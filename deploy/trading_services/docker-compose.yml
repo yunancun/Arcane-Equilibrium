@@ -1,0 +1,52 @@
+services:
+  bybit_connector:
+    image: alpine:latest
+    container_name: bybit_connector
+    restart: unless-stopped
+    env_file:
+      - /home/ncyu/srv/settings/environment_files/trading_services.env
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do echo '[bybit_connector] mode='$$BYBIT_MODE' contract='$$BYBIT_CONNECTOR_CONTRACT_VERSION' write_enabled='$$BYBIT_CONNECTOR_WRITE_ENABLED' health='$$BYBIT_CONNECTOR_HEALTH_STATE; sleep 300; done"
+      ]
+
+  binance_connector:
+    image: alpine:latest
+    container_name: binance_connector
+    restart: unless-stopped
+    env_file:
+      - /home/ncyu/srv/settings/environment_files/trading_services.env
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do echo '[binance_connector] mode='$$BINANCE_MODE; sleep 300; done"
+      ]
+
+  pretrade_risk_gate:
+    image: alpine:latest
+    container_name: pretrade_risk_gate
+    restart: unless-stopped
+    env_file:
+      - /home/ncyu/srv/settings/environment_files/trading_services.env
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do echo '[pretrade_risk_gate] permission_level='$$AGENT_PERMISSION_LEVEL' label='$$AGENT_PERMISSION_LABEL' autonomous='$$AUTONOMOUS_EXECUTION_ENABLED; sleep 300; done"
+      ]
+
+  audit_logger:
+    image: alpine:latest
+    container_name: audit_logger
+    restart: unless-stopped
+    env_file:
+      - /home/ncyu/srv/settings/environment_files/trading_services.env
+    command:
+      [
+        "sh",
+        "-c",
+        "while true; do echo '[audit_logger] skeleton service running'; sleep 300; done"
+      ]

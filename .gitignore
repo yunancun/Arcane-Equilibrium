@@ -1,0 +1,51 @@
+# -----------------------------
+# Secrets / 密钥
+# -----------------------------
+*.env
+.env
+.env.*
+secrets/
+private_config/
+**/secret_files/
+**/environment_files/
+**/service_configs/
+
+# -----------------------------
+# Runtime outputs / 运行产物
+# -----------------------------
+runtime/
+logs/
+log_files/
+connector_logs/
+decision_packets/
+verdicts/
+database_files/
+tmp/
+temp/
+cache/
+*.log
+*.pid
+*_latest.json
+*.bak_*
+*.bak_before_*
+*.bak_last_*
+
+# -----------------------------
+# Python / Python 相关
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.envrc
+
+# -----------------------------
+# OS / Editor
+# -----------------------------
+.DS_Store
+.idea/
+.vscode/
