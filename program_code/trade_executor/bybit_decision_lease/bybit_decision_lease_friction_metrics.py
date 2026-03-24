@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+MODULE_NOTE / 模块说明:
+- role / 角色:
+  Build I5-A friction metrics for the decision-lease chain.
+  为 decision-lease 链构建 I5-A 摩擦指标。
+- no-call semantics / 无调用语义:
+  A legal no-call path must not be treated as a latency failure.
+  合法 no-call 路径不能被视为“延迟失败”。
+"""
+
 import json
-import math
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -41,7 +52,6 @@ def main() -> None:
     i4 = read_json(I4_PATH)
 
     request_summary = inv.get("request_summary") or {}
-    transport = inv.get("transport_summary") or {}
     usage = (inv.get("response_extract") or {}).get("usage_summary") or {}
     consume_decision = i3.get("consume_decision") or {}
     shadow_candidate = i2.get("shadow_candidate") or {}
@@ -58,7 +68,18 @@ def main() -> None:
     reasoning_tokens = int((usage.get("output_tokens_details") or {}).get("reasoning_tokens") or 0)
     total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
 
-    ttl_to_latency_ratio = round(ttl_ms / latency_ms, 4) if latency_ms > 0 else None
+    should_call_ai = request_summary.get("should_call_ai")
+    selected_ai_tier = request_summary.get("selected_ai_tier")
+    route_plan = request_summary.get("route_plan")
+
+    legal_no_call_path = (
+        should_call_ai is False
+        or selected_ai_tier == "none"
+        or route_plan == "route_skip"
+    )
+    latency_available = latency_ms > 0
+
+    ttl_to_latency_ratio = round(ttl_ms / latency_ms, 4) if latency_available else None
     simulated_headroom_ratio = round(simulated_headroom_ms / ttl_ms, 4) if ttl_ms > 0 else None
     slack_to_ttl_ratio = round(consume_slack_ms / ttl_ms, 4) if ttl_ms > 0 else None
 
@@ -75,7 +96,18 @@ def main() -> None:
     add("consume_gate_present", i3.get("gate_ok") is True, i3.get("gate_ok"))
     add("replay_audit_present", i4.get("overall_ok") is True, i4.get("overall_ok"))
     add("ttl_positive", ttl_ms > 0, ttl_ms)
-    add("latency_positive", latency_ms > 0, latency_ms)
+    add(
+        "latency_positive_or_legal_no_call",
+        latency_available or legal_no_call_path,
+        {
+            "latency_ms": latency_ms,
+            "latency_available": latency_available,
+            "legal_no_call_path": legal_no_call_path,
+            "should_call_ai": should_call_ai,
+            "selected_ai_tier": selected_ai_tier,
+            "route_plan": route_plan,
+        },
+    )
     add("consume_slack_positive", consume_slack_ms > 0, consume_slack_ms)
     add("simulated_headroom_positive", simulated_headroom_ms > 0, simulated_headroom_ms)
     add("shadow_replay_only", replay_summary.get("shadow_replay_only") is True, replay_summary.get("shadow_replay_only"))
@@ -86,7 +118,7 @@ def main() -> None:
         "consume_gate_present",
         "replay_audit_present",
         "ttl_positive",
-        "latency_positive",
+        "latency_positive_or_legal_no_call",
         "consume_slack_positive",
         "simulated_headroom_positive",
         "shadow_replay_only",
@@ -99,9 +131,14 @@ def main() -> None:
     warning_flags.extend(i3.get("warning_flags") or [])
     warning_flags.extend(i4.get("warning_flags") or [])
 
+    if not latency_available and legal_no_call_path:
+        warning_flags.append("latency_not_observed_due_to_legal_no_call")
+    elif not latency_available:
+        warning_flags.append("latency_ms_missing_or_zero")
+
     if now_headroom_ms <= 0:
         warning_flags.append("lease_now_path_negative_headroom")
-    if latency_ms >= 3000:
+    if latency_available and latency_ms >= 3000:
         warning_flags.append("lease_friction_latency_elevated")
     if ttl_to_latency_ratio is not None and ttl_to_latency_ratio < 2.0:
         warning_flags.append("lease_ttl_latency_ratio_tight")
@@ -114,6 +151,9 @@ def main() -> None:
         "provider_target": request_summary.get("provider_target"),
         "model_name": request_summary.get("model_name"),
         "latency_ms": latency_ms,
+        "latency_available": latency_available,
+        "legal_no_call_path": legal_no_call_path,
+        "no_call_path_accepted": bool(legal_no_call_path and not latency_available),
         "ttl_ms": ttl_ms,
         "consume_slack_ms": consume_slack_ms,
         "simulated_headroom_ms": simulated_headroom_ms,
@@ -165,7 +205,7 @@ def main() -> None:
         "metrics_state": metrics_state,
         "allow_progress_to_i5b_adaptive_ttl": allow_progress,
         "recommended_action": recommended_action,
-        "operator_message": "I5-A friction metrics complete. Lease timing is now quantified from live invocation latency, shadow consume timing, and replay-safe shadow flow.",
+        "operator_message": "I5-A friction metrics complete. Lease timing is now quantified from live invocation latency, shadow consume timing, and replay-safe shadow flow. Legal no-call paths are accepted without treating missing latency as a hard failure.",
     }
     save_report(report)
 
