@@ -269,3 +269,5 @@ Canonical real files moved in this batch:
 Legacy flat-script paths remain compatibility wrappers during transition.
 
 > Canonical path note: exchange_io batch4 misc_io_support has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: exchange_io batch2 snapshot_and_postgres has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
