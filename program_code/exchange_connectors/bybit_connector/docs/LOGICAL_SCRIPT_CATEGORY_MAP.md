@@ -388,3 +388,26 @@ Those legacy files are now compatibility wrappers and should not be treated as t
 - new edits should target the canonical implementation first
 <!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_END -->
 
+<!-- P7E_DECISION_LEASE_BATCH2_2026_03_24 -->
+### Canonical path note — decision_lease batch2
+The following `decision_lease_and_execution_authority` members have been moved to the canonical directory:
+`program_code/trade_executor/bybit_decision_lease/`
+
+- `bybit_decision_lease_consume_contract_check.py`
+- `bybit_decision_lease_consume_final_audit.py`
+- `bybit_decision_lease_consume_gate.py`
+- `bybit_decision_lease_consume_gate_contract_check.py`
+- `bybit_decision_lease_consume_policy.py`
+- `bybit_decision_lease_consume_policy_contract_check.py`
+- `bybit_decision_lease_replay_contract_check.py`
+- `bybit_decision_lease_replay_final_audit.py`
+- `bybit_decision_lease_replay_guard.py`
+- `bybit_decision_lease_replay_guard_contract_check.py`
+- `bybit_decision_lease_replay_policy.py`
+- `bybit_decision_lease_replay_policy_contract_check.py`
+- `bybit_decision_lease_shadow_audit.py`
+- `bybit_decision_lease_shadow_contract_check.py`
+- `bybit_decision_lease_shadow_issue.py`
+- `bybit_decision_lease_shadow_issue_contract_check.py`
+
+Legacy paths under `program_code/exchange_connectors/bybit_connector/scripts/` remain only as compatibility wrappers.

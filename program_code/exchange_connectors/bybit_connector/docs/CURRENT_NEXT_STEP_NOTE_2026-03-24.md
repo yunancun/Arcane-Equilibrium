@@ -87,3 +87,18 @@ Those legacy files are now compatibility wrappers and should not be treated as t
 - new edits should target the canonical implementation first
 <!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_END -->
 
+<!-- P7E_DECISION_LEASE_BATCH2_2026_03_24 -->
+## Progress update — decision_lease batch2 completed
+Completed migration:
+- consume family
+- replay family
+- shadow family
+
+Current canonical home:
+- `program_code/trade_executor/bybit_decision_lease/`
+
+Recommended next order:
+1. migrate batch3 `friction_adaptive_approval`
+2. migrate batch4 `execution_authority_manual_ack`
+3. scan/update direct callers that should switch from wrapper path to canonical path
+4. rerun targeted compile checks and decision-lease closure checks

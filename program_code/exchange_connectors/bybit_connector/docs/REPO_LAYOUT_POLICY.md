@@ -75,3 +75,12 @@ Those legacy files are now compatibility wrappers and should not be treated as t
 - new edits should target the canonical implementation first
 <!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_END -->
 
+<!-- P7E_DECISION_LEASE_BATCH2_2026_03_24 -->
+## Decision lease migration progress — batch2 (2026-03-24)
+Batch2 (`consume / replay / shadow`) has been migrated to the canonical implementation directory:
+`program_code/trade_executor/bybit_decision_lease/`
+
+Rule remains unchanged:
+- canonical implementation = target category directory
+- legacy flat path under `bybit_connector/scripts/` = compatibility wrapper only
+- new business logic changes should be made only in the canonical file
