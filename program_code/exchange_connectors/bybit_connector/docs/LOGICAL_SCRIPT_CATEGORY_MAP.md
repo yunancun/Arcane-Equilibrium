@@ -608,3 +608,5 @@ Legacy flat-script paths remain compatibility wrappers during transition.
 > Canonical path note: ops batch4 other_ops_support has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
 
 > Canonical path note: ops batch2 fix_repair_recover has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: ops batch1 run_scripts has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
