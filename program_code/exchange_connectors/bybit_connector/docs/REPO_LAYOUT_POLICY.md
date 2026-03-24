@@ -134,3 +134,24 @@ Status:
 - canonical real files: 44
 - wrappers retained in legacy flat scripts path
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+
+## Canonical Path Update / 规范路径更新（Thought Gate Batch 1）
+
+The first `thought_gate_and_ai_governance` batch has been migrated to:
+
+`program_code/ai_agents/bybit_thought_gate/`
+
+Batch:
+- model_router
+
+Canonical real files moved in this batch:
+- bybit_model_router_contract_check.py
+- bybit_model_router_decision.py
+- bybit_model_router_decision_contract_check.py
+- bybit_model_router_final_audit.py
+- bybit_model_router_policy.py
+- bybit_model_router_policy_contract_check.py
+- bybit_model_router_runtime.py
+- bybit_model_router_runtime_contract_check.py
+
+Legacy flat-script paths remain compatibility wrappers during transition.
