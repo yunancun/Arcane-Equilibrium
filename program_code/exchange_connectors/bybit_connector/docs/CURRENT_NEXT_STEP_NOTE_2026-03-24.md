@@ -217,3 +217,30 @@ Canonical real files moved in this batch:
 - bybit_query_budget_runtime_contract_check.py
 
 Legacy flat-script paths remain compatibility wrappers during transition.
+
+## Canonical Path Update / 规范路径更新（Thought Gate Batch 4）
+
+The fourth `thought_gate_and_ai_governance` batch has been migrated to:
+
+`program_code/ai_agents/bybit_thought_gate/`
+
+Batch:
+- ai_request_response_core
+
+Canonical real files moved in this batch:
+- bybit_ai_governed_decision.py
+- bybit_ai_governed_decision_contract_check.py
+- bybit_ai_invocation_attempt_builder.py
+- bybit_ai_invocation_attempt_contract_check.py
+- bybit_ai_prompt_prep_builder.py
+- bybit_ai_prompt_prep_contract_check.py
+- bybit_ai_prompt_prep_tighten.py
+- bybit_ai_request_envelope_builder.py
+- bybit_ai_request_envelope_contract_check.py
+- bybit_ai_response_check.py
+- bybit_ai_response_check_builder.py
+- bybit_ai_response_check_contract_check.py
+- bybit_ai_route_selector_builder.py
+- bybit_ai_route_selector_contract_check.py
+
+Legacy flat-script paths remain compatibility wrappers during transition.
