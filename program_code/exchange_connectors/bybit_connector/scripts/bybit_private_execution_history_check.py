@@ -1,39 +1,12 @@
 #!/usr/bin/env python3
-"""
-MODULE_NOTE = '''
-[Maintainer Note]
-Script: bybit_private_execution_history_check.py
-Role:
-- 读取 Bybit 成交历史只读信息
-- 观察最近是否存在真实成交
-
-Purpose in system:
-- 为 observer 提供 execution history 上下文
-- 当前 spot / linear 都可能为 0，且属于允许状态
-
-Upstream:
-- Bybit private REST API
-
-Downstream:
-- bybit_private_rest_preflight_guard.py
-- bybit_snapshot_to_postgres.py
-- bybit_build_decision_packet.py
-
-Maintenance notes:
-- 当前无成交历史是正常状态
-- 若修改输出结构，需同步 snapshot payload_time_summary 与 audit
-'''
-
-"""
-
-import os
-import sys
 from pathlib import Path
+import runpy
+import sys
 
-BASE = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts")
-WRAPPER = BASE / "_bybit_latest_wrapper.py"
-ORIG = BASE / "bybit_private_execution_history_check.py.orig"
-LATEST = "/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json"
-PREFIX = "bybit_private_execution_history"
+_REAL = Path(__file__).resolve().parents[3] / "exchange_connectors" / "bybit_connector" / "io_and_persistence" / "bybit_private_execution_history_check.py"
+if not _REAL.exists():
+    raise FileNotFoundError(f"Canonical script not found: {_REAL}")
 
-os.execv(sys.executable, [sys.executable, str(WRAPPER), str(ORIG), LATEST, PREFIX])
+if __name__ == "__main__":
+    sys.path.insert(0, str(_REAL.parent))
+    runpy.run_path(str(_REAL), run_name="__main__")
