@@ -319,3 +319,5 @@ Legacy flat-script paths remain compatibility wrappers during transition.
 > Canonical path note: event_driven batch2 event_transition has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
 
 > Canonical path note: event_driven batch3 event_replay_transition has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: event_driven batch1 event_driven_core has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
