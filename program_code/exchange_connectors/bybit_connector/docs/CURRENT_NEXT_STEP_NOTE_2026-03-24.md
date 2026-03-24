@@ -141,3 +141,16 @@ Next recommended step:
 - run a focused caller/reference cleanup pass for decision_lease docs and helper scripts
 - then start next canonical migration batch from remaining logical categories
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+## Update: decision_lease fully complete / 更新：decision_lease 已全部完成
+
+Canonical migration completed for all decision_lease formal members.
+
+Counts:
+- exact list: 44
+- canonical real files: 44
+
+Recommended next step:
+- start `thought_gate_and_ai_governance` extraction, batching, and migration
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->

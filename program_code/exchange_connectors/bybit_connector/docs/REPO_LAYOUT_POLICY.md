@@ -121,3 +121,16 @@ Policy remains:
 - old flat `scripts/` entry remains wrapper-only during transition
 - wrappers are removed only after full caller cleanup and verification
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+## Decision Lease Status / Decision Lease 状态
+
+`decision_lease` migration is now complete at canonical target:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Status:
+- exact members: 44
+- canonical real files: 44
+- wrappers retained in legacy flat scripts path
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->

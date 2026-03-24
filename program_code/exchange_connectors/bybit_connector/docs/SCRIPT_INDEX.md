@@ -658,3 +658,19 @@ Files included in this batch:
 Legacy entrypoints under `program_code/exchange_connectors/bybit_connector/scripts/`
 are retained as compatibility wrappers only.
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+## Canonical Path Update / 规范路径更新（Decision Lease Final）
+
+`decision_lease` canonical migration is now complete.
+
+Canonical directory:
+`program_code/trade_executor/bybit_decision_lease/`
+
+The final migrated file is:
+- bybit_decision_lease_contract_check.py
+
+Legacy flat-script entries under
+`program_code/exchange_connectors/bybit_connector/scripts/`
+remain compatibility wrappers only.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->

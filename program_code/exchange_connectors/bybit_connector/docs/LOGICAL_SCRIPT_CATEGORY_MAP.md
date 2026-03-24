@@ -437,3 +437,15 @@ Batch4 canonicalized to:
 This batch covers execution authority, manual approval, and operator ack scripts.
 Legacy flat-script locations remain wrapper-compatible during transition.
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+### Decision Lease Completion Note / Decision Lease 完成说明
+
+`decision_lease_and_execution_authority` has now completed canonical migration
+for all 44 formal members.
+
+Canonical implementation lives in:
+`program_code/trade_executor/bybit_decision_lease/`
+
+Legacy flat-script paths are wrapper-only during transition.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
