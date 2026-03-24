@@ -1,90 +1,37 @@
 #!/usr/bin/env python3
-import json
-import time
+# Auto-generated compatibility wrapper
+# 自动生成的兼容包装器
+#
+# Legacy path kept alive temporarily:
+# 临时保留旧路径入口：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_business_event_fixture_generator.py
+#
+# Real implementation now lives at:
+# 真正实现现在位于：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/market_data_processor/bybit_business_events/bybit_business_event_fixture_generator.py
 
+from pathlib import Path
+import sys
 
-def now_ms():
-    return int(time.time() * 1000)
+CURRENT = Path(__file__).resolve()
+REPO_ROOT = CURRENT.parents[4]
+TARGET = REPO_ROOT / "program_code/market_data_processor/bybit_business_events/bybit_business_event_fixture_generator.py"
 
+if not TARGET.exists():
+    raise FileNotFoundError(f"Compatibility target missing: {TARGET}")
 
-def main():
-    ts = now_ms()
+OLD_SCRIPT_DIR = CURRENT.parent
+TARGET_DIR = TARGET.parent
 
-    fixtures = [
-        {
-            "topic": "wallet",
-            "ts": ts,
-            "conn_id": "fixture-conn-wallet",
-            "data": [
-                {
-                    "coin": "USDT",
-                    "walletBalance": "610.18483",
-                    "equity": "610.18483",
-                    "availableToWithdraw": "610.18483",
-                    "updatedTime": ts
-                }
-            ]
-        },
-        {
-            "topic": "position",
-            "ts": ts + 1,
-            "conn_id": "fixture-conn-position",
-            "data": [
-                {
-                    "symbol": "BTCUSDT",
-                    "side": "Buy",
-                    "size": "0.001",
-                    "avgPrice": "82000",
-                    "positionIdx": 0,
-                    "unrealisedPnl": "0.21",
-                    "updatedTime": ts + 1
-                }
-            ]
-        },
-        {
-            "topic": "order",
-            "ts": ts + 2,
-            "conn_id": "fixture-conn-order",
-            "data": [
-                {
-                    "symbol": "ETHUSDT",
-                    "side": "Sell",
-                    "orderId": "fixture-order-001",
-                    "orderStatus": "New",
-                    "orderType": "Limit",
-                    "price": "4200",
-                    "qty": "0.01",
-                    "updatedTime": ts + 2
-                }
-            ]
-        },
-        {
-            "topic": "execution",
-            "ts": ts + 3,
-            "conn_id": "fixture-conn-exec",
-            "data": [
-                {
-                    "symbol": "ETHUSDT",
-                    "side": "Sell",
-                    "orderId": "fixture-order-001",
-                    "execId": "fixture-exec-001",
-                    "execPrice": "4200",
-                    "execQty": "0.01",
-                    "execFee": "0.02",
-                    "execType": "Trade",
-                    "execTime": ts + 3
-                }
-            ]
-        }
-    ]
+for p in (str(OLD_SCRIPT_DIR), str(TARGET_DIR)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-    print(json.dumps({
-        "ok": True,
-        "fixture_version": "v1",
-        "message_count": len(fixtures),
-        "messages": fixtures
-    }, ensure_ascii=False, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+code = TARGET.read_text(encoding="utf-8")
+globals_dict = {
+    "__name__": "__main__",
+    "__file__": str(CURRENT),
+    "__package__": None,
+    "__cached__": None,
+}
+exec(compile(code, str(CURRENT), "exec"), globals_dict, globals_dict)

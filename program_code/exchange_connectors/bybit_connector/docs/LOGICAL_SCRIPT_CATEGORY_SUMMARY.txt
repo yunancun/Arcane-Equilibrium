@@ -1,0 +1,10 @@
+business_events: 26
+decision_lease_and_execution_authority: 44
+event_driven_and_transition_engine: 52
+exchange_io_and_persistence: 19
+local_models_risk_and_paper: 20
+misc_or_manual_review: 23
+ops_repair_and_runner_scripts: 50
+readonly_observer_pipeline: 18
+thought_gate_and_ai_governance: 55
+TOTAL: 307

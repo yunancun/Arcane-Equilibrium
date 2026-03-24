@@ -1,71 +1,37 @@
 #!/usr/bin/env python3
-"""
-MODULE_NOTE = '''
-[Maintainer Note]
-Script: bybit_business_event_final_audit_contract_check.py
+# Auto-generated compatibility wrapper
+# 自动生成的兼容包装器
+#
+# Legacy path kept alive temporarily:
+# 临时保留旧路径入口：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_business_event_final_audit_contract_check.py
+#
+# Real implementation now lives at:
+# 真正实现现在位于：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/market_data_processor/bybit_business_events/bybit_business_event_final_audit_contract_check.py
 
-Formal chapter placement:
-- 正式章节: G. 真实业务事件验证层
-- 当前定位: G4.4 contract check
-- 这一层的白话解释:
-  校验 G 章 final audit 输出结构是否稳定，确保总审计层本身不漂移。
-
-Role:
-- 对 bybit_business_event_final_audit.py 的输出做结构合同校验
-'''
-"""
-
-import json
-import time
 from pathlib import Path
+import sys
 
-CHECK_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_final_audit_latest.json")
+CURRENT = Path(__file__).resolve()
+REPO_ROOT = CURRENT.parents[4]
+TARGET = REPO_ROOT / "program_code/market_data_processor/bybit_business_events/bybit_business_event_final_audit_contract_check.py"
 
-OUT_DIR = CHECK_PATH.parent
-OUT_LATEST = OUT_DIR / "bybit_business_event_final_audit_contract_latest.json"
+if not TARGET.exists():
+    raise FileNotFoundError(f"Compatibility target missing: {TARGET}")
 
+OLD_SCRIPT_DIR = CURRENT.parent
+TARGET_DIR = TARGET.parent
 
-def add_check(checks, name, ok, detail):
-    checks.append({"name": name, "ok": bool(ok), "detail": detail})
+for p in (str(OLD_SCRIPT_DIR), str(TARGET_DIR)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-
-def main():
-    ts_ms = int(time.time() * 1000)
-    checks = []
-
-    exists = CHECK_PATH.exists()
-    add_check(checks, "audit_exists", exists, str(CHECK_PATH))
-
-    obj = {}
-    if exists:
-        obj = json.loads(CHECK_PATH.read_text(encoding="utf-8"))
-        add_check(checks, "audit_type_expected", obj.get("audit_type") == "bybit_business_event_final_audit", obj.get("audit_type"))
-        add_check(checks, "audit_version_v1", obj.get("audit_version") == "v1", obj.get("audit_version"))
-        add_check(checks, "overall_ok_bool", isinstance(obj.get("overall_ok"), bool), obj.get("overall_ok"))
-        add_check(checks, "failed_count_int", isinstance(obj.get("failed_count"), int), obj.get("failed_count"))
-        add_check(checks, "total_checks_int", isinstance(obj.get("total_checks"), int), obj.get("total_checks"))
-        add_check(checks, "checks_list", isinstance(obj.get("checks"), list), type(obj.get("checks")).__name__)
-        add_check(checks, "failed_checks_list", isinstance(obj.get("failed_checks"), list), type(obj.get("failed_checks")).__name__)
-        add_check(checks, "audit_summary_present", isinstance(obj.get("audit_summary"), dict), type(obj.get("audit_summary")).__name__)
-        add_check(checks, "audit_explainer_present", isinstance(obj.get("audit_explainer"), dict), type(obj.get("audit_explainer")).__name__)
-
-    report = {
-        "report_type": "bybit_business_event_final_audit_contract_check",
-        "report_version": "v1",
-        "ts_ms": ts_ms,
-        "overall_ok": all(x["ok"] for x in checks),
-        "failed_count": sum(1 for x in checks if not x["ok"]),
-        "checks": checks,
-        "failed_checks": [x for x in checks if not x["ok"]],
-    }
-
-    OUT_LATEST.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    dated = OUT_DIR / f"bybit_business_event_final_audit_contract_{ts_ms}.json"
-    dated.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f"saved_latest={OUT_LATEST}")
-    print(f"saved_dated={dated}")
-
-
-if __name__ == "__main__":
-    main()
+code = TARGET.read_text(encoding="utf-8")
+globals_dict = {
+    "__name__": "__main__",
+    "__file__": str(CURRENT),
+    "__package__": None,
+    "__cached__": None,
+}
+exec(compile(code, str(CURRENT), "exec"), globals_dict, globals_dict)

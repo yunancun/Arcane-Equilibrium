@@ -1,107 +1,37 @@
 #!/usr/bin/env python3
-"""
-MODULE_NOTE = '''
-[Maintainer Note]
-Script: bybit_business_event_state_contract_check.py
-Role:
-- 对 business event state 输出做契约检查
+# Auto-generated compatibility wrapper
+# 自动生成的兼容包装器
+#
+# Legacy path kept alive temporarily:
+# 临时保留旧路径入口：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_business_event_state_contract_check.py
+#
+# Real implementation now lives at:
+# 真正实现现在位于：
+#   /home/ncyu/BybitOpenClaw/srv/program_code/market_data_processor/bybit_business_events/bybit_business_event_state_contract_check.py
 
-Purpose in system:
-- 保证 business event 状态分类结果稳定、可被下游可靠消费
-
-Maintenance notes:
-- 状态枚举改动后应先同步这里
-'''
-
-"""
-
-import json
-import time
 from pathlib import Path
+import sys
 
-STATE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_event_state_latest.json")
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
+CURRENT = Path(__file__).resolve()
+REPO_ROOT = CURRENT.parents[4]
+TARGET = REPO_ROOT / "program_code/market_data_processor/bybit_business_events/bybit_business_event_state_contract_check.py"
 
-OUT_LATEST = OUT_DIR / "bybit_business_event_state_contract_latest.json"
+if not TARGET.exists():
+    raise FileNotFoundError(f"Compatibility target missing: {TARGET}")
 
-ALLOWED_CODES = {
-    "healthy_no_business_events_yet",
-    "healthy_business_events_present",
-    "stale_or_missing_business_event_feed",
+OLD_SCRIPT_DIR = CURRENT.parent
+TARGET_DIR = TARGET.parent
+
+for p in (str(OLD_SCRIPT_DIR), str(TARGET_DIR)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+code = TARGET.read_text(encoding="utf-8")
+globals_dict = {
+    "__name__": "__main__",
+    "__file__": str(CURRENT),
+    "__package__": None,
+    "__cached__": None,
 }
-
-def load_json(path: Path):
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-def add(checks, name, ok, detail):
-    checks.append({"name": name, "ok": bool(ok), "detail": detail})
-
-def save_json(obj):
-    ts_ms = obj["ts_ms"]
-    dated = OUT_DIR / f"bybit_business_event_state_contract_{ts_ms}.json"
-    payload = json.dumps(obj, ensure_ascii=False, indent=2)
-    OUT_LATEST.write_text(payload, encoding="utf-8")
-    dated.write_text(payload, encoding="utf-8")
-    return str(OUT_LATEST), str(dated)
-
-def main():
-    state = load_json(STATE_PATH)
-    checks = []
-
-    add(checks, "state_exists", bool(state), str(STATE_PATH))
-    add(checks, "state_type_expected", state.get("state_type") == "bybit_business_event_state", state.get("state_type"))
-    add(checks, "state_version_v1", state.get("state_version") == "v1", state.get("state_version"))
-    add(checks, "exchange_bybit", state.get("exchange") == "bybit", state.get("exchange"))
-    add(checks, "stage_d22_3", state.get("stage") == "D22.3", state.get("stage"))
-    add(checks, "state_code_allowed", state.get("state_code") in ALLOWED_CODES, state.get("state_code"))
-    add(checks, "healthy_bool", isinstance(state.get("healthy"), bool), state.get("healthy"))
-    add(checks, "reason_present", bool(state.get("reason")), state.get("reason"))
-
-    freshness = state.get("freshness") or {}
-    add(checks, "freshness_present", isinstance(freshness, dict), freshness)
-
-    summary = state.get("business_event_summary") or {}
-    add(checks, "normalized_count_present", "normalized_count" in summary, summary.get("normalized_count"))
-    add(checks, "has_business_events_present", "has_business_events" in summary, summary.get("has_business_events"))
-
-    code = state.get("state_code")
-    healthy = state.get("healthy")
-    normalized_count = int(summary.get("normalized_count") or 0)
-    has_business_events = bool(summary.get("has_business_events"))
-
-    if code == "healthy_no_business_events_yet":
-        add(checks, "healthy_no_events_consistent", healthy is True and normalized_count == 0 and has_business_events is False, {
-            "healthy": healthy,
-            "normalized_count": normalized_count,
-            "has_business_events": has_business_events,
-        })
-    elif code == "healthy_business_events_present":
-        add(checks, "healthy_with_events_consistent", healthy is True and (normalized_count > 0 or has_business_events is True), {
-            "healthy": healthy,
-            "normalized_count": normalized_count,
-            "has_business_events": has_business_events,
-        })
-    elif code == "stale_or_missing_business_event_feed":
-        add(checks, "stale_feed_consistent", healthy is False, {"healthy": healthy})
-
-    failed = [c for c in checks if not c["ok"]]
-    obj = {
-        "report_type": "bybit_business_event_state_contract_check",
-        "report_version": "v1",
-        "ts_ms": int(time.time() * 1000),
-        "overall_ok": len(failed) == 0,
-        "failed_count": len(failed),
-        "checks": checks,
-        "failed_checks": failed,
-    }
-
-    latest, dated = save_json(obj)
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
-
-if __name__ == "__main__":
-    main()
+exec(compile(code, str(CURRENT), "exec"), globals_dict, globals_dict)

@@ -1,3 +1,10 @@
+> **Canonical path note / 规范路径说明**  
+> Business-events real implementations now live under:  
+> `program_code/market_data_processor/bybit_business_events/`  
+> Legacy entry files remain under:  
+> `program_code/exchange_connectors/bybit_connector/scripts/`  
+> as compatibility wrappers during migration.
+
 # Bybit Connector Script Index
 
 ## Important Chapter Note
