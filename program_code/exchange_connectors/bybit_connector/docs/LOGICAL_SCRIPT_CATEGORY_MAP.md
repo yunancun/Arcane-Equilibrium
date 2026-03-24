@@ -357,3 +357,34 @@ For `readonly_observer_pipeline`:
   `program_code/exchange_connectors/bybit_connector/scripts/`
 
 This mirrors the same migration policy already used for `business_events`.
+
+<!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_START -->
+## Decision-lease batch1 canonical path update (2026-03-24)
+
+Canonical implementation path for the migrated batch1 core schema/preflight files is now:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Legacy compatibility entrypoints are intentionally preserved under:
+
+`program_code/exchange_connectors/bybit_connector/scripts/`
+
+Those legacy files are now compatibility wrappers and should not be treated as the primary implementation source for the files listed below.
+
+### Migrated files
+- `bybit_decision_lease_chapter_contract_check.py`
+- `bybit_decision_lease_chapter_final_audit.py`
+- `bybit_decision_lease_chapter_handoff.py`
+- `bybit_decision_lease_chapter_summary.py`
+- `bybit_decision_lease_final_audit.py`
+- `bybit_decision_lease_preflight.py`
+- `bybit_decision_lease_preflight_contract_check.py`
+- `bybit_decision_lease_schema.py`
+- `bybit_decision_lease_schema_contract_check.py`
+
+### Migration rule
+- canonical implementation: `program_code/trade_executor/bybit_decision_lease/`
+- compatibility wrapper: `program_code/exchange_connectors/bybit_connector/scripts/`
+- new edits should target the canonical implementation first
+<!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_END -->
+
