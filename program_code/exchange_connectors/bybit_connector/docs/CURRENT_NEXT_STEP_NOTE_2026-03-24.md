@@ -309,3 +309,5 @@ Legacy flat-script paths remain compatibility wrappers during transition.
 > Canonical path note: misc batch1 demo_gate has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
 
 > Canonical path note: ops batch3 diag_refresh_apply_force has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: ops batch4 other_ops_support has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
