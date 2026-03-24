@@ -582,3 +582,5 @@ Canonical real files moved in this batch:
 - bybit_thought_gate_regression_summary.py
 
 Legacy flat-script paths remain compatibility wrappers during transition.
+
+> Canonical path note: exchange_io batch4 misc_io_support has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
