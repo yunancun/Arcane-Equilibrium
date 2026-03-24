@@ -119,3 +119,25 @@ Next recommended step:
 - then refresh docs / caller notes / commit / push
 - then run targeted verification for decision_lease chapter closure dependencies
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+## Update: decision_lease batch4 finished / 更新：decision_lease batch4 已完成
+
+Finished migration:
+- execution_authority_aggregator
+- manual_approval_packet
+- operator_ack_shadow
+
+Canonical target:
+`program_code/trade_executor/bybit_decision_lease/`
+
+Decision lease migration status:
+- batch1 complete
+- batch2 complete
+- batch3 complete
+- batch4 complete
+
+Next recommended step:
+- run a focused caller/reference cleanup pass for decision_lease docs and helper scripts
+- then start next canonical migration batch from remaining logical categories
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->

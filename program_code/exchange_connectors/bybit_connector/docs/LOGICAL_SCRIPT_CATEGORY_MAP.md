@@ -424,3 +424,16 @@ Batch3 canonicalized to:
 This batch covers adaptive TTL, approval bridge, and friction related scripts.
 Legacy flat-script locations remain wrapper-compatible during transition.
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+### Canonical Path Progress Note / 规范路径进度说明（Decision Lease Batch4）
+
+`decision_lease_and_execution_authority` logical category has now completed migration batches 1-4.
+
+Batch4 canonicalized to:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+This batch covers execution authority, manual approval, and operator ack scripts.
+Legacy flat-script locations remain wrapper-compatible during transition.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->

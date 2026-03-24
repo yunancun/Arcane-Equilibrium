@@ -102,3 +102,22 @@ Policy remains:
 - old flat `scripts/` entry remains wrapper-only during transition
 - wrappers are removed only after full caller cleanup and verification
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+## Decision Lease Migration Progress / Decision Lease 迁移进度
+
+Completed canonical migrations under:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Completed batches:
+- batch1: core_schema_preflight
+- batch2: consume_shadow_replay
+- batch3: friction_adaptive_approval
+- batch4: execution_authority_manual_ack
+
+Policy remains:
+- canonical implementation lives in target domain directory
+- old flat `scripts/` entry remains wrapper-only during transition
+- wrappers are removed only after full caller cleanup and verification
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->

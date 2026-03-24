@@ -635,3 +635,26 @@ Files included in this batch:
 Legacy entrypoints under `program_code/exchange_connectors/bybit_connector/scripts/`
 are retained as compatibility wrappers only.
 <!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+## Canonical Path Update / 规范路径更新（Decision Lease Batch4）
+
+The following `decision_lease` batch4 files now use the canonical directory:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Files included in this batch:
+
+- bybit_execution_authority_aggregator.py
+- bybit_execution_authority_aggregator_contract_check.py
+- bybit_execution_authority_aggregator_final_audit.py
+- bybit_manual_approval_packet.py
+- bybit_manual_approval_packet_contract_check.py
+- bybit_manual_approval_packet_final_audit.py
+- bybit_operator_ack_shadow.py
+- bybit_operator_ack_shadow_contract_check.py
+- bybit_operator_ack_shadow_final_audit.py
+
+Legacy entrypoints under `program_code/exchange_connectors/bybit_connector/scripts/`
+are retained as compatibility wrappers only.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
