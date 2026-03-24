@@ -1,307 +1,159 @@
 # BybitOpenClaw Repository Layout Policy
 
-## Core rule
+## 1. Core rule
 
-The repository preserves the old `srv`-style project skeleton at the repo level, but keeps the actual connector script files physically flat under:
+The repository keeps an old srv-style project skeleton for compatibility, but canonical business-logic implementation should live in its logical target domain directory.
 
-`program_code/exchange_connectors/bybit_connector/scripts/`
+Examples:
 
-## Why
+- `program_code/ai_agents/bybit_thought_gate/`
+- `program_code/trade_executor/bybit_decision_lease/`
+- `program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/`
+- `program_code/market_data_processor/bybit_business_events/`
 
-This project has a large amount of historical shell tooling, absolute-path references, and operator habits built around the flat script layout. A physical relocation inside `scripts/` creates excessive compatibility burden and audit confusion.
-
-## Therefore
-
-- Repo-level skeleton should follow old `srv` style as much as practical.
-- Script-level physical layout remains flat unless a future migration is explicitly designed, reviewed, and compatibility-tested.
-- Logical grouping is handled by documentation and index files, not by moving files into subfolders.
-- Runtime payloads, logs, secrets, and local environment artifacts are local-only and must not be committed to GitHub.
-
-## Current live/local rule
-
-- Canonical project root: `/home/ncyu/BybitOpenClaw`
-- Compatibility access path: `/home/ncyu/srv` (symlink to the repo-local `srv`)
-- Local runtime payloads may be attached under the repo-local skeleton without entering Git history.
-
-## Migration safety rule
-
-Before any future file relocation:
-1. preview
-2. compile check
-3. compatibility check
-4. git status review
-5. only then commit
-
-If a relocation changes operator readability but breaks old expectations, operator readability preference wins only when compatibility is preserved or intentionally redesigned.
+Legacy flat script paths may remain during transition, but should be treated as wrappers or compatibility entrypoints where documented.
 
 ---
 
-## Compatibility-wrapper migration rule / 兼容包装器迁移规则
+## 2. Canonical root
 
-When a script family is migrated to its canonical old-srv-style directory:
+Canonical local repo root:
 
-1. real implementation files move to the canonical directory;
-2. old flat entrypoints under `scripts/` stay as compatibility wrappers;
-3. docs must state canonical path clearly;
-4. migration should preserve operator habit, runtime path compatibility, and rollback simplicity.
+`/home/ncyu/BybitOpenClaw`
 
-<!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_START -->
-## Decision-lease batch1 canonical path update (2026-03-24)
+Current working repo-local source root in this clone:
 
-Canonical implementation path for the migrated batch1 core schema/preflight files is now:
+`/home/ncyu/BybitOpenClaw/srv`
 
-`program_code/trade_executor/bybit_decision_lease/`
+Compatibility access path:
 
-Legacy compatibility entrypoints are intentionally preserved under:
+`/home/ncyu/srv`
 
-`program_code/exchange_connectors/bybit_connector/scripts/`
+The compatibility path exists for old tooling and operator habits, but is **not** the preferred design target for new code.
 
-Those legacy files are now compatibility wrappers and should not be treated as the primary implementation source for the files listed below.
+---
 
-### Migrated files
-- `bybit_decision_lease_chapter_contract_check.py`
-- `bybit_decision_lease_chapter_final_audit.py`
-- `bybit_decision_lease_chapter_handoff.py`
-- `bybit_decision_lease_chapter_summary.py`
-- `bybit_decision_lease_final_audit.py`
-- `bybit_decision_lease_preflight.py`
-- `bybit_decision_lease_preflight_contract_check.py`
-- `bybit_decision_lease_schema.py`
-- `bybit_decision_lease_schema_contract_check.py`
+## 3. Rule for new code
 
-### Migration rule
-- canonical implementation: `program_code/trade_executor/bybit_decision_lease/`
-- compatibility wrapper: `program_code/exchange_connectors/bybit_connector/scripts/`
-- new edits should target the canonical implementation first
-<!-- P7C_DECISION_LEASE_BATCH1_CANONICAL_END -->
+New code must not introduce fresh hardcoded references to:
 
-<!-- P7E_DECISION_LEASE_BATCH2_2026_03_24 -->
-## Decision lease migration progress — batch2 (2026-03-24)
-Batch2 (`consume / replay / shadow`) has been migrated to the canonical implementation directory:
-`program_code/trade_executor/bybit_decision_lease/`
+`/home/ncyu/srv`
 
-Rule remains unchanged:
-- canonical implementation = target category directory
-- legacy flat path under `bybit_connector/scripts/` = compatibility wrapper only
-- new business logic changes should be made only in the canonical file
+unless there is a documented compatibility reason.
 
-<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
-## Decision Lease Migration Progress / Decision Lease 迁移进度
+Preferred approaches:
 
-Completed canonical migrations under:
+1. resolve paths relative to repo-local source files
+2. use shared path helper modules
+3. keep runtime / settings / secrets paths centralized and documented
 
-`program_code/trade_executor/bybit_decision_lease/`
+---
 
-Completed batches:
-- batch1: core_schema_preflight
-- batch2: consume_shadow_replay
-- batch3: friction_adaptive_approval
+## 4. Wrapper policy
 
-Policy remains:
-- canonical implementation lives in target domain directory
-- old flat `scripts/` entry remains wrapper-only during transition
-- wrappers are removed only after full caller cleanup and verification
-<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+When a script family is migrated to its canonical target directory:
 
-<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
-## Decision Lease Migration Progress / Decision Lease 迁移进度
+1. the real implementation lives in the canonical directory
+2. the old flat `scripts/` entrypoint may remain as a compatibility wrapper
+3. new logic changes should target the canonical implementation first
+4. wrappers are removed only after caller cleanup and verification
 
-Completed canonical migrations under:
+---
 
-`program_code/trade_executor/bybit_decision_lease/`
+## 5. Runtime / local-only artifact rule
 
-Completed batches:
-- batch1: core_schema_preflight
-- batch2: consume_shadow_replay
-- batch3: friction_adaptive_approval
-- batch4: execution_authority_manual_ack
+These remain local/operator artifacts and are not canonical source code:
 
-Policy remains:
-- canonical implementation lives in target domain directory
-- old flat `scripts/` entry remains wrapper-only during transition
-- wrappers are removed only after full caller cleanup and verification
-<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH4 -->
+- runtime payloads
+- local logs
+- local env files
+- secrets
+- DB payloads
+- venvs
+- backups / inventory outputs
 
-<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
-## Decision Lease Status / Decision Lease 状态
+These may exist inside the repo-local srv-style skeleton for operator convenience, but they should not be treated as GitHub-shareable code assets.
 
-`decision_lease` migration is now complete at canonical target:
+---
+
+## 6. Current canonical migration status
+
+### decision_lease
+Canonical implementation directory:
 
 `program_code/trade_executor/bybit_decision_lease/`
 
 Status:
-- exact members: 44
-- canonical real files: 44
-- wrappers retained in legacy flat scripts path
-<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_FINAL -->
+- migration complete
+- legacy wrappers still retained during transition
 
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 1）
-
-The first `thought_gate_and_ai_governance` batch has been migrated to:
+### thought_gate_and_ai_governance
+Canonical implementation directory:
 
 `program_code/ai_agents/bybit_thought_gate/`
 
-Batch:
-- model_router
-
-Canonical real files moved in this batch:
-- bybit_model_router_contract_check.py
-- bybit_model_router_decision.py
-- bybit_model_router_decision_contract_check.py
-- bybit_model_router_final_audit.py
-- bybit_model_router_policy.py
-- bybit_model_router_policy_contract_check.py
-- bybit_model_router_runtime.py
-- bybit_model_router_runtime_contract_check.py
-
-Legacy flat-script paths remain compatibility wrappers during transition.
-
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 2）
-
-The second `thought_gate_and_ai_governance` batch has been migrated to:
-
-`program_code/ai_agents/bybit_thought_gate/`
-
-Batch:
-- compute_governor
-
-Canonical real files moved in this batch:
-- bybit_compute_governor_contract_check.py
-- bybit_compute_governor_final_audit.py
-- bybit_compute_governor_gate.py
-- bybit_compute_governor_gate_contract_check.py
-- bybit_compute_governor_policy.py
-- bybit_compute_governor_policy_contract_check.py
-- bybit_compute_governor_runtime.py
-- bybit_compute_governor_runtime_contract_check.py
-
-Legacy flat-script paths remain compatibility wrappers during transition.
-
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 3）
-
-The third `thought_gate_and_ai_governance` batch has been migrated to:
-
-`program_code/ai_agents/bybit_thought_gate/`
-
-Batch:
+Completed canonical batches:
 - query_budget
+- model_router
+- compute_governor
+- H1 response / governed decision closure fixes
+- H5 cost governance no-call compatibility fixes
 
-Canonical real files moved in this batch:
-- bybit_query_budget_final_audit.py
-- bybit_query_budget_final_audit_contract_check.py
-- bybit_query_budget_gate.py
-- bybit_query_budget_gate_contract_check.py
-- bybit_query_budget_policy.py
-- bybit_query_budget_policy_contract_check.py
-- bybit_query_budget_runtime.py
-- bybit_query_budget_runtime_contract_check.py
+Legacy flat-script paths remain compatibility entrypoints where still referenced by old tooling.
 
-Legacy flat-script paths remain compatibility wrappers during transition.
+---
 
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 4）
+## 7. Current H chapter status
 
-The fourth `thought_gate_and_ai_governance` batch has been migrated to:
+H1-H5 are now closed under the accepted no-call semantics:
 
-`program_code/ai_agents/bybit_thought_gate/`
+- `should_call_ai = false`
+- `route_plan = route_skip`
+- `no_call_path_accepted = true`
 
-Batch:
-- ai_request_response_core
+This closure does not grant live execution permission.
 
-Canonical real files moved in this batch:
-- bybit_ai_governed_decision.py
-- bybit_ai_governed_decision_contract_check.py
-- bybit_ai_invocation_attempt_builder.py
-- bybit_ai_invocation_attempt_contract_check.py
-- bybit_ai_prompt_prep_builder.py
-- bybit_ai_prompt_prep_contract_check.py
-- bybit_ai_prompt_prep_tighten.py
-- bybit_ai_request_envelope_builder.py
-- bybit_ai_request_envelope_contract_check.py
-- bybit_ai_response_check.py
-- bybit_ai_response_check_builder.py
-- bybit_ai_response_check_contract_check.py
-- bybit_ai_route_selector_builder.py
-- bybit_ai_route_selector_contract_check.py
+Safety state remains:
 
-Legacy flat-script paths remain compatibility wrappers during transition.
+- read_only
+- disabled
+- not_granted
 
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 5）
+---
 
-The fifth `thought_gate_and_ai_governance` batch has been migrated to:
+## 8. Canonical runner baseline
 
-`program_code/ai_agents/bybit_thought_gate/`
+Current minimal H chapter canonical runners:
 
-Batch:
-- ai_governance_cost
+- `run_h1_thought_gate_canonical_closure_minimal.sh`
+- `run_h2_query_budget_canonical_closure_minimal.sh`
+- `run_h3_model_router_canonical_closure_minimal.sh`
+- `run_h4_compute_governor_canonical_closure_minimal.sh`
+- `run_h5_ai_cost_governance_canonical_closure_minimal.sh`
 
-Canonical real files moved in this batch:
-- bybit_ai_cost_governance_contract_check.py
-- bybit_ai_cost_governance_final_audit.py
-- bybit_ai_cost_log.py
-- bybit_ai_cost_log_contract_check.py
-- bybit_ai_governance_audit.py
-- bybit_ai_governance_audit_contract_check.py
+These should be treated as the current authoritative minimal closure runners for H1-H5.
 
-Legacy flat-script paths remain compatibility wrappers during transition.
+---
 
-## Canonical Path Update / 规范路径更新（Thought Gate Batch 6）
+## 9. Migration safety rule
 
-The sixth `thought_gate_and_ai_governance` batch has been migrated to:
+Before any future relocation or wide caller rewrite:
 
-`program_code/ai_agents/bybit_thought_gate/`
+1. preview
+2. compile check
+3. compatibility check
+4. git diff / git status review
+5. only then commit
 
-Batch:
-- thought_gate_outputs
+---
 
-Canonical real files moved in this batch:
-- bybit_thought_gate_acceptance_suite.py
-- bybit_thought_gate_contract_check.py
-- bybit_thought_gate_decision_builder.py
-- bybit_thought_gate_decision_contract_check.py
-- bybit_thought_gate_final_audit.py
-- bybit_thought_gate_handoff.py
-- bybit_thought_gate_input_builder.py
-- bybit_thought_gate_input_contract_check.py
-- bybit_thought_gate_policy_builder.py
-- bybit_thought_gate_policy_contract_check.py
-- bybit_thought_gate_regression_summary.py
+## 10. Immediate next policy
 
-Legacy flat-script paths remain compatibility wrappers during transition.
+Before I-stage expansion continues:
 
-> Canonical path note: exchange_io batch4 misc_io_support has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
+1. complete path governance baseline
+2. stop new old-root hardcoding
+3. introduce shared path helpers
+4. clean first batch of actively-used canonical code
+5. only then continue I-stage development
 
-> Canonical path note: exchange_io batch2 snapshot_and_postgres has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: exchange_io batch3 private_api_checks has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: exchange_io batch1 connectivity_and_ws has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: local_models batch3 local_judgment has moved to `program_code/risk_control/bybit_local_models_and_risk/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: local_models batch2 risk_envelope_and_friction has moved to `program_code/risk_control/bybit_local_models_and_risk/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: local_models remaining trigger/trade-eligibility and support builders have moved to `program_code/risk_control/bybit_local_models_and_risk/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: misc batch2 demo_paper_or_adapter has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: misc batch4 other_misc has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: misc batch1 demo_gate has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: ops batch3 diag_refresh_apply_force has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: ops batch4 other_ops_support has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: ops batch2 fix_repair_recover has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: ops batch1 run_scripts has moved to `helper_scripts/maintenance_scripts/bybit_connector/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: event_driven batch2 event_transition has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: event_driven batch3 event_replay_transition has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: event_driven batch1 event_driven_core has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: event_driven batch5 other_event_driven_support has moved to `program_code/trading_strategy/bybit_event_driven/`. Legacy flat files under `scripts/` are compatibility wrappers.
-
-> Canonical path note: event_driven batch4 transition_engine_core has moved to `program_code/trading_strategy/bybit_event_driven/`. Event-driven canonical migration is now complete. Legacy flat files under `scripts/` are compatibility wrappers.

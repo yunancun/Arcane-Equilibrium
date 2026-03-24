@@ -6,7 +6,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-THOUGHT_GATE_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+from bybit_path_policy import get_thought_gate_runtime_dir
+
+THOUGHT_GATE_DIR = get_thought_gate_runtime_dir()
 
 
 def read_json(path: Path, default: Optional[Any] = None) -> Any:

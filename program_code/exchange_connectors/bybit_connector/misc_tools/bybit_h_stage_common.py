@@ -1,30 +1,37 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+from __future__ import annotations
+
 import json
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-RUNTIME_BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+from bybit_path_policy import get_thought_gate_runtime_dir
 
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+RUNTIME_BASE = get_thought_gate_runtime_dir()
 
 
 def read_json_if_exists(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
-    return read_json(path)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def write_json(path: Path, obj: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def unique_list(items: List[Any]) -> List[Any]:
     seen = set()
     out: List[Any] = []
-    for item in items:
-        if item is None:
-            continue
-        key = item if isinstance(item, str) else json.dumps(item, ensure_ascii=False, sort_keys=True)
+    for item in items or []:
+        key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else repr(item)
         if key in seen:
             continue
         seen.add(key)
@@ -33,22 +40,15 @@ def unique_list(items: List[Any]) -> List[Any]:
 
 
 def mkcheck(name: str, ok: bool, detail: Any) -> Dict[str, Any]:
-    return {
-        "name": name,
-        "ok": bool(ok),
-        "detail": detail,
-    }
+    return {"name": name, "ok": bool(ok), "detail": detail}
 
 
-def write_report(prefix: str, obj: Dict[str, Any]) -> Tuple[Path, Path]:
-    RUNTIME_BASE.mkdir(parents=True, exist_ok=True)
-    ts_ms = obj.get("ts_ms")
+def write_report(prefix: str, report: Dict[str, Any]) -> None:
+    ts_ms = int(report.get("ts_ms") or int(time.time() * 1000))
     latest = RUNTIME_BASE / f"{prefix}_latest.json"
     dated = RUNTIME_BASE / f"{prefix}_{ts_ms}.json"
-    text = json.dumps(obj, ensure_ascii=False, indent=2)
-    latest.write_text(text, encoding="utf-8")
-    dated.write_text(text, encoding="utf-8")
-    print(text)
+    write_json(latest, report)
+    write_json(dated, report)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
     print(f"saved_latest={latest}")
     print(f"saved_dated={dated}")
-    return latest, dated
