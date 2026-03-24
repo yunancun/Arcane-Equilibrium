@@ -102,3 +102,20 @@ Recommended next order:
 2. migrate batch4 `execution_authority_manual_ack`
 3. scan/update direct callers that should switch from wrapper path to canonical path
 4. rerun targeted compile checks and decision-lease closure checks
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+## Update: decision_lease batch3 finished / 更新：decision_lease batch3 已完成
+
+Finished migration:
+- adaptive_ttl
+- approval_bridge
+- friction
+
+Canonical target:
+`program_code/trade_executor/bybit_decision_lease/`
+
+Next recommended step:
+- migrate batch4 `execution_authority_manual_ack`
+- then refresh docs / caller notes / commit / push
+- then run targeted verification for decision_lease chapter closure dependencies
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->

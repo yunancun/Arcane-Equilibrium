@@ -411,3 +411,16 @@ The following `decision_lease_and_execution_authority` members have been moved t
 - `bybit_decision_lease_shadow_issue_contract_check.py`
 
 Legacy paths under `program_code/exchange_connectors/bybit_connector/scripts/` remain only as compatibility wrappers.
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+### Canonical Path Progress Note / 规范路径进度说明（Decision Lease Batch3）
+
+`decision_lease_and_execution_authority` logical category is being migrated in batches.
+
+Batch3 canonicalized to:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+This batch covers adaptive TTL, approval bridge, and friction related scripts.
+Legacy flat-script locations remain wrapper-compatible during transition.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->

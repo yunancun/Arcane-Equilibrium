@@ -612,3 +612,26 @@ Legacy files under `program_code/exchange_connectors/bybit_connector/scripts/` a
 - `bybit_decision_lease_shadow_contract_check.py` → `program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_contract_check.py`
 - `bybit_decision_lease_shadow_issue.py` → `program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue.py`
 - `bybit_decision_lease_shadow_issue_contract_check.py` → `program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue_contract_check.py`
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+## Canonical Path Update / 规范路径更新（Decision Lease Batch3）
+
+The following `decision_lease` batch3 files now use the canonical directory:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Files included in this batch:
+
+- bybit_decision_lease_adaptive_ttl.py
+- bybit_decision_lease_adaptive_ttl_contract_check.py
+- bybit_decision_lease_approval_bridge.py
+- bybit_decision_lease_approval_bridge_contract_check.py
+- bybit_decision_lease_approval_bridge_final_audit.py
+- bybit_decision_lease_friction_contract_check.py
+- bybit_decision_lease_friction_final_audit.py
+- bybit_decision_lease_friction_metrics.py
+- bybit_decision_lease_friction_metrics_contract_check.py
+
+Legacy entrypoints under `program_code/exchange_connectors/bybit_connector/scripts/`
+are retained as compatibility wrappers only.
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->

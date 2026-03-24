@@ -84,3 +84,21 @@ Rule remains unchanged:
 - canonical implementation = target category directory
 - legacy flat path under `bybit_connector/scripts/` = compatibility wrapper only
 - new business logic changes should be made only in the canonical file
+
+<!-- CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
+## Decision Lease Migration Progress / Decision Lease 迁移进度
+
+Completed canonical migrations under:
+
+`program_code/trade_executor/bybit_decision_lease/`
+
+Completed batches:
+- batch1: core_schema_preflight
+- batch2: consume_shadow_replay
+- batch3: friction_adaptive_approval
+
+Policy remains:
+- canonical implementation lives in target domain directory
+- old flat `scripts/` entry remains wrapper-only during transition
+- wrappers are removed only after full caller cleanup and verification
+<!-- /CANONICAL_PATH_NOTE_DECISION_LEASE_BATCH3 -->
