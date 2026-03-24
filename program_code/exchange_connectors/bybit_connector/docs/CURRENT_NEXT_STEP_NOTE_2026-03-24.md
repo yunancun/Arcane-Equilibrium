@@ -244,3 +244,22 @@ Canonical real files moved in this batch:
 - bybit_ai_route_selector_contract_check.py
 
 Legacy flat-script paths remain compatibility wrappers during transition.
+
+## Canonical Path Update / 规范路径更新（Thought Gate Batch 5）
+
+The fifth `thought_gate_and_ai_governance` batch has been migrated to:
+
+`program_code/ai_agents/bybit_thought_gate/`
+
+Batch:
+- ai_governance_cost
+
+Canonical real files moved in this batch:
+- bybit_ai_cost_governance_contract_check.py
+- bybit_ai_cost_governance_final_audit.py
+- bybit_ai_cost_log.py
+- bybit_ai_cost_log_contract_check.py
+- bybit_ai_governance_audit.py
+- bybit_ai_governance_audit_contract_check.py
+
+Legacy flat-script paths remain compatibility wrappers during transition.
