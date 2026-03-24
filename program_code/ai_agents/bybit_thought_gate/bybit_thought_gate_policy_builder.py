@@ -31,6 +31,8 @@ import json
 import os
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any
 
 
@@ -39,7 +41,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 THOUGHT_GATE_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+    str(get_thought_gate_runtime_dir())
 )
 INPUT_PATH = THOUGHT_GATE_DIR / "bybit_thought_gate_input_latest.json"
 LATEST_OUTPUT_PATH = THOUGHT_GATE_DIR / "bybit_thought_gate_policy_latest.json"

@@ -31,12 +31,14 @@ import json
 import os
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 
-RUNTIME_BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+RUNTIME_BASE = get_thought_gate_runtime_dir()
 REQUEST_PATH = RUNTIME_BASE / "bybit_ai_request_envelope_latest.json"
 OUTPUT_LATEST_PATH = RUNTIME_BASE / "bybit_ai_invocation_attempt_latest.json"
 

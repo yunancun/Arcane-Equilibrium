@@ -4,9 +4,11 @@
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import mkcheck, read_json_if_exists, write_report
 
-REPORT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_governance_audit_latest.json")
+REPORT_PATH = get_thought_gate_runtime_dir() / "bybit_ai_governance_audit_latest.json"
 PREFIX = "bybit_ai_governance_audit_contract"
 
 

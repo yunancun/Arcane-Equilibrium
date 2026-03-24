@@ -4,9 +4,11 @@
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List
 
-RUNTIME_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+RUNTIME_DIR = get_thought_gate_runtime_dir()
 REPORT_PATH = RUNTIME_DIR / "bybit_query_budget_final_audit_latest.json"
 LATEST_PATH = RUNTIME_DIR / "bybit_query_budget_final_audit_contract_latest.json"
 

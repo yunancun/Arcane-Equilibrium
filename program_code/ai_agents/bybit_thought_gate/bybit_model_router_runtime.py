@@ -4,9 +4,11 @@
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 DECISION_PATH = BASE / "bybit_model_router_decision_latest.json"
 INV_PATH = BASE / "bybit_ai_invocation_attempt_latest.json"
 RESP_CHECK_PATH = BASE / "bybit_ai_response_check_latest.json"
@@ -24,6 +26,7 @@ def main() -> None:
     budget_runtime = read_json_if_exists(BUDGET_RUNTIME_PATH)
 
     router_output = decision.get("router_output") or {}
+    decision_request_summary = decision.get("request_summary") or {}
     inv_summary = inv.get("request_summary") or {}
     inv_attempt = inv.get("attempt_result") or {}
     inv_extract = inv.get("response_extract") or {}
@@ -43,6 +46,13 @@ def main() -> None:
     response_text_present = inv_attempt.get("response_text_present") is True
     parsed_json_present = inv_attempt.get("parsed_json_present") is True
 
+    no_call_path_accepted = (
+        router_output.get("no_call_path_expected") is True
+        or router_output.get("route_mode") == "local_only"
+        or decision_request_summary.get("should_call_ai") is False
+        or resp_check.get("terminal_mode") == "legal_no_ai_call"
+    )
+
     warning_flags = unique_list(
         (decision.get("warning_flags") or [])
         + (budget_runtime.get("warning_flags") or [])
@@ -59,10 +69,11 @@ def main() -> None:
         blocking_reasons.append("model_name_mismatch_vs_invocation")
     if not response_check_ok:
         blocking_reasons.append("ai_response_check_not_ready")
-    if not response_text_present:
-        blocking_reasons.append("response_text_missing")
-    if not parsed_json_present:
-        blocking_reasons.append("parsed_json_missing")
+    if not no_call_path_accepted:
+        if not response_text_present:
+            blocking_reasons.append("response_text_missing")
+        if not parsed_json_present:
+            blocking_reasons.append("parsed_json_missing")
 
     runtime_ok = not blocking_reasons
 
@@ -92,6 +103,7 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": router_output.get("selected_ai_tier"),
             "route_mode": router_output.get("route_mode"),
+            "should_call_ai": decision_request_summary.get("should_call_ai"),
         },
         "runtime_summary": {
             "provider_target_match": provider_match,
@@ -104,12 +116,14 @@ def main() -> None:
             "output_tokens": usage_summary.get("output_tokens"),
             "reasoning_tokens": (usage_summary.get("output_tokens_details") or {}).get("reasoning_tokens"),
             "total_tokens": usage_summary.get("total_tokens"),
+            "no_call_path_accepted": no_call_path_accepted,
         },
         "route_explainability": {
             "route_reason_code": router_output.get("route_reason_code"),
             "route_reason_text": router_output.get("route_reason_text"),
             "local_owner": router_output.get("local_owner"),
             "cloud_owner": router_output.get("cloud_owner"),
+            "no_call_path_expected": router_output.get("no_call_path_expected"),
         },
         "warning_flags": warning_flags,
         "blocking_reasons": blocking_reasons,
@@ -121,7 +135,7 @@ def main() -> None:
             "inspect_model_router_runtime_blockers"
         ),
         "operator_message": (
-            "H3-C model router runtime ready. 路由决策与实际 invocation/response 已对齐。"
+            "H3-C model router runtime ready. 路由决策与当前 no-call / invocation 语义已对齐。"
             if runtime_ok else
             "H3-C model router runtime blocked."
         ),

@@ -4,9 +4,11 @@
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 REQ_PATH = BASE / "bybit_ai_request_envelope_latest.json"
 BUDGET_RUNTIME_PATH = BASE / "bybit_query_budget_runtime_latest.json"
 
@@ -22,13 +24,20 @@ def main() -> None:
     request_summary = req.get("request_summary") or {}
     request_payload = req.get("request_payload") or {}
     budget_context = req.get("budget_context") or {}
+    budget_runtime_assessment = budget_runtime.get("runtime_assessment") or {}
 
     provider_target = request_summary.get("provider_target") or request_payload.get("provider_target")
     model_name = request_summary.get("model_name") or request_payload.get("model_name")
     selected_ai_tier = request_summary.get("selected_ai_tier") or request_payload.get("selected_ai_tier")
     route_plan = request_summary.get("route_plan") or request_payload.get("route_plan")
+    should_call_ai = request_summary.get("should_call_ai")
 
     runtime_ok = budget_runtime.get("runtime_ok") is True
+    no_call_path_expected = (
+        should_call_ai is False
+        or route_plan == "route_skip"
+        or budget_runtime_assessment.get("no_call_path_accepted") is True
+    )
 
     warning_flags = unique_list(
         (budget_runtime.get("warning_flags") or [])
@@ -68,27 +77,50 @@ def main() -> None:
         },
     ]
 
-    current_task_profile = {
-        "task_class": "governed_ai_observation_json",
-        "local_role": [
-            "build_market_facts",
-            "apply_thought_gate",
-            "apply_query_budget",
-            "enforce_json_contract",
-            "governed_observation_normalization",
-        ],
-        "cloud_role": [
-            "compact_market_observation_synthesis",
-            "bounded_json_response_only",
-        ],
-        "active_provider_target": provider_target,
-        "active_model_name": model_name,
-        "selected_ai_tier": selected_ai_tier,
-        "route_plan": route_plan,
-    }
+    if no_call_path_expected:
+        current_task_profile = {
+            "task_class": "local_skip_no_ai",
+            "local_role": [
+                "build_market_facts",
+                "apply_thought_gate",
+                "apply_query_budget",
+                "local_route_resolution",
+                "contract_check",
+                "governed_observation_normalization",
+            ],
+            "cloud_role": [],
+            "active_provider_target": provider_target,
+            "active_model_name": model_name,
+            "selected_ai_tier": selected_ai_tier,
+            "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
+            "no_call_path_expected": True,
+            "route_mode": "local_only",
+        }
+    else:
+        current_task_profile = {
+            "task_class": "governed_ai_observation_json",
+            "local_role": [
+                "build_market_facts",
+                "apply_thought_gate",
+                "apply_query_budget",
+                "enforce_json_contract",
+                "governed_observation_normalization",
+            ],
+            "cloud_role": [
+                "compact_market_observation_synthesis",
+                "bounded_json_response_only",
+            ],
+            "active_provider_target": provider_target,
+            "active_model_name": model_name,
+            "selected_ai_tier": selected_ai_tier,
+            "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
+            "no_call_path_expected": False,
+            "route_mode": "cloud_compact_json",
+        }
 
     policy_ok = not blocking_reasons
-
     policy_state = "model_router_policy_snapshotted" if policy_ok else "model_router_policy_blocked"
     allow_progress = policy_ok
 
@@ -108,6 +140,7 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": selected_ai_tier,
             "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
         },
         "budget_snapshot": {
             "ai_daily_budget_usd": budget_context.get("ai_daily_budget_usd"),
@@ -115,11 +148,13 @@ def main() -> None:
             "max_output_tokens": budget_context.get("max_output_tokens"),
             "response_deadline_ms_hint": budget_context.get("response_deadline_ms_hint"),
             "runtime_ok": runtime_ok,
+            "no_call_path_expected": no_call_path_expected,
         },
         "task_catalog": task_catalog,
         "current_task_profile": current_task_profile,
         "routing_principles": [
             "local_first_for_facts_and_gates",
+            "local_skip_when_no_ai_required",
             "cloud_only_when_task_requires_bounded_model_judgment",
             "compact_json_for_governed_observation_path",
             "do_not_expand_to_longform_route_without_explicit_task_change",
@@ -134,8 +169,7 @@ def main() -> None:
             "inspect_model_router_policy_blockers"
         ),
         "operator_message": (
-            "H3-A model router policy snapshotted. Task classes, local/cloud职责边界、"
-            "以及当前主链应走的 compact JSON 路由已明确。"
+            "H3-A model router policy snapshotted. 当前任务、当前路由边界与是否需要 AI 调用已经明确。"
             if allow_progress else
             "H3-A model router policy blocked. Resolve blockers before H3-B."
         ),

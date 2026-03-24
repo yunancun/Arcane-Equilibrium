@@ -1,34 +1,14 @@
-from bybit_h5_compat_helpers import h2_stage_closed, h4_stage_closed, h5_log_ok, h5_governance_audit_ok, extract_within_timeout_hint
-from bybit_h5_main_postprocess import patch_ai_governance_audit_report
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""
-H5-B / AI governance audit
-
-中文：
-- 复核当前主链是否同时满足：
-  1) 只读保护
-  2) 禁止 execution authority / decision lease
-  3) H1-H4 已闭环
-  4) AI 调用在预算治理链内
-  5) 已记录成本与 usage 轨迹
-
-English:
-- Re-audit whether the active mainline simultaneously satisfies:
-  1) read-only protection
-  2) no execution authority / no decision lease
-  3) H1-H4 are closed
-  4) AI call remains inside the governed budget chain
-  5) cost / usage trace is logged
-"""
 
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import mkcheck, read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 H1_AUDIT_PATH = BASE / "bybit_thought_gate_final_audit_latest.json"
 H2_AUDIT_PATH = BASE / "bybit_query_budget_final_audit_latest.json"
@@ -60,6 +40,13 @@ def main() -> None:
     governance_guards = gov.get("governance_guards") or {}
     attempt_result = inv.get("attempt_result") or {}
     transport_summary = inv.get("transport_summary") or {}
+    h5_cost_log = h5.get("cost_log") or {}
+
+    no_call_path_accepted = (
+        h4_summary.get("no_call_path_accepted") is True
+        or h5_cost_log.get("no_call_path_accepted") is True
+        or (h5.get("request_summary") or {}).get("should_call_ai") is False
+    )
 
     checks = [
         mkcheck("h1_stage_closed", h1_summary.get("h1_stage_closed") is True, h1_summary.get("h1_stage_closed")),
@@ -73,7 +60,11 @@ def main() -> None:
         mkcheck("live_execution_allowed_false", governance_guards.get("live_execution_allowed") is False, governance_guards.get("live_execution_allowed")),
         mkcheck("decision_lease_emitted_false", governance_guards.get("decision_lease_emitted") is False, governance_guards.get("decision_lease_emitted")),
         mkcheck("max_retries_zero", transport_summary.get("max_retries") == 0, transport_summary.get("max_retries")),
-        mkcheck("parsed_json_present_true", attempt_result.get("parsed_json_present") is True, attempt_result.get("parsed_json_present")),
+        mkcheck(
+            "parsed_json_present_true_or_no_call_path",
+            (attempt_result.get("parsed_json_present") is True) or no_call_path_accepted,
+            {"parsed_json_present": attempt_result.get("parsed_json_present"), "no_call_path_accepted": no_call_path_accepted},
+        ),
     ]
 
     audit_ok = all(c["ok"] for c in checks)
@@ -91,121 +82,6 @@ def main() -> None:
         if audit_ok else
         "ai_governance_audit_blocked"
     )
-    soft_warn_only_flags = {
-        "recent_trade_last_price_missing",
-        "recent_trade_last_ts_missing",
-        "runtime_state_reference_old",
-        "freshness_soft_warning_present",
-        "last_trade_fields_missing",
-    }
-
-    warning_flags = list(dict.fromkeys(warning_flags or []))
-    blocking_reasons = list(locals().get("blocking_reasons") or [])
-    blocking_reasons = [x for x in blocking_reasons if x not in soft_warn_only_flags]
-    # AUDIT_STATE_SOFTWARN_REPAIR_V2
-    soft_warn_only_flags = {
-        "recent_trade_last_price_missing",
-        "recent_trade_last_ts_missing",
-        "runtime_state_reference_old",
-        "freshness_soft_warning_present",
-        "last_trade_fields_missing",
-    }
-    warning_flags = list(dict.fromkeys(list(warning_flags or [])))
-    blocking_reasons = [x for x in list(locals().get("blocking_reasons") or []) if x not in soft_warn_only_flags]
-
-    if blocking_reasons:
-        audit_state = "ai_governance_audit_blocked"
-        audit_ok = False
-    else:
-        audit_state = "ai_governance_audit_passed_soft_warn" if warning_flags else "ai_governance_audit_passed"
-        audit_ok = True
-
-
-
-    # H5_SCHEMA_DRIFT_COMPAT_V7
-
-
-
-    _authoritative_h2_closed = h2_stage_closed()
-
-
-
-    _authoritative_h4_closed = h4_stage_closed()
-
-
-
-    _authoritative_h5_log_ok = h5_log_ok()
-
-
-
-
-    failed_checks = list(dict.fromkeys(list(failed_checks or [])))
-
-
-
-    failed_checks = [x for x in failed_checks if x not in {"h2_stage_closed", "h4_stage_closed", "ai_cost_log_ok"}]
-
-
-
-
-    if not _authoritative_h2_closed:
-
-
-
-        failed_checks.append("h2_stage_closed")
-
-
-
-    if not _authoritative_h4_closed:
-
-
-
-        failed_checks.append("h4_stage_closed")
-
-
-
-    if not _authoritative_h5_log_ok:
-
-
-
-        failed_checks.append("ai_cost_log_ok")
-
-
-
-
-    warning_flags = list(dict.fromkeys(list(warning_flags or [])))
-
-
-
-    blocking_reasons = list(dict.fromkeys(list(locals().get("blocking_reasons") or [])))
-
-
-
-
-    if failed_checks or blocking_reasons:
-
-
-
-        audit_state = "ai_governance_audit_blocked"
-
-
-
-        audit_ok = False
-
-
-
-    else:
-
-
-
-        audit_state = "ai_governance_audit_passed_soft_warn" if warning_flags else "ai_governance_audit_passed"
-
-
-
-        audit_ok = True
-
-
-
 
     report = {
         "audit_type": "bybit_ai_governance_audit",
@@ -234,7 +110,7 @@ def main() -> None:
             "inspect_h5b_governance_audit_failures"
         ),
         "operator_message": (
-            "H5-B governance audit passed. 当前 AI 主链仍处于只读、零授权、受预算与 anti-abuse 约束的治理态。"
+            "H5-B governance audit passed. 当前主链仍满足只读保护、预算治理与 legal no-call 兼容语义。"
             if audit_ok else
             "H5-B governance audit blocked."
         ),

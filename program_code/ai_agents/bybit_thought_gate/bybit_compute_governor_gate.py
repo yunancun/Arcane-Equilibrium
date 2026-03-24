@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-H4-B / Compute governor gate
-中文：
-- 检查当前 request / invocation 是否满足 H4-A 的长期计算治理约束
-English:
-- Verify that the active request / invocation satisfies H4-A compute-governor constraints
-"""
-
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import mkcheck, read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 POLICY_PATH = BASE / "bybit_compute_governor_policy_latest.json"
 REQ_PATH = BASE / "bybit_ai_request_envelope_latest.json"
@@ -37,6 +31,7 @@ def main() -> None:
 
     request_summary = req.get("request_summary") or {}
     request_payload = req.get("request_payload") or {}
+    provider_runtime = req.get("provider_runtime") or {}
 
     transport_summary = inv.get("transport_summary") or {}
     attempt_result = inv.get("attempt_result") or {}
@@ -47,9 +42,19 @@ def main() -> None:
     route_policy_provider = (policy.get("request_summary") or {}).get("provider_target")
     route_policy_model = (policy.get("request_summary") or {}).get("model_name")
 
-    max_retries_actual = transport_summary.get("max_retries")
+    max_retries_actual = provider_runtime.get("max_retries")
+    if max_retries_actual is None:
+        max_retries_actual = transport_summary.get("max_retries")
+
     max_output_tokens_actual = request_payload.get("max_output_tokens")
     idempotency_key = response_extract.get("idempotency_key")
+
+    no_call_path_expected = (
+        governor_policy.get("no_call_path_expected") is True
+        or request_summary.get("should_call_ai") is False
+        or request_summary.get("route_plan") == "route_skip"
+        or (h3_runtime.get("runtime_summary") or {}).get("no_call_path_accepted") is True
+    )
 
     checks = [
         mkcheck("policy_ok", policy.get("policy_ok") is True, policy.get("policy_ok")),
@@ -71,10 +76,22 @@ def main() -> None:
                 "cap": budget_constraints.get("max_output_tokens_cap"),
             },
         ),
-        mkcheck("selected_ai_tier_light", request_summary.get("selected_ai_tier") == "light", request_summary.get("selected_ai_tier")),
+        mkcheck(
+            "selected_ai_tier_allowed",
+            request_summary.get("selected_ai_tier") in {"light", "none"},
+            request_summary.get("selected_ai_tier"),
+        ),
         mkcheck("model_router_runtime_ok", h3_runtime.get("runtime_ok") is True, h3_runtime.get("runtime_ok")),
-        mkcheck("idempotency_key_present", isinstance(idempotency_key, str) and len(idempotency_key) > 0, idempotency_key),
-        mkcheck("invocation_attempt_record_present", isinstance(attempt_result, dict) and len(attempt_result) > 0, type(attempt_result).__name__),
+        mkcheck(
+            "idempotency_key_present_or_no_call_path",
+            (isinstance(idempotency_key, str) and len(idempotency_key) > 0) or no_call_path_expected,
+            {"idempotency_key": idempotency_key, "no_call_path_expected": no_call_path_expected},
+        ),
+        mkcheck(
+            "invocation_attempt_record_present_or_no_call_path",
+            (isinstance(attempt_result, dict) and len(attempt_result) > 0) or no_call_path_expected,
+            {"attempt_result_type": type(attempt_result).__name__, "no_call_path_expected": no_call_path_expected},
+        ),
     ]
 
     gate_ok = all(c["ok"] for c in checks)
@@ -114,6 +131,10 @@ def main() -> None:
             "model_name": route_request_model,
             "selected_ai_tier": request_summary.get("selected_ai_tier"),
             "route_plan": request_summary.get("route_plan"),
+            "should_call_ai": request_summary.get("should_call_ai"),
+        },
+        "gate_context": {
+            "no_call_path_expected": no_call_path_expected,
         },
         "checks": checks,
         "failed_checks": failed_checks,

@@ -5,28 +5,11 @@ import os
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List, Optional
 
-# MODULE_NOTE / 模块说明:
-# - role / 角色:
-#   Build a normalized H2-A query-budget policy snapshot.
-#   构建 H2-A 查询预算策略快照的标准化报告。
-#
-# - purpose / 目的:
-#   Read H1 handoff + latest request envelope + latest invocation attempt,
-#   then normalize the active budget policy and the most recent observed call.
-#   读取 H1 handoff、最新 request envelope、最新 invocation attempt，
-#   然后把当前预算策略与最近一次调用观测统一整理出来。
-#
-# - boundary / 边界:
-#   This stage does NOT make final budget gating decisions yet.
-#   本阶段暂不做最终预算放行裁决。
-#
-# - output / 输出:
-#   Emit a stable JSON report for H2-B downstream budget gating.
-#   产出供 H2-B 继续使用的稳定 JSON 报告。
-
-RUNTIME_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+RUNTIME_DIR = get_thought_gate_runtime_dir()
 
 HANDOFF_PATH = RUNTIME_DIR / "bybit_thought_gate_handoff_latest.json"
 REQUEST_PATH = RUNTIME_DIR / "bybit_ai_request_envelope_latest.json"
@@ -75,6 +58,10 @@ def as_float(value: Any) -> Optional[float]:
         return None
 
 
+def as_bool(value: Any) -> Optional[bool]:
+    return value if isinstance(value, bool) else None
+
+
 def main() -> None:
     now_ms = int(time.time() * 1000)
 
@@ -97,6 +84,7 @@ def main() -> None:
     invocation = read_json(INVOCATION_PATH) if INVOCATION_PATH.exists() else {}
 
     request_summary = as_dict(request.get("request_summary"))
+    invocation_request_summary = as_dict(invocation.get("request_summary"))
     provider_runtime = as_dict(request.get("provider_runtime"))
     budget_context = as_dict(request.get("budget_context"))
     request_payload = as_dict(request.get("request_payload"))
@@ -105,6 +93,11 @@ def main() -> None:
     response_extract = as_dict(invocation.get("response_extract"))
     usage_summary = as_dict(response_extract.get("usage_summary"))
     output_tokens_details = as_dict(usage_summary.get("output_tokens_details"))
+
+    should_call_ai = request_summary.get("should_call_ai")
+    if not isinstance(should_call_ai, bool):
+        should_call_ai = invocation_request_summary.get("should_call_ai")
+    no_call_path_expected = (should_call_ai is False)
 
     warning_flags: List[str] = []
     blocking_reasons: List[str] = []
@@ -123,16 +116,16 @@ def main() -> None:
         if within_timeout_hint is False:
             warning_flags.append("last_call_latency_exceeds_deadline_hint")
 
-    if not usage_summary:
-        warning_flags.append("last_call_usage_summary_missing")
-
     invocation_state = invocation.get("invocation_state")
-    if invocation_state != "invocation_success_json_ready":
-        warning_flags.append("last_call_not_json_ready")
-
     retries_disabled = provider_runtime.get("max_retries") == 0
     if not retries_disabled:
         warning_flags.append("max_retries_not_zero")
+
+    if not no_call_path_expected:
+        if not usage_summary:
+            warning_flags.append("last_call_usage_summary_missing")
+        if invocation_state != "invocation_success_json_ready":
+            warning_flags.append("last_call_not_json_ready")
 
     report = {
         "report_type": "bybit_query_budget_policy",
@@ -152,6 +145,7 @@ def main() -> None:
             "model_name": request_summary.get("model_name"),
             "selected_ai_tier": request_summary.get("selected_ai_tier"),
             "route_plan": request_summary.get("route_plan"),
+            "should_call_ai": should_call_ai,
         },
         "policy_snapshot": {
             "ai_daily_budget_usd": budget_context.get("ai_daily_budget_usd"),
@@ -179,6 +173,7 @@ def main() -> None:
             "daily_budget_declared": budget_context.get("ai_daily_budget_usd") is not None,
             "per_call_budget_declared": budget_context.get("ai_per_call_budget_usd") is not None,
             "budget_trace_ready": bool(request and invocation and handoff),
+            "no_call_path_expected": no_call_path_expected,
         },
         "warning_flags": warning_flags,
         "blocking_reasons": blocking_reasons,

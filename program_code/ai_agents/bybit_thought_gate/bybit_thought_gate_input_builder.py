@@ -47,6 +47,8 @@ import json
 import os
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -57,7 +59,7 @@ LOCAL_JUDGMENT_DIR = Path(
     "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
 )
 THOUGHT_GATE_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+    str(get_thought_gate_runtime_dir())
 )
 
 HANDOFF_PATH = LOCAL_JUDGMENT_DIR / "bybit_local_trade_eligibility_handoff_latest.json"

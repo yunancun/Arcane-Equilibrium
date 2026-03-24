@@ -4,31 +4,11 @@
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List, Optional
 
-# MODULE_NOTE / 模块说明:
-# - role / 角色:
-#   Build H2-B query budget gate decision.
-#   构建 H2-B 查询预算闸门决策。
-#
-# - purpose / 目的:
-#   Consume H1 final audit + H2-A budget policy snapshot, then decide whether
-#   the chapter may progress past structural budget governance.
-#   消费 H1 final audit + H2-A 预算策略快照，判断当前章节是否可以通过结构化预算治理继续向下推进。
-#
-# - boundary / 边界:
-#   This stage still does NOT authorize live execution.
-#   本阶段仍然绝不授权实盘执行。
-#
-# - policy style / 策略风格:
-#   Conservative, deterministic, audit-first.
-#   保守、确定性、审计优先。
-#
-# - soft warning policy / 软警告策略:
-#   Latency exceeding deadline hint is treated as warning only, not blocker.
-#   延迟超过 deadline hint 只视为警告，不作为阻断。
-
-RUNTIME_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+RUNTIME_DIR = get_thought_gate_runtime_dir()
 
 FINAL_AUDIT_PATH = RUNTIME_DIR / "bybit_thought_gate_final_audit_latest.json"
 POLICY_PATH = RUNTIME_DIR / "bybit_query_budget_policy_latest.json"
@@ -103,12 +83,16 @@ def main() -> None:
     observed_last_call = as_dict(policy.get("observed_last_call"))
     budget_assessment = as_dict(policy.get("budget_assessment"))
 
+    should_call_ai = request_summary.get("should_call_ai")
+    legal_no_call_path = (
+        audit_summary.get("no_call_terminal_accepted") is True
+        or budget_assessment.get("no_call_path_expected") is True
+        or should_call_ai is False
+    )
+
     warning_flags: List[str] = []
     blocking_reasons: List[str] = []
 
-    # -----------------------------------------------------
-    # Hard gates / 硬性闸门
-    # -----------------------------------------------------
     if final_audit.get("overall_ok") is not True:
         blocking_reasons.append("h1_final_audit_not_green")
 
@@ -142,38 +126,31 @@ def main() -> None:
         blocking_reasons.append("model_name_missing")
 
     parsed_json_present = observed_last_call.get("parsed_json_present")
-    if parsed_json_present is not True:
+    if not legal_no_call_path and parsed_json_present is not True:
         blocking_reasons.append("last_call_not_json_ready")
 
-    # -----------------------------------------------------
-    # Soft warnings / 软警告
-    # -----------------------------------------------------
     within_timeout_hint = budget_assessment.get("within_timeout_hint")
     if within_timeout_hint is False:
         warning_flags.append("last_call_latency_exceeds_deadline_hint")
 
-    if observed_last_call.get("invocation_state") != "invocation_success_json_ready":
-        warning_flags.append("invocation_state_not_json_ready")
+    if not legal_no_call_path:
+        if observed_last_call.get("invocation_state") != "invocation_success_json_ready":
+            warning_flags.append("invocation_state_not_json_ready")
 
-    output_tokens = as_int(observed_last_call.get("output_tokens"))
-    total_tokens = as_int(observed_last_call.get("total_tokens"))
-    reasoning_tokens = as_int(observed_last_call.get("reasoning_tokens"))
-    latency_ms = as_int(observed_last_call.get("latency_ms"))
-    response_deadline_ms_hint = as_int(policy_snapshot.get("response_deadline_ms_hint"))
+        output_tokens = as_int(observed_last_call.get("output_tokens"))
+        total_tokens = as_int(observed_last_call.get("total_tokens"))
+        latency_ms = as_int(observed_last_call.get("latency_ms"))
 
-    if output_tokens is None:
-        warning_flags.append("output_tokens_missing")
-    if total_tokens is None:
-        warning_flags.append("total_tokens_missing")
-    if latency_ms is None:
-        warning_flags.append("latency_ms_missing")
+        if output_tokens is None:
+            warning_flags.append("output_tokens_missing")
+        if total_tokens is None:
+            warning_flags.append("total_tokens_missing")
+        if latency_ms is None:
+            warning_flags.append("latency_ms_missing")
 
-    if output_tokens is not None and max_output_tokens is not None and output_tokens > max_output_tokens:
-        blocking_reasons.append("output_tokens_exceed_policy_cap")
+        if output_tokens is not None and max_output_tokens is not None and output_tokens > max_output_tokens:
+            blocking_reasons.append("output_tokens_exceed_policy_cap")
 
-    # -----------------------------------------------------
-    # Derived assessment / 派生判断
-    # -----------------------------------------------------
     structural_budget_trace_ready = all([
         ai_daily_budget_usd is not None,
         ai_per_call_budget_usd is not None,
@@ -199,7 +176,11 @@ def main() -> None:
     add_check("max_retries_zero", max_retries == 0, max_retries)
     add_check("provider_target_present", bool(provider_target), provider_target)
     add_check("model_name_present", bool(model_name), model_name)
-    add_check("last_call_json_ready", parsed_json_present is True, parsed_json_present)
+    add_check(
+        "last_call_json_ready_or_no_call_expected",
+        (parsed_json_present is True) or legal_no_call_path,
+        {"parsed_json_present": parsed_json_present, "legal_no_call_path": legal_no_call_path},
+    )
     add_check("structural_budget_trace_ready", structural_budget_trace_ready, structural_budget_trace_ready)
 
     if blocking_reasons:
@@ -207,16 +188,16 @@ def main() -> None:
         gate_ok = False
         allow_progress = False
         recommended_action = "resolve_h2b_budget_blockers"
-    elif warning_flags:
-        gate_state = "query_budget_gate_pass_soft_warn"
-        gate_ok = True
-        allow_progress = True
-        recommended_action = "may_progress_to_h2c_with_soft_warnings"
     else:
-        gate_state = "query_budget_gate_pass_soft_warn"
+        gate_state = "query_budget_gate_pass_soft_warn" if warning_flags or legal_no_call_path else "query_budget_gate_pass_soft_warn"
         gate_ok = True
         allow_progress = True
-        recommended_action = "may_progress_to_h2c_budget_runtime"
+        recommended_action = (
+            "may_progress_to_h2c_with_soft_warnings"
+            if (warning_flags or legal_no_call_path)
+            else "may_progress_to_h2c_budget_runtime"
+        )
+
     report = {
         "gate_type": "bybit_query_budget_gate",
         "gate_version": "v1",
@@ -234,12 +215,13 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": request_summary.get("selected_ai_tier"),
             "route_plan": request_summary.get("route_plan"),
+            "should_call_ai": should_call_ai,
         },
         "budget_policy": {
             "ai_daily_budget_usd": ai_daily_budget_usd,
             "ai_per_call_budget_usd": ai_per_call_budget_usd,
             "max_output_tokens": max_output_tokens,
-            "response_deadline_ms_hint": response_deadline_ms_hint,
+            "response_deadline_ms_hint": as_int(policy_snapshot.get("response_deadline_ms_hint")),
             "connect_timeout_sec": as_float(policy_snapshot.get("connect_timeout_sec")),
             "read_timeout_sec": as_float(policy_snapshot.get("read_timeout_sec")),
             "max_retries": max_retries,
@@ -247,19 +229,20 @@ def main() -> None:
         },
         "observed_last_call": {
             "invocation_state": observed_last_call.get("invocation_state"),
-            "latency_ms": latency_ms,
+            "latency_ms": as_int(observed_last_call.get("latency_ms")),
             "within_timeout_hint": within_timeout_hint,
             "response_text_present": as_bool(observed_last_call.get("response_text_present")),
             "parsed_json_present": as_bool(observed_last_call.get("parsed_json_present")),
             "input_tokens": as_int(observed_last_call.get("input_tokens")),
-            "output_tokens": output_tokens,
-            "reasoning_tokens": reasoning_tokens,
-            "total_tokens": total_tokens,
+            "output_tokens": as_int(observed_last_call.get("output_tokens")),
+            "reasoning_tokens": as_int(observed_last_call.get("reasoning_tokens")),
+            "total_tokens": as_int(observed_last_call.get("total_tokens")),
         },
         "audit_context": {
             "h1_stage_closed": audit_summary.get("h1_stage_closed"),
             "runtime_still_protected": audit_summary.get("runtime_still_protected"),
             "ready_for_h2": audit_summary.get("ready_for_h2"),
+            "no_call_terminal_accepted": audit_summary.get("no_call_terminal_accepted"),
         },
         "gate_checks": gate_checks,
         "warning_flags": warning_flags,

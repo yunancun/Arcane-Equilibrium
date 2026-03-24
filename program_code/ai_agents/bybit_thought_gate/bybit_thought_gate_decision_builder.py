@@ -35,6 +35,8 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any
 
 
@@ -43,7 +45,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 THOUGHT_GATE_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+    str(get_thought_gate_runtime_dir())
 )
 TRIGGER_DIR = Path(
     "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/trigger_model"

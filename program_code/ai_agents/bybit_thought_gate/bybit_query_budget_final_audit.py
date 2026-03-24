@@ -4,32 +4,11 @@
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List
 
-# MODULE_NOTE / 模块说明:
-# - role / 角色:
-#   Close H2 (query_budget) using H1 final audit + H2-A/B/C reports.
-#   基于 H1 final audit 与 H2-A/B/C 报告，正式关闭 H2（query_budget）章节。
-#
-# - closure semantics / 闭环语义:
-#   H2 is considered closed when:
-#   1) H1 is already formally closed
-#   2) H2-A policy snapshot is green
-#   3) H2-B budget gate is green
-#   4) H2-C runtime budget object is green
-#   5) remaining warnings are soft only, with no blocking reasons
-#   H2 关闭条件：
-#   1) H1 已正式闭环
-#   2) H2-A policy snapshot 为绿色
-#   3) H2-B budget gate 为绿色
-#   4) H2-C runtime budget 对象为绿色
-#   5) 剩余问题仅为软警告，且不存在 blocking reasons
-#
-# - safety / 安全:
-#   This audit does not grant execution authority.
-#   此审计不会授予任何执行权限。
-
-RUNTIME_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+RUNTIME_DIR = get_thought_gate_runtime_dir()
 
 H1_FINAL_AUDIT_PATH = RUNTIME_DIR / "bybit_thought_gate_final_audit_latest.json"
 H2A_POLICY_PATH = RUNTIME_DIR / "bybit_query_budget_policy_latest.json"
@@ -90,6 +69,12 @@ def main() -> None:
     model_name = h2a_request_summary.get("model_name")
     selected_ai_tier = h2a_request_summary.get("selected_ai_tier")
     route_plan = h2a_request_summary.get("route_plan")
+    should_call_ai = h2a_request_summary.get("should_call_ai")
+    no_call_path_accepted = (
+        h2c_runtime_assessment.get("no_call_path_accepted") is True
+        or h1_audit_summary.get("no_call_terminal_accepted") is True
+        or should_call_ai is False
+    )
 
     checks: List[Dict[str, Any]] = []
 
@@ -104,23 +89,11 @@ def main() -> None:
     add_check("h1_ready_for_h2", h1_audit_summary.get("ready_for_h2") is True, h1_audit_summary.get("ready_for_h2"))
     add_check("h1_runtime_still_protected", h1_audit_summary.get("runtime_still_protected") is True, h1_audit_summary.get("runtime_still_protected"))
 
-    add_check(
-        "h2a_policy_snapshotted",
-        h2a.get("policy_state") == "query_budget_policy_snapshotted",
-        h2a.get("policy_state"),
-    )
-    add_check(
-        "h2a_allow_progress_true",
-        h2a.get("allow_progress_to_h2b_budget_gate") is True,
-        h2a.get("allow_progress_to_h2b_budget_gate"),
-    )
+    add_check("h2a_policy_snapshotted", h2a.get("policy_state") == "query_budget_policy_snapshotted", h2a.get("policy_state"))
+    add_check("h2a_allow_progress_true", h2a.get("allow_progress_to_h2b_budget_gate") is True, h2a.get("allow_progress_to_h2b_budget_gate"))
 
     add_check("h2b_gate_ok", h2b.get("gate_ok") is True, h2b.get("gate_ok"))
-    add_check(
-        "h2b_allow_progress_true",
-        h2b.get("allow_progress_to_h2c_budget_runtime") is True,
-        h2b.get("allow_progress_to_h2c_budget_runtime"),
-    )
+    add_check("h2b_allow_progress_true", h2b.get("allow_progress_to_h2c_budget_runtime") is True, h2b.get("allow_progress_to_h2c_budget_runtime"))
     add_check(
         "h2b_gate_state_known",
         h2b.get("gate_state") in {
@@ -131,11 +104,7 @@ def main() -> None:
     )
 
     add_check("h2c_runtime_ok", h2c.get("runtime_ok") is True, h2c.get("runtime_ok"))
-    add_check(
-        "h2c_allow_progress_true",
-        h2c.get("allow_progress_to_h2d_final_audit") is True,
-        h2c.get("allow_progress_to_h2d_final_audit"),
-    )
+    add_check("h2c_allow_progress_true", h2c.get("allow_progress_to_h2d_final_audit") is True, h2c.get("allow_progress_to_h2d_final_audit"))
     add_check(
         "h2c_runtime_state_known",
         h2c.get("runtime_state") in {
@@ -151,20 +120,16 @@ def main() -> None:
     )
 
     add_check("max_retries_zero", h2c_budget_policy.get("max_retries") == 0, h2c_budget_policy.get("max_retries"))
+    add_check("output_cap_enforced", h2c_runtime_assessment.get("output_cap_enforced") is True, h2c_runtime_assessment.get("output_cap_enforced"))
     add_check(
-        "output_cap_enforced",
-        h2c_runtime_assessment.get("output_cap_enforced") is True,
-        h2c_runtime_assessment.get("output_cap_enforced"),
+        "json_contract_ready_or_no_call_path",
+        (h2c_runtime_assessment.get("json_contract_ready") is True) or no_call_path_accepted,
+        {"json_contract_ready": h2c_runtime_assessment.get("json_contract_ready"), "no_call_path_accepted": no_call_path_accepted},
     )
     add_check(
-        "json_contract_ready",
-        h2c_runtime_assessment.get("json_contract_ready") is True,
-        h2c_runtime_assessment.get("json_contract_ready"),
-    )
-    add_check(
-        "call_trace_observed",
-        h2c_runtime_assessment.get("call_trace_observed") is True,
-        h2c_runtime_assessment.get("call_trace_observed"),
+        "call_trace_observed_or_no_call_path",
+        (h2c_runtime_assessment.get("call_trace_observed") is True) or no_call_path_accepted,
+        {"call_trace_observed": h2c_runtime_assessment.get("call_trace_observed"), "no_call_path_accepted": no_call_path_accepted},
     )
 
     failed_checks = [c["name"] for c in checks if not c["ok"]]
@@ -203,6 +168,7 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": selected_ai_tier,
             "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
         },
         "budget_snapshot": {
             "ai_daily_budget_usd": h2c_budget_policy.get("ai_daily_budget_usd"),
@@ -231,6 +197,7 @@ def main() -> None:
             "runtime_soft_warn_only": overall_ok and len(warning_flags) > 0,
             "runtime_still_protected": h1_audit_summary.get("runtime_still_protected") is True,
             "ready_for_h3": overall_ok,
+            "no_call_path_accepted": no_call_path_accepted,
         },
         "audit_state": audit_state,
         "recommended_next_build_order": [

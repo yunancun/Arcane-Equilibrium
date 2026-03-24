@@ -13,15 +13,13 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List
 
 
-REQUEST_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_request_envelope_latest.json"
-)
-OUTPUT_LATEST_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_request_envelope_contract_latest.json"
-)
+REQUEST_PATH = get_thought_gate_runtime_dir() / "bybit_ai_request_envelope_latest.json"
+OUTPUT_LATEST_PATH = get_thought_gate_runtime_dir() / "bybit_ai_request_envelope_contract_latest.json"
 
 
 def read_json(path: Path) -> Dict[str, Any]:

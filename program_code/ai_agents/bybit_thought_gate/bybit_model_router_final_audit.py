@@ -4,9 +4,11 @@
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import read_json_if_exists, unique_list, mkcheck, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 POLICY_PATH = BASE / "bybit_model_router_policy_latest.json"
 DECISION_PATH = BASE / "bybit_model_router_decision_latest.json"
 RUNTIME_PATH = BASE / "bybit_model_router_runtime_latest.json"
@@ -25,6 +27,7 @@ def main() -> None:
 
     tg_summary = thought_gate_audit.get("audit_summary") or {}
     runtime_still_protected = tg_summary.get("runtime_still_protected") is True
+    runtime_summary = runtime.get("runtime_summary") or {}
 
     warning_flags = unique_list(
         (policy.get("warning_flags") or [])
@@ -50,6 +53,7 @@ def main() -> None:
         "runtime_still_protected": runtime_still_protected,
         "provider_target": request_summary.get("provider_target"),
         "model_name": request_summary.get("model_name"),
+        "no_call_path_accepted": runtime_summary.get("no_call_path_accepted") is True,
     }
 
     audit_state = (

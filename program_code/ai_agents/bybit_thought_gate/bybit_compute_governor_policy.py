@@ -1,23 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-H4-A / Compute governor policy
-中文：
-- 固化当前 AI 主链的计算治理约束
-- 明确 anti-abuse 原则：零重试、紧凑输出、禁止执行升级、禁止无界扩张
-English:
-- Snapshot compute-governor constraints for the current AI mainline
-- Define anti-abuse principles: zero retries, compact outputs, no execution escalation,
-  and no unbounded expansion
-"""
-
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 H1_AUDIT_PATH = BASE / "bybit_thought_gate_final_audit_latest.json"
 H2_RUNTIME_PATH = BASE / "bybit_query_budget_runtime_latest.json"
@@ -39,11 +30,13 @@ def main() -> None:
 
     h1_summary = h1.get("audit_summary") or {}
     h2_runtime_summary = h2.get("runtime_summary") or {}
+    h2_runtime_assessment = h2.get("runtime_assessment") or {}
     h3_summary = h3.get("audit_summary") or {}
 
     request_summary = req.get("request_summary") or {}
     request_payload = req.get("request_payload") or {}
     budget_context = req.get("budget_context") or {}
+    provider_runtime = req.get("provider_runtime") or {}
 
     transport_summary = inv.get("transport_summary") or {}
     attempt_result = inv.get("attempt_result") or {}
@@ -55,16 +48,27 @@ def main() -> None:
     model_name = request_summary.get("model_name") or request_payload.get("model_name")
     selected_ai_tier = request_summary.get("selected_ai_tier") or request_payload.get("selected_ai_tier")
     route_plan = request_summary.get("route_plan") or request_payload.get("route_plan")
+    should_call_ai = request_summary.get("should_call_ai")
 
-    max_output_tokens = budget_context.get("max_output_tokens")
-    max_retries = transport_summary.get("max_retries")
+    max_output_tokens = request_payload.get("max_output_tokens") or budget_context.get("max_output_tokens")
+    max_retries = provider_runtime.get("max_retries")
+    if max_retries is None:
+        max_retries = transport_summary.get("max_retries")
+
     latency_ms = attempt_result.get("latency_ms")
     within_timeout_hint = h2_runtime_summary.get("within_timeout_hint")
-
     reasoning_tokens = output_tokens_details.get("reasoning_tokens")
+
+    no_call_path_expected = (
+        should_call_ai is False
+        or route_plan == "route_skip"
+        or h2_runtime_assessment.get("no_call_path_accepted") is True
+        or h3_summary.get("no_call_path_accepted") is True
+    )
 
     warning_flags = unique_list(
         (h2.get("warning_flags") or [])
+        + (h3.get("warning_flags") or [])
         + (inv.get("warning_flags") or [])
     )
 
@@ -93,6 +97,8 @@ def main() -> None:
         "active_model_name": model_name,
         "selected_ai_tier": selected_ai_tier,
         "route_plan": route_plan,
+        "should_call_ai": should_call_ai,
+        "no_call_path_expected": no_call_path_expected,
         "hard_constraints": {
             "system_must_remain_read_only": True,
             "execution_authority_must_not_be_granted": True,
@@ -100,6 +106,7 @@ def main() -> None:
             "max_retries_must_equal_zero": True,
             "single_compact_request_path_only": True,
             "no_longform_escalation_in_mainline": True,
+            "allow_legal_no_call_terminal": True,
         },
         "soft_constraints": {
             "prefer_reasoning_tokens_zero_when_supported": True,
@@ -120,6 +127,9 @@ def main() -> None:
             "input_tokens": usage_summary.get("input_tokens"),
             "output_tokens": usage_summary.get("output_tokens"),
             "total_tokens": usage_summary.get("total_tokens"),
+            "provider_response_present": attempt_result.get("provider_response_present"),
+            "response_text_present": attempt_result.get("response_text_present"),
+            "parsed_json_present": attempt_result.get("parsed_json_present"),
         },
         "anti_abuse_dimensions": [
             "no_retry_storm",
@@ -159,6 +169,7 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": selected_ai_tier,
             "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
         },
         "governor_policy": governor_policy,
         "warning_flags": warning_flags,
@@ -171,8 +182,7 @@ def main() -> None:
             "inspect_compute_governor_policy_blockers"
         ),
         "operator_message": (
-            "H4-A compute governor policy snapshotted. 已明确零重试、紧凑输出、"
-            "只读保护和 anti-abuse 计算边界。"
+            "H4-A compute governor policy snapshotted. 已明确只读保护、anti-abuse 约束与 no-call 合法终态。"
             if allow_progress else
             "H4-A compute governor policy blocked."
         ),

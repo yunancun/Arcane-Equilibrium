@@ -1,30 +1,15 @@
-from bybit_mainline_cleanup_helpers import compute_usage_cost_usd, resolve_provider_pricing
-from bybit_h5_compat_helpers import h2_stage_closed, h4_stage_closed, h5_log_ok, h5_governance_audit_ok, extract_within_timeout_hint
-from bybit_h5_main_postprocess import patch_ai_cost_log_report
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""
-H5-A / AI cost log
-
-中文：
-- 记录当前主链最近一次 provider-native AI 调用的 token / latency / budget 视角信息
-- 注意：这里不伪造“真实美元成本”，只记录“治理上限”和可验证 usage
-- 若主链没有绑定官方价格表，则 actual_cost_usd 保持为空，并给 soft warning
-
-English:
-- Record token / latency / budget-facing information for the latest provider-native AI call
-- Do NOT invent actual dollar cost; only log governed ceilings and verifiable usage
-- If the mainline does not bind an official pricing table, keep actual_cost_usd null
-  and emit a soft warning
-"""
 
 import time
 from pathlib import Path
 
-from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
+from bybit_path_policy import get_thought_gate_runtime_dir
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
+from bybit_mainline_cleanup_helpers import compute_usage_cost_usd, resolve_provider_pricing
+
+BASE = get_thought_gate_runtime_dir()
 
 H1_AUDIT_PATH = BASE / "bybit_thought_gate_final_audit_latest.json"
 H2_RUNTIME_PATH = BASE / "bybit_query_budget_runtime_latest.json"
@@ -46,6 +31,7 @@ def main() -> None:
 
     h1_summary = h1.get("audit_summary") or {}
     h2_runtime_summary = h2.get("runtime_summary") or {}
+    h2_runtime_assessment = h2.get("runtime_assessment") or {}
     h4_summary = h4.get("audit_summary") or {}
 
     request_summary = req.get("request_summary") or {}
@@ -62,21 +48,25 @@ def main() -> None:
     model_name = request_summary.get("model_name") or request_payload.get("model_name")
     selected_ai_tier = request_summary.get("selected_ai_tier") or request_payload.get("selected_ai_tier")
     route_plan = request_summary.get("route_plan") or request_payload.get("route_plan")
+    should_call_ai = request_summary.get("should_call_ai")
 
     ai_daily_budget_usd = budget_context.get("ai_daily_budget_usd")
     ai_per_call_budget_usd = budget_context.get("ai_per_call_budget_usd")
-    max_output_tokens = budget_context.get("max_output_tokens")
+    max_output_tokens = request_payload.get("max_output_tokens") or budget_context.get("max_output_tokens")
 
     input_tokens = usage_summary.get("input_tokens")
     output_tokens = usage_summary.get("output_tokens")
     reasoning_tokens = output_tokens_details.get("reasoning_tokens")
     total_tokens = usage_summary.get("total_tokens")
     latency_ms = attempt_result.get("latency_ms")
-    h2_runtime = locals().get("h2_runtime") or {}
-    h2_observed_last_call = h2_runtime.get("observed_last_call") or {}
     within_timeout_hint = h2_runtime_summary.get("within_timeout_hint")
-    if within_timeout_hint is None:
-        within_timeout_hint = h2_observed_last_call.get("within_timeout_hint")
+
+    no_call_path_accepted = (
+        should_call_ai is False
+        or route_plan == "route_skip"
+        or h2_runtime_assessment.get("no_call_path_accepted") is True
+        or h4_summary.get("no_call_path_accepted") is True
+    )
 
     pricing = resolve_provider_pricing(
         provider_target=request_summary.get("provider_target"),
@@ -84,12 +74,15 @@ def main() -> None:
         usage_summary=usage_summary,
     )
     pricing_table_bound = bool(pricing.get("pricing_table_bound"))
-    actual_cost_usd = compute_usage_cost_usd(usage_summary, pricing) if pricing_table_bound else None
+    actual_cost_usd = (
+        compute_usage_cost_usd(usage_summary, pricing)
+        if pricing_table_bound and usage_summary
+        else None
+    )
     governed_cost_ceiling_usd = ai_per_call_budget_usd
 
     warning_flags = unique_list(
         (h2.get("warning_flags") or [])
-        + (inv.get("warning_flags") or [])
         + (["provider_pricing_table_not_bound_in_mainline"] if not pricing_table_bound else [])
     )
 
@@ -98,12 +91,6 @@ def main() -> None:
         blocking_reasons.append("h1_runtime_not_protected")
     if h4_summary.get("h4_stage_closed") is not True:
         blocking_reasons.append("h4_not_closed")
-    if attempt_result.get("invocation_attempted") is not True:
-        blocking_reasons.append("invocation_not_attempted")
-    if attempt_result.get("provider_response_present") is not True:
-        blocking_reasons.append("provider_response_missing")
-    if not isinstance(usage_summary, dict) or not usage_summary:
-        blocking_reasons.append("usage_summary_missing")
     if ai_per_call_budget_usd is None:
         blocking_reasons.append("ai_per_call_budget_missing")
     if ai_daily_budget_usd is None:
@@ -113,6 +100,14 @@ def main() -> None:
     if model_name is None:
         blocking_reasons.append("model_name_missing")
 
+    if not no_call_path_accepted:
+        if attempt_result.get("invocation_attempted") is not True:
+            blocking_reasons.append("invocation_not_attempted")
+        if attempt_result.get("provider_response_present") is not True:
+            blocking_reasons.append("provider_response_missing")
+        if not isinstance(usage_summary, dict) or not usage_summary:
+            blocking_reasons.append("usage_summary_missing")
+
     log_ok = not blocking_reasons
 
     cost_log = {
@@ -121,6 +116,8 @@ def main() -> None:
         "model_name": model_name,
         "selected_ai_tier": selected_ai_tier,
         "route_plan": route_plan,
+        "should_call_ai": should_call_ai,
+        "no_call_path_accepted": no_call_path_accepted,
         "usage_summary": {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -140,14 +137,17 @@ def main() -> None:
         },
         "cost_accounting_summary": {
             "actual_cost_usd": actual_cost_usd,
-            "actual_cost_available": False,
+            "actual_cost_available": actual_cost_usd is not None,
             "pricing_table_bound": pricing_table_bound,
-            "pricing_source": "not_bound_in_mainline",
-            "budget_mode": "governed_budget_cap_only",
+            "pricing_source": "mainline_bound_table" if pricing_table_bound else "not_bound_in_mainline",
+            "budget_mode": "governed_budget_cap_only" if no_call_path_accepted else "governed_budget_cap_plus_usage",
             "usage_shape_within_contract": (
-                isinstance(output_tokens, int)
-                and isinstance(max_output_tokens, int)
-                and output_tokens <= max_output_tokens
+                True if no_call_path_accepted else
+                (
+                    isinstance(output_tokens, int)
+                    and isinstance(max_output_tokens, int)
+                    and output_tokens <= max_output_tokens
+                )
             ),
         },
     }
@@ -159,43 +159,6 @@ def main() -> None:
         if log_ok else
         "ai_cost_log_blocked"
     )
-
-    # H5_SCHEMA_DRIFT_COMPAT_V7
-
-    _authoritative_h4_closed = h4_stage_closed()
-
-    _authoritative_within_timeout_hint = extract_within_timeout_hint()
-
-
-    if _authoritative_within_timeout_hint is not None:
-
-        within_timeout_hint = _authoritative_within_timeout_hint
-
-
-    warning_flags = list(dict.fromkeys(list(warning_flags or [])))
-
-    blocking_reasons = list(dict.fromkeys(list(blocking_reasons or [])))
-
-
-    blocking_reasons = [x for x in blocking_reasons if x != "h4_not_closed"]
-
-    if not _authoritative_h4_closed:
-
-        blocking_reasons.append("h4_not_closed")
-
-
-    if blocking_reasons:
-
-        log_state = "ai_cost_log_blocked"
-
-        log_ok = False
-
-    else:
-
-        log_state = "ai_cost_log_recorded_soft_warn" if warning_flags else "ai_cost_log_recorded"
-
-        log_ok = True
-
 
     report = {
         "log_type": "bybit_ai_cost_log",
@@ -216,6 +179,7 @@ def main() -> None:
             "model_name": model_name,
             "selected_ai_tier": selected_ai_tier,
             "route_plan": route_plan,
+            "should_call_ai": should_call_ai,
         },
         "cost_log": cost_log,
         "warning_flags": warning_flags,
@@ -228,7 +192,7 @@ def main() -> None:
             "inspect_h5a_cost_log_blockers"
         ),
         "operator_message": (
-            "H5-A AI cost log recorded. 已记录 usage / latency / budget ceiling，未伪造真实美元成本。"
+            "H5-A AI cost log recorded. 已记录 usage / latency / budget ceiling，且接受 legal no-call 终态。"
             if log_ok else
             "H5-A AI cost log blocked."
         ),

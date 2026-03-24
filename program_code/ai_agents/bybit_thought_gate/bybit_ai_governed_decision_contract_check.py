@@ -17,9 +17,24 @@ def main() -> None:
     checks = [
         make_check("report_exists", bool(obj), str(REPORT_PATH)),
         make_check("decision_type_expected", obj.get("decision_type") == "bybit_ai_governed_decision", obj.get("decision_type")),
-        make_check("decision_version_v1", obj.get("decision_version") == "v1", obj.get("decision_version")),
+        make_check("decision_version_supported", obj.get("decision_version") in {"v1", "v2"}, obj.get("decision_version")),
         make_check("stage_h1h", obj.get("stage") == "H1-H", obj.get("stage")),
         make_check("decision_ok_bool", isinstance(obj.get("decision_ok"), bool), obj.get("decision_ok")),
+        make_check(
+            "decision_state_known",
+            obj.get("decision_state") in {
+                "governed_observation_blocked",
+                "governed_observation_ready",
+                "governed_observation_ready_ai_called",
+                "governed_observation_ready_no_ai_call",
+            },
+            obj.get("decision_state"),
+        ),
+        make_check(
+            "terminal_mode_known",
+            obj.get("terminal_mode") in {None, "provider_json_ready", "legal_no_ai_call"},
+            obj.get("terminal_mode"),
+        ),
         make_check("governance_guards_dict", isinstance(guards, dict), type(guards).__name__),
         make_check("system_mode_read_only", guards.get("system_mode") == "read_only", guards.get("system_mode")),
         make_check("execution_state_disabled", guards.get("execution_state") == "disabled", guards.get("execution_state")),
@@ -32,7 +47,7 @@ def main() -> None:
 
     report = {
         "report_type": "bybit_ai_governed_decision_contract_check",
-        "report_version": "v1",
+        "report_version": "v2",
         "ts_ms": now_ms,
         "overall_ok": overall_ok,
         "failed_count": len(failed),

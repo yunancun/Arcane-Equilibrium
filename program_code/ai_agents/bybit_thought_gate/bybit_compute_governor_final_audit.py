@@ -4,9 +4,11 @@
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import mkcheck, read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 H1_AUDIT_PATH = BASE / "bybit_thought_gate_final_audit_latest.json"
 H2_AUDIT_PATH = BASE / "bybit_query_budget_final_audit_latest.json"
@@ -31,6 +33,7 @@ def main() -> None:
     h1_summary = h1.get("audit_summary") or {}
     h2_summary = h2.get("audit_summary") or {}
     h3_summary = h3.get("audit_summary") or {}
+    h4_runtime_summary = h4_runtime.get("runtime_summary") or {}
 
     checks = [
         mkcheck("h1_still_closed", h1_summary.get("h1_stage_closed") is True, h1_summary.get("h1_stage_closed")),
@@ -63,6 +66,7 @@ def main() -> None:
         "h4_stage_closed": overall_ok,
         "ready_for_h5": overall_ok,
         "runtime_still_protected": h1_summary.get("runtime_still_protected") is True,
+        "no_call_path_accepted": h4_runtime_summary.get("no_call_path_accepted") is True,
     }
 
     report = {

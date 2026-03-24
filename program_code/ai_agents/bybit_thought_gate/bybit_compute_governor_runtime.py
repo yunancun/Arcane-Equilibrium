@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-H4-C / Compute governor runtime
-中文：
-- 检查实际运行结果是否符合 H4 anti-abuse 目标
-- 特别关注：零重试、输出受控、reasoning_tokens 最小化、主链仍只读
-English:
-- Validate runtime behavior against H4 anti-abuse goals
-- Focus: zero retries, bounded outputs, minimized reasoning tokens, read-only protection
-"""
-
 import time
 from pathlib import Path
 
+from bybit_path_policy import get_thought_gate_runtime_dir
+
 from bybit_h_stage_common import mkcheck, read_json_if_exists, unique_list, write_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 GATE_PATH = BASE / "bybit_compute_governor_gate_latest.json"
 INV_PATH = BASE / "bybit_ai_invocation_attempt_latest.json"
@@ -42,25 +34,53 @@ def main() -> None:
 
     h1_summary = h1.get("audit_summary") or {}
     h2_runtime_summary = h2.get("runtime_summary") or {}
+    h2_runtime_assessment = h2.get("runtime_assessment") or {}
+    gate_context = gate.get("gate_context") or {}
 
     output_tokens = usage_summary.get("output_tokens")
-    max_output_tokens = ((inv.get("request_summary") or {}).get("max_output_tokens"))  # normally None in this schema
-    request_payload_tokens = None
-    # keep compatibility with current request envelope schema via latest request file if unavailable
-
     reasoning_tokens = output_tokens_details.get("reasoning_tokens")
+
+    no_call_path_accepted = (
+        gate_context.get("no_call_path_expected") is True
+        or h2_runtime_assessment.get("no_call_path_accepted") is True
+        or gate.get("request_summary", {}).get("should_call_ai") is False
+    )
 
     checks = [
         mkcheck("gate_ok", gate.get("gate_ok") is True, gate.get("gate_ok")),
-        mkcheck("invocation_attempted_true", attempt_result.get("invocation_attempted") is True, attempt_result.get("invocation_attempted")),
-        mkcheck("provider_response_present_true", attempt_result.get("provider_response_present") is True, attempt_result.get("provider_response_present")),
-        mkcheck("response_text_present_true", attempt_result.get("response_text_present") is True, attempt_result.get("response_text_present")),
-        mkcheck("parsed_json_present_true", attempt_result.get("parsed_json_present") is True, attempt_result.get("parsed_json_present")),
-        mkcheck("max_retries_zero", transport_summary.get("max_retries") == 0, transport_summary.get("max_retries")),
+        mkcheck(
+            "invocation_attempted_true_or_no_call_path",
+            (attempt_result.get("invocation_attempted") is True) or no_call_path_accepted,
+            {"invocation_attempted": attempt_result.get("invocation_attempted"), "no_call_path_accepted": no_call_path_accepted},
+        ),
+        mkcheck(
+            "provider_response_present_true_or_no_call_path",
+            (attempt_result.get("provider_response_present") is True) or no_call_path_accepted,
+            {"provider_response_present": attempt_result.get("provider_response_present"), "no_call_path_accepted": no_call_path_accepted},
+        ),
+        mkcheck(
+            "response_text_present_true_or_no_call_path",
+            (attempt_result.get("response_text_present") is True) or no_call_path_accepted,
+            {"response_text_present": attempt_result.get("response_text_present"), "no_call_path_accepted": no_call_path_accepted},
+        ),
+        mkcheck(
+            "parsed_json_present_true_or_no_call_path",
+            (attempt_result.get("parsed_json_present") is True) or no_call_path_accepted,
+            {"parsed_json_present": attempt_result.get("parsed_json_present"), "no_call_path_accepted": no_call_path_accepted},
+        ),
+        mkcheck("max_retries_zero", transport_summary.get("max_retries") == 0 or no_call_path_accepted, transport_summary.get("max_retries")),
         mkcheck("runtime_still_protected", h1_summary.get("runtime_still_protected") is True, h1_summary.get("runtime_still_protected")),
         mkcheck("reasoning_tokens_zero_or_null", reasoning_tokens in (0, None), reasoning_tokens),
-        mkcheck("output_tokens_int", isinstance(output_tokens, int), output_tokens),
-        mkcheck("latency_ms_int", isinstance(attempt_result.get("latency_ms"), int), attempt_result.get("latency_ms")),
+        mkcheck(
+            "output_tokens_int_or_null_on_no_call",
+            isinstance(output_tokens, int) or (output_tokens is None and no_call_path_accepted),
+            {"output_tokens": output_tokens, "no_call_path_accepted": no_call_path_accepted},
+        ),
+        mkcheck(
+            "latency_ms_int_or_null_on_no_call",
+            isinstance(attempt_result.get("latency_ms"), int) or (attempt_result.get("latency_ms") is None and no_call_path_accepted),
+            {"latency_ms": attempt_result.get("latency_ms"), "no_call_path_accepted": no_call_path_accepted},
+        ),
     ]
 
     runtime_ok = all(c["ok"] for c in checks)
@@ -107,6 +127,7 @@ def main() -> None:
             "total_tokens": usage_summary.get("total_tokens"),
             "response_text_present": attempt_result.get("response_text_present"),
             "parsed_json_present": attempt_result.get("parsed_json_present"),
+            "no_call_path_accepted": no_call_path_accepted,
         },
         "checks": checks,
         "failed_checks": failed_checks,

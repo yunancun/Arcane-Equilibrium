@@ -28,11 +28,13 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+
+from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any
 
 
 INPUT_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/"
+    str(get_thought_gate_runtime_dir()) + "/"
     "bybit_thought_gate_input_latest.json"
 )
 OUTPUT_DIR = INPUT_PATH.parent
