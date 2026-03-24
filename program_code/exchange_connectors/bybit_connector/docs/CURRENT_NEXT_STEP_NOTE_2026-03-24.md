@@ -303,3 +303,5 @@ Legacy flat-script paths remain compatibility wrappers during transition.
 > Canonical path note: local_models remaining trigger/trade-eligibility and support builders have moved to `program_code/risk_control/bybit_local_models_and_risk/`. Legacy flat files under `scripts/` are compatibility wrappers.
 
 > Canonical path note: misc batch2 demo_paper_or_adapter has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: misc batch4 other_misc has moved to `program_code/exchange_connectors/bybit_connector/misc_tools/`. Legacy flat files under `scripts/` are compatibility wrappers.
