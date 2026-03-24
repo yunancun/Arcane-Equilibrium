@@ -33,3 +33,14 @@ Before any future file relocation:
 5. only then commit
 
 If a relocation changes operator readability but breaks old expectations, operator readability preference wins only when compatibility is preserved or intentionally redesigned.
+
+---
+
+## Compatibility-wrapper migration rule / 兼容包装器迁移规则
+
+When a script family is migrated to its canonical old-srv-style directory:
+
+1. real implementation files move to the canonical directory;
+2. old flat entrypoints under `scripts/` stay as compatibility wrappers;
+3. docs must state canonical path clearly;
+4. migration should preserve operator habit, runtime path compatibility, and rollback simplicity.

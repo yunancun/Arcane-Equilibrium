@@ -555,3 +555,17 @@ business-event 侧开始接入：
 - **不是 AI 自主交易系统**
 - **不能把“空业务事件”误判成“系统损坏”**
 
+
+---
+
+### Canonical path note / 规范路径说明（readonly observer）
+
+Canonical implementation directory:
+
+`program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/`
+
+Backward-compatible wrappers remain under:
+
+`program_code/exchange_connectors/bybit_connector/scripts/`
+
+Operational habit and existing absolute-path usage remain compatible during the migration phase.

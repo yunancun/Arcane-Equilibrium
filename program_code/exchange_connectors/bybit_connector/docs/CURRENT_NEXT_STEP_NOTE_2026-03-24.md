@@ -38,3 +38,21 @@ instead of letting such cases look like stage failures.
 2. distinguish true bug vs expected empty-state blockage
 3. design explicit neutral-state evidence objects if needed
 4. only then repair schema / final-audit semantics
+
+---
+
+## 2026-03-24 migration update / 迁移更新
+
+Completed today:
+- `business_events` migrated to:
+  `program_code/market_data_processor/bybit_business_events/`
+- `readonly_observer_pipeline` migrated to:
+  `program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/`
+
+Both migrations currently preserve legacy `scripts/` entrypoints via compatibility wrappers.
+
+Recommended next batch:
+- `decision_lease_and_execution_authority`
+- then `thought_gate_and_ai_governance`
+
+Do not remove compatibility wrappers until later full-path stabilization and regression closure.

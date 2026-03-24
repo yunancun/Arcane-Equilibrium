@@ -546,3 +546,17 @@
 - 校验 replay 输出是否为非空、topic 是否齐全、fingerprint 是否唯一
 - 为后续 G2 / G3 提供基线
 
+
+---
+
+### Canonical path note / 规范路径说明（readonly_observer_pipeline）
+
+The real implementation files for the readonly observer pipeline now live under:
+
+`program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/`
+
+The legacy entrypoints under:
+
+`program_code/exchange_connectors/bybit_connector/scripts/`
+
+are compatibility wrappers kept for backward compatibility during migration.

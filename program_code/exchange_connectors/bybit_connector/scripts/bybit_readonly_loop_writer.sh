@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-while true; do
-  python3 /home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_readonly_status_writer.py || true
-  sleep 300
-done
+set -u
+TARGET="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/readonly_observer_pipeline/bybit_readonly_loop_writer.sh"
+exec bash "$TARGET" "$@"

@@ -344,3 +344,16 @@ This file is only a logical classification aid.
 - bybit_thought_gate_policy_contract_check.py
 - bybit_thought_gate_regression_summary.py
 
+
+---
+
+### Canonical path policy / 规范路径策略补充
+
+For `readonly_observer_pipeline`:
+
+- canonical real files:
+  `program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/`
+- compatibility wrappers:
+  `program_code/exchange_connectors/bybit_connector/scripts/`
+
+This mirrors the same migration policy already used for `business_events`.
