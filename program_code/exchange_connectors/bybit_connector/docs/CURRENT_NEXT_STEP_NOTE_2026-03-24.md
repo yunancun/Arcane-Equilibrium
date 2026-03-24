@@ -295,3 +295,5 @@ Legacy flat-script paths remain compatibility wrappers during transition.
 > Canonical path note: exchange_io batch3 private_api_checks has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
 
 > Canonical path note: exchange_io batch1 connectivity_and_ws has moved to `program_code/exchange_connectors/bybit_connector/io_and_persistence/`. Legacy flat files under `scripts/` are compatibility wrappers.
+
+> Canonical path note: local_models batch3 local_judgment has moved to `program_code/risk_control/bybit_local_models_and_risk/`. Legacy flat files under `scripts/` are compatibility wrappers.
