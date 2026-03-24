@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+I1-A / Decision lease schema
+中文：
+- 定义 decision lease 的正式 schema 与 guard snapshot 模板
+- 明确当前阶段仅允许 no-emit / no-authority 的 schema 建模
+- I1 的目标是完成结构设计，不是发放执行权限
+
+English:
+- Define the formal decision-lease schema and guard-snapshot template
+- Explicitly keep the current stage in no-emit / no-authority schema-only mode
+- The goal of I1 is structure design, not execution authorization
+"""
+
 import time
-from pathlib import Path
 
 from bybit_h_stage_common import read_json_if_exists, unique_list, write_report
+from bybit_path_policy import get_thought_gate_runtime_dir
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 H1_GOV_PATH = BASE / "bybit_ai_governed_decision_latest.json"
 H5_AUDIT_PATH = BASE / "bybit_ai_cost_governance_final_audit_latest.json"

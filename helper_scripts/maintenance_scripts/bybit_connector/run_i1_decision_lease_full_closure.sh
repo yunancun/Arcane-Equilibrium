@@ -1,31 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# Canonical I1 runner / I1 规范 runner
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$ROOT"
 
-./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+export PYTHONPATH="$ROOT/program_code/exchange_connectors/bybit_connector/misc_tools:$ROOT/program_code/exchange_connectors/bybit_connector/scripts:$ROOT/program_code/ai_agents/bybit_thought_gate:$ROOT/program_code/trade_executor/bybit_decision_lease"
 
-python3 scripts/bybit_decision_lease_schema.py
-python3 scripts/bybit_decision_lease_schema_contract_check.py
+BASE="$ROOT/docker_projects/trading_services/runtime/bybit/thought_gate"
 
-python3 scripts/bybit_decision_lease_final_audit.py
-python3 scripts/bybit_decision_lease_contract_check.py
-'
+python3 -m py_compile \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_schema.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_schema_contract_check.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_final_audit.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_contract_check.py
 
-./scripts/run_with_trading_env.sh python3 - <<'PY'
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_schema.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_schema_contract_check.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_final_audit.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_contract_check.py
+
+python3 - "$BASE" <<'PY'
 import json
+import sys
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(sys.argv[1])
 
 schema = json.loads((base / "bybit_decision_lease_schema_latest.json").read_text(encoding="utf-8"))
 audit = json.loads((base / "bybit_decision_lease_final_audit_latest.json").read_text(encoding="utf-8"))
 
-runtime = schema.get("schema_runtime_view") or {}
 summary = audit.get("audit_summary") or {}
 
-print("===== I1 FINAL CLEAN STATUS =====")
+print("===== I1 CANONICAL CLEAN STATUS =====")
 print("schema_state =", schema.get("schema_state"))
 print("audit_state =", audit.get("audit_state"))
 print("i1_stage_closed =", summary.get("i1_stage_closed"))

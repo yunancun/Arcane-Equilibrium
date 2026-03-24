@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+I1-B / Decision lease final audit
+中文：
+- 复核 I1 schema 阶段是否已闭环
+- 确认 H5 已闭合、I1 已 ready、且仍处于 no-emit / no-authority 保护态
+- 该审计通过不代表 live execution 被放开
+
+English:
+- Re-audit whether the I1 schema stage is now formally closed
+- Confirm H5 is closed, I1 is ready, and the system remains in no-emit / no-authority mode
+- Passing this audit does not mean live execution is enabled
+"""
+
 import time
-from pathlib import Path
 
 from bybit_h_stage_common import mkcheck, read_json_if_exists, unique_list, write_report
+from bybit_path_policy import get_thought_gate_runtime_dir
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = get_thought_gate_runtime_dir()
 
 SCHEMA_PATH = BASE / "bybit_decision_lease_schema_latest.json"
 H5_AUDIT_PATH = BASE / "bybit_ai_cost_governance_final_audit_latest.json"

@@ -10,89 +10,99 @@ The H chapter is now formally closed:
 - H4 compute_governor closed
 - H5 ai_cost_governance closed
 
-Current accepted mainline semantics:
+The I chapter is also now formally closed as a shadow-only decision-lease control plane:
+
+- I1 decision_lease schema closed
+- I2 shadow issue path closed
+- I3 consume path closed
+- I4 replay / revoke defense closed
+- I5 friction + adaptive ttl closed
+- I6 approval bridge closed
+- I7 execution authority aggregation closed
+- I8 manual approval packet closed
+- I9 operator ack shadow closed
+- I10 chapter summary / handoff / final audit closed
+
+---
+
+## Accepted mainline semantics
+
+Current accepted H no-call semantics:
 
 - `should_call_ai = false`
 - `route_plan = route_skip`
 - `no_call_path_accepted = true`
+
+Current accepted I semantics:
+
+- `i_chapter_closed = true`
+- `shadow_control_plane_closed = true`
+- `ready_for_future_live_design = true`
 
 Current safety boundaries remain unchanged:
 
 - `system_mode = read_only`
 - `execution_state = disabled`
 - `execution_authority = not_granted`
+- `decision_lease_emitted = false`
+- `live_operator_ack_enabled = false`
 
 ---
 
 ## Important interpretation
 
-This means the system now explicitly accepts the following case as a valid governed terminal path:
+This does **not** mean:
 
-- no provider-native AI call is needed
-- no provider JSON response is produced
-- no usage/cost tokens are observed
-- the pipeline still closes cleanly as a valid read-only no-call chain
+- live execution approved
+- execution authority granted
+- decision lease emitted
+- operator live ack enabled
+- strategy may trade live
 
-This is a semantic repair, not a live-trading permission change.
+It means only:
+
+- H now closes coherently under governed legal no-call semantics
+- I now closes coherently as a shadow-only decision-lease control plane
+- runtime remains protected
+- future live design may use this as a safe baseline
 
 ---
 
-## What is no longer true
+## What is no longer current
 
-Earlier notes in this file that described H1/H5 as not closed are no longer current.
+The older statement that I1 should not yet begin is no longer current.
 
-Those statements were true earlier in the investigation stage, but they have now been superseded by the canonical H1-H5 closure work completed on 2026-03-24.
+The earlier note that I10 still needed future redesign is also no longer current.
+
+Those statements belonged to the earlier repair phase and have now been superseded by the canonical H and I closure work completed on 2026-03-24.
 
 ---
 
 ## Current next step
 
-### Do not start I1 immediately.
-
-Before new I-stage business logic is expanded, the project should first complete:
-
-1. path governance baseline
-2. repo layout / documentation refresh
-3. shared path helper baseline
-4. first cleanup batch for hardcoded old-root paths in actively maintained canonical H-chain code
-
----
-
-## I10 note
-
-The current `run_i10_clean_recheck.sh` is still oriented around older `decision_lease_chapter_*` products.
-
-It should not be treated as the authoritative closure checker for the newly repaired H1-H5 canonical no-call mainline.
-
-A future follow-up should either:
-
-- redesign I10 recheck around the current canonical chapter chain, or
-- clearly document that it is an older decision-lease-oriented observer only
-
----
-
-## Immediate engineering direction
+The next engineering focus should move to structured J / K inventory and cleanup, not to re-debating whether H or I are closed.
 
 Recommended next order:
 
-1. finalize path governance docs
-2. freeze H1-H5 canonical runner baseline
-3. introduce shared path helper
-4. clean first batch of hardcoded old-root references
-5. only then resume I1 / future I-stage design
+1. freeze I canonical runner baseline
+2. freeze I chapter closure note
+3. inventory J skeletons / partial runners / audit artifacts
+4. inventory K skeletons / partial runners / audit artifacts
+5. classify J/K into:
+   - canonical usable baseline
+   - partial but salvageable
+   - mixed / duplicate / legacy residue
+6. only then decide the true next build chapter
 
 ---
 
 ## Operational caution
 
-H chapter closure does **not** mean live execution approval.
-
-The following remain false:
+Even after H and I closure, the following remain false:
 
 - live execution authority granted
 - decision lease emitted
 - operator live-ack enabled
 - strategy may trade live
 
-The system is still a governed read-only chain.
-
+The system is still a governed read-only / shadow-only baseline.

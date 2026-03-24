@@ -1,26 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# Canonical I2 runner / I2 规范 runner
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$ROOT"
 
-./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+export PYTHONPATH="$ROOT/program_code/exchange_connectors/bybit_connector/misc_tools:$ROOT/program_code/exchange_connectors/bybit_connector/scripts:$ROOT/program_code/ai_agents/bybit_thought_gate:$ROOT/program_code/trade_executor/bybit_decision_lease"
 
-python3 scripts/bybit_decision_lease_preflight.py
-python3 scripts/bybit_decision_lease_preflight_contract_check.py
+BASE="$ROOT/docker_projects/trading_services/runtime/bybit/thought_gate"
 
-python3 scripts/bybit_decision_lease_shadow_issue.py
-python3 scripts/bybit_decision_lease_shadow_issue_contract_check.py
+python3 -m py_compile \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_preflight.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_preflight_contract_check.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue_contract_check.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_audit.py \
+  program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_contract_check.py
 
-python3 scripts/bybit_decision_lease_shadow_audit.py
-python3 scripts/bybit_decision_lease_shadow_contract_check.py
-'
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_preflight.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_preflight_contract_check.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_issue_contract_check.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_audit.py
+python3 program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_shadow_contract_check.py
 
-./scripts/run_with_trading_env.sh python3 - <<'PY'
+python3 - "$BASE" <<'PY'
 import json
+import sys
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(sys.argv[1])
 
 preflight = json.loads((base / "bybit_decision_lease_preflight_latest.json").read_text(encoding="utf-8"))
 shadow = json.loads((base / "bybit_decision_lease_shadow_issue_latest.json").read_text(encoding="utf-8"))
@@ -29,7 +38,7 @@ audit = json.loads((base / "bybit_decision_lease_shadow_audit_latest.json").read
 candidate = shadow.get("shadow_candidate") or {}
 summary = audit.get("audit_summary") or {}
 
-print("===== I2 FINAL CLEAN STATUS =====")
+print("===== I2 CANONICAL CLEAN STATUS =====")
 print("preflight_state =", preflight.get("preflight_state"))
 print("shadow_issue_state =", shadow.get("shadow_issue_state"))
 print("audit_state =", audit.get("audit_state"))
