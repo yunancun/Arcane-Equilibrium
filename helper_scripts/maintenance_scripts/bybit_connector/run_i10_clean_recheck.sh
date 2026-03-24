@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "===== LEGACY I10 NOTICE ====="
+echo "This runner is a legacy decision_lease-oriented observer."
+echo "It is NOT the authoritative checker for the repaired canonical H1-H5 chain."
+echo "For current canonical H-chain status, use:"
+echo "  helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_h_chain_recheck.sh"
+echo ""
+
 BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 python3 - <<'PY'
