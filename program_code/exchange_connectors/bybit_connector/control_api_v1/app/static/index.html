@@ -149,6 +149,66 @@
       </details>
     </section>
 
+    <!-- ── Paper Trading / 纸上交易 ──────────────────────────────────────── -->
+    <section class="card paper-trading-section">
+      <div class="card-header-row">
+        <div>
+          <h2>纸上交易 / Paper Trading</h2>
+          <p class="subtle">模拟交易系统 — 不会发送真实订单 / Simulated trading — no real orders are placed</p>
+        </div>
+        <div id="paperSessionBadge" class="status-chip neutral">未启动 / Inactive</div>
+      </div>
+      <div class="paper-warning-banner">⚠ 所有数据均为模拟，不影响真实账户 / All data is simulated, no impact on real account</div>
+      <div class="paper-session-controls" id="paperSessionControls">
+        <button class="paper-btn paper-start-btn" data-paper-action="start">开始交易 / Start</button>
+        <button class="paper-btn paper-pause-btn" data-paper-action="pause" disabled>暂停 / Pause</button>
+        <button class="paper-btn paper-resume-btn" data-paper-action="resume" disabled>恢复 / Resume</button>
+        <button class="paper-btn paper-stop-btn" data-paper-action="stop" disabled>结束 / Stop</button>
+      </div>
+      <div class="paper-market-feed-section" id="paperMarketFeedSection">
+        <h3>实时行情 / Market Feed</h3>
+        <div class="paper-market-feed-controls">
+          <button class="paper-btn paper-feed-start-btn" id="paperFeedStartBtn" data-feed-action="start">启动行情流 / Start Feed</button>
+          <button class="paper-btn paper-feed-stop-btn" id="paperFeedStopBtn" data-feed-action="stop" disabled>停止行情流 / Stop Feed</button>
+          <div id="paperFeedStatusBadge" class="status-chip neutral">未连接 / Disconnected</div>
+        </div>
+        <div class="paper-market-feed-info" id="paperMarketFeedInfo">
+          <div class="paper-feed-prices" id="paperFeedPrices">等待行情数据 / Waiting for market data...</div>
+          <div class="paper-feed-stats" id="paperFeedStats"></div>
+        </div>
+      </div>
+      <div class="paper-content-grid" id="paperContentGrid">
+        <div class="paper-pnl-card" id="paperPnlCard">
+          <h3>Paper PnL</h3>
+          <div class="paper-pnl-items" id="paperPnlItems">等待数据 / Waiting...</div>
+        </div>
+        <div class="paper-positions-card" id="paperPositionsCard">
+          <h3>持仓 / Positions</h3>
+          <div id="paperPositionsList">无持仓 / No positions</div>
+        </div>
+      </div>
+      <div class="paper-orders-section">
+        <h3>订单 / Orders</h3>
+        <div class="paper-order-form" id="paperOrderForm">
+          <input id="paperSymbol" type="text" placeholder="Symbol (e.g. BTCUSDT)" value="BTCUSDT" />
+          <select id="paperSide"><option value="Buy">Buy</option><option value="Sell">Sell</option></select>
+          <select id="paperOrderType"><option value="market">Market</option><option value="limit">Limit</option></select>
+          <input id="paperQty" type="number" placeholder="Qty" step="0.001" value="0.01" />
+          <input id="paperPrice" type="number" placeholder="Price (limit)" step="0.01" />
+          <button class="paper-btn" id="paperSubmitOrder">提交 / Submit</button>
+        </div>
+        <div id="paperOrdersList">无订单 / No orders</div>
+      </div>
+      <details class="raw-toggle">
+        <summary>成交历史 / Fill History</summary>
+        <div id="paperFillsList">无成交 / No fills</div>
+      </details>
+      <details class="raw-toggle">
+        <summary>审计记录 / Audit Trail</summary>
+        <pre id="paperAuditTrail">无记录 / No records</pre>
+      </details>
+    </section>
+
     <section class="card">
       <div class="card-header-row">
         <div>

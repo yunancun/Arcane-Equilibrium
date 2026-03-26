@@ -455,3 +455,189 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
 .badge-success { background: var(--good); color: #fff; }
 .badge-danger { background: var(--bad); color: #fff; }
 .badge-muted { background: var(--neutral); color: var(--text); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Paper Trading Section / 纸上交易区块样式
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.paper-trading-section {
+  border-left: 4px solid #3b82f6;
+}
+
+.paper-warning-banner {
+  background: #1e3a5f;
+  color: #93c5fd;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.paper-session-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.paper-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+}
+.paper-btn:hover:not(:disabled) { background: #334155; }
+.paper-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.paper-start-btn { border-color: #3b82f6; color: #93c5fd; }
+.paper-stop-btn { border-color: #ef4444; color: #fca5a5; }
+.paper-pause-btn { border-color: #f59e0b; color: #fcd34d; }
+.paper-resume-btn { border-color: #10b981; color: #6ee7b7; }
+
+.paper-content-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+@media (max-width: 700px) {
+  .paper-content-grid { grid-template-columns: 1fr; }
+}
+
+.paper-pnl-card, .paper-positions-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.paper-pnl-card h3, .paper-positions-card h3 {
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.paper-pnl-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.85rem;
+}
+.paper-pnl-net {
+  font-weight: 700;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.paper-positive { color: #10b981; }
+.paper-negative { color: #ef4444; }
+
+.paper-position-row, .paper-order-row, .paper-fill-row {
+  display: flex;
+  gap: 12px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.paper-pos-symbol { font-weight: 600; }
+.paper-pos-side { min-width: 32px; }
+
+.paper-order-state {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--neutral);
+}
+.paper-working .paper-order-state { background: #3b82f6; color: #fff; }
+.paper-filled .paper-order-state { background: var(--good); color: #fff; }
+.paper-canceled .paper-order-state { background: var(--muted); color: var(--text); }
+
+/* ── Market Feed Section / 行情流区块 ── */
+.paper-market-feed-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #1e40af;
+  border-radius: 8px;
+  background: rgba(30, 64, 175, 0.08);
+}
+.paper-market-feed-section h3 {
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+  color: #60a5fa;
+}
+.paper-market-feed-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.paper-feed-start-btn { background: #1d4ed8; color: #fff; }
+.paper-feed-start-btn:hover { background: #2563eb; }
+.paper-feed-stop-btn { background: #7f1d1d; color: #fca5a5; }
+.paper-feed-stop-btn:hover { background: #991b1b; }
+.paper-market-feed-info {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.paper-feed-prices {
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.paper-feed-price-item {
+  display: inline-block;
+  margin-right: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.1);
+  font-family: monospace;
+}
+.paper-feed-price-item .price-symbol { color: var(--muted); font-size: 0.8rem; }
+.paper-feed-price-item .price-value { color: #fff; font-weight: 600; font-size: 0.95rem; }
+.paper-feed-stats {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.paper-attention-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.paper-attention-dormant { background: #374151; color: #9ca3af; }
+.paper-attention-low { background: #1e3a5f; color: #93c5fd; }
+.paper-attention-medium { background: #422006; color: #fbbf24; }
+.paper-attention-high { background: #7f1d1d; color: #fca5a5; }
+.paper-attention-critical { background: #dc2626; color: #fff; }
+
+.paper-orders-section {
+  margin-bottom: 14px;
+}
+.paper-orders-section h3 {
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.paper-order-form {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.paper-order-form input, .paper-order-form select {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.82rem;
+}
+.paper-order-form input[type="text"] { width: 120px; }
+.paper-order-form input[type="number"] { width: 90px; }

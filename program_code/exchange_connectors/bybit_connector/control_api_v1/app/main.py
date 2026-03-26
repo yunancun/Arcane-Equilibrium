@@ -151,3 +151,7 @@ base.get_latest_snapshot = runtime_aware_get_latest_snapshot
 base.envelope_response = runtime_aware_envelope_response
 
 app = base.app
+
+# ── Paper Trading Router / 纸上交易路由注册 ──
+from .paper_trading_routes import paper_router  # noqa: E402
+app.include_router(paper_router)

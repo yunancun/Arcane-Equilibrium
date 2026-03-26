@@ -135,6 +135,9 @@ class Settings:
                         # ── L 章学习系统权限 / L-chapter learning system scopes ──
                         "learning:write",   # 录入观察/经验/假设/实验 / Record observations/lessons/hypotheses/experiments
                         "learning:manage",  # 审批假设/实验、完成实验 / Approve hypotheses/experiments, complete experiments
+                        # ── 纸上交易权限 / Paper trading scopes ──
+                        "paper:read",       # 查看纸上交易数据 / View paper trading data
+                        "paper:trade",      # 提交/取消纸上订单 / Submit/cancel paper orders
                     ]
                 ),
             )
@@ -4057,6 +4060,12 @@ def root_redirect() -> FileResponse:
 @app.get("/gui", include_in_schema=False)
 def gui_index() -> FileResponse:
     return FileResponse(static_dir / "index.html")
+
+
+@app.get("/console", include_in_schema=False)
+def console_index() -> FileResponse:
+    """Unified console: Trading Dashboard + OpenClaw + AI Cost sidebar"""
+    return FileResponse(static_dir / "console.html")
 
 
 @app.get(f"{settings.api_prefix}/system/overview", response_model=ResponseEnvelope[OverviewData])
