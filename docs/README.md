@@ -30,7 +30,7 @@ docs/
 │   ├── chapters_h-i/                  ← H-I 章节：本地判断内核 / AI 治理 / Decision Lease
 │   ├── chapters_j-k/                  ← J-K 章节：Transition Engine / Paper Gate / GitHub 迁移
 │   ├── control_api_gui/               ← Control API + GUI Operator Console 开发
-│   └── learning/                      ← L 章节：学习 / 自我感知 / Net PnL（待填充）
+│   └── learning/                      ← L 章节：自动学习管线 / 安全加固
 │
 ├── handoffs/                          ← 阶段交接文档（按日期+主题分文件夹）
 │   └── YYYY-MM-DD_主题名/
@@ -184,6 +184,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-25--新对话工作方式与带入文件清单.txt` | 新对话工作方式与带入文件清单 |
 | `2026-03-25--新对话启动prompt.txt` | 新对话启动 Prompt |
 | `2026-03-26--api_gui_全量工程报告.md` | API + GUI 全量工程报告 |
+
+### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
+
+| 文件 | 内容 |
+|------|------|
+| `2026-03-26--L章_自动学习管线与安全加固_完整工程日志.md` | L 章自动学习管线 + 安全加固全量工程日志（含审核包设计、96 测试、8 项安全修复） |
 
 ### handoffs/ — 阶段交接文档
 
