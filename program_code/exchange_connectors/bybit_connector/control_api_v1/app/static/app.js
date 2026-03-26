@@ -40,26 +40,26 @@ const CRITICAL_ACTIONS = {
   "set-demo-mode": {
     title: "切换到 Demo Reserved",
     subtitle: "Set global execution mode to demo_reserved",
-    risk: "这一步只是把系统从"完全不走 demo 流程"，改成"允许继续做 demo 相关判断"。它不是下单，不是开启 live，也不是马上获得执行权。",
-    consequence: "点完后，系统只会进入"可以继续做 demo 检查"的状态。你之后仍然还要 validate、arm，甚至 future enable；所以这一步只是打开下一道门，不是直接放权。"
+    risk: "这一步只是把系统从「完全不走 demo 流程」改成「允许继续做 demo 相关判断」。它不是下单，不是开启 live，也不是马上获得执行权。",
+    consequence: "点完后，系统只会进入「可以继续做 demo 检查」的状态。你之后仍然还要 validate、arm，甚至 future enable；所以这一步只是打开下一道门，不是直接放权。"
   },
   "enable-spot": {
     title: "开启 Spot / 现货产品配置",
     subtitle: "Enable spot family in shadow mode",
-    risk: "这一步只影响现货产品族。它会让 spot / 现货从"关闭/仅展示"进入 shadow 控制状态。shadow 的意思是：用于观察、验证、看控制结果，不是实际成交。",
+    risk: "这一步只影响现货产品族。它会让 spot/现货从「关闭/仅展示」进入 shadow 控制状态。shadow 的意思是：用于观察、验证、看控制结果，不是实际成交。",
     consequence: "点完后，只会改变现货这一类产品的控制展示和 gate 结果，不会影响其它产品族，也不会直接让账户获得真实现货下单权限。"
   },
   validate: {
     title: "验证 Demo 前提",
     subtitle: "Validate demo prerequisites and gates",
     risk: "这一步只是做检查。它会重新判断系统现在是否满足 demo 的前置条件。它不会切模式，也不会推进 demo 主状态。",
-    consequence: "点完后，你主要会看到 gate 结果变了，比如"可以继续"还是"还不满足条件"。它不会直接提高执行权限。"
+    consequence: "点完后，你主要会看到 gate 结果变了，比如「可以继续」还是「还不满足条件」。它不会直接提高执行权限。"
   },
   "arm-demo": {
     title: "执行 Demo Arm",
     subtitle: "Move demo state to armed_but_closed",
-    risk: "这是 demo 流程里更关键的一步。它表示系统已经通过前置检查，进入"已准备好下一步，但仍然封闭"的状态。",
-    consequence: "点完后，demo 会更接近后续 enable，但仍然不能直接执行。你可以把它理解成"已经准备好了，但保险还没真正打开"。"
+    risk: "这是 demo 流程里更关键的一步。它表示系统已经通过前置检查，进入「已准备好下一步，但仍然封闭」的状态。",
+    consequence: "点完后，demo 会更接近后续 enable，但仍然不能直接执行。你可以把它理解成「已经准备好了，但保险还没真正打开」。"
   },
   bundle: {
     title: "执行安全复核打包",
@@ -737,8 +737,8 @@ function ensureGuiEnhancements() {
       <details class="raw-toggle">
         <summary>${zhEnPrimary("关键概念提示（按需展开）", "Key Concept Hints")}</summary>
         <div class="glossary-wrap" style="padding:16px;">
-          ${annotateGlossary("事实", "Facts", "先看交易所、账户、runtime 实际返回了什么。事实是"真实情况"，不是你点按钮点出来的权限。", "Facts are the actual returned conditions, not permissions granted by a button.")}
-          ${annotateGlossary("权限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。这些是"允许系统往下判断"，不是"马上能执行"。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}
+          ${annotateGlossary("事实", "Facts", "先看交易所、账户、runtime 实际返回了什么。事实是「真实情况」，不是你点按钮点出来的权限。", "Facts are the actual returned conditions, not permissions granted by a button.")}
+          ${annotateGlossary("权限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。这些是「允许系统往下判断」，不是「马上能执行」。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}
           ${annotateGlossary("状态推进", "State Progress", "最后看 demo validate、demo arm 这类步骤。它们表示系统流程往前走了，但仍可能保持封闭。", "State progress means the workflow moved forward, but it can still remain closed.")}
           ${annotateGlossary("最重要的一句", "Most Important Rule", "看得见 ≠ 被允许；被允许继续判断 ≠ 能执行；demo ≠ live。", "Visible is not allowed; allowed to continue is not executable; demo is not live.")}
         </div>
