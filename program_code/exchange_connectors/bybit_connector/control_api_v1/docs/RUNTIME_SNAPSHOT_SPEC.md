@@ -12,7 +12,7 @@ This document defines the normalized JSON snapshot contract consumed by:
 - `runtime_snapshot_ts_ms`: integer
 - `rest_private_connection_state`: enum(`ready`,`degraded`,`down`,`unknown`)
 - `ws_private_connection_state`: enum(`ready`,`degraded`,`down`,`unknown`)
-- `runtime_connection_state`: enum(`ready`,`degraded`,`down`,`unknown`)
+- `runtime_connection_state`: enum(`healthy`,`degraded`,`down`,`unknown`)
 - `account_fact_completeness_state`: enum(`complete`,`partial`,`missing`,`unknown`)
 - `source_snapshot_completeness_state`: enum(`complete`,`partial`,`missing`,`unknown`)
 - `global_runtime_facts`: object

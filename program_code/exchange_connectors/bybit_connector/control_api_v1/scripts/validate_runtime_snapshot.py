@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 ALLOWED_CONNECTION_STATES = {"ready", "degraded", "down", "unknown"}
+ALLOWED_RUNTIME_CONNECTION_STATES = {"healthy", "degraded", "down", "unknown"}
 ALLOWED_COMPLETENESS_STATES = {"complete", "partial", "missing", "unknown"}
 ALLOWED_SYSTEM_MODE_FACTS = {"observe_only", "shadow_only", "design_only", "demo_reserved", "live_reserved"}
 ALLOWED_EXECUTION_STATE_FACTS = {"execution_disabled", "demo_blocked", "demo_enabled", "live_blocked", "unknown"}
@@ -78,7 +79,7 @@ def main() -> None:
 
     validate_state(payload["rest_private_connection_state"], ALLOWED_CONNECTION_STATES, "rest_private_connection_state")
     validate_state(payload["ws_private_connection_state"], ALLOWED_CONNECTION_STATES, "ws_private_connection_state")
-    validate_state(payload["runtime_connection_state"], ALLOWED_CONNECTION_STATES, "runtime_connection_state")
+    validate_state(payload["runtime_connection_state"], ALLOWED_RUNTIME_CONNECTION_STATES, "runtime_connection_state")
     validate_state(payload["account_fact_completeness_state"], ALLOWED_COMPLETENESS_STATES, "account_fact_completeness_state")
     validate_state(payload["source_snapshot_completeness_state"], ALLOWED_COMPLETENESS_STATES, "source_snapshot_completeness_state")
 
