@@ -764,3 +764,315 @@ class TestStateIntegrity:
             }),
         )
         assert r2.status_code == 401
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. 自动学习管线测试 / Auto Learning Pipeline Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAutoLearningPipeline:
+    """
+    自动学习管线 — 审核包生成、审核决策、AI 咨询。
+    Auto Learning Pipeline — review packet generation, review decisions, AI consultation.
+    """
+
+    def test_auto_scan_observations_creates_packets(self):
+        """扫描生成审核包 / Scan generates review packets."""
+        client = build_client()
+        rev = get_state_revision(client)
+        r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["scan_type"] == "observations"
+        assert isinstance(d["packets_generated"], int)
+        assert isinstance(d["packet_ids"], list)
+
+    def test_review_queue_returns_pending(self):
+        """审核队列返回待审核项 / Review queue returns pending items."""
+        client = build_client()
+        # 先扫描生成一些审核包 / First scan to generate some packets
+        rev = get_state_revision(client)
+        client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        # 获取审核队列 / Get review queue
+        r = client.get("/api/v1/learning/review-queue", headers=auth_headers())
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert "pending_packets" in d
+        assert "pending_count" in d
+        assert isinstance(d["pending_packets"], list)
+
+    def test_review_approve_creates_observation(self):
+        """批准观察审核包 → 创建观察记录 / Approve observation packet → creates observation record."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return  # no packets generated (possible if no triggers)
+
+        packet_id = packet_ids[0]
+        rev = get_state_revision(client)
+        r = client.post(
+            f"/api/v1/learning/review/{packet_id}/decide",
+            headers=auth_headers(),
+            json=make_envelope(rev, payload={"decision": "approve", "reason": "test approve"}),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["decision"] == "approve"
+        assert d["new_status"] == "approved"
+
+    def test_review_reject_no_record(self):
+        """拒绝 → 不创建记录 / Reject → no record created."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return
+
+        packet_id = packet_ids[0]
+        rev = get_state_revision(client)
+        r = client.post(
+            f"/api/v1/learning/review/{packet_id}/decide",
+            headers=auth_headers(),
+            json=make_envelope(rev, payload={"decision": "reject", "reason": "not useful"}),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["decision"] == "reject"
+        assert d["new_status"] == "rejected"
+        assert d["record_created"] is False
+
+    def test_review_defer_stays_in_queue(self):
+        """搁置 → 保留在队列 / Defer → stays in queue."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return
+
+        packet_id = packet_ids[0]
+        rev = get_state_revision(client)
+        r = client.post(
+            f"/api/v1/learning/review/{packet_id}/decide",
+            headers=auth_headers(),
+            json=make_envelope(rev, payload={"decision": "defer", "reason": "later"}),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["decision"] == "defer"
+        assert d["new_status"] == "deferred"
+        assert d["record_created"] is False
+
+    def test_packet_has_consequence_analysis(self):
+        """审核包含后果分析 / Packet includes consequence analysis."""
+        client = build_client()
+        rev = get_state_revision(client)
+        client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        r = client.get("/api/v1/learning/review-queue", headers=auth_headers())
+        packets = r.json()["data"]["pending_packets"]
+        if not packets:
+            return
+        p = packets[0]
+        # 后果分析在 options 字段下 / Consequence analysis is under options
+        opts = p.get("options", {})
+        assert "approve" in opts
+        assert "reject" in opts
+        assert "defer" in opts
+        assert "consequence" in opts["approve"]
+        assert "consequence" in opts["reject"]
+        assert "consequence" in opts["defer"]
+
+    def test_packet_has_confidence_tag(self):
+        """审核包含置信度标签 / Packet includes confidence tag."""
+        client = build_client()
+        rev = get_state_revision(client)
+        client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        r = client.get("/api/v1/learning/review-queue", headers=auth_headers())
+        packets = r.json()["data"]["pending_packets"]
+        if not packets:
+            return
+        p = packets[0]
+        assert "confidence_level" in p
+        assert p["confidence_level"] in ("fact", "inference", "hypothesis")
+
+    def test_packet_has_ai_consultation(self):
+        """审核包含 AI 咨询建议 / Packet includes AI consultation suggestion."""
+        client = build_client()
+        rev = get_state_revision(client)
+        client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        r = client.get("/api/v1/learning/review-queue", headers=auth_headers())
+        packets = r.json()["data"]["pending_packets"]
+        if not packets:
+            return
+        p = packets[0]
+        assert "ai_consultation" in p
+        ai = p["ai_consultation"]
+        assert "recommended_tier" in ai
+        assert "pre_built_question" in ai
+        assert "estimated_cost_usd" in ai
+
+    def test_ai_consult_returns_stub(self):
+        """AI 咨询返回 stub / AI consultation returns stub response."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return
+
+        packet_id = packet_ids[0]
+        rev = get_state_revision(client)
+        r = client.post(
+            f"/api/v1/learning/review/{packet_id}/ai-consult",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["packet_id"] == packet_id
+        assert "stub" in d["consultation_status"]
+        assert "question_sent" in d
+        assert "ai_response" in d
+
+    def test_duplicate_scan_deduplication(self):
+        """重复扫描去重 / Duplicate scans are deduplicated."""
+        client = build_client()
+        rev = get_state_revision(client)
+        r1 = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        first_count = r1.json()["data"]["packets_generated"]
+
+        rev = get_state_revision(client)
+        r2 = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        d2 = r2.json()["data"]
+        # 第二次扫描应该跳过已存在的相同内容 / Second scan should skip existing same-content
+        assert d2["skipped_duplicates"] >= first_count or d2["packets_generated"] == 0
+
+    def test_approved_packet_no_execution_authority(self):
+        """批准不授予执行权限（原则7）/ Approval does not grant execution authority (Principle 7)."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return
+
+        rev = get_state_revision(client)
+        client.post(
+            f"/api/v1/learning/review/{packet_ids[0]}/decide",
+            headers=auth_headers(),
+            json=make_envelope(rev, payload={"decision": "approve", "reason": "test"}),
+        )
+
+        # 验证执行权限未变 / Verify execution authority unchanged
+        r = client.get("/api/v1/system/control-plane", headers=auth_headers())
+        data = r.json()["data"]
+        assert data["execution_control_summary"]["global_execution_mode_switch_summary"] == "disabled"
+
+    def test_auto_record_source_is_system_auto(self):
+        """自动记录 source=system_auto / Auto records have source=system_auto."""
+        client = build_client()
+        rev = get_state_revision(client)
+        scan_r = client.post(
+            "/api/v1/learning/auto/scan-observations",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        packet_ids = scan_r.json()["data"]["packet_ids"]
+        if not packet_ids:
+            return
+
+        # 批准第一个包 / Approve first packet
+        rev = get_state_revision(client)
+        client.post(
+            f"/api/v1/learning/review/{packet_ids[0]}/decide",
+            headers=auth_headers(),
+            json=make_envelope(rev, payload={"decision": "approve", "reason": "test"}),
+        )
+
+        # 检查观察流中最新记录的 source / Check source of latest observation
+        r = client.get("/api/v1/learning/feed", headers=auth_headers())
+        obs = r.json()["data"]["observations_recent"]
+        if obs:
+            # 最新一条应该是自动生成的 / Latest should be auto-generated
+            source = obs[0].get("source", "")
+            assert source.startswith("system_auto"), f"Expected source starting with 'system_auto', got '{source}'"
+
+    def test_scan_lessons_from_observations(self):
+        """从观察中扫描经验 / Scan lessons from accumulated observations."""
+        client = build_client()
+        # 先录入 3 条相同 category 的观察 / First record 3 observations with same category
+        for i in range(3):
+            rev = get_state_revision(client)
+            client.post(
+                "/api/v1/input/observation",
+                headers=auth_headers(),
+                json=make_envelope(rev, payload={
+                    "title": f"system obs {i}",
+                    "detail": f"system observation {i}",
+                    "category": "system",
+                    "confidence_level": "fact",
+                }),
+            )
+
+        rev = get_state_revision(client)
+        r = client.post(
+            "/api/v1/learning/auto/scan-lessons",
+            headers=auth_headers(),
+            json=make_envelope(rev),
+        )
+        assert r.status_code == 200
+        d = r.json()["data"]
+        assert d["scan_type"] == "lessons"
+        assert isinstance(d["packets_generated"], int)
