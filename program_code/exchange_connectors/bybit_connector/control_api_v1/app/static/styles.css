@@ -122,10 +122,15 @@ button:active {
   transform: translateY(0);
 }
 
-.summary-grid {
+.summary-grid,
+.action-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.action-summary-grid {
+  margin-bottom: 12px;
 }
 
 .summary-item,
@@ -145,11 +150,34 @@ button:active {
   letter-spacing: 0.03em;
 }
 
-.summary-item strong {
+.summary-item strong,
+.action-result-value {
   display: block;
   font-size: 14px;
   line-height: 1.35;
   word-break: break-word;
+}
+
+.action-result-value.good {
+  color: #86efac;
+}
+
+.action-result-value.warn {
+  color: #fdba74;
+}
+
+.action-result-value.bad {
+  color: #fca5a5;
+}
+
+.action-result-value.neutral {
+  color: #e5e7eb;
+}
+
+.action-hint {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .kv-grid {
@@ -234,6 +262,28 @@ th {
   text-align: center;
 }
 
+.raw-toggle {
+  margin-top: 12px;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.raw-toggle summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  color: var(--text);
+  list-style: none;
+}
+
+.raw-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.raw-toggle[open] summary {
+  border-bottom: 1px solid #1e293b;
+}
+
 pre {
   margin: 0;
   white-space: pre-wrap;
@@ -243,8 +293,14 @@ pre {
   padding: 14px;
   border: 1px solid #1e293b;
   min-height: 180px;
-  max-height: 520px;
+  max-height: 420px;
   overflow: auto;
+}
+
+.raw-toggle pre {
+  border: none;
+  border-radius: 0 0 12px 12px;
+  max-height: 340px;
 }
 
 .actions {
@@ -255,7 +311,8 @@ pre {
 }
 
 @media (max-width: 1180px) {
-  .summary-grid {
+  .summary-grid,
+  .action-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -279,7 +336,8 @@ pre {
     flex-direction: column;
   }
 
-  .summary-grid {
+  .summary-grid,
+  .action-summary-grid {
     grid-template-columns: 1fr;
   }
 }

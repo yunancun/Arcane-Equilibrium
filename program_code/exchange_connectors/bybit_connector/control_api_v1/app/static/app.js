@@ -25,16 +25,67 @@ function setRuntimeModeBadge(text, variant = "neutral") {
 
 function variantForState(value) {
   const normalized = String(value || "").toLowerCase();
-  if (["passed", "healthy", "ready", "fresh", "complete", "shadow_only", "shadow_control_ready"].includes(normalized)) {
+  if (["passed", "healthy", "ready", "fresh", "complete", "shadow_only", "shadow_control_ready", "success", "true"].includes(normalized)) {
     return "good";
   }
-  if (["blocked", "disabled", "down", "missing", "failed", "unavailable", "unknown"].includes(normalized)) {
+  if (["blocked", "disabled", "down", "missing", "failed", "unavailable", "unknown", "false"].includes(normalized)) {
     return "bad";
   }
   if (["partial", "degraded", "demo_reserved", "demo_blocked", "armed_but_closed"].includes(normalized)) {
     return "warn";
   }
   return "neutral";
+}
+
+function safeText(value) {
+  return value === undefined || value === null ? "-" : String(value);
+}
+
+function setActionSummary(name, result, revision, auditRef, hint, raw) {
+  document.getElementById("actionSummaryName").textContent = safeText(name);
+  document.getElementById("actionSummaryResult").textContent = safeText(result);
+  document.getElementById("actionSummaryResult").className = "action-result-value " + variantForState(result);
+  document.getElementById("actionSummaryRevision").textContent = safeText(revision);
+  document.getElementById("actionSummaryAudit").textContent = safeText(auditRef);
+  document.getElementById("actionSummaryHint").textContent = safeText(hint);
+  document.getElementById("actionResultBox").textContent = typeof raw === "string" ? raw : pretty(raw);
+}
+
+function summarizeActionResult(actionName, result) {
+  const actionMap = {
+    refresh: "Refresh",
+    validate: "Demo Validate",
+    bundle: "Safe Recheck Bundle",
+    "set-demo-mode": "Set Demo Reserved",
+    "enable-spot": "Enable Spot Shadow",
+    "arm-demo": "Demo Arm"
+  };
+
+  const data = result?.data || {};
+  let hint = "动作执行完成 / Action completed.";
+
+  if (actionName === "validate") {
+    hint = `Demo prerequisites: ${safeText(data.demo_prerequisites_gate_state)} · arm gate: ${safeText(data.demo_arm_gate_state)}`;
+  } else if (actionName === "arm-demo") {
+    hint = `Demo state switched to ${safeText(data.demo_state_switch)}.`;
+  } else if (actionName === "set-demo-mode") {
+    hint = `Accepted paths: ${(data.accepted_paths || []).join(", ") || "none"}`;
+  } else if (actionName === "enable-spot") {
+    hint = `Accepted paths: ${(data.accepted_paths || []).join(", ") || "none"}`;
+  } else if (actionName === "bundle") {
+    hint = `Bundle result: ${safeText(result.action_result)}`;
+  } else if (actionName === "refresh") {
+    hint = "Dashboard refreshed.";
+  }
+
+  setActionSummary(
+    actionMap[actionName] || actionName,
+    safeText(result.action_result),
+    safeText(result.state_revision),
+    safeText(result.audit_ref),
+    hint,
+    result
+  );
 }
 
 function renderSummary(overview) {
@@ -58,7 +109,7 @@ function renderSummary(overview) {
 function renderKvGrid(nodeId, items) {
   const node = document.getElementById(nodeId);
   node.innerHTML = items.map(([label, value]) => {
-    const safeValue = value === undefined || value === null ? "-" : String(value);
+    const safeValue = safeText(value);
     return `<div class="kv-item"><dt>${label}</dt><dd><span class="status-chip ${variantForState(safeValue)}">${safeValue}</span></dd></div>`;
   }).join("");
 }
@@ -169,14 +220,13 @@ function baseEnvelope(overview, extra = {}) {
 }
 
 async function runQuickAction(actionName) {
-  const resultBox = document.getElementById("actionResultBox");
   try {
     const overview = await getOverviewForEnvelope();
     let result;
 
     if (actionName === "refresh") {
       await loadDashboard();
-      resultBox.textContent = "刷新成功 / Refresh completed.";
+      setActionSummary("Refresh", "success", overview.state_revision, "-", "Dashboard refreshed.", { message: "Refresh completed." });
       return;
     }
 
@@ -235,23 +285,22 @@ async function runQuickAction(actionName) {
       );
     }
 
-    resultBox.textContent = pretty(result);
+    summarizeActionResult(actionName, result);
     await loadDashboard();
   } catch (error) {
-    resultBox.textContent = String(error);
+    setActionSummary("Action Failed", "failed", "-", "-", String(error), String(error));
   }
 }
 
 document.getElementById("connectButton").addEventListener("click", async () => {
   inMemoryToken = document.getElementById("tokenInput").value.trim();
-  const resultBox = document.getElementById("actionResultBox");
   try {
     await loadDashboard();
     setConnectionStatus("已连接 / Connected", "good");
-    resultBox.textContent = "连接成功 / Connected successfully.";
+    setActionSummary("Connect", "success", "-", "-", "Connected successfully.", { message: "Connected successfully." });
   } catch (error) {
     setConnectionStatus("连接失败 / Failed", "bad");
-    resultBox.textContent = String(error);
+    setActionSummary("Connect", "failed", "-", "-", String(error), String(error));
   }
 });
 

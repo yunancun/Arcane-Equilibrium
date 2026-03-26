@@ -124,39 +124,53 @@
         <button data-action="arm-demo">Demo Arm</button>
         <button data-action="bundle">Safe Recheck Bundle</button>
       </div>
-      <pre id="actionResultBox">尚未执行动作 / No action yet.</pre>
-    </section>
-
-    <section class="grid two-up">
-      <section class="card">
-        <div class="card-header-row">
-          <div>
-            <h2>控制平面原文 / Control Plane Raw</h2>
-            <p class="subtle">调试用原始 JSON</p>
-          </div>
+      <div class="action-summary-grid" id="actionSummaryGrid">
+        <div class="summary-item">
+          <span class="summary-label">Last Action</span>
+          <strong id="actionSummaryName">-</strong>
         </div>
-        <pre id="controlPlaneBox">等待加载 / Waiting...</pre>
-      </section>
-
-      <section class="card">
-        <div class="card-header-row">
-          <div>
-            <h2>审计摘要原文 / Audit Raw</h2>
-            <p class="subtle">最近控制动作与写动作摘要</p>
-          </div>
+        <div class="summary-item">
+          <span class="summary-label">Result</span>
+          <strong id="actionSummaryResult">-</strong>
         </div>
-        <pre id="auditBox">等待加载 / Waiting...</pre>
-      </section>
+        <div class="summary-item">
+          <span class="summary-label">State Revision</span>
+          <strong id="actionSummaryRevision">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Audit Ref</span>
+          <strong id="actionSummaryAudit">-</strong>
+        </div>
+      </div>
+      <div id="actionSummaryHint" class="action-hint">尚未执行动作 / No action yet.</div>
+      <details class="raw-toggle" id="actionRawToggle">
+        <summary>查看原始动作响应 / View raw action response</summary>
+        <pre id="actionResultBox">尚未执行动作 / No action yet.</pre>
+      </details>
     </section>
 
     <section class="card">
       <div class="card-header-row">
         <div>
-          <h2>系统总览原文 / Overview Raw</h2>
-          <p class="subtle">完整 overview payload，便于审计对照</p>
+          <h2>调试原文 / Debug Raw JSON</h2>
+          <p class="subtle">默认折叠，仅在需要审计或排错时展开</p>
         </div>
       </div>
-      <pre id="overviewBox">等待加载 / Waiting...</pre>
+
+      <details class="raw-toggle">
+        <summary>控制平面原文 / Control Plane Raw</summary>
+        <pre id="controlPlaneBox">等待加载 / Waiting...</pre>
+      </details>
+
+      <details class="raw-toggle">
+        <summary>审计摘要原文 / Audit Raw</summary>
+        <pre id="auditBox">等待加载 / Waiting...</pre>
+      </details>
+
+      <details class="raw-toggle">
+        <summary>系统总览原文 / Overview Raw</summary>
+        <pre id="overviewBox">等待加载 / Waiting...</pre>
+      </details>
     </section>
   </main>
 
