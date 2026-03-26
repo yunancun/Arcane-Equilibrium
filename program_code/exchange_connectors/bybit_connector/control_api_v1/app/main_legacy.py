@@ -243,6 +243,53 @@ class LearningHypothesesData(BaseModel):
     approval_requirements: dict[str, Any]
 
 
+class ProductFamilyConfigData(BaseModel):
+    """
+    产品族配置写操作结果 / Result of a product family configuration write operation.
+
+    包含已应用的变更、被拒绝的字段及当前状态快照。
+    Contains applied changes, rejected fields, and the current state snapshot.
+    """
+
+    family: str
+    applied_changes: dict[str, Any]
+    rejected_fields: list[str] = Field(default_factory=list)
+    current_controls: dict[str, Any]
+    current_derived: dict[str, Any]
+    current_action_permissions: dict[str, Any]
+
+
+class PnLEntryData(BaseModel):
+    """
+    PnL 条目录入结果 / Result of a PnL entry record operation.
+
+    记录一次已实现 / 未实现盈亏更新的确认信息。
+    Records confirmation of a realized / unrealized PnL update.
+    """
+
+    accepted: bool = True
+    entry_type: str
+    delta_realized_pnl: float = 0.0
+    delta_unrealized_pnl: float = 0.0
+    record_count_delta: int = 1
+
+
+class BusinessSummaryData(BaseModel):
+    """
+    经营与收益完整汇总 / Complete business and income summary.
+
+    比 /system/business/daily 更丰富：包含历史条目列表和成本分解。
+    Richer than /system/business/daily: includes historical entry lists and cost breakdown.
+    """
+
+    daily: dict[str, Any]
+    cost_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
+    event_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
+    pnl_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
+    cost_breakdown: dict[str, Any] = Field(default_factory=dict)
+    entry_totals: dict[str, Any] = Field(default_factory=dict)
+
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -1553,6 +1600,285 @@ def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
     }, "success"
 
 
+# ── 产品族配置写接口 / Product Family Config Write ───────────────────────────
+
+# 当前阶段允许的 mode_switch 值（live 相关值不在此阶段开放）
+# Allowed mode_switch values at this stage (live-related values are NOT opened yet)
+ALLOWED_MODE_SWITCHES: frozenset[str] = frozenset({"disabled", "observe_only", "shadow_only"})
+
+
+def apply_product_family_config(
+    envelope: RequestEnvelope,
+    actor: AuthenticatedActor,
+    family: str,
+) -> tuple[dict[str, Any], str]:
+    """
+    应用产品族控制配置变更 / Apply product family control configuration changes.
+
+    支持修改：enabled_switch / visibility_switch / mode_switch / action_permissions
+    Supports modifying: enabled_switch / visibility_switch / mode_switch / action_permissions
+
+    安全规则 / Safety rules:
+    - mode_switch 只允许: disabled / observe_only / shadow_only
+      mode_switch only allows: disabled / observe_only / shadow_only
+    - 不能直接把产品族升到 live 相关模式
+      Cannot directly set a product family to live-related modes
+    - 需要 input:config scope
+      Requires input:config scope
+    """
+    if family not in PRODUCT_FAMILIES:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": ["invalid_product_family"]},
+        )
+
+    require_scope(actor, "input:config")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    applied_changes: dict[str, Any] = {}
+    rejected_fields: list[str] = []
+    payload = dict(envelope.payload)
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        pf_controls = state["product_family_status"][family]["controls"]
+
+        # 处理 enabled_switch（布尔值）/ Handle enabled_switch (boolean)
+        if "enabled_switch" in payload:
+            val = payload["enabled_switch"]
+            if isinstance(val, bool):
+                pf_controls["enabled_switch"] = val
+                applied_changes["enabled_switch"] = val
+            else:
+                rejected_fields.append("enabled_switch:invalid_type")
+
+        # 处理 visibility_switch（布尔值）/ Handle visibility_switch (boolean)
+        if "visibility_switch" in payload:
+            val = payload["visibility_switch"]
+            if isinstance(val, bool):
+                pf_controls["visibility_switch"] = val
+                applied_changes["visibility_switch"] = val
+            else:
+                rejected_fields.append("visibility_switch:invalid_type")
+
+        # 处理 mode_switch（只允许受限值）/ Handle mode_switch (only allowed values)
+        if "mode_switch" in payload:
+            val = payload["mode_switch"]
+            if val in ALLOWED_MODE_SWITCHES:
+                pf_controls["mode_switch"] = val
+                applied_changes["mode_switch"] = val
+            else:
+                rejected_fields.append(f"mode_switch:{val}:not_allowed_at_this_stage")
+
+        # 处理每个动作的开关权限 / Handle per-action permission switches
+        action_perms_payload = payload.get("action_permissions", {})
+        if isinstance(action_perms_payload, dict):
+            pf_perms = state["control_plane"]["action_permissions"]["by_product_family"][family]
+            for action_name, val in action_perms_payload.items():
+                key = f"configured_{action_name}_allowed_switch"
+                if action_name in ACTION_NAMES and isinstance(val, bool):
+                    pf_perms[key] = val
+                    applied_changes[f"action_permissions.{action_name}"] = val
+                else:
+                    rejected_fields.append(f"action_permissions.{action_name}:invalid")
+
+        # 更新审计字段 / Update audit fields
+        state["product_family_status"][family]["audit"] = {
+            "last_change_ts_ms": now_ms(),
+            "last_change_by": actor.actor_id,
+        }
+
+        result_str = "success" if applied_changes else "blocked"
+        audit_ref = _write_audit_fields(
+            state,
+            action_type=f"product_family_config_{family}",
+            operator_id=actor.actor_id,
+            request_id=envelope.request_id,
+            result=result_str,
+            reason_codes=rejected_fields,
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {
+                "family": family,
+                "applied_changes": dict(applied_changes),
+                "rejected_fields": list(rejected_fields),
+                "current_controls": copy.deepcopy(compiled["product_family_status"][family]["controls"]),
+                "current_derived": copy.deepcopy(compiled["product_family_status"][family]["derived"]),
+                "current_action_permissions": copy.deepcopy(
+                    compiled["control_plane"]["action_permissions"]["by_product_family"][family]
+                ),
+            },
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {
+            "family": family,
+            "applied_changes": applied_changes,
+            "rejected_fields": rejected_fields,
+            "current_controls": final_state["product_family_status"][family]["controls"],
+            "current_derived": final_state["product_family_status"][family]["derived"],
+            "current_action_permissions": final_state["control_plane"]["action_permissions"]["by_product_family"][family],
+        },
+        "snapshot": final_state,
+    }, "success" if applied_changes else "blocked"
+
+
+# ── PnL 条目录入 / PnL Entry Input ──────────────────────────────────────────
+
+
+def apply_pnl_entry(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tuple[dict[str, Any], str]:
+    """
+    录入一条 PnL 更新记录 / Record a PnL update entry.
+
+    payload 字段（均可选）/ payload fields (all optional):
+    - entry_type: str  例如 "realized" | "unrealized" | "manual_adjustment"
+    - realized_pnl: float  当次已实现盈亏增量 / realized PnL delta for this entry
+    - unrealized_pnl: float  当前未实现盈亏（取最新值）/ current unrealized PnL (snapshot, not delta)
+    - symbol: str  涉及标的 / symbol involved
+    - note: str  备注 / note
+    - category: str  成本/盈亏类型分类，用于 cost_breakdown
+
+    注意：unrealized_pnl 取最新值覆盖（snapshot），realized_pnl 是累计增量。
+    Note: unrealized_pnl is a snapshot (overwrite); realized_pnl is an accumulative delta.
+    """
+    require_scope(actor, "input:cost")  # 复用 cost scope / reuse cost scope for PnL writes
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(envelope.payload)
+        payload["recorded_ts_ms"] = now_ms()
+        payload["recorded_by"] = actor.actor_id
+
+        entry_type = str(payload.get("entry_type", "manual_adjustment"))
+        delta_realized = float(payload.get("realized_pnl", 0.0))
+        delta_unrealized = float(payload.get("unrealized_pnl", 0.0))
+        has_unrealized = "unrealized_pnl" in envelope.payload
+
+        # 确保 pnl_entries 列表存在（兼容旧快照文件）
+        # Ensure pnl_entries list exists (backward-compatible with old state files)
+        if "pnl_entries" not in state["records"]:
+            state["records"]["pnl_entries"] = []
+        state["records"]["pnl_entries"].append(payload)
+
+        # 更新每日 PnL / Update daily PnL metrics
+        daily = state["business_metrics"]["daily"]
+        daily["realized_pnl"] = daily.get("realized_pnl", 0.0) + delta_realized
+        if has_unrealized:
+            # unrealized 取最新快照值，不累加 / unrealized is a snapshot value, not accumulated
+            daily["unrealized_pnl"] = delta_unrealized
+        daily["gross_pnl"] = daily["realized_pnl"] + daily.get("unrealized_pnl", 0.0)
+        daily["net_operating_pnl"] = daily["gross_pnl"] - daily.get("total_cost", 0.0)
+
+        audit_ref = _write_audit_fields(
+            state,
+            action_type="pnl_entry",
+            operator_id=actor.actor_id,
+            request_id=envelope.request_id,
+            result="success",
+            reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {
+                "accepted": True,
+                "entry_type": entry_type,
+                "delta_realized_pnl": delta_realized,
+                "delta_unrealized_pnl": delta_unrealized,
+                "record_count_delta": 1,
+            },
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    payload = envelope.payload
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {
+            "accepted": True,
+            "entry_type": str(payload.get("entry_type", "manual_adjustment")),
+            "delta_realized_pnl": float(payload.get("realized_pnl", 0.0)),
+            "delta_unrealized_pnl": float(payload.get("unrealized_pnl", 0.0)),
+            "record_count_delta": 1,
+        },
+        "snapshot": final_state,
+    }, "success"
+
+
+# ── 经营摘要构建器 / Business Summary Builder ────────────────────────────────
+
+_MAX_RECENT_ENTRIES: int = 20  # 每次最多返回多少条历史记录 / Max entries returned per call
+
+
+def build_business_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """
+    构建完整的经营与收益汇总 / Build a complete business and income summary.
+
+    包含：每日 PnL 指标 + 最近费用条目 + 最近事件条目 + 最近 PnL 条目 + 成本分类合计
+    Includes: daily PnL metrics + recent cost entries + recent event entries
+              + recent PnL entries + cost breakdown by category
+    """
+    daily = copy.deepcopy(snapshot["business_metrics"]["daily"])
+    records = snapshot.get("records", {})
+
+    cost_entries: list[dict[str, Any]] = records.get("cost_entries", [])
+    event_entries: list[dict[str, Any]] = records.get("event_entries", [])
+    pnl_entries: list[dict[str, Any]] = records.get("pnl_entries", [])
+
+    # 取最近 N 条，按最新在前排列 / Take last N, newest first
+    cost_recent = list(reversed(cost_entries[-_MAX_RECENT_ENTRIES:]))
+    event_recent = list(reversed(event_entries[-_MAX_RECENT_ENTRIES:]))
+    pnl_recent = list(reversed(pnl_entries[-_MAX_RECENT_ENTRIES:]))
+
+    # 按 category 做成本分解 / Compute cost breakdown by category
+    cost_breakdown: dict[str, float] = {}
+    for entry in cost_entries:
+        category = str(entry.get("category", "manual"))
+        cost_breakdown[category] = round(
+            cost_breakdown.get(category, 0.0) + float(entry.get("amount", 0.0)),
+            8,
+        )
+
+    return {
+        "daily": daily,
+        "cost_entries_recent": cost_recent,
+        "event_entries_recent": event_recent,
+        "pnl_entries_recent": pnl_recent,
+        "cost_breakdown": cost_breakdown,
+        "entry_totals": {
+            "total_cost_entries": len(cost_entries),
+            "total_event_entries": len(event_entries),
+            "total_pnl_entries": len(pnl_entries),
+        },
+    }
+
+
 app = FastAPI(
     title=settings.service_name,
     version=settings.api_version,
@@ -1781,3 +2107,95 @@ def post_input_note(envelope: RequestEnvelope, actor=Depends(current_actor)) -> 
 def post_config_change(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[ConfigChangeAcceptedData]:
     result, action_result = apply_config_change(envelope, actor)
     return envelope_response(snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result, data=ConfigChangeAcceptedData(**result["data"]), audit_ref=result["audit_ref"], reason_codes=["replayed_request"] if action_result == "replayed" else [])
+
+
+# ── 产品族配置写接口路由 / Product Family Config Write Routes ─────────────────
+
+
+@app.post(
+    f"{settings.api_prefix}/control/product-family/{{family}}/config",
+    response_model=ResponseEnvelope[ProductFamilyConfigData],
+)
+def post_product_family_config(
+    family: str,
+    envelope: RequestEnvelope,
+    actor=Depends(current_actor),
+) -> ResponseEnvelope[ProductFamilyConfigData]:
+    """
+    修改指定产品族的控制配置 / Modify control configuration for a specific product family.
+
+    payload 支持字段 / Supported payload fields:
+    - enabled_switch: bool      是否启用该产品族 / Enable this product family
+    - visibility_switch: bool   是否在 GUI 可见 / Make visible in GUI
+    - mode_switch: str          模式切换（只允许 disabled/observe_only/shadow_only）
+                                Mode switch (only allows disabled/observe_only/shadow_only)
+    - action_permissions: dict  每个动作的开关，例如 {"new_order": false, "cancel": false}
+                                Per-action switches, e.g. {"new_order": false, "cancel": false}
+
+    安全 / Safety: 不能设置为 live 相关模式。需要 input:config scope。
+    Cannot set to live-related modes. Requires input:config scope.
+    """
+    result, action_result = apply_product_family_config(envelope, actor, family)
+    return envelope_response(
+        snapshot=result["snapshot"],
+        request_id=envelope.request_id,
+        action_result=action_result,
+        data=ProductFamilyConfigData(**result["data"]),
+        audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+# ── 经营摘要路由 / Business Summary Route ────────────────────────────────────
+
+
+@app.get(
+    f"{settings.api_prefix}/system/business/summary",
+    response_model=ResponseEnvelope[BusinessSummaryData],
+)
+def get_business_summary(actor=Depends(current_actor)) -> ResponseEnvelope[BusinessSummaryData]:
+    """
+    经营与收益完整摘要 / Complete business and income summary.
+
+    比 /system/business/daily 更完整：包含历史条目列表和按类别成本分解。
+    Richer than /system/business/daily: includes entry history and category-level cost breakdown.
+    """
+    snapshot, _ = get_latest_snapshot()
+    summary = build_business_summary(snapshot)
+    return envelope_response(
+        snapshot=snapshot,
+        request_id=None,
+        action_result="success",
+        data=BusinessSummaryData(**summary),
+    )
+
+
+# ── PnL 条目录入路由 / PnL Entry Input Route ─────────────────────────────────
+
+
+@app.post(f"{settings.api_prefix}/input/pnl-entry", response_model=ResponseEnvelope[PnLEntryData])
+def post_pnl_entry(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[PnLEntryData]:
+    """
+    录入 PnL 更新条目 / Record a PnL update entry.
+
+    用于手动录入已实现盈亏 / 未实现盈亏更新，自动刷新每日经营摘要中的 PnL 指标。
+    Used to manually record realized/unrealized PnL updates.
+    Automatically refreshes PnL metrics in the daily business summary.
+
+    payload 字段 / payload fields:
+    - entry_type: str          条目类型 / Entry type
+    - realized_pnl: float      累计增量（已实现）/ Cumulative delta (realized)
+    - unrealized_pnl: float    当前快照值（未实现）/ Current snapshot value (unrealized)
+    - symbol: str              涉及标的 / Symbol involved (optional)
+    - note: str                备注 / Note (optional)
+    - category: str            分类（用于 cost_breakdown）/ Category for cost_breakdown (optional)
+    """
+    result, action_result = apply_pnl_entry(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"],
+        request_id=envelope.request_id,
+        action_result=action_result,
+        data=PnLEntryData(**result["data"]),
+        audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )

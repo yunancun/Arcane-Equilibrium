@@ -100,10 +100,92 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #020
   .summary-grid, .action-summary-grid, .mode-grid, .business-grid, .config-family-grid, .switch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kv-grid, .grid.two-up { grid-template-columns: 1fr; }
 }
+/* ── 产品族配置设置台 / Product Family Config Console ─────────────────────── */
+
+.pf-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pf-editor-card { background: #020617; border: 1px solid #1e293b; border-radius: 14px; padding: 16px; }
+.pf-editor-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.pf-editor-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-editor-controls { display: grid; gap: 10px; }
+
+.switch-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; }
+.switch-label { font-size: 13px; color: #e5e7eb; }
+
+.pf-toggle, .settings-checkbox { width: 18px; height: 18px; accent-color: var(--good); cursor: pointer; }
+
+.pf-mode-select, .settings-select { background: #0f172a; border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; min-width: 140px; }
+
+.pf-apply-btn, .pf-perm-apply-btn { margin-top: 8px; font-size: 13px; padding: 8px 12px; }
+
+/* ── 动作权限展开区 / Action permission details ──────────────────────────── */
+
+.perm-details { margin-top: 10px; border: 1px solid #1e293b; border-radius: 10px; }
+.perm-summary { cursor: pointer; padding: 10px 14px; font-size: 13px; color: var(--text); list-style: none; }
+.perm-summary::-webkit-details-marker { display: none; }
+.perm-details[open] .perm-summary { border-bottom: 1px solid #1e293b; }
+.perm-grid { display: grid; gap: 6px; padding: 12px; }
+.perm-row { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
+.perm-check { width: 16px; height: 16px; accent-color: var(--good); }
+.perm-label { flex: 1; color: #cbd5e1; }
+.perm-effective { font-size: 10px; }
+
+/* ── 收益与成本录入 / Income & Cost Entry ─────────────────────────────────── */
+
+.entry-grid { gap: 16px !important; }
+.entry-form-card { background: #020617; border: 1px solid #1e293b; border-radius: 14px; padding: 16px; }
+.entry-form-title { margin: 0 0 14px; font-size: 15px; }
+
+.form-row { display: grid; gap: 4px; margin-bottom: 10px; }
+.form-label { font-size: 12px; color: var(--muted); }
+.form-input { background: #0f172a; border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 13px; width: 100%; }
+.form-input:focus { outline: none; border-color: #166534; }
+
+.entry-submit-btn { width: 100%; margin-top: 4px; font-size: 13px; padding: 10px 12px; }
+
+.entries-history { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-top: 16px; }
+.entries-col { background: #020617; border: 1px solid #1e293b; border-radius: 14px; padding: 14px; }
+.entries-col.full-width { grid-column: 1 / -1; }
+.entries-col-title { margin: 0 0 10px; font-size: 13px; color: #e5e7eb; }
+
+.entry-list { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; }
+.entry-row { display: flex; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: 8px; font-size: 12px; background: rgba(15, 23, 42, 0.5); }
+.entry-row:hover { background: rgba(30, 41, 59, 0.5); }
+.entry-ts { color: var(--muted); min-width: 140px; }
+.entry-cat { color: #93c5fd; min-width: 80px; }
+.entry-amt { font-weight: 600; min-width: 120px; }
+.entry-amt.good { color: #86efac; }
+.entry-amt.bad { color: #fca5a5; }
+.entry-note { color: var(--muted); flex: 1; }
+.muted-row { color: var(--muted); padding: 10px; text-align: center; }
+
+.breakdown-col { background: #020617; border: 1px solid #1e293b; border-radius: 14px; padding: 14px; }
+.breakdown-grid { display: grid; gap: 6px; }
+.breakdown-item { display: flex; justify-content: space-between; padding: 6px 8px; border-radius: 8px; font-size: 12px; background: rgba(15, 23, 42, 0.5); }
+.breakdown-cat { color: #93c5fd; }
+.breakdown-amt { font-weight: 600; }
+
+.biz-totals { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+
+/* ── 系统设置台 / System Settings Console ─────────────────────────────────── */
+
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.settings-block { background: #020617; border: 1px solid #1e293b; border-radius: 14px; padding: 16px; }
+.settings-block-title { margin: 0 0 14px; font-size: 15px; }
+.settings-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
+.settings-row:last-of-type { border-bottom: none; }
+.settings-label { font-size: 13px; color: #e5e7eb; flex: 1; }
+.settings-apply-btn { width: 100%; margin-top: 12px; font-size: 13px; padding: 10px 12px; }
+
+/* ── 响应式 / Responsive ─────────────────────────────────────────────────── */
+
 @media (max-width: 980px) {
   .topbar { flex-direction: column; align-items: stretch; }
   .token-panel { min-width: 0; }
   .token-row { flex-direction: column; }
   .summary-grid, .action-summary-grid, .mode-grid, .business-grid, .config-family-grid, .switch-grid { grid-template-columns: 1fr; }
   .glossary-wrap { flex-direction: column; }
+  .pf-editor-grid { grid-template-columns: 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .entries-history { grid-template-columns: 1fr; }
+  .entry-grid { grid-template-columns: 1fr !important; }
 }
