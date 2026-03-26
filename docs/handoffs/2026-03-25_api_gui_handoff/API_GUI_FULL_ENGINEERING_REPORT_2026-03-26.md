@@ -1,0 +1,483 @@
+# OpenClaw / Bybit Control API & GUI 全量工程报告
+
+日期：2026-03-26
+分支：`feature/openclaw-bybit-control-api-gui-v1-rc2`
+
+---
+
+## 1. 本报告用途
+
+本报告用于完整记录本轮 OpenClaw / Bybit Control API 与 GUI 章节的工程状态，供以下场景直接接手：
+
+- 明天继续开发
+- 新对话继续开发
+- 回主线前做阶段性归档
+- 后续把 GUI/API 真正并入 OpenClaw 主界面
+
+本报告重点覆盖：
+
+1. 当前章节目标
+2. 已完成内容
+3. 已定义的结构 / 预留 / 接口 / 页面
+4. 尚未完成内容
+5. 后续接手注意事项
+6. 当前建议的推进顺序
+
+---
+
+## 2. 本章节目标与定位
+
+### 2.1 本章节不是主线交易能力章节
+
+这一章的目标不是直接推进真实 live 执行，也不是完成最终交易主线，而是：
+
+- 建立一个可用的控制面 API
+- 建立一个可用的 GUI 控制台
+- 让 GUI 能真实消费 API，而不是做静态页面
+- 明确区分“事实层 / 控制层 / 状态推进层”
+- 在不误开高风险权限的前提下，把后续需要的结构先预埋好
+
+### 2.2 本章节目标是阶段性完工，而不是无限细修
+
+本章节当前被定义为：
+
+- 阶段性完工
+- 结构预留完成
+- 未来继续扩展的承接位已布好
+- 可以回归主线，但后续仍可按小步迭代继续修 GUI/API
+
+---
+
+## 3. 当前总体进度评估
+
+### 3.1 API 进度
+
+当前 API 进度评估：**约 85%**
+
+当前 API 已具备：
+
+- 控制面骨架
+- 核心只读接口
+- 核心受保护动作接口
+- runtime snapshot bridge
+- GUI 联调支撑能力
+
+但尚未具备：
+
+- 最终部署封板
+- 主线深度整合完成
+- 完整产品族写配置体系
+- 全量 business / income 深度数据源
+
+### 3.2 GUI 进度
+
+当前 GUI 进度评估：**约 80%**
+
+当前 GUI 已具备：
+
+- 可用仪表盘
+- 可真实调用 API
+- 可执行受保护动作
+- 可展示核心状态
+- 可承接后续产品族设置与长期入口
+
+但尚未具备：
+
+- 最终设置台
+- 最终 OpenClaw 一体化入口
+- 完整运营控制台形态
+- 最终视觉与文案终版
+
+### 3.3 本章节总体状态
+
+当前本章节可定义为：
+
+**阶段性完工，已完成轻量收口，适合备案并准备回主线。**
+
+---
+
+## 4. 代码与文档所在位置
+
+### 4.1 Control API 主目录
+
+主要代码目录：
+
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/`
+
+### 4.2 GUI 静态资源目录
+
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/app.js`
+- `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/styles.css`
+
+### 4.3 主要 handoff / README / 归档目录
+
+- `docs/handoffs/2026-03-25_api_gui_handoff/`
+
+当前该目录下已建立多份关键文档，用于接手与继续推进。
+
+---
+
+## 5. 本轮已完成的 API 工程工作
+
+### 5.1 控制 API 主骨架
+
+已完成：
+
+- 统一响应结构（envelope）
+- 认证 token 接入
+- API 主入口与核心路由组织
+- GET + POST 的基础受保护控制结构
+
+### 5.2 已可用的主要读取接口
+
+当前 GUI 已真实依赖这些接口：
+
+- `GET /api/v1/system/overview`
+- `GET /api/v1/system/source-context`
+- `GET /api/v1/system/product-families`
+- `GET /api/v1/system/control-plane`
+- `GET /api/v1/system/audit-summary`
+
+这些接口当前已足以支撑主控制台展示。
+
+### 5.3 已可用的主要受保护动作接口
+
+当前已建立并联调过的核心动作包括：
+
+- `POST /api/v1/control/demo/validate`
+- `POST /api/v1/control/demo/arm`
+- `POST /api/v1/control/safe-recheck-bundle`
+- `POST /api/v1/input/config-change`
+- `POST /api/v1/input/manual-note`
+
+这些动作当前都属于：
+
+- guarded
+- protected
+- 非 live 放权
+
+### 5.4 runtime snapshot bridge
+
+已完成：
+
+- runtime snapshot 文件桥接
+- source context 与 runtime snapshot 绑定
+- product family facts 可反映 runtime overlay
+- pinned runtime snapshot id / ts 可展示
+
+这部分是本章节 API 的关键价值之一，因为 GUI 不再只是看静态状态，而是能看到 runtime-aware 的事实层。
+
+### 5.5 API 合同与测试
+
+本轮已经完成多轮修正，重点包括：
+
+- runtime snapshot validator 修复
+- snapshot-stable 相关测试修复
+- runtime bridge overview mode mapping 修复
+- runtime snapshot bridge tests 修复
+
+阶段中曾达到：
+
+- `15 passed`
+
+说明当前 API 的关键合同层已经不是松散状态。
+
+---
+
+## 6. 本轮已完成的 GUI 工程工作
+
+### 6.1 主界面基础结构
+
+当前 GUI 已形成可用控制台结构，主要区块包括：
+
+- 顶部连接区
+- 高层 summary 区
+- 运行模式控制区
+- 经营与收益摘要区
+- 来源上下文区
+- 健康摘要区
+- 产品族配置区
+- 产品族事实区
+- 快捷动作区
+- 最近动作与结果区
+- 调试原文区
+
+### 6.2 GUI 与 API 已真实联动
+
+当前 GUI 已不是静态 mock，而是能调用真实 API：
+
+- 连接后加载 overview
+- 加载 source-context
+- 加载 product-families
+- 加载 control-plane
+- 加载 audit-summary
+- 调用 demo validate / arm / safe bundle / config change 等动作
+
+### 6.3 关键动作二次确认
+
+本轮已加入关键动作确认弹窗，适用于至少以下动作：
+
+- 切到 Demo Reserved
+- 开启 Spot / 现货产品配置
+- 验证 Demo 前提
+- 执行 Demo Arm
+- 安全复核打包
+
+当前设计原则：
+
+- 关键动作必须二次确认
+- 解释风险与后果
+- 不让高风险动作“一点即发”
+
+### 6.4 文案从术语流改为人话流
+
+本轮明显修正了这类问题：
+
+- 不再用术语解释术语
+- 尽量改成“这一步做了什么 / 点完后会怎样 / 它不是什么”
+- 把 demo / spot / shadow / reserved / arm 等词放回具体语境
+
+### 6.5 双语表达改善
+
+已完成：
+
+- 中文主表达 + 英文辅助表达
+- 避免早期那种强行硬拼的双语方式
+- 尽量让英文变成不抢主阅读流的辅助层
+
+### 6.6 关键概念提示折叠
+
+早期问题：
+
+- 关键概念提示长期占位
+- 影响主阅读流
+
+当前已处理为：
+
+- 默认折叠
+- 想看的人自己展开
+- 内容重点讲“事实 / 权限配置 / 状态推进 / 最重要的一句”
+
+### 6.7 产品族配置区独立成卡片
+
+这是本轮 GUI 很关键的进展之一。
+
+当前不再只是表格展示，而是新增了：
+
+- `产品族配置 / Product Family Configuration`
+
+目前覆盖：
+
+- spot / 现货
+- margin / 保证金
+- perp_linear / 线性永续
+- perp_inverse / 反向永续
+- options / 期权
+- other_derivatives_reserved / 其他衍生品（预留）
+
+当前展示内容：
+
+- enabled / disabled
+- visible / hidden
+- mode
+- 基础事实摘要
+- 能力摘要
+- 未来设置入口占位按钮（禁用）
+
+### 6.8 长期开关预留区
+
+本轮后期已加入：
+
+- `长期开关预留 / Long-Term Switch Preset`
+
+当前预留的项目包括：
+
+- 仅观察 / Observe Only
+- Demo Reserved
+- Demo Enabled
+- Live Locked
+- 紧急回锁 / Emergency Relock
+- 自动化锁定 / Automation Locked
+- 只读维护 / Readonly Maintenance
+- 审计增强 / Audit Enhanced
+
+这些当前全部是：
+
+- 显示位
+- 锁定位
+- 预留位
+
+并没有开放真实高风险能力。
+
+---
+
+## 7. 本轮已定义的核心设计思路
+
+### 7.1 三层理解模型
+
+本轮反复强调并已嵌入 GUI 文案的模型是：
+
+1. **事实层**
+   - 交易所 / 账户 / runtime 实际返回了什么
+2. **控制配置层**
+   - 你在控制面允许系统进入什么受保护流程
+3. **状态推进层**
+   - 系统流程推进到哪一步，如 validate / arm 等
+
+核心原则：
+
+- 看得见 ≠ 被允许
+- 被允许继续判断 ≠ 能执行
+- demo ≠ live
+
+### 7.2 当前章节只做 guarded / protected control plane
+
+这一章被明确限制为：
+
+- guarded
+- protected
+- 受保护控制台
+- 不开放真实 live execute
+
+### 7.3 只做预埋，不做误开放
+
+对未来一定会需要的能力，当前策略是：
+
+- 先定名字
+- 先定位置
+- 先定层级
+- 先定入口
+- 不提前做成真实高权限能力
+
+这点对后续延续正确性非常重要。
+
+---
+
+## 8. 本轮已建立的重要文档链
+
+以下文档都建议保留并作为接手时的优先阅读对象：
+
+1. `WORKLOG_2026-03-25.md`
+2. `SOURCE_DOCS_INDEX.md`
+3. `SOURCE_DOCS_MANIFEST_2026-03-26.md`
+4. `UPLOADED_SOURCE_FILES_LOCATOR_2026-03-26.md`
+5. `GUI_PORTAL_AND_OPENCLAW_INTEGRATION_TASK.md`
+6. `GUI_TEXT_REWRITE_AND_PRODUCT_CONFIG_NOTE_2026-03-26.md`
+7. `API_GUI_STAGE_COMPLETION_README_2026-03-26.md`
+8. `API_GUI_STAGE_CLOSEOUT_CHECKLIST_2026-03-26.md`
+9. `GUI_OPENCLAW_PORTAL_PRELAYOUT_2026-03-26.md`
+10. `LONG_TERM_SWITCHES_PRESET_2026-03-26.md`
+11. `API_GUI_LIGHT_CLOSEOUT_2026-03-26.md`
+12. 本文件 `API_GUI_FULL_ENGINEERING_REPORT_2026-03-26.md`
+
+如果后续要接手本章节，建议先看这些文件，而不是直接闷头改代码。
+
+---
+
+## 9. 当前仍未完成但不阻塞收口的部分
+
+### 9.1 API 侧未完成项
+
+1. 产品族配置写接口进一步体系化
+2. business / income 更深数据源接入
+3. learning / hypotheses 成熟化
+4. 更深层 runtime / exporter 对接
+5. 最终部署封板
+6. 与 OpenClaw 主线的更深整合
+
+### 9.2 GUI 侧未完成项
+
+1. 产品族配置区真正设置台化
+2. business / income 日/周/月切片
+3. GUI 与 OpenClaw 真正统一入口整合
+4. 少量文案继续精修
+5. learning / hypotheses UI 成熟化
+6. 更细致的操作权限表达
+
+这些目前都应视为：
+
+- 后续阶段工作
+- 非当前章节阻塞项
+
+---
+
+## 10. 当前明确不应继续在本章节做的事情
+
+以下内容当前不建议继续深挖：
+
+### 10.1 提前开放 live
+
+禁止方向：
+
+- 真实 live 开关
+- 容易误导用户理解为“已经可执行”的按钮
+
+### 10.2 提前开放自动化真实执行
+
+禁止方向：
+
+- 自动化真实交易执行
+- 高风险自动化开关
+
+### 10.3 提前做复杂风险参数编辑器
+
+当前阶段不建议做：
+
+- 大量高风险参数输入
+- 复杂执行参数编辑器
+
+### 10.4 无休止视觉细修
+
+当前章节已达到收口状态，不应为了页面更漂亮而无限继续消耗时间。
+
+---
+
+## 11. 当前推荐的后续接手方式
+
+### 11.1 如果继续留在本章节小修
+
+只建议做：
+
+- 小范围文本修正
+- 小范围样式修正
+- 入口与预埋微调
+- 非高风险的承接位增强
+
+### 11.2 如果准备回主线
+
+推荐顺序：
+
+1. 先确认本章节归档文件完整
+2. 保留当前分支状态
+3. 回主线时把本章节视为“已完成控制面基础设施建设”
+4. 主线如需新事实或新控制位，再回拉 GUI/API 做增量适配
+
+### 11.3 如果是新对话接手
+
+建议先读：
+
+1. `API_GUI_LIGHT_CLOSEOUT_2026-03-26.md`
+2. `API_GUI_STAGE_COMPLETION_README_2026-03-26.md`
+3. `API_GUI_STAGE_CLOSEOUT_CHECKLIST_2026-03-26.md`
+4. `GUI_OPENCLAW_PORTAL_PRELAYOUT_2026-03-26.md`
+5. `LONG_TERM_SWITCHES_PRESET_2026-03-26.md`
+6. 本文件
+
+再去看代码。
+
+---
+
+## 12. 当前阶段最终结论
+
+当前 OpenClaw / Bybit Control API & GUI 章节已经完成了本轮最重要的工作：
+
+- 控制台骨架已经建立
+- 控制面 API 已能真实支撑 GUI
+- 事实层 / 控制层 / 状态推进层已被明确区分
+- 产品族配置区与长期开关区已经完成预埋
+- OpenClaw 后续统一入口已完成命名和导航预埋
+- 高风险能力仍保持未开放状态
+
+因此当前最合理的章节定义是：
+
+**阶段性完工，可作为后续主线与未来控制台持续扩展的稳定基础。**
