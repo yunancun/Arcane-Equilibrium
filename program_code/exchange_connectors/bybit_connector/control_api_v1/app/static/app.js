@@ -51,6 +51,17 @@ const PRODUCT_FAMILY_CONFIG_IDS = {
   other_derivatives_reserved: { summary: "cfgOtherDerivativesSummary", meta: "cfgOtherDerivativesMeta" }
 };
 
+const LONG_TERM_SWITCHES = [
+  ["仅观察", "Observe Only", "当前只做展示位", "locked"],
+  ["Demo Reserved", "Demo Reserved", "允许继续做 demo 判断", "preset"],
+  ["Demo Enabled", "Demo Enabled", "后续阶段预留，当前不开放", "locked"],
+  ["Live Locked", "Live Locked", "真实执行长期锁定", "locked"],
+  ["紧急回锁", "Emergency Relock", "高优先级安全开关，当前只预留", "locked"],
+  ["自动化锁定", "Automation Locked", "自动化真实执行暂不开放", "locked"],
+  ["只读维护", "Readonly Maintenance", "维护模式后续接入", "locked"],
+  ["审计增强", "Audit Enhanced", "长期审计扩展位", "planned"]
+];
+
 function headers() {
   return {
     Authorization: `Bearer ${inMemoryToken}`,
@@ -58,25 +69,18 @@ function headers() {
   };
 }
 
-function pretty(value) {
-  return JSON.stringify(value, null, 2);
-}
-
-function safeText(value) {
-  return value === undefined || value === null ? "-" : String(value);
-}
+function pretty(value) { return JSON.stringify(value, null, 2); }
+function safeText(value) { return value === undefined || value === null ? "-" : String(value); }
 
 function variantForState(value) {
   const normalized = String(value || "").toLowerCase();
-  if (["passed", "healthy", "ready", "fresh", "complete", "shadow_only", "shadow_control_ready", "success", "true", "allowed"].includes(normalized)) return "good";
-  if (["blocked", "disabled", "down", "missing", "failed", "unavailable", "unknown", "false"].includes(normalized)) return "bad";
-  if (["partial", "degraded", "demo_reserved", "demo_blocked", "armed_but_closed", "visible_only", "shadow_visible"].includes(normalized)) return "warn";
+  if (["passed", "healthy", "ready", "fresh", "complete", "shadow_only", "shadow_control_ready", "success", "true", "allowed", "preset"].includes(normalized)) return "good";
+  if (["blocked", "disabled", "down", "missing", "failed", "unavailable", "unknown", "false", "locked"].includes(normalized)) return "bad";
+  if (["partial", "degraded", "demo_reserved", "demo_blocked", "armed_but_closed", "visible_only", "shadow_visible", "planned"].includes(normalized)) return "warn";
   return "neutral";
 }
 
-function booleanZh(value, trueText, falseText) {
-  return value ? trueText : falseText;
-}
+function booleanZh(value, trueText, falseText) { return value ? trueText : falseText; }
 
 function setConnectionStatus(text, variant = "neutral") {
   const node = document.getElementById("connectionStatus");
@@ -110,7 +114,6 @@ function summarizeActionResult(actionName, result) {
     "enable-spot": "开启 Spot / 现货产品配置",
     "arm-demo": "执行 Demo Arm"
   };
-
   const actionEnMap = {
     refresh: "refresh overview",
     validate: "validate demo",
@@ -144,30 +147,15 @@ function summarizeActionResult(actionName, result) {
     helper = "Dashboard refreshed.";
   }
 
-  setActionSummary(
-    `${actionMap[actionName] || actionName} / ${actionEnMap[actionName] || actionName}`,
-    safeText(result.action_result),
-    safeText(result.state_revision),
-    safeText(result.audit_ref),
-    `${hint} ${helper}`,
-    result
-  );
+  setActionSummary(`${actionMap[actionName] || actionName} / ${actionEnMap[actionName] || actionName}`, safeText(result.action_result), safeText(result.state_revision), safeText(result.audit_ref), `${hint} ${helper}`, result);
 }
 
-function zhEnPrimary(zh, en) {
-  return `<span class="label-zh">${zh}</span><span class="label-en">${en}</span>`;
-}
-
-function annotateGlossary(termZh, termEn, noteZh, noteEn) {
-  return `<div class="glossary-pill"><span class="glossary-term">${termZh}</span><span class="glossary-term-en">${termEn}</span><span class="glossary-note">${noteZh} / ${noteEn}</span></div>`;
-}
+function zhEnPrimary(zh, en) { return `<span class="label-zh">${zh}</span><span class="label-en">${en}</span>`; }
+function annotateGlossary(termZh, termEn, noteZh, noteEn) { return `<div class="glossary-pill"><span class="glossary-term">${termZh}</span><span class="glossary-term-en">${termEn}</span><span class="glossary-note">${noteZh} / ${noteEn}</span></div>`; }
 
 function renderKvGrid(nodeId, items) {
   const node = document.getElementById(nodeId);
-  node.innerHTML = items.map(([labelHtml, value]) => {
-    const safeValue = safeText(value);
-    return `<div class="kv-item"><dt>${labelHtml}</dt><dd><span class="status-chip ${variantForState(safeValue)}">${safeValue}</span></dd></div>`;
-  }).join("");
+  node.innerHTML = items.map(([labelHtml, value]) => `<div class="kv-item"><dt>${labelHtml}</dt><dd><span class="status-chip ${variantForState(value)}">${safeText(value)}</span></dd></div>`).join("");
 }
 
 function ensureGuiEnhancements() {
@@ -179,90 +167,33 @@ function ensureGuiEnhancements() {
 
   const topbarSubtle = document.querySelector(".topbar p");
   if (topbarSubtle) topbarSubtle.textContent = "RC2 控制台 · OpenClaw/Bybit 受保护控制面 / RC2 control console for guarded operations";
-
   const heroSubtle = document.querySelector(".hero-card .subtle");
   if (heroSubtle) heroSubtle.textContent = "高层状态、保护边界与 runtime snapshot 绑定情况。English helper text is intentionally lighter below.";
 
-  const summaryLabels = document.querySelectorAll("#summaryGrid .summary-label");
-  const summaryTexts = [
-    zhEnPrimary("全局模式", "Global Mode"),
-    zhEnPrimary("执行权限", "Execution Authority"),
-    zhEnPrimary("Demo 状态", "Demo State"),
-    zhEnPrimary("快照", "Snapshot"),
-    zhEnPrimary("Runtime 快照", "Runtime Snapshot"),
-    zhEnPrimary("仍受保护", "Runtime Protected")
-  ];
-  summaryLabels.forEach((node, index) => { if (summaryTexts[index]) node.innerHTML = summaryTexts[index]; });
+  const summaryTexts = [zhEnPrimary("全局模式", "Global Mode"), zhEnPrimary("执行权限", "Execution Authority"), zhEnPrimary("Demo 状态", "Demo State"), zhEnPrimary("快照", "Snapshot"), zhEnPrimary("Runtime 快照", "Runtime Snapshot"), zhEnPrimary("仍受保护", "Runtime Protected")];
+  document.querySelectorAll("#summaryGrid .summary-label").forEach((node, index) => { if (summaryTexts[index]) node.innerHTML = summaryTexts[index]; });
 
   const cards = document.querySelectorAll(".page-shell > .card, .page-shell > .grid.two-up .card");
   cards.forEach((card) => {
     const h2 = card.querySelector("h2");
     if (!h2) return;
     const current = h2.textContent.trim();
-    if (current.includes("来源上下文")) {
-      h2.innerHTML = zhEnPrimary("来源上下文", "Source Context");
-      card.querySelector(".subtle").textContent = "连接状态、完整性和 connector 角色分离。Small English hints stay secondary to reduce clutter.";
-    }
-    if (current.includes("健康摘要")) {
-      h2.innerHTML = zhEnPrimary("健康摘要", "Health Summary");
-      card.querySelector(".subtle").textContent = "健康评分、关键 gate 与 freshness。Used to judge whether runtime facts are trustworthy enough.";
-    }
-    if (current.includes("产品族事实")) {
-      h2.innerHTML = zhEnPrimary("产品族事实", "Product Family Facts");
-      card.querySelector(".subtle").textContent = "这里优先展示事实层：交易所与账户真实返回的状态。控制层配置只是另一层。";
-    }
-    if (current.includes("快捷动作")) {
-      h2.innerHTML = zhEnPrimary("快捷动作", "Quick Actions");
-      card.querySelector(".subtle").textContent = "仅调用受保护控制面动作，不直接开放真实执行权限。Critical actions now require second confirmation.";
-    }
-    if (current.includes("调试原文")) {
-      h2.innerHTML = zhEnPrimary("调试原文", "Debug Raw JSON");
-      card.querySelector(".subtle").textContent = "默认折叠，仅在需要审计或排错时展开。These raw blocks are not the primary UI.";
-    }
+    if (current.includes("来源上下文")) { h2.innerHTML = zhEnPrimary("来源上下文", "Source Context"); card.querySelector(".subtle").textContent = "连接状态、完整性和 connector 角色分离。Small English hints stay secondary to reduce clutter."; }
+    if (current.includes("健康摘要")) { h2.innerHTML = zhEnPrimary("健康摘要", "Health Summary"); card.querySelector(".subtle").textContent = "健康评分、关键 gate 与 freshness。Used to judge whether runtime facts are trustworthy enough."; }
+    if (current.includes("产品族事实")) { h2.innerHTML = zhEnPrimary("产品族事实", "Product Family Facts"); card.querySelector(".subtle").textContent = "这里优先展示事实层：交易所与账户真实返回的状态。控制层配置只是另一层。"; }
+    if (current.includes("快捷动作")) { h2.innerHTML = zhEnPrimary("快捷动作", "Quick Actions"); card.querySelector(".subtle").textContent = "仅调用受保护控制面动作，不直接开放真实执行权限。Critical actions now require second confirmation."; }
+    if (current.includes("调试原文")) { h2.innerHTML = zhEnPrimary("调试原文", "Debug Raw JSON"); card.querySelector(".subtle").textContent = "默认折叠，仅在需要审计或排错时展开。These raw blocks are not the primary UI."; }
   });
 
-  const ths = document.querySelectorAll("table thead th");
-  const tableHeaders = [
-    zhEnPrimary("产品族", "Product Family"),
-    zhEnPrimary("交易所事实", "Exchange Fact"),
-    zhEnPrimary("账户事实", "Account Fact"),
-    zhEnPrimary("已启用", "Enabled"),
-    zhEnPrimary("可见", "Visible"),
-    zhEnPrimary("模式", "Mode"),
-    zhEnPrimary("能力", "Capability"),
-    zhEnPrimary("执行", "Execution")
-  ];
-  ths.forEach((th, idx) => { if (tableHeaders[idx]) th.innerHTML = tableHeaders[idx]; });
+  const tableHeaders = [zhEnPrimary("产品族", "Product Family"), zhEnPrimary("交易所事实", "Exchange Fact"), zhEnPrimary("账户事实", "Account Fact"), zhEnPrimary("已启用", "Enabled"), zhEnPrimary("可见", "Visible"), zhEnPrimary("模式", "Mode"), zhEnPrimary("能力", "Capability"), zhEnPrimary("执行", "Execution")];
+  document.querySelectorAll("table thead th").forEach((th, idx) => { if (tableHeaders[idx]) th.innerHTML = tableHeaders[idx]; });
 
-  const actionButtons = {
-    refresh: "刷新概览",
-    validate: "验证 Demo",
-    "set-demo-mode": "切到 Demo Reserved",
-    "enable-spot": "开启 Spot / 现货产品配置",
-    "arm-demo": "执行 Demo Arm",
-    bundle: "安全复核打包"
-  };
-  const actionButtonSubs = {
-    refresh: "refresh overview",
-    validate: "validate demo gates",
-    "set-demo-mode": "global demo mode",
-    "enable-spot": "spot product config",
-    "arm-demo": "move to armed_but_closed",
-    bundle: "multi-step guarded recheck"
-  };
-  document.querySelectorAll("[data-action]").forEach((button) => {
-    const name = button.dataset.action;
-    if (actionButtons[name]) button.innerHTML = `${actionButtons[name]}<span class="button-sub">${actionButtonSubs[name] || name.replaceAll("-", " ")}</span>`;
-  });
+  const actionButtons = { refresh: "刷新概览", validate: "验证 Demo", "set-demo-mode": "切到 Demo Reserved", "enable-spot": "开启 Spot / 现货产品配置", "arm-demo": "执行 Demo Arm", bundle: "安全复核打包" };
+  const actionButtonSubs = { refresh: "refresh overview", validate: "validate demo gates", "set-demo-mode": "global demo mode", "enable-spot": "spot product config", "arm-demo": "move to armed_but_closed", bundle: "multi-step guarded recheck" };
+  document.querySelectorAll("[data-action]").forEach((button) => { const name = button.dataset.action; if (actionButtons[name]) button.innerHTML = `${actionButtons[name]}<span class="button-sub">${actionButtonSubs[name] || name.replaceAll("-", " ")}</span>`; });
 
-  const actionSummaryLabels = document.querySelectorAll("#actionSummaryGrid .summary-label");
-  const actionTexts = [
-    zhEnPrimary("最近动作", "Last Action"),
-    zhEnPrimary("结果", "Result"),
-    zhEnPrimary("状态版本", "State Revision"),
-    zhEnPrimary("审计引用", "Audit Ref")
-  ];
-  actionSummaryLabels.forEach((node, index) => { if (actionTexts[index]) node.innerHTML = actionTexts[index]; });
+  const actionTexts = [zhEnPrimary("最近动作", "Last Action"), zhEnPrimary("结果", "Result"), zhEnPrimary("状态版本", "State Revision"), zhEnPrimary("审计引用", "Audit Ref")];
+  document.querySelectorAll("#actionSummaryGrid .summary-label").forEach((node, index) => { if (actionTexts[index]) node.innerHTML = actionTexts[index]; });
 
   const rawSummaries = document.querySelectorAll("details.raw-toggle summary");
   if (rawSummaries[0]) rawSummaries[0].innerHTML = zhEnPrimary("查看原始动作响应", "View raw action response");
@@ -274,16 +205,7 @@ function ensureGuiEnhancements() {
     const hintCard = document.createElement("section");
     hintCard.className = "card glossary-card";
     hintCard.id = "guiConceptHints";
-    hintCard.innerHTML = `
-      <details class="raw-toggle">
-        <summary>${zhEnPrimary("关键概念提示（按需展开）", "Key Concept Hints")}</summary>
-        <div class="glossary-wrap" style="padding:16px;">
-          ${annotateGlossary("事实", "Facts", "先看交易所、账户、runtime 实际返回了什么。事实是“真实情况”，不是你点按钮点出来的权限。", "Facts are the actual returned conditions, not permissions granted by a button.")}
-          ${annotateGlossary("权限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。这些是“允许系统往下判断”，不是“马上能执行”。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}
-          ${annotateGlossary("状态推进", "State Progress", "最后看 demo validate、demo arm 这类步骤。它们表示系统流程往前走了，但仍可能保持封闭。", "State progress means the workflow moved forward, but it can still remain closed.")}
-          ${annotateGlossary("最重要的一句", "Most Important Rule", "看得见 ≠ 被允许；被允许继续判断 ≠ 能执行；demo ≠ live。", "Visible is not allowed; allowed to continue is not executable; demo is not live.")}
-        </div>
-      </details>`;
+    hintCard.innerHTML = `<details class="raw-toggle"><summary>${zhEnPrimary("关键概念提示（按需展开）", "Key Concept Hints")}</summary><div class="glossary-wrap" style="padding:16px;">${annotateGlossary("事实", "Facts", "先看交易所、账户、runtime 实际返回了什么。事实是“真实情况”，不是你点按钮点出来的权限。", "Facts are the actual returned conditions, not permissions granted by a button.")}${annotateGlossary("权限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。这些是“允许系统往下判断”，不是“马上能执行”。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}${annotateGlossary("状态推进", "State Progress", "最后看 demo validate、demo arm 这类步骤。它们表示系统流程往前走了，但仍可能保持封闭。", "State progress means the workflow moved forward, but it can still remain closed.")}${annotateGlossary("最重要的一句", "Most Important Rule", "看得见 ≠ 被允许；被允许继续判断 ≠ 能执行；demo ≠ live。", "Visible is not allowed; allowed to continue is not executable; demo is not live.")}</div></details>`;
     const hero = document.querySelector(".hero-card");
     if (hero) hero.after(hintCard);
   }
@@ -291,48 +213,7 @@ function ensureGuiEnhancements() {
   if (!document.getElementById("runtimeModeSection")) {
     const grid = document.createElement("section");
     grid.className = "grid two-up injected-grid";
-    grid.innerHTML = `
-      <section class="card" id="runtimeModeSection">
-        <div class="card-header-row">
-          <div>
-            <h2>${zhEnPrimary("运行模式控制", "Runtime Mode Control")}</h2>
-            <p class="subtle">受保护模式切换骨架；当前只开放低风险 guarded 动作，live 仍锁定。</p>
-          </div>
-        </div>
-        <div class="mode-grid">
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("阶段标签", "Stage Label")}</span><strong id="modeStageLabel">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("能力状态", "Capability State")}</span><strong id="modeCapabilityState">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("Demo Arm Gate", "Demo Arm Gate")}</span><strong id="modeDemoArmGate">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("Demo Enable Gate", "Demo Enable Gate")}</span><strong id="modeDemoEnableGate">-</strong></div>
-        </div>
-        <div class="mode-actions">
-          <button data-action="set-demo-mode">切到 Demo Reserved<span class="button-sub">global demo mode</span></button>
-          <button data-action="enable-spot">开启 Spot / 现货产品配置<span class="button-sub">spot product config</span></button>
-          <button data-action="validate">验证 Demo 前提<span class="button-sub">validate demo gates</span></button>
-          <button data-action="arm-demo">执行 Demo Arm<span class="button-sub">move to armed_but_closed</span></button>
-          <button class="button-muted" disabled>观测模式<span class="button-sub">Observe Only · later</span></button>
-          <button class="button-muted" disabled>Live 模式<span class="button-sub">Live Mode · locked</span></button>
-        </div>
-        <div id="modeControlNote" class="mode-note">简单理解这一区域：先决定“系统要不要进入 demo/spot 的受保护流程”，再决定“现在是否满足继续前进的条件”。它不是“真实执行权限开关区”。</div>
-      </section>
-      <section class="card" id="businessSummarySection">
-        <div class="card-header-row">
-          <div>
-            <h2>${zhEnPrimary("经营与收益摘要", "Business & Income Summary")}</h2>
-            <p class="subtle">来自 overview 的 daily business summary；当前为展示骨架，后续继续接更真实的 runtime exporter。</p>
-          </div>
-        </div>
-        <div class="summary-grid business-grid">
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("已实现盈亏", "Realized PnL")}</span><strong id="bizRealizedPnl">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("未实现盈亏", "Unrealized PnL")}</span><strong id="bizUnrealizedPnl">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("毛盈亏", "Gross PnL")}</span><strong id="bizGrossPnl">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("总成本", "Total Cost")}</span><strong id="bizTotalCost">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("净经营盈亏", "Net Operating PnL")}</span><strong id="bizNetOperatingPnl">-</strong></div>
-          <div class="summary-item"><span class="summary-label">${zhEnPrimary("业务事件数", "Business Event Count")}</span><strong id="bizEventCount">-</strong></div>
-        </div>
-        <div class="mode-note">当前只展示 overview 中已有的 daily business summary；后续可再做日/周/月切片与更完整收益面板。</div>
-      </section>`;
-
+    grid.innerHTML = `<section class="card" id="runtimeModeSection"><div class="card-header-row"><div><h2>${zhEnPrimary("运行模式控制", "Runtime Mode Control")}</h2><p class="subtle">受保护模式切换骨架；当前只开放低风险 guarded 动作，live 仍锁定。</p></div></div><div class="mode-grid"><div class="summary-item"><span class="summary-label">${zhEnPrimary("阶段标签", "Stage Label")}</span><strong id="modeStageLabel">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("能力状态", "Capability State")}</span><strong id="modeCapabilityState">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("Demo Arm Gate", "Demo Arm Gate")}</span><strong id="modeDemoArmGate">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("Demo Enable Gate", "Demo Enable Gate")}</span><strong id="modeDemoEnableGate">-</strong></div></div><div class="mode-actions"><button data-action="set-demo-mode">切到 Demo Reserved<span class="button-sub">global demo mode</span></button><button data-action="enable-spot">开启 Spot / 现货产品配置<span class="button-sub">spot product config</span></button><button data-action="validate">验证 Demo 前提<span class="button-sub">validate demo gates</span></button><button data-action="arm-demo">执行 Demo Arm<span class="button-sub">move to armed_but_closed</span></button><button class="button-muted" disabled>观测模式<span class="button-sub">Observe Only · later</span></button><button class="button-muted" disabled>Live 模式<span class="button-sub">Live Mode · locked</span></button></div><div id="modeControlNote" class="mode-note">简单理解这一区域：先决定“系统要不要进入 demo/spot 的受保护流程”，再决定“现在是否满足继续前进的条件”。它不是“真实执行权限开关区”。</div></section><section class="card" id="businessSummarySection"><div class="card-header-row"><div><h2>${zhEnPrimary("经营与收益摘要", "Business & Income Summary")}</h2><p class="subtle">来自 overview 的 daily business summary；当前为展示骨架，后续继续接更真实的 runtime exporter。</p></div></div><div class="summary-grid business-grid"><div class="summary-item"><span class="summary-label">${zhEnPrimary("已实现盈亏", "Realized PnL")}</span><strong id="bizRealizedPnl">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("未实现盈亏", "Unrealized PnL")}</span><strong id="bizUnrealizedPnl">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("毛盈亏", "Gross PnL")}</span><strong id="bizGrossPnl">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("总成本", "Total Cost")}</span><strong id="bizTotalCost">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("净经营盈亏", "Net Operating PnL")}</span><strong id="bizNetOperatingPnl">-</strong></div><div class="summary-item"><span class="summary-label">${zhEnPrimary("业务事件数", "Business Event Count")}</span><strong id="bizEventCount">-</strong></div></div><div class="mode-note">当前只展示 overview 中已有的 daily business summary；后续可再做日/周/月切片与更完整收益面板。</div></section>`;
     const firstGrid = document.querySelector(".page-shell > .grid.two-up");
     if (firstGrid) firstGrid.before(grid);
   }
@@ -341,86 +222,25 @@ function ensureGuiEnhancements() {
     const card = document.createElement("section");
     card.className = "card";
     card.id = "productFamilyConfigSection";
-    card.innerHTML = `
-      <div class="card-header-row">
-        <div>
-          <h2>${zhEnPrimary("产品族配置", "Product Family Configuration")}</h2>
-          <p class="subtle">这是后续正式承接“查看状态 + 调整设置”的独立区域。当前先做骨架，后续继续接入更多产品族设置。</p>
-        </div>
-      </div>
-      <div class="summary-grid business-grid config-family-grid">
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("现货产品配置", "Spot Configuration")}</span>
-          <strong id="cfgSpotSummary">-</strong>
-          <div id="cfgSpotMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("保证金产品配置", "Margin Configuration")}</span>
-          <strong id="cfgMarginSummary">-</strong>
-          <div id="cfgMarginMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("线性永续配置", "Linear Perp Configuration")}</span>
-          <strong id="cfgLinearPerpSummary">-</strong>
-          <div id="cfgLinearPerpMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("反向永续配置", "Inverse Perp Configuration")}</span>
-          <strong id="cfgInversePerpSummary">-</strong>
-          <div id="cfgInversePerpMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("期权配置", "Options Configuration")}</span>
-          <strong id="cfgOptionsSummary">-</strong>
-          <div id="cfgOptionsMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-        <div class="summary-item config-family-card">
-          <span class="summary-label">${zhEnPrimary("其他衍生品（预留）", "Other Derivatives Reserved")}</span>
-          <strong id="cfgOtherDerivativesSummary">-</strong>
-          <div id="cfgOtherDerivativesMeta" class="family-card-meta">-</div>
-          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
-        </div>
-      </div>
-      <div class="mode-note">这里先回答两个最基础的问题：这个产品族现在是否启用、是否可见、处于什么模式。等主线推进后，再把真正可修改的设置接进来。</div>`;
+    card.innerHTML = `<div class="card-header-row"><div><h2>${zhEnPrimary("产品族配置", "Product Family Configuration")}</h2><p class="subtle">这是后续正式承接“查看状态 + 调整设置”的独立区域。当前先做骨架，后续继续接入更多产品族设置。</p></div></div><div class="summary-grid business-grid config-family-grid"><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("现货产品配置", "Spot Configuration")}</span><strong id="cfgSpotSummary">-</strong><div id="cfgSpotMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("保证金产品配置", "Margin Configuration")}</span><strong id="cfgMarginSummary">-</strong><div id="cfgMarginMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("线性永续配置", "Linear Perp Configuration")}</span><strong id="cfgLinearPerpSummary">-</strong><div id="cfgLinearPerpMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("反向永续配置", "Inverse Perp Configuration")}</span><strong id="cfgInversePerpSummary">-</strong><div id="cfgInversePerpMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("期权配置", "Options Configuration")}</span><strong id="cfgOptionsSummary">-</strong><div id="cfgOptionsMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div><div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary("其他衍生品（预留）", "Other Derivatives Reserved")}</span><strong id="cfgOtherDerivativesSummary">-</strong><div id="cfgOtherDerivativesMeta" class="family-card-meta">-</div><div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div></div></div><div class="mode-note">这里先回答两个最基础的问题：这个产品族现在是否启用、是否可见、处于什么模式。等主线推进后，再把真正可修改的设置接进来。</div>`;
     const productFactsCard = Array.from(document.querySelectorAll(".page-shell > .card")).find((node) => node.querySelector("h2")?.textContent.includes("产品族事实"));
-    if (productFactsCard) {
-      productFactsCard.before(card);
-    }
+    if (productFactsCard) productFactsCard.before(card);
+  }
+
+  if (!document.getElementById("longTermSwitchSection")) {
+    const card = document.createElement("section");
+    card.className = "card";
+    card.id = "longTermSwitchSection";
+    card.innerHTML = `<div class="card-header-row"><div><h2>${zhEnPrimary("长期开关预留", "Long-Term Switch Preset")}</h2><p class="subtle">这里只预留长期会用到的结构和名字，不在当前章节开放真实高权限能力。</p></div></div><div class="summary-grid switch-grid" id="longTermSwitchGrid"></div><div class="mode-note">当前这一块的定位是：先把未来一定会出现的总开关和安全开关位置固定下来，避免后面临时加入口。现在全部只做展示、锁定或预留。</div>`;
+    const productConfig = document.getElementById("productFamilyConfigSection");
+    if (productConfig) productConfig.after(card);
   }
 
   if (!document.getElementById("confirmModal")) {
     const modal = document.createElement("div");
     modal.id = "confirmModal";
     modal.className = "confirm-modal hidden";
-    modal.innerHTML = `
-      <div class="confirm-modal-backdrop" data-close-modal="true"></div>
-      <div class="confirm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
-        <div class="confirm-modal-header">
-          <h3 id="confirmModalTitle">关键动作确认</h3>
-          <button class="confirm-close" data-close-modal="true">×</button>
-        </div>
-        <div class="confirm-modal-body">
-          <div id="confirmModalSubtitle" class="confirm-subtitle">-</div>
-          <div class="confirm-block">
-            <div class="confirm-label">风险说明 / Risk</div>
-            <div id="confirmModalRisk">-</div>
-          </div>
-          <div class="confirm-block">
-            <div class="confirm-label">后果说明 / Consequence</div>
-            <div id="confirmModalConsequence">-</div>
-          </div>
-          <div class="confirm-note">请确认你理解该动作不会直接开放真实 live execution，但会推进控制状态或影响可见控制结果。 / Please confirm you understand this does not directly open live execution, but it changes guarded control state or visible control outcomes.</div>
-        </div>
-        <div class="confirm-modal-footer">
-          <button class="button-muted confirm-cancel" data-close-modal="true">取消 / Cancel</button>
-          <button id="confirmModalProceed">确认执行 / Confirm</button>
-        </div>
-      </div>`;
+    modal.innerHTML = `<div class="confirm-modal-backdrop" data-close-modal="true"></div><div class="confirm-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle"><div class="confirm-modal-header"><h3 id="confirmModalTitle">关键动作确认</h3><button class="confirm-close" data-close-modal="true">×</button></div><div class="confirm-modal-body"><div id="confirmModalSubtitle" class="confirm-subtitle">-</div><div class="confirm-block"><div class="confirm-label">风险说明 / Risk</div><div id="confirmModalRisk">-</div></div><div class="confirm-block"><div class="confirm-label">后果说明 / Consequence</div><div id="confirmModalConsequence">-</div></div><div class="confirm-note">请确认你理解该动作不会直接开放真实 live execution，但会推进控制状态或影响可见控制结果。 / Please confirm you understand this does not directly open live execution, but it changes guarded control state or visible control outcomes.</div></div><div class="confirm-modal-footer"><button class="button-muted confirm-cancel" data-close-modal="true">取消 / Cancel</button><button id="confirmModalProceed">确认执行 / Confirm</button></div></div>`;
     document.body.appendChild(modal);
   }
 }
@@ -434,7 +254,6 @@ function openConfirmModal(actionName) {
   document.getElementById("confirmModalSubtitle").textContent = meta.subtitle;
   document.getElementById("confirmModalRisk").textContent = meta.risk;
   document.getElementById("confirmModalConsequence").textContent = meta.consequence;
-
   return new Promise((resolve) => {
     const cleanup = () => {
       modal.classList.add("hidden");
@@ -442,17 +261,8 @@ function openConfirmModal(actionName) {
       const proceed = document.getElementById("confirmModalProceed");
       proceed.replaceWith(proceed.cloneNode(true));
     };
-
-    modal.querySelectorAll("[data-close-modal='true']").forEach((node) => {
-      node.onclick = () => {
-        cleanup();
-        resolve(false);
-      };
-    });
-    document.getElementById("confirmModalProceed").onclick = () => {
-      cleanup();
-      resolve(true);
-    };
+    modal.querySelectorAll("[data-close-modal='true']").forEach((node) => node.onclick = () => { cleanup(); resolve(false); });
+    document.getElementById("confirmModalProceed").onclick = () => { cleanup(); resolve(true); };
   });
 }
 
@@ -460,45 +270,28 @@ function renderSummary(overview) {
   const runtime = overview.data.global_runtime;
   const demo = overview.data.demo_control_summary;
   const sourceContext = overview.source_context;
-
   document.getElementById("summaryGlobalMode").textContent = runtime.global_mode_state;
   document.getElementById("summaryExecutionAuthority").textContent = runtime.global_execution_authority_state;
   document.getElementById("summaryDemoState").textContent = demo.demo_state_switch;
   document.getElementById("summarySnapshot").textContent = `${overview.state_revision} / ${overview.snapshot_id}`;
   document.getElementById("summaryRuntimeSnapshot").textContent = sourceContext.pinned_runtime_snapshot_id;
   document.getElementById("summaryProtected").textContent = String(runtime.runtime_still_protected);
-
   setRuntimeModeBadge(`${runtime.global_mode_state} · ${demo.demo_state_switch}`, variantForState(runtime.global_execution_authority_state));
 }
 
 function renderModeControl(overview) {
   const runtime = overview.data.global_runtime;
   const demo = overview.data.demo_control_summary;
-  const stageLabel = document.getElementById("modeStageLabel");
-  const capability = document.getElementById("modeCapabilityState");
-  const armGate = document.getElementById("modeDemoArmGate");
-  const enableGate = document.getElementById("modeDemoEnableGate");
-  if (!stageLabel) return;
-  stageLabel.textContent = safeText(runtime.global_stage_label);
-  capability.textContent = safeText(runtime.global_capability_state);
-  armGate.textContent = safeText(demo.demo_arm_gate_state);
-  enableGate.textContent = safeText(demo.demo_enable_gate_state);
+  document.getElementById("modeStageLabel").textContent = safeText(runtime.global_stage_label);
+  document.getElementById("modeCapabilityState").textContent = safeText(runtime.global_capability_state);
+  document.getElementById("modeDemoArmGate").textContent = safeText(demo.demo_arm_gate_state);
+  document.getElementById("modeDemoEnableGate").textContent = safeText(demo.demo_enable_gate_state);
 }
 
 function renderBusinessSummary(overview) {
   const daily = overview.data.daily_business_summary;
-  const mapping = {
-    bizRealizedPnl: daily.realized_pnl,
-    bizUnrealizedPnl: daily.unrealized_pnl,
-    bizGrossPnl: daily.gross_pnl,
-    bizTotalCost: daily.total_cost,
-    bizNetOperatingPnl: daily.net_operating_pnl,
-    bizEventCount: daily.business_event_count
-  };
-  Object.entries(mapping).forEach(([id, value]) => {
-    const node = document.getElementById(id);
-    if (node) node.textContent = safeText(value);
-  });
+  const mapping = { bizRealizedPnl: daily.realized_pnl, bizUnrealizedPnl: daily.unrealized_pnl, bizGrossPnl: daily.gross_pnl, bizTotalCost: daily.total_cost, bizNetOperatingPnl: daily.net_operating_pnl, bizEventCount: daily.business_event_count };
+  Object.entries(mapping).forEach(([id, value]) => { const node = document.getElementById(id); if (node) node.textContent = safeText(value); });
 }
 
 function renderProductFamilyConfig(productFamilies) {
@@ -507,12 +300,7 @@ function renderProductFamilyConfig(productFamilies) {
     const summaryNode = document.getElementById(ids.summary);
     const metaNode = document.getElementById(ids.meta);
     if (!summaryNode || !metaNode) return;
-    if (!data) {
-      summaryNode.textContent = "-";
-      metaNode.textContent = "当前没有这类产品的配置摘要。";
-      return;
-    }
-
+    if (!data) { summaryNode.textContent = "-"; metaNode.textContent = "当前没有这类产品的配置摘要。"; return; }
     const enabledText = booleanZh(data.controls.enabled_switch, "已启用", "未启用");
     const visibleText = booleanZh(data.controls.visibility_switch, "可见", "隐藏");
     summaryNode.textContent = `${enabledText} · ${visibleText} · 模式 ${safeText(data.controls.mode_switch)}`;
@@ -520,48 +308,24 @@ function renderProductFamilyConfig(productFamilies) {
   });
 }
 
+function renderLongTermSwitches() {
+  const grid = document.getElementById("longTermSwitchGrid");
+  if (!grid) return;
+  grid.innerHTML = LONG_TERM_SWITCHES.map(([zh, en, desc, state]) => `<div class="summary-item config-family-card"><span class="summary-label">${zhEnPrimary(zh, en)}</span><strong><span class="status-chip ${variantForState(state)}">${safeText(state)}</span></strong><div class="family-card-meta">${desc}</div><div class="family-actions"><button class="button-muted" disabled>长期预留（未开放）<span class="button-sub">preset only</span></button></div></div>`).join("");
+}
+
 function renderSourceContext(sourceContext) {
-  renderKvGrid("sourceContextGrid", [
-    [zhEnPrimary("只读连接器", "Readonly Connector"), sourceContext.readonly_connector_name],
-    [zhEnPrimary("执行连接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"],
-    [zhEnPrimary("私有 REST", "REST Private"), sourceContext.rest_private_connection_state],
-    [zhEnPrimary("私有 WS", "WS Private"), sourceContext.ws_private_connection_state],
-    [zhEnPrimary("Runtime 连接", "Runtime Connection"), sourceContext.runtime_connection_state],
-    [zhEnPrimary("账户完整性", "Account Completeness"), sourceContext.account_fact_completeness_state],
-    [zhEnPrimary("快照完整性", "Snapshot Completeness"), sourceContext.source_snapshot_completeness_state],
-    [zhEnPrimary("角色分离", "Role Separation"), sourceContext.connector_role_separation_ok],
-    [zhEnPrimary("Runtime 快照", "Runtime Snapshot"), sourceContext.pinned_runtime_snapshot_id]
-  ]);
+  renderKvGrid("sourceContextGrid", [[zhEnPrimary("只读连接器", "Readonly Connector"), sourceContext.readonly_connector_name], [zhEnPrimary("执行连接器", "Execution Connector"), sourceContext.execution_connector_name || "not_attached"], [zhEnPrimary("私有 REST", "REST Private"), sourceContext.rest_private_connection_state], [zhEnPrimary("私有 WS", "WS Private"), sourceContext.ws_private_connection_state], [zhEnPrimary("Runtime 连接", "Runtime Connection"), sourceContext.runtime_connection_state], [zhEnPrimary("账户完整性", "Account Completeness"), sourceContext.account_fact_completeness_state], [zhEnPrimary("快照完整性", "Snapshot Completeness"), sourceContext.source_snapshot_completeness_state], [zhEnPrimary("角色分离", "Role Separation"), sourceContext.connector_role_separation_ok], [zhEnPrimary("Runtime 快照", "Runtime Snapshot"), sourceContext.pinned_runtime_snapshot_id]]);
 }
 
 function renderHealth(overview) {
   const health = overview.data.health_summary;
-  renderKvGrid("healthGrid", [
-    [zhEnPrimary("总健康分", "Overall Health Score"), health.scores.overall_health_score],
-    [zhEnPrimary("AI 健康分", "AI Health Score"), health.scores.ai_health_score],
-    [zhEnPrimary("交易所健康分", "Exchange Health Score"), health.scores.exchange_health_score],
-    [zhEnPrimary("新鲜度分", "Data Freshness Score"), health.scores.data_freshness_score],
-    [zhEnPrimary("总 Gate", "Health Gates Overall"), health.gates.health_gates_overall_state],
-    [zhEnPrimary("Timeout Gate", "Exchange Timeout Gate"), health.gates.exchange_timeout_gate_state],
-    [zhEnPrimary("WS 断连 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state],
-    [zhEnPrimary("延迟 Gate", "Latency Gate"), health.gates.latency_gate_state],
-    [zhEnPrimary("新鲜度 Gate", "Freshness Gate"), health.gates.freshness_gate_state]
-  ]);
+  renderKvGrid("healthGrid", [[zhEnPrimary("总健康分", "Overall Health Score"), health.scores.overall_health_score], [zhEnPrimary("AI 健康分", "AI Health Score"), health.scores.ai_health_score], [zhEnPrimary("交易所健康分", "Exchange Health Score"), health.scores.exchange_health_score], [zhEnPrimary("新鲜度分", "Data Freshness Score"), health.scores.data_freshness_score], [zhEnPrimary("总 Gate", "Health Gates Overall"), health.gates.health_gates_overall_state], [zhEnPrimary("Timeout Gate", "Exchange Timeout Gate"), health.gates.exchange_timeout_gate_state], [zhEnPrimary("WS 断连 Gate", "WS Disconnect Gate"), health.gates.ws_disconnect_gate_state], [zhEnPrimary("延迟 Gate", "Latency Gate"), health.gates.latency_gate_state], [zhEnPrimary("新鲜度 Gate", "Freshness Gate"), health.gates.freshness_gate_state]]);
 }
 
 function renderProductFamilies(productFamilies) {
   const body = document.getElementById("productFamilyTableBody");
-  const rows = Object.entries(productFamilies).map(([name, data]) => `
-    <tr>
-      <td>${PRODUCT_FAMILY_LABELS[name] || name}</td>
-      <td><span class="status-chip ${variantForState(data.facts.exchange_permission_fact)}">${data.facts.exchange_permission_fact}</span></td>
-      <td><span class="status-chip ${variantForState(data.facts.account_permission_fact)}">${data.facts.account_permission_fact}</span></td>
-      <td>${String(data.controls.enabled_switch)}</td>
-      <td>${String(data.controls.visibility_switch)}</td>
-      <td>${data.controls.mode_switch}</td>
-      <td><span class="status-chip ${variantForState(data.derived.capability_state)}">${data.derived.capability_state}</span></td>
-      <td><span class="status-chip ${variantForState(data.derived.execution_authority_state)}">${data.derived.execution_authority_state}</span></td>
-    </tr>`).join("");
+  const rows = Object.entries(productFamilies).map(([name, data]) => `<tr><td>${PRODUCT_FAMILY_LABELS[name] || name}</td><td><span class="status-chip ${variantForState(data.facts.exchange_permission_fact)}">${data.facts.exchange_permission_fact}</span></td><td><span class="status-chip ${variantForState(data.facts.account_permission_fact)}">${data.facts.account_permission_fact}</span></td><td>${String(data.controls.enabled_switch)}</td><td>${String(data.controls.visibility_switch)}</td><td>${data.controls.mode_switch}</td><td><span class="status-chip ${variantForState(data.derived.capability_state)}">${data.derived.capability_state}</span></td><td><span class="status-chip ${variantForState(data.derived.execution_authority_state)}">${data.derived.execution_authority_state}</span></td></tr>`).join("");
   body.innerHTML = rows || '<tr><td colspan="8" class="muted-cell">无数据 / No data</td></tr>';
 }
 
@@ -571,7 +335,6 @@ async function apiGet(path) {
   if (!response.ok) throw new Error(pretty(data));
   return data;
 }
-
 async function apiPost(path, payload) {
   const response = await fetch(path, { method: "POST", headers: headers(), body: JSON.stringify(payload) });
   const data = await response.json();
@@ -581,50 +344,27 @@ async function apiPost(path, payload) {
 
 async function loadDashboard() {
   ensureGuiEnhancements();
-  const [overview, controlPlane, sourceContext, audit, productFamilies] = await Promise.all([
-    apiGet("/api/v1/system/overview"),
-    apiGet("/api/v1/system/control-plane"),
-    apiGet("/api/v1/system/source-context"),
-    apiGet("/api/v1/system/audit-summary"),
-    apiGet("/api/v1/system/product-families")
-  ]);
-
+  const [overview, controlPlane, sourceContext, audit, productFamilies] = await Promise.all([apiGet("/api/v1/system/overview"), apiGet("/api/v1/system/control-plane"), apiGet("/api/v1/system/source-context"), apiGet("/api/v1/system/audit-summary"), apiGet("/api/v1/system/product-families")]);
   renderSummary(overview);
   renderModeControl(overview);
   renderBusinessSummary(overview);
   renderProductFamilyConfig(productFamilies.data);
+  renderLongTermSwitches();
   renderSourceContext(sourceContext.data);
   renderHealth(overview);
   renderProductFamilies(productFamilies.data);
-
   document.getElementById("overviewBox").textContent = pretty(overview);
   document.getElementById("controlPlaneBox").textContent = pretty(controlPlane);
   document.getElementById("auditBox").textContent = pretty(audit);
 }
 
-async function getOverviewForEnvelope() {
-  return await apiGet("/api/v1/system/overview");
-}
-
-function baseEnvelope(overview, extra = {}) {
-  return {
-    request_id: crypto.randomUUID(),
-    idempotency_key: crypto.randomUUID(),
-    operator_id: "demo-operator",
-    reason: "gui-triggered action",
-    client_ts_ms: Date.now(),
-    expected_state_revision: overview.state_revision,
-    expected_previous_state: null,
-    payload: {},
-    ...extra
-  };
-}
+async function getOverviewForEnvelope() { return await apiGet("/api/v1/system/overview"); }
+function baseEnvelope(overview, extra = {}) { return { request_id: crypto.randomUUID(), idempotency_key: crypto.randomUUID(), operator_id: "demo-operator", reason: "gui-triggered action", client_ts_ms: Date.now(), expected_state_revision: overview.state_revision, expected_previous_state: null, payload: {}, ...extra }; }
 
 async function runQuickAction(actionName) {
   try {
     const overview = await getOverviewForEnvelope();
     let result;
-
     if (actionName !== "refresh") {
       const confirmed = await openConfirmModal(actionName);
       if (!confirmed) {
@@ -632,7 +372,6 @@ async function runQuickAction(actionName) {
         return;
       }
     }
-
     if (actionName === "refresh") {
       await loadDashboard();
       setActionSummary("刷新概览 / refresh overview", "success", overview.state_revision, "-", "界面已刷新。 / Dashboard refreshed.", { message: "Refresh completed." });
@@ -640,27 +379,12 @@ async function runQuickAction(actionName) {
     }
     if (actionName === "validate") result = await apiPost("/api/v1/control/demo/validate", baseEnvelope(overview));
     if (actionName === "bundle") result = await apiPost("/api/v1/control/safe-recheck-bundle", baseEnvelope(overview));
-    if (actionName === "set-demo-mode") {
-      result = await apiPost("/api/v1/input/config-change", baseEnvelope(overview, {
-        payload: { changes: [{ path: "global_runtime.controls.global_execution_mode_switch", value: "demo_reserved" }] }
-      }));
-    }
-    if (actionName === "enable-spot") {
-      result = await apiPost("/api/v1/input/config-change", baseEnvelope(overview, {
-        payload: { changes: [
-          { path: "product_family_status.spot.controls.enabled_switch", value: true },
-          { path: "product_family_status.spot.controls.mode_switch", value: "shadow_only" }
-        ] }
-      }));
-    }
+    if (actionName === "set-demo-mode") result = await apiPost("/api/v1/input/config-change", baseEnvelope(overview, { payload: { changes: [{ path: "global_runtime.controls.global_execution_mode_switch", value: "demo_reserved" }] } }));
+    if (actionName === "enable-spot") result = await apiPost("/api/v1/input/config-change", baseEnvelope(overview, { payload: { changes: [{ path: "product_family_status.spot.controls.enabled_switch", value: true }, { path: "product_family_status.spot.controls.mode_switch", value: "shadow_only" }] } }));
     if (actionName === "arm-demo") {
       const demoState = overview.data.demo_control_summary.demo_state_switch;
-      result = await apiPost("/api/v1/control/demo/arm", baseEnvelope(overview, {
-        expected_previous_state: demoState,
-        payload: { acknowledged: true }
-      }));
+      result = await apiPost("/api/v1/control/demo/arm", baseEnvelope(overview, { expected_previous_state: demoState, payload: { acknowledged: true } }));
     }
-
     summarizeActionResult(actionName, result);
     await loadDashboard();
   } catch (error) {
@@ -681,7 +405,6 @@ document.addEventListener("DOMContentLoaded", () => {
       setActionSummary("连接 / Connect", "failed", "-", "-", String(error), String(error));
     }
   });
-
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     if (!target) return;
