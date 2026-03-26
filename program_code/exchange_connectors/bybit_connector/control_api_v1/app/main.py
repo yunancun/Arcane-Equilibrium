@@ -2,13 +2,13 @@ from __future__ import annotations
 
 """
 OpenClaw / Bybit Control API + GUI
-OpenClaw / Bybit 控制 API 与 GUI 默认入口（快照稳定版）
+OpenClaw / Bybit 控制 API 与 GUI 默认入口（快照稳定版 + runtime bridge）
 
 说明 / Notes:
-- 这是当前默认入口，已经通过 snapshot identity 稳定性验证。
-- This is the current default entrypoint and it has passed snapshot identity stability validation.
-- 纯读取 GET 不会刷新 `snapshot_id` 或 `snapshot_ts_ms`。
-- Pure read-only GET requests do not refresh `snapshot_id` or `snapshot_ts_ms`.
+- 当前默认入口已经通过 snapshot identity 稳定性验证。
+- The current default entrypoint has passed snapshot identity stability validation.
+- 可选接入 runtime snapshot bridge，从外部 runtime JSON 快照读取真实事实。
+- Optionally integrates a runtime snapshot bridge to read real facts from an external runtime JSON snapshot.
 - 若需回滚旧实现，请使用 `app.main_legacy:app`。
 - To roll back to the old implementation, use `app.main_legacy:app`.
 """
@@ -18,6 +18,11 @@ import json
 from typing import Any
 
 from . import main_legacy as base
+from .runtime_bridge import (
+    build_runtime_aware_source_context,
+    derive_response_snapshot_identity,
+    overlay_runtime_facts,
+)
 
 
 def stable_compile_state(state: dict[str, Any], *, refresh_identity: bool) -> dict[str, Any]:
@@ -71,10 +76,6 @@ def stable_compile_state(state: dict[str, Any], *, refresh_identity: bool) -> di
 
 
 def _patched_read(self) -> dict[str, Any]:
-    """
-    Read without writing back refreshed snapshot identity.
-    纯读取不回写新的 snapshot 身份。
-    """
     with self._lock:
         with self.file_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -82,10 +83,6 @@ def _patched_read(self) -> dict[str, Any]:
 
 
 def _patched_write(self, state: dict[str, Any]) -> dict[str, Any]:
-    """
-    Refresh snapshot identity only when the incoming state identity is stale.
-    只有在输入状态身份过期时才刷新 snapshot。
-    """
     with self._lock:
         compiled_without_refresh = stable_compile_state(state, refresh_identity=False)
         incoming_snapshot_id = state.get("meta", {}).get("snapshot_id")
@@ -107,10 +104,50 @@ def _patched_mutate(self, mutator):
         return _patched_write(self, mutated)
 
 
+def runtime_aware_build_source_context(snapshot: dict[str, Any]) -> Any:
+    return build_runtime_aware_source_context(snapshot, base.settings, base.SourceContext)
+
+
+def runtime_aware_get_latest_snapshot() -> tuple[dict[str, Any], Any]:
+    snapshot = base.STORE.read()
+    merged_snapshot = overlay_runtime_facts(snapshot)
+    return merged_snapshot, runtime_aware_build_source_context(merged_snapshot)
+
+
+def runtime_aware_envelope_response(
+    *,
+    snapshot: dict[str, Any],
+    request_id: str | None,
+    action_result: str,
+    data: Any,
+    audit_ref: str | None = None,
+    reason_codes: list[str] | None = None,
+) -> Any:
+    source_context = runtime_aware_build_source_context(snapshot)
+    response_snapshot_ts_ms, response_snapshot_id = derive_response_snapshot_identity(snapshot, source_context)
+    return base.ResponseEnvelope[Any](
+        api_version=base.settings.api_version,
+        schema_version=base.settings.schema_version,
+        request_id=request_id,
+        snapshot_ts_ms=response_snapshot_ts_ms,
+        snapshot_id=response_snapshot_id,
+        state_revision=snapshot["meta"]["state_revision"],
+        action_result=action_result,
+        reason_codes=reason_codes or [],
+        warnings=[],
+        audit_ref=audit_ref,
+        source_context=source_context,
+        data=data,
+    )
+
+
 base.compile_state = stable_compile_state
 base.JsonStateStore.read = _patched_read
 base.JsonStateStore.write = _patched_write
 base.JsonStateStore.mutate = _patched_mutate
 base.STORE = base.JsonStateStore(base.settings.state_file_path)
+base.build_source_context = runtime_aware_build_source_context
+base.get_latest_snapshot = runtime_aware_get_latest_snapshot
+base.envelope_response = runtime_aware_envelope_response
 
 app = base.app
