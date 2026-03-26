@@ -1,0 +1,417 @@
+OpenClaw / Bybit 项目
+完整工程记录（2026-03-25，J/K 集中收口完成版）
+============================================================
+
+一、文件用途
+------------------------------------------------------------
+这份文件用于：
+1. 作为 2026-03-24 晚至 2026-03-25 凌晨这一整段工程推进的正式记录；
+2. 给后续新对话/新分支直接接手使用；
+3. 记录今晚到底改了什么、验证了什么、哪些结论已经成立、哪些边界绝不能误读；
+4. 区分“章节已收口完成”与“系统已可执行放权”这两件完全不同的事；
+5. 在未来继续推进总文档/基线更新，或进入后续章节前，作为本轮 JK 收口的最终事实底稿。
+
+二、本轮记录的真相优先级
+------------------------------------------------------------
+本文件使用的真相优先级如下：
+
+第一优先级：
+- 2026-03-24 晚最新交接日志
+- 本轮实际 shell 回贴结果
+- 本轮实际 git status / git log / runtime latest / closure latest
+
+第二优先级：
+- 2026-03-24 当日工作报告 / 工程记录
+- repo 内已存在的 canonical runner、baseline 文档、closure 文档、work report
+
+第三优先级：
+- 2026-03-22 及更早的总报告 / 接手摘要 / 兼容性文件
+
+重要说明：
+- 旧文件中关于 I/J/K 的部分内容已有明显过时信息；
+- 本轮应以“2026-03-24 晚交接日志 + 本轮实测输出 + 本轮 git 主线结果”为最终真相；
+- 旧文件只保留背景价值，不再拥有覆盖本轮结论的资格。
+
+三、本轮结束后的项目最新状态总览
+------------------------------------------------------------
+1. H 章
+- 已处于闭环可复核状态。
+- no-call path 已被接受为合法成功语义的一部分。
+- 仍不代表 live execution。
+
+2. I 章
+- I 章（decision-lease control plane）已经 canonical closed。
+- 正确定位是：
+  - shadow-only decision-lease control plane closed
+  - runtime 仍严格受保护
+  - execution authority 未授予
+  - live execution 未开启
+- I5 曾因 legal no-call path 被误判为 latency failure 而阻断；
+  本轮前已经修复，本轮继续沿用该修复后的 accepted semantics。
+
+3. J 章
+- J 章（Transition Engine Skeleton）今晚已完成功能层集中收口。
+- 最终 latest 结果：
+  - closeout_state = functional_closeout_ready_shadow_only
+  - closeout_ready = True
+  - old_canonical_chain_green = True
+  - new_decision_chain_green = True
+  - runtime_still_protected = True
+  - execution_permitted = False
+  - demo_gate_open = False
+  - live_execution_open = False
+  - blockers = []
+- 正确解释：
+  - J 章已经完成本轮 functional closeout
+  - 但仍严格保持 shadow / skeleton-only
+  - 绝不等于 execution 放权
+
+4. K 章
+- K 章（Paper / Demo Gate）今晚已完成功能层集中收口。
+- 最终 latest 结果：
+  - closeout_state = functional_closeout_ready_design_only_gate_closed
+  - closeout_ready = True
+  - old_canonical_chain_green = True
+  - decision_chain_green = True
+  - capability_contract_chain_green = True
+  - runtime_still_protected = True
+  - paper_execution_permitted = False
+  - live_execution_permitted = False
+  - gate_can_open = False
+  - operator_can_enable = False
+  - blockers = []
+- 正确解释：
+  - K 章已经完成本轮 functional closeout
+  - 但仍严格保持 design-only gate closed
+  - 绝不等于 demo gate 已打开
+  - 更不等于 paper/live execution 已放权
+
+5. 当前系统全局边界
+- runtime 仍必须理解为：
+  - system_mode = read_only
+  - execution_state = disabled
+- 本轮任何“闭环”“收口”“closeout ready”都不能被解释成：
+  - 已允许 paper execution
+  - 已允许 live execution
+  - 已授予真实下单 authority
+
+四、本轮最重要的工程结论
+------------------------------------------------------------
+一句话总括：
+
+今晚不是把 J/K 做成“可执行放权章节”，
+而是把 J/K 做成“在严格保护边界内完成章节级功能收口”的章节。
+
+更精确地说：
+
+- J 已从“canonical skeleton 绿色”推进到：
+  - unified decision
+  - decision contract
+  - functional closure ready (shadow only)
+
+- K 已从“design-only gate closed”推进到：
+  - decision
+  - decision contract
+  - 多条 capability 链
+  - 多条 capability contract 链
+  - functional closure ready (design-only gate closed)
+
+五、本轮开始前的真实问题与最初收尾
+------------------------------------------------------------
+1. 初始问题
+本轮开始时，重点不是继续发散新功能，而是先核验 J/K 是否真的已经落地到主线。
+
+当时真实情况包括：
+- 用户最初在错误目录执行 git status / git log，显示“不是 git 仓库”；
+- 随后确认真正 repo 根在：
+  /home/ncyu/BybitOpenClaw/srv
+- J/K 一部分文件当时只是本地未跟踪文件，并未全部进入主线；
+- K 当时缺：
+  - K10 canonical runner
+  - K baseline 文档
+  - git 收尾确认
+- J 当时也需要确认 runner / baseline 文档是否已经完整 commit/push。
+
+2. 先做的事情
+本轮最初首先完成了：
+- repo 路径确认；
+- git remote / branch / status 核验；
+- 对本地未跟踪 J/K 文件做备份；
+- pull 最新 main；
+- 重新核对 J/K baseline 与 canonical runner 的存在状态；
+- 跑通 J10 / K10 canonical recheck；
+- 补做 J runner + J baseline 文档的 commit/push；
+- 最终把 git 工作区清理到干净状态。
+
+六、本轮 J 章节新增与收口内容
+------------------------------------------------------------
+1. 先前已落地的 J canonical 内容
+本轮开始前后已经确认 J 侧具备：
+- J canonical runner
+- J canonical runner baseline 文档
+- J chapter closure baseline 文档
+- J10 canonical recheck 可直接跑通
+- J runtime latest / final audit / chapter consistency 均为绿
+
+2. 本轮新增的 J 功能层
+本轮进一步新增并验证了以下功能层：
+
+A. unified decision
+文件：
+- program_code/trading_strategy/bybit_event_driven/bybit_transition_engine_decision_builder.py
+作用：
+- 聚合 J 现有 matrix / audit / rule / graph / summary / handoff / final audit / runtime
+- 输出统一 machine-readable decision
+- 其含义是：
+  candidate_transition_ready_skeleton_only
+- 只表示 candidate transition 在 skeleton 语义下成立并可流向 K 设计层；
+  不表示 execution 被打开
+
+B. decision contract
+文件：
+- program_code/trading_strategy/bybit_event_driven/bybit_transition_engine_decision_contract_check.py
+作用：
+- 对 J unified decision latest 做 contract check
+- 锁定以下边界：
+  - execution_permitted = False
+  - demo_gate_open = False
+  - live_execution_open = False
+
+C. functional closure
+文件：
+- program_code/trading_strategy/bybit_event_driven/bybit_transition_engine_functional_closure_builder.py
+作用：
+- 把 J 旧 canonical 链与新 decision / decision contract 统一吸进一个 closure latest
+- 给出本轮最终机器可读结论：
+  functional_closeout_ready_shadow_only
+
+3. J 最终判断
+- J 已完成本轮集中收口；
+- 但它仍是：
+  shadow / skeleton-only closeout ready；
+- 不是 execution engine；
+- 不是可放权章节。
+
+七、本轮 K 章节新增与收口内容
+------------------------------------------------------------
+1. 先前已落地的 K canonical 内容
+本轮开始前后已经确认 K 侧具备：
+- K10 canonical runner
+- K canonical runner baseline 文档
+- K chapter closure baseline 文档
+- K10 canonical recheck 可直接跑通
+- K runtime summary / handoff / final audit / chapter consistency 为绿
+- K 当时已正确解释为：
+  design-only gate closed
+
+2. 本轮新增的 K 功能层总览
+K 今晚新增内容很多，但核心思路是一致的：
+先把各 capability 定义出来，
+再给每条 capability 增加 contract，
+最后统一做 functional closure。
+
+3. K 顶层统一层
+A. transition intake
+- bybit_demo_gate_transition_intake_builder.py
+- bybit_demo_gate_transition_intake_contract_check.py
+作用：
+- 接住 J unified decision
+- 明确 K 设计层可安全接收 J 的 candidate transition
+- 但仍不开放 execution
+
+B. unified K decision
+- bybit_demo_gate_decision_builder.py
+- bybit_demo_gate_decision_contract_check.py
+作用：
+- 形成 K 自己的统一决策对象
+- 明确当前状态是：
+  design_only_ready_no_execution
+
+4. K 七条 capability 链
+本轮已全部补齐到 capability + contract 层：
+
+A. adapter
+- bybit_demo_paper_adapter_transition_intent_builder.py
+- bybit_demo_paper_adapter_transition_intent_contract_check.py
+- bybit_demo_paper_adapter_capability_builder.py
+- bybit_demo_paper_adapter_capability_contract_check.py
+
+含义：
+- adapter 已能形成内部 paper transition intent envelope
+- 但不能提交 paper order
+
+B. lifecycle
+- bybit_paper_order_lifecycle_capability_builder.py
+- bybit_paper_order_lifecycle_capability_contract_check.py
+
+含义：
+- lifecycle state machine skeleton 已定义
+- 但 submission path 仍关闭
+- lifecycle_ready 仍保持 false
+
+C. projection
+- bybit_paper_position_balance_projection_capability_builder.py
+- bybit_paper_position_balance_projection_capability_contract_check.py
+
+含义：
+- position / balance / pnl / fee / reserved margin projection 模型已定义
+- 但不能驱动真实 paper ledger
+- projection_ready 仍保持 false
+
+D. risk
+- bybit_pretrade_risk_gate_capability_builder.py
+- bybit_pretrade_risk_gate_capability_contract_check.py
+
+含义：
+- pretrade risk model surface 已定义
+- 但 risk gate 仍关闭
+- risk_ready 仍保持 false
+
+E. audit
+- bybit_paper_audit_trail_capability_builder.py
+- bybit_paper_audit_trail_capability_contract_check.py
+
+含义：
+- audit trail model surface 已定义
+- 但不能记录真实完整 execution flow
+- audit_ready 仍保持 false
+
+F. operator switch
+- bybit_explicit_operator_enable_switch_capability_builder.py
+- bybit_explicit_operator_enable_switch_capability_contract_check.py
+
+含义：
+- operator enable switch model 已定义
+- 但 operator enable 仍不可用
+- operator path 仍关闭
+
+G. acceptance
+- bybit_demo_gate_acceptance_capability_builder.py
+- bybit_demo_gate_acceptance_capability_contract_check.py
+
+含义：
+- demo gate acceptance model 已定义
+- 但 acceptance path 仍关闭
+- demo gate 仍不能打开
+
+5. K functional closure
+文件：
+- program_code/exchange_connectors/bybit_connector/misc_tools/bybit_demo_gate_functional_closure_builder.py
+
+作用：
+- 把 K 旧 canonical 链
+- K decision / contract
+- adapter / lifecycle / projection / risk / audit / switch / acceptance contract
+全部吸进一个统一 closure latest
+
+最终结论：
+- functional_closeout_ready_design_only_gate_closed
+
+八、本轮重要 git / 主线结果
+------------------------------------------------------------
+1. 本轮中后段 git 一直保持在主线 main 上推进。
+2. 用户最终确认：
+- git status 干净
+- HEAD -> main, origin/main 同步
+说明：
+- 绝大多数本轮新增程序已正式进入主线
+- 本轮结束时工作区干净
+
+3. 本轮一些关键 commit（按可见记录）
+- Add K paper adapter capability contract check
+- Add K paper order lifecycle capability builder
+- Add K paper order lifecycle capability contract check
+- Add K paper position balance projection capability builder
+- Add K paper position balance projection capability contract check
+- Add K pretrade risk gate capability builder
+- Add K pretrade risk gate capability contract check
+- Add K paper audit trail capability builder
+- Add K paper audit trail capability contract check
+- Add K explicit operator enable switch capability builder
+- Add K demo gate acceptance capability builder
+- Add K demo gate acceptance capability contract check
+- Add K explicit operator enable switch capability contract check
+- Add J functional closure builder
+- Add K functional closure builder
+
+注：
+commit message 以实际 git log 为准；
+这里保留的是本轮最终已经确认存在于 main 上的关键阶段性结果。
+
+九、本轮发生过但已被安全处理的工程细节
+------------------------------------------------------------
+1. operator switch contract 文件一度是本地 shell 创建、未跟踪文件。
+之后已经：
+- 先备份到 repo 外；
+- 删除本地未跟踪副本；
+- pull 最新 main；
+- 再确认远端主线版已经存在；
+- diff 显示本地版与远端版主要差异在注释展开和写法压缩，
+  不是逻辑分叉；
+- 最终以远端主线版为准，git 工作区保持干净。
+
+2. 本轮多次出现 shell / heredoc / 粘贴截断问题。
+实际应对方式已经形成经验：
+- 不再使用特别长的一坨 here-doc 命令；
+- 改为短命令、分段执行；
+- 先 pull，再单个 builder/contract 跑，再 inspect；
+- 必要时本地落文件，再对照远端主线收敛。
+
+十、本轮最终可确认为“已完成”的事项
+------------------------------------------------------------
+1. H 章：已闭环（背景事实）
+2. I 章：canonical closed（背景事实）
+3. J 章：本轮 functional closeout 完成
+4. K 章：本轮 functional closeout 完成
+5. git 工作区：干净
+6. 主分支 main：与 origin/main 同步
+
+十一、本轮仍必须坚持的解释边界
+------------------------------------------------------------
+以下说法是错误的：
+- “J 做完了，所以可以执行了”
+- “K 做完了，所以 demo gate 可以开了”
+- “K capability 都补齐了，所以 paper execution ready 了”
+- “closeout_ready = True 就代表已经允许真实交易”
+
+以下说法是正确的：
+- J 做完 = shadow/skeleton-only closeout complete
+- K 做完 = design-only gate closed closeout complete
+- 系统仍 read_only / disabled
+- execution 权限仍没有被打开
+- 真实交易 authority 仍未授予
+
+十二、下一轮最自然的起点
+------------------------------------------------------------
+经过今晚这轮后，下一轮不应再把重点放在“继续乱开新 capability 分支”。
+
+最自然的下一步应是：
+1. 生成新的完整工程记录 / 接手文件；
+2. 更新总文档与基线说明；
+3. 再决定是否进入后续章节，或先做 repo / docs 层的统一更新。
+
+十三、最重要的记忆锚点（必须保留）
+------------------------------------------------------------
+1. I 章已经 canonical closed，且只是 shadow-only
+2. I5 legal no-call semantics bug 已修复
+3. J 已完成 functional_closeout_ready_shadow_only
+4. K 已完成 functional_closeout_ready_design_only_gate_closed
+5. J/K 做完不等于 execution 放权
+6. runtime 仍 read_only / disabled
+7. git 最终是干净的，main 与 origin/main 同步
+8. operator switch contract 曾本地落地，但最后已安全并入主线
+9. 本轮真正完成的是“章节功能收口”，不是“交易权限开放”
+
+十四、结论
+------------------------------------------------------------
+如果只按当前工程口径来判断：
+
+今晚可以正式说：
+- J 做完了
+- K 做完了
+
+但这个“做完”是：
+- 在严格保护边界下完成章节级功能收口
+- 不是 demo gate / paper execution / live execution 放开
+
+这是本轮记录最关键的结论。

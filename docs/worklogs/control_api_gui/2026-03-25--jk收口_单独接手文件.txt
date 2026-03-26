@@ -1,0 +1,179 @@
+OpenClaw / Bybit 项目
+单独接手文件（2026-03-25，J/K 收口完成版）
+============================================================
+
+一、这份文件的用途
+------------------------------------------------------------
+这是一份给“新对话 / 新分支 / 下一轮施工”直接使用的最小接手文件。
+
+它的目标不是复述全部历史，而是快速让接手方建立正确事实基线、正确风险边界、
+正确的下一步顺序，避免重新掉回旧文件里的过时口径。
+
+二、接手时必须先建立的事实基线
+------------------------------------------------------------
+1. I 章（decision-lease control plane）
+- 已 canonical closed
+- 正确定位是 shadow-only closed
+- 不是 live execution ready
+- runtime 仍严格受保护
+- execution_authority 仍未授予
+
+2. I5 bug
+- I5 曾经因为 legal no-call path 被错误当成 latency failure 而阻断
+- 该 bug 已修复
+- legal no-call semantics 现在是 accepted semantics
+
+3. J 章
+- J 章（Transition Engine Skeleton）本轮最终收口结果：
+  - closeout_state = functional_closeout_ready_shadow_only
+  - closeout_ready = True
+  - execution_permitted = False
+  - demo_gate_open = False
+  - live_execution_open = False
+  - blockers = []
+- 正确解释：
+  J 已完成本轮 functional closeout
+  但仍严格保持 shadow / skeleton-only
+
+4. K 章
+- K 章（Paper / Demo Gate）本轮最终收口结果：
+  - closeout_state = functional_closeout_ready_design_only_gate_closed
+  - closeout_ready = True
+  - paper_execution_permitted = False
+  - live_execution_permitted = False
+  - gate_can_open = False
+  - operator_can_enable = False
+  - blockers = []
+- 正确解释：
+  K 已完成本轮 functional closeout
+  但仍严格保持 design-only gate closed
+
+5. 全局安全边界
+- 当前主 runtime 仍必须理解为：
+  - system_mode = read_only
+  - execution_state = disabled
+- 绝不能把任何章节闭环误读成 live 放权
+
+三、旧文件与新文件的优先级
+------------------------------------------------------------
+如果同时存在以下资料：
+
+第一优先级：
+- 2026-03-24 晚交接日志
+- 本轮 shell 实测输出
+- 本轮 git status / git log / closure latest
+- 本轮新生成的完整工程记录
+
+第二优先级：
+- 2026-03-24 当日工程记录 / 工作报告 / repo 内 work report
+
+第三优先级：
+- 2026-03-22 及更早总报告、接手摘要、兼容性文件
+
+注意：
+- 旧文件里关于 I/J/K 的部分，很多已被本轮结果覆盖；
+- 旧文件可继续提供背景，但不能覆盖本轮“J/K 已收口完成”的最新真相。
+
+四、本轮已经做完的关键工程内容
+------------------------------------------------------------
+1. J 章节
+已具备：
+- J canonical runner / baseline / closure baseline
+- J unified decision
+- J decision contract
+- J functional closure
+
+J 最终结论：
+- functional_closeout_ready_shadow_only
+
+2. K 章节
+已具备：
+- K canonical runner / baseline / closure baseline
+- K transition intake + contract
+- K decision + contract
+- K 七条 capability + contract：
+  - adapter
+  - lifecycle
+  - projection
+  - risk
+  - audit
+  - operator switch
+  - acceptance
+- K functional closure
+
+K 最终结论：
+- functional_closeout_ready_design_only_gate_closed
+
+3. git 状态
+- 本轮结束时 git 工作区干净
+- main 与 origin/main 同步
+
+五、后续绝不能误说的话
+------------------------------------------------------------
+以下说法是错误的：
+- “J 做完了，所以可以执行了”
+- “K 做完了，所以 demo gate 可以打开了”
+- “K capability 都齐了，所以 paper trading ready 了”
+- “章节 closeout_ready = True 就等于已放权”
+
+以下说法才是正确的：
+- J 做完 = shadow/skeleton-only closeout complete
+- K 做完 = design-only gate closed closeout complete
+- runtime 仍 read_only / disabled
+- execution 权限仍未打开
+
+六、后续最合理的工作顺序
+------------------------------------------------------------
+现在最合理的顺序不是再乱开新 capability 分支，而是：
+
+第一优先：
+- 更新总文档与基线说明
+- 把本轮 J/K 收口结果归入新的总报告 / 基线文件
+
+第二优先：
+- 核对 repo 文档区是否需要新增：
+  - 本轮完整工程记录
+  - 本轮接手文件
+  - 本轮 closure baseline 说明
+  - 下一步说明文件
+
+第三优先：
+- 再决定是否进入后续章节，或者是否先做 repo/docs 层统一更新
+
+七、新对话接手时建议的第一句话
+------------------------------------------------------------
+你现在接手的是 OpenClaw / Bybit 项目在 2026-03-25 凌晨 J/K 集中收口完成后的最新状态。
+
+请先建立以下基线：
+- I 已 canonical closed，但只是 shadow-only
+- J 已 functional_closeout_ready_shadow_only
+- K 已 functional_closeout_ready_design_only_gate_closed
+- runtime 仍 read_only / execution disabled
+- 绝不能把任何 closeout ready 误说成 execution 放权
+
+当前第一任务不是继续扩展 capability，而是：
+- 更新总文档与基线文件
+- 再决定后续章节推进顺序
+
+八、最重要的记忆锚点
+------------------------------------------------------------
+1. I canonical closed，但不是 live ready
+2. I5 legal no-call semantics bug 已修复
+3. J 本轮已经收口完成，且仍 shadow-only
+4. K 本轮已经收口完成，且仍 design-only gate closed
+5. git 工作区干净，main 与 origin/main 同步
+6. 当前不是 execution ready，也不是 live trading state
+7. 下一步应优先处理总文档与基线更新
+
+九、结论
+------------------------------------------------------------
+如果按当前工程定义来判断：
+
+- 今晚 J 已做完
+- 今晚 K 已做完
+
+但这个“做完”严格指：
+- 章节功能收口完成
+- 不指执行权限开放完成
+
+这是接手时必须死死记住的核心结论。

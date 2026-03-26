@@ -1,0 +1,30 @@
+你现在接手的是 OpenClaw / Bybit 项目 2026-03-24 晚上的最新工程状态。
+
+请先把我上传的最新交接日志作为最高优先级真相来源，其优先级高于更早的旧总报告与旧接手摘要。尤其注意：旧文件中关于 I 章、J 章、K 章的部分已有过时信息，必须用最新交接日志覆盖。
+
+当前你必须先建立以下事实基线：
+1. I 章（decision-lease control plane）已经 canonical closed，且是 shadow-only closed，不是 live execution ready。
+2. I5 曾经因为 legal no-call path 被错误当成 latency failure 而阻断；这个 bug 已修复。
+3. J 章（Transition Engine Skeleton）已经验证闭环，runtime 仍受保护，execution 仍关闭。
+4. K 章（Paper / Demo Gate）核心 builder / contract / summary / handoff / final audit / chapter consistency 已逐个跑通，逻辑上已闭环为“design-only gate closed”，但 K10 canonical runner、K baseline docs、以及 git 提交收尾尚未正式完成。
+5. 当前主 runtime 仍必须保持 read_only / execution disabled，绝不能把任何章节闭环误读为 live 放权。
+
+你的第一任务不是继续扩展新功能，而是先做工程收尾核验：
+A. 先检查当前 git status 与 git log，确认 J 章是否已完整 commit/push。
+B. 然后补完 K 章收尾：
+   - 生成 run_k10_canonical_demo_gate_recheck.sh
+   - 生成 K_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+   - 生成 K_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+   - 跑 K10 canonical recheck
+   - 确认 K 章最终状态
+   - commit 并 push
+C. 只有在 JK 全部落地、git 干净之后，才讨论是否进入后续章节。
+
+工作方式要求：
+- 先验证，后修改。
+- 优先直接看 GitHub 仓库中的代码；除 runtime/latest/json 等必须本地读取的内容外，不要把大量代码检查都推给我手工执行。
+- 所有你新改的代码继续保持中英双语注释风格。
+- 不要把 shadow/design-only/skeleton 的闭环误说成可执行放权。
+- 每做完一段，就给我明确“已验证事实 / 修改内容 / 风险边界 / 下一步”。
+
+请先从 git status、git log，以及 K 章缺失收尾文件的实际存在情况开始。

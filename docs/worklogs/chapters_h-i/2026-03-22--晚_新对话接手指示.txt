@@ -1,0 +1,167 @@
+OpenClaw / Bybit 项目
+新对话接手指示文件（2026-03-22 夜间版本，覆盖旧摘要中的过时信息）
+==================================================
+
+请把本文件视为“新对话接手规则”，优先级高于今晚之前的旧摘要文件。
+
+一、接手时的文件优先级
+--------------------------------------------------
+如果用户同时上传以下文件：
+1. 今晚工程记录（今晚新生成）
+2. 本接手指示文件（今晚新生成）
+3. OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+4. OpenClaw_全量整合总报告_2026-03-22
+
+请按以下优先级理解项目状态：
+最高优先级：
+- 今晚工程记录
+- 本接手指示文件
+
+次优先级：
+- OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+- OpenClaw_全量整合总报告_2026-03-22
+
+原因：
+旧文件中有些信息已经被今晚的新检查结果覆盖，不能再直接照搬。
+
+二、必须先记住的当前真实状态
+--------------------------------------------------
+1. H0 当前是绿的
+- H0 front chain 已能成功重建
+- H0 final audit = overall_ok true
+- handoff_state = ready_for_h1_thought_gate
+- allow_progress_to_h1 = true
+
+2. H1-A 当前已恢复正常
+- input_state = ready_for_thought_gate_policy_evaluation
+- operator_flags = []
+
+3. H1 当前主要真实 blocker 是 H1-B
+- policy_state = policy_blocked
+- blocking_reasons = ['budget_latency_cap_unacceptable']
+- final_max_ai_call_tier = none
+
+4. H1 之后有一大串“假红灯”
+当前 H1-G / H1-H / H1-I / H2 / H4 / H5 的很多失败，不一定是真失败，而是程序还没接受：
+- 合法 no-AI-call
+- 合法 idle account
+这两个语义。
+
+5. I10 失败不是因为 I10 本体坏了
+- I10 summary 明确显示：I1 = false，I2-I9 = true
+- 所以当前应先修 I1/H1 语义与闭环，再回到 I10
+
+三、今晚已经锁死的新语义，不要回退
+--------------------------------------------------
+语义 A：合法 idle account
+如果同时满足：
+- read_only
+- execution disabled
+- 无持仓
+- 无挂单
+- 无执行历史
+
+那么以下现象是正常的，不应被当成 blocker：
+- no_open_positions
+- no recent order history
+- no recent execution history
+- private ws 只有 control message、没有 business topic event（只要 auth/subscribe 正常）
+
+它们最多只能作为 info / idle_flags。
+
+语义 B：合法 no-AI-call
+如果同时满足：
+- route_plan == route_skip
+- selected_ai_tier == none
+- should_call_ai == false
+
+这说明“这一轮本来就不该调用 AI”，属于合法终态，不应再因为：
+- invocation_attempted = false
+- provider_response_present = false
+- parsed_json_present = false
+而判整链失败。
+
+四、旧文件里哪些地方已经过时
+--------------------------------------------------
+以下信息现在不能再直接按旧文件理解：
+
+1. 不能再默认 H1 的 stale blocker 还在
+今晚已确认：
+- refresh 脚本必须前置 rebuild H0 front chain
+- 做完后 H1-A 已不再 stale
+
+2. 不能再默认 refresh 脚本文件名都正确
+今晚已确认：
+脚本中混用了几个不存在/旧文件名，必须按现有真实脚本名替换。
+
+3. 不能再默认“没有 token / latency / response = 一定失败”
+这只适用于“本轮本应调用 AI 却没有调用”的情况。
+不适用于合法 no-call。
+
+4. 不能再把“账户没交易数据”当成异常
+当前阶段账户没有交易、执行、挂单，本来就是正常。
+
+五、新对话的第一任务，不是发散，而是收口
+--------------------------------------------------
+请按以下顺序接手，不要重新大范围重构：
+
+第一步：先检查并修 H1 的 no-call 语义
+重点文件：
+- bybit_ai_response_check.py
+- bybit_ai_governed_decision.py
+- bybit_thought_gate_acceptance_suite.py
+- bybit_thought_gate_final_audit.py
+
+目标：
+- 合法 no-call 时，H1-G / H1-H / H1-I / H1 final audit 能接受 observation terminal state
+- 不再强行要求一次实际 AI 调用
+
+第二步：再把 H2/H4/H5 改成“有调用审调用，无调用审结构”
+重点文件：
+- bybit_query_budget_policy*.py
+- bybit_query_budget_gate*.py
+- bybit_query_budget_runtime*.py
+- bybit_compute_governor_*.py
+- bybit_ai_cost_log*.py
+- bybit_ai_governance_audit*.py
+- bybit_ai_cost_governance_final_audit*.py
+
+目标：
+- 合法 no-call 时，token/latency/response 缺失不再视为失败
+- 但预算声明、输出上限、max_retries=0、runtime_still_protected 仍必须检查
+
+第三步：最后再重跑整链
+- refresh_upstream_truth_then_rebuild_h1_h5.sh
+- H1/H2/H4/H5 latest
+- I10 summary / final audit
+
+六、新对话必须保留的硬边界
+--------------------------------------------------
+下面这些不能因为清“假红灯”而放松：
+- 只读模式必须保持
+- execution authority 不能被授予
+- decision lease 不能被发出
+- max_retries 必须保持 0
+- 真正的 Bybit API timeout / retCode!=0 / public fetch_errors 仍必须视为硬错误
+- 如果 should_call_ai=true 却没调用，则仍必须视为真失败
+
+七、建议新对话一开始就先做的确认
+--------------------------------------------------
+建议一上来先明确以下三条：
+1. H0 现在是绿的，不要再把锅甩回 H0；
+2. H1-A 现在是绿的，stale 问题已基本排除；
+3. 当前应优先处理“合法 no-call / 合法 idle account 被误判失败”的语义 bug，再去判断 budget_latency_cap_unacceptable 是否成为唯一真实 blocker。
+
+八、接手后的工作判断标准
+--------------------------------------------------
+接手后不要以“是不是所有章节都绿了”作为第一成功标准。
+第一成功标准应是：
+- 假红灯明显减少；
+- no-call 和 idle 场景不再被误判；
+- 只剩少数真实 blocker（最可能是 H1-B 的 budget_latency_cap_unacceptable）；
+- 之后再决定是否进入下一轮真正的策略/预算/调用条件修正。
+
+九、最重要的一句
+--------------------------------------------------
+新对话必须把今晚新增结论视为覆盖层：
+“现在的主要问题，不是系统完全跑坏，而是还没有把合法静默态 / 合法 no-call 设计成被接受的终态。”

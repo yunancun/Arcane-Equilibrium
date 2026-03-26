@@ -1,0 +1,414 @@
+OpenClaw / Bybit 交易 Agent
+2026-03-11 至 2026-03-13 第一阶段三日补充综合日志
+
+时间范围：2026-03-11 ～ 2026-03-13
+阶段名称：第一阶段 / Bybit readonly observer 基础设施建立与强化阶段
+阶段结论：第一阶段核心目标已达成，系统已经形成 production-grade readonly observer infrastructure（生产级只读观察器基础设施），但仍不是交易执行系统。
+
+======================================================================
+一、第一阶段总目标（这三天到底在做什么）
+======================================================================
+
+这三天工作的总体目标，不是让 Agent 直接开始交易，而是先把最底层、最关键、最容易埋雷的只读观察器基础设施打牢。
+
+这三天围绕的是同一个核心逻辑：
+
+1. 让 Agent 能可靠读取 Bybit 账户真实状态。
+2. 把账户、持仓、订单、成交等私有数据标准化落地。
+3. 建立持续、可验证的观察器链路，而不是一次性脚本。
+4. 为以后进入 AI 判断、paper trading、live trading 做前置防呆、可追踪、可审计的基础设施。
+
+换句话说，这三天不是在“做一个会交易的 Agent”，而是在“做一个不会乱交易、不会因为小细节就误判、而且每一步都有证据链的交易系统底座”。
+
+======================================================================
+二、第一阶段最终成果总览
+======================================================================
+
+截至 2026-03-13，本阶段已经完成：
+
+A. 私有 REST 只读链路
+- private account check
+- private positions check
+- private order history check
+- private execution history check
+- 全部支持 read_only 模式
+- 已验证 retCode=0 正常返回
+
+B. 快照与入库
+- system snapshot 生成
+- snapshot 持久化到 Postgres
+- snapshot 标准化表落地
+- snapshot 增加 payload_time_summary
+
+C. WebSocket 观察能力
+- private WS smoke test
+- persistent private WS listener v2
+- listener ctl 启停脚本
+- WS raw event 持久化
+- WS runtime facts v2
+
+D. 判断链路
+- decision packet v4
+- observer verdict v4
+- decision packet 入库
+- observer verdict 入库
+
+E. 运行守卫与状态体系
+- private REST preflight guard
+- acceptance v4
+- runtime state v4
+- failure / degrade policy v1
+
+F. 阶段级汇总与审计
+- readonly final summary v2
+- next phase handoff v2
+- readonly audit v1
+
+G. 网络与环境保障
+- 解决 5GbE / VLAN / DHCP 不通问题
+- 恢复与确认公网出口 IP 匹配 Bybit API 白名单
+- Tailscale SSH 联通性确认
+
+======================================================================
+三、2026-03-11：第一天工作总览
+======================================================================
+
+3月11日更偏向“只读观察器阶段定型与阶段收口”。
+
+当天关键成果包括：
+
+1. 初步完成只读观察器全链路
+- 生成/确认 observer acceptance check
+- 生成 runtime state
+- 生成 failure policy
+- 生成 readonly final summary
+- 生成 next phase handoff
+
+2. 将系统状态明确压在安全边界内
+- system_mode=read_only
+- execution_state=disabled
+- ai_state=disabled_by_policy
+- verdict_code=OBSERVE_ONLY
+
+3. 明确只读阶段已完成的能力
+- 私有 REST 读账户 / 持仓 / 订单 / 成交
+- 快照生成
+- 快照入库
+- 归一化表入库
+- WS smoke 测试
+- decision packet 生成
+- observer verdict 生成
+- acceptance / runtime / failure policy 基础框架建立
+
+4. 明确尚未启用能力
+- live execution
+- demo/paper execution gate
+- AI-driven trade decisioning
+- autonomous execution
+- persistent business-event WS processing
+
+5. 明确下一阶段路线图
+- persistent WS listener
+- event-driven state update
+- AI 预算/治理
+- model router v2
+- paper execution
+- supervised live execution
+
+这一天的意义：
+- 把 D20 readonly observer mode 做成一个可交接、可总结、边界清晰的阶段。
+- 让系统从“多个零散脚本”变成“一个有状态定义、有 acceptance gate、有 failure policy 的观察器系统”。
+
+======================================================================
+四、2026-03-12：第二天工作总览
+======================================================================
+
+3月12日的核心，是从“静态只读观察器”推进到“更接近真实运行环境的只读观察器”。
+
+当天重点主要体现在两个方向：
+
+一）系统目标进一步拉高
+用户明确提出未来目标不只是会交易，而是要：
+- 越跑越聪明（学习能力）
+- 具备成本感知
+- 具备一定自我感知 / 自我诊断能力
+  - 能感知硬件、网速、某个子模块拖慢效率
+  - 能记录并提出指向性建议
+- 具备日报 / 周报 / 月报能力
+  - 一目了然看出赚了还是赔了
+  - 看出哪里做错、哪里可优化
+
+这一步虽然还不是代码交付，但它非常重要，因为它把整个项目从“交易机器人”抬升为“有运营意识、有诊断能力、有复盘能力的交易 Agent 平台”。
+
+二）硬件 /成本 / 阶段路线进一步确认
+- 讨论了当前硬件是否足够。
+- 讨论了新增功能是否会带来额外成本。
+- 确认继续沿 D21 往后推进。
+- 明确 D21 之后还会有多个阶段，但当前依旧优先把只读观察器打磨到极高完成度。
+
+这一天的意义：
+- 进一步明确长期产品方向。
+- 把后续“学习能力 / 自感知 / 报告系统 / 成本治理”纳入长期蓝图。
+- 为 3月13日真正的大规模工程强化打下方向基础。
+
+======================================================================
+五、2026-03-13：第三天工作总览（本阶段最密集的一天）
+======================================================================
+
+3月13日是本阶段最重的一天，几乎把 D21 hardened readonly observer 的主体全做出来了。
+
+当天主要完成了以下大类工作：
+
+1. persistent private WS listener 正式建立
+- listener 初版上线
+- 检查 auth / subscribe / events / status
+- 增加 ctl 脚本
+- 处理 pid file
+- 修复 graceful stop
+- listener 升级到 v2
+- 最终实现可持续运行、可启停、可记录 shutdown_reason
+
+2. trade-core 网络问题排查并解决
+- 5GbE thunderbolt 网卡虽然拿到 DHCP，但无法真正上网
+- 通过 Ubiquiti VLAN / 端口设置核对，确认不是驱动本身问题
+- 通过 nmcli disconnect/connect 刷新网络状态
+- 恢复对网关和公网的连通
+- 最终验证当前公网 IP=79.112.40.190
+- 再次验证 Bybit private REST retCode 全部恢复为 0
+
+3. 建立 WS runtime facts
+- 把 persistent listener 的实时状态抽象成 ws_runtime_facts
+- 区分：
+  - connection_state
+  - signal_strength
+  - business_signal_state
+  - connection_activity_state
+  - control_message_count_estimate
+  - business_message_count_estimate
+- 明确当前只是 control_only / none_seen，并未观察到业务 topic 事件
+
+4. 引入 private REST preflight guard
+- 为 account / positions / order_history / execution_history 全部增加前置门禁
+- 如果私有 REST 任一关键源失败，则后续链路不允许继续视作健康
+- 防止旧快照掩盖真实源数据失效
+
+5. packet / verdict 多轮精修
+- packet 升到 v4
+- verdict 升到 v4
+- 加入 source_refs
+- 加入 input_integrity
+- 增加 packet_generated_ts_ms / freshness_reference_ts_ms / verdict_generated_ts_ms
+- 修复 payload 读取路径 bug
+- 确保 account_summary / position_summary / order_summary / execution_summary 都从正确层级读取
+
+6. 修正 snapshot 时间语义
+- 发现 snapshot ts_ms 仅表示快照文件生成时间，不足以表达源 payload 的真实时间
+- 新增 payload_time_summary
+- 在 acceptance / runtime 中纳入 payload_freshness
+- 明确区分“文件新鲜”与“底层数据新鲜”
+
+7. full readonly cycle 日志净化
+- 清理 wrapper 辅助标记
+- 提升 cycle 输出可读性与后续审计可用性
+
+8. 形成最终状态体系
+- acceptance v4
+- runtime state v4
+- readonly final summary v2
+- next phase handoff v2
+- readonly audit v1
+
+9. 最终审计通过
+- readonly audit: overall_ok=true
+- failed_count=0
+
+这一天的意义：
+- 不是简单加脚本，而是把整个只读观察器真正“工程化”。
+- 形成了产物、版本、引用、时间、审计之间的完整自洽关系。
+
+======================================================================
+六、第一阶段中途遇到过的主要问题，以及如何解决
+======================================================================
+
+1. Bybit 私有 REST 出现 retCode=10010（Unmatched IP）
+原因：
+- 公网出口 IP 与 Bybit API 白名单不匹配。
+处理：
+- 排查 trade-core 网络链路与公网出口。
+- 修复 5GbE/VLAN 网络状态。
+- 恢复正确公网出口后，私有 REST 全部恢复 retCode=0。
+
+2. persistent WS 只有控制面消息，没有业务 topic 消息
+现状：
+- auth / subscribe success 持续发生
+- 但 topic_message_count 始终为空
+处理：
+- 不做错误乐观假设
+- 明确定义为 control_only / none_seen
+- 在 packet / verdict / runtime / handoff 中全部显式表达
+
+3. packet / verdict 时间语义不够严谨
+现象：
+- 不同来源文件时间不一致时，freshness 容易表达含糊
+处理：
+- 加入 source_refs
+- 加入 packet_generated_ts_ms / freshness_reference_ts_ms / verdict_generated_ts_ms
+- 强制 observer pipeline 先刷新 ws facts
+
+4. snapshot payload 读取层级 bug
+现象：
+- 一度导致 account_summary 变成 null
+处理：
+- 检查 snapshot 顶层结构
+- 修正读取到 payload.account 等正确层级
+
+5. snapshot 文件时间与 payload 实际时间混淆
+现象：
+- 容易把旧 payload 当成新数据
+处理：
+- 新增 payload_time_summary
+- runtime state 增加 payload_freshness
+
+6. full cycle 输出不够干净
+处理：
+- 清理 wrapper stderr/marker
+- 让 cycle 结果更适合审计与后续自动化使用
+
+======================================================================
+七、第一阶段结束时系统到底到了什么水平
+======================================================================
+
+截至 2026-03-13，系统已经达到：
+
+1. 可以被称为“生产级只读观察器基础设施”
+- 不是因为能交易，而是因为：
+  - 数据源明确
+  - 状态链完整
+  - 失败可拦截
+  - 新鲜度可量化
+  - 产物有版本
+  - 最终可审计
+
+2. 已具备以下特征
+- 安全边界清晰
+- 运行状态透明
+- 多层状态产物互相可引用
+- 能够说明“为什么当前只能 OBSERVE_ONLY”
+- 能把“不知道”与“没看到业务信号”明确区分，而不是糊涂给结论
+
+3. 但仍不能称为交易执行 Agent
+原因：
+- 没有 persistent business-event ingestion
+- 没有 event-driven state transitions
+- 没有 AI decisioning gate
+- 没有 paper execution
+- 没有 live execution
+
+所以这三天的成果是：
+- 第一阶段底座已经做得很像样。
+- 但它是“稳固的起跑线”，不是“终点线”。
+
+======================================================================
+八、第一阶段产物清单（总结版）
+======================================================================
+
+阶段内核心脚本/产物方向如下：
+
+数据源读取：
+- bybit_private_account_check.py
+- bybit_private_positions_check.py
+- bybit_private_order_history_check.py
+- bybit_private_execution_history_check.py
+
+守卫与快照：
+- bybit_private_rest_preflight_guard.py
+- bybit_snapshot_to_postgres.py
+- bybit_normalize_latest_snapshot_to_postgres.py
+- bybit_system_snapshot_latest.json（含 payload_time_summary）
+
+WS：
+- bybit_private_ws_listener.py（v2）
+- bybit_private_ws_listener_ctl.sh
+- bybit_ws_smoke_to_postgres.py
+- bybit_build_ws_runtime_facts.py（v2）
+
+判断：
+- bybit_build_decision_packet.py（v4）
+- bybit_decision_packet_pipeline.py
+- bybit_build_observer_verdict.py（v4）
+- bybit_observer_pipeline.py
+
+状态：
+- bybit_observer_acceptance_check.py（v4）
+- bybit_runtime_state_resolver.py（v4）
+- bybit_failure_policy_builder.py（v1）
+
+阶段汇总：
+- bybit_readonly_final_summary.py（v2）
+- bybit_next_phase_handoff.py（v2）
+- bybit_readonly_audit.py（v1）
+
+======================================================================
+九、第一阶段仍未完成的事项
+======================================================================
+
+以下事项被明确保留到下一阶段：
+
+1. persistent business-event ingestion
+2. event-driven state updater
+3. latest-file consistency auditor / contract checker 的进一步强化
+4. AI query budget / governance layer
+5. model router v2
+6. demo / paper execution gate
+7. supervised live trading gate
+8. 自学习 / 自感知 / 成本感知 / 日周月报告系统
+
+其中：
+- 前 1~7 是直接与交易 Agent 架构推进相关。
+- 第 8 项是更高层的 Agent 智能运营能力，会在更后面逐步接入。
+
+======================================================================
+十、第一阶段综合评价
+======================================================================
+
+如果用一句话评价这三天：
+
+这三天不是把 OpenClaw / Bybit 做成了会交易的 Agent，
+而是把它做成了一个“不会因为基础细节混乱而误导后续开发”的只读观察器底座。
+
+如果打分：
+- 从“工程底座是否扎实”角度：已经很高。
+- 从“是否离真实交易更近”角度：迈出关键一步，但仍然克制，没有冒进。
+
+这其实非常符合交易系统该有的节奏：
+先把只读、观察、审计、边界、失败处理、状态表达做到清楚，
+再往 AI / paper / live execution 走。
+
+======================================================================
+十一、给未来继续接手时的建议
+======================================================================
+
+如果未来隔几天再回来继续，建议先做这组恢复动作：
+
+1. 重跑：
+- bybit_full_readonly_observer_cycle.py
+- bybit_observer_acceptance_check.py
+- bybit_runtime_state_resolver.py
+- bybit_readonly_audit.py
+
+2. 先确认四个关键状态：
+- acceptance_passed = true
+- overall_runtime_state = ready_readonly_observer
+- verdict_code = OBSERVE_ONLY
+- readonly audit overall_ok = true
+
+3. 然后再进入下一阶段开发，优先从：
+- “为什么 persistent WS 还没有业务 topic 事件”
+- “如何把业务事件做成 event-driven runtime facts”
+开始。
+
+======================================================================
+十二、第一阶段一句话结论
+======================================================================
+
+2026-03-11 至 2026-03-13 这三天，OpenClaw / Bybit 第一阶段已经成功完成：从零散的 Bybit 只读脚本，进化为一个带 REST 预检、带持续 WS、带 packet/verdict、带 acceptance/runtime、带 final summary/handoff/audit 的 hardened readonly observer 基础设施，为后续真正进入 AI 决策、模拟执行和实盘执行奠定了非常扎实的底座。

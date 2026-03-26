@@ -1,0 +1,490 @@
+OpenClaw Bybit 项目工程记录补充1
+日期：2026-03-19（夜间补充）
+用途：本文件用于在新分支 / 新窗口 / 长时间间隔后，快速恢复本项目当前真实状态，避免再次混淆章节、临时编号、已完成范围、以及后续正式施工顺序。
+
+==================================================
+一、这份“补充1”的定位
+==================================================
+
+这不是完整总工程记录的替代品，而是针对 2026-03-19 夜间这一轮“校正 + 收尾 + 回归”的补充说明。
+
+这一轮工作的核心目标不是单纯继续堆脚本，而是：
+
+1. 校正项目章节认知，解决此前 G / J / K 临时编号混用带来的理解混乱；
+2. 把 G 章（真实业务事件验证层）正式收口；
+3. 把已经提前展开的 J / K 章，补到“结构层 / 测试层 / 审计层”的可维护状态；
+4. 做一次跨章节总回归，确认 D + G + J + K 当前结果同时成立；
+5. 固化“后续正式主线应回到 H / I”的工程判断，避免后续误把 J / K 当作已正式完工章节。
+
+==================================================
+二、本轮结束后必须牢记的正式章节树
+==================================================
+
+当前项目的章节理解，必须以 Revision 2 正式章节树为准。
+
+正式章节树如下：
+
+A-C：基础层 / OpenClaw 模型层 / 接入前治理
+D：Readonly Observer 主链
+E：Business Event Classification
+F：Event-Driven Transition Scaffold
+G：真实业务事件验证层
+H：AI 治理
+I：Decision Lease
+J：Transition Engine Skeleton
+K：Paper / Demo Gate
+L：Learning / Self-Observability / Net PnL
+后续才是 M / N
+
+关键要求：
+
+- 不要再把历史开发过程里的 G4.x / G5 / G6 临时编号，视为正式章节。
+- 历史编号可以保留在 JSON stage 或旧文件名里做兼容，但理解项目时必须以正式章节树为准。
+- 现阶段对外、对后续维护者、对新分支恢复，都应优先使用 G / H / I / J / K 的正式语义。
+
+==================================================
+三、今晚最终确认的关键工程判断
+==================================================
+
+今晚最重要的结论，不是“又多做了几个脚本”，而是以下这个正式工程策略已经确认：
+
+【正式策略】
+1. 先把 G 章完整做完并收口；
+2. J / K 可以继续提前补，但只补“结构层 / 测试层 / 审计层”；
+3. H / I 不能长期跳过；
+4. 在 H / I 回补前，不应把 J / K 误判为正式完工章节；
+5. 后续正式主线应回到 H / I，而不是继续无限向后堆 J / K。
+
+这个判断的原因是：
+
+- G 是当前第一优先的验证层，必须先证明真实业务事件相关语义成立；
+- H 负责 AI 治理（thought gate / budget / router 等）；
+- I 负责 decision lease，是核心理念之一，不能长期后置；
+- J 是 transition engine skeleton，本质上依赖后续 H / I 的正式输入语义；
+- K 是 paper / demo gate，本质上是为了验证治理 / lease / transition / net PnL，不应在 H / I 缺失时被误认为“已经真正走完”。
+
+因此，今晚的工程结论不是“J / K 已经完工”，而是：
+
+- G：本轮正式收口完成；
+- J：结构层 / 测试层 / 审计层已提前补强，并通过一致性检查；
+- K：结构层 / 测试层 / 审计层已提前补强，并通过一致性检查；
+- H / I：仍需作为下一正式主线优先回补。
+
+==================================================
+四、本轮开始前的状态（简述）
+==================================================
+
+在今晚进一步收尾之前，项目已经具备以下基础：
+
+1. D 主链已完成，主系统维持：
+   - overall_runtime_state = ready_readonly_observer
+   - system_mode = read_only
+   - execution_state = disabled
+   - business_event_state = healthy_no_business_events_yet
+   - business_event_healthy = true
+
+2. G 章此前已经做出：
+   - G1：fixture pack + replay harness
+   - G2：非空业务事件正向语义链
+   - G3：负向阻断语义链
+
+3. J / K 章此前已经提前做出大量 skeleton / summary / handoff / final audit，但章节注释和正式归位一度混乱。
+
+今晚的主要任务，就是把以上状态正式收口、校正并形成可交接结果。
+
+==================================================
+五、今晚完成的“章节校正类工作”
+==================================================
+
+（一）完成正式章节重新归位说明
+已经形成并确认以下文档语义：
+- Revision 2 正式章节树为当前唯一正式理解口径；
+- G = 真实业务事件验证层
+- J = Transition Engine Skeleton
+- K = Paper / Demo Gate
+
+（二）修正脚本头部注释
+本轮已经对大量 G / J / K 相关脚本头部注释进行了重新校正，要求每个脚本都明确写出：
+- 正式章节归属
+- 当前定位（例如 G4.1、J 章总控层、K2 等）
+- 这一层的白话解释
+- Purpose in system
+- Not this（明确它不是什么）
+- Historical note（临时编号已废弃）
+- Maintenance notes（只改注释，不乱改 latest / stage / 兼容字段）
+
+（三）修正文档索引口径
+文档层面已经形成以下结果：
+- SCRIPT_INDEX 不再把旧 D21 / D22 视角当作唯一主视角；
+- 增加了 Revision 2 chapter realignment note；
+- 增加了 current realigned progress snapshot。
+
+（四）明确了“章节校正后的当前真实落点”
+当前真实落点已明确为：
+- A-F 已完成；
+- G 已在今晚正式收口；
+- J / K 已提前展开并补强到结构层 / 测试层 / 审计层；
+- H / I 尚未正式开始，但应作为下一主线；
+- L 尚未正式开始。
+
+==================================================
+六、今晚完成的 G 章正式收口工作
+==================================================
+
+本轮把 G 章正式补到了 G4 层，完成了 acceptance / regression / handoff / final audit 的统一收口。
+
+------------------------------------------
+G4.1 acceptance suite
+------------------------------------------
+
+新增脚本：
+- bybit_business_event_acceptance_suite.py
+- bybit_business_event_acceptance_contract_check.py
+
+作用：
+- 统一读取 G1 / G2 / G3 的关键 latest 文件；
+- 验证正向非空业务事件路径成立；
+- 验证负向阻断路径成立；
+- 验证主 runtime 仍保持只读保护；
+- 输出统一 acceptance suite latest 与 contract latest。
+
+本轮 acceptance suite 核心通过项包括：
+
+1. 正向路径成立
+- fixture_count >= 4
+- replay has_business_events = true
+- replay normalized_count >= 4
+- replay 中 wallet / order / execution / position 全部出现
+- positive state = event_flow_present
+- positive phase = observer_event_flow_seen
+- positive input = input_ready_for_transition_engine
+- positive decision = allow_transition_engine
+- positive outcome = transition_engine_entry_allowed
+- positive consistency = overall_ok true
+
+2. 负向路径成立
+- negative fixture 仅 wallet
+- negative replay normalized_count = 1
+- order / execution / position 缺失
+- blocked chain contract ok
+- block state = not_ready
+- block decision = block_transition_engine
+- block outcome = transition_engine_blocked
+
+3. 主 runtime 未被污染
+- system_mode = read_only
+- execution_state = disabled
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+acceptance suite 结果：
+- overall_ok = true
+- failed_count = 0
+
+------------------------------------------
+G4.2 regression summary
+------------------------------------------
+
+新增脚本：
+- bybit_business_event_regression_summary.py
+- bybit_business_event_regression_contract_check.py
+
+作用：
+- 把 acceptance 结果收口成更高层的人工可读 summary；
+- 明确 G 章是否已经可以视为“正式收口”；
+- 明确后续建议施工顺序；
+- 把“先收 G，再回 H/I，J/K 只做结构性提前补强”的策略正式写进输出。
+
+关键结果：
+- summary_state = g_validation_complete_ready_for_h_i
+- summary_ok = true
+
+最重要的 strategy note 被正式写入：
+- g_now_should_be_closed_first = true
+- j_k_can_continue_structural_hardening = true
+- h_i_should_not_be_skipped_for_formal_completion = true
+
+recommended_next_build_order 被正式写入：
+- H1. thought_gate
+- H2. query_budget
+- H3. model_router v2
+- I1. decision lease schema
+- I2. lease freshness / validity
+
+------------------------------------------
+G4.3 handoff
+------------------------------------------
+
+新增脚本：
+- bybit_business_event_validation_handoff.py
+- bybit_business_event_validation_handoff_contract_check.py
+
+关键结果：
+- handoff_state = g_validation_closed_ready_to_return_h_i
+- handoff_ok = true
+
+handoff 中已正式写入：
+- hard_safety_boundaries
+- recommended_next_build_order
+- important_strategy_note
+- operator_guidance
+- operator_message
+
+------------------------------------------
+G4.4 final audit
+------------------------------------------
+
+新增脚本：
+- bybit_business_event_final_audit.py
+- bybit_business_event_final_audit_contract_check.py
+
+关键结果：
+- overall_ok = true
+- failed_count = 0
+- total_checks = 34
+
+audit_summary 核心结论：
+- g_stage_closed = true
+- positive_nonempty_path_verified = true
+- negative_blocked_path_verified = true
+- runtime_still_protected = true
+- ready_to_return_h_i = true
+
+【G 章本轮正式结论】
+G 章已经完成本轮正式收口，可以视为：
+- 验证层成立
+- 正向路径成立
+- 负向阻断成立
+- 主系统未被污染
+- 后续正式主线应回到 H / I
+
+==================================================
+七、今晚完成的 J 章补强工作
+==================================================
+
+J 章今晚做了关键的“章节级一致性补强”。
+
+此前 J 章已具备：
+- replay matrix
+- audit trail
+- rule layer
+- state graph
+- summary
+- handoff
+- final audit
+- checkpoint
+
+今晚新增：
+- bybit_transition_engine_chapter_consistency_check.py
+- bybit_transition_engine_chapter_consistency_contract_check.py
+
+关键结果：
+- overall_ok = true
+- failed_count = 0
+
+chapter_summary 核心结果：
+- matrix_ok = true
+- audit_trail_ok = true
+- rule_layer_ready = true
+- graph_ready = true
+- summary_ready = true
+- handoff_ready = true
+- checkpoint_ready = true
+- final_audit_ok = true
+- runtime_still_protected = true
+
+【J 章本轮正式结论】
+J 章当前可以视为：
+- Transition Engine Skeleton 的结构层 / 测试层 / 审计层完整性已较强；
+- 已达到“可维护、可回归、可交接”的 skeleton 状态；
+- 但仍不应被误解为正式完工章节；
+- 后续若正式推进，仍需在 H / I 回补后继续做更合理的闭环设计。
+
+==================================================
+八、今晚完成的 K 章补强工作
+==================================================
+
+K 章今晚做了章节级一致性补强。
+
+此前 K 章已具备：
+- demo gate contract
+- readiness
+- demo/paper adapter skeleton
+- paper order lifecycle skeleton
+- paper position / balance projection skeleton
+- pretrade risk integration skeleton
+- summary
+- handoff
+- final audit
+
+今晚新增：
+- bybit_demo_gate_chapter_consistency_check.py
+- bybit_demo_gate_chapter_consistency_contract_check.py
+
+关键结果：
+- overall_ok = true
+- failed_count = 0
+
+chapter_summary 核心结果：
+- contract_defined_and_closed = true
+- readiness_still_locked = true
+- adapter_defined = true
+- lifecycle_defined = true
+- projection_defined = true
+- risk_defined = true
+- summary_ok = true
+- handoff_present = true
+- final_audit_ok = true
+- runtime_still_protected = true
+
+【K 章本轮正式结论】
+K 章当前可以视为：
+- Paper / Demo Gate 的设计层、结构层、测试层、审计层已形成稳定骨架；
+- 但 gate 仍关闭，operator 仍锁定；
+- adapter / lifecycle / projection / risk 仍是 skeleton_defined_not_active；
+- 绝不应误解为已经可运行 paper execution，更不能误解为接近 live execution。
+
+==================================================
+九、今晚完成的跨章节总回归
+==================================================
+
+新增脚本：
+- bybit_revision2_master_regression_check.py
+- bybit_revision2_master_regression_contract_check.py
+
+作用：
+- 把 D / G / J / K 当前关键结果统一检查一遍；
+- 作为今晚这一轮大整理的最终总回归；
+- 明确下一步最优动作。
+
+最终结果：
+- overall_ok = true
+- failed_count = 0
+
+regression_summary 核心结论：
+- d_readonly_chain_ok = true
+- g_stage_closed = true
+- j_stage_structural_consistency_ok = true
+- k_stage_structural_consistency_ok = true
+- runtime_still_protected = true
+
+next_step_hint：
+- current_best_next_step = write_march_19_supplement_record_then_return_to_H_I
+- 原因：G 已正式收口，J/K 结构层检查通过；后续正式主线应回到 H/I，而不是把 J/K 误判为正式完工章节
+
+==================================================
+十、当前主系统安全边界（必须牢记）
+==================================================
+
+截至本补充1写成时，主 runtime 仍必须理解为：
+
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+任何后续开发都不能把以下事项误解掉：
+
+1. 当前没有放开 execution；
+2. 当前没有 live execution；
+3. 当前 demo gate 没开；
+4. 当前 paper adapter 不能接单；
+5. 当前 J / K 输出都是 skeleton / design / validation / audit 层；
+6. 当前主系统的真实角色仍然是 readonly observer。
+
+==================================================
+十一、截至今晚结束时的“正式进度图”
+==================================================
+
+A-C：已完成
+D：已完成且稳定
+E：已完成
+F：已完成
+G：本轮正式收口完成
+H：尚未正式开始，应作为下一正式主线之一
+I：尚未正式开始，应作为下一正式主线之一
+J：已提前展开，结构层 / 测试层 / 审计层已通过，但不应视为正式完工章节
+K：已提前展开，结构层 / 测试层 / 审计层已通过，但不应视为正式完工章节
+L：尚未正式开始
+
+==================================================
+十二、新分支里应如何立刻继续工作
+==================================================
+
+如果在新分支 / 新窗口继续工作，建议严格按以下方式恢复：
+
+【先做的事】
+1. 先把本补充1读完；
+2. 再看“当前进度图_校正后”；
+3. 再确认 Revision 2 正式章节树；
+4. 先不要因为看到 J/K 很完整，就误以为可以直接继续向后堆。
+
+【新分支的正式建议开工顺序】
+第一优先：
+- H1. thought_gate
+- H2. query_budget
+- H3. model_router v2
+
+第二优先：
+- I1. decision lease schema
+- I2. lease freshness / validity
+
+第三优先：
+- 在 H / I 有了正式最小闭环后，再回头看 J / K 是否需要继续更深层收口。
+
+==================================================
+十三、为什么不能直接把 J/K 当正式完工继续往后推
+==================================================
+
+J / K 可以提前做，这是事实；
+J / K 也已经做得不浅，这也是事实；
+
+但当前仍不能把它们定义为“正式完工章节”，原因在于：
+
+1. H 决定 AI 治理边界；
+2. I 决定 decision lease 的正式语义；
+3. J 的 transition 输入逻辑，最终会受 H / I 正式语义影响；
+4. K 的 paper/demo gate，本来就是为了验证治理 / lease / transition / net PnL，而不是脱离 H / I 独立完工；
+5. 如果现在就把 J / K 当正式完工，后面 H / I 回补时大概率还要返工接口语义。
+
+所以最合理的工程策略已经被正式固化为：
+
+- G 先完整收口；
+- J / K 可继续做 structural hardening；
+- 但正式主线必须回到 H / I；
+- H / I 回补后，再决定 J / K 的正式完工闭环。
+
+==================================================
+十四、终端粘贴问题的实务经验
+==================================================
+
+今晚多次出现 shell 粘贴被截断、here-doc 不完整、终端提示符混入内容、脚本写坏等问题。
+
+实务建议：
+
+1. 长脚本必须拆段粘贴，不要一次性超长 here-doc；
+2. 每个脚本尽量单独一个 cat > file <<'PY'；
+3. 一批脚本写完后，立刻先 py_compile，再运行；
+4. 出现奇怪的 `PYint(...)`、提示符混入、或者中文截断痕迹时，优先怀疑终端粘贴不完整；
+5. 编译通过并不等于内容没断，必要时用 sed -n '1,40p' 预览头部；
+6. 新分支里仍建议继续采用“小段粘贴 + 立即核验”的方式。
+
+==================================================
+十五、今晚这一轮最终结论（可直接复制给新分支）
+==================================================
+
+截至 2026-03-19 夜间，本项目当前真实状态如下：
+
+1. 正式章节树已重新校正，以 Revision 2 为准；
+2. G 章已完成本轮正式收口；
+3. J 章已通过章节级结构/测试/审计一致性；
+4. K 章已通过章节级结构/测试/审计一致性；
+5. D + G + J + K 跨章节 master regression 已全绿；
+6. 主 runtime 仍保持 read_only / execution disabled / ready_readonly_observer；
+7. 后续正式主线应回到 H / I；
+8. 不应把 J / K 误判为正式完工章节；
+9. 新分支继续工作时，应先读本补充1，再按 H1-H3、I1-I2 的顺序继续。
+
+—— 本文件即为“补充1”，用于跨分支 / 跨窗口 / 长间隔恢复施工。

@@ -1,0 +1,103 @@
+你现在接手的是 OpenClaw / Bybit 项目在 2026-03-25 的最新工程状态。
+
+请先建立以下事实基线，并把它们当成当前最高优先级真相：
+
+1. I 章（decision-lease control plane）已经 canonical closed，但只是 shadow-only closed，不是 live execution ready。
+2. I5 曾因 legal no-call path 被错误当成 latency failure 而阻断；这个 bug 已修复。
+3. J 章（Transition Engine Skeleton）当前最终状态是：
+   - functional_closeout_ready_shadow_only
+   - 仍是 shadow / skeleton-only
+   - execution 仍关闭
+4. K 章（Paper / Demo Gate）当前最终状态是：
+   - functional_closeout_ready_design_only_gate_closed
+   - 仍是 design-only gate closed
+   - paper/live execution 都仍关闭
+5. 当前主 runtime 仍必须解释为：
+   - system_mode = read_only
+   - execution_state = disabled
+6. 绝不能把任何“closed / closeout ready / green”误读成 execution 放权。
+7. 当前 J/K 在本轮工程定义下已经做完；除非发现 blocker 或真实 bug，不要再主动继续深挖 J/K 章节深度。
+8. 当前最合理的下一步主方向不是回头重开 H，不是先单独开 L，也不是直接裸推 demo，而是：
+   - 先做 GUI 背后的 control plane foundation
+   - 也就是先做数据字典 / 状态字典 / Control API / GUI MVP
+   - 再在这套受控骨架上推进 guarded demo trading
+   - L 的前半部分能力（自我观察、经验记忆、假设生成、实验提案）应嵌入 GUI / cockpit 设计里预埋，但不应先作为独立主开发章节推进
+
+当前你要优先继承的 GUI / Control Plane 方向如下：
+
+A. GUI 不应只是 shell 替代品，而应定义为：
+   OpenClaw Operator Console + Learning Cockpit
+
+B. GUI / 控制平面要同时覆盖：
+   - 控制：状态查看、recheck、demo arm / enable / relock、future live 占位
+   - 权限：Bybit API / 账户权限事实层
+   - 能力：OpenClaw 能力上线层
+   - 模式：disabled / observe_only / shadow_only / demo_enabled / live_blocked / live_guarded / live_enabled
+   - 动作：new order / cancel / amend / reduce only / increase position / close position / leverage / borrow / transfer 等动作权限
+   - 风险：risk envelope
+   - 健康：AI latency / API timeout / ws disconnect / data freshness / infra bottleneck
+   - 经营：gross PnL / total cost / net PnL
+   - 输入：成本录入、事件录入、配置变更录入、人工备注
+   - 汇报：日报、周报、成功/失败复盘
+   - 学习：Observation Feed、Lessons Memory、Hypothesis Queue、Experiment Queue（后续增强）
+
+C. 产品族不能被预先局限。后续开关设计必须按：
+   Bybit 权限边界 × OpenClaw 能力上线边界 × 产品族 × 执行动作
+   来组织，而不是只围绕某一种固定交易类别设计。
+
+D. 已确定的产品族抽象建议：
+   - spot
+   - margin
+   - perp_linear
+   - perp_inverse
+   - options
+   - other_derivatives_reserved
+
+E. 已确定的 OpenClaw capability 层建议：
+   - unsupported
+   - observe_only
+   - shadow_ready
+   - demo_ready
+   - live_guarded_ready
+   - live_ready
+
+F. 已确定的重要工作原则：
+   - 不要继续长期依赖纯 shell
+   - GUI 不能直接调 shell；建议 GUI -> Control API -> Data / Analytics layer
+   - 所有关键动作必须可审计
+   - 收益必须看 net PnL，不能只看 trading PnL
+   - 所有总结必须区分：事实 / 推断 / 假设
+   - 学习不等于自作主张；不能自动 live 放权、不能自动改 live 配置、不能自动改代码直接上线
+   - 多重确认当前可忽略（单人单账户场景）
+   - 时间冷却机制可以保留设计位，但不是当前第一优先
+
+你的工作方式请严格遵循以下偏好：
+
+1. 能直接从 GitHub 仓库读、直接在 GitHub 主线提交的，就优先直接做，不要无意义把大段检查都推给我手工执行。
+2. Shell 指令尽量短，不要给特别长的大块 here-doc，避免 shell 卡住或粘贴截断。
+3. 如果确实需要我贴回输出，务必把需要我看的输出 print 在最下面，并且明确标注：
+   - 我需要重点看什么
+   - 哪几行是结论
+   - 哪几行是 blockers
+4. 所有新写和修改的程序，继续保持中英双语注释风格，而且注释要详细、可维护、方便后续人工阅读。
+5. 每做完一段，请用固定结构汇报：
+   - 已验证事实
+   - 修改内容
+   - 风险边界
+   - 下一步
+6. 不要把 shadow/design-only/skeleton/closeout ready 误说成可执行放权。
+7. 如果某件事你没有真正核对到，就明确说没核对到，不要为了顺口而假设。
+8. 如果需要本地 shell 配合，命令要尽量稳、短、分段；不要让我在长输出里到处翻。
+9. 如果有更合理的新安排，可以提出，但必须明确说明它与当前既定路线的关系，不要悄悄改路线。
+10. 当前最合理的主线，是先做：
+    数据字典 / 状态字典 v1
+    然后 Control API v1
+    然后 GUI MVP
+    再推进 guarded demo trading
+
+进入工作前，请先用你看到的带入文件和当前仓库事实，快速复述一次：
+- 当前项目真实状态
+- 当前不该做什么
+- 当前下一步最合理做什么
+
+然后直接开始推进“数据字典 / 状态字典 v1”。

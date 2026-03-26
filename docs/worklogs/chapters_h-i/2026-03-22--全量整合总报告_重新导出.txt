@@ -1,0 +1,1078 @@
+OpenClaw / Bybit 项目
+全量整合总报告（新对话接手权威版）
+整理日期：2026-03-22
+用途：把目前已上传的工程记录、路线图、阶段日志、蓝图、handoff、兼容性清单统一整合为一份新的总报告，供后续新对话/新分支直接接手使用。
+
+============================================================
+一、这份整合报告的定位
+============================================================
+
+这份文件不是把旧报告简单拼接，而是做三件事：
+
+1. 统一口径  
+把 2026-03-11 至 2026-03-22 期间所有已上传资料里的阶段结论、路线图、章节树、蓝图与修复记录统一成一套可直接接手的正式说法。
+
+2. 解决冲突  
+旧资料之间存在阶段性“时间差”与“理解口径差”。
+最典型的冲突是：
+- 2026-03-17、2026-03-19 的若干资料还把 H / I 标成“尚未正式开始”；
+- 但 2026-03-20 与 2026-03-22 的新资料已经明确说明：
+  H 章先完成，I 章随后完成到 I10，再因为准备继续推进时发现 H 底层不稳，所以回头返修 H，最后 H 再次重绿闭环。
+本整合报告会把这种冲突全部明确消解。
+
+3. 形成后续唯一接手基线  
+以后开启新对话时，优先喂这份总报告，而不是让新对话去自行拼接多份旧文件。
+若后续与旧文件内容发生冲突，以本报告的“冲突消解说明”和“当前真实状态”部分为准。
+
+============================================================
+二、源文件整合原则（非常重要）
+============================================================
+
+本报告综合了以下类型资料：
+
+A. 早期立项与底层建设资料
+- 2026-03-11_openclaw_bybit_progress_log.txt
+- 2026-03-12_openclaw_bybit_progress_log.txt
+- 2026-03-11 至 2026-03-13 第一阶段三日补充综合日志.txt
+- 2026-03-13 详细工作日志.txt
+- 分支 · OpenClaw Trading Bot Design.txt
+
+B. Revision 2 重排与阶段基线资料
+- OpenClaw_Bybit_Revision2_工程记录_2026-03-17.txt
+- OpenClaw_Bybit_Revision2_执行清单_2026-03-17.txt
+- 2026-03-17OpenClaw_Bybit_工程一审修改建议报告_Revision2_可存档终稿.md / .txt
+- 2026-03-17_openclaw_bybit_engineering_log_latest.txt
+
+C. 2026-03-19 校正、收口、进度图资料
+- 2026-03-19_补充1.txt
+- 2026-03-19当前进度图_校正后.txt
+- 2026-03-19工作记录_含0317至0319校正与修复.txt
+- 校正后完整版当前进度图_2026-03-19.txt
+
+D. 2026-03-20 H0 / H / I 深化与返修资料
+- 03-20-2026openclaw.txt
+- OpenClaw_Bybit_2026-03-20_超级详细工作报告_新对话接手版.txt
+- OpenClaw_Bybit_超详细续接总报告_2026-03-20.txt
+- OpenClaw_H0_本地判断核心蓝图_v1_2026-03-20.txt
+- OpenClaw_HI_本地执行内核讨论备份_2026-03-20.txt
+
+E. 2026-03-22 兼容性与新对话首步资料
+- OpenClaw_HI_兼容性对账清单_新对话首步验证版_2026-03-22.txt
+
+============================================================
+三、冲突消解：哪些旧结论已经过时，哪些现在仍有效
+============================================================
+
+这一节最关键，因为新对话最容易在这里搞错。
+
+------------------------------------------------------------
+3.1 仍然有效的旧结论
+------------------------------------------------------------
+
+以下旧结论仍然有效，而且构成项目底盘：
+
+1. 项目总目标始终没变  
+不是普通自动下单 bot，而是一个以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。
+长期目标是：
+- 风险可控
+- 可审计
+- 可学习
+- 可逐步放权
+- 在成本、延迟、风控、权限治理受控的前提下，追求长期 net PnL 最大化
+
+2. D / E / F 作为底盘已完成  
+- D：Readonly Observer 主链
+- E：Business Event Classification
+- F：Event-Driven Transition Scaffold
+
+3. 2026-03-19 对章节树的 Revision 2 校正仍然有效  
+正式章节树是：
+A-C / D / E / F / G / H / I / J / K / L / M / N
+
+4. J / K 不能被误判为已完工执行层  
+J 与 K 虽然提前展开并补强了结构层 / 测试层 / 审计层，但绝不等于实盘执行已就绪。
+
+------------------------------------------------------------
+3.2 已过时或需要被新资料覆盖的旧结论
+------------------------------------------------------------
+
+以下旧结论需要被后来的资料覆盖：
+
+1. “H / I 尚未正式开始”  
+这是 2026-03-17 与 2026-03-19 部分资料中的旧状态。
+根据 2026-03-20 与 2026-03-22 新资料，这一说法已经过时。
+
+2. “后续正式主线应从 H1 开始，I 尚未开始”  
+这也只是 2026-03-19 当时的建议，不再是 2026-03-22 的真实项目位置。
+更新后的真实项目位置是：
+- H 已完成并在后半段被返修后重新闭环
+- I 已完成到 I10 并正式收口
+- 现在的首要任务不是“开始做 I”，而是“做 H / I compatibility audit”
+
+------------------------------------------------------------
+3.3 当前应该采用的最终判断
+------------------------------------------------------------
+
+当前真实项目位置，应采用以下统一结论：
+
+1. A-C 已完成
+2. D 已完成且稳定
+3. E 已完成
+4. F 已完成
+5. G 已正式收口
+6. H 已完成，且经历返修后重新闭环
+7. I 已完成到 I10，并在影子控制平面口径下正式收口
+8. J / K 已提前展开，但只是结构层 / 测试层 / 审计层补强，不能视作正式业务完工
+9. 当前最正确的下一步，不是直接继续 J，而是先做 H / I 兼容性审计
+
+============================================================
+四、项目总目标与绝对不能忘的根原则
+============================================================
+
+------------------------------------------------------------
+4.1 项目总目标
+------------------------------------------------------------
+
+本项目不是一个普通自动下单程序，也不是单纯的量化脚本集合。
+
+真正要做的是一个：
+“以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。”
+
+它的长期目标不是“尽快实盘”，而是：
+
+1. 风险可控
+2. 可审计
+3. 可学习
+4. 可逐步放权
+5. 在成本、延迟、风控、权限治理都受控的前提下，追求长期净收益最大化
+
+------------------------------------------------------------
+4.2 四条根原则
+------------------------------------------------------------
+
+原则 1：不是看 gross PnL，而是 net PnL  
+必须计入：
+- AI API 成本
+- 手续费
+- 电费
+- 设备折旧
+- 基础设施成本
+- 后续维护成本
+
+原则 2：AI 输出不能当成即时命令  
+AI 有延迟，市场有时效。
+因此 AI 更应输出 decision lease（决策租约），而不是“现在立刻买卖”的直接命令。
+本地层必须继续做：
+- freshness 校验
+- timing 校验
+- risk 校验
+- permission / legality 校验
+- execution gate
+
+原则 3：权限不能按时间自动升级，必须按表现赢得  
+不能因为系统运行久了就自动放权。
+必须在已经证明有效的子场景中局部放权。
+
+原则 4：最终形态不是机械 bot，而是长期进化型交易个体  
+它要会：
+- 观察
+- 判断
+- 审计
+- 学习
+- 自我观测
+- 产出经营报告
+- 在严格边界下逐步争取更高权限
+
+============================================================
+五、正式章节树（当前唯一正式口径）
+============================================================
+
+A-C：基础层 / OpenClaw 模型层 / 接入前治理
+D：Readonly Observer 主链
+E：Business Event Classification
+F：Event-Driven Transition Scaffold
+G：真实业务事件验证层
+H：AI 治理
+I：Decision Lease
+J：Transition Engine Skeleton
+K：Paper / Demo Gate
+L：Learning / Self-Observability / Net PnL
+M：Supervised Live Gate
+N：Constrained Autonomous Live
+
+关键校正规则：
+- 历史开发过程中出现过 G4.x / G5 / G6 等临时编号；
+- 这些都不是现在的正式章节理解；
+- 以后所有新对话、handoff、汇报、维护，都必须优先使用上面的正式章节树。
+
+============================================================
+六、完整时间线：项目到目前为止到底经历了什么
+============================================================
+
+------------------------------------------------------------
+6.1 立项与方向定型阶段（3 月 11 日以前到 3 月 11 日）
+------------------------------------------------------------
+
+这一阶段完成的是大方向定型，而不是具体执行。
+
+核心结论包括：
+1. OpenClaw 作为总编排与治理中枢
+2. Bybit 作为主交易所，Binance 作为辅助交易所
+3. OpenAI 负责复杂决策、结构化输出、策略判断
+4. Claude 负责长文本分析、研究、审阅
+5. 系统不应“每次都问 AI”，而应“只在值得思考时调用 AI”
+
+同阶段还做了 Bybit key 策略设计：
+- 现在只生成生产只读主 key：bybit_prod_readonly_main
+- 真正执行 key 后续再建：bybit_prod_live_executor
+- 可选 demo/testnet key 后续再建：bybit_demo_readonly / bybit_testnet_readonly
+- 当前只读 key 应遵循最小权限原则
+- 未来执行 key 必须 IP 白名单、单独目录、单独审计
+
+------------------------------------------------------------
+6.2 3 月 11 日：A-C 基础环境 + 只读方向定型
+------------------------------------------------------------
+
+这一天的重点是基础层与治理底座：
+
+A. 本地基础层
+- Ubuntu 主机 trade-core
+- Docker / Docker Compose
+- PostgreSQL / Redis / Qdrant
+- OpenClaw gateway
+- daily_cost_snapshot.sh
+- stage_health_check.sh 等基础运维逻辑
+
+B. OpenClaw 模型层
+- ~/.openclaw 权限收紧
+- openclaw.json 稳定化
+- Gateway / Dashboard 可用
+- 模型角色分工定稿
+
+C. 接入前治理与骨架
+- 先定 read_only 硬边界
+- 先定目录、latest、contract、audit 写法
+- 先定 secret_files 分层结构
+- 先定权限治理不是“先接入再补安全”
+
+同时，Bybit 生产只读主 key 已经被创建并用于真实只读验证。
+
+------------------------------------------------------------
+6.3 3 月 12 日：D15.3 ~ D20，Readonly Observer 第一轮正式收口
+------------------------------------------------------------
+
+这一天的正式结论非常明确：
+Bybit readonly observer mode 已完成阶段性收口并通过验收。
+
+完成的关键能力包括：
+1. 私有只读 account / positions / order history / execution history 读取
+2. system snapshot 生成
+3. snapshot 写入 PostgreSQL
+4. snapshot 拆分写入标准化原始表
+5. 私有 WS smoke test（auth / subscribe）
+6. WS 原始事件入库
+7. decision packet 生成
+8. observer verdict 生成
+9. 单入口 readonly observer cycle
+10. acceptance / runtime / failure policy / final summary / handoff
+
+这一天的核心定位是：
+系统已经成为 production-grade readonly observer infrastructure 的雏形，但还不是交易执行系统。
+
+------------------------------------------------------------
+6.4 3 月 13 日：D21 readonly observer hardened
+------------------------------------------------------------
+
+这一天的重点不是“继续扩功能”，而是把 readonly observer 主链硬化：
+
+1. 建立 persistent private WS listener
+2. 增加 ctl 脚本、pid 管理、graceful stop、shutdown_reason
+3. 形成 ws runtime facts
+4. 引入 private REST preflight guard
+5. 精修 decision packet / observer verdict / acceptance / runtime / audit / consistency
+6. 明确区分 snapshot 文件时间 与 payload 底层时间
+7. 完成 readonly audit v1 / final summary v2 / next phase handoff v2
+
+同时这一天还处理了底层网络问题：
+- 5GbE thunderbolt 网卡 + VLAN / DHCP 状态异常
+- 通过 nmcli disconnect/connect 刷新网络状态恢复连通
+- 重新确认公网出口 IP 与 Bybit 白名单匹配
+- private REST retCode 全部恢复 0
+
+这一天结束后，D21 hardened readonly observer 可视为完成。
+
+------------------------------------------------------------
+6.5 3 月 17 日：Revision 2 正式工程审视与章节树重排
+------------------------------------------------------------
+
+这一天的意义不是大量写新脚本，而是正式重写工程理解。
+
+一审结论：
+- 项目总体没有跑偏
+- 但章节推进顺序需要正式修订
+
+正式承认已完成三层：
+1. readonly observer infrastructure
+2. business-event classification
+3. event-driven transition scaffold
+
+同时正式重排后续主线：
+真实业务事件验证
+-> AI 治理
+-> Decision Lease
+-> Transition Engine
+-> Paper / Demo Gate
+-> Learning / Self-Observability / Net PnL
+-> supervised live
+-> constrained autonomous live
+
+这一天形成的资料，后来成为 3 月 19 与 3 月 20 继续推进的基线。
+
+------------------------------------------------------------
+6.6 3 月 19 日：G 收口、J/K 前置搭建、章节归位校正
+------------------------------------------------------------
+
+这一轮的意义在于：
+既新增工程成果，也修正工程认知。
+
+G 章完成的内容：
+G1. fixture pack + replay harness
+- 构造 wallet / order / execution / position 四类基础事件样本
+- 保证 replay 与主 runtime 隔离
+
+G2. 正向非空业务事件语义验证
+- 成功验证：
+  event_flow_present
+  -> observer_event_flow_seen
+  -> input_ready_for_transition_engine
+  -> allow_transition_engine
+  -> transition_engine_entry_allowed
+
+G3. 负向阻断验证
+- 故意只给 wallet-only 负向 fixture
+- 成功验证：
+  not_ready
+  -> observer_feed_not_ready
+  -> input_not_ready
+  -> block_transition_engine
+  -> transition_engine_blocked
+
+G4. acceptance / regression / handoff / final audit 收口
+- G 章正式闭环
+- 主 runtime 未被污染
+
+同晚还完成了重要校正：
+- 原先临时写成 G4.x / G5 / G6 的内容，被正式归位到 J / K
+- J = Transition Engine Skeleton
+- K = Paper / Demo Gate
+
+当时的正式结论是：
+- G 已正式收口
+- J / K 已提前展开并补强到结构层 / 测试层 / 审计层
+- 但 H / I 不能长期跳过
+- 后续正式主线应回到 H / I
+
+------------------------------------------------------------
+6.7 3 月 20 日：方向升级到 H0 / H / I，并在本对话内完成 H 与 I
+------------------------------------------------------------
+
+这一阶段是整个项目理解发生重大升级的关键点。
+
+1. H0 被正式提出  
+项目不再理解成：
+H -> I -> J
+而是升级为：
+H0 本地确定性判断内核
+-> H AI 治理
+-> I Decision Lease
+-> J Transition Engine
+-> K Paper / Demo Gate
+
+2. H0 的正式角色  
+H0 = Local Deterministic Judgment Core  
+负责：
+- 本地交易资格判定
+- 本地风险包络判定
+- 本地市场摩擦判定
+- 本地系统摩擦判定
+- 本地 AI 升级前筛选
+
+换句话说，H0 是本地反射神经 + 风控前门 + AI 升级前门。
+
+3. H 与 I 被重新理解为“大脑外壳”  
+H 解决：是否值得进入 AI 层、花多少预算、选什么模型、何时禁止调用  
+I 解决：谁有资格把看法变成权力、怎样把 AI 输出封装为可衰减、可撤销、可审计的租约控制平面
+
+------------------------------------------------------------
+6.8 3 月 20 日：H 章先完成，再进入 I
+------------------------------------------------------------
+
+这点必须反复强调，因为后半段返修 H 的终端输出很容易掩盖这个事实。
+
+真实顺序是：
+- 先完成 H
+- 再讨论和实现 I
+- 准备继续后面章节时发现 H 底层仍有问题
+- 最后回头返修 H
+
+H 的核心结构是：
+- H1 thought_gate
+- H2 query_budget
+- H3 model_router
+- H4 compute_governor
+- H5 AI cost governance
+
+H 章固定下来的硬边界包括：
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted
+- live_execution_allowed = false
+- decision_lease_emitted = false
+
+这意味着：
+H 章是“AI 观察判断治理层”，不是“执行授权层”。
+
+------------------------------------------------------------
+6.9 3 月 20 日：I 章节已经完成到 I10 正式收口
+------------------------------------------------------------
+
+这一点是很多旧报告没有来得及更新的，所以这里单独写清楚。
+
+I 章节不是只讨论了思路，而是在该对话中被一路做到 I10 收口。
+
+I 章主要内容包括：
+
+I1：decision lease schema
+- schema、template、runtime view 定型
+- 当前阶段是 schema_only / no emit / no authority
+
+I2：lease shadow issuance
+- preflight
+- shadow candidate
+- shadow audit
+- 只做影子签发，不开 live lease
+
+I3：consume gate
+- 做 simulated consume timestamp / consume policy / consume gate
+- 不做真实 consume / 真实下单
+
+I4：replay / revoke / expire / kill switch
+- 处理 replay / revoke / expiry / supersede / negative path 防护
+
+I5：lease friction metrics / adaptive ttl
+- latency / friction / adaptive ttl 纳入治理
+
+I6：approval bridge
+- operator review / bridge 结构化
+
+I7：execution authority aggregator
+- 仍然不授予 authority，只做 governed shadow aggregation
+
+I8：manual approval packet
+- review-only，不进入 live submit
+
+I9：operator acknowledgment shadow
+- operator_ack_shadow_only = true
+- live_operator_ack_enabled = false
+- execution_authority 仍 not_granted
+
+I10：chapter final closure
+- 起初 I10 因 stage 发现逻辑过严而未一次转绿
+- 后续扩大候选文件覆盖
+- 从仅靠 stage 改成 stage + filename_keyword 双通道识别
+- 再做 stage-source alias 清洁补丁
+- 最终 I10 成功闭环
+
+I 章最终结论：
+- decision_lease_chapter_closed_shadow_ready_for_future_live_design
+- i_chapter_closed = true
+- shadow_control_plane_closed = true
+- runtime_still_protected = true
+- execution_authority = not_granted
+- decision_lease_emitted = false
+- live_operator_ack_enabled = false
+
+也就是说：
+I 章已经以“影子控制平面 / 不放权 / 不实盘”的方式正式收口。
+
+------------------------------------------------------------
+6.10 3 月 20 日后半段：发现 H 底层问题，回头返修 H
+------------------------------------------------------------
+
+这一步是 2026-03-20 这条对话后半段的大头。
+
+项目推进原则在这里表现得很清楚：
+宁可回头修基础，也不带着脏底座继续叠层。
+
+返修 H 的主要内容包括：
+
+1. 统一所有关键脚本走 trading env wrapper  
+曾出现：
+- ModuleNotFoundError: No module named 'httpx'
+说明裸跑 python3 没进正确 venv / env 装载链。
+后续统一改为：
+./scripts/run_with_trading_env.sh python3 xxx.py
+
+2. 修 H5 硬错误  
+scripts/bybit_ai_cost_log.py 曾出现：
+- NameError: name 'h2_runtime' is not defined
+后续已修补，H5 能重新闭环。
+
+3. 重建 H0 真 builder 链，不再依赖旧 latest 假绿  
+重跑了：
+- bybit_public_microstructure_builder.py
+- bybit_local_market_friction_builder.py
+- bybit_local_risk_envelope_gate.py
+- bybit_local_trade_eligibility_builder.py
+- bybit_local_trade_eligibility_handoff_builder.py
+- bybit_local_judgment_final_audit.py
+等一整套上游链。
+
+H0 最终关键状态回到：
+- healthy_basic_public_microstructure
+- eligible_for_next_gate
+- flat_idle_low_risk
+- eligible_for_governed_ai_review
+- ready_for_h1_thought_gate
+- structurally_valid_and_ready_for_h1
+
+4. 修 H1 freshness 相关阻塞  
+曾反复卡在：
+- blocked_stale_public_microstructure
+- public_microstructure_stale
+- h0_final_audit_stale
+- recent_trade_last_price_missing
+后续通过重建 H0 并立刻重跑 H1-A / H1-B，重新拉回：
+- ready_for_thought_gate_policy_evaluation
+- policy_ready_light_only
+
+5. 精确定位 provider / model 绑定坑点  
+真正生效的是：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET
+- BYBIT_AI_ACTIVE_MODEL
+而不是：
+- BYBIT_AI_ACTIVE_MODEL_NAME
+这是本轮非常关键的修复点。
+
+6. 识别出 route 选择 与 active model 绑定是两层逻辑  
+不能简单理解为：
+route_a 被选中 -> 自动使用 route A model
+真正影响 H1-E / H1-F 的仍是 active provider / model 变量。
+
+7. 已验证 read-only AI 调用链真实跑通  
+成功 active binding：
+- provider_target = openai_native
+- model_name = gpt-5-mini
+并且：
+- invocation_success_json_ready
+- response_json_contract_satisfied
+- H1 final audit green
+
+结论：
+H 章不是纸面设计，而是已真实跑通的只读 AI 观察治理链。
+
+------------------------------------------------------------
+6.11 3 月 22 日：后续第一步被正式定义为 H / I compatibility audit
+------------------------------------------------------------
+
+这是当前最新、最重要的项目管理结论。
+
+因为真实状态已经不是：
+“刚做完 H，准备做 I”
+而是：
+- H 已做完
+- I 已做完到 I10
+- H 又被返修过并重新闭环
+
+因此当前最优先动作不是继续 J，而是先验证：
+1. H 单独仍能稳定全绿
+2. I 单独仍能稳定全绿
+3. 返修后的 H 输出，与更早已完成的 I 输入假设，是否仍完全兼容
+
+这就是 2026-03-22 兼容性对账清单的核心目的。
+
+============================================================
+七、当前真实完成度（最终汇总版）
+============================================================
+
+------------------------------------------------------------
+7.1 已完成并可视为收口的部分
+------------------------------------------------------------
+
+A-C：已完成  
+D：已完成且稳定  
+E：已完成  
+F：已完成  
+G：已正式收口  
+H：已完成，并在返修后重新闭环  
+I：已完成到 I10，并在 shadow control plane 口径下收口
+
+------------------------------------------------------------
+7.2 已提前展开但不能视为正式业务完工的部分
+------------------------------------------------------------
+
+J：Transition Engine Skeleton  
+已具备：
+- replay matrix
+- audit trail
+- rule layer
+- state graph
+- summary
+- handoff
+- final audit
+- checkpoint
+- chapter consistency / contract
+
+但当前只能说：
+“结构层 / 测试层 / 审计层已经补强”
+不能说：
+“transition engine 已正式业务完工”
+
+K：Paper / Demo Gate  
+已具备：
+- contract
+- readiness
+- adapter skeleton
+- paper lifecycle skeleton
+- position / balance projection skeleton
+- pretrade risk integration skeleton
+- summary
+- handoff
+- final audit
+- chapter consistency / contract
+
+但当前仍是：
+- gate 关闭
+- operator 锁定
+- adapter / lifecycle / projection / risk 仍为 skeleton_defined_not_active
+不能误判为接近 live execution。
+
+------------------------------------------------------------
+7.3 尚未正式开始或尚未进入正式主线深化的部分
+------------------------------------------------------------
+
+L：Learning / Self-Observability / Net PnL  
+M：Supervised Live Gate  
+N：Constrained Autonomous Live
+
+============================================================
+八、当前系统最准确的表述
+============================================================
+
+当前系统最准确的表述应当是：
+
+“当前系统已经具备 production-grade readonly observer infrastructure + business-event classification + event-driven scaffold，
+并且已经完成 G 章真实业务事件验证、完成 H 章只读 AI 治理闭环、完成 I 章影子 decision-lease control plane 收口；
+同时 J / K 已提前做出结构层 / 测试层 / 审计层 skeleton。
+但主 runtime 仍保持 read_only，真实 execution 未开启，demo gate 未开启，live execution 仍严格禁止。”
+
+绝对不能把当前系统理解成：
+- 快要实盘执行
+- 只差最后一步就能 live
+- J / K 已正式完工
+- 当前 replay / validation / skeleton 已污染主 runtime
+- healthy_no_business_events_yet 是故障
+
+============================================================
+九、当前主 runtime 与硬安全边界
+============================================================
+
+当前主 runtime 必须长期保持以下理解：
+
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+H / I 层新增的硬边界还包括：
+- execution_authority = not_granted
+- live_execution_allowed = false
+- decision_lease_emitted = false
+- live_operator_ack_enabled = false
+
+这意味着：
+1. 当前没有放开真实 execution
+2. 当前没有 live execution
+3. 当前 demo gate 没开
+4. 当前所有 replay / validation / shadow lease 输出都不能污染主 runtime
+5. 当前 H / I 的完成，不代表获得了执行权
+
+============================================================
+十、H0 / H / I 的最终设计理解（这是新对话最容易丢的部分）
+============================================================
+
+------------------------------------------------------------
+10.1 H0：Local Deterministic Judgment Core
+------------------------------------------------------------
+
+H0 的正式角色是：
+本地确定性判断内核
+
+它不直接下单，不替代 AI，不把系统拉回人工半自动。
+它的职责是：
+
+- 以最低延迟、最低成本、最高确定性
+- 先完成本地应当完成的判断
+- 把显然不该做、显然不值得问 AI 的情况全部挡掉
+
+H0 应回答的不是“买还是卖”，而是：
+1. 现在是否具备交易资格？
+2. 如果不具备，阻塞原因是什么？
+3. 如果具备，属于哪种级别的资格？
+4. 是否值得升级到 AI 治理层？
+5. 扣除现实摩擦后，是否还存在净可交易边际？
+
+------------------------------------------------------------
+10.2 H：AI Governance
+------------------------------------------------------------
+
+H 不是“让 AI 直接决定交易”，而是让 AI 成为受治理的认知资源。
+
+H 解决的问题是：
+- 该不该想
+- 值不值得问
+- 问谁最划算
+- 调用多少预算
+- 在何种情况下必须禁止调用
+
+H 的关键定位：
+- 只读
+- 不放权
+- 可审计
+- 预算受控
+- 可被本地层前置筛掉
+
+------------------------------------------------------------
+10.3 I：Decision Lease / Execution Authorization Control Plane
+------------------------------------------------------------
+
+I 不是“给 AI 开执行权限”，而是把 AI 输出变成一个：
+可审计、可衰减、可撤销、可 supersede 的控制平面。
+
+关键理念：
+1. lease 不是执行许可本体
+2. lease 必须可审计、可撤销、可过期、可重放
+3. 影子控制平面阶段必须维持：
+   - execution_authority = not_granted
+   - decision_lease_emitted = false
+   - live_operator_ack_enabled = false
+   - runtime_still_protected = true
+
+一句话：
+H 解决“AI 怎么看”，
+I 解决“谁有资格把看法变成权力”。
+
+============================================================
+十一、环境、路径、secret、wrapper、venv 统一说明
+============================================================
+
+------------------------------------------------------------
+11.1 代码主目录
+------------------------------------------------------------
+
+/home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+
+------------------------------------------------------------
+11.2 标准执行 wrapper（最重要）
+------------------------------------------------------------
+
+/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/run_with_trading_env.sh
+
+它负责：
+1. 把专用 venv 放到 PATH 前面
+2. 加载 env 默认值
+3. 在未设置时注入 AI secret
+4. 保留父 shell 已 export 变量的更高优先级
+
+后续凡是 H / I / provider / 返修相关脚本，优先通过这个 wrapper 执行。
+不要再裸跑 python3。
+
+------------------------------------------------------------
+11.3 专用 venv
+------------------------------------------------------------
+
+/home/ncyu/srv/venvs/openclaw_bybit_ai
+
+------------------------------------------------------------
+11.4 项目 env 默认文件
+------------------------------------------------------------
+
+/home/ncyu/srv/settings/environment_files/trading_services.env
+
+------------------------------------------------------------
+11.5 runtime env 默认文件
+------------------------------------------------------------
+
+/home/ncyu/srv/docker_projects/trading_services/.env
+
+------------------------------------------------------------
+11.6 AI secret 目录
+------------------------------------------------------------
+
+/home/ncyu/srv/settings/secret_files/ai/
+
+至少包括：
+- /home/ncyu/srv/settings/secret_files/ai/openai_api_key
+- /home/ncyu/srv/settings/secret_files/ai/anthropic_api_key
+
+------------------------------------------------------------
+11.7 Bybit 只读 key / secret 路径
+------------------------------------------------------------
+
+规范路径：
+- /home/ncyu/srv/settings/secret_files/bybit/read_only/api_key
+- /home/ncyu/srv/settings/secret_files/bybit/read_only/api_secret
+
+重要历史坑点：
+- 早期曾误写成 /srv/settings/secret_files/bybit/read_only/...
+- 正确路径必须带 /home/ncyu
+
+------------------------------------------------------------
+11.8 运行产物主要目录
+------------------------------------------------------------
+
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/trigger_model/
+- /home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/
+
+------------------------------------------------------------
+11.9 本轮必须记住的关键 env 变量
+------------------------------------------------------------
+
+当前真正生效的 provider 变量：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET
+
+当前真正生效的 model 变量：
+- BYBIT_AI_ACTIVE_MODEL
+
+本轮踩过的错误变量名：
+- BYBIT_AI_ACTIVE_MODEL_NAME
+这个名字是坑，不能再混用。
+
+route 相关变量（存在，但与 active binding 不是自动一体）：
+- BYBIT_ROUTE_A_PROVIDER_TARGET
+- BYBIT_ROUTE_A_MODEL
+- BYBIT_ROUTE_B_MODEL
+- BYBIT_ROUTE_C_MODEL
+
+已验证可工作的临时 active binding 示例：
+export BYBIT_AI_ACTIVE_PROVIDER_TARGET=openai_native
+export BYBIT_AI_ACTIVE_MODEL=gpt-5-mini
+
+============================================================
+十二、截至目前明确记录到的重要问题与解决方式
+============================================================
+
+1. Python 环境不对，导致 httpx 缺失  
+现象：
+- ModuleNotFoundError: No module named 'httpx'
+解决：
+- 统一使用 run_with_trading_env.sh 执行脚本
+
+2. Bybit secret 路径误写  
+现象：
+- 脚本误读 /srv/settings/secret_files/bybit/read_only/...
+解决：
+- 更正为 /home/ncyu/srv/settings/secret_files/bybit/read_only/...
+
+3. persistent WS 初版 graceful stop 不稳  
+解决：
+- 升级 listener 到 v2
+- 增加 stop_requested / shutdown_reason / 更稳的 signal handling
+
+4. snapshot 文件时间与 payload 实时性混淆  
+解决：
+- 增加 payload_time_summary
+- 在 acceptance / runtime 中纳入 freshness 语义
+
+5. 5GbE / VLAN / DHCP / 网关不通  
+解决：
+- 通过 nmcli disconnect/connect 刷新链路状态
+- 确认公网出口 IP 与 Bybit 白名单匹配
+
+6. H5 中 bybit_ai_cost_log.py NameError  
+现象：
+- h2_runtime 未定义
+解决：
+- 修补脚本实现层 bug
+- H5 重新闭环
+
+7. H1 freshness 阻塞  
+现象：
+- blocked_stale_public_microstructure
+- h0_final_audit_stale
+解决：
+- 先真 rebuild H0 再重建 H1
+
+8. provider / model 绑定变量名错用  
+现象：
+- provider_target 生效但 model_name 为空
+根因：
+- 用了 BYBIT_AI_ACTIVE_MODEL_NAME
+解决：
+- 改用 BYBIT_AI_ACTIVE_MODEL
+
+9. builder / canonical 脚本混跑导致 contract 不匹配  
+解决：
+- 新对话里先确认 canonical mainline，再运行
+- 不要随手混跑 builder / final / contract / runner
+
+============================================================
+十三、当前程序规模的诚实统计
+============================================================
+
+按 2026-03-20 续接总报告中“对已上传日志与报告文本抽取唯一脚本名”的统计口径：
+
+- 明确出现过的唯一 .py / .sh 脚本名共 137 个
+- 该统计不是对服务器仓库做实时扫描的硬计数
+- 而是基于已上传文本抽取的高保真统计
+- 对新对话续接已足够可靠
+
+按章节大致分布：
+- A-C / 基础运维与自动化：2
+- D / Readonly Observer 主链：36
+- E / Business Event Classification：8
+- F / Event-Driven Transition Scaffold：18
+- G / 真实业务事件验证层：30
+- J / Transition Engine Skeleton：21
+- K / Paper / Demo Gate：20
+- 跨章节 / Revision 2 总回归：2
+
+说明：
+- 这个分布来自“文本中唯一脚本名抽取”
+- 不代表仓库当前真实文件树必须一字不差
+- 但作为新聊天续接的工程量认知，已经足够高保真
+
+============================================================
+十四、当前最关键的概念词典
+============================================================
+
+- readonly observer  
+  当前主系统真实角色：只读观察，不允许执行。
+
+- healthy_no_business_events_yet  
+  业务事件侧健康，但当前还没有看到真实 wallet / order / execution / position 业务事件。
+  这是健康空态，不是故障。
+
+- healthy_but_empty  
+  event-driven scaffold 当前高层语义：结构健康，但为空，不能推进到交易态。
+
+- observe_only_retained  
+  系统合理继续保持 observe-only，而不是因为出错。
+
+- decision lease  
+  未来 AI 输出的受治理决策租约，不是即时执行命令。
+
+- thought_gate  
+  本地先判断“是否值得问 AI”的门。
+
+- query_budget  
+  控制 AI 调用预算，防止无限询问。
+
+- model_router  
+  根据任务价值、复杂度、成本路由不同模型。
+
+- structural hardening  
+  不是正式业务完工，而是先把结构层、测试层、审计层补强到可维护状态。
+
+- chapter consistency  
+  章节级一致性检查，确认某章的 latest / contract / summary / handoff / final audit 语义一致。
+
+- master regression  
+  跨章节总回归，确认多章结果能同时成立且不污染主 runtime。
+
+============================================================
+十五、后续新对话的第一优先任务（这一条最重要）
+============================================================
+
+不要继续往 J 章推进。
+先做 H / I compatibility audit。
+
+必须验证三件事：
+
+1. H 单独是否仍能稳定全绿  
+最低应检查：
+- H0 rebuild 后是否 fresh
+- H1 final audit 是否 overall_ok = true
+- H2 final audit 是否 overall_ok = true
+- H3 final audit 是否 overall_ok = true
+- H4 final audit 是否 overall_ok = true
+- H5 final audit 是否 overall_ok = true
+- H 章是否仍：
+  - h_chapter_closed = true
+  - ready_for_i1 = true
+  - runtime_still_protected = true
+
+2. I 单独是否仍能稳定全绿  
+最低应检查：
+- I1-I10 latest 文件是否都还在
+- I10 final audit 是否整体转绿
+- I 是否仍维持：
+  - execution_authority = not_granted
+  - decision_lease_emitted = false
+  - live_operator_ack_enabled = false
+  - runtime_still_protected = true
+
+3. H -> I 联动是否仍完全兼容  
+重点检查：
+- I 所依赖的 H 输出字段是否有漂移
+- latest 文件路径是否有漂移
+- stage source 选择是否有漂移
+- soft warn 口径是否有漂移
+- H 返修后，I 当年的输入假设是否仍成立
+
+只有以上三项都通过，才允许继续后续章节。
+
+============================================================
+十六、后续新对话的建议执行顺序
+============================================================
+
+建议顺序：
+
+第 1 步：
+先让新对话复述本报告里的：
+- 项目总目标
+- 当前正式章节树
+- 当前真实完成度
+- 当前硬安全边界
+- H / I compatibility audit 为什么必须先做
+
+第 2 步：
+正式执行 H / I compatibility audit
+
+第 3 步：
+若兼容性通过，再决定：
+- 是继续稳化 J / K
+- 还是补 L（学习 / 自观测 / net PnL）
+- 或先做 H / I 的更深审计与回放完善
+
+============================================================
+十七、可直接复制到新对话的开场指令
+============================================================
+
+请先不要继续往 J 章推进。
+先把 3 月 20 日返修后的 H 章与更早已完成的 I 章做一次 compatibility audit。
+我需要你验证三件事：
+1）H 单独是否仍能稳定全绿；
+2）I 单独是否仍能稳定全绿；
+3）I 所依赖的 H 输出、字段、文件、状态语义，是否与返修后的 H 完全兼容。
+只有这三件事都验证通过，才允许继续后续章节。
+
+另外请你先复述以下五件事，再正式开工：
+- 本项目总目标是什么
+- 当前正式章节树是什么
+- 当前哪些章节已真正完成
+- 当前主 runtime 的安全边界是什么
+- 为什么现在第一优先不是继续 J，而是先做 H / I compatibility audit
+
+============================================================
+十八、一句话总收口
+============================================================
+
+如果只用一句话概括当前真实项目状态：
+
+“OpenClaw / Bybit 项目已经完成只读观察底盘、业务事件分类、事件驱动空态骨架、真实业务事件验证、H 章只读 AI 治理闭环，以及 I 章影子 decision-lease 控制平面收口；J / K 只做到结构层 / 测试层 / 审计层补强；主 runtime 仍保持 read_only，当前第一优先动作是做 H / I 兼容性审计，而不是继续推进 J。” 

@@ -1,0 +1,689 @@
+OpenClaw / Bybit 分支 handoff 报告（基于本对话重建）
+生成时间：2026-03-21
+
+==============================
+0. 这份 handoff 的用途与可信度说明
+==============================
+
+这份文件的目标：
+1) 先把“本对话里已经完成了什么、顺序是什么、返修了什么”尽量完整固定下来，防止后续继续遗忘。
+2) 作为新聊天接手时的主线说明书，让后续继续工作的版本能迅速对齐当前真实状态。
+3) 把本对话里已经确认过的路径、env、secret、执行方式、关键坑点，集中记录下来。
+
+重要说明：
+- 本文件不参考更早上传给模型的旧总结文件；它只基于本对话、当前还可见的终端结果、以及用户在本对话里对整体时间线的明确纠正来重建。
+- 因为本对话里后半段可见信息主要集中在“H 章节返修”，所以对更早那段“I 章节设计与完成”的具体逐脚本细节，当前只能按“本对话已被用户明确确认的事实”记录，不能伪造未重新看到的具体代码文件名。
+- 也就是说：
+  A. “H 先完成 -> 讨论 I -> I 也做完 -> 准备去 J 前发现问题 -> 回头修 H” 这条总线，是用户在本对话中明确纠正并确认过的，应视为当前分支真实主线。
+  B. I 章节的精确脚本清单 / 文件名 / 每一步终端输出，当前仍需要后续专门在代码树和运行产物里反查定位。
+
+
+==============================
+1. 本对话的真实时间线（非常重要）
+==============================
+
+必须先纠正一件事：
+这条对话并不是“今晚从 H 做到 I”。
+真实顺序应当是：
+
+1) 今天前半段，先把 H 章节完成。
+2) 随后，围绕 I 章节应该怎么写，进行过专门讨论。
+3) 用户当时特别提醒：关于 I 章节的讨论内容，要认真记录，之后会来要。
+4) 在那之后，I 章节也已经完成。
+5) 然后在准备继续推进、也就是准备从 I 往后走、接近 J 章节之前，发现 H 章节底层仍有问题。
+6) 因此，本对话后半段的主要工作，变成了“回头返修 H”，把 H 从底层重新修绿、重新闭环、重新验证。
+
+所以：
+- 本对话后半段看到的大量终端输出，大多不是“第一次做 H”，而是“返修 H”。
+- I 章节不是未来要做，而是本对话更早阶段就已经做完。
+
+这条总线必须牢记，否则后续会把项目位置判断错。
+
+
+==============================
+2. 本对话里一共完成了哪些大块工作
+==============================
+
+按主线可分为四大块：
+
+--------------------------------
+2.1 Bybit 接入 / 权限边界 / 只读策略的前置规划
+--------------------------------
+
+本对话较早阶段已经明确过 Bybit API 权限策略，核心原则是“最小权限、先只读、后执行、职责分离”。
+
+当时形成的方向包括：
+- 现在优先创建生产只读主 key，用于真实私有读取与核验。
+- 真正执行用的 key 不在当前阶段立刻启用，待更后面受控执行阶段再考虑。
+- demo / testnet key 可作为额外演练，但不是当前主链重点。
+- 权限上偏向：Read-Only、Unified Trading、Assets、Trade 历史 / Orders / Positions / Convert 等与当前阶段相关的读取能力。
+- 不建议乱开与本项目当前阶段无关权限（Fiat、P2P、Ads、Broker only 等）。
+- 网络安全上，如果后续具备固定公网 IP，应优先切到白名单；无固定 IP 时，当前只能临时放宽但不应视作长期最佳方案。
+
+这一段为整个系统定下了安全总原则：
+“当前主线是只读观察系统，而非执行系统。”
+
+--------------------------------
+2.2 H 章节最初版本已完成
+--------------------------------
+
+用户已明确纠正：今天前半段不是在修 H，而是先把 H 做完。
+
+H 章节的结构已经明确固定为：
+- H1 thought gate
+- H2 query budget
+- H3 model router
+- H4 compute governor
+- H5 AI cost governance
+
+H 章节的总目标：
+- 把 AI 放入一个受治理、只读、预算受控、可审计的观察链。
+- 它可以接收本地事实并返回 compact JSON 观察结果。
+- 但它绝不能被误认为“已授予执行权”。
+
+在 H 章中反复被固定下来的硬边界：
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted
+- live_execution_allowed = false
+- decision_lease_emitted = false
+
+也就是说，H 的角色是：
+“AI 观察判断层”，不是“执行授权层”。
+
+--------------------------------
+2.3 I 章节经过讨论并且已经完成
+--------------------------------
+
+这是本对话里最容易被遗忘、但又非常关键的部分。
+
+用户已明确说明：
+- H 章节完成后，我们专门讨论了 I 章节应该怎么写。
+- 用户当时要求模型认真记录讨论内容，因为之后会回来要。
+- 随后，I 章节本身也已经做完。
+
+虽然当前可见终端片段主要聚焦于后半段返修 H，因此没有把 I 章节的逐脚本输出保留在这里，但从 H 章节反复出现的接口语义可以较明确地推断：
+
+I 章节当时承接的主题，核心应当围绕：
+- decision lease / 决策租约
+- execution authority / 执行授权边界
+- operator review / 人工审核位
+- 只读观察结果如何 handoff 给下一层治理对象
+- 权限与观察结果的分离
+- 不可越权、可过期、可撤销、可审计
+- idempotency / 状态一致性 / 安全兜底
+
+必须强调：
+- “I 已做完” 是本对话里被用户明确确认过的事实。
+- 但“I 的具体代码文件名、每一节脚本名、具体落在哪里”，当前仍需后续反查代码树与运行产物来精确定位。
+
+--------------------------------
+2.4 在进入更后章节前发现问题，因此回头返修 H
+--------------------------------
+
+本对话后半段的绝大多数终端工作，实际都属于这一步。
+
+逻辑上不是：
+“因为 H 没做，所以才做 H”。
+
+而是：
+- H 做完了。
+- I 也做完了。
+- 准备继续往后推进时，发现 H 的底层并没有真正稳固，或者存在表面通过但内核有问题的点。
+- 所以决定回头返修 H，把底座修干净，再继续往后。
+
+这一决策本身很重要，说明项目推进原则是：
+“宁可回头修基础，不带着脏底座继续叠层。”
+
+
+==============================
+3. 后半段返修 H，具体修了什么
+==============================
+
+以下是本对话后半段已确认完成的返修内容。
+
+--------------------------------
+3.1 统一所有关键脚本到 trading env 执行
+--------------------------------
+
+曾出现错误：
+- ModuleNotFoundError: No module named 'httpx'
+
+这说明裸跑 python3 时，没有进入正确 venv / 正确 env 装载链。
+
+后续采取的规范化动作：
+- 关键脚本统一尽量通过如下 wrapper 调用：
+  ./scripts/run_with_trading_env.sh python3 your_script.py
+
+并且还 patch 了一些 repair / closure 脚本，使其内部不要再直接裸用 python3，而是通过 run_with_trading_env.sh 调起。
+
+这一步修的是“执行基础设施一致性”。
+
+--------------------------------
+3.2 修 H5 硬错误：bybit_ai_cost_log.py NameError
+--------------------------------
+
+H5-A 一度出现硬错误：
+- NameError: name 'h2_runtime' is not defined
+
+说明 scripts/bybit_ai_cost_log.py 里直接引用了未定义变量。
+
+修复过程中还踩过一次小坑：
+- patch helper 使用 f-string 时先写出了 SyntaxError。
+
+最终结论：
+- bybit_ai_cost_log.py 已被真正修补。
+- 后面 H5 能重新闭环，说明这条硬错误已经不再阻断主链。
+
+--------------------------------
+3.3 重建 H0 真 builder 链，不再依赖旧 latest 假绿
+--------------------------------
+
+中途很重要的一步，是不再只看旧 latest.json，而是把 H0 真正整链重建：
+
+已实际重跑的核心包括：
+- bybit_public_microstructure_builder.py
+- bybit_public_microstructure_contract_check.py
+- bybit_local_market_friction_builder.py
+- bybit_local_market_friction_contract_check.py
+- bybit_local_risk_envelope_gate.py
+- bybit_local_risk_envelope_contract_check.py
+- bybit_local_trade_eligibility_builder.py
+- bybit_local_trade_eligibility_contract_check.py
+- bybit_local_trade_eligibility_handoff_builder.py
+- bybit_local_trade_eligibility_handoff_contract_check.py
+- bybit_local_judgment_final_audit.py
+- bybit_local_judgment_final_audit_contract_check.py
+
+H0 最终重新确认到的关键状态：
+- public microstructure: healthy_basic_public_microstructure
+- market friction: eligible_for_next_gate
+- risk envelope: flat_idle_low_risk
+- trade eligibility: eligible_for_governed_ai_review
+- handoff: ready_for_h1_thought_gate
+- final H0 state: structurally_valid_and_ready_for_h1
+
+这一步非常关键，因为后面 H1 的输入必须建立在真实更新的 H0 之上，而不是脏旧快照之上。
+
+--------------------------------
+3.4 修 H1-A / H1-B freshness 问题
+--------------------------------
+
+返修过程中，H1 最开始反复卡在：
+- input_state = blocked_stale_public_microstructure
+
+常见 operator_flags：
+- public_microstructure_stale
+- h0_final_audit_stale
+- recent_trade_last_price_missing
+
+返修做法包括：
+- 先重建 H0
+- 然后立即重建 H1-A / H1-B
+- 做 truth check，对比 input_state、allow_progress_to_h1b_policy、policy_state、blocking_reasons
+
+最终 H1-A 被拉回：
+- ready_for_thought_gate_policy_evaluation
+
+后续 H1-B 也被拉回：
+- policy_ready_light_only
+
+说明最初阻塞并不在 AI provider 本身，而是更前面的 freshness gate 没开。
+
+--------------------------------
+3.5 修 H1-E / H1-F 真正的核心卡点：active model 变量名错用
+--------------------------------
+
+这是本轮返修里最关键的一次精确定位。
+
+当时已经做到：
+- H1-C decision_ready_light_ai_call
+- H1-R route_ready_light
+
+即：
+- thought gate 已允许 light AI 调用
+- route selector 也已选出 route_a_light
+
+但 H1-E / H1-F 仍表现为：
+- provider_target 为空，或只 provider 有值、model_name 为空
+- request_state / invocation_state 继续 blocked
+
+后面通过 grep 定位到：
+- scripts/bybit_ai_request_envelope_builder.py 实际读取的是：
+  BYBIT_AI_ACTIVE_PROVIDER_TARGET
+  BYBIT_AI_ACTIVE_MODEL
+- 并不是：
+  BYBIT_AI_ACTIVE_MODEL_NAME
+
+这次一开始 export 的是：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET=openai_native
+- BYBIT_AI_ACTIVE_MODEL_NAME=gpt-5-mini
+
+结果：
+- provider 生效了
+- model 仍为空
+
+这是一个非常关键的坑：
+“看起来变量名很像，但真正生效的是 BYBIT_AI_ACTIVE_MODEL，不是 BYBIT_AI_ACTIVE_MODEL_NAME。”
+
+--------------------------------
+3.6 识别出 route 选择 与 active model 绑定 是两套逻辑
+--------------------------------
+
+后续继续 grep 环境变量时，还看到：
+- BYBIT_ROUTE_A_PROVIDER_TARGET=anthropic_native
+- BYBIT_ROUTE_A_MODEL=claude-haiku-4-5-20251001
+- BYBIT_ROUTE_B_MODEL=gpt-5-mini
+- BYBIT_ROUTE_C_MODEL=gpt-5
+
+同时 H1-R 当时已经选出：
+- route_a_light
+
+但 H1-E 并不会自动从 route 绑定变量里拿 model，而是仍然使用：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET
+- BYBIT_AI_ACTIVE_MODEL
+
+这说明当前代码实现中：
+- route selector 负责决定走哪条 lane
+- request envelope 负责从 active env 里绑定 provider/model
+- 两者不是完全自动联动的一套系统
+
+这也是为什么 route 已 ready，但 request 仍然空壳的根源之一。
+
+--------------------------------
+3.7 最终把 H1 真正打通
+--------------------------------
+
+在 provider/model 正确补齐后，最终主状态被打通为：
+- H1-E request_state = ready_provider_native_ai_request
+- H1-F invocation_state = invocation_success_json_ready
+- H1-G response_state = response_json_contract_satisfied
+- H1 final audit overall_ok = True
+
+这说明 H1 不只是表面生成了几个 JSON，而是已经完成了完整真实闭环：
+- request 合法
+- invocation 真执行
+- provider 真返回
+- JSON contract 真满足
+- governed decision 真建立
+- acceptance 真通过
+- final audit 真收绿
+
+--------------------------------
+3.8 最终 H2 / H3 / H4 / H5 全部重新收绿
+--------------------------------
+
+最终确认状态：
+- H2 query_budget_final_audit overall_ok = True
+  audit_state = query_budget_closed_ready_for_h3
+- H3 model_router_final_audit overall_ok = True
+  audit_state = model_router_closed_soft_warn_ready_for_h4
+- H4 compute_governor_final_audit overall_ok = True
+  audit_state = compute_governor_closed_soft_warn_ready_for_h5
+- H5 ai_cost_governance_final_audit overall_ok = True
+  final_state = ai_cost_governance_closed_soft_warn_ready_for_i1
+
+同时：
+- H chapter overall 已闭环
+- ready_for_i1 = True
+
+这说明本轮返修成功结果是：
+“H 章节重新修绿，并且再次达到了可进入 I 的状态。”
+
+注意：这里的 ready_for_i1 表示 H 的接口视角；但项目总线层面，用户已经说明 I 在这条对话更早时就做过，因此这里应理解为“返修后的 H 再次与 I 的入口条件重新对齐”。
+
+
+==============================
+4. 本对话里反复固定下来的关键概念
+==============================
+
+--------------------------------
+4.1 H 不是执行系统，而是受治理的 AI 只读观察链
+--------------------------------
+
+H 可以：
+- 接受本地 deterministic facts
+- 经过 thought gate / budget / router / governor
+- 调用 compact JSON AI observation
+- 对 response 做 contract check
+- 形成 governed observation
+
+H 不可以：
+- 授予 live execution authority
+- 把 AI 返回当作执行许可
+- 跳过 operator review
+- 发出 decision lease（那是更后面的事）
+
+--------------------------------
+4.2 H 的硬安全边界必须始终保持
+--------------------------------
+
+贯穿本对话反复确认的边界：
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted
+- live_execution_allowed = false
+- decision_lease_emitted = false
+
+这几条是 H 的地基。不能在后续工作中被误删或误解。
+
+--------------------------------
+4.3 I 的角色不是“让 H 更聪明”，而是“把 H 的观察结果转成受治理的下一层权限对象”
+--------------------------------
+
+虽然当前还没把 I 的具体代码树反查出来，但从本对话总线与 H->I 接口语义来看，I 的角色应当是：
+- 承接 H 的 governed observation
+- 管理 execution authority 的授予与不授予
+- 引入 decision lease / operator review / expiry / revoke 等机制
+- 把“观察结果”与“执行权”彻底分层
+
+--------------------------------
+4.4 route 与 active model 当前是两层绑定
+--------------------------------
+
+当前实现下：
+- route selector 选的是 lane（route_a / route_b / route_c / skip）
+- request envelope 绑定的是 active provider/model
+
+所以不能简单以为：
+“route_a_light 被选中 -> 就一定自动使用 route A model 变量”。
+
+当前真正影响 H1-E 的变量还是：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET
+- BYBIT_AI_ACTIVE_MODEL
+
+--------------------------------
+4.5 系统已经验证过 read-only AI 调用链能真实跑通
+--------------------------------
+
+最终成功打通的 active binding 是：
+- provider_target = openai_native
+- model_name = gpt-5-mini
+
+并且：
+- invocation_success_json_ready
+- response_json_contract_satisfied
+- H1 final audit green
+
+这说明“真实只读 AI 观察链”不是纸面设计，而是已实际跑通过。
+
+
+==============================
+5. 本对话里已经确认过的重要路径
+==============================
+
+--------------------------------
+5.1 代码主目录
+--------------------------------
+/home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+
+--------------------------------
+5.2 标准执行 wrapper
+--------------------------------
+/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/run_with_trading_env.sh
+
+--------------------------------
+5.3 专用 venv
+--------------------------------
+/home/ncyu/srv/venvs/openclaw_bybit_ai
+
+--------------------------------
+5.4 项目 env 默认文件
+--------------------------------
+/home/ncyu/srv/settings/environment_files/trading_services.env
+
+--------------------------------
+5.5 runtime env 默认文件
+--------------------------------
+/home/ncyu/srv/docker_projects/trading_services/.env
+
+--------------------------------
+5.6 AI secret 目录
+--------------------------------
+/home/ncyu/srv/settings/secret_files/ai
+
+其中至少包括：
+- /home/ncyu/srv/settings/secret_files/ai/openai_api_key
+- /home/ncyu/srv/settings/secret_files/ai/anthropic_api_key
+
+--------------------------------
+5.7 Bybit runtime / local_judgment / thought_gate 主要产物目录
+--------------------------------
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/
+- /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/trigger_model/
+- /home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/
+
+
+==============================
+6. 本对话里必须记住的关键 env / 变量名
+==============================
+
+--------------------------------
+6.1 当前真正生效的 provider 变量
+--------------------------------
+BYBIT_AI_ACTIVE_PROVIDER_TARGET
+
+--------------------------------
+6.2 当前真正生效的 model 变量
+--------------------------------
+BYBIT_AI_ACTIVE_MODEL
+
+--------------------------------
+6.3 本轮踩过的错误变量名（重点记住）
+--------------------------------
+BYBIT_AI_ACTIVE_MODEL_NAME
+
+这个名字在这次返修中是坑点。不要再混用。
+
+--------------------------------
+6.4 route 相关变量（当前实现存在，但与 active binding 并非自动完全一体）
+--------------------------------
+- BYBIT_ROUTE_A_PROVIDER_TARGET
+- BYBIT_ROUTE_A_MODEL
+- BYBIT_ROUTE_B_MODEL
+- BYBIT_ROUTE_C_MODEL
+
+本对话里曾实际看到：
+- BYBIT_ROUTE_A_PROVIDER_TARGET=anthropic_native
+- BYBIT_ROUTE_A_MODEL=claude-haiku-4-5-20251001
+- BYBIT_ROUTE_B_MODEL=gpt-5-mini
+- BYBIT_ROUTE_C_MODEL=gpt-5
+
+--------------------------------
+6.5 OpenAI runtime 相关变量
+--------------------------------
+- BYBIT_OPENAI_CONNECT_TIMEOUT_SEC
+- BYBIT_OPENAI_READ_TIMEOUT_SEC
+- BYBIT_OPENAI_MAX_RETRIES
+- BYBIT_OPENAI_REASONING_EFFORT
+- BYBIT_OPENAI_TEXT_VERBOSITY
+- BYBIT_OPENAI_WRITE_TIMEOUT_SEC
+
+本对话可见值包括：
+- BYBIT_OPENAI_CONNECT_TIMEOUT_SEC=2.0
+- BYBIT_OPENAI_READ_TIMEOUT_SEC=8.0
+- BYBIT_OPENAI_MAX_RETRIES=0
+- BYBIT_OPENAI_REASONING_EFFORT=minimal
+- BYBIT_OPENAI_TEXT_VERBOSITY=low
+
+
+==============================
+7. 本对话里已经修过的问题清单
+==============================
+
+1) Python 环境不对，导致 httpx 缺失
+   - 通过统一 run_with_trading_env.sh 执行路径修正。
+
+2) H5 scripts/bybit_ai_cost_log.py 引用未定义变量 h2_runtime
+   - 已修。
+
+3) H1-A freshness 过期，导致 input_state = blocked_stale_public_microstructure
+   - 通过重建 H0 + 紧接着重建 H1-A / H1-B 修正。
+
+4) H1-B 因 input_state_not_ready / h1a_policy_gate_not_open 卡死
+   - 随 H1-A 恢复为 ready_for_thought_gate_policy_evaluation 一并解决。
+
+5) H1-E / H1-F provider_target / model_name 为空
+   - 通过查出正确 active 变量名修正。
+
+6) 错把 BYBIT_AI_ACTIVE_MODEL_NAME 当成真正生效变量
+   - 已确认真正应使用 BYBIT_AI_ACTIVE_MODEL。
+
+7) route ready 但 request binding 仍为空壳
+   - 识别出 route 与 active binding 当前是两套逻辑，避免继续误判。
+
+8) H1-G builder / 老脚本 / contract check 之间存在 schema / 产物双轨
+   - 这轮虽然最终绕通并成功绿掉，但代码卫生上后续仍建议统一。
+
+
+==============================
+8. 当前已经确认的阶段性结果
+==============================
+
+当前分支在本对话后半段返修完成后，已经确认：
+
+H1:
+- overall_ok = True
+- h1_stage_closed = True
+- ai_response_checked = True
+- governed_observation_built = True
+- acceptance_passed = True
+- runtime_still_protected = True
+- ready_for_h2 = True
+
+H2:
+- overall_ok = True
+- audit_state = query_budget_closed_ready_for_h3
+- h2_stage_closed = True
+- ready_for_h3 = True
+
+H3:
+- overall_ok = True
+- audit_state = model_router_closed_soft_warn_ready_for_h4
+- h3_stage_closed = True
+- ready_for_h4 = True
+- provider_target = openai_native
+- model_name = gpt-5-mini
+
+H4:
+- overall_ok = True
+- audit_state = compute_governor_closed_soft_warn_ready_for_h5
+- h4_stage_closed = True
+- ready_for_h5 = True
+
+H5:
+- overall_ok = True
+- audit_state = ai_cost_governance_closed_soft_warn_ready_for_i1
+- final_state = ai_cost_governance_closed_soft_warn_ready_for_i1
+- h5_stage_closed = True
+- h_chapter_closed = True
+- ready_for_i1 = True
+
+结论：
+- 返修后的 H 章节已经重新完整闭环。
+- 从 H 的接口视角看，重新回到了“可以进入 I”的状态。
+- 但项目真实总线层面，应记住：I 在本对话更早时其实已经做完，所以现在更准确的说法应是：
+  “返修后的 H 已重新与早先已完成的 I 对齐。”
+
+
+==============================
+9. 当前仍未完全解决、后续应继续处理的事项
+==============================
+
+--------------------------------
+9.1 需要重新找回 I 章节的完整设计思路与具体代码位置
+--------------------------------
+
+这是当前最重要的未完成交接项。
+
+本文件已经把“本对话里 I 的位置和角色”固定下来了，但仍缺：
+- I 章节各子节的精确命名
+- I 章节对应脚本清单
+- I 章节运行产物目录
+- I 章节最后状态 / final audit 结果
+- I 与 J 之间的接口对象
+
+这部分下一步必须专门做“代码树反查 + 运行产物反查 + 命名搜索”。
+
+--------------------------------
+9.2 需要核对返修后的 H 与已完成 I 是否完全兼容
+--------------------------------
+
+因为 H 这次是返修，不排除：
+- 字段名改过
+- contract 版本改过
+- 状态枚举改过
+- provider/model 绑定逻辑改过
+
+所以要做一次：
+- “返修后 H 产物” vs “早先已完成 I 预期输入”的兼容性回归检查
+
+--------------------------------
+9.3 active binding 最终最好写入持久 env，而不是只停留在当前 shell
+--------------------------------
+
+当前本对话里已经证明：
+- export 到当前 shell 后能打通 H1
+
+但仍应确认：
+- 这些变量是否需要回写到正式 env 文件
+- 后续重启 shell / 重跑 closure 脚本时，是否还会掉回空 provider/model
+
+--------------------------------
+9.4 route selector 与 active model binding 最好后续统一
+--------------------------------
+
+否则同样的坑会再次出现：
+- route 已 ready
+- request 仍为空壳
+
+--------------------------------
+9.5 public microstructure 里的 last_trade 字段长期为空，虽然目前不再阻断主链，但仍值得继续调查
+--------------------------------
+
+常见 warning：
+- recent_trade_last_price_missing
+- recent_trade_last_ts_missing
+- last_trade_fields_missing
+
+目前它在最新 H 链里更多表现为 warning / soft concern，但后续仍建议找根因。
+
+
+==============================
+10. 下一步推荐行动（为下一聊天或下一轮工作做准备）
+==============================
+
+当前最合理的下一步，不是从头重做 H，也不是盲目直接开 J。
+而是：
+
+第一优先：
+- 把“早先已完成的 I 章节”重新找回来：
+  - 思路
+  - 代码
+  - 运行产物
+  - 最终状态
+
+第二优先：
+- 做一次“返修后 H -> 已完成 I”的兼容性回归核对。
+
+第三优先：
+- 核对 I 之后当时准备进入的下一章（用户明确说是接近 J 之前发现问题），从而恢复正确推进位置。
+
+
+==============================
+11. 给未来接手者的最短结论
+==============================
+
+一句话总结：
+这条分支不是“刚做完 H 正准备去 I”。
+真正情况是：
+
+- H 早些时候已经完成；
+- 随后 I 经过讨论并已经完成；
+- 在准备继续往后推进、接近 J 之前，发现 H 底层不稳；
+- 本对话后半段因此回头返修 H；
+- 返修后 H1~H5 已重新全部收绿；
+- 当前最重要的工作不是重做 H，而是“找回 I 的完整思路与代码位置，并核对返修后 H 与 I 的兼容性”。
+

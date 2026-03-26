@@ -1,0 +1,558 @@
+OpenClaw Bybit Agent 项目
+Revision 2 工程记录（含已完成章节、未完成章节、优先级重排、阶段定义）
+日期：2026-03-17
+状态：用于后续新分支继续推进的正式工程记录 / 阶段性总记录
+
+==================================================
+一、文档用途
+==================================================
+
+本文件用于记录当前 OpenClaw Bybit Agent 项目的最新阶段状态、完整章节树、已完成内容、后续执行顺序以及系统当前真实定位。
+目标如下：
+
+1. 作为后续新分支继续开发时的上游背景资料
+2. 作为阶段性交接记录，避免后续模型或人工维护时遗忘重点
+3. 作为 Revision 2 的正式章节树与优先级定义
+4. 作为后续执行、审计、回溯、维护时的统一文字依据
+
+本记录为“正式工程记录”版本，强调结构完整、定位清晰、章节关系明确。
+若后续需要直接按步骤推进，应配合《执行清单版》文件一并使用。
+
+==================================================
+二、当前阶段总定义
+==================================================
+
+当前项目并没有跑偏，但后续的推进顺序已经根据最新审核思路进行了 Revision 2 重排。
+
+当前已经完成的部分，严格来说属于以下三层：
+
+1. readonly observer infrastructure
+2. business-event classification
+3. event-driven transition scaffold
+
+也就是说，系统当前已经具备：
+- Bybit 只读账户信息接入
+- private REST / snapshot / websocket smoke / runtime facts / packet / verdict / acceptance / runtime / summary / audit 等只读观察主链
+- business event 健康状态区分能力
+- event-driven 状态表达链、阶段链、输入链、决策链、结果链、handoff 与 final audit
+
+但当前系统仍然不代表已经进入“真正可交易的事件驱动引擎阶段”。
+原因是：
+
+1. 当前尚未看到真实 business-topic 事件
+2. 当前 event-driven 子链处于 healthy but empty / observe-only retained 状态
+3. AI governance 尚未正式接入主链
+4. decision lease 尚未建立
+5. 真正的 transition engine 尚未开始构建
+6. paper/demo gate 尚未建设
+7. live execution 仍严格禁止
+
+因此，后续主线必须切换为：
+
+真实业务事件验证
+-> AI 治理
+-> decision lease
+-> transition engine
+-> paper/demo
+-> learning / self-observability / net PnL
+-> supervised live
+-> constrained autonomous live
+
+==================================================
+三、系统当前真实定位
+==================================================
+
+当前系统的准确定位应表述为：
+
+“当前系统是 production-grade readonly observer infrastructure + business-event classification + event-driven scaffold，
+但尚未验证真实 business-topic event flow，尚未接入 AI governance，尚未接入 decision lease，也尚未进入 demo/paper execution 阶段。”
+
+换句话说：
+
+1. 现在的系统是高质量的只读观察与状态表达基础设施
+2. 现在的系统不是交易执行基础设施
+3. 现在的系统不是自动交易系统
+4. 现在的系统不是 live trading system
+5. 现在的系统已经具备继续扩展为 event-driven trading architecture 的基础
+6. 但还不能跳过中间关键层直接推进 live execution
+
+==================================================
+四、完整章节树（Revision 2 正式版）
+==================================================
+
+以下章节树包含：
+- 已完成章节
+- 当前优先章节
+- 后续章节
+- 各章节之间的关系与定位
+
+状态标记定义：
+- [已完成]：当前视为已经收口
+- [当前优先 P0]：下一分支应最先推进
+- [高优先 P1]：紧随其后
+- [中优先 P2]：前述层完成后推进
+- [后续 P3]：更后阶段
+
+--------------------------------------------------
+A. 本地基础层  [已完成]
+--------------------------------------------------
+
+A1. 硬件 / 主机 / 网络底座
+A2. Ubuntu / Python / Docker / Postgres 环境
+A3. 文件路径与 latest/dated 输出规范
+A4. 本地服务编排基础
+
+本层在项目中对应更早的基础建设阶段，已经完成。
+其意义在于提供后续一切 Bybit / OpenClaw / 数据写入 / 审计流程的本地执行底座。
+
+--------------------------------------------------
+B. OpenClaw 模型层  [已完成 / 已定方向]
+--------------------------------------------------
+
+B1. OpenClaw 本地模型使用定位
+B2. 多模型角色分层
+B3. 模型切换与资源调度基础思路
+
+本层已完成或方向已固定。
+其核心意义在于明确：
+- OpenClaw 在整体系统中的定位
+- 本地模型与云模型的角色分工
+- 后续 AI governance 不是“无脑多问模型”，而是受治理、预算和路由控制的
+
+--------------------------------------------------
+C. 接入前治理与骨架  [已完成]
+--------------------------------------------------
+
+C1. Bybit 接入前安全原则
+C2. read_only 硬边界
+C3. 脚本 / latest / contract / audit 基础模式
+C4. 目录 / 日志 / 产物结构规范
+
+本层是整个项目的安全骨架。
+它决定了本项目从一开始就不是“先接入再补安全”，而是先确立：
+- 默认只读
+- 默认不允许 live execution
+- 默认不允许 AI 直接驱动真实执行
+- 所有升级必须分阶段推进
+- 所有关键状态必须可审计、可解释、可追溯
+
+--------------------------------------------------
+D. Readonly Observer 主链  [已完成]
+--------------------------------------------------
+
+D1. private REST readonly checks
+D2. preflight guard
+D3. snapshot + normalize + postgres
+D4. ws smoke + persistent ws listener
+D5. ws runtime facts
+D6. decision packet
+D7. observer verdict
+D8. acceptance
+D9. runtime / summary / handoff / audit / consistency
+
+这一层是 D21 之前与 D21 阶段的正式成果。
+当前已经完成的真实含义是：
+
+1. Bybit 私有只读接入已经打通
+2. 账户、持仓、历史订单、成交历史都可在只读模式下被拉取
+3. snapshot、ws smoke、decision packet、observer verdict、acceptance、runtime、summary、handoff、audit 已经形成闭环
+4. readonly observer infrastructure 已可稳定运行
+5. system_mode = read_only 作为硬边界仍成立
+
+这层是整个项目最基础也最重要的底盘之一。
+
+--------------------------------------------------
+E. Business Event Classification  [已完成]
+--------------------------------------------------
+
+E1. business event smoke
+E2. extract from ws jsonl
+E3. ingestion from ws
+E4. runtime facts
+E5. state classification
+E6. runtime / policy / summary / handoff / audit 集成
+
+这层已经完成。
+当前最关键成果不是“已经有真实业务事件”，而是系统已经能区分以下状态：
+
+1. healthy_no_business_events_yet
+2. healthy_business_events_present
+3. stale_or_missing_business_event_feed
+
+它的意义非常重要：
+系统现在知道“没有真实业务事件”与“事件流故障”不是一回事。
+
+也就是说：
+当前 healthy_no_business_events_yet 是一个关键“健康空态”，它不是坏状态，也不能误判为交易就绪。
+
+--------------------------------------------------
+F. Event-Driven Transition Scaffold  [已完成]
+--------------------------------------------------
+
+F1. event_driven_state
+F2. event_driven_phase
+F3. event_transition_input
+F4. event_transition_decision
+F5. event_transition_outcome
+F6. chain consistency
+F7. readiness summary
+F8. handoff
+F9. final audit
+
+这一层已经完成。
+其成果并不是“真正 transition engine 已经完成”，而是：
+
+系统已经具备了完整的 event-driven 状态表达与语义闭环。
+
+目前全链高层语义是：
+
+- event_driven_readiness = healthy_but_empty
+- phase_code = observer_only_empty_feed
+- decision_code = keep_observe_only
+- outcome_code = observe_only_retained
+
+这说明 event-driven 子链当前健康，但为空。
+也就是：
+“可以观察，可以表达，可以审计，但不能推进为交易态。”
+
+--------------------------------------------------
+G. 真实业务事件验证层  [当前优先 P0]
+--------------------------------------------------
+
+G1. replay harness / fixtures
+G2. wallet / order / execution / position 非空真实事件验证
+G3. 幂等 / 去重 / 指纹 / 乱序 / replay 验证
+G4. 非空事件 acceptance / regression 套件
+
+这是下一分支的第一优先。
+
+这一章的目标不是继续扩展空态表达，而是验证：
+当真实 business-topic 事件真的到来时，系统是否能够：
+
+1. 正确采集
+2. 正确去重
+3. 正确归类
+4. 正确更新状态
+5. 正确传播语义
+6. 正确更新 audit / summary / readiness / handoff
+
+这是当前系统距离“真正事件驱动链路”最近、也最必须补上的空缺。
+
+--------------------------------------------------
+H. AI 治理主线  [高优先 P1]
+--------------------------------------------------
+
+H1. thought_gate
+H2. query_budget
+H3. model_router v2
+H4. compute governor / anti-abuse
+H5. AI cost logging / governance audit
+
+这一章的目标是把“只在值得时调用 AI”正式落到主链中。
+项目总目的从来都不是“遇到市场就问 AI”，而是：
+
+1. 先做本地事实汇总
+2. 先做状态判断
+3. 先做风险过滤
+4. 只有在满足条件、值得付出计算成本时，才调 AI
+5. 所有 AI 调用都要可预算、可路由、可审计
+
+这一层是未来 Agent 是否可控、可商业化、可持续的关键层。
+
+--------------------------------------------------
+I. Decision Lease 主线  [高优先 P1]
+--------------------------------------------------
+
+I1. decision lease schema
+I2. lease freshness / validity
+I3. revoke / supersede / expiry
+I4. lease 与 risk gate 集成
+I5. lease audit / replay
+
+这一层是项目核心理念之一，不能再往后放。
+
+其目的不是让 AI 输出“即时命令”，而是把 AI 结果封装为：
+
+- 可验证
+- 可过期
+- 可撤销
+- 可替代
+- 可审计
+- 可回放
+
+的 decision lease。
+
+也就是说，未来哪怕 AI 真能参与决策，也必须先变成一种受治理的“决策租约”，而不是直接下单命令。
+
+--------------------------------------------------
+J. Transition Engine Skeleton  [中优先 P2]
+--------------------------------------------------
+
+J1. transition rules
+J2. transition executor
+J3. transition audit trail
+J4. transition replay
+J5. fail-safe / rollback
+
+这一章是真正 transition engine 的起点。
+它与 F 章的区别是：
+
+F 章：状态表达链、语义表达链
+J 章：真正推进状态的 engine
+
+这一层要解决的问题是：
+- 哪些事件、哪些状态、哪些条件可以触发 transition
+- transition 如何执行
+- transition 如何审计
+- transition 如何回放
+- transition 失败时如何回滚或 fail-safe
+
+--------------------------------------------------
+K. Paper / Demo Gate  [中优先 P2]
+--------------------------------------------------
+
+K1. paper execution adapter
+K2. pretrade risk gate 对接
+K3. simulated fill / fee / slippage
+K4. paper accounting
+K5. paper acceptance / audit
+
+这一章用于把系统推进到可模拟执行阶段。
+它的目标不是为了“看起来很像交易系统”，而是为了真实验证：
+
+1. AI 治理有没有用
+2. lease 机制能否工作
+3. transition engine 能否推进
+4. 纸面收益是否存在
+5. 净收益是否为正
+
+--------------------------------------------------
+L. Learning / Self-Observability / Net PnL  [中优先 P2]
+--------------------------------------------------
+
+L1. Learning Engine v1
+L2. Self-Observability Engine v1
+L3. Net PnL / ROI / cost reporting
+L4. 决策结果归因与反馈
+
+这一层是系统从“会跑”走向“会学习、会解释、会总结”的关键阶段。
+
+尤其要强调：
+本项目不是只追求 gross PnL，而必须看 net PnL。
+也就是说：
+- API 成本
+- 交易手续费
+- 滑点
+- 错误成本
+- 策略失效成本
+- 模型推理成本
+
+都必须纳入最终经营视角。
+
+--------------------------------------------------
+M. Supervised Live Gate  [后续 P3]
+--------------------------------------------------
+
+M1. supervised execution policy
+M2. restricted live permissions
+M3. human override / approval layer
+M4. supervised live audit
+
+这一层是更后阶段。
+进入前提包括：
+- 真实业务事件验证完成
+- AI 治理完成
+- decision lease 完成
+- transition engine 完成
+- paper/demo 验证完成
+
+--------------------------------------------------
+N. Constrained Autonomous Live  [后续 P3]
+--------------------------------------------------
+
+N1. limited autonomous execution scope
+N2. performance-based permission expansion
+N3. abnormal rollback / kill switch
+N4. autonomous governance
+
+这是项目终局能力，不应提前推进。
+核心原则仍然是：
+
+权限不是按时间自动升级，而是按表现赢得。
+
+==================================================
+五、当前系统已经完成的核心成果总结
+==================================================
+
+截至当前阶段，可以明确记为“已完成”的主成果如下：
+
+1. Bybit 只读基础接入完成
+2. private REST account / positions / order history / execution history 打通
+3. preflight guard 完成
+4. snapshot 生成、latest / dated 落盘完成
+5. snapshot -> postgres / normalize -> postgres 完成
+6. ws smoke 完成
+7. persistent private ws listener 接入与事实层完成
+8. ws runtime facts 完成
+9. decision packet v4 完成
+10. observer verdict v4 完成
+11. acceptance v4 完成
+12. runtime state v5 完成
+13. readonly final summary v4 完成
+14. next phase handoff v3 完成
+15. readonly audit v2 完成
+16. latest consistency check 完成
+17. business event smoke 完成
+18. business event contract check 完成
+19. business event extract / ingestion / runtime facts / runtime contract 完成
+20. business event state classification 完成
+21. business event state contract 完成
+22. failure policy builder 已整合 business event state，升级为 v3
+23. event-driven state（D23.1）完成
+24. event-driven phase（D23.2）完成
+25. event transition input（D23.3）完成
+26. event transition decision（D23.4）完成
+27. event transition outcome（D23.5）完成
+28. event-driven chain consistency（D23.6）完成
+29. event-driven readiness summary（D23.7）完成
+30. event-driven handoff（D23.8）完成
+31. event-driven final audit 完成
+32. 各阶段 contract check 基本齐全
+33. D21 之后新增脚本已补充头部维护注释
+34. SCRIPT_INDEX.md 已建立并初步补全
+
+==================================================
+六、当前系统最重要的限制与注意事项
+==================================================
+
+当前必须反复强调的限制如下：
+
+1. read_only 是硬边界
+   - 当前任何情况下都不能误开 execution
+
+2. healthy_no_business_events_yet 是关键健康空态
+   - 它表示“业务事件侧结构健康但为空”
+   - 绝不是坏状态
+   - 但也绝不能当作 active trading ready
+
+3. control_only 只代表 websocket 连接层健康
+   - 不代表已经有真实可交易业务事件
+   - 不代表 order / execution / wallet / position business flow 已经出现
+
+4. D23 完成不代表 transition engine 已完成
+   - 目前只是 event-driven scaffold 完成
+   - 不是 event-driven execution engine 完成
+
+5. 当前尚无真实 business-topic 非空流验证
+   - 这就是 G 章必须先做的原因
+
+6. 当前尚未接入 AI governance
+   - 不能进入真实 AI-driven decision loop
+
+7. 当前尚未接入 decision lease
+   - 不能让 AI 输出直接成为推进下游的决策载体
+
+8. 当前尚未进入 paper/demo
+   - 更不能进入 live
+
+==================================================
+七、下一分支正式执行顺序
+==================================================
+
+下一分支应该按以下顺序推进：
+
+P0：
+G1 -> G2 -> G3 -> G4
+
+P1：
+H1 -> H2 -> H3 -> H4 -> H5
+
+P1：
+I1 -> I2 -> I3 -> I4 -> I5
+
+P2：
+J1 -> J2 -> J3 -> J4 -> J5
+
+P2：
+K1 -> K2 -> K3 -> K4 -> K5
+
+P2：
+L1 -> L2 -> L3 -> L4
+
+P3：
+M1 -> M4
+N1 -> N4
+
+==================================================
+八、下一分支起点的一句话前情提要
+==================================================
+
+后续如果开新分支继续工作，可以直接用下面这句作为默认前情提要：
+
+“A-F 已完成；当前系统是 production-grade readonly observer + business-event classification + event-driven scaffold，
+但真实 business-event flow 尚未验证，AI governance 和 decision lease 尚未接入，所以下一步应从 G1 真实业务事件验证开始。”
+
+==================================================
+九、对本项目总目的的再次归纳
+==================================================
+
+本项目的总目的，不是简单做一个“会自动下单的程序”。
+
+更准确的总目的应理解为：
+
+构建一个分阶段升级、受治理、可审计、可学习、最终能在约束条件下自主运行的 Bybit Agent 系统，
+它必须能够：
+
+1. 先高质量观察市场与账户状态
+2. 再建立事件驱动与状态驱动的本地事实层
+3. 再在预算与治理条件下有限调用 AI
+4. 把 AI 输出封装为受控的 decision lease
+5. 通过 transition engine 推进系统状态
+6. 先在 paper/demo 中验证净收益和稳定性
+7. 再在受监督条件下进入 live
+8. 最终在严格安全边界内实现受约束自主运行
+
+这个目标本质上强调的不是“自动下单速度”，而是：
+- 安全
+- 分阶段升级
+- 可解释
+- 可审计
+- 可维护
+- 可商业化
+- 净收益导向
+- 权限按表现升级，而非按时间升级
+
+==================================================
+十、当前工程判断结论
+==================================================
+
+截至当前阶段，可以给出以下正式判断：
+
+1. 项目方向正确，没有根本跑偏
+2. D21-D23 已经形成了非常扎实的只读观察 + 业务事件分类 + 事件驱动表达底座
+3. 当前最大真实缺口不在“再加几个表达层脚本”，而在“真实业务事件验证”
+4. 下一阶段不应直接跳到 live / demo / AI 交易，而应先完成：
+   - 真实业务事件验证
+   - AI 治理
+   - decision lease
+5. 当前系统可以被称为：
+   - production-grade readonly observer infrastructure
+   - business-event-aware observer platform
+   - event-driven scaffold ready for next-phase validation
+6. 当前系统绝不能被误称为：
+   - autonomous trading system
+   - live trading system
+   - ready-for-production live execution engine
+
+==================================================
+十一、文档结束语
+==================================================
+
+本文件是当前阶段的正式工程记录版本。
+后续新分支应优先使用本文件进行上下文恢复，并配合《执行清单版》按章节推进。
+
+建议：
+- 每完成一个大章节，生成新的工程记录版本
+- 不要等到跨多个章节之后再统一整理
+- 所有新脚本继续保持“写时即加注释”的习惯
+- SCRIPT_INDEX.md 持续增量维护

@@ -1,0 +1,376 @@
+OpenClaw / Bybit 项目接手摘要（A-I 闭环后）
+生成日期：2026-03-22
+用途：供新对话快速接手，避免把 shadow-only 状态误判为 live-ready
+
+==================================================
+一、项目当前总定位
+==================================================
+
+当前系统不是 live trading infrastructure，也不是 autonomous live trading ready。
+当前应准确表述为：
+
+production-grade readonly observer
++ governed AI observation chain
++ shadow decision control plane
+
+这意味着：
+1. 主系统已具备较高完整度的只读观测、审计、治理、影子控制平面能力。
+2. 但并未授予执行权限。
+3. 也没有发出可被真实消费的 execution lease。
+4. 任何后续推进都必须先验证、后开发，不能把 shadow 逻辑误当成 live path。
+
+==================================================
+二、当前关键安全状态
+==================================================
+
+当前关键 runtime / authority 状态：
+
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted
+- decision_lease_emitted = false
+- live_execution_allowed = false
+
+这四条是整个项目当前最重要的硬边界：
+- 不得越过 read_only
+- 不得隐式启用 execution
+- 不得隐式提升 execution_authority
+- 不得把未发放的 decision lease 说成可 live consume
+
+==================================================
+三、A-I 当前完成状态总览
+==================================================
+
+A-F：
+- 已在此前工程中完成并整合进主线。
+- 本次对话重点不是重做 A-F，而是在已有基础上完成 G/H/I 的正式收口与验证。
+
+G：business-event validation
+- 已完成验证收口
+- 已验证 replay / negative / regression 路径
+- 已确认 G 章输出不会污染主 runtime
+- 当前结论：G 已够资格收口，主线可以回到 H/I
+
+H：governed AI chapter（已正式闭环）
+- H1 thought_gate
+- H2 query_budget
+- H3 model_router v2
+- H4 compute_governor / anti-abuse
+- H5 ai_cost_governance
+
+H 章核心结论：
+- AI 输出已被严格约束为 governed observation
+- 不是 execution permission
+- 不是下单指令
+- 不是 authority grant
+- H 章已完整闭环，并为 I 章提供受治理输入
+
+I：decision lease / shadow control plane（已正式闭环）
+- I1 decision lease schema
+- I2 decision lease shadow issue
+- I3 decision lease consume gate
+- I4 replay / revoke defense
+- I5 friction metrics + adaptive ttl
+- I6 approval bridge
+- I7 execution authority aggregator
+- I8 manual approval packet
+- I9 operator ack shadow
+- I10 clean recheck
+
+I 章核心结论：
+- shadow decision control plane 已完整闭环
+- 但始终保持 shadow-only / review-only / no-authority / no-live-submit
+- 对未来 live design 很关键，但绝不等于 live execution ready
+
+==================================================
+四、G 章完成结论（需记住）
+==================================================
+
+G 章最终结论可以概括为：
+
+- G-stage validation closed enough to return to H/I
+- positive_nonempty_path_verified = true
+- negative_blocked_path_verified = true
+- runtime_protection_preserved = true
+- ready_to_return_h_i = true
+
+解释：
+- business-event 相关验证路径已经做完本轮收口
+- 主系统依然保持 read_only / execution disabled
+- G 章 replay / validation 输出没有污染主 runtime
+- 后续正式主线不应继续停留在 G，而应以 H/I 为准
+
+==================================================
+五、H 章完成结论（需记住）
+==================================================
+
+H1 thought_gate：
+- AI invocation 成功
+- 返回 JSON 合同满足
+- 输出被限制为 observation_only
+- action_bias 虽存在，但不能等价为交易执行意图
+
+H2 query_budget：
+- query budget policy / gate / runtime / final audit 全部通过
+- 预算、输出 token cap、zero retry 等治理边界已落地
+- runtime_still_protected = true
+
+H3 model_router v2：
+- 当前主链路由已明确：
+  governed_ai_observation_json -> cloud_compact_json
+- provider_target = openai_native
+- model_name = gpt-5-mini
+- local/cloud 职责边界已明确
+- 不是 longform research route
+- 不是 local-only，因为当前仍需要 bounded structured observation
+
+H4 compute_governor：
+- anti-abuse 主链已成形
+- max_retries = 0
+- bounded compact output
+- single compact request path
+- no longform escalation in mainline
+- no execution permission upgrade
+- runtime_still_protected = true
+
+H5 ai_cost_governance：
+- 已记录 usage / latency / governed budget ceiling
+- 未伪造真实美元成本
+- H 章最终闭环完成
+- ready_for_i1 = true
+
+H 章总判断：
+- governed AI chapter 已完成
+- 当前 AI 只能提供 governed observation
+- 绝不能把 H 章成果误读为“系统已有交易执行决策权”
+
+==================================================
+六、I 章完成结论（分节摘要）
+==================================================
+
+I1 decision lease schema
+- 已建立 decision lease schema
+- 但 schema_only_mode = true
+- lease_emit_allowed_now = false
+- decision_lease_emitted = false
+- execution_authority = not_granted
+
+I2 shadow issue
+- 已构造 shadow candidate
+- ttl_ms = 12000
+- consume_slack_ms = 1500
+- 仅为 shadow-only candidate
+- 未发放 live lease
+
+I3 consume gate
+- 已验证 simulated consume path
+- simulated_before_expiry = true
+- simulated_within_recommended_window = true
+- would_pass_if_now = false
+- 说明：影子模拟路径能过，但当前“现在立刻消费”路径并不通过
+- consume_gate_open_live = false
+
+I4 replay / revoke defense
+- 已验证 first consume accept once
+- duplicate replay reject
+- revoke semantics modeled
+- 但 live replay block 未激活，live revoke 未激活
+- 仍然是 shadow-only replay defense
+
+I5 friction metrics + adaptive ttl
+- latency_ms = 4274
+- current_ttl_ms = 12000
+- recommended_ttl_ms = 12048
+- ttl_delta_ms = 48
+- simulated_headroom_ms = 11200
+- now_headroom_ms = -34916
+- 说明：按影子模拟路径，时序充足；但按“现在消费”路径，时序已经负余量
+- adaptive ttl 只是 shadow recommendation，尚未 live apply
+
+I6 approval bridge
+- 已建立 approval bridge
+- approval_strategy = policy_guard + manual_review + execution_authority
+- operator_review_status = pending_manual_review
+- execution_authority_status = not_granted
+- shadow_bridge_only = true
+- live_approval_grant_active = false
+
+I7 execution authority aggregator
+- 已建立 authority aggregation
+- blocking_reasons:
+  - operator_review_not_approved
+  - execution_authority_not_granted
+- shadow_authority_only = true
+- authority_grant_live = false
+
+I8 manual approval packet
+- 已生成 review-only packet
+- packet_for_review_only = true
+- approval_submit_live = false
+- 不授予 live execution authority
+
+I9 operator ack shadow
+- 已建立 operator acknowledgment shadow
+- operator_ack_shadow_only = true
+- live_operator_ack_enabled = false
+- 仍无 live authority
+
+I10 clean recheck
+关键结果：
+- summary_state = decision_lease_chapter_closed_shadow_ready_for_future_live_design
+- handoff_state = decision_lease_chapter_closed_handoff_ready
+- audit_state = decision_lease_chapter_closed_soft_warn
+- i_chapter_closed = True
+- shadow_control_plane_closed = True
+- runtime_still_protected = True
+- ready_for_future_live_design = True
+- execution_authority = not_granted
+- decision_lease_emitted = False
+- live_operator_ack_enabled = False
+
+I 章总判断：
+- 已完成一个“完整但严格影子化”的 decision-control-plane
+- 这为 future live design 做好了结构准备
+- 但不代表 live trading gate 已经完成
+
+==================================================
+七、当前 warning_flags 如何理解
+==================================================
+
+需要认真处理、与 live design 前置条件直接相关的 warning：
+
+1. recent_trade_last_price_missing
+2. recent_trade_last_ts_missing
+3. last_trade_fields_missing
+4. runtime_state_reference_old
+5. freshness_soft_warning_present
+6. provider_pricing_table_not_bound_in_mainline
+7. last_call_latency_exceeds_deadline_hint
+8. lease_friction_latency_elevated
+9. consume_now_would_be_expired
+10. consume_now_outside_recommended_window
+11. consume_now_exceeds_freshness_grace
+12. consume_now_path_would_not_pass
+13. lease_now_path_negative_headroom
+
+这些 warning 的含义不是“系统坏了”，而是：
+- live-ready 所需的新鲜度、时序、成本绑定、实时消费窗口仍未真正收敛
+- 当前更适合 shadow simulation / governance / design，而非 live enable
+
+以下 warning 更多代表当前是刻意安全收缩的 shadow-only 状态，不算 bug：
+
+- decision_lease_shadow_only_mode
+- decision_lease_replay_shadow_only_mode
+- decision_lease_replay_guard_shadow_only_mode
+- decision_lease_adaptive_ttl_shadow_only_mode
+- decision_lease_approval_bridge_shadow_only_mode
+- execution_authority_aggregator_shadow_only_mode
+- manual_approval_packet_review_only_mode
+- operator_ack_shadow_only_mode
+- live_authority_grant_not_active
+- live_operator_ack_not_active
+- decision_lease_operator_review_pending
+- decision_lease_execution_authority_not_granted
+
+==================================================
+八、当前项目准确结论
+==================================================
+
+可以说：
+- A-I 在 read_only / shadow / governance 范围内已经测试闭环完成
+- 当前系统可以作为 production-grade readonly observer + governed AI + shadow decision control plane
+
+不可以说：
+- 已经 live-ready
+- 已经可以自动实盘下单
+- 已经可以 autonomous trading
+- 已具备 live execution authority
+- 已具备可消费的真实 execution lease
+
+更准确的表述应为：
+“当前系统已经完成 A-I 阶段的只读观测、治理 AI、影子控制平面闭环，为 future live design 做好了结构准备，但仍未进入 live execution 实施阶段。”
+
+==================================================
+九、后续主线不应做什么
+==================================================
+
+新对话中，以下动作不应直接进行：
+
+1. 不要直接写 live order submitter
+2. 不要直接接入真实下单 adapter
+3. 不要跳过 authority grant 设计
+4. 不要把 approval packet 当成 live approval
+5. 不要把 operator ack shadow 当成 live operator approval
+6. 不要把 shadow candidate 当成可执行 lease
+7. 不要在 freshness / pricing / timing / accounting 未核验前推进 live
+8. 不要因为结构都“像已经完整了”就默认能上线
+
+==================================================
+十、后续主线应该做什么
+==================================================
+
+下一阶段正确主线应该是：
+
+第一优先级：live design 前置条件核验
+- 核验 freshness 真正闭合方式
+- 核验 recent trade 字段补全策略
+- 核验 runtime reference old 的来源与解决路径
+- 核验 provider pricing table 如何正式绑定主线
+- 核验 latency / ttl / consume timing 是否达到真实 live 需要
+
+第二优先级：先设计 contract，再写实现
+应先设计：
+- authority grant contract
+- manual approval contract
+- live approval transition contract
+- paper execution gate
+- simulator execution gate
+- pre-trade risk gate
+- post-trade reconciliation
+- accounting / audit trail
+- kill switch / revoke path
+- execution adapter contract
+- failure recovery contract
+
+第三优先级：路线顺序
+推荐：
+1. fresh/live design prerequisites audit
+2. paper execution design
+3. paper execution adapter + reconciliation
+4. supervised live design
+5. live authority grant model
+6. live execution adapter
+7. constrained live pilot
+
+==================================================
+十一、给新对话中的模型的工作方式要求
+==================================================
+
+新对话必须遵守：
+
+1. 先验证，后开发
+2. 所有结论优先基于 latest artifacts / latest json / final audit
+3. 不得把 shadow-only 误说成 live-ready
+4. 不得隐式提升 execution authority
+5. 先 contract，后 implementation
+6. shell 命令必须分小步给，一次 1-2 步，等用户反馈后再继续
+7. 先做核验清单与设计清单，再动 live 相关代码
+
+==================================================
+十二、如果新对话第一轮要做什么
+==================================================
+
+建议新对话第一轮只做四件事：
+
+A. 复述当前准确状态
+B. 列出 live design 前必须先核验的前置条件
+C. 给出新的章节树 / build order
+D. 只给 1-2 步 shell 检查命令，不要一次给很多命令
+
+==================================================
+十三、最关键的一句话总结
+==================================================
+
+当前 OpenClaw / Bybit 项目，A-I 已完成只读观测、治理 AI、影子控制平面的正式闭环；
+它已经为 future live design 做好结构准备，但仍明确处于 read_only / disabled / not_granted / no-live-submit 状态，
+任何后续推进都必须围绕“live design 前置条件核验与契约设计”展开，而不是直接进入实盘执行开发。

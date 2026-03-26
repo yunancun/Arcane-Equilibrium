@@ -1,0 +1,89 @@
+OpenClaw / Bybit
+新对话工作方式与带入文件清单（2026-03-25）
+============================================================
+
+一、建议在新对话里明确告诉模型的工作方式
+------------------------------------------------------------
+1. 能直接从 GitHub 仓库读、直接提交 GitHub 主线的，优先直接做。
+2. Shell 命令尽量短、稳、分段，不要给特别长的大块 here-doc。
+3. 如果需要我贴回输出，结论和需要我看的重点必须 print 在最下面，并清晰标注。
+4. 新写和修改的程序必须继续保持中英双语注释，且注释尽量详细。
+5. 每完成一段，都按以下结构汇报：
+   - 已验证事实
+   - 修改内容
+   - 风险边界
+   - 下一步
+6. 绝不能把 shadow-only / skeleton-only / design-only gate closed / closeout ready 误写成 execution 放权。
+7. 没核对到的就明确说没核对到，不要编。
+8. 不要默认继续深挖 J/K；除非发现 blocker 或真实 bug。
+9. 当前建议主线是：
+   数据字典 / 状态字典 -> Control API -> GUI MVP -> guarded demo trading
+10. L 的前半部分能力应嵌入 GUI / cockpit 设计里预埋，但当前不应先独立重开 L 作为主开发章节。
+
+二、必须带入新对话的核心事实
+------------------------------------------------------------
+1. I = canonical closed，但只是 shadow-only
+2. I5 legal no-call bug 已修复
+3. J = functional_closeout_ready_shadow_only
+4. K = functional_closeout_ready_design_only_gate_closed
+5. runtime 仍：
+   - read_only
+   - execution disabled
+6. J/K 在本轮工程定义下已完成，不应继续主动深挖
+7. 当前下一步最合理的是：
+   - 先做 control plane foundation
+   - 再推进 guarded demo trading
+   - GUI 要做成 Operator Console + Learning Cockpit
+8. 产品族不能被预先局限；应按：
+   Bybit 权限边界 × OpenClaw 能力上线边界 × 产品族 × 动作权限
+   来设计开关体系
+
+三、建议带到新对话里的文件（按优先级）
+------------------------------------------------------------
+第一优先级，强烈建议一定带：
+1. OpenClaw_Bybit_单独接手文件_2026-03-25_JK收口完成版.txt
+2. OpenClaw_Bybit_完整工程记录_2026-03-25_JK收口完成版.txt
+3. OpenClaw_Bybit_G到K详细复盘与程序总表_2026-03-25.txt
+4. OpenClaw_GUI_Operator_Console_Learning_Cockpit_v1_规格导出_2026-03-25.txt
+5. OpenClaw_Bybit_Capability_And_Permission_Switch_Plan_v1_导出_2026-03-25.txt
+
+第二优先级，若想保留更多历史脉络，可再带：
+6. OpenClaw_Bybit_Revision2_工程记录_2026-03-17.txt
+7. OpenClaw_Bybit_超详细续接总报告_2026-03-20.txt
+8. OpenClaw_项目总报告_优化重构版_含GitHub核对_2026-03-22.txt
+9. OpenClaw_最终整合总报告_2026-03-22夜间校正版.txt
+10. OpenClaw_交接日志_2026-03-24_晚.txt
+
+四、如果只想最简带入
+------------------------------------------------------------
+最少建议带这 5 份：
+- 单独接手文件（2026-03-25）
+- 完整工程记录（2026-03-25）
+- G到K详细复盘与程序总表（2026-03-25）
+- GUI 规格导出（2026-03-25）
+- Capability & Permission Switch Plan 导出（2026-03-25）
+
+五、新对话开启时的建议动作
+------------------------------------------------------------
+1. 先上传上面建议文件
+2. 再贴“新对话启动 Prompt”
+3. 让新对话先复述：
+   - 当前项目真实状态
+   - 当前不该做什么
+   - 当前下一步最合理做什么
+4. 然后直接开始：
+   数据字典 / 状态字典 v1
+
+六、最重要的一句提醒
+------------------------------------------------------------
+新对话最容易犯的错是：
+- 回头继续深挖 J/K
+- 把 closeout ready 误解成 execution ready
+- 直接裸推 demo
+- 忘记 GUI 不只是 demo 开关，而是 Operator Console + Learning Cockpit
+
+正确方向是：
+- 冻结 J/K 为当前真相基线
+- 先做 control plane foundation
+- 在 GUI / API 骨架上推进 guarded demo
+- 把 L 的前半部分能力嵌入 GUI，而不是现在单独重开 L 主线

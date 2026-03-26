@@ -1,0 +1,609 @@
+OpenClaw / Bybit 项目
+工程总报告（2026-03-24，结构迁移完成版 + 新工作流版）
+============================================================
+
+用途
+------------------------------------------------------------
+1. 作为 2026-03-24 这整条对话的正式工程归档；
+2. 供下一个新对话直接接手，不必重新从零理解今天的迁移工作；
+3. 作为 2026-03-22 那批“GitHub 接入 / srv 路径切换 / no-call 语义诊断”文件的后续覆盖层；
+4. 明确：今天真正完成了什么、代码现在分别在哪、旧路径如何兼容、接下来新对话应该如何和用户配合；
+5. 把新的 shell 复制粘贴 workflow、回贴格式、节奏控制规则整理进去，减少后续反复切窗口和复制长输出的痛苦。
+
+最高优先级定位
+------------------------------------------------------------
+如果下一个对话同时上传了：
+- 2026-03-22 的《今日总报告》《今晚工程记录》《新对话接手指示》《H1 no-call semantics patch bundle》
+- 以及本文件
+
+则优先级建议如下：
+第一优先级：
+- 本文件（2026-03-24 结构迁移完成版）
+- 2026-03-22 夜间《今晚工程记录》
+- 2026-03-22 夜间《新对话接手指示》
+- 2026-03-22《H1 no-call semantics patch bundle》
+
+第二优先级：
+- 2026-03-22《今日总报告（GitHub 接入 + srv 路径迁移 + 夜间语义诊断）》
+- OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+- OpenClaw_全量整合总报告_2026-03-22
+- OpenClaw_Bybit_HI正式完工对账报告_2026-03-22
+
+原因：
+- 2026-03-22 文件确定了 GitHub-first / local-runtime-second 的基本工作方式，也确认了 no-call / idle 语义误报问题；
+- 2026-03-24 则进一步把整仓 307 个正式脚本做完 canonical migration，并完成了全量接受性检查；
+- 因此今天的文件是“代码结构层”的最新事实覆盖层，22 日文件是“运行语义层”的关键背景覆盖层。
+
+一、今天这条对话到底完成了什么
+------------------------------------------------------------
+今天不是在继续发散性开发新章节，而是把“仓库公共结构层”彻底收口：
+
+1. 把逻辑分类图里声明的 307 个正式脚本，全部迁移到新的 canonical 目录；
+2. 在旧路径 scripts/ 下保留兼容包装器（compatibility wrappers），保证既有入口不立即断裂；
+3. 同步更新 docs：
+   - SCRIPT_INDEX.md
+   - LOGICAL_SCRIPT_CATEGORY_MAP.md
+   - REPO_LAYOUT_POLICY.md
+   - CURRENT_NEXT_STEP_NOTE_2026-03-24.md
+   让文档中的“规范路径”与实际目录结构一致；
+4. 完成每一批迁移后的语法检查，不生成 pycache；
+5. 多轮 commit + push 到 GitHub；
+6. 最后跑完整体 post-migration acceptance：
+   - canonical completeness
+   - wrapper audit
+   - syntax summary
+   - I10 clean recheck
+   - docs 严格统计和重复项诊断
+7. 结论：
+   - canonical migration = COMPLETE
+   - completed = 307 / 307
+   - remaining = 0 / 307
+   - git status clean
+
+一句话总结：
+今天完成的不是某个局部脚本修补，而是整仓脚本分类与规范路径的正式定版。
+
+二、今天迁移完成后的最终 canonical 布局
+------------------------------------------------------------
+下面是今天最终确认好的 canonical 目录。后续新对话应优先把这些目录视为“真实代码所在地”，不要再把旧 scripts/ 目录误认为主实现目录。
+
+A. business_events
+正式脚本数：26
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/market_data_processor/bybit_business_events
+
+说明：
+- 这一类在更早前已经迁移完成；
+- 今天的全仓接受性检查再次确认它属于完整 canonical 体系的一部分；
+- scripts/ 下仍保留兼容包装器。
+
+B. readonly_observer_pipeline
+正式脚本数：18
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline
+
+正式成员包括：
+- bybit_build_decision_packet.py
+- bybit_build_observer_verdict.py
+- bybit_build_system_snapshot.py
+- bybit_build_ws_runtime_facts.py
+- bybit_failure_policy_builder.py
+- bybit_full_readonly_observer_cycle.py
+- bybit_latest_consistency_check.py
+- bybit_next_phase_handoff.py
+- bybit_observer_acceptance_check.py
+- bybit_observer_pipeline.py
+- bybit_observer_verdict_to_postgres.py
+- bybit_readonly_audit.py
+- bybit_readonly_final_summary.py
+- bybit_readonly_loop_writer.sh
+- bybit_readonly_preflight.py
+- bybit_readonly_status_writer.py
+- bybit_runtime_state_resolver.py
+- run_bybit_observer_cycle.py
+
+今天状态：
+- 已迁移；
+- README 已建立；
+- 旧 scripts/ 路径保留包装器；
+- 相关 docs 已改为 canonical 路径。
+
+C. decision_lease_and_execution_authority
+正式脚本数：44
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/trade_executor/bybit_decision_lease
+
+今天迁移时按四批 + 最后 gap fix 完成：
+1. batch1 core_schema_preflight
+2. batch2 consume_shadow_replay
+3. batch3 friction_adaptive_approval
+4. batch4 execution_authority_manual_ack
+5. final gap fix：补上 bybit_decision_lease_contract_check.py
+
+今天最终结论：
+- exact count = 44
+- canonical script count = 44
+- missing in canonical = none
+- extra in canonical = none
+
+D. thought_gate_and_ai_governance
+正式脚本数：55
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/ai_agents/bybit_thought_gate
+
+今天迁移时按六批规划，实际执行顺序略调整：
+1. model_router
+2. compute_governor
+3. query_budget
+4. ai request / response core
+5. ai governance / cost
+6. thought_gate outputs
+
+重要说明：
+- 原始 docs 提取时一度出现 exact=110 的假象，不是代码多了一倍；
+- 后续严格统计确认：
+  - declared = 55
+  - parsed = 110
+  - unique = 55
+  - duplicate_entries = 55
+- 重复项全部发生在 thought_gate_and_ai_governance 章节，是文档重复列项，不是实际 canonical 目录重复，也不是迁移错误。
+
+E. exchange_io_and_persistence
+正式脚本数：19
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/io_and_persistence
+
+今天迁移时按四批完成：
+1. batch4 misc io support
+2. batch2 snapshot and postgres
+3. batch3 private api checks
+4. batch1 connectivity and ws
+
+代表性成员包括：
+- bybit_decision_packet_to_postgres.py
+- bybit_load_ws_jsonl_to_postgres.py
+- bybit_normalize_latest_snapshot_to_postgres.py
+- bybit_snapshot_to_postgres.py
+- bybit_private_account_check.py
+- bybit_private_execution_history_check.py
+- bybit_private_order_history_check.py
+- bybit_private_positions_check.py
+- bybit_private_readonly_precheck.py
+- bybit_private_rest_preflight_guard.py
+- bybit_private_ws_listener.py
+- bybit_private_ws_listener_ctl.sh
+- bybit_private_ws_smoke_test.py
+- bybit_private_ws_smoke_test_v2.py
+- bybit_public_connectivity_check.py
+- bybit_public_connectivity_status_writer.py
+- bybit_public_microstructure_builder.py
+- bybit_public_microstructure_contract_check.py
+- bybit_ws_smoke_to_postgres.py
+
+F. local_models_risk_and_paper
+正式脚本数：20
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/risk_control/bybit_local_models_and_risk
+
+今天迁移时按四批规划，实际完成顺序为：
+1. batch3 local judgment
+2. batch2 risk envelope and friction
+3. batch1 trigger and trade eligibility + batch4 other local support（合并完成）
+
+代表性成员包括：
+- bybit_local_trigger_model_builder.py
+- bybit_local_trade_eligibility_builder.py
+- bybit_local_trade_eligibility_handoff_builder.py
+- bybit_local_market_friction_builder.py
+- bybit_local_risk_envelope_gate.py
+- bybit_local_cost_model_builder.py
+- bybit_local_judgment_final_audit.py
+- bybit_paper_order_lifecycle_skeleton_builder.py
+- bybit_paper_position_balance_projection_skeleton_builder.py
+- bybit_pretrade_risk_integration_skeleton_builder.py
+
+G. misc_or_manual_review
+正式脚本数：23
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/exchange_connectors/bybit_connector/misc_tools
+
+今天迁移时按三块完成：
+1. demo paper adapter
+2. other misc tools
+3. demo gate
+
+代表性成员包括：
+- bybit_bind_active_route_env.sh
+- bybit_decision_packet_pipeline.py
+- bybit_demo_gate_*.py
+- bybit_demo_paper_adapter_skeleton_*.py
+- bybit_h1_report_utils.py
+- bybit_h5_compat_helpers.py
+- bybit_h5_main_postprocess.py
+- bybit_h_stage_common.py
+- bybit_mainline_cleanup_helpers.py
+- bybit_revision2_master_regression_check.py
+
+H. ops_repair_and_runner_scripts
+正式脚本数：50
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/helper_scripts/maintenance_scripts/bybit_connector
+
+今天迁移时按四批完成：
+1. batch3 diag / refresh / apply / force
+2. batch4 other ops support
+3. batch2 fix / repair / recover
+4. batch1 run scripts
+
+说明：
+- 这是今天后半最重的一类目录；
+- 以后凡是“整链重跑脚本、修理脚本、closure 脚本、run_with_trading_env”等，默认先看这里；
+- 旧 scripts/ 目录里的同名文件只是兼容包装器，不应作为主实现层继续维护。
+
+I. event_driven_and_transition_engine
+正式脚本数：52
+canonical 目录：
+/home/ncyu/BybitOpenClaw/srv/program_code/trading_strategy/bybit_event_driven
+
+今天迁移时按五批规划，实际完成顺序为：
+1. batch2 event_transition
+2. batch3 event_replay_transition
+3. batch1 event_driven_core
+4. batch5 support builders
+5. batch4 transition_engine_core
+
+最终完整性检查：
+- exact count = 52
+- canonical script count = 52
+- missing in canonical = none
+- extra in canonical = none
+
+三、今天的 commit / push 轨迹（供新对话快速核对）
+------------------------------------------------------------
+下面列出今天这条对话中最关键的提交链。新对话如需核对结构演进，可按此顺序理解。
+
+已在此前完成但今天继续承接的基础提交：
+- da16db0  Migrate business_events to market_data_processor with compatibility wrappers
+- d185ec3  Restore old srv-style public skeleton layout
+- d8db17f  Migrate readonly observer pipeline to canonical directory with compatibility wrappers
+
+decision_lease 系列：
+- 6a623b6  Migrate decision_lease batch1 core schema and preflight to trade_executor with compatibility wrappers
+- 089ae85  Migrate decision_lease batch2 consume shadow replay to trade_executor with compatibility wrappers
+- 37fe478  Migrate decision_lease batch3 friction adaptive approval to trade_executor with compatibility wrappers
+- 7419a67  Migrate decision_lease batch4 execution authority manual ack to trade_executor with compatibility wrappers
+- 0d06a48  Complete decision_lease canonical migration to trade_executor with compatibility wrappers
+
+thought_gate 系列：
+- b216f9e  Migrate thought_gate batch1 model_router to ai_agents with compatibility wrappers
+- 0a58f74  Migrate thought_gate batch2 compute_governor to ai_agents with compatibility wrappers
+- 2de5578  Migrate thought_gate batch3 query_budget to ai_agents with compatibility wrappers
+- 3864625  Migrate thought_gate batch4 ai request response core to ai_agents with compatibility wrappers
+- 7192c32  Migrate thought_gate batch5 ai governance cost to ai_agents with compatibility wrappers
+- d663514  Migrate thought_gate batch6 outputs to ai_agents with compatibility wrappers
+
+exchange_io 系列：
+- a9790b0  Migrate exchange_io batch4 misc io support to canonical directory with compatibility wrappers
+- 4e6cc00  Migrate exchange_io batch2 snapshot and postgres to canonical directory with compatibility wrappers
+- 6f5bc51  Migrate exchange_io batch3 private api checks to canonical directory with compatibility wrappers
+- f3d4842  Complete exchange_io canonical migration with connectivity and ws compatibility wrappers
+
+local_models 系列：
+- d0647dc  Migrate local_models batch3 local judgment to risk_control with compatibility wrappers
+- ea9d1f0  Migrate local_models batch2 risk envelope and friction to risk_control with compatibility wrappers
+- 50bc140  Complete local_models canonical migration to risk_control with compatibility wrappers
+
+misc 系列：
+- dde004d  Migrate misc batch2 demo paper adapter to misc_tools with compatibility wrappers
+- 8696521  Migrate misc batch4 other misc tools to canonical directory with compatibility wrappers
+- d1a78d0  Complete misc canonical migration with demo gate compatibility wrappers
+
+ops 系列：
+- c2fe61f  Migrate ops batch3 diag refresh apply force to maintenance_scripts with compatibility wrappers
+- 17bf3cd  Migrate ops batch4 other ops support to maintenance_scripts with compatibility wrappers
+- 036494e  Migrate ops batch2 fix repair recover to maintenance_scripts with compatibility wrappers
+- 3f9baf8  Complete ops canonical migration with run scripts compatibility wrappers
+
+event_driven 系列：
+- 9dfc05d  Migrate event_driven batch2 event transition to trading_strategy with compatibility wrappers
+- 544e92b  Migrate event_driven batch3 event replay transition to trading_strategy with compatibility wrappers
+- 0b886b9  Migrate event_driven batch1 event driven core to trading_strategy with compatibility wrappers
+- 88a3483  Migrate event_driven batch5 support builders to trading_strategy with compatibility wrappers
+- 23b437c  Complete event_driven canonical migration to trading_strategy with transition engine compatibility wrappers
+
+四、今天完成后的全仓验收结论
+------------------------------------------------------------
+今天最后做了两轮总验收：
+- P14A post-migration full acceptance
+- P14B/P14C docs strict summary + I1 diagnosis
+
+A. 总体完整性
+------------------------------------------------------------
+P14A 结果：
+- total_declared = 307
+- total_exact = 362
+- total_canonical = 307
+- total_missing = 0
+- total_extra = 0
+
+但这里的 total_exact = 362 不是实际脚本总数，而是 raw docs 提取结果，受 thought_gate 章节重复列项影响。
+
+P14B 严格统计后得到真正应采用的数字：
+- overall_declared = 307
+- overall_exact_unique = 307
+- repeated_section_count = 0
+- duplicate_entry_count = 55
+
+因此正确理解是：
+- 正式脚本宇宙 = 307
+- canonical 已完成 = 307
+- 缺失 = 0
+- 多余 = 0
+- docs 中只有 thought_gate 章节存在 55 条重复列项，不影响代码结构正确性。
+
+B. wrapper audit
+------------------------------------------------------------
+P14A 结果：
+- expected_wrapper_count = 362
+- wrapper_missing_count = 0
+- wrapper_marker_fail_count = 0
+
+正确理解：
+- wrapper 审计按 raw extraction 统计，因此“expected 362”包含了 thought_gate 文档重复项；
+- 但结果显示所有应有 wrapper 均存在，且 wrapper marker 没有失败；
+- 结合严格 unique=307，可判断：旧路径兼容层是完整的。
+
+C. syntax summary
+------------------------------------------------------------
+P14A 结果：
+- syntax_ok_count = 724
+- syntax_fail_count = 0
+
+这意味着：
+- canonical 文件 + 旧路径 wrapper 双侧语法检查全部通过；
+- 今天迁移过程中没有遗留语法错误。
+
+D. git 状态
+------------------------------------------------------------
+P14A 最终：
+- git status short 为空
+
+意味着：
+- 当前工作树在这轮迁移结束时是干净的；
+- 新对话不需要再先做“把今天未提交改动收口”的善后。
+
+五、今天发现并确认的运行态事实（不是结构问题）
+------------------------------------------------------------
+今天的迁移工作虽然已经完成，但全量验收顺便再次确认了运行态上仍存在一个真实阻塞点，这和 2026-03-22 夜间文件是一致的。
+
+1. I10 clean recheck 仍未绿
+------------------------------------------------------------
+P14A 结果：
+- summary_state = decision_lease_chapter_not_closed
+- handoff_state = decision_lease_chapter_closed_handoff_ready
+- audit_state = decision_lease_chapter_audit_failed
+- i_chapter_closed = False
+- shadow_control_plane_closed = False
+- runtime_still_protected = True
+- ready_for_future_live_design = False
+- source_errors = ['i1_stage_not_closed']
+
+这说明：
+- 结构迁移并没有自动解决 I1/H1 语义链本身的问题；
+- 迁移成功 != I chapter 已恢复闭环；
+- 真实下一步应回到 I1/H1 语义与最新 runtime 状态，而不是继续做结构迁移。
+
+2. I1 源诊断结果
+------------------------------------------------------------
+P14B/P14C 进一步把 I1 latest 文件定位清楚：
+- i1_path = /home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_decision_lease_final_audit_latest.json
+- mtime = 2026-03-22 19:40:04
+- stage_status = False
+- discovery_mode = normalized_stage_field
+
+I1 文件中的关键字段：
+- audit_state = decision_lease_schema_not_closed
+- stage = I1-B
+- audit_summary = {
+    'i1_stage_closed': False,
+    'ready_for_future_i_stage': False,
+    'runtime_still_protected': True,
+    'lease_emit_allowed_now': False,
+    'decision_lease_emitted': False
+  }
+- warning_flags = ['latency_ms_missing', 'input_tokens_missing', 'output_tokens_missing', 'total_tokens_missing', 'reasoning_tokens_missing', 'response_text_present_false', 'recent_trade_last_price_missing', 'last_trade_fields_missing', 'volatility_band_not_preferred']
+
+这一段必须与 2026-03-22 夜间文件合并理解：
+- 当前主要问题依然不是“仓库结构错误”；
+- 而是 H1 / I1 仍未把合法 no-call / legal idle fully accepted as terminal state。
+
+六、今天形成的最终工程判断
+------------------------------------------------------------
+截至本文件写成时，应把项目状态理解为：
+
+1. 结构层
+- canonical migration 已完成；
+- public skeleton / docs / canonical paths / compatibility wrappers 均已定版；
+- GitHub 上已 push，可作为新对话的直接阅读锚点。
+
+2. 运行态
+- 仍处于 read_only / disabled / authority_not_granted 的保护态；
+- runtime_still_protected = True；
+- decision_lease_emitted = False；
+- I10 仍反映 I1 未闭环；
+- 当前真正值得工程处理的主战场不再是“搬移结构”，而是“no-call / idle 语义修正 + I1/H1 重新验证”。
+
+3. 因此后续新对话不要再做的事
+- 不要再重复做 canonical migration；
+- 不要再把旧 scripts/ 当主实现目录整体整理一次；
+- 不要再花时间确认“是不是还有很多没搬完”；
+- 不要再把 thought_gate 110 当成真实 110 个脚本；
+- 不要再把 H0 stale 当默认主锅。
+
+4. 后续新对话应该先做的事
+- 先承认：迁移完成；
+- 再承认：22 日夜间确认的 no-call / idle 语义误报问题仍是主线；
+- 然后才进入 H1/I1 定点修理与 rerun。
+
+七、今天新的 workflow（必须整理进去，后续照此合作）
+------------------------------------------------------------
+这是本文件对下个对话最重要的附加价值之一。
+
+A. 以后默认采用“底部固定回贴块” workflow
+------------------------------------------------------------
+用户今天明确提出两个痛点：
+1. shell 输出太长，滚动寻找需要复制的内容很麻烦；
+2. 助手有时把要复制的段落分散在 1/3/5/7/9 多个位置，切窗口粘贴很不舒服。
+
+因此今天定下的新规则应是：
+
+规则 1：每轮 shell 命令结束后，真正需要用户回贴的内容，必须固定放在最下面。
+
+规则 2：最下面统一使用：
+==================== REPLY BLOCK START ====================
+...
+==================== REPLY BLOCK END ======================
+
+规则 3：如果能只回贴 1 个 block，就不要拆成很多零散段。
+
+规则 4：block 里面只放：
+- report dir
+- 最少的 rc / state / summary
+- 必要的 compact preview
+- DONE 标记
+不要把整段长日志塞进 REPLY BLOCK。
+
+规则 5：shell 输出设计时应做到：
+- 前面可以执行很多检查；
+- 但最后统一汇总成 1 个短 block 给用户复制；
+- 用户只需要滚到底部复制一次，不需要来回翻很多屏。
+
+B. shell 命令给法：短、小、分轮次
+------------------------------------------------------------
+后续新对话仍要继承：
+- 一次只给 1 小组命令；
+- 最多 1-2 个逻辑动作；
+- 中英双语注释；
+- 明确写清：
+  - 只检查 / 只读
+  - 会修改 / 会写文件
+  - 会 commit / 会 push
+
+不要再一次给很长很大的 shell 包，避免：
+- paste 失败
+- 终端卡顿
+- 用户误操作
+- 上下文被巨量输出占满
+
+C. 已 push 的代码优先直接看 GitHub
+------------------------------------------------------------
+现在应默认：
+- 已 push 文件：助手先自己看 GitHub / 文件内容；
+- 本地-only 内容（runtime/latest/json/log/env/config）：再让用户用 shell 读给助手；
+- 不要再默认让用户手贴整段代码正文。
+
+D. shell 回贴应尽量压缩为“汇总块”，不是全量输出
+------------------------------------------------------------
+推荐格式：
+- report dir
+- 关键计数
+- 关键状态
+- top 10/20 结果
+- DONE
+
+不推荐：
+- 把所有 compile/grep/head/full log 全贴回对话。
+
+E. 节奏规则：稳定一轮再 commit / push
+------------------------------------------------------------
+后续新对话应继续：
+1. 小范围修理
+2. 小范围验证
+3. 确认无误
+4. 再 commit + push
+
+这样下一轮新对话里，助手又能直接从 GitHub 接着看，而不用靠大段回忆。
+
+F. 进度控制规则：在安全前提下允许适度提速
+------------------------------------------------------------
+用户今天明确表示：
+- 后续可以适当加快进度；
+- 不要因过度保守导致时间拉得太长。
+
+这并不等于跳过验证，而是要求：
+- 对自包含、低风险、同类结构迁移，可适度合批；
+- 只要语法检查 + docs 更新 + wrapper 机制明确，就可以加快推进；
+- 但涉及 runtime 语义、真实状态判断、权限边界时，仍必须保持“先验证、后修改”。
+
+八、给下一个对话的直接协作规则
+------------------------------------------------------------
+下一个对话开始后，建议先明确复述以下几点，避免跑偏：
+
+1. 今天的 307/307 canonical migration 已完成；
+2. 旧 scripts/ 仍可用，但只是 compatibility wrappers，不是主实现层；
+3. 2026-03-22 夜间关于 no-call / idle 的语义判断仍然有效；
+4. 现在真正还没收口的是 I1/H1 运行语义，而不是仓库结构；
+5. 以后和用户协作时，shell 输出必须把可复制区块固定到最底部。
+
+建议新对话第一轮回复结构：
+1. 先确认已读本文件；
+2. 先确认结构迁移已完成，不再重复搬移；
+3. 先确认下一步进入 I1/H1 真实工程，而不是再做 repo 布局；
+4. 给一小组只读 shell 命令；
+5. 明确要求用户只贴最下面 REPLY BLOCK。
+
+九、建议新对话的第一个实际工程动作
+------------------------------------------------------------
+在不立即大改代码的前提下，建议下一个对话第一步先做：
+
+1. 再次只读确认：
+- origin/main 的 HEAD 提交
+- git status 是否干净
+- I1 latest 的 mtime / audit_state / i1_stage_closed
+- I10 latest 的 summary_state / source_errors
+
+2. 然后再决定进入哪条线：
+- 线 A：先重跑 I1 + I10（验证 latest 是否只是旧）
+- 线 B：若仍旧，则按 2026-03-22 patch bundle 开始改 H1 no-call semantics
+
+注意：
+今天这份报告刻意没有直接进入 H1 工程补丁，因为用户明确要求：
+“先不要进入程序具体工程，先把今天工作和改动生成工作报告。”
+所以本文件应视为：
+结构收口后的接力说明，而不是补丁实施记录。
+
+十、给未来自己的提醒（非常重要）
+------------------------------------------------------------
+以后看到以下现象，不要再误判：
+
+1. total_exact = 362
+不是 362 个真实脚本，而是 docs raw extraction 里 thought_gate 章节有 55 条重复项。
+
+2. scripts/ 目录里还看得到所有旧脚本名
+不表示还没迁移；很多只是 wrapper。
+
+3. 某个 closure / fix / run 脚本路径还是旧 scripts/
+也不表示迁移失败；ops 类脚本本来就在 helper_scripts/maintenance_scripts/bybit_connector 作为 canonical，旧路径同样保留 wrapper。
+
+4. I10 还是红的
+不表示今天迁移失败；只表示运行语义问题尚未解决。
+
+5. 用户要求“快一点”
+不等于跳过验证，而是要求把重复性结构工作更高效地完成，把验证集中在真正高风险的运行态问题上。
+
+十一、一句话总收口
+------------------------------------------------------------
+如果只用一句话概括今天这整条对话：
+
+“今天我们已经把 OpenClaw / Bybit 当前逻辑分类图中声明的 307 个正式脚本全部完成 canonical migration，并为旧 scripts/ 路径保留了完整兼容包装器；当前真正剩下的主问题已不再是仓库结构，而是 I1/H1 对合法 no-call / legal idle 的运行语义尚未收口，因此新对话应停止重复搬移，转入只读确认 + H1/I1 定点修理，并按新的底部固定 REPLY BLOCK workflow 与用户协作。”
+
+附录：供新对话直接复用的最短工作准则
+------------------------------------------------------------
+- 先看 GitHub 已 push 文件，再问本地-only 输出；
+- 一次只给一小组 shell；
+- 所有可复制内容固定在 shell 最底部；
+- 使用单一 REPLY BLOCK；
+- 不重复做 canonical migration；
+- 先确认 I1/I10 最新状态，再决定修补；
+- 任何改动先验证，再 commit/push；
+- read_only / disabled / no authority 边界始终不能放松。

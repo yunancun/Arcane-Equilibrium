@@ -1,0 +1,529 @@
+2026-03-12_openclaw_bybit_progress_log.txt
+
+============================================================
+一、记录说明
+============================================================
+
+1. 本记录承接 2026-03-11 的项目日志，记录 2026-03-12 的新增进展。
+2. 记录重点：
+- D15.3 至 D20 的实际推进结果
+- 新增脚本、数据流、数据库落表与运行状态
+- 过程中出现的主要问题与修复
+- 当前系统状态
+- 下一阶段（D21+）建议
+
+3. 当前项目总体目标未变：
+- 以 OpenClaw 为中枢
+- Bybit 为主交易所、Binance 为辅助交易所
+- 先完成真实只读观察模式
+- 再进入 demo/paper
+- 再进入 supervised live
+- 最后才考虑 constrained autonomous live
+
+============================================================
+二、今日（2026-03-12）阶段结论
+============================================================
+
+今日完成后，可以正式下结论：
+
+【Bybit 只读观察模式（readonly observer mode）已完成阶段性收口并通过验收。】
+
+当前系统已经能够：
+- 读取 Bybit 真实私有只读数据
+- 生成统一 system snapshot
+- 将 snapshot 写入 PostgreSQL
+- 将 snapshot 拆分为标准化原始表
+- 跑通 Bybit 私有 WebSocket smoke test（auth / subscribe）
+- 将 WebSocket 原始事件写入 PostgreSQL
+- 生成标准 decision packet
+- 生成本地 observer verdict
+- 以单入口脚本完成完整只读观察周期
+- 生成 acceptance report / runtime state / failure policy / final summary / next-phase handoff
+
+当前系统状态为：
+- system_mode = read_only
+- overall_runtime_state = ready_readonly_observer
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- ai_state = disabled_by_policy
+
+============================================================
+三、今日完成的主要路线图节点
+============================================================
+
+------------------------------------------------------------
+D15.3：Bybit 私有只读成交历史读取（已完成）
+------------------------------------------------------------
+
+1. 新建脚本：
+- bybit_private_execution_history_check.py
+
+2. 初始问题：
+- 脚本最初误用了错误的 secrets 路径：
+  /srv/settings/secret_files/bybit/read_only/...
+- 实际正确路径为：
+  /home/ncyu/srv/settings/secret_files/bybit/read_only/...
+
+3. 修复后结果：
+- spot execution history: retCode=0, OK
+- linear execution history: retCode=0, OK
+- 当前返回 count=0（空列表），但属于正常成功结果
+
+4. 结论：
+- Bybit 私有 execution history 已打通
+- D15.3 完成
+
+------------------------------------------------------------
+D16：真实系统快照层（已完成到收口）
+------------------------------------------------------------
+
+D16.1：system snapshot 聚合（完成）
+- 新建脚本：
+  bybit_build_system_snapshot.py
+- 将以下数据源聚合成一份统一快照：
+  - account
+  - positions
+  - order_history
+  - execution_history
+- 生成：
+  bybit_system_snapshot_latest.json
+
+D16.2：system snapshot 写入 PostgreSQL（完成）
+- 新建表：
+  trading_raw.exchange_snapshots
+- 成功插入快照记录
+- 已验证 payload 中的 account / positions / order_history / execution_history 状态
+
+D16.3：快照生成 + 写库单脚本（完成）
+- 新建脚本：
+  bybit_snapshot_to_postgres.py
+- 可单独执行并完成：
+  - system snapshot 生成
+  - PostgreSQL 插入
+
+D16.4：标准化原始表拆分（完成）
+- 新建脚本：
+  bybit_normalize_latest_snapshot_to_postgres.py
+- 拆分写入以下表：
+  - trading_raw.bybit_account_coin_snapshots
+  - trading_raw.bybit_position_snapshots
+  - trading_raw.bybit_order_history_raw
+  - trading_raw.bybit_execution_history_raw
+
+D16.4B：幂等与去重修复（完成）
+- 原问题：
+  同一 snapshot 重复跑时，会向标准化原始表重复插入
+- 修复动作：
+  - 补加 source_snapshot_type 字段
+  - 清理重复数据
+  - 建立唯一索引：
+    - uq_bybit_account_coin_snapshots_dedupe
+    - uq_bybit_position_snapshots_dedupe
+    - uq_bybit_order_history_raw_dedupe
+    - uq_bybit_execution_history_raw_dedupe
+  - 将标准化写入改成 ON CONFLICT DO NOTHING
+- 修复结果：
+  重复执行不会再产生重复数据
+
+------------------------------------------------------------
+D17：Bybit 私有 WebSocket 只读事件流骨架（已完成到 smoke + 入库）
+------------------------------------------------------------
+
+D17.1：私有 WS smoke test（完成）
+- 安装环境：
+  - Ubuntu 缺少 pip
+  - 后采用 venv 方案
+  - 创建虚拟环境：
+    /home/ncyu/srv/venvs/trading_ws
+  - 安装 websocket-client
+
+- 新建脚本：
+  bybit_private_ws_smoke_test.py
+
+- 结果：
+  - auth 成功
+  - subscribe 成功
+  - 无 errors
+  - 可输出 jsonl 和 summary
+
+D17.2：WS 原始事件入库（完成）
+- 新建脚本：
+  bybit_load_ws_jsonl_to_postgres.py
+- 新建表：
+  trading_raw.bybit_ws_private_events_raw
+- 成功写入以下事件：
+  - client_send auth
+  - server_msg auth
+  - client_send subscribe
+  - server_msg subscribe
+  - close
+
+D17.3：WS smoke test v2（完成）
+- 新建脚本：
+  bybit_private_ws_smoke_test_v2.py
+- 增强能力：
+  - 可配置 run-seconds
+  - 明确记录 topics_requested
+  - 明确记录 subscribed_topics
+  - 记录更多 preview
+
+D17.4：一键 WS smoke -> DB（完成）
+- 新建脚本：
+  bybit_ws_smoke_to_postgres.py
+- 一次执行完成：
+  - WS smoke
+  - 生成 jsonl
+  - 导入 PostgreSQL
+
+说明：
+- 当前 WS 仍仅收到 auth/subscribe/close 控制类消息
+- 尚未观察到真实 wallet / position / order / execution 业务事件
+- 这不代表错误，更可能是当前账户在观察窗口内没有触发相关事件
+- “WS smoke 成功”不等于“已具备 persistent business-event processing”
+
+------------------------------------------------------------
+D18：标准 decision packet 输入层（已完成）
+------------------------------------------------------------
+
+D18.1：decision packet 文件生成（完成）
+- 新建脚本：
+  bybit_build_decision_packet.py
+- 生成：
+  bybit_decision_packet_latest.json
+- 包含：
+  - account_summary
+  - position_summary
+  - order_summary
+  - execution_summary
+  - ws_session_summary
+  - freshness
+  - risk_flags
+  - candidate_questions_for_ai
+  - local_decision_hints
+
+D18.2：decision packet 写入 PostgreSQL（完成）
+- 新建脚本：
+  bybit_decision_packet_to_postgres.py
+- 新建表：
+  trading_raw.decision_packets
+
+D18.3：decision packet pipeline（完成）
+- 新建脚本：
+  bybit_decision_packet_pipeline.py
+- 一次执行完成：
+  - build decision packet
+  - load decision packet to PostgreSQL
+
+说明：
+- 当前 decision packet 中 should_query_ai = false
+- 当前逻辑仍为 observer-only
+- AI gating / abuse prevention / compute governor 仍未正式接入主链，仅完成设计方向确认
+
+------------------------------------------------------------
+D19：本地 observer verdict 决策骨架（已完成）
+------------------------------------------------------------
+
+D19.1：observer verdict 文件生成（完成）
+- 新建脚本：
+  bybit_build_observer_verdict.py
+- 生成：
+  bybit_observer_verdict_latest.json
+
+- 当前逻辑可输出：
+  - REFRESH_REQUIRED
+  - OBSERVE_ONLY
+- 依据：
+  - snapshot 是否 stale
+  - 当前是否有持仓 / 订单 / 成交
+  - 当前 local_decision_hints
+
+D19.2：observer verdict 写入 PostgreSQL（完成）
+- 新建脚本：
+  bybit_observer_verdict_to_postgres.py
+- 新建表：
+  trading_raw.observer_verdicts
+
+D19.3：observer pipeline（完成）
+- 新建脚本：
+  bybit_observer_pipeline.py
+- 一次执行完成：
+  - decision packet pipeline
+  - build observer verdict
+  - load observer verdict to PostgreSQL
+
+D19.4：完整只读观察周期（完成）
+- 新建脚本：
+  bybit_full_readonly_observer_cycle.py
+- 一次执行顺序包含：
+  1. bybit_private_account_check.py
+  2. bybit_private_positions_check.py
+  3. bybit_private_order_history_check.py
+  4. bybit_private_execution_history_check.py
+  5. bybit_snapshot_to_postgres.py
+  6. bybit_normalize_latest_snapshot_to_postgres.py
+  7. bybit_ws_smoke_to_postgres.py
+  8. bybit_observer_pipeline.py
+
+- 初期在旧 snapshot 条件下 verdict = REFRESH_REQUIRED
+- 刷新完整只读周期后 verdict 正常变为：
+  OBSERVE_ONLY
+
+结论：
+- 本地只读决策骨架已闭环
+- 当前 observer verdict 能正确反映数据新鲜度与只读模式状态
+
+------------------------------------------------------------
+D20：只读观察模式验收收口（已全部完成）
+------------------------------------------------------------
+
+D20.1：正式入口脚本（完成）
+- 新建脚本：
+  run_bybit_observer_cycle.py
+- 一次执行可完成完整 observer cycle，并输出摘要
+
+D20.2：自动验收与自检（完成）
+- 新建脚本：
+  bybit_observer_acceptance_check.py
+- 检查内容包括：
+  - cycle summary 是否存在
+  - decision packet 是否存在
+  - verdict 是否存在
+  - mode 是否为 read_only
+  - observer_mode 是否 true
+  - execution 是否禁用
+  - should_query_ai 是否 false
+  - verdict_code 是否合理
+  - snapshot_age 是否在阈值内
+- 当前结果：
+  - overall_passed = true
+  - passed_count = 14 / 14
+  - failed_count = 0
+
+D20.3：统一状态口径收口（完成）
+- 新建脚本：
+  bybit_runtime_state_resolver.py
+- 统一生成：
+  bybit_runtime_state_latest.json
+- 当前状态：
+  - system_mode = read_only
+  - overall_runtime_state = ready_readonly_observer
+  - data_freshness_state = fresh
+  - ws_state = fresh
+  - ai_state = disabled_by_policy
+  - execution_state = disabled
+  - observer_state = healthy_observe_only
+
+D20.4：失败处理与降级策略（完成）
+- 新建脚本：
+  bybit_failure_policy_builder.py
+- 生成：
+  bybit_failure_policy_latest.json
+- 明确：
+  - hard_stop_conditions
+  - degrade_conditions
+  - default_safe_actions
+
+D20.5：只读模式最终验收摘要（完成）
+- 新建脚本：
+  bybit_readonly_final_summary.py
+- 输出：
+  bybit_readonly_final_summary_latest.json
+- 当前结论：
+  - readonly_observer_ready = true
+  - acceptance_passed = true
+  - runtime_state = ready_readonly_observer
+  - verdict_code = OBSERVE_ONLY
+
+D20.6：下一阶段切换准备 / handoff（完成）
+- 新建脚本：
+  bybit_next_phase_handoff.py
+- 输出：
+  bybit_next_phase_handoff_latest.json
+- 明确：
+  - 当前已完成阶段
+  - 当前安全边界
+  - 下一阶段推荐顺序
+  - demo/paper 前最低要求
+  - 当前仍未启用的能力
+
+============================================================
+四、今日新确认/重申的总体设计目标
+============================================================
+
+今日再次明确并重申以下长期目标：
+
+1. Agent 不应只是“会调接口”，而应具备：
+- Learning Engine（越跑越聪明）
+- Self-Observability Engine（感知自身瓶颈）
+- Performance & PnL Reporting Engine（日/周/月经营报告）
+
+2. Agent 未来应具备学习能力：
+- 记住过去的判断
+- 记住哪些判断事后是对/错
+- 记住哪些市场环境适合某类判断
+- 记住哪些 AI 调用浪费 token 且无收益
+- 记住哪些模块常出错
+- 形成：
+  事实 -> 决策 -> 结果 -> 归因 -> 更新
+
+3. Agent 未来应具备自我感知能力：
+- CPU / RAM / 磁盘 I/O
+- 网络延迟
+- REST 请求耗时
+- WS 稳定性
+- DB 写入耗时
+- 本地推理耗时
+- 模块阻塞点
+- 效率拖累来源
+- 并能输出针对性建议
+
+4. Agent 未来应具备经营报告能力：
+- Daily / Weekly / Monthly summary
+- 总收益 / 总亏损 / 净收益
+- 手续费 / AI 成本 / 基础设施成本
+- 问题归因
+- 优化建议
+- 且输出要一目了然
+
+5. 这些能力不是边角增强，而应是后续主线的一部分。
+
+============================================================
+五、今日新确认/重申的 AI 治理方向
+============================================================
+
+1. AI 调用必须继续遵守：
+- 少问
+- 问准
+- 不重复问
+- 本地能做的先本地做
+
+2. 后续 AI 主线仍包括：
+- AI Query Efficiency / Abuse Prevention
+- AI Compute Governor
+- Model Router v2
+
+3. 当前系统状态仍然明确：
+- AI not enabled for trade decisioning
+- should_query_ai = false
+- ai_state = disabled_by_policy
+
+4. 当前新增治理与报告能力会增加一定工程复杂度，但当前阶段硬件压力仍可接受；
+真正显著可能增加成本的仍主要是：
+- 高频 AI API 调用
+- 长上下文推理
+- 多模型复核
+- 未来若引入本地大模型，则会增加电费与资源占用
+
+============================================================
+六、今日出现的主要问题与修复
+============================================================
+
+1. secrets 路径误写
+- execution history 脚本最初写成 /srv/settings/...
+- 实际为 /home/ncyu/srv/settings/...
+- 修正后恢复正常
+
+2. 多次 cat <<'PY' / heredoc 输入时终端看似“卡住”
+- 本质是 shell 仍在等待结束标记，或脚本本身仍在运行
+- 后续需继续注意：
+  - heredoc 结束标记必须单独占一行
+  - 某些脚本本身有 20~40 秒的等待时间（尤其 WS smoke）
+
+3. Ubuntu 24.04 下 pip 安装限制（PEP 668）
+- 系统 Python 不能直接用 pip 安装 websocket-client
+- 最终使用 venv 解决：
+  /home/ncyu/srv/venvs/trading_ws
+
+4. 标准化表重复插入问题
+- 原因：同一 snapshot 重跑会重复 insert
+- 通过去重、唯一索引、ON CONFLICT DO NOTHING 修复
+
+5. 多次把终端输出又粘回 shell
+- 导致 shell 将 JSON 字段、表格内容误当命令执行
+- 属于终端操作层误操作，不是系统逻辑错误
+- 后续继续注意只粘“命令块”，不要把输出再贴回 shell
+
+============================================================
+七、当前系统状态（截至 2026-03-12 收工前）
+============================================================
+
+1. 当前已可稳定运行的能力
+- Bybit private readonly REST
+- execution history readonly
+- system snapshot generation
+- snapshot persistence
+- normalized raw tables
+- private WS auth/subscribe smoke
+- WS raw event persistence
+- decision packet generation/persistence
+- observer verdict generation/persistence
+- full readonly observer cycle entrypoint
+- acceptance check
+- runtime state resolver
+- failure/degrade policy
+- readonly final summary
+- next-phase handoff
+
+2. 当前系统正式状态
+- system_mode = read_only
+- overall_runtime_state = ready_readonly_observer
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- ai_state = disabled_by_policy
+
+3. 当前结论
+- 系统已准备好作为 readonly observer infrastructure
+- 但尚不是 trading execution system
+
+============================================================
+八、下一阶段建议（D21+）
+============================================================
+
+后续主线建议顺序已明确为：
+
+D21：
+- persistent private/public WebSocket listener skeleton
+
+D22：
+- event-driven state updater from WS into runtime facts
+
+D23：
+- AI query efficiency / abuse prevention layer
+
+D24：
+- AI compute governor / model router v2
+
+D25：
+- Learning Engine
+- Self-Observability Engine
+- Performance & PnL Reporting Engine（基础版）
+
+D26：
+- demo/paper execution gate 准备
+
+更远阶段：
+- D27：supervised live gate
+- D28：constrained autonomous live
+
+============================================================
+九、给下一次继续时的最短续接说明
+============================================================
+
+如果明天继续，可以用下面这段最短说明快速续接：
+
+- D15.3~D20 已全部完成
+- Bybit readonly observer mode 已完成收口并通过验收
+- 当前 system_mode=read_only
+- 当前 overall_runtime_state=ready_readonly_observer
+- 当前 observer verdict=OBSERVE_ONLY
+- 当前 AI 仍 disabled_by_policy
+- 当前 execution 仍 disabled
+- 下一步进入 D21.1：persistent WebSocket listener skeleton
+
+============================================================
+十、今日最终结论（一句话版）
+============================================================
+
+截至 2026-03-12 晚间，OpenClaw + Bybit 项目已完成“只读观察模式”阶段收口；系统已具备真实只读感知、快照治理、事件留痕、decision packet、observer verdict、自动验收与统一运行状态表达能力，可作为下一阶段（常驻 WS / AI 治理 / paper execution 准备）的稳定基础。
+
+—— 记录结束 ——

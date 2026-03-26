@@ -1,0 +1,230 @@
+你现在接手的是 OpenClaw / Bybit 项目的新对话。
+请不要从泛泛背景重新发散，也不要默认旧摘要仍然完全最新。
+我会上传多份 txt，请按下面优先级接手。
+
+======================================================================
+一、文件优先级
+======================================================================
+
+最高优先级（覆盖层）：
+1. 今天新生成的《今日总报告（GitHub 接入 + srv 路径迁移 + 夜间语义诊断权威版）》
+2. 今天夜间工程记录
+3. 今天夜间接手指示文件
+4. H1 no-call semantics patch bundle
+
+背景参考层（较早结论，部分已过时）：
+5. OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+6. OpenClaw_全量整合总报告_2026-03-22
+7. OpenClaw_HI正式完工对账报告_2026-03-22
+
+如果新旧文件有冲突，以今天夜间文件和今天新的总报告为准。
+
+======================================================================
+二、你必须先明确复述的当前真实状态
+======================================================================
+
+请先明确复述以下内容，再开始做任何补丁计划：
+
+1. GitHub 仓库已经建立并在用：
+   - repo: yunancun/BybitOpenClaw
+   - 你应优先直接读取 GitHub 上已 push 的代码和 README。
+
+2. 本地主工作树已经切到新仓库：
+   - /home/ncyu/srv 实际上是 /home/ncyu/BybitOpenClaw/srv 的 symlink
+   - 旧 srv 已经备份
+   - 后续本地运行默认还是沿用 /home/ncyu/srv/... 旧路径。
+
+3. 新仓库已经恢复为旧 srv 风格公共骨架：
+   - program_code/
+   - docker_projects/
+   - settings/
+   - helper_scripts/
+   - log_files/
+   - stored_data/
+   - venvs/
+   等公共目录和 README 体系已基本恢复。
+
+4. 本地-only 内容已经重新 attach：
+   - settings 下真实 env / secrets / service config 已在本地工作树可见
+   - trading_services 下真实 .env、runtime、connector_logs、decision_packets、verdicts 已重新接回
+   - 这些内容是 local-only，不应误进 Git。
+
+5. 当前 H0 是绿的：
+   - H0 final audit 已 OK
+   - handoff 已 ready_for_h1_thought_gate
+
+6. 当前 H1-A 是绿的：
+   - 不再是 stale 阻塞
+
+7. 当前 H1 最主要的真实 blocker 是 H1-B：
+   - budget_latency_cap_unacceptable
+
+8. 当前 H1-G / H1-H / H1-I / H2 / H4 / H5 中存在大量假红灯：
+   - 根因是程序还没接受“合法 no-AI-call”
+   - 以及还没接受“合法 idle account”
+
+9. 当前 I10 失败的直接原因是 I1/H1 未闭环：
+   - 不是 I10 本体先坏了
+
+======================================================================
+三、你必须继承的工作方式（workflow 要求）
+======================================================================
+
+后续请严格遵守以下 workflow：
+
+1. GitHub-first + local-runtime-second
+- 已 push 的代码与说明文件，你先自己去 GitHub 看；
+- 看不见的本地-only latest/json/log/env/config，再让我用 shell 读给你。
+
+2. 先验证，后开发
+- 先区分真 blocker 与假红灯；
+- 先确认路径、脚本名、latest 来源、环境变量是否一致；
+- 再进入补丁实施。
+
+3. Shell 命令必须短、小、分轮次给
+- 每轮只给 1 小组命令；
+- 一次只做 1-2 个逻辑动作；
+- 注释必须中英文对照；
+- 明确写清楚“只检查 / 只读 / 会修改 / 会写文件 / 会 commit / 会 push”。
+
+4. 每轮都要明确告诉我只贴哪些 marker 段落
+例如：
+- ==[1] path + git check ==
+- ==[2] compile key scripts ==
+- ==[3] run I10 clean recheck ==
+不要让我贴全量长输出，优先 head / grep / compact summary。
+
+5. 不要一次性给很多段 shell
+今天这条对话的高效点就在于：
+- 一次一小步
+- 每步有明确回贴区块
+- 不让终端因为超长 paste 卡死
+- 不让上下文被大段输出耗尽
+
+6. 稳定一轮再建议 commit/push
+- 做完一轮稳定修复后，再建议我 commit + push
+- 这样你下一轮可以继续从 GitHub 直接接着看
+
+7. 能看见的代码你直接看，看不见的再跟我要
+- 不要默认让我手贴整段代码正文
+
+======================================================================
+四、你必须保留的硬边界
+======================================================================
+
+下面这些不能因为清“假红灯”而被放松：
+
+- system_mode 必须保持 read_only
+- execution_state 必须保持 disabled
+- execution_authority 必须保持 not_granted
+- decision_lease_emitted 必须保持 false
+- max_retries 必须保持 0
+- 不允许为了“让红灯变绿”而伪造一次 AI 调用
+- 不允许为了“让红灯变绿”而伪造交易活动
+- 真正的 API timeout / retCode 非 0 / public fetch_errors 仍是硬错误
+- should_call_ai = true 但没调用，仍是硬错误
+
+======================================================================
+五、当前阶段的核心语义（必须接受，不要回退）
+======================================================================
+
+语义 A：合法 no-AI-call 是有效终态
+如果同时满足：
+- route_plan = route_skip
+- selected_ai_tier = none
+- should_call_ai = false
+
+那么这表示“这一轮设计上本来就不该调用 AI”，属于合法 observation terminal state。
+不能再因为：
+- invocation_attempted = false
+- provider_response_present = false
+- parsed_json_present = false
+就把整链判失败。
+
+语义 B：合法 idle account 是 info/idle，不是 blocker
+如果同时满足：
+- read_only
+- execution disabled
+- 无持仓
+- 无挂单
+- 无执行历史
+
+那么：
+- no_open_positions
+- no recent order history
+- no recent execution history
+- private ws control-only traffic
+这些最多只能作为 info / idle_flags。
+
+======================================================================
+六、你接手后的实施顺序（不要跳）
+======================================================================
+
+第一步：先处理 H1 的 no-call 语义
+优先文件：
+- bybit_ai_response_check.py
+- bybit_ai_governed_decision.py
+- bybit_thought_gate_acceptance_suite.py
+- bybit_thought_gate_final_audit.py
+
+目标：
+- 合法 no-call 时，H1-G 不应再要求 invocation/provider response/parsed json；
+- H1-H 应生成 governed_observation_no_call；
+- H1-I acceptance suite 应接受 no-call 终态；
+- H1 final audit 应允许 no-call 合法收束。
+
+第二步：再处理 H2/H4/H5 的 no-call 结构语义
+目标：
+- 有调用时，继续严格检查 latency/tokens/parsed json；
+- 无调用但属于合法 no-call 时，允许 latency/tokens/response 为空；
+- 但仍必须检查：
+  - budget cap
+  - output cap
+  - max_retries = 0
+  - runtime_still_protected
+  - 只读安全边界
+
+第三步：把合法 idle account 降级为 info/idle
+前提：
+- read_only
+- execution disabled
+- position_count/order_count/execution_count 全为 0
+
+第四步：修 refresh 脚本
+必须确认：
+- 先 refresh readonly observer truth
+- 再 rebuild H0 front chain
+- 再 rebuild H1/H2/H4/H5
+- 已识别的旧脚本名要替换成当前真实存在的脚本名
+
+第五步：最后才重跑整链验证
+- refresh_upstream_truth_then_rebuild_h1_h5.sh
+- H1/H2/H4/H5 latest
+- I10 summary / final audit
+
+======================================================================
+七、你回复我的第一轮结构要求
+======================================================================
+
+请严格按下面结构开始你的第一条正式回复：
+
+1. 先用简洁但准确的话复述当前真实状态
+2. 明确说出你接受并将遵守的 workflow
+3. 给出“第一轮补丁计划”，只针对 H1 no-call 语义
+4. 最后只给我一小组 shell 命令
+5. 并明确写：
+   “执行后只贴这几个 marker 段落回来”
+
+不要一上来给很多命令。
+不要一上来重讲整个项目宏观愿景。
+不要一上来扩展到 J/K/live 设计。
+当前第一优先级是：
+先把 no-call / idle 语义误报清掉，再看真实 blocker 是否收敛到 H1-B 的 budget_latency_cap_unacceptable。
+
+======================================================================
+八、一句话收口
+======================================================================
+
+请记住：
+当前主要问题不是系统完全跑坏，而是“合法静默态 / 合法 no-call 还没有被设计成被接受的终态”。
+你接手后的第一目标，不是强行全绿，而是先把语义误报清掉，让真正的 blocker 暴露出来。

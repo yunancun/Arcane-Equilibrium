@@ -1,0 +1,732 @@
+OpenClaw Bybit 项目
+H0：Local Deterministic Judgment Core（本地确定性判断内核）
+正式蓝图 v1
+日期：2026-03-20
+
+============================================================
+一、文档定位
+============================================================
+
+本文件是 OpenClaw Bybit 自动交易项目中 H0 阶段的正式蓝图。
+
+H0 的正式名称为：
+Local Deterministic Judgment Core（本地确定性判断内核）
+
+H0 的职责不是直接下单，也不是替代 AI，更不是把系统重新拉回人工半自动；
+H0 的职责是：
+
+在不依赖外部 AI 返回的前提下，以最低延迟、最低成本、最高确定性，先完成本地应当完成的交易资格判断、风险过滤、市场摩擦过滤、系统健康过滤，以及 AI 升级前置筛选。
+
+它是整个自动交易 Agent 的本地“反射神经 + 资格判定器 + 风控前门 + AI 升级前门”。
+
+H0 的目标不是“聪明地下单”，而是：
+1. 极少在不该交易时放行；
+2. 极擅长挡掉烂机会；
+3. 为 H（AI治理）与 I（Decision Lease）提供坚实、可审计、可复用的上游基础。
+
+换句话说：
+如果 H0 没做扎实，后续 H / I 再漂亮，也容易变成高成本、低时效、低实用性的空中楼阁。
+
+============================================================
+二、H0 在全系统中的位置
+============================================================
+
+系统未来不应采用“行情来了 -> AI思考 -> 直接下单”的单层结构。
+更现实、更稳、更可落地的结构应当是：
+
+1. 数据与观察层（已存在）
+   - readonly REST
+   - WS smoke / persistent listener / runtime facts
+   - snapshot / decision packet / observer verdict
+   - acceptance / runtime / summary / audit / consistency
+
+2. H0 本地确定性判断内核（本蓝图）
+   - 本地交易资格判定
+   - 本地风险包络判定
+   - 本地市场摩擦判定
+   - 本地系统摩擦判定
+   - 本地 AI 升级价值初判
+
+3. H 阶段（AI治理层）
+   - H1 thought_gate
+   - H2 query_budget
+   - H3 model_router_v2
+   - 未来可扩展 compute_governor / AI ROI logging
+
+4. I 阶段（Decision Lease 层）
+   - lease schema
+   - freshness / validity
+   - revoke / supersede / expiry
+   - risk-integrated lease consumption
+
+5. 执行适配层（未来）
+   - Bybit order adapter
+   - order / amend / cancel / fill lifecycle
+   - execution audit / reconciliation
+
+6. 人类监督层
+   - 只做不定时检查、复盘、矫正、审核、策略演进
+   - 不参与常规逐笔手动下单
+
+因此，H0 并不与“自动交易”相冲突。
+相反，H0 是让系统真正可以长期自动运行、又不至于因延迟与耦合过重而崩溃的必要层。
+
+============================================================
+三、H0 的正式使命
+============================================================
+
+H0 的正式使命是：
+
+A. 在本地完成 80% 该由本地完成的判断；
+B. 在 AI 介入之前，把显然不值得问、显然不该做、显然不安全的情况全部挡掉；
+C. 生成标准化、可复用、可审计的“交易资格对象”；
+D. 为未来 H1 thought_gate 提供真实而不是空心的上游输入；
+E. 为未来 I decision lease 提供最终消费前的本地复核门；
+F. 为未来自动执行提供稳定、低延迟、可重复的一致性判断基础。
+
+H0 不直接回答“现在买还是卖”。
+H0 优先回答：
+
+1. 现在是否具备交易资格？
+2. 如果不具备，阻塞原因是什么？
+3. 如果具备，属于哪种级别的资格？
+4. 现在是否值得升级到 AI 治理层？
+5. 就算方向判断成立，扣除各种现实摩擦后，还有没有净可交易边际？
+
+============================================================
+四、H0 的八条核心原则
+============================================================
+
+原则 1：先拒绝，再放行
+默认状态不是“可以交易”，而是“不可交易 / 继续观察”。
+只有所有最低条件满足，才允许提升状态。
+
+原则 2：先本地，后 AI
+凡是可结构化、可计算、低歧义、时效敏感的判断，一律优先本地完成。
+
+原则 3：先安全，后收益
+H0 的第一职责不是抓机会，而是排除不该做的情况。
+
+原则 4：先净收益，后信号强度
+任何信号，若扣除手续费、滑点、延迟惩罚、系统摩擦惩罚后无净优势，应被拦截。
+
+原则 5：先系统健康，后市场判断
+系统自身不健康时，再好的市场机会也不值得积极行动。
+
+原则 6：先适格，再决策
+先判断“有没有资格参与交易”，再谈方向或动作。
+
+原则 7：先条件化，再执行化
+H0 产出资格对象、风险包络、升级建议，不直接产出执行命令。
+
+原则 8：失败默认收缩
+任何关键输入缺失、冲突、过时或不可信，全部应 fail-closed，而非大胆猜测。
+
+============================================================
+五、H0 应完成的判断范围
+============================================================
+
+一类：绝对本地、必须快、绝不应外包给 AI
+------------------------------------------------------------
+1. freshness / staleness 检查
+2. runtime health 检查
+3. REST / WS / DB / local system health 检查
+4. execution permission / system_mode / policy state 检查
+5. 当前持仓 / 挂单 / recent execution 事实判断
+6. exposure / kill switch / circuit breaker
+7. fee / spread / slippage / minimum edge
+8. execution legality / order parameter legality（未来）
+
+二类：高频基础交易判断，本地优先
+------------------------------------------------------------
+1. 是否达到最小入场边际
+2. 扣完 fee/slippage 后是否仍有正向净边际
+3. 当前波动是否过大
+4. 当前流动性是否过差
+5. 当前是否只是噪声，不适合介入
+6. 当前是否与现有仓位 / 挂单冲突
+7. 当前是否处于 cooldown / forbidden period
+8. 当前是否只允许观察，不允许新增风险
+
+三类：AI 只做高阶解释，本地先做预筛
+------------------------------------------------------------
+1. 当前 regime 更接近趋势延续、均值回归、假突破、事件扰动中的哪种
+2. 多个信号冲突时，优先级如何排序
+3. 当前是否值得提高 aggressiveness
+4. 当前是否只应生成 negative lease / observe-only lease
+5. 当前是否值得花 API 成本进入 AI deliberation
+
+============================================================
+六、H0 的总体架构
+============================================================
+
+H0 不应写成一个单点脚本，而应写成链式内核，由六个判断层组成：
+
+H0-1  Source Integrity Gate
+H0-2  System Friction Gate
+H0-3  Market Friction Gate
+H0-4  Account & Risk Envelope Gate
+H0-5  Local Trade Eligibility Builder
+H0-6  AI Escalation Value Builder
+
+其中 v1 第一阶段不必一次性把六层全部写满，但设计上必须按此模型展开。
+
+============================================================
+七、六层详细说明
+============================================================
+
+------------------------------------------------------------
+H0-1：Source Integrity Gate
+------------------------------------------------------------
+
+目标：
+判断当前上游最新对象是否可信，是否允许进入后续本地判断。
+
+主要输入：
+1. bybit_runtime_state_latest.json
+2. bybit_readonly_final_summary_latest.json
+3. bybit_readonly_audit_latest.json
+4. bybit_latest_consistency_latest.json
+5. bybit_revision2_master_regression_latest.json
+6. bybit_business_event_state_latest.json
+
+关键判断：
+1. runtime 是否 ready_readonly_observer
+2. system_mode 是否 read_only
+3. execution_state 是否 disabled
+4. readonly_audit 是否 overall_ok
+5. latest_consistency 是否 overall_ok
+6. master_regression 是否 overall_ok
+7. business_event_state 是否允许（例如 healthy_no_business_events_yet 可以接受）
+8. freshness 状态是否满足最低要求
+
+建议输出字段：
+- source_integrity_type
+- source_integrity_version
+- ts_ms
+- runtime_ready
+- readonly_audit_ok
+- latest_consistency_ok
+- master_regression_ok
+- business_event_state
+- source_integrity_state
+- source_integrity_score
+- blocking_reasons
+- operator_message
+
+建议状态枚举：
+- source_integrity_ok
+- source_integrity_degraded_but_usable
+- blocked_by_runtime_state
+- blocked_by_audit_failure
+- blocked_by_consistency_failure
+- blocked_by_missing_source
+
+设计原则：
+若上游基础事实链不可信，则后续 H0 所有结果都不得视为交易资格输入。
+
+------------------------------------------------------------
+H0-2：System Friction Gate
+------------------------------------------------------------
+
+目标：
+把系统自身运行质量纳入交易资格判断。
+
+这是 H0 的一等公民，不是边角监控功能。
+
+建议采集输入：
+1. CPU 使用率
+2. RAM 压力
+3. load average
+4. DB 写入延迟 / 失败率
+5. REST round-trip latency
+6. WS 最新事件年龄
+7. reconnect 频率
+8. 本地脚本执行耗时
+9. 本地事件队列长度（未来）
+10. 网络 jitter / 丢包代理指标（后续扩展）
+
+建议输出核心对象：
+System Friction Score
+
+建议输出字段：
+- system_friction_type
+- system_friction_version
+- ts_ms
+- cpu_state
+- ram_state
+- db_state
+- rest_latency_state
+- ws_lag_state
+- local_compute_state
+- system_friction_score
+- system_friction_band
+- allow_latency_sensitive_actions
+- blocking_reasons
+
+建议 band：
+- low
+- moderate
+- high
+- critical
+
+建议设计原则：
+1. 高摩擦时，允许观察，不应积极交易
+2. high / critical 时，应强烈抑制 AI 升级
+3. 系统本身的脏状态，必须视作市场风险的一部分
+
+------------------------------------------------------------
+H0-3：Market Friction Gate
+------------------------------------------------------------
+
+目标：
+回答“即使方向对了，现在做下去还有没有净可交易边际”。
+
+主要输入：
+1. 当前 symbol 的 bid/ask / spread（未来需接实际行情采样）
+2. 预估滑点 proxy
+3. fee rule / fee burden
+4. volatility band / noise band
+5. liquidity adequacy
+6. order book 稀薄度（未来）
+
+关键判断：
+1. spread 是否过宽
+2. slippage 预估是否过高
+3. fee 占比是否过高
+4. 当前波动是否属于噪声区
+5. 当前市场摩擦是否足以吃掉所有优势
+
+建议输出字段：
+- market_friction_type
+- market_friction_version
+- ts_ms
+- spread_state
+- slippage_state
+- fee_burden_state
+- volatility_noise_state
+- liquidity_state
+- minimum_edge_gate
+- market_friction_score
+- blocking_reasons
+
+建议状态：
+- tradable_edge_positive
+- edge_too_small_after_cost
+- blocked_by_spread
+- blocked_by_slippage
+- blocked_by_fee_burden
+- blocked_by_market_noise
+- blocked_by_liquidity
+
+关键公式（概念层）：
+Net Tradable Edge = expected_edge_proxy - fee_proxy - slippage_proxy - latency_penalty - system_friction_penalty
+
+若 Net Tradable Edge 不显著为正，则不应放行。
+
+------------------------------------------------------------
+H0-4：Account & Risk Envelope Gate
+------------------------------------------------------------
+
+目标：
+判断账户、持仓、挂单、风险包络是否允许进入下一层。
+
+主要输入：
+1. snapshot / account / positions / orders / executions
+2. 当前风险限制（需在后续正式参数化）
+3. cooldown 状态
+4. daily risk / symbol risk / exposure 上限
+5. kill switch / circuit breaker 状态
+
+关键判断：
+1. 当前是否已有方向冲突仓位
+2. 当前是否已有冲突挂单
+3. 当前 exposure 是否已达上限
+4. 是否处于 cooldown
+5. 是否触发 kill switch
+6. 当前是否只允许减仓、不允许增仓
+
+建议输出字段：
+- risk_envelope_type
+- risk_envelope_version
+- ts_ms
+- position_conflict_state
+- order_conflict_state
+- exposure_state
+- cooldown_state
+- kill_switch_state
+- trade_permission_state
+- blocking_reasons
+
+建议状态：
+- risk_envelope_clear
+- blocked_by_position_conflict
+- blocked_by_order_conflict
+- blocked_by_exposure
+- blocked_by_cooldown
+- blocked_by_kill_switch
+- allow_reduce_only
+
+------------------------------------------------------------
+H0-5：Local Trade Eligibility Builder
+------------------------------------------------------------
+
+目标：
+汇总 H0 前四层结果，生成标准化“本地交易资格对象”。
+
+这是 H0 的核心交付物。
+
+主要输入：
+1. Source Integrity Gate 结果
+2. System Friction Gate 结果
+3. Market Friction Gate 结果
+4. Risk Envelope Gate 结果
+5. 必要时读取 runtime / packet / verdict 上下文
+
+建议输出字段：
+- eligibility_type
+- eligibility_version
+- ts_ms
+- exchange
+- stage
+- source_integrity_state
+- system_friction_band
+- market_friction_score
+- risk_envelope_state
+- eligibility_state
+- allow_trade_evaluation
+- allow_ai_escalation_consideration
+- allow_lease_consumption_in_future
+- blocking_reasons
+- advisory_flags
+- operator_message
+
+建议 eligibility_state：
+- blocked_by_source_integrity
+- blocked_by_system_friction
+- blocked_by_market_friction
+- blocked_by_risk_envelope
+- observe_only
+- eligible_for_governed_ai_review
+- eligible_for_future_lease_consumption
+- reserved_for_local_autonomy
+
+注意：
+在 v1 中，eligible 不意味着允许真实下单。
+它只意味着“具备进一步升级判断的资格”。
+
+------------------------------------------------------------
+H0-6：AI Escalation Value Builder
+------------------------------------------------------------
+
+目标：
+回答“这次是否值得升级到 H1/H2/H3 的 AI 治理层”。
+
+核心问题不是有没有信号，而是：
+“花这次 AI 成本值不值？”
+
+建议输入：
+1. local_trade_eligibility_latest
+2. runtime / verdict / packet
+3. system_friction_score
+4. market_friction_score
+5. 本地规则已覆盖程度
+6. 未来可接入 query_budget 历史与 ROI 统计
+
+建议输出字段：
+- ai_escalation_type
+- ai_escalation_version
+- ts_ms
+- eligibility_state
+- local_only_sufficiency_state
+- query_value_score
+- query_cost_class
+- latency_penalty_class
+- expected_net_query_value_band
+- ai_escalation_candidate
+- recommended_query_class
+- why_not_local_only
+- blocking_reasons
+
+建议状态：
+- local_only_sufficient
+- ai_not_worth_it
+- ai_candidate_low_value
+- ai_candidate_medium_value
+- ai_candidate_high_value
+- blocked_by_system_friction
+- blocked_by_stage_policy
+
+说明：
+此对象未来将作为 H1 thought_gate 的直接上游输入之一。
+
+============================================================
+八、H0 最关键的五个高价值抓手
+============================================================
+
+抓手 1：先做“交易资格判定器”，不急着做“买卖判断器”
+------------------------------------------------------------
+H0 第一版不应优先回答 long / short，而应先回答：
+“现在有没有资格交易，若没有，是哪道门挡住了。”
+
+抓手 2：把 minimum edge 做成硬门
+------------------------------------------------------------
+任何机会，都必须先过净可交易边际门。
+净边际不足，直接拦截。
+
+抓手 3：把 system friction 视作真实风险，而不是辅助监控
+------------------------------------------------------------
+系统不稳，不应激进行为。
+
+抓手 4：H0 产物必须标准化、可被后续多层复用
+------------------------------------------------------------
+不是临时日志，而是未来 H / I / execution adapter 都消费的正式 latest 对象。
+
+抓手 5：先把“禁止交易”逻辑做漂亮
+------------------------------------------------------------
+长期盈利的关键之一，不是多做一笔，而是少做大量烂单。
+
+============================================================
+九、H0 与 H / I 的接口关系
+============================================================
+
+1. H0 不是替代 H
+H0 不负责 query budget，不负责模型路由，不负责 AI 预算，也不负责 lease 生成。
+
+2. H0 是 H1 的前置基础
+没有 H0，thought_gate 很容易成为空心门。
+
+3. H0 是 I 的消费前复核门
+未来 lease 再高级，也必须经过 H0 最新状态复核。
+
+4. H0 与执行层最终关系
+未来 execution adapter 在真正下单前，应消费：
+- 最新 lease
+- 最新 H0 eligibility
+- 最新 runtime / safety / risk state
+
+============================================================
+十、H0 第一阶段（v1）建议先落的三个核心模块
+============================================================
+
+为了避免一开始铺得过大，H0 v1 第一阶段建议优先落下三个最值钱模块：
+
+A. bybit_local_market_friction_builder.py
+B. bybit_local_risk_envelope_gate.py
+C. bybit_local_trade_eligibility_builder.py
+
+这三个是 H0 的灵魂最小集。
+
+------------------------------------------------------------
+A. Local Market Friction
+------------------------------------------------------------
+
+职责：
+本地计算市场摩擦与净边际基础状态。
+
+v1 可先做的内容：
+1. fee burden 基础计算
+2. spread / slippage 代理字段占位
+3. volatility noise band 占位与保守状态设计
+4. minimum_edge_gate 逻辑
+5. 输出 market_friction_score
+
+说明：
+即使某些实时行情字段后续才接，v1 也应先把字段、状态机、contract 和占位逻辑定下来。
+
+------------------------------------------------------------
+B. Local Risk Envelope
+------------------------------------------------------------
+
+职责：
+本地判断持仓、挂单、暴露、冷却、kill-switch 等风险包络。
+
+v1 可先做的内容：
+1. position_count / nonzero_position_count 读取
+2. order_count 读取
+3. position-order conflict 基础逻辑
+4. exposure clear / blocked 枚举
+5. cooldown / kill-switch 字段先占位
+6. trade_permission_state
+
+------------------------------------------------------------
+C. Local Trade Eligibility
+------------------------------------------------------------
+
+职责：
+整合 runtime / source integrity / market friction / risk envelope，生成最终资格对象。
+
+v1 必须做到：
+1. 有标准 eligibility_state
+2. 有 allow_trade_evaluation
+3. 有 allow_ai_escalation_consideration
+4. 有 blocking_reasons
+5. 有 operator_message
+6. 输出 latest / dated
+7. 配套 contract check
+8. 配套 handoff / audit（如第一阶段一次补齐）
+
+============================================================
+十一、建议的 H0 v1 文件清单
+============================================================
+
+建议最小正式文件包如下：
+
+1. bybit_local_market_friction_builder.py
+2. bybit_local_market_friction_contract_check.py
+3. bybit_local_risk_envelope_gate.py
+4. bybit_local_risk_envelope_contract_check.py
+5. bybit_local_trade_eligibility_builder.py
+6. bybit_local_trade_eligibility_contract_check.py
+7. bybit_local_trade_eligibility_handoff_builder.py
+8. bybit_local_trade_eligibility_handoff_contract_check.py
+9. bybit_local_trade_eligibility_final_audit.py
+10. bybit_local_trade_eligibility_final_audit_contract_check.py
+
+说明：
+若要缩小第一波施工量，可先完成 1-8；
+但从工程完整性来看，最好 1-10 一次成套交付。
+
+============================================================
+十二、建议输出路径
+============================================================
+
+建议统一落到：
+/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/
+
+建议文件：
+
+1. bybit_local_market_friction_latest.json
+2. bybit_local_market_friction_contract_latest.json
+3. bybit_local_risk_envelope_latest.json
+4. bybit_local_risk_envelope_contract_latest.json
+5. bybit_local_trade_eligibility_latest.json
+6. bybit_local_trade_eligibility_contract_latest.json
+7. bybit_local_trade_eligibility_handoff_latest.json
+8. bybit_local_trade_eligibility_handoff_contract_latest.json
+9. bybit_local_trade_eligibility_final_audit_latest.json
+10. bybit_local_trade_eligibility_final_audit_contract_latest.json
+
+并保留 dated 版本，使用 ts_ms 命名。
+
+============================================================
+十三、H0 v1 的 contract 设计要求
+============================================================
+
+所有 H0 文件应遵循以下要求：
+
+1. 必须带 MODULE_NOTE 头部维护注释
+2. 必须输出 latest 与 dated
+3. 必须有 contract check
+4. 状态枚举必须收敛，不允许随意拼写漂移
+5. 所有 bool / string / score 字段要有固定语义
+6. 任何未来扩展字段必须保持向后兼容
+7. 输出应优先机器可读，再兼顾人工可读
+
+============================================================
+十四、H0 与现有主链的依赖关系
+============================================================
+
+H0 不应破坏现有 D/G/J/K 主链。
+H0 的设计必须是“只读接入，独立产出”。
+
+它依赖现有：
+1. runtime state
+2. readonly summary
+3. readonly audit
+4. latest consistency
+5. master regression
+6. business event state
+7. snapshot / packet / verdict（按需）
+
+它不应：
+1. 修改 existing readonly runtime 的判断口径
+2. 修改 execution_state
+3. 修改 system_mode
+4. 打开 AI querying
+5. 打开 execution gate
+
+============================================================
+十五、H0 的阶段性成功标准
+============================================================
+
+H0 v1 做成后，至少应满足以下标准：
+
+1. 能稳定区分“允许继续观察”与“具备进一步升级资格”
+2. 能给出明确 blocking_reasons
+3. 能在 source/runtime 不可信时 fail-closed
+4. 能把 minimum edge 和风险包络作为硬门
+5. 能输出后续 H1 可直接消费的 latest 对象
+6. 不破坏当前 readonly observer 保护态
+7. 通过 compile / contract / final audit / master regression
+
+============================================================
+十六、H0 的最核心验收标准
+============================================================
+
+真正的高标准，不是 H0 能多聪明地挑机会，
+而是它能否做到：
+
+1. 在数据不干净时不放行
+2. 在系统卡顿时不放行
+3. 在净边际不足时不放行
+4. 在风险包络不允许时不放行
+5. 在不值得升级到 AI 时不乱升级
+
+若 H0 能长期稳定做到这五点，它就已经是整个自动交易 Agent 中最有价值的内核之一。
+
+============================================================
+十七、正式施工建议顺序
+============================================================
+
+建议施工顺序如下：
+
+第 1 批：
+1. bybit_local_market_friction_builder.py
+2. bybit_local_market_friction_contract_check.py
+3. bybit_local_risk_envelope_gate.py
+4. bybit_local_risk_envelope_contract_check.py
+5. bybit_local_trade_eligibility_builder.py
+6. bybit_local_trade_eligibility_contract_check.py
+
+第 2 批：
+7. bybit_local_trade_eligibility_handoff_builder.py
+8. bybit_local_trade_eligibility_handoff_contract_check.py
+9. bybit_local_trade_eligibility_final_audit.py
+10. bybit_local_trade_eligibility_final_audit_contract_check.py
+
+第 3 批：
+11. 将 H0 纳入 docs/SCRIPT_INDEX.md
+12. 再跑 readonly summary / audit / consistency / master regression
+13. 确认 H0 没有破坏现有保护态
+14. 再正式进入 H1 thought_gate
+
+============================================================
+十八、最终结论
+============================================================
+
+H0 不是一个普通小模块。
+
+H0 的正式定位应当是：
+
+OpenClaw Bybit 自动交易 Agent 的本地确定性判断内核、
+交易资格判定器、
+AI 升级前门、
+Decision Lease 消费前复核门、
+以及未来真实自动执行的低延迟保护核心。
+
+若 H0 做得扎实：
+- H 会更强
+- I 会更稳
+- 未来自动执行才真正有现实落地价值
+
+若 H0 没做扎实：
+- H 容易空心
+- I 容易失真
+- 自动交易容易沦为高成本、低时效、低鲁棒性的伪自动化系统
+
+因此，H0 应被视为当前项目的最高优先级前置基础之一。
+
+本蓝图结论：
+可以正式以 H0 v1 作为下一阶段施工主线，先完成本地确定性判断内核，再进入 H1 thought_gate。
+

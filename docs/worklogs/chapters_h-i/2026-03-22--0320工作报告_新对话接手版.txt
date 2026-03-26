@@ -1,0 +1,1276 @@
+OpenClaw / Bybit 项目
+2026-03-20 对话超级详细工作报告（新对话接手专用）
+格式：TXT
+整理日期：2026-03-22
+适用范围：
+1. 供新聊天 / 新分支中的模型快速接手；
+2. 重点恢复 2026-03-20 这条对话里真实完成过的工作，而不是只盯着后半段返修 H 的终端输出；
+3. 同时记录本对话内反复讨论过的方向性结论、环境与 secret 路径、调试陷阱、以及后续建议动作。
+
+说明：
+- 本报告优先依据以下材料整理：
+  1) 《26.03.20导出_已移除用户代码.txt》
+  2) 《新文件2_I章节提取整理.txt》
+  3) 《OpenClaw_Bybit_超详细续接总报告_2026-03-20.txt》
+  4) 《2026-03-19_补充1.txt》《2026-03-19工作记录_含0317至0319校正与修复.txt》等基线文件
+  5) 本对话后半段的真实终端反馈（尤其是 H 返修与重新转绿部分）
+- 这份报告特别强调：2026-03-20 这条对话的真实主线不是“只修 H”，而是：
+  前半段先完成 H -> 中段完整讨论并完成 I -> 准备进 J 前发现问题 -> 后半段回头返修 H。
+
+============================================================
+一、项目真正目标（新对话最先要记住）
+============================================================
+
+这个项目不是普通自动下单 bot，而是一个：
+
+“以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。”
+
+长期目标不是“尽快实盘”，而是：
+
+1. 风险可控
+2. 可审计
+3. 可学习
+4. 可逐步放权
+5. 在成本、延迟、权限治理、系统稳定性都受控的前提下，追求长期 net PnL 最大化
+
+绝对不能忘的根原则：
+
+A. 不只看 gross PnL，要看 net PnL
+- AI API 成本
+- 手续费
+- 电费 / 设备折旧
+- 网络 / 基础设施成本
+- 后续维护成本
+都要纳入经营口径。
+
+B. AI 输出不能当成即时命令
+- AI 有延迟；
+- 市场高度时效敏感；
+- AI 更适合输出 decision lease（决策租约），而不是“现在立刻买/卖”的直接命令；
+- 本地层必须继续做 freshness / timing / risk / permission / execution gate。
+
+C. 权限不能按时间自动升级
+- 必须按表现赢得；
+- 必须局部放权，不可全局放权；
+- 真正高级的 Agent，不是更莽，而是在优势区间更大胆，在非优势区间更保守。
+
+D. 最终形态不是机械 bot，而是长期进化的交易个体
+- 会观察
+- 会判断
+- 会审计
+- 会学习
+- 会自我观测
+- 会产出经营报告
+- 会在严格边界下逐步争取更高权限
+
+============================================================
+二、正式章节树（必须以 Revision 2 为准）
+============================================================
+
+A-C：基础层 / OpenClaw 模型层 / 接入前治理
+D：Readonly Observer 主链
+E：Business Event Classification
+F：Event-Driven Transition Scaffold
+G：真实业务事件验证层
+H：AI 治理
+I：Decision Lease
+J：Transition Engine Skeleton
+K：Paper / Demo Gate
+L：Learning / Self-Observability / Net PnL
+后续才是 M / N
+
+关键校正规则：
+- 历史过程里出现过 G4.x / G5 / G6 等临时编号；
+- 这些历史编号不能再当正式章节理解；
+- 新对话里必须优先使用 G / H / I / J / K 的正式语义。
+
+============================================================
+三、截至 2026-03-19 的基线状态（进入本对话前）
+============================================================
+
+进入 2026-03-20 这条对话前，正式基线已经是：
+
+1. D 主链稳定
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- execution_state = disabled
+- observer_state = healthy_observe_only
+
+2. E / F 已完成
+
+3. G 已正式收口
+
+4. J / K 已提前展开，并补到了“结构层 / 测试层 / 审计层”可维护状态
+- 但不应被误判为正式完工章节
+
+5. 当时官方工程判断已经明确：
+- G 已收口；
+- J / K 可以继续做 structural hardening；
+- 正式主线应回到 H / I；
+- 不能长期跳过 H / I。
+
+============================================================
+四、2026-03-20 这条对话里，真实发生了什么（按正确时间顺序）
+============================================================
+
+这部分是本报告最重要的内容。
+
+------------------------------------------------------------
+4.1 早段：再次确认项目方向与 H / I 的优先级
+------------------------------------------------------------
+
+本对话最早阶段，不是直接贴代码，而是先重新对齐方向。
+
+核心结论：
+
+1. H / I 是整个项目的大脑外壳与核心治理层，优先级极高；
+2. H 负责 AI 治理，不是让 AI 直接越权；
+3. I 负责 Decision Lease，不是即时执行许可；
+4. J / K 虽然提前写了很多，但不能因为它们有 skeleton / audit / summary 就误判为主线已完成；
+5. 正式主线必须从 H 开始，然后接 I，再看 J。
+
+------------------------------------------------------------
+4.2 早段：Bybit 接入边界与权限策略再次被定清
+------------------------------------------------------------
+
+在本对话前半段，Bybit API key 策略被再次清晰化，原则是：
+
+- 最小权限
+- 先只读
+- 后执行
+- 职责分离
+- 安全优先
+
+形成的口径包括：
+
+当前先创建：
+- 生产只读主 key
+- 命名建议：bybit_prod_readonly_main
+
+后续才考虑：
+- 正式执行 key：bybit_prod_live_executor
+- 可选 demo / testnet key
+
+当前阶段推荐权限：
+- API Transaction
+- Read-Only
+- Unified Trading
+- Assets
+- Trade
+- Convert / Exchange History
+- Orders / Positions（按需扩展）
+
+明确不建议乱勾：
+- Fiat
+- P2P
+- Ads
+- Bybit Pay
+- Broker only
+- 其他与当前阶段无关权限
+
+网络安全原则：
+- 有固定公网 IP 时优先白名单；
+- 没有固定 IP 时可临时无 IP 限制，但不应视为长期方案。
+
+这套策略的本质结论是：
+“当前系统仍然是生产只读观察系统，不是执行系统。”
+
+------------------------------------------------------------
+4.3 中前段：围绕 H / I 进行了高强度设计讨论（“天才般想法”要求）
+------------------------------------------------------------
+
+你在这条对话里明确要求过：
+
+1. 如何最佳均衡 API 成本与交易 Agent 收益；
+2. 如何以最低花费最大程度榨取 AI 价值；
+3. 哪些基础且安全的交易判断应本地完成；
+4. 本地判断与 AI 判断如何关联；
+5. 如何处理 AI 回复延迟；
+6. 如何把设备、网络、本地计算、DB、WS 等系统卡顿正式纳入框架；
+7. 希望 H 与 I 拿出“天才般”的思路与框架，并执行到极致。
+
+这一轮讨论沉淀出的正式结论，必须被新对话继续继承：
+
+【结论 1：H 与 I 不能孤立理解，要作为同一个“大脑外壳”设计】
+- H（AI Governance）负责：
+  - 该不该想
+  - 值不值得问
+  - 问谁最划算
+  - 预算、路由、滥用防护、延迟治理
+- I（Decision Lease）负责：
+  - 把 AI 的慢速认知结果，封装成可验证、可衰减、可撤销、可复核的行动许可外壳
+- 它们是统一脑壳的两面，不该割裂。
+
+【结论 2：AI 不是默认参与者，而是稀缺昂贵的“高阶认知资本”】
+系统应分三条速度层：
+
+- Local Reflex Lane（毫秒级）
+  只做本地、确定性、必须快的判断，绝不问 AI。
+- Local Tactical Lane（几十到几百毫秒）
+  做本地评分、过滤、场景识别、风控复核，尽量不问 AI。
+- AI Deliberation Lane（秒级）
+  只处理慢变量、高不确定、跨上下文、需要抽象推理的问题。
+
+【结论 3：每次 AI 调用都应被视作一笔必须回本的投资】
+要建立：
+Expected Net Query Value
+= 预期决策增益 - API成本 - 延迟惩罚 - 错误风险惩罚 - 机会成本
+
+只有明显为正时，AI 才允许参与。
+
+【结论 4：预算不只是按“次数”，而要按“价值层级”控】
+建议五层预算：
+- 全局日预算
+- 会话预算
+- 符号预算
+- 场景预算
+- 失败预算
+
+【结论 5：本地能做的，必须先本地做】
+绝对本地层包括：
+- freshness
+- runtime health
+- WS / REST / DB 状态
+- 持仓/订单/成交事实判断
+- spread / slippage / fee / min edge
+- kill switch / circuit breaker
+- permission / system_mode / execution legality
+
+AI 只应处理：
+- regime 判断
+- 多因素冲突解释
+- 场景重构
+- 风险边界重估
+- 结构变化解释
+- 策略切换建议
+而不应处理高频重复的小判断。
+
+【结论 6：AI 输出必须变成 decision lease，而不是即时命令】
+AI 不输出：
+- “现在立刻买”
+
+AI 应输出：
+- 适用条件集
+- 时间窗口
+- 风险边界
+- 场景前提
+- 失效条件
+- 必须再次通过的本地检查
+- 更快本地事件对它的 supersede / revoke 机制
+
+【结论 7：Decision Lease 至少要分三层】
+- Intent Lease：方向/场景层
+- Action Envelope Lease：交易框架层
+- Execution Window Lease：极短时执行许可层（应更多由本地层派生）
+
+【结论 8：必须引入 System Friction Score（系统摩擦分）】
+这个概念非常重要，是本对话里讨论出来的关键“天才级抓手”之一。
+
+它综合反映：
+- CPU 压力
+- RAM 压力
+- DB 延迟
+- REST 往返延迟
+- WS lag
+- 本地队列积压
+- 本地计算延迟
+- 网络 jitter / reconnect / 丢包
+
+它不能只是监控指标，而必须直接影响：
+- Thought Gate
+- Query Budget
+- Lease Validity
+
+【结论 9：真正高效的方向不是“让 AI 更频繁说话”，而是让 AI 只处理结构变化】
+AI 更像：
+- regime architect
+- exception interpreter
+- capital aggressiveness advisor
+- post-trade reviewer
+
+而本地层负责：
+- 速度
+- 纪律
+- 风控
+- 时效
+- 最终合法执行
+
+------------------------------------------------------------
+4.4 中段：H0 本地确定性判断内核（Local Deterministic Judgment Core）被正式提出并落地
+------------------------------------------------------------
+
+这是 3 月 20 日对话里非常重要的一次方向升级。
+
+在讨论 H / I 时，结论进一步变成：
+
+真正强的 H / I，不能建立在“本地层空心化”的前提上。
+因此正式主线在 H1 前，被进一步外扩成：
+
+H0：Local Deterministic Judgment Core（本地确定性判断内核）
+
+它的目标不是预测方向，而是先回答：
+“当前这单/这个时刻，是否具备交易资格，是否仍有净优势，是否本地层已经具备足够的合法性、时效性和风险可控性。”
+
+你当时要求“非常精巧准确且接近完美的思路与方案”，最终形成的 H0 关键抓手包括：
+
+1. local_market_friction
+- 不是看方向；
+- 而是标准化市场摩擦、最小边际优势要求、滑点/成本/覆盖度；
+- 为 risk_envelope 和 eligibility 提供上游基础。
+
+2. local_risk_envelope
+- 看当前仓位/挂单/执行数/kill switch/cooldown 等；
+- 不是给策略，而是给“此刻能不能继续进入资格判断”。
+
+3. local_trade_eligibility
+- 把 market friction + risk envelope 合并成是否可进入 H1 的本地门禁。
+
+4. H0 final audit
+- 明确 H0 是否已 structurally valid and ready for H1。
+
+这意味着项目主线在 3 月 20 日之后，不再只是：
+H1 -> H2 -> H3 -> I
+
+而是：
+
+H0 本地确定性判断内核
+-> H1 thought_gate
+-> H2 query_budget
+-> H3 model_router / compute governance
+-> I decision lease
+
+------------------------------------------------------------
+4.5 中段：H 章节被先完整做完，并且正式闭环
+------------------------------------------------------------
+
+这件事必须明确写出来，因为后半段返修 H 的输出很容易掩盖这个事实。
+
+3 月 20 日这条对话中，真正的顺序是：
+先讨论 H 的正确设计 -> 先把 H 做完 -> 再进入 I。
+
+H 章节的核心结构是：
+
+H1：thought_gate
+H2：query_budget
+H3：model_router
+H4：compute_governor
+H5：AI cost governance
+
+H 的核心目标不是“让 AI 决定交易”，而是：
+把 AI 放进一个受治理、只读、不可执行、可审计的观察层里。
+
+被反复固定下来的硬边界包括：
+
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted
+- live_execution_allowed = false
+- decision_lease_emitted = false
+
+H 章前半段已经成功闭环，并给出：
+- H5 已正式闭环
+- H 章可进入 I1
+- warning_flags 允许存在 soft warn，但不影响闭环
+- 当前系统仍然受保护，不放权、不实盘、不越权
+
+------------------------------------------------------------
+4.6 中后段：I 章节不是只讨论了思路，而是被完整做到 I10 收口
+------------------------------------------------------------
+
+这是之前最容易被忽略、但现在已经确认的事实。
+
+I 章节不只是“讨论过”，而是已经从 I1 一路推进到了 I10，并且正式收口。
+
+I 章节在这条对话里完成的主线包括：
+
+I1：decision lease schema
+- 把 decision lease 的 schema、template、runtime view 正式定下来；
+- 明确当前阶段是 schema_only / no emit / no authority。
+
+I2：lease shadow issuance（shadow-only）
+- preflight
+- shadow candidate
+- shadow audit
+- 只做影子签发，不开 live lease
+
+I3：consume gate（影子消费门）
+- 不是做真实 consume / 真实下单；
+- 而是做 simulated consume timestamp / consume policy / consume gate；
+- 形成 one-time consume guard 相关机制
+
+I4：replay / revoke / expire / kill switch 相关链路
+- 重点在 replay / revoke / expiry / supersede / negative path 防护
+
+I5：lease friction metrics / adaptive ttl
+- latency / friction / adaptive ttl 等与 lease 时效性相关的治理
+
+I6：approval bridge
+- 把 operator review / bridge 机制结构化
+
+I7：execution authority aggregator
+- 仍不授予 authority，只做 shadow / governed aggregation
+
+I8：manual approval packet
+- 仍然 review-only，不进入 live submit
+
+I9：operator acknowledgment shadow
+- operator_ack_shadow_only = True
+- live_operator_ack_enabled = False
+- execution_authority 仍 not_granted
+- runtime_still_protected = True
+
+I10：Decision Lease chapter final closure
+- 起初 I10 的汇总器/阶段发现逻辑过严，导致虽然 I1-I9 实际都完成，I10 仍未一次转绿；
+- 随后进行了多轮修补：
+  1) 扩大候选文件覆盖
+  2) 从仅靠 stage 字段识别，升级到 stage + filename_keyword 的双通道识别
+  3) 之后又做了 I10 小清洁补丁，改善 canonical stage-source alias
+- 最终 I10 成功给出正式闭环结果：
+
+summary_state = decision_lease_chapter_closed_shadow_ready_for_future_live_design
+handoff_state = decision_lease_chapter_closed_handoff_ready
+audit_state = decision_lease_chapter_closed_soft_warn
+i_chapter_closed = True
+shadow_control_plane_closed = True
+runtime_still_protected = True
+ready_for_future_live_design = True
+execution_authority = not_granted
+decision_lease_emitted = False
+live_operator_ack_enabled = False
+
+这说明：
+I1-I10 整章已经作为“影子控制平面 / 不放权 / 不实盘执行”的 decision-lease control plane 跑通。
+
+------------------------------------------------------------
+4.7 I 章节做完后，本应准备进入 J；但在继续推进前发现问题，于是翻回头返修 H
+------------------------------------------------------------
+
+这是本对话后半段大量终端输出的来源。
+
+也就是说：
+后半段不是“从 H 走向 I”，而是：
+I 已经做完了，随后为了保证主链可靠性，专门回头修 H。
+
+返修 H 的主要原因不是理念错了，而是：
+- 运行链上的真实 env / model binding / freshness / wrapper / script 混用问题没有完全干净；
+- H 的 latest 工件在某些时点被脏状态、旧状态或错误 env 影响；
+- 如果不把 H 彻底修绿，后续 J 继续推进会留下不稳定基础。
+
+============================================================
+五、本对话里实际写出/落地/反复运行的重要程序块
+============================================================
+
+说明：
+- 这里按“对新对话继续接手最有用”的方式分组；
+- 不追求绝对逐个文件全列到极限，但会把本对话中关键落地文件、主 runner、修补脚本、以及必须认识的阶段文件列出来；
+- 对话中还出现过多份 .bak_ / .orig / repair / runner 脚本，说明这一轮有真实返修与替换发生。
+
+------------------------------------------------------------
+5.1 H0 / Local Deterministic Judgment Core 相关
+------------------------------------------------------------
+
+核心脚本 / 程序块：
+
+- scripts/bybit_public_microstructure_builder.py
+- scripts/bybit_public_microstructure_contract_check.py
+- scripts/bybit_local_market_friction_builder.py
+- scripts/bybit_local_market_friction_contract_check.py
+- scripts/bybit_local_risk_envelope_gate.py
+- scripts/bybit_local_risk_envelope_contract_check.py
+- scripts/bybit_local_trade_eligibility_builder.py
+- scripts/bybit_local_trade_eligibility_contract_check.py
+- scripts/bybit_local_trade_eligibility_handoff_builder.py
+- scripts/bybit_local_trade_eligibility_handoff_contract_check.py
+- scripts/bybit_local_judgment_final_audit.py
+- scripts/bybit_local_judgment_final_audit_contract_check.py
+
+作用：
+- 刷新 public microstructure
+- 构建本地市场摩擦对象
+- 构建本地 risk envelope
+- 构建 trade eligibility
+- 构建 H0->H1 handoff
+- 做 H0 final audit
+
+------------------------------------------------------------
+5.2 H1 / Thought Gate 相关
+------------------------------------------------------------
+
+核心脚本 / 程序块：
+
+- scripts/bybit_thought_gate_input_builder.py
+- scripts/bybit_thought_gate_input_contract_check.py
+- scripts/bybit_thought_gate_policy_builder.py
+- scripts/bybit_thought_gate_policy_contract_check.py
+- scripts/bybit_local_trigger_model_builder.py
+- scripts/bybit_local_trigger_model_contract_check.py
+- scripts/bybit_thought_gate_decision_builder.py
+- scripts/bybit_thought_gate_decision_contract_check.py
+- scripts/bybit_ai_route_selector_builder.py
+- scripts/bybit_ai_route_selector_contract_check.py
+- scripts/bybit_ai_prompt_prep_builder.py
+- scripts/bybit_ai_prompt_prep_contract_check.py
+- scripts/bybit_ai_prompt_prep_tighten.py
+- scripts/bybit_ai_request_envelope_builder.py
+- scripts/bybit_ai_request_envelope_contract_check.py
+- scripts/bybit_ai_invocation_attempt_builder.py
+- scripts/bybit_ai_invocation_attempt_contract_check.py
+- scripts/bybit_ai_response_check_builder.py
+- scripts/bybit_ai_response_check.py
+- scripts/bybit_ai_response_check_contract_check.py
+- scripts/bybit_ai_governed_decision.py
+- scripts/bybit_ai_governed_decision_contract_check.py
+- scripts/bybit_thought_gate_acceptance_suite.py
+- scripts/bybit_thought_gate_regression_summary.py
+- scripts/bybit_thought_gate_handoff.py
+- scripts/bybit_thought_gate_final_audit.py
+- scripts/bybit_thought_gate_contract_check.py
+
+核心含义：
+- H1-A 输入归一化
+- H1-B policy 决定 AI 最大参与 tier
+- H1-C decision 决定 should_call_ai / selected_ai_tier
+- H1-R 路由选择 route_a / route_b / route_c / skip
+- H1-D prompt prep
+- H1-E provider-native request envelope
+- H1-F invocation attempt
+- H1-G response check
+- H1-H governed decision
+- H1-I acceptance / summary / handoff / final audit
+
+------------------------------------------------------------
+5.3 H2 / Query Budget 相关
+------------------------------------------------------------
+
+核心阶段对象（从 runtime latest 与 full closure 输出可以确认）：
+
+- bybit_query_budget_policy
+- bybit_query_budget_gate
+- bybit_query_budget_runtime
+- bybit_query_budget_final_audit
+- 对应 contract_check 文件
+
+主 runner：
+- scripts/run_h2_query_budget_full_closure.sh
+
+------------------------------------------------------------
+5.4 H3 / Model Router 相关
+------------------------------------------------------------
+
+核心阶段对象：
+
+- bybit_model_router_policy
+- bybit_model_router_decision
+- bybit_model_router_runtime
+- bybit_model_router_final_audit
+- 对应 contract_check 文件
+
+主 runner：
+- scripts/run_h3_model_router_full_closure.sh
+
+------------------------------------------------------------
+5.5 H4 / Compute Governor 相关
+------------------------------------------------------------
+
+核心阶段对象：
+
+- bybit_compute_governor_policy
+- bybit_compute_governor_gate
+- bybit_compute_governor_runtime
+- bybit_compute_governor_final_audit
+- 对应 contract_check 文件
+
+主 runner：
+- scripts/run_h4_compute_governor_full_closure.sh
+
+------------------------------------------------------------
+5.6 H5 / AI Cost Governance 相关
+------------------------------------------------------------
+
+核心阶段对象：
+
+- scripts/bybit_ai_cost_log.py
+- scripts/bybit_ai_cost_log_contract_check.py
+- scripts/bybit_ai_governance_audit.py
+- scripts/bybit_ai_governance_audit_contract_check.py
+- scripts/bybit_ai_cost_governance_final_audit.py
+- scripts/bybit_ai_cost_governance_contract_check.py
+
+主 runner：
+- scripts/run_h5_ai_cost_governance_full_closure.sh
+
+------------------------------------------------------------
+5.7 I 章节（Decision Lease）相关
+------------------------------------------------------------
+
+I1：
+- scripts/bybit_decision_lease_schema.py
+- scripts/bybit_decision_lease_schema_contract_check.py
+- scripts/bybit_decision_lease_final_audit.py
+- scripts/bybit_decision_lease_contract_check.py
+- scripts/run_i1_decision_lease_full_closure.sh
+
+I2：
+- scripts/bybit_decision_lease_preflight.py
+- scripts/bybit_decision_lease_preflight_contract_check.py
+- scripts/bybit_decision_lease_shadow_issue.py
+- scripts/bybit_decision_lease_shadow_issue_contract_check.py
+- scripts/bybit_decision_lease_shadow_audit.py
+- scripts/bybit_decision_lease_shadow_contract_check.py
+- scripts/run_i2_decision_lease_shadow_closure.sh
+
+I3：
+- scripts/bybit_decision_lease_consume_policy.py
+- scripts/bybit_decision_lease_consume_policy_contract_check.py
+- scripts/bybit_decision_lease_consume_gate.py
+- scripts/bybit_decision_lease_consume_gate_contract_check.py
+- scripts/bybit_decision_lease_consume_final_audit.py
+- scripts/bybit_decision_lease_consume_contract_check.py
+- scripts/run_i3_decision_lease_consume_closure.sh
+
+I4：
+- scripts/bybit_decision_lease_replay_policy.py
+- scripts/bybit_decision_lease_replay_policy_contract_check.py
+- scripts/bybit_decision_lease_replay_guard.py
+- scripts/bybit_decision_lease_replay_guard_contract_check.py
+- scripts/bybit_decision_lease_replay_final_audit.py
+- scripts/bybit_decision_lease_replay_contract_check.py
+- scripts/run_i4_decision_lease_replay_closure.sh
+
+I5：
+- scripts/bybit_decision_lease_friction_metrics.py
+- scripts/bybit_decision_lease_friction_metrics_contract_check.py
+- scripts/bybit_decision_lease_adaptive_ttl.py
+- scripts/bybit_decision_lease_adaptive_ttl_contract_check.py
+- scripts/bybit_decision_lease_friction_final_audit.py
+- scripts/bybit_decision_lease_friction_contract_check.py
+- scripts/run_i5_decision_lease_friction_closure.sh
+
+I6：
+- scripts/bybit_decision_lease_approval_bridge.py
+- scripts/bybit_decision_lease_approval_bridge_contract_check.py
+- scripts/bybit_decision_lease_approval_bridge_final_audit.py
+
+I7：
+- scripts/bybit_execution_authority_aggregator.py
+- scripts/bybit_execution_authority_aggregator_contract_check.py
+- scripts/bybit_execution_authority_aggregator_final_audit.py
+
+I8：
+- scripts/bybit_manual_approval_packet.py
+- scripts/bybit_manual_approval_packet_contract_check.py
+- scripts/bybit_manual_approval_packet_final_audit.py
+
+I9：
+- scripts/bybit_operator_ack_shadow.py
+- scripts/bybit_operator_ack_shadow_contract_check.py
+- scripts/bybit_operator_ack_shadow_final_audit.py
+
+I10：
+- scripts/bybit_decision_lease_chapter_summary.py
+- scripts/bybit_decision_lease_chapter_handoff.py
+- scripts/bybit_decision_lease_chapter_final_audit.py
+- scripts/bybit_decision_lease_chapter_contract_check.py
+- scripts/run_i10_clean_recheck.sh
+- scripts/repair_i10_stage_source_aliases.py
+
+------------------------------------------------------------
+5.8 本对话内显式出现过的重要修理 / 恢复 / 对账脚本
+------------------------------------------------------------
+
+这些脚本说明 3 月 20 日后半段确实发生了大规模返修：
+
+- scripts/refresh_h0_upstream_and_diag_public_microstructure.sh
+- scripts/final_truth_repair_round1.sh
+- scripts/recover_h0_h1_then_reclose_h2_h5.sh
+- scripts/fix_h5_and_rebuild_real_h1.sh
+- scripts/diag_and_repair_upstream_truth_sources.sh
+- scripts/repair_h1_h5_dirty_points_v2.sh
+- scripts/repair_h2_emitter_state_compat.sh
+- scripts/repair_h2_gate_state_only_v9.sh
+- scripts/repair_h2_h4_then_h5_truth.sh
+- scripts/repair_h2_h5_real_blockers_v2.sh
+- scripts/repair_h5_compile_only_v3.sh
+- scripts/repair_mainline_cleanup_compile.sh
+- scripts/restore_and_repair_h5_minimal.sh
+
+============================================================
+六、本对话里真实碰到的问题，以及怎么解决的
+============================================================
+
+------------------------------------------------------------
+6.1 问题：直接运行脚本时缺依赖，出现 httpx 缺失
+------------------------------------------------------------
+
+现象：
+- 运行 scripts/bybit_ai_invocation_attempt_builder.py 时出现：
+  ModuleNotFoundError: No module named 'httpx'
+
+根因：
+- 脚本没有在正确的 trading venv / env wrapper 下执行；
+- 直接 python3 运行时，没有使用已经准备好的 OpenClaw/Bybit 专用环境。
+
+处理：
+- 把调用改为通过 scripts/run_with_trading_env.sh 执行；
+- 并把 final_truth_repair_round1.sh 等脚本改成经由 wrapper 运行 python3。
+
+结论：
+- 后续凡是 H / I / provider 调用相关脚本，优先使用：
+  ./scripts/run_with_trading_env.sh python3 xxx.py
+  或
+  ./scripts/run_with_trading_env.sh bash xxx.sh
+
+------------------------------------------------------------
+6.2 问题：H5 中 bybit_ai_cost_log.py 出现 NameError
+------------------------------------------------------------
+
+现象：
+- H5 运行时出现：
+  NameError: name 'h2_runtime' is not defined
+
+根因：
+- bybit_ai_cost_log.py 内部对 h2_runtime 的引用没有正确初始化；
+- 属于脚本实现层 bug，而不是工程方向错误。
+
+处理：
+- 对 bybit_ai_cost_log.py 做了补丁/保护修正；
+- 之后 H5 能恢复到正常收口链路。
+
+注意：
+- 这类问题说明 H5 cost/log/audit 层虽然方向正确，但实现细节需要继续提高稳健性。
+
+------------------------------------------------------------
+6.3 问题：H1/H2/H3/H4/H5 一度全部变 blocked
+------------------------------------------------------------
+
+现象：
+- 出现过：
+  - H1 final overall_ok = False
+  - H2 query_budget_not_closed
+  - H3 model_router_not_closed
+  - H4 compute_governor_not_closed
+  - H5 ai_cost_governance_not_closed
+
+根因不是单一的，而是多因素叠加：
+1. H1 上游 request envelope 没绑定到正确 provider/model；
+2. invocation 没真正打出去；
+3. H1 final audit 不绿，导致 H2/H3/H4/H5 链式阻断；
+4. 某些 latest 工件被旧状态或 blocked 状态污染。
+
+处理方式：
+- 先刷新 H0；
+- 单独检查 H1-A / H1-B / H1-C / H1-E / H1-F / H1-G；
+- 确认 provider_target / model_name / invocation_state；
+- 然后再 clean 重跑 H1->H5 全闭环。
+
+------------------------------------------------------------
+6.4 问题：H1-A / H1-B 曾因为 freshness 超时而被 block
+------------------------------------------------------------
+
+现象：
+- H1-A input_state 一度变成：
+  blocked_stale_public_microstructure
+- H1-B blocking_reasons 一度包含：
+  input_state_not_ready
+  h1a_policy_gate_not_open
+
+根因：
+- H0 的 public_microstructure 与 local_judgment_final_audit 时间已经过旧；
+- H1-A 对 freshness 要求严格（如 max_public_data_age_ms / max_h0_audit_age_ms）；
+- 在拖延一段时间后直接重跑 H1，会看到 stale。
+
+处理：
+- 先强制刷新 H0：
+  public_microstructure
+  local_market_friction
+  local_risk_envelope
+  local_trade_eligibility
+  local_trade_eligibility_handoff
+  local_judgment_final_audit
+- 然后立刻重建 H1-A/H1-B。
+
+结论：
+- H1 的 freshness 是真门禁，不是形式检查；
+- H0 刷新后若拖太久再跑 H1，可能再次变 stale。
+
+------------------------------------------------------------
+6.5 问题：last_trade_price / last_trade_ts_ms 长期缺失
+------------------------------------------------------------
+
+现象：
+- public_microstructure.recent_trade_count 有值；
+- 但 last_trade_price 与 last_trade_ts_ms 多次为 null；
+- H0/H1/H2/H3/H4/H5 均带有这类 warning_flags。
+
+性质判断：
+- 这是长期 soft warn；
+- 它不会自动毁掉 H / I 章节闭环；
+- 但会影响数据质量、lease 可信度、延迟/时效判断质量。
+
+处理状态：
+- 本对话中没有把这个问题彻底根除；
+- 但已经明确：
+  它是后续需要继续治理的“行情数据真值/新鲜度”问题，而不是 H/I 设计方向错误。
+
+------------------------------------------------------------
+6.6 问题：H1-E provider_target / model_name 为空，导致 H1-F blocked_before_invocation
+------------------------------------------------------------
+
+现象：
+- H1-C 已经：
+  decision_ready_light_ai_call
+  should_call_ai = True
+- H1-R 已经：
+  route_ready_light
+  route_plan = route_a_light
+- 但 H1-E request envelope 里：
+  provider_target = ""
+  model_name = ""
+- H1-F 因此 blocked_before_invocation
+- H1-G/H1-H/H1-I 随后全部不绿。
+
+这是本对话后半段最关键的真实阻塞点之一。
+
+根因有两层：
+
+第一层：
+- 你最初 export 的环境变量是：
+  BYBIT_AI_ACTIVE_PROVIDER_TARGET
+  BYBIT_AI_ACTIVE_MODEL_NAME
+- 但 H1-E 实际读取的不是 MODEL_NAME，而是：
+  BYBIT_AI_ACTIVE_MODEL
+
+第二层：
+- H1-R 的 route_a_light 虽然选中了 route A，
+  但 H1-E 并不会自动把 route A 的 provider/model 绑定成请求 payload；
+- H1-E 明确读取：
+  BYBIT_AI_ACTIVE_PROVIDER_TARGET
+  BYBIT_AI_ACTIVE_MODEL
+- 也就是说，route decision 与 active provider/model env 是两层概念，不能混为一谈。
+
+处理：
+- 正确 export：
+  export BYBIT_AI_ACTIVE_PROVIDER_TARGET=openai_native
+  export BYBIT_AI_ACTIVE_MODEL=gpt-5-mini
+- 然后通过 wrapper 重新运行：
+  bybit_ai_request_envelope_builder.py
+  bybit_ai_invocation_attempt_builder.py
+  bybit_ai_response_check.py
+  bybit_ai_governed_decision.py
+  bybit_thought_gate_acceptance_suite.py
+  bybit_thought_gate_regression_summary.py
+  bybit_thought_gate_handoff.py
+  bybit_thought_gate_final_audit.py
+
+最终结果：
+- H1-E request_state = ready_provider_native_ai_request
+- H1-F invocation_state = invocation_success_json_ready
+- H1-G response_state = response_json_contract_satisfied
+- H1 final audit overall_ok = True
+
+这个点必须被新对话牢牢记住：
+【H1-E 使用的是 BYBIT_AI_ACTIVE_MODEL，不是 BYBIT_AI_ACTIVE_MODEL_NAME】
+
+------------------------------------------------------------
+6.7 问题：route 默认 env 与 active env 存在潜在漂移
+------------------------------------------------------------
+
+在打印 env 时，出现过：
+
+- BYBIT_ROUTE_A_MODEL=claude-haiku-4-5-20251001
+- BYBIT_ROUTE_A_PROVIDER_TARGET=anthropic_native
+- BYBIT_ROUTE_B_MODEL=gpt-5-mini
+- BYBIT_ROUTE_C_MODEL=gpt-5
+
+但在最终修通 H1 的时候，实际使用的是：
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET=openai_native
+- BYBIT_AI_ACTIVE_MODEL=gpt-5-mini
+
+这说明：
+- route A/B/C 的默认模型配置，与当前 active provider/model 不是一回事；
+- 如果未来想让 request envelope 自动跟随 route 绑定，需要额外统一设计；
+- 当前阶段，active env 仍是最终实际绑定源。
+
+------------------------------------------------------------
+6.8 问题：I10 汇总器一度识别不到 I1~I5 已闭环
+------------------------------------------------------------
+
+现象：
+- I1~I9 实际已经做完；
+- 但 I10 初次运行时仍给出：
+  i_chapter_closed = False
+  shadow_control_plane_closed = False
+
+根因：
+- I10 的阶段发现逻辑过严；
+- 起初过度依赖 stage 字段；
+- 但 I1~I5 某些文件更多是靠 filename 体系表达阶段；
+- 因此被 I10 漏识别。
+
+处理：
+- 扩大候选文件名覆盖；
+- 增加双通道识别（stage + filename_keyword）；
+- 后续又准备了 repair_i10_stage_source_aliases.py 做极小清洁补丁，让 I10 更优先选 final_audit / handoff / summary。
+
+最终结果：
+- I10 成功转绿；
+- I 章正式闭环。
+
+------------------------------------------------------------
+6.9 问题：builder / canonical 脚本混用导致 contract 不匹配的短暂脏状态
+------------------------------------------------------------
+
+现象：
+- 某次运行 bybit_ai_response_check_builder.py 后，response_check_contract_check 一度因为字段风格不一致而报不匹配；
+- 后来改为运行 canonical 的 bybit_ai_response_check.py，状态恢复正常。
+
+经验教训：
+- 仓库里存在 builder / final / contract / runner 多套脚本时，
+  新对话不要随手混跑；
+- 要先确认哪一组是当前 canonical mainline。
+
+============================================================
+七、环境变量、secret、wrapper、venv：现在都放在哪里
+============================================================
+
+------------------------------------------------------------
+7.1 最重要的执行包装器
+------------------------------------------------------------
+
+文件：
+- /home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/run_with_trading_env.sh
+
+它做的事情包括：
+
+1. 优先把专用 venv 放到 PATH 前面
+   - VENV_DIR=/home/ncyu/srv/venvs/openclaw_bybit_ai
+
+2. 加载 env 默认值
+   - /home/ncyu/srv/settings/environment_files/trading_services.env
+   - /home/ncyu/srv/docker_projects/trading_services/.env
+
+3. 注入 AI secret（仅当对应变量没设置时）
+   - /home/ncyu/srv/settings/secret_files/ai/openai_api_key
+   - /home/ncyu/srv/settings/secret_files/ai/anthropic_api_key
+
+4. 父 shell 里已 export 的变量优先级更高
+   - 所以临时调试时，你可以先 export，再用 wrapper 跑脚本；
+   - wrapper 不会粗暴覆盖已经 export 的值。
+
+------------------------------------------------------------
+7.2 AI secret 路径
+------------------------------------------------------------
+
+AI secret 目录：
+- /home/ncyu/srv/settings/secret_files/ai/
+
+关键文件：
+- /home/ncyu/srv/settings/secret_files/ai/openai_api_key
+- /home/ncyu/srv/settings/secret_files/ai/anthropic_api_key
+
+------------------------------------------------------------
+7.3 Bybit 只读 key / secret 路径（基线文件中已明确）
+------------------------------------------------------------
+
+当前生产只读 Bybit key 的规范路径曾明确写成：
+
+- /home/ncyu/srv/settings/secret_files/bybit/read_only/api_key
+- /home/ncyu/srv/settings/secret_files/bybit/read_only/api_secret
+
+重要历史问题：
+- 早期代码曾误写成：
+  /srv/settings/secret_files/bybit/read_only/...
+- 正确路径应是：
+  /home/ncyu/srv/settings/secret_files/bybit/read_only/...
+
+新对话若遇到认证或读不到 secret，要先检查是不是又把 /home/ncyu 漏掉了。
+
+------------------------------------------------------------
+7.4 本对话后半段调试时必须记住的 active env 变量
+------------------------------------------------------------
+
+最关键的两个：
+
+- BYBIT_AI_ACTIVE_PROVIDER_TARGET
+- BYBIT_AI_ACTIVE_MODEL
+
+注意：
+- H1-E 读取的是 BYBIT_AI_ACTIVE_MODEL
+- 不是 BYBIT_AI_ACTIVE_MODEL_NAME
+
+本对话里已验证可工作的临时导出示例：
+
+export BYBIT_AI_ACTIVE_PROVIDER_TARGET=openai_native
+export BYBIT_AI_ACTIVE_MODEL=gpt-5-mini
+
+然后再执行：
+./scripts/run_with_trading_env.sh python3 scripts/bybit_ai_request_envelope_builder.py
+./scripts/run_with_trading_env.sh python3 scripts/bybit_ai_invocation_attempt_builder.py
+...
+
+------------------------------------------------------------
+7.5 route 默认相关 env（本对话里实际打印过）
+------------------------------------------------------------
+
+出现过的变量包括：
+
+- BYBIT_ROUTE_A_MAX_COST_USD=0.03
+- BYBIT_ROUTE_A_PROVIDER_TARGET=anthropic_native
+- BYBIT_ROUTE_A_MODEL=claude-haiku-4-5-20251001
+- BYBIT_ROUTE_B_MODEL=gpt-5-mini
+- BYBIT_ROUTE_C_MODEL=gpt-5
+- BYBIT_H1F_ROUTE_A_PROVIDER_MODE=openai_compatible_chat
+- BYBIT_OPENAI_CONNECT_TIMEOUT_SEC=2.0
+- BYBIT_OPENAI_READ_TIMEOUT_SEC=8.0
+- BYBIT_OPENAI_MAX_RETRIES=0
+- BYBIT_OPENAI_REASONING_EFFORT=minimal
+- BYBIT_OPENAI_TEXT_VERBOSITY=low
+
+结论：
+- route A/B/C 的配置是“默认/路由层”信息；
+- 真正进入 H1-E 时，仍要看 active provider/model env；
+- 两套变量不能混为一谈。
+
+------------------------------------------------------------
+7.6 推荐调用方式（后续最好统一）
+------------------------------------------------------------
+
+Python 脚本：
+./scripts/run_with_trading_env.sh python3 scripts/xxx.py
+
+Shell runner：
+./scripts/run_with_trading_env.sh bash scripts/xxx.sh
+
+不建议：
+- 直接 python3 scripts/xxx.py
+- 除非你明确知道这次不依赖 venv / env / secret 注入
+
+============================================================
+八、2026-03-20 这条对话结束时，最可信的当前状态
+============================================================
+
+这部分按“最终已核实事实”写。
+
+------------------------------------------------------------
+8.1 H 章节当前状态（返修后重新转绿）
+------------------------------------------------------------
+
+已核实：
+
+H1：
+- overall_ok = True
+- h1_stage_closed = True
+- ai_response_checked = True
+- governed_observation_built = True
+- acceptance_passed = True
+- runtime_still_protected = True
+- ready_for_h2 = True
+
+H2：
+- overall_ok = True
+- audit_state = query_budget_closed_ready_for_h3
+- h2_stage_closed = True
+- ready_for_h3 = True
+
+H3：
+- overall_ok = True
+- audit_state = model_router_closed_soft_warn_ready_for_h4
+- h3_stage_closed = True
+- ready_for_h4 = True
+- provider_target = openai_native
+- model_name = gpt-5-mini
+
+H4：
+- overall_ok = True
+- audit_state = compute_governor_closed_soft_warn_ready_for_h5
+- h4_stage_closed = True
+- ready_for_h5 = True
+
+H5：
+- overall_ok = True
+- audit_state = ai_cost_governance_closed_soft_warn_ready_for_i1
+- final_state = ai_cost_governance_closed_soft_warn_ready_for_i1
+- h5_stage_closed = True
+- h_chapter_closed = True
+- ready_for_i1 = True
+
+结论：
+- H 章当前已再次恢复为正式闭环状态；
+- 当前运行时仍严格受保护，不存在 live authority 泄漏。
+
+------------------------------------------------------------
+8.2 I 章节当前状态（本对话中已完成）
+------------------------------------------------------------
+
+I10 最终已给出：
+
+- summary_state = decision_lease_chapter_closed_shadow_ready_for_future_live_design
+- handoff_state = decision_lease_chapter_closed_handoff_ready
+- audit_state = decision_lease_chapter_closed_soft_warn
+- i_chapter_closed = True
+- shadow_control_plane_closed = True
+- runtime_still_protected = True
+- ready_for_future_live_design = True
+- execution_authority = not_granted
+- decision_lease_emitted = False
+- live_operator_ack_enabled = False
+
+结论：
+- I 章节已完整闭环；
+- shadow control plane 已成立；
+- 仍未放权；
+- 仍不是 live execution；
+- 但设计上已经 ready_for_future_live_design。
+
+------------------------------------------------------------
+8.3 当前最合理的工程位置判断
+------------------------------------------------------------
+
+如果按“这条对话真正做到哪儿了”来判断：
+
+- H 已闭环
+- I 已闭环
+- J 之前准备继续推进
+- 但在继续前发现 H 主链细节问题，于是回头把 H 修绿
+
+因此当前最合理判断是：
+
+【逻辑/设计完成度】
+H 与 I 都已经在这条对话里完成过，并被证明可闭环。
+
+【工程稳态/继续施工前准备度】
+H 已经在返修后重新回到绿态；
+I 作为此前已完成章节，最稳妥的下一步是：
+在当前修绿后的 H 基线上，做一次 I 的 clean replay / reclose 对账，
+确认 I latest 工件与当前 H latest 工件再次一致，
+然后正式进入 J。
+
+============================================================
+九、后续仍可能需要继续修理或清理的问题
+============================================================
+
+1. public_microstructure 的 last_trade_price / last_trade_ts_ms 缺失
+- 当前仍是常见 soft warn；
+- 未来要继续处理。
+
+2. runtime_state_reference_old / freshness_soft_warning_present
+- 说明 freshness 治理仍需继续优化；
+- H1/H0 对时间窗口很敏感。
+
+3. H5 成本日志实现稳健性
+- 虽然已修绿，但 bybit_ai_cost_log.py 曾出现 NameError；
+- 后续应继续提高健壮性与测试覆盖。
+
+4. active model / route model 的绑定逻辑
+- 当前 active env 与 route A/B/C env 仍是两层；
+- 后续最好统一约定，减少“route 正确但 request envelope 没绑上 model”的问题。
+
+5. I10 stage source picker 的工程洁净度
+- I 已闭环没问题；
+- 但 I10 的 source picker 曾出现“识别到 contract 文件而不是最佳 final_audit 文件”的情况；
+- 小型 clean patch 方向已经明确，后续可继续清理。
+
+6. builder / canonical script 混跑风险
+- 新对话继续施工前，先确认当前 canonical mainline；
+- 不要随手同时混跑 *_builder.py 与对应 canonical final 链。
+
+7. H 与 I 闭环后的 clean replay
+- 由于 I 是先完成、H 是后返修，
+  所以最稳妥的进入 J 方式是：
+  先在当前 H 绿态上，对 I 再做一次 clean closure / replay / truth check。
+
+============================================================
+十、下一步建议（新对话中最推荐的真实开工顺序）
+============================================================
+
+我建议新对话不要从“继续设计 H / I”开始，因为这两章在 3 月 20 日已经不是空白设计，而是已经完成过了。
+
+最推荐顺序：
+
+第一步：
+先做一次“当前仓库 truth check / script inventory / latest artifact 对账”
+目标：
+- 确认仓库里 I1-I10 实体脚本仍在；
+- 确认当前 canonical runner 是哪些；
+- 确认 latest JSON 工件与当前 H 返修后的真实状态一致。
+
+第二步：
+在当前已修绿的 H 基线上，重跑 I 章节 clean reclose
+目标：
+- 重新确认 I10 仍绿；
+- 让 H 与 I 的 latest 工件处于同一时间基线。
+
+第三步：
+确认 H / I 同时为绿后，再进入 J
+J 的正式理解是：
+- Transition Engine Skeleton
+- 现在才适合从“已有骨架”继续往更正式闭环推进
+
+第四步（更后）：
+K / L / M / N 再按正式主线推进
+
+============================================================
+十一、新对话里最容易忘、但必须死记的几点
+============================================================
+
+1. 3 月 20 日这条对话，不是只修 H。
+正确顺序是：
+先讨论 H -> 做完 H -> 讨论并做完 I -> 准备继续时发现问题 -> 回头修 H
+
+2. I 不是只做到 I1 / I2。
+正确事实是：
+I1 一直到 I10 都在这条对话里做完并收口了。
+
+3. 当前系统仍然不是 live。
+即使 I 已闭环，也只是：
+- shadow-only
+- not_granted
+- no live authority
+- no real lease emit
+
+4. H1-E 读的是 BYBIT_AI_ACTIVE_MODEL，不是 BYBIT_AI_ACTIVE_MODEL_NAME。
+这是后半段最大真实坑之一。
+
+5. run_with_trading_env.sh 很重要。
+凡是 provider / venv / secret / env 相关脚本，优先经它执行。
+
+6. H0 本地确定性判断内核，是 3 月 20 日讨论中被正式提升出来的重要架构层。
+不要再把 H 理解成“第一个智能层”，因为 H 之前已经有 H0。
+
+7. “天才般想法”的最终结论，不是让 AI 参与更多，而是：
+- 本地层做快判断
+- AI 只做高价值稀缺判断
+- AI 输出变成 decision lease
+- 本地层再次复核后才可能落地
+
+============================================================
+十二、给新聊天的建议开场词（可直接复制）
+============================================================
+
+你可以在新聊天里先贴这段：
+
+“请先按以下事实复述当前项目状态，复述正确后再开工：
+1. 项目是以 OpenClaw 为中枢、Bybit 为主、Binance 为辅的 AI Agent 交易系统；
+2. 核心目标是风险可控、可审计、可学习、可逐步放权、追求 net PnL 最大化；
+3. 正式章节树必须按 Revision 2：A-C / D / E / F / G / H / I / J / K / L / M / N；
+4. 2026-03-20 这条对话的真实主线是：先完成 H，再完成 I，然后在准备进入 J 前回头返修 H；
+5. H 已闭环，I 已闭环，当前系统仍处于 shadow-only / read_only / execution disabled / not_granted；
+6. H1-E 读取的是 BYBIT_AI_ACTIVE_MODEL，不是 BYBIT_AI_ACTIVE_MODEL_NAME；
+7. 后续最稳妥的下一步不是重讲 H/I，而是先做当前仓库 truth check，再在当前 H 绿态上重跑 I clean reclose，然后进入 J。”
+
+
+============================================================
+十三、简明结论（供最后快速看）
+============================================================
+
+一句话总结：
+
+这条 2026-03-20 对话里，真正完成的不是“只做了点 H 修理”，而是：
+- 把 H / I 作为项目核心重新定型；
+- 正式提出并落地了 H0 本地确定性判断内核；
+- 先完整闭环 H1-H5；
+- 再完整闭环 I1-I10；
+- 然后在继续推进前，发现 H 的真实运行链细节问题，再回头把 H 修绿；
+- 当前最合理的下一步是：在修绿后的 H 基线上复核 I，然后进入 J。
+
+完。

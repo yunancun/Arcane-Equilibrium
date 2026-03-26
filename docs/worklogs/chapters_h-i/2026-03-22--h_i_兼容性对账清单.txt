@@ -1,0 +1,199 @@
+OpenClaw / Bybit
+H 与 I 兼容性对账清单（新对话首步验证版）
+版本：2026-03-22
+用途：
+1. 让新对话里的模型准确回忆 I 章节代码定位与当时设计思路；
+2. 作为“返修后的 H 章”与“更早已完成的 I 章”之间的首轮兼容性审计清单；
+3. 明确要求同时验证：H 单独可运行、I 单独可运行、H→I 联动可运行。
+
+============================================================
+一、为什么新对话第一步必须先做 H/I 兼容性审计
+============================================================
+当前真实项目位置不是“刚做完 H 准备做 I”，而是：
+- 3 月 20 日这条对话里，先完成了 H 章；
+- 然后进入 I 章节讨论与实施，并把 I 章一直做到 I10 收口；
+- 在准备继续后续章节前，又发现 H 章底层有问题，所以后半段发生了大量 H 章返修；
+- 最终 H1-H5 再次修绿、重新闭环成功。
+
+因此，后续真正的项目管理问题不是“继续新开发 I”，而是：
+“返修后的 H 输出，与更早已经完成的 I 输入假设，是否仍然完全兼容？”
+
+如果不先做这一步，就会出现一种危险假象：
+- H 单看是绿的；
+- I 单看历史上也是绿的；
+- 但 H→I 接口字段、状态语义、latest 文件路径、stage source 选择、soft warn 口径，可能已经发生了轻微漂移。
+
+============================================================
+二、新对话里必须先记住的三条总判断
+============================================================
+1. H 章已重新闭环，但这是“返修后重绿”，不是第一次新写。
+2. I 章更早已完成到 I10，并且曾经在当时语境下成功收口。
+3. 新对话第一优先动作不是继续 J，而是先做 H/I compatibility audit。
+
+============================================================
+三、新对话第一步的正式任务定义（建议原样复制）
+============================================================
+建议你在新对话里第一条正式任务直接这样说：
+
+“请不要继续往 J 章推进。先把 3 月 20 日返修后的 H 章与更早已完成的 I 章做一次 compatibility audit。
+我需要你验证三件事：
+1）H 单独是否仍能稳定全绿；
+2）I 单独是否仍能稳定全绿；
+3）I 所依赖的 H 输出、字段、文件、状态语义，是否与返修后的 H 完全兼容。
+只有这三件事都验证通过，才允许继续后续章节。”
+
+============================================================
+四、I 章节代码定位回忆清单（给新对话恢复记忆用）
+============================================================
+需要新对话优先检索/定位的对象，不是泛泛找“lease”，而是按 I1-I10 的阶段落点去定位：
+
+I1：decision lease schema
+I2：lease freshness / validity
+I3：revoke / supersede / expiry
+I4：lease 与 risk gate 集成
+I5：lease audit / replay
+I6：shadow control plane middle stages（如果有拆分）
+I7：operator / ack / readiness 相关阶段
+I8：handoff / acceptance / summary 类阶段
+I9：final audit 近端阶段
+I10：shadow control plane final closure / final audit / source picker 清洁补丁
+
+新对话不要只搜 “I1” 或 “lease schema”。
+应该同时搜：
+- bybit_decision_lease
+- lease_freshness
+- revoke / supersede / expiry
+- lease_audit / replay
+- shadow_control_plane
+- final_audit
+- I10
+- stage_sources
+- source picker
+
+============================================================
+五、I 章节设计思路回忆锚点（防止新对话只记得文件名忘了理念）
+============================================================
+I 章当时的核心不是“给 AI 开执行权限”，而是把它提升为：
+
+“执行授权控制平面（Execution Authorization Control Plane）”
+
+关键理念：
+1. H 章解决“AI 怎么看”。
+2. I 章解决“谁有资格把看法变成权力”。
+3. lease 不是直接执行许可。
+4. lease 必须可审计、可撤销、可过期、可被 supersede。
+5. lease 必须是“安全增益器”，不能成为“执行绊脚石”。
+6. 影子控制平面阶段必须维持：
+   - execution_authority = not_granted
+   - decision_lease_emitted = False
+   - live_operator_ack_enabled = False
+   - runtime 仍受保护
+
+============================================================
+六、H 单独验证清单（必须先跑）
+============================================================
+目标：证明返修后的 H 章本身独立成立。
+
+建议最低检查项：
+1. H0 真 rebuild 后是否是 fresh，而不是只用旧 latest。
+2. H1 final audit 是否 overall_ok = True。
+3. H2 final audit 是否 overall_ok = True。
+4. H3 final audit 是否 overall_ok = True。
+5. H4 final audit 是否 overall_ok = True。
+6. H5 final audit 是否 overall_ok = True。
+7. H 章最终是否：
+   - h_chapter_closed = True
+   - ready_for_i1 = True
+   - runtime_still_protected = True
+8. provider/model 绑定是否真实生效，而不是空字符串假绿。
+9. H5 cost log 是否不再因 NameError 崩溃。
+10. 所有调用是否统一经由 trading env wrapper。
+
+必要时应重复检查的旧根因：
+- stale public microstructure
+- stale h0 final audit
+- httpx 缺失 / 错环境执行
+- provider_target 为空
+- model_name 为空
+- BYBIT_AI_ACTIVE_MODEL 与历史错误变量名混淆
+
+============================================================
+七、I 单独验证清单（必须与 H 分开验证一次）
+============================================================
+目标：证明 I 章自身在当前代码基线上仍可独立收口。
+
+建议最低检查项：
+1. I1-I10 的 latest 文件是否仍都在、且路径无漂移。
+2. I1 schema 是否仍是当前权威入口，而不是被 contract 或旧 fallback 覆盖。
+3. I2 freshness / validity 是否仍能正确读取 lease 时间语义。
+4. I3 revoke / supersede / expiry 是否仍有可审计状态推进。
+5. I4 risk gate 集成是否仍坚持“lease ≠ 执行许可”。
+6. I5 audit / replay 是否仍可回放关键状态。
+7. I10 final audit 是否仍整体绿。
+8. I10 stage_sources 是否优先选择 final_audit / handoff / summary，而不是误抓 contract latest。
+9. I 章最终是否仍维持：
+   - execution_authority = not_granted
+   - decision_lease_emitted = False
+   - live_operator_ack_enabled = False
+   - ready_for_future_live_design = True
+
+============================================================
+八、H→I 联动兼容性验证清单（这是最关键的）
+============================================================
+目标：证明返修后的 H 输出仍可被 I 安全消费。
+
+必须对账的对象：
+1. H5 结束时的权威 handoff / final audit latest 路径。
+2. I1 起步时实际读取的 latest 路径。
+3. H 输出的字段名是否与 I 输入假设一致。
+4. H 输出状态枚举值是否与 I 的 allowed state 一致。
+5. H 输出中的 warning_flags / blocking_reasons 语义是否会误触发 I 阻塞。
+6. H 的 provider_target / model_name / route_plan / selected_ai_tier 语义是否仍能被 I 识别。
+7. H 的“只读、未放权、不可执行”边界，在 I 内是否被完整保留。
+8. H 返修中新增的 soft warn（如 freshness、last_trade 字段缺失）是否会让 I 错误判定为 hard fail。
+9. I 是否错误依赖旧版 H 的 stage 名称、文件名、contract 命名、fallback 路径。
+10. I10 source picker 是否会因为 H 返修后的文件布局变化而选错 stage source。
+
+============================================================
+九、必须做的三组验收结论
+============================================================
+新对话最后必须给出三个分开结论：
+
+A. H 单独验收结论
+- 绿 / 不绿
+- 如果不绿，阻塞点是什么
+
+B. I 单独验收结论
+- 绿 / 不绿
+- 如果不绿，阻塞点是什么
+
+C. H→I 联动兼容性结论
+- 完全兼容 / 基本兼容但需小修 / 不兼容需回归修理
+- 如果不兼容，明确是哪一层不兼容：
+  1) 文件路径
+  2) 字段名
+  3) 状态枚举
+  4) source picker
+  5) guard / audit 语义
+
+============================================================
+十、如果发现不兼容，优先修哪里
+============================================================
+修理优先级建议：
+1. 先修 latest 文件选择与 stage source 优先级；
+2. 再修字段名 / state enum 漂移；
+3. 再修 H→I handoff 语义；
+4. 最后才修 I 内部次级洁净度问题。
+
+也就是说，先修“接口对不上”，再修“内部不够漂亮”。
+
+============================================================
+十一、现阶段最重要的一句话
+============================================================
+新对话里最重要的第一目标不是“继续开发更多章节”，而是：
+
+“确认返修后的 H 与已完成的 I 还能像当时一样单独可跑、联动可跑，而且保护边界不被破坏。”
+
+只有这一点确认了，后面继续 J/K/L 才有意义。
+
+—— 完 ——

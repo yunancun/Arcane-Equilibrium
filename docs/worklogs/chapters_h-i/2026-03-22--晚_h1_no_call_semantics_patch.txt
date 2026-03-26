@@ -1,0 +1,432 @@
+OpenClaw / Bybit
+H1 no-call semantics patch bundle
+Date: 2026-03-22
+
+Purpose
+=======
+Apply the new 2026-03-22 semantic rule:
+- legal no-call is a valid observation terminal state
+- legal idle account is info/idle, not blocker
+- do NOT fabricate an AI call just to turn red lights green
+
+Scope of this bundle
+====================
+Primary step-1 target files:
+1. scripts/bybit_ai_response_check.py
+2. scripts/bybit_ai_governed_decision.py
+3. scripts/bybit_thought_gate_acceptance_suite.py
+4. scripts/bybit_thought_gate_final_audit.py
+
+Secondary step-2 targets (after H1 is corrected):
+- bybit_query_budget_policy*.py
+- bybit_query_budget_gate*.py
+- bybit_query_budget_runtime*.py
+- bybit_compute_governor_*.py
+- bybit_ai_cost_log*.py
+- bybit_ai_governance_audit*.py
+- bybit_ai_cost_governance_final_audit*.py
+
+Hard boundaries
+===============
+Never weaken these:
+- system_mode must remain read_only
+- execution_state must remain disabled
+- execution_authority must remain not_granted
+- decision_lease_emitted must remain false
+- max_retries must remain 0
+- should_call_ai=true but no invocation => hard error
+- Bybit timeout / retCode != 0 / public fetch_errors => hard error
+
+------------------------------------------------------------------
+A. Shared semantic helper to add to all step-1 scripts
+------------------------------------------------------------------
+
+Add a helper equivalent to:
+
+    def _norm_tier(value):
+        if value is None:
+            return "none"
+        return str(value).strip().lower()
+
+    def is_legal_no_call(route_plan, selected_ai_tier, should_call_ai):
+        return (
+            str(route_plan).strip().lower() == "route_skip"
+            and _norm_tier(selected_ai_tier) == "none"
+            and should_call_ai is False
+        )
+
+Also add a stricter sanity helper:
+
+    def is_inconsistent_no_call(route_plan, selected_ai_tier, should_call_ai):
+        route_skip = str(route_plan).strip().lower() == "route_skip"
+        tier_none = _norm_tier(selected_ai_tier) == "none"
+        return len({route_skip, tier_none, should_call_ai is False}) not in (1, 3)
+
+Rule:
+- all three aligned => legal no-call
+- partial mismatch => semantic inconsistency => fail hard
+
+------------------------------------------------------------------
+B. Patch spec for scripts/bybit_ai_response_check.py
+------------------------------------------------------------------
+
+Intent
+------
+When the upstream outcome is legal no-call, response check should become:
+- response_state = response_not_applicable_legal_no_call
+- overall_ok = true
+- no longer require invocation/provider response/parsed json
+- but still preserve a hard error if should_call_ai=true and invocation was skipped
+
+Required upstream fields to read if available
+--------------------------------------------
+- route_plan
+- selected_ai_tier
+- should_call_ai
+- invocation_attempted
+- provider_response_present
+- parsed_json_present
+- blocking_reasons
+- policy_state
+- invocation_state
+
+Recommended output fields
+-------------------------
+- response_state
+- overall_ok
+- terminal_mode                  # ai_invoked | legal_no_call | invalid
+- no_call_terminal_accepted      # bool
+- invocation_required            # bool
+- invocation_attempted
+- provider_response_present
+- parsed_json_present
+- hard_errors                    # list[str]
+- soft_warnings                  # list[str]
+- semantic_flags                 # list[str]
+- route_plan
+- selected_ai_tier
+- should_call_ai
+
+Decision matrix
+---------------
+Case 1: legal no-call
+- route_plan=route_skip
+- selected_ai_tier=none
+- should_call_ai=false
+Expected result:
+- overall_ok = true
+- terminal_mode = legal_no_call
+- response_state = response_not_applicable_legal_no_call
+- invocation_required = false
+- no_call_terminal_accepted = true
+- hard_errors = []
+- semantic_flags include:
+  - legal_no_call_terminal_state
+  - provider_response_not_applicable
+  - parsed_json_not_applicable
+- DO NOT assert invocation_attempted/provider_response_present/parsed_json_present are true
+
+Case 2: actual invocation path
+- should_call_ai=true
+Expected result:
+- preserve current strict contract checks
+- invocation/provider response/parsed json still required
+
+Case 3: inconsistent semantic state
+Examples:
+- should_call_ai=false but selected_ai_tier=light
+- route_skip but should_call_ai=true
+- should_call_ai=true but tier=none
+Expected result:
+- overall_ok = false
+- response_state = response_semantic_inconsistency
+- hard_errors include semantic mismatch details
+
+Case 4: call required but skipped
+- should_call_ai=true and invocation_attempted=false
+Expected result:
+- overall_ok = false
+- hard_errors include invocation_missing_when_call_required
+
+Suggested pseudo-implementation
+-------------------------------
+1. Read upstream H1-C / H1-R / H1-F latest payloads.
+2. Derive:
+       legal_no_call = is_legal_no_call(...)
+       inconsistent = is_inconsistent_no_call(...)
+3. Branch:
+   a) inconsistent => fail hard
+   b) legal_no_call => success terminal no-call
+   c) should_call_ai=true => run existing strict invocation contract
+   d) else => fail hard because semantics are under-specified
+
+------------------------------------------------------------------
+C. Patch spec for scripts/bybit_ai_governed_decision.py
+------------------------------------------------------------------
+
+Intent
+------
+When legal no-call happens, still emit a governed observation object instead of null.
+This object must explicitly say the system stayed in observation-only flat bias.
+
+Required no-call governed output
+--------------------------------
+Set decision state to something like:
+- decision_state = governed_observation_no_call
+or
+- governed_state = governed_observation_no_call
+
+Governed observation payload minimum:
+- analysis_mode = observation_only
+- action_bias = flat_bias
+- observation_source = no_ai_call_by_design
+- route_plan = route_skip
+- selected_ai_tier = none
+- should_call_ai = false
+- policy_state = policy_blocked
+- blocking_reasons = [...]
+- runtime_still_protected = true
+- execution_authority = not_granted
+- decision_lease_emitted = false
+- invocation_attempted = false
+- provider_response_present = false
+- parsed_json_present = false
+
+Rules
+-----
+- legal no-call must be treated as governed and structurally valid
+- DO NOT leave governed_observation = null in legal no-call mode
+- DO NOT invent synthetic model output text/json
+- DO emit explicit human/audit-readable reason for no-call
+
+Recommended extra fields
+------------------------
+- terminal_mode = legal_no_call
+- no_call_terminal_accepted = true
+- no_call_reason = h1_policy_blocked_or_route_skip
+- observation_summary = "AI call intentionally skipped; system remains observation_only with flat_bias"
+- hard_errors = []
+- soft_warnings maybe include budget_latency_cap_unacceptable if carried forward as blocker reason
+
+Hard-fail conditions to retain
+------------------------------
+- semantic mismatch between route/tier/should_call_ai
+- should_call_ai=true but response_check not ok
+- execution_authority unexpectedly granted
+- decision_lease_emitted unexpectedly true in current stage
+
+------------------------------------------------------------------
+D. Patch spec for scripts/bybit_thought_gate_acceptance_suite.py
+------------------------------------------------------------------
+
+Intent
+------
+Acceptance must allow two valid terminal modes:
+1. ai_invoked
+2. legal_no_call
+
+Acceptance mode derivation
+--------------------------
+Add:
+- accepted_terminal_mode = ai_invoked | legal_no_call | rejected
+
+Acceptance rules
+----------------
+Mode A: ai_invoked
+- keep current strict checks
+
+Mode B: legal_no_call
+Must all be true:
+- response_check.overall_ok == true
+- response_check.terminal_mode == legal_no_call
+- governed_decision.overall_ok == true
+- governed_decision terminal/decision state == governed_observation_no_call
+- analysis_mode == observation_only
+- action_bias == flat_bias
+- should_call_ai == false
+- selected_ai_tier == none
+- route_plan == route_skip
+- runtime_still_protected == true
+- execution_authority == not_granted (if field exists)
+- decision_lease_emitted == false (if field exists)
+
+In legal no-call mode these old checks must become N/A instead of false:
+- invocation_state_json_ready
+- provider_response_present_true
+- parsed_json_dict
+- action_bias_present (replace by action_bias_flat_bias_ok)
+
+Recommended output fields
+-------------------------
+- acceptance_ok
+- accepted_terminal_mode
+- legal_no_call_accepted
+- analysis_mode_observation_only
+- action_bias_flat_bias_ok
+- invocation_not_applicable
+- response_contract_not_applicable
+- hard_errors
+- soft_warnings
+
+------------------------------------------------------------------
+E. Patch spec for scripts/bybit_thought_gate_final_audit.py
+------------------------------------------------------------------
+
+Intent
+------
+Final audit must accept legal no-call as a valid chapter-close terminal state for H1.
+It must not implicitly require a real AI invocation when the policy/router decided not to call.
+
+Audit logic changes
+-------------------
+1. Derive terminal mode from response_check + governed_decision + acceptance outputs.
+2. If accepted_terminal_mode == legal_no_call:
+   - response_check_ok = true
+   - governed_decision_ok = true
+   - acceptance_ok = true
+   - final audit may be green for H1 if no other hard errors exist
+3. Preserve hard-fail for:
+   - should_call_ai=true but invocation missing
+   - semantic mismatches
+   - execution authority drift
+   - decision lease emitted unexpectedly
+
+Recommended output additions
+----------------------------
+- audit_terminal_mode = ai_invoked | legal_no_call | rejected
+- legal_no_call_terminal_accepted = bool
+- runtime_still_protected = true
+- execution_authority = not_granted
+- decision_lease_emitted = false
+- audit_state
+
+Recommended state strings
+-------------------------
+For legal no-call success, use one consistent state name such as:
+- thought_gate_closed_legal_no_call
+or
+- thought_gate_audit_passed_legal_no_call
+
+Avoid reusing failure-like state names such as blocked/provider_native_request for the final audit layer.
+
+------------------------------------------------------------------
+F. Step-2 patch plan for H2 / H4 / H5
+------------------------------------------------------------------
+
+Unifying semantic branch
+------------------------
+Each audit/runtime/final script should derive:
+- invocation_mode = ai_invoked | legal_no_call | invalid
+
+For ai_invoked:
+- keep strict checks for latency/tokens/provider response/parsed json
+
+For legal_no_call:
+Allowed to be None/False without failure:
+- latency_ms
+- input_tokens
+- output_tokens
+- total_tokens
+- reasoning_tokens
+- provider_response_present
+- response_text_present
+- parsed_json_present
+
+Still required in legal no-call mode:
+- governed budget cap declared
+- output cap declared
+- max_retries == 0
+- runtime_still_protected == true
+- execution authority not granted
+- read_only boundary intact
+- no hidden escalation / no live permission upgrade
+
+Specific downstream remaps
+--------------------------
+H2:
+- last_call_not_json_ready -> not_applicable_legal_no_call
+- latency_ms_missing -> not_applicable_legal_no_call
+- token missing fields -> not_applicable_legal_no_call
+
+H4:
+- selected_ai_tier_light hard expectation must be removed
+- invocation/provider_response/parsed_json/latency/output_tokens checks become N/A for legal no-call
+- keep anti-abuse, retry=0, bounded output, runtime protected checks
+
+H5:
+- invocation_not_attempted -> not_applicable_legal_no_call
+- provider_response_missing -> not_applicable_legal_no_call
+- usage_summary_missing -> cost_not_available_no_call_but_structurally_valid
+- keep budget ceiling/runtime protection/governance boundary checks
+
+------------------------------------------------------------------
+G. Idle-account downgrade rule
+------------------------------------------------------------------
+
+Add or reuse a helper wherever account activity is audited:
+
+    def is_expected_idle_account(system_mode, execution_state, position_count, order_count, execution_count):
+        return (
+            str(system_mode).strip().lower() == "read_only"
+            and str(execution_state).strip().lower() == "disabled"
+            and int(position_count or 0) == 0
+            and int(order_count or 0) == 0
+            and int(execution_count or 0) == 0
+        )
+
+When true, downgrade these to info/idle_flags, not blocker/failure:
+- no_open_positions
+- no recent order history
+- no recent execution history
+- control-only private WS traffic with successful auth/subscribe
+
+Do NOT downgrade when:
+- execution enabled
+- any position/order/execution count > 0
+- missing private source while account is active
+
+------------------------------------------------------------------
+H. Refresh script fix to apply before final re-run
+------------------------------------------------------------------
+
+refresh_upstream_truth_then_rebuild_h1_h5.sh must:
+1. refresh readonly observer truth
+2. explicitly rebuild H0 front chain
+3. use current real script names
+4. then rebuild H1/H2/H4/H5
+5. only then run I10 summary/final audit
+
+Known filename replacements from tonight's record:
+- bybit_local_risk_envelope_builder.py                  -> bybit_local_risk_envelope_gate.py
+- bybit_local_trade_eligibility_handoff.py              -> bybit_local_trade_eligibility_handoff_builder.py
+- bybit_local_judgment_contract_check.py                -> bybit_local_judgment_final_audit_contract_check.py
+- keep bybit_local_trade_eligibility_builder.py as current real name
+
+------------------------------------------------------------------
+I. Re-run order after patching
+------------------------------------------------------------------
+
+1. refresh_upstream_truth_then_rebuild_h1_h5.sh
+2. inspect H1-A/H1-B/H1-G/H1-H/H1-I/final audit latest
+3. inspect H2 latest
+4. inspect H4 latest
+5. inspect H5 latest
+6. run I10 summary and final audit
+
+Expected success shape after step-1 only
+---------------------------------------
+- H0 green
+- H1-A green
+- H1-B still blocked by budget_latency_cap_unacceptable (real blocker)
+- H1-G green under legal no-call terminal mode
+- H1-H green with governed_observation_no_call
+- H1-I green accepting legal no-call
+- H1 final audit green or at minimum narrowed to non-semantic residuals
+- H2/H4/H5 may still have red until step-2 is patched
+
+Expected success shape after step-2
+-----------------------------------
+- H2/H4/H5 false reds greatly reduced
+- legal idle account downgraded to info/idle
+- remaining blockers should mostly be real ones, likely H1-B budget latency policy and any true API/runtime errors
+

@@ -1,0 +1,754 @@
+OpenClaw / Bybit 项目
+超详细续接总报告（供新聊天 / 新分支直接接手）
+版本：2026-03-20 续接专用整理版
+格式：TXT
+用途：
+1. 让新聊天中的模型在最短时间内完整恢复项目上下文；
+2. 防止后续再次混淆总目标、核心概念、正式章节树、历史临时编号与已完成范围；
+3. 作为后续继续施工、全面回归、以及补写工作记录时的高保真总参考。
+
+============================================================
+一、先说结论：新聊天里最应该先记住什么
+============================================================
+
+1. 这个项目不是普通自动下单 bot，而是以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。
+2. 项目核心不是“尽快实盘”，而是：风险可控、可审计、可学习、可逐步放权、在成本与延迟受控前提下追求长期净收益最大化。
+3. 当前主系统仍然必须理解为：readonly observer。
+4. 当前正式章节树必须以 Revision 2 为准：A-C / D / E / F / G / H / I / J / K / L / M / N。
+5. 截至 2026-03-19 夜间：
+   - D 稳定；
+   - E 已完成；
+   - F 已完成；
+   - G 已正式收口；
+   - J 与 K 已提前展开，并补到了“结构层 / 测试层 / 审计层”可维护状态；
+   - 但 H / I 仍未正式开始，而且必须作为下一正式主线优先回补。
+6. 当前最重要的正式工程判断不是“继续往后堆 J/K”，而是：G 已收口，J/K 可继续 structural hardening，但正式主线应回到 H/I。
+
+============================================================
+二、这份报告怎么使用
+============================================================
+
+建议你在新聊天里按下面顺序使用：
+1. 先把本文件整体贴给模型；
+2. 然后明确告诉模型：后续理解必须以“Revision 2 正式章节树”为准；
+3. 再让模型先复述当前系统定位、已完成章节、未完成章节与下一步顺序；
+4. 只有当模型复述正确后，再正式开工。
+
+如果新聊天里的模型一开始就把 J/K 当成正式完工章节，或者把当前系统误解成快要实盘执行，说明它还没有真正接住上下文。
+
+============================================================
+三、项目总目的（绝对不能再遗忘）
+============================================================
+
+本项目不是一个普通自动交易脚本，也不是一个单纯会下单的 bot。
+
+本项目真正要做的是一个：
+“以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。”
+
+长期目标：
+1. 风险可控；
+2. 可审计；
+3. 可学习；
+4. 可逐步放权；
+5. 在成本、延迟、风控、权限治理都受控的前提下，追求长期净收益最大化。
+
+几个绝对不能忘的根原则：
+
+A. 不是只看 gross PnL，而必须看 net PnL
+- 交易收益不是唯一目标；
+- 必须同时考虑 AI API 成本、电费、设备折旧、手续费、基础设施成本、未来维护成本；
+- 所以本项目本质上不是单纯“交易系统”，而是“交易系统 + 经营系统”。
+
+B. AI 输出不能当成即时命令
+- AI 有延迟；
+- 市场会变化；
+- 因此 AI 更适合输出 decision lease（决策租约），而不是立即执行命令；
+- 本地层必须继续做 freshness / timing / risk / permission / execution gate。
+
+C. 权限不能按时间自动升级，必须按表现赢得
+- 不能因为系统运行久了就自动放权；
+- 不能全局放权；
+- 必须在已验证有效的子场景中局部放权；
+- 真正高级的 Agent 不是更莽，而是在优势区间更大胆、在非优势区间更保守。
+
+D. 项目最终形态不是机械 bot，而是长期进化型交易个体
+- 会观察；
+- 会判断；
+- 会审计；
+- 会学习；
+- 会自我观测；
+- 会产出经营报告；
+- 会在严格边界下逐步赢得更高权限。
+
+============================================================
+四、Agent 核心需求（正式口径）
+============================================================
+
+A. 安全与治理
+- 默认 read_only；
+- 默认 execution disabled；
+- 默认 AI 不可直接跨过本地 gate 驱动真实执行；
+- 任何阶段都必须可审计、可解释、可回放。
+
+B. 数据感知能力
+- 读取真实交易所 public / private readonly 数据；
+- 建立统一 snapshot；
+- 接入 WS；
+- 区分控制面消息与真实 business-topic 事件；
+- 维护 freshness / health / runtime state。
+
+C. 决策输入能力
+- 把账户、持仓、订单、成交、WS 状态、business event 状态加工成结构化输入；
+- 先做好本地输入治理，再谈 AI。
+
+D. AI 调用治理能力
+- 不是每次都问 AI；
+- 只有值得时才问；
+- 必须有 thought gate / query budget / model router / compute governor；
+- AI 成本必须纳入 net PnL。
+
+E. 学习能力
+- 未来必须形成：事实 -> 决策 -> 结果 -> 归因 -> 更新；
+- 要能记住哪些判断有效、哪些 AI 调用浪费、哪些环境适合哪些策略。
+
+F. 自我观测能力
+- 未来要观测 CPU / RAM / 网络 / REST / WS / DB / 模块阻塞点 / 本地推理延迟等。
+
+G. 经营报告能力
+- 未来要能输出 daily / weekly / monthly 级别的收益、成本、净收益、问题归因、优化建议。
+
+============================================================
+五、项目策划一共经历了几个阶段 / 几次路线变更
+============================================================
+
+这里要分两种口径来理解：
+
+【口径 A：宏观策划升级】
+如果按“大方向怎么一步步变清楚”来算，可以理解为经历了 3 次关键升级：
+
+第 1 次升级：从“普通交易 bot”升级为“AI Agent 交易系统”
+- 不是只会买卖；
+- 强调风险、审计、学习、逐步放权；
+- 明确 OpenClaw 为中枢，Bybit 主、Binance 辅。
+
+第 2 次升级：把 net PnL、decision lease、performance-based permission 变成核心理念
+- 不再只看毛收益；
+- AI 输出不再被理解为即时命令，而要变成 decision lease；
+- 权限不能按时间自动升级，必须按表现赢得。
+
+第 3 次升级：Revision 2 正式重排章节树，并在 3 月 19 日完成 G/J/K 归位校正
+- 3 月 17 日：正式承认工程已经比旧 D21-D23 理解更深，必须重排后续章节；
+- 3 月 19 日：再次校正，明确 G 是真实业务事件验证层，J 是 Transition Engine Skeleton，K 是 Paper / Demo Gate；
+- 同时形成正式策略：G 先收口，J/K 可提前补结构层，但正式主线应回到 H/I。
+
+【口径 B：正式章节树显式修订】
+如果只按“正式章节树被明确改写了几次”来算，可以理解为有 2 次关键显式修订：
+1. 2026-03-17 的 Revision 2 一审重排；
+2. 2026-03-19 的 G/J/K 正式归位校正。
+
+============================================================
+六、当前必须采用的正式章节树（Revision 2）
+============================================================
+
+A-C：基础层 / OpenClaw 模型层 / 接入前治理
+D：Readonly Observer 主链
+E：Business Event Classification
+F：Event-Driven Transition Scaffold
+G：真实业务事件验证层
+H：AI 治理
+I：Decision Lease
+J：Transition Engine Skeleton
+K：Paper / Demo Gate
+L：Learning / Self-Observability / Net PnL
+后续才是 M / N
+
+最重要的校正规则：
+- 历史开发过程里曾临时出现 G4.x、G5、G6 等编号；
+- 这些临时编号已经废弃；
+- 后续所有理解、汇报、交接，都必须优先使用正式章节树。
+
+============================================================
+七、历史编号与正式章节的映射（这是最容易混乱的地方）
+============================================================
+
+历史推进编号 / 临时理解              -> 现在的正式理解
+----------------------------------------------------------------
+A / B / C 基础层                     -> A / B / C
+D21 readonly observer hardened       -> D. Readonly Observer 主链
+D22 business-event classification    -> E. Business Event Classification
+D23 event-driven scaffold            -> F. Event-Driven Transition Scaffold
+后来临时写成的 G1 / G2 / G3          -> 正式仍属于 G. 真实业务事件验证层
+后来临时写成的 G4.x                  -> 正式应归到 J. Transition Engine Skeleton
+后来临时写成的 G5 / G6               -> 正式应归到 K. Paper / Demo Gate
+
+一句话：
+- G = 真实业务事件验证
+- J = transition engine skeleton
+- K = paper / demo gate
+
+============================================================
+八、从立项到 3 月 19 日的阶段演进总览
+============================================================
+
+1. 立项与设计初期
+- 明确项目不是普通 bot，而是 AI Agent 交易系统；
+- 明确 OpenClaw 为总编排层；
+- 明确 OpenAI 用于复杂决策/结构化输出/策略判断，Claude 用于长文本分析/研究/审阅；
+- 明确交易所优先级：Bybit 主、Binance 辅。
+
+2. 基础环境与网关/服务层打底（A-C）
+- 完成 OpenClaw gateway、本地服务、Docker、Postgres、Redis、Qdrant 等基础建设；
+- 建立 daily_cost_snapshot.sh、stage_health_check.sh 这类基础运维脚本；
+- 把目录、latest/dated、contract/audit 的工程写法固定下来。
+
+3. 3 月 11 日：整体项目目标与长期原则明确化
+- 明确系统目标是风险可控、可审计、可学习、可逐步放权、长期净收益最大化；
+- 明确 AI 调用不是“每次都问”，而是“只在值得思考时调用”；
+- 明确未来要进入 net PnL、decision lease、预算治理、自我观测、经营报告。
+
+4. 3 月 11 日至 3 月 13 日：第一阶段（readonly observer infrastructure）成型
+- 重点不是直接交易，而是先把 Bybit 只读观察底座打牢；
+- 完成 private REST、snapshot、WS smoke、persistent listener、runtime facts、decision packet、observer verdict、acceptance、runtime、summary、handoff、audit；
+- 阶段结论：形成 production-grade readonly observer infrastructure，但仍不是执行系统。
+
+5. 3 月 17 日：Revision 2 一审
+- 正式确认项目总体没有跑偏；
+- 但章节推进顺序需要重排；
+- 明确后续主线应转向：真实业务事件验证 -> AI 治理 -> decision lease -> transition engine -> paper/demo。
+
+6. 3 月 19 日夜：大规模校正、收口与回归
+- 把 G 章正式补齐到 G4 收口；
+- 把 J / K 已提前展开的内容补到结构层 / 测试层 / 审计层可维护状态；
+- 做跨章节 master regression；
+- 最终确认：G 已收口，J/K 可继续 structural hardening，但正式主线应回到 H/I。
+
+============================================================
+九、截至目前的当前真实进度（正式口径）
+============================================================
+
+A-C：已完成
+D：已完成且稳定
+E：已完成
+F：已完成
+G：已正式收口完成
+H：尚未正式开始
+I：尚未正式开始
+J：已提前展开，结构层 / 测试层 / 审计层已补强
+K：已提前展开，结构层 / 测试层 / 审计层已补强
+L：尚未正式开始
+M/N：尚未开始，绝不能跳级推进
+
+更细一点的理解：
+
+D. Readonly Observer 主链
+- 已完成且稳定；
+- 主 runtime 当前锚定于此层成果。
+
+E. Business Event Classification
+- 已完成；
+- 关键成果是系统已经会区分：
+  healthy_no_business_events_yet / healthy_business_events_present / stale_or_missing_business_event_feed。
+
+F. Event-Driven Transition Scaffold
+- 已完成；
+- 当前高层语义是健康空态，不是 engine ready。
+
+G. 真实业务事件验证层
+- 已正式收口；
+- G1 replay fixtures / harness 完成；
+- G2 非空业务事件正向语义验证完成；
+- G3 负向阻断验证完成；
+- G4 acceptance / regression / handoff / final audit 完成；
+- 结论：正向路径成立，负向阻断成立，主 runtime 未被污染，G 已可视为正式收口。
+
+H. AI 治理
+- 尚未正式开始；
+- 下一正式主线之一。
+
+I. Decision Lease
+- 尚未正式开始；
+- 下一正式主线之一。
+
+J. Transition Engine Skeleton
+- 已提前展开；
+- 已具备 replay matrix、audit trail、rule layer、state graph、summary、handoff、final audit、checkpoint、chapter consistency；
+- 当前结论：结构层 / 测试层 / 审计层就绪，但不能视为正式完工章节。
+
+K. Paper / Demo Gate
+- 已提前展开；
+- 已具备 contract、readiness、adapter skeleton、paper lifecycle skeleton、projection skeleton、risk skeleton、summary、handoff、final audit、chapter consistency；
+- 当前结论：design/skeleton 层已形成稳定骨架，但 gate 仍关闭，不能接单，更不能误认为接近 live execution。
+
+============================================================
+十、当前系统的准确定位
+============================================================
+
+当前系统最准确的表述是：
+
+“当前系统是 production-grade readonly observer infrastructure + business-event classification + event-driven scaffold，
+并且已经提前做出一部分真实业务事件验证层（G）、一部分 transition engine skeleton（J）、一部分 paper/demo gate design skeleton（K）；
+但 AI governance 尚未接入，decision lease 尚未建立，paper/demo gate 仍明确关闭，live execution 仍严格禁止。”
+
+绝对不能把当前系统理解成：
+- 快要实盘执行；
+- 只差最后一步就能 live；
+- J/K 已正式完工；
+- 当前 replay 结果已经污染主 runtime；
+- 当前 healthy_no_business_events_yet 是故障。
+
+============================================================
+十一、当前主 runtime 安全边界（必须长期保持）
+============================================================
+
+截至 2026-03-19 夜间，主 runtime 仍必须理解为：
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+这意味着：
+1. 当前没有放开 execution；
+2. 当前没有 live execution；
+3. 当前 demo gate 没开；
+4. 当前 paper adapter 不能接单；
+5. 当前所有 replay / validation / skeleton 输出都不能污染主 runtime。
+
+============================================================
+十二、当前最重要的正式工程判断
+============================================================
+
+正式策略：
+1. 先把 G 章完整做完并收口；
+2. J / K 可以继续提前补，但只补“结构层 / 测试层 / 审计层”；
+3. H / I 不能长期跳过；
+4. 在 H / I 回补前，不应把 J / K 误判为正式完工章节；
+5. 后续正式主线应回到 H / I，而不是继续无限向后堆 J / K。
+
+当前官方建议顺序：
+第一优先：
+- H1 thought_gate
+- H2 query_budget
+- H3 model_router v2
+
+第二优先：
+- I1 decision lease schema
+- I2 lease freshness / validity
+
+之后再决定：
+- J / K 是否继续深化为更正式闭环
+
+============================================================
+十三、脚本统计：一共写了多少程序
+============================================================
+
+按这次对已上传日志与报告文本的唯一脚本名抽取统计：
+- 明确出现过的唯一 .py / .sh 脚本名共 137 个；
+- 其中可视为实际工程脚本/工具的约 137 个；
+- 另有 1 个名称（bybit_simulator_adapter_contract_builder.py）更像是在校正过程中被误提/占位，不应当作已经稳定落地的成果。
+
+这个统计口径要诚实说明：
+- 它是“基于你上传的全部日志与报告文本抽取出来的唯一脚本名统计”；
+- 不是直接对你服务器仓库实时扫描得到的硬计数；
+- 但对于新聊天续接已经足够高保真。
+
+A-C / 基础运维与自动化：2 个
+D / Readonly Observer 主链：36 个
+E / Business Event Classification：8 个
+F / Event-Driven Transition Scaffold：18 个
+G / 真实业务事件验证层：30 个
+J / Transition Engine Skeleton：21 个
+K / Paper / Demo Gate：20 个
+跨章节 / Revision 2 总回归：2 个
+
+============================================================
+十四、概念词典（新聊天最容易接不住的概念）
+============================================================
+
+- readonly observer：当前主系统的真实角色：只读观察，不允许执行。
+- healthy_no_business_events_yet：业务事件侧健康，但当前还没有看到真实 wallet/order/execution/position 业务事件。这是健康空态，不是故障。
+- healthy_but_empty：event-driven scaffold 当前高层语义：结构健康，但为空，不能推进到交易态。
+- observe_only_retained：D23/F 章收口结论：系统合理地继续保持 observe-only，而不是因为出错。
+- decision lease：未来 AI 输出的受治理决策租约，不是即时执行命令。
+- thought_gate：本地层先判断“是否值得问 AI”的门。
+- query_budget：控制 AI 调用预算，防止无限询问。
+- model_router v2：根据任务价值、复杂度、成本去路由模型。
+- structural hardening：不是正式业务完工，而是先把结构层、测试层、审计层补强到可维护状态。
+- chapter consistency：章节级一致性检查，用于确认某章所有 latest/contract/summary/handoff/final audit 语义一致。
+- master regression：跨章节总回归，统一检查 D/G/J/K 是否同时成立。
+
+============================================================
+十五、详细程序清单（按正式章节归类，一行说明）
+============================================================
+
+说明：
+- 下面是基于已上传日志中出现的唯一脚本名整理的续接清单；
+- 作用说明以文件名、日志用途、阶段上下文综合归纳；
+- 对新聊天续接已经足够用；
+- 极少数角色若未来与真实仓库略有出入，应以实际代码为准。
+
+------------------------------------------------------------
+A-C / 基础运维与自动化
+------------------------------------------------------------
+- daily_cost_snapshot.sh
+  作用：每日成本快照脚本，用于记录运营成本基线。
+- stage_health_check.sh
+  作用：阶段性一键健康检查脚本，检查基础服务与关键链路。
+
+------------------------------------------------------------
+D / Readonly Observer 主链
+------------------------------------------------------------
+- _bybit_latest_wrapper.py
+  作用：latest/dated 输出包装器，负责产物落盘与 latest 指针更新。
+- bybit_build_decision_packet.py
+  作用：从 snapshot、WS 与 runtime 输入构建结构化 decision packet。
+- bybit_build_observer_verdict.py
+  作用：根据 decision packet 与 freshness/边界条件生成 observer verdict。
+- bybit_build_system_snapshot.py
+  作用：聚合账户、持仓、订单、成交等数据源，构建统一 system snapshot。
+- bybit_build_ws_runtime_facts.py
+  作用：把实时运行信息整理成“build ws runtime facts”输出。
+- bybit_decision_packet_pipeline.py
+  作用：串联 decision packet 构建与入库。
+- bybit_decision_packet_to_postgres.py
+  作用：把 decision packet 写入 PostgreSQL。
+- bybit_failure_policy_builder.py
+  作用：构建“failure policy”对应的 latest 输出。
+- bybit_full_readonly_observer_cycle.py
+  作用：串联私有 REST、snapshot、WS、packet、verdict 等完整只读观察周期。
+- bybit_latest_consistency_check.py
+  作用：对“latest”相关 latest 文件做一致性/引用关系检查。
+- bybit_load_ws_jsonl_to_postgres.py
+  作用：把 WS jsonl 原始事件装载到 PostgreSQL。
+- bybit_next_phase_handoff.py
+  作用：为“next phase”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_normalize_latest_snapshot_to_postgres.py
+  作用：把最新 system snapshot 写入 PostgreSQL。
+- bybit_observer_acceptance_check.py
+  作用：对 readonly observer 主链做 acceptance 验收。
+- bybit_observer_pipeline.py
+  作用：串联 decision packet 与 observer verdict 生成流程。
+- bybit_observer_verdict_to_postgres.py
+  作用：把 observer verdict 写入 PostgreSQL。
+- bybit_private_account_check.py
+  作用：读取 Bybit 私有只读账户余额/资产信息。
+- bybit_private_execution_history_check.py
+  作用：读取 Bybit 私有只读成交历史。
+- bybit_private_order_history_check.py
+  作用：读取 Bybit 私有只读历史订单。
+- bybit_private_positions_check.py
+  作用：读取 Bybit 私有只读持仓信息。
+- bybit_private_readonly_precheck.py
+  作用：对只读接入条件做预检，确认配置、key、模式与安全边界正确。
+- bybit_private_rest_preflight_guard.py
+  作用：在 observer 主链继续运行前，对关键 private REST 结果做前置门禁。
+- bybit_private_ws_listener.py
+  作用：持续运行的私有 WS listener，负责 auth/subscribe/事件记录与状态维护。
+- bybit_private_ws_listener_ctl.sh
+  作用：persistent private WS listener 的 start/stop/status 控制脚本。
+- bybit_private_ws_smoke_test.py
+  作用：对 Bybit 私有 WS 做 smoke test，验证 auth/subscribe 与原始事件输出。
+- bybit_private_ws_smoke_test_v2.py
+  作用：对 Bybit 私有 WS 做 smoke test，验证 auth/subscribe 与原始事件输出。
+- bybit_public_connectivity_check.py
+  作用：检查 Bybit 公共 API 联通性与延迟。
+- bybit_public_connectivity_status_writer.py
+  作用：把公共 API 联通性结果写入状态/心跳/审计层。
+- bybit_readonly_audit.py
+  作用：对 readonly observer 主链做总审计。
+- bybit_readonly_final_summary.py
+  作用：为“readonly final”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_readonly_preflight.py
+  作用：对只读接入条件做预检，确认配置、key、模式与安全边界正确。
+- bybit_readonly_status_writer.py
+  作用：与“readonly status writer”相关的工程脚本；具体职责需结合日志与上下游产物理解。
+- bybit_runtime_state_resolver.py
+  作用：汇总多上游状态，为“runtime”生成统一 state/resolver 结果。
+- bybit_snapshot_to_postgres.py
+  作用：把最新 system snapshot 写入 PostgreSQL。
+- bybit_ws_smoke_to_postgres.py
+  作用：执行 WS smoke test 并把结果/原始记录写入 PostgreSQL。
+- run_bybit_observer_cycle.py
+  作用：只读观察模式正式入口，一次跑完整 observer cycle。
+
+------------------------------------------------------------
+E / Business Event Classification
+------------------------------------------------------------
+- bybit_business_event_contract_check.py
+  作用：对“business event”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_extract_from_ws_jsonl.py
+  作用：从 WS jsonl 原始记录中提取业务相关消息，供后续分类或重放。
+- bybit_business_event_ingestion_from_ws.py
+  作用：把 WS 原始数据转换为可消费的 business event/ingestion 输出。
+- bybit_business_event_ingestion_smoke.py
+  作用：对 ingestion 路径做 smoke test，验证输入、解析与输出骨架可工作。
+- bybit_business_event_runtime_contract_check.py
+  作用：对“business event runtime”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_runtime_facts.py
+  作用：把实时运行信息整理成“business event runtime facts”输出。
+- bybit_business_event_state_contract_check.py
+  作用：对“business event state”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_state_resolver.py
+  作用：汇总多上游状态，为“business event”生成统一 state/resolver 结果。
+
+------------------------------------------------------------
+F / Event-Driven Transition Scaffold
+------------------------------------------------------------
+- bybit_event_driven_chain_consistency_check.py
+  作用：对“event driven chain”相关 latest 文件做一致性/引用关系检查。
+- bybit_event_driven_chain_contract_check.py
+  作用：对“event driven chain”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_final_audit.py
+  作用：对“event driven”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_event_driven_final_audit_contract_check.py
+  作用：对“event driven final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_handoff.py
+  作用：为“event driven”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_event_driven_handoff_contract_check.py
+  作用：对“event driven handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_phase_contract_check.py
+  作用：对“event driven phase”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_readiness_contract_check.py
+  作用：对“event driven readiness”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_readiness_summary.py
+  作用：为“event driven readiness”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_event_driven_state_builder.py
+  作用：构建“event driven state”对应的 latest 输出。
+- bybit_event_driven_state_contract_check.py
+  作用：对“event driven state”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_driven_state_machine.py
+  作用：根据 event-driven 输入生成 phase/状态机层判断。
+- bybit_event_transition_decider.py
+  作用：对 transition 是否允许推进做决策判断。
+- bybit_event_transition_decision_contract_check.py
+  作用：对“event transition decision”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_transition_input_builder.py
+  作用：构建“event transition input”对应的 latest 输出。
+- bybit_event_transition_input_contract_check.py
+  作用：对“event transition input”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_transition_outcome_builder.py
+  作用：构建“event transition outcome”对应的 latest 输出。
+- bybit_event_transition_outcome_contract_check.py
+  作用：对“event transition outcome”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+------------------------------------------------------------
+G / 真实业务事件验证层
+------------------------------------------------------------
+- bybit_business_event_acceptance_contract_check.py
+  作用：对“business event acceptance”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_acceptance_suite.py
+  作用：与“business event acceptance suite”相关的工程脚本；具体职责需结合日志与上下游产物理解。
+- bybit_business_event_final_audit.py
+  作用：对“business event”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_business_event_final_audit_contract_check.py
+  作用：对“business event final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_fixture_pack_builder.py
+  作用：构建“business event fixture pack”对应的 latest 输出。
+- bybit_business_event_fixture_pack_contract_check.py
+  作用：对“business event fixture pack”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_fixture_pack_builder.py
+  作用：构建“business event negative fixture pack”对应的 latest 输出。
+- bybit_business_event_negative_fixture_pack_contract_check.py
+  作用：对“business event negative fixture pack”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_replay_contract_check.py
+  作用：对“business event negative replay”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_replay_harness.py
+  作用：把 fixture pack 重放为标准化事件，验证 replay 路径与输出结构。
+- bybit_business_event_regression_contract_check.py
+  作用：对“business event regression”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_regression_summary.py
+  作用：为“business event regression”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_business_event_replay_contract_check.py
+  作用：对“business event replay”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_replay_harness.py
+  作用：把 fixture pack 重放为标准化事件，验证 replay 路径与输出结构。
+- bybit_business_event_validation_handoff.py
+  作用：为“business event validation”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_business_event_validation_handoff_contract_check.py
+  作用：对“business event validation handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_block_chain_builder.py
+  作用：构建“event replay block chain”对应的 latest 输出。
+- bybit_event_replay_block_chain_contract_check.py
+  作用：对“event replay block chain”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_phase_builder.py
+  作用：构建“event replay phase”对应的 latest 输出。
+- bybit_event_replay_phase_contract_check.py
+  作用：对“event replay phase”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_state_builder.py
+  作用：构建“event replay state”对应的 latest 输出。
+- bybit_event_replay_state_contract_check.py
+  作用：对“event replay state”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_consistency_check.py
+  作用：对“event replay transition”相关 latest 文件做一致性/引用关系检查。
+- bybit_event_replay_transition_consistency_contract_check.py
+  作用：对“event replay transition consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_decider.py
+  作用：对 transition 是否允许推进做决策判断。
+- bybit_event_replay_transition_decision_contract_check.py
+  作用：对“event replay transition decision”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_input_builder.py
+  作用：构建“event replay transition input”对应的 latest 输出。
+- bybit_event_replay_transition_input_contract_check.py
+  作用：对“event replay transition input”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_outcome_builder.py
+  作用：构建“event replay transition outcome”对应的 latest 输出。
+- bybit_event_replay_transition_outcome_contract_check.py
+  作用：对“event replay transition outcome”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+------------------------------------------------------------
+J / Transition Engine Skeleton
+------------------------------------------------------------
+- bybit_transition_engine_audit_trail_builder.py
+  作用：构建“transition engine audit trail”对应的 latest 输出。
+- bybit_transition_engine_audit_trail_contract_check.py
+  作用：对“transition engine audit trail”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_chapter_consistency_check.py
+  作用：对“transition engine chapter”相关 latest 文件做一致性/引用关系检查。
+- bybit_transition_engine_chapter_consistency_contract_check.py
+  作用：对“transition engine chapter consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_checkpoint_builder.py
+  作用：构建“transition engine checkpoint”对应的 latest 输出。
+- bybit_transition_engine_checkpoint_contract_check.py
+  作用：对“transition engine checkpoint”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_final_audit.py
+  作用：对“transition engine”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_transition_engine_final_audit_contract_check.py
+  作用：对“transition engine final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_handoff.py
+  作用：为“transition engine”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_transition_engine_handoff_contract_check.py
+  作用：对“transition engine handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_replay_matrix.py
+  作用：汇总正向/负向 replay 路径，形成 transition engine skeleton 的 replay matrix。
+- bybit_transition_engine_replay_matrix_contract_check.py
+  作用：对“transition engine replay matrix”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_summary.py
+  作用：为“transition engine”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_transition_engine_summary_builder.py
+  作用：为“transition engine builder”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_transition_engine_summary_contract_check.py
+  作用：对“transition engine summary”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_rule_layer_builder.py
+  作用：构建“transition rule layer”对应的 latest 输出。
+- bybit_transition_rule_layer_contract_check.py
+  作用：对“transition rule layer”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_state_graph_builder.py
+  作用：构建“transition state graph”对应的 latest 输出。
+- bybit_transition_state_graph_consistency_check.py
+  作用：对“transition state graph”相关 latest 文件做一致性/引用关系检查。
+- bybit_transition_state_graph_consistency_contract_check.py
+  作用：对“transition state graph consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_state_graph_contract_check.py
+  作用：对“transition state graph”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+------------------------------------------------------------
+K / Paper / Demo Gate
+------------------------------------------------------------
+- bybit_demo_gate_chapter_consistency_check.py
+  作用：对“demo gate chapter”相关 latest 文件做一致性/引用关系检查。
+- bybit_demo_gate_chapter_consistency_contract_check.py
+  作用：对“demo gate chapter consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_contract_builder.py
+  作用：构建“demo gate contract”对应的 latest 输出。
+- bybit_demo_gate_contract_contract_check.py
+  作用：对“demo gate”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_final_audit_builder.py
+  作用：对“demo gate builder”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_demo_gate_final_audit_contract_check.py
+  作用：对“demo gate final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_handoff_builder.py
+  作用：为“demo gate builder”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_demo_gate_handoff_contract_check.py
+  作用：对“demo gate handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_readiness_builder.py
+  作用：构建“demo gate readiness”对应的 latest 输出。
+- bybit_demo_gate_readiness_contract_check.py
+  作用：对“demo gate readiness”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_summary_builder.py
+  作用：为“demo gate builder”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_demo_gate_summary_contract_check.py
+  作用：对“demo gate summary”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_paper_adapter_skeleton_builder.py
+  作用：构建“demo paper adapter skeleton”对应的 latest 输出。
+- bybit_demo_paper_adapter_skeleton_contract_check.py
+  作用：对“demo paper adapter skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_paper_order_lifecycle_skeleton_builder.py
+  作用：构建“paper order lifecycle skeleton”对应的 latest 输出。
+- bybit_paper_order_lifecycle_skeleton_contract_check.py
+  作用：对“paper order lifecycle skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_paper_position_balance_projection_skeleton_builder.py
+  作用：构建“paper position balance projection skeleton”对应的 latest 输出。
+- bybit_paper_position_balance_projection_skeleton_contract_check.py
+  作用：对“paper position balance projection skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_pretrade_risk_integration_skeleton_builder.py
+  作用：构建“pretrade risk integration skeleton”对应的 latest 输出。
+- bybit_pretrade_risk_integration_skeleton_contract_check.py
+  作用：对“pretrade risk integration skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+------------------------------------------------------------
+跨章节 / Revision 2 总回归
+------------------------------------------------------------
+- bybit_revision2_master_regression_check.py
+  作用：Revision 2 跨章节总回归，统一检查 D/G/J/K 当前关键结果。
+- bybit_revision2_master_regression_contract_check.py
+  作用：校验 master regression 输出结构与字段稳定性。
+
+============================================================
+十六、最容易再次混乱的点（必须预先提醒新聊天）
+============================================================
+
+1. 不要把当前项目理解成“快要实盘执行了”。当前仍是 read_only / observer-only。
+2. 不要把 healthy_no_business_events_yet 当故障。它是 D22/E 章最关键的成果之一，是健康空态。
+3. 不要把 healthy_but_empty / observe_only_retained 当成 transition engine ready。F 章完成的是 scaffold，不是 engine 本体。
+4. 不要把 J / K 误判为正式完工章节。它们只是提前做出的 skeleton / design / audit 层。
+5. 不要忘记 G 章已经在 3 月 19 日正式收口。后续再谈 G 时，要以“已收口”而不是“G4 还没做”为口径。
+6. 不要继续沿历史临时编号 G4.x / G5 / G6 去理解项目。必须切回正式 G / J / K。
+7. 不要让 replay / validation / skeleton 结果污染主 runtime。主 runtime 仍锚定在 D 主链。
+8. 不要跳过 H / I。它们不是附属小节，而是整个项目核心理念的正式落地层。
+
+============================================================
+十七、新聊天里应该怎么立刻开工
+============================================================
+
+建议开工顺序：
+1. 先把本文件贴进去；
+2. 再把《2026-03-19_补充1.txt》和《2026-03-19当前进度图_校正后.txt》一起贴进去；
+3. 要求新聊天先复述以下 5 点：
+   - 当前正式章节树；
+   - 当前主 runtime 状态；
+   - G/J/K 当前各自的真实落点；
+   - 为什么 H/I 不能跳过；
+   - 下一步正式优先顺序。
+4. 如果它复述正确，再正式开始 H1。
+
+推荐直接对新聊天说的话：
+“请先基于我给你的总报告，复述当前项目的正式章节树、当前主 runtime 边界、G/J/K 的真实完成状态、以及为什么下一主线应回到 H/I。不要急着写代码，先证明你完全接住上下文。”
+
+============================================================
+十八、下一步最优动作（正式版）
+============================================================
+
+后续最佳动作不是继续补更多回顾性文件，而是：
+1. 进入 H1 thought_gate；
+2. 再做 H2 query_budget；
+3. 再做 H3 model_router v2；
+4. 然后切入 I1 decision lease schema；
+5. 再做 I2 lease freshness / validity。
+
+只有当 H / I 正式回补以后，J / K 后续深化才会更合理、更不容易跑偏。
+
+============================================================
+十九、一句话总括
+============================================================
+
+截至 2026-03-19 夜间：
+- D 稳定；
+- E 已完成；
+- F 已完成；
+- G 已正式收口；
+- J / K 结构层回归通过；
+- 主 runtime 未被污染；
+- 后续正式主线：回到 H / I。
+
+—— 完 ——

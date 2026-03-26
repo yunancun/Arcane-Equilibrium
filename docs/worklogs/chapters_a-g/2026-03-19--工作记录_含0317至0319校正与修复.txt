@@ -1,0 +1,1043 @@
+OpenClaw / Bybit 交易 Agent
+2026-03-17 至 2026-03-19 工作记录（含 3 月 19 日晚校正与修复）
+日期：2026-03-19
+阶段定位：Revision 2 校正、G/J/K 前置搭建与章节归位修复阶段
+用途：作为后续新分支/新对话的详细施工记录；当后续再次出现“忘记今天晚上到底做了什么、哪些是正式章、哪些只是临时编号、哪些已经修正过”时，可直接重新喂给模型。
+
+============================================================
+一、本阶段一句话结论
+============================================================
+
+2026-03-17 至 2026-03-19 这一轮工作的真实成果，不是把系统推进到 execution，而是：
+
+1. 先在 3 月 17 日完成 Revision 2 的正式工程审视、章节树重排、工程记录和执行清单；
+2. 然后在 3 月 19 日围绕“真实业务事件验证层 G”、“Transition Engine Skeleton（正式 J）”、“Paper / Demo Gate（正式 K）”做出一批隔离验证与 design skeleton；
+3. 最后又针对今晚已经出现的章节混乱，完成一次系统性的“正式归位修正”，把原先临时写成 G4.x / G5 / G6 的内容正式校正到 J / K，并同步修补脚本头注释、SCRIPT_INDEX、对齐文档和进度快照。
+
+换句话说：
+本轮最大的成果既包括工程新增，也包括工程校正。
+后者非常关键，因为如果不校正，后续阅读和维护会越来越混乱。
+
+============================================================
+二、本阶段开始时的上游基线（3 月 17 日基线）
+============================================================
+
+在本轮工作真正开始前，系统上游已经具备以下基线：
+
+1. 只读观察主链已经形成
+- private REST readonly checks
+- preflight guard
+- snapshot + normalize + postgres
+- ws smoke + persistent ws listener
+- ws runtime facts
+- decision packet
+- observer verdict
+- acceptance
+- runtime / summary / handoff / audit / consistency
+
+2. business-event classification 已形成
+- 系统已经能表达：
+  - healthy_no_business_events_yet
+  - healthy_business_events_present
+  - stale_or_missing_business_event_feed
+
+3. event-driven scaffold 已形成
+- 系统已经能表达：
+  - event_driven_state
+  - phase
+  - input
+  - decision
+  - outcome
+  - readiness
+  - handoff
+  - final audit
+- 但当前仍处于：
+  healthy_but_empty / observe_only_retained
+
+4. 3 月 17 日的正式审视结论
+- 项目总体没有跑偏；
+- 但章节顺序必须 Revision 2 重排；
+- 下一正式优先级应切换为：
+  真实业务事件验证 -> AI 治理 -> decision lease -> transition engine -> paper/demo gate。
+
+这份结论成为后续 3 月 19 日所有推进与校正的判断基线。
+
+============================================================
+三、2026-03-17：Revision 2 基线文件正式形成
+============================================================
+
+3 月 17 日的主要成果不是大量写新脚本，而是把工程整体理解正式抬升到“Revision 2 口径”。
+
+------------------------------------------------------------
+3.1 工程一审修改建议报告形成
+------------------------------------------------------------
+
+形成并归档：
+- 工程一审修改建议报告（Revision 2）终稿
+
+其核心作用是：
+
+1. 正式确认项目没跑偏；
+2. 正式重申总目标与核心需求；
+3. 正式承认当前已完成的三层：
+   - readonly observer infrastructure
+   - business-event classification
+   - event-driven transition scaffold
+4. 正式指出后续主线必须切换到：
+   真实业务事件验证 -> AI 治理 -> decision lease -> transition engine -> paper/demo gate
+
+这一点极其关键，因为它决定了后续不再能无限制继续扩写“空态表达脚本”。
+
+------------------------------------------------------------
+3.2 Revision 2 工程记录形成
+------------------------------------------------------------
+
+形成并归档：
+- Revision 2 工程记录
+- Revision 2 执行清单
+- 高保真续接工程记录
+
+这些文件的作用是：
+
+1. 统一后续章节树；
+2. 统一当前系统定位；
+3. 统一后续执行顺序；
+4. 作为下一新分支继续推进的正式资料。
+
+3 月 17 日这批文件，后来直接成为 3 月 19 日校正工作的依据。
+
+------------------------------------------------------------
+3.3 3 月 17 日基线结论
+------------------------------------------------------------
+
+如果只看 3 月 17 日当天，可以把它理解成：
+
+“不是主要写代码的一天，而是把整个工程的正式理解和未来推进顺序，提前做了制度化收口。”
+
+============================================================
+四、2026-03-18：说明
+============================================================
+
+本轮可存档资料里，没有形成一份独立、可明确拆出的 3 月 18 日单日完整工程日志。
+
+因此本工作记录不硬造 3 月 18 日不存在的独立成果，而是如实说明：
+
+- 3 月 18 日并未形成像 3 月 17 / 3 月 19 这样可单独归档的完整工作记录产物；
+- 本轮真正可确认、可审计、可复盘的新增工程与修复，主要集中在 3 月 17 的基线文件，以及 3 月 19 晚的集中施工与校正。
+
+这样记录更诚实，也更利于后续维护。
+
+============================================================
+五、2026-03-19 晚：G 章（真实业务事件验证层）施工记录
+============================================================
+
+这一晚首先推进的是“真实业务事件验证层”，也就是后来正式确认仍属于 G 章的那部分内容。
+
+============================================================
+5.1 G1：fixture pack + replay harness
+============================================================
+
+------------------------------------------------------------
+新增与完成的内容
+------------------------------------------------------------
+
+1. bybit_business_event_fixture_pack_builder.py
+2. bybit_business_event_fixture_pack_contract_check.py
+3. bybit_business_event_replay_harness.py
+4. bybit_business_event_replay_contract_check.py
+
+------------------------------------------------------------
+完成的验证结果
+------------------------------------------------------------
+
+1. 生成 4 条基础 fixture
+- wallet
+- order
+- execution
+- position
+
+2. fixture pack contract 通过
+- overall_ok = true
+- failed_count = 0
+
+3. replay harness 成功把 4 条 fixture 重放为标准化 business events
+- normalized_count = 4
+- has_business_events = true
+- topic_counts 覆盖 4 类 topic
+- event_type_counts 覆盖 4 类 event type
+- event_fingerprint 唯一性成立
+
+4. 与主 runtime 隔离得到验证
+- replay harness 在 isolated 路径下运行；
+- 主 runtime 仍保持：
+  ready_readonly_observer / healthy_no_business_events_yet
+
+------------------------------------------------------------
+这一层的真实意义
+------------------------------------------------------------
+
+这不是“主系统已经见到真实业务事件”，而是：
+
+- 我们已经拥有了一组可重复、可审计、可回放的业务事件样本；
+- 后续可以用这组样本去验证状态切换、decision 切换、blocked path、consistency 和 acceptance；
+- 它为 G2/G3 打下了真正可操作的输入层基础。
+
+============================================================
+5.2 G2：正向非空业务事件语义验证
+============================================================
+
+------------------------------------------------------------
+新增与完成的内容
+------------------------------------------------------------
+
+1. bybit_event_replay_state_builder.py
+2. bybit_event_replay_state_contract_check.py
+3. bybit_event_replay_phase_builder.py
+4. bybit_event_replay_phase_contract_check.py
+5. bybit_event_replay_transition_input_builder.py
+6. bybit_event_replay_transition_input_contract_check.py
+7. bybit_event_replay_transition_decider.py
+8. bybit_event_replay_transition_decision_contract_check.py
+9. bybit_event_replay_transition_outcome_builder.py
+10. bybit_event_replay_transition_outcome_contract_check.py
+11. bybit_event_replay_transition_consistency_check.py
+12. bybit_event_replay_transition_consistency_contract_check.py
+
+------------------------------------------------------------
+完成的正向链语义
+------------------------------------------------------------
+
+通过 replay_test 隔离验证，系统成功走出了完整正向链：
+
+1. state：
+- event_driven_readiness = event_flow_present
+- has_business_events = true
+- normalized_count = 4
+
+2. phase：
+- phase_code = observer_event_flow_seen
+- phase_ready = true
+
+3. input：
+- transition_readiness = input_ready_for_transition_engine
+- transition_allowed = true
+
+4. decision：
+- decision_code = allow_transition_engine
+- decision_allowed = true
+
+5. outcome：
+- outcome_code = transition_engine_entry_allowed
+- outcome_ok = true
+
+6. consistency：
+- overall_ok = true
+- failed_count = 0
+
+7. 所有 contract 全部通过
+- state / phase / input / decision / outcome / consistency contract 全部为 overall_ok=true
+
+------------------------------------------------------------
+额外确认
+------------------------------------------------------------
+
+最重要的一项确认是：
+主 runtime 没有被 replay_test 污染。
+
+也就是说：
+
+- replay_test 里的正向 path 成立；
+- 但主系统仍然保持 read_only / ready_readonly_observer；
+- 这证明隔离验证边界保持住了。
+
+------------------------------------------------------------
+这一层的真实意义
+------------------------------------------------------------
+
+G2 的真正含义不是“系统已经进入交易候选态”，而是：
+
+“在隔离 replay 验证环境中，已经证明：一旦出现完整的业务事件流，系统的 state / phase / input / decision / outcome 语义切换是可以跑通的。”
+
+这为之后的 J 章 skeleton，提供了非常直接的正向语义样本。
+
+============================================================
+5.3 G3：负向阻断验证
+============================================================
+
+------------------------------------------------------------
+新增与完成的内容
+------------------------------------------------------------
+
+1. bybit_business_event_negative_fixture_pack_builder.py
+2. bybit_business_event_negative_fixture_pack_contract_check.py
+3. bybit_business_event_negative_replay_harness.py
+4. bybit_business_event_negative_replay_contract_check.py
+5. bybit_event_replay_block_chain_builder.py
+6. bybit_event_replay_block_chain_contract_check.py
+
+------------------------------------------------------------
+负向样本设计
+------------------------------------------------------------
+
+这次故意只给了一个 wallet-only negative fixture，
+也就是：
+- 有业务事件
+- 但事件集不完整
+- 不足以支撑完整 transition path
+
+------------------------------------------------------------
+完成的负向链语义
+------------------------------------------------------------
+
+通过 replay_block_test 隔离验证，系统成功保持阻断：
+
+1. state：
+- state_readiness = not_ready
+
+2. phase：
+- phase_code = observer_feed_not_ready
+- phase_ready = false
+
+3. input：
+- input_readiness = input_not_ready
+- transition_allowed = false
+
+4. decision：
+- decision_code = block_transition_engine
+- decision_allowed = false
+
+5. outcome：
+- outcome_code = transition_engine_blocked
+- outcome_ok = true
+
+6. consistency：
+- overall_ok = true
+- failed_count = 0
+
+7. 相关 contract 全部通过
+
+------------------------------------------------------------
+额外确认
+------------------------------------------------------------
+
+同样确认：
+主 runtime 继续保持 unchanged。
+
+------------------------------------------------------------
+这一层的真实意义
+------------------------------------------------------------
+
+G3 非常关键，因为它证明：
+
+“系统不仅会在正向输入时打开 candidate path，也会在不完整输入时保持阻断。”
+
+也就是说：
+- 不是所有 business events 都能推进下游；
+- 事件集完整性本身就是 gate；
+- 这正是未来 transition engine、risk gate 和 demo gate 的必要前提。
+
+============================================================
+5.4 G 章当晚结论
+============================================================
+
+到这一层为止，可以确认：
+
+1. G1 已做出 replay harness / fixtures；
+2. G2 已证明正向非空业务事件语义切换可达；
+3. G3 已证明不完整事件集会保持阻断；
+4. 所有验证均在隔离目录下完成；
+5. 主 runtime 未被污染。
+
+但也必须承认：
+
+- 正式意义上的 G4 acceptance / regression 套件，还没有完全收口；
+- 所以 G 章不能说“正式全完”，而应记为：
+  G1/G2/G3 已完成，G4 仍需补齐。
+
+============================================================
+六、2026-03-19 晚：J 章（Transition Engine Skeleton）施工记录
+============================================================
+
+这一部分，是今晚最容易造成混乱的来源之一。
+
+因为当时开发中曾临时把这一大批内容写成 G4.x，
+但在本轮校正后，已经正式确认：
+它们应归属于 J. Transition Engine Skeleton。
+
+============================================================
+6.1 J 章实际做出的内容
+============================================================
+
+------------------------------------------------------------
+J4 / 横向基础：transition replay matrix
+------------------------------------------------------------
+
+产物：
+- bybit_transition_engine_replay_matrix.py
+- bybit_transition_engine_replay_matrix_contract_check.py
+
+关键结果：
+- engine_mode = simulation_only_skeleton
+- positive_replay_path：
+  candidate_transition_state = candidate_transition_open
+  candidate_available = true
+  execution_still_forbidden = true
+- negative_replay_path：
+  candidate_transition_state = candidate_transition_blocked
+  candidate_available = false
+  execution_still_forbidden = true
+- matrix_verdict：
+  positive_path_open = true
+  negative_path_blocked = true
+  readonly_context_ok = true
+  matrix_ok = true
+
+真实意义：
+- 正向 path 在隔离环境下可达；
+- 负向 path 在隔离环境下保持阻断；
+- 但 execution 依然绝对禁止。
+
+------------------------------------------------------------
+J3：transition audit trail
+------------------------------------------------------------
+
+产物：
+- bybit_transition_engine_audit_trail_builder.py
+- bybit_transition_engine_audit_trail_contract_check.py
+
+关键结果：
+- positive_replay_path 的 audit_verdict =
+  candidate_open_but_execution_forbidden
+- negative_replay_path 的 audit_verdict =
+  candidate_blocked
+- execution_forbidden_confirmed = true
+- trail_ok = true
+
+真实意义：
+- 把 replay matrix 的两条路径沉淀为可读、可审计的 trail。
+
+------------------------------------------------------------
+J1：transition rule layer skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_transition_rule_layer_builder.py
+- bybit_transition_rule_layer_contract_check.py
+
+关键结果：
+- rule_layer_state = skeleton_rules_ready
+- candidate_transition_supported = true
+- negative_blocking_supported = true
+- execution_permitted = false
+- failed_rule_count = 0
+
+已经明确通过的规则包括：
+- readonly_lock_must_remain_active
+- positive_replay_candidate_must_be_recognized
+- negative_replay_candidate_must_remain_blocked
+- execution_must_remain_forbidden
+- audit_trail_must_be_ok
+- demo_gate_must_remain_closed
+- live_execution_must_remain_closed
+
+真实意义：
+- 这不是可执行交易规则引擎；
+- 而是把“正向 candidate 可达 / 负向必须阻断 / execution 绝对关闭”的语义固定成统一规则层。
+
+------------------------------------------------------------
+J 章总控层：summary / handoff / final audit
+------------------------------------------------------------
+
+产物：
+- bybit_transition_engine_summary.py
+- bybit_transition_engine_summary_contract_check.py
+- bybit_transition_engine_handoff.py
+- bybit_transition_engine_handoff_contract_check.py
+- bybit_transition_engine_final_audit.py
+- bybit_transition_engine_final_audit_contract_check.py
+
+关键结论：
+- transition_engine_skeleton_ready = true
+- candidate_transition_supported = true
+- negative_blocking_supported = true
+- execution_permitted = false
+- demo_gate_open = false
+- live_execution_open = false
+- final audit overall_ok = true
+
+真实意义：
+- J 章整体 skeleton 已形成统一总结、交接和总审计能力；
+- 但它仍然只是 skeleton。
+
+------------------------------------------------------------
+J2：state graph skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_transition_state_graph_builder.py
+- bybit_transition_state_graph_contract_check.py
+- bybit_transition_state_graph_consistency_check.py
+- bybit_transition_state_graph_consistency_contract_check.py
+
+关键结论：
+- graph_status = skeleton_graph_ready
+- positive_path_mapped = true
+- negative_path_mapped = true
+- execution_path_closed = true
+
+closed_paths 明确列出：
+- main_runtime_to_execution：closed
+- candidate_to_demo_execution：closed
+- demo_to_live_execution：closed
+
+真实意义：
+- 状态图骨架已经能表达：
+  哪些路径存在
+  哪些路径仍强制关闭
+- 但这仍不是 runnable executor。
+
+------------------------------------------------------------
+J 章补充：checkpoint pack
+------------------------------------------------------------
+
+产物：
+- bybit_transition_engine_checkpoint_builder.py
+- bybit_transition_engine_checkpoint_contract_check.py
+
+关键结论：
+- checkpoint_status = skeleton_checkpoint_ready
+- positive_candidate_path_proven_in_isolation = true
+- negative_blocking_path_proven_in_isolation = true
+- execution_still_forbidden = true
+- checkpoint_ready = true
+
+真实意义：
+- J 章目前已经有一个“可交接检查包”；
+- 方便后续任何人从这里继续施工。
+
+============================================================
+6.2 J 章当晚真实结论
+============================================================
+
+这一晚实际上把 J 章做出了很大一批 skeleton。
+
+但这里必须牢牢记住三句话：
+
+1. J 章不是从零开始了；
+2. J 章已经有很多可复用 skeleton；
+3. 但 J 章仍然不是完整 transition engine，更不是 execution engine。
+
+============================================================
+七、2026-03-19 晚：K 章（Paper / Demo Gate）施工记录
+============================================================
+
+K 章也曾经是本轮最容易混淆的部分。
+
+因为当时开发中一度把它临时记成了 G5 / G6 一类的编号。
+但在本轮校正后，已经正式确认：
+
+这些内容应全部归到 K. Paper / Demo Gate。
+
+============================================================
+7.1 K 章实际做出的内容
+============================================================
+
+------------------------------------------------------------
+K 章总起点：demo gate contract
+------------------------------------------------------------
+
+产物：
+- bybit_demo_gate_contract_builder.py
+- bybit_demo_gate_contract_contract_check.py
+
+关键结论：
+- gate_state = closed_contract_defined
+- gate_open = false
+- gate_ready = false
+- prerequisite_count = 8
+- prerequisites_currently_true = 1
+- prerequisites_currently_false = 7
+
+真实意义：
+- gate 的边界定义出来了；
+- 但 gate 仍明确关闭。
+
+------------------------------------------------------------
+K 章 readiness evaluator
+------------------------------------------------------------
+
+产物：
+- bybit_demo_gate_readiness_builder.py
+- bybit_demo_gate_readiness_contract_check.py
+
+关键结论：
+- readiness_state = not_ready_missing_prerequisites
+- gate_can_open = false
+- operator_can_enable = false
+- missing_prerequisites 共 7 项
+
+真实意义：
+- 进一步把“为什么不能开 gate”表达清楚；
+- 不是模糊地说未完成，而是精确列出缺什么。
+
+------------------------------------------------------------
+K1：demo/paper adapter skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_demo_paper_adapter_skeleton_builder.py
+- bybit_demo_paper_adapter_skeleton_contract_check.py
+
+关键结论：
+- adapter_state = skeleton_defined_not_active
+- adapter_active = false
+- adapter_ready = false
+- adapter_can_accept_orders = false
+
+接口面已固定：
+- submit_paper_order
+- cancel_paper_order
+- sync_paper_positions
+- sync_paper_balance_projection
+- run_pretrade_risk_check
+- write_paper_audit_trail
+
+真实意义：
+- 接口面固定了；
+- 但当前只是 stub，不具备执行能力。
+
+------------------------------------------------------------
+K1/K3 支撑层：paper order lifecycle skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_paper_order_lifecycle_skeleton_builder.py
+- bybit_paper_order_lifecycle_skeleton_contract_check.py
+
+关键结论：
+- lifecycle_state = skeleton_defined_not_active
+- lifecycle_ready = false
+- lifecycle_can_accept_new_orders = false
+- state_count = 7
+- edge_count = 8
+
+真实意义：
+- 生命周期图定义出来了；
+- 但当前仍不是可运行 paper order system。
+
+------------------------------------------------------------
+K3/K4 支撑层：paper position / balance projection skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_paper_position_balance_projection_skeleton_builder.py
+- bybit_paper_position_balance_projection_skeleton_contract_check.py
+
+关键结论：
+- projection_state = skeleton_defined_not_active
+- projection_ready = false
+- projection_can_drive_paper_ledger = false
+
+已定义 surface：
+- project_balance_after_fill
+- project_position_after_fill
+- project_fee_and_cash_impact
+- project_order_reservation_and_release
+- reconcile_projection_with_paper_snapshot
+
+真实意义：
+- 责任边界固定了；
+- 但还没有真正 paper accounting / projection 能力。
+
+------------------------------------------------------------
+K2：pretrade risk integration skeleton
+------------------------------------------------------------
+
+产物：
+- bybit_pretrade_risk_integration_skeleton_builder.py
+- bybit_pretrade_risk_integration_skeleton_contract_check.py
+
+关键结论：
+- risk_state = skeleton_defined_not_active
+- risk_ready = false
+- risk_can_evaluate_orders = false
+
+已定义 risk checks：
+- check_symbol_allowlist
+- check_order_notional_limit
+- check_position_exposure_limit
+- check_available_balance_projection
+- check_duplicate_order_guard
+- check_daily_loss_or_drawdown_limit
+- emit_pretrade_risk_audit_record
+
+真实意义：
+- 风控检查面已经定义；
+- 但仍未进入真正可运行风控层。
+
+------------------------------------------------------------
+K 章总控层：summary / handoff / final audit
+------------------------------------------------------------
+
+产物：
+- bybit_demo_gate_summary_builder.py
+- bybit_demo_gate_summary_contract_check.py
+- bybit_demo_gate_handoff_builder.py
+- bybit_demo_gate_handoff_contract_check.py
+- bybit_demo_gate_final_audit_builder.py
+- bybit_demo_gate_final_audit_contract_check.py
+
+关键结论：
+- summary_state = design_layers_defined_gate_closed
+- summary_ok = true
+- gate_can_open = false
+- operator_can_enable = false
+
+handoff 中明确：
+- missing_prerequisite_count = 7
+- hard_safety_boundaries 明确禁止任何 paper order 放行
+- recommended_next_build_order 已给出
+
+final audit：
+- overall_ok = true
+- failed_count = 0
+- design_layers_defined = true
+- gate_still_closed = true
+- runtime_still_readonly = true
+- execution_still_disabled = true
+
+真实意义：
+- K 章 design skeleton 已形成闭环；
+- 但 gate 明确关闭；
+- 主 runtime 边界仍未被污染。
+
+============================================================
+7.2 K 章当晚真实结论
+============================================================
+
+到这里为止，K 章已经提前做出了很大一块 design skeleton。
+
+但也必须非常清楚：
+
+1. 这不是 paper execution ready；
+2. 这不是 demo gate open；
+3. 这只是：
+   contract + readiness + adapter + lifecycle + projection + risk + summary + handoff + final audit
+   的设计骨架层。
+
+============================================================
+八、2026-03-19 晚：混乱暴露与章节归位修复
+============================================================
+
+这一部分，是今晚非常重要的一块。
+
+因为在做完 G / J / K 的大量内容之后，用户明确提出了一个核心疑问：
+
+“你是不是有些混乱？之前不是只分到 G4 吗？刚才的 G5 和下面的 6 都是什么？”
+
+这个提醒非常关键。
+因为它说明：
+
+- 代码可以先跑；
+- 但如果章节口径乱掉，后续维护会很痛苦。
+
+============================================================
+8.1 重新核实整体框架
+============================================================
+
+为解决这个问题，先重新回看并核对了：
+
+1. 工程一审修改建议报告（Revision 2）
+2. Revision 2 工程记录
+3. Revision 2 执行清单
+4. 最新高保真工程记录
+
+核对后确认：
+
+正式章节口径应为：
+
+- A-C：基础层
+- D：Readonly Observer 主链
+- E：Business Event Classification
+- F：Event-Driven Transition Scaffold
+- G：真实业务事件验证层
+- H：AI 治理
+- I：Decision Lease
+- J：Transition Engine Skeleton
+- K：Paper / Demo Gate
+- L：Learning / Self-Observability / Net PnL
+- 后面才是 M / N
+
+因此：
+- 原来后来临时写成的 G4.x，其实应归 J；
+- 原来后来临时写成的 G5 / G6，其实应归 K。
+
+============================================================
+8.2 明确校正策略
+============================================================
+
+本轮没有选择“回滚脚本并改文件名、改 latest 路径、改 JSON stage 字段”，
+而是采用更稳妥的策略：
+
+1. 正式承认历史临时编号已废弃；
+2. 正式用 Revision 2 章节树重新解释这些脚本；
+3. 先修正：
+   - 头部维护注释
+   - SCRIPT_INDEX
+   - 章节归位文档
+   - 当前进度快照
+4. 暂不在这一轮顺手乱改：
+   - 文件名
+   - latest 路径
+   - JSON stage 字段
+
+这样做的好处是：
+- 不破坏现有输出链；
+- 不制造兼容性风险；
+- 先把“理解层”统一，再决定后续是否做 deeper refactor。
+
+============================================================
+8.3 K 章头部注释修正
+============================================================
+
+先对 K 章这批脚本做了头注释归位修正。
+
+目标脚本包括：
+- bybit_demo_gate_contract_builder.py
+- bybit_demo_gate_readiness_builder.py
+- bybit_demo_paper_adapter_skeleton_builder.py
+- bybit_paper_order_lifecycle_skeleton_builder.py
+- bybit_paper_position_balance_projection_skeleton_builder.py
+- bybit_pretrade_risk_integration_skeleton_builder.py
+- bybit_demo_gate_summary_builder.py
+- bybit_demo_gate_handoff_builder.py
+- bybit_demo_gate_final_audit_builder.py
+- 以及对应 contract checker
+
+修正后的头注释明确包含：
+- 正式章节: K. Paper / Demo Gate
+- 当前定位
+- 白话解释
+- Not this
+- Historical note（临时 G5.x / G6.x 已废弃）
+- Revision 2 正式章节树为准
+
+核验结果：
+- has_K_formal = true
+- has_history_note = true
+- has_revision2_note = true
+
+============================================================
+8.4 J 章头部注释修正
+============================================================
+
+随后又对 J 章这批脚本做了头注释归位修正。
+
+目标脚本包括：
+- bybit_transition_engine_replay_matrix.py
+- bybit_transition_engine_audit_trail_builder.py
+- bybit_transition_rule_layer_builder.py
+- bybit_transition_state_graph_builder.py
+- bybit_transition_engine_summary.py
+- bybit_transition_engine_handoff.py
+- bybit_transition_engine_final_audit.py
+- bybit_transition_engine_checkpoint_builder.py
+- 及对应 contract / consistency 脚本
+
+这一步中途出现过一次 patch helper 的 SyntaxError，
+原因是 patch 文本里出现了全角中文逗号，脚本拼装失败。
+
+但注意：
+- 这个错误发生在辅助 patch 脚本里；
+- 并没有破坏已经存在的目标脚本；
+- 后续通过单独重修与人工校验，所有目标脚本 compile 仍为 OK；
+- 最终头注释核验全部为 true。
+
+============================================================
+8.5 G 章头部注释校正与措辞修补
+============================================================
+
+最后又回头检查了 G 章脚本的头注释。
+
+目标包括：
+- bybit_business_event_fixture_pack_builder.py
+- bybit_business_event_replay_harness.py
+- bybit_event_replay_state_builder.py
+- bybit_event_replay_transition_decider.py
+- bybit_business_event_negative_replay_harness.py
+- bybit_event_replay_block_chain_builder.py
+- 以及相关 contract / consistency 脚本
+
+检查结果表明：
+- G 章 formal / not J / not K / runtime isolation 提示已经基本正确；
+- 但个别脚本的“当前只是在 G 章内定义/校验 replay harness”表述过于笼统；
+- 因此又对三处文案做了更准确的小修补：
+  - state_builder -> state 语义切换
+  - transition_decider -> decision 语义切换
+  - block_chain_builder -> blocked-path regression
+
+============================================================
+8.6 文档层校正
+============================================================
+
+除了脚本头注释外，这一晚还补了文档层校正。
+
+新增文档：
+1. docs/REVISION2_CHAPTER_REALIGNMENT_NOTE.md
+2. docs/CURRENT_REALIGNED_PROGRESS_SNAPSHOT.md
+
+同时修正：
+3. docs/SCRIPT_INDEX.md
+
+修正内容包括：
+
+- 明确后续应以 Revision 2 正式章节树为准
+- 明确：
+  G = 真实业务事件验证层
+  J = Transition Engine Skeleton
+  K = Paper / Demo Gate
+- 明确历史 G4.x / G5 / G6 编号已废弃
+- 明确当前真实进度落点：
+  A-F 已完成
+  G 已部分完成
+  J/K 已提前展开
+  H/I/L/M/N 尚未正式进入
+
+这一层非常重要，因为它让后续任何维护者，只看 docs 就能先统一章节理解。
+
+============================================================
+九、今晚过程中的主要问题与修复记录
+============================================================
+
+------------------------------------------------------------
+9.1 多次出现 shell 粘贴不完整 / 终端输出被误当命令
+------------------------------------------------------------
+
+表现包括：
+- 命令被截断
+- preview/check 脚本末尾变成奇怪的 “PYint(...)”
+- 有些路径或文件名在粘贴时被截坏
+
+修复思路：
+- 不再迷信一次贴很长命令块；
+- 认识到 Ubuntu shell / 终端 / 剪贴板在长粘贴场景下，确实可能出现截断或混贴；
+- 后续更适合把大命令拆成多段，一条一条粘。
+
+这不是业务逻辑问题，但会非常干扰施工效率。
+
+------------------------------------------------------------
+9.2 某些脚本实际文件名与预期不一致
+------------------------------------------------------------
+
+例如：
+- bybit_transition_engine_summary_builder.py 并不存在，
+  实际文件是 bybit_transition_engine_summary.py
+- 早期一次 compile 命令里还找不到 bybit_simulator_adapter_contract_builder.py
+
+修复思路：
+- 不强行假设 builder 命名统一；
+- 先 ls / preview 确认真实文件名；
+- 再按实际存在文件修正检查和注释。
+
+------------------------------------------------------------
+9.3 contract checker 缺失或路径写错
+------------------------------------------------------------
+
+例如：
+- 早前 handoff contract checker 缺失，需要补建；
+- 某些 compile 命令因为路径或文件名拼坏而报错。
+
+修复思路：
+- 按“主文件 + contract checker + 如有需要则 summary/handoff/final audit”成套补齐；
+- 每层完成后都做一次 existence check。
+
+------------------------------------------------------------
+9.4 patch helper 出现 SyntaxError
+------------------------------------------------------------
+
+表现：
+- patch 脚本里全角中文逗号触发 SyntaxError
+
+修复思路：
+- 不把 patch helper 的失败，误判为目标脚本损坏；
+- 先单独 compile 现有目标脚本确认无损；
+- 再用更稳的方法做头注释归位修正。
+
+============================================================
+十、截至今晚收工时的真实工程结论
+============================================================
+
+1. 已新完成或确认的正式成果
+- G1/G2/G3 已成形
+- J 章大块 skeleton 已成形
+- K 章大块 design skeleton 已成形
+- 章节混乱已被正式识别并纠正
+- 头注释与 docs 层已补了“正式归位保护层”
+
+2. 当前主系统没有被污染
+- 主 runtime 仍是：
+  ready_readonly_observer
+  read_only
+  execution disabled
+  business_event_state = healthy_no_business_events_yet
+
+3. 当前绝不能误判的事情
+- J 章 skeleton != transition engine 完成
+- K 章 design skeleton != demo gate open
+- replay 正向 path 成立 != 主系统已经进入 execution candidate
+- 当前系统仍然不是交易执行系统
+
+============================================================
+十一、截至今晚后的正式进度判断
+============================================================
+
+经过今晚校正后，当前最准确的正式进度判断是：
+
+1. A-F 已完成
+2. G 已完成 G1/G2/G3，G4 尚未收口
+3. H 未开始
+4. I 未开始
+5. J 已提前展开并完成大块 skeleton
+6. K 已提前展开并完成大块 design skeleton
+7. L 未开始
+8. M/N 更后
+
+因此，后续最合理顺序是：
+
+1. 先补齐 G4
+2. 再进入 H
+3. 再进入 I
+4. 然后回到 J，把 skeleton 正式化
+5. 再回到 K，把 design skeleton 推进为 runnable paper/demo gate
+6. 之后才是 L -> M -> N
+
+============================================================
+十二、给未来继续接手时的建议
+============================================================
+
+如果后续几天后再回来继续，建议先做如下恢复动作：
+
+1. 先看：
+- 校正后完整版当前进度图
+- REVISION2_CHAPTER_REALIGNMENT_NOTE.md
+- CURRENT_REALIGNED_PROGRESS_SNAPSHOT.md
+- SCRIPT_INDEX.md 开头章节说明
+
+2. 再确认当前正式口径：
+- D21 -> 正式 D
+- D22 -> 正式 E
+- D23 -> 正式 F
+- 临时 G4.x -> 正式 J
+- 临时 G5/G6 -> 正式 K
+
+3. 再决定施工顺序：
+- 不要直接跳去 execution
+- 不要再扩写空态表达
+- 先补 G4
+- 再做 H / I
+
+============================================================
+十三、本阶段一句话总括
+============================================================
+
+2026-03-17 至 2026-03-19 这一轮，系统一方面实际做出了 G 章真实业务事件验证层的正向/负向隔离验证，以及 J 章 transition engine skeleton、K 章 demo gate design skeleton；另一方面又针对今晚暴露出的章节混乱完成了正式归位修正。最终结果不是“把系统推进到可执行交易”，而是“把系统推进到一个更深但也更清楚、更不容易误读的阶段”。

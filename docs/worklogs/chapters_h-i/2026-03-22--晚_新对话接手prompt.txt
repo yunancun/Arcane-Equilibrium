@@ -1,0 +1,59 @@
+请按以下要求直接接手 OpenClaw / Bybit 项目，不要重新从大范围背景开始发散。
+
+我会同时上传以下文件：
+1. 今晚新生成的工程记录 txt
+2. 今晚新生成的接手指示文件 txt
+3. OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+4. OpenClaw_全量整合总报告_2026-03-22
+
+接手规则：
+- 以“今晚工程记录 + 今晚接手指示文件”为最高优先级。
+- 两个旧文件只能作为背景参考，因为其中有些信息已经过时，必须被今晚新结论覆盖。
+- 不要默认旧文件里的 H1/H2/H4/H5 失败解释仍然准确。
+
+请先明确并复述以下当前真实状态：
+1. H0 当前是绿的，H0 final audit 已 OK。
+2. H1-A 当前已恢复正常，不再是 stale 阻塞。
+3. H1 当前最主要的真实 blocker 是 H1-B 的 budget_latency_cap_unacceptable。
+4. H1-G / H1-H / H1-I / H2 / H4 / H5 中存在大量“把合法 no-AI-call / 合法 idle account 误判为失败”的假红灯。
+5. I10 当前失败的直接原因是 I1/H1 未闭环，而不是 I10 本体先坏了。
+
+然后请按以下顺序继续：
+第一步：先处理 H1 的 no-call 语义
+- bybit_ai_response_check.py
+- bybit_ai_governed_decision.py
+- bybit_thought_gate_acceptance_suite.py
+- bybit_thought_gate_final_audit.py
+
+目标：
+- 如果 route_plan=route_skip、selected_ai_tier=none、should_call_ai=false，
+  就把它视为合法 no-call 终态，而不是失败。
+- 合法 no-call 时：
+  - H1-G 不应再要求 invocation_attempted/provider_response/parsed_json；
+  - H1-H 应生成 governed_observation_no_call；
+  - H1-I acceptance suite 应接受 no-call 终态；
+  - H1 final audit 应允许 no-call 合法收束。
+
+第二步：再处理 H2/H4/H5 的 no-call 结构语义
+目标：
+- 有调用时，继续严格检查 latency/tokens/parsed json；
+- 无调用但属于合法 no-call 时，允许 latency/tokens/response 为空；
+- 但仍必须检查 budget cap、max_retries=0、runtime_still_protected、只读安全边界。
+
+第三步：把“账户无交易/无执行/无挂单”的正常静默态降级为 info/idle
+前提：
+- read_only
+- execution disabled
+- position_count/order_count/execution_count 全为 0
+
+第四步：最后才重跑整链验证
+- refresh_upstream_truth_then_rebuild_h1_h5.sh
+- H1/H2/H4/H5 latest
+- I10 summary / final audit
+
+请注意：
+- 不要为了“让红灯变绿”而伪造一次 AI 调用。
+- 现在首要目标不是强行全绿，而是先清掉语义误报，让真正的 blocker 暴露出来。
+- 真正的 API timeout、retCode 非 0、public fetch_errors、should_call_ai=true 但没调用，这些仍必须当成硬错误。
+
+请从“阅读今晚新文件 -> 复述当前真实状态 -> 给出精确补丁计划 -> 进入补丁实施”这个顺序开始。

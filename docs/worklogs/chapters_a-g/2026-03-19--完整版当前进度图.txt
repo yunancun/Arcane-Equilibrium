@@ -1,0 +1,576 @@
+OpenClaw Bybit Agent 项目
+校正后完整版当前进度图
+日期：2026-03-19
+用途：用于后续新分支/新对话/新维护者恢复上下文；统一当前正式章节口径；防止把历史临时编号、开发顺序编号、正式章节树混为一谈。
+
+==================================================
+一、这份文件解决什么问题
+==================================================
+
+这份文件不是单纯“再写一版工程记录”，而是专门解决最近几天已经暴露出来的两个问题：
+
+1. 工程已经推进得比最早预估更深，单靠旧的 D21/D22/D23 顺序已经不够描述当前状态；
+2. 近期开发过程中曾经把一部分“提前展开的章节”临时记成了 G4.x / G5 / G6，导致后续阅读时非常容易把：
+   - 真实业务事件验证层（正式 G）
+   - Transition Engine Skeleton（正式 J）
+   - Paper / Demo Gate（正式 K）
+   混在一起。
+
+因此，后续必须统一口径：
+
+- 历史开发顺序编号，只是“当时怎么推进”的过程编号；
+- Revision 2 章节树，才是“现在怎么理解整个工程”的正式章节树；
+- 任何后续维护、注释、索引、handoff、工程日志，都应该以本文件这套口径为准。
+
+==================================================
+二、校正后的统一正式口径
+==================================================
+
+--------------------------------------------------
+2.1 项目总目的（不能再忘）
+--------------------------------------------------
+
+本项目不是一个普通自动下单脚本，也不是一个只会买卖的 bot。
+
+本项目真正要做的是一个：
+
+“以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。”
+
+长期目标是：
+
+- 风险可控
+- 可审计
+- 可学习
+- 可逐步放权
+- 在成本、延迟、风控、权限治理都受控的前提下，追求长期净收益最大化
+
+几个绝对不能遗忘的根原则：
+
+1. 不是只看 gross PnL，而必须看 net PnL
+   - 交易收益不是唯一目标
+   - 必须同时考虑 AI 成本、电费、设备折旧、手续费、基础设施成本、未来维护成本
+
+2. AI 输出不能当成即时命令
+   - AI 有延迟
+   - 市场会变化
+   - AI 更应输出 decision lease（决策租约）
+   - 本地层还要再做 freshness / risk / timing / permission / execution gate
+
+3. 权限不能按时间自动升级，必须按表现赢得
+   - 不是跑久了就放权
+   - 不是全局放权
+   - 而是在已验证有效的子场景中局部放权
+
+4. 项目最终形态不是机械 bot，而是长期进化型交易个体
+   - 会观察
+   - 会判断
+   - 会审计
+   - 会学习
+   - 会自我观测
+   - 会产出经营报告
+   - 会在严格边界下逐步赢得更高权限
+
+--------------------------------------------------
+2.2 Agent 核心需求（正式口径）
+--------------------------------------------------
+
+A. 安全与治理
+- 默认 read_only
+- 默认 execution disabled
+- 默认 AI 不可直接跨过本地 gate 驱动真实执行
+- 任何阶段都必须可审计、可解释、可回放
+
+B. 数据感知能力
+- 读真实交易所 public / private readonly 数据
+- 建立 snapshot
+- 接入 WS
+- 区分控制面消息与真实 business-topic 事件
+- 维护 freshness / health / runtime state
+
+C. 决策输入能力
+- 把账户、持仓、订单、成交、WS 状态、business event 状态加工成结构化输入
+- 先做好本地输入治理，再谈 AI
+
+D. AI 调用治理能力
+- 不是每次都问 AI
+- 只有值得时才问
+- 必须有 thought gate / query budget / model router / compute governor
+- AI 成本必须纳入 net PnL
+
+E. 学习能力
+- 未来必须形成：
+  事实 -> 决策 -> 结果 -> 归因 -> 更新
+- 能记住哪些判断有效，哪些 AI 调用浪费，哪些环境适合哪些策略
+
+F. 自我观测能力
+- 未来要观测 CPU / RAM / 网络 / REST / WS / DB / 模块阻塞点 / 本地推理延迟等
+
+G. 经营报告能力
+- 未来要能输出 daily / weekly / monthly 级别的收益、成本、净收益、问题归因、优化建议
+
+--------------------------------------------------
+2.3 历史编号与正式章节的校正映射
+--------------------------------------------------
+
+这一部分非常重要，后续最容易混乱的地方就在这里。
+
+【历史推进编号】      -> 【Revision 2 正式章节理解】
+
+A / B / C 早期基础层  -> A / B / C
+D21 readonly observer hardened
+                      -> D. Readonly Observer 主链
+D22 business-event classification
+                      -> E. Business Event Classification
+D23 event-driven scaffold
+                      -> F. Event-Driven Transition Scaffold
+
+后来临时写成的 G1 / G2 / G3
+（事件回放、正向非空验证、负向阻断验证）
+                      -> 正式仍属于 G. 真实业务事件验证层
+
+后来一度临时写成的 G4.x
+（replay matrix / audit trail / rule layer / state graph / checkpoint 等）
+                      -> 正式应归到 J. Transition Engine Skeleton
+
+后来一度临时写成的 G5 / G6
+（demo gate contract / readiness / adapter / lifecycle / projection / risk / summary / handoff / final audit）
+                      -> 正式应归到 K. Paper / Demo Gate
+
+结论：
+- G 章就是“真实业务事件验证层”
+- J 章才是“Transition Engine Skeleton”
+- K 章才是“Paper / Demo Gate”
+- 以后不能再把 J / K 的内容记回 G4.x / G5 / G6
+
+==================================================
+三、校正后的完整正式章节树（Revision 2）
+==================================================
+
+状态标记：
+- [已完成]：当前可视为收口
+- [已提前展开/部分完成]：成果已做出来，但不是按原优先级顺序推进的，后续要带着成果继续而不是回滚
+- [当前优先 P0]：下一分支最应优先推进
+- [高优先 P1]：紧随其后
+- [中优先 P2]：前述层完成后推进
+- [后续 P3]：更后阶段
+
+--------------------------------------------------
+A. 本地基础层  [已完成]
+--------------------------------------------------
+A1. 硬件 / 主机 / 网络底座
+A2. Ubuntu / Python / Docker / Postgres 环境
+A3. 文件路径与 latest/dated 输出规范
+A4. 本地服务编排基础
+
+当前判断：
+- 已完成
+- 无需返工
+- 继续作为后续所有层的底座使用
+
+--------------------------------------------------
+B. OpenClaw 模型层  [已完成 / 方向已定]
+--------------------------------------------------
+B1. OpenClaw 本地模型使用定位
+B2. 多模型角色分层
+B3. 模型切换与资源调度基础思路
+
+当前判断：
+- 核心方向已定
+- 未来与 H 章（AI 治理）再汇合
+
+--------------------------------------------------
+C. 接入前治理与骨架  [已完成]
+--------------------------------------------------
+C1. Bybit 接入前安全原则
+C2. read_only 硬边界
+C3. 脚本 / latest / contract / audit 基础模式
+C4. 目录 / 日志 / 产物结构规范
+
+当前判断：
+- 已完成
+- 是后续所有 builder / contract / audit 写法的底层规范来源
+
+--------------------------------------------------
+D. Readonly Observer 主链  [已完成]
+--------------------------------------------------
+D1. private REST readonly checks
+D2. preflight guard
+D3. snapshot + normalize + postgres
+D4. ws smoke + persistent ws listener
+D5. ws runtime facts
+D6. decision packet
+D7. observer verdict
+D8. acceptance
+D9. runtime / summary / handoff / audit / consistency
+
+当前判断：
+- 已完成
+- 当前系统最扎实的底盘之一
+- 当前主系统真实状态仍锚定在本章成果之上
+
+--------------------------------------------------
+E. Business Event Classification  [已完成]
+--------------------------------------------------
+E1. business event smoke
+E2. extract from ws jsonl
+E3. ingestion from ws
+E4. runtime facts
+E5. state classification
+E6. runtime / policy / summary / handoff / audit 集成
+
+当前判断：
+- 已完成
+- 核心成果不是“已经有业务事件”，而是系统已经会正确表达：
+  - healthy_no_business_events_yet
+  - healthy_business_events_present
+  - stale_or_missing_business_event_feed
+
+--------------------------------------------------
+F. Event-Driven Transition Scaffold  [已完成]
+--------------------------------------------------
+F1. event_driven_state
+F2. event_driven_phase
+F3. event_transition_input
+F4. event_transition_decision
+F5. event_transition_outcome
+F6. chain consistency
+F7. readiness summary
+F8. handoff
+F9. final audit
+
+当前判断：
+- 已完成
+- 当前高层语义为：
+  healthy_but_empty / observer_only_empty_feed / keep_observe_only / observe_only_retained
+- 这说明结构完整，但仍为空态，不代表 engine 已完成
+
+--------------------------------------------------
+G. 真实业务事件验证层  [已部分完成；仍是当前优先 P0]
+--------------------------------------------------
+G1. replay harness / fixtures
+G2. wallet / order / execution / position 非空真实事件验证
+G3. 幂等 / 去重 / 指纹 / 乱序 / replay 验证
+G4. 非空事件 acceptance / regression 套件
+
+当前真实完成度判断：
+
+G1：已完成
+- 已做出 fixture pack builder / contract
+- 已做出 replay harness / contract
+- 已验证 4 类基础事件样本：
+  wallet / order / execution / position
+- 已证明 replay 输出与主 runtime 隔离
+
+G2：已完成（隔离 replay 正向验证）
+- 已做出 replay state / phase / input / decision / outcome / consistency / contract
+- 已验证正向路径能从：
+  event_flow_present
+  -> observer_event_flow_seen
+  -> input_ready_for_transition_engine
+  -> allow_transition_engine
+  -> transition_engine_entry_allowed
+- 已确认这是“隔离 replay 验证成立”，不是主 runtime 已切换
+
+G3：已完成（隔离 replay 负向阻断验证）
+- 已做出 negative fixture pack / negative replay / blocked chain / contract
+- 已验证当事件集不完整（例如只有 wallet）时，语义会保持阻断：
+  not_ready
+  -> observer_feed_not_ready
+  -> input_not_ready
+  -> block_transition_engine
+  -> transition_engine_blocked
+
+G4：部分完成
+- 已有若干正向/负向 consistency、contract、block regression 素材
+- 但正式意义上的“统一 acceptance / regression 套件”还没有完全收口
+- 因此 G 章不能算完全结束
+
+本章当前结论：
+- G1 / G2 / G3 已经先做出来了
+- G4 仍应作为下一分支最优先补齐对象
+- G 章依然是最该优先推进的正式章节
+
+--------------------------------------------------
+H. AI 治理主线  [未开始；高优先 P1]
+--------------------------------------------------
+H1. thought_gate
+H2. query_budget
+H3. model_router v2
+H4. compute governor / anti-abuse
+H5. AI cost logging / governance audit
+
+当前判断：
+- 尚未正式进入实现
+- 但其重要性非常高
+- 不能再被无限期往后拖
+
+--------------------------------------------------
+I. Decision Lease 主线  [未开始；高优先 P1]
+--------------------------------------------------
+I1. decision lease schema
+I2. lease freshness / validity
+I3. revoke / supersede / expiry
+I4. lease 与 risk gate 集成
+I5. lease audit / replay
+
+当前判断：
+- 尚未正式开始
+- 但它是整个项目“AI 不能直接下命令”这一原则的落地核心
+- 必须尽快进入
+
+--------------------------------------------------
+J. Transition Engine Skeleton  [已提前展开 / 部分完成；中优先 P2]
+--------------------------------------------------
+J1. transition rules
+J2. transition executor
+J3. transition audit trail
+J4. transition replay
+J5. fail-safe / rollback
+
+当前真实完成度判断：
+
+已完成或已做出骨架：
+- transition replay matrix
+- transition audit trail
+- transition rule layer skeleton
+- transition state graph skeleton
+- transition state graph consistency
+- transition engine summary
+- transition engine handoff
+- transition engine final audit
+- transition engine checkpoint
+
+按正式章节映射理解：
+- J1：已部分完成（rule layer skeleton 已有）
+- J2：已部分完成（state graph / executor skeleton 已有）
+- J3：已部分完成（audit trail 已有）
+- J4：已部分完成（positive / negative replay matrix 已有）
+- J5：未正式完成
+  - 当前只是通过“execution path closed / readonly lock / fail-safe semantics”表达了禁行边界
+  - 还没有真正独立的 rollback 子系统
+
+本章当前结论：
+- J 章不是从零开始
+- J 章已经被提前做出一大块 skeleton
+- 但它仍然只是 skeleton，不是完整 transition engine
+
+--------------------------------------------------
+K. Paper / Demo Gate  [已提前展开 / 部分完成；中优先 P2]
+--------------------------------------------------
+K1. paper execution adapter
+K2. pretrade risk gate 对接
+K3. simulated fill / fee / slippage
+K4. paper accounting
+K5. paper acceptance / audit
+
+当前真实完成度判断：
+
+已完成的设计/骨架层：
+- demo gate contract
+- demo gate readiness
+- demo/paper adapter skeleton
+- paper order lifecycle skeleton
+- paper position / balance projection skeleton
+- pretrade risk integration skeleton
+- demo gate summary
+- demo gate handoff
+- demo gate final audit
+
+按正式章节映射理解：
+- K1：已部分完成（adapter skeleton 已有）
+- K2：已部分完成（pretrade risk integration skeleton 已有）
+- K3：未正式实现
+  - 目前只有 lifecycle / projection skeleton
+  - 还没有真实 simulated fill / fee / slippage 逻辑
+- K4：未正式实现
+  - 目前只有 projection skeleton
+  - 还没有正式 paper accounting
+- K5：设计层审计部分已存在
+  - 但 runnable 的 paper acceptance / audit 还没形成完整闭环
+
+本章当前结论：
+- K 章已经提前做出很大一批 design skeleton
+- 但 gate 仍然明确关闭
+- 当前不能接任何 paper order
+- 更不能把 K 章误认为已经进入 demo execution
+
+--------------------------------------------------
+L. Learning / Self-Observability / Net PnL  [未开始；中优先 P2]
+--------------------------------------------------
+L1. Learning Engine v1
+L2. Self-Observability Engine v1
+L3. Net PnL / ROI / cost reporting
+L4. 决策结果归因与反馈
+
+当前判断：
+- 尚未开始
+- 但这是项目区别于普通 bot 的关键长期能力
+- 后续不能缺席
+
+--------------------------------------------------
+M. Supervised Live Gate  [未开始；后续 P3]
+--------------------------------------------------
+M1. supervised execution policy
+M2. restricted live permissions
+M3. human override / approval layer
+M4. supervised live audit
+
+当前判断：
+- 仍远未到进入时机
+- 必须等 G/H/I/J/K/L 主干成熟后再谈
+
+--------------------------------------------------
+N. Constrained Autonomous Live  [未开始；后续 P3]
+--------------------------------------------------
+N1. limited autonomous execution scope
+N2. performance-based permission expansion
+N3. abnormal rollback / kill switch
+N4. autonomous governance
+
+当前判断：
+- 这是终局层
+- 绝不能跳级推进
+
+==================================================
+四、当前真实完成状态总表（校正版）
+==================================================
+
+已正式完成：
+- A
+- B（方向已定）
+- C
+- D
+- E
+- F
+
+已部分完成 / 已提前展开：
+- G（G1-G3 已完成，G4 未完全收口）
+- J（已做出大块 skeleton）
+- K（已做出大块 design skeleton）
+
+尚未正式开始：
+- H
+- I
+- L
+- M
+- N
+
+==================================================
+五、当前系统的准确定位（校正版）
+==================================================
+
+当前系统的最准确定位应表述为：
+
+“当前系统是 production-grade readonly observer infrastructure + business-event classification + event-driven scaffold，
+并且已经提前做出一部分真实业务事件验证层（G）、
+一部分 transition engine skeleton（J）、
+一部分 paper/demo gate design skeleton（K）；
+但真实线上 business-topic 非空流尚未正式验证收口，
+AI governance 尚未接入，
+decision lease 尚未建立，
+paper/demo gate 仍明确关闭，
+live execution 仍严格禁止。”
+
+换句话说：
+
+1. 当前系统是高质量的观察、分类、表达、审计底座
+2. 当前系统不是交易执行基础设施
+3. 当前系统不是自动交易系统
+4. 当前系统不是 live trading system
+5. 当前系统已经具备继续扩展为 event-driven trading architecture 的基础
+6. 但还不能跳过 G/H/I/J/K 之间的关键层直接进入 execution
+
+==================================================
+六、当前主 runtime 的真实边界（必须牢牢记住）
+==================================================
+
+截至当前，主 runtime 仍然保持：
+
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- observer_state = healthy_observe_only
+- execution_state = disabled
+- ai_state = disabled_by_policy
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+这意味着：
+
+1. 主系统仍锚定在 D/E/F 的只读观察主链之上
+2. G/J/K 的 replay、skeleton、design 验证都必须继续与主 runtime 隔离
+3. 当前所有正向 replay 结果，都不代表主系统已经进入 candidate execution
+4. 所有 transition / demo 相关成果，目前都只是隔离验证或设计层成果
+
+==================================================
+七、最重要的“防混淆提醒”
+==================================================
+
+1. 不要再把 J 章写回 G4.x
+2. 不要再把 K 章写回 G5 / G6
+3. 不要把历史 D21/D22/D23 推进编号当成正式章节树本体
+4. 不要把 healthy_no_business_events_yet 当故障
+5. 不要把 healthy_but_empty 当成 transition engine ready
+6. 不要把 paper/demo skeleton 当成 paper execution ready
+7. 不要把当前系统说成“已经接近实盘执行”
+
+==================================================
+八、接下来最合理的正式推进顺序
+==================================================
+
+按“正式优先级 + 当前已提前展开成果”的综合判断，后续最合理顺序如下：
+
+第一优先：
+1. 先补齐 G4
+   - 把 G 章真正收口
+   - 让正向/负向真实业务事件验证形成正式 acceptance / regression 套件
+
+第二优先：
+2. 进入 H 章
+   - thought gate
+   - query budget
+   - model router v2
+   - compute governor
+   - AI cost logging
+
+3. 进入 I 章
+   - decision lease schema
+   - freshness / validity
+   - revoke / supersede / expiry
+   - lease + risk gate
+   - lease audit / replay
+
+第三优先：
+4. 回到 J 章，把“已做出的 skeleton”正式化
+   - 把规则层从表达骨架推进为真正 transition rule engine 起点
+   - 把 state graph / executor 从 skeleton 推向正式 engine 结构
+   - 单独完成 J5 fail-safe / rollback
+
+5. 回到 K 章，把“已做出的 design skeleton”推进为 runnable 的 demo/paper gate
+   - 让 simulated fill / fee / slippage 真正落地
+   - 让 paper accounting 真正出现
+   - 让 paper acceptance / audit 形成闭环
+
+第四优先：
+6. 进入 L
+   - learning
+   - self-observability
+   - net pnl / cost reporting
+
+最后再谈：
+7. M
+8. N
+
+==================================================
+九、交接给下一分支/下一对话时可直接复用的最短说明
+==================================================
+
+可直接复用如下：
+
+“A-C 已完成；D/E/F 已正式完成；当前系统仍是 production-grade readonly observer + business-event classification + event-driven scaffold。G 章已完成 G1/G2/G3，G4 尚未收口。J 章和 K 章已被提前展开，但它们只是 skeleton/design 层成果，不能误认为已进入 transition engine 或 paper execution。当前主 runtime 仍是 read_only / ready_readonly_observer / execution disabled / ai disabled_by_policy。下一步最合理顺序是先补齐 G4，再进入 H（AI 治理）与 I（decision lease），之后再把 J/K 从骨架推进为正式层。”
+
+==================================================
+十、最后一句总括
+==================================================
+
+截至 2026-03-19，工程真正的校正结论不是“之前全错了”，而是：
+“之前成果大体方向是对的，但开发过程中把一部分提前展开的 J/K 成果临时记成了 G4.x/G5/G6，现已校正。当前正式理解应为：A-F 已完成，G 部分完成，J/K 已提前展开但仍只是 skeleton/design 层，后续必须按 G -> H/I -> J/K -> L -> M/N 的正式主线继续推进。”

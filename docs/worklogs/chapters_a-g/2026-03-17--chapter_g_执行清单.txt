@@ -1,0 +1,390 @@
+OpenClaw Bybit Agent 项目
+Revision 2 执行清单版
+日期：2026-03-17
+用途：后续分支直接继续执行的清单版本
+
+==================================================
+一、当前完成边界
+==================================================
+
+已完成：
+A. 本地基础层
+B. OpenClaw 模型层（方向已定）
+C. 接入前治理与骨架
+D. Readonly Observer 主链
+E. Business Event Classification
+F. Event-Driven Transition Scaffold
+
+当前系统定位：
+- production-grade readonly observer
+- business-event classification 已完成
+- event-driven scaffold 已完成
+- 真实 business-topic 非空事件尚未验证
+- AI governance 尚未接入
+- decision lease 尚未接入
+- transition engine 尚未开始
+- paper/demo/live 均未进入
+
+当前关键状态口径：
+- business_event_state = healthy_no_business_events_yet
+- event_driven_readiness = healthy_but_empty
+- phase_code = observer_only_empty_feed
+- decision_code = keep_observe_only
+- outcome_code = observe_only_retained
+
+==================================================
+二、接下来正式执行顺序
+==================================================
+
+第一优先（P0）
+G. 真实业务事件验证层
+
+第二优先（P1）
+H. AI 治理主线
+I. Decision Lease 主线
+
+第三优先（P2）
+J. Transition Engine Skeleton
+K. Paper / Demo Gate
+L. Learning / Self-Observability / Net PnL
+
+后续（P3）
+M. Supervised Live Gate
+N. Constrained Autonomous Live
+
+==================================================
+三、P0：G 章执行清单（下一分支起点）
+==================================================
+
+--------------------------------------------------
+G1. replay harness / fixtures
+--------------------------------------------------
+目标：
+- 建立可重复使用的真实/半真实 business event 输入夹具
+- 能重放 wallet / order / execution / position 事件样本
+- 为后续非空业务事件验证打底
+
+完成标准：
+- 能从样本文件或构造 fixture 重放事件
+- 输出 latest / dated 结果
+- 有 contract check
+- 有基础说明注释
+
+验收重点：
+- 事件输入格式稳定
+- 能用于重复测试
+- 不会污染现有 readonly observer 主链
+
+--------------------------------------------------
+G2. 非空真实业务事件验证
+--------------------------------------------------
+目标：
+- 验证出现真实 wallet/order/execution/position 事件时，
+  系统是否能从 empty 正确切换到 non-empty 语义
+
+完成标准：
+- 至少验证 wallet / order / execution / position 四类中的主要事件流
+- business_event_state 能从 healthy_no_business_events_yet 正确过渡
+- event-driven state / phase / input / decision / outcome 的语义同步变化
+
+验收重点：
+- topic_counts 不再为空
+- normalized_count > 0
+- has_business_events = true
+- 相关 readiness / phase / decision 不再停留 empty 分支
+
+--------------------------------------------------
+G3. 幂等 / 去重 / 指纹 / 乱序 / replay 验证
+--------------------------------------------------
+目标：
+- 确保相同事件不会被重复计入
+- 确保乱序、重放、重复到达时语义仍可控
+
+完成标准：
+- 有 event fingerprint 相关验证
+- 对重复事件、乱序事件、重复回放有测试输出
+- contract / consistency 层能反映异常或正确处理结果
+
+验收重点：
+- normalized_count 不应因重复事件失真
+- 同一事件不可重复推进状态
+- replay 行为要可解释、可审计
+
+--------------------------------------------------
+G4. 非空事件 acceptance / regression 套件
+--------------------------------------------------
+目标：
+- 建立一组专门针对“真实 business-topic 非空流”的回归检查
+
+完成标准：
+- 新 acceptance 或 regression 检查存在
+- 能区分 empty healthy 与 non-empty healthy
+- 有 latest 审计文件
+- 有失败检查输出结构
+
+验收重点：
+- 后续改脚本时，不会把 non-empty 路径搞坏而无人发现
+
+==================================================
+四、P1：H 章执行清单（AI 治理）
+==================================================
+
+--------------------------------------------------
+H1. thought_gate
+--------------------------------------------------
+目标：
+- 明确什么情况下允许进入 AI 思考/调用阶段
+- 默认不问 AI，满足条件才问
+
+完成标准：
+- 有 gating 输出文件
+- 有 allowed / blocked 语义
+- 有原因字段
+
+--------------------------------------------------
+H2. query_budget
+--------------------------------------------------
+目标：
+- 让 AI 调用受预算控制，而不是无限使用
+
+完成标准：
+- 有 budget state
+- 有 remaining / blocked / exhausted 等字段
+- 有 contract check
+
+--------------------------------------------------
+H3. model_router v2
+--------------------------------------------------
+目标：
+- 建立不同任务去不同模型的路由逻辑
+- 明确本地模型与云模型职责
+
+完成标准：
+- 有 router 输出
+- 有 route reason
+- 可解释为什么走某模型
+
+--------------------------------------------------
+H4. compute governor / anti-abuse
+--------------------------------------------------
+目标：
+- 限制过度推理、重复提问、无意义计算
+
+完成标准：
+- 有 governor 判断输出
+- 有 block / allow / throttle 语义
+
+--------------------------------------------------
+H5. AI cost logging / governance audit
+--------------------------------------------------
+目标：
+- 所有 AI 调用都能记账、审计、回看
+
+完成标准：
+- 至少有成本记录 latest
+- 有治理审计输出
+- 能看见为什么调用、调用了什么层级
+
+==================================================
+五、P1：I 章执行清单（Decision Lease）
+==================================================
+
+--------------------------------------------------
+I1. decision lease schema
+--------------------------------------------------
+目标：
+- 把未来 AI 结果变成受控的 decision lease，而不是直接命令
+
+--------------------------------------------------
+I2. lease freshness / validity
+--------------------------------------------------
+目标：
+- 决策必须有有效期、过期判断
+
+--------------------------------------------------
+I3. revoke / supersede / expiry
+--------------------------------------------------
+目标：
+- 新租约替代旧租约
+- 旧租约可撤销、可过期
+
+--------------------------------------------------
+I4. lease 与 risk gate 集成
+--------------------------------------------------
+目标：
+- 即使 lease 存在，也必须过风险门
+
+--------------------------------------------------
+I5. lease audit / replay
+--------------------------------------------------
+目标：
+- 租约全链路可审计、可回放
+
+这一章统一验收口径：
+- lease 不能直接等于“执行许可”
+- lease 只是受治理的决策载体
+
+==================================================
+六、P2：J 章执行清单（Transition Engine Skeleton）
+==================================================
+
+--------------------------------------------------
+J1. transition rules
+--------------------------------------------------
+目标：
+- 明确哪些输入与状态允许推进 transition
+
+--------------------------------------------------
+J2. transition executor
+--------------------------------------------------
+目标：
+- 真正开始执行状态推进
+
+--------------------------------------------------
+J3. transition audit trail
+--------------------------------------------------
+目标：
+- 所有 transition 过程留痕
+
+--------------------------------------------------
+J4. transition replay
+--------------------------------------------------
+目标：
+- transition 可回放
+
+--------------------------------------------------
+J5. fail-safe / rollback
+--------------------------------------------------
+目标：
+- transition 失败时能安全退回
+
+统一提醒：
+- 这一章才是真正 transition engine 起点
+- 不要把 D23 的 scaffold 误认为 engine 本体
+
+==================================================
+七、P2：K 章执行清单（Paper / Demo Gate）
+==================================================
+
+--------------------------------------------------
+K1. paper execution adapter
+K2. pretrade risk gate 对接
+K3. simulated fill / fee / slippage
+K4. paper accounting
+K5. paper acceptance / audit
+--------------------------------------------------
+
+统一目标：
+- 把系统推进到可模拟执行阶段
+- 验证真实净收益逻辑而不是表面状态流
+
+统一验收：
+- 纸面环境中能够看见：
+  - simulated execution
+  - fee / slippage
+  - accounting
+  - 审计记录
+  - acceptance / audit
+
+==================================================
+八、P2：L 章执行清单（Learning / Self-Observability / Net PnL）
+==================================================
+
+--------------------------------------------------
+L1. Learning Engine v1
+L2. Self-Observability Engine v1
+L3. Net PnL / ROI / cost reporting
+L4. 决策结果归因与反馈
+--------------------------------------------------
+
+统一目标：
+- 让系统不仅会跑，还会总结、会学习、会解释
+
+特别注意：
+- 本项目最终不能只看 gross PnL
+- 必须纳入 API 成本、手续费、滑点、错误成本等，形成 net PnL 视角
+
+==================================================
+九、P3：后续章节
+==================================================
+
+--------------------------------------------------
+M. Supervised Live Gate
+--------------------------------------------------
+前提：
+- G / H / I / J / K 至少完成主干
+- 通过 paper/demo 验证
+
+内容：
+- supervised execution policy
+- restricted live permissions
+- human override / approval layer
+- supervised live audit
+
+--------------------------------------------------
+N. Constrained Autonomous Live
+--------------------------------------------------
+前提：
+- supervised live 已长期稳定
+- 风险、治理、审计全链完整
+
+内容：
+- limited autonomous execution scope
+- performance-based permission expansion
+- abnormal rollback / kill switch
+- autonomous governance
+
+==================================================
+十、每章推进时的通用动作
+==================================================
+
+每新增一个核心脚本，默认都要补齐：
+
+1. 头部 MODULE_NOTE 注释
+2. latest / dated 输出
+3. contract check
+4. 必要时加 consistency / final audit
+5. 更新 SCRIPT_INDEX.md
+
+==================================================
+十一、每次修改后的建议检查顺序
+==================================================
+
+若改的是 readonly observer 主链相关：
+1. python3 -m py_compile
+2. bybit_failure_policy_builder.py
+3. bybit_full_readonly_observer_cycle.py
+4. bybit_observer_acceptance_check.py
+5. bybit_runtime_state_resolver.py
+6. bybit_readonly_final_summary.py
+7. bybit_next_phase_handoff.py
+8. bybit_readonly_audit.py
+9. bybit_latest_consistency_check.py
+
+若改的是 business-event 或 event-driven 子链：
+1. 相关 builder
+2. 对应 contract check
+3. chain consistency（若该层已有）
+4. readiness / handoff / final audit（若该层已有）
+
+==================================================
+十二、当前最重要的提醒
+==================================================
+
+1. 当前下一步不是 live，不是 demo，也不是直接接 AI 下单
+2. 当前下一步是 G1：真实业务事件验证
+3. 当前 healthy_no_business_events_yet 是健康空态，不是故障
+4. 当前 event-driven scaffold 完成，不代表 transition engine 完成
+5. 所有新写程序都要一开始就写注释
+6. 所有版本号变更都要同步检查下游引用
+7. 所有 latest 字段名变更都要检查 summary / audit / handoff / consistency / contract
+
+==================================================
+十三、一句话执行入口
+==================================================
+
+下一个分支直接从这里开始：
+
+“先做 G1 replay harness / fixtures，然后推进 G2 非空真实业务事件验证，
+确认 event-driven 语义能从 healthy_but_empty 正确切换，再继续 G3 与 G4。”
+

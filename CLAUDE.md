@@ -420,6 +420,18 @@ python3 scripts/bybit_runtime_state_resolver.py
 
 ---
 
+## 十二-b、docs/ 文档目录规范
+
+**所有向 `docs/` 写入文件的操作必须遵守以下规则（无例外）：**
+
+1. 文件必须放入对应分类目录（`worklogs/` / `handoffs/` / `decisions/` / `incidents/` / `references/`），**禁止**直接放在 `docs/` 根目录
+2. 文件命名格式：`YYYY-MM-DD--功能描述.扩展名`（同天多份加时间：`YYYY-MM-DD--HHmm--描述`）
+3. **每次新增文件后必须更新 `docs/README.md` 底部的文档索引**
+4. 日志必须人类可读，中文为主 + 英文辅助，简洁有上下文
+5. 完整规范见 `docs/README.md`
+
+---
+
 ## 十三、Shell 命令工作方式要求
 
 - 每轮只给 1 小组命令（1-2 个逻辑动作）

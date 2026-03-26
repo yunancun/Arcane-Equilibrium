@@ -1,0 +1,529 @@
+OpenClaw / Bybit 项目
+H/I 章节正式完工对账报告（2026-03-22）
+
+一、报告目的
+本报告用于在后续新对话、换分支、或阶段性复盘时，快速、准确地恢复当前项目在 H 章节（AI 治理链）与 I 章节（decision lease / approval / authority shadow control plane）上的真实完工状态，避免出现以下常见混乱：
+1) 把 shadow/control-plane 完工误判为 live execution ready；
+2) 把已经完成的 H/I 子章节重复重做；
+3) 忽略 hard boundary，误把只读治理链推进到执行链；
+4) 后续接手时忘记 H 与 I 的先后依赖关系和验收结果。
+
+本报告严格基于本轮终端实测输出整理，不对未验证内容做乐观补充。
+
+======================================================================
+二、截至本报告时点的总判断
+======================================================================
+
+总判断：
+H 章节已正式闭环。
+I 章节已正式闭环。
+但二者闭环的含义是：
+“只读治理链 + shadow decision control plane 已完整收口”，
+不是“已经获得 live execution 权限”或“已经可以自动实盘执行”。
+
+当前最准确的系统定位应写为：
+生产级只读 observer 基础设施 + 已闭环的 AI 治理层 + 已闭环的 shadow 决策控制平面，尚未进入 live execution design/activation。
+
+======================================================================
+三、H 章节完工结论（H1-H5）
+======================================================================
+
+H 章节的主目标：
+在 read_only / execution disabled 的前提下，把“AI 调用”从一个松散的模型调用动作，收口成一个受治理、可审计、可限额、可解释、不可越权的 observation-only 主链。
+
+--------------------------------------------------
+H1：Thought Gate
+--------------------------------------------------
+完成结果：已闭环。
+关键验证结果：
+- AI 返回内容已被成功约束为 observation_only 语义；
+- 返回 JSON 合同完整满足；
+- governed decision 已生成；
+- execution_authority = not_granted；
+- live_execution_allowed = false；
+- decision_lease_emitted = false。
+
+关键结论：
+H1 证明“可以调用 AI”，但更重要的是证明“AI 输出只能进入 governed observation 路径，不能被当作执行许可”。
+
+H1 最终验收结论：
+- h1_stage_closed = True
+- ready_for_h2 = True
+- runtime_still_protected = True
+
+--------------------------------------------------
+H2：Query Budget
+--------------------------------------------------
+完成结果：已闭环。
+关键验证结果：
+- ai_daily_budget_usd = 5.0
+- ai_per_call_budget_usd = 0.05
+- max_output_tokens = 220
+- max_retries = 0
+- runtime_state = query_budget_runtime_ready
+- audit_state = query_budget_closed_ready_for_h3
+- warning_flags = []
+
+关键结论：
+H2 完成了预算声明、结构化限额、调用轨迹可追踪、零重试治理。此时 AI 调用不再是“随便调一次看看”，而是进入了正式预算约束链。
+
+H2 最终验收结论：
+- h2_stage_closed = True
+- ready_for_h3 = True
+- runtime_still_protected = True
+
+--------------------------------------------------
+H3：Model Router v2
+--------------------------------------------------
+完成结果：已闭环。
+关键验证结果：
+- 当前任务被归类为 governed_ai_observation_json；
+- route_mode = cloud_compact_json；
+- active provider/model = openai_native / gpt-5-mini；
+- 长文路由未进入当前交易主链；
+- 本地职责与云端职责边界已明确。
+
+关键结论：
+H3 不是“换模型玩具”，而是把“什么任务走本地、什么任务允许走受限云端、为什么是这个 provider/model、为什么不是 longform route”全部结构化了。
+
+H3 最终验收结论：
+- h3_stage_closed = True
+- ready_for_h4 = True
+- runtime_still_protected = True
+
+备注：
+H3 带有 soft warning，主要来自最近 trade 字段不足、freshness 软提示、volatility_band_not_preferred 等，但没有形成阻塞失败。
+
+--------------------------------------------------
+H4：Compute Governor / Anti-abuse
+--------------------------------------------------
+完成结果：已闭环。
+关键验证结果：
+- 零重试约束被保留；
+- 单一路径紧凑输出约束成立；
+- 不允许在主链中进行 longform escalation；
+- 不允许升级成 execution permission；
+- idempotency key 已纳入结构视图；
+- anti-abuse 维度已正式建模。
+
+关键结论：
+H4 完成的不是“计算更快”，而是“调用行为不失控”：
+不能爆算、不能乱重试、不能无限扩输出、不能借道升级执行权。
+
+H4 最终验收结论：
+- h4_stage_closed = True
+- ready_for_h5 = True
+- runtime_still_protected = True
+
+--------------------------------------------------
+H5：AI Cost Governance
+--------------------------------------------------
+完成结果：已闭环。
+关键验证结果：
+- usage / latency / budget ceiling 已记录；
+- 未伪造“真实美元成本”；
+- cost_accounting_summary 中明确区分了结构预算上限与实际 pricing 未绑定事实；
+- H1-H4 闭环状态全部被纳入治理审计；
+- 最终状态：H 章节全闭环并 ready_for_i1。
+
+关键结论：
+H5 完成后，H 章节整体从“AI 能工作”提升为“AI 主链具备完整治理边界、预算边界、反滥用边界、成本审计边界”。
+
+H5 最终验收结论：
+- h5_stage_closed = True
+- h_chapter_closed = True
+- ready_for_i1 = True
+- runtime_still_protected = True
+
+======================================================================
+四、I 章节完工结论（I1-I10）
+======================================================================
+
+I 章节的主目标：
+不是给系统开实盘权限，而是在严格 shadow-only 的前提下，把未来可能进入 live 的“决策租约 / 审批 / 授权 / 人工确认”控制平面先完整建模、验证、收口。
+
+--------------------------------------------------
+I1：Decision Lease Schema
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- 定义 bybit_decision_lease schema；
+- required_fields、timing_constraints、hard_disqualifiers 全部建模；
+- lease_template 建立；
+- schema_runtime_view 明确：schema_only_mode = true；
+- lease_emit_allowed_now = false；
+- execution_authority = not_granted；
+- decision_lease_emitted = false。
+
+关键结论：
+I1 完成的是“租约的法理结构与字段合同”，不是租约发放。
+
+--------------------------------------------------
+I2：Decision Lease Shadow Issue
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- preflight 建立；
+- shadow candidate 成功生成；
+- ttl_ms = 12000；
+- consume_slack_ms = 1500；
+- shadow_candidate_ready = true；
+- 但 lease_emit_allowed_now = false；
+- decision_lease_emitted = false。
+
+关键结论：
+I2 说明系统已经能构造“未来租约的影子候选体”，但仍不能发 live lease。
+
+--------------------------------------------------
+I3：Decision Lease Consume Gate
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- simulated consume 路径通过；
+- simulated_before_expiry = true；
+- simulated_within_recommended_window = true；
+- would_pass_if_now = false；
+- headroom_remaining_at_simulated_ms = 11200；
+- headroom_remaining_if_now_ms = -34916；
+- consume_gate_open_live = false；
+- decision_lease_consumed = false。
+
+关键结论：
+I3 非常重要：
+它证明“在影子模型下，按预期时序 consume 是可行的”；
+同时也证明“到了当前人工重查时刻，若现在才去 consume，已经不新鲜 / 会过期 / 不应通过”。
+
+这不是失败，而是非常有价值的 friction observation。
+
+--------------------------------------------------
+I4：Replay / Revoke Defense
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- replay_key / revoke_key 已生成；
+- first_attempt = would_accept_once；
+- second_attempt = would_reject_replay；
+- revoke_attempt = would_record_revoke_shadow_only；
+- duplicate_replay_rejected = true；
+- live_revoke_active = false；
+- live_replay_block_active = false。
+
+关键结论：
+I4 完成后，影子控制平面已经具备“首次可接受、重复应拒绝、撤销路径已建模”的反重放语义。
+
+--------------------------------------------------
+I5：Friction Metrics / Adaptive TTL
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- latency_ms = 4274；
+- current_ttl_ms = 12000；
+- recommended_ttl_ms = 12048；
+- ttl_delta_ms = 48；
+- recommended_consume_slack_ms = 1500；
+- ttl_to_latency_ratio = 2.8077；
+- simulated_headroom_ratio = 0.9333；
+- shadow_apply_only = true；
+- live_apply_allowed_now = false；
+- applied_to_runtime = false。
+
+关键结论：
+I5 不是为了把 TTL 自动改掉，而是先通过真实延迟与影子 consume 数据，建立“未来 live design 时如何更合理地算 TTL/consume slack”的依据。
+
+--------------------------------------------------
+I6：Approval Bridge
+--------------------------------------------------
+完成结果：已闭环。
+注意：最开始尝试运行 `scripts/run_i6_decision_lease_approval_bridge_closure.sh` 报错“没有那个文件或目录”。
+处理方式：
+改为手动顺序执行三步，成功完成本章：
+1) bybit_decision_lease_approval_bridge.py
+2) bybit_decision_lease_approval_bridge_contract_check.py
+3) bybit_decision_lease_approval_bridge_final_audit.py
+
+完成内容：
+- operator_review_required = true；
+- operator_review_status = pending_manual_review；
+- execution_authority_required = granted；
+- execution_authority_status = not_granted；
+- approval_quorum_state = shadow_waiting_manual_and_authority；
+- shadow_bridge_only = true；
+- live_approval_grant_active = false。
+
+关键结论：
+I6 证明审批桥已经建好，但仍然没有真实审批通过，更没有 live grant。
+
+--------------------------------------------------
+I7：Execution Authority Aggregator
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- policy/operator/authority 聚合模型已建立；
+- blocking_reasons = [operator_review_not_approved, execution_authority_not_granted]；
+- shadow_authority_only = true；
+- authority_grant_live = false；
+- lease_emit_allowed_now = false；
+- live_execution_allowed = false。
+
+关键结论：
+I7 是整章最关键的防误判节点之一。
+它明确告诉我们：
+即便前面已经有 schema、shadow candidate、consume/replay/approval bridge，
+只要 operator review 没批准、execution authority 没授予，整个系统就仍然不能跨入 live。
+
+--------------------------------------------------
+I8：Manual Approval Packet
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- manual approval packet 已生成；
+- packet_for_review_only = true；
+- approval_submit_live = false；
+- execution_authority = not_granted；
+- live_execution_allowed = false；
+- decision_lease_emitted = false。
+
+关键结论：
+I8 让“人工审查材料”结构化了，但这个 packet 仍然只是 review-only，不是 live submit packet。
+
+--------------------------------------------------
+I9：Operator Ack Shadow
+--------------------------------------------------
+完成结果：已闭环。
+完成内容：
+- operator ack 结构化建模完成；
+- operator_ack_shadow_only = true；
+- live_operator_ack_enabled = false；
+- operator_ack_record_emitted_live = false；
+- execution_authority 仍为 not_granted；
+- approval_submit_live 仍为 false。
+
+关键结论：
+I9 表示“人类确认动作”也已经在 shadow 模式下结构化，但仍然没有任何 live 权限效果。
+
+--------------------------------------------------
+I10：Clean Recheck / Chapter Closure
+--------------------------------------------------
+完成结果：已闭环。
+关键 recheck 结果：
+- summary_state = decision_lease_chapter_closed_shadow_ready_for_future_live_design
+- handoff_state = decision_lease_chapter_closed_handoff_ready
+- audit_state = decision_lease_chapter_closed_soft_warn
+- i_chapter_closed = True
+- shadow_control_plane_closed = True
+- runtime_still_protected = True
+- ready_for_future_live_design = True
+- execution_authority = not_granted
+- decision_lease_emitted = False
+- live_operator_ack_enabled = False
+- discovered_latest_file_count = 98
+- stage_status = {I1..I9 全部 True}
+
+关键结论：
+I10 正式确认：
+I 章节已经完整闭环，但闭的是 future live design 的 shadow control plane，不是 live execution plane。
+
+======================================================================
+五、H 与 I 的依赖关系和现在的正确理解
+======================================================================
+
+必须牢记：
+1) H 先于 I 完成，且 I 依赖 H 的治理结果；
+2) H 的 governed observation 是 I 的上游输入之一；
+3) I 的所有结构都建立在“read_only / no authority / no emit”的严格前提之上；
+4) H/I 同时完成，并不等于 J/K 就自动完成，更不等于系统能跳到 live。
+
+一句话概括：
+H 解决“AI 是否受治理”；
+I 解决“未来如果要把 AI 结果变成可执行决策控制平面，结构与审计链如何搭好”；
+但目前仍没有解决“live execution activation”。
+
+======================================================================
+六、当前仍然有效的 hard boundaries（必须长期保留）
+======================================================================
+
+以下边界在本轮所有结果里都反复被验证，后续不能在新对话中被忘掉：
+
+1. system_mode 必须继续保持 read_only
+2. execution_state 必须继续保持 disabled
+3. execution_authority 当前仍必须视为 not_granted
+4. decision_lease_emitted 当前必须保持 False
+5. live_execution_allowed 当前必须保持 False
+6. live_approval_grant_active 当前必须保持 False
+7. live_operator_ack_enabled 当前必须保持 False
+8. manual approval packet 当前只可视为 review-only
+9. operator ack 当前只可视为 shadow-only
+10. replay / revoke / consume / adaptive ttl / approval bridge / authority aggregator 全部仍是 shadow semantics，不可被误解释为 live-ready
+11. business-event validation、H 章节、I 章节的输出都不得污染主 runtime 成为“自动下单许可”
+12. 任何 future live design 都必须额外通过：新鲜度检查、独立授权、独立执行门、风险门、审计门
+
+======================================================================
+七、当前 warning_flags 的正确解释
+======================================================================
+
+当前 warning_flags 很长，但大部分属于“软警告 / 结构提醒”，不是章节失败。
+
+它们大致可以分为五类：
+
+A. 市场数据 / 新鲜度类
+- recent_trade_last_price_missing
+- recent_trade_last_ts_missing
+- runtime_state_reference_old
+- freshness_soft_warning_present
+- last_trade_fields_missing
+- volatility_band_not_preferred
+
+含义：
+当前市场事实仍不够强，AI 结果更适合作为 observation-only，不适合升级执行。
+
+B. Shadow-only 结构类
+- decision_lease_shadow_only_mode
+- decision_lease_replay_shadow_only_mode
+- decision_lease_replay_guard_shadow_only_mode
+- decision_lease_adaptive_ttl_shadow_only_mode
+- decision_lease_approval_bridge_shadow_only_mode
+- execution_authority_aggregator_shadow_only_mode
+- manual_approval_packet_review_only_mode
+- operator_ack_shadow_only_mode
+
+含义：
+这些是在提醒“该章已完成，但完成的是 shadow 版本”。
+
+C. 时序 / consume 现实摩擦类
+- consume_now_would_be_expired
+- consume_now_outside_recommended_window
+- consume_now_exceeds_freshness_grace
+- consume_now_path_would_not_pass
+- lease_now_path_negative_headroom
+- lease_friction_latency_elevated
+- adaptive_ttl_recommendation_differs_from_current
+- last_call_latency_exceeds_deadline_hint
+
+含义：
+这些是 future live design 的重要依据，说明真实时延与 TTL/窗口之间的摩擦不能被忽略。
+
+D. 授权 / 审批尚未打开类
+- decision_lease_operator_review_pending
+- decision_lease_execution_authority_not_granted
+- operator_review_still_pending
+- execution_authority_not_granted
+- live_authority_grant_not_active
+- manual_approval_packet_live_submit_inactive
+- operator_review_pending
+- live_operator_ack_not_active
+
+含义：
+这类警告恰恰是在保护系统，告诉我们：别把结构闭环误当作授权闭环。
+
+E. 成本 / pricing 绑定类
+- provider_pricing_table_not_bound_in_mainline
+
+含义：
+当前成本治理主要基于受治理上限与 usage trace，并没有把真实 pricing table 绑定进主链。这不是造假，但代表后续若进入更高阶段，需要更正式的价格口径绑定。
+
+总结：
+这些 warning_flags 目前更多是“未来 live design 的问题清单”，不是“当前 H/I 闭环失败的证据”。
+
+======================================================================
+八、已经解决的问题 vs 尚未解决的问题
+======================================================================
+
+已经解决的问题：
+1) Bybit 私有只读链恢复成功，IP 白名单问题已修复；
+2) venv 内 requests 缺失问题已修复；
+3) readonly observer 主链已稳定；
+4) G 章 business-event validation 已收口；
+5) H1-H5 全部闭环；
+6) I1-I10 全部闭环；
+7) I6 缺失 run_i6 脚本的问题已通过手动顺序执行绕过并成功验收；
+8) clean recheck 已证明 I1-I9 状态全绿、整章闭环；
+9) 系统在整个过程中未被误推进到 live execution。
+
+尚未解决的问题：
+1) live execution design 尚未正式开始；
+2) execution authority 未授予；
+3) decision lease 从未 live emit；
+4) operator ack 从未 live enable；
+5) manual approval packet 仍是 review-only；
+6) consume/replay/revoke/adaptive TTL 都还是 shadow 语义；
+7) 真实 pricing table 尚未绑定到主链成本口径；
+8) 市场 freshness / recent trade 数据不足问题仍存在；
+9) business-event feed 仍处于 healthy but no business-topic events yet 的长期观察状态；
+10) H/I 完成后，未来 live design 的章节树仍需重新规划，不可直接跳实盘。
+
+======================================================================
+九、当前最准确的项目状态表述（建议后续统一使用）
+======================================================================
+
+建议后续在新对话中统一使用以下表述：
+
+“OpenClaw/Bybit 当前已经完成：
+1) 只读 observer 基础设施；
+2) business-event validation 收口；
+3) H 章节 AI 治理链闭环（thought gate / budget / router / compute governor / cost governance）；
+4) I 章节 decision lease shadow control plane 闭环（schema / shadow issue / consume / replay / friction / approval / authority / manual packet / operator ack / final recheck）。
+
+但当前仍严格处于：
+- read_only
+- execution disabled
+- execution_authority not_granted
+- decision_lease_emitted = false
+- live operator ack disabled
+- shadow control plane only
+
+因此：
+系统是 future live design ready 的治理/控制平面，不是 live execution ready。”
+
+======================================================================
+十、后续主线建议
+======================================================================
+
+本报告不建议下一步马上继续堆更多脚本。
+更合理的主线顺序是：
+
+第一步：
+先把 H/I 正式完工状态固化为接手基线（本报告即承担该作用）。
+
+第二步：
+后续若继续推进，应明确分成两条线：
+A) 结构/审计/测试层继续硬化；
+B) future live design 单独开章，不得偷渡到现有主 runtime。
+
+第三步：
+在任何 future live design 开始前，必须先重新确认：
+- 谁来授予 execution authority；
+- 什么条件下 lease 才允许 emit；
+- 谁审批；
+- 哪个 freshness threshold 才是 live 可接受值；
+- 真实 pricing / latency / market freshness 是否足以支持 live path；
+- paper/demo execution gate 是否要先独立构建。
+
+======================================================================
+十一、给未来新对话接手者的最短提示词
+======================================================================
+
+可直接把下面这段给新对话中的我：
+
+“当前 OpenClaw/Bybit 项目中：G 已收口；H1-H5 已正式闭环；I1-I10 已正式闭环。请不要把 shadow/control-plane 完工误判为 live-ready。当前系统仍必须保持 read_only、execution disabled、execution_authority not_granted、decision_lease_emitted false、live_operator_ack_enabled false。I 章节闭的是 future live design 的 shadow control plane，不是 live execution plane。请先基于 H/I 完工状态做对账，再决定后续 future live design 或 J/K 结构硬化怎么推进。”
+
+======================================================================
+十二、最终结论
+======================================================================
+
+截至 2026-03-22 本轮终端实测，H 与 I 两章已经完成正式收口。
+
+这代表：
+- AI 治理层已闭环；
+- decision lease shadow control plane 已闭环；
+- 系统保护边界仍完好无损；
+- 未发生“未授权推进到 live execution”的错误；
+- 后续已具备进入“future live design”讨论的前提。
+
+但这绝不代表：
+- 可以实盘自动下单；
+- 可以发 live decision lease；
+- 可以把 manual approval / operator ack 当作 live 授权；
+- 可以跳过新的 live execution 设计阶段。
+
+一句话收尾：
+H/I 已正式完工，且完工质量是“结构闭环 + 边界未破 + shadow 完整”，这正是当前阶段最正确的结果。

@@ -1,0 +1,240 @@
+校正后完整版当前进度图
+版本：2026-03-19 夜间校正版
+用途：本文件用于快速查看当前真实进度落点。若需要详细经过，请结合《补充1》一起使用。
+
+==================================================
+一、当前有效的正式章节树
+==================================================
+
+A-C：基础层 / OpenClaw 模型层 / 接入前治理
+D：Readonly Observer 主链
+E：Business Event Classification
+F：Event-Driven Transition Scaffold
+G：真实业务事件验证层
+H：AI 治理
+I：Decision Lease
+J：Transition Engine Skeleton
+K：Paper / Demo Gate
+L：Learning / Self-Observability / Net PnL
+后续才是 M / N
+
+注意：
+- 历史开发过程中的 G4.x、G5、G6 等临时编号已废弃；
+- 现阶段所有理解、汇报、交接，必须以正式章节树为准。
+
+==================================================
+二、当前真实进度总览
+==================================================
+
+A-C
+状态：已完成
+
+D. Readonly Observer 主链
+状态：已完成且稳定
+当前关键状态：
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- execution_state = disabled
+- observer_state = healthy_observe_only
+- readonly summary / audit / consistency 均通过
+
+E. Business Event Classification
+状态：已完成
+
+F. Event-Driven Transition Scaffold
+状态：已完成
+
+G. 真实业务事件验证层
+状态：本轮已正式收口完成
+已完成范围：
+- G1 replay fixtures / replay harness
+- G2 非空业务事件正向语义验证
+- G3 负向阻断验证
+- G4 acceptance / regression / handoff / final audit
+
+当前结论：
+- 正向非空业务事件路径成立
+- 负向阻断路径成立
+- G 章 latest / contract / summary / handoff / final audit 均已形成闭环
+- G 可视为已正式收口
+- 后续正式主线应回到 H / I
+
+H. AI 治理
+状态：尚未正式开始
+建议下一步：
+- H1 thought_gate
+- H2 query_budget
+- H3 model_router v2
+
+I. Decision Lease
+状态：尚未正式开始
+建议下一步：
+- I1 decision lease schema
+- I2 lease freshness / validity
+
+J. Transition Engine Skeleton
+状态：已提前展开并已完成结构层 / 测试层 / 审计层补强
+已具备：
+- replay matrix
+- audit trail
+- rule layer
+- state graph
+- summary
+- handoff
+- final audit
+- checkpoint
+- chapter consistency + contract
+
+当前结论：
+- J skeleton 当前结构一致性通过
+- 可以视为“结构层 / 测试层 / 审计层就绪”
+- 但不能视为正式完工章节
+- 后续正式深化仍应在 H / I 回补后进行
+
+K. Paper / Demo Gate
+状态：已提前展开并已完成结构层 / 测试层 / 审计层补强
+已具备：
+- demo gate contract
+- readiness
+- demo/paper adapter skeleton
+- paper order lifecycle skeleton
+- paper position / balance projection skeleton
+- pretrade risk integration skeleton
+- summary
+- handoff
+- final audit
+- chapter consistency + contract
+
+当前结论：
+- K design/skeleton 当前结构一致性通过
+- gate 仍关闭
+- operator 仍锁定
+- adapter / lifecycle / projection / risk 仍是 skeleton_defined_not_active
+- 不能视为正式完工章节
+- 更不能误认为已经接近 live execution
+
+L. Learning / Self-Observability / Net PnL
+状态：尚未正式开始
+
+==================================================
+三、当前安全边界（必须长期保持）
+==================================================
+
+主 runtime 当前必须保持：
+
+- overall_runtime_state = ready_readonly_observer
+- system_mode = read_only
+- execution_state = disabled
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+解释：
+- 当前系统仍是只读观察态；
+- 当前没有放开真实执行；
+- 当前没有 live execution；
+- 当前 demo gate 未打开；
+- 当前所有 replay / validation / skeleton 结果都不能污染主 runtime。
+
+==================================================
+四、今晚新增并通过的关键收口结果
+==================================================
+
+G 章新增通过：
+- bybit_business_event_acceptance_suite.py
+- bybit_business_event_acceptance_contract_check.py
+- bybit_business_event_regression_summary.py
+- bybit_business_event_regression_contract_check.py
+- bybit_business_event_validation_handoff.py
+- bybit_business_event_validation_handoff_contract_check.py
+- bybit_business_event_final_audit.py
+- bybit_business_event_final_audit_contract_check.py
+
+G 章最终结论：
+- g_validation_complete_ready_for_h_i
+- g_validation_closed_ready_to_return_h_i
+- g_stage_closed = true
+
+J 章新增通过：
+- bybit_transition_engine_chapter_consistency_check.py
+- bybit_transition_engine_chapter_consistency_contract_check.py
+
+J 章最终结论：
+- matrix / audit / rule / graph / summary / handoff / final audit / checkpoint 一致
+- runtime_still_protected = true
+
+K 章新增通过：
+- bybit_demo_gate_chapter_consistency_check.py
+- bybit_demo_gate_chapter_consistency_contract_check.py
+
+K 章最终结论：
+- contract / readiness / adapter / lifecycle / projection / risk / summary / handoff / final audit 一致
+- gate 仍关闭
+- runtime_still_protected = true
+
+跨章节新增通过：
+- bybit_revision2_master_regression_check.py
+- bybit_revision2_master_regression_contract_check.py
+
+master regression 最终结论：
+- d_readonly_chain_ok = true
+- g_stage_closed = true
+- j_stage_structural_consistency_ok = true
+- k_stage_structural_consistency_ok = true
+- runtime_still_protected = true
+
+==================================================
+五、当前最重要的工程判断
+==================================================
+
+当前最重要的正式工程判断如下：
+
+1. G 已正式收口完成；
+2. J / K 可以继续做 structural hardening；
+3. 但 H / I 不能长期跳过；
+4. 在 H / I 回补前，不应把 J / K 视为正式完工章节；
+5. 后续正式主线应回到 H / I。
+
+对应的正式建议顺序：
+
+第一优先：
+- H1 thought_gate
+- H2 query_budget
+- H3 model_router v2
+
+第二优先：
+- I1 decision lease schema
+- I2 lease freshness / validity
+
+之后再决定：
+- J / K 是否继续深化为更正式闭环
+
+==================================================
+六、新分支开工建议
+==================================================
+
+如果在新分支继续工作，建议按以下顺序恢复：
+
+1. 先阅读：
+   - 本进度图
+   - 《补充1》
+   - REVISION2_CHAPTER_REALIGNMENT_NOTE.md
+
+2. 再确认：
+   - G 已正式收口
+   - J / K 只是提前做出的 skeleton / design / audit 层
+   - 后续正式主线应回到 H / I
+
+3. 真正开工时：
+   - 从 H1 开始，而不是继续无限向后堆 J / K
+
+==================================================
+七、一句话版结论
+==================================================
+
+截至 2026-03-19 夜间：
+
+- D 稳定
+- G 已正式收口
+- J / K 结构层回归通过
+- 主 runtime 未被污染
+- 后续正式主线：回到 H / I

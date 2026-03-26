@@ -1,0 +1,602 @@
+OpenClaw + Bybit Trading Agent 项目完整进度记录
+记录日期：2026-03-11（Europe/Madrid）
+格式：TXT
+用途：作为新分支/新对话的高保真续接资料，帮助快速恢复项目全貌、关键结论、已完成部署、问题与修复、当前状态与后续计划。
+
+============================================================
+一、项目概述
+============================================================
+
+1. 项目目标
+- 构建一个以 OpenClaw 为中枢、以 Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。
+- 系统目标不是简单自动下单，而是：
+  1) 风险可控；
+  2) 可审计；
+  3) 可学习；
+  4) 可逐步放权；
+  5) 在成本、延迟、风控、权限治理前提下追求长期净收益最大化。
+- AI 模型分工已定：
+  - OpenAI：复杂决策、结构化输出、策略判断；
+  - Claude：复杂长文本分析、研究、审阅；
+  - 后续原则：不是“每次都问 AI”，而是“只在值得思考时调用 AI”。
+
+2. 硬件与基础环境
+- 主机：Ubuntu（trade-core）
+- CPU/硬件方向：AMD AI MAX 395 + 128G 内存
+- 还有 Synology NAS 可作为后续存储/归档支持
+- Docker / Docker Compose 已部署
+- OpenClaw 采用：主机安装 + Docker 沙箱思路
+
+3. 当前总方向
+- 交易所优先级：Bybit 主力，Binance 辅助
+- 当前系统阶段：Bybit 只读（public + private readonly）已打通到余额/持仓/订单历史层面；尚未进入写权限与真实执行阶段
+- 当前 Agent 权限：Level 0 / observer
+- 当前执行状态：autonomous execution = false
+
+============================================================
+二、Brainstorm / 设计阶段演进过程
+============================================================
+
+1. 初始构想
+- 用户希望构建一个更像“人”的 AI Agent，不只是机械执行，而是能够：
+  - 自主分析；
+  - 总结经验；
+  - 学习与进化；
+  - 在市场中长期优化自身行为。
+
+2. 模型与平台架构的明确化
+- 确定 OpenClaw 作为总编排层。
+- 确定 OpenAI 用于复杂决策、结构化输出、策略判断。
+- 确定 Claude 用于长文本分析、研究、审阅。
+- 考虑过 ChatGPT / Kimi / DeepSeek / Claude 的组合，但实际落地目前以 OpenAI + Claude 为核心。
+
+3. 成本概念的引入（关键转折点）
+- 用户明确提出：Agent 不能只盯交易盈亏，必须考虑系统经营成本。
+- 已纳入的成本概念包括：
+  - 初始交易资金：500 欧元（或等值虚拟币）
+  - 已投入基础设施：Ubiquiti 设备约 700 欧元
+  - OpenAI API：30 欧元
+  - Claude API：20 欧元
+  - 运行电费：约 0.5 欧元 / 小时
+  - 设备折旧：按电脑 3000 欧元、5 年折旧折算日成本
+- 关键结论：
+  - Agent 不能只优化 gross PnL；
+  - 必须优化 net PnL（交易收益 - 模型成本 - 电费 - 折旧 - 手续费等）。
+
+4. 延迟问题被提升为核心架构问题（关键转折点）
+- 用户明确指出：AI 分析与给出结论存在延迟，而市场波动很多时候是瞬时的。
+- 由此引出一个关键架构结论：
+  - 不应把 AI 输出当作“即时命令”；
+  - 应把 AI 输出变成“决策租约（decision lease）”；
+  - 本地执行层根据最新市场状态、时效校验、风控校验做最后裁决。
+
+5. 权限治理体系的重大升级（关键转折点）
+- 原本曾讨论简单的阶段式放权，但后续升级为“按表现赢得权限”的框架。
+- 最终关键结论：
+  - 权限不按时间自动升级；
+  - 权限应按可量化表现赢得；
+  - 权限不应全局提升，而应在已证明有优势的子场景中局部提升；
+  - 真正高水平的系统不是“更大胆”，而是“在优势区间更大胆，在非优势区间继续保守”。
+- 最终形成 6 级权限体系：
+  - Level 0：observer
+  - Level 1：simulated_executor
+  - Level 2：micro_live_probe
+  - Level 3：constrained_profit_mode
+  - Level 4：conditional_expansion
+  - Level 5：controlled_evolution
+
+6. API 调用治理的重大升级（关键转折点）
+- 经过深入思考，形成了“不是每次都问 AI”的核心架构结论：
+  - 先由本地层判断“是否值得调用 AI”；
+  - 只有在值得的时候才调用大模型；
+  - 调用本身也要计入成本收益分析。
+- 由此形成新的架构链：
+  1) 市场快照；
+  2) thought_gate（是否值得调用 AI）；
+  3) model_router（选便宜模型 / OpenAI / Claude / 双模型）；
+  4) AI 输出 decision lease；
+  5) pretrade_risk_gate；
+  6) freshness / validity check；
+  7) execution_gate；
+  8) audit_logger；
+  9) review_and_learning。
+
+============================================================
+三、部署与实现阶段详细记录
+============================================================
+
+------------------------------------------------------------
+A 阶段：本地基础层收口（已完成并封测通过）
+------------------------------------------------------------
+
+A1. 基础服务安装与检查
+- 确认 Docker、Docker Compose 已可用。
+- 发现 Node / npm / pnpm 不存在；OpenClaw 安装器自动补齐 Node.js v22 与 npm。
+- OpenClaw 安装成功。
+
+A2. OpenClaw 初始配置与 Gateway 启动
+- 选择 local gateway 模式。
+- 解决 openclaw.json 语法问题（曾出现缺少逗号/JSON 破坏问题）。
+- 最终 gateway 成功运行：
+  - bind=127.0.0.1
+  - port=18789
+  - RPC probe ok
+
+A3. 基础容器服务搭建
+- basic_system_services 下部署：
+  - PostgreSQL
+  - Redis
+  - Qdrant
+- 途中出现 docker compose YAML 书写损坏、healthcheck 写错、缩进/语法错误等问题。
+- 最终修复 docker-compose.yml，服务稳定。
+
+A4. PostgreSQL 初始化与数据目录问题修复
+- 遇到 postgres_data 目录权限/非空问题，导致 initdb 失败。
+- 通过清理并重建数据目录解决。
+- PostgreSQL 最终 healthy。
+
+A5. Qdrant 状态修复
+- 曾出现 Qdrant healthy 检查配置导致的“服务正常但 unhealthy 假警报”。
+- 去掉/修正不合适的 healthcheck 后，Qdrant 运行恢复正常。
+
+A6. 自动化成本快照基础
+- daily_cost_snapshot.sh 脚本建立并赋予执行权限。
+- crontab 配置：每日 00:05 执行 daily_cost_snapshot.sh。
+- system_logs 目录建立。
+
+A7. A 阶段封测结论
+- PostgreSQL healthy
+- Redis healthy
+- Qdrant 可访问
+- OpenClaw gateway 正常
+- compose 重启恢复正常
+- 每日成本脚本与 cron 已就位
+
+------------------------------------------------------------
+B 阶段：OpenClaw 模型层收口（已完成并封测通过）
+------------------------------------------------------------
+
+B1. ~/.openclaw 权限与 secrets 管理
+- ~/.openclaw 权限收紧为 700
+- ~/.openclaw/.env 权限收紧为 600
+
+B2. OpenClaw 配置文件稳定化
+- openclaw.json 可通过 json.tool 校验
+- gateway token 曾暴露后，进行了重新轮换
+
+B3. doctor / sessions / transcripts 收尾
+- 解决 sessions 缺 transcript 的清理问题
+- doctor 最终仅剩 OAuth dir not present 提示（可忽略，因为当前不走 OAuth / WhatsApp pairing）
+
+B4. Dashboard / Gateway 最终复核
+- gateway status / probe 正常
+- Dashboard 地址可用
+
+B5. 模型分工定稿
+- OpenAI = 主决策 / 结构化输出 / 策略判断
+- Claude = 长文本分析 / 研究 / 审阅
+
+------------------------------------------------------------
+C 阶段：Bybit / Binance 接入前治理与骨架（已完成并封测通过）
+------------------------------------------------------------
+
+C1. 目录骨架建立
+- exchange_connectors/
+  - bybit_connector/
+  - binance_connector/
+- secret_files/
+  - bybit/
+  - binance/
+- trading_rules/exchange_rules/
+- docker_projects/trading_services/
+
+C2. secrets 分层结构建立
+- Bybit / Binance 各自建立：
+  - read_only/
+  - demo/
+  - live/
+- 各目录下建立 api_key / api_secret 占位文件
+- 权限收紧：目录 700，文件 600
+
+C3. trading_services 骨架 compose 建立
+- bybit_connector
+- binance_connector
+- pretrade_risk_gate
+- audit_logger
+- 初期均为 skeleton 服务
+
+C4. 交易所接入策略定稿
+- Bybit 主交易所，Binance 辅助
+- 接入顺序固定为：
+  1) read_only
+  2) demo/paper
+  3) supervised live
+  4) constrained autonomous live
+- 形成 bybit_rules.md / binance_rules.md / exchange_rules README
+
+C5. 权限治理表建立
+- 新增表：
+  - agent_permission_state
+  - permission_upgrade_reviews
+- 初始权限写入：
+  - environment=live
+  - exchange=bybit
+  - permission_level=0
+  - permission_label=observer
+  - autonomous_execution_enabled=false
+- 中途出现重复初始记录，后已清理保留单条有效状态。
+
+------------------------------------------------------------
+D 阶段：决策链 / 风控链 / 时效链 / 审计链 / Bybit 只读接入（进行中，已完成到 D15.2）
+------------------------------------------------------------
+
+D1. 决策事件包与审计表初版
+- 增加：
+  - decision_event_envelopes
+  - （后续 audit_events 单独补建）
+- 目标：统一决策事件的外壳与审计入口
+
+D2. 结果归因与延迟分解
+- 增加：
+  - decision_outcomes
+  - latency_breakdowns
+- 正式把模型 API 延迟、本机处理延迟、网络 RTT/jitter、市场时效损耗纳入架构。
+
+D3. review queue 桥接层
+- 增加：
+  - review_generation_queue
+- 实现 outcome -> queue 的桥接。
+
+D4. 从 queue 生成学习与权限审查
+- learning_notes 成功写入
+- permission_upgrade_reviews 成功写入
+- queue 状态变为 completed
+- 打通：
+  - outcome -> queue -> learning_note / permission_review
+
+D5. 标准决策包 schema
+- 建立 decision_packet_schema_v1.md
+- 建立 system_schemas 表
+- 将 decision_packet_schema_v1 注册入数据库
+- 形成未来 OpenClaw / 模型 / 风控 / 执行 / 审计共享的统一协议
+
+D6. Bybit read-only connector contract
+- 建立 bybit_readonly_connector_contract_v1.md
+- 将 connector contract schema 注册入 system_schemas
+- 在 trading_services.env 中明确：
+  - BYBIT_MODE=read_only
+  - BYBIT_CONNECTOR_CONTRACT_VERSION=v1
+  - BYBIT_CONNECTOR_HEALTH_STATE=healthy
+  - BYBIT_CONNECTOR_WRITE_ENABLED=false
+
+D7. connector 状态与心跳表
+- 新增：
+  - connector_runtime_status
+  - connector_heartbeats
+- 写入 Bybit read-only skeleton 的样例运行状态与样例心跳
+
+D8. Bybit 只读预检链
+- 建立：
+  - bybit_connector_config.json
+  - bybit_readonly_credentials_protocol_v1.md
+  - bybit_readonly_preflight.py
+- preflight 结果正常：
+  - mode=read_only
+  - write_enabled=false
+  - 凭据文件存在
+  - health_state=healthy
+
+D9. 预检结果自动落库
+- 建立 bybit_readonly_status_writer.py
+- 功能：将 preflight 结果写入：
+  - connector_runtime_status
+  - connector_heartbeats
+  - audit_events
+- 期间曾出现问题：
+  - audit_events 表不存在，导致部分写入成功、部分失败
+- 修复后重新执行，成功写入三者
+- 清理了重复 status/heartbeat 测试记录，保留干净结果
+
+D10（原始方案）. 容器内自动写状态（废弃）
+- 曾尝试让 bybit_connector 容器内周期性执行 writer
+- 失败原因：容器镜像内无 docker CLI，且让容器 docker exec 数据库不优雅
+- 因此原始 D10 方案废弃
+
+D10-R1（修正版）. 宿主机 cron 自动写状态（已完成）
+- 采用宿主机 crontab 每 5 分钟运行：
+  - bybit_readonly_status_writer.py
+- logs 已生成：
+  - bybit_readonly_status_writer.log
+- status / heartbeat / audit 正在持续追加
+- 这是当前有效方案
+
+D11. Bybit 公共 API 连通性检查（已通过）
+- 建立脚本：
+  - bybit_public_connectivity_check.py
+- 检查端点：
+  - /v5/market/time
+  - /v5/market/tickers?category=spot&symbol=BTCUSDT
+- 结果：
+  - server_time ok=true
+  - ticker_snapshot ok=true
+  - issues=[]
+  - 延迟约 200–265ms
+- 说明公网到 Bybit 公共 API 连通正常
+- 日志文件：bybit_public_connectivity_check_latest.json
+- 建立文档：bybit_public_connectivity_check_v1.md
+
+D12. 公共连通性结果纳入治理链（已通过）
+- 建立脚本：
+  - bybit_public_connectivity_status_writer.py
+- 成功将公共连通性检查结果写入：
+  - connector_runtime_status（connector_name = bybit_connector_public_api）
+  - connector_heartbeats
+  - audit_events（event_type = public_connectivity_check_written）
+- 当前状态 healthy
+
+D13. 私有只读接入前验证（已通过）
+- 建立文档：
+  - bybit_private_readonly_contract_v1.md
+- 建立脚本：
+  - bybit_private_readonly_precheck.py
+- 校验项：
+  - config 存在
+  - mode = read_only
+  - write_enabled = false
+  - api_key_file 存在
+  - api_secret_file 存在
+  - private contract 文档存在
+- 结果：ok=true, issues=[]
+- 日志文件：bybit_private_readonly_precheck_latest.json
+
+D14. 真实 Bybit 私有只读账户读取（已通过）
+- 用户已创建 Bybit 生产只读主 key：
+  - 建议名称：bybit_prod_readonly_main
+- 凭据已写入：
+  - /srv/settings/secret_files/bybit/read_only/api_key
+  - /srv/settings/secret_files/bybit/read_only/api_secret
+- 权限已收紧到 600
+- 建立脚本：
+  - bybit_private_account_check.py
+- 结果：
+  - ok=true
+  - retCode=0
+  - retMsg=OK
+  - 成功读取 UNIFIED account wallet balance
+- 关键返回：
+  - totalEquity ≈ 610.22997
+  - totalAvailableBalance ≈ 610.22997
+  - USDT walletBalance = 610
+- 当前说明：Bybit 生产只读主 key 已真实可用
+
+D15.1. 真实私有只读持仓读取（已通过）
+- 建立脚本：
+  - bybit_private_positions_check.py
+- 请求参数：category=linear, settleCoin=USDT
+- 结果：
+  - ok=true
+  - retCode=0
+  - linear 持仓 list=[]
+- 说明：当前无线性合约持仓，空列表正常
+
+D15.2. 真实私有只读历史订单读取（已通过）
+- 建立脚本：
+  - bybit_private_order_history_check.py
+- 请求参数：category=spot, limit=20
+- 结果：
+  - ok=true
+  - retCode=0
+  - spot 历史订单 list=[]
+- 说明：当前无可返回的 spot 历史订单，空列表正常
+
+------------------------------------------------------------
+E 阶段：阶段性联调与健康检查（已完成）
+------------------------------------------------------------
+
+E1. 阶段性总联调与一键健康检查脚本
+- 建立：
+  - /srv/helper_scripts/health_checks/stage_health_check.sh
+- 覆盖检查项：
+  1) basic_system_services
+  2) openclaw
+  3) governance_and_learning
+  4) trading_services / bybit readonly skeleton
+  5) automation
+- 执行结果：总体通过
+
+E2. trading_services 变量插值 warning 修复
+- 问题：docker compose 在 YAML 解析阶段对 $VAR 插值，导致 warning
+- 修复：command 内改用 $$VAR
+- 修复后：
+  - docker compose config 无 warning
+  - bybit_connector / pretrade_risk_gate 日志变量正确展开
+
+============================================================
+四、当前系统状态（截至 2026-03-11 晚间）
+============================================================
+
+1. Agent / 权限 / 执行状态
+- environment（治理层初始状态）：live/bybit
+- permission_level = 0
+- permission_label = observer
+- autonomous_execution_enabled = false
+- 当前交易服务层：paper + read_only
+- 当前 Bybit 连接层：生产只读已打通（public + private readonly）
+
+2. Bybit 读取现状
+- 公共 API：正常
+- 私有账户余额：正常
+- 私有持仓读取：正常（空列表）
+- 私有订单历史读取：正常（空列表）
+- 尚未进行：
+  - 私有成交历史读取
+  - WebSocket 只读事件流
+  - 私有余额/持仓/订单结果自动纳入数据库治理链
+
+3. 自动化状态
+- daily_cost_snapshot.sh：已配置 cron，每日 00:05 执行
+- bybit_readonly_status_writer.py：已配置 cron，每 5 分钟执行
+- connector_logs 已真实写入
+- system_logs 目录存在；daily_cost 日志尚未等到定时触发，但手动执行已确认正常
+
+4. 当前已确认正常工作的链路
+- 基础服务链：Postgres / Redis / Qdrant
+- OpenClaw gateway / probe / doctor
+- 决策 / 风控 / 延迟 / 权限 / 学习 / 审计骨架
+- Bybit read-only preflight + status writer
+- Bybit public connectivity check + status writer
+- Bybit private account / positions / order history readonly calls
+
+============================================================
+五、今日（3 月 11 日）关键进度摘要
+============================================================
+
+今日完成的关键事项包括：
+- OpenClaw / 基础服务 / 数据库 / 治理层整体完成基础部署与联调
+- 设计并落地了 AI 调用治理、decision lease、execution gate、decision outcome、latency breakdown、learning / permission review 队列等关键结构
+- 确定并文档化了 6 级权限框架与 Bybit/Binance 接入策略
+- 建立了标准决策包 schema（decision_packet_schema_v1）
+- 建立了 Bybit read-only connector contract
+- 跑通了 Bybit read-only 预检与自动状态写入
+- 跑通了 Bybit 公共 API 连通性检查
+- 创建并成功启用了 Bybit 生产只读主 key
+- 跑通了 Bybit 私有只读：
+  - account wallet balance
+  - positions
+  - order history
+- 建立了一键阶段健康检查脚本并总联调通过
+
+============================================================
+六、过程中出现过的主要问题与修复记录
+============================================================
+
+1. OpenClaw / JSON 配置问题
+- openclaw.json 曾出现逗号缺失、格式破坏等问题
+- 通过 json.tool 校验与重写修复
+
+2. Docker 权限问题
+- 多次遇到：permission denied while trying to connect to the docker API
+- 处理方式：newgrp docker 或重新 SSH 登录
+- 这是一个已知常见故障
+
+3. PostgreSQL 数据目录问题
+- 数据目录非空 / 权限不对导致 initdb 失败
+- 清理并重建目录后恢复
+
+4. Qdrant unhealthy 假警报
+- 服务本身正常，但 healthcheck 配置不合理
+- 调整后恢复
+
+5. Shell 与 SQL / psql 命令混用问题
+- 多次在 Ubuntu shell 中直接输入：
+  - SELECT ...
+  - \dt
+  - 表名
+- 导致“未找到命令”
+- 后续应优先使用“shell 可直接执行版”的 psql 调用：
+  - docker exec -it trading_postgres psql ... -c "SELECT ..."
+  - docker exec -it trading_postgres psql ... -c "\dt"
+
+6. audit_events 缺表问题
+- bybit_readonly_status_writer.py 初次运行时，status / heartbeat 写入成功，但 audit_events 因缺表失败
+- 补建 audit_events 表后重新运行恢复
+- 过程中产生重复状态/心跳记录，后已清理
+
+7. D10 原始方案不合理
+- 尝试让容器内自动执行 writer，失败于容器内缺 docker CLI
+- 最终改成宿主机 cron 方案，成为有效修正版 D10-R1
+
+8. compose 变量 warning
+- trading_services docker-compose.yml 中 command 使用 $VAR，导致 compose config warning
+- 统一改为 $$VAR，修复完成
+
+9. 文档 / cat EOF 截断问题
+- 几次用 cat <<'EOF' 录入文档时被截断，导致文件损坏
+- 后续通过重新完整覆盖修复
+
+============================================================
+七、后续潜在问题 / 需要注意的点
+============================================================
+
+1. 当前 cron 日志会持续增长
+- connector_runtime_status / connector_heartbeats / audit_events 会持续追加
+- 后续可能需要：
+  - 采样策略
+  - 归档策略
+  - 当前状态表 + 历史表分离
+
+2. 当前 Bybit 只读 key 若未绑 IP
+- 若选择 No IP restriction，这是过渡方案
+- 后续应尽量切换到固定公网 IP 白名单
+
+3. private readonly 虽已打通，但尚未把真实私有读取结果纳入数据库治理链
+- 当前 account / positions / order history 结果主要写入本地 JSON 日志
+- 后续应进一步落入：
+  - connector_runtime_status / audit
+  - 或专门的 account_snapshot / order_snapshot / position_snapshot 表
+
+4. 仍未接入 WebSocket
+- 当前主要依赖 REST
+- 后续如果要提高实时性，必须引入 Bybit WebSocket 只读事件流
+
+5. 当前仍未进入真实执行
+- 这不是问题，而是正确节奏
+- 后续必须保持：
+  - 先 demo / paper / 审计 / 风控 / 延迟
+  - 再考虑执行 key
+
+============================================================
+八、下一步建议（供新分支继续）
+============================================================
+
+建议下一步从 D15.3 / D16 附近继续推进，主线可参考：
+
+1. D15.3（建议）
+- 继续做真实私有只读：成交历史读取（fills / executions）
+
+2. D16
+- 设计并实现真实账户/持仓/订单/成交快照写入数据库
+- 不再只写本地 JSON 日志，而是进入治理链
+
+3. D17
+- 设计 Bybit WebSocket 只读事件流骨架
+- 逐步提升 market snapshot / account snapshot 的实时性
+
+4. D18
+- 用真实只读数据驱动标准 decision packet 输入层
+
+5. D19
+- 在真实只读事实基础上做完整决策链联调（仍不执行）
+
+6. D20
+- 准备受限 demo / paper 执行前的总验收
+
+============================================================
+九、给新分支 / 新对话的最短续接说明
+============================================================
+
+如果在新分支中继续，可以用下面这段作为最简启动说明：
+
+- A、B、C 已完成并封测通过
+- D1–D15.2 已推进完成（含 D10-R1 修正版）
+- 当前 Bybit 公共 API 与私有只读 API 已打通到账户余额、持仓、订单历史层面
+- 当前 Agent 仍处于 permission_level=0, observer, autonomous_execution=false
+- 当前系统以 read_only 为主，不涉及真实写权限
+- 当前下一步建议继续：成交历史读取 -> 真实账户/订单/持仓快照入库 -> WebSocket 只读事件流 -> 用真实只读数据驱动决策输入层
+
+============================================================
+十、附加说明
+============================================================
+
+1. 本记录是截至 2026-03-11 晚间的详细项目日志。
+2. 本记录强调：
+- 项目概述
+- brainstorm 演进
+- 关键结论
+- A/B/C/D/E 阶段详细过程
+- 问题与修复
+- 当前状态
+- 后续建议
+3. 本记录适合作为新分支/新对话的高保真续接资料。
+
+—— 记录结束 ——

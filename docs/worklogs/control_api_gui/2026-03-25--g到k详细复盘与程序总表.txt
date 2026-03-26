@@ -1,0 +1,498 @@
+OpenClaw / Bybit
+G-K 路线复盘 + 程序总表（对照旧报告并与当前主线比较）
+版本：2026-03-25 夜间整理版
+============================================================
+
+一、这份报告的定位
+------------------------------------------------------------
+这份报告不是替代你刚保存的 2026-03-25 J/K 收口工程记录，而是专门回答以下三个问题：
+
+1. 从 2026-03-17 Revision 2 路线图，到 2026-03-20 超详细续接总报告，再到 2026-03-24 / 2026-03-25 的 repo 主线，路线事实上是怎么演进的？
+2. 从 G 开始到 K 为止，现在每个板块到底做到了哪一步？
+3. 从 G 到 K 这段真正写过的程序，当前应该按哪些板块来理解，它们各自做什么、上下游关系是什么？
+
+二、证据与保真方法
+------------------------------------------------------------
+本报告同时采用了三层证据：
+
+A. 历史路线与旧阶段定义
+- 2026-03-17《OpenClaw_Bybit_Revision2_工程记录》
+- 2026-03-20《OpenClaw_Bybit_超详细续接总报告》
+
+B. 中期 repo 交叉核对与冲突消解
+- 2026-03-22《OpenClaw_项目总报告_优化重构版_含GitHub核对》
+- 2026-03-22《OpenClaw_最终整合总报告_2026-03-22夜间校正版》
+
+C. 当前主线与最新收口结果
+- 2026-03-24《OpenClaw_Bybit_工程总报告_结构迁移完成与新工作流》
+- 2026-03-24《OpenClaw_交接日志_2026-03-24_晚》
+- 2026-03-25 J/K 收口工程记录、baseline、顶层索引、README 导航更新（本轮已进入 main）
+
+三、保真声明（必须诚实）
+------------------------------------------------------------
+1. 我已经按照你要求，尽量把“历史报告 + 当前主线”对齐了。
+2. 对 G / J / K 的程序总表，本报告可以给到很高保真，因为 2026-03-20 报告里已经有逐脚本清单，且后续 2026-03-24 结构迁移报告又给出了 canonical 目录归位。
+3. 对 H0 / H / I，我可以给出“当前路线位置 + 当前状态 + 已被 repo 直接核对的关键脚本 + canonical 目录与规模”的高保真汇总。
+4. 但我不能不诚实地宣称：我已经通过 GitHub connector 把 H / I 全树 99 个脚本逐个重新枚举完毕。2026-03-22 的 repo-cross-check 文件自己也明确提醒过：GitHub connector 没有一次性枚举整棵私有仓库文件树，H0/H1/I 只核对了代表脚本与关键文件。
+5. 因此，本报告的准确性策略是：
+   - 路线、阶段状态、章节真义：高置信；
+   - G / J / K 逐脚本清单：高置信；
+   - H0 / H / I：高置信到模块/关键脚本层，但不是“全树逐文件 checksum 级别”的绝对穷尽。
+
+四、路线图到底有没有改
+------------------------------------------------------------
+宏观路线图仍然是 Revision 2 的主骨架：
+A-C -> D -> E -> F -> G -> H -> I -> J -> K -> L -> M -> N
+
+但工程执行口径事实上已经升级成“2.5 版”：
+- 大章节顺序基本没改；
+- 但每章“怎样才算真的做完”比 2026-03-17 时严格得多；
+- 3 月 22 日后，H0 被正式从 H 前拆出，用来表达“本地先判断是否值得思考”的确定性判断内核；
+- 到 2026-03-25，J/K 又进一步从“canonical / skeleton / design-only closed”推进到了“functional closeout ready”。
+
+五、从 G 到 K 的当前权威阶段判断
+------------------------------------------------------------
+G：真实业务事件验证层
+- 历史上于 2026-03-19 已正式收口；
+- 后续没有被重新打开，也没有被推翻；
+- 当前正确理解：G 仍应视为已完成的上游事实验证层。
+
+H0：Local Deterministic Judgment Core（2026-03-22 后正式被单独提出）
+- 不是原始 2026-03-17 Revision 2 显式写出的章节；
+- 但 2026-03-22 repo-cross-check 与 truth 报告已把它当作 H 前的本地判断层；
+- 当前正确理解：H0 属于 H/I 治理栈的前置本地确定性层，而不是独立替换 H 的大章节。
+
+H：AI Governance
+- 2026-03-20 报告还把 H/I 视为“尚未正式开始，下一主线应回补”的对象；
+- 2026-03-22 以后，H 代码与 runner 大量存在，且 H0 绿、H1-A 绿，但 H1-B 与 no-call / idle account 语义问题曾是真 blocker；
+- 2026-03-24 晚交接日志已经把 H 描述为“前置治理链已处于闭环可复核状态”；
+- 当前正确理解：H 不应再写成“完全没开始”，但也不应倒退成“从零待开发”。
+
+I：Decision Lease / Execution Authorization Control Plane
+- 2026-03-20 报告仍把 I 视为应回补的正式主线；
+- 2026-03-22 之后大量 I1-I10 已实现并被返修；
+- 2026-03-24 晚交接日志明确：I 已 canonical closed，且 closed 含义是 shadow-only control plane closed，不是 live trading ready；
+- 当前正确理解：I 是已闭合的 shadow-only control plane，而不是 execution authority 已放开。
+
+J：Transition Engine Skeleton
+- 2026-03-20 时正确判断是：J 已提前展开到结构层 / 测试层 / 审计层可维护状态，但不是正式完工章节；
+- 2026-03-24 晚交接日志：J 已 canonical recheck 通过；
+- 2026-03-25：J 已进一步达到 functional_closeout_ready_shadow_only；
+- 当前正确理解：J 在当前工程定义下已经做完，但做完的含义是 shadow/skeleton-only closeout，不是执行引擎放权。
+
+K：Paper / Demo Gate
+- 2026-03-20 时正确判断是：K 已有 design/skeleton 层骨架，gate 保持关闭，不能接单；
+- 2026-03-24 晚交接日志：K 的 contract / readiness / summary / handoff / final audit / chapter consistency 已逐项跑通，逻辑上 design-only gate closed；
+- 2026-03-25：K 已进一步达到 functional_closeout_ready_design_only_gate_closed；
+- 当前正确理解：K 在当前工程定义下已经做完，但做完的含义是 design-only gate closed，不是 demo trading 已经开放。
+
+六、当前从 G 到 K 的“上下游链”总图
+------------------------------------------------------------
+G（真实业务事件验证）
+  -> 给 H0 / H / I / J 提供“真实业务事件是否存在、正向/负向 replay 是否成立、runtime 是否未被污染”的上游事实基线
+
+H0（本地确定性判断）
+  -> 先把本地市场摩擦、风险包络、交易可行性、成本等做成本地 judgment
+  -> 其输出决定 H 是否值得进入 AI 治理链
+
+H（AI Governance）
+  -> 管理 should_call_ai、budget、route、response contract、governed observation
+  -> 输出不能直接成为执行命令，只能成为受治理 observation
+
+I（Decision Lease）
+  -> 把 H 的受治理 observation 进一步封装为 shadow-only decision lease / execution authority control plane
+  -> I 本身也不放权，只是建立谁有资格拥有“后续权力对象”的治理结构
+
+J（Transition Engine Skeleton）
+  -> 使用 G/H/I 的输入，在 skeleton 语义下判断 transition candidate 是否成立
+  -> 当前只做到 skeleton-only candidate transition，不推进 execution
+
+K（Paper / Demo Gate）
+  -> 接住 J 的 candidate transition，并把 adapter / lifecycle / projection / risk / audit / switch / acceptance 全部做成 design-only gate closed 的能力层
+  -> 当前不开放 gate，不允许接单
+
+七、当前 canonical 目录归位（和 GitHub/main 对齐后的理解）
+------------------------------------------------------------
+1. G 相关脚本的 canonical 大类：
+- program_code/market_data_processor/bybit_business_events
+- 2026-03-24 结构迁移报告确认该目录属于 canonical 体系，正式脚本数 26。
+
+2. H0 / H 相关脚本的 canonical 大类：
+- H0 主要落在：
+  program_code/risk_control/bybit_local_models_and_risk
+- H 主要落在：
+  program_code/ai_agents/bybit_thought_gate
+- 2026-03-24 结构迁移报告确认：
+  - local_models_risk_and_paper = 20 脚本
+  - thought_gate_and_ai_governance = 55 脚本
+
+3. I 相关脚本的 canonical 大类：
+- program_code/trade_executor/bybit_decision_lease
+- 2026-03-24 结构迁移报告确认该目录正式脚本数 44。
+
+4. J 相关脚本的 canonical 大类：
+- program_code/trading_strategy/bybit_event_driven
+- 2026-03-24 结构迁移报告确认 event_driven_and_transition_engine 目录正式脚本数 52。
+
+5. K 相关脚本的 canonical 大类：
+- program_code/exchange_connectors/bybit_connector/misc_tools
+- program_code/risk_control/bybit_local_models_and_risk
+- 2026-03-24 晚交接日志也再次确认：K 的核心 builder 分散在 misc_tools 与 local_models_and_risk，两处共同组成 K。
+
+八、G 章节程序总表（高保真，历史清单 + 当前归位）
+------------------------------------------------------------
+板块定位：
+- G = 真实业务事件验证层
+- 它的职责不是表达“observer-only 空态”，而是验证：当真实 business-topic event 存在或重放时，系统能否正确采集、去重、重放、阻断、验收并交接。
+
+上游：
+- D 只读观察主链
+- E business-event classification
+- F event-driven scaffold
+
+下游：
+- H0/H/H/I 使用它提供的“真实事件是否成立”的事实前提
+- J 使用它提供的 replay / block / acceptance 结果来证明 transition skeleton 的输入边界
+
+
+G 逐脚本清单：
+- bybit_business_event_acceptance_contract_check.py
+  作用：对“business event acceptance”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_acceptance_suite.py
+  作用：与“business event acceptance suite”相关的工程脚本；具体职责需结合日志与上下游产物理解。
+- bybit_business_event_final_audit.py
+  作用：对“business event”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_business_event_final_audit_contract_check.py
+  作用：对“business event final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_fixture_pack_builder.py
+  作用：构建“business event fixture pack”对应的 latest 输出。
+- bybit_business_event_fixture_pack_contract_check.py
+  作用：对“business event fixture pack”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_fixture_pack_builder.py
+  作用：构建“business event negative fixture pack”对应的 latest 输出。
+- bybit_business_event_negative_fixture_pack_contract_check.py
+  作用：对“business event negative fixture pack”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_replay_contract_check.py
+  作用：对“business event negative replay”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_negative_replay_harness.py
+  作用：把 fixture pack 重放为标准化事件，验证 replay 路径与输出结构。
+- bybit_business_event_regression_contract_check.py
+  作用：对“business event regression”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_regression_summary.py
+  作用：为“business event regression”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_business_event_replay_contract_check.py
+  作用：对“business event replay”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_business_event_replay_harness.py
+  作用：把 fixture pack 重放为标准化事件，验证 replay 路径与输出结构。
+- bybit_business_event_validation_handoff.py
+  作用：为“business event validation”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_business_event_validation_handoff_contract_check.py
+  作用：对“business event validation handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_block_chain_builder.py
+  作用：构建“event replay block chain”对应的 latest 输出。
+- bybit_event_replay_block_chain_contract_check.py
+  作用：对“event replay block chain”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_phase_builder.py
+  作用：构建“event replay phase”对应的 latest 输出。
+- bybit_event_replay_phase_contract_check.py
+  作用：对“event replay phase”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_state_builder.py
+  作用：构建“event replay state”对应的 latest 输出。
+- bybit_event_replay_state_contract_check.py
+  作用：对“event replay state”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_consistency_check.py
+  作用：对“event replay transition”相关 latest 文件做一致性/引用关系检查。
+- bybit_event_replay_transition_consistency_contract_check.py
+  作用：对“event replay transition consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_decider.py
+  作用：对 transition 是否允许推进做决策判断。
+- bybit_event_replay_transition_decision_contract_check.py
+  作用：对“event replay transition decision”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_input_builder.py
+  作用：构建“event replay transition input”对应的 latest 输出。
+- bybit_event_replay_transition_input_contract_check.py
+  作用：对“event replay transition input”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_event_replay_transition_outcome_builder.py
+  作用：构建“event replay transition outcome”对应的 latest 输出。
+- bybit_event_replay_transition_outcome_contract_check.py
+  作用：对“event replay transition outcome”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+九、H0 / H / I 当前程序与模块总表（高保真到模块簇 + 关键文件；不伪造全树逐文件）
+------------------------------------------------------------
+为什么这里不用“伪完整表”：
+- 2026-03-22 的 repo-cross-check 报告已经明确说过：GitHub connector 当时没有一次性枚举整棵私有仓库文件树。
+- 因此，对 H0/H/I 最诚实的做法，是列出：
+  1) 当前 canonical 目录与规模；
+  2) 已被 repo 直接核对的关键脚本；
+  3) 当前章节真实状态；
+  而不是在没有全树逐文件扫描证据的情况下伪造 99 个文件名。
+
+H0/H 的模块定位：
+- H0 = 本地确定性判断内核，本地先判断是否值得思考
+- H = AI 治理层，决定是否调用 AI、如何路由、如何把 AI 输出限制在 governed observation 内
+
+I 的模块定位：
+- I = decision lease / execution authorization control plane
+- 负责把“可讨论的判断”封装成 shadow-only、可过期、可撤销、可审计的权力对象
+- 当前 I 已 canonical closed，但仍然 not_granted / false / disabled
+
+H0/H/I 当前 canonical 目录与规模：
+- H0 主要所在：
+  /program_code/risk_control/bybit_local_models_and_risk
+  （2026-03-24 结构迁移报告：local_models_risk_and_paper = 20 脚本）
+- H 主要所在：
+  /program_code/ai_agents/bybit_thought_gate
+  （2026-03-24 结构迁移报告：thought_gate_and_ai_governance = 55 脚本）
+- I 所在：
+  /program_code/trade_executor/bybit_decision_lease
+  （2026-03-24 结构迁移报告：decision_lease_and_execution_authority = 44 脚本）
+
+H0/H/I 已被 repo 直接核对的关键脚本：
+
+- run_with_trading_env.sh
+  作用：标准 wrapper；负责 venv / env / secret 注入，后续 H/I truth check 与运行一律优先走这个入口。
+- bybit_h1_report_utils.py
+  作用：H 章通用读写辅助层，负责 thought_gate 目录下 latest / dated / 检查项生成。
+- bybit_local_market_friction_builder.py
+  作用：H0-A；把本地市场摩擦/成本/微结构因素整理为进入 H 的本地判断输入。
+- bybit_local_judgment_final_audit.py
+  作用：H0 总终审；检查本地判断链是否 structurally valid，是否 ready_for_h1。
+- bybit_ai_response_check.py
+  作用：H1-G；校验 AI JSON 返回是否满足 observation-only 合同。
+- bybit_ai_governed_decision.py
+  作用：H1-H；把 AI 输出正规化为 governed observation，并显式保持 execution_authority = not_granted。
+- bybit_thought_gate_acceptance_suite.py
+  作用：H1-I；验收 thought_gate 链是否仍保持 read_only / no lease / no live execution。
+- bybit_thought_gate_final_audit.py
+  作用：H1 总终审；汇总 H1 链的结构状态与边界状态。
+- bybit_decision_lease_chapter_summary.py
+  作用：I10 汇总器；聚合 I1-I9 来源，生成 decision lease chapter summary。
+- bybit_decision_lease_chapter_final_audit.py
+  作用：I10 终审；二次确认 decision_lease、execution_authority、live_operator_ack 等保护位仍关闭。
+- run_i10_canonical_decision_lease_recheck.sh
+  作用：I 章 canonical 总复查入口；是 I 正式 closed 的关键 runner。
+
+
+十、J 章节程序总表（高保真：历史结构层清单 + 2026-03-25 新收口增量）
+------------------------------------------------------------
+板块定位：
+- J = Transition Engine Skeleton
+- 它的目标不是执行，而是把 transition 的 matrix / rule / graph / audit / summary / handoff / final audit / chapter consistency 做成可重放、可判断、可收口的 skeleton engine。
+
+上游：
+- G 的 replay / validation / acceptance 结果
+- H / I 提供的 governed observation / decision lease 边界
+- D/E/F 提供的 readonly observer + classification + scaffold 基础事实
+
+下游：
+- K 的 design-only transition intake
+- 后续真正 execution 相关的 demo/paper 讨论必须以 J 的 skeleton 结果为前提
+
+2026-03-20 历史结构层清单：
+
+- bybit_transition_engine_audit_trail_builder.py
+  作用：构建“transition engine audit trail”对应的 latest 输出。
+- bybit_transition_engine_audit_trail_contract_check.py
+  作用：对“transition engine audit trail”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_chapter_consistency_check.py
+  作用：对“transition engine chapter”相关 latest 文件做一致性/引用关系检查。
+- bybit_transition_engine_chapter_consistency_contract_check.py
+  作用：对“transition engine chapter consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_checkpoint_builder.py
+  作用：构建“transition engine checkpoint”对应的 latest 输出。
+- bybit_transition_engine_checkpoint_contract_check.py
+  作用：对“transition engine checkpoint”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_final_audit.py
+  作用：对“transition engine”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_transition_engine_final_audit_contract_check.py
+  作用：对“transition engine final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_handoff.py
+  作用：为“transition engine”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_transition_engine_handoff_contract_check.py
+  作用：对“transition engine handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_replay_matrix.py
+  作用：汇总正向/负向 replay 路径，形成 transition engine skeleton 的 replay matrix。
+- bybit_transition_engine_replay_matrix_contract_check.py
+  作用：对“transition engine replay matrix”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_engine_summary.py
+  作用：为“transition engine”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_transition_engine_summary_builder.py
+  作用：为“transition engine builder”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_transition_engine_summary_contract_check.py
+  作用：对“transition engine summary”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_rule_layer_builder.py
+  作用：构建“transition rule layer”对应的 latest 输出。
+- bybit_transition_rule_layer_contract_check.py
+  作用：对“transition rule layer”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_state_graph_builder.py
+  作用：构建“transition state graph”对应的 latest 输出。
+- bybit_transition_state_graph_consistency_check.py
+  作用：对“transition state graph”相关 latest 文件做一致性/引用关系检查。
+- bybit_transition_state_graph_consistency_contract_check.py
+  作用：对“transition state graph consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_transition_state_graph_contract_check.py
+  作用：对“transition state graph”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+2026-03-25 新增收口层：
+
+- run_j10_canonical_transition_engine_recheck.sh
+  作用：J 章 canonical 高层复查入口；汇总 matrix / audit / rule / graph / summary / handoff / final audit / chapter consistency 与 runtime 保护态。
+- bybit_transition_engine_decision_builder.py
+  作用：把 J 旧 canonical 链聚合为统一 transition decision，输出 candidate_transition_ready_skeleton_only。
+- bybit_transition_engine_decision_contract_check.py
+  作用：对 J unified decision latest 做 contract 校验，锁定 execution_permitted/demo_gate_open/live_execution_open 均为 false。
+- bybit_transition_engine_functional_closure_builder.py
+  作用：把 J canonical 结果与 decision / contract 一起收口为 functional_closeout_ready_shadow_only。
+
+
+十一、K 章节程序总表（高保真：历史设计层清单 + 2026-03-25 新收口增量）
+------------------------------------------------------------
+板块定位：
+- K = Paper / Demo Gate
+- 但当前 K 的正确完成口径不是“demo trading ready”，而是“design-only gate closed closeout complete”。
+
+上游：
+- J unified decision / functional closeout
+- H / I 提供的治理与权力边界
+- G 提供真实业务事件验证层的事实底盘
+
+下游：
+- 未来真正的 demo trading 开门、paper order submission、lifecycle 真执行、projection 真 ledger、risk 真拦截、audit 真落链
+- 这些都仍是 K 之后的“执行放开阶段”，不是当前已完成内容
+
+2026-03-20 历史设计层清单：
+
+- bybit_demo_gate_chapter_consistency_check.py
+  作用：对“demo gate chapter”相关 latest 文件做一致性/引用关系检查。
+- bybit_demo_gate_chapter_consistency_contract_check.py
+  作用：对“demo gate chapter consistency”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_contract_builder.py
+  作用：构建“demo gate contract”对应的 latest 输出。
+- bybit_demo_gate_contract_contract_check.py
+  作用：对“demo gate”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_final_audit_builder.py
+  作用：对“demo gate builder”层做最终总审计，确认全链路结果、引用与安全边界一致。
+- bybit_demo_gate_final_audit_contract_check.py
+  作用：对“demo gate final audit”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_handoff_builder.py
+  作用：为“demo gate builder”层生成 handoff/交接摘要，固定当前状态、边界与下一步建议。
+- bybit_demo_gate_handoff_contract_check.py
+  作用：对“demo gate handoff”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_readiness_builder.py
+  作用：构建“demo gate readiness”对应的 latest 输出。
+- bybit_demo_gate_readiness_contract_check.py
+  作用：对“demo gate readiness”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_gate_summary_builder.py
+  作用：为“demo gate builder”层生成人工可读 summary，总结当前状态与关键结论。
+- bybit_demo_gate_summary_contract_check.py
+  作用：对“demo gate summary”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_demo_paper_adapter_skeleton_builder.py
+  作用：构建“demo paper adapter skeleton”对应的 latest 输出。
+- bybit_demo_paper_adapter_skeleton_contract_check.py
+  作用：对“demo paper adapter skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_paper_order_lifecycle_skeleton_builder.py
+  作用：构建“paper order lifecycle skeleton”对应的 latest 输出。
+- bybit_paper_order_lifecycle_skeleton_contract_check.py
+  作用：对“paper order lifecycle skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_paper_position_balance_projection_skeleton_builder.py
+  作用：构建“paper position balance projection skeleton”对应的 latest 输出。
+- bybit_paper_position_balance_projection_skeleton_contract_check.py
+  作用：对“paper position balance projection skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+- bybit_pretrade_risk_integration_skeleton_builder.py
+  作用：构建“pretrade risk integration skeleton”对应的 latest 输出。
+- bybit_pretrade_risk_integration_skeleton_contract_check.py
+  作用：对“pretrade risk integration skeleton”产物做 contract/结构校验，防止字段、版本或语义漂移。
+
+2026-03-25 新增能力层/收口层：
+
+- run_k10_canonical_demo_gate_recheck.sh
+  作用：K 章 canonical 高层复查入口；汇总 contract / readiness / summary / handoff / final audit / chapter consistency 与 runtime 保护态。
+- bybit_demo_gate_transition_intake_builder.py
+  作用：把 J decision 安全接入 K 章，形成 transition intake latest。
+- bybit_demo_gate_transition_intake_contract_check.py
+  作用：对 K intake latest 做 contract 校验，锁定仅 design-only 接收，不开放 paper/live。
+- bybit_demo_gate_decision_builder.py
+  作用：形成 K 自己的 unified decision，当前正确状态为 design_only_ready_no_execution。
+- bybit_demo_gate_decision_contract_check.py
+  作用：对 K unified decision 做 contract 校验，锁定 gate_can_open/operator_can_enable/paper/live execution 全关闭。
+- bybit_demo_paper_adapter_transition_intent_builder.py
+  作用：把 J->K 语义链转成 adapter 内部 paper transition intent envelope。
+- bybit_demo_paper_adapter_transition_intent_contract_check.py
+  作用：校验 adapter transition intent latest。
+- bybit_demo_paper_adapter_capability_builder.py
+  作用：把 adapter 从 skeleton 提升为 capability 视图：intent-only capability。
+- bybit_demo_paper_adapter_capability_contract_check.py
+  作用：校验 adapter capability latest。
+- bybit_paper_order_lifecycle_capability_builder.py
+  作用：把 lifecycle 从 skeleton 提升为 capability 视图；状态机已定义，但 submission path 关闭。
+- bybit_paper_order_lifecycle_capability_contract_check.py
+  作用：校验 lifecycle capability latest。
+- bybit_paper_position_balance_projection_capability_builder.py
+  作用：把 projection 从 skeleton 提升为 capability 视图；projection model defined，ledger path 关闭。
+- bybit_paper_position_balance_projection_capability_contract_check.py
+  作用：校验 projection capability latest。
+- bybit_pretrade_risk_gate_capability_builder.py
+  作用：把 pretrade risk 从 skeleton 提升为 capability 视图；risk model defined，risk gate 关闭。
+- bybit_pretrade_risk_gate_capability_contract_check.py
+  作用：校验 risk capability latest。
+- bybit_paper_audit_trail_capability_builder.py
+  作用：把 paper audit trail 从抽象设计层提升为 capability 视图；audit model defined，path 关闭。
+- bybit_paper_audit_trail_capability_contract_check.py
+  作用：校验 audit capability latest。
+- bybit_explicit_operator_enable_switch_capability_builder.py
+  作用：定义 operator enable switch capability；operator path 仍关闭。
+- bybit_explicit_operator_enable_switch_capability_contract_check.py
+  作用：校验 operator switch capability latest。
+- bybit_demo_gate_acceptance_capability_builder.py
+  作用：定义 acceptance gate capability；acceptance model defined，gate 仍关闭。
+- bybit_demo_gate_acceptance_capability_contract_check.py
+  作用：校验 acceptance capability latest。
+- bybit_demo_gate_functional_closure_builder.py
+  作用：把 K canonical 链、decision、七条 capability-contract 链统一收口为 functional_closeout_ready_design_only_gate_closed。
+
+
+十二、从 2026-03-17 到 2026-03-25 的最终路线判断
+------------------------------------------------------------
+如果只看 2026-03-17 Revision 2，正确路线是：
+G -> H -> I -> J -> K -> L -> M -> N
+
+如果只看 2026-03-20，正确判断是：
+- G 已收口
+- J/K 已提前展开到结构层 / 测试层 / 审计层
+- 但正式主线应回到 H/I
+
+如果只看 2026-03-22 夜间 truth check，正确判断是：
+- 不能简单说 H/I 全绿
+- H0 绿，H1-B 曾是真 blocker
+- no-call / idle account 语义是主问题
+- I 不是没代码，而是 I1/H1 未闭环导致 I10 不绿
+
+如果看 2026-03-24 晚交接日志与 2026-03-25 当前主线，正确判断已经进一步更新为：
+- H 前置治理链已进入闭环可复核状态
+- I 已 canonical closed（shadow-only）
+- J 已从 canonical skeleton green 进一步推进到 functional_closeout_ready_shadow_only
+- K 已从 design-only gate closed 进一步推进到 functional_closeout_ready_design_only_gate_closed
+
+十三、当前最准确的一句话总括
+------------------------------------------------------------
+从 G 到 K 这段，现在最准确的一句话是：
+
+G 已完成真实业务事件验证；
+H0/H/I 已把“本地判断 -> AI 治理 -> shadow-only 权力控制”补到当前阶段正确形态；
+J 已完成 shadow/skeleton-only functional closeout；
+K 已完成 design-only gate closed functional closeout；
+但 execution authority 仍未开放，runtime 仍必须解释为 read_only / execution disabled。
+
+十四、你后续如何使用这份报告
+------------------------------------------------------------
+推荐用途：
+1. 作为“G-K 当前真实进度 + 程序板块索引”的专用报告；
+2. 以后若要追某个脚本，先按本报告看它属于哪一章、在哪个 canonical 目录、上下游是谁；
+3. 若未来要做逐文件精审，优先在 H0/H/I 上再做一次本地真实仓库全树扫描，以把当前“关键文件级高保真”进一步升级成“全树逐文件高保真”。
+
+十五、最终诚实结论
+------------------------------------------------------------
+- 这份报告已经尽可能把 2026-03-17、2026-03-20、2026-03-22、2026-03-24、2026-03-25 之间的路线变化与程序版图对齐。
+- 对 G / J / K，我有把握说：遗漏风险很低。
+- 对 H0 / H / I，我有把握说：路线位置、当前状态、canonical 目录和关键代表脚本是可信的；但若你要求“逐文件零遗漏证明”，仍建议后续补一轮本地仓库全树扫描。
+- 因此，这份报告已经足够作为高保真接手报告使用；同时也诚实保留了“哪一部分已经 repo 直接核对、哪一部分仍属于谨慎口径”的边界。

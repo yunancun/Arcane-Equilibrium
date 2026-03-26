@@ -1,0 +1,911 @@
+OpenClaw + Bybit Trading Agent 最新工程记录（高保真续接版）
+记录日期：2026-03-17（Europe/Madrid）
+格式：TXT
+用途：
+1. 作为下一新分支/新对话的高保真续接资料；
+2. 当模型后续出现“忘记总目标 / 忘记核心需求 / 忘记当前工程进展 / 忘记脚本关系 / 忘记版本链”的情况时，可直接重新喂给模型；
+3. 重点覆盖：项目总目的、Agent 核心需求、截至 D23 的完整工程进展、关键版本、脚本关系、维护注意事项、当前状态、后续建议。
+
+============================================================
+一、项目总目的（这部分非常重要，后续不可遗忘）
+============================================================
+
+这个项目的目标，不是做一个普通的自动交易脚本，也不是只做一个会下单的 bot。
+
+真正要做的是一个：
+“以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统。”
+它的长期目标是：
+- 风险可控；
+- 可审计；
+- 可学习；
+- 可逐步放权；
+- 在成本、延迟、风控、权限治理都受控的前提下，追求长期净收益最大化。
+
+这里有几个不能忘记的根原则：
+
+1. 不是只看 gross PnL，而是必须看 net PnL
+- 交易收益不是唯一目标；
+- 必须同时考虑：
+  - AI API 成本；
+  - 电费；
+  - 设备折旧；
+  - 手续费；
+  - 基础设施长期成本；
+  - 未来可能的人力维护成本。
+- 所以本项目本质上不是单纯“交易系统”，而是“交易系统 + 经营系统”。
+
+2. AI 输出不能当成即时命令
+- 用户明确指出：AI 调用和分析有延迟；
+- 市场很多变化是瞬时的；
+- 因此 AI 输出不能直接视为“立即执行命令”；
+- AI 更应输出 decision lease（决策租约）；
+- 本地执行层必须再做：
+  - 时效校验；
+  - 风控校验；
+  - 最新市场状态校验；
+  - 权限与环境校验；
+  - 最终允许或拒绝执行。
+
+3. 权限不能按时间自动升级，必须按表现赢得
+- 不能因为系统运行久了就自动放权；
+- 权限要基于可量化表现逐步提升；
+- 不是全局放权，而是：
+  - 在已经验证有效的子场景中局部放权；
+  - 在未验证区间继续保持保守；
+- 真正高级的 Agent 不是更莽，而是更会在优势区间使用更高权限。
+
+4. Agent 的长期形态，不是机械 bot，而是长期进化型交易个体
+- 不只是执行；
+- 还必须能够：
+  - 自主分析；
+  - 总结经验；
+  - 学习与迭代；
+  - 感知自身系统状态；
+  - 产出经营级报告；
+  - 在未来根据结果修正自己的行为。
+
+============================================================
+二、Agent 核心需求（这部分也非常重要）
+============================================================
+
+Agent 的核心需求不是单一策略，而是一整套系统能力。至少包括：
+
+A. 安全与治理
+- 默认只读；
+- 默认不允许 live execution；
+- 默认不允许 AI 直接驱动真实执行；
+- 所有升级必须遵循分阶段推进；
+- 所有关键状态必须可审计、可解释、可追溯。
+
+B. 数据感知能力
+- 能读真实交易所公共与私有只读数据；
+- 能建立统一 snapshot；
+- 能接入 WS；
+- 能区分控制面消息与真实 business-topic 事件；
+- 能维护 freshness / health / state。
+
+C. 决策输入能力
+- 把账户、持仓、订单、成交、WS 状态、business event 状态统一加工成标准决策输入；
+- 决策输入必须结构化；
+- 不是“为了问 AI 而问 AI”，而是先做好本地输入治理。
+
+D. AI 调用治理能力
+- 只有在值得思考时才调用 AI；
+- 本地能决定的，先本地决定；
+- AI 调用必须被预算控制；
+- 后续必须有 abuse prevention / compute governor / model router。
+
+E. 学习能力
+- 未来必须记录：
+  - 过去做过什么判断；
+  - 哪些判断是对的；
+  - 哪些判断是错的；
+  - 哪些环境下什么策略有效；
+  - 哪些 AI 调用纯属浪费。
+- 要形成“事实 -> 决策 -> 结果 -> 归因 -> 更新”的闭环。
+
+F. 自我观测能力
+- 不只是看市场，也要看自己；
+- 包括未来对：
+  - CPU / RAM；
+  - 网络延迟；
+  - REST 延迟；
+  - WS 稳定性；
+  - DB 写入耗时；
+  - 模块阻塞点；
+  - 整体效率瓶颈
+进行持续观测。
+
+G. 经营报告能力
+- 未来要能生成 daily / weekly / monthly 级别的：
+  - 收益；
+  - 成本；
+  - 净收益；
+  - 问题归因；
+  - 优化建议；
+- 最终让系统不仅“能跑”，还“会交经营报告”。
+
+============================================================
+三、项目总阶段（Revision 1 全量章节树）
+============================================================
+
+以下是目前适合作为 Revision 1 的完整章节树（含已完成与未完成）：
+
+A. 基础环境与 OpenClaw 中枢搭建
+A1. OpenClaw 基础安装与目录初始化
+A2. OpenClaw gateway 启动与 probe 验证
+A3. 基础容器服务：PostgreSQL / Redis / Qdrant
+A4. PostgreSQL 数据目录 / initdb / 权限修复
+A5. Qdrant health 修复
+A6. 自动化成本快照与基础 system_logs
+A7. A 阶段封测
+
+B. OpenClaw 模型层与配置收口
+B1. ~/.openclaw 权限与 secrets 管理
+B2. openclaw.json 稳定化
+B3. doctor / sessions / transcripts 清理
+B4. Dashboard / Gateway 最终复核
+B5. 模型分工定稿（OpenAI / Claude）
+
+C. 接入前治理与骨架
+C1. 决策 / 风控 / 审计 / 权限 / 学习骨架
+C2. decision lease 思路定稿
+C3. permission review / learning queue / latency breakdown 等治理结构
+C4. 6 级权限框架定稿
+C5. 交易所策略：Bybit 主、Binance 辅
+
+D. Bybit 接入主线（Revision 1 主体）
+D1-D13. 早期只读骨架、治理合同、公共链与基础状态写入（此前已推进，不在今日记录展开）
+D14. 真实 Bybit 私有只读账户读取
+D15.1. 真实私有只读持仓读取
+D15.2. 真实私有只读历史订单读取
+D15.3. 真实私有只读成交历史读取
+D16. 真实系统快照层（snapshot + 入库 + 标准化 + 去重）
+D17. 私有 WS 只读事件流骨架（smoke + 原始事件入库）
+D18. 标准 decision packet 输入层
+D19. 本地 observer verdict 骨架
+D20. readonly observer mode 阶段性收口
+D21. persistent private/public WebSocket listener skeleton（已完成并硬化）
+D22. event-driven state updater from WS into runtime facts（已完成到 business-event state、policy/handoff 集成）
+D23. event-driven 过渡链 / transition engine 前置输入闭环（当前已完成第一版骨架）
+D24. AI compute governor / model router v2（未开始）
+D25. Learning Engine / Self-Observability / Performance & PnL Reporting（未开始）
+D26. demo/paper execution gate（未开始）
+D27. supervised live gate（未来）
+D28. constrained autonomous live（未来）
+
+============================================================
+四、截至 2026-03-11 已完成的大框架（简要复盘）
+============================================================
+
+1. OpenClaw / 基础服务 / 数据库 / 治理层完成基础部署与联调
+- OpenClaw gateway 正常；
+- PostgreSQL / Redis / Qdrant 可用；
+- doctor / probe / dashboard 基本正常；
+- cron / daily_cost_snapshot / status writer 已建立；
+- 系统已有治理层骨架，不是裸 bot。
+
+2. Bybit 生产只读主 key 已创建并可真实使用
+- 建议名称：bybit_prod_readonly_main
+- 已用于真实只读私有接口验证；
+- 当前系统已在 production readonly key 上打通：
+  - account wallet balance；
+  - positions；
+  - order history；
+  - 后续再扩展到 executions、WS、snapshot、observer 链。
+
+3. 截至 2026-03-11 晚间系统定位
+- permission_level = 0
+- permission_label = observer
+- autonomous_execution_enabled = false
+- 当前节奏明确：只读观察优先，不做真实写权限。
+
+============================================================
+五、截至 2026-03-12 已完成的关键收口（D15.3 ~ D20）
+============================================================
+
+这一部分是上一轮阶段性收口的基线，后续所有 D21+ 都是在此基础上往上叠。
+
+1. D15.3：Bybit 私有只读成交历史读取完成
+- 新建脚本：
+  bybit_private_execution_history_check.py
+- 修复 secrets 路径误写问题；
+- spot / linear execution history 都返回 retCode=0；
+- 当前 count=0 为空列表，但这是“成功且空”，不是错误。
+
+2. D16：snapshot 层完成
+- system snapshot 聚合完成；
+- snapshot 入 PostgreSQL 完成；
+- 标准化原始表拆分完成；
+- 幂等与去重修复完成（唯一索引 + ON CONFLICT DO NOTHING）；
+- snapshot 不再只是 JSON 文件，而进入治理链。
+
+3. D17：WS 只读骨架完成到 smoke + 入库
+- bybit_private_ws_smoke_test.py
+- bybit_private_ws_smoke_test_v2.py
+- bybit_load_ws_jsonl_to_postgres.py
+- bybit_ws_smoke_to_postgres.py
+- auth / subscribe 成功；
+- 原始 WS 事件可以落到 PostgreSQL；
+- 但当前观察窗口中只看到控制类消息；
+- 尚未看到真实 wallet/order/execution/position 业务事件；
+- 这是正常现象，不等于失败。
+
+4. D18：decision packet 输入层完成
+- bybit_build_decision_packet.py
+- bybit_decision_packet_to_postgres.py
+- bybit_decision_packet_pipeline.py
+- 当前 should_query_ai = false；
+- observer-only 逻辑成立；
+- AI abuse prevention / compute governor 还没正式接主链。
+
+5. D19：observer verdict 完成
+- 本地可生成 observer verdict；
+- verdict 仍为 OBSERVE_ONLY；
+- 执行未开启；
+- urgency 低；
+- 方向正确。
+
+6. D20：readonly observer mode 阶段性收口
+- 完成 acceptance report；
+- 完成 runtime state；
+- 完成 failure / degrade policy；
+- 完成 final summary；
+- 完成 next-phase handoff；
+- 阶段结论：
+  当前系统已准备好作为 readonly observer infrastructure，
+  但尚不是 trading execution system。
+
+============================================================
+六、2026-03-17 这一轮推进总览（本次记录的重点）
+============================================================
+
+今天以及这几天继续推进的核心，是把原来的“只读观察基础设施”继续往上推进到：
+
+1. D21 readonly observer hardened 完整硬化；
+2. D22 business-event state 集成与 policy/handoff/audit 一致化；
+3. D23 event-driven 过渡链第一版闭环；
+4. 可维护性强化（脚本头注释 + SCRIPT_INDEX.md）；
+5. consistency / audit / contract 多层校验补齐。
+
+一句话概括：
+“系统仍保持 read_only / observer-only 不变，但已经从单纯的 readonly observer，推进到带 business-event 状态分类、event-driven 过渡骨架、全链 contract / audit / consistency 的更完整工程阶段。”
+
+============================================================
+七、D21 完成情况：readonly observer hardened
+============================================================
+
+D21 的目的不是进入交易，而是把 readonly observer 做硬：
+- 让主链路的 stage、state、acceptance、summary、policy、audit 都更稳定；
+- 让 latest 文件之间的引用关系明确；
+- 让 WS 运行状态和 REST freshness 都有统一表达；
+- 让后续 D22 / D23 有可靠上游。
+
+D21 关键成果：
+
+1. readonly observer 主链完善
+关键脚本包括：
+- _bybit_latest_wrapper.py
+- bybit_private_account_check.py
+- bybit_private_positions_check.py
+- bybit_private_order_history_check.py
+- bybit_private_execution_history_check.py
+- bybit_private_rest_preflight_guard.py
+- bybit_snapshot_to_postgres.py
+- bybit_normalize_latest_snapshot_to_postgres.py
+- bybit_ws_smoke_to_postgres.py
+- bybit_build_ws_runtime_facts.py
+- bybit_build_decision_packet.py
+- bybit_decision_packet_to_postgres.py
+- bybit_build_observer_verdict.py
+- bybit_observer_verdict_to_postgres.py
+- bybit_full_readonly_observer_cycle.py
+- bybit_observer_acceptance_check.py
+- bybit_runtime_state_resolver.py
+- bybit_failure_policy_builder.py
+- bybit_readonly_final_summary.py
+- bybit_next_phase_handoff.py
+- bybit_readonly_audit.py
+
+2. bybit_full_readonly_observer_cycle.py 的 guard 解析问题修复
+最开始曾出现：
+- cycle 文件中 guard step 的 parsed_guard 为空字典；
+- 造成自检时出现：
+  RESULT: NOT CLEAN
+  - guard parsed_guard missing_or_empty
+
+进一步检查后发现：
+- 该脚本 guard 阶段需要更稳定地从 stdout 解析 guard JSON；
+- 修复后 parsed_guard 已正常写入；
+- 再次验证时，parsed_guard_keys 已正常包含：
+  guard_type / guard_version / ts_ms / allowed_to_continue / check_count /
+  failed_count / checks / blocking_issues
+
+3. D21 验收结果
+在刷新完整 readonly 链后，关键状态达成：
+- acceptance overall_passed = true
+- runtime overall_runtime_state = ready_readonly_observer
+- summary readonly_observer_ready = true
+- audit overall_ok = true
+
+4. 当前只读观察主链的标准定位
+- system_mode = read_only
+- overall_runtime_state = ready_readonly_observer
+- observer_state = healthy_observe_only
+- verdict_code = OBSERVE_ONLY
+- execution_state = disabled
+- ai_state = disabled_by_policy
+
+5. D21 阶段结论
+- readonly observer hardened 完成；
+- 当前系统是 production-grade readonly observer infrastructure；
+- 仍然不是 trading execution infrastructure。
+
+============================================================
+八、D22 完成情况：business event state 集成
+============================================================
+
+D22 的核心，不是让系统“已经看到了真实业务事件”，而是让系统能够正确地区分三件事：
+1. WS 健康但没有真实业务事件；
+2. WS 看到了真实 business-topic 事件；
+3. business-event 侧失真、过期、或不可信。
+
+这个阶段最关键的概念是：
+“healthy_no_business_events_yet”
+也就是：
+“健康空态”。
+
+这个状态绝对不能被误判为故障，也不能被误判为已经具备交易事件流。
+
+D22.1：business event ingestion smoke
+- 新建脚本：
+  bybit_business_event_ingestion_smoke.py
+  bybit_business_event_contract_check.py
+- 结果：
+  normalized_count = 4
+  contract overall_ok = true
+- 说明 normalization smoke 能工作。
+
+D22.2：从 WS 原始 jsonl 提取 business messages，并形成 runtime facts
+- 新建脚本：
+  bybit_business_event_extract_from_ws_jsonl.py
+  bybit_business_event_ingestion_from_ws.py
+  bybit_business_event_runtime_facts.py
+  bybit_business_event_runtime_contract_check.py
+- 结果：
+  source_row_count = 5
+  business_row_count = 0
+  normalized_count = 0
+  has_business_events = false
+  contract overall_ok = true
+
+解释：
+- 目前 WS 原始 jsonl 里只有控制面消息；
+- 当前没有真实 wallet/order/execution/position 业务事件；
+- 这不是错误；
+- 这正好证明系统已经能识别“空而健康”的情况。
+
+D22.3：business event state resolver
+- 新建脚本：
+  bybit_business_event_state_resolver.py
+  bybit_business_event_state_contract_check.py
+- 输出关键状态：
+  state_type = bybit_business_event_state
+  state_version = v1
+  stage = D22.3
+  state_code = healthy_no_business_events_yet
+  healthy = true
+  reason = ws is healthy but no business-topic events have arrived yet
+
+同时引入三种关键状态：
+- healthy_no_business_events_yet
+- healthy_business_events_present
+- stale_or_missing_business_event_feed
+
+D22.4：runtime / summary / audit 集成 business_event_state
+- 更新脚本：
+  bybit_runtime_state_resolver.py
+  bybit_readonly_final_summary.py
+  bybit_next_phase_handoff.py
+  bybit_readonly_audit.py
+
+期间发生过一次 freshness 过期导致验收失败：
+- acceptance_passed = false
+- runtime = degraded
+- snapshot / ws_smoke / ws_runtime_facts / preflight 都 stale
+
+原因：
+- 修改后直接跑集成层，没有先刷新完整 readonly 主链。
+
+修复方式：
+- 先重新刷新完整 readonly chain；
+- 再重新运行 D22.4 集成脚本；
+- 结果恢复正常：
+  acceptance_passed = true
+  runtime = ready_readonly_observer
+  audit overall_ok = true
+
+D22.5：failure policy / handoff / audit 一致化增强
+
+1. failure policy 升级到 v3
+新增 business-event 相关 degrade 条件：
+- business_event_feed_missing_or_stale
+- business_event_feed_healthy_but_empty
+
+并补充了 business_event_interpretation：
+- healthy_no_business_events_yet
+- healthy_business_events_present
+- stale_or_missing_business_event_feed
+
+2. next phase handoff 升级到 v3
+handoff 中开始明确体现：
+- current_stage_complete = D22.5 readonly observer + business-event policy/handoff integrated
+- business_event_status 单独表达
+- hard safety boundaries 明确增加：
+  不要把 healthy empty business-event feed 当成 active event-driven trading readiness
+
+3. audit 适配 handoff_version v3
+曾出现：
+- handoff_version 实际已经是 v3；
+- 但 audit 仍按 v2 校验；
+- 导致 audit failed_count = 1
+后续修复 bybit_readonly_audit.py 后恢复正常。
+
+4. snapshot ts 字段名兼容修复
+曾出现：
+- audit 检查 packet_snapshot_ref_matches_snapshot 时，
+  packet 用 snapshot_ts_ms，
+  snapshot 文件真实键是 ts_ms，
+  导致 snapshot 读到 null；
+- 后续修复 bybit_readonly_audit.py；
+- 兼容 snapshot["ts_ms"]；
+- 问题消除。
+
+D22 附加成果：latest consistency check
+- 新增脚本：
+  bybit_latest_consistency_check.py
+- 检查 latest 文件之间的关键引用关系与语义一致性。
+- 最新结果：
+  overall_ok = true
+  failed_count = 0
+
+D22 阶段结论
+- 当前系统能够把 healthy empty business-event feed 和 broken/stale business-event feed 区分开；
+- 当前系统知道自己“没有真实业务事件”，同时也知道这不是故障；
+- 这为 D23 的 event-driven transition 输入层打下了基础。
+
+============================================================
+九、D23 完成情况：event-driven 过渡链第一版闭环
+============================================================
+
+D23 当前做的还不是完整 transition engine，更不是执行引擎。
+D23 当前完成的是：
+“在 business-event 仍为空的情况下，把 event-driven 子链的 state、phase、transition input、decision、outcome、chain consistency、readiness summary、handoff、final audit 全部先搭成闭环。”
+
+D23.1：event driven state
+- 新建脚本：
+  bybit_event_driven_state_builder.py
+  bybit_event_driven_state_contract_check.py
+- 输出核心：
+  state_type = bybit_event_driven_state
+  state_version = v1
+  stage = D23.1
+  event_driven_readiness = healthy_but_empty
+  business_event_state_code = healthy_no_business_events_yet
+  business_event_healthy = true
+  has_business_events = false
+  normalized_count = 0
+- topic_observation 当前为：
+  wallet=0 / order=0 / execution=0 / position=0
+
+D23.2：event driven phase
+- 新建脚本：
+  bybit_event_driven_state_machine.py
+  bybit_event_driven_phase_contract_check.py
+- 输出核心：
+  phase_type = bybit_event_driven_phase
+  phase_version = v1
+  stage = D23.2
+  phase_code = observer_only_empty_feed
+  phase_ready = false
+  phase_reason = event-driven feed is healthy but still empty
+- state_machine_hint：
+  allow_future_transition_engine = false
+  allow_demo_gate_consideration = false
+  allow_live_execution = false
+
+D23.3：event transition input
+- 新建脚本：
+  bybit_event_transition_input_builder.py
+  bybit_event_transition_input_contract_check.py
+- 输出核心：
+  input_type = bybit_event_transition_input
+  input_version = v1
+  stage = D23.3
+  transition_readiness = input_ready_but_empty
+  transition_allowed = false
+  transition_reason = inputs are healthy and consistent, but no business events exist yet
+
+D23.4：event transition decision
+- 新建脚本：
+  bybit_event_transition_decider.py
+  bybit_event_transition_decision_contract_check.py
+- 输出核心：
+  decision_type = bybit_event_transition_decision
+  decision_version = v1
+  stage = D23.4
+  decision_code = keep_observe_only
+  decision_allowed = false
+  decision_reason = transition input is healthy but empty, so stay in observe-only state
+
+D23.5：event transition outcome
+- 新建脚本：
+  bybit_event_transition_outcome_builder.py
+  bybit_event_transition_outcome_contract_check.py
+- 输出核心：
+  outcome_type = bybit_event_transition_outcome
+  outcome_version = v1
+  stage = D23.5
+  outcome_code = observe_only_retained
+  outcome_ok = true
+  outcome_reason = system intentionally remains in observe-only state
+
+D23.6：event-driven chain consistency
+- 新建脚本：
+  bybit_event_driven_chain_consistency_check.py
+  bybit_event_driven_chain_contract_check.py
+- 目标：
+  检查整个 D23 子链的引用关系与语义映射是否一致。
+- 最新结果：
+  overall_ok = true
+  failed_count = 0
+
+D23.7：event-driven readiness summary
+- 新建脚本：
+  bybit_event_driven_readiness_summary.py
+  bybit_event_driven_readiness_contract_check.py
+- 输出核心：
+  summary_type = bybit_event_driven_readiness_summary
+  summary_version = v1
+  stage = D23.7
+  readiness_ok = true
+  current_mode = observe_only_retained
+  high_level_reason = system intentionally remains in observe-only state
+
+D23.8：event-driven handoff
+- 新建脚本：
+  bybit_event_driven_handoff.py
+  bybit_event_driven_handoff_contract_check.py
+- 期间小问题：
+  compile 命令曾因路径打字损坏；
+  后续又发现 handoff contract checker 文件不存在；
+  之后补建 contract checker；
+  问题解决。
+- handoff 输出核心：
+  handoff_type = bybit_event_driven_handoff
+  handoff_version = v1
+  stage = D23.8
+  current_status.current_mode = observe_only_retained
+  consistency_ok = true
+
+D23 最终总审计
+- 新建脚本：
+  bybit_event_driven_final_audit.py
+  bybit_event_driven_final_audit_contract_check.py
+- 最新结果：
+  audit_type = bybit_event_driven_final_audit
+  audit_version = v1
+  overall_ok = true
+  failed_count = 0
+  total_checks = 31
+- contract check 也通过：
+  overall_ok = true
+  failed_count = 0
+
+D23 阶段结论
+- event-driven 子链已具备完整结构；
+- 当前所有层都一致地表达：
+  feed 健康；
+  但真实业务事件仍为空；
+  因此继续 observe-only；
+- 系统不是“因为坏了而不能推进”，而是“因为当前没有真实 business-topic 事件，所以合理地不推进”。
+
+============================================================
+十、可维护性强化：脚本注释与文档化
+============================================================
+
+1. 脚本头注释（MODULE_NOTE）补写
+本轮对大量核心脚本补了头部维护说明，覆盖了 D21/D22 的大部分核心脚本，以及后续新写的 D23 脚本。
+
+2. 头注释注入时出现过一次语法破坏，已修复
+最开始批量插入注释时，因文本拼接不当导致文件头异常，触发 SyntaxError。
+后续统一修复后，目标脚本重新 py_compile 通过。
+
+3. SCRIPT_INDEX.md 建立
+创建位置：
+/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/docs/SCRIPT_INDEX.md
+当前特征：
+- 文件存在；
+- 约 399 行；
+- 覆盖 D21 / D22 阶段核心脚本索引；
+- 说明各脚本作用、上下游依赖、latest 产物、维护顺序与原则。
+
+4. 后续维护原则
+后续所有新写脚本，都应该：
+- 一开始就写好头部维护注释；
+- 尽量写明 role / purpose / upstream / output / notes；
+- 写完后立即编译检查；
+- 如有必要同步补入 SCRIPT_INDEX.md。
+
+============================================================
+十一、今天及最近几天遇到的主要问题与修复
+============================================================
+
+1. heredoc / cat <<'PY' 终端看似“卡住”
+- 常见原因是 shell 仍在等待 heredoc 结束标记，或脚本本身仍在运行；
+- 这是近期多次出现的操作层问题。
+
+2. 多次把终端输出又粘回 shell
+- 导致 JSON 字段和终端输出被误当命令执行；
+- 这是粘贴误操作，不是程序逻辑错误。
+
+3. 刷新顺序错误导致 freshness stale
+- 改完 runtime / summary / audit 后直接跑集成层，会因为上游 latest 没刷新而出现 stale；
+- 正确经验：
+  改完核心脚本后先刷新 readonly chain，再跑集成层。
+
+4. 版本漂移问题
+- handoff 升级到 v3 后，audit 还按 v2 校验；
+- 已修复；
+- 以后版本号一旦改动，要同步所有下游 checker / audit / summary / handoff / policy。
+
+5. 字段名漂移问题
+- snapshot 文件实际使用 ts_ms；
+- 某些检查脚本曾按 snapshot_ts_ms 取值；
+- 导致 null；
+- 已修复。
+
+6. handoff contract checker 文件漏建
+- D23.8 首次运行时发现 bybit_event_driven_handoff_contract_check.py 不存在；
+- 后续补建并通过；
+- 说明新阶段结束前要确保“主文件 + contract checker + 如有需要则 final audit”成套存在。
+
+============================================================
+十二、当前最新系统状态（截至本记录）
+============================================================
+
+A. readonly observer 主系统状态
+- system_mode = read_only
+- overall_runtime_state = ready_readonly_observer
+- observer_state = healthy_observe_only
+- verdict_code = OBSERVE_ONLY
+- execution_state = disabled
+- ai_state = disabled_by_policy
+- business_event_state = healthy_no_business_events_yet
+- business_event_healthy = true
+
+B. failure policy 当前状态
+- policy_version = v3
+
+C. readonly 主链 versions
+- failure policy = v3
+- runtime state = v5
+- final summary = v4
+- next phase handoff = v3
+- readonly audit = v2
+- latest consistency = v1
+- business event state = v1
+
+D. D23 event-driven 子链当前版本
+- event_driven_state = v1
+- event_driven_phase = v1
+- event_transition_input = v1
+- event_transition_decision = v1
+- event_transition_outcome = v1
+- event_driven_chain_consistency = v1
+- event_driven_readiness_summary = v1
+- event_driven_handoff = v1
+- event_driven_final_audit = v1
+
+E. D23 子链当前高层结论
+- readiness_ok = true
+- current_mode = observe_only_retained
+- high_level_reason = system intentionally remains in observe-only state
+
+更直白地说：
+event-driven 子链现在已经搭好了，但因为没有真实 business-topic 事件，所以系统有意识地保持 observe-only，而不是错误地推进下一个引擎。
+
+============================================================
+十三、当前最新文件 / 脚本成果清单（本轮重点新增）
+============================================================
+
+D21 / D22 主系统侧重点新增或强化
+1. bybit_full_readonly_observer_cycle.py
+2. bybit_runtime_state_resolver.py
+3. bybit_failure_policy_builder.py
+4. bybit_readonly_final_summary.py
+5. bybit_next_phase_handoff.py
+6. bybit_readonly_audit.py
+7. bybit_latest_consistency_check.py
+
+D22 business-event 侧新增
+8. bybit_business_event_ingestion_smoke.py
+9. bybit_business_event_contract_check.py
+10. bybit_business_event_extract_from_ws_jsonl.py
+11. bybit_business_event_ingestion_from_ws.py
+12. bybit_business_event_runtime_facts.py
+13. bybit_business_event_runtime_contract_check.py
+14. bybit_business_event_state_resolver.py
+15. bybit_business_event_state_contract_check.py
+
+D23 event-driven 侧新增
+16. bybit_event_driven_state_builder.py
+17. bybit_event_driven_state_contract_check.py
+18. bybit_event_driven_state_machine.py
+19. bybit_event_driven_phase_contract_check.py
+20. bybit_event_transition_input_builder.py
+21. bybit_event_transition_input_contract_check.py
+22. bybit_event_transition_decider.py
+23. bybit_event_transition_decision_contract_check.py
+24. bybit_event_transition_outcome_builder.py
+25. bybit_event_transition_outcome_contract_check.py
+26. bybit_event_driven_chain_consistency_check.py
+27. bybit_event_driven_chain_contract_check.py
+28. bybit_event_driven_readiness_summary.py
+29. bybit_event_driven_readiness_contract_check.py
+30. bybit_event_driven_handoff.py
+31. bybit_event_driven_handoff_contract_check.py
+32. bybit_event_driven_final_audit.py
+33. bybit_event_driven_final_audit_contract_check.py
+
+============================================================
+十四、当前最重要的工程理解（后续若模型忘记，必须重读）
+============================================================
+
+1. 当前系统不是交易系统，而是：
+“生产级只读观察基础设施 + business-event 状态分类 + event-driven 过渡骨架”。
+
+2. 当前最重要的“空态”概念有两个：
+- business_event_state = healthy_no_business_events_yet
+- event_driven_readiness = healthy_but_empty
+
+这两个状态都表示：
+“健康，但还没看到真实业务事件。”
+
+3. 当前 event-driven 子链的正确高层结论不是：
+- blocked because broken
+而是：
+- observe_only_retained because healthy but empty
+
+4. 当前所有系统层都一致表达：
+- 不允许推进 transition engine；
+- 不允许 demo gate；
+- 更不允许 live execution。
+
+5. 当前项目节奏完全正确：
+- 先把观察、状态、语义、audit、contract、handoff 做齐；
+- 未来真实业务事件一旦出现，再看哪一层首先变化；
+- 然后再去做 transition engine / demo gate；
+- 再之后才可能接近 execution。
+
+============================================================
+十五、当前还没做的章节（大方向）
+============================================================
+
+从大章节看，最主要剩余方向大致还有这些：
+
+1. D24：AI compute governor / model router v2
+- 目标：治理 AI 调用预算、路由策略、调用边界、算力成本；
+- 当前尚未正式进入实现；
+- 但设计方向早已确定。
+
+2. D25：Learning Engine / Self-Observability / Performance & PnL Reporting
+- 这是项目长期核心之一；
+- 未来要实现：
+  - 学习闭环；
+  - 系统自我观测；
+  - 净收益与经营报告；
+- 当前尚未开始正式工程化。
+
+3. D26：demo/paper execution gate
+- 当前仍远未到这一步；
+- 必须等 event-driven transition 与治理层更成熟后再进入。
+
+4. D27：supervised live gate
+- 更远阶段。
+
+5. D28：constrained autonomous live
+- 更远阶段；
+- 绝不能跳级。
+
+============================================================
+十六、我对下一新分支的强烈建议
+============================================================
+
+下一新分支继续时，建议把注意力放在下面这条主线上：
+
+“不要急着想 execution。
+先把 transition engine skeleton 做出来，
+让系统在未来一旦看到真实 wallet/order/execution/position 事件时，
+能够从 healthy_but_empty / observer_only_empty_feed /
+input_ready_but_empty / keep_observe_only / observe_only_retained
+这些空态，正确地切换到下一套有事件流的状态。”
+
+也就是说，下一步最合理方向大致是：
+1. transition engine skeleton
+2. event-driven state transition rules
+3. transition audit trail
+4. 之后才考虑 demo/paper gate integration
+
+============================================================
+十七、给下一新分支的最短续接说明（短版）
+============================================================
+
+如果你在下一新分支里要用最短说明快速续接，可直接贴下面这段：
+
+- 项目总目标不是做普通 bot，而是做一个以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的长期进化型交易 Agent；
+- 核心原则：风险可控、可审计、可学习、可逐步放权、优化 net PnL 而不是 gross PnL；
+- 当前 system_mode=read_only；
+- 当前 overall_runtime_state=ready_readonly_observer；
+- 当前 observer verdict=OBSERVE_ONLY；
+- 当前 execution disabled；
+- 当前 ai disabled_by_policy；
+- 当前 business_event_state=healthy_no_business_events_yet；
+- D21 readonly observer hardened 已完成；
+- D22 business-event state 集成、policy/handoff/audit 一致化已完成；
+- D23 event-driven 子链第一版已完成到：
+  state -> phase -> transition input -> decision -> outcome -> chain consistency -> readiness summary -> handoff -> final audit；
+- 当前 D23 高层结论：
+  readiness_ok=true，但 current_mode=observe_only_retained，
+  原因不是坏了，而是 event-driven feed 健康但仍为空；
+- 下一步更适合继续做 transition engine skeleton / state transition rules / transition audit trail，
+  还不应该进入真实执行。
+
+============================================================
+十八、给下一新分支的最短续接说明（长版）
+============================================================
+
+如果需要更稳一点的续接说明，可以直接贴下面这段：
+
+OpenClaw + Bybit 项目当前不是执行系统，而是生产级 readonly observer infrastructure，已经完成 D21 硬化、D22 business-event state 集成、D23 event-driven 过渡链第一版。当前 system_mode=read_only，overall_runtime_state=ready_readonly_observer，observer_state=healthy_observe_only，execution_state=disabled，ai_state=disabled_by_policy。当前 business_event_state=healthy_no_business_events_yet，表示 WS / business-event 侧健康，但尚未看到真实 wallet/order/execution/position 事件。D23 当前高层结论是 observe_only_retained，不是因为出错，而是因为 event-driven feed 健康但为空。当前 event-driven 子链已经完成 state / phase / transition input / decision / outcome / chain consistency / readiness summary / handoff / final audit，并全部通过 contract / audit。下一步更适合继续做 transition engine skeleton、event-driven state transition rules 和 transition audit trail，而不是急于推进 execution。
+
+============================================================
+十九、对未来模型的提醒（防遗忘清单）
+============================================================
+
+后续如果模型再出现模糊，优先提醒它以下几点：
+
+1. 不要把当前项目理解成“快要实盘执行了”
+- 还没有；
+- 现在仍是 read_only / observe-only。
+
+2. 不要把 healthy_no_business_events_yet 当故障
+- 这是 D22 的关键成果；
+- 它是健康空态，不是失败。
+
+3. 不要把 healthy_but_empty 当成 transition engine ready
+- D23 的核心就是：
+  结构已齐，但当前仍为空。
+
+4. 不要忘记项目真正长期目标
+- 风险；
+- 审计；
+- 学习；
+- 自我观测；
+- 成本治理；
+- 净收益；
+- 权限按表现逐步放权。
+
+5. 不要忘记当前最重要的未完成方向
+- transition engine skeleton
+- AI compute governor / model router v2
+- Learning / Self-Observability / PnL Reporting
+- demo/paper gate
+
+============================================================
+二十、最后一句总括
+============================================================
+
+截至 2026-03-17，本项目已经从“Bybit 只读观察基础设施”进一步推进到“带 business-event 状态分类与 event-driven 过渡骨架的生产级 observer 系统”。系统当前清楚地知道自己仍应保持 observe-only，并且这种保守是健康、合理、经过多层 contract / consistency / audit 验证的结果，而不是因为系统故障。下一新分支最合理的推进方向，是继续把 transition engine 骨架与状态转移规则做出来，而不是贸然进入 execution。
+
+—— 记录结束 —

@@ -1,0 +1,807 @@
+OpenClaw / Bybit 项目
+今日总报告（2026-03-22，GitHub 接入 + srv 路径迁移 + 夜间语义诊断权威版）
+
+用途：
+1. 作为今天这条对话的正式归档；
+2. 供明天/下一个新对话直接接手；
+3. 覆盖今天之前部分已过时的接手摘要与总报告口径；
+4. 明确今天形成的新工作流、新路径结构、当前真实阻塞点与后续实施顺序。
+
+======================================================================
+一、今天这条对话的定位
+======================================================================
+
+今天这条对话，不是继续盲目向后开发新章节，而是完成了三件非常关键的基础工程：
+
+A. 把项目从“旧本地 srv 目录 + 零散工程状态”整理成“可 GitHub 管理、可继续接力、可局部本地运行”的新工程形态；
+B. 把 /home/ncyu/srv 与新的 /home/ncyu/BybitOpenClaw/srv 做了安全切换，同时尽量保留旧 srv 风格骨架和 README 体系；
+C. 在完成路径迁移后，重新用当前 runtime/latest artifacts 做夜间只读诊断，确认：
+   - 当前真正的 blocker 是什么；
+   - 哪些红灯是“语义误报”；
+   - 哪些旧报告已经被今天新的检查结果覆盖。
+
+今天最大的成果，不是“又多写了几个脚本”，而是：
+- GitHub 接通了；
+- 新仓库结构稳定下来了；
+- 本地运行入口重新挂到了新仓库；
+- 旧 runtime 数据重新接回来了；
+- H/I 当前的真实状态被重新核验了一遍；
+- 新的高效协作 workflow 被正式定型。
+
+======================================================================
+二、项目总目标（再次定锚，防止新对话跑偏）
+======================================================================
+
+本项目不是普通自动下单 bot，也不是单纯的量化脚本集合。
+真正目标始终是：
+
+“构建一个以 OpenClaw 为中枢、Bybit 为主交易所、Binance 为辅助交易所的 AI Agent 交易系统，
+长期追求在风险可控、权限可审计、成本可治理、行为可回放、边界可逐步放权的前提下，实现长期 net PnL 最大化。”
+
+四条根原则仍然不变：
+
+1. 看 net PnL，不看 gross PnL
+必须计入 AI API 成本、手续费、基础设施、电费、维护成本等现实摩擦。
+
+2. AI 输出不能直接当执行命令
+AI 输出更适合理解为 governed observation 或 future decision lease，而不是“立刻下单”。
+
+3. 权限不能因为时间自动升级
+execution authority 必须靠验证、审计、表现逐步赢得，不允许偷渡放权。
+
+4. 项目最终形态不是机械 bot，而是可长期进化、可学习、可自我观测、可被严格约束的交易个体。
+
+======================================================================
+三、今天接手时的背景与已知基线
+======================================================================
+
+今天接手时，项目已经积累了大量历史报告。
+旧报告大体上成立的部分包括：
+
+- A-C 基础环境与治理底座已经完成；
+- D readonly observer 主链已经完成并稳定；
+- E business event classification 已完成；
+- F event-driven scaffold 已完成；
+- G 真实业务事件验证层已收口；
+- H 与 I 曾在更早阶段被做到正式闭环，并以 read_only / shadow-only 口径完成；
+- J / K 提前搭过结构层 / 测试层 / 审计层 skeleton，但并不等于进入 live execution。
+
+但今天的核心发现之一是：
+“更早的 H/I/A-I 完工报告，属于历史里程碑，不等于当前迁移后的最新 runtime 状态仍然全绿。”
+
+因此今天形成了一个非常重要的新判断标准：
+
+- 旧的 A-I 完工报告、H/I 完工报告、总整合报告，仍然有参考价值；
+- 但它们现在只能作为历史背景层；
+- 今天夜间新生成的工程记录、接手指示、no-call patch 语义说明，必须视为更高优先级覆盖层。
+
+======================================================================
+四、今天白天到夜间完成的主要工作
+======================================================================
+
+----------------------------------------------------------------------
+4.1 安全诊断：确认旧源路径、旧代码树、secrets/env/config 都还在
+----------------------------------------------------------------------
+
+先做了一轮只读安全诊断，确认以下源路径存在：
+- 旧代码：/home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+- compose：/home/ncyu/srv/docker_projects/trading_services/docker-compose.yml
+- runtime env：/home/ncyu/srv/docker_projects/trading_services/.env
+- environment_files：/home/ncyu/srv/settings/environment_files
+- secret_files：/home/ncyu/srv/settings/secret_files
+- service config：/home/ncyu/srv/settings/service_configs/bybit_connector_config.json
+
+同时还确认了：
+- 命令行基础命令都可用；
+- 旧 bybit_connector 代码目录与 settings/secret_files 真实存在；
+- 旧工程数据并未丢失。
+
+这一步的意义是：
+在做任何路径迁移前，先确认“源还在”，避免误迁移或误删除。
+
+----------------------------------------------------------------------
+4.2 生成新布局预览与旧路径引用扫描
+----------------------------------------------------------------------
+
+围绕新的 BybitOpenClaw 目录，做了：
+- new_layout_preview
+- hardcoded_old_srv_refs
+- compact_review
+
+得到的重要结论：
+1. 新目录已经初步形成：
+   - /home/ncyu/BybitOpenClaw/srv
+   - /home/ncyu/BybitOpenClaw/secrets
+   - /home/ncyu/BybitOpenClaw/inventory
+   - /home/ncyu/BybitOpenClaw/backups
+
+2. live 代码里仍然保留了大量对旧路径 /home/ncyu/srv/... 的硬编码引用；
+3. docs/backups、临时历史 .bak、噪声文件会显著干扰扫描判断。
+
+这一步的意义是：
+在正式整理 GitHub 仓库前，先知道“哪些是 live 文件、哪些是噪声、哪些旧路径引用还没清”。
+
+----------------------------------------------------------------------
+4.3 清理 repo 噪声：去掉备份目录与历史 .bak 干扰
+----------------------------------------------------------------------
+
+随后做了 repo cleanup：
+- 清掉 backup_dirs
+- 清掉 noise_files
+
+清理前：
+- backup dir count = 2
+- noise file count = 150
+
+清理后：
+- backup dir count after = 0
+- noise file count after = 0
+
+清理后再次扫描 live 代码旧路径引用，结果仍有 731 行命中。
+这说明：
+- 噪声去掉了；
+- 但 live 脚本里仍确实有不少旧路径引用；
+- 这不是扫描误差，而是当前工程真实状态。
+
+这一步的意义是：
+先把“假噪声”去掉，再看“真旧引用”。
+
+----------------------------------------------------------------------
+4.4 GitHub 前安全检查：确认仓库本体不带敏感文件
+----------------------------------------------------------------------
+
+正式进 Git 之前，做了一轮 GitHub readiness scan：
+
+结果：
+- suspicious filenames count = 0
+- suspicious content hits 有一些，但主要是代码里出现 api_key / api_secret 这些字段名、secret path、环境变量名，并不是把真实 secret 值写进仓库。
+
+这说明：
+- 公开仓库当前结构没有直接把 .env、pem、key 等敏感文件塞进去；
+- 代码里仍然会引用 local secret path，这是正常的；
+- 真正的 secrets 仍应该留在本地-only 层，而不是进入 Git。
+
+----------------------------------------------------------------------
+4.5 初始化本地 git、首次提交、设置 GitHub SSH、首次推送
+----------------------------------------------------------------------
+
+今天正式完成了以下 GitHub 接入工作：
+
+1. 本地 git init 完成
+2. staged 文件预览完成
+3. 首次本地 commit 完成：
+   - e53cf98 Initial sanitized BybitOpenClaw snapshot
+4. 配置 GitHub SSH key
+5. 确认 ssh -T git@github.com 成功认证
+6. 添加 remote：
+   - git@github.com:yunancun/BybitOpenClaw.git
+7. 因远端已有 README 初始提交，最终采用 force update，把本地工程快照推上远端
+8. 当前可确认：
+   - GitHub 仓库已存在
+   - main 分支已与本地新仓库对齐
+   - 后续已 push 的文件，助手可以直接从 GitHub 读取
+
+这是今天最重要的里程碑之一。
+从这一刻开始，后续协作不再完全依赖“你贴整段代码给我”，而可以变成：
+
+- 已 push 的代码：我直接看 GitHub
+- 本地-only 的 runtime / latest / 日志 / env / secret：你只贴必要输出
+
+----------------------------------------------------------------------
+4.6 复盘旧 srv 结构，确认你原本在意的骨架和 README 体系
+----------------------------------------------------------------------
+
+因为你明确提出：
+“新的 BybitOpenClaw/srv 看起来比旧 srv 少了很多目录，不利于人工检查，也丢失了不少 README 语义。”
+
+所以今天专门回头审查了旧 /home/ncyu/srv 的结构。
+关键发现：
+
+旧 srv 顶层结构非常完整，包含：
+- backup_files
+- database_files
+- docker_projects
+- helper_scripts
+- log_files
+- old_archive
+- program_code
+- research_notes
+- settings
+- sql
+- stored_data
+- venvs
+
+同时旧 srv 里 README/说明类文件极多，重点候选文件超过 300 个。
+其中 program_code / docker_projects / settings / stored_data / rules / secret_files 下都有很多 README。
+
+你的要求是合理的：
+不是单纯把“会跑的代码”扔进 Git 就行，
+还要保留旧工程长期积累下来的“路径语义 + README 导航感”。
+
+----------------------------------------------------------------------
+4.7 按旧 srv 风格重排新 GitHub 仓库骨架
+----------------------------------------------------------------------
+
+基于上面的复盘，今天对新仓库做了重要重排：
+
+把拍扁结构重新改回旧 srv 风格骨架，主要包括：
+- program_code/exchange_connectors/bybit_connector
+- docker_projects/trading_services
+- settings/secret_files/bybit
+- settings/secret_files/binance
+- settings/environment_files
+- settings/service_configs
+
+同时：
+- 把 docker-compose.yml 移回 docker_projects/trading_services/
+- 把 bybit_connector 的 README/docs/scripts 迁移到 program_code/exchange_connectors/bybit_connector/
+- 补回 root README、program_code README、docker_projects README、trading_services README、settings README、secret_files README、bybit/binance README 等关键说明文件
+- 新增 LOCAL_PRIVATE_LAYOUT.md
+- 后续又继续补齐公共骨架目录与 placeholder README
+
+之后又进一步做了 R2 / R2.5：
+- 扩充 program_code 下的 ai_agents、daily_reports、dashboard、database_setup、local_model_tools、market_data_collector、market_data_processor、risk_control、trade_executor、trading_strategy 等骨架
+- 扩充 docker_projects 下的 ai_agent_services、basic_system_services、local_ai_services、market_data_services、monitoring_services、research_and_backtest_services、trading_services
+- 扩充 settings 下的 ai_prompt_templates、asset_role_rules、risk_control_rules、secret_files、service_configs、system_notes、trading_rules
+- 补 placeholder README 到缺失的重要目录
+
+这一轮结束后，新仓库的公开骨架已经基本恢复成“旧 srv 风格的公共版本”。
+
+随后做了第二次提交并推送：
+- d185ec3 Restore old srv-style public skeleton layout
+
+这一步的意义非常大：
+它让 GitHub 仓库既保留了公开可用的最小代码集，又尽量恢复了你习惯的旧工程导航逻辑。
+
+----------------------------------------------------------------------
+4.8 准备 live candidate：把本地-only 的真实 env / secret / config / runtime 接回新仓库
+----------------------------------------------------------------------
+
+今天还有一个非常关键的工程动作：
+
+因为 GitHub 仓库是 sanitized public snapshot，
+它本身不带：
+- 真实 secret
+- 真实 .env
+- 真实 service config
+- 真实 runtime/latest payload
+- 真实 connector logs / verdicts / decision packets
+
+但如果本地要继续“直接运行”，这些东西又必须接回来。
+
+所以今天做了 live candidate preparation，关键结果包括：
+
+1. settings 下本地-only 项目重新可见：
+- environment_files/basic_system_services.env
+- environment_files/trading_services.env
+- secret_files/ai/openai_api_key
+- secret_files/ai/anthropic_api_key
+- bybit/binance 各种 api_key/api_secret
+- service_configs/bybit_connector_config.json
+
+2. trading_services 下本地-only 项目重新可见：
+- docker-compose.yml
+- .env
+
+3. 加入 local-only git exclude 规则
+确保这些本地-only 内容不会误进 Git。
+
+这一步的意义是：
+把“GitHub 公开骨架”和“本地可运行候选体”分离开，但又在本机上重新接通。
+
+----------------------------------------------------------------------
+4.9 把旧 /home/ncyu/srv 切换成新仓库的符号链接
+----------------------------------------------------------------------
+
+你提出了很关键的要求：
+“以后本地最好只保留一份，不想一套旧 srv 再加一套新 BybitOpenClaw 各跑各的。”
+
+所以今天没有让你以后改所有绝对路径，
+而是采用了兼容性更高的方案：
+
+- 把旧 /home/ncyu/srv 先备份成：
+  /home/ncyu/srv_before_bybitopenclaw_link_2026-03-22_222109
+- 然后把 /home/ncyu/srv 切成：
+  /home/ncyu/BybitOpenClaw/srv 的 symlink
+
+验证结果：
+- /home/ncyu/srv -> /home/ncyu/BybitOpenClaw/srv
+- 旧的绝对路径仍能 resolve
+- Git 仍指向新仓库路径
+
+也就是说：
+以后你日常继续用老路径 /home/ncyu/srv/...，但实质上已经在操作新的 GitHub 仓库工作树。
+
+这一步是今天另一个决定性成果：
+“旧路径兼容 + 新仓库承载 + 本地只保留一套主工作树”。
+
+----------------------------------------------------------------------
+4.10 重新挂回 runtime payload：修复 I10 recheck 文件缺失
+----------------------------------------------------------------------
+
+在 symlink 切换后，第一次跑 I10 clean recheck 时，出现了：
+- FileNotFoundError
+- 缺的是 decision_lease_chapter_summary_latest.json
+
+随后检查发现：
+- 旧备份目录里的 trading_services/runtime、connector_logs、decision_packets、verdicts 都还在；
+- 新仓库公开骨架里只有最小目录，真实 runtime payload 还没挂回来。
+
+因此又做了一步关键操作：
+把旧备份里的 runtime / connector_logs / decision_packets / verdicts 重新 attach 到新工作树。
+
+attach 后再验证，关键路径恢复正常：
+- runtime/bybit/thought_gate/bybit_decision_lease_chapter_summary_latest.json
+- connector_logs/bybit
+- decision_packets/bybit
+- verdicts/bybit
+
+这一步让“新仓库工作树 + 旧运行载荷”重新拼成可继续诊断的本地工作态。
+
+======================================================================
+五、今天夜间最重要的诊断结论
+======================================================================
+
+今天夜间真正有价值的，不是多跑几次脚本，而是把“当前真实 blocker”和“语义误报”区分出来。
+
+----------------------------------------------------------------------
+5.1 当前 I10 失败，不是 I10 本体先坏了，而是 I1/H1 没闭环
+----------------------------------------------------------------------
+
+重新 attach runtime 后跑 I10 clean recheck，结果显示：
+
+- summary_state = decision_lease_chapter_not_closed
+- audit_state = decision_lease_chapter_audit_failed
+- i_chapter_closed = False
+- source_errors = ['i1_stage_not_closed']
+- stage_status 里只有 I1 = False，其余 I2-I9 = True
+
+这说明：
+当前不是 I10 本体逻辑先坏，而是 I10 在忠实反映：
+“上游 I1/H1 当前未闭环，所以 I 章不能再次关上。”
+
+这条结论非常重要，因为它直接改变了后续优先级：
+不是先修 I10，而是先回到 H1/H1 之后的语义链。
+
+----------------------------------------------------------------------
+5.2 当前 H0 是绿的，H1-A 也是绿的
+----------------------------------------------------------------------
+
+后续只读追踪显示：
+
+H0 侧已经恢复到：
+- structurally_valid_and_ready_for_h1
+- ready_for_h1_thought_gate
+- overall_ok = true
+
+H1-A 当前也已经恢复正常：
+- input_state = ready_for_thought_gate_policy_evaluation
+- operator_flags = []
+
+也就是说：
+今晚之前“stale public_microstructure / stale h0_final_audit”这类 freshness 假阻塞，已经不应该再被当成主锅。
+
+这条结论也很重要：
+后续新对话不能再把锅甩回 H0，也不能再默认 H1-A 还卡 stale。
+
+----------------------------------------------------------------------
+5.3 当前 H1 最主要的真实 blocker 是 H1-B
+----------------------------------------------------------------------
+
+今天最终锁定的真实 blocker 是：
+
+H1-B:
+- policy_state = policy_blocked
+- blocking_reasons = ['budget_latency_cap_unacceptable']
+- final_max_ai_call_tier = none
+
+这意味着：
+在当前 latest/runtime 语义下，系统真实地认为：
+“这轮不应该调用 AI。”
+
+所以 H1-C/H1-R/H1-E/H1-F 后面看到的：
+- should_call_ai = false
+- selected_ai_tier = none
+- route_plan = route_skip
+- invocation_attempted = false
+
+从业务逻辑上其实是合理的。
+问题不在于“为什么没调 AI”，而在于“后续审计脚本还不接受合法 no-call 终态”。
+
+----------------------------------------------------------------------
+5.4 当前大量红灯，本质是合法 no-call / 合法 idle account 被误判为失败
+----------------------------------------------------------------------
+
+这是今晚最重要的新思路，也是后续必须继承的设计结论。
+
+当前链路里，至少以下部分存在大量“语义误报”：
+
+- H1-G bybit_ai_response_check
+- H1-H bybit_ai_governed_decision
+- H1-I bybit_thought_gate_acceptance_suite
+- H1 final audit
+- H2 query_budget 部分脚本
+- H4 compute_governor 部分脚本
+- H5 ai_cost_governance 部分脚本
+
+它们普遍沿用了旧假设：
+“如果这轮没有真实 invocation / 没有 provider response / 没有 parsed json / 没有 token / 没有 latency，那就应该失败。”
+
+但今晚已经确认：
+这条假设不再成立。
+因为当前最新链路里存在一种合法终态：
+
+- route_plan = route_skip
+- selected_ai_tier = none
+- should_call_ai = false
+
+这表示：
+“本轮设计上本来就不应该调用 AI。”
+
+因此：
+- invocation_attempted = false
+- provider_response_present = false
+- parsed_json_present = false
+- latency_ms = None
+- input_tokens/output_tokens = None
+
+在这种 no-call 终态下，不应该再被判失败。
+
+同理，在当前阶段如果同时满足：
+- read_only
+- execution disabled
+- 无持仓
+- 无挂单
+- 无执行历史
+
+那么：
+- 没有 recent execution
+- 没有 order history
+- private ws 只有 control message 而没有 business topic event
+
+也应默认视为 expected idle account，而不是异常。
+
+这就是今晚形成的核心语义升级：
+
+1. 合法 no-AI-call 是有效 observation terminal state；
+2. 合法 idle account 是 info/idle，不是 blocker/failure；
+3. 不能为了“把红灯改绿”而伪造一笔 AI 调用或伪造一笔交易行为。
+
+----------------------------------------------------------------------
+5.5 今天还锁定了 refresh 脚本的真实工程问题
+----------------------------------------------------------------------
+
+今晚还确认了另一个重要事实：
+
+refresh_upstream_truth_then_rebuild_h1_h5.sh 需要修正，至少包括两类问题：
+
+A. 必须先前置 rebuild H0 front chain
+否则 H1-A 很容易再读到 stale latest。
+
+B. 脚本里混用了几个旧名字/错误文件名
+已识别出需要替换的至少包括：
+- bybit_local_risk_envelope_builder.py -> bybit_local_risk_envelope_gate.py
+- bybit_local_trade_eligibility_handoff.py -> bybit_local_trade_eligibility_handoff_builder.py
+- bybit_local_judgment_contract_check.py -> bybit_local_judgment_final_audit_contract_check.py
+
+这个结论意味着：
+今天之后，refresh 脚本不能再被默认当作“已经完全正确”。
+
+======================================================================
+六、今天形成的新工作流（非常重要，后续必须继承）
+======================================================================
+
+今天这条对话里，你明确表示很喜欢现在的整体 workflow。
+我也认为这是目前最适合这个项目的工作方式，后续应视为默认规则。
+
+----------------------------------------------------------------------
+6.1 GitHub-first + local-runtime-second
+----------------------------------------------------------------------
+
+以后默认采用：
+
+1. 已 push 的代码与 README
+   -> 我直接看 GitHub 仓库
+
+2. 本地-only 的内容
+   -> 你只贴必要输出
+包括：
+- latest json
+- shell 报错
+- runtime 日志
+- env/config 生效结果
+- grep/head/tail/summary 片段
+
+这样能极大减少重复贴代码、重复解释路径的成本。
+
+----------------------------------------------------------------------
+6.2 先验证，后开发
+----------------------------------------------------------------------
+
+这是你一直要求、今天也被进一步固化的原则：
+
+- 先用只读检查确认真实状态
+- 先区分真 blocker 与假红灯
+- 先确认上游/路径/环境/脚本名是否一致
+- 再进入补丁或开发
+
+不能因为“看到红灯”就直接写新逻辑，也不能带着未核验的假设推进。
+
+----------------------------------------------------------------------
+6.3 Shell 命令必须短、小、单次只做一小步
+----------------------------------------------------------------------
+
+今天的对话里，最有效的地方之一就是：
+
+- 不再一次塞很多大段命令
+- 每轮只给 1 组小命令，最多 1-2 个逻辑步骤
+- 中英文注释都写清楚
+- 说明“这是只检查 / 只读 / 不修改”还是“会写文件 / 会暂存 / 会推送”
+
+这大大降低了：
+- 终端闪退
+- paste 过长
+- 用户误操作
+- 我方记忆混乱
+
+后续应继续保持：
+“一次一个小阶段、一段短命令、一轮一反馈”。
+
+----------------------------------------------------------------------
+6.4 必须明确告诉你：只贴哪些 marker 段落，不要贴全量
+----------------------------------------------------------------------
+
+今天另一个非常成功的点是：
+
+每次我不再让你把全量输出都贴回来，
+而是明确告诉你只贴例如：
+
+- ==[1] path + git check ==
+- ==[2] compile key scripts ==
+- ==[3] run I10 clean recheck ==
+
+这种带 marker 的回贴方式非常节省上下文长度，也极大提升了后续判断速度。
+
+后续默认规则应是：
+1. 每轮 shell 结束后，只让你贴 2-4 个明确 marker 段落；
+2. 如果输出太长，优先 head / grep / compact summary；
+3. 只有在必要时才要全量文件。
+
+----------------------------------------------------------------------
+6.5 不再在对话里大量粘贴代码正文，优先 GitHub 查；看不见的再向你要
+----------------------------------------------------------------------
+
+今天你明确提出：
+“以后能看见的你直接看，看不见的再跟我要。”
+
+这是正确方向。
+后续默认行为应是：
+
+- 能在 GitHub 看见的文件：我先自己定位、自己读
+- 看不见的本地-only 文件：我再给你 shell 读取命令
+- 不再默认让你手动整段贴代码
+
+----------------------------------------------------------------------
+6.6 稳定一轮再 push，让 GitHub 成为可续接状态锚点
+----------------------------------------------------------------------
+
+今天之后建议默认采用：
+
+- 做完一轮稳定修复
+- 本地只读复核
+- commit
+- push
+
+这样下一轮新对话里，我就能从 GitHub 直接继续看代码，减少上下文重建成本。
+
+----------------------------------------------------------------------
+6.7 旧摘要 / 总报告若与今晚结论冲突，以今晚新的“覆盖层文件”为准
+----------------------------------------------------------------------
+
+今天新生成的夜间文件，其优先级必须高于早些时候的旧摘要。
+后续只要用户同时上传：
+
+- 今晚工程记录
+- 今晚接手指示文件
+- A-I 接手摘要
+- 全量整合总报告
+
+则必须按以下优先级理解：
+
+最高优先级：
+- 今晚工程记录
+- 今晚接手指示文件
+- 今晚 no-call semantics patch bundle
+
+背景参考层：
+- OpenClaw_Bybit_A-I_接手摘要
+- OpenClaw_全量整合总报告
+- H/I 正式完工对账报告
+
+原因很简单：
+旧文件记录的是历史阶段性正确结论，
+而今晚文件记录的是“迁移到新工作树并接回 runtime 之后”的当前真实运行态。
+
+======================================================================
+七、今天产生的新设计思路与方向修正
+======================================================================
+
+今天至少形成了三个必须长期保留的新设计结论。
+
+----------------------------------------------------------------------
+7.1 合法 no-call 必须成为正式受支持的 observation terminal state
+----------------------------------------------------------------------
+
+这不是临时 workaround，而是设计升级。
+
+过去系统隐含假设：
+“如果 AI 没被调用，那就是失败。”
+
+今天确认后，这条假设必须改为：
+“如果 policy/router/selected tier 一致地得出 should_call_ai = false，
+那么 no-call 就是合法终态，而不是失败态。”
+
+这将直接影响：
+- H1-G
+- H1-H
+- H1-I
+- H1 final audit
+- H2/H4/H5 的下游语义
+
+这也是今天最关键的新思路之一。
+
+----------------------------------------------------------------------
+7.2 合法 idle account 必须降级为 info/idle，而不是 blocker
+----------------------------------------------------------------------
+
+在当前 read_only + disabled + 无持仓/无挂单/无执行 的真实阶段里，
+“什么都没发生”经常就是正确状态。
+
+所以后续要把以下内容从 blocker/warning 调整为 info/idle_flags（在满足静默态前提时）：
+- no_open_positions
+- no recent order history
+- no recent execution history
+- private ws control-only traffic
+
+这条原则，将显著减少“系统没坏却一直报错”的语义噪音。
+
+----------------------------------------------------------------------
+7.3 未来 live 设计前，先把“语义误报”清掉，再看真实 blocker
+----------------------------------------------------------------------
+
+今天之后，后续主线不应再是：
+“看到 H2/H4/H5 很红 -> 直接大修很多模块”。
+
+而应是：
+第一步，先清合法 no-call / legal idle 的误报；
+第二步，再看 H1-B 的 budget_latency_cap_unacceptable 是否成为唯一或主要真实 blocker；
+第三步，再决定是调整 budget/policy/latency 设计，还是继续下游章节。
+
+这比以前的大范围猜测方式更科学，也更符合“先验证、后开发”的总原则。
+
+======================================================================
+八、当前最新真实状态（必须这样理解）
+======================================================================
+
+截至今天这条对话结束时，最准确的项目状态应表述为：
+
+1. GitHub 仓库已建立并可持续使用
+- 仓库：yunancun/BybitOpenClaw
+- 助手已可直接查看已 push 文件
+
+2. 本地主工作树已切换到新仓库
+- /home/ncyu/srv 已是指向 /home/ncyu/BybitOpenClaw/srv 的 symlink
+- 旧 srv 已安全备份
+
+3. 新工作树已恢复旧 srv 风格公共骨架
+- program_code / docker_projects / settings / helper_scripts / log_files / stored_data / venvs 等公共路径与 README 体系已基本恢复
+
+4. 本地-only 的 env / secret / runtime payload 已重新接回新工作树
+- 本地可继续运行
+- 但这些本地-only内容仍不进 Git
+
+5. 当前 H0 是绿的
+6. 当前 H1-A 是绿的
+7. 当前 H1 最主要真实 blocker 是 H1-B 的 budget_latency_cap_unacceptable
+8. H1-G / H1-H / H1-I / H2 / H4 / H5 里存在大量 no-call / idle 语义误报
+9. I10 当前失败的直接原因是 I1/H1 未闭环，而不是 I10 自己先坏
+10. 现阶段最优先任务，不是继续 J/K/live 方向，而是先修正 H1/H2/H4/H5 的 no-call / idle 语义
+
+======================================================================
+九、后续工作流程（建议新对话严格照此执行）
+======================================================================
+
+后续应采用如下顺序，不要再发散：
+
+第一组：先修 H1 的 no-call 语义
+目标文件：
+- bybit_ai_response_check.py
+- bybit_ai_governed_decision.py
+- bybit_thought_gate_acceptance_suite.py
+- bybit_thought_gate_final_audit.py
+
+目标：
+- 合法 no-call 时，不再强行要求 invocation/provider response/parsed json
+- H1-H 要产出 governed_observation_no_call
+- H1 final audit 要接受 legal no-call terminal state
+
+第二组：再修 H2/H4/H5 的下游 no-call 结构语义
+目标：
+- 有调用时，严格审 latency/tokens/parsed json
+- 无调用但属于合法 no-call 时，允许 latency/tokens/response 为空
+- 但仍检查：
+  - budget cap
+  - output cap
+  - max_retries = 0
+  - runtime_still_protected
+  - read_only/execution disabled 等硬边界
+
+第三组：把合法 idle account 降级为 info/idle
+前提：
+- read_only
+- execution disabled
+- position/order/execution 全为 0
+
+第四组：修 refresh 脚本
+- 前置 rebuild H0 front chain
+- 替换掉已确认的旧脚本名/错误脚本名
+
+第五组：最后才重跑整链验证
+- refresh_upstream_truth_then_rebuild_h1_h5.sh
+- H1/H2/H4/H5 latest
+- I10 summary / final audit
+
+======================================================================
+十、给新对话的使用说明
+======================================================================
+
+新对话接手时，必须优先读取今天的新文件，而不是只看旧摘要。
+并且一上来先做四件事：
+
+1. 复述当前真实状态
+2. 复述新的 workflow 规则
+3. 给出精确补丁计划
+4. 只给一小段 shell 指令，不要一次给很多
+
+同时必须保持以下硬边界：
+- system_mode 仍必须 read_only
+- execution_state 仍必须 disabled
+- execution_authority 仍必须 not_granted
+- decision_lease_emitted 仍必须 false
+- 不能为了变绿而伪造 AI call
+- 不能为了变绿而伪造交易活动
+- 真正的 API timeout / retCode 非 0 / public fetch_errors / should_call_ai=true 但没调用，仍必须当硬错误
+
+======================================================================
+十一、对“今天之前进度”的正式总结（可供新对话快速回忆）
+======================================================================
+
+到今天为止，可把项目理解成：
+
+历史层：
+- A-C 基础层、模型层、环境治理已完成
+- D readonly observer 已完成且稳定
+- E business event classification 已完成
+- F event-driven scaffold 已完成
+- G business-event validation 已完成收口
+- H/I 曾在更早阶段完成 read_only/shadow 口径闭环
+- J/K 曾提前展开 skeleton 结构，但并不代表 live
+
+今天新完成的层：
+- 新 GitHub 仓库建立与推送
+- 新公共骨架恢复为旧 srv 风格
+- 本地主工作树切换到新仓库
+- 旧 runtime/logs/latest 重新 attach
+- 当前 runtime 下的 H/I 真状态重新核验
+- no-call / idle 语义误报被正式识别并成为下一阶段主修目标
+
+所以今天不是简单的“搬家”，而是一次：
+“工程仓库体系重建 + 本地入口重挂 + 当前运行态重新定性”。
+
+======================================================================
+十二、一句话总收口
+======================================================================
+
+如果只用一句话概括今天这条对话的价值：
+
+“今天我们完成了 OpenClaw / Bybit 工程从旧本地 srv 到新 GitHub 工作树的安全迁移，恢复了旧 srv 风格公共骨架与本地可运行入口，并在接回真实 runtime 后重新确认：当前主问题不是系统整体跑坏，而是 H1/H2/H4/H5 仍把合法 no-AI-call 与合法 idle account 误判为失败；因此后续第一优先级应是先修正这些语义误报，再看 H1-B 的 budget_latency_cap_unacceptable 是否成为唯一真实 blocker。”

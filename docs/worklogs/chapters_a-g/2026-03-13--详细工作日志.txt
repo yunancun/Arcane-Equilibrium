@@ -1,0 +1,550 @@
+OpenClaw / Bybit 交易 Agent
+2026-03-13 详细工作日志
+
+日期：2026-03-13
+阶段定位：D21 readonly observer hardened（只读观察器强化阶段）
+工作目标：
+1. 在 D20 只读观察器基础上，把 persistent private WebSocket listener 正式纳入运行态。
+2. 修补 decision packet / observer verdict / acceptance / runtime state 之间的引用一致性、时间新鲜度、语义精度问题。
+3. 完成一轮“从私有 REST → 快照 → 预检守卫 → WS 冒烟 → WS 运行事实 → packet → verdict → acceptance → runtime → final summary → handoff → audit”的贯通盘查。
+4. 把系统状态从“能跑”提升到“结构清晰、引用准确、链路自检完整、可交接”。
+
+——————————————————————————————————————
+一、当日工作起点
+——————————————————————————————————————
+
+当天开始时，系统已经具备以下基础：
+- Bybit 私有 REST 只读访问能力已经可用。
+- 基础 snapshot / packet / verdict / acceptance / runtime state 产物已经存在。
+- private WebSocket smoke test 已完成。
+- 初版 persistent private WS listener 已能认证、订阅并驻留运行。
+- 但仍存在若干“细节不够极致”的问题：
+  1) listener 的启停控制不够完善。
+  2) persistent WS 状态尚未完整并入 acceptance / runtime state。
+  3) packet / verdict 中对 freshness 的表达、引用链与语义精度仍有可优化之处。
+  4) full readonly cycle 的日志输出不够干净。
+  5) snapshot 内 payload 时间与 snapshot 文件时间的区别没有被充分表达。
+  6) 尚缺一份对当前只读观察器阶段的全面审计报告。
+
+当天工作的核心，就是把上述问题逐一压缩到尽可能低。
+
+——————————————————————————————————————
+二、D20 收尾确认：只读观察器阶段产物再次确认
+——————————————————————————————————————
+
+当天首先确认并重看了以下关键只读阶段产物：
+
+1. bybit_readonly_final_summary.py
+- 重新生成 readonly final summary。
+- 总结了只读观察器阶段已完成能力、未启用能力和下一阶段候选事项。
+- 明确系统当前仍是 read_only / OBSERVE_ONLY，不是交易执行系统。
+
+2. bybit_next_phase_handoff.py
+- 重新生成 next-phase handoff。
+- 把下一阶段顺序明确为：
+  1) persistent private/public WS listener with reconnect handling
+  2) event-driven state updater
+  3) AI query efficiency / abuse prevention layer
+  4) compute governor / model router v2
+  5) demo/paper execution gate
+  6) supervised live trading gate
+
+这一步的意义：
+- 为 D21 的继续强化建立清晰边界。
+- 确保系统不会因“已经有 WS 就误以为接近可交易”。
+
+——————————————————————————————————————
+三、persistent private WS listener 正式推进与修正
+——————————————————————————————————————
+
+1. 新建并启动 bybit_private_ws_listener.py
+- 目标：从一次性 smoke test 升级为持续运行的 private WS listener。
+- 订阅主题：wallet / position / order / execution。
+- 初始状态文件显示：
+  - running=true
+  - connection_open_count=0（最初刚启动时）
+  - 随后完成 auth / subscribe
+- 事件文件中记录到：
+  - client_send auth
+  - server_msg auth success
+  - client_send subscribe
+  - server_msg subscribe success
+
+结论：
+- persistent listener 初版上线成功。
+- 但仅收到控制面消息（auth / subscribe success），没有业务 topic 事件。
+
+2. 检查 listener 脚本、events 文件、nohup 输出
+- 对 listener 主体逻辑进行人工复核：
+  - on_open 发 auth
+  - auth success 后发 subscribe
+  - on_message 记录消息并累计 topic_message_count
+  - on_error / on_close 记录状态
+- 检查结果：
+  - 逻辑主线正确。
+  - 事件记录正常。
+  - nohup 输出无明显报错。
+
+3. 新建 bybit_private_ws_listener_ctl.sh
+- 为 listener 增加 start / stop / status 控制脚本。
+- 加入 pid file 管理。
+- 能识别“进程在跑但 pid 文件缺失”的情况并补写 pid 文件。
+
+4. 验证 listener stop / restart 行为
+- 执行 stop：初次停止时，graceful stop 未能完全退出，ctl 发送 SIGKILL 后清理成功。
+- 执行 restart：listener 重新启动成功。
+- 状态文件更新正常。
+
+暴露出的细节问题：
+- 初版 listener 对 graceful stop 的收尾不够稳。
+- 于是继续升级 listener。
+
+5. listener 升级到 v2
+- 增加 listener_version=v2
+- 增加 shutdown_reason 字段
+- 增加更清晰的 stop_requested / running 状态表达
+- 改进 signal 处理逻辑，验证 graceful stop
+
+验证结果：
+- graceful stop 成功。
+- 状态文件在停止后正确显示：
+  - running=false
+  - stop_requested=true
+  - shutdown_reason=signal_15
+- 随后再次重启 listener，并保持服务持续运行。
+
+当日对 listener 的结论：
+- persistent private WS listener 已从“能连上”提升到“可持续运行、可启停、可记录停止原因”的状态。
+- 但业务层面仍只观察到控制面信号，没有 wallet/position/order/execution 的业务 topic 消息进入。
+
+——————————————————————————————————————
+四、网络故障插曲：5GbE Thunderbolt 网卡与 VLAN / DHCP 问题排查
+——————————————————————————————————————
+
+当天中途还处理了一个直接影响 Bybit 私有 API 可用性的底层网络问题。
+
+问题现象：
+- trade-core 接上 Ubiquiti 5GbE thunderbolt 网卡后，接口拿到了 192.168.30.30/24。
+- default route 指向 192.168.30.1。
+- 但无法 ping 通网关，也无法访问 1.1.1.1。
+- ARP 显示 192.168.30.1 INCOMPLETE。
+- 这说明不是驱动没识别，而是二层/三层链路没有真正打通。
+
+排查过程：
+1. 查看 ip -br addr / ip route / nmcli device status。
+2. 确认接口 enx00242715937f 已经 UP，且 DHCP 领到地址。
+3. 结合 Ubiquiti 截图确认：
+   - trade-core 端口在 VLAN 30 上。
+   - Netgear 设备已被彻底移除。
+   - 但端口与配置切换后，NetworkManager 侧仍可能残留旧状态。
+4. 执行：
+   - nmcli device disconnect enx00242715937f
+   - nmcli device connect enx00242715937f
+5. 重连后再次测试：
+   - ping 192.168.30.1 成功
+   - ping 1.1.1.1 成功
+
+结论：
+- 不是驱动问题。
+- 更像是 VLAN / 交换机端口切换后，本机网络状态没有完全刷新，重新 disconnect/connect 后恢复正常。
+- 这一步很关键，因为此前 Bybit retCode=10010（Unmatched IP）问题与公网出口 IP 密切相关。
+
+后续验证：
+- 查询当前公网 egress IP 为 79.112.40.190。
+- 再次测试 Bybit 私有 REST：
+  - account / positions / order history / execution history 全部 retCode=0。
+- 说明新出口 IP 与 Bybit API key 白名单匹配，私有只读访问恢复正常。
+
+——————————————————————————————————————
+五、Tailscale 连通性补充确认
+——————————————————————————————————————
+
+1. 记录到 trade-core 的 Tailscale IP：100.91.109.86
+2. 在 Mac 上测试 SSH 连通性的方法已给出。
+3. 用户反馈测试正常。
+4. 后续又查看 resolvectl / tailscale netcheck，发现 Tailscale 有 DNS 健康提示：
+   - “Tailscale can't reach the configured DNS servers. Internet connectivity may be affected.”
+
+当日判断：
+- Tailscale 主功能未阻塞当前 Bybit 只读链路。
+- 但 DNS 健康仍属于后续可继续优化的网络侧事项。
+- 当天主线仍优先推进交易 Agent 运行链路，所以没有继续深挖到尾。
+
+——————————————————————————————————————
+六、把 persistent WS 正式纳入运行态链路
+——————————————————————————————————————
+
+1. bybit_build_ws_runtime_facts.py
+- 新建脚本，从 persistent WS listener status 构建 ws runtime facts。
+- 初版输出字段包括：
+  - listener_health
+  - connection_state
+  - signal_strength
+  - running
+  - auth_ok_count / subscribe_ok_count
+  - message_count
+  - business_topic_event_count
+  - last_event_age_ms
+  - notes
+
+初始结果显示：
+- listener_health=idle_but_connected
+- connection_state=connected
+- signal_strength=control_only
+- business_topic_event_count=0
+- auth_ok_count / subscribe_ok_count 持续累加
+
+含义：
+- listener 周期性重连并持续维持控制面活动。
+- 但到目前为止没有出现业务 topic 数据。
+
+2. 将 persistent WS 状态并入 decision packet v2
+- bybit_build_decision_packet.py 升级后引入 ws_runtime_facts。
+- 新增 ws_runtime_summary。
+- 新增风险标记：ws_control_only_no_business_events。
+- local_decision_hints 仍明确 should_query_ai=false。
+
+3. 将 persistent WS 状态并入 observer verdict v2
+- verdict reasons 中新增：
+  - persistent WS connected but no business topic events observed yet
+  - persistent WS is alive but currently idle（后续又根据精度继续打磨）
+
+4. 将 persistent WS 状态并入 acceptance / runtime state
+- acceptance v2 / v3 新增检查：
+  - persistent_ws_status_exists
+  - persistent_ws_running
+  - persistent_ws_auth_ok
+  - persistent_ws_subscribe_ok
+  - ws_runtime_facts_exists
+  - ws_connection_connected
+  - ws_signal_known
+- runtime state v2 / v3 新增：
+  - persistent_ws_state
+  - persistent_ws_running
+  - persistent_ws_last_event_age_ms
+  - ws_listener_health
+  - ws_signal_strength
+  - preflight_guard_allowed
+
+到此，persistent WS 不再是“旁路组件”，而是进入核心运行态视图。
+
+——————————————————————————————————————
+七、Bybit 私有 REST preflight guard 引入
+——————————————————————————————————————
+
+1. 触发问题背景
+- 在某轮 observer cycle 中，Bybit 私有 REST 返回 retCode=10010：
+  “Unmatched IP, please check your API key's bound IP addresses.”
+- 这证明只依赖旧快照继续往后跑，会掩盖真实的底层访问失败。
+
+2. 新建 bybit_private_rest_preflight_guard.py
+- 目标：在 snapshot / normalization / packet / verdict 之前，对最新 private REST 结果做强一致预检。
+- 检查项覆盖：
+  - account file present / ok / retcode_zero
+  - positions file present / ok / retcode_zero
+  - order_history file present / ok / retcode_zero
+  - execution_history file present / spot ok / spot retcode_zero / linear ok / linear retcode_zero
+
+3. 输出
+- allowed_to_continue
+- check_count / failed_count
+- blocking_issues
+
+4. 将 preflight guard 纳入 full readonly observer cycle
+- 新建 guarded flow：
+  private_rest_steps → preflight_guard → post_guard_steps
+- 若 preflight 失败，就不允许后续产物建立在坏源数据上。
+
+5. 网络恢复后再次验证
+- 所有 private REST 检查 retCode=0
+- preflight guard allowed_to_continue=true
+
+意义：
+- 这是当天非常关键的一次“底线强化”。
+- 系统从“后面产物看起来都 OK”提升为“前置数据源先过门禁，再允许形成后续结论”。
+
+——————————————————————————————————————
+八、decision packet / observer verdict 的多轮精修
+——————————————————————————————————————
+
+当天大量时间花在 packet / verdict 生成逻辑的“极致化”上。主要包括以下几轮。
+
+A. v2 → v3：补 source refs 与 freshness 透明度
+1. 在 decision packet 中加入 source_refs：
+- source_snapshot_path / ts
+- source_ws_smoke_path / ts
+- source_ws_runtime_facts_path / ts
+- source_preflight_guard_path / ts
+
+2. 加入 input_integrity：
+- snapshot_present
+- ws_smoke_present
+- ws_runtime_facts_present
+- preflight_present
+- preflight_allowed_to_continue
+
+3. 将 freshness 细化为多个来源年龄。
+
+问题暴露：
+- 当时 packet 里 freshness 使用的 now_ts_ms，与 packet 自身 ts_ms 之间在表达上还不够严格。
+- 当 ws_runtime_facts 是新刷出来而 snapshot / preflight 是旧的时，verdict 会转成 REFRESH_REQUIRED，这在逻辑上是正确的，但还需要进一步规范时间语义。
+
+B. observer pipeline 强制先刷新 ws_runtime_facts
+- 修改 bybit_observer_pipeline.py
+- 每次生成 packet / verdict 前先强制执行 build_ws_runtime_facts
+- 目的是消除“packet 引用到陈旧 ws facts”的误差。
+
+结果：
+- packet 中 source_ws_runtime_facts_ts_ms 与当前最新 ws_runtime_facts 对齐。
+- verdict 的 freshness 判断变得稳定。
+
+C. packet / verdict 升到 v4：区分 packet_generated_ts_ms 与 freshness_reference_ts_ms
+1. decision packet v4
+- 新增：
+  - packet_generated_ts_ms
+  - freshness_reference_ts_ms
+- 明确 freshness 的计算锚点。
+
+2. observer verdict v4
+- 新增：
+  - verdict_generated_ts_ms
+  - source_packet_generated_ts_ms
+  - source_packet_freshness_reference_ts_ms
+- verdict 不再只是“引用 packet ts”，而是保留更完整的上游生成语境。
+
+D. 修 payload 读取路径 bug
+- 在一次 precision cleanup 后，packet 的 account_summary 意外变成全 null。
+- 通过检查 snapshot 顶层结构发现：
+  - snapshot 顶层有 payload.account / payload.positions / payload.order_history / payload.execution_history
+- 修正 bybit_build_decision_packet.py 的读取路径后，account_summary 恢复正常。
+
+这是当天比较典型的一类“小问题但很关键”：
+- 功能表面没崩，但如果 summary 读取错层，会直接污染后续 packet / verdict 语义。
+
+E. 继续精修 WS 语义表达
+- bybit_build_ws_runtime_facts.py 升级到 v2
+- 新增字段：
+  - business_signal_state
+  - connection_activity_state
+  - control_message_count_estimate
+  - business_message_count_estimate
+- 目的：把“控制面活着，但业务面没消息”表达得更准确。
+
+最终语义演进：
+- 早期：idle_but_connected / control_only
+- 后期：
+  - signal_strength=control_only
+  - business_signal_state=none_seen
+  - connection_activity_state 可区分 idle_control_only 与 healthy_recent_control
+
+这使 verdict reasons 更干净，不再含糊地把“连接活着”与“业务就绪”混为一谈。
+
+——————————————————————————————————————
+九、snapshot 时间语义修正
+——————————————————————————————————————
+
+1. 发现问题
+- snapshot 文件的 ts_ms 是 snapshot 写入时间。
+- 但 payload.account.check_time_utc / payload.account.response.time 等，可能来自更早的真实源数据时间。
+- 如果只看 snapshot 文件时间，容易高估底层 payload 的新鲜度。
+
+2. 解决方案
+- 在 bybit_snapshot_to_postgres.py / snapshot 构建逻辑中，加入 payload_time_summary：
+  - account_payload_ts_ms
+  - positions_payload_ts_ms
+  - order_history_payload_ts_ms
+  - execution_history_payload_ts_ms
+- 同时在 sources.* 下加入 payload_ts_ms。
+
+3. acceptance v4 / runtime state v4 中使用 payload 时间
+- acceptance v4 增加：
+  - snapshot_version_v2
+  - snapshot_payload_times_present
+- runtime state v4 增加 payload_freshness：
+  - account_payload_age_ms / state
+  - positions_payload_age_ms / state
+  - order_history_payload_age_ms / state
+  - execution_history_payload_age_ms / state
+
+意义：
+- 这一步把“文件新”与“数据源新”区分开了。
+- 对交易 Agent 尤其重要，因为后续一旦进入更高频策略，错把旧 payload 当新数据，风险很大。
+
+——————————————————————————————————————
+十、full readonly observer cycle 日志清洁化
+——————————————————————————————————————
+
+问题：
+- 早期 wrapper 会在 stdout / stderr 里插入 [wrapper] saved_latest=... 等标记。
+- full cycle 产出的步骤日志因此显得凌乱。
+
+处理：
+1. 检查 _bybit_latest_wrapper.py 的 quiet 逻辑。
+2. 检查 bybit_full_readonly_observer_cycle.py 环境变量传递情况。
+3. 为 full cycle 添加 clean_wrapper_stderr()。
+4. 清理步骤 stderr 中 wrapper 标记。
+
+结果：
+- full cycle 的步骤记录更干净。
+- 核心 JSON stdout 不再被 wrapper 辅助输出污染。
+
+说明：
+- 当天最终看到，wrapper 标记主要被压到 stderr，且 cycle 内做了清理。
+- 虽非功能性问题，但对后续审计与自动比对非常有帮助。
+
+——————————————————————————————————————
+十一、acceptance v4 / runtime state v4 / final summary v2 / handoff v2 / audit v1 全面更新
+——————————————————————————————————————
+
+1. bybit_observer_acceptance_check.py → v4
+- 新增检查合计达到 24 项。
+- 覆盖：
+  - cycle / packet / verdict / snapshot / ws facts / preflight 文件存在性
+  - packet_version_v4
+  - verdict_version_v4
+  - snapshot_version_v2
+  - snapshot_payload_times_present
+  - snapshot_age_within_15m
+  - ws connection / signal / persistent ws running
+  - preflight_allowed
+
+结果：overall_passed=true
+
+2. bybit_runtime_state_resolver.py → v4
+- 运行态表达更加完整：
+  - overall_runtime_state=ready_readonly_observer
+  - observer_state=healthy_observe_only
+  - snapshot_state / ws_smoke_state / ws_runtime_facts_state / preflight_state
+  - payload_freshness（4 项 payload 各自新鲜度）
+  - ws_connection_activity_state
+
+3. bybit_readonly_final_summary.py → v2
+- 对当前阶段做正式总结：
+  - project_stage=D21 readonly observer hardened
+  - readonly_observer_ready=true
+  - acceptance_passed=true
+  - verdict_code=OBSERVE_ONLY
+- 汇总了：
+  - safety_status
+  - freshness_status
+  - latest_packet / latest_verdict
+  - ws_runtime
+  - snapshot
+  - completed_capabilities
+  - not_yet_enabled
+
+4. bybit_next_phase_handoff.py → v2
+- 交接文件明确指出：
+  当前系统是 production-grade readonly observer infrastructure，
+  不是 trading execution infrastructure。
+- 同时给出下一阶段推荐顺序与 demo/paper 前置条件。
+
+5. bybit_readonly_audit.py → v1
+- 新建综合审计脚本。
+- 检查总数 27 项，failed_count=0。
+- 覆盖：
+  - 各核心产物存在性
+  - 版本一致性（snapshot v2 / packet v4 / verdict v4 / acceptance v4 / runtime v4 / final summary v2 / handoff v2）
+  - packet_snapshot_ref_matches_snapshot
+  - verdict_packet_ref_matches_packet
+  - acceptance_passed
+  - runtime_ready
+  - verdict_observe_only
+  - preflight_allowed
+  - ws_connected
+  - 四类 payload fresh
+
+结果：overall_ok=true
+
+意义：
+- 这标志着 D21 不只是“加了几个脚本”，而是已经形成了一套较完整的只读观察器内部自检闭环。
+
+——————————————————————————————————————
+十二、当日最终状态评估
+——————————————————————————————————————
+
+截至 2026-03-13 收尾，系统状态可以概括为：
+
+1. 已达到的水平
+- Bybit 私有 REST 只读链路稳定可用。
+- preflight guard 能拦截底层私有 REST 失败。
+- snapshot 已带 payload 时间摘要。
+- private WS smoke test 正常。
+- persistent private WS listener 可持续运行、可启停、可记录状态。
+- ws runtime facts 已能描述控制面活动与业务面缺失。
+- decision packet v4 与 observer verdict v4 已具备较好的引用透明度与 freshness 语义。
+- acceptance v4 / runtime state v4 / final summary v2 / handoff v2 / audit v1 全部产出并通过。
+- 审计结果 overall_ok=true。
+
+2. 当前仍明确存在的限制
+- 仍未看到真实业务 topic 事件进入 persistent private WS listener。
+- 尚未构建 event-driven state updater。
+- 尚未进入 AI 查询预算 / 治理层。
+- 尚未进入 demo/paper execution gate。
+- 尚未进入 live execution。
+
+3. 当天综合评分（工程质量角度）
+- 如果以“D21 只读观察器强化是否合格”来评估：已经非常接近可作为阶段性交付。
+- 如果以“是否已经是可交易 Agent”来评估：还不是，且当天所有 summary / handoff 都明确压住了这个边界。
+
+——————————————————————————————————————
+十三、当日核心成果清单（可直接回看）
+——————————————————————————————————————
+
+当日重点新增/强化的脚本与产物包括：
+
+网络 / 基础：
+- 修复 5GbE thunderbolt 接口无法通网问题
+- 确认公网出口 IP 恢复匹配 Bybit API key 白名单
+- 确认 Tailscale SSH 可连
+
+WS 持续监听：
+- bybit_private_ws_listener.py（升级到 v2）
+- bybit_private_ws_listener_ctl.sh
+- bybit_ws_runtime_facts_latest.json（升级到 v2）
+
+预检与链路：
+- bybit_private_rest_preflight_guard.py
+- bybit_full_readonly_observer_cycle.py（guarded flow + stderr cleanup）
+
+核心判断：
+- bybit_build_decision_packet.py（推进到 v4）
+- bybit_decision_packet_pipeline.py
+- bybit_build_observer_verdict.py（推进到 v4）
+- bybit_observer_pipeline.py（强制先刷新 ws facts）
+
+系统状态与审计：
+- bybit_observer_acceptance_check.py（v4）
+- bybit_runtime_state_resolver.py（v4）
+- bybit_readonly_final_summary.py（v2）
+- bybit_next_phase_handoff.py（v2）
+- bybit_readonly_audit.py（v1）
+
+——————————————————————————————————————
+十四、对下一次继续工作的建议起点
+——————————————————————————————————————
+
+建议下次回来时，从以下顺序继续：
+
+1. 先快速重跑一遍：
+- bybit_full_readonly_observer_cycle.py
+- bybit_observer_acceptance_check.py
+- bybit_runtime_state_resolver.py
+- bybit_readonly_audit.py
+
+2. 确认当时环境是否仍保持：
+- acceptance_passed=true
+- runtime_state=ready_readonly_observer
+- verdict_code=OBSERVE_ONLY
+- audit overall_ok=true
+
+3. 然后正式进入下一阶段：
+- 重点观察“为什么 persistent WS 只有控制面消息，没有业务 topic 事件”
+- 开始设计 business-event ingestion model
+- 再往后才是 event-driven state updater / AI budget / paper execution
+
+——————————————————————————————————————
+十五、当日一句话结论
+——————————————————————————————————————
+
+2026-03-13 这一天，OpenClaw / Bybit 系统从“只读观察器已经能跑”进一步提升为“带持续 WS、带预检守卫、带版本化 packet/verdict、带 payload 级新鲜度、带最终总结与审计的 hardened readonly observer 基础设施”，已经基本把 D21 阶段该补的关键细节补到了非常高的完成度。

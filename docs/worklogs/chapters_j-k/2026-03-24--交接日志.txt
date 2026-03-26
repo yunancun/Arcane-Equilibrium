@@ -1,0 +1,377 @@
+OpenClaw / Bybit 项目交接日志（截至 2026-03-24 晚）
+==================================================
+
+一、当前工程总状态
+--------------------------------------------------
+1) H 章与 I 章状态
+- H 章前置治理链已处于闭环可复核状态。
+- I 章（decision-lease control plane）已经正式闭环，并且被重新校正为 canonical runner 路径。
+- I 章最终状态不是 live execution，而是：
+  - shadow-only decision-lease control plane 已闭环；
+  - runtime 仍严格受保护；
+  - execution_authority 仍为 not_granted；
+  - live_execution_allowed 仍为 false；
+  - decision_lease_emitted 仍为 false；
+  - live_operator_ack_enabled 仍为 false。
+
+2) J 章状态
+- J 章（Transition Engine Skeleton）已完成验证与 canonical recheck。
+- J 章最新结果表明：
+  - positive replay path open = true
+  - negative replay path blocked = true
+  - readonly_context_ok = true
+  - transition_engine_skeleton_ready = true
+  - execution_permitted = false
+  - demo_gate_open = false
+  - live_execution_open = false
+  - final_audit overall_ok = true
+  - chapter_consistency overall_ok = true
+- 结论：J 章可以视为“已闭合的 skeleton 章节”，但绝不等于执行放权。
+
+3) K 章状态
+- K 章（Paper / Demo Gate）核心 builder / contract / summary / handoff / final audit / chapter consistency 已逐个编译并逐个直接跑通。
+- K 章最后一次 safe recheck 的实质结果表明：
+  - contract 已定义且 gate 关闭；
+  - readiness 仍是 not_ready_missing_prerequisites；
+  - adapter / lifecycle / projection / risk 全部为 skeleton_defined_not_active；
+  - summary_ok = true；
+  - final_audit overall_ok = true；
+  - chapter_consistency overall_ok = true；
+  - runtime 仍为 read_only / disabled。
+- 结论：K 章逻辑上已闭合为“设计层闭环且 gate 关闭”的章节。
+- 但注意：K 章最后没有把 K10 canonical runner、K baseline 文档、以及 git 提交完整做完；卡住点是 shell/heredoc 与超长对话导致的粘贴/语法截断，不是 K 核心工程逻辑失败。
+
+
+二、2026-03-24 本对话内已经完成的重要工作
+--------------------------------------------------
+
+A. 修复 I1 runner 误跑旧路径的问题
+1) 发现的问题
+- 先前 I1 shell runner 实际调用的是旧的 scripts 路径版本，导致 direct canonical run 是绿的，但 runner 重跑时又出现：
+  - h1_not_closed
+  - h5_not_closed
+  - h5_not_ready_for_i1
+  - analysis_mode_not_observation_only
+- 这造成了“同一章节 direct run 通过，但 closure runner 报阻断”的假阴性混乱。
+
+2) 已确认的根因
+- canonical 代码已经在 program_code/trade_executor/bybit_decision_lease 下，但旧 runner 仍在调用 exchange_connectors/bybit_connector/scripts 下的旧镜像脚本。
+- direct canonical run 证明了真正的新实现没有问题。
+
+3) 修复结果
+- 已把 I1 与后续 I2~I5 的 closure runners 统一修正到 canonical 路径。
+- I1 canonical clean status 最终已稳定为：
+  - schema_state = decision_lease_schema_ready_no_emit_soft_warn
+  - audit_state = decision_lease_schema_closed_soft_warn
+  - i1_stage_closed = True
+  - runtime_still_protected = True
+  - lease_emit_allowed_now = False
+  - decision_lease_emitted = False
+
+
+B. 发现并修复 I5 “legal no-call path 被误判为失败”的语义错误
+1) 发现的问题
+- 在 I2~I10 canonical recheck 中，I5-A friction metrics 与 I5-B adaptive TTL 被阻断。
+- 直接根因是：
+  - should_call_ai = false
+  - selected_ai_tier = none
+  - route_plan = route_skip
+  - latency_ms = 0
+- 旧逻辑把“合法 no-call”当成“latency_positive 不成立”的硬失败，导致：
+  - metrics_ok = false
+  - adaptive_ok = false
+  - I5 不闭合
+  - I10 chapter summary / handoff / final audit 被拖死
+
+2) 修复动作
+- 修改：
+  - program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_friction_metrics.py
+  - program_code/trade_executor/bybit_decision_lease/bybit_decision_lease_adaptive_ttl.py
+- 修复原则：
+  - A legal no-call path must not be treated as a latency failure.
+  - 合法 no-call 路径不能被视为延迟失败。
+- 加入了清晰的中英双语语义注释。
+
+3) 修复后结果
+- I5-A 变为：
+  - metrics_ok = true
+  - no_call_path_accepted = true
+  - warning_flags 中保留 latency_not_observed_due_to_legal_no_call
+- I5-B 变为：
+  - decision_ok = true
+  - legal_no_call_path = true
+  - no_call_path_accepted = true
+  - recommended_ttl_ms 维持 12000
+- I5-C final audit 变为：
+  - overall_ok = true
+  - i5_stage_closed = true
+- I10 随之恢复闭合：
+  - summary_ok = true
+  - handoff_ok = true
+  - overall_ok = true
+  - i_chapter_closed = true
+  - ready_for_future_live_design = true
+
+
+C. I 章 canonical 化与正式归档
+1) 已新增 / 修订的内容
+- 新增 canonical recheck runner：
+  - helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_lease_recheck.sh
+- 新增文档：
+  - program_code/exchange_connectors/bybit_connector/docs/I_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+  - program_code/exchange_connectors/bybit_connector/docs/I_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+- 修订若干 I1~I5 相关 runner 与 schema/final_audit 逻辑。
+
+2) 已完成 git 提交
+- commit: 37422c9cefa2054c979626cdda811e053dcc2c85
+- commit message:
+  Canonicalize I runners and mark I chapter closed
+
+3) 含义
+- I 章已被正式标记为 closed。
+- 但 closed 的含义是：shadow-only control plane closed，不是 live trading ready。
+
+
+D. JK 章节盘点与正式章节归位验证
+1) 已做 inventory
+- 对以下目录完成系统盘点：
+  - program_code/trading_strategy/bybit_event_driven
+  - program_code/risk_control/bybit_local_models_and_risk
+  - program_code/exchange_connectors/bybit_connector/misc_tools
+  - program_code/exchange_connectors/bybit_connector/scripts
+
+2) 已验证的事实
+- J 章正式放置在：
+  - program_code/trading_strategy/bybit_event_driven
+- K 章核心 builder 分散在：
+  - program_code/exchange_connectors/bybit_connector/misc_tools
+  - program_code/risk_control/bybit_local_models_and_risk
+- 大量文件头注释已经写清：
+  - Formal chapter placement
+  - 正式章节: J. Transition Engine Skeleton
+  - 正式章节: K. Paper / Demo Gate
+- 同时保留了历史 note：旧 stage 编号（G4.x / G5.x）只是历史 stage / JSON stage 字段兼容，不代表当前正式章节命名。
+
+3) 重要理解
+- 当前“正式章节归位”主要体现在：
+  - 文件头注释
+  - 目录归属
+  - baseline 文档
+  - canonical runner
+- 但 runtime JSON 里的 stage 字段仍大量保留 G4.x / G5.x 兼容值，不能贸然批量改，否则会破坏 contract checks 与既有 latest runtime 兼容。
+
+
+E. J 章完整验证与 closure 确认
+1) 已做的检查
+- J_VERIFY_PHASE1
+- J_CANONICAL_DIRECT_RECHECK
+- J10 CANONICAL TRANSITION-ENGINE RECHECK
+
+2) 关键结果
+- matrix_ok = True
+- positive_path_open = True
+- negative_path_blocked = True
+- trail_ok = True
+- rule_layer_state = skeleton_rules_ready
+- graph_ready = True
+- transition_engine_skeleton_ready = True
+- final_audit overall_ok = True
+- chapter_consistency overall_ok = True
+- system_mode = read_only
+- execution_state = disabled
+- demo_gate_open = False
+- live_execution_open = False
+
+3) 结论
+- J 章已经可以视为“章节闭环成立”。
+- 但 J 章本质仍是 transition-engine skeleton，不是 execution engine。
+
+4) 文档与 runner 状态
+- 你贴出的 shell 输出已经显示：
+  - run_j10_canonical_transition_engine_recheck.sh
+  - J_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+  - J_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+  都已经生成并进入 git status。
+- 但在本对话里没有看到它们最终提交上 GitHub 的确认输出，所以新对话里应先核对一次 git log / git status。
+
+
+F. K 章完整验证与当前中断点
+1) 已做的检查
+- K_VERIFY_PHASE1
+- K_CANONICAL_DIRECT_RECHECK_SAFE
+
+2) 已确认跑通的内容
+逐个 compile 与逐个 run 均成功：
+- bybit_demo_gate_contract_builder.py
+- bybit_demo_gate_contract_contract_check.py
+- bybit_demo_gate_readiness_builder.py
+- bybit_demo_gate_readiness_contract_check.py
+- bybit_demo_paper_adapter_skeleton_builder.py
+- bybit_demo_paper_adapter_skeleton_contract_check.py
+- bybit_paper_order_lifecycle_skeleton_builder.py
+- bybit_paper_order_lifecycle_skeleton_contract_check.py
+- bybit_paper_position_balance_projection_skeleton_builder.py
+- bybit_paper_position_balance_projection_skeleton_contract_check.py
+- bybit_pretrade_risk_integration_skeleton_builder.py
+- bybit_pretrade_risk_integration_skeleton_contract_check.py
+- bybit_demo_gate_summary_builder.py
+- bybit_demo_gate_summary_contract_check.py
+- bybit_demo_gate_handoff_builder.py
+- bybit_demo_gate_handoff_contract_check.py
+- bybit_demo_gate_final_audit_builder.py
+- bybit_demo_gate_final_audit_contract_check.py
+- bybit_demo_gate_chapter_consistency_check.py
+- bybit_demo_gate_chapter_consistency_contract_check.py
+
+3) K 章关键结果
+- contract: closed_contract_defined
+- gate_open = false
+- readiness_state = not_ready_missing_prerequisites
+- adapter_state = skeleton_defined_not_active
+- lifecycle_state = skeleton_defined_not_active
+- projection_state = skeleton_defined_not_active
+- risk_state = skeleton_defined_not_active
+- summary_state = design_layers_defined_gate_closed
+- summary_ok = true
+- final_audit overall_ok = true
+- chapter_consistency overall_ok = true
+- runtime 仍 read_only / disabled
+
+4) 真正的中断点
+- 不是 K builder / runtime / contract fail。
+- 而是最后一个“compact summary 打印脚本”里 Python 括号没收好，导致：
+  SyntaxError: '(' was never closed
+- 后续又尝试补 K10 canonical runner 与 K baseline 文档，但因为对话极长，shell/heredoc 易截断，最终没有稳定落地。
+
+5) 因此当前对 K 的最准确认识
+- 逻辑状态：基本已经闭合，可视为 closed design-only demo gate chapter。
+- 工程落地状态：
+  - 还缺 K10 canonical runner 文件；
+  - 还缺 K baseline docs；
+  - 还缺一次 git status / commit / push 的正式收尾确认。
+
+
+三、当前最重要的安全边界
+--------------------------------------------------
+1) 整个系统仍然不是 live trading ready。
+2) I 章 closed 不等于可以发 execution lease。
+3) J 章 closed 不等于 transition engine 可驱动 execution。
+4) K 章 closed 的正确含义是“设计层闭合且 gate 仍关闭”，不等于 paper trading 已开放。
+5) runtime 当前仍应保持：
+- system_mode = read_only
+- execution_state = disabled
+- execution_authority = not_granted（至少在 I 章链路中仍如此）
+- live_execution_allowed = false
+
+
+四、当前已知但未处理 / 未完成的事项
+--------------------------------------------------
+1) K 章 formal close 收尾未完全落地
+- 缺：
+  - helper_scripts/maintenance_scripts/bybit_connector/run_k10_canonical_demo_gate_recheck.sh
+  - docs/K_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+  - docs/K_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+- 缺一次 git 提交确认。
+
+2) J 章虽然看起来已完成 runner 与 baseline 文档，但新对话仍需确认：
+- 是否已 commit/push；
+- git status 是否干净。
+
+3) 旧 stage marker 仍然大量存在
+- G4.x / G5.x 的 JSON stage 字段和 contract checks 仍在大量使用。
+- 目前不能贸然全量改名为 J/K stage，否则高概率破坏 runtime 兼容与 contract checks。
+- 这应被视为“后续兼容性改造专题”，不能和当前闭环确认混在一起做。
+
+4) 后续 LMN 等章节推进前，必须先把 JK 的 canonical baseline 与 git 收尾彻底钉死。
+
+
+五、建议新对话的第一优先任务
+--------------------------------------------------
+第一优先：完成 K 章收尾固定
+- 生成并验证：
+  - run_k10_canonical_demo_gate_recheck.sh
+  - K_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+  - K_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+- 跑一次 K10 canonical recheck
+- 确认 git status
+- commit + push
+
+第二优先：核对 J 章是否也已完全 commit/push
+- 检查 git log
+- 检查 git status
+- 如未提交则补提交
+
+第三优先：在 JK 完整落地后，再决定是否进入后续章节（L/M/N），而不是直接跨过去。
+
+
+六、建议上传到新对话的文件
+--------------------------------------------------
+强烈建议至少上传以下文件：
+
+A. 本次新交接日志
+- OpenClaw_交接日志_2026-03-24_晚.txt
+
+B. 你之前保存的 2026-03-24 早/晚工程记录
+- 尤其是今天你让我做的 3 月 24 日详细工作报告 txt
+
+C. 较大的总纲文件（如你手里还有）
+- OpenClaw_全量整合总报告_2026-03-22_重新导出
+- OpenClaw_Bybit_A-I_接手摘要_2026-03-22
+
+注意：
+- 这两份旧文件可以继续作为大参考；
+- 但其中部分信息已经过时，特别是：
+  - I 章现在已经正式 canonical closed；
+  - I5 no-call semantics bug 已修复；
+  - J 章已被验证闭环；
+  - K 章逻辑上也基本闭环，只差收尾落地。
+- 所以在新对话里必须以“这份 2026-03-24 晚交接日志”为最新真相覆盖旧内容。
+
+
+七、新对话启动 prompt（可直接复制）
+--------------------------------------------------
+你现在接手的是 OpenClaw / Bybit 项目 2026-03-24 晚上的最新工程状态。
+
+请先把我上传的最新交接日志作为最高优先级真相来源，其优先级高于更早的旧总报告与旧接手摘要。尤其注意：旧文件中关于 I 章、J 章、K 章的部分已有过时信息，必须用最新交接日志覆盖。
+
+当前你必须先建立以下事实基线：
+1. I 章（decision-lease control plane）已经 canonical closed，且是 shadow-only closed，不是 live execution ready。
+2. I5 曾经因为 legal no-call path 被错误当成 latency failure 而阻断；这个 bug 已修复。
+3. J 章（Transition Engine Skeleton）已经验证闭环，runtime 仍受保护，execution 仍关闭。
+4. K 章（Paper / Demo Gate）核心 builder / contract / summary / handoff / final audit / chapter consistency 已逐个跑通，逻辑上已闭环为“design-only gate closed”，但 K10 canonical runner、K baseline docs、以及 git 提交收尾尚未正式完成。
+5. 当前主 runtime 仍必须保持 read_only / execution disabled，绝不能把任何章节闭环误读为 live 放权。
+
+你的第一任务不是继续扩展新功能，而是先做工程收尾核验：
+A. 先检查当前 git status 与 git log，确认 J 章是否已完整 commit/push。
+B. 然后补完 K 章收尾：
+   - 生成 run_k10_canonical_demo_gate_recheck.sh
+   - 生成 K_CANONICAL_RUNNER_BASELINE_2026-03-24.md
+   - 生成 K_CHAPTER_CLOSURE_BASELINE_2026-03-24.md
+   - 跑 K10 canonical recheck
+   - 确认 K 章最终状态
+   - commit 并 push
+C. 只有在 JK 全部落地、git 干净之后，才讨论是否进入后续章节。
+
+工作方式要求：
+- 先验证，后修改。
+- 优先直接看 GitHub 仓库中的代码；除 runtime/latest/json 等必须本地读取的内容外，不要把大量代码检查都推给我手工执行。
+- 所有你新改的代码继续保持中英双语注释风格。
+- 不要把 shadow/design-only/skeleton 的闭环误说成可执行放权。
+- 每做完一段，就给我明确“已验证事实 / 修改内容 / 风险边界 / 下一步”。
+
+请先从 git status、git log，以及 K 章缺失收尾文件的实际存在情况开始。
+
+
+八、给新对话的额外提醒
+--------------------------------------------------
+- 这次老对话里多次出现的“卡住”大多不是工程逻辑失败，而是：
+  - shell heredoc 截断
+  - 长对话导致粘贴片段损坏
+  - Python 单行括号没闭合
+- 所以新对话里尽量：
+  - 少用超长单段 shell；
+  - 多用小步验证；
+  - 避免把长 Python print 嵌套写成一行；
+  - 先落 runner/doc 文件，再执行。
+
+交接结束。
