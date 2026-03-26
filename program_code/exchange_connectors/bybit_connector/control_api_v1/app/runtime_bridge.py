@@ -31,16 +31,12 @@ PRODUCT_FACT_KEYS = {
     "account_permission_fact",
 }
 
-SOURCE_CONTEXT_KEYS = {
-    "readonly_connector_name",
-    "execution_connector_name",
-    "rest_private_connection_state",
-    "ws_private_connection_state",
-    "runtime_connection_state",
-    "account_fact_completeness_state",
-    "source_snapshot_completeness_state",
-    "runtime_snapshot_id",
-    "runtime_snapshot_ts_ms",
+SYSTEM_MODE_FACT_TO_OVERVIEW_MODE = {
+    "observe_only": "observe_only",
+    "shadow_only": "shadow_only",
+    "design_only": "design_only",
+    "demo_reserved": "demo_reserved",
+    "live_reserved": "live_reserved",
 }
 
 
@@ -87,6 +83,10 @@ def overlay_runtime_facts(snapshot: dict[str, Any]) -> dict[str, Any]:
         for key in RUNTIME_FACT_KEYS:
             if key in runtime_facts:
                 merged["global_runtime"]["facts"][key] = runtime_facts[key]
+
+        system_mode_fact = runtime_facts.get("system_mode_fact")
+        if system_mode_fact in SYSTEM_MODE_FACT_TO_OVERVIEW_MODE:
+            merged["global_runtime"]["derived"]["global_mode_state"] = SYSTEM_MODE_FACT_TO_OVERVIEW_MODE[system_mode_fact]
 
     product_family_facts = payload.get("product_family_facts")
     if isinstance(product_family_facts, dict):

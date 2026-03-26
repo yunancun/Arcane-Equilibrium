@@ -17,8 +17,9 @@ def build_client() -> TestClient:
     runtime_dir = Path(tempfile.mkdtemp(prefix="openclaw_test_runtime_stable_"))
     os.environ["OPENCLAW_STATE_FILE"] = str(runtime_dir / "state.json")
     os.environ["OPENCLAW_API_TOKEN"] = "test-token"
+    os.environ.pop("OPENCLAW_RUNTIME_SNAPSHOT_FILE", None)
 
-    for module_name in ["app.main_snapshot_stable", "app.main"]:
+    for module_name in ["app.main_snapshot_stable", "app.main", "app.runtime_bridge", "app.main_legacy"]:
         if module_name in sys.modules:
             del sys.modules[module_name]
 
