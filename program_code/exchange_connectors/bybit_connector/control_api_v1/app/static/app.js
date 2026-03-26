@@ -170,6 +170,16 @@ function fmtTs(tsMs) {
 
 // ── UI 状态更新辅助 / UI state update helpers ─────────────────────────────────
 
+/**
+ * 安全设置元素文本 / Safely set element text by ID.
+ * 如果元素不存在则静默忽略。
+ * Silently ignored if element does not exist.
+ */
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = String(text);
+}
+
 function setConnectionStatus(text, variant = "neutral") {
   const node = document.getElementById("connectionStatus");
   node.textContent = text;
@@ -1019,6 +1029,225 @@ function ensureGuiEnhancements() {
     if (incomeSection) incomeSection.after(card);
   }
 
+  // ── 注入：学习驾驶舱 / Inject: Learning Cockpit ─────────────────────────────
+  // L 章核心 GUI 区域：四标签页（观察 / 经验 / 假设 / 实验）+ 录入表单 + 审批按钮。
+  // L-chapter core GUI section: four tabs (observations / lessons / hypotheses / experiments)
+  // + input forms + approval buttons.
+  if (!document.getElementById("learningCockpitSection")) {
+    const card = document.createElement("section");
+    card.className = "card";
+    card.id = "learningCockpitSection";
+    card.innerHTML = `
+      <div class="card-header-row">
+        <div>
+          <h2>${zhEnPrimary("学习驾驶舱", "Learning Cockpit")}</h2>
+          <p class="subtle">L 章：观察流 / 经验记忆 / 假设队列 / 实验队列。所有记录区分事实、推断、假设（原则 8）。
+            / L-Chapter: Observation Feed / Lessons Memory / Hypothesis Queue / Experiment Queue. All entries tagged with fact/inference/hypothesis (Principle 8).</p>
+        </div>
+      </div>
+      <div class="learning-tabs">
+        <button class="learning-tab active" data-tab="observations">${zhEnPrimary("观察流", "Observations")}</button>
+        <button class="learning-tab" data-tab="lessons">${zhEnPrimary("经验记忆", "Lessons")}</button>
+        <button class="learning-tab" data-tab="hypotheses">${zhEnPrimary("假设队列", "Hypotheses")}</button>
+        <button class="learning-tab" data-tab="experiments">${zhEnPrimary("实验队列", "Experiments")}</button>
+      </div>
+
+      <div class="learning-tab-content active" id="tabObservations">
+        <div class="entry-form-card learning-form">
+          <h4 class="entry-form-title">${zhEnPrimary("录入观察", "Record Observation")}</h4>
+          <div class="form-row">
+            <label class="form-label">标题 / Title</label>
+            <input type="text" id="obsTitle" placeholder="简要描述 / Brief description" class="form-input">
+          </div>
+          <div class="form-row">
+            <label class="form-label">详情 / Detail</label>
+            <textarea id="obsDetail" rows="2" placeholder="完整观察内容 / Full observation" class="form-input form-textarea"></textarea>
+          </div>
+          <div class="form-row form-row-inline">
+            <div>
+              <label class="form-label">类别 / Category</label>
+              <select id="obsCategory" class="form-input">
+                <option value="market">market（市场）</option>
+                <option value="execution">execution（执行）</option>
+                <option value="cost">cost（成本）</option>
+                <option value="system">system（系统）</option>
+                <option value="strategy">strategy（策略）</option>
+                <option value="other">other（其他）</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">置信度 / Confidence</label>
+              <select id="obsConfidence" class="form-input">
+                <option value="fact">fact（事实）</option>
+                <option value="inference">inference（推断）</option>
+                <option value="hypothesis">hypothesis（假设）</option>
+              </select>
+            </div>
+          </div>
+          <button id="submitObservation" class="entry-submit-btn">
+            录入观察 / Record Observation
+            <span class="button-sub">POST /input/observation</span>
+          </button>
+        </div>
+        <div id="observationsList" class="learning-records-list">等待加载 / Loading...</div>
+      </div>
+
+      <div class="learning-tab-content" id="tabLessons">
+        <div class="entry-form-card learning-form">
+          <h4 class="entry-form-title">${zhEnPrimary("录入经验", "Record Lesson")}</h4>
+          <div class="form-row">
+            <label class="form-label">标题 / Title</label>
+            <input type="text" id="lessonTitle" placeholder="经验概要 / Lesson summary" class="form-input">
+          </div>
+          <div class="form-row">
+            <label class="form-label">详情 / Detail</label>
+            <textarea id="lessonDetail" rows="2" placeholder="经验详情 / Full lesson" class="form-input form-textarea"></textarea>
+          </div>
+          <div class="form-row form-row-inline">
+            <div>
+              <label class="form-label">类别 / Category</label>
+              <select id="lessonCategory" class="form-input">
+                <option value="market_pattern">market_pattern（市场规律）</option>
+                <option value="cost_insight">cost_insight（成本洞察）</option>
+                <option value="execution_quality">execution_quality（执行质量）</option>
+                <option value="strategy">strategy（策略）</option>
+                <option value="system">system（系统）</option>
+                <option value="other">other（其他）</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">置信度 / Confidence</label>
+              <select id="lessonConfidence" class="form-input">
+                <option value="fact">fact（事实）</option>
+                <option value="inference">inference（推断）</option>
+                <option value="hypothesis">hypothesis（假设）</option>
+              </select>
+            </div>
+          </div>
+          <button id="submitLesson" class="entry-submit-btn">
+            录入经验 / Record Lesson
+            <span class="button-sub">POST /input/lesson</span>
+          </button>
+        </div>
+        <div id="lessonsList" class="learning-records-list">等待加载 / Loading...</div>
+      </div>
+
+      <div class="learning-tab-content" id="tabHypotheses">
+        <div class="entry-form-card learning-form">
+          <h4 class="entry-form-title">${zhEnPrimary("提出假设", "Propose Hypothesis")}</h4>
+          <div class="form-row">
+            <label class="form-label">标题 / Title</label>
+            <input type="text" id="hypTitle" placeholder="假设名称 / Hypothesis name" class="form-input">
+          </div>
+          <div class="form-row">
+            <label class="form-label">描述 / Description</label>
+            <textarea id="hypDescription" rows="2" placeholder="假设描述 / Description" class="form-input form-textarea"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">可检验预测 / Testable Prediction</label>
+            <textarea id="hypPrediction" rows="2" placeholder="什么结果能证实或否定这个假设 / What outcome confirms or denies" class="form-input form-textarea"></textarea>
+          </div>
+          <button id="submitHypothesis" class="entry-submit-btn">
+            提出假设 / Propose Hypothesis
+            <span class="button-sub">POST /input/hypothesis (confidence_level = hypothesis)</span>
+          </button>
+        </div>
+        <div id="hypothesesList" class="learning-records-list">等待加载 / Loading...</div>
+      </div>
+
+      <div class="learning-tab-content" id="tabExperiments">
+        <div class="entry-form-card learning-form">
+          <h4 class="entry-form-title">${zhEnPrimary("提出实验", "Propose Experiment")}</h4>
+          <div class="form-row">
+            <label class="form-label">关联假设 ID / Hypothesis ID</label>
+            <input type="text" id="expHypothesisId" placeholder="hyp:..." class="form-input">
+          </div>
+          <div class="form-row">
+            <label class="form-label">标题 / Title</label>
+            <input type="text" id="expTitle" placeholder="实验名称 / Experiment name" class="form-input">
+          </div>
+          <div class="form-row">
+            <label class="form-label">描述 / Description</label>
+            <textarea id="expDescription" rows="2" placeholder="实验描述 / Description" class="form-input form-textarea"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">方法 / Method</label>
+            <textarea id="expMethod" rows="2" placeholder="如何验证 / How to test" class="form-input form-textarea"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">成功标准 / Success Criteria</label>
+            <input type="text" id="expSuccessCriteria" placeholder="什么结果算成功 / What counts as success" class="form-input">
+          </div>
+          <button id="submitExperiment" class="entry-submit-btn">
+            提出实验 / Propose Experiment
+            <span class="button-sub">POST /input/experiment</span>
+          </button>
+        </div>
+        <div id="experimentsList" class="learning-records-list">等待加载 / Loading...</div>
+      </div>
+
+      <div class="learning-stats" id="learningStats">
+        <span>${zhEnPrimary("观察", "Obs")}: <strong id="lrnObsCount">0</strong></span>
+        <span>${zhEnPrimary("经验", "Lessons")}: <strong id="lrnLesCount">0</strong></span>
+        <span>${zhEnPrimary("假设", "Hyp")}: <strong id="lrnHypCount">0</strong></span>
+        <span>${zhEnPrimary("实验", "Exp")}: <strong id="lrnExpCount">0</strong></span>
+        <span>${zhEnPrimary("待审批", "Pending")}: <strong id="lrnPendingCount">0</strong></span>
+      </div>`;
+
+    const settingsSection = document.getElementById("settingsConsoleSection");
+    if (settingsSection) settingsSection.after(card);
+  }
+
+  // ── 注入：净 PnL 仪表盘 / Inject: Net PnL Dashboard ────────────────────────
+  // L 章 Net PnL 模块：周期趋势、成本分解、快照保存。
+  // L-chapter Net PnL module: period trends, cost breakdown, snapshot saving.
+  if (!document.getElementById("netPnlDashboardSection")) {
+    const card = document.createElement("section");
+    card.className = "card";
+    card.id = "netPnlDashboardSection";
+    card.innerHTML = `
+      <div class="card-header-row">
+        <div>
+          <h2>${zhEnPrimary("净 PnL 仪表盘", "Net PnL Dashboard")}</h2>
+          <p class="subtle">含所有成本分解的盈亏趋势追踪。来自 /learning/net-pnl。
+            / PnL trend tracking with full cost breakdown. From /learning/net-pnl.</p>
+        </div>
+      </div>
+      <div class="summary-grid business-grid">
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("已实现盈亏", "Realized PnL")}</span><strong id="npRealizedPnl">-</strong></div>
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("未实现盈亏", "Unrealized PnL")}</span><strong id="npUnrealizedPnl">-</strong></div>
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("毛盈亏", "Gross PnL")}</span><strong id="npGrossPnl">-</strong></div>
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("总成本", "Total Cost")}</span><strong id="npTotalCost">-</strong></div>
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("净经营盈亏", "Net Operating PnL")}</span><strong id="npNetPnl" class="pnl-highlight">-</strong></div>
+        <div class="summary-item"><span class="summary-label">${zhEnPrimary("周期快照数", "Period Snapshots")}</span><strong id="npSnapshotCount">-</strong></div>
+      </div>
+      <div class="net-pnl-actions">
+        <div class="form-row form-row-inline">
+          <div>
+            <label class="form-label">周期标签 / Period Label</label>
+            <input type="text" id="periodLabel" placeholder="e.g. 2026-03-26" class="form-input">
+          </div>
+          <button id="savePeriodSnapshot" class="entry-submit-btn">
+            保存快照 / Save Period Snapshot
+            <span class="button-sub">POST /input/pnl-period-snapshot</span>
+          </button>
+        </div>
+      </div>
+      <div class="entries-history">
+        <div class="entries-col">
+          <h4 class="entries-col-title">${zhEnPrimary("成本分解", "Cost Breakdown")}</h4>
+          <div id="npCostBreakdown" class="breakdown-grid">-</div>
+        </div>
+        <div class="entries-col">
+          <h4 class="entries-col-title">${zhEnPrimary("周期趋势", "Period Trend")}</h4>
+          <div id="npTrendList" class="entry-list">-</div>
+        </div>
+      </div>`;
+
+    const learningSection = document.getElementById("learningCockpitSection");
+    if (learningSection) learningSection.after(card);
+  }
+
   // ── 注入：确认弹窗 / Inject: confirmation modal ─────────────────────────────
   if (!document.getElementById("confirmModal")) {
     const modal = document.createElement("div");
@@ -1057,14 +1286,19 @@ function ensureGuiEnhancements() {
 async function loadDashboard() {
   ensureGuiEnhancements();
 
-  // 并发加载所有数据 / Load all data concurrently
-  const [overview, controlPlane, sourceContext, audit, productFamilies, businessSummary] = await Promise.all([
+  // 并发加载所有数据（含 L 章学习 + 净 PnL 端点）
+  // Load all data concurrently (including L-chapter learning + net PnL endpoints)
+  const [overview, controlPlane, sourceContext, audit, productFamilies, businessSummary,
+         learningFeed, learningExperiments, netPnlDashboard] = await Promise.all([
     apiGet("/api/v1/system/overview"),
     apiGet("/api/v1/system/control-plane"),
     apiGet("/api/v1/system/source-context"),
     apiGet("/api/v1/system/audit-summary"),
     apiGet("/api/v1/system/product-families"),
-    apiGet("/api/v1/system/business/summary")
+    apiGet("/api/v1/system/business/summary"),
+    apiGet("/api/v1/learning/feed"),
+    apiGet("/api/v1/learning/experiments"),
+    apiGet("/api/v1/learning/net-pnl")
   ]);
 
   // 渲染各区块 / Render each section
@@ -1078,6 +1312,11 @@ async function loadDashboard() {
   renderHealth(overview);
   renderProductFamilies(productFamilies.data);
   updateSettingsConsoleFromControlPlane(controlPlane);
+
+  // L 章渲染 / L-chapter rendering
+  renderLearningFeed(learningFeed.data);
+  renderLearningExperiments(learningExperiments.data);
+  renderNetPnlDashboard(netPnlDashboard.data);
 
   // 调试原文 / Debug raw JSON
   document.getElementById("overviewBox").textContent = pretty(overview);
@@ -1291,6 +1530,392 @@ async function applyDemoLearningSettings() {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// L 章渲染函数 / L-Chapter Render Functions
+//
+// 渲染学习驾驶舱各标签页内容和净 PnL 仪表盘。
+// Render learning cockpit tab contents and Net PnL dashboard.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 置信度级别徽章 / Confidence level badge.
+ * 根据置信度级别返回对应颜色的标记 / Returns colored badge based on confidence level.
+ */
+function confidenceBadge(level) {
+  const colors = { fact: "#27ae60", inference: "#f39c12", hypothesis: "#3498db" };
+  const labels = { fact: "事实/fact", inference: "推断/inference", hypothesis: "假设/hypothesis" };
+  const color = colors[level] || "#999";
+  return `<span class="confidence-badge" style="background:${color}">${labels[level] || level}</span>`;
+}
+
+/**
+ * 状态徽章 / Status badge for hypotheses and experiments.
+ */
+function statusBadge(status) {
+  const colors = {
+    proposed: "#3498db", under_review: "#f39c12", testing: "#9b59b6",
+    validated: "#27ae60", invalidated: "#e74c3c", archived: "#95a5a6",
+    pending_approval: "#f39c12", approved: "#27ae60", rejected: "#e74c3c",
+    in_progress: "#9b59b6", completed: "#2ecc71"
+  };
+  const color = colors[status] || "#999";
+  return `<span class="status-badge" style="background:${color}">${status}</span>`;
+}
+
+/**
+ * 渲染学习观察流和经验记忆 / Render learning feed (observations + lessons).
+ */
+function renderLearningFeed(feedData) {
+  if (!feedData) return;
+
+  // 渲染观察列表 / Render observations list
+  const obsList = document.getElementById("observationsList");
+  if (obsList) {
+    const obs = feedData.observations_recent || [];
+    obsList.innerHTML = obs.length === 0
+      ? '<div class="muted-row">暂无观察记录 / No observations yet</div>'
+      : obs.map(o => `
+        <div class="learning-record-item">
+          <div class="learning-record-header">
+            ${confidenceBadge(o.confidence_level)}
+            <span class="learning-record-category">${o.category}</span>
+            <span class="learning-record-ts">${fmtTs(o.recorded_ts_ms)}</span>
+          </div>
+          <div class="learning-record-title">${escHtml(o.title)}</div>
+          <div class="learning-record-detail">${escHtml(o.detail)}</div>
+          <div class="learning-record-id">${o.observation_id}</div>
+        </div>`).join("");
+  }
+
+  // 渲染经验列表 / Render lessons list
+  const lesList = document.getElementById("lessonsList");
+  if (lesList) {
+    const les = feedData.lessons_recent || [];
+    lesList.innerHTML = les.length === 0
+      ? '<div class="muted-row">暂无经验记录 / No lessons yet</div>'
+      : les.map(l => `
+        <div class="learning-record-item">
+          <div class="learning-record-header">
+            ${confidenceBadge(l.confidence_level)}
+            <span class="learning-record-category">${l.category}</span>
+            <span class="learning-record-ts">${fmtTs(l.recorded_ts_ms)}</span>
+          </div>
+          <div class="learning-record-title">${escHtml(l.title)}</div>
+          <div class="learning-record-detail">${escHtml(l.detail)}</div>
+          <div class="learning-record-id">${l.lesson_id}</div>
+        </div>`).join("");
+  }
+
+  // 更新统计 / Update stats
+  const totals = feedData.totals || {};
+  setText("lrnObsCount", totals.total_observations ?? 0);
+  setText("lrnLesCount", totals.total_lessons ?? 0);
+  setText("lrnHypCount", totals.total_hypotheses ?? 0);
+  setText("lrnExpCount", totals.total_experiments ?? 0);
+}
+
+/**
+ * 渲染假设和实验队列 / Render hypotheses and experiments queue.
+ */
+function renderLearningExperiments(expData) {
+  if (!expData) return;
+
+  // 渲染假设列表 / Render hypotheses list
+  const hypList = document.getElementById("hypothesesList");
+  if (hypList) {
+    const hyps = expData.hypotheses || [];
+    hypList.innerHTML = hyps.length === 0
+      ? '<div class="muted-row">暂无假设 / No hypotheses yet</div>'
+      : hyps.map(h => `
+        <div class="learning-record-item">
+          <div class="learning-record-header">
+            ${statusBadge(h.status)}
+            ${confidenceBadge(h.confidence_level || "hypothesis")}
+            <span class="learning-record-ts">${fmtTs(h.recorded_ts_ms)}</span>
+          </div>
+          <div class="learning-record-title">${escHtml(h.title)}</div>
+          <div class="learning-record-detail">${escHtml(h.description || "")}</div>
+          <div class="learning-record-prediction"><strong>预测 / Prediction:</strong> ${escHtml(h.testable_prediction || "")}</div>
+          <div class="learning-record-id">${h.hypothesis_id}</div>
+          ${h.status === "proposed" || h.status === "under_review" ? `
+            <div class="learning-record-actions">
+              <button class="hyp-verdict-btn" data-hyp-id="${h.hypothesis_id}" data-verdict="approved">批准 / Approve</button>
+              <button class="hyp-verdict-btn btn-danger" data-hyp-id="${h.hypothesis_id}" data-verdict="rejected">拒绝 / Reject</button>
+              <button class="hyp-verdict-btn btn-muted" data-hyp-id="${h.hypothesis_id}" data-verdict="archived">归档 / Archive</button>
+            </div>` : ""}
+          ${h.operator_verdict ? `<div class="learning-record-verdict">判定 / Verdict: ${h.operator_verdict} (${h.operator_verdict_reason || "-"})</div>` : ""}
+        </div>`).join("");
+  }
+
+  // 渲染实验列表 / Render experiments list
+  const expList = document.getElementById("experimentsList");
+  if (expList) {
+    const exps = expData.experiments || [];
+    expList.innerHTML = exps.length === 0
+      ? '<div class="muted-row">暂无实验 / No experiments yet</div>'
+      : exps.map(e => `
+        <div class="learning-record-item">
+          <div class="learning-record-header">
+            ${statusBadge(e.status)}
+            <span class="learning-record-category">hyp: ${e.hypothesis_id}</span>
+            <span class="learning-record-ts">${fmtTs(e.recorded_ts_ms)}</span>
+          </div>
+          <div class="learning-record-title">${escHtml(e.title)}</div>
+          <div class="learning-record-detail">${escHtml(e.description || "")}</div>
+          <div class="learning-record-id">${e.experiment_id}</div>
+          ${e.status === "pending_approval" ? `
+            <div class="learning-record-actions">
+              <button class="exp-approve-btn" data-exp-id="${e.experiment_id}" data-action="approved">批准 / Approve</button>
+              <button class="exp-approve-btn btn-danger" data-exp-id="${e.experiment_id}" data-action="rejected">拒绝 / Reject</button>
+            </div>` : ""}
+          ${e.status === "approved" ? `
+            <div class="learning-record-actions">
+              <button class="exp-complete-btn" data-exp-id="${e.experiment_id}">标记完成 / Mark Complete</button>
+            </div>` : ""}
+          ${e.result_summary ? `<div class="learning-record-verdict">结论 / Result: ${escHtml(e.result_summary)} ${confidenceBadge(e.result_confidence_level || "inference")}</div>` : ""}
+        </div>`).join("");
+  }
+
+  // 更新待审批计数 / Update pending count
+  setText("lrnPendingCount", expData.pending_approval_count ?? 0);
+}
+
+/**
+ * 渲染净 PnL 仪表盘 / Render Net PnL Dashboard.
+ */
+function renderNetPnlDashboard(dashData) {
+  if (!dashData) return;
+  const daily = dashData.daily || {};
+
+  setText("npRealizedPnl", fmtPnl(daily.realized_pnl));
+  setText("npUnrealizedPnl", fmtPnl(daily.unrealized_pnl));
+  setText("npGrossPnl", fmtPnl(daily.gross_pnl));
+  setText("npTotalCost", fmtPnl(daily.total_cost));
+  setText("npNetPnl", fmtPnl(daily.net_operating_pnl));
+  setText("npSnapshotCount", (dashData.entry_totals || {}).total_period_snapshots ?? 0);
+
+  // 成本分解 / Cost breakdown
+  const brkEl = document.getElementById("npCostBreakdown");
+  if (brkEl) {
+    const brk = dashData.cost_breakdown || {};
+    const keys = Object.keys(brk);
+    brkEl.innerHTML = keys.length === 0
+      ? '<div class="muted-row">暂无成本 / No costs yet</div>'
+      : keys.map(k => `<div class="breakdown-item"><span>${k}</span><strong>${fmtPnl(brk[k])}</strong></div>`).join("");
+  }
+
+  // 趋势列表 / Trend list
+  const trendEl = document.getElementById("npTrendList");
+  if (trendEl) {
+    const trend = dashData.net_pnl_trend || [];
+    trendEl.innerHTML = trend.length === 0
+      ? '<div class="muted-row">暂无周期快照 / No period snapshots</div>'
+      : trend.map(t => `
+        <div class="entry-item">
+          <span class="entry-item-label">${escHtml(t.period_label)}</span>
+          <span>净 PnL: <strong>${fmtPnl(t.net_operating_pnl)}</strong></span>
+          <span>毛 PnL: ${fmtPnl(t.gross_pnl)}</span>
+          <span>成本: ${fmtPnl(t.total_cost)}</span>
+        </div>`).join("");
+  }
+}
+
+/**
+ * HTML 转义 / Simple HTML escape to prevent XSS.
+ */
+function escHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = String(str);
+  return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// L 章动作处理器 / L-Chapter Action Handlers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 提交观察记录 / Submit an observation record.
+ */
+async function submitObservation() {
+  const title = document.getElementById("obsTitle")?.value?.trim();
+  const detail = document.getElementById("obsDetail")?.value?.trim();
+  const category = document.getElementById("obsCategory")?.value;
+  const confidence = document.getElementById("obsConfidence")?.value;
+
+  if (!title || !detail) {
+    setActionSummary("录入失败", "failed", "-", "-", "请填写标题和详情 / Title and detail are required.", {});
+    return;
+  }
+
+  try {
+    const result = await apiPost("/api/v1/input/observation", baseEnvelope({
+      payload: { title, detail, category, confidence_level: confidence }
+    }));
+    summarizeActionResult("learning-observation", result);
+    document.getElementById("obsTitle").value = "";
+    document.getElementById("obsDetail").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("观察录入失败 / Observation Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 提交经验教训 / Submit a lesson.
+ */
+async function submitLesson() {
+  const title = document.getElementById("lessonTitle")?.value?.trim();
+  const detail = document.getElementById("lessonDetail")?.value?.trim();
+  const category = document.getElementById("lessonCategory")?.value;
+  const confidence = document.getElementById("lessonConfidence")?.value;
+
+  if (!title || !detail) {
+    setActionSummary("录入失败", "failed", "-", "-", "请填写标题和详情 / Title and detail are required.", {});
+    return;
+  }
+
+  try {
+    const result = await apiPost("/api/v1/input/lesson", baseEnvelope({
+      payload: { title, detail, category, confidence_level: confidence }
+    }));
+    summarizeActionResult("learning-lesson", result);
+    document.getElementById("lessonTitle").value = "";
+    document.getElementById("lessonDetail").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("经验录入失败 / Lesson Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 提交假设 / Submit a hypothesis.
+ */
+async function submitHypothesis() {
+  const title = document.getElementById("hypTitle")?.value?.trim();
+  const description = document.getElementById("hypDescription")?.value?.trim();
+  const prediction = document.getElementById("hypPrediction")?.value?.trim();
+
+  if (!title || !description || !prediction) {
+    setActionSummary("录入失败", "failed", "-", "-", "请填写标题、描述和可检验预测 / Title, description and prediction required.", {});
+    return;
+  }
+
+  try {
+    const result = await apiPost("/api/v1/input/hypothesis", baseEnvelope({
+      payload: { title, description, testable_prediction: prediction }
+    }));
+    summarizeActionResult("learning-hypothesis", result);
+    document.getElementById("hypTitle").value = "";
+    document.getElementById("hypDescription").value = "";
+    document.getElementById("hypPrediction").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("假设录入失败 / Hypothesis Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 提交实验 / Submit an experiment.
+ */
+async function submitExperiment() {
+  const hypothesisId = document.getElementById("expHypothesisId")?.value?.trim();
+  const title = document.getElementById("expTitle")?.value?.trim();
+  const description = document.getElementById("expDescription")?.value?.trim();
+  const method = document.getElementById("expMethod")?.value?.trim();
+  const criteria = document.getElementById("expSuccessCriteria")?.value?.trim();
+
+  if (!hypothesisId || !title || !description || !method || !criteria) {
+    setActionSummary("录入失败", "failed", "-", "-", "请填写所有必填字段 / All required fields must be filled.", {});
+    return;
+  }
+
+  try {
+    const result = await apiPost("/api/v1/input/experiment", baseEnvelope({
+      payload: { hypothesis_id: hypothesisId, title, description, method, success_criteria: criteria }
+    }));
+    summarizeActionResult("learning-experiment", result);
+    document.getElementById("expTitle").value = "";
+    document.getElementById("expDescription").value = "";
+    document.getElementById("expMethod").value = "";
+    document.getElementById("expSuccessCriteria").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("实验录入失败 / Experiment Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 假设审批 / Hypothesis verdict.
+ */
+async function applyHypothesisVerdict(hypothesisId, verdict) {
+  try {
+    const result = await apiPost(`/api/v1/learning/hypothesis/${hypothesisId}/verdict`, baseEnvelope({
+      payload: { verdict, reason: "operator decision via GUI" }
+    }));
+    summarizeActionResult("hypothesis-verdict", result);
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("假设审批失败 / Verdict Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 实验审批 / Experiment approval.
+ */
+async function applyExperimentApproval(experimentId, action) {
+  try {
+    const result = await apiPost(`/api/v1/learning/experiment/${experimentId}/approve`, baseEnvelope({
+      payload: { action, reason: "operator decision via GUI" }
+    }));
+    summarizeActionResult("experiment-approval", result);
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("实验审批失败 / Approval Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 实验完成 / Experiment completion.
+ */
+async function applyExperimentCompletion(experimentId) {
+  const summary = prompt("请输入实验结论摘要 / Enter experiment result summary:");
+  if (!summary) return;
+  const confidence = prompt("置信度级别 / Confidence level (fact/inference/hypothesis):", "inference");
+  if (!confidence) return;
+
+  try {
+    const result = await apiPost(`/api/v1/learning/experiment/${experimentId}/complete`, baseEnvelope({
+      payload: { result_summary: summary, result_confidence_level: confidence }
+    }));
+    summarizeActionResult("experiment-completion", result);
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("实验完成失败 / Completion Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
+/**
+ * 保存周期快照 / Save period snapshot.
+ */
+async function savePeriodSnapshot() {
+  const label = document.getElementById("periodLabel")?.value?.trim();
+  if (!label) {
+    setActionSummary("失败", "failed", "-", "-", "请输入周期标签 / Period label is required.", {});
+    return;
+  }
+
+  try {
+    const result = await apiPost("/api/v1/input/pnl-period-snapshot", baseEnvelope({
+      payload: { period_label: label }
+    }));
+    summarizeActionResult("period-snapshot", result);
+    document.getElementById("periodLabel").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setActionSummary("快照保存失败 / Snapshot Failed", "failed", "-", "-", String(error), String(error));
+  }
+}
+
 // ── 事件绑定 / Event binding ──────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1360,6 +1985,87 @@ document.addEventListener("DOMContentLoaded", () => {
     if (event.target.closest("#applyDemoLearningSettings")) {
       event.preventDefault();
       applyDemoLearningSettings();
+      return;
+    }
+
+    // ── L 章事件 / L-chapter events ─────────────────────────────────────────
+
+    // 观察录入 / Observation submit
+    if (event.target.closest("#submitObservation")) {
+      event.preventDefault();
+      submitObservation();
+      return;
+    }
+
+    // 经验录入 / Lesson submit
+    if (event.target.closest("#submitLesson")) {
+      event.preventDefault();
+      submitLesson();
+      return;
+    }
+
+    // 假设录入 / Hypothesis submit
+    if (event.target.closest("#submitHypothesis")) {
+      event.preventDefault();
+      submitHypothesis();
+      return;
+    }
+
+    // 实验录入 / Experiment submit
+    if (event.target.closest("#submitExperiment")) {
+      event.preventDefault();
+      submitExperiment();
+      return;
+    }
+
+    // 假设审批按钮 / Hypothesis verdict buttons
+    const hypVerdictBtn = event.target.closest(".hyp-verdict-btn");
+    if (hypVerdictBtn) {
+      event.preventDefault();
+      applyHypothesisVerdict(hypVerdictBtn.dataset.hypId, hypVerdictBtn.dataset.verdict);
+      return;
+    }
+
+    // 实验审批按钮 / Experiment approval buttons
+    const expApproveBtn = event.target.closest(".exp-approve-btn");
+    if (expApproveBtn) {
+      event.preventDefault();
+      applyExperimentApproval(expApproveBtn.dataset.expId, expApproveBtn.dataset.action);
+      return;
+    }
+
+    // 实验完成按钮 / Experiment completion button
+    const expCompleteBtn = event.target.closest(".exp-complete-btn");
+    if (expCompleteBtn) {
+      event.preventDefault();
+      applyExperimentCompletion(expCompleteBtn.dataset.expId);
+      return;
+    }
+
+    // 保存周期快照 / Save period snapshot
+    if (event.target.closest("#savePeriodSnapshot")) {
+      event.preventDefault();
+      savePeriodSnapshot();
+      return;
+    }
+
+    // 学习标签页切换 / Learning tab switching
+    const tabBtn = event.target.closest(".learning-tab");
+    if (tabBtn) {
+      event.preventDefault();
+      const tabName = tabBtn.dataset.tab;
+      // 切换标签页激活状态 / Toggle active tab
+      document.querySelectorAll(".learning-tab").forEach(t => t.classList.remove("active"));
+      tabBtn.classList.add("active");
+      // 切换内容面板 / Toggle content panel
+      document.querySelectorAll(".learning-tab-content").forEach(c => c.classList.remove("active"));
+      const panelMap = {
+        observations: "tabObservations",
+        lessons: "tabLessons",
+        hypotheses: "tabHypotheses",
+        experiments: "tabExperiments"
+      };
+      document.getElementById(panelMap[tabName])?.classList.add("active");
       return;
     }
   });

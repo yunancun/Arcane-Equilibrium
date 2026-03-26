@@ -70,6 +70,9 @@ class Settings:
                         "input:event",
                         "input:note",
                         "input:config",
+                        # ── L 章学习系统权限 / L-chapter learning system scopes ──
+                        "learning:write",   # 录入观察/经验/假设/实验 / Record observations/lessons/hypotheses/experiments
+                        "learning:manage",  # 审批假设/实验、完成实验 / Approve hypotheses/experiments, complete experiments
                     ]
                 ),
             )
@@ -288,6 +291,182 @@ class BusinessSummaryData(BaseModel):
     pnl_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
     cost_breakdown: dict[str, Any] = Field(default_factory=dict)
     entry_totals: dict[str, Any] = Field(default_factory=dict)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# L 章 Pydantic 响应模型 / L-Chapter Pydantic Response Models
+#
+# 以下模型覆盖学习系统五大模块的 API 响应：
+# 观察流 / 经验记忆 / 假设队列 / 实验队列 / 净 PnL 仪表盘。
+#
+# The following models cover API responses for the five L-chapter modules:
+# Observation Feed / Lessons Memory / Hypothesis Queue / Experiment Queue / Net PnL Dashboard.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class ObservationAcceptedData(BaseModel):
+    """
+    观察记录录入结果 / Result of recording an observation.
+
+    当一条观察被成功写入观察流时返回此结构。
+    Returned when an observation is successfully written to the observation feed.
+    """
+
+    accepted: bool = True
+    observation_id: str
+    record_count_delta: int = 1
+
+
+class LessonAcceptedData(BaseModel):
+    """
+    经验教训录入结果 / Result of recording a lesson learned.
+
+    当一条经验教训被成功写入经验记忆库时返回此结构。
+    Returned when a lesson is successfully written to the lessons memory.
+    """
+
+    accepted: bool = True
+    lesson_id: str
+    record_count_delta: int = 1
+
+
+class HypothesisAcceptedData(BaseModel):
+    """
+    假设录入结果 / Result of recording a hypothesis.
+
+    假设的 confidence_level 始终为 "hypothesis"（原则 8：区分事实/推断/假设）。
+    Hypothesis confidence_level is always "hypothesis" (Principle 8: distinguish fact/inference/hypothesis).
+    """
+
+    accepted: bool = True
+    hypothesis_id: str
+    status: str = "proposed"
+    record_count_delta: int = 1
+
+
+class ExperimentAcceptedData(BaseModel):
+    """
+    实验提案录入结果 / Result of recording an experiment proposal.
+
+    如果 approval_required=True，实验状态为 pending_approval，需要 Operator 审批。
+    If approval_required=True, experiment status is pending_approval, requiring Operator approval.
+    """
+
+    accepted: bool = True
+    experiment_id: str
+    status: str
+    approval_required: bool
+    record_count_delta: int = 1
+
+
+class HypothesisVerdictData(BaseModel):
+    """
+    假设审批结果 / Result of hypothesis verdict by Operator.
+
+    Operator 可以批准（approved）、拒绝（rejected）或归档（archived）假设。
+    Operator can approve, reject, or archive a hypothesis.
+    """
+
+    hypothesis_id: str
+    new_status: str
+    operator_verdict: str
+
+
+class ExperimentApprovalData(BaseModel):
+    """
+    实验审批结果 / Result of experiment approval/rejection by Operator.
+
+    仅对 pending_approval 状态的实验有效。
+    Only valid for experiments in pending_approval status.
+    """
+
+    experiment_id: str
+    new_status: str
+    operator_approval: str
+
+
+class ExperimentCompletionData(BaseModel):
+    """
+    实验完成结果 / Result of experiment completion.
+
+    记录实验结论和置信度级别，状态变为 completed。
+    Records experiment conclusion and confidence level, status becomes completed.
+    """
+
+    experiment_id: str
+    new_status: str
+    result_summary: str
+    result_confidence_level: str
+
+
+class LearningFeedData(BaseModel):
+    """
+    完整学习观察流 / Complete learning observation feed.
+
+    包含：最近观察 + 最近经验教训 + 摘要统计 + 记忆状态。
+    Includes: recent observations + recent lessons + summary statistics + memory state.
+    """
+
+    observations_recent: list[dict[str, Any]] = Field(default_factory=list)
+    lessons_recent: list[dict[str, Any]] = Field(default_factory=list)
+    observation_summary: dict[str, Any] = Field(default_factory=dict)
+    memory_state: dict[str, Any] = Field(default_factory=dict)
+    totals: dict[str, Any] = Field(default_factory=dict)
+
+
+class LearningExperimentsData(BaseModel):
+    """
+    实验队列完整视图 / Complete experiment queue view.
+
+    包含：实验列表 + 待审批数量 + 审批开关状态。
+    Includes: experiments list + pending approval count + approval switch status.
+    """
+
+    experiments: list[dict[str, Any]] = Field(default_factory=list)
+    hypotheses: list[dict[str, Any]] = Field(default_factory=list)
+    pending_approval_count: int = 0
+    approval_required: bool = True
+
+
+class NetPnLDashboardData(BaseModel):
+    """
+    含所有成本分解的净 PnL 仪表盘 / Net PnL dashboard with full cost breakdown.
+
+    整合每日经营指标、成本分类、周期快照趋势和最近录入条目。
+    Integrates daily business metrics, cost categories, period snapshot trends, and recent entries.
+    """
+
+    daily: dict[str, Any]
+    cost_breakdown: dict[str, Any] = Field(default_factory=dict)
+    period_snapshots: list[dict[str, Any]] = Field(default_factory=list)
+    pnl_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
+    cost_entries_recent: list[dict[str, Any]] = Field(default_factory=list)
+    net_pnl_trend: list[dict[str, Any]] = Field(default_factory=list)
+    entry_totals: dict[str, Any] = Field(default_factory=dict)
+
+
+# ── L 章学习系统常量 / L-chapter Learning System Constants ────────────────────
+
+# 观察类别白名单 / Allowed observation categories
+# 用于验证观察记录的 category 字段
+# Used to validate the category field of observation records
+OBSERVATION_CATEGORIES = frozenset({"market", "execution", "cost", "system", "strategy", "other"})
+
+# 经验教训类别白名单 / Allowed lesson categories
+# 用于验证经验教训的 category 字段
+# Used to validate the category field of lesson records
+LESSON_CATEGORIES = frozenset({"market_pattern", "cost_insight", "execution_quality", "strategy", "system", "other"})
+
+# 置信度级别白名单 / Allowed confidence levels
+# 原则 8：所有结论区分事实 / 推断 / 假设
+# Principle 8: all conclusions must distinguish fact / inference / hypothesis
+CONFIDENCE_LEVELS = frozenset({"fact", "inference", "hypothesis"})
+
+# 假设审批动作白名单 / Allowed hypothesis verdict actions
+HYPOTHESIS_VERDICT_ACTIONS = frozenset({"approved", "rejected", "archived"})
+
+# 实验审批动作白名单 / Allowed experiment approval actions
+EXPERIMENT_APPROVAL_ACTIONS = frozenset({"approved", "rejected"})
 
 
 def now_ms() -> int:
@@ -669,6 +848,36 @@ def compile_state(state: dict[str, Any]) -> dict[str, Any]:
         "latency_gate_state_summary": state["health_telemetry"]["gates"]["latency_gate_state"],
         "freshness_gate_state_summary": state["health_telemetry"]["gates"]["freshness_gate_state"],
     }
+
+    # ── L 章学习状态派生字段 / L-chapter learning derived fields ──────────────
+    # 从 records 列表动态计算摘要统计，确保派生字段始终与底层数据一致。
+    # Dynamically compute summary statistics from records lists, ensuring
+    # derived fields always stay consistent with underlying data.
+    ls = state.get("learning_state", {})
+    ls_records = ls.get("records", {})
+
+    # 统计活跃假设数（状态为 proposed / under_review / testing）
+    # Count active hypotheses (status in proposed / under_review / testing)
+    active_hyp = [h for h in ls_records.get("hypotheses", [])
+                  if h.get("status") in {"proposed", "under_review", "testing"}]
+    ls.setdefault("hypotheses", {})["active_hypothesis_count"] = len(active_hyp)
+
+    # 统计活跃实验数（状态为 proposed / pending_approval / approved / in_progress）
+    # Count active experiments (status in proposed / pending_approval / approved / in_progress)
+    active_exp = [e for e in ls_records.get("experiments", [])
+                  if e.get("status") in {"proposed", "pending_approval", "approved", "in_progress"}]
+    ls.setdefault("experiments", {})["active_experiment_count"] = len(active_exp)
+
+    # 更新观察摘要计数 / Update observation summary counts
+    obs_summary = ls.setdefault("observation_summary", {})
+    obs_summary["recent_lessons_count"] = len(ls_records.get("lessons", []))
+    obs_summary["recent_hypothesis_count"] = len(ls_records.get("hypotheses", []))
+    obs_summary["recent_experiment_proposal_count"] = len(ls_records.get("experiments", []))
+
+    # 学习进展状态始终为 observe_and_record_only（当前系统 read_only / disabled）
+    # Learning progression state always observe_and_record_only while system is read_only
+    ls.setdefault("derived", {})["learning_progression_state"] = "observe_and_record_only"
+
     state["meta"]["snapshot_id"] = build_snapshot_id(state)
     return state
 
@@ -780,6 +989,18 @@ def build_default_state() -> dict[str, Any]:
                 "last_verified_ts_ms": ts,
                 "source_of_truth": "closeout",
             },
+            # ── L 章：学习 / 自我感知 / Net PnL ──
+            # L Chapter: Learning / Self-Observability / Net PnL
+            "L": {
+                "chapter_display_name": "L (Learning / Self-Observability / Net PnL)",
+                "chapter_state": "implemented",
+                "chapter_interpretation": "learning_observe_and_record_active",
+                "current_phase_ready": True,
+                "readiness_scope": "observe_and_record_only",
+                "execution_meaning": "does_not_grant_live_execution",
+                "last_verified_ts_ms": ts,
+                "source_of_truth": "learning_state",
+            },
         },
         "product_family_status": product_families,
         "control_plane": {
@@ -859,7 +1080,11 @@ def build_default_state() -> dict[str, Any]:
                 "manual_cost_included": True,
                 "manual_cost_source_count": 0,
                 "business_event_count": 0,
-            }
+            },
+            # ── L 章周期快照 / L-chapter period snapshots ──
+            # 用于 Net PnL 趋势追踪：Operator 手动保存当前经营指标快照。
+            # For Net PnL trend tracking: Operator manually saves current business metrics snapshot.
+            "period_snapshots": [],
         },
         "health_telemetry": {
             "scores": {
@@ -904,7 +1129,19 @@ def build_default_state() -> dict[str, Any]:
                 "last_experiment_proposal_ts_ms": None,
             },
             "derived": {"learning_progression_state": "observe_and_record_only"},
-            "records": {"hypotheses": [], "experiments": [], "manual_notes": []},
+            # ── L 章学习记录存储 / L-chapter learning record storage ──
+            # observations: 观察流记录 / Observation feed records
+            # lessons: 经验教训记录 / Lessons memory records
+            # hypotheses: 假设队列 / Hypothesis queue
+            # experiments: 实验队列 / Experiment queue
+            # manual_notes: 手动备注（已有）/ Manual notes (existing)
+            "records": {
+                "observations": [],
+                "lessons": [],
+                "hypotheses": [],
+                "experiments": [],
+                "manual_notes": [],
+            },
         },
         "audit_context": {
             "last_operator_action_type": None,
@@ -1879,6 +2116,796 @@ def build_business_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# L 章：学习系统逻辑函数 / L-Chapter: Learning System Logic Functions
+#
+# 五大模块的写入 / 审批 / 查询逻辑。
+# 所有写操作遵循标准流程：scope → snapshot → identity → idempotency → revision → mutate。
+#
+# Write / approve / query logic for the five learning modules.
+# All write operations follow the standard flow:
+# scope → snapshot → identity → idempotency → revision → mutate.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def apply_learning_observation(
+    envelope: RequestEnvelope, actor: AuthenticatedActor
+) -> tuple[dict[str, Any], str]:
+    """
+    录入一条观察记录到观察流 / Record an observation to the observation feed.
+
+    payload 必填字段 / Required payload fields:
+    - title: str        观察标题 / Observation title
+    - detail: str       观察详情 / Observation detail
+    - category: str     类别（market/execution/cost/system/strategy/other）
+    - confidence_level: str  置信度（fact/inference/hypothesis）
+
+    payload 可选字段 / Optional payload fields:
+    - related_hypothesis_id: str  关联假设 ID / Related hypothesis ID
+    - tags: list[str]            标签 / Tags
+    """
+    require_scope(actor, "learning:write")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    # 验证必填字段 / Validate required fields
+    p = envelope.payload
+    title = str(p.get("title", "")).strip()
+    detail = str(p.get("detail", "")).strip()
+    category = str(p.get("category", "")).strip()
+    confidence = str(p.get("confidence_level", "")).strip()
+    if not title or not detail:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_title_or_detail"]})
+    if category not in OBSERVATION_CATEGORIES:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_observation_category"]})
+    if confidence not in CONFIDENCE_LEVELS:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_confidence_level"]})
+
+    ts = now_ms()
+    observation_id = f"obs:{ts}"
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        # 构建观察记录 / Build observation record
+        record = {
+            "observation_id": observation_id,
+            "recorded_ts_ms": ts,
+            "recorded_by": actor.actor_id,
+            "source": "operator_input",
+            "category": category,
+            "confidence_level": confidence,
+            "title": title,
+            "detail": detail,
+            "related_hypothesis_id": p.get("related_hypothesis_id"),
+            "tags": list(p.get("tags", [])),
+        }
+        # 确保 observations 列表存在（兼容旧快照）
+        # Ensure observations list exists (backward-compatible with old state files)
+        ls_records = state["learning_state"].setdefault("records", {})
+        ls_records.setdefault("observations", []).append(record)
+
+        # 更新最后观察时间 / Update last observation timestamp
+        state["learning_state"]["observation_summary"]["last_observation_ts_ms"] = ts
+
+        audit_ref = _write_audit_fields(
+            state, action_type="learning_observation", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"accepted": True, "observation_id": observation_id, "record_count_delta": 1},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"accepted": True, "observation_id": observation_id, "record_count_delta": 1},
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_learning_lesson(
+    envelope: RequestEnvelope, actor: AuthenticatedActor
+) -> tuple[dict[str, Any], str]:
+    """
+    录入一条经验教训到经验记忆库 / Record a lesson to the lessons memory.
+
+    payload 必填字段 / Required payload fields:
+    - title: str        经验标题 / Lesson title
+    - detail: str       经验详情 / Lesson detail
+    - category: str     类别（market_pattern/cost_insight/execution_quality/strategy/system/other）
+    - confidence_level: str  置信度（fact/inference/hypothesis）
+
+    payload 可选字段 / Optional payload fields:
+    - source_observation_ids: list[str]  来源观察 ID 列表 / Source observation IDs
+    - actionable: bool                   是否可操作 / Whether actionable
+    - related_hypothesis_ids: list[str]  关联假设 ID 列表 / Related hypothesis IDs
+    - tags: list[str]                    标签 / Tags
+    """
+    require_scope(actor, "learning:write")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    title = str(p.get("title", "")).strip()
+    detail = str(p.get("detail", "")).strip()
+    category = str(p.get("category", "")).strip()
+    confidence = str(p.get("confidence_level", "")).strip()
+    if not title or not detail:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_title_or_detail"]})
+    if category not in LESSON_CATEGORIES:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_lesson_category"]})
+    if confidence not in CONFIDENCE_LEVELS:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_confidence_level"]})
+
+    ts = now_ms()
+    lesson_id = f"lesson:{ts}"
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "lesson_id": lesson_id,
+            "recorded_ts_ms": ts,
+            "recorded_by": actor.actor_id,
+            "source_observation_ids": list(p.get("source_observation_ids", [])),
+            "confidence_level": confidence,
+            "category": category,
+            "title": title,
+            "detail": detail,
+            "actionable": bool(p.get("actionable", False)),
+            "related_hypothesis_ids": list(p.get("related_hypothesis_ids", [])),
+            "tags": list(p.get("tags", [])),
+        }
+        ls_records = state["learning_state"].setdefault("records", {})
+        ls_records.setdefault("lessons", []).append(record)
+
+        # 更新记忆最后更新时间 / Update memory last update timestamp
+        state["learning_state"]["memory"]["last_memory_update_ts_ms"] = ts
+
+        audit_ref = _write_audit_fields(
+            state, action_type="learning_lesson", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"accepted": True, "lesson_id": lesson_id, "record_count_delta": 1},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"accepted": True, "lesson_id": lesson_id, "record_count_delta": 1},
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_learning_hypothesis(
+    envelope: RequestEnvelope, actor: AuthenticatedActor
+) -> tuple[dict[str, Any], str]:
+    """
+    提出一条假设到假设队列 / Propose a hypothesis to the hypothesis queue.
+
+    原则 8：假设的 confidence_level 始终强制为 "hypothesis"，不由调用方指定。
+    Principle 8: hypothesis confidence_level is always forced to "hypothesis", not caller-specified.
+
+    payload 必填字段 / Required payload fields:
+    - title: str                假设标题 / Hypothesis title
+    - description: str          假设描述 / Hypothesis description
+    - testable_prediction: str  可检验的预测 / Testable prediction
+
+    payload 可选字段 / Optional payload fields:
+    - supporting_observation_ids: list[str]  支持该假设的观察 ID / Supporting observation IDs
+    - supporting_lesson_ids: list[str]       支持该假设的经验 ID / Supporting lesson IDs
+    - tags: list[str]                        标签 / Tags
+    """
+    require_scope(actor, "learning:write")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    title = str(p.get("title", "")).strip()
+    description = str(p.get("description", "")).strip()
+    testable_prediction = str(p.get("testable_prediction", "")).strip()
+    if not title or not description or not testable_prediction:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_required_hypothesis_fields"]})
+
+    ts = now_ms()
+    hypothesis_id = f"hyp:{ts}"
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "hypothesis_id": hypothesis_id,
+            "recorded_ts_ms": ts,
+            "recorded_by": actor.actor_id,
+            # 原则 8：强制为 hypothesis / Principle 8: forced to hypothesis
+            "status": "proposed",
+            "confidence_level": "hypothesis",
+            "title": title,
+            "description": description,
+            "testable_prediction": testable_prediction,
+            "supporting_observation_ids": list(p.get("supporting_observation_ids", [])),
+            "supporting_lesson_ids": list(p.get("supporting_lesson_ids", [])),
+            "related_experiment_id": None,
+            "operator_verdict": None,
+            "operator_verdict_ts_ms": None,
+            "operator_verdict_reason": None,
+            "tags": list(p.get("tags", [])),
+        }
+        state["learning_state"]["records"]["hypotheses"].append(record)
+        state["learning_state"]["hypotheses"]["last_hypothesis_ts_ms"] = ts
+
+        audit_ref = _write_audit_fields(
+            state, action_type="learning_hypothesis", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"accepted": True, "hypothesis_id": hypothesis_id, "status": "proposed", "record_count_delta": 1},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"accepted": True, "hypothesis_id": hypothesis_id, "status": "proposed", "record_count_delta": 1},
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_learning_experiment(
+    envelope: RequestEnvelope, actor: AuthenticatedActor
+) -> tuple[dict[str, Any], str]:
+    """
+    提出一项实验到实验队列 / Propose an experiment to the experiment queue.
+
+    如果当前 learning_state.experiments.approval_required=True，
+    实验状态初始化为 pending_approval；否则直接 approved。
+    If approval_required=True, experiment status starts as pending_approval; otherwise approved.
+
+    payload 必填字段 / Required payload fields:
+    - hypothesis_id: str    关联假设 ID / Linked hypothesis ID (must exist)
+    - title: str            实验标题 / Experiment title
+    - description: str      实验描述 / Experiment description
+    - method: str           实验方法 / Experiment method
+    - success_criteria: str 成功标准 / Success criteria
+
+    payload 可选字段 / Optional payload fields:
+    - risk_assessment: str  风险评估 / Risk assessment
+    - tags: list[str]       标签 / Tags
+    """
+    require_scope(actor, "learning:write")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    hypothesis_id = str(p.get("hypothesis_id", "")).strip()
+    title = str(p.get("title", "")).strip()
+    description = str(p.get("description", "")).strip()
+    method = str(p.get("method", "")).strip()
+    success_criteria = str(p.get("success_criteria", "")).strip()
+    if not hypothesis_id or not title or not description or not method or not success_criteria:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_required_experiment_fields"]})
+
+    # 验证关联假设存在 / Verify linked hypothesis exists
+    hyp_list = snapshot["learning_state"]["records"]["hypotheses"]
+    if not any(h.get("hypothesis_id") == hypothesis_id for h in hyp_list):
+        raise HTTPException(status_code=400, detail={"reason_codes": ["hypothesis_not_found"]})
+
+    # 快照当前审批要求 / Snapshot current approval requirement
+    approval_required = snapshot["learning_state"]["experiments"]["approval_required"]
+    initial_status = "pending_approval" if approval_required else "approved"
+
+    ts = now_ms()
+    experiment_id = f"exp:{ts}"
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "experiment_id": experiment_id,
+            "recorded_ts_ms": ts,
+            "recorded_by": actor.actor_id,
+            "status": initial_status,
+            "hypothesis_id": hypothesis_id,
+            "title": title,
+            "description": description,
+            "method": method,
+            "success_criteria": success_criteria,
+            "risk_assessment": str(p.get("risk_assessment", "")),
+            "approval_required": approval_required,
+            "operator_approval": None,
+            "operator_approval_ts_ms": None,
+            "operator_approval_reason": None,
+            "result_summary": None,
+            "result_confidence_level": None,
+            "completed_ts_ms": None,
+            "tags": list(p.get("tags", [])),
+        }
+        state["learning_state"]["records"]["experiments"].append(record)
+        state["learning_state"]["experiments"]["last_experiment_proposal_ts_ms"] = ts
+
+        audit_ref = _write_audit_fields(
+            state, action_type="learning_experiment", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {
+                "accepted": True, "experiment_id": experiment_id,
+                "status": initial_status, "approval_required": approval_required,
+                "record_count_delta": 1,
+            },
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {
+            "accepted": True, "experiment_id": experiment_id,
+            "status": initial_status, "approval_required": approval_required,
+            "record_count_delta": 1,
+        },
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_hypothesis_verdict(
+    envelope: RequestEnvelope, actor: AuthenticatedActor, hypothesis_id: str
+) -> tuple[dict[str, Any], str]:
+    """
+    Operator 对假设做出审批判定 / Operator renders verdict on a hypothesis.
+
+    payload 必填字段 / Required payload fields:
+    - verdict: str  判定结果（approved / rejected / archived）
+    - reason: str   判定理由 / Verdict reason (optional but recommended)
+
+    状态转换 / Status transitions:
+    - proposed → approved / rejected / archived
+    - under_review → approved / rejected / archived
+    """
+    require_scope(actor, "learning:manage")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    verdict = str(p.get("verdict", "")).strip()
+    if verdict not in HYPOTHESIS_VERDICT_ACTIONS:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_hypothesis_verdict"]})
+
+    # 查找假设 / Find the hypothesis
+    hyp_list = snapshot["learning_state"]["records"]["hypotheses"]
+    target = None
+    target_idx = -1
+    for idx, h in enumerate(hyp_list):
+        if h.get("hypothesis_id") == hypothesis_id:
+            target = h
+            target_idx = idx
+            break
+    if target is None:
+        raise HTTPException(status_code=404, detail={"reason_codes": ["hypothesis_not_found"]})
+
+    ts = now_ms()
+    # 映射 verdict → 新状态 / Map verdict → new status
+    status_map = {"approved": "validated", "rejected": "invalidated", "archived": "archived"}
+    new_status = status_map[verdict]
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        hyp = state["learning_state"]["records"]["hypotheses"][target_idx]
+        hyp["status"] = new_status
+        hyp["operator_verdict"] = verdict
+        hyp["operator_verdict_ts_ms"] = ts
+        hyp["operator_verdict_reason"] = str(p.get("reason", ""))
+
+        audit_ref = _write_audit_fields(
+            state, action_type="hypothesis_verdict", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"hypothesis_id": hypothesis_id, "new_status": new_status, "operator_verdict": verdict},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"hypothesis_id": hypothesis_id, "new_status": new_status, "operator_verdict": verdict},
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_experiment_approval(
+    envelope: RequestEnvelope, actor: AuthenticatedActor, experiment_id: str
+) -> tuple[dict[str, Any], str]:
+    """
+    Operator 审批或拒绝实验 / Operator approves or rejects an experiment.
+
+    仅对 pending_approval 状态的实验有效。
+    Only valid for experiments in pending_approval status.
+
+    payload 必填字段 / Required payload fields:
+    - action: str   审批动作（approved / rejected）
+    - reason: str   理由 / Reason (optional but recommended)
+    """
+    require_scope(actor, "learning:manage")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    action = str(p.get("action", "")).strip()
+    if action not in EXPERIMENT_APPROVAL_ACTIONS:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_experiment_approval_action"]})
+
+    # 查找实验 / Find the experiment
+    exp_list = snapshot["learning_state"]["records"]["experiments"]
+    target_idx = -1
+    for idx, e in enumerate(exp_list):
+        if e.get("experiment_id") == experiment_id:
+            if e.get("status") != "pending_approval":
+                raise HTTPException(status_code=400, detail={"reason_codes": ["experiment_not_pending_approval"]})
+            target_idx = idx
+            break
+    if target_idx == -1:
+        raise HTTPException(status_code=404, detail={"reason_codes": ["experiment_not_found"]})
+
+    ts = now_ms()
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        exp = state["learning_state"]["records"]["experiments"][target_idx]
+        exp["status"] = action  # "approved" or "rejected"
+        exp["operator_approval"] = action
+        exp["operator_approval_ts_ms"] = ts
+        exp["operator_approval_reason"] = str(p.get("reason", ""))
+
+        audit_ref = _write_audit_fields(
+            state, action_type="experiment_approval", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"experiment_id": experiment_id, "new_status": action, "operator_approval": action},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"experiment_id": experiment_id, "new_status": action, "operator_approval": action},
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_experiment_completion(
+    envelope: RequestEnvelope, actor: AuthenticatedActor, experiment_id: str
+) -> tuple[dict[str, Any], str]:
+    """
+    标记实验完成并录入结论 / Mark an experiment as completed and record conclusion.
+
+    仅对 approved 或 in_progress 状态的实验有效。
+    Only valid for experiments in approved or in_progress status.
+
+    payload 必填字段 / Required payload fields:
+    - result_summary: str           实验结论摘要 / Experiment conclusion summary
+    - result_confidence_level: str  结论置信度（fact/inference/hypothesis）
+    """
+    require_scope(actor, "learning:manage")
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    result_summary = str(p.get("result_summary", "")).strip()
+    result_confidence = str(p.get("result_confidence_level", "")).strip()
+    if not result_summary:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_result_summary"]})
+    if result_confidence not in CONFIDENCE_LEVELS:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["invalid_confidence_level"]})
+
+    # 查找实验 / Find the experiment
+    exp_list = snapshot["learning_state"]["records"]["experiments"]
+    target_idx = -1
+    for idx, e in enumerate(exp_list):
+        if e.get("experiment_id") == experiment_id:
+            if e.get("status") not in {"approved", "in_progress"}:
+                raise HTTPException(status_code=400, detail={"reason_codes": ["experiment_not_completable"]})
+            target_idx = idx
+            break
+    if target_idx == -1:
+        raise HTTPException(status_code=404, detail={"reason_codes": ["experiment_not_found"]})
+
+    ts = now_ms()
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        exp = state["learning_state"]["records"]["experiments"][target_idx]
+        exp["status"] = "completed"
+        exp["result_summary"] = result_summary
+        exp["result_confidence_level"] = result_confidence
+        exp["completed_ts_ms"] = ts
+
+        audit_ref = _write_audit_fields(
+            state, action_type="experiment_completion", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {
+                "experiment_id": experiment_id, "new_status": "completed",
+                "result_summary": result_summary, "result_confidence_level": result_confidence,
+            },
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {
+            "experiment_id": experiment_id, "new_status": "completed",
+            "result_summary": result_summary, "result_confidence_level": result_confidence,
+        },
+        "snapshot": final_state,
+    }, "success"
+
+
+def apply_pnl_period_snapshot(
+    envelope: RequestEnvelope, actor: AuthenticatedActor
+) -> tuple[dict[str, Any], str]:
+    """
+    保存当前经营指标为周期快照 / Save current business metrics as a period snapshot.
+
+    用于 Net PnL 趋势追踪：Operator 手动冻结当前时刻的经营指标。
+    For Net PnL trend tracking: Operator manually freezes current-moment business metrics.
+
+    payload 必填字段 / Required payload fields:
+    - period_label: str  周期标签，例如 "2026-03-26" / Period label, e.g. "2026-03-26"
+    """
+    require_scope(actor, "input:cost")  # 复用 cost scope / Reuse cost scope
+    snapshot, _ = get_latest_snapshot()
+    verify_operator_identity(envelope, actor)
+    replay = _check_idempotency(snapshot, envelope)
+    if replay is not None:
+        replay["snapshot"] = snapshot
+        return replay, "replayed"
+    _assert_revision(snapshot, envelope)
+
+    p = envelope.payload
+    period_label = str(p.get("period_label", "")).strip()
+    if not period_label:
+        raise HTTPException(status_code=400, detail={"reason_codes": ["missing_period_label"]})
+
+    ts = now_ms()
+
+    def mutator(state: dict[str, Any]) -> dict[str, Any]:
+        daily = state["business_metrics"]["daily"]
+
+        # 构建成本分解快照 / Build cost breakdown snapshot
+        cost_breakdown: dict[str, float] = {}
+        for entry in state.get("records", {}).get("cost_entries", []):
+            cat = str(entry.get("category", "manual"))
+            cost_breakdown[cat] = round(cost_breakdown.get(cat, 0.0) + float(entry.get("amount", 0.0)), 8)
+
+        period_record = {
+            "snapshot_ts_ms": ts,
+            "period_label": period_label,
+            "realized_pnl": daily.get("realized_pnl", 0.0),
+            "unrealized_pnl": daily.get("unrealized_pnl", 0.0),
+            "gross_pnl": daily.get("gross_pnl", 0.0),
+            "total_cost": daily.get("total_cost", 0.0),
+            "net_operating_pnl": daily.get("net_operating_pnl", 0.0),
+            "cost_breakdown": cost_breakdown,
+            "recorded_by": actor.actor_id,
+        }
+
+        # 确保 period_snapshots 列表存在（兼容旧快照文件）
+        # Ensure period_snapshots list exists (backward-compatible)
+        state["business_metrics"].setdefault("period_snapshots", []).append(period_record)
+
+        audit_ref = _write_audit_fields(
+            state, action_type="pnl_period_snapshot", operator_id=actor.actor_id,
+            request_id=envelope.request_id, result="success", reason_codes=[],
+            is_control_action=False,
+        )
+        _bump_revision(state)
+        compiled = STORE.write(state)
+        response = {
+            "audit_ref": audit_ref,
+            "data": {"accepted": True, "record_count_delta": 1},
+            "snapshot": compiled,
+        }
+        _store_idempotent_response(compiled, envelope, response)
+        STORE.write(compiled)
+        return compiled
+
+    final_state = STORE.mutate(mutator)
+    return {
+        "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
+        "data": {"accepted": True, "record_count_delta": 1},
+        "snapshot": final_state,
+    }, "success"
+
+
+# ── L 章只读查询构建器 / L-Chapter Read-Only Query Builders ────────────────────
+
+
+def build_learning_feed(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """
+    构建完整学习观察流 / Build complete learning observation feed.
+
+    返回最近 N 条观察和经验教训，以及摘要统计。
+    Returns the last N observations and lessons, plus summary statistics.
+    """
+    ls = snapshot.get("learning_state", {})
+    ls_records = ls.get("records", {})
+
+    observations = ls_records.get("observations", [])
+    lessons = ls_records.get("lessons", [])
+
+    # 取最近 N 条，按最新在前排列 / Take last N, newest first
+    obs_recent = list(reversed(observations[-_MAX_RECENT_ENTRIES:]))
+    les_recent = list(reversed(lessons[-_MAX_RECENT_ENTRIES:]))
+
+    return {
+        "observations_recent": obs_recent,
+        "lessons_recent": les_recent,
+        "observation_summary": copy.deepcopy(ls.get("observation_summary", {})),
+        "memory_state": copy.deepcopy(ls.get("memory", {})),
+        "totals": {
+            "total_observations": len(observations),
+            "total_lessons": len(lessons),
+            "total_hypotheses": len(ls_records.get("hypotheses", [])),
+            "total_experiments": len(ls_records.get("experiments", [])),
+            "total_manual_notes": len(ls_records.get("manual_notes", [])),
+        },
+    }
+
+
+def build_learning_experiments(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """
+    构建实验队列完整视图 / Build complete experiment queue view.
+
+    包含所有实验、关联假设和待审批统计。
+    Includes all experiments, linked hypotheses, and pending approval statistics.
+    """
+    ls = snapshot.get("learning_state", {})
+    ls_records = ls.get("records", {})
+
+    experiments = ls_records.get("experiments", [])
+    hypotheses = ls_records.get("hypotheses", [])
+
+    # 统计待审批数 / Count pending approvals
+    pending = sum(1 for e in experiments if e.get("status") == "pending_approval")
+
+    return {
+        "experiments": list(reversed(experiments[-_MAX_RECENT_ENTRIES:])),
+        "hypotheses": list(reversed(hypotheses[-_MAX_RECENT_ENTRIES:])),
+        "pending_approval_count": pending,
+        "approval_required": ls.get("experiments", {}).get("approval_required", True),
+    }
+
+
+def build_net_pnl_dashboard(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """
+    构建含所有成本分解的净 PnL 仪表盘 / Build Net PnL dashboard with full cost breakdown.
+
+    整合：每日经营指标 + 成本分类 + 周期快照趋势 + 最近录入条目。
+    Integrates: daily business metrics + cost categories + period snapshot trends + recent entries.
+    """
+    daily = copy.deepcopy(snapshot["business_metrics"]["daily"])
+    records = snapshot.get("records", {})
+    bm = snapshot.get("business_metrics", {})
+
+    cost_entries = records.get("cost_entries", [])
+    pnl_entries = records.get("pnl_entries", [])
+    period_snapshots = bm.get("period_snapshots", [])
+
+    # 成本分解 / Cost breakdown
+    cost_breakdown: dict[str, float] = {}
+    for entry in cost_entries:
+        cat = str(entry.get("category", "manual"))
+        cost_breakdown[cat] = round(cost_breakdown.get(cat, 0.0) + float(entry.get("amount", 0.0)), 8)
+
+    # 趋势数据：从周期快照提取 net_operating_pnl 序列
+    # Trend data: extract net_operating_pnl series from period snapshots
+    net_pnl_trend = [
+        {
+            "period_label": ps.get("period_label", ""),
+            "net_operating_pnl": ps.get("net_operating_pnl", 0.0),
+            "gross_pnl": ps.get("gross_pnl", 0.0),
+            "total_cost": ps.get("total_cost", 0.0),
+            "snapshot_ts_ms": ps.get("snapshot_ts_ms", 0),
+        }
+        for ps in period_snapshots
+    ]
+
+    return {
+        "daily": daily,
+        "cost_breakdown": cost_breakdown,
+        "period_snapshots": list(reversed(period_snapshots[-_MAX_RECENT_ENTRIES:])),
+        "pnl_entries_recent": list(reversed(pnl_entries[-_MAX_RECENT_ENTRIES:])),
+        "cost_entries_recent": list(reversed(cost_entries[-_MAX_RECENT_ENTRIES:])),
+        "net_pnl_trend": net_pnl_trend,
+        "entry_totals": {
+            "total_cost_entries": len(cost_entries),
+            "total_pnl_entries": len(pnl_entries),
+            "total_period_snapshots": len(period_snapshots),
+        },
+    }
+
+
 app = FastAPI(
     title=settings.service_name,
     version=settings.api_version,
@@ -2029,6 +3056,229 @@ def get_learning_hypotheses(actor=Depends(current_actor)) -> ResponseEnvelope[Le
         approval_requirements={"approval_required": snapshot["learning_state"]["experiments"]["approval_required"]},
     )
     return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=data)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# L 章路由 / L-Chapter Routes
+#
+# 三类端点：
+# 1. GET 查询端点：观察流 / 实验队列 / 净 PnL 仪表盘
+# 2. POST 录入端点：观察 / 经验 / 假设 / 实验 / 周期快照
+# 3. POST 管理端点：假设审批 / 实验审批 / 实验完成
+#
+# Three categories of endpoints:
+# 1. GET queries: observation feed / experiment queue / net PnL dashboard
+# 2. POST inputs: observation / lesson / hypothesis / experiment / period snapshot
+# 3. POST management: hypothesis verdict / experiment approval / experiment completion
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get(f"{settings.api_prefix}/learning/feed", response_model=ResponseEnvelope[LearningFeedData])
+def get_learning_feed(actor=Depends(current_actor)) -> ResponseEnvelope[LearningFeedData]:
+    """
+    学习观察流 / Learning observation feed.
+
+    返回最近的观察和经验教训列表，以及摘要统计。
+    Returns recent observations and lessons, plus summary statistics.
+    """
+    snapshot, _ = get_latest_snapshot()
+    feed = build_learning_feed(snapshot)
+    return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=LearningFeedData(**feed))
+
+
+@app.get(f"{settings.api_prefix}/learning/experiments", response_model=ResponseEnvelope[LearningExperimentsData])
+def get_learning_experiments_list(actor=Depends(current_actor)) -> ResponseEnvelope[LearningExperimentsData]:
+    """
+    实验队列完整视图 / Complete experiment queue view.
+
+    包含所有实验和关联假设，以及待审批数量。
+    Includes all experiments and linked hypotheses, plus pending approval count.
+    """
+    snapshot, _ = get_latest_snapshot()
+    data = build_learning_experiments(snapshot)
+    return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=LearningExperimentsData(**data))
+
+
+@app.get(f"{settings.api_prefix}/learning/net-pnl", response_model=ResponseEnvelope[NetPnLDashboardData])
+def get_net_pnl_dashboard(actor=Depends(current_actor)) -> ResponseEnvelope[NetPnLDashboardData]:
+    """
+    含所有成本分解的净 PnL 仪表盘 / Net PnL dashboard with full cost breakdown.
+
+    整合每日 PnL、成本分类分解、趋势和最近录入条目。
+    Integrates daily PnL, cost category breakdown, trends, and recent entries.
+    """
+    snapshot, _ = get_latest_snapshot()
+    dashboard = build_net_pnl_dashboard(snapshot)
+    return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=NetPnLDashboardData(**dashboard))
+
+
+# ── L 章录入路由 / L-Chapter Input Routes ─────────────────────────────────────
+
+
+@app.post(f"{settings.api_prefix}/input/observation", response_model=ResponseEnvelope[ObservationAcceptedData])
+def post_input_observation(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[ObservationAcceptedData]:
+    """
+    录入观察记录 / Record an observation to the observation feed.
+
+    payload 字段 / payload fields:
+    - title: str            观察标题（必填）/ Observation title (required)
+    - detail: str           观察详情（必填）/ Observation detail (required)
+    - category: str         类别（必填）/ Category (required): market/execution/cost/system/strategy/other
+    - confidence_level: str 置信度（必填）/ Confidence (required): fact/inference/hypothesis
+    - related_hypothesis_id: str  关联假设 ID（可选）/ Related hypothesis ID (optional)
+    - tags: list[str]       标签（可选）/ Tags (optional)
+    """
+    result, action_result = apply_learning_observation(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=ObservationAcceptedData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(f"{settings.api_prefix}/input/lesson", response_model=ResponseEnvelope[LessonAcceptedData])
+def post_input_lesson(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[LessonAcceptedData]:
+    """
+    录入经验教训 / Record a lesson to the lessons memory.
+
+    payload 字段 / payload fields:
+    - title: str            经验标题（必填）/ Lesson title (required)
+    - detail: str           经验详情（必填）/ Lesson detail (required)
+    - category: str         类别（必填）/ Category (required): market_pattern/cost_insight/execution_quality/strategy/system/other
+    - confidence_level: str 置信度（必填）/ Confidence (required): fact/inference/hypothesis
+    """
+    result, action_result = apply_learning_lesson(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=LessonAcceptedData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(f"{settings.api_prefix}/input/hypothesis", response_model=ResponseEnvelope[HypothesisAcceptedData])
+def post_input_hypothesis(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[HypothesisAcceptedData]:
+    """
+    提出假设 / Propose a hypothesis.
+
+    原则 8：confidence_level 自动设为 "hypothesis"。
+    Principle 8: confidence_level is automatically set to "hypothesis".
+
+    payload 字段 / payload fields:
+    - title: str                假设标题（必填）/ Title (required)
+    - description: str          假设描述（必填）/ Description (required)
+    - testable_prediction: str  可检验预测（必填）/ Testable prediction (required)
+    """
+    result, action_result = apply_learning_hypothesis(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=HypothesisAcceptedData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(f"{settings.api_prefix}/input/experiment", response_model=ResponseEnvelope[ExperimentAcceptedData])
+def post_input_experiment(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[ExperimentAcceptedData]:
+    """
+    提出实验 / Propose an experiment to validate a hypothesis.
+
+    payload 字段 / payload fields:
+    - hypothesis_id: str    关联假设 ID（必填）/ Linked hypothesis ID (required)
+    - title: str            实验标题（必填）/ Title (required)
+    - description: str      实验描述（必填）/ Description (required)
+    - method: str           实验方法（必填）/ Method (required)
+    - success_criteria: str 成功标准（必填）/ Success criteria (required)
+    """
+    result, action_result = apply_learning_experiment(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=ExperimentAcceptedData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+# ── L 章管理路由 / L-Chapter Management Routes ───────────────────────────────
+
+
+@app.post(
+    f"{settings.api_prefix}/learning/hypothesis/{{hypothesis_id}}/verdict",
+    response_model=ResponseEnvelope[HypothesisVerdictData],
+)
+def post_hypothesis_verdict(
+    hypothesis_id: str, envelope: RequestEnvelope, actor=Depends(current_actor)
+) -> ResponseEnvelope[HypothesisVerdictData]:
+    """
+    Operator 审批假设 / Operator renders verdict on a hypothesis.
+
+    payload 字段 / payload fields:
+    - verdict: str  判定（必填）/ Verdict (required): approved / rejected / archived
+    - reason: str   理由（可选）/ Reason (optional)
+    """
+    result, action_result = apply_hypothesis_verdict(envelope, actor, hypothesis_id)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=HypothesisVerdictData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/learning/experiment/{{experiment_id}}/approve",
+    response_model=ResponseEnvelope[ExperimentApprovalData],
+)
+def post_experiment_approval(
+    experiment_id: str, envelope: RequestEnvelope, actor=Depends(current_actor)
+) -> ResponseEnvelope[ExperimentApprovalData]:
+    """
+    Operator 审批实验 / Operator approves or rejects an experiment.
+
+    payload 字段 / payload fields:
+    - action: str   审批动作（必填）/ Action (required): approved / rejected
+    - reason: str   理由（可选）/ Reason (optional)
+    """
+    result, action_result = apply_experiment_approval(envelope, actor, experiment_id)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=ExperimentApprovalData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/learning/experiment/{{experiment_id}}/complete",
+    response_model=ResponseEnvelope[ExperimentCompletionData],
+)
+def post_experiment_completion(
+    experiment_id: str, envelope: RequestEnvelope, actor=Depends(current_actor)
+) -> ResponseEnvelope[ExperimentCompletionData]:
+    """
+    标记实验完成 / Mark an experiment as completed.
+
+    payload 字段 / payload fields:
+    - result_summary: str           实验结论（必填）/ Conclusion (required)
+    - result_confidence_level: str  结论置信度（必填）/ Confidence (required): fact/inference/hypothesis
+    """
+    result, action_result = apply_experiment_completion(envelope, actor, experiment_id)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=ExperimentCompletionData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
+
+
+@app.post(f"{settings.api_prefix}/input/pnl-period-snapshot", response_model=ResponseEnvelope[InputAcceptedData])
+def post_pnl_period_snapshot(envelope: RequestEnvelope, actor=Depends(current_actor)) -> ResponseEnvelope[InputAcceptedData]:
+    """
+    保存当前经营指标为周期快照 / Save current business metrics as a period snapshot.
+
+    payload 字段 / payload fields:
+    - period_label: str  周期标签（必填）/ Period label (required), e.g. "2026-03-26"
+    """
+    result, action_result = apply_pnl_period_snapshot(envelope, actor)
+    return envelope_response(
+        snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
+        data=InputAcceptedData(**result["data"]), audit_ref=result["audit_ref"],
+        reason_codes=["replayed_request"] if action_result == "replayed" else [],
+    )
 
 
 @app.post(f"{settings.api_prefix}/control/recheck/j-canonical", response_model=ResponseEnvelope[RecheckResultData])
