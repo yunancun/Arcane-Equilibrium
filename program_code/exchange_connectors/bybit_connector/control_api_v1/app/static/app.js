@@ -3,28 +3,43 @@ let inMemoryToken = "";
 const CRITICAL_ACTIONS = {
   "set-demo-mode": {
     title: "切换到 Demo Reserved",
-    subtitle: "Set execution mode to demo_reserved",
-    risk: "这会把全局执行模式从 disabled 推进到 demo_reserved。它不会直接开启真实执行，但会改变后续 demo 控制链路的可达性。",
-    consequence: "后果：后续 validate / arm 的 gate 判断会基于 demo 模式运行。若误操作，可能让界面进入更接近可执行的受保护状态。"
+    subtitle: "Set global execution mode to demo_reserved",
+    risk: "这一步的意义是把全局执行模式从 disabled 切到 demo_reserved。它不是下单，不是开启 live，也不是让 demo 立刻可执行。它只是告诉控制面：后续 demo 验证链可以按 demo 预留模式继续判断。",
+    consequence: "状态差异说明：demo_reserved = 允许 demo 链路进入下一步判断；demo_validate = 只是检查 gate 是否满足；demo_arm = 把 demo 状态推进到 armed_but_closed。也就是说，点这个按钮后，系统只是从“完全禁用 demo”变成“允许 demo 受保护推进”，不会直接开放执行。"
   },
   "enable-spot": {
     title: "开启 Spot Shadow",
     subtitle: "Enable spot product family in shadow mode",
-    risk: "这会修改产品族控制配置，使 spot 从可见但关闭，推进为受控 shadow 模式。",
-    consequence: "后果：spot 控制面展示和部分 gate 结果会随之变化，但仍不会直接放开 live execution。"
+    risk: "这一步只影响产品族里的 spot。它会把 spot 从 disabled/visible-only 一侧，推进到 shadow_only 控制态。这里的 shadow 指“受控影子模式”，重点是可见性、配置和控制判断，不是真实成交。",
+    consequence: "状态差异说明：shadow = 某个功能或产品族进入影子控制态；spot shadow = 仅 spot 产品族进入 shadow；demo = 整个 demo 控制链状态机；demo arm = demo 状态机的关键前推节点。也就是说，这个按钮只会改变 spot 这一栏的能力展示与 gate 结果，不会改变其它产品族，也不会直接开启真实现货执行。"
+  },
+  validate: {
+    title: "验证 Demo 前提",
+    subtitle: "Validate demo prerequisites and gates",
+    risk: "这一步不会切模式，也不会推进 demo 主状态机。它只是重新检查 prerequisites、arm gate、enable gate、relock gate 等条件是否成立。",
+    consequence: "状态差异说明：demo validate = 纯检查；demo reserved = 改全局 demo 模式前提；demo arm = 真正推进 demo 主状态。也就是说，点 validate 后你看到的主要变化应该是 gate 结果与审计摘要，而不是执行权限本身。"
   },
   "arm-demo": {
     title: "执行 Demo Arm",
     subtitle: "Move demo state to armed_but_closed",
-    risk: "这是 demo 状态机的关键节点。执行后，demo 主状态会从 closed/relocked 进入 armed_but_closed。",
-    consequence: "后果：系统会更接近 demo enable，但仍处于封闭保护态；若前置 gate 不满足则会被阻断。"
+    risk: "这是 demo 状态机里的关键一步。它会把 demo 主状态从 closed 或 relocked 推到 armed_but_closed。它仍然不是 enable，更不是 live execution，但它表示系统已经通过前置校验，进入“已武装但仍封闭”的受保护阶段。",
+    consequence: "状态差异说明：demo arm 之后，demo 会更接近 enable；但 armed_but_closed 仍明确表示‘封闭，不可直接执行’。所以这个动作的意义是推进 demo 主状态机，而不是放开真实下单。若前置 gate 或 previous_state 不匹配，动作会被阻断。"
   },
   bundle: {
     title: "执行安全复核打包",
     subtitle: "Run safe recheck bundle",
-    risk: "该动作会触发多步复核/聚合逻辑，并刷新控制判断结果。",
-    consequence: "后果：页面上的 readiness、gate、audit 摘要可能一起变化，适合在明确知道用途时再执行。"
+    risk: "该动作会一次性触发多步复核、聚合与结果刷新，适合在你希望整体更新 readiness、gate、audit 时使用。它不是单一模式按钮，而是‘一组安全检查动作’的打包执行。",
+    consequence: "状态差异说明：bundle 不等于切模式，也不等于 arm。它更像一次‘统一复核刷新’，会同时影响页面多个摘要块的最新结果。如果你只是想理解某一个状态差异，优先用单个按钮；如果你想让整页控制判断一起重算，再用 bundle。"
   }
+};
+
+const PRODUCT_FAMILY_LABELS = {
+  spot: "spot / 现货",
+  margin: "margin / 保证金",
+  perp_linear: "perp_linear / 线性永续",
+  perp_inverse: "perp_inverse / 反向永续",
+  options: "options / 期权",
+  other_derivatives_reserved: "other_derivatives_reserved / 其他衍生品（预留）"
 };
 
 function headers() {
@@ -83,6 +98,15 @@ function summarizeActionResult(actionName, result) {
     "arm-demo": "执行 Demo Arm"
   };
 
+  const actionEnMap = {
+    refresh: "refresh",
+    validate: "validate demo",
+    bundle: "safe recheck bundle",
+    "set-demo-mode": "set demo reserved",
+    "enable-spot": "enable spot shadow",
+    "arm-demo": "arm demo"
+  };
+
   const data = result?.data || {};
   let hint = "动作执行完成。";
   let helper = "Action completed.";
@@ -105,7 +129,7 @@ function summarizeActionResult(actionName, result) {
   }
 
   setActionSummary(
-    `${actionMap[actionName] || actionName} / ${actionMap[actionName] ? actionName.replaceAll("-", " ") : actionName}`,
+    `${actionMap[actionName] || actionName} / ${actionEnMap[actionName] || actionName}`,
     safeText(result.action_result),
     safeText(result.state_revision),
     safeText(result.audit_ref),
@@ -202,9 +226,17 @@ function ensureGuiEnhancements() {
     "arm-demo": "执行 Demo Arm",
     bundle: "安全复核打包"
   };
+  const actionButtonSubs = {
+    refresh: "refresh overview",
+    validate: "validate demo gates",
+    "set-demo-mode": "global demo mode",
+    "enable-spot": "spot product family",
+    "arm-demo": "move to armed_but_closed",
+    bundle: "multi-step guarded recheck"
+  };
   document.querySelectorAll("[data-action]").forEach((button) => {
     const name = button.dataset.action;
-    if (actionButtons[name]) button.innerHTML = `${actionButtons[name]}<span class="button-sub">${name.replaceAll("-", " ")}</span>`;
+    if (actionButtons[name]) button.innerHTML = `${actionButtons[name]}<span class="button-sub">${actionButtonSubs[name] || name.replaceAll("-", " ")}</span>`;
   });
 
   const actionSummaryLabels = document.querySelectorAll("#actionSummaryGrid .summary-label");
@@ -236,7 +268,10 @@ function ensureGuiEnhancements() {
       <div class="glossary-wrap">
         ${annotateGlossary("Gate", "Gate", "门槛判断，表示某动作是否满足前提", "a gate decides whether an action is allowed to proceed")}
         ${annotateGlossary("Shadow", "Shadow", "影子模式，只做可见性/控制验证，不开放真实执行", "shadow means validation and visibility without real live execution")}
+        ${annotateGlossary("Demo Reserved", "Demo Reserved", "全局 demo 预留模式，允许 demo 链路继续判断，但不等于可执行", "global demo-reserved mode that allows guarded demo flow without opening execution")}
+        ${annotateGlossary("Demo Validate", "Demo Validate", "只检查 gate，不推进 demo 主状态", "checks gates only and does not advance demo main state")}
         ${annotateGlossary("Demo Arm", "Demo Arm", "把 demo 状态推进到 armed_but_closed 的关键节点", "a critical demo-state transition to armed_but_closed")}
+        ${annotateGlossary("Spot Shadow", "Spot Shadow", "只让现货产品族进入 shadow 控制态，不影响其它产品族", "puts only the spot family into shadow control state")}
         ${annotateGlossary("Snapshot", "Snapshot", "同一屏数据的一致性标识", "the consistency marker for one screen of data")}
       </div>`;
     const hero = document.querySelector(".hero-card");
@@ -261,10 +296,10 @@ function ensureGuiEnhancements() {
           <div class="summary-item"><span class="summary-label">${zhEnPrimary("Demo Enable Gate", "Demo Enable Gate")}</span><strong id="modeDemoEnableGate">-</strong></div>
         </div>
         <div class="mode-actions">
-          <button data-action="set-demo-mode">切到 Demo Reserved<span class="button-sub">Set Demo Reserved</span></button>
-          <button data-action="enable-spot">开启 Spot Shadow<span class="button-sub">Enable Spot Shadow</span></button>
-          <button data-action="validate">验证 Demo 前提<span class="button-sub">Validate Demo</span></button>
-          <button data-action="arm-demo">执行 Demo Arm<span class="button-sub">Demo Arm</span></button>
+          <button data-action="set-demo-mode">切到 Demo Reserved<span class="button-sub">global demo mode</span></button>
+          <button data-action="enable-spot">开启 Spot Shadow<span class="button-sub">spot product family</span></button>
+          <button data-action="validate">验证 Demo 前提<span class="button-sub">validate demo gates</span></button>
+          <button data-action="arm-demo">执行 Demo Arm<span class="button-sub">move to armed_but_closed</span></button>
           <button class="button-muted" disabled>观测模式<span class="button-sub">Observe Only · later</span></button>
           <button class="button-muted" disabled>Live 模式<span class="button-sub">Live Mode · locked</span></button>
         </div>
@@ -433,7 +468,7 @@ function renderProductFamilies(productFamilies) {
   const body = document.getElementById("productFamilyTableBody");
   const rows = Object.entries(productFamilies).map(([name, data]) => `
     <tr>
-      <td>${name}</td>
+      <td>${PRODUCT_FAMILY_LABELS[name] || name}</td>
       <td><span class="status-chip ${variantForState(data.facts.exchange_permission_fact)}">${data.facts.exchange_permission_fact}</span></td>
       <td><span class="status-chip ${variantForState(data.facts.account_permission_fact)}">${data.facts.account_permission_fact}</span></td>
       <td>${String(data.controls.enabled_switch)}</td>
@@ -514,7 +549,7 @@ async function runQuickAction(actionName) {
 
     if (actionName === "refresh") {
       await loadDashboard();
-      setActionSummary("刷新概览 / Refresh", "success", overview.state_revision, "-", "界面已刷新。 / Dashboard refreshed.", { message: "Refresh completed." });
+      setActionSummary("刷新概览 / refresh overview", "success", overview.state_revision, "-", "界面已刷新。 / Dashboard refreshed.", { message: "Refresh completed." });
       return;
     }
     if (actionName === "validate") result = await apiPost("/api/v1/control/demo/validate", baseEnvelope(overview));
