@@ -1,0 +1,28 @@
+{
+  "scores": {
+    "overall_health_score": 100,
+    "ai_health_score": 100,
+    "exchange_health_score": 100,
+    "infra_health_score": 100,
+    "data_freshness_score": 100
+  },
+  "metrics": {
+    "avg_ai_latency_ms": 0,
+    "exchange_timeout_count": 0,
+    "ws_disconnect_count": 0,
+    "runtime_stale_count": 0
+  },
+  "evaluation_context": {
+    "evaluation_window_sec": 300,
+    "sample_count": 0,
+    "last_evaluated_ts_ms": 1774485000000,
+    "threshold_basis": "rolling_window"
+  },
+  "gates": {
+    "health_gates_overall_state": "passed",
+    "exchange_timeout_gate_state": "passed",
+    "ws_disconnect_gate_state": "passed",
+    "latency_gate_state": "passed",
+    "freshness_gate_state": "passed"
+  }
+}

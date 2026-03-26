@@ -1,0 +1,71 @@
+{
+  "runtime_snapshot_id": "runtime:file:example-001",
+  "runtime_snapshot_ts_ms": 1774485000000,
+  "readonly_connector_name": "bybit_prod_readonly_main",
+  "execution_connector_name": null,
+  "rest_private_connection_state": "ready",
+  "ws_private_connection_state": "ready",
+  "runtime_connection_state": "healthy",
+  "account_fact_completeness_state": "complete",
+  "source_snapshot_completeness_state": "complete",
+  "global_runtime_facts": {
+    "system_mode_fact": "shadow_only",
+    "execution_state_fact": "execution_disabled",
+    "runtime_last_refresh_ts_ms": 1774485000000,
+    "runtime_data_freshness_state": "fresh"
+  },
+  "product_family_facts": {
+    "spot": {
+      "exchange_permission_fact": "readonly_visible",
+      "account_permission_fact": "readonly_visible"
+    },
+    "margin": {
+      "exchange_permission_fact": "readonly_visible",
+      "account_permission_fact": "readonly_visible"
+    },
+    "perp_linear": {
+      "exchange_permission_fact": "unavailable",
+      "account_permission_fact": "unavailable"
+    },
+    "perp_inverse": {
+      "exchange_permission_fact": "readonly_visible",
+      "account_permission_fact": "readonly_visible"
+    },
+    "options": {
+      "exchange_permission_fact": "readonly_visible",
+      "account_permission_fact": "readonly_visible"
+    },
+    "other_derivatives_reserved": {
+      "exchange_permission_fact": "readonly_visible",
+      "account_permission_fact": "readonly_visible"
+    }
+  },
+  "health_telemetry": {
+    "scores": {
+      "overall_health_score": 100,
+      "ai_health_score": 100,
+      "exchange_health_score": 100,
+      "infra_health_score": 100,
+      "data_freshness_score": 100
+    },
+    "metrics": {
+      "avg_ai_latency_ms": 0,
+      "exchange_timeout_count": 0,
+      "ws_disconnect_count": 0,
+      "runtime_stale_count": 0
+    },
+    "evaluation_context": {
+      "evaluation_window_sec": 300,
+      "sample_count": 0,
+      "last_evaluated_ts_ms": 1774485000000,
+      "threshold_basis": "rolling_window"
+    },
+    "gates": {
+      "health_gates_overall_state": "passed",
+      "exchange_timeout_gate_state": "passed",
+      "ws_disconnect_gate_state": "passed",
+      "latency_gate_state": "passed",
+      "freshness_gate_state": "passed"
+    }
+  }
+}

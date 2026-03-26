@@ -1,0 +1,17 @@
+{
+  "runtime_snapshot_id": "runtime:dir-example:001",
+  "runtime_snapshot_ts_ms": 1774487000000,
+  "readonly_connector_name": "bybit_prod_readonly_main",
+  "execution_connector_name": null,
+  "rest_private_connection_state": "ready",
+  "ws_private_connection_state": "ready",
+  "runtime_connection_state": "healthy",
+  "account_fact_completeness_state": "complete",
+  "source_snapshot_completeness_state": "complete",
+  "global_runtime_facts": {
+    "system_mode_fact": "shadow_only",
+    "execution_state_fact": "execution_disabled",
+    "runtime_last_refresh_ts_ms": 1774487000000,
+    "runtime_data_freshness_state": "fresh"
+  }
+}

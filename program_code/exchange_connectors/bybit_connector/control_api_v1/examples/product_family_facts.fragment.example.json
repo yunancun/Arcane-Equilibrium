@@ -1,0 +1,26 @@
+{
+  "spot": {
+    "exchange_permission_fact": "readonly_visible",
+    "account_permission_fact": "readonly_visible"
+  },
+  "margin": {
+    "exchange_permission_fact": "readonly_visible",
+    "account_permission_fact": "readonly_visible"
+  },
+  "perp_linear": {
+    "exchange_permission_fact": "unavailable",
+    "account_permission_fact": "unavailable"
+  },
+  "perp_inverse": {
+    "exchange_permission_fact": "readonly_visible",
+    "account_permission_fact": "readonly_visible"
+  },
+  "options": {
+    "exchange_permission_fact": "readonly_visible",
+    "account_permission_fact": "readonly_visible"
+  },
+  "other_derivatives_reserved": {
+    "exchange_permission_fact": "readonly_visible",
+    "account_permission_fact": "readonly_visible"
+  }
+}
