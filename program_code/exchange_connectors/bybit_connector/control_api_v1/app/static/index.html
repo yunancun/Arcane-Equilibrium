@@ -10,48 +10,153 @@
   <header class="topbar">
     <div>
       <h1>OpenClaw / Bybit Control Center</h1>
-      <p>RC2 MVP GUI · FastAPI embedded dashboard</p>
+      <p>RC2 control console · runtime-aware GUI / 已接入 runtime-aware bridge</p>
     </div>
     <div class="token-panel">
       <label for="tokenInput">Bearer Token</label>
-      <input id="tokenInput" type="password" placeholder="仅保存在当前页面内存 / kept in-memory only" />
-      <button id="connectButton">连接 / Connect</button>
+      <div class="token-row">
+        <input id="tokenInput" type="password" placeholder="仅保存在当前页面内存 / kept in-memory only" />
+        <button id="connectButton">连接 / Connect</button>
+      </div>
+      <div id="connectionStatus" class="status-chip neutral">未连接 / Disconnected</div>
     </div>
   </header>
 
-  <main class="grid">
-    <section class="card">
-      <h2>系统总览 / Overview</h2>
-      <pre id="overviewBox">等待加载 / Waiting...</pre>
+  <main class="page-shell">
+    <section class="card hero-card">
+      <div class="card-header-row">
+        <div>
+          <h2>运行态摘要 / Runtime Summary</h2>
+          <p class="subtle">高层状态、保护边界、runtime snapshot 绑定情况</p>
+        </div>
+        <div id="runtimeModeBadge" class="status-chip neutral">未加载 / Not loaded</div>
+      </div>
+      <div class="summary-grid" id="summaryGrid">
+        <div class="summary-item">
+          <span class="summary-label">Global Mode</span>
+          <strong id="summaryGlobalMode">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Execution Authority</span>
+          <strong id="summaryExecutionAuthority">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Demo State</span>
+          <strong id="summaryDemoState">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Snapshot</span>
+          <strong id="summarySnapshot">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Runtime Snapshot</span>
+          <strong id="summaryRuntimeSnapshot">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Runtime Protected</span>
+          <strong id="summaryProtected">-</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid two-up">
+      <section class="card">
+        <div class="card-header-row">
+          <div>
+            <h2>来源上下文 / Source Context</h2>
+            <p class="subtle">连接状态、完整性、connector 角色分离</p>
+          </div>
+        </div>
+        <dl class="kv-grid" id="sourceContextGrid"></dl>
+      </section>
+
+      <section class="card">
+        <div class="card-header-row">
+          <div>
+            <h2>健康摘要 / Health Summary</h2>
+            <p class="subtle">health scores、关键 gate 与 freshness</p>
+          </div>
+        </div>
+        <dl class="kv-grid" id="healthGrid"></dl>
+      </section>
     </section>
 
     <section class="card">
-      <h2>控制平面 / Control Plane</h2>
-      <pre id="controlPlaneBox">等待加载 / Waiting...</pre>
-    </section>
-
-    <section class="card">
-      <h2>来源上下文 / Source Context</h2>
-      <pre id="sourceContextBox">等待加载 / Waiting...</pre>
-    </section>
-
-    <section class="card">
-      <h2>审计摘要 / Audit Summary</h2>
-      <pre id="auditBox">等待加载 / Waiting...</pre>
+      <div class="card-header-row">
+        <div>
+          <h2>产品族事实 / Product Family Facts</h2>
+          <p class="subtle">当前 visibility / capability / permission facts 概览</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Product Family</th>
+              <th>Exchange Fact</th>
+              <th>Account Fact</th>
+              <th>Enabled</th>
+              <th>Visible</th>
+              <th>Mode</th>
+              <th>Capability</th>
+              <th>Execution</th>
+            </tr>
+          </thead>
+          <tbody id="productFamilyTableBody">
+            <tr><td colspan="8" class="muted-cell">等待加载 / Waiting...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card wide">
-      <h2>快捷动作 / Quick Actions</h2>
+      <div class="card-header-row">
+        <div>
+          <h2>快捷动作 / Quick Actions</h2>
+          <p class="subtle">仅调用受保护控制面动作，不直接开放真实执行权限</p>
+        </div>
+      </div>
       <div class="actions">
         <button data-action="refresh">刷新概览 / Refresh</button>
         <button data-action="validate">Demo Validate</button>
-        <button data-action="bundle">Safe Recheck Bundle</button>
-      </div>
-      <div class="actions">
         <button data-action="set-demo-mode">Set Demo Reserved</button>
         <button data-action="enable-spot">Enable Spot Shadow</button>
+        <button data-action="arm-demo">Demo Arm</button>
+        <button data-action="bundle">Safe Recheck Bundle</button>
       </div>
       <pre id="actionResultBox">尚未执行动作 / No action yet.</pre>
+    </section>
+
+    <section class="grid two-up">
+      <section class="card">
+        <div class="card-header-row">
+          <div>
+            <h2>控制平面原文 / Control Plane Raw</h2>
+            <p class="subtle">调试用原始 JSON</p>
+          </div>
+        </div>
+        <pre id="controlPlaneBox">等待加载 / Waiting...</pre>
+      </section>
+
+      <section class="card">
+        <div class="card-header-row">
+          <div>
+            <h2>审计摘要原文 / Audit Raw</h2>
+            <p class="subtle">最近控制动作与写动作摘要</p>
+          </div>
+        </div>
+        <pre id="auditBox">等待加载 / Waiting...</pre>
+      </section>
+    </section>
+
+    <section class="card">
+      <div class="card-header-row">
+        <div>
+          <h2>系统总览原文 / Overview Raw</h2>
+          <p class="subtle">完整 overview payload，便于审计对照</p>
+        </div>
+      </div>
+      <pre id="overviewBox">等待加载 / Waiting...</pre>
     </section>
   </main>
 
