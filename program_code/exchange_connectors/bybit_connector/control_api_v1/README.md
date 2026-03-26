@@ -1,55 +1,45 @@
 # OpenClaw / Bybit Control API + GUI V1 RC2
 
-这是一个可直接落地的 **FastAPI + 内嵌静态 GUI** MVP 实现。
-This is a deployable **FastAPI + embedded static GUI** MVP implementation.
+这是当前分支上的 **FastAPI + 内嵌静态 GUI** 默认入口版本。
+This is the **FastAPI + embedded static GUI** default-entrypoint version on the current branch.
 
-## 目标 / Goal
+## 当前状态 / Current status
 
-本模块用于把你已经冻结的状态字典、Control API RC2 和 GUI 一致性规则，落成一个：
-This module turns the frozen state dictionary, Control API RC2, and GUI consistency rules into a practical service that is:
+本版本已经完成以下收口：
+This version has already completed the following closeout items:
 
-- 可启动 / bootable
-- 可本地验证 / locally verifiable
-- 可继续对接 OpenClaw runtime / easy to connect to the OpenClaw runtime later
-- 默认保持 **execution disabled / protected** / protected by default
+- 默认启动入口统一为 `app.main:app`
+- 默认入口已通过 snapshot identity 稳定性验证
+- 旧实现保留为 `app.main_legacy:app`
+- 兼容别名保留为 `app.main_snapshot_stable:app`
+- 默认保持 protected boundary，不会打开真实执行权限
 
 ## 路径 / Location
 
-- 后端代码 / backend:
+- 后端代码 / backend  
   `program_code/exchange_connectors/bybit_connector/control_api_v1/app`
-- GUI 静态页 / GUI static files:
+- GUI 静态资源 / GUI static files  
   `program_code/exchange_connectors/bybit_connector/control_api_v1/app/static`
-- Docker 部署 / Docker deployment:
+- Docker 部署目录 / Docker deployment directory  
   `docker_projects/trading_services/openclaw_bybit_control_api_v1`
 
-## 主要能力 / Main capabilities
+## 默认入口 / Default entrypoint
 
-1. 冻结 `/api/v1` 路由骨架并给出可运行实现  
-   Freeze the `/api/v1` route family with a runnable implementation.
+- 默认入口 / default: `app.main:app`
+- 旧实现回滚入口 / rollback: `app.main_legacy:app`
+- 兼容别名 / compatibility alias: `app.main_snapshot_stable:app`
 
-2. 提供统一 envelope、`snapshot_id`、`state_revision`、`source_context`  
-   Provide the unified envelope, `snapshot_id`, `state_revision`, and `source_context`.
+## 默认保护边界 / Default protected boundary
 
-3. 提供 demo 状态机的最小可运行实现  
-   Provide a minimal runnable implementation for the demo state machine.
-
-4. 提供 `config-change / cost / event / manual-note` 的受控写入  
-   Provide controlled writes for `config-change / cost / event / manual-note`.
-
-5. 提供一个不依赖前端框架的 GUI  
-   Provide a GUI that does not require a separate frontend framework.
-
-## 默认边界 / Default boundary
-
-本实现默认：
-By default, this implementation keeps:
+默认情况下：
+By default:
 
 - `global_execution_mode_switch = disabled`
 - `demo_state_switch = closed`
 - `runtime_still_protected = true`
 
-它不会打开真实执行权限。
-It does not open real execution authority.
+它不会直接赋予真实交易执行权限。
+It does not directly grant real trading execution authority.
 
 ## 本地启动 / Local startup
 
@@ -75,22 +65,24 @@ cd program_code/exchange_connectors/bybit_connector/control_api_v1
 pytest -q
 ```
 
-## 需要你本地帮我验证的命令 / Commands I want you to run locally
+## Docker 启动 / Docker startup
 
 ```bash
-cd ~/srv/program_code/exchange_connectors/bybit_connector/control_api_v1
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export OPENCLAW_API_TOKEN='change-me'
-pytest -q
-uvicorn app.main:app --host 0.0.0.0 --port 8710
+cd docker_projects/trading_services/openclaw_bybit_control_api_v1
+docker compose up --build
 ```
 
-然后把以下结果贴给我：
-Then paste back:
+## 审计稳定性 / Audit stability
 
-1. `pytest -q`
-2. `curl -s http://127.0.0.1:8710/api/v1/system/overview | jq`
-3. 打开 `/gui` 后首页截图或核心错误
-   a screenshot of `/gui` or any important errors
+当前默认入口已经验证通过：
+The current default entrypoint has been validated for:
+
+- 连续两次 GET overview 时，`snapshot_id` 不变
+- 连续两次 GET overview 时，`snapshot_ts_ms` 不变
+- `config-change -> demo_validate -> demo_arm` 能推进到 `armed_but_closed`
+- 系统仍保持 protected / guarded 状态，不进入 `demo_enabled`
+
+## 后续对接 / Next integration step
+
+下一步应当把当前 demo/state 层继续对接到真实 OpenClaw runtime facts，而不是继续扩展本地 demo 假状态。
+The next step should connect the current demo/state layer to real OpenClaw runtime facts instead of further expanding local demo-only mocked state.

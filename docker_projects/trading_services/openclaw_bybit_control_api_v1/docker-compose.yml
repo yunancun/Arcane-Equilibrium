@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  openclaw_bybit_control_api_v1:
+    build:
+      context: ../../../program_code/exchange_connectors/bybit_connector/control_api_v1
+      dockerfile: Dockerfile
+    container_name: openclaw_bybit_control_api_v1
+    restart: unless-stopped
+    ports:
+      - "8710:8710"
+    environment:
+      OPENCLAW_API_TOKEN: "${OPENCLAW_API_TOKEN:-change-me}"
+      OPENCLAW_STATE_FILE: "/runtime/openclaw_bybit_control_state.json"
+      OPENCLAW_READONLY_CONNECTOR_NAME: "${OPENCLAW_READONLY_CONNECTOR_NAME:-bybit_prod_readonly_main}"
+      OPENCLAW_EXECUTION_CONNECTOR_NAME: "${OPENCLAW_EXECUTION_CONNECTOR_NAME:-}"
+      OPENCLAW_REST_PRIVATE_CONNECTION_STATE: "${OPENCLAW_REST_PRIVATE_CONNECTION_STATE:-ready}"
+      OPENCLAW_WS_PRIVATE_CONNECTION_STATE: "${OPENCLAW_WS_PRIVATE_CONNECTION_STATE:-ready}"
+      OPENCLAW_RUNTIME_CONNECTION_STATE: "${OPENCLAW_RUNTIME_CONNECTION_STATE:-healthy}"
+      OPENCLAW_ACCOUNT_FACT_COMPLETENESS_STATE: "${OPENCLAW_ACCOUNT_FACT_COMPLETENESS_STATE:-complete}"
+      OPENCLAW_SOURCE_SNAPSHOT_COMPLETENESS_STATE: "${OPENCLAW_SOURCE_SNAPSHOT_COMPLETENESS_STATE:-complete}"
+    volumes:
+      - ./runtime:/runtime
