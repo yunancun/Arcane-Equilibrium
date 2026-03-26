@@ -15,22 +15,84 @@ OpenClaw / Bybit 控制 API 与 GUI 的可运行 MVP
 
 import copy
 import hashlib
+import hmac
 import json
 import os
+import secrets
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 
 def _split_csv(value: str) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
+
+
+def _resolve_api_token() -> str:
+    """
+    API Token 解析顺序 / API Token resolution order:
+    1. 环境变量 OPENCLAW_API_TOKEN（推荐）/ Environment variable (recommended)
+    2. Token 文件 OPENCLAW_API_TOKEN_FILE 指向的文件 / File pointed to by env var
+    3. 默认 token 文件路径 ../.secrets/api_token / Default token file path
+    4. 自动生成并保存到默认路径 / Auto-generate and save to default path
+
+    安全规则 / Safety rules:
+    - 不接受 "change-me" 或空值 / Rejects "change-me" or empty values
+    - 自动生成时会打印到 stderr 提醒 / Prints to stderr when auto-generating
+    """
+    import sys
+
+    # 1. 环境变量 / Environment variable
+    env_token = os.getenv("OPENCLAW_API_TOKEN", "").strip()
+    if env_token and env_token != "change-me":
+        return env_token
+
+    # 2. Token 文件（环境变量指定路径）/ Token file (env-specified path)
+    token_file_env = os.getenv("OPENCLAW_API_TOKEN_FILE", "").strip()
+    if token_file_env:
+        token_file = Path(token_file_env)
+    else:
+        # 3. 默认 token 文件路径 / Default token file path
+        token_file = Path(__file__).resolve().parent.parent / ".secrets" / "api_token"
+
+    if token_file.exists():
+        saved_token = token_file.read_text(encoding="utf-8").strip()
+        if saved_token and saved_token != "change-me":
+            return saved_token
+
+    # 4. 自动生成 / Auto-generate
+    new_token = secrets.token_urlsafe(32)
+    token_file.parent.mkdir(parents=True, exist_ok=True)
+    token_file.write_text(new_token + "\n", encoding="utf-8")
+    os.chmod(str(token_file), 0o600)
+    os.chmod(str(token_file.parent), 0o700)
+
+    print(
+        f"\n{'='*60}\n"
+        f"  [OpenClaw] API Token 已自动生成并保存\n"
+        f"  [OpenClaw] API Token auto-generated and saved\n"
+        f"\n"
+        f"  Token: {new_token}\n"
+        f"  文件 / File: {token_file}\n"
+        f"\n"
+        f"  请妥善保管此 Token。重置方法见：\n"
+        f"  Keep this token safe. Reset instructions:\n"
+        f"    docs/references/API_TOKEN_RESET_GUIDE.md\n"
+        f"{'='*60}\n",
+        file=sys.stderr,
+    )
+    return new_token
 
 
 @dataclass(slots=True)
@@ -41,7 +103,7 @@ class Settings:
     service_name: str = "OpenClaw / Bybit Control API"
     gui_title: str = "OpenClaw / Bybit Control Center"
 
-    api_token: str = field(default_factory=lambda: os.getenv("OPENCLAW_API_TOKEN", "change-me"))
+    api_token: str = field(default_factory=_resolve_api_token)
     auth_actor_id: str = field(default_factory=lambda: os.getenv("OPENCLAW_AUTH_ACTOR_ID", "demo-operator"))
     auth_actor_type: str = field(default_factory=lambda: os.getenv("OPENCLAW_AUTH_ACTOR_TYPE", "human"))
     auth_roles: set[str] = field(
@@ -128,10 +190,10 @@ T = TypeVar("T")
 
 
 class RequestEnvelope(BaseModel):
-    request_id: str
-    idempotency_key: str
-    operator_id: str
-    reason: str
+    request_id: str = Field(max_length=200)
+    idempotency_key: str = Field(max_length=200)
+    operator_id: str = Field(max_length=100)
+    reason: str = Field(max_length=500)
     client_ts_ms: int
     expected_state_revision: int
     expected_previous_state: str | None = None
@@ -539,6 +601,23 @@ AUTO_SCAN_TYPES = frozenset({"observations", "lessons", "hypotheses"})
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+# ── 输入长度限制 / Input length limits ─────────────────────────────────────────
+_MAX_TEXT_SHORT = 200   # 标题 / title 类
+_MAX_TEXT_LONG = 2000   # 详情 / detail / description 类
+_MAX_TEXT_REASON = 500  # 理由 / reason 类
+_MAX_PAYLOAD_SIZE = 50000  # payload JSON 总字节 / total payload bytes
+
+
+def _validate_text_length(value: str, field_name: str, max_len: int) -> str:
+    """验证文本长度，超限抛 400 / Validate text length, raise 400 if exceeded."""
+    if len(value) > max_len:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": [f"{field_name}_too_long"], "max_length": max_len, "actual_length": len(value)},
+        )
+    return value
 
 
 ACTION_NAMES = [
@@ -1266,7 +1345,7 @@ def build_default_state() -> dict[str, Any]:
 class JsonStateStore:
     def __init__(self, file_path: str) -> None:
         self.file_path = Path(file_path)
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._lock = threading.RLock()
         if not self.file_path.exists():
             self.write(build_default_state())
@@ -1285,6 +1364,8 @@ class JsonStateStore:
             compiled = compile_state(state)
             with self.file_path.open("w", encoding="utf-8") as handle:
                 json.dump(compiled, handle, ensure_ascii=False, indent=2)
+            # 限制状态文件权限：仅 owner 可读写 / Restrict state file: owner read/write only
+            os.chmod(str(self.file_path), 0o600)
             return compiled
 
     def mutate(self, mutator) -> dict[str, Any]:
@@ -1385,14 +1466,35 @@ def _check_idempotency(snapshot: dict[str, Any], envelope: RequestEnvelope) -> d
     return record["response"]
 
 
+_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000  # 24 小时 / 24 hours
+_IDEMPOTENCY_MAX_ENTRIES = 500  # 最大缓存条目 / Max cached entries
+
+
 def _store_idempotent_response(state: dict[str, Any], envelope: RequestEnvelope, response: dict[str, Any]) -> None:
     stored_response = dict(response)
     stored_response.pop("snapshot", None)
-    state["records"]["idempotency"][envelope.idempotency_key] = {
+    cache = state["records"]["idempotency"]
+    cache[envelope.idempotency_key] = {
         "request_id": envelope.request_id,
         "fingerprint": request_fingerprint(envelope),
+        "stored_ts_ms": now_ms(),
         "response": stored_response,
     }
+    # 清理过期和超量条目 / Cleanup expired and overflow entries
+    _cleanup_idempotency_cache(cache)
+
+
+def _cleanup_idempotency_cache(cache: dict[str, Any]) -> None:
+    """移除过期和超量的幂等性缓存条目 / Remove expired and overflow idempotency cache entries."""
+    cutoff = now_ms() - _IDEMPOTENCY_TTL_MS
+    expired_keys = [k for k, v in cache.items() if v.get("stored_ts_ms", 0) < cutoff]
+    for k in expired_keys:
+        del cache[k]
+    # 如果仍超量，移除最旧的 / If still over limit, remove oldest
+    if len(cache) > _IDEMPOTENCY_MAX_ENTRIES:
+        sorted_keys = sorted(cache.keys(), key=lambda k: cache[k].get("stored_ts_ms", 0))
+        for k in sorted_keys[: len(cache) - _IDEMPOTENCY_MAX_ENTRIES]:
+            del cache[k]
 
 
 def _write_audit_fields(
@@ -2240,8 +2342,8 @@ def apply_learning_observation(
 
     # 验证必填字段 / Validate required fields
     p = envelope.payload
-    title = str(p.get("title", "")).strip()
-    detail = str(p.get("detail", "")).strip()
+    title = _validate_text_length(str(p.get("title", "")).strip(), "title", _MAX_TEXT_SHORT)
+    detail = _validate_text_length(str(p.get("detail", "")).strip(), "detail", _MAX_TEXT_LONG)
     category = str(p.get("category", "")).strip()
     confidence = str(p.get("confidence_level", "")).strip()
     if not title or not detail:
@@ -2328,8 +2430,8 @@ def apply_learning_lesson(
     _assert_revision(snapshot, envelope)
 
     p = envelope.payload
-    title = str(p.get("title", "")).strip()
-    detail = str(p.get("detail", "")).strip()
+    title = _validate_text_length(str(p.get("title", "")).strip(), "title", _MAX_TEXT_SHORT)
+    detail = _validate_text_length(str(p.get("detail", "")).strip(), "detail", _MAX_TEXT_LONG)
     category = str(p.get("category", "")).strip()
     confidence = str(p.get("confidence_level", "")).strip()
     if not title or not detail:
@@ -2415,9 +2517,9 @@ def apply_learning_hypothesis(
     _assert_revision(snapshot, envelope)
 
     p = envelope.payload
-    title = str(p.get("title", "")).strip()
-    description = str(p.get("description", "")).strip()
-    testable_prediction = str(p.get("testable_prediction", "")).strip()
+    title = _validate_text_length(str(p.get("title", "")).strip(), "title", _MAX_TEXT_SHORT)
+    description = _validate_text_length(str(p.get("description", "")).strip(), "description", _MAX_TEXT_LONG)
+    testable_prediction = _validate_text_length(str(p.get("testable_prediction", "")).strip(), "testable_prediction", _MAX_TEXT_LONG)
     if not title or not description or not testable_prediction:
         raise HTTPException(status_code=400, detail={"reason_codes": ["missing_required_hypothesis_fields"]})
 
@@ -2502,10 +2604,10 @@ def apply_learning_experiment(
 
     p = envelope.payload
     hypothesis_id = str(p.get("hypothesis_id", "")).strip()
-    title = str(p.get("title", "")).strip()
-    description = str(p.get("description", "")).strip()
-    method = str(p.get("method", "")).strip()
-    success_criteria = str(p.get("success_criteria", "")).strip()
+    title = _validate_text_length(str(p.get("title", "")).strip(), "title", _MAX_TEXT_SHORT)
+    description = _validate_text_length(str(p.get("description", "")).strip(), "description", _MAX_TEXT_LONG)
+    method = _validate_text_length(str(p.get("method", "")).strip(), "method", _MAX_TEXT_LONG)
+    success_criteria = _validate_text_length(str(p.get("success_criteria", "")).strip(), "success_criteria", _MAX_TEXT_LONG)
     if not hypothesis_id or not title or not description or not method or not success_criteria:
         raise HTTPException(status_code=400, detail={"reason_codes": ["missing_required_experiment_fields"]})
 
@@ -3877,6 +3979,37 @@ app = FastAPI(
     description="OpenClaw / Bybit Control API + GUI MVP",
 )
 
+# ── CORS 中间件 / CORS middleware ─────────────────────────────────────────────
+# 默认仅允许同源访问；部署时通过 OPENCLAW_CORS_ORIGINS 设置允许的前端源
+# Default: same-origin only. Set OPENCLAW_CORS_ORIGINS for deployment.
+_cors_origins = os.getenv("OPENCLAW_CORS_ORIGINS", "").strip()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins.split(",") if _cors_origins else [],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# ── 速率限制 / Rate limiting ──────────────────────────────────────────────────
+# 默认限制：每 IP 120 次/分钟（可通过 OPENCLAW_RATE_LIMIT 覆盖）
+# Default: 120 requests/minute per IP (overridable via OPENCLAW_RATE_LIMIT)
+_rate_limit_default = os.getenv("OPENCLAW_RATE_LIMIT", "120/minute")
+limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit_default])
+app.state.limiter = limiter
+from slowapi.middleware import SlowAPIMiddleware
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    from starlette.responses import JSONResponse
+    return JSONResponse(
+        status_code=429,
+        content={"detail": {"reason_codes": ["rate_limit_exceeded"], "retry_after": str(exc.detail)}},
+    )
+
+
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -3885,7 +4018,8 @@ def current_actor(authorization: str | None = Header(default=None)) -> Any:
     if authorization is None or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail={"reason_codes": ["unauthenticated"]})
     token = authorization.replace("Bearer ", "", 1).strip()
-    if token != settings.api_token:
+    # 常数时间比较，防止时序攻击 / Constant-time comparison to prevent timing attacks
+    if not hmac.compare_digest(token.encode("utf-8"), settings.api_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail={"reason_codes": ["unauthenticated"]})
     return build_authenticated_actor()
 

@@ -1,0 +1,13 @@
+# Secrets — 不要提交到 Git / Do NOT commit to Git
+.secrets/
+
+# Runtime state
+runtime/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environment
+.venv/
