@@ -42,6 +42,15 @@ const PRODUCT_FAMILY_LABELS = {
   other_derivatives_reserved: "other_derivatives_reserved / 其他衍生品（预留）"
 };
 
+const PRODUCT_FAMILY_CONFIG_IDS = {
+  spot: { summary: "cfgSpotSummary", meta: "cfgSpotMeta" },
+  margin: { summary: "cfgMarginSummary", meta: "cfgMarginMeta" },
+  perp_linear: { summary: "cfgLinearPerpSummary", meta: "cfgLinearPerpMeta" },
+  perp_inverse: { summary: "cfgInversePerpSummary", meta: "cfgInversePerpMeta" },
+  options: { summary: "cfgOptionsSummary", meta: "cfgOptionsMeta" },
+  other_derivatives_reserved: { summary: "cfgOtherDerivativesSummary", meta: "cfgOtherDerivativesMeta" }
+};
+
 function headers() {
   return {
     Authorization: `Bearer ${inMemoryToken}`,
@@ -63,6 +72,10 @@ function variantForState(value) {
   if (["blocked", "disabled", "down", "missing", "failed", "unavailable", "unknown", "false"].includes(normalized)) return "bad";
   if (["partial", "degraded", "demo_reserved", "demo_blocked", "armed_but_closed", "visible_only", "shadow_visible"].includes(normalized)) return "warn";
   return "neutral";
+}
+
+function booleanZh(value, trueText, falseText) {
+  return value ? trueText : falseText;
 }
 
 function setConnectionStatus(text, variant = "neutral") {
@@ -335,33 +348,45 @@ function ensureGuiEnhancements() {
           <p class="subtle">这是后续正式承接“查看状态 + 调整设置”的独立区域。当前先做骨架，后续继续接入更多产品族设置。</p>
         </div>
       </div>
-      <div class="summary-grid business-grid">
-        <div class="summary-item">
+      <div class="summary-grid business-grid config-family-grid">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("现货产品配置", "Spot Configuration")}</span>
           <strong id="cfgSpotSummary">-</strong>
+          <div id="cfgSpotMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
-        <div class="summary-item">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("保证金产品配置", "Margin Configuration")}</span>
           <strong id="cfgMarginSummary">-</strong>
+          <div id="cfgMarginMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
-        <div class="summary-item">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("线性永续配置", "Linear Perp Configuration")}</span>
           <strong id="cfgLinearPerpSummary">-</strong>
+          <div id="cfgLinearPerpMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
-        <div class="summary-item">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("反向永续配置", "Inverse Perp Configuration")}</span>
           <strong id="cfgInversePerpSummary">-</strong>
+          <div id="cfgInversePerpMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
-        <div class="summary-item">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("期权配置", "Options Configuration")}</span>
           <strong id="cfgOptionsSummary">-</strong>
+          <div id="cfgOptionsMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
-        <div class="summary-item">
+        <div class="summary-item config-family-card">
           <span class="summary-label">${zhEnPrimary("其他衍生品（预留）", "Other Derivatives Reserved")}</span>
           <strong id="cfgOtherDerivativesSummary">-</strong>
+          <div id="cfgOtherDerivativesMeta" class="family-card-meta">-</div>
+          <div class="family-actions"><button class="button-muted" disabled>设置入口（后续）<span class="button-sub">settings later</span></button></div>
         </div>
       </div>
-      <div class="mode-note">后续我们可以在这里继续加入：各产品族是否启用、是否可见、当前 mode、以及专属设置按钮。这样它会比现在单纯看表格更清楚。</div>`;
+      <div class="mode-note">这里先回答两个最基础的问题：这个产品族现在是否启用、是否可见、处于什么模式。等主线推进后，再把真正可修改的设置接进来。</div>`;
     const productFactsCard = Array.from(document.querySelectorAll(".page-shell > .card")).find((node) => node.querySelector("h2")?.textContent.includes("产品族事实"));
     if (productFactsCard) {
       productFactsCard.before(card);
@@ -477,23 +502,21 @@ function renderBusinessSummary(overview) {
 }
 
 function renderProductFamilyConfig(productFamilies) {
-  const familyMap = {
-    spot: "cfgSpotSummary",
-    margin: "cfgMarginSummary",
-    perp_linear: "cfgLinearPerpSummary",
-    perp_inverse: "cfgInversePerpSummary",
-    options: "cfgOptionsSummary",
-    other_derivatives_reserved: "cfgOtherDerivativesSummary"
-  };
-  Object.entries(familyMap).forEach(([family, nodeId]) => {
-    const node = document.getElementById(nodeId);
+  Object.entries(PRODUCT_FAMILY_CONFIG_IDS).forEach(([family, ids]) => {
     const data = productFamilies[family];
-    if (!node) return;
+    const summaryNode = document.getElementById(ids.summary);
+    const metaNode = document.getElementById(ids.meta);
+    if (!summaryNode || !metaNode) return;
     if (!data) {
-      node.textContent = "-";
+      summaryNode.textContent = "-";
+      metaNode.textContent = "当前没有这类产品的配置摘要。";
       return;
     }
-    node.textContent = `enabled=${data.controls.enabled_switch} · visible=${data.controls.visibility_switch} · mode=${data.controls.mode_switch}`;
+
+    const enabledText = booleanZh(data.controls.enabled_switch, "已启用", "未启用");
+    const visibleText = booleanZh(data.controls.visibility_switch, "可见", "隐藏");
+    summaryNode.textContent = `${enabledText} · ${visibleText} · 模式 ${safeText(data.controls.mode_switch)}`;
+    metaNode.textContent = `交易所事实：${safeText(data.facts.exchange_permission_fact)}；账户事实：${safeText(data.facts.account_permission_fact)}；能力：${safeText(data.derived.capability_state)}`;
   });
 }
 

@@ -58,7 +58,7 @@ button:active { transform: translateY(0); }
 .action-result-value.bad { color: #fca5a5; }
 .action-result-value.neutral { color: #e5e7eb; }
 .action-hint, .mode-note { margin-bottom: 12px; color: var(--muted); font-size: 14px; line-height: 1.5; }
-.mode-actions, .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.mode-actions, .actions, .family-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .injected-grid { margin-top: -4px; }
 
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
@@ -97,6 +97,10 @@ pre {
 .glossary-term-en { display: block; font-size: 11px; color: #cbd5e1; margin-top: 2px; }
 .glossary-note { display: block; font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
 
+.config-family-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.config-family-card strong { margin-bottom: 8px; }
+.family-card-meta { color: var(--muted); font-size: 12px; line-height: 1.45; min-height: 36px; margin-bottom: 12px; }
+
 .confirm-modal.hidden { display: none; }
 .confirm-modal { position: fixed; inset: 0; z-index: 120; }
 .confirm-modal-backdrop { position: absolute; inset: 0; background: rgba(2, 6, 23, 0.72); }
@@ -114,13 +118,13 @@ pre {
 .confirm-note { color: var(--muted); font-size: 13px; line-height: 1.5; }
 
 @media (max-width: 1180px) {
-  .summary-grid, .action-summary-grid, .mode-grid, .business-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-grid, .action-summary-grid, .mode-grid, .business-grid, .config-family-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kv-grid, .grid.two-up { grid-template-columns: 1fr; }
 }
 @media (max-width: 980px) {
   .topbar { flex-direction: column; align-items: stretch; }
   .token-panel { min-width: 0; }
   .token-row { flex-direction: column; }
-  .summary-grid, .action-summary-grid, .mode-grid, .business-grid { grid-template-columns: 1fr; }
+  .summary-grid, .action-summary-grid, .mode-grid, .business-grid, .config-family-grid { grid-template-columns: 1fr; }
   .glossary-wrap { flex-direction: column; }
 }
