@@ -4,32 +4,32 @@ const CRITICAL_ACTIONS = {
   "set-demo-mode": {
     title: "切换到 Demo Reserved",
     subtitle: "Set global execution mode to demo_reserved",
-    risk: "这一步的意义是把全局执行模式从 disabled 切到 demo_reserved。它不是下单，不是开启 live，也不是让 demo 立刻可执行。它只是告诉控制面：后续 demo 验证链可以按 demo 预留模式继续判断。",
-    consequence: "状态差异说明：demo_reserved = 允许 demo 链路进入下一步判断；demo_validate = 只是检查 gate 是否满足；demo_arm = 把 demo 状态推进到 armed_but_closed。也就是说，点这个按钮后，系统只是从“完全禁用 demo”变成“允许 demo 受保护推进”，不会直接开放执行。"
+    risk: "这一步只是把系统从“完全不走 demo 流程”，改成“允许继续做 demo 相关判断”。它不是下单，不是开启 live，也不是马上获得执行权。",
+    consequence: "点完后，系统只会进入“可以继续做 demo 检查”的状态。你之后仍然还要 validate、arm，甚至 future enable；所以这一步只是打开下一道门，不是直接放权。"
   },
   "enable-spot": {
-    title: "开启 Spot Shadow",
-    subtitle: "Enable spot product family in shadow mode",
-    risk: "这一步只影响产品族里的 spot。它会把 spot 从 disabled/visible-only 一侧，推进到 shadow_only 控制态。这里的 shadow 指“受控影子模式”，重点是可见性、配置和控制判断，不是真实成交。",
-    consequence: "状态差异说明：shadow = 某个功能或产品族进入影子控制态；spot shadow = 仅 spot 产品族进入 shadow；demo = 整个 demo 控制链状态机；demo arm = demo 状态机的关键前推节点。也就是说，这个按钮只会改变 spot 这一栏的能力展示与 gate 结果，不会改变其它产品族，也不会直接开启真实现货执行。"
+    title: "开启 Spot / 现货产品配置",
+    subtitle: "Enable spot family in shadow mode",
+    risk: "这一步只影响现货产品族。它会让 spot / 现货从“关闭/仅展示”进入 shadow 控制状态。shadow 的意思是：用于观察、验证、看控制结果，不是实际成交。",
+    consequence: "点完后，只会改变现货这一类产品的控制展示和 gate 结果，不会影响其它产品族，也不会直接让账户获得真实现货下单权限。"
   },
   validate: {
     title: "验证 Demo 前提",
     subtitle: "Validate demo prerequisites and gates",
-    risk: "这一步不会切模式，也不会推进 demo 主状态机。它只是重新检查 prerequisites、arm gate、enable gate、relock gate 等条件是否成立。",
-    consequence: "状态差异说明：demo validate = 纯检查；demo reserved = 改全局 demo 模式前提；demo arm = 真正推进 demo 主状态。也就是说，点 validate 后你看到的主要变化应该是 gate 结果与审计摘要，而不是执行权限本身。"
+    risk: "这一步只是做检查。它会重新判断系统现在是否满足 demo 的前置条件。它不会切模式，也不会推进 demo 主状态。",
+    consequence: "点完后，你主要会看到 gate 结果变了，比如“可以继续”还是“还不满足条件”。它不会直接提高执行权限。"
   },
   "arm-demo": {
     title: "执行 Demo Arm",
     subtitle: "Move demo state to armed_but_closed",
-    risk: "这是 demo 状态机里的关键一步。它会把 demo 主状态从 closed 或 relocked 推到 armed_but_closed。它仍然不是 enable，更不是 live execution，但它表示系统已经通过前置校验，进入“已武装但仍封闭”的受保护阶段。",
-    consequence: "状态差异说明：demo arm 之后，demo 会更接近 enable；但 armed_but_closed 仍明确表示‘封闭，不可直接执行’。所以这个动作的意义是推进 demo 主状态机，而不是放开真实下单。若前置 gate 或 previous_state 不匹配，动作会被阻断。"
+    risk: "这是 demo 流程里更关键的一步。它表示系统已经通过前置检查，进入“已准备好下一步，但仍然封闭”的状态。",
+    consequence: "点完后，demo 会更接近后续 enable，但仍然不能直接执行。你可以把它理解成“已经准备好了，但保险还没真正打开”。"
   },
   bundle: {
     title: "执行安全复核打包",
     subtitle: "Run safe recheck bundle",
-    risk: "该动作会一次性触发多步复核、聚合与结果刷新，适合在你希望整体更新 readiness、gate、audit 时使用。它不是单一模式按钮，而是‘一组安全检查动作’的打包执行。",
-    consequence: "状态差异说明：bundle 不等于切模式，也不等于 arm。它更像一次‘统一复核刷新’，会同时影响页面多个摘要块的最新结果。如果你只是想理解某一个状态差异，优先用单个按钮；如果你想让整页控制判断一起重算，再用 bundle。"
+    risk: "这一步会把多项检查和刷新一起跑一遍。它适合在你想让整页判断一起更新时使用。",
+    consequence: "点完后，readiness、gate、audit 等多个区域可能一起刷新。它本身不是切模式，也不是直接放权。"
   }
 };
 
@@ -94,16 +94,16 @@ function summarizeActionResult(actionName, result) {
     validate: "验证 Demo",
     bundle: "安全复核打包",
     "set-demo-mode": "切到 Demo Reserved",
-    "enable-spot": "开启 Spot Shadow",
+    "enable-spot": "开启 Spot / 现货产品配置",
     "arm-demo": "执行 Demo Arm"
   };
 
   const actionEnMap = {
-    refresh: "refresh",
+    refresh: "refresh overview",
     validate: "validate demo",
     bundle: "safe recheck bundle",
     "set-demo-mode": "set demo reserved",
-    "enable-spot": "enable spot shadow",
+    "enable-spot": "enable spot config",
     "arm-demo": "arm demo"
   };
 
@@ -112,17 +112,20 @@ function summarizeActionResult(actionName, result) {
   let helper = "Action completed.";
 
   if (actionName === "validate") {
-    hint = `前提 gate：${safeText(data.demo_prerequisites_gate_state)}；Arm gate：${safeText(data.demo_arm_gate_state)}`;
-    helper = `Prerequisites gate: ${safeText(data.demo_prerequisites_gate_state)}; Arm gate: ${safeText(data.demo_arm_gate_state)}`;
+    hint = `系统刚完成一次检查：前提 gate = ${safeText(data.demo_prerequisites_gate_state)}；Arm gate = ${safeText(data.demo_arm_gate_state)}。这表示“现在能不能继续走 demo 流程”，不是“现在能不能直接执行”。`;
+    helper = `This checked whether demo can continue, not whether execution is already open.`;
   } else if (actionName === "arm-demo") {
-    hint = `Demo 状态切换为：${safeText(data.demo_state_switch)}`;
-    helper = `Demo state switched to: ${safeText(data.demo_state_switch)}`;
-  } else if (actionName === "set-demo-mode" || actionName === "enable-spot") {
-    hint = `已接受路径：${(data.accepted_paths || []).join(", ") || "none"}`;
-    helper = `Accepted paths: ${(data.accepted_paths || []).join(", ") || "none"}`;
+    hint = `Demo 状态现在是：${safeText(data.demo_state_switch)}。简单理解：系统已经更接近下一步，但还没有真正放开执行。`;
+    helper = `The system moved closer to the next step, but execution is still not open.`;
+  } else if (actionName === "set-demo-mode") {
+    hint = `系统已经接受“进入 Demo Reserved”这个配置。简单理解：以后可以继续做 demo 相关判断了，但这一步本身不等于获得执行权。`;
+    helper = `Demo evaluation path is now allowed to continue, but no execution authority was opened by this step alone.`;
+  } else if (actionName === "enable-spot") {
+    hint = `系统已经接受现货产品配置修改。简单理解：现货这类产品现在会进入 shadow 控制展示，但并不等于账户已经能真实现货下单。`;
+    helper = `Spot moved into shadow control display, but real spot trading authority is still separate.`;
   } else if (actionName === "bundle") {
-    hint = `打包结果：${safeText(result.action_result)}`;
-    helper = `Bundle result: ${safeText(result.action_result)}`;
+    hint = `系统刚完成一轮统一复核刷新。简单理解：页面上的多个判断结果都可能更新了，但这一步本身不直接放权。`;
+    helper = `Multiple checks were refreshed together, but no authority was directly opened.`;
   } else if (actionName === "refresh") {
     hint = "界面已刷新。";
     helper = "Dashboard refreshed.";
@@ -193,7 +196,7 @@ function ensureGuiEnhancements() {
     }
     if (current.includes("产品族事实")) {
       h2.innerHTML = zhEnPrimary("产品族事实", "Product Family Facts");
-      card.querySelector(".subtle").textContent = "当前 visibility / capability / permission facts 概览。English kept secondary for readability.";
+      card.querySelector(".subtle").textContent = "这里优先展示事实层：交易所与账户真实返回的状态。控制层配置只是另一层。";
     }
     if (current.includes("快捷动作")) {
       h2.innerHTML = zhEnPrimary("快捷动作", "Quick Actions");
@@ -222,7 +225,7 @@ function ensureGuiEnhancements() {
     refresh: "刷新概览",
     validate: "验证 Demo",
     "set-demo-mode": "切到 Demo Reserved",
-    "enable-spot": "开启 Spot Shadow",
+    "enable-spot": "开启 Spot / 现货产品配置",
     "arm-demo": "执行 Demo Arm",
     bundle: "安全复核打包"
   };
@@ -230,7 +233,7 @@ function ensureGuiEnhancements() {
     refresh: "refresh overview",
     validate: "validate demo gates",
     "set-demo-mode": "global demo mode",
-    "enable-spot": "spot product family",
+    "enable-spot": "spot product config",
     "arm-demo": "move to armed_but_closed",
     bundle: "multi-step guarded recheck"
   };
@@ -259,21 +262,15 @@ function ensureGuiEnhancements() {
     hintCard.className = "card glossary-card";
     hintCard.id = "guiConceptHints";
     hintCard.innerHTML = `
-      <div class="card-header-row">
-        <div>
-          <h2>${zhEnPrimary("关键概念提示", "Key Concept Hints")}</h2>
-          <p class="subtle">放在不起眼的位置，只补充关键词释义，不打断主体排版。</p>
+      <details class="raw-toggle">
+        <summary>${zhEnPrimary("关键概念提示（按需展开）", "Key Concept Hints")}</summary>
+        <div class="glossary-wrap" style="padding:16px;">
+          ${annotateGlossary("事实", "Facts", "先看交易所、账户、runtime 实际返回了什么。事实是“真实情况”，不是你点按钮点出来的权限。", "Facts are the actual returned conditions, not permissions granted by a button.")}
+          ${annotateGlossary("权限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。这些是“允许系统往下判断”，不是“马上能执行”。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}
+          ${annotateGlossary("状态推进", "State Progress", "最后看 demo validate、demo arm 这类步骤。它们表示系统流程往前走了，但仍可能保持封闭。", "State progress means the workflow moved forward, but it can still remain closed.")}
+          ${annotateGlossary("最重要的一句", "Most Important Rule", "看得见 ≠ 被允许；被允许继续判断 ≠ 能执行；demo ≠ live。", "Visible is not allowed; allowed to continue is not executable; demo is not live.")}
         </div>
-      </div>
-      <div class="glossary-wrap">
-        ${annotateGlossary("Gate", "Gate", "门槛判断，表示某动作是否满足前提", "a gate decides whether an action is allowed to proceed")}
-        ${annotateGlossary("Shadow", "Shadow", "影子模式，只做可见性/控制验证，不开放真实执行", "shadow means validation and visibility without real live execution")}
-        ${annotateGlossary("Demo Reserved", "Demo Reserved", "全局 demo 预留模式，允许 demo 链路继续判断，但不等于可执行", "global demo-reserved mode that allows guarded demo flow without opening execution")}
-        ${annotateGlossary("Demo Validate", "Demo Validate", "只检查 gate，不推进 demo 主状态", "checks gates only and does not advance demo main state")}
-        ${annotateGlossary("Demo Arm", "Demo Arm", "把 demo 状态推进到 armed_but_closed 的关键节点", "a critical demo-state transition to armed_but_closed")}
-        ${annotateGlossary("Spot Shadow", "Spot Shadow", "只让现货产品族进入 shadow 控制态，不影响其它产品族", "puts only the spot family into shadow control state")}
-        ${annotateGlossary("Snapshot", "Snapshot", "同一屏数据的一致性标识", "the consistency marker for one screen of data")}
-      </div>`;
+      </details>`;
     const hero = document.querySelector(".hero-card");
     if (hero) hero.after(hintCard);
   }
@@ -297,13 +294,13 @@ function ensureGuiEnhancements() {
         </div>
         <div class="mode-actions">
           <button data-action="set-demo-mode">切到 Demo Reserved<span class="button-sub">global demo mode</span></button>
-          <button data-action="enable-spot">开启 Spot Shadow<span class="button-sub">spot product family</span></button>
+          <button data-action="enable-spot">开启 Spot / 现货产品配置<span class="button-sub">spot product config</span></button>
           <button data-action="validate">验证 Demo 前提<span class="button-sub">validate demo gates</span></button>
           <button data-action="arm-demo">执行 Demo Arm<span class="button-sub">move to armed_but_closed</span></button>
           <button class="button-muted" disabled>观测模式<span class="button-sub">Observe Only · later</span></button>
           <button class="button-muted" disabled>Live 模式<span class="button-sub">Live Mode · locked</span></button>
         </div>
-        <div id="modeControlNote" class="mode-note">当前 GUI 只开放受保护的 demo / shadow 动作；live 相关切换仍保持封闭。轻微英文说明保留在小字中，避免干扰主阅读流。</div>
+        <div id="modeControlNote" class="mode-note">简单理解这一区域：先决定“系统要不要进入 demo/spot 的受保护流程”，再决定“现在是否满足继续前进的条件”。它不是“真实执行权限开关区”。</div>
       </section>
       <section class="card" id="businessSummarySection">
         <div class="card-header-row">
@@ -325,6 +322,50 @@ function ensureGuiEnhancements() {
 
     const firstGrid = document.querySelector(".page-shell > .grid.two-up");
     if (firstGrid) firstGrid.before(grid);
+  }
+
+  if (!document.getElementById("productFamilyConfigSection")) {
+    const card = document.createElement("section");
+    card.className = "card";
+    card.id = "productFamilyConfigSection";
+    card.innerHTML = `
+      <div class="card-header-row">
+        <div>
+          <h2>${zhEnPrimary("产品族配置", "Product Family Configuration")}</h2>
+          <p class="subtle">这是后续正式承接“查看状态 + 调整设置”的独立区域。当前先做骨架，后续继续接入更多产品族设置。</p>
+        </div>
+      </div>
+      <div class="summary-grid business-grid">
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("现货产品配置", "Spot Configuration")}</span>
+          <strong id="cfgSpotSummary">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("保证金产品配置", "Margin Configuration")}</span>
+          <strong id="cfgMarginSummary">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("线性永续配置", "Linear Perp Configuration")}</span>
+          <strong id="cfgLinearPerpSummary">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("反向永续配置", "Inverse Perp Configuration")}</span>
+          <strong id="cfgInversePerpSummary">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("期权配置", "Options Configuration")}</span>
+          <strong id="cfgOptionsSummary">-</strong>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">${zhEnPrimary("其他衍生品（预留）", "Other Derivatives Reserved")}</span>
+          <strong id="cfgOtherDerivativesSummary">-</strong>
+        </div>
+      </div>
+      <div class="mode-note">后续我们可以在这里继续加入：各产品族是否启用、是否可见、当前 mode、以及专属设置按钮。这样它会比现在单纯看表格更清楚。</div>`;
+    const productFactsCard = Array.from(document.querySelectorAll(".page-shell > .card")).find((node) => node.querySelector("h2")?.textContent.includes("产品族事实"));
+    if (productFactsCard) {
+      productFactsCard.before(card);
+    }
   }
 
   if (!document.getElementById("confirmModal")) {
@@ -435,6 +476,27 @@ function renderBusinessSummary(overview) {
   });
 }
 
+function renderProductFamilyConfig(productFamilies) {
+  const familyMap = {
+    spot: "cfgSpotSummary",
+    margin: "cfgMarginSummary",
+    perp_linear: "cfgLinearPerpSummary",
+    perp_inverse: "cfgInversePerpSummary",
+    options: "cfgOptionsSummary",
+    other_derivatives_reserved: "cfgOtherDerivativesSummary"
+  };
+  Object.entries(familyMap).forEach(([family, nodeId]) => {
+    const node = document.getElementById(nodeId);
+    const data = productFamilies[family];
+    if (!node) return;
+    if (!data) {
+      node.textContent = "-";
+      return;
+    }
+    node.textContent = `enabled=${data.controls.enabled_switch} · visible=${data.controls.visibility_switch} · mode=${data.controls.mode_switch}`;
+  });
+}
+
 function renderSourceContext(sourceContext) {
   renderKvGrid("sourceContextGrid", [
     [zhEnPrimary("只读连接器", "Readonly Connector"), sourceContext.readonly_connector_name],
@@ -507,6 +569,7 @@ async function loadDashboard() {
   renderSummary(overview);
   renderModeControl(overview);
   renderBusinessSummary(overview);
+  renderProductFamilyConfig(productFamilies.data);
   renderSourceContext(sourceContext.data);
   renderHealth(overview);
   renderProductFamilies(productFamilies.data);
