@@ -232,6 +232,26 @@ python3 scripts/bybit_runtime_state_resolver.py
   - 跨交易所套利：接入 Binance 扫描，发现 Bybit-Binance 价差
   - 波动率 regime 切换：市场整体波动率变化时自动调整 max_symbols 和策略偏好
 
+OpenClaw 开发潜力（通信层 → 信息增强层）：
+  第一步（近期）：
+    - Telegram 告警接通：交易信号/止损触发/异常推送到手机
+    - Cron 日报：每天 UTC 0:00 自动生成持仓/PnL/策略表现日报 → 推送 Telegram
+  第二步（数据积累期间）：
+    - web-pilot 新闻扫描：每 30 分钟抓 CoinDesk/Bybit 公告 → 情绪打分 → 注入信号引擎
+    - 事件驱动信号：FOMC/CPI → 自动降杠杆收紧止损；上币公告 → 提前部署策略
+    - Cron 小时简报 → 存入 Memory 知识库积累市场认知
+  第三步（长期）：
+    - 多 Agent 架构：研究员（新闻收集）+ 监控员（持仓巡检）+ 分析师（策略优化）
+    - Twitter/X 情绪信号（xurl skill）→ 与技术信号交叉验证
+    - 跨交易所价差监控（web-pilot 抓 Binance/OKX 价格）→ 套利信号
+    - Canvas 实时面板：Agent 自主生成可视化仪表盘
+    - Browser 自动化：登录 Bybit 网页端核对实际订单/持仓
+  OpenClaw 已有能力（v2026.3.24）：
+    - 51 内置 skill（8 已就绪），23+ 通信通道，Cron + Heartbeat 定时
+    - web-pilot 网页搜索/抓取（免费），Browser 自动化，Memory 向量检索
+    - Multi-Agent 路由（隔离工作空间），Canvas A2UI 实时渲染
+    - 当前角色：通信层（嘴巴和耳朵），不参与 AI 调用和交易决策
+
 之后：
   M 章：Supervised Live Gate（需先积累 paper trading 数据）
   N 章：Constrained Autonomous Live
