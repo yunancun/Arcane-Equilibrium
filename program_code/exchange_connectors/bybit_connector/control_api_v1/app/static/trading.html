@@ -25,9 +25,7 @@
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
   .status-dot.live { background: var(--green); }
   .status-dot.err { background: var(--red); }
-  .token-input { background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-    color: var(--text); font-size: 11px; padding: 4px 8px; width: 180px; }
-  .token-input::placeholder { color: var(--text-dim); }
+  /* token-input removed — auth handled by login page */
   .spacer { flex: 1; }
 
   /* Layout */
@@ -129,15 +127,10 @@
 
 <div class="header">
   <div class="status-dot" id="api-dot"></div>
-  <h1>OpenClaw Trading Chart</h1>
+  <h1>OpenClaw K线图表</h1>
   <span class="tag tag-blue">Paper Trading</span>
-  <span class="tag tag-green">shadow_only</span>
-  <a href="/console" class="nav-link" style="margin-left:8px">Console</a>
-  <a href="/gui" class="nav-link">GUI</a>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
-  <input type="password" id="token-input" class="token-input" placeholder="API Token" />
-  <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:11px;padding:4px 10px;cursor:pointer">Logout</button>
 </div>
 
 <div class="layout">
@@ -256,18 +249,9 @@ function getToken() {
   return localStorage.getItem(TOKEN_KEY) || '';
 }
 
-function saveToken(t) {
-  localStorage.setItem(TOKEN_KEY, t);
-}
+// saveToken removed — managed by login page
 
-const tokenInput = document.getElementById('token-input');
-tokenInput.value = getToken();
-tokenInput.addEventListener('change', () => {
-  saveToken(tokenInput.value.trim());
-  _authFailCount = 0;  // Reset auth failure counter on new token
-  startAutoRefresh();
-  loadAll();
-});
+// Token is managed by login page via localStorage — no manual input needed
 
 // ============================================================
 // API helper

@@ -24,7 +24,26 @@
 
 <!-- ═══ Strategy Cards ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4CB; 策略列表 / Registered Strategies</h3>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <h3 style="margin:0">&#x1F4CB; 策略列表 / Registered Strategies</h3>
+    <button class="oc-btn oc-btn-primary" onclick="toggleCreateForm()">&#x2795; 创建策略 / Create Strategy</button>
+  </div>
+
+  <!-- Create Strategy Form (hidden by default) -->
+  <div id="create-form" style="display:none;margin-bottom:14px;padding:14px;background:var(--bg);border:1px solid #21262d;border-radius:8px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px">新建策略 / Create New Strategy</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <div><label style="font-size:10px;color:var(--text-dim)">Type / 类型</label>
+      <select class="oc-select" id="new-type"><option value="ma_crossover">MA Crossover / 均线交叉</option><option value="bb_reversion">BB Reversion / 布林回归</option><option value="funding_arb">Funding Arb / 资金费率套利</option><option value="grid">Grid / 网格交易</option><option value="bb_breakout">BB Breakout / 布林突破</option></select></div>
+      <div><label style="font-size:10px;color:var(--text-dim)">Symbol / 币种</label>
+      <input class="oc-input" id="new-symbol" value="BTCUSDT" style="width:120px" /></div>
+      <div><label style="font-size:10px;color:var(--text-dim)">Qty/Trade</label>
+      <input class="oc-input" id="new-qty" type="number" value="0.001" step="0.001" style="width:90px" /></div>
+      <button class="oc-btn oc-btn-success" onclick="createStrategy()">Create</button>
+      <button class="oc-btn" onclick="toggleCreateForm()">Cancel</button>
+    </div>
+  </div>
+
   <div class="oc-strat-grid" id="strategy-grid">
     <div class="oc-loading">Loading strategies...</div>
   </div>
@@ -111,6 +130,38 @@ $('explain-intents').innerHTML = ocExplain(
   'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、price、strategy_source。intent 会经过 StopManager 风控检查和 Position Sizing 计算后，转换为实际订单提交给 Paper Trading Engine 或 Bybit Demo。'
 );
 
+// ─── Create / Delete Strategy ─────────────────────────────────
+function toggleCreateForm() {
+  const form = $('create-form');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function createStrategy() {
+  const body = {
+    strategy_type: $('new-type').value,
+    symbol: $('new-symbol').value.trim().toUpperCase(),
+    qty_per_trade: parseFloat($('new-qty').value) || 0.001,
+  };
+  const d = await ocPost('/api/v1/strategy/create', body);
+  if (d) {
+    ocToast('Strategy created: ' + (d.data ? d.data.strategy : ''), 'success');
+    toggleCreateForm();
+    loadStrategies();
+  } else {
+    ocToast('Create failed', 'error');
+  }
+}
+
+async function deleteStrategy(name) {
+  const d = await ocApi('/api/v1/strategy/' + encodeURIComponent(name), { method: 'DELETE' });
+  if (d) {
+    ocToast(name + ' deleted', 'success');
+    loadStrategies();
+  } else {
+    ocToast('Delete failed', 'error');
+  }
+}
+
 // ─── Strategy Actions ─────────────────────────────────────────
 async function strategyAction(name, action) {
   const d = await ocPost('/api/v1/strategy/' + encodeURIComponent(name) + '/' + action);
@@ -160,9 +211,9 @@ async function loadStrategies() {
     if (s.current_position) html += ' | Position: ' + ocEsc(s.current_position);
     html += '</div>';
     html += '<div class="strat-actions" style="margin-top:6px">';
-    html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close: overrides AI decision" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Hard Stop</button>';
-    html += '<button class="oc-btn" title="暂停策略 / Pause: AI can resume later" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
-    html += '<span style="font-size:10px;color:var(--text-dim);margin-left:6px">AI 自主决定启停 / AI decides activation</span>';
+    html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
+    html += '<button class="oc-btn" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
+    html += '<button class="oc-btn oc-btn-danger" title="删除策略 / Delete permanently" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
     html += '</div>';
     html += '</div>';
   });
