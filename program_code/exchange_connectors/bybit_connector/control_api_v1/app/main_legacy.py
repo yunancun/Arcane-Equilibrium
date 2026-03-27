@@ -965,6 +965,21 @@ def _compile_product_family_derived(state: dict[str, Any], pf: str) -> None:
     pf_state["derived"]["product_family_summary"] = summary
 
 
+def _compile_for_response(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Compile state for building mutator response data (no file write).
+    为构建 mutator 响应数据编译状态（不写文件）。
+
+    This handles both the original compile_state and the patched stable_compile_state.
+    兼容原始 compile_state 和 patched stable_compile_state。
+    """
+    import inspect
+    sig = inspect.signature(compile_state)
+    if "refresh_identity" in sig.parameters:
+        return compile_state(state, refresh_identity=False)
+    return compile_state(state)
+
+
 def compile_state(state: dict[str, Any]) -> dict[str, Any]:
     state = copy.deepcopy(state)
     state["meta"]["snapshot_ts_ms"] = now_ms()
@@ -1374,7 +1389,7 @@ class JsonStateStore:
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            compiled = compile_state(state)
+            compiled = _compile_for_response(state)
             # Atomic write: write to temp file, then rename (prevents corruption on crash)
             fd, tmp_path = tempfile.mkstemp(
                 dir=str(self.file_path.parent),
@@ -1655,7 +1670,7 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
             is_control_action=True,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -1669,7 +1684,6 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -1722,7 +1736,7 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
             is_control_action=True,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -1740,7 +1754,6 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -1830,7 +1843,7 @@ def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor
             is_control_action=True,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -1843,7 +1856,6 @@ def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -1903,7 +1915,7 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
             is_control_action=True,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         steps = [
             {"step_name": "j-canonical", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
             {"step_name": "k-canonical", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
@@ -1922,7 +1934,6 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -1986,10 +1997,9 @@ def apply_input_action(envelope: RequestEnvelope, actor: AuthenticatedActor, act
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {"audit_ref": audit_ref, "data": {"accepted": True, "record_count_delta": delta}, "snapshot": compiled}
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2042,14 +2052,13 @@ def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"accepted_paths": accepted_paths, "rejected_paths": rejected_paths},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2164,7 +2173,7 @@ def apply_product_family_config(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -2180,7 +2189,6 @@ def apply_product_family_config(
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2260,7 +2268,7 @@ def apply_pnl_entry(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tup
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -2273,7 +2281,6 @@ def apply_pnl_entry(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tup
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2420,14 +2427,13 @@ def apply_learning_observation(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"accepted": True, "observation_id": observation_id, "record_count_delta": 1},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2506,14 +2512,13 @@ def apply_learning_lesson(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"accepted": True, "lesson_id": lesson_id, "record_count_delta": 1},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2590,14 +2595,13 @@ def apply_learning_hypothesis(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"accepted": True, "hypothesis_id": hypothesis_id, "status": "proposed", "record_count_delta": 1},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2689,7 +2693,7 @@ def apply_learning_experiment(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -2700,7 +2704,6 @@ def apply_learning_experiment(
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2773,14 +2776,13 @@ def apply_hypothesis_verdict(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"hypothesis_id": hypothesis_id, "new_status": new_status, "operator_verdict": verdict},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2845,14 +2847,13 @@ def apply_experiment_approval(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"experiment_id": experiment_id, "new_status": action, "operator_approval": action},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -2920,7 +2921,7 @@ def apply_experiment_completion(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -2930,7 +2931,6 @@ def apply_experiment_completion(
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -3003,14 +3003,13 @@ def apply_pnl_period_snapshot(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {"accepted": True, "record_count_delta": 1},
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -3598,7 +3597,7 @@ def apply_auto_generate(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -3610,7 +3609,6 @@ def apply_auto_generate(
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
@@ -3784,7 +3782,7 @@ def apply_review_decision(
             is_control_action=False,
         )
         _bump_revision(state)
-        compiled = STORE.write(state)
+        compiled = _compile_for_response(state)
         response = {
             "audit_ref": audit_ref,
             "data": {
@@ -3797,7 +3795,6 @@ def apply_review_decision(
             "snapshot": compiled,
         }
         _store_idempotent_response(compiled, envelope, response)
-        STORE.write(compiled)
         return compiled
 
     final_state = STORE.mutate(mutator)
