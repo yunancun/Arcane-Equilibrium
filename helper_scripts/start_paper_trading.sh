@@ -60,8 +60,8 @@ except: print('none')
 " 2>/dev/null)
 
 if [[ "$SESSION_STATUS" != "active" ]]; then
-    echo "  Starting paper session (initial_balance=10000)..."
-    api_post "/api/v1/paper/session/start" '{"initial_balance": 10000}'
+    echo "  Starting paper session (initial_balance=100000, matching Bybit Demo)..."
+    api_post "/api/v1/paper/session/start" '{"initial_balance": 100000}'
     sleep 1
 else
     echo "  Paper session already active"

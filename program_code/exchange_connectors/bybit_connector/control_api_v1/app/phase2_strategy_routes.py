@@ -231,13 +231,15 @@ try:
     from local_model_tools.market_scanner import MarketScanner
     from local_model_tools.strategy_auto_deployer import StrategyAutoDeployer
 
-    MARKET_SCANNER = MarketScanner(max_symbols=5)
+    MARKET_SCANNER = MarketScanner(max_symbols=10)
     AUTO_DEPLOYER = StrategyAutoDeployer(
         orchestrator=ORCHESTRATOR,
         kline_manager=KLINE_MANAGER,
         paper_engine=PAPER_ENGINE,
-        max_symbols=5,
-        risk_per_trade_pct=1.0,  # Risk 1% of balance per trade
+        max_symbols=10,            # Agent can trade up to 10 symbols simultaneously
+        risk_per_trade_pct=2.0,    # Risk 2% of balance per trade (more aggressive)
+        min_qty_usdt=20.0,         # Minimum $20 per trade
+        max_qty_pct=15.0,          # Max 15% of balance per single trade
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()
