@@ -78,9 +78,9 @@ except: print('False')
 " 2>/dev/null)
 
 if [[ "$FEED_STATUS" != "True" ]]; then
-    api_post "/api/v1/paper/market-feed/start"
+    api_post "/api/v1/paper/market-feed/start" '{"symbols": ["BTCUSDT", "ETHUSDT"]}'
     echo "  Market feed started"
-    sleep 2
+    sleep 3
 else
     echo "  Market feed already running"
 fi
