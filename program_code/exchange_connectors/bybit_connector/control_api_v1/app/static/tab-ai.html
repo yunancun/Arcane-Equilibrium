@@ -45,22 +45,64 @@
   </div>
 </div>
 
-<!-- ═══ AI Consultation Status ═══ -->
-<div class="oc-grid-2">
-  <div class="oc-card">
-    <h3>&#x1F4AC; AI 咨询状态 / Consultation Status</h3>
-    <div id="explain-consult"></div>
-    <div class="oc-metrics" id="consult-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">Enabled</div><div class="oc-metric-val" id="c-enabled">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Running</div><div class="oc-metric-val" id="c-running">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Total Queries</div><div class="oc-metric-val" id="c-queries">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Last Query</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
+<!-- ═══ AI Settings (Editable) ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+  <h3>&#x1F527; AI 引擎设置 / Engine Settings</h3>
+  <div id="explain-settings"></div>
+
+  <div class="oc-grid-2" style="margin-top:10px">
+    <div style="display:grid;gap:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">启用 AI 引擎 / Enable</div><div style="font-size:10px;color:var(--text-dim)">关闭后所有 AI 查询将停止</div></div>
+        <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">启用</option><option value="false">禁用</option></select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">绝对不可超越的每日成本上限</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-hard-cap" type="number" step="0.5" min="0" max="100" style="width:80px" /></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自适应预算的基准值，AI 可在上下限内浮动</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-base-daily" type="number" step="0.5" min="0" max="50" style="width:80px" /></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">弹性上限倍数 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多可扩大到基准的几倍</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-max-mult" type="number" step="0.1" min="1" max="5" style="width:80px" /><span>x</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">弹性下限倍数 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少缩减到基准的几倍</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-min-mult" type="number" step="0.1" min="0" max="1" style="width:80px" /><span>x</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">单次 Sonnet 预算 / Sonnet Budget</div><div style="font-size:10px;color:var(--text-dim)">每次 Sonnet 会话最大成本</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-sonnet-budget" type="number" step="0.1" min="0" max="10" style="width:80px" /></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">单次 Opus 预算 / Opus Budget</div><div style="font-size:10px;color:var(--text-dim)">每次 Opus 会话最大成本</div></div>
+        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-opus-budget" type="number" step="0.5" min="0" max="20" style="width:80px" /></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">允许 Opus 升级 / Allow Opus</div><div style="font-size:10px;color:var(--text-dim)">是否允许系统在需要时升级到 Opus 模型</div></div>
+        <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允许</option><option value="false">不允许</option></select>
+      </div>
+      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig()" style="margin-top:4px">&#x1F4BE; 保存 AI 设置 / Save AI Settings</button>
+    </div>
+
+    <div>
+      <h4 style="font-size:13px;margin-bottom:8px">当前配置 / Current Config</h4>
+      <div id="ai-config" class="oc-loading">Loading...</div>
     </div>
   </div>
+</div>
 
-  <div class="oc-card">
-    <h3>&#x1F4CB; 引擎配置 / Engine Config</h3>
-    <div id="ai-config" class="oc-loading">Loading...</div>
+<!-- ═══ AI Consultation Status ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4AC; AI 咨询状态 / Consultation Status</h3>
+  <div id="explain-consult"></div>
+  <div class="oc-metrics" id="consult-metrics">
+    <div class="oc-metric"><div class="oc-metric-label">Enabled</div><div class="oc-metric-val" id="c-enabled">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Running</div><div class="oc-metric-val" id="c-running">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Total Queries</div><div class="oc-metric-val" id="c-queries">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Last Query</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
   </div>
 </div>
 
@@ -105,6 +147,28 @@ $('explain-pricing').innerHTML = ocExplain(
   '定价表列出了各 AI 模型的成本。系统根据这个表来计算每次 AI 调用的费用。',
   '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。缓存命中的 token 价格更低。不同模型的价格差异很大：Haiku 约为 Opus 的 1/20。'
 );
+
+$('explain-settings').innerHTML = ocExplain(
+  '在这里设置 AI 引擎的预算和行为。日硬上限是绝对不可超越的每日成本上限。弹性基准允许 AI 根据表现自动调整预算：赚钱时适当增加，亏损时自动缩减。',
+  '自适应预算系统通过 multiplier 控制弹性范围。例如基准 $8、最大 2x、最小 0.3x，则实际预算在 $2.4-$16 之间浮动，但永远不超过日硬上限 $15。Sonnet/Opus 预算控制单次会话的最大成本，防止单次查询消耗过多。Allow Opus 控制是否允许升级到更昂贵但更深入的 Opus 模型。'
+);
+
+// ─── Save AI Config ───────────────────────────────────────────
+async function saveAIConfig() {
+  const body = {
+    daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 15,
+    adaptive_base_daily_usd: parseFloat($('ai-base-daily').value) || 8,
+    adaptive_max_multiplier: parseFloat($('ai-max-mult').value) || 2,
+    adaptive_min_multiplier: parseFloat($('ai-min-mult').value) || 0.3,
+    session_budget_sonnet_usd: parseFloat($('ai-sonnet-budget').value) || 1.5,
+    session_budget_opus_usd: parseFloat($('ai-opus-budget').value) || 4,
+    allow_opus_upgrade: $('ai-allow-opus').value === 'true',
+    adaptive_enabled: $('ai-enabled').value === 'true',
+  };
+  const d = await ocPost('/api/v1/paper/layer2/config', body);
+  if (d) { ocToast('AI settings saved', 'success'); loadAll(); }
+  else ocToast('Save failed', 'error');
+}
 
 // ─── Actions ──────────────────────────────────────────────────
 async function triggerSession() {
@@ -209,6 +273,16 @@ async function loadConfig() {
   });
   html += '</div>';
   ocSetHtml('ai-config', html);
+
+  // Populate input fields
+  if (!$('ai-hard-cap').value) $('ai-hard-cap').value = cfg.daily_hard_cap_usd || 15;
+  if (!$('ai-base-daily').value) $('ai-base-daily').value = cfg.adaptive_base_daily_usd || 8;
+  if (!$('ai-max-mult').value) $('ai-max-mult').value = cfg.adaptive_max_multiplier || 2;
+  if (!$('ai-min-mult').value) $('ai-min-mult').value = cfg.adaptive_min_multiplier || 0.3;
+  if (!$('ai-sonnet-budget').value) $('ai-sonnet-budget').value = cfg.session_budget_sonnet_usd || 1.5;
+  if (!$('ai-opus-budget').value) $('ai-opus-budget').value = cfg.session_budget_opus_usd || 4;
+  $('ai-allow-opus').value = cfg.allow_opus_upgrade !== false ? 'true' : 'false';
+  $('ai-enabled').value = cfg.adaptive_enabled !== false ? 'true' : 'false';
 }
 
 async function loadPricing() {

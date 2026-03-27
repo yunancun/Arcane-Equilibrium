@@ -148,6 +148,7 @@
       <option value="BTCUSDT">BTCUSDT</option>
       <option value="ETHUSDT">ETHUSDT</option>
     </select>
+    <div style="font-size:9px;color:var(--text-dim);margin-top:3px" id="sym-hint">Agent 交易的币种会自动加入</div>
 
     <h2>Timeframe</h2>
     <div class="btn-group" id="tf-buttons">
@@ -558,6 +559,48 @@ async function loadPnL() {
 // ============================================================
 // Master loader
 // ============================================================
+// Dynamic symbol loader — adds Agent-traded symbols to selector
+async function loadDynamicSymbols() {
+  const sel = document.getElementById('symbol-select');
+  const existing = new Set([...sel.options].map(o => o.value));
+  try {
+    // Get symbols from strategies
+    const d = await api('/api/v1/strategy/list');
+    if (d && d.data && d.data.strategies) {
+      d.data.strategies.forEach(s => {
+        if (s.symbol && !existing.has(s.symbol)) {
+          sel.add(new Option(s.symbol, s.symbol));
+          existing.add(s.symbol);
+        }
+      });
+    }
+    // Get symbols from paper positions
+    const p = await api('/api/v1/paper/positions');
+    if (p && p.data) {
+      const positions = p.data.positions || {};
+      Object.keys(positions).forEach(sym => {
+        if (!existing.has(sym)) {
+          sel.add(new Option(sym, sym));
+          existing.add(sym);
+        }
+      });
+    }
+    // Get symbols from demo positions
+    const dd = await api('/api/v1/strategy/demo/positions');
+    if (dd && dd.data && dd.data.result && dd.data.result.list) {
+      dd.data.result.list.forEach(pos => {
+        if (pos.symbol && parseFloat(pos.size || 0) > 0 && !existing.has(pos.symbol)) {
+          sel.add(new Option(pos.symbol, pos.symbol));
+          existing.add(pos.symbol);
+        }
+      });
+    }
+    if (existing.size > 2) {
+      document.getElementById('sym-hint').textContent = existing.size + ' symbols available';
+    }
+  } catch(e) {}
+}
+
 async function loadAll() {
   const bar = document.getElementById('refresh-bar');
   bar.style.width = '0%';
@@ -569,6 +612,7 @@ async function loadAll() {
     loadStrategies(),
     loadOrchestratorStatus(),
     loadPnL(),
+    loadDynamicSymbols(),
   ]);
 
   bar.style.width = '70%';

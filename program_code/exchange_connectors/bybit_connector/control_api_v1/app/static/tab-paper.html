@@ -337,20 +337,30 @@ async function loadMetrics() {
   const d = await ocApi('/api/v1/paper/metrics');
   if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">No metrics available</div>'); return; }
   const m = d.data;
+  // Metrics are nested: trade_metrics, drawdown_metrics, holding_period_metrics
+  const tm = m.trade_metrics || {};
+  const dm = m.drawdown_metrics || {};
+  const hm = m.holding_period_metrics || {};
   let html = '';
   const items = [
-    ['Sharpe Ratio', m.sharpe_ratio],
-    ['Max Drawdown', m.max_drawdown != null ? (m.max_drawdown * 100).toFixed(1) + '%' : null],
-    ['Win Rate', m.win_rate != null ? (m.win_rate * 100).toFixed(1) + '%' : null],
-    ['Avg Hold Time', m.avg_holding_period_minutes != null ? Math.round(m.avg_holding_period_minutes) + ' min' : null],
-    ['Total Trades', m.total_trades],
-    ['Profit Factor', m.profit_factor],
+    ['Total Fills', tm.total_fills || m.total_fills],
+    ['Round Trips', tm.total_round_trips || m.total_trades],
+    ['Win Rate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
+    ['Win/Loss Ratio', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
+    ['Max Drawdown', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
+    ['Peak Balance', dm.peak_balance != null ? '$' + ocNum(dm.peak_balance, 2) : null],
+    ['Current Balance', dm.current_balance != null ? '$' + ocNum(dm.current_balance, 2) : null],
+    ['Avg Hold Time', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
+    ['Total Fees', tm.total_fees_paid != null ? '$' + ocNum(tm.total_fees_paid, 4) : null],
+    ['Largest Win', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
+    ['Largest Loss', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
+    ['Avg Loss', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
   ];
   items.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:16px">' + (val != null ? val : '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
   });
   ocSetHtml('perf-metrics', '<div class="oc-metrics">' + html + '</div>');
-  ocSetText('p-winrate', m.win_rate != null ? (m.win_rate * 100).toFixed(1) + '%' : '--');
+  ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');
 }
 
 async function loadShadow() {

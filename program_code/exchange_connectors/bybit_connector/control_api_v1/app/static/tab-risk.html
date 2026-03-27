@@ -58,21 +58,95 @@
   </div>
 </div>
 
-<!-- ═══ Stop Manager ═══ -->
+<!-- ═══ Stop Manager (Editable) ═══ -->
 <div class="oc-card">
-  <h3>&#x1F6D1; 止损管理器 / Stop Manager</h3>
+  <h3>&#x1F6D1; 止损设置 / Stop Manager Settings</h3>
   <div id="explain-stops"></div>
-  <div class="oc-metrics" id="stop-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Hard Stop Loss</div><div class="oc-metric-val red" id="s-hard">--</div><div class="oc-metric-sub">固定止损线</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Trailing Stop</div><div class="oc-metric-val yellow" id="s-trailing">--</div><div class="oc-metric-sub">跟踪止损</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Time Stop</div><div class="oc-metric-val" id="s-time">--</div><div class="oc-metric-sub">超时平仓</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">ATR Multiplier</div><div class="oc-metric-val" id="s-atr">--</div><div class="oc-metric-sub">动态仓位系数</div></div>
+
+  <div class="oc-grid-2" style="margin-top:10px">
+    <div>
+      <div style="display:grid;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600;color:var(--red)">Hard Stop Loss / 硬止损</div><div style="font-size:10px;color:var(--text-dim)">单笔最大亏损百分比，触发后立即平仓</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-hard-stop" type="number" step="0.5" min="0.5" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">Trailing Stop / 跟踪止损</div><div style="font-size:10px;color:var(--text-dim)">从最高盈利回撤此百分比后平仓</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-trailing" type="number" step="0.5" min="0" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600">Time Stop / 超时止损</div><div style="font-size:10px;color:var(--text-dim)">持仓超过此时间后自动平仓</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-time-stop" type="number" step="1" min="1" max="720" style="width:80px" /><span style="font-size:12px">小时</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600">Max Session Drawdown / 最大回撤</div><div style="font-size:10px;color:var(--text-dim)">账户回撤超过此值则暂停交易</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-drawdown" type="number" step="1" min="1" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600">Max Leverage / 最大杠杆</div><div style="font-size:10px;color:var(--text-dim)">单笔交易最大杠杆倍数</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-leverage" type="number" step="1" min="1" max="100" style="width:80px" /><span style="font-size:12px">x</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏损上限</div><div style="font-size:10px;color:var(--text-dim)">单日亏损超过此值后停止当日交易</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-daily-loss" type="number" step="0.5" min="0.5" max="30" style="width:80px" /><span style="font-size:12px">%</span></div>
+        </div>
+        <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:6px">&#x1F4BE; 保存设置 / Save Settings</button>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
+        <div class="oc-metric"><div class="oc-metric-label">Hard Stop</div><div class="oc-metric-val red" id="s-hard" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Trailing Stop</div><div class="oc-metric-val yellow" id="s-trailing" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Time Stop</div><div class="oc-metric-val" id="s-time" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="s-drawdown" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Leverage</div><div class="oc-metric-val" id="s-leverage" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Daily Loss</div><div class="oc-metric-val" id="s-daily" style="font-size:16px">--</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ AI Stop-Loss Consultation ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+  <h3>&#x1F916; AI 止损建议 / AI Stop-Loss Consultation</h3>
+  <div id="explain-ai-consult"></div>
+
+  <div class="oc-grid-2" style="margin-top:10px">
+    <div>
+      <div style="display:grid;gap:8px">
+        <div><label style="font-size:11px;color:var(--text-dim)">AI 模型 / Model</label>
+        <select class="oc-select" id="ai-model" style="width:100%">
+          <option value="sonnet">Claude Sonnet（快速，低成本）</option>
+          <option value="opus">Claude Opus（深度分析，高成本）</option>
+          <option value="haiku">Claude Haiku（极速，最低成本）</option>
+        </select></div>
+        <div><label style="font-size:11px;color:var(--text-dim)">关注重点 / Focus</label>
+        <select class="oc-select" id="ai-focus" style="width:100%">
+          <option value="conservative">保守型：优先保本，减少回撤</option>
+          <option value="balanced">均衡型：平衡风险和收益</option>
+          <option value="aggressive">激进型：允许更大波动追求收益</option>
+        </select></div>
+        <button class="oc-btn oc-btn-primary" onclick="askAIStopLoss()" id="btn-ask-ai">&#x1F916; 向 AI 询问止损建议 / Ask AI</button>
+        <div style="font-size:10px;color:var(--text-dim)" id="ai-cost-hint">预估成本：Sonnet ~$0.02 | Opus ~$0.15 | Haiku ~$0.002</div>
+      </div>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px">AI 建议 / AI Recommendation</div>
+      <div id="ai-advice-body" class="oc-pre" style="min-height:120px;font-size:12px;white-space:pre-wrap">
+        点击左侧按钮向 AI 询问。AI 会根据当前持仓、市场状态、历史表现给出具体的止损建议。
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px" id="ai-advice-actions" style="display:none">
+        <button class="oc-btn oc-btn-success" onclick="applyAIAdvice()" style="display:none" id="btn-apply-ai">&#x2714; 采纳建议 / Apply</button>
+      </div>
+    </div>
   </div>
 </div>
 
 <!-- ═══ AI Risk Context ═══ -->
 <details class="oc-collapse">
-  <summary>&#x1F916; AI 风控建议 / AI Risk Context</summary>
+  <summary>&#x1F916; AI 风控上下文 / AI Risk Context</summary>
   <div class="oc-collapse-body">
     <div id="explain-ai-risk"></div>
     <div id="ai-risk-body" class="oc-loading">Loading...</div>
@@ -112,8 +186,13 @@ $('explain-p2').innerHTML = ocExplain(
 );
 
 $('explain-stops').innerHTML = ocExplain(
-  '止损管理器负责自动平仓保护。有三种止损类型：固定止损（跌到某个价格就平仓）、跟踪止损（随着利润上升自动上移止损线）、超时止损（持仓超过设定时间自动平仓）。',
-  'Hard Stop 是绝对止损线，一旦触发不可撤销。Trailing Stop 会跟随最高价格移动，当价格从最高点回撤超过设定百分比时触发。Time Stop 防止长时间持仓占用资金——如果持仓超过设定小时数且没有明显盈利趋势，会自动平仓。ATR Multiplier 用于根据市场波动率（Average True Range）动态调整仓位大小。'
+  '在这里设置止损硬限制。修改左侧数值后点击"保存设置"即可生效。这些是人工设定的硬边界，AI Agent 不能超越这些限制。',
+  'Hard Stop 是单笔最大亏损百分比，触发后立即平仓不可撤销。Trailing Stop 会跟随最高价格移动，从最高点回撤超过设定百分比时触发。Time Stop 防止长时间持仓占用资金。Max Session Drawdown 是账户级别的回撤保护，触发后暂停所有交易。Max Leverage 限制单笔最大杠杆。Daily Loss 是当日亏损上限。'
+);
+
+$('explain-ai-consult').innerHTML = ocExplain(
+  '让 AI 分析你当前的交易状况并给出止损建议。选择模型和风格，点击"询问"按钮，AI 会根据你的持仓、市场状态和历史表现给出具体建议。你可以选择是否采纳。',
+  'AI 会获取以下信息来生成建议：当前所有持仓的详情、最近交易的胜率和回撤数据、当前市场 regime（趋势/震荡）、波动率水平。基于这些信息，AI 会推荐具体的止损百分比、跟踪止损距离和时间止损设置。不同模型的深度和成本不同：Haiku 最快最便宜但分析较浅，Opus 最深入但成本较高。'
 );
 
 $('explain-ai-risk').innerHTML = ocExplain(
@@ -125,6 +204,93 @@ $('explain-danger').innerHTML = ocExplain(
   '这些是紧急操作按钮。只有在你确定系统误判时才使用。"Reset Cooldown" 清除连续亏损后的冷却期，允许继续交易。"Unhalt Session" 解除熔断保护，恢复被暂停的交易会话。',
   '冷却期是连续亏损达到阈值后自动触发的保护机制，防止情绪化追单。熔断是回撤达到 P1 设定阈值后的强制暂停。手动解除这些保护意味着你承认当前的触发条件是合理的但你选择继续——这需要格外谨慎。'
 );
+
+// ─── Save Risk Config ─────────────────────────────────────────
+async function saveRiskConfig() {
+  const body = {
+    max_stop_loss_pct: parseFloat($('in-hard-stop').value) || 5,
+    max_take_profit_pct: 20,
+    max_session_drawdown_pct: parseFloat($('in-drawdown').value) || 15,
+    max_daily_loss_pct: parseFloat($('in-daily-loss').value) || 5,
+    max_leverage: parseFloat($('in-leverage').value) || 20,
+    max_holding_hours: parseFloat($('in-time-stop').value) || 72,
+  };
+  const d = await ocPost('/api/v1/paper/risk/config/global', body);
+  if (d) { ocToast('Risk settings saved', 'success'); loadAll(); }
+  else ocToast('Save failed', 'error');
+}
+
+// ─── AI Stop-Loss Consultation ────────────────────────────────
+let _lastAIAdvice = null;
+
+async function askAIStopLoss() {
+  const model = $('ai-model').value;
+  const focus = $('ai-focus').value;
+  $('btn-ask-ai').disabled = true;
+  $('btn-ask-ai').textContent = '⏳ Asking AI...';
+  $('ai-advice-body').textContent = '正在查询 AI，请稍候...\nQuerying AI, please wait...';
+
+  // Gather context data
+  const [riskD, sessD, stratD] = await Promise.allSettled([
+    ocApi('/api/v1/paper/risk/status'),
+    ocApi('/api/v1/paper/session/status'),
+    ocApi('/api/v1/strategy/status'),
+  ]);
+
+  const riskStatus = riskD.status === 'fulfilled' && riskD.value ? riskD.value.data : {};
+  const session = sessD.status === 'fulfilled' && sessD.value ? sessD.value.data : {};
+  const orchestrator = stratD.status === 'fulfilled' && stratD.value ? stratD.value.data : {};
+
+  const prompt = `You are an expert crypto trading risk manager. Analyze the current trading situation and recommend specific stop-loss settings.
+
+Current Account Status:
+- Balance: $${session.pnl ? (10000 + session.pnl.net_paper_pnl).toFixed(2) : '10000'}
+- Net PnL: $${session.pnl ? session.pnl.net_paper_pnl.toFixed(4) : '0'}
+- Open Positions: ${session.position_count || 0}
+- Total Orders: ${session.order_count || 0}
+- Drawdown: ${(riskStatus.drawdown_pct || 0).toFixed(2)}%
+- Consecutive Losses: ${riskStatus.consecutive_losses || 0}
+- Session Halted: ${riskStatus.session_halted || false}
+- Market Regime: ${orchestrator.market_regime || 'unknown'}
+
+Risk Style: ${focus === 'conservative' ? 'Conservative — prioritize capital preservation, minimize drawdown' : focus === 'aggressive' ? 'Aggressive — accept higher volatility for potential returns' : 'Balanced — balance risk and reward'}
+
+Please recommend specific values for:
+1. Hard Stop Loss % (per trade)
+2. Trailing Stop % (from peak profit)
+3. Time Stop (hours)
+4. Max Session Drawdown %
+5. Max Leverage
+6. Max Daily Loss %
+
+Explain your reasoning briefly. Answer in both Chinese and English.`;
+
+  try {
+    const d = await ocPost('/api/v1/paper/layer2/trigger', {
+      reason: 'gui_risk_consultation',
+      model: model,
+      prompt: prompt,
+    });
+
+    if (d && d.data) {
+      const result = d.data.result || d.data.recommendation || d.data.response || JSON.stringify(d.data, null, 2);
+      _lastAIAdvice = d.data;
+      $('ai-advice-body').textContent = result;
+      $('btn-apply-ai').style.display = '';
+    } else {
+      $('ai-advice-body').textContent = 'AI 查询失败。请检查 AI 引擎是否已配置。\nAI query failed. Check if AI engine is configured.';
+    }
+  } catch(e) {
+    $('ai-advice-body').textContent = 'Error: ' + e.message;
+  }
+
+  $('btn-ask-ai').disabled = false;
+  $('btn-ask-ai').textContent = '🤖 向 AI 询问止损建议 / Ask AI';
+}
+
+function applyAIAdvice() {
+  ocToast('请根据 AI 建议手动调整左侧数值后保存 / Please manually adjust values based on AI advice', 'info');
+}
 
 // ─── Actions ──────────────────────────────────────────────────
 async function resetCooldown() {
@@ -238,11 +404,21 @@ async function loadRiskConfig() {
   html2 += '</div>';
   ocSetHtml('p2-config', html2);
 
-  // Stop Manager — derive from global config
+  // Stop Manager — populate display and input fields
   ocSetText('s-hard', gc.max_stop_loss_pct != null ? gc.max_stop_loss_pct + '%' : '--');
   ocSetText('s-trailing', p2.trailing_stop_pct != null ? p2.trailing_stop_pct + '%' : '--');
   ocSetText('s-time', gc.max_holding_hours != null ? gc.max_holding_hours + 'h' : '--');
-  ocSetText('s-atr', p2.atr_multiplier != null ? p2.atr_multiplier + 'x' : '--');
+  ocSetText('s-drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : '--');
+  ocSetText('s-leverage', gc.max_leverage != null ? gc.max_leverage + 'x' : '--');
+  ocSetText('s-daily', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : '--');
+
+  // Populate input fields (only if not already edited by user)
+  if (!$('in-hard-stop').value) $('in-hard-stop').value = gc.max_stop_loss_pct || 5;
+  if (!$('in-trailing').value) $('in-trailing').value = p2.trailing_stop_pct || 3;
+  if (!$('in-time-stop').value) $('in-time-stop').value = gc.max_holding_hours || 72;
+  if (!$('in-drawdown').value) $('in-drawdown').value = gc.max_session_drawdown_pct || 15;
+  if (!$('in-leverage').value) $('in-leverage').value = gc.max_leverage || 20;
+  if (!$('in-daily-loss').value) $('in-daily-loss').value = gc.max_daily_loss_pct || 5;
 }
 
 async function loadAIContext() {

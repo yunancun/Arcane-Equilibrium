@@ -90,20 +90,22 @@ async function loadOverview() {
   const d = await ocApi('/api/v1/system/overview');
   if (!d || !d.data) return;
   const ov = d.data;
+  // Data is nested: global_runtime.global_mode_state, etc.
+  const gr = ov.global_runtime || ov;
 
-  ocSetText('m-mode', ov.global_execution_mode_switch || ov.global_mode || '--');
-  ocSetText('m-auth', ov.execution_authority_state || '--');
-  ocSetText('m-demo', ov.demo_state_switch || '--');
-  ocSetText('m-snap', ov.snapshot_id ? 'Yes (' + String(ov.snapshot_id).slice(0,8) + ')' : 'No');
-  ocSetText('m-prot', ov.runtime_protected ? 'Yes' : 'No');
+  ocSetText('m-mode', gr.global_mode_state || gr.global_stage_label || ov.global_execution_mode_switch || '--');
+  ocSetText('m-auth', gr.global_execution_authority_state || ov.execution_authority_state || '--');
+  ocSetText('m-demo', gr.global_capability_state || ov.demo_state_switch || '--');
+  ocSetText('m-snap', gr.runtime_still_protected != null ? (gr.runtime_still_protected ? 'Protected' : 'Unprotected') : '--');
+  ocSetText('m-prot', gr.runtime_still_protected ? 'Yes' : (ov.runtime_protected ? 'Yes' : 'No'));
   ocSetText('m-sysmode', ov.system_mode || 'read_only');
 
   // Mode badge
-  const mode = ov.global_execution_mode_switch || ov.global_mode || '';
+  const mode = gr.global_mode_state || gr.global_stage_label || '';
   const badge = $('mode-badge');
   if (mode.includes('live')) { badge.textContent = 'LIVE'; badge.className = 'oc-chip oc-chip-bad'; }
   else if (mode.includes('demo')) { badge.textContent = 'DEMO'; badge.className = 'oc-chip oc-chip-warn'; }
-  else { badge.textContent = 'OBSERVE ONLY'; badge.className = 'oc-chip oc-chip-good'; }
+  else { badge.textContent = mode.includes('design') ? 'DESIGN ONLY' : 'OBSERVE ONLY'; badge.className = 'oc-chip oc-chip-good'; }
 }
 
 async function loadSourceContext() {

@@ -15,7 +15,7 @@
   <span id="orch-regime" class="oc-chip oc-chip-neutral">--</span>
   <span style="flex:1"></span>
   <span style="font-size:12px;color:var(--text-dim)">
-    Active: <strong id="orch-active">0</strong> / Total: <strong id="orch-total">0</strong>
+    Active: <strong id="orch-active">0</strong> / Total: <strong id="orch-total">0</strong> (上限 100 / max 100)
   </span>
   <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
 </div>
@@ -79,10 +79,26 @@
 </details>
 
 <script>
+// ─── Strategy Chinese Name Map ────────────────────────────────
+const STRAT_CN = {
+  'MA_Crossover':     '均线交叉',
+  'BB_Reversion':     '布林回归',
+  'FundingRate_Arb':  '资金费率套利',
+  'Grid_Trading':     '网格交易',
+  'BB_Breakout':      '布林突破',
+  'RSI_Divergence':   'RSI 背离',
+  'MACD_Trend':       'MACD 趋势',
+  'Volume_Spike':     '量价突破',
+};
+function stratLabel(name) {
+  const cn = STRAT_CN[name];
+  return cn ? name + ' / ' + cn : name;
+}
+
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-strategy').innerHTML = ocExplain(
-  '策略中心管理所有交易策略。每个策略会分析市场数据并生成交易信号。你可以启动、暂停或停止任何策略。编排器会根据市场状态协调所有策略的运行。',
-  '系统支持 5 种策略类型：MA Crossover（均线交叉趋势跟踪）、Bollinger Reversion（布林带均值回归）、Funding Rate Arb（资金费率套利）、Grid Trading（网格交易）、BB Breakout（布林带突破）。编排器通过 Regime Detection 自动识别市场状态（趋势/震荡/高波动），并据此调整策略参数和信号权重。'
+  '策略中心管理所有交易策略。AI Agent 自主决定启动哪些策略（上限 100 个），人类只通过手动开关进行硬关闭。每个策略会分析市场数据并生成交易信号。编排器根据市场状态协调所有策略的运行。',
+  '系统支持多种策略类型：MA Crossover（均线交叉趋势跟踪）、Bollinger Reversion（布林带均值回归）、Funding Rate Arb（资金费率套利）、Grid Trading（网格交易）、BB Breakout（布林带突破）等。策略由 AI Agent 根据市场扫描结果自动部署，上限 100 个实例。编排器通过 Regime Detection 识别市场状态，据此调整参数和信号权重。手动开关仅用于紧急硬关闭。'
 );
 
 $('explain-scanner').innerHTML = ocExplain(
@@ -134,21 +150,19 @@ async function loadStrategies() {
     html += '<div class="oc-strat-card">';
     html += '<div class="strat-header">';
     const stratName = s.strategy || s.name || s.strategy_name || '?';
-    html += '<span class="strat-name">' + ocEsc(stratName) + '</span>';
+    html += '<span class="strat-name">' + ocEsc(stratLabel(stratName)) + '</span>';
     html += '<span class="oc-chip oc-chip-' + chipType + '">' + ocEsc(state) + '</span>';
     html += '</div>';
     html += '<div class="strat-meta">';
-    // Strategy type can be inferred from name or explicit field
-    const stratType = s.strategy_type || s.type || stratName;
-    html += 'Type: ' + ocEsc(stratType);
-    if (s.symbol) html += ' | Symbol: ' + ocEsc(s.symbol);
-    if (s.qty_per_trade != null) html += ' | Qty: ' + s.qty_per_trade;
+    if (s.symbol) html += 'Symbol: <strong>' + ocEsc(s.symbol) + '</strong>';
+    if (s.qty_per_trade != null) html += ' | Qty/Trade: ' + s.qty_per_trade;
     if (s.trade_count != null) html += ' | Trades: ' + s.trade_count;
+    if (s.current_position) html += ' | Position: ' + ocEsc(s.current_position);
     html += '</div>';
-    html += '<div class="strat-actions">';
-    html += '<button class="oc-btn oc-btn-success" ' + (state === 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'activate\')">Activate</button>';
-    html += '<button class="oc-btn" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">Pause</button>';
-    html += '<button class="oc-btn oc-btn-danger" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">Stop</button>';
+    html += '<div class="strat-actions" style="margin-top:6px">';
+    html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close: overrides AI decision" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Hard Stop</button>';
+    html += '<button class="oc-btn" title="暂停策略 / Pause: AI can resume later" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
+    html += '<span style="font-size:10px;color:var(--text-dim);margin-left:6px">AI 自主决定启停 / AI decides activation</span>';
     html += '</div>';
     html += '</div>';
   });
