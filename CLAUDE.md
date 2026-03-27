@@ -34,8 +34,10 @@
 ## 三、当前系统状态（2026-03-27）
 
 ```
-测试：640 全通过（214 local_model_tools + 426 control_api）
-路由：104 条
+测试：644 全通过（218 local_model_tools + 426 control_api）
+路由：109 条（+5: login, demo/status, demo/balance, demo/positions, trading page）
+GUI：统一控制台 4 Tab（Dashboard + K线图表 + Grafana 监控 + OpenClaw）
+Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 
 Runtime 硬状态：
   system_mode             = read_only
@@ -69,6 +71,7 @@ L    Learning / Self-Observability / Net PnL    ✅ 全部完成
      Phase 2 本地策略工具包                      ✅ 严格审核（K线+6指标+信号+4策略+编排器+11路由）
      Phase 3 管线桥接+止损+信号增强              ✅ 完成（管线接通+StopManager+Regime检测+3新规则+历史K线引导）
      全系统审核 A-K 修复                         ✅ 完成（7C+19H+28M+16L 全修 + 路径统一 + I章去重 + mutator 3x→1x）
+     GUI 三层架构                                ✅ 完成（Grafana 监控 + TradingView K线 + Bybit Demo 双重执行 + 登录系统）
 M    Supervised Live Gate                       ⬜ 未开始
 N    Constrained Autonomous Live                ⬜ 未开始
 ```
@@ -206,9 +209,11 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 全系统 A-K 审核修复（7C+19H+28M+16L + 路径统一 + I章去重 + mutator 3x→1x）
   ✅ 路线图 B-I（cron + 加权共识 + volume + Grid 几何 + regime 过滤 + 持久化 + Delta-Neutral）
   ✅ Telegram 告警 + BB Breakout + RSI Divergence + AI Consultation + 远程访问指南
+  ✅ GUI 三层架构（Grafana + TradingView + Bybit Demo + 登录系统 + 统一控制台 4 Tab）
 
 下一步（按优先级）：
-  ★ GUI 专攻（策略面板 / StopManager / Pipeline / Regime / Grid / PnL 图表 / 整体升级）
+  GUI 美化完善（面板细节 / 交互优化 / 移动端适配）
+  Paper Trading 数据分析（积累数据后分析策略表现）
 
 之后：
   M 章：Supervised Live Gate（需先积累 paper trading 数据）
@@ -244,10 +249,11 @@ Live 前置条件（M/N 前必须核验）：
 | 本地交易逻辑审查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
 | GUI 交接文档 | `docs/handoffs/2026-03-25_api_gui_handoff/` |
 | 路线图 B-I 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
+| GUI 三层架构工程日志 | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成 + 路线图 B-I + Telegram/BB Breakout/RSI Divergence/AI Consultation 全部完成。644 测试，106 路由，8 信号规则，5 策略。Paper Trading 实时运行中（28 订单 / 35 成交）。系统全程 read_only / disabled / not_granted。下一步：GUI 全面升级（10 个面板）→ Beta 数据分析 → M 章。
+> 截至 2026-03-27：全系统完成。644 测试，109 路由，8 信号规则，5 策略。GUI 三层架构已上线（Grafana 监控 + TradingView K线 + Bybit Demo 双重执行）。统一控制台 4 Tab + 登录认证。Paper Trading + Bybit Demo 实时运行中。系统全程 read_only / disabled / not_granted。
