@@ -83,7 +83,7 @@ def _make_governed_observation(
     market_regime="trending_up",
     action_bias="buy_bias",
     confidence=0.75,
-    edge_bps=15.0,
+    edge_bps=30.0,
     analysis_mode="governed_observation",
 ):
     return {
@@ -107,12 +107,12 @@ class TestBuildShadowDecision:
         """High confidence + edge → should_trade=True"""
         decision = build_shadow_decision(
             verdict=_make_verdict(),
-            governed_observation=_make_governed_observation(confidence=0.8, edge_bps=20.0),
+            governed_observation=_make_governed_observation(confidence=0.8, edge_bps=30.0),
         )
         assert decision["should_trade"] is True
         assert decision["trade_side"] == SIDE_BUY
         assert decision["confidence"] == 0.8
-        assert decision["edge_assessment_bps"] == 20.0
+        assert decision["edge_assessment_bps"] == 30.0
         assert decision["market_regime"] == "trending_up"
 
     def test_low_confidence_no_trade(self):
@@ -223,7 +223,7 @@ class TestShadowDecisionConsumer:
         consumer = ShadowDecisionConsumer(active_engine)
         decision = build_shadow_decision(
             verdict=_make_verdict(),
-            governed_observation=_make_governed_observation(confidence=0.8, edge_bps=20.0),
+            governed_observation=_make_governed_observation(confidence=0.8, edge_bps=30.0),
         )
         result = consumer.consume(decision, {"BTCUSDT": 50000.0})
         assert result["action_taken"] == "order_submitted"

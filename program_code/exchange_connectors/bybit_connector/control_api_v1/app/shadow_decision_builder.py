@@ -70,7 +70,7 @@ DEFAULT_CONFIDENCE_THRESHOLD = 0.5
 
 # Minimum expected edge in basis points to justify a trade
 # 交易的最低预期边际（基点）
-DEFAULT_EDGE_THRESHOLD_BPS = 5.0
+DEFAULT_EDGE_THRESHOLD_BPS = 25.0  # Must exceed round-trip cost floor (~21 bps)
 
 # Default position size as fraction of paper balance
 # 默认仓位大小（纸上余额的百分比）
@@ -221,7 +221,7 @@ class ShadowDecisionConsumer:
 
         # Check session is active / 检查 session 活跃
         try:
-            state = self._engine._read()
+            state = self._engine.get_state()
         except Exception:
             result["reason"] = "engine_read_failed"
             self._record(decision, result)
@@ -248,8 +248,15 @@ class ShadowDecisionConsumer:
             return result
 
         # Calculate position size / 计算仓位大小
+        # Apply risk manager's position_size_multiplier if available
+        # 如果有风控管理器，应用仓位大小乘数
         balance = state["session"].get("current_paper_balance_usdt", 0)
-        notional = balance * self._position_size_fraction
+        effective_fraction = self._position_size_fraction
+        risk_state = state.get("risk", {})
+        agent_params = risk_state.get("agent_params", {})
+        multiplier = agent_params.get("position_size_multiplier", 1.0)
+        effective_fraction *= max(0.1, min(multiplier, 1.0))
+        notional = balance * effective_fraction
         qty = notional / price
         if qty <= 0:
             result["reason"] = "insufficient_balance"

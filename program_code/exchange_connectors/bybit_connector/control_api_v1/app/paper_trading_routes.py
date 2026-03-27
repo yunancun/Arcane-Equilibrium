@@ -48,7 +48,12 @@ _paper_state_path = os.getenv(
     ),
 )
 PAPER_STORE = PaperStateStore(_paper_state_path)
-ENGINE = PaperTradingEngine(PAPER_STORE)
+
+# Risk manager (3-tier priority: P0 category > P1 global > P2 agent)
+# 风控管理器（三层优先级：P0 品类专属 > P1 全局 > P2 Agent 自适应）
+from .risk_manager import RiskManager  # noqa: E402
+RISK_MANAGER = RiskManager()
+ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
 # Market data dispatcher (lazy-initialized on first start)
 # 行情分发器（首次启动时延迟初始化）
@@ -460,7 +465,7 @@ def get_shadow_decisions(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get shadow decisions stored in paper state / 获取存储在纸上状态中的影子决策"""
-    state = ENGINE._read()
+    state = ENGINE.get_state()
     decisions = state.get("shadow_decisions", [])[-min(limit, 200):]
     return _paper_response({"shadow_decisions": decisions, "count": len(decisions)})
 
@@ -479,7 +484,7 @@ def get_metrics(
 
     Includes: win rate, drawdown, holding period, Sharpe ratio, shadow decision stats.
     """
-    state = ENGINE._read()
+    state = ENGINE.get_state()
     metrics = compute_full_metrics(state)
     return _paper_response(metrics)
 

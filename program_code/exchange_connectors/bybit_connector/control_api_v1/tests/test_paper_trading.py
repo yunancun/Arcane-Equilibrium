@@ -187,13 +187,14 @@ class TestOrderLifecycle:
         cancel_result = active_engine.cancel_order(order_id)
         assert cancel_result["success"] is False
 
-    def test_reject_insufficient_balance(self, paper_engine):
+    def test_reject_insufficient_margin(self, paper_engine):
+        """Reject order when balance < required_margin + fee"""
         paper_engine.start_session(initial_balance=0.0001)
         result = paper_engine.submit_order(
             "BTCUSDT", "Buy", "market", 100.0,
             market_prices={"BTCUSDT": 60000.0},
         )
-        assert result["rejected_reason"] == "insufficient_balance"
+        assert result["rejected_reason"] == "insufficient_margin"
         assert result["order"]["state"] == "paper_order_rejected"
 
     def test_cannot_submit_when_session_inactive(self, paper_engine):

@@ -58,13 +58,37 @@ SESSION_ACTIVE = "active"
 SESSION_PAUSED = "paused"
 SESSION_COMPLETED = "completed"
 
-# Order types
+# Order types / 订单类型
 ORDER_TYPE_MARKET = "market"
 ORDER_TYPE_LIMIT = "limit"
+ORDER_TYPE_CONDITIONAL = "conditional"  # Triggered when price hits trigger_price
 
 # Order sides
 SIDE_BUY = "Buy"
 SIDE_SELL = "Sell"
+
+# Time in Force / 有效期类型
+TIF_GTC = "GTC"            # Good-Till-Cancelled（默认）
+TIF_IOC = "IOC"            # Immediate-or-Cancel
+TIF_FOK = "FOK"            # Fill-or-Kill
+TIF_POST_ONLY = "PostOnly"  # Cancel if would fill immediately (guarantees maker fee)
+
+VALID_TIF = {TIF_GTC, TIF_IOC, TIF_FOK, TIF_POST_ONLY}
+
+# Order flags / 订单标记
+FLAG_REDUCE_ONLY = "reduce_only"    # Only reduce position, never increase
+FLAG_POST_ONLY = "post_only"        # Same as TIF_POST_ONLY, alternative expression
+
+# Trigger price types (for conditional orders) / 触发价类型
+TRIGGER_BY_LAST_PRICE = "LastPrice"
+TRIGGER_BY_MARK_PRICE = "MarkPrice"
+TRIGGER_BY_INDEX_PRICE = "IndexPrice"
+
+# Product categories / 产品品类
+CATEGORY_SPOT = "spot"
+CATEGORY_LINEAR = "linear"
+CATEGORY_INVERSE = "inverse"
+CATEGORY_OPTION = "option"
 
 # Fee rates (Bybit perpetual linear defaults)
 # 费率（Bybit 永续线性合约默认值）
@@ -119,6 +143,11 @@ def build_default_paper_state() -> dict[str, Any]:
             "stopped_ts_ms": None,
             "initial_paper_balance_usdt": DEFAULT_INITIAL_BALANCE_USDT,
             "current_paper_balance_usdt": DEFAULT_INITIAL_BALANCE_USDT,
+            "peak_balance_usdt": DEFAULT_INITIAL_BALANCE_USDT,
+            "daily_start_balance_usdt": DEFAULT_INITIAL_BALANCE_USDT,
+            "daily_start_date": "",
+            "session_halted": False,
+            "session_halt_reason": None,
         },
         "orders": [],
         "positions": {},
@@ -133,6 +162,7 @@ def build_default_paper_state() -> dict[str, Any]:
             "net_paper_pnl": 0.0,
         },
         "shadow_decisions": [],
+        "risk": {},
     }
 
 
@@ -157,12 +187,25 @@ class PaperStateStore:
                 return json.load(handle)
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
+        import tempfile
         with self._lock:
             state["meta"]["revision"] = state["meta"].get("revision", 0) + 1
             state["meta"]["updated_ts_ms"] = now_ms()
-            with self.file_path.open("w", encoding="utf-8") as handle:
-                json.dump(state, handle, ensure_ascii=False, indent=2)
-            os.chmod(str(self.file_path), 0o600)
+            # Atomic write: write to temp file then rename (crash-safe)
+            # 原子写入：先写临时文件再重命名（崩溃安全）
+            dir_path = self.file_path.parent
+            fd, tmp_path = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(state, handle, ensure_ascii=False, indent=2)
+                os.chmod(tmp_path, 0o600)
+                os.replace(tmp_path, str(self.file_path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             return state
 
     def mutate(self, mutator) -> dict[str, Any]:
@@ -203,24 +246,42 @@ def create_paper_order(
     qty: float,
     price: float | None = None,
     leverage: float = 1.0,
+    *,
+    time_in_force: str = TIF_GTC,
+    reduce_only: bool = False,
+    trigger_price: float | None = None,
+    trigger_by: str = TRIGGER_BY_LAST_PRICE,
+    take_profit: float | None = None,
+    stop_loss: float | None = None,
+    tp_trigger_by: str = TRIGGER_BY_LAST_PRICE,
+    sl_trigger_by: str = TRIGGER_BY_LAST_PRICE,
+    category: str = CATEGORY_LINEAR,
 ) -> dict[str, Any]:
     """
     Create a new paper order object / 创建纸上订单对象
 
+    Supports: market, limit, conditional orders with optional TP/SL.
+    支持：市价、限价、条件触发单，可附加止盈止损。
+
     This only creates the order in 'paper_order_created' state.
     Submission and lifecycle processing happen in subsequent steps.
     """
+    valid_types = (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT, ORDER_TYPE_CONDITIONAL)
     if side not in (SIDE_BUY, SIDE_SELL):
         raise ValueError(f"Invalid side: {side}. Must be '{SIDE_BUY}' or '{SIDE_SELL}'")
-    if order_type not in (ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT):
-        raise ValueError(f"Invalid order_type: {order_type}. Must be '{ORDER_TYPE_MARKET}' or '{ORDER_TYPE_LIMIT}'")
+    if order_type not in valid_types:
+        raise ValueError(f"Invalid order_type: {order_type}. Must be one of {valid_types}")
     if order_type == ORDER_TYPE_LIMIT and price is None:
         raise ValueError("Limit orders require a price")
+    if order_type == ORDER_TYPE_CONDITIONAL and trigger_price is None:
+        raise ValueError("Conditional orders require a trigger_price")
     if qty <= 0:
         raise ValueError("Quantity must be positive")
+    if time_in_force not in VALID_TIF:
+        time_in_force = TIF_GTC
 
     ts = now_ms()
-    return {
+    order: dict[str, Any] = {
         "order_id": gen_order_id(),
         "symbol": symbol,
         "side": side,
@@ -238,7 +299,28 @@ def create_paper_order(
         "fills": [],
         "is_simulated": True,
         "data_source": "paper_engine_v1",
+        # New fields / 新增字段
+        "time_in_force": time_in_force,
+        "reduce_only": reduce_only,
+        "category": category,
     }
+
+    # Conditional order fields / 条件单字段
+    if order_type == ORDER_TYPE_CONDITIONAL:
+        order["trigger_price"] = trigger_price
+        order["trigger_by"] = trigger_by
+        order["triggered"] = False
+
+    # TP/SL attachment / 止盈止损附加
+    if take_profit is not None or stop_loss is not None:
+        order["tp_sl"] = {
+            "take_profit": take_profit,
+            "stop_loss": stop_loss,
+            "tp_trigger_by": tp_trigger_by,
+            "sl_trigger_by": sl_trigger_by,
+        }
+
+    return order
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -276,6 +358,50 @@ def compute_fee(
     notional = fill_qty * fill_price
     rate = taker_rate if is_taker else maker_rate
     return notional * rate
+
+
+def compute_partial_fill_qty(
+    order: dict,
+    market_price: float,
+    rng: Any = None,
+) -> float:
+    """
+    Simulate partial fill quantity for limit orders based on price cross depth.
+    根据价格穿越深度模拟限价单部分成交数量。
+
+    Deep cross (>0.5%) → full fill. Shallow cross → probabilistic partial fill.
+    深穿（>0.5%）→ 全部成交。浅穿 → 概率性部分成交。
+
+    Args:
+        rng: Optional random.Random instance for deterministic testing.
+             可选的 random.Random 实例，用于测试确定性。
+    """
+    import random as _random
+    r = rng or _random
+
+    remaining = order["remaining_qty"]
+    limit_price = order["price"]
+    if limit_price <= 0 or remaining <= 0:
+        return remaining
+
+    if order["side"] == SIDE_BUY:
+        cross_pct = (limit_price - market_price) / limit_price
+    else:
+        cross_pct = (market_price - limit_price) / limit_price
+
+    cross_pct = max(cross_pct, 0.0)
+
+    if cross_pct >= 0.005:
+        fill_fraction = 1.0
+    elif cross_pct >= 0.001:
+        fill_fraction = r.uniform(0.5, 1.0)
+    else:
+        fill_fraction = r.uniform(0.3, 0.7)
+
+    fill_qty = remaining * fill_fraction
+    min_fill = remaining * 0.1
+    fill_qty = max(fill_qty, min_fill)
+    return min(fill_qty, remaining)
 
 
 def should_fill_limit_order(order: dict, market_price: float) -> bool:
@@ -382,6 +508,16 @@ def project_position_after_fill(
             "opened_ts_ms": now_ms(),
             "updated_ts_ms": now_ms(),
             "is_simulated": True,
+            # AI attention tax tracking / AI 注意力税追踪
+            "holding_cost": {
+                "financial_cost_usd": 0.0,
+                "ai_cost_attributed_usd": 0.0,
+                "total_holding_cost_usd": 0.0,
+                "estimated_remaining_edge_usd": 0.0,
+                "cost_edge_ratio": 0.0,
+                "cost_efficiency_grade": "A",
+                "hourly_ai_burn_rate_usd": 0.003,
+            },
         }
         return positions, close_pnl
 
@@ -409,6 +545,10 @@ def project_position_after_fill(
             return positions, close_pnl
         else:
             # Flip: close existing + open opposite
+            # close_pnl is returned and accumulated by caller into closed_position_pnl.
+            # New position starts with realized_pnl=0 to avoid double-counting.
+            # 翻转：平旧仓 + 开反向仓。close_pnl 由调用方累加到 closed_position_pnl，
+            # 新仓位 realized_pnl=0 避免双重计算。
             close_pnl = _compute_close_pnl(pos, pos["qty"], fill_price)
             remaining = fill_qty - pos["qty"]
             positions[symbol] = {
@@ -417,10 +557,19 @@ def project_position_after_fill(
                 "qty": remaining,
                 "avg_entry_price": fill_price,
                 "unrealized_pnl": 0.0,
-                "realized_pnl": close_pnl,
+                "realized_pnl": 0.0,
                 "opened_ts_ms": now_ms(),
                 "updated_ts_ms": now_ms(),
                 "is_simulated": True,
+                "holding_cost": {
+                    "financial_cost_usd": 0.0,
+                    "ai_cost_attributed_usd": 0.0,
+                    "total_holding_cost_usd": 0.0,
+                    "estimated_remaining_edge_usd": 0.0,
+                    "cost_edge_ratio": 0.0,
+                    "cost_efficiency_grade": "A",
+                    "hourly_ai_burn_rate_usd": 0.003,
+                },
             }
 
     return positions, close_pnl
@@ -508,10 +657,19 @@ class PaperTradingEngine:
     安全不变量：绝不 import 或调用任何 Bybit API client。
     """
 
-    def __init__(self, store: PaperStateStore) -> None:
+    def __init__(self, store: PaperStateStore, risk_manager: Any = None, *, partial_fill_rng: Any = None) -> None:
         self.store = store
+        self.risk_manager = risk_manager  # Optional RiskManager for pre-order + tick checks
+        self._partial_fill_rng = partial_fill_rng  # Pass random.Random(seed) for deterministic tests
 
     def _read(self) -> dict[str, Any]:
+        return self.store.read()
+
+    def get_state(self) -> dict[str, Any]:
+        """
+        Public read-only access to current paper state.
+        公开的只读状态访问接口，供外部模块使用（替代直接访问 _read()）。
+        """
         return self.store.read()
 
     def _audit(self, state: dict, action: str, detail: str = "") -> None:
@@ -540,7 +698,11 @@ class PaperTradingEngine:
             state["session"]["started_ts_ms"] = now_ms()
             state["session"]["initial_paper_balance_usdt"] = initial_balance
             state["session"]["current_paper_balance_usdt"] = initial_balance
+            state["session"]["peak_balance_usdt"] = initial_balance
             self._audit(state, "session_start", f"balance={initial_balance}")
+            # Persist risk manager state / 持久化风控状态
+            if self.risk_manager:
+                state["risk"] = self.risk_manager.get_risk_state_for_persistence()
             return state
         return self.store.mutate(mutator)
 
@@ -583,6 +745,8 @@ class PaperTradingEngine:
             sess["session_state"] = SESSION_COMPLETED
             sess["stopped_ts_ms"] = now_ms()
             self._audit(state, "session_stop", f"net_pnl={state['pnl']['net_paper_pnl']:.4f}")
+            if self.risk_manager:
+                state["risk"] = self.risk_manager.get_risk_state_for_persistence()
             return state
         return self.store.mutate(mutator)
 
@@ -611,10 +775,19 @@ class PaperTradingEngine:
         price: float | None = None,
         leverage: float = 1.0,
         market_prices: dict[str, float] | None = None,
+        *,
+        time_in_force: str = TIF_GTC,
+        reduce_only: bool = False,
+        trigger_price: float | None = None,
+        trigger_by: str = TRIGGER_BY_LAST_PRICE,
+        take_profit: float | None = None,
+        stop_loss: float | None = None,
+        category: str = CATEGORY_LINEAR,
     ) -> dict[str, Any]:
         """
         Submit a paper order / 提交纸上订单
 
+        Supports market, limit, conditional orders with optional TP/SL.
         For market orders, immediate fill is attempted if market_prices provided.
         """
         result = {"order": None, "fills": [], "rejected_reason": None}
@@ -624,23 +797,61 @@ class PaperTradingEngine:
             if sess["session_state"] != SESSION_ACTIVE:
                 raise ValueError(f"Cannot submit order: session is {sess['session_state']}")
 
-            order = create_paper_order(symbol, side, order_type, qty, price, leverage)
+            order = create_paper_order(
+                symbol, side, order_type, qty, price, leverage,
+                time_in_force=time_in_force,
+                reduce_only=reduce_only,
+                trigger_price=trigger_price,
+                trigger_by=trigger_by,
+                take_profit=take_profit,
+                stop_loss=stop_loss,
+                category=category,
+            )
 
             # Transition: created → submitted
             _transition_order(order, ORDER_STATE_SUBMITTED)
 
-            # Pre-trade risk check: sufficient balance?
-            notional = qty * (price or (market_prices or {}).get(symbol, 0))
+            # Risk manager pre-order check / 风控管理器下单前检查
+            if self.risk_manager:
+                price_est = price or (market_prices or {}).get(symbol, 0)
+                allowed, reason = self.risk_manager.check_order_allowed(
+                    state, symbol, side, qty, price_est, leverage,
+                    category=category,
+                    market_prices=market_prices,
+                )
+                if not allowed:
+                    _transition_order(order, ORDER_STATE_REJECTED)
+                    order["reject_reason"] = reason
+                    state["orders"].append(order)
+                    result["order"] = order
+                    result["rejected_reason"] = reason
+                    self._audit(state, "order_risk_rejected", f"{symbol} {side} qty={qty} reason={reason}")
+                    return state
+
+            # Pre-trade risk check: sufficient balance for margin + fees?
+            # 开仓前风控：余额是否足够覆盖保证金 + 手续费？
+            price_estimate = price or (market_prices or {}).get(symbol, 0)
+            notional = qty * price_estimate
             required_margin = notional / leverage if leverage > 0 else notional
-            # Simple margin check: need at least the fee amount available
-            estimated_fee = compute_fee(qty, price or (market_prices or {}).get(symbol, 0))
-            if sess["current_paper_balance_usdt"] < estimated_fee:
+            estimated_fee = compute_fee(qty, price_estimate)
+            required_total = required_margin + estimated_fee
+            if sess["current_paper_balance_usdt"] < required_total:
                 _transition_order(order, ORDER_STATE_REJECTED)
-                order["reject_reason"] = "insufficient_balance"
+                order["reject_reason"] = "insufficient_margin"
                 state["orders"].append(order)
                 result["order"] = order
-                result["rejected_reason"] = "insufficient_balance"
-                self._audit(state, "order_rejected", f"{symbol} {side} qty={qty} reason=insufficient_balance")
+                result["rejected_reason"] = "insufficient_margin"
+                self._audit(state, "order_rejected", f"{symbol} {side} qty={qty} reason=insufficient_margin need={required_total:.2f} have={sess['current_paper_balance_usdt']:.2f}")
+                return state
+
+            # Check session halted / 检查 session 是否已熔断
+            if sess.get("session_halted"):
+                _transition_order(order, ORDER_STATE_REJECTED)
+                order["reject_reason"] = "session_halted"
+                state["orders"].append(order)
+                result["order"] = order
+                result["rejected_reason"] = "session_halted"
+                self._audit(state, "order_rejected", f"{symbol} {side} reason=session_halted")
                 return state
 
             # Transition: submitted → working
@@ -741,17 +952,53 @@ class PaperTradingEngine:
             for order in state["orders"]:
                 if order["state"] not in ACTIVE_STATES:
                     continue
-                if order["order_type"] != ORDER_TYPE_LIMIT:
-                    continue
 
                 symbol = order["symbol"]
                 mp = market_prices.get(symbol)
                 if mp is None:
                     continue
+                otype = order["order_type"]
 
-                if should_fill_limit_order(order, mp):
-                    fill_qty = order["remaining_qty"]
+                # ── Conditional order trigger check / 条件单触发检查 ──
+                if otype == ORDER_TYPE_CONDITIONAL and not order.get("triggered"):
+                    tp = order.get("trigger_price")
+                    if tp is not None:
+                        triggered = False
+                        if order["side"] == SIDE_BUY and mp >= tp:
+                            triggered = True
+                        elif order["side"] == SIDE_SELL and mp <= tp:
+                            triggered = True
+                        if triggered:
+                            order["triggered"] = True
+                            # Conditional becomes market fill at trigger
+                            fill_qty = order["remaining_qty"]
+                            fill_price = compute_fill_price(
+                                {**order, "order_type": ORDER_TYPE_MARKET}, mp
+                            )
+                            fee = compute_fee(fill_qty, fill_price, is_taker=True)
+                            fill_record = execute_fill(order, fill_qty, fill_price, fee)
+                            state["fills"].append(fill_record)
+                            tick_result["fills"].append(fill_record)
+                            tick_result["orders_filled"] += 1
+                            _, close_pnl = project_position_after_fill(
+                                state["positions"], symbol, order["side"], fill_qty, fill_price
+                            )
+                            state["pnl"]["closed_position_pnl"] += close_pnl
+                            sess["current_paper_balance_usdt"] = project_balance_after_fill(
+                                sess["current_paper_balance_usdt"], order["side"],
+                                fill_qty, fill_price, fee, order.get("leverage", 1.0)
+                            )
+                            self._audit(state, "conditional_triggered", f"{order['order_id']} trigger={tp} market={mp:.2f}")
+                            if self.risk_manager and close_pnl != 0:
+                                self.risk_manager.record_fill_result(close_pnl)
+                                self.risk_manager.clear_trailing_stop(symbol)
+                    continue
+
+                # ── Limit order fill check / 限价单成交检查 ──
+                if otype == ORDER_TYPE_LIMIT and should_fill_limit_order(order, mp):
+                    fill_qty = compute_partial_fill_qty(order, mp, rng=self._partial_fill_rng)
                     fill_price = compute_fill_price(order, mp)
+                    # Resting limit orders are always maker fee / 挂单限价单始终 maker 费率
                     fee = compute_fee(fill_qty, fill_price, is_taker=False)
                     fill_record = execute_fill(order, fill_qty, fill_price, fee)
                     state["fills"].append(fill_record)
@@ -767,10 +1014,126 @@ class PaperTradingEngine:
                         fill_qty, fill_price, fee, order.get("leverage", 1.0)
                     )
                     self._audit(state, "limit_fill", f"{order['order_id']} price={fill_price:.4f}")
+                    if self.risk_manager and close_pnl != 0:
+                        self.risk_manager.record_fill_result(close_pnl)
+                        if symbol not in state["positions"]:
+                            self.risk_manager.clear_trailing_stop(symbol)
+
+            # ── Order-level TP/SL check / 订单级止盈止损检查 ──
+            for order in state["orders"]:
+                if order["state"] not in TERMINAL_STATES:
+                    continue
+                if order["state"] != ORDER_STATE_FILLED:
+                    continue
+                tp_sl = order.get("tp_sl")
+                if not tp_sl or tp_sl.get("_triggered"):
+                    continue
+                symbol = order["symbol"]
+                pos = state["positions"].get(symbol)
+                if not pos:
+                    continue
+                mp = market_prices.get(symbol)
+                if mp is None:
+                    continue
+
+                tp_price = tp_sl.get("take_profit")
+                sl_price = tp_sl.get("stop_loss")
+                triggered_reason = None
+
+                if tp_price is not None:
+                    if (pos["side"] == SIDE_BUY and mp >= tp_price) or \
+                       (pos["side"] == SIDE_SELL and mp <= tp_price):
+                        triggered_reason = f"order_tp_{tp_price}"
+
+                if sl_price is not None and triggered_reason is None:
+                    if (pos["side"] == SIDE_BUY and mp <= sl_price) or \
+                       (pos["side"] == SIDE_SELL and mp >= sl_price):
+                        triggered_reason = f"order_sl_{sl_price}"
+
+                if triggered_reason:
+                    tp_sl["_triggered"] = True
+                    close_side = SIDE_SELL if pos["side"] == SIDE_BUY else SIDE_BUY
+                    close_qty = pos["qty"]
+                    fp = mp * (1 + DEFAULT_SLIPPAGE_RATE) if close_side == SIDE_BUY else mp * (1 - DEFAULT_SLIPPAGE_RATE)
+                    fee = compute_fee(close_qty, fp, is_taker=True)
+                    close_order = create_paper_order(symbol, close_side, ORDER_TYPE_MARKET, close_qty)
+                    _transition_order(close_order, ORDER_STATE_SUBMITTED)
+                    _transition_order(close_order, ORDER_STATE_WORKING)
+                    fill_record = execute_fill(close_order, close_qty, fp, fee)
+                    state["orders"].append(close_order)
+                    state["fills"].append(fill_record)
+                    tick_result["fills"].append(fill_record)
+                    _, close_pnl = project_position_after_fill(
+                        state["positions"], symbol, close_side, close_qty, fp
+                    )
+                    state["pnl"]["closed_position_pnl"] += close_pnl
+                    sess["current_paper_balance_usdt"] = project_balance_after_fill(
+                        sess["current_paper_balance_usdt"], close_side, close_qty, fp, fee, 1.0
+                    )
+                    self._audit(state, "tp_sl_triggered", f"{order['order_id']} {triggered_reason}")
+                    if self.risk_manager:
+                        self.risk_manager.record_fill_result(close_pnl)
+                        self.risk_manager.clear_trailing_stop(symbol)
 
             # Update unrealized PnL
             update_unrealized_pnl(state["positions"], market_prices)
             self._recompute_pnl(state)
+
+            # Risk manager tick checks / 风控管理器 tick 检查
+            if self.risk_manager:
+                close_orders = self.risk_manager.check_positions_on_tick(state, market_prices)
+                for co in close_orders:
+                    sym = co["symbol"]
+                    pos = state["positions"].get(sym)
+                    if not pos:
+                        continue
+                    close_side = SIDE_SELL if pos["side"] == SIDE_BUY else SIDE_BUY
+                    close_qty = co.get("qty", pos["qty"])
+                    mp = market_prices.get(sym)
+                    if mp is None:
+                        continue
+                    # Market close with slippage
+                    if close_side == SIDE_BUY:
+                        fp = mp * (1 + DEFAULT_SLIPPAGE_RATE)
+                    else:
+                        fp = mp * (1 - DEFAULT_SLIPPAGE_RATE)
+                    fee = compute_fee(close_qty, fp, is_taker=True)
+                    close_order = create_paper_order(sym, close_side, ORDER_TYPE_MARKET, close_qty)
+                    _transition_order(close_order, ORDER_STATE_SUBMITTED)
+                    _transition_order(close_order, ORDER_STATE_WORKING)
+                    fill_record = execute_fill(close_order, close_qty, fp, fee)
+                    state["orders"].append(close_order)
+                    state["fills"].append(fill_record)
+                    tick_result["fills"].append(fill_record)
+                    _, close_pnl = project_position_after_fill(
+                        state["positions"], sym, close_side, close_qty, fp
+                    )
+                    state["pnl"]["closed_position_pnl"] += close_pnl
+                    sess["current_paper_balance_usdt"] = project_balance_after_fill(
+                        sess["current_paper_balance_usdt"], close_side, close_qty, fp, fee, 1.0
+                    )
+                    self._audit(state, "risk_auto_close", f"{sym} reason={co['reason']}")
+                    self.risk_manager.record_fill_result(close_pnl)
+                    self.risk_manager.clear_trailing_stop(sym)
+
+                # Session drawdown circuit breaker
+                peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
+                current = sess.get("current_paper_balance_usdt", 0)
+                if peak > 0:
+                    dd_pct = ((peak - current) / peak) * 100
+                    if dd_pct >= self.risk_manager.config.max_session_drawdown_pct:
+                        if not sess.get("session_halted"):
+                            sess["session_halted"] = True
+                            sess["session_halt_reason"] = f"max_drawdown_{dd_pct:.1f}pct"
+                            self._audit(state, "session_halted", f"drawdown={dd_pct:.1f}%")
+
+                # Re-recompute PnL after risk closes
+                if close_orders:
+                    self._recompute_pnl(state)
+
+                # Persist risk state
+                state["risk"] = self.risk_manager.get_risk_state_for_persistence()
+
             return state
 
         self.store.mutate(mutator)
@@ -811,6 +1174,23 @@ class PaperTradingEngine:
         state["session"]["current_paper_balance_usdt"] = (
             initial + pnl["realized_pnl"] - pnl["total_fees_paid"]
         )
+
+        # Track peak balance for drawdown calculation / 跟踪峰值余额（用于回撤计算）
+        current = state["session"]["current_paper_balance_usdt"]
+        peak = state["session"].get("peak_balance_usdt", initial)
+        if current > peak:
+            state["session"]["peak_balance_usdt"] = current
+
+        # Cap orders and fills lists to prevent unbounded growth / 限制列表长度防止无限增长
+        # Keep terminal orders (filled/canceled/rejected) capped; active orders always kept
+        max_terminal_orders = 500
+        max_fills = 2000
+        if len(state["orders"]) > max_terminal_orders + 50:
+            active = [o for o in state["orders"] if o.get("state") not in TERMINAL_STATES]
+            terminal = [o for o in state["orders"] if o.get("state") in TERMINAL_STATES]
+            state["orders"] = active + terminal[-max_terminal_orders:]
+        if len(state["fills"]) > max_fills:
+            state["fills"] = state["fills"][-max_fills:]
 
     # ── Data Export / 数据导出 ──
 

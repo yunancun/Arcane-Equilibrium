@@ -466,11 +466,13 @@ class TestDispatcherIntegration:
         )
         order_id = result["order"]["order_id"]
 
-        # Price drops to 86500 → should fill
-        event = PriceEvent(symbol="BTCUSDT", last_price=86500.0)
+        # Price drops well below limit (deep cross >0.5%) → guarantees full fill
+        # 价格深穿限价（>0.5%）→ 保证全部成交
+        deep_cross_price = 86500.0 * 0.994  # ~86000, >0.5% below limit
+        event = PriceEvent(symbol="BTCUSDT", last_price=deep_cross_price)
         dispatcher._on_price_event(event)
 
-        # Verify filled
+        # Verify filled (deep cross ensures 100% fill)
         orders = active_engine.get_orders()
         filled = [o for o in orders if o["order_id"] == order_id]
         assert len(filled) == 1

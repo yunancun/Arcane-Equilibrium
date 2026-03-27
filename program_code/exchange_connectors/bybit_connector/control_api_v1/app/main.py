@@ -159,3 +159,7 @@ app.include_router(paper_router)
 # ── Layer 2 AI Reasoning Engine Router / L2 AI 推理引擎路由注册 ──
 from .layer2_routes import layer2_router  # noqa: E402
 app.include_router(layer2_router)
+
+# ── Risk Control Router / 风控路由注册 ──
+from .risk_routes import risk_router  # noqa: E402
+app.include_router(risk_router)

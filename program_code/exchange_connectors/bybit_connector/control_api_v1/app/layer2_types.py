@@ -426,7 +426,7 @@ class Layer2Config:
     # Integration / 集成
     auto_submit_to_paper: bool = True
     confidence_threshold: float = 0.5
-    edge_threshold_bps: float = 5.0
+    edge_threshold_bps: float = 25.0  # Must exceed round-trip cost floor (~21 bps)
 
     def to_dict(self) -> dict[str, Any]:
         return {

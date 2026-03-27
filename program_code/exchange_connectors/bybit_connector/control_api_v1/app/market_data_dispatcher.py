@@ -283,7 +283,7 @@ class MarketDataDispatcher:
         """
         # Read paper trading state / 读取纸上交易状态
         try:
-            state = self._engine._read()
+            state = self._engine.get_state()
         except Exception:
             return ATTENTION_DORMANT
 
