@@ -163,3 +163,7 @@ app.include_router(layer2_router)
 # ── Risk Control Router / 风控路由注册 ──
 from .risk_routes import risk_router  # noqa: E402
 app.include_router(risk_router)
+
+# ── Phase 2 Strategy Toolkit Router / Phase 2 本地策略工具包路由注册 ──
+from .phase2_strategy_routes import phase2_router  # noqa: E402
+app.include_router(phase2_router)
