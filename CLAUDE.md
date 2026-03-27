@@ -74,6 +74,7 @@ L    Learning / Self-Observability / Net PnL    ✅ 全部完成
      Phase 3 管线桥接+止损+信号增强              ✅ 完成（管线接通+StopManager+Regime检测+3新规则+历史K线引导）
      全系统审核 A-K 修复                         ✅ 完成（7C+19H+28M+16L 全修 + 路径统一 + I章去重 + mutator 3x→1x）
      GUI 三层架构                                ✅ 完成（Grafana 监控 + TradingView K线 + Bybit Demo 双重执行 + 登录系统）
+     GUI 10-Tab 专业控制台                       ✅ 完成（10 Tab + common.js + 双层解释 + 三层信息密度）
      自主交易 Agent                              ✅ 完成（市场扫描器 650 符号 + 策略自动部署 + 多币种支持）
 M    Supervised Live Gate                       ⬜ 未开始
 N    Constrained Autonomous Live                ⬜ 未开始
@@ -216,7 +217,8 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 自主交易 Agent（市场扫描器 650 符号 + 策略自动部署 5 品种 + Bybit Demo 同步）
 
 下一步（按优先级）：
-  GUI 美化完善（面板细节 / 交互优化 / 移动端适配）
+  ✅ GUI 10-Tab 专业控制台（已完成）
+  GUI 细节打磨（移动端适配 / 图表增强 / 实时 PnL 折线图）
   Paper Trading + Bybit Demo 数据对比分析
 
 长期优化（自主交易 Agent 持续改进）：
@@ -268,10 +270,11 @@ Live 前置条件（M/N 前必须核验）：
 | 自主交易 Agent 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
 | Session 2 总结 | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
 | Session 3 残留审核修复 | `docs/worklogs/control_api_gui/2026-03-27--session3_remaining_audit_fixes.md` |
+| GUI 10-Tab 全面重构 | `docs/worklogs/control_api_gui/2026-03-27--gui_10tab_restructure.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成。646 测试（0 失败），111 路由，8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 三层架构（Grafana + TradingView + Bybit Demo）。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-27：全系统完成。646 测试（0 失败），111 路由，8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 10-Tab 专业控制台（系统总览 / 模拟交易 / Bybit Demo / 策略中心 / K线图表 / 风控止损 / AI 引擎 / 学习系统 / 监控 / 设置）+ 双层解释 + 三层信息密度。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。

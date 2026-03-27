@@ -12,299 +12,315 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
-    font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; }
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif;
+    overflow: hidden; }
 
-  .header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-    background: var(--card-bg); border-bottom: 1px solid var(--border); }
-  .header h1 { font-size: 15px; font-weight: 600; }
-  .header .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  /* ── Header ─────────────────────────────────────────────────── */
+  .header { display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+    background: var(--card-bg); border-bottom: 1px solid var(--border); height: 42px; }
+  .header .logo { font-size: 18px; margin-right: 2px; }
+  .header h1 { font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .header .tag { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
   .tag-blue { background: rgba(56,139,253,0.15); color: var(--blue); }
   .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%;
-    background: var(--text-dim); flex-shrink: 0; }
-  .status-dot.live { background: var(--green); }
-  .status-dot.down { background: var(--red); }
+  .tag-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok { background: var(--green); }
+  .dot-err { background: var(--red); }
+  .dot-off { background: var(--text-dim); }
+  .spacer { flex: 1; }
+  .header-btn { background: transparent; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text-dim); font-size: 11px; padding: 3px 10px; cursor: pointer; }
+  .header-btn:hover { border-color: var(--accent); color: var(--text); }
 
-  .grid { display: grid; grid-template-columns: 260px 1fr; height: calc(100vh - 42px); }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } .sidebar { display: none; } }
+  /* ── Layout ─────────────────────────────────────────────────── */
+  .layout { display: grid; grid-template-columns: 220px 1fr; height: calc(100vh - 42px); }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .sidebar { display: none; } }
 
+  /* ── Sidebar ────────────────────────────────────────────────── */
   .sidebar { background: var(--card-bg); border-right: 1px solid var(--border);
-    padding: 12px; overflow-y: auto; }
-  .sidebar h2 { font-size: 11px; text-transform: uppercase; color: var(--text-dim);
-    margin: 14px 0 6px; letter-spacing: 0.5px; }
+    padding: 10px; overflow-y: auto; }
+  .sidebar h2 { font-size: 10px; text-transform: uppercase; color: var(--text-dim);
+    margin: 12px 0 5px; letter-spacing: 0.5px; }
   .sidebar h2:first-child { margin-top: 0; }
 
-  .mc { background: var(--bg); border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
-  .mc-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
-  .mc-val { font-size: 18px; font-weight: 600; margin-top: 2px; }
-  .mc-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+  .mc { background: var(--bg); border: 1px solid #21262d; border-radius: 8px;
+    padding: 7px 10px; margin-bottom: 5px; }
+  .mc-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
+  .mc-val { font-size: 17px; font-weight: 700; margin-top: 1px; }
+  .mc-sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
   .green { color: var(--green); } .red { color: var(--red); }
-  .blue { color: var(--blue); } .yellow { color: var(--yellow); }
+  .yellow { color: var(--yellow); } .blue { color: var(--blue); }
 
-  .cost-row { display: flex; justify-content: space-between; padding: 3px 0;
-    font-size: 11px; border-bottom: 1px solid rgba(48,54,61,0.3); }
-  .cost-row:last-child { border: none; }
-
-  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .btn { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--bg); color: var(--text); font-size: 11px; cursor: pointer;
-    transition: border-color 0.2s; }
-  .btn:hover { border-color: var(--accent); }
-  .btn.primary { background: rgba(56,139,253,0.15); border-color: var(--blue); color: var(--blue); }
-
-  .main-frame { width: 100%; height: 100%; border: none; }
-
-  .tab-bar { display: flex; gap: 0; background: var(--card-bg);
-    border-bottom: 1px solid var(--border); }
-  .tab { padding: 8px 14px; font-size: 12px; cursor: pointer; color: var(--text-dim);
-    border-bottom: 2px solid transparent; transition: all 0.2s; user-select: none; }
-  .tab:hover { color: var(--text); }
+  /* ── Tab Bar ────────────────────────────────────────────────── */
+  .tab-bar { display: flex; background: var(--card-bg); border-bottom: 1px solid var(--border);
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab { padding: 7px 14px; font-size: 12px; cursor: pointer; color: var(--text-dim);
+    border-bottom: 2px solid transparent; transition: all 0.15s; user-select: none;
+    white-space: nowrap; flex-shrink: 0; }
+  .tab:hover { color: var(--text); background: rgba(56,139,253,0.04); }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab .tab-icon { margin-right: 4px; font-size: 12px; }
 
-  .frame-wrap { height: calc(100% - 36px); position: relative; }
-  .frame-wrap iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+  /* ── Frame Container ────────────────────────────────────────── */
+  .frame-wrap { flex: 1; position: relative; overflow: hidden; }
+  .frame-wrap iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    border: none; background: var(--bg); }
+  .frame-wrap .placeholder { display: none; position: absolute; inset: 0; overflow-y: auto; }
+
+  /* ── Sidebar Nav Buttons ────────────────────────────────────── */
+  .nav-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+  .nav-btn { padding: 5px 6px; border-radius: 6px; border: 1px solid #21262d;
+    background: var(--bg); color: var(--text-dim); font-size: 10px; cursor: pointer;
+    text-align: center; transition: all 0.15s; }
+  .nav-btn:hover { border-color: var(--accent); color: var(--text); }
+  .nav-btn.nav-active { background: rgba(56,139,253,0.1); border-color: rgba(56,139,253,0.3); color: var(--accent); }
 </style>
 </head>
 <body>
 
+<!-- ═══ Header ═══ -->
 <div class="header">
-  <div class="status-dot" id="api-dot"></div>
+  <span class="logo">&#x1F99E;</span>
+  <div class="dot" id="api-dot"></div>
   <h1>OpenClaw Trading Console</h1>
-  <span class="tag tag-blue">Paper Trading Beta</span>
-  <span class="tag tag-green">shadow_only</span>
-  <span style="flex:1"></span>
+  <span class="tag tag-blue">Paper Trading</span>
+  <span class="tag tag-green" id="mode-tag">shadow_only</span>
+  <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
-  <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:11px;padding:4px 10px;cursor:pointer;margin-left:8px">Logout</button>
+  <span style="font-size:11px;color:var(--text-dim);margin:0 4px" id="user-label"></span>
+  <button class="header-btn" onclick="ocLogout()">Logout</button>
 </div>
 
-<div class="grid">
-  <div class="sidebar">
+<!-- ═══ Layout ═══ -->
+<div class="layout">
 
-    <h2>AI Cost / AI 成本</h2>
-    <div class="mc">
-      <div class="mc-label">Today / 今日</div>
-      <div class="mc-val blue" id="cost-today">$--</div>
-      <div class="mc-sub" id="cost-tokens">loading...</div>
-    </div>
-    <div class="mc">
-      <div class="mc-label">30-Day Total / 30天累计</div>
-      <div class="mc-val" id="cost-30d" style="font-size:14px">$--</div>
-    </div>
-    <div id="cost-daily"></div>
+  <!-- ─── Sidebar ─── -->
+  <div class="sidebar">
 
     <h2>Paper PnL / 模拟盈亏</h2>
     <div class="mc">
-      <div class="mc-label">Net Paper PnL</div>
-      <div class="mc-val" id="pnl-net">--</div>
-      <div class="mc-sub" id="pnl-detail"></div>
-    </div>
-    <div class="mc">
-      <div class="mc-label">Session</div>
-      <div class="mc-val" id="sess-state" style="font-size:14px">--</div>
-      <div class="mc-sub" id="sess-detail"></div>
+      <div class="mc-label">Net PnL</div>
+      <div class="mc-val" id="s-pnl">--</div>
+      <div class="mc-sub" id="s-pnl-detail"></div>
     </div>
 
-    <h2>System Health / 系统</h2>
+    <h2>Session / 会话</h2>
+    <div class="mc">
+      <div class="mc-label">State</div>
+      <div class="mc-val" id="s-session" style="font-size:14px">--</div>
+      <div class="mc-sub" id="s-session-detail"></div>
+    </div>
+
+    <h2>AI Cost / AI 成本</h2>
+    <div class="mc">
+      <div class="mc-label">Today</div>
+      <div class="mc-val blue" id="s-cost" style="font-size:14px">$--</div>
+      <div class="mc-sub" id="s-cost-detail"></div>
+    </div>
+
+    <h2>System / 系统</h2>
     <div class="mc">
       <div class="mc-label">Control API</div>
-      <div class="mc-val" id="api-state" style="font-size:14px">--</div>
+      <div class="mc-val" id="s-api" style="font-size:14px">--</div>
     </div>
     <div class="mc">
       <div class="mc-label">OpenClaw Gateway</div>
-      <div class="mc-val" id="oc-state" style="font-size:14px">--</div>
+      <div class="mc-val" id="s-oc" style="font-size:14px">--</div>
     </div>
 
-    <h2>Actions / 操作</h2>
-    <div class="btn-row">
-      <button class="btn primary" onclick="switchTo('trading')">Dashboard</button>
-      <button class="btn" onclick="switchTo('charts')">Charts</button>
-      <button class="btn" onclick="switchTo('grafana')">Grafana</button>
-      <button class="btn" onclick="switchTo('openclaw')">OpenClaw</button>
-      <button class="btn" onclick="refreshAll()">Refresh</button>
-    </div>
-    <div class="mc-sub" style="margin-top:8px">
-      Auto-refresh: 15s | Token: <span id="token-status">--</span>
+    <h2>Navigation / 导航</h2>
+    <div class="nav-grid" id="nav-grid"></div>
+    <div class="mc-sub" style="margin-top:6px;text-align:center">
+      Auto-refresh 15s | <span id="s-token-status">--</span>
     </div>
   </div>
 
+  <!-- ─── Main Content ─── -->
   <div style="display:flex;flex-direction:column;overflow:hidden">
-    <div class="tab-bar">
-      <div class="tab active" data-tab="trading" onclick="switchTo('trading')">控制台 / Dashboard</div>
-      <div class="tab" data-tab="charts" onclick="switchTo('charts')">K线图表 / Charts</div>
-      <div class="tab" data-tab="grafana" onclick="switchTo('grafana')">监控 / Grafana</div>
-      <div class="tab" data-tab="openclaw" onclick="switchTo('openclaw')">OpenClaw Control</div>
-    </div>
-    <div class="frame-wrap">
-      <iframe id="f-trading" src="/static/index.html"></iframe>
-      <iframe id="f-charts" class="main-frame" src="/trading" style="display:none"></iframe>
-      <iframe id="f-grafana" class="main-frame" src="http://trade-core:3000/d/openclaw-trading-pnl?orgId=1&kiosk" style="display:none"></iframe>
-      <div id="f-openclaw" style="display:none;padding:24px;overflow-y:auto">
-        <div style="text-align:center;margin-top:40px">
-          <div style="font-size:40px;margin-bottom:16px">&#x1f9e0;</div>
-          <h2 style="margin-bottom:8px">OpenClaw Gateway</h2>
-          <p style="color:var(--text-dim);margin-bottom:20px">OpenClaw 控制台需在独立窗口中打开（安全策略限制嵌入）</p>
-          <button class="btn primary" style="font-size:14px;padding:10px 24px"
-            onclick="window.open(window.location.origin+'/openclaw/','_blank')">
-            打开 OpenClaw 控制台 / Open OpenClaw Console
-          </button>
-        </div>
-        <div style="margin-top:32px;max-width:500px;margin-left:auto;margin-right:auto">
-          <h2 style="font-size:12px;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Gateway Status</h2>
-          <div class="mc">
-            <div class="mc-label">OpenClaw Gateway</div>
-            <div class="mc-val" id="oc-detail" style="font-size:14px">checking...</div>
-          </div>
-          <div class="mc">
-            <div class="mc-label">Agents</div>
-            <div class="mc-val" id="oc-agents" style="font-size:14px">--</div>
-          </div>
-          <div class="mc">
-            <div class="mc-label">Channels</div>
-            <div class="mc-val" id="oc-channels" style="font-size:14px">--</div>
-          </div>
-        </div>
-      </div>
-    </div>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar" id="tab-bar"></div>
+
+    <!-- Frame Container -->
+    <div class="frame-wrap" id="frame-wrap"></div>
   </div>
 </div>
 
 <script>
-// Auth check: redirect to login if no token
+// ─── Auth ─────────────────────────────────────────────────────
+const TOKEN_KEY = 'oc_trading_token';
+const USER_KEY = 'oc_username';
 (function() {
-  var t = localStorage.getItem('oc_trading_token');
-  if (!t) {
-    sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+  if (!localStorage.getItem(TOKEN_KEY)) {
+    sessionStorage.setItem('oc_login_redirect', '/console');
     window.location.href = '/login';
-    return;
   }
 })();
 
-// OpenClaw Gateway: proxied through Trading API at /openclaw/
-// 通过 Trading API 的 /openclaw/ 反向代理访问（远程和本地都能工作）
-const OC = window.location.origin + '/openclaw';
-let token = '';
-
-function switchTo(tab) {
-  document.querySelectorAll('.tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === tab);
-  });
-  document.getElementById('f-trading').style.display = tab === 'trading' ? 'block' : 'none';
-  document.getElementById('f-charts').style.display = tab === 'charts' ? 'block' : 'none';
-  document.getElementById('f-grafana').style.display = tab === 'grafana' ? 'block' : 'none';
-  document.getElementById('f-openclaw').style.display = tab === 'openclaw' ? 'block' : 'none';
-  if (tab === 'openclaw') refreshOCDetail();
+function ocLogout() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  window.location.href = '/login';
 }
 
-// Clock
+function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+
+// ─── Tab Definitions ──────────────────────────────────────────
+const TABS = [
+  { id: 'system',     label: '系统总览',       labelEn: 'System',    icon: '&#x1F4CA;', src: '/static/tab-system.html' },
+  { id: 'paper',      label: '模拟交易',       labelEn: 'Paper',     icon: '&#x1F4B0;', src: '/static/tab-paper.html' },
+  { id: 'demo',       label: 'Bybit Demo',     labelEn: 'Demo',      icon: '&#x1F3E6;', src: '/static/tab-demo.html' },
+  { id: 'strategy',   label: '策略中心',       labelEn: 'Strategy',  icon: '&#x2699;',  src: '/static/tab-strategy.html' },
+  { id: 'charts',     label: 'K线图表',        labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
+  { id: 'risk',       label: '风控止损',       labelEn: 'Risk',      icon: '&#x1F6E1;', src: '/static/tab-risk.html' },
+  { id: 'ai',         label: 'AI 引擎',        labelEn: 'AI',        icon: '&#x1F916;', src: '/static/tab-ai.html' },
+  { id: 'learning',   label: '学习系统',       labelEn: 'Learning',  icon: '&#x1F4D6;', src: '/static/tab-learning.html' },
+  { id: 'monitoring', label: '监控',           labelEn: 'Monitor',   icon: '&#x1F50D;', src: '/static/tab-monitoring.html' },
+  { id: 'settings',   label: '设置',           labelEn: 'Settings',  icon: '&#x2699;',  src: '/static/tab-settings.html' },
+];
+
+let currentTab = 'system';
+
+// ─── Build Tab Bar ────────────────────────────────────────────
+function buildTabs() {
+  const bar = document.getElementById('tab-bar');
+  const wrap = document.getElementById('frame-wrap');
+  const navGrid = document.getElementById('nav-grid');
+
+  TABS.forEach((t, i) => {
+    // Tab button
+    const tab = document.createElement('div');
+    tab.className = 'tab' + (i === 0 ? ' active' : '');
+    tab.dataset.tab = t.id;
+    tab.innerHTML = '<span class="tab-icon">' + t.icon + '</span>' + t.label;
+    tab.onclick = () => switchTo(t.id);
+    bar.appendChild(tab);
+
+    // iframe (lazy loaded)
+    const frame = document.createElement('iframe');
+    frame.id = 'f-' + t.id;
+    frame.style.display = i === 0 ? 'block' : 'none';
+    frame.dataset.src = t.src;
+    if (i === 0) frame.src = t.src; // Load first tab immediately
+    wrap.appendChild(frame);
+
+    // Sidebar nav button
+    const navBtn = document.createElement('div');
+    navBtn.className = 'nav-btn' + (i === 0 ? ' nav-active' : '');
+    navBtn.dataset.tab = t.id;
+    navBtn.textContent = t.labelEn;
+    navBtn.onclick = () => switchTo(t.id);
+    navGrid.appendChild(navBtn);
+  });
+}
+
+function switchTo(tabId) {
+  currentTab = tabId;
+  // Update tab bar
+  document.querySelectorAll('.tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === tabId));
+  // Update nav buttons
+  document.querySelectorAll('.nav-btn').forEach(b =>
+    b.classList.toggle('nav-active', b.dataset.tab === tabId));
+  // Show/hide iframes (lazy load on first switch)
+  TABS.forEach(t => {
+    const frame = document.getElementById('f-' + t.id);
+    if (t.id === tabId) {
+      frame.style.display = 'block';
+      if (!frame.src || frame.src === 'about:blank') {
+        frame.src = frame.dataset.src;
+      }
+    } else {
+      frame.style.display = 'none';
+    }
+  });
+}
+
+buildTabs();
+
+// ─── Clock ────────────────────────────────────────────────────
 setInterval(() => {
   const d = new Date();
   document.getElementById('clock').textContent =
     d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', {hour12:false});
 }, 1000);
 
-// API helper
+// ─── User Label ───────────────────────────────────────────────
+const user = localStorage.getItem(USER_KEY);
+if (user) document.getElementById('user-label').textContent = user;
+document.getElementById('s-token-status').textContent = getToken() ? 'authenticated' : 'none';
+
+// ─── Sidebar API helper ──────────────────────────────────────
 async function api(path) {
-  const h = {};
-  if (token) h['Authorization'] = 'Bearer ' + token;
-  const r = await fetch(path, {headers: h});
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
-}
-
-// Load token from localStorage (set by login page)
-function loadToken() {
-  token = localStorage.getItem('oc_trading_token') || '';
-  document.getElementById('token-status').textContent = token ? 'authenticated' : 'none';
-}
-
-// AI Cost
-async function refreshCost() {
+  const t = getToken();
+  if (!t) return null;
   try {
-    const d = await api('/api/v1/paper/ai-cost');
-    const c = d.data;
-    if (c.available) {
-      document.getElementById('cost-today').textContent = '$' + c.today_cost.toFixed(4);
-      document.getElementById('cost-tokens').textContent = c.today_tokens.toLocaleString() + ' tokens';
-      document.getElementById('cost-30d').textContent = '$' + c.total_cost_30d.toFixed(4);
-
-      let html = '';
-      (c.daily || []).forEach(day => {
-        html += '<div class="cost-row"><span>' + day.date + '</span><span>$' + day.totalCost.toFixed(4) + '</span></div>';
-      });
-      document.getElementById('cost-daily').innerHTML = html;
-    } else {
-      document.getElementById('cost-today').textContent = '--';
-      document.getElementById('cost-tokens').textContent = c.message || 'unavailable';
-    }
-  } catch(e) {
-    document.getElementById('cost-today').textContent = '--';
-    document.getElementById('cost-tokens').textContent = 'API error';
-  }
+    const r = await fetch(path, { headers: { 'Authorization': 'Bearer ' + t } });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch(e) { return null; }
 }
 
-// OpenClaw health
-async function refreshOC() {
-  try {
-    const r = await fetch(OC + '/health');
-    const h = await r.json();
-    document.getElementById('oc-state').textContent = h.ok ? 'Live' : 'Down';
-    document.getElementById('oc-state').className = 'mc-val ' + (h.ok ? 'green' : 'red');
-  } catch(e) {
-    document.getElementById('oc-state').textContent = 'Offline';
-    document.getElementById('oc-state').className = 'mc-val red';
-  }
-}
-async function refreshOCDetail() {
-  try {
-    const r = await fetch(OC + '/health');
-    const h = await r.json();
-    document.getElementById('oc-detail').textContent = h.ok ? 'Online' : 'Down';
-    document.getElementById('oc-detail').className = 'mc-val ' + (h.ok ? 'green' : 'red');
-    document.getElementById('oc-agents').textContent = (h.agents || []).length + ' agent(s)';
-    document.getElementById('oc-channels').textContent = (h.channels || []).length + ' channel(s)';
-  } catch(e) {
-    document.getElementById('oc-detail').textContent = 'Offline';
-    document.getElementById('oc-detail').className = 'mc-val red';
-  }
-}
+const OC = window.location.origin + '/openclaw';
 
-// PnL + Session
-async function refreshTrading() {
+// ─── Sidebar Refresh ─────────────────────────────────────────
+async function refreshSidebar() {
+  // Paper Trading PnL + Session
   try {
     const d = await api('/api/v1/paper/session/status');
-    const s = d.data.session;
-    const state = s.session_state;
-    document.getElementById('sess-state').textContent = state;
-    document.getElementById('sess-state').className = 'mc-val ' +
-      (state==='active'?'green': state==='paused'?'yellow': '');
-    document.getElementById('sess-detail').textContent =
-      'Orders: ' + (d.data.order_count||0) + ' | Pos: ' + (d.data.position_count||0);
-    document.getElementById('api-state').textContent = 'Connected';
-    document.getElementById('api-state').className = 'mc-val green';
-    document.getElementById('api-dot').className = 'status-dot live';
+    if (d && d.data) {
+      const s = d.data.session;
+      const state = s.session_state;
+      const el = document.getElementById('s-session');
+      el.textContent = state;
+      el.className = 'mc-val ' + (state==='active'?'green': state==='paused'?'yellow':'');
+      document.getElementById('s-session-detail').textContent =
+        'Orders: ' + (d.data.order_count||0) + ' | Pos: ' + (d.data.position_count||0);
 
-    const pnl = d.data.pnl;
-    const net = pnl.net_paper_pnl || 0;
-    document.getElementById('pnl-net').textContent = (net>=0?'+':'') + net.toFixed(4);
-    document.getElementById('pnl-net').className = 'mc-val ' + (net>=0?'green':'red');
-    document.getElementById('pnl-detail').textContent =
-      'Real: ' + (pnl.realized_pnl||0).toFixed(2) + ' | Fees: ' + (pnl.total_fees_paid||0).toFixed(4) +
-      ' | AI: $' + (pnl.total_ai_cost||0).toFixed(4);
+      const pnl = d.data.pnl;
+      const net = pnl.net_paper_pnl || 0;
+      const pnlEl = document.getElementById('s-pnl');
+      pnlEl.textContent = (net>=0?'+':'') + net.toFixed(2);
+      pnlEl.className = 'mc-val ' + (net>=0?'green':'red');
+      document.getElementById('s-pnl-detail').textContent =
+        'Realized: ' + (pnl.realized_pnl||0).toFixed(2) + ' | Fees: ' + (pnl.total_fees_paid||0).toFixed(4);
+
+      document.getElementById('s-api').textContent = 'Online';
+      document.getElementById('s-api').className = 'mc-val green';
+      document.getElementById('api-dot').className = 'dot dot-ok';
+    }
   } catch(e) {
-    document.getElementById('api-state').textContent = 'Offline';
-    document.getElementById('api-state').className = 'mc-val red';
-    document.getElementById('api-dot').className = 'status-dot down';
+    document.getElementById('s-api').textContent = 'Offline';
+    document.getElementById('s-api').className = 'mc-val red';
+    document.getElementById('api-dot').className = 'dot dot-err';
+  }
+
+  // AI Cost
+  try {
+    const d = await api('/api/v1/paper/ai-cost');
+    if (d && d.data && d.data.available) {
+      document.getElementById('s-cost').textContent = '$' + d.data.today_cost.toFixed(4);
+      document.getElementById('s-cost-detail').textContent =
+        d.data.today_tokens.toLocaleString() + ' tokens | 30d: $' + d.data.total_cost_30d.toFixed(2);
+    }
+  } catch(e) {}
+
+  // OpenClaw
+  try {
+    const r = await fetch(OC + '/health');
+    const h = await r.json();
+    document.getElementById('s-oc').textContent = h.ok ? 'Online' : 'Down';
+    document.getElementById('s-oc').className = 'mc-val ' + (h.ok ? 'green' : 'red');
+  } catch(e) {
+    document.getElementById('s-oc').textContent = 'Offline';
+    document.getElementById('s-oc').className = 'mc-val red';
   }
 }
 
-async function refreshAll() {
-  await Promise.allSettled([refreshCost(), refreshOC(), refreshTrading()]);
-}
-
-loadToken();
-refreshAll();
-setInterval(refreshAll, 15000);
+refreshSidebar();
+setInterval(refreshSidebar, 15000);
 </script>
 </body>
 </html>

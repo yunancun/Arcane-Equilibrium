@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bybit Demo</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Connector Status ═══ -->
+<div class="oc-control-bar">
+  <span style="font-weight:600">&#x1F3E6; Bybit Demo Trading</span>
+  <span id="demo-badge" class="oc-chip oc-chip-neutral">checking...</span>
+  <span style="flex:1"></span>
+  <span style="font-size:12px;color:var(--text-dim)" id="demo-api-info"></span>
+</div>
+
+<div id="explain-demo"></div>
+
+<!-- ═══ Content (shown when connected) ═══ -->
+<div id="demo-content" style="display:none">
+
+  <!-- Balance -->
+  <div class="oc-card">
+    <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
+    <div class="oc-metrics" id="balance-grid">
+      <div class="oc-metric"><div class="oc-metric-label">Total Equity</div><div class="oc-metric-val" id="d-equity">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Available Balance</div><div class="oc-metric-val" id="d-available">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Margin Used</div><div class="oc-metric-val" id="d-margin">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Realized PnL</div><div class="oc-metric-val" id="d-realized">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Account Type</div><div class="oc-metric-val" id="d-type" style="font-size:14px">--</div></div>
+    </div>
+  </div>
+
+  <!-- Positions -->
+  <div class="oc-card">
+    <h3>&#x1F4CA; 持仓 / Open Positions</h3>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>Symbol</th><th>Side</th><th>Size</th><th>Entry Price</th><th>Mark Price</th><th>PnL</th><th>Leverage</th><th>Liq. Price</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Comparison -->
+  <details class="oc-collapse">
+    <summary>&#x1F504; Paper vs Demo 对比 / Comparison</summary>
+    <div class="oc-collapse-body">
+      <div id="explain-comparison"></div>
+      <div class="oc-table-wrap">
+        <table class="oc-table">
+          <thead><tr><th>Metric</th><th>Paper Engine</th><th>Bybit Demo</th><th>Match?</th></tr></thead>
+          <tbody id="comparison-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+</div>
+
+<!-- ═══ Not Configured State ═══ -->
+<div id="demo-offline" style="display:none">
+  <div class="oc-card">
+    <div class="oc-not-configured">
+      <div class="icon">&#x1F3E6;</div>
+      <h3>Bybit Demo 未连接 / Not Connected</h3>
+      <p>Bybit Demo 交易需要配置 API 密钥才能使用。请在环境配置中设置 Bybit Demo API 密钥。</p>
+      <details class="oc-explain-deep" style="margin-top:16px;text-align:left">
+        <summary style="color:var(--accent);cursor:pointer">如何配置 / How to configure</summary>
+        <div class="oc-explain-content">
+          <p>1. 在 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 注册并获取 API 密钥</p>
+          <p>2. 将密钥添加到环境配置文件 <code>.env</code>：</p>
+          <pre class="oc-pre" style="margin:8px 0">BYBIT_DEMO_API_KEY=your_key_here
+BYBIT_DEMO_API_SECRET=your_secret_here</pre>
+          <p>3. 重启交易系统以加载新配置</p>
+          <p style="margin-top:8px;color:var(--text-dim)">Bybit Demo 使用真实市场数据但虚拟资金，订单在 Bybit 的沙盒服务器上执行。这与本地 Paper Engine 的区别是：Demo 订单会经过 Bybit 的撮合引擎，更接近真实环境。</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-demo').innerHTML = ocExplain(
+  'Bybit Demo 是 Bybit 交易所提供的沙盒环境，使用真实市场数据但虚拟资金。订单在 Bybit 的测试服务器上执行，更接近真实交易环境。与本地模拟（Paper Trading）不同的是，这里的订单会经过 Bybit 的撮合引擎。',
+  '系统采用"双重执行"模式：每笔交易同时在本地 Paper Engine（内部模拟）和 Bybit Demo（外部沙盒）上执行。这样可以对比两个引擎的结果差异，验证本地模拟的准确性。如果两边的持仓或 PnL 出现较大偏差，可能意味着本地模拟的假设需要调整。'
+);
+
+$('explain-comparison').innerHTML = ocExplain(
+  '这个表格对比本地模拟引擎和 Bybit Demo 的数据，帮助你发现差异。如果两边数据一致，说明本地模拟是准确的。',
+  '常见的偏差来源：滑点模型差异（本地固定 0.01%，Demo 受真实订单簿影响）、成交时间差（本地即时，Demo 需要网络往返）、费率差异（本地使用配置费率，Demo 使用 Bybit 实际费率）。'
+);
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadDemoStatus() {
+  const d = await ocApi('/api/v1/strategy/demo/status');
+  if (!d || !d.data) {
+    showOffline();
+    return;
+  }
+  const status = d.data;
+  const connected = status.enabled || status.connected || status.is_configured;
+  const badge = $('demo-badge');
+
+  if (connected) {
+    badge.textContent = 'Connected';
+    badge.className = 'oc-chip oc-chip-good';
+    $('demo-api-info').textContent = status.api_mode || 'demo-trading.bybit.com';
+    $('demo-content').style.display = '';
+    $('demo-offline').style.display = 'none';
+    loadBalance();
+    loadPositions();
+    loadComparison();
+  } else {
+    showOffline();
+  }
+}
+
+function showOffline() {
+  $('demo-badge').textContent = 'Not Connected';
+  $('demo-badge').className = 'oc-chip oc-chip-neutral';
+  $('demo-content').style.display = 'none';
+  $('demo-offline').style.display = '';
+}
+
+async function loadBalance() {
+  const d = await ocApi('/api/v1/strategy/demo/balance');
+  if (!d || !d.data) return;
+  const b = d.data;
+
+  const equity = b.total_equity || b.equity || 0;
+  ocSetText('d-equity', '$' + ocNum(equity, 2));
+
+  const available = b.available_balance || b.available || 0;
+  ocSetText('d-available', '$' + ocNum(available, 2));
+
+  const margin = b.used_margin || b.margin_used || 0;
+  ocSetText('d-margin', '$' + ocNum(margin, 2));
+
+  const unrealized = b.unrealized_pnl || b.total_unrealized_pnl || 0;
+  const elU = $('d-unrealized');
+  elU.textContent = ocMoney(unrealized);
+  elU.className = 'oc-metric-val ' + ocPnlClass(unrealized);
+
+  const realized = b.realized_pnl || b.total_realized_pnl || 0;
+  const elR = $('d-realized');
+  elR.textContent = ocMoney(realized);
+  elR.className = 'oc-metric-val ' + ocPnlClass(realized);
+
+  ocSetText('d-type', b.account_type || 'UNIFIED');
+}
+
+async function loadPositions() {
+  const d = await ocApi('/api/v1/strategy/demo/positions');
+  if (!d || !d.data) return;
+  const positions = d.data.positions || d.data || [];
+  if (!positions.length) {
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="8">暂无持仓 / No open positions</td></tr>');
+    return;
+  }
+  let html = '';
+  positions.forEach(p => {
+    const pnl = p.unrealised_pnl || p.unrealized_pnl || 0;
+    html += '<tr>';
+    html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
+    html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(p.side) + '</td>';
+    html += '<td>' + ocNum(p.size || p.qty, 4) + '</td>';
+    html += '<td>' + ocNum(p.avg_price || p.entry_price, 2) + '</td>';
+    html += '<td>' + ocNum(p.mark_price, 2) + '</td>';
+    html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
+    html += '<td>' + (p.leverage || '1') + 'x</td>';
+    html += '<td>' + ocNum(p.liq_price, 2) + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('demo-positions', html);
+}
+
+async function loadComparison() {
+  // Load both paper and demo data for comparison
+  const [paperD, demoD] = await Promise.allSettled([
+    ocApi('/api/v1/paper/session/status'),
+    ocApi('/api/v1/strategy/demo/balance'),
+  ]);
+
+  const paper = paperD.status === 'fulfilled' && paperD.value ? paperD.value.data : null;
+  const demo = demoD.status === 'fulfilled' && demoD.value ? demoD.value.data : null;
+
+  if (!paper || !demo) {
+    ocSetHtml('comparison-tbody', '<tr class="empty-row"><td colspan="4">数据不足 / Insufficient data</td></tr>');
+    return;
+  }
+
+  const paperPnl = paper.pnl || {};
+  const rows = [
+    ['Net PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(demo.realized_pnl || demo.total_realized_pnl)],
+    ['Unrealized PnL', ocMoney(paperPnl.unrealized_pnl), ocMoney(demo.unrealized_pnl || demo.total_unrealized_pnl)],
+    ['Position Count', paper.position_count || 0, (demo.positions || []).length || '?'],
+    ['Order Count', paper.order_count || 0, demo.order_count || '?'],
+  ];
+
+  let html = '';
+  rows.forEach(([label, pVal, dVal]) => {
+    const match = String(pVal) === String(dVal);
+    html += '<tr>';
+    html += '<td>' + label + '</td>';
+    html += '<td>' + pVal + '</td>';
+    html += '<td>' + dVal + '</td>';
+    html += '<td>' + (match ? '<span class="green">&#x2713;</span>' : '<span class="yellow">&#x2260;</span>') + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('comparison-tbody', html);
+}
+
+async function loadAll() {
+  await loadDemoStatus();
+}
+
+loadAll();
+ocStartRefresh(loadAll, 15000);
+</script>
+</body>
+</html>

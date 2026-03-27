@@ -77,8 +77,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     localStorage.setItem(TOKEN_KEY, data.token);
     localStorage.setItem(USER_KEY, data.username);
 
-    // Redirect to original page or default to /trading
-    const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/trading';
+    // Redirect to original page or default to /console
+    const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
     sessionStorage.removeItem(REDIRECT_KEY);
     window.location.href = redirect;
 
@@ -92,7 +92,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
 // If already logged in, redirect
 if (localStorage.getItem(TOKEN_KEY)) {
-  const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/trading';
+  const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
   sessionStorage.removeItem(REDIRECT_KEY);
   window.location.href = redirect;
 }

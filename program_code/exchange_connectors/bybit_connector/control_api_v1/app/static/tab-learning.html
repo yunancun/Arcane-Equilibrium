@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Learning System</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Learning Overview ═══ -->
+<div class="oc-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2>&#x1F4D6; 学习系统 / Learning System</h2>
+      <div class="subtitle">观察 → 教训 → 假设 → 实验 → 改进</div>
+    </div>
+    <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
+  </div>
+
+  <div id="explain-learning"></div>
+
+  <div class="oc-metrics" id="learn-overview">
+    <div class="oc-metric"><div class="oc-metric-label">Observations</div><div class="oc-metric-val" id="l-obs">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Lessons</div><div class="oc-metric-val" id="l-lessons">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Hypotheses</div><div class="oc-metric-val" id="l-hyp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Experiments (Active)</div><div class="oc-metric-val" id="l-exp">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Review Queue</div><div class="oc-metric-val" id="l-queue">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Net PnL Score</div><div class="oc-metric-val" id="l-score">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Review Queue ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4E5; 待审核队列 / Review Queue</h3>
+  <div id="explain-review"></div>
+  <div class="oc-table-wrap">
+    <table class="oc-table">
+      <thead><tr><th>ID</th><th>Type</th><th>Summary</th><th>Priority</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody id="review-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ Two Column: Feed + Net PnL ═══ -->
+<div class="oc-grid-2">
+  <div class="oc-card">
+    <h3>&#x1F4CB; 学习动态 / Learning Feed</h3>
+    <div class="subtitle">最近的观察和教训</div>
+    <div id="feed-body" class="oc-loading">Loading...</div>
+  </div>
+
+  <div class="oc-card">
+    <h3>&#x1F4B5; 净 PnL 仪表盘 / Net PnL Dashboard</h3>
+    <div id="explain-netpnl"></div>
+    <div id="netpnl-body" class="oc-loading">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ Auto-Scan Controls ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F50D; 自动扫描 / Auto-Scan Controls</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-autoscan"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-observations')">Scan Observations</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-lessons')">Scan Lessons</button>
+      <button class="oc-btn oc-btn-primary" onclick="autoScan('scan-hypotheses')">Scan Hypotheses</button>
+    </div>
+    <div id="scan-result" style="margin-top:10px"></div>
+  </div>
+</details>
+
+<!-- ═══ Experiments ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F9EA; 实验列表 / Experiments</summary>
+  <div class="oc-collapse-body">
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>ID</th><th>Hypothesis</th><th>Status</th><th>Started</th><th>Result</th></tr></thead>
+        <tbody id="experiments-tbody"><tr class="empty-row"><td colspan="5">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<!-- ═══ Hypotheses ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F4A1; 假设列表 / Hypotheses</summary>
+  <div class="oc-collapse-body">
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>ID</th><th>Prediction</th><th>Status</th><th>Verdict</th><th>Created</th></tr></thead>
+        <tbody id="hypotheses-tbody"><tr class="empty-row"><td colspan="5">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-learning').innerHTML = ocExplain(
+  '学习系统帮助 AI Agent 从交易经验中持续改进。它遵循科学方法：先观察市场现象，提炼教训，形成假设，设计实验验证，最后将验证过的知识应用到策略中。',
+  '学习循环：Observation（观察到的市场行为或交易结果）→ Lesson（从多个观察中归纳出的规律）→ Hypothesis（基于教训提出的可测试预测）→ Experiment（设计实验来验证假设）→ 回归验证。这个过程确保系统的每次改进都有数据支撑，避免"拍脑袋"式的策略调整。'
+);
+
+$('explain-review').innerHTML = ocExplain(
+  '审核队列包含需要人工确认的学习成果。你可以批准、拒绝或推迟这些项目，也可以请求 AI 进行分析。',
+  '审核项目包括：自动发现的市场模式、策略参数调整建议、风控阈值修改建议。每个项目都会标注优先级和推荐的处理方式。通过审核机制，人类 Operator 始终保持对系统学习方向的控制权。'
+);
+
+$('explain-netpnl').innerHTML = ocExplain(
+  '净 PnL 仪表盘展示扣除所有成本后的真实收益。这是衡量系统表现的最终指标。',
+  'Net PnL = Gross PnL - Trading Fees - AI Costs - Infrastructure Costs。系统严格遵循"看 net PnL 不看 gross PnL"的原则，确保对真实盈利能力有清晰认知。'
+);
+
+$('explain-autoscan').innerHTML = ocExplain(
+  '自动扫描功能让 AI 分析最近的交易数据，自动发现值得关注的观察、教训和假设。',
+  '扫描过程使用 AI 模型分析历史交易数据和市场行为，识别重复出现的模式和异常。发现的内容会进入审核队列，等待人工确认后才会被纳入学习知识库。这确保了自动发现的质量。'
+);
+
+// ─── Actions ──────────────────────────────────────────────────
+async function reviewAction(id, action) {
+  const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: action });
+  if (d) { ocToast('Review ' + action + ' OK', 'success'); loadReviewQueue(); }
+  else ocToast('Review action failed', 'error');
+}
+
+async function aiConsult(id) {
+  const d = await ocPost('/api/v1/learning/review/' + id + '/ai-consult');
+  if (d) { ocToast('AI consultation requested', 'success'); loadReviewQueue(); }
+  else ocToast('AI consult failed', 'error');
+}
+
+async function autoScan(type) {
+  const d = await ocPost('/api/v1/learning/auto/' + type);
+  if (d) {
+    ocToast('Scan completed', 'success');
+    const count = d.data ? (d.data.count || d.data.discovered || 0) : 0;
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-good">Discovered ' + count + ' items</div>');
+    loadAll();
+  } else {
+    ocToast('Scan failed', 'error');
+    ocSetHtml('scan-result', '<div class="oc-chip oc-chip-bad">Scan failed</div>');
+  }
+}
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadOverview() {
+  const d = await ocApi('/api/v1/learning/overview');
+  if (!d || !d.data) return;
+  const o = d.data;
+  ocSetText('l-obs', o.observation_count || o.observations || 0);
+  ocSetText('l-lessons', o.lesson_count || o.lessons || 0);
+  ocSetText('l-hyp', o.hypothesis_count || o.hypotheses || 0);
+  ocSetText('l-exp', o.active_experiment_count || o.experiments || 0);
+}
+
+async function loadReviewQueue() {
+  const d = await ocApi('/api/v1/learning/review-queue');
+  if (!d || !d.data) {
+    ocSetText('l-queue', '0');
+    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6">审核队列为空 / Queue is empty</td></tr>');
+    return;
+  }
+  const items = d.data.items || d.data.queue || d.data || [];
+  ocSetText('l-queue', items.length);
+
+  if (!items.length) {
+    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6">审核队列为空 / Queue is empty</td></tr>');
+    return;
+  }
+  let html = '';
+  items.forEach(item => {
+    html += '<tr>';
+    html += '<td style="font-size:11px">' + ocEsc(String(item.id || '').slice(0, 8)) + '</td>';
+    html += '<td>' + ocChip(item.type || '--', 'info') + '</td>';
+    html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(item.summary || item.title || '--') + '</td>';
+    html += '<td>' + ocChip(item.priority || 'normal', item.priority === 'high' ? 'warn' : 'neutral') + '</td>';
+    html += '<td>' + ocTimeShort(item.created_at) + '</td>';
+    html += '<td style="white-space:nowrap">';
+    html += '<button class="oc-btn oc-btn-success" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'approve\')">Approve</button> ';
+    html += '<button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="reviewAction(\'' + item.id + '\',\'reject\')">Reject</button> ';
+    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="aiConsult(\'' + item.id + '\')">Ask AI</button>';
+    html += '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('review-tbody', html);
+}
+
+async function loadFeed() {
+  const d = await ocApi('/api/v1/learning/feed');
+  if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading">No feed data</div>'); return; }
+  const feed = d.data.items || d.data.feed || d.data || [];
+  if (!feed.length) { ocSetHtml('feed-body', '<div class="oc-loading">暂无学习动态 / No feed items</div>'); return; }
+
+  let html = '';
+  feed.slice(0, 15).forEach(f => {
+    html += '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:12px">';
+    html += '<div style="display:flex;justify-content:space-between">';
+    html += '<span>' + ocChip(f.type || f.category || '--', 'info') + '</span>';
+    html += '<span style="color:var(--text-dim)">' + ocTimeShort(f.timestamp || f.created_at) + '</span>';
+    html += '</div>';
+    html += '<div style="margin-top:4px;color:var(--text)">' + ocEsc(f.detail || f.content || f.title || '--') + '</div>';
+    html += '</div>';
+  });
+  ocSetHtml('feed-body', html);
+}
+
+async function loadNetPnl() {
+  const d = await ocApi('/api/v1/learning/net-pnl');
+  if (!d || !d.data) { ocSetHtml('netpnl-body', '<div class="oc-loading">No PnL data</div>'); return; }
+  const pnl = d.data;
+  let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
+  const fields = [
+    ['Gross Revenue', pnl.gross_revenue || pnl.gross_pnl, true],
+    ['Trading Fees', pnl.trading_fees || pnl.fees, false],
+    ['AI Costs', pnl.ai_costs || pnl.ai_cost, false],
+    ['Net Revenue', pnl.net_revenue || pnl.net_pnl, true],
+  ];
+  fields.forEach(([label, val, isPnl]) => {
+    const cls = isPnl ? ocPnlClass(val) : '';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + (val != null ? '$' + ocNum(val, 4) : '--') + '</div></div>';
+  });
+  html += '</div>';
+
+  // Score
+  const score = pnl.net_revenue || pnl.net_pnl;
+  const elScore = $('l-score');
+  if (score != null) {
+    elScore.textContent = ocMoney(score);
+    elScore.className = 'oc-metric-val ' + ocPnlClass(score);
+  }
+
+  ocSetHtml('netpnl-body', html);
+}
+
+async function loadExperiments() {
+  const d = await ocApi('/api/v1/learning/experiments');
+  if (!d || !d.data) return;
+  const exps = d.data.experiments || d.data || [];
+  if (!exps.length) {
+    ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5">暂无实验 / No experiments</td></tr>');
+    return;
+  }
+  let html = '';
+  exps.forEach(e => {
+    html += '<tr>';
+    html += '<td style="font-size:11px">' + ocEsc(String(e.id || '').slice(0, 8)) + '</td>';
+    html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(e.hypothesis || e.title || '--') + '</td>';
+    html += '<td>' + ocChip(e.status || '--', e.status === 'completed' ? 'good' : e.status === 'active' ? 'info' : 'neutral') + '</td>';
+    html += '<td>' + ocTimeShort(e.started_at || e.created_at) + '</td>';
+    html += '<td style="font-size:11px">' + ocEsc(e.result || '--') + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('experiments-tbody', html);
+}
+
+async function loadHypotheses() {
+  const d = await ocApi('/api/v1/learning/hypotheses');
+  if (!d || !d.data) return;
+  const hyps = d.data.hypotheses || d.data || [];
+  if (!hyps.length) {
+    ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5">暂无假设 / No hypotheses</td></tr>');
+    return;
+  }
+  let html = '';
+  hyps.forEach(h => {
+    html += '<tr>';
+    html += '<td style="font-size:11px">' + ocEsc(String(h.id || '').slice(0, 8)) + '</td>';
+    html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(h.prediction || h.title || '--') + '</td>';
+    html += '<td>' + ocChip(h.status || '--', h.status === 'validated' ? 'good' : h.status === 'rejected' ? 'bad' : 'neutral') + '</td>';
+    html += '<td>' + ocEsc(h.verdict || '--') + '</td>';
+    html += '<td>' + ocTimeShort(h.created_at) + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('hypotheses-tbody', html);
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadOverview(), loadReviewQueue(), loadFeed(), loadNetPnl(), loadExperiments(), loadHypotheses()]);
+}
+
+loadAll();
+ocStartRefresh(loadAll, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Strategy Center</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Orchestrator Status Bar ═══ -->
+<div class="oc-control-bar">
+  <span style="font-weight:600">&#x2699; 策略编排器 / Strategy Orchestrator</span>
+  <span id="orch-regime" class="oc-chip oc-chip-neutral">--</span>
+  <span style="flex:1"></span>
+  <span style="font-size:12px;color:var(--text-dim)">
+    Active: <strong id="orch-active">0</strong> / Total: <strong id="orch-total">0</strong>
+  </span>
+  <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
+</div>
+
+<div id="explain-strategy"></div>
+
+<!-- ═══ Strategy Cards ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4CB; 策略列表 / Registered Strategies</h3>
+  <div class="oc-strat-grid" id="strategy-grid">
+    <div class="oc-loading">Loading strategies...</div>
+  </div>
+</div>
+
+<!-- ═══ Scanner Opportunities ═══ -->
+<div class="oc-grid-2">
+  <div class="oc-card">
+    <h3>&#x1F50D; 市场扫描 / Scanner Opportunities</h3>
+    <div class="subtitle">自动发现的交易机会</div>
+    <div id="explain-scanner"></div>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>Symbol</th><th>Type</th><th>Score</th><th>Reason</th></tr></thead>
+        <tbody id="scanner-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="oc-card">
+    <h3>&#x1F680; 自动部署 / Auto-Deployed</h3>
+    <div class="subtitle">扫描器自动创建的策略实例</div>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>Strategy</th><th>Symbol</th><th>State</th><th>Deployed At</th></tr></thead>
+        <tbody id="deployed-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Recent Intents ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F4AC; 近期交易意图 / Recent Order Intents（最近 30 条）</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-intents"></div>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody id="intents-tbody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<!-- ═══ Orchestrator Details ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F527; 编排器详情 / Orchestrator Details</summary>
+  <div class="oc-collapse-body">
+    <div class="oc-metrics" id="orch-details"><div class="oc-loading">Loading...</div></div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-strategy').innerHTML = ocExplain(
+  '策略中心管理所有交易策略。每个策略会分析市场数据并生成交易信号。你可以启动、暂停或停止任何策略。编排器会根据市场状态协调所有策略的运行。',
+  '系统支持 5 种策略类型：MA Crossover（均线交叉趋势跟踪）、Bollinger Reversion（布林带均值回归）、Funding Rate Arb（资金费率套利）、Grid Trading（网格交易）、BB Breakout（布林带突破）。编排器通过 Regime Detection 自动识别市场状态（趋势/震荡/高波动），并据此调整策略参数和信号权重。'
+);
+
+$('explain-scanner').innerHTML = ocExplain(
+  '市场扫描器每 5 分钟分析 650+ 个交易对，找出最有交易潜力的品种并自动部署策略。',
+  '扫描器对每个交易对计算 5 个维度的得分：funding_arb（资金费率偏离度）、grid（波动率适合网格交易程度）、trend（趋势强度）、reversion（超买超卖程度）、breakout（突破信号强度）。排名最高的品种会被自动部署对应的策略类型。'
+);
+
+$('explain-intents').innerHTML = ocExplain(
+  '交易意图是策略产生的下单指令。它们在被执行前会经过风控检查，确保不违反任何限制。',
+  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、price、strategy_source。intent 会经过 StopManager 风控检查和 Position Sizing 计算后，转换为实际订单提交给 Paper Trading Engine 或 Bybit Demo。'
+);
+
+// ─── Strategy Actions ─────────────────────────────────────────
+async function strategyAction(name, action) {
+  const d = await ocPost('/api/v1/strategy/' + encodeURIComponent(name) + '/' + action);
+  if (d) {
+    ocToast(name + ' → ' + action + ' OK', 'success');
+    loadStrategies();
+  } else {
+    ocToast(action + ' failed for ' + name, 'error');
+  }
+}
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadStrategies() {
+  const d = await ocApi('/api/v1/strategy/list');
+  if (!d || !d.data) return;
+  const strategies = d.data.strategies || [];
+
+  // Update counters
+  const active = strategies.filter(s => s.state === 'active').length;
+  ocSetText('orch-active', active);
+  ocSetText('orch-total', strategies.length);
+
+  if (!strategies.length) {
+    ocSetHtml('strategy-grid', '<div class="oc-loading">没有注册的策略 / No registered strategies</div>');
+    return;
+  }
+
+  let html = '';
+  strategies.forEach(s => {
+    const state = s.state || 'unknown';
+    let dotClass = 'yellow';
+    let chipType = 'neutral';
+    if (state === 'active') { dotClass = 'green'; chipType = 'good'; }
+    else if (state === 'stopped') { dotClass = 'red'; chipType = 'bad'; }
+    else if (state === 'paused') { dotClass = 'yellow'; chipType = 'warn'; }
+
+    html += '<div class="oc-strat-card">';
+    html += '<div class="strat-header">';
+    html += '<span class="strat-name">' + ocEsc(s.name || s.strategy_name) + '</span>';
+    html += '<span class="oc-chip oc-chip-' + chipType + '">' + ocEsc(state) + '</span>';
+    html += '</div>';
+    html += '<div class="strat-meta">';
+    html += 'Type: ' + ocEsc(s.strategy_type || s.type || '--');
+    if (s.symbol) html += ' | Symbol: ' + ocEsc(s.symbol);
+    if (s.signals_count != null) html += ' | Signals: ' + s.signals_count;
+    if (s.intents_count != null) html += ' | Intents: ' + s.intents_count;
+    html += '</div>';
+    html += '<div class="strat-actions">';
+    html += '<button class="oc-btn oc-btn-success" ' + (state === 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'activate\')">Activate</button>';
+    html += '<button class="oc-btn" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'pause\')">Pause</button>';
+    html += '<button class="oc-btn oc-btn-danger" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'stop\')">Stop</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+  ocSetHtml('strategy-grid', html);
+}
+
+async function loadOrchestrator() {
+  const d = await ocApi('/api/v1/strategy/status');
+  if (!d || !d.data) return;
+  const orch = d.data;
+
+  // Regime badge
+  const regime = orch.market_regime || orch.regime || '--';
+  const regimeBadge = $('orch-regime');
+  regimeBadge.textContent = regime;
+  if (regime.includes('trend')) regimeBadge.className = 'oc-chip oc-chip-good';
+  else if (regime.includes('rang') || regime.includes('sideways')) regimeBadge.className = 'oc-chip oc-chip-warn';
+  else if (regime.includes('volatile')) regimeBadge.className = 'oc-chip oc-chip-bad';
+  else regimeBadge.className = 'oc-chip oc-chip-info';
+
+  // Details
+  let html = '';
+  const fields = [
+    ['Pipeline Active', orch.pipeline_active || orch.pipeline_running],
+    ['Tick Count', orch.tick_count],
+    ['Signal Count', orch.total_signals || orch.signal_count],
+    ['Intent Count', orch.total_intents || orch.intent_count],
+    ['Last Tick', ocTimeShort(orch.last_tick_ts)],
+    ['Regime Confidence', orch.regime_confidence != null ? (orch.regime_confidence * 100).toFixed(0) + '%' : null],
+  ];
+  fields.forEach(([label, val]) => {
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+  });
+  ocSetHtml('orch-details', '<div class="oc-metrics">' + html + '</div>');
+}
+
+async function loadScanner() {
+  const d = await ocApi('/api/v1/strategy/scanner/opportunities');
+  if (!d || !d.data) {
+    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">扫描器未运行 / Scanner not running</td></tr>');
+    return;
+  }
+  const opps = d.data.opportunities || d.data || [];
+  if (!opps.length) {
+    ocSetHtml('scanner-tbody', '<tr class="empty-row"><td colspan="4">暂无机会 / No opportunities</td></tr>');
+    return;
+  }
+  let html = '';
+  opps.slice(0, 20).forEach(o => {
+    html += '<tr>';
+    html += '<td><strong>' + ocEsc(o.symbol) + '</strong></td>';
+    html += '<td>' + ocEsc(o.strategy_type || o.type || '--') + '</td>';
+    html += '<td>' + ocNum(o.score, 2) + '</td>';
+    html += '<td style="font-size:11px;color:var(--text-dim)">' + ocEsc(o.reason || '--') + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('scanner-tbody', html);
+}
+
+async function loadDeployed() {
+  const d = await ocApi('/api/v1/strategy/scanner/deployed');
+  if (!d || !d.data) {
+    ocSetHtml('deployed-tbody', '<tr class="empty-row"><td colspan="4">No auto-deployed strategies</td></tr>');
+    return;
+  }
+  const deployed = d.data.deployed || d.data || [];
+  if (!deployed.length) {
+    ocSetHtml('deployed-tbody', '<tr class="empty-row"><td colspan="4">No auto-deployed strategies</td></tr>');
+    return;
+  }
+  let html = '';
+  deployed.forEach(dd => {
+    html += '<tr>';
+    html += '<td>' + ocEsc(dd.strategy_name || dd.name) + '</td>';
+    html += '<td>' + ocEsc(dd.symbol) + '</td>';
+    html += '<td>' + ocChip(dd.state || 'active', dd.state === 'active' ? 'good' : 'neutral') + '</td>';
+    html += '<td>' + ocTime(dd.deployed_at || dd.created_at) + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('deployed-tbody', html);
+}
+
+async function loadIntents() {
+  const d = await ocApi('/api/v1/strategy/intents');
+  if (!d || !d.data) return;
+  const intents = d.data.intents || d.data || [];
+  if (!intents.length) {
+    ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="7">暂无交易意图 / No intents</td></tr>');
+    return;
+  }
+  let html = '';
+  intents.slice(0, 30).forEach(i => {
+    html += '<tr>';
+    html += '<td>' + ocTimeShort(i.timestamp || i.ts_ms) + '</td>';
+    html += '<td>' + ocEsc(i.symbol) + '</td>';
+    html += '<td class="' + (i.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(i.side) + '</td>';
+    html += '<td>' + ocEsc(i.order_type || 'market') + '</td>';
+    html += '<td>' + ocNum(i.qty, 4) + '</td>';
+    html += '<td style="font-size:11px">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
+    html += '<td>' + ocEsc(i.status || i.state || '--') + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('intents-tbody', html);
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadStrategies(), loadOrchestrator(), loadScanner(), loadDeployed(), loadIntents()]);
+}
+
+loadAll();
+ocStartRefresh(loadAll, 15000);
+</script>
+</body>
+</html>

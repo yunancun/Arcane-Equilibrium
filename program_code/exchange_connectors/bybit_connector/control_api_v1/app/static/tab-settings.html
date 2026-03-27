@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Settings & Control</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Demo Control Plane ═══ -->
+<div class="oc-card">
+  <h2>&#x1F3AE; Demo 控制面板 / Demo Control Plane</h2>
+  <div class="subtitle">Demo 模式的启用、验证和管理</div>
+
+  <div id="explain-demo-control"></div>
+
+  <div class="oc-metrics" id="demo-state-grid">
+    <div class="oc-metric"><div class="oc-metric-label">Demo State</div><div class="oc-metric-val" id="dc-state" style="font-size:14px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Validation</div><div class="oc-metric-val" id="dc-valid" style="font-size:14px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Armed</div><div class="oc-metric-val" id="dc-armed" style="font-size:14px">--</div></div>
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+    <button class="oc-btn oc-btn-primary" onclick="demoAction('validate')">&#x2714; Validate</button>
+    <button class="oc-btn" onclick="demoAction('arm')">&#x1F512; Arm Demo</button>
+    <button class="oc-btn oc-btn-success" onclick="demoAction('enable')">&#x2705; Enable Demo</button>
+    <button class="oc-btn oc-btn-danger" onclick="demoAction('relock')">&#x1F510; Relock</button>
+    <button class="oc-btn" onclick="bundleRecheck()">&#x1F504; Safe Recheck Bundle</button>
+  </div>
+
+  <div id="action-result" style="margin-top:10px"></div>
+</div>
+
+<!-- ═══ Quick Actions ═══ -->
+<div class="oc-card">
+  <h3>&#x26A1; 快捷操作 / Quick Actions</h3>
+  <div id="explain-actions"></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <button class="oc-btn" onclick="configAction('set-demo-mode')">Set Demo Reserved</button>
+    <button class="oc-btn" onclick="configAction('enable-spot')">Enable Spot Shadow</button>
+  </div>
+</div>
+
+<!-- ═══ Product Family Config ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4E6; 产品族配置 / Product Family Config</h3>
+  <div id="explain-pf-config"></div>
+  <div id="pf-config-grid" class="oc-loading">Loading...</div>
+</div>
+
+<!-- ═══ Config Change ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F527; 系统配置变更 / System Config Change</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-config-change"></div>
+    <div class="oc-grid-2">
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">Cost Entry / 成本录入</h4>
+        <div style="display:grid;gap:8px">
+          <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
+          <select class="oc-select" id="cost-cat" style="width:100%"><option value="ai_api">AI API</option><option value="infrastructure">Infrastructure</option><option value="data_feed">Data Feed</option><option value="other">Other</option></select></div>
+          <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
+          <input class="oc-input" id="cost-amount" type="number" step="0.01" style="width:100%" /></div>
+          <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
+          <input class="oc-input" id="cost-note" style="width:100%" placeholder="Optional description" /></div>
+          <button class="oc-btn oc-btn-primary" onclick="submitCost()">Submit Cost</button>
+        </div>
+      </div>
+      <div>
+        <h4 style="font-size:13px;margin-bottom:8px">PnL Entry / 盈亏录入</h4>
+        <div style="display:grid;gap:8px">
+          <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
+          <select class="oc-select" id="pnl-cat" style="width:100%"><option value="trading">Trading</option><option value="funding">Funding</option><option value="other">Other</option></select></div>
+          <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
+          <input class="oc-input" id="pnl-amount" type="number" step="0.01" style="width:100%" /></div>
+          <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
+          <input class="oc-input" id="pnl-note" style="width:100%" placeholder="Optional description" /></div>
+          <button class="oc-btn oc-btn-primary" onclick="submitPnl()">Submit PnL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- ═══ Debug JSON ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F41B; 调试原文 / Debug Raw JSON</summary>
+  <div class="oc-collapse-body">
+    <div class="oc-grid-2">
+      <div>
+        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Control Plane</h4>
+        <pre class="oc-pre" id="debug-cp">Loading...</pre>
+      </div>
+      <div>
+        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">System Overview</h4>
+        <pre class="oc-pre" id="debug-ov">Loading...</pre>
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Audit Summary</h4>
+      <pre class="oc-pre" id="debug-audit">Loading...</pre>
+    </div>
+  </div>
+</details>
+
+<!-- ═══ System Info ═══ -->
+<details class="oc-collapse">
+  <summary>&#x2139; 系统信息 / System Info</summary>
+  <div class="oc-collapse-body">
+    <div class="oc-metrics" id="sys-info">
+      <div class="oc-metric"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val" style="font-size:14px">read_only</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Execution State</div><div class="oc-metric-val" style="font-size:14px">disabled</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val" style="font-size:14px">not_granted</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Decision Lease</div><div class="oc-metric-val" style="font-size:14px">false</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Live Execution</div><div class="oc-metric-val red" style="font-size:14px">BLOCKED</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Max Retries</div><div class="oc-metric-val" style="font-size:14px">0</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text-dim)">
+      这些是系统的硬编码安全边界，不可通过 GUI 修改。只有通过代码变更和正式审批流程才能改变这些值。
+    </div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-demo-control').innerHTML = ocExplain(
+  'Demo 控制面板管理系统从"只读观察"到"Demo 交易"的切换流程。需要按照 Validate → Arm → Enable 的顺序逐步启用。每一步都有安全检查。',
+  '切换流程：1) Validate — 检查所有前置条件（API 连接、账户状态、健康检查）。2) Arm — 准备切换，锁定配置防止意外修改。3) Enable — 正式启用 Demo 交易模式。4) Relock — 如需回退，重新锁定到观察模式。每一步都会记录审计日志。'
+);
+
+$('explain-actions').innerHTML = ocExplain(
+  '快捷操作用于执行常用的系统配置变更。所有操作都在安全保护下运行，不会直接开放真实交易权限。',
+  '"Set Demo Reserved" 将全局模式设为 demo_reserved（预留 Demo 但未启用）。"Enable Spot Shadow" 启用现货产品族的影子模式（可以观察现货数据但不实际交易）。'
+);
+
+$('explain-pf-config').innerHTML = ocExplain(
+  '这里可以管理每个产品族（交易类别）的开关。启用某个产品族意味着系统可以观察和分析该类别的市场数据。',
+  '每个产品族有三个独立开关：enabled（是否启用该品类的数据处理）、visible（是否在 GUI 中显示）、mode（该品类的运行模式：observe / shadow / demo）。修改这些设置需要通过 Control Plane 的正式配置变更流程。'
+);
+
+$('explain-config-change').innerHTML = ocExplain(
+  '手动录入系统成本和盈亏记录。这些数据用于计算 Net PnL（扣除所有成本后的真实收益）。',
+  '成本类别包括：AI API 调用费、服务器基础设施费、数据馈送费等。所有录入会进入审计日志，并反映在 Learning System 的 Net PnL 仪表盘中。'
+);
+
+// ─── State ────────────────────────────────────────────────────
+let stateRevision = 0;
+
+// ─── Actions ──────────────────────────────────────────────────
+async function demoAction(action) {
+  const body = ocEnvelope({}, stateRevision);
+  const d = await ocPost('/api/v1/control/demo/' + action, body);
+  if (d) {
+    ocToast('Demo ' + action + ' OK', 'success');
+    if (d.state_revision) stateRevision = d.state_revision;
+    ocSetHtml('action-result', '<div class="oc-chip oc-chip-good">' + action + ' completed</div>');
+    loadControlPlane();
+  } else {
+    ocToast('Demo ' + action + ' failed', 'error');
+    ocSetHtml('action-result', '<div class="oc-chip oc-chip-bad">' + action + ' failed</div>');
+  }
+}
+
+async function bundleRecheck() {
+  const body = ocEnvelope({}, stateRevision);
+  const d = await ocPost('/api/v1/control/safe-recheck-bundle', body);
+  if (d) { ocToast('Recheck bundle OK', 'success'); loadAll(); }
+  else ocToast('Recheck failed', 'error');
+}
+
+async function configAction(action) {
+  let payload = {};
+  if (action === 'set-demo-mode') payload = { key: 'global_execution_mode_switch', value: 'demo_reserved' };
+  else if (action === 'enable-spot') payload = { product_family: 'spot', key: 'enabled_switch', value: true };
+
+  const body = ocEnvelope(payload, stateRevision);
+  const d = await ocPost('/api/v1/input/config-change', body);
+  if (d) { ocToast('Config change OK', 'success'); if (d.state_revision) stateRevision = d.state_revision; loadAll(); }
+  else ocToast('Config change failed', 'error');
+}
+
+async function submitCost() {
+  const body = ocEnvelope({
+    category: $('cost-cat').value,
+    amount: parseFloat($('cost-amount').value),
+    note: $('cost-note').value,
+  }, stateRevision);
+  const d = await ocPost('/api/v1/input/cost', body);
+  if (d) { ocToast('Cost recorded', 'success'); $('cost-amount').value = ''; $('cost-note').value = ''; }
+  else ocToast('Submit failed', 'error');
+}
+
+async function submitPnl() {
+  const body = ocEnvelope({
+    category: $('pnl-cat').value,
+    amount: parseFloat($('pnl-amount').value),
+    note: $('pnl-note').value,
+  }, stateRevision);
+  const d = await ocPost('/api/v1/input/pnl-entry', body);
+  if (d) { ocToast('PnL recorded', 'success'); $('pnl-amount').value = ''; $('pnl-note').value = ''; }
+  else ocToast('Submit failed', 'error');
+}
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadControlPlane() {
+  const d = await ocApi('/api/v1/system/control-plane');
+  if (!d || !d.data) return;
+  const cp = d.data;
+
+  ocSetText('dc-state', cp.demo_state || cp.demo_state_switch || '--');
+  ocSetText('dc-valid', cp.demo_validated ? 'Passed' : 'Not Validated');
+  $('dc-valid').className = 'oc-metric-val ' + (cp.demo_validated ? 'green' : '');
+  ocSetText('dc-armed', cp.demo_armed ? 'Yes' : 'No');
+
+  if (cp.state_revision) stateRevision = cp.state_revision;
+
+  // Debug
+  ocSetText('debug-cp', JSON.stringify(cp, null, 2));
+}
+
+async function loadProductFamilyConfig() {
+  const d = await ocApi('/api/v1/system/product-families');
+  if (!d || !d.data) { ocSetHtml('pf-config-grid', '<div class="oc-loading">No data</div>'); return; }
+  const families = d.data.families || d.data;
+  if (typeof families !== 'object') return;
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">';
+  Object.entries(families).forEach(([name, f]) => {
+    html += '<div style="background:var(--bg);border:1px solid #21262d;border-radius:8px;padding:12px">';
+    html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">' + ocEsc(name) + '</div>';
+    html += '<div style="font-size:11px;color:var(--text-dim);display:grid;gap:4px">';
+    html += '<div>Enabled: ' + (f.enabled_switch ? '<span class="green">Yes</span>' : 'No') + '</div>';
+    html += '<div>Visible: ' + (f.visibility_switch ? '<span class="green">Yes</span>' : 'No') + '</div>';
+    html += '<div>Mode: ' + ocEsc(f.mode_switch || '--') + '</div>';
+    html += '<div>Capability: ' + ocEsc(f.capability || '--') + '</div>';
+    html += '</div></div>';
+  });
+  html += '</div>';
+  ocSetHtml('pf-config-grid', html);
+}
+
+async function loadDebug() {
+  const [ov, audit] = await Promise.allSettled([
+    ocApi('/api/v1/system/overview'),
+    ocApi('/api/v1/system/audit-summary'),
+  ]);
+  if (ov.status === 'fulfilled' && ov.value) ocSetText('debug-ov', JSON.stringify(ov.value.data, null, 2));
+  if (audit.status === 'fulfilled' && audit.value) ocSetText('debug-audit', JSON.stringify(audit.value.data, null, 2));
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadControlPlane(), loadProductFamilyConfig(), loadDebug()]);
+}
+
+loadAll();
+ocStartRefresh(loadAll, 30000);
+</script>
+</body>
+</html>

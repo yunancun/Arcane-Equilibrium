@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Engine</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ AI Engine Status ═══ -->
+<div class="oc-control-bar">
+  <span style="font-weight:600">&#x1F916; AI 推理引擎 / Layer 2 AI Engine</span>
+  <span id="ai-badge" class="oc-chip oc-chip-neutral">checking...</span>
+  <span style="flex:1"></span>
+  <button class="oc-btn oc-btn-primary" onclick="triggerSession()">&#x26A1; Trigger Session</button>
+  <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
+</div>
+
+<div id="explain-ai"></div>
+
+<!-- ═══ Cost Dashboard ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4B0; AI 成本仪表盘 / Cost Dashboard</h3>
+  <div class="oc-metrics" id="cost-metrics">
+    <div class="oc-metric"><div class="oc-metric-label">Today's Cost</div><div class="oc-metric-val blue" id="a-today">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Total Cost (30d)</div><div class="oc-metric-val" id="a-total">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Budget Limit</div><div class="oc-metric-val" id="a-budget">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Sessions Today</div><div class="oc-metric-val" id="a-sessions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Avg Cost/Session</div><div class="oc-metric-val" id="a-avg">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Budget Remaining</div><div class="oc-metric-val" id="a-remaining">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Adaptive Budget ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4C8; 自适应预算 / Adaptive Budget</h3>
+  <div id="explain-adaptive"></div>
+  <div class="oc-metrics" id="adaptive-metrics">
+    <div class="oc-metric"><div class="oc-metric-label">Budget Multiplier</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 标准</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI ROI</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI成本回报率</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Effective Budget</div><div class="oc-metric-val" id="ab-effective">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Adjustment Reason</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ AI Consultation Status ═══ -->
+<div class="oc-grid-2">
+  <div class="oc-card">
+    <h3>&#x1F4AC; AI 咨询状态 / Consultation Status</h3>
+    <div id="explain-consult"></div>
+    <div class="oc-metrics" id="consult-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">Enabled</div><div class="oc-metric-val" id="c-enabled">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Running</div><div class="oc-metric-val" id="c-running">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Total Queries</div><div class="oc-metric-val" id="c-queries">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Last Query</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
+    </div>
+  </div>
+
+  <div class="oc-card">
+    <h3>&#x1F4CB; 引擎配置 / Engine Config</h3>
+    <div id="ai-config" class="oc-loading">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ Session History ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4DC; 推理会话历史 / Session History</h3>
+  <div class="oc-table-wrap">
+    <table class="oc-table">
+      <thead><tr><th>ID</th><th>Time</th><th>Trigger</th><th>Symbol</th><th>Status</th><th>Cost</th><th>Result</th></tr></thead>
+      <tbody id="sessions-tbody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══ Pricing Table ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F4B2; 定价表 / Pricing Table</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-pricing"></div>
+    <div id="pricing-body" class="oc-loading">Loading...</div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-ai').innerHTML = ocExplain(
+  'AI 推理引擎（Layer 2）使用大型语言模型来深入分析交易机会。每次查询都会消耗真实的 API 费用，因此系统设有预算限制。引擎分析市场状况后会给出买入/卖出/持仓的建议。',
+  'Layer 2 采用三层架构：L0（确定性规则，零成本）→ L1（轻量级模型如 Haiku，低成本快速筛选）→ L2（高级模型如 Sonnet/Opus，高成本深度分析）。只有通过 L0 和 L1 筛选的机会才会升级到 L2，这样可以把昂贵的 AI 调用集中在最有价值的场景上。如果 L2 不可用或预算耗尽，系统会自动降级到 L1 或 L0。'
+);
+
+$('explain-adaptive').innerHTML = ocExplain(
+  '自适应预算根据 AI 的投资回报率自动调整预算。如果 AI 建议带来了盈利，预算会适当增加；如果亏损，预算会缩减。',
+  'Budget Multiplier 表示当前预算是标准值的多少倍。AI ROI 是 AI 建议产生的净利润与 AI 成本的比率。当 ROI > 1 时说明 AI 建议的价值超过其成本，乘数会增加；反之则缩减。这确保 AI 使用量与其实际贡献成正比。'
+);
+
+$('explain-consult').innerHTML = ocExplain(
+  'AI 咨询是策略可以调用的即时分析服务。当策略遇到不确定的交易信号时，可以请求 AI 进行深入分析。',
+  '咨询请求通过 /strategy/ai/status 端点追踪。每次咨询会记录：触发原因、使用的模型、输入/输出 token 数量、成本、以及咨询结果对交易决策的影响。'
+);
+
+$('explain-pricing').innerHTML = ocExplain(
+  '定价表列出了各 AI 模型的成本。系统根据这个表来计算每次 AI 调用的费用。',
+  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。缓存命中的 token 价格更低。不同模型的价格差异很大：Haiku 约为 Opus 的 1/20。'
+);
+
+// ─── Actions ──────────────────────────────────────────────────
+async function triggerSession() {
+  const d = await ocPost('/api/v1/paper/layer2/trigger', { reason: 'manual_gui_trigger' });
+  if (d) { ocToast('L2 session triggered', 'success'); loadSessions(); }
+  else ocToast('Trigger failed', 'error');
+}
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadCost() {
+  const d = await ocApi('/api/v1/paper/layer2/cost');
+  if (!d || !d.data) return;
+  const c = d.data;
+  ocSetText('a-today', '$' + ocNum(c.today_cost || c.cost_today, 4));
+  ocSetText('a-total', '$' + ocNum(c.total_cost || c.cost_total, 2));
+  ocSetText('a-budget', '$' + ocNum(c.daily_budget || c.budget_limit, 2));
+  ocSetText('a-sessions', c.sessions_today || c.session_count || 0);
+  ocSetText('a-avg', '$' + ocNum(c.avg_cost_per_session || 0, 4));
+  const remaining = (c.daily_budget || 0) - (c.today_cost || c.cost_today || 0);
+  const elR = $('a-remaining');
+  elR.textContent = '$' + ocNum(remaining, 4);
+  elR.className = 'oc-metric-val ' + (remaining > 0 ? 'green' : 'red');
+}
+
+async function loadAdaptive() {
+  const d = await ocApi('/api/v1/paper/layer2/cost/adaptive');
+  if (!d || !d.data) return;
+  const a = d.data;
+  ocSetText('ab-mult', ocNum(a.multiplier || a.budget_multiplier, 2) + 'x');
+  const roi = a.roi || a.ai_roi;
+  const elRoi = $('ab-roi');
+  if (roi != null) {
+    elRoi.textContent = ocNum(roi, 2) + 'x';
+    elRoi.className = 'oc-metric-val ' + (roi >= 1 ? 'green' : 'red');
+  }
+  ocSetText('ab-effective', '$' + ocNum(a.effective_budget || a.adjusted_budget, 2));
+  ocSetText('ab-reason', a.reason || a.adjustment_reason || '--');
+}
+
+async function loadConsult() {
+  const d = await ocApi('/api/v1/strategy/ai/status');
+  if (!d || !d.data) return;
+  const s = d.data;
+  ocSetText('c-enabled', s.enabled ? 'Yes' : 'No');
+  $('c-enabled').className = 'oc-metric-val ' + (s.enabled ? 'green' : '');
+  ocSetText('c-running', s.running || s.is_running ? 'Yes' : 'No');
+  ocSetText('c-queries', s.total_queries || s.query_count || 0);
+  ocSetText('c-last', ocTimeShort(s.last_query_at));
+
+  // Badge
+  const badge = $('ai-badge');
+  if (s.enabled) { badge.textContent = 'Enabled'; badge.className = 'oc-chip oc-chip-good'; }
+  else { badge.textContent = 'Disabled'; badge.className = 'oc-chip oc-chip-neutral'; }
+}
+
+async function loadSessions() {
+  const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
+  if (!d || !d.data) return;
+  const sessions = d.data.sessions || d.data || [];
+  if (!sessions.length) {
+    ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无推理会话 / No L2 sessions</td></tr>');
+    return;
+  }
+  let html = '';
+  sessions.slice(0, 20).forEach(s => {
+    html += '<tr>';
+    html += '<td style="font-size:11px">' + ocEsc(String(s.session_id || s.id || '').slice(0, 8)) + '</td>';
+    html += '<td>' + ocTimeShort(s.created_at || s.timestamp) + '</td>';
+    html += '<td>' + ocEsc(s.trigger || s.reason || '--') + '</td>';
+    html += '<td>' + ocEsc(s.symbol || '--') + '</td>';
+    html += '<td>' + ocChip(s.status || s.state || '--', s.status === 'completed' ? 'good' : s.status === 'failed' ? 'bad' : 'neutral') + '</td>';
+    html += '<td>' + (s.cost != null ? '$' + ocNum(s.cost, 4) : '--') + '</td>';
+    html += '<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(s.result || s.recommendation || '--') + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('sessions-tbody', html);
+}
+
+async function loadConfig() {
+  const d = await ocApi('/api/v1/paper/layer2/config');
+  if (!d || !d.data) { ocSetHtml('ai-config', '<div class="oc-loading">No config</div>'); return; }
+  const cfg = d.data;
+  let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  const fields = [
+    ['Default Model', cfg.default_model || cfg.model],
+    ['Fallback Chain', cfg.fallback_chain ? cfg.fallback_chain.join(' → ') : null],
+    ['Max Tokens', cfg.max_tokens],
+    ['Temperature', cfg.temperature],
+    ['Auto Trigger', cfg.auto_trigger ? 'Yes' : 'No'],
+  ];
+  fields.forEach(([label, val]) => {
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(val || '--') + '</div></div>';
+  });
+  html += '</div>';
+  ocSetHtml('ai-config', html);
+}
+
+async function loadPricing() {
+  const d = await ocApi('/api/v1/paper/layer2/cost/pricing');
+  if (!d || !d.data) { ocSetHtml('pricing-body', '<div class="oc-loading">No pricing data</div>'); return; }
+  const pricing = d.data.models || d.data;
+  let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>Model</th><th>Input $/1K</th><th>Output $/1K</th><th>Cache $/1K</th></tr></thead><tbody>';
+  if (Array.isArray(pricing)) {
+    pricing.forEach(p => {
+      html += '<tr><td>' + ocEsc(p.model || p.name) + '</td><td>' + ocNum(p.input_cost_per_1k, 4) + '</td><td>' + ocNum(p.output_cost_per_1k, 4) + '</td><td>' + ocNum(p.cache_cost_per_1k, 4) + '</td></tr>';
+    });
+  } else if (typeof pricing === 'object') {
+    Object.entries(pricing).forEach(([model, costs]) => {
+      html += '<tr><td>' + ocEsc(model) + '</td><td>' + ocNum(costs.input, 4) + '</td><td>' + ocNum(costs.output, 4) + '</td><td>' + ocNum(costs.cache, 4) + '</td></tr>';
+    });
+  }
+  html += '</tbody></table></div>';
+  ocSetHtml('pricing-body', html);
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadCost(), loadAdaptive(), loadConsult(), loadSessions(), loadConfig(), loadPricing()]);
+}
+
+loadAll();
+ocStartRefresh(loadAll, 30000); // AI tab refreshes slower
+</script>
+</body>
+</html>

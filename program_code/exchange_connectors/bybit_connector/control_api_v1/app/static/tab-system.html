@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>System Overview</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Runtime Summary ═══ -->
+<div class="oc-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2>&#x1F4CA; 运行态摘要 / Runtime Summary</h2>
+      <div class="subtitle">系统核心状态一览 — 执行权限、模式、保护边界</div>
+    </div>
+    <span id="mode-badge" class="oc-chip oc-chip-neutral">loading...</span>
+  </div>
+
+  <div id="explain-runtime"></div>
+
+  <div class="oc-metrics" id="runtime-grid">
+    <div class="oc-metric"><div class="oc-metric-label">Global Mode</div><div class="oc-metric-val" id="m-mode">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val" id="m-auth">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Demo State</div><div class="oc-metric-val" id="m-demo">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Snapshot Bound</div><div class="oc-metric-val" id="m-snap" style="font-size:13px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Runtime Protected</div><div class="oc-metric-val" id="m-prot">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val" id="m-sysmode">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Business Summary ═══ -->
+<div class="oc-card">
+  <h2>&#x1F4B5; 业务概览 / Business Summary</h2>
+  <div class="subtitle">今日 PnL、AI 成本、整体 ROI</div>
+  <div class="oc-metrics" id="biz-grid">
+    <div class="oc-metric"><div class="oc-metric-label">Net PnL (Paper)</div><div class="oc-metric-val" id="b-pnl">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI Cost Today</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI Cost 30d</div><div class="oc-metric-val" id="b-cost30" style="font-size:14px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Orders Today</div><div class="oc-metric-val" id="b-orders">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Active Positions</div><div class="oc-metric-val" id="b-positions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Active Strategies</div><div class="oc-metric-val" id="b-strategies">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Two-Column: Source Context + Health ═══ -->
+<div class="oc-grid-2">
+  <div class="oc-card">
+    <h2>&#x1F50C; 来源上下文 / Source Context</h2>
+    <div class="subtitle">连接状态、数据完整性</div>
+    <div id="source-context-body" class="oc-loading">Loading...</div>
+  </div>
+  <div class="oc-card">
+    <h2>&#x1F3E5; 健康摘要 / Health Summary</h2>
+    <div class="subtitle">系统健康评分与关键门禁</div>
+    <div id="health-body" class="oc-loading">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ Product Families ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F4E6; 产品族事实 / Product Family Facts（6 个产品类别）</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-pf"></div>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>Family</th><th>Exchange</th><th>Account</th><th>Enabled</th><th>Visible</th><th>Mode</th><th>Capability</th><th>Execution</th></tr></thead>
+        <tbody id="pf-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-runtime').innerHTML = ocExplain(
+  '这里显示系统的核心运行状态。绿色表示正常运行，黄色表示受限模式。当前系统处于"只读模式"——可以观察市场数据，但不会执行任何真实交易。',
+  '系统使用多层保护机制：Global Mode 控制整体模式（observe_only → demo_enabled → live）；Execution Authority 控制是否允许下单（not_granted → demo_only → live_enabled）；Runtime Protected 确保关键状态不会被意外修改。所有状态切换需要通过 Control Plane 的正式流程。'
+);
+
+$('explain-pf').innerHTML = ocExplain(
+  '产品族是 Bybit 交易所支持的 6 种交易类别。每种类别有独立的开关和权限设置。目前只有"永续合约（线性）"在模拟中启用。',
+  '6 种产品族分别是：spot（现货）、margin（杠杆）、perp_linear（USDT 永续合约）、perp_inverse（币本位永续）、options（期权）、other_derivatives（其他衍生品）。每个产品族有独立的 exchange_fact（交易所层面是否支持）、account_fact（账户层面是否开通）、enabled_switch（我们是否启用）、visibility_switch（是否在 GUI 中显示）。'
+);
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadOverview() {
+  const d = await ocApi('/api/v1/system/overview');
+  if (!d || !d.data) return;
+  const ov = d.data;
+
+  ocSetText('m-mode', ov.global_execution_mode_switch || ov.global_mode || '--');
+  ocSetText('m-auth', ov.execution_authority_state || '--');
+  ocSetText('m-demo', ov.demo_state_switch || '--');
+  ocSetText('m-snap', ov.snapshot_id ? 'Yes (' + String(ov.snapshot_id).slice(0,8) + ')' : 'No');
+  ocSetText('m-prot', ov.runtime_protected ? 'Yes' : 'No');
+  ocSetText('m-sysmode', ov.system_mode || 'read_only');
+
+  // Mode badge
+  const mode = ov.global_execution_mode_switch || ov.global_mode || '';
+  const badge = $('mode-badge');
+  if (mode.includes('live')) { badge.textContent = 'LIVE'; badge.className = 'oc-chip oc-chip-bad'; }
+  else if (mode.includes('demo')) { badge.textContent = 'DEMO'; badge.className = 'oc-chip oc-chip-warn'; }
+  else { badge.textContent = 'OBSERVE ONLY'; badge.className = 'oc-chip oc-chip-good'; }
+}
+
+async function loadSourceContext() {
+  const d = await ocApi('/api/v1/system/source-context');
+  if (!d || !d.data) { ocSetHtml('source-context-body', '<div class="oc-loading">Failed to load</div>'); return; }
+  const ctx = d.data;
+  let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
+  const fields = [
+    ['REST', ctx.rest_connected || ctx.rest_status],
+    ['WebSocket', ctx.ws_connected || ctx.ws_status],
+    ['Account', ctx.account_completeness || ctx.account_status],
+    ['Connector', ctx.connector_role || ctx.connector_type],
+  ];
+  fields.forEach(([label, val]) => {
+    const v = val != null ? String(val) : '--';
+    const cls = (v === 'true' || v === 'connected' || v === 'complete') ? 'green' : '';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + ocEsc(v) + '</div></div>';
+  });
+  html += '</div>';
+  ocSetHtml('source-context-body', html);
+}
+
+async function loadHealth() {
+  const d = await ocApi('/api/v1/system/health');
+  if (!d) { ocSetHtml('health-body', '<div class="oc-loading">Failed to load</div>'); return; }
+  const h = d.data || d;
+  let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
+  const items = Object.entries(h).slice(0, 8);
+  items.forEach(([key, val]) => {
+    const v = val != null ? String(val) : '--';
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    let cls = '';
+    if (v === 'true' || v === 'pass' || v === 'healthy') cls = 'green';
+    else if (v === 'false' || v === 'fail') cls = 'red';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + ocEsc(v) + '</div></div>';
+  });
+  html += '</div>';
+  ocSetHtml('health-body', html);
+}
+
+async function loadBusiness() {
+  // PnL
+  try {
+    const d = await ocApi('/api/v1/paper/session/status');
+    if (d && d.data) {
+      const pnl = d.data.pnl;
+      const net = pnl.net_paper_pnl || 0;
+      const el = $('b-pnl');
+      el.textContent = ocMoney(net);
+      el.className = 'oc-metric-val ' + ocPnlClass(net);
+      ocSetText('b-orders', d.data.order_count || 0);
+      ocSetText('b-positions', d.data.position_count || 0);
+    }
+  } catch(e) {}
+
+  // AI Cost
+  try {
+    const d = await ocApi('/api/v1/paper/ai-cost');
+    if (d && d.data && d.data.available) {
+      ocSetText('b-cost', '$' + d.data.today_cost.toFixed(4));
+      ocSetText('b-cost30', '$' + d.data.total_cost_30d.toFixed(2));
+    }
+  } catch(e) {}
+
+  // Strategies
+  try {
+    const d = await ocApi('/api/v1/strategy/list');
+    if (d && d.data) {
+      const active = (d.data.strategies || []).filter(s => s.state === 'active').length;
+      ocSetText('b-strategies', active + ' / ' + (d.data.strategies || []).length);
+    }
+  } catch(e) {}
+}
+
+async function loadProductFamilies() {
+  const d = await ocApi('/api/v1/system/product-families');
+  if (!d || !d.data) return;
+  const families = d.data.families || d.data;
+  if (!Array.isArray(families) && typeof families === 'object') {
+    // object format
+    let html = '';
+    Object.entries(families).forEach(([name, f]) => {
+      html += '<tr>';
+      html += '<td><strong>' + ocEsc(name) + '</strong></td>';
+      html += '<td>' + ocEsc(f.exchange_fact || '--') + '</td>';
+      html += '<td>' + ocEsc(f.account_fact || '--') + '</td>';
+      html += '<td>' + (f.enabled_switch ? '<span class="green">Yes</span>' : 'No') + '</td>';
+      html += '<td>' + (f.visibility_switch ? '<span class="green">Yes</span>' : 'No') + '</td>';
+      html += '<td>' + ocEsc(f.mode_switch || '--') + '</td>';
+      html += '<td>' + ocEsc(f.capability || '--') + '</td>';
+      html += '<td>' + ocEsc(f.execution || '--') + '</td>';
+      html += '</tr>';
+    });
+    ocSetHtml('pf-tbody', html || '<tr class="empty-row"><td colspan="8">No data</td></tr>');
+  }
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies()]);
+}
+
+loadAll();
+ocStartRefresh(loadAll, 15000);
+</script>
+</body>
+</html>

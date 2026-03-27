@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monitoring</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  .grafana-wrap { width: 100%; height: 55vh; min-height: 400px; border: 1px solid var(--border);
+    border-radius: var(--card-radius); overflow: hidden; position: relative; background: var(--bg); }
+  .grafana-wrap iframe { width: 100%; height: 100%; border: none; }
+  .grafana-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--text-dim); padding: 40px; text-align: center; }
+  .grafana-fallback h3 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+</style>
+
+<!-- ═══ Grafana Embed ═══ -->
+<div class="oc-card" style="padding:0;overflow:hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
+    <h3 style="margin:0">&#x1F4CA; Grafana 监控面板 / Monitoring Dashboard</h3>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="grafana-badge" class="oc-chip oc-chip-neutral">checking...</span>
+      <button class="oc-btn" onclick="window.open('http://trade-core:3000','_blank')">Open Grafana &#x2197;</button>
+    </div>
+  </div>
+  <div class="grafana-wrap" id="grafana-wrap">
+    <div class="grafana-fallback" id="grafana-fallback">
+      <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
+      <h3>Grafana 连接中...</h3>
+      <p>正在检查 Grafana 服务是否可用</p>
+    </div>
+  </div>
+</div>
+
+<div id="explain-grafana"></div>
+
+<!-- ═══ Component Status Grid ═══ -->
+<div class="oc-grid-3">
+  <!-- Pipeline Bridge -->
+  <div class="oc-card">
+    <h3>&#x1F310; Pipeline Bridge</h3>
+    <div id="explain-pipeline"></div>
+    <div class="oc-metrics" style="grid-template-columns:1fr" id="pipeline-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="pipe-status" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Tick Count</div><div class="oc-metric-val" id="pipe-ticks" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Intent Count</div><div class="oc-metric-val" id="pipe-intents" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Last Tick</div><div class="oc-metric-val" id="pipe-last" style="font-size:12px">--</div></div>
+    </div>
+  </div>
+
+  <!-- Telegram Alerter -->
+  <div class="oc-card">
+    <h3>&#x1F4E8; Telegram Alerter</h3>
+    <div id="explain-telegram"></div>
+    <div class="oc-metrics" style="grid-template-columns:1fr" id="telegram-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="tg-status" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Messages Sent</div><div class="oc-metric-val" id="tg-sent" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Failed</div><div class="oc-metric-val" id="tg-failed" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Last Sent</div><div class="oc-metric-val" id="tg-last" style="font-size:12px">--</div></div>
+    </div>
+  </div>
+
+  <!-- OpenClaw Gateway -->
+  <div class="oc-card">
+    <h3>&#x1F9E0; OpenClaw Gateway</h3>
+    <div id="explain-openclaw"></div>
+    <div class="oc-metrics" style="grid-template-columns:1fr" id="oc-metrics">
+      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="oc-status" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Agents</div><div class="oc-metric-val" id="oc-agents" style="font-size:14px">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">Channels</div><div class="oc-metric-val" id="oc-channels" style="font-size:14px">--</div></div>
+    </div>
+    <div style="margin-top:8px">
+      <button class="oc-btn oc-btn-primary" onclick="window.open(window.location.origin+'/openclaw/','_blank')">Open Gateway &#x2197;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ System Health Detail ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F3E5; 系统健康详情 / System Health Detail</summary>
+  <div class="oc-collapse-body">
+    <div id="health-detail" class="oc-loading">Loading...</div>
+  </div>
+</details>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-grafana').innerHTML = ocExplain(
+  'Grafana 是一个专业的监控仪表盘工具，用来展示系统运行的实时图表和历史趋势。如果 Grafana 显示"未连接"，说明监控服务尚未启动或配置。',
+  'Grafana 连接到 Prometheus 时间序列数据库，收集交易系统的各项指标：API 响应时间、订单处理延迟、WebSocket 连接状态、内存/CPU 使用率等。Dashboard 预配置了 OpenClaw Trading PnL 看板，显示盈亏趋势和交易活动。'
+);
+
+$('explain-pipeline').innerHTML = ocExplain(
+  'Pipeline Bridge 是数据管线的核心组件，负责将实时市场数据分发给各个策略，并将策略的交易意图转换为实际订单。',
+  'Pipeline Bridge 接收 WebSocket tick 数据，执行 fan-out 分发给所有注册的策略。策略产生的 OrderIntent 经过风控检查后，通过 Bridge 转换为 Paper Trading Engine 或 Bybit Demo 的订单。Bridge 还负责 K 线聚合和成交量追踪。'
+);
+
+$('explain-telegram').innerHTML = ocExplain(
+  'Telegram 告警在重要事件发生时发送通知到你的手机。例如：新的交易信号、订单成交、止损触发、系统异常等。',
+  '告警通过 Telegram Bot API 发送。需要配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 环境变量。告警分为多个级别：INFO（信号和成交）、WARNING（异常和风控触发）、CRITICAL（系统错误和熔断）。可以按级别过滤。'
+);
+
+$('explain-openclaw').innerHTML = ocExplain(
+  'OpenClaw Gateway 是 AI 通信层，负责与外部 AI 服务（如 Claude、GPT）的连接。它处理模型调用、token 计数和成本追踪。',
+  'Gateway 通过反向代理 /openclaw/ 路径访问。它管理 AI agent 实例和通信 channel，支持多模型路由和故障降级。Gateway 独立于交易逻辑运行，确保 AI 服务的不可用不会影响核心交易功能。'
+);
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function checkGrafana() {
+  try {
+    const r = await fetch('http://trade-core:3000/api/health', { signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      $('grafana-badge').textContent = 'Connected';
+      $('grafana-badge').className = 'oc-chip oc-chip-good';
+      // Load Grafana in iframe
+      const wrap = $('grafana-wrap');
+      wrap.innerHTML = '<iframe src="http://trade-core:3000/d/openclaw-trading-pnl?orgId=1&kiosk" allowfullscreen></iframe>';
+    } else {
+      showGrafanaOffline();
+    }
+  } catch(e) {
+    showGrafanaOffline();
+  }
+}
+
+function showGrafanaOffline() {
+  $('grafana-badge').textContent = 'Not Connected';
+  $('grafana-badge').className = 'oc-chip oc-chip-neutral';
+  $('grafana-fallback').innerHTML = `
+    <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
+    <h3>Grafana 未连接 / Not Connected</h3>
+    <p style="color:var(--text-dim);margin-bottom:16px">Grafana 监控服务未启动或不可访问</p>
+    <details style="text-align:left;max-width:400px">
+      <summary style="color:var(--accent);cursor:pointer;font-size:12px">如何配置 Grafana / Setup Guide</summary>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.6">
+        <p>1. 安装 Grafana: <code>sudo apt install grafana</code></p>
+        <p>2. 安装 Prometheus: <code>sudo apt install prometheus</code></p>
+        <p>3. 配置 Prometheus 抓取 Trading API 的 /metrics 端点</p>
+        <p>4. 在 Grafana 添加 Prometheus 数据源</p>
+        <p>5. 导入 OpenClaw Trading PnL 看板</p>
+        <p>6. 确保 Grafana 运行在 trade-core:3000</p>
+      </div>
+    </details>
+  `;
+}
+
+async function loadPipeline() {
+  // Pipeline data comes from orchestrator status
+  const d = await ocApi('/api/v1/strategy/status');
+  if (!d || !d.data) return;
+  const o = d.data;
+  const active = o.pipeline_active || o.pipeline_running;
+  const el = $('pipe-status');
+  el.textContent = active ? 'Active' : 'Inactive';
+  el.className = 'oc-metric-val ' + (active ? 'green' : '');
+  ocSetText('pipe-ticks', o.tick_count || 0);
+  ocSetText('pipe-intents', o.total_intents || o.intent_count || 0);
+  ocSetText('pipe-last', ocTimeShort(o.last_tick_ts));
+}
+
+async function loadTelegram() {
+  const d = await ocApi('/api/v1/strategy/telegram/status');
+  if (!d || !d.data) {
+    ocSetText('tg-status', 'Not Configured');
+    return;
+  }
+  const t = d.data;
+  const enabled = t.enabled || t.configured;
+  const el = $('tg-status');
+  el.textContent = enabled ? 'Enabled' : 'Disabled';
+  el.className = 'oc-metric-val ' + (enabled ? 'green' : '');
+  ocSetText('tg-sent', t.messages_sent || t.sent_count || 0);
+  ocSetText('tg-failed', t.messages_failed || t.error_count || 0);
+  ocSetText('tg-last', ocTimeShort(t.last_sent_at));
+}
+
+async function loadOpenClaw() {
+  try {
+    const r = await fetch(window.location.origin + '/openclaw/health');
+    const h = await r.json();
+    const el = $('oc-status');
+    el.textContent = h.ok ? 'Online' : 'Down';
+    el.className = 'oc-metric-val ' + (h.ok ? 'green' : 'red');
+    ocSetText('oc-agents', (h.agents || []).length + ' agent(s)');
+    ocSetText('oc-channels', (h.channels || []).length + ' channel(s)');
+  } catch(e) {
+    $('oc-status').textContent = 'Offline';
+    $('oc-status').className = 'oc-metric-val red';
+  }
+}
+
+async function loadHealthDetail() {
+  const d = await ocApi('/api/v1/system/health');
+  if (!d) { ocSetHtml('health-detail', '<div class="oc-loading">Failed to load</div>'); return; }
+  const h = d.data || d;
+  let html = '<div class="oc-metrics">';
+  Object.entries(h).forEach(([key, val]) => {
+    const v = val != null ? String(val) : '--';
+    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    let cls = '';
+    if (v === 'true' || v === 'pass' || v === 'healthy') cls = 'green';
+    else if (v === 'false' || v === 'fail') cls = 'red';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:13px">' + ocEsc(v) + '</div></div>';
+  });
+  html += '</div>';
+  ocSetHtml('health-detail', html);
+}
+
+async function loadAll() {
+  await Promise.allSettled([loadPipeline(), loadTelegram(), loadOpenClaw(), loadHealthDetail()]);
+}
+
+checkGrafana();
+loadAll();
+ocStartRefresh(loadAll, 15000);
+</script>
+</body>
+</html>
