@@ -20,7 +20,8 @@ Important / 重要约束
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json, save_report, as_list, merged_unique
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 
@@ -33,48 +34,11 @@ I5_FRICTION_PATH = BASE / "bybit_decision_lease_friction_latest.json"
 LATEST_PATH = BASE / "bybit_manual_approval_packet_latest.json"
 
 
-def read_json(path: Path) -> Optional[Dict[str, Any]]:
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def as_list(value: Any) -> List[Any]:
-    return value if isinstance(value, list) else []
-
-
-def merged_unique(*parts: Any) -> List[Any]:
-    out: List[Any] = []
-    seen = set()
-    for part in parts:
-        for item in as_list(part):
-            if item is None:
-                continue
-            key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else str(item)
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(item)
-    return out
-
-
 def first_not_none(*values: Any) -> Any:
     for value in values:
         if value is not None:
             return value
     return None
-
-
-def save_report(report: Dict[str, Any], latest_path: Path) -> None:
-    ts_ms = report.get("ts_ms")
-    dated_path = latest_path.with_name(latest_path.stem.replace("_latest", f"_{ts_ms}") + latest_path.suffix)
-    latest_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"saved_latest={latest_path}")
-    print(f"saved_dated={dated_path}")
 
 
 def main() -> None:

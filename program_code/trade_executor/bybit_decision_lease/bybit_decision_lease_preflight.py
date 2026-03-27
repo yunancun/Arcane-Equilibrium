@@ -4,6 +4,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 GOV_PATH = BASE / "bybit_ai_governed_decision_latest.json"
@@ -11,10 +12,6 @@ SCHEMA_PATH = BASE / "bybit_decision_lease_schema_latest.json"
 INV_PATH = BASE / "bybit_ai_invocation_attempt_latest.json"
 
 STEM = "bybit_decision_lease_preflight"
-
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def env_int(name: str, default: int) -> int:
@@ -25,20 +22,6 @@ def env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
-
-
-def uniq(items: List[str]) -> List[str]:
-    return list(dict.fromkeys(items))
-
-
-def save_report(obj: Dict[str, Any]) -> None:
-    latest = BASE / f"{STEM}_latest.json"
-    dated = BASE / f"{STEM}_{obj['ts_ms']}.json"
-    latest.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
 
 
 def main() -> None:
@@ -173,7 +156,7 @@ def main() -> None:
         "recommended_action": recommended_action,
         "operator_message": "I2-A decision lease preflight complete. This stage only evaluates whether a future execution lease could be issued late and consumed quickly, without emitting any live lease.",
     }
-    save_report(report)
+    save_report_stem(report, BASE, STEM)
 
 
 if __name__ == "__main__":

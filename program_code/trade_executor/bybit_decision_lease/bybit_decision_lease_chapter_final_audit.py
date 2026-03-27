@@ -5,26 +5,13 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 SUMMARY_PATH = BASE / "bybit_decision_lease_chapter_summary_latest.json"
 HANDOFF_PATH = BASE / "bybit_decision_lease_chapter_handoff_latest.json"
 I9_ACK_PATH = BASE / "bybit_operator_ack_shadow_latest.json"
 LATEST_PATH = BASE / "bybit_decision_lease_chapter_final_audit_latest.json"
-
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def save_report(report: Dict[str, Any], latest_path: Path) -> None:
-    ts_ms = report.get("ts_ms")
-    dated_path = latest_path.with_name(latest_path.stem.replace("_latest", f"_{ts_ms}") + latest_path.suffix)
-    latest_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest_path}")
-    print(f"saved_dated={dated_path}")
 
 
 def check(name: str, ok: bool, detail: Any) -> Dict[str, Any]:
@@ -92,7 +79,7 @@ def main() -> None:
         ),
     }
 
-    save_report(report, LATEST_PATH)
+    save_report(report, LATEST_PATH, print_json=True)
 
 
 if __name__ == "__main__":

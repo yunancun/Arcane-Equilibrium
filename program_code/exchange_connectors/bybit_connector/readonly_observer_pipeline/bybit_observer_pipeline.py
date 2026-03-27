@@ -4,11 +4,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-BUILD_WS_FACTS = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_build_ws_runtime_facts.py")
-BUILD_DECISION_PACKET = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_build_decision_packet.py")
-LOAD_DECISION_PACKET = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_decision_packet_to_postgres.py")
-BUILD_VERDICT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_build_observer_verdict.py")
-LOAD_VERDICT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_observer_verdict_to_postgres.py")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
+
+_scripts_dir = bpp.PROGRAM_CODE_ROOT / "exchange_connectors" / "bybit_connector" / "scripts"
+BUILD_WS_FACTS = _scripts_dir / "bybit_build_ws_runtime_facts.py"
+BUILD_DECISION_PACKET = _scripts_dir / "bybit_build_decision_packet.py"
+LOAD_DECISION_PACKET = _scripts_dir / "bybit_decision_packet_to_postgres.py"
+BUILD_VERDICT = _scripts_dir / "bybit_build_observer_verdict.py"
+LOAD_VERDICT = _scripts_dir / "bybit_observer_verdict_to_postgres.py"
 
 def run_cmd(cmd):
     proc = subprocess.run(cmd, text=True, capture_output=True)

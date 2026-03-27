@@ -25,15 +25,22 @@ Maintenance notes:
 """
 
 import json
+import sys
 import time
 from pathlib import Path
 
-SNAPSHOT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
-WS_SUMMARY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws/bybit_private_ws_smoke_latest.json")
-WS_RUNTIME_FACTS_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_ws_runtime_facts_latest.json")
-PREFLIGHT_GUARD_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_private_rest_preflight_latest.json")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit")
+SNAPSHOT_PATH = bpp.CONNECTOR_LOGS_ROOT / "bybit_system_snapshot_latest.json"
+WS_SUMMARY_PATH = bpp.WS_LOGS_DIR / "bybit_private_ws_smoke_latest.json"
+WS_RUNTIME_FACTS_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_ws_runtime_facts_latest.json"
+PREFLIGHT_GUARD_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_private_rest_preflight_latest.json"
+
+OUT_DIR = bpp.DECISION_PACKETS_ROOT
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def load_json(path: Path):

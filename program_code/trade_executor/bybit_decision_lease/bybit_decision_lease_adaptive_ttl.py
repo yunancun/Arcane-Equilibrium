@@ -18,6 +18,7 @@ import math
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 METRICS_PATH = BASE / "bybit_decision_lease_friction_metrics_latest.json"
@@ -26,26 +27,8 @@ I2_PATH = BASE / "bybit_decision_lease_shadow_issue_latest.json"
 STEM = "bybit_decision_lease_adaptive_ttl"
 
 
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def uniq(items: List[str]) -> List[str]:
-    return list(dict.fromkeys(items))
-
-
 def clamp(v: int, lo: int, hi: int) -> int:
     return max(lo, min(v, hi))
-
-
-def save_report(obj: Dict[str, Any]) -> None:
-    latest = BASE / f"{STEM}_latest.json"
-    dated = BASE / f"{STEM}_{obj['ts_ms']}.json"
-    latest.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
 
 
 def main() -> None:
@@ -193,7 +176,7 @@ def main() -> None:
         "recommended_action": recommended_action,
         "operator_message": "I5-B adaptive TTL complete. A safer TTL and consume-slack recommendation is now computed from measured friction; legal no-call paths keep a shadow recommendation without treating missing latency as a hard failure.",
     }
-    save_report(report)
+    save_report_stem(report, BASE, STEM)
 
 
 if __name__ == "__main__":

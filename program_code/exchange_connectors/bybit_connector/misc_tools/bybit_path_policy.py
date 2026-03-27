@@ -28,6 +28,20 @@ TRADING_SERVICES_ROOT = DOCKER_PROJECTS_ROOT / "trading_services"
 BYBIT_RUNTIME_ROOT = TRADING_SERVICES_ROOT / "runtime" / "bybit"
 THOUGHT_GATE_RUNTIME_DIR = BYBIT_RUNTIME_ROOT / "thought_gate"
 
+# D chapter paths / D 章路径
+CONNECTOR_LOGS_ROOT = TRADING_SERVICES_ROOT / "connector_logs" / "bybit"
+DECISION_PACKETS_ROOT = TRADING_SERVICES_ROOT / "decision_packets" / "bybit"
+VERDICTS_ROOT = TRADING_SERVICES_ROOT / "verdicts" / "bybit"
+BUSINESS_EVENTS_RUNTIME_DIR = BYBIT_RUNTIME_ROOT / "business_events"
+WS_LOGS_DIR = CONNECTOR_LOGS_ROOT / "ws"
+WS_PERSISTENT_DIR = CONNECTOR_LOGS_ROOT / "ws_persistent"
+
+# H0 paths / H0 章路径
+LOCAL_JUDGMENT_RUNTIME_DIR = BYBIT_RUNTIME_ROOT / "local_judgment"
+
+# I chapter paths / I 章路径
+DECISION_LEASE_RUNTIME_DIR = BYBIT_RUNTIME_ROOT / "decision_lease"
+
 
 def get_repo_root() -> Path:
     return REPO_ROOT
@@ -65,6 +79,30 @@ def get_thought_gate_runtime_dir() -> Path:
     return THOUGHT_GATE_RUNTIME_DIR
 
 
+def get_connector_logs_root() -> Path:
+    return CONNECTOR_LOGS_ROOT
+
+
+def get_decision_packets_root() -> Path:
+    return DECISION_PACKETS_ROOT
+
+
+def get_verdicts_root() -> Path:
+    return VERDICTS_ROOT
+
+
+def get_business_events_runtime_dir() -> Path:
+    return BUSINESS_EVENTS_RUNTIME_DIR
+
+
+def get_local_judgment_runtime_dir() -> Path:
+    return LOCAL_JUDGMENT_RUNTIME_DIR
+
+
+def get_decision_lease_runtime_dir() -> Path:
+    return DECISION_LEASE_RUNTIME_DIR
+
+
 def compat_root_points_to_repo_root() -> bool:
     try:
         return COMPAT_ROOT.resolve() == REPO_ROOT.resolve()
@@ -83,6 +121,14 @@ __all__ = [
     "TRADING_SERVICES_ROOT",
     "BYBIT_RUNTIME_ROOT",
     "THOUGHT_GATE_RUNTIME_DIR",
+    "CONNECTOR_LOGS_ROOT",
+    "DECISION_PACKETS_ROOT",
+    "VERDICTS_ROOT",
+    "BUSINESS_EVENTS_RUNTIME_DIR",
+    "WS_LOGS_DIR",
+    "WS_PERSISTENT_DIR",
+    "LOCAL_JUDGMENT_RUNTIME_DIR",
+    "DECISION_LEASE_RUNTIME_DIR",
     "get_repo_root",
     "get_compat_root",
     "get_program_code_root",
@@ -92,5 +138,11 @@ __all__ = [
     "get_trading_services_root",
     "get_bybit_runtime_root",
     "get_thought_gate_runtime_dir",
+    "get_connector_logs_root",
+    "get_decision_packets_root",
+    "get_verdicts_root",
+    "get_business_events_runtime_dir",
+    "get_local_judgment_runtime_dir",
+    "get_decision_lease_runtime_dir",
     "compat_root_points_to_repo_root",
 ]

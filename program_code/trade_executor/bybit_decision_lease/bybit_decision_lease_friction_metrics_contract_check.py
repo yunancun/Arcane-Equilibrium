@@ -3,24 +3,11 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report_stem
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 TARGET = BASE / "bybit_decision_lease_friction_metrics_latest.json"
 STEM = "bybit_decision_lease_friction_metrics_contract"
-
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def save_report(obj: Dict[str, Any]) -> None:
-    latest = BASE / f"{STEM}_latest.json"
-    dated = BASE / f"{STEM}_{obj['ts_ms']}.json"
-    latest.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
 
 
 def main() -> None:
@@ -59,7 +46,7 @@ def main() -> None:
         "checks": checks,
         "failed_checks": failed_checks,
     }
-    save_report(report)
+    save_report_stem(report, BASE, STEM)
 
 
 if __name__ == "__main__":

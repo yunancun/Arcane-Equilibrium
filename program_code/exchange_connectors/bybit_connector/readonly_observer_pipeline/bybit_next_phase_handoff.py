@@ -22,14 +22,21 @@ Maintenance notes:
 """
 
 import json
+import sys
 import time
 from pathlib import Path
 
-RUNTIME_STATE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
-FAILURE_POLICY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_failure_policy_latest.json")
-BUSINESS_EVENT_STATE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_event_state_latest.json")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+RUNTIME_STATE_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_runtime_state_latest.json"
+FAILURE_POLICY_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_failure_policy_latest.json"
+BUSINESS_EVENT_STATE_PATH = bpp.BUSINESS_EVENTS_RUNTIME_DIR / "bybit_business_event_state_latest.json"
+
+OUT_DIR = bpp.BYBIT_RUNTIME_ROOT
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_next_phase_handoff_latest.json"
 

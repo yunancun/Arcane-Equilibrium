@@ -16,8 +16,8 @@ def stable_json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def sha1_text(text: str) -> str:
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def extract_topic(raw: Dict[str, Any]) -> str:
@@ -182,7 +182,7 @@ def normalize_one_message(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
             "normalized_payload": normalized_payload,
             "raw_payload": item,
         }
-        event_core["event_fingerprint"] = sha1_text(stable_json_dumps(fingerprint_basis))
+        event_core["event_fingerprint"] = sha256_text(stable_json_dumps(fingerprint_basis))
 
         normalized_events.append(event_core)
 

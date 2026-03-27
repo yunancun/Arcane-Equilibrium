@@ -4,6 +4,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 SHADOW_PATH = BASE / "bybit_decision_lease_shadow_issue_latest.json"
@@ -13,26 +14,8 @@ CONSUME_AUDIT_PATH = BASE / "bybit_decision_lease_consume_final_audit_latest.jso
 STEM = "bybit_decision_lease_replay_policy"
 
 
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def uniq(items: List[str]) -> List[str]:
-    return list(dict.fromkeys(items))
-
-
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def save_report(obj: Dict[str, Any]) -> None:
-    latest = BASE / f"{STEM}_latest.json"
-    dated = BASE / f"{STEM}_{obj['ts_ms']}.json"
-    latest.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
 
 
 def main() -> None:
@@ -164,7 +147,7 @@ def main() -> None:
         "recommended_action": recommended_action,
         "operator_message": "I4-A replay policy complete. Lease replay and revoke identities are defined in shadow mode, without enabling live revoke or live replay enforcement.",
     }
-    save_report(report)
+    save_report_stem(report, BASE, STEM)
 
 
 if __name__ == "__main__":

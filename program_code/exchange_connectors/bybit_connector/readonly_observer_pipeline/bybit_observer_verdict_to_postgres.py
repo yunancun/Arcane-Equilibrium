@@ -17,9 +17,16 @@ Upstream:
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
-VERDICT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
+
+VERDICT_PATH = bpp.VERDICTS_ROOT / "bybit_observer_verdict_latest.json"
 POSTGRES_CONTAINER = "trading_postgres"
 SQL_SCHEMA = "trading_raw"
 SQL_TABLE = "observer_verdicts"

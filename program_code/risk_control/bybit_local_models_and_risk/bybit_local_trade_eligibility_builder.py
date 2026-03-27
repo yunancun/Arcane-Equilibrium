@@ -24,33 +24,25 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parents[1] / "exchange_connectors" / "bybit_connector" / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
 
-RUNTIME_STATE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/"
-    "bybit_runtime_state_latest.json"
-)
-READONLY_AUDIT_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/"
-    "bybit_readonly_audit_latest.json"
-)
-LATEST_CONSISTENCY_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/"
-    "bybit_latest_consistency_latest.json"
-)
-MARKET_FRICTION_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/"
-    "bybit_local_market_friction_latest.json"
-)
-RISK_ENVELOPE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/"
-    "bybit_local_risk_envelope_latest.json"
-)
 
-OUTPUT_DIR = MARKET_FRICTION_PATH.parent
+RUNTIME_STATE_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_runtime_state_latest.json"
+READONLY_AUDIT_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_readonly_audit_latest.json"
+LATEST_CONSISTENCY_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_latest_consistency_latest.json"
+MARKET_FRICTION_PATH = bpp.LOCAL_JUDGMENT_RUNTIME_DIR / "bybit_local_market_friction_latest.json"
+RISK_ENVELOPE_PATH = bpp.LOCAL_JUDGMENT_RUNTIME_DIR / "bybit_local_risk_envelope_latest.json"
+
+OUTPUT_DIR = bpp.LOCAL_JUDGMENT_RUNTIME_DIR
 LATEST_OUTPUT_PATH = OUTPUT_DIR / "bybit_local_trade_eligibility_latest.json"
 
 

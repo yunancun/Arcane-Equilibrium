@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from bybit_decision_lease_common import read_json, save_report, as_list, merged_unique
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 LATEST_PATH = BASE / "bybit_decision_lease_chapter_summary_latest.json"
@@ -50,32 +51,6 @@ STAGE_KEYWORDS = {
         "operator_ack_shadow",
     ],
 }
-
-
-def read_json(path: Path) -> Optional[Dict[str, Any]]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def as_list(v: Any) -> List[Any]:
-    return v if isinstance(v, list) else []
-
-
-def merged_unique(*parts: Any) -> List[Any]:
-    out: List[Any] = []
-    seen = set()
-    for part in parts:
-        for item in as_list(part):
-            if item is None:
-                continue
-            key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else str(item)
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(item)
-    return out
 
 
 def normalize_stage_name(stage: Any) -> Optional[str]:
@@ -180,16 +155,6 @@ def choose_best_stage_obj(candidates: List[Dict[str, Any]]) -> Optional[Dict[str
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[0][1]
-
-
-def save_report(report: Dict[str, Any], latest_path: Path) -> None:
-    ts_ms = report.get("ts_ms")
-    dated_path = latest_path.with_name(latest_path.stem.replace("_latest", f"_{ts_ms}") + latest_path.suffix)
-    latest_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest_path}")
-    print(f"saved_dated={dated_path}")
 
 
 def main() -> None:
@@ -340,7 +305,7 @@ def main() -> None:
         "operator_message": operator_message,
     }
 
-    save_report(report, LATEST_PATH)
+    save_report(report, LATEST_PATH, print_json=True)
 
 
 if __name__ == "__main__":

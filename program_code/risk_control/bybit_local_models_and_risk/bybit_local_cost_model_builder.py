@@ -20,23 +20,22 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parents[1] / "exchange_connectors" / "bybit_connector" / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
 
-RUNTIME_STATE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/"
-    "bybit_runtime_state_latest.json"
-)
-DECISION_PACKET_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/"
-    "bybit_decision_packet_latest.json"
-)
 
-OUTPUT_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
-)
+RUNTIME_STATE_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_runtime_state_latest.json"
+DECISION_PACKET_PATH = bpp.DECISION_PACKETS_ROOT / "bybit_decision_packet_latest.json"
+
+OUTPUT_DIR = bpp.LOCAL_JUDGMENT_RUNTIME_DIR
 LATEST_OUTPUT_PATH = OUTPUT_DIR / "bybit_local_cost_model_latest.json"
 
 ROUND_TRIP_COST_BPS_ENV = "BYBIT_LOCAL_ROUND_TRIP_COST_BPS"

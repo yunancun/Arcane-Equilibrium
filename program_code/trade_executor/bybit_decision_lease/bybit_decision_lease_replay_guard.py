@@ -3,30 +3,13 @@ import json
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
 BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
 POLICY_PATH = BASE / "bybit_decision_lease_replay_policy_latest.json"
 CONSUME_GATE_PATH = BASE / "bybit_decision_lease_consume_gate_latest.json"
 
 STEM = "bybit_decision_lease_replay_guard"
-
-
-def read_json(path: Path) -> Dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def uniq(items: List[str]) -> List[str]:
-    return list(dict.fromkeys(items))
-
-
-def save_report(obj: Dict[str, Any]) -> None:
-    latest = BASE / f"{STEM}_latest.json"
-    dated = BASE / f"{STEM}_{obj['ts_ms']}.json"
-    latest.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    dated.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(obj, ensure_ascii=False, indent=2))
-    print(f"saved_latest={latest}")
-    print(f"saved_dated={dated}")
 
 
 def main() -> None:
@@ -143,7 +126,7 @@ def main() -> None:
         "recommended_action": recommended_action,
         "operator_message": "I4-B replay guard complete. The shadow model now proves first-consume acceptance and duplicate-consume rejection semantics without enabling live revoke or live replay enforcement.",
     }
-    save_report(report)
+    save_report_stem(report, BASE, STEM)
 
 
 if __name__ == "__main__":

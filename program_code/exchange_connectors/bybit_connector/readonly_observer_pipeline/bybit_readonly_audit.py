@@ -23,21 +23,28 @@ Maintenance notes:
 """
 
 import json
+import sys
 import time
 from pathlib import Path
 
-SNAPSHOT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
-PACKET_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
-VERDICT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
-ACCEPTANCE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_observer_acceptance_latest.json")
-RUNTIME_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
-FINAL_SUMMARY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_final_summary_latest.json")
-HANDOFF_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_next_phase_handoff_latest.json")
-WS_FACTS_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_ws_runtime_facts_latest.json")
-PREFLIGHT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_private_rest_preflight_latest.json")
-BUSINESS_EVENT_STATE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_event_state_latest.json")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+SNAPSHOT_PATH = bpp.CONNECTOR_LOGS_ROOT / "bybit_system_snapshot_latest.json"
+PACKET_PATH = bpp.DECISION_PACKETS_ROOT / "bybit_decision_packet_latest.json"
+VERDICT_PATH = bpp.VERDICTS_ROOT / "bybit_observer_verdict_latest.json"
+ACCEPTANCE_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_observer_acceptance_latest.json"
+RUNTIME_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_runtime_state_latest.json"
+FINAL_SUMMARY_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_readonly_final_summary_latest.json"
+HANDOFF_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_next_phase_handoff_latest.json"
+WS_FACTS_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_ws_runtime_facts_latest.json"
+PREFLIGHT_PATH = bpp.BYBIT_RUNTIME_ROOT / "bybit_private_rest_preflight_latest.json"
+BUSINESS_EVENT_STATE_PATH = bpp.BUSINESS_EVENTS_RUNTIME_DIR / "bybit_business_event_state_latest.json"
+
+OUT_DIR = bpp.BYBIT_RUNTIME_ROOT
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_readonly_audit_latest.json"
 

@@ -25,11 +25,18 @@ Maintenance notes:
 """
 
 import json
+import sys
 import time
 from pathlib import Path
 
-PACKET_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit")
+_script_dir = Path(__file__).resolve().parent
+_misc_tools_dir = _script_dir.parent / "misc_tools"
+if str(_misc_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_misc_tools_dir))
+import bybit_path_policy as bpp
+
+PACKET_PATH = bpp.DECISION_PACKETS_ROOT / "bybit_decision_packet_latest.json"
+OUT_DIR = bpp.VERDICTS_ROOT
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def load_json(path: Path):

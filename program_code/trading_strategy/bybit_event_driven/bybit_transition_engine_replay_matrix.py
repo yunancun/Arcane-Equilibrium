@@ -94,7 +94,7 @@ def main():
         "report_version": "v1",
         "ts_ms": now_ms,
         "exchange": "bybit",
-        "stage": "G4.1",
+        "stage": "J",
         "engine_mode": "simulation_only_skeleton",
         "system_context": {
             "system_mode": runtime.get("system_mode"),
