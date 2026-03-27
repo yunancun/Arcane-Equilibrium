@@ -214,6 +214,17 @@ except Exception as e:
     DEMO_CONNECTOR = None
     logger.info("Bybit Demo connector not available: %s", e)
 
+# ── Bybit Demo Data Sync (pulls Demo data into PostgreSQL) ──
+# Bybit Demo 数据同步器（从 Demo API 拉取数据写入 PostgreSQL）
+try:
+    from .bybit_demo_sync import BybitDemoSync
+    DEMO_SYNC = BybitDemoSync(demo_connector=DEMO_CONNECTOR)
+    DEMO_SYNC.start()
+    logger.info("Bybit Demo sync started / Demo 数据同步器已启动")
+except Exception as e:
+    DEMO_SYNC = None
+    logger.info("Demo sync not available: %s", e)
+
 
 # =============================================================================
 # Router / 路由
