@@ -387,10 +387,12 @@ class TestGridTradingStrategy:
         )
         s.activate()
         ts = int(time.time() * 1000)
-        s.on_tick("BTCUSDT", 41000.0, ts)       # Grid 0
-        s.on_tick("BTCUSDT", 47000.0, ts + 1000)  # Grid 3 — crossed 3 grids up!
+        # Grid step = 2000. 41000 → index round(0.5)=0, 47000 → index round(3.5)=4
+        # So 4 grids crossed upward / 穿越 4 格向上
+        s.on_tick("BTCUSDT", 41000.0, ts)
+        s.on_tick("BTCUSDT", 47000.0, ts + 1000)
         intents = s.get_pending_intents()
-        assert len(intents) == 3
+        assert len(intents) == 4
         for intent in intents:
             assert intent.side == "Sell"
 

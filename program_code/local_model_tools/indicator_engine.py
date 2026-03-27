@@ -230,9 +230,11 @@ class IndicatorEngine:
             key = (symbol, timeframe)
             self._cache[key] = results
             self._last_update[key] = time.time()
+            # Snapshot callback list under lock (T-3 fix) / 在锁内拷贝回调列表
+            callbacks = list(self._on_update_callbacks)
 
-        # Notify downstream callbacks / 通知下游回调
-        for cb in self._on_update_callbacks:
+        # Notify downstream callbacks outside lock / 在锁外通知下游回调
+        for cb in callbacks:
             try:
                 cb(symbol, timeframe, results)
             except Exception:
@@ -253,6 +255,8 @@ class IndicatorEngine:
           {indicator_name: result_dict_or_None} for each indicator
         """
         results: dict[str, Any] = {}
+        total_ok = 0
+        total_err = 0
 
         with self._lock:
             indicators = list(self._indicators)
@@ -267,14 +271,19 @@ class IndicatorEngine:
                     volume=ohlcv.get("volume", []),
                 )
                 results[indicator.name] = result
-                self._stats["total_computations"] += 1
+                total_ok += 1
             except Exception:
                 logger.exception(
                     "Indicator computation error / 指标计算异常: %s",
                     indicator.name,
                 )
                 results[indicator.name] = None
-                self._stats["computation_errors"] += 1
+                total_err += 1
+
+        # Update stats under lock (T-2 fix) / 在锁内更新统计
+        with self._lock:
+            self._stats["total_computations"] += total_ok
+            self._stats["computation_errors"] += total_err
 
         return results
 

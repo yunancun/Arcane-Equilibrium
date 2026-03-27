@@ -54,6 +54,7 @@ MODULE_NOTE (English):
 """
 
 import logging
+import re
 import sys
 import os
 from typing import Any
@@ -132,6 +133,22 @@ phase2_router = APIRouter(
 )
 
 
+# Input validation: symbol must be 1-20 alphanumeric chars
+# 输入验证：交易对必须是 1-20 个字母数字字符
+_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9]{1,20}$")
+
+# Valid timeframes / 有效时间框架
+_VALID_TIMEFRAMES = {"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
+
+
+def _validate_symbol(symbol: str) -> str | None:
+    """Validate and normalize symbol. Returns uppercased symbol or None if invalid."""
+    s = symbol.strip().upper()
+    if not _SYMBOL_PATTERN.match(s):
+        return None
+    return s
+
+
 def _envelope(data: Any, action: str = "success") -> dict[str, Any]:
     """Minimal response envelope for Phase 2 routes / Phase 2 路由的最小响应封装"""
     return {
@@ -154,10 +171,15 @@ async def get_klines(
     Get latest N closed klines for a symbol + timeframe.
     获取指定交易对 + 时间框架的最近 N 根已闭合 K线。
     """
-    klines = KLINE_MANAGER.get_latest_klines(symbol.upper(), timeframe, n=n)
-    current = KLINE_MANAGER.get_current_bar(symbol.upper(), timeframe)
+    sym = _validate_symbol(symbol)
+    if sym is None:
+        return _envelope({"error": "Invalid symbol (1-20 alphanumeric) / 无效交易对"}, action="invalid_input")
+    if timeframe not in _VALID_TIMEFRAMES:
+        return _envelope({"error": f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架"}, action="invalid_input")
+    klines = KLINE_MANAGER.get_latest_klines(sym, timeframe, n=n)
+    current = KLINE_MANAGER.get_current_bar(sym, timeframe)
     return _envelope({
-        "symbol": symbol.upper(),
+        "symbol": sym,
         "timeframe": timeframe,
         "closed_klines": klines,
         "current_bar": current.to_dict() if current else None,
@@ -173,9 +195,14 @@ async def get_indicators(symbol: str, timeframe: str):
     Get latest cached indicator values for a symbol + timeframe.
     获取指定交易对 + 时间框架的最新缓存指标值。
     """
-    indicators = INDICATOR_ENGINE.get_indicators(symbol.upper(), timeframe)
+    sym = _validate_symbol(symbol)
+    if sym is None:
+        return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
+    if timeframe not in _VALID_TIMEFRAMES:
+        return _envelope({"error": "Invalid timeframe / 无效时间框架"}, action="invalid_input")
+    indicators = INDICATOR_ENGINE.get_indicators(sym, timeframe)
     return _envelope({
-        "symbol": symbol.upper(),
+        "symbol": sym,
         "timeframe": timeframe,
         "indicators": indicators,
         "indicator_count": len(indicators),
@@ -193,11 +220,16 @@ async def get_signals(
     Get recent trading signals.
     获取最近的交易信号。
     """
-    signals = SIGNAL_ENGINE.get_latest_signals(symbol=symbol.upper() if symbol else None, n=n)
+    filter_sym = None
+    if symbol:
+        filter_sym = _validate_symbol(symbol)
+        if filter_sym is None:
+            return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
+    signals = SIGNAL_ENGINE.get_latest_signals(symbol=filter_sym, n=n)
     return _envelope({
         "signals": signals,
         "count": len(signals),
-        "filter_symbol": symbol,
+        "filter_symbol": filter_sym,
     })
 
 
@@ -207,7 +239,10 @@ async def get_signal_summary(symbol: str):
     Get signal consensus summary for a symbol.
     获取指定交易对的信号共识摘要。
     """
-    summary = SIGNAL_ENGINE.get_signal_summary(symbol.upper())
+    sym = _validate_symbol(symbol)
+    if sym is None:
+        return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
+    summary = SIGNAL_ENGINE.get_signal_summary(sym)
     return _envelope(summary)
 
 

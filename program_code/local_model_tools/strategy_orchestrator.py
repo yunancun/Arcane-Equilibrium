@@ -61,6 +61,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from typing import Any
 
 from .signal_generator import Signal, SignalEngine
@@ -129,9 +130,8 @@ class StrategyOrchestrator:
         # Collected order intents / 收集的订单意图
         self._pending_intents: list[OrderIntent] = []
 
-        # Intent history (for audit) / 意图历史（用于审计）
-        self._intent_history: list[dict[str, Any]] = []
-        self._max_history = 500
+        # Intent history (for audit) — bounded deque / 意图历史（审计用）— 有界 deque
+        self._intent_history: deque[dict[str, Any]] = deque(maxlen=500)
 
         # Statistics / 统计
         self._stats = {
@@ -287,15 +287,13 @@ class StrategyOrchestrator:
                 intents = strategy.get_pending_intents()
                 all_intents.extend(intents)
 
-            # Record in history / 记录到历史
+            # Record in history (deque auto-trims at maxlen) / 记录到历史（deque 自动裁剪）
+            now_ms = int(time.time() * 1000)
             for intent in all_intents:
                 self._intent_history.append({
                     **intent.to_dict(),
-                    "collected_ts_ms": int(time.time() * 1000),
+                    "collected_ts_ms": now_ms,
                 })
-                # Trim history / 裁剪历史
-                if len(self._intent_history) > self._max_history:
-                    self._intent_history = self._intent_history[-self._max_history:]
 
             self._stats["intents_collected"] += len(all_intents)
 
@@ -319,7 +317,8 @@ class StrategyOrchestrator:
     def get_intent_history(self, n: int = 50) -> list[dict[str, Any]]:
         """Get recent OrderIntent history / 获取最近的 OrderIntent 历史"""
         with self._lock:
-            return list(self._intent_history[-n:])
+            history_list = list(self._intent_history)
+            return history_list[-n:]
 
     def get_status(self) -> dict[str, Any]:
         """Get comprehensive orchestrator status / 获取编排器综合状态"""
@@ -339,7 +338,7 @@ class StrategyOrchestrator:
                 ),
                 "total_registered": len(self._strategies),
                 "pending_intents": sum(
-                    len(s._pending_intents) for s in self._strategies.values()
+                    s.pending_intent_count for s in self._strategies.values()
                 ),
                 "stats": dict(self._stats),
                 "kline_manager_status": self._km.get_status(),

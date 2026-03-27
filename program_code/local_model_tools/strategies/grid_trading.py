@@ -129,7 +129,9 @@ class GridTradingStrategy(StrategyBase):
             return 0
         if price >= self._upper:
             return self._grid_count
-        return int((price - self._lower) / self._grid_step)
+        # Use round() to avoid floating-point truncation errors
+        # 使用 round() 避免浮点截断误差（如 0.9999→0 而非 1）
+        return int(round((price - self._lower) / self._grid_step))
 
     def on_tick(self, symbol: str, price: float, ts_ms: int) -> None:
         """

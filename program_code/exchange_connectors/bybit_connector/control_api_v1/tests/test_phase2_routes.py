@@ -16,17 +16,18 @@ Tests for Phase 2 Strategy Toolkit API Routes / Phase 2 策略工具包 API 路�
 """
 
 import pytest
-from unittest.mock import patch
 import sys
 import os
 
-# Ensure program_code is in path for local_model_tools imports
-# 确保 program_code 在路径中以便 local_model_tools 导入
+# Ensure both control_api_v1/ and program_code/ are in path
+# 确保 control_api_v1/ 和 program_code/ 都在路径中
 _tests_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_tests_dir)
 _bybit_connector_dir = os.path.dirname(_control_api_dir)
 _exchange_connectors_dir = os.path.dirname(_bybit_connector_dir)
 _program_code_dir = os.path.dirname(_exchange_connectors_dir)
+if _control_api_dir not in sys.path:
+    sys.path.insert(0, _control_api_dir)
 if _program_code_dir not in sys.path:
     sys.path.insert(0, _program_code_dir)
 

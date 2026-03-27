@@ -42,6 +42,7 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -140,6 +141,7 @@ class StrategyBase(ABC):
     def __init__(self) -> None:
         self._state = STRATEGY_IDLE
         self._pending_intents: list[OrderIntent] = []
+        self._intent_lock = threading.Lock()  # Protects _pending_intents / 保护 _pending_intents
 
     @property
     @abstractmethod
@@ -169,7 +171,8 @@ class StrategyBase(ABC):
     def stop(self) -> None:
         """Stop the strategy / 停止策略"""
         self._state = STRATEGY_STOPPED
-        self._pending_intents.clear()
+        with self._intent_lock:
+            self._pending_intents.clear()
 
     def on_signal(self, signal: Any) -> None:
         """
@@ -201,22 +204,33 @@ class StrategyBase(ABC):
         """
         Get and clear pending order intents / 获取并清空待处理的订单意图
 
+        Thread-safe: protected by _intent_lock.
+        线程安全：受 _intent_lock 保护。
+
         Returns:
           List of OrderIntents generated since last call / 上次调用后生成的 OrderIntent 列表
         """
-        intents = list(self._pending_intents)
-        self._pending_intents.clear()
+        with self._intent_lock:
+            intents = list(self._pending_intents)
+            self._pending_intents.clear()
         return intents
+
+    @property
+    def pending_intent_count(self) -> int:
+        """Number of pending intents / 待处理意图数量"""
+        with self._intent_lock:
+            return len(self._pending_intents)
 
     def _emit_intent(self, intent: OrderIntent) -> None:
         """
         Internal: add an order intent to the pending queue / 内部：添加订单意图到待处理队列
 
-        Only emits if strategy is active.
-        仅在策略激活状态时生效。
+        Only emits if strategy is active. Thread-safe.
+        仅在策略激活状态时生效。线程安全。
         """
         if self._state == STRATEGY_ACTIVE:
-            self._pending_intents.append(intent)
+            with self._intent_lock:
+                self._pending_intents.append(intent)
 
     @abstractmethod
     def get_status(self) -> dict[str, Any]:

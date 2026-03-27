@@ -569,23 +569,25 @@ class KlineManager:
         """
         Internal handler when any aggregator closes a kline / 任何聚合器闭合 K线时的内部处理
 
-        Updates stats and invokes registered callbacks.
-        更新统计信息并调用注册的回调。
+        Updates stats (under lock) and invokes registered callbacks (outside lock).
+        更新统计信息（加锁）并调用注册的回调（不加锁）。
         """
-        # Update stats / 更新统计
-        key = f"{symbol}:{timeframe}"
-        self._stats["total_klines_closed"] += 1
-        self._stats["klines_by_symbol_tf"][key] = (
-            self._stats["klines_by_symbol_tf"].get(key, 0) + 1
-        )
+        # Update stats under lock / 在锁内更新统计
+        with self._lock:
+            key = f"{symbol}:{timeframe}"
+            self._stats["total_klines_closed"] += 1
+            self._stats["klines_by_symbol_tf"][key] = (
+                self._stats["klines_by_symbol_tf"].get(key, 0) + 1
+            )
+            callbacks = list(self._on_close_callbacks)
 
         logger.debug(
             "Kline closed / K线闭合: %s %s %s",
             symbol, timeframe, bar,
         )
 
-        # Invoke all registered callbacks / 调用所有注册的回调
-        for cb in self._on_close_callbacks:
+        # Invoke callbacks outside lock / 在锁外调用回调
+        for cb in callbacks:
             try:
                 cb(symbol, timeframe, bar)
             except Exception:
