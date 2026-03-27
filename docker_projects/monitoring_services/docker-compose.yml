@@ -1,0 +1,31 @@
+services:
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: trading_grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=<REDACTED>
+      - GF_SERVER_ROOT_URL=http://trade-core:3000
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=marcusolsson-json-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/system_overview.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning
+      - ./dashboards:/var/lib/grafana/dashboards
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - pg_net
+
+networks:
+  pg_net:
+    external: true
+    name: basic_system_services_default
+
+volumes:
+  grafana_data:

@@ -1,0 +1,159 @@
+{
+  "uid": "openclaw-market-data",
+  "title": "5. Market Data & Risk / 行情与风控",
+  "description": "Market tickers, funding rates, risk events, learning pipeline",
+  "tags": ["openclaw", "market", "risk"],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Price Tracker (Top Symbols) / 价格追踪",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, last_price, symbol FROM market_tickers WHERE $__timeFilter(ts) AND symbol IN (SELECT symbol FROM market_tickers GROUP BY symbol ORDER BY MAX(volume_24h) DESC LIMIT 5) ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "lineWidth": 2 }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Funding Rates / 资金费率",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, funding_rate, symbol FROM market_tickers WHERE $__timeFilter(ts) AND funding_rate IS NOT NULL ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Open Interest / 未平仓合约",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, open_interest, symbol FROM market_tickers WHERE $__timeFilter(ts) AND open_interest IS NOT NULL ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Bid-Ask Spread / 买卖价差",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, (ask_price - bid_price) / NULLIF(last_price, 0) * 10000 AS spread_bps, symbol FROM market_tickers WHERE $__timeFilter(ts) AND bid_price > 0 AND ask_price > 0 ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "fillOpacity": 20 },
+          "displayName": "${__field.labels.symbol} spread (bps)"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Risk Events Timeline / 风控事件时间线",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts, event_type, symbol, severity, layer, detail FROM risk_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 50;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "overrides": [{
+          "matcher": { "id": "byName", "options": "severity" },
+          "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "critical": { "color": "red", "text": "CRITICAL" }, "warning": { "color": "yellow", "text": "WARNING" }, "info": { "color": "blue", "text": "INFO" } } }] }]
+        }]
+      }
+    },
+    {
+      "id": 6,
+      "title": "Risk Events by Type / 风控事件分类",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 26 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT event_type, COUNT(*) AS count FROM risk_events WHERE $__timeFilter(ts) GROUP BY event_type;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Learning Pipeline / 学习管线",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT event_type, status, COUNT(*) AS count FROM learning_events WHERE $__timeFilter(ts) GROUP BY event_type, status ORDER BY event_type, status;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Recent Learning Events / 最近学习事件",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 26 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts, event_type, title, status, confidence FROM learning_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 20;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 9,
+      "title": "Volume by Symbol / 按品种成交量",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 34 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT symbol, SUM(volume_24h) AS total_volume FROM market_tickers WHERE ts = (SELECT MAX(ts) FROM market_tickers) GROUP BY symbol ORDER BY total_volume DESC LIMIT 10;",
+        "format": "table",
+        "refId": "A"
+      }]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

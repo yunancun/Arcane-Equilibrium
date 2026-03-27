@@ -1,0 +1,141 @@
+{
+  "uid": "openclaw-system-overview",
+  "title": "1. System Overview / 系统总览",
+  "description": "OpenClaw Trading AI - System health, observer status, runtime state",
+  "tags": ["openclaw", "system", "overview"],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "System Health Status / 系统健康状态",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT component, status, latency_ms, detail, ts FROM system_health WHERE ts = (SELECT MAX(ts) FROM system_health sh2 WHERE sh2.component = system_health.component) ORDER BY component;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "status" },
+            "properties": [{
+              "id": "custom.cellOptions",
+              "value": {
+                "type": "color-background",
+                "mode": "basic"
+              }
+            },
+            {
+              "id": "mappings",
+              "value": [
+                { "type": "value", "options": { "healthy": { "color": "green", "text": "Healthy" }, "degraded": { "color": "yellow", "text": "Degraded" }, "down": { "color": "red", "text": "DOWN" } } }
+              ]
+            }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Observer Verdicts Over Time / 观察者判定趋势",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, CASE WHEN verdict = 'pass' THEN 1 WHEN verdict = 'skip' THEN 0 ELSE -1 END AS verdict_score, verdict FROM observer_verdicts WHERE $__timeFilter(ts) ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20 },
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Component Latency Trend / 组件延迟趋势",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, latency_ms, component FROM system_health WHERE $__timeFilter(ts) ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "AI Tier Distribution / AI 层级分布",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(ai_tier, 'none') AS tier, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY ai_tier;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 5,
+      "title": "Thought Gate Decisions / 思考门决策",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(thought_gate, 'unknown') AS gate, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY thought_gate;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 6,
+      "title": "Risk Events / 风控事件",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts, event_type, symbol, severity, layer, detail FROM risk_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 50;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "overrides": [{
+          "matcher": { "id": "byName", "options": "severity" },
+          "properties": [{
+            "id": "mappings",
+            "value": [
+              { "type": "value", "options": { "critical": { "color": "red" }, "warning": { "color": "yellow" }, "info": { "color": "blue" } } }
+            ]
+          }]
+        }]
+      }
+    },
+    {
+      "id": 7,
+      "title": "Runtime State / 运行时状态",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT 'read_only' AS system_mode, 'disabled' AS execution_state, 'not_granted' AS execution_authority, (SELECT COUNT(*) FROM system_health WHERE status = 'healthy' AND ts > NOW() - INTERVAL '5 minutes') AS healthy_components;",
+        "format": "table",
+        "refId": "A"
+      }]
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

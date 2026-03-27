@@ -4098,6 +4098,12 @@ def console_index() -> FileResponse:
     return FileResponse(static_dir / "console.html")
 
 
+@app.get("/trading", include_in_schema=False)
+def trading_dashboard() -> FileResponse:
+    """Trading chart dashboard: TradingView Lightweight Charts + signals + strategies"""
+    return FileResponse(static_dir / "trading.html")
+
+
 @app.get(f"{settings.api_prefix}/system/overview", response_model=ResponseEnvelope[OverviewData])
 def get_system_overview(actor=Depends(current_actor)) -> ResponseEnvelope[OverviewData]:
     snapshot, _ = get_latest_snapshot()

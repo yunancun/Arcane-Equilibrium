@@ -1,0 +1,205 @@
+{
+  "uid": "openclaw-ai-cost",
+  "title": "3. AI Cost Tracking / AI 成本追踪",
+  "description": "AI API costs, token usage, cost efficiency, budget monitoring",
+  "tags": ["openclaw", "ai", "cost"],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cumulative AI Cost / 累计 AI 成本",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ts AS time, SUM(cost_usd) OVER (ORDER BY ts) AS cumulative_cost FROM ai_cost_events WHERE $__timeFilter(ts) ORDER BY ts;",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "fillOpacity": 20 },
+          "color": { "fixedColor": "red", "mode": "fixed" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Today's AI Spend / 今日 AI 花费",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) AS today_cost FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Daily Budget Limit / 日预算上限",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) / 15.0 * 100 AS budget_pct FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Total Calls Today / 今日总调用",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) AS calls FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 5,
+      "title": "Avg Latency / 平均延迟",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT ROUND(AVG(latency_ms)) AS avg_latency FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cost by Provider / 按提供商分",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT provider, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY provider ORDER BY cost DESC;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 7,
+      "title": "Cost by Tier / 按层级分",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(tier, 'unknown') AS tier, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY tier ORDER BY cost DESC;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 8,
+      "title": "Cost by Purpose / 按用途分",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT COALESCE(purpose, 'unknown') AS purpose, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY purpose ORDER BY cost DESC;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 9,
+      "title": "Token Usage Over Time / Token 用量趋势",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', ts) AS time, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Model Usage Table / 模型使用明细",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT model, COUNT(*) AS calls, SUM(input_tokens) AS total_input, SUM(output_tokens) AS total_output, ROUND(SUM(cost_usd)::numeric, 4) AS total_cost, ROUND(AVG(latency_ms)::numeric) AS avg_latency_ms, ROUND(SUM(CASE WHEN success THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS success_pct FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY model ORDER BY total_cost DESC;",
+        "format": "table",
+        "refId": "A"
+      }]
+    },
+    {
+      "id": 11,
+      "title": "Daily Cost Trend / 每日成本趋势",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "" },
+      "targets": [{
+        "rawSql": "SELECT date_trunc('day', ts)::date AS day, SUM(cost_usd) AS daily_cost, COUNT(*) AS calls FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      },
+      "options": {
+        "barWidth": 0.6
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}
