@@ -72,6 +72,7 @@ class PipelineBridge:
         self._max_intents_per_tick = max_intents_per_tick
         self._lock = threading.Lock()
         self._telegram = None  # Set externally if available
+        self._demo_connector = None  # Set externally if available
 
         self._stats = {
             "ticks_received": 0,
@@ -93,6 +94,10 @@ class PipelineBridge:
     def set_telegram(self, alerter: Any) -> None:
         """Set Telegram alerter for notifications / 设置 Telegram 告警器"""
         self._telegram = alerter
+
+    def set_demo_connector(self, connector: Any) -> None:
+        """Set Bybit Demo connector for dual execution / 设置 Bybit Demo 连接器"""
+        self._demo_connector = connector
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -273,6 +278,23 @@ class PipelineBridge:
                         "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
                         intent.symbol, intent.side, intent.order_type, intent.qty,
                     )
+
+                # Also submit to Bybit Demo if connector is available
+                # 同时提交到 Bybit Demo（如果连接器可用）
+                if self._demo_connector and self._demo_connector.is_enabled:
+                    try:
+                        demo_result = self._demo_connector.submit_order(
+                            symbol=intent.symbol,
+                            side=intent.side,
+                            order_type="Market" if intent.order_type == "market" else "Limit",
+                            qty=intent.qty,
+                            price=intent.price,
+                            category=category,
+                        )
+                        if demo_result.get("retCode") != 0:
+                            logger.warning("Demo order failed: %s", demo_result.get("retMsg"))
+                    except Exception:
+                        logger.debug("Demo connector error (non-fatal)")
                     if self._telegram and intent.order_type == "market":
                         price = market_prices.get(intent.symbol, 0)
                         self._telegram.alert_trade(intent.symbol, intent.side, intent.qty, price, intent.reason[:100])

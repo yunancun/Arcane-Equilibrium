@@ -202,6 +202,18 @@ except Exception as e:
     GRAFANA_WRITER = None
     logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
 
+# ── Bybit Demo Connector (optional, for sandbox execution) ──
+# Bybit Demo 连接器（可选，用于沙盒执行）
+try:
+    from .bybit_demo_connector import BybitDemoConnector
+    DEMO_CONNECTOR = BybitDemoConnector()
+    if DEMO_CONNECTOR.is_enabled and PIPELINE_BRIDGE is not None:
+        PIPELINE_BRIDGE.set_demo_connector(DEMO_CONNECTOR)
+        logger.info("Bybit Demo connector wired to pipeline bridge / Bybit Demo 已接入管线")
+except Exception as e:
+    DEMO_CONNECTOR = None
+    logger.info("Bybit Demo connector not available: %s", e)
+
 
 # =============================================================================
 # Router / 路由
@@ -552,3 +564,41 @@ async def get_ai_consultation_status(
     except Exception:
         logger.exception("AI status check error / AI 状态检查异常")
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
+
+
+# ── Bybit Demo Routes / Bybit Demo 路由 ──
+
+@phase2_router.get("/demo/status")
+async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Bybit Demo connector status / 获取 Bybit Demo 连接器状态"""
+    if DEMO_CONNECTOR is None:
+        return _envelope({"enabled": False})
+    try:
+        status = DEMO_CONNECTOR.get_status()
+        return _envelope(status)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/demo/balance")
+async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Bybit Demo account balance / 获取 Bybit Demo 账户余额"""
+    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
+        return _envelope({"enabled": False})
+    try:
+        result = DEMO_CONNECTOR.get_wallet_balance()
+        return _envelope(result)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/demo/positions")
+async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Bybit Demo open positions / 获取 Bybit Demo 持仓"""
+    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
+        return _envelope({"enabled": False})
+    try:
+        result = DEMO_CONNECTOR.get_positions()
+        return _envelope(result)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
