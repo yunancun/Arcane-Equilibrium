@@ -4082,6 +4082,58 @@ def envelope_response(
     )
 
 
+@app.get("/login", include_in_schema=False)
+def login_page() -> FileResponse:
+    """Login page for GUI authentication / GUI 登录页面"""
+    return FileResponse(static_dir / "login.html")
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/v1/auth/login", include_in_schema=False)
+async def auth_login(req: _LoginRequest):
+    """
+    Authenticate with username/password, return bearer token.
+    用户名密码认证，返回 bearer token。
+    """
+    # Read credentials from gui_auth.env
+    _gui_env_path = os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env")
+    _expected_user = ""
+    _expected_pass = ""
+    try:
+        with open(_gui_env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("GUI_USERNAME="):
+                    _expected_user = line.split("=", 1)[1]
+                elif line.startswith("GUI_PASSWORD="):
+                    _expected_pass = line.split("=", 1)[1]
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Auth config not found")
+
+    if not _expected_user or _expected_user == "YOUR_USERNAME":
+        raise HTTPException(status_code=500, detail="Auth not configured — edit gui_auth.env")
+
+    if not (hmac.compare_digest(req.username, _expected_user) and
+            hmac.compare_digest(req.password, _expected_pass)):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Return the API bearer token (.secrets is at control_api_v1/ level, one up from app/)
+    _token_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".secrets", "api_token"
+    )
+    try:
+        with open(_token_path) as f:
+            api_token = f.read().strip()
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="API token not found")
+
+    return {"token": api_token, "username": req.username}
+
+
 @app.get("/", include_in_schema=False)
 def root_redirect() -> FileResponse:
     return FileResponse(static_dir / "index.html")

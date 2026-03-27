@@ -2147,6 +2147,14 @@ async function requestAIConsult(packetId) {
 document.addEventListener("DOMContentLoaded", () => {
   ensureGuiEnhancements();
 
+  // Auto-fill token from login page localStorage
+  const savedToken = localStorage.getItem('oc_trading_token');
+  if (savedToken) {
+    document.getElementById('tokenInput').value = savedToken;
+    // Auto-connect after a short delay to let UI initialize
+    setTimeout(() => { document.getElementById('connectButton').click(); }, 200);
+  }
+
   // 连接按钮 / Connect button
   document.getElementById("connectButton").addEventListener("click", async () => {
     inMemoryToken = document.getElementById("tokenInput").value.trim();

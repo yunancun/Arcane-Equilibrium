@@ -75,6 +75,7 @@
   <span class="tag tag-green">shadow_only</span>
   <span style="flex:1"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
+  <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:11px;padding:4px 10px;cursor:pointer;margin-left:8px">Logout</button>
 </div>
 
 <div class="grid">
@@ -163,6 +164,16 @@
 </div>
 
 <script>
+// Auth check: redirect to login if no token
+(function() {
+  var t = localStorage.getItem('oc_trading_token');
+  if (!t) {
+    sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+    window.location.href = '/login';
+    return;
+  }
+})();
+
 // OpenClaw Gateway: proxied through Trading API at /openclaw/
 // 通过 Trading API 的 /openclaw/ 反向代理访问（远程和本地都能工作）
 const OC = window.location.origin + '/openclaw';
@@ -193,21 +204,10 @@ async function api(path) {
   return r.json();
 }
 
-// Load token from the same domain cookie/localStorage or prompt
+// Load token from localStorage (set by login page)
 function loadToken() {
   token = localStorage.getItem('oc_trading_token') || '';
-  if (!token) {
-    // Prompt operator for API token on first use (localhost-only console)
-    const entered = prompt(
-      'OpenClaw Console: Enter API token (from .secrets/api_token).\n' +
-      'This will be saved in localStorage for future visits.'
-    );
-    if (entered && entered.trim()) {
-      token = entered.trim();
-      localStorage.setItem('oc_trading_token', token);
-    }
-  }
-  document.getElementById('token-status').textContent = token ? 'set' : 'none (401 expected)';
+  document.getElementById('token-status').textContent = token ? 'authenticated' : 'none';
 }
 
 // AI Cost

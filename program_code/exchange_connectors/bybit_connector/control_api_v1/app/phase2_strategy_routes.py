@@ -185,6 +185,23 @@ try:
 except ImportError:
     TELEGRAM = None
 
+# ── Grafana Data Writer (writes trading data to PostgreSQL for dashboards) ──
+# Grafana 数据写入器（将交易数据写入 PostgreSQL 供仪表盘使用）
+try:
+    from .grafana_data_writer import GrafanaDataWriter
+    GRAFANA_WRITER = GrafanaDataWriter(
+        paper_engine=PAPER_ENGINE,
+        kline_manager=KLINE_MANAGER,
+        signal_engine=SIGNAL_ENGINE,
+        orchestrator=ORCHESTRATOR,
+        pipeline_bridge=PIPELINE_BRIDGE,
+    )
+    GRAFANA_WRITER.start()
+    logger.info("Grafana data writer started / Grafana 数据写入器已启动")
+except Exception as e:
+    GRAFANA_WRITER = None
+    logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
+
 
 # =============================================================================
 # Router / 路由

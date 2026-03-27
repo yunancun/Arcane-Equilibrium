@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>OpenClaw / Bybit Control Center</title>
   <link rel="stylesheet" href="/static/styles.css" />
+  <script>
+  // Auth check: redirect to login if no token
+  (function() {
+    var token = localStorage.getItem('oc_trading_token');
+    if (!token) {
+      sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+      window.location.href = '/login';
+    }
+  })();
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -15,8 +25,9 @@
     <div class="token-panel">
       <label for="tokenInput">Bearer Token</label>
       <div class="token-row">
-        <input id="tokenInput" type="password" placeholder="仅保存在当前页面内存 / kept in-memory only" />
+        <input id="tokenInput" type="password" placeholder="Auto-filled from login" />
         <button id="connectButton">连接 / Connect</button>
+        <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
       </div>
       <div id="connectionStatus" class="status-chip neutral">未连接 / Disconnected</div>
     </div>

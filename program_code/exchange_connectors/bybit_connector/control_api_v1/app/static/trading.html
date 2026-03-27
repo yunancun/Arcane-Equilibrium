@@ -137,6 +137,7 @@
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
   <input type="password" id="token-input" class="token-input" placeholder="API Token" />
+  <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:11px;padding:4px 10px;cursor:pointer">Logout</button>
 </div>
 
 <div class="layout">
@@ -225,6 +226,16 @@
 </div>
 
 <script>
+// Auth check: redirect to login if no token
+(function() {
+  var token = localStorage.getItem('oc_trading_token');
+  if (!token) {
+    sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+    window.location.href = '/login';
+    return;
+  }
+})();
+
 // ============================================================
 // State
 // ============================================================
