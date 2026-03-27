@@ -178,9 +178,9 @@ from fastapi.responses import Response  # noqa: E402
 @app.api_route("/openclaw/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
 async def openclaw_proxy(path: str, request: Request):
     """Reverse proxy to OpenClaw Gateway"""
-    # Gateway binds to Tailscale IP by default; fallback to localhost
+    # Gateway binds to loopback when using --tailscale serve
     import os as _os
-    _oc_host = _os.getenv("OPENCLAW_GATEWAY_HOST", "100.91.109.86")
+    _oc_host = _os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
     target = f"http://{_oc_host}:18789/{path}"
     try:
         body = await request.body()
