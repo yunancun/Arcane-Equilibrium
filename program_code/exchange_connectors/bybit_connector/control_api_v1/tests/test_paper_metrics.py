@@ -108,13 +108,15 @@ class TestTradeMetrics:
         fill = _make_fill(side="Buy", qty=0.01, price=50000, fee=0.275)
         order = _make_order(state="paper_order_filled", fills=[fill])
         result = compute_trade_metrics([fill], [order])
-        assert result["total_filled_orders"] == 1
+        assert result["total_fills"] == 1
 
-    def test_working_orders_ignored(self):
-        fill = _make_fill()
-        order = _make_order(state="paper_order_working", fills=[fill])
-        result = compute_trade_metrics([fill], [order])
-        assert result["total_filled_orders"] == 0
+    def test_round_trip_pnl(self):
+        """Buy then sell → round-trip PnL computed."""
+        buy_fill = _make_fill(side="Buy", qty=0.01, price=50000, fee=0.275)
+        sell_fill = _make_fill(side="Sell", qty=0.01, price=51000, fee=0.2805)
+        result = compute_trade_metrics([buy_fill, sell_fill], [])
+        assert result["total_round_trips"] == 1
+        assert result["win_count"] == 1  # 51000-50000=10 per 0.01 = $10 - fees > 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

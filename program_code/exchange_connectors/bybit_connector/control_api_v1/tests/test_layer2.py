@@ -237,7 +237,9 @@ class TestLayer2CostTracker:
     def test_check_daily_budget_ok(self, cost_tracker):
         allowed, remaining = cost_tracker.check_daily_budget()
         assert allowed is True
-        assert remaining == DEFAULT_DAILY_HARD_CAP_USD
+        # Remaining is min(hard_cap, adaptive_effective) when adaptive enabled
+        assert remaining > 0
+        assert remaining <= DEFAULT_DAILY_HARD_CAP_USD
 
     def test_record_claude_cost(self, cost_tracker, session):
         cost = cost_tracker.record_claude_cost(session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET)

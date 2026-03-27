@@ -187,10 +187,13 @@ class Layer2CostTracker:
         """
         Check if daily budget allows a new session.
         Returns (allowed, remaining_usd).
-        检查每日预算是否允许新 session。返回 (是否允许, 剩余金额)。
+        Uses min(hard_cap, adaptive_effective_budget) when adaptive is enabled.
+        检查每日预算是否允许新 session。自适应启用时使用有效预算和硬上限中的较小值。
         """
         today_total = self.get_today_total_usd()
         cap = self._config.daily_hard_cap_usd
+        if self._config.adaptive_enabled and self._adaptive.effective_daily_budget_usd > 0:
+            cap = min(cap, self._adaptive.effective_daily_budget_usd)
         remaining = round(cap - today_total, 4)
         return remaining > 0, max(0.0, remaining)
 
@@ -256,12 +259,13 @@ class Layer2CostTracker:
         self._write_raw(raw)
 
     def _increment_daily_session_count(self) -> None:
-        raw = self._read_raw()
-        key = self._today_key()
-        daily = raw.setdefault("daily_spend", {})
-        day = daily.setdefault(key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0})
-        day["session_count"] = day.get("session_count", 0) + 1
-        self._write_raw(raw)
+        with self._lock:
+            raw = self._read_raw()
+            key = self._today_key()
+            daily = raw.setdefault("daily_spend", {})
+            day = daily.setdefault(key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0})
+            day["session_count"] = day.get("session_count", 0) + 1
+            self._write_raw(raw)
 
     def _write_raw(self, raw: dict[str, Any]) -> None:
         """Write raw state + update in-memory config/pricing/adaptive / 写入原始状态并更新内存"""
@@ -334,7 +338,8 @@ class Layer2CostTracker:
             sessions = raw.get("sessions", [])
 
             today = datetime.date.today()
-            seven_days_ago_ms = int((today - datetime.timedelta(days=7)).strftime("%s")) * 1000
+            seven_days_ago_dt = datetime.datetime.combine(today - datetime.timedelta(days=7), datetime.time(), tzinfo=datetime.timezone.utc)
+            seven_days_ago_ms = int(seven_days_ago_dt.timestamp()) * 1000
 
             # Sum AI spend for last 7 days
             ai_spend_7d = 0.0

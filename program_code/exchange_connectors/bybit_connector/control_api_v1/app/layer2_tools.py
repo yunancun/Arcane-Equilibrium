@@ -765,7 +765,7 @@ class ToolExecutor:
             categories_to_read = (
                 ["observations", "lessons", "hypotheses", "experiments"]
                 if category == "all"
-                else [category + "s" if not category.endswith("s") else category]
+                else [{"hypothesis": "hypotheses", "observation": "observations", "lesson": "lessons", "experiment": "experiments"}.get(category, category + "s")]
             )
 
             for cat in categories_to_read:
@@ -818,6 +818,28 @@ class ToolExecutor:
             return {"error": "url is required"}
         max_chars = min(args.get("max_chars", 5000), 10000)
 
+        # SSRF protection: block private/internal URLs
+        # SSRF 防护：阻止私有/内部 URL
+        try:
+            from urllib.parse import urlparse
+            import ipaddress
+            parsed = urlparse(url)
+            if parsed.scheme.lower() not in ("http", "https"):
+                return {"error": f"blocked_scheme_{parsed.scheme}"}
+            hostname = parsed.hostname or ""
+            if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0", ""):
+                return {"error": "blocked_localhost"}
+            if any(hostname.endswith(d) for d in (".local", ".internal", ".corp")):
+                return {"error": "blocked_internal_domain"}
+            try:
+                ip = ipaddress.ip_address(hostname)
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                    return {"error": "blocked_private_ip"}
+            except ValueError:
+                pass  # hostname is a domain, not IP — OK
+        except Exception:
+            return {"error": "url_validation_failed"}
+
         try:
             import httpx
             from bs4 import BeautifulSoup
@@ -826,7 +848,8 @@ class ToolExecutor:
 
         try:
             import httpx as _httpx
-            async with _httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            # follow_redirects=False to prevent SSRF via redirect
+            async with _httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                 resp = await client.get(url, headers={"User-Agent": "OpenClaw-Research/1.0"})
                 resp.raise_for_status()
                 html = resp.text
