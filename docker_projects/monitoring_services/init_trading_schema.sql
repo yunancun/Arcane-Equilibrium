@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS trade_executions (
     fee_currency    TEXT DEFAULT 'USDT',
     realized_pnl    NUMERIC(20,8) DEFAULT 0,
     is_paper        BOOLEAN DEFAULT FALSE,
-    raw_json        JSONB
+    strategy        TEXT,                   -- strategy name that generated this trade
+    metrics         JSONB                   -- additional execution metrics
 );
 CREATE INDEX IF NOT EXISTS idx_trade_executions_ts ON trade_executions(ts);
 CREATE INDEX IF NOT EXISTS idx_trade_executions_symbol ON trade_executions(symbol);
@@ -159,9 +160,10 @@ CREATE TABLE IF NOT EXISTS market_tickers (
     bid_price       NUMERIC(20,8),
     ask_price       NUMERIC(20,8),
     volume_24h      NUMERIC(30,8),
-    turnover_24h    NUMERIC(30,8),
     funding_rate    NUMERIC(20,10),
-    open_interest   NUMERIC(30,8)
+    open_interest   NUMERIC(30,8),
+    index_price     NUMERIC(20,8),
+    mark_price      NUMERIC(20,8)
 );
 CREATE INDEX IF NOT EXISTS idx_market_tickers_ts ON market_tickers(ts);
 CREATE INDEX IF NOT EXISTS idx_market_tickers_symbol ON market_tickers(symbol);

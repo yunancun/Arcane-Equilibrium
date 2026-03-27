@@ -117,7 +117,9 @@
 
     <h2>Actions / 操作</h2>
     <div class="btn-row">
-      <button class="btn primary" onclick="switchTo('trading')">Trading</button>
+      <button class="btn primary" onclick="switchTo('trading')">Dashboard</button>
+      <button class="btn" onclick="switchTo('charts')">Charts</button>
+      <button class="btn" onclick="switchTo('grafana')">Grafana</button>
       <button class="btn" onclick="switchTo('openclaw')">OpenClaw</button>
       <button class="btn" onclick="refreshAll()">Refresh</button>
     </div>
@@ -128,11 +130,15 @@
 
   <div style="display:flex;flex-direction:column;overflow:hidden">
     <div class="tab-bar">
-      <div class="tab active" data-tab="trading" onclick="switchTo('trading')">Trading Dashboard / 交易仪表盘</div>
+      <div class="tab active" data-tab="trading" onclick="switchTo('trading')">控制台 / Dashboard</div>
+      <div class="tab" data-tab="charts" onclick="switchTo('charts')">K线图表 / Charts</div>
+      <div class="tab" data-tab="grafana" onclick="switchTo('grafana')">监控 / Grafana</div>
       <div class="tab" data-tab="openclaw" onclick="switchTo('openclaw')">OpenClaw Control</div>
     </div>
     <div class="frame-wrap">
       <iframe id="f-trading" src="/static/index.html"></iframe>
+      <iframe id="f-charts" class="main-frame" src="/trading" style="display:none"></iframe>
+      <iframe id="f-grafana" class="main-frame" src="http://trade-core:3000/d/trading-pnl?orgId=1&kiosk" style="display:none"></iframe>
       <div id="f-openclaw" style="display:none;padding:24px;overflow-y:auto">
         <div style="text-align:center;margin-top:40px">
           <div style="font-size:40px;margin-bottom:16px">&#x1f9e0;</div>
@@ -184,6 +190,8 @@ function switchTo(tab) {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
   document.getElementById('f-trading').style.display = tab === 'trading' ? 'block' : 'none';
+  document.getElementById('f-charts').style.display = tab === 'charts' ? 'block' : 'none';
+  document.getElementById('f-grafana').style.display = tab === 'grafana' ? 'block' : 'none';
   document.getElementById('f-openclaw').style.display = tab === 'openclaw' ? 'block' : 'none';
   if (tab === 'openclaw') refreshOCDetail();
 }

@@ -4135,8 +4135,9 @@ async def auth_login(req: _LoginRequest):
 
 
 @app.get("/", include_in_schema=False)
-def root_redirect() -> FileResponse:
-    return FileResponse(static_dir / "index.html")
+def root_redirect():
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/console")
 
 
 @app.get("/gui", include_in_schema=False)

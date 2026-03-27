@@ -211,7 +211,7 @@ class GrafanaDataWriter:
     def _write_market_tickers(self, cur, now_ms: int) -> None:
         """Write latest prices to market_tickers table.
         Schema: ts, symbol, last_price, bid_price, ask_price, volume_24h,
-                turnover_24h, funding_rate, open_interest"""
+                funding_rate, open_interest, index_price, mark_price"""
         if not self._bridge:
             return
         try:
@@ -223,9 +223,12 @@ class GrafanaDataWriter:
                     cur.execute("""
                         INSERT INTO market_tickers
                             (ts, symbol, last_price, bid_price, ask_price,
-                             volume_24h, turnover_24h, funding_rate, open_interest)
-                        VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (now_ms, symbol, price, None, None, None, None, None, None))
+                             volume_24h, funding_rate, open_interest,
+                             index_price, mark_price)
+                        VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s)
+                    """, (now_ms, symbol, price, None, None,
+                          None, None, None, None, None))
                 except Exception:
                     pass
         except Exception as e:
@@ -288,7 +291,7 @@ class GrafanaDataWriter:
     def _write_trade_executions(self, cur, now_ms: int) -> None:
         """Write new fills to trade_executions table (incremental).
         Schema: ts, exec_id, order_id, symbol, side, exec_type, exec_qty,
-                exec_price, fee, fee_currency, realized_pnl, is_paper, raw_json"""
+                exec_price, fee, fee_currency, realized_pnl, is_paper, strategy, metrics"""
         if not self._engine:
             return
         try:
@@ -305,9 +308,9 @@ class GrafanaDataWriter:
                         INSERT INTO trade_executions
                             (ts, exec_id, order_id, symbol, side, exec_type,
                              exec_qty, exec_price, fee, fee_currency, realized_pnl,
-                             is_paper, raw_json)
+                             is_paper, strategy, metrics)
                         VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s)
+                                %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         f.get("fill_ts_ms", now_ms),
                         f.get("fill_id", f.get("exec_id", "")),
@@ -321,6 +324,7 @@ class GrafanaDataWriter:
                         "USDT",
                         f.get("realized_pnl", 0),
                         True,  # is_paper
+                        f.get("strategy", None),
                         json.dumps(f),
                     ))
                 except Exception as e:
