@@ -193,12 +193,16 @@ class Layer2Engine:
             if client is None:
                 return {"worth_investigating": False, "reason": "Anthropic client not available", "error": True}
 
-            response = await asyncio.to_thread(
-                client.messages.create,
-                model=MODEL_IDS[MODEL_HAIKU],
-                max_tokens=256,
-                system=L1_TRIAGE_PROMPT,
-                messages=[{"role": "user", "content": triage_context}],
+            # Add timeout to prevent hanging / 添加超时防止挂起
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.messages.create,
+                    model=MODEL_IDS[MODEL_HAIKU],
+                    max_tokens=256,
+                    system=L1_TRIAGE_PROMPT,
+                    messages=[{"role": "user", "content": triage_context}],
+                ),
+                timeout=60.0,  # 1 minute for triage
             )
 
             # Track cost
@@ -218,6 +222,9 @@ class Layer2Engine:
             result["output_tokens"] = output_tokens
             return result
 
+        except asyncio.TimeoutError:
+            logger.error("L1 triage timed out after 60s / L1 分诊超时")
+            return {"worth_investigating": False, "reason": "Triage timed out after 60s", "error": True}
         except Exception as e:
             logger.error(f"L1 triage error: {e}")
             return {"worth_investigating": False, "reason": f"Triage error: {str(e)[:100]}", "error": True}
@@ -313,16 +320,26 @@ class Layer2Engine:
                     session.final_summary = "Daily hard cap reached during session"
                     break
 
-                # Call Claude
+                # Call Claude (with timeout to prevent hanging)
+                # 调用 Claude（带超时防止挂起）
                 model_id = MODEL_IDS.get(session.current_model, MODEL_IDS[MODEL_SONNET])
-                response = await asyncio.to_thread(
-                    client.messages.create,
-                    model=model_id,
-                    max_tokens=4096,
-                    system=SYSTEM_PROMPT,
-                    tools=TOOL_SCHEMAS,
-                    messages=messages,
-                )
+                try:
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            client.messages.create,
+                            model=model_id,
+                            max_tokens=4096,
+                            system=SYSTEM_PROMPT,
+                            tools=TOOL_SCHEMAS,
+                            messages=messages,
+                        ),
+                        timeout=120.0,  # 2 minute timeout per iteration
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("L2 Claude call timed out after 120s (iteration %d) / L2 Claude 调用超时", iteration)
+                    session.state = SESSION_STATE_FAILED
+                    session.final_summary = f"Claude API call timed out after 120s at iteration {iteration}"
+                    break
 
                 # Track tokens & cost
                 input_tokens = response.usage.input_tokens
@@ -392,9 +409,12 @@ class Layer2Engine:
                             if should_upgrade:
                                 session.current_model = MODEL_OPUS
                                 session.model_upgraded = True
+                                # Re-check daily budget at upgrade time (stale `remaining` from session start)
+                                # 升级时重新检查每日预算（session 开始时的 remaining 可能已过时）
+                                _, fresh_remaining = self._cost_tracker.check_daily_budget()
                                 session.session_budget_usd = min(
                                     self._cost_tracker.get_effective_session_budget(MODEL_OPUS),
-                                    remaining,
+                                    fresh_remaining,
                                 )
 
                     tool_results.append({
@@ -444,12 +464,16 @@ class Layer2Engine:
         try:
             triage_input = f"Search results:\n{search_results_str[:3000]}"
 
-            response = await asyncio.to_thread(
-                client.messages.create,
-                model=MODEL_IDS[MODEL_HAIKU],
-                max_tokens=256,
-                system=MODEL_UPGRADE_TRIAGE_PROMPT,
-                messages=[{"role": "user", "content": triage_input}],
+            # Add timeout to prevent hanging / 添加超时防止挂起
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.messages.create,
+                    model=MODEL_IDS[MODEL_HAIKU],
+                    max_tokens=256,
+                    system=MODEL_UPGRADE_TRIAGE_PROMPT,
+                    messages=[{"role": "user", "content": triage_input}],
+                ),
+                timeout=60.0,  # 1 minute for upgrade triage
             )
 
             # Track cost

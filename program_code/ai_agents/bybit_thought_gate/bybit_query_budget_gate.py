@@ -110,6 +110,18 @@ def main() -> None:
     if ai_per_call_budget_usd is None or ai_per_call_budget_usd <= 0:
         blocking_reasons.append("per_call_budget_missing_or_invalid")
 
+    # --- H7 fix: runtime spending check (when upstream provides it) ---
+    # Known limitation: total_spent_today_usd is not yet tracked by H2-A
+    # policy builder. When it becomes available, this gate will enforce it.
+    total_spent_today_usd = as_float(budget_assessment.get("total_spent_today_usd"))
+    if (
+        total_spent_today_usd is not None
+        and ai_daily_budget_usd is not None
+        and ai_daily_budget_usd > 0
+        and total_spent_today_usd >= ai_daily_budget_usd
+    ):
+        blocking_reasons.append("daily_budget_exhausted")
+
     if max_output_tokens is None or max_output_tokens <= 0:
         blocking_reasons.append("max_output_tokens_missing_or_invalid")
 
@@ -182,6 +194,11 @@ def main() -> None:
         {"parsed_json_present": parsed_json_present, "legal_no_call_path": legal_no_call_path},
     )
     add_check("structural_budget_trace_ready", structural_budget_trace_ready, structural_budget_trace_ready)
+    add_check(
+        "daily_budget_not_exhausted",
+        total_spent_today_usd is None or (ai_daily_budget_usd is not None and total_spent_today_usd < ai_daily_budget_usd),
+        {"total_spent_today_usd": total_spent_today_usd, "ai_daily_budget_usd": ai_daily_budget_usd},
+    )
 
     if blocking_reasons:
         gate_state = "query_budget_gate_blocked"
@@ -189,7 +206,7 @@ def main() -> None:
         allow_progress = False
         recommended_action = "resolve_h2b_budget_blockers"
     else:
-        gate_state = "query_budget_gate_pass_soft_warn" if warning_flags or legal_no_call_path else "query_budget_gate_pass_soft_warn"
+        gate_state = "query_budget_gate_pass_soft_warn" if warning_flags else "query_budget_gate_pass"
         gate_ok = True
         allow_progress = True
         recommended_action = (

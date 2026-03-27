@@ -180,49 +180,6 @@ def prune_freshness_warning_flags(local_scope: Dict[str, Any], warning_flags: Li
     return list(dict.fromkeys(flags))
 
 
-def resolve_provider_pricing(provider_target: Any, model_name: Any, usage_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    provider = str(provider_target or "")
-    model = str(model_name or "")
-
-    if provider == "openai_native" and model.startswith("gpt-5-mini"):
-        return {
-            "pricing_table_bound": True,
-            "input_usd_per_1m": float(os.getenv("BYBIT_OPENAI_GPT5_MINI_INPUT_USD_PER_1M", "0.25")),
-            "cached_input_usd_per_1m": float(os.getenv("BYBIT_OPENAI_GPT5_MINI_CACHED_INPUT_USD_PER_1M", "0.025")),
-            "output_usd_per_1m": float(os.getenv("BYBIT_OPENAI_GPT5_MINI_OUTPUT_USD_PER_1M", "2.00")),
-        }
-
-    return {
-        "pricing_table_bound": False,
-        "input_usd_per_1m": None,
-        "cached_input_usd_per_1m": None,
-        "output_usd_per_1m": None,
-    }
-
-
-def compute_usage_cost_usd(usage_summary: Optional[Dict[str, Any]], pricing: Dict[str, Any]) -> Optional[float]:
-    if not usage_summary or not pricing.get("pricing_table_bound"):
-        return None
-
-    input_tokens = int((usage_summary or {}).get("input_tokens") or 0)
-    output_tokens = int((usage_summary or {}).get("output_tokens") or 0)
-
-    input_details = (usage_summary or {}).get("input_tokens_details") or {}
-    cached_tokens = int(input_details.get("cached_tokens") or 0)
-    billable_input_tokens = max(input_tokens - cached_tokens, 0)
-
-    input_rate = float(pricing.get("input_usd_per_1m") or 0.0)
-    cached_input_rate = float(pricing.get("cached_input_usd_per_1m") or input_rate)
-    output_rate = float(pricing.get("output_usd_per_1m") or 0.0)
-
-    cost = (
-        (billable_input_tokens * input_rate)
-        + (cached_tokens * cached_input_rate)
-        + (output_tokens * output_rate)
-    ) / 1_000_000.0
-
-    return round(cost, 10)
-
 # MAINLINE_PRICING_ALIAS_OVERRIDE_V1
 def resolve_provider_pricing(*, provider_target, model_name, usage_summary=None):
     import os
@@ -478,48 +435,28 @@ def prune_freshness_warning_flags(context: Any, flags: Any):
 
     return flags
 
-def resolve_provider_pricing(provider_target: Any, model_name: Any, usage_summary: Any) -> Dict[str, Any]:
-    import os
-
-    provider_target = str(provider_target or "").strip()
-    model_name = str(model_name or "").strip()
-
-    if provider_target == "openai_native" and model_name.startswith("gpt-5-mini"):
-        try:
-            input_per_1m = float(os.getenv("BYBIT_OPENAI_GPT5_MINI_INPUT_USD_PER_1M", "0.25"))
-            cached_input_per_1m = float(os.getenv("BYBIT_OPENAI_GPT5_MINI_CACHED_INPUT_USD_PER_1M", "0.025"))
-            output_per_1m = float(os.getenv("BYBIT_OPENAI_GPT5_MINI_OUTPUT_USD_PER_1M", "2.00"))
-            return {
-                "pricing_table_bound": True,
-                "input_per_1m": input_per_1m,
-                "cached_input_per_1m": cached_input_per_1m,
-                "output_per_1m": output_per_1m,
-            }
-        except Exception:
-            pass
-
-    return {
-        "pricing_table_bound": False,
-        "input_per_1m": None,
-        "cached_input_per_1m": None,
-        "output_per_1m": None,
-    }
-
-def compute_usage_cost_usd(usage_summary: Any, pricing: Any):
+def compute_usage_cost_usd(usage_summary: Any, pricing: Any) -> Any:
+    """Authoritative cost calculator. Reads `input_usd_per_1m` key names
+    (matching the output of the MAINLINE_PRICING_ALIAS_OVERRIDE_V1
+    resolve_provider_pricing above)."""
     if not usage_summary or not pricing or not pricing.get("pricing_table_bound"):
         return None
 
-    try:
-        input_tokens = int((usage_summary or {}).get("input_tokens") or 0)
-        output_tokens = int((usage_summary or {}).get("output_tokens") or 0)
-        cached_tokens = int((((usage_summary or {}).get("input_tokens_details") or {}).get("cached_tokens")) or 0)
+    input_tokens = int((usage_summary or {}).get("input_tokens") or 0)
+    output_tokens = int((usage_summary or {}).get("output_tokens") or 0)
 
-        billable_input = max(input_tokens - cached_tokens, 0)
+    input_details = (usage_summary or {}).get("input_tokens_details") or {}
+    cached_tokens = int(input_details.get("cached_tokens") or 0)
+    billable_input_tokens = max(input_tokens - cached_tokens, 0)
 
-        cost = 0.0
-        cost += (billable_input / 1_000_000.0) * float(pricing["input_per_1m"])
-        cost += (cached_tokens / 1_000_000.0) * float(pricing["cached_input_per_1m"])
-        cost += (output_tokens / 1_000_000.0) * float(pricing["output_per_1m"])
-        return round(cost, 6)
-    except Exception:
-        return None
+    input_rate = float(pricing.get("input_usd_per_1m") or 0.0)
+    cached_input_rate = float(pricing.get("cached_input_usd_per_1m") or input_rate)
+    output_rate = float(pricing.get("output_usd_per_1m") or 0.0)
+
+    cost = (
+        (billable_input_tokens * input_rate)
+        + (cached_tokens * cached_input_rate)
+        + (output_tokens * output_rate)
+    ) / 1_000_000.0
+
+    return round(cost, 10)

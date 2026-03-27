@@ -882,6 +882,16 @@ class PaperTradingEngine:
                 self._recompute_pnl(state)
                 self._audit(state, "order_filled", f"{order['order_id']} price={fill_price:.4f} fee={fee:.6f}")
 
+            # C2 fix: If market order could not be filled immediately (no market price), reject it
+            # Market orders stuck in WORKING will never fill via tick(), so reject now.
+            if order_type == ORDER_TYPE_MARKET and order["state"] == ORDER_STATE_WORKING:
+                _transition_order(order, ORDER_STATE_REJECTED)
+                order["reject_reason"] = "no_market_price"
+                result["order"] = order
+                result["rejected_reason"] = "no_market_price"
+                self._audit(state, "order_rejected", f"{symbol} {side} market order: no market price available")
+                return state
+
             return state
 
         self.store.mutate(mutator)

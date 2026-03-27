@@ -385,8 +385,13 @@ def build_report() -> dict[str, Any]:
     _last_trade_price = public_derived.get("last_trade_price")
     _last_trade_ts_ms = public_derived.get("last_trade_ts_ms")
     if _last_trade_price is None or _last_trade_ts_ms is None:
+        _trade_sources = {
+            "public_micro": public_micro,
+            "decision_packet": decision_packet,
+            "runtime_state": runtime_state,
+        }
         _rehydrated_trade = normalize_recent_trade_fields(
-            locals(),
+            _trade_sources,
             explicit_price=_last_trade_price,
             explicit_ts_ms=_last_trade_ts_ms,
         )
@@ -419,7 +424,13 @@ def build_report() -> dict[str, Any]:
         input_state = "ready_for_thought_gate_policy_evaluation"
         allow_progress_to_h1b_policy = True
 
-    operator_flags = prune_freshness_warning_flags(locals(), operator_flags)
+    _freshness_context = {
+        "public_micro": public_micro,
+        "runtime_state": runtime_state,
+        "decision_packet": decision_packet,
+        "h0_final": h0_final,
+    }
+    operator_flags = prune_freshness_warning_flags(_freshness_context, operator_flags)
 
     return {
         "input_type": "bybit_thought_gate_input",

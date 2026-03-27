@@ -114,8 +114,12 @@ ORCHESTRATOR = StrategyOrchestrator(
 ORCHESTRATOR.register_strategy(MACrossoverStrategy(symbol="BTCUSDT"))
 ORCHESTRATOR.register_strategy(BollingerReversionStrategy(symbol="BTCUSDT"))
 ORCHESTRATOR.register_strategy(FundingRateArbStrategy(symbol="BTCUSDT"))
+_grid_upper = float(os.getenv("OPENCLAW_GRID_UPPER", "100000"))
+_grid_lower = float(os.getenv("OPENCLAW_GRID_LOWER", "80000"))
+_grid_count = int(os.getenv("OPENCLAW_GRID_COUNT", "20"))
+
 ORCHESTRATOR.register_strategy(GridTradingStrategy(
-    symbol="BTCUSDT", upper_price=100000.0, lower_price=80000.0, grid_count=20,
+    symbol="BTCUSDT", upper_price=_grid_upper, lower_price=_grid_lower, grid_count=_grid_count,
 ))
 
 logger.info(

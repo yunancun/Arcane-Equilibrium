@@ -117,19 +117,6 @@ def load_json(path: Path) -> tuple[dict[str, Any], bool, str | None]:
     if not path.exists():
         return {}, False, f"missing_file:{path}"
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:  # pragma: no cover
-        return {}, False, f"json_load_error:{path}:{exc}"
-
-
-def load_json(path: Path) -> tuple[dict[str, Any], bool, str | None]:
-    """
-    Load JSON from disk.
-    从磁盘读取 JSON。
-    """
-    if not path.exists():
-        return {}, False, f"missing_file:{path}"
-    try:
         return json.loads(path.read_text(encoding="utf-8")), True, None
     except Exception as exc:  # pragma: no cover
         return {}, False, f"json_load_error:{path}:{exc}"

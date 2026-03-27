@@ -78,6 +78,7 @@ class PipelineBridge:
         }
 
         self._active = False
+        self._latest_prices: dict[str, float] = {}
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
 
     def activate(self) -> None:
@@ -124,6 +125,9 @@ class PipelineBridge:
         if not symbol or price <= 0:
             return
 
+        # Track latest prices for intent submission (fixes C1: positions is dict, not list)
+        self._latest_prices[symbol] = price
+
         # 1. Feed KlineManager -> triggers IndicatorEngine -> triggers SignalEngine -> triggers Orchestrator.on_signal
         try:
             self._km.on_price_event(event)
@@ -140,7 +144,12 @@ class PipelineBridge:
             with self._lock:
                 self._stats["errors"] += 1
 
-        # 3. Process pending intents -> submit to paper engine
+        # 3. Periodic funding rate check (every 100 ticks, ~5 minutes at medium attention)
+        # 定期 funding rate 检查（每 100 个 tick，中等注意力下约 5 分钟）
+        if self._stats["ticks_received"] % 100 == 0:
+            self._check_funding_rates()
+
+        # 4. Process pending intents -> submit to paper engine
         if self._auto_submit:
             self._process_pending_intents()
 
@@ -169,18 +178,8 @@ class PipelineBridge:
             )
             intents = intents[: self._max_intents_per_tick]
 
-        # Get current market prices for order submission
-        market_prices: dict[str, float] = {}
-        try:
-            state = self._engine.get_state()
-            # Extract latest prices from paper engine state if available
-            for pos in state.get("positions", []):
-                if pos.get("symbol"):
-                    mp = pos.get("mark_price") or pos.get("entry_price", 0)
-                    if mp:
-                        market_prices[pos["symbol"]] = mp
-        except Exception:
-            pass
+        # Get current market prices from tick history (fixes C1: positions is dict, not list)
+        market_prices = dict(self._latest_prices)
 
         for intent in intents:
             try:
@@ -221,6 +220,46 @@ class PipelineBridge:
                 )
                 with self._lock:
                     self._stats["errors"] += 1
+
+    def _check_funding_rates(self) -> None:
+        """Fetch funding rate data and feed to FundingRate strategy / 获取 funding rate 并喂给策略"""
+        import urllib.request
+        import json as _json
+
+        for symbol in ["BTCUSDT", "ETHUSDT"]:
+            try:
+                url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+                req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = _json.loads(resp.read().decode())
+
+                if data.get("retCode") != 0:
+                    continue
+
+                ticker_list = data.get("result", {}).get("list", [])
+                if not ticker_list:
+                    continue
+
+                ticker = ticker_list[0]
+                funding_rate = float(ticker.get("fundingRate", 0))
+                next_funding_ts = int(ticker.get("nextFundingTime", 0))
+
+                if funding_rate == 0 or next_funding_ts == 0:
+                    continue
+
+                # Find FundingRate strategy in orchestrator and call evaluate
+                # 在编排器中找到 FundingRate 策略并调用评估
+                for strategy in self._orch._strategies.values():
+                    if hasattr(strategy, "evaluate_funding_opportunity"):
+                        try:
+                            strategy.evaluate_funding_opportunity(
+                                funding_rate=funding_rate,
+                                next_settle_ts_ms=next_funding_ts,
+                            )
+                        except Exception:
+                            logger.exception("Funding rate eval error / funding rate 评估异常")
+            except Exception:
+                logger.debug("Funding rate fetch failed for %s / 获取失败", symbol)
 
     def get_stats(self) -> dict[str, Any]:
         """Get bridge statistics / 获取桥接器统计"""

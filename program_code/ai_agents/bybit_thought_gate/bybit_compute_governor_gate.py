@@ -78,7 +78,7 @@ def main() -> None:
         ),
         mkcheck(
             "selected_ai_tier_allowed",
-            request_summary.get("selected_ai_tier") in {"light", "none"},
+            request_summary.get("selected_ai_tier") in {"light", "standard", "none"},
             request_summary.get("selected_ai_tier"),
         ),
         mkcheck("model_router_runtime_ok", h3_runtime.get("runtime_ok") is True, h3_runtime.get("runtime_ok")),

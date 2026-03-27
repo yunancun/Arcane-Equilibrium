@@ -597,17 +597,32 @@ class RiskManager:
         # Total exposure check (reducing orders decrease exposure, skip check)
         # 总敞口检查（减仓单减少敞口，跳过）
         if not is_reducing:
+            if not market_prices:
+                logger.warning("No market prices for exposure calculation, using entry prices (may be stale) / 无市场价格，使用入场价（可能过时）")
             total_exposure = sum(
                 p.get("qty", 0) * (market_prices.get(p.get("symbol", ""), p.get("avg_entry_price", 0)) if market_prices else p.get("avg_entry_price", 0))
                 for p in positions.values()
             )
             # Include pending unfilled orders (working/partially_filled) in exposure
             # 将未成交挂单（working/partially_filled）计入敞口
-            pending_notional = sum(
-                o.get("remaining_qty", 0) * (o.get("price") or (market_prices.get(o.get("symbol", ""), 0) if market_prices else 0))
-                for o in state.get("orders", [])
-                if o.get("state") in ("paper_order_working", "paper_order_partially_filled")
-            )
+            pending_notional = 0
+            for o in state.get("orders", []):
+                if o.get("state") not in ("paper_order_working", "paper_order_partially_filled"):
+                    continue
+                remaining = o.get("remaining_qty", 0)
+                oprice = o.get("price")
+                if oprice is None or oprice == 0:
+                    # Market orders or orders without price: use market price if available
+                    # 市价单或无价格的订单：使用市场价（如果可用）
+                    fallback = market_prices.get(o.get("symbol", ""), 0) if market_prices else 0
+                    if fallback == 0:
+                        logger.warning(
+                            "Pending order %s has no price and no market price, exposure=0 / "
+                            "挂单 %s 无价格且无市场价，敞口=0",
+                            o.get("order_id", "?"), o.get("order_id", "?"),
+                        )
+                    oprice = fallback
+                pending_notional += remaining * oprice
             new_total = total_exposure + pending_notional + notional
             total_pct = (new_total / balance) * 100
             max_total = resolve_effective_limit("max_total_exposure_pct", self._config, self._category_configs.get(category))
@@ -621,12 +636,17 @@ class RiskManager:
                 for p in positions.values()
                 if p.get("side") == side
             )
-            pending_same_side = sum(
-                o.get("remaining_qty", 0) * (o.get("price") or (market_prices.get(o.get("symbol", ""), 0) if market_prices else 0))
-                for o in state.get("orders", [])
-                if o.get("state") in ("paper_order_working", "paper_order_partially_filled")
-                and o.get("side") == side
-            )
+            pending_same_side = 0
+            for o in state.get("orders", []):
+                if o.get("state") not in ("paper_order_working", "paper_order_partially_filled"):
+                    continue
+                if o.get("side") != side:
+                    continue
+                remaining = o.get("remaining_qty", 0)
+                oprice = o.get("price")
+                if oprice is None or oprice == 0:
+                    oprice = market_prices.get(o.get("symbol", ""), 0) if market_prices else 0
+                pending_same_side += remaining * oprice
             new_corr = same_side_exposure + pending_same_side + notional
             corr_pct = (new_corr / balance) * 100
             max_corr = self._config.max_correlated_exposure_pct

@@ -33,6 +33,9 @@ OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def load_json(path: Path):
+    """Load JSON from disk, returning None if the file does not exist."""
+    if not path.exists():
+        return None
     return json.loads(path.read_text(encoding="utf-8"))
 
 def now_ms():
@@ -40,6 +43,9 @@ def now_ms():
 
 def main():
     packet = load_json(PACKET_PATH)
+    if packet is None:
+        print(f"ERROR: decision packet not found at {PACKET_PATH}")
+        return
 
     risk_flags = packet.get("risk_flags") or []
     local_hints = packet.get("local_decision_hints") or {}

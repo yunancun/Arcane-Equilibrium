@@ -17,10 +17,14 @@ import copy
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import tempfile
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
@@ -1355,8 +1359,12 @@ class JsonStateStore:
 
     def read(self) -> dict[str, Any]:
         with self._lock:
-            with self.file_path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+            try:
+                with self.file_path.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+                logger.error("State file read error, returning default state / 状态文件读取异常: %s", e)
+                payload = build_default_state()
             compiled = compile_state(payload)
             if compiled != payload:
                 self.write(compiled)
@@ -1365,8 +1373,23 @@ class JsonStateStore:
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             compiled = compile_state(state)
-            with self.file_path.open("w", encoding="utf-8") as handle:
-                json.dump(compiled, handle, ensure_ascii=False, indent=2)
+            # Atomic write: write to temp file, then rename (prevents corruption on crash)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.file_path.parent),
+                prefix=".state_tmp_",
+                suffix=".json",
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(compiled, handle, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, str(self.file_path))
+            except BaseException:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             # 限制状态文件权限：仅 owner 可读写 / Restrict state file: owner read/write only
             os.chmod(str(self.file_path), 0o600)
             return compiled
@@ -1449,6 +1472,11 @@ def ensure_source_is_usable(source_context: SourceContext) -> None:
 
 
 def _assert_revision(snapshot: dict[str, Any], envelope: RequestEnvelope) -> None:
+    # KNOWN LIMITATION: This revision check runs BEFORE STORE.mutate() acquires the lock.
+    # Under concurrent requests, the revision could change between this check and the
+    # actual mutation. The risk is low because the mutator re-reads current state inside
+    # the lock. A full fix would move revision checking into mutate() itself.
+    # 已知限制：此版本检查在 STORE.mutate() 获取锁之前运行。
     if envelope.expected_state_revision != snapshot["meta"]["state_revision"]:
         raise HTTPException(status_code=409, detail={"reason_codes": ["state_revision_mismatch"]})
 
