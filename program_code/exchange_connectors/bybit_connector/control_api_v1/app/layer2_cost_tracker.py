@@ -165,7 +165,7 @@ class Layer2CostTracker:
     # ── Daily Spend / 每日花费 ──
 
     def _today_key(self) -> str:
-        return datetime.date.today().isoformat()
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
     def get_daily_spend(self, date_key: str | None = None) -> dict[str, Any]:
         """Get spend for a specific day / 获取某天的花费"""

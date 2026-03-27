@@ -71,7 +71,7 @@ class PipelineBridge:
         self._stats = {
             "ticks_received": 0,
             "intents_submitted": 0,
-            "intents_filled": 0,
+            "intents_accepted": 0,
             "intents_rejected": 0,
             "errors": 0,
             "last_tick_ts_ms": 0,
@@ -208,7 +208,7 @@ class PipelineBridge:
                     )
                 else:
                     with self._lock:
-                        self._stats["intents_filled"] += 1
+                        self._stats["intents_accepted"] += 1
                     logger.info(
                         "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
                         intent.symbol, intent.side, intent.order_type, intent.qty,

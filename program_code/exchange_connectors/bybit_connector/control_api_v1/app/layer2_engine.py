@@ -217,6 +217,11 @@ class Layer2Engine:
             except json.JSONDecodeError:
                 result = {"worth_investigating": False, "reason": "Failed to parse triage response"}
 
+            # Track triage cost in daily budget / 将分诊成本计入每日预算
+            if cost > 0:
+                triage_session = Layer2Session(trigger="triage")
+                self._cost_tracker.record_claude_cost(triage_session, input_tokens, output_tokens, MODEL_HAIKU)
+
             result["triage_cost_usd"] = cost
             result["input_tokens"] = input_tokens
             result["output_tokens"] = output_tokens

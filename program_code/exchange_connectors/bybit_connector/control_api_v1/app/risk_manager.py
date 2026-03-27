@@ -104,6 +104,11 @@ class PriceHistoryTracker:
         # Prune old entries
         cutoff = now - self._window_sec
         self._history[symbol] = [(t, p) for t, p in self._history[symbol] if t >= cutoff]
+        # Prune symbols with no recent data (prevent unbounded growth)
+        if len(self._history) > 100:
+            stale_symbols = [s for s, hist in self._history.items() if not hist]
+            for s in stale_symbols:
+                del self._history[s]
 
     def get_prices(self, symbol: str) -> list[tuple[float, float]]:
         return self._history.get(symbol, [])

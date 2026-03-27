@@ -194,11 +194,18 @@ async function api(path) {
 // Load token from the same domain cookie/localStorage or prompt
 function loadToken() {
   token = localStorage.getItem('oc_trading_token') || '';
-  document.getElementById('token-status').textContent = token ? 'set' : 'none';
   if (!token) {
-    // Try without token first (if API allows)
-    return;
+    // Prompt operator for API token on first use (localhost-only console)
+    const entered = prompt(
+      'OpenClaw Console: Enter API token (from .secrets/api_token).\n' +
+      'This will be saved in localStorage for future visits.'
+    );
+    if (entered && entered.trim()) {
+      token = entered.trim();
+      localStorage.setItem('oc_trading_token', token);
+    }
   }
+  document.getElementById('token-status').textContent = token ? 'set' : 'none (401 expected)';
 }
 
 // AI Cost

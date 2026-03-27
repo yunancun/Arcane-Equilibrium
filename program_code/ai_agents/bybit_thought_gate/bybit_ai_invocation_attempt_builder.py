@@ -317,7 +317,7 @@ def main() -> None:
 
     connect_timeout_sec = float(provider_runtime.get("connect_timeout_sec", 1.0) or 1.0)
     read_timeout_sec = float(provider_runtime.get("read_timeout_sec", 5.0) or 5.0)
-    max_retries = int(provider_runtime.get("max_retries", 0) or 0)
+    max_retries = 0  # Enforced: never retry AI calls / 强制：AI 调用不重试
 
     dry_run = env_bool("BYBIT_AI_DRY_RUN", False)
     log_provider_errors = env_bool("BYBIT_AI_LOG_PROVIDER_ERRORS", True)
@@ -352,6 +352,9 @@ def main() -> None:
             blocking_reasons.append("anthropic_api_key_missing")
 
     invocation_attempted = False
+    # NOTE: http_status is always None because the provider SDKs (openai, anthropic)
+    # raise exceptions on non-200 responses and do not expose the raw HTTP status
+    # on success. This is a known limitation; the field is kept for schema stability.
     http_status = None
     latency_ms = None
     provider_response_present = False
@@ -461,7 +464,7 @@ def main() -> None:
         "ts_ms": now_ms,
         "exchange": "bybit",
         "stage": "H1-F",
-        "report_ok": True,
+        "report_ok": len(blocking_reasons) == 0,
         "source_refs": {
             "ai_request_envelope_path": str(REQUEST_PATH),
         },

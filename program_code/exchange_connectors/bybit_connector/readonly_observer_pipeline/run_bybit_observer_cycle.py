@@ -24,7 +24,10 @@ def run_cmd(cmd):
 def load_json_if_exists(path: Path):
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 def main():
     started_ts_ms = int(time.time() * 1000)

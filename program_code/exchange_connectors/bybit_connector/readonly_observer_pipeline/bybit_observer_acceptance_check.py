@@ -39,7 +39,10 @@ MAX_SNAPSHOT_AGE_MS = 15 * 60 * 1000
 def load_json(path: Path):
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 def main():
     now_ms = int(time.time() * 1000)

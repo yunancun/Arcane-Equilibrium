@@ -90,6 +90,9 @@ def main() -> None:
             "min_ttl_ms": 1000,
             "max_ttl_ms": 30000,
         },
+        # Note: hard_disqualifiers are human-readable strings, not machine-executable rules.
+        # When M chapter (execution layer) is built, these must be converted to executable checks.
+        # 注意：hard_disqualifiers 是人类可读字符串，非可执行规则。M 章实现时需转换为可执行检查。
         "hard_disqualifiers": [
             "system_mode != read_only/controlled_execution_transition",
             "execution_state != explicitly_enabled",

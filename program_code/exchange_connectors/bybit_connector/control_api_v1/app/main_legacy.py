@@ -680,6 +680,8 @@ def deep_set(container: dict[str, Any], path: str, value: Any) -> None:
     pieces = path.split(".")
     current = container
     for piece in pieces[:-1]:
+        if piece not in current:
+            raise KeyError(f"Path component '{piece}' not found in state (full path: {path})")
         current = current[piece]
     current[pieces[-1]] = value
 
@@ -694,7 +696,7 @@ def build_snapshot_id(state: dict[str, Any]) -> str:
         "updated_ts": state["meta"]["snapshot_ts_ms"],
     }
     payload = json.dumps(meta, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    digest = hashlib.sha1(payload).hexdigest()[:12]
+    digest = hashlib.sha256(payload).hexdigest()[:12]
     return f"snapshot:{revision}:{digest}"
 
 
@@ -1439,7 +1441,7 @@ def verify_operator_identity(envelope: RequestEnvelope, actor: AuthenticatedActo
 
 def request_fingerprint(envelope: RequestEnvelope) -> str:
     payload = envelope.model_dump(mode="json")
-    return hashlib.sha1(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def build_source_context(snapshot: dict[str, Any]) -> SourceContext:
@@ -1517,11 +1519,14 @@ def _store_idempotent_response(state: dict[str, Any], envelope: RequestEnvelope,
 
 def _cleanup_idempotency_cache(cache: dict[str, Any]) -> None:
     """移除过期和超量的幂等性缓存条目 / Remove expired and overflow idempotency cache entries."""
+    # Fast path: skip all work when cache is well under limit (avoids O(n) scan on every store)
+    if len(cache) <= _IDEMPOTENCY_MAX_ENTRIES // 2:
+        return
     cutoff = now_ms() - _IDEMPOTENCY_TTL_MS
     expired_keys = [k for k, v in cache.items() if v.get("stored_ts_ms", 0) < cutoff]
     for k in expired_keys:
         del cache[k]
-    # 如果仍超量，移除最旧的 / If still over limit, remove oldest
+    # O(n log n) sort only when over limit — guarded by size check
     if len(cache) > _IDEMPOTENCY_MAX_ENTRIES:
         sorted_keys = sorted(cache.keys(), key=lambda k: cache[k].get("stored_ts_ms", 0))
         for k in sorted_keys[: len(cache) - _IDEMPOTENCY_MAX_ENTRIES]:

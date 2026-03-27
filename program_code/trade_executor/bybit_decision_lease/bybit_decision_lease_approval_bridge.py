@@ -146,6 +146,13 @@ def main() -> None:
         recommended_action = "may_progress_to_i7_execution_authority_aggregator"
         approval_quorum_state = "shadow_waiting_manual_and_authority"
 
+    # Build conditional flags without None values / 构建条件标志，不产生 None
+    _bridge_flags: list[str] = ["decision_lease_approval_bridge_shadow_only_mode"]
+    if operator_review_required:
+        _bridge_flags.append("decision_lease_operator_review_pending")
+    if execution_authority != "granted":
+        _bridge_flags.append("decision_lease_execution_authority_not_granted")
+
     warning_flags = merged_unique(
         (governed or {}).get("warning_flags"),
         (lease_schema or {}).get("warning_flags"),
@@ -154,13 +161,8 @@ def main() -> None:
         consume_audit.get("warning_flags"),
         replay_audit.get("warning_flags"),
         friction_audit.get("warning_flags"),
-        [
-            "decision_lease_approval_bridge_shadow_only_mode",
-            "decision_lease_operator_review_pending" if operator_review_required else None,
-            "decision_lease_execution_authority_not_granted" if execution_authority != "granted" else None,
-        ],
+        _bridge_flags,
     )
-    warning_flags = [x for x in warning_flags if x is not None]
 
     report: Dict[str, Any] = {
         "bridge_type": "bybit_decision_lease_approval_bridge",

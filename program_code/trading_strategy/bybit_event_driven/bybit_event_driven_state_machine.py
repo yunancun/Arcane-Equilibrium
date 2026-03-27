@@ -4,13 +4,18 @@ MODULE_NOTE = '''
 [Maintainer Note]
 Script: bybit_event_driven_state_machine.py
 
+NOTE: Despite the name, this module performs classification-only (not stateful transitions).
+It reads current state from files and classifies into phase codes without maintaining state memory.
+注意：尽管名为 state_machine，本模块仅做分类（非有状态转换）。
+它从文件读取当前状态并分类为 phase code，不维护状态记忆。
+
 Role:
 - 基于 bybit_event_driven_state_latest.json 做轻量状态机判定
 - 输出 event-driven phase / phase readiness / next action hint
 
 Purpose in system:
 - 这是 D23.2 的状态机骨架
-- 先把“事件驱动是否真的进入可推进阶段”单独表达出来
+- 先把”事件驱动是否真的进入可推进阶段”单独表达出来
 - 暂不涉及执行、不涉及下单，只做 phase classification
 
 Current intended phases:

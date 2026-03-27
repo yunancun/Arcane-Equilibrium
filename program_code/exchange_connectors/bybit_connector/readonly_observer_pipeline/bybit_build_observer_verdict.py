@@ -36,7 +36,10 @@ def load_json(path: Path):
     """Load JSON from disk, returning None if the file does not exist."""
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 def now_ms():
     return int(time.time() * 1000)

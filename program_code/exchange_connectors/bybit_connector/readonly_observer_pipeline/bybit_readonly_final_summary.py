@@ -44,7 +44,10 @@ OUT_LATEST = OUT_DIR / "bybit_readonly_final_summary_latest.json"
 def load_json(path: Path):
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 def save_json(obj):
     ts_ms = obj["ts_ms"]

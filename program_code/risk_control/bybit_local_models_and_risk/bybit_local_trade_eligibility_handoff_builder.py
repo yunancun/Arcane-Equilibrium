@@ -21,6 +21,7 @@ MODULE_NOTE:
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,9 @@ def save_report(report: dict[str, Any]) -> tuple[Path, Path]:
     dated_path = OUTPUT_DIR / f"bybit_local_trade_eligibility_handoff_{report['ts_ms']}.json"
     serialized = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     latest_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(latest_path), 0o600)
     dated_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(dated_path), 0o600)
     return latest_path, dated_path
 
 

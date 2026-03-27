@@ -101,7 +101,9 @@ def save_report(report: dict[str, Any]) -> tuple[Path, Path]:
     dated_path = OUTPUT_DIR / f"bybit_local_risk_envelope_{report['ts_ms']}.json"
     serialized = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     latest_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(latest_path), 0o600)
     dated_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(dated_path), 0o600)
     return latest_path, dated_path
 
 
@@ -215,7 +217,7 @@ def build_report() -> dict[str, Any]:
         "ts_ms": ts_ms,
         "exchange": "bybit",
         "stage": "H0-B",
-        "report_ok": True,
+        "report_ok": len(blocking_reasons) == 0,
         "system_mode": system_mode,
         "overall_runtime_state": runtime_state,
         "observer_state": observer_state,

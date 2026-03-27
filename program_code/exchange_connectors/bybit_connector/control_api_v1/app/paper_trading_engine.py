@@ -466,7 +466,7 @@ def execute_fill(
     order["fills"].append(fill_record)
 
     # Transition state
-    if order["remaining_qty"] <= 0:
+    if order["remaining_qty"] <= 1e-10:
         order["remaining_qty"] = 0.0
         _transition_order(order, ORDER_STATE_FILLED)
     elif order["state"] == ORDER_STATE_WORKING:
@@ -1085,6 +1085,18 @@ class PaperTradingEngine:
                         self.risk_manager.record_fill_result(close_pnl)
                         self.risk_manager.clear_trailing_stop(symbol)
 
+            # Auto-cancel stale working orders (TTL: 24 hours)
+            # 自动取消过期的挂单（TTL: 24 小时）
+            now_ms_val = int(time.time() * 1000)
+            ORDER_TTL_MS = 86_400_000  # 24 hours
+            for order in state.get("orders", []):
+                if order.get("state") in ACTIVE_STATES:
+                    created = order.get("created_ts_ms", 0)
+                    if created > 0 and (now_ms_val - created) > ORDER_TTL_MS:
+                        _transition_order(order, ORDER_STATE_CANCELED)
+                        order["cancel_reason"] = "ttl_expired"
+                        self._audit(state, "order_ttl_canceled", f"{order.get('symbol')} {order.get('side')} order expired after 24h")
+
             # Update unrealized PnL
             update_unrealized_pnl(state["positions"], market_prices)
             self._recompute_pnl(state)
@@ -1193,6 +1205,11 @@ class PaperTradingEngine:
 
         # Cap orders and fills lists to prevent unbounded growth / 限制列表长度防止无限增长
         # Keep terminal orders (filled/canceled/rejected) capped; active orders always kept
+        # Note: fills are trimmed to max_fills (2000) independently of orders (500 terminal).
+        # This means some orders may reference fill IDs that have been evicted from the fills list.
+        # This is acceptable for paper trading; a full audit should use the exported state file.
+        # 注意：fills 独立于 orders 裁剪，部分 order 可能引用已被裁剪的 fill_id。
+        # 纸上交易可接受；完整审计请使用导出的状态文件。
         max_terminal_orders = 500
         max_fills = 2000
         if len(state["orders"]) > max_terminal_orders + 50:

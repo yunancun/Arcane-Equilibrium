@@ -191,7 +191,9 @@ def save_report(report: dict[str, Any]) -> tuple[Path, Path]:
     dated_path = THOUGHT_GATE_DIR / f"bybit_thought_gate_input_{report['ts_ms']}.json"
     serialized = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     latest_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(latest_path), 0o600)
     dated_path.write_text(serialized, encoding="utf-8")
+    os.chmod(str(dated_path), 0o600)
     return latest_path, dated_path
 
 # ---------------------------------------------------------------------------
@@ -251,6 +253,19 @@ def build_report() -> dict[str, Any]:
         AI_PER_CALL_BUDGET_USD_ENV,
         DEFAULT_AI_PER_CALL_BUDGET_USD,
     )
+
+    # Range validation: budgets must be positive / 预算必须为正数
+    _budget_reset_flags: list[str] = []
+    if ai_daily_budget_usd <= 0:
+        ai_daily_budget_usd = DEFAULT_AI_DAILY_BUDGET_USD
+        _budget_reset_flags.append("invalid_daily_budget_reset")
+    if ai_per_call_budget_usd <= 0:
+        ai_per_call_budget_usd = DEFAULT_AI_PER_CALL_BUDGET_USD
+        _budget_reset_flags.append("invalid_per_call_budget_reset")
+    if ai_max_expected_roundtrip_ms <= 0:
+        ai_max_expected_roundtrip_ms = DEFAULT_AI_MAX_EXPECTED_ROUNDTRIP_MS
+        _budget_reset_flags.append("invalid_max_roundtrip_ms_reset")
+
     max_public_data_age_ms = parse_int_env(
         THOUGHT_GATE_MAX_PUBLIC_DATA_AGE_MS_ENV,
         DEFAULT_MAX_PUBLIC_DATA_AGE_MS,
@@ -330,7 +345,7 @@ def build_report() -> dict[str, Any]:
     # These are hints only, not final decisions.
     # 这些只是提示，不是最终 AI 调用裁决。
     # -----------------------------------------------------------------------
-    operator_flags: list[str] = []
+    operator_flags: list[str] = list(_budget_reset_flags)
 
     if not h0_final_overall_ok or not h0_chain_ok:
         operator_flags.append("h0_final_not_ok")
@@ -438,7 +453,7 @@ def build_report() -> dict[str, Any]:
         "ts_ms": ts_ms,
         "exchange": "bybit",
         "stage": "H1-A",
-        "report_ok": True,
+        "report_ok": len(source_errors) == 0,
         "source_refs": {
             "handoff_path": str(HANDOFF_PATH),
             "h0_final_audit_path": str(H0_FINAL_AUDIT_PATH),

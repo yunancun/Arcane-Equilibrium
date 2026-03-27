@@ -49,7 +49,10 @@ OUT_LATEST = OUT_DIR / "bybit_latest_consistency_latest.json"
 def load_json(path: Path):
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def add_check(checks, name, ok, detail):

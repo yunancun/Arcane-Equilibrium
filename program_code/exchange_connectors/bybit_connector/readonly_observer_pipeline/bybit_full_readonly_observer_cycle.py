@@ -129,8 +129,9 @@ def main():
         step = run_cmd([sys.executable, script], "post_guard")
         steps.append(step)
 
+    all_steps_ok = guard.get("ok", False) and all(s.get("ok", False) for s in steps)
     result = {
-        "overall_ok": True,
+        "overall_ok": all_steps_ok,
         "steps": steps,
     }
     save_cycle_result(result)
