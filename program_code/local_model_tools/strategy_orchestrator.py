@@ -159,23 +159,32 @@ class StrategyOrchestrator:
 
     # ── Strategy Management / 策略管理 ──
 
-    def register_strategy(self, strategy: StrategyBase) -> None:
+    def register_strategy(self, strategy: StrategyBase, name: str | None = None) -> None:
         """
         Register a strategy instance / 注册策略实例
 
         The strategy starts in idle state. Call activate_strategy() to enable it.
         策略以 idle 状态注册。调用 activate_strategy() 激活。
+
+        Args:
+          strategy — strategy instance / 策略实例
+          name     — optional custom registration key. If provided, sets
+                     strategy._custom_name so registered_name reflects it.
+                     可选的自定义注册键。若提供，会设置 strategy._custom_name。
         """
+        if name is not None:
+            strategy._custom_name = name
+        key = strategy.registered_name
         with self._lock:
-            old = self._strategies.get(strategy.name)
+            old = self._strategies.get(key)
             if old is not None:
                 logger.warning(
                     "Strategy %s already registered, stopping old + replacing / 策略 %s 已注册，停止旧策略并替换",
-                    strategy.name, strategy.name,
+                    key, key,
                 )
                 old.stop()
-            self._strategies[strategy.name] = strategy
-        logger.info("Registered strategy / 注册策略: %s", strategy.name)
+            self._strategies[key] = strategy
+        logger.info("Registered strategy / 注册策略: %s", key)
 
     def activate_strategy(self, name: str) -> bool:
         """

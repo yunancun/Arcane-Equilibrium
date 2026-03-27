@@ -87,7 +87,7 @@ fi
 
 # ── Step 3: Activate strategies / 激活策略 ──
 echo "[3/5] Activating strategies..."
-for STRATEGY in "Grid_Trading" "MA_Crossover" "BB_Reversion"; do
+for STRATEGY in "Grid_Trading" "MA_Crossover" "BB_Reversion" "FundingRate_Arb" "BB_Breakout"; do
     RESULT=$(api_post "/api/v1/strategy/${STRATEGY}/activate" | python3 -c "
 import sys, json
 try:

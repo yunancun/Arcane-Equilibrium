@@ -194,12 +194,13 @@ class StrategyAutoDeployer:
         if strategy is None:
             return
 
-        # Override name to be unique (include symbol)
-        # Strategy names must be unique in orchestrator
+        # Unique registration key includes symbol to prevent name collision
+        # 唯一注册键包含 symbol 以防止名称冲突（R1 fix）
         unique_name = f"{strategy.name}_{symbol}"
 
         # Add symbol to kline manager if not tracked
-        if symbol not in self._km._symbols:
+        new_symbol = symbol not in self._km._symbols
+        if new_symbol:
             self._km.add_symbol(symbol)
             # Bootstrap historical klines for new symbol
             try:
@@ -207,14 +208,27 @@ class StrategyAutoDeployer:
             except Exception:
                 pass
 
-        # Register and activate
-        self._orch.register_strategy(strategy)
-        self._orch.activate_strategy(strategy.name)
+        # Register with unique name and activate
+        self._orch.register_strategy(strategy, name=unique_name)
+        self._orch.activate_strategy(unique_name)
+
+        # R2 fix: trigger initial indicator computation for newly added symbols
+        # so strategies don't have to wait for the next kline close.
+        # 为新添加的 symbol 触发初始指标计算，策略无需等待下一根 K线闭合。
+        if new_symbol and hasattr(self._orch, '_ie'):
+            for tf in self._km._timeframes:
+                try:
+                    self._orch._ie.compute_now(symbol, tf)
+                except Exception:
+                    logger.debug(
+                        "Initial indicator computation skipped for %s:%s / 初始指标计算跳过",
+                        symbol, tf,
+                    )
 
         self._deployed[key] = {
             "symbol": symbol,
             "category": category,
-            "strategy_name": strategy.name,
+            "strategy_name": unique_name,
             "score": opp.score,
             "deployed_ts_ms": int(time.time() * 1000),
             "reason": opp.reason,

@@ -151,12 +151,28 @@ class StrategyBase(ABC):
         self._total_fees: float = 0.0
         self._trade_history: list[dict[str, Any]] = []
         self._max_trade_history: int = 200
+        # Custom name override for auto-deployed multi-symbol strategies.
+        # When set, orchestrator uses this as the registration key instead of self.name.
+        # 自定义名称覆盖，用于自动部署的多品种策略。设置后，编排器用此名称作为注册键。
+        self._custom_name: str | None = None
 
     @property
     @abstractmethod
     def name(self) -> str:
         """Strategy name / 策略名称"""
         ...
+
+    @property
+    def registered_name(self) -> str:
+        """
+        Name used for orchestrator registration key.
+        编排器注册键使用的名称。
+
+        Returns _custom_name if set (for auto-deployed multi-symbol strategies),
+        otherwise falls back to self.name.
+        若设置了 _custom_name（自动部署的多品种策略），返回自定义名称，否则返回 self.name。
+        """
+        return self._custom_name or self.name
 
     @property
     @abstractmethod
@@ -315,7 +331,7 @@ class StrategyBase(ABC):
         子类重写以包含策略特定状态。
         """
         return {
-            "name": self.name,
+            "name": self.registered_name,
             "state": self._state,
             "realized_pnl": self._realized_pnl,
             "total_fees": self._total_fees,

@@ -110,6 +110,11 @@ class MACrossoverStrategy(StrategyBase):
         with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
             # Multi-TF regime filter: skip trend-following in ranging/squeeze markets
             # 多时间框架 regime 过滤：震荡/收窄市场中跳过趋势跟踪
+            # Note: "unknown" passes through — when regime detection is unavailable for
+            # this symbol (no BB/ATR history yet), we still allow trading.
+            # "trending" and "volatile" also pass through (favorable for trend-following).
+            # Only "ranging" and "squeeze" are filtered (unfavorable for MA crossover).
+            # 注意："unknown" 允许通过 — 当该品种尚无 regime 检测（缺少 BB/ATR 历史）时，仍允许交易。
             signal_regime = getattr(signal, "metadata", {}).get("_regime", "unknown")
             if signal_regime in ("ranging", "squeeze"):
                 return
