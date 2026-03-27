@@ -37,8 +37,8 @@
 
 ```
 测试：646 全通过（218 local_model_tools + 428 control_api）
-路由：109 条（+5: login, demo/status, demo/balance, demo/positions, trading page）
-GUI：统一控制台 4 Tab（Dashboard + K线图表 + Grafana 监控 + OpenClaw）
+路由：113 条（+2: strategy/create, strategy/{name} DELETE）
+GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 
 Runtime 硬状态：
@@ -271,10 +271,11 @@ Live 前置条件（M/N 前必须核验）：
 | Session 2 总结 | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
 | Session 3 残留审核修复 | `docs/worklogs/control_api_gui/2026-03-27--session3_remaining_audit_fixes.md` |
 | GUI 10-Tab 全面重构 | `docs/worklogs/control_api_gui/2026-03-27--gui_10tab_restructure.md` |
+| Session 4 GUI 专业控制台 | `docs/worklogs/control_api_gui/2026-03-27--session4_gui_10tab_professional_console.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成。646 测试（0 失败），111 路由，8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 10-Tab 专业控制台（系统总览 / 模拟交易 / Bybit Demo / 策略中心 / K线图表 / 风控止损 / AI 引擎 / 学习系统 / 监控 / 设置）+ 双层解释 + 三层信息密度。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-27：全系统完成。646 测试（0 失败），113 路由（+2 策略创建/删除），8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署策略（上限 100）。GUI 10-Tab 专业控制台：中文状态标签 + 悬停提示 + 确认弹窗 + 可编辑风控 + AI 止损咨询 + 6 供应商管理（Anthropic/OpenAI/DeepSeek/Perplexity/Local LLM/Google）+ API Key GUI 管理。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
