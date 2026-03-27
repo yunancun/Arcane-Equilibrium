@@ -225,6 +225,27 @@ except Exception as e:
     DEMO_SYNC = None
     logger.info("Demo sync not available: %s", e)
 
+# ── Market Scanner + Strategy Auto-Deployer (autonomous opportunity discovery) ──
+# 市场扫描器 + 策略自动部署器（自主发现交易机会）
+try:
+    from local_model_tools.market_scanner import MarketScanner
+    from local_model_tools.strategy_auto_deployer import StrategyAutoDeployer
+
+    MARKET_SCANNER = MarketScanner(max_symbols=5)
+    AUTO_DEPLOYER = StrategyAutoDeployer(
+        orchestrator=ORCHESTRATOR,
+        kline_manager=KLINE_MANAGER,
+        max_symbols=5,
+        qty_per_trade=0.001,
+    )
+    MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
+    MARKET_SCANNER.start()
+    logger.info("Market scanner + auto-deployer started / 市场扫描器+自动部署器已启动")
+except Exception as e:
+    MARKET_SCANNER = None
+    AUTO_DEPLOYER = None
+    logger.warning("Market scanner not available: %s", e)
+
 
 # =============================================================================
 # Router / 路由
@@ -611,5 +632,35 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
     try:
         result = DEMO_CONNECTOR.get_positions()
         return _envelope(result)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+# ── Market Scanner Routes / 市场扫描路由 ──
+
+@phase2_router.get("/scanner/opportunities")
+async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get latest market scan opportunities / 获取最新市场扫描机会"""
+    if MARKET_SCANNER is None:
+        return _envelope({"available": False})
+    try:
+        return _envelope({
+            "opportunities": MARKET_SCANNER.get_latest_opportunities(),
+            "stats": MARKET_SCANNER.get_stats(),
+        })
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/scanner/deployed")
+async def get_auto_deployed(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get auto-deployed strategies / 获取自动部署的策略"""
+    if AUTO_DEPLOYER is None:
+        return _envelope({"available": False})
+    try:
+        return _envelope({
+            "deployed": AUTO_DEPLOYER.get_deployed(),
+            "stats": AUTO_DEPLOYER.get_stats(),
+        })
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
