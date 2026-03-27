@@ -114,8 +114,8 @@ ORCHESTRATOR = StrategyOrchestrator(
 ORCHESTRATOR.register_strategy(MACrossoverStrategy(symbol="BTCUSDT"))
 ORCHESTRATOR.register_strategy(BollingerReversionStrategy(symbol="BTCUSDT"))
 ORCHESTRATOR.register_strategy(FundingRateArbStrategy(symbol="BTCUSDT"))
-_grid_upper = float(os.getenv("OPENCLAW_GRID_UPPER", "100000"))
-_grid_lower = float(os.getenv("OPENCLAW_GRID_LOWER", "80000"))
+_grid_upper = float(os.getenv("OPENCLAW_GRID_UPPER", "72000"))
+_grid_lower = float(os.getenv("OPENCLAW_GRID_LOWER", "60000"))
 _grid_count = int(os.getenv("OPENCLAW_GRID_COUNT", "20"))
 
 ORCHESTRATOR.register_strategy(GridTradingStrategy(
@@ -141,14 +141,24 @@ from .pipeline_bridge import PipelineBridge
 # 注意：避免循环导入，因为两个文件都由 main.py 在模块级导入
 try:
     from .paper_trading_routes import ENGINE as PAPER_ENGINE
+    # StopManager with default 5% hard stop + 3% trailing + 48h time stop
+    # 止损管理器：5% 硬止损 + 3% 追踪止损 + 48h 时间止损
+    import sys as _sys
+    _lmt_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+    if _lmt_dir not in _sys.path:
+        _sys.path.insert(0, _lmt_dir)
+    from local_model_tools.stop_manager import StopManager, StopConfig
+    STOP_MANAGER = StopManager(StopConfig(hard_stop_pct=5.0, trailing_stop_pct=3.0, time_stop_hours=48.0))
+
     PIPELINE_BRIDGE = PipelineBridge(
         kline_manager=KLINE_MANAGER,
         indicator_engine=INDICATOR_ENGINE,
         signal_engine=SIGNAL_ENGINE,
         orchestrator=ORCHESTRATOR,
         paper_engine=PAPER_ENGINE,
+        stop_manager=STOP_MANAGER,
     )
-    logger.info("Pipeline bridge created (inactive until paper session starts) / 管线桥接器已创建（等待 paper session 启动后激活）")
+    logger.info("Pipeline bridge created with StopManager (inactive until paper session starts) / 管线桥接器+止损管理器已创建")
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")

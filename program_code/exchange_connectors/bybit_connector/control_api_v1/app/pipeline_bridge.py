@@ -55,6 +55,7 @@ class PipelineBridge:
         signal_engine: Any,
         orchestrator: Any,
         paper_engine: Any,
+        stop_manager: Any = None,
         *,
         auto_submit_intents: bool = True,
         max_intents_per_tick: int = 20,
@@ -64,6 +65,7 @@ class PipelineBridge:
         self._se = signal_engine
         self._orch = orchestrator
         self._engine = paper_engine
+        self._stop_mgr = stop_manager
         self._auto_submit = auto_submit_intents
         self._max_intents_per_tick = max_intents_per_tick
         self._lock = threading.Lock()
@@ -73,6 +75,7 @@ class PipelineBridge:
             "intents_submitted": 0,
             "intents_accepted": 0,
             "intents_rejected": 0,
+            "stops_triggered": 0,
             "errors": 0,
             "last_tick_ts_ms": 0,
         }
@@ -82,9 +85,22 @@ class PipelineBridge:
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
 
     def activate(self) -> None:
-        """Activate the bridge / 激活桥接器"""
+        """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
         self._active = True
         logger.info("PipelineBridge activated / 管线桥接器已激活")
+
+        # Bootstrap historical klines on activation (eliminates cold-start blind period)
+        # 激活时引导历史 K线（消除冷启动盲期）
+        try:
+            results = self._km.bootstrap_from_rest(limit=200)
+            total = sum(results.values()) if results else 0
+            if total > 0:
+                logger.info(
+                    "Kline bootstrap loaded %d klines / K线引导加载了 %d 根",
+                    total, total,
+                )
+        except Exception:
+            logger.exception("Kline bootstrap failed (non-fatal) / K线引导失败（非致命）")
 
     def deactivate(self) -> None:
         """Deactivate the bridge / 停用桥接器"""
@@ -153,6 +169,10 @@ class PipelineBridge:
         if self._auto_submit:
             self._process_pending_intents()
 
+        # 5. Check stop-losses against current prices / 检查止损
+        if self._stop_mgr and self._latest_prices:
+            self._check_stops()
+
     def _process_pending_intents(self) -> None:
         """
         Collect OrderIntents from orchestrator and submit to paper engine.
@@ -220,6 +240,33 @@ class PipelineBridge:
                 )
                 with self._lock:
                     self._stats["errors"] += 1
+
+    def _check_stops(self) -> None:
+        """Check stop-losses and submit close orders if triggered / 检查止损并提交平仓"""
+        try:
+            triggered = self._stop_mgr.check_stops(self._latest_prices)
+        except Exception:
+            logger.exception("StopManager check error / 止损检查异常")
+            return
+
+        market_prices = dict(self._latest_prices)
+        for stop in triggered:
+            try:
+                result = self._engine.submit_order(
+                    symbol=stop["symbol"],
+                    side=stop["side"],
+                    order_type="market",
+                    qty=stop["qty"],
+                    market_prices=market_prices,
+                )
+                with self._lock:
+                    self._stats["stops_triggered"] += 1
+                logger.warning(
+                    "STOP ORDER SUBMITTED: %s %s %.6f — %s / 止损单已提交",
+                    stop["symbol"], stop["side"], stop["qty"], stop["reason"],
+                )
+            except Exception:
+                logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
 
     def _check_funding_rates(self) -> None:
         """Fetch funding rate data and feed to FundingRate strategy / 获取 funding rate 并喂给策略"""
