@@ -68,6 +68,7 @@ L    Learning / Self-Observability / Net PnL    ✅ 全部完成
      全品类风控框架                              ✅ 4 轮审核（P0/P1/P2 + 对抗性止损 + AI 注意力税）
      Phase 2 本地策略工具包                      ✅ 严格审核（K线+6指标+信号+4策略+编排器+11路由）
      Phase 3 管线桥接+止损+信号增强              ✅ 完成（管线接通+StopManager+Regime检测+3新规则+历史K线引导）
+     全系统审核 A-K 修复                         ✅ 完成（7C+19H+28M+16L 全修 + 路径统一 + I章去重 + mutator 3x→1x）
 M    Supervised Live Gate                       ⬜ 未开始
 N    Constrained Autonomous Live                ⬜ 未开始
 ```
@@ -202,6 +203,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 全品类风控框架（9 路由 + 78 测试 + 4 轮审核）
   ✅ Phase 2 本地策略工具包（11 路由 + 215 测试 + 严格审核）
   ✅ Phase 3 管线桥接+止损+信号增强（8 新文件 + 23 新测试 + 640 总测试）
+  ✅ 全系统 A-K 审核修复（7C+19H+28M+16L + 路径统一 + I章去重 + mutator 3x→1x）
 
 下一步（按优先级）：
   远程安全访问方案（SSH 隧道 / Tailscale / Cloudflare Tunnel）
@@ -235,6 +237,8 @@ Live 前置条件（M/N 前必须核验）：
 | Phase 2 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--phase2_local_strategy_toolkit_engineering_log.md` |
 | Phase 2 第二轮审核报告 | `docs/references/2026-03-27--phase2_round2_strategic_audit_report.md` |
 | Phase 3 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--phase3_pipeline_bridge_engineering_log.md` |
+| 全系统 A-K 审核报告 | `docs/references/2026-03-27--full_system_audit_A_to_K.md` |
+| 全系统审核修复工程日志 | `docs/worklogs/control_api_gui/2026-03-27--full_system_audit_fix_engineering_log.md` |
 | Layer 2 实现计划 | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` |
 | 本地交易逻辑审查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
 | GUI 交接文档 | `docs/handoffs/2026-03-25_api_gui_handoff/` |
@@ -244,4 +248,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：A-L + Phase 2 + Phase 3 全部完成。640 测试，104 路由，7 信号规则。管线已接通（WebSocket→K线→指标→信号→策略→Paper Trading Engine）。系统全程 read_only / disabled / not_granted。下一步：远程安全访问 → Telegram → cron → Beta 数据积累 → M 章。
+> 截至 2026-03-27：A-L + Phase 2 + Phase 3 + 全系统 A-K 审核修复全部完成。640 测试，104 路由，7 信号规则。管线已接通。系统性问题已清零（路径统一 / I章去重-750行 / mutator 3x→1x / SHA256 / stage 标签）。系统全程 read_only / disabled / not_granted。下一步：远程安全访问 → Telegram → cron → Beta 数据积累 → M 章。
