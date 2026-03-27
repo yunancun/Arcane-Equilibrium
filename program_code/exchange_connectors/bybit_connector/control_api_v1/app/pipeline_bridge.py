@@ -233,6 +233,10 @@ class PipelineBridge:
 
         for intent in intents:
             try:
+                # Extract category from intent metadata (default: linear)
+                # 从意图元数据提取品类（默认：linear）
+                category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
+
                 result = self._engine.submit_order(
                     symbol=intent.symbol,
                     side=intent.side,
@@ -240,6 +244,7 @@ class PipelineBridge:
                     qty=intent.qty,
                     price=intent.price,
                     market_prices=market_prices,
+                    category=category,
                 )
 
                 with self._lock:

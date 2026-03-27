@@ -237,89 +237,102 @@ class TestBollingerReversionStrategy:
 # =============================================================================
 
 class TestFundingRateArbStrategy:
-    """Funding Rate Arbitrage strategy tests"""
+    """Funding Rate Arbitrage strategy tests (delta-neutral)"""
 
     def _next_settle(self, hours: float = 4.0) -> int:
-        """Helper: settlement time N hours from now / 辅助：从现在起 N 小时后的结算时间"""
+        """Helper: settlement time N hours from now"""
         return int((time.time() + hours * 3600) * 1000)
 
-    def test_high_positive_rate_shorts(self):
-        """High positive funding → short / 高正费率 → 做空"""
-        s = FundingRateArbStrategy(symbol="BTCUSDT", funding_threshold=0.0001, fee_bps=5)
-        s.activate()
-        s.evaluate_funding_opportunity(
-            funding_rate=0.001,  # 10 bps — well above threshold
-            next_settle_ts_ms=self._next_settle(4.0),
+    def test_high_positive_rate_delta_neutral(self):
+        """High positive funding → short perp + long spot (2 intents) / delta-neutral"""
+        s = FundingRateArbStrategy(
+            symbol="BTCUSDT", funding_threshold=0.0001,
+            perp_fee_bps=5, spot_fee_bps=5, delta_neutral=True,
         )
+        s.activate()
+        s.evaluate_funding_opportunity(0.005, self._next_settle(4.0))  # 50 bps, well above 10 bps fees
         intents = s.get_pending_intents()
-        assert len(intents) == 1
+        assert len(intents) == 2  # perp + spot
+        assert intents[0].side == "Sell"  # Short perp
+        assert intents[0].metadata.get("leg") == "perp"
+        assert intents[1].side == "Buy"  # Long spot hedge
+        assert intents[1].metadata.get("leg") == "spot_hedge"
+        assert intents[1].metadata.get("category") == "spot"
+
+    def test_high_negative_rate_delta_neutral(self):
+        """High negative funding → long perp + short spot"""
+        s = FundingRateArbStrategy(
+            symbol="BTCUSDT", funding_threshold=0.0001,
+            perp_fee_bps=5, spot_fee_bps=5, delta_neutral=True,
+        )
+        s.activate()
+        s.evaluate_funding_opportunity(-0.005, self._next_settle(4.0))  # 50 bps
+        intents = s.get_pending_intents()
+        assert len(intents) == 2
+        assert intents[0].side == "Buy"   # Long perp
+        assert intents[1].side == "Sell"  # Short spot hedge
+
+    def test_legacy_mode_single_leg(self):
+        """Legacy mode (delta_neutral=False) → single perp leg only"""
+        s = FundingRateArbStrategy(
+            funding_threshold=0.0001, perp_fee_bps=5,
+            delta_neutral=False,
+        )
+        s.activate()
+        s.evaluate_funding_opportunity(0.005, self._next_settle(4.0))  # 50 bps
+        intents = s.get_pending_intents()
+        assert len(intents) == 1  # perp only, no spot
         assert intents[0].side == "Sell"
 
-    def test_high_negative_rate_longs(self):
-        """High negative funding → long / 高负费率 → 做多"""
-        s = FundingRateArbStrategy(symbol="BTCUSDT", funding_threshold=0.0001, fee_bps=5)
-        s.activate()
-        s.evaluate_funding_opportunity(
-            funding_rate=-0.001,
-            next_settle_ts_ms=self._next_settle(4.0),
-        )
-        intents = s.get_pending_intents()
-        assert len(intents) == 1
-        assert intents[0].side == "Buy"
-
     def test_small_rate_no_action(self):
-        """Small funding rate → no action / 小费率 → 不操作"""
-        s = FundingRateArbStrategy(funding_threshold=0.0001)
+        """Small funding rate → no action"""
+        s = FundingRateArbStrategy(funding_threshold=0.0005)
         s.activate()
-        s.evaluate_funding_opportunity(
-            funding_rate=0.00005,  # 0.5 bps — below threshold
-            next_settle_ts_ms=self._next_settle(4.0),
-        )
+        s.evaluate_funding_opportunity(0.0001, self._next_settle(4.0))
         assert s.get_pending_intents() == []
 
-    def test_too_close_to_settlement_no_action(self):
-        """Too close to settlement → no action / 距结算太近 → 不操作"""
-        s = FundingRateArbStrategy(min_hours_to_settle=2.0, fee_bps=5)
+    def test_too_close_to_settlement(self):
+        """Too close to settlement → no action"""
+        s = FundingRateArbStrategy(min_hours_to_settle=2.0, perp_fee_bps=5, spot_fee_bps=5)
         s.activate()
-        s.evaluate_funding_opportunity(
-            funding_rate=0.001,
-            next_settle_ts_ms=self._next_settle(1.0),  # Only 1 hour
-        )
+        s.evaluate_funding_opportunity(0.005, self._next_settle(1.0))  # Good rate but too close
         assert s.get_pending_intents() == []
 
     def test_edge_below_fees_no_action(self):
-        """Edge below fees → no action / 边际低于手续费 → 不操作"""
-        s = FundingRateArbStrategy(fee_bps=20)  # High fees
+        """Edge below total fees → no action"""
+        s = FundingRateArbStrategy(perp_fee_bps=20, spot_fee_bps=20)  # 40 bps total
         s.activate()
-        s.evaluate_funding_opportunity(
-            funding_rate=0.0001,  # 1 bps — below 20 bps fees
-            next_settle_ts_ms=self._next_settle(4.0),
-        )
+        s.evaluate_funding_opportunity(0.001, self._next_settle(4.0))  # 10 bps < 40 bps
         assert s.get_pending_intents() == []
 
-    def test_rate_flip_exits(self):
-        """Funding rate flip → exit position / 费率反转 → 平仓"""
-        s = FundingRateArbStrategy(funding_threshold=0.0001, fee_bps=5)
+    def test_rate_flip_exits_both_legs(self):
+        """Rate flip → exit both perp + spot legs"""
+        s = FundingRateArbStrategy(
+            funding_threshold=0.0001, perp_fee_bps=5, spot_fee_bps=5,
+            delta_neutral=True,
+        )
         s.activate()
-        # Enter short (positive rate)
-        s.evaluate_funding_opportunity(0.001, self._next_settle(4.0))
-        s.get_pending_intents()
-        # Rate flips negative → should exit
-        s.evaluate_funding_opportunity(-0.001, self._next_settle(4.0))
+        s.evaluate_funding_opportunity(0.005, self._next_settle(4.0))  # 50 bps entry
+        s.get_pending_intents()  # Clear entry intents
+        # Rate flips
+        s.evaluate_funding_opportunity(-0.005, self._next_settle(4.0))
         intents = s.get_pending_intents()
-        assert len(intents) == 1
-        assert intents[0].side == "Buy"  # Close short
+        assert len(intents) == 2  # Close perp + close spot
+        assert intents[0].side == "Buy"   # Close short perp
+        assert intents[1].side == "Sell"  # Close long spot
 
     def test_record_funding(self):
-        """Funding payment tracking / 追踪 funding 支付"""
         s = FundingRateArbStrategy()
         s.record_funding_payment(5.0)
         s.record_funding_payment(3.0)
         assert s.get_status()["funding_collected_usdt"] == 8.0
 
-    def test_get_status(self):
+    def test_get_status_delta_neutral(self):
         s = FundingRateArbStrategy()
-        assert s.get_status()["strategy"] == "FundingRate_Arb"
+        status = s.get_status()
+        assert status["strategy"] == "FundingRate_Arb"
+        assert status["delta_neutral"] is True
+        assert "total_fee_bps" in status
 
 
 # =============================================================================

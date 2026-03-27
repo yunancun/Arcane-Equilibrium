@@ -1,93 +1,102 @@
 """
-Funding Rate Arbitrage Strategy / Funding Rate 套利策略
+Funding Rate Arbitrage Strategy — Delta-Neutral / Funding Rate 套利策略 — 市场中性
 
 MODULE_NOTE (中文):
-  Bybit 永续合约每 8 小时结算一次 funding rate。
-  当 funding rate 极端时存在套利机会：
-  - 正 funding rate 过高（多头付空头）→ 做空收取 funding
-  - 负 funding rate 过低（空头付多头）→ 做多收取 funding
+  真正的 Delta-Neutral Funding Rate 套利：
+  - 正 funding rate → 做空永续 + 做多现货（对冲价格风险）
+  - 负 funding rate → 做多永续 + 做空现货
 
-  这是一个低频、低风险、低收益的策略，适合作为"底仓"运行。
-  核心优势：不需要预测价格方向，只需 funding rate 足够覆盖手续费。
+  两腿同时开仓，价格波动相互抵消，只赚 funding rate 差额。
 
-  Agent 偏好这类策略的原因：
-  - AI 注意力成本低（不需要频繁监控）
-  - 边际明确（funding rate 是已知数据，不是预测）
-  - 风险可控（holding 成本主要是保证金机会成本）
+  与旧版的区别：
+  - 旧版只开永续单腿（裸方向性敞口，不是真套利）
+  - 新版同时开 perp + spot 两腿，delta-neutral
+
+  费用模型：
+  - 永续 taker: 0.055% × 2 sides = 11 bps
+  - 现货 taker: 0.10% × 2 sides = 20 bps（Bybit VIP0 spot taker 0.10%）
+  - 总来回费用 ≈ 31 bps
+  - 因此 funding rate 需 > 31 bps 才有正期望（约 0.0031）
+  - 但如果持仓跨多个 funding 周期（每 8h），费用摊薄
 
   入场条件：
-  1. |funding_rate| > threshold（默认 0.01% = 10bps）
-  2. 预估 funding 收入 > 手续费 + 滑点 + AI 注意力成本
-  3. 距离下次结算时间足够（至少 2 小时）
+  1. |funding_rate| > threshold（默认 5bps = 0.0005）
+  2. 预估多周期 funding 收入 > 总费用
+  3. 距下次结算 ≥ 2 小时
 
   出场条件：
-  1. 收到 funding 后自动评估是否继续持有
-  2. funding rate 反转（方向变了）→ 平仓
-  3. 持仓成本（含 AI 注意力税）超过预期收益 → 平仓
-
-  注意：当前实现为 Paper Trading 模拟版，funding rate 数据需从 Bybit API 获取。
+  1. funding rate 反转
+  2. funding rate 太小不值得继续持有
+  3. 持仓超时
 
 MODULE_NOTE (English):
-  Bybit perpetual contracts settle funding rate every 8 hours.
-  Extreme funding rates present arbitrage opportunities:
-  - High positive rate (longs pay shorts) → go short to collect funding
-  - High negative rate (shorts pay longs) → go long to collect funding
+  True Delta-Neutral Funding Rate Arbitrage:
+  - Positive funding → short perp + long spot (hedge price risk)
+  - Negative funding → long perp + short spot
 
-  Low-frequency, low-risk, low-return strategy. Good as a "base position".
-  Core advantage: doesn't need to predict price direction, only needs funding
-  rate to cover fees.
-
-  Why Agent prefers this strategy:
-  - Low AI attention cost (infrequent monitoring)
-  - Clear edge (funding rate is known data, not prediction)
-  - Controllable risk (holding cost is mainly margin opportunity cost)
+  Both legs open simultaneously, price movements cancel out,
+  profit comes only from funding rate payments.
 
 Safety invariant / 安全不变量:
   - 只产生 OrderIntent / Only generates OrderIntents
+  - 每次入场同时发出 2 个意图（perp + spot）/ Each entry emits 2 intents
   - funding rate 数据是只读的 / Funding rate data is read-only
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from .base import OrderIntent, StrategyBase, STRATEGY_ACTIVE
 
+logger = logging.getLogger(__name__)
+
 
 class FundingRateArbStrategy(StrategyBase):
     """
-    Funding Rate Arbitrage strategy.
-    Funding Rate 套利策略。
+    Delta-Neutral Funding Rate Arbitrage strategy.
+    Delta-Neutral Funding Rate 套利策略。
 
     Parameters:
       symbol              — trading pair / 交易对
-      qty_per_trade       — position size / 仓位大小
-      funding_threshold   — minimum |funding_rate| to enter (default 0.0001 = 1bps) / 入场最小 funding rate
-      min_hours_to_settle — minimum hours before next settlement / 距结算最少小时数
-      fee_bps             — estimated round-trip fee in bps / 预估来回手续费（基点）
+      qty_per_trade       — position size per leg / 每腿仓位大小
+      funding_threshold   — minimum |funding_rate| to enter (default 0.0005 = 5bps)
+      min_hours_to_settle — minimum hours before next settlement
+      perp_fee_bps        — perpetual round-trip fee (default 11 bps)
+      spot_fee_bps        — spot round-trip fee (default 20 bps)
+      delta_neutral       — True=hedge with spot, False=naked perp only (legacy mode)
     """
 
     def __init__(
         self,
         symbol: str = "BTCUSDT",
         qty_per_trade: float = 0.001,
-        funding_threshold: float = 0.0001,  # 1 bps
+        funding_threshold: float = 0.0005,  # 5 bps (higher than before — needs to cover 2-leg fees)
         min_hours_to_settle: float = 2.0,
-        fee_bps: float = 11.0,  # taker×2 = 0.055%×2 = 11 bps
+        perp_fee_bps: float = 11.0,
+        spot_fee_bps: float = 20.0,
+        delta_neutral: bool = True,
     ) -> None:
         super().__init__()
         if qty_per_trade <= 0:
-            raise ValueError(f"qty_per_trade must be > 0, got {qty_per_trade} / 每笔数量必须大于 0")
+            raise ValueError(f"qty_per_trade must be > 0, got {qty_per_trade}")
         self._symbol = symbol
         self._qty = qty_per_trade
         self._threshold = funding_threshold
         self._min_hours = min_hours_to_settle
-        self._fee_bps = fee_bps
-        self._current_position: str | None = None
+        self._perp_fee_bps = perp_fee_bps
+        self._spot_fee_bps = spot_fee_bps
+        self._delta_neutral = delta_neutral
+        self._total_fee_bps = perp_fee_bps + (spot_fee_bps if delta_neutral else 0)
+
+        self._current_position: str | None = None  # "short_perp_long_spot" / "long_perp_short_spot" / None
         self._entry_funding_rate: float | None = None
+        self._entry_ts_ms: int = 0
         self._trade_count = 0
-        self._funding_collected: float = 0.0  # Cumulative funding collected / 累计收取的 funding
+        self._funding_collected: float = 0.0
+        self._funding_periods_held: int = 0
 
     @property
     def name(self) -> str:
@@ -95,9 +104,10 @@ class FundingRateArbStrategy(StrategyBase):
 
     @property
     def description(self) -> str:
+        mode = "Delta-Neutral" if self._delta_neutral else "Directional"
         return (
-            "Funding Rate 套利策略 / Funding Rate Arbitrage strategy. "
-            "当 funding rate 极端时做反向，收取 funding 费用"
+            f"Funding Rate {mode} 套利策略 / Funding Rate {mode} Arbitrage. "
+            f"Threshold={self._threshold*10000:.0f}bps, Fees={self._total_fee_bps:.0f}bps"
         )
 
     def evaluate_funding_opportunity(
@@ -109,16 +119,6 @@ class FundingRateArbStrategy(StrategyBase):
         """
         Evaluate whether to enter or exit based on funding rate data.
         根据 funding rate 数据评估是否入场或出场。
-
-        This should be called periodically (e.g., every hour) with the latest
-        funding rate from Bybit API.
-        应定期调用（如每小时），传入 Bybit API 的最新 funding rate。
-
-        Args:
-          funding_rate     — current predicted funding rate (e.g., 0.0003 = 3bps)
-                            当前预测的 funding rate
-          next_settle_ts_ms — next settlement timestamp in ms / 下次结算时间戳
-          current_ts_ms    — current time (None=now) / 当前时间
         """
         if self._state != STRATEGY_ACTIVE:
             return
@@ -126,104 +126,218 @@ class FundingRateArbStrategy(StrategyBase):
         now_ms = current_ts_ms or int(time.time() * 1000)
         hours_to_settle = (next_settle_ts_ms - now_ms) / 3600_000
 
-        with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
-            # Check if we should exit / 检查是否应出场
+        with self._intent_lock:
+            # ── Exit evaluation / 出场评估 ──
             if self._current_position is not None:
                 should_exit = False
                 exit_reason = ""
 
-                # Exit if funding rate flipped / funding rate 反转则出场
-                if self._current_position == "short" and funding_rate < 0:
+                # Exit if funding rate flipped / funding rate 反转
+                if "short_perp" in self._current_position and funding_rate < 0:
                     should_exit = True
-                    exit_reason = f"Funding rate flipped negative ({funding_rate:.6f}) / Funding rate 转负"
-                elif self._current_position == "long" and funding_rate > 0:
+                    exit_reason = f"Rate flipped negative ({funding_rate:.6f})"
+                elif "long_perp" in self._current_position and funding_rate > 0:
                     should_exit = True
-                    exit_reason = f"Funding rate flipped positive ({funding_rate:.6f}) / Funding rate 转正"
+                    exit_reason = f"Rate flipped positive ({funding_rate:.6f})"
 
-                # Exit if funding too small to cover costs / funding 不足以覆盖成本
-                elif abs(funding_rate) * 10000 < self._fee_bps * 0.3:
+                # Exit if rate too small to cover ongoing costs
+                # Use only the exit-leg fee (not full round-trip, entry fee is sunk)
+                # 只用退出腿费用（入场费已沉没）
+                elif abs(funding_rate) * 10000 < (self._perp_fee_bps / 2 + (self._spot_fee_bps / 2 if self._delta_neutral else 0)):
                     should_exit = True
-                    exit_reason = f"Funding too small ({abs(funding_rate)*10000:.1f}bps vs fee {self._fee_bps}bps) / Funding 过小"
+                    exit_reason = f"Rate too small ({abs(funding_rate)*10000:.1f}bps < exit_fee)"
 
                 if should_exit:
-                    side = "Buy" if self._current_position == "short" else "Sell"
-                    self._emit_intent(OrderIntent(
-                        symbol=self._symbol, side=side, order_type="market",
-                        qty=self._qty, strategy_name=self.name,
-                        reason=f"Exit funding arb: {exit_reason}",
-                        confidence=0.6,
-                    ))
+                    self._emit_close_intents(exit_reason)
                     self._current_position = None
                     self._entry_funding_rate = None
+                    self._entry_ts_ms = 0
                 return
 
-            # Check if we should enter / 检查是否应入场
+            # ── Entry evaluation / 入场评估 ──
             if abs(funding_rate) < self._threshold:
-                return  # Funding rate too small / Funding rate 太小
+                return
 
             if hours_to_settle < self._min_hours:
-                return  # Too close to settlement / 距结算时间太近
+                return
 
-            # Calculate expected edge / 计算预期边际
+            # Expected edge: funding bps - total fee bps
             funding_bps = abs(funding_rate) * 10000
-            edge_bps = funding_bps - self._fee_bps
+            edge_bps = funding_bps - self._total_fee_bps
             if edge_bps <= 0:
-                return  # Not enough edge after fees / 扣除手续费后无边际
+                return
 
-            # Determine direction / 确定方向
+            # Determine direction and open both legs
             if funding_rate > self._threshold:
-                # Positive rate: longs pay shorts → go short / 正费率：多付空 → 做空
-                self._emit_intent(OrderIntent(
-                    symbol=self._symbol, side="Sell", order_type="market",
-                    qty=self._qty, strategy_name=self.name,
-                    reason=(
-                        f"Funding arb short: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
-                        f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
-                        f"Funding 套利做空"
-                    ),
-                    confidence=min(1.0, edge_bps / 20 + 0.3),
-                    metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
-                ))
-                self._current_position = "short"
-                self._entry_funding_rate = funding_rate
-                self._trade_count += 1
+                # Positive rate: longs pay shorts
+                # → Short perp (collect funding) + Long spot (hedge)
+                self._emit_entry_intents(
+                    perp_side="Sell",
+                    spot_side="Buy",
+                    position_label="short_perp_long_spot",
+                    funding_rate=funding_rate,
+                    funding_bps=funding_bps,
+                    edge_bps=edge_bps,
+                    hours_to_settle=hours_to_settle,
+                )
 
             elif funding_rate < -self._threshold:
-                # Negative rate: shorts pay longs → go long / 负费率：空付多 → 做多
-                self._emit_intent(OrderIntent(
-                    symbol=self._symbol, side="Buy", order_type="market",
-                    qty=self._qty, strategy_name=self.name,
-                    reason=(
-                        f"Funding arb long: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
-                        f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
-                        f"Funding 套利做多"
-                    ),
-                    confidence=min(1.0, edge_bps / 20 + 0.3),
-                    metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
-                ))
-                self._current_position = "long"
-                self._entry_funding_rate = funding_rate
-                self._trade_count += 1
+                # Negative rate: shorts pay longs
+                # → Long perp (collect funding) + Short spot (hedge)
+                self._emit_entry_intents(
+                    perp_side="Buy",
+                    spot_side="Sell",
+                    position_label="long_perp_short_spot",
+                    funding_rate=funding_rate,
+                    funding_bps=funding_bps,
+                    edge_bps=edge_bps,
+                    hours_to_settle=hours_to_settle,
+                )
+
+    def _emit_entry_intents(
+        self,
+        perp_side: str,
+        spot_side: str,
+        position_label: str,
+        funding_rate: float,
+        funding_bps: float,
+        edge_bps: float,
+        hours_to_settle: float,
+    ) -> None:
+        """Emit entry intents for both legs / 发出两腿入场意图"""
+        confidence = min(1.0, edge_bps / 20 + 0.3)
+        reason_base = (
+            f"Funding arb {position_label}: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
+            f"edge={edge_bps:.1f}bps, settle={hours_to_settle:.1f}h"
+        )
+
+        # Leg 1: Perpetual / 永续腿
+        self._emit_intent(OrderIntent(
+            symbol=self._symbol,
+            side=perp_side,
+            order_type="market",
+            qty=self._qty,
+            strategy_name=self.name,
+            reason=f"[PERP] {reason_base}",
+            confidence=confidence,
+            metadata={
+                "funding_rate": funding_rate,
+                "edge_bps": edge_bps,
+                "leg": "perp",
+                "category": "linear",
+            },
+        ))
+
+        # Leg 2: Spot hedge (if delta-neutral) / 现货对冲腿
+        if self._delta_neutral:
+            self._emit_intent(OrderIntent(
+                symbol=self._symbol,
+                side=spot_side,
+                order_type="market",
+                qty=self._qty,
+                strategy_name=self.name,
+                reason=f"[SPOT HEDGE] {reason_base}",
+                confidence=confidence,
+                metadata={
+                    "funding_rate": funding_rate,
+                    "edge_bps": edge_bps,
+                    "leg": "spot_hedge",
+                    "category": "spot",
+                },
+            ))
+
+        self._current_position = position_label
+        self._entry_funding_rate = funding_rate
+        self._entry_ts_ms = int(time.time() * 1000)
+        self._trade_count += 1
+
+        logger.info(
+            "Funding arb entry: %s rate=%.6f edge=%.1fbps delta_neutral=%s / 入场",
+            position_label, funding_rate, edge_bps, self._delta_neutral,
+        )
+
+    def _emit_close_intents(self, reason: str) -> None:
+        """Emit close intents for both legs / 发出两腿平仓意图"""
+        if self._current_position is None:
+            return
+
+        # Determine close directions (opposite of entry)
+        if "short_perp" in self._current_position:
+            perp_close_side = "Buy"   # Close short perp
+            spot_close_side = "Sell"  # Close long spot
+        else:
+            perp_close_side = "Sell"  # Close long perp
+            spot_close_side = "Buy"   # Close short spot
+
+        # Close perp leg
+        self._emit_intent(OrderIntent(
+            symbol=self._symbol,
+            side=perp_close_side,
+            order_type="market",
+            qty=self._qty,
+            strategy_name=self.name,
+            reason=f"[PERP CLOSE] {reason}",
+            confidence=0.6,
+            metadata={"leg": "perp_close", "category": "linear"},
+        ))
+
+        # Close spot hedge leg
+        if self._delta_neutral:
+            self._emit_intent(OrderIntent(
+                symbol=self._symbol,
+                side=spot_close_side,
+                order_type="market",
+                qty=self._qty,
+                strategy_name=self.name,
+                reason=f"[SPOT CLOSE] {reason}",
+                confidence=0.6,
+                metadata={"leg": "spot_close", "category": "spot"},
+            ))
+
+        logger.info(
+            "Funding arb exit: %s reason=%s / 出场", self._current_position, reason,
+        )
 
     def record_funding_payment(self, amount_usdt: float) -> None:
-        """
-        Record a funding payment received / 记录收到的 funding 支付
-
-        Args:
-          amount_usdt — funding payment amount (positive = received) / 收到的金额
-        """
+        """Record a funding payment received / 记录收到的 funding 支付"""
         self._funding_collected += amount_usdt
+        self._funding_periods_held += 1
+
+    def get_persistent_state(self) -> dict[str, Any]:
+        base = super().get_persistent_state()
+        base.update({
+            "current_position": self._current_position,
+            "entry_funding_rate": self._entry_funding_rate,
+            "entry_ts_ms": self._entry_ts_ms,
+            "trade_count": self._trade_count,
+            "funding_collected": self._funding_collected,
+            "funding_periods_held": self._funding_periods_held,
+        })
+        return base
+
+    def restore_persistent_state(self, saved: dict[str, Any]) -> None:
+        super().restore_persistent_state(saved)
+        self._current_position = saved.get("current_position")
+        self._entry_funding_rate = saved.get("entry_funding_rate")
+        self._entry_ts_ms = saved.get("entry_ts_ms", 0)
+        self._trade_count = saved.get("trade_count", 0)
+        self._funding_collected = saved.get("funding_collected", 0.0)
+        self._funding_periods_held = saved.get("funding_periods_held", 0)
 
     def get_status(self) -> dict[str, Any]:
         return {
             "strategy": self.name,
             "state": self.state,
             "symbol": self._symbol,
+            "delta_neutral": self._delta_neutral,
             "current_position": self._current_position,
             "entry_funding_rate": self._entry_funding_rate,
             "qty_per_trade": self._qty,
             "funding_threshold": self._threshold,
-            "fee_bps": self._fee_bps,
+            "perp_fee_bps": self._perp_fee_bps,
+            "spot_fee_bps": self._spot_fee_bps,
+            "total_fee_bps": self._total_fee_bps,
             "trade_count": self._trade_count,
             "funding_collected_usdt": round(self._funding_collected, 4),
+            "funding_periods_held": self._funding_periods_held,
         }
