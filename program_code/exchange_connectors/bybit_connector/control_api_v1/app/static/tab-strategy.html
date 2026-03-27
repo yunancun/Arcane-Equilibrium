@@ -133,19 +133,22 @@ async function loadStrategies() {
 
     html += '<div class="oc-strat-card">';
     html += '<div class="strat-header">';
-    html += '<span class="strat-name">' + ocEsc(s.name || s.strategy_name) + '</span>';
+    const stratName = s.strategy || s.name || s.strategy_name || '?';
+    html += '<span class="strat-name">' + ocEsc(stratName) + '</span>';
     html += '<span class="oc-chip oc-chip-' + chipType + '">' + ocEsc(state) + '</span>';
     html += '</div>';
     html += '<div class="strat-meta">';
-    html += 'Type: ' + ocEsc(s.strategy_type || s.type || '--');
+    // Strategy type can be inferred from name or explicit field
+    const stratType = s.strategy_type || s.type || stratName;
+    html += 'Type: ' + ocEsc(stratType);
     if (s.symbol) html += ' | Symbol: ' + ocEsc(s.symbol);
-    if (s.signals_count != null) html += ' | Signals: ' + s.signals_count;
-    if (s.intents_count != null) html += ' | Intents: ' + s.intents_count;
+    if (s.qty_per_trade != null) html += ' | Qty: ' + s.qty_per_trade;
+    if (s.trade_count != null) html += ' | Trades: ' + s.trade_count;
     html += '</div>';
     html += '<div class="strat-actions">';
-    html += '<button class="oc-btn oc-btn-success" ' + (state === 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'activate\')">Activate</button>';
-    html += '<button class="oc-btn" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'pause\')">Pause</button>';
-    html += '<button class="oc-btn oc-btn-danger" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(s.name || s.strategy_name) + '\',\'stop\')">Stop</button>';
+    html += '<button class="oc-btn oc-btn-success" ' + (state === 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'activate\')">Activate</button>';
+    html += '<button class="oc-btn" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">Pause</button>';
+    html += '<button class="oc-btn oc-btn-danger" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">Stop</button>';
     html += '</div>';
     html += '</div>';
   });

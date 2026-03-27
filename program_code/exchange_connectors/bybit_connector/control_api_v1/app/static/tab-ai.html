@@ -115,15 +115,20 @@ async function triggerSession() {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadCost() {
-  const d = await ocApi('/api/v1/paper/layer2/cost');
+  // Try layer2 cost first, fallback to paper/ai-cost
+  let d = await ocApi('/api/v1/paper/layer2/cost');
+  if (!d || !d.data) d = await ocApi('/api/v1/paper/ai-cost');
   if (!d || !d.data) return;
   const c = d.data;
-  ocSetText('a-today', '$' + ocNum(c.today_cost || c.cost_today, 4));
-  ocSetText('a-total', '$' + ocNum(c.total_cost || c.cost_total, 2));
-  ocSetText('a-budget', '$' + ocNum(c.daily_budget || c.budget_limit, 2));
+  const todayCost = c.today_cost || c.cost_today || 0;
+  const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
+  const budget = c.daily_budget || c.budget_limit || 15; // default $15 from config
+  ocSetText('a-today', '$' + ocNum(todayCost, 4));
+  ocSetText('a-total', '$' + ocNum(totalCost, 2));
+  ocSetText('a-budget', '$' + ocNum(budget, 2));
   ocSetText('a-sessions', c.sessions_today || c.session_count || 0);
   ocSetText('a-avg', '$' + ocNum(c.avg_cost_per_session || 0, 4));
-  const remaining = (c.daily_budget || 0) - (c.today_cost || c.cost_today || 0);
+  const remaining = budget - todayCost;
   const elR = $('a-remaining');
   elR.textContent = '$' + ocNum(remaining, 4);
   elR.className = 'oc-metric-val ' + (remaining > 0 ? 'green' : 'red');
@@ -190,13 +195,17 @@ async function loadConfig() {
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   const fields = [
     ['Default Model', cfg.default_model || cfg.model],
-    ['Fallback Chain', cfg.fallback_chain ? cfg.fallback_chain.join(' → ') : null],
-    ['Max Tokens', cfg.max_tokens],
-    ['Temperature', cfg.temperature],
-    ['Auto Trigger', cfg.auto_trigger ? 'Yes' : 'No'],
+    ['Daily Hard Cap', cfg.daily_hard_cap_usd != null ? '$' + cfg.daily_hard_cap_usd : null],
+    ['Sonnet Budget/Session', cfg.session_budget_sonnet_usd != null ? '$' + cfg.session_budget_sonnet_usd : null],
+    ['Opus Budget/Session', cfg.session_budget_opus_usd != null ? '$' + cfg.session_budget_opus_usd : null],
+    ['Adaptive Enabled', cfg.adaptive_enabled ? 'Yes' : 'No'],
+    ['Adaptive Base Daily', cfg.adaptive_base_daily_usd != null ? '$' + cfg.adaptive_base_daily_usd : null],
+    ['Max Iterations', cfg.max_iterations],
+    ['Auto Submit to Paper', cfg.auto_submit_to_paper ? 'Yes' : 'No'],
+    ['Search Providers', (cfg.search_providers_enabled || []).join(', ') || '--'],
   ];
   fields.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(val || '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(val != null ? val : '--') + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('ai-config', html);

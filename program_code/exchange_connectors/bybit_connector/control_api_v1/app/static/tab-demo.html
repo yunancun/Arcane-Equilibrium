@@ -97,27 +97,37 @@ $('explain-comparison').innerHTML = ocExplain(
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
-  const d = await ocApi('/api/v1/strategy/demo/status');
-  if (!d || !d.data) {
-    showOffline();
-    return;
-  }
-  const status = d.data;
-  const connected = status.enabled || status.connected || status.is_configured;
-  const badge = $('demo-badge');
-
-  if (connected) {
-    badge.textContent = 'Connected';
-    badge.className = 'oc-chip oc-chip-good';
-    $('demo-api-info').textContent = status.api_mode || 'demo-trading.bybit.com';
+  // Try balance endpoint first — if it returns Bybit data, Demo is connected
+  const balD = await ocApi('/api/v1/strategy/demo/balance');
+  if (balD && balD.data && balD.data.retCode === 0) {
+    // Bybit Demo is connected (balance API returned real data)
+    $('demo-badge').textContent = 'Connected';
+    $('demo-badge').className = 'oc-chip oc-chip-good';
+    $('demo-api-info').textContent = 'demo-trading.bybit.com';
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
-    loadBalance();
+    renderBalance(balD.data);
     loadPositions();
     loadComparison();
-  } else {
-    showOffline();
+    return;
   }
+  // Fallback: check status endpoint
+  const d = await ocApi('/api/v1/strategy/demo/status');
+  if (d && d.data && Object.keys(d.data).length > 0) {
+    const status = d.data;
+    const connected = status.enabled || status.connected || status.is_configured;
+    if (connected) {
+      $('demo-badge').textContent = 'Connected';
+      $('demo-badge').className = 'oc-chip oc-chip-good';
+      $('demo-content').style.display = '';
+      $('demo-offline').style.display = 'none';
+      loadBalance();
+      loadPositions();
+      loadComparison();
+      return;
+    }
+  }
+  showOffline();
 }
 
 function showOffline() {
@@ -127,53 +137,69 @@ function showOffline() {
   $('demo-offline').style.display = '';
 }
 
-async function loadBalance() {
-  const d = await ocApi('/api/v1/strategy/demo/balance');
-  if (!d || !d.data) return;
-  const b = d.data;
+function renderBalance(raw) {
+  // Handle Bybit API response format: { retCode, result: { list: [{ totalEquity, ... }] } }
+  let b = raw;
+  if (raw.result && raw.result.list && raw.result.list[0]) {
+    b = raw.result.list[0];
+  }
 
-  const equity = b.total_equity || b.equity || 0;
+  const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
   ocSetText('d-equity', '$' + ocNum(equity, 2));
 
-  const available = b.available_balance || b.available || 0;
+  const available = parseFloat(b.availableBalance || b.available_balance || b.available || 0);
   ocSetText('d-available', '$' + ocNum(available, 2));
 
-  const margin = b.used_margin || b.margin_used || 0;
+  const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0);
   ocSetText('d-margin', '$' + ocNum(margin, 2));
 
-  const unrealized = b.unrealized_pnl || b.total_unrealized_pnl || 0;
+  const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealized_pnl || 0);
   const elU = $('d-unrealized');
   elU.textContent = ocMoney(unrealized);
   elU.className = 'oc-metric-val ' + ocPnlClass(unrealized);
 
-  const realized = b.realized_pnl || b.total_realized_pnl || 0;
+  const realized = parseFloat(b.totalRealizedPL || b.realized_pnl || b.total_realized_pnl || 0);
   const elR = $('d-realized');
   elR.textContent = ocMoney(realized);
   elR.className = 'oc-metric-val ' + ocPnlClass(realized);
 
-  ocSetText('d-type', b.account_type || 'UNIFIED');
+  ocSetText('d-type', b.accountType || b.account_type || 'UNIFIED');
+}
+
+async function loadBalance() {
+  const d = await ocApi('/api/v1/strategy/demo/balance');
+  if (!d || !d.data) return;
+  renderBalance(d.data);
 }
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/strategy/demo/positions');
   if (!d || !d.data) return;
-  const positions = d.data.positions || d.data || [];
+  // Handle Bybit format: { retCode, result: { list: [...] } }
+  let positions = [];
+  if (d.data.result && d.data.result.list) {
+    positions = d.data.result.list;
+  } else {
+    positions = d.data.positions || d.data || [];
+  }
+  // Filter out zero-size positions
+  positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
     ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="8">暂无持仓 / No open positions</td></tr>');
     return;
   }
   let html = '';
   positions.forEach(p => {
-    const pnl = p.unrealised_pnl || p.unrealized_pnl || 0;
+    const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(p.side) + '</td>';
-    html += '<td>' + ocNum(p.size || p.qty, 4) + '</td>';
-    html += '<td>' + ocNum(p.avg_price || p.entry_price, 2) + '</td>';
-    html += '<td>' + ocNum(p.mark_price, 2) + '</td>';
+    html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
+    html += '<td>' + ocNum(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0), 2) + '</td>';
+    html += '<td>' + ocNum(parseFloat(p.markPrice || p.mark_price || 0), 2) + '</td>';
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
-    html += '<td>' + ocNum(p.liq_price, 2) + '</td>';
+    html += '<td>' + ocNum(parseFloat(p.liqPrice || p.liq_price || 0), 2) + '</td>';
     html += '</tr>';
   });
   ocSetHtml('demo-positions', html);

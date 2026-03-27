@@ -633,7 +633,9 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:
-        result = DEMO_CONNECTOR.get_positions()
+        # Bybit V5 requires symbol or settleCoin — use settleCoin=USDT for all linear positions
+        params: dict[str, Any] = {"category": "linear", "settleCoin": "USDT"}
+        result = DEMO_CONNECTOR._request("GET", "/v5/position/list", params)
         return _envelope(result)
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")

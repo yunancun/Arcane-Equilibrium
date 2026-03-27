@@ -146,24 +146,24 @@ async function loadRiskStatus() {
   const s = d.data;
 
   // Metrics
-  const pressure = s.risk_pressure || s.pressure || 0;
+  const pressure = s.risk_pressure || s.pressure || s.drawdown_pct || 0;
   const elP = $('r-pressure');
   elP.textContent = (pressure * 100).toFixed(0) + '%';
   elP.className = 'oc-metric-val ' + (pressure > 0.7 ? 'red' : pressure > 0.4 ? 'yellow' : 'green');
 
-  const drawdown = s.current_drawdown || s.drawdown || 0;
+  const drawdown = s.current_drawdown || s.drawdown || s.drawdown_pct || 0;
   const elD = $('r-drawdown');
   elD.textContent = (drawdown * 100).toFixed(1) + '%';
   elD.className = 'oc-metric-val ' + (drawdown > 0.1 ? 'red' : drawdown > 0.05 ? 'yellow' : 'green');
 
-  ocSetText('r-peak', '$' + ocNum(s.peak_balance || s.peak, 2));
+  ocSetText('r-peak', '$' + ocNum(s.peak_balance || s.peak_balance_usdt || s.peak, 2));
 
   const halted = s.session_halted || s.halted || false;
   const elH = $('r-halted');
   elH.textContent = halted ? 'YES' : 'No';
   elH.className = 'oc-metric-val ' + (halted ? 'red' : 'green');
 
-  const cooldown = s.loss_cooldown_active || s.in_cooldown || false;
+  const cooldown = s.loss_cooldown_active || s.cooldown_active || s.in_cooldown || false;
   const elC = $('r-cooldown');
   elC.textContent = cooldown ? 'Active' : 'Inactive';
   elC.className = 'oc-metric-val ' + (cooldown ? 'yellow' : 'green');
@@ -183,31 +183,38 @@ async function loadRiskConfig() {
   if (!d || !d.data) return;
   const cfg = d.data;
 
-  // P0
-  const p0 = cfg.category || cfg.p0 || {};
+  // P0 - Category config: field is "category_overrides" or "category" or from allowed_categories
+  const p0 = cfg.category_overrides || cfg.category || cfg.p0 || {};
+  const gc = cfg.global_config || cfg.global || cfg.p1 || {};
   let html0 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   if (typeof p0 === 'object' && Object.keys(p0).length) {
     Object.entries(p0).forEach(([cat, limits]) => {
       html0 += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(cat) + '</div><div class="oc-metric-val" style="font-size:12px">';
       if (typeof limits === 'object') {
-        Object.entries(limits).forEach(([k, v]) => { html0 += ocEsc(k) + ': ' + ocEsc(v) + '<br>'; });
+        Object.entries(limits).forEach(([k, v]) => { html0 += ocEsc(k.replace(/_/g,' ')) + ': ' + ocEsc(v) + '<br>'; });
       } else { html0 += ocEsc(limits); }
       html0 += '</div></div>';
     });
-  } else { html0 += '<div class="oc-loading">No P0 config</div>'; }
+  } else {
+    // Show allowed categories from global config
+    const cats = gc.allowed_categories || [];
+    html0 += '<div class="oc-metric"><div class="oc-metric-label">Allowed Categories</div><div class="oc-metric-val" style="font-size:13px">' + (cats.length ? cats.join(', ') : '--') + '</div></div>';
+    html0 += '<div class="oc-metric"><div class="oc-metric-label">Max Single Position</div><div class="oc-metric-val" style="font-size:13px">' + (gc.max_single_position_pct || '--') + '%</div></div>';
+  }
   html0 += '</div>';
   ocSetHtml('p0-config', html0);
 
-  // P1
-  const p1 = cfg.global || cfg.p1 || {};
+  // P1 - Global config: field is "global_config"
   let html1 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   const p1Fields = [
-    ['Max Leverage', p1.max_leverage],
-    ['Max Drawdown', p1.max_drawdown != null ? (p1.max_drawdown * 100) + '%' : null],
-    ['Max Exposure', p1.max_exposure_pct != null ? (p1.max_exposure_pct * 100) + '%' : null],
-    ['Max Risk/Trade', p1.max_risk_per_trade != null ? (p1.max_risk_per_trade * 100) + '%' : null],
-    ['Max Positions', p1.max_positions],
-    ['Cooldown Threshold', p1.loss_cooldown_threshold],
+    ['Max Leverage', gc.max_leverage],
+    ['Max Session Drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : null],
+    ['Max Daily Loss', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : null],
+    ['Max Total Exposure', gc.max_total_exposure_pct != null ? gc.max_total_exposure_pct + '%' : null],
+    ['Max Correlated Exp', gc.max_correlated_exposure_pct != null ? gc.max_correlated_exposure_pct + '%' : null],
+    ['Loss Cooldown Count', gc.consecutive_loss_cooldown_count],
+    ['Cooldown Minutes', gc.consecutive_loss_cooldown_minutes],
+    ['Max Holding Hours', gc.max_holding_hours],
   ];
   p1Fields.forEach(([label, val]) => {
     html1 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
@@ -215,14 +222,15 @@ async function loadRiskConfig() {
   html1 += '</div>';
   ocSetHtml('p1-config', html1);
 
-  // P2
-  const p2 = cfg.agent || cfg.p2 || {};
+  // P2 - Agent adjustable: field is "agent_adjustable" or from global config
+  const p2 = cfg.agent_adjustable || cfg.agent || cfg.p2 || {};
   let html2 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   const p2Fields = [
-    ['Stop Loss %', p2.stop_loss_pct != null ? (p2.stop_loss_pct * 100) + '%' : null],
-    ['Trailing Stop %', p2.trailing_stop_pct != null ? (p2.trailing_stop_pct * 100) + '%' : null],
-    ['Position Size Factor', p2.position_size_factor],
-    ['Max Risk/Trade', p2.max_risk_per_trade != null ? (p2.max_risk_per_trade * 100) + '%' : null],
+    ['Max Stop Loss', (p2.max_stop_loss_pct || gc.max_stop_loss_pct || '--') + '%'],
+    ['Max Take Profit', (p2.max_take_profit_pct || gc.max_take_profit_pct || '--') + '%'],
+    ['Max Single Position', (p2.max_single_position_pct || gc.max_single_position_pct || '--') + '%'],
+    ['Position Size Factor', p2.position_size_factor || '--'],
+    ['Trailing Stop', (p2.trailing_stop_pct || '--') + '%'],
   ];
   p2Fields.forEach(([label, val]) => {
     html2 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
@@ -230,12 +238,11 @@ async function loadRiskConfig() {
   html2 += '</div>';
   ocSetHtml('p2-config', html2);
 
-  // Stop Manager
-  const stops = cfg.stops || cfg.stop_manager || {};
-  ocSetText('s-hard', stops.hard_stop_pct != null ? (stops.hard_stop_pct * 100) + '%' : '--');
-  ocSetText('s-trailing', stops.trailing_stop_pct != null ? (stops.trailing_stop_pct * 100) + '%' : '--');
-  ocSetText('s-time', stops.time_stop_hours != null ? stops.time_stop_hours + 'h' : '--');
-  ocSetText('s-atr', stops.atr_multiplier != null ? stops.atr_multiplier + 'x' : '--');
+  // Stop Manager — derive from global config
+  ocSetText('s-hard', gc.max_stop_loss_pct != null ? gc.max_stop_loss_pct + '%' : '--');
+  ocSetText('s-trailing', p2.trailing_stop_pct != null ? p2.trailing_stop_pct + '%' : '--');
+  ocSetText('s-time', gc.max_holding_hours != null ? gc.max_holding_hours + 'h' : '--');
+  ocSetText('s-atr', p2.atr_multiplier != null ? p2.atr_multiplier + 'x' : '--');
 }
 
 async function loadAIContext() {
