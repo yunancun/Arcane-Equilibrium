@@ -81,6 +81,7 @@ from local_model_tools.strategies.ma_crossover import MACrossoverStrategy
 from local_model_tools.strategies.bollinger_reversion import BollingerReversionStrategy
 from local_model_tools.strategies.funding_rate_arb import FundingRateArbStrategy
 from local_model_tools.strategies.grid_trading import GridTradingStrategy
+from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,7 @@ _grid_count = int(os.getenv("OPENCLAW_GRID_COUNT", "20"))
 ORCHESTRATOR.register_strategy(GridTradingStrategy(
     symbol="BTCUSDT", upper_price=_grid_upper, lower_price=_grid_lower, grid_count=_grid_count,
 ))
+ORCHESTRATOR.register_strategy(BBBreakoutStrategy(symbol="BTCUSDT"))
 
 logger.info(
     "Phase 2 strategy pipeline initialized / Phase 2 策略管线初始化完成: "
@@ -162,6 +164,26 @@ try:
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
+
+
+# ── AI Consultation (connects Layer 2 engine to strategy orchestrator) ──
+# AI 咨询连接（将 Layer 2 引擎连接到策略编排器）
+try:
+    from .layer2_routes import _get_engine as _get_l2_engine
+    ORCHESTRATOR.set_ai_engine(_get_l2_engine())
+    logger.info("AI consultation connected to orchestrator / AI 咨询已连接编排器")
+except (ImportError, Exception) as e:
+    logger.info("AI consultation not available: %s / AI 咨询不可用: %s", e, e)
+
+# ── Telegram Alerter (optional, enabled by env vars) ──
+try:
+    from .telegram_alerter import TelegramAlerter
+    TELEGRAM = TelegramAlerter()
+    if TELEGRAM.is_enabled and PIPELINE_BRIDGE is not None:
+        PIPELINE_BRIDGE.set_telegram(TELEGRAM)
+        logger.info("Telegram alerts wired to pipeline bridge / Telegram 告警已接入管线")
+except ImportError:
+    TELEGRAM = None
 
 
 # =============================================================================
@@ -481,4 +503,35 @@ async def get_orchestrator_status(
         return _envelope(ORCHESTRATOR.get_status())
     except Exception:
         logger.exception("Error in get_orchestrator_status / get_orchestrator_status 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
+
+
+# ── Telegram Status Route / Telegram 状态路由 ──
+
+@phase2_router.get("/telegram/status")
+async def get_telegram_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Telegram alerter status / 获取 Telegram 告警器状态"""
+    if TELEGRAM is None:
+        return _envelope({"enabled": False, "reason": "module not loaded"})
+    return _envelope(TELEGRAM.get_stats())
+
+
+# ── AI Consultation Route / AI 咨询路由 ──
+
+@phase2_router.get("/ai/status")
+async def get_ai_consultation_status(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    Get AI consultation availability status.
+    获取 AI 咨询可用状态。
+    """
+    try:
+        result = ORCHESTRATOR.request_ai_analysis("status_check")
+        return _envelope({
+            "ai_consultation_enabled": ORCHESTRATOR._ai_consultation_enabled,
+            "analysis_result": result,
+        })
+    except Exception:
+        logger.exception("AI status check error / AI 状态检查异常")
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")

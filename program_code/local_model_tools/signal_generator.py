@@ -795,6 +795,104 @@ class MACDExhaustionRule(SignalRule):
         return None
 
 
+class RSIDivergenceRule(SignalRule):
+    """
+    RSI Divergence detection signal.
+    RSI 背离检测信号。
+
+    Logic:
+    - Bearish divergence: price makes higher high but RSI makes lower high → close_long / short
+    - Bullish divergence: price makes lower low but RSI makes higher low → close_short / long
+
+    Tracks recent price and RSI peaks/troughs to detect divergence.
+    追踪近期价格和 RSI 的高低点以检测背离。
+    """
+
+    def __init__(
+        self,
+        rsi_name: str = "RSI(14)",
+        lookback: int = 5,  # Number of recent evaluations to compare
+    ) -> None:
+        self._rsi_name = rsi_name
+        self._lookback = lookback
+        # Track recent price and RSI values per symbol:timeframe
+        self._history: dict[str, list[tuple[float, float]]] = {}  # key → [(price, rsi), ...]
+        self._max_history = 20
+
+    @property
+    def name(self) -> str:
+        return "RSI_Divergence"
+
+    def evaluate(self, symbol: str, timeframe: str, indicators: dict[str, Any]) -> Signal | None:
+        rsi_data = indicators.get(self._rsi_name)
+        if not rsi_data or "rsi" not in rsi_data:
+            return None
+        rsi = rsi_data["rsi"]
+        if not isinstance(rsi, (int, float)) or not math.isfinite(rsi):
+            return None
+
+        # Need a price reference — get from EMA or BB middle
+        price = None
+        for ind_name, ind_data in indicators.items():
+            if ind_data and "ema" in ind_data:
+                price = ind_data["ema"]
+                break
+            if ind_data and "middle" in ind_data:
+                price = ind_data["middle"]
+                break
+        if price is None or not math.isfinite(price):
+            return None
+
+        key = f"{symbol}:{timeframe}"
+        history = self._history.setdefault(key, [])
+        history.append((price, rsi))
+        if len(history) > self._max_history:
+            history[:] = history[-self._max_history:]
+
+        if len(history) < self._lookback + 1:
+            return None
+
+        recent = history[-self._lookback:]
+        older = history[-(self._lookback + 1)]
+
+        # Find highest price and corresponding RSI in recent window
+        max_price_entry = max(recent, key=lambda x: x[0])
+        min_price_entry = min(recent, key=lambda x: x[0])
+
+        # Bearish divergence: recent price higher than older, but RSI lower
+        if max_price_entry[0] > older[0] and max_price_entry[1] < older[1] - 3:
+            # Price making higher high, RSI making lower high
+            if rsi > 55:  # Only in overbought-ish zone
+                return Signal(
+                    symbol=symbol,
+                    direction=DIRECTION_CLOSE_LONG,
+                    confidence=min(1.0, (older[1] - max_price_entry[1]) / 20 + 0.3),
+                    source=self.name,
+                    timeframe=timeframe,
+                    reasoning=(
+                        f"Bearish divergence: price high={max_price_entry[0]:.2f} > prev={older[0]:.2f} "
+                        f"but RSI={max_price_entry[1]:.1f} < prev_RSI={older[1]:.1f}"
+                    ),
+                )
+
+        # Bullish divergence: recent price lower than older, but RSI higher
+        if min_price_entry[0] < older[0] and min_price_entry[1] > older[1] + 3:
+            if rsi < 45:  # Only in oversold-ish zone
+                return Signal(
+                    symbol=symbol,
+                    direction=DIRECTION_CLOSE_SHORT,
+                    confidence=min(1.0, (min_price_entry[1] - older[1]) / 20 + 0.3),
+                    source=self.name,
+                    timeframe=timeframe,
+                    reasoning=(
+                        f"Bullish divergence: price low={min_price_entry[0]:.2f} < prev={older[0]:.2f} "
+                        f"but RSI={min_price_entry[1]:.1f} > prev_RSI={older[1]:.1f}"
+                    ),
+                )
+
+        return None
+
+
 def create_default_signal_rules() -> list[SignalRule]:
     """
     Create the default set of signal rules / 创建默认信号规则集
@@ -812,6 +910,7 @@ def create_default_signal_rules() -> list[SignalRule]:
         # Exit rules / 出场规则
         RSIExitRule(),
         MACDExhaustionRule(),
+        RSIDivergenceRule(),
         # Regime detection / Regime 检测
         RegimeDetectorRule(),
     ]

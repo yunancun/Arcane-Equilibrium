@@ -139,6 +139,11 @@ class StrategyOrchestrator:
         self._current_regime: str = "unknown"
         self._current_regime_ts_ms: int = 0
 
+        # AI consultation (optional Layer 2 engine reference)
+        # AI 咨询（可选的 Layer 2 引擎引用）
+        self._ai_engine: Any = None
+        self._ai_consultation_enabled: bool = False
+
         # Statistics / 统计
         self._stats = {
             "signals_dispatched": 0,
@@ -415,3 +420,35 @@ class StrategyOrchestrator:
         """List all registered strategy names / 列出所有注册的策略名称"""
         with self._lock:
             return list(self._strategies.keys())
+
+    # ── AI Consultation / AI 咨询 ──
+
+    def set_ai_engine(self, engine: Any) -> None:
+        """Set Layer 2 AI engine for strategy consultation / 设置 L2 AI 引擎供策略咨询"""
+        self._ai_engine = engine
+        self._ai_consultation_enabled = engine is not None
+        logger.info("AI consultation %s / AI 咨询%s",
+                    "enabled" if engine else "disabled",
+                    "已启用" if engine else "已禁用")
+
+    def request_ai_analysis(self, query: str, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """
+        Request AI analysis from Layer 2 engine (non-blocking stub).
+        请求 L2 AI 引擎分析（非阻塞 stub）。
+
+        This is a synchronous stub that returns cached/recent analysis if available,
+        or queues a request for async processing.
+        同步 stub，返回缓存/最近分析（如有），或排队异步处理。
+
+        Returns analysis result dict or None if unavailable.
+        """
+        if not self._ai_consultation_enabled or self._ai_engine is None:
+            return None
+
+        # For now, return a stub response. Full async integration is Phase 4.
+        # 当前返回 stub。完整异步集成在 Phase 4。
+        return {
+            "status": "ai_available_but_not_queried",
+            "reason": "Sync AI consultation is a stub. Use POST /api/v1/layer2/analyze for async.",
+            "engine_running": getattr(self._ai_engine, 'is_running', False),
+        }

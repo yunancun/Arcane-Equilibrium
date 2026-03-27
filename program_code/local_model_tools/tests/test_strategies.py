@@ -470,3 +470,54 @@ class TestGridTradingStrategy:
         intents = s.get_pending_intents()
         assert intents[0].order_type == "limit"
         assert intents[0].price is not None
+
+
+# =============================================================================
+# BB Breakout Strategy Tests / 布林带突破策略测试
+# =============================================================================
+
+class TestBBBreakoutStrategy:
+    """BB Breakout strategy tests"""
+
+    def test_no_action_without_squeeze(self):
+        """No squeeze history → no breakout signal"""
+        from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
+        s = BBBreakoutStrategy(symbol="BTCUSDT")
+        s.activate()
+        # Simulate a BB signal with high bandwidth but no prior squeeze
+        signal = type('S', (), {
+            'symbol': 'BTCUSDT', 'source': 'BB_Reversion(0.1/0.9)',
+            'confidence': 0.7, 'direction': 'long',
+            'metadata': {'bandwidth': 0.05, 'percent_b': 1.1},
+        })()
+        s.on_signal(signal)
+        assert s.get_pending_intents() == []
+
+    def test_squeeze_then_breakout_long(self):
+        """Squeeze → expansion with %B > 1 → long"""
+        from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
+        s = BBBreakoutStrategy(symbol="BTCUSDT", cooldown_ms=0)
+        s.activate()
+        # Phase 1: squeeze (low bandwidth)
+        squeeze_signal = type('S', (), {
+            'symbol': 'BTCUSDT', 'source': 'BB_Reversion(0.1/0.9)',
+            'confidence': 0.5, 'direction': 'neutral',
+            'metadata': {'bandwidth': 0.01, 'percent_b': 0.5},
+        })()
+        s.on_signal(squeeze_signal)
+        assert s._was_squeezed is True
+        # Phase 2: expansion breakout above upper band
+        breakout_signal = type('S', (), {
+            'symbol': 'BTCUSDT', 'source': 'BB_Reversion(0.1/0.9)',
+            'confidence': 0.7, 'direction': 'long',
+            'metadata': {'bandwidth': 0.05, 'percent_b': 1.2},
+        })()
+        s.on_signal(breakout_signal)
+        intents = s.get_pending_intents()
+        assert len(intents) == 1
+        assert intents[0].side == "Buy"
+
+    def test_get_status(self):
+        from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
+        s = BBBreakoutStrategy()
+        assert s.get_status()["strategy"] == "BB_Breakout"

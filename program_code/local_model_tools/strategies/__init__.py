@@ -9,7 +9,7 @@
 #
 # MODULE_NOTE (English):
 #   Concrete trading strategy implementations: Funding Rate Arbitrage,
-#   Bollinger Mean Reversion, Grid Trading, etc.
+#   Bollinger Mean Reversion, Grid Trading, BB Breakout, etc.
 #   Each strategy is a separate file, all inherit from StrategyBase ABC.
 #   Strategies only generate trading signals, not submit orders directly
 #   (managed by the Strategy Orchestrator).

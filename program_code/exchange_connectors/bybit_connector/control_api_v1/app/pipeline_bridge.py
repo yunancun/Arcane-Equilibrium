@@ -71,6 +71,7 @@ class PipelineBridge:
         self._auto_submit = auto_submit_intents
         self._max_intents_per_tick = max_intents_per_tick
         self._lock = threading.Lock()
+        self._telegram = None  # Set externally if available
 
         self._stats = {
             "ticks_received": 0,
@@ -88,6 +89,10 @@ class PipelineBridge:
             os.path.dirname(os.path.abspath(__file__)), "..", "runtime", "strategy_state.json"
         )
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
+
+    def set_telegram(self, alerter: Any) -> None:
+        """Set Telegram alerter for notifications / 设置 Telegram 告警器"""
+        self._telegram = alerter
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -268,6 +273,9 @@ class PipelineBridge:
                         "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
                         intent.symbol, intent.side, intent.order_type, intent.qty,
                     )
+                    if self._telegram and intent.order_type == "market":
+                        price = market_prices.get(intent.symbol, 0)
+                        self._telegram.alert_trade(intent.symbol, intent.side, intent.qty, price, intent.reason[:100])
 
             except Exception:
                 logger.exception(
@@ -300,6 +308,8 @@ class PipelineBridge:
                     "STOP ORDER SUBMITTED: %s %s %.6f — %s / 止损单已提交",
                     stop["symbol"], stop["side"], stop["qty"], stop["reason"],
                 )
+                if self._telegram:
+                    self._telegram.alert_stop(stop["symbol"], stop["stop_type"], stop["reason"])
             except Exception:
                 logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
 
