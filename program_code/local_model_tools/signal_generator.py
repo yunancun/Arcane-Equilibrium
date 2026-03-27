@@ -992,44 +992,88 @@ class SignalEngine:
 
     def get_signal_summary(self, symbol: str) -> dict[str, Any]:
         """
-        Get a consensus summary: what do all rules say about this symbol?
-        获取共识摘要：所有规则对该交易对的判断是什么？
+        Get a weighted consensus summary for a symbol.
+        获取加权共识摘要。
 
-        Returns:
-          {
-            "symbol": str,
-            "long_count": int, "short_count": int,
-            "avg_confidence": float,
-            "consensus_direction": str,
-            "signals": [...]
-          }
+        Weights signals by confidence, freshness, and regime context.
+        按置信度、新鲜度和 regime 上下文加权。
         """
+        now_ms = int(time.time() * 1000)
+        FRESHNESS_DECAY_MS = 300_000  # 5 minutes full weight, then decay / 5 分钟内全权重
+
         with self._lock:
             signals = [
                 s for (sym, _), s in self._latest.items()
                 if sym == symbol and s.is_actionable
             ]
+            # Also get regime info if available
+            regime_signal = None
+            for (sym, src), s in self._latest.items():
+                if sym == symbol and s.source == "Regime_Detector":
+                    regime_signal = s
+                    break
 
-        # Only count entry signals for consensus (exit signals should not flip direction)
-        # 只计入入场信号用于共识（出场信号不应翻转方向）
-        long_count = sum(1 for s in signals if s.direction == DIRECTION_LONG)
-        short_count = sum(1 for s in signals if s.direction == DIRECTION_SHORT)
-        avg_conf = sum(s.confidence for s in signals) / len(signals) if signals else 0.0
+        # Determine regime for weighting
+        regime = "unknown"
+        if regime_signal and regime_signal.metadata:
+            regime = regime_signal.metadata.get("regime", "unknown")
 
-        if long_count > short_count:
-            consensus = DIRECTION_LONG
-        elif short_count > long_count:
-            consensus = DIRECTION_SHORT
+        # Regime-based rule weight multipliers
+        # 趋势市场：MA/MACD 权重高，RSI/BB 权重低
+        # 震荡市场：RSI/BB 权重高，MA/MACD 权重低
+        REGIME_WEIGHTS = {
+            "trending": {"MA_Cross": 1.5, "MACD_Cross": 1.3, "RSI_OB_OS": 0.5, "BB_Reversion": 0.5},
+            "ranging":  {"MA_Cross": 0.5, "MACD_Cross": 0.5, "RSI_OB_OS": 1.5, "BB_Reversion": 1.5},
+            "squeeze":  {"MA_Cross": 0.3, "MACD_Cross": 0.3, "RSI_OB_OS": 0.3, "BB_Reversion": 0.3},
+            "volatile": {"MA_Cross": 0.7, "MACD_Cross": 0.7, "RSI_OB_OS": 0.7, "BB_Reversion": 0.7},
+        }
+        regime_mults = REGIME_WEIGHTS.get(regime, {})
+
+        long_score = 0.0
+        short_score = 0.0
+
+        for s in signals:
+            # Base weight = confidence
+            weight = s.confidence
+
+            # Freshness decay: signals older than 5 min lose weight linearly
+            age_ms = now_ms - s.ts_ms
+            if age_ms > FRESHNESS_DECAY_MS:
+                freshness = max(0.1, 1.0 - (age_ms - FRESHNESS_DECAY_MS) / FRESHNESS_DECAY_MS)
+                weight *= freshness
+
+            # Regime multiplier: match source prefix to regime weights
+            for prefix, mult in regime_mults.items():
+                if prefix in s.source:
+                    weight *= mult
+                    break
+
+            if s.direction == DIRECTION_LONG:
+                long_score += weight
+            elif s.direction == DIRECTION_SHORT:
+                short_score += weight
+
+        total_score = long_score + short_score
+        if total_score > 0:
+            if long_score > short_score * 1.2:  # Need 20% margin for conviction
+                consensus = DIRECTION_LONG
+            elif short_score > long_score * 1.2:
+                consensus = DIRECTION_SHORT
+            else:
+                consensus = DIRECTION_NEUTRAL  # Insufficient conviction / 信念不足
         else:
             consensus = DIRECTION_NEUTRAL
 
         return {
             "symbol": symbol,
-            "long_count": long_count,
-            "short_count": short_count,
+            "long_score": round(long_score, 4),
+            "short_score": round(short_score, 4),
+            "long_count": sum(1 for s in signals if s.direction == DIRECTION_LONG),
+            "short_count": sum(1 for s in signals if s.direction == DIRECTION_SHORT),
             "total_signals": len(signals),
-            "avg_confidence": round(avg_conf, 4),
+            "avg_confidence": round(sum(s.confidence for s in signals) / len(signals), 4) if signals else 0.0,
             "consensus_direction": consensus,
+            "regime": regime,
             "signals": [s.to_dict() for s in signals],
         }
 

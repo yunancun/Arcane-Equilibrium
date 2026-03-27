@@ -34,7 +34,9 @@ Safety invariant:
 
 from __future__ import annotations
 
+import json as _json_mod
 import logging
+import os
 import threading
 import time
 from typing import Any
@@ -82,6 +84,9 @@ class PipelineBridge:
 
         self._active = False
         self._latest_prices: dict[str, float] = {}
+        self._strategy_state_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "runtime", "strategy_state.json"
+        )
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
 
     def activate(self) -> None:
@@ -102,8 +107,28 @@ class PipelineBridge:
         except Exception:
             logger.exception("Kline bootstrap failed (non-fatal) / K线引导失败（非致命）")
 
+        # Restore strategy state if available / 恢复策略状态
+        try:
+            if os.path.exists(self._strategy_state_path):
+                with open(self._strategy_state_path, "r") as f:
+                    saved = _json_mod.load(f)
+                self._orch.restore_all_strategy_state(saved)
+                logger.info("Strategy state restored from %s / 策略状态已恢复", self._strategy_state_path)
+        except Exception:
+            logger.exception("Strategy state restore failed (non-fatal) / 策略状态恢复失败")
+
     def deactivate(self) -> None:
         """Deactivate the bridge / 停用桥接器"""
+        # Save strategy state before deactivation / 停用前保存策略状态
+        try:
+            saved = self._orch.save_all_strategy_state()
+            os.makedirs(os.path.dirname(self._strategy_state_path), exist_ok=True)
+            with open(self._strategy_state_path, "w") as f:
+                _json_mod.dump(saved, f, indent=2)
+            logger.info("Strategy state saved to %s / 策略状态已保存", self._strategy_state_path)
+        except Exception:
+            logger.exception("Strategy state save failed / 策略状态保存失败")
+
         self._active = False
         logger.info("PipelineBridge deactivated / 管线桥接器已停用")
 
@@ -160,16 +185,21 @@ class PipelineBridge:
             with self._lock:
                 self._stats["errors"] += 1
 
-        # 3. Periodic funding rate check (every 100 ticks, ~5 minutes at medium attention)
+        # 3. Periodic volume refresh from REST API (every 60 ticks)
+        # 定期从 REST API 刷新成交量（每 60 个 tick）
+        if self._stats["ticks_received"] % 60 == 0 and self._stats["ticks_received"] > 0:
+            self._refresh_kline_volume()
+
+        # 4. Periodic funding rate check (every 100 ticks, ~5 minutes at medium attention)
         # 定期 funding rate 检查（每 100 个 tick，中等注意力下约 5 分钟）
         if self._stats["ticks_received"] % 100 == 0:
             self._check_funding_rates()
 
-        # 4. Process pending intents -> submit to paper engine
+        # 5. Process pending intents -> submit to paper engine
         if self._auto_submit:
             self._process_pending_intents()
 
-        # 5. Check stop-losses against current prices / 检查止损
+        # 6. Check stop-losses against current prices / 检查止损
         if self._stop_mgr and self._latest_prices:
             self._check_stops()
 
@@ -267,6 +297,52 @@ class PipelineBridge:
                 )
             except Exception:
                 logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
+
+    def _refresh_kline_volume(self) -> None:
+        """
+        Periodically fetch latest kline from REST API to get real volume data.
+        定期从 REST API 获取最新 K线以获取真实成交量。
+
+        The WebSocket ticker doesn't provide per-trade volume, but REST kline API does.
+        WebSocket ticker 不提供单笔成交量，但 REST K线 API 有。
+        """
+        import urllib.request
+        import json as _json
+
+        tf_map = {"1m": "1", "5m": "5", "15m": "15", "1h": "60"}
+
+        for symbol in ["BTCUSDT", "ETHUSDT"]:
+            for tf, interval in tf_map.items():
+                try:
+                    url = (
+                        f"https://api.bybit.com/v5/market/kline"
+                        f"?category=linear&symbol={symbol}&interval={interval}&limit=2"
+                    )
+                    req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        data = _json.loads(resp.read().decode())
+
+                    if data.get("retCode") != 0:
+                        continue
+
+                    klines = data.get("result", {}).get("list", [])
+                    if not klines:
+                        continue
+
+                    # Bybit returns newest first; we want the most recently CLOSED kline (index 1)
+                    # The kline at index 0 is still forming
+                    if len(klines) >= 2:
+                        closed = klines[1]  # [startTime, open, high, low, close, volume, turnover]
+                        volume = float(closed[5]) if len(closed) > 5 else 0.0
+                        # Update the last closed bar's volume in KlineManager
+                        buf = self._km.get_buffer(symbol, tf)
+                        if buf and len(buf) > 0:
+                            last_bar = buf._bars[-1]  # Access internal deque
+                            if last_bar.volume == 0 and volume > 0:
+                                last_bar.volume = volume
+                                last_bar.turnover = float(closed[6]) if len(closed) > 6 else 0.0
+                except Exception:
+                    pass  # Non-critical, silently skip
 
     def _check_funding_rates(self) -> None:
         """Fetch funding rate data and feed to FundingRate strategy / 获取 funding rate 并喂给策略"""

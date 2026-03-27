@@ -433,6 +433,10 @@ class KlineAggregator:
                 volume=volume,
                 turnover=turnover,
             )
+        elif ts_ms < self._current_bar.open_time_ms:
+            # Guard: reject out-of-order ticks (timestamp before current bar's period)
+            # 防护：拒绝乱序 tick（时间戳早于当前 K线周期）
+            return None  # Silently discard stale tick / 静默丢弃过时 tick
         elif ts_ms >= self._current_bar.close_time_ms:
             # Tick belongs to a new period → close the current kline
             # Tick 属于新周期 → 闭合当前 K线

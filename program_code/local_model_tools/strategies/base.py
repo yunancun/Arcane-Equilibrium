@@ -306,6 +306,34 @@ class StrategyBase(ABC):
             "avg_loss": round(sum(t["pnl"] for t in losses) / len(losses), 4) if losses else 0.0,
         }
 
+    def get_persistent_state(self) -> dict[str, Any]:
+        """
+        Get strategy state that should survive restarts.
+        获取需要在重启后保留的策略状态。
+
+        Override in subclasses to include strategy-specific state.
+        子类重写以包含策略特定状态。
+        """
+        return {
+            "name": self.name,
+            "state": self._state,
+            "realized_pnl": self._realized_pnl,
+            "total_fees": self._total_fees,
+        }
+
+    def restore_persistent_state(self, saved: dict[str, Any]) -> None:
+        """
+        Restore strategy state from a previous save.
+        从之前的保存中恢复策略状态。
+
+        Override in subclasses to restore strategy-specific state.
+        子类重写以恢复策略特定状态。
+        """
+        if saved.get("state") == STRATEGY_ACTIVE:
+            self._state = STRATEGY_ACTIVE
+        self._realized_pnl = saved.get("realized_pnl", 0.0)
+        self._total_fees = saved.get("total_fees", 0.0)
+
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
         """Get strategy-specific status / 获取策略特定状态"""

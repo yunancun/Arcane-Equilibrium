@@ -134,6 +134,11 @@ class StrategyOrchestrator:
         # Intent history (for audit) — bounded deque / 意图历史（审计用）— 有界 deque
         self._intent_history: deque[dict[str, Any]] = deque(maxlen=intent_history_capacity)
 
+        # Current regime context (cached from Regime_Detector signals)
+        # 当前 regime 上下文（从 Regime_Detector 信号缓存）
+        self._current_regime: str = "unknown"
+        self._current_regime_ts_ms: int = 0
+
         # Statistics / 统计
         self._stats = {
             "signals_dispatched": 0,
@@ -230,6 +235,15 @@ class StrategyOrchestrator:
                 if s.state == STRATEGY_ACTIVE
             ]
             self._stats["signals_dispatched"] += 1
+
+            # Cache regime info for strategy use / 缓存 regime 信息供策略使用
+            if signal.source == "Regime_Detector" and signal.metadata:
+                self._current_regime = signal.metadata.get("regime", "unknown")
+                self._current_regime_ts_ms = signal.ts_ms
+
+            # Enrich signal with current regime context / 用当前 regime 上下文丰富信号
+            if hasattr(signal, "metadata") and signal.metadata and self._current_regime != "unknown":
+                signal.metadata["_regime"] = self._current_regime
 
         for strategy in active_strategies:
             try:
@@ -361,6 +375,41 @@ class StrategyOrchestrator:
                 "indicator_engine_status": self._ie.get_status(),
                 "signal_engine_status": self._se.get_stats(),
             }
+
+    def get_indicators(self, symbol: str, timeframe: str) -> dict[str, Any]:
+        """
+        Get cached indicator values for a symbol + timeframe.
+        获取指定交易对+时间框架的缓存指标值。
+
+        Strategies can use this to check higher timeframe trends.
+        策略可用此查看高时间框架趋势。
+        """
+        return self._ie.get_indicators(symbol, timeframe)
+
+    def get_current_regime(self) -> str:
+        """Get the latest detected market regime / 获取最新检测到的市场 regime"""
+        return self._current_regime
+
+    def save_all_strategy_state(self) -> dict[str, Any]:
+        """Save persistent state of all strategies / 保存所有策略的持久化状态"""
+        with self._lock:
+            return {
+                name: strategy.get_persistent_state()
+                for name, strategy in self._strategies.items()
+                if hasattr(strategy, 'get_persistent_state')
+            }
+
+    def restore_all_strategy_state(self, saved: dict[str, Any]) -> None:
+        """Restore persistent state of all strategies / 恢复所有策略的持久化状态"""
+        with self._lock:
+            for name, state in saved.items():
+                strategy = self._strategies.get(name)
+                if strategy and hasattr(strategy, 'restore_persistent_state'):
+                    try:
+                        strategy.restore_persistent_state(state)
+                        logger.info("Restored state for %s / 恢复策略状态: %s", name, name)
+                    except Exception:
+                        logger.exception("Failed to restore state for %s / 恢复失败", name)
 
     def list_available_strategies(self) -> list[str]:
         """List all registered strategy names / 列出所有注册的策略名称"""

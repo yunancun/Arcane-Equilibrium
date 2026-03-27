@@ -75,6 +75,7 @@ class GridTradingStrategy(StrategyBase):
         lower_price: float = 40000.0,
         grid_count: int = 10,
         qty_per_grid: float = 0.001,
+        geometric: bool = False,
     ) -> None:
         super().__init__()
         if upper_price <= lower_price:
@@ -97,11 +98,21 @@ class GridTradingStrategy(StrategyBase):
         self._grid_count = grid_count
         self._qty = qty_per_grid
 
-        # Calculate grid levels (evenly spaced from lower to upper)
-        # 计算网格价位（从下边界到上边界均匀分布）
-        step = (upper_price - lower_price) / grid_count
-        self._grid_levels = [lower_price + i * step for i in range(grid_count + 1)]
-        self._grid_step = step
+        # Calculate grid levels / 计算网格价位
+        if geometric:
+            # Geometric spacing: constant percentage between levels
+            # 几何间距：每级之间百分比恒定
+            ratio = (upper_price / lower_price) ** (1.0 / grid_count)
+            self._grid_levels = [lower_price * (ratio ** i) for i in range(grid_count + 1)]
+            self._grid_step = 0  # Not used in geometric mode
+            self._geometric = True
+            self._geo_ratio = ratio
+        else:
+            step = (upper_price - lower_price) / grid_count
+            self._grid_levels = [lower_price + i * step for i in range(grid_count + 1)]
+            self._grid_step = step
+            self._geometric = False
+            self._geo_ratio = 1.0
 
         # Track which grid level the price was last in
         # 追踪价格上次在哪个网格层
@@ -140,10 +151,12 @@ class GridTradingStrategy(StrategyBase):
             return 0
         if price >= self._upper:
             return self._grid_count
-        # Use floor() for correct interval mapping (which grid interval the price is in)
-        # 使用 floor() 正确映射到网格区间（价格在哪个网格区间内）
-        idx = int(math.floor((price - self._lower) / self._grid_step))
-        return min(idx, self._grid_count)  # clamp to valid range / 限制在有效范围内
+        if self._geometric:
+            idx = int(math.floor(math.log(price / self._lower) / math.log(self._geo_ratio)))
+            return min(idx, self._grid_count)
+        else:
+            idx = int(math.floor((price - self._lower) / self._grid_step))
+            return min(idx, self._grid_count)  # clamp to valid range / 限制在有效范围内
 
     def on_tick(self, symbol: str, price: float, ts_ms: int) -> None:
         """
@@ -256,6 +269,43 @@ class GridTradingStrategy(StrategyBase):
             self._last_grid_index = current_index
             self._last_price = price
 
+    def check_grid_health(self) -> dict[str, Any]:
+        """
+        Check if grid needs recentering.
+        检查网格是否需要重新居中。
+        """
+        if self._last_price is None:
+            return {"needs_reset": False, "reason": "no_data"}
+
+        # If price is within 10% of boundary for extended time, suggest reset
+        range_size = self._upper - self._lower
+        if self._last_price < self._lower + range_size * 0.1:
+            return {"needs_reset": True, "reason": "price_near_lower_boundary", "last_price": self._last_price}
+        if self._last_price > self._upper - range_size * 0.1:
+            return {"needs_reset": True, "reason": "price_near_upper_boundary", "last_price": self._last_price}
+        return {"needs_reset": False, "reason": "price_in_range"}
+
+    def get_persistent_state(self) -> dict[str, Any]:
+        base = super().get_persistent_state()
+        base.update({
+            "last_grid_index": self._last_grid_index,
+            "last_price": self._last_price,
+            "net_inventory": self._net_inventory,
+            "trade_count": self._trade_count,
+            "buy_count": self._buy_count,
+            "sell_count": self._sell_count,
+        })
+        return base
+
+    def restore_persistent_state(self, saved: dict[str, Any]) -> None:
+        super().restore_persistent_state(saved)
+        self._last_grid_index = saved.get("last_grid_index")
+        self._last_price = saved.get("last_price")
+        self._net_inventory = saved.get("net_inventory", 0.0)
+        self._trade_count = saved.get("trade_count", 0)
+        self._buy_count = saved.get("buy_count", 0)
+        self._sell_count = saved.get("sell_count", 0)
+
     def get_status(self) -> dict[str, Any]:
         return {
             "strategy": self.name,
@@ -265,6 +315,8 @@ class GridTradingStrategy(StrategyBase):
             "lower_price": self._lower,
             "grid_count": self._grid_count,
             "grid_step": round(self._grid_step, 2),
+            "geometric": self._geometric,
+            "grid_health": self.check_grid_health(),
             "qty_per_grid": self._qty,
             "current_grid_index": self._last_grid_index,
             "last_price": self._last_price,

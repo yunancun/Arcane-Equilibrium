@@ -108,6 +108,12 @@ class MACrossoverStrategy(StrategyBase):
             return
 
         with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
+            # Multi-TF regime filter: skip trend-following in ranging/squeeze markets
+            # 多时间框架 regime 过滤：震荡/收窄市场中跳过趋势跟踪
+            signal_regime = getattr(signal, "metadata", {}).get("_regime", "unknown")
+            if signal_regime in ("ranging", "squeeze"):
+                return
+
             if direction == "long" and self._current_position != "long":
                 # Close short if exists, then go long / 有空仓先平仓，再开多
                 if self._current_position == "short":
@@ -144,6 +150,19 @@ class MACrossoverStrategy(StrategyBase):
                 self._current_position = "short"
                 self._trade_count += 1
                 self._last_trade_ts_ms = int(time.time() * 1000)
+
+    def get_persistent_state(self) -> dict[str, Any]:
+        base = super().get_persistent_state()
+        base.update({
+            "current_position": self._current_position,
+            "trade_count": self._trade_count,
+        })
+        return base
+
+    def restore_persistent_state(self, saved: dict[str, Any]) -> None:
+        super().restore_persistent_state(saved)
+        self._current_position = saved.get("current_position")
+        self._trade_count = saved.get("trade_count", 0)
 
     def get_status(self) -> dict[str, Any]:
         return {
