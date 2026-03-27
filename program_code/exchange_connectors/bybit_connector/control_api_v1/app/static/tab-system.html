@@ -9,12 +9,40 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
+<style>
+  .tip-metric { position: relative; cursor: help; }
+  .tip-metric .tip-box { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    background: #1c2128; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; min-width: 260px; max-width: 360px;
+    z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.4); font-size: 12px; line-height: 1.6; }
+  .tip-metric:hover .tip-box { display: block; }
+  .tip-box .tip-raw { font-family: monospace; color: var(--accent); font-size: 11px; margin-bottom: 6px; word-break: break-all; }
+  .tip-box .tip-desc { color: var(--text-dim); }
+  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid #21262d; }
+  .qa-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); font-size: 12px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
+  .qa-btn:hover { border-color: var(--accent); }
+  .qa-btn .qa-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .qa-dot-on { background: var(--green); }
+  .qa-dot-off { background: var(--text-dim); }
+  /* Confirm Modal */
+  .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
+  .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
+  .confirm-dialog { background: #161b22; border: 1px solid var(--border); border-radius: 12px; width: min(480px, 90vw);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .confirm-header { padding: 16px 20px; border-bottom: 1px solid #21262d; font-size: 15px; font-weight: 600; }
+  .confirm-body { padding: 16px 20px; font-size: 13px; line-height: 1.7; color: var(--text-dim); }
+  .confirm-body strong { color: var(--text); }
+  .confirm-body .warn-box { background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.2);
+    border-radius: 8px; padding: 10px 14px; margin-top: 10px; color: var(--red); font-size: 12px; }
+  .confirm-footer { padding: 12px 20px; border-top: 1px solid #21262d; display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+
 <!-- ═══ Runtime Summary ═══ -->
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
       <h2>&#x1F4CA; 运行态摘要 / Runtime Summary</h2>
-      <div class="subtitle">系统核心状态一览 — 执行权限、模式、保护边界</div>
+      <div class="subtitle">系统核心状态一览 — 鼠标悬停查看详细说明</div>
     </div>
     <span id="mode-badge" class="oc-chip oc-chip-neutral">loading...</span>
   </div>
@@ -22,12 +50,28 @@
   <div id="explain-runtime"></div>
 
   <div class="oc-metrics" id="runtime-grid">
-    <div class="oc-metric"><div class="oc-metric-label">Global Mode</div><div class="oc-metric-val" id="m-mode">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val" id="m-auth">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Demo State</div><div class="oc-metric-val" id="m-demo">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Snapshot Bound</div><div class="oc-metric-val" id="m-snap" style="font-size:13px">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Runtime Protected</div><div class="oc-metric-val" id="m-prot">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val" id="m-sysmode">--</div></div>
+    <div class="oc-metric tip-metric" id="m-mode-wrap"><div class="oc-metric-label">全局模式</div><div class="oc-metric-val" id="m-mode">--</div><div class="tip-box" id="m-mode-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-auth-wrap"><div class="oc-metric-label">执行权限</div><div class="oc-metric-val" id="m-auth">--</div><div class="tip-box" id="m-auth-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系统能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-snap-wrap"><div class="oc-metric-label">快照绑定</div><div class="oc-metric-val" id="m-snap" style="font-size:13px">--</div><div class="tip-box" id="m-snap-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">运行保护</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">阶段标签</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="quick-actions">
+    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')">
+      <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span> 模拟交易 Paper
+    </button>
+    <button class="qa-btn" id="qa-demo" onclick="confirmAction('demo')">
+      <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span> Bybit Demo
+    </button>
+    <button class="qa-btn" id="qa-feed" onclick="confirmAction('feed')">
+      <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span> 行情流 Feed
+    </button>
+    <button class="qa-btn" id="qa-scanner" onclick="confirmAction('scanner')">
+      <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner
+    </button>
   </div>
 </div>
 
@@ -36,12 +80,12 @@
   <h2>&#x1F4B5; 业务概览 / Business Summary</h2>
   <div class="subtitle">今日 PnL、AI 成本、整体 ROI</div>
   <div class="oc-metrics" id="biz-grid">
-    <div class="oc-metric"><div class="oc-metric-label">Net PnL (Paper)</div><div class="oc-metric-val" id="b-pnl">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI Cost Today</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI Cost 30d</div><div class="oc-metric-val" id="b-cost30" style="font-size:14px">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Orders Today</div><div class="oc-metric-val" id="b-orders">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Active Positions</div><div class="oc-metric-val" id="b-positions">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Active Strategies</div><div class="oc-metric-val" id="b-strategies">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">模拟净盈亏</div><div class="oc-metric-val" id="b-pnl">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日 AI 成本</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val" id="b-cost30" style="font-size:14px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">累计订单数</div><div class="oc-metric-val" id="b-orders">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">当前持仓数</div><div class="oc-metric-val" id="b-positions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">注册策略数</div><div class="oc-metric-val" id="b-strategies">--</div></div>
   </div>
 </div>
 
@@ -49,7 +93,7 @@
 <div class="oc-grid-2">
   <div class="oc-card">
     <h2>&#x1F50C; 来源上下文 / Source Context</h2>
-    <div class="subtitle">连接状态、数据完整性</div>
+    <div class="subtitle">数据连接状态与完整性</div>
     <div id="source-context-body" class="oc-loading">Loading...</div>
   </div>
   <div class="oc-card">
@@ -66,63 +110,223 @@
     <div id="explain-pf"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Family</th><th>Exchange</th><th>Account</th><th>Enabled</th><th>Visible</th><th>Mode</th><th>Capability</th><th>Execution</th></tr></thead>
+        <thead><tr><th>产品族</th><th>交易所</th><th>账户</th><th>启用</th><th>可见</th><th>模式</th><th>能力</th><th>执行</th></tr></thead>
         <tbody id="pf-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
 </details>
 
+<!-- ═══ Confirm Modal ═══ -->
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-dialog">
+    <div class="confirm-header" id="confirm-title">确认操作</div>
+    <div class="confirm-body" id="confirm-body"></div>
+    <div class="confirm-footer">
+      <button class="oc-btn" onclick="closeConfirm()">取消 / Cancel</button>
+      <button class="oc-btn oc-btn-primary" id="confirm-ok" onclick="executeConfirmed()">确认执行 / Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ─── Chinese Status Translations ──────────────────────────────
+const MODE_CN = {
+  'design_only': '仅设计模式',
+  'observe_only': '仅观察模式',
+  'demo_reserved': 'Demo 预留',
+  'demo_enabled': 'Demo 已启用',
+  'live_reserved': 'Live 预留',
+  'live_enabled': 'Live 已启用',
+};
+const AUTH_CN = {
+  'demo_blocked': 'Demo 受限',
+  'not_granted': '未授权',
+  'demo_only': '仅 Demo',
+  'demo_enabled': 'Demo 可执行',
+  'live_enabled': 'Live 可执行',
+  'blocked': '已阻止',
+};
+const CAP_CN = {
+  'shadow_control_ready': '影子控制就绪',
+  'demo_ready': 'Demo 就绪',
+  'live_ready': 'Live 就绪',
+  'not_ready': '未就绪',
+};
+
+function cnLabel(raw, map) {
+  if (!raw) return '--';
+  return map[raw] || raw.replace(/_/g, ' ');
+}
+
+function setTip(id, raw, desc) {
+  const el = $(id);
+  if (el) el.innerHTML = '<div class="tip-raw">' + ocEsc(raw || '--') + '</div><div class="tip-desc">' + desc + '</div>';
+}
+
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-runtime').innerHTML = ocExplain(
-  '这里显示系统的核心运行状态。绿色表示正常运行，黄色表示受限模式。当前系统处于"只读模式"——可以观察市场数据，但不会执行任何真实交易。',
-  '系统使用多层保护机制：Global Mode 控制整体模式（observe_only → demo_enabled → live）；Execution Authority 控制是否允许下单（not_granted → demo_only → live_enabled）；Runtime Protected 确保关键状态不会被意外修改。所有状态切换需要通过 Control Plane 的正式流程。'
+  '这里显示系统的核心运行状态。鼠标悬停在每个指标上可以看到原始状态值和详细说明。下方的快速按钮可以直接开关关键功能。',
+  '系统使用多层保护机制：全局模式控制整体运行阶段（仅设计 → 仅观察 → Demo → Live）；执行权限控制是否允许下单；系统能力表示当前可用的功能级别；运行保护确保关键状态不会被意外修改。'
 );
 
 $('explain-pf').innerHTML = ocExplain(
-  '产品族是 Bybit 交易所支持的 6 种交易类别。每种类别有独立的开关和权限设置。目前只有"永续合约（线性）"在模拟中启用。',
-  '6 种产品族分别是：spot（现货）、margin（杠杆）、perp_linear（USDT 永续合约）、perp_inverse（币本位永续）、options（期权）、other_derivatives（其他衍生品）。每个产品族有独立的 exchange_fact（交易所层面是否支持）、account_fact（账户层面是否开通）、enabled_switch（我们是否启用）、visibility_switch（是否在 GUI 中显示）。'
+  '产品族是 Bybit 交易所支持的 6 种交易类别。每种类别有独立的开关和权限设置。',
+  '6 种产品族：spot（现货）、margin（杠杆）、perp_linear（USDT 永续）、perp_inverse（币本位永续）、options（期权）、other_derivatives（其他衍生品）。'
 );
+
+// ─── Quick Action State ──────────────────────────────────────
+let _paperActive = false, _feedRunning = false, _demoConnected = false, _scannerRunning = false;
+let _pendingAction = null;
+let _stateRevision = 0;
+
+// ─── Confirm Dialog ──────────────────────────────────────────
+const CONFIRM_MSGS = {
+  paper: {
+    on: { title: '&#x25B6; 启动模拟交易 / Start Paper Trading',
+      body: '<strong>即将启动模拟交易系统。</strong><p>模拟交易使用虚拟资金（$100,000），不涉及任何真实资金。所有订单在本地引擎中模拟执行。</p><p>启动后，策略可以通过模拟引擎提交订单、管理持仓、追踪盈亏。</p>' },
+    off: { title: '&#x23F9; 停止模拟交易 / Stop Paper Trading',
+      body: '<strong>即将停止模拟交易系统。</strong><div class="warn-box">&#x26A0; 停止后，所有未平仓的模拟持仓将被冻结，不再更新市值。活跃的订单将被取消。当前会话的盈亏数据会被保留。</div>' },
+  },
+  feed: {
+    on: { title: '&#x1F4E1; 启动行情流 / Start Market Feed',
+      body: '<strong>即将启动实时行情数据流。</strong><p>系统将通过 WebSocket 接收 Bybit 的实时价格数据，用于策略分析和 K 线图表。</p><p>启动后会产生少量网络流量（约 1-5 KB/s），不涉及任何交易操作。</p>' },
+    off: { title: '&#x23F9; 停止行情流 / Stop Market Feed',
+      body: '<strong>即将停止行情数据流。</strong><div class="warn-box">&#x26A0; 停止后，K 线图表将不再更新，策略将无法接收到新的价格数据。已有的策略分析将使用最后已知价格。</div>' },
+  },
+  demo: {
+    on: { title: '&#x1F3E6; 启用 Bybit Demo / Enable Bybit Demo',
+      body: '<strong>即将启用 Bybit Demo 交易。</strong><p>Bybit Demo 是 Bybit 官方提供的沙盒环境，使用真实市场数据但虚拟资金。订单会发送到 Bybit 的测试服务器执行。</p><p>启用后，系统将以"双重执行"模式运行：每笔交易同时在本地模拟和 Bybit Demo 上执行。</p>' },
+    off: { title: '&#x23F9; 关闭 Bybit Demo / Disable Bybit Demo',
+      body: '<strong>即将关闭 Bybit Demo 交易。</strong><div class="warn-box">&#x26A0; 关闭后，不再向 Bybit Demo 发送订单。Bybit Demo 上的持仓不会自动平仓——你需要在 Bybit 网站手动处理。本地模拟不受影响。</div>' },
+  },
+  scanner: {
+    on: { title: '&#x1F50D; 启动自动扫描 / Start Auto Scanner',
+      body: '<strong>即将启动市场扫描器。</strong><p>扫描器每 5 分钟分析 650+ 个 Bybit 交易对，自动发现交易机会并部署对应策略。</p><p>AI Agent 将根据评分结果自主决定启动哪些策略（上限 100 个），你可以通过策略中心的"Hard Stop"按钮手动关闭任何策略。</p>' },
+    off: { title: '&#x23F9; 停止自动扫描 / Stop Auto Scanner',
+      body: '<strong>即将停止市场扫描器。</strong><div class="warn-box">&#x26A0; 停止后，不再自动发现新的交易机会。已部署的策略将继续运行，但不会有新策略被自动创建。</div>' },
+  },
+};
+
+function confirmAction(action) {
+  _pendingAction = action;
+  let isOn = false;
+  if (action === 'paper') isOn = _paperActive;
+  else if (action === 'feed') isOn = _feedRunning;
+  else if (action === 'demo') isOn = _demoConnected;
+  else if (action === 'scanner') isOn = _scannerRunning;
+
+  const msg = CONFIRM_MSGS[action][isOn ? 'off' : 'on'];
+  $('confirm-title').innerHTML = msg.title;
+  $('confirm-body').innerHTML = msg.body;
+  $('confirm-overlay').classList.add('show');
+}
+
+function closeConfirm() {
+  $('confirm-overlay').classList.remove('show');
+  _pendingAction = null;
+}
+
+async function executeConfirmed() {
+  closeConfirm();
+  const action = _pendingAction;
+  if (!action) return;
+
+  if (action === 'paper') {
+    if (_paperActive) {
+      await ocPost('/api/v1/paper/session/stop', ocEnvelope({}, _stateRevision));
+    } else {
+      await ocPost('/api/v1/paper/session/start', ocEnvelope({ initial_balance: 100000 }, _stateRevision));
+    }
+    ocToast('Paper Trading ' + (_paperActive ? 'stopped' : 'started'), 'success');
+  } else if (action === 'feed') {
+    if (_feedRunning) {
+      await ocPost('/api/v1/paper/market-feed/stop');
+    } else {
+      await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
+    }
+    ocToast('Market Feed ' + (_feedRunning ? 'stopped' : 'started'), 'success');
+  } else if (action === 'demo') {
+    // Demo enable/disable is a config change
+    ocToast('Demo toggle — check Demo tab for connection status', 'info');
+  } else if (action === 'scanner') {
+    ocToast('Scanner toggle — check Strategy tab', 'info');
+  }
+
+  setTimeout(loadAll, 1000);
+}
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadOverview() {
   const d = await ocApi('/api/v1/system/overview');
   if (!d || !d.data) return;
   const ov = d.data;
-  // Data is nested: global_runtime.global_mode_state, etc.
   const gr = ov.global_runtime || ov;
 
-  ocSetText('m-mode', gr.global_mode_state || gr.global_stage_label || ov.global_execution_mode_switch || '--');
-  ocSetText('m-auth', gr.global_execution_authority_state || ov.execution_authority_state || '--');
-  ocSetText('m-demo', gr.global_capability_state || ov.demo_state_switch || '--');
-  ocSetText('m-snap', gr.runtime_still_protected != null ? (gr.runtime_still_protected ? 'Protected' : 'Unprotected') : '--');
-  ocSetText('m-prot', gr.runtime_still_protected ? 'Yes' : (ov.runtime_protected ? 'Yes' : 'No'));
-  ocSetText('m-sysmode', ov.system_mode || 'read_only');
+  // Global Mode
+  const modeRaw = gr.global_mode_state || '';
+  ocSetText('m-mode', cnLabel(modeRaw, MODE_CN));
+  $('m-mode').className = 'oc-metric-val ' + (modeRaw.includes('live') ? 'red' : modeRaw.includes('demo') ? 'yellow' : 'green');
+  setTip('m-mode-tip', modeRaw, '全局运行模式。design_only = 仅设计阶段，不执行任何操作；observe_only = 可观察市场但不交易；demo_enabled = 允许 Demo 交易；live_enabled = 允许真实交易。');
+
+  // Execution Authority
+  const authRaw = gr.global_execution_authority_state || '';
+  ocSetText('m-auth', cnLabel(authRaw, AUTH_CN));
+  $('m-auth').className = 'oc-metric-val ' + (authRaw.includes('live') ? 'red' : authRaw.includes('demo_enabled') ? 'yellow' : 'green');
+  setTip('m-auth-tip', authRaw, '执行权限状态。blocked/not_granted = 不允许任何下单；demo_blocked = Demo 模式受限；demo_only = 仅允许 Demo 下单；live_enabled = 允许真实下单（需要多重审批）。');
+
+  // Capability
+  const capRaw = gr.global_capability_state || '';
+  ocSetText('m-demo', cnLabel(capRaw, CAP_CN));
+  setTip('m-demo-tip', capRaw, '系统能力状态。shadow_control_ready = 影子控制面板就绪（可以模拟决策流程但不执行）；demo_ready = Demo 模式就绪；live_ready = 生产模式就绪。');
+
+  // Snapshot
+  const snapProtected = gr.runtime_still_protected;
+  ocSetText('m-snap', snapProtected ? '已保护' : '未保护');
+  $('m-snap').className = 'oc-metric-val ' + (snapProtected ? 'green' : 'yellow');
+  setTip('m-snap-tip', 'runtime_still_protected = ' + snapProtected, '运行时快照保护。已保护 = 关键状态不会被意外修改，所有变更需要通过正式 Control Plane 流程。');
+
+  // Runtime Protected
+  ocSetText('m-prot', snapProtected ? '&#x2705; 已启用' : '&#x274C; 未启用');
+  $('m-prot').className = 'oc-metric-val ' + (snapProtected ? 'green' : 'red');
+  setTip('m-prot-tip', 'runtime_still_protected = ' + snapProtected, '运行保护机制。已启用 = 系统处于保护状态，execution_authority 不会被意外授予。这是防止误操作的关键安全层。');
+
+  // Stage Label
+  const stageRaw = gr.global_stage_label || '';
+  ocSetText('m-stage', stageRaw.replace(/_/g, ' '));
+  setTip('m-stage-tip', stageRaw, '当前系统阶段标签。design_only_gate_closed = K 章设计门已关闭，系统处于仅设计阶段。需要完成 M 章（Supervised Live Gate）才能进入下一阶段。');
 
   // Mode badge
-  const mode = gr.global_mode_state || gr.global_stage_label || '';
   const badge = $('mode-badge');
-  if (mode.includes('live')) { badge.textContent = 'LIVE'; badge.className = 'oc-chip oc-chip-bad'; }
-  else if (mode.includes('demo')) { badge.textContent = 'DEMO'; badge.className = 'oc-chip oc-chip-warn'; }
-  else { badge.textContent = mode.includes('design') ? 'DESIGN ONLY' : 'OBSERVE ONLY'; badge.className = 'oc-chip oc-chip-good'; }
+  if (modeRaw.includes('live')) { badge.textContent = '&#x1F534; LIVE 模式'; badge.className = 'oc-chip oc-chip-bad'; }
+  else if (modeRaw.includes('demo') && !modeRaw.includes('design')) { badge.textContent = '&#x1F7E1; DEMO 模式'; badge.className = 'oc-chip oc-chip-warn'; }
+  else { badge.textContent = '&#x1F7E2; 安全模式'; badge.className = 'oc-chip oc-chip-good'; }
 }
 
 async function loadSourceContext() {
   const d = await ocApi('/api/v1/system/source-context');
-  if (!d || !d.data) { ocSetHtml('source-context-body', '<div class="oc-loading">Failed to load</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('source-context-body', '<div class="oc-loading">无法加载</div>'); return; }
   const ctx = d.data;
+
+  const SC_CN = {
+    'ready': '就绪', 'healthy': '健康', 'complete': '完整', 'not_attached': '未连接',
+    'fact_source': '数据源', 'execution_source_reserved': '执行源（预留）',
+    'private_readonly': '只读私有',
+  };
+  function scCn(v) { return SC_CN[v] || v; }
+
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
   const fields = [
-    ['REST', ctx.rest_connected || ctx.rest_status],
-    ['WebSocket', ctx.ws_connected || ctx.ws_status],
-    ['Account', ctx.account_completeness || ctx.account_status],
-    ['Connector', ctx.connector_role || ctx.connector_type],
+    ['REST 连接', ctx.rest_private_connection_state, ctx.rest_private_connection_state === 'ready'],
+    ['WebSocket 连接', ctx.ws_private_connection_state, ctx.ws_private_connection_state === 'ready'],
+    ['运行连接状态', ctx.runtime_connection_state, ctx.runtime_connection_state === 'healthy'],
+    ['账户数据完整性', ctx.account_fact_completeness_state, ctx.account_fact_completeness_state === 'complete'],
+    ['快照完整性', ctx.source_snapshot_completeness_state, ctx.source_snapshot_completeness_state === 'complete'],
+    ['角色分离', ctx.connector_role_separation_ok, ctx.connector_role_separation_ok === true],
   ];
-  fields.forEach(([label, val]) => {
-    const v = val != null ? String(val) : '--';
-    const cls = (v === 'true' || v === 'connected' || v === 'complete') ? 'green' : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + ocEsc(v) + '</div></div>';
+  fields.forEach(([label, val, ok]) => {
+    const display = typeof val === 'boolean' ? (val ? '正常' : '异常') : scCn(String(val || '--'));
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + (ok ? 'green' : '') + '" style="font-size:14px">' + ocEsc(display) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('source-context-body', html);
@@ -130,24 +334,73 @@ async function loadSourceContext() {
 
 async function loadHealth() {
   const d = await ocApi('/api/v1/system/health');
-  if (!d) { ocSetHtml('health-body', '<div class="oc-loading">Failed to load</div>'); return; }
-  const h = d.data || d;
-  let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
-  const items = Object.entries(h).slice(0, 8);
-  items.forEach(([key, val]) => {
-    const v = val != null ? String(val) : '--';
-    const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    let cls = '';
-    if (v === 'true' || v === 'pass' || v === 'healthy') cls = 'green';
-    else if (v === 'false' || v === 'fail') cls = 'red';
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + ocEsc(v) + '</div></div>';
-  });
-  html += '</div>';
-  ocSetHtml('health-body', html);
+  if (!d || !d.data) { ocSetHtml('health-body', '<div class="oc-loading">无法加载</div>'); return; }
+  const h = d.data;
+
+  let html = '';
+  // Scores
+  if (h.scores) {
+    const SCORE_CN = { 'overall_health_score': '综合健康', 'ai_health_score': 'AI 健康', 'exchange_health_score': '交易所健康',
+      'infra_health_score': '基础设施', 'data_freshness_score': '数据新鲜度' };
+    html += '<div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr))">';
+    Object.entries(h.scores).forEach(([k, v]) => {
+      const label = SCORE_CN[k] || k.replace(/_/g, ' ');
+      const cls = v >= 80 ? 'green' : v >= 50 ? 'yellow' : 'red';
+      html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:18px">' + v + '</div></div>';
+    });
+    html += '</div>';
+  }
+  // Gates
+  if (h.gates) {
+    const GATE_CN = { 'health_gates_overall_state': '总门禁', 'exchange_timeout_gate_state': '交易所超时',
+      'ws_disconnect_gate_state': 'WS 断连', 'latency_gate_state': '延迟', 'freshness_gate_state': '新鲜度' };
+    html += '<div style="margin-top:10px;font-size:12px;color:var(--text-dim)">门禁状态：</div>';
+    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">';
+    Object.entries(h.gates).forEach(([k, v]) => {
+      const label = GATE_CN[k] || k;
+      const passed = v === 'passed';
+      html += '<span class="oc-chip ' + (passed ? 'oc-chip-good' : 'oc-chip-bad') + '">' + (passed ? '&#x2714; ' : '&#x274C; ') + label + '</span>';
+    });
+    html += '</div>';
+  }
+  ocSetHtml('health-body', html || '<div class="oc-loading">No health data</div>');
+}
+
+async function loadQuickStatus() {
+  // Paper session
+  try {
+    const d = await ocApi('/api/v1/paper/session/status');
+    if (d && d.data) {
+      _paperActive = d.data.session.session_state === 'active';
+      $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+      if (d.data.state_revision) _stateRevision = d.data.state_revision;
+    }
+  } catch(e) {}
+  // Feed
+  try {
+    const d = await ocApi('/api/v1/paper/market-feed/status');
+    if (d && d.data) {
+      _feedRunning = d.data.running || false;
+      $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
+    }
+  } catch(e) {}
+  // Demo
+  try {
+    const d = await ocApi('/api/v1/strategy/demo/balance');
+    _demoConnected = d && d.data && d.data.retCode === 0;
+    $('qa-demo-dot').className = 'qa-dot ' + (_demoConnected ? 'qa-dot-on' : 'qa-dot-off');
+  } catch(e) {}
+  // Scanner
+  try {
+    const d = await ocApi('/api/v1/strategy/scanner/opportunities');
+    if (d && d.data && d.data.stats) {
+      _scannerRunning = d.data.stats.running || false;
+      $('qa-scanner-dot').className = 'qa-dot ' + (_scannerRunning ? 'qa-dot-on' : 'qa-dot-off');
+    }
+  } catch(e) {}
 }
 
 async function loadBusiness() {
-  // PnL
   try {
     const d = await ocApi('/api/v1/paper/session/status');
     if (d && d.data) {
@@ -160,8 +413,6 @@ async function loadBusiness() {
       ocSetText('b-positions', d.data.position_count || 0);
     }
   } catch(e) {}
-
-  // AI Cost
   try {
     const d = await ocApi('/api/v1/paper/ai-cost');
     if (d && d.data && d.data.available) {
@@ -169,8 +420,6 @@ async function loadBusiness() {
       ocSetText('b-cost30', '$' + d.data.total_cost_30d.toFixed(2));
     }
   } catch(e) {}
-
-  // Strategies
   try {
     const d = await ocApi('/api/v1/strategy/list');
     if (d && d.data) {
@@ -184,16 +433,16 @@ async function loadProductFamilies() {
   const d = await ocApi('/api/v1/system/product-families');
   if (!d || !d.data) return;
   const families = d.data.families || d.data;
-  if (!Array.isArray(families) && typeof families === 'object') {
-    // object format
+  const PF_CN = { 'spot': '现货', 'margin': '杠杆', 'perp_linear': 'USDT 永续', 'perp_inverse': '币本位永续', 'options': '期权', 'other_derivatives_reserved': '其他衍生品' };
+  if (typeof families === 'object' && !Array.isArray(families)) {
     let html = '';
     Object.entries(families).forEach(([name, f]) => {
       html += '<tr>';
-      html += '<td><strong>' + ocEsc(name) + '</strong></td>';
+      html += '<td><strong>' + ocEsc(PF_CN[name] || name) + '</strong></td>';
       html += '<td>' + ocEsc(f.exchange_fact || '--') + '</td>';
       html += '<td>' + ocEsc(f.account_fact || '--') + '</td>';
-      html += '<td>' + (f.enabled_switch ? '<span class="green">Yes</span>' : 'No') + '</td>';
-      html += '<td>' + (f.visibility_switch ? '<span class="green">Yes</span>' : 'No') + '</td>';
+      html += '<td>' + (f.enabled_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
+      html += '<td>' + (f.visibility_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
       html += '<td>' + ocEsc(f.mode_switch || '--') + '</td>';
       html += '<td>' + ocEsc(f.capability || '--') + '</td>';
       html += '<td>' + ocEsc(f.execution || '--') + '</td>';
@@ -204,7 +453,7 @@ async function loadProductFamilies() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies()]);
+  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus()]);
 }
 
 loadAll();
