@@ -1,5 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系统
-# CLAUDE.md — Claude Code 项目指令文件
+# CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
+# 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
 # 最后更新：2026-03-27
 
 ---
@@ -72,6 +73,7 @@ L    Learning / Self-Observability / Net PnL    ✅ 全部完成
      Phase 3 管线桥接+止损+信号增强              ✅ 完成（管线接通+StopManager+Regime检测+3新规则+历史K线引导）
      全系统审核 A-K 修复                         ✅ 完成（7C+19H+28M+16L 全修 + 路径统一 + I章去重 + mutator 3x→1x）
      GUI 三层架构                                ✅ 完成（Grafana 监控 + TradingView K线 + Bybit Demo 双重执行 + 登录系统）
+     自主交易 Agent                              ✅ 完成（市场扫描器 650 符号 + 策略自动部署 + 多币种支持）
 M    Supervised Live Gate                       ⬜ 未开始
 N    Constrained Autonomous Live                ⬜ 未开始
 ```
@@ -210,10 +212,22 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 路线图 B-I（cron + 加权共识 + volume + Grid 几何 + regime 过滤 + 持久化 + Delta-Neutral）
   ✅ Telegram 告警 + BB Breakout + RSI Divergence + AI Consultation + 远程访问指南
   ✅ GUI 三层架构（Grafana + TradingView + Bybit Demo + 登录系统 + 统一控制台 4 Tab）
+  ✅ 自主交易 Agent（市场扫描器 650 符号 + 策略自动部署 5 品种 + Bybit Demo 同步）
 
 下一步（按优先级）：
   GUI 美化完善（面板细节 / 交互优化 / 移动端适配）
-  Paper Trading 数据分析（积累数据后分析策略表现）
+  Paper Trading + Bybit Demo 数据对比分析
+
+长期优化（自主交易 Agent 持续改进）：
+  - 扫描器策略匹配优化：不只选 trend，根据市场状态平衡 funding_arb / grid / reversion
+  - 策略动态退出：连续亏损 N 次自动停用 + 机会消失时移除
+  - 仓位智能分配：高分机会分配更大仓位（ATR 动态 + score 加权）
+  - 多策略同币种：同一币种可同时跑 Grid + Trend（不同策略类型互补）
+  - 策略表现追踪：每个自动部署的策略独立 PnL，定期排名淘汰末位
+  - 扫描器学习：记录历史扫描→部署→结果，优化分类评分模型
+  - Funding Rate 专扫：独立高频扫描 funding rate（每小时），不等 5 分钟周期
+  - 跨交易所套利：接入 Binance 扫描，发现 Bybit-Binance 价差
+  - 波动率 regime 切换：市场整体波动率变化时自动调整 max_symbols 和策略偏好
 
 之后：
   M 章：Supervised Live Gate（需先积累 paper trading 数据）
@@ -250,10 +264,11 @@ Live 前置条件（M/N 前必须核验）：
 | GUI 交接文档 | `docs/handoffs/2026-03-25_api_gui_handoff/` |
 | 路线图 B-I 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
 | GUI 三层架构工程日志 | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
+| 自主交易 Agent 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成。644 测试，109 路由，8 信号规则，5 策略。GUI 三层架构已上线（Grafana 监控 + TradingView K线 + Bybit Demo 双重执行）。统一控制台 4 Tab + 登录认证。Paper Trading + Bybit Demo 实时运行中。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-27：全系统完成。644 测试，111 路由，8 信号规则。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 三层架构（Grafana + TradingView + Bybit Demo）。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
