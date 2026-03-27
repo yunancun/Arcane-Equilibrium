@@ -266,6 +266,7 @@ Live 前置条件（M/N 前必须核验）：
 | 路线图 B-I 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
 | GUI 三层架构工程日志 | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
 | 自主交易 Agent 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
+| Session 2 总结 | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
