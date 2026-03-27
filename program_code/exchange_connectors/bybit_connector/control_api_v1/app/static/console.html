@@ -138,7 +138,7 @@
           <h2 style="margin-bottom:8px">OpenClaw Gateway</h2>
           <p style="color:var(--text-dim);margin-bottom:20px">OpenClaw 控制台需在独立窗口中打开（安全策略限制嵌入）</p>
           <button class="btn primary" style="font-size:14px;padding:10px 24px"
-            onclick="window.open('http://127.0.0.1:18789/','_blank')">
+            onclick="window.open(window.location.origin+'/openclaw/','_blank')">
             打开 OpenClaw 控制台 / Open OpenClaw Console
           </button>
         </div>
@@ -163,7 +163,9 @@
 </div>
 
 <script>
-const OC = 'http://127.0.0.1:18789';
+// OpenClaw Gateway: proxied through Trading API at /openclaw/
+// 通过 Trading API 的 /openclaw/ 反向代理访问（远程和本地都能工作）
+const OC = window.location.origin + '/openclaw';
 let token = '';
 
 function switchTo(tab) {

@@ -167,3 +167,32 @@ app.include_router(risk_router)
 # ── Phase 2 Strategy Toolkit Router / Phase 2 本地策略工具包路由注册 ──
 from .phase2_strategy_routes import phase2_router  # noqa: E402
 app.include_router(phase2_router)
+
+# ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
+# Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789
+# 将 /openclaw/* 代理到 localhost:18789，远程客户端无需直接访问 18789 端口
+import urllib.request as _oc_urllib  # noqa: E402
+from fastapi import Request  # noqa: E402
+from fastapi.responses import Response  # noqa: E402
+
+@app.api_route("/openclaw/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
+async def openclaw_proxy(path: str, request: Request):
+    """Reverse proxy to OpenClaw Gateway at localhost:18789"""
+    target = f"http://127.0.0.1:18789/{path}"
+    try:
+        body = await request.body()
+        req = _oc_urllib.Request(
+            target,
+            data=body if body else None,
+            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")},
+            method=request.method,
+        )
+        with _oc_urllib.urlopen(req, timeout=10) as resp:
+            content = resp.read()
+            headers = dict(resp.headers)
+            headers.pop("Transfer-Encoding", None)
+            return Response(content=content, status_code=resp.status, headers=headers)
+    except _oc_urllib.HTTPError as e:
+        return Response(content=e.read(), status_code=e.code)
+    except Exception:
+        return Response(content=b'{"error":"OpenClaw Gateway unreachable"}', status_code=502)
