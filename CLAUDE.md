@@ -204,10 +204,11 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ Phase 2 本地策略工具包（11 路由 + 215 测试 + 严格审核）
   ✅ Phase 3 管线桥接+止损+信号增强（8 新文件 + 23 新测试 + 640 总测试）
   ✅ 全系统 A-K 审核修复（7C+19H+28M+16L + 路径统一 + I章去重 + mutator 3x→1x）
+  ✅ 路线图 B-I（cron + 加权共识 + volume + Grid 几何 + regime 过滤 + 持久化 + Delta-Neutral）
+  ✅ Telegram 告警 + BB Breakout + RSI Divergence + AI Consultation + 远程访问指南
 
 下一步（按优先级）：
-  远程安全访问方案（SSH 隧道 / Tailscale / Cloudflare Tunnel）
-  Telegram 告警通道 / 自动循环 cron / AI 咨询接通 H 链
+  ★ GUI 专攻（策略面板 / StopManager / Pipeline / Regime / Grid / PnL 图表 / 整体升级）
 
 之后：
   M 章：Supervised Live Gate（需先积累 paper trading 数据）
@@ -249,4 +250,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成 + 路线图 B-I 已实现。641 测试，104 路由，7 信号规则，4 策略（含 Delta-Neutral Funding Arb）。Paper Trading 实时运行中。加权共识 + regime 过滤 + 策略持久化 + Volume 刷新 + Grid 几何间距已上线。系统全程 read_only / disabled / not_granted。下一步：Telegram 告警 → Beta 数据积累 → M 章。
+> 截至 2026-03-27：全系统完成 + 路线图 B-I + Telegram/BB Breakout/RSI Divergence/AI Consultation 全部完成。644 测试，106 路由，8 信号规则，5 策略。Paper Trading 实时运行中（28 订单 / 35 成交）。系统全程 read_only / disabled / not_granted。下一步：GUI 全面升级（10 个面板）→ Beta 数据分析 → M 章。
