@@ -235,8 +235,9 @@ try:
     AUTO_DEPLOYER = StrategyAutoDeployer(
         orchestrator=ORCHESTRATOR,
         kline_manager=KLINE_MANAGER,
+        paper_engine=PAPER_ENGINE,
         max_symbols=5,
-        qty_per_trade=0.001,
+        risk_per_trade_pct=1.0,  # Risk 1% of balance per trade
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()

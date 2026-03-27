@@ -45,14 +45,20 @@ class StrategyAutoDeployer:
         self,
         orchestrator: Any,
         kline_manager: Any,
+        paper_engine: Any = None,
         *,
         max_symbols: int = 5,
-        qty_per_trade: float = 0.001,
+        risk_per_trade_pct: float = 1.0,  # Risk 1% of balance per trade
+        min_qty_usdt: float = 10.0,       # Minimum $10 per trade
+        max_qty_pct: float = 10.0,        # Max 10% of balance per single trade
     ) -> None:
         self._orch = orchestrator
         self._km = kline_manager
+        self._engine = paper_engine
         self._max_symbols = max_symbols
-        self._qty = qty_per_trade
+        self._risk_pct = risk_per_trade_pct
+        self._min_qty_usdt = min_qty_usdt
+        self._max_qty_pct = max_qty_pct
         self._lock = threading.Lock()
 
         # Track auto-deployed strategies: {strategy_name: {symbol, category, deployed_ts, ...}}
@@ -99,8 +105,58 @@ class StrategyAutoDeployer:
                 except Exception:
                     logger.exception("Failed to deploy %s for %s", category, symbol)
 
+    def _compute_qty(self, symbol: str, price: float, score: float) -> float:
+        """
+        Compute position size based on balance, opportunity score, and risk.
+        根据余额、机会评分和风险计算仓位大小。
+
+        Logic:
+        - Base: risk_per_trade_pct of account balance
+        - Score bonus: higher score → larger allocation (up to 2x)
+        - Divided by active symbol count (portfolio balance)
+        - Clamped to min/max limits
+        """
+        # Get current balance
+        balance = 10000.0  # Default
+        if self._engine:
+            try:
+                state = self._engine.get_state()
+                sess = state.get("session", {})
+                balance = sess.get("current_paper_balance_usdt", 10000.0)
+            except Exception:
+                pass
+
+        if balance <= 0 or price <= 0:
+            return self._min_qty_usdt / max(price, 1)
+
+        # Base allocation: risk% of balance
+        base_usdt = balance * (self._risk_pct / 100.0)
+
+        # Score multiplier: score 50→1.0x, score 100→1.5x, score 200→2.0x
+        score_mult = min(2.0, 0.5 + score / 200.0)
+        allocated_usdt = base_usdt * score_mult
+
+        # Divide by number of active symbols (portfolio balance)
+        active_count = max(1, len(set(d["symbol"] for d in self._deployed.values())) + 1)
+        per_symbol_usdt = allocated_usdt / active_count
+
+        # Clamp to limits
+        per_symbol_usdt = max(self._min_qty_usdt, per_symbol_usdt)
+        max_usdt = balance * (self._max_qty_pct / 100.0)
+        per_symbol_usdt = min(per_symbol_usdt, max_usdt)
+
+        # Convert to asset quantity
+        qty = per_symbol_usdt / price
+        qty = round(qty, 6)
+
+        logger.info(
+            "Position sizing: %s balance=$%.0f score=%.0f → $%.1f (%.6f units) / 仓位计算",
+            symbol, balance, score, per_symbol_usdt, qty,
+        )
+        return qty
+
     def _deploy_strategy(self, symbol: str, category: str, opp: Any) -> None:
-        """Create and register a strategy instance."""
+        """Create and register a strategy instance with intelligent sizing."""
         from .strategies.ma_crossover import MACrossoverStrategy
         from .strategies.bollinger_reversion import BollingerReversionStrategy
         from .strategies.funding_rate_arb import FundingRateArbStrategy
@@ -110,8 +166,11 @@ class StrategyAutoDeployer:
         key = f"{category}_{symbol}"
         strategy = None
 
+        # Compute intelligent position size
+        qty = self._compute_qty(opp.symbol, opp.price, opp.score)
+
         if category == "funding_arb":
-            strategy = FundingRateArbStrategy(symbol=symbol, qty_per_trade=self._qty)
+            strategy = FundingRateArbStrategy(symbol=symbol, qty_per_trade=qty)
 
         elif category == "grid":
             # Calculate grid range from current price (+-5%)
@@ -120,17 +179,17 @@ class StrategyAutoDeployer:
             lower = price * 0.95
             strategy = GridTradingStrategy(
                 symbol=symbol, upper_price=upper, lower_price=lower,
-                grid_count=20, qty_per_grid=self._qty,
+                grid_count=20, qty_per_grid=qty,
             )
 
         elif category == "trend":
-            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=self._qty)
+            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=qty)
 
         elif category == "reversion":
-            strategy = BollingerReversionStrategy(symbol=symbol, qty_per_trade=self._qty)
+            strategy = BollingerReversionStrategy(symbol=symbol, qty_per_trade=qty)
 
         elif category == "breakout":
-            strategy = BBBreakoutStrategy(symbol=symbol, qty_per_trade=self._qty)
+            strategy = BBBreakoutStrategy(symbol=symbol, qty_per_trade=qty)
 
         if strategy is None:
             return
