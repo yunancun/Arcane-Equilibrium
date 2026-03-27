@@ -263,23 +263,39 @@ const tokenInput = document.getElementById('token-input');
 tokenInput.value = getToken();
 tokenInput.addEventListener('change', () => {
   saveToken(tokenInput.value.trim());
+  _authFailCount = 0;  // Reset auth failure counter on new token
+  startAutoRefresh();
   loadAll();
 });
 
 // ============================================================
 // API helper
 // ============================================================
+let _authFailCount = 0;
+const _AUTH_FAIL_MAX = 3;  // Stop polling after 3 consecutive 401s
 async function api(path) {
   const t = getToken();
   if (!t) return null;
+  // Stop hammering server after repeated auth failures / 连续认证失败后停止请求
+  if (_authFailCount >= _AUTH_FAIL_MAX) {
+    document.getElementById('api-dot').className = 'status-dot err';
+    stopAutoRefresh();
+    return null;
+  }
   try {
     const r = await fetch(path, { headers: { 'Authorization': 'Bearer ' + t } });
     if (!r.ok) {
       if (r.status === 401 || r.status === 403) {
+        _authFailCount++;
         document.getElementById('api-dot').className = 'status-dot err';
+        if (_authFailCount >= _AUTH_FAIL_MAX) {
+          stopAutoRefresh();
+          console.warn('Auth failed ' + _authFailCount + ' times, auto-refresh stopped. Re-enter token to resume.');
+        }
       }
       return null;
     }
+    _authFailCount = 0;  // Reset on success / 成功时重置计数器
     document.getElementById('api-dot').className = 'status-dot live';
     return await r.json();
   } catch (e) {

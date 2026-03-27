@@ -18,6 +18,11 @@ def build_client():
     os.environ["OPENCLAW_STATE_FILE"] = str(runtime_dir / "state.json")
     os.environ["OPENCLAW_API_TOKEN"] = "test-token"
 
+    # Reload both main_legacy (state store) and main (app) to reset shared state
+    # between test files. Prevents stale state_revision causing 409 conflicts.
+    # 重新加载 main_legacy 和 main 以重置测试间的共享状态
+    from app import main_legacy as legacy_module
+    importlib.reload(legacy_module)
     from app import main as main_module
     importlib.reload(main_module)
     return TestClient(main_module.app)

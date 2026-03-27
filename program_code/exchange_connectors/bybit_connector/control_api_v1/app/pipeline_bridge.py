@@ -167,11 +167,13 @@ class PipelineBridge:
         if isinstance(event, dict):
             symbol = event.get("symbol", "")
             price = float(event.get("last_price", 0.0))
-            ts_ms = int(event.get("ts_ms", 0) or time.time() * 1000)
+            raw_ts = event.get("ts_ms")
+            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
         else:
             symbol = getattr(event, "symbol", "")
             price = float(getattr(event, "last_price", 0.0))
-            ts_ms = int(getattr(event, "ts_ms", 0) or time.time() * 1000)
+            raw_ts = getattr(event, "ts_ms", None)
+            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
 
         if not symbol or price <= 0:
             return
@@ -340,15 +342,22 @@ class PipelineBridge:
         Periodically fetch latest kline from REST API to get real volume data.
         定期从 REST API 获取最新 K线以获取真实成交量。
 
-        The WebSocket ticker doesn't provide per-trade volume, but REST kline API does.
-        WebSocket ticker 不提供单笔成交量，但 REST K线 API 有。
+        Dynamically covers all tracked symbols, not just BTC/ETH.
+        动态覆盖所有已追踪的交易对，不仅限于 BTC/ETH。
         """
         import urllib.request
         import json as _json
 
         tf_map = {"1m": "1", "5m": "5", "15m": "15", "1h": "60"}
 
-        for symbol in ["BTCUSDT", "ETHUSDT"]:
+        # Use all actively tracked symbols / 使用所有活跃追踪的交易对
+        tracked = self._km.get_tracked_symbols() if hasattr(self._km, "get_tracked_symbols") else []
+        if not tracked:
+            tracked = list(self._latest_prices.keys())
+        # Cap to 10 symbols per refresh to avoid rate limits / 限制每次最多 10 个以避免频率限制
+        symbols = tracked[:10]
+
+        for symbol in symbols:
             for tf, interval in tf_map.items():
                 try:
                     url = (

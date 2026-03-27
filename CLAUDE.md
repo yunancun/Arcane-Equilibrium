@@ -36,7 +36,7 @@
 ## 三、当前系统状态（2026-03-27）
 
 ```
-测试：644 全通过（218 local_model_tools + 426 control_api）
+测试：646 全通过（218 local_model_tools + 428 control_api）
 路由：109 条（+5: login, demo/status, demo/balance, demo/positions, trading page）
 GUI：统一控制台 4 Tab（Dashboard + K线图表 + Grafana 监控 + OpenClaw）
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
@@ -267,10 +267,11 @@ Live 前置条件（M/N 前必须核验）：
 | GUI 三层架构工程日志 | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
 | 自主交易 Agent 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
 | Session 2 总结 | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
+| Session 3 残留审核修复 | `docs/worklogs/control_api_gui/2026-03-27--session3_remaining_audit_fixes.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成。644 测试，111 路由，8 信号规则。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 三层架构（Grafana + TradingView + Bybit Demo）。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-27：全系统完成。646 测试（0 失败），111 路由，8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署 5 个策略到最优品种。GUI 三层架构（Grafana + TradingView + Bybit Demo）。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。

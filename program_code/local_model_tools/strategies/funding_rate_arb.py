@@ -123,7 +123,7 @@ class FundingRateArbStrategy(StrategyBase):
         if self._state != STRATEGY_ACTIVE:
             return
 
-        now_ms = current_ts_ms or int(time.time() * 1000)
+        now_ms = current_ts_ms if current_ts_ms is not None and current_ts_ms != 0 else int(time.time() * 1000)
         hours_to_settle = (next_settle_ts_ms - now_ms) / 3600_000
 
         with self._intent_lock:

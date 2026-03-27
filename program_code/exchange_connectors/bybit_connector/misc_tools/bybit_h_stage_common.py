@@ -44,7 +44,8 @@ def mkcheck(name: str, ok: bool, detail: Any) -> Dict[str, Any]:
 
 
 def write_report(prefix: str, report: Dict[str, Any]) -> None:
-    ts_ms = int(report.get("ts_ms") or int(time.time() * 1000))
+    raw_ts = report.get("ts_ms")
+    ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
     latest = RUNTIME_BASE / f"{prefix}_latest.json"
     dated = RUNTIME_BASE / f"{prefix}_{ts_ms}.json"
     write_json(latest, report)

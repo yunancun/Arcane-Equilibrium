@@ -117,6 +117,7 @@ class KlineBar:
         "open_time_ms", "close_time_ms",
         "open", "high", "low", "close",
         "volume", "turnover", "tick_count", "is_closed",
+        "_vol_comp", "_turn_comp",
     )
 
     def __init__(
@@ -142,6 +143,10 @@ class KlineBar:
         self.turnover = turnover
         self.tick_count = tick_count
         self.is_closed = is_closed
+        # Kahan summation compensators for volume/turnover drift correction
+        # Kahan 补偿求和，修正 volume/turnover 的浮点累加漂移
+        self._vol_comp = 0.0
+        self._turn_comp = 0.0
 
     def update(self, price: float, volume: float = 0.0, turnover: float = 0.0) -> None:
         """
@@ -157,11 +162,18 @@ class KlineBar:
         if price < self.low:
             self.low = price
         self.close = price
-        # Note: float += accumulation has ~1 ULP drift over thousands of ticks.
-        # Acceptable for paper trading; consider Kahan summation for live.
-        # 注意：float 累加在数千 tick 后有 ~1 ULP 漂移。Paper trading 可接受。
-        self.volume += volume
-        self.turnover += turnover
+        # Kahan compensated summation to avoid float drift over thousands of ticks
+        # Kahan 补偿求和，避免数千 tick 后的浮点漂移
+        y = volume - self._vol_comp
+        t = self.volume + y
+        self._vol_comp = (t - self.volume) - y
+        self.volume = t
+
+        y = turnover - self._turn_comp
+        t = self.turnover + y
+        self._turn_comp = (t - self.turnover) - y
+        self.turnover = t
+
         self.tick_count += 1
 
     def to_dict(self) -> dict[str, Any]:
@@ -653,15 +665,17 @@ class KlineManager:
             if isinstance(event, dict):
                 symbol = event.get("symbol", "")
                 price = float(event.get("last_price", 0.0))
-                ts_ms = int(event.get("ts_ms", 0) or time.time() * 1000)
-                volume = float(event.get("volume", 0.0) or 0.0)
-                turnover = float(event.get("turnover", 0.0) or 0.0)
+                raw_ts = event.get("ts_ms")
+                ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+                volume = float(event.get("volume") or 0.0)
+                turnover = float(event.get("turnover") or 0.0)
             else:
                 symbol = getattr(event, "symbol", "")
                 price = float(getattr(event, "last_price", 0.0))
-                ts_ms = int(getattr(event, "ts_ms", 0) or time.time() * 1000)
-                volume = float(getattr(event, "volume", 0.0) or 0.0)
-                turnover = float(getattr(event, "turnover", 0.0) or 0.0)
+                raw_ts = getattr(event, "ts_ms", None)
+                ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+                volume = float(getattr(event, "volume", None) or 0.0)
+                turnover = float(getattr(event, "turnover", None) or 0.0)
         except (ValueError, TypeError):
             # Non-numeric value in event fields — skip silently
             # 事件字段中有非数值 — 静默跳过

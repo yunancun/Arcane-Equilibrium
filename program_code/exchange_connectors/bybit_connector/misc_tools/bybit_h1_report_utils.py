@@ -23,7 +23,8 @@ def write_json(path: Path, obj: Dict[str, Any]) -> None:
 
 
 def save_latest_and_dated(prefix: str, obj: Dict[str, Any]) -> None:
-    ts_ms = int(obj.get("ts_ms") or int(time.time() * 1000))
+    raw_ts = obj.get("ts_ms")
+    ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
     latest = THOUGHT_GATE_DIR / f"{prefix}_latest.json"
     dated = THOUGHT_GATE_DIR / f"{prefix}_{ts_ms}.json"
     write_json(latest, obj)

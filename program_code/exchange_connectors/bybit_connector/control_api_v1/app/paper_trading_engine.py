@@ -523,6 +523,9 @@ def project_position_after_fill(
 
     pos["updated_ts_ms"] = now_ms()
 
+    # Float tolerance for quantity comparisons / 数量比较的浮点容差
+    _QTY_EPS = 1e-10
+
     if pos["side"] == side:
         # Same direction: add to position (average up/down)
         total_qty = pos["qty"] + fill_qty
@@ -532,14 +535,17 @@ def project_position_after_fill(
         pos["qty"] = total_qty
     else:
         # Opposite direction: reduce or flip
-        if fill_qty < pos["qty"]:
+        # Use tolerance-based comparison instead of exact float equality
+        # 使用容差比较代替精确浮点数相等
+        diff = pos["qty"] - fill_qty
+        if diff > _QTY_EPS:
             # Partial close
             close_pnl = _compute_close_pnl(pos, fill_qty, fill_price)
             pos["realized_pnl"] += close_pnl
-            pos["qty"] -= fill_qty
-        elif fill_qty == pos["qty"]:
-            # Full close
-            close_pnl = _compute_close_pnl(pos, fill_qty, fill_price)
+            pos["qty"] = diff  # Use subtraction result directly
+        elif abs(diff) <= _QTY_EPS:
+            # Full close (within tolerance)
+            close_pnl = _compute_close_pnl(pos, pos["qty"], fill_price)
             pos["realized_pnl"] += close_pnl
             del positions[symbol]
             return positions, close_pnl
@@ -859,6 +865,60 @@ class PaperTradingEngine:
             state["orders"].append(order)
             result["order"] = order
             self._audit(state, "order_submitted", f"{order['order_id']} {symbol} {side} {order_type} qty={qty}")
+
+            # TIF enforcement for limit orders / 限价单 TIF 执行
+            # PostOnly: reject if order would fill immediately (guarantees maker fee)
+            # IOC: attempt immediate fill, cancel unfilled remainder
+            # FOK: fill entirely or cancel (simulated: fill if price crosses, else cancel)
+            if order_type == ORDER_TYPE_LIMIT and market_prices and symbol in market_prices:
+                mp = market_prices[symbol]
+                would_fill = should_fill_limit_order(order, mp)
+
+                if time_in_force == TIF_POST_ONLY and would_fill:
+                    _transition_order(order, ORDER_STATE_CANCELED)
+                    order["cancel_reason"] = "post_only_would_fill"
+                    result["order"] = order
+                    result["rejected_reason"] = "post_only_would_fill"
+                    self._audit(state, "order_post_only_canceled", f"{symbol} {side} limit would fill immediately")
+                    return state
+
+                if time_in_force == TIF_FOK:
+                    if would_fill:
+                        fill_price = compute_fill_price(order, mp)
+                        fee = compute_fee(qty, fill_price, is_taker=False)
+                        fill_record = execute_fill(order, qty, fill_price, fee)
+                        state["fills"].append(fill_record)
+                        result["fills"].append(fill_record)
+                        _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
+                        state["pnl"]["closed_position_pnl"] += close_pnl
+                        sess["current_paper_balance_usdt"] = project_balance_after_fill(
+                            sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
+                        )
+                        self._audit(state, "fok_filled", f"{order['order_id']} price={fill_price:.4f}")
+                    else:
+                        _transition_order(order, ORDER_STATE_CANCELED)
+                        order["cancel_reason"] = "fok_not_fillable"
+                        self._audit(state, "fok_canceled", f"{order['order_id']} price not crossed")
+                    return state
+
+                if time_in_force == TIF_IOC:
+                    if would_fill:
+                        fill_price = compute_fill_price(order, mp)
+                        fee = compute_fee(qty, fill_price, is_taker=False)
+                        fill_record = execute_fill(order, qty, fill_price, fee)
+                        state["fills"].append(fill_record)
+                        result["fills"].append(fill_record)
+                        _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
+                        state["pnl"]["closed_position_pnl"] += close_pnl
+                        sess["current_paper_balance_usdt"] = project_balance_after_fill(
+                            sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
+                        )
+                        self._audit(state, "ioc_filled", f"{order['order_id']} price={fill_price:.4f}")
+                    else:
+                        _transition_order(order, ORDER_STATE_CANCELED)
+                        order["cancel_reason"] = "ioc_not_fillable"
+                        self._audit(state, "ioc_canceled", f"{order['order_id']} price not crossed")
+                    return state
 
             # For market orders: immediate fill
             if order_type == ORDER_TYPE_MARKET and market_prices and symbol in market_prices:
