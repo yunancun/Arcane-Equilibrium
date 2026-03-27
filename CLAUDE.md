@@ -271,27 +271,48 @@ Live 前置条件（M/N 前必须核验）：
 
 以下内容已从 CLAUDE.md 移出到独立文件。需要时请读取对应文件。
 
+### 参考文档（references/）
+
 | 内容 | 文件位置 |
 |------|---------|
 | **系统参考手册**（能力目标 A-J / API 路由列表 / 安全加固 / Paper Trading / GUI / 产品族 / 订单类型 / 风控详细 / 止损设计 / AI 注意力税 / 能力层 / 权限 / 部署 / 历史编号） | `docs/references/2026-03-27--system_reference_handbook.md` |
 | 全品类风控框架设计 | `docs/references/2026-03-27--phase1_risk_framework_and_agent_autonomy_design.md` |
-| Phase 2 审核报告 | `docs/references/2026-03-27--phase2_strict_audit_report.md` |
+| Phase 2 严格审核报告（8C+15H+25M+19L） | `docs/references/2026-03-27--phase2_strict_audit_report.md` |
 | Phase 2 修复路线图 | `docs/references/2026-03-27--phase2_audit_fix_roadmap.md` |
-| Phase 2 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--phase2_local_strategy_toolkit_engineering_log.md` |
-| Phase 2 第二轮审核报告 | `docs/references/2026-03-27--phase2_round2_strategic_audit_report.md` |
-| Phase 3 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--phase3_pipeline_bridge_engineering_log.md` |
-| 全系统 A-K 审核报告 | `docs/references/2026-03-27--full_system_audit_A_to_K.md` |
-| 全系统审核修复工程日志 | `docs/worklogs/control_api_gui/2026-03-27--full_system_audit_fix_engineering_log.md` |
-| Layer 2 实现计划 | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` |
-| 本地交易逻辑审查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
-| GUI 交接文档 | `docs/handoffs/2026-03-25_api_gui_handoff/` |
-| 路线图 B-I 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
-| GUI 三层架构工程日志 | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
-| 自主交易 Agent 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
-| Session 2 总结 | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
-| Session 3 残留审核修复 | `docs/worklogs/control_api_gui/2026-03-27--session3_remaining_audit_fixes.md` |
-| GUI 10-Tab 全面重构 | `docs/worklogs/control_api_gui/2026-03-27--gui_10tab_restructure.md` |
-| Session 4 GUI 专业控制台 | `docs/worklogs/control_api_gui/2026-03-27--session4_gui_10tab_professional_console.md` |
+| Phase 2 第二轮审核报告（实战适用性） | `docs/references/2026-03-27--phase2_round2_strategic_audit_report.md` |
+| 全系统 A-K 审核报告（7C+19H+28M+16L） | `docs/references/2026-03-27--full_system_audit_A_to_K.md` |
+| Layer 2 AI 推理引擎实现计划 | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` |
+| 本地交易逻辑审查 + 策略补齐计划 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
+| 远程访问指南（Tailscale + 安全配置） | `docs/references/2026-03-27--remote_access_guide.md` |
+
+### 工作日志（worklogs/control_api_gui/）— 按时间顺序
+
+| 内容 | 文件位置 |
+|------|---------|
+| Layer 2 设计会话：Provider 调研 + 4 层降级 + 预算 | `docs/worklogs/control_api_gui/2026-03-27--layer2_ai_engine_design_session.md` |
+| Phase 1 早期工程日志（S1-S5 修复 + P0/P1/P2 风控 + 8 路由） | `docs/worklogs/control_api_gui/2026-03-27--phase1_risk_framework_implementation.md` |
+| Phase 1 中期工程日志（1-2 轮审核后） | `docs/worklogs/control_api_gui/2026-03-27--phase1_complete_engineering_log.md` |
+| ★ Phase 1 最终审核版（4 轮审核 + 25 修复 + 405 测试 + 93 路由） | `docs/worklogs/control_api_gui/2026-03-27--phase1_final_audited_engineering_log.md` |
+| Pre-Phase1 审核修复（metrics 重写 + SSRF + race fix） | `docs/worklogs/control_api_gui/2026-03-27--pre_phase1_audit_fixes.md` |
+| ★ Phase 2 完整工程日志（K线+6指标+信号+4策略+编排器+11路由） | `docs/worklogs/control_api_gui/2026-03-27--phase2_local_strategy_toolkit_engineering_log.md` |
+| Phase 3 工程日志（管线桥接+止损管理器+信号增强） | `docs/worklogs/control_api_gui/2026-03-27--phase3_pipeline_bridge_engineering_log.md` |
+| ★ 全系统审核修复工程日志（214/214 问题全修） | `docs/worklogs/control_api_gui/2026-03-27--full_system_audit_fix_engineering_log.md` |
+| ★ 路线图 B-I 实现日志（cron+共识+volume+Grid+regime+持久化+Delta-Neutral） | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
+| 远程访问 + 安全加固工程日志 | `docs/worklogs/control_api_gui/2026-03-27--remote_access_and_security_hardening.md` |
+| GUI 三层架构工程日志（Grafana+TradingView+Demo+登录） | `docs/worklogs/control_api_gui/2026-03-27--gui_three_layer_implementation.md` |
+| ★ 自主交易 Agent 工程日志（650 符号扫描+自动部署） | `docs/worklogs/control_api_gui/2026-03-27--autonomous_agent_scanner_deployer.md` |
+| ★★ 完整工作日总结（Session 1-2，13 commits，644 测试） | `docs/worklogs/control_api_gui/2026-03-27--full_day_session_summary.md` |
+| Session 2 总结（GUI三层+Demo+Agent+R1-R5+第4轮审核） | `docs/worklogs/control_api_gui/2026-03-27--session2_audit_fix_and_agent_autonomy.md` |
+| Session 3 残留审核全修（时间戳+浮点容差+Kahan+646测试） | `docs/worklogs/control_api_gui/2026-03-27--session3_remaining_audit_fixes.md` |
+| ★ GUI 10-Tab 全面重构（common.js+8新Tab+双层解释） | `docs/worklogs/control_api_gui/2026-03-27--gui_10tab_restructure.md` |
+| ★★ Session 4 GUI 专业控制台（6 commits+17 files+3964 行+6 AI 供应商） | `docs/worklogs/control_api_gui/2026-03-27--session4_gui_10tab_professional_console.md` |
+| Session 5 管线启动验证 + OpenClaw 能力深挖 + 服务自动重启确认 | `docs/worklogs/control_api_gui/2026-03-27--session5_pipeline_launch_and_openclaw_analysis.md` |
+
+### 交接与索引
+
+| 内容 | 文件位置 |
+|------|---------|
+| GUI 交接文档（Control API v1 + GUI v1 阶段交接） | `docs/handoffs/2026-03-25_api_gui_handoff/` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
