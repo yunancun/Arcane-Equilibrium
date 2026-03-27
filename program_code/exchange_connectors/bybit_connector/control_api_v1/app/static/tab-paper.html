@@ -145,12 +145,13 @@ $('explain-order').innerHTML = ocExplain(
 let stateRevision = 0;
 
 async function sessionAction(action) {
-  const body = ocEnvelope({}, stateRevision);
-  if (action === 'start') body.payload = { initial_balance: 100000 };
+  // Paper routes expect simple bodies, not envelope format
+  let body = {};
+  if (action === 'start') body = { initial_balance: 100000 };
+  // pause/resume/stop need no body — use POST with empty JSON
   const d = await ocPost('/api/v1/paper/session/' + action, body);
   if (d) {
     ocToast('Session ' + action + ' OK', 'success');
-    if (d.state_revision) stateRevision = d.state_revision;
     loadAll();
   } else {
     ocToast('Session ' + action + ' failed', 'error');
@@ -169,21 +170,20 @@ function togglePrice() {
 }
 
 async function submitOrder() {
-  const body = ocEnvelope({
+  const body = {
     symbol: $('o-symbol').value.trim().toUpperCase(),
     side: $('o-side').value,
     order_type: $('o-type').value,
     qty: parseFloat($('o-qty').value),
-    price: $('o-type').value === 'limit' ? parseFloat($('o-price').value) : undefined,
-  }, stateRevision);
+  };
+  if ($('o-type').value === 'limit') body.price = parseFloat($('o-price').value);
   const d = await ocPost('/api/v1/paper/order/submit', body);
   if (d) { ocToast('Order submitted', 'success'); loadOrders(); loadPositions(); }
   else ocToast('Order submit failed', 'error');
 }
 
 async function cancelOrder(orderId) {
-  const body = ocEnvelope({ order_id: orderId }, stateRevision);
-  const d = await ocPost('/api/v1/paper/order/cancel', body);
+  const d = await ocPost('/api/v1/paper/order/cancel', { order_id: orderId });
   if (d) { ocToast('Order cancelled', 'success'); loadOrders(); }
   else ocToast('Cancel failed', 'error');
 }

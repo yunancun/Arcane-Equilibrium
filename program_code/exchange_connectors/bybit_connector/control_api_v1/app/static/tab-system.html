@@ -234,23 +234,22 @@ async function executeConfirmed() {
 
   if (action === 'paper') {
     if (_paperActive) {
-      await ocPost('/api/v1/paper/session/stop', ocEnvelope({}, _stateRevision));
+      await ocPost('/api/v1/paper/session/stop', {});
     } else {
-      await ocPost('/api/v1/paper/session/start', ocEnvelope({ initial_balance: 100000 }, _stateRevision));
+      await ocPost('/api/v1/paper/session/start', { initial_balance: 100000 });
     }
-    ocToast('Paper Trading ' + (_paperActive ? 'stopped' : 'started'), 'success');
+    ocToast('Paper Trading ' + (_paperActive ? '已停止' : '已启动'), 'success');
   } else if (action === 'feed') {
     if (_feedRunning) {
-      await ocPost('/api/v1/paper/market-feed/stop');
+      await ocPost('/api/v1/paper/market-feed/stop', {});
     } else {
       await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
     }
-    ocToast('Market Feed ' + (_feedRunning ? 'stopped' : 'started'), 'success');
+    ocToast('行情流 ' + (_feedRunning ? '已停止' : '已启动'), 'success');
   } else if (action === 'demo') {
-    // Demo enable/disable is a config change
-    ocToast('Demo toggle — check Demo tab for connection status', 'info');
+    ocToast('请前往 Bybit Demo 页面查看连接状态', 'info');
   } else if (action === 'scanner') {
-    ocToast('Scanner toggle — check Strategy tab', 'info');
+    ocToast('请前往策略中心查看扫描器状态', 'info');
   }
 
   setTimeout(loadAll, 1000);

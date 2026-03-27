@@ -9,12 +9,29 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
+<style>
+  .confirm-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:200; }
+  .confirm-overlay.show { display:flex; align-items:center; justify-content:center; }
+  .confirm-dialog { background:#161b22; border:1px solid var(--border); border-radius:12px; width:min(520px,90vw); box-shadow:0 20px 50px rgba(0,0,0,0.5); }
+  .confirm-header { padding:16px 20px; border-bottom:1px solid #21262d; font-size:15px; font-weight:600; }
+  .confirm-body { padding:16px 20px; font-size:13px; line-height:1.7; color:var(--text-dim); }
+  .confirm-body strong { color:var(--text); }
+  .confirm-body .cost-est { background:rgba(56,139,253,0.08); border:1px solid rgba(56,139,253,0.2); border-radius:8px; padding:10px 14px; margin-top:10px; }
+  .confirm-footer { padding:12px 20px; border-top:1px solid #21262d; display:flex; justify-content:flex-end; gap:8px; }
+  .provider-card { background:var(--bg); border:1px solid #21262d; border-radius:8px; padding:12px; }
+  .provider-card .prov-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .provider-card .prov-name { font-weight:600; font-size:13px; }
+  .provider-card .prov-models { font-size:11px; color:var(--text-dim); margin-bottom:8px; }
+  .api-key-row { display:flex; gap:6px; align-items:center; }
+  .api-key-row input { flex:1; font-family:monospace; font-size:11px; }
+</style>
+
 <!-- ═══ AI Engine Status ═══ -->
 <div class="oc-control-bar">
   <span style="font-weight:600">&#x1F916; AI 推理引擎 / Layer 2 AI Engine</span>
   <span id="ai-badge" class="oc-chip oc-chip-neutral">checking...</span>
   <span style="flex:1"></span>
-  <button class="oc-btn oc-btn-primary" onclick="triggerSession()">&#x26A1; Trigger Session</button>
+  <button class="oc-btn oc-btn-primary" onclick="showTriggerConfirm()">&#x26A1; Trigger Session</button>
   <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
 </div>
 
@@ -22,14 +39,15 @@
 
 <!-- ═══ Cost Dashboard ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4B0; AI 成本仪表盘 / Cost Dashboard</h3>
+  <h3>&#x1F4B0; 全供应商 AI 成本 / All-Provider Cost Dashboard</h3>
+  <div class="subtitle">汇总所有 AI 供应商的成本（不仅限于 Claude）</div>
   <div class="oc-metrics" id="cost-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Today's Cost</div><div class="oc-metric-val blue" id="a-today">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Total Cost (30d)</div><div class="oc-metric-val" id="a-total">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Budget Limit</div><div class="oc-metric-val" id="a-budget">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Sessions Today</div><div class="oc-metric-val" id="a-sessions">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Avg Cost/Session</div><div class="oc-metric-val" id="a-avg">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Budget Remaining</div><div class="oc-metric-val" id="a-remaining">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日总成本</div><div class="oc-metric-val blue" id="a-today">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">30 天累计</div><div class="oc-metric-val" id="a-total">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">日预算上限</div><div class="oc-metric-val" id="a-budget">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日会话数</div><div class="oc-metric-val" id="a-sessions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">平均成本/会话</div><div class="oc-metric-val" id="a-avg">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">预算剩余</div><div class="oc-metric-val" id="a-remaining">--</div></div>
   </div>
 </div>
 
@@ -38,16 +56,90 @@
   <h3>&#x1F4C8; 自适应预算 / Adaptive Budget</h3>
   <div id="explain-adaptive"></div>
   <div class="oc-metrics" id="adaptive-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Budget Multiplier</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 标准</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI ROI</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI成本回报率</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Effective Budget</div><div class="oc-metric-val" id="ab-effective">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Adjustment Reason</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">预算倍数</div><div class="oc-metric-val" id="ab-mult">--</div><div class="oc-metric-sub">1.0 = 标准</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI 投资回报率</div><div class="oc-metric-val" id="ab-roi">--</div><div class="oc-metric-sub">AI 建议产生的收益/AI成本</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">有效预算</div><div class="oc-metric-val" id="ab-effective">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">调整原因</div><div class="oc-metric-val" id="ab-reason" style="font-size:12px">--</div></div>
   </div>
 </div>
 
-<!-- ═══ AI Settings (Editable) ═══ -->
+<!-- ═══ AI Provider Management ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <h3>&#x1F527; AI 引擎设置 / Engine Settings</h3>
+  <h3>&#x1F310; AI 供应商管理 / AI Provider Management</h3>
+  <div id="explain-providers"></div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px" id="provider-grid">
+    <!-- Anthropic / Claude -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F9E0; Anthropic (Claude)</span><span class="oc-chip oc-chip-good" id="prov-anthropic-badge">已配置</span></div>
+      <div class="prov-models">模型：Claude Opus / Sonnet / Haiku</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-anthropic" type="password" placeholder="sk-ant-..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('anthropic')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Haiku $0.25/Sonnet $3/Opus $15 per 1M tokens</div>
+    </div>
+
+    <!-- OpenAI -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F4A1; OpenAI (GPT)</span><span class="oc-chip oc-chip-neutral" id="prov-openai-badge">未配置</span></div>
+      <div class="prov-models">模型：GPT-4o / GPT-4o-mini / o1 / o3</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-openai" type="password" placeholder="sk-..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('openai')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：GPT-4o-mini $0.15/GPT-4o $2.5/o1 $15 per 1M tokens</div>
+    </div>
+
+    <!-- DeepSeek -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F52C; DeepSeek</span><span class="oc-chip oc-chip-neutral" id="prov-deepseek-badge">未配置</span></div>
+      <div class="prov-models">模型：DeepSeek-V3 / DeepSeek-R1</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-deepseek" type="password" placeholder="sk-..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('deepseek')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：V3 $0.27/R1 $0.55 per 1M tokens（极低成本）</div>
+    </div>
+
+    <!-- Perplexity -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F50D; Perplexity</span><span class="oc-chip oc-chip-neutral" id="prov-perplexity-badge">未配置</span></div>
+      <div class="prov-models">搜索增强型 AI，用于获取实时市场信息</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-perplexity" type="password" placeholder="pplx-..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('perplexity')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
+    </div>
+
+    <!-- Local LLM -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F4BB; 本地 LLM / Local LLM</span><span class="oc-chip oc-chip-neutral" id="prov-local-badge">未配置</span></div>
+      <div class="prov-models">Ollama / LM Studio — 零 API 成本</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-local" type="text" placeholder="http://localhost:11434" />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，但需要本地 GPU。推荐 Llama 3 / Qwen 2.5</div>
+    </div>
+
+    <!-- Google -->
+    <div class="provider-card">
+      <div class="prov-header"><span class="prov-name">&#x1F3AF; Google (Gemini)</span><span class="oc-chip oc-chip-neutral" id="prov-google-badge">未配置</span></div>
+      <div class="prov-models">模型：Gemini 2.5 Pro / Flash</div>
+      <div class="api-key-row">
+        <input class="oc-input" id="key-google" type="password" placeholder="AI..." />
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('google')">保存</button>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：Flash $0.075/Pro $1.25 per 1M tokens</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Engine Settings ═══ -->
+<div class="oc-card">
+  <h3>&#x1F527; 引擎设置 / Engine Settings</h3>
   <div id="explain-settings"></div>
 
   <div class="oc-grid-2" style="margin-top:10px">
@@ -57,34 +149,59 @@
         <select class="oc-select" id="ai-enabled" style="width:100px"><option value="true">启用</option><option value="false">禁用</option></select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">绝对不可超越的每日成本上限</div></div>
+        <div><div style="font-size:12px;font-weight:600">默认供应商 / Default Provider</div><div style="font-size:10px;color:var(--text-dim)">首选使用哪个 AI 供应商</div></div>
+        <select class="oc-select" id="ai-provider" style="width:140px">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="google">Google (Gemini)</option>
+          <option value="perplexity">Perplexity</option>
+          <option value="local_llm">本地 LLM</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">默认模型 / Default Model</div><div style="font-size:10px;color:var(--text-dim)">首选使用哪个模型</div></div>
+        <select class="oc-select" id="ai-model" style="width:140px">
+          <option value="sonnet">Claude Sonnet</option>
+          <option value="haiku">Claude Haiku</option>
+          <option value="opus">Claude Opus</option>
+          <option value="gpt-4o-mini">GPT-4o-mini</option>
+          <option value="gpt-4o">GPT-4o</option>
+          <option value="deepseek-v3">DeepSeek-V3</option>
+          <option value="deepseek-r1">DeepSeek-R1</option>
+          <option value="gemini-flash">Gemini Flash</option>
+          <option value="gemini-pro">Gemini Pro</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600;color:var(--red)">日硬上限 / Daily Hard Cap</div><div style="font-size:10px;color:var(--text-dim)">所有供应商合计的每日成本硬上限</div></div>
         <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-hard-cap" type="number" step="0.5" min="0" max="100" style="width:80px" /></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自适应预算的基准值，AI 可在上下限内浮动</div></div>
+        <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">弹性基准 / Adaptive Base</div><div style="font-size:10px;color:var(--text-dim)">自适应预算基准值</div></div>
         <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-base-daily" type="number" step="0.5" min="0" max="50" style="width:80px" /></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性上限倍数 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多可扩大到基准的几倍</div></div>
+        <div><div style="font-size:12px;font-weight:600">弹性上限 / Max Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最多扩大到基准的几倍</div></div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-max-mult" type="number" step="0.1" min="1" max="5" style="width:80px" /><span>x</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">弹性下限倍数 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少缩减到基准的几倍</div></div>
+        <div><div style="font-size:12px;font-weight:600">弹性下限 / Min Multiplier</div><div style="font-size:10px;color:var(--text-dim)">预算最少缩减到基准的几倍</div></div>
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="ai-min-mult" type="number" step="0.1" min="0" max="1" style="width:80px" /><span>x</span></div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">单次 Sonnet 预算 / Sonnet Budget</div><div style="font-size:10px;color:var(--text-dim)">每次 Sonnet 会话最大成本</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-sonnet-budget" type="number" step="0.1" min="0" max="10" style="width:80px" /></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">单次 Opus 预算 / Opus Budget</div><div style="font-size:10px;color:var(--text-dim)">每次 Opus 会话最大成本</div></div>
-        <div style="display:flex;align-items:center;gap:6px"><span>$</span><input class="oc-input" id="ai-opus-budget" type="number" step="0.5" min="0" max="20" style="width:80px" /></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div><div style="font-size:12px;font-weight:600">允许 Opus 升级 / Allow Opus</div><div style="font-size:10px;color:var(--text-dim)">是否允许系统在需要时升级到 Opus 模型</div></div>
+        <div><div style="font-size:12px;font-weight:600">允许自动升级模型 / Auto Upgrade</div><div style="font-size:10px;color:var(--text-dim)">允许系统自动选择更贵但更准确的模型</div></div>
         <select class="oc-select" id="ai-allow-opus" style="width:100px"><option value="true">允许</option><option value="false">不允许</option></select>
       </div>
-      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig()" style="margin-top:4px">&#x1F4BE; 保存 AI 设置 / Save AI Settings</button>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">自动提交到模拟 / Auto Submit</div><div style="font-size:10px;color:var(--text-dim)">AI 建议是否自动提交为模拟订单</div></div>
+        <select class="oc-select" id="ai-auto-submit" style="width:100px"><option value="true">自动</option><option value="false">手动</option></select>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:12px;font-weight:600">最大迭代次数 / Max Iterations</div><div style="font-size:10px;color:var(--text-dim)">单次推理会话的最大思考轮数</div></div>
+        <input class="oc-input" id="ai-max-iter" type="number" step="1" min="1" max="50" style="width:80px" />
+      </div>
+      <button class="oc-btn oc-btn-primary" onclick="saveAIConfig()" style="margin-top:4px">&#x1F4BE; 保存设置 / Save Settings</button>
     </div>
 
     <div>
@@ -94,15 +211,14 @@
   </div>
 </div>
 
-<!-- ═══ AI Consultation Status ═══ -->
+<!-- ═══ Consultation Status ═══ -->
 <div class="oc-card">
-  <h3>&#x1F4AC; AI 咨询状态 / Consultation Status</h3>
-  <div id="explain-consult"></div>
-  <div class="oc-metrics" id="consult-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Enabled</div><div class="oc-metric-val" id="c-enabled">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Running</div><div class="oc-metric-val" id="c-running">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Total Queries</div><div class="oc-metric-val" id="c-queries">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Last Query</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
+  <h3>&#x1F4AC; 咨询状态 / Consultation Status</h3>
+  <div class="oc-metrics">
+    <div class="oc-metric"><div class="oc-metric-label">已启用</div><div class="oc-metric-val" id="c-enabled">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">运行中</div><div class="oc-metric-val" id="c-running">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">总查询次数</div><div class="oc-metric-val" id="c-queries">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">最后查询</div><div class="oc-metric-val" id="c-last" style="font-size:12px">--</div></div>
   </div>
 </div>
 
@@ -126,67 +242,118 @@
   </div>
 </details>
 
+<!-- ═══ Trigger Confirm Modal ═══ -->
+<div class="confirm-overlay" id="trigger-confirm">
+  <div class="confirm-dialog">
+    <div class="confirm-header">&#x26A1; 触发 AI 推理会话 / Trigger L2 Session</div>
+    <div class="confirm-body">
+      <strong>即将触发一次 AI 深度分析会话。</strong>
+      <p>AI 会分析当前市场状况、持仓情况和历史表现，然后给出交易建议。</p>
+      <div class="cost-est">
+        <div style="font-weight:600;margin-bottom:4px">&#x1F4B0; 预估成本：</div>
+        <div id="trigger-cost-est">
+          <div>默认模型 (Sonnet): <strong>~$0.02 - $0.08</strong></div>
+          <div>如升级到 Opus: <strong>~$0.10 - $0.50</strong></div>
+          <div>如使用 Haiku: <strong>~$0.002 - $0.01</strong></div>
+          <div>如使用 DeepSeek: <strong>~$0.001 - $0.005</strong></div>
+          <div style="margin-top:4px;font-size:11px;color:var(--text-dim)">实际成本取决于分析复杂度和 token 用量</div>
+        </div>
+      </div>
+    </div>
+    <div class="confirm-footer">
+      <button class="oc-btn" onclick="closeTriggerConfirm()">取消 / Cancel</button>
+      <button class="oc-btn oc-btn-primary" onclick="doTriggerSession()">确认触发 / Confirm</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-ai').innerHTML = ocExplain(
-  'AI 推理引擎（Layer 2）使用大型语言模型来深入分析交易机会。每次查询都会消耗真实的 API 费用，因此系统设有预算限制。引擎分析市场状况后会给出买入/卖出/持仓的建议。',
-  'Layer 2 采用三层架构：L0（确定性规则，零成本）→ L1（轻量级模型如 Haiku，低成本快速筛选）→ L2（高级模型如 Sonnet/Opus，高成本深度分析）。只有通过 L0 和 L1 筛选的机会才会升级到 L2，这样可以把昂贵的 AI 调用集中在最有价值的场景上。如果 L2 不可用或预算耗尽，系统会自动降级到 L1 或 L0。'
+  'AI 推理引擎使用多种大型语言模型来深入分析交易机会。系统支持多个 AI 供应商（Claude、GPT、DeepSeek、Gemini 等），会自动选择性价比最高的模型。每次查询都会产生 API 费用。',
+  'Layer 2 采用三层架构：L0（确定性规则，零成本）→ L1（轻量模型快速筛选）→ L2（高级模型深度分析）。系统会根据配置的供应商和预算，自动在不同模型间选择最合适的方案。'
 );
 
 $('explain-adaptive').innerHTML = ocExplain(
-  '自适应预算根据 AI 的投资回报率自动调整预算。如果 AI 建议带来了盈利，预算会适当增加；如果亏损，预算会缩减。',
-  'Budget Multiplier 表示当前预算是标准值的多少倍。AI ROI 是 AI 建议产生的净利润与 AI 成本的比率。当 ROI > 1 时说明 AI 建议的价值超过其成本，乘数会增加；反之则缩减。这确保 AI 使用量与其实际贡献成正比。'
+  '自适应预算根据 AI 的投资回报率自动调整。赚钱时预算增加，亏损时缩减。',
+  'Budget Multiplier 表示当前预算是标准值的多少倍。AI ROI = AI 建议产生的净利润 / AI 成本。ROI > 1 说明 AI 建议的价值超过其成本。'
 );
 
-$('explain-consult').innerHTML = ocExplain(
-  'AI 咨询是策略可以调用的即时分析服务。当策略遇到不确定的交易信号时，可以请求 AI 进行深入分析。',
-  '咨询请求通过 /strategy/ai/status 端点追踪。每次咨询会记录：触发原因、使用的模型、输入/输出 token 数量、成本、以及咨询结果对交易决策的影响。'
-);
-
-$('explain-pricing').innerHTML = ocExplain(
-  '定价表列出了各 AI 模型的成本。系统根据这个表来计算每次 AI 调用的费用。',
-  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。缓存命中的 token 价格更低。不同模型的价格差异很大：Haiku 约为 Opus 的 1/20。'
+$('explain-providers').innerHTML = ocExplain(
+  '在这里管理 AI 供应商。输入 API Key 后点击保存，系统会自动将密钥安全存储到本地 secrets 文件夹。你可以同时配置多个供应商，系统会根据任务类型和成本自动选择最合适的。',
+  'API Key 保存在本地 ~/BybitOpenClaw/secrets/providers/ 目录下，每个供应商一个 .env 文件。密钥不会上传到任何远程服务器，也不会进入 Git。系统启动时自动扫描可用的供应商并加载对应的定价表。'
 );
 
 $('explain-settings').innerHTML = ocExplain(
-  '在这里设置 AI 引擎的预算和行为。日硬上限是绝对不可超越的每日成本上限。弹性基准允许 AI 根据表现自动调整预算：赚钱时适当增加，亏损时自动缩减。',
-  '自适应预算系统通过 multiplier 控制弹性范围。例如基准 $8、最大 2x、最小 0.3x，则实际预算在 $2.4-$16 之间浮动，但永远不超过日硬上限 $15。Sonnet/Opus 预算控制单次会话的最大成本，防止单次查询消耗过多。Allow Opus 控制是否允许升级到更昂贵但更深入的 Opus 模型。'
+  '设置 AI 引擎的全局参数。日硬上限是所有供应商合计的每日成本上限。弹性预算允许 AI 根据表现自动调整使用量。',
+  '日硬上限是绝对不可超越的。弹性基准是正常情况下的日预算，乘以弹性倍数得到实际上下限。例如基准 $8、上限 2x、下限 0.3x → 实际预算在 $2.4-$16 之间浮动。Auto Submit 控制 AI 建议是否自动变成模拟订单。'
 );
 
-// ─── Save AI Config ───────────────────────────────────────────
+$('explain-pricing').innerHTML = ocExplain(
+  '各 AI 模型的详细定价。系统根据此表计算每次 AI 调用的费用。',
+  '定价分为 input tokens（发送给模型的文本）和 output tokens（模型生成的回复）。不同模型的价格差异巨大：DeepSeek-V3 约为 Claude Opus 的 1/50。'
+);
+
+// ─── Trigger Session ─────────────────────────────────────────
+function showTriggerConfirm() { $('trigger-confirm').classList.add('show'); }
+function closeTriggerConfirm() { $('trigger-confirm').classList.remove('show'); }
+
+async function doTriggerSession() {
+  closeTriggerConfirm();
+  const d = await ocPost('/api/v1/paper/layer2/trigger', { reason: 'manual_gui_trigger' });
+  if (d) { ocToast('AI 推理会话已触发', 'success'); loadSessions(); }
+  else ocToast('触发失败 / Trigger failed', 'error');
+}
+
+// ─── Provider Key Management ─────────────────────────────────
+async function saveProviderKey(provider) {
+  const inputId = 'key-' + (provider === 'local_llm' ? 'local' : provider);
+  const key = $(inputId).value.trim();
+  if (!key) { ocToast('请输入 API Key', 'error'); return; }
+
+  // Save via API (backend will write to secrets folder)
+  const d = await ocPost('/api/v1/paper/layer2/config', {
+    provider_keys: { [provider]: key },
+  });
+  if (d) {
+    ocToast(provider + ' API Key 已保存', 'success');
+    $(inputId).value = '';
+    $('prov-' + provider + '-badge').textContent = '已配置';
+    $('prov-' + provider + '-badge').className = 'oc-chip oc-chip-good';
+  } else {
+    // Fallback: try to save directly to secrets file via a dedicated endpoint or show instructions
+    ocToast('保存到后端失败，请手动添加到 ~/BybitOpenClaw/secrets/providers/' + provider + '.env', 'error');
+  }
+}
+
+// ─── Save AI Config ──────────────────────────────────────────
 async function saveAIConfig() {
   const body = {
     daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 15,
     adaptive_base_daily_usd: parseFloat($('ai-base-daily').value) || 8,
     adaptive_max_multiplier: parseFloat($('ai-max-mult').value) || 2,
     adaptive_min_multiplier: parseFloat($('ai-min-mult').value) || 0.3,
-    session_budget_sonnet_usd: parseFloat($('ai-sonnet-budget').value) || 1.5,
-    session_budget_opus_usd: parseFloat($('ai-opus-budget').value) || 4,
     allow_opus_upgrade: $('ai-allow-opus').value === 'true',
     adaptive_enabled: $('ai-enabled').value === 'true',
+    default_model: $('ai-model').value,
+    default_provider: $('ai-provider').value,
+    auto_submit_to_paper: $('ai-auto-submit').value === 'true',
+    max_iterations: parseInt($('ai-max-iter').value) || 15,
   };
   const d = await ocPost('/api/v1/paper/layer2/config', body);
-  if (d) { ocToast('AI settings saved', 'success'); loadAll(); }
-  else ocToast('Save failed', 'error');
+  if (d) { ocToast('AI 设置已保存', 'success'); loadAll(); }
+  else ocToast('保存失败', 'error');
 }
 
-// ─── Actions ──────────────────────────────────────────────────
-async function triggerSession() {
-  const d = await ocPost('/api/v1/paper/layer2/trigger', { reason: 'manual_gui_trigger' });
-  if (d) { ocToast('L2 session triggered', 'success'); loadSessions(); }
-  else ocToast('Trigger failed', 'error');
-}
-
-// ─── Data Loading ─────────────────────────────────────────────
+// ─── Data Loading ────────────────────────────────────────────
 async function loadCost() {
-  // Try layer2 cost first, fallback to paper/ai-cost
   let d = await ocApi('/api/v1/paper/layer2/cost');
   if (!d || !d.data) d = await ocApi('/api/v1/paper/ai-cost');
   if (!d || !d.data) return;
   const c = d.data;
   const todayCost = c.today_cost || c.cost_today || 0;
   const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
-  const budget = c.daily_budget || c.budget_limit || 15; // default $15 from config
+  const budget = c.daily_budget || c.budget_limit || 15;
   ocSetText('a-today', '$' + ocNum(todayCost, 4));
   ocSetText('a-total', '$' + ocNum(totalCost, 2));
   ocSetText('a-budget', '$' + ocNum(budget, 2));
@@ -204,10 +371,9 @@ async function loadAdaptive() {
   const a = d.data;
   ocSetText('ab-mult', ocNum(a.multiplier || a.budget_multiplier, 2) + 'x');
   const roi = a.roi || a.ai_roi;
-  const elRoi = $('ab-roi');
   if (roi != null) {
-    elRoi.textContent = ocNum(roi, 2) + 'x';
-    elRoi.className = 'oc-metric-val ' + (roi >= 1 ? 'green' : 'red');
+    $('ab-roi').textContent = ocNum(roi, 2) + 'x';
+    $('ab-roi').className = 'oc-metric-val ' + (roi >= 1 ? 'green' : 'red');
   }
   ocSetText('ab-effective', '$' + ocNum(a.effective_budget || a.adjusted_budget, 2));
   ocSetText('ab-reason', a.reason || a.adjustment_reason || '--');
@@ -217,26 +383,21 @@ async function loadConsult() {
   const d = await ocApi('/api/v1/strategy/ai/status');
   if (!d || !d.data) return;
   const s = d.data;
-  ocSetText('c-enabled', s.enabled ? 'Yes' : 'No');
+  ocSetText('c-enabled', s.enabled ? '是' : '否');
   $('c-enabled').className = 'oc-metric-val ' + (s.enabled ? 'green' : '');
-  ocSetText('c-running', s.running || s.is_running ? 'Yes' : 'No');
+  ocSetText('c-running', (s.running || s.is_running) ? '是' : '否');
   ocSetText('c-queries', s.total_queries || s.query_count || 0);
   ocSetText('c-last', ocTimeShort(s.last_query_at));
-
-  // Badge
   const badge = $('ai-badge');
-  if (s.enabled) { badge.textContent = 'Enabled'; badge.className = 'oc-chip oc-chip-good'; }
-  else { badge.textContent = 'Disabled'; badge.className = 'oc-chip oc-chip-neutral'; }
+  if (s.enabled) { badge.textContent = '已启用'; badge.className = 'oc-chip oc-chip-good'; }
+  else { badge.textContent = '已禁用'; badge.className = 'oc-chip oc-chip-neutral'; }
 }
 
 async function loadSessions() {
   const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
   if (!d || !d.data) return;
   const sessions = d.data.sessions || d.data || [];
-  if (!sessions.length) {
-    ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无推理会话 / No L2 sessions</td></tr>');
-    return;
-  }
+  if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无推理会话</td></tr>'); return; }
   let html = '';
   sessions.slice(0, 20).forEach(s => {
     html += '<tr>';
@@ -258,18 +419,17 @@ async function loadConfig() {
   const cfg = d.data;
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   const fields = [
-    ['Default Model', cfg.default_model || cfg.model],
-    ['Daily Hard Cap', cfg.daily_hard_cap_usd != null ? '$' + cfg.daily_hard_cap_usd : null],
-    ['Sonnet Budget/Session', cfg.session_budget_sonnet_usd != null ? '$' + cfg.session_budget_sonnet_usd : null],
-    ['Opus Budget/Session', cfg.session_budget_opus_usd != null ? '$' + cfg.session_budget_opus_usd : null],
-    ['Adaptive Enabled', cfg.adaptive_enabled ? 'Yes' : 'No'],
-    ['Adaptive Base Daily', cfg.adaptive_base_daily_usd != null ? '$' + cfg.adaptive_base_daily_usd : null],
-    ['Max Iterations', cfg.max_iterations],
-    ['Auto Submit to Paper', cfg.auto_submit_to_paper ? 'Yes' : 'No'],
-    ['Search Providers', (cfg.search_providers_enabled || []).join(', ') || '--'],
+    ['默认模型', cfg.default_model || 'sonnet'],
+    ['日硬上限', '$' + (cfg.daily_hard_cap_usd || 15)],
+    ['弹性基准', '$' + (cfg.adaptive_base_daily_usd || 8)],
+    ['弹性范围', (cfg.adaptive_min_multiplier || 0.3) + 'x - ' + (cfg.adaptive_max_multiplier || 2) + 'x'],
+    ['自适应', cfg.adaptive_enabled !== false ? '启用' : '禁用'],
+    ['最大迭代', cfg.max_iterations || 15],
+    ['自动提交', cfg.auto_submit_to_paper ? '是' : '否'],
+    ['搜索引擎', (cfg.search_providers_enabled || []).join(', ') || '--'],
   ];
   fields.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(val != null ? val : '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(String(val)) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('ai-config', html);
@@ -279,24 +439,25 @@ async function loadConfig() {
   if (!$('ai-base-daily').value) $('ai-base-daily').value = cfg.adaptive_base_daily_usd || 8;
   if (!$('ai-max-mult').value) $('ai-max-mult').value = cfg.adaptive_max_multiplier || 2;
   if (!$('ai-min-mult').value) $('ai-min-mult').value = cfg.adaptive_min_multiplier || 0.3;
-  if (!$('ai-sonnet-budget').value) $('ai-sonnet-budget').value = cfg.session_budget_sonnet_usd || 1.5;
-  if (!$('ai-opus-budget').value) $('ai-opus-budget').value = cfg.session_budget_opus_usd || 4;
+  if (!$('ai-max-iter').value) $('ai-max-iter').value = cfg.max_iterations || 15;
   $('ai-allow-opus').value = cfg.allow_opus_upgrade !== false ? 'true' : 'false';
   $('ai-enabled').value = cfg.adaptive_enabled !== false ? 'true' : 'false';
+  $('ai-auto-submit').value = cfg.auto_submit_to_paper ? 'true' : 'false';
+  if (cfg.default_model) $('ai-model').value = cfg.default_model;
 }
 
 async function loadPricing() {
   const d = await ocApi('/api/v1/paper/layer2/cost/pricing');
   if (!d || !d.data) { ocSetHtml('pricing-body', '<div class="oc-loading">No pricing data</div>'); return; }
   const pricing = d.data.models || d.data;
-  let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>Model</th><th>Input $/1K</th><th>Output $/1K</th><th>Cache $/1K</th></tr></thead><tbody>';
+  let html = '<div class="oc-table-wrap"><table class="oc-table"><thead><tr><th>模型</th><th>供应商</th><th>Input $/1M</th><th>Output $/1M</th></tr></thead><tbody>';
   if (Array.isArray(pricing)) {
     pricing.forEach(p => {
-      html += '<tr><td>' + ocEsc(p.model || p.name) + '</td><td>' + ocNum(p.input_cost_per_1k, 4) + '</td><td>' + ocNum(p.output_cost_per_1k, 4) + '</td><td>' + ocNum(p.cache_cost_per_1k, 4) + '</td></tr>';
+      html += '<tr><td>' + ocEsc(p.model || p.name) + '</td><td>' + ocEsc(p.provider || '--') + '</td><td>$' + ocNum((p.input_cost_per_1k || 0) * 1000, 2) + '</td><td>$' + ocNum((p.output_cost_per_1k || 0) * 1000, 2) + '</td></tr>';
     });
   } else if (typeof pricing === 'object') {
     Object.entries(pricing).forEach(([model, costs]) => {
-      html += '<tr><td>' + ocEsc(model) + '</td><td>' + ocNum(costs.input, 4) + '</td><td>' + ocNum(costs.output, 4) + '</td><td>' + ocNum(costs.cache, 4) + '</td></tr>';
+      html += '<tr><td>' + ocEsc(model) + '</td><td>--</td><td>$' + ocNum((costs.input || 0) * 1000, 2) + '</td><td>$' + ocNum((costs.output || 0) * 1000, 2) + '</td></tr>';
     });
   }
   html += '</tbody></table></div>';
@@ -308,7 +469,7 @@ async function loadAll() {
 }
 
 loadAll();
-ocStartRefresh(loadAll, 30000); // AI tab refreshes slower
+ocStartRefresh(loadAll, 30000);
 </script>
 </body>
 </html>
