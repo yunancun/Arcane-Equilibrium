@@ -767,6 +767,13 @@ class MACDExhaustionRule(SignalRule):
         prev_hist = self._prev_histogram.get(key)
         self._prev_histogram[key] = histogram
 
+        # Limit history size to prevent unbounded growth / 限制历史大小防止无限增长
+        if len(self._prev_histogram) > 200:
+            # Keep only recent half / 只保留最近一半
+            keys = list(self._prev_histogram.keys())
+            for k in keys[:100]:
+                del self._prev_histogram[k]
+
         if prev_hist is None:
             return None
 
@@ -848,6 +855,12 @@ class RSIDivergenceRule(SignalRule):
         history.append((price, rsi))
         if len(history) > self._max_history:
             history[:] = history[-self._max_history:]
+
+        # Limit total keys to prevent unbounded growth / 限制总键数防止无限增长
+        if len(self._history) > 200:
+            keys = list(self._history.keys())
+            for k in keys[:100]:
+                del self._history[k]
 
         if len(history) < self._lookback + 1:
             return None
@@ -1019,7 +1032,9 @@ class SignalEngine:
         for rule in rules:
             try:
                 signal = rule.evaluate(symbol, timeframe, indicators)
-                if signal is not None and signal.is_actionable:
+                # Allow Regime_Detector neutral signals through for dispatch
+                # 允许 Regime_Detector 的中性信号通过以便分发
+                if signal is not None and (signal.is_actionable or signal.source == "Regime_Detector"):
                     generated.append(signal)
                     with self._lock:
                         self._history.append(signal)

@@ -313,7 +313,7 @@ class StrategyBase(ABC):
         return {
             "realized_pnl": round(self._realized_pnl, 4),
             "total_fees": round(self._total_fees, 4),
-            "net_pnl": round(self._realized_pnl - self._total_fees, 4),
+            "net_pnl": round(self._realized_pnl, 4),  # fees already deducted in record_trade_result
             "trade_count": len(self._trade_history),
             "win_count": len(wins),
             "loss_count": len(losses),

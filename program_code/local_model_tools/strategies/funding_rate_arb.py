@@ -168,7 +168,7 @@ class FundingRateArbStrategy(StrategyBase):
                 return
 
             # Determine direction and open both legs
-            if funding_rate > self._threshold:
+            if funding_rate >= self._threshold:
                 # Positive rate: longs pay shorts
                 # → Short perp (collect funding) + Long spot (hedge)
                 self._emit_entry_intents(
@@ -181,7 +181,7 @@ class FundingRateArbStrategy(StrategyBase):
                     hours_to_settle=hours_to_settle,
                 )
 
-            elif funding_rate < -self._threshold:
+            elif funding_rate <= -self._threshold:
                 # Negative rate: shorts pay longs
                 # → Long perp (collect funding) + Short spot (hedge)
                 self._emit_entry_intents(

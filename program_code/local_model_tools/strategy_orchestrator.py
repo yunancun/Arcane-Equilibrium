@@ -390,6 +390,10 @@ class StrategyOrchestrator:
                 "signal_engine_status": self._se.get_stats(),
             }
 
+    def compute_indicators(self, symbol: str, timeframe: str) -> None:
+        """Trigger indicator computation for a symbol/timeframe. 为指定品种/时间框架触发指标计算。"""
+        self._ie.compute_now(symbol, timeframe)
+
     def get_indicators(self, symbol: str, timeframe: str) -> dict[str, Any]:
         """
         Get cached indicator values for a symbol + timeframe.

@@ -733,6 +733,15 @@ class KlineManager:
         for sym, tf, bar in closed_bars:
             self._on_kline_closed(sym, tf, bar)
 
+    def get_tracked_symbols(self) -> list[str]:
+        """Return list of currently tracked symbols / 返回当前追踪的交易对列表"""
+        with self._lock:
+            return list(self._symbols)
+
+    def get_timeframes(self) -> list[str]:
+        """Return list of configured timeframes / 返回已配置的时间框架列表"""
+        return list(self._timeframes)
+
     def add_symbol(self, symbol: str) -> None:
         """Add a symbol to track / 添加一个追踪的交易对"""
         with self._lock:

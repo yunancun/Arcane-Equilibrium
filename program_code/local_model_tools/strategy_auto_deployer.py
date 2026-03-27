@@ -74,9 +74,8 @@ class StrategyAutoDeployer:
         Callback from MarketScanner. Deploys/updates strategies based on opportunities.
         市场扫描回调。根据机会部署/更新策略。
         """
-        self._stats["scan_callbacks_received"] += 1
-
         with self._lock:
+            self._stats["scan_callbacks_received"] += 1
             current_symbols = set(d["symbol"] for d in self._deployed.values())
             available_slots = self._max_symbols - len(current_symbols)
 
@@ -90,10 +89,6 @@ class StrategyAutoDeployer:
                 # Skip if already trading this symbol with same category
                 key = f"{category}_{symbol}"
                 if key in self._deployed:
-                    continue
-
-                # Skip if already at max symbols
-                if symbol not in current_symbols and available_slots <= 0:
                     continue
 
                 # Deploy strategy
@@ -198,8 +193,9 @@ class StrategyAutoDeployer:
         # 唯一注册键包含 symbol 以防止名称冲突（R1 fix）
         unique_name = f"{strategy.name}_{symbol}"
 
-        # Add symbol to kline manager if not tracked
-        new_symbol = symbol not in self._km._symbols
+        # Add symbol to kline manager if not tracked (use public API)
+        # 使用公开 API 检查是否已追踪
+        new_symbol = symbol not in self._km.get_tracked_symbols()
         if new_symbol:
             self._km.add_symbol(symbol)
             # Bootstrap historical klines for new symbol
@@ -215,10 +211,10 @@ class StrategyAutoDeployer:
         # R2 fix: trigger initial indicator computation for newly added symbols
         # so strategies don't have to wait for the next kline close.
         # 为新添加的 symbol 触发初始指标计算，策略无需等待下一根 K线闭合。
-        if new_symbol and hasattr(self._orch, '_ie'):
-            for tf in self._km._timeframes:
+        if new_symbol:
+            for tf in self._km.get_timeframes():
                 try:
-                    self._orch._ie.compute_now(symbol, tf)
+                    self._orch.compute_indicators(symbol, tf)
                 except Exception:
                     logger.debug(
                         "Initial indicator computation skipped for %s:%s / 初始指标计算跳过",

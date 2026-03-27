@@ -30,6 +30,26 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _read_pg_pass_from_secrets() -> str:
+    """Read PG password from secrets file. 从 secrets 文件读取数据库密码。"""
+    import os
+    try:
+        path = os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env")
+        with open(path) as f:
+            for line in f:
+                if line.startswith("POSTGRES_PASSWORD="):
+                    return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+def _default_pg_pass() -> str:
+    """Get PG password from env var or secrets file. 从环境变量或 secrets 文件获取密码。"""
+    import os
+    return os.getenv("PG_PASS") or _read_pg_pass_from_secrets()
+
+
 class BybitDemoSync:
     """Periodically syncs Bybit Demo data to PostgreSQL."""
 
@@ -41,12 +61,15 @@ class BybitDemoSync:
         pg_host: str = "127.0.0.1",
         pg_port: int = 5432,
         pg_user: str = "trading_admin",
-        pg_pass: str = "<REDACTED>",
+        pg_pass: str = "",
         pg_db: str = "trading_ai",
     ) -> None:
         self._demo = demo_connector
         self._interval = interval_sec
-        self._pg_config = dict(host=pg_host, port=pg_port, user=pg_user, password=pg_pass, dbname=pg_db)
+        # Use provided pg_pass, fall back to env/secrets if empty
+        # 使用传入的密码，若为空则回退到环境变量/secrets 文件
+        effective_pass = pg_pass or _default_pg_pass()
+        self._pg_config = dict(host=pg_host, port=pg_port, user=pg_user, password=effective_pass, dbname=pg_db)
         self._running = False
         self._thread: threading.Thread | None = None
         self._last_exec_cursor: str = ""  # Pagination cursor for executions
@@ -111,10 +134,7 @@ class BybitDemoSync:
         """Pull recent executions from Bybit Demo."""
         try:
             # Get last 50 executions
-            result = self._demo._request("GET", "/v5/execution/list", {
-                "category": "linear",
-                "limit": "50",
-            })
+            result = self._demo.get_executions(category="linear", limit=50)
             if result.get("retCode") != 0:
                 return
 
@@ -191,7 +211,7 @@ class BybitDemoSync:
             unrealized = sum(float(c.get("unrealisedPnl", 0)) for c in coins)
 
             cur.execute("""
-                INSERT INTO account_snapshots (ts, total_equity, total_balance, unrealized_pnl, account_type)
+                INSERT INTO account_snapshots (ts, total_equity, available_balance, unrealized_pnl, account_type)
                 VALUES (to_timestamp(%s/1000.0), %s, %s, %s, %s)
             """, (now_ms, total_equity, total_balance, unrealized, "bybit_demo"))
         except Exception as e:

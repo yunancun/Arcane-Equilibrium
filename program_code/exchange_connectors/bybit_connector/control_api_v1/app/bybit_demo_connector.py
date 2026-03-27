@@ -50,13 +50,15 @@ class BybitDemoConnector:
         if not api_key:
             key_path = os.path.expanduser("~/BybitOpenClaw/secrets/secret_files/bybit/demo/api_key")
             try:
-                api_key = open(key_path).read().strip()
+                with open(key_path) as f:
+                    api_key = f.read().strip()
             except FileNotFoundError:
                 logger.warning("Bybit Demo API key not found at %s", key_path)
         if not api_secret:
             secret_path = os.path.expanduser("~/BybitOpenClaw/secrets/secret_files/bybit/demo/api_secret")
             try:
-                api_secret = open(secret_path).read().strip()
+                with open(secret_path) as f:
+                    api_secret = f.read().strip()
             except FileNotFoundError:
                 logger.warning("Bybit Demo API secret not found at %s", secret_path)
 
@@ -123,6 +125,10 @@ class BybitDemoConnector:
             return {"retCode": -1, "retMsg": str(e)}
 
     # ── Public Methods ──
+
+    def get_executions(self, category: str = "linear", limit: int = 50) -> dict[str, Any]:
+        """Get recent executions. 获取最近成交记录。"""
+        return self._request("GET", "/v5/execution/list", {"category": category, "limit": str(limit)})
 
     def get_wallet_balance(self) -> dict[str, Any]:
         """Get account balance."""

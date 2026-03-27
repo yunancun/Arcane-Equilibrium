@@ -161,83 +161,89 @@ class StopManager:
         triggered: list[dict[str, Any]] = []
         now_ms = int(time.time() * 1000)
 
+        # Hold lock for entire iteration — position count is small (max ~10),
+        # so contention is negligible. This prevents best_price mutation outside lock.
+        # 整个遍历期间持锁 — 持仓数量很小（最多约 10），争用可忽略。
+        # 防止 best_price 在锁外被修改。
         with self._lock:
-            positions = list(self._positions.values())
+            for pos in self._positions.values():
+                price = market_prices.get(pos.symbol)
+                if price is None or price <= 0:
+                    continue
 
-        for pos in positions:
-            price = market_prices.get(pos.symbol)
-            if price is None or price <= 0:
-                continue
-
-            # Update best price
-            if pos.side == "long":
-                if price > pos.best_price:
-                    pos.best_price = price
-            else:  # short
-                if pos.best_price == pos.entry_price or price < pos.best_price:
-                    pos.best_price = price
-
-            stop_type = None
-            reason = ""
-
-            # 1. Hard stop check
-            if pos.side == "long":
-                stop_price = pos.entry_price * (1 - pos.stop_config.hard_stop_pct / 100)
-                if price <= stop_price:
-                    stop_type = "hard_stop"
-                    pnl_pct = (price - pos.entry_price) / pos.entry_price * 100
-                    reason = f"Hard stop: price {price:.2f} <= {stop_price:.2f} ({pnl_pct:.1f}%)"
-            else:
-                stop_price = pos.entry_price * (1 + pos.stop_config.hard_stop_pct / 100)
-                if price >= stop_price:
-                    stop_type = "hard_stop"
-                    pnl_pct = (pos.entry_price - price) / pos.entry_price * 100
-                    reason = f"Hard stop: price {price:.2f} >= {stop_price:.2f} ({pnl_pct:.1f}%)"
-
-            # 2. Trailing stop check (only if profitable)
-            if stop_type is None and pos.stop_config.trailing_stop_pct is not None:
-                trail_pct = pos.stop_config.trailing_stop_pct / 100
+                # Update best price (under lock)
                 if pos.side == "long":
-                    trail_price = pos.best_price * (1 - trail_pct)
-                    if price <= trail_price and pos.best_price > pos.entry_price:
-                        stop_type = "trailing_stop"
-                        locked_pct = (trail_price - pos.entry_price) / pos.entry_price * 100
-                        reason = f"Trailing stop: price {price:.2f} <= trail {trail_price:.2f} (best={pos.best_price:.2f}, locked={locked_pct:.1f}%)"
+                    if price > pos.best_price:
+                        pos.best_price = price
+                else:  # short
+                    if pos.best_price == pos.entry_price or price < pos.best_price:
+                        pos.best_price = price
+
+                stop_type = None
+                reason = ""
+
+                # 1. Hard stop check
+                if pos.side == "long":
+                    stop_price = pos.entry_price * (1 - pos.stop_config.hard_stop_pct / 100)
+                    if price <= stop_price:
+                        stop_type = "hard_stop"
+                        pnl_pct = (price - pos.entry_price) / pos.entry_price * 100
+                        reason = f"Hard stop: price {price:.2f} <= {stop_price:.2f} ({pnl_pct:.1f}%)"
                 else:
-                    trail_price = pos.best_price * (1 + trail_pct)
-                    if price >= trail_price and pos.best_price < pos.entry_price:
-                        stop_type = "trailing_stop"
-                        locked_pct = (pos.entry_price - trail_price) / pos.entry_price * 100
-                        reason = f"Trailing stop: price {price:.2f} >= trail {trail_price:.2f} (best={pos.best_price:.2f}, locked={locked_pct:.1f}%)"
+                    stop_price = pos.entry_price * (1 + pos.stop_config.hard_stop_pct / 100)
+                    if price >= stop_price:
+                        stop_type = "hard_stop"
+                        pnl_pct = (pos.entry_price - price) / pos.entry_price * 100
+                        reason = f"Hard stop: price {price:.2f} >= {stop_price:.2f} ({pnl_pct:.1f}%)"
 
-            # 3. Time stop check
-            if stop_type is None and pos.stop_config.time_stop_hours is not None:
-                max_hold_ms = int(pos.stop_config.time_stop_hours * 3600 * 1000)
-                held_ms = now_ms - pos.entry_ts_ms
-                if held_ms >= max_hold_ms:
-                    stop_type = "time_stop"
-                    held_hours = held_ms / 3600_000
-                    reason = f"Time stop: held {held_hours:.1f}h >= max {pos.stop_config.time_stop_hours}h"
+                # 2. Trailing stop check (only if profitable)
+                if stop_type is None and pos.stop_config.trailing_stop_pct is not None:
+                    trail_pct = pos.stop_config.trailing_stop_pct / 100
+                    if pos.side == "long":
+                        trail_price = pos.best_price * (1 - trail_pct)
+                        if price <= trail_price and pos.best_price > pos.entry_price:
+                            stop_type = "trailing_stop"
+                            locked_pct = (trail_price - pos.entry_price) / pos.entry_price * 100
+                            reason = f"Trailing stop: price {price:.2f} <= trail {trail_price:.2f} (best={pos.best_price:.2f}, locked={locked_pct:.1f}%)"
+                    else:
+                        trail_price = pos.best_price * (1 + trail_pct)
+                        if price >= trail_price and pos.best_price < pos.entry_price:
+                            stop_type = "trailing_stop"
+                            locked_pct = (pos.entry_price - trail_price) / pos.entry_price * 100
+                            reason = f"Trailing stop: price {price:.2f} >= trail {trail_price:.2f} (best={pos.best_price:.2f}, locked={locked_pct:.1f}%)"
 
-            if stop_type:
-                triggered.append({
-                    "symbol": pos.symbol,
-                    "side": "Sell" if pos.side == "long" else "Buy",  # Close direction
-                    "strategy_name": pos.strategy_name,
-                    "qty": pos.qty,
-                    "stop_type": stop_type,
-                    "reason": reason,
-                    "entry_price": pos.entry_price,
-                    "current_price": price,
-                })
+                # 3. Time stop check
+                if stop_type is None and pos.stop_config.time_stop_hours is not None:
+                    max_hold_ms = int(pos.stop_config.time_stop_hours * 3600 * 1000)
+                    held_ms = now_ms - pos.entry_ts_ms
+                    if held_ms >= max_hold_ms:
+                        stop_type = "time_stop"
+                        held_hours = held_ms / 3600_000
+                        reason = f"Time stop: held {held_hours:.1f}h >= max {pos.stop_config.time_stop_hours}h"
 
-                with self._lock:
-                    self._stats[f"{stop_type}s_triggered"] += 1
-                    key = f"{pos.strategy_name}:{pos.symbol}"
-                    self._positions.pop(key, None)
-                    self._stats["positions_tracked"] = len(self._positions)
+                if stop_type:
+                    triggered.append({
+                        "symbol": pos.symbol,
+                        "side": "Sell" if pos.side == "long" else "Buy",  # Close direction
+                        "strategy_name": pos.strategy_name,
+                        "qty": pos.qty,
+                        "stop_type": stop_type,
+                        "reason": reason,
+                        "entry_price": pos.entry_price,
+                        "current_price": price,
+                    })
+                    key = f"{stop_type}s_triggered"
+                    self._stats[key] = self._stats.get(key, 0) + 1
 
-                logger.warning("STOP TRIGGERED: %s / 止损触发: %s", reason, reason)
+            # Remove triggered positions (still under lock)
+            # 移除已触发的持仓（仍在锁内）
+            for t in triggered:
+                key = f"{t['strategy_name']}:{t['symbol']}"
+                self._positions.pop(key, None)
+            self._stats["positions_tracked"] = len(self._positions)
+
+        for t in triggered:
+            logger.warning("STOP TRIGGERED: %s / 止损触发: %s", t["reason"], t["reason"])
 
         return triggered
 
@@ -277,8 +283,9 @@ def compute_atr_position_size(
     Compute position size based on ATR (Average True Range).
     基于 ATR 计算仓位大小。
 
-    Formula: qty = (account_balance * risk_pct) / (ATR * multiplier * price)
-    公式：qty = (账户余额 × 风险比例) / (ATR × 倍数 × 价格)
+    Note: this formula is valid for linear USDT contracts where ATR is in price units.
+    注意：此公式适用于线性 USDT 合约（ATR 以价格单位计）。
+    For inverse contracts, use: qty = risk_amount / (stop_distance * price)
 
     This ensures each trade risks approximately risk_per_trade_pct of the account,
     with the stop distance determined by ATR.
@@ -296,16 +303,13 @@ def compute_atr_position_size(
     Returns:
       Position size in asset units, clamped to [min_qty, max_qty]
     """
-    if atr <= 0 or price <= 0 or account_balance <= 0 or risk_per_trade_pct <= 0:
+    if atr <= 0 or price <= 0 or account_balance <= 0 or risk_per_trade_pct <= 0 or atr_multiplier <= 0:
         return min_qty
 
     risk_amount = account_balance * (risk_per_trade_pct / 100.0)
     stop_distance = atr * atr_multiplier
 
-    # qty * stop_distance = risk_amount → qty = risk_amount / stop_distance
-    # But we need qty in asset units, and stop_distance is in price units
-    qty = risk_amount / (stop_distance * price / price)  # simplified: risk_amount / stop_distance
-    # Actually: risk = qty * stop_distance_in_usdt = qty * stop_distance
+    # For linear USDT contracts: risk = qty * stop_distance (both in USDT terms)
     # So qty = risk_amount / stop_distance
     qty = risk_amount / stop_distance
 

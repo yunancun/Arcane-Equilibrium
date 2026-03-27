@@ -46,12 +46,25 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+def _read_pg_pass_from_secrets() -> str:
+    """Read PG password from secrets file. 从 secrets 文件读取数据库密码。"""
+    try:
+        path = os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env")
+        with open(path) as f:
+            for line in f:
+                if line.startswith("POSTGRES_PASSWORD="):
+                    return line.split("=", 1)[1].strip()
+    except FileNotFoundError:
+        pass
+    return ""
+
+
 # PostgreSQL connection config — override via env vars
 # PostgreSQL 连接配置 — 通过环境变量覆盖
 PG_HOST = os.getenv("PG_HOST", "127.0.0.1")
 PG_PORT = int(os.getenv("PG_PORT", "5432"))
 PG_USER = os.getenv("PG_USER", "trading_admin")
-PG_PASS = os.getenv("PG_PASS", "<REDACTED>")
+PG_PASS = os.getenv("PG_PASS") or _read_pg_pass_from_secrets()
 PG_DB = os.getenv("PG_DB", "trading_ai")
 
 

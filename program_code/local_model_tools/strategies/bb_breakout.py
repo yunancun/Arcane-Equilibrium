@@ -125,6 +125,7 @@ class BBBreakoutStrategy(StrategyBase):
                 self._current_position = "long"
                 self._trade_count += 1
                 self._last_trade_ts_ms = now_ms
+                self._was_squeezed = False  # Reset squeeze state after trade
 
             elif pct_b < 0.0:
                 # Price below lower band -> bearish breakout
@@ -137,8 +138,7 @@ class BBBreakoutStrategy(StrategyBase):
                 self._current_position = "short"
                 self._trade_count += 1
                 self._last_trade_ts_ms = now_ms
-
-            self._was_squeezed = False  # Reset squeeze state after trade attempt
+                self._was_squeezed = False  # Reset squeeze state after trade
 
     def _process_regime_signal(self, signal: Any) -> None:
         """Exit on regime change back to ranging/squeeze"""
