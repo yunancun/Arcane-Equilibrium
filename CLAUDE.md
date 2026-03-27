@@ -242,10 +242,11 @@ Live 前置条件（M/N 前必须核验）：
 | Layer 2 实现计划 | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` |
 | 本地交易逻辑审查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
 | GUI 交接文档 | `docs/handoffs/2026-03-25_api_gui_handoff/` |
+| 路线图 B-I 工程日志 | `docs/worklogs/control_api_gui/2026-03-27--roadmap_B_to_I_engineering_log.md` |
 | 文档目录规范 + 全量索引 | `docs/README.md` |
 
 ---
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：A-L + Phase 2 + Phase 3 + 全系统 A-K 审核修复全部完成。640 测试，104 路由，7 信号规则。管线已接通。系统性问题已清零（路径统一 / I章去重-750行 / mutator 3x→1x / SHA256 / stage 标签）。系统全程 read_only / disabled / not_granted。下一步：远程安全访问 → Telegram → cron → Beta 数据积累 → M 章。
+> 截至 2026-03-27：全系统完成 + 路线图 B-I 已实现。641 测试，104 路由，7 信号规则，4 策略（含 Delta-Neutral Funding Arb）。Paper Trading 实时运行中。加权共识 + regime 过滤 + 策略持久化 + Volume 刷新 + Grid 几何间距已上线。系统全程 read_only / disabled / not_granted。下一步：Telegram 告警 → Beta 数据积累 → M 章。
