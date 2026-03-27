@@ -87,9 +87,11 @@ class TestSMA:
         assert len(series) == len(LINEAR_PRICES)
 
     def test_sma_series_first_values(self):
-        """First period-1 values are 0.0 / 前 period-1 个值为 0.0"""
+        """First period-1 values are NaN (insufficient data) / 前 period-1 个值为 NaN（数据不足）"""
+        import math
         series = compute_sma_series(LINEAR_PRICES, 5)
-        assert series[:4] == [0.0, 0.0, 0.0, 0.0]
+        for v in series[:4]:
+            assert math.isnan(v), f"Expected NaN, got {v}"
         assert series[4] == 3.0  # mean(1,2,3,4,5)
 
     def test_sma_class(self):

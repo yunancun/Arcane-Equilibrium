@@ -107,6 +107,8 @@ def compute_bollinger_bands(
 
     # Bandwidth: normalized volatility (0 means no volatility)
     # 带宽：归一化波动率（0 表示无波动）
+    # middle=0 only possible if all prices are 0 (impossible in real trading)
+    # middle=0 仅在所有价格为 0 时发生（真实交易中不可能）
     bandwidth = (upper - lower) / middle if middle != 0 else 0.0
 
     # %B: where is the current price within the band (0=lower, 1=upper)
@@ -143,6 +145,10 @@ class BollingerBands(IndicatorBase):
         """
         self._period = period
         self._std_dev_multiplier = std_dev_multiplier
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period} / 周期必须大于 0")
+        if std_dev_multiplier <= 0:
+            raise ValueError(f"std_dev_multiplier must be > 0, got {std_dev_multiplier} / 标准差乘数必须大于 0")
 
     @property
     def name(self) -> str:

@@ -117,6 +117,7 @@ class StrategyOrchestrator:
         kline_manager: KlineManager,
         indicator_engine: IndicatorEngine,
         signal_engine: SignalEngine,
+        intent_history_capacity: int = 500,
     ) -> None:
         self._km = kline_manager
         self._ie = indicator_engine
@@ -131,7 +132,7 @@ class StrategyOrchestrator:
         self._pending_intents: list[OrderIntent] = []
 
         # Intent history (for audit) — bounded deque / 意图历史（审计用）— 有界 deque
-        self._intent_history: deque[dict[str, Any]] = deque(maxlen=500)
+        self._intent_history: deque[dict[str, Any]] = deque(maxlen=intent_history_capacity)
 
         # Statistics / 统计
         self._stats = {
@@ -156,11 +157,13 @@ class StrategyOrchestrator:
         策略以 idle 状态注册。调用 activate_strategy() 激活。
         """
         with self._lock:
-            if strategy.name in self._strategies:
+            old = self._strategies.get(strategy.name)
+            if old is not None:
                 logger.warning(
-                    "Strategy %s already registered, replacing / 策略 %s 已注册，将替换",
+                    "Strategy %s already registered, stopping old + replacing / 策略 %s 已注册，停止旧策略并替换",
                     strategy.name, strategy.name,
                 )
+                old.stop()
             self._strategies[strategy.name] = strategy
         logger.info("Registered strategy / 注册策略: %s", strategy.name)
 
@@ -294,6 +297,19 @@ class StrategyOrchestrator:
                     **intent.to_dict(),
                     "collected_ts_ms": now_ms,
                 })
+
+            # Detect conflicting intents for same symbol (different strategies, opposite sides)
+            # 检测同一交易对的冲突意图（不同策略、相反方向）
+            symbols_sides: dict[str, set[str]] = {}
+            for intent in all_intents:
+                sides = symbols_sides.setdefault(intent.symbol, set())
+                sides.add(intent.side)
+            for sym, sides in symbols_sides.items():
+                if len(sides) > 1:
+                    logger.warning(
+                        "Conflicting intents for %s: %s from different strategies / "
+                        "交易对 %s 存在冲突意图: %s", sym, sides, sym, sides,
+                    )
 
             self._stats["intents_collected"] += len(all_intents)
 

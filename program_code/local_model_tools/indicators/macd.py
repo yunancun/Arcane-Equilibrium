@@ -134,6 +134,14 @@ class MACD(IndicatorBase):
         self._fast = fast_period
         self._slow = slow_period
         self._signal = signal_period
+        if fast_period <= 0:
+            raise ValueError(f"fast_period must be > 0, got {fast_period} / 快速周期必须大于 0")
+        if slow_period <= 0:
+            raise ValueError(f"slow_period must be > 0, got {slow_period} / 慢速周期必须大于 0")
+        if signal_period <= 0:
+            raise ValueError(f"signal_period must be > 0, got {signal_period} / 信号周期必须大于 0")
+        if fast_period >= slow_period:
+            raise ValueError(f"fast_period must be < slow_period, got fast={fast_period} >= slow={slow_period} / 快速周期必须小于慢速周期")
 
     @property
     def name(self) -> str:

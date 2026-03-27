@@ -77,6 +77,8 @@ class FundingRateArbStrategy(StrategyBase):
         fee_bps: float = 11.0,  # taker×2 = 0.055%×2 = 11 bps
     ) -> None:
         super().__init__()
+        if qty_per_trade <= 0:
+            raise ValueError(f"qty_per_trade must be > 0, got {qty_per_trade} / 每笔数量必须大于 0")
         self._symbol = symbol
         self._qty = qty_per_trade
         self._threshold = funding_threshold
@@ -124,83 +126,84 @@ class FundingRateArbStrategy(StrategyBase):
         now_ms = current_ts_ms or int(time.time() * 1000)
         hours_to_settle = (next_settle_ts_ms - now_ms) / 3600_000
 
-        # Check if we should exit / 检查是否应出场
-        if self._current_position is not None:
-            should_exit = False
-            exit_reason = ""
+        with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
+            # Check if we should exit / 检查是否应出场
+            if self._current_position is not None:
+                should_exit = False
+                exit_reason = ""
 
-            # Exit if funding rate flipped / funding rate 反转则出场
-            if self._current_position == "short" and funding_rate < 0:
-                should_exit = True
-                exit_reason = f"Funding rate flipped negative ({funding_rate:.6f}) / Funding rate 转负"
-            elif self._current_position == "long" and funding_rate > 0:
-                should_exit = True
-                exit_reason = f"Funding rate flipped positive ({funding_rate:.6f}) / Funding rate 转正"
+                # Exit if funding rate flipped / funding rate 反转则出场
+                if self._current_position == "short" and funding_rate < 0:
+                    should_exit = True
+                    exit_reason = f"Funding rate flipped negative ({funding_rate:.6f}) / Funding rate 转负"
+                elif self._current_position == "long" and funding_rate > 0:
+                    should_exit = True
+                    exit_reason = f"Funding rate flipped positive ({funding_rate:.6f}) / Funding rate 转正"
 
-            # Exit if funding too small to cover costs / funding 不足以覆盖成本
-            elif abs(funding_rate) * 10000 < self._fee_bps * 0.3:
-                should_exit = True
-                exit_reason = f"Funding too small ({abs(funding_rate)*10000:.1f}bps vs fee {self._fee_bps}bps) / Funding 过小"
+                # Exit if funding too small to cover costs / funding 不足以覆盖成本
+                elif abs(funding_rate) * 10000 < self._fee_bps * 0.3:
+                    should_exit = True
+                    exit_reason = f"Funding too small ({abs(funding_rate)*10000:.1f}bps vs fee {self._fee_bps}bps) / Funding 过小"
 
-            if should_exit:
-                side = "Buy" if self._current_position == "short" else "Sell"
+                if should_exit:
+                    side = "Buy" if self._current_position == "short" else "Sell"
+                    self._emit_intent(OrderIntent(
+                        symbol=self._symbol, side=side, order_type="market",
+                        qty=self._qty, strategy_name=self.name,
+                        reason=f"Exit funding arb: {exit_reason}",
+                        confidence=0.6,
+                    ))
+                    self._current_position = None
+                    self._entry_funding_rate = None
+                return
+
+            # Check if we should enter / 检查是否应入场
+            if abs(funding_rate) < self._threshold:
+                return  # Funding rate too small / Funding rate 太小
+
+            if hours_to_settle < self._min_hours:
+                return  # Too close to settlement / 距结算时间太近
+
+            # Calculate expected edge / 计算预期边际
+            funding_bps = abs(funding_rate) * 10000
+            edge_bps = funding_bps - self._fee_bps
+            if edge_bps <= 0:
+                return  # Not enough edge after fees / 扣除手续费后无边际
+
+            # Determine direction / 确定方向
+            if funding_rate > self._threshold:
+                # Positive rate: longs pay shorts → go short / 正费率：多付空 → 做空
                 self._emit_intent(OrderIntent(
-                    symbol=self._symbol, side=side, order_type="market",
+                    symbol=self._symbol, side="Sell", order_type="market",
                     qty=self._qty, strategy_name=self.name,
-                    reason=f"Exit funding arb: {exit_reason}",
-                    confidence=0.6,
+                    reason=(
+                        f"Funding arb short: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
+                        f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
+                        f"Funding 套利做空"
+                    ),
+                    confidence=min(1.0, edge_bps / 20 + 0.3),
+                    metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
                 ))
-                self._current_position = None
-                self._entry_funding_rate = None
-            return
+                self._current_position = "short"
+                self._entry_funding_rate = funding_rate
+                self._trade_count += 1
 
-        # Check if we should enter / 检查是否应入场
-        if abs(funding_rate) < self._threshold:
-            return  # Funding rate too small / Funding rate 太小
-
-        if hours_to_settle < self._min_hours:
-            return  # Too close to settlement / 距结算时间太近
-
-        # Calculate expected edge / 计算预期边际
-        funding_bps = abs(funding_rate) * 10000
-        edge_bps = funding_bps - self._fee_bps
-        if edge_bps <= 0:
-            return  # Not enough edge after fees / 扣除手续费后无边际
-
-        # Determine direction / 确定方向
-        if funding_rate > self._threshold:
-            # Positive rate: longs pay shorts → go short / 正费率：多付空 → 做空
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Sell", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=(
-                    f"Funding arb short: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
-                    f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
-                    f"Funding 套利做空"
-                ),
-                confidence=min(1.0, edge_bps / 20 + 0.3),
-                metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
-            ))
-            self._current_position = "short"
-            self._entry_funding_rate = funding_rate
-            self._trade_count += 1
-
-        elif funding_rate < -self._threshold:
-            # Negative rate: shorts pay longs → go long / 负费率：空付多 → 做多
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Buy", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=(
-                    f"Funding arb long: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
-                    f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
-                    f"Funding 套利做多"
-                ),
-                confidence=min(1.0, edge_bps / 20 + 0.3),
-                metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
-            ))
-            self._current_position = "long"
-            self._entry_funding_rate = funding_rate
-            self._trade_count += 1
+            elif funding_rate < -self._threshold:
+                # Negative rate: shorts pay longs → go long / 负费率：空付多 → 做多
+                self._emit_intent(OrderIntent(
+                    symbol=self._symbol, side="Buy", order_type="market",
+                    qty=self._qty, strategy_name=self.name,
+                    reason=(
+                        f"Funding arb long: rate={funding_rate:.6f} ({funding_bps:.1f}bps), "
+                        f"edge={edge_bps:.1f}bps, settle in {hours_to_settle:.1f}h / "
+                        f"Funding 套利做多"
+                    ),
+                    confidence=min(1.0, edge_bps / 20 + 0.3),
+                    metadata={"funding_rate": funding_rate, "edge_bps": edge_bps},
+                ))
+                self._current_position = "long"
+                self._entry_funding_rate = funding_rate
+                self._trade_count += 1
 
     def record_funding_payment(self, amount_usdt: float) -> None:
         """

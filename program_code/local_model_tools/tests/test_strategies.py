@@ -106,7 +106,7 @@ class TestMACrossoverStrategy:
 
     def test_long_signal_opens_long(self):
         """Bullish MA cross → open long / 金叉 → 开多"""
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         s.activate()
         s.on_signal(self._make_signal("long"))
         intents = s.get_pending_intents()
@@ -116,7 +116,7 @@ class TestMACrossoverStrategy:
 
     def test_short_signal_opens_short(self):
         """Bearish MA cross → open short / 死叉 → 开空"""
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         s.activate()
         s.on_signal(self._make_signal("short"))
         intents = s.get_pending_intents()
@@ -125,7 +125,7 @@ class TestMACrossoverStrategy:
 
     def test_reversal_closes_and_opens(self):
         """Long → short reversal generates close + open / 多转空生成平仓+开仓"""
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         s.activate()
         s.on_signal(self._make_signal("long"))
         s.get_pending_intents()  # Clear
@@ -137,7 +137,7 @@ class TestMACrossoverStrategy:
 
     def test_duplicate_direction_ignored(self):
         """Same direction signal doesn't double-open / 同方向信号不重复开仓"""
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         s.activate()
         s.on_signal(self._make_signal("long"))
         s.get_pending_intents()
@@ -146,21 +146,21 @@ class TestMACrossoverStrategy:
 
     def test_low_confidence_ignored(self):
         """Low confidence signal ignored / 低置信度信号被忽略"""
-        s = MACrossoverStrategy(symbol="BTCUSDT", min_confidence=0.5)
+        s = MACrossoverStrategy(symbol="BTCUSDT", min_confidence=0.5, cooldown_ms=0)
         s.activate()
         s.on_signal(self._make_signal("long", confidence=0.2))
         assert s.get_pending_intents() == []
 
     def test_wrong_symbol_ignored(self):
         """Signal for different symbol ignored / 其他交易对的信号被忽略"""
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         s.activate()
         sig = Signal(symbol="ETHUSDT", direction="long", confidence=0.8, source="MA_Cross(EMA(12)/EMA(26))")
         s.on_signal(sig)
         assert s.get_pending_intents() == []
 
     def test_get_status(self):
-        s = MACrossoverStrategy(symbol="BTCUSDT")
+        s = MACrossoverStrategy(symbol="BTCUSDT", cooldown_ms=0)
         status = s.get_status()
         assert status["strategy"] == "MA_Crossover"
         assert status["symbol"] == "BTCUSDT"
@@ -387,12 +387,13 @@ class TestGridTradingStrategy:
         )
         s.activate()
         ts = int(time.time() * 1000)
-        # Grid step = 2000. 41000 → index round(0.5)=0, 47000 → index round(3.5)=4
-        # So 4 grids crossed upward / 穿越 4 格向上
+        # Grid step = 2000. 41000 → index floor(0.5)=0, 47000 → index floor(3.5)=3
+        # So 3 grids crossed upward (floor gives correct interval mapping)
+        # 穿越 3 格向上（floor 给出正确的区间映射）
         s.on_tick("BTCUSDT", 41000.0, ts)
         s.on_tick("BTCUSDT", 47000.0, ts + 1000)
         intents = s.get_pending_intents()
-        assert len(intents) == 4
+        assert len(intents) == 3
         for intent in intents:
             assert intent.side == "Sell"
 

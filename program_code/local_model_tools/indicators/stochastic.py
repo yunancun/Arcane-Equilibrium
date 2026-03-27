@@ -78,7 +78,10 @@ def compute_stochastic(
         lowest = min(window_low)
         diff = highest - lowest
         if diff == 0:
-            k_values.append(50.0)  # No range → neutral / 无波动 → 中性
+            # No price range in the window → return neutral 50.0 (by design).
+            # This means the asset is flat; %K at midpoint is the correct neutral value.
+            # 窗口内无价格波动 → 返回中性值 50.0（设计决策：平盘时 %K 取中点是正确的中性值）
+            k_values.append(50.0)
         else:
             k_val = ((close[i] - lowest) / diff) * 100.0
             k_values.append(k_val)
@@ -111,6 +114,10 @@ class Stochastic(IndicatorBase):
     def __init__(self, k_period: int = 14, d_period: int = 3) -> None:
         self._k_period = k_period
         self._d_period = d_period
+        if k_period <= 0:
+            raise ValueError(f"k_period must be > 0, got {k_period} / K 周期必须大于 0")
+        if d_period <= 0:
+            raise ValueError(f"d_period must be > 0, got {d_period} / D 周期必须大于 0")
 
     @property
     def name(self) -> str:

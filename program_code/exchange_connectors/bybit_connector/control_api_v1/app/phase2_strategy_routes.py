@@ -59,7 +59,9 @@ import sys
 import os
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from . import main_legacy as base  # Auth helpers (current_actor, AuthenticatedActor)
 
 # Add program_code to path so local_model_tools is importable
 # 将 program_code 加入路径以便导入 local_model_tools
@@ -122,6 +124,31 @@ logger.info(
     DEFAULT_SYMBOLS, DEFAULT_TIMEFRAMES, ORCHESTRATOR.list_available_strategies(),
 )
 
+# ── Pipeline Bridge (connects strategy pipeline to paper trading engine) ──
+# 管线桥接器（连接策略管线与纸上交易引擎）
+# Lazy initialization: bridge is created here but activated when paper session starts
+# 延迟激活：桥接器在此创建，但在纸上交易 session 启动时激活
+
+from .pipeline_bridge import PipelineBridge
+
+# Import paper trading singletons (these are created in paper_trading_routes.py)
+# 导入纸上交易单例（在 paper_trading_routes.py 中创建）
+# Note: circular import is avoided because both files are imported at module level by main.py
+# 注意：避免循环导入，因为两个文件都由 main.py 在模块级导入
+try:
+    from .paper_trading_routes import ENGINE as PAPER_ENGINE
+    PIPELINE_BRIDGE = PipelineBridge(
+        kline_manager=KLINE_MANAGER,
+        indicator_engine=INDICATOR_ENGINE,
+        signal_engine=SIGNAL_ENGINE,
+        orchestrator=ORCHESTRATOR,
+        paper_engine=PAPER_ENGINE,
+    )
+    logger.info("Pipeline bridge created (inactive until paper session starts) / 管线桥接器已创建（等待 paper session 启动后激活）")
+except ImportError:
+    PIPELINE_BRIDGE = None
+    logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
+
 
 # =============================================================================
 # Router / 路由
@@ -149,8 +176,18 @@ def _validate_symbol(symbol: str) -> str | None:
     return s
 
 
+_STRATEGY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{1,50}$")
+
+
+def _validate_strategy_name(name: str) -> str | None:
+    """Validate strategy name (1-50 alphanum/underscore/dash). Returns cleaned name or None."""
+    if not _STRATEGY_NAME_PATTERN.match(name):
+        return None
+    return name
+
+
 def _envelope(data: Any, action: str = "success") -> dict[str, Any]:
-    """Minimal response envelope for Phase 2 routes / Phase 2 路由的最小响应封装"""
+    """Response envelope for Phase 2 routes / Phase 2 路由的响应封装"""
     return {
         "action_result": action,
         "data": data,
@@ -166,6 +203,7 @@ async def get_klines(
     symbol: str,
     timeframe: str,
     n: int = Query(default=50, ge=1, le=500, description="Number of klines to return / 返回K线数量"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Get latest N closed klines for a symbol + timeframe.
@@ -173,40 +211,52 @@ async def get_klines(
     """
     sym = _validate_symbol(symbol)
     if sym is None:
-        return _envelope({"error": "Invalid symbol (1-20 alphanumeric) / 无效交易对"}, action="invalid_input")
+        raise HTTPException(status_code=400, detail="Invalid symbol (1-20 alphanumeric) / 无效交易对")
     if timeframe not in _VALID_TIMEFRAMES:
-        return _envelope({"error": f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架"}, action="invalid_input")
-    klines = KLINE_MANAGER.get_latest_klines(sym, timeframe, n=n)
-    current = KLINE_MANAGER.get_current_bar(sym, timeframe)
-    return _envelope({
-        "symbol": sym,
-        "timeframe": timeframe,
-        "closed_klines": klines,
-        "current_bar": current.to_dict() if current else None,
-        "count": len(klines),
-    })
+        raise HTTPException(status_code=400, detail=f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架")
+    try:
+        klines = KLINE_MANAGER.get_latest_klines(sym, timeframe, n=n)
+        current = KLINE_MANAGER.get_current_bar(sym, timeframe)
+        return _envelope({
+            "symbol": sym,
+            "timeframe": timeframe,
+            "closed_klines": klines,
+            "current_bar": current.to_dict() if current else None,
+            "count": len(klines),
+        })
+    except Exception:
+        logger.exception("Error in get_klines / get_klines 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 # ── Indicator Routes / 指标路由 ──
 
 @phase2_router.get("/indicators/{symbol}/{timeframe}")
-async def get_indicators(symbol: str, timeframe: str):
+async def get_indicators(
+    symbol: str,
+    timeframe: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get latest cached indicator values for a symbol + timeframe.
     获取指定交易对 + 时间框架的最新缓存指标值。
     """
     sym = _validate_symbol(symbol)
     if sym is None:
-        return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
+        raise HTTPException(status_code=400, detail="Invalid symbol / 无效交易对")
     if timeframe not in _VALID_TIMEFRAMES:
-        return _envelope({"error": "Invalid timeframe / 无效时间框架"}, action="invalid_input")
-    indicators = INDICATOR_ENGINE.get_indicators(sym, timeframe)
-    return _envelope({
-        "symbol": sym,
-        "timeframe": timeframe,
-        "indicators": indicators,
-        "indicator_count": len(indicators),
-    })
+        raise HTTPException(status_code=400, detail="Invalid timeframe / 无效时间框架")
+    try:
+        indicators = INDICATOR_ENGINE.get_indicators(sym, timeframe)
+        return _envelope({
+            "symbol": sym,
+            "timeframe": timeframe,
+            "indicators": indicators,
+            "indicator_count": len(indicators),
+        })
+    except Exception:
+        logger.exception("Error in get_indicators / get_indicators 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 # ── Signal Routes / 信号路由 ──
@@ -215,6 +265,7 @@ async def get_indicators(symbol: str, timeframe: str):
 async def get_signals(
     symbol: str = Query(default=None, description="Filter by symbol / 按交易对过滤"),
     n: int = Query(default=50, ge=1, le=200, description="Number of signals / 信号数量"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Get recent trading signals.
@@ -224,113 +275,162 @@ async def get_signals(
     if symbol:
         filter_sym = _validate_symbol(symbol)
         if filter_sym is None:
-            return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
-    signals = SIGNAL_ENGINE.get_latest_signals(symbol=filter_sym, n=n)
-    return _envelope({
-        "signals": signals,
-        "count": len(signals),
-        "filter_symbol": filter_sym,
-    })
+            raise HTTPException(status_code=400, detail="Invalid symbol / 无效交易对")
+    try:
+        signals = SIGNAL_ENGINE.get_latest_signals(symbol=filter_sym, n=n)
+        return _envelope({
+            "signals": signals,
+            "count": len(signals),
+            "filter_symbol": filter_sym,
+        })
+    except Exception:
+        logger.exception("Error in get_signals / get_signals 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.get("/signals/{symbol}/summary")
-async def get_signal_summary(symbol: str):
+async def get_signal_summary(
+    symbol: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get signal consensus summary for a symbol.
     获取指定交易对的信号共识摘要。
     """
     sym = _validate_symbol(symbol)
     if sym is None:
-        return _envelope({"error": "Invalid symbol / 无效交易对"}, action="invalid_input")
-    summary = SIGNAL_ENGINE.get_signal_summary(sym)
-    return _envelope(summary)
+        raise HTTPException(status_code=400, detail="Invalid symbol / 无效交易对")
+    try:
+        summary = SIGNAL_ENGINE.get_signal_summary(sym)
+        return _envelope(summary)
+    except Exception:
+        logger.exception("Error in get_signal_summary / get_signal_summary 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 # ── Strategy Management Routes / 策略管理路由 ──
 
 @phase2_router.get("/list")
-async def list_strategies():
+async def list_strategies(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     List all registered strategies and their states.
     列出所有注册的策略及其状态。
     """
-    statuses = ORCHESTRATOR.get_all_strategies_status()
-    return _envelope({
-        "strategies": statuses,
-        "count": len(statuses),
-    })
+    try:
+        statuses = ORCHESTRATOR.get_all_strategies_status()
+        return _envelope({
+            "strategies": statuses,
+            "count": len(statuses),
+        })
+    except Exception:
+        logger.exception("Error in list_strategies / list_strategies 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.get("/{name}/status")
-async def get_strategy_status(name: str):
+async def get_strategy_status(
+    name: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get status of a specific strategy.
     获取指定策略的状态。
     """
-    status = ORCHESTRATOR.get_strategy_status(name)
-    if status is None:
-        return _envelope(
-            {"error": f"Strategy '{name}' not found / 策略 '{name}' 未找到"},
-            action="not_found",
-        )
-    return _envelope(status)
+    if _validate_strategy_name(name) is None:
+        raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    try:
+        status = ORCHESTRATOR.get_strategy_status(name)
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        return _envelope(status)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in get_strategy_status / get_strategy_status 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.post("/{name}/activate")
-async def activate_strategy(name: str):
+async def activate_strategy(
+    name: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Activate a registered strategy.
     激活已注册的策略。
     """
-    success = ORCHESTRATOR.activate_strategy(name)
-    if not success:
-        return _envelope(
-            {"error": f"Strategy '{name}' not found / 策略 '{name}' 未找到"},
-            action="not_found",
-        )
-    return _envelope({
-        "strategy": name,
-        "action": "activated",
-        "new_state": "active",
-    })
+    if _validate_strategy_name(name) is None:
+        raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    try:
+        success = ORCHESTRATOR.activate_strategy(name)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        return _envelope({
+            "strategy": name,
+            "action": "activated",
+            "new_state": "active",
+        })
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in activate_strategy / activate_strategy 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.post("/{name}/pause")
-async def pause_strategy(name: str):
+async def pause_strategy(
+    name: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Pause a running strategy.
     暂停运行中的策略。
     """
-    success = ORCHESTRATOR.pause_strategy(name)
-    if not success:
-        return _envelope(
-            {"error": f"Strategy '{name}' not found / 策略 '{name}' 未找到"},
-            action="not_found",
-        )
-    return _envelope({
-        "strategy": name,
-        "action": "paused",
-        "new_state": "paused",
-    })
+    if _validate_strategy_name(name) is None:
+        raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    try:
+        success = ORCHESTRATOR.pause_strategy(name)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        return _envelope({
+            "strategy": name,
+            "action": "paused",
+            "new_state": "paused",
+        })
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in pause_strategy / pause_strategy 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.post("/{name}/stop")
-async def stop_strategy(name: str):
+async def stop_strategy(
+    name: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Stop a strategy.
     停止策略。
     """
-    success = ORCHESTRATOR.stop_strategy(name)
-    if not success:
-        return _envelope(
-            {"error": f"Strategy '{name}' not found / 策略 '{name}' 未找到"},
-            action="not_found",
-        )
-    return _envelope({
-        "strategy": name,
-        "action": "stopped",
-        "new_state": "stopped",
-    })
+    if _validate_strategy_name(name) is None:
+        raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    try:
+        success = ORCHESTRATOR.stop_strategy(name)
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        return _envelope({
+            "strategy": name,
+            "action": "stopped",
+            "new_state": "stopped",
+        })
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error in stop_strategy / stop_strategy 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 # ── Intent & Status Routes / 意图与状态路由 ──
@@ -338,22 +438,33 @@ async def stop_strategy(name: str):
 @phase2_router.get("/intents")
 async def get_intents(
     n: int = Query(default=50, ge=1, le=200, description="Number of intents / 意图数量"),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Get recent OrderIntent history.
     获取最近的 OrderIntent 历史。
     """
-    history = ORCHESTRATOR.get_intent_history(n=n)
-    return _envelope({
-        "intents": history,
-        "count": len(history),
-    })
+    try:
+        history = ORCHESTRATOR.get_intent_history(n=n)
+        return _envelope({
+            "intents": history,
+            "count": len(history),
+        })
+    except Exception:
+        logger.exception("Error in get_intents / get_intents 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
 @phase2_router.get("/status")
-async def get_orchestrator_status():
+async def get_orchestrator_status(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get comprehensive orchestrator status including all sub-components.
     获取编排器综合状态，包括所有子组件。
     """
-    return _envelope(ORCHESTRATOR.get_status())
+    try:
+        return _envelope(ORCHESTRATOR.get_status())
+    except Exception:
+        logger.exception("Error in get_orchestrator_status / get_orchestrator_status 异常")
+        raise HTTPException(status_code=500, detail="Internal error / 内部错误")

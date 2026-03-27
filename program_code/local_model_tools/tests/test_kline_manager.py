@@ -82,7 +82,7 @@ class TestKlineBar:
         bar = KlineBar(open_time_ms=0, close_time_ms=60000, open_price=100.0)
         r = repr(bar)
         assert "KlineBar" in r
-        assert "100.00" in r
+        assert "100" in r
 
 
 # =============================================================================

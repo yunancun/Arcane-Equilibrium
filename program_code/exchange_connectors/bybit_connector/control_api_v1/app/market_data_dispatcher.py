@@ -141,6 +141,9 @@ class MarketDataDispatcher:
             "started_ts_ms": None,
         }
 
+        # External tick consumers (e.g., PipelineBridge) / 外部 tick 消费者（如管线桥接器）
+        self._tick_consumers: list[Any] = []
+
     # ── Public Interface / 公开接口 ──
 
     def start(self) -> None:
@@ -187,6 +190,17 @@ class MarketDataDispatcher:
         if symbol in self._symbols:
             self._symbols.remove(symbol)
         self._listener.remove_symbol(symbol)
+
+    def register_tick_consumer(self, consumer: Any) -> None:
+        """
+        Register an external tick consumer that will receive price events.
+        注册外部 tick 消费者，将收到价格事件。
+
+        Consumer must have an `on_tick(event)` method.
+        消费者必须有 `on_tick(event)` 方法。
+        """
+        self._tick_consumers.append(consumer)
+        logger.info("Registered tick consumer: %s / 注册 tick 消费者", type(consumer).__name__)
 
     # ── Core: Price Event Handler / 核心：价格事件处理 ──
 
@@ -264,6 +278,13 @@ class MarketDataDispatcher:
                     trigger_event.symbol,
                     trigger_event.last_price,
                 )
+
+            # Fan-out to registered tick consumers / 分发到注册的 tick 消费者
+            for consumer in self._tick_consumers:
+                try:
+                    consumer.on_tick(trigger_event)
+                except Exception:
+                    logger.exception("Tick consumer error / tick 消费者异常: %s", type(consumer).__name__)
         except Exception as e:
             logger.error("Engine tick failed: %s", e)
 

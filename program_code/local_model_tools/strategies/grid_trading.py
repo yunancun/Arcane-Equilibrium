@@ -47,7 +47,11 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import logging
+import math
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from .base import OrderIntent, StrategyBase, STRATEGY_ACTIVE
 
@@ -82,6 +86,10 @@ class GridTradingStrategy(StrategyBase):
             raise ValueError(
                 f"grid_count ({grid_count}) must be >= 2 / 网格数量至少为 2"
             )
+        if qty_per_grid <= 0:
+            raise ValueError(
+                f"qty_per_grid ({qty_per_grid}) must be > 0 / 每格数量必须大于 0"
+            )
 
         self._symbol = symbol
         self._upper = upper_price
@@ -104,6 +112,9 @@ class GridTradingStrategy(StrategyBase):
         self._trade_count = 0
         self._buy_count = 0
         self._sell_count = 0
+        self._net_inventory: float = 0.0  # Net inventory in asset units (positive=long, negative=short)
+        self._max_inventory_qty: float = qty_per_grid * grid_count  # Max allowed inventory
+        self._inventory_stop_triggered = False
 
     @property
     def name(self) -> str:
@@ -129,9 +140,10 @@ class GridTradingStrategy(StrategyBase):
             return 0
         if price >= self._upper:
             return self._grid_count
-        # Use round() to avoid floating-point truncation errors
-        # 使用 round() 避免浮点截断误差（如 0.9999→0 而非 1）
-        return int(round((price - self._lower) / self._grid_step))
+        # Use floor() for correct interval mapping (which grid interval the price is in)
+        # 使用 floor() 正确映射到网格区间（价格在哪个网格区间内）
+        idx = int(math.floor((price - self._lower) / self._grid_step))
+        return min(idx, self._grid_count)  # clamp to valid range / 限制在有效范围内
 
     def on_tick(self, symbol: str, price: float, ts_ms: int) -> None:
         """
@@ -150,72 +162,99 @@ class GridTradingStrategy(StrategyBase):
         if symbol != self._symbol:
             return
 
-        # Price out of grid range → no action / 价格超出网格范围 → 不操作
-        if price < self._lower or price > self._upper:
-            self._last_price = price
-            return
+        with self._intent_lock:  # Protect grid state read+write+emit atomically / 原子保护网格状态
+            # Price out of grid range → reset grid index to boundary to avoid phantom orders on re-entry
+            # 价格超出网格范围 → 重置网格索引到边界，避免重入时产生幻影订单
+            if price < self._lower or price > self._upper:
+                if price < self._lower:
+                    self._last_grid_index = 0
+                else:
+                    self._last_grid_index = self._grid_count
+                self._last_price = price
+                return
 
-        current_index = self._price_to_grid_index(price)
+            current_index = self._price_to_grid_index(price)
 
-        if self._last_grid_index is None:
-            # First tick — just record position / 首个 tick — 只记录位置
+            if self._last_grid_index is None:
+                # First tick — just record position / 首个 tick — 只记录位置
+                self._last_grid_index = current_index
+                self._last_price = price
+                return
+
+            if current_index == self._last_grid_index:
+                # Same grid level — no crossing / 同一网格层 — 无穿越
+                self._last_price = price
+                return
+
+            # Inventory stop: if accumulated inventory exceeds max, stop taking new positions
+            # 库存止损：累计库存超过上限时，停止新建同方向仓位
+            if abs(self._net_inventory) >= self._max_inventory_qty:
+                if not self._inventory_stop_triggered:
+                    self._inventory_stop_triggered = True
+                    logger.warning(
+                        "Grid inventory limit reached: %.6f (max %.6f) / "
+                        "网格库存达到上限",
+                        self._net_inventory, self._max_inventory_qty,
+                    )
+
+            # Grid crossing detected / 检测到网格穿越
+            if current_index > self._last_grid_index:
+                # Price moved up → sell (one intent per grid crossed)
+                # 价格上移 → 卖出（每穿越一格一个意图）
+                if self._net_inventory <= -self._max_inventory_qty:
+                    self._last_grid_index = current_index
+                    self._last_price = price
+                    return  # Inventory limit reached / 库存限制
+                grids_crossed = current_index - self._last_grid_index
+                for i in range(grids_crossed):
+                    grid_level = self._grid_levels[self._last_grid_index + i + 1]
+                    self._emit_intent(OrderIntent(
+                        symbol=self._symbol,
+                        side="Sell",
+                        order_type="limit",
+                        qty=self._qty,
+                        price=grid_level,
+                        strategy_name=self.name,
+                        reason=(
+                            f"Grid sell at {grid_level:.2f} (crossed up) / "
+                            f"网格卖出 {grid_level:.2f}（向上穿越）"
+                        ),
+                        confidence=0.8,
+                        metadata={"grid_level": grid_level, "direction": "up"},
+                    ))
+                    self._sell_count += 1
+                    self._net_inventory -= self._qty
+                    self._trade_count += 1
+
+            else:
+                # Price moved down → buy / 价格下移 → 买入
+                if self._net_inventory >= self._max_inventory_qty:
+                    self._last_grid_index = current_index
+                    self._last_price = price
+                    return  # Inventory limit reached / 库存限制
+                grids_crossed = self._last_grid_index - current_index
+                for i in range(grids_crossed):
+                    grid_level = self._grid_levels[self._last_grid_index - i]
+                    self._emit_intent(OrderIntent(
+                        symbol=self._symbol,
+                        side="Buy",
+                        order_type="limit",
+                        qty=self._qty,
+                        price=grid_level,
+                        strategy_name=self.name,
+                        reason=(
+                            f"Grid buy at {grid_level:.2f} (crossed down) / "
+                            f"网格买入 {grid_level:.2f}（向下穿越）"
+                        ),
+                        confidence=0.8,
+                        metadata={"grid_level": grid_level, "direction": "down"},
+                    ))
+                    self._buy_count += 1
+                    self._net_inventory += self._qty
+                    self._trade_count += 1
+
             self._last_grid_index = current_index
             self._last_price = price
-            return
-
-        if current_index == self._last_grid_index:
-            # Same grid level — no crossing / 同一网格层 — 无穿越
-            self._last_price = price
-            return
-
-        # Grid crossing detected / 检测到网格穿越
-        if current_index > self._last_grid_index:
-            # Price moved up → sell (one intent per grid crossed)
-            # 价格上移 → 卖出（每穿越一格一个意图）
-            grids_crossed = current_index - self._last_grid_index
-            for i in range(grids_crossed):
-                grid_level = self._grid_levels[self._last_grid_index + i + 1]
-                self._emit_intent(OrderIntent(
-                    symbol=self._symbol,
-                    side="Sell",
-                    order_type="limit",
-                    qty=self._qty,
-                    price=grid_level,
-                    strategy_name=self.name,
-                    reason=(
-                        f"Grid sell at {grid_level:.2f} (crossed up) / "
-                        f"网格卖出 {grid_level:.2f}（向上穿越）"
-                    ),
-                    confidence=0.8,
-                    metadata={"grid_level": grid_level, "direction": "up"},
-                ))
-                self._sell_count += 1
-                self._trade_count += 1
-
-        else:
-            # Price moved down → buy / 价格下移 → 买入
-            grids_crossed = self._last_grid_index - current_index
-            for i in range(grids_crossed):
-                grid_level = self._grid_levels[self._last_grid_index - i]
-                self._emit_intent(OrderIntent(
-                    symbol=self._symbol,
-                    side="Buy",
-                    order_type="limit",
-                    qty=self._qty,
-                    price=grid_level,
-                    strategy_name=self.name,
-                    reason=(
-                        f"Grid buy at {grid_level:.2f} (crossed down) / "
-                        f"网格买入 {grid_level:.2f}（向下穿越）"
-                    ),
-                    confidence=0.8,
-                    metadata={"grid_level": grid_level, "direction": "down"},
-                ))
-                self._buy_count += 1
-                self._trade_count += 1
-
-        self._last_grid_index = current_index
-        self._last_price = price
 
     def get_status(self) -> dict[str, Any]:
         return {
@@ -232,5 +271,8 @@ class GridTradingStrategy(StrategyBase):
             "trade_count": self._trade_count,
             "buy_count": self._buy_count,
             "sell_count": self._sell_count,
+            "net_inventory": self._net_inventory,
+            "max_inventory_qty": self._max_inventory_qty,
+            "inventory_stop_triggered": self._inventory_stop_triggered,
             "grid_levels": [round(l, 2) for l in self._grid_levels],
         }

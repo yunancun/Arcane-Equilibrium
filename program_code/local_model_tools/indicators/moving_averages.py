@@ -72,8 +72,8 @@ def compute_sma_series(values: list[float], period: int) -> list[float]:
     Compute SMA series for the entire input (returns list same length as input).
     计算整个输入序列的 SMA 序列（返回与输入同长度的列表）。
 
-    The first (period-1) values will be 0.0 (insufficient data).
-    前 (period-1) 个值为 0.0（数据不足）。
+    The first (period-1) values will be NaN (insufficient data).
+    前 (period-1) 个值为 NaN（数据不足）。
 
     Args:
       values — price list / 价格列表
@@ -84,7 +84,7 @@ def compute_sma_series(values: list[float], period: int) -> list[float]:
     """
     if period <= 0 or len(values) < period:
         return []
-    result = [0.0] * (period - 1)
+    result = [float('nan')] * (period - 1)
     # Initial SMA: average of first `period` values / 初始 SMA：前 period 个值的平均
     window_sum = sum(values[:period])
     result.append(window_sum / period)
@@ -123,8 +123,8 @@ def compute_ema_series(values: list[float], period: int) -> list[float]:
 
     Seed: SMA of first `period` values.
     种子：前 period 个值的 SMA。
-    The first (period-1) values will be 0.0 (insufficient data).
-    前 (period-1) 个值为 0.0（数据不足）。
+    The first (period-1) values will be NaN (insufficient data).
+    前 (period-1) 个值为 NaN（数据不足）。
 
     Args:
       values — price list / 价格列表
@@ -137,7 +137,7 @@ def compute_ema_series(values: list[float], period: int) -> list[float]:
         return []
 
     k = 2.0 / (period + 1)  # EMA multiplier / EMA 乘数
-    result = [0.0] * (period - 1)
+    result = [float('nan')] * (period - 1)
 
     # Seed with SMA / 用 SMA 作为种子
     seed = sum(values[:period]) / period
@@ -175,6 +175,8 @@ class SMA(IndicatorBase):
           period — SMA window size (default 20) / SMA 窗口大小（默认 20）
         """
         self._period = period
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period} / 周期必须大于 0")
 
     @property
     def name(self) -> str:
@@ -226,6 +228,8 @@ class EMA(IndicatorBase):
           period — EMA period (default 12) / EMA 周期（默认 12）
         """
         self._period = period
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period} / 周期必须大于 0")
 
     @property
     def name(self) -> str:

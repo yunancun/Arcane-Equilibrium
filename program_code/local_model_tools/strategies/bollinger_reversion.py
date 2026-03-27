@@ -60,6 +60,8 @@ class BollingerReversionStrategy(StrategyBase):
         min_confidence: float = 0.35,
     ) -> None:
         super().__init__()
+        if qty_per_trade <= 0:
+            raise ValueError(f"qty_per_trade must be > 0, got {qty_per_trade} / 每笔数量必须大于 0")
         self._symbol = symbol
         self._qty = qty_per_trade
         self._entry_pct_b = entry_pct_b
@@ -89,38 +91,48 @@ class BollingerReversionStrategy(StrategyBase):
         if getattr(signal, "confidence", 0) < self._min_confidence:
             return
 
-        source = getattr(signal, "source", "")
-        direction = getattr(signal, "direction", "")
+        with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
+            # Check exit conditions on any BB signal when we have a position
+            # 当有持仓时，在收到任何 BB 信号时检查出场条件
+            if self._current_position is not None and "BB_Reversion" in getattr(signal, "source", ""):
+                pct_b = getattr(signal, "metadata", {}).get("percent_b")
+                if pct_b is not None:
+                    self._check_exit_locked(pct_b)
+                    if self._current_position is None:
+                        return  # Exited, don't process entry / 已出场，不处理入场
 
-        if "BB_Reversion" not in source:
-            return
+            source = getattr(signal, "source", "")
+            direction = getattr(signal, "direction", "")
 
-        # Entry: open position based on BB signal / 入场：根据 BB 信号开仓
-        if direction == "long" and self._current_position is None:
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Buy", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=(
-                    f"BB reversion long: price near lower band / "
-                    f"布林带回归做多：价格接近下轨, conf={signal.confidence:.2f}"
-                ),
-                confidence=signal.confidence,
-            ))
-            self._current_position = "long"
-            self._trade_count += 1
+            if "BB_Reversion" not in source:
+                return
 
-        elif direction == "short" and self._current_position is None:
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Sell", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=(
-                    f"BB reversion short: price near upper band / "
-                    f"布林带回归做空：价格接近上轨, conf={signal.confidence:.2f}"
-                ),
-                confidence=signal.confidence,
-            ))
-            self._current_position = "short"
-            self._trade_count += 1
+            # Entry: open position based on BB signal / 入场：根据 BB 信号开仓
+            if direction == "long" and self._current_position is None:
+                self._emit_intent(OrderIntent(
+                    symbol=self._symbol, side="Buy", order_type="market",
+                    qty=self._qty, strategy_name=self.name,
+                    reason=(
+                        f"BB reversion long: price near lower band / "
+                        f"布林带回归做多：价格接近下轨, conf={signal.confidence:.2f}"
+                    ),
+                    confidence=signal.confidence,
+                ))
+                self._current_position = "long"
+                self._trade_count += 1
+
+            elif direction == "short" and self._current_position is None:
+                self._emit_intent(OrderIntent(
+                    symbol=self._symbol, side="Sell", order_type="market",
+                    qty=self._qty, strategy_name=self.name,
+                    reason=(
+                        f"BB reversion short: price near upper band / "
+                        f"布林带回归做空：价格接近上轨, conf={signal.confidence:.2f}"
+                    ),
+                    confidence=signal.confidence,
+                ))
+                self._current_position = "short"
+                self._trade_count += 1
 
     def check_exit(self, pct_b: float) -> None:
         """
@@ -133,6 +145,11 @@ class BollingerReversionStrategy(StrategyBase):
         Args:
           pct_b — current Bollinger %B value / 当前布林带 %B 值
         """
+        with self._intent_lock:  # Protect _current_position read+write atomically / 原子保护仓位状态
+            self._check_exit_locked(pct_b)
+
+    def _check_exit_locked(self, pct_b: float) -> None:
+        """Internal: check exit while _intent_lock is already held / 内部：在已持有锁时检查出场"""
         if self._state != STRATEGY_ACTIVE or self._current_position is None:
             return
 

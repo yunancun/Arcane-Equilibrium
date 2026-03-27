@@ -91,10 +91,6 @@ DEFAULT_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"]
 # 500 × 1m = ~8.3 hours, 500 × 1h = ~20 days — 足够指标计算
 DEFAULT_BUFFER_CAPACITY = 500
 
-# Minimum number of ticks required to consider a kline valid
-# 最少需要多少个 tick 才认为 K线有效（防止只有 1 个 tick 的退化 K线）
-MIN_TICKS_FOR_VALID_KLINE = 1
-
 
 # =============================================================================
 # KlineBar — Single Kline Data / 单根 K线数据
@@ -161,6 +157,9 @@ class KlineBar:
         if price < self.low:
             self.low = price
         self.close = price
+        # Note: float += accumulation has ~1 ULP drift over thousands of ticks.
+        # Acceptable for paper trading; consider Kahan summation for live.
+        # 注意：float 累加在数千 tick 后有 ~1 ULP 漂移。Paper trading 可接受。
         self.volume += volume
         self.turnover += turnover
         self.tick_count += 1
@@ -182,8 +181,8 @@ class KlineBar:
 
     def __repr__(self) -> str:
         return (
-            f"KlineBar(O={self.open:.2f} H={self.high:.2f} "
-            f"L={self.low:.2f} C={self.close:.2f} V={self.volume:.4f} "
+            f"KlineBar(O={self.open:.8g} H={self.high:.8g} "
+            f"L={self.low:.8g} C={self.close:.8g} V={self.volume:.4f} "
             f"ticks={self.tick_count} closed={self.is_closed})"
         )
 
@@ -257,27 +256,27 @@ class KlineBuffer:
         Args:
           n — how many to return (None = all) / 返回多少个（None = 全部）
         """
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         return [b.close for b in bars]
 
     def high_array(self, n: int | None = None) -> list[float]:
         """Get high prices as a flat list / 获取最高价列表"""
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         return [b.high for b in bars]
 
     def low_array(self, n: int | None = None) -> list[float]:
         """Get low prices as a flat list / 获取最低价列表"""
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         return [b.low for b in bars]
 
     def open_array(self, n: int | None = None) -> list[float]:
         """Get open prices as a flat list / 获取开盘价列表"""
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         return [b.open for b in bars]
 
     def volume_array(self, n: int | None = None) -> list[float]:
         """Get volume values as a flat list / 获取成交量列表"""
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         return [b.volume for b in bars]
 
     def ohlcv_arrays(self, n: int | None = None) -> dict[str, list[float]]:
@@ -288,7 +287,7 @@ class KlineBuffer:
         Returns:
           {"open": [...], "high": [...], "low": [...], "close": [...], "volume": [...]}
         """
-        bars = self.latest(n) if n else list(self._bars)
+        bars = self.latest(n) if n is not None else list(self._bars)
         opens, highs, lows, closes, volumes = [], [], [], [], []
         for b in bars:
             opens.append(b.open)
@@ -361,6 +360,9 @@ class KlineAggregator:
 
         # Current building kline (None until first tick) / 当前正在构建的 K线（首个 tick 前为 None）
         self._current_bar: KlineBar | None = None
+
+        # Gap tracking: number of skipped periods detected / 缺口追踪：检测到的跳过周期数
+        self._gap_periods_detected: int = 0
 
     @property
     def timeframe(self) -> str:
@@ -437,6 +439,18 @@ class KlineAggregator:
             self._current_bar.is_closed = True
             closed_bar = self._current_bar
             self._buffer.append(closed_bar)
+
+            # Gap detection: check if periods were skipped / 缺口检测：检查是否跳过了周期
+            expected_next = self._current_bar.close_time_ms
+            if period_start > expected_next:
+                gap_count = int((period_start - expected_next) / self._duration_ms)
+                if gap_count > 0:
+                    logger.warning(
+                        "Kline gap detected: %d periods skipped for %s / "
+                        "K线缺口: 跳过 %d 个周期 (%s)",
+                        gap_count, self._timeframe, gap_count, self._timeframe,
+                    )
+                    self._gap_periods_detected += gap_count
 
             # Notify downstream / 通知下游
             if self._on_kline_close is not None:
@@ -524,9 +538,11 @@ class KlineManager:
         self._on_close_callbacks: list[KlineCloseCallback] = []
 
         # Statistics / 统计
-        self._stats = {
+        self._stats: dict[str, Any] = {
             "total_ticks_processed": 0,
             "total_klines_closed": 0,
+            "gap_periods_detected": 0,
+            "last_tick_ts_ms": 0,
             "ticks_by_symbol": {},
             "klines_by_symbol_tf": {},
         }
@@ -623,18 +639,29 @@ class KlineManager:
         """
         # Extract fields (support both PriceEvent objects and dicts)
         # 提取字段（同时支持 PriceEvent 对象和字典）
-        if isinstance(event, dict):
-            symbol = event.get("symbol", "")
-            price = float(event.get("last_price", 0.0))
-            ts_ms = int(event.get("ts_ms", 0) or time.time() * 1000)
-            volume = float(event.get("volume_24h", 0.0) or 0.0)
-            turnover = float(event.get("turnover_24h", 0.0) or 0.0)
-        else:
-            symbol = getattr(event, "symbol", "")
-            price = float(getattr(event, "last_price", 0.0))
-            ts_ms = int(getattr(event, "ts_ms", 0) or time.time() * 1000)
-            volume = float(getattr(event, "volume_24h", 0.0) or 0.0)
-            turnover = float(getattr(event, "turnover_24h", 0.0) or 0.0)
+        # Note: volume_24h / turnover_24h are CUMULATIVE 24h values from Bybit ticker,
+        # NOT per-tick trade volume. Using them as per-tick volume would inflate kline volume
+        # by orders of magnitude. We use per-trade volume/turnover fields if available,
+        # otherwise default to 0 (ticker stream doesn't provide per-tick volume).
+        # 注意：volume_24h / turnover_24h 是 Bybit ticker 的 24 小时累计值，
+        # 不是单笔成交量。使用 volume（单笔）字段，否则默认为 0。
+        try:
+            if isinstance(event, dict):
+                symbol = event.get("symbol", "")
+                price = float(event.get("last_price", 0.0))
+                ts_ms = int(event.get("ts_ms", 0) or time.time() * 1000)
+                volume = float(event.get("volume", 0.0) or 0.0)
+                turnover = float(event.get("turnover", 0.0) or 0.0)
+            else:
+                symbol = getattr(event, "symbol", "")
+                price = float(getattr(event, "last_price", 0.0))
+                ts_ms = int(getattr(event, "ts_ms", 0) or time.time() * 1000)
+                volume = float(getattr(event, "volume", 0.0) or 0.0)
+                turnover = float(getattr(event, "turnover", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            # Non-numeric value in event fields — skip silently
+            # 事件字段中有非数值 — 静默跳过
+            return
 
         if not symbol or price <= 0:
             return
@@ -687,7 +714,12 @@ class KlineManager:
                 closed = agg.on_tick(price=price, ts_ms=ts_ms, volume=volume, turnover=turnover)
                 if closed is not None:
                     closed_bars.append((symbol, tf, closed))
+                # Propagate gap stats from aggregator / 从聚合器传播缺口统计
+                if agg._gap_periods_detected > 0:
+                    self._stats["gap_periods_detected"] += agg._gap_periods_detected
+                    agg._gap_periods_detected = 0
             self._stats["total_ticks_processed"] += 1
+            self._stats["last_tick_ts_ms"] = ts_ms
             self._stats["ticks_by_symbol"][symbol] = (
                 self._stats["ticks_by_symbol"].get(symbol, 0) + 1
             )
@@ -710,6 +742,14 @@ class KlineManager:
             if symbol in self._symbols:
                 self._symbols.remove(symbol)
             self._aggregators.pop(symbol, None)
+            # Clean up stats for removed symbol / 清理已移除交易对的统计数据
+            self._stats.get("ticks_by_symbol", {}).pop(symbol, None)
+            keys_to_remove = [
+                k for k in self._stats.get("klines_by_symbol_tf", {})
+                if k.startswith(f"{symbol}:")
+            ]
+            for k in keys_to_remove:
+                del self._stats["klines_by_symbol_tf"][k]
 
     def get_buffer(self, symbol: str, timeframe: str) -> KlineBuffer | None:
         """
@@ -726,16 +766,31 @@ class KlineManager:
 
     def get_current_bar(self, symbol: str, timeframe: str) -> KlineBar | None:
         """
-        Get the currently building (not yet closed) kline /
-        获取当前正在构建的（尚未闭合的）K线
+        Get a snapshot of the currently building (not yet closed) kline /
+        获取当前正在构建的（尚未闭合的）K线的快照
 
-        Useful for displaying real-time "live" kline in GUI.
-        适合在 GUI 中显示实时"活"K线。
+        Returns a copy to avoid thread-unsafe mutation of the live bar.
+        返回副本以避免对活跃 K线的线程不安全修改。
         """
         with self._lock:
             aggs = self._aggregators.get(symbol, {})
             agg = aggs.get(timeframe)
-            return agg.current_bar if agg else None
+            bar = agg.current_bar if agg else None
+            if bar is None:
+                return None
+            # Return a snapshot copy / 返回快照副本
+            return KlineBar(
+                open_time_ms=bar.open_time_ms,
+                close_time_ms=bar.close_time_ms,
+                open_price=bar.open,
+                high=bar.high,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+                turnover=bar.turnover,
+                tick_count=bar.tick_count,
+                is_closed=bar.is_closed,
+            )
 
     def get_latest_klines(
         self, symbol: str, timeframe: str, n: int = 20,
@@ -752,10 +807,12 @@ class KlineManager:
         Returns:
           List of kline dicts, oldest first / K线字典列表，最旧的在前
         """
-        buf = self.get_buffer(symbol, timeframe)
-        if buf is None:
-            return []
-        return [bar.to_dict() for bar in buf.latest(n)]
+        with self._lock:
+            aggs = self._aggregators.get(symbol, {})
+            agg = aggs.get(timeframe)
+            if agg is None:
+                return []
+            return [bar.to_dict() for bar in agg.buffer.latest(n)]
 
     def get_ohlcv(
         self, symbol: str, timeframe: str, n: int | None = None,
@@ -768,10 +825,12 @@ class KlineManager:
           {"open": [...], "high": [...], "low": [...], "close": [...], "volume": [...]}
           Empty dict if buffer not found.
         """
-        buf = self.get_buffer(symbol, timeframe)
-        if buf is None or len(buf) == 0:
-            return {"open": [], "high": [], "low": [], "close": [], "volume": []}
-        return buf.ohlcv_arrays(n)
+        with self._lock:
+            aggs = self._aggregators.get(symbol, {})
+            agg = aggs.get(timeframe)
+            if agg is None or len(agg.buffer) == 0:
+                return {"open": [], "high": [], "low": [], "close": [], "volume": []}
+            return agg.buffer.ohlcv_arrays(n)
 
     def get_stats(self) -> dict[str, Any]:
         """Get aggregation statistics / 获取聚合统计信息"""
@@ -791,10 +850,13 @@ class KlineManager:
 
     def get_status(self) -> dict[str, Any]:
         """Get comprehensive status for API / 获取 API 用的综合状态"""
+        with self._lock:
+            symbols = list(self._symbols)
+            timeframes = list(self._timeframes)
         return {
             "component": "kline_manager",
-            "symbols": list(self._symbols),
-            "timeframes": list(self._timeframes),
+            "symbols": symbols,
+            "timeframes": timeframes,
             "stats": self.get_stats(),
             "is_simulated": True,
             "data_category": "paper_simulated",
@@ -809,6 +871,158 @@ class KlineManager:
             self._stats = {
                 "total_ticks_processed": 0,
                 "total_klines_closed": 0,
+                "gap_periods_detected": 0,
+                "last_tick_ts_ms": 0,
                 "ticks_by_symbol": {},
                 "klines_by_symbol_tf": {},
             }
+
+    def bootstrap_from_rest(
+        self,
+        limit: int = 200,
+        base_url: str = "https://api.bybit.com",
+    ) -> dict[str, int]:
+        """
+        Bootstrap kline buffers from Bybit REST API historical data.
+        从 Bybit REST API 历史数据引导 K线缓冲区。
+
+        Fetches historical klines for all tracked symbols × timeframes
+        to pre-fill buffers so indicators can compute immediately on startup.
+        为所有追踪的交易对 × 时间框架获取历史 K线，预填充缓冲区，
+        使指标在启动时即可计算。
+
+        Args:
+          limit    — number of klines to fetch per symbol/timeframe (max 200) / 每组获取的 K线数
+          base_url — Bybit API base URL / Bybit API 基础 URL
+
+        Returns:
+          {"{symbol}:{timeframe}": count_loaded} / 每组加载的数量
+        """
+        import urllib.request
+        import json as _json
+
+        results: dict[str, int] = {}
+        limit = min(limit, 200)  # Bybit max is 200 per request
+
+        # Map our timeframe names to Bybit interval values
+        tf_map = {
+            "1m": "1", "5m": "5", "15m": "15", "30m": "30",
+            "1h": "60", "4h": "240", "1d": "D",
+        }
+
+        with self._lock:
+            symbols = list(self._symbols)
+            timeframes = list(self._timeframes)
+
+        for symbol in symbols:
+            for tf in timeframes:
+                bybit_interval = tf_map.get(tf)
+                if bybit_interval is None:
+                    continue
+
+                key = f"{symbol}:{tf}"
+                try:
+                    url = (
+                        f"{base_url}/v5/market/kline"
+                        f"?category=linear&symbol={symbol}"
+                        f"&interval={bybit_interval}&limit={limit}"
+                    )
+                    req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = _json.loads(resp.read().decode())
+
+                    if data.get("retCode") != 0:
+                        logger.warning(
+                            "Bybit kline API error for %s: %s / K线 API 错误",
+                            key, data.get("retMsg", "unknown"),
+                        )
+                        results[key] = 0
+                        continue
+
+                    klines = data.get("result", {}).get("list", [])
+                    if not klines:
+                        results[key] = 0
+                        continue
+
+                    # Bybit returns newest first, reverse to oldest first
+                    klines.reverse()
+
+                    count = 0
+                    duration_ms = TIMEFRAME_DURATIONS.get(tf, 60) * 1000
+
+                    with self._lock:
+                        self._ensure_aggregators_for_symbol(symbol)
+                        agg = self._aggregators.get(symbol, {}).get(tf)
+                        if agg is None:
+                            continue
+
+                        for k in klines:
+                            # Bybit kline format: [startTime, open, high, low, close, volume, turnover]
+                            try:
+                                open_time_ms = int(k[0])
+                                bar = KlineBar(
+                                    open_time_ms=open_time_ms,
+                                    close_time_ms=open_time_ms + duration_ms,
+                                    open_price=float(k[1]),
+                                    high=float(k[2]),
+                                    low=float(k[3]),
+                                    close=float(k[4]),
+                                    volume=float(k[5]),
+                                    turnover=float(k[6]) if len(k) > 6 else 0.0,
+                                    tick_count=0,  # Historical, not from ticks
+                                    is_closed=True,
+                                )
+                                agg.buffer.append(bar)
+                                count += 1
+                            except (ValueError, IndexError, TypeError) as e:
+                                logger.debug("Skip malformed kline: %s / 跳过格式错误的 K线: %s", e, e)
+
+                    results[key] = count
+                    logger.info(
+                        "Bootstrapped %d klines for %s / 为 %s 引导了 %d 根 K线",
+                        count, key, key, count,
+                    )
+
+                except Exception:
+                    logger.exception("Failed to bootstrap %s / 引导 %s 失败", key, key)
+                    results[key] = 0
+
+        total = sum(results.values())
+        logger.info(
+            "Kline bootstrap complete: %d total klines across %d groups / "
+            "K线引导完成：共 %d 根 K线，%d 个组",
+            total, len(results), total, len(results),
+        )
+        return results
+
+    def get_staleness(self, max_age_ms: int = 120_000) -> dict[str, Any]:
+        """
+        Check data staleness for all tracked symbols.
+        检查所有追踪交易对的数据新鲜度。
+
+        Args:
+          max_age_ms — maximum acceptable age in milliseconds (default 2 min)
+
+        Returns:
+          {
+            "is_stale": bool,
+            "last_tick_ts_ms": int,
+            "age_ms": int,
+            "stale_symbols": [str],
+          }
+        """
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            last_ts = self._stats.get("last_tick_ts_ms", 0)
+            symbols = list(self._symbols)
+
+        age_ms = now_ms - last_ts if last_ts > 0 else -1
+        is_stale = age_ms > max_age_ms or age_ms < 0
+
+        return {
+            "is_stale": is_stale,
+            "last_tick_ts_ms": last_ts,
+            "age_ms": age_ms,
+            "max_age_ms": max_age_ms,
+            "symbols_tracked": symbols,
+        }

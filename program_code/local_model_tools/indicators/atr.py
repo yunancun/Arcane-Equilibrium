@@ -67,7 +67,7 @@ def compute_true_range(
     if n == 0:
         return []
 
-    tr = [high[0] - low[0]]  # First bar: intraday range / 首根：日内波幅
+    tr = [abs(high[0] - low[0])]  # First bar: intraday range (abs for safety) / 首根：日内波幅（abs 防负值）
     for i in range(1, n):
         hl = high[i] - low[i]
         hc = abs(high[i] - close[i - 1])
@@ -119,14 +119,14 @@ def compute_atr_series(
     Compute full ATR series.
     计算完整的 ATR 序列。
 
-    First `period-1` values are 0.0.
-    前 period-1 个值为 0.0。
+    First `period-1` values are NaN (insufficient data).
+    前 period-1 个值为 NaN（数据不足）。
     """
     tr = compute_true_range(high, low, close)
     if len(tr) < period or period <= 0:
         return []
 
-    result = [0.0] * (period - 1)
+    result = [float('nan')] * (period - 1)
     atr = sum(tr[:period]) / period
     result.append(atr)
 
@@ -177,6 +177,8 @@ class ATR(IndicatorBase):
           period — ATR period (default 14) / ATR 周期
         """
         self._period = period
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period} / 周期必须大于 0")
 
     @property
     def name(self) -> str:
@@ -211,8 +213,10 @@ class ATR(IndicatorBase):
         if atr_val is None:
             return None
 
-        atr_pct = compute_atr_percent(high, low, close, self._period)
+        # Compute ATR percent inline (avoid calling compute_atr a second time)
+        # 内联计算 ATR 百分比（避免重复调用 compute_atr）
+        atr_pct = (atr_val / close[-1]) * 100.0 if close and close[-1] > 0 else 0.0
         return {
             "atr": atr_val,
-            "atr_percent": atr_pct if atr_pct is not None else 0.0,
+            "atr_percent": atr_pct,
         }

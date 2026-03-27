@@ -16,9 +16,12 @@ MODULE_NOTE (English):
 """
 
 import json
+import logging
 import os
 import subprocess
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -348,6 +351,17 @@ def post_market_feed_start(
         symbols=req.symbols,
     )
     DISPATCHER.start()
+
+    # Register pipeline bridge as tick consumer / 注册管线桥接器为 tick 消费者
+    try:
+        from .phase2_strategy_routes import PIPELINE_BRIDGE
+        if PIPELINE_BRIDGE is not None:
+            DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
+            PIPELINE_BRIDGE.activate()
+            logger.info("Pipeline bridge registered and activated / 管线桥接器已注册并激活")
+    except ImportError:
+        logger.warning("Pipeline bridge not available / 管线桥接器不可用")
+
     return _paper_response({
         "message": "Market feed started / 行情流已启动",
         "symbols": req.symbols,
@@ -366,6 +380,14 @@ def post_market_feed_stop(
             {"message": "Market feed not running / 行情流未运行"},
             action_result="no_change",
         )
+
+    # Deactivate pipeline bridge / 停用管线桥接器
+    try:
+        from .phase2_strategy_routes import PIPELINE_BRIDGE
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.deactivate()
+    except ImportError:
+        pass
 
     DISPATCHER.stop()
     return _paper_response({"message": "Market feed stopped / 行情流已停止"})

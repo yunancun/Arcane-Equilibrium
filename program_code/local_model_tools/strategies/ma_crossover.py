@@ -31,6 +31,7 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .base import OrderIntent, StrategyBase, STRATEGY_ACTIVE
@@ -45,7 +46,6 @@ class MACrossoverStrategy(StrategyBase):
       symbol            — trading pair to trade / 交易的交易对
       qty_per_trade     — position size per trade / 每次交易的仓位大小
       min_confidence    — minimum signal confidence to act / 最小信号置信度
-      require_macd      — require MACD confirmation / 是否需要 MACD 确认
     """
 
     def __init__(
@@ -53,15 +53,22 @@ class MACrossoverStrategy(StrategyBase):
         symbol: str = "BTCUSDT",
         qty_per_trade: float = 0.001,
         min_confidence: float = 0.3,
-        require_macd: bool = True,
+        cooldown_ms: int = 300_000,
     ) -> None:
         super().__init__()
+        if qty_per_trade <= 0:
+            raise ValueError(f"qty_per_trade must be > 0, got {qty_per_trade} / 每笔数量必须大于 0")
         self._symbol = symbol
         self._qty = qty_per_trade
         self._min_confidence = min_confidence
-        self._require_macd = require_macd
+        # Position state is "intended" — updated when intent is emitted, not when confirmed.
+        # In paper trading without execution callback, this is a known limitation.
+        # 仓位状态为"意图态" — 在意图发出时更新，非确认后更新。
+        # 在没有执行回调的纸上交易中，这是已知限制。
         self._current_position: str | None = None  # "long" / "short" / None
         self._trade_count = 0
+        self._last_trade_ts_ms: int = 0
+        self._cooldown_ms: int = cooldown_ms  # Default 5 min cooldown between trades / 交易间隔冷却默认 5 分钟
 
     @property
     def name(self) -> str:
@@ -88,6 +95,11 @@ class MACrossoverStrategy(StrategyBase):
         if getattr(signal, "confidence", 0) < self._min_confidence:
             return
 
+        # Cooldown check / 冷却期检查
+        now_ms = int(time.time() * 1000)
+        if now_ms - self._last_trade_ts_ms < self._cooldown_ms:
+            return
+
         source = getattr(signal, "source", "")
         direction = getattr(signal, "direction", "")
 
@@ -95,40 +107,43 @@ class MACrossoverStrategy(StrategyBase):
         if "MA_Cross" not in source:
             return
 
-        if direction == "long" and self._current_position != "long":
-            # Close short if exists, then go long / 有空仓先平仓，再开多
-            if self._current_position == "short":
+        with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
+            if direction == "long" and self._current_position != "long":
+                # Close short if exists, then go long / 有空仓先平仓，再开多
+                if self._current_position == "short":
+                    self._emit_intent(OrderIntent(
+                        symbol=self._symbol, side="Buy", order_type="market",
+                        qty=self._qty, strategy_name=self.name,
+                        reason=f"Close short: MA crossover bullish / 平空：均线金叉, conf={signal.confidence:.2f}",
+                        confidence=signal.confidence,
+                    ))
                 self._emit_intent(OrderIntent(
                     symbol=self._symbol, side="Buy", order_type="market",
                     qty=self._qty, strategy_name=self.name,
-                    reason=f"Close short: MA crossover bullish / 平空：均线金叉, conf={signal.confidence:.2f}",
+                    reason=f"Open long: MA crossover bullish / 开多：均线金叉, conf={signal.confidence:.2f}",
                     confidence=signal.confidence,
                 ))
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Buy", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=f"Open long: MA crossover bullish / 开多：均线金叉, conf={signal.confidence:.2f}",
-                confidence=signal.confidence,
-            ))
-            self._current_position = "long"
-            self._trade_count += 1
+                self._current_position = "long"
+                self._trade_count += 1
+                self._last_trade_ts_ms = int(time.time() * 1000)
 
-        elif direction == "short" and self._current_position != "short":
-            if self._current_position == "long":
+            elif direction == "short" and self._current_position != "short":
+                if self._current_position == "long":
+                    self._emit_intent(OrderIntent(
+                        symbol=self._symbol, side="Sell", order_type="market",
+                        qty=self._qty, strategy_name=self.name,
+                        reason=f"Close long: MA crossover bearish / 平多：均线死叉, conf={signal.confidence:.2f}",
+                        confidence=signal.confidence,
+                    ))
                 self._emit_intent(OrderIntent(
                     symbol=self._symbol, side="Sell", order_type="market",
                     qty=self._qty, strategy_name=self.name,
-                    reason=f"Close long: MA crossover bearish / 平多：均线死叉, conf={signal.confidence:.2f}",
+                    reason=f"Open short: MA crossover bearish / 开空：均线死叉, conf={signal.confidence:.2f}",
                     confidence=signal.confidence,
                 ))
-            self._emit_intent(OrderIntent(
-                symbol=self._symbol, side="Sell", order_type="market",
-                qty=self._qty, strategy_name=self.name,
-                reason=f"Open short: MA crossover bearish / 开空：均线死叉, conf={signal.confidence:.2f}",
-                confidence=signal.confidence,
-            ))
-            self._current_position = "short"
-            self._trade_count += 1
+                self._current_position = "short"
+                self._trade_count += 1
+                self._last_trade_ts_ms = int(time.time() * 1000)
 
     def get_status(self) -> dict[str, Any]:
         return {
@@ -139,4 +154,6 @@ class MACrossoverStrategy(StrategyBase):
             "qty_per_trade": self._qty,
             "min_confidence": self._min_confidence,
             "trade_count": self._trade_count,
+            "cooldown_ms": self._cooldown_ms,
+            "last_trade_ts_ms": self._last_trade_ts_ms,
         }

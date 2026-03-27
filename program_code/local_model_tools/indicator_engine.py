@@ -258,6 +258,14 @@ class IndicatorEngine:
         total_ok = 0
         total_err = 0
 
+        # Validate OHLCV contains numeric data (guard against corrupted input)
+        # 校验 OHLCV 包含数值数据（防止损坏的输入）
+        for key in ("open", "high", "low", "close"):
+            arr = ohlcv.get(key, [])
+            if arr and not isinstance(arr[0], (int, float)):
+                logger.warning("Non-numeric data in OHLCV[%s], skipping / OHLCV[%s] 包含非数值数据", key, key)
+                return {}
+
         with self._lock:
             indicators = list(self._indicators)
 

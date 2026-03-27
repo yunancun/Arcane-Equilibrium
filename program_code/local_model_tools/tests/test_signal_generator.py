@@ -306,7 +306,7 @@ class TestSignalEngine:
     def test_default_rules(self):
         """Default rules are populated / 默认规则已填充"""
         rules = create_default_signal_rules()
-        assert len(rules) == 4
+        assert len(rules) == 7
 
     def test_evaluation_generates_signals(self):
         """Evaluation of oversold indicators generates signals / 评估超卖指标产生信号"""

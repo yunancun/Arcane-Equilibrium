@@ -54,6 +54,7 @@ Safety invariant / 安全不变量:
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -128,11 +129,16 @@ class Signal:
         self.symbol = symbol
         self.direction = direction
         self.confidence = max(0.0, min(1.0, confidence))  # Clamp to [0, 1] / 限制到 [0, 1]
+        if confidence < 0.0 or confidence > 1.0:
+            logger.debug(
+                "Signal confidence clamped: %.4f → %.4f / 信号置信度被截断",
+                confidence, self.confidence,
+            )
         self.edge_bps = edge_bps
         self.source = source
         self.timeframe = timeframe
         self.reasoning = reasoning
-        self.ts_ms = ts_ms or int(time.time() * 1000)
+        self.ts_ms = ts_ms if ts_ms is not None else int(time.time() * 1000)
         self.metadata = metadata or {}
 
     @property
@@ -243,6 +249,8 @@ class RSIOverboughtOversoldRule(SignalRule):
         oversold: float = 30.0,
         overbought: float = 70.0,
     ) -> None:
+        if oversold >= overbought:
+            raise ValueError(f"oversold ({oversold}) must be < overbought ({overbought})")
         self._rsi_name = rsi_indicator_name
         self._oversold = oversold
         self._overbought = overbought
@@ -257,6 +265,8 @@ class RSIOverboughtOversoldRule(SignalRule):
             return None
 
         rsi = rsi_data["rsi"]
+        if not isinstance(rsi, (int, float)) or not math.isfinite(rsi):
+            return None
 
         if rsi <= self._oversold:
             # Oversold → expect bounce → long / 超卖 → 预期反弹 → 做多
@@ -299,6 +309,12 @@ class MACrossoverRule(SignalRule):
 
     Classic trend-following signal. Works best in trending markets.
     经典趋势跟踪信号。在趋势市场效果最好。
+
+    Note: This rule generates signals based on MA spread levels (fast above/below slow),
+    not on the actual crossing event. It will emit a signal on every evaluation tick
+    as long as the spread exceeds the threshold.
+    注意：本规则基于 MA 价差水平（快线在慢线上/下方）生成信号，
+    而非真正的交叉事件。只要价差超过阈值，每次评估都会生成信号。
     """
 
     def __init__(
@@ -321,13 +337,20 @@ class MACrossoverRule(SignalRule):
 
         # Extract the MA value (could be "sma" or "ema" key)
         # 提取 MA 值（可能是 "sma" 或 "ema" 键）
-        fast_val = fast_data.get("ema") or fast_data.get("sma")
-        slow_val = slow_data.get("ema") or slow_data.get("sma")
+        # Use `is not None` instead of `or` to handle 0.0 correctly / 用 is not None 正确处理 0.0
+        fast_val = fast_data.get("ema")
+        if fast_val is None:
+            fast_val = fast_data.get("sma")
+        slow_val = slow_data.get("ema")
+        if slow_val is None:
+            slow_val = slow_data.get("sma")
         if fast_val is None or slow_val is None:
+            return None
+        if not math.isfinite(fast_val) or not math.isfinite(slow_val):
             return None
 
         # Calculate the spread as percentage / 计算价差百分比
-        if slow_val == 0:
+        if abs(slow_val) < 1e-12:
             return None
         spread_pct = (fast_val - slow_val) / slow_val * 100
 
@@ -408,7 +431,11 @@ class BollingerBandReversionRule(SignalRule):
             return None
 
         pct_b = bb_data["percent_b"]
-        bandwidth = bb_data.get("bandwidth", 0)
+        if not isinstance(pct_b, (int, float)) or not math.isfinite(pct_b):
+            return None
+        bandwidth = bb_data.get("bandwidth")
+        if bandwidth is None or not math.isfinite(bandwidth):
+            return None
 
         # Skip if bandwidth too narrow (squeeze — don't trade reversion during squeeze)
         # 跳过带宽过窄的情况（布林带收窄 — 收窄期间不做均值回归）
@@ -444,6 +471,7 @@ class BollingerBandReversionRule(SignalRule):
                     + (f", RSI={rsi_val:.1f}" if rsi_val else "")
                     + " → mean reversion long/均值回归做多"
                 ),
+                metadata={"percent_b": pct_b, "bandwidth": bandwidth},
             )
 
         if pct_b > self._upper:
@@ -467,6 +495,7 @@ class BollingerBandReversionRule(SignalRule):
                     + (f", RSI={rsi_val:.1f}" if rsi_val else "")
                     + " → mean reversion short/均值回归做空"
                 ),
+                metadata={"percent_b": pct_b, "bandwidth": bandwidth},
             )
 
         return None
@@ -497,15 +526,19 @@ class MACDCrossoverRule(SignalRule):
         if not macd_data:
             return None
 
-        macd_val = macd_data.get("macd", 0)
-        histogram = macd_data.get("histogram", 0)
+        macd_val = macd_data.get("macd")
+        histogram = macd_data.get("histogram")
+        if macd_val is None or histogram is None:
+            return None
+        if not math.isfinite(macd_val) or not math.isfinite(histogram):
+            return None
 
         if macd_val == 0 and histogram == 0:
             return None
 
         # Need both MACD and histogram to agree / 需要 MACD 和柱状图方向一致
         if macd_val > 0 and histogram > 0:
-            confidence = min(1.0, abs(histogram) / (abs(macd_val) + 1) * 0.5 + 0.2)
+            confidence = min(1.0, abs(histogram) / (abs(macd_val) + abs(histogram) + 1e-10) * 0.5 + 0.2)
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_LONG,
@@ -520,7 +553,7 @@ class MACDCrossoverRule(SignalRule):
             )
 
         if macd_val < 0 and histogram < 0:
-            confidence = min(1.0, abs(histogram) / (abs(macd_val) + 1) * 0.5 + 0.2)
+            confidence = min(1.0, abs(histogram) / (abs(macd_val) + abs(histogram) + 1e-10) * 0.5 + 0.2)
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_SHORT,
@@ -537,18 +570,250 @@ class MACDCrossoverRule(SignalRule):
         return None
 
 
+class RegimeDetectorRule(SignalRule):
+    """
+    Market regime detection — trending vs ranging.
+    市场 regime 检测 — 趋势 vs 震荡。
+
+    Uses ATR-normalized range and BB bandwidth to classify:
+    - trending: strong directional move, BB expanding
+    - ranging: sideways, BB contracting or stable
+    - volatile: high ATR but no direction (choppy)
+
+    Emits a neutral signal with regime info in metadata.
+    Output is used by orchestrator to weight other signals.
+    输出用于编排器加权其他信号。
+
+    Note: This rule emits "neutral" direction with regime info in metadata,
+    so it does not directly trigger trades. It provides context for other rules.
+    本规则发出"中性"方向 + 元数据中的 regime 信息，不直接触发交易。
+    """
+
+    def __init__(
+        self,
+        atr_name: str = "ATR(14)",
+        bb_name: str = "BB(20,2.0)",
+        ema_fast_name: str = "EMA(12)",
+        ema_slow_name: str = "EMA(26)",
+        trend_spread_threshold: float = 0.3,  # MA spread % to consider trending
+        bb_squeeze_threshold: float = 0.02,    # BB bandwidth below this = squeeze
+    ) -> None:
+        self._atr_name = atr_name
+        self._bb_name = bb_name
+        self._ema_fast = ema_fast_name
+        self._ema_slow = ema_slow_name
+        self._trend_threshold = trend_spread_threshold
+        self._squeeze_threshold = bb_squeeze_threshold
+
+    @property
+    def name(self) -> str:
+        return "Regime_Detector"
+
+    def evaluate(self, symbol: str, timeframe: str, indicators: dict[str, Any]) -> Signal | None:
+        bb_data = indicators.get(self._bb_name)
+        atr_data = indicators.get(self._atr_name)
+        fast_data = indicators.get(self._ema_fast)
+        slow_data = indicators.get(self._ema_slow)
+
+        if not bb_data or not atr_data:
+            return None
+
+        bandwidth = bb_data.get("bandwidth")
+        atr_pct = atr_data.get("atr_percent")
+        if bandwidth is None or atr_pct is None:
+            return None
+        if not math.isfinite(bandwidth) or not math.isfinite(atr_pct):
+            return None
+
+        # Determine MA spread for trend direction
+        ma_spread_pct = 0.0
+        trend_direction = "none"
+        if fast_data and slow_data:
+            fast_val = fast_data.get("ema")
+            slow_val = slow_data.get("ema")
+            if fast_val is not None and slow_val is not None and slow_val != 0:
+                if math.isfinite(fast_val) and math.isfinite(slow_val):
+                    ma_spread_pct = (fast_val - slow_val) / slow_val * 100
+                    if ma_spread_pct > self._trend_threshold:
+                        trend_direction = "up"
+                    elif ma_spread_pct < -self._trend_threshold:
+                        trend_direction = "down"
+
+        # Classify regime
+        if bandwidth < self._squeeze_threshold:
+            regime = "squeeze"       # BB contracting — breakout imminent
+        elif abs(ma_spread_pct) > self._trend_threshold and bandwidth > 0.03:
+            regime = "trending"      # Strong trend + expanding bands
+        elif atr_pct > 3.0 and abs(ma_spread_pct) < self._trend_threshold:
+            regime = "volatile"      # High ATR but no trend = choppy
+        else:
+            regime = "ranging"       # Default: sideways
+
+        # Regime confidence
+        if regime == "trending":
+            confidence = min(1.0, abs(ma_spread_pct) / 1.0 * 0.3 + 0.4)
+        elif regime == "squeeze":
+            confidence = min(1.0, (self._squeeze_threshold - bandwidth) / self._squeeze_threshold * 0.5 + 0.3)
+        elif regime == "volatile":
+            confidence = min(1.0, atr_pct / 5.0 * 0.3 + 0.3)
+        else:
+            confidence = 0.5
+
+        return Signal(
+            symbol=symbol,
+            direction=DIRECTION_NEUTRAL,
+            confidence=confidence,
+            source=self.name,
+            timeframe=timeframe,
+            reasoning=f"Regime={regime}, MA_spread={ma_spread_pct:.2f}%, BW={bandwidth:.4f}, ATR%={atr_pct:.2f}%",
+            metadata={
+                "regime": regime,
+                "trend_direction": trend_direction,
+                "ma_spread_pct": round(ma_spread_pct, 4),
+                "bandwidth": round(bandwidth, 6),
+                "atr_percent": round(atr_pct, 4),
+            },
+        )
+
+
+class RSIExitRule(SignalRule):
+    """
+    RSI exit signal — close positions when RSI reverts from extreme.
+    RSI 出场信号 — RSI 从极端值回归时平仓。
+
+    Logic:
+    - RSI crosses back below 70 from overbought → close_long
+    - RSI crosses back above 30 from oversold → close_short
+    """
+
+    def __init__(
+        self,
+        rsi_name: str = "RSI(14)",
+        exit_overbought: float = 65.0,   # Exit long when RSI drops below this
+        exit_oversold: float = 35.0,      # Exit short when RSI rises above this
+    ) -> None:
+        self._rsi_name = rsi_name
+        self._exit_ob = exit_overbought
+        self._exit_os = exit_oversold
+
+    @property
+    def name(self) -> str:
+        return "RSI_Exit"
+
+    def evaluate(self, symbol: str, timeframe: str, indicators: dict[str, Any]) -> Signal | None:
+        rsi_data = indicators.get(self._rsi_name)
+        if not rsi_data or "rsi" not in rsi_data:
+            return None
+        rsi = rsi_data["rsi"]
+        if not isinstance(rsi, (int, float)) or not math.isfinite(rsi):
+            return None
+
+        # RSI dropping from overbought → close long
+        if 50 < rsi < self._exit_ob:
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_CLOSE_LONG,
+                confidence=0.6,
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=f"RSI={rsi:.1f} dropped below {self._exit_ob} (exit overbought/退出超买)",
+            )
+
+        # RSI rising from oversold → close short
+        if rsi > self._exit_os and rsi < 50:
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_CLOSE_SHORT,
+                confidence=0.6,
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=f"RSI={rsi:.1f} rose above {self._exit_os} (exit oversold/退出超卖)",
+            )
+
+        return None
+
+
+class MACDExhaustionRule(SignalRule):
+    """
+    MACD momentum exhaustion exit signal.
+    MACD 动量衰竭出场信号。
+
+    Logic:
+    - MACD histogram shrinking toward zero from positive → momentum fading → close_long
+    - MACD histogram shrinking toward zero from negative → momentum fading → close_short
+    """
+
+    def __init__(self, macd_name: str = "MACD(12,26,9)") -> None:
+        self._macd_name = macd_name
+        self._prev_histogram: dict[str, float] = {}  # symbol → previous histogram
+
+    @property
+    def name(self) -> str:
+        return "MACD_Exhaustion"
+
+    def evaluate(self, symbol: str, timeframe: str, indicators: dict[str, Any]) -> Signal | None:
+        macd_data = indicators.get(self._macd_name)
+        if not macd_data:
+            return None
+
+        histogram = macd_data.get("histogram")
+        macd_val = macd_data.get("macd")
+        if histogram is None or macd_val is None:
+            return None
+        if not math.isfinite(histogram) or not math.isfinite(macd_val):
+            return None
+
+        key = f"{symbol}:{timeframe}"
+        prev_hist = self._prev_histogram.get(key)
+        self._prev_histogram[key] = histogram
+
+        if prev_hist is None:
+            return None
+
+        # Histogram was positive and shrinking → momentum fading → close_long
+        if prev_hist > 0 and histogram > 0 and histogram < prev_hist * 0.6:
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_CLOSE_LONG,
+                confidence=min(1.0, (prev_hist - histogram) / (abs(prev_hist) + 1e-10) * 0.5 + 0.2),
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=f"MACD hist fading: {prev_hist:.2f}→{histogram:.2f} (momentum exhaustion/动量衰竭)",
+            )
+
+        # Histogram was negative and shrinking (toward zero) → close_short
+        if prev_hist < 0 and histogram < 0 and histogram > prev_hist * 0.6:
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_CLOSE_SHORT,
+                confidence=min(1.0, (histogram - prev_hist) / (abs(prev_hist) + 1e-10) * 0.5 + 0.2),
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=f"MACD hist recovering: {prev_hist:.2f}→{histogram:.2f} (momentum exhaustion/动量衰竭)",
+            )
+
+        return None
+
+
 def create_default_signal_rules() -> list[SignalRule]:
     """
     Create the default set of signal rules / 创建默认信号规则集
 
-    Returns a balanced set of rules covering trend-following and mean-reversion.
-    返回一组平衡的规则，涵盖趋势跟踪和均值回归。
+    Returns a balanced set of rules covering trend-following, mean-reversion,
+    regime detection, and exit signals.
+    返回一组平衡的规则，涵盖趋势跟踪、均值回归、regime 检测和退出信号。
     """
     return [
+        # Entry rules / 入场规则
         RSIOverboughtOversoldRule(),
         MACrossoverRule(),
         BollingerBandReversionRule(),
         MACDCrossoverRule(),
+        # Exit rules / 出场规则
+        RSIExitRule(),
+        MACDExhaustionRule(),
+        # Regime detection / Regime 检测
+        RegimeDetectorRule(),
     ]
 
 
@@ -590,7 +855,9 @@ class SignalEngine:
         self._history: deque[Signal] = deque(maxlen=history_capacity)
 
         # Latest signal per (symbol, source) / 每个 (交易对, 来源) 的最新信号
+        # Bounded to prevent unbounded growth for delisted symbols / 有上限防止已下架交易对的无限增长
         self._latest: dict[tuple[str, str], Signal] = {}
+        self._latest_max_size = 500
 
         # Downstream callbacks / 下游回调
         self._on_signal_callbacks: list[SignalCallback] = []
@@ -599,6 +866,7 @@ class SignalEngine:
         self._stats = {
             "total_evaluations": 0,
             "signals_generated": 0,
+            "rule_errors": 0,
             "signals_by_direction": {d: 0 for d in ALL_DIRECTIONS},
             "signals_by_source": {},
         }
@@ -657,6 +925,11 @@ class SignalEngine:
                     with self._lock:
                         self._history.append(signal)
                         self._latest[(symbol, rule.name)] = signal
+                        # Evict oldest entries if _latest exceeds max size
+                        # 超过上限时淘汰最旧条目
+                        if len(self._latest) > self._latest_max_size:
+                            oldest_key = next(iter(self._latest))
+                            del self._latest[oldest_key]
                         self._stats["signals_generated"] += 1
                         self._stats["signals_by_direction"][signal.direction] = (
                             self._stats["signals_by_direction"].get(signal.direction, 0) + 1
@@ -669,13 +942,17 @@ class SignalEngine:
                     "Signal rule evaluation error / 信号规则评估异常: %s",
                     rule.name,
                 )
+                with self._lock:
+                    self._stats["rule_errors"] += 1
 
         with self._lock:
             self._stats["total_evaluations"] += 1
 
-        # Notify downstream / 通知下游
+        # Notify downstream (snapshot callbacks under lock) / 通知下游（在锁内快照回调列表）
+        with self._lock:
+            callbacks = list(self._on_signal_callbacks)
         for signal in generated:
-            for cb in self._on_signal_callbacks:
+            for cb in callbacks:
                 try:
                     cb(signal)
                 except Exception:
@@ -733,8 +1010,10 @@ class SignalEngine:
                 if sym == symbol and s.is_actionable
             ]
 
-        long_count = sum(1 for s in signals if s.direction in (DIRECTION_LONG, DIRECTION_CLOSE_SHORT))
-        short_count = sum(1 for s in signals if s.direction in (DIRECTION_SHORT, DIRECTION_CLOSE_LONG))
+        # Only count entry signals for consensus (exit signals should not flip direction)
+        # 只计入入场信号用于共识（出场信号不应翻转方向）
+        long_count = sum(1 for s in signals if s.direction == DIRECTION_LONG)
+        short_count = sum(1 for s in signals if s.direction == DIRECTION_SHORT)
         avg_conf = sum(s.confidence for s in signals) / len(signals) if signals else 0.0
 
         if long_count > short_count:
@@ -762,7 +1041,10 @@ class SignalEngine:
                 "rules_registered": [r.name for r in self._rules],
                 "rule_count": len(self._rules),
                 "history_size": len(self._history),
-                "stats": dict(self._stats),
+                "stats": {
+                    k: (dict(v) if isinstance(v, dict) else v)
+                    for k, v in self._stats.items()
+                },
             }
 
     def clear_history(self) -> None:

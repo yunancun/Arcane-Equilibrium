@@ -42,9 +42,13 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from abc import ABC, abstractmethod
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -141,7 +145,12 @@ class StrategyBase(ABC):
     def __init__(self) -> None:
         self._state = STRATEGY_IDLE
         self._pending_intents: list[OrderIntent] = []
-        self._intent_lock = threading.Lock()  # Protects _pending_intents / 保护 _pending_intents
+        self._intent_lock = threading.RLock()  # RLock: reentrant, allows on_signal to hold lock while calling _emit_intent / 可重入锁
+        self._realized_pnl: float = 0.0
+        self._unrealized_pnl: float = 0.0
+        self._total_fees: float = 0.0
+        self._trade_history: list[dict[str, Any]] = []
+        self._max_trade_history: int = 200
 
     @property
     @abstractmethod
@@ -161,11 +170,23 @@ class StrategyBase(ABC):
         return self._state
 
     def activate(self) -> None:
-        """Activate the strategy / 激活策略"""
+        """Activate the strategy (from idle or paused) / 激活策略（从 idle 或 paused）"""
+        if self._state == STRATEGY_STOPPED:
+            logger.warning(
+                "Cannot activate stopped strategy, re-register instead / "
+                "无法激活已停止的策略，请重新注册"
+            )
+            return
         self._state = STRATEGY_ACTIVE
 
     def pause(self) -> None:
-        """Pause the strategy / 暂停策略"""
+        """Pause the strategy (from active) / 暂停策略（从 active）"""
+        if self._state != STRATEGY_ACTIVE:
+            logger.warning(
+                "Cannot pause non-active strategy (state=%s) / "
+                "无法暂停非活跃策略（状态=%s）", self._state, self._state,
+            )
+            return
         self._state = STRATEGY_PAUSED
 
     def stop(self) -> None:
@@ -231,6 +252,59 @@ class StrategyBase(ABC):
         if self._state == STRATEGY_ACTIVE:
             with self._intent_lock:
                 self._pending_intents.append(intent)
+
+    def record_trade_result(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        entry_price: float,
+        exit_price: float,
+        fee: float = 0.0,
+        reason: str = "",
+    ) -> None:
+        """
+        Record a completed trade result for PnL tracking.
+        记录已完成的交易结果用于 PnL 跟踪。
+        """
+        if side.lower() in ("buy", "long"):
+            pnl = (exit_price - entry_price) * qty - fee
+        else:
+            pnl = (entry_price - exit_price) * qty - fee
+
+        self._realized_pnl += pnl
+        self._total_fees += fee
+
+        record = {
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "pnl": round(pnl, 4),
+            "fee": round(fee, 4),
+            "reason": reason,
+            "ts_ms": int(time.time() * 1000),
+        }
+        self._trade_history.append(record)
+        if len(self._trade_history) > self._max_trade_history:
+            self._trade_history = self._trade_history[-self._max_trade_history:]
+
+    def get_pnl_summary(self) -> dict[str, Any]:
+        """Get strategy PnL summary / 获取策略 PnL 摘要"""
+        wins = [t for t in self._trade_history if t["pnl"] > 0]
+        losses = [t for t in self._trade_history if t["pnl"] <= 0]
+        return {
+            "realized_pnl": round(self._realized_pnl, 4),
+            "total_fees": round(self._total_fees, 4),
+            "net_pnl": round(self._realized_pnl - self._total_fees, 4),
+            "trade_count": len(self._trade_history),
+            "win_count": len(wins),
+            "loss_count": len(losses),
+            "win_rate": round(len(wins) / len(self._trade_history), 4) if self._trade_history else 0.0,
+            "avg_win": round(sum(t["pnl"] for t in wins) / len(wins), 4) if wins else 0.0,
+            "avg_loss": round(sum(t["pnl"] for t in losses) / len(losses), 4) if losses else 0.0,
+        }
 
     @abstractmethod
     def get_status(self) -> dict[str, Any]:

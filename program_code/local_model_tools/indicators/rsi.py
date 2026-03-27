@@ -88,6 +88,9 @@ def compute_rsi(close: list[float], period: int = 14) -> float | None:
 
     # Step 5 & 6: RS → RSI
     if avg_loss == 0:
+        if avg_gain == 0:
+            # No movement → RSI = 50 (neutral) / 无波动 → RSI = 50（中性）
+            return 50.0
         # All gains, no losses → RSI = 100 / 全涨无跌 → RSI = 100
         return 100.0
     rs = avg_gain / avg_loss
@@ -100,8 +103,8 @@ def compute_rsi_series(close: list[float], period: int = 14) -> list[float]:
     Compute RSI series for the entire input.
     计算整个输入序列的 RSI 序列。
 
-    Returns list same length as input. First `period` values are 0.0 (insufficient data).
-    返回与输入同长度的列表。前 `period` 个值为 0.0（数据不足）。
+    Returns list same length as input. First `period` values are NaN (insufficient data).
+    返回与输入同长度的列表。前 `period` 个值为 NaN（数据不足）。
 
     Args:
       close  — close prices / 收盘价
@@ -117,13 +120,13 @@ def compute_rsi_series(close: list[float], period: int = 14) -> list[float]:
     gains = [max(c, 0.0) for c in changes]
     losses = [max(-c, 0.0) for c in changes]
 
-    result = [0.0] * period  # First `period` values are insufficient / 前 period 个值不足
+    result = [float('nan')] * period  # First `period` values are insufficient / 前 period 个值不足
 
     avg_gain = sum(gains[:period]) / period
     avg_loss = sum(losses[:period]) / period
 
     if avg_loss == 0:
-        result.append(100.0)
+        result.append(50.0 if avg_gain == 0 else 100.0)
     else:
         rs = avg_gain / avg_loss
         result.append(100.0 - (100.0 / (1.0 + rs)))
@@ -132,7 +135,7 @@ def compute_rsi_series(close: list[float], period: int = 14) -> list[float]:
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
         if avg_loss == 0:
-            result.append(100.0)
+            result.append(50.0 if avg_gain == 0 else 100.0)
         else:
             rs = avg_gain / avg_loss
             result.append(100.0 - (100.0 / (1.0 + rs)))
@@ -155,6 +158,8 @@ class RSI(IndicatorBase):
         Args:
           period — RSI period (default 14, Wilder's standard) / RSI 周期（默认 14）
         """
+        if period <= 0:
+            raise ValueError(f"period must be > 0, got {period} / 周期必须大于 0")
         self._period = period
 
     @property
