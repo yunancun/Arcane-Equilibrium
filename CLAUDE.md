@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-28（Session 8）
+# 最后更新：2026-03-28（Session 9）
 
 ---
 
@@ -36,8 +36,8 @@
 ## 三、当前系统状态（2026-03-28 Session 8）
 
 ```
-测试：428 全通过（control_api，local_model_tools 需 venv 单独运行）
-路由：113 条（+2: strategy/create, strategy/{name} DELETE）
+测试：646 全通过（428 control_api + 218 local_model_tools）
+路由：113 条
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 
@@ -64,6 +64,11 @@ Session 8 修复（4项）：
   G1: StrategyAutoDeployer.on_trade_result()连续亏损10次自动暂停策略
   H1: PipelineBridge._on_position_open()调用stop_mgr.track_position(ATR动态止损)
   D1: 确认health_gates正常（live系统全部passed），无需代码修复
+
+Session 9 修复（3项）：
+  B2: paper_trading_engine._recompute_pnl() 新增 net_realized_pnl 字段（realized - total_fees）
+  G3: strategy_auto_deployer._compute_qty() 修复 active_count +1 bug（改用 | {symbol}）
+  A2: 新增 on_fill 回调链路（StrategyBase.on_fill → MACrossoverStrategy 实现 → deployer.notify_fill → PipelineBridge 调用），防止仓位状态漂移
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -368,4 +373,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 8：428 测试通过，113 路由。完成 A-J 全面功能审核（25小时 684 fill，胜率 0%，净亏 $63.78）。核心发现：系统在"交易"但完全不在"学习"（observations/lessons/hypotheses 全部为 0）。Session 8 修复 3 项：E1 自动写 Observation（PipelineBridge 每轮 round-trip 后写入 learning_state）、G1 连续亏损自动暂停（10 次阈值，StrategyAutoDeployer.on_trade_result）、H1 ATR 动态止损接入（_on_position_open 调用 stop_mgr.track_position）。决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1）。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-28 Session 9：646 测试通过，113 路由。Session 9 修复 3 项：B2 新增 net_realized_pnl 字段（扣费后净实现盈亏）、G3 修复仓位计算 active_count +1 bug（策略分配更准确）、A2 新增 on_fill 回调链路（StrategyBase→MACrossoverStrategy→deployer→bridge），防止 MA 策略仓位状态漂移。系统全程 read_only / disabled / not_granted。待处理问题见第十一章。
