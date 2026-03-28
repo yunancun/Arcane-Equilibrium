@@ -281,11 +281,70 @@ try:
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()
+
+    # G1: wire auto-deployer into pipeline bridge for consecutive-loss auto-exit
+    # G1：将自动部署器接入管线桥接器，实现连续亏损自动退出
+    if PIPELINE_BRIDGE is not None:
+        PIPELINE_BRIDGE.set_auto_deployer(AUTO_DEPLOYER)
+        logger.info("Auto-deployer wired to pipeline bridge for loss tracking / 自动部署器已接入管线桥接器")
+
     logger.info("Market scanner + auto-deployer started / 市场扫描器+自动部署器已启动")
 except Exception as e:
     MARKET_SCANNER = None
     AUTO_DEPLOYER = None
     logger.warning("Market scanner not available: %s", e)
+
+
+# ── E1: Auto-Observation Writer (writes observations after each round-trip trade) ──
+# E1：自动观察写入器（每轮交易结束后写入观察）
+try:
+    import time as _time_mod
+    from . import main_legacy as _ml
+
+    def _write_auto_observation(
+        symbol: str,
+        strategy_name: str,
+        close_pnl: float,
+        hold_ms: int,
+        regime: str,
+    ) -> None:
+        """Write a trading observation to the learning state after each round-trip."""
+        try:
+            outcome = "win" if close_pnl > 0 else ("loss" if close_pnl < 0 else "breakeven")
+            hold_h = hold_ms / 3_600_000
+            obs_text = (
+                f"[Auto] {strategy_name} on {symbol}: {outcome} "
+                f"PnL={close_pnl:+.4f} USDT, hold={hold_h:.2f}h, regime={regime}"
+            )
+
+            def mutator(state):
+                import uuid
+                ts = int(_time_mod.time() * 1000)
+                record = {
+                    "observation_id": f"auto:{uuid.uuid4().hex[:12]}",
+                    "observation_ts_ms": ts,
+                    "observation_type": "trade_outcome",
+                    "confidence_level": "fact",
+                    "title": f"Trade: {strategy_name}/{symbol} → {outcome}",
+                    "detail": obs_text,
+                    "related_hypothesis_id": None,
+                    "tags": ["auto", "trade", strategy_name, symbol, outcome, regime],
+                }
+                ls = state.setdefault("learning_state", {})
+                ls.setdefault("observation_summary", {}).setdefault("last_observation_ts_ms", None)
+                ls["observation_summary"]["last_observation_ts_ms"] = ts
+                ls.setdefault("records", {}).setdefault("observations", []).append(record)
+                return state
+
+            _ml.STORE.mutate(mutator)
+        except Exception:
+            pass  # non-fatal, best-effort
+
+    if PIPELINE_BRIDGE is not None:
+        PIPELINE_BRIDGE.set_observation_writer(_write_auto_observation)
+        logger.info("Auto-observation writer wired to pipeline bridge / 自动观察写入器已接入管线桥接器")
+except Exception as _e1_e:
+    logger.info("Auto-observation writer not wired: %s", _e1_e)
 
 
 # ── Auto-start market feed if a paper session is already active ──

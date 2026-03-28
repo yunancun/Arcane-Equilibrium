@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-28（Session 7）
+# 最后更新：2026-03-28（Session 8）
 
 ---
 
@@ -33,7 +33,7 @@
 
 ---
 
-## 三、当前系统状态（2026-03-27）
+## 三、当前系统状态（2026-03-28 Session 8）
 
 ```
 测试：428 全通过（control_api，local_model_tools 需 venv 单独运行）
@@ -41,11 +41,31 @@
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 
-Paper Trading 运行状态（2026-03-28 Session 7 修复后）：
+Paper Trading 运行状态（2026-03-28 Session 8 审核时）：
   session_id              = psess:fe7ac188（运行中）
-  net_pnl                 = -$53.70（Session 7 修复后继续运行）
-  胜率                    = 0%（历史数据；新规则下积累中）
-  fill_count              = 655
+  net_pnl                 = -$63.78（运行约25小时）
+  胜率                    = 0%（fill=684，round_trips=162，win=0）
+  fill_count              = 684
+
+Session 8 全面功能审核（A-J 完成度）：
+  A. 自主交易执行          = 60%（交易流通，AI治理层全部绕过）
+  B. 成本收益感知          = 50%（手续费追踪，AI成本未纳入net_pnl）
+  C. 计算路径智能分级      = 30%（AI引擎存在但主链路从未调用）
+  D. 自我感知              = 20%→已验证健康门正常（live系统=passed）
+  E. 持续学习              ★ 0%→已修复：E1自动写Observation（每轮trip后）
+  F. 日/周报告             = 30%（路由存在，无自动化）
+  G. Agent自主交易         = 55%→已修复：G1连续亏损自动暂停（10次阈值）
+  H. 对抗性止损            = 60%→已修复：H1 ATR动态止损接入（track_position）
+  I. AI注意力税            = 0%（待AI咨询接入后自然实现）
+  J. GUI控制台             = 80%（Learning Cockpit空=数据来源空）
+
+Session 8 修复（4项）：
+  E1: PipelineBridge每轮round-trip自动写Observation到learning_state
+  G1: StrategyAutoDeployer.on_trade_result()连续亏损10次自动暂停策略
+  H1: PipelineBridge._on_position_open()调用stop_mgr.track_position(ATR动态止损)
+  D1: 确认health_gates正常（live系统全部passed），无需代码修复
+
+决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过
@@ -233,8 +253,10 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ GUI 10-Tab 专业控制台（已完成）
   ✅ 半天数据分析与策略修复（2026-03-28 Session 6）
   ✅ 系统全面审核 + 5项修复（2026-03-28 Session 7）
-  Paper Trading 数据继续积累（新规则下积累中：unknown regime 过滤 + trend cap）
-  Paper Trading + Bybit Demo 数据对比分析（等胜率数据）
+  ✅ A-J 全面功能审核 + E1/G1/H1 修复（2026-03-28 Session 8）
+  Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
+  等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
+  Paper Trading + Bybit Demo 数据对比分析
   GUI 细节打磨（移动端适配 / 图表增强 / 实时 PnL 折线图）
 
 待处理问题（已记录，非紧急）：
@@ -242,6 +264,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   - StopManager 与 RiskManager 双重止损（需统一 Stop 逻辑）
   - realized_pnl 毛利问题（添加 net_realized_pnl 字段）
   - StrategyAutoDeployer active_count +1（影响小）
+  - Learning Cockpit GUI 数据展示（依赖 E1 数据积累后再完善）
   - RiskManager daily loss 跨天不重置（影响小）
 
 长期优化（自主交易 Agent 持续改进）：
@@ -332,6 +355,7 @@ Live 前置条件（M/N 前必须核验）：
 | Session 5 管线启动验证 + OpenClaw 能力深挖 + 服务自动重启确认 | `docs/worklogs/control_api_gui/2026-03-27--session5_pipeline_launch_and_openclaw_analysis.md` |
 | ★ Session 6 半天数据分析：胜率0%根因 + 4项修复（扫描器+置信度+.orig stub+DB表） | `docs/worklogs/control_api_gui/2026-03-28--session6_halfday_data_analysis_and_fixes.md` |
 | ★★ Session 7 系统全面审核 + 5项修复（市场流自动重启+regime过滤+trend cap+时间驱动+confidence） | `docs/worklogs/control_api_gui/2026-03-28--session7_system_audit_and_fixes.md` |
+| ★★★ Session 8 A-J 全面功能审核报告（胜率0%根因/学习系统空置/止损未接入） | `docs/worklogs/control_api_gui/2026-03-28--session8_functional_audit_report.md` |
 
 ### 交接与索引
 
@@ -344,4 +368,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 7：646 测试通过，113 路由。系统完成两轮数据分析与修复：Session 6 修复 pump/dump 过滤+置信度+.orig stub+DB 表；Session 7 完成全面审核（8 模块/12问题），修复 5 项——市场数据流自动重启（服务 restart 后无需手动干预）、unknown regime 冷启动保护、trend 评分上限 100（释放 funding_arb/grid 机会）、PipelineBridge 时间驱动刷新、默认策略 confidence 0.3→0.5。Paper session psess:fe7ac188 净亏 $53.70，新规则下积累中。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-28 Session 8：428 测试通过，113 路由。完成 A-J 全面功能审核（25小时 684 fill，胜率 0%，净亏 $63.78）。核心发现：系统在"交易"但完全不在"学习"（observations/lessons/hypotheses 全部为 0）。Session 8 修复 3 项：E1 自动写 Observation（PipelineBridge 每轮 round-trip 后写入 learning_state）、G1 连续亏损自动暂停（10 次阈值，StrategyAutoDeployer.on_trade_result）、H1 ATR 动态止损接入（_on_position_open 调用 stop_mgr.track_position）。决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1）。系统全程 read_only / disabled / not_granted。

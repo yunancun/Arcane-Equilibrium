@@ -166,6 +166,18 @@ class BybitDemoConnector:
         if not self._enabled:
             return {"retCode": -1, "retMsg": "Demo connector not enabled"}
 
+        # Round qty to exchange step precision to avoid "Qty invalid" rejections.
+        # Bybit linear perps: BTC=0.001 step (3dp), ETH=0.01 step (2dp),
+        # cheap tokens (price < $1) typically use integer step (1 unit).
+        # Heuristic: qty >= 1 → round to nearest integer; qty < 1 → round to 3dp.
+        # 四舍五入到交易所步长精度，避免「Qty invalid」拒绝
+        if qty >= 1.0:
+            qty = round(qty)        # integer step for cheap tokens
+        else:
+            qty = round(qty, 3)     # 0.001 step for BTC-class assets
+        if qty <= 0:
+            return {"retCode": -1, "retMsg": "qty rounds to zero, order skipped"}
+
         params: dict[str, Any] = {
             "category": category,
             "symbol": symbol,

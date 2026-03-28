@@ -796,7 +796,7 @@ class PaperTradingEngine:
         Supports market, limit, conditional orders with optional TP/SL.
         For market orders, immediate fill is attempted if market_prices provided.
         """
-        result = {"order": None, "fills": [], "rejected_reason": None}
+        result = {"order": None, "fills": [], "rejected_reason": None, "close_pnl": 0.0}
 
         def mutator(state):
             sess = state["session"]
@@ -891,6 +891,7 @@ class PaperTradingEngine:
                         result["fills"].append(fill_record)
                         _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
                         state["pnl"]["closed_position_pnl"] += close_pnl
+                        result["close_pnl"] += close_pnl
                         sess["current_paper_balance_usdt"] = project_balance_after_fill(
                             sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
                         )
@@ -910,6 +911,7 @@ class PaperTradingEngine:
                         result["fills"].append(fill_record)
                         _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
                         state["pnl"]["closed_position_pnl"] += close_pnl
+                        result["close_pnl"] += close_pnl
                         sess["current_paper_balance_usdt"] = project_balance_after_fill(
                             sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
                         )
@@ -932,6 +934,7 @@ class PaperTradingEngine:
                 # Update position
                 _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
                 state["pnl"]["closed_position_pnl"] += close_pnl
+                result["close_pnl"] += close_pnl
 
                 # Update balance
                 sess["current_paper_balance_usdt"] = project_balance_after_fill(

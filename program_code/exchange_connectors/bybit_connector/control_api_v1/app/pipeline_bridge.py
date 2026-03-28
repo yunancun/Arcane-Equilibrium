@@ -93,11 +93,27 @@ class PipelineBridge:
         self._strategy_state_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "runtime", "strategy_state.json"
         )
+        # E1: observation writer callback fn(symbol, strategy_name, close_pnl, hold_ms, regime)
+        # E1：观察写入回调，在每次持仓关闭时触发
+        self._observation_writer = None
+        # G1: auto-deployer for consecutive-loss auto-exit / G1：自动部署器，用于连续亏损自动退出
+        self._auto_deployer = None
+        # H1: track open positions so StopManager can fire / H1：追踪开仓用于止损
+        # {"{strategy}:{symbol}": {"side": ..., "entry_price": ..., "qty": ..., "entry_ts_ms": ..., "regime": ...}}
+        self._open_positions: dict[str, dict[str, Any]] = {}
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
 
     def set_telegram(self, alerter: Any) -> None:
         """Set Telegram alerter for notifications / 设置 Telegram 告警器"""
         self._telegram = alerter
+
+    def set_observation_writer(self, fn: Any) -> None:
+        """Set callback for auto-observations on round-trip close / 设置交易回合结束时的自动观察回调"""
+        self._observation_writer = fn
+
+    def set_auto_deployer(self, deployer: Any) -> None:
+        """Set auto-deployer for consecutive-loss tracking / 设置自动部署器用于连续亏损追踪"""
+        self._auto_deployer = deployer
 
     def set_demo_connector(self, connector: Any) -> None:
         """Set Bybit Demo connector for dual execution / 设置 Bybit Demo 连接器"""
@@ -288,6 +304,22 @@ class PipelineBridge:
                         intent.symbol, intent.side, intent.order_type, intent.qty,
                     )
 
+                    # H1: track position or detect close for E1/G1 hooks
+                    # H1：追踪持仓，或检测关闭触发 E1/G1
+                    fills = result.get("fills", []) if isinstance(result, dict) else []
+                    close_pnl = result.get("close_pnl", 0.0) if isinstance(result, dict) else 0.0
+                    if fills:
+                        fill = fills[0]
+                        fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
+                        if close_pnl != 0.0:
+                            # Position closed — round-trip complete
+                            # 持仓已关闭 — 一轮交易完成
+                            self._on_round_trip_complete(intent, fill_price, close_pnl)
+                        else:
+                            # New position opened — start tracking
+                            # 新持仓开仓 — 开始追踪
+                            self._on_position_open(intent, fill_price)
+
                 # Also submit to Bybit Demo if connector is available
                 # 同时提交到 Bybit Demo（如果连接器可用）
                 if self._demo_connector and self._demo_connector.is_enabled:
@@ -343,6 +375,121 @@ class PipelineBridge:
                     self._telegram.alert_stop(stop["symbol"], stop["stop_type"], stop["reason"])
             except Exception:
                 logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
+
+    def _on_position_open(self, intent: Any, fill_price: float) -> None:
+        """
+        Called when a new position is opened.
+        Record it in _open_positions and register with StopManager using ATR-based stop.
+        新持仓开仓时调用。记录到 _open_positions 并用 ATR 动态止损注册到 StopManager。
+        """
+        symbol = intent.symbol
+        strategy_name = getattr(intent, "strategy_name", "unknown")
+        side = "long" if intent.side == "Buy" else "short"
+        qty = intent.qty
+        regime = (intent.metadata or {}).get("_regime", "unknown") if intent.metadata else "unknown"
+        key = f"{strategy_name}:{symbol}"
+
+        with self._lock:
+            self._open_positions[key] = {
+                "symbol": symbol,
+                "strategy_name": strategy_name,
+                "side": side,
+                "entry_price": fill_price,
+                "qty": qty,
+                "entry_ts_ms": int(time.time() * 1000),
+                "regime": regime,
+            }
+
+        # H1: register with StopManager using ATR-based dynamic stop
+        # H1：使用 ATR 动态止损注册到 StopManager
+        if self._stop_mgr:
+            try:
+                from local_model_tools.stop_manager import StopConfig
+                # Try to get ATR from indicator engine for dynamic stop distance
+                # 尝试从指标引擎获取 ATR 用于动态止损距离
+                atr_stop_pct = 5.0  # default hard stop
+                if self._ie and fill_price > 0:
+                    try:
+                        indics = self._ie.get_indicators(symbol, "1h")
+                        atr = indics.get("atr") if indics else None
+                        if atr and atr > 0:
+                            # ATR-based stop: use 2x ATR as stop distance
+                            # ATR 动态止损：使用 2倍 ATR 作为止损距离
+                            atr_stop_pct = min(15.0, max(2.0, (atr * 2.0 / fill_price) * 100))
+                    except Exception:
+                        pass
+                self._stop_mgr.track_position(
+                    symbol=symbol,
+                    side=side,
+                    entry_price=fill_price,
+                    qty=qty,
+                    strategy_name=strategy_name,
+                    stop_config=StopConfig(
+                        hard_stop_pct=atr_stop_pct,
+                        trailing_stop_pct=3.0,
+                        time_stop_hours=48.0,
+                    ),
+                )
+                logger.info(
+                    "Tracking position %s %s atr_stop=%.2f%% / 追踪持仓",
+                    strategy_name, symbol, atr_stop_pct,
+                )
+            except Exception:
+                logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
+
+    def _on_round_trip_complete(self, intent: Any, exit_price: float, close_pnl: float) -> None:
+        """
+        Called when a position is closed (round-trip complete).
+        Writes auto-observation (E1) and notifies auto-deployer for loss tracking (G1).
+        持仓关闭（一轮交易完成）时调用。
+        写入自动观察（E1）并通知自动部署器进行亏损追踪（G1）。
+        """
+        symbol = intent.symbol
+        strategy_name = getattr(intent, "strategy_name", "unknown")
+        key = f"{strategy_name}:{symbol}"
+
+        with self._lock:
+            pos_info = self._open_positions.pop(key, None)
+
+        hold_ms = 0
+        regime = "unknown"
+        if pos_info:
+            hold_ms = int(time.time() * 1000) - pos_info.get("entry_ts_ms", int(time.time() * 1000))
+            regime = pos_info.get("regime", "unknown")
+
+        # Untrack from StopManager (position is closed) / 从 StopManager 取消追踪
+        if self._stop_mgr:
+            try:
+                self._stop_mgr.untrack_position(symbol, strategy_name)
+            except Exception:
+                pass
+
+        # G1: notify auto-deployer for consecutive loss tracking
+        # G1：通知自动部署器进行连续亏损追踪
+        if self._auto_deployer:
+            try:
+                self._auto_deployer.on_trade_result(strategy_name, close_pnl)
+            except Exception:
+                logger.debug("Auto-deployer on_trade_result error (non-fatal)")
+
+        # E1: write auto-observation
+        # E1：写入自动观察
+        if self._observation_writer:
+            try:
+                self._observation_writer(
+                    symbol=symbol,
+                    strategy_name=strategy_name,
+                    close_pnl=close_pnl,
+                    hold_ms=hold_ms,
+                    regime=regime,
+                )
+            except Exception:
+                logger.debug("Observation writer error (non-fatal)")
+
+        logger.info(
+            "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",
+            strategy_name, symbol, close_pnl, hold_ms / 3600000, regime,
+        )
 
     def _refresh_kline_volume(self) -> None:
         """

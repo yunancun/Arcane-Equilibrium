@@ -65,10 +65,14 @@ class StrategyAutoDeployer:
 
         # Track auto-deployed strategies: {strategy_name: {symbol, category, deployed_ts, ...}}
         self._deployed: dict[str, dict[str, Any]] = {}
+        # G1: consecutive loss tracking per strategy / G1：每策略连续亏损追踪
+        self._consecutive_losses: dict[str, int] = {}
+        self._MAX_CONSECUTIVE_LOSSES = 10  # auto-pause after 10 consecutive losses
         self._stats = {
             "strategies_deployed": 0,
             "strategies_removed": 0,
             "scan_callbacks_received": 0,
+            "strategies_auto_paused": 0,
         }
 
     def on_scan_results(self, opportunities: list[Any]) -> None:
@@ -256,6 +260,39 @@ class StrategyAutoDeployer:
             "Auto-deployed %s for %s (score=%.0f): %s / 自动部署策略",
             category, symbol, opp.score, opp.reason,
         )
+
+    def on_trade_result(self, strategy_name: str, close_pnl: float) -> None:
+        """
+        G1: Called after each round-trip trade to track consecutive losses.
+        Auto-pause the strategy after MAX_CONSECUTIVE_LOSSES in a row.
+        G1：每轮交易后调用以追踪连续亏损。
+        连续亏损超过阈值后自动暂停策略。
+        """
+        with self._lock:
+            if close_pnl < 0:
+                self._consecutive_losses[strategy_name] = self._consecutive_losses.get(strategy_name, 0) + 1
+                losses = self._consecutive_losses[strategy_name]
+                logger.info(
+                    "Strategy %s consecutive losses: %d / 策略连续亏损: %d",
+                    strategy_name, losses, losses,
+                )
+                if losses >= self._MAX_CONSECUTIVE_LOSSES:
+                    # Auto-pause: strategy is losing consistently, stop deploying it
+                    # 自动暂停：策略持续亏损，停止其交易
+                    try:
+                        self._orch.pause_strategy(strategy_name)
+                        self._stats["strategies_auto_paused"] += 1
+                        logger.warning(
+                            "AUTO-PAUSED strategy %s after %d consecutive losses / "
+                            "自动暂停策略 %s，连续亏损 %d 次",
+                            strategy_name, losses, strategy_name, losses,
+                        )
+                    except Exception:
+                        logger.debug("Could not pause strategy %s (may not be registered)", strategy_name)
+            else:
+                # Win or break-even: reset consecutive loss counter
+                # 盈利或平局：重置连续亏损计数器
+                self._consecutive_losses.pop(strategy_name, None)
 
     def remove_stale_strategies(self, active_symbols: set[str]) -> None:
         """Remove strategies for symbols no longer in top opportunities."""
