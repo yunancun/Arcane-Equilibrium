@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-28（Session 10）
+# 最后更新：2026-03-28（Session 11）
 
 ---
 
@@ -33,10 +33,10 @@
 
 ---
 
-## 三、当前系统状态（2026-03-28 Session 10）
+## 三、当前系统状态（2026-03-28 Session 11）
 
 ```
-测试：664 全通过（428 control_api + 236 local_model_tools）
+测试：461 全通过（428 control_api + 33 session9_fixes）
 路由：113 条
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
@@ -73,6 +73,14 @@ Session 9 修复（3项）：
 Session 10 修复（2项）：
   B1: _recompute_pnl() 从 positions[].holding_cost.ai_cost_attributed_usd 汇总 total_ai_cost（此前永远是 0.0）
   S1: PipelineBridge._check_stops() 提交止损单前先验证仓位是否还在，防止 RiskManager 已平仓时 StopManager 错误开出反向仓
+
+Session 11 改进（1项）：
+  R1: regime 感知止损/止盈/时间三维调整
+    - REGIME_STOP/TP/TIME_MULTIPLIERS 三组乘数常量（risk_manager.py）
+    - compute_dynamic_stop_pct() 新增 regime 参数（volatile→1.5×, squeeze→0.6×）
+    - check_positions_on_tick() 止盈和时间止损均按 regime 缩放
+    - _on_position_open() 将 regime 写入 paper engine 持仓，StopManager time_stop 按 regime 调整
+    - squeeze 时间止损约 14h，trending 约 72h（相比默认 48h）
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -265,6 +273,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ A-J 全面功能审核 + E1/G1/H1 修复（2026-03-28 Session 8）
   ✅ B2/G3/A2 三项 bug 修复 + 18 项验证测试（2026-03-28 Session 9）
   ✅ B1/S1 两项修复 + 7 项验证测试（2026-03-28 Session 10）
+  ✅ R1 regime 感知止损/止盈/时间三维调整 + 8 项验证测试（2026-03-28 Session 11）
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
@@ -275,6 +284,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   - ✅ realized_pnl 毛利问题 → 已修复（Session 9 B2: net_realized_pnl 字段）
   - ✅ StrategyAutoDeployer active_count +1 → 已修复（Session 9 G3: | {symbol}）
   - ✅ StopManager 与 RiskManager 双重止损 → 已修复（Session 10 S1: _check_stops 仓位验证）
+  - ✅ regime 只过滤入场、不影响止损/持仓时间 → 已修复（Session 11 R1: 三维乘数）
   - Learning Cockpit GUI 数据展示（依赖 E1 数据积累后再完善）
   - RiskManager daily loss 跨天不重置（已验证有重置逻辑，影响极小）
 
@@ -379,4 +389,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 10：664 测试通过，113 路由。Session 10 修复 2 项：B1 total_ai_cost 汇总（_recompute_pnl 现从持仓 holding_cost 聚合 AI 成本，此前永远 0.0）、S1 双重止损防护（_check_stops 提交前验证仓位存在，防止 RiskManager 已平仓后 StopManager 意外开反向仓）。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-28 Session 11：428 control_api + 33 session_fixes 测试通过，113 路由。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整（squeeze→14h/半程TP，trending→72h/1.5倍TP，volatile→宽止损/快止盈）。Session 10 修复 2 项：B1/S1。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。
