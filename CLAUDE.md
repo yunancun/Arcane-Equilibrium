@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-28（Session 9）
+# 最后更新：2026-03-28（Session 10）
 
 ---
 
@@ -33,7 +33,7 @@
 
 ---
 
-## 三、当前系统状态（2026-03-28 Session 9）
+## 三、当前系统状态（2026-03-28 Session 10）
 
 ```
 测试：664 全通过（428 control_api + 236 local_model_tools）
@@ -69,6 +69,10 @@ Session 9 修复（3项）：
   B2: paper_trading_engine._recompute_pnl() 新增 net_realized_pnl 字段（realized - total_fees）
   G3: strategy_auto_deployer._compute_qty() 修复 active_count +1 bug（改用 | {symbol}）
   A2: 新增 on_fill 回调链路（StrategyBase.on_fill → MACrossoverStrategy 实现 → deployer.notify_fill → PipelineBridge 调用），防止仓位状态漂移
+
+Session 10 修复（2项）：
+  B1: _recompute_pnl() 从 positions[].holding_cost.ai_cost_attributed_usd 汇总 total_ai_cost（此前永远是 0.0）
+  S1: PipelineBridge._check_stops() 提交止损单前先验证仓位是否还在，防止 RiskManager 已平仓时 StopManager 错误开出反向仓
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -260,6 +264,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 系统全面审核 + 5项修复（2026-03-28 Session 7）
   ✅ A-J 全面功能审核 + E1/G1/H1 修复（2026-03-28 Session 8）
   ✅ B2/G3/A2 三项 bug 修复 + 18 项验证测试（2026-03-28 Session 9）
+  ✅ B1/S1 两项修复 + 7 项验证测试（2026-03-28 Session 10）
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
@@ -269,7 +274,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   - ✅ MACrossoverStrategy 双边持仓状态漂移 → 已修复（Session 9 A2: on_fill 链路）
   - ✅ realized_pnl 毛利问题 → 已修复（Session 9 B2: net_realized_pnl 字段）
   - ✅ StrategyAutoDeployer active_count +1 → 已修复（Session 9 G3: | {symbol}）
-  - StopManager 与 RiskManager 双重止损（需统一 Stop 逻辑）
+  - ✅ StopManager 与 RiskManager 双重止损 → 已修复（Session 10 S1: _check_stops 仓位验证）
   - Learning Cockpit GUI 数据展示（依赖 E1 数据积累后再完善）
   - RiskManager daily loss 跨天不重置（已验证有重置逻辑，影响极小）
 
@@ -374,4 +379,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 9：646 测试通过，113 路由。Session 9 修复 3 项：B2 新增 net_realized_pnl 字段（扣费后净实现盈亏）、G3 修复仓位计算 active_count +1 bug（策略分配更准确）、A2 新增 on_fill 回调链路（StrategyBase→MACrossoverStrategy→deployer→bridge），防止 MA 策略仓位状态漂移。系统全程 read_only / disabled / not_granted。待处理问题见第十一章。
+> 截至 2026-03-28 Session 10：664 测试通过，113 路由。Session 10 修复 2 项：B1 total_ai_cost 汇总（_recompute_pnl 现从持仓 holding_cost 聚合 AI 成本，此前永远 0.0）、S1 双重止损防护（_check_stops 提交前验证仓位存在，防止 RiskManager 已平仓后 StopManager 意外开反向仓）。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。
