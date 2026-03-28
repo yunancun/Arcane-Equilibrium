@@ -438,7 +438,7 @@ class PipelineBridge:
         # 将市场状态写入纸上交易引擎持仓，让 RiskManager 用于止损/止盈/时间缩放
         if self._engine and regime != "unknown":
             try:
-                store = self._engine._store
+                store = self._engine.store
                 def _inject_regime(state: dict) -> dict:
                     if symbol in state.get("positions", {}):
                         state["positions"][symbol]["regime"] = regime
