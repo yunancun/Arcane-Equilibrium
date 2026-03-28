@@ -556,3 +556,173 @@ class TestDoubleStopGuard:
         # Should not raise, and should fall through to submit_order
         bridge._check_stops()
         engine.submit_order.assert_called_once()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# R1 — Regime-aware stop/TP/time scaling (Session 10)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestRegimeAwareStops:
+    """
+    R1: compute_dynamic_stop_pct and check_positions_on_tick apply regime multipliers.
+    Verifies: stop wider in volatile/trending, tighter in ranging/squeeze,
+              TP scaled by REGIME_TP_MULTIPLIERS, time_stop scaled by REGIME_TIME_MULTIPLIERS.
+    """
+
+    @pytest.fixture
+    def rm_mod(self):
+        import importlib
+        import importlib.util
+        # Must register in sys.modules BEFORE exec_module so @dataclass can resolve cls.__module__
+        rm_path = CONTROL_API_ROOT / "app" / "risk_manager.py"
+        spec = importlib.util.spec_from_file_location("risk_manager", rm_path)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["risk_manager"] = mod
+        try:
+            spec.loader.exec_module(mod)
+        finally:
+            pass  # leave registered for test duration
+        return mod
+
+    # ── compute_dynamic_stop_pct regime scaling ──────────────────────────────
+
+    def test_unknown_regime_is_neutral(self, rm_mod):
+        """unknown regime → multiplier 1.0 → same as baseline."""
+        base = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime="unknown")
+        neutral = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0)
+        assert abs(base - neutral) < 1e-9, "default regime should equal explicit 'unknown'"
+
+    def test_volatile_widens_stop(self, rm_mod):
+        """volatile regime (1.5×) should produce a wider stop than ranging (0.7×)."""
+        volatile_sl = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime="volatile")
+        ranging_sl = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime="ranging")
+        assert volatile_sl > ranging_sl, (
+            f"volatile stop ({volatile_sl:.3f}) should be > ranging stop ({ranging_sl:.3f})"
+        )
+
+    def test_squeeze_is_tightest(self, rm_mod):
+        """squeeze (0.6×) should produce the tightest stop among all regimes."""
+        regimes = ["trending", "volatile", "ranging", "squeeze", "unknown"]
+        stops = {r: rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime=r) for r in regimes}
+        assert stops["squeeze"] < stops["volatile"], (
+            f"squeeze stop ({stops['squeeze']:.3f}) should be < volatile ({stops['volatile']:.3f})"
+        )
+        assert stops["squeeze"] < stops["trending"], (
+            f"squeeze stop ({stops['squeeze']:.3f}) should be < trending ({stops['trending']:.3f})"
+        )
+
+    def test_trending_wider_than_ranging(self, rm_mod):
+        """trending (1.0×) > ranging (0.7×)."""
+        trending_sl = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime="trending")
+        ranging_sl = rm_mod.compute_dynamic_stop_pct(5.0, None, "BTCUSDT", 0, regime="ranging")
+        assert trending_sl > ranging_sl
+
+    def test_regime_tp_multipliers_exported(self, rm_mod):
+        """REGIME_TP_MULTIPLIERS must be exported and have all 5 keys."""
+        m = rm_mod.REGIME_TP_MULTIPLIERS
+        for k in ("trending", "volatile", "ranging", "squeeze", "unknown"):
+            assert k in m, f"Missing regime key: {k}"
+        assert m["trending"] > m["ranging"], "trending TP should be higher than ranging TP"
+        assert m["volatile"] < m["trending"], "volatile TP should be < trending (exit faster)"
+
+    def test_regime_time_multipliers_exported(self, rm_mod):
+        """REGIME_TIME_MULTIPLIERS must be exported and squeeze is the shortest."""
+        m = rm_mod.REGIME_TIME_MULTIPLIERS
+        for k in ("trending", "volatile", "ranging", "squeeze", "unknown"):
+            assert k in m, f"Missing regime key: {k}"
+        assert m["squeeze"] < m["trending"], "squeeze time should be shorter than trending"
+        assert m["squeeze"] < m["unknown"], "squeeze time should be shorter than unknown"
+
+    # ── Pipeline bridge regime-adjusted time stop ────────────────────────────
+
+    def test_time_stop_adjusted_by_regime(self, rm_mod):
+        """
+        REGIME_TIME_MULTIPLIERS.squeeze × 48h = ~14.4h.
+        Verify the constant yields a value < 48h (i.e. actual tightening occurs).
+        """
+        base_hours = 48.0
+        squeeze_hours = base_hours * rm_mod.REGIME_TIME_MULTIPLIERS["squeeze"]
+        trending_hours = base_hours * rm_mod.REGIME_TIME_MULTIPLIERS["trending"]
+        assert squeeze_hours < base_hours, "squeeze time stop should be shorter than base"
+        assert trending_hours > base_hours, "trending time stop should be longer than base"
+
+    # ── check_positions_on_tick reads regime from position ───────────────────
+
+    def test_risk_manager_reads_regime_from_position(self, rm_mod):
+        """
+        When a position has regime='squeeze', the TP threshold should be lower
+        (squeeze TP = 0.5×) compared to regime='trending' (1.5×).
+        Inject two positions with same entry and same current price (at profit),
+        and verify which one triggers TP.
+        """
+        from unittest.mock import MagicMock, patch
+
+        config = rm_mod.GlobalRiskConfig(
+            max_stop_loss_pct=20.0,    # high hard stop so it doesn't interfere
+            max_leverage=20.0,
+        )
+        agent_params = rm_mod.AgentRiskParams(
+            effective_stop_loss_pct=20.0,   # high soft stop to avoid triggering
+            effective_take_profit_pct=4.0,  # base TP = 4%
+            trailing_stop_enabled=False,
+        )
+
+        manager = rm_mod.RiskManager(config=config, agent_params=agent_params)
+
+        mock_tracker = MagicMock()
+        mock_tracker.update_price = MagicMock()
+        mock_tracker.compute_atr_pct.return_value = None
+        mock_tracker.detect_spike.return_value = None
+        manager._price_tracker = mock_tracker
+
+        # Position in squeeze regime — TP = 4% × 0.5 = 2%
+        # Current pnl = +3% → should trigger TP in squeeze, but not in trending (needs 6%)
+        import time as _time
+        entry_price = 100.0
+        current_price = 103.0  # +3%
+        # opened 1 hour ago → well within any time stop window (squeeze=14h, trending=72h)
+        opened_ts_ms = int(_time.time() * 1000) - 3600 * 1000
+
+        state_squeeze = {
+            "positions": {
+                "BTCUSDT": {
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "qty": 1.0,
+                    "avg_entry_price": entry_price,
+                    "unrealized_pnl": 3.0,
+                    "opened_ts_ms": opened_ts_ms,
+                    "regime": "squeeze",
+                }
+            },
+            "orders": [],
+        }
+        state_trending = {
+            "positions": {
+                "BTCUSDT": {
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "qty": 1.0,
+                    "avg_entry_price": entry_price,
+                    "unrealized_pnl": 3.0,
+                    "opened_ts_ms": opened_ts_ms,
+                    "regime": "trending",
+                }
+            },
+            "orders": [],
+        }
+
+        closes_squeeze = manager.check_positions_on_tick(state_squeeze, {"BTCUSDT": current_price})
+        closes_trending = manager.check_positions_on_tick(state_trending, {"BTCUSDT": current_price})
+
+        # squeeze TP = 4% × 0.5 = 2% → 3% profit → should trigger
+        squeeze_reasons = [c["reason"] for c in closes_squeeze]
+        assert any("take_profit" in r for r in squeeze_reasons), (
+            f"squeeze regime at +3% should trigger TP (threshold=2%). reasons={squeeze_reasons}"
+        )
+
+        # trending TP = 4% × 1.5 = 6% → 3% profit → should NOT trigger
+        trending_reasons = [c["reason"] for c in closes_trending]
+        assert not any("take_profit" in r for r in trending_reasons), (
+            f"trending regime at +3% should NOT trigger TP (threshold=6%). reasons={trending_reasons}"
+        )

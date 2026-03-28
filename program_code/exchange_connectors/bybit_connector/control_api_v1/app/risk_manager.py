@@ -80,6 +80,35 @@ ATR_MIN_SAMPLES = 10      # Minimum samples to compute ATR
 # 反聚集：随机偏移占止损距离的最大比例
 ANTI_CLUSTER_OFFSET_FRACTION = 0.15  # ±15% of stop distance
 
+# Regime-aware stop/TP/time multipliers
+# 市场状态感知止损/止盈/时间乘数
+# trending: wider stop + larger TP + hold longer (trend continuation)
+# volatile: wider stop (avoid noise) + smaller TP (take profit faster) + exit faster
+# ranging: tighter stop + smaller TP (mean-revert quickly) + exit faster
+# squeeze: very tight stop + small TP (breakout can fail fast) + exit very fast
+# unknown: neutral
+REGIME_STOP_MULTIPLIERS: dict[str, float] = {
+    "trending": 1.0,
+    "volatile": 1.5,
+    "ranging": 0.7,
+    "squeeze": 0.6,
+    "unknown": 1.0,
+}
+REGIME_TP_MULTIPLIERS: dict[str, float] = {
+    "trending": 1.5,
+    "volatile": 0.8,
+    "ranging": 0.7,
+    "squeeze": 0.5,
+    "unknown": 1.0,
+}
+REGIME_TIME_MULTIPLIERS: dict[str, float] = {
+    "trending": 1.5,
+    "volatile": 0.8,
+    "ranging": 0.8,
+    "squeeze": 0.3,
+    "unknown": 1.0,
+}
+
 # Spike detection thresholds / 尖刺检测阈值
 SPIKE_REVERT_THRESHOLD_PCT = 0.5    # Price reverts >50% within window → spike
 SPIKE_WINDOW_SECONDS = 180          # 3 minute window for spike detection
@@ -193,14 +222,19 @@ def compute_dynamic_stop_pct(
     atr_pct: float | None,
     symbol: str,
     entry_ts_ms: int,
+    regime: str = "unknown",
 ) -> float:
     """
-    Compute ATR-adjusted stop loss with anti-clustering random offset.
-    计算 ATR 自适应止损 + 反聚集随机偏移。
+    Compute ATR-adjusted stop loss with anti-clustering random offset and regime scaling.
+    计算 ATR 自适应止损 + 反聚集随机偏移 + 市场状态缩放。
 
     If ATR available: stop = max(base, 1.5 × ATR) + random offset
     If no ATR: stop = base + small random offset (still unpredictable)
+    Regime multiplier widens stop in volatile/trending markets, tightens in ranging/squeeze.
     """
+    regime_mult = REGIME_STOP_MULTIPLIERS.get(regime, 1.0)
+    base_stop_pct = base_stop_pct * regime_mult
+
     if atr_pct is not None and atr_pct > 0:
         # ATR-based: use 1.5x ATR as minimum, but don't exceed base cap
         atr_stop = atr_pct * 1.5
@@ -716,11 +750,12 @@ class RiskManager:
                 continue
 
             # 2. Soft stop loss with adversarial logic / 对抗性软止损
-            # Uses ATR-dynamic level + anti-clustering offset + spike detection
+            # Uses ATR-dynamic level + anti-clustering offset + spike detection + regime scaling
+            regime = pos.get("regime", "unknown")
             base_soft_sl = self.effective_stop_loss_pct(category)
             atr_pct = self._price_tracker.compute_atr_pct(symbol)
             entry_ts = pos.get("opened_ts_ms", now_ms_val)
-            dynamic_sl = compute_dynamic_stop_pct(base_soft_sl, atr_pct, symbol, entry_ts)
+            dynamic_sl = compute_dynamic_stop_pct(base_soft_sl, atr_pct, symbol, entry_ts, regime=regime)
 
             if pnl_pct <= -dynamic_sl:
                 # Check for spike (possible stop hunting) / 检查尖刺（可能的止损猎杀）
@@ -742,8 +777,8 @@ class RiskManager:
                 })
                 continue
 
-            # 3. Take profit
-            tp = self.effective_take_profit_pct(category)
+            # 3. Take profit (regime-adjusted)
+            tp = self.effective_take_profit_pct(category) * REGIME_TP_MULTIPLIERS.get(regime, 1.0)
             if pnl_pct >= tp:
                 close_orders.append({
                     "symbol": symbol, "qty": qty,
@@ -778,11 +813,12 @@ class RiskManager:
                         })
                         continue
 
-            # 5. Max holding time
+            # 5. Max holding time (regime-adjusted)
             opened_ts = pos.get("opened_ts_ms", 0)
             if opened_ts > 0:
                 holding_hours = (now_ms_val - opened_ts) / (1000 * 3600)
                 max_hold = resolve_effective_limit("max_holding_hours", self._config, self._category_configs.get(category))
+                max_hold = max_hold * REGIME_TIME_MULTIPLIERS.get(regime, 1.0)
                 if holding_hours >= max_hold:
                     close_orders.append({
                         "symbol": symbol, "qty": qty,

@@ -41,6 +41,8 @@ import threading
 import time
 from typing import Any
 
+from .risk_manager import REGIME_TIME_MULTIPLIERS
+
 logger = logging.getLogger(__name__)
 
 
@@ -432,8 +434,21 @@ class PipelineBridge:
                 "regime": regime,
             }
 
-        # H1: register with StopManager using ATR-based dynamic stop
-        # H1：使用 ATR 动态止损注册到 StopManager
+        # Write regime to paper engine position so RiskManager can use it for stop/TP/time scaling
+        # 将市场状态写入纸上交易引擎持仓，让 RiskManager 用于止损/止盈/时间缩放
+        if self._engine and regime != "unknown":
+            try:
+                store = self._engine._store
+                def _inject_regime(state: dict) -> dict:
+                    if symbol in state.get("positions", {}):
+                        state["positions"][symbol]["regime"] = regime
+                    return state
+                store.mutate(_inject_regime)
+            except Exception:
+                logger.debug("Could not write regime to position (non-fatal): %s", symbol)
+
+        # H1: register with StopManager using ATR-based dynamic stop + regime-adjusted time stop
+        # H1：使用 ATR 动态止损 + 市场状态调整时间止损注册到 StopManager
         if self._stop_mgr:
             try:
                 from local_model_tools.stop_manager import StopConfig
@@ -450,6 +465,9 @@ class PipelineBridge:
                             atr_stop_pct = min(15.0, max(2.0, (atr * 2.0 / fill_price) * 100))
                     except Exception:
                         pass
+                # Regime-adjusted time stop: e.g. squeeze only holds 0.3x default = ~14h
+                # 市场状态调整时间止损：如 squeeze 只持有默认的 0.3 倍 ≈ 14 小时
+                time_stop_hours = 48.0 * REGIME_TIME_MULTIPLIERS.get(regime, 1.0)
                 self._stop_mgr.track_position(
                     symbol=symbol,
                     side=side,
@@ -459,12 +477,12 @@ class PipelineBridge:
                     stop_config=StopConfig(
                         hard_stop_pct=atr_stop_pct,
                         trailing_stop_pct=3.0,
-                        time_stop_hours=48.0,
+                        time_stop_hours=time_stop_hours,
                     ),
                 )
                 logger.info(
-                    "Tracking position %s %s atr_stop=%.2f%% / 追踪持仓",
-                    strategy_name, symbol, atr_stop_pct,
+                    "Tracking position %s %s atr_stop=%.2f%% time_stop=%.1fh regime=%s / 追踪持仓",
+                    strategy_name, symbol, atr_stop_pct, time_stop_hours, regime,
                 )
             except Exception:
                 logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
