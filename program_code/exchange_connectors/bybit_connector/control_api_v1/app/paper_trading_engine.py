@@ -1250,12 +1250,20 @@ class PaperTradingEngine:
         # Net realized PnL (after deducting all fees) / 净实现盈亏（扣除全部手续费）
         pnl["net_realized_pnl"] = realized - total_fees
 
+        # Aggregate AI attention cost from open positions' holding_cost
+        # / 从持仓 holding_cost 汇总 AI 注意力成本
+        total_ai_cost = sum(
+            p.get("holding_cost", {}).get("ai_cost_attributed_usd", 0.0)
+            for p in state["positions"].values()
+        )
+        pnl["total_ai_cost"] = total_ai_cost
+
         # Net paper PnL
         pnl["net_paper_pnl"] = (
             pnl["realized_pnl"]
             + pnl["unrealized_pnl"]
             - pnl["total_fees_paid"]
-            - pnl.get("total_ai_cost", 0.0)
+            - total_ai_cost
         )
 
         # Update balance to reflect realized PnL

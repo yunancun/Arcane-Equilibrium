@@ -372,6 +372,24 @@ class PipelineBridge:
         market_prices = dict(self._latest_prices)
         for stop in triggered:
             try:
+                # Guard: skip if position was already closed by RiskManager in the same tick.
+                # Without this check, submitting a close-side order on a gone position would
+                # open a new opposite-direction position — a silent bug.
+                # 防止双重止损：若 RiskManager 已平仓，跳过此止损单，避免开出反向仓位。
+                try:
+                    engine_state = self._engine.get_state()
+                    if not engine_state.get("positions", {}).get(stop["symbol"]):
+                        logger.debug(
+                            "Stop skipped — position already closed: %s / 止损跳过，仓位已平",
+                            stop["symbol"],
+                        )
+                        self._stop_mgr.untrack_position(
+                            stop["symbol"], stop.get("strategy_name", "unknown")
+                        )
+                        continue
+                except Exception:
+                    pass  # If state read fails, proceed with stop order (safe default)
+
                 result = self._engine.submit_order(
                     symbol=stop["symbol"],
                     side=stop["side"],

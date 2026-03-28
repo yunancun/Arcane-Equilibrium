@@ -353,3 +353,206 @@ class TestOnFillPositionSync:
         deployer.notify_fill("MA_ETHUSDT", fill, is_open=True)
 
         assert strategy._current_position == "long"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# B1 — total_ai_cost aggregation in _recompute_pnl
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestAiCostAggregation:
+    """B1: total_ai_cost is now aggregated from positions' holding_cost in _recompute_pnl"""
+
+    @pytest.fixture
+    def engine_mod(self):
+        import importlib.util
+        engine_path = CONTROL_API_ROOT / "app" / "paper_trading_engine.py"
+        spec = importlib.util.spec_from_file_location("paper_trading_engine", engine_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    @pytest.fixture
+    def active_engine(self, engine_mod):
+        import os, tempfile
+        tmpdir = tempfile.mkdtemp(prefix="openclaw_ai_cost_test_")
+        store = engine_mod.PaperStateStore(os.path.join(tmpdir, "state.json"))
+        engine = engine_mod.PaperTradingEngine(store)
+        engine.start_session(initial_balance=10000.0)
+        return engine
+
+    def test_total_ai_cost_zero_with_no_positions(self, active_engine):
+        """No open positions → total_ai_cost should be 0.0."""
+        state = active_engine.get_state()
+        assert state["pnl"]["total_ai_cost"] == 0.0
+
+    def test_total_ai_cost_aggregated_from_holding_cost(self, active_engine):
+        """If positions carry ai_cost_attributed_usd, it should be aggregated into pnl."""
+        # Manually inject holding_cost onto a position to simulate RiskManager having run
+        def _inject(state):
+            state["positions"]["BTCUSDT"] = {
+                "symbol": "BTCUSDT", "side": "Buy", "qty": 0.001,
+                "avg_entry_price": 50000.0, "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0, "opened_ts_ms": 0,
+                "holding_cost": {
+                    "ai_cost_attributed_usd": 0.042,
+                    "hourly_ai_burn_rate_usd": 0.01,
+                },
+            }
+            state["positions"]["ETHUSDT"] = {
+                "symbol": "ETHUSDT", "side": "Sell", "qty": 0.1,
+                "avg_entry_price": 3000.0, "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0, "opened_ts_ms": 0,
+                "holding_cost": {
+                    "ai_cost_attributed_usd": 0.018,
+                    "hourly_ai_burn_rate_usd": 0.01,
+                },
+            }
+            return state
+        active_engine.store.mutate(_inject)
+
+        # Trigger _recompute_pnl via a tick (no price movement needed)
+        active_engine.tick({"BTCUSDT": 50000.0, "ETHUSDT": 3000.0})
+
+        state = active_engine.get_state()
+        expected_ai_cost = 0.042 + 0.018  # = 0.060
+        assert abs(state["pnl"]["total_ai_cost"] - expected_ai_cost) < 1e-9, (
+            f"total_ai_cost should be {expected_ai_cost}, got {state['pnl']['total_ai_cost']}"
+        )
+
+    def test_total_ai_cost_reflected_in_net_paper_pnl(self, active_engine):
+        """net_paper_pnl must decrease when AI cost is present."""
+        # Get baseline net_paper_pnl with no AI cost
+        state_before = active_engine.get_state()
+        baseline_net = state_before["pnl"]["net_paper_pnl"]
+
+        # Inject a position with AI cost
+        def _inject(state):
+            state["positions"]["BTCUSDT"] = {
+                "symbol": "BTCUSDT", "side": "Buy", "qty": 0.001,
+                "avg_entry_price": 50000.0, "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0, "opened_ts_ms": 0,
+                "holding_cost": {"ai_cost_attributed_usd": 0.05},
+            }
+            return state
+        active_engine.store.mutate(_inject)
+
+        active_engine.tick({"BTCUSDT": 50000.0})
+
+        state_after = active_engine.get_state()
+        assert state_after["pnl"]["total_ai_cost"] > 0
+        assert state_after["pnl"]["net_paper_pnl"] < baseline_net, (
+            "net_paper_pnl should decrease when AI cost > 0"
+        )
+
+    def test_position_without_holding_cost_is_safe(self, active_engine):
+        """Positions with no holding_cost key should not crash and contribute 0 AI cost."""
+        def _inject(state):
+            state["positions"]["SOLUSDT"] = {
+                "symbol": "SOLUSDT", "side": "Buy", "qty": 1.0,
+                "avg_entry_price": 100.0, "realized_pnl": 0.0,
+                "unrealized_pnl": 0.0, "opened_ts_ms": 0,
+                # no "holding_cost" key
+            }
+            return state
+        active_engine.store.mutate(_inject)
+
+        # Should not raise
+        active_engine.tick({"SOLUSDT": 100.0})
+        state = active_engine.get_state()
+        assert state["pnl"]["total_ai_cost"] == 0.0
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# S1 — double-stop guard in PipelineBridge._check_stops
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestDoubleStopGuard:
+    """S1: _check_stops skips stop orders when position is already closed"""
+
+    def _make_bridge(self, positions: dict):
+        """Build a minimal PipelineBridge with mocked engine and stop manager."""
+        sys.path.insert(0, str(CONTROL_API_ROOT))
+        from app.pipeline_bridge import PipelineBridge
+        from local_model_tools.stop_manager import StopManager
+
+        orch = MagicMock()
+        orch.collect_pending_intents.return_value = []
+        orch.dispatch_tick.return_value = None
+
+        engine = MagicMock()
+        engine.get_state.return_value = {"positions": positions}
+
+        km = MagicMock()
+        bridge = PipelineBridge(
+            km, MagicMock(), MagicMock(), orch, engine,
+        )
+        return bridge, engine
+
+    def test_stop_skipped_when_position_already_closed(self):
+        """If position is gone from engine state, stop order must NOT be submitted."""
+        bridge, engine = self._make_bridge(positions={})  # no open positions
+
+        stop_mgr = MagicMock()
+        stop_mgr.check_stops.return_value = [{
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "qty": 0.001,
+            "stop_type": "hard",
+            "reason": "hard_stop",
+            "strategy_name": "MA_Crossover",
+        }]
+        stop_mgr.untrack_position = MagicMock()
+        bridge._stop_mgr = stop_mgr
+        bridge._latest_prices = {"BTCUSDT": 48000.0}
+
+        bridge._check_stops()
+
+        # submit_order must NOT have been called (position already gone)
+        engine.submit_order.assert_not_called()
+        # untrack_position should have been called to clean up StopManager state
+        stop_mgr.untrack_position.assert_called_once_with("BTCUSDT", "MA_Crossover")
+
+    def test_stop_submitted_when_position_still_open(self):
+        """If position still exists, stop order SHOULD be submitted normally."""
+        positions = {
+            "BTCUSDT": {"symbol": "BTCUSDT", "side": "Buy", "qty": 0.001}
+        }
+        bridge, engine = self._make_bridge(positions=positions)
+        engine.submit_order.return_value = {"fills": [], "close_pnl": 0.0}
+
+        stop_mgr = MagicMock()
+        stop_mgr.check_stops.return_value = [{
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "qty": 0.001,
+            "stop_type": "hard",
+            "reason": "hard_stop",
+            "strategy_name": "MA_Crossover",
+        }]
+        bridge._stop_mgr = stop_mgr
+        bridge._latest_prices = {"BTCUSDT": 48000.0}
+
+        bridge._check_stops()
+
+        engine.submit_order.assert_called_once()
+
+    def test_stop_get_state_failure_proceeds_safely(self):
+        """If get_state() raises, stop order should still be submitted (safe default)."""
+        bridge, engine = self._make_bridge(positions={})
+        engine.get_state.side_effect = RuntimeError("state unavailable")
+        engine.submit_order.return_value = {"fills": [], "close_pnl": 0.0}
+
+        stop_mgr = MagicMock()
+        stop_mgr.check_stops.return_value = [{
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "qty": 0.001,
+            "stop_type": "hard",
+            "reason": "hard_stop",
+        }]
+        bridge._stop_mgr = stop_mgr
+        bridge._latest_prices = {"BTCUSDT": 48000.0}
+
+        # Should not raise, and should fall through to submit_order
+        bridge._check_stops()
+        engine.submit_order.assert_called_once()
