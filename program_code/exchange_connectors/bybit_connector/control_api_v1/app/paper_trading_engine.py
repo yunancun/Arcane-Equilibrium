@@ -159,6 +159,7 @@ def build_default_paper_state() -> dict[str, Any]:
             "closed_position_pnl": 0.0,  # PnL from fully closed positions
             "total_fees_paid": 0.0,
             "total_ai_cost": 0.0,
+            "net_realized_pnl": 0.0,     # realized_pnl minus fees / 扣费后净实现盈亏
             "net_paper_pnl": 0.0,
         },
         "shadow_decisions": [],

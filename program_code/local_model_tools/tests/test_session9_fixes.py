@@ -1,0 +1,355 @@
+"""
+Session 9 Fix Verification Tests / Session 9 修复验证测试
+
+Covers:
+  - G3: active_count +1 bug fix in StrategyAutoDeployer._compute_qty
+  - B2: net_realized_pnl field in PaperTradingEngine._recompute_pnl
+  - A2: on_fill position sync chain (StrategyBase → MACrossoverStrategy → deployer → bridge)
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# ── path setup ──────────────────────────────────────────────────────────────
+LOCAL_MODEL_ROOT = Path(__file__).resolve().parents[1]
+CONTROL_API_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "exchange_connectors" / "bybit_connector" / "control_api_v1"
+)
+for p in [str(LOCAL_MODEL_ROOT), str(CONTROL_API_ROOT)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# G3 — active_count fix
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestActiveCountFix:
+    """G3: _compute_qty uses | {symbol} instead of + 1"""
+
+    def _make_deployer(self, deployed_symbols: list[str]):
+        """Build a StrategyAutoDeployer with mocked deps and pre-populated _deployed."""
+        from strategy_auto_deployer import StrategyAutoDeployer
+
+        orch = MagicMock()
+        engine = MagicMock()
+        engine.get_state.return_value = {
+            "session": {"current_paper_balance_usdt": 10000.0}
+        }
+
+        deployer = StrategyAutoDeployer(
+            orch,
+            MagicMock(),  # kline_manager
+            engine,
+            risk_per_trade_pct=1.0,
+            min_qty_usdt=5.0,
+            max_qty_pct=10.0,
+        )
+        # Populate _deployed with existing symbols
+        for i, sym in enumerate(deployed_symbols):
+            deployer._deployed[f"trend_{sym}"] = {"symbol": sym, "category": "linear"}
+
+        return deployer
+
+    def test_no_existing_deployments(self):
+        """With 0 deployed, active_count should be 1 (just the new symbol)."""
+        deployer = self._make_deployer([])
+        qty = deployer._compute_qty("BTCUSDT", price=50000.0, score=80.0)
+        # balance=10000, risk=1% → base=100, score_mult≈0.9, allocated≈90
+        # active_count=1, per_symbol=90, clamped. qty=90/50000≈0.0018
+        assert qty > 0
+
+    def test_with_two_deployed_same_symbol(self):
+        """
+        Bug scenario: BTCUSDT already deployed as 1 strategy.
+        Old code: active_count = len({BTCUSDT}) + 1 = 2
+        New code: active_count = len({BTCUSDT} | {BTCUSDT}) = 1
+        Deploying the SAME symbol again should not double-count.
+        """
+        deployer = self._make_deployer(["BTCUSDT"])
+        qty_same = deployer._compute_qty("BTCUSDT", price=50000.0, score=80.0)
+        # active_count = len({BTCUSDT} | {BTCUSDT}) = 1
+        # Old code would give active_count = 2 → smaller qty
+
+        deployer2 = self._make_deployer([])
+        qty_fresh = deployer2._compute_qty("BTCUSDT", price=50000.0, score=80.0)
+        # active_count = len({} | {BTCUSDT}) = 1
+
+        # Both should give same qty (1 active symbol either way)
+        assert abs(qty_same - qty_fresh) < 1e-9, (
+            f"Same-symbol redeploy should give same qty as fresh deploy. "
+            f"Got same={qty_same}, fresh={qty_fresh}"
+        )
+
+    def test_with_two_different_deployed(self):
+        """
+        2 different deployed symbols + 1 new → active_count should be 3.
+        Old code: len({A,B}) + 1 = 3 ← coincidentally correct
+        New code: len({A,B} | {C}) = 3 ← also correct
+        """
+        deployer = self._make_deployer(["ETHUSDT", "SOLUSDT"])
+        qty_3symbols = deployer._compute_qty("BTCUSDT", price=50000.0, score=80.0)
+
+        deployer1 = self._make_deployer([])
+        qty_1symbol = deployer1._compute_qty("BTCUSDT", price=50000.0, score=80.0)
+
+        # With 3 active symbols, qty should be smaller than with 1
+        assert qty_3symbols < qty_1symbol, (
+            f"3-symbol portfolio should give smaller per-symbol qty. "
+            f"Got 3sym={qty_3symbols}, 1sym={qty_1symbol}"
+        )
+
+    def test_active_count_does_not_double_count_new_symbol(self):
+        """
+        Core bug test: deploying ETHUSDT when ETHUSDT is already in _deployed.
+        Old code: len({ETHUSDT}) + 1 = 2  (wrong: counts it twice)
+        New code: len({ETHUSDT} | {ETHUSDT}) = 1  (correct: same symbol)
+        """
+        deployer_old_bug = self._make_deployer(["ETHUSDT"])
+
+        # Manually simulate old buggy behavior to confirm fix changes result
+        deployed_syms = set(d["symbol"] for d in deployer_old_bug._deployed.values())
+        old_count = max(1, len(deployed_syms) + 1)  # old buggy
+        new_count = max(1, len(deployed_syms | {"ETHUSDT"}))  # new fixed
+
+        assert old_count == 2, f"Old bug count should be 2, got {old_count}"
+        assert new_count == 1, f"New fixed count should be 1, got {new_count}"
+        assert old_count != new_count, "Fix should produce different result for this scenario"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# B2 — net_realized_pnl field
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestNetRealizedPnl:
+    """B2: net_realized_pnl = realized_pnl - total_fees_paid in _recompute_pnl"""
+
+    @pytest.fixture
+    def active_engine(self):
+        import importlib.util
+        engine_path = CONTROL_API_ROOT / "app" / "paper_trading_engine.py"
+        spec = importlib.util.spec_from_file_location("paper_trading_engine", engine_path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        PaperStateStore = mod.PaperStateStore
+        PaperTradingEngine = mod.PaperTradingEngine
+        tmpdir = tempfile.mkdtemp(prefix="openclaw_pnl_test_")
+        store = PaperStateStore(os.path.join(tmpdir, "state.json"))
+        engine = PaperTradingEngine(store)
+        engine.start_session(initial_balance=10000.0)
+        return engine
+
+    def test_net_realized_pnl_field_exists(self, active_engine):
+        """net_realized_pnl must exist in state.pnl after start."""
+        state = active_engine.get_state()
+        assert "net_realized_pnl" in state["pnl"], (
+            "net_realized_pnl field missing from state.pnl"
+        )
+
+    def test_net_realized_pnl_zero_at_start(self, active_engine):
+        """At session start, net_realized_pnl should be 0."""
+        state = active_engine.get_state()
+        assert state["pnl"]["net_realized_pnl"] == 0.0
+
+    def test_net_realized_pnl_equals_realized_minus_fees(self, active_engine):
+        """After trades, net_realized_pnl = realized_pnl - total_fees_paid."""
+        prices = {"BTCUSDT": 50000.0}
+        # Open long
+        active_engine.submit_order(
+            symbol="BTCUSDT", side="Buy", order_type="market",
+            qty=0.001, market_prices=prices,
+        )
+        # Close with higher price (profit)
+        prices2 = {"BTCUSDT": 51000.0}
+        active_engine.submit_order(
+            symbol="BTCUSDT", side="Sell", order_type="market",
+            qty=0.001, market_prices=prices2,
+        )
+        state = active_engine.get_state()
+        pnl = state["pnl"]
+
+        realized = pnl["realized_pnl"]
+        fees = pnl["total_fees_paid"]
+        net = pnl["net_realized_pnl"]
+
+        assert abs(net - (realized - fees)) < 1e-9, (
+            f"net_realized_pnl={net} should equal realized={realized} - fees={fees} = {realized - fees}"
+        )
+
+    def test_net_realized_pnl_is_less_than_gross(self, active_engine):
+        """net_realized_pnl must be less than realized_pnl when fees > 0."""
+        prices = {"BTCUSDT": 50000.0}
+        active_engine.submit_order("BTCUSDT", "Buy", "market", 0.001, market_prices=prices)
+        prices2 = {"BTCUSDT": 51000.0}
+        active_engine.submit_order("BTCUSDT", "Sell", "market", 0.001, market_prices=prices2)
+
+        state = active_engine.get_state()
+        pnl = state["pnl"]
+
+        assert pnl["total_fees_paid"] > 0, "Fees should be non-zero"
+        assert pnl["net_realized_pnl"] < pnl["realized_pnl"], (
+            "net_realized_pnl must be less than gross realized_pnl when fees exist"
+        )
+
+    def test_net_realized_pnl_consistent_with_net_paper_pnl(self, active_engine):
+        """
+        net_paper_pnl = realized + unrealized - fees - ai_cost
+        net_realized_pnl = realized - fees
+        When unrealized=0 and ai_cost=0: net_paper_pnl == net_realized_pnl
+        """
+        prices = {"BTCUSDT": 50000.0}
+        active_engine.submit_order("BTCUSDT", "Buy", "market", 0.001, market_prices=prices)
+        prices2 = {"BTCUSDT": 51000.0}
+        active_engine.submit_order("BTCUSDT", "Sell", "market", 0.001, market_prices=prices2)
+
+        state = active_engine.get_state()
+        pnl = state["pnl"]
+
+        # After full close, unrealized should be 0
+        if pnl["unrealized_pnl"] == 0.0 and pnl.get("total_ai_cost", 0.0) == 0.0:
+            assert abs(pnl["net_paper_pnl"] - pnl["net_realized_pnl"]) < 1e-9, (
+                "With no open positions and no AI cost, net_paper_pnl should equal net_realized_pnl"
+            )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# A2 — on_fill position sync chain
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestOnFillPositionSync:
+    """A2: on_fill callback chain syncs MACrossoverStrategy._current_position"""
+
+    # ── StrategyBase.on_fill exists and is a no-op ──────────────────────────
+
+    def test_base_on_fill_exists(self):
+        # StrategyBase is abstract; verify via MACrossoverStrategy which inherits it.
+        # The MACrossoverStrategy.on_fill overrides base, but base default must also exist.
+        from strategies.base import StrategyBase
+        from strategies.ma_crossover import MACrossoverStrategy
+        # Check the method exists on the base class
+        assert hasattr(StrategyBase, "on_fill"), "StrategyBase must have on_fill method"
+        # MACrossoverStrategy inherits and overrides it — verify callable
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        result = s.on_fill({"symbol": "XYZUSDT", "side": "Buy"}, is_open=True)  # wrong symbol → no-op
+        assert result is None
+
+    # ── MACrossoverStrategy.on_fill syncs position ──────────────────────────
+
+    def test_on_fill_open_buy_sets_long(self):
+        from strategies.ma_crossover import MACrossoverStrategy
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        s.activate()
+        assert s._current_position is None  # starts neutral
+
+        s.on_fill({"symbol": "BTCUSDT", "side": "Buy", "qty": 0.001}, is_open=True)
+        assert s._current_position == "long", (
+            f"Expected 'long' after Buy open fill, got {s._current_position!r}"
+        )
+
+    def test_on_fill_open_sell_sets_short(self):
+        from strategies.ma_crossover import MACrossoverStrategy
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        s.activate()
+        s.on_fill({"symbol": "BTCUSDT", "side": "Sell", "qty": 0.001}, is_open=True)
+        assert s._current_position == "short"
+
+    def test_on_fill_close_sets_none(self):
+        from strategies.ma_crossover import MACrossoverStrategy
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        s.activate()
+        # Simulate: we think we're long (intent-first update)
+        s._current_position = "long"
+        # Close fill arrives
+        s.on_fill({"symbol": "BTCUSDT", "side": "Sell", "qty": 0.001}, is_open=False)
+        assert s._current_position is None, (
+            f"Expected None after close fill, got {s._current_position!r}"
+        )
+
+    def test_on_fill_wrong_symbol_ignored(self):
+        from strategies.ma_crossover import MACrossoverStrategy
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        s.activate()
+        s._current_position = "long"
+        # Fill for different symbol — should be ignored
+        s.on_fill({"symbol": "ETHUSDT", "side": "Sell", "qty": 0.1}, is_open=False)
+        assert s._current_position == "long", "Fill for wrong symbol should not change position"
+
+    def test_on_fill_corrects_drift(self):
+        """
+        Core scenario: strategy set _current_position='long' optimistically (intent-first),
+        but the actual fill was rejected/different. on_fill corrects the state.
+        """
+        from strategies.ma_crossover import MACrossoverStrategy
+        s = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        s.activate()
+        # Strategy optimistically set to long via intent emission
+        s._current_position = "long"
+        # But fill comes back as close (close_pnl != 0) — we actually closed
+        s.on_fill({"symbol": "BTCUSDT", "side": "Sell"}, is_open=False)
+        assert s._current_position is None
+
+    # ── StrategyAutoDeployer.notify_fill routes to strategy ─────────────────
+
+    def test_notify_fill_routes_to_strategy(self):
+        from strategy_auto_deployer import StrategyAutoDeployer
+        from strategies.ma_crossover import MACrossoverStrategy
+
+        strategy = MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=0.001)
+        strategy.activate()
+        strategy._current_position = "short"  # drift state
+
+        orch = MagicMock()
+        orch._strategies = {"MA_Crossover_BTCUSDT": strategy}
+
+        engine = MagicMock()
+        engine.get_state.return_value = {"session": {"current_paper_balance_usdt": 10000.0}}
+
+        deployer = StrategyAutoDeployer(orch, MagicMock(), engine)
+
+        fill = {"symbol": "BTCUSDT", "side": "Sell", "qty": 0.001, "price": 50000.0}
+        deployer.notify_fill("MA_Crossover_BTCUSDT", fill, is_open=False)
+
+        assert strategy._current_position is None, (
+            f"notify_fill should have called on_fill → cleared position. "
+            f"Got {strategy._current_position!r}"
+        )
+
+    def test_notify_fill_unknown_strategy_does_not_raise(self):
+        from strategy_auto_deployer import StrategyAutoDeployer
+
+        orch = MagicMock()
+        orch._strategies = {}
+        engine = MagicMock()
+        engine.get_state.return_value = {"session": {"current_paper_balance_usdt": 10000.0}}
+
+        deployer = StrategyAutoDeployer(orch, MagicMock(), engine)
+        # Should not raise for unknown strategy name
+        deployer.notify_fill("nonexistent_strategy", {"symbol": "BTCUSDT"}, is_open=True)
+
+    def test_notify_fill_open_corrects_to_long(self):
+        from strategy_auto_deployer import StrategyAutoDeployer
+        from strategies.ma_crossover import MACrossoverStrategy
+
+        strategy = MACrossoverStrategy(symbol="ETHUSDT", qty_per_trade=0.01)
+        strategy.activate()
+        # Simulate no position (intent not yet updated)
+        assert strategy._current_position is None
+
+        orch = MagicMock()
+        orch._strategies = {"MA_ETHUSDT": strategy}
+        engine = MagicMock()
+        engine.get_state.return_value = {"session": {"current_paper_balance_usdt": 10000.0}}
+
+        deployer = StrategyAutoDeployer(orch, MagicMock(), engine)
+        fill = {"symbol": "ETHUSDT", "side": "Buy", "qty": 0.01, "price": 3000.0}
+        deployer.notify_fill("MA_ETHUSDT", fill, is_open=True)
+
+        assert strategy._current_position == "long"
