@@ -81,6 +81,7 @@ Session 11 改进（1项）：
     - check_positions_on_tick() 止盈和时间止损均按 regime 缩放
     - _on_position_open() 将 regime 写入 paper engine 持仓，StopManager time_stop 按 regime 调整
     - squeeze 时间止损约 14h，trending 约 72h（相比默认 48h）
+    - 事后审计修复：_store → store（静默 AttributeError 导致 regime 未实际写入，已修复）
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -389,4 +390,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 11：428 control_api + 33 session_fixes 测试通过，113 路由。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整（squeeze→14h/半程TP，trending→72h/1.5倍TP，volatile→宽止损/快止盈）。Session 10 修复 2 项：B1/S1。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-28 Session 11：428 control_api + 33 session_fixes 测试通过，113 路由。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整（squeeze→14h/半程TP，trending→72h/1.5倍TP，volatile→宽止损/快止盈）+ 事后审计修复 `_store→store`。Session 10 修复 2 项：B1/S1。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。

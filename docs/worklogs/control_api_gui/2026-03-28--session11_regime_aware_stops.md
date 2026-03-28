@@ -123,8 +123,22 @@ REGIME_TIME_MULTIPLIERS = {
 
 ---
 
+## 审计修复（Session 11 事后核验）
+
+**Bug：`self._engine._store` → `self._engine.store`**
+
+在事后核验时发现：`_on_position_open()` 写 regime 到 paper engine 时访问 `self._engine._store`，
+但 `PaperTradingEngine` 的状态存储是公共属性 `self.store`（不带下划线）。
+`AttributeError` 被 `except Exception: pass` 静默捕获，导致 regime 实际上从未写入持仓。
+
+修复：改为 `self._engine.store`。已单独提交（commit `0d90f8b`）。
+
+测试仍全通（33+428），此修复是正确性修复，不影响测试行为（测试通过 mock 注入 regime）。
+
+---
+
 ## 一句话总结
 
 > Session 11 实现 regime 感知止损：trending 持仓更长/TP 更宽，squeeze 快进快出（14h/半程TP）。
 > regime 从开仓时写入 paper engine 持仓，RiskManager 每 tick 读取并动态调整三个维度。
-> 33+428 测试全通，无回归。
+> 事后审计修复 `_store→store`（静默 bug，regime 实际未写入）。33+428 测试全通，无回归。
