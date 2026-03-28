@@ -110,19 +110,57 @@ ORCHESTRATOR = StrategyOrchestrator(
     signal_engine=SIGNAL_ENGINE,
 )
 
+# ── Bybit Demo Connector (created early to read balance for position sizing) ──
+# 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
+try:
+    from .bybit_demo_connector import BybitDemoConnector
+    DEMO_CONNECTOR: Any = BybitDemoConnector()
+    if DEMO_CONNECTOR.is_enabled:
+        _bal_result = DEMO_CONNECTOR.get_wallet_balance()
+        _equity_str = (
+            _bal_result.get("result", {}).get("list", [{}])[0].get("totalEquity", "")
+        )
+        _ACCOUNT_BALANCE_USDT = float(_equity_str) if _equity_str else 10000.0
+        logger.info(
+            "Demo balance read for sizing: $%.0f / 已读取 Demo 余额用于仓位计算",
+            _ACCOUNT_BALANCE_USDT,
+        )
+    else:
+        _ACCOUNT_BALANCE_USDT = 10000.0
+        logger.info("Demo connector disabled, using paper balance $%.0f for sizing", _ACCOUNT_BALANCE_USDT)
+except Exception as _e:
+    DEMO_CONNECTOR = None
+    _ACCOUNT_BALANCE_USDT = 10000.0
+    logger.info("Demo connector unavailable (%s), using default balance for sizing", _e)
+
+# ── Compute initial qty for pre-registered strategies based on account balance ──
+# 根据账户余额计算预注册策略的初始仓位大小
+# Logic: 2% risk / 5 strategies, min $20, max 15% of balance
+# 逻辑：2% 风险 / 5 个策略，最小 $20，最大 15%
+_N_DEFAULT_STRATEGIES = 5
+_per_strategy_usdt = (_ACCOUNT_BALANCE_USDT * 2.0 / 100.0) / _N_DEFAULT_STRATEGIES
+_per_strategy_usdt = max(20.0, min(_per_strategy_usdt, _ACCOUNT_BALANCE_USDT * 0.15))
+_BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
+_DEFAULT_BTC_QTY = round(_per_strategy_usdt / _BTC_PRICE_HINT, 3)  # 3dp = Bybit BTCUSDT step precision
+logger.info(
+    "Default strategy qty: $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位",
+    _per_strategy_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,
+)
+
 # Pre-register default strategies (idle by default, user activates via API)
 # 预注册默认策略（默认 idle，用户通过 API 激活）
-ORCHESTRATOR.register_strategy(MACrossoverStrategy(symbol="BTCUSDT"))
-ORCHESTRATOR.register_strategy(BollingerReversionStrategy(symbol="BTCUSDT"))
-ORCHESTRATOR.register_strategy(FundingRateArbStrategy(symbol="BTCUSDT"))
+ORCHESTRATOR.register_strategy(MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY, min_confidence=0.5))
+ORCHESTRATOR.register_strategy(BollingerReversionStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
+ORCHESTRATOR.register_strategy(FundingRateArbStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
 _grid_upper = float(os.getenv("OPENCLAW_GRID_UPPER", "68000"))
 _grid_lower = float(os.getenv("OPENCLAW_GRID_LOWER", "63000"))
 _grid_count = int(os.getenv("OPENCLAW_GRID_COUNT", "25"))
 
 ORCHESTRATOR.register_strategy(GridTradingStrategy(
-    symbol="BTCUSDT", upper_price=_grid_upper, lower_price=_grid_lower, grid_count=_grid_count,
+    symbol="BTCUSDT", upper_price=_grid_upper, lower_price=_grid_lower,
+    grid_count=_grid_count, qty_per_grid=_DEFAULT_BTC_QTY,
 ))
-ORCHESTRATOR.register_strategy(BBBreakoutStrategy(symbol="BTCUSDT"))
+ORCHESTRATOR.register_strategy(BBBreakoutStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
 
 logger.info(
     "Phase 2 strategy pipeline initialized / Phase 2 策略管线初始化完成: "
@@ -202,17 +240,11 @@ except Exception as e:
     GRAFANA_WRITER = None
     logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
 
-# ── Bybit Demo Connector (optional, for sandbox execution) ──
-# Bybit Demo 连接器（可选，用于沙盒执行）
-try:
-    from .bybit_demo_connector import BybitDemoConnector
-    DEMO_CONNECTOR = BybitDemoConnector()
-    if DEMO_CONNECTOR.is_enabled and PIPELINE_BRIDGE is not None:
-        PIPELINE_BRIDGE.set_demo_connector(DEMO_CONNECTOR)
-        logger.info("Bybit Demo connector wired to pipeline bridge / Bybit Demo 已接入管线")
-except Exception as e:
-    DEMO_CONNECTOR = None
-    logger.info("Bybit Demo connector not available: %s", e)
+# ── Wire Demo Connector to Pipeline Bridge (DEMO_CONNECTOR created earlier) ──
+# 将已提前创建的 Demo 连接器接入管线桥接器
+if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled and PIPELINE_BRIDGE is not None:
+    PIPELINE_BRIDGE.set_demo_connector(DEMO_CONNECTOR)
+    logger.info("Bybit Demo connector wired to pipeline bridge / Bybit Demo 已接入管线")
 
 # ── Bybit Demo Data Sync (pulls Demo data into PostgreSQL) ──
 # Bybit Demo 数据同步器（从 Demo API 拉取数据写入 PostgreSQL）
@@ -231,6 +263,11 @@ try:
     from local_model_tools.market_scanner import MarketScanner
     from local_model_tools.strategy_auto_deployer import StrategyAutoDeployer
 
+    # Lazy dispatcher reference: resolves at call time so it works even if
+    # market feed starts after the auto-deployer is created.
+    # 惰性 dispatcher 引用：调用时才解析，无论行情流何时启动均有效。
+    from . import paper_trading_routes as _ptr
+
     MARKET_SCANNER = MarketScanner(max_symbols=10)
     AUTO_DEPLOYER = StrategyAutoDeployer(
         orchestrator=ORCHESTRATOR,
@@ -240,6 +277,7 @@ try:
         risk_per_trade_pct=2.0,    # Risk 2% of balance per trade (more aggressive)
         min_qty_usdt=20.0,         # Minimum $20 per trade
         max_qty_pct=15.0,          # Max 15% of balance per single trade
+        market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()
@@ -248,6 +286,43 @@ except Exception as e:
     MARKET_SCANNER = None
     AUTO_DEPLOYER = None
     logger.warning("Market scanner not available: %s", e)
+
+
+# ── Auto-start market feed if a paper session is already active ──
+# 若纸上交易 session 已存在（服务重启场景），自动重启行情数据流
+# This prevents the "frozen system" state after systemctl restart.
+# 防止 systemctl restart 后系统进入"活死人"状态（策略激活但无数据）。
+try:
+    from . import paper_trading_routes as _paper_ptr
+    from .paper_trading_routes import MarketDataDispatcher
+
+    if (
+        _paper_ptr.DISPATCHER is None          # feed not yet running
+        and PIPELINE_BRIDGE is not None        # pipeline ready
+        and _paper_ptr.PAPER_STORE is not None  # store available
+    ):
+        _sess_state = _paper_ptr.PAPER_STORE.read().get("session", {}).get("session_state", "")
+        if _sess_state in ("active", "paused"):
+            _auto_symbols = ["BTCUSDT", "ETHUSDT"]
+            _paper_ptr.DISPATCHER = MarketDataDispatcher(
+                engine=_paper_ptr.ENGINE,
+                symbols=_auto_symbols,
+            )
+            _paper_ptr.DISPATCHER.start()
+            _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
+            PIPELINE_BRIDGE.activate()
+            logger.info(
+                "Auto-started market feed (session_state=%s) / 自动启动行情流（session_state=%s）",
+                _sess_state, _sess_state,
+            )
+        else:
+            logger.info(
+                "No active paper session at startup (state=%r), skipping auto market feed / "
+                "启动时无活跃 session，跳过自动启动行情流",
+                _sess_state,
+            )
+except Exception as _auto_e:
+    logger.info("Auto market feed start skipped: %s / 自动启动行情流已跳过: %s", _auto_e, _auto_e)
 
 
 # =============================================================================

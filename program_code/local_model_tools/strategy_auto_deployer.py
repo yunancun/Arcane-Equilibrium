@@ -51,6 +51,7 @@ class StrategyAutoDeployer:
         risk_per_trade_pct: float = 1.0,  # Risk 1% of balance per trade
         min_qty_usdt: float = 10.0,       # Minimum $10 per trade
         max_qty_pct: float = 10.0,        # Max 10% of balance per single trade
+        market_feed_add_fn: Any = None,   # Optional: callable(symbol) to subscribe market feed
     ) -> None:
         self._orch = orchestrator
         self._km = kline_manager
@@ -59,6 +60,7 @@ class StrategyAutoDeployer:
         self._risk_pct = risk_per_trade_pct
         self._min_qty_usdt = min_qty_usdt
         self._max_qty_pct = max_qty_pct
+        self._market_feed_add_fn = market_feed_add_fn
         self._lock = threading.Lock()
 
         # Track auto-deployed strategies: {strategy_name: {symbol, category, deployed_ts, ...}}
@@ -178,7 +180,18 @@ class StrategyAutoDeployer:
             )
 
         elif category == "trend":
-            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=qty)
+            # 过滤 pump/dump 币：24小时涨跌幅超过 40% 的币不适合 MA Crossover
+            # 这类币往往是暴拉暴跌，MA 信号会被反复震仓
+            # Filter pump/dump coins: abs daily change > 40% is too noisy for MA Crossover
+            if abs(getattr(opp, "price_change_pct_24h", 0.0)) > 40.0:
+                logger.info(
+                    "Skipping trend deploy for %s: extreme daily change=%.1f%% (pump/dump risk) / 跳过：日涨跌幅过大",
+                    symbol, opp.price_change_pct_24h,
+                )
+                return
+            # 提高置信度阈值：auto-deploy 使用 0.55，避免追噪声信号
+            # Raise confidence threshold for auto-deployed strategies to reduce noise trading
+            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=qty, min_confidence=0.55)
 
         elif category == "reversion":
             strategy = BollingerReversionStrategy(symbol=symbol, qty_per_trade=qty)
@@ -203,6 +216,14 @@ class StrategyAutoDeployer:
                 self._km.bootstrap_from_rest(limit=200)
             except Exception:
                 pass
+            # Subscribe market feed so live prices flow in for this symbol
+            # 订阅行情流，让该品种的实时价格数据流入
+            if self._market_feed_add_fn is not None:
+                try:
+                    self._market_feed_add_fn(symbol)
+                    logger.info("Market feed subscribed to %s / 行情流已订阅 %s", symbol, symbol)
+                except Exception:
+                    logger.debug("Market feed add skipped for %s (feed may not be running yet)", symbol)
 
         # Register with unique name and activate
         self._orch.register_strategy(strategy, name=unique_name)

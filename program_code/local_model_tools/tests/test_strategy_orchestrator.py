@@ -93,6 +93,7 @@ class TestSignalDispatch:
         signal = Signal(
             symbol="BTCUSDT", direction="long", confidence=0.8,
             source="MA_Cross(EMA(12)/EMA(26))", timeframe="1h",
+            metadata={"_regime": "trending"},
         )
         orch._on_signal(signal)
 
@@ -149,6 +150,7 @@ class TestIntentCollection:
         signal = Signal(
             symbol="BTCUSDT", direction="long", confidence=0.8,
             source="MA_Cross(EMA(12)/EMA(26))", timeframe="1h",
+            metadata={"_regime": "trending"},
         )
         orch._on_signal(signal)
 
@@ -167,6 +169,7 @@ class TestIntentCollection:
         signal = Signal(
             symbol="BTCUSDT", direction="long", confidence=0.8,
             source="MA_Cross(EMA(12)/EMA(26))", timeframe="1h",
+            metadata={"_regime": "trending"},
         )
         orch._on_signal(signal)
         orch.collect_pending_intents()
@@ -193,6 +196,7 @@ class TestIntentCollection:
         signal = Signal(
             symbol="BTCUSDT", direction="long", confidence=0.8,
             source="MA_Cross(EMA(12)/EMA(26))", timeframe="1h",
+            metadata={"_regime": "trending"},
         )
         orch._on_signal(signal)
 

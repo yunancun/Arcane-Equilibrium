@@ -86,6 +86,10 @@ class PipelineBridge:
 
         self._active = False
         self._latest_prices: dict[str, float] = {}
+        # Time-based refresh timestamps (replaces tick-count modulo triggers)
+        # 时间驱动刷新时间戳（替代基于 tick 计数的模运算触发器）
+        self._last_volume_refresh_ts: float = 0.0
+        self._last_funding_check_ts: float = 0.0
         self._strategy_state_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "runtime", "strategy_state.json"
         )
@@ -197,15 +201,18 @@ class PipelineBridge:
             with self._lock:
                 self._stats["errors"] += 1
 
-        # 3. Periodic volume refresh from REST API (every 60 ticks)
-        # 定期从 REST API 刷新成交量（每 60 个 tick）
-        if self._stats["ticks_received"] % 60 == 0 and self._stats["ticks_received"] > 0:
+        # 3. Periodic volume refresh from REST API (every 60 real seconds, time-driven)
+        # 定期从 REST API 刷新成交量（每 60 秒真实时间，时间驱动）
+        _now = time.time()
+        if _now - self._last_volume_refresh_ts >= 60.0:
             self._refresh_kline_volume()
+            self._last_volume_refresh_ts = _now
 
-        # 4. Periodic funding rate check (every 100 ticks, ~5 minutes at medium attention)
-        # 定期 funding rate 检查（每 100 个 tick，中等注意力下约 5 分钟）
-        if self._stats["ticks_received"] % 100 == 0:
+        # 4. Periodic funding rate check (every 300 real seconds = 5 minutes, time-driven)
+        # 定期 funding rate 检查（每 300 秒真实时间 = 5 分钟，时间驱动）
+        if _now - self._last_funding_check_ts >= 300.0:
             self._check_funding_rates()
+            self._last_funding_check_ts = _now
 
         # 5. Process pending intents -> submit to paper engine
         if self._auto_submit:

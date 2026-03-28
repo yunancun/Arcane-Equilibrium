@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""
+bybit_private_positions_check.py.orig
+实际 Bybit 私有持仓查询逻辑。
+当前状态：API Key 未配置，返回 not_configured 状态。
+"""
+import json, os
+from pathlib import Path
+
+KEY_PATH = Path(os.path.expanduser("~/BybitOpenClaw/secrets/secret_files/bybit/prod/api_key"))
+
+if not KEY_PATH.exists():
+    print(json.dumps({
+        "ok": False,
+        "retCode": -1,
+        "retMsg": "api_key_not_configured",
+        "health_state": "credential_misconfigured",
+        "issues": ["credential files missing"],
+        "position_count": 0,
+        "positions": []
+    }, ensure_ascii=False))
+else:
+    print(json.dumps({
+        "ok": False,
+        "retCode": -1,
+        "retMsg": "not_implemented",
+        "health_state": "not_implemented",
+        "issues": ["real API call not implemented"],
+        "position_count": 0,
+        "positions": []
+    }, ensure_ascii=False))

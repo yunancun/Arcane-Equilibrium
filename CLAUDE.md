@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-27
+# 最后更新：2026-03-28（Session 7）
 
 ---
 
@@ -36,10 +36,23 @@
 ## 三、当前系统状态（2026-03-27）
 
 ```
-测试：646 全通过（218 local_model_tools + 428 control_api）
+测试：428 全通过（control_api，local_model_tools 需 venv 单独运行）
 路由：113 条（+2: strategy/create, strategy/{name} DELETE）
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
+
+Paper Trading 运行状态（2026-03-28 Session 7 修复后）：
+  session_id              = psess:fe7ac188（运行中）
+  net_pnl                 = -$53.70（Session 7 修复后继续运行）
+  胜率                    = 0%（历史数据；新规则下积累中）
+  fill_count              = 655
+
+Scanner 规则（最新）：
+  MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过
+  MA Crossover 置信度     = 0.55（扫描器部署）/ 0.50（默认 BTCUSDT）
+  Trend 评分上限          = 100（原无限制，防止压制 funding_arb/grid）
+  Unknown regime 入场     = 禁止（新上线品种冷启动保护）
+  Market Feed 自动重启    = ✅（服务 restart 后自动恢复，无需手动）
 
 Runtime 硬状态：
   system_mode             = read_only
@@ -218,8 +231,18 @@ python3 scripts/bybit_runtime_state_resolver.py
 
 下一步（按优先级）：
   ✅ GUI 10-Tab 专业控制台（已完成）
+  ✅ 半天数据分析与策略修复（2026-03-28 Session 6）
+  ✅ 系统全面审核 + 5项修复（2026-03-28 Session 7）
+  Paper Trading 数据继续积累（新规则下积累中：unknown regime 过滤 + trend cap）
+  Paper Trading + Bybit Demo 数据对比分析（等胜率数据）
   GUI 细节打磨（移动端适配 / 图表增强 / 实时 PnL 折线图）
-  Paper Trading + Bybit Demo 数据对比分析
+
+待处理问题（已记录，非紧急）：
+  - MACrossoverStrategy 双边持仓状态漂移（需 on_fill 回调）
+  - StopManager 与 RiskManager 双重止损（需统一 Stop 逻辑）
+  - realized_pnl 毛利问题（添加 net_realized_pnl 字段）
+  - StrategyAutoDeployer active_count +1（影响小）
+  - RiskManager daily loss 跨天不重置（影响小）
 
 长期优化（自主交易 Agent 持续改进）：
   - 扫描器策略匹配优化：不只选 trend，根据市场状态平衡 funding_arb / grid / reversion
@@ -307,6 +330,8 @@ Live 前置条件（M/N 前必须核验）：
 | ★ GUI 10-Tab 全面重构（common.js+8新Tab+双层解释） | `docs/worklogs/control_api_gui/2026-03-27--gui_10tab_restructure.md` |
 | ★★ Session 4 GUI 专业控制台（6 commits+17 files+3964 行+6 AI 供应商） | `docs/worklogs/control_api_gui/2026-03-27--session4_gui_10tab_professional_console.md` |
 | Session 5 管线启动验证 + OpenClaw 能力深挖 + 服务自动重启确认 | `docs/worklogs/control_api_gui/2026-03-27--session5_pipeline_launch_and_openclaw_analysis.md` |
+| ★ Session 6 半天数据分析：胜率0%根因 + 4项修复（扫描器+置信度+.orig stub+DB表） | `docs/worklogs/control_api_gui/2026-03-28--session6_halfday_data_analysis_and_fixes.md` |
+| ★★ Session 7 系统全面审核 + 5项修复（市场流自动重启+regime过滤+trend cap+时间驱动+confidence） | `docs/worklogs/control_api_gui/2026-03-28--session7_system_audit_and_fixes.md` |
 
 ### 交接与索引
 
@@ -319,4 +344,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-27：全系统完成。646 测试（0 失败），113 路由（+2 策略创建/删除），8 信号规则。全部审核问题已修复（214/214）。自主交易 Agent 已上线：扫描 650 个 Bybit 交易对 → 自动部署策略（上限 100）。GUI 10-Tab 专业控制台：中文状态标签 + 悬停提示 + 确认弹窗 + 可编辑风控 + AI 止损咨询 + 6 供应商管理（Anthropic/OpenAI/DeepSeek/Perplexity/Local LLM/Google）+ API Key GUI 管理。Paper Trading + Bybit Demo 双重执行。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-28 Session 7：646 测试通过，113 路由。系统完成两轮数据分析与修复：Session 6 修复 pump/dump 过滤+置信度+.orig stub+DB 表；Session 7 完成全面审核（8 模块/12问题），修复 5 项——市场数据流自动重启（服务 restart 后无需手动干预）、unknown regime 冷启动保护、trend 评分上限 100（释放 funding_arb/grid 机会）、PipelineBridge 时间驱动刷新、默认策略 confidence 0.3→0.5。Paper session psess:fe7ac188 净亏 $53.70，新规则下积累中。系统全程 read_only / disabled / not_granted。

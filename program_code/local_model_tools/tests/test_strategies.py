@@ -102,6 +102,7 @@ class TestMACrossoverStrategy:
         return Signal(
             symbol="BTCUSDT", direction=direction, confidence=confidence,
             source="MA_Cross(EMA(12)/EMA(26))", timeframe="1h",
+            metadata={"_regime": "trending"},
         )
 
     def test_long_signal_opens_long(self):

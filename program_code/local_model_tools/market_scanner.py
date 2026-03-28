@@ -244,8 +244,10 @@ class MarketScanner:
                 best_reason = f"Ranging: vol={volatility_pct:.1f}%, change={price_change_pct:+.1f}%, turnover=${volume_24h/1e6:.0f}M"
 
         # 3. Trend Following (strong directional move)
+        # Score capped at 100 so extreme moves don't systematically outbid funding_arb/grid
+        # 趋势分数上限 100，防止极端涨跌幅压制 funding_arb/grid 机会
         if abs(price_change_pct) > 3 and volatility_pct > 3:
-            score = 30 + abs(price_change_pct) * 5
+            score = min(100.0, 30 + abs(price_change_pct) * 5)
             direction = "bullish" if price_change_pct > 0 else "bearish"
             if score > best_score:
                 best_score = score

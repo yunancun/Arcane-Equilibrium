@@ -116,7 +116,12 @@ class MACrossoverStrategy(StrategyBase):
             # Only "ranging" and "squeeze" are filtered (unfavorable for MA crossover).
             # 注意："unknown" 允许通过 — 当该品种尚无 regime 检测（缺少 BB/ATR 历史）时，仍允许交易。
             signal_regime = getattr(signal, "metadata", {}).get("_regime", "unknown")
-            if signal_regime in ("ranging", "squeeze"):
+            # Reject ranging/squeeze (unfavorable) AND unknown (insufficient history).
+            # "unknown" means no BB/ATR data yet — new symbols with cold-start data should
+            # not trade immediately. Only "trending" and "volatile" pass through.
+            # 拒绝 ranging/squeeze（不利）以及 unknown（数据不足）。
+            # "unknown" 表示尚无 BB/ATR 历史，新上线品种不应立即入场。
+            if signal_regime in ("ranging", "squeeze", "unknown"):
                 return
 
             if direction == "long" and self._current_position != "long":
