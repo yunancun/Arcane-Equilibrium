@@ -1246,6 +1246,9 @@ class PaperTradingEngine:
         total_fees = sum(f.get("fee", 0.0) for f in state["fills"])
         pnl["total_fees_paid"] = total_fees
 
+        # Net realized PnL (after deducting all fees) / 净实现盈亏（扣除全部手续费）
+        pnl["net_realized_pnl"] = realized - total_fees
+
         # Net paper PnL
         pnl["net_paper_pnl"] = (
             pnl["realized_pnl"]

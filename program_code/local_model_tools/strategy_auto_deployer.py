@@ -138,7 +138,9 @@ class StrategyAutoDeployer:
         allocated_usdt = base_usdt * score_mult
 
         # Divide by number of active symbols (portfolio balance)
-        active_count = max(1, len(set(d["symbol"] for d in self._deployed.values())) + 1)
+        # Include the symbol being deployed to correctly size allocation.
+        # / 包含即将部署的品种，正确计算仓位分配。
+        active_count = max(1, len(set(d["symbol"] for d in self._deployed.values()) | {symbol}))
         per_symbol_usdt = allocated_usdt / active_count
 
         # Clamp to limits
@@ -260,6 +262,20 @@ class StrategyAutoDeployer:
             "Auto-deployed %s for %s (score=%.0f): %s / 自动部署策略",
             category, symbol, opp.score, opp.reason,
         )
+
+    def notify_fill(self, strategy_name: str, fill: dict, is_open: bool) -> None:
+        """
+        Route a confirmed fill back to the originating strategy's on_fill callback.
+        This prevents position state drift caused by intent-first (optimistic) updates.
+        将已确认的成交路由回原始策略的 on_fill 回调，防止仓位状态因意图先行更新而漂移。
+        """
+        try:
+            with self._lock:
+                strategy = self._orch._strategies.get(strategy_name)
+            if strategy is not None:
+                strategy.on_fill(fill, is_open)
+        except Exception:
+            logger.debug("notify_fill error for %s (non-fatal)", strategy_name)
 
     def on_trade_result(self, strategy_name: str, close_pnl: float) -> None:
         """

@@ -311,6 +311,7 @@ class PipelineBridge:
                     if fills:
                         fill = fills[0]
                         fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
+                        is_open_fill = close_pnl == 0.0
                         if close_pnl != 0.0:
                             # Position closed — round-trip complete
                             # 持仓已关闭 — 一轮交易完成
@@ -319,6 +320,19 @@ class PipelineBridge:
                             # New position opened — start tracking
                             # 新持仓开仓 — 开始追踪
                             self._on_position_open(intent, fill_price)
+                        # Sync strategy position state via on_fill callback
+                        # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
+                        if self._auto_deployer:
+                            strategy_name = getattr(intent, "strategy_name", None)
+                            if strategy_name:
+                                fill_for_callback = {
+                                    "symbol": intent.symbol,
+                                    "side": intent.side,
+                                    "qty": intent.qty,
+                                    "price": fill_price,
+                                    "strategy_name": strategy_name,
+                                }
+                                self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
 
                 # Also submit to Bybit Demo if connector is available
                 # 同时提交到 Bybit Demo（如果连接器可用）

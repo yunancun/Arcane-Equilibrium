@@ -237,6 +237,19 @@ class StrategyBase(ABC):
         """
         pass  # Default: do nothing / 默认：不做任何事
 
+    def on_fill(self, fill: dict, is_open: bool) -> None:
+        """
+        Called when an order fill is confirmed for this strategy / 订单成交确认时调用
+
+        Override to sync internal position state with actual fills.
+        重写以将内部仓位状态与实际成交同步。
+
+        Args:
+          fill    — fill dict with keys: symbol, side, qty, price, strategy_name
+          is_open — True if this fill opened a new position, False if it closed one
+        """
+        pass  # Default: do nothing / 默认：不做任何事
+
     def get_pending_intents(self) -> list[OrderIntent]:
         """
         Get and clear pending order intents / 获取并清空待处理的订单意图

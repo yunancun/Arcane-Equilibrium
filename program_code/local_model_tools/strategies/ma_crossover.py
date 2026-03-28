@@ -161,6 +161,19 @@ class MACrossoverStrategy(StrategyBase):
                 self._trade_count += 1
                 self._last_trade_ts_ms = int(time.time() * 1000)
 
+    def on_fill(self, fill: dict, is_open: bool) -> None:
+        """
+        Sync internal position state from confirmed fill.
+        从已确认的成交同步内部仓位状态，防止意图态与实际仓位漂移。
+        """
+        if fill.get("symbol") != self._symbol:
+            return
+        with self._intent_lock:
+            if is_open:
+                self._current_position = "long" if fill.get("side") == "Buy" else "short"
+            else:
+                self._current_position = None
+
     def get_persistent_state(self) -> dict[str, Any]:
         base = super().get_persistent_state()
         base.update({
