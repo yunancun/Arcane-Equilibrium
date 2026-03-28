@@ -33,10 +33,10 @@
 
 ---
 
-## 三、当前系统状态（2026-03-28 Session 8）
+## 三、当前系统状态（2026-03-28 Session 9）
 
 ```
-测试：646 全通过（428 control_api + 218 local_model_tools）
+测试：664 全通过（428 control_api + 236 local_model_tools）
 路由：113 条
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
@@ -259,18 +259,19 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ 半天数据分析与策略修复（2026-03-28 Session 6）
   ✅ 系统全面审核 + 5项修复（2026-03-28 Session 7）
   ✅ A-J 全面功能审核 + E1/G1/H1 修复（2026-03-28 Session 8）
+  ✅ B2/G3/A2 三项 bug 修复 + 18 项验证测试（2026-03-28 Session 9）
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
   GUI 细节打磨（移动端适配 / 图表增强 / 实时 PnL 折线图）
 
 待处理问题（已记录，非紧急）：
-  - MACrossoverStrategy 双边持仓状态漂移（需 on_fill 回调）
+  - ✅ MACrossoverStrategy 双边持仓状态漂移 → 已修复（Session 9 A2: on_fill 链路）
+  - ✅ realized_pnl 毛利问题 → 已修复（Session 9 B2: net_realized_pnl 字段）
+  - ✅ StrategyAutoDeployer active_count +1 → 已修复（Session 9 G3: | {symbol}）
   - StopManager 与 RiskManager 双重止损（需统一 Stop 逻辑）
-  - realized_pnl 毛利问题（添加 net_realized_pnl 字段）
-  - StrategyAutoDeployer active_count +1（影响小）
   - Learning Cockpit GUI 数据展示（依赖 E1 数据积累后再完善）
-  - RiskManager daily loss 跨天不重置（影响小）
+  - RiskManager daily loss 跨天不重置（已验证有重置逻辑，影响极小）
 
 长期优化（自主交易 Agent 持续改进）：
   - 扫描器策略匹配优化：不只选 trend，根据市场状态平衡 funding_arb / grid / reversion
