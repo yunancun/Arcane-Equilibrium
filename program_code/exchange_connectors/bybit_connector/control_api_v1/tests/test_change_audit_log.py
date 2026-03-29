@@ -33,28 +33,21 @@ from app.change_audit_log import (
     ChangeApprovalStatus,
 )
 
+# Import shared fixtures from conftest
+from conftest import (
+    change_audit_log,
+    change_audit_log_with_callback as audit_log_with_callback,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Fixtures / 测试夹具
+# Test-Specific Fixtures / 测试特定夹具
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.fixture
-def audit_log():
-    """Create a fresh audit log for each test."""
-    log = ChangeAuditLog()
-    yield log
-
-
-@pytest.fixture
-def audit_log_with_callback():
-    """Create an audit log with callback tracking."""
-    callbacks = []
-
-    def callback(record: ChangeRecord):
-        callbacks.append(record)
-
-    log = ChangeAuditLog(audit_callback=callback)
-    return log, callbacks
+def audit_log(change_audit_log):
+    """Alias for change_audit_log for backward compatibility"""
+    return change_audit_log
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

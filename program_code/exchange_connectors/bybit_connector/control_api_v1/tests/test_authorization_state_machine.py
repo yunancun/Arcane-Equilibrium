@@ -38,54 +38,30 @@ from app.authorization_state_machine import (
     TRANSITION_RULES,
 )
 
+# Import shared fixtures and helpers from conftest
+from conftest import (
+    auth_state_machine as sm,
+    auth_sm_with_audit as sm_with_audit,
+    _create_draft_auth,
+    _activate_auth,
+    _make_active,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Fixtures
+# Test-Specific Fixtures / 测试特定夹具
 # ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture
-def sm():
-    """Fresh state machine instance / 全新状态机实例"""
-    return AuthorizationStateMachine()
-
-
-@pytest.fixture
-def sm_with_audit():
-    """State machine with audit callback / 带审计回调的状态机"""
-    records = []
-    machine = AuthorizationStateMachine(audit_callback=lambda r: records.append(r))
-    return machine, records
-
 
 @pytest.fixture
 def draft_auth(sm):
     """Create a DRAFT authorization / 创建 DRAFT 授权"""
-    return sm.create_draft(
-        title="Test Auth",
-        scope={"categories": ["linear"], "symbols": ["BTCUSDT"], "mode": "paper_only"},
-        created_by="test_operator",
-        description="Test authorization for unit tests",
-        expires_at_ms=int(time.time() * 1000) + 3600_000,  # 1 hour from now
-    )
+    return _create_draft_auth(sm, title="Test Auth")
 
 
 @pytest.fixture
 def active_auth(sm, draft_auth):
     """Create an ACTIVE authorization (draft → pending → active) / 创建 ACTIVE 授权"""
-    sm.submit_for_approval(draft_auth.authorization_id)
-    return sm.approve(draft_auth.authorization_id, approved_by="operator_1", reason="approved for testing")
-
-
-def _make_active(sm) -> AuthorizationObject:
-    """Helper: create and activate an authorization / 辅助：创建并激活授权"""
-    auth = sm.create_draft(
-        title="Helper Auth",
-        scope={"mode": "paper_only"},
-        created_by="test",
-    )
-    sm.submit_for_approval(auth.authorization_id)
-    sm.approve(auth.authorization_id, approved_by="operator_1")
-    return sm.get(auth.authorization_id)
+    return _activate_auth(sm, draft_auth)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

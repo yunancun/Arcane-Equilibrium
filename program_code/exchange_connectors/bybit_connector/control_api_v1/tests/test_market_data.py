@@ -45,34 +45,34 @@ from app.paper_trading_engine import (
     PaperTradingEngine,
 )
 
+# Import shared fixtures from conftest
+from conftest import (
+    tmp_state_file,
+    paper_engine,
+    active_paper_engine,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Fixtures / 测试夹具
+# Test-Specific Fixtures / 测试特定夹具
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.fixture
-def tmp_state_path():
-    """Create a temp file path for paper state / 创建临时状态文件路径"""
-    fd, path = tempfile.mkstemp(suffix=".json", prefix="test_paper_state_")
-    os.close(fd)
-    os.unlink(path)  # Let PaperStateStore create it
-    yield path
-    if os.path.exists(path):
-        os.unlink(path)
+def tmp_state_path(tmp_state_file):
+    """Alias for tmp_state_file for backward compatibility"""
+    return tmp_state_file
 
 
 @pytest.fixture
-def engine(tmp_state_path):
-    """Create a paper trading engine for testing / 创建测试用纸上交易引擎"""
-    store = PaperStateStore(tmp_state_path)
-    return PaperTradingEngine(store)
+def engine(paper_engine):
+    """Alias for paper_engine for backward compatibility"""
+    return paper_engine
 
 
 @pytest.fixture
-def active_engine(engine):
-    """Engine with an active session / 已启动 session 的引擎"""
-    engine.start_session(initial_balance=10000.0)
-    return engine
+def active_engine(active_paper_engine):
+    """Alias for active_paper_engine for backward compatibility"""
+    return active_paper_engine
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

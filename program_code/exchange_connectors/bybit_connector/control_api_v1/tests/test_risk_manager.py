@@ -32,33 +32,22 @@ from app.paper_trading_engine import (
     SIDE_SELL,
 )
 
+# Import shared fixtures from conftest
+from conftest import (
+    tmp_state_file,
+    risk_manager,
+    paper_engine_with_risk,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Fixtures
+# Test-Specific Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.fixture
-def tmp_state_file():
-    fd, path = tempfile.mkstemp(suffix=".json", prefix="risk_test_")
-    os.close(fd)
-    os.unlink(path)
-    yield path
-    if os.path.exists(path):
-        os.unlink(path)
-
-
-@pytest.fixture
-def risk_manager():
-    return RiskManager()
-
-
-@pytest.fixture
-def engine_with_risk(tmp_state_file):
-    store = PaperStateStore(tmp_state_file)
-    rm = RiskManager()
-    eng = PaperTradingEngine(store, risk_manager=rm)
-    eng.start_session(initial_balance=10000.0)
-    return eng, rm
+def engine_with_risk(paper_engine_with_risk):
+    """Alias for paper_engine_with_risk for backward compatibility"""
+    return paper_engine_with_risk
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -36,54 +36,32 @@ from app.audit_persistence import (
     wrap_audit_record,
 )
 
+# Import shared fixtures and helpers from conftest
+from conftest import (
+    tmp_audit_dir,
+    audit_file_writer as writer,
+    audit_file_reader as reader,
+    audit_pipeline as pipeline,
+    _sample_audit_record,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Fixtures
+# Test-Specific Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture
-def tmp_audit_dir():
-    """Temp directory for audit files / 临时审计目录"""
-    with tempfile.TemporaryDirectory(prefix="audit_test_") as d:
-        yield d
-
 
 @pytest.fixture
 def config(tmp_audit_dir):
+    """Audit persistence config for testing"""
     return AuditPersistenceConfig(
         base_dir=tmp_audit_dir,
         flush_after_write=True,
     )
 
 
-@pytest.fixture
-def writer(config):
-    w = AuditFileWriter(config)
-    yield w
-    w.close()
-
-
-@pytest.fixture
-def reader(tmp_audit_dir):
-    return AuditFileReader(base_dir=tmp_audit_dir)
-
-
-@pytest.fixture
-def pipeline(config):
-    p = AuditPipeline(config)
-    yield p
-    p.close()
-
-
 def _sample_record(event: str = "test_event") -> dict:
-    return {
-        "transition_id": f"tx:{os.urandom(6).hex()}",
-        "trigger_event": event,
-        "previous_status": "STATE_A",
-        "next_status": "STATE_B",
-        "initiated_by": "TestSuite",
-        "effective_at_ms": int(time.time() * 1000),
-    }
+    """Backward compatibility alias for _sample_audit_record"""
+    return _sample_audit_record(event)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
