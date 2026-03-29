@@ -148,13 +148,25 @@ async function autoScan(type) {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadOverview() {
-  const d = await ocApi('/api/v1/learning/overview');
-  if (!d || !d.data) return;
-  const o = d.data;
-  ocSetText('l-obs', o.observation_count || o.observations || 0);
-  ocSetText('l-lessons', o.lesson_count || o.lessons || 0);
-  ocSetText('l-hyp', o.hypothesis_count || o.hypotheses || 0);
-  ocSetText('l-exp', o.active_experiment_count || o.experiments || 0);
+  // Totals come from /learning/feed, active experiments from /learning/overview
+  const [feedD, ovD] = await Promise.allSettled([
+    ocApi('/api/v1/learning/feed'),
+    ocApi('/api/v1/learning/overview'),
+  ]);
+
+  if (feedD.status === 'fulfilled' && feedD.value && feedD.value.data) {
+    const totals = feedD.value.data.totals || {};
+    ocSetText('l-obs', totals.total_observations != null ? totals.total_observations : 0);
+    ocSetText('l-lessons', totals.total_lessons != null ? totals.total_lessons : 0);
+    ocSetText('l-hyp', totals.total_hypotheses != null ? totals.total_hypotheses : 0);
+  }
+
+  if (ovD.status === 'fulfilled' && ovD.value && ovD.value.data) {
+    const o = ovD.value.data;
+    const expCount = (o.experiments && o.experiments.active_experiment_count) ||
+                     o.active_experiment_count || 0;
+    ocSetText('l-exp', expCount);
+  }
 }
 
 async function loadReviewQueue() {
@@ -192,17 +204,37 @@ async function loadReviewQueue() {
 async function loadFeed() {
   const d = await ocApi('/api/v1/learning/feed');
   if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading">No feed data</div>'); return; }
-  const feed = d.data.items || d.data.feed || d.data || [];
-  if (!feed.length) { ocSetHtml('feed-body', '<div class="oc-loading">暂无学习动态 / No feed items</div>'); return; }
+
+  // API returns observations_recent and lessons_recent arrays
+  const observations = (d.data.observations_recent || []).map(o => ({ ...o, _feedType: 'observation' }));
+  const lessons = (d.data.lessons_recent || []).map(l => ({ ...l, _feedType: 'lesson' }));
+  const feed = [...observations, ...lessons];
+
+  const totals = d.data.totals || {};
+  const totalObs = totals.total_observations || 0;
+  const totalLessons = totals.total_lessons || 0;
+
+  if (!feed.length) {
+    ocSetHtml('feed-body',
+      '<div style="color:var(--text-dim);font-size:12px;padding:8px 0">' +
+      '暂无学习动态 / No feed items yet<br>' +
+      '<span style="font-size:11px">Total observations: ' + totalObs + ' | Total lessons: ' + totalLessons + '</span>' +
+      '</div>');
+    return;
+  }
 
   let html = '';
   feed.slice(0, 15).forEach(f => {
+    const typeLabel = f._feedType || f.observation_type || f.type || '--';
+    const ts = f.recorded_at || f.created_at || f.timestamp;
+    const detail = f.detail || f.outcome_summary || f.content || f.title || '--';
+    const symbol = f.symbol ? ' · ' + f.symbol : '';
     html += '<div style="padding:6px 0;border-bottom:1px solid #21262d;font-size:12px">';
     html += '<div style="display:flex;justify-content:space-between">';
-    html += '<span>' + ocChip(f.type || f.category || '--', 'info') + '</span>';
-    html += '<span style="color:var(--text-dim)">' + ocTimeShort(f.timestamp || f.created_at) + '</span>';
+    html += '<span>' + ocChip(typeLabel, f._feedType === 'lesson' ? 'good' : 'info') + ocEsc(symbol) + '</span>';
+    html += '<span style="color:var(--text-dim)">' + ocTimeShort(ts) + '</span>';
     html += '</div>';
-    html += '<div style="margin-top:4px;color:var(--text)">' + ocEsc(f.detail || f.content || f.title || '--') + '</div>';
+    html += '<div style="margin-top:4px;color:var(--text)">' + ocEsc(detail) + '</div>';
     html += '</div>';
   });
   ocSetHtml('feed-body', html);

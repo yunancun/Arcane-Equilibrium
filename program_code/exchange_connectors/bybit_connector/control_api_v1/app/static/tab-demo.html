@@ -46,6 +46,14 @@
     </div>
   </div>
 
+  <!-- Performance Metrics -->
+  <details class="oc-collapse">
+    <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
+    <div class="oc-collapse-body">
+      <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">Loading...</div></div>
+    </div>
+  </details>
+
   <!-- Comparison -->
   <details class="oc-collapse">
     <summary>&#x1F504; Paper vs Demo 对比 / Comparison</summary>
@@ -108,24 +116,9 @@ async function loadDemoStatus() {
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
     loadPositions();
+    loadDemoMetrics(balD.data);
     loadComparison();
     return;
-  }
-  // Fallback: check status endpoint
-  const d = await ocApi('/api/v1/strategy/demo/status');
-  if (d && d.data && Object.keys(d.data).length > 0) {
-    const status = d.data;
-    const connected = status.enabled || status.connected || status.is_configured;
-    if (connected) {
-      $('demo-badge').textContent = 'Connected';
-      $('demo-badge').className = 'oc-chip oc-chip-good';
-      $('demo-content').style.display = '';
-      $('demo-offline').style.display = 'none';
-      loadBalance();
-      loadPositions();
-      loadComparison();
-      return;
-    }
   }
   showOffline();
 }
@@ -221,11 +214,16 @@ async function loadComparison() {
   }
 
   const paperPnl = paper.pnl || {};
+  // Extract Bybit account data from nested format: { retCode, result: { list: [{ totalEquity, ... }] } }
+  let demoB = demo;
+  if (demo.result && demo.result.list && demo.result.list[0]) {
+    demoB = demo.result.list[0];
+  }
   const rows = [
-    ['Net PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(demo.realized_pnl || demo.total_realized_pnl)],
-    ['Unrealized PnL', ocMoney(paperPnl.unrealized_pnl), ocMoney(demo.unrealized_pnl || demo.total_unrealized_pnl)],
-    ['Position Count', paper.position_count || 0, (demo.positions || []).length || '?'],
-    ['Order Count', paper.order_count || 0, demo.order_count || '?'],
+    ['Net / Realized PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(parseFloat(demoB.totalRealizedPL || 0))],
+    ['Unrealized PnL', ocMoney(paperPnl.unrealized_pnl), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
+    ['Total Equity', '$' + ocNum(100000 + (paperPnl.net_paper_pnl || 0), 2), '$' + ocNum(parseFloat(demoB.totalEquity || 0), 2)],
+    ['Available Balance', '--', '$' + ocNum(parseFloat(demoB.availableBalance || 0), 2)],
   ];
 
   let html = '';
@@ -239,6 +237,36 @@ async function loadComparison() {
     html += '</tr>';
   });
   ocSetHtml('comparison-tbody', html);
+}
+
+function loadDemoMetrics(raw) {
+  let b = raw;
+  if (raw && raw.result && raw.result.list && raw.result.list[0]) {
+    b = raw.result.list[0];
+  }
+  if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">No data</div>'); return; }
+
+  const equity = parseFloat(b.totalEquity || 0);
+  const available = parseFloat(b.availableBalance || 0);
+  const marginUsed = parseFloat(b.totalInitialMargin || 0);
+  const unrealized = parseFloat(b.totalPerpUPL || 0);
+  const realized = parseFloat(b.totalRealizedPL || 0);
+  const imRate = parseFloat(b.accountIMRate || 0);
+
+  const items = [
+    ['Total Equity', '$' + ocNum(equity, 2)],
+    ['Available Balance', '$' + ocNum(available, 2)],
+    ['Margin Used', '$' + ocNum(marginUsed, 4)],
+    ['Margin Rate', (imRate * 100).toFixed(2) + '%'],
+    ['Unrealized PnL', ocMoney(unrealized)],
+    ['Realized PnL', ocMoney(realized)],
+  ];
+
+  let html = '';
+  items.forEach(([label, val]) => {
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + val + '</div></div>';
+  });
+  ocSetHtml('demo-perf-metrics', html);
 }
 
 async function loadAll() {

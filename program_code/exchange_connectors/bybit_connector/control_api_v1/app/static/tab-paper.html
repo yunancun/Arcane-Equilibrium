@@ -208,8 +208,10 @@ async function loadSession() {
   $('btn-resume').disabled = (state !== 'paused');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
 
-  // Balance
-  $('balance-val').textContent = '$' + ocNum(s.initial_balance || 100000, 0);
+  // Balance — show current_balance (updated by loadMetrics); fallback to initial
+  if (!$('balance-val').dataset.fromMetrics) {
+    $('balance-val').textContent = '$' + ocNum(s.initial_balance || 100000, 0);
+  }
 
   // PnL
   const pnl = d.data.pnl;
@@ -262,7 +264,7 @@ async function loadOrders() {
   const d = await ocApi('/api/v1/paper/orders');
   if (!d || !d.data) return;
   const orders = d.data.orders || d.data || [];
-  const active = orders.filter(o => o.state === 'new' || o.state === 'partially_filled' || o.state === 'open');
+  const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
     ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="7">暂无活跃订单 / No active orders</td></tr>');
     return;
@@ -298,7 +300,8 @@ async function loadFeed() {
   if (Object.keys(prices).length) {
     let html = '';
     Object.entries(prices).forEach(([sym, p]) => {
-      html += '<div class="feed-price"><span class="sym">' + ocEsc(sym) + '</span> <span class="price">$' + ocNum(p, 2) + '</span></div>';
+      const decimals = p < 0.01 ? 6 : p < 1 ? 4 : 2;
+      html += '<div class="feed-price"><span class="sym">' + ocEsc(sym) + '</span> <span class="price">$' + ocNum(p, decimals) + '</span></div>';
     });
     ocSetHtml('feed-prices', html);
   }
@@ -322,7 +325,7 @@ async function loadFills() {
   let html = '';
   fills.slice(0, 50).forEach(f => {
     html += '<tr>';
-    html += '<td>' + ocTimeShort(f.filled_at || f.timestamp) + '</td>';
+    html += '<td>' + ocTimeShort(f.ts_ms || f.filled_at || f.timestamp) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(f.side) + '</td>';
     html += '<td>' + ocNum(f.qty, 4) + '</td>';
@@ -361,6 +364,13 @@ async function loadMetrics() {
   });
   ocSetHtml('perf-metrics', '<div class="oc-metrics">' + html + '</div>');
   ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');
+
+  // Update current balance from metrics
+  if (dm.current_balance != null) {
+    const el = $('balance-val');
+    el.textContent = '$' + ocNum(dm.current_balance, 0);
+    el.dataset.fromMetrics = '1';
+  }
 }
 
 async function loadShadow() {
