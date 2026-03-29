@@ -168,6 +168,10 @@ app.include_router(risk_router)
 from .phase2_strategy_routes import phase2_router  # noqa: E402
 app.include_router(phase2_router)
 
+# ── Governance Hub Router / 治理集線器路由注册 ──
+from .governance_routes import governance_router  # noqa: E402
+app.include_router(governance_router)
+
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
 # Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789
 # 将 /openclaw/* 代理到 localhost:18789，远程客户端无需直接访问 18789 端口

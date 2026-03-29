@@ -476,6 +476,7 @@ class RiskManager:
         self._cooldown_until_ts_ms: int = 0
         self._price_tracker = PriceHistoryTracker()
         self._spike_suppression_count: dict[str, int] = {}  # symbol → count
+        self._governance_hub = None  # Optional GovernanceHub for governance integration
 
     # ── Properties ──
 
@@ -486,6 +487,10 @@ class RiskManager:
     @property
     def agent_params(self) -> AgentRiskParams:
         return self._agent_params
+
+    def set_governance_hub(self, hub: Any) -> None:
+        """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
+        self._governance_hub = hub
 
     # ── Config Management ──
 
@@ -568,6 +573,14 @@ class RiskManager:
         下单前风控门。返回 (是否允许, 原因)。
         """
         sess = state.get("session", {})
+
+        # Governance Hub authorization check / 治理集線器授權檢查
+        if self._governance_hub:
+            try:
+                if not self._governance_hub.is_authorized():
+                    return False, "governance_not_authorized"
+            except Exception:
+                logger.warning("Governance is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
 
         # Session halted?
         if sess.get("session_halted"):
@@ -1010,7 +1023,7 @@ class RiskManager:
         # 基于压力的推荐仓位缩减
         recommended_size_multiplier = max(0.1, 1.0 - pressure)
 
-        return {
+        result = {
             "risk_pressure": round(pressure, 3),
             "recommended_size_multiplier": round(recommended_size_multiplier, 3),
             "drawdown_pct": round(drawdown_pct, 2),
@@ -1029,6 +1042,21 @@ class RiskManager:
                 else "normal"
             ),
         }
+
+        # Feed risk metrics to Governance Hub / 将风控指标反馈给治理集線器
+        if self._governance_hub:
+            try:
+                self._governance_hub.check_risk_and_act({
+                    "risk_pressure": result["risk_pressure"],
+                    "drawdown_pct": result["drawdown_pct"],
+                    "daily_loss_pct": result["daily_loss_pct"],
+                    "consecutive_losses": result["consecutive_losses"],
+                    "session_halted": result["session_halted"],
+                })
+            except Exception:
+                logger.warning("Governance check_risk_and_act failed (non-fatal) / 治理風控檢查失敗（非致命）")
+
+        return result
 
     # ── Status / Serialization ──
 

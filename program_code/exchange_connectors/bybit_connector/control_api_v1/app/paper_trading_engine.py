@@ -18,6 +18,7 @@ MODULE_NOTE (English):
 import copy
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -25,6 +26,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -674,6 +677,7 @@ class PaperTradingEngine:
         self.store = store
         self.risk_manager = risk_manager  # Optional RiskManager for pre-order + tick checks
         self._partial_fill_rng = partial_fill_rng  # Pass random.Random(seed) for deterministic tests
+        self._governance_hub = None  # Optional GovernanceHub for governance integration
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -694,6 +698,10 @@ class PaperTradingEngine:
         # Cap audit trail at 500 entries
         if len(state["audit_trail"]) > 500:
             state["audit_trail"] = state["audit_trail"][-500:]
+
+    def set_governance_hub(self, hub: Any) -> None:
+        """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
+        self._governance_hub = hub
 
     # ── Session Management / Session 管理 ──
 
@@ -758,6 +766,15 @@ class PaperTradingEngine:
             sess["session_state"] = SESSION_COMPLETED
             sess["stopped_ts_ms"] = now_ms()
             self._audit(state, "session_stop", f"net_pnl={state['pnl']['net_paper_pnl']:.4f}")
+
+            # Governance Hub reconciliation / 治理集線器對賬
+            if self._governance_hub:
+                try:
+                    self._governance_hub.reconcile(state)
+                    self._audit(state, "governance_reconciliation", "session_stop reconciliation triggered")
+                except Exception:
+                    logger.warning("Governance reconciliation failed (non-fatal) / 對賬失敗（非致命）")
+
             if self.risk_manager:
                 state["risk"] = self.risk_manager.get_risk_state_for_persistence()
             return state
@@ -824,6 +841,20 @@ class PaperTradingEngine:
             # Transition: created → submitted
             _transition_order(order, ORDER_STATE_SUBMITTED)
 
+            # Governance Hub authorization check (H0 gate) / 治理集線器授權檢查（H0 门）
+            if self._governance_hub:
+                try:
+                    if not self._governance_hub.is_authorized():
+                        _transition_order(order, ORDER_STATE_REJECTED)
+                        order["reject_reason"] = "governance_not_authorized"
+                        state["orders"].append(order)
+                        result["order"] = order
+                        result["rejected_reason"] = "governance_not_authorized"
+                        self._audit(state, "order_governance_rejected", f"{symbol} {side} not authorized by governance")
+                        return state
+                except Exception:
+                    logger.warning("Governance hub is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
+
             # Risk manager pre-order check / 风控管理器下单前检查
             if self.risk_manager:
                 price_est = price or (market_prices or {}).get(symbol, 0)
@@ -872,6 +903,17 @@ class PaperTradingEngine:
             state["orders"].append(order)
             result["order"] = order
             self._audit(state, "order_submitted", f"{order['order_id']} {symbol} {side} {order_type} qty={qty}")
+
+            # Governance Hub lease acquisition / 治理集線器租約獲取
+            if self._governance_hub:
+                try:
+                    lease_id = self._governance_hub.acquire_lease(order["order_id"], scope={"symbol": symbol, "side": side})
+                    if lease_id:
+                        order["governance_lease_id"] = lease_id
+                        self._audit(state, "governance_lease_acquired", f"{order['order_id']} lease={lease_id}")
+                except Exception:
+                    import logging as _log
+                    _log.warning("Governance lease acquisition failed (non-fatal) / 租約獲取失敗（非致命）")
 
             # TIF enforcement for limit orders / 限价单 TIF 执行
             # PostOnly: reject if order would fill immediately (guarantees maker fee)
@@ -937,6 +979,15 @@ class PaperTradingEngine:
                 fill_record = execute_fill(order, qty, fill_price, fee)
                 state["fills"].append(fill_record)
                 result["fills"].append(fill_record)
+
+                # Governance Hub lease release / 治理集線器租約釋放
+                if self._governance_hub and "governance_lease_id" in order:
+                    try:
+                        self._governance_hub.release_lease(order["governance_lease_id"], consumed=True)
+                        self._audit(state, "governance_lease_released", f"{order['order_id']} consumed=true")
+                    except Exception:
+                        import logging as _log
+                        _log.warning("Governance lease release failed (non-fatal) / 租約釋放失敗（非致命）")
 
                 # Update position
                 _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)

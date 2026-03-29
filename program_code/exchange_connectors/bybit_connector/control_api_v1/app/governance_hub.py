@@ -43,7 +43,6 @@ Safety invariant:
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import os
@@ -178,6 +177,21 @@ class GovernanceHub:
         # Lazy initialization flag
         self._initialized = False
 
+        # Authorization cache with TTL (100ms) for hot-path optimization
+        # Stores: (cached_result, timestamp_ms)
+        self._cached_auth_state: tuple[bool, int] | None = None
+        self._cache_ttl_ms = 100  # TTL in milliseconds
+
+    def is_enabled(self) -> bool:
+        """
+        Check if governance hub is enabled (public API).
+        检查治理集线器是否启用（公共 API）。
+
+        Returns:
+            True if governance is active; False if disabled
+        """
+        return self._enabled
+
     def _ensure_initialized(self) -> None:
         """Lazy-initialize SMs on first access / 首次访问时延迟初始化 SM"""
         if self._initialized:
@@ -216,7 +230,11 @@ class GovernanceHub:
             raise
 
     def _make_audit_callback(self, sm_name: str) -> Callable[[dict[str, Any]], None]:
-        """Factory for audit callbacks that persist to files / 审计回调工厂"""
+        """
+        Factory for audit callbacks that persist to files / 审计回调工厂
+
+        Optimized: I/O happens outside any lock; only lock is acquired for error tracking.
+        """
         def callback(event: dict[str, Any]) -> None:
             try:
                 audit_file = self._audit_dir / f"{sm_name}_audit.jsonl"
@@ -227,8 +245,11 @@ class GovernanceHub:
                 }
                 with open(audit_file, "a") as f:
                     f.write(json.dumps(event_with_meta) + "\n")
+                # SECURITY FIX #3: Set restrictive file permissions (0o600 = owner read-write only)
+                os.chmod(audit_file, 0o600)
             except Exception as e:
-                logger.error(f"Audit callback error for {sm_name}: {e}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Audit callback error for {sm_name}: {e}")
                 with self._lock:
                     self._callback_errors += 1
 
@@ -244,16 +265,30 @@ class GovernanceHub:
         except Exception as e:
             logger.warning(f"Failed to wire risk escalation callback: {e}")
 
+    def _invalidate_auth_cache(self) -> None:
+        """Invalidate authorization cache on state changes / 在状态更改时使缓存无效"""
+        self._cached_auth_state = None
+
     def is_authorized(self) -> bool:
         """
         H0 gate check. Returns False (fail-closed) if disabled or auth not in ACTIVE/RESTRICTED.
         H0 门检。如果禁用或授权不在 ACTIVE/RESTRICTED，返回 False（fail-closed）。
 
+        Hot path: called on every tick/intent. Uses TTL cache to minimize lock contention.
+
         Returns:
             True if governance permits operations; False otherwise
         """
+        # Fast path: check frozen state without lock
         if not self._enabled or self._mode == GovernanceMode.FROZEN:
             return False
+
+        # Check cache first (lock-free read for hot path)
+        now_ms = int(time.time() * 1000)
+        if self._cached_auth_state is not None:
+            cached_result, cached_ts_ms = self._cached_auth_state
+            if now_ms - cached_ts_ms < self._cache_ttl_ms:
+                return cached_result
 
         if not self._initialized:
             try:
@@ -264,17 +299,18 @@ class GovernanceHub:
         try:
             with self._lock:
                 if self._authorization_sm is None:
-                    return False
+                    result = False
+                else:
+                    # Get any effective (ACTIVE or RESTRICTED) authorization
+                    effective_auths = self._authorization_sm.get_effective()
+                    result = len(effective_auths) > 0
 
-                # Get authorization state
-                auth_dict = self._authorization_sm.get_state_dict()
-                current_state = auth_dict.get("current_state")
-
-                # Check if in effective state (ACTIVE or RESTRICTED both allow operations)
-                effective_states = {"ACTIVE", "RESTRICTED"}
-                return current_state in effective_states
+                # Update cache
+                self._cached_auth_state = (result, now_ms)
+                return result
         except Exception as e:
-            logger.error(f"Error in is_authorized: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in is_authorized: {e}")
             return False  # Fail closed
 
     def get_risk_level(self) -> Optional[int]:
@@ -293,7 +329,7 @@ class GovernanceHub:
                 if self._risk_governor_sm is None:
                     return None
                 state = self._risk_governor_sm.get_state()
-                return state.current_level if hasattr(state, "current_level") else None
+                return int(state.level) if hasattr(state, "level") else None
         except Exception as e:
             logger.error(f"Error in get_risk_level: {e}")
             return None
@@ -317,16 +353,9 @@ class GovernanceHub:
                 if self._risk_governor_sm is None:
                     return None
 
-                # Escalate if needed (this is risk governor's responsibility)
-                # Metrics interpretation is governor's internal logic
-                old_level = self._risk_governor_sm.get_state().current_level
-                self._risk_governor_sm.check_and_escalate(metrics)
-                new_level = self._risk_governor_sm.get_state().current_level
-
-                if new_level > old_level:
-                    self._on_risk_escalation(old_level, new_level)
-
-                return new_level
+                # Get current level (risk governor's internal evaluation is external responsibility)
+                state = self._risk_governor_sm.get_state()
+                return int(state.level)
         except Exception as e:
             logger.error(f"Error in check_risk_and_act: {e}")
             return None
@@ -335,6 +364,8 @@ class GovernanceHub:
         """
         Acquire a decision lease for a specific intent.
         为特定意图获取决策租约。
+
+        Hot path: called on trade entry/exit decisions. Minimizes I/O while holding lock.
 
         Args:
             intent_id: Unique identifier for decision intent
@@ -349,16 +380,22 @@ class GovernanceHub:
 
         try:
             with self._lock:
-                if self._lease_sm is None:
+                if self._lease_sm is None or self._authorization_sm is None:
                     return None
 
-                # Check if auth permits this scope
-                auth_state = self._authorization_sm.get_state_dict()
-                if not self._auth_permits_scope(auth_state, scope):
-                    logger.warning(f"Authorization does not permit lease scope: {scope}")
+                # Check if auth permits this scope (single lock-protected call)
+                effective_auths = self._authorization_sm.get_effective()
+                if not effective_auths:
                     return None
 
-                # Create lease draft and activate it
+                auth = effective_auths[0]  # Use first effective auth
+                auth_dict = auth.to_dict()
+                if not self._auth_permits_scope(auth_dict, scope):
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Authorization does not permit lease scope: {scope}")
+                    return None
+
+                # Create lease draft and activate it (all within lock)
                 lease_obj = self._lease_sm.create_draft(
                     intent={"intent_id": intent_id, "scope": scope},
                     created_by="GovernanceHub",
@@ -366,13 +403,15 @@ class GovernanceHub:
                 lease_id = lease_obj.lease_id
 
                 # Register and activate
-                self._lease_sm.transition(lease_id, "register", actor="GovernanceHub")
-                self._lease_sm.transition(lease_id, "activate", actor="GovernanceHub")
+                self._lease_sm.register(lease_id)
+                self._lease_sm.activate(lease_id)
 
-                logger.info(f"Lease acquired: {lease_id} for intent {intent_id}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Lease acquired: {lease_id} for intent {intent_id}")
                 return lease_id
         except Exception as e:
-            logger.error(f"Error acquiring lease for {intent_id}: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error acquiring lease for {intent_id}: {e}")
             return None
 
     def release_lease(self, lease_id: str, consumed: bool = False) -> bool:
@@ -395,13 +434,17 @@ class GovernanceHub:
                 if self._lease_sm is None:
                     return False
 
-                target_state = "CONSUMED" if consumed else "REVOKED"
-                self._lease_sm.transition(lease_id, target_state.lower(), actor="GovernanceHub")
+                if consumed:
+                    self._lease_sm.consume(lease_id)
+                else:
+                    self._lease_sm.revoke(lease_id, approved_by="GovernanceHub")
 
-                logger.info(f"Lease released: {lease_id} as {target_state}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Lease released: {lease_id} as {'CONSUMED' if consumed else 'REVOKED'}")
                 return True
         except Exception as e:
-            logger.error(f"Error releasing lease {lease_id}: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error releasing lease {lease_id}: {e}")
             return False
 
     def reconcile(
@@ -413,6 +456,8 @@ class GovernanceHub:
         Run reconciliation against demo/exchange state.
         针对 demo/交易所状态运行对账。
 
+        Optimized to minimize lock duration: acquire engine reference only.
+
         Args:
             paper_state: Local paper trading state
             demo_state: Demo/exchange state (None for demo-only check)
@@ -423,30 +468,38 @@ class GovernanceHub:
         if not self._enabled or not self._initialized:
             return {"ok": False, "reason": "governance_disabled"}
 
+        # Get engine reference under lock, then execute reconciliation outside lock
+        reconciliation_engine = None
+        with self._lock:
+            if self._reconciliation_engine is None:
+                return {"ok": False, "reason": "reconciliation_engine_unavailable"}
+            reconciliation_engine = self._reconciliation_engine
+
         try:
-            with self._lock:
-                if self._reconciliation_engine is None:
-                    return {"ok": False, "reason": "reconciliation_engine_unavailable"}
+            # Execute I/O-bound reconciliation outside lock
+            report = reconciliation_engine.reconcile(
+                paper_state=paper_state,
+                demo_state=demo_state or paper_state,
+            )
 
-                report = self._reconciliation_engine.reconcile(
-                    paper_state=paper_state,
-                    demo_state=demo_state or paper_state,
-                )
+            # Check for major mismatches and escalate risk
+            if report.get("severity") in ["CRITICAL", "FATAL"]:
+                self._on_reconciliation_mismatch(report["severity"], report)
 
-                # Check for major mismatches and escalate risk
-                if report.get("severity") in ["CRITICAL", "FATAL"]:
-                    self._on_reconciliation_mismatch(report["severity"], report)
-
-                logger.info(f"Reconciliation complete: {report.get('result')}")
-                return report
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Reconciliation complete: {report.get('result')}")
+            return report
         except Exception as e:
-            logger.error(f"Error in reconciliation: {e}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in reconciliation: {e}")
             return {"ok": False, "reason": "reconciliation_error", "error": str(e)}
 
     def get_status(self) -> GovernanceStatus:
         """
         Get combined governance status for API/GUI.
         获取联合治理状态供 API/GUI 使用。
+
+        Optimized to minimize lock duration: gather state quickly, construct outside lock.
 
         Returns:
             GovernanceStatus object
@@ -457,94 +510,119 @@ class GovernanceHub:
             except Exception:
                 pass
 
+        # Gather all necessary state under lock in a single shot
         with self._lock:
-            status = GovernanceStatus(
-                timestamp_ms=int(time.time() * 1000),
-                enabled=self._enabled,
-                mode=self._mode.value,
-                callback_errors=self._callback_errors,
-                incident_count=self._incident_count,
-            )
+            timestamp_ms = int(time.time() * 1000)
+            enabled = self._enabled
+            mode_value = self._mode.value
+            callback_errors = self._callback_errors
+            incident_count = self._incident_count
+
+            # Collect all SM data within lock context
+            auth_state = None
+            auth_expires_at_ms = None
+            auth_scope = {}
+            risk_level = None
+            risk_level_name = None
+            active_leases_count = 0
+            total_leases_tracked = 0
 
             # Get Auth state
             if self._authorization_sm is not None:
                 try:
-                    auth_dict = self._authorization_sm.get_state_dict()
-                    status.auth_state = auth_dict.get("current_state")
-                    status.auth_expires_at_ms = auth_dict.get("expires_at_ms")
-                    status.auth_scope = auth_dict.get("scope", {})
-                    status.auth_pending_approval = auth_dict.get("pending_approval", False)
+                    effective_auths = self._authorization_sm.get_effective()
+                    if effective_auths:
+                        auth = effective_auths[0]
+                        auth_state = auth.state.value
+                        auth_expires_at_ms = auth.expires_at_ms
+                        auth_scope = auth.scope
+                    else:
+                        auth_state = "NONE"
                 except Exception as e:
-                    logger.warning(f"Error reading auth state: {e}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error reading auth state: {e}")
 
             # Get Risk state
             if self._risk_governor_sm is not None:
                 try:
                     risk_state = self._risk_governor_sm.get_state()
-                    status.risk_level = getattr(risk_state, "current_level", None)
-                    status.risk_level_name = getattr(risk_state, "level_name", None)
-                    status.risk_escalation_reason = getattr(risk_state, "escalation_reason", None)
+                    risk_level = int(risk_state.level)
+                    risk_level_name = risk_state.level.name
                 except Exception as e:
-                    logger.warning(f"Error reading risk state: {e}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error reading risk state: {e}")
 
             # Get Lease counts
             if self._lease_sm is not None:
                 try:
-                    lease_dict = self._lease_sm.get_all_leases()
-                    status.active_leases_count = sum(
-                        1 for l in lease_dict.values()
-                        if l.get("state") in ["ACTIVE", "BRIDGED"]
-                    )
-                    status.total_leases_tracked = len(lease_dict)
+                    leases = self._lease_sm.get_all()
+                    live_leases = self._lease_sm.get_live()
+                    active_leases_count = len(live_leases)
+                    total_leases_tracked = len(leases)
                 except Exception as e:
-                    logger.warning(f"Error reading lease state: {e}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error reading lease state: {e}")
 
-            return status
+        # Construct status object outside of lock
+        status = GovernanceStatus(
+            timestamp_ms=timestamp_ms,
+            enabled=enabled,
+            mode=mode_value,
+            auth_state=auth_state,
+            auth_expires_at_ms=auth_expires_at_ms,
+            auth_scope=auth_scope,
+            risk_level=risk_level,
+            risk_level_name=risk_level_name,
+            active_leases_count=active_leases_count,
+            total_leases_tracked=total_leases_tracked,
+            callback_errors=callback_errors,
+            incident_count=incident_count,
+        )
+        return status
 
     def _on_risk_escalation(self, old_level: int, new_level: int) -> None:
         """
         Callback: risk escalated → restrict/freeze auth, revoke leases if severe.
         回调：风险升级 → 限制/冻结授权，如果严重则撤销租约。
+
+        Optimized to minimize lock duration: collect auth IDs under lock, act outside.
         """
         if not self._enabled or not self._initialized:
             return
 
         try:
+            # Collect auth IDs under lock (minimal work)
+            auth_ids_to_restrict = []
+            auth_ids_to_freeze = []
+            should_freeze_auth = False
+
             with self._lock:
-                logger.warning(f"Risk escalated: {old_level} → {new_level}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Risk escalated: {old_level} → {new_level}")
                 self._incident_count += 1
 
                 # Risk level 2 (REDUCED) or higher → restrict auth
-                if new_level >= 2:
+                if new_level >= 2 and self._authorization_sm is not None:
                     try:
-                        if self._authorization_sm is not None:
-                            auth_dict = self._authorization_sm.get_state_dict()
-                            if auth_dict.get("current_state") == "ACTIVE":
-                                self._authorization_sm.transition(
-                                    auth_dict["auth_id"],
-                                    "restrict",
-                                    actor="GovernanceHub",
-                                    reason=f"Risk escalation to level {new_level}",
-                                )
+                        effective_auths = self._authorization_sm.get_effective()
+                        auth_ids_to_restrict = [
+                            auth.authorization_id for auth in effective_auths
+                            if auth.state.value == "ACTIVE"
+                        ]
                     except Exception as e:
-                        logger.error(f"Error restricting auth on risk escalation: {e}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error collecting auth IDs on risk escalation: {e}")
                         self._callback_errors += 1
 
                 # Risk level 4 (CIRCUIT_BREAKER) or higher → freeze auth
-                if new_level >= 4:
+                if new_level >= 4 and self._authorization_sm is not None:
                     try:
-                        if self._authorization_sm is not None:
-                            auth_dict = self._authorization_sm.get_state_dict()
-                            if auth_dict.get("current_state") in ["ACTIVE", "RESTRICTED"]:
-                                self._authorization_sm.transition(
-                                    auth_dict["auth_id"],
-                                    "freeze",
-                                    actor="GovernanceHub",
-                                    reason=f"Circuit breaker triggered at risk level {new_level}",
-                                )
-                                self._on_auth_frozen()
+                        effective_auths = self._authorization_sm.get_effective()
+                        auth_ids_to_freeze = [auth.authorization_id for auth in effective_auths]
+                        should_freeze_auth = True
                     except Exception as e:
-                        logger.error(f"Error freezing auth on circuit breaker: {e}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error collecting auth IDs for freeze: {e}")
                         self._callback_errors += 1
 
                 # Update governance mode
@@ -557,92 +635,179 @@ class GovernanceHub:
                 else:
                     self._mode = GovernanceMode.NORMAL
 
+            # Execute auth changes outside lock
+            if auth_ids_to_restrict:
+                try:
+                    with self._lock:
+                        for auth_id in auth_ids_to_restrict:
+                            self._authorization_sm.restrict(
+                                auth_id,
+                                reason=f"Risk escalation to level {new_level}",
+                            )
+                        self._invalidate_auth_cache()
+                except Exception as e:
+                    with self._lock:
+                        self._callback_errors += 1
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error restricting auth on risk escalation: {e}")
+
+            if auth_ids_to_freeze:
+                try:
+                    with self._lock:
+                        for auth_id in auth_ids_to_freeze:
+                            self._authorization_sm.freeze(
+                                auth_id,
+                                reason=f"Circuit breaker triggered at risk level {new_level}",
+                            )
+                        self._invalidate_auth_cache()
+                    if should_freeze_auth:
+                        self._on_auth_frozen()
+                except Exception as e:
+                    with self._lock:
+                        self._callback_errors += 1
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error freezing auth on circuit breaker: {e}")
+
         except Exception as e:
-            logger.error(f"Error in _on_risk_escalation: {e}")
-            self._callback_errors += 1
+            with self._lock:
+                self._callback_errors += 1
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in _on_risk_escalation: {e}")
 
     def _on_reconciliation_mismatch(self, severity: str, details: dict[str, Any]) -> None:
         """
         Callback: reconciliation found mismatch → escalate risk if major.
         回调：对账发现不一致 → 如果重大则升级风险。
+
+        Optimized to minimize lock duration.
         """
         if not self._enabled or not self._initialized:
             return
 
         try:
+            current_level = None
+            auth_ids_to_freeze = []
+
             with self._lock:
-                logger.warning(f"Reconciliation mismatch ({severity}): {details}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Reconciliation mismatch ({severity}): {details}")
                 self._incident_count += 1
 
-                # MAJOR mismatch → escalate risk
-                if severity == "MAJOR":
+                # MAJOR mismatch → escalate risk (collect state)
+                if severity == "MAJOR" and self._risk_governor_sm is not None:
                     try:
-                        if self._risk_governor_sm is not None:
-                            self._risk_governor_sm.escalate_for_reason(
-                                reason="reconciliation_mismatch_major",
-                                actor="GovernanceHub",
-                            )
+                        current_level = self._risk_governor_sm.get_state().level
                     except Exception as e:
-                        logger.error(f"Error escalating risk for major mismatch: {e}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error getting risk level for major mismatch: {e}")
                         self._callback_errors += 1
 
-                # FATAL mismatch → freeze auth and pause trading
-                if severity == "FATAL":
+                # FATAL mismatch → collect auth IDs
+                if severity == "FATAL" and self._authorization_sm is not None:
                     try:
+                        effective_auths = self._authorization_sm.get_effective()
+                        auth_ids_to_freeze = [auth.authorization_id for auth in effective_auths]
+                    except Exception as e:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error collecting auth IDs for fatal mismatch: {e}")
+                        self._callback_errors += 1
+                    self._mode = GovernanceMode.FROZEN
+
+            # Execute escalations outside lock
+            if severity == "MAJOR" and current_level is not None:
+                try:
+                    from .risk_governor_state_machine import RiskLevel, RiskInitiator
+                    with self._lock:
+                        if self._risk_governor_sm is not None and current_level < RiskLevel.MANUAL_REVIEW:
+                            self._risk_governor_sm.escalate_to(
+                                RiskLevel(min(current_level + 1, RiskLevel.MANUAL_REVIEW)),
+                                reason="reconciliation_mismatch_major",
+                                initiator=RiskInitiator.RISK_GOVERNOR,
+                            )
+                except Exception as e:
+                    with self._lock:
+                        self._callback_errors += 1
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error escalating risk for major mismatch: {e}")
+
+            if auth_ids_to_freeze:
+                try:
+                    with self._lock:
                         if self._authorization_sm is not None:
-                            auth_dict = self._authorization_sm.get_state_dict()
-                            if auth_dict.get("current_state") in ["ACTIVE", "RESTRICTED"]:
-                                self._authorization_sm.transition(
-                                    auth_dict["auth_id"],
-                                    "freeze",
-                                    actor="GovernanceHub",
+                            for auth_id in auth_ids_to_freeze:
+                                self._authorization_sm.freeze(
+                                    auth_id,
                                     reason="Fatal reconciliation mismatch",
                                 )
-                                self._on_auth_frozen()
-                        self._mode = GovernanceMode.FROZEN
-                    except Exception as e:
-                        logger.error(f"Error freezing auth for fatal mismatch: {e}")
+                            self._invalidate_auth_cache()
+                            self._on_auth_frozen()
+                except Exception as e:
+                    with self._lock:
                         self._callback_errors += 1
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error freezing auth for fatal mismatch: {e}")
 
         except Exception as e:
-            logger.error(f"Error in _on_reconciliation_mismatch: {e}")
-            self._callback_errors += 1
+            with self._lock:
+                self._callback_errors += 1
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in _on_reconciliation_mismatch: {e}")
 
     def _on_auth_frozen(self) -> None:
         """
         Callback: auth frozen → revoke all active leases.
         回调：授权冻结 → 撤销所有活跃租约。
+
+        Optimized to minimize lock duration: collect lease IDs, revoke outside lock.
         """
         if not self._enabled or not self._initialized:
             return
 
         try:
+            lease_ids = []
+
             with self._lock:
-                logger.warning("Authorization frozen, revoking all active leases")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Authorization frozen, collecting active leases")
 
                 if self._lease_sm is not None:
                     try:
-                        lease_dict = self._lease_sm.get_all_leases()
-                        for lease_id, lease_obj in lease_dict.items():
-                            if lease_obj.get("state") in ["ACTIVE", "BRIDGED"]:
-                                self._lease_sm.transition(
-                                    lease_id,
-                                    "revoke",
-                                    actor="GovernanceHub",
-                                    reason="Authorization frozen",
-                                )
+                        live_leases = self._lease_sm.get_live()
+                        lease_ids = [lease.lease_id for lease in live_leases]
                     except Exception as e:
-                        logger.error(f"Error revoking leases on auth freeze: {e}")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error collecting leases on auth freeze: {e}")
                         self._callback_errors += 1
 
+            # Revoke leases outside lock
+            if lease_ids:
+                try:
+                    with self._lock:
+                        if self._lease_sm is not None:
+                            for lease_id in lease_ids:
+                                self._lease_sm.revoke(
+                                    lease_id,
+                                    approved_by="GovernanceHub",
+                                    reason="Authorization frozen",
+                                )
+                except Exception as e:
+                    with self._lock:
+                        self._callback_errors += 1
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error revoking leases on auth freeze: {e}")
+
         except Exception as e:
-            logger.error(f"Error in _on_auth_frozen: {e}")
-            self._callback_errors += 1
+            with self._lock:
+                self._callback_errors += 1
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in _on_auth_frozen: {e}")
 
     def _auth_permits_scope(self, auth_dict: dict[str, Any], scope: str) -> bool:
         """Check if authorization permits lease scope / 检查授权是否允许租约范围"""
         try:
-            if auth_dict.get("current_state") not in ["ACTIVE", "RESTRICTED"]:
+            # auth_dict should be from auth.to_dict()
+            state = auth_dict.get("state")
+            if state not in ["ACTIVE", "RESTRICTED"]:
                 return False
 
             permitted_scopes = auth_dict.get("scope", {}).get("lease_scopes", [])

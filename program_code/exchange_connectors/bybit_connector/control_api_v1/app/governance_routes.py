@@ -34,6 +34,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+import html
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,23 @@ governance_router = APIRouter(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _get_governance_hub():
-    """Lazy import to avoid circular dependency / 延迟导入避免循环依赖"""
+    """
+    Lazy import to avoid circular dependency / 延迟导入避免循环依赖
+
+    Tries to get GOV_HUB from paper_trading_routes module (the primary source).
+    Falls back gracefully if unavailable.
+    """
     try:
-        # Try to get from module-level singleton (populate in main app init)
-        from . import _GOVERNANCE_HUB
-        return _GOVERNANCE_HUB
+        # Primary source: paper_trading_routes.GOV_HUB
+        from .paper_trading_routes import GOV_HUB
+        return GOV_HUB
     except ImportError:
-        return None
+        try:
+            # Fallback: try module-level singleton (if explicitly exported)
+            from . import _GOVERNANCE_HUB
+            return _GOVERNANCE_HUB
+        except ImportError:
+            return None
 
 
 def _get_auth_actor():
@@ -68,11 +79,35 @@ def _get_auth_actor():
         from . import main_legacy as base
         return base.current_actor
     except ImportError:
-        # Fallback if main_legacy not available
-        from fastapi import Depends
-        async def dummy_actor():
-            return {"user": "system"}
-        return dummy_actor
+        # SECURITY FIX #1: Fail explicitly if auth system unavailable (not fallback to "system")
+        raise HTTPException(status_code=503, detail="Authentication system unavailable")
+
+
+def _require_operator_role(actor: Any) -> None:
+    """SECURITY FIX #1: Validate that actor has Operator role / 验证 actor 具有 Operator 角色"""
+    if not actor:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    # Check if actor has operator_role or is_operator flag
+    is_operator = (
+        actor.get("operator_role") == "Operator" or
+        actor.get("is_operator") is True or
+        actor.get("role") == "operator"
+    )
+
+    if not is_operator:
+        logger.warning(f"Non-operator attempted privileged operation: {actor.get('user', 'unknown')}")
+        raise HTTPException(status_code=403, detail="Operator role required")
+
+
+def _sanitize_string(s: str, max_len: int = 500) -> str:
+    """SECURITY FIX #4: Sanitize user input to prevent injection / 清理用户输入防止注入"""
+    if not isinstance(s, str):
+        raise ValueError("Input must be string")
+    # Limit length
+    s = s[:max_len]
+    # HTML-escape for safe logging/display
+    return html.escape(s, quote=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -196,6 +231,12 @@ def approve_authorization(
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        # SECURITY FIX #4: Sanitize approval note
+        sanitized_note = _sanitize_string(body.approval_note, max_len=500)
+
         # Get current auth state and approve pending
         status = hub.get_status()
         if not status.auth_pending_approval:
@@ -205,21 +246,38 @@ def approve_authorization(
                 status_code=400
             )
 
-        # Note: actual approval logic would call hub._authorization_sm.approve()
-        # For now, we return success indicating the operator intent
-        logger.info(f"Authorization approval request from {actor}: {body.approval_note}")
+        # SECURITY FIX #8: Actually call hub._authorization_sm.approve() to approve pending
+        if hub._authorization_sm:
+            try:
+                all_auths = hub._authorization_sm.list_all()
+                pending_auth = next(
+                    (a for a in all_auths if a.state.value == "PENDING_APPROVAL"),
+                    None
+                )
+                if pending_auth:
+                    hub._authorization_sm.approve(pending_auth.authorization_id, approved_by=actor.get("user", "unknown"))
+                    logger.info(f"Authorization approved by {actor.get('user', 'unknown')}: {sanitized_note}")
+                else:
+                    return GovernanceResponse.error("No pending authorization found", code="not_found", status_code=404)
+            except Exception as e:
+                logger.error(f"Error calling approval method: {e}")
+                # SECURITY FIX #6: Generic error to client, full details logged server-side
+                raise HTTPException(status_code=500, detail="Failed to process approval")
 
         return GovernanceResponse.success(
             data={
                 "status": "approval_recorded",
-                "note": body.approval_note,
+                "note": sanitized_note,
                 "next_state": "ACTIVE",
             },
             message="authorization_approved"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error approving authorization: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error approving authorization: {e}", exc_info=True)
+        # SECURITY FIX #6: Return generic error message
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/risk/level")
@@ -283,6 +341,12 @@ def override_risk_level(
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        # SECURITY FIX #4: Sanitize reason
+        sanitized_reason = _sanitize_string(body.reason, max_len=500)
+
         status = hub.get_status()
         current_level = status.risk_level or 0
 
@@ -311,21 +375,36 @@ def override_risk_level(
                 status_code=403
             )
 
-        logger.warning(f"Risk override request from {actor}: {current_level} → {target_level}, reason: {body.reason}")
+        # SECURITY FIX #9: Actually apply the de-escalation if risk governor supports it
+        if hub._risk_governor_sm:
+            try:
+                from .risk_governor_state_machine import RiskLevel, RiskInitiator
+                hub._risk_governor_sm.escalate_to(
+                    RiskLevel(target_level),
+                    reason=sanitized_reason,
+                    initiator=RiskInitiator.OPERATOR,
+                )
+                logger.warning(f"Risk override applied by {actor.get('user', 'unknown')}: {current_level} → {target_level}, reason: {sanitized_reason}")
+            except Exception as e:
+                logger.error(f"Error applying risk de-escalation: {e}")
+                # SECURITY FIX #6: Return generic error to client
+                raise HTTPException(status_code=500, detail="Failed to apply risk override")
 
         return GovernanceResponse.success(
             data={
-                "status": "override_recorded",
+                "status": "override_applied",
                 "current_level": current_level,
                 "target_level": target_level,
-                "reason": body.reason,
-                "requires_confirmation": True,
+                "reason": sanitized_reason,
             },
-            message="risk_override_requested"
+            message="risk_override_applied"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in risk override: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in risk override: {e}", exc_info=True)
+        # SECURITY FIX #6: Return generic error message
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/reconcile")
@@ -343,7 +422,7 @@ def trigger_manual_reconciliation(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:

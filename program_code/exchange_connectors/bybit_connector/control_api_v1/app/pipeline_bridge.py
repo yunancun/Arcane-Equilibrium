@@ -75,6 +75,7 @@ class PipelineBridge:
         self._lock = threading.Lock()
         self._telegram = None  # Set externally if available
         self._demo_connector = None  # Set externally if available
+        self._governance_hub = None  # Set externally for governance integration
 
         self._stats = {
             "ticks_received": 0,
@@ -120,6 +121,10 @@ class PipelineBridge:
     def set_demo_connector(self, connector: Any) -> None:
         """Set Bybit Demo connector for dual execution / 设置 Bybit Demo 连接器"""
         self._demo_connector = connector
+
+    def set_governance_hub(self, hub: Any) -> None:
+        """Set GovernanceHub for governance state machine integration / 设置治理集線器"""
+        self._governance_hub = hub
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -270,6 +275,20 @@ class PipelineBridge:
 
         for intent in intents:
             try:
+                # Governance Hub authorization check / 治理集線器授權檢查
+                if self._governance_hub:
+                    try:
+                        if not self._governance_hub.is_authorized():
+                            logger.info(
+                                "Intent rejected by governance: %s %s (not authorized) / 意图被治理拒絕",
+                                intent.symbol, intent.side
+                            )
+                            with self._lock:
+                                self._stats["intents_rejected"] += 1
+                            continue
+                    except Exception:
+                        logger.warning("Governance is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
+
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）
                 category = intent.metadata.get("category", "linear") if intent.metadata else "linear"

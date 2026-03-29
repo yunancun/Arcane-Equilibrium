@@ -58,6 +58,25 @@ from .risk_manager import RiskManager  # noqa: E402
 RISK_MANAGER = RiskManager()
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
+# Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
+# 治理集線器（授權 + 風控 + 租約 + 對賬 集成）
+from .governance_hub import GovernanceHub  # noqa: E402
+import os as _gov_os
+_gov_audit_dir = _gov_os.getenv(
+    "OPENCLAW_GOVERNANCE_AUDIT_DIR",
+    _gov_os.path.abspath(_gov_os.path.join(_gov_os.path.dirname(__file__), "..", "runtime", "governance_audit"))
+)
+GOV_HUB = GovernanceHub(audit_dir=_gov_audit_dir)
+ENGINE.set_governance_hub(GOV_HUB)
+RISK_MANAGER.set_governance_hub(GOV_HUB)
+
+# Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
+# This creates a singleton reference for the governance API routes
+# 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入
+import sys as _sys_ref
+_current_module = _sys_ref.modules[__name__]
+_current_module._GOVERNANCE_HUB = GOV_HUB
+
 # Market data dispatcher (lazy-initialized on first start)
 # 行情分发器（首次启动时延迟初始化）
 DISPATCHER: MarketDataDispatcher | None = None
