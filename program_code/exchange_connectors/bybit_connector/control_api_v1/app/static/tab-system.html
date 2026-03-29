@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>System Overview</title>
 <script src="/static/common.js"></script>
+<script src="/static/governance.js"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -72,6 +73,37 @@
     <button class="qa-btn" id="qa-scanner" onclick="confirmAction('scanner')">
       <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner
     </button>
+  </div>
+</div>
+
+<!-- ═══ Governance Status ═══ -->
+<div class="oc-card" id="gov-status-section">
+  <h3>Governance Status / 治理狀態</h3>
+  <div class="oc-metrics">
+    <div class="oc-metric">
+      <span class="label">Auth State / 授權狀態</span>
+      <span id="gov-auth-badge">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Risk Level / 風險等級</span>
+      <span id="gov-risk-badge">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Gov Mode / 治理模式</span>
+      <span id="gov-mode-badge">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Auth Expiry / 授權到期</span>
+      <span id="gov-auth-expiry">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Active Leases / 活躍租約</span>
+      <span id="gov-lease-count">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Consistent / 一致性</span>
+      <span id="gov-consistent">—</span>
+    </div>
   </div>
 </div>
 
@@ -451,8 +483,68 @@ async function loadProductFamilies() {
   }
 }
 
+async function loadGovernanceStatus() {
+  try {
+    const d = await ocApi('/api/v1/governance/status');
+    if (!d || !d.ok || !d.data) {
+      ocSetHtml('gov-auth-badge', ocChip('N/A', 'neutral'));
+      ocSetHtml('gov-risk-badge', ocChip('N/A', 'neutral'));
+      ocSetHtml('gov-mode-badge', ocChip('N/A', 'neutral'));
+      ocSetHtml('gov-auth-expiry', '—');
+      ocSetHtml('gov-lease-count', '—');
+      ocSetHtml('gov-consistent', '—');
+      return;
+    }
+    const s = d.data;
+    // Use governance.js helpers if available, otherwise inline
+    if (typeof govAuthBadge === 'function') {
+      ocSetHtml('gov-auth-badge', govAuthBadge(s.authorization?.state));
+      ocSetHtml('gov-risk-badge', govRiskBadge(s.risk?.level));
+      ocSetHtml('gov-mode-badge', govModeBadge(s.mode));
+      ocSetHtml('gov-auth-expiry', govExpiryCountdown(s.authorization?.expires_at_ms));
+    } else {
+      // Fallback if governance.js not loaded
+      const authState = s.authorization?.state || 'UNKNOWN';
+      const authColors = { ACTIVE: 'good', RESTRICTED: 'warn', FROZEN: 'bad', PENDING_APPROVAL: 'info' };
+      ocSetHtml('gov-auth-badge', ocChip(authState, authColors[authState] || 'neutral'));
+
+      const riskLevel = s.risk?.level ?? '?';
+      const riskName = s.risk?.level_name || 'UNKNOWN';
+      const riskColors = { 0: 'good', 1: 'good', 2: 'warn', 3: 'warn', 4: 'bad', 5: 'bad' };
+      ocSetHtml('gov-risk-badge', ocChip(riskLevel + ' ' + riskName, riskColors[riskLevel] || 'neutral'));
+
+      const mode = s.mode || 'UNKNOWN';
+      const modeColors = { NORMAL: 'good', RESTRICTED: 'warn', FROZEN: 'bad', MANUAL_REVIEW: 'info' };
+      ocSetHtml('gov-mode-badge', ocChip(mode, modeColors[mode] || 'neutral'));
+
+      // Expiry
+      if (s.authorization?.expires_at_ms) {
+        const remaining = s.authorization.expires_at_ms - Date.now();
+        if (remaining <= 0) {
+          ocSetHtml('gov-auth-expiry', ocChip('EXPIRED', 'bad'));
+        } else {
+          const h = Math.floor(remaining / 3600000);
+          const m = Math.floor((remaining % 3600000) / 60000);
+          ocSetHtml('gov-auth-expiry', h > 0 ? h + 'h ' + m + 'm' : m + 'm');
+        }
+      } else {
+        ocSetHtml('gov-auth-expiry', '—');
+      }
+    }
+    // Lease count
+    ocSetHtml('gov-lease-count', String(s.leases?.active_count ?? '—'));
+    // Consistency
+    const con = s.reconciliation?.is_consistent;
+    if (con === true) ocSetHtml('gov-consistent', ocChip('✓ OK', 'good'));
+    else if (con === false) ocSetHtml('gov-consistent', ocChip('⚠ Diverged', 'bad'));
+    else ocSetHtml('gov-consistent', '—');
+  } catch (e) {
+    console.warn('Governance status unavailable:', e);
+  }
+}
+
 async function loadAll() {
-  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus()]);
+  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus(), loadGovernanceStatus()]);
 }
 
 loadAll();
