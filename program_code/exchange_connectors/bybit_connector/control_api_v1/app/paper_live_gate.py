@@ -36,7 +36,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -154,7 +154,7 @@ class GateCheckResult:
     criteria_results: dict[str, CriterionCheckResult] = field(default_factory=dict)
     blocking_reasons: list[str] = field(default_factory=list)
     timestamp_ms: int = field(default_factory=lambda: int(time.time() * 1000))
-    evaluated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    evaluated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     operator_approval_required: bool = True
     operator_approval_status: Optional[GateStatus] = None
     operator_approval_reason: Optional[str] = None

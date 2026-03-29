@@ -45,6 +45,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field, asdict
+from datetime import timezone
 from enum import Enum
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
@@ -461,7 +462,7 @@ class TradeAttributionEngine:
                 skill_pct=skill_pct,
                 luck_pct=luck_pct,
                 total_cost=total_cost,
-                timestamp=datetime.datetime.utcnow(),
+                timestamp=datetime.datetime.now(timezone.utc),
             )
 
             # Cache result
@@ -884,7 +885,7 @@ class TradeAttributionEngine:
                 trades_positive_skill=trades_positive_skill,
                 trades_negative_skill=trades_negative_skill,
                 confidence=confidence,
-                last_updated=datetime.datetime.utcnow(),
+                last_updated=datetime.datetime.now(timezone.utc),
             )
 
             self._strategy_skill_ratios[strategy] = ratio

@@ -210,6 +210,9 @@ class GovernanceHub:
             lease_callback = self._make_audit_callback("decision_lease")
             recon_callback = self._make_audit_callback("reconciliation")
 
+            # Create incident callback for reconciliation engine
+            incident_callback = self._make_incident_callback()
+
             # Initialize SMs
             self._authorization_sm = AuthorizationStateMachine(audit_callback=auth_callback)
             self._risk_governor_sm = RiskGovernorStateMachine(audit_callback=risk_callback)
@@ -217,6 +220,7 @@ class GovernanceHub:
             self._reconciliation_engine = ReconciliationEngine(
                 config=ReconciliationConfig(),
                 audit_callback=recon_callback,
+                incident_callback=incident_callback,
             )
 
             # Wire cross-SM callbacks
@@ -255,6 +259,31 @@ class GovernanceHub:
 
         return callback
 
+    def _make_incident_callback(self) -> Callable[[str, dict[str, Any]], None]:
+        """
+        Factory for reconciliation incident callbacks.
+        Routes reconciliation incidents to appropriate cross-SM handlers.
+        """
+        def callback(action: str, report: dict[str, Any]) -> None:
+            try:
+                severity = report.get("overall_result", "").upper()
+                # Treat reconciliation failures as incidents
+                if action in ["reconciliation_mismatch", "reconciliation_failure"]:
+                    # Map overall_result to severity for callback
+                    if severity in ["CRITICAL", "FATAL"]:
+                        self._on_reconciliation_mismatch(severity, report)
+                    elif severity == "WARNING":
+                        # Minor mismatch - log but don't escalate
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Reconciliation warning: {report.get('result')}")
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Incident callback error for action {action}: {e}")
+                with self._lock:
+                    self._callback_errors += 1
+
+        return callback
+
     def _wire_callbacks(self) -> None:
         """Wire cross-SM callbacks / 连接跨 SM 回调"""
         try:
@@ -262,8 +291,12 @@ class GovernanceHub:
             if hasattr(self._risk_governor_sm, "_on_level_change"):
                 original_callback = self._risk_governor_sm._on_level_change
                 self._risk_governor_sm._on_level_change = lambda old, new: self._on_risk_escalation(old, new)
+            logger.debug("Wired risk escalation callback")
         except Exception as e:
             logger.warning(f"Failed to wire risk escalation callback: {e}")
+
+        # Note: Reconciliation engine incident_callback is already set during initialization
+        # in _ensure_initialized() to avoid race conditions
 
     def _invalidate_auth_cache(self) -> None:
         """Invalidate authorization cache on state changes / 在状态更改时使缓存无效"""
