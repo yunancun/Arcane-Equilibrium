@@ -755,6 +755,8 @@ class RiskGovernorStateMachine:
         """Get status summary for API/GUI / 获取状态摘要"""
         with self._lock:
             now_ms = int(time.time() * 1000)
+            # Get constraints without calling self.level (which acquires lock again)
+            constraints_obj = LEVEL_CONSTRAINTS[self._state.level]
             return {
                 "level": self._state.level.name,
                 "level_value": self._state.level.value,
@@ -767,12 +769,12 @@ class RiskGovernorStateMachine:
                 "version": self._state.version,
                 "transition_count": len(self._state.transitions),
                 "constraints": {
-                    "new_entries_allowed": self.constraints.new_entries_allowed,
-                    "position_size_multiplier": self.constraints.position_size_multiplier,
-                    "reduce_only": self.constraints.reduce_only,
-                    "active_de_risking": self.constraints.active_de_risking,
-                    "emergency_stops": self.constraints.emergency_stops,
-                    "requires_operator": self.constraints.requires_operator,
+                    "new_entries_allowed": constraints_obj.new_entries_allowed,
+                    "position_size_multiplier": constraints_obj.position_size_multiplier,
+                    "reduce_only": constraints_obj.reduce_only,
+                    "active_de_risking": constraints_obj.active_de_risking,
+                    "emergency_stops": constraints_obj.emergency_stops,
+                    "requires_operator": constraints_obj.requires_operator,
                 },
             }
 
