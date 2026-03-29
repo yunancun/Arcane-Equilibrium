@@ -427,6 +427,23 @@ class TestPaperTradingAPI:
         )
         assert r.status_code == 200
 
+    def test_fill_fragmentation_dust_check(self, active_engine):
+        """Fill fragmentation fix (Session 12): limit order completes in ≤10 fills,
+        not 25-30. Remaining qty < 1% of original gets filled at once.
+        碎片化修复：限价单应在 ≤10 次成交内完成，而非 25-30 次。"""
+        import random
+        rng = random.Random(42)
+        from app.paper_trading_engine import compute_partial_fill_qty
+        order = {"qty": 0.01, "remaining_qty": 0.01, "price": 60000.0, "side": "Buy"}
+        fills = 0
+        while order["remaining_qty"] > 0:
+            fill = compute_partial_fill_qty(order, 59500.0, rng=rng)
+            order["remaining_qty"] -= fill
+            fills += 1
+            if fills > 50:
+                break  # prevent infinite loop in case fix is broken
+        assert fills <= 10, f"Expected ≤10 fills, got {fills} (fragmentation bug still present)"
+
     def test_export_via_api(self):
         client = build_api_client()
         client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})

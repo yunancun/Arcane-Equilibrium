@@ -559,6 +559,25 @@ class TestAIAttentionTax:
         hc = pos.get("holding_cost", {})
         assert hc["cost_efficiency_grade"] in ("A", "B", "C", "D", "F")
 
+    def test_attention_tax_does_not_close_tiny_edge_position(self, engine_with_risk):
+        """Session 12 fix: attention tax must NOT close a position whose unrealized edge
+        is smaller than the taker close fee — doing so would create a net loss.
+        注意力税不应平掉 edge < 平仓手续费的仓位，否则平仓本身造成净亏损。"""
+        eng, rm = engine_with_risk
+        rm.update_global_config({
+            "max_stop_loss_pct": 50.0,
+            "max_cost_edge_ratio": 0.8,
+        })
+        rm.agent_adjust({"effective_stop_loss_pct": 50.0, "effective_take_profit_pct": 50.0})
+        # Open a small BTC position
+        eng.submit_order("BTCUSDT", "Buy", "market", 0.001, market_prices={"BTCUSDT": 60000.0})
+        # Tick at a tiny gain: +$0.001 edge (notional=60, taker close fee~$0.033)
+        # edge < close fee → should NOT trigger attention tax close
+        eng.tick({"BTCUSDT": 60001.0})
+        assert "BTCUSDT" in eng.get_positions(), (
+            "Attention tax wrongly closed position with edge < taker close fee"
+        )
+
     def test_losing_position_not_closed_by_ai_tax(self, engine_with_risk):
         """AI tax only closes profitable positions eaten by costs, not losing ones."""
         eng, rm = engine_with_risk

@@ -883,8 +883,12 @@ class RiskManager:
 
             # If cost_edge_ratio exceeds max AND position was profitable → recommend close
             # (losing positions are handled by stop loss, not AI tax)
-            # 只有盈利仓位被 AI 税吃光利润时才触发（亏损仓位由止损处理）
-            if (edge_usd > 0
+            # Guard: only close if edge covers the taker close fee; otherwise closing
+            # creates a net loss (edge < close_fee means we'd exit at a net loss).
+            # 只有盈利仓位被 AI 税吃光利润时才触发（亏损仓位由止损处理）。
+            # 保护：edge 必须覆盖平仓 taker 手续费，否则平仓本身造成净亏损。
+            taker_close_fee_usd = notional * 0.00055  # DEFAULT_TAKER_FEE_RATE
+            if (edge_usd > taker_close_fee_usd
                     and hc["cost_edge_ratio"] >= self._config.max_cost_edge_ratio):
                 already_closing = any(co["symbol"] == symbol for co in close_orders)
                 if not already_closing and pos.get("qty", 0) > 0:

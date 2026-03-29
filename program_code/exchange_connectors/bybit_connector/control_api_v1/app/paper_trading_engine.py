@@ -385,6 +385,12 @@ def compute_partial_fill_qty(
     if limit_price <= 0 or remaining <= 0:
         return remaining
 
+    # Dust check: if remaining < 1% of original qty, fill it all at once.
+    # Prevents geometric-decay fragmentation (25-30 fills per order).
+    # 尾量检查：剩余量 < 原始数量 1% 时一次性全部成交，防止几何衰减碎片化。
+    if remaining <= order["qty"] * 0.01:
+        return remaining
+
     if order["side"] == SIDE_BUY:
         cross_pct = (limit_price - market_price) / limit_price
     else:

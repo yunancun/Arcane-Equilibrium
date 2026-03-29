@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-28（Session 11）
+# 最后更新：2026-03-29（Session 12）
 
 ---
 
@@ -33,10 +33,10 @@
 
 ---
 
-## 三、当前系统状态（2026-03-28 Session 11）
+## 三、当前系统状态（2026-03-29 Session 12）
 
 ```
-测试：461 全通过（428 control_api + 33 session9_fixes）
+测试：432 全通过（430 control_api + 2 session12_fixes）
 路由：113 条
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
@@ -82,6 +82,17 @@ Session 11 改进（1项）：
     - _on_position_open() 将 regime 写入 paper engine 持仓，StopManager time_stop 按 regime 调整
     - squeeze 时间止损约 14h，trending 约 72h（相比默认 48h）
     - 事后审计修复：_store → store（静默 AttributeError 导致 regime 未实际写入，已修复）
+
+Session 12 修复（2项）：
+  F1: compute_partial_fill_qty() 添加尾量检查（remaining < 1% of qty → 一次性成交）
+    - 修复 fill 碎片化：25-30 次成交/单 → ≤10 次/单
+    - 连锁效果：n_active_orders 减少 → AI 注意力税燃烧率从 HIGH 降至 MEDIUM/LOW
+  F2: check_positions_on_tick() 注意力税平仓添加最低 edge 保护
+    - edge_usd > 0 改为 edge_usd > taker_close_fee_usd（notional × 0.00055）
+    - 修复 0% 胜率根因：微小盈利（如 $0.0003）触发平仓，扣手续费后净亏损
+    - 注意力税恢复设计意图：仅在 edge 能覆盖平仓成本时才触发
+已知待处理：E1 观察记录只捕获 submit_order 路径，tick() 内 risk_auto_close 绕过 →
+  total_observations=0，下次修（需 MarketDataDispatcher → PipelineBridge 传递 tick_result）
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -390,4 +401,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-28 Session 11：428 control_api + 33 session_fixes 测试通过，113 路由。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整（squeeze→14h/半程TP，trending→72h/1.5倍TP，volatile→宽止损/快止盈）+ 事后审计修复 `_store→store`。Session 10 修复 2 项：B1/S1。Session 9 修复 3 项：B2/G3/A2。Session 8 修复 4 项：E1/G1/H1/D1。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-29 Session 12：430 control_api 测试通过，113 路由。Session 12 修复 F1/F2：fill 碎片化（25-30 次→≤10 次/单）+ AI 注意力税微小盈利强制平仓（0% 胜率根因修复）。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整。系统全程 read_only / disabled / not_granted。
