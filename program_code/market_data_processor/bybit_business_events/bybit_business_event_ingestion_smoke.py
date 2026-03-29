@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-SCRIPT_DIR = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts")
+SCRIPT_DIR = Path("/home/ncyu/srv/program_code/market_data_processor/bybit_business_events")
 FIXTURE_SCRIPT = SCRIPT_DIR / "bybit_business_event_fixture_generator.py"
 NORMALIZER_SCRIPT = SCRIPT_DIR / "bybit_business_event_normalizer.py"
 

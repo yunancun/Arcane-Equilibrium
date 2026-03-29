@@ -1,0 +1,147 @@
+================================================================================
+SCRIPTS CLASSIFICATION QUICK REFERENCE
+================================================================================
+
+Repository: BybitOpenClaw
+Directory: program_code/exchange_connectors/bybit_connector/scripts/
+Date: 2026-03-30
+
+================================================================================
+RESULTS AT A GLANCE
+================================================================================
+
+Total Files: 257
+  - WRAPPER (removable): 230 (89.5%)
+  - DUPLICATE_MINOR: 27 (10.5%)
+  - Unique: 0 (0%)
+
+=> ALL 257 FILES HAVE CANONICAL VERSIONS ELSEWHERE
+
+================================================================================
+WRAPPER DISTRIBUTION (230 files)
+================================================================================
+
+55 -> program_code/ai_agents/bybit_thought_gate/
+52 -> program_code/trading_strategy/bybit_event_driven/
+44 -> program_code/trade_executor/bybit_decision_lease/
+21 -> program_code/exchange_connectors/bybit_connector/misc_tools/
+20 -> program_code/risk_control/bybit_local_models_and_risk/
+18 -> program_code/exchange_connectors/bybit_connector/io_and_persistence/
+17 -> program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/
+3  -> helper_scripts/maintenance_scripts/bybit_connector/
+
+================================================================================
+DUPLICATE_MINOR DISTRIBUTION (27 files)
+================================================================================
+
+26 -> program_code/market_data_processor/bybit_business_events/
+1  -> program_code/exchange_connectors/bybit_connector/misc_tools/
+
+================================================================================
+WHAT TO DO NEXT
+================================================================================
+
+1. VERIFY DEPENDENCIES (CRITICAL)
+   - Search for hardcoded references to scripts/ directory
+   - Check build systems, CI/CD, deployment configs
+   - Verify no external code imports from scripts/
+
+2. REMOVE WRAPPERS (if safe)
+   - 230 files can be safely deleted if no external refs
+   - Wrappers just delegate to canonical versions
+   - Would reduce directory from 257 to 27 files
+
+3. EVALUATE DUPLICATES
+   - 27 files have minor differences from canonical versions
+   - Review each to determine if custom version is needed
+   - 26/27 are market_data_processor business events
+
+4. UPDATE REFERENCES
+   - Point code to canonical locations
+   - Update documentation and deployment scripts
+
+================================================================================
+HOW TO USE THE OUTPUT FILES
+================================================================================
+
+scripts_classification.txt
+  Format: CATEGORY|SCRIPTS_PATH|CANONICAL_PATH[|DIFF_LINES]
+  Use: grep, awk, shell scripting
+  Example: grep "^WRAPPER" to get all removable files
+
+scripts_classification.csv
+  Format: CSV with CATEGORY,SCRIPTS_FILE,CANONICAL_FILE,DIFF_LINES
+  Use: Excel, Google Sheets, data analysis tools
+  Import directly into spreadsheet applications
+
+scripts_classification.json
+  Format: Structured JSON with metadata and file array
+  Use: Programmatic analysis with Python/Node/etc
+  Contains summary counts and full file details
+
+scripts_classification_summary.txt
+  Format: Human-readable text summary
+  Use: Quick overview and reference guide
+
+SCRIPTS_ANALYSIS_REPORT.md
+  Format: Comprehensive markdown report
+  Use: Full technical documentation and recommendations
+
+================================================================================
+QUICK COMMANDS
+================================================================================
+
+# Find all wrappers
+grep "^WRAPPER" scripts_classification.txt
+
+# Find all duplicates with minor differences
+grep "^DUPLICATE_MINOR" scripts_classification.txt
+
+# Extract unique canonical locations
+grep "^WRAPPER" scripts_classification.txt | \
+  awk -F'|' '{print $3}' | sed 's|/[^/]*$||' | sort -u
+
+# List files sorted by category
+sort scripts_classification.csv | cut -d, -f1 | uniq -c
+
+# Find which canonical location has most wrappers
+grep "^WRAPPER" scripts_classification.txt | \
+  awk -F'|' '{print $3}' | \
+  sed 's|/[^/]*$||' | sort | uniq -c | sort -rn
+
+================================================================================
+KEY INSIGHTS
+================================================================================
+
+1. The scripts/ directory is a COMPATIBILITY LAYER
+   - Contains only derived files (wrappers + duplicates)
+   - No original code exists in this directory
+   - Likely created for backward compatibility or convenience
+
+2. Most files (89.5%) use runpy.run_path() pattern
+   - These are safe to remove if no external code depends on scripts/ paths
+   - They add no functionality, just import and run canonical versions
+
+3. Market data processor duplicates (26 files)
+   - Near-duplicates with 100-300 lines of differences
+   - Likely have path/import adjustments for scripts context
+   - May be intentional customizations or legacy code
+
+4. No truly unique files
+   - Every single file has a canonical version
+   - Directory could be eliminated entirely with proper reference updates
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+LOW RISK:
+- Removing 230 wrapper files (safe if dependencies verified)
+
+MEDIUM RISK:
+- Removing 27 duplicate-minor files (need case-by-case review)
+
+HIGH RISK:
+- Removing without verifying external dependencies
+
+================================================================================

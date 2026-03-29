@@ -30,7 +30,7 @@ import os
 import sys
 from pathlib import Path
 
-BASE = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts")
+BASE = Path("/home/ncyu/srv/helper_scripts/maintenance_scripts/bybit_connector")
 WRAPPER = BASE / "_bybit_latest_wrapper.py"
 ORIG = BASE / "bybit_private_order_history_check.py.orig"
 LATEST = "/home/ncyu/srv/log_files/connector_logs/bybit_private_order_history_check_latest.json"
