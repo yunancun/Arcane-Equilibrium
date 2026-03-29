@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-29（Session 12 + GUI 修复）
+# 最后更新：2026-03-30（Phase 2 治理模組審核 + TW 註釋品質審核）
 
 ---
 
@@ -138,6 +138,7 @@ F    Event-Driven Transition Scaffold           ✅ 完成
 G    真实业务事件验证层                          ✅ 收口
 H0   Local Deterministic Judgment Core          ✅ 完成
 H1-H5 AI 治理层                                ✅ 完成
+     Phase 2 治理模組 T2.01–T2.23               ✅ 完成（21 模组 + PM/TW 双审核通过）
 I1-I10 Decision Lease shadow control plane      ✅ 完成（shadow-only）
 J    Transition Engine Skeleton                 ✅ shadow-only closeout
 K    Paper / Demo Gate                          ✅ design-only gate closed
@@ -301,6 +302,9 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ B2/G3/A2 三项 bug 修复 + 18 项验证测试（2026-03-28 Session 9）
   ✅ B1/S1 两项修复 + 7 项验证测试（2026-03-28 Session 10）
   ✅ R1 regime 感知止损/止盈/时间三维调整 + 8 项验证测试（2026-03-28 Session 11）
+  ✅ Phase 2 治理模組 T2.01–T2.23 全部实现（2026-03-29）— 21 模组 · 1,522 测试 · 52,211 行代码
+  ✅ Phase 2 PM 品质审核通过（2026-03-29）— 整体评级 4/5 · 0 个 P0 blocker
+  ✅ Phase 2 TW 註釋品質審核通过（2026-03-30）— 評級 9.5/10 · 100% 雙語覆蓋 · 0 Critical
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
@@ -405,6 +409,17 @@ Live 前置条件（M/N 前必须核验）：
 | ★★ Session 7 系统全面审核 + 5项修复（市场流自动重启+regime过滤+trend cap+时间驱动+confidence） | `docs/worklogs/control_api_gui/2026-03-28--session7_system_audit_and_fixes.md` |
 | ★★★ Session 8 A-J 全面功能审核报告（胜率0%根因/学习系统空置/止损未接入） | `docs/worklogs/control_api_gui/2026-03-28--session8_functional_audit_report.md` |
 
+### 治理开发（governance_dev/）
+
+| 内容 | 文件位置 |
+|------|---------|
+| **Phase 2 执行总览**（21 模组矩阵 + 关键指标） | `docs/governance_dev/phase2_execution/T2_EXECUTION_SUMMARY.md` |
+| Phase 2 PM 品质审核报告（T2.01–T2.23） | `docs/governance_dev/phase2_execution/T2_PM_QUALITY_AUDIT_REPORT.md` |
+| Phase 2 TW 註釋品質審核報告 | `docs/governance_dev/phase2_execution/T2_TW_COMMENT_AUDIT_REPORT.md` |
+| T2.01–T2.23 变更日志（23 份） | `docs/governance_dev/changelogs/` |
+| Phase 0 接手报告（4 份） | `docs/governance_dev/phase0_takeover/` |
+| Phase 1 差距分析（2 份） | `docs/governance_dev/phase1_gap_analysis/` |
+
 ### 交接与索引
 
 | 内容 | 文件位置 |
@@ -416,4 +431,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-29 Session 12 + GUI 修复：432 control_api 测试通过，113 路由。后端修复 F1/F2/E1a/E1b（fill 碎片化/注意力税误关仓/E1 观察覆盖），GUI 修复 G1-G6（活跃订单/价格精度/成交时间戳/余额/Demo 对比/学习系统计数）。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-30：Phase 2 治理模組 T2.01–T2.23 全部完成（21 模组 · 1,522 测试 · 52,211 行 · PM + TW 双审核通过）。432 control_api 测试通过，113 路由。Session 12 修复 F1/F2/E1a/E1b + GUI G1-G6。系统全程 read_only / disabled / not_granted。

@@ -24,21 +24,23 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-27)
+## 当前状态 (2026-03-30)
 
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         644 全通过
-API 路由:     111 条
+测试:         432 control_api + 1,522 governance = 全通过
+API 路由:     113 条
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
 市场扫描:     650+ 交易对每 5 分钟全扫描
 自动部署:     最优 5 品种自动匹配策略
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
+治理模組:     21 个 Phase 2 模组全部实现并通过审核（T2.01–T2.23）
+代码规模:     52,211 行（29,624 实现 + 22,587 测试）
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組 (T2.01–T2.23)**
 
 ---
 
@@ -67,6 +69,7 @@ srv/
 │   │   ├── strategies/            ← 5 策略
 │   │   ├── stop_manager.py        ← Hard/Trailing/Time Stop + ATR 仓位
 │   │   └── strategy_orchestrator.py
+│   ├── governance/                ← Phase 2 治理状态机（授权/风控/租约/对账/审计）
 │   ├── ai_agents/                 ← H1-H5 AI 治理层
 │   ├── risk_control/              ← H0 本地判断
 │   └── trade_executor/            ← I 决策租约
@@ -78,6 +81,21 @@ srv/
     ├── cron_observer_cycle.sh     ← Observer 自动化
     └── maintenance_scripts/       ← 清理 / 检查脚本
 ```
+
+---
+
+## Phase 2 治理模組 (T2.01–T2.23)
+
+21 个治理模组全部实现，覆盖 4 个核心状态机 + 17 个扩展模组：
+
+| 类别 | 模组 | 规格 |
+|------|------|------|
+| 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
+| 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
+
+**关键指标：** 1,522 测试全通过 · 52,211 行代码 · 100% 双语注释 · fail-closed 设计 · 线程安全
+
+**详细报告：** `docs/governance_dev/phase2_execution/`（执行总览 + PM 品质审核 + TW 注释审核 + 23 份变更日志）
 
 ---
 

@@ -7,10 +7,13 @@
 ```
 governance_dev/
 ├── README.md                  ← 本文件
-├── phase0_takeover/           ← Phase 0 接手：目錄架構、代碼閱讀、AI 整合評估
-├── phase1_gap_analysis/       ← Phase 1 差距分析：22 份治理文件 vs 代碼對比
-├── phase2_remediation/        ← Phase 2 修復執行：狀態機實現、風控擴展等
-└── changelogs/                ← 修改日誌：每次代碼變更的記錄
+├── phase0_takeover/           ← Phase 0 接手：目錄架構、代碼閱讀、AI 整合評估（5 份報告）
+├── phase1_gap_analysis/       ← Phase 1 差距分析：22 份治理文件 vs 代碼對比（2 份報告）
+├── phase2_execution/          ← Phase 2 執行：T2.01–T2.23 治理模組實現（3 份審核報告）
+│   ├── T2_EXECUTION_SUMMARY.md         ← ★ 執行總覽（21 模組矩陣 + 關鍵指標）
+│   ├── T2_PM_QUALITY_AUDIT_REPORT.md   ← PM 品質審核（2026-03-29）
+│   └── T2_TW_COMMENT_AUDIT_REPORT.md   ← TW 註釋品質審核（2026-03-30）
+└── changelogs/                ← 修改日誌：T2.01–T2.23 共 23 份變更記錄
 ```
 
 ## 文件命名規範
