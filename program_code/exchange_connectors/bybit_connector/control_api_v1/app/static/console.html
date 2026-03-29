@@ -167,6 +167,9 @@ function ocLogout() {
 
 function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
 
+// Cache-bust timestamp — ensures iframe tabs reload on each console.html refresh
+const BUILD_TS = Date.now();
+
 // ─── Tab Definitions ──────────────────────────────────────────
 const TABS = [
   { id: 'system',     label: '系统总览',       labelEn: 'System',    icon: '&#x1F4CA;', src: '/static/tab-system.html' },
@@ -198,12 +201,12 @@ function buildTabs() {
     tab.onclick = () => switchTo(t.id);
     bar.appendChild(tab);
 
-    // iframe (lazy loaded)
+    // iframe (lazy loaded) — append build timestamp to bust browser cache on reload
     const frame = document.createElement('iframe');
     frame.id = 'f-' + t.id;
     frame.style.display = i === 0 ? 'block' : 'none';
-    frame.dataset.src = t.src;
-    if (i === 0) frame.src = t.src; // Load first tab immediately
+    frame.dataset.src = t.src + '?v=' + BUILD_TS;
+    if (i === 0) frame.src = t.src + '?v=' + BUILD_TS; // Load first tab immediately
     wrap.appendChild(frame);
 
     // Sidebar nav button
