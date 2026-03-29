@@ -753,3 +753,120 @@ class TestFullLifecycle:
                 event=AuthEvent.SUBMITTED_FOR_APPROVAL,
                 initiator=AuthInitiator.OPERATOR,
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. Fail-Closed Behavior / 故障保护（闭合）测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAuthorizationFailClosed:
+    """Verify fail-closed behavior: unauthorized by default.
+    验证故障保护（闭合）行为：默认无权限。"""
+
+    def test_draft_state_is_not_effective(self, sm):
+        """DRAFT state should not grant authorization.
+        DRAFT 状态不应授予权限。"""
+        auth = sm.create_draft(title="Test", scope={"mode": "paper"}, created_by="op")
+        assert auth.state == AuthState.DRAFT
+        assert auth.is_effective is False
+        assert not auth.is_effective
+
+    def test_pending_state_is_not_effective(self, sm, draft_auth):
+        """PENDING_APPROVAL state should not grant authorization.
+        PENDING_APPROVAL 状态不应授予权限。"""
+        sm.submit_for_approval(draft_auth.authorization_id)
+        auth = sm.get(draft_auth.authorization_id)
+        assert auth.state == AuthState.PENDING_APPROVAL
+        assert auth.is_effective is False
+        # Verify PENDING_APPROVAL is not in EFFECTIVE_STATES
+        assert AuthState.PENDING_APPROVAL not in EFFECTIVE_STATES
+
+    def test_expired_auth_is_not_effective(self, sm):
+        """Expired authorization should not grant access.
+        过期的授权不应授予访问权限。"""
+        auth = sm.create_draft(
+            title="Will Expire", scope={}, created_by="op",
+            expires_at_ms=int(time.time() * 1000) - 1000,  # Already expired
+        )
+        sm.submit_for_approval(auth.authorization_id)
+        sm.approve(auth.authorization_id, approved_by="op1")
+
+        # Auto-expire via check_expiry
+        expired = sm.check_expiry()
+        assert auth.authorization_id in expired
+
+        # Verify state is EXPIRED and not effective
+        expired_auth = sm.get(auth.authorization_id)
+        assert expired_auth.state == AuthState.EXPIRED
+        assert expired_auth.is_effective is False
+
+    def test_frozen_auth_is_not_effective(self, sm):
+        """Frozen authorization should not grant access.
+        冻结的授权不应授予访问权限。"""
+        auth = sm.create_draft(title="Freeze Test", scope={}, created_by="op")
+        aid = auth.authorization_id
+        sm.submit_for_approval(aid)
+        sm.approve(aid, approved_by="op1")
+
+        # Should be effective before freeze
+        assert sm.get(aid).is_effective is True
+
+        # Freeze it
+        sm.freeze(aid, reason="incident")
+        frozen = sm.get(aid)
+        assert frozen.state == AuthState.FROZEN
+        assert frozen.is_effective is False
+
+    def test_rejected_auth_is_terminal(self, sm):
+        """Rejected authorization is terminal and cannot be reactivated.
+        被拒绝的授权是终态，不能重新激活。"""
+        auth = sm.create_draft(title="Reject Test", scope={}, created_by="op")
+        sm.reject(auth.authorization_id, reason="not approved")
+
+        rejected = sm.get(auth.authorization_id)
+        assert rejected.state == AuthState.REJECTED
+        assert rejected.is_terminal is True
+        assert rejected.is_effective is False
+
+    def test_revoked_auth_is_terminal(self, sm):
+        """Revoked authorization is terminal and cannot be reactivated.
+        被撤销的授权是终态，不能重新激活。"""
+        auth = sm.create_draft(title="Revoke Test", scope={}, created_by="op")
+        aid = auth.authorization_id
+        sm.submit_for_approval(aid)
+        sm.approve(aid, approved_by="op1")
+        sm.revoke(aid, approved_by="op1", reason="revoked")
+
+        revoked = sm.get(aid)
+        assert revoked.state == AuthState.REVOKED
+        assert revoked.is_terminal is True
+        assert revoked.is_effective is False
+
+        # Try to recover — should fail
+        with pytest.raises(AuthorizationError, match="terminal"):
+            sm.recover_to_active(aid, approved_by="op1")
+
+    def test_only_active_and_restricted_are_effective(self, sm):
+        """Only ACTIVE and RESTRICTED states grant authorization.
+        只有 ACTIVE 和 RESTRICTED 状态授予权限。"""
+        # Create and get to ACTIVE state
+        auth = sm.create_draft(title="Effective Test", scope={}, created_by="op")
+        aid = auth.authorization_id
+        sm.submit_for_approval(aid)
+        sm.approve(aid, approved_by="op1")
+
+        active = sm.get(aid)
+        assert active.state == AuthState.ACTIVE
+        assert active.is_effective is True
+
+        # Restrict it
+        sm.restrict(aid, reason="test")
+        restricted = sm.get(aid)
+        assert restricted.state == AuthState.RESTRICTED
+        assert restricted.is_effective is True
+
+        # Freeze it
+        sm.freeze(aid, reason="test")
+        frozen = sm.get(aid)
+        assert frozen.state == AuthState.FROZEN
+        assert frozen.is_effective is False

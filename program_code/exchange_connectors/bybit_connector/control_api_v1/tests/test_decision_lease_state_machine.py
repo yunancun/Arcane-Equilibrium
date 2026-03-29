@@ -464,3 +464,135 @@ class TestFullLifecycle:
         sm.reject(l.lease_id, reason="invalid")
         with pytest.raises(LeaseError, match="terminal"):
             sm.register(l.lease_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. Fail-Closed Behavior / 故障保护（闭合）测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLeaseFailClosed:
+    """Verify fail-closed behavior: leases deny by default.
+    验证故障保护（闭合）行为：租约默认拒绝。"""
+
+    def test_draft_lease_is_not_active(self, sm):
+        """DRAFT lease should not be usable for decisions.
+        DRAFT 租约不应可用于决策。"""
+        lease = sm.create_draft(intent={"symbol": "BTC"}, created_by="test")
+        assert lease.state == LeaseState.DRAFT
+        assert lease.is_live is False
+        assert lease.is_bridgeable is False
+
+    def test_draft_lease_cannot_be_bridged(self, sm):
+        """DRAFT lease cannot be bridged directly (not in live states).
+        DRAFT 租约不能直接桥接。"""
+        lease = sm.create_draft(intent={}, created_by="test")
+        with pytest.raises(LeaseError, match="Forbidden|not in transition"):
+            sm.bridge(lease.lease_id)
+
+    def test_registered_lease_is_not_bridgeable(self, sm):
+        """REGISTERED lease cannot be bridged (not in BRIDGEABLE_STATES).
+        REGISTERED 租约不能桥接。"""
+        lease = sm.create_draft(intent={}, created_by="test")
+        sm.register(lease.lease_id)
+        registered = sm.get(lease.lease_id)
+        assert registered.state == LeaseState.REGISTERED
+        assert registered.is_live is True
+        assert registered.is_bridgeable is False
+
+    def test_expired_lease_is_terminal(self, sm):
+        """Expired lease is terminal and cannot be reactivated.
+        过期的租约是终态，不能重新激活。"""
+        lease = sm.create_draft(
+            intent={}, created_by="test",
+            expires_at_ms=int(time.time() * 1000) - 1000,  # Already expired
+        )
+        sm.register(lease.lease_id)
+        sm.activate(lease.lease_id)
+
+        # Auto-expire
+        expired = sm.check_expiry()
+        assert lease.lease_id in expired
+
+        expired_lease = sm.get(lease.lease_id)
+        assert expired_lease.state == LeaseState.EXPIRED
+        assert expired_lease.is_terminal is True
+        assert expired_lease.is_live is False
+
+    def test_expired_lease_cannot_be_reactivated(self, sm):
+        """Expired lease cannot return to active.
+        过期租约不能返回活跃状态。"""
+        lease = sm.create_draft(
+            intent={}, created_by="test",
+            expires_at_ms=int(time.time() * 1000) - 1000,
+        )
+        sm.register(lease.lease_id)
+        sm.activate(lease.lease_id)
+        sm.check_expiry()
+
+        # Try to reactivate — should fail
+        with pytest.raises(LeaseError, match="terminal"):
+            sm.activate(lease.lease_id)
+
+    def test_revoked_lease_is_terminal(self, sm):
+        """Revoked lease is terminal and cannot transition.
+        撤销的租约是终态，不能迁移。"""
+        lease = _make_active(sm)
+        sm.revoke(lease.lease_id, approved_by="op1")
+
+        revoked = sm.get(lease.lease_id)
+        assert revoked.state == LeaseState.REVOKED
+        assert revoked.is_terminal is True
+        assert revoked.is_live is False
+
+        # Try to bridge — should fail
+        with pytest.raises(LeaseError, match="terminal"):
+            sm.bridge(lease.lease_id)
+
+    def test_consumed_lease_is_terminal(self, sm):
+        """Consumed lease is terminal and cannot be re-bridged or re-activated.
+        已消费的租约是终态，不能重新桥接或激活。"""
+        lease = _make_active(sm)
+        sm.bridge(lease.lease_id)
+        sm.consume(lease.lease_id)
+
+        consumed = sm.get(lease.lease_id)
+        assert consumed.state == LeaseState.CONSUMED
+        assert consumed.is_terminal is True
+        assert consumed.is_live is False
+
+        # Try to activate — should fail
+        with pytest.raises(LeaseError, match="terminal"):
+            sm.activate(lease.lease_id)
+
+    def test_rejected_lease_is_terminal(self, sm):
+        """Rejected lease is terminal and cannot proceed.
+        被拒绝的租约是终态，不能继续。"""
+        lease = sm.create_draft(intent={}, created_by="test")
+        sm.reject(lease.lease_id, reason="invalid")
+
+        rejected = sm.get(lease.lease_id)
+        assert rejected.state == LeaseState.REJECTED
+        assert rejected.is_terminal is True
+        assert rejected.is_live is False
+
+        # Try to register — should fail
+        with pytest.raises(LeaseError, match="terminal"):
+            sm.register(lease.lease_id)
+
+    def test_only_live_leases_are_in_live_states(self, sm):
+        """Only REGISTERED, ACTIVE, BRIDGED are in LIVE_STATES.
+        只有 REGISTERED, ACTIVE, BRIDGED 在 LIVE_STATES 中。"""
+        lease = sm.create_draft(intent={}, created_by="test")
+        assert lease.is_live is False
+
+        sm.register(lease.lease_id)
+        assert sm.get(lease.lease_id).is_live is True
+
+        sm.activate(lease.lease_id)
+        assert sm.get(lease.lease_id).is_live is True
+
+        sm.bridge(lease.lease_id)
+        assert sm.get(lease.lease_id).is_live is True
+
+        sm.consume(lease.lease_id)
+        assert sm.get(lease.lease_id).is_live is False  # Terminal

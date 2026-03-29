@@ -36,9 +36,16 @@
       </div>
     </div>
 
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Scope / 范围</div>
-      <div id="auth-scope" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:80px;overflow-y:auto">--</div>
+    <!-- Auth Scope Visualizer / 授权范围可视化 -->
+    <div style="margin-top:12px;margin-bottom:12px">
+      <h4 style="cursor:pointer;font-size:0.95em;margin:0;padding:0" onclick="toggleAuthScope()">
+        Authorization Scope / 授權範圍 <span id="auth-scope-toggle" style="font-size:0.85em">▶</span>
+      </h4>
+      <div id="auth-scope-body" style="display:none;margin-top:8px">
+        <div id="auth-scope-content" style="padding:8px 0">
+          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        </div>
+      </div>
     </div>
 
     <div id="auth-pending-indicator" style="display:none;margin-bottom:12px;padding:8px;background:rgba(56,139,253,0.1);border-left:3px solid var(--blue);border-radius:0 6px 6px 0">
@@ -281,6 +288,18 @@ let _prevStatus = null;
 const MAX_EVENTS = 50;
 
 // ─── Toggle Functions for Collapsible Sections ────────────────
+function toggleAuthScope() {
+  const body = document.getElementById('auth-scope-body');
+  const toggle = document.getElementById('auth-scope-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
 function toggleIncidentLog() {
   const body = document.getElementById('incident-log-body');
   const toggle = document.getElementById('incident-toggle');
@@ -502,11 +521,56 @@ async function submitReconcile() {
 
 // ─── Render Functions ─────────────────────────────────────────
 
+function renderAuthScope(scope) {
+  const el = document.getElementById('auth-scope-content');
+  if (!scope || Object.keys(scope).length === 0) {
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No scope data / 無範圍資料</p>';
+    return;
+  }
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">';
+
+  // Render each scope key as a card
+  for (const [key, value] of Object.entries(scope)) {
+    const label = ocEsc(key.replace(/_/g, ' '));
+    let valueDisplay;
+
+    if (typeof value === 'boolean') {
+      valueDisplay = value ? ocChip('✓ Allowed / 允許', 'good') : ocChip('✗ Denied / 拒絕', 'bad');
+    } else if (Array.isArray(value)) {
+      valueDisplay = value.map(v => ocChip(ocEsc(String(v)), 'neutral')).join(' ');
+    } else if (typeof value === 'object' && value !== null) {
+      valueDisplay = '<pre style="font-size:0.8em;margin:4px 0;overflow-x:auto">' + ocEsc(JSON.stringify(value, null, 2)) + '</pre>';
+    } else {
+      valueDisplay = ocChip(ocEsc(String(value)), 'neutral');
+    }
+
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">';
+    html += '<div style="font-size:0.85em;color:var(--text-dim);margin-bottom:4px;text-transform:capitalize">' + label + '</div>';
+    html += '<div>' + valueDisplay + '</div>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function loadAuthScope() {
+  try {
+    const d = await govGetAuthStatus();
+    if (d && d.ok && d.data) {
+      renderAuthScope(d.data.scope);
+    }
+  } catch(e) {
+    console.warn('Auth scope unavailable:', e);
+  }
+}
+
 function renderAuthCard(authData) {
   if (!authData) {
     ocSetHtml('auth-state-badge', ocChip('UNAVAILABLE', 'neutral'));
     ocSetText('auth-expiry', '--');
-    ocSetText('auth-scope', '--');
+    renderAuthScope({});
     $('btn-approve').style.display = 'none';
     $('auth-pending-indicator').style.display = 'none';
     return;
@@ -518,23 +582,9 @@ function renderAuthCard(authData) {
   const expiresMs = authData.expires_at_ms;
   ocSetText('auth-expiry', expiresMs ? govExpiryCountdown(expiresMs) : '--');
 
+  // Render scope using the new visualizer
   const scope = authData.scope || {};
-  let scopeHtml = '<div style="font-size:12px">';
-  if (typeof scope === 'object' && Object.keys(scope).length) {
-    Object.entries(scope).forEach(([k, v]) => {
-      scopeHtml += '<div>' + ocEsc(k) + ': ';
-      if (Array.isArray(v)) {
-        scopeHtml += v.map(x => ocEsc(String(x))).join(', ');
-      } else {
-        scopeHtml += ocEsc(String(v));
-      }
-      scopeHtml += '</div>';
-    });
-  } else {
-    scopeHtml += '--';
-  }
-  scopeHtml += '</div>';
-  ocSetHtml('auth-scope', scopeHtml);
+  renderAuthScope(scope);
 
   const isPending = authData.pending_approval === true;
   $('auth-pending-indicator').style.display = isPending ? 'block' : 'none';
@@ -658,6 +708,9 @@ async function loadAll() {
     renderLeaseCard(leases);
     renderReconCard(recon);
     renderSummary(_currentStatus);
+
+    // Load scope visualization (async, complements auth card)
+    loadAuthScope();
 
     // Detect changes and render incident/audit logs
     detectChanges(_currentStatus);

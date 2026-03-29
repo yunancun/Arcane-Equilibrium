@@ -559,3 +559,98 @@ class TestFullLifecycle:
         assert status["level_value"] == 1
         assert status["constraints"]["new_entries_allowed"] is True
         assert status["constraints"]["position_size_multiplier"] == 0.7
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. Fail-Closed Behavior / 故障保护（闭合）测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRiskGovernorFailClosed:
+    """Verify fail-closed behavior: when SM is not properly initialized or in error state.
+    当状态机未正确初始化或处于错误状态时验证故障保护（闭合）行为。"""
+
+    def test_fresh_governor_starts_at_normal(self, gov):
+        """Fresh governor should start at NORMAL (safest operational level).
+        新的总督应从 NORMAL 开始（最安全的操作级别）。"""
+        assert gov.level == RiskLevel.NORMAL
+        state = gov.get_state()
+        assert state.level == RiskLevel.NORMAL
+        assert state.version == 1  # Initial state
+
+    def test_invalid_metrics_does_not_lower_risk(self, gov):
+        """Invalid or missing metrics should not cause de-escalation.
+        无效或缺失的指标不应导致降级。"""
+        gov.escalate_to(RiskLevel.CAUTIOUS, reason="test")
+        assert gov.level == RiskLevel.CAUTIOUS
+
+        # Try to evaluate with all-zero metrics — should not de-escalate
+        result = gov.evaluate_risk_context({
+            "risk_pressure": 0.0,
+            "drawdown_pct": 0.0,
+            "daily_loss_pct": 0.0,
+            "consecutive_losses": 0,
+            "session_halted": False,
+            "cooldown_active": False,
+        })
+        assert gov.level == RiskLevel.CAUTIOUS  # Should stay at CAUTIOUS (no auto de-escalation)
+
+    def test_circuit_breaker_cannot_be_bypassed(self, gov):
+        """CIRCUIT_BREAKER state cannot transition to lower levels without operator.
+        熔断状态不能绕过操作员直接降级。"""
+        gov.circuit_break(reason="emergency")
+        assert gov.level == RiskLevel.CIRCUIT_BREAKER
+
+        # Try de-escalation without approval — should fail (either wrong initiator or missing approval)
+        with pytest.raises(RiskGovernorError, match="not allowed|requires.*approval"):
+            gov.transition(
+                RiskLevel.DEFENSIVE,
+                event=RiskEvent.CONDITIONS_IMPROVED,
+                initiator=RiskInitiator.RISK_GOVERNOR,
+                # No approved_by!
+            )
+
+        # Verify state unchanged
+        assert gov.level == RiskLevel.CIRCUIT_BREAKER
+
+    def test_order_denied_at_circuit_breaker(self, gov):
+        """Orders should be blocked at CIRCUIT_BREAKER level / 熔断时订单应被阻止。"""
+        gov.circuit_break(reason="test")
+        allowed, reason = gov.is_order_allowed(is_reducing=True)
+        assert allowed is False
+        assert "requires_operator" in reason
+
+    def test_manual_review_requires_approval_to_exit(self, gov):
+        """MANUAL_REVIEW state cannot auto-exit; requires explicit approval.
+        人工审核状态不能自动退出；需要明确审批。"""
+        gov.request_manual_review(reason="review needed")
+        assert gov.level == RiskLevel.MANUAL_REVIEW
+
+        # Try to auto-transition without approval — should fail
+        with pytest.raises(RiskGovernorError, match="requires.*approval"):
+            gov.transition(
+                RiskLevel.NORMAL,
+                event=RiskEvent.CONDITIONS_IMPROVED,
+                initiator=RiskInitiator.OPERATOR,
+                # No approved_by!
+            )
+
+        # Verify state unchanged
+        assert gov.level == RiskLevel.MANUAL_REVIEW
+
+    def test_no_auto_de_escalation_from_high_state(self, gov):
+        """Auto-evaluation should NEVER de-escalate from high risk states.
+        自动评估不应从高风险状态降级。"""
+        gov.escalate_to(RiskLevel.DEFENSIVE, reason="high risk")
+        assert gov.level == RiskLevel.DEFENSIVE
+
+        # Evaluate with all-clear metrics — should NOT de-escalate
+        result = gov.evaluate_risk_context({
+            "risk_pressure": 0.0,
+            "drawdown_pct": 0.0,
+            "daily_loss_pct": 0.0,
+            "consecutive_losses": 0,
+            "session_halted": False,
+            "cooldown_active": False,
+        })
+        assert result is None  # No transition
+        assert gov.level == RiskLevel.DEFENSIVE  # Still at DEFENSIVE
