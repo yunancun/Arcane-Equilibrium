@@ -462,7 +462,7 @@ class TradeAttributionEngine:
                 skill_pct=skill_pct,
                 luck_pct=luck_pct,
                 total_cost=total_cost,
-                timestamp=datetime.datetime.now(timezone.utc),
+                timestamp=exit_timestamp,
             )
 
             # Cache result
