@@ -487,15 +487,13 @@ class PipelineBridge:
             except Exception:
                 logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
 
-    def _on_round_trip_complete(self, intent: Any, exit_price: float, close_pnl: float) -> None:
+    def _emit_round_trip(self, symbol: str, strategy_name: str, exit_price: float, close_pnl: float) -> None:
         """
-        Called when a position is closed (round-trip complete).
-        Writes auto-observation (E1) and notifies auto-deployer for loss tracking (G1).
-        持仓关闭（一轮交易完成）时调用。
-        写入自动观察（E1）并通知自动部署器进行亏损追踪（G1）。
+        Core round-trip completion handler — shared by intent-path and tick-path closes.
+        Pops _open_positions, fires G1 + E1 callbacks, unregisters from StopManager.
+        核心 round-trip 完成处理器 — 被意图路径和 tick 路径共用。
+        弹出 _open_positions，触发 G1 + E1 回调，从 StopManager 取消注册。
         """
-        symbol = intent.symbol
-        strategy_name = getattr(intent, "strategy_name", "unknown")
         key = f"{strategy_name}:{symbol}"
 
         with self._lock:
@@ -540,6 +538,78 @@ class PipelineBridge:
             "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",
             strategy_name, symbol, close_pnl, hold_ms / 3600000, regime,
         )
+
+    def _on_round_trip_complete(self, intent: Any, exit_price: float, close_pnl: float) -> None:
+        """
+        Called when a position is closed via immediate market-order fill in submit_order().
+        Delegates to _emit_round_trip.
+        通过 submit_order() 即时成交路径平仓时调用，委托给 _emit_round_trip。
+        """
+        symbol = intent.symbol
+        strategy_name = getattr(intent, "strategy_name", "unknown")
+        self._emit_round_trip(symbol, strategy_name, exit_price, close_pnl)
+
+    def on_tick_result(self, tick_result: dict) -> None:
+        """
+        Called by MarketDataDispatcher after engine.tick() produced fills.
+        Detects positions closed via tick path (risk_auto_close, time stop, soft stop)
+        and fires E1/G1 hooks that the submit_order path would otherwise miss.
+
+        由 MarketDataDispatcher 在 engine.tick() 产生成交后调用。
+        检测通过 tick 路径平仓的仓位（risk_auto_close/时间止损/软止损），
+        触发 submit_order 路径本会遗漏的 E1/G1 回调。
+        """
+        fills = tick_result.get("fills", [])
+        if not fills:
+            return
+
+        # Snapshot tracked open positions to avoid holding lock during callbacks
+        with self._lock:
+            tracked = dict(self._open_positions)
+
+        if not tracked:
+            return
+
+        already_emitted: set = set()
+
+        for fill in fills:
+            symbol = fill.get("symbol", "")
+            fill_side = fill.get("side", "")   # "Buy" or "Sell"
+            fill_price = fill.get("price", 0.0)
+            close_fee = fill.get("fee", 0.0)
+
+            if not symbol or fill_price <= 0:
+                continue
+
+            # Find a tracked open position for this symbol with a matching close direction
+            for key, pos_info in tracked.items():
+                if pos_info.get("symbol") != symbol:
+                    continue
+                if key in already_emitted:
+                    continue
+
+                pos_side = pos_info.get("side", "")  # "long" or "short"
+                is_close = (
+                    (pos_side == "long" and fill_side == "Sell") or
+                    (pos_side == "short" and fill_side == "Buy")
+                )
+                if not is_close:
+                    continue
+
+                # Approximate close_pnl from entry/exit price (entry fee already sunk)
+                entry_price = pos_info.get("entry_price", 0.0)
+                qty = pos_info.get("qty", 0.0)
+                if entry_price > 0 and qty > 0:
+                    raw_pnl = (fill_price - entry_price) * qty if pos_side == "long" \
+                        else (entry_price - fill_price) * qty
+                    close_pnl = raw_pnl - close_fee
+                else:
+                    close_pnl = 0.0
+
+                strategy_name = pos_info.get("strategy_name", "unknown")
+                self._emit_round_trip(symbol, strategy_name, fill_price, close_pnl)
+                already_emitted.add(key)
+                break  # one emit per tracked position per tick
 
     def _refresh_kline_volume(self) -> None:
         """

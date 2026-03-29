@@ -285,6 +285,20 @@ class MarketDataDispatcher:
                     consumer.on_tick(trigger_event)
                 except Exception:
                     logger.exception("Tick consumer error / tick 消费者异常: %s", type(consumer).__name__)
+
+            # Notify consumers of tick fills for E1/G1 hooks
+            # (covers positions closed via risk_auto_close, time stop, soft stop — paths
+            #  that bypass the submit_order() route and would otherwise miss observations)
+            # 通知消费者 tick 成交，覆盖 E1/G1 路径（risk_auto_close/时间止损/软止损）
+            if result.get("orders_filled", 0) > 0:
+                for consumer in self._tick_consumers:
+                    if hasattr(consumer, "on_tick_result"):
+                        try:
+                            consumer.on_tick_result(result)
+                        except Exception:
+                            logger.exception(
+                                "Tick consumer on_tick_result error: %s", type(consumer).__name__
+                            )
         except Exception as e:
             logger.error("Engine tick failed: %s", e)
 

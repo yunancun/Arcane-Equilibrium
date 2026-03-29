@@ -36,7 +36,7 @@
 ## 三、当前系统状态（2026-03-29 Session 12）
 
 ```
-测试：432 全通过（430 control_api + 2 session12_fixes）
+测试：432 全通过（432 control_api，含 Session 12 的 4 个新测试）
 路由：113 条
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
@@ -83,16 +83,18 @@ Session 11 改进（1项）：
     - squeeze 时间止损约 14h，trending 约 72h（相比默认 48h）
     - 事后审计修复：_store → store（静默 AttributeError 导致 regime 未实际写入，已修复）
 
-Session 12 修复（2项）：
+Session 12 修复（4项）：
   F1: compute_partial_fill_qty() 添加尾量检查（remaining < 1% of qty → 一次性成交）
     - 修复 fill 碎片化：25-30 次成交/单 → ≤10 次/单
     - 连锁效果：n_active_orders 减少 → AI 注意力税燃烧率从 HIGH 降至 MEDIUM/LOW
   F2: check_positions_on_tick() 注意力税平仓添加最低 edge 保护
     - edge_usd > 0 改为 edge_usd > taker_close_fee_usd（notional × 0.00055）
     - 修复 0% 胜率根因：微小盈利（如 $0.0003）触发平仓，扣手续费后净亏损
-    - 注意力税恢复设计意图：仅在 edge 能覆盖平仓成本时才触发
-已知待处理：E1 观察记录只捕获 submit_order 路径，tick() 内 risk_auto_close 绕过 →
-  total_observations=0，下次修（需 MarketDataDispatcher → PipelineBridge 传递 tick_result）
+  E1a: PipelineBridge._on_round_trip_complete() 重构为 _emit_round_trip()
+    - 提取核心逻辑，intent 路径和 tick 路径共用
+  E1b: PipelineBridge.on_tick_result() 新增 + MarketDataDispatcher 传递 tick_result
+    - tick 路径平仓（risk_auto_close/时间止损/软止损）现在也触发 E1 观察记录
+    - 通过 fill 方向与 _open_positions 对比检测平仓，计算 close_pnl 写入观察
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -401,4 +403,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-29 Session 12：430 control_api 测试通过，113 路由。Session 12 修复 F1/F2：fill 碎片化（25-30 次→≤10 次/单）+ AI 注意力税微小盈利强制平仓（0% 胜率根因修复）。Session 11 改进 R1：regime 感知止损/止盈/时间三维调整。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-29 Session 12：432 control_api 测试通过，113 路由。Session 12 修复 F1/F2/E1a/E1b：fill 碎片化 + 注意力税微小盈利强制平仓（0% 胜率根因）+ E1 观察记录覆盖 tick 平仓路径。系统全程 read_only / disabled / not_granted。

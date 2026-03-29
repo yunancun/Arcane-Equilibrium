@@ -427,6 +427,118 @@ class TestPaperTradingAPI:
         )
         assert r.status_code == 200
 
+    def test_e1_observation_fires_on_tick_close(self, active_engine):
+        """E1 fix (Session 12): observations must be written for positions closed
+        via engine.tick() (risk_auto_close, time stop) not just via submit_order().
+        E1 修复：通过 tick 路径平仓（风控自动平仓/时间止损）也必须触发观察记录。"""
+        import types, sys, os
+
+        # Add program_code to path so local_model_tools is importable
+        _ctrl = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _prog = os.path.dirname(os.path.dirname(os.path.dirname(_ctrl)))
+        for p in (_ctrl, _prog):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+
+        from app.pipeline_bridge import PipelineBridge
+
+        # Minimal mocks for dependencies not used by on_tick_result
+        km = types.SimpleNamespace(on_price_event=lambda e: None, get_tracked_symbols=lambda: [])
+        ie = types.SimpleNamespace(get_indicators=lambda s, tf: None)
+        orch = types.SimpleNamespace(
+            dispatch_tick=lambda s, p, t: None,
+            collect_pending_intents=lambda: [],
+            on_signal=lambda sig: None,
+        )
+
+        bridge = PipelineBridge(km, ie, None, orch, active_engine,
+                                auto_submit_intents=False)
+        bridge.activate()
+
+        observations = []
+        bridge.set_observation_writer(lambda **kw: observations.append(kw))
+
+        # Simulate a tracked position (as if strategy's Buy market order already opened it)
+        bridge._open_positions["test_strategy:BTCUSDT"] = {
+            "symbol": "BTCUSDT",
+            "strategy_name": "test_strategy",
+            "side": "long",
+            "entry_price": 60000.0,
+            "qty": 0.001,
+            "entry_ts_ms": 0,
+            "regime": "trending",
+        }
+
+        # Simulate tick_result from engine.tick() with a risk_auto_close Sell fill
+        tick_result = {
+            "orders_filled": 1,
+            "fills": [{
+                "fill_id": "test_fill_001",
+                "symbol": "BTCUSDT",
+                "side": "Sell",
+                "qty": 0.001,
+                "price": 60100.0,
+                "fee": 0.033,
+                "notional": 60.1,
+                "ts_ms": 9999999999,
+                "is_simulated": True,
+            }],
+        }
+
+        bridge.on_tick_result(tick_result)
+
+        assert len(observations) == 1, (
+            f"Expected 1 E1 observation from tick close, got {len(observations)}"
+        )
+        obs = observations[0]
+        assert obs["symbol"] == "BTCUSDT"
+        assert obs["strategy_name"] == "test_strategy"
+        assert obs["regime"] == "trending"
+        # close_pnl = (60100-60000)*0.001 - 0.033 = 0.1 - 0.033 = 0.067
+        assert abs(obs["close_pnl"] - 0.067) < 0.001, f"Unexpected pnl: {obs['close_pnl']}"
+        assert "test_strategy:BTCUSDT" not in bridge._open_positions
+
+    def test_e1_observation_not_fired_for_open_fills(self, active_engine):
+        """on_tick_result must NOT fire E1 for same-side (opening) fills."""
+        import types, sys, os
+
+        _ctrl = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _prog = os.path.dirname(os.path.dirname(os.path.dirname(_ctrl)))
+        for p in (_ctrl, _prog):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+
+        from app.pipeline_bridge import PipelineBridge
+
+        km = types.SimpleNamespace(on_price_event=lambda e: None, get_tracked_symbols=lambda: [])
+        ie = types.SimpleNamespace(get_indicators=lambda s, tf: None)
+        orch = types.SimpleNamespace(
+            dispatch_tick=lambda s, p, t: None,
+            collect_pending_intents=lambda: [],
+            on_signal=lambda sig: None,
+        )
+        bridge = PipelineBridge(km, ie, None, orch, active_engine,
+                                auto_submit_intents=False)
+        bridge.activate()
+
+        observations = []
+        bridge.set_observation_writer(lambda **kw: observations.append(kw))
+
+        bridge._open_positions["test_strategy:BTCUSDT"] = {
+            "symbol": "BTCUSDT", "strategy_name": "test_strategy",
+            "side": "long", "entry_price": 60000.0, "qty": 0.001,
+            "entry_ts_ms": 0, "regime": "trending",
+        }
+
+        # Buy fill = opening direction for a long → must NOT trigger E1
+        tick_result = {
+            "orders_filled": 1,
+            "fills": [{"symbol": "BTCUSDT", "side": "Buy", "qty": 0.001,
+                        "price": 60100.0, "fee": 0.001, "notional": 60.1}],
+        }
+        bridge.on_tick_result(tick_result)
+        assert len(observations) == 0, "E1 must not fire for opening fills"
+
     def test_fill_fragmentation_dust_check(self, active_engine):
         """Fill fragmentation fix (Session 12): limit order completes in ≤10 fills,
         not 25-30. Remaining qty < 1% of original gets filled at once.
