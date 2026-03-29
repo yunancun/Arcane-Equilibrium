@@ -505,9 +505,9 @@ class TestQueryAndFilter:
             reason="Test",
         )
 
-        time.sleep(0.1)
+        time.sleep(0.01)
         mid_time = time.time()
-        time.sleep(0.1)
+        time.sleep(0.01)
 
         audit_log.record_change(
             change_type=ChangeType.CONFIG_CHANGE,

@@ -621,11 +621,11 @@ class TestDaemonSweepMode:
         enforcer, _, expiry_calls = ttl_enforcer_with_callbacks
         now_ms = int(time.time() * 1000)
 
-        # Register an entry with short TTL
+        # Register an entry with very short TTL
         custom_config = TTLConfig(
             state_machine_name="QuickExpire",
             state_name="QUICK",
-            max_duration_seconds=1,
+            max_duration_seconds=0.1,
             on_expiry_action=TTLExpiryAction.AUTO_EXPIRE,
             on_expiry_target_state="EXPIRED",
         )
@@ -634,10 +634,10 @@ class TestDaemonSweepMode:
         enforcer.register_entry("QuickExpire", "obj_1", "QUICK", now_ms)
 
         # Start daemon with short interval
-        enforcer.start_daemon_sweep(interval_seconds=0.5)
+        enforcer.start_daemon_sweep(interval_seconds=0.05)
 
-        # Wait for sweep to execute
-        time.sleep(2)
+        # Wait for sweep to execute (0.2s is enough for TTL of 0.1s and interval of 0.05s)
+        time.sleep(0.2)
 
         # Stop daemon
         enforcer.stop_daemon_sweep(timeout_seconds=2)

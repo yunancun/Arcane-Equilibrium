@@ -537,7 +537,7 @@ class TestScheduledReconciler:
         )
         reconciler.start()
         assert reconciler.is_running
-        time.sleep(0.5)
+        time.sleep(0.3)
         reconciler.stop()
         assert not reconciler.is_running
         assert engine.get_status()["total_runs"] >= 1
@@ -554,7 +554,7 @@ class TestScheduledReconciler:
 
         reconciler = ScheduledReconciler(engine, paper_fn, remote_fn, interval_sec=0.2)
         reconciler.start()
-        time.sleep(0.5)
+        time.sleep(0.3)
         reconciler.stop()
 
         assert engine.get_status()["total_discrepancies"] > 0
