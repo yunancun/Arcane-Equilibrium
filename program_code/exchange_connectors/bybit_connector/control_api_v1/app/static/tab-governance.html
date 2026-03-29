@@ -149,6 +149,45 @@
   </div>
 </div>
 
+<!-- ═══ Incident Timeline / 事件時間線 ═══ -->
+<div class="oc-card" id="incident-timeline-card">
+  <h3 style="cursor:pointer" onclick="toggleIncidentLog()">
+    &#x23F3; Incident Timeline / 事件時間線
+    <span id="incident-toggle" style="float:right">▼</span>
+  </h3>
+  <div id="incident-log-body">
+    <div id="incident-log-content" style="max-height:400px;overflow-y:auto">
+      <p style="color:var(--text-dim)">Loading... / 載入中...</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Audit Trail / 審計軌跡 ═══ -->
+<div class="oc-card" id="audit-trail-card">
+  <h3 style="cursor:pointer" onclick="toggleAuditTrail()">
+    &#x1F50E; Audit Trail / 審計軌跡
+    <span id="audit-toggle" style="float:right">▼</span>
+  </h3>
+  <div id="audit-trail-body">
+    <div class="oc-table-wrap">
+      <table class="oc-table" id="audit-trail-table">
+        <thead>
+          <tr>
+            <th>Time / 時間</th>
+            <th>SM</th>
+            <th>Event / 事件</th>
+            <th>From → To</th>
+            <th>Initiator / 觸發者</th>
+          </tr>
+        </thead>
+        <tbody id="audit-trail-tbody">
+          <tr><td colspan="5" style="color:var(--text-dim)">Loading... / 載入中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Modal: Approve Authorization ═══ -->
 <div id="modal-approve" class="oc-modal" style="display:none">
   <div class="oc-modal-content">
@@ -235,6 +274,144 @@ $('explain-governance').innerHTML = ocExplain(
 // ─── State Storage ─────────────────────────────────────────────
 let _currentStatus = null;
 let _currentRiskLevel = 0;
+
+// ─── Event Log (Incident Timeline & Audit Trail) ───────────────
+let _govEventLog = [];
+let _prevStatus = null;
+const MAX_EVENTS = 50;
+
+// ─── Toggle Functions for Collapsible Sections ────────────────
+function toggleIncidentLog() {
+  const body = document.getElementById('incident-log-body');
+  const toggle = document.getElementById('incident-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+function toggleAuditTrail() {
+  const body = document.getElementById('audit-trail-body');
+  const toggle = document.getElementById('audit-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+// ─── Change Detection & Event Logging ──────────────────────────
+function detectChanges(newStatus) {
+  if (!_prevStatus || !newStatus) { _prevStatus = newStatus; return; }
+  const now = new Date().toLocaleTimeString('zh-TW');
+
+  // Auth state change
+  const oldAuth = _prevStatus.authorization?.state;
+  const newAuth = newStatus.authorization?.state;
+  if (oldAuth && newAuth && oldAuth !== newAuth) {
+    _govEventLog.unshift({
+      time: now,
+      sm: 'Auth',
+      severity: newAuth === 'FROZEN' ? 'bad' : newAuth === 'RESTRICTED' ? 'warn' : 'good',
+      msg: 'Authorization: ' + oldAuth + ' → ' + newAuth,
+      from: oldAuth,
+      to: newAuth,
+      initiator: 'System'
+    });
+  }
+
+  // Risk level change
+  const oldRisk = _prevStatus.risk?.level;
+  const newRisk = newStatus.risk?.level;
+  if (oldRisk !== undefined && newRisk !== undefined && oldRisk !== newRisk) {
+    const NAMES = ['NORMAL','CAUTIOUS','REDUCED','DEFENSIVE','CIRCUIT_BREAKER','MANUAL_REVIEW'];
+    _govEventLog.unshift({
+      time: now,
+      sm: 'Risk',
+      severity: newRisk >= 4 ? 'bad' : newRisk >= 2 ? 'warn' : 'good',
+      msg: 'Risk Level: ' + oldRisk + ' (' + (NAMES[oldRisk]||'?') + ') → ' + newRisk + ' (' + (NAMES[newRisk]||'?') + ')',
+      from: NAMES[oldRisk] || String(oldRisk),
+      to: NAMES[newRisk] || String(newRisk),
+      initiator: newRisk > oldRisk ? 'Auto-escalation' : 'Operator'
+    });
+  }
+
+  // Mode change
+  const oldMode = _prevStatus.mode;
+  const newMode = newStatus.mode;
+  if (oldMode && newMode && oldMode !== newMode) {
+    _govEventLog.unshift({
+      time: now,
+      sm: 'Hub',
+      severity: newMode === 'FROZEN' ? 'bad' : newMode === 'RESTRICTED' ? 'warn' : 'good',
+      msg: 'Governance Mode: ' + oldMode + ' → ' + newMode,
+      from: oldMode,
+      to: newMode,
+      initiator: 'Cross-SM'
+    });
+  }
+
+  // Consistency change
+  const oldCon = _prevStatus.reconciliation?.is_consistent;
+  const newCon = newStatus.reconciliation?.is_consistent;
+  if (oldCon !== undefined && newCon !== undefined && oldCon !== newCon) {
+    _govEventLog.unshift({
+      time: now,
+      sm: 'Recon',
+      severity: newCon ? 'good' : 'bad',
+      msg: 'Consistency: ' + (oldCon ? 'OK' : 'Diverged') + ' → ' + (newCon ? 'OK' : 'Diverged'),
+      from: oldCon ? 'Consistent' : 'Diverged',
+      to: newCon ? 'Consistent' : 'Diverged',
+      initiator: 'Reconciliation'
+    });
+  }
+
+  // Trim to max events
+  if (_govEventLog.length > MAX_EVENTS) _govEventLog.length = MAX_EVENTS;
+  _prevStatus = newStatus;
+}
+
+function renderIncidentLog() {
+  const el = document.getElementById('incident-log-content');
+  if (_govEventLog.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-dim);padding:8px">No events yet / 尚無事件。Events are detected during auto-refresh. / 事件在自動刷新時偵測。</p>';
+    return;
+  }
+  let html = '';
+  for (const e of _govEventLog) {
+    html += '<div style="padding:8px 0;border-bottom:1px solid var(--border)">';
+    html += '<span style="color:var(--text-dim);font-size:0.85em;margin-right:8px">' + ocEsc(e.time) + '</span>';
+    html += ocChip(e.sm, 'neutral') + ' ';
+    html += ocChip(e.severity === 'bad' ? 'CRITICAL' : e.severity === 'warn' ? 'WARNING' : 'INFO', e.severity) + ' ';
+    html += '<span>' + ocEsc(e.msg) + '</span>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderAuditTrail() {
+  const tbody = document.getElementById('audit-trail-tbody');
+  if (_govEventLog.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">No state changes detected / 尚未偵測到狀態變更</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const e of _govEventLog) {
+    html += '<tr>';
+    html += '<td>' + ocEsc(e.time) + '</td>';
+    html += '<td>' + ocChip(e.sm, 'neutral') + '</td>';
+    html += '<td>' + ocEsc(e.msg) + '</td>';
+    html += '<td>' + ocEsc(e.from) + ' → ' + ocEsc(e.to) + '</td>';
+    html += '<td>' + ocEsc(e.initiator) + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
 
 // ─── Modal Functions ──────────────────────────────────────────
 function showApprovalModal() {
@@ -481,6 +658,11 @@ async function loadAll() {
     renderLeaseCard(leases);
     renderReconCard(recon);
     renderSummary(_currentStatus);
+
+    // Detect changes and render incident/audit logs
+    detectChanges(_currentStatus);
+    renderIncidentLog();
+    renderAuditTrail();
   }
 }
 
