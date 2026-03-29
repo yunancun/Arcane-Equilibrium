@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Governance Control Center</title>
+<script src="/static/common.js"></script>
+<script src="/static/governance.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!-- ═══ Page Header ═══ -->
+<div class="oc-card">
+  <h2>&#x2696; Governance Control Center / 治理控制中心</h2>
+  <div class="subtitle">授权、风控、租约、对账的统一控制台</div>
+  <div id="explain-governance"></div>
+</div>
+
+<!-- ═══ 2x2 Grid: 4 Cards ═══ -->
+<div class="oc-grid-2">
+
+  <!-- Card 1: Authorization (SM-01) -->
+  <div class="oc-card">
+    <h3>&#x1F511; Authorization / 授权</h3>
+    <div class="subtitle">SM-01 | 授权状态和范围</div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">State / 状态</div>
+        <div id="auth-state-badge">--</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Expires / 过期</div>
+        <div id="auth-expiry" style="font-size:13px">--</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Scope / 范围</div>
+      <div id="auth-scope" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;max-height:80px;overflow-y:auto">--</div>
+    </div>
+
+    <div id="auth-pending-indicator" style="display:none;margin-bottom:12px;padding:8px;background:rgba(56,139,253,0.1);border-left:3px solid var(--blue);border-radius:0 6px 6px 0">
+      <div style="font-size:12px;color:var(--blue)">Pending Approval / 待批准</div>
+    </div>
+
+    <button class="oc-btn oc-btn-primary" id="btn-approve" style="width:100%;display:none" onclick="showApprovalModal()">
+      &#x2714; Approve / 批准
+    </button>
+  </div>
+
+  <!-- Card 2: Risk Governor (SM-04) -->
+  <div class="oc-card">
+    <h3>&#x1F6E1; Risk Governor / 风控治理</h3>
+    <div class="subtitle">SM-04 | 风险等级和模式</div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等级</div>
+        <div id="risk-level-badge">--</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Mode / 模式</div>
+        <div id="risk-mode-badge">--</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Reason / 原因</div>
+      <div id="risk-reason" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px;white-space:pre-wrap">--</div>
+    </div>
+
+    <button class="oc-btn oc-btn-primary" id="btn-override" style="width:100%" onclick="showOverrideModal()">
+      &#x1F4A7; De-escalate / 降级
+    </button>
+  </div>
+
+  <!-- Card 3: Decision Leases (SM-02) -->
+  <div class="oc-card">
+    <h3>&#x1F4DD; Decision Leases / 决策租约</h3>
+    <div class="subtitle">SM-02 | 活跃租约追踪</div>
+
+    <div class="oc-metrics">
+      <div class="oc-metric">
+        <div class="oc-metric-label">Active Leases / 活跃租约</div>
+        <div class="oc-metric-val" id="lease-active">--</div>
+      </div>
+      <div class="oc-metric">
+        <div class="oc-metric-label">Total Tracked / 总追踪数</div>
+        <div class="oc-metric-val" id="lease-total">--</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 4: Reconciliation (EX-04) -->
+  <div class="oc-card">
+    <h3>&#x1F503; Reconciliation / 对账</h3>
+    <div class="subtitle">EX-04 | 一致性检查和手动触发</div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 状态</div>
+        <div id="recon-consistency">--</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最后检查</div>
+        <div id="recon-time" style="font-size:12px">--</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Result / 结果</div>
+      <div id="recon-result" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px">--</div>
+    </div>
+
+    <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
+      &#x1F504; Trigger / 触发对账
+    </button>
+  </div>
+
+</div>
+
+<!-- ═══ Cross-SM Summary ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4CA; Governance Summary / 治理摘要</h3>
+
+  <div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+    <div class="oc-metric">
+      <div class="oc-metric-label">Enabled / 启用</div>
+      <div class="oc-metric-val" id="summary-enabled">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Mode / 模式</div>
+      <div class="oc-metric-val" id="summary-mode">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Incidents / 事件</div>
+      <div class="oc-metric-val" id="summary-incidents">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Errors / 错误</div>
+      <div class="oc-metric-val" id="summary-errors">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Updated / 更新</div>
+      <div class="oc-metric-val" id="summary-time" style="font-size:11px">--</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal: Approve Authorization ═══ -->
+<div id="modal-approve" class="oc-modal" style="display:none">
+  <div class="oc-modal-content">
+    <h3>Approve Authorization / 批准授权</h3>
+    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+      Enter your approval reason (1-500 characters)
+    </p>
+    <textarea id="approve-note" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+      placeholder="Approval reason / 批准理由..." maxlength="500"></textarea>
+    <div class="oc-modal-footer">
+      <button class="oc-btn" onclick="hideApprovalModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-success" onclick="submitApproval()">Submit / 提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal: Override Risk Level ═══ -->
+<div id="modal-override" class="oc-modal" style="display:none">
+  <div class="oc-modal-content">
+    <h3>De-escalate Risk Level / 降级风险等级</h3>
+    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+      Select target risk level (de-escalation only)
+    </p>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Level / 目标等级</label>
+      <select id="override-level" class="oc-select" style="width:100%">
+        <option value="">-- Select Level --</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
+      <textarea id="override-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+        placeholder="Reason for de-escalation / 降级原因..." maxlength="500"></textarea>
+    </div>
+    <div class="oc-modal-footer">
+      <button class="oc-btn" onclick="hideOverrideModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-success" onclick="submitOverride()">Submit / 提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal: Trigger Reconciliation ═══ -->
+<div id="modal-reconcile" class="oc-modal" style="display:none">
+  <div class="oc-modal-content">
+    <h3>Manual Reconciliation / 手动对账</h3>
+    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+      Trigger a manual reconciliation check (1-500 characters)
+    </p>
+    <textarea id="reconcile-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+      placeholder="Reason for manual reconciliation / 手动对账原因..." maxlength="500"></textarea>
+    <div class="oc-modal-footer">
+      <button class="oc-btn" onclick="hideReconcileModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-success" onclick="submitReconcile()">Submit / 提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal CSS ═══ -->
+<style>
+.oc-modal {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.6); display: flex; align-items: center;
+  justify-content: center; z-index: 1000;
+}
+.oc-modal-content {
+  background: var(--card-bg); border-radius: 12px; padding: 24px;
+  width: 480px; max-width: 90vw;
+}
+.oc-modal-content h3 {
+  font-size: 15px; font-weight: 600; margin-bottom: 8px;
+}
+.oc-modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
+}
+</style>
+
+<script>
+// ─── Explainers ───────────────────────────────────────────────
+$('explain-governance').innerHTML = ocExplain(
+  '治理系统是 OpenClaw 的安全核心，通过 4 个状态机管理授权、风控、租约、对账。',
+  '授权 SM (SM-01) 控制操作权限和有效期。风控 SM (SM-04) 动态调整风险等级。租约 SM (SM-02) 管理决策生命周期。对账引擎 (EX-04) 检查纸上交易与交易所的一致性。这些组件通过级联规则联动，确保整个系统始终处于安全状态。'
+);
+
+// ─── State Storage ─────────────────────────────────────────────
+let _currentStatus = null;
+let _currentRiskLevel = 0;
+
+// ─── Modal Functions ──────────────────────────────────────────
+function showApprovalModal() {
+  $('approve-note').value = '';
+  $('modal-approve').style.display = 'flex';
+}
+
+function hideApprovalModal() {
+  $('modal-approve').style.display = 'none';
+}
+
+function showOverrideModal() {
+  $('override-level').value = '';
+  $('override-reason').value = '';
+  $('modal-override').style.display = 'flex';
+}
+
+function hideOverrideModal() {
+  $('modal-override').style.display = 'none';
+}
+
+function showReconcileModal() {
+  $('reconcile-reason').value = '';
+  $('modal-reconcile').style.display = 'flex';
+}
+
+function hideReconcileModal() {
+  $('modal-reconcile').style.display = 'none';
+}
+
+// ─── Form Submission ──────────────────────────────────────────
+async function submitApproval() {
+  const note = $('approve-note').value.trim();
+  if (!note) {
+    ocToast('Please enter an approval note / 请输入批准备注', 'error');
+    return;
+  }
+
+  const d = await govPostApprove(note);
+  if (d && d.ok) {
+    ocToast('Authorization approved / 授权已批准', 'success');
+    hideApprovalModal();
+    loadAll();
+  } else {
+    ocToast(d ? d.message : 'Approval failed / 批准失败', 'error');
+  }
+}
+
+async function submitOverride() {
+  const level = $('override-level').value;
+  const reason = $('override-reason').value.trim();
+
+  if (!level) {
+    ocToast('Please select target level / 请选择目标等级', 'error');
+    return;
+  }
+  if (!reason) {
+    ocToast('Please enter a reason / 请输入原因', 'error');
+    return;
+  }
+
+  const d = await govPostOverride(level, reason);
+  if (d && d.ok) {
+    ocToast('Risk level de-escalated / 风险等级已降级', 'success');
+    hideOverrideModal();
+    loadAll();
+  } else {
+    ocToast(d ? d.message : 'Override failed / 降级失败', 'error');
+  }
+}
+
+async function submitReconcile() {
+  const reason = $('reconcile-reason').value.trim();
+  if (!reason) {
+    ocToast('Please enter a reason / 请输入原因', 'error');
+    return;
+  }
+
+  const d = await govPostReconcile(reason);
+  if (d && d.ok) {
+    ocToast('Reconciliation triggered / 对账已触发', 'success');
+    hideReconcileModal();
+    loadAll();
+  } else {
+    ocToast(d ? d.message : 'Reconciliation failed / 对账失败', 'error');
+  }
+}
+
+// ─── Render Functions ─────────────────────────────────────────
+
+function renderAuthCard(authData) {
+  if (!authData) {
+    ocSetHtml('auth-state-badge', ocChip('UNAVAILABLE', 'neutral'));
+    ocSetText('auth-expiry', '--');
+    ocSetText('auth-scope', '--');
+    $('btn-approve').style.display = 'none';
+    $('auth-pending-indicator').style.display = 'none';
+    return;
+  }
+
+  const state = authData.state || 'UNKNOWN';
+  ocSetHtml('auth-state-badge', govAuthBadge(state));
+
+  const expiresMs = authData.expires_at_ms;
+  ocSetText('auth-expiry', expiresMs ? govExpiryCountdown(expiresMs) : '--');
+
+  const scope = authData.scope || {};
+  let scopeHtml = '<div style="font-size:12px">';
+  if (typeof scope === 'object' && Object.keys(scope).length) {
+    Object.entries(scope).forEach(([k, v]) => {
+      scopeHtml += '<div>' + ocEsc(k) + ': ';
+      if (Array.isArray(v)) {
+        scopeHtml += v.map(x => ocEsc(String(x))).join(', ');
+      } else {
+        scopeHtml += ocEsc(String(v));
+      }
+      scopeHtml += '</div>';
+    });
+  } else {
+    scopeHtml += '--';
+  }
+  scopeHtml += '</div>';
+  ocSetHtml('auth-scope', scopeHtml);
+
+  const isPending = authData.pending_approval === true;
+  $('auth-pending-indicator').style.display = isPending ? 'block' : 'none';
+  $('btn-approve').style.display = isPending ? '' : 'none';
+}
+
+function renderRiskCard(riskData) {
+  if (!riskData) {
+    ocSetHtml('risk-level-badge', ocChip('UNAVAILABLE', 'neutral'));
+    ocSetHtml('risk-mode-badge', ocChip('--', 'neutral'));
+    ocSetText('risk-reason', '--');
+    return;
+  }
+
+  const level = riskData.level != null ? riskData.level : 0;
+  _currentRiskLevel = level;
+
+  ocSetHtml('risk-level-badge', govRiskBadge(level));
+
+  const mode = riskData.mode || 'UNKNOWN';
+  ocSetHtml('risk-mode-badge', govModeBadge(mode));
+
+  const reason = riskData.escalation_reason || '--';
+  ocSetText('risk-reason', ocEsc(reason));
+
+  // Populate override dropdown with lower levels
+  const selectEl = $('override-level');
+  selectEl.innerHTML = '<option value="">-- Select Level --</option>';
+  for (let i = 0; i < level; i++) {
+    const levelName = GOV_RISK_LEVELS[i] || 'LEVEL_' + i;
+    selectEl.innerHTML += '<option value="' + levelName + '">' + i + ' — ' + levelName + '</option>';
+  }
+
+  // Disable override button if already at NORMAL
+  $('btn-override').disabled = (level === 0);
+}
+
+function renderLeaseCard(leaseData) {
+  if (!leaseData) {
+    ocSetText('lease-active', '--');
+    ocSetText('lease-total', '--');
+    return;
+  }
+
+  const activeCount = leaseData.active_count != null ? leaseData.active_count : 0;
+  const totalCount = leaseData.total_tracked != null ? leaseData.total_tracked : 0;
+
+  ocSetText('lease-active', String(activeCount));
+  ocSetText('lease-total', String(totalCount));
+}
+
+function renderReconCard(reconData) {
+  if (!reconData) {
+    ocSetHtml('recon-consistency', ocChip('UNAVAILABLE', 'neutral'));
+    ocSetText('recon-time', '--');
+    ocSetText('recon-result', '--');
+    return;
+  }
+
+  const isConsistent = reconData.is_consistent;
+  ocSetHtml('recon-consistency', govConsistencyIcon(isConsistent));
+
+  const lastMs = reconData.last_check_ms;
+  ocSetText('recon-time', lastMs ? ocTime(lastMs) : '--');
+
+  const result = reconData.last_result || '--';
+  ocSetText('recon-result', ocEsc(result));
+}
+
+function renderSummary(fullStatus) {
+  const enabled = fullStatus.enabled === true;
+  const mode = fullStatus.mode || 'UNKNOWN';
+  const incidents = fullStatus.incidents || 0;
+  const errors = fullStatus.callback_errors || 0;
+  const timestamp = fullStatus.timestamp_ms;
+
+  ocSetHtml('summary-enabled', ocChip(enabled ? 'Yes' : 'No', enabled ? 'good' : 'warn'));
+  ocSetHtml('summary-mode', govModeBadge(mode));
+  ocSetText('summary-incidents', String(incidents));
+  ocSetText('summary-errors', String(errors));
+  ocSetText('summary-time', timestamp ? ocTimeShort(timestamp) : '--');
+}
+
+function showUnavailable() {
+  const unavailMsg = ocChip('Governance Hub Not Available / 治理中枢未启用', 'warn');
+
+  // Clear all cards
+  $('auth-state-badge').innerHTML = unavailMsg;
+  $('risk-level-badge').innerHTML = unavailMsg;
+  $('lease-active').textContent = '--';
+  $('lease-total').textContent = '--';
+  $('recon-consistency').innerHTML = unavailMsg;
+
+  // Hide action buttons
+  $('btn-approve').disabled = true;
+  $('btn-override').disabled = true;
+  $('btn-reconcile').disabled = true;
+}
+
+// ─── Data Loading ─────────────────────────────────────────────
+async function loadAll() {
+  const d = await govGetStatus();
+
+  if (!d || !d.ok) {
+    if (d && d.error_code === 'governance_hub_unavailable') {
+      showUnavailable();
+    }
+    return;
+  }
+
+  _currentStatus = d.data;
+
+  if (_currentStatus) {
+    const auth = _currentStatus.authorization || {};
+    const risk = _currentStatus.risk || {};
+    const leases = _currentStatus.leases || {};
+    const recon = _currentStatus.reconciliation || {};
+
+    renderAuthCard(auth);
+    renderRiskCard(risk);
+    renderLeaseCard(leases);
+    renderReconCard(recon);
+    renderSummary(_currentStatus);
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────
+loadAll();
+ocStartRefresh(loadAll, 15000);
+
+// Close modals on background click
+['modal-approve', 'modal-override', 'modal-reconcile'].forEach(id => {
+  $(id).addEventListener('click', function(e) {
+    if (e.target === this) {
+      this.style.display = 'none';
+    }
+  });
+});
+</script>
+
+</body>
+</html>

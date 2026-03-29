@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Risk & Stops</title>
 <script src="/static/common.js"></script>
+<script src="/static/governance.js"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -28,6 +29,55 @@
     <div class="oc-metric"><div class="oc-metric-label">Session Halted</div><div class="oc-metric-val" id="r-halted">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Loss Cooldown</div><div class="oc-metric-val" id="r-cooldown">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Consecutive Losses</div><div class="oc-metric-val" id="r-losses">--</div></div>
+  </div>
+</div>
+
+<!-- ═══ Risk Governor (SM-04) / 風險治理狀態機 ═══ -->
+<div class="oc-card" id="risk-governor-card">
+  <h3>Risk Governor (SM-04) / 風險治理等級</h3>
+  <div id="rg-explainer"></div>
+  <div class="oc-metrics">
+    <div class="oc-metric">
+      <span class="label">Level / 等級</span>
+      <span id="rg-level">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Level Name / 等級名稱</span>
+      <span id="rg-name">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Escalation Reason / 升級原因</span>
+      <span id="rg-reason">—</span>
+    </div>
+    <div class="oc-metric">
+      <span class="label">Gov Mode / 治理模式</span>
+      <span id="rg-mode">—</span>
+    </div>
+  </div>
+  <div style="margin-top:12px">
+    <button class="oc-btn" id="rg-override-btn" onclick="showRiskOverrideModal()" style="display:none">
+      De-escalate / 降級 ▼
+    </button>
+  </div>
+</div>
+
+<!-- Risk Override Modal -->
+<div class="oc-modal" id="modal-risk-override" style="display:none">
+  <div class="oc-modal-content">
+    <h3>De-escalate Risk Level / 降級風險等級</h3>
+    <div style="margin:12px 0">
+      <label style="display:block;margin-bottom:4px">Target Level / 目標等級</label>
+      <select id="rg-target-level" style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)">
+      </select>
+    </div>
+    <div style="margin:12px 0">
+      <label style="display:block;margin-bottom:4px">Reason / 原因</label>
+      <textarea id="rg-override-reason" maxlength="500" rows="3" placeholder="De-escalation reason / 降級原因..." style="width:100%;padding:8px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="oc-btn" onclick="closeRiskOverrideModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-success" onclick="submitRiskOverride()">Submit / 提交</button>
+    </div>
   </div>
 </div>
 
@@ -164,7 +214,101 @@
 </div>
 
 <script>
+// ─── Modal CSS ────────────────────────────────────────────────
+if (!document.getElementById('oc-modal-css')) {
+  const modalStyle = document.createElement('style');
+  modalStyle.id = 'oc-modal-css';
+  modalStyle.textContent = `
+    .oc-modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:1000; }
+    .oc-modal-content { background:var(--card-bg); border-radius:12px; padding:24px; width:480px; max-width:90vw; }
+  `;
+  document.head.appendChild(modalStyle);
+}
+
+// ─── Risk Governor Constants ────────────────────────────────────
+const RISK_LEVEL_NAMES = ['NORMAL', 'CAUTIOUS', 'REDUCED', 'DEFENSIVE', 'CIRCUIT_BREAKER', 'MANUAL_REVIEW'];
+const RISK_LEVEL_COLORS = { 0: 'good', 1: 'good', 2: 'warn', 3: 'warn', 4: 'bad', 5: 'bad' };
+let _currentRiskLevel = null;
+
+// ─── Risk Governor Functions ───────────────────────────────────
+async function loadRiskGovernor() {
+  try {
+    const d = await ocApi('/api/v1/governance/risk/level');
+    if (!d || !d.ok || !d.data) {
+      ocSetHtml('rg-level', '—');
+      ocSetHtml('rg-name', '—');
+      ocSetHtml('rg-reason', '—');
+      ocSetHtml('rg-mode', '—');
+      document.getElementById('rg-override-btn').style.display = 'none';
+      return;
+    }
+    const r = d.data;
+    _currentRiskLevel = r.level;
+
+    // Level with color badge
+    ocSetHtml('rg-level', ocChip(String(r.level), RISK_LEVEL_COLORS[r.level] || 'neutral'));
+    ocSetHtml('rg-name', ocChip(r.level_name || RISK_LEVEL_NAMES[r.level] || '?', RISK_LEVEL_COLORS[r.level] || 'neutral'));
+    ocSetHtml('rg-reason', ocEsc(r.escalation_reason || 'None / 無'));
+
+    // Mode badge
+    const modeColors = { NORMAL: 'good', RESTRICTED: 'warn', FROZEN: 'bad', MANUAL_REVIEW: 'info' };
+    ocSetHtml('rg-mode', ocChip(r.mode || '—', modeColors[r.mode] || 'neutral'));
+
+    // Show override button only if level > 0 (can de-escalate)
+    document.getElementById('rg-override-btn').style.display = r.level > 0 ? '' : 'none';
+  } catch (e) {
+    console.warn('Risk governor unavailable:', e);
+  }
+}
+
+function showRiskOverrideModal() {
+  const sel = document.getElementById('rg-target-level');
+  sel.innerHTML = '';
+  // Only show levels BELOW current (de-escalation)
+  for (let i = 0; i < _currentRiskLevel; i++) {
+    const opt = document.createElement('option');
+    opt.value = RISK_LEVEL_NAMES[i];
+    opt.textContent = i + ' — ' + RISK_LEVEL_NAMES[i];
+    sel.appendChild(opt);
+  }
+  document.getElementById('rg-override-reason').value = '';
+  document.getElementById('modal-risk-override').style.display = 'flex';
+}
+
+function closeRiskOverrideModal() {
+  document.getElementById('modal-risk-override').style.display = 'none';
+}
+
+async function submitRiskOverride() {
+  const level = document.getElementById('rg-target-level').value;
+  const reason = document.getElementById('rg-override-reason').value.trim();
+  if (!reason || reason.length < 1) {
+    ocToast('Please enter a reason / 請輸入原因', 'error');
+    return;
+  }
+  try {
+    const d = await ocPost('/api/v1/governance/risk/override', {
+      target_level: level,
+      reason: reason
+    });
+    document.getElementById('modal-risk-override').style.display = 'none';
+    if (d && d.ok) {
+      ocToast('Risk level de-escalated / 風險等級已降級', 'success');
+    } else {
+      ocToast('Override failed: ' + (d?.message || 'Unknown error'), 'error');
+    }
+    await loadRiskGovernor();
+  } catch (e) {
+    ocToast('Override error / 降級失敗: ' + e.message, 'error');
+  }
+}
+
 // ─── Explainers ───────────────────────────────────────────────
+$('rg-explainer').innerHTML = ocExplain(
+  'SM-04 Risk Governor monitors system risk and auto-escalates when thresholds are breached. Only de-escalation (lowering the level) is allowed via override.',
+  'SM-04 風險治理狀態機監控系統風險，當閾值被突破時自動升級。只允許通過覆蓋操作進行降級（降低等級）。六個等級：NORMAL (0) → CAUTIOUS (1) → REDUCED (2) → DEFENSIVE (3) → CIRCUIT_BREAKER (4) → MANUAL_REVIEW (5)。升級可自動觸發，降級需要 Operator 手動審批。'
+);
+
 $('explain-risk').innerHTML = ocExplain(
   '风控系统保护你的资金安全。它使用三层保护：品类限制（最严格）、全局限制（中等）、AI 可调参数（最灵活）。当风险过高时，系统会自动降低仓位或暂停交易。',
   '风控框架采用 P0/P1/P2 三层架构。P0 是按品类的硬上限（如单品种最大持仓、资金费率上限），由人工设定且不可被 AI 覆盖。P1 是全局限制（最大杠杆、最大回撤、最大敞口百分比）。P2 是 AI 可自主调整的参数（止损百分比、跟踪止损、仓位大小），Agent 会根据市场 regime 和历史表现动态调整这些参数。'
@@ -446,7 +590,7 @@ async function loadAIContext() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadRiskStatus(), loadRiskConfig(), loadAIContext()]);
+  await Promise.allSettled([loadRiskGovernor(), loadRiskStatus(), loadRiskConfig(), loadAIContext()]);
 }
 
 loadAll();
