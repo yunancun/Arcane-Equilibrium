@@ -47,7 +47,7 @@
   </div>
 
   <!-- Performance Metrics -->
-  <details class="oc-collapse">
+  <details class="oc-collapse" open>
     <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
     <div class="oc-collapse-body">
       <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">Loading...</div></div>
@@ -140,7 +140,7 @@ function renderBalance(raw) {
   const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
   ocSetText('d-equity', '$' + ocNum(equity, 2));
 
-  const available = parseFloat(b.availableBalance || b.available_balance || b.available || 0);
+  const available = parseFloat(b.totalAvailableBalance || b.availableBalance || b.available_balance || 0);
   ocSetText('d-available', '$' + ocNum(available, 2));
 
   const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0);
@@ -151,7 +151,8 @@ function renderBalance(raw) {
   elU.textContent = ocMoney(unrealized);
   elU.className = 'oc-metric-val ' + ocPnlClass(unrealized);
 
-  const realized = parseFloat(b.totalRealizedPL || b.realized_pnl || b.total_realized_pnl || 0);
+  // cumRealisedPnl is per-coin; sum up from coin[] array
+  const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
   const elR = $('d-realized');
   elR.textContent = ocMoney(realized);
   elR.className = 'oc-metric-val ' + ocPnlClass(realized);
@@ -219,11 +220,12 @@ async function loadComparison() {
   if (demo.result && demo.result.list && demo.result.list[0]) {
     demoB = demo.result.list[0];
   }
+  const demoRealized = (demoB.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
   const rows = [
-    ['Net / Realized PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(parseFloat(demoB.totalRealizedPL || 0))],
+    ['Realized PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(demoRealized)],
     ['Unrealized PnL', ocMoney(paperPnl.unrealized_pnl), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
     ['Total Equity', '$' + ocNum(100000 + (paperPnl.net_paper_pnl || 0), 2), '$' + ocNum(parseFloat(demoB.totalEquity || 0), 2)],
-    ['Available Balance', '--', '$' + ocNum(parseFloat(demoB.availableBalance || 0), 2)],
+    ['Available Balance', '--', '$' + ocNum(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 
   let html = '';
@@ -247,10 +249,10 @@ function loadDemoMetrics(raw) {
   if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">No data</div>'); return; }
 
   const equity = parseFloat(b.totalEquity || 0);
-  const available = parseFloat(b.availableBalance || 0);
+  const available = parseFloat(b.totalAvailableBalance || b.availableBalance || 0);
   const marginUsed = parseFloat(b.totalInitialMargin || 0);
   const unrealized = parseFloat(b.totalPerpUPL || 0);
-  const realized = parseFloat(b.totalRealizedPL || 0);
+  const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
   const imRate = parseFloat(b.accountIMRate || 0);
 
   const items = [

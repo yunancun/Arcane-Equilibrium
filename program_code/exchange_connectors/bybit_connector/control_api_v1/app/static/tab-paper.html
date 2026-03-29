@@ -239,7 +239,9 @@ async function loadSession() {
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
   if (!d || !d.data) return;
-  const positions = d.data.positions || d.data || [];
+  // API returns a dict keyed by symbol; convert to array
+  const raw = d.data.positions || d.data || {};
+  const positions = Array.isArray(raw) ? raw : Object.values(raw);
   if (!positions.length) {
     ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="7">暂无持仓 / No open positions</td></tr>');
     return;
@@ -247,12 +249,22 @@ async function loadPositions() {
   let html = '';
   positions.forEach(p => {
     const pnl = p.unrealized_pnl || 0;
+    const qty = p.qty || 0;
+    const entryPrice = p.avg_entry_price || p.entry_price || 0;
+    // Compute approximate mark price from unrealized PnL
+    let markPrice = 0;
+    if (qty > 0 && entryPrice > 0) {
+      markPrice = p.side === 'Buy'
+        ? entryPrice + pnl / qty
+        : entryPrice - pnl / qty;
+    }
+    const decimals = entryPrice < 1 ? 4 : 2;
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(p.side) + '</td>';
-    html += '<td>' + ocNum(p.qty, 4) + '</td>';
-    html += '<td>' + ocNum(p.entry_price, 2) + '</td>';
-    html += '<td>' + ocNum(p.mark_price || p.current_price, 2) + '</td>';
+    html += '<td>' + ocNum(qty, 4) + '</td>';
+    html += '<td>' + ocNum(entryPrice, decimals) + '</td>';
+    html += '<td>' + (markPrice > 0 ? ocNum(markPrice, decimals) : '--') + '</td>';
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
     html += '</tr>';
