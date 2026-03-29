@@ -154,18 +154,75 @@ if (edge_usd > taker_close_fee_usd
 
 ---
 
-## 六、仍待处理问题
+## 六、仍待处理问题（后端部分，截至本次修复后）
 
 | 问题 | 优先级 | 说明 |
 |------|--------|------|
-| E1 观察记录未写入 | P1 | 需要 MarketDataDispatcher → PipelineBridge tick_result 通道 |
+| ✅ E1 观察记录未写入 | P1 → 已修复 | E1a/E1b：tick 路径平仓现在也触发观察写入 |
 | 策略整体负向边际 | P2 | MA 交叉在震荡市场中仍有系统性 buy-high-sell-low 倾向 |
 | Holding period 仅 25 条记录 | P3 | 指标不完整，影响分析 |
-| Learning Cockpit GUI 空数据 | P3 | 依赖 E1 修复 |
+| Learning Cockpit GUI 空数据 | P3 → 已修复 | 见下方 GUI 修复 G6 |
 
 ---
 
-## 七、服务状态
+## 七、GUI 修复（同次 session，5 项问题 6 项修复）
+
+### G1：tab-paper 活跃订单永远为空
+
+**根因**：订单过滤器用了 `'new' || 'partially_filled' || 'open'`，但引擎实际状态为 `paper_order_working` / `paper_order_partially_filled`。
+**修复**：更新过滤条件为 `paper_order_working` / `paper_order_partially_filled`。
+
+---
+
+### G2：tab-paper 行情价格小数位固定 2 位
+
+**根因**：`ocNum(p, 2)` 对 $0.37 的代币显示 `$0.37`（正确），但对 $0.003 的代币显示 `$0.00`。
+**修复**：自适应小数位 —— `p < 0.01 → 6位，p < 1 → 4位，≥1 → 2位`。
+
+---
+
+### G3：tab-paper 成交历史时间戳为空
+
+**根因**：`f.filled_at || f.timestamp` 均为 undefined，API 实际字段为 `ts_ms`。
+**修复**：优先序改为 `f.ts_ms || f.filled_at || f.timestamp`。
+
+---
+
+### G4：tab-paper 余额显示初始值而非当前值
+
+**根因**：`loadSession()` 直接用 `s.initial_balance`（固定 $100,000），从不更新。
+**修复**：`loadMetrics()` 执行后若 `dm.current_balance != null` 则更新余额显示，并打 `dataset.fromMetrics` 标记防止 `loadSession()` 覆盖。
+
+---
+
+### G5：tab-demo Paper vs Demo 对比不显示 Bybit 数据 + 无性能指标区
+
+**根因**：
+1. `loadComparison()` 直接读 `demo.realized_pnl`，但 API 返回 `{retCode:0, result:{list:[{totalRealizedPL,...}]}}`，未提取 `result.list[0]`。
+2. Demo 页面没有类似 Paper Trading 的性能指标折叠区。
+3. `/strategy/demo/status` 端点返回 404，fallback 路径产生噪音。
+
+**修复**：
+- 提取 `demoB = demo.result.list[0]`，映射 `totalRealizedPL / totalPerpUPL / totalEquity / availableBalance`。
+- 新增"性能指标"折叠区（6 项：Equity/Available/Margin Used/Margin Rate/Unrealized PnL/Realized PnL），数据来自 balance API 响应。
+- 移除 404 status 回退路径。
+
+---
+
+### G6：tab-learning 概览计数全显示 0
+
+**根因**：
+- `loadOverview()` 读 `/learning/overview` 返回的 `{summary:{...}, experiments:{active_experiment_count:0}}`，但字段路径 `o.observation_count` / `o.lessons` 均不存在。
+- 实际计数在 `/learning/feed` 返回的 `totals.total_observations` 等字段中。
+- `loadFeed()` 读 `d.data.items || d.data.feed`，均不存在；实际字段为 `observations_recent` / `lessons_recent` 数组。
+
+**修复**：
+- `loadOverview()` 改为同时请求两个端点：从 `/learning/feed → totals` 读计数，从 `/learning/overview → experiments` 读活跃实验数。
+- `loadFeed()` 改用 `observations_recent` + `lessons_recent`，合并渲染，空时显示总计数（`total_observations: 0`）。
+
+---
+
+## 八、服务状态
 
 - 重启：`systemctl --user restart openclaw-trading-api`（2026-03-29）
 - 会话 psess:fe7ac188 继续运行，历史数据完整保留

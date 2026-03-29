@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-29（Session 12）
+# 最后更新：2026-03-29（Session 12 + GUI 修复）
 
 ---
 
@@ -33,7 +33,7 @@
 
 ---
 
-## 三、当前系统状态（2026-03-29 Session 12）
+## 三、当前系统状态（2026-03-29 Session 12 + GUI 修复）
 
 ```
 测试：432 全通过（432 control_api，含 Session 12 的 4 个新测试）
@@ -95,6 +95,19 @@ Session 12 修复（4项）：
   E1b: PipelineBridge.on_tick_result() 新增 + MarketDataDispatcher 传递 tick_result
     - tick 路径平仓（risk_auto_close/时间止损/软止损）现在也触发 E1 观察记录
     - 通过 fill 方向与 _open_positions 对比检测平仓，计算 close_pnl 写入观察
+
+Session 12 GUI 修复（5项）：
+  G1: tab-paper 活跃订单过滤器修复（paper_order_working/paper_order_partially_filled）
+    - 原状态名 'new'/'partially_filled'/'open' 与引擎实际状态不符，导致订单列表永远为空
+  G2: tab-paper 行情价格小数位自适应（<$0.01=6位，<$1=4位，>=$1=2位）
+    - 修复便宜代币（如 ONT=$0.37）显示为 $0.00 的问题
+  G3: tab-paper 成交历史时间戳修复（ts_ms → filled_at → timestamp 优先序）
+  G4: tab-paper 余额显示改为当前余额（从 metrics.current_balance 更新，非固定初始值）
+  G5: tab-demo Paper vs Demo 对比修复（提取 result.list[0] 才能读到 totalRealizedPL 等字段）
+    - 新增性能指标折叠区（Total Equity/Available Balance/Margin Rate/PnL）
+    - 移除 /strategy/demo/status 404 回退路径（不存在该端点）
+  G6: tab-learning 概览计数修复（从 /learning/feed → totals 读取，非 /learning/overview）
+    - loadFeed() 改用 observations_recent / lessons_recent 数组，空时显示总计数
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
@@ -403,4 +416,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-29 Session 12：432 control_api 测试通过，113 路由。Session 12 修复 F1/F2/E1a/E1b：fill 碎片化 + 注意力税微小盈利强制平仓（0% 胜率根因）+ E1 观察记录覆盖 tick 平仓路径。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-29 Session 12 + GUI 修复：432 control_api 测试通过，113 路由。后端修复 F1/F2/E1a/E1b（fill 碎片化/注意力税误关仓/E1 观察覆盖），GUI 修复 G1-G6（活跃订单/价格精度/成交时间戳/余额/Demo 对比/学习系统计数）。系统全程 read_only / disabled / not_granted。
