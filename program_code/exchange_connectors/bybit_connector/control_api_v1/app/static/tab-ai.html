@@ -113,15 +113,16 @@
       <div style="font-size:10px;color:var(--text-dim);margin-top:4px">参考价格：$5/1000 requests（含实时搜索）</div>
     </div>
 
-    <!-- Local LLM -->
+    <!-- Local LLM (Ollama) -->
     <div class="provider-card">
-      <div class="prov-header"><span class="prov-name">&#x1F4BB; 本地 LLM / Local LLM</span><span class="oc-chip oc-chip-neutral" id="prov-local-badge">未配置</span></div>
-      <div class="prov-models">Ollama / LM Studio — 零 API 成本</div>
+      <div class="prov-header"><span class="prov-name">&#x1F4BB; 本地 LLM / Ollama</span><span class="oc-chip oc-chip-neutral" id="prov-local-badge">检测中...</span></div>
+      <div class="prov-models" id="ollama-models-line">Qwen 3.5 27B / 9B — 零 API 成本</div>
       <div class="api-key-row">
-        <input class="oc-input" id="key-local" type="text" placeholder="http://localhost:11434" />
+        <input class="oc-input" id="key-local" type="text" placeholder="http://127.0.0.1:11434" value="http://127.0.0.1:11434" />
         <button class="oc-btn" style="padding:4px 8px;font-size:10px" onclick="saveProviderKey('local_llm')">保存</button>
+        <button class="oc-btn" style="padding:4px 8px;font-size:10px;margin-left:4px" onclick="checkOllamaStatus()">检测</button>
       </div>
-      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，但需要本地 GPU。推荐 Llama 3 / Qwen 2.5</div>
+      <div id="ollama-status-detail" style="font-size:10px;color:var(--text-dim);margin-top:4px">零成本，需要本地 GPU。正在检测 Ollama 连通性...</div>
     </div>
 
     <!-- Google -->
@@ -171,6 +172,8 @@
           <option value="deepseek-r1">DeepSeek-R1</option>
           <option value="gemini-flash">Gemini Flash</option>
           <option value="gemini-pro">Gemini Pro</option>
+          <option value="qwen3.5:27b">Qwen 3.5 27B (本地)</option>
+          <option value="qwen3.5:9b">Qwen 3.5 9B (本地)</option>
         </select>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -464,8 +467,39 @@ async function loadPricing() {
   ocSetHtml('pricing-body', html);
 }
 
+// ─── Ollama Status ───────────────────────────────────────────
+async function checkOllamaStatus() {
+  const badge = $('prov-local-badge');
+  const detail = $('ollama-status-detail');
+  const modelsLine = $('ollama-models-line');
+  badge.textContent = '检测中...';
+  badge.className = 'oc-chip oc-chip-neutral';
+  detail.textContent = '正在连接 Ollama...';
+
+  const d = await ocApi('/api/v1/paper/layer2/ollama/status');
+  if (!d || !d.data) {
+    badge.textContent = '离线';
+    badge.className = 'oc-chip oc-chip-bad';
+    detail.textContent = '无法连接后端，请确认服务正在运行。';
+    return;
+  }
+  const s = d.data;
+  if (s.available) {
+    badge.textContent = '已连接';
+    badge.className = 'oc-chip oc-chip-good';
+    const modelList = (s.models || []).join(', ') || s.default_model;
+    modelsLine.textContent = 'Ollama — 可用模型：' + modelList;
+    detail.textContent = `已连接 ${s.base_url} · 默认模型：${s.default_model} · 共 ${s.model_count ?? '?'} 个模型`;
+  } else {
+    badge.textContent = '不可用';
+    badge.className = 'oc-chip oc-chip-bad';
+    detail.textContent = `Ollama 未响应（${s.base_url}）。请确认 Ollama 服务已启动（ollama serve）。`;
+  }
+}
+
 async function loadAll() {
   await Promise.allSettled([loadCost(), loadAdaptive(), loadConsult(), loadSessions(), loadConfig(), loadPricing()]);
+  checkOllamaStatus();
 }
 
 loadAll();

@@ -323,6 +323,36 @@ async def get_config(
     return _layer2_response(tracker.get_config().to_dict())
 
 
+@layer2_router.get("/ollama/status")
+async def get_ollama_status() -> dict[str, Any]:
+    """
+    Check Ollama connectivity and list available models.
+    检查 Ollama 连通状态并列出可用模型。
+    """
+    from .ollama_client import get_ollama_client, DEFAULT_OLLAMA_BASE_URL, DEFAULT_MODEL
+    client = get_ollama_client()
+    available = client.is_available()
+    result: dict[str, Any] = {
+        "available": available,
+        "base_url": client.config.base_url,
+        "default_model": client.config.model,
+    }
+    if available:
+        # Fetch model list from /api/tags
+        import urllib.request, json as _json
+        try:
+            url = client.config.base_url.rstrip("/") + "/api/tags"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                data = _json.loads(resp.read())
+            models = [m["name"] for m in data.get("models", [])]
+            result["models"] = models
+            result["model_count"] = len(models)
+        except Exception as exc:
+            result["models"] = []
+            result["model_list_error"] = str(exc)
+    return _layer2_response(result)
+
+
 @layer2_router.post("/config")
 async def update_config(
     req: ConfigUpdateRequest,

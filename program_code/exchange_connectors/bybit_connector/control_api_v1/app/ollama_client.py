@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Configuration / 配置
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen3.5:27b-q4_K_M"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_TEMPERATURE = 0.3  # Lower for more deterministic trading decisions
