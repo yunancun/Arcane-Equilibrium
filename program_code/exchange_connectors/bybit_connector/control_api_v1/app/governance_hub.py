@@ -453,21 +453,29 @@ class GovernanceHub:
             except Exception:
                 return False
 
+        # FIX-03: On cache miss or TTL expiry, re-check with fail-closed behavior
         try:
             with self._lock:
-                if self._authorization_sm is None:
-                    result = False
-                else:
-                    # Get any effective (ACTIVE or RESTRICTED) authorization
-                    effective_auths = self._authorization_sm.get_effective()
-                    result = len(effective_auths) > 0
+                try:
+                    if self._authorization_sm is None:
+                        result = False
+                    else:
+                        # Get any effective (ACTIVE or RESTRICTED) authorization
+                        effective_auths = self._authorization_sm.get_effective()
+                        result = len(effective_auths) > 0
 
-                # Update cache
-                self._cached_auth_state = (result, now_ms)
+                    # Update cache only on successful check
+                    self._cached_auth_state = (result, now_ms)
+                except Exception as e:
+                    # On re-check failure, return False (fail-closed) and don't cache
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error in authorization check: {e}")
+                    return False
+
                 return result
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in is_authorized: {e}")
+                logger.debug(f"Error acquiring lock in is_authorized: {e}")
             return False  # Fail closed
 
     def get_risk_level(self) -> Optional[int]:
