@@ -679,25 +679,30 @@ class PipelineBridge:
                                 }
                                 self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
 
-                # Also submit to Bybit Demo if connector is available
-                # 同时提交到 Bybit Demo（如果连接器可用）
-                if self._demo_connector and self._demo_connector.is_enabled:
-                    try:
-                        demo_result = self._demo_connector.submit_order(
-                            symbol=intent.symbol,
-                            side=intent.side,
-                            order_type="Market" if intent.order_type == "market" else "Limit",
-                            qty=intent.qty,
-                            price=intent.price,
-                            category=category,
-                        )
-                        if demo_result.get("retCode") != 0:
-                            logger.warning("Demo order failed: %s", demo_result.get("retMsg"))
-                    except Exception:
-                        logger.debug("Demo connector error (non-fatal)")
-                    if self._telegram and intent.order_type == "market":
-                        price = market_prices.get(intent.symbol, 0)
-                        self._telegram.alert_trade(intent.symbol, intent.side, intent.qty, price, intent.reason[:100])
+                    # Also submit to Bybit Demo — ONLY when paper engine accepted.
+                    # Demo must mirror paper exactly: rejected paper orders must not
+                    # reach demo, otherwise positions diverge (paper=0, demo>0).
+                    # Also use _submit_qty (Guardian-modified) not intent.qty (original).
+                    # 仅在 Paper Engine 接受订单后才提交 Demo — 两者必须严格同步。
+                    # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
+                    # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
+                    if self._demo_connector and self._demo_connector.is_enabled:
+                        try:
+                            demo_result = self._demo_connector.submit_order(
+                                symbol=intent.symbol,
+                                side=intent.side,
+                                order_type="Market" if intent.order_type == "market" else "Limit",
+                                qty=_submit_qty,
+                                price=intent.price,
+                                category=category,
+                            )
+                            if demo_result.get("retCode") != 0:
+                                logger.warning("Demo order failed: %s", demo_result.get("retMsg"))
+                        except Exception:
+                            logger.debug("Demo connector error (non-fatal)")
+                        if self._telegram and intent.order_type == "market":
+                            price = market_prices.get(intent.symbol, 0)
+                            self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, intent.reason[:100])
 
             except Exception:
                 logger.exception(
