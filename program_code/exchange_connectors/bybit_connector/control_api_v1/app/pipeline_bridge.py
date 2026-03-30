@@ -414,12 +414,18 @@ class PipelineBridge:
                 # 从意图元数据提取品类（默认：linear）
                 category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
 
+                # B6: For limit orders without explicit price, use current market price
+                # B6：limit 单如无明确价格，使用当前市场价
+                submit_price = intent.price
+                if intent.order_type == "limit" and submit_price is None:
+                    submit_price = market_prices.get(intent.symbol)
+
                 result = self._engine.submit_order(
                     symbol=intent.symbol,
                     side=intent.side,
                     order_type=intent.order_type,
                     qty=intent.qty,
-                    price=intent.price,
+                    price=submit_price,
                     market_prices=market_prices,
                     category=category,
                 )
@@ -763,9 +769,19 @@ class PipelineBridge:
                             atr_stop_pct = min(15.0, max(2.0, (atr * 2.0 / fill_price) * 100))
                     except Exception:
                         pass
-                # Regime-adjusted time stop: e.g. squeeze only holds 0.3x default = ~14h
-                # 市场状态调整时间止损：如 squeeze 只持有默认的 0.3 倍 ≈ 14 小时
+                # Regime-adjusted time stop / 市场状态调整时间止损
                 time_stop_hours = 48.0 * REGIME_TIME_MULTIPLIERS.get(regime, 1.0)
+                # B6: Dynamic trailing stop = max(5%, 2×ATR/price*100)
+                # B6：动态追踪止损 = max(5%, 2×ATR/价格*100)，避免噪音触发
+                trailing_pct = 5.0  # floor: never tighter than 5%
+                try:
+                    indics_trail = self._km.get_latest_indicators(symbol) if hasattr(self._km, 'get_latest_indicators') else None
+                    atr_val = indics_trail.get("atr") if indics_trail else None
+                    if atr_val and atr_val > 0 and fill_price > 0:
+                        atr_trail_pct = (atr_val * 2.0 / fill_price) * 100
+                        trailing_pct = max(5.0, min(15.0, atr_trail_pct))
+                except Exception:
+                    pass  # fallback to 5% floor
                 self._stop_mgr.track_position(
                     symbol=symbol,
                     side=side,
@@ -774,7 +790,7 @@ class PipelineBridge:
                     strategy_name=strategy_name,
                     stop_config=StopConfig(
                         hard_stop_pct=atr_stop_pct,
-                        trailing_stop_pct=3.0,
+                        trailing_stop_pct=trailing_pct,
                         time_stop_hours=time_stop_hours,
                     ),
                 )

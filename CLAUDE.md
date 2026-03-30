@@ -236,23 +236,26 @@ Round 2 Batch 5-C（2026-03-30 — L1 本地推理管道验证 · Ollama/Qwen 3.
     - TestL1TriageLocalFallback（8）：fallback 触发 / JSON 解析 / 自由文本启发 / Ollama 不可用 / 超时
     - TestOllamaResponseProperties（2）：tokens/s 计算 / 零值边界
 
-Round 2 Batch 5-B（2026-03-30 — 方向 B · Pre-trade Edge Filter 接入）：
-  目标：利用 Qwen 3.5 本地推理在下单前过滤无 edge 信号，直接修复 0% 胜率根因之一
-  B-T1 (E1a): pipeline_bridge.py — pre-trade edge filter
-    - 新增 _ollama_client 属性 + set_ollama_client() + _edge_filter_enabled 开关
-    - 新增 _edge_filter_stats 追踪（checked/passed/rejected/errors）
-    - 新增 _check_edge_filter() 方法（~110 行）：
-      构建市场上下文（symbol/side/price/strategy/confidence/regime/indicators）→
-      调用 ollama_client.judge_edge() → 解析 JSON 或自由文本启发式 →
-      has_edge=true 放行 / false 拒绝
-    - 设计原则：fail-OPEN（Ollama 不可用/出错时放行，不因过滤器阻断全部交易）
-    - 插入点：_process_pending_intents() 中 governance check 之后、submit_order() 之前
-  B-T2 (E1b): phase2_strategy_routes.py
-    - 导入 get_ollama_client() 并实例化 OLLAMA_CLIENT
-    - 注入 PIPELINE_BRIDGE.set_ollama_client(OLLAMA_CLIENT)
-  B-T3 (E4): 新增 test_edge_filter_integration.py（21 测试）
-    - TestEdgeFilterIntegration（18）：通过/拒绝/fail-open/禁用/统计/自由文本/上下文/超时
-    - TestEdgeFilterErrorHandling（3）：None metadata / 缺失价格 / 无效 JSON 回退
+Round 2 Batch 6（2026-03-30 — ★ 0% 胜率四根因全修复）：
+  B6-T1 (E1a): 加宽追踪止损
+    - phase2_strategy_routes.py: StopConfig trailing_stop_pct 3.0 → 5.0
+    - pipeline_bridge.py: 动态追踪止损 = max(5%, min(15%, 2×ATR/价格×100))
+    - 原因：3% 太紧，加密货币正常波动 1-3%，噪音频繁触发止损
+  B6-T2 (E1b): 入场改 limit order
+    - local_model_tools/strategies/base.py: OrderIntent default order_type "market" → "limit"
+    - pipeline_bridge.py: limit 单无明确价格时自动填入当前市场价
+    - 原因：taker 双邊 0.055% × 2 = 0.11% 回合费用 → maker 0.02% × 2 = 0.04%，节省 ~66%
+  B6-T3 (E1a): squeeze 时间乘数 0.3 → 1.0
+    - risk_manager.py: REGIME_TIME_MULTIPLIERS["squeeze"] 0.3 → 1.0
+    - 原因：均值回归策略需 24-48h 完成，0.3x 导致 14h 强制平仓
+  B6-T4 (E4): 新增 test_winrate_param_fixes.py（23 测试）
+    - TestTrailingStopWidened（5）/ TestLimitOrderDefault（4）/ TestSqueezeTimeMultiplier（5）
+    - TestFeeImpactCalculation（4）/ TestB6IntegrationScenarios（2）/ TestRegressionNoOldBrokenBehavior（3）
+  0% 胜率根因修复状态：4/4 全部修复
+    #1 追踪止损太紧 ✅ → 动态 max(5%, 2×ATR)
+    #2 taker 手续费过高 ✅ → limit order (maker fee)
+    #3 squeeze 强制平仓 ✅ → 乘数 1.0x（允许 48h）
+    #4 无 edge 过滤 ✅ → Qwen pre-trade edge filter（Batch 5-B）
 
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过

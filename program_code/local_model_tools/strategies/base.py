@@ -94,7 +94,7 @@ class OrderIntent:
         self,
         symbol: str,
         side: str,
-        order_type: str = "market",
+        order_type: str = "limit",  # B6: default changed market→limit (maker fee ~0.02% vs taker ~0.055%)
         qty: float = 0.0,
         price: float | None = None,
         strategy_name: str = "",

@@ -103,11 +103,13 @@ REGIME_TP_MULTIPLIERS: dict[str, float] = {
     "squeeze": 0.5,
     "unknown": 1.0,
 }
+# B6: squeeze multiplier changed 0.3→1.0 — mean-reversion strategies need 24-48h to complete
+# B6：squeeze 乘数从 0.3 改为 1.0 — 均值回归策略需要 24-48h 完成
 REGIME_TIME_MULTIPLIERS: dict[str, float] = {
     "trending": 1.5,
     "volatile": 0.8,
     "ranging": 0.8,
-    "squeeze": 0.3,
+    "squeeze": 1.0,
     "unknown": 1.0,
 }
 
