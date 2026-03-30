@@ -682,6 +682,7 @@ class PaperTradingEngine:
         self._governance_hub = None  # Optional GovernanceHub for governance integration
         self._protective_order_manager = None  # Optional ProtectiveOrderManager for local triggers
         self._change_audit_log = None  # Optional ChangeAuditLog for audit trail
+        self._last_reconciliation_ms = 0  # T4.01: Track last periodic reconciliation time
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -1365,6 +1366,20 @@ class PaperTradingEngine:
                                     f"{trig_order.symbol} type={trig_order.order_type.value} trigger_price={trig_order.trigger_price}")
                     except Exception as e:
                         logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
+
+                # T4.01: Periodic reconciliation trigger (every 60 seconds during active session)
+                if self._governance_hub:
+                    now_ms_recon = int(time.time() * 1000)
+                    last_recon = getattr(self, '_last_reconciliation_ms', 0)
+                    if now_ms_recon - last_recon >= 60_000:  # 60 seconds
+                        try:
+                            recon_report = self._governance_hub.reconcile(state)
+                            self._last_reconciliation_ms = now_ms_recon
+                            if recon_report.get("ok") is False:
+                                self._audit(state, "reconciliation_warning",
+                                    f"reason={recon_report.get('reason', 'unknown')}")
+                        except Exception as e:
+                            logger.error(f"Periodic reconciliation error: {e} (non-fatal)")
 
                 # Session drawdown circuit breaker
                 peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
