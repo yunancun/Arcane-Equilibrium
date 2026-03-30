@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """
 Layer 2 AI Reasoning Engine — API Routes / API 路由
-9 条 FastAPI 路由：trigger / sessions / cost / pricing / adaptive / config
+10 条 FastAPI 路由：trigger / sessions / cost / pricing / adaptive / config / ollama
 
 MODULE_NOTE (中文):
-  本模块定义 Layer 2 AI 推理引擎的所有 API 路由（9 条）：
+  本模块定义 Layer 2 AI 推理引擎的所有 API 路由（10 条）：
   POST /paper/layer2/trigger          — 手动触发 L2 推理 session
   GET  /paper/layer2/sessions         — session 列表
   GET  /paper/layer2/sessions/{id}    — session 详情
@@ -15,9 +15,10 @@ MODULE_NOTE (中文):
   GET  /paper/layer2/cost/adaptive    — 自适应预算状态
   GET  /paper/layer2/config           — L2 全量配置
   POST /paper/layer2/config           — 更新配置
+  GET  /paper/layer2/ollama/status    — Ollama 连通状态 + 已安装模型列表（GUI 用）
 
 MODULE_NOTE (English):
-  Defines all Layer 2 AI Reasoning Engine API routes (9 routes):
+  Defines all Layer 2 AI Reasoning Engine API routes (10 routes):
   POST /paper/layer2/trigger          — manually trigger L2 reasoning session
   GET  /paper/layer2/sessions         — session list
   GET  /paper/layer2/sessions/{id}    — session detail (reasoning chain + model upgrade + PnL attribution)
@@ -27,6 +28,7 @@ MODULE_NOTE (English):
   GET  /paper/layer2/cost/adaptive    — adaptive budget state (multiplier + ROI + history)
   GET  /paper/layer2/config           — L2 full configuration
   POST /paper/layer2/config           — update configuration
+  GET  /paper/layer2/ollama/status    — Ollama connectivity check + installed model list (GUI use)
 """
 
 import asyncio
@@ -328,9 +330,19 @@ async def get_ollama_status() -> dict[str, Any]:
     """
     Check Ollama connectivity and list available models.
     检查 Ollama 连通状态并列出可用模型。
+
+    Returns:
+        available (bool)   — whether Ollama is reachable / Ollama 是否可达
+        base_url  (str)    — configured endpoint / 已配置的端点地址
+        default_model (str)— default model name / 默认模型名称
+        models    (list)   — installed model names from /api/tags / 已安装的模型列表
+        model_count (int)  — number of installed models / 已安装模型数量
     """
-    from .ollama_client import get_ollama_client, DEFAULT_OLLAMA_BASE_URL, DEFAULT_MODEL
+    from .ollama_client import get_ollama_client  # local import to avoid circular deps / 避免循环导入
+
     client = get_ollama_client()
+    # is_available() has a 60s TTL cache — cheap to call on every GUI refresh
+    # is_available() 内置 60s TTL 缓存，每次 GUI 刷新调用无额外开销
     available = client.is_available()
     result: dict[str, Any] = {
         "available": available,
@@ -338,7 +350,8 @@ async def get_ollama_status() -> dict[str, Any]:
         "default_model": client.config.model,
     }
     if available:
-        # Fetch model list from /api/tags
+        # Fetch installed model list via /api/tags (Ollama standard endpoint)
+        # 通过 /api/tags 获取已安装模型列表（Ollama 标准端点）
         import urllib.request, json as _json
         try:
             url = client.config.base_url.rstrip("/") + "/api/tags"
@@ -348,6 +361,8 @@ async def get_ollama_status() -> dict[str, Any]:
             result["models"] = models
             result["model_count"] = len(models)
         except Exception as exc:
+            # Non-fatal: connectivity confirmed but model list unavailable
+            # 非致命错误：连通性已确认，但模型列表无法获取
             result["models"] = []
             result["model_list_error"] = str(exc)
     return _layer2_response(result)

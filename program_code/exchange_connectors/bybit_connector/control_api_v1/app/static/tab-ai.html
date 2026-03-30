@@ -468,29 +468,42 @@ async function loadPricing() {
 }
 
 // ─── Ollama Status ───────────────────────────────────────────
+// Polls GET /api/v1/paper/layer2/ollama/status and updates the Local LLM card UI.
+// 轮询后端 Ollama 状态接口，实时更新本地 LLM 供应商卡片的显示状态。
+// Called automatically on page load and when the user clicks 检测 / 自动在页面加载和用户点击检测时触发。
 async function checkOllamaStatus() {
-  const badge = $('prov-local-badge');
-  const detail = $('ollama-status-detail');
-  const modelsLine = $('ollama-models-line');
+  const badge = $('prov-local-badge');       // status badge chip / 状态徽章
+  const detail = $('ollama-status-detail');  // detail text below the card / 卡片下方详情文本
+  const modelsLine = $('ollama-models-line');// subtitle showing available models / 显示可用模型的副标题
+
+  // Show "checking" state while the request is in-flight
+  // 请求进行中时显示"检测中"状态
   badge.textContent = '检测中...';
   badge.className = 'oc-chip oc-chip-neutral';
   detail.textContent = '正在连接 Ollama...';
 
   const d = await ocApi('/api/v1/paper/layer2/ollama/status');
   if (!d || !d.data) {
+    // Backend itself unreachable (server down, network issue)
+    // 后端不可达（服务未启动或网络问题）
     badge.textContent = '离线';
     badge.className = 'oc-chip oc-chip-bad';
     detail.textContent = '无法连接后端，请确认服务正在运行。';
     return;
   }
+
   const s = d.data;
   if (s.available) {
+    // Ollama is up and responded — show model list
+    // Ollama 正常运行并已响应 — 显示模型列表
     badge.textContent = '已连接';
     badge.className = 'oc-chip oc-chip-good';
     const modelList = (s.models || []).join(', ') || s.default_model;
     modelsLine.textContent = 'Ollama — 可用模型：' + modelList;
     detail.textContent = `已连接 ${s.base_url} · 默认模型：${s.default_model} · 共 ${s.model_count ?? '?'} 个模型`;
   } else {
+    // Backend reachable but Ollama process not responding (e.g. not started)
+    // 后端可达但 Ollama 进程未响应（例如未执行 ollama serve）
     badge.textContent = '不可用';
     badge.className = 'oc-chip oc-chip-bad';
     detail.textContent = `Ollama 未响应（${s.base_url}）。请确认 Ollama 服务已启动（ollama serve）。`;
