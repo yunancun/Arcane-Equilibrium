@@ -54,6 +54,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -185,6 +187,9 @@ class GovernanceHub:
         # T1.04: Audit pipeline for SM persistence
         self._audit_pipeline: Optional[Any] = None
 
+        # T2.04: Change Audit Log for WHO/WHEN/APPROVAL tracking
+        self._change_audit_log: Optional[ChangeAuditLog] = None
+
     def set_audit_pipeline(self, pipeline: Any) -> None:
         """
         Set the audit pipeline for SM callbacks.
@@ -196,6 +201,12 @@ class GovernanceHub:
         with self._lock:
             self._audit_pipeline = pipeline
             logger.info("Audit pipeline set on GovernanceHub")
+
+    def set_change_audit_log(self, cal: Any) -> None:
+        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
+        with self._lock:
+            self._change_audit_log = cal
+            logger.info("ChangeAuditLog set on GovernanceHub")
 
     def is_enabled(self) -> bool:
         """
@@ -323,6 +334,17 @@ class GovernanceHub:
     def _invalidate_auth_cache(self) -> None:
         """Invalidate authorization cache on state changes / 在状态更改时使缓存无效"""
         self._cached_auth_state = None
+        # Record authorization cache invalidation
+        if self._change_audit_log:
+            try:
+                self._change_audit_log.record_change(
+                    change_type=ChangeType.STATE_CHANGE,
+                    who="GovernanceHub",
+                    what="Authorization cache invalidated",
+                    reason="State machine transition detected",
+                )
+            except Exception as e:
+                logger.debug(f"ChangeAuditLog record failed (non-fatal): {e}")
 
     def is_authorized(self) -> bool:
         """
@@ -655,6 +677,20 @@ class GovernanceHub:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"Risk escalated: {old_level} → {new_level}")
                 self._incident_count += 1
+
+                # Record change in audit log
+                if self._change_audit_log:
+                    try:
+                        self._change_audit_log.record_change(
+                            change_type=ChangeType.STATE_CHANGE,
+                            who="GovernanceHub",
+                            what=f"Risk level changed: {old_level} → {new_level}",
+                            reason="Automatic risk escalation",
+                            old_value=old_level,
+                            new_value=new_level,
+                        )
+                    except Exception as e:
+                        logger.error(f"ChangeAuditLog record failed (non-fatal): {e}")
 
                 # Risk level 2 (REDUCED) or higher → restrict auth
                 if new_level >= 2 and self._authorization_sm is not None:

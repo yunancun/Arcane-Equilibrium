@@ -144,6 +144,11 @@ _atexit.register(_shutdown_ttl_enforcer)
 ENGINE.set_governance_hub(GOV_HUB)
 RISK_MANAGER.set_governance_hub(GOV_HUB)
 
+# T2.04: Initialize and inject ChangeAuditLog / 初始化并注入變更審計日誌
+from .change_audit_log import ChangeAuditLog  # noqa: E402
+CHANGE_AUDIT_LOG = ChangeAuditLog()
+GOV_HUB.set_change_audit_log(CHANGE_AUDIT_LOG)
+
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
 # This creates a singleton reference for the governance API routes
 # 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入
