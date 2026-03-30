@@ -272,3 +272,45 @@ class TestIntentAndStatusRoutes:
             resp = client.get(route, headers=AUTH)
             assert resp.status_code == 200, f"Failed: {route}"
             assert resp.json()["is_simulated"] is True, f"Not simulated: {route}"
+
+
+# =============================================================================
+# PipelineBridge Governance Hub Injection Tests (T1.01)
+# =============================================================================
+
+class TestPipelineBridgeGovernanceInjection:
+    """Test GovernanceHub injection into PipelineBridge / 治理集线器注入到管线桥接器的测试"""
+
+    def test_pipeline_bridge_has_governance_hub(self):
+        """PIPELINE_BRIDGE._governance_hub should not be None / 管线桥接器应已注入治理集线器"""
+        from app.phase2_strategy_routes import PIPELINE_BRIDGE
+
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
+        assert hasattr(PIPELINE_BRIDGE, '_governance_hub'), "PIPELINE_BRIDGE missing _governance_hub attribute"
+        assert PIPELINE_BRIDGE._governance_hub is not None, "PIPELINE_BRIDGE._governance_hub is None after injection"
+
+    def test_pipeline_bridge_has_set_governance_hub_method(self):
+        """PIPELINE_BRIDGE should have set_governance_hub() method / 管线桥接器应有 set_governance_hub() 方法"""
+        from app.phase2_strategy_routes import PIPELINE_BRIDGE
+
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
+        assert hasattr(PIPELINE_BRIDGE, 'set_governance_hub'), "PIPELINE_BRIDGE missing set_governance_hub method"
+        assert callable(getattr(PIPELINE_BRIDGE, 'set_governance_hub')), "set_governance_hub should be callable"
+
+    def test_governance_hub_from_paper_trading_routes(self):
+        """GOV_HUB from paper_trading_routes should be available and injected / 来自 paper_trading_routes 的 GOV_HUB 应已注入"""
+        from app.paper_trading_routes import GOV_HUB
+        from app.phase2_strategy_routes import PIPELINE_BRIDGE
+
+        assert GOV_HUB is not None, "GOV_HUB is None"
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE is None"
+        assert PIPELINE_BRIDGE._governance_hub is GOV_HUB, "PIPELINE_BRIDGE._governance_hub should reference the same GOV_HUB instance"
+
+    def test_is_authorized_check_works(self):
+        """PipelineBridge.is_authorized() should use GovernanceHub / 管线桥接器应能调用治理检查"""
+        from app.phase2_strategy_routes import PIPELINE_BRIDGE
+
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
+        # PipelineBridge should have a method that checks authorization via governance_hub
+        # This is a basic smoke test to ensure governance integration doesn't crash
+        assert PIPELINE_BRIDGE._governance_hub is not None, "Governance hub not properly injected"

@@ -199,6 +199,18 @@ try:
         stop_manager=STOP_MANAGER,
     )
     logger.info("Pipeline bridge created with StopManager (inactive until paper session starts) / 管线桥接器+止损管理器已创建")
+
+    # --- Governance Hub injection (T1.01) ---
+    # 治理集线器注入到管线桥接器 (T1.01)
+    try:
+        from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
+        if _GOV_HUB_REF is not None:
+            PIPELINE_BRIDGE.set_governance_hub(_GOV_HUB_REF)
+            logger.info("GovernanceHub injected into PipelineBridge / 治理集线器已注入管线桥接器")
+        else:
+            logger.warning("GOV_HUB is None — PipelineBridge running without governance / GOV_HUB 为 None — 管线桥接器运行不包含治理")
+    except ImportError as e:
+        logger.warning("Could not import GOV_HUB for PipelineBridge: %s / 无法为管线桥接器导入 GOV_HUB: %s", e, e)
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
