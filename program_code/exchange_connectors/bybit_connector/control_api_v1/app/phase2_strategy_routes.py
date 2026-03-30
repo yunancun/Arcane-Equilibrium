@@ -127,6 +127,51 @@ SCOUT_AGENT = ScoutAgent(config=ScoutConfig(), message_bus=MESSAGE_BUS)
 SCOUT_AGENT.start()
 logger.info("ScoutAgent + MessageBus initialized (Plan A2) / Scout 代理 + 消息总线已初始化（方案 A2）")
 
+# ── Batch 7: Conductor + StrategistAgent (5-Agent event loop) ──
+# Batch 7：Conductor + StrategistAgent（5-Agent 事件循环）
+from .multi_agent_framework import AgentRole, Conductor, AgentState as _AgentState
+from .strategist_agent import StrategistAgent, StrategistConfig
+from .ollama_client import OllamaClient
+
+# Create Conductor with shared MessageBus / 创建 Conductor 并使用共享消息总线
+CONDUCTOR = Conductor(message_bus=MESSAGE_BUS)
+
+# Register Scout with Conductor / 向 Conductor 注册 Scout
+CONDUCTOR.register_agent(AgentRole.SCOUT, resource_mode="local")
+CONDUCTOR.set_agent_state(AgentRole.SCOUT, _AgentState.RUNNING)
+
+# Create OllamaClient for Strategist AI evaluation / 为 Strategist 创建 OllamaClient
+OLLAMA_CLIENT: Any = None
+try:
+    OLLAMA_CLIENT = OllamaClient()
+    _ollama_ok = OLLAMA_CLIENT.is_available(force_check=True)
+    logger.info("OllamaClient for Strategist: available=%s / Strategist 用 OllamaClient: 可用=%s", _ollama_ok, _ollama_ok)
+except Exception as _oc_e:
+    logger.warning("OllamaClient init failed: %s / OllamaClient 初始化失败: %s", _oc_e, _oc_e)
+
+# Create StrategistAgent (shadow=True by default — log only, no live intents)
+# 创建 StrategistAgent（默认 shadow=True — 仅记录，不产生实际 intent）
+STRATEGIST_AGENT = StrategistAgent(
+    config=StrategistConfig(shadow=True),
+    message_bus=MESSAGE_BUS,
+    ollama_client=OLLAMA_CLIENT,
+)
+STRATEGIST_AGENT.start()
+
+# Register Strategist with Conductor / 向 Conductor 注册 Strategist
+CONDUCTOR.register_agent(AgentRole.STRATEGIST, resource_mode="local")
+CONDUCTOR.set_agent_state(AgentRole.STRATEGIST, _AgentState.RUNNING)
+
+# Subscribe Strategist to MessageBus (receives messages sent to STRATEGIST role)
+# 订阅 Strategist 到消息总线（接收发送给 STRATEGIST 角色的消息）
+MESSAGE_BUS.subscribe(AgentRole.STRATEGIST, STRATEGIST_AGENT.on_message)
+
+logger.info(
+    "Batch 7: Conductor + StrategistAgent initialized (shadow=%s) / "
+    "Batch 7：Conductor + StrategistAgent 已初始化 (shadow=%s)",
+    STRATEGIST_AGENT.config.shadow, STRATEGIST_AGENT.config.shadow,
+)
+
 # ── Bybit Demo Connector (created early to read balance for position sizing) ──
 # 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
 try:
@@ -274,6 +319,15 @@ try:
             logger.info("ScoutAgent + MessageBus injected into PipelineBridge / Scout 代理 + 消息总线已注入管线桥接器")
     except Exception as e:
         logger.warning("Could not inject ScoutAgent/MessageBus: %s", e)
+
+    # --- Batch 7: StrategistAgent + OllamaClient injection into PipelineBridge ---
+    # Batch 7：StrategistAgent + OllamaClient 注入管线桥接器
+    try:
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_strategist_agent(STRATEGIST_AGENT)
+            logger.info("StrategistAgent injected into PipelineBridge / StrategistAgent 已注入管线桥接器")
+    except Exception as e:
+        logger.warning("Could not inject StrategistAgent: %s", e)
 
     # --- EX-05: LearningTierGate injection into PipelineBridge ---
     # EX-05：学习等级门控注入管线桥接器，以支持 L1→L2→L3... 自动晋升

@@ -99,6 +99,7 @@ class PipelineBridge:
         self._scout_agent = None  # T2.07: Set externally for ScoutAgent local market intelligence / Scout 代理
         self._message_bus = None  # T2.07: Set externally for inter-agent communication / 消息总线
         self._learning_tier_gate = None  # EX-05 §3: Set externally for learning tier auto-promotion / 学习等级自动晋升门控
+        self._strategist_agent = None  # Batch 7: Set externally for StrategistAgent intents / 策略师代理
         self._ollama_client = None  # B5-B: Set externally for L1 pre-trade edge filter / L1 交易前 edge 过滤器
         self._edge_filter_enabled = True  # Can be toggled at runtime / 可在运行时切换
         self._edge_filter_stats = {"checked": 0, "passed": 0, "rejected": 0, "errors": 0}
@@ -184,6 +185,14 @@ class PipelineBridge:
         为学习等级自动晋升设置 LearningTierGate。
         """
         self._learning_tier_gate = gate
+
+    def set_strategist_agent(self, agent: Any) -> None:
+        """
+        Set StrategistAgent for collecting AI-evaluated intents.
+        设置 StrategistAgent 用于收集 AI 评估后的 intent。
+        """
+        self._strategist_agent = agent
+        logger.info("StrategistAgent set for intent collection / 已设置 StrategistAgent 用于 intent 收集")
 
     def set_ollama_client(self, client: Any) -> None:
         """
@@ -331,14 +340,49 @@ class PipelineBridge:
 
     def _process_pending_intents(self) -> None:
         """
-        Collect OrderIntents from orchestrator and submit to paper engine.
-        从编排器收集 OrderIntent 并提交到纸上交易引擎。
+        Collect OrderIntents from orchestrator AND StrategistAgent, submit to paper engine.
+        从编排器和 StrategistAgent 收集 OrderIntent 并提交到纸上交易引擎。
+
+        Batch 7: Extended to also collect intents from StrategistAgent
+        (AI-evaluated intents that passed Guardian review or shadow=False).
         """
         try:
             intents = self._orch.collect_pending_intents()
         except Exception:
-            logger.exception("Failed to collect intents / 收集意图失败")
-            return
+            logger.exception("Failed to collect orchestrator intents / 收集编排器意图失败")
+            intents = []
+
+        # Batch 7: Also collect from StrategistAgent (non-shadow intents)
+        # Batch 7：同时从 StrategistAgent 收集（非 shadow 模式下的 intent）
+        if self._strategist_agent:
+            try:
+                strategist_intents = self._strategist_agent.collect_pending_intents()
+                if strategist_intents:
+                    logger.info(
+                        "Collected %d intents from StrategistAgent / 从 StrategistAgent 收集了 %d 个 intent",
+                        len(strategist_intents), len(strategist_intents),
+                    )
+                    # Convert TradeIntent to OrderIntent-compatible format
+                    # 将 TradeIntent 转换为与 OrderIntent 兼容的格式
+                    for ti in strategist_intents:
+                        try:
+                            # Create a minimal OrderIntent-like object from TradeIntent
+                            # This bridges the multi-agent TradeIntent → legacy OrderIntent
+                            _side = "Buy" if ti.direction == "long" else "Sell"
+                            _intent_obj = type("StrategyIntent", (), {
+                                "symbol": ti.symbol,
+                                "side": _side,
+                                "order_type": "market",
+                                "qty": ti.size,
+                                "price": None,
+                                "metadata": ti.metadata,
+                                "perception_data_id": None,
+                            })()
+                            intents.append(_intent_obj)
+                        except Exception as _si_e:
+                            logger.warning("Failed to convert StrategistAgent intent: %s / 转换 StrategistAgent intent 失败", _si_e)
+            except Exception as _strat_e:
+                logger.warning("Failed to collect StrategistAgent intents: %s / 收集 StrategistAgent intent 失败", _strat_e)
 
         if not intents:
             return
