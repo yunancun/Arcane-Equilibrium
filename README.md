@@ -24,23 +24,24 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-30 TW 工程審核)
+## 当前状态 (2026-03-30 Round 2 Batch 3)
 
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         1,566 全通过（含 46 治理 Hub + 92 集成测试 · 2 跳过）
-API 路由:     121+ 条（含 8 治理端点）
+测试:         1,843+（含 46 治理 Hub + 92 集成 + 45 Scout 集成 · 2 跳过）
+API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
 市场扫描:     650+ 交易对每 5 分钟全扫描
 自动部署:     最优 5 品种自动匹配策略
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时
-合规度:       ~65%（从 ~28% 提升 · 接入率 11/22 模组）
+Scout:        ScoutAgent + MessageBus 已接入 PipelineBridge（Plan A2 本地代理模式）
+合规度:       ~88%（Round 2 审计后 · 接入率 12/22 模组 = 55%）
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成**
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）**
 
 ---
 
@@ -57,7 +58,9 @@ srv/
 │   │           ├── app/
 │   │           │   ├── governance_hub.py         ← ★ 治理中枢（4 SM 编排 + 跨 SM 级联）
 │   │           │   ├── governance_routes.py      ← 8 治理 API 端点
-│   │           │   ├── pipeline_bridge.py       ← 管线桥接器（已接入治理 gate）
+│   │           │   ├── scout_routes.py          ← 5 Scout REST 端点（OpenClaw 推送入口）
+│   │           │   ├── multi_agent_framework.py ← ScoutAgent + MessageBus + Conductor
+│   │           │   ├── pipeline_bridge.py       ← 管线桥接器（治理 gate + Scout 本地扫描）
 │   │           │   ├── stop_manager.py          ← 止损管理器（→ local_model_tools）
 │   │           │   ├── bybit_demo_connector.py  ← Bybit Demo 连接器
 │   │           │   ├── grafana_data_writer.py   ← Grafana 数据写入
@@ -161,7 +164,7 @@ srv/
 | **EX-03** 控制面边界 | system_mode/execution_state 强制 | main_legacy.py（嵌入式） | ⚠ 部分 | ⬜ | 模式变更不传播到治理模组 |
 | **EX-04** 对账边界 | 5类结果/自动冻结/审计触发 | reconciliation_engine.py | ✅ 完整 | ✅ GovernanceHub | — |
 | **EX-05** 学习边界 | L1→L5 五级门控/自动晋升 | learning_tier_gate.py | ✅ 完整 | ⬜ 未接入 | 主流程从未调用 check_promotion() |
-| **EX-06** 多Agent编排 | 6 Agent + Conductor + 正式消息 | multi_agent_framework.py | ⚠ 框架 | ⬜ 未接入 | 仅 ScoutAgent 实现，无 Conductor |
+| **EX-06** 多Agent编排 | 6 Agent + Conductor + 正式消息 | multi_agent_framework.py + scout_routes.py | ✅ Scout接入 | ✅ PipelineBridge + REST | ScoutAgent 运行时接入，其馀 4 Agent 待实作 |
 | **EX-07** 感知面 | FACT/INFERENCE/HYPOTHESIS 标记 | perception_data_plane.py | ✅ 完整 | ⬜ 未接入 | 市场数据未包装 PerceptionDataObject |
 | **DOC-01** 项目宪法 | 16条根原则/6 Agent 角色 | 全系统 | ✅ 已记录 | ⚠ 部分 | 仅 1/6 Agent 实现 |
 | **DOC-02** 边界定义 | 层间职责/治理链路 | governance_hub.py | ✅ 完整 | ✅ | — |
@@ -195,7 +198,7 @@ srv/
 |----|------|------|
 | GAP-C1 | 治理 gate 仍为 warning-only（is_authorized 不拒绝订单） | GovernanceHub 已接入但需确认 fail-closed 生效 |
 | GAP-C2 | 跨 SM 级联回调未自动触发（手动调用） | Hub 内实现了回调逻辑但非事件驱动 |
-| GAP-C3 | 多Agent系统仅有 ScoutAgent（需 6 个） | 框架类定义完整，缺 Conductor + 5 Agent |
+| GAP-C3 | 多Agent系统 ScoutAgent 已接入（需 6 个） | ScoutAgent + MessageBus 已 WIRED，缺 Conductor + 4 Agent |
 
 **High — 影响核心功能：**
 
@@ -226,30 +229,103 @@ srv/
   ✅ audit_persistence.py      — GovernanceHub 审计写盘
   ✅ reconciliation_engine.py  — GovernanceHub.reconcile() 调用
 
-独立存在（STANDALONE · 11/22）:
+已接入运行时（Round 2 新增 · 12/22）:
+  ✅ multi_agent_framework.py      — ScoutAgent + MessageBus 接入 PipelineBridge + scout_routes REST
+  ✅ trade_attribution.py          — TradeAttributionEngine 接入 PipelineBridge._emit_round_trip()
+
+独立存在（STANDALONE · 10/22）:
   ⬜ oms_state_machine.py          ← GAP-H1
   ⬜ learning_tier_gate.py         ← GAP-H2
-  ⬜ multi_agent_framework.py      ← GAP-C3
   ⬜ paper_live_gate.py            ← GAP-H5
   ⬜ ttl_enforcer.py               ← GAP-H6
-  ⬜ trade_attribution.py
   ⬜ protective_order_manager.py
   ⬜ portfolio_risk_control.py
   ⬜ recovery_approval_gate.py
   ⬜ shadow_decision_builder.py
   ⬜ change_audit_log.py
+  ⬜ scout_routes.py（代码已就绪，独立于 paper trading 运行时）
 
-接入率:  11/22 = 50%（Phase 3 从 32% 提升到 50%）
-合规度:  ~65%
+接入率:  12/22 = 55%（Round 2 从 50% 提升到 55%）
+合规度:  ~88%（Round 2 审计后）
 ```
 
-### 下一步优先级
+### 下一步优先级（继续推进路线图）
 
-1. **fail-closed 确认** — 确保 is_authorized() 拒绝时订单被阻断（非仅 warning）
-2. **OMS 串联** — Paper Trading Engine 使用 SM-03 11态生命周期
-3. **学习门控** — 交易完成后调用 check_promotion()，启动 L1→L2 自动晋升
-4. **多 Agent 实例化** — Conductor + Strategist/Guardian/Analyst/Executor（ScoutAgent 已有）
-5. **感知面接入** — 市场数据包装 PerceptionDataObject 进入决策链
+**Phase 4: 多 Agent 推进（需 3-4 sessions）**
+
+1. **Strategist Agent** — 消费 ScoutAgent 情报，产出 TradeIntent，接入 PipelineBridge 替代硬编码策略选择
+2. **Guardian Agent** — 消费 EventAlert，动态调整风控参数，与 GovernanceHub.SM-04 联动
+3. **Analyst Agent** — 消费 round_trip_complete，驱动 TradeAttribution + Learning Tier 推进
+4. **Executor Agent** — 包装 PaperTradingEngine.submit_order()，提供执行质量反馈
+5. **Conductor 实例化** — 在 phase2_strategy_routes.py 创建 Conductor 单例，注册全部 Agent，驱动 dispatch_market_event
+
+**Phase 5: 学习管线打通（需 2-3 sessions）**
+
+1. **Learning Tier Gate 接入** — round_trip_complete → check_promotion() → L1→L2 自动晋升
+2. **L2 触发条件** — observations ≥ 500 + win_rate ≥ 20%（当前 0%）→ 需先修正策略胜率
+3. **L2→L3 需 Analyst 产出 PatternInsight** — 依赖 Phase 4 完成 Analyst Agent
+4. **L4/L5 需 Operator 审批** — 接入 GovernanceHub 授权流
+
+**Phase 6: Paper→Live 准备（需 2+ sessions）**
+
+1. **OMS 串联** — Paper Trading Engine 使用 SM-03 11态生命周期
+2. **Paper-Live Gate** — paper_live_gate.py 接入授权工作流
+3. **TTL 执行器** — 定期调用，自动终止过期租约
+4. **Demo 模式稳定性** — 在 Bybit Demo sandbox 积累足够交易记录
+
+---
+
+## OpenClaw 联合开发路线图
+
+### 当前集成状态（Plan A2）
+
+OpenClaw 与 BybitOpenClaw 通过以下方式互联：
+
+```
+┌─────────────┐                    ┌─────────────────────┐
+│  OpenClaw   │ ── REST POST ──▶  │  scout_routes.py    │
+│  (中枢)     │   /scout/market-  │  (5 端点 · Token 认证)│
+│             │   signal          │         │            │
+│  Gateway    │   /scout/event-   │         ▼            │
+│  :18789     │   alert           │  ScoutAgent          │
+└─────────────┘                    │    + MessageBus      │
+                                   │         │            │
+┌─────────────┐                    │         ▼            │
+│  Bybit API  │ ── WebSocket ──▶  │  PipelineBridge     │
+│  (行情)     │   price events    │  (on_tick 本地扫描)   │
+└─────────────┘                    └─────────────────────┘
+```
+
+- **外部情报通道**: OpenClaw → `POST /scout/market-signal` + `POST /scout/event-alert` → ScoutAgent → MessageBus
+- **本地市场通道**: Bybit WebSocket → PipelineBridge.on_tick → `_invoke_scout_scan()` (300s 间隔) → ScoutAgent → MessageBus
+- **双通道汇聚**: MessageBus → Strategist (intel_object) + Guardian (event_alert)
+
+### OpenClaw 侧需开发
+
+1. **OpenClaw Skill: bybit-scout-push** — 定期扫描新闻/事件，格式化为 IntelObject/EventAlert，POST 到 BybitOpenClaw
+2. **OpenClaw Skill: bybit-monitor** — 监控 BybitOpenClaw 健康状态（GET /scout/status），异常时 Telegram 告警
+3. **OpenClaw Cron** — 每 30 分钟触发 bybit-scout-push（新闻扫描），每 24 小时触发事件日历检查
+4. **认证** — OpenClaw 存储 API Token（`OPENCLAW_API_TOKEN` 环境变量，不可硬编码）
+
+### BybitOpenClaw 侧后续开发
+
+1. **Conductor → OpenClaw 反向通信** — Conductor.broadcast_directive() 通过 webhook 推送到 OpenClaw Gateway
+2. **策略建议回传** — Analyst 产出 strategy_proposal → OpenClaw 审核 → SYSTEM_DIRECTIVE 下发
+3. **AI 计算预算协调** — OpenClaw 管理 L1.5/L2 云端 AI 配额，BybitOpenClaw 本地 L0/L1
+4. **共享 Memory** — OpenClaw Memory 存储交易观察/教训，BybitOpenClaw 可查询
+
+### 联合开发协作流程
+
+```
+1. 开发者在 trade-core 使用 Claude Code（SSH/tmux）开发 BybitOpenClaw
+2. 开发者在 Cowork 使用 PM 批次分配开发 OpenClaw 技能
+3. 两侧通过 REST API + Token 认证互联
+4. 测试流程：
+   a. BybitOpenClaw 单元测试 → pytest（1800+ tests）
+   b. OpenClaw 技能测试 → OpenClaw 内置测试
+   c. 集成测试 → 手动触发 POST /scout/market-signal 验证端到端
+5. 版本对齐：BybitOpenClaw 的 scout_routes API 版本 = v1，OpenClaw skill 需匹配
+```
 
 ---
 

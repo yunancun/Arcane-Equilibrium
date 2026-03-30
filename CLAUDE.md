@@ -152,6 +152,42 @@ Phase 3 治理集成（2026-03-30，另一 session 完成）：
 
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
+Round 2 Cowork 审计（2026-03-30）：
+  三路并行验证：测试 + 代码级整合验证 + Gap 殘留分析
+  测试基准：1798 passed, 0 failed, 2 skipped（与 Round 1 完全吻合）
+  七大整合点全部代码级确认接入：
+    1. GovernanceHub 注入 — ✅ paper_trading_routes:167,289-290
+    2. is_authorized() fail-closed — ✅ paper_trading_engine:898-917
+    3. acquire_lease() fail-closed — ✅ paper_trading_engine:962-986
+    4. SM 跨级联 — ✅ governance_hub:936-979
+    5. Portfolio Risk Control — ✅ risk_manager:749
+    6. ProtectiveOrderManager — ✅ paper_trading_engine:1403
+    7. Governance REST (18 端点) — ✅ governance_routes 完整註冊
+  治理合规率：65% → 88%（+23%）
+  Phase 0 Gap 解决率：15/17（88%）
+  剩馀長期 Gap：Multi-Agent（僅 Scout）+ Learning L2-L5（佔位符）
+
+Round 2 Batch 3（2026-03-30 Plan A2 — ScoutAgent as OpenClaw local proxy）：
+  方案：ScoutAgent 作为 OpenClaw 本地代理
+    - OpenClaw 通过 REST 推送外部情报（新闻/事件/情绪）
+    - ScoutAgent 处理本地 Bybit 市场数据（成交量/资金费率/regime）
+    - 双通道统一汇入 MessageBus → Strategist/Guardian
+  新增文件：
+    - scout_routes.py（667 行）— 5 端点 REST API（Token 认证）
+      POST /scout/market-signal — OpenClaw 推送市场信号
+      POST /scout/event-alert  — OpenClaw 推送事件警报
+      GET  /scout/status       — 获取 ScoutAgent + MessageBus 状态
+      GET  /scout/intel        — 查询最近情报对象
+      GET  /scout/alerts       — 查询最近事件警报
+    - test_scout_integration.py（1122 行 · 45 测试）
+  修改文件：
+    - phase2_strategy_routes.py — 初始化 ScoutAgent + MessageBus + 注入 PipelineBridge + 接线 scout_routes
+    - pipeline_bridge.py — set_scout_agent/set_message_bus + _invoke_scout_scan（300s 间隔）+ 成交量异常检测 + 资金费率尖峰检测
+    - main.py — 注册 scout_router
+  Multi-Agent 接入：multi_agent_framework.py 从 STANDALONE → WIRED（ScoutAgent + MessageBus 已接入运行时）
+  EX-06 合规度提升：ScoutAgent 实际接入 PipelineBridge on_tick + REST 双通道
+  接入率：12/22 = 55%（从 11/22 = 50% 提升）
+
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过
   MA Crossover 置信度     = 0.55（扫描器部署）/ 0.50（默认 BTCUSDT）
@@ -351,6 +387,7 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ Phase 3 GovernanceHub 集成（2026-03-30）— Hub 819行 + 8路由 525行 + 4SM接入 + 安全审核 9项修复
   ✅ Phase 3 RiskGovernor 死锁修复（2026-03-30）— get_status() 嵌套锁 → 直接属性访问
   ✅ 合规度校准（2026-03-30 TW 审核）— ~28% → ~65%，接入率 7/22 → 11/22
+  ✅ Round 2 Cowork Phase 0 审计（2026-03-30）— 三路并行验证 · 合规率 65%→88%
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
@@ -482,4 +519,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-30 TW 工程審核：Phase 3 GovernanceHub 已集成（4 核心 SM 接入运行时 · 8 API 端点 · 安全审核通过）。1,566 测试全通过，121+ 路由。合规度 ~65%（从 ~28% 提升）。接入率 11/22 模组。剩余缺口：OMS 未走 SM-03 生命周期、学习门控未调用、多 Agent 框架未实例化、感知面未包装市场数据。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-30 Round 2 Cowork 审计：Phase 3 GovernanceHub 已集成（七大整合点代码级确认 · 1798 测试全通过 · 治理合规率 65%→88%）。121+ 路由，接入率 7/22→11/22。Phase 0 Gap 解决率 15/17（88%）。剩馀長期缺口：Multi-Agent（僅 Scout）+ Learning L2-L5（佔位符）。系统全程 read_only / disabled / not_granted。

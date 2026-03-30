@@ -44,8 +44,11 @@ venv/
 .envrc
 
 # -----------------------------
-# OS / Editor
+# OS / Editor / SMB
 # -----------------------------
 .DS_Store
+._*
+.smbdelete*
 .idea/
 .vscode/
+.claude/

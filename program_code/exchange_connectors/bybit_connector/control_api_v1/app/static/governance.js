@@ -87,6 +87,41 @@ async function govPostHealthCheck() {
   return ocPost('/api/v1/governance/health-check', {});
 }
 
+async function govGetPendingRecovery() {
+  // GET /api/v1/governance/recovery/pending
+  return ocApi('/api/v1/governance/recovery/pending');
+}
+
+async function govApprovePendingRecovery(requestId) {
+  // POST /api/v1/governance/recovery/{request_id}/approve
+  return ocPost(`/api/v1/governance/recovery/${requestId}/approve`, {});
+}
+
+async function govGetPendingAudit() {
+  // GET /api/v1/governance/audit/pending
+  return ocApi('/api/v1/governance/audit/pending');
+}
+
+async function govGetSymbolWhitelist() {
+  // GET /api/v1/governance/symbols/whitelist
+  return ocApi('/api/v1/governance/symbols/whitelist');
+}
+
+async function govAddSymbolWhitelist(symbol, category) {
+  // POST /api/v1/governance/symbols/whitelist
+  return ocPost('/api/v1/governance/symbols/whitelist', {
+    symbol: symbol,
+    category: category,
+  });
+}
+
+async function govRemoveSymbolWhitelist(symbol, category) {
+  // DELETE /api/v1/governance/symbols/whitelist/{symbol}?category=...
+  return ocApi(`/api/v1/governance/symbols/whitelist/${symbol}?category=${category}`, {
+    method: 'DELETE',
+  });
+}
+
 // ─── Render Helpers ──────────────────────────────────────────────────────────
 
 function govAuthBadge(state) {

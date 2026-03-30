@@ -83,6 +83,9 @@ from local_model_tools.strategies.funding_rate_arb import FundingRateArbStrategy
 from local_model_tools.strategies.grid_trading import GridTradingStrategy
 from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
 
+# Trade Attribution Engine / 交易归因引擎
+from .trade_attribution import TradeAttributionEngine
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,6 +112,20 @@ ORCHESTRATOR = StrategyOrchestrator(
     indicator_engine=INDICATOR_ENGINE,
     signal_engine=SIGNAL_ENGINE,
 )
+
+# Initialize Trade Attribution Engine / 初始化交易归因引擎
+# This engine decomposes completed trades into skill vs luck attribution factors
+# 本引擎将完成的交易分解为技能vs运气的归因因子
+TRADE_ATTRIBUTION = TradeAttributionEngine()
+logger.info("TradeAttributionEngine initialized / 交易归因引擎已初始化")
+
+# ── Scout Agent + Message Bus (T2.07: Plan A2 — ScoutAgent as OpenClaw local proxy) ──
+# Scout 代理 + 消息总线（T2.07：方案 A2 — ScoutAgent 作为 OpenClaw 本地代理）
+from .multi_agent_framework import ScoutAgent, MessageBus, ScoutConfig
+MESSAGE_BUS = MessageBus()
+SCOUT_AGENT = ScoutAgent(config=ScoutConfig(), message_bus=MESSAGE_BUS)
+SCOUT_AGENT.start()
+logger.info("ScoutAgent + MessageBus initialized (Plan A2) / Scout 代理 + 消息总线已初始化（方案 A2）")
 
 # ── Bybit Demo Connector (created early to read balance for position sizing) ──
 # 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
@@ -232,6 +249,30 @@ try:
             logger.info("ScannerRateLimiter injected into PipelineBridge / 掃描限速器已注入管線橋接器")
     except ImportError as e:
         logger.warning("Could not import SCANNER_RATE_LIMITER: %s", e)
+
+    # --- L1.01: TradeAttributionEngine injection ---
+    # L1.01：交易归因引擎注入到管线桥接器
+    # This enables attribution of completed trades into skill vs luck factors (ALPHA/TIMING/SIZING/EXECUTION/COST/LUCK)
+    # 使已完成的交易能够分解为技能vs运气因子
+    try:
+        if PIPELINE_BRIDGE is not None and TRADE_ATTRIBUTION is not None:
+            PIPELINE_BRIDGE.set_trade_attribution(TRADE_ATTRIBUTION)
+            logger.info("TradeAttributionEngine injected into PipelineBridge / 交易归因引擎已注入管线桥接器")
+        else:
+            logger.warning("TRADE_ATTRIBUTION or PIPELINE_BRIDGE is None — skipping attribution / 归因引擎或管线桥接器为 None — 跳过交易归因")
+    except Exception as e:
+        logger.warning("Could not inject TradeAttributionEngine: %s", e)
+
+    # --- T2.07: ScoutAgent + MessageBus injection (Plan A2) ---
+    # T2.07：Scout 代理 + 消息总线注入管线桥接器（方案 A2）
+    try:
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_scout_agent(SCOUT_AGENT)
+            PIPELINE_BRIDGE.set_message_bus(MESSAGE_BUS)
+            logger.info("ScoutAgent + MessageBus injected into PipelineBridge / Scout 代理 + 消息总线已注入管线桥接器")
+    except Exception as e:
+        logger.warning("Could not inject ScoutAgent/MessageBus: %s", e)
+
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
@@ -326,6 +367,15 @@ except Exception as e:
     MARKET_SCANNER = None
     AUTO_DEPLOYER = None
     logger.warning("Market scanner not available: %s", e)
+
+# --- Wire ScoutAgent + MessageBus into scout_routes ---
+try:
+    from . import scout_routes
+    scout_routes.set_scout_agent(SCOUT_AGENT)
+    scout_routes.set_message_bus(MESSAGE_BUS)
+    logger.info("ScoutAgent + MessageBus wired to scout_routes / Scout 代理 + 消息总线已接入 scout 路由")
+except Exception as e:
+    logger.warning("Could not wire scout_routes: %s", e)
 
 
 # ── E1: Auto-Observation Writer (writes observations after each round-trip trade) ──

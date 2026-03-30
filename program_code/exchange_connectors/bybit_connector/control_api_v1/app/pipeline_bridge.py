@@ -43,6 +43,23 @@ from typing import Any
 
 from .risk_manager import REGIME_TIME_MULTIPLIERS
 
+# T2.07: Import Scout-related enums for local market scanning
+# Lazy import pattern to avoid circular dependencies
+# 懒惰导入模式避免循环依赖
+try:
+    from .multi_agent_framework import DataQualityLevel, SentimentScore
+except ImportError:
+    # If multi_agent_framework is not available, define fallback enums
+    class DataQualityLevel:  # type: ignore
+        FACT = "fact"
+        INFERENCE = "inference"
+        HYPOTHESIS = "hypothesis"
+
+    class SentimentScore:  # type: ignore
+        POSITIVE = "positive"
+        NEGATIVE = "negative"
+        NEUTRAL = "neutral"
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,6 +95,9 @@ class PipelineBridge:
         self._governance_hub = None  # Set externally for governance integration
         self._perception_plane = None  # T2.02: Set externally for cognitive honesty checks / 感知平面
         self._scanner_rate_limiter = None  # T2.07: Set externally for rate limiting / 扫描速率限制器
+        self._trade_attribution = None  # L1.01: Set externally for trade attribution / 交易归因引擎
+        self._scout_agent = None  # T2.07: Set externally for ScoutAgent local market intelligence / Scout 代理
+        self._message_bus = None  # T2.07: Set externally for inter-agent communication / 消息总线
 
         self._stats = {
             "ticks_received": 0,
@@ -95,6 +115,7 @@ class PipelineBridge:
         # 时间驱动刷新时间戳（替代基于 tick 计数的模运算触发器）
         self._last_volume_refresh_ts: float = 0.0
         self._last_funding_check_ts: float = 0.0
+        self._last_scout_scan_ts: float = 0.0  # T2.07: Scout local scan timestamp / Scout 本地扫描时间戳
         self._strategy_state_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "runtime", "strategy_state.json"
         )
@@ -135,6 +156,18 @@ class PipelineBridge:
     def set_scanner_rate_limiter(self, limiter: Any) -> None:
         """Set ScannerRateLimiter for rate limiting scans / 设置扫描速率限制器"""
         self._scanner_rate_limiter = limiter
+
+    def set_trade_attribution(self, attribution_engine: Any) -> None:
+        """Set TradeAttributionEngine for trade attribution / 设置交易归因引擎"""
+        self._trade_attribution = attribution_engine
+
+    def set_scout_agent(self, agent: Any) -> None:
+        """Set ScoutAgent for local market intelligence / 设置 Scout 代理用于本地市场情报"""
+        self._scout_agent = agent
+
+    def set_message_bus(self, bus: Any) -> None:
+        """Set MessageBus for inter-agent communication / 设置消息总线用于代理间通信"""
+        self._message_bus = bus
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -257,6 +290,12 @@ class PipelineBridge:
         if _now - self._last_funding_check_ts >= 300.0:
             self._check_funding_rates()
             self._last_funding_check_ts = _now
+
+        # 4.5. Periodic Scout local scan (every 300s = 5 minutes, time-driven)
+        # 定期 Scout 本地扫描（每 300 秒 = 5 分钟，时间驱动）
+        if self._scout_agent and _now - self._last_scout_scan_ts >= 300.0:
+            self._invoke_scout_scan(symbol, price)
+            self._last_scout_scan_ts = _now
 
         # 5. Process pending intents -> submit to paper engine
         if self._auto_submit:
@@ -475,6 +514,53 @@ class PipelineBridge:
             except Exception:
                 logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
 
+    def _invoke_scout_scan(self, symbol: str, price: float) -> None:
+        """T2.07 Plan A2: Scout local market scan — volume anomaly + funding rate spike detection.
+        Scout 本地市场扫描 — 成交量异常 + 资金费率尖峰检测。
+        """
+        try:
+            if not self._scout_agent or self._scout_agent.state.value != "running":
+                return
+
+            # --- Volume anomaly check ---
+            try:
+                vol_data = self._km.get_volume_profile(symbol) if hasattr(self._km, 'get_volume_profile') else None
+                if vol_data and isinstance(vol_data, dict):
+                    vol_ratio = vol_data.get("volume_ratio", 1.0)
+                    if vol_ratio > 2.0:  # 2x average volume = anomaly
+                        self._scout_agent.produce_intel(
+                            source=f"local_volume_scan:{symbol}",
+                            content=f"Volume anomaly detected: {vol_ratio:.1f}x average for {symbol}",
+                            symbols=[symbol],
+                            data_quality=DataQualityLevel.FACT,
+                            sentiment=SentimentScore.NEUTRAL,
+                            relevance_score=min(0.9, vol_ratio / 5.0),
+                            metadata={"volume_ratio": vol_ratio, "price": price},
+                        )
+            except Exception:
+                pass  # Volume check is non-fatal
+
+            # --- Funding rate spike check ---
+            try:
+                if hasattr(self._km, 'get_latest_funding_rate'):
+                    fr = self._km.get_latest_funding_rate(symbol)
+                    if fr is not None and abs(fr) > 0.01:  # >1% funding = spike
+                        severity = "high" if abs(fr) > 0.03 else "medium"
+                        self._scout_agent.produce_event_alert(
+                            event_type="funding_rate_spike",
+                            severity=severity,
+                            affected_symbols=[symbol],
+                            description=f"Funding rate spike: {fr*100:.2f}% for {symbol}",
+                            metadata={"funding_rate": fr, "price": price},
+                        )
+            except Exception:
+                pass  # Funding check is non-fatal
+
+            self._scout_agent.record_scan()
+
+        except Exception:
+            logger.exception("Scout local scan error (non-fatal) / Scout 本地扫描异常（非致命）")
+
     def _on_position_open(self, intent: Any, fill_price: float) -> None:
         """
         Called when a new position is opened.
@@ -566,9 +652,16 @@ class PipelineBridge:
 
         hold_ms = 0
         regime = "unknown"
+        entry_ts_ms = int(time.time() * 1000)
+        entry_price = 0.0
+        qty = 0.0
+
         if pos_info:
             hold_ms = int(time.time() * 1000) - pos_info.get("entry_ts_ms", int(time.time() * 1000))
             regime = pos_info.get("regime", "unknown")
+            entry_ts_ms = pos_info.get("entry_ts_ms", int(time.time() * 1000))
+            entry_price = pos_info.get("entry_price", 0.0)
+            qty = pos_info.get("qty", 0.0)
 
         # Untrack from StopManager (position is closed) / 从 StopManager 取消追踪
         if self._stop_mgr:
@@ -598,6 +691,53 @@ class PipelineBridge:
                 )
             except Exception:
                 logger.debug("Observation writer error (non-fatal)")
+
+        # L1.01: Trade Attribution / L1.01：交易归因
+        # 当交易完成时，分解交易为归因因子（ALPHA/TIMING/SIZING/EXECUTION/COST/LUCK）
+        # When trade completes, decompose into attribution factors
+        if self._trade_attribution and entry_price > 0 and qty > 0:
+            try:
+                import datetime
+                import uuid
+
+                exit_ts_ms = int(time.time() * 1000)
+                entry_dt = datetime.datetime.fromtimestamp(entry_ts_ms / 1000.0, tz=datetime.timezone.utc)
+                exit_dt = datetime.datetime.fromtimestamp(exit_ts_ms / 1000.0, tz=datetime.timezone.utc)
+                trade_id = f"{strategy_name}:{symbol}:{uuid.uuid4().hex[:8]}"
+
+                # Calculate gross PnL from entry/exit prices and quantity
+                # 从入场/出场价格和数量计算毛利润
+                gross_pnl = (exit_price - entry_price) * qty
+
+                # Call attribution engine with minimal required parameters
+                # 用最少必需的参数调用归因引擎
+                attribution_result = self._trade_attribution.attribute_trade(
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    strategy=strategy_name,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    quantity=qty,
+                    entry_timestamp=entry_dt,
+                    exit_timestamp=exit_dt,
+                    market_prices_at_entry={},  # Empty dict as default
+                    market_prices_at_exit={},   # Empty dict as default
+                    fees_paid=0.0,              # Could be enhanced with actual fees
+                    slippage=0.0,               # Could be enhanced with actual slippage
+                    ai_cost=0.0,                # Could be enhanced with model costs
+                )
+
+                # Log attribution results for learning_tier
+                # 将归因结果记录到学习层
+                logger.info(
+                    "Trade attribution: %s → skill=%.2f%% luck=%.2f%% alpha=%.4f / 交易归因: skill=%.2f%% luck=%.2f%%",
+                    trade_id,
+                    attribution_result.skill_pct * 100,
+                    attribution_result.luck_pct * 100,
+                    attribution_result.attribution_scores[0].score if attribution_result.attribution_scores else 0.0,
+                )
+            except Exception as e:
+                logger.debug("Trade attribution error (non-fatal): %s", e)
 
         logger.info(
             "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",
