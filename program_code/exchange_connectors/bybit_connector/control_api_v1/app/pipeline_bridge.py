@@ -863,9 +863,10 @@ class PipelineBridge:
                     regime = self._km.get_regime(symbol)
                     if regime:
                         regime_info = f"\nMarket regime: {regime}"
-            except Exception:
-                # Intentional: regime fetch is optional enrichment for AI context
-                pass
+            except Exception as e:
+                # Non-fatal: regime is optional AI context enrichment; log for observability
+                # 非致命：regime 是可选 AI 上下文富化字段；记录日志以备观测
+                logger.debug("Regime fetch failed for %s (non-fatal, skipping enrichment): %s", symbol, e)
 
             indicator_info = ""
             try:
@@ -877,9 +878,10 @@ class PipelineBridge:
                         parts = [f"{k}={indicators[k]:.4f}" for k in keys if k in indicators]
                         if parts:
                             indicator_info = f"\nIndicators: {', '.join(parts)}"
-            except Exception:
-                # Intentional: indicators fetch is optional enrichment for AI context
-                pass
+            except Exception as e:
+                # Non-fatal: indicators are optional AI context enrichment; log for observability
+                # 非致命：指标是可选 AI 上下文富化字段；记录日志以备观测
+                logger.debug("Indicators fetch failed for %s (non-fatal, skipping enrichment): %s", symbol, e)
 
             context = (
                 f"Symbol: {symbol}\n"
@@ -1190,8 +1192,11 @@ class PipelineBridge:
         if self._auto_deployer:
             try:
                 self._auto_deployer.on_trade_result(strategy_name, close_pnl)
-            except Exception:
-                logger.debug("Auto-deployer on_trade_result error (non-fatal)")
+            except Exception as e:
+                # Log at warning: consecutive-loss tracking failure means auto-deployer
+                # may not pause the strategy on drawdown — worth surfacing
+                # 使用 warning 级别：连续亏损追踪失败意味着自动部署器可能无法在回撤时暂停策略
+                logger.warning("Auto-deployer on_trade_result error for %s (consecutive-loss tracking may be stale): %s", strategy_name, e)
 
         # E1: write auto-observation
         # E1：写入自动观察

@@ -310,6 +310,12 @@ class TestOllamaClient:
         """
         Test: generate() retries on transient URLError.
         测试：generate() 在临时 URLError 时重试。
+
+        Uses a URL-filtering side_effect callable instead of a list to prevent background
+        threads (e.g. kline_manager bootstrapping) from consuming mock entries intended
+        for the Ollama client, which would cause spurious failures in the full test suite.
+        使用 URL 过滤的 callable 替代列表式 side_effect，防止后台线程（如 kline_manager 引导）
+        消耗原本分配给 Ollama 客户端的 mock 条目，避免全量测试中的误报失败。
         """
         import urllib.error
 
@@ -318,14 +324,21 @@ class TestOllamaClient:
         mock_response.__enter__.return_value = mock_response
         mock_response.__exit__.return_value = None
 
-        # First call fails, second succeeds
-        with patch(
-            "urllib.request.urlopen",
-            side_effect=[
-                urllib.error.URLError("Temporary failure"),
-                mock_response,
-            ],
-        ):
+        ollama_call_count = 0
+
+        def urlopen_side_effect(req, timeout=None):
+            # Only intercept requests to the Ollama endpoint; let other callers fail naturally.
+            # 仅拦截发往 Ollama 端点的请求；其他调用者（如 kline_manager）会独立处理自己的异常。
+            nonlocal ollama_call_count
+            url = getattr(req, "full_url", str(req))
+            if "11434" not in url:
+                raise urllib.error.URLError("Test isolation — non-Ollama call blocked")
+            ollama_call_count += 1
+            if ollama_call_count == 1:
+                raise urllib.error.URLError("Temporary failure")
+            return mock_response
+
+        with patch("urllib.request.urlopen", side_effect=urlopen_side_effect):
             result = ollama_client.generate("Test prompt")
 
         assert result.success is True
