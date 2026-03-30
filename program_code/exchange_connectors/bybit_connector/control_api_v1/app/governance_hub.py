@@ -266,6 +266,16 @@ class GovernanceHub:
                 incident_callback=incident_callback,
             )
 
+            # T5.02: Inject ChangeAuditLog into all SMs if available
+            if self._change_audit_log is not None:
+                try:
+                    self._authorization_sm.set_change_audit_log(self._change_audit_log)
+                    self._risk_governor_sm.set_change_audit_log(self._change_audit_log)
+                    self._lease_sm.set_change_audit_log(self._change_audit_log)
+                    logger.debug("ChangeAuditLog injected into all SMs")
+                except Exception as e:
+                    logger.warning(f"Failed to inject ChangeAuditLog into SMs: {e}")
+
             # Wire cross-SM callbacks
             self._wire_callbacks()
 

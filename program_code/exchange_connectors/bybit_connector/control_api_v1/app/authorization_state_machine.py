@@ -355,6 +355,14 @@ class AuthorizationStateMachine:
         self._lock = threading.Lock()
         self._authorizations: dict[str, AuthorizationObject] = {}
         self._audit_callback = audit_callback  # External audit sink / 外部审计接收器
+        self._change_audit_log = None  # T5.02: Optional ChangeAuditLog for WHO/WHEN/APPROVAL tracking
+
+    # ── T5.02: Change Audit Log Injection / 變更審計日誌注入 ──
+
+    def set_change_audit_log(self, cal: Any) -> None:
+        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
+        with self._lock:
+            self._change_audit_log = cal
 
     # ── Create / 创建 ──
 
@@ -494,6 +502,21 @@ class AuthorizationStateMachine:
                 auth.freeze_reason = reason
             elif to_state == AuthState.REVOKED:
                 auth.revoke_reason = reason
+
+            # T5.02: Record state change to ChangeAuditLog if available
+            if self._change_audit_log:
+                try:
+                    from .change_audit_log import ChangeType  # noqa: E402
+                    self._change_audit_log.record_change(
+                        change_type=ChangeType.STATE_CHANGE,
+                        who=str(approved_by or initiator.value),
+                        what=f"Authorization: {from_state.value} → {to_state.value}",
+                        reason=reason or "",
+                        old_value=from_state.value,
+                        new_value=to_state.value,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to record change audit: {e}")
 
             # Return a copy / 返回副本
             result = copy.deepcopy(auth)

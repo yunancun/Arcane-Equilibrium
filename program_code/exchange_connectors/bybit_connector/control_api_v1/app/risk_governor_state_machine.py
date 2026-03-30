@@ -435,6 +435,14 @@ class RiskGovernorStateMachine:
         self._state = GovernorState()
         self._thresholds = thresholds or EscalationThresholds()
         self._audit_callback = audit_callback
+        self._change_audit_log = None  # T5.02: Optional ChangeAuditLog for WHO/WHEN/APPROVAL tracking
+
+    # ── T5.02: Change Audit Log Injection / 變更審計日誌注入 ──
+
+    def set_change_audit_log(self, cal: Any) -> None:
+        """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
+        with self._lock:
+            self._change_audit_log = cal
 
     # ── Properties ──
 
@@ -534,6 +542,21 @@ class RiskGovernorStateMachine:
                 self._state.consecutive_escalations += 1
             else:
                 self._state.consecutive_escalations = 0
+
+            # T5.02: Record state change to ChangeAuditLog if available
+            if self._change_audit_log:
+                try:
+                    from .change_audit_log import ChangeType  # noqa: E402
+                    self._change_audit_log.record_change(
+                        change_type=ChangeType.STATE_CHANGE,
+                        who=str(approved_by or initiator.value),
+                        what=f"RiskGovernor: {from_level.name} → {to_level.name}",
+                        reason=reason or "",
+                        old_value=from_level.name,
+                        new_value=to_level.name,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to record change audit: {e}")
 
             result = copy.deepcopy(self._state)
 
