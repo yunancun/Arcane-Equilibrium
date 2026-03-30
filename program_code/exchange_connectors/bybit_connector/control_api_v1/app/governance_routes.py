@@ -1424,7 +1424,8 @@ def get_paper_live_gate_status(
         raise HTTPException(status_code=503, detail="PaperLiveGate not available")
 
     try:
-        status_info = gate.get_status() if hasattr(gate, 'get_status') else {"status": "not_evaluated"}
+        raw_status = gate.get_gate_status() if hasattr(gate, 'get_gate_status') else None
+        status_info = raw_status.to_dict() if raw_status is not None and hasattr(raw_status, 'to_dict') else {"status": "not_evaluated"}
         return GovernanceResponse.success(data=status_info, message="paper_live_gate_status")
     except Exception as e:
         logger.error(f"Error getting PaperLiveGate status: {e}")
@@ -1479,7 +1480,11 @@ def evaluate_paper_live_gate(
         }
 
         # Evaluate the gate
-        result = gate.evaluate(metrics) if hasattr(gate, 'evaluate') else {"status": "error", "reason": "evaluate method not found"}
+        result = gate.evaluate_gate(**metrics) if hasattr(gate, 'evaluate_gate') else {"status": "error", "reason": "evaluate_gate method not found"}
+
+        # Convert GateCheckResult to dict for JSON response / 转换为 dict 以便 JSON 响应
+        result_dict = result.to_dict() if hasattr(result, 'to_dict') else result
+        gate_status_str = result.gate_status.value if hasattr(result, 'gate_status') else str(result)
 
         # Record to ChangeAuditLog if available
         if hub is not None and hub._change_audit_log is not None:
@@ -1488,16 +1493,16 @@ def evaluate_paper_live_gate(
                 hub._change_audit_log.record_change(
                     change_type=ChangeType.STATE_CHANGE,
                     who=actor.get("actor_id", "unknown") if isinstance(actor, dict) else "unknown",
-                    what=f"PaperLiveGate evaluation: {result.get('status', 'unknown')}",
+                    what=f"PaperLiveGate evaluation: {gate_status_str}",
                     reason="API evaluation request",
                     old_value=None,
-                    new_value=result.get('status'),
+                    new_value=gate_status_str,
                 )
             except Exception as e:
                 logger.warning("Failed to record PaperLiveGate evaluation to ChangeAuditLog: %s", e)
 
         return GovernanceResponse.success(
-            data=result,
+            data=result_dict,
             message="paper_live_gate_evaluated"
         )
     except Exception as e:
