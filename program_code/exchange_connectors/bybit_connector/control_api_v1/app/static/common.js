@@ -125,15 +125,19 @@ function _ocSyncCurrencyBadges() {
   });
 }
 
+let _ocFxTimer = null;  // handle for the 60-second refresh loop / 60秒刷新定时器句柄
+
 async function ocInitFx() {
   // Fetch real-time USDT/USD and USDT/EUR rates from CoinGecko (free, no key).
-  // CoinGecko returns prices *in* the target currency, so tether.usd = how many
-  // USD per 1 USDT, and tether.eur = how many EUR per 1 USDT — exactly what we need.
-  // Falls back to stale values if the API is unavailable.
+  // Runs once immediately, then schedules itself every 60 s via setTimeout
+  // (recursive, not setInterval — avoids overlap if the fetch is slow).
+  // Only dispatches 'occurrencychange' when a rate actually moves by ≥ 0.0001,
+  // so tabs don't re-render every minute when rates are stable.
   //
   // 从 CoinGecko 获取实时 USDT/USD 和 USDT/EUR 汇率（免费，无需 API Key）。
-  // USDT 并非严格等于 1 USD（通常在 0.997–1.003 之间浮动）。
-  // API 不可用时静默回退到上次成功的值或内置回退值。
+  // 首次立即执行，之后每 60 秒通过 setTimeout 递归调度（避免 fetch 延迟导致重叠）。
+  // 仅在汇率变化 ≥ 0.0001 时才派发 'occurrencychange' 事件，避免无效重渲染。
+  const prev = { USD: _ocFxRates.USD, EUR: _ocFxRates.EUR };
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 6000);
@@ -146,12 +150,26 @@ async function ocInitFx() {
       const d = await r.json();
       const t = d && d.tether;
       if (t) {
-        if (t.usd) _ocFxRates.USD = Number(t.usd);  // real USDT→USD rate
-        if (t.eur) _ocFxRates.EUR = Number(t.eur);  // real USDT→EUR rate
+        if (t.usd) _ocFxRates.USD = Number(t.usd);
+        if (t.eur) _ocFxRates.EUR = Number(t.eur);
       }
     }
   } catch (_) { /* silent fallback / 静默回退 */ }
+
   _ocSyncCurrencyBadges();
+
+  // Notify tabs only if rates actually changed (threshold 0.0001)
+  // 仅汇率实际变化时通知各 Tab 刷新，避免无意义的重渲染
+  const changed = Math.abs(_ocFxRates.USD - prev.USD) > 0.0001 ||
+                  Math.abs(_ocFxRates.EUR - prev.EUR) > 0.0001;
+  if (changed) {
+    window.dispatchEvent(new CustomEvent('occurrencychange', { detail: { currency: ocCurrCode(), rateUpdate: true } }));
+  }
+
+  // Schedule next refresh in 60 s (clear any existing timer first)
+  // 60 秒后调度下次刷新（先清除已有定时器）
+  if (_ocFxTimer) clearTimeout(_ocFxTimer);
+  _ocFxTimer = setTimeout(ocInitFx, 60_000);
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
