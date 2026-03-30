@@ -111,21 +111,90 @@ def _make_ttl_expiry_callback():
     """Create expiry callback for TTL Enforcer to trigger SM transitions"""
     def callback(entry, action):
         try:
+            # Access module-level globals for late binding to SM singletons
+            # This allows the SMs to be initialized after the callback is created
+            gov_hub = globals().get("GOV_HUB")
+            if gov_hub is None:
+                logger.warning(f"GovernanceHub not available in TTL callback")
+                return
+
             # Handle different SM types based on entry.state_machine_name
             if entry.state_machine_name == "Authorization":
                 if action == "auto_reject":
-                    logger.info(f"TTL expired for Authorization {entry.object_id}: auto-rejecting")
-                    # Auth PENDING_APPROVAL → REJECTED happens in the SM via audit_callback
+                    try:
+                        # Ensure SMs are initialized
+                        if not gov_hub._initialized:
+                            gov_hub._ensure_initialized()
+
+                        # Call reject on the authorization SM
+                        if gov_hub._authorization_sm is not None:
+                            result = gov_hub._authorization_sm.reject(
+                                entry.object_id,
+                                reason=f"TTL expired: {action}"
+                            )
+                            logger.info(f"TTL expired Authorization {entry.object_id}: auto-rejected to {result.state.value}")
+                        else:
+                            logger.warning(f"Authorization SM not available for TTL callback")
+                    except Exception as e:
+                        logger.error(f"Failed to reject authorization {entry.object_id} on TTL: {e}")
+
             elif entry.state_machine_name == "DecisionLease":
                 if action == "auto_expire":
-                    logger.info(f"TTL expired for Lease {entry.object_id}: auto-expiring")
+                    try:
+                        # Ensure SMs are initialized
+                        if not gov_hub._initialized:
+                            gov_hub._ensure_initialized()
+
+                        # Call reject on the lease SM (to expire it)
+                        if gov_hub._lease_sm is not None:
+                            result = gov_hub._lease_sm.reject(
+                                entry.object_id,
+                                reason=f"TTL expired: {action}"
+                            )
+                            logger.info(f"TTL expired Lease {entry.object_id}: auto-expired to {result.state.value}")
+                        else:
+                            logger.warning(f"DecisionLease SM not available for TTL callback")
+                    except Exception as e:
+                        logger.error(f"Failed to expire lease {entry.object_id} on TTL: {e}")
+
             elif entry.state_machine_name == "RiskGovernor":
                 if action == "manual_review_required":
-                    logger.info(f"TTL expired for Risk CIRCUIT_BREAKER {entry.object_id}: requires manual review")
+                    try:
+                        # Ensure SMs are initialized
+                        if not gov_hub._initialized:
+                            gov_hub._ensure_initialized()
+
+                        # Request manual review
+                        if gov_hub._risk_governor_sm is not None:
+                            result = gov_hub._risk_governor_sm.request_manual_review(
+                                reason=f"TTL expired: Circuit breaker requires manual review"
+                            )
+                            logger.info(f"TTL expired Risk state: escalated to MANUAL_REVIEW (level={result.level})")
+                        else:
+                            logger.warning(f"RiskGovernor SM not available for TTL callback")
+                    except Exception as e:
+                        logger.error(f"Failed to request manual review on TTL: {e}")
+
                 elif action == "escalate":
-                    logger.info(f"TTL expired for Risk MANUAL_REVIEW {entry.object_id}: escalating")
+                    try:
+                        # Ensure SMs are initialized
+                        if not gov_hub._initialized:
+                            gov_hub._ensure_initialized()
+
+                        # Escalate from MANUAL_REVIEW
+                        if gov_hub._risk_governor_sm is not None:
+                            result = gov_hub._risk_governor_sm.request_manual_review(
+                                reason=f"TTL expired: Manual review timeout, escalating"
+                            )
+                            logger.info(f"TTL expired Risk MANUAL_REVIEW: escalated (level={result.level})")
+                        else:
+                            logger.warning(f"RiskGovernor SM not available for TTL callback")
+                    except Exception as e:
+                        logger.error(f"Failed to escalate risk on TTL: {e}")
+
         except Exception as e:
             logger.error(f"Error in TTL expiry callback: {e}")
+
     return callback
 
 TTL_ENFORCER = TTLEnforcer(
