@@ -1244,48 +1244,44 @@ class GovernanceHub:
             return
 
         try:
+            from .oms_state_machine import OrderState, OrderInitiator
+
             overall_result = report.get("overall_result", "").upper()
 
             # Query orders that are currently in RECONCILING state
-            # This would be called if OMS_SM has a method to get orders by state
-            if hasattr(self._oms_sm, "get_orders_by_state"):
-                reconciling_orders = self._oms_sm.get_orders_by_state("RECONCILING")
+            reconciling_orders = self._oms_sm.get_by_state(OrderState.RECONCILING)
 
-                if not reconciling_orders:
-                    return
+            if not reconciling_orders:
+                return
 
-                # Based on reconciliation result, transition orders appropriately
-                if overall_result == "PASS":
-                    # Reconciliation passed - mark orders as COMPLETED
-                    for order_id in reconciling_orders:
-                        try:
-                            if hasattr(self._oms_sm, "transition"):
-                                from .oms_state_machine import OrderState, OrderInitiator
-                                self._oms_sm.transition(
-                                    order_id,
-                                    OrderState.COMPLETED,
-                                    OrderInitiator.RECONCILIATION_ENGINE,
-                                    reason="Reconciliation passed",
-                                )
-                                logger.info(f"OMS order {order_id} transitioned to COMPLETED after reconciliation")
-                        except Exception as e:
-                            logger.error(f"Failed to complete order {order_id}: {e}")
+            # Based on reconciliation result, transition orders appropriately
+            if overall_result == "PASS":
+                # Reconciliation passed - mark orders as COMPLETED
+                for order_dict in reconciling_orders:
+                    order_id = order_dict.get("order_id")
+                    try:
+                        self._oms_sm.reconciliation_pass(
+                            order_id,
+                            OrderInitiator.RECONCILIATION_ENGINE,
+                            reason="Reconciliation passed",
+                        )
+                        logger.info(f"OMS order {order_id} transitioned to COMPLETED after reconciliation")
+                    except Exception as e:
+                        logger.error(f"Failed to complete order {order_id}: {e}")
 
-                elif overall_result in ["MISMATCH_MINOR", "MISMATCH_MAJOR", "FAIL"]:
-                    # Reconciliation failed - mark orders as REJECTED
-                    for order_id in reconciling_orders:
-                        try:
-                            if hasattr(self._oms_sm, "transition"):
-                                from .oms_state_machine import OrderState, OrderInitiator
-                                self._oms_sm.transition(
-                                    order_id,
-                                    OrderState.REJECTED,
-                                    OrderInitiator.RECONCILIATION_ENGINE,
-                                    reason=f"Reconciliation failed: {overall_result}",
-                                )
-                                logger.info(f"OMS order {order_id} transitioned to REJECTED after reconciliation")
-                        except Exception as e:
-                            logger.error(f"Failed to reject order {order_id}: {e}")
+            elif overall_result in ["MISMATCH_MINOR", "MISMATCH_MAJOR", "FAIL"]:
+                # Reconciliation failed - mark orders as REJECTED
+                for order_dict in reconciling_orders:
+                    order_id = order_dict.get("order_id")
+                    try:
+                        self._oms_sm.reconciliation_fail(
+                            order_id,
+                            OrderInitiator.RECONCILIATION_ENGINE,
+                            reason=f"Reconciliation failed: {overall_result}",
+                        )
+                        logger.info(f"OMS order {order_id} transitioned to REJECTED after reconciliation")
+                    except Exception as e:
+                        logger.error(f"Failed to reject order {order_id}: {e}")
 
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
