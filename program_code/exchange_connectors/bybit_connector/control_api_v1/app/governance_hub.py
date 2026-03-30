@@ -589,6 +589,135 @@ class GovernanceHub:
                 logger.debug(f"Error releasing lease {lease_id}: {e}")
             return False
 
+    # ── T5.05: De-escalation via RecoveryApprovalGate / 通过恢復審批門禁解除升級 ──
+
+    def request_de_escalation(self, target_level: int, requested_by: str, reason: str = "") -> Optional[str]:
+        """
+        T5.05: Submit de-escalation request through recovery gate.
+        通過恢復審批門禁提交降級要求。
+
+        Args:
+            target_level: Target risk level to de-escalate to
+            requested_by: Name/ID of requester
+            reason: Reason for de-escalation
+
+        Returns:
+            request_id if successful; None otherwise
+        """
+        if not self._enabled or not self._initialized or self._recovery_gate is None:
+            return None
+
+        try:
+            from .recovery_approval_gate import RecoveryType
+            from .risk_governor_state_machine import RiskLevel
+
+            with self._lock:
+                if self._risk_governor_sm is None:
+                    return None
+
+                current_state = self._risk_governor_sm.get_state()
+                current_level = current_state.level
+
+                # Ensure we're actually de-escalating
+                if target_level >= current_level:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"De-escalation target {target_level} must be lower than current {current_level}")
+                    return None
+
+                # Submit recovery request
+                req = self._recovery_gate.submit_recovery_request(
+                    recovery_type=RecoveryType.RISK_DEESCALATE,
+                    from_state=current_level.name,
+                    to_state=RiskLevel(target_level).name,
+                    requested_by=requested_by,
+                    reason=reason,
+                )
+
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"De-escalation request submitted: {req.request_id}")
+                return req.request_id
+
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error submitting de-escalation request: {e}")
+            return None
+
+    def approve_de_escalation(self, request_id: str, approved_by: str) -> bool:
+        """
+        T5.05: Approve and execute de-escalation request.
+        批准並執行降級要求。
+
+        Args:
+            request_id: ID of recovery request
+            approved_by: Name of approver (should be Operator)
+
+        Returns:
+            True if successful; False otherwise
+        """
+        if not self._enabled or not self._initialized or self._recovery_gate is None:
+            return False
+
+        try:
+            with self._lock:
+                if self._risk_governor_sm is None:
+                    return False
+
+                # Get the request to determine target level
+                req = self._recovery_gate._requests.get(request_id)
+                if req is None:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Request {request_id} not found")
+                    return False
+
+                # Approve the recovery
+                approval = self._recovery_gate.approve_recovery(
+                    request_id=request_id,
+                    approved_by=approved_by,
+                )
+
+                if approval is None:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Failed to approve recovery {request_id}")
+                    return False
+
+                # Execute de-escalation on the risk SM
+                try:
+                    from .risk_governor_state_machine import RiskLevel
+                    target_level = RiskLevel[req.to_state]
+                    self._risk_governor_sm.de_escalate_to(
+                        target_level,
+                        approved_by=approved_by,
+                        reason=f"Approved via recovery gate: {req.reason}",
+                    )
+
+                    # Record to change audit log
+                    if self._change_audit_log:
+                        try:
+                            from .change_audit_log import ChangeType
+                            self._change_audit_log.record_change(
+                                change_type=ChangeType.STATE_CHANGE,
+                                who=approved_by,
+                                what=f"RiskGovernor de-escalation approved: {req.from_state} → {req.to_state}",
+                                reason=req.reason,
+                                old_value=req.from_state,
+                                new_value=req.to_state,
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to record change audit: {e}")
+
+                    logger.info(f"De-escalation approved and executed for request {request_id}")
+                    return True
+
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error executing de-escalation: {e}")
+                    return False
+
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error approving de-escalation: {e}")
+            return False
+
     def reconcile(
         self,
         paper_state: dict[str, Any],
