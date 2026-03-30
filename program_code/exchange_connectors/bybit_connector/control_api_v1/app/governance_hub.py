@@ -678,6 +678,92 @@ class GovernanceHub:
         except Exception as e:
             logger.error("trigger_risk_upgrade error: %s / 触发风控升级错误: %s", e, e)
 
+    def grant_paper_authorization(self, ttl_hours: int = 24) -> bool:
+        """
+        Auto-grant paper trading authorization (DRAFT → PENDING_APPROVAL → ACTIVE).
+        自动批准纸盘交易授权（DRAFT → PENDING_APPROVAL → ACTIVE）。
+
+        Paper trading carries zero real financial risk, so authorization is auto-approved
+        by the system without requiring Operator manual approval.
+        纸盘交易不涉及真实资金风险，因此系统自动批准，无需操作员手动审批。
+
+        Safe to call multiple times — skips if an ACTIVE authorization already exists.
+        可安全多次调用 — 如果 ACTIVE 授权已存在则跳过。
+
+        Args:
+            ttl_hours: Authorization TTL in hours (default 24h) / 授权有效期（小时，默认 24h）
+
+        Returns:
+            True if authorization is ACTIVE after call; False on any failure (never raises)
+            调用后授权为 ACTIVE 则返回 True；任何失败返回 False（永不抛出异常）
+        """
+        # Guard: hub must be initialized / 前置检查：Hub 必须已初始化
+        if self._authorization_sm is None or not self._initialized:
+            logger.warning(
+                "grant_paper_authorization: hub not ready — skipping / 纸盘授权：Hub 未就绪 — 跳过"
+            )
+            return False
+
+        try:
+            with self._lock:
+                # Skip if already ACTIVE — idempotent call / 如果已 ACTIVE 则跳过（幂等）
+                effective_auths = self._authorization_sm.get_effective()
+                if effective_auths:
+                    logger.debug(
+                        "grant_paper_authorization: ACTIVE auth already exists — no-op / 已有 ACTIVE 授权 — 跳过"
+                    )
+                    return True
+
+                # Step 1: Create DRAFT authorization with paper-only scope
+                # 步骤 1：创建仅限纸盘的 DRAFT 授权
+                import time as _time
+                paper_scope = {
+                    "mode": "paper_only",
+                    "execution": ["paper_submit"],
+                    "max_position_usd": 10000,
+                    "auto_approved": True,
+                }
+                # expires_at_ms: current time + ttl_hours in milliseconds
+                # 到期时间：当前时间 + ttl_hours（毫秒）
+                expires_at_ms = int((_time.time() + ttl_hours * 3600) * 1000)
+                auth_obj = self._authorization_sm.create_draft(
+                    title="Paper Trading Auto-Authorization / 纸盘交易自动授权",
+                    scope=paper_scope,
+                    created_by="system_paper_auto",
+                    description="Auto-granted on paper session start. No real funds at risk. / 纸盘 session 启动时自动授权，无真实资金风险。",
+                    expires_at_ms=expires_at_ms,
+                )
+                auth_id = auth_obj.authorization_id
+
+                # Step 2: Submit (DRAFT → PENDING_APPROVAL)
+                # 步骤 2：提交（DRAFT → PENDING_APPROVAL）
+                self._authorization_sm.submit_for_approval(auth_id)
+
+                # Step 3: Auto-approve (PENDING_APPROVAL → ACTIVE)
+                # 步骤 3：自动批准（PENDING_APPROVAL → ACTIVE）
+                self._authorization_sm.approve(
+                    auth_id,
+                    approved_by="system_paper_auto",
+                    reason="Paper trading carries zero real-funds risk; auto-approved by system. / 纸盘无真实资金风险，系统自动批准。",
+                )
+
+            # Invalidate cache so is_authorized() picks up the new ACTIVE auth immediately
+            # 使缓存失效，让 is_authorized() 立即感知到新 ACTIVE 授权
+            self._invalidate_auth_cache()
+
+            logger.info(
+                "Paper trading authorization auto-granted (id=%s, ttl=%dh) / "
+                "纸盘交易授权已自动批准（id=%s，有效期=%dh）",
+                auth_id, ttl_hours, auth_id, ttl_hours,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "grant_paper_authorization failed: %s / 纸盘授权失败: %s", e, e
+            )
+            return False
+
     def acquire_lease(self, intent_id: str, scope: str, ttl_seconds: float = 30.0) -> Optional[str]:
         """
         Acquire a decision lease for a specific intent.

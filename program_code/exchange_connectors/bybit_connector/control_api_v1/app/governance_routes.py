@@ -6,6 +6,7 @@ MODULE_NOTE (中文):
   本模块提供治理集线器的 REST API 接口：
   - GET /api/v1/governance/status — 联合治理仪表板
   - GET /api/v1/governance/auth/status — 授权 SM 详细状态
+  - POST /api/v1/governance/auth/request — 创建新授权请求（DRAFT → PENDING_APPROVAL，等待操作员批准）
   - POST /api/v1/governance/auth/approve — 操作员批准待审核授权
   - GET /api/v1/governance/risk/level — 风控等级 + 历史
   - POST /api/v1/governance/risk/override — 操作员降级（带原因）
@@ -18,6 +19,7 @@ MODULE_NOTE (English):
   REST API routes for the GovernanceHub:
   - GET /api/v1/governance/status — Combined governance dashboard
   - GET /api/v1/governance/auth/status — Authorization SM detailed state
+  - POST /api/v1/governance/auth/request — Create new authorization request (DRAFT → PENDING_APPROVAL, awaiting Operator)
   - POST /api/v1/governance/auth/approve — Operator approves pending auth
   - GET /api/v1/governance/risk/level — Risk governor level + history
   - POST /api/v1/governance/risk/override — Operator de-escalates
@@ -194,6 +196,19 @@ class PaperLiveGateEvaluateRequest(BaseModel):
     reconciliation_mismatch_percent: float = Field(default=0.0, ge=0)
     consecutive_losses: int = Field(default=0, ge=0)
     has_major_incidents: bool = Field(default=False)
+
+
+class AuthRequestBody(BaseModel):
+    """
+    Request body for POST /auth/request — create a new authorization request.
+    POST /auth/request 的请求体 — 创建新的授权请求。
+
+    Used for Live Trading authorization requests that require Operator approval.
+    用于需要操作员批准的实盘交易授权请求。
+    """
+    scope: dict = Field(default_factory=dict, description="Authorization scope dict (e.g., mode, execution, limits)")
+    ttl_hours: int = Field(default=24, ge=1, le=168, description="TTL in hours (1–168)")
+    reason: str = Field(default="operator_request", min_length=1, max_length=500, description="Reason for authorization request")
 
 
 class GovernanceResponse:
@@ -405,6 +420,80 @@ def get_authorization_status(
     except Exception as e:
         logger.error(f"Error getting authorization status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/auth/request")
+def request_authorization(
+    body: AuthRequestBody,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Request a new authorization (DRAFT → PENDING_APPROVAL).
+    请求新授权（DRAFT → PENDING_APPROVAL），等待操作员批准。
+
+    Used for Live Trading authorization requests that require Operator approval.
+    Paper Trading should use the auto-grant path (triggered on session start).
+    用于需要操作员批准的实盘交易授权请求。
+    纸盘交易应使用自动授权路径（在会话启动时触发）。
+
+    Body: {scope: dict (optional), ttl_hours: int (default 24), reason: str}
+    Returns: {authorization_id, state: "pending_approval"}
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    if not hub._enabled:
+        raise HTTPException(status_code=403, detail="Governance hub disabled")
+
+    try:
+        # Sanitize reason before use / 清理 reason 防注入
+        sanitized_reason = _sanitize_string(body.reason, max_len=500)
+
+        if hub._authorization_sm is None:
+            raise HTTPException(status_code=503, detail="Authorization state machine not initialized")
+
+        # Step 1: Create DRAFT authorization / 步骤 1：创建 DRAFT 授权
+        import time as _time
+        expires_at_ms = int((_time.time() + body.ttl_hours * 3600) * 1000)
+        requester = actor.get("user", "operator")
+        auth_obj = hub._authorization_sm.create_draft(
+            title=f"Operator Authorization Request / 操作员授权请求 ({requester})",
+            scope=body.scope,
+            created_by=requester,
+            description=sanitized_reason,
+            expires_at_ms=expires_at_ms,
+        )
+        auth_id = auth_obj.authorization_id
+
+        # Step 2: Submit (DRAFT → PENDING_APPROVAL) / 步骤 2：提交（DRAFT → PENDING_APPROVAL）
+        hub._authorization_sm.submit_for_approval(auth_id)
+
+        logger.info(
+            "Authorization request submitted by %s (id=%s, reason=%s) / "
+            "授权请求已提交（id=%s，操作者=%s，原因=%s）",
+            actor.get("user", "unknown"), auth_id, sanitized_reason,
+            auth_id, actor.get("user", "unknown"), sanitized_reason,
+        )
+
+        return GovernanceResponse.success(
+            data={
+                "authorization_id": auth_id,
+                "state": "pending_approval",
+                "ttl_hours": body.ttl_hours,
+                "scope": body.scope,
+                "reason": sanitized_reason,
+                "requested_by": actor.get("user", "operator"),
+                "message": "Authorization request submitted. Awaiting Operator approval.",
+            },
+            message="authorization_requested",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error requesting authorization: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/auth/approve")

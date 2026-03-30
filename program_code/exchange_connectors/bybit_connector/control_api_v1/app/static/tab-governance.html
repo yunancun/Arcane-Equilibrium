@@ -48,9 +48,16 @@
       </div>
     </div>
 
+    <!-- Auth state description line / 授权状态说明 -->
+    <div id="auth-state-desc" style="font-size:11px;color:var(--text-dim);margin-top:4px;margin-bottom:8px"></div>
+
     <div id="auth-pending-indicator" style="display:none;margin-bottom:12px;padding:8px;background:rgba(56,139,253,0.1);border-left:3px solid var(--blue);border-radius:0 6px 6px 0">
       <div style="font-size:12px;color:var(--blue)">Pending Approval / 待批准</div>
     </div>
+
+    <button class="oc-btn" id="btn-request-auth" style="width:100%;display:none;margin-bottom:8px" onclick="showRequestAuthModal()">
+      &#x1F4CB; 申请授权 Request Authorization
+    </button>
 
     <button class="oc-btn oc-btn-primary" id="btn-approve" style="width:100%;display:none" onclick="showApprovalModal()">
       &#x2714; Approve / 批准
@@ -351,6 +358,35 @@
           <tr><td colspan="5" style="color:var(--text-dim)">Loading... / 載入中...</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal: Request Authorization ═══ -->
+<div id="modal-request-auth" class="oc-modal" style="display:none">
+  <div class="oc-modal-content">
+    <h3>&#x1F4CB; 申请授权 / Request Authorization</h3>
+    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+      为实盘交易申请操作员授权。Paper Trading 会自动授权，无需此步骤。<br>
+      Request Operator authorization for live trading. Paper Trading is auto-authorized.
+    </p>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">TTL / 有效期</label>
+      <select id="request-auth-ttl" class="oc-select" style="width:100%">
+        <option value="8">8 小时 / 8 hours</option>
+        <option value="24" selected>24 小时 / 24 hours</option>
+        <option value="72">72 小时 / 72 hours (3 days)</option>
+        <option value="168">168 小时 / 168 hours (1 week)</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 申请原因 <span style="color:var(--red)">*</span></label>
+      <textarea id="request-auth-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+        placeholder="请说明申请原因 / Please enter the reason for this authorization request..." maxlength="300"></textarea>
+    </div>
+    <div class="oc-modal-footer">
+      <button class="oc-btn" onclick="hideRequestAuthModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-primary" onclick="submitRequestAuth()">Submit / 提交</button>
     </div>
   </div>
 </div>
@@ -780,6 +816,41 @@ async function loadAuditTrail() {
 }
 
 // ─── Modal Functions ──────────────────────────────────────────
+
+// showRequestAuthModal: 显示授权申请弹窗（DRAFT → PENDING_APPROVAL 流程）
+// Show the Request Authorization modal to initiate SM-01 DRAFT → PENDING_APPROVAL flow
+function showRequestAuthModal() {
+  // 重置表单并显示授权申请弹窗 / Reset form and show modal
+  $('request-auth-ttl').value = '24';
+  $('request-auth-reason').value = '';
+  $('modal-request-auth').style.display = 'flex';
+}
+
+// hideRequestAuthModal: 关闭授权申请弹窗
+// Hide the Request Authorization modal
+function hideRequestAuthModal() {
+  $('modal-request-auth').style.display = 'none';
+}
+
+// submitRequestAuth: 提交授权申请（POST /api/v1/governance/auth/request）
+// Submit the authorization request; on success reload data and close modal
+async function submitRequestAuth() {
+  const ttl = parseInt($('request-auth-ttl').value) || 24;
+  const reason = $('request-auth-reason').value.trim();
+  if (!reason) {
+    ocToast('请输入申请原因 / Please enter a reason', 'error');
+    return;
+  }
+  const d = await govRequestAuthorization(ttl, reason);
+  if (d && d.ok) {
+    ocToast('授权申请已提交，等待审批 / Authorization request submitted', 'success');
+    hideRequestAuthModal();
+    loadAll();
+  } else {
+    ocToast((d && d.message) ? d.message : '申请失败 / Request failed', 'error');
+  }
+}
+
 function showApprovalModal() {
   $('approve-note').value = '';
   $('modal-approve').style.display = 'flex';
@@ -917,8 +988,10 @@ function renderAuthCard(authData) {
   if (!authData) {
     ocSetHtml('auth-state-badge', ocChip('UNAVAILABLE', 'neutral'));
     ocSetText('auth-expiry', '--');
+    ocSetText('auth-state-desc', '');
     renderAuthScope({});
     $('btn-approve').style.display = 'none';
+    $('btn-request-auth').style.display = 'none';
     $('auth-pending-indicator').style.display = 'none';
     return;
   }
@@ -927,7 +1000,23 @@ function renderAuthCard(authData) {
   ocSetHtml('auth-state-badge', govAuthBadge(state));
 
   const expiresMs = authData.expires_at_ms;
-  ocSetText('auth-expiry', expiresMs ? govExpiryCountdown(expiresMs) : '--');
+  // ACTIVE → show expiry countdown; other states → hide expiry
+  // ACTIVE 显示过期倒计时；其他状态不显示
+  ocSetText('auth-expiry', (state === 'ACTIVE' && expiresMs) ? govExpiryCountdown(expiresMs) : '--');
+
+  // State description text / 各状态说明文字
+  const AUTH_DESC = {
+    NONE:             '无授权对象 No authorization object',
+    DRAFT:            '草稿待提交 Draft pending submission',
+    PENDING_APPROVAL: '等待操作员审批 Awaiting Operator approval',
+    ACTIVE:           '',   // expiry countdown is shown instead / 显示过期倒计时，无需额外说明
+    RESTRICTED:       '受限运行 Restricted operation',
+    FROZEN:           '已冻结 Frozen — no trading allowed',
+    EXPIRED:          '已过期，需重新申请 Re-authorization required',
+    REVOKED:          '已吊销，需重新申请 Re-authorization required',
+    REJECTED:         '已拒绝，需重新申请 Re-authorization required',
+  };
+  ocSetText('auth-state-desc', AUTH_DESC[state] || '');
 
   // Render scope using the new visualizer
   const scope = authData.scope || {};
@@ -936,6 +1025,11 @@ function renderAuthCard(authData) {
   const isPending = authData.pending_approval === true;
   $('auth-pending-indicator').style.display = isPending ? 'block' : 'none';
   $('btn-approve').style.display = isPending ? '' : 'none';
+
+  // Show "Request Authorization" button for states that need a fresh auth object
+  // 无授权、草稿、已过期/吊销/拒绝 时显示申请授权按钮
+  const needsRequest = ['NONE', 'DRAFT', 'EXPIRED', 'REVOKED', 'REJECTED'].includes(state);
+  $('btn-request-auth').style.display = needsRequest ? '' : 'none';
 }
 
 function renderRiskCard(riskData) {
@@ -1374,6 +1468,7 @@ function showUnavailable() {
 
   // Hide action buttons
   $('btn-approve').disabled = true;
+  $('btn-request-auth').disabled = true;
   $('btn-override').disabled = true;
   $('btn-reconcile').disabled = true;
 }
@@ -1603,7 +1698,7 @@ loadAll();
 ocStartRefresh(loadAll, 10000);
 
 // Close modals on background click
-['modal-approve', 'modal-override', 'modal-reconcile', 'modal-remove-whitelist', 'modal-promote'].forEach(id => {
+['modal-request-auth', 'modal-approve', 'modal-override', 'modal-reconcile', 'modal-remove-whitelist', 'modal-promote'].forEach(id => {
   const el = $(id);
   if (el) {
     el.addEventListener('click', function(e) {

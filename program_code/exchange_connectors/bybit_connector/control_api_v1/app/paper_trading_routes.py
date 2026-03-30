@@ -486,6 +486,26 @@ def post_session_start(
     """Start a new paper trading session / 开始新的纸上交易 session"""
     try:
         state = ENGINE.start_session(initial_balance=req.initial_balance)
+
+        # Auto-grant paper authorization on session start (zero real risk).
+        # 会话启动时自动授予纸盘授权（无真实资金风险）。
+        # This unblocks is_authorized() so orders can flow through the governance gate.
+        # 这将解除 is_authorized() 的阻塞，让订单能通过治理门检。
+        try:
+            if GOV_HUB is not None:
+                granted = GOV_HUB.grant_paper_authorization()
+                if granted:
+                    logger.info("Paper trading authorization auto-granted on session start")
+                else:
+                    logger.warning(
+                        "grant_paper_authorization() returned False on session start "
+                        "— governance gate will remain closed / 纸盘授权返回 False — 治理门检仍关闭"
+                    )
+        except Exception as _auth_err:
+            # Non-fatal: session itself is started; warn and continue.
+            # 非致命错误：会话本身已启动；记录警告并继续。
+            logger.warning("Failed to auto-grant paper authorization: %s", _auth_err)
+
         return _paper_response({"session": state["session"], "message": "Paper trading session started"})
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))

@@ -11,6 +11,9 @@ const GOV_AUTH_STATES = {
   PENDING_APPROVAL: 'info',
   DRAFT: 'neutral',
   NONE: 'neutral',
+  EXPIRED: 'bad',
+  REVOKED: 'bad',
+  REJECTED: 'bad',
 };
 
 const GOV_RISK_LEVELS = {
@@ -53,6 +56,16 @@ async function govGetAuthStatus() {
 async function govPostApprove(note) {
   // POST /api/v1/governance/auth/approve
   return ocPost('/api/v1/governance/auth/approve', { approval_note: note || '' });
+}
+
+async function govRequestAuthorization(ttlHours, reason) {
+  // POST /api/v1/governance/auth/request — create DRAFT → PENDING_APPROVAL
+  // 创建草稿授权并提交待审批（DRAFT → PENDING_APPROVAL）
+  return ocPost('/api/v1/governance/auth/request', {
+    scope: {},
+    ttl_hours: ttlHours || 24,
+    reason: reason || 'operator_request',
+  });
 }
 
 async function govGetRiskLevel() {
