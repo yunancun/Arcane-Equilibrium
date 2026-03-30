@@ -1429,45 +1429,71 @@ class PipelineBridge:
                 except Exception:
                     pass  # Non-critical, silently skip
 
-    def _check_funding_rates(self) -> None:
-        """Fetch funding rate data and feed to FundingRate strategy / 获取 funding rate 并喂给策略"""
+    def _fetch_single_funding_rate(self, symbol: str) -> tuple[float, int] | None:
+        """Fetch funding rate for a single symbol from Bybit API.
+        为单个品种从 Bybit API 获取 funding rate。
+
+        Returns:
+            (funding_rate, next_settle_ts_ms) or None if unavailable.
+            返回 (funding_rate, next_settle_ts_ms)，不可用时返回 None。
+        """
         import urllib.request
         import json as _json
 
-        for symbol in ["BTCUSDT", "ETHUSDT"]:
+        try:
+            url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+            req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = _json.loads(resp.read().decode())
+
+            if data.get("retCode") != 0:
+                return None
+
+            ticker_list = data.get("result", {}).get("list", [])
+            if not ticker_list:
+                return None
+
+            ticker = ticker_list[0]
+            funding_rate = float(ticker.get("fundingRate", 0))
+            next_funding_ts = int(ticker.get("nextFundingTime", 0))
+
+            if funding_rate == 0 or next_funding_ts == 0:
+                return None
+
+            return funding_rate, next_funding_ts
+        except Exception:
+            logger.debug("Funding rate fetch failed for %s / 获取失败: %s", symbol, symbol)
+            return None
+
+    def _check_funding_rates(self) -> None:
+        """Fetch funding rate for each deployed FundingRate strategy's own symbol.
+        为每个已部署的 FundingRate 策略获取其自身品种的 funding rate。
+
+        Fix P0-A2: previously only fetched BTCUSDT/ETHUSDT and fed all strategies with
+        wrong data. Now each strategy receives the rate for its own symbol.
+        修复 P0-A2：此前只获取 BTCUSDT/ETHUSDT 并将错误数据喂给所有策略。
+        现在每个策略接收其自身品种的 funding rate。
+        """
+        for strategy in self._orch._strategies.values():
+            if not hasattr(strategy, "evaluate_funding_opportunity"):
+                continue
+
+            symbol = getattr(strategy, "_symbol", None) or getattr(strategy, "symbol", None)
+            if not symbol:
+                continue
+
+            result = self._fetch_single_funding_rate(symbol)
+            if result is None:
+                continue
+
+            funding_rate, next_funding_ts = result
             try:
-                url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
-                req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    data = _json.loads(resp.read().decode())
-
-                if data.get("retCode") != 0:
-                    continue
-
-                ticker_list = data.get("result", {}).get("list", [])
-                if not ticker_list:
-                    continue
-
-                ticker = ticker_list[0]
-                funding_rate = float(ticker.get("fundingRate", 0))
-                next_funding_ts = int(ticker.get("nextFundingTime", 0))
-
-                if funding_rate == 0 or next_funding_ts == 0:
-                    continue
-
-                # Find FundingRate strategy in orchestrator and call evaluate
-                # 在编排器中找到 FundingRate 策略并调用评估
-                for strategy in self._orch._strategies.values():
-                    if hasattr(strategy, "evaluate_funding_opportunity"):
-                        try:
-                            strategy.evaluate_funding_opportunity(
-                                funding_rate=funding_rate,
-                                next_settle_ts_ms=next_funding_ts,
-                            )
-                        except Exception:
-                            logger.exception("Funding rate eval error / funding rate 评估异常")
+                strategy.evaluate_funding_opportunity(
+                    funding_rate=funding_rate,
+                    next_settle_ts_ms=next_funding_ts,
+                )
             except Exception:
-                logger.debug("Funding rate fetch failed for %s / 获取失败", symbol)
+                logger.exception("Funding rate eval error for %s / funding rate 评估异常: %s", symbol, symbol)
 
     def get_stats(self) -> dict[str, Any]:
         """Get bridge statistics / 获取桥接器统计"""

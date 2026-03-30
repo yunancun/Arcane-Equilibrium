@@ -256,7 +256,11 @@ class StrategyOrchestrator:
                 self._current_regime_ts_ms = signal.ts_ms
 
             # Enrich signal with current regime context / 用当前 regime 上下文丰富信号
-            if hasattr(signal, "metadata") and signal.metadata and self._current_regime != "unknown":
+            # Fix P0-A1: use `is not None` instead of truthiness check — empty dict {} is falsy
+            # but is a valid metadata container that needs _regime injection.
+            # 修复 P0-A1：改用 `is not None` 而非真值检查 — 空字典 {} 为 falsy，
+            # 但它是有效的 metadata 容器，需要注入 _regime。
+            if hasattr(signal, "metadata") and signal.metadata is not None and self._current_regime != "unknown":
                 signal.metadata["_regime"] = self._current_regime
 
         for strategy in active_strategies:

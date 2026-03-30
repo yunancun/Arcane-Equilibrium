@@ -294,6 +294,22 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-30--governance_compliance_audit.md` | 治理合规审计（EX-05/06/07/DOC-01~08，合规度 ~65%） |
 | `2026-03-30--pipeline_bridge_paper_engine_audit.md` | PipelineBridge + PaperTradingEngine 代码级审计（治理 gate 验证 + 止损验证 + 学习回调验证） |
 
+#### governance_dev/audits/2026-03-30--全面審核/ — ★★★ 全系统冷酷功能审核（9 Batch）
+
+| 文件 | 内容 |
+|------|------|
+| `00_審查計劃總綱.md` | 审查计划总纲 + 进度追踪（9 Batch，A-I） |
+| `01_A_即時問題診斷.md` | ★★★ P0 根因分析：MA_Cross metadata falsy + FundingRate 错误 symbol（10/10 策略全失效） |
+| `02_B_交易核心路徑.md` | 交易核心路径验证（B1-B7：状态机/Fill/PnL/round_trip 均正确） |
+| `03_C_風控框架.md` | 风控框架验证（P1：drawdown gate 无强制执行；其余 C2-C8 均正确） |
+| `04_D_學習系統.md` | 学习系统验证（E1 路径代码就绪，因 0 fills 未实际运行） |
+| `05_E_AI治理層.md` | AI 治理层验证（H0/Decision Lease 完整；AI 调用合法跳过） |
+| `06_F_掃描器策略部署.md` | 扫描器与策略部署验证（5min 周期、40% 过滤、WS 动态订阅均正确） |
+| `07_G_GUI_API端點.md` | GUI 与 API 端点验证（所有关键端点存在，数据源正确） |
+| `08_H_測試健康度.md` | 测试健康度（2,166 通过；P0 bug 路径无测试覆盖） |
+| `09_I_代碼品質.md` | 代码品质扫描（无 TODO/FIXME/silent except；硬编码值均有注释） |
+| `99_審查總結與修復清單.md` | ★★★ 审查总结：3 个问题（P0×2 + P1×1）+ 修复方案 + 系统健康全景 |
+
 #### governance_dev/2026-03-30 Round 2 修复计划
 
 | 文件 | 内容 |

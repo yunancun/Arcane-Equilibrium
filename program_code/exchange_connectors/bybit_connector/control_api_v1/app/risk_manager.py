@@ -974,14 +974,39 @@ class RiskManager:
                         "reason": f"ai_attention_tax_ratio_{hc['cost_edge_ratio']:.2f}_grade_{hc['cost_efficiency_grade']}",
                     })
 
-        # 7. Session drawdown circuit breaker (checked in tick() mutator, logged here)
+        # 7. Session drawdown circuit breaker
+        # Fix P1-C1: actually set session_halted=True instead of only logging a warning.
+        # check_order_allowed() already blocks orders when session_halted is set.
+        # 修复 P1-C1：实际设置 session_halted=True，而非仅记录警告。
+        # check_order_allowed() 已检查该标志并阻止新订单。
         peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
         current = sess.get("current_paper_balance_usdt", 0)
         if peak > 0:
             drawdown_pct = ((peak - current) / peak) * 100
             if drawdown_pct >= self._config.max_session_drawdown_pct:
                 if not sess.get("session_halted"):
-                    logger.warning("Session drawdown %.1f%% >= %.1f%% → halt recommended", drawdown_pct, self._config.max_session_drawdown_pct)
+                    sess["session_halted"] = True
+                    sess["session_halt_reason"] = f"drawdown_{drawdown_pct:.1f}pct"
+                    logger.warning(
+                        "SESSION HALTED: drawdown %.1f%% >= %.1f%% limit / "
+                        "会话已停止：回撤 %.1f%% 超过 %.1f%% 上限",
+                        drawdown_pct, self._config.max_session_drawdown_pct,
+                        drawdown_pct, self._config.max_session_drawdown_pct,
+                    )
+                    if self._change_audit_log:
+                        try:
+                            from .change_audit_log import ChangeType
+                            self._change_audit_log.record_change(
+                                change_type=ChangeType.STATE_CHANGE,
+                                who="RiskManager",
+                                what="Session halted due to drawdown circuit breaker",
+                                reason=f"Drawdown {drawdown_pct:.1f}% exceeded limit {self._config.max_session_drawdown_pct:.1f}%",
+                                new_value={"session_halted": True, "halt_reason": sess["session_halt_reason"]},
+                                affected_components=["PaperTradingEngine", "RiskManager"],
+                                auto_approve=True,
+                            )
+                        except Exception:
+                            pass  # audit log failure is non-fatal
 
         # 8. Daily loss check / 日内亏损检查
         # Uses daily_start_balance (reset each calendar day), not session initial
