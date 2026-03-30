@@ -29,7 +29,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         1,930+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama/L1 + 21 Edge Filter + 23 参数修复 · 2 跳过）
+测试:         2,159+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama/L1 + 21 Edge Filter + 23 参数修复 + 35 Batch12 E2E · 2 跳过）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
@@ -43,6 +43,7 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 胜率修复:     ★ 4/4 根因已修复（edge filter + 止损加宽 + limit order + squeeze 乘数）
 接入率:       19/22 = 86%（Batch 4 审计修正 · 仅 3 模组真正 STANDALONE）
 合规度:       ~88%
+PaperLiveGate: 已部署（11 项准入评估 + GET/POST API + ChangeAuditLog 联动）
 ```
 
 **★ Round 2 冷酷功能审核结论（2026-03-30）**
@@ -57,16 +58,16 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 | 下单 | 85% | 治理 gate + OMS SM-03 已串联（Batch 10） |
 | 止损 | 75% | 缺交易所条件单双重防线 |
 | 学习 | 25% | E1 观察 + L2 自动触发 + Sunday cron（Batch 10） |
-| 进化 | 5% | PaperLiveGate 未部署 |
+| 进化 | 30% | PaperLiveGate 已部署（Batch 12），无策略自动优化 |
 
-**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 2124+ 测试
+**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 2,159+ 测试 · PaperLiveGate 11 项准入已部署
 
-**关键缺失**：Executor Agent 未启动 · L2 仅手动触发→已自动化（Batch 10） · 策略无 alpha
+**关键缺失**：策略无可证明 alpha · L3-L5 学习层未实现 · 策略自动优化未接入
 
 **详细报告**：`docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md`
 **修复计划**：`docs/governance_dev/2026-03-30--round2_fix_plan_batches_7_12.md`
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + Phase 2 治理模組 + Phase 3 GovernanceHub 集成 + Round 2 Scout 集成 + Learning 自动晋升 + L1 本地推理 + Pre-trade Edge Filter + 0% 胜率四根因全修复
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + Phase 2 治理模組 + Phase 3 GovernanceHub 集成 + Round 2 Scout 集成 + Learning 自动晋升 + L1 本地推理 + Pre-trade Edge Filter + 0% 胜率四根因全修复 + **Batch 12 PaperLiveGate 部署 + E2E 冒烟测试 35 项 + 日报自动化**
 
 **★ 下一步：Round 2 修复计划（Batch 7-12）**
 
@@ -78,8 +79,8 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 | 8 | Guardian Agent + 动态风控 | 50→62% |
 | 9 | Perception Plane 激活 + Analyst Agent (L1) | 62→72% |
 | **10** | **L2 学习自动化 + OMS 串联** | **72→80% ✅** |
-| 11 | Executor Agent + 交易所条件单 | 80→85% |
-| 12 | Paper→Live 门禁 + 端到端验证 | 85→88% |
+| **11** | **Executor Agent + 交易所条件单 + 双重防线** | **80→85% ✅** |
+| **12** | **Paper→Live 门禁 + E2E 验证** | **85→88% ✅** |
 
 **务实修复计划**：[`docs/governance_dev/2026-03-30--round2_pragmatic_fix_plan.md`](docs/governance_dev/2026-03-30--round2_pragmatic_fix_plan.md)
 
@@ -125,6 +126,7 @@ srv/
 └── helper_scripts/
     ├── start_paper_trading.sh     ← 一键启动
     ├── cron_observer_cycle.sh     ← Observer 自动化
+    ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
     └── maintenance_scripts/       ← 清理 / 检查脚本
 ```
 

@@ -536,6 +536,37 @@ try:
         EXECUTOR_AGENT = None
         logger.warning("Could not initialize ExecutorAgent: %s / 无法初始化 ExecutorAgent: %s", e, e)
 
+    # ── Batch 12: PaperLiveGate instantiation (Paper→Live gate conditions) ──
+    # Batch 12：PaperLiveGate 实例化（纸盘→实盘闸门条件）
+    try:
+        from .paper_live_gate import PaperLiveGate, PaperLiveGateConfig
+
+        def _paper_live_gate_audit_cb(event_type: str, event_data: dict) -> None:
+            """Audit callback for PaperLiveGate → ChangeAuditLog"""
+            try:
+                from .paper_trading_routes import GOV_HUB as _hub
+                if _hub is not None and _hub._change_audit_log is not None:
+                    from .change_audit_log import ChangeType
+                    _hub._change_audit_log.record_change(
+                        change_type=ChangeType.STATE_CHANGE,
+                        who="PaperLiveGate",
+                        what=f"Gate event: {event_type}",
+                        reason=str(event_data.get('reason', 'gate_evaluation')),
+                        old_value=event_data.get('old_value'),
+                        new_value=event_data.get('new_value'),
+                    )
+            except Exception as e:
+                logger.warning("PaperLiveGate audit callback failed (non-fatal): %s", e)
+
+        PAPER_LIVE_GATE = PaperLiveGate(
+            config=PaperLiveGateConfig(),
+            audit_callback=_paper_live_gate_audit_cb,
+        )
+        logger.info("Batch 12: PaperLiveGate instantiated / PaperLiveGate 已实例化")
+    except (ImportError, Exception) as e:
+        PAPER_LIVE_GATE = None
+        logger.warning("Could not instantiate PaperLiveGate: %s", e)
+
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")

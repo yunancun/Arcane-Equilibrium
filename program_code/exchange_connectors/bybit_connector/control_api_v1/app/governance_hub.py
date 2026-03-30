@@ -1440,6 +1440,20 @@ class GovernanceHub:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"Error sending fatal reconciliation alert: {e}")
 
+            # Batch 12: Record reconciliation mismatch to ChangeAuditLog
+            if self._change_audit_log:
+                try:
+                    self._change_audit_log.record_change(
+                        change_type=ChangeType.STATE_CHANGE,
+                        who="GovernanceHub",
+                        what=f"Reconciliation mismatch detected: {severity}",
+                        reason=str(details.get('reason', 'reconciliation_mismatch')),
+                        old_value="consistent",
+                        new_value="mismatch",
+                    )
+                except Exception as e:
+                    logger.warning("ChangeAuditLog record failed for reconciliation mismatch (non-fatal): %s", e)
+
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
@@ -1498,6 +1512,20 @@ class GovernanceHub:
                             self._append_governance_event(evt.to_dict())
                         except Exception as _evt_err:
                             pass  # Non-fatal: event emission failure does not block governance action
+
+                    # Batch 12: Record auth freeze to ChangeAuditLog
+                    if self._change_audit_log:
+                        try:
+                            self._change_audit_log.record_change(
+                                change_type=ChangeType.STATE_CHANGE,
+                                who="GovernanceHub",
+                                what=f"Authorization frozen: {len(lease_ids)} active leases revoked",
+                                reason="Authorization frozen cascade",
+                                old_value="ACTIVE",
+                                new_value="FROZEN",
+                            )
+                        except Exception as e:
+                            logger.warning("ChangeAuditLog record failed for auth freeze (non-fatal): %s", e)
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1

@@ -76,6 +76,20 @@ def _get_governance_hub() -> Any:
             return None
 
 
+def _get_paper_live_gate() -> Any:
+    """
+    Lazy import PaperLiveGate from phase2_strategy_routes / 延迟导入
+
+    Returns:
+        PaperLiveGate instance or None if unavailable
+    """
+    try:
+        from .phase2_strategy_routes import PAPER_LIVE_GATE
+        return PAPER_LIVE_GATE
+    except ImportError:
+        return None
+
+
 def _get_auth_actor() -> Any:
     """
     Lazy import of authentication dependency / 延迟导入认证依赖
@@ -165,6 +179,21 @@ class SymbolWhitelistAddRequest(BaseModel):
     """Request to add symbol to whitelist / 将符号添加到白名单的请求"""
     symbol: str = Field(..., min_length=1, max_length=50, description="Symbol to add (e.g., BTCUSDT)")
     category: str = Field(..., description="Category (spot, linear, inverse, option)")
+
+
+class PaperLiveGateEvaluateRequest(BaseModel):
+    """Request to evaluate PaperLiveGate conditions / 评估 PaperLiveGate 条件的请求"""
+    paper_start_time_ms: int = Field(..., description="Paper trading start timestamp (ms)")
+    total_trades: int = Field(..., ge=0, description="Total completed round-trip trades")
+    win_rate_percent: float = Field(..., ge=0, le=100)
+    net_pnl: float = Field(...)
+    sharpe_ratio: float = Field(...)
+    max_drawdown_percent: float = Field(..., ge=0)
+    profit_factor: float = Field(..., ge=0)
+    audit_trail_completeness_percent: float = Field(default=99.0, ge=0, le=100)
+    reconciliation_mismatch_percent: float = Field(default=0.0, ge=0)
+    consecutive_losses: int = Field(default=0, ge=0)
+    has_major_incidents: bool = Field(default=False)
 
 
 class GovernanceResponse:
@@ -1373,6 +1402,106 @@ def governance_health_check(
         return GovernanceResponse.success(data=health, message="health_check")
     except Exception as e:
         logger.error(f"Error in health check: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Batch 12: Paper→Live Gate Endpoints ──
+# Batch 12：纸盘→实盘闸门端点
+
+@governance_router.get("/paper-live-gate/status")
+def get_paper_live_gate_status(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get PaperLiveGate status (last evaluation result or "not_evaluated").
+    获取 PaperLiveGate 状态（最后评估结果或"未评估"）。
+
+    Returns:
+        Current gate status: "not_evaluated", "closed" (conditions not met), or "open" (ready for transition)
+    """
+    gate = _get_paper_live_gate()
+    if gate is None:
+        raise HTTPException(status_code=503, detail="PaperLiveGate not available")
+
+    try:
+        status_info = gate.get_status() if hasattr(gate, 'get_status') else {"status": "not_evaluated"}
+        return GovernanceResponse.success(data=status_info, message="paper_live_gate_status")
+    except Exception as e:
+        logger.error(f"Error getting PaperLiveGate status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/paper-live-gate/evaluate")
+def evaluate_paper_live_gate(
+    request: PaperLiveGateEvaluateRequest,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Trigger PaperLiveGate evaluation with provided metrics.
+    使用提供的指标触发 PaperLiveGate 评估。
+
+    Parameters (from request body):
+      - paper_start_time_ms: Paper trading start timestamp (ms)
+      - total_trades: Total completed round-trip trades
+      - win_rate_percent: Win rate as percentage (0-100)
+      - net_pnl: Net profit/loss (can be negative)
+      - sharpe_ratio: Sharpe ratio (can be negative)
+      - max_drawdown_percent: Maximum drawdown as percentage
+      - profit_factor: Profit factor (gross profit / gross loss, >= 0)
+      - audit_trail_completeness_percent: Audit trail completeness (default: 99.0)
+      - reconciliation_mismatch_percent: Reconciliation mismatch percentage (default: 0.0)
+      - consecutive_losses: Consecutive losses count (default: 0)
+      - has_major_incidents: Whether there are major incidents (default: False)
+
+    Returns:
+        Evaluation result: gate_status, passed_conditions, failed_conditions
+    """
+    gate = _get_paper_live_gate()
+    if gate is None:
+        raise HTTPException(status_code=503, detail="PaperLiveGate not available")
+
+    hub = _get_governance_hub()
+
+    try:
+        # Prepare evaluation metrics dict from request
+        metrics = {
+            "paper_start_time_ms": request.paper_start_time_ms,
+            "total_trades": request.total_trades,
+            "win_rate_percent": request.win_rate_percent,
+            "net_pnl": request.net_pnl,
+            "sharpe_ratio": request.sharpe_ratio,
+            "max_drawdown_percent": request.max_drawdown_percent,
+            "profit_factor": request.profit_factor,
+            "audit_trail_completeness_percent": request.audit_trail_completeness_percent,
+            "reconciliation_mismatch_percent": request.reconciliation_mismatch_percent,
+            "consecutive_losses": request.consecutive_losses,
+            "has_major_incidents": request.has_major_incidents,
+        }
+
+        # Evaluate the gate
+        result = gate.evaluate(metrics) if hasattr(gate, 'evaluate') else {"status": "error", "reason": "evaluate method not found"}
+
+        # Record to ChangeAuditLog if available
+        if hub is not None and hub._change_audit_log is not None:
+            try:
+                from .change_audit_log import ChangeType
+                hub._change_audit_log.record_change(
+                    change_type=ChangeType.STATE_CHANGE,
+                    who=actor.get("actor_id", "unknown") if isinstance(actor, dict) else "unknown",
+                    what=f"PaperLiveGate evaluation: {result.get('status', 'unknown')}",
+                    reason="API evaluation request",
+                    old_value=None,
+                    new_value=result.get('status'),
+                )
+            except Exception as e:
+                logger.warning("Failed to record PaperLiveGate evaluation to ChangeAuditLog: %s", e)
+
+        return GovernanceResponse.success(
+            data=result,
+            message="paper_live_gate_evaluated"
+        )
+    except Exception as e:
+        logger.error(f"Error evaluating PaperLiveGate: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

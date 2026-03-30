@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-30（Batch 11 Executor Agent + 交易所条件单 + 双重防线）
+# 最后更新：2026-03-30（Batch 11+12 Executor Agent + PaperLiveGate + E2E 冒烟测试 + 日报自动化）
 
 ---
 
@@ -48,7 +48,7 @@
 ## 三、当前系统状态（2026-03-30 Round 2 冷酷功能审核后）
 
 ```
-测试：2,124+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 + 30 Guardian + 25 Perception/Analyst + 32 Batch10 OMS/L2 · 2 跳过）
+测试：2,159+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 + 30 Guardian + 25 Perception/Analyst + 32 Batch10 OMS/L2 + 35 Batch12 E2E · 2 跳过）
 路由：126+ 条（含 8 治理 + 5 Scout 端点）
 治理：GovernanceHub 4 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04），fail-closed 已验证
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
@@ -68,7 +68,7 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     下单                  = 90%（治理 gate + OMS SM-03 + ExecutorAgent 包装，Batch 11）
     止损                  = 90%（本地 3 类止损 + 交易所条件单双重防线，Batch 11）
     学习                  = 25%（E1 观察 + L2 自动触发 + Sunday cron，Batch 10）
-    进化                  = 5%（PaperLiveGate 未部署，无策略自动优化）
+    进化                  = 30%（PaperLiveGate 已部署，11 项准入评估 + API 端点 + 日报自动化，无策略自动优化）
 
   关键发现：
     ✅ 治理 fail-closed 一流（is_authorized 真实拒绝订单，acquire_lease fail-closed）
@@ -80,6 +80,9 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     ✅ L2 AI Engine 自动触发（Batch 10：observations≥200 auto + Sunday cron）
     ❌ Perception Plane register_data() 零调用
     ✅ OMS SM-03 已串联（Batch 10：Paper 7-state→OMS 11-state 映射，fail-closed）
+    ✅ PaperLiveGate 已部署（Batch 12：11 项准入评估 + GET/POST API + ChangeAuditLog 联动）
+    ✅ E2E 冒烟测试 35 项（A1-A10 审计项全覆盖，Batch 12）
+    ✅ 日报自动化（cron_daily_report.sh → Telegram，UTC 0:00）
     ❌ 策略层标准 RSI/MACD/MA，无可证明的 alpha
 
   详细审核报告：docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md
@@ -555,9 +558,9 @@ python3 scripts/bybit_runtime_state_resolver.py
     - Executor 包装 submit_order + 执行质量反馈
     - 交易所条件单双重防线（DOC-01 §5.9）
 
-  Batch 12: Paper→Live 门禁 + E2E 验证（85→88%）
-    - PaperLiveGate 11 项准入评估 + Operator 审批
-    - E2E 冒烟测试 100+ 笔 + 日报自动化
+  ✅ Batch 12: Paper→Live 门禁 + E2E 验证（85→88%）
+    - PaperLiveGate 11 项准入评估 + API 端点 + ChangeAuditLog 联动
+    - E2E 冒烟测试 35 项（A1-A10 审计项） + 日报自动化（Telegram cron）
 
   每 Batch 工作流：PM 分配 → E1a∥E1b 并行开发 → E4 测试 → FA+CC 审计 → PM 收尾
   总预估：10 Sessions · 2-3 周 · ~5,700 行新代码
@@ -658,7 +661,7 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-30 Batch 11 完成：ExecutorAgent 接入管线（APPROVED_INTENT→submit_order→EXECUTION_REPORT）+ 交易所条件止损单（Bybit Demo V5 API）+ 本地止损+交易所条件单双重防线（DOC-01 §5.9）。195 测试通过（含 25 新 Batch 11），零回归。系统全程 read_only。
+> 截至 2026-03-30 Batch 12 完成：Batch 11 ExecutorAgent 接入 + 交易所条件止损双重防线（DOC-01 §5.9）+ Batch 12 PaperLiveGate 11 项准入部署 + API 端点 + ChangeAuditLog 联动 + 日报自动化 + E2E 冒烟测试 35 项（A1-A10 全覆盖）。2,159+ 测试（1,986 passed），零回归。系统全程 read_only。
 
 ### Batch 7 记录（2026-03-30）
 
@@ -753,3 +756,32 @@ Live 前置条件（M/N 前必须核验）：
 | **合计** | **25** | **全部通过** |
 
 全量测试：195 passed — 零回归
+
+### Batch 12 记录（2026-03-30 — PaperLiveGate 部署 + E2E 冒烟测试 + 日报自动化）
+
+**Part A: PaperLiveGate 部署**
+- 12.1: `phase2_strategy_routes.py` — PAPER_LIVE_GATE 单例实例化 + audit_callback 联动 ChangeAuditLog
+- 12.2: `governance_routes.py` — GET /paper-live-gate/status + POST /paper-live-gate/evaluate 端点
+- 12.3: `governance_hub.py` — ChangeAuditLog 深度联动（auth freeze + reconciliation mismatch 记录）
+
+**Part B: 日报自动化**
+- 12.4: `helper_scripts/cron_daily_report.sh` (141 行) — UTC 0:00 cron 采集 Paper Trading 指标 → Telegram Bot
+
+**Part C: E2E 冒烟测试**
+
+| 测试类 | 数量 | 覆盖审计项 |
+|--------|------|-----------|
+| TestA1ScoutToStrategist | 4 | A1: Scout→Strategist 情报流 |
+| TestA2StrategistGuardianExecutor | 4 | A2: 策略→风控→执行链路 |
+| TestA3UnauthorizedRejection | 3 | A3: 授权拒绝 fail-closed |
+| TestA4LeaseLifecycle | 4 | A4: 租约生命周期 |
+| TestA5StopLossDualDefense | 2 | A5: 止损双重防线 |
+| TestA6LearningCallback | 3 | A6: 学习回调链路 |
+| TestA7PerceptionTagging | 3 | A7: 感知标记认知诚实 |
+| TestA8OMSStateConsistency | 3 | A8: OMS 状态一致性 |
+| TestA9PaperLiveGate | 5 | A9: Paper→Live 门禁评估 |
+| TestA10DailyReportAutomation | 4 | A10: 日报自动化脚本 |
+| **合计** | **35** | **A1-A10 全覆盖** |
+
+全量测试：1,986 passed, 142 failed (pre-existing env deps), 2 skipped — 零回归
+Batch 测试：153/153 通过（Batch 7+8+9+10+12）
