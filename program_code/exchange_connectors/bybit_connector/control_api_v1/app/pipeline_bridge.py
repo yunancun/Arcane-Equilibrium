@@ -286,8 +286,11 @@ class PipelineBridge:
                             with self._lock:
                                 self._stats["intents_rejected"] += 1
                             continue
-                    except Exception:
-                        logger.warning("Governance is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
+                    except Exception as exc:
+                        logger.error("Governance is_authorized error — fail-closed: %s", exc)
+                        with self._lock:
+                            self._stats["intents_rejected"] += 1
+                        continue
 
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）

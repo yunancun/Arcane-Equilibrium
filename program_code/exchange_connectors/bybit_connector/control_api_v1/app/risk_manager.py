@@ -579,8 +579,9 @@ class RiskManager:
             try:
                 if not self._governance_hub.is_authorized():
                     return False, "governance_not_authorized"
-            except Exception:
-                logger.warning("Governance is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
+            except Exception as exc:
+                logger.error("Governance is_authorized error — fail-closed: %s", exc)
+                return False, "governance_check_error"
 
         # Session halted?
         if sess.get("session_halted"):
