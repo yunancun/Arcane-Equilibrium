@@ -264,3 +264,33 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-27--full_system_audit_A_to_K.md` | ★★ 全系统审核 A-K：569 文件 63,874 行，7 CRITICAL + 19 HIGH + 28 MEDIUM + 16 LOW |
 | `2026-03-27--phase2_round2_strategic_audit_report.md` | Phase 2 第二轮审核：实战适用性审核（策略盈利性/管线连通性/数据质量/风控集成/信号可靠性） |
 | `2026-03-27--remote_access_guide.md` | 远程访问完整指南：Tailscale 安装配置 + Bybit Demo 访问地址 + secrets 权限加固 |
+| `2026-03-22--local_private_layout.md` | 本地私有布局说明：Git 仓库 vs 本地私有目录结构（secrets/srv 分离） |
+
+### governance_dev/ — 治理开发文档
+
+#### governance_dev/phase2_execution/ — Phase 2 治理模組执行记录
+
+| 文件 | 内容 |
+|------|------|
+| `T2_EXECUTION_SUMMARY.md` | ★ Phase 2 执行总览：21 模组矩阵 + 关键指标 |
+| `T2_PM_QUALITY_AUDIT_REPORT.md` | Phase 2 PM 品质审核报告（T2.01–T2.23，整体 4/5，0 个 P0 blocker） |
+| `T2_TW_COMMENT_AUDIT_REPORT.md` | Phase 2 TW 注释品质审核报告（评级 9.5/10，100% 双语覆盖） |
+| `T2_TEST_RESULTS.md` | T2 测试套件执行报告（1485 测试，Pytest 运行结果） |
+| `FIXTURE_REFACTOR_SUMMARY.md` | 测试 Fixture 重构总结：36 个测试文件整合至 conftest.py（30+ 可复用 fixture） |
+| `TEST_FIXTURE_OVERVIEW.md` | 测试 Fixture 重构概览：重复代码消除 + conftest.py 集中管理 |
+
+#### governance_dev/phase3_integration/ — Phase 3 治理集成
+
+| 文件 | 内容 |
+|------|------|
+| `T3_GOVERNANCE_INTEGRATION_GUIDE.md` | Phase 3 治理集成指南 |
+| `PHASE3_CODE_REVIEW_REPORT.md` | Phase 3 代码审查报告 |
+| `SECURITY_AUDIT_PHASE3.md` | Phase 3 安全审计报告 |
+| `REVIEW_GOVERNANCE_GUI.md` | E2 代码审查：GUI 治理集成（Authorization/Risk Governor/Decision Leases/Reconciliation 4 个状态机，结论 PASS） |
+
+#### governance_dev/phase4_acceptance/ — Phase 4 验收
+
+| 文件 | 内容 |
+|------|------|
+| `T4.05_PM_FINAL_ACCEPTANCE_REPORT.md` | PM 最终验收报告 |
+| `TEST_REPORT_GOVERNANCE_E4.md` | E4 测试工程师验收报告（1485 测试，治理集成 PASS，1 个无关 datetime 失败） |
