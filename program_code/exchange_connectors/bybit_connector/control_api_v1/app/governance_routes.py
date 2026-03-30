@@ -53,12 +53,15 @@ governance_router = APIRouter(
 # Lazy Imports / 延迟导入
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _get_governance_hub():
+def _get_governance_hub() -> Any:
     """
     Lazy import to avoid circular dependency / 延迟导入避免循环依赖
 
     Tries to get GOV_HUB from paper_trading_routes module (the primary source).
     Falls back gracefully if unavailable.
+
+    Returns:
+        GovernanceHub instance or None if unavailable
     """
     try:
         # Primary source: paper_trading_routes.GOV_HUB
@@ -73,8 +76,13 @@ def _get_governance_hub():
             return None
 
 
-def _get_auth_actor():
-    """Lazy import of authentication dependency / 延迟导入认证依赖"""
+def _get_auth_actor() -> Any:
+    """
+    Lazy import of authentication dependency / 延迟导入认证依赖
+
+    Returns:
+        Actor dict with role and identity, or raises HTTPException(401/503)
+    """
     try:
         from . import main_legacy as base
         actor = base.current_actor

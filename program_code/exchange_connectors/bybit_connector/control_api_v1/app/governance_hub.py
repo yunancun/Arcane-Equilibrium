@@ -206,50 +206,66 @@ class GovernanceHub:
         self._governance_events: list[dict[str, Any]] = []
         self._governance_events_max_size = 1000
 
-    def set_audit_pipeline(self, pipeline: Any) -> None:
+    def set_audit_pipeline(self, pipeline: 'Any') -> None:
         """
         Set the audit pipeline for SM callbacks.
         設置 SM 回調的審計管道。
 
         Args:
-            pipeline: AuditPipeline instance for persisting audit records to disk
+            pipeline: AuditPipeline instance for persisting audit records to disk.
+                      Type: audit_persistence.AuditPipeline (lazy import to avoid circular dep)
         """
         with self._lock:
             self._audit_pipeline = pipeline
             logger.info("Audit pipeline set on GovernanceHub")
 
-    def set_change_audit_log(self, cal: Any) -> None:
+    def set_change_audit_log(self, cal: 'ChangeAuditLog') -> None:
         """Inject ChangeAuditLog for WHO/WHEN/APPROVAL tracking / 注入變更審計日誌"""
         with self._lock:
             self._change_audit_log = cal
             logger.info("ChangeAuditLog set on GovernanceHub")
 
-    def set_recovery_gate(self, gate: Any) -> None:
+    def set_recovery_gate(self, gate: 'RecoveryApprovalGate') -> None:
         """Inject RecoveryApprovalGate for de-escalation approval / 注入恢復審批門禁"""
         with self._lock:
             self._recovery_gate = gate
             logger.info("RecoveryApprovalGate set on GovernanceHub")
 
-    def set_alerter(self, alerter: Any) -> None:
+    def set_alerter(self, alerter: 'Any') -> None:
         """
         T8.06: Inject TelegramAlerter for governance event notifications.
         注入 TelegramAlerter 用于治理事件通知。
 
         Args:
-            alerter: TelegramAlerter instance for sending alerts
+            alerter: TelegramAlerter instance with .send() and .is_enabled property.
+                     Type: telegram_alerter.TelegramAlerter (lazy import to avoid circular dep)
         """
         with self._lock:
             self._alerter = alerter
             logger.info("TelegramAlerter set on GovernanceHub")
 
-    def set_oms_sm(self, oms_sm: Any) -> None:
-        """T5.03: Inject OMS State Machine for order reconciliation / 注入OMS狀態機"""
+    def set_oms_sm(self, oms_sm: 'Any') -> None:
+        """
+        T5.03: Inject OMS State Machine for order reconciliation.
+        注入 OMS 狀態機用於訂單對賬。
+
+        Args:
+            oms_sm: OmsStateMachine instance with get_by_state(), reconciliation_pass/fail().
+                    Type: oms_state_machine.OmsStateMachine (lazy import to avoid circular dep)
+        """
         with self._lock:
             self._oms_sm = oms_sm
             logger.info("OMS State Machine set on GovernanceHub")
 
-    def set_learning_tier_gate(self, gate: Any) -> None:
-        """T9A.01: Inject LearningTierGate for analyst agent evolution / 注入学习等级门控"""
+    def set_learning_tier_gate(self, gate: 'Any') -> None:
+        """
+        T9A.01: Inject LearningTierGate for analyst agent evolution.
+        注入學習等級門控用於分析師代理演進。
+
+        Args:
+            gate: LearningTierGate instance with can_*() capability check methods.
+                  Type: learning_tier_gate.LearningTierGate (lazy import to avoid circular dep)
+        """
         with self._lock:
             self._learning_tier_gate = gate
             logger.info("LearningTierGate set on GovernanceHub")
@@ -1013,8 +1029,8 @@ class GovernanceHub:
                     for s in OrderState:
                         try:
                             orders.extend(self._oms_sm.get_by_state(s))
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                 return orders[:limit]
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1144,8 +1160,8 @@ class GovernanceHub:
                                 parent_event_id=risk_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1173,8 +1189,8 @@ class GovernanceHub:
                                 parent_event_id=risk_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                     if should_freeze_auth:
                         self._on_auth_frozen(correlation_id=cascade_correlation_id, parent_event_id=risk_event_id)
                 except Exception as e:
@@ -1333,8 +1349,8 @@ class GovernanceHub:
                                 parent_event_id=recon_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1411,8 +1427,8 @@ class GovernanceHub:
                                 parent_event_id=parent_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1523,7 +1539,8 @@ class GovernanceHub:
             f"OPERATOR_ALERT: Incident {context.get('event_id')} "
             f"severity={context.get('severity')} reason={context.get('reason_code')}"
         )
-        # TODO: Future enhancement - integrate with notification system
+        # NOTE: Notification integration handled by TelegramAlerter (set_alerter, T8.06).
+        # Additional notification channels (Slack, webhook) deferred to future enhancement.
 
     def _auth_permits_scope(self, auth_dict: dict[str, Any], scope: str) -> bool:
         """Check if authorization permits lease scope / 检查授权是否允许租约范围"""
@@ -1579,8 +1596,8 @@ class GovernanceHub:
                                 message=f"Order {order_id} completed after reconciliation pass",
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                     except Exception as e:
                         logger.error(f"Failed to complete order {order_id}: {e}")
 
@@ -1605,8 +1622,8 @@ class GovernanceHub:
                                 message=f"Order {order_id} rejected: {overall_result}",
                             )
                             self._append_governance_event(evt.to_dict())
-                        except Exception:
-                            pass
+                        except Exception as _evt_err:
+                            pass  # Non-fatal: event emission failure does not block governance action
                     except Exception as e:
                         logger.error(f"Failed to reject order {order_id}: {e}")
 
