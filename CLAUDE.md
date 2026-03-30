@@ -470,50 +470,50 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ Phase 3 RiskGovernor 死锁修复（2026-03-30）— get_status() 嵌套锁 → 直接属性访问
   ✅ 合规度校准（2026-03-30 TW 审核）— ~28% → ~65%，接入率 7/22 → 11/22
   ✅ Round 2 Cowork Phase 0 审计（2026-03-30）— 三路并行验证 · 合规率 65%→88%
-  Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
-  等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
-  Paper Trading + Bybit Demo 数据对比分析
-  GUI 细节打磨（移动端适配 / 图表增强 / 实时 PnL 折线图）
+  ★★ Round 2 务实修复计划（2026-03-30 PM+FA 联合制定，Operator 待批准）
+     详细文档：docs/governance_dev/2026-03-30--round2_pragmatic_fix_plan.md
+
+  ★ Batch 7: Conductor 事件循环 + Strategist Agent（32→50%）
+    - Conductor 实例化并启动事件循环（复用已有 multi_agent_framework.py:619-928）
+    - MessageBus 注册 Scout→Strategist 订阅
+    - StrategistAgent 用 Qwen 3.5 评估信号质量替代硬编码
+    - Shadow 模式先行（只记录不执行），验证后激活
+    - E1a: Conductor 接线 ∥ E1b: Strategist 实现 → E4: 25 测试 → FA: 审计
+
+  Batch 8: Guardian Agent + 动态风控（50→62%）
+    - GuardianAgent 5 项检查（方向冲突/杠杆/关联/Sharpe/回撤）
+    - Guardian verdict（APPROVED/REJECTED/MODIFIED）反馈到 PipelineBridge
+    - SM-04 联动（异常事件→风控升级）
+
+  Batch 9: Perception Plane 激活 + Analyst Agent L1（62→72%）
+    - KlineManager→FACT, SignalEngine→INFERENCE, Scout→INFERENCE/HYPOTHESIS
+    - Analyst 消费 ROUND_TRIP_COMPLETE → 更新 LearningTierGate 指标
+
+  Batch 10: L2 学习自动化 + OMS 串联（72→80%）
+    - Analyst L2 模式发现（Qwen 分析）+ 每周 Cron 触发
+    - OMS SM-03 串联替换 Paper Engine 独立 7 态
+    - TTL 执行器定期调用
+
+  Batch 11: Executor Agent + 交易所条件单（80→85%）
+    - Executor 包装 submit_order + 执行质量反馈
+    - 交易所条件单双重防线（DOC-01 §5.9）
+
+  Batch 12: Paper→Live 门禁 + E2E 验证（85→88%）
+    - PaperLiveGate 11 项准入评估 + Operator 审批
+    - E2E 冒烟测试 100+ 笔 + 日报自动化
+
+  每 Batch 工作流：PM 分配 → E1a∥E1b 并行开发 → E4 测试 → FA+CC 审计 → PM 收尾
+  总预估：10 Sessions · 2-3 周 · ~5,700 行新代码
 
 待处理问题（已记录，非紧急）：
-  - ✅ MACrossoverStrategy 双边持仓状态漂移 → 已修复（Session 9 A2: on_fill 链路）
-  - ✅ realized_pnl 毛利问题 → 已修复（Session 9 B2: net_realized_pnl 字段）
-  - ✅ StrategyAutoDeployer active_count +1 → 已修复（Session 9 G3: | {symbol}）
-  - ✅ StopManager 与 RiskManager 双重止损 → 已修复（Session 10 S1: _check_stops 仓位验证）
-  - ✅ regime 只过滤入场、不影响止损/持仓时间 → 已修复（Session 11 R1: 三维乘数）
-  - Learning Cockpit GUI 数据展示（依赖 E1 数据积累后再完善）
+  - Learning Cockpit GUI 数据展示（依赖 Batch 9 Analyst 数据积累后再完善）
   - RiskManager daily loss 跨天不重置（已验证有重置逻辑，影响极小）
 
-长期优化（自主交易 Agent 持续改进）：
-  - 扫描器策略匹配优化：不只选 trend，根据市场状态平衡 funding_arb / grid / reversion
-  - 策略动态退出：连续亏损 N 次自动停用 + 机会消失时移除
-  - 仓位智能分配：高分机会分配更大仓位（ATR 动态 + score 加权）
-  - 多策略同币种：同一币种可同时跑 Grid + Trend（不同策略类型互补）
-  - 策略表现追踪：每个自动部署的策略独立 PnL，定期排名淘汰末位
-  - 扫描器学习：记录历史扫描→部署→结果，优化分类评分模型
-  - Funding Rate 专扫：独立高频扫描 funding rate（每小时），不等 5 分钟周期
-  - 跨交易所套利：接入 Binance 扫描，发现 Bybit-Binance 价差
-  - 波动率 regime 切换：市场整体波动率变化时自动调整 max_symbols 和策略偏好
-
-OpenClaw 开发潜力（通信层 → 信息增强层）：
-  第一步（近期）：
-    - Telegram 告警接通：交易信号/止损触发/异常推送到手机
-    - Cron 日报：每天 UTC 0:00 自动生成持仓/PnL/策略表现日报 → 推送 Telegram
-  第二步（数据积累期间）：
-    - web-pilot 新闻扫描：每 30 分钟抓 CoinDesk/Bybit 公告 → 情绪打分 → 注入信号引擎
-    - 事件驱动信号：FOMC/CPI → 自动降杠杆收紧止损；上币公告 → 提前部署策略
-    - Cron 小时简报 → 存入 Memory 知识库积累市场认知
-  第三步（长期）：
-    - 多 Agent 架构：研究员（新闻收集）+ 监控员（持仓巡检）+ 分析师（策略优化）
-    - Twitter/X 情绪信号（xurl skill）→ 与技术信号交叉验证
-    - 跨交易所价差监控（web-pilot 抓 Binance/OKX 价格）→ 套利信号
-    - Canvas 实时面板：Agent 自主生成可视化仪表盘
-    - Browser 自动化：登录 Bybit 网页端核对实际订单/持仓
-  OpenClaw 已有能力（v2026.3.24）：
-    - 51 内置 skill（8 已就绪），23+ 通信通道，Cron + Heartbeat 定时
-    - web-pilot 网页搜索/抓取（免费），Browser 自动化，Memory 向量检索
-    - Multi-Agent 路由（隔离工作空间），Canvas A2UI 实时渲染
-    - 当前角色：通信层（嘴巴和耳朵），不参与 AI 调用和交易决策
+长期优化（Batch 12 后）：
+  - 策略参数自动优化（L3 假设验证 + L4 策略进化）
+  - 跨交易所套利（接入 Binance/OKX）
+  - 波动率 regime 切换（自动调整 max_symbols 和策略偏好）
+  - OpenClaw 深度集成（新闻扫描 + 事件驱动信号 + Twitter 情绪）
 
 之后：
   M 章：Supervised Live Gate（需先积累 paper trading 数据）

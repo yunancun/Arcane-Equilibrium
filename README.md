@@ -68,6 +68,21 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 
 **已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + Phase 2 治理模組 + Phase 3 GovernanceHub 集成 + Round 2 Scout 集成 + Learning 自动晋升 + L1 本地推理 + Pre-trade Edge Filter + 0% 胜率四根因全修复
 
+**★ 下一步：Round 2 修复计划（Batch 7-12）**
+
+6 个 Batch，预估 10 个 Cowork Session（2-3 周），目标 32% → 85%+ 功能完成度。
+
+| Batch | 内容 | 完成度 |
+|-------|------|--------|
+| 7 | Conductor 事件循环 + Strategist Agent | 32→50% |
+| 8 | Guardian Agent + 动态风控 | 50→62% |
+| 9 | Perception Plane 激活 + Analyst Agent (L1) | 62→72% |
+| 10 | L2 学习自动化 + OMS 串联 | 72→80% |
+| 11 | Executor Agent + 交易所条件单 | 80→85% |
+| 12 | Paper→Live 门禁 + 端到端验证 | 85→88% |
+
+**务实修复计划**：[`docs/governance_dev/2026-03-30--round2_pragmatic_fix_plan.md`](docs/governance_dev/2026-03-30--round2_pragmatic_fix_plan.md)
+
 ---
 
 ## 项目结构
