@@ -217,5 +217,53 @@ class BybitDemoSync:
         except Exception as e:
             logger.debug("Wallet sync failed: %s", e)
 
+    def get_current_snapshot(self) -> dict[str, Any] | None:
+        """
+        T7.04: Build reconciliation-format snapshot from current Demo API state / 从当前 Demo API 状态构建对账格式快照
+
+        Returns snapshot in reconciliation format:
+        {
+            "snapshot_ts_ms": int,
+            "orders": [],
+            "positions": {symbol: {...}},
+            "fills": [],
+            "balances": {asset: balance}
+        }
+        """
+        try:
+            positions_raw = self._demo.get_positions()
+            wallet_raw = self._demo.get_wallet_balance()
+
+            # Parse positions
+            positions_dict = {}
+            for pos in positions_raw.get("result", {}).get("list", []):
+                symbol = pos.get("symbol")
+                if symbol and float(pos.get("size", 0)) > 0:
+                    positions_dict[symbol] = {
+                        "side": pos.get("side"),
+                        "size": float(pos.get("size")),
+                        "avg_entry_price": float(pos.get("avgPrice", 0)),
+                    }
+
+            # Parse wallet
+            coins = wallet_raw.get("result", {}).get("list", [{}])[0].get("coin", [])
+            balances = {}
+            for c in coins:
+                coin_name = c.get("coin")
+                balance = float(c.get("walletBalance", 0))
+                if coin_name and balance > 0:
+                    balances[coin_name] = balance
+
+            return {
+                "snapshot_ts_ms": int(time.time() * 1000),
+                "orders": [],
+                "positions": positions_dict,
+                "fills": [],
+                "balances": balances,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get demo snapshot for reconciliation: {e}")
+            return None
+
     def get_stats(self) -> dict[str, Any]:
         return {"component": "bybit_demo_sync", "running": self._running, **self._stats}

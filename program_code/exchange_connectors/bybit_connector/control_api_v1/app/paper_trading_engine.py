@@ -661,6 +661,30 @@ def update_unrealized_pnl(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Paper State → Reconciliation Format Adapter / 纸上状态 → 对账格式转换
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _paper_state_to_recon_format(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Convert internal paper state to reconciliation engine format / 将内部纸上状态转换为对账格式
+
+    Expected format for reconciliation engine:
+    - snapshot_ts_ms: int — timestamp in milliseconds
+    - orders: list[dict] — order snapshots
+    - positions: dict[str, dict] — positions keyed by symbol
+    - fills: list[dict] — execution records
+    - balances: dict[str, float] — asset balances (e.g., USDT)
+    """
+    return {
+        "snapshot_ts_ms": state.get("meta", {}).get("updated_ts_ms", int(time.time() * 1000)),
+        "orders": state.get("orders", []),
+        "positions": state.get("positions", {}),
+        "fills": state.get("fills", []),
+        "balances": {"USDT": state.get("session", {}).get("current_paper_balance_usdt", 0.0)},
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Paper Trading Session Manager / 纸上交易 Session 管理器
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -683,6 +707,8 @@ class PaperTradingEngine:
         self._protective_order_manager = None  # Optional ProtectiveOrderManager for local triggers
         self._change_audit_log = None  # Optional ChangeAuditLog for audit trail
         self._last_reconciliation_ms = 0  # T4.01: Track last periodic reconciliation time
+        self._demo_connector = None  # T7.01: Optional BybitDemoConnector for demo API integration
+        self._demo_sync = None  # T7.04: Optional BybitDemoSync for demo state snapshots
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -715,6 +741,14 @@ class PaperTradingEngine:
     def set_protective_order_manager(self, pom: Any) -> None:
         """Inject ProtectiveOrderManager for automatic stop-loss / 注入保護性訂單管理器"""
         self._protective_order_manager = pom
+
+    def set_demo_connector(self, connector: Any) -> None:
+        """Inject BybitDemoConnector for demo API integration / 注入 Demo 连接器"""
+        self._demo_connector = connector
+
+    def set_demo_sync(self, sync: Any) -> None:
+        """Inject BybitDemoSync for demo state snapshots / 注入 Demo 同步器"""
+        self._demo_sync = sync
 
     # ── Session Management / Session 管理 ──
 
@@ -780,10 +814,17 @@ class PaperTradingEngine:
             sess["stopped_ts_ms"] = now_ms()
             self._audit(state, "session_stop", f"net_pnl={state['pnl']['net_paper_pnl']:.4f}")
 
-            # Governance Hub reconciliation / 治理集線器對賬
+            # T7.04: Governance Hub reconciliation with demo state / 治理集線器對賬
             if self._governance_hub:
                 try:
-                    self._governance_hub.reconcile(state)
+                    paper_snap = _paper_state_to_recon_format(state)
+                    demo_snap = None
+                    if self._demo_sync:
+                        try:
+                            demo_snap = self._demo_sync.get_current_snapshot()
+                        except Exception as e:
+                            logger.error(f"Demo snapshot failed: {e}")
+                    self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
                     self._audit(state, "governance_reconciliation", "session_stop reconciliation triggered")
                 except Exception:
                     logger.warning("Governance reconciliation failed (non-fatal) / 對賬失敗（非致命）")
@@ -1367,13 +1408,20 @@ class PaperTradingEngine:
                     except Exception as e:
                         logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
 
-                # T4.01: Periodic reconciliation trigger (every 60 seconds during active session)
+                # T7.04: Periodic reconciliation trigger (every 60 seconds during active session)
                 if self._governance_hub:
                     now_ms_recon = int(time.time() * 1000)
                     last_recon = getattr(self, '_last_reconciliation_ms', 0)
                     if now_ms_recon - last_recon >= 60_000:  # 60 seconds
                         try:
-                            recon_report = self._governance_hub.reconcile(state)
+                            paper_snap = _paper_state_to_recon_format(state)
+                            demo_snap = None
+                            if self._demo_sync:
+                                try:
+                                    demo_snap = self._demo_sync.get_current_snapshot()
+                                except Exception as e:
+                                    logger.error(f"Demo snapshot failed: {e}")
+                            recon_report = self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
                             self._last_reconciliation_ms = now_ms_recon
                             if recon_report.get("ok") is False:
                                 self._audit(state, "reconciliation_warning",

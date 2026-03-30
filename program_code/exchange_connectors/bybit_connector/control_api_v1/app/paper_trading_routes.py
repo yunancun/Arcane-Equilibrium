@@ -70,15 +70,81 @@ if _init_symbol_whitelist:
 PERCEPTION_PLANE = PerceptionPlane()
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
-# T2.03: Initialize and inject ProtectiveOrderManager / 初始化并注入保护性订单管理器
-from .protective_order_manager import ProtectiveOrderManager  # noqa: E402
+# T7.01: Initialize BybitDemoConnector / 初始化 Bybit Demo 连接器
+from .bybit_demo_connector import BybitDemoConnector  # noqa: E402
+from .bybit_demo_sync import BybitDemoSync  # noqa: E402
 
-# T4.03: Wire ProtectiveOrderManager execute callback
+DEMO_CONNECTOR = None
+try:
+    DEMO_CONNECTOR = BybitDemoConnector()
+except Exception as e:
+    logger.warning(f"Failed to initialize BybitDemoConnector: {e}")
+
+# T7.04: Initialize BybitDemoSync for demo state snapshots / 初始化 Demo 同步器
+DEMO_SYNC = None
+if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
+    try:
+        DEMO_SYNC = BybitDemoSync(DEMO_CONNECTOR)
+    except Exception as e:
+        logger.warning(f"Failed to initialize BybitDemoSync: {e}")
+
+# T2.03: Initialize and inject ProtectiveOrderManager / 初始化并注入保护性订单管理器
+from .protective_order_manager import ProtectiveOrderManager, ProtectiveOrderSide, ProtectiveOrderType  # noqa: E402
+
+# T7.02: Enhanced ProtectiveOrderManager execute callback → Demo API
 def _protective_order_execute_callback(order, market_state):
-    logger.info(f"Protective order executed: {order.order_id} {order.symbol} {order.order_type.value}")
+    """Execute protective order via Demo API if available / 通过 Demo API 执行保护性订单"""
+    logger.info(f"Protective order triggered: {order.order_id} {order.symbol} {order.order_type.value}")
+
+    if DEMO_CONNECTOR is None:
+        logger.warning("Demo connector unavailable, protective order not submitted to exchange")
+        return
+
+    try:
+        # Map side: LONG_POSITION closing = Sell, SHORT_POSITION closing = Buy
+        if order.side == ProtectiveOrderSide.LONG_POSITION:
+            bybit_side = "Sell"
+        elif order.side == ProtectiveOrderSide.SHORT_POSITION:
+            bybit_side = "Buy"
+        else:
+            logger.warning(f"Unsupported protective order side: {order.side.value}")
+            return
+
+        # Map order type
+        if order.order_type in (ProtectiveOrderType.HARD_STOP_LOSS, ProtectiveOrderType.SOFT_STOP_LOSS,
+                                ProtectiveOrderType.EMERGENCY_CLOSE_ALL):
+            bybit_order_type = "Market"
+            bybit_price = None
+        elif order.order_type == ProtectiveOrderType.TAKE_PROFIT:
+            bybit_order_type = "Limit"
+            bybit_price = order.trigger_price
+        else:
+            bybit_order_type = "Market"
+            bybit_price = None
+
+        result = DEMO_CONNECTOR.submit_order(
+            symbol=order.symbol,
+            side=bybit_side,
+            order_type=bybit_order_type,
+            qty=order.quantity,
+            price=bybit_price,
+            reduce_only=True,
+            category="linear",
+        )
+        logger.info(f"Protective order {order.order_id} submitted to Demo API: {result}")
+    except Exception as e:
+        logger.error(f"Failed to submit protective order {order.order_id} to Demo API: {e}")
 
 PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager(on_execute_callback=_protective_order_execute_callback)
 ENGINE.set_protective_order_manager(PROTECTIVE_ORDER_MANAGER)
+
+# T7.01: Inject BybitDemoConnector into ENGINE / 向 ENGINE 注入 Demo 连接器
+if DEMO_CONNECTOR is not None:
+    ENGINE.set_demo_connector(DEMO_CONNECTOR)
+
+# T7.04: Inject BybitDemoSync into ENGINE / 向 ENGINE 注入 Demo 同步器
+if DEMO_SYNC is not None:
+    ENGINE.set_demo_sync(DEMO_SYNC)
 
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
 # 治理集線器（授權 + 風控 + 租約 + 對賬 集成）
