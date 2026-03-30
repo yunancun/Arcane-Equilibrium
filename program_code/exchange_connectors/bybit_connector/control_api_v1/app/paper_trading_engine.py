@@ -1349,6 +1349,18 @@ class PaperTradingEngine:
                     self.risk_manager.record_fill_result(close_pnl)
                     self.risk_manager.clear_trailing_stop(sym)
 
+                # T3.03: Check protective orders on tick (last line of defense)
+                if self._protective_order_manager:
+                    try:
+                        market_state = {sym: {"price": p} for sym, p in market_prices.items()}
+                        pom_result = self._protective_order_manager.check_triggers(market_state)
+                        if pom_result and pom_result.triggered_orders:
+                            for trig_order in pom_result.triggered_orders:
+                                self._audit(state, "protective_order_triggered",
+                                    f"{trig_order.symbol} type={trig_order.order_type.value} trigger_price={trig_order.trigger_price}")
+                    except Exception as e:
+                        logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
+
                 # Session drawdown circuit breaker
                 peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
                 current = sess.get("current_paper_balance_usdt", 0)
