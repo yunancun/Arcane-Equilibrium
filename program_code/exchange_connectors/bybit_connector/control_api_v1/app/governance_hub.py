@@ -56,6 +56,7 @@ from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .recovery_approval_gate import RecoveryApprovalGate
+from .governance_events import risk_event, recon_event
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,10 @@ class GovernanceHub:
 
         # T9A.01: LearningTierGate for analyst agent evolution
         self._learning_tier_gate: Optional[Any] = None
+
+        # T9A.02: Governance event stream for event aggregation
+        self._governance_events: list[dict[str, Any]] = []
+        self._governance_events_max_size = 1000
 
     def set_audit_pipeline(self, pipeline: Any) -> None:
         """
@@ -901,6 +906,41 @@ class GovernanceHub:
         )
         return status
 
+    def get_governance_events(self, limit: int = 50, event_type: str | None = None) -> list[dict[str, Any]]:
+        """
+        T9A.02: Retrieve governance events from the event stream.
+        检索治理事件流中的治理事件。
+
+        Args:
+            limit: Maximum number of events to return (default 50, max 1000)
+            event_type: Optional filter by event type/category (e.g., "risk_governor", "authorization")
+
+        Returns:
+            List of governance event dictionaries (most recent first)
+        """
+        with self._lock:
+            if event_type:
+                # Filter by event type if specified
+                filtered = [e for e in self._governance_events if e.get("category") == event_type]
+            else:
+                filtered = self._governance_events
+
+            # Return most recent events first (reverse chronological)
+            return list(reversed(filtered))[-min(limit, 1000):]
+
+    def _append_governance_event(self, event: dict[str, Any]) -> None:
+        """
+        T9A.02: Append a governance event to the event stream (internal helper).
+        将治理事件追加到事件流中（内部辅助方法）。
+
+        Maintains bounded event list (max 1000 events, drops oldest).
+        """
+        with self._lock:
+            self._governance_events.append(event)
+            # Keep list bounded: drop oldest events if exceeding max size
+            if len(self._governance_events) > self._governance_events_max_size:
+                self._governance_events = self._governance_events[-self._governance_events_max_size:]
+
     def _on_risk_escalation(self, old_level: int, new_level: int) -> None:
         """
         Callback: risk escalated → restrict/freeze auth, revoke leases if severe.
@@ -921,6 +961,19 @@ class GovernanceHub:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"Risk escalated: {old_level} → {new_level}")
                 self._incident_count += 1
+
+                # T9A.02: Emit governance event for risk escalation
+                try:
+                    event = risk_event(
+                        level_from=old_level,
+                        level_to=new_level,
+                        initiator="SYSTEM",
+                        reason=f"Automatic risk escalation triggered",
+                    )
+                    self._append_governance_event(event.to_dict())
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error emitting risk escalation event: {e}")
 
                 # Record change in audit log
                 if self._change_audit_log:
@@ -1047,6 +1100,19 @@ class GovernanceHub:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"Reconciliation mismatch ({severity}): {details}")
                 self._incident_count += 1
+
+                # T9A.02: Emit governance event for reconciliation mismatch
+                try:
+                    event = recon_event(
+                        result=severity,
+                        initiator="SYSTEM",
+                        message=f"Reconciliation mismatch detected: {severity}",
+                        **details,
+                    )
+                    self._append_governance_event(event.to_dict())
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error emitting reconciliation event: {e}")
 
                 # T5.06: Determine escalation level based on severity / 根据严重性确定升级级别
                 if severity == "MISMATCH_MINOR":

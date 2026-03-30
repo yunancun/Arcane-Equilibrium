@@ -1174,6 +1174,50 @@ def get_active_leases(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@governance_router.get("/events")
+def get_governance_events(
+    limit: int = 50,
+    event_type: str | None = None,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    T9A.02: Retrieve governance events from the event stream.
+    检索治理事件流中的治理事件。
+
+    Query Parameters:
+      - limit: Maximum number of events to return (default 50, max 1000)
+      - event_type: Optional filter by event type/category (e.g., "risk_governor", "authorization", "reconciliation")
+
+    Returns list of governance events in reverse chronological order (most recent first).
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        # Validate limit parameter
+        if limit < 1 or limit > 1000:
+            limit = min(max(limit, 1), 1000)
+
+        # Retrieve events from governance hub
+        events = hub.get_governance_events(limit=limit, event_type=event_type)
+
+        return GovernanceResponse.success(
+            data={
+                "events": events,
+                "count": len(events),
+                "limit": limit,
+                "event_type_filter": event_type,
+            },
+            message="governance_events_retrieved"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving governance events: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @governance_router.post("/health-check")
 def governance_health_check(
     actor: Any = Depends(_get_auth_actor()),
