@@ -13,12 +13,15 @@ MODULE_NOTE (English):
   Supports viewing and configuring the 3-tier priority risk framework.
 """
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+
+logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Router / 路由器
@@ -178,8 +181,9 @@ def get_risk_status(
         status["drawdown_pct"] = round(drawdown_pct, 2)
         status["peak_balance_usdt"] = peak
         status["current_balance_usdt"] = current
-    except Exception:
-        pass
+    except Exception as e:
+        # Intentional: session state enrichment is optional; endpoint remains functional without it
+        logger.debug("Failed to add session drawdown info to risk status: %s", e)
 
     return _risk_response(status)
 

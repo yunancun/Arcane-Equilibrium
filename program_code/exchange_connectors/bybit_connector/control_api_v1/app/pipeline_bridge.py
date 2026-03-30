@@ -864,6 +864,7 @@ class PipelineBridge:
                     if regime:
                         regime_info = f"\nMarket regime: {regime}"
             except Exception:
+                # Intentional: regime fetch is optional enrichment for AI context
                 pass
 
             indicator_info = ""
@@ -877,6 +878,7 @@ class PipelineBridge:
                         if parts:
                             indicator_info = f"\nIndicators: {', '.join(parts)}"
             except Exception:
+                # Intentional: indicators fetch is optional enrichment for AI context
                 pass
 
             context = (
@@ -981,8 +983,9 @@ class PipelineBridge:
                 atr_raw = indics_atr.get("atr") if indics_atr else None
                 if atr_raw and atr_raw > 0:
                     atr_stop_pct = min(15.0, max(2.0, (atr_raw * 2.0 / fill_price) * 100))
-            except Exception:
-                pass
+            except Exception as e:
+                # Log but allow fallback to default 5.0% stop (fail-closed)
+                logger.error("Failed to compute ATR stop percentage for %s: %s; using default 5.0%%", symbol, e)
 
         # H1: register with StopManager using ATR-based dynamic stop + regime-adjusted time stop
         # H1：使用 ATR 动态止损 + 市场状态调整时间止损注册到 StopManager
@@ -1178,8 +1181,9 @@ class PipelineBridge:
         if self._stop_mgr:
             try:
                 self._stop_mgr.untrack_position(symbol, strategy_name)
-            except Exception:
-                pass
+            except Exception as e:
+                # Critical path: position untracking should not silently fail
+                logger.error("Failed to untrack position %s from StopManager: %s", symbol, e)
 
         # G1: notify auto-deployer for consecutive loss tracking
         # G1：通知自动部署器进行连续亏损追踪

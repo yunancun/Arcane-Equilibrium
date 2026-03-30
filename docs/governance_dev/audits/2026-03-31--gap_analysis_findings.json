@@ -1,0 +1,485 @@
+{
+  "analysis_metadata": {
+    "date": "2026-03-31",
+    "codebase_root": "/sessions/determined-epic-cori/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/",
+    "spec_source": "COMPREHENSIVE_SPEC_REQUIREMENTS.md",
+    "total_requirements": 287,
+    "total_components_analyzed": 95,
+    "overall_completion_percent": 76.0,
+    "governance_compliance_percent": 87.5
+  },
+  "category_breakdown": {
+    "category_A_fully_implemented": {
+      "count": 67,
+      "percentage": 70.5,
+      "description": "Code exists, tested, wired to runtime",
+      "examples": [
+        "SM-01 Authorization State Machine (8 states, 16 transitions)",
+        "SM-02 Decision Lease State Machine (9 states, 20+ transitions)",
+        "SM-04 Risk Governor State Machine (6 levels)",
+        "EX-02 OMS Order Lifecycle (11 states)",
+        "EX-04 Reconciliation Engine",
+        "Trade Attribution Engine (6-factor decomposition)",
+        "Protective Order Manager (dual defense)",
+        "Portfolio Risk Control (correlation gates)"
+      ]
+    },
+    "category_B_partial": {
+      "count": 18,
+      "percentage": 18.9,
+      "description": "Code exists but incomplete, not fully wired, or missing key behavior",
+      "examples": [
+        "Truth Source Registry (framework exists; canonical authority enforcement incomplete)",
+        "Data Quality Degradation (framework exists; risk integration incomplete)",
+        "M-of-N Signing (framework exists; no signature validation enforcement)",
+        "Learning L2 Pattern Discovery (framework defined; auto-discovery not wired)",
+        "Agent Access Control (framework defined; enforcement incomplete)",
+        "Liquidity Risk (assumed in checks; not explicitly verified)"
+      ]
+    },
+    "category_c_stub_placeholder": {
+      "count": 8,
+      "percentage": 8.4,
+      "description": "Code structure exists but logic is empty/hardcoded",
+      "examples": [
+        "Learning L3 Hypothesis & Experiment (tier defined; pipeline empty)",
+        "Learning L4 Strategy Evolution (tier defined; algorithms missing)",
+        "Learning L5 Meta-Learning (tier defined; no implementation)",
+        "Backtesting Engine (required for L3-L5; stub only)",
+        "Model Training Framework (required for L4-L5; stub only)",
+        "Strategy Optimization (required for L4; stub only)",
+        "Auto-Rollout/Rollback (required for L4-L5; stub only)"
+      ]
+    },
+    "category_d_missing": {
+      "count": 2,
+      "percentage": 2.1,
+      "description": "No code at all for this requirement",
+      "examples": [
+        "H0 Gate (DOC-02): No h0_gate.py file; no deterministic gate implementation",
+        "Cooldown Mechanism (DOC-02-R06): No auto-pause on consecutive losses"
+      ]
+    }
+  },
+  "critical_gaps": [
+    {
+      "gap_id": "GAP-CRITICAL-01",
+      "component": "H0 Gate (DOC-02)",
+      "category": "D",
+      "severity": "CRITICAL",
+      "description": "Non-negotiable first check for all trade decisions is completely missing",
+      "spec_requirements": [
+        "DOC02-R02: Freshness check (market_data.age < 1000ms)",
+        "DOC02-R03: Health check (CPU<90%, memory>1GB, db_latency<100ms, loss<5%)",
+        "DOC02-R04: Eligibility check (product_family + capability_level)",
+        "DOC02-R05: Risk envelope (position, leverage, margin within P0/P1)",
+        "DOC02-R06: Cooldown check (auto-pause on consecutive losses)",
+        "DOC02-R07: SLA (<1ms execution, <1KB memory, zero external calls)"
+      ],
+      "current_state": "No file h0_gate.py exists. Health check endpoint exists in governance_routes.py but is HTTP-based (violates <1ms SLA).",
+      "evidence": [
+        "find /app -name 'h0_gate.py' returns nothing",
+        "grep -r 'h0_gate\\|H0Gate' finds only comments, no implementation",
+        "No <1ms deterministic gate in pre-trade decision flow"
+      ],
+      "impact": "Every trade decision bypasses the mandatory first-line safety gate. This is a critical governance violation.",
+      "remediation_effort": "2-3 days",
+      "remediation_priority": "CRITICAL (before Phase 1 live trading)"
+    },
+    {
+      "gap_id": "GAP-HIGH-02",
+      "component": "Learning L3-L5 (EX-05 §3)",
+      "category": "C",
+      "severity": "HIGH",
+      "description": "Analyst evolution to L3-L5 is stubbed; no auto-evolution pipeline",
+      "spec_requirements": [
+        "EX-05 §3.3: L3 Hypothesis & Experiment generation from L2 patterns",
+        "EX-05 §3.4: L4 Strategy Evolution with parameter optimization",
+        "EX-05 §3.5: L5 Meta-Learning and blind-spot identification"
+      ],
+      "current_state": "learning_tier_gate.py defines tiers and eligibility criteria, but L3-L5 logic is empty stubs. L1 post-trade review working; L2 pattern discovery framework exists but not auto-triggered.",
+      "evidence": [
+        "learning_tier_gate.py:60-107 defines LearningTier enum with detailed docstrings",
+        "learning_tier_gate.py:181-240 defines TIER_CAPABILITIES mapping",
+        "No backtesting_engine.py; no strategy_evolution.py; no meta_learning.py files",
+        "test_learning_tier_gate.py has only unit tests for tier eligibility",
+        "test_learning_promotion_integration.py tests only L1→L2 flow"
+      ],
+      "impact": "Auto-learning disabled. Manual strategy iteration required. Reduces system autonomy.",
+      "remediation_effort": "5-7 days (L3); +5 days each (L4, L5)",
+      "remediation_priority": "HIGH (Phase 2 feature; defer for Phase 1)"
+    },
+    {
+      "gap_id": "GAP-MEDIUM-03",
+      "component": "M-of-N Signing (SM-01)",
+      "category": "B",
+      "severity": "MEDIUM",
+      "description": "Authorization state machine has M-of-N framework but no signature validation enforcement",
+      "spec_requirements": [
+        "SM01-R13: Approval from authorized signer (M-of-N support)"
+      ],
+      "current_state": "authorization_state_machine.py defines AuthInitiator enum (lines 97-101) suggesting multiple signers, but actual signature validation logic not found.",
+      "evidence": [
+        "authorization_state_machine.py:97-101 defines AuthInitiator enum",
+        "No signature_validator.py or m_of_n_enforcement.py file",
+        "Transition rules allow multiple initiators but don't validate M-of-N threshold"
+      ],
+      "impact": "M-of-N authorization not enforced; a single signer could approve critical transactions.",
+      "remediation_effort": "2-3 days",
+      "remediation_priority": "MEDIUM"
+    },
+    {
+      "gap_id": "GAP-MEDIUM-04",
+      "component": "Truth Source Registry (EX-07)",
+      "category": "B",
+      "severity": "MEDIUM",
+      "description": "Canonical data authority framework exists but formal registry and enforcement incomplete",
+      "spec_requirements": [
+        "EX-07 §1: Canonical fact authority per data type",
+        "EX-07 §6 TABLE 5: Agent data access control"
+      ],
+      "current_state": "perception_data_plane.py defines DataSourceType enum and CognitiveLevel marking, but no explicit Truth Source Registry structure. Canonical authority stated in comments but not formally enforced.",
+      "evidence": [
+        "perception_data_plane.py:49-71 defines DataSourceType (8 sources)",
+        "perception_data_plane.py:62-71 defines SOURCE_COGNITIVE_DEFAULTS mapping",
+        "No 'registry' or 'authority' enforcement mechanism",
+        "data_source_enforcer.py exists but integration with risk decisions unclear"
+      ],
+      "impact": "Data authority ambiguity could allow alternative sources to override canonical truth.",
+      "remediation_effort": "3 days",
+      "remediation_priority": "MEDIUM (Phase 1 completion)"
+    }
+  ],
+  "state_machine_verification": {
+    "SM-01_Authorization": {
+      "status": "CATEGORY_A",
+      "file": "authorization_state_machine.py",
+      "states_required": 8,
+      "states_implemented": 8,
+      "states_list": [
+        "DRAFT",
+        "PENDING_APPROVAL",
+        "ACTIVE",
+        "RESTRICTED",
+        "FROZEN",
+        "REVOKED (terminal)",
+        "EXPIRED (terminal)",
+        "REJECTED (terminal)"
+      ],
+      "transitions_required": 16,
+      "transitions_found": "16+",
+      "terminal_states_enforced": true,
+      "audit_trail_implemented": true,
+      "timeout_configurable": true,
+      "timeout_range": "5-300 seconds",
+      "line_evidence": {
+        "states": "lines 52-70",
+        "events": "lines 77-91",
+        "transitions": "lines 119-154",
+        "state_machine": "lines 392-724"
+      }
+    },
+    "SM-02_Decision_Lease": {
+      "status": "CATEGORY_A",
+      "file": "decision_lease_state_machine.py",
+      "states_required": 9,
+      "states_implemented": 9,
+      "states_list": [
+        "DRAFT",
+        "REGISTERED",
+        "ACTIVE",
+        "BRIDGED",
+        "FROZEN",
+        "REVOKED (terminal)",
+        "EXPIRED (terminal)",
+        "REJECTED (terminal)",
+        "CONSUMED (terminal)"
+      ],
+      "transitions_required": "20+",
+      "transitions_found": "20+",
+      "immutable_parameters_enforced": true,
+      "ttl_hard_upper_bound": "0.1-300 seconds",
+      "auto_expiry_implemented": true,
+      "partial_fills_marked": true,
+      "audit_trail_implemented": true,
+      "idempotency_via_unique_id": true,
+      "line_evidence": {
+        "states": "lines 53-64",
+        "events": "lines 85-101",
+        "transitions": "lines 127-227",
+        "lease_object": "lines 227-380",
+        "state_machine": "lines 392-740"
+      }
+    },
+    "SM-04_Risk_Governor": {
+      "status": "CATEGORY_A",
+      "file": "risk_governor_state_machine.py",
+      "levels_required": 6,
+      "levels_implemented": 6,
+      "levels_list": [
+        "NORMAL (0)",
+        "CAUTIOUS (1)",
+        "REDUCED (2)",
+        "DEFENSIVE (3)",
+        "CIRCUIT_BREAKER (4)",
+        "MANUAL_REVIEW (5)"
+      ],
+      "threshold_a_warning": "75% of limit",
+      "threshold_b_critical": "95% of limit",
+      "critical_to_locked_latency_ms": "<1ms (claimed)",
+      "critical_to_locked_latency_verified": false,
+      "escalation_automatic": true,
+      "de_escalation_requires_governance": true,
+      "monitored_metrics": [
+        "position_size_per_instrument",
+        "notional_exposure",
+        "margin_ratio",
+        "leverage"
+      ],
+      "line_evidence": {
+        "levels": "lines 63-77",
+        "events": "lines 83-110",
+        "transitions": "lines 125-147",
+        "state_machine": "lines 420-858"
+      }
+    }
+  },
+  "protection_mechanisms": {
+    "protective_orders": {
+      "status": "CATEGORY_A",
+      "file": "protective_order_manager.py",
+      "order_types_implemented": 6,
+      "types": [
+        "HARD_STOP_LOSS (cannot be disabled)",
+        "SOFT_STOP_LOSS (can be adjusted)",
+        "TAKE_PROFIT",
+        "TRAILING_STOP",
+        "POSITION_CLOSE",
+        "EMERGENCY_CLOSE_ALL"
+      ],
+      "dual_defense_implemented": true,
+      "local_protection": "Smart stop-loss with <1ms checks",
+      "exchange_protection": "Conditional orders (pre-staged on exchange)",
+      "atr_scaling_implemented": true,
+      "atr_scaling_distance": ">=1.5x ATR",
+      "anti_hunt_stealth_mode": true,
+      "stealth_mode_description": "Stops held locally until triggered"
+    },
+    "portfolio_risk": {
+      "status": "CATEGORY_A",
+      "file": "portfolio_risk_control.py",
+      "correlation_gate_implemented": true,
+      "correlation_threshold": 0.7,
+      "correlation_window": 20,
+      "sector_concentration_limit": "40% max per sector",
+      "reserve_buffer": "30% equity unallocated (hard limit)",
+      "overlapping_position_detection": true,
+      "average_correlation_warning": 0.6
+    }
+  },
+  "audit_and_explainability": {
+    "trade_attribution": {
+      "status": "CATEGORY_A",
+      "file": "trade_attribution.py",
+      "attribution_factors": 6,
+      "factors": [
+        "ALPHA (directional correctness)",
+        "TIMING (entry/exit quality)",
+        "SIZING (position sizing vs volatility)",
+        "EXECUTION (fill quality and slippage)",
+        "COST (fee optimization)",
+        "LUCK (residual unexplained)"
+      ],
+      "skill_vs_luck_tracking": true,
+      "strategy_level_aggregation": true,
+      "serialization_supported": true
+    },
+    "cost_awareness": {
+      "status": "CATEGORY_A",
+      "file": "risk_manager.py",
+      "cost_edge_ratio_implemented": true,
+      "max_cost_edge_ratio_threshold": 0.8,
+      "closure_recommendation_triggered": true,
+      "closure_trigger_condition": "cost_edge_ratio >= 0.8 AND position_profitable",
+      "cost_efficiency_grading": true,
+      "line_evidence": {
+        "config": "line 301",
+        "computation": "lines 953-974"
+      }
+    },
+    "reconciliation_engine": {
+      "status": "CATEGORY_A",
+      "file": "reconciliation_engine.py",
+      "discrepancy_types": 9,
+      "severity_levels": 4,
+      "incident_actions": 5,
+      "retry_attempts": 5,
+      "integration": "EX-04 full implementation"
+    }
+  },
+  "agent_framework": {
+    "status": "CATEGORY_A",
+    "file": "multi_agent_framework.py",
+    "agents_wired": 5,
+    "agents": [
+      "Scout (intelligence gathering)",
+      "Strategist (trade decision making)",
+      "Guardian (risk control)",
+      "Analyst (post-trade evolution)",
+      "Executor (order execution)"
+    ],
+    "conductor_role": "OpenClaw (orchestration, conflict arbitration)",
+    "message_types": 8,
+    "structured_messages_enforced": true,
+    "free_text_prohibited": true,
+    "conflict_resolution": "Guardian veto over Strategist",
+    "data_quality_marking": "FACT / INFERENCE / HYPOTHESIS",
+    "resource_priority_levels": 5,
+    "highest_priority": "Guardian"
+  },
+  "learning_system": {
+    "status_overall": "CATEGORY_C",
+    "file": "learning_tier_gate.py",
+    "L1_post_trade_review": {
+      "status": "IMPLEMENTED",
+      "description": "Passive observation recording, basic metrics",
+      "cost": "Zero",
+      "test_coverage": "Full"
+    },
+    "L2_pattern_discovery": {
+      "status": "PARTIAL",
+      "description": "Cross-strategy analysis framework defined; auto-discovery not wired",
+      "unlock_criteria": "500+ observations + win_rate > 20%",
+      "test_coverage": "Unit tests only"
+    },
+    "L3_hypothesis_experiment": {
+      "status": "STUBBED",
+      "description": "Tier defined; pipeline empty",
+      "unlock_criteria": "L2 running 2+ weeks + 3+ confirmed patterns",
+      "missing_components": [
+        "Hypothesis generation algorithm",
+        "Paper trading experiment scaffolding",
+        "Statistical validation framework"
+      ],
+      "test_coverage": "None"
+    },
+    "L4_strategy_evolution": {
+      "status": "STUBBED",
+      "description": "Tier defined; algorithms missing",
+      "unlock_criteria": "3+ validated hypotheses from L3 + positive ROI",
+      "missing_components": [
+        "Parameter optimization engine",
+        "Strategy variant generation",
+        "Transfer learning framework",
+        "Auto-deployment pipeline"
+      ],
+      "test_coverage": "None"
+    },
+    "L5_meta_learning": {
+      "status": "STUBBED",
+      "description": "Tier defined; no implementation",
+      "unlock_criteria": "6+ months operational + sustained positive performance + Operator approval",
+      "missing_components": [
+        "Learning pipeline optimization",
+        "Blind spot identification",
+        "Self-calibration framework",
+        "Meta-hypothesis generation"
+      ],
+      "test_coverage": "None"
+    }
+  },
+  "data_quality_and_sources": {
+    "status": "CATEGORY_B",
+    "file": "perception_data_plane.py",
+    "cognitive_level_marking": true,
+    "levels": [
+      "FACT (Exchange API confirmed)",
+      "INFERENCE (Derived, AI-processed)",
+      "HYPOTHESIS (Limited-information guess)"
+    ],
+    "data_source_types": 8,
+    "freshness_tracking": true,
+    "freshness_states": [
+      "FRESH (< 5 min)",
+      "RECENT (5-30 min)",
+      "STALE (30 min - 2 hours)",
+      "EXPIRED (> 2 hours)"
+    ],
+    "quality_dimensions": [
+      "completeness",
+      "consistency",
+      "latency_ms",
+      "source_reliability"
+    ],
+    "unmarked_inference_blocked": true,
+    "gaps": [
+      "Canonical authority enforcement incomplete",
+      "Data-quality-driven risk degradation framework incomplete",
+      "Agent access control integration incomplete"
+    ]
+  },
+  "phase_0_baseline": {
+    "tests_passing": 2227,
+    "agents_wired": 5,
+    "state_machines_integrated": 3,
+    "governance_components": "SM-01/02/04, EX-04, PaperLiveGate"
+  },
+  "test_coverage": {
+    "total_test_files": 78,
+    "phase_0_covered": [
+      "SM-01, SM-02, SM-04",
+      "EX-01, EX-02, EX-04",
+      "All 5 agents",
+      "Paper trading engine",
+      "Audit persistence"
+    ],
+    "phase_1_coverage": [
+      "test_governance_hub.py",
+      "test_trade_attribution.py",
+      "test_learning_tier_gate.py",
+      "test_perception_data_plane.py",
+      "test_portfolio_risk_control.py"
+    ],
+    "uncovered": [
+      "H0 Gate (component missing)",
+      "Learning L3-L5 (stubs only)",
+      "Backtesting engine (missing)",
+      "Strategy evolution (missing)",
+      "M-of-N signature validation"
+    ]
+  },
+  "remediation_roadmap": {
+    "critical_path": [
+      {
+        "phase": "Phase 0+ (Blocking)",
+        "component": "H0 Gate Implementation",
+        "effort_days": 2.5,
+        "description": "<1ms deterministic first-line check"
+      },
+      {
+        "phase": "Phase 1 (High Priority)",
+        "component": "Learning L3 Hypothesis & Experiment",
+        "effort_days": 5,
+        "description": "Backtesting + hypothesis generation + paper experiment scaffolding"
+      },
+      {
+        "phase": "Phase 1 (High Priority)",
+        "component": "Truth Source Registry Formalization",
+        "effort_days": 3,
+        "description": "Consolidate canonical authorities; enforce in decision flow"
+      },
+      {
+        "phase": "Phase 2",
+        "component": "Learning L4 Strategy Evolution",
+        "effort_days": 7,
+        "description": "Parameter optimization + variant generation + auto-deployment"
+      },
+      {
+        "phase": "Phase 2",
+        "component": "Learning L5 Meta-Learning",
+        "effort_days": 7,
+        "description": "Learning pipeline optimization + blind spot identification"
+      }
+    ]
+  }
+}

@@ -1,0 +1,1761 @@
+{
+  "metadata": {
+    "project": "OpenClaw / Bybit AI Trading System",
+    "extraction_date": "2026-03-31",
+    "scope": "13 core governance documents + synthesis",
+    "role": "Functional Architect (FA) Specification Extraction",
+    "total_documents": 13,
+    "total_requirements_extracted": 287,
+    "documents_analyzed": [
+      "DOC-01 (Core Risk Doctrine)",
+      "DOC-02 (Scanning & Monitoring)",
+      "DOC-03 (Market Regime Detection)",
+      "DOC-04 (Agent Learning Evolution)",
+      "DOC-06 (Change Audit Log)",
+      "DOC-07 (Audit Persistence)",
+      "DOC-08 (Incident Response)",
+      "SM-01 (Authorization State Machine)",
+      "SM-02 (Decision Lease State Machine)",
+      "SM-04 (Risk Governor State Machine)",
+      "EX-01 (Protection & Anti-Hunt)",
+      "EX-02 (OMS & Order Lifecycle)",
+      "EX-04 (Reconciliation Engine)",
+      "EX-05 (Learning Tiers & Autonomy)",
+      "EX-06 (Agent Conflict Arbitration)",
+      "EX-07 (Agent Data Access Control)",
+      "HIST-01 (Core Design Overview)",
+      "HIST-02 (Governance Design Pack)"
+    ]
+  },
+  "executive_summary": {
+    "critical_path_items": [
+      "H0 Local Deterministic Gate (blocks all trading decisions)",
+      "Single Write Port Executor Module (prevents multi-path execution)",
+      "Audit Trail Infrastructure (6-element reconstruction required)",
+      "Truth Source Registry (canonical fact authority)",
+      "State Machine Core: SM-01, SM-02, SM-04"
+    ],
+    "16_root_principles": [
+      "Single Write Port — all order actions through ONE entry",
+      "Read-Write Separation — research/GUI read-only",
+      "AI Output ≠ Instant Command — AI forms leases, not direct orders",
+      "Strategy Cannot Bypass Risk — all intent through Guardian",
+      "Survival > Profit — won't spiral before can profit",
+      "Failure Default Contraction — uncertain defaults conservative",
+      "Learning ≠ Rewrite Live — learning isolated from execution",
+      "Trade Explainability — reconstruct why/when/risk/auth/exec/outcome",
+      "Exchange Disaster Protection — dual defense: local + conditional orders",
+      "Cognitive Honesty — distinguish fact/inference/assumption",
+      "Agent Maximum Autonomy — within P0/P1 hard limits, fully autonomous",
+      "Continuous Evolution — auto-learn, new strategies auto-live if paper passes",
+      "AI Resource Cost Awareness — cost_edge_ratio ≥ 0.8 triggers closure recommendation",
+      "Zero External Cost Runnable — basic op on L0+L1 only",
+      "Multi-Agent Collaboration — formal object communication",
+      "Portfolio-Level Risk — correlation, overlaps, capital allocation, drawdown"
+    ],
+    "6_agent_roles": [
+      "OpenClaw (Conductor) — task distribution, conflict arbitration, resource allocation",
+      "Scout (Intelligence) — external news, events, sentiment",
+      "Strategist (Decisions) — coin selection, strategy, parameters, allocation",
+      "Guardian (Risk) — dynamic risk control within P0/P1",
+      "Analyst (Evolution) — post-trade analysis, pattern discovery, incubation",
+      "Executor (Execution) — adversarial stops, maker priority, time awareness"
+    ]
+  },
+  "specification_by_document": {
+    "DOC-01_CORE_RISK_DOCTRINE": {
+      "document_id": "DOC-01",
+      "document_title": "Core Risk Doctrine / 核心風控教義",
+      "version": "V2",
+      "implementing_modules": [
+        "protective_order_manager.py",
+        "portfolio_risk_control.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC01-R01",
+          "category": "Architecture",
+          "title": "Single Write Port Principle",
+          "description": "All order actions must pass through ONE controlled entry point only. No direct exchange writes from other modules.",
+          "specific_testable_requirement": "Code audit must show ZERO exchange API write calls outside Executor module",
+          "priority": "CRITICAL",
+          "section_reference": "§5.1"
+        },
+        {
+          "id": "DOC01-R02",
+          "category": "Architecture",
+          "title": "Read-Write Separation",
+          "description": "Research, learning, and GUI modules have read-only or suggestion-only capability. No direct execution path.",
+          "specific_testable_requirement": "All research/learning/gui imports verified to have no exchange write capability",
+          "priority": "CRITICAL",
+          "section_reference": "§5.2"
+        },
+        {
+          "id": "DOC01-R03",
+          "category": "Decision Control",
+          "title": "AI Output Forms Leases, Not Direct Orders",
+          "description": "AI output is formalized as Decision Lease objects with TTL, revocability, idempotency. Not direct order placement.",
+          "specific_testable_requirement": "All AI inference chains end with Lease object generation before executor consumption",
+          "priority": "CRITICAL",
+          "section_reference": "§5.3"
+        },
+        {
+          "id": "DOC01-R04",
+          "category": "Risk Control",
+          "title": "Strategy Cannot Bypass Risk Gates",
+          "description": "All trading intent must pass through Guardian approval. Risk gates are non-negotiable.",
+          "specific_testable_requirement": "No order can be submitted without passing EX-01 pre-trade risk checks",
+          "priority": "CRITICAL",
+          "section_reference": "§5.4"
+        },
+        {
+          "id": "DOC01-R05",
+          "category": "Priority",
+          "title": "Account Survival Over Profit",
+          "description": "System is judged on 'won't spiral' before 'can profit'. Conservative defaults when uncertain.",
+          "specific_testable_requirement": "System defaults to reduce/pause positions on any anomaly detection",
+          "priority": "CRITICAL",
+          "section_reference": "§5.5"
+        },
+        {
+          "id": "DOC01-R06",
+          "category": "Learning",
+          "title": "Learning Isolated From Live Trading",
+          "description": "ML training and model updates do not block execution. Suggestions only, no forced behavior changes.",
+          "specific_testable_requirement": "Model training runs asynchronously, non-blocking to order execution",
+          "priority": "HIGH",
+          "section_reference": "§5.7"
+        },
+        {
+          "id": "DOC01-R07",
+          "category": "Audit",
+          "title": "Trade Explainability - 6 Element Reconstruction",
+          "description": "Every trade must reconstruct: pre-state, decision basis, risk approval, authorization, execution, result",
+          "specific_testable_requirement": "Mock trade execution must log all 6 elements and be reconstructable post-hoc",
+          "priority": "CRITICAL",
+          "section_reference": "§5.8"
+        },
+        {
+          "id": "DOC01-R08",
+          "category": "Risk Control",
+          "title": "Hard Stop-Loss Protection",
+          "description": "Local stop-loss + exchange-side conditional orders as dual defense against disaster",
+          "specific_testable_requirement": "Every position must have hard stop-loss set locally AND conditional order on exchange",
+          "priority": "CRITICAL",
+          "section_reference": "§5.9"
+        },
+        {
+          "id": "DOC01-R09",
+          "category": "Data Quality",
+          "title": "Cognitive Honesty - Fact vs Inference vs Assumption",
+          "description": "Clearly distinguish fact (exchange data), inference (derived), assumption (unverified). External data = inference-level",
+          "specific_testable_requirement": "All data sources tagged with confidence level: FACT/INFERENCE/ASSUMPTION",
+          "priority": "HIGH",
+          "section_reference": "§5.10"
+        },
+        {
+          "id": "DOC01-R10",
+          "category": "Autonomy",
+          "title": "Agent Maximum Autonomy Within Bounds",
+          "description": "Within P0/P1 hard limits, Agent is fully autonomous on all trading decisions. Operator sets boundaries only.",
+          "specific_testable_requirement": "Agent can make all decisions (coin, strategy, entry/exit) without human pre-approval if within P0/P1",
+          "priority": "HIGH",
+          "section_reference": "§5.11"
+        },
+        {
+          "id": "DOC01-R11",
+          "category": "Learning",
+          "title": "Continuous Evolution Engine",
+          "description": "System MUST auto-learn from trading behavior. New strategies auto-enter live if paper passes gate.",
+          "specific_testable_requirement": "New strategies can auto-deploy after 7-day paper validation without human intervention",
+          "priority": "HIGH",
+          "section_reference": "§5.12"
+        },
+        {
+          "id": "DOC01-R12",
+          "category": "Cost",
+          "title": "AI Resource Cost Awareness",
+          "description": "Every AI call counted. cost_edge_ratio ≥ 0.8 (cost ≥ 80% of position margin) triggers closure recommendation",
+          "specific_testable_requirement": "System calculates cost_edge_ratio per position; when ≥0.8, recommends closure",
+          "priority": "HIGH",
+          "section_reference": "§5.13"
+        },
+        {
+          "id": "DOC01-R13",
+          "category": "Cost",
+          "title": "Zero External AI Cost Runnable",
+          "description": "Basic operation on L0 (deterministic) + L1 (Ollama local) only. Cloud AI is enhancement, not requirement.",
+          "specific_testable_requirement": "System must achieve positive net PnL using only L0+L1, before any L1.5/L2 cloud costs",
+          "priority": "HIGH",
+          "section_reference": "§5.14"
+        },
+        {
+          "id": "DOC01-R14",
+          "category": "Orchestration",
+          "title": "Multi-Agent Formal Object Communication",
+          "description": "OpenClaw Conductor + 6 Agents. Agents communicate via formal objects (not free text or RPC).",
+          "specific_testable_requirement": "All inter-agent messages follow strict schema (SignalEvent, DecisionLease, ExecutionStatus, etc.)",
+          "priority": "HIGH",
+          "section_reference": "§5.15"
+        },
+        {
+          "id": "DOC01-R15",
+          "category": "Risk",
+          "title": "Portfolio-Level Risk Monitoring",
+          "description": "Monitor correlation exposure, strategy overlaps, capital allocation, broad-market drawdown",
+          "specific_testable_requirement": "System calculates portfolio-level metrics: correlation matrix, strategy overlap %, max drawdown %, capital allocation per strategy",
+          "priority": "MEDIUM",
+          "section_reference": "§5.16"
+        },
+        {
+          "id": "DOC01-R16",
+          "category": "Cost",
+          "title": "Net PnL Only Accountability",
+          "description": "Mandatory cost components: fees, slippage, funding, AI cost, AI attention tax, infrastructure",
+          "specific_testable_requirement": "All positions tracked with net_realized_pnl = realized_pnl - total_fees - ai_cost - slippage",
+          "priority": "HIGH",
+          "section_reference": "§6"
+        },
+        {
+          "id": "DOC01-R17",
+          "category": "Cost",
+          "title": "AI Attention Tax Shelf Life",
+          "description": "Every position has shelf life. When AI cost erodes expected margin, position no longer worth holding even if profitable.",
+          "specific_testable_requirement": "Position closure logic includes check: if cost_edge_ratio ≥ 0.8 AND position_margin < cost, recommend closure",
+          "priority": "MEDIUM",
+          "section_reference": "§6"
+        },
+        {
+          "id": "DOC01-R18",
+          "category": "Degradation",
+          "title": "6-Level Degradation Modes",
+          "description": "NORMAL → CAUTIOUS → REDUCED → DEFENSIVE → CIRCUIT_BREAKER → MANUAL_REVIEW. Gradual recovery only.",
+          "specific_testable_requirement": "System implements all 6 modes; can transition only to adjacent level; must define action set per mode",
+          "priority": "CRITICAL",
+          "section_reference": "§12"
+        }
+      ]
+    },
+    "DOC-02_SCANNING_MONITORING": {
+      "document_id": "DOC-02",
+      "document_title": "Scanning & Monitoring / 掃描與監控",
+      "version": "V1",
+      "implementing_modules": [
+        "scanner_rate_limiter.py",
+        "h0_gate.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC02-R01",
+          "category": "H0 Gate",
+          "title": "H0 Local Deterministic Gate - Execution Sequence",
+          "description": "H0 gate is the FIRST check for all trading decisions. Non-negotiable, before all other gates (H1-H5).",
+          "specific_testable_requirement": "Execution trace shows H0 gate executed and passed before any downstream H1-H5 processing",
+          "priority": "CRITICAL",
+          "section_reference": "H0"
+        },
+        {
+          "id": "DOC02-R02",
+          "category": "H0 Gate",
+          "title": "H0 Freshness Check",
+          "description": "Validates market data age. Rejects decisions if data older than threshold.",
+          "specific_testable_requirement": "H0 rejects order if market_data.timestamp < now - 1000ms",
+          "priority": "CRITICAL",
+          "section_reference": "H0 Freshness"
+        },
+        {
+          "id": "DOC02-R03",
+          "category": "H0 Gate",
+          "title": "H0 Health Check",
+          "description": "Validates system resources: CPU, memory, database, network connectivity",
+          "specific_testable_requirement": "H0 checks: cpu_usage < 90%, memory_free > 1GB, db_latency < 100ms, network_loss < 5%",
+          "priority": "CRITICAL",
+          "section_reference": "H0 Health"
+        },
+        {
+          "id": "DOC02-R04",
+          "category": "H0 Gate",
+          "title": "H0 Eligibility Check",
+          "description": "Validates authorized product family and capability level for this decision",
+          "specific_testable_requirement": "H0 checks: product_family in authorized_list AND capability_level >= required_level",
+          "priority": "CRITICAL",
+          "section_reference": "H0 Eligibility"
+        },
+        {
+          "id": "DOC02-R05",
+          "category": "H0 Gate",
+          "title": "H0 Risk Envelope Check",
+          "description": "Position size, leverage, margin must be within P0/P1 limits",
+          "specific_testable_requirement": "H0 rejects if: position_size > P1_limit OR leverage > P1_leverage OR margin_ratio < P1_minimum",
+          "priority": "CRITICAL",
+          "section_reference": "H0 Risk Envelope"
+        },
+        {
+          "id": "DOC02-R06",
+          "category": "H0 Gate",
+          "title": "H0 Cooldown Check",
+          "description": "Auto-pause on consecutive losses. Re-enables after cooldown period.",
+          "specific_testable_requirement": "H0 rejects new orders if consecutive_losses > threshold AND cooldown_expiry > now",
+          "priority": "HIGH",
+          "section_reference": "H0 Cooldown"
+        },
+        {
+          "id": "DOC02-R07",
+          "category": "H0 Performance",
+          "title": "H0 SLA Requirements",
+          "description": "H0 must execute in <1ms with <1KB memory, pure in-memory (no external calls)",
+          "specific_testable_requirement": "Benchmark shows H0 execution < 1ms, <1KB heap allocation, zero external I/O",
+          "priority": "CRITICAL",
+          "section_reference": "H0 SLA"
+        },
+        {
+          "id": "DOC02-R08",
+          "category": "Scanning",
+          "title": "Scanner Rate Limiting - 5 Minute Interval",
+          "description": "Market scanning runs every 5 minutes minimum. Prevents thrashing and cost explosion.",
+          "specific_testable_requirement": "Scanner runs on 5-minute interval; consecutive scans < 5min are rate-limited",
+          "priority": "MEDIUM",
+          "section_reference": "Scanner"
+        }
+      ]
+    },
+    "DOC-03_MARKET_REGIME_DETECTION": {
+      "document_id": "DOC-03",
+      "document_title": "Market Regime Detection / 市場制度檢測",
+      "version": "V1",
+      "implementing_modules": [
+        "market_regime.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC03-R01",
+          "category": "Perception",
+          "title": "Regime Classification System",
+          "description": "Market regime classification with defined states and transition logic",
+          "specific_testable_requirement": "System classifies market into defined regimes (e.g., TRENDING, MEAN_REVERT, VOLATILE, ILLIQUID) with clear transition rules",
+          "priority": "HIGH",
+          "section_reference": "Regime Classification"
+        },
+        {
+          "id": "DOC03-R02",
+          "category": "Perception",
+          "title": "Regime Confidence Scoring",
+          "description": "Each regime classification includes confidence score (0-100%)",
+          "specific_testable_requirement": "Every regime classification includes confidence score; low confidence triggers degradation mode",
+          "priority": "MEDIUM",
+          "section_reference": "Confidence"
+        },
+        {
+          "id": "DOC03-R03",
+          "category": "Perception",
+          "title": "Data Sources for Regime Detection",
+          "description": "Uses market volatility, trend strength, correlation, volume profile, order book shape",
+          "specific_testable_requirement": "Regime detection incorporates: IV, trend_strength, correlation_matrix, volume_profile, orderbook_imbalance",
+          "priority": "HIGH",
+          "section_reference": "Data Sources"
+        }
+      ]
+    },
+    "DOC-04_AGENT_LEARNING_EVOLUTION": {
+      "document_id": "DOC-04",
+      "document_title": "Agent Learning Evolution / 代理學習進化",
+      "version": "V1",
+      "implementing_modules": [
+        "learning_tier_gate.py",
+        "analyst_evolution_engine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC04-R01",
+          "category": "Autonomy",
+          "title": "Agent Complete Autonomy (10 Domains)",
+          "description": "No human pre-approval required for: coin selection, product family, strategy, entry/exit, P2 adjustment, execution method, AI resource allocation, stop-loss timing",
+          "specific_testable_requirement": "Code path shows all 10 domains decided by agent without human gate",
+          "priority": "HIGH",
+          "section_reference": "Autonomy Matrix"
+        },
+        {
+          "id": "DOC04-R02",
+          "category": "Autonomy",
+          "title": "Agent Notify Post-Audit (3 Cases)",
+          "description": "New strategy live (after paper verification), P2 adjustment, new product family enabled, AI model switch → notify operator (post-audit, no pre-approval)",
+          "specific_testable_requirement": "System logs notification to operator after each event; operator review is post-hoc, not blocking",
+          "priority": "HIGH",
+          "section_reference": "Autonomy Matrix"
+        },
+        {
+          "id": "DOC04-R03",
+          "category": "Evolution",
+          "title": "Tier Advancement Criteria",
+          "description": "Define tier progression (L1-L5) with specific win rate, Sharpe ratio, consistency metrics",
+          "specific_testable_requirement": "Each tier has explicit promotion criteria: L1→L2 requires win_rate > 20%, Sharpe > 1.0, etc.",
+          "priority": "HIGH",
+          "section_reference": "Tier Advancement"
+        },
+        {
+          "id": "DOC04-R04",
+          "category": "Evolution",
+          "title": "Performance Metrics Tracking",
+          "description": "Track win rate, Sharpe ratio, max drawdown, consistency, cost efficiency per strategy and tier",
+          "specific_testable_requirement": "Daily performance report shows: win_rate, Sharpe, max_drawdown, cost_efficiency for each active strategy",
+          "priority": "HIGH",
+          "section_reference": "Performance Metrics"
+        }
+      ]
+    },
+    "DOC-06_CHANGE_AUDIT_LOG": {
+      "document_id": "DOC-06",
+      "document_title": "Change Audit Log / 變更審計日誌",
+      "version": "V1",
+      "implementing_modules": [
+        "change_audit_log.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC06-R01",
+          "category": "Governance",
+          "title": "L0 Changes - No Approval",
+          "description": "Bug fixes (trade logic unaffected), UI/visualization, log adjustments, documentation → no approval required",
+          "specific_testable_requirement": "Git commits tagged with [L0_CHANGE] bypass approval workflow",
+          "priority": "MEDIUM",
+          "section_reference": "L0 Changes"
+        },
+        {
+          "id": "DOC06-R02",
+          "category": "Governance",
+          "title": "L1 Changes - Agent Self-Governed",
+          "description": "P2 micro-adjustments, strategy tweaks, backtest validation, new strategy incubation → auto-log, no pre-approval",
+          "specific_testable_requirement": "L1 changes auto-logged with timestamp; system notifies operator post-execution",
+          "priority": "MEDIUM",
+          "section_reference": "L1 Changes"
+        },
+        {
+          "id": "DOC06-R03",
+          "category": "Governance",
+          "title": "L2 Changes - Post-Audit Review",
+          "description": "P2 range expansion, new product family, AI model upgrade → operator review within 24h, then auto-approval",
+          "specific_testable_requirement": "L2 changes require operator signature within 24h; after 24h, auto-approved if no rejection",
+          "priority": "MEDIUM",
+          "section_reference": "L2 Changes"
+        },
+        {
+          "id": "DOC06-R04",
+          "category": "Governance",
+          "title": "L3 Changes - Operator Pre-Approval",
+          "description": "P0/P1 modification, constitution change, system architecture, paper→live first, auth matrix → requires written approval",
+          "specific_testable_requirement": "L3 changes blocked until operator provides explicit written approval",
+          "priority": "CRITICAL",
+          "section_reference": "L3 Changes"
+        },
+        {
+          "id": "DOC06-R05",
+          "category": "Audit",
+          "title": "Append-Only JSONL Log Format",
+          "description": "Immutable log, no modification or deletion allowed. Structured JSON format.",
+          "specific_testable_requirement": "All changes logged to append-only JSONL file; no delete/update operations allowed",
+          "priority": "CRITICAL",
+          "section_reference": "Log Format"
+        },
+        {
+          "id": "DOC06-R06",
+          "category": "Audit",
+          "title": "Log Rotation and Archival",
+          "description": "Logs rotate daily; old logs archived and compressed",
+          "specific_testable_requirement": "Daily log rotation; old logs moved to archive/ directory; file size < 100MB per day",
+          "priority": "MEDIUM",
+          "section_reference": "Log Rotation"
+        },
+        {
+          "id": "DOC06-R07",
+          "category": "Audit",
+          "title": "Thread-Safe Log Writing",
+          "description": "All concurrent writes to log use mutual exclusion (lock-based or append-only queue)",
+          "specific_testable_requirement": "Concurrent write test: 10 threads writing simultaneously → zero data corruption",
+          "priority": "HIGH",
+          "section_reference": "Thread Safety"
+        }
+      ]
+    },
+    "DOC-07_AUDIT_PERSISTENCE": {
+      "document_id": "DOC-07",
+      "document_title": "Audit Persistence / 審計持久性",
+      "version": "V1",
+      "implementing_modules": [
+        "audit_persistence.py",
+        "circuit_breaker.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC07-R01",
+          "category": "Audit",
+          "title": "JSONL Audit Trail - 6 Elements",
+          "description": "Every trade logged with: pre-state, decision_basis, risk_approval, authorization, execution, result",
+          "specific_testable_requirement": "Sample trade audit shows all 6 elements in JSONL record; missing element fails validation",
+          "priority": "CRITICAL",
+          "section_reference": "6-Element Trail"
+        },
+        {
+          "id": "DOC07-R02",
+          "category": "Audit",
+          "title": "Deterministic Replay Capability",
+          "description": "Event log stored immutably. Can re-execute exact sequence of decisions.",
+          "specific_testable_requirement": "Given event log of 10 trades, replay produces identical decision sequence and outcome",
+          "priority": "HIGH",
+          "section_reference": "Deterministic Replay"
+        },
+        {
+          "id": "DOC07-R03",
+          "category": "Audit",
+          "title": "Circuit Breaker - Data Freshness",
+          "description": "Market data stale > threshold triggers degradation mode",
+          "specific_testable_requirement": "H0 gate checks data age; if > 1000ms, triggers CAUTIOUS mode",
+          "priority": "CRITICAL",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R04",
+          "category": "Audit",
+          "title": "Circuit Breaker - API Latency Anomalies",
+          "description": "REST latency > 5s or WebSocket > 3s triggers degradation",
+          "specific_testable_requirement": "Monitor latency; if REST > 5s, transition to REDUCED mode",
+          "priority": "HIGH",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R05",
+          "category": "Audit",
+          "title": "Circuit Breaker - Network Anomalies",
+          "description": "Packet loss > 5%, network partition detected → degrade",
+          "specific_testable_requirement": "Network monitor detects loss; if > 5%, transition to DEFENSIVE mode",
+          "priority": "HIGH",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R06",
+          "category": "Audit",
+          "title": "Circuit Breaker - Margin Utilization",
+          "description": "Margin > P1 limit → trigger degradation",
+          "specific_testable_requirement": "H0 gate checks margin; if > P1_limit, trigger CAUTIOUS mode",
+          "priority": "CRITICAL",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R07",
+          "category": "Audit",
+          "title": "Circuit Breaker - Consecutive Loss Pause",
+          "description": "Consecutive losses > threshold auto-pauses trading",
+          "specific_testable_requirement": "After 3 consecutive losses, trading paused for 1 hour minimum",
+          "priority": "HIGH",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R08",
+          "category": "Audit",
+          "title": "Circuit Breaker - Volatility Anomalies",
+          "description": "IV spike, gap anomaly > threshold → degrade",
+          "specific_testable_requirement": "IV spike > 2x baseline OR gap > 5% triggers CAUTIOUS mode",
+          "priority": "MEDIUM",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R09",
+          "category": "Audit",
+          "title": "Circuit Breaker - System Component Failure",
+          "description": "Module crash, DB down, service failure → immediate degrade",
+          "specific_testable_requirement": "Service health check failure triggers CIRCUIT_BREAKER mode within 1 second",
+          "priority": "CRITICAL",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R10",
+          "category": "Audit",
+          "title": "Circuit Breaker - Reconciliation Failure",
+          "description": "Exchange state ≠ local state (after 5 retries) → degrade",
+          "specific_testable_requirement": "Reconciliation mismatch triggers 5 retries; if still failed, transition to MANUAL_REVIEW",
+          "priority": "CRITICAL",
+          "section_reference": "Circuit Breaker"
+        },
+        {
+          "id": "DOC07-R11",
+          "category": "Degradation",
+          "title": "Degradation Mode Action Matrix",
+          "description": "Define allowed actions per mode: NORMAL, CAUTIOUS, REDUCED, DEFENSIVE, CIRCUIT_BREAKER, MANUAL_REVIEW",
+          "specific_testable_requirement": "Matrix shows which order types, position sizes, strategies allowed per mode",
+          "priority": "CRITICAL",
+          "section_reference": "Degradation Modes"
+        },
+        {
+          "id": "DOC07-R12",
+          "category": "Degradation",
+          "title": "Gradual Recovery (No Cross-Level Jumps)",
+          "description": "Recovery must follow: MANUAL_REVIEW → CIRCUIT_BREAKER → DEFENSIVE → REDUCED → CAUTIOUS → NORMAL",
+          "specific_testable_requirement": "State transition validation prevents jumping levels; must advance one at a time with time delay",
+          "priority": "HIGH",
+          "section_reference": "Degradation Modes"
+        }
+      ]
+    },
+    "DOC-08_INCIDENT_RESPONSE": {
+      "document_id": "DOC-08",
+      "document_title": "Incident Response / 事件響應",
+      "version": "V1",
+      "implementing_modules": [
+        "incident_event_model.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "DOC08-R01",
+          "category": "Incident",
+          "title": "Incident Classification Schema",
+          "description": "Define incident types: Data Freshness, API Latency, Network, Margin, Loss, Volatility, Component Failure, Reconciliation",
+          "specific_testable_requirement": "Incident_event object includes: type, severity (CRITICAL/HIGH/MEDIUM/LOW), timestamp, trigger_condition, action_taken",
+          "priority": "HIGH",
+          "section_reference": "Classification"
+        },
+        {
+          "id": "DOC08-R02",
+          "category": "Incident",
+          "title": "SM-04 Trigger Integration",
+          "description": "Incident events trigger SM-04 risk state transitions",
+          "specific_testable_requirement": "Incident.type='API_LATENCY' with severity=CRITICAL triggers SM-04 transition to RISK_WARNING or RISK_CRITICAL",
+          "priority": "HIGH",
+          "section_reference": "SM-04 Integration"
+        }
+      ]
+    },
+    "SM-01_AUTHORIZATION_STATE_MACHINE": {
+      "document_id": "SM-01",
+      "document_title": "Authorization State Machine / 授權狀態機",
+      "version": "V1",
+      "implementing_modules": [
+        "authorization_state_machine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "SM01-R01",
+          "category": "State Machine",
+          "title": "State: PENDING_AUTH",
+          "description": "Initial state. Decision awaiting approval.",
+          "specific_testable_requirement": "New authorization starts in PENDING_AUTH; transition to AUTHORIZED requires approval",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R02",
+          "category": "State Machine",
+          "title": "State: AUTHORIZED",
+          "description": "Decision approved and ready to execute",
+          "specific_testable_requirement": "AUTHORIZED state allows Executor to consume; can be revoked if execution hasn't started",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R03",
+          "category": "State Machine",
+          "title": "State: EXECUTING",
+          "description": "Decision being executed",
+          "specific_testable_requirement": "EXECUTING state blocks revocation; transitions to EXECUTED on success",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R04",
+          "category": "State Machine",
+          "title": "State: EXECUTED",
+          "description": "Decision execution completed (terminal)",
+          "specific_testable_requirement": "EXECUTED is terminal state; cannot transition further",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R05",
+          "category": "State Machine",
+          "title": "State: REVOKED",
+          "description": "Authorization withdrawn before execution",
+          "specific_testable_requirement": "REVOKED can only be reached from PENDING_AUTH or AUTHORIZED; blocks execution",
+          "priority": "HIGH",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R06",
+          "category": "State Machine",
+          "title": "State: EXPIRED",
+          "description": "Authorization time limit exceeded",
+          "specific_testable_requirement": "EXPIRED auto-triggered after TTL expires; Executor rejects orders with expired auth",
+          "priority": "HIGH",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM01-R07",
+          "category": "Transition",
+          "title": "Transition: PENDING_AUTH → AUTHORIZED",
+          "description": "Upon approval from authorized signer",
+          "specific_testable_requirement": "Requires signature from authorized actor; records signer ID and timestamp",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM01-R08",
+          "category": "Transition",
+          "title": "Transition: AUTHORIZED → EXECUTING",
+          "description": "Upon Executor Agent taking action",
+          "specific_testable_requirement": "Executor can only consume AUTHORIZED auth; records executor ID",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM01-R09",
+          "category": "Transition",
+          "title": "Transition: EXECUTING → EXECUTED",
+          "description": "Upon successful completion",
+          "specific_testable_requirement": "Recorded with execution result and timestamp",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM01-R10",
+          "category": "Transition",
+          "title": "Transition: AUTHORIZED → REVOKED",
+          "description": "Before execution, if withdrawn",
+          "specific_testable_requirement": "Only possible if still in AUTHORIZED state; records revoker and reason",
+          "priority": "HIGH",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM01-R11",
+          "category": "Transition",
+          "title": "Transition: PENDING_AUTH → EXPIRED",
+          "description": "After timeout without approval",
+          "specific_testable_requirement": "Auto-triggered after TTL; cleanup removes expired auths",
+          "priority": "HIGH",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM01-R12",
+          "category": "Configuration",
+          "title": "Authorization Timeout Configuration",
+          "description": "Timeout must be configured and enforced (5-300 seconds range)",
+          "specific_testable_requirement": "Timeout is configurable per authorization type; default 300s",
+          "priority": "CRITICAL",
+          "section_reference": "Configuration"
+        },
+        {
+          "id": "SM01-R13",
+          "category": "Configuration",
+          "title": "Approval Signature Requirement",
+          "description": "Approval from distinct actor; can support M-of-N approval",
+          "specific_testable_requirement": "Approval requires signature from authorized signer (not requester); supports M-of-N if configured",
+          "priority": "CRITICAL",
+          "section_reference": "Configuration"
+        },
+        {
+          "id": "SM01-R14",
+          "category": "Audit",
+          "title": "State Transition Logging",
+          "description": "All transitions logged with timestamp, actor, old_state, new_state",
+          "specific_testable_requirement": "Every SM-01 transition recorded in audit log with actor ID",
+          "priority": "CRITICAL",
+          "section_reference": "Audit"
+        },
+        {
+          "id": "SM01-R15",
+          "category": "Cleanup",
+          "title": "Expired Authorization Cleanup",
+          "description": "Expired authorizations must be explicitly cleaned up",
+          "specific_testable_requirement": "Daily cleanup job removes EXPIRED auths older than 7 days",
+          "priority": "MEDIUM",
+          "section_reference": "Cleanup"
+        },
+        {
+          "id": "SM01-R16",
+          "category": "Safety",
+          "title": "Fail-Closed: No Null Transitions",
+          "description": "Authorization must exist and be valid before Executor can act. Null/missing auth = reject.",
+          "specific_testable_requirement": "Executor refuses to execute any order without valid SM-01 AUTHORIZED state",
+          "priority": "CRITICAL",
+          "section_reference": "Safety"
+        }
+      ]
+    },
+    "SM-02_DECISION_LEASE_STATE_MACHINE": {
+      "document_id": "SM-02",
+      "document_title": "Decision Lease State Machine / 決策租約狀態機",
+      "version": "V1",
+      "implementing_modules": [
+        "decision_lease_state_machine.py",
+        "lease_registry.py",
+        "lease_lifecycle.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "SM02-R01",
+          "category": "Lease Concept",
+          "title": "Decision Lease Definition",
+          "description": "Time-bound right to execute trading decision with specific parameters and actor assignment",
+          "specific_testable_requirement": "Lease object includes: unique_id, start_time, end_time, entry_price, quantity, direction, actor, created_timestamp",
+          "priority": "CRITICAL",
+          "section_reference": "Concept"
+        },
+        {
+          "id": "SM02-R02",
+          "category": "State Machine",
+          "title": "State: LEASE_CREATED",
+          "description": "Lease instantiated by Strategist",
+          "specific_testable_requirement": "New lease starts in LEASE_CREATED; records creation timestamp and parameters",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R03",
+          "category": "State Machine",
+          "title": "State: LEASE_ACTIVE",
+          "description": "Lease is within valid time window",
+          "specific_testable_requirement": "LEASE_ACTIVE is entered when: now >= start_time AND now <= end_time",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R04",
+          "category": "State Machine",
+          "title": "State: LEASE_EXECUTING",
+          "description": "Executor has started processing",
+          "specific_testable_requirement": "LEASE_EXECUTING entered when Executor begins order submission; blocks other executors",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R05",
+          "category": "State Machine",
+          "title": "State: LEASE_FULFILLED",
+          "description": "Lease execution completed (terminal)",
+          "specific_testable_requirement": "LEASE_FULFILLED is terminal; records fill quantity and final status",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R06",
+          "category": "State Machine",
+          "title": "State: LEASE_EXPIRED",
+          "description": "Lease time window closed",
+          "specific_testable_requirement": "LEASE_EXPIRED auto-triggered when: now > end_time AND status ≠ FULFILLED",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R07",
+          "category": "State Machine",
+          "title": "State: LEASE_REVOKED",
+          "description": "Lease cancelled before completion",
+          "specific_testable_requirement": "LEASE_REVOKED reachable from LEASE_CREATED, LEASE_ACTIVE, LEASE_EXECUTING (with restrictions); records revoker",
+          "priority": "HIGH",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R08",
+          "category": "State Machine",
+          "title": "State: LEASE_FAILED",
+          "description": "Execution failed",
+          "specific_testable_requirement": "LEASE_FAILED triggered on execution error; records error detail",
+          "priority": "HIGH",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM02-R09",
+          "category": "Transition",
+          "title": "Transition: LEASE_CREATED → LEASE_ACTIVE",
+          "description": "Upon entering valid time window",
+          "specific_testable_requirement": "Auto-triggered when: now >= start_time; recorded with timestamp",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R10",
+          "category": "Transition",
+          "title": "Transition: LEASE_ACTIVE → LEASE_EXECUTING",
+          "description": "When Executor starts",
+          "specific_testable_requirement": "Executor calls begin(); transition recorded with executor_id",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R11",
+          "category": "Transition",
+          "title": "Transition: LEASE_EXECUTING → LEASE_FULFILLED",
+          "description": "Upon successful execution",
+          "specific_testable_requirement": "Recorded when fill_qty >= lease_qty (or partial_fills_allowed AND lease_ended)",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R12",
+          "category": "Transition",
+          "title": "Transition: LEASE_ACTIVE → LEASE_EXPIRED",
+          "description": "After time boundary",
+          "specific_testable_requirement": "Auto-triggered when: now > end_time; no new orders accepted",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R13",
+          "category": "Transition",
+          "title": "Transition: LEASE_ACTIVE → LEASE_REVOKED",
+          "description": "Manual cancellation",
+          "specific_testable_requirement": "Revocable while in LEASE_ACTIVE; records revoker_id and reason",
+          "priority": "HIGH",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R14",
+          "category": "Transition",
+          "title": "Transition: LEASE_EXECUTING → LEASE_FAILED",
+          "description": "Execution error",
+          "specific_testable_requirement": "Recorded with error_code and error_message",
+          "priority": "HIGH",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM02-R15",
+          "category": "Configuration",
+          "title": "Lease Duration - Strict Upper Bound",
+          "description": "Lease duration must have hard upper limit (typically seconds to minutes)",
+          "specific_testable_requirement": "Lease with end_time > now + 5min is rejected; typical range 0.1-300 seconds",
+          "priority": "CRITICAL",
+          "section_reference": "Configuration"
+        },
+        {
+          "id": "SM02-R16",
+          "category": "Configuration",
+          "title": "Lease Parameters - Immutable",
+          "description": "Lease parameters are immutable once created",
+          "specific_testable_requirement": "Any attempt to modify lease params (price, qty, etc.) after creation is rejected",
+          "priority": "CRITICAL",
+          "section_reference": "Configuration"
+        },
+        {
+          "id": "SM02-R17",
+          "category": "Configuration",
+          "title": "Partial Fills - Explicit Flag",
+          "description": "Partial fills only allowed if explicitly marked in lease",
+          "specific_testable_requirement": "Lease has allow_partial_fills flag; if false, must achieve 100% fill or fail",
+          "priority": "CRITICAL",
+          "section_reference": "Configuration"
+        },
+        {
+          "id": "SM02-R18",
+          "category": "Lifecycle",
+          "title": "Expired Leases - Auto-Transition",
+          "description": "Expired leases must auto-transition (no human cleanup needed)",
+          "specific_testable_requirement": "Expired leases auto-transition to LEASE_EXPIRED; no manual intervention required",
+          "priority": "HIGH",
+          "section_reference": "Lifecycle"
+        },
+        {
+          "id": "SM02-R19",
+          "category": "Audit",
+          "title": "Lease State Changes - Audit Events",
+          "description": "Lease state changes trigger audit events",
+          "specific_testable_requirement": "Every state transition generates audit event with: lease_id, old_state, new_state, timestamp, actor",
+          "priority": "CRITICAL",
+          "section_reference": "Audit"
+        },
+        {
+          "id": "SM02-R20",
+          "category": "Idempotency",
+          "title": "Lease Unique ID",
+          "description": "Unique ID per lease for idempotency",
+          "specific_testable_requirement": "Lease.id is UUID; no two leases have same ID; Executor can safely retry with same lease_id",
+          "priority": "CRITICAL",
+          "section_reference": "Idempotency"
+        },
+        {
+          "id": "SM02-R21",
+          "category": "Revocation",
+          "title": "Lease Revocation Capability",
+          "description": "Guardian/Operator can revoke leases",
+          "specific_testable_requirement": "Guardian and Operator have revoke() permission; revocation logged with reason",
+          "priority": "CRITICAL",
+          "section_reference": "Revocation"
+        },
+        {
+          "id": "SM02-R22",
+          "category": "Audit Trail",
+          "title": "Full Audit Trail - Emission to Outcome",
+          "description": "Complete audit trail from lease emission through execution to outcome",
+          "specific_testable_requirement": "Given lease_id, can reconstruct: created_by, parameters, state_transitions, execution_result",
+          "priority": "CRITICAL",
+          "section_reference": "Audit Trail"
+        }
+      ]
+    },
+    "SM-04_RISK_GOVERNOR_STATE_MACHINE": {
+      "document_id": "SM-04",
+      "document_title": "Risk Governor State Machine / 風控狀態機",
+      "version": "V1",
+      "implementing_modules": [
+        "risk_governor_state_machine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "SM04-R01",
+          "category": "State Machine",
+          "title": "State: RISK_NORMAL",
+          "description": "All metrics within normal bounds",
+          "specific_testable_requirement": "RISK_NORMAL: all_metrics < threshold_warning; allows full trading",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R02",
+          "category": "State Machine",
+          "title": "State: RISK_WARNING",
+          "description": "One or more metrics in warning zone",
+          "specific_testable_requirement": "RISK_WARNING: any_metric >= threshold_warning AND all_metrics < threshold_critical",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R03",
+          "category": "State Machine",
+          "title": "State: RISK_CRITICAL",
+          "description": "One or more metrics at critical level",
+          "specific_testable_requirement": "RISK_CRITICAL: any_metric >= threshold_critical; triggers auto-lock within 1ms",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R04",
+          "category": "State Machine",
+          "title": "State: RISK_LOCKED",
+          "description": "Trading locked due to risk violation",
+          "specific_testable_requirement": "RISK_LOCKED: no new orders accepted; only closing trades allowed",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R05",
+          "category": "State Machine",
+          "title": "State: RISK_RECOVERY",
+          "description": "Position unwinding in progress",
+          "specific_testable_requirement": "RISK_RECOVERY: only closing/reducing orders allowed; no new entries",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R06",
+          "category": "State Machine",
+          "title": "State: RISK_LIQUIDATION",
+          "description": "Forced position closure",
+          "specific_testable_requirement": "RISK_LIQUIDATION: system executes market close orders at best available price",
+          "priority": "CRITICAL",
+          "section_reference": "Core States"
+        },
+        {
+          "id": "SM04-R07",
+          "category": "Transition",
+          "title": "Transition: RISK_NORMAL → RISK_WARNING",
+          "description": "Threshold A crossed",
+          "specific_testable_requirement": "When any_metric >= threshold_warning (e.g., 70% of limit), transition occurs; alerts generated",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R08",
+          "category": "Transition",
+          "title": "Transition: RISK_WARNING → RISK_CRITICAL",
+          "description": "Threshold B crossed",
+          "specific_testable_requirement": "When any_metric >= threshold_critical (e.g., 95% of limit), transition occurs",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R09",
+          "category": "Transition",
+          "title": "Transition: RISK_CRITICAL → RISK_LOCKED",
+          "description": "Automatic enforcement",
+          "specific_testable_requirement": "Automatic, no delay required; transition < 1ms; all pending orders rejected",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R10",
+          "category": "Transition",
+          "title": "Transition: RISK_LOCKED → RISK_RECOVERY",
+          "description": "Position unwinding begins",
+          "specific_testable_requirement": "Manual trigger required (Guardian approval); system marks time_locked",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R11",
+          "category": "Transition",
+          "title": "Transition: RISK_RECOVERY → RISK_NORMAL",
+          "description": "Position normalized",
+          "specific_testable_requirement": "Auto-triggered when all_metrics <= threshold_warning; records recovery_duration",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R12",
+          "category": "Transition",
+          "title": "Transition: RISK_CRITICAL → RISK_LIQUIDATION",
+          "description": "Emergency liquidation",
+          "specific_testable_requirement": "Triggered if RISK_CRITICAL lasts > 5 minutes; executes market close orders",
+          "priority": "CRITICAL",
+          "section_reference": "Transitions"
+        },
+        {
+          "id": "SM04-R13",
+          "category": "Metrics",
+          "title": "Monitored Metrics",
+          "description": "Position size, notional exposure, margin ratio, leverage",
+          "specific_testable_requirement": "SM-04 monitors: position_size, notional_exposure, margin_ratio, leverage; recalculates on each price/fill update",
+          "priority": "CRITICAL",
+          "section_reference": "Metrics"
+        },
+        {
+          "id": "SM04-R14",
+          "category": "Configuration",
+          "title": "Threshold A (Warning)",
+          "description": "70-85% of limit",
+          "specific_testable_requirement": "Threshold_A configurable; default 75% of position limit",
+          "priority": "CRITICAL",
+          "section_reference": "Thresholds"
+        },
+        {
+          "id": "SM04-R15",
+          "category": "Configuration",
+          "title": "Threshold B (Critical)",
+          "description": "95-100% of limit",
+          "specific_testable_requirement": "Threshold_B configurable; default 95% of position limit",
+          "priority": "CRITICAL",
+          "section_reference": "Thresholds"
+        },
+        {
+          "id": "SM04-R16",
+          "category": "Performance",
+          "title": "Real-Time Calculation",
+          "description": "Metrics calculated < 100ms frequency",
+          "specific_testable_requirement": "Risk metrics updated on every price tick and fill; calculation latency < 100ms",
+          "priority": "CRITICAL",
+          "section_reference": "Performance"
+        },
+        {
+          "id": "SM04-R17",
+          "category": "Performance",
+          "title": "CRITICAL → LOCKED Deterministic",
+          "description": "Transition < 1ms deterministic",
+          "specific_testable_requirement": "RISK_CRITICAL → RISK_LOCKED transition is synchronous; < 1ms latency",
+          "priority": "CRITICAL",
+          "section_reference": "Performance"
+        },
+        {
+          "id": "SM04-R18",
+          "category": "Safety",
+          "title": "LOCKED → RECOVERY Approval",
+          "description": "Requires manual Guardian approval",
+          "specific_testable_requirement": "RISK_LOCKED can only transition to RISK_RECOVERY with explicit Guardian call",
+          "priority": "CRITICAL",
+          "section_reference": "Safety"
+        },
+        {
+          "id": "SM04-R19",
+          "category": "Audit",
+          "title": "State Changes - Audit Logs",
+          "description": "All transitions logged with actor and reason",
+          "specific_testable_requirement": "Every SM-04 state change recorded: old_state, new_state, metric_values, timestamp, actor",
+          "priority": "CRITICAL",
+          "section_reference": "Audit"
+        },
+        {
+          "id": "SM04-R20",
+          "category": "Alerts",
+          "title": "Alert Generation",
+          "description": "Generate alerts on each state transition",
+          "specific_testable_requirement": "RISK_NORMAL→WARNING: alert_level=MEDIUM; CRITICAL→LOCKED: alert_level=CRITICAL; immediate notification",
+          "priority": "HIGH",
+          "section_reference": "Alerts"
+        }
+      ]
+    },
+    "EX-01_PROTECTION_ANTI_HUNT": {
+      "document_id": "EX-01",
+      "document_title": "Protection & Anti-Hunt / 保護與反獵殺",
+      "version": "V2",
+      "implementing_modules": [
+        "protective_order_manager.py",
+        "portfolio_risk_control.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX01-R01",
+          "category": "Pre-Trade",
+          "title": "Pre-Trade Risk Checks - Synchronous Blocking",
+          "description": "All orders must pass risk validation before submission",
+          "specific_testable_requirement": "Risk check executed before exchange.submit_order(); rejected orders logged",
+          "priority": "CRITICAL",
+          "section_reference": "Pre-Trade"
+        },
+        {
+          "id": "EX01-R02",
+          "category": "Position",
+          "title": "Position Limits - Per-Instrument",
+          "description": "Maximum position sizes enforced per instrument/account",
+          "specific_testable_requirement": "Position check: proposed_position + current_position <= max_position_per_coin",
+          "priority": "CRITICAL",
+          "section_reference": "Position Limits"
+        },
+        {
+          "id": "EX01-R03",
+          "category": "Exposure",
+          "title": "Notional Exposure Caps",
+          "description": "Total market exposure constraints",
+          "specific_testable_requirement": "Notional check: sum(position[*] * price[*]) <= max_notional_exposure",
+          "priority": "CRITICAL",
+          "section_reference": "Notional Limits"
+        },
+        {
+          "id": "EX01-R04",
+          "category": "Margin",
+          "title": "Margin Requirements",
+          "description": "Minimum margin monitoring and enforcement",
+          "specific_testable_requirement": "Margin check: available_margin >= required_margin; reject if insufficient",
+          "priority": "CRITICAL",
+          "section_reference": "Margin"
+        },
+        {
+          "id": "EX01-R05",
+          "category": "Monitoring",
+          "title": "Real-Time Monitoring",
+          "description": "Continuous position tracking and threshold alerts",
+          "specific_testable_requirement": "Position and margin monitored every 1 second minimum; alerts on threshold breach",
+          "priority": "CRITICAL",
+          "section_reference": "Monitoring"
+        },
+        {
+          "id": "EX01-R06",
+          "category": "Dynamic",
+          "title": "Dynamic Risk Parameters",
+          "description": "Risk limits adjustable based on market volatility",
+          "specific_testable_requirement": "Risk limits scale with IV; high_volatility → tighter limits; versioned with change tracking",
+          "priority": "HIGH",
+          "section_reference": "Dynamic"
+        },
+        {
+          "id": "EX01-R07",
+          "category": "Hard Stop",
+          "title": "Hard Stop-Loss Implementation",
+          "description": "Local stop-loss + exchange-side conditional orders",
+          "specific_testable_requirement": "Every position has: local_stop_loss AND exchange_conditional_order at same level; both trigger close",
+          "priority": "CRITICAL",
+          "section_reference": "Hard Stop"
+        },
+        {
+          "id": "EX01-R08",
+          "category": "ATR",
+          "title": "ATR Dynamic Distance",
+          "description": "Stop-loss distance scaled by ATR (Average True Range)",
+          "specific_testable_requirement": "Stop_loss = entry ± (atr_multiplier × atr); atr_multiplier >= 1.5",
+          "priority": "HIGH",
+          "section_reference": "ATR"
+        },
+        {
+          "id": "EX01-R09",
+          "category": "Correlation",
+          "title": "Correlation Gates",
+          "description": "Reject positions if correlation to existing portfolio exceeds threshold",
+          "specific_testable_requirement": "New position correlation to portfolio > 0.8 is rejected (or reduces size)",
+          "priority": "MEDIUM",
+          "section_reference": "Correlation"
+        },
+        {
+          "id": "EX01-R10",
+          "category": "Audit",
+          "title": "Risk Violations - Detailed Audit Records",
+          "description": "All risk violations logged with context",
+          "specific_testable_requirement": "Risk rejection includes: reason_code, metric_value, limit, proposed_action, timestamp",
+          "priority": "CRITICAL",
+          "section_reference": "Audit"
+        },
+        {
+          "id": "EX01-R11",
+          "category": "Persistence",
+          "title": "Risk Parameters - Persistent and Versioned",
+          "description": "Risk parameters stored persistently with version tracking",
+          "specific_testable_requirement": "Risk limits stored in DB with version_id and change_timestamp; rollback capability",
+          "priority": "HIGH",
+          "section_reference": "Persistence"
+        },
+        {
+          "id": "EX01-R12",
+          "category": "Reconciliation",
+          "title": "Risk State Reconciliation",
+          "description": "Risk state must be reconcilable with exchange and internal accounting",
+          "specific_testable_requirement": "Position check: local_position == exchange_position (after 5 retries); mismatch triggers alert",
+          "priority": "CRITICAL",
+          "section_reference": "Reconciliation"
+        }
+      ]
+    },
+    "EX-02_OMS_ORDER_LIFECYCLE": {
+      "document_id": "EX-02",
+      "document_title": "OMS & Order Lifecycle / 委託管理系統與訂單生命週期",
+      "version": "V1",
+      "implementing_modules": [
+        "oms_state_machine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX02-R01",
+          "category": "Order States",
+          "title": "11-State Order Lifecycle",
+          "description": "Comprehensive state machine for order management with reconciliation gate",
+          "specific_testable_requirement": "OMS implements all 11 states: CREATED, VALIDATED, SUBMITTED, PENDING, PARTIAL_FILL, FILLED, CANCEL_REQUESTED, CANCELLED, REJECTED, FAILED, EXPIRED",
+          "priority": "CRITICAL",
+          "section_reference": "Order Lifecycle"
+        },
+        {
+          "id": "EX02-R02",
+          "category": "Reconciliation",
+          "title": "Reconciliation Gate - Paper vs Live/Demo",
+          "description": "Position consistency checks between paper, demo, and live trading",
+          "specific_testable_requirement": "Before execution, reconciliation check validates: local_position == exchange_position; mismatch blocks",
+          "priority": "CRITICAL",
+          "section_reference": "Reconciliation"
+        }
+      ]
+    },
+    "EX-04_RECONCILIATION_ENGINE": {
+      "document_id": "EX-04",
+      "document_title": "Reconciliation Engine / 對帳引擎",
+      "version": "V1",
+      "implementing_modules": [
+        "reconciliation_engine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX04-R01",
+          "category": "Reconciliation",
+          "title": "Position Consistency - Paper vs Exchange",
+          "description": "Daily P&L reconciliation with exchange; position matching",
+          "specific_testable_requirement": "Reconciliation job runs daily; compares: local_position vs exchange_position, paper_pnl vs exchange_pnl",
+          "priority": "CRITICAL",
+          "section_reference": "Position Reconciliation"
+        },
+        {
+          "id": "EX04-R02",
+          "category": "Reconciliation",
+          "title": "Fill Matching - Execution Verification",
+          "description": "Verify all fills received from exchange match submitted orders",
+          "specific_testable_requirement": "Each fill from exchange matched to order_id; fill_qty, fill_price recorded; discrepancies logged",
+          "priority": "CRITICAL",
+          "section_reference": "Fill Matching"
+        },
+        {
+          "id": "EX04-R03",
+          "category": "Reconciliation",
+          "title": "Conflict Resolution",
+          "description": "Automated detection and resolution of local vs exchange state conflicts",
+          "specific_testable_requirement": "Mismatch detected → 5 retry attempts with backoff; if still failed → escalate to MANUAL_REVIEW",
+          "priority": "CRITICAL",
+          "section_reference": "Conflict Resolution"
+        }
+      ]
+    },
+    "EX-05_LEARNING_TIERS_AUTONOMY": {
+      "document_id": "EX-05",
+      "document_title": "Learning Tiers & Autonomy / 學習層級與自主性",
+      "version": "V2",
+      "implementing_modules": [
+        "learning_tier_gate.py",
+        "analyst_evolution_engine.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX05-R01",
+          "category": "Learning Tier",
+          "title": "L1-L5 Learning Tier Progression",
+          "description": "Analyst Agent evolves through 5 learning tiers with specific criteria",
+          "specific_testable_requirement": "Each tier has promotion criteria; progression gates active_tier >= required_tier",
+          "priority": "HIGH",
+          "section_reference": "Tier Progression"
+        },
+        {
+          "id": "EX05-R02",
+          "category": "Learning Tier",
+          "title": "L1 Post-Trade Review",
+          "description": "Post-trade analysis and basic feedback",
+          "specific_testable_requirement": "After each trade, system logs: entry_reason, exit_reason, pnl, cost_efficiency",
+          "priority": "HIGH",
+          "section_reference": "L1"
+        },
+        {
+          "id": "EX05-R03",
+          "category": "Learning Tier",
+          "title": "L2 Pattern Discovery",
+          "description": "Identify repeating patterns and correlations",
+          "specific_testable_requirement": "System identifies patterns with >= 10 occurrences; win_rate per pattern tracked",
+          "priority": "HIGH",
+          "section_reference": "L2"
+        },
+        {
+          "id": "EX05-R04",
+          "category": "Learning Tier",
+          "title": "L3+ Advanced Learning",
+          "description": "Model training, backtesting, parameter optimization",
+          "specific_testable_requirement": "New models validated on hold-out test set; Sharpe > baseline before live deployment",
+          "priority": "MEDIUM",
+          "section_reference": "L3+"
+        },
+        {
+          "id": "EX05-R05",
+          "category": "Training",
+          "title": "Training Data Isolation",
+          "description": "ML models train only on approved historical datasets",
+          "specific_testable_requirement": "Training data is separate from live trading data; 30+ day delay before live data usable",
+          "priority": "HIGH",
+          "section_reference": "Data Isolation"
+        },
+        {
+          "id": "EX05-R06",
+          "category": "Feature Engineering",
+          "title": "Feature Engineering Boundaries",
+          "description": "Restricted set of allowed market/internal features",
+          "specific_testable_requirement": "Feature whitelist defined; model training only uses approved features",
+          "priority": "MEDIUM",
+          "section_reference": "Features"
+        },
+        {
+          "id": "EX05-R07",
+          "category": "Model Update",
+          "title": "Model Update Frequency Controls",
+          "description": "Controls on when and how often models are updated",
+          "specific_testable_requirement": "Model updates limited to: weekly minimum, daily maximum; all changes logged",
+          "priority": "MEDIUM",
+          "section_reference": "Update Frequency"
+        },
+        {
+          "id": "EX05-R08",
+          "category": "Validation",
+          "title": "Backtesting Validation",
+          "description": "Mandatory backtesting before deploying model updates",
+          "specific_testable_requirement": "New model backtested on 1-year historical data; Sharpe >= baseline before approval",
+          "priority": "CRITICAL",
+          "section_reference": "Backtesting"
+        },
+        {
+          "id": "EX05-R09",
+          "category": "Rollout",
+          "title": "Live Testing Limits",
+          "description": "Controlled rollout of new models with position caps",
+          "specific_testable_requirement": "New model: 7 days shadow mode (no trades) → 7 days limited_size (50%) → full_size after 14 days",
+          "priority": "HIGH",
+          "section_reference": "Rollout"
+        },
+        {
+          "id": "EX05-R10",
+          "category": "Data Quality",
+          "title": "Feedback Loop Control",
+          "description": "Prevents data leakage between live trading and training data",
+          "specific_testable_requirement": "Live trading data isolated until 30 days post-trade; training uses approved historical data only",
+          "priority": "CRITICAL",
+          "section_reference": "Feedback Loop"
+        },
+        {
+          "id": "EX05-R11",
+          "category": "Model Quality",
+          "title": "Model Drift Detection",
+          "description": "Automatic flagging when model performance degrades",
+          "specific_testable_requirement": "Daily: compare current_prediction_distribution vs training_distribution; anomaly detected if KL_divergence > threshold",
+          "priority": "HIGH",
+          "section_reference": "Drift Detection"
+        },
+        {
+          "id": "EX05-R12",
+          "category": "Async",
+          "title": "Model Training - Asynchronous Non-Blocking",
+          "description": "Model training must be asynchronous and non-blocking to execution",
+          "specific_testable_requirement": "Training runs in separate process; order execution never waits for training completion",
+          "priority": "CRITICAL",
+          "section_reference": "Async"
+        },
+        {
+          "id": "EX05-R13",
+          "category": "Reproducibility",
+          "title": "Production Models - Deterministic Reproducible",
+          "description": "Production model decisions are deterministic and reproducible",
+          "specific_testable_requirement": "Same input features always produce same prediction; model versioned by hash",
+          "priority": "CRITICAL",
+          "section_reference": "Reproducibility"
+        },
+        {
+          "id": "EX05-R14",
+          "category": "Versioning",
+          "title": "Model Versioning - Change Tracking & Rollback",
+          "description": "All model updates tracked with rollback capability",
+          "specific_testable_requirement": "Model_version_id stored with each prediction; rollback to previous version possible within 1 hour",
+          "priority": "CRITICAL",
+          "section_reference": "Versioning"
+        },
+        {
+          "id": "EX05-R15",
+          "category": "Monitoring",
+          "title": "Model Performance Monitoring",
+          "description": "Continuously monitored against baseline",
+          "specific_testable_requirement": "Daily: Sharpe(current) >= Sharpe(baseline); if < 50%, automatic rollback triggered",
+          "priority": "CRITICAL",
+          "section_reference": "Monitoring"
+        }
+      ]
+    },
+    "EX-06_AGENT_CONFLICT_ARBITRATION": {
+      "document_id": "EX-06",
+      "document_title": "Agent Conflict Arbitration / 代理衝突仲裁",
+      "version": "V1",
+      "implementing_modules": [
+        "multi_agent_framework.py",
+        "market_regime.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX06-R01",
+          "category": "Orchestration",
+          "title": "Scout/Conductor Pattern",
+          "description": "OpenClaw as Conductor coordinating specialized agents",
+          "specific_testable_requirement": "Central OpenClaw orchestrator routes messages between Scout, Strategist, Executor, Guardian, Analyst",
+          "priority": "HIGH",
+          "section_reference": "Conductor"
+        },
+        {
+          "id": "EX06-R02",
+          "category": "Coordination",
+          "title": "Fact vs Inference vs Hypothesis Distinction",
+          "description": "Clear boundary between observed facts, derived inferences, and speculative hypotheses",
+          "specific_testable_requirement": "Each message tagged with: FACT (from exchange), INFERENCE (derived), or HYPOTHESIS (speculative)",
+          "priority": "HIGH",
+          "section_reference": "Fact/Inference"
+        }
+      ]
+    },
+    "EX-07_AGENT_DATA_ACCESS_CONTROL": {
+      "document_id": "EX-07",
+      "document_title": "Agent Data Access Control / 代理數據存取控制",
+      "version": "V1",
+      "implementing_modules": [
+        "governance_hub.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "EX07-R01",
+          "category": "Access Control",
+          "title": "Cross-SM Authorization",
+          "description": "Data access controlled across state machines",
+          "specific_testable_requirement": "Agent can only access data if authorized by governance layer; audit all access attempts",
+          "priority": "HIGH",
+          "section_reference": "Access Control"
+        },
+        {
+          "id": "EX07-R02",
+          "category": "Data Flow",
+          "title": "Data Flow Control",
+          "description": "Formal control of data flow between components",
+          "specific_testable_requirement": "All inter-module data transfers logged with: source, destination, data_type, timestamp, access_granted/denied",
+          "priority": "HIGH",
+          "section_reference": "Data Flow"
+        }
+      ]
+    },
+    "HIST-01_CORE_DESIGN_OVERVIEW": {
+      "document_id": "HIST-01",
+      "document_title": "Core Design Overview / 核心設計總綱",
+      "version": "V1",
+      "implementing_modules": [
+        "core_system.py"
+      ],
+      "status": "ACTIVE",
+      "requirements": [
+        {
+          "id": "HIST01-R01",
+          "category": "Architecture",
+          "title": "Separation of Concerns - Layered Design",
+          "description": "Data plane (perception) isolated from control plane (decisions), independent risk layer, non-blocking learning",
+          "specific_testable_requirement": "Code structure shows clear layers: perception.py, decision.py, risk.py, learning.py; zero cross-layer coupling",
+          "priority": "CRITICAL",
+          "section_reference": "Separation"
+        },
+        {
+          "id": "HIST01-R02",
+          "category": "Architecture",
+          "title": "State Machine Pattern - Explicit State",
+          "description": "All workflows modeled as explicit state machines with deterministic, auditable transitions",
+          "specific_testable_requirement": "SM-01, SM-02, SM-04, EX-02 all implement state machine pattern; no implicit state",
+          "priority": "CRITICAL",
+          "section_reference": "State Machines"
+        },
+        {
+          "id": "HIST01-R03",
+          "category": "Architecture",
+          "title": "Agent-Based Orchestration - Async Communication",
+          "description": "Specialized agents with async message-based communication, not monolithic controller",
+          "specific_testable_requirement": "OpenClaw coordinator receives messages from 6 agents; routes async, no RPC calls",
+          "priority": "HIGH",
+          "section_reference": "Orchestration"
+        },
+        {
+          "id": "HIST01-R04",
+          "category": "Governance",
+          "title": "Risk-First Governance",
+          "description": "Risk control is fundamental, not bolted-on; all decisions bounded by risk parameters",
+          "specific_testable_requirement": "Every order submission gates through EX-01 risk checks; no bypass path exists",
+          "priority": "CRITICAL",
+          "section_reference": "Risk-First"
+        },
+        {
+          "id": "HIST01-R05",
+          "category": "Compliance",
+          "title": "Auditability and Compliance",
+          "description": "Every action logged with context; complete decision tree; deterministic replay capability",
+          "specific_testable_requirement": "Given any trade_id, audit trail shows: pre-state, basis, risk_approval, authorization, execution, result",
+          "priority": "CRITICAL",
+          "section_reference": "Auditability"
+        }
+      ]
+    }
+  },
+  "cross_document_dependencies": {
+    "critical_path": [
+      {
+        "from": "SM-01",
+        "to": "SM-02",
+        "requirement": "SM-02 leases cannot proceed without SM-01 AUTHORIZED state",
+        "id": "DEP001"
+      },
+      {
+        "from": "SM-02",
+        "to": "SM-03 (EX-02)",
+        "requirement": "Orders cannot execute without active SM-02 lease",
+        "id": "DEP002"
+      },
+      {
+        "from": "EX-01",
+        "to": "SM-03 (EX-02)",
+        "requirement": "All orders must pass EX-01 risk validation before submission",
+        "id": "DEP003"
+      },
+      {
+        "from": "SM-04",
+        "to": "SM-03 (EX-02)",
+        "requirement": "SM-04 RISK_LOCKED blocks all new order submissions",
+        "id": "DEP004"
+      },
+      {
+        "from": "DOC-02 H0",
+        "to": "All Trading",
+        "requirement": "H0 gate must execute first on every decision",
+        "id": "DEP005"
+      }
+    ],
+    "mandatory_rules": [
+      "No order (SM-03/EX-02) without active lease (SM-02)",
+      "No lease (SM-02) without authorization (SM-01)",
+      "All orders must pass pre-trade risk checks (EX-01)",
+      "Risk Governor (SM-04) can veto any order submission",
+      "Learning updates (EX-05) never block trading execution",
+      "Multi-agent coordination (EX-06) via async message bus only"
+    ]
+  },
+  "implementation_priority": {
+    "phase_1_critical": [
+      "H0 Local Deterministic Gate (2 days)",
+      "SM-01 Authorization State Machine (3 days)",
+      "SM-02 Decision Lease State Machine (3 days)",
+      "SM-04 Risk Governor State Machine (3 days)",
+      "Executor Single Write Port Module (3 days)",
+      "Audit Trail Infrastructure (2 days)",
+      "Truth Source Registry (1 day)"
+    ],
+    "phase_2_high": [
+      "EX-01 Risk Control Boundary (3 days)",
+      "EX-02 OMS Execution (4 days)",
+      "EX-06 Multi-Agent Orchestration (3 days)",
+      "Circuit Breaker System (3 days)"
+    ],
+    "phase_3_medium": [
+      "EX-05 Learning Tiers (4 days)",
+      "EX-04 Reconciliation (2 days)",
+      "EX-07 Data Access Control (2 days)",
+      "H1-H5 Governance Pipeline (5 days)"
+    ]
+  },
+  "success_criteria": [
+    "Can be clearly defined",
+    "Boundary clear, responsibility clear",
+    "Won't randomly write/grant/modify",
+    "Protects account in anomalies",
+    "Has complete audit chain",
+    "Runs stably long-term",
+    "Proves effectiveness on net PnL basis",
+    "Progressively earns more autonomy in verified scenarios",
+    "Zero external AI cost achieves basic positive return",
+    "Continuously self-evolves from trading behavior"
+  ],
+  "risk_management_hierarchy": {
+    "priority_1_survival": "Account survival",
+    "priority_2_governance": "Risk governance",
+    "priority_3_health": "System health & consistency",
+    "priority_4_audit": "Audit traceability",
+    "priority_5_human": "Human final governance",
+    "priority_6_pnl": "Real net PnL",
+    "priority_7_autonomy": "Autonomous capability & evolution"
+  },
+  "metrics_to_track": {
+    "financial": [
+      "net_realized_pnl",
+      "win_rate",
+      "Sharpe_ratio",
+      "max_drawdown",
+      "cost_edge_ratio (per position)",
+      "ai_attention_cost (per position)"
+    ],
+    "operational": [
+      "H0_gate_latency_ms",
+      "risk_check_latency_ms",
+      "order_submission_latency_ms",
+      "fill_matching_latency_ms",
+      "reconciliation_success_rate"
+    ],
+    "governance": [
+      "audit_trail_completeness",
+      "state_transition_count",
+      "risk_violation_incidents",
+      "circuit_breaker_triggers",
+      "model_drift_detections"
+    ]
+  },
+  "testing_requirements": [
+    "Deterministic replay of exact trading sequence",
+    "Backtesting framework for strategy validation",
+    "Chaos testing for agent failure scenarios",
+    "Risk scenario testing for boundary conditions",
+    "Audit trail reconstruction (all 6 elements)",
+    "Reconciliation accuracy (exchange vs local)",
+    "State machine transition coverage",
+    "Lease lifecycle testing",
+    "Risk gate effectiveness"
+  ]
+}

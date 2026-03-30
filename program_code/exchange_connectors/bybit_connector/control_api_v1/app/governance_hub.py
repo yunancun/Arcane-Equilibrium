@@ -671,8 +671,9 @@ class GovernanceHub:
                         reason=f"Event: {event_type}, risk_level: {risk_level}",
                     )
                     self._append_governance_event(ev.to_dict())
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log governance event append failure (non-blocking audit trail)
+                    logger.warning("Failed to record governance event for risk escalation: %s", e)
 
         except Exception as e:
             logger.error("trigger_risk_upgrade error: %s / 触发风控升级错误: %s", e, e)

@@ -443,7 +443,7 @@ class TestLocalLLMSearchProvider:
         assert result.query == "What is Bitcoin?"
         assert len(result.results) == 1
         assert result.results[0].snippet == "Bitcoin is a decentralized digital currency..."
-        assert result.provider_used == "LOCAL_LLM"
+        assert result.provider_used == "local_llm"  # FIX: matches SEARCH_PROVIDER_LOCAL_LLM constant
         assert result.cost_usd == 0.0
         mock_client.generate.assert_called_once()
 

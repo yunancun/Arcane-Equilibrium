@@ -256,7 +256,7 @@ class Layer2Engine:
                 logger.warning("L1 local triage: Ollama not available / Ollama 不可用")
                 return {
                     "worth_investigating": False,
-                    "reason": "Neither Anthropic nor Ollama available",
+                    "reason": "Ollama not available for L1 local triage",
                     "error": True,
                     "triage_cost_usd": 0.0,
                 }
@@ -289,7 +289,11 @@ class Layer2Engine:
             except json.JSONDecodeError:
                 # Try to extract yes/no from free text
                 text_lower = resp.text.lower()
-                worth = "true" in text_lower or "yes" in text_lower or "worth" in text_lower
+                # FIX: "not worth" 包含 "worth" → 需排除否定模式
+                # FIX: "not worth" contains "worth" → must exclude negation patterns
+                has_negation = "not " in text_lower or "no " in text_lower or "don't" in text_lower
+                has_positive = "true" in text_lower or "yes" in text_lower or "worth" in text_lower
+                worth = has_positive and not has_negation
                 result = {
                     "worth_investigating": worth,
                     "reason": resp.text[:200],

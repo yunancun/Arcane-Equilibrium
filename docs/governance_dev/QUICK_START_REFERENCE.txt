@@ -1,0 +1,315 @@
+================================================================================
+                    GOVERNANCE SPECS - QUICK START GUIDE
+================================================================================
+
+PROJECT: OpenClaw / Bybit AI Trading System
+DATE: 2026-03-31
+STATUS: Complete specification extraction (287 requirements)
+
+================================================================================
+                              4 MINUTE READ
+================================================================================
+
+WHAT WAS EXTRACTED:
+- 287 specific, testable requirements from 13+ governance documents
+- 16 root principles for governance and autonomy
+- 6 agent roles for multi-agent architecture
+- 4 state machines (authorization, lease, risk, orders)
+- 7 critical path items (must do first)
+- 40-day implementation roadmap (4 phases)
+
+WHERE TO FIND THINGS:
+
+  Start Here:
+  → SPECIFICATION_EXTRACTION_SUMMARY.md (overview & navigation)
+
+  For Implementation Teams:
+  → COMPREHENSIVE_SPEC_REQUIREMENTS.json (287 requirements, all details)
+
+  For Presentations/Training:
+  → COMPREHENSIVE_SPEC_REQUIREMENTS.md (human-readable reference)
+
+  For Validation:
+  → EXTRACTION_VALIDATION.txt (this document confirms completeness)
+
+================================================================================
+                           CRITICAL PATH (7 ITEMS)
+================================================================================
+
+MUST DO FIRST (Blocking all other work):
+
+1. H0 Local Deterministic Gate (2 days)
+   ├─ 5 checks: freshness, health, eligibility, risk envelope, cooldown
+   ├─ SLA: <1ms, <1KB memory, zero external calls
+   └─ Requirement IDs: DOC02-R01 through DOC02-R07
+
+2. SM-01 Authorization State Machine (3 days)
+   ├─ 8 states: PENDING_AUTH → AUTHORIZED → EXECUTING → EXECUTED
+   ├─ M-of-N approval support, timeout enforcement
+   └─ Requirement IDs: SM01-R01 through SM01-R16
+
+3. SM-02 Decision Lease State Machine (3 days)
+   ├─ 9 states: LEASE_CREATED → ACTIVE → EXECUTING → FULFILLED
+   ├─ TTL-based, immutable params, revocable
+   └─ Requirement IDs: SM02-R01 through SM02-R22
+
+4. SM-04 Risk Governor State Machine (3 days)
+   ├─ 6 states: NORMAL → WARNING → CRITICAL → LOCKED → RECOVERY
+   ├─ Real-time monitoring, <1ms CRITICAL→LOCKED transition
+   └─ Requirement IDs: SM04-R01 through SM04-R20
+
+5. Executor Single Write Port (3 days)
+   ├─ ONE entry point for all order operations
+   ├─ Code audit: ZERO exchange writes outside Executor
+   └─ Requirement IDs: DOC01-R01, DOC01-R02
+
+6. Audit Trail Infrastructure (2 days)
+   ├─ 6-element reconstruction: pre-state, basis, risk, auth, exec, result
+   ├─ Append-only JSONL, deterministic replay
+   └─ Requirement IDs: DOC07-R01, DOC01-R07
+
+7. Truth Source Registry (1 day)
+   ├─ Canonical fact authority: position, order, risk, mode, auth, audit
+   ├─ No duplicate state machines for same fact
+   └─ Implicit in DOC-05
+
+TOTAL: 15 days to foundation
+
+================================================================================
+                            16 ROOT PRINCIPLES
+================================================================================
+
+GOVERNANCE (Original):
+1. Single Write Port ......................... One entry for all orders
+2. Read-Write Separation ..................... Research/GUI read-only
+3. AI ≠ Instant Command ...................... AI forms leases, not orders
+4. Strategy Cannot Bypass Risk ............... All intent through Guardian
+5. Survival > Profit ......................... Won't spiral before can profit
+6. Failure Default Contraction ............... Uncertain = conservative
+7. Learning ≠ Rewrite Live ................... Learning isolated, async
+8. Trade Explainability ...................... 6-element audit reconstruction
+9. Exchange Disaster Protection .............. Dual defense: local + conditional
+10. Cognitive Honesty ........................ Fact/inference/assumption clarity
+
+AUTONOMY & EVOLUTION (New):
+11. Agent Maximum Autonomy ................... Within P0/P1, fully autonomous
+12. Continuous Evolution ..................... Auto-learn, auto-deploy paper-verified
+13. AI Resource Cost Awareness ............... cost_edge_ratio ≥0.8 triggers closure
+14. Zero External Cost Runnable .............. Basic profit on L0+L1 only
+15. Multi-Agent Collaboration ............... Formal objects, not free text
+16. Portfolio-Level Risk ..................... Correlation, overlaps, capital, drawdown
+
+================================================================================
+                              STATE MACHINES
+================================================================================
+
+SM-01 AUTHORIZATION:
+  PENDING_AUTH → AUTHORIZED → EXECUTING → EXECUTED
+  ↑ 6 states total (includes REVOKED, EXPIRED)
+  Key: Fail-closed, M-of-N approval, timeout enforced
+
+SM-02 DECISION LEASE:
+  LEASE_CREATED → LEASE_ACTIVE → LEASE_EXECUTING → LEASE_FULFILLED
+  ↑ 9 states total (includes EXPIRED, REVOKED, FAILED)
+  Key: TTL-bounded, immutable params, auto-transitions
+
+SM-04 RISK GOVERNOR:
+  RISK_NORMAL → RISK_WARNING → RISK_CRITICAL → RISK_LOCKED → RISK_RECOVERY
+  ↑ 6 states (includes LIQUIDATION)
+  Key: Real-time monitoring, <1ms critical→locked, manual unlock required
+
+EX-02 OMS ORDER LIFECYCLE:
+  ORDER_CREATED → VALIDATED → SUBMITTED → PENDING → PARTIAL_FILL → FILLED
+  ↑ 11 states total (includes CANCELLED, REJECTED, FAILED, EXPIRED)
+  Key: Risk validation before submission, fill reconciliation
+
+================================================================================
+                              IMPLEMENTATION PHASES
+================================================================================
+
+PHASE 1: Foundation (15 days)
+├─ H0 gate (2d) + SM-01/02/04 (9d) + Executor (3d) + Audit (2d)
+└─ Delivers: State machines + core gates + executor single write port
+
+PHASE 2: Risk & Orchestration (12 days)
+├─ EX-01 Risk Control (3d) + EX-02 OMS (4d) + EX-06 Multi-Agent (3d)
+└─ Delivers: Risk enforcement + order management + agent coordination
+
+PHASE 3: Learning & Reconciliation (8 days)
+├─ EX-05 Learning Tiers (4d) + EX-04 Reconciliation (2d) + EX-07 Data (2d)
+└─ Delivers: Learning system + position matching + data access control
+
+PHASE 4: Governance Pipeline (5 days)
+├─ H1-H5 Gates (5d)
+└─ Delivers: Full governance pipeline + degradation modes
+
+TOTAL: 40 days to complete implementation
+
+================================================================================
+                            CRITICAL DEPENDENCY CHAIN
+================================================================================
+
+Trading Decision Flow (MUST execute in order):
+
+1. H0 Gate ◄─────────────── First check (freshness, health, risk, cooldown)
+   ↓
+2. SM-01 Authorization ◄─── Check if authorized (PENDING → AUTHORIZED)
+   ↓
+3. SM-02 Decision Lease ◄─── Generate lease (CREATED → ACTIVE → EXECUTING)
+   ↓
+4. EX-01 Risk Validation ◄─ Pre-trade risk checks (blocking)
+   ↓
+5. SM-04 Risk Governor ◄──── Risk state validation (NORMAL/WARNING/CRITICAL/LOCKED)
+   ↓
+6. EX-02 OMS ◄────────────── Order submission (validated, submitted, pending, filled)
+   ↓
+7. EX-04 Reconciliation ◄─── Position matching (local vs exchange)
+   ↓
+8. EX-05 Learning ◄────────── Async feedback (non-blocking)
+
+MANDATORY RULES:
+✓ No order without lease (SM-02)
+✓ No lease without auth (SM-01)
+✓ All orders require risk check (EX-01)
+✓ Risk can veto any order (SM-04 LOCKED blocks all)
+✓ Learning never blocks (EX-05 async)
+
+================================================================================
+                             TESTING STRATEGY
+================================================================================
+
+UNIT TESTS:
+- State machine transitions (all paths)
+- Gate functionality (H0 checks, latency)
+- Risk calculations (boundary conditions)
+
+INTEGRATION TESTS:
+- Full H0→SM-01→SM-02→EX-01→SM-04→EX-02→EX-04 flow
+- Lease lifecycle (creation → fulfillment → expiration)
+- Risk lock → recovery flow
+- Degradation mode transitions
+
+SYSTEM TESTS:
+- Deterministic replay (10+ trades)
+- Backtesting framework (1-year historical)
+- Reconciliation (paper vs exchange)
+- Audit trail reconstruction (all 6 elements)
+
+CHAOS TESTS:
+- Agent crash scenarios
+- Network partition (5s timeout)
+- Data staleness (>1000ms)
+- Margin breach scenarios
+- Consecutive loss pause
+
+================================================================================
+                           SUCCESS CRITERIA (10)
+================================================================================
+
+1. ✓ Can be clearly defined
+2. ✓ Boundary clear, responsibility clear
+3. ✓ Won't randomly write/grant/modify
+4. ✓ Protects account in anomalies
+5. ✓ Has complete audit chain
+6. ✓ Runs stably long-term
+7. ✓ Proves effectiveness on net PnL basis
+8. ✓ Progressively earns autonomy in verified scenarios
+9. ✓ Zero external AI cost achieves basic positive return
+10. ✓ Continuously self-evolves from trading behavior
+
+================================================================================
+                             KEY METRICS
+================================================================================
+
+FINANCIAL:
+- win_rate (%)
+- Sharpe_ratio
+- max_drawdown (%)
+- cost_edge_ratio (threshold: 0.8)
+- net_realized_pnl
+
+OPERATIONAL:
+- H0_gate_latency (target <1ms)
+- risk_check_latency (target <10ms)
+- order_submission_latency (target <20ms)
+- fill_matching_latency (target <1s)
+- reconciliation_success_rate (target >99%)
+
+GOVERNANCE:
+- audit_trail_completeness (100%)
+- state_transition_coverage (100%)
+- risk_violation_incidents (tracked)
+- circuit_breaker_triggers (tracked)
+- model_drift_detections (tracked)
+
+================================================================================
+                            NEXT STEPS
+================================================================================
+
+FOR IMPLEMENTATION TEAMS:
+1. Read: COMPREHENSIVE_SPEC_REQUIREMENTS.md (overview)
+2. Extract: Requirements from JSON file by your module
+3. Create: Test cases from "specific_testable_requirement" field
+4. Reference: Requirement ID (e.g., DOC01-R01) in every commit
+5. Implement: Phase 1 critical path items first
+
+FOR CODE REVIEW:
+1. Map: Each requirement to code module
+2. Verify: Specific_testable_requirement is met
+3. Check: Audit trail has all 6 elements
+4. Validate: State machine transitions match spec
+5. Confirm: SLA targets (latency, memory) met
+
+FOR QA/TESTING:
+1. Plan: Test cases from testing_requirements section
+2. Track: Metrics (financial, operational, governance)
+3. Verify: Audit log completeness
+4. Test: Circuit breaker triggers and recovery
+5. Validate: Deterministic replay capability
+
+FOR GOVERNANCE/PM:
+1. Present: 16 root principles to stakeholders
+2. Show: Critical path (7 items, 15 days)
+3. Track: Phase completion (4 phases, 40 days total)
+4. Monitor: Success criteria (10 measures)
+5. Report: Metrics (financial, operational, governance)
+
+================================================================================
+                          QUICK REFERENCE LINKS
+================================================================================
+
+Main Files:
+├─ COMPREHENSIVE_SPEC_REQUIREMENTS.json (78 KB) ◄─ Machine-readable
+├─ COMPREHENSIVE_SPEC_REQUIREMENTS.md   (23 KB) ◄─ Human-readable
+├─ SPECIFICATION_EXTRACTION_SUMMARY.md  (15 KB) ◄─ Navigation guide
+├─ EXTRACTION_VALIDATION.txt            (12 KB) ◄─ Completeness report
+└─ QUICK_START_REFERENCE.txt            (THIS) ◄─ 4-minute overview
+
+All in: /sessions/determined-epic-cori/srv/docs/governance_dev/
+
+================================================================================
+                              FINAL CHECKLIST
+================================================================================
+
+✓ 287 specific, testable requirements extracted
+✓ 13+ governance documents analyzed
+✓ 16 root principles documented
+✓ 6 agent roles defined
+✓ 4 state machines specified
+✓ 7 critical path items identified
+✓ 40-day implementation roadmap created
+✓ Cross-document dependencies mapped
+✓ Testing strategy comprehensive
+✓ Success criteria defined (10 measures)
+✓ Metrics framework established
+✓ Documentation complete (4 files)
+
+READY FOR: Implementation planning & code review
+
+================================================================================
+
+Generated: 2026-03-31
+Role: Functional Architect (FA)
+Status: READY FOR DEVELOPMENT
+
+================================================================================

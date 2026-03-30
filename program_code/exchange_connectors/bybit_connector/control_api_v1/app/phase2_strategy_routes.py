@@ -472,9 +472,9 @@ try:
         # Subscribe to ROUND_TRIP_COMPLETE on MessageBus
         if MESSAGE_BUS is not None:
             from .multi_agent_framework import MessageType as _MT, AgentRole as _AR
-            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.ROUND_TRIP_COMPLETE, ANALYST_AGENT.on_message)
-            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.EXECUTION_REPORT, ANALYST_AGENT.on_message)
-            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.SYSTEM_DIRECTIVE, ANALYST_AGENT.on_message)
+            # FIX: subscribe() 只接受 2 參數 (role, callback)，MessageType 過濾由 Agent.on_message() 內部處理
+            # FIX: subscribe() takes 2 args (role, callback); MessageType filtering is handled inside Agent.on_message()
+            MESSAGE_BUS.subscribe(_AR.ANALYST, ANALYST_AGENT.on_message)
             logger.info("AnalystAgent subscribed to MessageBus / 分析师代理已订阅消息总线")
     except (ImportError, Exception) as e:
         ANALYST_AGENT = None
