@@ -709,6 +709,7 @@ class PaperTradingEngine:
         self._last_reconciliation_ms = 0  # T4.01: Track last periodic reconciliation time
         self._demo_connector = None  # T7.01: Optional BybitDemoConnector for demo API integration
         self._demo_sync = None  # T7.04: Optional BybitDemoSync for demo state snapshots
+        self._learning_tier_gate = None  # T9A.01: Optional LearningTierGate for analyst agent evolution
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -749,6 +750,10 @@ class PaperTradingEngine:
     def set_demo_sync(self, sync: Any) -> None:
         """Inject BybitDemoSync for demo state snapshots / 注入 Demo 同步器"""
         self._demo_sync = sync
+
+    def set_learning_tier_gate(self, gate: Any) -> None:
+        """Inject LearningTierGate for analyst agent evolution / 注入学习等级门控"""
+        self._learning_tier_gate = gate
 
     # ── Session Management / Session 管理 ──
 

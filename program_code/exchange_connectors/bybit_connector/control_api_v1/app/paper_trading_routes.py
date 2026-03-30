@@ -355,6 +355,33 @@ if TELEGRAM_ALERTER.is_enabled:
 else:
     logger.info("TelegramAlerter disabled (no token/chat_id configured)")
 
+# T9A.01: Initialize and inject LearningTierGate for analyst agent evolution
+from .learning_tier_gate import LearningTierGate  # noqa: E402
+try:
+    def _make_learning_tier_audit_callback():
+        """Create audit callback for LearningTierGate promotion events"""
+        def callback(promotion_record: dict):
+            try:
+                # Emit learning_tier_promotion audit via AUDIT_PIPELINE if available
+                if AUDIT_PIPELINE:
+                    AUDIT_PIPELINE.record_event({
+                        "event_type": "learning_tier_promotion",
+                        "data": promotion_record,
+                        "timestamp_ms": int(promotion_record.get("effective_at_ms", 0)),
+                    })
+                logger.info(f"Learning tier promotion recorded: {promotion_record.get('promotion_id')}")
+            except Exception as e:
+                logger.error(f"Error in learning tier audit callback: {e}")
+        return callback
+
+    LEARNING_TIER_GATE = LearningTierGate(audit_callback=_make_learning_tier_audit_callback())
+    ENGINE.set_learning_tier_gate(LEARNING_TIER_GATE)
+    GOV_HUB.set_learning_tier_gate(LEARNING_TIER_GATE)
+    logger.info("LearningTierGate injected into ENGINE and GovernanceHub")
+except Exception as e:
+    logger.error(f"Failed to initialize LearningTierGate: {e}")
+    LEARNING_TIER_GATE = None
+
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
 # This creates a singleton reference for the governance API routes
 # 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入

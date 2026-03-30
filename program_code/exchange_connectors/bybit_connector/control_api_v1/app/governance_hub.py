@@ -198,6 +198,9 @@ class GovernanceHub:
         # T8.06: TelegramAlerter for governance event notifications
         self._alerter: Optional[Any] = None
 
+        # T9A.01: LearningTierGate for analyst agent evolution
+        self._learning_tier_gate: Optional[Any] = None
+
     def set_audit_pipeline(self, pipeline: Any) -> None:
         """
         Set the audit pipeline for SM callbacks.
@@ -239,6 +242,12 @@ class GovernanceHub:
         with self._lock:
             self._oms_sm = oms_sm
             logger.info("OMS State Machine set on GovernanceHub")
+
+    def set_learning_tier_gate(self, gate: Any) -> None:
+        """T9A.01: Inject LearningTierGate for analyst agent evolution / 注入学习等级门控"""
+        with self._lock:
+            self._learning_tier_gate = gate
+            logger.info("LearningTierGate set on GovernanceHub")
 
     def is_enabled(self) -> bool:
         """
