@@ -4233,6 +4233,190 @@ def get_source_context(actor=Depends(current_actor)) -> ResponseEnvelope[dict[st
     return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=source.model_dump(mode="json"))
 
 
+# ── Scheduled Restart ────────────────────────────────────────────────────────
+# 计划重启：在指定延迟后重启 uvicorn 进程，可选强制清仓（只平盈利仓位）
+# Scheduled restart: restart uvicorn after a specified delay, optionally
+# closing only profitable paper positions before the restart.
+
+class ScheduledRestartRequest(BaseModel):
+    """Request body for scheduled restart / 计划重启请求体"""
+    delay_minutes: int = Field(..., description="Restart delay in minutes (5/10/15/30/60)")
+    force_liquidate: bool = Field(False, description="Close profitable paper positions before restart")
+
+    def validate_delay(self) -> None:
+        if self.delay_minutes not in (5, 10, 15, 30, 60):
+            raise ValueError("delay_minutes must be one of: 5, 10, 15, 30, 60")
+
+
+def _close_profitable_paper_positions() -> dict[str, Any]:
+    """
+    Close paper positions where net PnL (after fees) > 0.
+    关闭净盈利（扣除手续费后）的纸盘仓位。
+
+    Returns dict with closed/skipped lists.
+    """
+    TAKER_FEE_RATE = 0.00055  # Bybit taker fee / Bybit taker 手续费
+
+    try:
+        from .phase2_strategy_routes import PAPER_ENGINE, PIPELINE_BRIDGE
+    except ImportError:
+        return {"closed": [], "skipped": [], "error": "paper engine not available"}
+
+    if PAPER_ENGINE is None:
+        return {"closed": [], "skipped": [], "error": "paper engine not initialized"}
+
+    try:
+        state = PAPER_ENGINE.get_state()
+    except Exception as exc:
+        return {"closed": [], "skipped": [], "error": str(exc)}
+
+    positions = state.get("positions", {})
+    latest_prices: dict[str, float] = {}
+    if PIPELINE_BRIDGE is not None:
+        try:
+            latest_prices = dict(PIPELINE_BRIDGE._latest_prices)
+        except Exception:
+            pass
+
+    closed: list[dict] = []
+    skipped: list[dict] = []
+
+    for symbol, pos in positions.items():
+        qty = pos.get("qty", 0)
+        side = pos.get("side", "long")
+        entry_price = pos.get("entry_price", 0)
+        current_price = latest_prices.get(symbol, 0)
+
+        if qty <= 0 or entry_price <= 0 or current_price <= 0:
+            skipped.append({"symbol": symbol, "reason": "missing_price_data"})
+            continue
+
+        notional = current_price * qty
+        fee_cost = notional * TAKER_FEE_RATE * 2  # open + close taker fees
+        raw_pnl = (current_price - entry_price) * qty if side == "long" else (entry_price - current_price) * qty
+        net_pnl = raw_pnl - fee_cost
+
+        if net_pnl <= 0:
+            skipped.append({"symbol": symbol, "reason": f"would_lose_usd_{-net_pnl:.4f}", "net_pnl": round(net_pnl, 4)})
+            continue
+
+        # Close position / 平仓
+        close_side = "Sell" if side == "long" else "Buy"
+        try:
+            PAPER_ENGINE.submit_order(
+                symbol=symbol,
+                side=close_side,
+                order_type="market",
+                qty=qty,
+                market_prices=latest_prices,
+            )
+            closed.append({"symbol": symbol, "side": side, "qty": qty,
+                           "net_pnl": round(net_pnl, 4), "close_price": current_price})
+        except Exception as exc:
+            skipped.append({"symbol": symbol, "reason": f"submit_error: {exc}"})
+
+    return {"closed": closed, "skipped": skipped, "error": None}
+
+
+def _run_restart_in_background(delay_seconds: int) -> None:
+    """
+    Background thread: sleep then restart the uvicorn process.
+    后台线程：等待后重启 uvicorn 进程。
+
+    Writes a temp shell script and executes it in a new session so the
+    parent process can die without killing the restart script.
+    写入临时 shell 脚本并在新会话中执行，使父进程可以退出而不影响重启脚本。
+    """
+    import signal
+    import subprocess
+    import sys
+
+    pid = os.getpid()
+    python = sys.executable
+    # Reconstruct uvicorn launch command / 重建 uvicorn 启动命令
+    work_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script_content = f"""#!/bin/bash
+# OpenClaw scheduled restart script / 计划重启脚本
+sleep {delay_seconds}
+kill {pid} 2>/dev/null
+sleep 3
+cd {work_dir}
+nohup {python} -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >> /tmp/openclaw_restart.log 2>&1 &
+echo "Restarted PID=$!" >> /tmp/openclaw_restart.log
+"""
+    try:
+        fd, script_path = tempfile.mkstemp(suffix=".sh", prefix="openclaw_restart_")
+        with os.fdopen(fd, "w") as f:
+            f.write(script_content)
+        os.chmod(script_path, 0o700)
+        subprocess.Popen(
+            ["bash", script_path],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("Scheduled restart script launched: delay=%ds pid=%d", delay_seconds, pid)
+    except Exception as exc:
+        logger.error("Failed to launch restart script: %s", exc)
+
+
+@app.post(f"{settings.api_prefix}/system/scheduled-restart")
+def post_scheduled_restart(
+    request: ScheduledRestartRequest,
+    actor=Depends(current_actor),
+) -> dict[str, Any]:
+    """
+    Schedule a server restart after the specified delay.
+    在指定延迟后计划服务器重启。
+
+    If force_liquidate=True, closes paper positions where net PnL > 0 immediately.
+    Positions that would result in a net loss are left open.
+    如果 force_liquidate=True，立即关闭净盈利的纸盘仓位。
+    会造成净亏损的仓位保持开放。
+
+    Returns scheduled restart time and liquidation results.
+    返回计划重启时间和清仓结果。
+    """
+    try:
+        request.validate_delay()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    liquidation_result: dict[str, Any] = {"closed": [], "skipped": [], "error": None}
+
+    if request.force_liquidate:
+        liquidation_result = _close_profitable_paper_positions()
+
+    delay_seconds = request.delay_minutes * 60
+    restart_at_ts_ms = int(time.time() * 1000) + (delay_seconds * 1000)
+
+    # Launch background restart / 启动后台重启
+    t = threading.Thread(
+        target=_run_restart_in_background,
+        args=(delay_seconds,),
+        daemon=True,
+        name=f"scheduled-restart-{request.delay_minutes}m",
+    )
+    t.start()
+
+    logger.info(
+        "Scheduled restart in %d min (force_liquidate=%s) by %s",
+        request.delay_minutes, request.force_liquidate,
+        actor.get("operator_id", "unknown") if isinstance(actor, dict) else "unknown",
+    )
+
+    return {
+        "action_result": "scheduled",
+        "delay_minutes": request.delay_minutes,
+        "restart_at_ts_ms": restart_at_ts_ms,
+        "force_liquidate": request.force_liquidate,
+        "positions_closed": liquidation_result["closed"],
+        "positions_skipped": liquidation_result["skipped"],
+        "liquidation_error": liquidation_result.get("error"),
+        "message": f"Server will restart in {request.delay_minutes} minute(s).",
+    }
+
+
 @app.get(f"{settings.api_prefix}/learning/overview", response_model=ResponseEnvelope[LearningOverviewData])
 def get_learning_overview(actor=Depends(current_actor)) -> ResponseEnvelope[LearningOverviewData]:
     snapshot, _ = get_latest_snapshot()
