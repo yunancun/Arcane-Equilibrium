@@ -91,6 +91,8 @@ class ScannerRateLimiter:
         self._total_scans: int = 0
         self._total_errors: int = 0
         self._scan_intervals: list[float] = []
+        # FIX-07: Track rejected scans for accurate throttle counting
+        self._rejected_scans: int = 0
 
     def can_scan(self) -> tuple[bool, str]:
         """
@@ -136,6 +138,8 @@ class ScannerRateLimiter:
         with self._lock:
             can, reason = self.can_scan()
             if not can:
+                # FIX-07: Increment rejected scans counter
+                self._rejected_scans += 1
                 self._audit_event("scan_start_rejected", {"reason": reason})
                 return False
 
@@ -310,12 +314,12 @@ class ScannerRateLimiter:
             if next_scan_time_ms is not None:
                 time_until_next = max(0.0, (next_scan_time_ms - now_ms) / 1000.0)
 
-            # Count throttled scans (rejections due to rate limits)
-            throttled_count = self._total_scans + self._total_errors  # Approximation based on audit events
+            # FIX-07: Use actual rejected scans counter for throttled_count
+            throttled_count = self._rejected_scans
 
             return {
                 "total_scans": self._total_scans,
-                "throttled_count": throttled_count if not self._total_scans else 0,
+                "throttled_count": throttled_count,
                 "error_count": self._total_errors,
                 "last_scan_ts": self._last_scan_complete_ms,
                 "current_state": current_state,
