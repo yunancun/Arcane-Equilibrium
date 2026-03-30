@@ -126,21 +126,28 @@ function _ocSyncCurrencyBadges() {
 }
 
 async function ocInitFx() {
-  // Fetch live USD→EUR rate from open.er-api.com (free, no key required).
-  // Falls back to hardcoded EUR=0.92 if API is unavailable.
-  // 从 open.er-api.com 获取实时 USD→EUR 汇率（免费，无需 API Key）。
-  // 若 API 不可用则回退到内置汇率 EUR=0.92。
+  // Fetch real-time USDT/USD and USDT/EUR rates from CoinGecko (free, no key).
+  // CoinGecko returns prices *in* the target currency, so tether.usd = how many
+  // USD per 1 USDT, and tether.eur = how many EUR per 1 USDT — exactly what we need.
+  // Falls back to stale values if the API is unavailable.
+  //
+  // 从 CoinGecko 获取实时 USDT/USD 和 USDT/EUR 汇率（免费，无需 API Key）。
+  // USDT 并非严格等于 1 USD（通常在 0.997–1.003 之间浮动）。
+  // API 不可用时静默回退到上次成功的值或内置回退值。
   try {
     const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 5000);
-    const r = await fetch('https://open.er-api.com/v6/latest/USD', { signal: ctrl.signal });
+    const tid = setTimeout(() => ctrl.abort(), 6000);
+    const r = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd,eur',
+      { signal: ctrl.signal }
+    );
     clearTimeout(tid);
     if (r.ok) {
       const d = await r.json();
-      if (d.rates && d.rates.EUR) {
-        // 1 USDT ≈ 1 USD; so 1 USDT = d.rates.EUR EUR
-        // 1 USDT ≈ 1 USD，因此 1 USDT = d.rates.EUR EUR
-        _ocFxRates.EUR = Number(d.rates.EUR);
+      const t = d && d.tether;
+      if (t) {
+        if (t.usd) _ocFxRates.USD = Number(t.usd);  // real USDT→USD rate
+        if (t.eur) _ocFxRates.EUR = Number(t.eur);  // real USDT→EUR rate
       }
     }
   } catch (_) { /* silent fallback / 静默回退 */ }
