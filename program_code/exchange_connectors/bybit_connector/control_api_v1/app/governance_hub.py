@@ -608,6 +608,75 @@ class GovernanceHub:
             logger.error(f"Error in check_risk_and_act: {e}")
             return None
 
+    def trigger_risk_upgrade(self, event_record: dict[str, Any]) -> None:
+        """
+        Batch 8: Called by GuardianAgent when a high/critical event is detected.
+        Escalates the risk governor SM to the next level (SM-04 联动).
+        Batch 8：当 GuardianAgent 检测到高/严重事件时调用。
+        将风控状态机升级到下一级（SM-04 联动）。
+
+        Args:
+            event_record: Dict with event_type, risk_level, severity, affected_symbols etc.
+        """
+        if not self._enabled or not self._initialized:
+            logger.warning("GovernanceHub disabled — cannot trigger risk upgrade / 治理禁用 — 无法触发风控升级")
+            return
+
+        risk_level = event_record.get("risk_level", "medium")
+        event_type = event_record.get("event_type", "unknown")
+
+        try:
+            with self._lock:
+                if self._risk_governor_sm is None:
+                    logger.warning("RiskGovernorSM is None — cannot escalate / 风控状态机为 None — 无法升级")
+                    return
+
+                from .risk_governor_state_machine import RiskLevel
+                current_state = self._risk_governor_sm.get_state()
+                current_level = int(current_state.level)
+
+                # Determine target level based on event risk / 根据事件风险确定目标级别
+                # critical → CIRCUIT_BREAKER (4), high → REDUCED (2) or CAUTIOUS (1)
+                if risk_level == "critical":
+                    target = RiskLevel.CIRCUIT_BREAKER
+                elif risk_level == "high":
+                    target = RiskLevel.REDUCED if current_level < 2 else RiskLevel(min(current_level + 1, 4))
+                else:
+                    # medium or low — log only, no escalation
+                    logger.info("Guardian event %s risk=%s — no escalation needed / 无需升级", event_type, risk_level)
+                    return
+
+                if int(target) <= current_level:
+                    logger.info("Risk already at level %d, target %d — no action / 风控已在目标级别", current_level, int(target))
+                    return
+
+                # Escalate via risk governor SM / 通过风控状态机升级
+                self._risk_governor_sm.escalate_to(
+                    target,
+                    reason=f"Guardian event: {event_type} (risk={risk_level})",
+                    initiator="GuardianAgent",
+                )
+                logger.info(
+                    "SM-04 risk escalated %d → %d by Guardian event %s / SM-04 风控由 Guardian 事件升级",
+                    current_level, int(target), event_type,
+                )
+
+                # Record governance event / 记录治理事件
+                try:
+                    from .governance_events import risk_event
+                    ev = risk_event(
+                        level_from=current_level,
+                        level_to=int(target),
+                        initiator="GuardianAgent",
+                        reason=f"Event: {event_type}, risk_level: {risk_level}",
+                    )
+                    self._append_governance_event(ev.to_dict())
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error("trigger_risk_upgrade error: %s / 触发风控升级错误: %s", e, e)
+
     def acquire_lease(self, intent_id: str, scope: str, ttl_seconds: float = 30.0) -> Optional[str]:
         """
         Acquire a decision lease for a specific intent.

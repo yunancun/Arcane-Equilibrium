@@ -195,8 +195,10 @@ class TestEdgeFilterIntegration:
         assert pipeline_bridge._edge_filter_stats["passed"] == 1
 
     def test_edge_filter_rejects_no_edge(self, pipeline_bridge, mock_ollama_client, mock_orchestrator):
-        """Test: judge_edge returns has_edge=false, intent is rejected.
-        测试：judge_edge 返回 has_edge=false，意图被拒绝。
+        """Test: judge_edge returns has_edge=false, advisory rejection logged.
+        Batch 8: Edge filter demoted to advisory — no longer blocks submission.
+        测试：judge_edge 返回 has_edge=false，建议性拒绝被记录。
+        Batch 8: 边缘过滤器降级为建议性 — 不再阻止提交。
         """
         pipeline_bridge.set_ollama_client(mock_ollama_client)
         mock_ollama_client.judge_edge.return_value = OllamaResponse(
@@ -212,10 +214,12 @@ class TestEdgeFilterIntegration:
         pipeline_bridge.activate()
         pipeline_bridge.on_tick({"symbol": "BTCUSDT", "last_price": 45000.0})
 
-        # Verify intent was rejected by edge filter
+        # Edge filter still evaluates and tracks stats / 边缘过滤器仍然评估并记录统计
         assert mock_ollama_client.judge_edge.called
         assert pipeline_bridge._edge_filter_stats["rejected"] == 1
-        assert pipeline_bridge._stats["intents_rejected"] == 1
+        # Batch 8: advisory-only — intent NOT blocked, goes to submission
+        # Batch 8: 仅建议性 — 意图未被阻止，继续提交
+        assert pipeline_bridge._stats["intents_rejected"] == 0
 
     def test_edge_filter_fail_open_on_ollama_unavailable(
         self, pipeline_bridge, mock_ollama_client, mock_orchestrator
@@ -384,8 +388,10 @@ class TestEdgeFilterIntegration:
         assert pipeline_bridge._stats["intents_submitted"] > 0
 
     def test_edge_filter_freetext_rejection(self, pipeline_bridge, mock_ollama_client, mock_orchestrator):
-        """Test: non-JSON text response with 'no/false' is parsed as has_edge=false.
-        测试：非 JSON 文本响应包含 'no/false' 被解析为 has_edge=false。
+        """Test: non-JSON text response with 'no/false' parsed as has_edge=false, advisory only.
+        Batch 8: Edge filter demoted to advisory — no longer blocks submission.
+        测试：非 JSON 文本响应包含 'no/false' 被解析为 has_edge=false，仅建议性。
+        Batch 8: 边缘过滤器降级为建议性 — 不再阻止提交。
         """
         pipeline_bridge.set_ollama_client(mock_ollama_client)
         mock_ollama_client.judge_edge.return_value = OllamaResponse(
@@ -401,9 +407,10 @@ class TestEdgeFilterIntegration:
         pipeline_bridge.activate()
         pipeline_bridge.on_tick({"symbol": "BTCUSDT", "last_price": 45000.0})
 
-        # Verify intent was rejected (heuristic parsing rejected it)
+        # Edge filter still tracks advisory rejection / 边缘过滤器仍记录建议性拒绝
         assert pipeline_bridge._edge_filter_stats["rejected"] == 1
-        assert pipeline_bridge._stats["intents_rejected"] == 1
+        # Batch 8: advisory-only — intent NOT blocked / 仅建议性 — 意图未被阻止
+        assert pipeline_bridge._stats["intents_rejected"] == 0
 
     def test_edge_filter_context_includes_symbol(self, pipeline_bridge, mock_ollama_client, mock_orchestrator):
         """Test: context passed to judge_edge includes symbol and side.

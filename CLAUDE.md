@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-30（TW 工程審核 — Phase 3 GovernanceHub 集成 + 缺口校准）
+# 最后更新：2026-03-30（Batch 8 Guardian 接线 + Batch 9 Perception/Analyst 接线）
 
 ---
 
@@ -48,13 +48,13 @@
 ## 三、当前系统状态（2026-03-30 Round 2 冷酷功能审核后）
 
 ```
-测试：1,930+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 · 2 跳过）
+测试：2,124+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 + 30 Guardian + 25 Perception/Analyst · 2 跳过）
 路由：126+ 条（含 8 治理 + 5 Scout 端点）
 治理：GovernanceHub 4 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04），fail-closed 已验证
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
-5-Agent 体系：仅 Scout 运行，其余 4 Agent + Conductor 未启动
+5-Agent 体系：Scout + Strategist + Guardian + Analyst 运行，Executor 未启动
 
 ★ Round 2 冷酷功能审核结论（2026-03-30 PM 4 路并行代码级审计）：
 
@@ -269,6 +269,63 @@ Round 2 Batch 6（2026-03-30 — ★ 0% 胜率四根因全修复）：
     #2 taker 手续费过高 ✅ → limit order (maker fee)
     #3 squeeze 强制平仓 ✅ → 乘数 1.0x（允许 48h）
     #4 无 edge 过滤 ✅ → Qwen pre-trade edge filter（Batch 5-B）
+
+Round 2 Batch 7（2026-03-30 — Strategist + Guardian + Analyst + Executor Agent 预写）：
+  预写 4 Agent 完整实现，为 Batch 8-11 接线做准备
+  详情见 Batch 7 commit 记录
+
+Round 2 Batch 8（2026-03-30 — Guardian Agent 接线 + 动态风控）：
+  B8-T1: GuardianAgent 接入 MessageBus
+    - phase2_strategy_routes.py: 实例化 GuardianAgent + Conductor 注册 + MESSAGE_BUS.subscribe(GUARDIAN)
+    - Guardian 订阅 TRADE_INTENT + EVENT_ALERT 消息类型
+  B8-T2: PipelineBridge 接收 Guardian 裁决
+    - pipeline_bridge.py: set_guardian_agent() + _guardian_stats 追踪
+    - _process_pending_intents(): 构建 TradeIntent → guardian.review_intent() → RiskVerdict
+    - APPROVED → 放行，REJECTED → 阻止（continue），MODIFIED → 调整 qty/leverage 后放行
+    - fail-closed: Guardian 异常/不可用 → 默认拒绝（DOC-01 §5.6）
+  B8-T3: Edge Filter 降级为建议性
+    - Edge filter 不再阻止提交（无 continue），仅记录 advisory 日志
+    - Guardian 成为唯一的 primary gate（fail-closed vs edge filter 的 fail-open）
+    - test_edge_filter_integration.py: 2 个旧测试更新为 advisory 语义
+  B8-T4: SM-04 联动 — Guardian 检测异常事件 → GovernanceHub.trigger_risk_upgrade()
+    - governance_hub.py: 新增 trigger_risk_upgrade()（~70 行）
+    - critical → CIRCUIT_BREAKER，high → REDUCED 或 current+1，medium/low → 不升级
+    - Guardian._handle_event_alert() → governance_hub.trigger_risk_upgrade() 完成级联
+  B8-T5: test_batch8_guardian_integration.py（30 测试 · 9 测试类 · 912 行）
+    - MessageBus 集成 / PipelineBridge 集成 / fail-closed / SM-04 联动 / GovernanceHub 升级
+    - Guardian 作为 primary gate / 方向冲突检测 / 杠杆上限 / 关联/Sharpe/回撤检查
+
+Round 2 Batch 9（2026-03-30 — Perception Plane 激活 + Analyst 接线）：
+  B9-T1: Perception 注册 kline 数据为 FACT
+    - pipeline_bridge.py: on_tick() 新增 FACT 注册（DataSourceType.EXCHANGE_WS, CognitiveLevel.FACT）
+  B9-T2: Perception 注册 Scout 情报/事件
+    - scout_routes.py: post_market_signal() + post_event_alert() 新增 INFERENCE 注册
+    - data_quality=="hypothesis" 时自动标记为 CognitiveLevel.HYPOTHESIS
+  B9-T3: Perception 注册交易结果为 INFERENCE
+    - pipeline_bridge.py: _emit_round_trip() 新增 INFERENCE 注册（交易结果反馈）
+  B9-T4: AnalystAgent 接入 MessageBus
+    - phase2_strategy_routes.py: 实例化 AnalystAgent + Conductor 注册 + MESSAGE_BUS.subscribe(ANALYST)
+    - Analyst 订阅 ROUND_TRIP_COMPLETE 消息类型
+  B9-T5: PipelineBridge 发送 ROUND_TRIP_COMPLETE
+    - pipeline_bridge.py: _emit_round_trip() 新增 MessageBus 发射（sender=EXECUTOR → receiver=ANALYST）
+  B9-T6: LearningTierGate 由 Analyst 更新
+    - AnalystAgent.on_message() 处理 ROUND_TRIP_COMPLETE → L1 统计分析 → update_metrics(observation_count, win_rate)
+    - L1→L2 自动晋升条件：observations ≥ 200 + 满足 win_rate 阈值
+  B9-T7: test_batch9_perception_analyst_integration.py（25 测试 · 11 测试类）
+    - 数据注册（FACT/INFERENCE/HYPOTHESIS）/ 漂移保护 / 新鲜度 / 决策资格
+    - Analyst round-trip 处理 / L1 分析 / Sharpe / LearningTierGate / L2 模式分析
+    - 策略排名 / MessageBus 流转 / 数据质量 / 端到端集成
+
+  Multi-Agent 状态更新：
+    Scout    → RUNNING（Batch 3 接入）
+    Strategist → RUNNING（Batch 7 接入）
+    Guardian → RUNNING（Batch 8 接入，primary gate，fail-closed）
+    Analyst  → RUNNING（Batch 9 接入，L1 统计 + L2 模式发现）
+    Executor → 未启动（Batch 11 计划）
+    Conductor → WIRED（管理 4 Agent 生命周期）
+
+  测试总计：2,124 passed, 11 failed（pre-existing pytest-asyncio 缺失）, 2 skipped
+  Batch 8+9 新增测试：55（30 + 25），全部通过
 
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过

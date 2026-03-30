@@ -58,6 +58,8 @@ scout_router = APIRouter(
 # Will be set by external initialization code (e.g., E1b-B)
 SCOUT_AGENT: Optional[ScoutAgent] = None
 MESSAGE_BUS: Optional[MessageBus] = None
+# Batch 9: Perception Plane for cognitive level marking / 感知平面用于认知级别标记
+PERCEPTION_PLANE: Optional[Any] = None
 
 
 def set_scout_agent(agent: ScoutAgent) -> None:
@@ -78,6 +80,16 @@ def set_message_bus(bus: MessageBus) -> None:
     global MESSAGE_BUS
     MESSAGE_BUS = bus
     logger.info("MessageBus injected into scout_routes")
+
+
+def set_perception_plane(plane: Any) -> None:
+    """
+    Batch 9: Inject PerceptionPlane for cognitive level marking on intel/events.
+    Batch 9：注入感知平面用于对情报/事件进行认知级别标记。
+    """
+    global PERCEPTION_PLANE
+    PERCEPTION_PLANE = plane
+    logger.info("PerceptionPlane injected into scout_routes / 感知平面已注入 scout_routes")
 
 
 def _check_agent_ready() -> None:
@@ -360,6 +372,28 @@ async def post_market_signal(
             f"intel_id={intel_obj.intel_id}, symbols={req.symbols}"
         )
 
+        # Batch 9: Register intel as INFERENCE in Perception Plane (EX-07 §1)
+        # Batch 9：将情报注册为 INFERENCE 到感知平面（认知诚实）
+        if PERCEPTION_PLANE is not None:
+            try:
+                from .perception_data_plane import DataSourceType, CognitiveLevel
+                # Intel from external sources = INFERENCE by default
+                # 来自外部来源的情报 = 默认 INFERENCE
+                _cog_level = CognitiveLevel.INFERENCE
+                if req.data_quality == "hypothesis":
+                    _cog_level = CognitiveLevel.HYPOTHESIS
+                PERCEPTION_PLANE.register_data(
+                    source_type=DataSourceType.SEARCH_WEB,
+                    content={"intel_id": intel_obj.intel_id, "source": req.source, "content": req.content[:200]},
+                    source_detail=f"scout_intel:{req.source}",
+                    cognitive_level=_cog_level,
+                    symbols=req.symbols,
+                    marked_by="scout_routes.post_market_signal",
+                    marking_reason=f"External intelligence = {_cog_level.value} (EX-07 §1)",
+                )
+            except Exception as _pp_err:
+                logger.debug("Perception registration error (non-fatal): %s", _pp_err)
+
         return {
             "api_version": "v1",
             "action_result": "success",
@@ -444,6 +478,23 @@ async def post_event_alert(
             f"alert_id={alert_obj.alert_id}, severity={req.severity}, "
             f"symbols={req.affected_symbols}"
         )
+
+        # Batch 9: Register event alert as INFERENCE in Perception Plane (EX-07 §1)
+        # Batch 9：将事件警报注册为 INFERENCE 到感知平面（认知诚实）
+        if PERCEPTION_PLANE is not None:
+            try:
+                from .perception_data_plane import DataSourceType, CognitiveLevel
+                PERCEPTION_PLANE.register_data(
+                    source_type=DataSourceType.EVENT_CALENDAR,
+                    content={"alert_id": alert_obj.alert_id, "event_type": req.event_type, "severity": req.severity},
+                    source_detail=f"scout_event:{req.event_type}",
+                    cognitive_level=CognitiveLevel.INFERENCE,
+                    symbols=req.affected_symbols,
+                    marked_by="scout_routes.post_event_alert",
+                    marking_reason="External event alert = INFERENCE (EX-07 §1)",
+                )
+            except Exception as _pp_err:
+                logger.debug("Perception registration error (non-fatal): %s", _pp_err)
 
         return {
             "api_version": "v1",

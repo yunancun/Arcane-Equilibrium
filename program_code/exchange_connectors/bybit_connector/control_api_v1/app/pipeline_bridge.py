@@ -100,9 +100,13 @@ class PipelineBridge:
         self._message_bus = None  # T2.07: Set externally for inter-agent communication / 消息总线
         self._learning_tier_gate = None  # EX-05 §3: Set externally for learning tier auto-promotion / 学习等级自动晋升门控
         self._strategist_agent = None  # Batch 7: Set externally for StrategistAgent intents / 策略师代理
+        self._guardian_agent = None  # Batch 8: Set externally for GuardianAgent verdict gate / 守卫代理
+        self._analyst_agent = None  # Batch 9: Set externally for AnalystAgent trade analysis / 分析师代理
         self._ollama_client = None  # B5-B: Set externally for L1 pre-trade edge filter / L1 交易前 edge 过滤器
         self._edge_filter_enabled = True  # Can be toggled at runtime / 可在运行时切换
         self._edge_filter_stats = {"checked": 0, "passed": 0, "rejected": 0, "errors": 0}
+        # Batch 8: Guardian verdict stats / Guardian 裁决统计
+        self._guardian_stats = {"checked": 0, "approved": 0, "rejected": 0, "modified": 0, "errors": 0}
 
         self._stats = {
             "ticks_received": 0,
@@ -193,6 +197,24 @@ class PipelineBridge:
         """
         self._strategist_agent = agent
         logger.info("StrategistAgent set for intent collection / 已设置 StrategistAgent 用于 intent 收集")
+
+    def set_guardian_agent(self, agent: Any) -> None:
+        """
+        Batch 8: Set GuardianAgent as primary trade gate (fail-closed).
+        Guardian reviews every intent; unavailable → REJECTED.
+        Batch 8：设置 GuardianAgent 为主交易门控（fail-closed）。
+        Guardian 审查每个 intent；不可用 → 拒绝。
+        """
+        self._guardian_agent = agent
+        logger.info("GuardianAgent set as primary gate (fail-closed) / 已设置 GuardianAgent 为主门控")
+
+    def set_analyst_agent(self, agent: Any) -> None:
+        """
+        Batch 9: Set AnalystAgent for trade result analysis and LearningTierGate updates.
+        Batch 9：设置 AnalystAgent 用于交易结果分析和 LearningTierGate 指标更新。
+        """
+        self._analyst_agent = agent
+        logger.info("AnalystAgent set for trade analysis / 已设置 AnalystAgent 用于交易分析")
 
     def set_ollama_client(self, client: Any) -> None:
         """
@@ -291,6 +313,24 @@ class PipelineBridge:
             logger.exception("KlineManager tick error / K线管理器 tick 异常")
             with self._lock:
                 self._stats["errors"] += 1
+
+        # 1.5 Batch 9: Register kline/price data as FACT in Perception Plane (EX-07 §1)
+        # Batch 9：将 K线/价格数据注册为 FACT 到感知平面（认知诚实）
+        if self._perception_plane:
+            try:
+                from .perception_data_plane import DataSourceType, CognitiveLevel
+                self._perception_plane.register_data(
+                    source_type=DataSourceType.EXCHANGE_WS,
+                    content={"symbol": symbol, "price": price, "ts_ms": ts_ms},
+                    source_detail="bybit_ws_ticker",
+                    cognitive_level=CognitiveLevel.FACT,
+                    symbols=[symbol],
+                    marked_by="PipelineBridge.on_tick",
+                    marking_reason="Exchange WebSocket price data = FACT (EX-07 §1)",
+                    metadata={"data_type": "price"},
+                )
+            except Exception:
+                pass  # Perception registration is non-fatal / 感知注册失败不影响主流程
 
         # 2. Feed tick-driven strategies (Grid Trading, etc.)
         try:
@@ -442,17 +482,104 @@ class PipelineBridge:
                             self._stats["intents_rejected"] += 1
                         continue
 
-                # 5-B: L1 Pre-trade edge filter (Ollama/Qwen) / L1 交易前 edge 过滤
+                # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
+                # Batch 8：Guardian Agent 作为主门控（fail-closed）
+                # Guardian verdict overrides all other filters (EX-06 §9).
+                # If Guardian is unavailable → REJECTED (fail-closed, DOC-01 §5.6).
+                # Original edge filter demoted to auxiliary reference (logged only).
+                _submit_qty = intent.qty
+                _submit_leverage = None
+
+                if self._guardian_agent:
+                    try:
+                        from .multi_agent_framework import TradeIntent as _TI, RiskVerdictResult as _RVR
+
+                        # Sync active positions to Guardian for context
+                        # 同步活跃仓位到 Guardian 用于上下文判断
+                        if self._open_positions:
+                            self._guardian_agent.update_active_positions(self._open_positions)
+
+                        # Build TradeIntent from OrderIntent / 从 OrderIntent 构建 TradeIntent
+                        _direction = "long" if intent.side == "Buy" else "short"
+                        _strategy = (
+                            intent.metadata.get("strategy_name", "unknown")
+                            if intent.metadata else "unknown"
+                        )
+                        _ti = _TI(
+                            symbol=intent.symbol,
+                            strategy=_strategy,
+                            direction=_direction,
+                            size=intent.qty,
+                            params={"leverage": getattr(intent, "leverage", 1.0) or 1.0},
+                            confidence=getattr(intent, "confidence", 0.5) or 0.5,
+                        )
+
+                        verdict = self._guardian_agent.review_intent(_ti)
+
+                        with self._lock:
+                            self._guardian_stats["checked"] += 1
+
+                        if verdict.result == _RVR.REJECTED:
+                            with self._lock:
+                                self._guardian_stats["rejected"] += 1
+                                self._stats["intents_rejected"] += 1
+                            logger.info(
+                                "Intent REJECTED by Guardian: %s %s (reason: %s, risk=%.2f) / "
+                                "意图被 Guardian 拒绝",
+                                intent.symbol, intent.side, verdict.reason, verdict.risk_score,
+                            )
+                            continue
+
+                        elif verdict.result == _RVR.MODIFIED:
+                            with self._lock:
+                                self._guardian_stats["modified"] += 1
+                            # Apply modifications: adjust qty and/or leverage
+                            # 应用修改：调整数量和/或杠杆
+                            if "size" in verdict.modified_params:
+                                _submit_qty = float(verdict.modified_params["size"])
+                            if "leverage" in verdict.modified_params:
+                                _submit_leverage = float(verdict.modified_params["leverage"])
+                            logger.info(
+                                "Intent MODIFIED by Guardian: %s %s (qty %.6f→%.6f, reason: %s) / "
+                                "意图被 Guardian 修改",
+                                intent.symbol, intent.side, intent.qty, _submit_qty, verdict.reason,
+                            )
+                        else:
+                            # APPROVED
+                            with self._lock:
+                                self._guardian_stats["approved"] += 1
+                            logger.debug(
+                                "Intent APPROVED by Guardian: %s %s / 意图被 Guardian 批准",
+                                intent.symbol, intent.side,
+                            )
+
+                    except Exception as _guardian_err:
+                        # Guardian error → fail-closed: REJECT (DOC-01 §5.6)
+                        # Guardian 错误 → fail-closed：拒绝
+                        logger.error(
+                            "Guardian error — fail-closed REJECT: %s %s (%s) / "
+                            "Guardian 异常 — fail-closed 拒绝",
+                            intent.symbol, intent.side, _guardian_err,
+                        )
+                        with self._lock:
+                            self._guardian_stats["errors"] += 1
+                            self._stats["intents_rejected"] += 1
+                        continue
+
+                # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
+                # L1 交易前 edge 过滤（辅助参考 — 仅记录，不阻塞）
+                # Batch 8: Guardian is now the primary gate; edge filter demoted to advisory
+                # Batch 8：Guardian 已成为主门控；edge filter 降级为参考
                 if self._ollama_client and self._edge_filter_enabled:
                     edge_ok = self._check_edge_filter(intent, market_prices)
                     if not edge_ok:
                         logger.info(
-                            "Intent rejected by L1 edge filter: %s %s / 意图被 L1 edge 过滤器拒绝",
-                            intent.symbol, intent.side,
+                            "Edge filter advisory: would reject %s %s (Guardian already approved) / "
+                            "Edge 过滤器建议：会拒绝 %s %s（Guardian 已批准）",
+                            intent.symbol, intent.side, intent.symbol, intent.side,
                         )
-                        with self._lock:
-                            self._stats["intents_rejected"] += 1
-                        continue
+                        # Note: no longer blocking — Guardian verdict is authoritative
+                        # 注意：不再阻塞 — Guardian 裁决为权威
 
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）
@@ -468,7 +595,7 @@ class PipelineBridge:
                     symbol=intent.symbol,
                     side=intent.side,
                     order_type=intent.order_type,
-                    qty=intent.qty,
+                    qty=_submit_qty,  # Batch 8: may be modified by Guardian / 可能被 Guardian 修改
                     price=submit_price,
                     market_prices=market_prices,
                     category=category,
@@ -1035,6 +1162,50 @@ class PipelineBridge:
         # Record trade outcome and check for promotion eligibility
         # 记录交易结果并检查晋升资格
         self._try_learning_promotion(close_pnl)
+
+        # Batch 9: Emit ROUND_TRIP_COMPLETE to MessageBus for AnalystAgent
+        # Batch 9：通过消息总线发送 ROUND_TRIP_COMPLETE 给 AnalystAgent
+        if self._message_bus:
+            try:
+                from .multi_agent_framework import AgentMessage, AgentRole, MessageType
+                rt_msg = AgentMessage(
+                    sender=AgentRole.EXECUTOR,
+                    receiver=AgentRole.ANALYST,
+                    message_type=MessageType.ROUND_TRIP_COMPLETE,
+                    priority=5,
+                    payload={
+                        "trade_id": f"{strategy_name}:{symbol}:{int(time.time())}",
+                        "symbol": symbol,
+                        "strategy": strategy_name,
+                        "direction": "long" if pos_info and pos_info.get("side") == "Buy" else "short",
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "pnl": close_pnl,
+                        "hold_ms": hold_ms,
+                        "regime": regime,
+                        "timestamp_ms": int(time.time() * 1000),
+                    },
+                )
+                self._message_bus.send(rt_msg)
+            except Exception as _rt_err:
+                logger.debug("MessageBus ROUND_TRIP_COMPLETE send error (non-fatal): %s", _rt_err)
+
+        # Batch 9: Register trade result as INFERENCE in Perception Plane
+        # Batch 9：将交易结果注册为 INFERENCE 到感知平面
+        if self._perception_plane:
+            try:
+                from .perception_data_plane import DataSourceType, CognitiveLevel
+                self._perception_plane.register_data(
+                    source_type=DataSourceType.LEARNING_HISTORY,
+                    content={"symbol": symbol, "strategy": strategy_name, "pnl": close_pnl, "regime": regime},
+                    source_detail="round_trip_complete",
+                    cognitive_level=CognitiveLevel.INFERENCE,
+                    symbols=[symbol],
+                    marked_by="PipelineBridge._emit_round_trip",
+                    marking_reason="Trade result analysis = INFERENCE (learning data)",
+                )
+            except Exception:
+                pass  # Non-fatal / 非致命
 
         logger.info(
             "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",

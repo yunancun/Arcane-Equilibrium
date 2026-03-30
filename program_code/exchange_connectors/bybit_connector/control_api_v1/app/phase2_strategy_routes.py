@@ -172,6 +172,83 @@ logger.info(
     STRATEGIST_AGENT.config.shadow, STRATEGIST_AGENT.config.shadow,
 )
 
+# ── Batch 8: GuardianAgent — risk review for every TradeIntent (fail-closed) ──
+# Batch 8：GuardianAgent — 审查每个 TradeIntent 的风控守卫（失败时拒绝）
+from .guardian_agent import GuardianAgent, GuardianConfig
+
+# GovernanceHub reference for SM-04 risk escalation (may be None at this point, injected later)
+# GovernanceHub 引用用于 SM-04 风控升级（此时可能为 None，后续注入）
+_GOV_HUB_FOR_GUARDIAN: Any = None
+try:
+    from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_GUARDIAN
+except ImportError:
+    pass
+
+# RiskManager reference for drawdown checks / RiskManager 引用用于回撤检查
+_RISK_MGR_FOR_GUARDIAN: Any = None
+try:
+    from .paper_trading_routes import ENGINE as _PE_REF
+    if _PE_REF and hasattr(_PE_REF, '_risk_manager'):
+        _RISK_MGR_FOR_GUARDIAN = _PE_REF._risk_manager
+except (ImportError, AttributeError):
+    pass
+
+GUARDIAN_AGENT = GuardianAgent(
+    config=GuardianConfig(),
+    message_bus=MESSAGE_BUS,
+    risk_manager=_RISK_MGR_FOR_GUARDIAN,
+    ollama_client=OLLAMA_CLIENT,
+    governance_hub=_GOV_HUB_FOR_GUARDIAN,
+)
+GUARDIAN_AGENT.start()
+
+# Register Guardian with Conductor / 向 Conductor 注册 Guardian
+CONDUCTOR.register_agent(AgentRole.GUARDIAN, resource_mode="local")
+CONDUCTOR.set_agent_state(AgentRole.GUARDIAN, _AgentState.RUNNING)
+
+# Subscribe Guardian to MessageBus — receives TRADE_INTENT and EVENT_ALERT
+# 订阅 Guardian 到消息总线 — 接收 TRADE_INTENT 和 EVENT_ALERT
+MESSAGE_BUS.subscribe(AgentRole.GUARDIAN, GUARDIAN_AGENT.on_message)
+
+logger.info(
+    "Batch 8: GuardianAgent initialized (fail-closed, SM-04 linked=%s) / "
+    "Batch 8：GuardianAgent 已初始化 (fail-closed, SM-04 关联=%s)",
+    _GOV_HUB_FOR_GUARDIAN is not None, _GOV_HUB_FOR_GUARDIAN is not None,
+)
+
+# ── Batch 9: AnalystAgent — trade result analysis + LearningTierGate metrics ──
+# Batch 9：AnalystAgent — 交易结果分析 + 学习等级门控指标更新
+from .analyst_agent import AnalystAgent, AnalystConfig
+
+# LearningTierGate reference for metrics update / LearningTierGate 引用用于指标更新
+_LTG_FOR_ANALYST: Any = None
+try:
+    from .paper_trading_routes import LEARNING_TIER_GATE as _LTG_FOR_ANALYST
+except ImportError:
+    pass
+
+ANALYST_AGENT = AnalystAgent(
+    config=AnalystConfig(),
+    message_bus=MESSAGE_BUS,
+    ollama_client=OLLAMA_CLIENT,
+    learning_tier_gate=_LTG_FOR_ANALYST,
+)
+ANALYST_AGENT.start()
+
+# Register Analyst with Conductor / 向 Conductor 注册 Analyst
+CONDUCTOR.register_agent(AgentRole.ANALYST, resource_mode="local")
+CONDUCTOR.set_agent_state(AgentRole.ANALYST, _AgentState.RUNNING)
+
+# Subscribe Analyst to MessageBus — receives ROUND_TRIP_COMPLETE
+# 订阅 Analyst 到消息总线 — 接收 ROUND_TRIP_COMPLETE
+MESSAGE_BUS.subscribe(AgentRole.ANALYST, ANALYST_AGENT.on_message)
+
+logger.info(
+    "Batch 9: AnalystAgent initialized (LearningTierGate linked=%s) / "
+    "Batch 9：AnalystAgent 已初始化 (LearningTierGate 关联=%s)",
+    _LTG_FOR_ANALYST is not None, _LTG_FOR_ANALYST is not None,
+)
+
 # ── Bybit Demo Connector (created early to read balance for position sizing) ──
 # 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
 try:
@@ -329,6 +406,24 @@ try:
     except Exception as e:
         logger.warning("Could not inject StrategistAgent: %s", e)
 
+    # --- Batch 8: GuardianAgent injection into PipelineBridge ---
+    # Batch 8：GuardianAgent 注入管线桥接器（主门控 fail-closed）
+    try:
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_guardian_agent(GUARDIAN_AGENT)
+            logger.info("GuardianAgent injected into PipelineBridge (primary gate) / GuardianAgent 已注入管线桥接器（主门控）")
+    except Exception as e:
+        logger.warning("Could not inject GuardianAgent: %s", e)
+
+    # --- Batch 9: AnalystAgent injection into PipelineBridge ---
+    # Batch 9：AnalystAgent 注入管线桥接器（交易结果分析 + 指标更新）
+    try:
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_analyst_agent(ANALYST_AGENT)
+            logger.info("AnalystAgent injected into PipelineBridge / AnalystAgent 已注入管线桥接器")
+    except Exception as e:
+        logger.warning("Could not inject AnalystAgent: %s", e)
+
     # --- EX-05: LearningTierGate injection into PipelineBridge ---
     # EX-05：学习等级门控注入管线桥接器，以支持 L1→L2→L3... 自动晋升
     try:
@@ -442,7 +537,15 @@ try:
     from . import scout_routes
     scout_routes.set_scout_agent(SCOUT_AGENT)
     scout_routes.set_message_bus(MESSAGE_BUS)
-    logger.info("ScoutAgent + MessageBus wired to scout_routes / Scout 代理 + 消息总线已接入 scout 路由")
+    # Batch 9: Wire PerceptionPlane into scout_routes for cognitive level marking
+    # Batch 9：将感知平面接入 scout 路由用于认知级别标记
+    try:
+        from .paper_trading_routes import PERCEPTION_PLANE as _PP_FOR_SCOUT
+        if _PP_FOR_SCOUT is not None:
+            scout_routes.set_perception_plane(_PP_FOR_SCOUT)
+    except ImportError:
+        pass
+    logger.info("ScoutAgent + MessageBus (+ PerceptionPlane) wired to scout_routes / Scout 代理 + 消息总线（+ 感知平面）已接入 scout 路由")
 except Exception as e:
     logger.warning("Could not wire scout_routes: %s", e)
 
