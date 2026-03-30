@@ -973,8 +973,8 @@ class RiskManager:
         if daily_start > 0 and current < daily_start:
             daily_loss_pct = ((daily_start - current) / daily_start) * 100
             if daily_loss_pct >= self._config.max_daily_loss_pct:
-                # Don't halt session, but close all positions as protective measure
-                # 不熔断 session，但平掉所有仓位作为保护措施
+                # T3.04: Close all positions and halt session as protective measure
+                # 平掉所有仓位并熔断 session 作为保护措施
                 for symbol, pos in list(positions.items()):
                     already_closing = any(co["symbol"] == symbol for co in close_orders)
                     if not already_closing and pos.get("qty", 0) > 0:
@@ -983,6 +983,9 @@ class RiskManager:
                             "qty": pos["qty"],
                             "reason": f"daily_loss_{daily_loss_pct:.1f}pct_exceeds_max_{self._config.max_daily_loss_pct:.1f}pct",
                         })
+                # Halt session on daily loss exceeded
+                sess["session_halted"] = True
+                sess["session_halt_reason"] = f"daily_loss_{daily_loss_pct:.1f}pct"
 
         return close_orders
 
