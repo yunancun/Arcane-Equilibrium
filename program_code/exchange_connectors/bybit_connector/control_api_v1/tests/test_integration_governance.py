@@ -1011,31 +1011,32 @@ class TestIT03AuthActiveLeaseDeniedOrderRejected:
     Will pass after T1.02 merge.
     """
 
-    @pytest.mark.skipif(
-        True,  # Skip until T1.02 fail-closed merge
-        reason="Depends on T1.02 (acquire_lease fail-closed) — not yet merged"
-    )
     def test_lease_denied_order_rejected(self, auth_machine, lease_machine):
-        """Lease acquisition fails → order REJECTED (governance_lease_denied)"""
+        """When acquire_lease returns None → order REJECTED"""
+        from app.paper_trading_engine import PaperTradingEngine, PaperStateStore
+        import tempfile, os
 
-        # Create and activate auth
-        auth = auth_machine.create_draft(
-            title="Auth with Lease Denial",
-            scope={"symbols": ["BTCUSDT"]},
-            created_by="operator_1",
-            expires_at_ms=_future_ms(86400),
-        )
-        auth = auth_machine.submit_for_approval(auth.authorization_id)
-        auth = auth_machine.approve(
-            auth.authorization_id,
-            approved_by="supervisor_1",
-            reason="Test",
-        )
-        assert auth.state == AuthState.ACTIVE
+        tmpdir = tempfile.mkdtemp()
+        tmpf = os.path.join(tmpdir, "state.json")
+        try:
+            store = PaperStateStore(tmpf)
+            eng = PaperTradingEngine(store)
 
-        # Lease acquisition would return None or fail
-        # With T1.02 fail-closed: order would be REJECTED
-        # Expected reject_reason: "governance_lease_denied"
+            # Create a mock GovernanceHub that always denies lease
+            class MockHub:
+                def is_authorized(self): return True
+                def acquire_lease(self, order_id, scope=None): return None
+                def release_lease(self, lease_id): pass
+
+            eng.set_governance_hub(MockHub())
+            eng.start_session(initial_balance=10000.0)
+            result = eng.submit_order("BTCUSDT", "Buy", "market", 0.01, market_prices={"BTCUSDT": 50000.0})
+            state = eng.get_state()
+            last_order = state["orders"][-1] if state["orders"] else {}
+            assert last_order.get("reject_reason") == "governance_lease_denied"
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestIT04RiskEscalationDuringOrderProcessing:
@@ -1121,16 +1122,29 @@ class TestIT05GovernanceHubExceptionOrderRejected:
     Will pass after T1.03 merge.
     """
 
-    @pytest.mark.skipif(
-        True,
-        reason="Depends on T1.03 (is_authorized exception handler fail-closed) — not yet merged"
-    )
     def test_governance_hub_exception_order_rejected(self):
-        """GovernanceHub exception → order REJECTED (governance_check_error)"""
+        """When is_authorized() raises → order REJECTED"""
+        from app.paper_trading_engine import PaperTradingEngine, PaperStateStore
+        import tempfile, os
 
-        # Simulate GovernanceHub raising exception during is_authorized()
-        # With T1.03 fail-closed: exception caught, order REJECTED
-        # Expected reject_reason: "governance_check_error"
+        tmpdir = tempfile.mkdtemp()
+        tmpf = os.path.join(tmpdir, "state.json")
+        try:
+            store = PaperStateStore(tmpf)
+            eng = PaperTradingEngine(store)
+
+            class MockHub:
+                def is_authorized(self): raise RuntimeError("Governance unavailable")
+
+            eng.set_governance_hub(MockHub())
+            eng.start_session(initial_balance=10000.0)
+            result = eng.submit_order("BTCUSDT", "Buy", "market", 0.01, market_prices={"BTCUSDT": 50000.0})
+            state = eng.get_state()
+            last_order = state["orders"][-1] if state["orders"] else {}
+            assert last_order.get("reject_reason") == "governance_check_error"
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestIT06PipelineBridgeGovernanceRejection:
