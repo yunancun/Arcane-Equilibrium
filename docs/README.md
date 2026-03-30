@@ -39,10 +39,27 @@ docs/
 │
 ├── incidents/                         ← 故障/异常事件记录（待填充）
 │
-└── references/                        ← 长期参考文档（规范、合同、规格书）
-    ├── state_dictionary/              ← 状态字典 / 数据字典
-    ├── api_contract/                  ← API 合同 / 路由草案 / 审核报告
-    └── api_stub/                      ← API 骨架代码
+├── references/                        ← 长期参考文档（规范、合同、规格书）
+│   ├── state_dictionary/              ← 状态字典 / 数据字典
+│   ├── api_contract/                  ← API 合同 / 路由草案 / 审核报告
+│   └── api_stub/                      ← API 骨架代码
+│
+└── governance_dev/                    ← 治理开发全部文档
+    ├── audits/                        ← ★ 审计报告（Round 1/2 审计 + 合规审计）
+    ├── changelogs/                    ← T2.01–T2.23 模组变更日志
+    ├── governance_extracts/           ← 治理文件结构化提取（索引/速查/技术规格/实现清单）
+    ├── phase0_restart/                ← Phase 0 重启审计
+    ├── phase0_takeover/               ← Phase 0 接管（目录/代码/AI 架构/计划）
+    ├── phase1_gap_analysis/           ← Phase 1 缺口分析
+    ├── phase1_governance_wiring/      ← Phase 1 治理接线
+    ├── phase2_execution/              ← Phase 2 治理模组执行（21 模组 + PM/TW 审核）
+    ├── phase2_risk_hardening/         ← Phase 2 风控强化
+    ├── phase3_bug_fix_hardening/      ← Phase 3 Bug 修复强化
+    ├── phase3_integration/            ← Phase 3 治理集成 + 安全审计
+    ├── phase4_acceptance/             ← Phase 4 验收（合规/测试/UX/文档/PM）
+    ├── phase4_reconciliation_hardening/ ← Phase 4 对账强化
+    ├── phase5–12/                     ← Phase 5-12（治理完整性/测试/Demo/REST/事件/执行/打磨）
+    └── 2026-03-30--round2_fix_plan*   ← Round 2 修复计划（Batch 7-12）
 ```
 
 ---
@@ -265,8 +282,40 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-27--phase2_round2_strategic_audit_report.md` | Phase 2 第二轮审核：实战适用性审核（策略盈利性/管线连通性/数据质量/风控集成/信号可靠性） |
 | `2026-03-27--remote_access_guide.md` | 远程访问完整指南：Tailscale 安装配置 + Bybit Demo 访问地址 + secrets 权限加固 |
 | `2026-03-22--local_private_layout.md` | 本地私有布局说明：Git 仓库 vs 本地私有目录结构（secrets/srv 分离） |
+| `2026-03-30--local_ai_expansion_analysis.md` | 本地 AI 擴展用途分析（Ollama/Qwen 3.5 應用場景，DOC-08 依據） |
 
 ### governance_dev/ — 治理开发文档
+
+#### governance_dev/audits/ — ★ 审计报告
+
+| 文件 | 内容 |
+|------|------|
+| `2026-03-30--round2_cold_functional_audit.md` | ★★★ Round 2 冷酷功能审核（任务 1/2/3：32% 完成度 + 架构融合 + Paper Trading 路线图） |
+| `2026-03-30--governance_compliance_audit.md` | 治理合规审计（EX-05/06/07/DOC-01~08，合规度 ~65%） |
+| `2026-03-30--pipeline_bridge_paper_engine_audit.md` | PipelineBridge + PaperTradingEngine 代码级审计（治理 gate 验证 + 止损验证 + 学习回调验证） |
+
+#### governance_dev/2026-03-30 Round 2 修复计划
+
+| 文件 | 内容 |
+|------|------|
+| `2026-03-30--round2_fix_plan_batches_7_12.md` | ★★ Batch 7-12 完整技术规格（Conductor + Guardian + Perception + Analyst + L2 + Paper→Live） |
+| `2026-03-30--round2_fix_plan_EXECUTIVE_SUMMARY.md` | 修复计划管理摘要（缺口分析 + 策略 + 风险） |
+| `2026-03-30--round2_fix_plan_QUICK_REFERENCE.md` | 修复计划开发速查（批次清单 + 依赖图 + 成本） |
+| `2026-03-30--ROUND2_FIX_PLAN_INDEX.md` | 修复计划导航索引 |
+
+#### governance_dev/governance_extracts/ — 治理规格提取（5 份参考文档）
+
+| 文件 | 内容 |
+|------|------|
+| `GOVERNANCE_DOCUMENTATION_INDEX.md` | 治理文档索引（13 份规格文件导航） |
+| `GOVERNANCE_IMPLEMENTATION_CHECKLIST.md` | 治理实现清单（需求→代码映射 + 完成度追踪） |
+| `GOVERNANCE_QUICK_REFERENCE.md` | 治理速查手册（16 根原则 + 状态机速览） |
+| `OPENCLAW_GOVERNANCE_SUMMARY.md` | 治理综合摘要（13 份文件结构化总结） |
+| `OPENCLAW_TECHNICAL_SPEC.md` | 技术规格总结（22 份治理规格集） |
+
+#### governance_dev/changelogs/ — T2.01–T2.23 模组变更日志（23 份）
+
+每份治理模组的实现变更日志，命名格式 `2026-03-29_T2.XX_模组名.md`。
 
 #### governance_dev/phase2_execution/ — Phase 2 治理模組执行记录
 
@@ -275,22 +324,39 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `T2_EXECUTION_SUMMARY.md` | ★ Phase 2 执行总览：21 模组矩阵 + 关键指标 |
 | `T2_PM_QUALITY_AUDIT_REPORT.md` | Phase 2 PM 品质审核报告（T2.01–T2.23，整体 4/5，0 个 P0 blocker） |
 | `T2_TW_COMMENT_AUDIT_REPORT.md` | Phase 2 TW 注释品质审核报告（评级 9.5/10，100% 双语覆盖） |
-| `T2_TEST_RESULTS.md` | T2 测试套件执行报告（1485 测试，Pytest 运行结果） |
-| `FIXTURE_REFACTOR_SUMMARY.md` | 测试 Fixture 重构总结：36 个测试文件整合至 conftest.py（30+ 可复用 fixture） |
-| `TEST_FIXTURE_OVERVIEW.md` | 测试 Fixture 重构概览：重复代码消除 + conftest.py 集中管理 |
+| `T2_TEST_RESULTS.md` | T2 测试套件执行报告（1485 测试） |
+| `PM_FA_FULL_COMPLIANCE_AUDIT.md` | PM + FA 完整合规审计 |
+| `PM_T0_ENGINEERING_AUDIT.md` | PM T0 工程审计 |
+| `REVIEW_T2_CODE_QUALITY.md` | T2 代码质量审查 |
+| `DOCUMENTATION_REVIEW_T2.07-LATEST.md` | T2.07+ 文档审查 |
+| `FIXTURE_REFACTOR_SUMMARY.md` | 测试 Fixture 重构总结 |
+| `TEST_FIXTURE_OVERVIEW.md` | 测试 Fixture 重构概览 |
 
 #### governance_dev/phase3_integration/ — Phase 3 治理集成
 
 | 文件 | 内容 |
 |------|------|
+| `PHASE3_WORK_PLAN.md` | Phase 3 工作计划（从 72% 到可安全交易） |
+| `T3.01_FA_INTEGRATION_DESIGN.md` | FA 集成设计 |
 | `T3_GOVERNANCE_INTEGRATION_GUIDE.md` | Phase 3 治理集成指南 |
 | `PHASE3_CODE_REVIEW_REPORT.md` | Phase 3 代码审查报告 |
 | `SECURITY_AUDIT_PHASE3.md` | Phase 3 安全审计报告 |
-| `REVIEW_GOVERNANCE_GUI.md` | E2 代码审查：GUI 治理集成（Authorization/Risk Governor/Decision Leases/Reconciliation 4 个状态机，结论 PASS） |
+| `2026-03-30_TW_ENGINEERING_AUDIT_REPORT.md` | TW 工程审计报告 |
+| `REVIEW_GOVERNANCE_GUI.md` | GUI 治理集成审查（PASS） |
 
 #### governance_dev/phase4_acceptance/ — Phase 4 验收
 
 | 文件 | 内容 |
 |------|------|
+| `T4.01_CC_COMPLIANCE_MATRIX.md` | CC 合规矩阵 |
+| `T4.02_E4_TEST_COVERAGE_REPORT.md` | E4 测试覆盖报告 |
+| `T4.03_A3_UX_REVIEW_REPORT.md` | A3 UX 审查报告 |
+| `T4.04_R4_DOCUMENT_AUDIT_REPORT.md` | R4 文档审计报告 |
 | `T4.05_PM_FINAL_ACCEPTANCE_REPORT.md` | PM 最终验收报告 |
-| `TEST_REPORT_GOVERNANCE_E4.md` | E4 测试工程师验收报告（1485 测试，治理集成 PASS，1 个无关 datetime 失败） |
+| `T4.06_PM_GUI_GOVERNANCE_PLAN.md` | PM GUI 治理计划 |
+| `TEST_REPORT_GOVERNANCE_E4.md` | E4 测试工程师验收报告 |
+
+#### governance_dev/phase1–12 其他阶段 — 各阶段任务书 + PM 验收 + FA 缺口审计
+
+每阶段通常包含：`PHASE*_TASK_BOOK`, `PHASE*_PM_ACCEPTANCE_REPORT`, `FA_GAP_AUDIT_REPORT`。
+详见各子目录。

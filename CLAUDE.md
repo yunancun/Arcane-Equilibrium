@@ -45,32 +45,45 @@
 
 ---
 
-## 三、当前系统状态（2026-03-30 TW 工程審核）
+## 三、当前系统状态（2026-03-30 Round 2 冷酷功能审核后）
 
 ```
-测试：1,566 全通过（含 46 治理 Hub 测试 + 92 集成测试 · 2 跳过）
-路由：121+ 条（113 原有 + 8 治理 API 端点）
-治理：GovernanceHub 已实例化，4 核心 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04）
+测试：1,930+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 · 2 跳过）
+路由：126+ 条（含 8 治理 + 5 Scout 端点）
+治理：GovernanceHub 4 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04），fail-closed 已验证
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
+L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
+5-Agent 体系：仅 Scout 运行，其余 4 Agent + Conductor 未启动
 
-Paper Trading 运行状态（2026-03-28 Session 8 审核时）：
-  session_id              = psess:fe7ac188（运行中）
-  net_pnl                 = -$63.78（运行约25小时）
-  胜率                    = 0%（fill=684，round_trips=162，win=0）
-  fill_count              = 684
+★ Round 2 冷酷功能审核结论（2026-03-30 PM 4 路并行代码级审计）：
 
-Session 8 全面功能审核（A-J 完成度）：
-  A. 自主交易执行          = 60%（交易流通，AI治理层全部绕过）
-  B. 成本收益感知          = 50%（手续费追踪，AI成本未纳入net_pnl）
-  C. 计算路径智能分级      = 30%（AI引擎存在但主链路从未调用）
-  D. 自我感知              = 20%→已验证健康门正常（live系统=passed）
-  E. 持续学习              ★ 0%→已修复：E1自动写Observation（每轮trip后）
-  F. 日/周报告             = 30%（路由存在，无自动化）
-  G. Agent自主交易         = 55%→已修复：G1连续亏损自动暂停（10次阈值）
-  H. 对抗性止损            = 60%→已修复：H1 ATR动态止损接入（track_position）
-  I. AI注意力税            = 0%（待AI咨询接入后自然实现）
-  J. GUI控制台             = 80%（Learning Cockpit空=数据来源空）
+  代码完成度            ≈ 75%
+  业务功能真正能用      ≈ 32%（自动扫描→策略→风险→下单→止损→学习→进化 全链路评估）
+
+  逐环节完成度：
+    自动扫描              = 85%（650+ 对全扫描可用，Scout 情报无消费者）
+    策略选择              = 40%（标准技术指标，无 AI、无回测、无动态仓位）
+    AI 风险评估           = 20%（H0 规则引擎强，H1-H5 AI 层完全断开）
+    下单                  = 70%（治理 gate 实际拒绝订单，OMS SM-03 未串联）
+    止损                  = 75%（本地 3 类止损可用，缺交易所条件单）
+    学习                  = 10%（E1 观察记录可用，无知识提取/模式发现）
+    进化                  = 5%（PaperLiveGate 未部署，无策略自动优化）
+
+  关键发现：
+    ✅ 治理 fail-closed 一流（is_authorized 真实拒绝订单，acquire_lease fail-closed）
+    ✅ P0/P1/P2 风控真实执行（check_order_allowed 返回 False 阻止订单）
+    ✅ 异常处理防御性、核心代码零 except:pass
+    ❌ 4/6 Agent 未实现（Strategist/Guardian/Analyst/Executor 类不存在）
+    ❌ Conductor 300+ 行零生产调用
+    ❌ MessageBus 零订阅者（Scout 对空气说话）
+    ❌ L2 AI Engine 只有手动 API 触发
+    ❌ Perception Plane register_data() 零调用
+    ❌ OMS SM-03 完全绕过（Paper Engine 用独立 7 态）
+    ❌ 策略层标准 RSI/MACD/MA，无可证明的 alpha
+
+  详细审核报告：docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md
+  修复计划：docs/governance_dev/2026-03-30--round2_fix_plan_batches_7_12.md
 
 Session 8 修复（4项）：
   E1: PipelineBridge每轮round-trip自动写Observation到learning_state

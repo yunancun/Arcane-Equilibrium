@@ -24,7 +24,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-30 Round 2 Batch 6)
+## 当前状态 (2026-03-30 Round 2 冷酷功能审核后)
 
 ```
 系统模式:     read_only（不变）
@@ -36,7 +36,7 @@ API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 市场扫描:     650+ 交易对每 5 分钟全扫描
 自动部署:     最优 5 品种自动匹配策略
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
-治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时
+治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时 · fail-closed 已验证
 Scout:        ScoutAgent + MessageBus 已接入 PipelineBridge（Plan A2 本地代理模式）
 学习晋升:     L1→L2 自动晋升已接通（PipelineBridge → promote_tier()）
 L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade edge filter 就绪）
@@ -45,7 +45,28 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 合规度:       ~88%
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）** + **Learning 自动晋升** + **L1 本地推理管道（Ollama/Qwen 3.5）** + **Pre-trade Edge Filter** + **★ 0% 胜率四根因全修复（Batch 6）**
+**★ Round 2 冷酷功能审核结论（2026-03-30）**
+
+代码完成度 ~75%，但**业务功能真正能用 = 32%**。
+
+| 环节 | 完成度 | 关键缺失 |
+|------|--------|----------|
+| 自动扫描 | 85% | Scout 情报无消费者 |
+| 策略选择 | 40% | 无 AI、无回测、无动态仓位 |
+| AI 风险评估 | 20% | H1-H5 AI 层完全断开 |
+| 下单 | 70% | OMS SM-03 未串联 |
+| 止损 | 75% | 缺交易所条件单双重防线 |
+| 学习 | 10% | 无知识提取/模式发现 |
+| 进化 | 5% | PaperLiveGate 未部署 |
+
+**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 1930+ 测试
+
+**关键缺失**：4/6 Agent 未实现 · Conductor 零调用 · MessageBus 零订阅者 · L2 仅手动触发 · 策略无 alpha
+
+**详细报告**：`docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md`
+**修复计划**：`docs/governance_dev/2026-03-30--round2_fix_plan_batches_7_12.md`
+
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + Phase 2 治理模組 + Phase 3 GovernanceHub 集成 + Round 2 Scout 集成 + Learning 自动晋升 + L1 本地推理 + Pre-trade Edge Filter + 0% 胜率四根因全修复
 
 ---
 
