@@ -149,6 +149,11 @@ from .change_audit_log import ChangeAuditLog  # noqa: E402
 CHANGE_AUDIT_LOG = ChangeAuditLog()
 GOV_HUB.set_change_audit_log(CHANGE_AUDIT_LOG)
 
+# T2.05: Initialize and inject RecoveryApprovalGate / 初始化并注入恢復審批門禁
+from .recovery_approval_gate import RecoveryApprovalGate  # noqa: E402
+RECOVERY_GATE = RecoveryApprovalGate()
+GOV_HUB.set_recovery_gate(RECOVERY_GATE)
+
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
 # This creates a singleton reference for the governance API routes
 # 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入

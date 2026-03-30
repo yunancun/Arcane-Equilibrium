@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
+from .recovery_approval_gate import RecoveryApprovalGate
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,9 @@ class GovernanceHub:
         # T2.04: Change Audit Log for WHO/WHEN/APPROVAL tracking
         self._change_audit_log: Optional[ChangeAuditLog] = None
 
+        # T2.05: Recovery Approval Gate for de-escalation approval
+        self._recovery_gate: Optional[RecoveryApprovalGate] = None
+
     def set_audit_pipeline(self, pipeline: Any) -> None:
         """
         Set the audit pipeline for SM callbacks.
@@ -207,6 +211,12 @@ class GovernanceHub:
         with self._lock:
             self._change_audit_log = cal
             logger.info("ChangeAuditLog set on GovernanceHub")
+
+    def set_recovery_gate(self, gate: Any) -> None:
+        """Inject RecoveryApprovalGate for de-escalation approval / 注入恢復審批門禁"""
+        with self._lock:
+            self._recovery_gate = gate
+            logger.info("RecoveryApprovalGate set on GovernanceHub")
 
     def is_enabled(self) -> bool:
         """
@@ -345,6 +355,33 @@ class GovernanceHub:
                 )
             except Exception as e:
                 logger.debug(f"ChangeAuditLog record failed (non-fatal): {e}")
+
+    def _check_de_escalation_gate(self, from_state: str, to_state: str, reason: str) -> bool:
+        """
+        Check if de-escalation is permitted via RecoveryApprovalGate.
+        检查去升级是否通过 RecoveryApprovalGate 批准。
+
+        De-escalation requires approval unless disabled.
+
+        Args:
+            from_state: Current state (more restrictive)
+            to_state: Target state (less restrictive)
+            reason: Reason for de-escalation
+
+        Returns:
+            True if de-escalation is permitted; False otherwise
+        """
+        if not self._recovery_gate:
+            # No gate installed, allow by default
+            return True
+
+        # Check if pending approvals exist for this transition
+        pending = self._recovery_gate.get_pending_requests()
+        for req in pending:
+            if req.get("from_state") == from_state and req.get("to_state") == to_state:
+                return False  # De-escalation pending approval
+
+        return True
 
     def is_authorized(self) -> bool:
         """
