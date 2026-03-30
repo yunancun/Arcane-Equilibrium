@@ -182,6 +182,21 @@ class GovernanceHub:
         self._cached_auth_state: tuple[bool, int] | None = None
         self._cache_ttl_ms = 100  # TTL in milliseconds
 
+        # T1.04: Audit pipeline for SM persistence
+        self._audit_pipeline: Optional[Any] = None
+
+    def set_audit_pipeline(self, pipeline: Any) -> None:
+        """
+        Set the audit pipeline for SM callbacks.
+        設置 SM 回調的審計管道。
+
+        Args:
+            pipeline: AuditPipeline instance for persisting audit records to disk
+        """
+        with self._lock:
+            self._audit_pipeline = pipeline
+            logger.info("Audit pipeline set on GovernanceHub")
+
     def is_enabled(self) -> bool:
         """
         Check if governance hub is enabled (public API).
@@ -204,11 +219,18 @@ class GovernanceHub:
             from .decision_lease_state_machine import DecisionLeaseStateMachine
             from .reconciliation_engine import ReconciliationEngine, ReconciliationConfig
 
-            # Create audit callbacks
-            auth_callback = self._make_audit_callback("authorization")
-            risk_callback = self._make_audit_callback("risk_governor")
-            lease_callback = self._make_audit_callback("decision_lease")
-            recon_callback = self._make_audit_callback("reconciliation")
+            # T1.04: Create audit callbacks - use audit pipeline if available
+            if self._audit_pipeline is not None:
+                auth_callback = self._audit_pipeline.make_callback("authorization")
+                risk_callback = self._audit_pipeline.make_callback("risk_governor")
+                lease_callback = self._audit_pipeline.make_callback("decision_lease")
+                recon_callback = self._audit_pipeline.make_callback("reconciliation")
+            else:
+                # Fallback to built-in audit callbacks (backward compatibility)
+                auth_callback = self._make_audit_callback("authorization")
+                risk_callback = self._make_audit_callback("risk_governor")
+                lease_callback = self._make_audit_callback("decision_lease")
+                recon_callback = self._make_audit_callback("reconciliation")
 
             # Create incident callback for reconciliation engine
             incident_callback = self._make_incident_callback()

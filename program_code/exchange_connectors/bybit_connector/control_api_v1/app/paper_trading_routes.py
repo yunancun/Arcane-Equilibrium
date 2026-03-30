@@ -61,12 +61,23 @@ ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
 # 治理集線器（授權 + 風控 + 租約 + 對賬 集成）
 from .governance_hub import GovernanceHub  # noqa: E402
+from .audit_persistence import AuditPipeline, AuditPersistenceConfig  # noqa: E402
 import os as _gov_os
 _gov_audit_dir = _gov_os.getenv(
     "OPENCLAW_GOVERNANCE_AUDIT_DIR",
     _gov_os.path.abspath(_gov_os.path.join(_gov_os.path.dirname(__file__), "..", "runtime", "governance_audit"))
 )
+
+# T1.04: Create AuditPipeline for SM persistence
+AUDIT_PIPELINE = AuditPipeline(
+    config=AuditPersistenceConfig(base_dir=_gov_audit_dir)
+)
+
 GOV_HUB = GovernanceHub(audit_dir=_gov_audit_dir)
+
+# T1.04: Connect AuditPipeline to GovernanceHub for SM callbacks
+GOV_HUB.set_audit_pipeline(AUDIT_PIPELINE)
+
 ENGINE.set_governance_hub(GOV_HUB)
 RISK_MANAGER.set_governance_hub(GOV_HUB)
 
