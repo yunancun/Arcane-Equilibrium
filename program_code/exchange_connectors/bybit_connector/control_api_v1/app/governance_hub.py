@@ -857,6 +857,106 @@ class GovernanceHub:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"Error in _on_auth_frozen: {e}")
 
+    def handle_incident_auth_action(self, action: str, context: dict[str, Any]) -> None:
+        """
+        Handle authorization actions triggered by IncidentPolicy.
+        處理 IncidentPolicy 觸發的授權動作。
+
+        Args:
+            action: Auth action name (AUTH_RESTRICT, AUTH_FREEZE, etc.)
+            context: Event context dict
+        """
+        if not self._enabled or not self._initialized:
+            return
+
+        try:
+            with self._lock:
+                if self._authorization_sm is None:
+                    return
+
+                effective_auths = self._authorization_sm.get_effective()
+
+                if action == "AUTH_RESTRICT":
+                    for auth in effective_auths:
+                        if auth.state.value == "ACTIVE":
+                            self._authorization_sm.restrict(
+                                auth.authorization_id,
+                                reason=f"Incident {action}: {context.get('reason_code')}",
+                            )
+                    self._invalidate_auth_cache()
+
+                elif action == "AUTH_FREEZE":
+                    for auth in effective_auths:
+                        self._authorization_sm.freeze(
+                            auth.authorization_id,
+                            reason=f"Incident {action}: {context.get('reason_code')}",
+                        )
+                    self._invalidate_auth_cache()
+                    self._on_auth_frozen()
+
+                logger.info(f"Incident auth action executed: {action}")
+        except Exception as e:
+            with self._lock:
+                self._callback_errors += 1
+            logger.error(f"Error in handle_incident_auth_action({action}): {e}")
+
+    def handle_incident_risk_action(self, action: str, context: dict[str, Any]) -> None:
+        """
+        Handle risk actions triggered by IncidentPolicy.
+        處理 IncidentPolicy 觸發的風險動作。
+
+        Args:
+            action: Risk action name (RISK_ESCALATE_*, RISK_CIRCUIT_BREAKER, etc.)
+            context: Event context dict
+        """
+        if not self._enabled or not self._initialized:
+            return
+
+        try:
+            with self._lock:
+                if self._risk_governor_sm is None:
+                    return
+
+                from .risk_governor_state_machine import RiskLevel, RiskInitiator
+
+                # Map incident actions to risk levels
+                action_to_level = {
+                    "RISK_ESCALATE_CAUTIOUS": RiskLevel.CAUTIOUS,
+                    "RISK_ESCALATE_REDUCED": RiskLevel.REDUCED,
+                    "RISK_ESCALATE_DEFENSIVE": RiskLevel.DEFENSIVE,
+                    "RISK_CIRCUIT_BREAKER": RiskLevel.CIRCUIT_BREAKER,
+                }
+
+                target_level = action_to_level.get(action)
+                if target_level is not None:
+                    current_state = self._risk_governor_sm.get_state()
+                    if current_state.level < target_level:
+                        self._risk_governor_sm.escalate_to(
+                            target_level,
+                            reason=f"Incident {action}: {context.get('reason_code')}",
+                            initiator=RiskInitiator.INCIDENT_POLICY,
+                        )
+
+                logger.info(f"Incident risk action executed: {action}")
+        except Exception as e:
+            with self._lock:
+                self._callback_errors += 1
+            logger.error(f"Error in handle_incident_risk_action({action}): {e}")
+
+    def handle_incident_operator_alert(self, context: dict[str, Any]) -> None:
+        """
+        Handle operator alerts triggered by IncidentPolicy.
+        處理 IncidentPolicy 觸發的運營商警報。
+
+        Args:
+            context: Event context dict
+        """
+        logger.critical(
+            f"OPERATOR_ALERT: Incident {context.get('event_id')} "
+            f"severity={context.get('severity')} reason={context.get('reason_code')}"
+        )
+        # TODO: Future enhancement - integrate with notification system
+
     def _auth_permits_scope(self, auth_dict: dict[str, Any], scope: str) -> bool:
         """Check if authorization permits lease scope / 检查授权是否允许租约范围"""
         try:
