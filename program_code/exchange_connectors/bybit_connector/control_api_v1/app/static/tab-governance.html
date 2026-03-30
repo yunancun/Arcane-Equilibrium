@@ -98,6 +98,19 @@
         <div class="oc-metric-val" id="lease-total">--</div>
       </div>
     </div>
+
+    <!-- Collapsible lease detail list / 可折叠租约详情列表 -->
+    <div style="margin-top:12px">
+      <h4 style="cursor:pointer;font-size:0.9em;margin:0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="toggleLeaseList()">
+        <span>詳情 Details</span>
+        <span id="lease-list-toggle" style="font-size:0.85em">▶</span>
+      </h4>
+      <div id="lease-list-body" style="display:none;margin-top:8px">
+        <div id="lease-list-content">
+          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Card 4: Reconciliation (EX-04) -->
@@ -126,6 +139,91 @@
     </button>
   </div>
 
+</div>
+
+<!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
+<div class="oc-card" id="paper-live-gate-card">
+  <h3>&#x1F4CB; Paper &#x2192; Live Gate / 升级门禁</h3>
+  <div class="subtitle">升级实盘前的 11 项准入评估</div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Gate Status / 门禁状态</div>
+      <div id="plg-status-badge">--</div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Score / 评分</div>
+      <div id="plg-score" style="font-size:18px;font-weight:600">--</div>
+    </div>
+    <div>
+      <button class="oc-btn oc-btn-primary" onclick="evaluatePaperLiveGate()">&#x1F4CA; 评估 Evaluate</button>
+    </div>
+  </div>
+
+  <!-- Criteria list toggle / 准入项目列表折叠 -->
+  <div>
+    <h4 style="cursor:pointer;font-size:0.9em;margin:0 0 8px 0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="togglePLGCriteria()">
+      <span>准入项目 Criteria</span>
+      <span id="plg-criteria-toggle" style="font-size:0.85em">▶</span>
+    </h4>
+    <div id="plg-criteria-body" style="display:none">
+      <div id="plg-criteria-list" style="padding:8px 0">
+        <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Learning Tier / 学习层级 ═══ -->
+<div class="oc-card" id="learning-tier-card">
+  <h3>&#x1F393; Learning Tier / 学习层级</h3>
+  <div class="subtitle">L0&#x2192;L5 自动晋升追踪</div>
+
+  <div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px">
+    <div class="oc-metric">
+      <div class="oc-metric-label">Current Tier / 当前层级</div>
+      <div class="oc-metric-val" id="lt-tier">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Observations / 观测数</div>
+      <div class="oc-metric-val" id="lt-obs">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">Win Rate / 胜率</div>
+      <div class="oc-metric-val" id="lt-winrate">--</div>
+    </div>
+  </div>
+
+  <!-- Progress bar toward next tier / 升级进度条 -->
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Progress to Next Tier / 下一层级进度</div>
+    <div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden">
+      <div id="lt-progress" style="height:100%;width:0%;background:var(--accent);border-radius:6px;transition:width 0.4s ease"></div>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div id="lt-eligible">--</div>
+    <button id="btn-promote" class="oc-btn oc-btn-success" style="display:none" onclick="showPromoteModal()">
+      &#x1F4C8; 手动晋升 Promote
+    </button>
+  </div>
+</div>
+
+<!-- ═══ Governance Events Feed / 治理事件流 ═══ -->
+<div class="oc-card" id="events-feed-card">
+  <h3 style="cursor:pointer" onclick="toggleEventsFeed()">
+    &#x1F4E1; Governance Events / 治理事件流
+    <span id="events-feed-toggle" style="float:right">▶</span>
+  </h3>
+  <div id="events-feed-body" style="display:none">
+    <div id="events-feed-content" style="max-height:400px;overflow-y:auto;padding:4px 0">
+      <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+    </div>
+    <div style="margin-top:10px;text-align:center">
+      <button class="oc-btn" onclick="loadEventsFeed(50)">&#x2B07; 加载更多 Load More</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ Cross-SM Summary ═══ -->
@@ -230,20 +328,23 @@
 
 <!-- ═══ Audit Trail / 審計軌跡 ═══ -->
 <div class="oc-card" id="audit-trail-card">
-  <h3 style="cursor:pointer" onclick="toggleAuditTrail()">
-    &#x1F50E; Audit Trail / 審計軌跡
-    <span id="audit-toggle" style="float:right">▼</span>
-  </h3>
-  <div id="audit-trail-body">
+  <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleAuditTrail()">
+    <h3 style="margin:0">&#x1F50E; Audit Trail / 審計軌跡</h3>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="oc-btn" style="font-size:11px;padding:4px 10px" onclick="event.stopPropagation();loadAuditTrail()">&#x1F504; 刷新 Refresh</button>
+      <span id="audit-toggle">▼</span>
+    </div>
+  </div>
+  <div id="audit-trail-body" style="margin-top:12px">
     <div class="oc-table-wrap">
       <table class="oc-table" id="audit-trail-table">
         <thead>
           <tr>
             <th>Time / 時間</th>
-            <th>SM</th>
+            <th>SM / Who</th>
             <th>Event / 事件</th>
-            <th>From → To</th>
-            <th>Initiator / 觸發者</th>
+            <th>Change / 变更</th>
+            <th>Reason / 原因</th>
           </tr>
         </thead>
         <tbody id="audit-trail-tbody">
@@ -325,6 +426,34 @@
     <div class="oc-modal-footer">
       <button class="oc-btn" onclick="hideRemoveWhitelistModal()">Cancel / 取消</button>
       <button class="oc-btn oc-btn-danger" onclick="submitRemoveWhitelist()">Remove / 移除</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Modal: Promote Learning Tier ═══ -->
+<div id="modal-promote" class="oc-modal" style="display:none">
+  <div class="oc-modal-content">
+    <h3>&#x1F393; 手动晋升 Manual Tier Promotion</h3>
+    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+      手动晋升学习层级 (需要 Operator 批准) / Manually promote learning tier (requires Operator approval)
+    </p>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Tier / 目标层级</label>
+      <select id="promote-tier" class="oc-select" style="width:100%">
+        <option value="">-- Select Tier --</option>
+        <option value="L1">L1 — Local Ollama</option>
+        <option value="L2">L2 — Cloud AI</option>
+        <option value="L3">L3 — Advanced AI</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
+      <textarea id="promote-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+        placeholder="Reason for manual promotion / 手动晋升原因..." maxlength="500"></textarea>
+    </div>
+    <div class="oc-modal-footer">
+      <button class="oc-btn" onclick="hidePromoteModal()">Cancel / 取消</button>
+      <button class="oc-btn oc-btn-success" onclick="submitPromotion()">Submit / 提交</button>
     </div>
   </div>
 </div>
@@ -459,6 +588,45 @@ function toggleWhitelist() {
   }
 }
 
+// 切换租约详情列表 / Toggle lease detail list
+function toggleLeaseList() {
+  const body = document.getElementById('lease-list-body');
+  const toggle = document.getElementById('lease-list-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+// 切换 PaperLiveGate 准入项目 / Toggle PaperLiveGate criteria list
+function togglePLGCriteria() {
+  const body = document.getElementById('plg-criteria-body');
+  const toggle = document.getElementById('plg-criteria-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
+// 切换治理事件流 / Toggle governance events feed
+function toggleEventsFeed() {
+  const body = document.getElementById('events-feed-body');
+  const toggle = document.getElementById('events-feed-toggle');
+  if (body.style.display === 'none') {
+    body.style.display = '';
+    toggle.textContent = '▼';
+  } else {
+    body.style.display = 'none';
+    toggle.textContent = '▶';
+  }
+}
+
 // ─── Change Detection & Event Logging ──────────────────────────
 function detectChanges(newStatus) {
   if (!_prevStatus || !newStatus) { _prevStatus = newStatus; return; }
@@ -548,6 +716,8 @@ function renderIncidentLog() {
   el.innerHTML = html;
 }
 
+// renderAuditTrail: 客户端回退渲染（使用 _govEventLog）
+// Client-side fallback render using local event log (session-only data)
 function renderAuditTrail() {
   const tbody = document.getElementById('audit-trail-tbody');
   if (_govEventLog.length === 0) {
@@ -560,11 +730,53 @@ function renderAuditTrail() {
     html += '<td>' + ocEsc(e.time) + '</td>';
     html += '<td>' + ocChip(e.sm, 'neutral') + '</td>';
     html += '<td>' + ocEsc(e.msg) + '</td>';
-    html += '<td>' + ocEsc(e.from) + ' → ' + ocEsc(e.to) + '</td>';
-    html += '<td>' + ocEsc(e.initiator) + '</td>';
+    // 客户端日志没有 change_type，用 from→to 替代 / Client log lacks change_type; use from→to
+    html += '<td>' + ocEsc(e.from || '--') + ' → ' + ocEsc(e.to || '--') + '</td>';
+    html += '<td>' + ocEsc(e.initiator || '--') + '</td>';
     html += '</tr>';
   }
   tbody.innerHTML = html;
+}
+
+// loadAuditTrail: 从服务端加载持久化审计日志
+// Load persistent audit trail from server; fall back to client-side log on error/empty
+async function loadAuditTrail() {
+  const tbody = document.getElementById('audit-trail-tbody');
+  try {
+    // 调用 govGetAuditChanges(limit) 获取服务端审计记录
+    // Call govGetAuditChanges to retrieve server-persisted change records
+    const d = await govGetAuditChanges(100);
+    const records = (d && d.ok && Array.isArray(d.data)) ? d.data : [];
+
+    if (records.length === 0) {
+      // 服务端无数据，降级为客户端日志 / No server data — fall back to client-side log
+      renderAuditTrail();
+      return;
+    }
+
+    let html = '';
+    for (const r of records) {
+      // 服务端字段: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
+      // Server fields: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
+      const timeStr = r.timestamp ? ocTime(r.timestamp) : '--';
+      const who = r.who || '--';
+      const what = r.what || '--';
+      const changeType = r.change_type || '--';
+      const reason = r.reason || '--';
+      html += '<tr>';
+      html += '<td style="font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</td>';
+      html += '<td>' + ocChip(ocEsc(who), 'neutral') + '</td>';
+      html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + ocEsc(what) + '">' + ocEsc(what) + '</td>';
+      html += '<td>' + ocChip(ocEsc(changeType), 'info') + '</td>';
+      html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:11px" title="' + ocEsc(reason) + '">' + ocEsc(reason) + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html;
+  } catch (e) {
+    // 请求失败，降级为客户端日志 / Request failed — fall back to client-side log
+    console.warn('Audit trail server load failed, using client-side fallback:', e);
+    renderAuditTrail();
+  }
 }
 
 // ─── Modal Functions ──────────────────────────────────────────
@@ -757,6 +969,53 @@ function renderRiskCard(riskData) {
   $('btn-override').disabled = (level === 0);
 }
 
+// renderLeaseList: 渲染活跃租约详情列表
+// Render the collapsible active lease detail list
+function renderLeaseList(leases) {
+  const el = document.getElementById('lease-list-content');
+  if (!leases || leases.length === 0) {
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:4px 0">暫無活躍租約 No active leases</p>';
+    return;
+  }
+
+  const now = Date.now();
+  let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+  for (const lease of leases) {
+    // lease_id 缩短为最后 8 位 / Truncate lease_id to last 8 chars
+    const shortId = (lease.lease_id || lease.id || '--').slice(-8);
+    const symbol = lease.symbol || '--';
+    const direction = lease.direction || '--';
+    const strategy = lease.strategy || '--';
+
+    // 计算过期倒计时 / Calculate expiry countdown
+    let expiryStr = '--';
+    const expiresAt = lease.expires_at_ms || lease.expires_at;
+    if (expiresAt) {
+      const expiresMs = typeof expiresAt === 'number' ? expiresAt : new Date(expiresAt).getTime();
+      const diffSec = Math.round((expiresMs - now) / 1000);
+      if (diffSec <= 0) {
+        expiryStr = ocChip('Expired / 已过期', 'bad');
+      } else if (diffSec < 60) {
+        expiryStr = ocChip(diffSec + 's', 'warn');
+      } else {
+        expiryStr = ocChip(Math.round(diffSec / 60) + 'm', 'good');
+      }
+    }
+
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">';
+    html += '<span style="font-family:monospace;color:var(--text-dim)">' + ocEsc('…' + shortId) + '</span>';
+    html += ocChip(ocEsc(symbol), 'info') + ' ';
+    html += ocChip(ocEsc(direction), direction === 'Buy' || direction === 'buy' ? 'good' : 'bad') + ' ';
+    html += '<span style="color:var(--text-dim);font-size:11px">' + ocEsc(strategy) + '</span>';
+    html += '<span>Expires: ' + expiryStr + '</span>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
 function renderLeaseCard(leaseData) {
   if (!leaseData) {
     ocSetText('lease-active', '--');
@@ -801,6 +1060,306 @@ function renderSummary(fullStatus) {
   ocSetText('summary-incidents', String(incidents));
   ocSetText('summary-errors', String(errors));
   ocSetText('summary-time', timestamp ? ocTimeShort(timestamp) : '--');
+}
+
+// ─── PaperLiveGate Functions ──────────────────────────────────────
+
+// PLG 状态徽章颜色映射 / Badge color for gate status
+function _plgStatusColor(status) {
+  if (!status) return 'neutral';
+  const s = status.toUpperCase();
+  if (s === 'OPEN' || s === 'APPROVED') return 'good';
+  if (s === 'BLOCKED') return 'bad';
+  if (s === 'EVALUATING') return 'warn';
+  return 'neutral'; // CLOSED or unknown
+}
+
+// loadPaperLiveGate: 加载 Paper→Live 门禁状态
+// Load Paper→Live gate status from server
+async function loadPaperLiveGate() {
+  try {
+    // GET /api/v1/governance/paper-live-gate/status
+    const d = await ocApi('/api/v1/governance/paper-live-gate/status');
+    if (!d || !d.ok) {
+      ocSetHtml('plg-status-badge', ocChip('Unavailable / 不可用', 'neutral'));
+      ocSetText('plg-score', '--');
+      document.getElementById('plg-criteria-list').innerHTML =
+        '<p style="color:var(--text-dim);font-size:12px">Data unavailable / 数据不可用</p>';
+      return;
+    }
+
+    const data = d.data || d;
+    const status = data.status || 'UNKNOWN';
+    const passedCount = data.passed_count != null ? data.passed_count : '--';
+    const totalCount = data.total_count != null ? data.total_count : '--';
+    const criteria = Array.isArray(data.criteria) ? data.criteria : [];
+
+    // 渲染状态徽章和评分 / Render status badge and score
+    ocSetHtml('plg-status-badge', ocChip(ocEsc(status), _plgStatusColor(status)));
+    ocSetText('plg-score', passedCount + '/' + totalCount + ' 通过');
+
+    // 渲染准入项目列表 / Render criteria list
+    if (criteria.length === 0) {
+      document.getElementById('plg-criteria-list').innerHTML =
+        '<p style="color:var(--text-dim);font-size:12px">No criteria data / 无准入项目数据</p>';
+    } else {
+      let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+      for (const c of criteria) {
+        const icon = c.passed ? '✅' : '❌';
+        const name = c.name || '--';
+        const reason = c.reason || '';
+        html += '<div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">';
+        html += '<span style="flex-shrink:0">' + icon + '</span>';
+        html += '<div>';
+        html += '<div style="font-weight:' + (c.passed ? '400' : '600') + ';color:' + (c.passed ? 'inherit' : 'var(--red)') + '">' + ocEsc(name) + '</div>';
+        if (reason) {
+          html += '<div style="color:var(--text-dim);font-size:11px">' + ocEsc(reason) + '</div>';
+        }
+        html += '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+      document.getElementById('plg-criteria-list').innerHTML = html;
+    }
+  } catch (e) {
+    console.warn('PaperLiveGate load failed:', e);
+    ocSetHtml('plg-status-badge', ocChip('Error / 错误', 'bad'));
+  }
+}
+
+// evaluatePaperLiveGate: 触发准入评估，自动从 Paper Engine 读取当前指标作为评估参数
+// Trigger PaperLiveGate evaluation — auto-fills required metrics from Paper Engine status
+async function evaluatePaperLiveGate() {
+  ocToast('读取指标中... / Fetching metrics...', 'info');
+  try {
+    // Step 1: Fetch current paper engine metrics to fill required fields
+    // 第一步：拉取 Paper Engine 当前指标填充必填字段
+    let metrics = {
+      paper_start_time_ms: Date.now() - 86400000, // fallback: 1 day ago / 回退：1 天前
+      total_trades: 0,
+      win_rate_percent: 0,
+      net_pnl: 0,
+      sharpe_ratio: 0,
+      max_drawdown_percent: 0,
+      profit_factor: 0,
+    };
+
+    try {
+      const pe = await ocApi('/api/v1/paper/status');
+      if (pe && pe.data) {
+        const m = pe.data.metrics || pe.data;
+        // Map Paper Engine metric fields to PaperLiveGate requirements
+        // 映射 Paper Engine 指标字段到 PaperLiveGate 必填参数
+        if (m.start_time_ms != null)       metrics.paper_start_time_ms = m.start_time_ms;
+        if (m.total_trades != null)         metrics.total_trades = m.total_trades;
+        if (m.win_rate != null)             metrics.win_rate_percent = m.win_rate * 100;
+        if (m.win_rate_pct != null)         metrics.win_rate_percent = m.win_rate_pct;
+        if (m.net_pnl != null)              metrics.net_pnl = m.net_pnl;
+        if (m.sharpe_ratio != null)         metrics.sharpe_ratio = m.sharpe_ratio;
+        if (m.max_drawdown_pct != null)     metrics.max_drawdown_percent = m.max_drawdown_pct;
+        if (m.profit_factor != null)        metrics.profit_factor = m.profit_factor;
+      }
+    } catch (fetchErr) {
+      console.warn('Could not fetch paper metrics, using defaults:', fetchErr);
+    }
+
+    // Step 2: POST evaluation request with populated metrics
+    // 第二步：发送携带真实指标的评估请求
+    ocToast('评估中... / Evaluating...', 'info');
+    const d = await ocPost('/api/v1/governance/paper-live-gate/evaluate', metrics);
+    if (d && d.ok) {
+      ocToast('Evaluation complete / 评估完成', 'success');
+      await loadPaperLiveGate();
+      // A3: Auto-expand criteria list after evaluation so operator can see results immediately
+      // A3: 评估完成后自动展开准入项目列表，让操作员立即看到结果
+      const criteriaBody = document.getElementById('plg-criteria-body');
+      const criteriaToggle = document.getElementById('plg-criteria-toggle');
+      if (criteriaBody) { criteriaBody.style.display = ''; }
+      if (criteriaToggle) { criteriaToggle.textContent = '▼'; }
+    } else {
+      ocToast((d && d.message) ? d.message : 'Evaluation failed / 评估失败', 'error');
+    }
+  } catch (e) {
+    console.warn('PLG evaluate failed:', e);
+    ocToast('Evaluation request failed / 评估请求失败', 'error');
+  }
+}
+
+// ─── Learning Tier Functions ──────────────────────────────────────
+
+// 层级徽章颜色映射 / Badge color for learning tier
+function _ltTierColor(tier) {
+  if (!tier) return 'neutral';
+  const t = String(tier).toUpperCase();
+  if (t === 'L0') return 'neutral';
+  if (t === 'L1') return 'good';
+  if (t === 'L2') return 'good';
+  if (t === 'L3') return 'info';
+  return 'warn'; // L4+
+}
+
+// loadLearningTier: 加载学习层级状态
+// Load learning tier status from server
+async function loadLearningTier() {
+  try {
+    // 调用 governance.js 中的 govGetLearningTier()
+    // Call govGetLearningTier() from governance.js
+    const d = await govGetLearningTier();
+    if (!d || !d.ok) {
+      ocSetHtml('lt-tier', ocChip('Unavailable / 不可用', 'neutral'));
+      ocSetText('lt-obs', '--');
+      ocSetText('lt-winrate', '--');
+      ocSetHtml('lt-eligible', ocChip('Unknown / 未知', 'neutral'));
+      return;
+    }
+
+    const data = d.data || d;
+    const tier = data.current_tier || 'L0';
+    const obsCount = data.observation_count != null ? data.observation_count : 0;
+    const winRate = data.win_rate != null ? data.win_rate : null;
+    const eligible = data.eligible_for_promotion === true;
+    const nextReqs = data.next_tier_requirements || {};
+
+    // 渲染层级、观测数、胜率 / Render tier, observation count, win rate
+    ocSetHtml('lt-tier', ocChip(ocEsc(tier), _ltTierColor(tier)));
+    ocSetText('lt-obs', String(obsCount));
+    ocSetText('lt-winrate', winRate != null ? (winRate * 100).toFixed(1) + '%' : '--');
+
+    // 进度条：基于下一层级所需观测数 / Progress bar based on next tier observation requirement
+    const obsRequired = nextReqs.observations || nextReqs.min_observations || 0;
+    const pct = obsRequired > 0 ? Math.min(100, Math.round((obsCount / obsRequired) * 100)) : (eligible ? 100 : 0);
+    document.getElementById('lt-progress').style.width = pct + '%';
+
+    // 资格徽章 / Eligibility badge
+    ocSetHtml('lt-eligible', ocChip(
+      eligible ? '可晋升 Eligible' : '未达标 Not yet',
+      eligible ? 'good' : 'neutral'
+    ));
+
+    // 晋升按钮仅在可晋升时显示 / Show promote button only when eligible
+    const btn = document.getElementById('btn-promote');
+    if (btn) btn.style.display = eligible ? '' : 'none';
+
+    // A3: Dynamically filter promote dropdown to only show tiers ABOVE current
+    // A3: 动态过滤晋升下拉，只显示高于当前层级的选项（防止误操作降级）
+    const tierSelect = document.getElementById('promote-tier');
+    if (tierSelect) {
+      const tierOrder = { L0: 0, L1: 1, L2: 2, L3: 3, L4: 4, L5: 5 };
+      const currentNum = tierOrder[tier] != null ? tierOrder[tier] : 0;
+      const allTiers = [
+        { value: 'L1', label: 'L1 — Local Ollama' },
+        { value: 'L2', label: 'L2 — Cloud AI' },
+        { value: 'L3', label: 'L3 — Advanced AI' },
+        { value: 'L4', label: 'L4 — Strategy Optimizer' },
+        { value: 'L5', label: 'L5 — Full Autonomy' },
+      ];
+      tierSelect.innerHTML = '<option value="">-- Select Tier --</option>';
+      for (const t of allTiers) {
+        const tNum = tierOrder[t.value] || 0;
+        if (tNum > currentNum) {
+          tierSelect.innerHTML += '<option value="' + t.value + '">' + t.label + '</option>';
+        }
+      }
+    }
+
+  } catch (e) {
+    console.warn('Learning tier load failed:', e);
+    ocSetHtml('lt-tier', ocChip('Error / 错误', 'bad'));
+  }
+}
+
+// showPromoteModal / hidePromoteModal: 晋升确认弹窗
+// Show/hide the manual tier promotion modal
+function showPromoteModal() {
+  const el = document.getElementById('promote-tier');
+  if (el) el.value = '';
+  const re = document.getElementById('promote-reason');
+  if (re) re.value = '';
+  document.getElementById('modal-promote').style.display = 'flex';
+}
+
+function hidePromoteModal() {
+  document.getElementById('modal-promote').style.display = 'none';
+}
+
+// submitPromotion: 提交手动晋升请求
+// Submit a manual learning tier promotion
+async function submitPromotion() {
+  const targetTier = document.getElementById('promote-tier').value;
+  const reason = document.getElementById('promote-reason').value.trim();
+
+  if (!targetTier) {
+    ocToast('Please select a target tier / 请选择目标层级', 'error');
+    return;
+  }
+  if (!reason) {
+    ocToast('Please enter a reason / 请输入原因', 'error');
+    return;
+  }
+
+  // 调用 governance.js 中的 govPromoteLearningTier()
+  // Call govPromoteLearningTier() from governance.js
+  const d = await govPromoteLearningTier(targetTier, reason);
+  if (d && d.ok) {
+    ocToast('Promotion submitted / 晋升请求已提交', 'success');
+    hidePromoteModal();
+    await loadLearningTier();
+  } else {
+    ocToast((d && d.message) ? d.message : 'Promotion failed / 晋升失败', 'error');
+  }
+}
+
+// ─── Events Feed Functions ────────────────────────────────────────
+
+// loadEventsFeed: 加载服务端治理事件流
+// Load governance event history from server
+async function loadEventsFeed(limit) {
+  const lim = limit || 50;
+  const el = document.getElementById('events-feed-content');
+  try {
+    // 调用 governance.js 中的 govGetEvents(limit)
+    // Call govGetEvents(limit) from governance.js
+    const d = await govGetEvents(lim);
+    // Backend: {data: {events: [...], count, limit}} — extract nested array
+    // 后端返回 {data: {events: [...], count, limit}}，提取内层数组
+    const events = (d && d.ok && d.data && Array.isArray(d.data.events)) ? d.data.events : [];
+
+    if (events.length === 0) {
+      el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">No events yet / 暂无事件</p>';
+      return;
+    }
+
+    let html = '';
+    for (const ev of events) {
+      // 服务端事件字段: timestamp/time, event_type/type, description/message
+      // Server event fields: timestamp/time, event_type/type, description/message
+      const ts = ev.timestamp || ev.time || ev.ts;
+      const timeStr = ts ? ocTime(ts) : '--';
+      const evType = ev.event_type || ev.type || 'EVENT';
+      const desc = ev.description || ev.message || ev.msg || '';
+
+      // 根据事件类型选择颜色 / Choose color by event type
+      let chipColor = 'neutral';
+      const evUpper = evType.toUpperCase();
+      if (evUpper.includes('ERROR') || evUpper.includes('FAIL') || evUpper.includes('CIRCUIT')) chipColor = 'bad';
+      else if (evUpper.includes('WARN') || evUpper.includes('ESCALAT') || evUpper.includes('REDUCE')) chipColor = 'warn';
+      else if (evUpper.includes('APPROV') || evUpper.includes('SUCCESS') || evUpper.includes('OK')) chipColor = 'good';
+
+      html += '<div style="padding:8px 0;border-bottom:1px solid var(--border)">';
+      html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
+      html += '<span style="color:var(--text-dim);font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</span>';
+      html += ocChip(ocEsc(evType), chipColor);
+      html += '</div>';
+      if (desc) {
+        html += '<div style="font-size:12px;color:var(--text-dim)">' + ocEsc(desc) + '</div>';
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
+  } catch (e) {
+    console.warn('Events feed load failed:', e);
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">Failed to load events / 事件加载失败</p>';
+  }
 }
 
 function showUnavailable() {
@@ -1003,10 +1562,35 @@ async function loadAll() {
     // Load scope visualization (async, complements auth card)
     loadAuthScope();
 
-    // Detect changes and render incident/audit logs
+    // Detect changes and render incident log (client-side session data)
+    // 检测状态变更并渲染事件时间线（客户端会话数据）
     detectChanges(_currentStatus);
     renderIncidentLog();
-    renderAuditTrail();
+
+    // Load audit trail from server (with client-side fallback)
+    // 从服务端加载持久化审计日志（客户端回退）
+    loadAuditTrail().catch(e => console.warn('Audit trail load failed:', e));
+
+    // Load lease detail list from server
+    // 从服务端加载租约详情列表
+    // Backend returns {data: {active_count, total_tracked, leases: [...], all_leases: [...]}}
+    // 后端返回 {data: {active_count, total_tracked, leases: [...], all_leases: [...]}}
+    govGetLeases().then(ld => {
+      const leaseList = (ld && ld.ok && ld.data && Array.isArray(ld.data.leases)) ? ld.data.leases : [];
+      renderLeaseList(leaseList);
+    }).catch(e => console.warn('Lease list load failed:', e));
+
+    // Load Paper→Live Gate status
+    // 加载 Paper→Live 门禁状态
+    loadPaperLiveGate().catch(e => console.warn('PLG load failed:', e));
+
+    // Load learning tier status
+    // 加载学习层级状态
+    loadLearningTier().catch(e => console.warn('Learning tier load failed:', e));
+
+    // Load governance events feed
+    // 加载治理事件流
+    loadEventsFeed().catch(e => console.warn('Events feed load failed:', e));
 
     // Load pending approvals and whitelist (async, non-blocking)
     loadPendingApprovals().catch(e => console.warn('Failed to load pending approvals:', e));
@@ -1019,7 +1603,7 @@ loadAll();
 ocStartRefresh(loadAll, 10000);
 
 // Close modals on background click
-['modal-approve', 'modal-override', 'modal-reconcile', 'modal-remove-whitelist'].forEach(id => {
+['modal-approve', 'modal-override', 'modal-reconcile', 'modal-remove-whitelist', 'modal-promote'].forEach(id => {
   const el = $(id);
   if (el) {
     el.addEventListener('click', function(e) {

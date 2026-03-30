@@ -1196,11 +1196,31 @@ def get_active_leases(
         if status is None:
             raise HTTPException(status_code=500, detail="Governance status unavailable")
 
-        # Note: Actual lease details would be fetched from hub._lease_sm
+        # 从 DecisionLeaseStateMachine 读取真实租约列表
+        # Fetch real lease list from DecisionLeaseStateMachine
+        all_leases: list[dict] = []
+        live_leases: list[dict] = []
+        if hub._lease_sm is not None:
+            # get_all() 返回所有状态的租约（含终态）
+            # get_all() returns leases in all states (including terminal)
+            try:
+                all_leases = [lease.to_dict() for lease in hub._lease_sm.get_all()]
+            except Exception as _e:
+                logger.warning(f"Failed to fetch all leases: {_e}")
+            # get_live() 仅返回 ACTIVE + BRIDGED 的活跃租约
+            # get_live() returns only ACTIVE and BRIDGED leases
+            try:
+                live_leases = [lease.to_dict() for lease in hub._lease_sm.get_live()]
+            except Exception as _e:
+                logger.warning(f"Failed to fetch live leases: {_e}")
+
         lease_detail = {
             "active_count": status.active_leases_count,
             "total_tracked": status.total_leases_tracked,
-            "leases": [],  # Populated from hub._lease_sm.get_all_leases() in full impl
+            # 活跃租约（ACTIVE + BRIDGED）/ Live leases (ACTIVE + BRIDGED only)
+            "leases": live_leases,
+            # 全量快照（所有状态）/ Full snapshot (all states including terminal)
+            "all_leases": all_leases,
         }
 
         return GovernanceResponse.success(data=lease_detail, message="leases_list")

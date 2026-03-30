@@ -70,8 +70,30 @@ async function govPostOverride(targetLevel, reason) {
 
 async function govPostReconcile(reason) {
   // POST /api/v1/governance/reconcile
+  // 对账前先拉取 paper engine 当前状态填充 paper_state
+  // Before reconciling, fetch current paper engine metrics to populate paper_state
+
+  let paperState = {};
+  try {
+    // 从 /api/v1/paper/status 获取仓位、余额和订单数量
+    // Fetch positions, balance, total_orders from paper engine status
+    const ps = await ocApi('/api/v1/paper/status');
+    if (ps && ps.data) {
+      const d = ps.data;
+      paperState = {
+        positions: d.positions || [],
+        balance: d.balance !== undefined ? d.balance : null,
+        total_orders: d.total_orders !== undefined ? d.total_orders : null,
+      };
+    }
+  } catch (_e) {
+    // paper status 获取失败时回退到空对象，不阻断对账
+    // If paper status fetch fails, fall back to empty dict — do not block reconcile
+    paperState = {};
+  }
+
   return ocPost('/api/v1/governance/reconcile', {
-    paper_state: {},  // In full impl, would be populated from session state
+    paper_state: paperState,
     demo_state: null,
     reason: reason || 'manual_trigger',
   });
@@ -85,6 +107,34 @@ async function govGetLeases() {
 async function govPostHealthCheck() {
   // POST /api/v1/governance/health-check
   return ocPost('/api/v1/governance/health-check', {});
+}
+
+async function govGetAuditChanges(limit) {
+  // GET /api/v1/governance/audit/changes — real persistent audit log
+  // 获取真实持久化审计变更日志（ChangeAuditLog 写盘记录）
+  return ocApi('/api/v1/governance/audit/changes?limit=' + (limit || 100));
+}
+
+async function govGetEvents(limit) {
+  // GET /api/v1/governance/events — server-side governance event history
+  // 获取服务端治理事件历史（跨重启持久化）
+  return ocApi('/api/v1/governance/events?limit=' + (limit || 50));
+}
+
+async function govGetLearningTier() {
+  // GET /api/v1/governance/learning-tier/status — tier level, metrics, promotion eligibility
+  // 获取学习层级状态：当前层级、观察数、胜率、晋升资格
+  return ocApi('/api/v1/governance/learning-tier/status');
+}
+
+async function govPromoteLearningTier(targetTier, reason) {
+  // POST /api/v1/governance/learning-tier/promote — operator manual promotion
+  // 操作员手动晋升学习层级（需 Operator 角色）
+  return ocPost('/api/v1/governance/learning-tier/promote', {
+    target_tier: targetTier,
+    reason: reason || 'manual_operator_promotion',
+    approved_by: 'operator',
+  });
 }
 
 async function govGetPendingRecovery() {
