@@ -24,12 +24,12 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-30 Round 2 Batch 3)
+## 当前状态 (2026-03-30 Round 2 Batch 4)
 
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         1,843+（含 46 治理 Hub + 92 集成 + 45 Scout 集成 · 2 跳过）
+测试:         1,858+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 · 2 跳过）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
@@ -38,10 +38,12 @@ API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时
 Scout:        ScoutAgent + MessageBus 已接入 PipelineBridge（Plan A2 本地代理模式）
-合规度:       ~88%（Round 2 审计后 · 接入率 12/22 模组 = 55%）
+学习晋升:     L1→L2 自动晋升已接通（PipelineBridge → promote_tier()）
+接入率:       19/22 = 86%（Batch 4 审计修正 · 仅 3 模组真正 STANDALONE）
+合规度:       ~88%
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）**
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）** + **Learning 自动晋升**
 
 ---
 
@@ -213,43 +215,56 @@ srv/
 
 **Medium：** 影子决策构建器、交易归因、事件队列、组合风控接入、变更审计与审计持久化厘清
 
-### 接入率校准
+### 接入率校准（Batch 4 重新审计 · 2026-03-30）
 
 ```
-已接入运行时（WIRED · 11/22）:
-  ✅ governance_hub.py         — 4 核心 SM 编排 + 跨 SM 级联 + 审计
-  ✅ governance_routes.py      — 8 治理 API 端点
-  ✅ risk_manager.py           — 仓位大小 / P0/P1 风控
-  ✅ pipeline_bridge.py        — 策略→治理 gate→订单→执行→观察
-  ✅ paper_trading_engine.py   — 订单管理 + is_authorized + acquire_lease
-  ✅ market_data_dispatcher.py — WebSocket 行情分发
-  ✅ market_regime.py          — 多时间框架 regime 检测
-  ✅ data_source_enforcer.py   — 数据源分类
-  ✅ perception_data_plane.py  — 认知标记框架（内部已接）
-  ✅ audit_persistence.py      — GovernanceHub 审计写盘
-  ✅ reconciliation_engine.py  — GovernanceHub.reconcile() 调用
-
-已接入运行时（Round 2 新增 · 12/22）:
+已接入运行时（WIRED · 19/22）:
+  ── Phase 3 基础（11 模组）──
+  ✅ governance_hub.py             — 4 核心 SM 编排 + 跨 SM 级联 + 审计
+  ✅ governance_routes.py          — 8 治理 API 端点
+  ✅ risk_manager.py               — 仓位大小 / P0/P1 风控
+  ✅ pipeline_bridge.py            — 策略→治理 gate→订单→执行→观察→晋升
+  ✅ paper_trading_engine.py       — 订单管理 + is_authorized + acquire_lease
+  ✅ market_data_dispatcher.py     — WebSocket 行情分发
+  ✅ market_regime.py              — 多时间框架 regime 检测
+  ✅ data_source_enforcer.py       — 数据源分类
+  ✅ perception_data_plane.py      — 认知标记框架（内部已接）
+  ✅ audit_persistence.py          — GovernanceHub 审计写盘
+  ✅ reconciliation_engine.py      — GovernanceHub.reconcile() 调用
+  ── Round 2 Batch 3 新增（2 模组）──
   ✅ multi_agent_framework.py      — ScoutAgent + MessageBus 接入 PipelineBridge + scout_routes REST
   ✅ trade_attribution.py          — TradeAttributionEngine 接入 PipelineBridge._emit_round_trip()
+  ── Batch 4 审计发现已接入（6 模组，原标记 STANDALONE 实为误差）──
+  ✅ learning_tier_gate.py         — 注入 ENGINE + GovernanceHub + PipelineBridge 自动晋升
+  ✅ ttl_enforcer.py               — 实例化 + 5s daemon sweep + expiry callback
+  ✅ protective_order_manager.py   — 注入 ENGINE（自动创建保护性止损单）
+  ✅ portfolio_risk_control.py     — 注入 RISK_MANAGER（关联曝险 + 仓位检查）
+  ✅ recovery_approval_gate.py     — 实例化（恢复审批门禁）
+  ✅ change_audit_log.py           — 注入 GovernanceHub + RiskManager + ENGINE
+  ── 共享但非独立模组 ──
+  ✅ shadow_decision_builder.py    — 导入 + ShadowDecisionConsumer 创建 + API 路由
 
-独立存在（STANDALONE · 10/22）:
-  ⬜ oms_state_machine.py          ← GAP-H1
-  ⬜ learning_tier_gate.py         ← GAP-H2
-  ⬜ paper_live_gate.py            ← GAP-H5
-  ⬜ ttl_enforcer.py               ← GAP-H6
-  ⬜ protective_order_manager.py
-  ⬜ portfolio_risk_control.py
-  ⬜ recovery_approval_gate.py
-  ⬜ shadow_decision_builder.py
-  ⬜ change_audit_log.py
-  ⬜ scout_routes.py（代码已就绪，独立于 paper trading 运行时）
+真正独立存在（STANDALONE · 3/22）:
+  ⬜ oms_state_machine.py          ← SM-03 未串联到 Paper Trading Engine（用独立状态名）
+  ⬜ paper_live_gate.py            ← Paper→Live 门控未接入授权工作流
+  ⬜ scout_routes.py               ← 代码已就绪，独立于 paper trading 运行时
 
-接入率:  12/22 = 55%（Round 2 从 50% 提升到 55%）
-合规度:  ~88%（Round 2 审计后）
+接入率:  19/22 = 86%（Batch 4 审计后 · 从误标 55% 修正）
+合规度:  ~88%
 ```
 
 ### 下一步优先级（继续推进路线图）
+
+**★ 最高优先：修正 0% 胜率（需 1-2 sessions）**
+
+R1 根因分析结论：0% 胜率非 bug，是**风控参数结构性错配**。
+
+| 根因 | 影响 | 修复 |
+|------|------|------|
+| 3% 追踪止损太紧 | 40-60% 盈利被市场噪音吃掉 | 加宽至 5% 或 ATR 动态计算 |
+| 0.11% 手续费（双向 taker） | 每笔需立即 +0.11% 才保本 | 入场改 limit order（maker 0.02%） |
+| Squeeze regime 0.3x 时间乘数 | 14h 强制平仓，均值回归未完成 | 调整为 1.0x |
+| 无交易前 edge 检查 | 数学不可行的交易也被执行 | 添加 edge > 1.5× fees 过滤器 |
 
 **Phase 4: 多 Agent 推进（需 3-4 sessions）**
 
@@ -259,9 +274,9 @@ srv/
 4. **Executor Agent** — 包装 PaperTradingEngine.submit_order()，提供执行质量反馈
 5. **Conductor 实例化** — 在 phase2_strategy_routes.py 创建 Conductor 单例，注册全部 Agent，驱动 dispatch_market_event
 
-**Phase 5: 学习管线打通（需 2-3 sessions）**
+**Phase 5: 学习管线打通（✅ 已部分完成）**
 
-1. **Learning Tier Gate 接入** — round_trip_complete → check_promotion() → L1→L2 自动晋升
+1. ~~**Learning Tier Gate 接入**~~ ✅ Batch 4 已完成 — PipelineBridge._emit_round_trip() → _try_learning_promotion() → promote_tier()
 2. **L2 触发条件** — observations ≥ 500 + win_rate ≥ 20%（当前 0%）→ 需先修正策略胜率
 3. **L2→L3 需 Analyst 产出 PatternInsight** — 依赖 Phase 4 完成 Analyst Agent
 4. **L4/L5 需 Operator 审批** — 接入 GovernanceHub 授权流

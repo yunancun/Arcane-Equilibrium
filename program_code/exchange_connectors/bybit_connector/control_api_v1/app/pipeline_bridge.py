@@ -98,6 +98,7 @@ class PipelineBridge:
         self._trade_attribution = None  # L1.01: Set externally for trade attribution / 交易归因引擎
         self._scout_agent = None  # T2.07: Set externally for ScoutAgent local market intelligence / Scout 代理
         self._message_bus = None  # T2.07: Set externally for inter-agent communication / 消息总线
+        self._learning_tier_gate = None  # EX-05 §3: Set externally for learning tier auto-promotion / 学习等级自动晋升门控
 
         self._stats = {
             "ticks_received": 0,
@@ -127,6 +128,11 @@ class PipelineBridge:
         # H1: track open positions so StopManager can fire / H1：追踪开仓用于止损
         # {"{strategy}:{symbol}": {"side": ..., "entry_price": ..., "qty": ..., "entry_ts_ms": ..., "regime": ...}}
         self._open_positions: dict[str, dict[str, Any]] = {}
+        # EX-05: Track trade outcomes for learning tier gate metrics / EX-05：追踪交易结果用于学习等级门控指标
+        self._learning_stats = {
+            "total_trades": 0,
+            "winning_trades": 0,
+        }
         logger.info("PipelineBridge initialized / 管线桥接器初始化完成")
 
     def set_telegram(self, alerter: Any) -> None:
@@ -168,6 +174,13 @@ class PipelineBridge:
     def set_message_bus(self, bus: Any) -> None:
         """Set MessageBus for inter-agent communication / 设置消息总线用于代理间通信"""
         self._message_bus = bus
+
+    def set_learning_tier_gate(self, gate: Any) -> None:
+        """
+        Set LearningTierGate for auto-promotion of learning tiers.
+        为学习等级自动晋升设置 LearningTierGate。
+        """
+        self._learning_tier_gate = gate
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -638,6 +651,91 @@ class PipelineBridge:
             except Exception:
                 logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
 
+    def _try_learning_promotion(self, close_pnl: float) -> None:
+        """
+        EX-05 §3: Attempt to promote learning tier based on trade outcome.
+        根据交易结果尝试晋升学习等级。
+
+        This is called after each round-trip completion to:
+        1. Record the trade outcome (win/loss) and update local stats
+        2. Update tier metrics (observation_count, win_rate, etc.)
+        3. Check for promotion eligibility and auto-promote if eligible
+
+        L1→L2 promotion requires:
+          - observation_count >= 500
+          - win_rate >= 20%
+
+        Non-fatal if gate is not set or if promotion fails.
+
+        在每个 round-trip 完成后调用以：
+        1. 记录交易结果（赢/亏）并更新本地统计
+        2. 更新等级指标（观察计数、胜率等）
+        3. 检查晋升资格并在符合条件时自动晋升
+
+        L1→L2 晋升需要：
+          - 观察计数 >= 500
+          - 胜率 >= 20%
+
+        如果未设置门控或晋升失败，则为非致命。
+
+        Args:
+            close_pnl: Closed PnL of the completed trade (positive = win, negative/zero = loss)
+        """
+        if not self._learning_tier_gate:
+            return
+
+        try:
+            # Determine win/loss: close_pnl > 0 means win, otherwise loss
+            # 确定 win/loss：close_pnl > 0 表示赢，否则表示亏
+            win = close_pnl > 0
+
+            # Update local learning stats for this bridge instance
+            # 更新此桥接器实例的本地学习统计
+            with self._lock:
+                self._learning_stats["total_trades"] += 1
+                if win:
+                    self._learning_stats["winning_trades"] += 1
+                total = self._learning_stats["total_trades"]
+                wins = self._learning_stats["winning_trades"]
+
+            # Calculate win_rate from local stats
+            # 从本地统计计算胜率
+            win_rate = wins / total if total > 0 else 0.0
+
+            # Update metrics in the gate
+            # 更新门控中的指标
+            self._learning_tier_gate.update_metrics(
+                observation_count=total,
+                win_rate=win_rate,
+            )
+
+            # Attempt promotion to next tier if eligible
+            # 如果符合条件，尝试晋升到下一个等级
+            next_tier_method = getattr(self._learning_tier_gate, '_next_tier', None)
+            if next_tier_method:
+                from .learning_tier_gate import LearningTier
+                current = self._learning_tier_gate.current_tier
+                next_tier = next_tier_method(current)
+
+                if next_tier > current:
+                    eligible, reasons = self._learning_tier_gate.check_tier_eligibility(next_tier)
+                    if eligible:
+                        try:
+                            self._learning_tier_gate.promote_tier(
+                                next_tier,
+                                initiator="LearningGate",
+                                reason=f"auto_promotion from {current.name} to {next_tier.name}",
+                            )
+                            logger.info(
+                                "Learning tier auto-promoted: %s → %s / 学习等级自动晋升",
+                                current.name,
+                                next_tier.name,
+                            )
+                        except Exception as e:
+                            logger.debug("Learning tier promotion error (non-fatal): %s", e)
+        except Exception as e:
+            logger.debug("Learning tier gate error (non-fatal): %s", e)
+
     def _emit_round_trip(self, symbol: str, strategy_name: str, exit_price: float, close_pnl: float) -> None:
         """
         Core round-trip completion handler — shared by intent-path and tick-path closes.
@@ -738,6 +836,11 @@ class PipelineBridge:
                 )
             except Exception as e:
                 logger.debug("Trade attribution error (non-fatal): %s", e)
+
+        # EX-05 §3: Learning Tier Auto-Promotion / EX-05 §3：学习等级自动晋升
+        # Record trade outcome and check for promotion eligibility
+        # 记录交易结果并检查晋升资格
+        self._try_learning_promotion(close_pnl)
 
         logger.info(
             "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",

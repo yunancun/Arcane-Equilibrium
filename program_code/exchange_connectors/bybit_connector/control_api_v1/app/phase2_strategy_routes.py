@@ -264,7 +264,7 @@ try:
         logger.warning("Could not inject TradeAttributionEngine: %s", e)
 
     # --- T2.07: ScoutAgent + MessageBus injection (Plan A2) ---
-    # T2.07：Scout 代理 + 消息总线注入管线桥接器（方案 A2）
+    # T2.07：Scout 代理 + 消息总线注入管線桥接器（方案 A2）
     try:
         if PIPELINE_BRIDGE is not None:
             PIPELINE_BRIDGE.set_scout_agent(SCOUT_AGENT)
@@ -272,6 +272,19 @@ try:
             logger.info("ScoutAgent + MessageBus injected into PipelineBridge / Scout 代理 + 消息总线已注入管线桥接器")
     except Exception as e:
         logger.warning("Could not inject ScoutAgent/MessageBus: %s", e)
+
+    # --- EX-05: LearningTierGate injection into PipelineBridge ---
+    # EX-05：学习等级门控注入管线桥接器，以支持 L1→L2→L3... 自动晋升
+    try:
+        from .paper_trading_routes import LEARNING_TIER_GATE as _LTG_REF
+        if PIPELINE_BRIDGE is not None and _LTG_REF is not None:
+            PIPELINE_BRIDGE.set_learning_tier_gate(_LTG_REF)
+            logger.info("LearningTierGate injected into PipelineBridge / 学习等级门控已注入管線桥接器")
+        else:
+            if _LTG_REF is None:
+                logger.warning("LEARNING_TIER_GATE is None — auto-promotion disabled / 学习等级门控为 None — 自动晋升已禁用")
+    except (ImportError, Exception) as e:
+        logger.warning("Could not inject LearningTierGate into PipelineBridge: %s", e)
 
 except ImportError:
     PIPELINE_BRIDGE = None
