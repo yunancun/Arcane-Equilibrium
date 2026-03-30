@@ -172,6 +172,7 @@ class GovernanceHub:
         self._risk_governor_sm: Optional[Any] = None
         self._lease_sm: Optional[Any] = None
         self._reconciliation_engine: Optional[Any] = None
+        self._oms_sm: Optional[Any] = None  # T5.03: OMS State Machine for order reconciliation
 
         # Tracking for callbacks
         self._callback_errors = 0
@@ -217,6 +218,12 @@ class GovernanceHub:
         with self._lock:
             self._recovery_gate = gate
             logger.info("RecoveryApprovalGate set on GovernanceHub")
+
+    def set_oms_sm(self, oms_sm: Any) -> None:
+        """T5.03: Inject OMS State Machine for order reconciliation / 注入OMS狀態機"""
+        with self._lock:
+            self._oms_sm = oms_sm
+            logger.info("OMS State Machine set on GovernanceHub")
 
     def is_enabled(self) -> bool:
         """
@@ -329,6 +336,17 @@ class GovernanceHub:
                         # Minor mismatch - log but don't escalate
                         if logger.isEnabledFor(logging.DEBUG):
                             logger.debug(f"Reconciliation warning: {report.get('result')}")
+
+                # T5.03: Handle OMS reconciliation state transitions if available
+                if action == "reconciliation_complete" and self._oms_sm is not None:
+                    try:
+                        self._handle_oms_reconciliation(report)
+                    except Exception as e:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"Error handling OMS reconciliation: {e}")
+                        with self._lock:
+                            self._callback_errors += 1
+
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"Incident callback error for action {action}: {e}")
@@ -1055,6 +1073,62 @@ class GovernanceHub:
             return scope in permitted_scopes if permitted_scopes else True
         except Exception:
             return False
+
+    def _handle_oms_reconciliation(self, report: dict[str, Any]) -> None:
+        """
+        T5.03: Handle OMS reconciliation state transitions based on reconciliation report.
+        Based on reconciliation result, call appropriate OMS methods for orders in RECONCILING state.
+        """
+        if self._oms_sm is None:
+            return
+
+        try:
+            overall_result = report.get("overall_result", "").upper()
+
+            # Query orders that are currently in RECONCILING state
+            # This would be called if OMS_SM has a method to get orders by state
+            if hasattr(self._oms_sm, "get_orders_by_state"):
+                reconciling_orders = self._oms_sm.get_orders_by_state("RECONCILING")
+
+                if not reconciling_orders:
+                    return
+
+                # Based on reconciliation result, transition orders appropriately
+                if overall_result == "PASS":
+                    # Reconciliation passed - mark orders as COMPLETED
+                    for order_id in reconciling_orders:
+                        try:
+                            if hasattr(self._oms_sm, "transition"):
+                                from .oms_state_machine import OrderState, OrderInitiator
+                                self._oms_sm.transition(
+                                    order_id,
+                                    OrderState.COMPLETED,
+                                    OrderInitiator.RECONCILIATION_ENGINE,
+                                    reason="Reconciliation passed",
+                                )
+                                logger.info(f"OMS order {order_id} transitioned to COMPLETED after reconciliation")
+                        except Exception as e:
+                            logger.error(f"Failed to complete order {order_id}: {e}")
+
+                elif overall_result in ["MISMATCH_MINOR", "MISMATCH_MAJOR", "FAIL"]:
+                    # Reconciliation failed - mark orders as REJECTED
+                    for order_id in reconciling_orders:
+                        try:
+                            if hasattr(self._oms_sm, "transition"):
+                                from .oms_state_machine import OrderState, OrderInitiator
+                                self._oms_sm.transition(
+                                    order_id,
+                                    OrderState.REJECTED,
+                                    OrderInitiator.RECONCILIATION_ENGINE,
+                                    reason=f"Reconciliation failed: {overall_result}",
+                                )
+                                logger.info(f"OMS order {order_id} transitioned to REJECTED after reconciliation")
+                        except Exception as e:
+                            logger.error(f"Failed to reject order {order_id}: {e}")
+
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error in _handle_oms_reconciliation: {e}")
 
 
 __all__ = ["GovernanceHub", "GovernanceStatus", "GovernanceMode"]
