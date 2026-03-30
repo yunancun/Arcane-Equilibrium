@@ -65,6 +65,11 @@ RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
 PERCEPTION_PLANE = PerceptionPlane()
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
+# T2.03: Initialize and inject ProtectiveOrderManager / 初始化并注入保护性订单管理器
+from .protective_order_manager import ProtectiveOrderManager  # noqa: E402
+PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager()
+ENGINE.set_protective_order_manager(PROTECTIVE_ORDER_MANAGER)
+
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
 # 治理集線器（授權 + 風控 + 租約 + 對賬 集成）
 from .governance_hub import GovernanceHub  # noqa: E402

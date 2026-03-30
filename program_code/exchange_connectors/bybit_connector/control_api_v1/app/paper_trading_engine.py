@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .protective_order_manager import ProtectiveOrderManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -678,6 +680,7 @@ class PaperTradingEngine:
         self.risk_manager = risk_manager  # Optional RiskManager for pre-order + tick checks
         self._partial_fill_rng = partial_fill_rng  # Pass random.Random(seed) for deterministic tests
         self._governance_hub = None  # Optional GovernanceHub for governance integration
+        self._protective_order_manager = None  # Optional ProtectiveOrderManager for local triggers
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -702,6 +705,10 @@ class PaperTradingEngine:
     def set_governance_hub(self, hub: Any) -> None:
         """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
         self._governance_hub = hub
+
+    def set_protective_order_manager(self, pom: Any) -> None:
+        """Inject ProtectiveOrderManager for automatic stop-loss / 注入保護性訂單管理器"""
+        self._protective_order_manager = pom
 
     # ── Session Management / Session 管理 ──
 
@@ -966,6 +973,25 @@ class PaperTradingEngine:
                         sess["current_paper_balance_usdt"] = project_balance_after_fill(
                             sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
                         )
+                        # Create protective order for newly opened position
+                        if self._protective_order_manager and symbol in state["positions"]:
+                            try:
+                                from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
+                                if side == SIDE_BUY:
+                                    pom_side = ProtectiveOrderSide.LONG_POSITION
+                                else:
+                                    pom_side = ProtectiveOrderSide.SHORT_POSITION
+                                self._protective_order_manager.create_protective_order(
+                                    symbol=symbol,
+                                    side=pom_side,
+                                    order_type=ProtectiveOrderType.HARD_STOP_LOSS,
+                                    entry_price=fill_price,
+                                    trigger_price_pct=2.0,
+                                    quantity=qty,
+                                )
+                                self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
+                            except Exception as e:
+                                logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
                         self._audit(state, "fok_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
                         _transition_order(order, ORDER_STATE_CANCELED)
@@ -986,6 +1012,25 @@ class PaperTradingEngine:
                         sess["current_paper_balance_usdt"] = project_balance_after_fill(
                             sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
                         )
+                        # Create protective order for newly opened position
+                        if self._protective_order_manager and symbol in state["positions"]:
+                            try:
+                                from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
+                                if side == SIDE_BUY:
+                                    pom_side = ProtectiveOrderSide.LONG_POSITION
+                                else:
+                                    pom_side = ProtectiveOrderSide.SHORT_POSITION
+                                self._protective_order_manager.create_protective_order(
+                                    symbol=symbol,
+                                    side=pom_side,
+                                    order_type=ProtectiveOrderType.HARD_STOP_LOSS,
+                                    entry_price=fill_price,
+                                    trigger_price_pct=2.0,
+                                    quantity=qty,
+                                )
+                                self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
+                            except Exception as e:
+                                logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
                         self._audit(state, "ioc_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
                         _transition_order(order, ORDER_STATE_CANCELED)
@@ -1015,6 +1060,27 @@ class PaperTradingEngine:
                 _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
                 state["pnl"]["closed_position_pnl"] += close_pnl
                 result["close_pnl"] += close_pnl
+
+                # Create protective order for newly opened position
+                if self._protective_order_manager and symbol in state["positions"]:
+                    try:
+                        from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
+                        # Map paper trading side to protective order side
+                        if side == SIDE_BUY:
+                            pom_side = ProtectiveOrderSide.LONG_POSITION
+                        else:
+                            pom_side = ProtectiveOrderSide.SHORT_POSITION
+                        self._protective_order_manager.create_protective_order(
+                            symbol=symbol,
+                            side=pom_side,
+                            order_type=ProtectiveOrderType.HARD_STOP_LOSS,
+                            entry_price=fill_price,
+                            trigger_price_pct=2.0,  # 2% below entry
+                            quantity=qty,
+                        )
+                        self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
+                    except Exception as e:
+                        logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
 
                 # Update balance
                 sess["current_paper_balance_usdt"] = project_balance_after_fill(
