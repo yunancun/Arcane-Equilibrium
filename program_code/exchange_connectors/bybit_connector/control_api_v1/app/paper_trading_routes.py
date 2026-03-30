@@ -154,6 +154,10 @@ from .recovery_approval_gate import RecoveryApprovalGate  # noqa: E402
 RECOVERY_GATE = RecoveryApprovalGate()
 GOV_HUB.set_recovery_gate(RECOVERY_GATE)
 
+# T2.07: Initialize and inject ScannerRateLimiter / 初始化并注入扫描速率限制器
+from .scanner_rate_limiter import ScannerRateLimiter  # noqa: E402
+SCANNER_RATE_LIMITER = ScannerRateLimiter()
+
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
 # This creates a singleton reference for the governance API routes
 # 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入

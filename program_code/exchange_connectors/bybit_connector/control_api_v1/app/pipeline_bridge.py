@@ -77,6 +77,7 @@ class PipelineBridge:
         self._demo_connector = None  # Set externally if available
         self._governance_hub = None  # Set externally for governance integration
         self._perception_plane = None  # T2.02: Set externally for cognitive honesty checks / 感知平面
+        self._scanner_rate_limiter = None  # T2.07: Set externally for rate limiting / 扫描速率限制器
 
         self._stats = {
             "ticks_received": 0,
@@ -130,6 +131,10 @@ class PipelineBridge:
     def set_perception_plane(self, plane: Any) -> None:
         """Set PerceptionPlane for cognitive honesty checks / 设置感知平面用于认知诚实检查"""
         self._perception_plane = plane
+
+    def set_scanner_rate_limiter(self, limiter: Any) -> None:
+        """Set ScannerRateLimiter for rate limiting scans / 设置扫描速率限制器"""
+        self._scanner_rate_limiter = limiter
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -231,10 +236,21 @@ class PipelineBridge:
 
         # 3. Periodic volume refresh from REST API (every 60 real seconds, time-driven)
         # 定期从 REST API 刷新成交量（每 60 秒真实时间，时间驱动）
+        # T2.07: Check scanner rate limiter before full market scan
         _now = time.time()
         if _now - self._last_volume_refresh_ts >= 60.0:
-            self._refresh_kline_volume()
-            self._last_volume_refresh_ts = _now
+            # Check if rate limiter permits scan
+            if self._scanner_rate_limiter:
+                can_scan, reason = self._scanner_rate_limiter.can_scan()
+                if can_scan:
+                    self._refresh_kline_volume()
+                    self._scanner_rate_limiter.record_scan_complete()
+                    self._last_volume_refresh_ts = _now
+                # else: skip scan due to rate limit, will try again next tick
+            else:
+                # No rate limiter installed, allow scan by default
+                self._refresh_kline_volume()
+                self._last_volume_refresh_ts = _now
 
         # 4. Periodic funding rate check (every 300 real seconds = 5 minutes, time-driven)
         # 定期 funding rate 检查（每 300 秒真实时间 = 5 分钟，时间驱动）
