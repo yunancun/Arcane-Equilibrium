@@ -964,8 +964,13 @@ class GovernanceHub:
 
     def _on_reconciliation_mismatch(self, severity: str, details: dict[str, Any]) -> None:
         """
-        Callback: reconciliation found mismatch → escalate risk if major.
-        回调：对账发现不一致 → 如果重大则升级风险。
+        T5.06: Callback: reconciliation found mismatch → escalate risk based on severity.
+        回调：对账发现不一致 → 根据严重性升级风险。
+
+        Severity handling:
+        - MISMATCH_MINOR: log warning only
+        - MISMATCH_MAJOR: escalate to DEFENSIVE or REDUCED
+        - FATAL: escalate to CIRCUIT_BREAKER + cascade (freeze auth, revoke leases)
 
         Optimized to minimize lock duration.
         """
@@ -975,48 +980,75 @@ class GovernanceHub:
         try:
             current_level = None
             auth_ids_to_freeze = []
+            target_risk_level = None
 
             with self._lock:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(f"Reconciliation mismatch ({severity}): {details}")
                 self._incident_count += 1
 
-                # MAJOR mismatch → escalate risk (collect state)
-                if severity == "MAJOR" and self._risk_governor_sm is not None:
-                    try:
-                        current_level = self._risk_governor_sm.get_state().level
-                    except Exception as e:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error getting risk level for major mismatch: {e}")
-                        self._callback_errors += 1
+                # T5.06: Determine escalation level based on severity / 根据严重性确定升级级别
+                if severity == "MISMATCH_MINOR":
+                    # Minor mismatch - log warning only
+                    logger.warning(f"Reconciliation warning (minor): {details}")
+                    return
 
-                # FATAL mismatch → collect auth IDs
-                if severity == "FATAL" and self._authorization_sm is not None:
-                    try:
-                        effective_auths = self._authorization_sm.get_effective()
-                        auth_ids_to_freeze = [auth.authorization_id for auth in effective_auths]
-                    except Exception as e:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error collecting auth IDs for fatal mismatch: {e}")
-                        self._callback_errors += 1
+                elif severity == "MISMATCH_MAJOR":
+                    # Major mismatch → escalate risk to DEFENSIVE or REDUCED
+                    if self._risk_governor_sm is not None:
+                        try:
+                            from .risk_governor_state_machine import RiskLevel
+                            current_level = self._risk_governor_sm.get_state().level
+                            # Escalate to REDUCED or DEFENSIVE based on current level
+                            if current_level < RiskLevel.REDUCED:
+                                target_risk_level = RiskLevel.REDUCED
+                            else:
+                                target_risk_level = RiskLevel.DEFENSIVE
+                        except Exception as e:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(f"Error getting risk level for major mismatch: {e}")
+                            self._callback_errors += 1
+
+                elif severity == "FATAL":
+                    # Fatal mismatch → escalate to CIRCUIT_BREAKER + cascade
+                    if self._risk_governor_sm is not None:
+                        try:
+                            from .risk_governor_state_machine import RiskLevel
+                            target_risk_level = RiskLevel.CIRCUIT_BREAKER
+                        except Exception as e:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(f"Error setting fatal escalation: {e}")
+                            self._callback_errors += 1
+
+                    # Collect auth IDs for freeze
+                    if self._authorization_sm is not None:
+                        try:
+                            effective_auths = self._authorization_sm.get_effective()
+                            auth_ids_to_freeze = [auth.authorization_id for auth in effective_auths]
+                        except Exception as e:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(f"Error collecting auth IDs for fatal mismatch: {e}")
+                            self._callback_errors += 1
                     self._mode = GovernanceMode.FROZEN
 
             # Execute escalations outside lock
-            if severity == "MAJOR" and current_level is not None:
+            if target_risk_level is not None:
                 try:
-                    from .risk_governor_state_machine import RiskLevel, RiskInitiator
+                    from .risk_governor_state_machine import RiskInitiator
                     with self._lock:
-                        if self._risk_governor_sm is not None and current_level < RiskLevel.MANUAL_REVIEW:
+                        if self._risk_governor_sm is not None:
                             self._risk_governor_sm.escalate_to(
-                                RiskLevel(min(current_level + 1, RiskLevel.MANUAL_REVIEW)),
-                                reason="reconciliation_mismatch_major",
+                                target_risk_level,
+                                reason=f"reconciliation_{severity.lower()}",
                                 initiator=RiskInitiator.RISK_GOVERNOR,
                             )
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(f"Risk escalated to {target_risk_level.name} due to {severity}")
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error escalating risk for major mismatch: {e}")
+                        logger.debug(f"Error escalating risk for {severity}: {e}")
 
             if auth_ids_to_freeze:
                 try:
