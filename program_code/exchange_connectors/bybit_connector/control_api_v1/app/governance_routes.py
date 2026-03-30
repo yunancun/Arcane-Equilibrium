@@ -1218,6 +1218,119 @@ def get_governance_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@governance_router.get("/learning-tier/status")
+def get_learning_tier_status(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    T10.04: Retrieve current learning tier gate status and capabilities.
+    检索当前学习层级门控状态和能力。
+
+    Returns tier level, available capabilities, and promotion history.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        tier_status = hub.get_learning_tier_status()
+        return GovernanceResponse.success(
+            data=tier_status,
+            message="learning_tier_status_retrieved"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving learning tier status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/learning-tier/promote")
+def promote_learning_tier(
+    request: dict[str, Any],
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    T10.04: Manually promote learning tier (operator only).
+    手动晋升学习层级（仅限操作员）。
+
+    Body: {target_tier: int, reason: str, approved_by: str}
+    """
+    _require_operator_role(actor)
+
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        gate = hub._learning_tier_gate
+        if gate is None:
+            raise HTTPException(status_code=503, detail="LearningTierGate not configured")
+
+        target_tier = request.get("target_tier")
+        reason = html.escape(str(request.get("reason", "Manual promotion")))
+        approved_by = html.escape(str(request.get("approved_by", "operator")))
+
+        if target_tier is None or not isinstance(target_tier, int):
+            raise HTTPException(status_code=400, detail="target_tier (int) is required")
+
+        result = gate.promote_tier(
+            target_tier=target_tier,
+            reason=reason,
+            initiator_name=approved_by,
+        )
+
+        return GovernanceResponse.success(
+            data={"promoted": result is not None, "target_tier": target_tier},
+            message="learning_tier_promotion_processed"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error promoting learning tier: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.get("/oms/orders")
+def get_oms_orders(
+    state: str | None = None,
+    limit: int = 50,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    T10.05: Retrieve OMS order states for governance visibility.
+    检索 OMS 订单状态以提供治理可见性。
+
+    Query Parameters:
+      - state: Optional filter by OrderState name (e.g., "PENDING", "RECONCILING")
+      - limit: Maximum number of orders to return (default 50)
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        if limit < 1 or limit > 500:
+            limit = min(max(limit, 1), 500)
+
+        orders = hub.get_oms_orders(state=state, limit=limit)
+
+        return GovernanceResponse.success(
+            data={
+                "orders": orders,
+                "count": len(orders),
+                "state_filter": state,
+                "limit": limit,
+            },
+            message="oms_orders_retrieved"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving OMS orders: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @governance_router.post("/health-check")
 def governance_health_check(
     actor: Any = Depends(_get_auth_actor()),

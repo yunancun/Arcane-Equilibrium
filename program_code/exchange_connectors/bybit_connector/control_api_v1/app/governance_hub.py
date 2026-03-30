@@ -56,7 +56,7 @@ from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .recovery_approval_gate import RecoveryApprovalGate
-from .governance_events import risk_event, recon_event
+from .governance_events import risk_event, recon_event, auth_event, lease_event
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +253,59 @@ class GovernanceHub:
         with self._lock:
             self._learning_tier_gate = gate
             logger.info("LearningTierGate set on GovernanceHub")
+
+    def check_learning_tier_capability(self, capability: str) -> bool:
+        """
+        T10.03: Check if the current learning tier permits a given capability.
+        检查当前学习层级是否允许指定的能力。
+
+        Args:
+            capability: Name of capability method (e.g. "can_discover_patterns")
+
+        Returns:
+            True if allowed or gate not configured; False if tier too low.
+        """
+        gate = self._learning_tier_gate
+        if gate is None:
+            return True  # Backward-compatible: no gate = no restriction
+        try:
+            method = getattr(gate, capability, None)
+            if method is None:
+                return True  # Unknown capability = allow
+            return bool(method())
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Error checking learning tier capability {capability}: {e}")
+            return False  # Fail-closed
+
+    def get_learning_tier_status(self) -> dict[str, Any]:
+        """
+        T10.04: Return current learning tier state for REST exposure.
+        返回当前学习层级状态供 REST 端点使用。
+        """
+        gate = self._learning_tier_gate
+        if gate is None:
+            return {"available": False, "message": "LearningTierGate not configured"}
+        try:
+            state = gate.export_state()
+            return {
+                "available": True,
+                "current_tier": state.get("current_tier", "UNKNOWN"),
+                "tier_name": state.get("tier_name", "UNKNOWN"),
+                "capabilities": {
+                    "can_record_observations": gate.can_record_observations(),
+                    "can_discover_patterns": gate.can_discover_patterns(),
+                    "can_generate_hypotheses": gate.can_generate_hypotheses(),
+                    "can_design_experiments": gate.can_design_experiments(),
+                    "can_evolve_strategies": gate.can_evolve_strategies(),
+                    "can_propose_strategy_variants": gate.can_propose_strategy_variants(),
+                    "can_auto_deploy_to_paper": gate.can_auto_deploy_to_paper(),
+                    "can_modify_live_config": gate.can_modify_live_config(),
+                },
+                "promotion_history": state.get("promotion_history", []),
+            }
+        except Exception as e:
+            return {"available": True, "error": str(e)}
 
     def is_enabled(self) -> bool:
         """
@@ -644,6 +697,11 @@ class GovernanceHub:
         if not self._enabled or not self._initialized or self._recovery_gate is None:
             return None
 
+        # T10.03: LearningTierGate enforcement — de-escalation requires L4+ (can_evolve_strategies)
+        if not self.check_learning_tier_capability("can_evolve_strategies"):
+            logger.warning(f"De-escalation request denied: learning tier too low for {requested_by}")
+            return None
+
         try:
             from .recovery_approval_gate import RecoveryType
             from .risk_governor_state_machine import RiskLevel
@@ -928,6 +986,41 @@ class GovernanceHub:
             # Return most recent events first (reverse chronological)
             return list(reversed(filtered))[-min(limit, 1000):]
 
+    def get_oms_orders(self, state: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """
+        T10.05: Retrieve OMS orders by state for REST exposure.
+        按状态检索 OMS 订单供 REST 端点使用。
+
+        Args:
+            state: Optional filter by OrderState name (e.g., "PENDING", "RECONCILING")
+            limit: Maximum number of orders to return
+
+        Returns:
+            List of order dictionaries
+        """
+        with self._lock:
+            if self._oms_sm is None:
+                return []
+            try:
+                if state:
+                    from .oms_state_machine import OrderState
+                    target_state = OrderState[state.upper()]
+                    orders = self._oms_sm.get_by_state(target_state)
+                else:
+                    # Return all orders from all states
+                    from .oms_state_machine import OrderState
+                    orders = []
+                    for s in OrderState:
+                        try:
+                            orders.extend(self._oms_sm.get_by_state(s))
+                        except Exception:
+                            pass
+                return orders[:limit]
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Error getting OMS orders: {e}")
+                return []
+
     def _append_governance_event(self, event: dict[str, Any]) -> None:
         """
         T9A.02: Append a governance event to the event stream (internal helper).
@@ -1033,6 +1126,18 @@ class GovernanceHub:
                                 reason=f"Risk escalation to level {new_level}",
                             )
                         self._invalidate_auth_cache()
+                    # T10.01: Emit auth_event for each restricted authorization
+                    for auth_id in auth_ids_to_restrict:
+                        try:
+                            evt = auth_event(
+                                state_from="ACTIVE",
+                                state_to="RESTRICTED",
+                                initiator="GovernanceHub",
+                                message=f"Auth {auth_id} restricted: risk escalation to level {new_level}",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1048,6 +1153,18 @@ class GovernanceHub:
                                 reason=f"Circuit breaker triggered at risk level {new_level}",
                             )
                         self._invalidate_auth_cache()
+                    # T10.01: Emit auth_event for each frozen authorization
+                    for auth_id in auth_ids_to_freeze:
+                        try:
+                            evt = auth_event(
+                                state_from="ACTIVE",
+                                state_to="FROZEN",
+                                initiator="GovernanceHub",
+                                message=f"Auth {auth_id} frozen: circuit breaker at risk level {new_level}",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                     if should_freeze_auth:
                         self._on_auth_frozen()
                 except Exception as e:
@@ -1188,6 +1305,18 @@ class GovernanceHub:
                                 )
                             self._invalidate_auth_cache()
                             self._on_auth_frozen()
+                    # T10.01: Emit auth_event for FATAL recon → freeze cascade
+                    for auth_id in auth_ids_to_freeze:
+                        try:
+                            evt = auth_event(
+                                state_from="ACTIVE",
+                                state_to="FROZEN",
+                                initiator="GovernanceHub",
+                                message=f"Auth {auth_id} frozen: fatal reconciliation mismatch cascade",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1251,6 +1380,19 @@ class GovernanceHub:
                                     approved_by="GovernanceHub",
                                     reason="Authorization frozen",
                                 )
+                    # T10.02: Emit lease_event for each revoked lease
+                    for lease_id in lease_ids:
+                        try:
+                            evt = lease_event(
+                                state_from="ACTIVE",
+                                state_to="REVOKED",
+                                lease_id=lease_id,
+                                initiator="GovernanceHub",
+                                message=f"Lease {lease_id} revoked: authorization frozen cascade",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
