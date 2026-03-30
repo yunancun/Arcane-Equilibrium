@@ -466,7 +466,7 @@ async function loadRiskStatus() {
   elD.textContent = (drawdown * 100).toFixed(1) + '%';
   elD.className = 'oc-metric-val ' + (drawdown > 0.1 ? 'red' : drawdown > 0.05 ? 'yellow' : 'green');
 
-  ocSetText('r-peak', '$' + ocNum(s.peak_balance || s.peak_balance_usdt || s.peak, 2));
+  ocSetText('r-peak', ocBalance(s.peak_balance || s.peak_balance_usdt || s.peak, 2));
 
   const halted = s.session_halted || s.halted || false;
   const elH = $('r-halted');
@@ -595,6 +595,8 @@ async function loadAll() {
 
 loadAll();
 ocStartRefresh(loadAll, 15000);
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>

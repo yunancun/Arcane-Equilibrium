@@ -138,13 +138,13 @@ function renderBalance(raw) {
   }
 
   const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-  ocSetText('d-equity', '$' + ocNum(equity, 2));
+  ocSetText('d-equity', ocBalance(equity, 2));
 
   const available = parseFloat(b.totalAvailableBalance || b.availableBalance || b.available_balance || 0);
-  ocSetText('d-available', '$' + ocNum(available, 2));
+  ocSetText('d-available', ocBalance(available, 2));
 
   const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0);
-  ocSetText('d-margin', '$' + ocNum(margin, 2));
+  ocSetText('d-margin', ocBalance(margin, 2));
 
   const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealized_pnl || 0);
   const elU = $('d-unrealized');
@@ -224,8 +224,8 @@ async function loadComparison() {
   const rows = [
     ['Realized PnL', ocMoney(paperPnl.net_paper_pnl), ocMoney(demoRealized)],
     ['Unrealized PnL', ocMoney(paperPnl.unrealized_pnl), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
-    ['Total Equity', '$' + ocNum(100000 + (paperPnl.net_paper_pnl || 0), 2), '$' + ocNum(parseFloat(demoB.totalEquity || 0), 2)],
-    ['Available Balance', '--', '$' + ocNum(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
+    ['Total Equity', ocBalance(100000 + (paperPnl.net_paper_pnl || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
+    ['Available Balance', '--', ocBalance(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 
   let html = '';
@@ -256,9 +256,9 @@ function loadDemoMetrics(raw) {
   const imRate = parseFloat(b.accountIMRate || 0);
 
   const items = [
-    ['Total Equity', '$' + ocNum(equity, 2)],
-    ['Available Balance', '$' + ocNum(available, 2)],
-    ['Margin Used', '$' + ocNum(marginUsed, 4)],
+    ['Total Equity', ocBalance(equity, 2)],
+    ['Available Balance', ocBalance(available, 2)],
+    ['Margin Used', ocBalance(marginUsed, 4)],
     ['Margin Rate', (imRate * 100).toFixed(2) + '%'],
     ['Unrealized PnL', ocMoney(unrealized)],
     ['Realized PnL', ocMoney(realized)],
@@ -277,6 +277,8 @@ async function loadAll() {
 
 loadAll();
 ocStartRefresh(loadAll, 15000);
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>

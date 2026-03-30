@@ -181,19 +181,28 @@ class TierCapabilities:
 TIER_CAPABILITIES: dict[LearningTier, TierCapabilities] = {
     LearningTier.L1: TierCapabilities(
         can_record_observations=True,
-        description="Post-Trade Review: passive observation recording, basic metrics computation / 复盘：被动记录观察、计算基础指标",
+        can_auto_deploy_to_paper=True,  # L1 can paper-trade to accumulate observations.
+        # Paper trading IS the mechanism for building L1 observations; blocking it at L1
+        # creates a chicken-and-egg problem: no paper trades → no observations → never
+        # reaches L2 → never reaches L3 where paper was previously unlocked.
+        # L1 的纸盘交易是积累观察数据的前提。L3 原有的 can_auto_deploy_to_paper 语义
+        # 保留为"假说驱动的 paper 实验自动部署"，L1/L2 的语义是"正常纸盘交易积累观察"。
+        description="Post-Trade Review: passive observation recording, basic metrics, paper trading / 复盘：被动记录观察、计算基础指标、纸盘交易",
     ),
     LearningTier.L2: TierCapabilities(
         can_record_observations=True,
         can_discover_patterns=True,
-        description="Pattern Discovery: cross-strategy analysis, cost attribution, anomaly detection / 模式发现：跨策略分析、成本归因、异常检测",
+        can_auto_deploy_to_paper=True,  # Retained from L1; L2 continues paper trading
+        # L2 保留纸盘交易能力；在此基础上新增模式发现能力
+        description="Pattern Discovery: cross-strategy analysis, cost attribution, anomaly detection, paper trading / 模式发现：跨策略分析、成本归因、异常检测、纸盘交易",
     ),
     LearningTier.L3: TierCapabilities(
         can_record_observations=True,
         can_discover_patterns=True,
         can_generate_hypotheses=True,
         can_design_experiments=True,
-        can_auto_deploy_to_paper=True,
+        can_auto_deploy_to_paper=True,  # L3 adds hypothesis-driven experiment deployment
+        # L3 新增语义：假说驱动的 paper 实验自动部署（原始设计意图）
         description="Hypothesis & Experiment: generate hypotheses, design paper experiments / 假说实验：生成假说、设计纸上实验",
     ),
     LearningTier.L4: TierCapabilities(

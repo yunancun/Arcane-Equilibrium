@@ -357,14 +357,14 @@ async function loadCost() {
   const todayCost = c.today_cost || c.cost_today || 0;
   const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
   const budget = c.daily_budget || c.budget_limit || 15;
-  ocSetText('a-today', '$' + ocNum(todayCost, 4));
-  ocSetText('a-total', '$' + ocNum(totalCost, 2));
-  ocSetText('a-budget', '$' + ocNum(budget, 2));
+  ocSetText('a-today', ocBalance(todayCost, 4));
+  ocSetText('a-total', ocBalance(totalCost, 2));
+  ocSetText('a-budget', ocBalance(budget, 2));
   ocSetText('a-sessions', c.sessions_today || c.session_count || 0);
-  ocSetText('a-avg', '$' + ocNum(c.avg_cost_per_session || 0, 4));
+  ocSetText('a-avg', ocBalance(c.avg_cost_per_session || 0, 4));
   const remaining = budget - todayCost;
   const elR = $('a-remaining');
-  elR.textContent = '$' + ocNum(remaining, 4);
+  elR.textContent = ocBalance(remaining, 4);
   elR.className = 'oc-metric-val ' + (remaining > 0 ? 'green' : 'red');
 }
 
@@ -378,7 +378,7 @@ async function loadAdaptive() {
     $('ab-roi').textContent = ocNum(roi, 2) + 'x';
     $('ab-roi').className = 'oc-metric-val ' + (roi >= 1 ? 'green' : 'red');
   }
-  ocSetText('ab-effective', '$' + ocNum(a.effective_budget || a.adjusted_budget, 2));
+  ocSetText('ab-effective', ocBalance(a.effective_budget || a.adjusted_budget, 2));
   ocSetText('ab-reason', a.reason || a.adjustment_reason || '--');
 }
 
@@ -409,7 +409,7 @@ async function loadSessions() {
     html += '<td>' + ocEsc(s.trigger || s.reason || '--') + '</td>';
     html += '<td>' + ocEsc(s.symbol || '--') + '</td>';
     html += '<td>' + ocChip(s.status || s.state || '--', s.status === 'completed' ? 'good' : s.status === 'failed' ? 'bad' : 'neutral') + '</td>';
-    html += '<td>' + (s.cost != null ? '$' + ocNum(s.cost, 4) : '--') + '</td>';
+    html += '<td>' + (s.cost != null ? ocBalance(s.cost, 4) : '--') + '</td>';
     html += '<td style="font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis">' + ocEsc(s.result || s.recommendation || '--') + '</td>';
     html += '</tr>';
   });
@@ -517,6 +517,8 @@ async function loadAll() {
 
 loadAll();
 ocStartRefresh(loadAll, 30000);
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>

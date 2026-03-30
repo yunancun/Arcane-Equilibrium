@@ -303,6 +303,15 @@ python3 scripts/bybit_runtime_state_resolver.py
   Phase 4: Paper Trading 观察 + Live 准备（5 + 21 天）
     Paper Trading 稳定运行 21 天观察期
     Live 前置条件核验 + Supervised Live Gate
+    ★ SM-01 授权 TTL 分级设计（与 Learning Tier 挂钩）：
+      授权 TTL 应随学习层级晋升自动延长，降低操作负担同时保留安全边界
+      L1-L2（初期 live）  = 24h   — 严格监督，强制每日 checkpoint
+      L3（稳定运行 30d+） = 72h   — 已积累足够记录，降低手动频率
+      L4（高胜率长期）    = 7d    — 信任已建立，weekly 确认即可
+      L5（完全成熟）      = 30d   — Agent 自主权最大化（原则 #11）+ 到期前通知提醒
+      实现要点：grant_paper_authorization() / /auth/request TTL 参数改为读取
+      LearningTierGate.current_tier → 查表得 TTL；Operator 仍可手动覆盖
+      Dead Man's Switch 语义保留：不续期 = 自然停止，无需手动 kill
 
   详细路线图：docs/governance_dev/audits/ 及 Cowork 输出 OpenClaw_Development_Roadmap_v2.md
 

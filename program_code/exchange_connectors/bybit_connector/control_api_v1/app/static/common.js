@@ -72,12 +72,101 @@ function ocEnvelope(payload, stateRevision) {
   };
 }
 
+// ─── Currency Toggle System ───────────────────────────────────────────────────
+// Three-way toggle: USDT → USD → EUR, persisted in localStorage.
+// All monetary formatters (ocMoney, ocBalance) automatically apply the active
+// currency. Toggling dispatches 'occurrencychange' so tabs can re-render.
+// 三选计价货币：USDT → USD → EUR，状态持久化到 localStorage。
+// 所有货币格式化函数自动适配当前货币；切换时发出 'occurrencychange' 事件触发页面刷新。
+
+const _OC_CURRENCIES = ['USDT', 'USD', 'EUR'];
+let _ocCurrIdx = parseInt(localStorage.getItem('oc_curr_idx') || '0');
+
+// Fallback rates (USDT base). Updated by ocInitFx() from live API.
+// 回退汇率（USDT 基准）。由 ocInitFx() 从在线 API 实时更新。
+let _ocFxRates = { USDT: 1.0, USD: 1.0, EUR: 0.92 };
+
+function ocCurrCode() {
+  // Current currency code: 'USDT', 'USD', or 'EUR'
+  // 当前计价货币代码
+  return _OC_CURRENCIES[_ocCurrIdx] || 'USDT';
+}
+
+function ocCurrSymbol() {
+  // Display symbol for current currency: 'USDT ', '$', or '€'
+  // 当前货币显示符号
+  const c = ocCurrCode();
+  if (c === 'EUR')  return '€';
+  if (c === 'USDT') return 'USDT ';
+  return '$';  // USD
+}
+
+function ocFxConvert(v) {
+  // Convert a USDT value to the current display currency.
+  // 将 USDT 数值转换为当前显示货币。
+  if (v == null || isNaN(v)) return v;
+  return Number(v) * (_ocFxRates[ocCurrCode()] || 1.0);
+}
+
+function ocToggleCurrency() {
+  // Cycle to the next currency and notify all tabs.
+  // 切换到下一个计价货币，并通知所有 Tab 刷新。
+  _ocCurrIdx = (_ocCurrIdx + 1) % _OC_CURRENCIES.length;
+  localStorage.setItem('oc_curr_idx', String(_ocCurrIdx));
+  _ocSyncCurrencyBadges();
+  window.dispatchEvent(new CustomEvent('occurrencychange', { detail: { currency: ocCurrCode() } }));
+}
+
+function _ocSyncCurrencyBadges() {
+  // Update all .oc-curr-badge elements to show the active currency.
+  // 更新所有 .oc-curr-badge 元素以显示当前计价货币。
+  document.querySelectorAll('.oc-curr-badge').forEach(b => {
+    b.textContent = ocCurrCode();
+  });
+}
+
+async function ocInitFx() {
+  // Fetch live USD→EUR rate from open.er-api.com (free, no key required).
+  // Falls back to hardcoded EUR=0.92 if API is unavailable.
+  // 从 open.er-api.com 获取实时 USD→EUR 汇率（免费，无需 API Key）。
+  // 若 API 不可用则回退到内置汇率 EUR=0.92。
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch('https://open.er-api.com/v6/latest/USD', { signal: ctrl.signal });
+    clearTimeout(tid);
+    if (r.ok) {
+      const d = await r.json();
+      if (d.rates && d.rates.EUR) {
+        // 1 USDT ≈ 1 USD; so 1 USDT = d.rates.EUR EUR
+        // 1 USDT ≈ 1 USD，因此 1 USDT = d.rates.EUR EUR
+        _ocFxRates.EUR = Number(d.rates.EUR);
+      }
+    }
+  } catch (_) { /* silent fallback / 静默回退 */ }
+  _ocSyncCurrencyBadges();
+}
+
 // ─── Formatters ──────────────────────────────────────────────────────────────
 function ocMoney(v, decimals) {
+  // PnL display: converts to active currency, adds +/- prefix.
+  // Example: ocMoney(100) → "+USDT 100.00" / "+$100.00" / "+€92.00"
+  // PnL 显示：转换为当前货币，添加 +/- 前缀。
   if (v == null || isNaN(v)) return '--';
   const d = decimals != null ? decimals : 2;
-  const prefix = v >= 0 ? '+' : '';
-  return prefix + '$' + Number(v).toFixed(d);
+  const converted = ocFxConvert(Number(v));
+  const prefix = converted >= 0 ? '+' : '-';
+  return prefix + ocCurrSymbol() + Math.abs(converted).toFixed(d);
+}
+
+function ocBalance(v, decimals) {
+  // Balance display: converts to active currency, no +/- prefix.
+  // Example: ocBalance(9994) → "USDT 9994.00" / "$9994.00" / "€9194.48"
+  // 余额显示：转换为当前货币，无 +/- 前缀。
+  if (v == null || isNaN(v)) return '--';
+  const d = decimals != null ? decimals : 2;
+  const converted = ocFxConvert(Number(v));
+  return ocCurrSymbol() + converted.toFixed(d);
 }
 
 function ocNum(v, decimals) {
@@ -322,6 +411,14 @@ function ocInjectBaseCSS() {
     .oc-not-configured .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
     .oc-not-configured h3 { font-size: 16px; margin-bottom: 8px; }
     .oc-not-configured p { color: var(--text-dim); font-size: 13px; max-width: 400px; margin: 0 auto; }
+
+    /* Currency Toggle Badge — clickable pill showing active currency */
+    /* 计价货币切换徽章 — 点击循环切换 USDT / USD / EUR */
+    .oc-curr-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.3px; cursor: pointer;
+      background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
+      color: var(--blue); user-select: none; transition: background 0.15s; }
+    .oc-curr-badge:hover { background: rgba(56,139,253,0.25); }
   `;
   document.head.appendChild(style);
 }

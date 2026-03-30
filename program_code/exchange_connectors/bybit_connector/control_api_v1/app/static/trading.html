@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OpenClaw Trading Chart</title>
+<script src="/static/common.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
@@ -121,6 +122,13 @@
   /* Nav link */
   .nav-link { font-size: 11px; color: var(--text-dim); text-decoration: none; }
   .nav-link:hover { color: var(--accent); }
+
+  /* Currency Toggle Badge */
+  .oc-curr-badge { display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px; cursor: pointer;
+    background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
+    color: var(--blue); user-select: none; transition: background 0.15s; }
+  .oc-curr-badge:hover { background: rgba(56,139,253,0.25); }
 </style>
 </head>
 <body>
@@ -196,7 +204,7 @@
 
     <div class="bottom-panels">
       <div class="bottom-panel">
-        <h3>Paper PnL</h3>
+        <h3>Paper PnL &nbsp;<span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle currency / 点击切换计价货币">USDT</span></h3>
         <div class="pnl-grid" id="pnl-grid">
           <div class="pnl-item"><div class="label">Balance</div><div class="value" id="pnl-balance">--</div></div>
           <div class="pnl-item"><div class="label">Net PnL</div><div class="value" id="pnl-net">--</div></div>
@@ -516,7 +524,7 @@ async function loadPnL() {
     const el = document.getElementById(id);
     if (!el) return;
     if (typeof val === 'number') {
-      el.textContent = val < 0 ? `-$${Math.abs(val).toFixed(2)}` : `$${val.toFixed(2)}`;
+      el.textContent = colorize ? ocMoney(val) : ocBalance(val);
       if (colorize) el.className = 'value ' + (val >= 0 ? 'green' : 'red');
     } else {
       el.textContent = val || '--';
@@ -674,6 +682,9 @@ tokenInput.addEventListener('input', () => {
     if (autoRefreshOn) startAutoRefresh();
   }
 });
+
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>

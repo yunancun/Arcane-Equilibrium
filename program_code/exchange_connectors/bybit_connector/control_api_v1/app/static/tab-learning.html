@@ -253,7 +253,7 @@ async function loadNetPnl() {
   ];
   fields.forEach(([label, val, isPnl]) => {
     const cls = isPnl ? ocPnlClass(val) : '';
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + (val != null ? '$' + ocNum(val, 4) : '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:14px">' + (val != null ? (isPnl ? ocMoney(val) : ocBalance(val, 4)) : '--') + '</div></div>';
   });
   html += '</div>';
 
@@ -316,6 +316,8 @@ async function loadAll() {
 
 loadAll();
 ocStartRefresh(loadAll, 30000);
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>

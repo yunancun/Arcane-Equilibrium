@@ -210,7 +210,7 @@ async function loadSession() {
 
   // Balance — show current_balance (updated by loadMetrics); fallback to initial
   if (!$('balance-val').dataset.fromMetrics) {
-    $('balance-val').textContent = '$' + ocNum(s.initial_balance || 100000, 0);
+    $('balance-val').textContent = ocBalance(s.initial_balance || 100000, 0);
   }
 
   // PnL
@@ -230,8 +230,8 @@ async function loadSession() {
   elUnrealized.textContent = ocMoney(unrealized);
   elUnrealized.className = 'oc-metric-val ' + ocPnlClass(unrealized);
 
-  ocSetText('p-fees', '$' + ocNum(pnl.total_fees_paid || 0, 4));
-  ocSetText('p-aicost', '$' + ocNum(pnl.total_ai_cost || 0, 4));
+  ocSetText('p-fees', ocBalance(pnl.total_fees_paid || 0, 4));
+  ocSetText('p-aicost', ocBalance(pnl.total_ai_cost || 0, 4));
 
   if (d.data.state_revision) stateRevision = d.data.state_revision;
 }
@@ -363,10 +363,10 @@ async function loadMetrics() {
     ['Win Rate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
     ['Win/Loss Ratio', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
     ['Max Drawdown', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
-    ['Peak Balance', dm.peak_balance != null ? '$' + ocNum(dm.peak_balance, 2) : null],
-    ['Current Balance', dm.current_balance != null ? '$' + ocNum(dm.current_balance, 2) : null],
+    ['Peak Balance', dm.peak_balance != null ? ocBalance(dm.peak_balance, 2) : null],
+    ['Current Balance', dm.current_balance != null ? ocBalance(dm.current_balance, 2) : null],
     ['Avg Hold Time', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
-    ['Total Fees', tm.total_fees_paid != null ? '$' + ocNum(tm.total_fees_paid, 4) : null],
+    ['Total Fees', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
     ['Largest Win', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
     ['Largest Loss', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
     ['Avg Loss', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
@@ -380,7 +380,7 @@ async function loadMetrics() {
   // Update current balance from metrics
   if (dm.current_balance != null) {
     const el = $('balance-val');
-    el.textContent = '$' + ocNum(dm.current_balance, 0);
+    el.textContent = ocBalance(dm.current_balance, 0);
     el.dataset.fromMetrics = '1';
   }
 }
@@ -413,6 +413,8 @@ async function loadAll() {
 
 loadAll();
 ocStartRefresh(loadAll, 15000);
+ocInitFx();
+window.addEventListener('occurrencychange', loadAll);
 </script>
 </body>
 </html>
