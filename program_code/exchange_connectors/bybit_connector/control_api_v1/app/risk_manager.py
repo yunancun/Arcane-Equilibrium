@@ -723,8 +723,6 @@ class RiskManager:
                 return False, f"correlated_exposure_{corr_pct:.1f}pct_exceeds_max_{max_corr:.1f}pct"
 
             # T2.01: Portfolio Risk Control check / 组合级风控检查
-            # NOTE: Portfolio risk control is advisory (non-blocking) to allow P1/P2 configured limits to take precedence
-            # 注意：组合级风控是建议性的（非阻止性的），允许 P1/P2 配置的限制优先
             try:
                 allowed, reason = self._portfolio_risk_control.check_new_entry(
                     symbol=symbol,
@@ -735,7 +733,14 @@ class RiskManager:
                     market_prices=market_prices,
                 )
                 if not allowed:
-                    logger.warning("Portfolio risk advisory: %s (non-blocking, P1/P2 check passed)", reason)
+                    # Only block on correlation (P3 risk). Sector/reserve are covered by P1/P2
+                    # 仅在相关性上阻止（P3 风险）。部门/储备由 P1/P2 覆盖
+                    if "correlation" in reason:
+                        return False, f"portfolio_risk_{reason}"
+                    else:
+                        # Sector/reserve buffer: advisory only (P1/P2 limits take precedence)
+                        # 部门/储备缓冲：仅建议性（P1/P2 限制优先）
+                        logger.warning("Portfolio risk advisory: %s (non-blocking, P1/P2 check passed)", reason)
             except Exception as exc:
                 logger.warning("Portfolio risk check error (non-fatal, passing through): %s", exc)
 
