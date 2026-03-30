@@ -184,6 +184,7 @@ _ttl_enforcement_failures = 0
 def _make_ttl_expiry_callback():
     """Create expiry callback for TTL Enforcer to trigger SM transitions"""
     def callback(entry, action):
+        global _ttl_enforcement_failures
         try:
             # Access module-level globals for late binding to SM singletons
             # This allows the SMs to be initialized after the callback is created
@@ -210,7 +211,6 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"Authorization SM not available for TTL callback")
                     except Exception as e:
-                        global _ttl_enforcement_failures
                         _ttl_enforcement_failures += 1
                         logger.critical(f"Failed to reject authorization {entry.object_id} on TTL: {e}")
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
@@ -237,7 +237,6 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"DecisionLease SM not available for TTL callback")
                     except Exception as e:
-                        global _ttl_enforcement_failures
                         _ttl_enforcement_failures += 1
                         logger.critical(f"Failed to expire lease {entry.object_id} on TTL: {e}")
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
@@ -263,7 +262,6 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"RiskGovernor SM not available for TTL callback")
                     except Exception as e:
-                        global _ttl_enforcement_failures
                         _ttl_enforcement_failures += 1
                         logger.critical(f"Failed to request manual review on TTL: {e}")
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
@@ -288,7 +286,6 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"RiskGovernor SM not available for TTL callback")
                     except Exception as e:
-                        global _ttl_enforcement_failures
                         _ttl_enforcement_failures += 1
                         logger.critical(f"Failed to escalate risk on TTL: {e}")
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
@@ -299,7 +296,6 @@ def _make_ttl_expiry_callback():
                                 pass  # Don't fail the callback if alerting fails
 
         except Exception as e:
-            global _ttl_enforcement_failures
             _ttl_enforcement_failures += 1
             logger.critical(f"Error in TTL expiry callback: {e}")
             # FIX-04: Send alert via TELEGRAM_ALERTER if available
