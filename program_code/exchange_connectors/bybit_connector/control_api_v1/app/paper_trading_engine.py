@@ -681,6 +681,7 @@ class PaperTradingEngine:
         self._partial_fill_rng = partial_fill_rng  # Pass random.Random(seed) for deterministic tests
         self._governance_hub = None  # Optional GovernanceHub for governance integration
         self._protective_order_manager = None  # Optional ProtectiveOrderManager for local triggers
+        self._change_audit_log = None  # Optional ChangeAuditLog for audit trail
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -705,6 +706,10 @@ class PaperTradingEngine:
     def set_governance_hub(self, hub: Any) -> None:
         """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
         self._governance_hub = hub
+
+    def set_change_audit_log(self, cal: Any) -> None:
+        """Inject ChangeAuditLog for audit trail tracking / 注入变更审计日志"""
+        self._change_audit_log = cal
 
     def set_protective_order_manager(self, pom: Any) -> None:
         """Inject ProtectiveOrderManager for automatic stop-loss / 注入保護性訂單管理器"""
@@ -1371,6 +1376,21 @@ class PaperTradingEngine:
                             sess["session_halted"] = True
                             sess["session_halt_reason"] = f"max_drawdown_{dd_pct:.1f}pct"
                             self._audit(state, "session_halted", f"drawdown={dd_pct:.1f}%")
+                            # T3.06: Record session halt in audit log
+                            if self._change_audit_log:
+                                try:
+                                    from .change_audit_log import ChangeType
+                                    self._change_audit_log.record_change(
+                                        change_type=ChangeType.STATE_CHANGE,
+                                        who="system",
+                                        what="Session halted due to drawdown limit exceeded",
+                                        reason=f"Drawdown {dd_pct:.1f}% exceeded limit {self.risk_manager.config.max_session_drawdown_pct:.1f}%",
+                                        new_value={"session_halted": True, "halt_reason": sess["session_halt_reason"]},
+                                        affected_components=["PaperTradingEngine", "RiskManager"],
+                                        auto_approve=True,
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Failed to record session halt in audit log: {e} (non-fatal)")
 
                 # Re-recompute PnL after risk closes
                 if close_orders:

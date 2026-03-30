@@ -479,6 +479,7 @@ class RiskManager:
         self._price_tracker = PriceHistoryTracker()
         self._spike_suppression_count: dict[str, int] = {}  # symbol → count
         self._governance_hub = None  # Optional GovernanceHub for governance integration
+        self._change_audit_log = None  # Optional ChangeAuditLog for audit tracking
         # T2.01: Portfolio Risk Control integration / 组合级风控
         self._portfolio_risk_control = PortfolioRiskControl(config=PortfolioRiskConfig())
 
@@ -495,6 +496,10 @@ class RiskManager:
     def set_governance_hub(self, hub: Any) -> None:
         """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
         self._governance_hub = hub
+
+    def set_change_audit_log(self, cal: Any) -> None:
+        """Inject ChangeAuditLog for audit trail tracking / 注入变更审计日志"""
+        self._change_audit_log = cal
 
     def set_portfolio_risk_control(self, prc: PortfolioRiskControl) -> None:
         """Inject or replace PortfolioRiskControl instance / 注入或替换组合风控实例"""
@@ -515,7 +520,24 @@ class RiskManager:
         valid_fields = GlobalRiskConfig.__dataclass_fields__
         for k, v in updates.items():
             if v is not None and k in valid_fields:
+                old_value = getattr(self._config, k, None)
                 setattr(self._config, k, v)
+                # T3.06: Record risk config changes in audit log
+                if self._change_audit_log:
+                    try:
+                        from .change_audit_log import ChangeType
+                        self._change_audit_log.record_change(
+                            change_type=ChangeType.CONFIG_CHANGE,
+                            who="agent",
+                            what=f"Updated risk config parameter: {k}",
+                            reason="Risk parameter adjustment",
+                            old_value=old_value,
+                            new_value=v,
+                            affected_components=["RiskManager"],
+                            auto_approve=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record config change in audit log: {e} (non-fatal)")
         return self._config
 
     def update_category_config(self, category: str, updates: dict[str, Any]) -> CategoryRiskConfig:
@@ -986,6 +1008,21 @@ class RiskManager:
                 # Halt session on daily loss exceeded
                 sess["session_halted"] = True
                 sess["session_halt_reason"] = f"daily_loss_{daily_loss_pct:.1f}pct"
+                # T3.06: Record session halt in audit log
+                if self._change_audit_log:
+                    try:
+                        from .change_audit_log import ChangeType
+                        self._change_audit_log.record_change(
+                            change_type=ChangeType.STATE_CHANGE,
+                            who="system",
+                            what="Session halted due to daily loss limit exceeded",
+                            reason=f"Daily loss {daily_loss_pct:.1f}% exceeded limit {self._config.max_daily_loss_pct:.1f}%",
+                            new_value={"session_halted": True, "halt_reason": sess["session_halt_reason"]},
+                            affected_components=["PaperTradingEngine", "RiskManager"],
+                            auto_approve=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record session halt in audit log: {e} (non-fatal)")
 
         return close_orders
 

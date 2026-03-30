@@ -149,6 +149,10 @@ from .change_audit_log import ChangeAuditLog  # noqa: E402
 CHANGE_AUDIT_LOG = ChangeAuditLog()
 GOV_HUB.set_change_audit_log(CHANGE_AUDIT_LOG)
 
+# T3.06: Inject ChangeAuditLog into RiskManager and PaperTradingEngine
+RISK_MANAGER.set_change_audit_log(CHANGE_AUDIT_LOG)
+ENGINE.set_change_audit_log(CHANGE_AUDIT_LOG)
+
 # T2.05: Initialize and inject RecoveryApprovalGate / 初始化并注入恢復審批門禁
 from .recovery_approval_gate import RecoveryApprovalGate  # noqa: E402
 RECOVERY_GATE = RecoveryApprovalGate()
