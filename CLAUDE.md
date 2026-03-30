@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-30（Phase 2 治理模組審核 + TW 註釋品質審核）
+# 最后更新：2026-03-30（TW 工程審核 — Phase 3 GovernanceHub 集成 + 缺口校准）
 
 ---
 
@@ -19,25 +19,38 @@
 
 ---
 
-## 二、不可违背的根原则
+## 二、16 条根原则（DOC-01 项目宪法 §5.1–§5.16，不可违背）
 
-1. **看 net PnL，不看 gross PnL** — 每笔扣除 AI 成本、手续费、滑点、设备折旧
-2. **本地先做，AI 只做高价值部分** — H0 先做，AI 负责 regime 识别等高价值判断
-3. **AI 输出不能当即时命令** — AI → Decision Lease（带时效、可撤销）→ 本地复核 → 执行
-4. **权限按表现赢得** — 不全局放权，只在已验证的子场景局部放权
-5. **先系统健康，后市场判断** — 系统不健康时不行动
-6. **失败默认收缩** — fail-closed，不猜测
-7. **学习 ≠ 自作主张** — Agent 不能自动改 live 配置、放开权限、修改代码上线
-8. **所有结论区分事实 / 推断 / 假设** — 防止乱归因
-9. **Agent 最大自主权** — 在风控硬上限内，Agent 自主决定：交易品种、策略类型、仓位大小、入场时机、出场时机。用户只设硬止损上限，不干预具体交易决策
+**V1 原版（§5.1–§5.10）：**
+1. **单一写入口** — 所有订单/执行动作通过唯一受控入口
+2. **读写分离** — 研究/GUI/学习：只读。写入权限极度受限、可审计、可锁定
+3. **AI 输出 ≠ 即时命令** — AI → Decision Lease（带时效、可撤销）→ 本地复核 → 执行
+4. **策略不能绕过风控** — 所有交易意图必须经 Guardian 审批
+5. **生存 > 利润** — 先判断"不会螺旋崩溃"，再判断"能否盈利"
+6. **失败默认收缩** — 不确定时默认保守：不开新仓、降频率、降风险
+7. **学习 ≠ 改写 Live** — 学习平面与 Live 平面隔离
+8. **交易可解释** — 每笔交易必须可重建：为什么、何时、风控审批、授权、执行、结果
+9. **交易所灾难保护** — 本地止损 + 交易所条件单双重防线
+10. **认知诚实** — 所有结论区分事实 / 推断 / 假设
+
+**V2 新增（§5.11–§5.16）：**
+11. **Agent 最大自主权** — P0/P1 硬边界内，Agent 完全自主决定：币种、策略、参数、时机
+12. **持续进化** — 系统必须从交易行为中自动学习
+13. **AI 资源成本感知** — 每次 AI 调用计费，cost_edge_ratio ≥ 0.8 → 建议关仓
+14. **零外部成本可运行** — 基础运营仅需 L0+L1（Ollama + 免费搜索）
+15. **多 Agent 协作** — OpenClaw 指挥官 + 6 Agent，正式对象通信
+16. **组合级风险意识** — 监控关联曝险、策略重叠持仓、资金分配合理性
+
+**优先级序：** 账户生存 > 风控治理 > 系统健康 > 审计可追溯 > 人类终审 > 真实 Net PnL > 自主能力进化
 
 ---
 
-## 三、当前系统状态（2026-03-29 Session 12 + GUI 修复）
+## 三、当前系统状态（2026-03-30 TW 工程審核）
 
 ```
-测试：432 全通过（432 control_api，含 Session 12 的 4 个新测试）
-路由：113 条
+测试：1,566 全通过（含 46 治理 Hub 测试 + 92 集成测试 · 2 跳过）
+路由：121+ 条（113 原有 + 8 治理 API 端点）
+治理：GovernanceHub 已实例化，4 核心 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04）
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
 
@@ -109,6 +122,34 @@ Session 12 GUI 修复（5项）：
   G6: tab-learning 概览计数修复（从 /learning/feed → totals 读取，非 /learning/overview）
     - loadFeed() 改用 observations_recent / lessons_recent 数组，空时显示总计数
 
+Phase 3 治理集成（2026-03-30，另一 session 完成）：
+  T3-1: governance_hub.py（819 行）— 中央治理编排层
+    - GovernanceHub 类：RLock 保护的跨 SM 操作
+    - 实例化 SM-01/SM-02/SM-04/EX-04 四个核心状态机
+    - 跨 SM 级联回调：风控升级→授权收缩/冻结，对账异常→风控升级，授权冻结→吊销所有活租约
+    - 100ms TTL 热路径缓存（is_authorized 高频调用优化）
+    - 审计写盘（JSONL，0o600 权限）
+  T3-2: governance_routes.py（525 行）— 8 个治理 API 端点
+    - GET /governance/status · GET /governance/auth/status · POST /governance/auth/approve
+    - GET /governance/risk/level · POST /governance/risk/override
+    - POST /governance/reconcile · GET /governance/leases · POST /governance/health-check
+    - Operator 角色验证 + 输入 HTML 消毒 + 通用错误消息
+  T3-3: 集成接入点
+    - PaperTradingEngine.submit_order() → is_authorized() + acquire_lease()
+    - RiskManager.check_pre_trade_gate() → is_authorized()
+    - PipelineBridge.on_tick() → is_authorized()
+    - paper_trading_routes.py → GovernanceHub 单例实例化
+  T3-4: 安全审核 — 9 项 CRITICAL/HIGH 修复
+    - Operator 角色验证（/auth/approve, /risk/override）
+    - 审计文件 chmod 0o600
+    - 输入消毒防存储型 XSS
+    - 原子性 auth check + lease create（防竞态）
+    - 通用错误消息（防信息泄露）
+    - 实际调用 SM 转换（之前是 stub）
+  T3-5: RiskGovernorStateMachine.get_status() 死锁修复
+    - 嵌套锁获取导致死锁 → 直接访问 _state.level
+  合规度提升：~28% → ~65%（4 核心 SM 从 standalone 变为 wired）
+
 决策：win_rate > 20% 前不接入 AI 咨询（C1/I1/A1），避免在随机决策上叠加AI成本
 
 Scanner 规则（最新）：
@@ -139,6 +180,7 @@ G    真实业务事件验证层                          ✅ 收口
 H0   Local Deterministic Judgment Core          ✅ 完成
 H1-H5 AI 治理层                                ✅ 完成
      Phase 2 治理模組 T2.01–T2.23               ✅ 完成（21 模组 + PM/TW 双审核通过）
+     Phase 3 GovernanceHub 集成                  ✅ 完成（Hub+8路由+4SM接入+安全审核+46测试）
 I1-I10 Decision Lease shadow control plane      ✅ 完成（shadow-only）
 J    Transition Engine Skeleton                 ✅ shadow-only closeout
 K    Paper / Demo Gate                          ✅ design-only gate closed
@@ -167,16 +209,17 @@ N    Constrained Autonomous Live                ⬜ 未开始
 ```
 [数据与观察层]           Bybit REST + WS → Postgres + Observer
 [H0 本地判断内核]        freshness / health / eligibility / risk envelope
+[GovernanceHub]          ★ SM-01授权 + SM-04风控 + SM-02租约 + EX-04对账（跨SM级联）
 [H1-H5 AI 治理层]       thought_gate / budget / model_router / governor / cost_logging
-[I Decision Lease]       shadow-only lease schema + revoke + expiry
-[Control API v1]         FastAPI 104 路由（/system /control /input /learning /paper /strategy）
+[I Decision Lease]       GovernanceHub.acquire_lease() / release_lease()
+[Control API v1]         FastAPI 121+ 路由（含 /governance 8 端点）
 [GUI + Learning]         Operator Console + Learning Cockpit + Paper Trading Dashboard
-[Paper Trading Engine]   7 状态生命周期 / 成交模拟 / PnL 计算
+[Paper Trading Engine]   7 状态生命周期 / 成交模拟 / PnL / 治理 gate 接入
 [Layer 2 AI 推理]        L0 确定性 → L1 Haiku → L2 Sonnet/Opus + 4 层搜索降级
 [风控框架]               P0/P1/P2 三层 + 对抗性止损 + AI 注意力税
 [Phase 2 策略]           KlineManager → IndicatorEngine → SignalEngine → 4 策略 → Orchestrator
-[Phase 3 管线桥接]           PipelineBridge: Tick Fan-Out + Intent→Order + 执行回调
-[止损管理器]                 StopManager: Hard/Trailing/Time Stop + ATR 动态仓位
+[管线桥接]               PipelineBridge: Tick Fan-Out + Intent→Order + 治理 gate + 执行回调
+[止损管理器]             StopManager: Hard/Trailing/Time Stop + ATR 动态仓位
 ```
 
 **详细架构 + 各层子模块说明见：** `docs/references/2026-03-27--system_reference_handbook.md`
@@ -305,6 +348,9 @@ python3 scripts/bybit_runtime_state_resolver.py
   ✅ Phase 2 治理模組 T2.01–T2.23 全部实现（2026-03-29）— 21 模组 · 1,522 测试 · 52,211 行代码
   ✅ Phase 2 PM 品质审核通过（2026-03-29）— 整体评级 4/5 · 0 个 P0 blocker
   ✅ Phase 2 TW 註釋品質審核通过（2026-03-30）— 評級 9.5/10 · 100% 雙語覆蓋 · 0 Critical
+  ✅ Phase 3 GovernanceHub 集成（2026-03-30）— Hub 819行 + 8路由 525行 + 4SM接入 + 安全审核 9项修复
+  ✅ Phase 3 RiskGovernor 死锁修复（2026-03-30）— get_status() 嵌套锁 → 直接属性访问
+  ✅ 合规度校准（2026-03-30 TW 审核）— ~28% → ~65%，接入率 7/22 → 11/22
   Paper Trading 数据继续积累（等胜率数据；新规则+学习机制运行中）
   等胜率 > 20% 后：接入 AI 咨询（C1/I1/A1）
   Paper Trading + Bybit Demo 数据对比分析
@@ -417,6 +463,11 @@ Live 前置条件（M/N 前必须核验）：
 | Phase 2 PM 品质审核报告（T2.01–T2.23） | `docs/governance_dev/phase2_execution/T2_PM_QUALITY_AUDIT_REPORT.md` |
 | Phase 2 TW 註釋品質審核報告 | `docs/governance_dev/phase2_execution/T2_TW_COMMENT_AUDIT_REPORT.md` |
 | T2.01–T2.23 变更日志（23 份） | `docs/governance_dev/changelogs/` |
+| Phase 3 集成指南（双语·API参考·部署步骤） | `docs/governance_dev/phase3_integration/T3_GOVERNANCE_INTEGRATION_GUIDE.md` |
+| Phase 3 代码审核报告 | `docs/governance_dev/phase3_integration/PHASE3_CODE_REVIEW_REPORT.md` |
+| Phase 3 安全审核报告 | `docs/governance_dev/phase3_integration/SECURITY_AUDIT_PHASE3.md` |
+| Phase 3 FA 集成设计 | `docs/governance_dev/phase3_integration/T3.01_FA_INTEGRATION_DESIGN.md` |
+| 治理文件提取（8 份参考文档） | `docs/governance_dev/governance_extracts/` |
 | Phase 0 接手报告（4 份） | `docs/governance_dev/phase0_takeover/` |
 | Phase 1 差距分析（2 份） | `docs/governance_dev/phase1_gap_analysis/` |
 
@@ -431,4 +482,4 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-30：Phase 2 治理模組 T2.01–T2.23 全部完成（21 模组 · 1,522 测试 · 52,211 行 · PM + TW 双审核通过）。432 control_api 测试通过，113 路由。Session 12 修复 F1/F2/E1a/E1b + GUI G1-G6。系统全程 read_only / disabled / not_granted。
+> 截至 2026-03-30 TW 工程審核：Phase 3 GovernanceHub 已集成（4 核心 SM 接入运行时 · 8 API 端点 · 安全审核通过）。1,566 测试全通过，121+ 路由。合规度 ~65%（从 ~28% 提升）。接入率 11/22 模组。剩余缺口：OMS 未走 SM-03 生命周期、学习门控未调用、多 Agent 框架未实例化、感知面未包装市场数据。系统全程 read_only / disabled / not_granted。

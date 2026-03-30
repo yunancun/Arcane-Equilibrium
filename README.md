@@ -24,23 +24,23 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-30)
+## 当前状态 (2026-03-30 TW 工程審核)
 
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         432 control_api + 1,522 governance = 全通过
-API 路由:     113 条
+测试:         1,566 全通过（含 46 治理 Hub + 92 集成测试 · 2 跳过）
+API 路由:     121+ 条（含 8 治理端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
 市场扫描:     650+ 交易对每 5 分钟全扫描
 自动部署:     最优 5 品种自动匹配策略
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
-治理模組:     21 个 Phase 2 模组全部实现并通过审核（T2.01–T2.23）
-代码规模:     52,211 行（29,624 实现 + 22,587 测试）
+治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时
+合规度:       ~65%（从 ~28% 提升 · 接入率 11/22 模组）
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組 (T2.01–T2.23)**
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成**
 
 ---
 
@@ -53,9 +53,11 @@ srv/
 ├── program_code/
 │   ├── exchange_connectors/
 │   │   └── bybit_connector/
-│   │       └── control_api_v1/    ← FastAPI 109 路由 + 426 测试
+│   │       └── control_api_v1/    ← FastAPI 121+ 路由 + 1,566 测试
 │   │           ├── app/
-│   │           │   ├── pipeline_bridge.py       ← 管线桥接器
+│   │           │   ├── governance_hub.py         ← ★ 治理中枢（4 SM 编排 + 跨 SM 级联）
+│   │           │   ├── governance_routes.py      ← 8 治理 API 端点
+│   │           │   ├── pipeline_bridge.py       ← 管线桥接器（已接入治理 gate）
 │   │           │   ├── stop_manager.py          ← 止损管理器（→ local_model_tools）
 │   │           │   ├── bybit_demo_connector.py  ← Bybit Demo 连接器
 │   │           │   ├── grafana_data_writer.py   ← Grafana 数据写入
@@ -144,87 +146,110 @@ srv/
 
 ---
 
-## FA 缺口分析（2026-03-30 架构审核）
+## 工程目标 vs 实现完成度（2026-03-30 TW 工程審核）
 
-> **关键发现：21 个治理模组代码品质优秀（PM 4/5 · TW 9.5/10），但大部分尚未接入运行时主管线。**
+### 22 份治理文件合规矩阵
 
-### Critical（阻塞系统完整性）
+| 规格 | 要求 | 模组 | 代码 | 接入 | 缺口 |
+|------|------|------|------|------|------|
+| **SM-01** 授权状态机 | 8态/16转/fail-closed/终态不回流 | authorization_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
+| **SM-02** 决策租约 | 9态/TTL自动到期/租约≠订单 | decision_lease_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
+| **SM-03** OMS 执行 | 11态订单生命周期/对账前不完成 | oms_state_machine.py | ✅ 完整 | ⬜ 未接入 | Paper 引擎用独立状态名 |
+| **SM-04** 风控状态机 | 6级风险/升级自动/降级需审批 | risk_governor_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
+| **EX-01** 风控边界 | P0/P1/P2 三层 + 组合风控 | risk_manager.py + portfolio_risk_control.py | ✅ 完整 | ⚠ 部分 | 组合风控未接入 |
+| **EX-02** OMS 执行边界 | 单一执行入口/授权前置 | oms_state_machine.py + paper_trading_engine.py | ✅ 完整 | ⚠ 部分 | SM-03 未串联 |
+| **EX-03** 控制面边界 | system_mode/execution_state 强制 | main_legacy.py（嵌入式） | ⚠ 部分 | ⬜ | 模式变更不传播到治理模组 |
+| **EX-04** 对账边界 | 5类结果/自动冻结/审计触发 | reconciliation_engine.py | ✅ 完整 | ✅ GovernanceHub | — |
+| **EX-05** 学习边界 | L1→L5 五级门控/自动晋升 | learning_tier_gate.py | ✅ 完整 | ⬜ 未接入 | 主流程从未调用 check_promotion() |
+| **EX-06** 多Agent编排 | 6 Agent + Conductor + 正式消息 | multi_agent_framework.py | ⚠ 框架 | ⬜ 未接入 | 仅 ScoutAgent 实现，无 Conductor |
+| **EX-07** 感知面 | FACT/INFERENCE/HYPOTHESIS 标记 | perception_data_plane.py | ✅ 完整 | ⬜ 未接入 | 市场数据未包装 PerceptionDataObject |
+| **DOC-01** 项目宪法 | 16条根原则/6 Agent 角色 | 全系统 | ✅ 已记录 | ⚠ 部分 | 仅 1/6 Agent 实现 |
+| **DOC-02** 边界定义 | 层间职责/治理链路 | governance_hub.py | ✅ 完整 | ✅ | — |
+| **DOC-03** 字段状态规范 | 枚举/状态值一致性 | 各 SM types 文件 | ✅ 完整 | ✅ | — |
+| **DOC-04** Agent能力蓝图 | A-J 能力目标 | 全系统 | ⚠ 部分 | — | 见下方 A-J 完成度 |
+| **DOC-05** 真相源矩阵 | 数据源所有权/可信级 | data_source_enforcer.py | ✅ 完整 | ✅ | — |
+| **DOC-06** 变更治理 | L1/L2/L3 变更分级 | change_audit_log.py | ✅ 完整 | ⬜ 未接入 | 未与 GovernanceHub 联动 |
+| **DOC-07** 审计/事故/熔断 | append-only/不可删/自动轮转 | audit_persistence.py | ✅ 完整 | ✅ GovernanceHub | — |
+| **DOC-08** 实施桥梁 | Phase 对照/迁移路径 | governance_dev/ 文档 | ✅ 文档 | — | — |
 
-| ID | 缺口 | 模组 | 现状 |
-|----|------|------|------|
-| GAP-1 | 授权状态机未实例化到运行时 | SM-01 | 代码完整，仅在测试中使用 |
-| GAP-2 | 决策租约未实例化到运行时 | SM-02 | 同上 |
-| GAP-3 | OMS 状态机未接入 Paper Trading Engine | SM-03 | Paper 引擎使用独立状态名，未走 11 态生命周期 |
-| GAP-4 | 对账引擎未在订单完成时调用 | EX-04 | 引擎完整，无集成点 |
-| GAP-5 | 学习层级门控从未被调用 | EX-05 | L1→L5 逻辑完整，主流程无调用 |
-| GAP-6 | 多Agent框架仅有类定义，无 Conductor 实例 | EX-06 | 消息类完整，无编排实例 |
-| GAP-7 | 感知数据面未包装市场数据 | EX-07 | 框架完整，管线传入原始 tick |
+### A-J 能力目标完成度（DOC-04 蓝图 vs 当前）
 
-### High（影响核心功能）
+| 目标 | 描述 | 完成度 | 关键缺失 |
+|------|------|--------|----------|
+| A | 自主交易执行 | 65% | AI 治理层仍被绕过（is_authorized 已接但为新加） |
+| B | 成本收益感知 | 55% | AI 成本追踪框架在但未实际累计 |
+| C | 计算路径智能分级 | 35% | L0+L1 实现，L2 Sonnet/Opus 未接入主链路 |
+| D | 自我感知 | 40% | 健康门正常，但 GovernanceHub 状态未暴露到 GUI |
+| E | 持续学习 | 15% | E1 观察记录已接，L2-L5 门控未调用 |
+| F | 日/周报告 | 30% | 路由存在，无自动化 Cron |
+| G | Agent 自主交易 | 60% | 连续亏损暂停已接，但缺多 Agent 协作 |
+| H | 对抗性止损 | 65% | ATR 动态止损 + 交易所条件单保护未实现 |
+| I | AI 注意力税 | 10% | 框架设计存在，等 AI 咨询接入后生效 |
+| J | GUI 控制台 | 80% | 10-Tab 完成，治理仪表盘待加 |
 
-| ID | 缺口 | 影响 |
+### 剩余缺口（按优先级）
+
+**Critical — 阻塞系统完整性：**
+
+| ID | 缺口 | 现状 |
 |----|------|------|
-| GAP-8 | 控制面 system_mode 变更未传播到治理模组 | 授权/风控不知系统模式切换 |
-| GAP-9 | Paper→Live 门控未接入授权工作流 | 门控逻辑存在但无人检查 |
-| GAP-10 | TTL 执行器未定期调用 | 过期决策租约不会自动终止 |
-| GAP-11 | 审计回调未全局注册 | 状态机生成记录但未写盘 |
+| GAP-C1 | 治理 gate 仍为 warning-only（is_authorized 不拒绝订单） | GovernanceHub 已接入但需确认 fail-closed 生效 |
+| GAP-C2 | 跨 SM 级联回调未自动触发（手动调用） | Hub 内实现了回调逻辑但非事件驱动 |
+| GAP-C3 | 多Agent系统仅有 ScoutAgent（需 6 个） | 框架类定义完整，缺 Conductor + 5 Agent |
 
-### Medium
-
-| ID | 缺口 |
-|----|------|
-| GAP-12 | 影子决策构建器未接入决策租约 BRIDGED 状态 |
-| GAP-13 | 风控升级事件未触发授权收缩 |
-| GAP-14 | 交易归因模组未在成交时调用 |
-
-### Low
+**High — 影响核心功能：**
 
 | ID | 缺口 |
 |----|------|
-| GAP-15 | 事件模型未建立事件队列 |
-| GAP-16 | 变更审计日志与审计持久化职责待厘清 |
+| GAP-H1 | OMS 状态机（SM-03）未串联到 Paper Trading Engine |
+| GAP-H2 | 学习门控（EX-05）主流程未调用 check_promotion() |
+| GAP-H3 | 感知面（EX-07）市场数据未包装 PerceptionDataObject |
+| GAP-H4 | 控制面 system_mode 变更未传播到 GovernanceHub |
+| GAP-H5 | Paper→Live 门控未接入授权工作流 |
+| GAP-H6 | TTL 执行器未定期调用（过期租约不会自动终止） |
 
----
+**Medium：** 影子决策构建器、交易归因、事件队列、组合风控接入、变更审计与审计持久化厘清
 
-## 进度校准（2026-03-30 FA 评估）
+### 接入率校准
 
 ```
-已接入运行时（WIRED）:
-  ✅ risk_manager.py          — 仓位大小/P0/P1 风控
-  ✅ pipeline_bridge.py       — 策略→订单→执行→观察
-  ✅ paper_trading_engine.py  — 订单管理 + 成交模拟 + PnL
+已接入运行时（WIRED · 11/22）:
+  ✅ governance_hub.py         — 4 核心 SM 编排 + 跨 SM 级联 + 审计
+  ✅ governance_routes.py      — 8 治理 API 端点
+  ✅ risk_manager.py           — 仓位大小 / P0/P1 风控
+  ✅ pipeline_bridge.py        — 策略→治理 gate→订单→执行→观察
+  ✅ paper_trading_engine.py   — 订单管理 + is_authorized + acquire_lease
   ✅ market_data_dispatcher.py — WebSocket 行情分发
   ✅ market_regime.py          — 多时间框架 regime 检测
   ✅ data_source_enforcer.py   — 数据源分类
   ✅ perception_data_plane.py  — 认知标记框架（内部已接）
+  ✅ audit_persistence.py      — GovernanceHub 审计写盘
+  ✅ reconciliation_engine.py  — GovernanceHub.reconcile() 调用
 
-独立存在（STANDALONE，代码完整但未接入主管线）:
-  ⬜ authorization_state_machine.py   ← GAP-1
-  ⬜ risk_governor_state_machine.py   ← 代码已完成，需创建 ControlPlaneGovernance 服务
-  ⬜ decision_lease_state_machine.py  ← GAP-2
-  ⬜ oms_state_machine.py             ← GAP-3
-  ⬜ reconciliation_engine.py         ← GAP-4
-  ⬜ learning_tier_gate.py            ← GAP-5
-  ⬜ multi_agent_framework.py         ← GAP-6
-  ⬜ audit_persistence.py             ← GAP-11
-  ⬜ paper_live_gate.py               ← GAP-9
-  ⬜ ttl_enforcer.py                  ← GAP-10
-  ⬜ trade_attribution.py             ← GAP-14
+独立存在（STANDALONE · 11/22）:
+  ⬜ oms_state_machine.py          ← GAP-H1
+  ⬜ learning_tier_gate.py         ← GAP-H2
+  ⬜ multi_agent_framework.py      ← GAP-C3
+  ⬜ paper_live_gate.py            ← GAP-H5
+  ⬜ ttl_enforcer.py               ← GAP-H6
+  ⬜ trade_attribution.py
   ⬜ protective_order_manager.py
   ⬜ portfolio_risk_control.py
   ⬜ recovery_approval_gate.py
   ⬜ shadow_decision_builder.py
+  ⬜ change_audit_log.py
 
-接入率:  7/22 = 32%（模组已全部实现，接入是下一阶段重点）
+接入率:  11/22 = 50%（Phase 3 从 32% 提升到 50%）
+合规度:  ~65%
 ```
 
-**下一步（Phase 3 集成优先级）：**
+### 下一步优先级
 
-1. 创建 `ControlPlaneGovernance` 服务类 — 实例化 SM-01/SM-04，注册审计回调
-2. 接入 OMS 状态机到 Paper Trading Engine — 统一订单生命周期
-3. 对账引擎接入订单完成路径 — 成交后自动对账
-4. 决策租约接入 pipeline_bridge — AI 输出走正式租约流程
-5. 创建治理事件总线 — 风控升级 → 授权收缩 → TTL 强制
+1. **fail-closed 确认** — 确保 is_authorized() 拒绝时订单被阻断（非仅 warning）
+2. **OMS 串联** — Paper Trading Engine 使用 SM-03 11态生命周期
+3. **学习门控** — 交易完成后调用 check_promotion()，启动 L1→L2 自动晋升
+4. **多 Agent 实例化** — Conductor + Strategist/Guardian/Analyst/Executor（ScoutAgent 已有）
+5. **感知面接入** — 市场数据包装 PerceptionDataObject 进入决策链
 
 ---
 
@@ -261,7 +286,9 @@ bash helper_scripts/start_paper_trading.sh
 |------|------|
 | 22 份治理文件（SPEC 源） | Cowork `01_source_documents/` |
 | Phase 2 执行总览 + 审核报告 | `docs/governance_dev/phase2_execution/` |
+| Phase 3 集成指南 + 安全审核 | `docs/governance_dev/phase3_integration/` |
 | T2.01–T2.23 变更日志 | `docs/governance_dev/changelogs/` |
+| 治理文件提取参考（8 份） | `docs/governance_dev/governance_extracts/` |
 | 完整项目日志 | `CLAUDE.md` |
 
 GitHub: [yunancun/BybitOpenClaw](https://github.com/yunancun/BybitOpenClaw)
