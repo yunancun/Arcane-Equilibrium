@@ -201,7 +201,12 @@ def get_governance_status(
 
     try:
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         return GovernanceResponse.success(data=status.to_dict(), message="governance_status")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting governance status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -224,6 +229,9 @@ def get_detailed_governance_status(
 
     try:
         base_status = hub.get_status()
+        # FIX-06: Null safety check
+        if base_status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         detailed = base_status.to_dict()
 
         # Risk Governor State
@@ -344,6 +352,9 @@ def get_authorization_status(
 
     try:
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         auth_detail = {
             "state": status.auth_state,
             "expires_at_ms": status.auth_expires_at_ms,
@@ -352,6 +363,8 @@ def get_authorization_status(
             "is_effective": status.auth_state in ["ACTIVE", "RESTRICTED"],
         }
         return GovernanceResponse.success(data=auth_detail, message="authorization_status")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting authorization status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -384,6 +397,9 @@ def approve_authorization(
 
         # Get current auth state and approve pending
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         if not status.auth_pending_approval:
             return GovernanceResponse.error(
                 "No pending authorization approval",
@@ -441,6 +457,9 @@ def get_risk_level(
 
     try:
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         level_detail = {
             "level": status.risk_level,
             "level_name": status.risk_level_name,
@@ -493,6 +512,9 @@ def override_risk_level(
         sanitized_reason = _sanitize_string(body.reason, max_len=500)
 
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
         current_level = status.risk_level or 0
 
         # Map level name to int
@@ -1133,6 +1155,9 @@ def get_active_leases(
 
     try:
         status = hub.get_status()
+        # FIX-06: Null safety check
+        if status is None:
+            raise HTTPException(status_code=500, detail="Governance status unavailable")
 
         # Note: Actual lease details would be fetched from hub._lease_sm
         lease_detail = {
@@ -1142,6 +1167,8 @@ def get_active_leases(
         }
 
         return GovernanceResponse.success(data=lease_detail, message="leases_list")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting leases: {e}")
         raise HTTPException(status_code=500, detail=str(e))
