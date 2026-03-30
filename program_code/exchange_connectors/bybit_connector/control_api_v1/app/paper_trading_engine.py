@@ -1246,6 +1246,8 @@ class PaperTradingEngine:
 
             # Risk manager tick checks / 风控管理器 tick 检查
             if self.risk_manager:
+                # T2.01: Record market prices for portfolio risk correlation tracking
+                self.risk_manager.record_market_prices_for_portfolio_risk(market_prices)
                 close_orders = self.risk_manager.check_positions_on_tick(state, market_prices)
                 for co in close_orders:
                     sym = co["symbol"]

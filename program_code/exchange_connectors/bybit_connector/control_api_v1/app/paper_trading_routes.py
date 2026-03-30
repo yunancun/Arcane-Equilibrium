@@ -55,7 +55,11 @@ PAPER_STORE = PaperStateStore(_paper_state_path)
 # Risk manager (3-tier priority: P0 category > P1 global > P2 agent)
 # 风控管理器（三层优先级：P0 品类专属 > P1 全局 > P2 Agent 自适应）
 from .risk_manager import RiskManager  # noqa: E402
+from .portfolio_risk_control import PortfolioRiskControl, PortfolioRiskConfig  # noqa: E402
 RISK_MANAGER = RiskManager()
+# T2.01: Initialize and inject PortfolioRiskControl / 初始化并注入组合风控
+PORTFOLIO_RISK_CONTROL = PortfolioRiskControl(config=PortfolioRiskConfig())
+RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
