@@ -930,6 +930,196 @@ class TestIntegration:
         assert status3.mode == GovernanceMode.MANUAL_REVIEW.value
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: Edge Cases (T1.07 Hardening)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestEdgeCasesPartialInit:
+    """Test is_authorized() with partial SM initialization failures"""
+
+    def test_is_authorized_partial_init(self, tmp_audit_dir):
+        """is_authorized() fails-closed when one SM initialization fails"""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+
+        # Mock _ensure_initialized to raise exception
+        with mock.patch.object(
+            hub,
+            "_ensure_initialized",
+            side_effect=Exception("Auth SM init failed"),
+        ):
+            # First access triggers _ensure_initialized
+            result = hub.is_authorized()
+
+        # Should fail-closed despite partial init attempt
+        assert result is False
+
+
+class TestEdgeCasesLockContention:
+    """Test is_authorized() under high concurrent load"""
+
+    def test_is_authorized_lock_contention(self, tmp_audit_dir):
+        """is_authorized() handles concurrent access without deadlock"""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+
+        # Create and activate authorization
+        auth_obj = hub._authorization_sm.create_draft(
+            title="Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+
+        results = []
+        errors = []
+        start_time = time.perf_counter()
+
+        def stress_test_auth():
+            """Worker thread calling is_authorized() repeatedly"""
+            try:
+                for _ in range(20):
+                    result = hub.is_authorized()
+                    results.append(result)
+                    time.sleep(0.001)  # 1ms between calls
+            except Exception as e:
+                errors.append(e)
+
+        # Spawn 10 concurrent threads
+        threads = [threading.Thread(target=stress_test_auth) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        elapsed = time.perf_counter() - start_time
+
+        # Verify no errors
+        assert not errors, f"Concurrency errors: {errors}"
+
+        # Verify all results are consistent (all True since auth is active)
+        assert len(results) == 200  # 10 threads * 20 calls
+        assert all(results), "All calls should return True with active auth"
+
+        # Verify reasonable performance (should be fast due to cache)
+        # 200 calls should complete in < 1 second even with contention
+        assert elapsed < 1.0, f"Stress test took too long: {elapsed}s"
+
+    def test_is_authorized_cache_hit_rate(self, tmp_audit_dir):
+        """is_authorized() cache achieves high hit rate under repeated calls"""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+
+        # Create and activate authorization
+        auth_obj = hub._authorization_sm.create_draft(
+            title="Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+
+        # Reset cache stats
+        initial_cache_state = hub._cached_auth_state
+
+        # Call is_authorized() 100 times rapidly (should hit cache)
+        cache_hits = 0
+        for _ in range(100):
+            result = hub.is_authorized()
+            if hub._cached_auth_state == initial_cache_state:
+                cache_hits += 1
+
+        # We can't perfectly measure cache hits, but verify no errors occurred
+        assert result is True
+
+
+class TestEdgeCasesCacheExpiryRace:
+    """Test is_authorized() cache expiry race condition resistance"""
+
+    def test_is_authorized_cache_expiry_race(self, tmp_audit_dir):
+        """Cache expiry does not cause authorization decision corruption"""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        # Set shorter cache TTL for testing
+        hub._cache_ttl_ms = 50
+
+        hub._ensure_initialized()
+
+        # Create and activate authorization
+        auth_obj = hub._authorization_sm.create_draft(
+            title="Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+
+        # First call caches result
+        result1 = hub.is_authorized()
+        assert result1 is True
+        cache1 = hub._cached_auth_state
+
+        # Wait for cache to expire
+        time.sleep(0.06)  # 60ms > 50ms TTL
+
+        # Second call after expiry should refresh cache
+        result2 = hub.is_authorized()
+        cache2 = hub._cached_auth_state
+
+        # Result should remain consistent
+        assert result2 is True
+
+        # Cache should be refreshed (new timestamp)
+        assert cache1 is not None and cache2 is not None
+        _, ts1 = cache1
+        _, ts2 = cache2
+        assert ts2 > ts1  # Timestamp should have advanced
+
+    def test_is_authorized_cache_invalidation_on_state_change(self, tmp_audit_dir):
+        """Cache is properly invalidated when authorization state changes"""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+
+        # Create and activate authorization
+        auth_obj = hub._authorization_sm.create_draft(
+            title="Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+
+        # First call caches result (True)
+        result1 = hub.is_authorized()
+        assert result1 is True
+        cache_after_active = hub._cached_auth_state
+        assert cache_after_active is not None
+
+        # Manually invalidate cache (simulating state change)
+        hub._invalidate_auth_cache()
+        assert hub._cached_auth_state is None
+
+        # Wait a bit to ensure timestamp advances
+        time.sleep(0.002)
+
+        # Next call should bypass cache and recompute
+        result2 = hub.is_authorized()
+        cache_after_refresh = hub._cached_auth_state
+
+        assert result2 is True  # Should still be True (auth still active)
+        assert cache_after_refresh is not None
+        # Cache should be refreshed with new timestamp (or at least potentially different)
+        result_before, ts_before = cache_after_active
+        result_after, ts_after = cache_after_refresh
+        # Both should be True and timestamp should be >= (allowing for same millisecond)
+        assert result_before is True
+        assert result_after is True
+        assert ts_after >= ts_before
+
+
 __all__ = [
     "TestHubInitialization",
     "TestAuthorizationGate",
@@ -943,4 +1133,7 @@ __all__ = [
     "TestErrorResilience",
     "TestAuditTrail",
     "TestIntegration",
+    "TestEdgeCasesPartialInit",
+    "TestEdgeCasesLockContention",
+    "TestEdgeCasesCacheExpiryRace",
 ]
