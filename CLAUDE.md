@@ -236,6 +236,24 @@ Round 2 Batch 5-C（2026-03-30 — L1 本地推理管道验证 · Ollama/Qwen 3.
     - TestL1TriageLocalFallback（8）：fallback 触发 / JSON 解析 / 自由文本启发 / Ollama 不可用 / 超时
     - TestOllamaResponseProperties（2）：tokens/s 计算 / 零值边界
 
+Round 2 Batch 5-B（2026-03-30 — 方向 B · Pre-trade Edge Filter 接入）：
+  目标：利用 Qwen 3.5 本地推理在下单前过滤无 edge 信号，直接修复 0% 胜率根因之一
+  B-T1 (E1a): pipeline_bridge.py — pre-trade edge filter
+    - 新增 _ollama_client 属性 + set_ollama_client() + _edge_filter_enabled 开关
+    - 新增 _edge_filter_stats 追踪（checked/passed/rejected/errors）
+    - 新增 _check_edge_filter() 方法（~110 行）：
+      构建市场上下文（symbol/side/price/strategy/confidence/regime/indicators）→
+      调用 ollama_client.judge_edge() → 解析 JSON 或自由文本启发式 →
+      has_edge=true 放行 / false 拒绝
+    - 设计原则：fail-OPEN（Ollama 不可用/出错时放行，不因过滤器阻断全部交易）
+    - 插入点：_process_pending_intents() 中 governance check 之后、submit_order() 之前
+  B-T2 (E1b): phase2_strategy_routes.py
+    - 导入 get_ollama_client() 并实例化 OLLAMA_CLIENT
+    - 注入 PIPELINE_BRIDGE.set_ollama_client(OLLAMA_CLIENT)
+  B-T3 (E4): 新增 test_edge_filter_integration.py（21 测试）
+    - TestEdgeFilterIntegration（18）：通过/拒绝/fail-open/禁用/统计/自由文本/上下文/超时
+    - TestEdgeFilterErrorHandling（3）：None metadata / 缺失价格 / 无效 JSON 回退
+
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过
   MA Crossover 置信度     = 0.55（扫描器部署）/ 0.50（默认 BTCUSDT）

@@ -127,6 +127,10 @@ SCOUT_AGENT = ScoutAgent(config=ScoutConfig(), message_bus=MESSAGE_BUS)
 SCOUT_AGENT.start()
 logger.info("ScoutAgent + MessageBus initialized (Plan A2) / Scout 代理 + 消息总线已初始化（方案 A2）")
 
+# B5-B: Ollama client for L1 pre-trade edge filter / L1 交易前 edge 过滤器
+from .ollama_client import get_ollama_client
+OLLAMA_CLIENT = get_ollama_client()
+
 # ── Bybit Demo Connector (created early to read balance for position sizing) ──
 # 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
 try:
@@ -272,6 +276,14 @@ try:
             logger.info("ScoutAgent + MessageBus injected into PipelineBridge / Scout 代理 + 消息总线已注入管线桥接器")
     except Exception as e:
         logger.warning("Could not inject ScoutAgent/MessageBus: %s", e)
+
+    # B5-B: Inject Ollama client for pre-trade edge filter / 注入 Ollama 客户端用于交易前 edge 过滤
+    try:
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_ollama_client(OLLAMA_CLIENT)
+            logger.info("Ollama client injected into PipelineBridge / Ollama 客户端已注入管線桥接器")
+    except Exception as e:
+        logger.warning("Could not inject Ollama client: %s", e)
 
     # --- EX-05: LearningTierGate injection into PipelineBridge ---
     # EX-05：学习等级门控注入管线桥接器，以支持 L1→L2→L3... 自动晋升

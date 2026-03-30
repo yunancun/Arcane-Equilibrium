@@ -99,6 +99,9 @@ class PipelineBridge:
         self._scout_agent = None  # T2.07: Set externally for ScoutAgent local market intelligence / Scout 代理
         self._message_bus = None  # T2.07: Set externally for inter-agent communication / 消息总线
         self._learning_tier_gate = None  # EX-05 §3: Set externally for learning tier auto-promotion / 学习等级自动晋升门控
+        self._ollama_client = None  # B5-B: Set externally for L1 pre-trade edge filter / L1 交易前 edge 过滤器
+        self._edge_filter_enabled = True  # Can be toggled at runtime / 可在运行时切换
+        self._edge_filter_stats = {"checked": 0, "passed": 0, "rejected": 0, "errors": 0}
 
         self._stats = {
             "ticks_received": 0,
@@ -181,6 +184,14 @@ class PipelineBridge:
         为学习等级自动晋升设置 LearningTierGate。
         """
         self._learning_tier_gate = gate
+
+    def set_ollama_client(self, client: Any) -> None:
+        """
+        Set OllamaClient for L1 pre-trade edge filter.
+        设置 OllamaClient 用于 L1 交易前 edge 过滤。
+        """
+        self._ollama_client = client
+        logger.info("OllamaClient set for pre-trade edge filter / 已设置 OllamaClient 用于交易前 edge 过滤")
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -387,6 +398,18 @@ class PipelineBridge:
                             self._stats["intents_rejected"] += 1
                         continue
 
+                # 5-B: L1 Pre-trade edge filter (Ollama/Qwen) / L1 交易前 edge 过滤
+                if self._ollama_client and self._edge_filter_enabled:
+                    edge_ok = self._check_edge_filter(intent, market_prices)
+                    if not edge_ok:
+                        logger.info(
+                            "Intent rejected by L1 edge filter: %s %s / 意图被 L1 edge 过滤器拒绝",
+                            intent.symbol, intent.side,
+                        )
+                        with self._lock:
+                            self._stats["intents_rejected"] += 1
+                        continue
+
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）
                 category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
@@ -573,6 +596,117 @@ class PipelineBridge:
 
         except Exception:
             logger.exception("Scout local scan error (non-fatal) / Scout 本地扫描异常（非致命）")
+
+    def _check_edge_filter(self, intent: Any, market_prices: dict[str, float]) -> bool:
+        """
+        L1 pre-trade edge filter: ask Qwen if the signal has enough edge to trade.
+        L1 交易前 edge 过滤器：询问 Qwen 当前信号是否有足够的交易优势。
+
+        Returns True if intent should proceed, False if it should be rejected.
+        返回 True 表示允许交易，False 表示拒绝。
+
+        Design principle: fail-OPEN (if Ollama is unavailable or errors, allow the trade).
+        设计原则：失败时放行（Ollama 不可用或出错时允许交易通过）。
+        This is conservative in a different sense — we don't want the edge filter
+        to become a single point of failure that blocks all trading.
+        """
+        with self._lock:
+            self._edge_filter_stats["checked"] += 1
+
+        try:
+            if not self._ollama_client.is_available():
+                logger.debug("Edge filter: Ollama unavailable, passing through / Ollama 不可用，放行")
+                with self._lock:
+                    self._edge_filter_stats["errors"] += 1
+                return True  # fail-open
+
+            # Build market context for Qwen / 为 Qwen 构建市场上下文
+            symbol = intent.symbol
+            side = intent.side
+            price = market_prices.get(symbol, 0.0)
+            strategy = intent.metadata.get("strategy_name", "unknown") if intent.metadata else "unknown"
+            confidence = getattr(intent, "confidence", None) or (
+                intent.metadata.get("confidence", "N/A") if intent.metadata else "N/A"
+            )
+
+            # Gather additional context from KlineManager if available
+            regime_info = ""
+            try:
+                if hasattr(self._km, 'get_regime'):
+                    regime = self._km.get_regime(symbol)
+                    if regime:
+                        regime_info = f"\nMarket regime: {regime}"
+            except Exception:
+                pass
+
+            indicator_info = ""
+            try:
+                if hasattr(self._km, 'get_latest_indicators'):
+                    indicators = self._km.get_latest_indicators(symbol)
+                    if indicators and isinstance(indicators, dict):
+                        # Only include key indicators
+                        keys = ["rsi_14", "atr_14", "bb_width", "macd_histogram", "volume_ratio"]
+                        parts = [f"{k}={indicators[k]:.4f}" for k in keys if k in indicators]
+                        if parts:
+                            indicator_info = f"\nIndicators: {', '.join(parts)}"
+            except Exception:
+                pass
+
+            context = (
+                f"Symbol: {symbol}\n"
+                f"Signal: {side} (strategy: {strategy}, confidence: {confidence})\n"
+                f"Current price: {price:.4f}\n"
+                f"Fee drag: ~0.11% round-trip (taker both sides)"
+                f"{regime_info}"
+                f"{indicator_info}"
+            )
+
+            resp = self._ollama_client.judge_edge(context, timeout=10)
+
+            if not resp.success:
+                logger.warning(
+                    "Edge filter: Qwen error (%s), passing through / Qwen 出错，放行: %s",
+                    resp.error, symbol,
+                )
+                with self._lock:
+                    self._edge_filter_stats["errors"] += 1
+                return True  # fail-open
+
+            # Parse response / 解析响应
+            import json as _json
+            try:
+                result = _json.loads(resp.text)
+                has_edge = result.get("has_edge", True)  # default: allow
+                edge_confidence = result.get("confidence", 0.5)
+                edge_reason = result.get("reason", "")
+            except (_json.JSONDecodeError, AttributeError):
+                # If Qwen returns non-JSON, try heuristic
+                text_lower = resp.text.lower()
+                has_edge = "true" in text_lower or "yes" in text_lower
+                edge_confidence = 0.5
+                edge_reason = resp.text[:200]
+
+            logger.info(
+                "Edge filter: %s %s has_edge=%s confidence=%.2f reason=%s latency=%.0fms / "
+                "edge 过滤: %s %s has_edge=%s",
+                symbol, side, has_edge, edge_confidence, edge_reason[:80], resp.latency_ms,
+                symbol, side, has_edge,
+            )
+
+            if has_edge:
+                with self._lock:
+                    self._edge_filter_stats["passed"] += 1
+                return True
+            else:
+                with self._lock:
+                    self._edge_filter_stats["rejected"] += 1
+                return False
+
+        except Exception as e:
+            logger.warning("Edge filter exception (fail-open): %s / edge 过滤异常（放行）: %s", e, intent.symbol)
+            with self._lock:
+                self._edge_filter_stats["errors"] += 1
+            return True  # fail-open — never block trading due to filter errors
 
     def _on_position_open(self, intent: Any, fill_price: float) -> None:
         """
