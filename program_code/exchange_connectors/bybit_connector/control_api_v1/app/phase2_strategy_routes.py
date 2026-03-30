@@ -223,6 +223,15 @@ try:
             logger.warning("PERCEPTION_PLANE is None — skipping cognitive honesty checks / 感知平面为 None — 跳过认知诚实检查")
     except ImportError as e:
         logger.warning("Could not import PERCEPTION_PLANE for PipelineBridge: %s", e)
+
+    # --- T3.05: ScannerRateLimiter injection ---
+    try:
+        from .paper_trading_routes import SCANNER_RATE_LIMITER as _SCANNER_RATE_LIMITER_REF
+        if PIPELINE_BRIDGE is not None and _SCANNER_RATE_LIMITER_REF is not None:
+            PIPELINE_BRIDGE.set_scanner_rate_limiter(_SCANNER_RATE_LIMITER_REF)
+            logger.info("ScannerRateLimiter injected into PipelineBridge / 掃描限速器已注入管線橋接器")
+    except ImportError as e:
+        logger.warning("Could not import SCANNER_RATE_LIMITER: %s", e)
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
