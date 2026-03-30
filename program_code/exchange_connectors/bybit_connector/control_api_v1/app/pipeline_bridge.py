@@ -109,6 +109,7 @@ class PipelineBridge:
         self._guardian_stats = {"checked": 0, "approved": 0, "rejected": 0, "modified": 0, "errors": 0}
         self._analyst_agent = None  # Batch 10: Set externally for L2 pattern analysis / 分析师代理
         self._last_l2_cron_ts: float = 0.0  # Batch 10: Last L2 cron trigger timestamp / L2 Cron 上次触发时间
+        self._executor_agent = None  # Batch 11: Set externally for ExecutorAgent / 执行者代理
 
         self._stats = {
             "ticks_received": 0,
@@ -233,6 +234,14 @@ class PipelineBridge:
         """
         self._analyst_agent = agent
         logger.info("AnalystAgent set for L2 cron trigger / 已设置 AnalystAgent 用于 L2 Cron 触发")
+
+    def set_executor_agent(self, agent: Any) -> None:
+        """
+        Batch 11: Set ExecutorAgent for order execution wrapping + quality feedback.
+        设置 ExecutorAgent 用于订单执行包装 + 质量反馈。
+        """
+        self._executor_agent = agent
+        logger.info("ExecutorAgent set for execution wrapping / 已设置 ExecutorAgent 用于执行包装")
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -963,24 +972,23 @@ class PipelineBridge:
             except Exception:
                 logger.debug("Could not write regime to position (non-fatal): %s", symbol)
 
+        # Compute ATR-based stop percentage (shared by StopManager + exchange conditional)
+        # 计算 ATR 止损百分比（本地止损 + 交易所条件单共用）
+        atr_stop_pct = 5.0  # default hard stop
+        if self._ie and fill_price > 0:
+            try:
+                indics_atr = self._ie.get_indicators(symbol, "1h")
+                atr_raw = indics_atr.get("atr") if indics_atr else None
+                if atr_raw and atr_raw > 0:
+                    atr_stop_pct = min(15.0, max(2.0, (atr_raw * 2.0 / fill_price) * 100))
+            except Exception:
+                pass
+
         # H1: register with StopManager using ATR-based dynamic stop + regime-adjusted time stop
         # H1：使用 ATR 动态止损 + 市场状态调整时间止损注册到 StopManager
         if self._stop_mgr:
             try:
                 from local_model_tools.stop_manager import StopConfig
-                # Try to get ATR from indicator engine for dynamic stop distance
-                # 尝试从指标引擎获取 ATR 用于动态止损距离
-                atr_stop_pct = 5.0  # default hard stop
-                if self._ie and fill_price > 0:
-                    try:
-                        indics = self._ie.get_indicators(symbol, "1h")
-                        atr = indics.get("atr") if indics else None
-                        if atr and atr > 0:
-                            # ATR-based stop: use 2x ATR as stop distance
-                            # ATR 动态止损：使用 2倍 ATR 作为止损距离
-                            atr_stop_pct = min(15.0, max(2.0, (atr * 2.0 / fill_price) * 100))
-                    except Exception:
-                        pass
                 # Regime-adjusted time stop / 市场状态调整时间止损
                 time_stop_hours = 48.0 * REGIME_TIME_MULTIPLIERS.get(regime, 1.0)
                 # B6: Dynamic trailing stop = max(5%, 2×ATR/price*100)
@@ -1012,6 +1020,49 @@ class PipelineBridge:
                 )
             except Exception:
                 logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
+
+        # ── Batch 11: Exchange conditional stop-loss (DOC-01 §5.9 dual defense) ──
+        # Batch 11：交易所条件止损单（DOC-01 §5.9 双重防线）
+        # fail-closed: if conditional order creation fails, log but do NOT block local stop-loss
+        # 失败安全：条件单创建失败仅记录日志，不阻止本地止损
+        if self._demo_connector and self._demo_connector.is_enabled and fill_price > 0:
+            try:
+                # Close side is opposite of position side
+                # 平仓方向与持仓方向相反
+                close_side = "Sell" if side == "long" else "Buy"
+                # Stop trigger price = entry_price × (1 - hard_stop_pct/100) for long,
+                #                      entry_price × (1 + hard_stop_pct/100) for short
+                # 止损触发价 = 入场价 × (1 ± 硬止损百分比/100)
+                _hard_stop_pct = atr_stop_pct
+                if side == "long":
+                    trigger_price = round(fill_price * (1 - _hard_stop_pct / 100), 2)
+                else:
+                    trigger_price = round(fill_price * (1 + _hard_stop_pct / 100), 2)
+
+                cond_result = self._demo_connector.place_conditional_order(
+                    symbol=symbol,
+                    side=close_side,
+                    qty=qty,
+                    trigger_price=trigger_price,
+                )
+                if cond_result.get("retCode") == 0:
+                    logger.info(
+                        "Batch 11 dual defense: exchange stop-loss created %s %s trigger=%.2f / "
+                        "双重防线：交易所止损单已创建",
+                        symbol, close_side, trigger_price,
+                    )
+                else:
+                    logger.warning(
+                        "Batch 11 dual defense: exchange stop-loss FAILED %s reason=%s (local stop still active) / "
+                        "双重防线：交易所止损单创建失败（本地止损仍然有效）",
+                        symbol, cond_result.get("retMsg"),
+                    )
+            except Exception as _cond_err:
+                logger.warning(
+                    "Batch 11 dual defense: conditional order error %s: %s (local stop still active) / "
+                    "双重防线：条件单创建异常（本地止损仍然有效）",
+                    symbol, _cond_err,
+                )
 
     def _try_learning_promotion(self, close_pnl: float) -> None:
         """

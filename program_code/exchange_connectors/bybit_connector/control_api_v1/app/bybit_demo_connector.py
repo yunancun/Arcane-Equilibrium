@@ -216,6 +216,115 @@ class BybitDemoConnector:
             "category": category, "symbol": symbol, "orderId": order_id,
         })
 
+    # ── Batch 11: Exchange Conditional Orders (stop-loss) ──
+    # Batch 11：交易所条件单（止损）— DOC-01 §5.9 双重防线
+
+    def place_conditional_order(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        trigger_price: float,
+        *,
+        category: str = "linear",
+        order_type: str = "Market",
+        trigger_direction: int | None = None,
+        reduce_only: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Place a conditional stop-loss order on Bybit Demo sandbox.
+        在 Bybit Demo sandbox 上创建条件止损单。
+
+        DOC-01 §5.9: Exchange conditional order = second defense line.
+        Even if the local program crashes, the exchange order persists.
+        即使本地程序崩溃，交易所条件单依然存在。
+
+        Args:
+            symbol: e.g. "BTCUSDT"
+            side: "Buy" or "Sell" — the close side (opposite of position)
+            qty: position size to close
+            trigger_price: price at which the stop triggers
+            category: "linear" for USDT perps
+            order_type: "Market" (recommended for stops) or "Limit"
+            trigger_direction: 1 = rise above trigger, 2 = fall below trigger.
+                Auto-detected from side if None.
+            reduce_only: True — stops should only close, never open new positions
+        """
+        if not self._enabled:
+            return {"retCode": -1, "retMsg": "Demo connector not enabled"}
+
+        # Auto-detect trigger direction from close side:
+        #   Sell stop (close long) → triggers when price falls below → direction=2
+        #   Buy stop (close short) → triggers when price rises above → direction=1
+        # 自动推断触发方向
+        if trigger_direction is None:
+            trigger_direction = 2 if side.capitalize() == "Sell" else 1
+
+        # Round qty same as submit_order / 四舍五入到交易所步长精度
+        if qty >= 1.0:
+            qty = round(qty)
+        else:
+            qty = round(qty, 3)
+        if qty <= 0:
+            return {"retCode": -1, "retMsg": "qty rounds to zero, conditional order skipped"}
+
+        params: dict[str, Any] = {
+            "category": category,
+            "symbol": symbol,
+            "side": side.capitalize(),
+            "orderType": order_type.capitalize() if order_type.lower() in ("market", "limit") else order_type,
+            "qty": str(qty),
+            "triggerPrice": str(trigger_price),
+            "triggerDirection": trigger_direction,
+            "reduceOnly": True,
+            "timeInForce": "GTC",
+            "orderFilter": "StopOrder",
+        }
+
+        result = self._request("POST", "/v5/order/create", params)
+
+        with self._lock:
+            if result.get("retCode") == 0:
+                self._stats["conditional_orders_created"] = self._stats.get("conditional_orders_created", 0) + 1
+                order_id = result.get("result", {}).get("orderId", "")
+                logger.info(
+                    "Demo CONDITIONAL stop-loss created: %s %s trigger=%.2f qty=%s orderId=%s / "
+                    "Demo 条件止损单已创建",
+                    symbol, side, trigger_price, qty, order_id,
+                )
+            else:
+                self._stats["conditional_orders_failed"] = self._stats.get("conditional_orders_failed", 0) + 1
+                logger.warning(
+                    "Demo conditional order failed: %s %s trigger=%.2f reason=%s / "
+                    "Demo 条件单创建失败",
+                    symbol, side, trigger_price, result.get("retMsg"),
+                )
+
+        return result
+
+    def cancel_all_conditional_orders(self, symbol: str, category: str = "linear") -> dict[str, Any]:
+        """
+        Cancel all conditional (stop) orders for a symbol on Demo.
+        取消某个交易对的所有条件单（Demo 环境）。
+        """
+        if not self._enabled:
+            return {"retCode": -1, "retMsg": "Demo connector not enabled"}
+        return self._request("POST", "/v5/order/cancel-all", {
+            "category": category,
+            "symbol": symbol,
+            "orderFilter": "StopOrder",
+        })
+
+    def get_conditional_orders(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
+        """
+        Get open conditional orders from Demo.
+        获取 Demo 环境的挂起条件单。
+        """
+        params: dict[str, Any] = {"category": category, "orderFilter": "StopOrder"}
+        if symbol:
+            params["symbol"] = symbol
+        return self._request("GET", "/v5/order/realtime", params)
+
     def get_status(self) -> dict[str, Any]:
         """Get connector status."""
         with self._lock:

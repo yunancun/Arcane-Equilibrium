@@ -480,6 +480,62 @@ try:
         ANALYST_AGENT = None
         logger.warning("Could not inject AnalystAgent: %s", e)
 
+    # ── Batch 11: ExecutorAgent — order execution wrapper + quality feedback ──
+    # Batch 11：ExecutorAgent — 订单执行包装 + 执行质量反馈
+    # DOC-01 §5.9: dual defense (local stop + exchange conditional)
+    try:
+        from .executor_agent import ExecutorAgent, ExecutorConfig
+        from .multi_agent_framework import MessageType as _MT11, AgentRole as _AR11
+
+        EXECUTOR_AGENT = ExecutorAgent(
+            config=ExecutorConfig(),
+            message_bus=MESSAGE_BUS,
+            paper_engine=PAPER_ENGINE,
+        )
+        EXECUTOR_AGENT.start()
+
+        # Register Executor with Conductor / 向 Conductor 注册 Executor
+        CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")
+        CONDUCTOR.set_agent_state(_AR11.EXECUTOR, _AgentState.RUNNING)
+
+        # Subscribe Executor to MessageBus — receives APPROVED_INTENT from Guardian
+        # 订阅 Executor 到消息总线 — 接收 Guardian 批准的 APPROVED_INTENT
+        MESSAGE_BUS.subscribe(_AR11.EXECUTOR, EXECUTOR_AGENT.on_message)
+
+        # Wire conditional order callback (Batch 11: exchange stop-loss)
+        # 接入条件单回调（Batch 11：交易所止损单）
+        if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
+            def _exchange_stop_callback(symbol: str, side: str, price: float, qty: float) -> None:
+                """Create exchange conditional stop-loss after order fill / 成交后创建交易所条件止损"""
+                close_side = "Sell" if side.capitalize() == "Buy" else "Buy"
+                # Use 5% hard stop as default for executor-initiated stops
+                hard_pct = 5.0
+                if side.capitalize() == "Buy":
+                    trigger = round(price * (1 - hard_pct / 100), 2)
+                else:
+                    trigger = round(price * (1 + hard_pct / 100), 2)
+                DEMO_CONNECTOR.place_conditional_order(
+                    symbol=symbol, side=close_side, qty=qty, trigger_price=trigger,
+                )
+
+            EXECUTOR_AGENT.set_conditional_order_callback(_exchange_stop_callback)
+            logger.info("ExecutorAgent conditional order callback wired to DemoConnector / Executor 条件单回调已接入 Demo 连接器")
+
+        # Inject ExecutorAgent into PipelineBridge for status tracking
+        # 将 ExecutorAgent 注入管线桥接器用于状态追踪
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_executor_agent(EXECUTOR_AGENT)
+
+        logger.info(
+            "Batch 11: ExecutorAgent initialized (bus=%s, engine=%s, demo=%s) / "
+            "Batch 11：ExecutorAgent 已初始化",
+            MESSAGE_BUS is not None, PAPER_ENGINE is not None,
+            DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled,
+        )
+    except (ImportError, Exception) as e:
+        EXECUTOR_AGENT = None
+        logger.warning("Could not initialize ExecutorAgent: %s / 无法初始化 ExecutorAgent: %s", e, e)
+
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")

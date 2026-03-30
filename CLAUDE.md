@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-30（Batch 8 Guardian 接线 + Batch 9 Perception/Analyst 接线）
+# 最后更新：2026-03-30（Batch 11 Executor Agent + 交易所条件单 + 双重防线）
 
 ---
 
@@ -65,8 +65,8 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     自动扫描              = 85%（650+ 对全扫描可用，Scout 情报无消费者）
     策略选择              = 40%（标准技术指标，无 AI、无回测、无动态仓位）
     AI 风险评估           = 20%（H0 规则引擎强，H1-H5 AI 层完全断开）
-    下单                  = 85%（治理 gate + OMS SM-03 已串联，Batch 10）
-    止损                  = 75%（本地 3 类止损可用，缺交易所条件单）
+    下单                  = 90%（治理 gate + OMS SM-03 + ExecutorAgent 包装，Batch 11）
+    止损                  = 90%（本地 3 类止损 + 交易所条件单双重防线，Batch 11）
     学习                  = 25%（E1 观察 + L2 自动触发 + Sunday cron，Batch 10）
     进化                  = 5%（PaperLiveGate 未部署，无策略自动优化）
 
@@ -74,9 +74,9 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     ✅ 治理 fail-closed 一流（is_authorized 真实拒绝订单，acquire_lease fail-closed）
     ✅ P0/P1/P2 风控真实执行（check_order_allowed 返回 False 阻止订单）
     ✅ 异常处理防御性、核心代码零 except:pass
-    ❌ 4/6 Agent 未实现（Strategist/Guardian/Analyst/Executor 类不存在）
-    ❌ Conductor 300+ 行零生产调用
-    ❌ MessageBus 零订阅者（Scout 对空气说话）
+    ✅ 5/6 Agent 已实现（Scout/Strategist/Guardian/Analyst/Executor，仅 Conductor 编排待完善）
+    ✅ Conductor 注册 5 个 Agent，MessageBus 有多订阅者
+    ✅ ExecutorAgent 接入管线：APPROVED_INTENT→submit_order()→EXECUTION_REPORT（Batch 11）
     ✅ L2 AI Engine 自动触发（Batch 10：observations≥200 auto + Sunday cron）
     ❌ Perception Plane register_data() 零调用
     ✅ OMS SM-03 已串联（Batch 10：Paper 7-state→OMS 11-state 映射，fail-closed）
@@ -321,7 +321,7 @@ Round 2 Batch 9（2026-03-30 — Perception Plane 激活 + Analyst 接线）：
     Strategist → RUNNING（Batch 7 接入）
     Guardian → RUNNING（Batch 8 接入，primary gate，fail-closed）
     Analyst  → RUNNING（Batch 9 接入，L1 统计 + L2 模式发现）
-    Executor → 未启动（Batch 11 计划）
+    Executor → ✅ 已接入（Batch 11：消费 APPROVED_INTENT → submit_order → EXECUTION_REPORT + 交易所条件单回调）
     Conductor → WIRED（管理 4 Agent 生命周期）
 
   测试总计：2,124 passed, 11 failed（pre-existing pytest-asyncio 缺失）, 2 skipped
@@ -551,7 +551,7 @@ python3 scripts/bybit_runtime_state_resolver.py
     - OMS SM-03 串联替换 Paper Engine 独立 7 态
     - TTL 执行器定期调用
 
-  Batch 11: Executor Agent + 交易所条件单（80→85%）
+  Batch 11: ✅ Executor Agent + 交易所条件单 + 双重防线（80→85%）
     - Executor 包装 submit_order + 执行质量反馈
     - 交易所条件单双重防线（DOC-01 §5.9）
 
@@ -658,7 +658,7 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-30 Batch 10 完成：OMS SM-03 串联 Paper Engine（7→11 state 映射 + fail-closed）+ L2 学习自动化（observations 阈值触发 + Sunday cron + TTL OMS 回调）+ AnalystAgent 接入 MessageBus。2101 测试通过（32 新），零回归。系统全程 read_only。
+> 截至 2026-03-30 Batch 11 完成：ExecutorAgent 接入管线（APPROVED_INTENT→submit_order→EXECUTION_REPORT）+ 交易所条件止损单（Bybit Demo V5 API）+ 本地止损+交易所条件单双重防线（DOC-01 §5.9）。195 测试通过（含 25 新 Batch 11），零回归。系统全程 read_only。
 
 ### Batch 7 记录（2026-03-30）
 
@@ -712,3 +712,44 @@ Live 前置条件（M/N 前必须核验）：
 | **合计** | **32** | **全部通过** |
 
 全量测试：2101 passed, 11 failed (pre-existing ollama), 2 skipped — 零回归
+
+### Batch 11 记录（2026-03-30 — Executor Agent + 交易所条件单 + 双重防线）
+
+**11.1 ExecutorAgent 接线（phase2_strategy_routes.py +50 行）**
+- 实例化 ExecutorAgent 注入 PaperTradingEngine + MessageBus
+- 向 Conductor 注册 EXECUTOR，设置 RUNNING 状态
+- MESSAGE_BUS.subscribe(EXECUTOR, on_message) — 接收 APPROVED_INTENT
+- 条件单回调接入 BybitDemoConnector.place_conditional_order()
+
+**11.2 交易所条件止损单（bybit_demo_connector.py +100 行）**
+- `place_conditional_order(symbol, side, qty, trigger_price)` — Bybit V5 `/v5/order/create` + `orderFilter=StopOrder`
+- 自动推断 `triggerDirection`：Sell 止损→2（跌破），Buy 止损→1（升破）
+- `cancel_all_conditional_orders(symbol)` — 批量取消
+- `get_conditional_orders()` — 查询挂起条件单
+- qty 四舍五入到交易所步长精度，`reduceOnly=True` 防止意外开仓
+
+**11.3 双重防线接通（pipeline_bridge.py +40 行）**
+- `_on_position_open()` 开仓后同时创建：
+  - 本地止损（StopManager ATR 动态止损）
+  - 交易所条件单（Bybit Demo stop-loss trigger）
+- ATR 止损百分比计算提升到方法级别（StopManager + 交易所共用）
+- fail-closed：条件单创建失败 → 记录日志但不阻止本地止损
+- 程序崩溃时交易所条件单仍然存在（DOC-01 §5.9）
+
+**11.4 ExecutorAgent 执行质量反馈（executor_agent.py — 预写已完成）**
+- EXECUTION_REPORT 消息包含：slippage_bps、fill_time_ms、actual_price vs expected_price
+- 发送给 ANALYST 角色用于交易质量分析
+- 统计：avg_slippage_bps、executions_success/failed
+
+**11.5 测试（25 tests）**
+
+| 测试类 | 数量 | 覆盖 |
+|--------|------|------|
+| TestExecutorAgentLifecycle | 3 | start/stop/pause 生命周期 |
+| TestExecutorAgentExecution | 7 | APPROVED_INTENT→submit_order、EXECUTION_REPORT、rejection、fail-closed、callback |
+| TestExecutorAgentStats | 3 | 统计追踪、报告上限 |
+| TestBybitDemoConditionalOrders | 7 | place/cancel/get 条件单、方向推断、qty 四舍五入、disabled |
+| TestDualStopLossDefense | 5 | 双重防线创建、trigger price 方向、失败安全、disabled 跳过 |
+| **合计** | **25** | **全部通过** |
+
+全量测试：195 passed — 零回归
