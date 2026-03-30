@@ -211,6 +211,31 @@ Round 2 Batch 4（2026-03-30 — Learning 自动晋升 + 接入率审计修正 +
   B4-T4 (E4): 新增 test_learning_promotion_integration.py（15 测试全通过）
   接入率：19/22 = 86%（Batch 4 审计修正 · 从误标 55% 更正）
 
+Round 2 Batch 5-C（2026-03-30 — L1 本地推理管道验证 · Ollama/Qwen 3.5 接入）：
+  基础设施：Ollama 已完整部署并优化，API http://127.0.0.1:11434，模型 qwen3.5:27b-q4_K_M
+  C-T1 (E1a): 新建 ollama_client.py（~350 行）
+    - OllamaClient 类：HTTP 调用 /api/generate + /api/chat，可配模型/超时/temperature
+    - OllamaConfig 数据类：支持环境变量 OLLAMA_BASE_URL / OLLAMA_MODEL / OLLAMA_TIMEOUT
+    - OllamaResponse 数据类：text + latency + eval_count + tokens_per_second + cost_usd=0.0
+    - 便捷方法：classify()（情绪分类）+ judge_edge()（交易 edge 判断，为方向 B 预留）
+    - is_available()：连通性检测 + 模型匹配 + 60s TTL 缓存
+    - 线程安全单例 get_ollama_client() + reset_ollama_client()
+  C-T2 (E1b): 改造 layer2_tools.py
+    - LocalLLMWebSearchProvider.is_available()：subprocess → get_ollama_client().is_available()
+    - LocalLLMSearchProvider.is_available()：subprocess → get_ollama_client().is_available()
+    - LocalLLMSearchProvider.search()：subprocess.run(["ollama","run","llama3.2",...]) → client.generate()
+    - 模型从硬编码 llama3.2 改为可配（默认 qwen3.5:27b-q4_K_M）
+  C-T3 (E1a): 改造 layer2_engine.py — L1 triage 本地 fallback
+    - 新增 L1_LOCAL_TRIAGE_PROMPT 常量
+    - l1_triage(): Anthropic client=None 时回退到 _l1_triage_local()
+    - 新增 _l1_triage_local() 方法（~75 行）：Ollama 生成 + JSON 解析 + 自由文本启发式 + 超时处理
+    - 成本归零：triage_cost_usd=0.0 + triage_source="local_ollama"
+  C-T4 (E4): 新增 test_ollama_integration.py（28 测试）
+    - TestOllamaClient（15）：HTTP mock / 超时 / 重试 / 分类 / edge 判断 / 单例 / 环境变量
+    - TestLocalLLMSearchProvider（3）：搜索委托 / 可用性委托 / 错误处理
+    - TestL1TriageLocalFallback（8）：fallback 触发 / JSON 解析 / 自由文本启发 / Ollama 不可用 / 超时
+    - TestOllamaResponseProperties（2）：tokens/s 计算 / 零值边界
+
 Scanner 规则（最新）：
   MA Crossover 部署过滤   = 24h涨跌幅 > 40% 跳过
   MA Crossover 置信度     = 0.55（扫描器部署）/ 0.50（默认 BTCUSDT）

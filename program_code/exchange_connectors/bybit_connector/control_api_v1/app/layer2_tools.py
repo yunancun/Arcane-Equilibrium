@@ -36,6 +36,7 @@ import subprocess
 import time
 from typing import Any
 
+from .ollama_client import get_ollama_client
 from .layer2_types import (
     SEARCH_PROVIDER_LOCAL_LLM,
     SEARCH_PROVIDER_LOCAL_LLM_WEB,
@@ -392,16 +393,9 @@ class LocalLLMWebSearchProvider(SearchProvider):
         return SEARCH_PROVIDER_LOCAL_LLM_WEB
 
     def is_available(self) -> bool:
-        # Check if Ollama is running and web-pilot script exists
-        try:
-            result = subprocess.run(
-                ["ollama", "list"], capture_output=True, timeout=3,
-            )
-            if result.returncode != 0:
-                return False
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        client = get_ollama_client()
+        if not client.is_available():
             return False
-        # Check web-pilot
         web_pilot = os.path.expanduser("~/.local/bin/web-pilot")
         return os.path.isfile(web_pilot)
 
@@ -461,34 +455,25 @@ class LocalLLMSearchProvider(SearchProvider):
         return SEARCH_PROVIDER_LOCAL_LLM
 
     def is_available(self) -> bool:
-        try:
-            result = subprocess.run(
-                ["ollama", "list"], capture_output=True, timeout=3,
-            )
-            return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
+        return get_ollama_client().is_available()
 
     async def search(self, query: str, *, max_results: int = 5) -> SearchResponse:
         start = time.time()
         try:
-            proc = subprocess.run(
-                ["ollama", "run", "llama3.2", f"Briefly answer: {query}"],
-                capture_output=True, text=True, timeout=60,
-            )
-            content = proc.stdout.strip() if proc.returncode == 0 else ""
+            client = get_ollama_client()
+            resp = client.generate(f"Briefly answer: {query}", max_tokens=512, timeout=60)
+            content = resp.text if resp.success else ""
             if not content:
                 return SearchResponse(
                     query=query, provider_used=self.name,
                     providers_tried=[self.name],
-                    error="Ollama returned empty response",
+                    error=resp.error or "Ollama returned empty response",
                 )
-
             results = [SearchResult(
                 title=query,
                 snippet=content[:2000],
                 provider=self.name,
-                confidence=0.4,  # Lower confidence — no web source
+                confidence=0.4,
             )]
             latency = (time.time() - start) * 1000
             return SearchResponse(

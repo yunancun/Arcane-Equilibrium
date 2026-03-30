@@ -24,12 +24,12 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-30 Round 2 Batch 4)
+## 当前状态 (2026-03-30 Round 2 Batch 5-C)
 
 ```
 系统模式:     read_only（不变）
 执行权限:     disabled / not_granted（不变）
-测试:         1,858+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 · 2 跳过）
+测试:         1,886+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama/L1 · 2 跳过）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
@@ -39,11 +39,12 @@ API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时
 Scout:        ScoutAgent + MessageBus 已接入 PipelineBridge（Plan A2 本地代理模式）
 学习晋升:     L1→L2 自动晋升已接通（PipelineBridge → promote_tier()）
+L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage 本地 fallback 就绪）
 接入率:       19/22 = 86%（Batch 4 审计修正 · 仅 3 模组真正 STANDALONE）
 合规度:       ~88%
 ```
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）** + **Learning 自动晋升**
+**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + **Phase 2 治理模組** + **Phase 3 GovernanceHub 集成** + **Round 2 Scout 集成（Plan A2）** + **Learning 自动晋升** + **L1 本地推理管道（Ollama/Qwen 3.5）**
 
 ---
 
@@ -62,6 +63,7 @@ srv/
 │   │           │   ├── governance_routes.py      ← 8 治理 API 端点
 │   │           │   ├── scout_routes.py          ← 5 Scout REST 端点（OpenClaw 推送入口）
 │   │           │   ├── multi_agent_framework.py ← ScoutAgent + MessageBus + Conductor
+│   │           │   ├── ollama_client.py         ← Ollama HTTP 客户端（L1 本地推理）
 │   │           │   ├── pipeline_bridge.py       ← 管线桥接器（治理 gate + Scout 本地扫描）
 │   │           │   ├── stop_manager.py          ← 止损管理器（→ local_model_tools）
 │   │           │   ├── bybit_demo_connector.py  ← Bybit Demo 连接器

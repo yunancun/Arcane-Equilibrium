@@ -63,6 +63,7 @@ from .layer2_types import (
 )
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
+from .ollama_client import get_ollama_client
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,14 @@ Criteria for worth_investigating=false:
 - No relevant news or events
 - Recent L2 session already covered this scenario
 - System health issues suggest caution"""
+
+
+L1_LOCAL_TRIAGE_PROMPT = (
+    "You are a quick market triage filter. Given market context, determine if it's worth "
+    "running a deeper AI analysis. Respond with JSON only:\n"
+    '{"worth_investigating": true/false, "reason": "brief reason", "confidence": 0.0-1.0}\n'
+    "Be conservative: only return true if there's a clear signal worth investigating."
+)
 
 
 MODEL_UPGRADE_TRIAGE_PROMPT = """You are a model upgrade decision filter.
@@ -191,7 +200,9 @@ class Layer2Engine:
         try:
             client = _get_anthropic_client()
             if client is None:
-                return {"worth_investigating": False, "reason": "Anthropic client not available", "error": True}
+                # Fallback to local Ollama/Qwen for L1 triage
+                # 回退到本地 Ollama/Qwen 进行 L1 分诊
+                return await self._l1_triage_local(triage_context)
 
             # Add timeout to prevent hanging / 添加超时防止挂起
             response = await asyncio.wait_for(
@@ -233,6 +244,83 @@ class Layer2Engine:
         except Exception as e:
             logger.error(f"L1 triage error: {e}")
             return {"worth_investigating": False, "reason": f"Triage error: {str(e)[:100]}", "error": True}
+
+    async def _l1_triage_local(self, context: str) -> dict[str, Any]:
+        """
+        L1 triage via local Ollama/Qwen (fallback when Anthropic unavailable).
+        本地 Ollama/Qwen L1 分诊（Anthropic 不可用时的回退路径）。
+        """
+        try:
+            client = get_ollama_client()
+            if not client.is_available():
+                logger.warning("L1 local triage: Ollama not available / Ollama 不可用")
+                return {
+                    "worth_investigating": False,
+                    "reason": "Neither Anthropic nor Ollama available",
+                    "error": True,
+                    "triage_cost_usd": 0.0,
+                }
+
+            # Run in thread to avoid blocking event loop
+            # 在线程中运行避免阻塞事件循环
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.generate,
+                    context,
+                    system=L1_LOCAL_TRIAGE_PROMPT,
+                    max_tokens=256,
+                    timeout=30,
+                ),
+                timeout=35.0,
+            )
+
+            if not resp.success:
+                logger.warning(f"L1 local triage failed: {resp.error}")
+                return {
+                    "worth_investigating": False,
+                    "reason": f"Local triage error: {resp.error}",
+                    "error": True,
+                    "triage_cost_usd": 0.0,
+                }
+
+            # Parse response
+            try:
+                result = json.loads(resp.text)
+            except json.JSONDecodeError:
+                # Try to extract yes/no from free text
+                text_lower = resp.text.lower()
+                worth = "true" in text_lower or "yes" in text_lower or "worth" in text_lower
+                result = {
+                    "worth_investigating": worth,
+                    "reason": resp.text[:200],
+                }
+
+            result["triage_cost_usd"] = 0.0
+            result["triage_source"] = "local_ollama"
+            result["triage_model"] = resp.model
+            result["triage_latency_ms"] = resp.latency_ms
+            logger.info(
+                f"L1 local triage: worth={result.get('worth_investigating')} "
+                f"model={resp.model} latency={resp.latency_ms:.0f}ms"
+            )
+            return result
+
+        except asyncio.TimeoutError:
+            logger.error("L1 local triage timed out / L1 本地分诊超时")
+            return {
+                "worth_investigating": False,
+                "reason": "Local triage timed out",
+                "error": True,
+                "triage_cost_usd": 0.0,
+            }
+        except Exception as e:
+            logger.error(f"L1 local triage error: {e}")
+            return {
+                "worth_investigating": False,
+                "reason": f"Local triage error: {str(e)[:100]}",
+                "error": True,
+                "triage_cost_usd": 0.0,
+            }
 
     # ── L2 Agent Loop / L2 Agent 循环 ──
 
