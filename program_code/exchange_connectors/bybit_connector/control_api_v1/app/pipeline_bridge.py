@@ -76,6 +76,7 @@ class PipelineBridge:
         self._telegram = None  # Set externally if available
         self._demo_connector = None  # Set externally if available
         self._governance_hub = None  # Set externally for governance integration
+        self._perception_plane = None  # T2.02: Set externally for cognitive honesty checks / 感知平面
 
         self._stats = {
             "ticks_received": 0,
@@ -125,6 +126,10 @@ class PipelineBridge:
     def set_governance_hub(self, hub: Any) -> None:
         """Set GovernanceHub for governance state machine integration / 设置治理集線器"""
         self._governance_hub = hub
+
+    def set_perception_plane(self, plane: Any) -> None:
+        """Set PerceptionPlane for cognitive honesty checks / 设置感知平面用于认知诚实检查"""
+        self._perception_plane = plane
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -275,6 +280,28 @@ class PipelineBridge:
 
         for intent in intents:
             try:
+                # T2.02: Cognitive honesty check (perception plane validation)
+                # 认知诚实检查（感知平面验证）
+                if self._perception_plane:
+                    data_id = getattr(intent, "perception_data_id", None)
+                    if data_id:
+                        # Intent references perception data — validate before proceeding
+                        # 意图引用了感知数据 — 在继续前验证
+                        eligible, reason = self._perception_plane.validate_for_decision(data_id)
+                        if not eligible:
+                            logger.info(
+                                "Intent rejected by perception honesty: %s %s (reason: %s) / 意图被感知拒絕",
+                                intent.symbol, intent.side, reason
+                            )
+                            with self._lock:
+                                self._stats["intents_rejected"] += 1
+                            continue
+                    else:
+                        # Intent has no perception data marked (implicit FACT assumption for exchange data)
+                        # 意图无感知数据标记（假设交易所数据为 FACT）
+                        # This is acceptable for exchange-sourced signals
+                        pass
+
                 # Governance Hub authorization check / 治理集線器授權檢查
                 if self._governance_hub:
                     try:

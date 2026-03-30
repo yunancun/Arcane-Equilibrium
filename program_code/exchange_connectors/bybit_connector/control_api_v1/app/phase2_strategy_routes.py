@@ -211,6 +211,18 @@ try:
             logger.warning("GOV_HUB is None — PipelineBridge running without governance / GOV_HUB 为 None — 管线桥接器运行不包含治理")
     except ImportError as e:
         logger.warning("Could not import GOV_HUB for PipelineBridge: %s / 无法为管线桥接器导入 GOV_HUB: %s", e, e)
+
+    # --- T2.02: PerceptionPlane injection (Cognitive Honesty) ---
+    # T2.02：感知平面注入（认知诚实检查）
+    try:
+        from .paper_trading_routes import PERCEPTION_PLANE as _PERCEPTION_PLANE_REF
+        if _PERCEPTION_PLANE_REF is not None:
+            PIPELINE_BRIDGE.set_perception_plane(_PERCEPTION_PLANE_REF)
+            logger.info("PerceptionPlane injected into PipelineBridge / 感知平面已注入管线桥接器")
+        else:
+            logger.warning("PERCEPTION_PLANE is None — skipping cognitive honesty checks / 感知平面为 None — 跳过认知诚实检查")
+    except ImportError as e:
+        logger.warning("Could not import PERCEPTION_PLANE for PipelineBridge: %s", e)
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")

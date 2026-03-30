@@ -494,3 +494,126 @@ class TestEdgeCases:
         dq = DataQuality()
         d = dq.to_dict()
         assert isinstance(d["overall_score"], float)
+
+
+# ─────────────────────────────────────────────
+# T2.02: Integration Tests — Perception Plane + Intent Pipeline
+# ─────────────────────────────────────────────
+
+class TestPerceptionPlaneIntegration:
+    """T2.02: Test PerceptionPlane integration with intent processing"""
+
+    def test_perception_plane_validates_unmarked_data(self):
+        """T2.02: Unmarked inference cannot enter decision chain (EX-07 §1)"""
+        pp = PerceptionPlane()
+
+        # Register data without explicit cognitive level (search data without explicit marking)
+        pdo = pp.register_data(
+            source_type=DataSourceType.SEARCH_PERPLEXITY,
+            content={"signal": "bullish"},
+            cognitive_level=None,  # Will auto-default to INFERENCE
+        )
+        assert pdo is not None
+
+        # Since it defaults to INFERENCE for search data, it will pass validation
+        # (marked by default). Let's test with a PDO that has no cognitive level
+        data_id = pdo.data_id
+        pdo.cognitive_level = None  # Manually unmark it
+
+        # Validation should fail
+        eligible, reason = pp.validate_for_decision(data_id)
+        assert not eligible
+        assert "No cognitive level marking" in reason
+
+    def test_perception_plane_validates_marked_fact_data(self):
+        """T2.02: Marked FACT data passes validation"""
+        pp = PerceptionPlane()
+
+        # Register marked FACT data (exchange)
+        pdo = pp.register_data(
+            source_type=DataSourceType.EXCHANGE_REST,
+            content={"price": 50000},
+            cognitive_level=CognitiveLevel.FACT,
+        )
+        assert pdo is not None
+        data_id = pdo.data_id
+
+        # Validation should pass
+        eligible, reason = pp.validate_for_decision(data_id)
+        assert eligible
+        assert "fact" in reason.lower()
+
+    def test_perception_plane_validates_marked_inference_data(self):
+        """T2.02: Marked INFERENCE data passes validation"""
+        pp = PerceptionPlane()
+
+        # Register marked INFERENCE data
+        pdo = pp.register_data(
+            source_type=DataSourceType.SEARCH_PERPLEXITY,
+            content={"sentiment": "positive"},
+            cognitive_level=CognitiveLevel.INFERENCE,
+        )
+        assert pdo is not None
+        data_id = pdo.data_id
+
+        # Validation should pass (marked, even if inference)
+        eligible, reason = pp.validate_for_decision(data_id)
+        assert eligible
+        assert "inference" in reason.lower()
+
+    def test_perception_plane_rejects_expired_data(self):
+        """T2.02: Expired data (>2h) rejected from decision chain"""
+        pp = PerceptionPlane()
+
+        # Register old data (3 hours ago)
+        three_hours_ago = int(time.time() * 1000) - 10_800_000
+        pdo = pp.register_data(
+            source_type=DataSourceType.EXCHANGE_REST,
+            content={"price": 50000},
+            cognitive_level=CognitiveLevel.FACT,
+        )
+        assert pdo is not None
+        # Manually set old timestamp
+        pdo.fetched_at_ms = three_hours_ago
+        data_id = pdo.data_id
+
+        # Validation should fail due to expiration
+        eligible, reason = pp.validate_for_decision(data_id)
+        assert not eligible
+        assert "expired" in reason.lower()
+
+    def test_perception_plane_accepts_fresh_data(self):
+        """T2.02: Fresh data (<5min) passes validation"""
+        pp = PerceptionPlane()
+
+        # Register fresh data (just now)
+        pdo = pp.register_data(
+            source_type=DataSourceType.EXCHANGE_WS,
+            content={"price": 50000},
+            cognitive_level=CognitiveLevel.FACT,
+        )
+        assert pdo is not None
+        data_id = pdo.data_id
+
+        # Validation should pass
+        eligible, reason = pp.validate_for_decision(data_id)
+        assert eligible
+        assert "fact" in reason.lower()
+
+    def test_perception_plane_data_store_grows(self):
+        """T2.02: PerceptionPlane stores multiple data objects"""
+        pp = PerceptionPlane()
+
+        # Register many data objects
+        for i in range(5):
+            pdo = pp.register_data(
+                source_type=DataSourceType.EXCHANGE_REST,
+                content={"price": 50000 + i},
+                cognitive_level=CognitiveLevel.FACT,
+            )
+            assert pdo is not None
+
+        # Store should contain all objects
+        stats = pp.get_stats()
+        assert stats["total_objects"] == 5
+        assert stats["facts"] == 5
