@@ -107,6 +107,8 @@ class PipelineBridge:
         self._edge_filter_stats = {"checked": 0, "passed": 0, "rejected": 0, "errors": 0}
         # Batch 8: Guardian verdict stats / Guardian 裁决统计
         self._guardian_stats = {"checked": 0, "approved": 0, "rejected": 0, "modified": 0, "errors": 0}
+        self._analyst_agent = None  # Batch 10: Set externally for L2 pattern analysis / 分析师代理
+        self._last_l2_cron_ts: float = 0.0  # Batch 10: Last L2 cron trigger timestamp / L2 Cron 上次触发时间
 
         self._stats = {
             "ticks_received": 0,
@@ -223,6 +225,14 @@ class PipelineBridge:
         """
         self._ollama_client = client
         logger.info("OllamaClient set for pre-trade edge filter / 已设置 OllamaClient 用于交易前 edge 过滤")
+
+    def set_analyst_agent(self, agent: Any) -> None:
+        """
+        Batch 10: Set AnalystAgent for L2 pattern analysis cron trigger.
+        设置 AnalystAgent 用于 L2 模式分析 Cron 触发。
+        """
+        self._analyst_agent = agent
+        logger.info("AnalystAgent set for L2 cron trigger / 已设置 AnalystAgent 用于 L2 Cron 触发")
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -369,6 +379,13 @@ class PipelineBridge:
         if self._scout_agent and _now - self._last_scout_scan_ts >= 300.0:
             self._invoke_scout_scan(symbol, price)
             self._last_scout_scan_ts = _now
+
+        # 4.6 Batch 10: L2 Cron trigger — every Sunday UTC 0:00, trigger Analyst L2 analysis
+        # Batch 10：L2 Cron 触发器 — 每周日 UTC 0:00 触发 Analyst L2 分析
+        if self._analyst_agent and _now - self._last_l2_cron_ts >= 3600.0:
+            # Check once per hour; only fire if it's Sunday UTC 0:xx
+            self._last_l2_cron_ts = _now
+            self._try_l2_cron_trigger(_now)
 
         # 5. Process pending intents -> submit to paper engine
         if self._auto_submit:
@@ -773,6 +790,30 @@ class PipelineBridge:
 
         except Exception:
             logger.exception("Scout local scan error (non-fatal) / Scout 本地扫描异常（非致命）")
+
+    def _try_l2_cron_trigger(self, now_ts: float) -> None:
+        """
+        Batch 10: Trigger L2 analysis on weekly schedule (Sunday UTC 0:00–0:59).
+        每周日 UTC 0:00-0:59 触发 L2 模式分析。
+        """
+        import datetime
+        try:
+            utc_now = datetime.datetime.fromtimestamp(now_ts, tz=datetime.timezone.utc)
+            if utc_now.weekday() == 6 and utc_now.hour == 0:
+                # Check if we already ran this week (use a simple flag)
+                week_key = utc_now.strftime("%Y-W%W")
+                if getattr(self, "_last_l2_cron_week", None) == week_key:
+                    return  # Already ran this week
+                self._last_l2_cron_week = week_key
+                logger.info("L2 Cron trigger fired (Sunday UTC 0:00) / L2 Cron 触发（周日 UTC 0:00）")
+                insight = self._analyst_agent.analyze_patterns(force=True)
+                if insight:
+                    logger.info(
+                        "L2 Cron produced PatternInsight: %d winning, %d losing patterns",
+                        len(insight.winning_patterns), len(insight.losing_patterns),
+                    )
+        except Exception:
+            logger.exception("L2 Cron trigger error (non-fatal) / L2 Cron 触发异常（非致命）")
 
     def _check_edge_filter(self, intent: Any, market_prices: dict[str, float]) -> bool:
         """

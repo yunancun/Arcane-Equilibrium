@@ -246,6 +246,31 @@ def _make_ttl_expiry_callback():
                             except Exception:
                                 pass  # Don't fail the callback if alerting fails
 
+            elif entry.state_machine_name == "OMS":
+                # Batch 10: Handle OMS TTL expiry (e.g., SUBMITTED timeout → auto-CANCEL)
+                if action == "auto_cancel":
+                    try:
+                        if not gov_hub._initialized:
+                            gov_hub._ensure_initialized()
+                        if gov_hub._oms_sm is not None:
+                            from .oms_state_machine import OrderState, OrderInitiator
+                            gov_hub._oms_sm.cancel(
+                                entry.object_id,
+                                initiator=OrderInitiator.SYSTEM,
+                                reason=f"TTL expired: {action}",
+                            )
+                            logger.info(f"TTL expired OMS {entry.object_id}: auto-canceled")
+                        else:
+                            logger.warning("OMS SM not available for TTL callback")
+                    except Exception as e:
+                        _ttl_enforcement_failures += 1
+                        logger.critical(f"Failed to cancel OMS order {entry.object_id} on TTL: {e}")
+                        if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                            try:
+                                TELEGRAM_ALERTER.alert(f"TTL enforcement failure: OMS {entry.object_id} cancel failed: {e}")
+                            except Exception:
+                                pass
+
             elif entry.state_machine_name == "RiskGovernor":
                 if action == "manual_review_required":
                     try:

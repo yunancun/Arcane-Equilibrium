@@ -57,6 +57,13 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     ORDER_STATE_PARTIALLY_FILLED: {ORDER_STATE_FILLED, ORDER_STATE_CANCELED},
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Batch 10: OMS SM-03 Integration / OMS SM-03 串联
+# Configuration switch to enable/disable OMS SM-03 enforcement.
+# 配置开关：启用/禁用 OMS SM-03 强制执行。回退路径：设 False 恢复旧 7 态。
+# ═══════════════════════════════════════════════════════════════════════════════
+OMS_SM03_ENABLED: bool = True  # Set False to fall back to legacy 7-state lifecycle
+
 # Session states
 SESSION_INACTIVE = "inactive"
 SESSION_ACTIVE = "active"
@@ -226,8 +233,12 @@ class PaperStateStore:
 # (Implements K chapter 7-state lifecycle)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _transition_order(order: dict, new_state: str) -> dict:
-    """Validate and execute a state transition on a paper order."""
+def _transition_order(order: dict, new_state: str, *, oms_sm=None) -> dict:
+    """
+    Validate and execute a state transition on a paper order.
+    Batch 10: If OMS SM-03 is enabled and oms_sm is provided, the transition
+    is also validated and synced through the 11-state OMS lifecycle.
+    """
     current = order["state"]
     valid_next = VALID_TRANSITIONS.get(current, set())
     if new_state not in valid_next:
@@ -235,6 +246,61 @@ def _transition_order(order: dict, new_state: str) -> dict:
             f"Invalid transition: {current} → {new_state}. "
             f"Valid targets: {valid_next}"
         )
+
+    # Batch 10: OMS SM-03 enforcement — sync transition to 11-state lifecycle
+    # Paper 7-state maps to OMS 11-state with intermediate steps:
+    #   Paper CREATED→SUBMITTED  ≡ OMS CREATED→PENDING→APPROVED→SUBMITTED
+    #   Paper SUBMITTED→WORKING  ≡ OMS SUBMITTED→WORKING
+    #   Paper SUBMITTED→REJECTED ≡ OMS SUBMITTED→REJECTED (or PENDING→REJECTED)
+    #   Paper WORKING→FILLED     ≡ OMS WORKING→FILLED
+    #   Paper WORKING→CANCELED   ≡ OMS WORKING→CANCELED
+    if OMS_SM03_ENABLED and oms_sm is not None:
+        oms_order_id = order.get("oms_order_id")
+        if oms_order_id:
+            try:
+                from .oms_state_machine import OMSStateMachine, OrderState as OmsOrderState, OrderInitiator
+                target_oms = OMSStateMachine.map_from_paper_state(new_state)
+
+                # For CREATED→SUBMITTED, we need to drive through PENDING→APPROVED→SUBMITTED
+                if current == ORDER_STATE_CREATED and new_state == ORDER_STATE_SUBMITTED:
+                    oms_sm.submit_for_approval(oms_order_id, initiator=OrderInitiator.SYSTEM,
+                                                reason="paper_engine_submit")
+                    oms_sm.approve(oms_order_id, initiator=OrderInitiator.AUTHORIZATION_SM,
+                                   reason="paper_engine_auto_approve")
+                    oms_sm.send_to_venue(oms_order_id, initiator=OrderInitiator.SYSTEM,
+                                          reason="paper_engine_send")
+                elif current == ORDER_STATE_SUBMITTED and new_state == ORDER_STATE_REJECTED:
+                    # OMS is already in SUBMITTED state, transition to REJECTED
+                    oms_sm.reject(oms_order_id, initiator=OrderInitiator.SYSTEM,
+                                  reason=f"paper_engine_reject:{order.get('reject_reason', '')}")
+                else:
+                    # Direct 1:1 mapping for remaining transitions
+                    oms_sm.transition(
+                        oms_order_id,
+                        target_oms,
+                        initiator=OrderInitiator.SYSTEM,
+                        reason=f"paper_engine_sync:{current}→{new_state}",
+                    )
+                order["oms_state"] = target_oms.value
+            except ValueError as e:
+                # SM-03 rejected the transition — fail-closed
+                logger.warning(
+                    "OMS SM-03 rejected transition %s→%s for %s: %s",
+                    current, new_state, order.get("order_id"), e,
+                )
+                raise ValueError(
+                    f"OMS SM-03 rejected: {current} → {new_state}. Reason: {e}"
+                ) from e
+            except Exception as e:
+                # Unexpected error — fail-closed (do NOT proceed with the paper transition)
+                logger.error(
+                    "OMS SM-03 sync error for %s: %s — fail-closed",
+                    order.get("order_id"), e,
+                )
+                raise ValueError(
+                    f"OMS SM-03 sync error: {e} — fail-closed"
+                ) from e
+
     order["state"] = new_state
     order["updated_ts_ms"] = now_ms()
     order["state_history"].append({
@@ -685,6 +751,56 @@ def _paper_state_to_recon_format(state: dict[str, Any]) -> dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Batch 10: OMS SM-03 Post-Fill Reconciliation Helper
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _oms_complete_reconciliation(order: dict, oms_sm) -> None:
+    """
+    After a paper order is FILLED, drive OMS SM-03 from current OMS state through
+    FILLED → RECONCILING → COMPLETED lifecycle.
+
+    Since execute_fill() is a standalone function that doesn't know about OMS,
+    we first catch up the OMS state to FILLED (if needed), then drive reconciliation.
+    """
+    if not OMS_SM03_ENABLED or oms_sm is None:
+        return
+    oms_order_id = order.get("oms_order_id")
+    if not oms_order_id:
+        return
+    try:
+        from .oms_state_machine import OrderInitiator, OrderState as OmsOrderState
+
+        # Catch up OMS to FILLED if not already there
+        # (execute_fill doesn't sync OMS, so OMS may still be at WORKING)
+        oms_dict = oms_sm.get(oms_order_id)
+        if oms_dict:
+            current_oms = oms_dict.get("state", "")
+            if current_oms == "WORKING":
+                oms_sm.fill(oms_order_id, initiator=OrderInitiator.EXECUTION_VENUE,
+                           reason="paper_fill_sync")
+            elif current_oms == "PARTIALLY_FILLED":
+                oms_sm.fill(oms_order_id, initiator=OrderInitiator.EXECUTION_VENUE,
+                           reason="paper_fill_sync")
+            # If already FILLED, skip
+
+        oms_sm.begin_reconciliation(
+            oms_order_id,
+            initiator=OrderInitiator.RECONCILIATION_ENGINE,
+            reason="paper_fill_auto_reconcile",
+        )
+        oms_sm.reconciliation_pass(
+            oms_order_id,
+            initiator=OrderInitiator.RECONCILIATION_ENGINE,
+            reason="paper_fill_verified",
+        )
+        order["oms_state"] = "COMPLETED"
+    except Exception as e:
+        # Non-fatal: reconciliation is a verification step, not a blocker for paper fills
+        logger.warning("OMS post-fill reconciliation failed for %s: %s", oms_order_id, e)
+        order["oms_reconciliation_error"] = str(e)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Paper Trading Session Manager / 纸上交易 Session 管理器
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -710,6 +826,7 @@ class PaperTradingEngine:
         self._demo_connector = None  # T7.01: Optional BybitDemoConnector for demo API integration
         self._demo_sync = None  # T7.04: Optional BybitDemoSync for demo state snapshots
         self._learning_tier_gate = None  # T9A.01: Optional LearningTierGate for analyst agent evolution
+        self._oms_sm = None  # Batch 10: Optional OMS State Machine (SM-03) for 11-state lifecycle
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -754,6 +871,18 @@ class PaperTradingEngine:
     def set_learning_tier_gate(self, gate: Any) -> None:
         """Inject LearningTierGate for analyst agent evolution / 注入学习等级门控"""
         self._learning_tier_gate = gate
+
+    def set_oms_sm(self, oms_sm: Any) -> None:
+        """
+        Batch 10: Inject OMS State Machine (SM-03) for 11-state lifecycle enforcement.
+        注入 OMS 状态机（SM-03）用于 11 态生命周期强制执行。
+
+        When OMS_SM03_ENABLED=True, every paper order state transition is validated
+        against SM-03 and synced to its 11-state lifecycle. If SM-03 rejects a
+        transition, the paper engine refuses it too (fail-closed).
+        """
+        self._oms_sm = oms_sm
+        logger.info("OMS SM-03 injected into PaperTradingEngine (enabled=%s)", OMS_SM03_ENABLED)
 
     def _check_tier_capability(self, capability: str) -> bool:
         """
@@ -920,14 +1049,39 @@ class PaperTradingEngine:
                 category=category,
             )
 
+            # Batch 10: Register order in OMS SM-03 if enabled
+            _oms = self._oms_sm if (OMS_SM03_ENABLED and getattr(self, '_oms_sm', None)) else None
+            if _oms is not None:
+                try:
+                    oms_order_id = _oms.create_order(
+                        symbol=symbol,
+                        side=side,
+                        order_type=order_type,
+                        qty=qty,
+                        price=price,
+                        created_by="paper_engine",
+                        metadata={"paper_engine": True, "leverage": leverage, "paper_order_id": order["order_id"]},
+                    )
+                    order["oms_order_id"] = oms_order_id
+                    order["oms_state"] = "CREATED"
+                except Exception as e:
+                    logger.error("OMS SM-03 create_order failed: %s — fail-closed", e)
+                    order["reject_reason"] = f"oms_create_failed: {e}"
+                    order["state"] = ORDER_STATE_REJECTED
+                    state["orders"].append(order)
+                    result["order"] = order
+                    result["rejected_reason"] = f"oms_create_failed: {e}"
+                    self._audit(state, "order_oms_create_failed", f"{symbol} {side} OMS error: {e}")
+                    return state
+
             # Transition: created → submitted
-            _transition_order(order, ORDER_STATE_SUBMITTED)
+            _transition_order(order, ORDER_STATE_SUBMITTED, oms_sm=_oms)
 
             # Governance Hub authorization check (H0 gate) / 治理集線器授權檢查（H0 门）
             if self._governance_hub:
                 try:
                     if not self._governance_hub.is_authorized():
-                        _transition_order(order, ORDER_STATE_REJECTED)
+                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                         order["reject_reason"] = "governance_not_authorized"
                         state["orders"].append(order)
                         result["order"] = order
@@ -935,7 +1089,7 @@ class PaperTradingEngine:
                         self._audit(state, "order_governance_rejected", f"{symbol} {side} not authorized by governance")
                         return state
                 except Exception as exc:
-                    _transition_order(order, ORDER_STATE_REJECTED)
+                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                     order["reject_reason"] = "governance_check_error"
                     state["orders"].append(order)
                     result["order"] = order
@@ -953,7 +1107,7 @@ class PaperTradingEngine:
                     market_prices=market_prices,
                 )
                 if not allowed:
-                    _transition_order(order, ORDER_STATE_REJECTED)
+                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                     order["reject_reason"] = reason
                     state["orders"].append(order)
                     result["order"] = order
@@ -969,7 +1123,7 @@ class PaperTradingEngine:
             estimated_fee = compute_fee(qty, price_estimate)
             required_total = required_margin + estimated_fee
             if sess["current_paper_balance_usdt"] < required_total:
-                _transition_order(order, ORDER_STATE_REJECTED)
+                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                 order["reject_reason"] = "insufficient_margin"
                 state["orders"].append(order)
                 result["order"] = order
@@ -979,7 +1133,7 @@ class PaperTradingEngine:
 
             # Check session halted / 检查 session 是否已熔断
             if sess.get("session_halted"):
-                _transition_order(order, ORDER_STATE_REJECTED)
+                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                 order["reject_reason"] = "session_halted"
                 state["orders"].append(order)
                 result["order"] = order
@@ -992,7 +1146,7 @@ class PaperTradingEngine:
                 try:
                     lease_id = self._governance_hub.acquire_lease(order["order_id"], scope={"symbol": symbol, "side": side})
                     if not lease_id:
-                        _transition_order(order, ORDER_STATE_REJECTED)
+                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                         order["reject_reason"] = "governance_lease_denied"
                         state["orders"].append(order)
                         result["order"] = order
@@ -1004,7 +1158,7 @@ class PaperTradingEngine:
                     self._audit(state, "governance_lease_acquired",
                                 f"{order['order_id']} lease={lease_id}")
                 except Exception as exc:
-                    _transition_order(order, ORDER_STATE_REJECTED)
+                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                     order["reject_reason"] = "governance_lease_error"
                     state["orders"].append(order)
                     result["order"] = order
@@ -1014,7 +1168,7 @@ class PaperTradingEngine:
                     return state
 
             # Transition: submitted → working
-            _transition_order(order, ORDER_STATE_WORKING)
+            _transition_order(order, ORDER_STATE_WORKING, oms_sm=_oms)
             state["orders"].append(order)
             result["order"] = order
             self._audit(state, "order_submitted", f"{order['order_id']} {symbol} {side} {order_type} qty={qty}")
@@ -1028,7 +1182,7 @@ class PaperTradingEngine:
                 would_fill = should_fill_limit_order(order, mp)
 
                 if time_in_force == TIF_POST_ONLY and would_fill:
-                    _transition_order(order, ORDER_STATE_CANCELED)
+                    _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
                     order["cancel_reason"] = "post_only_would_fill"
                     result["order"] = order
                     result["rejected_reason"] = "post_only_would_fill"
@@ -1069,7 +1223,7 @@ class PaperTradingEngine:
                                 logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
                         self._audit(state, "fok_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
-                        _transition_order(order, ORDER_STATE_CANCELED)
+                        _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
                         order["cancel_reason"] = "fok_not_fillable"
                         self._audit(state, "fok_canceled", f"{order['order_id']} price not crossed")
                     return state
@@ -1108,7 +1262,7 @@ class PaperTradingEngine:
                                 logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
                         self._audit(state, "ioc_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
-                        _transition_order(order, ORDER_STATE_CANCELED)
+                        _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
                         order["cancel_reason"] = "ioc_not_fillable"
                         self._audit(state, "ioc_canceled", f"{order['order_id']} price not crossed")
                     return state
@@ -1166,10 +1320,13 @@ class PaperTradingEngine:
                 self._recompute_pnl(state)
                 self._audit(state, "order_filled", f"{order['order_id']} price={fill_price:.4f} fee={fee:.6f}")
 
+                # Batch 10: OMS SM-03 post-fill reconciliation (FILLED→RECONCILING→COMPLETED)
+                _oms_complete_reconciliation(order, _oms)
+
             # C2 fix: If market order could not be filled immediately (no market price), reject it
             # Market orders stuck in WORKING will never fill via tick(), so reject now.
             if order_type == ORDER_TYPE_MARKET and order["state"] == ORDER_STATE_WORKING:
-                _transition_order(order, ORDER_STATE_REJECTED)
+                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                 order["reject_reason"] = "no_market_price"
                 result["order"] = order
                 result["rejected_reason"] = "no_market_price"

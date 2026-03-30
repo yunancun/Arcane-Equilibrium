@@ -379,13 +379,43 @@ class AnalystAgent:
 
     # ── L2: AI Pattern Discovery / L2：AI 模式发现 ──
 
-    def _run_l2_analysis(self) -> Optional[PatternInsight]:
+    def analyze_patterns(self, *, force: bool = False) -> Optional[PatternInsight]:
+        """
+        Batch 10: Public API for L2 pattern analysis.
+        公开的 L2 模式分析入口，供 Cron 触发器和外部调用使用。
+
+        Args:
+            force: If True, skip the min_observations check (e.g., for scheduled analysis).
+
+        Returns:
+            PatternInsight if analysis ran, None if skipped.
+        """
+        total = len(self._records)
+        if not force and total < self.config.l2_min_observations:
+            logger.info(
+                "analyze_patterns skipped: %d/%d observations / 分析跳过：观察不足",
+                total, self.config.l2_min_observations,
+            )
+            return None
+        if total == 0:
+            logger.info("analyze_patterns skipped: no observations / 分析跳过：无观察数据")
+            return None
+        self._audit("l2_analysis_triggered", {
+            "total_observations": total,
+            "trigger": "scheduled" if force else "threshold",
+        })
+        return self._run_l2_analysis(force=force)
+
+    def _run_l2_analysis(self, *, force: bool = False) -> Optional[PatternInsight]:
         """
         Run L2 pattern analysis (requires sufficient observations).
         运行 L2 模式分析（需要足够的观察数据）。
+
+        Args:
+            force: If True, skip the min_observations check.
         """
         total = len(self._records)
-        if total < self.config.l2_min_observations:
+        if not force and total < self.config.l2_min_observations:
             logger.info("L2 analysis skipped: only %d/%d observations / L2 分析跳过：观察不足",
                         total, self.config.l2_min_observations)
             return None

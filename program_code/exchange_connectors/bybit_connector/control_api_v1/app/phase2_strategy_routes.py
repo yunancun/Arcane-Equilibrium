@@ -437,6 +437,49 @@ try:
     except (ImportError, Exception) as e:
         logger.warning("Could not inject LearningTierGate into PipelineBridge: %s", e)
 
+    # --- Batch 10: OMS SM-03 injection into PaperTradingEngine ---
+    # Batch 10：OMS 状态机注入纸上交易引擎，以启用 11 态生命周期
+    try:
+        from .oms_state_machine import OMSStateMachine
+        OMS_STATE_MACHINE = OMSStateMachine()
+        if PAPER_ENGINE is not None:
+            PAPER_ENGINE.set_oms_sm(OMS_STATE_MACHINE)
+            logger.info("OMS SM-03 injected into PaperTradingEngine / OMS 状态机已注入纸上交易引擎")
+        # Also inject into GovernanceHub for reconciliation
+        from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
+        if _GOV_HUB_REF is not None:
+            _GOV_HUB_REF.set_oms_sm(OMS_STATE_MACHINE)
+            logger.info("OMS SM-03 injected into GovernanceHub / OMS 状态机已注入治理集線器")
+    except (ImportError, Exception) as e:
+        OMS_STATE_MACHINE = None
+        logger.warning("Could not inject OMS SM-03: %s", e)
+
+    # --- Batch 10: AnalystAgent injection into PipelineBridge ---
+    # Batch 10：分析师代理注入管线桥接器，以启用 L2 Cron 触发
+    try:
+        from .analyst_agent import AnalystAgent, AnalystConfig
+        from .ollama_client import get_ollama_client
+        ANALYST_AGENT = AnalystAgent(
+            config=AnalystConfig(),
+            message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
+            ollama_client=get_ollama_client(),
+            learning_tier_gate=_LTG_REF if '_LTG_REF' in dir() else None,
+        )
+        ANALYST_AGENT.start()
+        if PIPELINE_BRIDGE is not None:
+            PIPELINE_BRIDGE.set_analyst_agent(ANALYST_AGENT)
+            logger.info("AnalystAgent injected into PipelineBridge / 分析师代理已注入管线桥接器")
+        # Subscribe to ROUND_TRIP_COMPLETE on MessageBus
+        if MESSAGE_BUS is not None:
+            from .multi_agent_framework import MessageType as _MT, AgentRole as _AR
+            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.ROUND_TRIP_COMPLETE, ANALYST_AGENT.on_message)
+            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.EXECUTION_REPORT, ANALYST_AGENT.on_message)
+            MESSAGE_BUS.subscribe(_AR.ANALYST, _MT.SYSTEM_DIRECTIVE, ANALYST_AGENT.on_message)
+            logger.info("AnalystAgent subscribed to MessageBus / 分析师代理已订阅消息总线")
+    except (ImportError, Exception) as e:
+        ANALYST_AGENT = None
+        logger.warning("Could not inject AnalystAgent: %s", e)
+
 except ImportError:
     PIPELINE_BRIDGE = None
     logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")

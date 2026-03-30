@@ -48,7 +48,7 @@
 ## 三、当前系统状态（2026-03-30 Round 2 冷酷功能审核后）
 
 ```
-测试：2,124+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 + 30 Guardian + 25 Perception/Analyst · 2 跳过）
+测试：2,124+（含 46 治理 Hub + 92 集成 + 45 Scout + 15 学习晋升 + 28 Ollama + 21 Edge Filter + 23 参数修复 + 30 Guardian + 25 Perception/Analyst + 32 Batch10 OMS/L2 · 2 跳过）
 路由：126+ 条（含 8 治理 + 5 Scout 端点）
 治理：GovernanceHub 4 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04），fail-closed 已验证
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
@@ -65,9 +65,9 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     自动扫描              = 85%（650+ 对全扫描可用，Scout 情报无消费者）
     策略选择              = 40%（标准技术指标，无 AI、无回测、无动态仓位）
     AI 风险评估           = 20%（H0 规则引擎强，H1-H5 AI 层完全断开）
-    下单                  = 70%（治理 gate 实际拒绝订单，OMS SM-03 未串联）
+    下单                  = 85%（治理 gate + OMS SM-03 已串联，Batch 10）
     止损                  = 75%（本地 3 类止损可用，缺交易所条件单）
-    学习                  = 10%（E1 观察记录可用，无知识提取/模式发现）
+    学习                  = 25%（E1 观察 + L2 自动触发 + Sunday cron，Batch 10）
     进化                  = 5%（PaperLiveGate 未部署，无策略自动优化）
 
   关键发现：
@@ -77,9 +77,9 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
     ❌ 4/6 Agent 未实现（Strategist/Guardian/Analyst/Executor 类不存在）
     ❌ Conductor 300+ 行零生产调用
     ❌ MessageBus 零订阅者（Scout 对空气说话）
-    ❌ L2 AI Engine 只有手动 API 触发
+    ✅ L2 AI Engine 自动触发（Batch 10：observations≥200 auto + Sunday cron）
     ❌ Perception Plane register_data() 零调用
-    ❌ OMS SM-03 完全绕过（Paper Engine 用独立 7 态）
+    ✅ OMS SM-03 已串联（Batch 10：Paper 7-state→OMS 11-state 映射，fail-closed）
     ❌ 策略层标准 RSI/MACD/MA，无可证明的 alpha
 
   详细审核报告：docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md
@@ -658,7 +658,7 @@ Live 前置条件（M/N 前必须核验）：
 
 ## 十三、一句话状态
 
-> 截至 2026-03-30 Batch 7 + S2 完成：Conductor 事件循环启动 + StrategistAgent (AI 信号评估 + shadow 模式) + MessageBus Scout→Strategist 消息路由 + PipelineBridge 双来源 intent 收集。预写 Guardian/Analyst/Executor 独立模块。2069 测试通过（83 新），零回归。功能完成度 32%→50%（+18%）。系统全程 read_only。
+> 截至 2026-03-30 Batch 10 完成：OMS SM-03 串联 Paper Engine（7→11 state 映射 + fail-closed）+ L2 学习自动化（observations 阈值触发 + Sunday cron + TTL OMS 回调）+ AnalystAgent 接入 MessageBus。2101 测试通过（32 新），零回归。系统全程 read_only。
 
 ### Batch 7 记录（2026-03-30）
 
@@ -678,3 +678,37 @@ Live 前置条件（M/N 前必须核验）：
 | GuardianAgent (5 项检查 + fail-closed) | `app/guardian_agent.py` (~350 行) | `tests/test_guardian_agent_unit.py` (20 tests) | ✅ |
 | AnalystAgent (L1 统计 + L2 模式发现) | `app/analyst_agent.py` (~370 行) | `tests/test_analyst_agent_unit.py` (17 tests) | ✅ |
 | ExecutorAgent (执行包装 + 质量指标) | `app/executor_agent.py` (~270 行) | `tests/test_executor_agent_unit.py` (15 tests) | ✅ |
+
+### Batch 10 记录（2026-03-30 — OMS SM-03 串联 + L2 学习自动化）
+
+**Part A: OMS SM-03 串联（paper_trading_engine.py ~80 行）**
+- `OMS_SM03_ENABLED` config 开关（默认 True，可回退到 legacy 7-state）
+- `_transition_order()` 新增 `oms_sm` kwarg：Paper 7-state→OMS 11-state 映射
+  - CREATED→SUBMITTED 自动走 PENDING→APPROVED→SUBMITTED 三步中间态
+  - REJECTED/CANCELED/FILLED 等直接映射
+  - OMS 拒绝 → fail-closed 阻断 paper transition
+- `_oms_complete_reconciliation()` helper：fill 后追赶 OMS 到 FILLED→RECONCILING→COMPLETED
+- `PaperTradingEngine.set_oms_sm()` + constructor `self._oms_sm = None`
+- `submit_order()` 调用 OMS `create_order()` 获取 `oms_order_id`
+
+**Part B: L2 学习自动化**
+- B1: `analyst_agent.py` — `analyze_patterns(force=False)` 公开方法，observations≥200 自动触发 L2
+- B2: `pipeline_bridge.py` — Sunday UTC 0:00 cron 触发 `analyze_patterns(force=True)`，week-key 去重
+- B3: `paper_trading_routes.py` — TTL 到期 OMS 自动取消 + GovernanceHub 回调
+- B3: `phase2_strategy_routes.py` — OMS SM-03 实例化 + AnalystAgent 实例化 + MessageBus 订阅接线
+
+**Part C: 测试**
+
+| 测试类 | 数量 | 覆盖 |
+|--------|------|------|
+| TestOMSSM03Mapping | 4 | Paper↔OMS 状态映射 |
+| TestOMSSM03Integration | 5 | submit+fill 全链路 OMS 同步 |
+| TestOMSSM03Fallback | 3 | OMS_SM03_ENABLED=False 回退 |
+| TestPostFillReconciliation | 3 | fill 后 RECONCILING→COMPLETED |
+| TestAnalystL2AutoTrigger | 7 | observations 阈值 + force + 空记录 |
+| TestL2CronTrigger | 3 | Sunday/非Sunday/week-key 去重 |
+| TestTTLEnforcerOMS | 4 | TTL 到期 auto_cancel |
+| TestOMSSM03FullOrderLifecycle | 3 | 完整 11-state 生命周期 |
+| **合计** | **32** | **全部通过** |
+
+全量测试：2101 passed, 11 failed (pre-existing ollama), 2 skipped — 零回归
