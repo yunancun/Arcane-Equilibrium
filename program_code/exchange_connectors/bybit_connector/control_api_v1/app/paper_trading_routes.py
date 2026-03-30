@@ -67,7 +67,12 @@ ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 
 # T2.03: Initialize and inject ProtectiveOrderManager / 初始化并注入保护性订单管理器
 from .protective_order_manager import ProtectiveOrderManager  # noqa: E402
-PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager()
+
+# T4.03: Wire ProtectiveOrderManager execute callback
+def _protective_order_execute_callback(order, market_state):
+    logger.info(f"Protective order executed: {order.order_id} {order.symbol} {order.order_type.value}")
+
+PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager(on_execute_callback=_protective_order_execute_callback)
 ENGINE.set_protective_order_manager(PROTECTIVE_ORDER_MANAGER)
 
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
