@@ -77,7 +77,13 @@ def _get_auth_actor():
     """Lazy import of authentication dependency / 延迟导入认证依赖"""
     try:
         from . import main_legacy as base
-        return base.current_actor
+        actor = base.current_actor
+        # FIX-02: Ensure we never return None silently
+        if actor is None:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return actor
+    except HTTPException:
+        raise
     except ImportError:
         # SECURITY FIX #1: Fail explicitly if auth system unavailable (not fallback to "system")
         raise HTTPException(status_code=503, detail="Authentication system unavailable")
@@ -85,7 +91,7 @@ def _get_auth_actor():
 
 def _require_operator_role(actor: Any) -> None:
     """SECURITY FIX #1: Validate that actor has Operator role / 验证 actor 具有 Operator 角色"""
-    if not actor:
+    if not actor or not isinstance(actor, dict):
         raise HTTPException(status_code=401, detail="Authentication required")
 
     # Check if actor has operator_role or is_operator flag
