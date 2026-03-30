@@ -135,6 +135,24 @@ class ManualReconciliationRequest(BaseModel):
     reason: str = Field(default="manual_trigger", description="Reason for reconciliation")
 
 
+class DeEscalationRequest(BaseModel):
+    """Request to de-escalate risk level / 降级风险等级的请求"""
+    target_level: int = Field(..., ge=0, le=5, description="Target risk level (0=NORMAL to 5=MANUAL_REVIEW)")
+    requested_by: str = Field(..., min_length=1, max_length=100, description="Requester name/ID")
+    reason: str = Field(..., min_length=1, max_length=500, description="Reason for de-escalation")
+
+
+class ApproveDeEscalationRequest(BaseModel):
+    """Request to approve de-escalation / 批准降级的请求"""
+    approved_by: str = Field(..., min_length=1, max_length=100, description="Approver name/ID")
+
+
+class SymbolWhitelistAddRequest(BaseModel):
+    """Request to add symbol to whitelist / 将符号添加到白名单的请求"""
+    symbol: str = Field(..., min_length=1, max_length=50, description="Symbol to add (e.g., BTCUSDT)")
+    category: str = Field(..., description="Category (spot, linear, inverse, option)")
+
+
 class GovernanceResponse:
     """Unified response wrapper for governance API / 治理 API 的统一响应包装"""
 
@@ -181,6 +199,127 @@ def get_governance_status(
     except Exception as e:
         logger.error(f"Error getting governance status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.get("/status/detailed")
+def get_detailed_governance_status(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get detailed aggregated governance status.
+    获取详细的聚合治理状态。
+
+    Returns comprehensive status including risk SM, authorizations, leases, OMS orders,
+    recovery gate, change audit log, and demo connector.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        base_status = hub.get_status()
+        detailed = base_status.to_dict()
+
+        # Risk Governor State
+        detailed["risk_governor"] = {
+            "level": base_status.risk_level,
+            "level_name": base_status.risk_level_name,
+            "escalation_reason": base_status.risk_escalation_reason,
+        }
+
+        # Authorization counts
+        detailed["authorization"] = {
+            "state": base_status.auth_state,
+            "expires_at_ms": base_status.auth_expires_at_ms,
+            "pending_approval": base_status.auth_pending_approval,
+        }
+
+        # Leases
+        detailed["decision_leases"] = {
+            "active_count": base_status.active_leases_count,
+            "total_tracked": base_status.total_leases_tracked,
+        }
+
+        # Reconciliation
+        detailed["reconciliation"] = {
+            "last_check_ms": base_status.last_reconciliation_ms,
+            "last_result": base_status.last_reconciliation_result,
+            "is_consistent": base_status.is_consistent,
+        }
+
+        # Recovery Gate pending count
+        try:
+            if hub._recovery_gate is not None:
+                pending_reqs = hub._recovery_gate.get_pending_requests()
+                detailed["recovery_gate"] = {
+                    "pending_count": len(pending_reqs),
+                    "stats": hub._recovery_gate.get_stats(),
+                }
+            else:
+                detailed["recovery_gate"] = None
+        except Exception as e:
+            logger.debug(f"Error getting recovery gate status: {e}")
+            detailed["recovery_gate"] = None
+
+        # Change Audit Log pending count
+        try:
+            if hub._change_audit_log is not None:
+                pending_changes = hub._change_audit_log.get_pending_approvals()
+                detailed["change_audit_log"] = {
+                    "pending_count": len(pending_changes),
+                    "total_changes": len(hub._change_audit_log.get_all_changes()),
+                }
+            else:
+                detailed["change_audit_log"] = None
+        except Exception as e:
+            logger.debug(f"Error getting change audit log status: {e}")
+            detailed["change_audit_log"] = None
+
+        # OMS State Machine status if available
+        try:
+            if hub._oms_sm is not None:
+                # Try to get OMS status if the method exists
+                if hasattr(hub._oms_sm, "get_status"):
+                    oms_status = hub._oms_sm.get_status()
+                    detailed["oms"] = oms_status if isinstance(oms_status, dict) else str(oms_status)
+                else:
+                    detailed["oms"] = {"status": "available", "method_unavailable": True}
+            else:
+                detailed["oms"] = None
+        except Exception as e:
+            logger.debug(f"Error getting OMS status: {e}")
+            detailed["oms"] = None
+
+        # Demo connector status if available
+        try:
+            from .paper_trading_routes import ENGINE
+            if ENGINE is not None and hasattr(ENGINE, "_demo_connector"):
+                demo_enabled = ENGINE._demo_connector is not None
+                detailed["demo_connector"] = {
+                    "enabled": demo_enabled,
+                    "connector_type": type(ENGINE._demo_connector).__name__ if demo_enabled else None,
+                }
+            else:
+                detailed["demo_connector"] = None
+        except Exception as e:
+            logger.debug(f"Error getting demo connector status: {e}")
+            detailed["demo_connector"] = None
+
+        # Overall health
+        detailed["health"] = {
+            "enabled": base_status.enabled,
+            "mode": base_status.mode,
+            "incident_count": base_status.incident_count,
+            "callback_errors": base_status.callback_errors,
+        }
+
+        return GovernanceResponse.success(data=detailed, message="governance_status_detailed")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting detailed governance status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/auth/status")
@@ -407,6 +546,115 @@ def override_risk_level(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@governance_router.post("/risk/de-escalation/request")
+def request_de_escalation(
+    body: DeEscalationRequest,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Submit a de-escalation request for risk level.
+    提交风险等级降级请求。
+
+    Request will be queued for Operator approval before execution.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    if not hub._enabled:
+        raise HTTPException(status_code=403, detail="Governance hub disabled")
+
+    try:
+        # Sanitize inputs
+        sanitized_reason = _sanitize_string(body.reason, max_len=500)
+        sanitized_requester = _sanitize_string(body.requested_by, max_len=100)
+
+        # Submit de-escalation request
+        request_id = hub.request_de_escalation(
+            target_level=body.target_level,
+            requested_by=sanitized_requester,
+            reason=sanitized_reason,
+        )
+
+        if request_id is None:
+            return GovernanceResponse.error(
+                "Failed to submit de-escalation request",
+                code="submission_failed",
+                status_code=500
+            )
+
+        logger.info(f"De-escalation request submitted: {request_id} by {sanitized_requester}")
+
+        return GovernanceResponse.success(
+            data={
+                "request_id": request_id,
+                "target_level": body.target_level,
+                "status": "pending_approval",
+                "requested_by": sanitized_requester,
+            },
+            message="deescalation_requested"
+        )
+    except Exception as e:
+        logger.error(f"Error submitting de-escalation request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@governance_router.post("/risk/de-escalation/{request_id}/approve")
+def approve_de_escalation_request(
+    request_id: str,
+    body: ApproveDeEscalationRequest,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Operator approves and executes a de-escalation request.
+    操作员批准并执行降级请求。
+
+    This will execute the risk level reduction if approved.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    if not hub._enabled:
+        raise HTTPException(status_code=403, detail="Governance hub disabled")
+
+    try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        # Sanitize approver name
+        sanitized_approver = _sanitize_string(body.approved_by, max_len=100)
+
+        # Approve and execute de-escalation
+        success = hub.approve_de_escalation(
+            request_id=request_id,
+            approved_by=sanitized_approver,
+        )
+
+        if not success:
+            return GovernanceResponse.error(
+                f"Failed to approve de-escalation request {request_id}",
+                code="approval_failed",
+                status_code=500
+            )
+
+        logger.info(f"De-escalation request approved: {request_id} by {sanitized_approver}")
+
+        return GovernanceResponse.success(
+            data={
+                "request_id": request_id,
+                "status": "approved_and_executed",
+                "approved_by": sanitized_approver,
+            },
+            message="deescalation_approved"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving de-escalation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @governance_router.post("/reconcile")
 def trigger_manual_reconciliation(
     body: ManualReconciliationRequest,
@@ -453,6 +701,388 @@ def trigger_manual_reconciliation(
     except Exception as e:
         logger.error(f"Error in manual reconciliation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.get("/recovery/pending")
+def get_pending_recovery_requests(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get all pending recovery approval requests.
+    获取所有待审批恢复请求。
+
+    Returns list of pending recovery requests awaiting Operator approval.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        if hub._recovery_gate is None:
+            return GovernanceResponse.success(data=[], message="recovery_pending_empty")
+
+        pending = hub._recovery_gate.get_pending_requests()
+        return GovernanceResponse.success(data=pending, message="recovery_pending_list")
+    except Exception as e:
+        logger.error(f"Error getting pending recovery requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/recovery/{request_id}/approve")
+def approve_recovery_request(
+    request_id: str,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Operator approves a pending recovery request.
+    操作员批准待处理的恢复请求。
+
+    Transitions recovery from PENDING to APPROVED and executes the recovery.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    if not hub._enabled:
+        raise HTTPException(status_code=403, detail="Governance hub disabled")
+
+    try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        if hub._recovery_gate is None:
+            return GovernanceResponse.error(
+                "Recovery approval gate not available",
+                code="gate_unavailable",
+                status_code=503
+            )
+
+        # Verify request exists
+        req = hub._recovery_gate.get_request(request_id)
+        if req is None:
+            return GovernanceResponse.error(
+                f"Recovery request {request_id} not found",
+                code="not_found",
+                status_code=404
+            )
+
+        # Approve the recovery
+        approval = hub._recovery_gate.approve_recovery(
+            request_id=request_id,
+            approved_by=actor.get("user", "unknown"),
+        )
+
+        if approval is None:
+            return GovernanceResponse.error(
+                "Failed to approve recovery request",
+                code="approval_failed",
+                status_code=500
+            )
+
+        logger.info(f"Recovery request approved by {actor.get('user', 'unknown')}: {request_id}")
+
+        return GovernanceResponse.success(
+            data={
+                "request_id": request_id,
+                "approval_id": approval.approval_id,
+                "status": "approved",
+                "has_observation_period": approval.has_observation_period,
+                "observation_end_ms": approval.observation_end_ms,
+            },
+            message="recovery_approved"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error approving recovery request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@governance_router.get("/audit/changes")
+def get_change_history(
+    limit: int = 50,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get change audit log history.
+    获取变更审计日志历史。
+
+    Returns list of recorded changes with audit trail.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        if hub._change_audit_log is None:
+            return GovernanceResponse.success(data=[], message="audit_changes_empty")
+
+        # Get all changes (limit applied on response)
+        all_changes = hub._change_audit_log.get_all_changes()
+        # Return most recent first (reverse order), limited by limit param
+        changes_data = [change.to_dict() for change in reversed(all_changes[-limit:])]
+
+        return GovernanceResponse.success(
+            data=changes_data,
+            message="audit_changes_list"
+        )
+    except Exception as e:
+        logger.error(f"Error getting change history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.get("/audit/pending")
+def get_pending_approvals(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get all changes awaiting approval.
+    获取所有待批准的变更。
+
+    Returns list of PENDING and EMERGENCY_BYPASSED changes.
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        if hub._change_audit_log is None:
+            return GovernanceResponse.success(data=[], message="audit_pending_empty")
+
+        pending = hub._change_audit_log.get_pending_approvals()
+        pending_data = [change.to_dict() for change in pending]
+
+        return GovernanceResponse.success(data=pending_data, message="audit_pending_list")
+    except Exception as e:
+        logger.error(f"Error getting pending approvals: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.get("/symbols/whitelist")
+def get_symbol_whitelist(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get current symbol whitelist across all categories.
+    获取所有品类的当前符号白名单。
+
+    Returns symbol whitelist grouped by category.
+    """
+    try:
+        # Lazy import to avoid circular dependencies
+        from .paper_trading_routes import RISK_MANAGER
+
+        if RISK_MANAGER is None:
+            return GovernanceResponse.error(
+                "Risk manager not available",
+                code="manager_unavailable",
+                status_code=503
+            )
+
+        whitelist_data = {}
+        categories = ["spot", "linear", "inverse", "option"]
+
+        for category in categories:
+            try:
+                cfg = RISK_MANAGER.get_category_config(category)
+                if cfg is not None and hasattr(cfg, "allowed_symbols"):
+                    whitelist_data[category] = cfg.allowed_symbols or []
+                else:
+                    whitelist_data[category] = []
+            except Exception as e:
+                logger.debug(f"Error getting whitelist for {category}: {e}")
+                whitelist_data[category] = []
+
+        return GovernanceResponse.success(data=whitelist_data, message="symbol_whitelist")
+    except Exception as e:
+        logger.error(f"Error getting symbol whitelist: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/symbols/whitelist")
+def add_symbol_to_whitelist(
+    body: SymbolWhitelistAddRequest,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Add a symbol to the whitelist for a specific category.
+    将符号添加到特定品类的白名单。
+
+    Records change to ChangeAuditLog if available.
+    """
+    hub = _get_governance_hub()
+
+    try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        # Lazy import to avoid circular dependencies
+        from .paper_trading_routes import RISK_MANAGER
+
+        if RISK_MANAGER is None:
+            return GovernanceResponse.error(
+                "Risk manager not available",
+                code="manager_unavailable",
+                status_code=503
+            )
+
+        # Sanitize inputs
+        sanitized_symbol = _sanitize_string(body.symbol.upper(), max_len=50)
+        sanitized_category = _sanitize_string(body.category.lower(), max_len=50)
+
+        # Get current config
+        cfg = RISK_MANAGER.get_category_config(sanitized_category)
+        old_whitelist = cfg.allowed_symbols if cfg and hasattr(cfg, "allowed_symbols") else []
+
+        # Add symbol if not already present
+        if sanitized_symbol not in old_whitelist:
+            new_whitelist = old_whitelist + [sanitized_symbol]
+            RISK_MANAGER.update_category_config(
+                sanitized_category,
+                {"allowed_symbols": new_whitelist}
+            )
+
+            # Record to change audit log if available
+            if hub and hub._change_audit_log:
+                try:
+                    from .change_audit_log import ChangeType
+                    hub._change_audit_log.record_change(
+                        change_type=ChangeType.CONFIG_CHANGE,
+                        who=actor.get("user", "unknown"),
+                        what=f"Symbol added to {sanitized_category} whitelist: {sanitized_symbol}",
+                        reason="Operator whitelist management",
+                        old_value=old_whitelist,
+                        new_value=new_whitelist,
+                        affected_components=["risk_manager", sanitized_category],
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record whitelist change: {e}")
+
+            logger.info(f"Symbol {sanitized_symbol} added to {sanitized_category} whitelist by {actor.get('user', 'unknown')}")
+
+            return GovernanceResponse.success(
+                data={
+                    "symbol": sanitized_symbol,
+                    "category": sanitized_category,
+                    "status": "added",
+                    "new_whitelist": new_whitelist,
+                },
+                message="symbol_added"
+            )
+        else:
+            return GovernanceResponse.success(
+                data={
+                    "symbol": sanitized_symbol,
+                    "category": sanitized_category,
+                    "status": "already_exists",
+                    "whitelist": old_whitelist,
+                },
+                message="symbol_already_in_whitelist"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding symbol to whitelist: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@governance_router.delete("/symbols/whitelist/{symbol}")
+def remove_symbol_from_whitelist(
+    symbol: str,
+    category: str | None = None,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Remove a symbol from the whitelist.
+    从白名单中删除符号。
+
+    If category not specified, removes from all categories.
+    """
+    hub = _get_governance_hub()
+
+    try:
+        # SECURITY FIX #1: Require Operator role
+        _require_operator_role(actor)
+
+        # Lazy import to avoid circular dependencies
+        from .paper_trading_routes import RISK_MANAGER
+
+        if RISK_MANAGER is None:
+            return GovernanceResponse.error(
+                "Risk manager not available",
+                code="manager_unavailable",
+                status_code=503
+            )
+
+        # Sanitize inputs
+        sanitized_symbol = _sanitize_string(symbol.upper(), max_len=50)
+        categories_to_update = []
+
+        if category:
+            sanitized_category = _sanitize_string(category.lower(), max_len=50)
+            categories_to_update = [sanitized_category]
+        else:
+            categories_to_update = ["spot", "linear", "inverse", "option"]
+
+        changes_made = []
+
+        for cat in categories_to_update:
+            try:
+                cfg = RISK_MANAGER.get_category_config(cat)
+                old_whitelist = cfg.allowed_symbols if cfg and hasattr(cfg, "allowed_symbols") else []
+
+                if sanitized_symbol in old_whitelist:
+                    new_whitelist = [s for s in old_whitelist if s != sanitized_symbol]
+                    RISK_MANAGER.update_category_config(
+                        cat,
+                        {"allowed_symbols": new_whitelist}
+                    )
+
+                    changes_made.append(cat)
+
+                    # Record to change audit log if available
+                    if hub and hub._change_audit_log:
+                        try:
+                            from .change_audit_log import ChangeType
+                            hub._change_audit_log.record_change(
+                                change_type=ChangeType.CONFIG_CHANGE,
+                                who=actor.get("user", "unknown"),
+                                what=f"Symbol removed from {cat} whitelist: {sanitized_symbol}",
+                                reason="Operator whitelist management",
+                                old_value=old_whitelist,
+                                new_value=new_whitelist,
+                                affected_components=["risk_manager", cat],
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to record whitelist change: {e}")
+            except Exception as e:
+                logger.warning(f"Error updating whitelist for {cat}: {e}")
+
+        if changes_made:
+            logger.info(f"Symbol {sanitized_symbol} removed from {','.join(changes_made)} by {actor.get('user', 'unknown')}")
+            return GovernanceResponse.success(
+                data={
+                    "symbol": sanitized_symbol,
+                    "categories_updated": changes_made,
+                    "status": "removed",
+                },
+                message="symbol_removed"
+            )
+        else:
+            return GovernanceResponse.success(
+                data={
+                    "symbol": sanitized_symbol,
+                    "status": "not_found",
+                },
+                message="symbol_not_in_whitelist"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing symbol from whitelist: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/leases")

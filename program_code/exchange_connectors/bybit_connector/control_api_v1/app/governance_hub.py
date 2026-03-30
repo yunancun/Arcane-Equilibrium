@@ -195,6 +195,9 @@ class GovernanceHub:
         # T2.05: Recovery Approval Gate for de-escalation approval
         self._recovery_gate: Optional[RecoveryApprovalGate] = None
 
+        # T8.06: TelegramAlerter for governance event notifications
+        self._alerter: Optional[Any] = None
+
     def set_audit_pipeline(self, pipeline: Any) -> None:
         """
         Set the audit pipeline for SM callbacks.
@@ -218,6 +221,18 @@ class GovernanceHub:
         with self._lock:
             self._recovery_gate = gate
             logger.info("RecoveryApprovalGate set on GovernanceHub")
+
+    def set_alerter(self, alerter: Any) -> None:
+        """
+        T8.06: Inject TelegramAlerter for governance event notifications.
+        注入 TelegramAlerter 用于治理事件通知。
+
+        Args:
+            alerter: TelegramAlerter instance for sending alerts
+        """
+        with self._lock:
+            self._alerter = alerter
+            logger.info("TelegramAlerter set on GovernanceHub")
 
     def set_oms_sm(self, oms_sm: Any) -> None:
         """T5.03: Inject OMS State Machine for order reconciliation / 注入OMS狀態機"""
@@ -705,6 +720,21 @@ class GovernanceHub:
                         except Exception as e:
                             logger.error(f"Failed to record change audit: {e}")
 
+                    # T8.06: Send success alert to Telegram if alerter available
+                    if self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
+                        try:
+                            alert_msg = (
+                                f"✅ <b>De-escalation Approved</b>\n"
+                                f"Request ID: {request_id}\n"
+                                f"Level Change: {req.from_state} → {req.to_state}\n"
+                                f"Approved By: {approved_by}\n"
+                                f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                            )
+                            self._alerter.send(alert_msg, parse_mode="HTML")
+                        except Exception as e:
+                            if logger.isEnabledFor(logging.DEBUG):
+                                logger.debug(f"Error sending de-escalation approval alert: {e}")
+
                     logger.info(f"De-escalation approved and executed for request {request_id}")
                     return True
 
@@ -956,6 +986,20 @@ class GovernanceHub:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"Error freezing auth on circuit breaker: {e}")
 
+            # T8.06: Send alert to Telegram if escalated to CIRCUIT_BREAKER and alerter available
+            if new_level >= 4 and self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
+                try:
+                    alert_msg = (
+                        f"⚠️ <b>Risk Escalation Alert</b>\n"
+                        f"Level: {old_level} → {new_level}\n"
+                        f"Status: Circuit Breaker Activated\n"
+                        f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    self._alerter.send(alert_msg, parse_mode="HTML")
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error sending risk escalation alert: {e}")
+
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
@@ -1066,6 +1110,20 @@ class GovernanceHub:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"Error freezing auth for fatal mismatch: {e}")
+
+            # T8.06: Send FATAL alert to Telegram if alerter available
+            if severity == "FATAL" and self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
+                try:
+                    alert_msg = (
+                        f"🚨 <b>FATAL Reconciliation Mismatch</b>\n"
+                        f"Status: Account FROZEN\n"
+                        f"Details: {details.get('result', 'Unknown mismatch')}\n"
+                        f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    self._alerter.send(alert_msg, parse_mode="HTML")
+                except Exception as e:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"Error sending fatal reconciliation alert: {e}")
 
         except Exception as e:
             with self._lock:

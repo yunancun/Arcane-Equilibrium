@@ -307,6 +307,15 @@ GOV_HUB.set_recovery_gate(RECOVERY_GATE)
 from .scanner_rate_limiter import ScannerRateLimiter  # noqa: E402
 SCANNER_RATE_LIMITER = ScannerRateLimiter()
 
+# T8.06: Initialize and inject TelegramAlerter into GovernanceHub
+from .telegram_alerter import TelegramAlerter  # noqa: E402
+TELEGRAM_ALERTER = TelegramAlerter()
+if TELEGRAM_ALERTER.is_enabled:
+    GOV_HUB.set_alerter(TELEGRAM_ALERTER)
+    logger.info("TelegramAlerter injected into GovernanceHub")
+else:
+    logger.info("TelegramAlerter disabled (no token/chat_id configured)")
+
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import
 # This creates a singleton reference for the governance API routes
 # 将 GOV_HUB 导出为 _GOVERNANCE_HUB，供 governance_routes.py 导入
