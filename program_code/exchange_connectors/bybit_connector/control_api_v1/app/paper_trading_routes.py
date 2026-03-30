@@ -178,6 +178,9 @@ INCIDENT_POLICY = IncidentPolicy(
 )
 
 # T1.06: Create and start TTL Enforcer daemon
+# FIX-04: Counter for tracking TTL enforcement failures
+_ttl_enforcement_failures = 0
+
 def _make_ttl_expiry_callback():
     """Create expiry callback for TTL Enforcer to trigger SM transitions"""
     def callback(entry, action):
@@ -207,7 +210,15 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"Authorization SM not available for TTL callback")
                     except Exception as e:
-                        logger.error(f"Failed to reject authorization {entry.object_id} on TTL: {e}")
+                        global _ttl_enforcement_failures
+                        _ttl_enforcement_failures += 1
+                        logger.critical(f"Failed to reject authorization {entry.object_id} on TTL: {e}")
+                        # FIX-04: Send alert via TELEGRAM_ALERTER if available
+                        if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                            try:
+                                TELEGRAM_ALERTER.alert(f"TTL enforcement failure: Authorization {entry.object_id} rejection failed: {e}")
+                            except Exception:
+                                pass  # Don't fail the callback if alerting fails
 
             elif entry.state_machine_name == "DecisionLease":
                 if action == "auto_expire":
@@ -226,7 +237,15 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"DecisionLease SM not available for TTL callback")
                     except Exception as e:
-                        logger.error(f"Failed to expire lease {entry.object_id} on TTL: {e}")
+                        global _ttl_enforcement_failures
+                        _ttl_enforcement_failures += 1
+                        logger.critical(f"Failed to expire lease {entry.object_id} on TTL: {e}")
+                        # FIX-04: Send alert via TELEGRAM_ALERTER if available
+                        if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                            try:
+                                TELEGRAM_ALERTER.alert(f"TTL enforcement failure: Lease {entry.object_id} expiry failed: {e}")
+                            except Exception:
+                                pass  # Don't fail the callback if alerting fails
 
             elif entry.state_machine_name == "RiskGovernor":
                 if action == "manual_review_required":
@@ -244,7 +263,15 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"RiskGovernor SM not available for TTL callback")
                     except Exception as e:
-                        logger.error(f"Failed to request manual review on TTL: {e}")
+                        global _ttl_enforcement_failures
+                        _ttl_enforcement_failures += 1
+                        logger.critical(f"Failed to request manual review on TTL: {e}")
+                        # FIX-04: Send alert via TELEGRAM_ALERTER if available
+                        if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                            try:
+                                TELEGRAM_ALERTER.alert(f"TTL enforcement failure: Risk manual review request failed: {e}")
+                            except Exception:
+                                pass  # Don't fail the callback if alerting fails
 
                 elif action == "escalate":
                     try:
@@ -261,10 +288,26 @@ def _make_ttl_expiry_callback():
                         else:
                             logger.warning(f"RiskGovernor SM not available for TTL callback")
                     except Exception as e:
-                        logger.error(f"Failed to escalate risk on TTL: {e}")
+                        global _ttl_enforcement_failures
+                        _ttl_enforcement_failures += 1
+                        logger.critical(f"Failed to escalate risk on TTL: {e}")
+                        # FIX-04: Send alert via TELEGRAM_ALERTER if available
+                        if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                            try:
+                                TELEGRAM_ALERTER.alert(f"TTL enforcement failure: Risk escalation failed: {e}")
+                            except Exception:
+                                pass  # Don't fail the callback if alerting fails
 
         except Exception as e:
-            logger.error(f"Error in TTL expiry callback: {e}")
+            global _ttl_enforcement_failures
+            _ttl_enforcement_failures += 1
+            logger.critical(f"Error in TTL expiry callback: {e}")
+            # FIX-04: Send alert via TELEGRAM_ALERTER if available
+            if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
+                try:
+                    TELEGRAM_ALERTER.alert(f"TTL enforcement failure: Callback error: {e}")
+                except Exception:
+                    pass  # Don't fail the callback if alerting fails
 
     return callback
 
