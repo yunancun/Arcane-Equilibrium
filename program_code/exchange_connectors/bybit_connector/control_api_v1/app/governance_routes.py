@@ -514,6 +514,32 @@ def override_risk_level(
                 status_code=403
             )
 
+        # FIX-01: Check de-escalation gate for downward level changes
+        # Map int back to string for gate check
+        int_to_level_name = {
+            0: "NORMAL",
+            1: "CAUTIOUS",
+            2: "REDUCED",
+            3: "DEFENSIVE",
+            4: "CIRCUIT_BREAKER",
+            5: "MANUAL_REVIEW",
+        }
+        current_level_str = int_to_level_name.get(current_level, "UNKNOWN")
+        target_level_str = int_to_level_name.get(target_level, "UNKNOWN")
+
+        if target_level < current_level:
+            # This is a de-escalation, check the gate
+            if not hub._check_de_escalation_gate(current_level_str, target_level_str, sanitized_reason):
+                return GovernanceResponse.success(
+                    data={
+                        "status": "de_escalation_pending_approval",
+                        "current_level": current_level,
+                        "target_level": target_level,
+                        "reason": sanitized_reason,
+                    },
+                    message="de_escalation_pending_approval"
+                )
+
         # SECURITY FIX #9: Actually apply the de-escalation if risk governor supports it
         if hub._risk_governor_sm:
             try:
