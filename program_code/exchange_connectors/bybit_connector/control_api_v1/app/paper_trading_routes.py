@@ -63,7 +63,9 @@ ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
 from .governance_hub import GovernanceHub  # noqa: E402
 from .audit_persistence import AuditPipeline, AuditPersistenceConfig  # noqa: E402
 from .incident_event_model import IncidentPolicy  # noqa: E402
+from .ttl_enforcer import TTLEnforcer  # noqa: E402
 import os as _gov_os
+import atexit as _atexit
 _gov_audit_dir = _gov_os.getenv(
     "OPENCLAW_GOVERNANCE_AUDIT_DIR",
     _gov_os.path.abspath(_gov_os.path.join(_gov_os.path.dirname(__file__), "..", "runtime", "governance_audit"))
@@ -86,6 +88,46 @@ INCIDENT_POLICY = IncidentPolicy(
     on_risk_action=GOV_HUB.handle_incident_risk_action,
     on_operator_alert=GOV_HUB.handle_incident_operator_alert,
 )
+
+# T1.06: Create and start TTL Enforcer daemon
+def _make_ttl_expiry_callback():
+    """Create expiry callback for TTL Enforcer to trigger SM transitions"""
+    def callback(entry, action):
+        try:
+            # Handle different SM types based on entry.state_machine_name
+            if entry.state_machine_name == "Authorization":
+                if action == "auto_reject":
+                    logger.info(f"TTL expired for Authorization {entry.object_id}: auto-rejecting")
+                    # Auth PENDING_APPROVAL → REJECTED happens in the SM via audit_callback
+            elif entry.state_machine_name == "DecisionLease":
+                if action == "auto_expire":
+                    logger.info(f"TTL expired for Lease {entry.object_id}: auto-expiring")
+            elif entry.state_machine_name == "RiskGovernor":
+                if action == "manual_review_required":
+                    logger.info(f"TTL expired for Risk CIRCUIT_BREAKER {entry.object_id}: requires manual review")
+                elif action == "escalate":
+                    logger.info(f"TTL expired for Risk MANUAL_REVIEW {entry.object_id}: escalating")
+        except Exception as e:
+            logger.error(f"Error in TTL expiry callback: {e}")
+    return callback
+
+TTL_ENFORCER = TTLEnforcer(
+    audit_callback=AUDIT_PIPELINE.make_callback("ttl_enforcer"),
+    expiry_callback=_make_ttl_expiry_callback(),
+)
+
+# Start TTL daemon sweep (every 5 seconds)
+TTL_ENFORCER.start_daemon_sweep(interval_seconds=5)
+
+# Register shutdown hook to stop TTL daemon gracefully
+def _shutdown_ttl_enforcer():
+    try:
+        TTL_ENFORCER.stop_daemon_sweep(timeout_seconds=10)
+        logger.info("TTL Enforcer daemon stopped")
+    except Exception as e:
+        logger.error(f"Error stopping TTL Enforcer: {e}")
+
+_atexit.register(_shutdown_ttl_enforcer)
 
 ENGINE.set_governance_hub(GOV_HUB)
 RISK_MANAGER.set_governance_hub(GOV_HUB)
