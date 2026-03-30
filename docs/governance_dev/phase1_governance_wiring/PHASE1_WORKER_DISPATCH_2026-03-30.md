@@ -65,7 +65,6 @@
 | 順序 | Task ID | 前置條件 | 修改文件 |
 |------|---------|---------|---------|
 | 1 | T1.01 實現 | Worker-1 完成 T1.01 架構驗證 | `phase2_strategy_routes.py` |
-| 2 | T1.06 實現 | T1.01 完成 | `paper_trading_routes.py` 或 `governance_hub.py` |
 
 **Worker Prompt 補充：**
 ```
@@ -81,13 +80,7 @@
 - 新增測試：驗證 PIPELINE_BRIDGE._governance_hub is not None
 - 運行全部測試確認無回歸
 
-【任務 2】T1.06 — TTL Enforcer daemon 啟動
-- 在 GovernanceHub 初始化後啟動 TTL Enforcer daemon
-- 連接 expiry_callback → GovernanceHub 的 lease/auth 過期處理
-- 確保 shutdown hook 調用 stop_daemon_sweep()
-- 運行全部測試確認無回歸
-
-完成後 git commit + push。
+完成後 git commit + push。Sprint 1 結束後可支援其他 Worker 的 Code Review。
 ```
 
 ---
@@ -153,11 +146,16 @@
 | 順序 | Task ID | 前置條件 | 修改文件 |
 |------|---------|---------|---------|
 | 1 | T1.04 實現 | FA 完成 T1.04 設計 + T1.01 完成 | `paper_trading_routes.py`, `governance_hub.py` |
-| 2 | T1.05 實現 | FA 完成 T1.05 設計 + T1.01 完成 | `paper_trading_routes.py`, `governance_hub.py` |
+| 2 | T1.05 實現 | FA 完成 T1.05 設計 + T1.04 完成 | `paper_trading_routes.py`, `governance_hub.py` |
+| 3 | T1.06 實現 | T1.05 完成 | `paper_trading_routes.py` 或 `governance_hub.py` |
+
+⚠️ **重要：T1.04 → T1.05 → T1.06 必須按順序執行**，因為三者都修改 `paper_trading_routes.py` 的 GovernanceHub 初始化區塊。統一由 Worker-4 處理以避免合併衝突。
 
 **Worker Prompt 補充：**
 ```
-你是 E1b-C（修改工程師），負責 Phase 1 的持久化和級聯接入。
+你是 E1b-C（修改工程師），負責 Phase 1 的持久化、級聯接入和 TTL 啟動。
+
+⚠️ 三個任務都修改 paper_trading_routes.py 的 GOV_HUB 初始化區塊，必須按順序執行。
 
 【任務 1】T1.04 — AuditPipeline 連接
 - 等待 FA 的 AuditPipeline 整合架構文件
@@ -178,7 +176,13 @@
 - 連接 ReconciliationEngine → IncidentPolicy.process_event()
 - 測試 5 個嚴重度級別的級聯效果
 
-完成後 git commit + push。
+【任務 3】T1.06 — TTL Enforcer daemon 啟動
+- 在 GovernanceHub 初始化後啟動 TTL Enforcer daemon
+- 連接 expiry_callback → GovernanceHub 的 lease/auth 過期處理
+- 確保 shutdown hook 調用 stop_daemon_sweep()
+- 運行全部測試確認無回歸
+
+完成後每個任務分別 git commit + push。
 ```
 
 ---
@@ -246,8 +250,8 @@ Week 1 Day 3-5:  Sprint 2（P1 任務）
 ──────────────────────────────────────────────────────
 Worker-1 (FA):     ├─ T1.04 設計 ──┤ ├─ T1.05 設計 ──┤
                                     ↓                  ↓
-Worker-4 (E1b-C):                  ├─ T1.04 實現 ──┤ ├─ T1.05 實現 ──┤
-Worker-2 (E1b-A):  ├─ T1.06 TTL daemon ─┤
+Worker-4 (E1b-C):                  ├─ T1.04 實現 ──┤ ├─ T1.05 實現 ──┤ ├─ T1.06 TTL ─┤
+Worker-2 (E1b-A):  ├─ Code Review 支援 ─┤
 
 Week 2 Day 1-2:  Sprint 3（P2 + 收尾）
 ──────────────────────────────────────────────────────
