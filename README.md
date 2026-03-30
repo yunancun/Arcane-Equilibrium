@@ -54,14 +54,14 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 | 自动扫描 | 85% | Scout 情报无消费者 |
 | 策略选择 | 40% | 无 AI、无回测、无动态仓位 |
 | AI 风险评估 | 20% | H1-H5 AI 层完全断开 |
-| 下单 | 70% | OMS SM-03 未串联 |
+| 下单 | 85% | 治理 gate + OMS SM-03 已串联（Batch 10） |
 | 止损 | 75% | 缺交易所条件单双重防线 |
-| 学习 | 10% | 无知识提取/模式发现 |
+| 学习 | 25% | E1 观察 + L2 自动触发 + Sunday cron（Batch 10） |
 | 进化 | 5% | PaperLiveGate 未部署 |
 
-**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 1930+ 测试
+**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 2124+ 测试
 
-**关键缺失**：4/6 Agent 未实现 · Conductor 零调用 · MessageBus 零订阅者 · L2 仅手动触发 · 策略无 alpha
+**关键缺失**：Executor Agent 未启动 · L2 仅手动触发→已自动化（Batch 10） · 策略无 alpha
 
 **详细报告**：`docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md`
 **修复计划**：`docs/governance_dev/2026-03-30--round2_fix_plan_batches_7_12.md`
@@ -77,7 +77,7 @@ L1 本地推理:  Ollama HTTP 客户端 + Qwen 3.5 27B（L1 triage + pre-trade e
 | 7 | Conductor 事件循环 + Strategist Agent | 32→50% |
 | 8 | Guardian Agent + 动态风控 | 50→62% |
 | 9 | Perception Plane 激活 + Analyst Agent (L1) | 62→72% |
-| 10 | L2 学习自动化 + OMS 串联 | 72→80% |
+| **10** | **L2 学习自动化 + OMS 串联** | **72→80% ✅** |
 | 11 | Executor Agent + 交易所条件单 | 80→85% |
 | 12 | Paper→Live 门禁 + 端到端验证 | 85→88% |
 
@@ -198,10 +198,10 @@ srv/
 |------|------|------|------|------|------|
 | **SM-01** 授权状态机 | 8态/16转/fail-closed/终态不回流 | authorization_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
 | **SM-02** 决策租约 | 9态/TTL自动到期/租约≠订单 | decision_lease_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **SM-03** OMS 执行 | 11态订单生命周期/对账前不完成 | oms_state_machine.py | ✅ 完整 | ⬜ 未接入 | Paper 引擎用独立状态名 |
+| **SM-03** OMS 执行 | 11态订单生命周期/对账前不完成 | oms_state_machine.py | ✅ 完整 | ✅ Batch 10 | Paper Engine 7→11 state 映射 |
 | **SM-04** 风控状态机 | 6级风险/升级自动/降级需审批 | risk_governor_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
 | **EX-01** 风控边界 | P0/P1/P2 三层 + 组合风控 | risk_manager.py + portfolio_risk_control.py | ✅ 完整 | ⚠ 部分 | 组合风控未接入 |
-| **EX-02** OMS 执行边界 | 单一执行入口/授权前置 | oms_state_machine.py + paper_trading_engine.py | ✅ 完整 | ⚠ 部分 | SM-03 未串联 |
+| **EX-02** OMS 执行边界 | 单一执行入口/授权前置 | oms_state_machine.py + paper_trading_engine.py | ✅ 完整 | ✅ Batch 10 | SM-03 已串联 + fail-closed |
 | **EX-03** 控制面边界 | system_mode/execution_state 强制 | main_legacy.py（嵌入式） | ⚠ 部分 | ⬜ | 模式变更不传播到治理模组 |
 | **EX-04** 对账边界 | 5类结果/自动冻结/审计触发 | reconciliation_engine.py | ✅ 完整 | ✅ GovernanceHub | — |
 | **EX-05** 学习边界 | L1→L5 五级门控/自动晋升 | learning_tier_gate.py | ✅ 完整 | ⬜ 未接入 | 主流程从未调用 check_promotion() |
@@ -224,7 +224,7 @@ srv/
 | B | 成本收益感知 | 55% | AI 成本追踪框架在但未实际累计 |
 | C | 计算路径智能分级 | 35% | L0+L1 实现，L2 Sonnet/Opus 未接入主链路 |
 | D | 自我感知 | 40% | 健康门正常，但 GovernanceHub 状态未暴露到 GUI |
-| E | 持续学习 | 15% | E1 观察记录已接，L2-L5 门控未调用 |
+| E | 持续学习 | 30% | E1 观察 + L2 自动触发 + Sunday cron（Batch 10），L3-L5 待推进 |
 | F | 日/周报告 | 30% | 路由存在，无自动化 Cron |
 | G | Agent 自主交易 | 60% | 连续亏损暂停已接，但缺多 Agent 协作 |
 | H | 对抗性止损 | 65% | ATR 动态止损 + 交易所条件单保护未实现 |
@@ -245,7 +245,7 @@ srv/
 
 | ID | 缺口 |
 |----|------|
-| GAP-H1 | OMS 状态机（SM-03）未串联到 Paper Trading Engine |
+| ~~GAP-H1~~ | ~~OMS 状态机（SM-03）未串联~~ ✅ Batch 10 已修复 |
 | GAP-H2 | 学习门控（EX-05）主流程未调用 check_promotion() |
 | GAP-H3 | 感知面（EX-07）市场数据未包装 PerceptionDataObject |
 | GAP-H4 | 控制面 system_mode 变更未传播到 GovernanceHub |
@@ -283,13 +283,15 @@ srv/
   ── 共享但非独立模组 ──
   ✅ shadow_decision_builder.py    — 导入 + ShadowDecisionConsumer 创建 + API 路由
 
-真正独立存在（STANDALONE · 3/22）:
-  ⬜ oms_state_machine.py          ← SM-03 未串联到 Paper Trading Engine（用独立状态名）
+  ── Batch 10 新增接入（1 模组）──
+  ✅ oms_state_machine.py          — SM-03 串联 Paper Engine（7→11 state 映射 + fail-closed）
+
+真正独立存在（STANDALONE · 2/22）:
   ⬜ paper_live_gate.py            ← Paper→Live 门控未接入授权工作流
   ⬜ scout_routes.py               ← 代码已就绪，独立于 paper trading 运行时
 
-接入率:  19/22 = 86%（Batch 4 审计后 · 从误标 55% 修正）
-合规度:  ~88%
+接入率:  20/22 = 91%（Batch 10 后 · OMS SM-03 串联）
+合规度:  ~90%
 ```
 
 ### 下一步优先级（继续推进路线图）
@@ -313,18 +315,18 @@ R1 根因分析结论：0% 胜率非 bug，是**风控参数结构性错配**。
 4. **Executor Agent** — 包装 PaperTradingEngine.submit_order()，提供执行质量反馈
 5. **Conductor 实例化** — 在 phase2_strategy_routes.py 创建 Conductor 单例，注册全部 Agent，驱动 dispatch_market_event
 
-**Phase 5: 学习管线打通（✅ 已部分完成）**
+**Phase 5: 学习管线打通（✅ 大部分完成）**
 
-1. ~~**Learning Tier Gate 接入**~~ ✅ Batch 4 已完成 — PipelineBridge._emit_round_trip() → _try_learning_promotion() → promote_tier()
-2. **L2 触发条件** — observations ≥ 500 + win_rate ≥ 20%（当前 0%）→ 需先修正策略胜率
-3. **L2→L3 需 Analyst 产出 PatternInsight** — 依赖 Phase 4 完成 Analyst Agent
+1. ~~**Learning Tier Gate 接入**~~ ✅ Batch 4 已完成
+2. ~~**L2 自动触发**~~ ✅ Batch 10 已完成 — observations≥200 auto + Sunday UTC cron + AnalystAgent MessageBus 接入
+3. **L2→L3 需 Analyst 产出 PatternInsight** — 依赖 Analyst 数据积累
 4. **L4/L5 需 Operator 审批** — 接入 GovernanceHub 授权流
 
 **Phase 6: Paper→Live 准备（需 2+ sessions）**
 
-1. **OMS 串联** — Paper Trading Engine 使用 SM-03 11态生命周期
+1. ~~**OMS 串联**~~ ✅ Batch 10 已完成 — Paper Engine 7→11 state 映射 + fail-closed + 对账管线
 2. **Paper-Live Gate** — paper_live_gate.py 接入授权工作流
-3. **TTL 执行器** — 定期调用，自动终止过期租约
+3. ~~**TTL 执行器 OMS 回调**~~ ✅ Batch 10 已完成 — TTL 到期自动取消 OMS 订单
 4. **Demo 模式稳定性** — 在 Bybit Demo sandbox 积累足够交易记录
 
 ---
