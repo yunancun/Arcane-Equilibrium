@@ -56,7 +56,7 @@ from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .recovery_approval_gate import RecoveryApprovalGate
-from .governance_events import risk_event, recon_event, auth_event, lease_event
+from .governance_events import risk_event, recon_event, auth_event, lease_event, oms_event
 
 logger = logging.getLogger(__name__)
 
@@ -1049,6 +1049,10 @@ class GovernanceHub:
             auth_ids_to_restrict = []
             auth_ids_to_freeze = []
             should_freeze_auth = False
+            # T11.03: Generate correlation_id for entire cascade chain
+            import uuid as _uuid
+            cascade_correlation_id = str(_uuid.uuid4())
+            risk_event_id = None
 
             with self._lock:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1062,7 +1066,9 @@ class GovernanceHub:
                         level_to=new_level,
                         initiator="SYSTEM",
                         reason=f"Automatic risk escalation triggered",
+                        correlation_id=cascade_correlation_id,
                     )
+                    risk_event_id = event.event_id
                     self._append_governance_event(event.to_dict())
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
@@ -1126,7 +1132,7 @@ class GovernanceHub:
                                 reason=f"Risk escalation to level {new_level}",
                             )
                         self._invalidate_auth_cache()
-                    # T10.01: Emit auth_event for each restricted authorization
+                    # T10.01 + T11.03: Emit auth_event with correlation chain
                     for auth_id in auth_ids_to_restrict:
                         try:
                             evt = auth_event(
@@ -1134,6 +1140,8 @@ class GovernanceHub:
                                 state_to="RESTRICTED",
                                 initiator="GovernanceHub",
                                 message=f"Auth {auth_id} restricted: risk escalation to level {new_level}",
+                                correlation_id=cascade_correlation_id,
+                                parent_event_id=risk_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
                         except Exception:
@@ -1153,7 +1161,7 @@ class GovernanceHub:
                                 reason=f"Circuit breaker triggered at risk level {new_level}",
                             )
                         self._invalidate_auth_cache()
-                    # T10.01: Emit auth_event for each frozen authorization
+                    # T10.01 + T11.03: Emit auth_event with correlation chain
                     for auth_id in auth_ids_to_freeze:
                         try:
                             evt = auth_event(
@@ -1161,12 +1169,14 @@ class GovernanceHub:
                                 state_to="FROZEN",
                                 initiator="GovernanceHub",
                                 message=f"Auth {auth_id} frozen: circuit breaker at risk level {new_level}",
+                                correlation_id=cascade_correlation_id,
+                                parent_event_id=risk_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
                         except Exception:
                             pass
                     if should_freeze_auth:
-                        self._on_auth_frozen()
+                        self._on_auth_frozen(correlation_id=cascade_correlation_id, parent_event_id=risk_event_id)
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
@@ -1212,6 +1222,10 @@ class GovernanceHub:
             current_level = None
             auth_ids_to_freeze = []
             target_risk_level = None
+            # T11.03: Generate correlation_id for recon cascade
+            import uuid as _uuid
+            recon_correlation_id = str(_uuid.uuid4())
+            recon_event_id = None
 
             with self._lock:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1224,8 +1238,10 @@ class GovernanceHub:
                         result=severity,
                         initiator="SYSTEM",
                         message=f"Reconciliation mismatch detected: {severity}",
+                        correlation_id=recon_correlation_id,
                         **details,
                     )
+                    recon_event_id = event.event_id
                     self._append_governance_event(event.to_dict())
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
@@ -1304,8 +1320,8 @@ class GovernanceHub:
                                     reason="Fatal reconciliation mismatch",
                                 )
                             self._invalidate_auth_cache()
-                            self._on_auth_frozen()
-                    # T10.01: Emit auth_event for FATAL recon → freeze cascade
+                            self._on_auth_frozen(correlation_id=recon_correlation_id, parent_event_id=recon_event_id)
+                    # T10.01 + T11.03: Emit auth_event with correlation chain
                     for auth_id in auth_ids_to_freeze:
                         try:
                             evt = auth_event(
@@ -1313,6 +1329,8 @@ class GovernanceHub:
                                 state_to="FROZEN",
                                 initiator="GovernanceHub",
                                 message=f"Auth {auth_id} frozen: fatal reconciliation mismatch cascade",
+                                correlation_id=recon_correlation_id,
+                                parent_event_id=recon_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
                         except Exception:
@@ -1343,7 +1361,7 @@ class GovernanceHub:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"Error in _on_reconciliation_mismatch: {e}")
 
-    def _on_auth_frozen(self) -> None:
+    def _on_auth_frozen(self, correlation_id: str | None = None, parent_event_id: str | None = None) -> None:
         """
         Callback: auth frozen → revoke all active leases.
         回调：授权冻结 → 撤销所有活跃租约。
@@ -1380,7 +1398,7 @@ class GovernanceHub:
                                     approved_by="GovernanceHub",
                                     reason="Authorization frozen",
                                 )
-                    # T10.02: Emit lease_event for each revoked lease
+                    # T10.02 + T11.03: Emit lease_event with correlation chain
                     for lease_id in lease_ids:
                         try:
                             evt = lease_event(
@@ -1389,6 +1407,8 @@ class GovernanceHub:
                                 lease_id=lease_id,
                                 initiator="GovernanceHub",
                                 message=f"Lease {lease_id} revoked: authorization frozen cascade",
+                                correlation_id=correlation_id,
+                                parent_event_id=parent_event_id,
                             )
                             self._append_governance_event(evt.to_dict())
                         except Exception:
@@ -1549,6 +1569,18 @@ class GovernanceHub:
                             reason="Reconciliation passed",
                         )
                         logger.info(f"OMS order {order_id} transitioned to COMPLETED after reconciliation")
+                        # T11.01: Emit OMS event for reconciliation pass
+                        try:
+                            evt = oms_event(
+                                order_id=order_id,
+                                state_from="RECONCILING",
+                                state_to="COMPLETED",
+                                initiator="ReconciliationEngine",
+                                message=f"Order {order_id} completed after reconciliation pass",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                     except Exception as e:
                         logger.error(f"Failed to complete order {order_id}: {e}")
 
@@ -1563,6 +1595,18 @@ class GovernanceHub:
                             reason=f"Reconciliation failed: {overall_result}",
                         )
                         logger.info(f"OMS order {order_id} transitioned to REJECTED after reconciliation")
+                        # T11.01: Emit OMS event for reconciliation fail
+                        try:
+                            evt = oms_event(
+                                order_id=order_id,
+                                state_from="RECONCILING",
+                                state_to="REJECTED",
+                                initiator="ReconciliationEngine",
+                                message=f"Order {order_id} rejected: {overall_result}",
+                            )
+                            self._append_governance_event(evt.to_dict())
+                        except Exception:
+                            pass
                     except Exception as e:
                         logger.error(f"Failed to reject order {order_id}: {e}")
 

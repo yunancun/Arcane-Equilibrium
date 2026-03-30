@@ -209,6 +209,33 @@ def lease_event(
     )
 
 
+def oms_event(
+    order_id: str, state_from: str, state_to: str, initiator: str,
+    message: str = "",
+    correlation_id: str | None = None,
+    parent_event_id: str | None = None,
+    **details
+) -> GovernanceEvent:
+    """Create an OMS (Order Management System) state machine event."""
+    terminal_states = ("COMPLETED", "REJECTED", "CANCELLED", "ABORTED", "EXPIRED")
+    severity = EventSeverity.WARNING if state_to in ("REJECTED", "ABORTED") else EventSeverity.INFO
+    direction = EventDirection.RESTRICT if state_to in ("REJECTED", "ABORTED", "CANCELLED") else EventDirection.NEUTRAL
+    return GovernanceEvent(
+        category=EventCategory.ORDER_MANAGEMENT,
+        severity=severity,
+        direction=direction,
+        source_sm="EX-02",
+        source_module="oms_state_machine",
+        initiator=initiator,
+        state_from=state_from,
+        state_to=state_to,
+        message=message or f"Order {order_id}: {state_from} → {state_to}",
+        details={"order_id": order_id, **details},
+        correlation_id=correlation_id,
+        parent_event_id=parent_event_id,
+    )
+
+
 def recon_event(
     result: str, initiator: str = "SYSTEM",
     message: str = "", severity: EventSeverity = EventSeverity.INFO,

@@ -755,6 +755,24 @@ class PaperTradingEngine:
         """Inject LearningTierGate for analyst agent evolution / 注入学习等级门控"""
         self._learning_tier_gate = gate
 
+    def _check_tier_capability(self, capability: str) -> bool:
+        """
+        T11.02: Check if the current learning tier permits a capability.
+        检查当前学习层级是否允许指定能力。
+
+        Returns True if allowed or gate not configured (backward-compatible).
+        """
+        gate = self._learning_tier_gate
+        if gate is None:
+            return True
+        try:
+            method = getattr(gate, capability, None)
+            if method is None:
+                return True
+            return bool(method())
+        except Exception:
+            return False  # Fail-closed
+
     # ── Session Management / Session 管理 ──
 
     def start_session(
@@ -880,6 +898,11 @@ class PaperTradingEngine:
         For market orders, immediate fill is attempted if market_prices provided.
         """
         result = {"order": None, "fills": [], "rejected_reason": None, "close_pnl": 0.0}
+
+        # T11.02: LearningTierGate enforcement — order submission requires L3+ (can_auto_deploy_to_paper)
+        if not self._check_tier_capability("can_auto_deploy_to_paper"):
+            result["rejected_reason"] = "Learning tier too low for autonomous order submission (requires L3+)"
+            return result
 
         def mutator(state):
             sess = state["session"]
@@ -1162,6 +1185,11 @@ class PaperTradingEngine:
         """Cancel a working paper order / 取消 working 状态的纸上订单"""
         result = {"success": False, "reason": ""}
 
+        # T11.02: LearningTierGate enforcement — cancel requires L3+ (same as submit)
+        if not self._check_tier_capability("can_auto_deploy_to_paper"):
+            result["reason"] = "Learning tier too low for order cancellation (requires L3+)"
+            return result
+
         def mutator(state):
             for order in state["orders"]:
                 if order["order_id"] == order_id:
@@ -1214,6 +1242,10 @@ class PaperTradingEngine:
         Returns summary of fills executed during this tick.
         """
         tick_result = {"fills": [], "orders_filled": 0, "tick_ts_ms": now_ms()}
+
+        # T11.02: LearningTierGate enforcement — market observation requires L1+ (can_record_observations)
+        if not self._check_tier_capability("can_record_observations"):
+            return tick_result  # Silent no-op at L0 (gate not yet initialized to L1)
 
         def mutator(state):
             sess = state["session"]
