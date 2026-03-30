@@ -621,8 +621,11 @@ class GovernanceHub:
         if not self._initialized:
             try:
                 self._ensure_initialized()
-            except Exception:
-                pass
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"Cross-SM callback error: {e}")
+                with self._lock:
+                    self._callback_errors += 1
 
         # Gather all necessary state under lock in a single shot
         with self._lock:
