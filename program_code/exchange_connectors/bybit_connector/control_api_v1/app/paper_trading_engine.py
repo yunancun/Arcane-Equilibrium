@@ -852,8 +852,15 @@ class PaperTradingEngine:
                         result["rejected_reason"] = "governance_not_authorized"
                         self._audit(state, "order_governance_rejected", f"{symbol} {side} not authorized by governance")
                         return state
-                except Exception:
-                    logger.warning("Governance hub is_authorized check failed (non-fatal) / 治理檢查失敗（非致命）")
+                except Exception as exc:
+                    _transition_order(order, ORDER_STATE_REJECTED)
+                    order["reject_reason"] = "governance_check_error"
+                    state["orders"].append(order)
+                    result["order"] = order
+                    result["rejected_reason"] = "governance_check_error"
+                    self._audit(state, "order_governance_error",
+                                f"{symbol} {side} governance error: {exc} — fail-closed")
+                    return state
 
             # Risk manager pre-order check / 风控管理器下单前检查
             if self.risk_manager:
@@ -898,22 +905,37 @@ class PaperTradingEngine:
                 self._audit(state, "order_rejected", f"{symbol} {side} reason=session_halted")
                 return state
 
+            # Governance Hub lease acquisition / 治理集線器租約獲取（在進入 WORKING 前檢查）
+            if self._governance_hub:
+                try:
+                    lease_id = self._governance_hub.acquire_lease(order["order_id"], scope={"symbol": symbol, "side": side})
+                    if not lease_id:
+                        _transition_order(order, ORDER_STATE_REJECTED)
+                        order["reject_reason"] = "governance_lease_denied"
+                        state["orders"].append(order)
+                        result["order"] = order
+                        result["rejected_reason"] = "governance_lease_denied"
+                        self._audit(state, "order_governance_lease_denied",
+                                    f"{symbol} {side} lease denied — fail-closed")
+                        return state
+                    order["governance_lease_id"] = lease_id
+                    self._audit(state, "governance_lease_acquired",
+                                f"{order['order_id']} lease={lease_id}")
+                except Exception as exc:
+                    _transition_order(order, ORDER_STATE_REJECTED)
+                    order["reject_reason"] = "governance_lease_error"
+                    state["orders"].append(order)
+                    result["order"] = order
+                    result["rejected_reason"] = "governance_lease_error"
+                    self._audit(state, "order_governance_lease_error",
+                                f"{symbol} {side} lease error: {exc} — fail-closed")
+                    return state
+
             # Transition: submitted → working
             _transition_order(order, ORDER_STATE_WORKING)
             state["orders"].append(order)
             result["order"] = order
             self._audit(state, "order_submitted", f"{order['order_id']} {symbol} {side} {order_type} qty={qty}")
-
-            # Governance Hub lease acquisition / 治理集線器租約獲取
-            if self._governance_hub:
-                try:
-                    lease_id = self._governance_hub.acquire_lease(order["order_id"], scope={"symbol": symbol, "side": side})
-                    if lease_id:
-                        order["governance_lease_id"] = lease_id
-                        self._audit(state, "governance_lease_acquired", f"{order['order_id']} lease={lease_id}")
-                except Exception:
-                    import logging as _log
-                    _log.warning("Governance lease acquisition failed (non-fatal) / 租約獲取失敗（非致命）")
 
             # TIF enforcement for limit orders / 限价单 TIF 执行
             # PostOnly: reject if order would fill immediately (guarantees maker fee)
