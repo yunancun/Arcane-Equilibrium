@@ -36,6 +36,49 @@
 
 ---
 
+## 一-B、Cowork 基础设施（每个 Session 必须先确认）
+
+### Git 仓库
+
+| 项 | 值 |
+|----|----|
+| 远程仓库 | `https://github.com/Nancuncloud/BybitOpenClaw.git` |
+| 认证方式 | GitHub PAT（Personal Access Token），由 Operator 在 Session 开始时提供 |
+| 克隆命令 | `git clone https://<PAT>@github.com/Nancuncloud/BybitOpenClaw.git` |
+| 推送流程 | 每个 Batch 完成后：`git add` → `git commit` → `git push origin main` |
+| 分支策略 | 当前阶段直接 push main（Paper Trading 阶段，无 Live 风险） |
+
+> **安全提醒**：PAT 不可硬编码到任何文件中。每个 Cowork Session 由 Operator 临时提供，用完即弃。
+
+### 本地文件系统（SMB 挂载）
+
+| 项 | 值 |
+|----|----|
+| Operator 本机路径 | `~/BybitOpenClaw/` |
+| SMB 挂载点（Cowork VM） | `~/mnt/smb-openclaw/` → 映射到本机 `~/BybitOpenClaw/` |
+| Control API 核心代码 | `srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/` |
+| 测试目录 | `control_api_v1/tests/` |
+| 治理文档 | `srv/docs/governance_dev/` |
+
+> **注意**：SMB 挂载不一定每次都可用。如不可用，使用 Git clone 作为 fallback。
+
+### Ollama / Qwen 3.5 本地推理
+
+| 项 | 值 |
+|----|----|
+| Ollama API 端点 | `http://127.0.0.1:11434` |
+| 模型 | `qwen3.5:27b-q4_K_M`（27B 参数，Q4_K_M 量化） |
+| 成本 | **$0.00**（本地运行，零外部成本） |
+| 健康检查 | `curl http://127.0.0.1:11434/api/tags` |
+| 代码中的客户端 | `app/ollama_client.py` — `OllamaClient` 类（线程安全单例） |
+| 环境变量 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `OLLAMA_TIMEOUT`（均有默认值） |
+| 关键方法 | `classify()`（情绪分类）、`judge_edge()`（交易 edge 判断）、`generate()`（通用生成） |
+| 不可用时行为 | **必须 fail-closed**：Ollama 不可用 → 回退到本地启发式规则，不可放行未评估的交易 |
+
+> **每个 Session 启动时**：先运行 `curl http://127.0.0.1:11434/api/tags | grep qwen` 确认 Ollama 在线且模型已加载。
+
+---
+
 ## 二、改进要求（硬性约束）
 
 ### 不可违背
@@ -356,29 +399,61 @@ Session 10 ── 缓冲（回归修复 + 参数调优 + 观察期启动）
 ### 每个 Cowork Session 内部分配
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Session 开始                                                     │
-│                                                                   │
-│ Phase 0: PM 任务分配（5 min）                                    │
-│   PM 读取上一 session 的审计结果，分配本 session 任务             │
-│                                                                   │
-│ Phase 1: 并行开发（E1a ∥ E1b，2-3h）                            │
-│   E1a: 核心模块实现（Conductor/Bridge/Engine 改造）              │
-│   E1b: Agent 实现 + 接线（Strategist/Guardian/Analyst/Executor） │
-│   ── 独立文件，零冲突 ──                                        │
-│                                                                   │
-│ Phase 2: 集成 + 测试（E4，1-2h）                                │
-│   E4: 编写测试 + 运行全量测试 + 验证零回归                      │
-│                                                                   │
-│ Phase 3: 审计验收（FA+CC，30min-1h）                            │
-│   FA: 架构合规性检查（fail-closed/治理/审计）                    │
-│   CC: 16 条根原则合规验证                                        │
-│                                                                   │
-│ Phase 4: PM 收尾（15 min）                                      │
-│   更新 CLAUDE.md + docs/ + Git commit + push                    │
-│                                                                   │
-│ Session 结束                                                     │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Session 开始                                                             │
+│                                                                           │
+│ Phase 0: 环境确认 + PM 任务分配（5 min）                                │
+│   0-1. 检查 SMB 挂载：ls ~/mnt/smb-openclaw/srv/                       │
+│   0-2. 如可用 → 直接在 SMB 路径上操作（首选）                           │
+│        如不可用 → git clone fallback（Operator 提供 PAT）               │
+│   0-3. 检查 Ollama：curl http://127.0.0.1:11434/api/tags | grep qwen   │
+│   0-4. PM 读取上一 session 的审计结果，分配本 session 任务              │
+│                                                                           │
+│ Phase 1: 并行开发（E1a ∥ E1b，2-3h）                                   │
+│   ★ 所有代码修改直接在 SMB 挂载路径上进行 ★                            │
+│   工作目录：~/mnt/smb-openclaw/srv/program_code/.../control_api_v1/app/ │
+│   E1a: 核心模块实现（Conductor/Bridge/Engine 改造）                     │
+│   E1b: Agent 实现 + 接线（Strategist/Guardian/Analyst/Executor）        │
+│   ── 独立文件，零冲突 ──                                               │
+│                                                                           │
+│ Phase 2: 集成 + 测试（E4，1-2h）                                       │
+│   E4: 在 SMB 路径上运行 pytest，验证零回归                              │
+│   cd ~/mnt/smb-openclaw/srv/.../control_api_v1 && python -m pytest      │
+│                                                                           │
+│ Phase 3: 审计验收（FA+CC，30min-1h）                                    │
+│   FA: 架构合规性检查（fail-closed/治理/审计）                           │
+│   CC: 16 条根原则合规验证                                               │
+│                                                                           │
+│ Phase 4: PM 收尾 — Git Commit + Push（15 min）                          │
+│   4-1. 更新 CLAUDE.md + docs/（在 SMB 路径上）                          │
+│   4-2. cd ~/mnt/smb-openclaw && git add <具体文件>                      │
+│   4-3. git commit -m "Batch N: <描述>"                                  │
+│   4-4. git push origin main                                              │
+│   4-5. 验证：git log --oneline -3                                       │
+│                                                                           │
+│ Session 结束                                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 文件操作路径优先级
+
+```
+首选（SMB 直接修改）：
+  ~/mnt/smb-openclaw/srv/program_code/.../control_api_v1/app/*.py   ← 代码
+  ~/mnt/smb-openclaw/srv/program_code/.../control_api_v1/tests/*.py ← 测试
+  ~/mnt/smb-openclaw/srv/docs/governance_dev/*.md                   ← 文档
+  ~/mnt/smb-openclaw/srv/CLAUDE.md                                  ← 主日志
+  ~/mnt/smb-openclaw/srv/README.md                                  ← Git 日志
+
+  优点：修改即时生效到 Operator 本机，可直接 git push
+  Git 操作：cd ~/mnt/smb-openclaw && git add/commit/push
+
+降级（Git Clone fallback）：
+  git clone https://<PAT>@github.com/Nancuncloud/BybitOpenClaw.git
+  cd BybitOpenClaw && <修改> && git add/commit/push
+
+  适用于：SMB 不可用时
+  注意：clone 路径与 SMB 路径不同，需确认正确的工作目录
 ```
 
 ### 角色与工具对应
@@ -460,11 +535,91 @@ Batch 7-12 全部完成后，进行一次完整的功能审计（与 Round 2 审
 
 ---
 
+## 五-B、治理深度融合分析
+
+### 当前状态：GovernanceHub 与业务模块的融合程度
+
+Round 2 审计结论：GovernanceHub 处于"**半融合**"状态。
+
+| 模块 | 融合状态 | 说明 |
+|------|----------|------|
+| Paper Trading Engine | ✅ **深度融合** | `submit_order()` → `is_authorized()` 真实拒绝 + `acquire_lease()` fail-closed |
+| Risk Manager | ✅ **深度融合** | `check_pre_trade_gate()` → `is_authorized()` + SM-04 风控级联 |
+| PipelineBridge (tick) | ⚠️ **部分融合** | `on_tick()` 经过 `is_authorized()` gate，但 edge filter 是 **fail-open** |
+| Strategy Orchestrator | ❌ **未融合** | 产出 OrderIntent 但不经过任何 Agent/Guardian 审查 |
+| Multi-Agent (Scout) | ⚠️ **部分融合** | Scout 已接入 MessageBus，但情报无消费者 |
+| Multi-Agent (其余 4 Agent) | ❌ **未融合** | Strategist/Guardian/Analyst/Executor 类不存在 |
+| Learning Pipeline | ❌ **未融合** | L1 观察记录可用，但 LearningTierGate 指标永不更新 |
+| Perception Plane | ❌ **未融合** | 已注入 context 但 `register_data()` 零调用 |
+| OMS SM-03 | ❌ **完全绕过** | Paper Engine 用独立 7 态，SM-03 11 态从未接入 |
+| PaperLiveGate | ❌ **完全绕过** | 代码完整但从未实例化 |
+
+### 关键治理缺口：Edge Filter Fail-Open 问题
+
+**位置**：`pipeline_bridge.py` `_check_edge_filter()` 方法（约第 606-715 行）
+
+**现状**：三个 `return True`（fail-open）分支——
+
+1. **第 627 行**：Ollama 不可用 → `return True`（放行）
+2. **第 679 行**：Ollama 返回错误 → `return True`（放行）
+3. **第 715 行**：异常 → `return True`（放行）
+
+**问题**：这违反了 DOC-01 §5.6（失败默认收缩）。当 Ollama 不可用时，未经 AI 评估的交易信号被直接放行，相当于 AI 风险评估层完全失效。
+
+**修复策略（纳入 Batch 8 Guardian）**：
+
+```
+当前：  Intent → edge_filter(fail-open) → submit_order
+修复后：Intent → Guardian(fail-closed) → edge_filter(辅助参考) → submit_order
+```
+
+- **Guardian 是主门控**（fail-closed）：Guardian 不可用或返回 UNKNOWN → 拒绝 intent
+- **Edge filter 降级为辅助参考**：Ollama 不可用时 → Guardian 仅依据本地启发式规则决策（非放行）
+- 这样即使 Ollama 宕机，交易仍需通过 Guardian 的本地风控检查（方向冲突 / 杠杆上限 / 关联冲突 / 回撤限制）
+
+### Batch 7-12 如何逐步深化治理融合
+
+```
+Batch 7  ──→  Conductor + MessageBus 运转 → 所有 Agent 消息经审计管线
+              融合提升：Scout 情报有消费者，消息链路有治理审计
+
+Batch 8  ──→  Guardian 审查所有 TradeIntent + SM-04 联动
+              融合提升：Strategy → Guardian → Execute 全链路治理门控
+              ★ 修复 edge filter fail-open：Guardian 接管为主门控
+
+Batch 9  ──→  Perception Plane 激活 + Analyst 回调
+              融合提升：所有数据标记认知级别 (FACT/INFERENCE/HYPOTHESIS)
+              ★ GovernanceHub 审计日志包含认知级别标记
+
+Batch 10 ──→  OMS SM-03 串联 + L2 学习自动化
+              融合提升：订单状态统一到治理框架下的 11 态生命周期
+              ★ 学习管线更新 LearningTierGate 指标，治理可监控学习进度
+
+Batch 11 ──→  Executor Agent + 交易所条件单
+              融合提升：执行层被 Agent 包装，执行质量反馈进入治理审计
+              ★ 双重防线（本地 + 交易所）完善 DOC-01 §5.9
+
+Batch 12 ──→  PaperLiveGate 部署 + 端到端验证
+              融合提升：11 项门禁接入 GovernanceHub 授权工作流
+              ★ ChangeAuditLog 联动，所有状态变更有完整审计轨迹
+```
+
+### 融合完成后的治理覆盖率目标
+
+| 指标 | 当前 | Batch 12 完成后 |
+|------|------|-----------------|
+| 治理接入模块 | 19/22（86%） | 22/22（100%） |
+| fail-closed 覆盖 | 2/3 门控点 | 3/3（含 Guardian 接管 edge filter） |
+| 审计覆盖 | 订单级 | 订单 + Agent 消息 + 认知标记 + 学习指标 + 执行质量 |
+| 跨 SM 级联 | SM-01/SM-04 | SM-01/SM-02/SM-03/SM-04 全联动 |
+
+---
+
 ## 六、风险与缓解
 
 | 风险 | 概率 | 影响 | 缓解 |
 |------|------|------|------|
-| Qwen 3.5 推理质量不足 | 中 | 策略选择退化 | fail-open 设计，Qwen 不可用时回退到本地启发式 |
+| Qwen 3.5 推理质量不足 | 中 | 策略选择退化 | Guardian fail-closed 兜底，Qwen 不可用时 Guardian 用本地启发式决策（非放行） |
 | Agent 引入新 bug | 中 | 回归 | shadow 模式先行 + 全量回归测试 |
 | OMS 串联破坏现有 Paper Engine | 中 | 阻塞 | 分步替换（先 mapping 再完全切换），保留回退路径 |
 | 标准技术指标本身无 alpha | 高 | 盈利不达标 | Batch 10 Analyst L2 发现模式 → 策略排名淘汰 |
