@@ -70,7 +70,7 @@ E1-Alpha（P0-NEW-1+2）‖ E1-Beta（P0-NEW-3）
 
 > 所有 P1 快修可最大並行，P1-NEW-1 需 PA 架構確認後才能動手。
 
-### [ ] P1-NEW-1：`main.py` openclaw_proxy 轉發 Bearer Token（需 PA 確認）
+### [x] P1-NEW-1：`main.py` openclaw_proxy 轉發 Bearer Token（需 PA 確認）
 - **檔案**：`app/main.py`（第 199 行 headers 過濾）
 - **問題**：`Authorization` 頭未過濾，原樣轉發至 OpenClaw Gateway（127.0.0.1:18789）
 - **PA 確認事項**：OpenClaw Gateway 是否依賴透傳 Token 認證？
@@ -80,14 +80,14 @@ E1-Alpha（P0-NEW-1+2）‖ E1-Beta（P0-NEW-3）
 - **工時**：2h（含架構確認）
 - **E1 指派**：E1-Zeta（PA 確認後啟動）
 
-### [ ] P1-NEW-2：`main_legacy.py` `_COMPILE_STATE_SIG_CACHE` id(fn) → WeakKeyDictionary
+### [x] P1-NEW-2：`main_legacy.py` `_COMPILE_STATE_SIG_CACHE` id(fn) → WeakKeyDictionary
 - **檔案**：`app/main_legacy.py`（第 658 行附近）
 - **問題**：`id(fn)` 作為鍵，Python GC 回收後可能 reuse id 導致緩存誤判
 - **修復**：`import weakref` + `weakref.WeakKeyDictionary()` 替換 `dict[int, bool]`，訪問改為 `.get(fn, None)`
 - **工時**：45m
 - **E1 指派**：E1-Alpha
 
-### [ ] P1-NEW-3：`main_legacy.py` `_login_fail_counts` 加 asyncio.Lock + 容量上限
+### [x] P1-NEW-3：`main_legacy.py` `_login_fail_counts` 加 asyncio.Lock + 容量上限
 - **檔案**：`app/main_legacy.py`（第 51 行附近）
 - **問題雙維度**：(1) 無 `asyncio.Lock`，並發登錄計數競態；(2) 無容量上限，IP 掃描攻擊 OOM
 - **修復**：
@@ -98,26 +98,26 @@ E1-Alpha（P0-NEW-1+2）‖ E1-Beta（P0-NEW-3）
 - **工時**：1.5h
 - **E1 指派**：E1-Beta
 
-### [ ] P1-NEW-4：`main_legacy.py` `auth_login` token 重讀文件 → `settings.api_token`
+### [x] P1-NEW-4：`main_legacy.py` `auth_login` token 重讀文件 → `settings.api_token`
 - **檔案**：`app/main_legacy.py`（第 4210-4218 行）
 - **問題**：登錄成功後從磁盤重讀 `api_token`，與啟動緩存 `settings.api_token` 不一致
 - **修復**：移除文件讀取，直接 `api_token = settings.api_token`
 - **工時**：30m
 - **E1 指派**：E1-Gamma
 
-### [ ] P1-NEW-5：`main.py` openclaw_proxy 異常無日誌
+### [x] P1-NEW-5：`main.py` openclaw_proxy 異常無日誌
 - **檔案**：`app/main.py`（第 214 行 except 塊）
 - **修復**：添加 `logger.warning("openclaw_proxy error [%s]: %s", path, type(e).__name__)`（不洩漏完整異常到客戶端）
 - **工時**：20m
 - **E1 指派**：E1-Gamma（與 P1-NEW-4 同批次）
 
-### [ ] P1-NEW-6：`main.py` `OPENCLAW_GATEWAY_HOST` 每次請求讀 env → 啟動緩存
+### [x] P1-NEW-6：`main.py` `OPENCLAW_GATEWAY_HOST` 每次請求讀 env → 啟動緩存
 - **檔案**：`app/main.py`（第 192 行）
 - **修復**：模組頂層 `_OC_HOST = os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")`，proxy 函數改用 `_OC_HOST`
 - **工時**：30m
 - **E1 指派**：E1-Gamma（同批次）
 
-### [ ] P1-NEW-7：`layer2_engine.py` `_session_lock` threading.Lock → asyncio.Lock
+### [x] P1-NEW-7：`layer2_engine.py` `_session_lock` threading.Lock → asyncio.Lock
 - **檔案**：`app/layer2_engine.py`（第 185 行）
 - **問題**：`run_session` 是 `async def`，混用 `threading.Lock` 語義不清，重構時易死鎖
 - **修復**：`asyncio.Lock()` 替換；`acquire(blocking=False)` 改為 `if self._session_lock.locked(): return ...; async with self._session_lock:`
@@ -261,6 +261,7 @@ Phase 4（5+21天）：
 ## 已完成記錄（可查 git log）
 
 ```
+2eda4ec — fix(security): Wave 3b — Token 隔離 + Lock 安全 + 緩存修復
 c6a8845 — fix(security): Wave 3a — /reconcile Operator 角色驗證 + 錯誤信息屏蔽
 ec0e794 — fix(security): P0+P1 Wave 0-2 安全修復第一批（16 files）
 c113ab2 — fix(security): P0 Wave 0-2 安全修復第二批 — paper_engine + pipeline_bridge（10 files）
@@ -270,4 +271,5 @@ Wave 0：✅ P0（5項）+ P1（5項）全部完成（E2+E4 通過）
 Wave 1：✅ PA-4.3 DI 統一（26 Depends）+ HTTPException 穿透（E2+E4 通過）
 Wave 2：✅ P0-8/P1-1/P1-2/P1-6/P1-8/P1-9/P1-13/P1-18 全部完成（E2+E4 通過）
 Wave 3a：✅ P0-NEW-1/2/3 全部完成（E2+E4 通過，2026-03-31）
+Wave 3b：✅ P1-NEW-1~7 全部完成（E2+E4 通過，2026-03-31）
 ```
