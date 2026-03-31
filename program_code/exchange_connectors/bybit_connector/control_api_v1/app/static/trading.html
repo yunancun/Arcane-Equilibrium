@@ -421,7 +421,7 @@ async function loadSignals() {
     const dir = s.direction || '--';
     const dirClass = dir === 'long' ? 'green' : dir === 'short' ? 'red' : '';
     const conf = s.confidence != null ? s.confidence.toFixed(2) : '--';
-    return `<tr><td>${t}</td><td>${src}</td><td class="${dirClass}">${dir}</td><td>${conf}</td></tr>`;
+    return `<tr><td>${t}</td><td>${ocEsc(src)}</td><td class="${dirClass}">${ocEsc(dir)}</td><td>${ocEsc(conf)}</td></tr>`;
   });
   tbody.innerHTML = rows.join('');
 }
@@ -458,9 +458,9 @@ async function loadStrategies() {
     const state = s.state || s.status || 'idle';
     const name = (s.name || s.strategy_name || '--').replace(/_/g, ' ');
     return `<div class="strat-row">
-      <div class="strat-dot ${state}"></div>
-      <div class="strat-name">${name}</div>
-      <div class="strat-state">${state}</div>
+      <div class="strat-dot ${ocEsc(state)}"></div>
+      <div class="strat-name">${ocEsc(name)}</div>
+      <div class="strat-state">${ocEsc(state)}</div>
     </div>`;
   }).join('');
 }
@@ -483,8 +483,8 @@ async function loadIndicators() {
     if (typeof v === 'number') v = v.toFixed(4);
     else if (typeof v === 'object' && v !== null) v = JSON.stringify(v).substring(0, 30);
     return `<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:11px;border-bottom:1px solid rgba(48,54,61,0.3)">
-      <span style="color:var(--text-dim)">${k}</span>
-      <span>${v}</span>
+      <span style="color:var(--text-dim)">${ocEsc(k)}</span>
+      <span>${ocEsc(v)}</span>
     </div>`;
   });
   el.innerHTML = rows.join('');

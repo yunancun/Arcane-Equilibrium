@@ -163,9 +163,8 @@ class GovernanceHub:
         self._audit_dir = Path(audit_dir)
         self._audit_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check environment override for enabled flag
-        env_enabled = os.environ.get("OPENCLAW_GOVERNANCE_ENABLED", "true").lower() == "true"
-        self._enabled = enabled and env_enabled
+        # P1-2: env var override removed — governance cannot be disabled via environment variable
+        self._enabled = enabled
         self._mode = GovernanceMode.NORMAL
 
         # Initialize all 4 state machines

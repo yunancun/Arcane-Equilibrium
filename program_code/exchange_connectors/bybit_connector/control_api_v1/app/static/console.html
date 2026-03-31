@@ -334,7 +334,9 @@ async function refreshSidebar() {
 
   // OpenClaw
   try {
-    const r = await fetch(OC + '/health');
+    const r = await fetch(OC + '/health', {
+      headers: { 'Authorization': 'Bearer ' + getToken() }
+    });
     const h = await r.json();
     document.getElementById('s-oc').textContent = h.ok ? 'Online' : 'Down';
     document.getElementById('s-oc').className = 'mc-val ' + (h.ok ? 'green' : 'red');

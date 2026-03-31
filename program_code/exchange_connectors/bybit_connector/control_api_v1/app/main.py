@@ -179,13 +179,14 @@ app.include_router(scout_router)
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
 # Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789
 # 将 /openclaw/* 代理到 localhost:18789，远程客户端无需直接访问 18789 端口
+import asyncio as _asyncio  # noqa: E402
 import urllib.request as _oc_urllib  # noqa: E402
-from fastapi import Request  # noqa: E402
+from fastapi import Depends, Request  # noqa: E402
 from fastapi.responses import Response  # noqa: E402
 
 @app.api_route("/openclaw/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
-async def openclaw_proxy(path: str, request: Request):
-    """Reverse proxy to OpenClaw Gateway"""
+async def openclaw_proxy(path: str, request: Request, actor=Depends(base.current_actor)):
+    """Reverse proxy to OpenClaw Gateway — requires authenticated actor / 需要已認證 Actor"""
     # Gateway binds to loopback when using --tailscale serve
     import os as _os
     _oc_host = _os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
@@ -198,11 +199,16 @@ async def openclaw_proxy(path: str, request: Request):
             headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")},
             method=request.method,
         )
-        with _oc_urllib.urlopen(req, timeout=10) as resp:
-            content = resp.read()
-            headers = dict(resp.headers)
-            headers.pop("Transfer-Encoding", None)
-            return Response(content=content, status_code=resp.status, headers=headers)
+
+        def _do_request():
+            with _oc_urllib.urlopen(req, timeout=10) as resp:
+                _content = resp.read()
+                _headers = dict(resp.headers)
+                _headers.pop("Transfer-Encoding", None)
+                return _content, resp.status, _headers
+
+        content, status_code, headers = await _asyncio.to_thread(_do_request)
+        return Response(content=content, status_code=status_code, headers=headers)
     except _oc_urllib.HTTPError as e:
         return Response(content=e.read(), status_code=e.code)
     except Exception:

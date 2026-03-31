@@ -403,8 +403,9 @@ class LocalLLMWebSearchProvider(SearchProvider):
         start = time.time()
         try:
             web_pilot = os.path.expanduser("~/.local/bin/web-pilot")
+            safe_query = query.strip().lstrip("-")[:200]
             proc = subprocess.run(
-                [web_pilot, "search", query, "--max", str(max_results)],
+                [web_pilot, "search", "--max", str(max_results), "--", safe_query],
                 capture_output=True, text=True, timeout=30,
             )
             if proc.returncode != 0:

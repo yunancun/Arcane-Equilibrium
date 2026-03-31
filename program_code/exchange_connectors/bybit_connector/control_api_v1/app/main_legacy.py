@@ -16,6 +16,7 @@ OpenClaw / Bybit 控制 API 与 GUI 的可运行 MVP
 import copy
 import hashlib
 import hmac
+import inspect as _inspect
 import json
 import logging
 import os
@@ -41,6 +42,40 @@ from slowapi.util import get_remote_address
 
 def _split_csv(value: str) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
+
+
+# Login failure tracking — IP → (failure_count, first_failure_timestamp)
+# 登录失败追踪：IP → (失败次数, 首次失败时间戳)
+# Locked out after 5 failures within 15 minutes; auto-resets after window expires.
+# 15分钟内失败5次后锁定；超过窗口期自动重置。（P1-8 修复）
+_login_fail_counts: dict[str, tuple[int, float]] = {}
+_LOGIN_MAX_FAILURES = 5        # 同一IP最多失败次数 / max failures per IP
+_LOGIN_LOCKOUT_WINDOW = 900.0  # 锁定窗口（秒）/ lockout window in seconds (15 min)
+
+# ── Auth credentials cache (P1-12) ────────────────────────────────────────────
+# Loaded once at startup; avoids per-request file I/O on the login endpoint.
+# 启动时一次性加载凭证，避免每次登录请求都读文件。
+_AUTH_CREDENTIALS: dict[str, str] | None = None
+
+
+def _load_auth_credentials() -> dict[str, str]:
+    """Load auth credentials once at startup and cache.
+    启动时加载一次认证凭证并缓存，后续直接返回缓存值。
+    """
+    global _AUTH_CREDENTIALS
+    if _AUTH_CREDENTIALS is not None:
+        return _AUTH_CREDENTIALS
+    creds: dict[str, str] = {}
+    env_path = Path(os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env"))
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.partition("=")
+                    creds[k.strip()] = v.strip()
+    _AUTH_CREDENTIALS = creds
+    return creds
 
 
 def _resolve_api_token() -> str:
@@ -616,6 +651,12 @@ _MAX_TEXT_LONG = 2000   # 详情 / detail / description 类
 _MAX_TEXT_REASON = 500  # 理由 / reason 类
 _MAX_PAYLOAD_SIZE = 50000  # payload JSON 总字节 / total payload bytes
 
+# Module-level cache for compile_state signature inspection.
+# Keyed by function object id() so tests that monkey-patch compile_state get a fresh lookup.
+# 模块级签名缓存：以函数对象 id 为键，避免高频 _compile_for_response 路径重复调用
+# inspect.signature()；当测试替换 compile_state 时自动失效并重新检测。
+_COMPILE_STATE_SIG_CACHE: dict[int, bool] = {}
+
 
 def _validate_text_length(value: str, field_name: str, max_len: int) -> str:
     """验证文本长度，超限抛 400 / Validate text length, raise 400 if exceeded."""
@@ -972,12 +1013,22 @@ def _compile_for_response(state: dict[str, Any]) -> dict[str, Any]:
 
     This handles both the original compile_state and the patched stable_compile_state.
     兼容原始 compile_state 和 patched stable_compile_state。
+
+    Uses _COMPILE_STATE_SIG_CACHE (keyed by function id) to avoid repeated
+    inspect.signature() calls on this high-frequency path (every mutator operation).
+    Cache auto-invalidates when compile_state is monkey-patched (e.g. in tests).
+    使用模块级字典缓存（以函数 id 为键）避免高频路径重复调用 inspect.signature()；
+    compile_state 被替换（如测试 monkeypatch）时自动失效并重新检测。
     """
-    import inspect
-    sig = inspect.signature(compile_state)
-    if "refresh_identity" in sig.parameters:
-        return compile_state(state, refresh_identity=False)
-    return compile_state(state)
+    fn = compile_state
+    fn_id = id(fn)
+    has_refresh = _COMPILE_STATE_SIG_CACHE.get(fn_id)
+    if has_refresh is None:
+        has_refresh = "refresh_identity" in _inspect.signature(fn).parameters
+        _COMPILE_STATE_SIG_CACHE[fn_id] = has_refresh
+    if has_refresh:
+        return fn(state, refresh_identity=False)
+    return fn(state)
 
 
 def compile_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -4027,6 +4078,8 @@ app.add_middleware(
 # ── 速率限制 / Rate limiting ──────────────────────────────────────────────────
 # 默认限制：每 IP 120 次/分钟（可通过 OPENCLAW_RATE_LIMIT 覆盖）
 # Default: 120 requests/minute per IP (overridable via OPENCLAW_RATE_LIMIT)
+# 登录端点单独限制为 5 次/分钟 + IP 锁定，防止暴力破解（P1-8 修复）
+# Login endpoint separately capped at 5/minute + IP lockout to prevent brute-force (P1-8 fix)
 _rate_limit_default = os.getenv("OPENCLAW_RATE_LIMIT", "120/minute")
 limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit_default])
 app.state.limiter = limiter
@@ -4094,32 +4147,65 @@ class _LoginRequest(BaseModel):
 
 
 @app.post("/api/v1/auth/login", include_in_schema=False)
-async def auth_login(req: _LoginRequest):
+@limiter.limit("5/minute")
+async def auth_login(request: Request, req: _LoginRequest):
     """
     Authenticate with username/password, return bearer token.
     用户名密码认证，返回 bearer token。
+
+    Rate-limited to 5/minute per IP. IPs that fail ≥5 times within 15 minutes
+    are locked out with HTTP 429 until the window expires.
+    每IP限速5次/分钟。同一IP在15分钟内失败≥5次，返回429并锁定至窗口期结束。（P1-8 修复）
     """
-    # Read credentials from gui_auth.env
-    _gui_env_path = os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env")
-    _expected_user = ""
-    _expected_pass = ""
-    try:
-        with open(_gui_env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("GUI_USERNAME="):
-                    _expected_user = line.split("=", 1)[1]
-                elif line.startswith("GUI_PASSWORD="):
-                    _expected_pass = line.split("=", 1)[1]
-    except FileNotFoundError:
+    client_ip: str = request.client.host if request.client else "unknown"
+    now = time.time()
+
+    # --- IP-level lockout check — runs before any credential work ---
+    # --- IP 级别锁定检查（在验证凭证之前执行）---
+    if client_ip in _login_fail_counts:
+        fail_count, first_fail_ts = _login_fail_counts[client_ip]
+        elapsed = now - first_fail_ts
+        if elapsed > _LOGIN_LOCKOUT_WINDOW:
+            # Window expired — reset counter automatically
+            # 窗口期已过，自动重置计数器
+            del _login_fail_counts[client_ip]
+        elif fail_count >= _LOGIN_MAX_FAILURES:
+            retry_after = int(_LOGIN_LOCKOUT_WINDOW - elapsed)
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "reason_codes": ["login_locked"],
+                    "message": "Too many failed login attempts. Try again later.",
+                    "retry_after": retry_after,
+                },
+            )
+
+    # Load credentials from startup cache (P1-12: avoid per-request file I/O)
+    # 从启动缓存读取凭证（P1-12 修复：避免每次请求读文件）
+    _creds = _load_auth_credentials()
+    _expected_user = _creds.get("GUI_USERNAME", "")
+    _expected_pass = _creds.get("GUI_PASSWORD", "")
+
+    if not _expected_user:
         raise HTTPException(status_code=500, detail="Auth config not found")
 
-    if not _expected_user or _expected_user == "YOUR_USERNAME":
+    if _expected_user == "YOUR_USERNAME":
         raise HTTPException(status_code=500, detail="Auth not configured — edit gui_auth.env")
 
     if not (hmac.compare_digest(req.username, _expected_user) and
             hmac.compare_digest(req.password, _expected_pass)):
+        # Increment failure counter for this IP
+        # 遞增此 IP 的失败计数器
+        if client_ip in _login_fail_counts:
+            prev_count, first_ts = _login_fail_counts[client_ip]
+            _login_fail_counts[client_ip] = (prev_count + 1, first_ts)
+        else:
+            _login_fail_counts[client_ip] = (1, now)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Login succeeded — clear any failure record for this IP
+    # 登录成功，清除该 IP 的失败记录
+    _login_fail_counts.pop(client_ip, None)
 
     # Return the API bearer token (.secrets is at control_api_v1/ level, one up from app/)
     _token_path = os.path.join(
@@ -4335,14 +4421,17 @@ def _run_restart_in_background(delay_seconds: int) -> None:
     python = sys.executable
     # Reconstruct uvicorn launch command / 重建 uvicorn 启动命令
     work_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # P1-14: Use project logs/ dir instead of /tmp/ to prevent symlink attacks.
+    # P1-14 修复：使用项目内 logs/ 目录，防止符号链接攻击。
     script_content = f"""#!/bin/bash
 # OpenClaw scheduled restart script / 计划重启脚本
 sleep {delay_seconds}
 kill {pid} 2>/dev/null
 sleep 3
 cd {work_dir}
-nohup {python} -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >> /tmp/openclaw_restart.log 2>&1 &
-echo "Restarted PID=$!" >> /tmp/openclaw_restart.log
+mkdir -p {work_dir}/logs
+nohup {python} -m uvicorn app.main:app --host 0.0.0.0 --port 8000 >> {work_dir}/logs/restart.log 2>&1 &
+echo "Restarted PID=$!" >> {work_dir}/logs/restart.log
 """
     try:
         fd, script_path = tempfile.mkstemp(suffix=".sh", prefix="openclaw_restart_")

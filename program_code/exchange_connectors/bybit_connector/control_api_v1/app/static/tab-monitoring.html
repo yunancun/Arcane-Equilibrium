@@ -180,7 +180,9 @@ async function loadTelegram() {
 
 async function loadOpenClaw() {
   try {
-    const r = await fetch(window.location.origin + '/openclaw/health');
+    const r = await fetch(window.location.origin + '/openclaw/health', {
+      headers: { 'Authorization': 'Bearer ' + ocGetToken() }
+    });
     const h = await r.json();
     const el = $('oc-status');
     el.textContent = h.ok ? 'Online' : 'Down';

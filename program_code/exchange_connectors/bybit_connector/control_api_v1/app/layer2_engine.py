@@ -37,6 +37,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re as _re
 import threading
 import time
 from typing import Any
@@ -66,6 +67,16 @@ from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
 from .ollama_client import get_ollama_client
 
 logger = logging.getLogger(__name__)
+
+# ── Precompiled word-boundary regexes for L1 triage text parsing ──
+# 詞邊界正則：防止 "know" / "unknown" 等詞誤觸發否定匹配
+# Word-boundary regexes: prevent false negation matches from "know", "unknown", etc.
+_NEGATION_RE = _re.compile(
+    r"\b(not|no|don't|doesn't|won't|isn't|aren't|cannot|can't|never|avoid)\b"
+)
+_POSITIVE_RE = _re.compile(
+    r"\b(true|yes|worth|worthy|worthwhile|recommend|investigate|promising)\b"
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -290,10 +301,11 @@ class Layer2Engine:
             except json.JSONDecodeError:
                 # Try to extract yes/no from free text
                 text_lower = resp.text.lower()
-                # FIX: "not worth" 包含 "worth" → 需排除否定模式
-                # FIX: "not worth" contains "worth" → must exclude negation patterns
-                has_negation = "not " in text_lower or "no " in text_lower or "don't" in text_lower
-                has_positive = "true" in text_lower or "yes" in text_lower or "worth" in text_lower
+                # FIX P0-7: 使用詞邊界正則，防止 "know"/"unknown" 等詞誤觸發否定
+                # FIX P0-7: use word-boundary regex to avoid false matches from
+                #            "know" (contains "no "), "unknown" (contains "no"), etc.
+                has_negation = bool(_NEGATION_RE.search(text_lower))
+                has_positive = bool(_POSITIVE_RE.search(text_lower))
                 worth = has_positive and not has_negation
                 result = {
                     "worth_investigating": worth,

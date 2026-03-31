@@ -57,7 +57,7 @@ class OllamaConfig:
     model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", DEFAULT_MODEL))
     timeout_seconds: int = field(default_factory=lambda: int(os.getenv("OLLAMA_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS))))
     temperature: float = DEFAULT_TEMPERATURE
-    max_retries: int = 1
+    max_retries: int = 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

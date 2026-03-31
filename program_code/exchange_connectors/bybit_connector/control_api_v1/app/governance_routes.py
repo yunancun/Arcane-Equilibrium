@@ -113,20 +113,44 @@ def _get_auth_actor() -> Any:
         raise HTTPException(status_code=503, detail="Authentication system unavailable")
 
 
+def _get_authenticated_actor_class() -> type:
+    """
+    Lazily import AuthenticatedActor to avoid circular imports.
+    延迟导入 AuthenticatedActor 以避免循环依赖。
+
+    Returns:
+        AuthenticatedActor class, or type(None) as fail-closed sentinel.
+    """
+    try:
+        from .main_legacy import AuthenticatedActor
+        return AuthenticatedActor
+    except (ImportError, AttributeError):
+        return type(None)  # fail-closed: no actor will match type(None)
+
+
+def _sanitize_log(value: Any, max_len: int = 200) -> str:
+    """
+    Sanitize a value for safe log output (strip newlines, truncate).
+    清理日志输出值（去除换行符，截断长度）。
+    """
+    return str(value).replace("\n", "\\n").replace("\r", "\\r")[:max_len]
+
+
 def _require_operator_role(actor: Any) -> None:
-    """SECURITY FIX #1: Validate that actor has Operator role / 验证 actor 具有 Operator 角色"""
-    if not actor or not isinstance(actor, dict):
+    """
+    Validate that actor has Operator role / 验证 actor 具有 Operator 角色
+
+    P0-1 fix: uses isinstance(actor, AuthenticatedActor) instead of isinstance(actor, dict).
+    P0-1 修复：使用 isinstance(actor, AuthenticatedActor) 替代 isinstance(actor, dict)。
+    """
+    AuthenticatedActor = _get_authenticated_actor_class()
+    if not actor or not isinstance(actor, AuthenticatedActor):
         raise HTTPException(status_code=401, detail="Authentication required")
-
-    # Check if actor has operator_role or is_operator flag
-    is_operator = (
-        actor.get("operator_role") == "Operator" or
-        actor.get("is_operator") is True or
-        actor.get("role") == "operator"
-    )
-
-    if not is_operator:
-        logger.warning(f"Non-operator attempted privileged operation: {actor.get('user', 'unknown')}")
+    if "operator" not in actor.roles:
+        logger.warning(
+            "Non-operator attempted governance action: %s",
+            _sanitize_log(actor.actor_id),
+        )
         raise HTTPException(status_code=403, detail="Operator role required")
 
 
@@ -456,7 +480,7 @@ def request_authorization(
         # Step 1: Create DRAFT authorization / 步骤 1：创建 DRAFT 授权
         import time as _time
         expires_at_ms = int((_time.time() + body.ttl_hours * 3600) * 1000)
-        requester = actor.get("user", "operator")
+        requester = actor.actor_id
         auth_obj = hub._authorization_sm.create_draft(
             title=f"Operator Authorization Request / 操作员授权请求 ({requester})",
             scope=body.scope,
@@ -472,8 +496,8 @@ def request_authorization(
         logger.info(
             "Authorization request submitted by %s (id=%s, reason=%s) / "
             "授权请求已提交（id=%s，操作者=%s，原因=%s）",
-            actor.get("user", "unknown"), auth_id, sanitized_reason,
-            auth_id, actor.get("user", "unknown"), sanitized_reason,
+            _sanitize_log(actor.actor_id), auth_id, sanitized_reason,
+            auth_id, _sanitize_log(actor.actor_id), sanitized_reason,
         )
 
         return GovernanceResponse.success(
@@ -483,7 +507,7 @@ def request_authorization(
                 "ttl_hours": body.ttl_hours,
                 "scope": body.scope,
                 "reason": sanitized_reason,
-                "requested_by": actor.get("user", "operator"),
+                "requested_by": actor.actor_id,
                 "message": "Authorization request submitted. Awaiting Operator approval.",
             },
             message="authorization_requested",
@@ -542,8 +566,8 @@ def approve_authorization(
                     None
                 )
                 if pending_auth:
-                    hub._authorization_sm.approve(pending_auth.authorization_id, approved_by=actor.get("user", "unknown"))
-                    logger.info(f"Authorization approved by {actor.get('user', 'unknown')}: {sanitized_note}")
+                    hub._authorization_sm.approve(pending_auth.authorization_id, approved_by=actor.actor_id)
+                    logger.info("Authorization approved by %s: %s", _sanitize_log(actor.actor_id), sanitized_note)
                 else:
                     return GovernanceResponse.error("No pending authorization found", code="not_found", status_code=404)
             except Exception as e:
@@ -703,7 +727,10 @@ def override_risk_level(
                     reason=sanitized_reason,
                     initiator=RiskInitiator.OPERATOR,
                 )
-                logger.warning(f"Risk override applied by {actor.get('user', 'unknown')}: {current_level} → {target_level}, reason: {sanitized_reason}")
+                logger.warning(
+                    "Risk override applied by %s: %s → %s, reason: %s",
+                    _sanitize_log(actor.actor_id), current_level, target_level, sanitized_reason,
+                )
             except Exception as e:
                 logger.error(f"Error applying risk de-escalation: {e}")
                 # SECURITY FIX #6: Return generic error to client
@@ -949,7 +976,7 @@ def approve_recovery_request(
         # Approve the recovery
         approval = hub._recovery_gate.approve_recovery(
             request_id=request_id,
-            approved_by=actor.get("user", "unknown"),
+            approved_by=actor.actor_id,
         )
 
         if approval is None:
@@ -959,7 +986,7 @@ def approve_recovery_request(
                 status_code=500
             )
 
-        logger.info(f"Recovery request approved by {actor.get('user', 'unknown')}: {request_id}")
+        logger.info("Recovery request approved by %s: %s", _sanitize_log(actor.actor_id), request_id)
 
         return GovernanceResponse.success(
             data={
@@ -1062,7 +1089,7 @@ def approve_audit_change(
         if hub._change_audit_log is None:
             return GovernanceResponse.error("Change audit log not available", code="log_unavailable", status_code=503)
 
-        approver = actor.get("user", "operator") if isinstance(actor, dict) else "operator"
+        approver = actor.actor_id
         result = hub._change_audit_log.approve_change(
             change_id=change_id,
             approved_by=approver,
@@ -1073,6 +1100,8 @@ def approve_audit_change(
 
         logger.info(f"Audit change {change_id} approved by {approver}")
         return GovernanceResponse.success(data=result.to_dict(), message="audit_change_approved")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error approving audit change {change_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1097,7 +1126,7 @@ def reject_audit_change(
         if hub._change_audit_log is None:
             return GovernanceResponse.error("Change audit log not available", code="log_unavailable", status_code=503)
 
-        rejector = actor.get("user", "operator") if isinstance(actor, dict) else "operator"
+        rejector = actor.actor_id
         rejection_reason = body.reason.strip() if body.reason.strip() else "Operator rejected via GUI"
         result = hub._change_audit_log.reject_change(
             change_id=change_id,
@@ -1109,6 +1138,8 @@ def reject_audit_change(
 
         logger.info(f"Audit change {change_id} rejected by {rejector}")
         return GovernanceResponse.success(data=result.to_dict(), message="audit_change_rejected")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error rejecting audit change {change_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1204,7 +1235,7 @@ def add_symbol_to_whitelist(
                     from .change_audit_log import ChangeType
                     hub._change_audit_log.record_change(
                         change_type=ChangeType.CONFIG_CHANGE,
-                        who=actor.get("user", "unknown"),
+                        who=actor.actor_id,
                         what=f"Symbol added to {sanitized_category} whitelist: {sanitized_symbol}",
                         reason="Operator whitelist management",
                         old_value=old_whitelist,
@@ -1214,7 +1245,10 @@ def add_symbol_to_whitelist(
                 except Exception as e:
                     logger.warning(f"Failed to record whitelist change: {e}")
 
-            logger.info(f"Symbol {sanitized_symbol} added to {sanitized_category} whitelist by {actor.get('user', 'unknown')}")
+            logger.info(
+                "Symbol %s added to %s whitelist by %s",
+                sanitized_symbol, sanitized_category, _sanitize_log(actor.actor_id),
+            )
 
             return GovernanceResponse.success(
                 data={
@@ -1303,7 +1337,7 @@ def remove_symbol_from_whitelist(
                             from .change_audit_log import ChangeType
                             hub._change_audit_log.record_change(
                                 change_type=ChangeType.CONFIG_CHANGE,
-                                who=actor.get("user", "unknown"),
+                                who=actor.actor_id,
                                 what=f"Symbol removed from {cat} whitelist: {sanitized_symbol}",
                                 reason="Operator whitelist management",
                                 old_value=old_whitelist,
@@ -1316,7 +1350,10 @@ def remove_symbol_from_whitelist(
                 logger.warning(f"Error updating whitelist for {cat}: {e}")
 
         if changes_made:
-            logger.info(f"Symbol {sanitized_symbol} removed from {','.join(changes_made)} by {actor.get('user', 'unknown')}")
+            logger.info(
+                "Symbol %s removed from %s by %s",
+                sanitized_symbol, ','.join(changes_made), _sanitize_log(actor.actor_id),
+            )
             return GovernanceResponse.success(
                 data={
                     "symbol": sanitized_symbol,
@@ -1677,7 +1714,7 @@ def evaluate_paper_live_gate(
                 from .change_audit_log import ChangeType
                 hub._change_audit_log.record_change(
                     change_type=ChangeType.STATE_CHANGE,
-                    who=actor.get("actor_id", "unknown") if isinstance(actor, dict) else "unknown",
+                    who=actor.actor_id if hasattr(actor, "actor_id") else "unknown",
                     what=f"PaperLiveGate evaluation: {gate_status_str}",
                     reason="API evaluation request",
                     old_value=None,
