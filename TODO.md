@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-2539 passed / 17 failed（全部 pre-existing） / 23 warnings（P1-16 Day 3 完成後確認）
+2555 passed / 17 failed（全部 pre-existing） / 23 warnings（FA-2 reconciliation 邊界值 +16 測試後確認）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/
 命令：python3 -m pytest tests/ -q --tb=no
 ```
@@ -244,6 +244,15 @@ P1-16（獨立 branch，E1 × 2）
 
 ### [ ] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
 
+### [ ] P2-NEW-9：`scout_routes.py` 2 個 async 路由阻塞 event loop（Live 前必須修復）
+- **來源**：FA-3 threading.Lock 系統性評估（2026-03-31）
+- **檔案**：`app/scout_routes.py`
+- **問題**：`async def post_market_signal()` + `async def post_event_alert()` 直接調用 `ScoutAgent` 同步方法，ScoutAgent 持有 `threading.Lock`，阻塞 event loop
+- **修復方案（PA 建議 A）**：改為 `def`（sync routes，FastAPI thread pool 執行）
+- **修復方案 B**：改用 `asyncio.to_thread(SCOUT_AGENT.produce_intel, ...)` 包裝
+- **工時**：1h + E4
+- **⚠️ Live 前必須修復**（高並發市場信號推送會累積 event loop 延遲）
+
 ### [x] P2-NEW-7：`POST /auth/request` 缺少 Operator 角色驗證
 - **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
 - **檔案**：`app/governance_routes.py`（`request_authorization` 函數）
@@ -275,19 +284,26 @@ P1-16（獨立 branch，E1 × 2）
 - 特別關注：所有觸發 SM 狀態轉換的 POST 端點
 - 驗收：端點-角色矩陣文件 + E3 二輪確認無漏項
 
-### 2. 對帳引擎輸入驗證（Wave 3 後，FA + E3 聯合）
+### [x] 2. 對帳引擎輸入驗證（FA-2，Wave 3 後，FA + E1 聯合）
 - `reconciliation_engine.py` 的 `_reconcile_positions`/`_reconcile_balances` 對邊界值的處理
 - 重點：惡意構造的 `paper_state`（如 `qty=-999999`）是否能觸發 FATAL severity 升級風控
 - 路徑：`hub.reconcile()` → `_on_reconciliation_mismatch()` → 風控 SM 狀態切換
+- ✅ 完成：修復 3 個漏洞（BUG-1 NaN qty WARNING→FATAL / BUG-2 NaN balance 靜默接受→CRITICAL / BUG-3 負數 qty local-only 不報告→FATAL）
+  + 新增 TestBoundaryInputValidation（11 測試全過），55/55 passed（2026-03-31）
 
-### 3. threading.Lock 系統性風險評估（Wave 3+ ，E5 + E4）
+### [x] 3. threading.Lock 系統性風險評估（FA-3，Wave 3+ ，E5 + FA）
 - 受影響模塊：`decision_lease_state_machine.py` / `authorization_state_machine.py` / `reconciliation_engine.py` / `governance_hub.py` / `multi_agent_framework.py`
-- 任務：映射哪些 async 路由調用了帶 threading.Lock 的同步函數
-- 設計混合壓力測試（高並發 + 同時觸發 SM 狀態轉換）確認無 event loop 阻塞
+- ✅ 完成：評估報告（2026-03-31）— 整體風險 MEDIUM，4/5 模塊安全
+- **發現：`scout_routes.py` 2 個 async 路由直接調用 `threading.Lock` 同步方法（ScoutAgent）**
+  - `async def post_market_signal()` → `SCOUT_AGENT.produce_intel()`（Lock @ multi_agent_framework:378）
+  - `async def post_event_alert()` → `SCOUT_AGENT.produce_event_alert()`（Lock @ multi_agent_framework:378）
+  - 修復方案：改為 `def`（sync routes）或用 `asyncio.to_thread()` 包裝
+  - 追加為 P2-NEW-9（Live trading 前必須修復）
 
-### 4. ChangeAuditLog `who` 欄位完整性（Wave 3 後，E4）
+### [x] 4. ChangeAuditLog `who` 欄位完整性（Wave 3 後，E4）
 - 確保所有審計路徑的 `who` 字段不為 "unknown"
 - 驗收：E4 測試覆蓋所有寫入 ChangeAuditLog 的路徑，斷言 who != "unknown"
+- ✅ 完成：新增 TestChangeAuditLogWhoField（6 測試，5 passed + 1 skipped），test_governance_hub.py 59 passed（2026-03-31）
 
 ---
 

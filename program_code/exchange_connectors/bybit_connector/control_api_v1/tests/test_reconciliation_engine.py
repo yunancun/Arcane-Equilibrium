@@ -630,3 +630,183 @@ class TestEdgeCases:
             DiscrepancyType.POSITION_SIZE, DiscrepancyType.POSITION_SIDE, DiscrepancyType.POSITION_MISSING
         )]
         assert len(pos_discs) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. Boundary / Malicious Input Tests — FA-2 審計補充
+#     邊界值輸入驗證測試（惡意 paper_state 是否正確升級風控）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBoundaryInputValidation:
+    """
+    FA-2 audit: verify that malicious / corrupted paper_state inputs
+    escalate to FATAL severity and trigger FREEZE_TRADING rather than
+    being silently accepted or downgraded to WARNING.
+
+    FA-2 審計：驗證惡意/損壞的 paper_state 輸入能正確升級為 FATAL 嚴重等級
+    並觸發 FREEZE_TRADING，不會被靜默接受或降級為 WARNING。
+    """
+
+    # ── BUG-1 fix: NaN qty in position (both-sides-present path) ──────────
+
+    def test_position_nan_qty_local_is_fatal(self, engine):
+        """
+        BUG-1: qty=NaN local, remote=1.0 → must be FATAL + FREEZE_TRADING.
+        修復前：NaN > 0 = False → WARNING（不觸發 FREEZE），現在應為 FATAL。
+        """
+        paper = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": float("nan"), "avg_entry_price": 50000}})
+        remote = _make_state(positions={"BTCUSDT": _make_position(side="Buy", size=1.0)})
+
+        report = engine.reconcile(paper, remote)
+        pos_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_SIZE]
+        assert len(pos_discs) == 1
+        assert pos_discs[0].severity == Severity.FATAL, (
+            "NaN local qty must escalate to FATAL, not WARNING"
+        )
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    def test_position_nan_qty_remote_is_fatal(self, engine):
+        """
+        BUG-1: local=1.0, remote qty=NaN → must be FATAL + FREEZE_TRADING.
+        """
+        paper = _make_state(positions={"BTCUSDT": _make_position(side="Buy", size=1.0)})
+        remote = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": float("nan")}})
+
+        report = engine.reconcile(paper, remote)
+        pos_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_SIZE]
+        assert len(pos_discs) == 1
+        assert pos_discs[0].severity == Severity.FATAL
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    def test_position_inf_qty_is_fatal(self, engine):
+        """
+        qty=inf local → must be FATAL + FREEZE_TRADING (not just CRITICAL).
+        """
+        paper = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": float("inf")}})
+        remote = _make_state(positions={"BTCUSDT": _make_position(side="Buy", size=1.0)})
+
+        report = engine.reconcile(paper, remote)
+        pos_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_SIZE]
+        assert len(pos_discs) == 1
+        assert pos_discs[0].severity == Severity.FATAL
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    # ── BUG-1 (continued): extreme negative qty in both-sides-present path ─
+
+    def test_position_negative_qty_both_sides_is_fatal(self, engine):
+        """
+        BUG-1 extension: qty=-999999 with remote present → FATAL + FREEZE.
+        Both paper and remote exist, so it goes through the size-comparison path.
+        """
+        paper = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": -999999}})
+        remote = _make_state(positions={"BTCUSDT": _make_position(side="Buy", size=1.0)})
+
+        report = engine.reconcile(paper, remote)
+        pos_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_SIZE]
+        assert len(pos_discs) == 1
+        assert pos_discs[0].severity == Severity.FATAL
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    # ── BUG-3 fix: negative qty when position only exists locally ──────────
+
+    def test_position_negative_qty_local_only_is_fatal(self, engine):
+        """
+        BUG-3: qty=-999999 local, remote has no position for that symbol.
+        修復前：p_size > 0 = False → 不報告任何差異，現在應為 FATAL + FREEZE。
+        """
+        paper = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": -999999}})
+        remote = _make_state(positions={})
+
+        report = engine.reconcile(paper, remote)
+        missing_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_MISSING]
+        assert len(missing_discs) == 1, (
+            "Negative local qty must still report POSITION_MISSING (data corruption)"
+        )
+        assert missing_discs[0].severity == Severity.FATAL
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    def test_position_nan_qty_local_only_is_fatal(self, engine):
+        """
+        NaN local qty with no remote counterpart → FATAL + FREEZE.
+        """
+        paper = _make_state(positions={"BTCUSDT": {"side": "Buy", "size": float("nan")}})
+        remote = _make_state(positions={})
+
+        report = engine.reconcile(paper, remote)
+        missing_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_MISSING]
+        assert len(missing_discs) == 1
+        assert missing_discs[0].severity == Severity.FATAL
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    # ── BUG-2 fix: NaN balance silently accepted ───────────────────────────
+
+    def test_balance_nan_is_critical(self, engine):
+        """
+        BUG-2: balance=NaN → abs(NaN - real) = NaN → NaN > threshold = False
+        → was silently accepted. Now must raise CRITICAL + ALERT.
+        修復前：NaN 差值比較永遠為 False，餘額異常被靜默接受。
+        """
+        paper = _make_state(balances={"USDT": float("nan")})
+        remote = _make_state(balances={"USDT": 10000.0})
+
+        report = engine.reconcile(paper, remote)
+        bal_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.BALANCE_DRIFT]
+        assert len(bal_discs) == 1, (
+            "NaN balance must be detected, not silently pass tolerance check"
+        )
+        assert bal_discs[0].severity == Severity.CRITICAL
+        # auto_freeze_on_critical is True by default → FREEZE expected
+        assert IncidentAction.FREEZE_TRADING.value in report.actions_triggered
+
+    def test_balance_inf_is_critical(self, engine):
+        """
+        balance=inf remote → must raise CRITICAL.
+        """
+        paper = _make_state(balances={"USDT": 10000.0})
+        remote = _make_state(balances={"USDT": float("inf")})
+
+        report = engine.reconcile(paper, remote)
+        bal_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.BALANCE_DRIFT]
+        assert len(bal_discs) == 1
+        assert bal_discs[0].severity == Severity.CRITICAL
+
+    def test_balance_negative_inf_is_critical(self, engine):
+        """
+        balance=-inf → must raise CRITICAL (isinf covers both signs).
+        """
+        paper = _make_state(balances={"USDT": float("-inf")})
+        remote = _make_state(balances={"USDT": 10000.0})
+
+        report = engine.reconcile(paper, remote)
+        bal_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.BALANCE_DRIFT]
+        assert len(bal_discs) == 1
+        assert bal_discs[0].severity == Severity.CRITICAL
+
+    # ── Regression: existing valid behaviour unchanged ─────────────────────
+
+    def test_valid_negative_remote_remote_only_ignored(self, engine):
+        """
+        Remote position with size=0 still ignored (no change to zero-filter).
+        零倉位邊界不應受修復影響。
+        """
+        paper = _make_state(positions={})
+        remote = _make_state(positions={"BTCUSDT": _make_position(size=0)})
+
+        report = engine.reconcile(paper, remote)
+        missing = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_MISSING]
+        assert len(missing) == 0
+
+    def test_normal_position_large_qty_still_critical_not_fatal(self, engine):
+        """
+        Legitimate large qty mismatch (positive, finite) → CRITICAL, not FATAL.
+        合法的大額倉位差異不應被誤升級為 FATAL。
+        """
+        paper = _make_state(positions={"BTCUSDT": _make_position(size=999999.0)})
+        remote = _make_state(positions={"BTCUSDT": _make_position(size=1.0)})
+
+        report = engine.reconcile(paper, remote)
+        pos_discs = [d for d in report.discrepancies if d.disc_type == DiscrepancyType.POSITION_SIZE]
+        assert len(pos_discs) == 1
+        assert pos_discs[0].severity == Severity.CRITICAL, (
+            "Large but valid positive qty mismatch should remain CRITICAL, not FATAL"
+        )

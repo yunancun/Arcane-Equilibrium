@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import os
 import threading
 import time
@@ -484,7 +485,23 @@ class ReconciliationEngine:
 
             if p_pos and not r_pos:
                 p_size = float(p_pos.get("size", p_pos.get("qty", 0)))
-                if p_size > 0:
+                # BUG-3 fix: reject negative or NaN qty — treat as FATAL data corruption
+                # 修復：負數或 NaN qty 視為數據損壞，直接升級為 FATAL
+                if math.isnan(p_size) or math.isinf(p_size) or p_size < 0:
+                    discs.append(Discrepancy(
+                        disc_type=DiscrepancyType.POSITION_MISSING,
+                        severity=Severity.FATAL,
+                        symbol=sym,
+                        description=(
+                            f"Position {sym} local size is invalid ({p_size}); "
+                            "NaN/Inf/negative qty is a data integrity violation"
+                        ),
+                        local_value=p_size,
+                        remote_value=0,
+                        magnitude=0.0,
+                        recommended_action=IncidentAction.FREEZE_TRADING,
+                    ))
+                elif p_size > 0:
                     discs.append(Discrepancy(
                         disc_type=DiscrepancyType.POSITION_MISSING,
                         severity=Severity.CRITICAL,
@@ -515,32 +532,52 @@ class ReconciliationEngine:
                 p_side = p_pos.get("side", "")
                 r_side = r_pos.get("side", "")
 
-                # Side check
-                if p_side.lower() != r_side.lower() and (p_size > 0 or r_size > 0):
-                    discs.append(Discrepancy(
-                        disc_type=DiscrepancyType.POSITION_SIDE,
-                        severity=Severity.FATAL,
-                        symbol=sym,
-                        description=f"Position {sym} side mismatch: local={p_side}, remote={r_side}",
-                        local_value=p_side,
-                        remote_value=r_side,
-                        recommended_action=IncidentAction.FREEZE_TRADING,
-                    ))
+                # BUG-1 fix: reject NaN/Inf/negative qty before any comparison
+                # 修復：在任何比較前先拒絕非法數值，升級為 FATAL
+                for label, val in (("local", p_size), ("remote", r_size)):
+                    if math.isnan(val) or math.isinf(val) or val < 0:
+                        discs.append(Discrepancy(
+                            disc_type=DiscrepancyType.POSITION_SIZE,
+                            severity=Severity.FATAL,
+                            symbol=sym,
+                            description=(
+                                f"Position {sym} {label} size is invalid ({val}); "
+                                "NaN/Inf/negative qty is a data integrity violation"
+                            ),
+                            local_value=p_size,
+                            remote_value=r_size,
+                            magnitude=0.0,
+                            recommended_action=IncidentAction.FREEZE_TRADING,
+                        ))
+                        # Skip further comparison for this symbol once invalid value found
+                        break
+                else:
+                    # Side check (only reached when both values are valid)
+                    if p_side.lower() != r_side.lower() and (p_size > 0 or r_size > 0):
+                        discs.append(Discrepancy(
+                            disc_type=DiscrepancyType.POSITION_SIDE,
+                            severity=Severity.FATAL,
+                            symbol=sym,
+                            description=f"Position {sym} side mismatch: local={p_side}, remote={r_side}",
+                            local_value=p_side,
+                            remote_value=r_side,
+                            recommended_action=IncidentAction.FREEZE_TRADING,
+                        ))
 
-                # Size check
-                if not self._within_tolerance(p_size, r_size, self._config.qty_tolerance_pct):
-                    magnitude = abs(p_size - r_size)
-                    severity = Severity.CRITICAL if magnitude > 0 else Severity.WARNING
-                    discs.append(Discrepancy(
-                        disc_type=DiscrepancyType.POSITION_SIZE,
-                        severity=severity,
-                        symbol=sym,
-                        description=f"Position {sym} size mismatch: local={p_size}, remote={r_size}",
-                        local_value=p_size,
-                        remote_value=r_size,
-                        magnitude=magnitude,
-                        recommended_action=IncidentAction.MANUAL_REVIEW,
-                    ))
+                    # Size check
+                    if not self._within_tolerance(p_size, r_size, self._config.qty_tolerance_pct):
+                        magnitude = abs(p_size - r_size)
+                        severity = Severity.CRITICAL if magnitude > 0 else Severity.WARNING
+                        discs.append(Discrepancy(
+                            disc_type=DiscrepancyType.POSITION_SIZE,
+                            severity=severity,
+                            symbol=sym,
+                            description=f"Position {sym} size mismatch: local={p_size}, remote={r_size}",
+                            local_value=p_size,
+                            remote_value=r_size,
+                            magnitude=magnitude,
+                            recommended_action=IncidentAction.MANUAL_REVIEW,
+                        ))
 
         return discs
 
@@ -656,19 +693,38 @@ class ReconciliationEngine:
             p_bal = float(paper_balances.get(coin, 0))
             r_bal = float(remote_balances.get(coin, 0))
 
-            diff = abs(p_bal - r_bal)
-            if diff > self._config.balance_tolerance_abs:
-                severity = Severity.CRITICAL if diff > self._config.balance_tolerance_abs * 10 else Severity.WARNING
-                discs.append(Discrepancy(
-                    disc_type=DiscrepancyType.BALANCE_DRIFT,
-                    severity=severity,
-                    symbol=coin,
-                    description=f"Balance drift for {coin}: local={p_bal:.4f}, remote={r_bal:.4f}",
-                    local_value=p_bal,
-                    remote_value=r_bal,
-                    magnitude=diff,
-                    recommended_action=IncidentAction.ALERT if severity == Severity.WARNING else IncidentAction.MANUAL_REVIEW,
-                ))
+            # BUG-2 fix: NaN/Inf balance silently passes diff>tolerance (NaN comparisons always False)
+            # 修復：NaN/Inf 餘額因 NaN 比較永遠為 False 而靜默通過，必須先拒絕
+            for label, val in (("local", p_bal), ("remote", r_bal)):
+                if math.isnan(val) or math.isinf(val):
+                    discs.append(Discrepancy(
+                        disc_type=DiscrepancyType.BALANCE_DRIFT,
+                        severity=Severity.CRITICAL,
+                        symbol=coin,
+                        description=(
+                            f"Balance for {coin} {label} value is invalid ({val}); "
+                            "NaN/Inf balance is a data integrity violation"
+                        ),
+                        local_value=p_bal,
+                        remote_value=r_bal,
+                        magnitude=0.0,
+                        recommended_action=IncidentAction.MANUAL_REVIEW,
+                    ))
+                    break
+            else:
+                diff = abs(p_bal - r_bal)
+                if diff > self._config.balance_tolerance_abs:
+                    severity = Severity.CRITICAL if diff > self._config.balance_tolerance_abs * 10 else Severity.WARNING
+                    discs.append(Discrepancy(
+                        disc_type=DiscrepancyType.BALANCE_DRIFT,
+                        severity=severity,
+                        symbol=coin,
+                        description=f"Balance drift for {coin}: local={p_bal:.4f}, remote={r_bal:.4f}",
+                        local_value=p_bal,
+                        remote_value=r_bal,
+                        magnitude=diff,
+                        recommended_action=IncidentAction.ALERT if severity == Severity.WARNING else IncidentAction.MANUAL_REVIEW,
+                    ))
 
         return discs
 
