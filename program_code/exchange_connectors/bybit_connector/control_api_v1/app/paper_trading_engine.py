@@ -864,6 +864,108 @@ class PaperTradingEngine:
         """Inject BybitDemoConnector for demo API integration / 注入 Demo 连接器"""
         self._demo_connector = connector
 
+    def _sync_close_to_demo(self, symbol: str, close_side: str, close_qty: float, reason: str) -> None:
+        """
+        Sync a Paper-internal close (risk_auto_close / tp_sl) to Bybit Demo.
+        將 Paper 引擎內部平倉同步到 Bybit Demo。
+
+        Paper Engine has internal close paths that bypass PipelineBridge:
+        - RiskManager.check_positions_on_tick() → risk_auto_close
+        - TP/SL trigger on filled orders → tp_sl_triggered
+        This helper ensures Demo mirrors Paper's position changes.
+        此方法確保 Demo 與 Paper 的持倉變化保持同步。
+
+        Non-fatal: Demo failure does not block Paper close (fail-open for local safety).
+        非致命：Demo 失敗不阻塞 Paper 平倉（本地安全優先）。
+        """
+        if not self._demo_connector or not self._demo_connector.is_enabled:
+            return
+        try:
+            from .bybit_demo_connector import round_qty_for_exchange
+            demo_qty = round_qty_for_exchange(close_qty)
+            if demo_qty <= 0:
+                return
+            result = self._demo_connector.submit_order(
+                symbol=symbol, side=close_side, order_type="Market",
+                qty=demo_qty, reduce_only=True,
+            )
+            if result.get("retCode") == 0:
+                logger.info(
+                    "Demo close synced (%s): %s %s qty=%.6f / Demo 平倉已同步",
+                    reason, symbol, close_side, demo_qty,
+                )
+            else:
+                logger.warning(
+                    "Demo close FAILED (%s): %s reason=%s — Paper/Demo DIVERGED / "
+                    "Demo 平倉失敗，數據已分歧",
+                    reason, symbol, result.get("retMsg"),
+                )
+        except Exception as e:
+            logger.warning(
+                "Demo close error (%s): %s %s (non-fatal) / Demo 平倉異常",
+                reason, symbol, e,
+            )
+
+    def _close_all_demo_positions(self, paper_positions: dict[str, Any]) -> None:
+        """
+        Close all Demo positions when engine stops.
+        引擎停止時平掉 Demo 所有倉位。
+
+        Two-pass approach: first close positions known to Paper, then query Demo
+        API for any remaining diverged positions and close those too.
+        雙遍歷：先根據 Paper 持倉平，再查 Demo API 平殘留倉位。
+        """
+        closed_symbols: set[str] = set()
+
+        # Pass 1: Close positions known to Paper
+        for symbol, pos in paper_positions.items():
+            pos_side = pos.get("side", "Buy")
+            close_side = "Sell" if pos_side == "Buy" else "Buy"
+            qty = pos.get("qty", 0)
+            if qty <= 0:
+                continue
+            try:
+                from .bybit_demo_connector import round_qty_for_exchange
+                demo_qty = round_qty_for_exchange(qty)
+                if demo_qty <= 0:
+                    continue
+                result = self._demo_connector.submit_order(
+                    symbol=symbol, side=close_side, order_type="Market",
+                    qty=demo_qty, reduce_only=True,
+                )
+                if result.get("retCode") == 0:
+                    closed_symbols.add(symbol)
+                    logger.info("Session stop — Demo closed: %s %s qty=%s", symbol, close_side, demo_qty)
+                else:
+                    logger.warning("Session stop — Demo close failed: %s reason=%s", symbol, result.get("retMsg"))
+            except Exception as e:
+                logger.warning("Session stop — Demo close error: %s %s (non-fatal)", symbol, e)
+
+        # Pass 2: Query Demo API for any remaining diverged positions
+        try:
+            demo_positions = self._demo_connector.get_positions()
+            pos_list = demo_positions.get("result", {}).get("list", [])
+            for dp in pos_list:
+                sym = dp.get("symbol", "")
+                size = float(dp.get("size", 0))
+                if sym in closed_symbols or size <= 0:
+                    continue
+                demo_side = dp.get("side", "")
+                close_side = "Buy" if demo_side == "Sell" else "Sell"
+                try:
+                    result = self._demo_connector.submit_order(
+                        symbol=sym, side=close_side, order_type="Market",
+                        qty=size, reduce_only=True,
+                    )
+                    if result.get("retCode") == 0:
+                        logger.info("Session stop — Demo DIVERGED position closed: %s %s qty=%s", sym, close_side, size)
+                    else:
+                        logger.warning("Session stop — Demo diverged close failed: %s reason=%s", sym, result.get("retMsg"))
+                except Exception as e:
+                    logger.warning("Session stop — Demo diverged close error: %s %s", sym, e)
+        except Exception as e:
+            logger.warning("Session stop — Could not query Demo positions: %s (non-fatal)", e)
+
     def set_demo_sync(self, sync: Any) -> None:
         """Inject BybitDemoSync for demo state snapshots / 注入 Demo 同步器"""
         self._demo_sync = sync
@@ -959,6 +1061,11 @@ class PaperTradingEngine:
             for order in state["orders"]:
                 if order["state"] in ACTIVE_STATES:
                     _transition_order(order, ORDER_STATE_CANCELED)
+
+            # ── Close all Demo positions before finalizing ──
+            # 停止引擎時平掉 Demo 所有倉位，防止幽靈倉殘留
+            if self._demo_connector and self._demo_connector.is_enabled:
+                self._close_all_demo_positions(state.get("positions", {}))
 
             # Finalize PnL
             self._recompute_pnl(state)
@@ -1568,6 +1675,9 @@ class PaperTradingEngine:
                     if self.risk_manager:
                         self.risk_manager.record_fill_result(close_pnl)
                         self.risk_manager.clear_trailing_stop(symbol)
+                    # Sync to Demo — tp_sl bypasses PipelineBridge
+                    # TP/SL 觸發繞過 PipelineBridge，需手動同步 Demo
+                    self._sync_close_to_demo(symbol, close_side, close_qty, f"tp_sl:{triggered_reason}")
 
             # Auto-cancel stale working orders (TTL: 24 hours)
             # 自动取消过期的挂单（TTL: 24 小时）
@@ -1623,6 +1733,9 @@ class PaperTradingEngine:
                     self._audit(state, "risk_auto_close", f"{sym} reason={co['reason']}")
                     self.risk_manager.record_fill_result(close_pnl)
                     self.risk_manager.clear_trailing_stop(sym)
+                    # Sync to Demo — risk_auto_close bypasses PipelineBridge
+                    # 風控自動平倉繞過 PipelineBridge，需手動同步 Demo
+                    self._sync_close_to_demo(sym, close_side, close_qty, f"risk_auto_close:{co['reason']}")
 
                 # T3.03: Check protective orders on tick (last line of defense)
                 if self._protective_order_manager:
