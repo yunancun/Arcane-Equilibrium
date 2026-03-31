@@ -1581,16 +1581,28 @@ class GovernanceHub:
                         logger.debug(f"Error sending fatal reconciliation alert: {e}")
 
             # Batch 12: Record reconciliation mismatch to ChangeAuditLog
+            # Dedup: only create a new entry if no identical PENDING entry exists.
+            # After operator approves/rejects, the entry leaves PENDING state,
+            # so a new occurrence of the same issue will create a fresh entry.
+            # 去重：仅当不存在相同的 PENDING 条目时才创建新记录。
+            # 操作员批准/拒绝后条目离开 PENDING 状态，相同问题再次出现时会创建新条目。
             if self._change_audit_log:
                 try:
-                    self._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who="GovernanceHub",
-                        what=f"Reconciliation mismatch detected: {severity}",
-                        reason=str(details.get('reason', 'reconciliation_mismatch')),
-                        old_value="consistent",
-                        new_value="mismatch",
-                    )
+                    recon_what = f"Reconciliation mismatch detected: {severity}"
+                    pending = self._change_audit_log.get_pending_approvals()
+                    already_pending = any(p.what == recon_what for p in pending)
+                    if already_pending:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug("Reconciliation mismatch already pending, skipping duplicate")
+                    else:
+                        self._change_audit_log.record_change(
+                            change_type=ChangeType.STATE_CHANGE,
+                            who="GovernanceHub",
+                            what=recon_what,
+                            reason=str(details.get('reason', 'reconciliation_mismatch')),
+                            old_value="consistent",
+                            new_value="mismatch",
+                        )
                 except Exception as e:
                     logger.warning("ChangeAuditLog record failed for reconciliation mismatch (non-fatal): %s", e)
 
