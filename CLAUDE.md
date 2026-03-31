@@ -331,6 +331,24 @@ python3 scripts/bybit_observer_acceptance_check.py
 python3 scripts/bybit_runtime_state_resolver.py
 ```
 
+### ★ TODO.md 強制規則（每次 Claude 接手必須遵守）
+
+**接手時（會話開始）：**
+- 必須讀取 `/home/ncyu/BybitOpenClaw/srv/TODO.md` 確認當前工作狀態
+- 從 TODO.md 中找到第一個 `[ ]` 未完成項目，作為本次會話起點
+- 若用戶有明確指令，以用戶指令為準，但仍需先讀 TODO.md 了解上下文
+
+**發現新問題時（任意時刻）：**
+- 審計報告（E3/E5/FA/PA/PM）產出新問題 → 立即追加到 TODO.md 對應的 Wave/批次區塊
+- 格式：`### [ ] 問題編號：簡短描述` + 檔案/行號/修復方案/工時/E1 指派
+- 不能等到會話結束才批量更新，發現即寫入
+
+**修復完成後（E2+E4 通過，PM/PA/FA 確認後）：**
+- 將對應條目的 `[ ]` 改為 `[x]`，**不得刪除條目**
+- 在條目末尾追加一行：`- ✅ 完成：commit XXXXXXX（YYYY-MM-DD）`
+- 更新 TODO.md 頂部「當前測試基準線」的 passed 數字
+- commit 時帶上 TODO.md（與生產代碼改動一起 commit）
+
 ---
 
 ## 十、代码与文档规范
