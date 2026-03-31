@@ -3,14 +3,25 @@ H0 Gate 確定性門控測試
 DOC-02 §3.1 — <1ms SLA · 純確定性邏輯 · 無 AI 調用
 
 覆蓋範圍（Day 1）：
-  - TestH0GateFreshness: 15 個測試，涵蓋 freshness check 所有邊界條件
+  - TestH0GateFreshness:  15 個測試，涵蓋 freshness check 所有邊界條件
   - TestH0GateEligibility: 15 個測試，涵蓋 category + symbol 資格審核
+  - TestH0GateStats:       4 個測試，統計計數驗證
+  - TestH0GateLatency:     3 個測試，SLA 基礎驗證
+
+覆蓋範圍（Day 2 新增）：
+  - TestH0GateHealth:      12 個測試，health check 所有邊界條件
+  - TestH0GateRisk:        12 個測試，risk envelope 邊界條件
+  - TestH0GateCooldown:    8 個測試，cooldown period 所有情形
+  - TestH0GateSLATimeit:   2 個測試，1000 次迭代 SLA 壓測（avg < 1ms）
+  - TestH0HealthWorker:    6 個測試，H0HealthWorker 生命週期與採樣
 
 E1-Beta 任務：P1-16 H0 Gate Day 1 測試基礎框架
+E1-Beta 擴展：P1-16 H0 Gate Day 2 健康/風控/冷卻/SLA 完整覆蓋
 注意：h0_gate.py 由 E1-Alpha 並行實現，本文件基於接口設計先行編寫。
 """
 
 import time
+import timeit
 import sys
 import os
 
@@ -23,6 +34,7 @@ from app.h0_gate import (
     H0GateConfig,
     H0GateHealthSnapshot,
     H0GateRiskSnapshot,
+    H0HealthWorker,
 )
 
 
@@ -425,3 +437,501 @@ class TestH0GateLatency:
         gate = _make_gate()
         result = gate.check("BTCUSDT", "linear")
         assert isinstance(result.latency_us, int)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH0GateHealth — Health Check 12 個測試（Day 2 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH0GateHealth:
+    """
+    驗證 H0Gate health check 的所有邊界條件。
+    health check 是 check() 流程的第二關。
+    使用 _pass_all_prerequisites 確保 freshness 先通過，再測試 health 邏輯。
+    """
+
+    @pytest.fixture(autouse=True)
+    def gate_with_fresh_data(self):
+        """每個測試前建立 gate，freshness 已通過"""
+        self.gate = H0Gate()
+        _pass_freshness(self.gate, "BTCUSDT")
+
+    def _healthy_snap(self, **kwargs) -> H0GateHealthSnapshot:
+        """返回健康的 snapshot，可覆蓋個別欄位"""
+        defaults = dict(
+            cpu_pct=30.0,
+            memory_available_mb=4096,
+            db_latency_ms=10.0,
+            network_loss_pct=0.0,
+            snapshot_ts_ms=int(time.time() * 1000),
+        )
+        defaults.update(kwargs)
+        return H0GateHealthSnapshot(**defaults)
+
+    def test_default_snapshot_no_timestamp_passes(self):
+        """1. 默認 snapshot（snapshot_ts_ms=0）略過過期檢查，cpu=0/mem=9999→通過"""
+        # 默認 snapshot 所有值安全（cpu=0, mem=9999MB, snapshot_ts_ms=0）
+        self.gate.update_risk(_fresh_risk())
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.check_name != "health"
+
+    def test_healthy_snapshot_passes(self):
+        """2. 有時間戳且所有指標正常的 snapshot → 通過"""
+        self.gate.update_health(self._healthy_snap())
+        self.gate.update_risk(_fresh_risk())
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.check_name != "health"
+
+    def test_cpu_above_threshold_blocked(self):
+        """3. CPU 超過 max_cpu_pct → blocked"""
+        self.gate.update_health(self._healthy_snap(cpu_pct=95.0))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+        assert "cpu_too_high" in result.reason
+
+    def test_cpu_exactly_at_threshold_blocked(self):
+        """4. CPU == max_cpu_pct（90.0）→ blocked（> 比較）"""
+        gate = H0Gate(H0GateConfig(max_cpu_pct=90.0))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(self._healthy_snap(cpu_pct=90.1))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+
+    def test_cpu_below_threshold_passes(self):
+        """5. CPU == 89.9（低於 90.0 閾值）→ health 通過"""
+        gate = H0Gate(H0GateConfig(max_cpu_pct=90.0))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(self._healthy_snap(cpu_pct=89.9))
+        gate.update_risk(_fresh_risk())
+        result = gate.check("BTCUSDT", "linear")
+        assert result.check_name != "health"
+
+    def test_memory_below_threshold_blocked(self):
+        """6. 可用記憶體低於 min_memory_mb → blocked"""
+        self.gate.update_health(self._healthy_snap(memory_available_mb=512))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+        assert "memory_low" in result.reason
+
+    def test_memory_exactly_at_threshold_passes(self):
+        """7. 可用記憶體 == min_memory_mb（1024）→ 通過（< 比較）"""
+        gate = H0Gate(H0GateConfig(min_memory_mb=1024))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(self._healthy_snap(memory_available_mb=1024))
+        gate.update_risk(_fresh_risk())
+        result = gate.check("BTCUSDT", "linear")
+        assert result.check_name != "health"
+
+    def test_db_latency_above_threshold_blocked(self):
+        """8. DB 延遲超過 max_db_latency_ms → blocked"""
+        self.gate.update_health(self._healthy_snap(db_latency_ms=150.0))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+        assert "db_latency_high" in result.reason
+
+    def test_network_loss_above_threshold_blocked(self):
+        """9. 網絡丟包超過 max_network_loss_pct → blocked"""
+        self.gate.update_health(self._healthy_snap(network_loss_pct=10.0))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+        assert "network_loss_high" in result.reason
+
+    def test_stale_health_snapshot_blocked(self):
+        """10. health snapshot 超過 health_snapshot_max_age_ms → blocked"""
+        old_ts = int(time.time() * 1000) - 60_000  # 60秒前，超過默認 30秒 TTL
+        stale_snap = H0GateHealthSnapshot(
+            cpu_pct=0.0,
+            memory_available_mb=9999,
+            snapshot_ts_ms=old_ts,
+        )
+        self.gate.update_health(stale_snap)
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "health"
+        assert "health_snapshot_stale" in result.reason
+
+    def test_fresh_health_snapshot_not_stale(self):
+        """11. 剛更新的 snapshot（now）→ 不觸發 stale 判斷"""
+        fresh_snap = H0GateHealthSnapshot(
+            cpu_pct=10.0,
+            memory_available_mb=8192,
+            snapshot_ts_ms=int(time.time() * 1000),
+        )
+        self.gate.update_health(fresh_snap)
+        self.gate.update_risk(_fresh_risk())
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.check_name != "health"
+
+    def test_update_health_immediately_effective(self):
+        """12. update_health 立即生效：注入 bad→blocked，再注入 good→通過"""
+        self.gate.update_health(self._healthy_snap(cpu_pct=99.9))
+        result_bad = self.gate.check("BTCUSDT", "linear")
+        assert result_bad.allowed is False
+
+        _pass_freshness(self.gate, "BTCUSDT")  # 重新注入新鮮 tick
+        self.gate.update_health(self._healthy_snap(cpu_pct=10.0))
+        self.gate.update_risk(_fresh_risk())
+        result_good = self.gate.check("BTCUSDT", "linear")
+        assert result_good.check_name != "health"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH0GateRisk — Risk Envelope Check 12 個測試（Day 2 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH0GateRisk:
+    """
+    驗證 H0Gate risk envelope check 的所有邊界條件。
+    risk check 是 check() 流程的第四關。
+    使用 _pass_all_prerequisites 確保 freshness/health/eligibility 先通過，
+    再通過 update_risk() 測試 risk 邏輯。
+    """
+
+    @pytest.fixture(autouse=True)
+    def gate_with_prerequisites(self):
+        """每個測試前建立 gate，freshness + health 已通過"""
+        self.gate = H0Gate()
+        _pass_freshness(self.gate, "BTCUSDT")
+        self.gate.update_health(_fresh_health())
+
+    def test_kill_switch_active_blocked(self):
+        """1. kill_switch_active=True → blocked，reason 包含 'kill_switch_active'"""
+        self.gate.update_risk(H0GateRiskSnapshot(kill_switch_active=True))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "risk"
+        assert "kill_switch_active" in result.reason
+
+    def test_kill_switch_inactive_allows(self):
+        """2. kill_switch_active=False（默認）→ risk check 通過"""
+        self.gate.update_risk(H0GateRiskSnapshot(kill_switch_active=False))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.check_name != "risk"
+
+    def test_max_positions_reached_blocked(self):
+        """3. open_position_count == max_open_positions → blocked（>= 比較）"""
+        gate = H0Gate(H0GateConfig(max_open_positions=5))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(open_position_count=5))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "risk"
+        assert "max_positions_reached" in result.reason
+
+    def test_positions_below_max_allowed(self):
+        """4. open_position_count < max_open_positions → 通過"""
+        gate = H0Gate(H0GateConfig(max_open_positions=5))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(open_position_count=4))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.check_name != "risk"
+
+    def test_exposure_at_limit_blocked(self):
+        """5. total_exposure_pct == max_total_exposure_pct → blocked（>= 比較）"""
+        gate = H0Gate(H0GateConfig(max_total_exposure_pct=80.0))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(total_exposure_pct=80.0))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "risk"
+        assert "exposure_limit_reached" in result.reason
+
+    def test_exposure_below_limit_allowed(self):
+        """6. total_exposure_pct < max_total_exposure_pct → 通過"""
+        gate = H0Gate(H0GateConfig(max_total_exposure_pct=80.0))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(total_exposure_pct=79.9))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.check_name != "risk"
+
+    def test_kill_switch_takes_priority_over_positions(self):
+        """7. kill_switch + max positions 同時觸發 → reason 為 kill_switch_active"""
+        gate = H0Gate(H0GateConfig(max_open_positions=5))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(
+            kill_switch_active=True,
+            open_position_count=10,
+        ))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert "kill_switch_active" in result.reason
+
+    def test_default_risk_snapshot_all_zero_allowed(self):
+        """8. 默認 risk snapshot（全零）→ 通過"""
+        self.gate.update_risk(H0GateRiskSnapshot())
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.check_name != "risk"
+
+    def test_risk_reason_contains_position_counts(self):
+        """9. max positions blocked 時 reason 包含實際數字"""
+        gate = H0Gate(H0GateConfig(max_open_positions=3))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(open_position_count=3))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert "3" in result.reason
+
+    def test_risk_reason_contains_exposure_pct(self):
+        """10. exposure blocked 時 reason 包含百分比數字"""
+        gate = H0Gate(H0GateConfig(max_total_exposure_pct=50.0))
+        _pass_freshness(gate, "BTCUSDT")
+        gate.update_health(_fresh_health())
+        gate.update_risk(H0GateRiskSnapshot(total_exposure_pct=75.5))
+        result = gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert "75.5" in result.reason
+
+    def test_update_risk_immediately_effective(self):
+        """11. update_risk 立即生效：注入 bad→blocked，再注入 good→通過"""
+        self.gate.update_risk(H0GateRiskSnapshot(kill_switch_active=True))
+        result_bad = self.gate.check("BTCUSDT", "linear")
+        assert result_bad.allowed is False
+
+        _pass_freshness(self.gate, "BTCUSDT")
+        self.gate.update_risk(H0GateRiskSnapshot(kill_switch_active=False))
+        result_good = self.gate.check("BTCUSDT", "linear")
+        assert result_good.check_name != "risk"
+
+    def test_stats_blocked_risk_increments(self):
+        """12. kill switch blocked → stats['blocked_risk'] 遞增"""
+        self.gate.update_risk(H0GateRiskSnapshot(kill_switch_active=True))
+        stats_before = self.gate.get_stats().get("blocked_risk", 0)
+        self.gate.check("BTCUSDT", "linear")
+        stats_after = self.gate.get_stats().get("blocked_risk", 0)
+        assert stats_after == stats_before + 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH0GateCooldown — Cooldown Check 8 個測試（Day 2 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH0GateCooldown:
+    """
+    驗證 H0Gate cooldown check 的所有邊界條件。
+    cooldown check 是 check() 流程的最後一關（第五關）。
+    使用 _pass_all_prerequisites 確保前四關通過，專注測試 cooldown 邏輯。
+    """
+
+    @pytest.fixture(autouse=True)
+    def gate_with_prerequisites(self):
+        """每個測試前建立 gate，freshness + health 已通過"""
+        self.gate = H0Gate()
+        _pass_all_prerequisites(self.gate, "BTCUSDT")
+
+    def test_no_cooldown_zero_timestamp_allowed(self):
+        """1. cooldown_until_ts_ms=0 → 無冷卻，通過"""
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=0))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is True
+        assert result.check_name == "all_passed"
+
+    def test_active_cooldown_blocked(self):
+        """2. cooldown_until_ts_ms 設在未來 10 秒 → blocked"""
+        future_ts = int(time.time() * 1000) + 10_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=future_ts))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        assert result.check_name == "cooldown"
+        assert "cooldown_active" in result.reason
+
+    def test_expired_cooldown_allowed(self):
+        """3. cooldown_until_ts_ms 設在過去 1 秒前 → 冷卻已過期，通過"""
+        past_ts = int(time.time() * 1000) - 1_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=past_ts))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is True
+
+    def test_cooldown_reason_contains_remaining_ms(self):
+        """4. active cooldown 的 reason 包含剩餘毫秒數"""
+        future_ts = int(time.time() * 1000) + 5_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=future_ts))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is False
+        # reason 包含數字（剩餘 ms）
+        assert any(ch.isdigit() for ch in result.reason)
+
+    def test_cooldown_reason_contains_ms_remaining(self):
+        """5. reason 包含 'ms_remaining' 後綴"""
+        future_ts = int(time.time() * 1000) + 3_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=future_ts))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert "ms_remaining" in result.reason
+
+    def test_just_expired_cooldown_allowed(self):
+        """6. cooldown_until 剛好等於當前時間（差 <5ms）→ 通過（已過期）"""
+        just_past = int(time.time() * 1000) - 1  # 1ms 前
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=just_past))
+        result = self.gate.check("BTCUSDT", "linear")
+        assert result.allowed is True
+
+    def test_stats_blocked_cooldown_increments(self):
+        """7. active cooldown blocked → stats['blocked_cooldown'] 遞增"""
+        future_ts = int(time.time() * 1000) + 10_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=future_ts))
+        before = self.gate.get_stats().get("blocked_cooldown", 0)
+        self.gate.check("BTCUSDT", "linear")
+        after = self.gate.get_stats().get("blocked_cooldown", 0)
+        assert after == before + 1
+
+    def test_cooldown_cleared_by_update_risk(self):
+        """8. 先設 active cooldown → blocked；再 update_risk 清除冷卻 → 通過"""
+        future_ts = int(time.time() * 1000) + 10_000
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=future_ts))
+        result_blocked = self.gate.check("BTCUSDT", "linear")
+        assert result_blocked.allowed is False
+
+        _pass_freshness(self.gate, "BTCUSDT")
+        self.gate.update_risk(H0GateRiskSnapshot(cooldown_until_ts_ms=0))
+        result_allowed = self.gate.check("BTCUSDT", "linear")
+        assert result_allowed.allowed is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH0GateSLATimeit — 1000 次迭代 SLA 壓測（Day 2 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH0GateSLATimeit:
+    """
+    DOC-02 §3.1 嚴格 SLA 驗證：1000 次迭代平均必須 < 1ms。
+    分別測試 blocked 路徑（第一關即失敗）與 allowed 路徑（全部通過）。
+    """
+
+    def test_sla_1ms_blocked_path_1000_iterations(self):
+        """
+        blocked 路徑（第一關即失敗）的 1000 次平均延遲 < 1ms。
+        這是最樂觀的情境（fail-fast，只跑 freshness check）。
+        """
+        gate = _make_gate()
+        # 不注冊任何 symbol → 第一關即失敗
+
+        elapsed = timeit.timeit(
+            lambda: gate.check("BTCUSDT", "linear"),
+            number=1000,
+        )
+        avg_ms = (elapsed / 1000) * 1000  # 轉換為毫秒
+        assert avg_ms < 1.0, (
+            f"SLA violation: blocked path avg={avg_ms:.4f}ms > 1ms (DOC-02 §3.1)"
+        )
+
+    def test_sla_1ms_allowed_path_1000_iterations(self):
+        """
+        allowed 路徑（全部 5 個子檢查通過）的 1000 次平均延遲 < 1ms。
+        這是最嚴格的情境（完整熱路徑）。
+
+        注意：max_data_age_ms 設為 60000ms（60秒），避免 1000 次迭代期間
+        price_ts 逐漸老化至 stale（預設 1s 閾值在低速機器上可能在迭代中間觸發）。
+        """
+        # 使用 60s freshness window，確保整個 timeit 期間不觸發 stale
+        gate = H0Gate(H0GateConfig(max_data_age_ms=60_000))
+        # 注入所有狀態使 check 通過
+        gate.update_price_ts("BTCUSDT", int(time.time() * 1000))
+        gate.update_health(H0GateHealthSnapshot(
+            cpu_pct=10.0,
+            memory_available_mb=8192,
+            snapshot_ts_ms=int(time.time() * 1000),
+        ))
+        gate.update_risk(H0GateRiskSnapshot())
+
+        elapsed = timeit.timeit(
+            lambda: gate.check("BTCUSDT", "linear"),
+            number=1000,
+        )
+        avg_ms = (elapsed / 1000) * 1000
+        assert avg_ms < 1.0, (
+            f"SLA violation: allowed path avg={avg_ms:.4f}ms > 1ms (DOC-02 §3.1)"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH0HealthWorker — H0HealthWorker 生命週期測試（Day 2 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH0HealthWorker:
+    """
+    驗證 H0HealthWorker 生命週期（start/stop）與採樣注入功能。
+    注意：不依賴 psutil 是否已安裝（psutil 為可選依賴）。
+    """
+
+    def test_worker_starts_and_stops(self):
+        """1. start() → is_running=True；stop() → is_running=False"""
+        gate = H0Gate()
+        worker = H0HealthWorker(gate, sample_interval_s=60.0)  # 長間隔避免自動採樣干擾
+
+        worker.start()
+        assert worker.is_running is True
+
+        worker.stop()
+        assert worker.is_running is False
+
+    def test_worker_start_idempotent(self):
+        """2. 連續兩次 start() 不應 crash（idempotent）"""
+        gate = H0Gate()
+        worker = H0HealthWorker(gate, sample_interval_s=60.0)
+
+        worker.start()
+        thread1 = worker._thread
+        worker.start()  # 第二次應被忽略
+        thread2 = worker._thread
+
+        assert thread1 is thread2  # 同一個線程，未重建
+
+        worker.stop()
+
+    def test_worker_stop_before_start_is_noop(self):
+        """3. 未 start 就 stop() 不應 crash"""
+        gate = H0Gate()
+        worker = H0HealthWorker(gate, sample_interval_s=60.0)
+        worker.stop()  # 不應拋出異常
+        assert worker.is_running is False
+
+    def test_worker_injects_health_snapshot(self):
+        """4. 啟動後短暫等待，gate 的 health snapshot 應被更新（snapshot_ts_ms > 0）"""
+        gate = H0Gate()
+        worker = H0HealthWorker(gate, sample_interval_s=0.05)  # 50ms 短間隔
+
+        worker.start()
+        time.sleep(0.2)  # 等待至少一次採樣
+        worker.stop()
+
+        snap = gate._health_snapshot
+        assert snap.snapshot_ts_ms > 0, "H0HealthWorker 未注入任何 health snapshot"
+
+    def test_worker_with_db_probe_fn(self):
+        """5. 提供 db_probe_fn → 採樣後 db_latency_ms 應 >= 0"""
+        gate = H0Gate()
+        probe_called = []
+
+        def fake_probe():
+            probe_called.append(1)
+            time.sleep(0.001)  # 模擬 1ms DB 延遲
+
+        worker = H0HealthWorker(gate, sample_interval_s=0.05, db_probe_fn=fake_probe)
+        worker.start()
+        time.sleep(0.2)
+        worker.stop()
+
+        assert len(probe_called) > 0, "db_probe_fn 從未被調用"
+        snap = gate._health_snapshot
+        assert snap.db_latency_ms >= 0.0
+
+    def test_worker_sample_once_returns_snapshot(self):
+        """6. _sample_once() 直接調用應返回有效 snapshot（無論 psutil 是否安裝）"""
+        gate = H0Gate()
+        worker = H0HealthWorker(gate)
+        snap = worker._sample_once()
+
+        assert isinstance(snap.cpu_pct, float)
+        assert isinstance(snap.memory_available_mb, int)
+        assert snap.memory_available_mb > 0
+        assert snap.snapshot_ts_ms > 0

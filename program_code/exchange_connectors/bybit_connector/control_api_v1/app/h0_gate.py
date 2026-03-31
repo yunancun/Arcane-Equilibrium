@@ -57,9 +57,10 @@ Governance reference:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -659,3 +660,173 @@ class H0Gate:
             },
             "stats": self.get_stats(),
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# H0 Health Worker / H0 健康監控工作線程
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class H0HealthWorker:
+    """
+    Background daemon thread that periodically samples system health
+    and injects H0GateHealthSnapshot into an H0Gate instance.
+
+    背景守護線程，週期性採樣系統健康指標並注入 H0Gate 快照。
+
+    Usage / 使用方式:
+        worker = H0HealthWorker(gate, sample_interval_s=5.0)
+        worker.start()
+        # ... application runs ...
+        worker.stop()
+
+    Dependencies / 依賴:
+        psutil (optional) — if not installed, CPU/memory sampling is skipped
+        and defaults (0.0 / 9999 MB) are used instead.
+        psutil 為可選依賴；未安裝時 CPU/記憶體採樣跳過，使用安全默認值。
+
+    Design notes / 設計說明:
+        - Thread is daemon=True; exits automatically when main process exits.
+        - db_probe_fn: injectable callable returning DB latency in ms (float).
+          Must be fast (<10ms); called inside the sample loop on every interval.
+        - network_loss_pct: currently always 0.0 (requires icmp/ping tooling
+          which is platform-specific; left for future integration).
+        - Thread is non-blocking: sample loop uses threading.Event.wait()
+          so stop() wakes the thread immediately.
+    """
+
+    def __init__(
+        self,
+        gate: H0Gate,
+        sample_interval_s: float = 5.0,
+        db_probe_fn: Callable[[], float] | None = None,
+    ) -> None:
+        """
+        Initialize H0HealthWorker.
+
+        Args:
+            gate: H0Gate instance to inject health snapshots into.
+            sample_interval_s: Sampling interval in seconds (default 5.0).
+            db_probe_fn: Optional callable that measures DB round-trip latency.
+                         Must return float (latency in ms). Called on each
+                         sampling cycle. Should be fast (<10ms).
+        """
+        self._gate = gate
+        self._sample_interval_s = sample_interval_s
+        self._db_probe_fn = db_probe_fn
+
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # ── Lifecycle / 生命週期 ─────────────────────────────────────────────────
+
+    def start(self) -> None:
+        """
+        Start the background health sampling thread.
+        啟動背景健康採樣線程。
+
+        Idempotent: calling start() on an already-running worker is a no-op.
+        """
+        if self._thread is not None and self._thread.is_alive():
+            logger.debug("H0HealthWorker already running — start() ignored")
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="H0HealthWorker",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info(
+            "H0HealthWorker started (interval=%.1fs, db_probe=%s)",
+            self._sample_interval_s,
+            "yes" if self._db_probe_fn is not None else "no",
+        )
+
+    def stop(self) -> None:
+        """
+        Stop the background health sampling thread.
+        停止背景健康採樣線程。
+
+        Signals the thread to exit and waits for it to finish (up to 10s).
+        Does nothing if the thread is not running.
+        """
+        if self._thread is None or not self._thread.is_alive():
+            logger.debug("H0HealthWorker not running — stop() ignored")
+            return
+
+        self._stop_event.set()
+        self._thread.join(timeout=10.0)
+        if self._thread.is_alive():
+            logger.warning("H0HealthWorker thread did not stop within 10s")
+        else:
+            logger.info("H0HealthWorker stopped")
+        self._thread = None
+
+    @property
+    def is_running(self) -> bool:
+        """True if the worker thread is alive."""
+        return self._thread is not None and self._thread.is_alive()
+
+    # ── Internal / 內部實現 ──────────────────────────────────────────────────
+
+    def _run(self) -> None:
+        """
+        Main thread loop. Samples health and injects snapshot on each interval.
+        主線程循環。每個採樣週期採集健康數據並注入快照。
+        """
+        logger.debug("H0HealthWorker loop started")
+        while not self._stop_event.is_set():
+            try:
+                snapshot = self._sample_once()
+                self._gate.update_health(snapshot)
+            except Exception:
+                logger.exception("H0HealthWorker sample failed — skipping cycle")
+            # Use Event.wait for interruptible sleep / 可中斷睡眠
+            self._stop_event.wait(timeout=self._sample_interval_s)
+        logger.debug("H0HealthWorker loop exited")
+
+    def _sample_once(self) -> H0GateHealthSnapshot:
+        """
+        Collect one health sample. Returns a populated H0GateHealthSnapshot.
+        採集一次健康樣本，返回 H0GateHealthSnapshot。
+
+        CPU and memory are sampled via psutil if available.
+        If psutil is not installed, safe defaults are used (0% CPU, 9999 MB RAM).
+        DB latency is measured via db_probe_fn if provided.
+        Network loss is always 0.0 (future integration point).
+        """
+        cpu_pct = 0.0
+        memory_available_mb = 9999
+
+        try:
+            import psutil  # type: ignore[import]
+            cpu_pct = psutil.cpu_percent(interval=None)
+            mem = psutil.virtual_memory()
+            memory_available_mb = int(mem.available / (1024 * 1024))
+        except ImportError:
+            logger.debug(
+                "psutil not installed — H0HealthWorker using defaults"
+                " (cpu=0.0, mem=9999MB)"
+            )
+        except Exception:
+            logger.warning("H0HealthWorker: psutil sampling error — using defaults")
+
+        db_latency_ms = 0.0
+        if self._db_probe_fn is not None:
+            try:
+                t0 = time.perf_counter()
+                self._db_probe_fn()
+                db_latency_ms = (time.perf_counter() - t0) * 1000.0
+            except Exception:
+                logger.warning(
+                    "H0HealthWorker: db_probe_fn raised — db_latency_ms set to 0.0"
+                )
+
+        return H0GateHealthSnapshot(
+            cpu_pct=cpu_pct,
+            memory_available_mb=memory_available_mb,
+            db_latency_ms=db_latency_ms,
+            network_loss_pct=0.0,
+            snapshot_ts_ms=int(time.time() * 1000),
+        )
