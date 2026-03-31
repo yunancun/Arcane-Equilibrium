@@ -79,29 +79,14 @@
   </div>
 </div>
 
-<!-- Orders + Order Form / 订单 -->
-<div class="oc-grid-2">
-  <div class="oc-card">
-    <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
-    <div class="oc-table-wrap">
-      <table class="oc-table">
-        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="oc-card">
-    <h3>&#x1F4E9; 下单 / Submit Order</h3>
-    <div id="explain-order"></div>
-    <div class="order-form">
-      <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
-      <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
-      <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
-      <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
-      <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
-      <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
-    </div>
+<!-- Active Orders / 活跃订单 -->
+<div class="oc-card">
+  <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
+  <div class="oc-table-wrap">
+    <table class="oc-table">
+      <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="orders-tbody"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
+    </table>
   </div>
 </div>
 
@@ -135,6 +120,22 @@
         <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>来源</th><th>置信度</th><th>结果</th></tr></thead>
         <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
       </table>
+    </div>
+  </div>
+</details>
+
+<!-- Submit Order / 手动下单（默认折叠） -->
+<details class="oc-collapse">
+  <summary>&#x1F4E9; 手动下单 / Submit Order</summary>
+  <div class="oc-collapse-body">
+    <div id="explain-order"></div>
+    <div class="order-form">
+      <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
+      <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
+      <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
+      <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
+      <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
+      <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
     </div>
   </div>
 </details>
@@ -463,7 +464,7 @@ window.addEventListener('occurrencychange', loadAll);
     const autoModes = ['observe_only', 'shadow_only', 'demo_reserved'];
     if (autoModes.includes(mode)) {
       const fd = await ocApi('/api/v1/paper/market-feed/status');
-      const running = fd && fd.data && (fd.data.running || fd.data.is_running);
+      const running = fd && fd.data && (fd.data.dispatcher_running || fd.data.running || fd.data.is_running);
       if (!running) {
         await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
         loadFeed();

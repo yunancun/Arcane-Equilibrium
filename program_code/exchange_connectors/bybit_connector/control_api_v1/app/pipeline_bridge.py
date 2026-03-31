@@ -688,6 +688,50 @@ class PipelineBridge:
                         # Note: no longer blocking — Guardian verdict is authoritative
                         # 注意：不再阻塞 — Guardian 裁决为权威
 
+                # H6: Acquire Decision Lease before execution (Principle 3: AI output ≠ command)
+                # H6：執行前申請 Decision Lease，確保 Guardian 批准不直接等於執行命令（根原則 3）
+                # fail-open when governance_hub is None (backward compat, no hub deployed)
+                # fail-closed when hub exists but acquire_lease() returns None (hub denied the lease)
+                # 若 governance_hub 為 None：fail-open（向後兼容，無 Hub 時不阻塞）
+                # 若 Hub 存在但 acquire_lease 返回 None：fail-closed（Hub 拒絕，跳過此 intent）
+                if self._governance_hub is not None:
+                    try:
+                        _intent_id_for_lease = (
+                            getattr(intent, "intent_id", None)
+                            or f"pb-{intent.symbol}-{intent.side}-{id(intent)}"
+                        )
+                        _lease_id = self._governance_hub.acquire_lease(
+                            intent_id=_intent_id_for_lease,
+                            scope="TRADE_ENTRY",
+                            ttl_seconds=30,
+                        )
+                        if _lease_id is None:
+                            # fail-closed: Guardian approved but lease acquisition failed
+                            # 失敗默認收縮：Guardian 已批准但 lease 申請失敗，拒絕執行（DOC-01 §5.6）
+                            logger.warning(
+                                "pipeline_bridge: lease acquisition failed for intent %s %s, "
+                                "skipping (fail-closed) / lease 申請失敗，跳過執行（fail-closed）",
+                                intent.symbol, intent.side,
+                            )
+                            with self._lock:
+                                self._stats["intents_lease_failed"] = (
+                                    self._stats.get("intents_lease_failed", 0) + 1
+                                )
+                            continue
+                    except Exception as _lease_err:
+                        # Lease acquisition error → fail-closed (DOC-01 §5.6)
+                        # Lease 申請異常 → fail-closed（不允許在治理狀態不明時執行）
+                        logger.error(
+                            "pipeline_bridge: lease acquisition error — fail-closed: %s %s (%s) / "
+                            "lease 申請異常 — fail-closed 拒絕",
+                            intent.symbol, intent.side, _lease_err,
+                        )
+                        with self._lock:
+                            self._stats["intents_lease_failed"] = (
+                                self._stats.get("intents_lease_failed", 0) + 1
+                            )
+                        continue
+
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）
                 category = intent.metadata.get("category", "linear") if intent.metadata else "linear"

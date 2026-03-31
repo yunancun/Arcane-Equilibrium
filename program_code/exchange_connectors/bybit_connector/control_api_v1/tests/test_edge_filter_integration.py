@@ -736,5 +736,242 @@ class TestEdgeFilterErrorHandling:
         assert pipeline_bridge._edge_filter_stats["passed"] == 1
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestPipelineBridgeDecisionLease / Pipeline Bridge Decision Lease 測試
+# Wave 6 Sprint 0 TD-1：Principle 3 — AI output ≠ immediate command
+# 根原則 3：AI 輸出（Guardian 批准）≠ 即時命令，必須先申請 Decision Lease
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPipelineBridgeDecisionLease:
+    """
+    Tests for the Decision Lease gate in PipelineBridge._process_pending_intents().
+    PipelineBridge._process_pending_intents() 中 Decision Lease 門控的測試。
+
+    Principle 3 (DOC-01 §5.3): AI output (Guardian approval) ≠ immediate command.
+    Guardian approval must be followed by a lease acquisition before submit_order().
+    根原則 3：Guardian 批准不直接等於執行命令。Guardian 批准後必須申請 Decision Lease。
+
+    Design:
+      - governance_hub is None → fail-open (backward compat, no hub deployed)
+      - governance_hub.acquire_lease() returns None → fail-closed (hub denied, skip intent)
+      - governance_hub.acquire_lease() returns lease_id → proceed to submit_order()
+      - governance_hub.acquire_lease() raises exception → fail-closed (skip intent)
+    設計：
+      - governance_hub 為 None → fail-open（向後兼容，無 Hub 時不阻塞）
+      - acquire_lease 返回 None → fail-closed（Hub 拒絕，跳過此 intent）
+      - acquire_lease 返回 lease_id → 繼續執行 submit_order()
+      - acquire_lease 拋出異常 → fail-closed（跳過此 intent）
+    """
+
+    def _make_bridge_with_guardian_approved(
+        self,
+        mock_kline_manager,
+        mock_indicator_engine,
+        mock_signal_engine,
+        mock_orchestrator,
+        mock_paper_engine,
+    ):
+        """
+        Create a PipelineBridge where Guardian always returns APPROVED.
+        創建一個 Guardian 始終返回 APPROVED 的 PipelineBridge。
+        """
+        bridge = PipelineBridge(
+            kline_manager=mock_kline_manager,
+            indicator_engine=mock_indicator_engine,
+            signal_engine=mock_signal_engine,
+            orchestrator=mock_orchestrator,
+            paper_engine=mock_paper_engine,
+            auto_submit_intents=True,
+            max_intents_per_tick=20,
+        )
+        # Guardian always approves (result is not REJECTED, not MODIFIED → APPROVED)
+        # Guardian 始終批准（result 不是 REJECTED 也不是 MODIFIED → APPROVED）
+        mock_guardian = MagicMock()
+        mock_verdict = MagicMock()
+        mock_verdict.result = MagicMock()
+        mock_verdict.result.__eq__ = lambda self, other: False
+        mock_guardian.review_intent = MagicMock(return_value=mock_verdict)
+        mock_guardian.update_active_positions = MagicMock()
+        bridge.set_guardian_agent(mock_guardian)
+        return bridge
+
+    def _make_mock_governance_hub(self, lease_result):
+        """
+        Create a mock GovernanceHub with configurable acquire_lease return value.
+        創建 mock GovernanceHub，可配置 acquire_lease 返回值。
+
+        Args:
+            lease_result: The value acquire_lease() should return (str or None).
+            lease_result：acquire_lease() 應返回的值（str 或 None）。
+        """
+        hub = MagicMock()
+        hub.is_authorized = MagicMock(return_value=True)
+        hub.acquire_lease = MagicMock(return_value=lease_result)
+        return hub
+
+    def test_td1_no_hub_fail_open_submit_proceeds(
+        self,
+        mock_kline_manager,
+        mock_indicator_engine,
+        mock_signal_engine,
+        mock_orchestrator,
+        mock_paper_engine,
+    ):
+        """
+        TD-1 Test 1: When governance_hub is None, fail-open — submit_order is called.
+        TD-1 測試 1：governance_hub 為 None 時，fail-open — submit_order 正常調用。
+
+        Backward compatibility: systems without a deployed GovernanceHub should not be broken.
+        向後兼容：未部署 GovernanceHub 的系統不應被阻塞。
+        """
+        bridge = self._make_bridge_with_guardian_approved(
+            mock_kline_manager, mock_indicator_engine, mock_signal_engine,
+            mock_orchestrator, mock_paper_engine,
+        )
+        # Explicitly confirm governance_hub is None (no hub deployed)
+        # 確認 governance_hub 為 None（無 Hub 部署）
+        assert bridge._governance_hub is None
+
+        intent = MockIntent(symbol="BTCUSDT", side="Buy")
+        mock_orchestrator.collect_pending_intents.return_value = [intent]
+
+        bridge.activate()
+        bridge._latest_prices["BTCUSDT"] = 45000.0
+        bridge._process_pending_intents()
+
+        # submit_order must be called (fail-open: no hub → proceed)
+        # submit_order 必須被調用（fail-open：無 hub → 繼續執行）
+        assert mock_paper_engine.submit_order.called, (
+            "submit_order should be called when governance_hub is None (fail-open)"
+        )
+
+    def test_td1_acquire_lease_none_fail_closed_submit_blocked(
+        self,
+        mock_kline_manager,
+        mock_indicator_engine,
+        mock_signal_engine,
+        mock_orchestrator,
+        mock_paper_engine,
+    ):
+        """
+        TD-1 Test 2: acquire_lease() returns None → fail-closed, submit_order NOT called.
+        TD-1 測試 2：acquire_lease() 返回 None → fail-closed，submit_order 不調用。
+
+        DOC-01 §5.6: When in doubt, default conservative — no new position.
+        DOC-01 §5.6：不確定時默認保守 — 不開新倉。
+        """
+        bridge = self._make_bridge_with_guardian_approved(
+            mock_kline_manager, mock_indicator_engine, mock_signal_engine,
+            mock_orchestrator, mock_paper_engine,
+        )
+        hub = self._make_mock_governance_hub(lease_result=None)
+        bridge.set_governance_hub(hub)
+
+        intent = MockIntent(symbol="BTCUSDT", side="Buy")
+        mock_orchestrator.collect_pending_intents.return_value = [intent]
+
+        bridge.activate()
+        bridge._latest_prices["BTCUSDT"] = 45000.0
+        bridge._process_pending_intents()
+
+        # submit_order must NOT be called (fail-closed: lease denied)
+        # submit_order 不應被調用（fail-closed：lease 被拒絕）
+        assert not mock_paper_engine.submit_order.called, (
+            "submit_order should NOT be called when acquire_lease() returns None (fail-closed)"
+        )
+        # intents_lease_failed counter must increment
+        # intents_lease_failed 計數器必須遞增
+        stats = bridge.get_stats()
+        assert stats.get("intents_lease_failed", 0) >= 1, (
+            "intents_lease_failed should be >= 1 after lease acquisition failure"
+        )
+
+    def test_td1_acquire_lease_success_submit_proceeds(
+        self,
+        mock_kline_manager,
+        mock_indicator_engine,
+        mock_signal_engine,
+        mock_orchestrator,
+        mock_paper_engine,
+    ):
+        """
+        TD-1 Test 3: acquire_lease() returns a valid lease_id → submit_order is called.
+        TD-1 測試 3：acquire_lease() 返回有效 lease_id → submit_order 正常調用。
+        """
+        bridge = self._make_bridge_with_guardian_approved(
+            mock_kline_manager, mock_indicator_engine, mock_signal_engine,
+            mock_orchestrator, mock_paper_engine,
+        )
+        hub = self._make_mock_governance_hub(lease_result="lease-abc-12345")
+        bridge.set_governance_hub(hub)
+
+        intent = MockIntent(symbol="BTCUSDT", side="Buy")
+        mock_orchestrator.collect_pending_intents.return_value = [intent]
+
+        bridge.activate()
+        bridge._latest_prices["BTCUSDT"] = 45000.0
+        bridge._process_pending_intents()
+
+        # submit_order must be called (lease acquired successfully)
+        # submit_order 必須被調用（lease 成功獲取）
+        assert mock_paper_engine.submit_order.called, (
+            "submit_order should be called when acquire_lease() returns a valid lease_id"
+        )
+        # acquire_lease must have been called with TRADE_ENTRY scope
+        # acquire_lease 必須以 TRADE_ENTRY scope 被調用
+        hub.acquire_lease.assert_called_once()
+        call_kwargs = hub.acquire_lease.call_args
+        assert "TRADE_ENTRY" in str(call_kwargs), (
+            "acquire_lease should be called with scope='TRADE_ENTRY'"
+        )
+
+    def test_td1_acquire_lease_exception_fail_closed(
+        self,
+        mock_kline_manager,
+        mock_indicator_engine,
+        mock_signal_engine,
+        mock_orchestrator,
+        mock_paper_engine,
+    ):
+        """
+        TD-1 Test 4: acquire_lease() raises an exception → fail-closed, submit_order NOT called.
+        TD-1 測試 4：acquire_lease() 拋出異常 → fail-closed，submit_order 不調用。
+
+        When governance state is uncertain, we must not execute.
+        治理狀態不明時，不允許執行（根原則 6：失敗默認收縮）。
+        """
+        bridge = self._make_bridge_with_guardian_approved(
+            mock_kline_manager, mock_indicator_engine, mock_signal_engine,
+            mock_orchestrator, mock_paper_engine,
+        )
+        hub = MagicMock()
+        hub.is_authorized = MagicMock(return_value=True)
+        hub.acquire_lease = MagicMock(side_effect=RuntimeError("Lease store unavailable"))
+        bridge.set_governance_hub(hub)
+
+        intent = MockIntent(symbol="BTCUSDT", side="Buy")
+        mock_orchestrator.collect_pending_intents.return_value = [intent]
+
+        bridge.activate()
+        bridge._latest_prices["BTCUSDT"] = 45000.0
+
+        # Must not raise — exception is caught internally (fail-closed, not fail-crash)
+        # 不能拋出異常 — 異常在內部捕獲（fail-closed，而非崩潰）
+        bridge._process_pending_intents()
+
+        # submit_order must NOT be called
+        # submit_order 不應被調用
+        assert not mock_paper_engine.submit_order.called, (
+            "submit_order should NOT be called when acquire_lease() raises an exception"
+        )
+        # intents_lease_failed counter must increment
+        # intents_lease_failed 計數器必須遞增
+        stats = bridge.get_stats()
+        assert stats.get("intents_lease_failed", 0) >= 1, (
+            "intents_lease_failed should be >= 1 after lease acquisition exception"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

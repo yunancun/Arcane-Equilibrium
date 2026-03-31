@@ -58,11 +58,35 @@
     </div>
   </div>
 
+  <!-- Active Orders / 活跃订单 -->
+  <div class="oc-card">
+    <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
+    <div class="oc-table-wrap">
+      <table class="oc-table">
+        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th></tr></thead>
+        <tbody id="demo-orders"><tr class="empty-row"><td colspan="6">暂无订单</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Performance Metrics / 性能指标 -->
   <details class="oc-collapse">
     <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
     <div class="oc-collapse-body">
       <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
+    </div>
+  </details>
+
+  <!-- Fill History / 成交历史 -->
+  <details class="oc-collapse">
+    <summary>&#x1F4C4; 成交历史 / Fill History（最近 50 笔）</summary>
+    <div class="oc-collapse-body">
+      <div class="oc-table-wrap">
+        <table class="oc-table">
+          <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
+          <tbody id="demo-fills"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </details>
 
@@ -140,7 +164,9 @@ async function loadDemoStatus() {
     $('demo-offline').style.display = 'none';
     renderBalance(balD.data);
     loadPositions();
+    loadDemoOrders();
     loadDemoMetrics(balD.data);
+    loadDemoFills();
     loadComparison();
     return;
   }
@@ -251,6 +277,78 @@ async function loadPositions() {
     html += '</tr>';
   });
   ocSetHtml('demo-positions', html);
+}
+
+async function loadDemoOrders() {
+  const d = await ocApi('/api/v1/strategy/demo/orders');
+  if (!d || !d.data) return;
+  let orders = [];
+  if (d.data.result && d.data.result.list) {
+    orders = d.data.result.list;
+  } else {
+    orders = d.data.orders || d.data || [];
+  }
+  // Filter active orders only
+  orders = orders.filter(o => {
+    const st = (o.orderStatus || o.status || '').toLowerCase();
+    return st === 'new' || st === 'partiallyfilled' || st === 'untriggered';
+  });
+  if (!orders.length) {
+    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="6">暂无订单</td></tr>');
+    return;
+  }
+  let html = '';
+  const typeMap = { Market: '市价', Limit: '限价' };
+  const statusMap = { New: '挂单中', PartiallyFilled: '部分成交', Untriggered: '未触发' };
+  orders.forEach(o => {
+    const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
+    const orderType = o.orderType || o.order_type || '';
+    const status = o.orderStatus || o.status || '';
+    html += '<tr>';
+    html += '<td>' + ocEsc(o.symbol) + '</td>';
+    html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
+    html += '<td>' + (typeMap[orderType] || ocEsc(orderType)) + '</td>';
+    html += '<td>' + ocNum(parseFloat(o.qty || o.origQty || 0), 4) + '</td>';
+    html += '<td>' + (parseFloat(o.price || 0) > 0 ? ocNum(parseFloat(o.price), 2) : '市价') + '</td>';
+    html += '<td>' + (statusMap[status] || ocEsc(status)) + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('demo-orders', html);
+}
+
+async function loadDemoFills() {
+  const d = await ocApi('/api/v1/strategy/demo/fills');
+  if (!d || !d.data) {
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
+    return;
+  }
+  let fills = [];
+  if (d.data.result && d.data.result.list) {
+    fills = d.data.result.list;
+  } else {
+    fills = d.data.fills || d.data || [];
+  }
+  if (!fills.length) {
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
+    return;
+  }
+  let html = '';
+  fills.slice(0, 50).forEach(f => {
+    const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
+    const ts = f.execTime || f.updatedTime || f.createdTime || f.ts_ms || '';
+    const price = parseFloat(f.execPrice || f.price || 0);
+    const qty = parseFloat(f.execQty || f.qty || 0);
+    const fee = parseFloat(f.execFee || f.fee || 0);
+    html += '<tr>';
+    html += '<td>' + (ts ? ocTimeShort(parseInt(ts) || ts) : '--') + '</td>';
+    html += '<td>' + ocEsc(f.symbol) + '</td>';
+    html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
+    html += '<td>' + ocNum(qty, 4) + '</td>';
+    html += '<td>' + ocNum(price, 2) + '</td>';
+    html += '<td>' + ocNum(Math.abs(fee), 6) + '</td>';
+    html += '</tr>';
+  });
+  ocSetHtml('demo-fills', html);
 }
 
 async function loadComparison() {

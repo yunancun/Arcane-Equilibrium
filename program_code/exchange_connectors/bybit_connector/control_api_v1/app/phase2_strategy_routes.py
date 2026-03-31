@@ -1448,6 +1448,30 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
         raise HTTPException(status_code=500, detail="Internal error")
 
 
+@phase2_router.get("/demo/orders")
+async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Bybit Demo open orders / 获取 Bybit Demo 活跃订单"""
+    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
+        return _envelope({"enabled": False})
+    try:
+        result = DEMO_CONNECTOR.get_open_orders(category="linear")
+        return _envelope(result)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/demo/fills")
+async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get Bybit Demo recent executions / 获取 Bybit Demo 最近成交"""
+    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
+        return _envelope({"enabled": False})
+    try:
+        result = DEMO_CONNECTOR.get_executions(category="linear", limit=50)
+        return _envelope(result)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
 # ── Market Scanner Routes / 市场扫描路由 ──
 
 @phase2_router.get("/scanner/opportunities")
