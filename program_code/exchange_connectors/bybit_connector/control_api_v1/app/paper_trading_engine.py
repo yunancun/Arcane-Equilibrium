@@ -564,12 +564,14 @@ def project_position_after_fill(
     side: str,
     fill_qty: float,
     fill_price: float,
+    category: str = "linear",
 ) -> tuple[dict[str, Any], float]:
     """
     Project position state after a fill / 投影成交后的持仓状态
 
     Handles: opening new position, adding to position, reducing position, flipping position.
     Returns: (positions, close_pnl) — close_pnl is realized PnL from closing (0 if opening/adding).
+    category: Bybit API category ("linear"/"spot"/"inverse") — stored on position for downstream use.
     """
     pos = positions.get(symbol)
     close_pnl = 0.0
@@ -586,6 +588,7 @@ def project_position_after_fill(
             "opened_ts_ms": now_ms(),
             "updated_ts_ms": now_ms(),
             "is_simulated": True,
+            "category": category,
             # AI attention tax tracking / AI 注意力税追踪
             "holding_cost": {
                 "financial_cost_usd": 0.0,
@@ -1426,8 +1429,8 @@ class PaperTradingEngine:
                         import logging as _log
                         _log.warning("Governance lease release failed (non-fatal) / 租約釋放失敗（非致命）")
 
-                # Update position
-                _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
+                # Update position (pass category so new positions record their api_category)
+                _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price, category=category)
                 state["pnl"]["closed_position_pnl"] += close_pnl
                 result["close_pnl"] += close_pnl
 

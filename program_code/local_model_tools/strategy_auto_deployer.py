@@ -419,6 +419,13 @@ class StrategyAutoDeployer:
         if strategy is None:
             return
 
+        # Inject api_category into strategy default metadata so all intents carry it.
+        # Pipeline bridge reads intent.metadata["category"] to route to correct Bybit API.
+        # 注入 api_category 到策略預設元數據，所有 intent 自動攜帶品類信息。
+        api_category = getattr(opp, "api_category", "linear")
+        if api_category != "linear":
+            strategy._default_metadata["category"] = api_category
+
         # Unique registration key includes symbol to prevent name collision
         # 唯一注册键包含 symbol 以防止名称冲突（R1 fix）
         unique_name = f"{strategy.name}_{symbol}"

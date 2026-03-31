@@ -155,6 +155,10 @@ class StrategyBase(ABC):
         # When set, orchestrator uses this as the registration key instead of self.name.
         # 自定义名称覆盖，用于自动部署的多品种策略。设置后，编排器用此名称作为注册键。
         self._custom_name: str | None = None
+        # Default metadata merged into every emitted intent.
+        # Used by deployer to inject api_category ("linear"/"spot") at deploy time.
+        # 預設元數據，合併到每個發出的 intent 中。部署器用此注入 api_category。
+        self._default_metadata: dict[str, Any] = {}
 
     @property
     @abstractmethod
@@ -279,6 +283,11 @@ class StrategyBase(ABC):
         仅在策略激活状态时生效。线程安全。
         """
         if self._state == STRATEGY_ACTIVE:
+            # Merge default metadata (e.g. api_category) — intent-level values take precedence
+            # 合併預設元數據（如 api_category）— intent 級別的值優先
+            if self._default_metadata:
+                merged = {**self._default_metadata, **intent.metadata}
+                intent.metadata = merged
             with self._intent_lock:
                 self._pending_intents.append(intent)
 

@@ -59,6 +59,7 @@ class SymbolOpportunity:
     price_change_pct_24h: float = 0.0
     volatility_hint: str = ""        # "high" / "medium" / "low"
     reason: str = ""
+    api_category: str = "linear"     # Bybit API category: "linear" / "spot" / "inverse"
 
 
 class MarketScanner:
@@ -73,11 +74,15 @@ class MarketScanner:
         min_volume: float = MIN_VOLUME_24H_USDT,
         max_symbols: int = MAX_SYMBOLS_TO_TRADE,
         base_url: str = "https://api.bybit.com",
+        categories: list[str] | None = None,
     ) -> None:
         self._interval = scan_interval_sec
         self._min_volume = min_volume
         self._max_symbols = max_symbols
         self._base_url = base_url
+        # Scan categories: defaults to ["linear"], supports ["linear", "spot"]
+        # 掃描品類：預設只掃 linear，可擴展支持 spot
+        self._categories = categories or ["linear"]
         self._running = False
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -114,33 +119,41 @@ class MarketScanner:
             time.sleep(self._interval)
 
     def scan(self) -> list[SymbolOpportunity]:
-        """Run a full market scan. Returns scored opportunities."""
-        # Fetch all linear perpetual tickers
-        try:
-            url = f"{self._base_url}/v5/market/tickers?category=linear"
-            req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = _json.loads(resp.read().decode())
-        except Exception as e:
-            logger.warning("Ticker fetch failed: %s", e)
-            return []
+        """
+        Run a full market scan across all configured categories. Returns scored opportunities.
+        在所有配置的品類中進行全市場掃描。返回評分後的交易機會。
+        """
+        all_tickers: list[tuple[dict, str]] = []  # (ticker_data, api_category)
 
-        if data.get("retCode") != 0:
-            return []
+        # Fetch tickers for each configured category
+        # 拉取每個配置品類的 ticker 數據
+        for cat in self._categories:
+            try:
+                url = f"{self._base_url}/v5/market/tickers?category={cat}"
+                req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = _json.loads(resp.read().decode())
+                if data.get("retCode") == 0:
+                    for t in data.get("result", {}).get("list", []):
+                        all_tickers.append((t, cat))
+                    logger.debug("Fetched %d tickers for category=%s", len(data.get("result", {}).get("list", [])), cat)
+            except Exception as e:
+                logger.warning("Ticker fetch failed for category=%s: %s", cat, e)
 
-        tickers = data.get("result", {}).get("list", [])
         self._stats["scans"] += 1
-        self._stats["symbols_scanned"] = len(tickers)
+        self._stats["symbols_scanned"] = len(all_tickers)
 
         # Score each symbol
         opportunities: list[SymbolOpportunity] = []
 
-        for t in tickers:
+        for t, api_category in all_tickers:
             try:
                 symbol = t.get("symbol", "")
                 price = float(t.get("lastPrice", 0))
                 volume_24h = float(t.get("turnover24h", 0))  # USDT turnover
-                funding_rate = float(t.get("fundingRate", 0))
+                # Spot tickers don't have fundingRate — default to 0
+                # 現貨沒有資金費率 — 預設為 0
+                funding_rate = float(t.get("fundingRate", 0) or 0)
                 price_change = float(t.get("price24hPcnt", 0)) * 100  # percentage
                 high_24h = float(t.get("highPrice24h", 0))
                 low_24h = float(t.get("lowPrice24h", 0))
@@ -151,7 +164,7 @@ class MarketScanner:
                 if price < MIN_PRICE_USDT:
                     continue
                 if not symbol.endswith("USDT"):
-                    continue  # Only USDT pairs for now
+                    continue  # Only USDT pairs (applies to both linear and spot)
 
                 # Calculate volatility (24h range as % of price)
                 volatility_pct = ((high_24h - low_24h) / price * 100) if price > 0 else 0
@@ -166,6 +179,7 @@ class MarketScanner:
                     funding_abs_bps=funding_abs_bps,
                     price_change_pct=price_change,
                     volatility_pct=volatility_pct,
+                    api_category=api_category,
                 )
                 if opp and opp.score > 20:  # Minimum score threshold
                     opportunities.append(opp)
@@ -206,6 +220,7 @@ class MarketScanner:
         funding_abs_bps: float,
         price_change_pct: float,
         volatility_pct: float,
+        api_category: str = "linear",
     ) -> SymbolOpportunity | None:
         """Classify a symbol into an opportunity category."""
 
@@ -276,6 +291,7 @@ class MarketScanner:
             price_change_pct_24h=price_change_pct,
             volatility_hint=vol_hint,
             reason=best_reason,
+            api_category=api_category,
         )
 
     def get_latest_opportunities(self) -> list[dict[str, Any]]:
@@ -287,6 +303,7 @@ class MarketScanner:
                     "volume_24h_m": round(o.volume_24h / 1e6, 1),
                     "price": o.price, "price_change_24h": round(o.price_change_pct_24h, 2),
                     "volatility": o.volatility_hint, "reason": o.reason,
+                    "api_category": o.api_category,
                 }
                 for o in self._latest_opportunities
             ]
@@ -296,6 +313,7 @@ class MarketScanner:
             return {
                 "component": "market_scanner",
                 "running": self._running,
+                "categories": self._categories,
                 "last_scan_ts_ms": self._latest_scan_ts,
                 "top_opportunities": len(self._latest_opportunities),
                 **self._stats,
