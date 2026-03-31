@@ -18,6 +18,20 @@
     flex-direction: column;
   }
 
+  /* ── Unified control bar ─────────────────────────────────────── */
+  .unified-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .unified-bar .bar-title { font-weight: 600; font-size: 13px; }
+  .unified-bar .bar-status { font-size: 12px; color: var(--text-dim); }
+
   /* ── Sub-tab bar — same style as outer console tab bar ───────── */
   .sub-tab-bar {
     display: flex;
@@ -57,7 +71,40 @@
     border: none;
     background: var(--bg);
   }
+
+  /* ── Confirm dialog overlay ──────────────────────────────────── */
+  .oc-dialog-overlay {
+    display: none;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 9999;
+    align-items: center; justify-content: center;
+  }
+  .oc-dialog-overlay.show { display: flex; }
+  .oc-dialog {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    max-width: 440px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .oc-dialog h3 { margin: 0 0 12px; font-size: 16px; }
+  .oc-dialog p { margin: 0 0 16px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .oc-dialog .note { font-size: 11px; color: var(--yellow); margin-bottom: 12px; }
 </style>
+
+<!-- ── Unified Control Bar ──────────────────────────────────────── -->
+<div class="unified-bar">
+  <span class="bar-title">&#x2699;&#xFE0F; 双引擎统一控制</span>
+  <span id="unified-status" class="oc-chip oc-chip-neutral">--</span>
+  <span class="bar-status" id="unified-detail"></span>
+  <span style="flex:1"></span>
+  <button class="oc-btn oc-btn-success" id="btn-unified-start" onclick="unifiedStart()">&#x25B6; 启动引擎</button>
+  <button class="oc-btn oc-btn-danger" id="btn-unified-stop" onclick="unifiedStop()" disabled>&#x23F9; 停止引擎</button>
+</div>
 
 <!-- ── Sub-tab bar ──────────────────────────────────────────────── -->
 <div class="sub-tab-bar">
@@ -75,21 +122,46 @@
   <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html"></iframe>
 </div>
 
+<!-- ── Start Confirmation Dialog ────────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-start">
+  <div class="oc-dialog">
+    <h3>&#x25B6; 启动双引擎</h3>
+    <p>是否从头开始计算？选择「是」将重置 Paper 引擎账户，初始余额同步 Bybit Demo 账户余额。</p>
+    <div class="note">&#x26A0; Bybit Demo 如需重置余额，请到 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 手动操作。</div>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeDialog('dlg-start')">取消</button>
+      <button class="oc-btn" onclick="doStart(false)">继续（保留数据）</button>
+      <button class="oc-btn oc-btn-success" onclick="doStart(true)">是，从头开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Stop Confirmation Dialog ─────────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-stop">
+  <div class="oc-dialog">
+    <h3>&#x23F9; 停止双引擎</h3>
+    <p>是否在停止前清仓所有持仓？选择「清仓」将平掉 Paper 引擎中所有持仓后再停止会话。</p>
+    <div class="note">&#x26A0; Bybit Demo 持仓不会自动平仓，如需平仓请到 Demo 页面手动操作或使用 Bybit 界面。</div>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeDialog('dlg-stop')">取消</button>
+      <button class="oc-btn oc-btn-danger" onclick="doStop(false)">直接停止</button>
+      <button class="oc-btn oc-btn-danger" onclick="doStop(true)">清仓后停止</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let _loaded = { paper: true, demo: false };
 
 function switchSub(which) {
-  // Update pill styles
   document.getElementById('st-paper').classList.toggle('active', which === 'paper');
   document.getElementById('st-demo').classList.toggle('active', which === 'demo');
 
-  // Show / hide iframes
   const frames = { paper: 'if-paper', demo: 'if-demo' };
   Object.entries(frames).forEach(([id, frameId]) => {
     const el = document.getElementById(frameId);
     if (id === which) {
       el.style.display = 'block';
-      // Lazy-load on first visit
       if (!_loaded[id]) {
         el.src = el.dataset.src;
         _loaded[id] = true;
@@ -99,6 +171,142 @@ function switchSub(which) {
     }
   });
 }
+
+// ── Dialog helpers ──────────────────────────────────────────────
+function closeDialog(id) { document.getElementById(id).classList.remove('show'); }
+
+// ── Unified Start ───────────────────────────────────────────────
+function unifiedStart() {
+  document.getElementById('dlg-start').classList.add('show');
+}
+
+async function doStart(fresh) {
+  closeDialog('dlg-start');
+  let initialBalance = 100000;
+
+  if (fresh) {
+    // Try to read Bybit Demo balance as initial_balance
+    try {
+      const balD = await ocApi('/api/v1/strategy/demo/balance');
+      if (balD && balD.data && balD.data.retCode === 0) {
+        let b = balD.data;
+        if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
+        const equity = parseFloat(b.totalEquity || 0);
+        if (equity > 0) {
+          initialBalance = equity;
+          ocToast('Paper 初始余额同步 Demo: $' + initialBalance.toFixed(2), 'success');
+        }
+      }
+    } catch (e) { /* fallback to default */ }
+  }
+
+  // Start Paper session
+  const d = await ocPost('/api/v1/paper/session/start', { initial_balance: initialBalance });
+  if (d) {
+    ocToast('Paper 引擎已启动', 'success');
+    refreshIframes();
+    checkUnifiedStatus();
+  } else {
+    ocToast('启动失败', 'error');
+  }
+}
+
+// ── Unified Stop ────────────────────────────────────────────────
+function unifiedStop() {
+  document.getElementById('dlg-stop').classList.add('show');
+}
+
+async function doStop(liquidate) {
+  closeDialog('dlg-stop');
+
+  if (liquidate) {
+    // Close all Paper positions first
+    try {
+      const posD = await ocApi('/api/v1/paper/positions');
+      if (posD && posD.data) {
+        const raw = posD.data.positions || posD.data || {};
+        const positions = Array.isArray(raw) ? raw : Object.values(raw);
+        for (const p of positions) {
+          if (parseFloat(p.qty || 0) > 0) {
+            const closeSide = p.side === 'Buy' ? 'Sell' : 'Buy';
+            await ocPost('/api/v1/paper/order/submit', {
+              symbol: p.symbol,
+              side: closeSide,
+              order_type: 'market',
+              qty: parseFloat(p.qty),
+            });
+          }
+        }
+        if (positions.length > 0) ocToast('Paper 持仓已全部平仓', 'success');
+      }
+    } catch (e) { ocToast('平仓时出错', 'error'); }
+  }
+
+  // Stop Paper session
+  const d = await ocPost('/api/v1/paper/session/stop', {});
+  if (d) {
+    ocToast('Paper 引擎已停止', 'success');
+    refreshIframes();
+    checkUnifiedStatus();
+  } else {
+    ocToast('停止失败', 'error');
+  }
+}
+
+// ── Status Check ────────────────────────────────────────────────
+async function checkUnifiedStatus() {
+  const badge = document.getElementById('unified-status');
+  const detail = document.getElementById('unified-detail');
+  const btnStart = document.getElementById('btn-unified-start');
+  const btnStop = document.getElementById('btn-unified-stop');
+
+  let paperState = 'idle';
+  let demoConnected = false;
+
+  try {
+    const pd = await ocApi('/api/v1/paper/session/status');
+    if (pd && pd.data && pd.data.session) paperState = pd.data.session.session_state || 'idle';
+  } catch (e) {}
+
+  try {
+    const dd = await ocApi('/api/v1/strategy/demo/balance');
+    if (dd && dd.data && dd.data.retCode === 0) demoConnected = true;
+  } catch (e) {}
+
+  const paperActive = (paperState === 'active' || paperState === 'paused');
+  const stateMap = {
+    'active': '运行中', 'paused': '已暂停', 'stopped': '已停止', 'idle': '未启动',
+  };
+
+  if (paperActive && demoConnected) {
+    badge.textContent = '双引擎运行中';
+    badge.className = 'oc-chip oc-chip-good';
+  } else if (paperActive) {
+    badge.textContent = 'Paper 运行中';
+    badge.className = 'oc-chip oc-chip-warn';
+  } else if (demoConnected) {
+    badge.textContent = '仅 Demo 连接';
+    badge.className = 'oc-chip oc-chip-warn';
+  } else {
+    badge.textContent = '未启动';
+    badge.className = 'oc-chip oc-chip-neutral';
+  }
+
+  detail.textContent = 'Paper: ' + (stateMap[paperState] || paperState) + ' | Demo: ' + (demoConnected ? '已连接' : '未连接');
+  btnStart.disabled = paperActive;
+  btnStop.disabled = !paperActive;
+}
+
+function refreshIframes() {
+  try { document.getElementById('if-paper').contentWindow.location.reload(); } catch (e) {}
+  if (_loaded.demo) {
+    try { document.getElementById('if-demo').contentWindow.location.reload(); } catch (e) {}
+  }
+}
+
+// Initial status check + periodic
+checkUnifiedStatus();
+setInterval(checkUnifiedStatus, 20000);
 </script>
 </body>
 </html>

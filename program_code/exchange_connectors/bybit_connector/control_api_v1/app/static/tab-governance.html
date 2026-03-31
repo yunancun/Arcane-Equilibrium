@@ -1502,24 +1502,30 @@ function renderPendingRecovery(requests) {
   el.innerHTML = html;
 }
 
-// Change type → human-readable label / 变更类型标签映射
+// ═══════════════════════════════════════════════════════════════════════
+// 审计变更 完整翻译系统 / Audit Change Complete Translation System
+// 覆盖所有 record_change() 调用来源，确保 Operator 能看懂每一条记录
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── 变更类型 Change Type ──
 const _CHANGE_TYPE_LABELS = {
-  STATE_CHANGE:     '状态变更',
-  CONFIG_CHANGE:    '配置变更',
-  RISK_OVERRIDE:    '风控覆盖',
-  PERMISSION_CHANGE:'权限变更',
-  CODE_DEPLOYMENT:  '代码部署',
-  ROLLBACK:         '回滚',
-  EMERGENCY_CHANGE: '紧急变更',
+  STATE_CHANGE:      '状态变更',
+  CONFIG_CHANGE:     '配置变更',
+  PARAMETER_CHANGE:  '参数变更',
+  RISK_OVERRIDE:     '风控覆盖',
+  PERMISSION_CHANGE: '权限变更',
+  CODE_DEPLOYMENT:   '代码部署',
+  ROLLBACK:          '回滚',
+  EMERGENCY_CHANGE:  '紧急变更',
 };
 
-// Approval status → Chinese label
+// ── 审批状态 Approval Status ──
 const _APPROVAL_STATUS_CN = {
   PENDING:            '待批准',
-  AUTO_APPROVED:      '自动批准',
+  AUTO_APPROVED:      '系统自动批准',
   APPROVED:           '已批准',
   REJECTED:           '已拒绝',
-  EMERGENCY_BYPASSED: '紧急跳过（需补批）',
+  EMERGENCY_BYPASSED: '紧急跳过（需事后补批）',
 };
 
 function _changeTypeBadge(ct) {
@@ -1528,54 +1534,239 @@ function _changeTypeBadge(ct) {
   return ocChip(label, isRisk ? 'bad' : 'info');
 }
 
-// Translate English `what` descriptions to Chinese for Operator readability
-// 将英文 what 描述翻译为中文，方便 Operator 快速理解变更内容
-function _translateWhat(what) {
-  if (!what) return '（無描述）';
-  let cn = what;
-  // Symbol whitelist changes
-  cn = cn.replace(/Symbol added to (\w+) whitelist: (\w+)/,  '新增交易对 $2 到 $1 白名单');
-  cn = cn.replace(/Symbol removed from (\w+) whitelist: (\w+)/, '从 $1 白名单移除交易对 $2');
-  // PaperLiveGate evaluation
-  cn = cn.replace(/PaperLiveGate evaluation: (.+)/, 'Paper→Live 准入评估结果：$1');
-  // Generic state/config
-  cn = cn.replace(/Authorization state changed to (\w+)/, '授权状态变更为 $1');
-  cn = cn.replace(/Risk level changed to (\w+)/, '风控等级变更为 $1');
-  cn = cn.replace(/Reconciliation triggered/, '触发对账');
-  return cn;
+// ── 授权状态值 Authorization State Values ──
+const _AUTH_STATE_CN = {
+  DRAFT: '草稿', PENDING_APPROVAL: '待批准', ACTIVE: '生效中', SUSPENDED: '已暂停',
+  FROZEN: '已冻结', EXPIRED: '已过期', REVOKED: '已撤销',
+  NOT_REQUESTED: '未申请', REQUESTED: '已申请', APPROVED: '已批准', DENIED: '已拒绝',
+};
+
+// ── 风控等级 Risk Level ──
+const _RISK_LEVEL_CN = {
+  NORMAL: '正常（无限制）', CAUTIOUS: '谨慎（降低仓位）', REDUCED: '缩减（限制开仓）',
+  DEFENSIVE: '防御（只许平仓）', CIRCUIT_BREAKER: '熔断（全部冻结）', MANUAL_REVIEW: '人工审核（全停）',
+};
+
+// ── 订单状态 OMS Order State ──
+const _OMS_STATE_CN = {
+  PENDING_NEW: '等待提交', ACCEPTED: '已接受', REJECTED: '被拒绝', PARTIALLY_FILLED: '部分成交',
+  FILLED: '完全成交', PENDING_CANCEL: '等待取消', CANCELLED: '已取消',
+  EXPIRED: '已过期', FAILED: '失败', PENDING_AMEND: '等待修改', AMENDED: '已修改',
+};
+
+// ── 决策租约状态 Decision Lease State ──
+const _LEASE_STATE_CN = {
+  IDLE: '空闲', REQUESTED: '已请求', ACTIVE: '生效中', EXECUTING: '执行中',
+  COMPLETED: '已完成', EXPIRED: '已过期', REVOKED: '已撤销', FAILED: '失败',
+};
+
+// ── 组件名 Component Names ──
+const _COMP_CN = {
+  risk_manager: '风控管理器', RiskManager: '风控管理器', RiskGovernor: '风控治理器',
+  PaperTradingEngine: 'Paper 模拟引擎', paper_engine: 'Paper 模拟引擎',
+  governance_hub: '治理中枢', GovernanceHub: '治理中枢',
+  linear: '合约(USDT)', spot: '现货', inverse: '反向合约', option: '期权',
+  Authorization: '授权系统', DecisionLease: '决策租约', OMS: '订单管理',
+};
+function _translateComp(c) { return _COMP_CN[c] || c; }
+
+// ── 发起人 Who ──
+function _translateWho(who) {
+  if (!who) return '--';
+  if (who === 'demo-operator' || who === 'operator') return '操作员 Operator';
+  if (who === 'system' || who === 'SYSTEM') return '系统自动 System';
+  if (who === 'GovernanceHub') return '治理中枢 GovernanceHub';
+  if (who === 'RiskManager') return '风控管理器 RiskManager';
+  if (who === 'PaperLiveGate') return 'Paper→Live 准入门控';
+  if (who.toLowerCase().includes('agent')) return 'AI Agent 代理';
+  return who;
 }
 
-// Format old/new value for human readability
-// 将 JSON 序列化的 old/new value 转为可读格式
+// 翻译一个状态值（尝试所有状态字典）
+function _translateStateVal(val) {
+  if (!val || typeof val !== 'string') return val;
+  return _AUTH_STATE_CN[val] || _RISK_LEVEL_CN[val] || _OMS_STATE_CN[val] || _LEASE_STATE_CN[val] || val;
+}
+
+// ── 核心：what 描述翻译 + 审批后果说明 ──
+// 每条规则：{ pattern, cn: 中文描述, approve: 批准后果, reject: 拒绝后果 }
+// 覆盖所有 record_change() 调用产生的 what 文本
+const _WHAT_RULES = [
+  // ═══ 对账不一致 Reconciliation (governance_hub.py) ═══
+  { pattern: /^Reconciliation mismatch detected: (.+)$/,
+    cn: (m) => '对账发现不一致 — 严重性：' + m[1],
+    detail: '系统在对比本地状态与远端状态时发现差异。这通常是因为 Paper 引擎与 Bybit Demo 之间的仓位/订单不同步。',
+    approve: '确认已知晓此差异，系统将继续运行。如果是 CRITICAL 级别，风控会自动升级。',
+    reject: '标记此差异需要进一步调查。不影响系统运行，但会保持审计记录为"待处理"状态。',
+  },
+
+  // ═══ 授权冻结 Auth Frozen (governance_hub.py) ═══
+  { pattern: /^Authorization frozen: (\d+) active leases revoked$/,
+    cn: (m) => '授权已冻结 — ' + m[1] + ' 个活跃租约已被撤销',
+    detail: '治理中枢检测到异常并冻结了授权系统。所有进行中的决策租约被强制撤销，系统停止接受新的交易指令。',
+    approve: '确认冻结操作正确，同意系统进入冻结状态。',
+    reject: '认为冻结是误判。但注意：冻结是自动安全机制，拒绝只影响审计记录，不会解冻系统。需在授权卡片手动恢复。',
+  },
+
+  // ═══ 授权缓存失效 Auth Cache Invalidated (governance_hub.py) ═══
+  { pattern: /^Authorization cache invalidated$/,
+    cn: () => '授权缓存已失效并重新加载',
+    detail: '授权状态机发生了状态转换，缓存被清除。这是正常的内部维护操作。',
+    approve: '确认知晓。这通常是自动操作，不需要人工干预。',
+    reject: '标记异常。如果你没有进行任何授权操作但看到此记录，可能需要检查是否有意外的状态变更。',
+  },
+
+  // ═══ 风控等级变更 Risk Level Changed (governance_hub.py) ═══
+  { pattern: /^Risk level changed: (.+) → (.+)$/,
+    cn: (m) => '风控等级变更：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    detail: '治理中枢根据市场状况或系统事件自动调整了风控等级。等级越高限制越严。',
+    approve: '同意此风控调整。系统将按新等级执行交易限制。',
+    reject: '认为风控调整不合理。注意：拒绝不会回退风控等级，需在风控治理卡片手动调整。',
+  },
+
+  // ═══ 风控降级批准 RiskGovernor De-escalation (governance_hub.py) ═══
+  { pattern: /^RiskGovernor de-escalation approved: (.+) → (.+)$/,
+    cn: (m) => '风控降级已批准：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    detail: '操作员批准了从高风控等级降低到低风控等级的请求。这意味着系统将恢复更多交易能力。',
+    approve: '确认此降级记录。',
+    reject: '不适用（此记录是已完成的批准操作的审计日志）。',
+  },
+
+  // ═══ 授权状态机转换 Authorization SM (authorization_state_machine.py) ═══
+  { pattern: /^Authorization: (.+) → (.+)$/,
+    cn: (m) => '授权状态变更：' + (_AUTH_STATE_CN[m[1]] || m[1]) + ' → ' + (_AUTH_STATE_CN[m[2]] || m[2]),
+    detail: '授权状态机发生了状态转换。授权控制系统能否执行交易操作。',
+    approve: '同意此授权变更。',
+    reject: '认为此授权变更不应发生。注意：拒绝不会回退状态，需要通过治理操作手动处理。',
+  },
+
+  // ═══ 风控状态机转换 Risk Governor SM (risk_governor_state_machine.py) ═══
+  { pattern: /^RiskGovernor: (.+) → (.+)$/,
+    cn: (m) => '风控治理器状态变更：' + (_RISK_LEVEL_CN[m[1]] || m[1]) + ' → ' + (_RISK_LEVEL_CN[m[2]] || m[2]),
+    detail: '风控治理状态机发生了等级转换。',
+    approve: '同意此风控等级变更。',
+    reject: '标记此变更需要审查。',
+  },
+
+  // ═══ 订单状态转换 OMS Order (oms_state_machine.py) ═══
+  { pattern: /^OmsOrder (.+): (.+) → (.+)$/,
+    cn: (m) => '订单 ' + m[1] + ' 状态变更：' + (_OMS_STATE_CN[m[2]] || m[2]) + ' → ' + (_OMS_STATE_CN[m[3]] || m[3]),
+    detail: '订单管理系统中的订单状态发生了转换。',
+    approve: '确认此订单状态变更正常。',
+    reject: '标记此订单状态变更异常，需要人工检查。',
+  },
+
+  // ═══ 决策租约转换 Decision Lease (decision_lease_state_machine.py) ═══
+  { pattern: /^DecisionLease: (.+) → (.+)$/,
+    cn: (m) => '决策租约状态变更：' + (_LEASE_STATE_CN[m[1]] || m[1]) + ' → ' + (_LEASE_STATE_CN[m[2]] || m[2]),
+    detail: '决策租约控制 AI 的交易执行权限。租约有时效性，过期后 AI 无法执行新交易。',
+    approve: '同意此租约状态变更。',
+    reject: '标记此租约变更异常。',
+  },
+
+  // ═══ 会话熔断-回撤 Session Halt Drawdown (risk_manager.py / paper_trading_engine.py) ═══
+  { pattern: /^Session halted due to drawdown/,
+    cn: () => '交易会话已熔断 — 回撤超过阈值',
+    detail: '当前交易会话的账户回撤（从最高点下跌的幅度）超过了预设的安全阈值，系统自动暂停所有新交易以防止更大损失。',
+    approve: '确认知晓熔断。系统已自动处理。',
+    reject: '不适用（熔断是自动安全机制，无法通过拒绝来取消）。',
+  },
+
+  // ═══ 会话熔断-日损失 Session Halt Daily Loss (risk_manager.py) ═══
+  { pattern: /^Session halted due to daily loss/,
+    cn: () => '交易会话已熔断 — 单日亏损超过阈值',
+    detail: '当日累计亏损超过了预设的安全阈值，系统自动暂停所有新交易。这是防止单日重大损失的保护机制。',
+    approve: '确认知晓熔断。系统已自动处理。',
+    reject: '不适用（熔断是自动安全机制，无法通过拒绝来取消）。',
+  },
+
+  // ═══ 风控参数更新 Risk Config Update (risk_manager.py) ═══
+  { pattern: /^Updated risk config parameter: (.+)$/,
+    cn: (m) => '风控参数已更新：' + m[1],
+    detail: 'AI Agent 或系统修改了风控管理器的配置参数（如仓位大小、止损比例等）。',
+    approve: '同意此参数调整。',
+    reject: '认为此参数调整不合理。注意：拒绝只标记记录，不会自动回退参数值。',
+  },
+
+  // ═══ 白名单增加 Symbol Whitelist Add (governance_routes.py) ═══
+  { pattern: /^Symbol added to (\w+) whitelist: (\w+)$/,
+    cn: (m) => '新增交易对 ' + m[2] + ' 到 ' + _translateComp(m[1]) + ' 白名单',
+    detail: '操作员将一个交易对添加到了允许交易的白名单中。只有白名单中的交易对才能被系统交易。',
+    approve: '确认允许此交易对参与交易。',
+    reject: '拒绝此交易对加入白名单。注意：拒绝只标记记录，交易对可能已经在白名单中生效。',
+  },
+
+  // ═══ 白名单移除 Symbol Whitelist Remove (governance_routes.py) ═══
+  { pattern: /^Symbol removed from (\w+) whitelist: (\w+)$/,
+    cn: (m) => '从 ' + _translateComp(m[1]) + ' 白名单移除交易对 ' + m[2],
+    detail: '操作员将一个交易对从白名单中移除。移除后系统将不再交易此品种。',
+    approve: '确认移除此交易对。',
+    reject: '认为不应移除。注意：拒绝只标记记录，不会自动恢复。',
+  },
+
+  // ═══ PaperLiveGate 评估 (governance_routes.py) ═══
+  { pattern: /^PaperLiveGate evaluation: (.+)$/,
+    cn: (m) => 'Paper→Live 准入评估结果：' + m[1],
+    detail: '系统评估了从 Paper 模拟模式升级到 Live 实盘模式的准备程度。这包括 11 项评估指标（胜率、盈亏比、运行天数等）。',
+    approve: '确认评估结果，同意当前的准入判断。',
+    reject: '对评估结果有异议。这不会改变系统模式，仅标记审计。',
+  },
+
+  // ═══ PaperLiveGate 事件 (phase2_strategy_routes.py) ═══
+  { pattern: /^Gate event: (.+)$/,
+    cn: (m) => 'Paper→Live 门控事件：' + m[1],
+    detail: 'Paper→Live 准入门控系统产生了一个事件。',
+    approve: '确认此事件已知晓。',
+    reject: '标记此事件需要审查。',
+  },
+];
+
+// ── 翻译 what 描述 ──
+function _translateWhat(what) {
+  if (!what) return '（无描述）';
+  for (const rule of _WHAT_RULES) {
+    const m = what.match(rule.pattern);
+    if (m) return typeof rule.cn === 'function' ? rule.cn(m) : rule.cn;
+  }
+  return what; // 无匹配规则时返回原文
+}
+
+// ── 获取审批后果说明 ──
+function _getApprovalGuidance(what) {
+  if (!what) return null;
+  for (const rule of _WHAT_RULES) {
+    if (what.match(rule.pattern)) return rule;
+  }
+  return null;
+}
+
+// ── 格式化 old/new value ──
 function _formatValue(val) {
   if (val == null || val === '--') return '--';
+  // 先尝试翻译单个状态值
+  const translated = _translateStateVal(val);
+  if (translated !== val) return translated + '（' + val + '）';
   try {
     const parsed = JSON.parse(val);
     if (Array.isArray(parsed)) {
       if (parsed.length === 0) return '（空列表）';
-      return parsed.join(', ');
+      if (parsed.length <= 5) return parsed.join(', ');
+      return parsed.slice(0, 5).join(', ') + '… 共 ' + parsed.length + ' 项';
     }
-    if (typeof parsed === 'object') return JSON.stringify(parsed, null, 1);
+    if (typeof parsed === 'object' && parsed !== null) {
+      // 特殊处理常见对象结构
+      if ('session_halted' in parsed) {
+        return parsed.session_halted ? '会话已熔断' + (parsed.halt_reason ? '（' + parsed.halt_reason + '）' : '') : '会话正常';
+      }
+      // 通用对象：转为 key=value 对
+      return Object.entries(parsed).map(([k,v]) => k + '=' + v).join(', ');
+    }
     return String(parsed);
   } catch (_) {
-    return String(val);
+    // 非 JSON，尝试翻译为已知状态
+    const t = _translateStateVal(String(val));
+    return t !== String(val) ? t + '（' + val + '）' : String(val);
   }
-}
-
-// Component name → Chinese
-const _COMP_CN = {
-  risk_manager: '风控管理器', linear: '合约', spot: '现货', inverse: '反向合约',
-  option: '期权', governance_hub: '治理中枢', paper_engine: 'Paper 引擎',
-};
-function _translateComp(c) { return _COMP_CN[c] || c; }
-
-// Who → readable name
-function _translateWho(who) {
-  if (!who) return '--';
-  if (who === 'demo-operator' || who === 'operator') return 'Operator（操作员）';
-  if (who === 'system') return '系统自动';
-  if (who.includes('agent') || who.includes('Agent')) return 'AI Agent';
-  return who;
 }
 
 function renderPendingAudit(changes) {

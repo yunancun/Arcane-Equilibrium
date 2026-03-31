@@ -382,8 +382,8 @@ async function executeConfirmed() {
     await executeModeChange();
     return;
   }
-  closeConfirm();
   const action = _pendingAction;
+  closeConfirm();
   if (!action) return;
 
   if (action === 'paper') {
@@ -392,14 +392,18 @@ async function executeConfirmed() {
     } else {
       await ocPost('/api/v1/paper/session/start', { initial_balance: 100000 });
     }
-    ocToast('Paper Trading ' + (_paperActive ? '已停止' : '已启动'), 'success');
+    _paperActive = !_paperActive;
+    $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+    ocToast('Paper Trading ' + (_paperActive ? '已启动' : '已停止'), 'success');
   } else if (action === 'feed') {
     if (_feedRunning) {
       await ocPost('/api/v1/paper/market-feed/stop', {});
     } else {
       await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
     }
-    ocToast('行情流 ' + (_feedRunning ? '已停止' : '已启动'), 'success');
+    _feedRunning = !_feedRunning;
+    $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
+    ocToast('行情流 ' + (_feedRunning ? '已启动' : '已停止'), 'success');
   } else if (action === 'demo') {
     ocToast('请前往 Bybit Demo 页面查看连接状态', 'info');
   } else if (action === 'scanner') {
@@ -628,7 +632,7 @@ async function loadQuickStatus() {
   try {
     const d = await ocApi('/api/v1/paper/market-feed/status');
     if (d && d.data) {
-      _feedRunning = d.data.running || false;
+      _feedRunning = d.data.dispatcher_running || d.data.running || false;
       $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
     }
   } catch(e) {}

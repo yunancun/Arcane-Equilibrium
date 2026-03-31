@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Paper Trading</title>
+<title>模拟引擎</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
@@ -20,76 +20,73 @@
   .feed-price .price { font-weight: 600; }
 </style>
 
-<!-- ═══ Session Control Bar ═══ -->
+<!-- Session Control Bar / 会话控制栏 -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x1F4B0; Paper Trading Session</span>
+  <span style="font-weight:600">&#x1F4B0; 模拟引擎</span>
   <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
   <span class="spacer" style="flex:1"></span>
-  <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; Start</button>
-  <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; Pause</button>
-  <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; Resume</button>
-  <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; Stop</button>
-  <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">Balance: <strong id="balance-val">--</strong></span>
+  <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
+  <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
+  <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
+  <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止</button>
+  <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
 </div>
 
 <div id="explain-paper"></div>
 
-<!-- ═══ Market Feed Bar ═══ -->
-<div class="oc-card">
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <h3>&#x1F4E1; 实时行情 / Market Feed</h3>
-    <span id="feed-badge" class="oc-chip oc-chip-neutral">--</span>
-    <span style="flex:1"></span>
-    <button class="oc-btn oc-btn-primary" onclick="feedAction('start')" id="btn-feed-start">Start Feed</button>
-    <button class="oc-btn" onclick="feedAction('stop')" id="btn-feed-stop" disabled>Stop Feed</button>
+<!-- Market Feed / 实时行情（默认折叠，只读状态，启停由主仪表盘控制） -->
+<details class="oc-collapse">
+  <summary>&#x1F4E1; 实时行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">--</span></summary>
+  <div class="oc-collapse-body">
+    <div class="feed-prices" id="feed-prices">等待行情数据...</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
   </div>
-  <div class="feed-prices" id="feed-prices">等待行情数据 / Waiting for market data...</div>
-  <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
-</div>
+</details>
 
-<!-- ═══ Account Balance ═══ -->
+<!-- Account Balance / 账户余额 -->
 <div class="oc-card">
   <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
   <div class="oc-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Current Balance</div><div class="oc-metric-val" id="p-bal-current">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="p-bal-drawdown">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="p-bal-available">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">已用保证金 / Margin Used</div><div class="oc-metric-val" id="p-bal-margin">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
   </div>
 </div>
 
-<!-- ═══ PnL Metrics ═══ -->
+<!-- PnL Overview / 盈亏概览 -->
 <div class="oc-card">
   <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
   <div class="oc-metrics" id="pnl-metrics">
-    <div class="oc-metric"><div class="oc-metric-label">Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Total Fees</div><div class="oc-metric-val" id="p-fees">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI Cost</div><div class="oc-metric-val blue" id="p-aicost">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">总手续费 / Total Fees</div><div class="oc-metric-val" id="p-fees">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">AI 成本 / AI Cost</div><div class="oc-metric-val blue" id="p-aicost">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
   </div>
 </div>
 
-<!-- ═══ Positions ═══ -->
+<!-- Positions / 持仓 -->
 <div class="oc-card">
-  <h3>&#x1F4CA; 持仓 / Open Positions</h3>
+  <h3>&#x1F4CA; 持仓 / Positions</h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry Price</th><th>Mark Price</th><th>Unrealized PnL</th><th>Leverage</th></tr></thead>
-      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="7">暂无持仓 / No open positions</td></tr></tbody>
+      <thead><tr><th>交易对</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th></tr></thead>
+      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="7">暂无持仓</td></tr></tbody>
     </table>
   </div>
 </div>
 
-<!-- ═══ Orders + Order Form ═══ -->
+<!-- Orders + Order Form / 订单 -->
 <div class="oc-grid-2">
   <div class="oc-card">
     <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="7">暂无订单 / No orders</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="orders-tbody"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -98,43 +95,45 @@
     <h3>&#x1F4E9; 下单 / Submit Order</h3>
     <div id="explain-order"></div>
     <div class="order-form">
-      <div class="field"><label>Symbol</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
-      <div class="field"><label>Side</label><select class="oc-select" id="o-side"><option value="Buy">Buy / 买</option><option value="Sell">Sell / 卖</option></select></div>
-      <div class="field"><label>Type</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">Market</option><option value="limit">Limit</option></select></div>
-      <div class="field"><label>Qty</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
-      <div class="field" id="price-field" style="display:none"><label>Price</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
-      <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">Submit / 提交</button></div>
+      <div class="field"><label>交易对</label><input class="oc-input" id="o-symbol" value="BTCUSDT" /></div>
+      <div class="field"><label>方向</label><select class="oc-select" id="o-side"><option value="Buy">买入</option><option value="Sell">卖出</option></select></div>
+      <div class="field"><label>类型</label><select class="oc-select" id="o-type" onchange="togglePrice()"><option value="market">市价</option><option value="limit">限价</option></select></div>
+      <div class="field"><label>数量</label><input class="oc-input" id="o-qty" type="number" step="0.001" value="0.01" /></div>
+      <div class="field" id="price-field" style="display:none"><label>价格</label><input class="oc-input" id="o-price" type="number" step="0.01" /></div>
+      <div class="field"><label>&nbsp;</label><button class="oc-btn oc-btn-success" onclick="submitOrder()">提交</button></div>
     </div>
   </div>
 </div>
 
-<!-- ═══ Collapsed Sections ═══ -->
+<!-- Performance Metrics / 性能指标 -->
 <details class="oc-collapse">
   <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
   <div class="oc-collapse-body">
-    <div class="oc-metrics" id="perf-metrics"><div class="oc-loading">Loading...</div></div>
+    <div class="oc-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
   </div>
 </details>
 
+<!-- Fill History / 成交历史 -->
 <details class="oc-collapse">
   <summary>&#x1F4C4; 成交历史 / Fill History（最近 50 笔）</summary>
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th></tr></thead>
-        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
+        <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
+        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
 </details>
 
+<!-- Shadow Decisions / 影子决策 -->
 <details class="oc-collapse">
   <summary>&#x1F50D; 影子决策 / Shadow Decisions</summary>
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Direction</th><th>Source</th><th>Confidence</th><th>Result</th></tr></thead>
-        <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
+        <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>来源</th><th>置信度</th><th>结果</th></tr></thead>
+        <tbody id="shadow-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -143,37 +142,30 @@
 <script>
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-paper').innerHTML = ocExplain(
-  '模拟交易使用真实市场价格但不涉及真实资金。你可以测试策略、练习下单，所有操作都是安全的。绿色数字表示盈利，红色表示亏损。"Net PnL"是扣除手续费和 AI 成本后的净收益。',
-  '模拟引擎使用 Bybit 公共 WebSocket 的实时价格数据。市价单以当前 ticker 价格加上 0.01% 模拟滑点成交。限价单在市场价格穿越指定价格时成交。引擎跟踪三种 PnL：已实现（已平仓）、未实现（持仓按市值计算）、净值（已实现减去手续费和 AI 咨询成本）。'
+  '模拟交易使用真实市场价格但不涉及真实资金。你可以测试策略、练习下单，所有操作都是安全的。绿色数字表示盈利，红色表示亏损。「净盈亏」是扣除手续费和 AI 成本后的净收益。',
+  '模拟引擎使用 Bybit 公共 WebSocket 的实时价格数据。市价单以当前 ticker 价格加上 0.01% 模拟滑点成交。限价单在市场价格穿越指定价格时成交。引擎跟踪三种盈亏：已实现（已平仓）、未实现（持仓按市值计算）、净值（已实现减去手续费和 AI 咨询成本）。'
 );
 
 $('explain-order').innerHTML = ocExplain(
-  '在这里提交模拟订单。选择交易对（如 BTCUSDT）、方向（买入/卖出）、类型（市价/限价）和数量即可。',
-  'Market（市价）订单会以当前市场价格立即成交。Limit（限价）订单需要指定价格，只有当市场价格达到你的指定价格时才会成交。TIF（有效期）支持 GTC（持续有效）、IOC（立即成交或取消）、FOK（全部成交或取消）、PostOnly（只做 Maker）。'
+  '在这里提交模拟订单。选择交易对、方向、类型和数量即可。',
+  '市价订单以当前市场价格立即成交。限价订单需指定价格，只有市场价格达到指定价格时才会成交。'
 );
 
 // ─── Session Actions ──────────────────────────────────────────
 let stateRevision = 0;
+let _cachedPositions = []; // Cache for margin calculation
 
 async function sessionAction(action) {
-  // Paper routes expect simple bodies, not envelope format
   let body = {};
   if (action === 'start') body = { initial_balance: 100000 };
-  // pause/resume/stop need no body — use POST with empty JSON
   const d = await ocPost('/api/v1/paper/session/' + action, body);
   if (d) {
-    ocToast('Session ' + action + ' OK', 'success');
+    const labels = { start: '已启动', pause: '已暂停', resume: '已继续', stop: '已停止' };
+    ocToast('会话' + (labels[action] || action), 'success');
     loadAll();
   } else {
-    ocToast('Session ' + action + ' failed', 'error');
+    ocToast('操作失败', 'error');
   }
-}
-
-async function feedAction(action) {
-  const body = action === 'start' ? { symbols: ['BTCUSDT', 'ETHUSDT'] } : {};
-  const d = await ocPost('/api/v1/paper/market-feed/' + action, body);
-  if (d) { ocToast('Feed ' + action + ' OK', 'success'); loadFeed(); }
-  else ocToast('Feed ' + action + ' failed', 'error');
 }
 
 function togglePrice() {
@@ -189,14 +181,14 @@ async function submitOrder() {
   };
   if ($('o-type').value === 'limit') body.price = parseFloat($('o-price').value);
   const d = await ocPost('/api/v1/paper/order/submit', body);
-  if (d) { ocToast('Order submitted', 'success'); loadOrders(); loadPositions(); }
-  else ocToast('Order submit failed', 'error');
+  if (d) { ocToast('订单已提交', 'success'); loadOrders(); loadPositions(); }
+  else ocToast('下单失败', 'error');
 }
 
 async function cancelOrder(orderId) {
   const d = await ocPost('/api/v1/paper/order/cancel', { order_id: orderId });
-  if (d) { ocToast('Order cancelled', 'success'); loadOrders(); }
-  else ocToast('Cancel failed', 'error');
+  if (d) { ocToast('订单已取消', 'success'); loadOrders(); }
+  else ocToast('取消失败', 'error');
 }
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -206,24 +198,22 @@ async function loadSession() {
   const s = d.data.session;
   const state = s.session_state;
 
-  // Badge
   const badge = $('session-badge');
-  badge.textContent = state;
+  const stateLabels = { active: '运行中', paused: '已暂停', stopped: '已停止', idle: '未启动' };
+  badge.textContent = stateLabels[state] || state;
   if (state === 'active') badge.className = 'oc-chip oc-chip-good';
   else if (state === 'paused') badge.className = 'oc-chip oc-chip-warn';
   else badge.className = 'oc-chip oc-chip-neutral';
 
-  // Buttons
   $('btn-start').disabled = (state === 'active' || state === 'paused');
   $('btn-pause').disabled = (state !== 'active');
   $('btn-resume').disabled = (state !== 'paused');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
 
-  // Balance — show current_balance (updated by loadMetrics); fallback to initial
   if (!$('balance-val').dataset.fromMetrics) {
     $('balance-val').textContent = ocBalance(s.initial_balance || 100000, 0);
   }
-  ocSetText('p-bal-initial', ocBalance(s.initial_balance || 100000, 0));
+  ocSetText('p-bal-initial', ocBalance(s.initial_balance || 100000, 2));
 
   // PnL
   const pnl = d.data.pnl;
@@ -245,10 +235,10 @@ async function loadSession() {
   ocSetText('p-fees', ocBalance(pnl.total_fees_paid || 0, 4));
   ocSetText('p-aicost', ocBalance(pnl.total_ai_cost || 0, 4));
 
-  // Estimated current balance (overridden by loadMetrics if available)
-  if (!$('p-bal-current').dataset.fromMetrics) {
+  // Available balance = initial + realized + unrealized - margin (estimated)
+  if (!$('p-bal-available').dataset.fromMetrics) {
     const estBal = (s.initial_balance || 100000) + (pnl.realized_pnl || 0) + (pnl.unrealized_pnl || 0);
-    ocSetText('p-bal-current', ocBalance(estBal, 2));
+    ocSetText('p-bal-available', ocBalance(estBal, 2));
   }
 
   if (d.data.state_revision) stateRevision = d.data.state_revision;
@@ -257,11 +247,22 @@ async function loadSession() {
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
   if (!d || !d.data) return;
-  // API returns a dict keyed by symbol; convert to array
   const raw = d.data.positions || d.data || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
+  _cachedPositions = positions;
+
+  // Calculate margin used from positions
+  let totalMargin = 0;
+  positions.forEach(p => {
+    const qty = parseFloat(p.qty || 0);
+    const entry = parseFloat(p.avg_entry_price || p.entry_price || 0);
+    const leverage = parseFloat(p.leverage || 1);
+    if (qty > 0 && entry > 0) totalMargin += (qty * entry) / leverage;
+  });
+  ocSetText('p-bal-margin', totalMargin > 0 ? ocBalance(totalMargin, 2) : '$0.00');
+
   if (!positions.length) {
-    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="7">暂无持仓 / No open positions</td></tr>');
+    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="7">暂无持仓</td></tr>');
     return;
   }
   let html = '';
@@ -269,7 +270,6 @@ async function loadPositions() {
     const pnl = p.unrealized_pnl || 0;
     const qty = p.qty || 0;
     const entryPrice = p.avg_entry_price || p.entry_price || 0;
-    // Compute approximate mark price from unrealized PnL
     let markPrice = 0;
     if (qty > 0 && entryPrice > 0) {
       markPrice = p.side === 'Buy'
@@ -277,9 +277,10 @@ async function loadPositions() {
         : entryPrice - pnl / qty;
     }
     const decimals = entryPrice < 1 ? 4 : 2;
+    const sideLabel = p.side === 'Buy' ? '做多' : '做空';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
-    html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(p.side) + '</td>';
+    html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
     html += '<td>' + ocNum(entryPrice, decimals) + '</td>';
     html += '<td>' + (markPrice > 0 ? ocNum(markPrice, decimals) : '--') + '</td>';
@@ -296,19 +297,22 @@ async function loadOrders() {
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
-    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="7">暂无活跃订单 / No active orders</td></tr>');
+    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="7">暂无活跃订单</td></tr>');
     return;
   }
   let html = '';
+  const typeLabels = { market: '市价', limit: '限价' };
+  const stateLabels = { paper_order_working: '挂单中', paper_order_partially_filled: '部分成交' };
   active.forEach(o => {
+    const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
-    html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(o.side) + '</td>';
-    html += '<td>' + ocEsc(o.order_type) + '</td>';
+    html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
+    html += '<td>' + (typeLabels[o.order_type] || ocEsc(o.order_type)) + '</td>';
     html += '<td>' + ocNum(o.qty, 4) + '</td>';
-    html += '<td>' + (o.price ? ocNum(o.price, 2) : 'Market') + '</td>';
-    html += '<td>' + ocEsc(o.state) + '</td>';
-    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="cancelOrder(\'' + o.order_id + '\')">Cancel</button></td>';
+    html += '<td>' + (o.price ? ocNum(o.price, 2) : '市价') + '</td>';
+    html += '<td>' + (stateLabels[o.state] || ocEsc(o.state)) + '</td>';
+    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="cancelOrder(\'' + o.order_id + '\')">取消</button></td>';
     html += '</tr>';
   });
   ocSetHtml('orders-tbody', html);
@@ -318,14 +322,11 @@ async function loadFeed() {
   const d = await ocApi('/api/v1/paper/market-feed/status');
   if (!d || !d.data) return;
   const f = d.data;
-  const running = f.running || f.is_running;
+  const running = f.dispatcher_running || f.running || f.is_running || false;
   const badge = $('feed-badge');
-  badge.textContent = running ? 'Connected' : 'Disconnected';
+  badge.textContent = running ? '已连接' : '未连接';
   badge.className = 'oc-chip ' + (running ? 'oc-chip-good' : 'oc-chip-neutral');
-  $('btn-feed-start').disabled = running;
-  $('btn-feed-stop').disabled = !running;
 
-  // Prices
   const prices = f.prices || f.latest_prices || {};
   if (Object.keys(prices).length) {
     let html = '';
@@ -336,12 +337,13 @@ async function loadFeed() {
     ocSetHtml('feed-prices', html);
   }
 
-  // Stats
-  const stats = [];
-  if (f.tick_count != null) stats.push('Ticks: ' + f.tick_count);
-  if (f.symbols_count != null) stats.push('Symbols: ' + f.symbols_count);
-  if (f.uptime_seconds != null) stats.push('Uptime: ' + Math.round(f.uptime_seconds) + 's');
-  ocSetText('feed-stats', stats.join(' | '));
+  const stats = f.stats || {};
+  const ws = f.ws_listener || {};
+  const items = [];
+  if (stats.total_events_received != null) items.push('Tick 数: ' + stats.total_events_received);
+  if (ws.subscribed_symbols) items.push('交易对: ' + ws.subscribed_symbols.length);
+  if (ws.started_ts_ms) items.push('运行时间: ' + Math.round((Date.now() - ws.started_ts_ms) / 1000) + '秒');
+  ocSetText('feed-stats', items.join(' | '));
 }
 
 async function loadFills() {
@@ -349,15 +351,16 @@ async function loadFills() {
   if (!d || !d.data) return;
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
-    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="6">暂无成交 / No fills</td></tr>');
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
     return;
   }
   let html = '';
   fills.slice(0, 50).forEach(f => {
+    const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
     html += '<tr>';
     html += '<td>' + ocTimeShort(f.ts_ms || f.filled_at || f.timestamp) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
-    html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(f.side) + '</td>';
+    html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(f.qty, 4) + '</td>';
     html += '<td>' + ocNum(f.price, 2) + '</td>';
     html += '<td>' + ocNum(f.fee || 0, 6) + '</td>';
@@ -368,44 +371,52 @@ async function loadFills() {
 
 async function loadMetrics() {
   const d = await ocApi('/api/v1/paper/metrics');
-  if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">No metrics available</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('perf-metrics', '<div class="oc-loading">暂无指标数据</div>'); return; }
   const m = d.data;
-  // Metrics are nested: trade_metrics, drawdown_metrics, holding_period_metrics
   const tm = m.trade_metrics || {};
   const dm = m.drawdown_metrics || {};
   const hm = m.holding_period_metrics || {};
+  const sr = m.sharpe_ratio || {};
+
   let html = '';
   const items = [
-    ['Total Fills', tm.total_fills || m.total_fills],
-    ['Round Trips', tm.total_round_trips || m.total_trades],
-    ['Win Rate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
-    ['Win/Loss Ratio', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
-    ['Max Drawdown', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
-    ['Peak Balance', dm.peak_balance != null ? ocBalance(dm.peak_balance, 2) : null],
-    ['Current Balance', dm.current_balance != null ? ocBalance(dm.current_balance, 2) : null],
-    ['Avg Hold Time', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
-    ['Total Fees', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
-    ['Largest Win', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
-    ['Largest Loss', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
-    ['Avg Loss', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
+    ['总成交笔数', tm.total_fills || m.total_fills],
+    ['完整交易次数', tm.total_round_trips || m.total_trades],
+    ['胜率', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
+    ['盈亏比', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
+    ['最大回撤', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
+    ['峰值余额', dm.peak_balance != null ? ocBalance(dm.peak_balance, 2) : null],
+    ['夏普比率', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
+    ['平均持仓时间', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' 分钟' : null],
+    ['最大单笔盈利', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
+    ['最大单笔亏损', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
+    ['平均亏损', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
+    ['总手续费', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
   ];
   items.forEach(([label, val]) => {
     html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
   });
   ocSetHtml('perf-metrics', '<div class="oc-metrics">' + html + '</div>');
-  ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');
 
-  // Update current balance from metrics (authoritative)
+  // Update PnL card fields from metrics (authoritative source)
+  ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');
+  ocSetText('p-maxdd', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : '--');
+
   if (dm.current_balance != null) {
     const el = $('balance-val');
     el.textContent = ocBalance(dm.current_balance, 0);
     el.dataset.fromMetrics = '1';
-    const elCard = $('p-bal-current');
-    elCard.textContent = ocBalance(dm.current_balance, 2);
-    elCard.dataset.fromMetrics = '1';
+    // Available = current - margin used
+    const margin = _cachedPositions.reduce((s, p) => {
+      const qty = parseFloat(p.qty || 0), entry = parseFloat(p.avg_entry_price || p.entry_price || 0), lev = parseFloat(p.leverage || 1);
+      return s + (qty > 0 && entry > 0 ? (qty * entry) / lev : 0);
+    }, 0);
+    const avail = dm.current_balance - margin;
+    const elAvail = $('p-bal-available');
+    elAvail.textContent = ocBalance(avail, 2);
+    elAvail.dataset.fromMetrics = '1';
   }
   if (dm.peak_balance != null) ocSetText('p-bal-peak', ocBalance(dm.peak_balance, 2));
-  if (dm.max_drawdown_pct != null) ocSetText('p-bal-drawdown', dm.max_drawdown_pct.toFixed(2) + '%');
 }
 
 async function loadShadow() {
@@ -413,15 +424,18 @@ async function loadShadow() {
   if (!d || !d.data) return;
   const decisions = d.data.decisions || d.data || [];
   if (!decisions.length) {
-    ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暂无影子决策 / No shadow decisions</td></tr>');
+    ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暂无影子决策</td></tr>');
     return;
   }
   let html = '';
+  const dirLabels = { long: '做多', short: '做空' };
   decisions.slice(0, 30).forEach(dd => {
+    const dir = dd.direction || '--';
+    const dirLabel = dirLabels[dir] || dir;
     html += '<tr>';
     html += '<td>' + ocTimeShort(dd.timestamp || dd.ts_ms) + '</td>';
     html += '<td>' + ocEsc(dd.symbol || '--') + '</td>';
-    html += '<td class="' + (dd.direction === 'long' ? 'green' : dd.direction === 'short' ? 'red' : '') + '">' + ocEsc(dd.direction || '--') + '</td>';
+    html += '<td class="' + (dd.direction === 'long' ? 'green' : dd.direction === 'short' ? 'red' : '') + '">' + dirLabel + '</td>';
     html += '<td>' + ocEsc(dd.source || '--') + '</td>';
     html += '<td>' + ocNum(dd.confidence, 1) + '</td>';
     html += '<td>' + ocEsc(dd.result || dd.outcome || '--') + '</td>';
@@ -438,6 +452,25 @@ loadAll();
 ocStartRefresh(loadAll, 15000);
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
+
+// Auto-start feed when global mode is observe_only / shadow_only / demo_reserved
+(async function autoStartFeed() {
+  try {
+    const ov = await ocApi('/api/v1/system/overview');
+    if (!ov || !ov.data) return;
+    const gr = ov.data.global_runtime || {};
+    const mode = (gr.derived && gr.derived.global_mode_state) || gr.global_mode_state || '';
+    const autoModes = ['observe_only', 'shadow_only', 'demo_reserved'];
+    if (autoModes.includes(mode)) {
+      const fd = await ocApi('/api/v1/paper/market-feed/status');
+      const running = fd && fd.data && (fd.data.running || fd.data.is_running);
+      if (!running) {
+        await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
+        loadFeed();
+      }
+    }
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>
