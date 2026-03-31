@@ -765,45 +765,27 @@ Wave 6 Sprint 1b：✅ 1B-1 Cooldown smoke test + 1B-2 freshness API + TD-3/TD-4
 
 ---
 
-### 13.5 Sub-Agent 啟動與完成強制協議（自動化記憶系統）
+### 13.5 Sub-Agent Workspace 規則（輕量版）
 
-> **強制規則：每次用 Agent tool 喚起任何 sub-agent，必須在 prompt 中包含啟動序列。每次 sub-agent 完成任務，必須執行完成序列。兩端均不可省略。**
+每個角色在 `docs/CCAgentWorkSpace/{角色代號}/` 下有自己的存儲空間，規則如下：
 
-#### 啟動序列（每次 Agent tool prompt 的開頭必須包含）
+#### 輸出文件存放
 
-```
-你是 {角色代號}（{角色全名}）。在執行任何任務之前，必須先完成以下兩步：
+- sub-agent 產生的報告、分析輸出、審計結論 → 存至 `docs/CCAgentWorkSpace/{角色代號}/workspace/reports/YYYY-MM-DD--描述.md`
+- 最終結論性報告（需要 Operator 閱讀）→ 同時存一份到 `docs/CCAgentWorkSpace/Operator/`
+- 純代碼修復類任務（E1/E1a）→ 不需要寫報告
 
-【Step 1 - 讀取自身記憶】
-讀取：docs/CCAgentWorkSpace/{角色代號}/memory.md
-理解你目前的工作狀態、已知問題、歷史決策。
+#### memory.md 更新（自主判斷，非強制）
 
-【Step 2 - 讀取最近上下文】
-讀取：docs/CCAgentWorkSpace/{角色代號}/workspace/reports/ 目錄中最新的一份報告（按文件名日期排序最後一個）。
-若目錄為空，跳過此步。
+**何時更新**：sub-agent 完成任務後，若有以下情況之一，主動更新 `memory.md`：
+- 做出了影響未來同類任務的架構決策
+- 發現了需要跨 session 記住的風險點或教訓
+- 與其他 Agent 達成了非顯而易見的共識或分歧
 
-完成以上兩步後，再執行以下任務：
-{實際任務內容}
-```
-
-#### 完成序列（每次 sub-agent 完成任務後必須執行）
-
-```
-任務完成後，必須執行以下兩步：
-
-【Step A - 更新記憶】
-更新 docs/CCAgentWorkSpace/{角色代號}/memory.md：
-- 追加本次任務的關鍵發現、重要決策、需要記住的教訓
-- 更新任何已過時的狀態信息
-- 不要刪除歷史記錄，追加到文件末尾
-
-【Step B - 存檔報告】
-若本次任務產生了報告或分析輸出：
-- 存至 docs/CCAgentWorkSpace/{角色代號}/workspace/reports/YYYY-MM-DD--描述.md
-- 同時確認是否需要存一份到 docs/CCAgentWorkSpace/Operator/（僅限最終結論性報告）
-
-若本次任務只是輔助性工作（如純代碼修復），跳過 Step B。
-```
+**何時不需要更新**：
+- 常規代碼修復（結果已在 git 裡）
+- 可從 CLAUDE.md / TODO.md 直接查到的進度信息
+- 只在本次 session 有效的臨時上下文
 
 #### 角色代號 → workspace 路徑對照
 
@@ -817,15 +799,6 @@ Wave 6 Sprint 1b：✅ 1B-1 Cooldown smoke test + 1B-2 freshness API + TD-3/TD-4
 | E1a | `docs/CCAgentWorkSpace/E1a/` | R4 | `docs/CCAgentWorkSpace/R4/` |
 | QA | `docs/CCAgentWorkSpace/QA/` | TW | `docs/CCAgentWorkSpace/TW/` |
 | AI-E | `docs/CCAgentWorkSpace/AI-E/` | | |
-
-#### 記憶更新範圍說明
-
-| 更新到 memory.md | 不需要更新 |
-|----------------|-----------|
-| 角色視角下的關鍵發現與教訓 | 可從代碼/git 直接查到的技術細節 |
-| 重要決策及其原因 | 當前會話臨時上下文 |
-| 與其他 Agent 的分歧或共識 | 已在報告文件中完整記錄的內容（報告存檔即可）|
-| 需要在下次啟動時注意的風險點 | 無法在未來會話中復用的一次性信息 |
 
 ---
 
