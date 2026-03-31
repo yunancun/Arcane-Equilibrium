@@ -175,6 +175,11 @@ async function govRejectAuditChange(changeId, reason) {
   return ocPost(`/api/v1/governance/audit/reject/${changeId}`, { reason: reason || '' });
 }
 
+async function govDismissAllAudit(reason) {
+  // POST /api/v1/governance/audit/dismiss-all — bulk approve all pending
+  return ocPost('/api/v1/governance/audit/dismiss-all', { reason: reason || '' });
+}
+
 async function govGetSymbolWhitelist() {
   // GET /api/v1/governance/symbols/whitelist
   return ocApi('/api/v1/governance/symbols/whitelist');
