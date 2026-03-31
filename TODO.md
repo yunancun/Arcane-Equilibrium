@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-2440 passed / 17 failed（全部 pre-existing） / 23 warnings
+2440 passed / 17 failed（全部 pre-existing） / 23 warnings（Wave 3a 後確認）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/
 命令：python3 -m pytest tests/ -q --tb=no
 ```
@@ -30,7 +30,7 @@
 > 安全閘門缺失，不修復前存在真實攻擊面。
 > **前置確認（PA 已完成）**：SEC-H2（/auth/request）為設計意圖，不修。
 
-### [ ] P0-NEW-1：`governance_routes.py` `/reconcile` 缺少 Operator 角色驗證
+### [x] P0-NEW-1：`governance_routes.py` `/reconcile` 缺少 Operator 角色驗證
 - **檔案**：`app/governance_routes.py`（第 865 行附近 `trigger_manual_reconciliation`）
 - **修復**：函數體開頭添加 `_require_operator_role(actor)`
 - **同步修復**：第 884 行日誌 `actor` → `_sanitize_log(actor.actor_id)`，`body.reason` → `_sanitize_log(body.reason)`
@@ -38,14 +38,14 @@
 - **工時**：30m
 - **E1 指派**：E1-Alpha
 
-### [ ] P0-NEW-2：`governance_routes.py` logger 重複/錯序參數
+### [x] P0-NEW-2：`governance_routes.py` logger 重複/錯序參數
 - **檔案**：`app/governance_routes.py`（第 496-500 行，`request_authorization`）
 - **問題**：中文格式字串的 `auth_id` 和 `actor.actor_id` 順序對調，造成日誌顯示誤導
 - **修復**：統一參數順序或拆為兩條獨立日誌
 - **工時**：10m
 - **E1 指派**：E1-Alpha（與 P0-NEW-1 同文件，合併執行）
 
-### [ ] P0-NEW-3：`governance_routes.py` 18+ 處 `detail=str(e)` 洩漏內部錯誤
+### [x] P0-NEW-3：`governance_routes.py` 18+ 處 `detail=str(e)` 洩漏內部錯誤
 - **檔案**：`app/governance_routes.py`（第 288/446/636/910/935/1038/1065/1107/1145/1186/1433/1477/1504/1550/1590/1627/1654/1732 行，共 18 處）
 - **修復**：全部改為 `detail="Internal server error"`，保留 server-side `logger.error(..., exc_info=True)`
 - **⚠️ 副作用**：E4 中斷言錯誤訊息內容的測試需同步更新（修復後不再含原始異常字符串）
@@ -261,6 +261,7 @@ Phase 4（5+21天）：
 ## 已完成記錄（可查 git log）
 
 ```
+c6a8845 — fix(security): Wave 3a — /reconcile Operator 角色驗證 + 錯誤信息屏蔽
 ec0e794 — fix(security): P0+P1 Wave 0-2 安全修復第一批（16 files）
 c113ab2 — fix(security): P0 Wave 0-2 安全修復第二批 — paper_engine + pipeline_bridge（10 files）
 7f1324f — docs(CLAUDE.md): 更新至 Wave 0-2 全部完成狀態 + 15 角色工作鏈
@@ -268,4 +269,5 @@ c113ab2 — fix(security): P0 Wave 0-2 安全修復第二批 — paper_engine + 
 Wave 0：✅ P0（5項）+ P1（5項）全部完成（E2+E4 通過）
 Wave 1：✅ PA-4.3 DI 統一（26 Depends）+ HTTPException 穿透（E2+E4 通過）
 Wave 2：✅ P0-8/P1-1/P1-2/P1-6/P1-8/P1-9/P1-13/P1-18 全部完成（E2+E4 通過）
+Wave 3a：✅ P0-NEW-1/2/3 全部完成（E2+E4 通過，2026-03-31）
 ```
