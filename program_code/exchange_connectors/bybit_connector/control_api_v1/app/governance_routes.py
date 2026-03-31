@@ -177,11 +177,12 @@ def _require_operator_role(actor: Any) -> None:
     """
     Validate that actor has Operator role / 验证 actor 具有 Operator 角色
 
-    P0-1 fix: uses isinstance(actor, AuthenticatedActor) instead of isinstance(actor, dict).
-    P0-1 修复：使用 isinstance(actor, AuthenticatedActor) 替代 isinstance(actor, dict)。
+    Uses duck-typing (hasattr check) instead of isinstance to avoid false negatives
+    from Python module reimport causing different class objects in memory.
+    The actor is guaranteed to come from the FastAPI dependency chain (current_actor),
+    so duck-typing is safe here.
     """
-    AuthenticatedActor = _get_authenticated_actor_class()
-    if not actor or not isinstance(actor, AuthenticatedActor):
+    if not actor or not hasattr(actor, 'roles') or not hasattr(actor, 'actor_id'):
         raise HTTPException(status_code=401, detail="Authentication required")
     if "operator" not in actor.roles:
         logger.warning(

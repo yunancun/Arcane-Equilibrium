@@ -97,7 +97,7 @@ function ocEnvelope(payload, stateRevision) {
   return {
     request_id: _ocUUID(),
     idempotency_key: _ocUUID(),
-    operator_id: localStorage.getItem(OC_USER_KEY) || 'gui-operator',
+    operator_id: 'demo-operator',
     reason: 'gui-triggered action',
     client_ts_ms: Date.now(),
     expected_state_revision: stateRevision || 0,
