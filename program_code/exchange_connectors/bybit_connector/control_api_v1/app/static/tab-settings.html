@@ -35,11 +35,14 @@
 
 <!-- ═══ Quick Actions ═══ -->
 <div class="oc-card">
-  <h3>&#x26A1; 快捷操作 / Quick Actions</h3>
+  <h3>&#x26A1; 全局模式控制 / Global Mode Control</h3>
   <div id="explain-actions"></div>
+  <div style="margin:8px 0 6px;font-size:12px;color:var(--text-dim)">
+    當前模式 Current Mode: <strong id="qa-current-mode" style="color:var(--accent)">--</strong>
+  </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-    <button class="oc-btn" onclick="configAction('set-demo-mode')">Set Demo Reserved</button>
-    <button class="oc-btn" onclick="configAction('enable-spot')">Enable Spot Shadow</button>
+    <button class="oc-btn" id="btn-set-demo" onclick="configAction('set-demo-mode')">Set Demo Reserved</button>
+    <button class="oc-btn" id="btn-enable-spot" onclick="configAction('enable-spot')">Enable Spot Shadow</button>
   </div>
 </div>
 
@@ -409,10 +412,22 @@ async function configAction(action) {
     ];
   }
 
+  // Disable button during request
+  const btnId = action === 'set-demo-mode' ? 'btn-set-demo' : 'btn-enable-spot';
+  const btn = document.getElementById(btnId);
+  if (btn) { btn.disabled = true; btn.textContent += ' ...'; }
+
   const body = ocEnvelope({ changes: changes }, stateRevision);
   const d = await ocPost('/api/v1/input/config-change', body);
-  if (d) { ocToast('Config change OK', 'success'); if (d.state_revision) stateRevision = d.state_revision; loadAll(); }
-  else ocToast('Config change failed', 'error');
+
+  if (btn) btn.disabled = false;
+  if (d) {
+    ocToast('Config change OK', 'success');
+    if (d.state_revision) stateRevision = d.state_revision;
+    await loadAll();
+  } else {
+    if (btn) btn.textContent = btn.textContent.replace(' ...', '');
+  }
 }
 
 async function submitCost() {
@@ -439,9 +454,13 @@ async function submitPnl() {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadControlPlane() {
-  const d = await ocApi('/api/v1/system/control-plane');
-  if (!d || !d.data) return;
-  const cp = d.data;
+  const [cpRes, ovRes] = await Promise.all([
+    ocApi('/api/v1/system/control-plane'),
+    ocApi('/api/v1/system/overview'),
+  ]);
+
+  const cp = (cpRes && cpRes.data) || {};
+  const ov = (ovRes && ovRes.data) || {};
 
   ocSetText('dc-state', cp.demo_state || cp.demo_state_switch || '--');
   ocSetText('dc-valid', cp.demo_validated ? 'Passed' : 'Not Validated');
@@ -450,8 +469,33 @@ async function loadControlPlane() {
 
   if (cp.state_revision) stateRevision = cp.state_revision;
 
+  // Get global mode from overview (global_runtime.global_mode_state)
+  const gr = ov.global_runtime || {};
+  const mode = (gr.derived && gr.derived.global_mode_state)
+    || gr.global_mode_state
+    || (gr.controls && gr.controls.global_execution_mode_switch)
+    || '';
+
+  const modeEl = document.getElementById('qa-current-mode');
+  if (modeEl) {
+    const modeLabels = { disabled: '禁用 Disabled', demo_reserved: 'Demo 預留', shadow_only: '影子模式', observe_only: '觀察模式', design_only: '僅設計' };
+    modeEl.textContent = modeLabels[mode] || mode || '--';
+    modeEl.style.color = mode === 'demo_reserved' ? 'var(--green)' : 'var(--accent)';
+  }
+  const btnDemo = document.getElementById('btn-set-demo');
+  if (btnDemo) {
+    if (mode === 'demo_reserved') {
+      btnDemo.className = 'oc-btn oc-btn-success';
+      btnDemo.textContent = '✔ Demo Reserved (已啟用)';
+    } else {
+      btnDemo.className = 'oc-btn';
+      btnDemo.textContent = 'Set Demo Reserved';
+    }
+  }
+
   // Debug
   ocSetText('debug-cp', JSON.stringify(cp, null, 2));
+  ocSetText('debug-ov', JSON.stringify(ov, null, 2));
 }
 
 async function loadProductFamilyConfig() {
@@ -476,12 +520,9 @@ async function loadProductFamilyConfig() {
 }
 
 async function loadDebug() {
-  const [ov, audit] = await Promise.allSettled([
-    ocApi('/api/v1/system/overview'),
-    ocApi('/api/v1/system/audit-summary'),
-  ]);
-  if (ov.status === 'fulfilled' && ov.value) ocSetText('debug-ov', JSON.stringify(ov.value.data, null, 2));
-  if (audit.status === 'fulfilled' && audit.value) ocSetText('debug-audit', JSON.stringify(audit.value.data, null, 2));
+  // overview debug is now populated by loadControlPlane(), only fetch audit here
+  const audit = await ocApi('/api/v1/system/audit-summary');
+  if (audit && audit.data) ocSetText('debug-audit', JSON.stringify(audit.data, null, 2));
 }
 
 async function loadAll() {

@@ -319,13 +319,35 @@ function ocExplain(simple, deep) {
 }
 
 // ─── Toast Notification ──────────────────────────────────────────────────────
+const _ocToasts = [];
 function ocToast(msg, type) {
   const toast = document.createElement('div');
   toast.className = 'oc-toast oc-toast-' + (type || 'info');
   toast.textContent = msg;
   document.body.appendChild(toast);
-  setTimeout(() => toast.classList.add('show'), 10);
-  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+  _ocToasts.push(toast);
+  // Position before show so offsetHeight is available after DOM insertion
+  _ocRepositionToasts();
+  requestAnimationFrame(() => {
+    _ocRepositionToasts();
+    toast.classList.add('show');
+  });
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      toast.remove();
+      const idx = _ocToasts.indexOf(toast);
+      if (idx !== -1) _ocToasts.splice(idx, 1);
+      _ocRepositionToasts();
+    }, 300);
+  }, 3500);
+}
+function _ocRepositionToasts() {
+  let bottom = 20;
+  for (let i = _ocToasts.length - 1; i >= 0; i--) {
+    _ocToasts[i].style.bottom = bottom + 'px';
+    bottom += (_ocToasts[i].offsetHeight || 40) + 8;
+  }
 }
 
 // ─── Tab Page Base CSS (injected by each tab) ────────────────────────────────
@@ -435,9 +457,9 @@ function ocInjectBaseCSS() {
     .oc-sep { border: none; border-top: 1px solid #21262d; margin: 14px 0; }
 
     /* Toast */
-    .oc-toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 18px;
+    .oc-toast { position: fixed; right: 20px; padding: 10px 18px;
       border-radius: 8px; font-size: 13px; z-index: 9999; transform: translateY(20px);
-      opacity: 0; transition: all 0.3s; pointer-events: none; }
+      opacity: 0; transition: all 0.3s; pointer-events: none; max-width: 420px; word-break: break-word; }
     .oc-toast.show { transform: translateY(0); opacity: 1; }
     .oc-toast-info { background: #1f2937; color: var(--text); border: 1px solid var(--border); }
     .oc-toast-success { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
