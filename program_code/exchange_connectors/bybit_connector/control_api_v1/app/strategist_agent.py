@@ -574,12 +574,37 @@ class StrategistAgent:
         direction = "long" if intel.sentiment == SentimentScore.POSITIVE else "short"
 
         for symbol in intel.symbols:
+            # Apply strategy preference weight learned from TruthSourceRegistry (Principle 12)
+            # 應用來自 TruthSourceRegistry 學習所得的策略偏好權重（原則 12 持續進化）
+            # Weight > 1.0 = preferred by backtest evidence; < 1.0 = avoid.
+            # 權重 > 1.0 表示回測證據偏好；< 1.0 表示應迴避。
+            # Strategy key: try symbol-level first, then "strategist_ai" / "strategist_heuristic"
+            # 策略鍵：先嘗試幣種級別，再用 evaluation.source 對應的策略名稱
+            strategy_key = f"{evaluation.source}_{symbol}" if evaluation.source else symbol
+            weight = self._strategy_preference_weights.get(strategy_key, None)
+            if weight is None:
+                # Fallback to source-based strategy key (e.g. "strategist_ai" or "strategist_heuristic")
+                # 回退到基於 source 的策略鍵
+                source_key = "strategist_ai" if evaluation.source == "ai" else "strategist_heuristic"
+                weight = self._strategy_preference_weights.get(source_key, 1.0)
+            # Clamp adjusted_confidence to [0.0, 1.0]; weight range is [0.2, 2.0] (enforced by _apply_pattern_insight)
+            # 限幅 adjusted_confidence 至 [0.0, 1.0]；權重範圍 [0.2, 2.0] 由 _apply_pattern_insight 保證
+            adjusted_confidence = min(1.0, evaluation.confidence * weight)
+            if adjusted_confidence != evaluation.confidence:
+                logger.debug(
+                    "Strategy weight applied for %s: %.2f × %.2f = %.2f / "
+                    "策略偏好權重已應用：原始置信度 %.2f × 權重 %.2f = 調整後 %.2f",
+                    symbol, evaluation.confidence, weight, adjusted_confidence,
+                    evaluation.confidence, weight, adjusted_confidence,
+                )
+            # Use weight-adjusted confidence for TradeIntent; raw confidence preserved in metadata
+            # 使用調整後的置信度構建 TradeIntent；原始置信度保留在 metadata 以便審計
             intent = TradeIntent(
                 symbol=symbol,
                 strategy="strategist_ai" if evaluation.source == "ai" else "strategist_heuristic",
                 direction=direction,
                 size=self.config.default_size,
-                confidence=evaluation.confidence,
+                confidence=adjusted_confidence,  # weight-adjusted / 經策略偏好權重調整
                 thesis=f"Scout intel: {intel.content[:100]}",
                 invalidation_condition=f"Edge confidence drops below {self.config.min_confidence}",
                 data_quality=intel.data_quality,
@@ -587,6 +612,8 @@ class StrategistAgent:
                     "intel_id": intel.intel_id,
                     "evaluation_source": evaluation.source,
                     "evaluation_reason": evaluation.reason,
+                    "raw_confidence": evaluation.confidence,       # original pre-weight / 調整前原始值
+                    "strategy_weight": weight,                     # applied weight / 實際乘數
                     "shadow": self.config.shadow,
                 },
             )
@@ -597,9 +624,11 @@ class StrategistAgent:
                     self._stats["intents_shadow_logged"] += 1
                 self._audit("shadow_intent", intent.to_dict())
                 logger.info(
-                    "SHADOW intent: %s %s %s conf=%.2f / 影子 intent: %s %s",
+                    "SHADOW intent: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
+                    "影子 intent: %s %s 調整置信度=%.2f",
                     symbol, direction, evaluation.source,
-                    evaluation.confidence, symbol, direction,
+                    adjusted_confidence, evaluation.confidence, weight,
+                    symbol, direction, adjusted_confidence,
                 )
             else:
                 # Live mode: send intent to Guardian via bus (MessageBus is the authoritative path)
@@ -625,8 +654,11 @@ class StrategistAgent:
 
                 self._audit("intent_produced", intent.to_dict())
                 logger.info(
-                    "TradeIntent produced: %s %s %s conf=%.2f / TradeIntent 已产出",
-                    symbol, direction, evaluation.source, evaluation.confidence,
+                    "TradeIntent produced: %s %s %s conf=%.2f (raw=%.2f weight=%.2f) / "
+                    "TradeIntent 已產出：調整置信度=%.2f",
+                    symbol, direction, evaluation.source,
+                    adjusted_confidence, evaluation.confidence, weight,
+                    adjusted_confidence,
                 )
 
     def _handle_risk_verdict(self, message: AgentMessage) -> None:

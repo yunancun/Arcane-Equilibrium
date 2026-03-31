@@ -205,7 +205,7 @@ class MarketScanner:
 
         logger.info(
             "Market scan: %d tickers → %d opportunities (top: %s) / 市场扫描完成",
-            len(tickers), len(top),
+            len(all_tickers), len(top),
             ", ".join(f"{o.symbol}({o.category}:{o.score:.0f})" for o in top[:3]),
         )
 

@@ -391,28 +391,111 @@ class AnalystAgent:
         """
         self._truth_registry = registry
 
+    # 已知策略名稱清單，供從 pattern_text 中提取策略名使用
+    # Known strategy names used to extract applies_to_strategy from pattern_text
+    _KNOWN_STRATEGIES = frozenset([
+        "ma_crossover", "grid", "bb_reversion", "bb_breakout", "funding_arb",
+    ])
+
+    @staticmethod
+    def _extract_strategy_from_pattern(pattern_text: str) -> str:
+        """
+        Extract a strategy key from pattern text for use as applies_to_strategy.
+        從 pattern 文字中提取策略 key，作為 applies_to_strategy 使用。
+
+        Priority:
+          1. If a known strategy name appears in the text, return it directly.
+          2. Otherwise, derive a stable slug from the first 40 chars of pattern_text.
+             This ensures registration still happens (total_registered > 0) while
+             never injecting "all" which is silently skipped by StrategistAgent.
+
+        優先順序：
+          1. 如果文字包含已知策略名，直接返回。
+          2. 否則，從 pattern_text 前 40 字元衍生穩定 slug，確保聲明能被登記。
+             絕不回退到 "all"，因為 StrategistAgent._apply_pattern_insight() 明確跳過
+             applies_to_strategy=="all" 的聲明，會導致所有聲明靜默丟失。
+
+        StrategistAgent._strategy_preference_weights 使用 .get(strategy, 1.0) 回退，
+        因此未知的 slug key 完全安全，不會崩潰。
+        StrategistAgent uses .get(strategy, 1.0) fallback, so an unknown slug key
+        is completely safe and won't cause any errors.
+        """
+        lower = pattern_text.lower()
+        # 優先：從已知策略名中匹配 / Priority: match against known strategy names
+        for strategy in AnalystAgent._KNOWN_STRATEGIES:
+            if strategy in lower:
+                return strategy
+        # 回退：從前 40 字元衍生穩定 slug（去掉空格/特殊字元，轉小寫）
+        # Fallback: derive a stable slug from first 40 chars (strip spaces/special chars, lowercase)
+        import re as _re
+        slug = _re.sub(r"[^a-z0-9_]", "_", lower[:40]).strip("_")
+        # 確保 slug 非空且不等於 "all" / Ensure slug is non-empty and not "all"
+        return slug if slug and slug != "all" else "generic_pattern"
+
     def _register_pattern_claims(self, insight: Any) -> None:
         """
         Register winning/losing patterns from insight into TruthSourceRegistry.
         將洞察中的贏/輸模式登記到知識登記表。
 
+        - winning_patterns: registered with confidence derived from observation count.
+          贏模式：置信度由觀察數推算。
+        - losing_patterns: registered with inverted confidence (fixed 0.4) and
+          "losing: " prefix so StrategistAgent can identify them as negative signals.
+          輸模式：反轉置信度（固定 0.4），加 "losing: " 前綴，讓 StrategistAgent 識別為負向信號。
+        - applies_to_strategy is extracted via _extract_strategy_from_pattern(); this method
+          never returns "all" to avoid silent skip in StrategistAgent._apply_pattern_insight().
+          applies_to_strategy 通過 _extract_strategy_from_pattern() 提取，
+          該方法永不返回 "all"，避免 StrategistAgent 靜默跳過所有聲明。
+
         Fail-open: any error → log warning, never raises.
         失敗開放：任何異常 → 記錄警告，不向上拋出。
         """
         if self._truth_registry is None:
+            # registry 未注入，正常運行，直接返回（fail-open）
+            # registry not injected — normal operation, return silently (fail-open)
             return
         try:
             n_obs = len(self._records)
-            confidence = min(0.85, 0.5 + n_obs * 0.001)
+            # 置信度上限 0.85（原則 7：AI 輸出永遠不是 FACT）
+            # Confidence capped at 0.85 (Principle 7: AI output is never FACT)
+            win_confidence = min(0.85, 0.5 + n_obs * 0.001)
+
+            # ── 贏模式登記 / Register winning patterns ──
             for pattern_text in (getattr(insight, "winning_patterns", None) or []):
+                pt_str = str(pattern_text)
+                # 提取策略 key；_extract_strategy_from_pattern 永不返回 "all"
+                # Extract strategy key; _extract_strategy_from_pattern never returns "all"
+                strategy = self._extract_strategy_from_pattern(pt_str)
                 self._truth_registry.register_claim(
-                    pattern_text=str(pattern_text),
+                    pattern_text=pt_str,
                     evidence_source="ai",
                     observation_count=n_obs,
-                    confidence=confidence,
+                    confidence=win_confidence,
                     applies_to_regime="all",
-                    applies_to_strategy="all",
+                    applies_to_strategy=strategy,
                 )
+
+            # ── 輸模式登記 / Register losing patterns ──
+            # 置信度反轉：輸模式固定使用低置信度 0.4，讓 StrategistAgent 降低對應策略偏好
+            # Confidence inverted: losing patterns use fixed low confidence 0.4
+            # so StrategistAgent reduces preference for those strategies
+            losing_confidence = 0.4
+            for pattern_text in (getattr(insight, "losing_patterns", None) or []):
+                pt_str = str(pattern_text)
+                # 提取策略 key，不使用 "all"
+                # Extract strategy key, never "all"
+                strategy = self._extract_strategy_from_pattern(pt_str)
+                # 加 "losing: " 前綴，讓 StrategistAgent._apply_pattern_insight() 識別為負向信號
+                # Prefix with "losing: " so StrategistAgent identifies it as a negative signal
+                self._truth_registry.register_claim(
+                    pattern_text=f"losing: {pt_str}",
+                    evidence_source="ai",
+                    observation_count=n_obs,
+                    confidence=losing_confidence,
+                    applies_to_regime="all",
+                    applies_to_strategy=strategy,
+                )
+
         except Exception as e:
             logger.warning("_register_pattern_claims failed (fail-open): %s", e)
 
@@ -522,6 +605,10 @@ class AnalystAgent:
         with self._lock:
             self._pattern_insights.append(insight)
 
+        # 在發送給 Strategist 前，先登記模式聲明到 TruthSourceRegistry（若已注入）
+        # Register pattern claims into TruthSourceRegistry before sending to Strategist
+        self._register_pattern_claims(insight)
+
         # Send to Strategist / 发送给 Strategist
         if self.bus:
             msg = AgentMessage(
@@ -586,6 +673,10 @@ class AnalystAgent:
 
         with self._lock:
             self._pattern_insights.append(insight)
+
+        # 在發送給 Strategist 前，先登記模式聲明到 TruthSourceRegistry（若已注入）
+        # Register pattern claims into TruthSourceRegistry before sending to Strategist
+        self._register_pattern_claims(insight)
 
         # Send to Strategist / 发送给 Strategist
         if self.bus:

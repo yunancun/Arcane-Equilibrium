@@ -176,6 +176,10 @@ app.include_router(governance_router)
 from .scout_routes import scout_router  # noqa: E402
 app.include_router(scout_router)
 
+# ── Backtest Engine Router / 回測引擎路由注册 ──
+from .backtest_routes import router as backtest_router  # noqa: E402
+app.include_router(backtest_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
