@@ -178,6 +178,7 @@ def _make_hub(status: MagicMock | None = None, enabled: bool = True) -> MagicMoc
     hub = MagicMock()
     hub._enabled = enabled
     hub.is_enabled.return_value = enabled
+    hub.is_globally_enabled.return_value = enabled
     hub.is_authorized.return_value = True
     hub._authorization_sm = MagicMock()
     hub._risk_governor_sm = None
@@ -570,7 +571,6 @@ class TestRequestAuthorization:
     def test_hub_disabled_raises_403(self):
         actor = _make_actor()
         hub = _make_hub(enabled=False)
-        hub._enabled = False
         with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
             with pytest.raises(HTTPException) as exc:
                 request_authorization(body=self._make_body(), actor=actor)
@@ -1148,7 +1148,6 @@ class TestTriggerManualReconciliation:
     def test_hub_disabled_raises_403(self):
         actor = _make_actor()
         hub = _make_hub(enabled=False)
-        hub.is_enabled.return_value = False
         with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
             with pytest.raises(HTTPException) as exc:
                 trigger_manual_reconciliation(body=self._make_body(), actor=actor)
@@ -1221,7 +1220,6 @@ class TestRequestDeEscalation:
     def test_hub_disabled_raises_403(self):
         actor = _make_actor()
         hub = _make_hub(enabled=False)
-        hub._enabled = False
         with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
             with pytest.raises(HTTPException) as exc:
                 request_de_escalation(body=self._make_body(), actor=actor)
@@ -1308,7 +1306,9 @@ class TestGetH0GateStatusFreshnessFields:
         # freshness_age_ms 應大約為 100ms（容許 CI 下 500ms 誤差）
         assert result["freshness_age_ms"] is not None
         assert result["freshness_age_ms"] >= 0
-        assert result["data_quality_warn_only"] is True
+        # Sprint 5a: H0Gate is fail-closed (not advisory) — value changed True→False
+        # Sprint 5a: H0Gate 為 fail-closed（非 warn-only），值已更新為 False
+        assert result["data_quality_warn_only"] is False
 
     def test_freshness_age_ms_is_none_when_no_price_data(self):
         """
@@ -1333,7 +1333,9 @@ class TestGetH0GateStatusFreshnessFields:
         assert result["ok"] is True
         assert result["freshness_age_ms"] is None
         assert result["freshness_score"] is None
-        assert result["data_quality_warn_only"] is True
+        # Sprint 5a: H0Gate is fail-closed (not advisory) — value changed True→False
+        # Sprint 5a: H0Gate 為 fail-closed（非 warn-only），值已更新為 False
+        assert result["data_quality_warn_only"] is False
 
     def test_h0_gate_unavailable_raises_503(self):
         """

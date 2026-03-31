@@ -84,6 +84,22 @@ class TestHubInitialization:
             hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
             assert hub._enabled
 
+    def test_is_globally_enabled_true(self, tmp_audit_dir):
+        """
+        is_globally_enabled() returns True when hub is enabled.
+        hub 啟用時，is_globally_enabled() 應返回 True。
+        """
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        assert hub.is_globally_enabled() is True
+
+    def test_is_globally_enabled_false(self, tmp_audit_dir):
+        """
+        is_globally_enabled() returns False when hub is disabled.
+        hub 禁用時，is_globally_enabled() 應返回 False。
+        """
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=False)
+        assert hub.is_globally_enabled() is False
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test: Authorization Gate

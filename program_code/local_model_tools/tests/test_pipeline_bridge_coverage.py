@@ -1336,5 +1336,97 @@ class TestH0GateBlocking:
             f"but changed from {baseline} to {after_count}"
         )
 
+    def test_h0_gate_none_intent_continues_fail_open(self):
+        """
+        When H0Gate is None (not set), intent must proceed normally through the pipeline.
+        Verifies fail-open backward-compat: removing the gate must not break existing flows.
+        H0Gate 未設置（None）時，intent 必須正常繼續流過管線。
+        驗證 fail-open 向後兼容：移除門控不得中斷現有交易流程。
+
+        Arrange:
+          - PipelineBridge with no H0Gate set (default None)
+        Act:
+          - Submit one intent via _process_pending_intents()
+        Assert:
+          - intent reaches engine (submitted_orders has 1 entry)
+          - intents_h0_blocked == 0 (gate is absent, not blocking)
+        """
+        # Arrange: no h0_gate set → self._h0_gate is None
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        # Do NOT call bridge.set_h0_gate() — gate stays None
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+
+        # Act
+        bridge._process_pending_intents()
+
+        # Assert: intent reaches engine despite H0Gate=None (fail-open)
+        # H0Gate=None → intent 正常到達引擎（fail-open，不中斷流程）
+        assert len(engine.submitted_orders) == 1, (
+            "With H0Gate=None, intent should reach engine (fail-open behavior)"
+        )
+        stats = bridge.get_stats()
+        assert stats.get("intents_h0_blocked", 0) == 0, (
+            "intents_h0_blocked must be 0 when H0Gate is None"
+        )
+
+    def test_h0_gate_data_quality_freshness_fail_blocks_intent(self):
+        """
+        When H0Gate returns allowed=False with check_name='freshness' (data quality failure),
+        the intent must be skipped — same fail-closed path as all other H0 check failures.
+        This confirms data_quality checks are NOT warn-only: they are blocking.
+
+        H0Gate 返回 allowed=False 且 check_name='freshness'（數據品質失敗）時，
+        intent 必須被跳過——與其他 H0 子檢查失敗路徑相同（fail-closed）。
+        確認 data_quality 檢查非 warn-only：為強制阻擋。
+
+        Arrange:
+          - H0Gate mock returning allowed=False, check_name='freshness'
+            (simulates stale data quality failure)
+        Act:
+          - Submit one intent
+        Assert:
+          - intent does NOT reach engine (submitted_orders is empty)
+          - intents_h0_blocked increments by 1
+        """
+        # Arrange: mock H0Gate reporting freshness/data-quality failure
+        # 模擬 H0Gate 報告數據新鮮度失敗（data quality check 失敗）
+        gate = MagicMock()
+        result = MagicMock()
+        result.allowed = False
+        result.check_name = "freshness"   # data quality sub-check
+        result.reason = "data_stale_BTCUSDT_5000ms"
+        result.latency_us = 10
+        gate.check.return_value = result
+
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        bridge.set_h0_gate(gate)
+
+        stats_before = bridge.get_stats()
+        baseline = stats_before.get("intents_h0_blocked", 0)
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+
+        # Act
+        bridge._process_pending_intents()
+
+        # Assert: freshness (data quality) failure → intent blocked, NOT warn-only
+        # 數據新鮮度失敗 → intent 被阻擋，確認非 warn-only 行為
+        assert len(engine.submitted_orders) == 0, (
+            "H0Gate freshness/data-quality failure must block intent (fail-closed, not warn-only)"
+        )
+        stats_after = bridge.get_stats()
+        after_count = stats_after.get("intents_h0_blocked", 0)
+        assert after_count == baseline + 1, (
+            f"intents_h0_blocked must increment on freshness failure: "
+            f"expected {baseline + 1}, got {after_count}"
+        )
+
 
 # (pytest imported at top of file)

@@ -274,7 +274,7 @@ class GlobalRiskConfig:
     max_take_profit_pct: float = 20.0
 
     # Position sizing
-    max_single_position_pct: float = 10.0
+    max_single_position_pct: float = 15.0
     max_total_exposure_pct: float = 50.0
     max_correlated_exposure_pct: float = 30.0
     max_leverage: float = 20.0

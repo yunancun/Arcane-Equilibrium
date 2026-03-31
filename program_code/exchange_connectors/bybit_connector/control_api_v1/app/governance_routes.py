@@ -507,7 +507,7 @@ def request_authorization(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -577,7 +577,7 @@ def approve_authorization(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -693,7 +693,7 @@ def override_risk_level(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -810,7 +810,7 @@ def request_de_escalation(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -868,7 +868,7 @@ def approve_de_escalation_request(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -923,7 +923,7 @@ def trigger_manual_reconciliation(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub.is_enabled():
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -1003,7 +1003,7 @@ def approve_recovery_request(
     if hub is None:
         raise HTTPException(status_code=503, detail="Governance hub not available")
 
-    if not hub._enabled:
+    if not hub.is_globally_enabled():
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
@@ -1903,12 +1903,17 @@ def get_h0_gate_status(
             "message": "h0_gate_status",
             "data": state,
             # Freshness diagnostic fields (1B-2 / H0Gate API extension):
-            # These are advisory — freshness is currently warn-only in the pipeline.
+            # NOTE: freshness is BLOCKING in the pipeline (fail-closed since Sprint 5a).
+            # H0Gate.check() returning allowed=False causes intent to be skipped via `continue`.
+            # This field is retained for API backward compatibility but the value reflects
+            # the current enforced state: False = fail-closed, NOT advisory.
             # 新鮮度診斷字段（1B-2 / H0Gate API 擴充）：
-            # 僅供參考，freshness 目前在管線中為 warn-only 模式。
+            # 注意：freshness 在管線中為 fail-closed（Sprint 5a 起正式阻擋）。
+            # H0Gate.check() 返回 allowed=False 時 intent 被跳過（continue）。
+            # 此字段保留以維持 API 向後兼容，值已更新為 False 反映實際強制狀態。
             "freshness_age_ms": freshness_age_ms,
             "freshness_score": freshness_score,
-            "data_quality_warn_only": True,  # freshness is currently advisory-only / freshness 目前為 warn-only 模式
+            "data_quality_warn_only": False,  # fail-closed since Sprint 5a — NOT advisory / Sprint 5a 起為強制 fail-closed
         }
     except HTTPException:
         raise

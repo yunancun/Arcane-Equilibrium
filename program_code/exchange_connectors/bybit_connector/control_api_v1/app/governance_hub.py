@@ -332,6 +332,25 @@ class GovernanceHub:
         """
         return self._enabled
 
+    def is_globally_enabled(self) -> bool:
+        """
+        Check if governance is globally enabled. Public accessor for _enabled.
+        全局治理是否啟用。_enabled 私有屬性的公開訪問方法。
+
+        This method is the canonical public API for checking the global enabled flag.
+        External callers (e.g. governance_routes.py) MUST use this method instead of
+        accessing hub._enabled directly to preserve encapsulation and allow future
+        refactoring of the internal attribute without breaking callers.
+
+        此方法是檢查全局啟用標誌的標準公開 API。
+        外部調用方（如 governance_routes.py）必須使用此方法，而非直接訪問
+        hub._enabled，以保持封裝性並允許未來在不破壞調用方的情況下重構內部屬性。
+
+        Returns:
+            True if governance is globally active; False if disabled.
+        """
+        return self._enabled
+
     def _ensure_initialized(self) -> None:
         """Lazy-initialize SMs on first access / 首次访问时延迟初始化 SM"""
         if self._initialized:

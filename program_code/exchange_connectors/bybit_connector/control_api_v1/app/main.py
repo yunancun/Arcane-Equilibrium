@@ -176,6 +176,54 @@ app.include_router(governance_router)
 from .scout_routes import scout_router  # noqa: E402
 app.include_router(scout_router)
 
+# ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
+# Verify that non-optional critical dependencies were successfully injected at
+# module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
+# None in degraded / test environments; the three hub/engine/risk dependencies
+# must always be present — if they are None the server must not start.
+# 驗證非可選關鍵依賴在模塊初始化時已成功注入。
+# PIPELINE_BRIDGE 和 H0_GATE 允許為 None（降級/測試環境）；
+# 其餘三個依賴必須存在 — 若為 None 則服務拒絕啟動。
+@app.on_event("startup")
+async def _startup_integrity_check() -> None:
+    """Startup integrity check — fail-closed if non-optional deps are missing.
+    啟動完整性驗證 — 非可選依賴缺失時 fail-closed 拒絕啟動。
+    """
+    from .paper_trading_routes import GOV_HUB, ENGINE, RISK_MANAGER, H0_GATE  # noqa: PLC0415
+    from .phase2_strategy_routes import PIPELINE_BRIDGE  # noqa: PLC0415
+
+    # Hard-required: these must never be None in any environment
+    # 硬性要求：任何環境下均不得為 None
+    _hard_required: dict[str, object] = {
+        "governance_hub (GOV_HUB)": GOV_HUB,
+        "paper_engine (ENGINE)": ENGINE,
+        "risk_manager (RISK_MANAGER)": RISK_MANAGER,
+    }
+    missing = [name for name, dep in _hard_required.items() if dep is None]
+    if missing:
+        base.logger.critical(
+            "Startup integrity check FAILED — missing critical deps: %s", missing
+        )
+        raise RuntimeError(f"Startup integrity check failed: {missing}")
+
+    # Soft-required: None is allowed (degraded mode), but log a warning
+    # 軟性依賴：允許為 None（降級模式），但記錄警告
+    _soft_required: dict[str, object] = {
+        "pipeline_bridge (PIPELINE_BRIDGE)": PIPELINE_BRIDGE,
+        "h0_gate (H0_GATE)": H0_GATE,
+    }
+    degraded = [name for name, dep in _soft_required.items() if dep is None]
+    if degraded:
+        base.logger.warning(
+            "Startup integrity check: soft deps missing (degraded mode) — %s", degraded
+        )
+
+    base.logger.info(
+        "Startup integrity check passed — hard deps all present%s",
+        f"; degraded: {degraded}" if degraded else "",
+    )
+
+
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
 # Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789
 # 将 /openclaw/* 代理到 localhost:18789，远程客户端无需直接访问 18789 端口
