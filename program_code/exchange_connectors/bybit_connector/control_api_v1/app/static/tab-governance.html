@@ -1585,15 +1585,16 @@ function renderPendingAudit(changes) {
     return;
   }
 
-  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  let html = '<div style="display:flex;flex-direction:column;gap:12px">';
   for (const c of changes) {
     const cid = ocEsc(c.change_id || '');
     const cidJs = (c.change_id || '').replace(/'/g, "\\'");
     const statusLabel = _APPROVAL_STATUS_CN[c.approval_status] || c.approval_status || '待批准';
     const statusChip = ocChip(statusLabel, 'warn');
 
-    // Translate description
+    // Translate description + get guidance
     const whatCn = _translateWhat(c.what);
+    const guidance = _getApprovalGuidance(c.what);
 
     // Parse old→new values into readable format
     let changeDetail = '';
@@ -1614,7 +1615,7 @@ function renderPendingAudit(changes) {
         + '</div>';
     }
 
-    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px">';
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px">';
     // Header row: type badge + status + time
     html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
     html += _changeTypeBadge(c.change_type);
@@ -1623,7 +1624,14 @@ function renderPendingAudit(changes) {
     html += '</div>';
     // What — main description (Chinese)
     html += '<div style="font-weight:600;margin-bottom:6px;font-size:13px">' + ocEsc(whatCn) + '</div>';
-    // Who + reason (Chinese labels)
+
+    // Context explanation (from guidance rules)
+    if (guidance && guidance.detail) {
+      html += '<div style="margin-bottom:8px;padding:8px 10px;background:rgba(88,166,255,0.06);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:11px;color:var(--text);line-height:1.7">'
+        + ocEsc(guidance.detail) + '</div>';
+    }
+
+    // Who + reason
     html += '<div style="color:var(--text-dim);margin-bottom:4px">发起人：<strong style="color:var(--text)">' + ocEsc(_translateWho(c.who)) + '</strong></div>';
     if (c.reason) {
       html += '<div style="color:var(--text-dim);margin-bottom:4px">原因：' + ocEsc(c.reason) + '</div>';
@@ -1632,20 +1640,32 @@ function renderPendingAudit(changes) {
     html += changeDetail;
     // Affected components
     html += comps;
-    // Approve / Reject buttons with clear Chinese guidance
+
+    // Approve / Reject buttons with per-item guidance
     const isPending = c.approval_status === 'PENDING' || c.approval_status === 'EMERGENCY_BYPASSED';
     if (isPending) {
-      html += '<div style="margin-top:8px;padding:8px;background:rgba(56,139,253,0.06);border-radius:6px;font-size:11px;color:var(--text-dim);line-height:1.6">'
-        + '批准 = 确认此变更有效，允许系统执行；拒绝 = 撤销此变更，恢复到变更前状态。'
-        + '</div>';
-      html += '<div style="display:flex;gap:8px;margin-top:8px">';
-      html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" '
+      // Show approve/reject consequences
+      html += '<div style="margin-top:10px;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:11px">';
+      html += '<div style="display:flex">';
+      html += '<div style="flex:1;padding:8px 10px;background:rgba(63,185,80,0.06);border-right:1px solid var(--border)">';
+      html += '<div style="font-weight:600;color:var(--green);margin-bottom:4px">✔ 批准后果</div>';
+      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.approve : '确认此变更有效。') + '</div>';
+      html += '</div>';
+      html += '<div style="flex:1;padding:8px 10px;background:rgba(248,81,73,0.06)">';
+      html += '<div style="font-weight:600;color:var(--red);margin-bottom:4px">✖ 拒绝后果</div>';
+      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.reject : '标记此变更为不合规，需要进一步处理。') + '</div>';
+      html += '</div>';
+      html += '</div></div>';
+
+      html += '<div style="display:flex;gap:8px;margin-top:10px">';
+      html += '<button class="oc-btn oc-btn-success" style="font-size:12px;padding:6px 20px" '
         + 'onclick="auditApprove(\'' + cidJs + '\')">✔ 批准</button>';
-      html += '<button class="oc-btn oc-btn-danger" style="font-size:11px;padding:5px 16px" '
+      html += '<button class="oc-btn oc-btn-danger" style="font-size:12px;padding:6px 20px" '
         + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒绝</button>';
       html += '</div>';
     }
-    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + cid + '</div>';
+    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:8px;opacity:0.5">ID: ' + cid
+      + (c.what ? ' · 原文 Original: ' + ocEsc(c.what) : '') + '</div>';
     html += '</div>';
   }
   html += '</div>';
