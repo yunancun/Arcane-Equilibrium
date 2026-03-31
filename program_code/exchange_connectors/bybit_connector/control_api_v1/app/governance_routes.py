@@ -92,6 +92,21 @@ def _get_paper_live_gate() -> Any:
         return None
 
 
+def _get_h0_gate() -> Any:
+    """
+    Lazy import H0Gate singleton from paper_trading_routes (P1-16).
+    延遲導入 H0Gate singleton（來自 paper_trading_routes，P1-16）。
+
+    Returns:
+        H0Gate instance or None if unavailable / H0Gate 實例，不可用時為 None
+    """
+    try:
+        from .paper_trading_routes import H0_GATE  # noqa: PLC0415
+        return H0_GATE
+    except (ImportError, AttributeError):
+        return None
+
+
 def _get_auth_actor() -> Any:
     """
     Lazy import of authentication dependency / 延迟导入认证依赖
@@ -1736,6 +1751,41 @@ def evaluate_paper_live_gate(
         )
     except Exception as e:
         logger.error(f"Error evaluating PaperLiveGate: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@governance_router.get("/h0-gate/status")
+def get_h0_gate_status(
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Get H0 Gate current state and statistics (P1-16).
+    獲取 H0 確定性門控當前狀態與統計數據（P1-16）。
+
+    Returns current config, health snapshot, risk snapshot, tracked symbols,
+    and accumulated check statistics for monitoring and observability.
+    返回當前配置、健康快照、風控快照、追蹤符號數及累積檢查統計。
+
+    Read-only endpoint — no state mutation. Authenticated users only (no Operator role required).
+    只讀端點，不修改任何狀態。僅需認證用戶（無需 Operator 角色）。
+    """
+    gate = _get_h0_gate()
+    if gate is None:
+        raise HTTPException(status_code=503, detail="H0Gate not available")
+
+    try:
+        state = gate.get_current_state()
+        if state is None:
+            raise HTTPException(status_code=500, detail="H0Gate state unavailable")
+        return {
+            "ok": True,
+            "message": "h0_gate_status",
+            "data": state,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        logger.error("Error getting H0Gate status", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

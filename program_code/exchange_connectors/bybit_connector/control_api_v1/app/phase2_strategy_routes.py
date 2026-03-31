@@ -787,6 +787,45 @@ try:
 except Exception as _auto_e:
     logger.warning("Background market feed auto-start failed: %s / 后台行情流自动启动失败: %s", _auto_e, _auto_e)
 
+# ─────────────────────────────────────────────────────────────────────
+# P1-16: Inject H0Gate into PipelineBridge + RiskManager
+# P1-16：注入 H0 確定性門控到管線橋接器與風控管理器
+# ─────────────────────────────────────────────────────────────────────
+try:
+    from .paper_trading_routes import H0_GATE as _H0_GATE_REF
+    if PIPELINE_BRIDGE is not None and _H0_GATE_REF is not None:
+        PIPELINE_BRIDGE.set_h0_gate(_H0_GATE_REF)
+        logger.info(
+            "H0Gate injected into PipelineBridge (P1-16) / H0 門控已注入管線橋接器"
+        )
+    else:
+        logger.warning(
+            "H0_GATE or PIPELINE_BRIDGE is None — skipping H0Gate injection "
+            "/ H0 門控或管線橋接器為 None，跳過注入"
+        )
+except (ImportError, AttributeError) as _h0_inj_err:
+    logger.warning(
+        "Could not import H0_GATE for PipelineBridge injection: %s "
+        "/ 無法導入 H0_GATE 用於管線橋接器注入：%s",
+        _h0_inj_err, _h0_inj_err,
+    )
+
+try:
+    from .paper_trading_routes import H0_GATE as _H0_GATE_FOR_RM
+    from .paper_trading_routes import RISK_MANAGER as _RISK_MGR_REF
+    if _H0_GATE_FOR_RM is not None and _RISK_MGR_REF is not None:
+        _RISK_MGR_REF.set_h0_gate(_H0_GATE_FOR_RM)
+        logger.info(
+            "H0Gate injected into RiskManager for cooldown sync (P1-16) "
+            "/ H0 門控已注入風控管理器以同步冷卻期"
+        )
+except (ImportError, AttributeError) as _h0_rm_err:
+    logger.warning(
+        "Could not inject H0Gate into RiskManager: %s "
+        "/ 無法注入 H0 門控到風控管理器：%s",
+        _h0_rm_err, _h0_rm_err,
+    )
+
 
 # =============================================================================
 # Router / 路由

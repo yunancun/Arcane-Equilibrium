@@ -350,6 +350,47 @@ def _shutdown_ttl_enforcer():
 
 _atexit.register(_shutdown_ttl_enforcer)
 
+# ─────────────────────────────────────────────────────────────────────
+# P1-16: H0Gate singleton + H0HealthWorker background daemon
+# P1-16：H0 確定性門控單例 + 健康監控背景線程
+# ─────────────────────────────────────────────────────────────────────
+try:
+    from .h0_gate import H0Gate, H0HealthWorker, H0GateConfig
+
+    def _h0_db_probe() -> None:
+        """Lightweight I/O probe via PAPER_STORE read.
+        透過 paper state 文件讀取測量輕量 I/O 延遲（偵測磁盤 hang）。
+        """
+        PAPER_STORE.read()
+
+    H0_GATE = H0Gate(config=H0GateConfig())
+    _h0_health_worker = H0HealthWorker(
+        gate=H0_GATE,
+        sample_interval_s=5.0,
+        db_probe_fn=_h0_db_probe,
+    )
+    _h0_health_worker.start()
+    logger.info(
+        "H0Gate + H0HealthWorker started (P1-16) / H0 門控 + 健康監控線程已啟動"
+    )
+
+    def _shutdown_h0_health_worker() -> None:
+        try:
+            _h0_health_worker.stop()
+            logger.info("H0HealthWorker stopped / H0 健康監控線程已停止")
+        except Exception as _h0_stop_err:
+            logger.error("Error stopping H0HealthWorker: %s", _h0_stop_err)
+
+    _atexit.register(_shutdown_h0_health_worker)
+
+except ImportError as _h0_import_err:
+    H0_GATE = None
+    logger.warning(
+        "H0Gate not available (import error) — running without H0 gate: %s "
+        "/ H0 門控不可用（導入錯誤）：%s",
+        _h0_import_err, _h0_import_err,
+    )
+
 ENGINE.set_governance_hub(GOV_HUB)
 RISK_MANAGER.set_governance_hub(GOV_HUB)
 

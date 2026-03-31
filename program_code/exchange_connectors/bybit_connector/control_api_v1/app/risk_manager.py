@@ -481,6 +481,7 @@ class RiskManager:
         self._price_tracker = PriceHistoryTracker()
         self._spike_suppression_count: dict[str, int] = {}  # symbol → count
         self._governance_hub = None  # Optional GovernanceHub for governance integration
+        self._h0_gate: Any = None  # P1-16: sync cooldown to H0Gate / 同步冷卻期到 H0 確定性門控
         self._change_audit_log = None  # Optional ChangeAuditLog for audit tracking
         # T2.01: Portfolio Risk Control integration / 组合级风控
         self._portfolio_risk_control = PortfolioRiskControl(config=PortfolioRiskConfig())
@@ -498,6 +499,12 @@ class RiskManager:
     def set_governance_hub(self, hub: Any) -> None:
         """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
         self._governance_hub = hub
+
+    def set_h0_gate(self, gate: Any) -> None:
+        """Inject H0Gate to receive cooldown sync on consecutive loss (P1-16).
+        注入 H0Gate 以在連續虧損冷卻期時同步狀態（P1-16）。
+        """
+        self._h0_gate = gate
 
     def set_change_audit_log(self, cal: Any) -> None:
         """Inject ChangeAuditLog for audit trail tracking / 注入变更审计日志"""
@@ -1066,6 +1073,32 @@ class RiskManager:
                     "Consecutive losses %d → cooldown %d min",
                     self._consecutive_losses, self._config.consecutive_loss_cooldown_minutes,
                 )
+                # P1-16: Sync cooldown to H0Gate risk snapshot for deterministic pre-filter
+                # P1-16：同步冷卻期到 H0Gate 風控快照以供確定性前置過濾
+                if self._h0_gate is not None:
+                    try:
+                        from .h0_gate import H0GateRiskSnapshot  # noqa: PLC0415
+                        _current_h0_snap = self._h0_gate._risk_snapshot
+                        _h0_cooldown_snap = H0GateRiskSnapshot(
+                            open_position_count=_current_h0_snap.open_position_count,
+                            total_exposure_pct=_current_h0_snap.total_exposure_pct,
+                            cooldown_until_ts_ms=self._cooldown_until_ts_ms,
+                            kill_switch_active=_current_h0_snap.kill_switch_active,
+                            snapshot_ts_ms=int(time.time() * 1000),
+                        )
+                        self._h0_gate.update_risk(_h0_cooldown_snap)
+                        logger.info(
+                            "H0Gate cooldown sync: cooldown_until_ts_ms=%d "
+                            "/ H0 門控冷卻期已同步：%d",
+                            self._cooldown_until_ts_ms,
+                            self._cooldown_until_ts_ms,
+                        )
+                    except Exception as _h0_sync_err:
+                        logger.warning(
+                            "H0Gate cooldown sync failed (non-fatal): %s "
+                            "/ H0 門控冷卻期同步失敗（不影響業務）：%s",
+                            _h0_sync_err, _h0_sync_err,
+                        )
         else:
             self._consecutive_losses = 0
 
