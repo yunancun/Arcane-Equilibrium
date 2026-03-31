@@ -188,17 +188,22 @@ const BUILD_TS = Date.now();
 
 // ─── Tab Definitions ──────────────────────────────────────────
 const TABS = [
-  { id: 'system',     label: '系统总览',       labelEn: 'System',    icon: '&#x1F4CA;', src: '/static/tab-system.html' },
-  { id: 'paper',      label: '模拟交易',       labelEn: 'Paper',     icon: '&#x1F4B0;', src: '/static/tab-paper.html' },
-  { id: 'demo',       label: 'Bybit Demo',     labelEn: 'Demo',      icon: '&#x1F3E6;', src: '/static/tab-demo.html' },
-  { id: 'strategy',   label: '策略中心',       labelEn: 'Strategy',  icon: '&#x2699;',  src: '/static/tab-strategy.html' },
-  { id: 'charts',     label: 'K线图表',        labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
-  { id: 'risk',       label: '风控止损',       labelEn: 'Risk',      icon: '&#x1F6E1;', src: '/static/tab-risk.html' },
-  { id: 'governance', label: '治理控制',       labelEn: 'Governance',icon: '&#x2696;',  src: '/static/tab-governance.html' },
-  { id: 'ai',         label: 'AI 引擎',        labelEn: 'AI',        icon: '&#x1F916;', src: '/static/tab-ai.html' },
-  { id: 'learning',   label: '学习系统',       labelEn: 'Learning',  icon: '&#x1F4D6;', src: '/static/tab-learning.html' },
-  { id: 'monitoring', label: '监控',           labelEn: 'Monitor',   icon: '&#x1F50D;', src: '/static/tab-monitoring.html' },
-  { id: 'settings',   label: '设置',           labelEn: 'Settings',  icon: '&#x2699;',  src: '/static/tab-settings.html' },
+  // ── 儀表板 ──────────────────────────────────────────────────────
+  { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: '/static/tab-system.html' },
+  // ── 交易核心 ─────────────────────────────────────────────────────
+  { id: 'live',       label: '实盘交易',  labelEn: 'Live 🔒',   icon: '&#x1F512;', src: '/static/tab-live.html' },
+  { id: 'trading',    label: '测试交易',  labelEn: 'Test',      icon: '&#x1F9EA;', src: '/static/tab-trading.html' },
+  // ── 市場與策略 ───────────────────────────────────────────────────
+  { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
+  { id: 'strategy',   label: '策略中心',  labelEn: 'Strategy',  icon: '&#x2699;',  src: '/static/tab-strategy.html' },
+  // ── 風控與智能 ───────────────────────────────────────────────────
+  { id: 'risk',       label: '风控止损',  labelEn: 'Risk',      icon: '&#x1F6E1;', src: '/static/tab-risk.html' },
+  { id: 'ai',         label: 'AI 引擎',   labelEn: 'AI',        icon: '&#x1F916;', src: '/static/tab-ai.html' },
+  { id: 'learning',   label: '学习系统',  labelEn: 'Learning',  icon: '&#x1F4D6;', src: '/static/tab-learning.html' },
+  // ── 治理與運維 ───────────────────────────────────────────────────
+  { id: 'governance', label: '治理控制',  labelEn: 'Governance',icon: '&#x2696;',  src: '/static/tab-governance.html' },
+  { id: 'monitoring', label: '监控',      labelEn: 'Monitor',   icon: '&#x1F50D;', src: '/static/tab-monitoring.html' },
+  { id: 'settings',   label: '设置',      labelEn: 'Settings',  icon: '&#x2699;',  src: '/static/tab-settings.html' },
 ];
 
 let currentTab = 'system';

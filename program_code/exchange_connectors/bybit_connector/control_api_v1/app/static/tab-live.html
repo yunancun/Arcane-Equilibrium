@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>实盘交易</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  .live-lock-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+    padding: 40px 24px;
+  }
+  .lock-icon { font-size: 56px; margin-bottom: 16px; }
+  .lock-title { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .lock-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 28px; max-width: 480px; line-height: 1.6; }
+
+  .prereq-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    width: 100%;
+    max-width: 860px;
+    margin-bottom: 28px;
+    text-align: left;
+  }
+  .prereq-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .prereq-card .pc-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .prereq-card .pc-title { font-size: 12px; font-weight: 600; color: var(--text); }
+  .prereq-card .pc-desc { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  .dot-done  { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
+  .dot-todo  { width: 8px; height: 8px; border-radius: 50%; background: #484f58; border: 1px solid #6e7681; flex-shrink: 0; }
+  .dot-warn  { width: 8px; height: 8px; border-radius: 50%; background: #d29922; flex-shrink: 0; }
+
+  .phase-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3);
+    color: #d29922; border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 600;
+    margin-bottom: 20px;
+  }
+  .state-row {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 24px;
+  }
+</style>
+
+<div class="live-lock-wrap">
+  <div class="lock-icon">&#x1F512;</div>
+  <div class="lock-title">实盘交易 — 尚未解锁 / Live Trading Locked</div>
+  <div class="lock-sub">
+    实盘执行权限尚未授予。系统当前运行于 <strong>read_only</strong> 模式，所有订单通道已禁用。<br>
+    完成以下前置条件并通过人工审批后，方可进入受监督实盘阶段（Phase M）。
+  </div>
+
+  <div class="phase-badge">&#x23F3; 当前：Phase 0 → Phase 1 开发中</div>
+
+  <!-- Runtime State -->
+  <div class="state-row" id="state-row">
+    <span class="oc-chip oc-chip-neutral">loading...</span>
+  </div>
+
+  <!-- Prerequisites -->
+  <div class="prereq-grid">
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-warn"></span><span class="pc-title">H0 Gate — 确定性门控</span></div>
+      <div class="pc-desc">DOC-02 规定 &lt;1ms 本地判断内核，Live 前必须实施并压测验证。（Phase 1 最高优先）</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Paper Trading 稳定运行 21 天</span></div>
+      <div class="pc-desc">模拟引擎需连续稳定运行满 21 天，积累足够的历史成交数据作为 Live 基线。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">回测引擎验证策略 Alpha</span></div>
+      <div class="pc-desc">所有部署策略须通过回测引擎验证，证明存在可重复的统计 alpha，非随机收益。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Learning Tier ≥ L2</span></div>
+      <div class="pc-desc">系统须完成足够观察周期并晋升至学习层级 L2，证明具备自我校正能力。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">治理 fail-closed 验证</span></div>
+      <div class="pc-desc">GovernanceHub 4 SM 已接入，is_authorized / acquire_lease fail-closed 已验证通过。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">P0/P1/P2 风控实测</span></div>
+      <div class="pc-desc">三层风控框架已实测：check_order_allowed 返回 False 实际阻止订单执行。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Supervised Live Gate (M 章)</span></div>
+      <div class="pc-desc">M 章受监督实盘门控需完整实施，包括 authority grant contract 和 execution adapter contract。</div>
+    </div>
+
+    <div class="prereq-card">
+      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">远程访问安全加固</span></div>
+      <div class="pc-desc">Tailscale + HTTPS + CSP 已配置，GUI 登录认证已启用。</div>
+    </div>
+
+  </div>
+
+  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6">
+    &#x26A0;&#xFE0F; 实盘放权须经 Operator 手动审批。即使所有前置条件满足，系统不会自动开启实盘执行。<br>
+    开发路线图：Phase 1 → Phase 2 → Phase 3 → Phase 4 Paper 观察 → Phase M Supervised Live
+  </div>
+</div>
+
+<script>
+// Pull live system state to show current mode/execution status
+async function loadState() {
+  const row = document.getElementById('state-row');
+  try {
+    const d = await ocApi('/api/v1/governance/status');
+    const s = (d && d.data) ? d.data : {};
+    const chips = [
+      ['system_mode',        s.system_mode        || 'read_only',    'warn'],
+      ['execution_state',    s.execution_state    || 'disabled',     'bad'],
+      ['execution_authority',s.execution_authority|| 'not_granted',  'bad'],
+    ];
+    row.innerHTML = chips.map(([label, val, type]) =>
+      `<span class="oc-chip oc-chip-${type}" title="${label}">${label}: ${ocEsc(String(val))}</span>`
+    ).join('');
+  } catch (_) {
+    row.innerHTML = '<span class="oc-chip oc-chip-neutral">system_mode: read_only &nbsp;|&nbsp; execution: disabled</span>';
+  }
+}
+
+loadState();
+</script>
+</body>
+</html>

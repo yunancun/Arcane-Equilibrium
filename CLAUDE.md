@@ -53,8 +53,11 @@
 治理：GovernanceHub 4 SM 已接入运行时（SM-01/SM-02/SM-04/EX-04），fail-closed 已验证
 GUI：10-Tab 专业控制台 + 中文状态 + 悬停提示 + 确认弹窗 + 6 AI 供应商
 Bybit Demo：双重执行（Paper Engine + Bybit sandbox）
-L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
+L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 9B（快速路径，think=False，~1.9s）/ 27B（复杂任务，~9.9s）
 5-Agent 体系：Scout + Strategist + Guardian + Analyst + Executor 全部运行（Phase 0 修复 AnalystAgent subscribe bug）
+GUI：11-Tab 专业控制台（实盘锁 + 测试交易双子Tab + tab-live占位 + tab-trading iframe包装）
+周报：周三 UTC 0:00 简报（27B Ollama）/ 周日 UTC 0:00 详报（Claude L2）
+市场流：后台常驻（BTCUSDT+ETHUSDT 服务启动即开始，不依赖 Paper/Demo 会话状态）
 
 ★ Round 2 冷酷功能审核结论（2026-03-30 PM 4 路并行代码级审计）：
 
@@ -97,6 +100,20 @@ L1 本地推理：Ollama HTTP 客户端 + Qwen 3.5 27B（就绪）
   关键缺失：H0 Gate（DOC-02 指定 <1ms 确定性门控）· 回测引擎 · L3-L5 学习
   4-Phase 开发路线图已制定（详见 §11）
   详细报告：docs/governance_dev/audits/2026-03-31--gap_analysis_287_specs.md
+
+★ GUI + Ollama 优化（2026-03-31 Session）：
+  GUI：Paper+Demo 合并为「测试交易」子 Tab（iframe 包装器），新增「实盘交易」锁定占位 Tab（tab-live.html）
+  GUI：11 Tab 重排（系统→实盘锁→测试→K线→策略→风控→AI→学习→治理→监控→设置）
+  GUI：子 Tab 样式修复（半椭圆→下划线，与外层 Tab 栏风格一致）
+  GUI：设置 Tab Modal CSS 补全（修复「计划重启」对话框常驻 bug）
+  GUI：Paper/Demo 布局对齐（账户余额卡片在上，盈亏概览在下）
+  Ollama：think=False 参数修复（必须放 JSON 顶层，非 options 内）→ 9B 8.7s→1.9s，27B 21s→9.9s
+  Ollama：模型分配（9B 快速路径；27B 复杂/周报；DEFAULT_MODEL 改 9B）
+  Ollama：get_ollama_client_27b() 27B 单例，AnalystAgent 改用 27B，analyze_patterns 加 think=True
+  L1 Edge Filter：set_ollama_client() 修复（原为死代码，从未注入，现在 pipeline_bridge 正常接入）
+  后台市场流：MarketDataDispatcher 改为服务启动即运行（常驻），不依赖 Paper/Demo 会话状态
+  周报：扩展为周三简报（27B Ollama）+ 周日详报（Claude L2），独立去重键
+  工程日志：docs/worklogs/control_api_gui/2026-03-31--gui_tab_restructure_ollama_optimization.md
 
 历史 Batch 3-12 + Session 8-12 + Phase 3 详细记录已归档至：
   → docs/worklogs/control_api_gui/2026-03-31--round2_batch_records_archive.md

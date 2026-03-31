@@ -47,6 +47,17 @@
   <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
 </div>
 
+<!-- ═══ Account Balance ═══ -->
+<div class="oc-card">
+  <h3>&#x1F4B0; 账户余额 / Account Balance</h3>
+  <div class="oc-metrics">
+    <div class="oc-metric"><div class="oc-metric-label">Initial Balance</div><div class="oc-metric-val" id="p-bal-initial">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Current Balance</div><div class="oc-metric-val" id="p-bal-current">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val" id="p-bal-peak">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="p-bal-drawdown">--</div></div>
+  </div>
+</div>
+
 <!-- ═══ PnL Metrics ═══ -->
 <div class="oc-card">
   <h3>&#x1F4B5; 盈亏概览 / PnL Overview</h3>
@@ -212,6 +223,7 @@ async function loadSession() {
   if (!$('balance-val').dataset.fromMetrics) {
     $('balance-val').textContent = ocBalance(s.initial_balance || 100000, 0);
   }
+  ocSetText('p-bal-initial', ocBalance(s.initial_balance || 100000, 0));
 
   // PnL
   const pnl = d.data.pnl;
@@ -232,6 +244,12 @@ async function loadSession() {
 
   ocSetText('p-fees', ocBalance(pnl.total_fees_paid || 0, 4));
   ocSetText('p-aicost', ocBalance(pnl.total_ai_cost || 0, 4));
+
+  // Estimated current balance (overridden by loadMetrics if available)
+  if (!$('p-bal-current').dataset.fromMetrics) {
+    const estBal = (s.initial_balance || 100000) + (pnl.realized_pnl || 0) + (pnl.unrealized_pnl || 0);
+    ocSetText('p-bal-current', ocBalance(estBal, 2));
+  }
 
   if (d.data.state_revision) stateRevision = d.data.state_revision;
 }
@@ -377,12 +395,17 @@ async function loadMetrics() {
   ocSetHtml('perf-metrics', '<div class="oc-metrics">' + html + '</div>');
   ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');
 
-  // Update current balance from metrics
+  // Update current balance from metrics (authoritative)
   if (dm.current_balance != null) {
     const el = $('balance-val');
     el.textContent = ocBalance(dm.current_balance, 0);
     el.dataset.fromMetrics = '1';
+    const elCard = $('p-bal-current');
+    elCard.textContent = ocBalance(dm.current_balance, 2);
+    elCard.dataset.fromMetrics = '1';
   }
+  if (dm.peak_balance != null) ocSetText('p-bal-peak', ocBalance(dm.peak_balance, 2));
+  if (dm.max_drawdown_pct != null) ocSetText('p-bal-drawdown', dm.max_drawdown_pct.toFixed(2) + '%');
 }
 
 async function loadShadow() {

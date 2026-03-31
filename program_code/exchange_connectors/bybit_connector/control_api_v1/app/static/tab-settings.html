@@ -177,6 +177,54 @@
 </div>
 
 <style>
+/* ── Modal overlay ────────────────────────────────────────────── */
+.hidden { display: none !important; }
+
+.confirm-modal {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.confirm-modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);
+}
+.confirm-modal-dialog {
+  position: relative; z-index: 1;
+  background: #161b22; border: 1px solid #30363d;
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.confirm-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 12px; border-bottom: 1px solid #21262d;
+}
+.confirm-modal-header h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.confirm-close {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.confirm-close:hover { color: var(--text); }
+.confirm-modal-body { padding: 16px 20px; }
+.confirm-modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 20px; border-top: 1px solid #21262d;
+}
+.confirm-block {
+  background: rgba(255,255,255,0.03); border: 1px solid #30363d;
+  border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;
+}
+.confirm-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 8px; letter-spacing: 0.05em;
+}
+.button-muted {
+  background: none; border: 1px solid #30363d; color: var(--text-dim);
+  border-radius: 6px; padding: 5px 14px; font-size: 12px; cursor: pointer;
+}
+.button-muted:hover { border-color: #6e7681; color: var(--text); }
+.confirm-cancel { margin-right: auto; }
+
+/* ── Restart time options ─────────────────────────────────────── */
 .restart-time-opt {
   display: flex; align-items: center; gap: 6px;
   padding: 7px 14px; border: 1px solid #334155; border-radius: 8px;

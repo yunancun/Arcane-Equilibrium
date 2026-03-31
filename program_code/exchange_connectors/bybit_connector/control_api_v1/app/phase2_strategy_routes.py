@@ -403,6 +403,8 @@ try:
         if PIPELINE_BRIDGE is not None:
             PIPELINE_BRIDGE.set_strategist_agent(STRATEGIST_AGENT)
             logger.info("StrategistAgent injected into PipelineBridge / StrategistAgent 已注入管线桥接器")
+            PIPELINE_BRIDGE.set_ollama_client(OLLAMA_CLIENT)
+            logger.info("OllamaClient injected into PipelineBridge L1 edge filter / OllamaClient 已注入管线桥接器 L1 edge 过滤器")
     except Exception as e:
         logger.warning("Could not inject StrategistAgent: %s", e)
 
@@ -458,11 +460,11 @@ try:
     # Batch 10：分析师代理注入管线桥接器，以启用 L2 Cron 触发
     try:
         from .analyst_agent import AnalystAgent, AnalystConfig
-        from .ollama_client import get_ollama_client
+        from .ollama_client import get_ollama_client_27b
         ANALYST_AGENT = AnalystAgent(
             config=AnalystConfig(),
             message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
-            ollama_client=get_ollama_client(),
+            ollama_client=get_ollama_client_27b(),  # 27B: complex weekly pattern analysis
             learning_tier_gate=_LTG_REF if '_LTG_REF' in dir() else None,
         )
         ANALYST_AGENT.start()
@@ -740,33 +742,30 @@ try:
     from . import paper_trading_routes as _paper_ptr
     from .paper_trading_routes import MarketDataDispatcher
 
-    if (
-        _paper_ptr.DISPATCHER is None          # feed not yet running
-        and PIPELINE_BRIDGE is not None        # pipeline ready
-        and _paper_ptr.PAPER_STORE is not None  # store available
-    ):
-        _sess_state = _paper_ptr.PAPER_STORE.read().get("session", {}).get("session_state", "")
-        if _sess_state in ("active", "paused"):
-            _auto_symbols = ["BTCUSDT", "ETHUSDT"]
-            _paper_ptr.DISPATCHER = MarketDataDispatcher(
-                engine=_paper_ptr.ENGINE,
-                symbols=_auto_symbols,
-            )
-            _paper_ptr.DISPATCHER.start()
-            _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
-            PIPELINE_BRIDGE.activate()
-            logger.info(
-                "Auto-started market feed (session_state=%s) / 自动启动行情流（session_state=%s）",
-                _sess_state, _sess_state,
-            )
-        else:
-            logger.info(
-                "No active paper session at startup (state=%r), skipping auto market feed / "
-                "启动时无活跃 session，跳过自动启动行情流",
-                _sess_state,
-            )
+    if _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None:
+        # Always start background market feed regardless of paper/demo session state.
+        # Data (K-lines, indicators, observations) accumulates continuously so paper/demo
+        # can be toggled on/off without waiting for data warm-up.
+        # 无论 paper/demo session 状态如何，始终启动后台行情流。
+        # 数据（K线、指标、观察值）持续积累，开关 paper/demo 无需等待数据预热。
+        _auto_symbols = ["BTCUSDT", "ETHUSDT"]
+        _paper_ptr.DISPATCHER = MarketDataDispatcher(
+            engine=_paper_ptr.ENGINE,
+            symbols=_auto_symbols,
+        )
+        _paper_ptr.DISPATCHER.start()
+        _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
+        PIPELINE_BRIDGE.activate()
+        _sess_state = ""
+        if _paper_ptr.PAPER_STORE is not None:
+            _sess_state = _paper_ptr.PAPER_STORE.read().get("session", {}).get("session_state", "none")
+        logger.info(
+            "Background market feed started (always-on, paper_state=%s) / "
+            "后台行情流已启动（始终运行，paper_state=%s）",
+            _sess_state, _sess_state,
+        )
 except Exception as _auto_e:
-    logger.info("Auto market feed start skipped: %s / 自动启动行情流已跳过: %s", _auto_e, _auto_e)
+    logger.warning("Background market feed start failed: %s / 后台行情流启动失败: %s", _auto_e, _auto_e)
 
 
 # =============================================================================

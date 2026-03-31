@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>测试交易</title>
+<script src="/static/common.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Sub-tab bar — same style as outer console tab bar ───────── */
+  .sub-tab-bar {
+    display: flex;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sub-tab-bar::-webkit-scrollbar { display: none; }
+  .sub-tab {
+    padding: 7px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    flex-shrink: 0;
+    color: var(--text-dim);
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .sub-tab:hover { color: var(--text); background: rgba(56,139,253,0.04); }
+  .sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .sub-tab .sub-icon { margin-right: 4px; }
+
+  /* ── Inner frame container ────────────────────────────────────── */
+  .inner-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  .inner-wrap iframe {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    border: none;
+    background: var(--bg);
+  }
+</style>
+
+<!-- ── Sub-tab bar ──────────────────────────────────────────────── -->
+<div class="sub-tab-bar">
+  <div class="sub-tab active" id="st-paper" onclick="switchSub('paper')">
+    <span class="sub-icon">&#x1F4B0;</span>模拟引擎 / Paper
+  </div>
+  <div class="sub-tab" id="st-demo" onclick="switchSub('demo')">
+    <span class="sub-icon">&#x1F3E6;</span>Bybit Demo
+  </div>
+</div>
+
+<!-- ── Inner iframe area ────────────────────────────────────────── -->
+<div class="inner-wrap">
+  <iframe id="if-paper" src="/static/tab-paper.html"></iframe>
+  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html"></iframe>
+</div>
+
+<script>
+let _loaded = { paper: true, demo: false };
+
+function switchSub(which) {
+  // Update pill styles
+  document.getElementById('st-paper').classList.toggle('active', which === 'paper');
+  document.getElementById('st-demo').classList.toggle('active', which === 'demo');
+
+  // Show / hide iframes
+  const frames = { paper: 'if-paper', demo: 'if-demo' };
+  Object.entries(frames).forEach(([id, frameId]) => {
+    const el = document.getElementById(frameId);
+    if (id === which) {
+      el.style.display = 'block';
+      // Lazy-load on first visit
+      if (!_loaded[id]) {
+        el.src = el.dataset.src;
+        _loaded[id] = true;
+      }
+    } else {
+      el.style.display = 'none';
+    }
+  });
+}
+</script>
+</body>
+</html>

@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-DEFAULT_MODEL = "qwen3.5:27b-q4_K_M"
+DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_TEMPERATURE = 0.3  # Lower for more deterministic trading decisions
 
@@ -182,6 +182,7 @@ class OllamaClient:
         temperature: float | None = None,
         max_tokens: int = 1024,
         timeout: int | None = None,
+        think: bool = False,
     ) -> OllamaResponse:
         """
         Single-turn generation via /api/generate.
@@ -204,6 +205,7 @@ class OllamaClient:
             "model": use_model,
             "prompt": prompt,
             "stream": False,
+            "think": think,  # top-level flag required by Ollama for Qwen3.5 think control
             "options": {
                 "temperature": use_temp,
                 "num_predict": max_tokens,
@@ -299,7 +301,8 @@ class OllamaClient:
             model=model,
             temperature=0.1,  # Very deterministic for classification
             max_tokens=32,
-            timeout=timeout or 15,
+            timeout=timeout or 8,
+            think=False,  # single-word answer needs no chain-of-thought
         )
 
     def judge_edge(
@@ -329,8 +332,9 @@ class OllamaClient:
             system=system,
             model=model,
             temperature=0.2,
-            max_tokens=256,
-            timeout=timeout or 20,
+            max_tokens=100,   # JSON answer is ~40-60 tokens; was 256
+            timeout=timeout or 8,
+            think=False,      # disable chain-of-thought for latency-sensitive gate
         )
 
     # ── Internal HTTP / 内部 HTTP 实现 ──
@@ -424,13 +428,14 @@ class OllamaClient:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _default_client: OllamaClient | None = None
+_heavy_client: OllamaClient | None = None
 _singleton_lock = threading.Lock()
 
 
 def get_ollama_client(config: OllamaConfig | None = None) -> OllamaClient:
     """
-    Get or create default OllamaClient singleton.
-    获取或创建默认 OllamaClient 单例。
+    Get or create default OllamaClient singleton (9B — speed-critical tasks).
+    获取或创建默认 OllamaClient 单例（9B — 速度敏感任务）。
     """
     global _default_client
     if _default_client is not None and config is None:
@@ -443,8 +448,28 @@ def get_ollama_client(config: OllamaConfig | None = None) -> OllamaClient:
         return _default_client
 
 
+def get_ollama_client_27b() -> OllamaClient:
+    """
+    Get or create 27B OllamaClient singleton (complex / time-insensitive tasks).
+    获取或创建 27B OllamaClient 单例（复杂 / 时效不敏感任务）。
+
+    Used by: AnalystAgent weekly pattern discovery, Layer2Engine L2 full loop fallback.
+    用于：AnalystAgent 周报模式发现、Layer2Engine L2 完整推理回退。
+    """
+    global _heavy_client
+    if _heavy_client is not None:
+        return _heavy_client
+
+    with _singleton_lock:
+        if _heavy_client is not None:
+            return _heavy_client
+        _heavy_client = OllamaClient(OllamaConfig(model="qwen3.5:27b-q4_K_M"))
+        return _heavy_client
+
+
 def reset_ollama_client() -> None:
-    """Reset singleton (for testing) / 重置单例（用于测试）"""
-    global _default_client
+    """Reset singletons (for testing) / 重置单例（用于测试）"""
+    global _default_client, _heavy_client
     with _singleton_lock:
         _default_client = None
+        _heavy_client = None

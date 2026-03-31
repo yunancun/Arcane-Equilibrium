@@ -268,8 +268,9 @@ class Layer2Engine:
                     client.generate,
                     context,
                     system=L1_LOCAL_TRIAGE_PROMPT,
-                    max_tokens=256,
-                    timeout=30,
+                    max_tokens=100,  # triage JSON is short; was 256
+                    think=False,     # quick yes/no, no chain-of-thought needed
+                    timeout=12,
                 ),
                 timeout=35.0,
             )

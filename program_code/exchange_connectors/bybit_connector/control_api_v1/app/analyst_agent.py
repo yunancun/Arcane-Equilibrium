@@ -460,7 +460,7 @@ class AnalystAgent:
             '"regime_strategy_matrix": {"regime": {"strategy": win_rate}}}'
         )
 
-        response = self._ollama.generate(summary, system=system, temperature=0.3, max_tokens=1024)
+        response = self._ollama.generate(summary, system=system, temperature=0.3, max_tokens=1024, think=True)
 
         if not response.success:
             return None

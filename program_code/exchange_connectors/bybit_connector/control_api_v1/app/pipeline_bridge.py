@@ -807,25 +807,56 @@ class PipelineBridge:
 
     def _try_l2_cron_trigger(self, now_ts: float) -> None:
         """
-        Batch 10: Trigger L2 analysis on weekly schedule (Sunday UTC 0:00–0:59).
-        每周日 UTC 0:00-0:59 触发 L2 模式分析。
+        Weekly schedule:
+          Wednesday UTC 0:00 — brief report via 27B Ollama (AnalystAgent.analyze_patterns)
+          Sunday    UTC 0:00 — detailed report via Claude L2 (Layer2Engine.run_session)
+        每周计划：
+          周三 UTC 0:00 — 简报（27B Ollama，AnalystAgent 模式发现）
+          周日 UTC 0:00 — 详报（Claude L2 完整推理 session）
         """
+        import asyncio
         import datetime
         try:
             utc_now = datetime.datetime.fromtimestamp(now_ts, tz=datetime.timezone.utc)
-            if utc_now.weekday() == 6 and utc_now.hour == 0:
-                # Check if we already ran this week (use a simple flag)
-                week_key = utc_now.strftime("%Y-W%W")
-                if getattr(self, "_last_l2_cron_week", None) == week_key:
-                    return  # Already ran this week
-                self._last_l2_cron_week = week_key
-                logger.info("L2 Cron trigger fired (Sunday UTC 0:00) / L2 Cron 触发（周日 UTC 0:00）")
-                insight = self._analyst_agent.analyze_patterns(force=True)
-                if insight:
-                    logger.info(
-                        "L2 Cron produced PatternInsight: %d winning, %d losing patterns",
-                        len(insight.winning_patterns), len(insight.losing_patterns),
-                    )
+            weekday = utc_now.weekday()  # 2=Wednesday, 6=Sunday
+            week_key = utc_now.strftime("%Y-W%W")
+
+            # ── Wednesday UTC 0:xx : brief report (27B Ollama) ──────────────
+            if weekday == 2 and utc_now.hour == 0:
+                brief_key = "brief_" + week_key
+                if getattr(self, "_last_l2_brief_week", None) != brief_key:
+                    self._last_l2_brief_week = brief_key
+                    logger.info("L2 Cron: Wednesday brief report triggered (27B Ollama) / 周三简报触发")
+                    insight = self._analyst_agent.analyze_patterns(force=True)
+                    if insight:
+                        logger.info(
+                            "Wednesday brief: %d winning, %d losing patterns / 周三简报: %d 获胜模式, %d 亏损模式",
+                            len(insight.winning_patterns), len(insight.losing_patterns),
+                            len(insight.winning_patterns), len(insight.losing_patterns),
+                        )
+
+            # ── Sunday UTC 0:xx : detailed report (Claude L2 session) ────────
+            elif weekday == 6 and utc_now.hour == 0:
+                detail_key = "detail_" + week_key
+                if getattr(self, "_last_l2_detail_week", None) != detail_key:
+                    self._last_l2_detail_week = detail_key
+                    logger.info("L2 Cron: Sunday detailed report triggered (Claude L2) / 周日详报触发")
+                    try:
+                        from .layer2_routes import _get_engine
+                        engine = _get_engine()
+                        if not engine.is_running:
+                            coro = engine.run_session(
+                                trigger="weekly_cron_sunday",
+                                symbol="BTCUSDT",
+                                context="Weekly scheduled deep analysis. Analyze all accumulated patterns, regime transitions, and strategy performance. Generate actionable insights.",
+                            )
+                            asyncio.ensure_future(coro)
+                            logger.info("Sunday detailed L2 session scheduled / 周日详报 L2 session 已调度")
+                        else:
+                            logger.info("Sunday L2 skipped: another session already running / 周日详报跳过：另一 session 运行中")
+                    except Exception as _e:
+                        logger.warning("Sunday L2 session schedule failed (non-fatal): %s / 周日详报调度失败（非致命）: %s", _e, _e)
+
         except Exception:
             logger.exception("L2 Cron trigger error (non-fatal) / L2 Cron 触发异常（非致命）")
 
@@ -897,7 +928,7 @@ class PipelineBridge:
                 f"{indicator_info}"
             )
 
-            resp = self._ollama_client.judge_edge(context, timeout=10)
+            resp = self._ollama_client.judge_edge(context, timeout=15)
 
             if not resp.success:
                 logger.warning(
