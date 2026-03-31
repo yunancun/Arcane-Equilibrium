@@ -53,6 +53,12 @@
   .green { color: var(--green); } .red { color: var(--red); }
   .yellow { color: var(--yellow); } .blue { color: var(--blue); }
 
+  /* ── Switchable Side Panel ─────────────────────────────────── */
+  .side-panel { cursor: pointer; border-radius: 8px; padding: 4px; transition: background 0.15s; }
+  .side-panel:hover { background: rgba(56,139,253,0.04); }
+  .panel-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); display: inline-block; cursor: pointer; }
+  .panel-dot-active { background: var(--accent); }
+
   /* ── Tab Bar ────────────────────────────────────────────────── */
   .tab-bar { display: flex; background: var(--card-bg); border-bottom: 1px solid var(--border);
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -ms-overflow-style: none; }
@@ -108,33 +114,44 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <h2>&#x1F512; Live / 实盘</h2>
-    <div class="mc" id="live-section" style="opacity:0.5">
-      <div class="mc-label">Mode</div>
-      <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
-      <div class="mc-sub" id="s-live-mode-detail"></div>
-    </div>
-    <div class="mc" id="live-balance-section" style="opacity:0.5">
-      <div class="mc-label">Balance</div>
-      <div class="mc-val" id="s-live-balance" style="font-size:14px">--</div>
-      <div class="mc-sub" id="s-live-balance-detail"></div>
-    </div>
-    <div class="mc" id="live-pnl-section" style="opacity:0.5">
-      <div class="mc-label">Net PnL</div>
-      <div class="mc-val" id="s-live-pnl">--</div>
-      <div class="mc-sub" id="s-live-pnl-detail"></div>
+    <!-- Switchable Live / Paper panel — click anywhere to toggle -->
+    <div id="side-panel-live" class="side-panel active" onclick="toggleSidePanel('live')">
+      <h2 style="margin:0 0 5px">&#x1F512; Live / 实盘</h2>
+      <div class="mc" id="live-section" style="opacity:0.5">
+        <div class="mc-label">Mode</div>
+        <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
+        <div class="mc-sub" id="s-live-mode-detail"></div>
+      </div>
+      <div class="mc" id="live-balance-section" style="opacity:0.5">
+        <div class="mc-label">Balance</div>
+        <div class="mc-val" id="s-live-balance" style="font-size:14px">--</div>
+        <div class="mc-sub" id="s-live-balance-detail"></div>
+      </div>
+      <div class="mc" id="live-pnl-section" style="opacity:0.5">
+        <div class="mc-label">Net PnL</div>
+        <div class="mc-val" id="s-live-pnl">--</div>
+        <div class="mc-sub" id="s-live-pnl-detail"></div>
+      </div>
     </div>
 
-    <h2>&#x1F4B0; Paper / 模拟</h2>
-    <div class="mc">
-      <div class="mc-label">Net PnL</div>
-      <div class="mc-val" id="s-pnl">--</div>
-      <div class="mc-sub" id="s-pnl-detail"></div>
+    <div id="side-panel-paper" class="side-panel" onclick="toggleSidePanel('paper')" style="display:none">
+      <h2 style="margin:0 0 5px">&#x1F4B0; Paper / 模拟</h2>
+      <div class="mc">
+        <div class="mc-label">Net PnL</div>
+        <div class="mc-val" id="s-pnl">--</div>
+        <div class="mc-sub" id="s-pnl-detail"></div>
+      </div>
+      <div class="mc">
+        <div class="mc-label">Session</div>
+        <div class="mc-val" id="s-session" style="font-size:14px">--</div>
+        <div class="mc-sub" id="s-session-detail"></div>
+      </div>
     </div>
-    <div class="mc">
-      <div class="mc-label">Session</div>
-      <div class="mc-val" id="s-session" style="font-size:14px">--</div>
-      <div class="mc-sub" id="s-session-detail"></div>
+
+    <!-- Indicator dots: shows which panel is active -->
+    <div style="display:flex;justify-content:center;gap:6px;margin:4px 0 2px">
+      <span id="dot-live" class="panel-dot panel-dot-active" title="Live"></span>
+      <span id="dot-paper" class="panel-dot" title="Paper"></span>
     </div>
 
     <h2>AI Cost / AI 成本</h2>
@@ -291,6 +308,17 @@ setInterval(() => {
 const user = localStorage.getItem(USER_KEY);
 if (user) document.getElementById('user-label').textContent = user;
 document.getElementById('s-token-status').textContent = getToken() ? 'authenticated' : 'none';
+
+// ─── Side Panel Toggle (Live ↔ Paper) ────────────────────────
+let _sidePanel = 'live';
+function toggleSidePanel(clicked) {
+  // Switch to the OTHER panel
+  _sidePanel = (clicked === 'live') ? 'paper' : 'live';
+  document.getElementById('side-panel-live').style.display = _sidePanel === 'live' ? '' : 'none';
+  document.getElementById('side-panel-paper').style.display = _sidePanel === 'paper' ? '' : 'none';
+  document.getElementById('dot-live').className = 'panel-dot' + (_sidePanel === 'live' ? ' panel-dot-active' : '');
+  document.getElementById('dot-paper').className = 'panel-dot' + (_sidePanel === 'paper' ? ' panel-dot-active' : '');
+}
 
 // ─── Sidebar API helper ──────────────────────────────────────
 async function api(path) {
