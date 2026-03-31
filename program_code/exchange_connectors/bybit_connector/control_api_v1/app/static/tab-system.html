@@ -689,15 +689,18 @@ async function loadProductFamilies() {
   if (typeof families === 'object' && !Array.isArray(families)) {
     let html = '';
     Object.entries(families).forEach(([name, f]) => {
+      const facts = f.facts || {};
+      const ctrl = f.controls || {};
+      const derived = f.derived || {};
       html += '<tr>';
       html += '<td><strong>' + ocEsc(PF_CN[name] || name) + '</strong></td>';
-      html += '<td>' + ocEsc(f.exchange_fact || '--') + '</td>';
-      html += '<td>' + ocEsc(f.account_fact || '--') + '</td>';
-      html += '<td>' + (f.enabled_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
-      html += '<td>' + (f.visibility_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
-      html += '<td>' + ocEsc(f.mode_switch || '--') + '</td>';
-      html += '<td>' + ocEsc(f.capability || '--') + '</td>';
-      html += '<td>' + ocEsc(f.execution || '--') + '</td>';
+      html += '<td>' + ocEsc(facts.exchange_permission_fact || '--') + '</td>';
+      html += '<td>' + ocEsc(facts.account_permission_fact || '--') + '</td>';
+      html += '<td>' + (ctrl.enabled_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
+      html += '<td>' + (ctrl.visibility_switch ? '<span class="green">&#x2714;</span>' : '&#x274C;') + '</td>';
+      html += '<td>' + ocEsc(ctrl.mode_switch || '--') + '</td>';
+      html += '<td>' + ocEsc(derived.capability_state || '--') + '</td>';
+      html += '<td>' + ocEsc(derived.execution_authority_state || '--') + '</td>';
       html += '</tr>';
     });
     ocSetHtml('pf-tbody', html || '<tr class="empty-row"><td colspan="8">No data</td></tr>');
