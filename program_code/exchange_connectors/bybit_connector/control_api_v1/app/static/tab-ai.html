@@ -373,10 +373,17 @@ async function loadAdaptive() {
   if (!d || !d.data) return;
   const a = d.data;
   ocSetText('ab-mult', ocNum(a.multiplier || a.budget_multiplier, 2) + 'x');
-  const roi = a.roi || a.ai_roi;
-  if (roi != null) {
+  // FA-8: 使用 ?? 空值合并（而非 || 短路），确保 cost_edge_ratio=0 不被跳过
+  // 优先读 cost_edge_ratio（根原则 13 字段），再降级到 roi / ai_roi
+  // FA-8: Use nullish coalescing (??) instead of || to handle 0 correctly
+  const roi = a.cost_edge_ratio ?? a.roi ?? a.ai_roi;
+  if (roi !== null && roi !== undefined) {
     $('ab-roi').textContent = ocNum(roi, 2) + 'x';
-    $('ab-roi').className = 'oc-metric-val ' + (roi >= 1 ? 'green' : 'red');
+    // 根原则 13：cost_edge_ratio >= 0.8 才建议持仓 / Principle 13: ratio >= 0.8 = hold recommended
+    $('ab-roi').className = 'oc-metric-val ' + (roi >= 0.8 ? 'green' : 'red');
+  } else {
+    $('ab-roi').textContent = 'N/A（數據不足）';
+    $('ab-roi').className = 'oc-metric-val';
   }
   ocSetText('ab-effective', ocBalance(a.effective_budget || a.adjusted_budget, 2));
   ocSetText('ab-reason', a.reason || a.adjustment_reason || '--');

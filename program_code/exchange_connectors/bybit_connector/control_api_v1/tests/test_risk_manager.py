@@ -1119,3 +1119,196 @@ class TestPortfolioRiskIntegration:
         assert not allowed
         assert "portfolio_risk" in reason
         assert "correlation" in reason
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: Edge Cases — P2-6 / P2-7 / P2-8
+# 边界与极端市况测试（P2-6 / P2-7 / P2-8）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCheckOrderAllowedEdgeCases:
+    """
+    Edge-case and extreme-market tests for check_order_allowed().
+    check_order_allowed() 的边界与极端市况测试，覆盖 P2-6/P2-7/P2-8 三项规格。
+    """
+
+    # ── Helpers ──
+
+    def _make_state(self, balance: float = 10000.0, **session_overrides) -> dict:
+        """
+        Build a minimal valid state dict for check_order_allowed.
+        构造 check_order_allowed 所需的最小合法 state 字典。
+        """
+        session = {
+            "current_paper_balance_usdt": balance,
+            "initial_paper_balance_usdt": balance,
+            "daily_start_balance_usdt": balance,
+            "daily_start_date": "",
+            "session_halted": False,
+        }
+        session.update(session_overrides)
+        return {"session": session, "positions": {}, "orders": []}
+
+    # ── P2-6: Input validation — zero/negative qty and price ──
+
+    def test_zero_qty_rejected(self, risk_manager):
+        """
+        P2-6: qty=0.0 must be rejected with a reason containing 'qty'.
+        P2-6：qty=0.0 必须被拒绝，原因中必须包含 'qty'。
+
+        Background: before this guard, qty=0 produced notional=0 → position_pct=0
+        which silently passed all size checks — a dangerous silent no-op.
+        背景：若无此防御，qty=0 会导致 notional=0 → position_pct=0，静默通过所有仓位检查。
+        """
+        state = self._make_state()
+        allowed, reason = risk_manager.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.0,
+            price=60000.0,
+            leverage=1.0,
+            category="linear",
+        )
+        assert allowed is False, f"Expected rejection for qty=0, got allowed=True"
+        assert "qty" in reason, f"Expected 'qty' in reason, got: {reason!r}"
+
+    def test_negative_qty_rejected(self, risk_manager):
+        """
+        P2-6: qty=-1.0 must be rejected with a reason containing 'qty'.
+        P2-6：qty=-1.0 必须被拒绝，原因中必须包含 'qty'。
+
+        Negative qty has no valid trading semantics in this system.
+        负数 qty 在本系统中无任何合法交易语义。
+        """
+        state = self._make_state()
+        allowed, reason = risk_manager.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=-1.0,
+            price=60000.0,
+            leverage=1.0,
+            category="linear",
+        )
+        assert allowed is False, f"Expected rejection for qty=-1.0, got allowed=True"
+        assert "qty" in reason, f"Expected 'qty' in reason, got: {reason!r}"
+
+    def test_zero_price_rejected(self, risk_manager):
+        """
+        P2-6: price=0.0 with valid qty must be rejected with a reason containing 'price'.
+        P2-6：price=0.0（qty 合法）必须被拒绝，原因中必须包含 'price'。
+
+        A zero price makes notional=0 and is economically nonsensical.
+        价格为零导致名义价值为零，经济上无意义，应强制拦截。
+        """
+        state = self._make_state()
+        allowed, reason = risk_manager.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=1.0,
+            price=0.0,
+            leverage=1.0,
+            category="linear",
+        )
+        assert allowed is False, f"Expected rejection for price=0.0, got allowed=True"
+        assert "price" in reason, f"Expected 'price' in reason, got: {reason!r}"
+
+    # ── P2-7: Stale daily_start_date bypasses daily-loss check ──
+
+    def test_stale_daily_start_date_no_loss_blocking(self, risk_manager):
+        """
+        P2-7: When daily_start_date is yesterday (stale), the daily-loss guard
+        is not triggered even if daily_loss_pct looks high in raw numbers.
+        P2-7：当 daily_start_date 为昨天（过期），即使账面亏损接近上限，日内亏损拦截也不触发。
+
+        Known behavior: stale date bypasses daily loss check — the guard condition
+        requires stored_date == today_str, so an outdated date means no blocking.
+        已知行为：过期日期导致日内亏损检查被跳过（设计上：daily reset 应在 session start 时重置）。
+        """
+        import datetime
+        yesterday = (
+            datetime.datetime.now(datetime.timezone.utc).date()
+            - datetime.timedelta(days=1)
+        ).isoformat()
+
+        # daily_loss_pct would be 0.99% if the date matched today — but it doesn't
+        # 如果日期匹配今天，loss_pct ≈ 0.99%（接近默认 max_daily_loss_pct=5%，仍在限内）
+        # The important point is the date check short-circuits the comparison entirely
+        # Known behavior: stale date bypasses daily loss check
+        state = self._make_state(
+            balance=9901.0,             # balance_now < daily_start → looks like a loss
+            daily_start_balance_usdt=10000.0,
+            daily_start_date=yesterday,  # stale: not today
+        )
+
+        allowed, reason = risk_manager.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+            price=60000.0,
+            leverage=1.0,
+            category="linear",
+        )
+
+        # With a stale date the daily-loss block does NOT fire;
+        # the order should proceed past that check (may still be blocked by other checks)
+        # 过期日期下，日内亏损拦截不触发；订单可以通过该检查（可能被其他检查拦截）
+        assert "daily_loss" not in reason, (
+            f"daily_loss check fired despite stale date — unexpected: {reason!r}"
+        )
+
+    # ── P2-8: market_prices=None does not raise exceptions ──
+
+    def test_market_prices_none_does_not_raise(self, risk_manager):
+        """
+        P2-8: Passing market_prices=None must not raise any exception, and
+        total-exposure calculation must degrade gracefully (use entry prices).
+        P2-8：market_prices=None 不得抛出任何异常，总敞口计算必须优雅降级（使用入场价）。
+
+        Extreme market scenario: price feed unavailable.
+        极端市况：行情服务不可用时，风控检查必须继续运行而非崩溃。
+        """
+        state = {
+            "session": {
+                "current_paper_balance_usdt": 10000.0,
+                "initial_paper_balance_usdt": 10000.0,
+                "daily_start_balance_usdt": 10000.0,
+                "daily_start_date": "",
+                "session_halted": False,
+            },
+            "positions": {
+                "BTCUSDT": {
+                    "symbol": "BTCUSDT",
+                    "side": "Buy",
+                    "qty": 0.001,
+                    "avg_entry_price": 60000.0,
+                    "size": 0.001,
+                }
+            },
+            "orders": [],
+        }
+
+        # Must not raise — exposure calc falls back to avg_entry_price internally
+        # 不得抛异常——内部敞口计算回退使用 avg_entry_price
+        try:
+            result = risk_manager.check_order_allowed(
+                state,
+                symbol="ETHUSDT",
+                side="Buy",
+                qty=0.01,
+                price=3000.0,
+                leverage=1.0,
+                category="linear",
+                market_prices=None,
+            )
+        except Exception as exc:  # pragma: no cover
+            raise AssertionError(
+                f"check_order_allowed raised with market_prices=None: {exc!r}"
+            ) from exc
+
+        allowed, reason = result
+        assert isinstance(allowed, bool), "Return value must be (bool, str)"
+        assert isinstance(reason, str), "Return value must be (bool, str)"

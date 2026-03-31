@@ -570,15 +570,18 @@ class TestStrategistShadowFalse(unittest.TestCase):
 
     def test_shadow_false_intent_added_to_pending(self):
         """
-        shadow=False: when _handle_intel() evaluates an edge, intent is added to _pending_intents.
-        shadow=False：_handle_intel() 評估出 edge 時，intent 應被加入 _pending_intents。
+        [TD-2] shadow=False: when _handle_intel() evaluates an edge, intent is sent via MessageBus.
+        _pending_intents must remain EMPTY (collect path deprecated by TD-2).
+        intents_produced counter must still increment to confirm the intent was produced.
 
-        Verifies that the Strategist is in live (non-shadow) mode after Sprint 5a switch,
-        and that valid intel produces buffered TradeIntents for downstream consumption.
-        驗證 Sprint 5a 切換後 Strategist 處於真實模式，有效情報產出可被下游消費的 TradeIntent。
+        [TD-2] shadow=False：_handle_intel() 評估出 edge 時，intent 應通過 MessageBus 發送。
+        _pending_intents 必須保持空（collect 路徑已由 TD-2 廢棄）。
+        intents_produced 計數器必須遞增，確認 intent 確實被產出。
         """
         from app.strategist_agent import StrategistAgent, StrategistConfig, EdgeEvaluation
+        mock_bus = MagicMock()
         agent = self._make_strategist_live()
+        agent.bus = mock_bus
 
         # Patch _evaluate_edge to return a guaranteed positive result
         # 修補 _evaluate_edge 返回正向結果，排除 Ollama 不可用的不確定性
@@ -589,49 +592,59 @@ class TestStrategistShadowFalse(unittest.TestCase):
         msg = self._make_intel_message_live(symbol="BTCUSDT", relevance=0.9)
         agent.on_message(msg)
 
-        # In shadow=False mode, _pending_intents should have at least 1 item
-        # shadow=False 模式下，_pending_intents 應至少有 1 個 item
+        # After TD-2: _pending_intents must be EMPTY (append is disabled)
+        # TD-2 之後：_pending_intents 必須為空（append 已禁用）
         with agent._lock:
             pending_count = len(agent._pending_intents)
+            intents_produced = agent._stats["intents_produced"]
 
-        self.assertGreater(
+        self.assertEqual(
             pending_count, 0,
-            "shadow=False: expected at least one intent in _pending_intents after positive intel"
+            "TD-2: _pending_intents must be empty; collect path is deprecated"
         )
+        # intents_produced counter must still increment (intent was produced and sent via bus)
+        # intents_produced 計數器仍必須遞增（intent 確已產出並通過 bus 發送）
+        self.assertGreater(
+            intents_produced, 0,
+            "intents_produced counter must increment even though collect path is deprecated"
+        )
+        # MessageBus.send must have been called with the TRADE_INTENT
+        # MessageBus.send 必須已被呼叫並傳入 TRADE_INTENT
+        mock_bus.send.assert_called()
 
     def test_shadow_false_pending_intents_capped(self):
         """
-        When _pending_intents reaches max_pending_intents, new intents are NOT added.
-        當 _pending_intents 達到 max_pending_intents 上限時，新 intent 不被加入。
+        [TD-2] _pending_intents is always empty after deprecation; all intents go via MessageBus.
+        Multiple intents sent — each one routed via bus.send(), none buffered in _pending_intents.
 
-        The production code at line 405 checks `len < max` before appending.
-        This protects against memory overflow under 650-symbol load.
-        生產代碼第 405 行：加入前檢查 len < max，防止 650 符號負載下記憶體溢出。
+        [TD-2] _pending_intents 廢棄後始終為空；所有 intent 都通過 MessageBus 路由。
+        發送多個 intent — 每個都通過 bus.send() 路由，_pending_intents 中不緩衝任何內容。
         """
         from app.strategist_agent import StrategistAgent, StrategistConfig, EdgeEvaluation
-        max_pending = 2
-        agent = self._make_strategist_live(max_pending=max_pending)
+        mock_bus = MagicMock()
+        agent = self._make_strategist_live(max_pending=2)
+        agent.bus = mock_bus
 
         positive_eval = EdgeEvaluation(has_edge=True, confidence=0.8,
                                        source="heuristic", reason="test")
         agent._evaluate_edge = lambda _intel: positive_eval
 
-        # Send more intents than the cap allows (3 messages, cap=2)
-        # 發送超過上限的 intent（3 條消息，上限=2）
+        # Send multiple intents (more than the old cap)
+        # 發送多個 intent（超過舊上限）
         symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
         for sym in symbols:
             msg = self._make_intel_message_live(symbol=sym, relevance=0.9)
             agent.on_message(msg)
             __import__("time").sleep(0.01)  # ensure cooldown doesn't block all
 
-        # Should have at most max_pending intents buffered
-        # 緩衝區最多應有 max_pending 個 intent
+        # After TD-2: _pending_intents must always be empty regardless of volume
+        # TD-2 之後：無論發送量多少，_pending_intents 必須始終為空
         with agent._lock:
             pending_count = len(agent._pending_intents)
 
-        self.assertLessEqual(
-            pending_count, max_pending,
-            f"Expected _pending_intents count <= {max_pending}, got {pending_count}"
+        self.assertEqual(
+            pending_count, 0,
+            "TD-2: _pending_intents must be empty; intents are routed via MessageBus"
         )
 
 
@@ -1042,6 +1055,150 @@ class TestH1CooldownLRUCap(unittest.TestCase):
         # Dict grew by 1 (NEWUSDT added) — no eviction needed
         # 字典增加 1 個（NEWUSDT 已加入），無需清理
         self.assertEqual(len(agent._h1_cooldown), 6)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestTD2CollectPathDeprecation
+# TD-2: collect_pending_intents() 廢棄驗證 / Deprecation of collect path
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTD2CollectPathDeprecation(unittest.TestCase):
+    """
+    TD-2: Verify that the old collect path is fully deprecated.
+    - collect_pending_intents() raises DeprecationWarning and returns []
+    - shadow=False no longer appends intents to _pending_intents
+
+    TD-2：驗證舊的 collect 路徑已完全廢棄。
+    - collect_pending_intents() 發出 DeprecationWarning 並返回空列表
+    - shadow=False 不再將 intent 加入 _pending_intents
+    """
+
+    def _make_agent(self, shadow: bool = False) -> "StrategistAgent":
+        """
+        Create a StrategistAgent for TD-2 deprecation tests.
+        建立用於 TD-2 廢棄測試的 StrategistAgent。
+        """
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        agent = StrategistAgent(
+            config=StrategistConfig(
+                shadow=shadow,
+                min_relevance=0.3,
+                min_confidence=0.1,
+                heuristic_min_relevance=0.0,
+                heuristic_min_freshness=9999,
+            )
+        )
+        agent.start()
+        return agent
+
+    def _make_intel_message(self, symbol: str = "BTCUSDT",
+                             relevance: float = 0.9) -> "AgentMessage":
+        """
+        Build an INTEL_OBJECT AgentMessage for testing.
+        構建用於測試的 INTEL_OBJECT AgentMessage。
+        """
+        return AgentMessage(
+            sender=AgentRole.SCOUT,
+            receiver=AgentRole.STRATEGIST,
+            message_type=MessageType.INTEL_OBJECT,
+            priority=3,
+            payload={
+                "intel_id": f"td2_test_{id(symbol)}",
+                "source": "test_scout",
+                "timestamp_ms": int(__import__("time").time() * 1000),
+                "freshness_seconds": 2,
+                "data_quality": "fact",
+                "sentiment": "positive",
+                "relevance_score": relevance,
+                "content": f"Bullish breakout for {symbol}",
+                "symbols": [symbol],
+                "metadata": {"strategy_name": "test"},
+            },
+        )
+
+    def test_collect_pending_intents_deprecated_returns_empty(self):
+        """
+        [TD-2] collect_pending_intents() must always return [] and emit DeprecationWarning.
+        Backward-compatible: no exception raised, just warns and returns empty list.
+
+        [TD-2] collect_pending_intents() 必須始終返回空列表並發出 DeprecationWarning。
+        向後兼容：不拋出異常，只警告並返回空列表。
+        """
+        import warnings
+        from app.strategist_agent import StrategistAgent, StrategistConfig, EdgeEvaluation
+
+        agent = self._make_agent(shadow=False)
+
+        # Trigger a positive intel so _pending_intents would have been populated under old behavior
+        # 觸發一條正向情報，舊行為下 _pending_intents 應有內容，但 TD-2 後不應有
+        positive_eval = EdgeEvaluation(has_edge=True, confidence=0.8,
+                                       source="heuristic", reason="test_td2")
+        agent._evaluate_edge = lambda _intel: positive_eval
+        msg = self._make_intel_message(symbol="BTCUSDT", relevance=0.9)
+        agent.on_message(msg)
+
+        # collect_pending_intents() must emit DeprecationWarning
+        # collect_pending_intents() 必須發出 DeprecationWarning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = agent.collect_pending_intents()
+
+        self.assertEqual(result, [],
+                         "collect_pending_intents() must return [] after TD-2 deprecation")
+        self.assertEqual(len(w), 1,
+                         f"Expected exactly 1 DeprecationWarning, got {len(w)}")
+        self.assertTrue(
+            issubclass(w[0].category, DeprecationWarning),
+            f"Warning must be DeprecationWarning, got {w[0].category}"
+        )
+        self.assertIn("deprecated", str(w[0].message).lower(),
+                      "Warning message must mention 'deprecated'")
+
+    def test_shadow_false_does_not_append_to_pending(self):
+        """
+        [TD-2] shadow=False: after processing intel, _pending_intents must remain empty.
+        Verifies that the append to _pending_intents is disabled (commented out by TD-2).
+        After calling collect_pending_intents(), result must be [].
+
+        [TD-2] shadow=False：處理情報後，_pending_intents 必須保持空。
+        驗證 _pending_intents.append 已被禁用（TD-2 注釋掉）。
+        調用 collect_pending_intents() 後結果必須為空列表。
+        """
+        import warnings
+        from app.strategist_agent import StrategistAgent, StrategistConfig, EdgeEvaluation
+        from unittest.mock import MagicMock
+
+        mock_bus = MagicMock()
+        agent = self._make_agent(shadow=False)
+        agent.bus = mock_bus
+
+        # Inject a positive evaluation to ensure intent production code path runs
+        # 注入正向評估以確保 intent 生成代碼路徑被執行
+        positive_eval = EdgeEvaluation(has_edge=True, confidence=0.8,
+                                       source="heuristic", reason="test_td2_append")
+        agent._evaluate_edge = lambda _intel: positive_eval
+
+        msg = self._make_intel_message(symbol="ETHUSDT", relevance=0.9)
+        agent.on_message(msg)
+
+        # _pending_intents must be empty — TD-2 disabled the append
+        # _pending_intents 必須為空 — TD-2 已禁用 append
+        with agent._lock:
+            pending_count = len(agent._pending_intents)
+
+        self.assertEqual(
+            pending_count, 0,
+            "TD-2: shadow=False must NOT append to _pending_intents; collect path is deprecated"
+        )
+
+        # collect_pending_intents() must return [] (not any stale content)
+        # collect_pending_intents() 必須返回空列表（不得返回任何殘留內容）
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            collected = agent.collect_pending_intents()
+
+        self.assertEqual(collected, [],
+                         "collect_pending_intents() must return [] when collect path is deprecated")
 
 
 if __name__ == "__main__":

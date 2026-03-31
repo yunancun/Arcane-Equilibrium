@@ -428,7 +428,14 @@ class TestStrategistAgent(unittest.TestCase):
         self.assertGreater(stats["ai_evaluations"], 0)
 
     def test_collect_pending_intents(self):
-        """PipelineBridge can collect pending intents from StrategistAgent."""
+        """
+        [TD-2] collect_pending_intents() is deprecated and always returns [].
+        Intents are now routed via MessageBus, not the collect path.
+        [TD-2] collect_pending_intents() 已廢棄，始終返回空列表。
+        Intent 現在通過 MessageBus 路由，不再走 collect 路徑。
+        """
+        import warnings
+
         mock_ollama = MagicMock()
         mock_ollama.is_available.return_value = True
         mock_ollama.judge_edge.return_value = MagicMock(
@@ -444,13 +451,21 @@ class TestStrategistAgent(unittest.TestCase):
         msg = self._make_intel_message(relevance=0.8, sentiment="positive")
         agent.on_message(msg)
 
-        intents = agent.collect_pending_intents()
-        self.assertGreater(len(intents), 0)
-        self.assertEqual(intents[0].symbol, "BTCUSDT")
-        self.assertEqual(intents[0].direction, "long")
+        # After TD-2: collect_pending_intents() must return [] and emit DeprecationWarning
+        # TD-2 之後：collect_pending_intents() 必須返回空列表並發出 DeprecationWarning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            intents = agent.collect_pending_intents()
+            self.assertEqual(len(intents), 0,
+                             "collect_pending_intents() must return [] after TD-2 deprecation")
+            self.assertEqual(len(w), 1, "Expected exactly one DeprecationWarning")
+            self.assertIn("deprecated", str(w[0].message).lower())
 
-        # After collect, buffer should be empty
-        intents2 = agent.collect_pending_intents()
+        # Second call also returns [] without error (backward compatibility)
+        # 第二次調用也返回空列表，不報錯（向後兼容）
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            intents2 = agent.collect_pending_intents()
         self.assertEqual(len(intents2), 0)
 
     def test_shadow_directive_toggle(self):
@@ -474,7 +489,12 @@ class TestStrategistAgent(unittest.TestCase):
         self.assertTrue(agent.config.shadow)
 
     def test_short_direction_on_negative_sentiment(self):
-        """Negative sentiment intel produces short direction intent."""
+        """
+        [TD-2] Negative sentiment intel routes a short-direction TradeIntent via MessageBus.
+        collect_pending_intents() no longer buffers intents — verify via bus.send() call instead.
+        [TD-2] 負面情緒情報應通過 MessageBus 路由 short 方向的 TradeIntent。
+        collect_pending_intents() 不再緩衝 intent — 改由 bus.send() 調用驗證。
+        """
         mock_ollama = MagicMock()
         mock_ollama.is_available.return_value = True
         mock_ollama.judge_edge.return_value = MagicMock(
@@ -482,17 +502,21 @@ class TestStrategistAgent(unittest.TestCase):
             text='{"has_edge": true, "confidence": 0.7, "reason": "Bearish"}',
         )
 
+        mock_bus = MagicMock()
         agent = StrategistAgent(
             config=StrategistConfig(shadow=False, min_confidence=0.3),
             ollama_client=mock_ollama,
         )
+        agent.bus = mock_bus
         agent.start()
         msg = self._make_intel_message(relevance=0.8, sentiment="negative")
         agent.on_message(msg)
 
-        intents = agent.collect_pending_intents()
-        self.assertGreater(len(intents), 0)
-        self.assertEqual(intents[0].direction, "short")
+        # After TD-2: intent is on MessageBus, not in collect buffer
+        # TD-2 之後：intent 在 MessageBus 上，不在 collect 緩衝區中
+        mock_bus.send.assert_called()
+        sent_msg = mock_bus.send.call_args[0][0]
+        self.assertEqual(sent_msg.payload.get("direction"), "short")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

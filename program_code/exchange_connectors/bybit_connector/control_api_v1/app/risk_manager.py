@@ -680,6 +680,15 @@ class RiskManager:
         if leverage > max_lev:
             return False, f"leverage_{leverage}_exceeds_max_{max_lev}"
 
+        # Input sanity guard: reject zero/negative qty or price before any size math
+        # 输入合法性检查：在任何仓位计算前拒绝 qty/price 为零或负数
+        # Fail-closed: a zero qty would produce notional=0 → position_pct=0 which silently passes
+        # all size checks; a zero/negative price is economically meaningless.
+        if qty <= 0:
+            return False, "invalid_qty_zero_or_negative"
+        if price <= 0:
+            return False, "invalid_price_zero_or_negative"
+
         # Position size check (skip for reducing orders)
         # 仓位大小检查（减仓单跳过）
         balance = sess.get("current_paper_balance_usdt", 0)

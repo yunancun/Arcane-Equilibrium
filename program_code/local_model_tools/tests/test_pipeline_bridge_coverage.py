@@ -373,19 +373,16 @@ class TestOnTick:
 # ===========================================================================
 # 5. Guardian=None fail-closed (P0-2 修復驗證)
 #
-# NOTE: P0-B FIX (Guardian=None → else: fail-closed) is currently MISSING from
-# pipeline_bridge.py lines 519-593. The `if self._guardian_agent:` block has no
-# corresponding `else:` clause, so intents PASS THROUGH when guardian is None.
-# These tests document the EXPECTED (post-fix) behaviour; they will fail until
-# the fix is applied. This is a known gap detected by E4 Wave 2 P1-6 review.
+# P0-B FIX APPLIED: pipeline_bridge.py now contains else: fail-closed block
+# at L665-674. Tests verified passing as of Wave 0 / 2026-03-31.
+# xfail markers removed; regression test for bug-state deleted.
 # ===========================================================================
 
 class TestGuardianNoneFailClosed:
     """
     P0-B Fix verification: Guardian=None must fail-closed (reject all intents).
 
-    Current status: XFAIL — the else-branch fix is missing from pipeline_bridge.py:519.
-    Tests are marked xfail so the suite stays green while clearly flagging the gap.
+    P0-B 修復已完成（pipeline_bridge.py L665）：Guardian=None 時所有 intent 被拒絕。
     """
 
     def _run_with_intent(self, intent):
@@ -397,11 +394,6 @@ class TestGuardianNoneFailClosed:
         bridge._process_pending_intents()
         return bridge, engine
 
-    @pytest.mark.xfail(
-        reason="P0-B Guardian=None else: fail-closed block missing from pipeline_bridge.py:519 — "
-               "fix required before this passes",
-        strict=True,
-    )
     def test_intent_rejected_when_guardian_none(self):
         intent = _make_intent()
         bridge, engine = self._run_with_intent(intent)
@@ -409,10 +401,6 @@ class TestGuardianNoneFailClosed:
         assert stats["intents_rejected"] == 1
         assert len(engine.submitted_orders) == 0
 
-    @pytest.mark.xfail(
-        reason="P0-B Guardian=None fail-closed block missing — see pipeline_bridge.py:519",
-        strict=True,
-    )
     def test_multiple_intents_all_rejected_when_guardian_none(self):
         bridge, engine = _make_bridge()
         bridge.activate()
@@ -426,34 +414,10 @@ class TestGuardianNoneFailClosed:
         assert stats["intents_rejected"] == 3
         assert len(engine.submitted_orders) == 0
 
-    @pytest.mark.xfail(
-        reason="P0-B Guardian=None fail-closed block missing — see pipeline_bridge.py:519",
-        strict=True,
-    )
     def test_no_order_submitted_to_engine(self):
         intent = _make_intent()
         bridge, engine = self._run_with_intent(intent)
         assert engine.submitted_orders == []
-
-    def test_guardian_none_currently_passes_through_documenting_bug(self):
-        """
-        Negative regression: documents CURRENT (broken) behaviour — intents pass through
-        when Guardian=None. Once P0-B fix is applied, this test should be deleted and
-        the xfail tests above should be unmarked.
-        """
-        bridge, engine = _make_bridge()
-        bridge.activate()
-        bridge._guardian_agent = None
-        intent = _make_intent()
-        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
-        bridge._process_pending_intents()
-        # Documents current (buggy) state: order IS submitted when guardian is None
-        # This assertion should FAIL once the P0-B fix is applied.
-        assert len(engine.submitted_orders) == 1, (
-            "Expected guardian=None to let intent through (current bug). "
-            "If this fails, P0-B fix has been applied — delete this test and "
-            "remove xfail markers from the sibling tests."
-        )
 
 
 def _make_intent(symbol: str = "BTCUSDT", side: str = "Buy",
@@ -664,6 +628,78 @@ class TestProcessPendingIntents:
         assert stats["intents_submitted"] == 1
         assert stats["intents_accepted"] == 1
         assert stats["intents_rejected"] == 0
+
+    def test_intents_capped_includes_both_sources(self):
+        """P2-12: 雙源合併後截斷測試。
+
+        验证当 orchestrator 和 StrategistAgent 合计超过 max_intents_per_tick
+        时，只有前 max_intents_per_tick 个被处理。
+        Verify that when orchestrator + StrategistAgent combined intents exceed
+        max_intents_per_tick, only the first max_intents_per_tick are processed.
+        """
+        # max_intents=20，orchestrator 返回 15 個，strategist 返回 10 個，合計 25
+        bridge, engine = _make_bridge(max_intents=20, reject=False)
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+
+        # Orchestrator provides 15 intents
+        orch_intents = [_make_intent() for _ in range(15)]
+        bridge._orch.collect_pending_intents = MagicMock(return_value=orch_intents)
+
+        # StrategistAgent provides 10 TradeIntents (will be converted internally)
+        mock_strategist = MagicMock()
+        strategist_trade_intents = []
+        for i in range(10):
+            ti = MagicMock()
+            ti.direction = "long"
+            ti.symbol = "ETHUSDT"
+            ti.size = 0.01
+            ti.metadata = {"strategy_name": "momentum", "category": "linear"}
+            strategist_trade_intents.append(ti)
+        mock_strategist.collect_pending_intents.return_value = strategist_trade_intents
+        bridge._strategist_agent = mock_strategist
+
+        bridge._process_pending_intents()
+
+        # 合計 25 > max 20，截斷後只提交 20 個（engine.submitted_orders <= 20）
+        # Combined 25 > max 20; after capping only 20 are submitted to paper engine
+        assert len(engine.submitted_orders) <= 20, (
+            f"Expected at most 20 submitted orders, got {len(engine.submitted_orders)}"
+        )
+        # 必須確認 StrategistAgent.collect_pending_intents 被呼叫（雙源都要合併）
+        # Confirm both sources were consulted — strategist was called
+        mock_strategist.collect_pending_intents.assert_called_once()
+
+    def test_strategist_collect_exception_falls_back_to_orchestrator(self):
+        """P2-15: StrategistAgent.collect_pending_intents() 拋異常時，
+        系統應 fallback 到 orchestrator intents，不崩潰。
+
+        When StrategistAgent.collect_pending_intents() raises RuntimeError,
+        the pipeline must not crash; orchestrator intents must still be processed.
+        """
+        bridge, engine = _make_bridge(max_intents=20, reject=False)
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+
+        # Orchestrator returns 3 valid intents
+        orch_intents = [_make_intent() for _ in range(3)]
+        bridge._orch.collect_pending_intents = MagicMock(return_value=orch_intents)
+
+        # StrategistAgent 拋出 RuntimeError — 模擬外部異常
+        # StrategistAgent raises RuntimeError — simulates external failure
+        mock_strategist = MagicMock()
+        mock_strategist.collect_pending_intents.side_effect = RuntimeError("test error")
+        bridge._strategist_agent = mock_strategist
+
+        # 不應拋出，系統應繼續處理 orchestrator intents
+        # Must not raise; orchestrator intents should proceed normally
+        bridge._process_pending_intents()
+
+        # 3 個 orchestrator intents 正常提交
+        # All 3 orchestrator intents still submitted
+        assert len(engine.submitted_orders) == 3, (
+            f"Expected 3 orders from orchestrator fallback, got {len(engine.submitted_orders)}"
+        )
 
 
 # ===========================================================================

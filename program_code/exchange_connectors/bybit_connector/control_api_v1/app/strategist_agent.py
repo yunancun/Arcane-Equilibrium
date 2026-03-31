@@ -41,6 +41,7 @@ import logging
 import threading
 import time
 import uuid
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -593,11 +594,14 @@ class StrategistAgent:
                     evaluation.confidence, symbol, direction,
                 )
             else:
-                # Live mode: buffer intent + send to Guardian via bus
-                # 实时模式：缓冲 intent + 通过总线发送给 Guardian
+                # Live mode: send intent to Guardian via bus (MessageBus is the authoritative path)
+                # 实时模式：通过总线将 intent 发送给 Guardian（MessageBus 是权威路径）
                 with self._lock:
-                    if len(self._pending_intents) < self.config.max_pending_intents:
-                        self._pending_intents.append(intent)
+                    # DEPRECATED: direct collect path — intent already sent via MessageBus below (TD-2)
+                    # 已廢棄：直接收集路徑 — intent 已通過下方的 MessageBus 發送，不應重複入隊
+                    # Do not add to _pending_intents; collect path is being phased out (TD-2)
+                    # 不應加入 _pending_intents；collect 路徑正在逐步廢棄（TD-2）
+                    # DEPRECATED: self._pending_intents.append(intent)
                     self._stats["intents_produced"] += 1
 
                 # Send TRADE_INTENT to Guardian for review / 发送 TRADE_INTENT 给 Guardian 审查
@@ -831,13 +835,34 @@ class StrategistAgent:
 
     def collect_pending_intents(self) -> List[TradeIntent]:
         """
-        Collect and clear pending intents (called by PipelineBridge).
-        收集并清除待处理的 intents（由 PipelineBridge 调用）。
+        [DEPRECATED] Collect and clear pending intents (called by PipelineBridge).
+        This method is deprecated as of TD-2. Intents are now routed exclusively via
+        MessageBus (TRADE_INTENT → GuardianAgent → ExecutorAgent). This method always
+        returns an empty list to prevent double-submission of intents.
+
+        [已廢棄] 收集並清除待處理的 intents（原由 PipelineBridge 調用）。
+        自 TD-2 起此方法已廢棄。Intent 現在完全通過 MessageBus 路由
+        （TRADE_INTENT → GuardianAgent → ExecutorAgent）。
+        此方法始終返回空列表，以防止 intent 雙重提交。
+
+        Reason for deprecation / 廢棄原因：
+          shadow=False 時 intent 走了兩條路徑（MessageBus + collect），導致同一個 intent 雙重提交。
+          TD-2 廢棄此收集路徑，保留 MessageBus 作為唯一授權路徑。
+
+        Returns / 返回：
+          [] — Always empty; callers should rely on MessageBus for intent delivery.
+               始終為空；呼叫者應依賴 MessageBus 進行 intent 傳遞。
         """
-        with self._lock:
-            intents = list(self._pending_intents)
-            self._pending_intents.clear()
-        return intents
+        # Emit deprecation warning so callers (e.g. PipelineBridge) can be updated
+        # 發出廢棄警告，通知呼叫方（如 PipelineBridge）更新
+        warnings.warn(
+            "collect_pending_intents() is deprecated; intents are now routed via MessageBus (TD-2)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # Return empty list for backward compatibility — do not drain _pending_intents
+        # 返回空列表以向後兼容 — 不再清空 _pending_intents（該列表現已始終為空）
+        return []
 
     # ── Audit / 审计 ──
 
