@@ -137,14 +137,14 @@
     <div id="side-panel-paper" class="side-panel" onclick="toggleSidePanel('paper')" style="display:none">
       <h2 style="margin:0 0 5px">&#x1F4B0; Paper / 模拟</h2>
       <div class="mc">
+        <div class="mc-label">Balance</div>
+        <div class="mc-val" id="s-paper-balance" style="font-size:14px">--</div>
+        <div class="mc-sub" id="s-paper-balance-detail"></div>
+      </div>
+      <div class="mc">
         <div class="mc-label">Net PnL</div>
         <div class="mc-val" id="s-pnl">--</div>
         <div class="mc-sub" id="s-pnl-detail"></div>
-      </div>
-      <div class="mc">
-        <div class="mc-label">Session</div>
-        <div class="mc-val" id="s-session" style="font-size:14px">--</div>
-        <div class="mc-sub" id="s-session-detail"></div>
       </div>
     </div>
 
@@ -404,20 +404,22 @@ async function refreshSidebar() {
     document.getElementById('s-live-pnl-detail').textContent = 'requires execution_authority';
   }
 
-  // ── Paper Trading PnL + Session ──
+  // ── Paper Trading Balance + PnL ──
   try {
     const d = await api('/api/v1/paper/session/status');
     if (d && d.data) {
       const s = d.data.session;
-      const state = s.session_state;
-      const el = document.getElementById('s-session');
-      el.textContent = state;
-      el.className = 'mc-val ' + (state==='active'?'green': state==='paused'?'yellow':'');
-      document.getElementById('s-session-detail').textContent =
-        'Orders: ' + (d.data.order_count||0) + ' | Pos: ' + (d.data.position_count||0);
-
+      const initBal = s.initial_paper_balance_usdt || 0;
       const pnl = d.data.pnl;
       const net = pnl.net_paper_pnl || 0;
+      const currentBal = initBal + net;
+
+      document.getElementById('s-paper-balance').textContent = ocBalance(currentBal, 2);
+      const state = s.session_state;
+      const stateLabel = {active:'运行中',paused:'已暂停',stopped:'已停止',idle:'未启动'}[state] || state;
+      document.getElementById('s-paper-balance-detail').textContent =
+        stateLabel + ' | Pos: ' + (d.data.position_count||0);
+
       const pnlEl = document.getElementById('s-pnl');
       pnlEl.textContent = ocMoney(net);
       pnlEl.className = 'mc-val ' + (net>=0?'green':'red');
