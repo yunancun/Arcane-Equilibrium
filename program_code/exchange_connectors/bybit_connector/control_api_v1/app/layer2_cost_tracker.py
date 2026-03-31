@@ -484,3 +484,18 @@ class Layer2CostTracker:
         """Check if daily hard cap is exceeded / 检查每日硬上限是否已超过"""
         allowed, _ = self.check_daily_budget()
         return allowed
+
+    def reset_today_costs(self) -> dict[str, Any]:
+        """
+        Zero-out today's cost counters in the persistent state file.
+        Returns the zeroed-out day record so callers can confirm what was cleared.
+        将今日成本计数器归零（写入持久化文件）。返回归零后的记录供调用方确认。
+        """
+        with self._lock:
+            raw = self._read_raw()
+            key = self._today_key()
+            zeroed = {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0}
+            raw.setdefault("daily_spend", {})[key] = zeroed
+            self._write_raw(raw)
+            logger.info(f"Layer2CostTracker: today's costs reset to zero (date={key})")
+            return {"date": key, **zeroed}

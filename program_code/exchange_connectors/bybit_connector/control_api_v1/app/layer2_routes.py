@@ -252,6 +252,23 @@ async def get_cost_summary(
     return _layer2_response(tracker.get_cost_summary())
 
 
+@layer2_router.post("/cost/reset")
+async def reset_today_costs(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """
+    Zero-out today's AI cost counters (claude_usd, search_usd, total_usd, session_count).
+    Operator action — useful for calibration after a test run.
+    将今日 AI 成本计数器归零（校准用途）。
+    """
+    tracker = _get_cost_tracker()
+    zeroed = tracker.reset_today_costs()
+    return _layer2_response({
+        "message": "Today's AI cost counters reset to zero / 今日 AI 成本已归零",
+        "cleared": zeroed,
+    })
+
+
 @layer2_router.get("/cost/pricing")
 async def get_pricing(
     actor: base.AuthenticatedActor = Depends(base.current_actor),

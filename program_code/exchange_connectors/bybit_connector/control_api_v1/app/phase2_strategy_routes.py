@@ -280,7 +280,7 @@ _N_DEFAULT_STRATEGIES = 5
 _per_strategy_usdt = (_ACCOUNT_BALANCE_USDT * 2.0 / 100.0) / _N_DEFAULT_STRATEGIES
 _per_strategy_usdt = max(20.0, min(_per_strategy_usdt, _ACCOUNT_BALANCE_USDT * 0.15))
 _BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
-_DEFAULT_BTC_QTY = round(_per_strategy_usdt / _BTC_PRICE_HINT, 3)  # 3dp = Bybit BTCUSDT step precision
+_DEFAULT_BTC_QTY = max(0.001, round(_per_strategy_usdt / _BTC_PRICE_HINT, 3))  # floor=0.001 (Bybit min lot)
 logger.info(
     "Default strategy qty: $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位",
     _per_strategy_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,
