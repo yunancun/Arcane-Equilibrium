@@ -47,8 +47,8 @@ class StrategyAutoDeployer:
         kline_manager: Any,
         paper_engine: Any = None,
         *,
-        max_symbols: int = 5,
-        risk_per_trade_pct: float = 1.0,  # Risk 1% of balance per trade
+        max_symbols: int = 25,
+        risk_per_trade_pct: float = 3.0,  # Risk 3% of balance per trade (max loss)
         min_qty_usdt: float = 10.0,       # Minimum $10 per trade
         max_qty_pct: float = 10.0,        # Max 10% of balance per single trade
         market_feed_add_fn: Any = None,   # Optional: callable(symbol) to subscribe market feed
@@ -73,12 +73,171 @@ class StrategyAutoDeployer:
             "strategies_removed": 0,
             "scan_callbacks_received": 0,
             "strategies_auto_paused": 0,
+            "rebalance_triggered": 0,
+            "rebalance_closed": 0,
         }
+
+    # ── Portfolio position evaluation ──
+
+    def _get_open_positions(self) -> dict[str, Any]:
+        """Get current open positions from paper engine / 從紙上引擎獲取當前持倉"""
+        if not self._engine:
+            return {}
+        try:
+            state = self._engine.get_state()
+            return state.get("positions", {})
+        except Exception:
+            return {}
+
+    def _score_existing_position(self, symbol: str, pos: dict) -> float:
+        """
+        Score an existing position on how worthwhile it is to keep (0-100).
+        評估現有持倉的保留價值（0-100分）。
+
+        High score = keep it. Low score = candidate for closing.
+        Factors:
+        - Unrealized PnL direction and magnitude
+        - How long it's been held (stale positions score lower)
+        - Consecutive losses on this strategy
+        """
+        score = 50.0  # neutral baseline
+
+        # 1. Unrealized PnL impact (most important factor)
+        unrealized_pnl = pos.get("unrealized_pnl", 0.0)
+        notional = pos.get("qty", 0) * pos.get("avg_entry_price", 1)
+        if notional > 0:
+            pnl_pct = (unrealized_pnl / notional) * 100
+        else:
+            pnl_pct = 0.0
+
+        if pnl_pct > 2.0:
+            # Strong profit — high keep value but diminishing returns above 3%
+            score += min(30.0, pnl_pct * 5)
+        elif pnl_pct > 0:
+            # Small profit — moderate keep value
+            score += pnl_pct * 10
+        elif pnl_pct > -2.0:
+            # Small loss — still has potential
+            score += pnl_pct * 8  # penalty proportional to loss
+        else:
+            # Significant loss (> -2%) — low keep value, unlikely to recover
+            score += max(-40.0, pnl_pct * 10)
+
+        # 2. Hold time penalty: positions held > 4h get progressively lower scores
+        entry_ts = pos.get("created_ts_ms", pos.get("updated_ts_ms", 0))
+        if entry_ts:
+            hold_hours = (time.time() * 1000 - entry_ts) / 3_600_000
+            if hold_hours > 4:
+                score -= min(15.0, (hold_hours - 4) * 1.5)
+
+        # 3. Consecutive loss penalty from strategy tracking
+        for key, info in self._deployed.items():
+            if info["symbol"] == symbol:
+                strategy_name = info.get("strategy_name", "")
+                losses = self._consecutive_losses.get(strategy_name, 0)
+                score -= losses * 3  # each consecutive loss reduces keep-score
+                break
+
+        return max(0.0, min(100.0, score))
+
+    def _find_weakest_position(self, exclude_symbols: set[str] | None = None) -> tuple[str | None, float]:
+        """
+        Find the position with lowest keep-score that could be closed.
+        找到保留價值最低的持倉（可被關閉以騰出資金）。
+
+        Returns: (symbol, keep_score) or (None, 100.0) if no candidates.
+        """
+        positions = self._get_open_positions()
+        if not positions:
+            return None, 100.0
+
+        worst_symbol = None
+        worst_score = 100.0
+
+        for symbol, pos in positions.items():
+            if exclude_symbols and symbol in exclude_symbols:
+                continue
+            keep_score = self._score_existing_position(symbol, pos)
+            if keep_score < worst_score:
+                worst_score = keep_score
+                worst_symbol = symbol
+
+        return worst_symbol, worst_score
+
+    def _close_position_for_rebalance(self, symbol: str) -> bool:
+        """
+        Close a position by submitting a counter-side market order via paper engine.
+        通過提交反向市價單來平倉。
+
+        Returns True if the close order was submitted successfully.
+        """
+        positions = self._get_open_positions()
+        pos = positions.get(symbol)
+        if not pos:
+            return False
+
+        close_side = "Sell" if pos["side"] == "Buy" else "Buy"
+        close_qty = pos.get("qty", 0)
+        if close_qty <= 0:
+            return False
+
+        try:
+            # Get current market price for submission
+            state = self._engine.get_state()
+            # Build market_prices from positions' updated prices or fall back
+            market_prices = {}
+            for s, p in state.get("positions", {}).items():
+                if "mark_price" in p:
+                    market_prices[s] = p["mark_price"]
+
+            result = self._engine.submit_order(
+                symbol=symbol,
+                side=close_side,
+                order_type="market",
+                qty=close_qty,
+                market_prices=market_prices,
+            )
+            rejected = result.get("rejected_reason") if isinstance(result, dict) else None
+            if rejected:
+                logger.warning(
+                    "Rebalance close rejected: %s reason=%s / 再平衡平倉被拒",
+                    symbol, rejected,
+                )
+                return False
+
+            logger.info(
+                "Rebalance: closed %s %s qty=%.6f to free capital / 再平衡：平倉 %s 以釋放資金",
+                symbol, close_side, close_qty, symbol,
+            )
+
+            # Remove the deployed strategy for this symbol
+            to_remove = [k for k, v in self._deployed.items() if v["symbol"] == symbol]
+            for k in to_remove:
+                info = self._deployed.pop(k)
+                try:
+                    self._orch.stop_strategy(info["strategy_name"])
+                    self._orch.remove_strategy(info["strategy_name"])
+                except Exception:
+                    pass
+
+            self._stats["strategies_removed"] += 1
+            self._stats["rebalance_closed"] += 1
+            return True
+        except Exception:
+            logger.exception("Rebalance close failed for %s / 再平衡平倉失敗", symbol)
+            return False
+
+    # ── Main scan callback (with smart rebalancing) ──
 
     def on_scan_results(self, opportunities: list[Any]) -> None:
         """
         Callback from MarketScanner. Deploys/updates strategies based on opportunities.
         市场扫描回调。根据机会部署/更新策略。
+
+        Smart rebalancing: when all slots are full and a high-score opportunity appears,
+        evaluate existing positions and close the weakest one to make room.
+        智能再平衡：當所有槽位已滿且出現高分機會時，評估現有持倉，
+        關閉最弱的持倉以騰出空間。
         """
         with self._lock:
             self._stats["scan_callbacks_received"] += 1
@@ -86,9 +245,6 @@ class StrategyAutoDeployer:
             available_slots = self._max_symbols - len(current_symbols)
 
             for opp in opportunities:
-                if available_slots <= 0:
-                    break
-
                 symbol = opp.symbol
                 category = opp.category
 
@@ -96,6 +252,43 @@ class StrategyAutoDeployer:
                 key = f"{category}_{symbol}"
                 if key in self._deployed:
                     continue
+
+                if available_slots <= 0:
+                    # ── Smart rebalancing: slots full, try to replace weak positions ──
+                    # Only rebalance for high-quality opportunities (score >= 70)
+                    if opp.score < 70:
+                        continue
+
+                    weakest_sym, weakest_score = self._find_weakest_position(
+                        exclude_symbols={symbol}
+                    )
+                    if weakest_sym is None:
+                        continue
+
+                    # Only replace if new opportunity is significantly better
+                    # New opp score (0-200 range) vs keep-score (0-100 range)
+                    # Normalize: opp.score/2 gives 0-100 comparable range
+                    new_score_normalized = opp.score / 2.0
+                    if new_score_normalized <= weakest_score + 15:
+                        # New opportunity isn't compelling enough to justify closing
+                        logger.debug(
+                            "Rebalance skip: %s (score %.0f) not enough better than %s (keep %.0f) / "
+                            "再平衡跳過：新機會不夠優",
+                            symbol, opp.score, weakest_sym, weakest_score,
+                        )
+                        continue
+
+                    self._stats["rebalance_triggered"] += 1
+                    logger.info(
+                        "Rebalance trigger: closing %s (keep=%.0f) for %s (opp=%.0f) / "
+                        "再平衡觸發：關閉弱倉以部署新機會",
+                        weakest_sym, weakest_score, symbol, opp.score,
+                    )
+                    if self._close_position_for_rebalance(weakest_sym):
+                        current_symbols.discard(weakest_sym)
+                        available_slots += 1
+                    else:
+                        continue
 
                 # Deploy strategy
                 try:
@@ -106,57 +299,75 @@ class StrategyAutoDeployer:
                 except Exception:
                     logger.exception("Failed to deploy %s for %s", category, symbol)
 
+    def _get_balance(self) -> float:
+        """Read current balance from paper engine / 從紙上交易引擎讀取當前餘額"""
+        if self._engine:
+            try:
+                state = self._engine.get_state()
+                return state.get("session", {}).get("current_paper_balance_usdt", 10000.0)
+            except Exception:
+                pass
+        return 10000.0
+
     def _compute_qty(self, symbol: str, price: float, score: float) -> float:
         """
         Compute position size based on balance, opportunity score, and risk.
         根据余额、机会评分和风险计算仓位大小。
 
         Logic:
-        - Base: risk_per_trade_pct of account balance
+        - Base: risk_per_trade_pct of account balance (= max acceptable loss per trade)
+        - With 5% hard stop, position_notional = risk_amount / stop_pct
         - Score bonus: higher score → larger allocation (up to 2x)
-        - Divided by active symbol count (portfolio balance)
         - Clamped to min/max limits
+        - NOT divided by active symbol count (each trade sized independently)
         """
-        # Get current balance
-        balance = 10000.0  # Default
-        if self._engine:
-            try:
-                state = self._engine.get_state()
-                sess = state.get("session", {})
-                balance = sess.get("current_paper_balance_usdt", 10000.0)
-            except Exception:
-                pass
+        balance = self._get_balance()
 
         if balance <= 0 or price <= 0:
             return self._min_qty_usdt / max(price, 1)
 
-        # Base allocation: risk% of balance
-        base_usdt = balance * (self._risk_pct / 100.0)
+        # risk_per_trade_pct = max loss as % of balance if stop-loss hits
+        # With 5% hard stop: notional = risk_amount / 0.05
+        # E.g. 3% risk on $100k = $3k risk → $3k / 0.05 = $60k notional (capped by max_qty_pct)
+        risk_amount = balance * (self._risk_pct / 100.0)
+        hard_stop_pct = 0.05  # 5% hard stop
+        base_usdt = risk_amount / hard_stop_pct
 
         # Score multiplier: score 50→1.0x, score 100→1.5x, score 200→2.0x
         score_mult = min(2.0, 0.5 + score / 200.0)
         allocated_usdt = base_usdt * score_mult
 
-        # Divide by number of active symbols (portfolio balance)
-        # Include the symbol being deployed to correctly size allocation.
-        # / 包含即将部署的品种，正确计算仓位分配。
-        active_count = max(1, len(set(d["symbol"] for d in self._deployed.values()) | {symbol}))
-        per_symbol_usdt = allocated_usdt / active_count
-
-        # Clamp to limits
-        per_symbol_usdt = max(self._min_qty_usdt, per_symbol_usdt)
+        # Clamp to limits (no division by active count — each trade sized independently)
+        allocated_usdt = max(self._min_qty_usdt, allocated_usdt)
         max_usdt = balance * (self._max_qty_pct / 100.0)
-        per_symbol_usdt = min(per_symbol_usdt, max_usdt)
+        allocated_usdt = min(allocated_usdt, max_usdt)
 
         # Convert to asset quantity
-        qty = per_symbol_usdt / price
+        qty = allocated_usdt / price
         qty = round(qty, 6)
 
         logger.info(
             "Position sizing: %s balance=$%.0f score=%.0f → $%.1f (%.6f units) / 仓位计算",
-            symbol, balance, score, per_symbol_usdt, qty,
+            symbol, balance, score, allocated_usdt, qty,
         )
         return qty
+
+    def compute_dynamic_qty(self, symbol: str, price: float) -> float:
+        """
+        Recompute qty at order submission time using current balance.
+        在訂單提交時根據當前餘額重新計算倉位大小。
+
+        Called by PipelineBridge before submitting each order, ensuring
+        position sizes reflect the latest account state.
+        """
+        # Look up the deployed strategy's original score, or use default
+        score = 50.0  # default moderate score
+        with self._lock:
+            for info in self._deployed.values():
+                if info["symbol"] == symbol:
+                    score = info.get("score", 50.0)
+                    break
+        return self._compute_qty(symbol, price, score)
 
     def _deploy_strategy(self, symbol: str, category: str, opp: Any) -> None:
         """Create and register a strategy instance with intelligent sizing."""

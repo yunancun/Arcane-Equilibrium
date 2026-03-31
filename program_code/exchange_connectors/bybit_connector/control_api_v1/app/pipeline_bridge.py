@@ -554,7 +554,16 @@ class PipelineBridge:
                 # Guardian verdict overrides all other filters (EX-06 §9).
                 # If Guardian is unavailable → REJECTED (fail-closed, DOC-01 §5.6).
                 # Original edge filter demoted to auxiliary reference (logged only).
+                # Dynamic qty: recalculate based on current balance at submission time
+                # 動態倉位：在提交時根據當前餘額重新計算
                 _submit_qty = intent.qty
+                if self._auto_deployer and market_prices.get(intent.symbol):
+                    try:
+                        _submit_qty = self._auto_deployer.compute_dynamic_qty(
+                            intent.symbol, market_prices[intent.symbol]
+                        )
+                    except Exception:
+                        logger.debug("Dynamic qty fallback to intent.qty for %s", intent.symbol)
                 _submit_leverage = None
 
                 if self._guardian_agent:

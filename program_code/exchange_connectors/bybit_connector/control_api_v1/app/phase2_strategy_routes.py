@@ -274,16 +274,18 @@ except Exception as _e:
 
 # ── Compute initial qty for pre-registered strategies based on account balance ──
 # 根据账户余额计算预注册策略的初始仓位大小
-# Logic: 2% risk / 5 strategies, min $20, max 15% of balance
-# 逻辑：2% 风险 / 5 个策略，最小 $20，最大 15%
-_N_DEFAULT_STRATEGIES = 5
-_per_strategy_usdt = (_ACCOUNT_BALANCE_USDT * 2.0 / 100.0) / _N_DEFAULT_STRATEGIES
-_per_strategy_usdt = max(20.0, min(_per_strategy_usdt, _ACCOUNT_BALANCE_USDT * 0.15))
+# Note: This is an initial hint only — actual qty is recalculated dynamically
+# at order submission time by the auto_deployer.compute_dynamic_qty() method.
+# 注意：此為初始參考值 — 實際倉位大小在下單時由 compute_dynamic_qty() 動態重算。
 _BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
-_DEFAULT_BTC_QTY = max(0.001, round(_per_strategy_usdt / _BTC_PRICE_HINT, 3))  # floor=0.001 (Bybit min lot)
+# 3% risk / 5% stop = 60% max notional, capped at 15%
+_risk_usdt = _ACCOUNT_BALANCE_USDT * 3.0 / 100.0  # 3% risk budget
+_notional_usdt = min(_risk_usdt / 0.05, _ACCOUNT_BALANCE_USDT * 0.15)  # risk/stop, cap 15%
+_notional_usdt = max(20.0, _notional_usdt)
+_DEFAULT_BTC_QTY = max(0.001, round(_notional_usdt / _BTC_PRICE_HINT, 3))
 logger.info(
-    "Default strategy qty: $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位",
-    _per_strategy_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,
+    "Default strategy qty (initial hint): $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位（初始參考值）",
+    _notional_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,
 )
 
 # Pre-register default strategies (idle by default, user activates via API)
@@ -638,13 +640,13 @@ try:
     # 惰性 dispatcher 引用：调用时才解析，无论行情流何时启动均有效。
     from . import paper_trading_routes as _ptr
 
-    MARKET_SCANNER = MarketScanner(max_symbols=10)
+    MARKET_SCANNER = MarketScanner(max_symbols=25)
     AUTO_DEPLOYER = StrategyAutoDeployer(
         orchestrator=ORCHESTRATOR,
         kline_manager=KLINE_MANAGER,
         paper_engine=PAPER_ENGINE,
-        max_symbols=10,            # Agent can trade up to 10 symbols simultaneously
-        risk_per_trade_pct=2.0,    # Risk 2% of balance per trade (more aggressive)
+        max_symbols=25,            # Agent can trade up to 25 symbols simultaneously
+        risk_per_trade_pct=3.0,    # Risk 3% of balance per trade (max loss per trade)
         min_qty_usdt=20.0,         # Minimum $20 per trade
         max_qty_pct=15.0,          # Max 15% of balance per single trade
         market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
