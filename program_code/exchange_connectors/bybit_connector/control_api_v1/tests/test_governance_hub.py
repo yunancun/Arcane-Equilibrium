@@ -71,14 +71,15 @@ class TestHubInitialization:
         # is_authorized should fail-closed
         assert hub.is_authorized() is False
 
-    def test_hub_env_override_disable(self, tmp_audit_dir):
-        """Hub can be disabled via environment variable"""
+    def test_hub_env_override_cannot_disable(self, tmp_audit_dir):
+        """P1-2: OPENCLAW_GOVERNANCE_ENABLED env var removed — governance cannot be
+        disabled via environment variable. env var is now ignored."""
         with mock.patch.dict(os.environ, {"OPENCLAW_GOVERNANCE_ENABLED": "false"}):
             hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
-            assert not hub._enabled
+            assert hub._enabled  # env var is ignored; enabled=True wins
 
     def test_hub_env_override_enable(self, tmp_audit_dir):
-        """Hub can be enabled via environment variable"""
+        """Hub enabled state follows constructor argument, not env var"""
         with mock.patch.dict(os.environ, {"OPENCLAW_GOVERNANCE_ENABLED": "true"}):
             hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
             assert hub._enabled
