@@ -680,7 +680,7 @@ try:
     # 惰性 dispatcher 引用：调用时才解析，无论行情流何时启动均有效。
     from . import paper_trading_routes as _ptr
 
-    MARKET_SCANNER = MarketScanner(max_symbols=25)
+    MARKET_SCANNER = MarketScanner(max_symbols=25, categories=["linear", "spot"])
     AUTO_DEPLOYER = StrategyAutoDeployer(
         orchestrator=ORCHESTRATOR,
         kline_manager=KLINE_MANAGER,
@@ -1450,12 +1450,40 @@ async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.curre
 
 @phase2_router.get("/demo/orders")
 async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo open orders / 获取 Bybit Demo 活跃订单"""
+    """
+    Get Bybit Demo open orders (regular + conditional/stop).
+    获取 Bybit Demo 活跃订单（普通订单 + 条件止损单合并返回）。
+    """
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:
-        result = DEMO_CONNECTOR.get_open_orders(category="linear")
-        return _envelope(result)
+        regular = DEMO_CONNECTOR.get_open_orders(category="linear")
+        regular_list = []
+        if regular.get("retCode") == 0:
+            regular_list = (regular.get("result") or {}).get("list") or []
+
+        # 条件单（止损单）通过 orderFilter=StopOrder 单独查询
+        # Conditional orders (stop-loss) are queried separately via orderFilter=StopOrder
+        conditional_list = []
+        try:
+            cond = DEMO_CONNECTOR.get_conditional_orders(category="linear")
+            if cond.get("retCode") == 0:
+                conditional_list = (cond.get("result") or {}).get("list") or []
+        except Exception:
+            logger.warning("Failed to fetch conditional orders / 获取条件单失败")
+
+        # 合并返回，条件单加 _orderFilter 标记便于前端区分
+        # Merge results; tag conditional orders for frontend differentiation
+        for o in conditional_list:
+            o["_orderFilter"] = "StopOrder"
+        merged = regular_list + conditional_list
+
+        return _envelope({
+            "retCode": 0,
+            "result": {"list": merged},
+            "regular_count": len(regular_list),
+            "conditional_count": len(conditional_list),
+        })
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
 

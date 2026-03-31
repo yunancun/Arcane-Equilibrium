@@ -58,11 +58,11 @@
 
   <!-- Active Orders / 活跃订单 -->
   <div class="oc-card">
-    <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
+    <h3>&#x1F4DD; 活跃订单 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th></tr></thead>
-        <tbody id="demo-orders"><tr class="empty-row"><td colspan="6">暂无订单</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
+        <tbody id="demo-orders"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -297,28 +297,39 @@ async function loadDemoOrders() {
   } else {
     orders = d.data.orders || d.data || [];
   }
-  // Filter active orders only
+  // Filter active orders only (New/PartiallyFilled for regular, Untriggered for conditional)
   orders = orders.filter(o => {
     const st = (o.orderStatus || o.status || '').toLowerCase();
     return st === 'new' || st === 'partiallyfilled' || st === 'untriggered';
   });
+
+  // 显示计数 / Show counts
+  const regCount = d.data.regular_count || 0;
+  const condCount = d.data.conditional_count || 0;
+  const countsEl = document.getElementById('demo-order-counts');
+  if (countsEl) countsEl.textContent = '（普通 ' + regCount + ' / 条件止损 ' + condCount + '）';
+
   if (!orders.length) {
-    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="6">暂无订单</td></tr>');
+    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="7">暂无订单</td></tr>');
     return;
   }
   let html = '';
   const typeMap = { Market: '市价', Limit: '限价' };
-  const statusMap = { New: '挂单中', PartiallyFilled: '部分成交', Untriggered: '未触发' };
+  const statusMap = { New: '挂单中', PartiallyFilled: '部分成交', Untriggered: '待触发' };
   orders.forEach(o => {
     const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
     const orderType = o.orderType || o.order_type || '';
     const status = o.orderStatus || o.status || '';
+    const isConditional = o._orderFilter === 'StopOrder' || status === 'Untriggered';
+    const typeLabel = isConditional ? '条件止损' : (typeMap[orderType] || ocEsc(orderType));
+    const triggerPrice = parseFloat(o.triggerPrice || 0);
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
-    html += '<td>' + (typeMap[orderType] || ocEsc(orderType)) + '</td>';
+    html += '<td>' + typeLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(o.qty || o.origQty || 0), 4) + '</td>';
     html += '<td>' + (parseFloat(o.price || 0) > 0 ? ocNum(parseFloat(o.price), 2) : '市价') + '</td>';
+    html += '<td>' + (triggerPrice > 0 ? ocNum(triggerPrice, 2) : '--') + '</td>';
     html += '<td>' + (statusMap[status] || ocEsc(status)) + '</td>';
     html += '</tr>';
   });
