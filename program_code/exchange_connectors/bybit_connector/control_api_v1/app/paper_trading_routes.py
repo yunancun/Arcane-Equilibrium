@@ -580,12 +580,58 @@ def post_session_resume(
 def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop the session and finalize PnL / 停止 session 并结算 PnL"""
+    """
+    Stop the session and finalize PnL / 停止 session 并结算 PnL
+
+    Automatically closes all Bybit Demo positions and cancels conditional orders
+    before stopping the Paper engine. Paper positions are closed inside the engine.
+    停止前自动平掉所有 Bybit Demo 持仓并取消条件单，Paper 持仓在引擎内部自动平仓。
+    """
     try:
+        # Close all Bybit Demo positions before stopping Paper engine
+        # 在停止 Paper 引擎前平掉所有 Bybit Demo 持仓
+        demo_close_results = []
+        if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
+            try:
+                pos_resp = DEMO_CONNECTOR.get_positions(category="linear")
+                positions = []
+                if pos_resp.get("retCode") == 0:
+                    positions = pos_resp.get("result", {}).get("list", [])
+                for p in positions:
+                    qty = float(p.get("size", 0))
+                    if qty > 0:
+                        close_side = "Sell" if p.get("side") == "Buy" else "Buy"
+                        r = DEMO_CONNECTOR.submit_order(
+                            symbol=p["symbol"],
+                            side=close_side,
+                            order_type="Market",
+                            qty=qty,
+                            reduce_only=True,
+                        )
+                        demo_close_results.append({
+                            "symbol": p["symbol"],
+                            "qty": qty,
+                            "result": "ok" if r.get("retCode") == 0 else r.get("retMsg", "failed"),
+                        })
+                        logger.info("Demo auto-close: %s %s qty=%s → %s",
+                            p["symbol"], close_side, qty,
+                            "ok" if r.get("retCode") == 0 else r.get("retMsg"))
+                # Cancel all conditional orders (stop-loss etc.)
+                # 取消所有条件单（止损等）
+                for p in positions:
+                    if float(p.get("size", 0)) > 0:
+                        try:
+                            DEMO_CONNECTOR.cancel_all_conditional_orders(p["symbol"])
+                        except Exception:
+                            pass  # Non-fatal / 非致命
+            except Exception as e:
+                logger.warning("Demo position cleanup failed (non-fatal): %s", e)
+
         state = ENGINE.stop_session()
         return _paper_response({
             "session": state["session"],
             "pnl": state["pnl"],
+            "demo_closed": demo_close_results,
             "message": "Paper trading session stopped and PnL finalized",
         })
     except ValueError as e:

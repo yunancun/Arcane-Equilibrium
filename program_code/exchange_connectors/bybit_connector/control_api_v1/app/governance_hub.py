@@ -1562,16 +1562,26 @@ class GovernanceHub:
                         logger.debug(f"Error sending fatal reconciliation alert: {e}")
 
             # Batch 12: Record reconciliation mismatch to ChangeAuditLog
+            # Dedup: only record if no identical PENDING entry already exists
+            # 去重：仅当不存在相同的待审核条目时才记录，避免重复审批请求
             if self._change_audit_log:
                 try:
-                    self._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who="GovernanceHub",
-                        what=f"Reconciliation mismatch detected: {severity}",
-                        reason=str(details.get('reason', 'reconciliation_mismatch')),
-                        old_value="consistent",
-                        new_value="mismatch",
+                    # Check for existing pending entry with same severity
+                    # 检查是否已存在相同严重性的待审核条目
+                    pending = self._change_audit_log.get_pending_approvals()
+                    recon_what = f"Reconciliation mismatch detected: {severity}"
+                    already_pending = any(
+                        p.what == recon_what for p in pending
                     )
+                    if not already_pending:
+                        self._change_audit_log.record_change(
+                            change_type=ChangeType.STATE_CHANGE,
+                            who="GovernanceHub",
+                            what=recon_what,
+                            reason=str(details.get('reason', 'reconciliation_mismatch')),
+                            old_value="consistent",
+                            new_value="mismatch",
+                        )
                 except Exception as e:
                     logger.warning("ChangeAuditLog record failed for reconciliation mismatch (non-fatal): %s", e)
 

@@ -118,15 +118,16 @@
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331d"></iframe>
-  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331d"></iframe>
+  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331e"></iframe>
+  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331e"></iframe>
 </div>
 
 <!-- ── Start Confirmation Dialog ────────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-start">
   <div class="oc-dialog">
-    <h3>&#x25B6; 启动双引擎</h3>
-    <p>是否从头开始计算？选择「是」将重置 Paper 引擎账户，初始余额同步 Bybit Demo 账户余额。</p>
+    <h3>&#x25B6; 启动双引擎 / Start Engines</h3>
+    <p>新一轮测试将归零所有指标（历史数据保留供分析），启动后 30 秒预热期间不会执行交易。选择「从头开始」将同步 Bybit Demo 余额作为初始资金。</p>
+    <p style="font-size:12px;color:var(--text-dim)">A new round resets all metrics (historical data preserved). 30s warmup blocks trading after start. "Fresh start" syncs Demo balance as initial capital.</p>
     <div class="note">&#x26A0; Bybit Demo 如需重置余额，请到 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 手动操作。</div>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-start')">取消</button>
@@ -139,13 +140,12 @@
 <!-- ── Stop Confirmation Dialog ─────────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-stop">
   <div class="oc-dialog">
-    <h3>&#x23F9; 停止双引擎</h3>
-    <p>是否在停止前清仓所有持仓？选择「清仓」将平掉 Paper 引擎中所有持仓后再停止会话。</p>
-    <div class="note">&#x26A0; Bybit Demo 持仓不会自动平仓，如需平仓请到 Demo 页面手动操作或使用 Bybit 界面。</div>
+    <h3>&#x23F9; 停止双引擎 / Stop Engines</h3>
+    <p>停止将自动平掉所有 Paper 和 Bybit Demo 持仓，取消所有挂单和条件单，并结算本轮 PnL。历史数据会保留供分析。</p>
+    <p style="font-size:12px;color:var(--text-dim)">Stopping will auto-close all Paper &amp; Demo positions, cancel all orders, and finalize PnL. Historical data is preserved for analysis.</p>
     <div class="btn-row">
-      <button class="oc-btn" onclick="closeDialog('dlg-stop')">取消</button>
-      <button class="oc-btn oc-btn-danger" onclick="doStop(false)">直接停止</button>
-      <button class="oc-btn oc-btn-danger" onclick="doStop(true)">清仓后停止</button>
+      <button class="oc-btn" onclick="closeDialog('dlg-stop')">取消 / Cancel</button>
+      <button class="oc-btn oc-btn-danger" onclick="doStop()">确认停止 / Confirm Stop</button>
     </div>
   </div>
 </div>
@@ -200,10 +200,11 @@ async function doStart(fresh) {
     } catch (e) { /* fallback to default */ }
   }
 
-  // Start Paper session
+  // Start Paper session — backend enforces 30s warmup before first trade
+  // 启动 Paper 会话 — 后端强制 30 秒预热后才允许首笔交易
   const d = await ocPost('/api/v1/paper/session/start', { initial_balance: initialBalance });
   if (d) {
-    ocToast('Paper 引擎已启动', 'success');
+    ocToast('引擎已启动，30 秒预热中（预热期间不会交易）', 'success');
     refreshIframes();
     checkUnifiedStatus();
   } else {
@@ -216,36 +217,19 @@ function unifiedStop() {
   document.getElementById('dlg-stop').classList.add('show');
 }
 
-async function doStop(liquidate) {
+async function doStop() {
   closeDialog('dlg-stop');
 
-  if (liquidate) {
-    // Close all Paper positions first
-    try {
-      const posD = await ocApi('/api/v1/paper/positions');
-      if (posD && posD.data) {
-        const raw = posD.data.positions || posD.data || {};
-        const positions = Array.isArray(raw) ? raw : Object.values(raw);
-        for (const p of positions) {
-          if (parseFloat(p.qty || 0) > 0) {
-            const closeSide = p.side === 'Buy' ? 'Sell' : 'Buy';
-            await ocPost('/api/v1/paper/order/submit', {
-              symbol: p.symbol,
-              side: closeSide,
-              order_type: 'market',
-              qty: parseFloat(p.qty),
-            });
-          }
-        }
-        if (positions.length > 0) ocToast('Paper 持仓已全部平仓', 'success');
-      }
-    } catch (e) { ocToast('平仓时出错', 'error'); }
-  }
-
-  // Stop Paper session
+  // Stop session — backend automatically closes all Paper + Demo positions
+  // 停止会话 — 后端自动平掉所有 Paper + Demo 持仓
   const d = await ocPost('/api/v1/paper/session/stop', {});
   if (d) {
-    ocToast('Paper 引擎已停止', 'success');
+    const demoClosed = (d.data && d.data.demo_closed) || [];
+    if (demoClosed.length > 0) {
+      ocToast('Paper + Demo 全部平仓完成，引擎已停止', 'success');
+    } else {
+      ocToast('引擎已停止，PnL 已结算', 'success');
+    }
     refreshIframes();
     checkUnifiedStatus();
   } else {

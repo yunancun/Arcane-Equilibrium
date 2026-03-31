@@ -197,11 +197,19 @@ async function loadSession() {
   const state = s.session_state;
 
   const badge = $('session-badge');
+  const warmupUntil = s.warmup_until_ms || 0;
+  const inWarmup = state === 'active' && warmupUntil > 0 && Date.now() < warmupUntil;
   const stateLabels = { active: '运行中', paused: '已暂停', stopped: '已停止', idle: '未启动' };
-  badge.textContent = stateLabels[state] || state;
-  if (state === 'active') badge.className = 'oc-chip oc-chip-good';
-  else if (state === 'paused') badge.className = 'oc-chip oc-chip-warn';
-  else badge.className = 'oc-chip oc-chip-neutral';
+  if (inWarmup) {
+    const remaining = Math.ceil((warmupUntil - Date.now()) / 1000);
+    badge.textContent = '预热中 ' + remaining + 's';
+    badge.className = 'oc-chip oc-chip-warn';
+  } else {
+    badge.textContent = stateLabels[state] || state;
+    if (state === 'active') badge.className = 'oc-chip oc-chip-good';
+    else if (state === 'paused') badge.className = 'oc-chip oc-chip-warn';
+    else badge.className = 'oc-chip oc-chip-neutral';
+  }
 
   $('btn-start').disabled = (state === 'active' || state === 'paused');
   $('btn-pause').disabled = (state !== 'active');
