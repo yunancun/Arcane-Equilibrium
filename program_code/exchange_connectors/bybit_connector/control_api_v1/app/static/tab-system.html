@@ -428,13 +428,24 @@ async function executeModeChange() {
   closeConfirm();
   if (!mode) return;
 
+  // Map derived mode names to actual switch values
+  // 将派生模式名映射为控制开关的实际值（design_only 是派生态，开关值为 disabled）
+  const MODE_TO_SWITCH = {
+    'design_only': 'disabled',
+    'observe_only': 'observe_only',
+    'shadow_only': 'shadow_only',
+    'demo_reserved': 'demo_reserved',
+    'live_reserved': 'live_reserved',
+  };
+  const switchVal = MODE_TO_SWITCH[mode] || mode;
+
   try {
     // Fetch current state_revision from control-plane
     const cp = await ocApi('/api/v1/system/control-plane');
     const rev = (cp && cp.state_revision) ? cp.state_revision : 0;
 
     const envelope = ocEnvelope(
-      { changes: [{ path: 'global_runtime.controls.global_execution_mode_switch', value: mode }] },
+      { changes: [{ path: 'global_runtime.controls.global_execution_mode_switch', value: switchVal }] },
       rev
     );
     const result = await ocApi('/api/v1/input/config-change', { method: 'POST', body: envelope });
