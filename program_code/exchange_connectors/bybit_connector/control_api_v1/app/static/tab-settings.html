@@ -238,6 +238,22 @@
   border-color: #3b82f6; background: rgba(59,130,246,0.12); color: #93c5fd;
 }
 .restart-time-opt input { display: none; }
+
+/* ── Product Family Toggle Switch ─────────────────────────────── */
+.pf-card { background:var(--bg); border:1px solid #21262d; border-radius:8px; padding:14px; }
+.pf-card-title { font-weight:600; font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.pf-card-title .pf-cap { font-size:11px; padding:2px 6px; border-radius:4px; font-weight:500; }
+.pf-row { display:flex; align-items:center; justify-content:space-between; padding:5px 0; font-size:12px; color:var(--text-dim); }
+.pf-row + .pf-row { border-top:1px solid rgba(255,255,255,0.04); }
+.pf-toggle { position:relative; width:36px; height:20px; flex-shrink:0; }
+.pf-toggle input { opacity:0; width:0; height:0; position:absolute; }
+.pf-toggle .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#30363d; border-radius:10px; transition:0.2s; }
+.pf-toggle .slider::before { content:''; position:absolute; width:14px; height:14px; left:3px; bottom:3px; background:#8b949e; border-radius:50%; transition:0.2s; }
+.pf-toggle input:checked + .slider { background:rgba(56,139,253,0.3); }
+.pf-toggle input:checked + .slider::before { transform:translateX(16px); background:var(--accent); }
+.pf-toggle input:disabled + .slider { opacity:0.4; cursor:not-allowed; }
+.pf-mode-select { background:var(--bg); border:1px solid #30363d; color:var(--text); font-size:11px; padding:2px 6px; border-radius:4px; cursor:pointer; }
+.pf-mode-select:disabled { opacity:0.4; cursor:not-allowed; }
 </style>
 
 <!-- ═══ Debug JSON ═══ -->
@@ -498,25 +514,101 @@ async function loadControlPlane() {
   ocSetText('debug-ov', JSON.stringify(ov, null, 2));
 }
 
+// 产品族中英名称对照 / Product family bilingual name mapping
+// Bybit V5 API categories: spot, linear, inverse, option
+// margin 在 Bybit 中归属 spot（保证金模式），此处作为系统内部分类保留
+const PF_LABELS = {
+  spot:         '现货 / Spot',
+  margin:       '杠杆 / Margin',
+  perp_linear:  'U本位合约 / Linear Perp',
+  perp_inverse: '币本位合约 / Inverse Perp',
+  options:      '期权 / Options',
+};
+// Bybit 支持情况 / Bybit support status
+const PF_BYBIT_SUPPORT = {
+  spot:         { demo: true,  note: 'Bybit Demo 支持' },
+  margin:       { demo: false, note: '归属 Spot 品类（保证金模式）' },
+  perp_linear:  { demo: true,  note: 'Bybit Demo 支持（主要交易品类）' },
+  perp_inverse: { demo: true,  note: 'Bybit Demo 支持' },
+  options:      { demo: false, note: '实盘支持 · Demo 环境不可用' },
+};
+
 async function loadProductFamilyConfig() {
   const d = await ocApi('/api/v1/system/product-families');
   if (!d || !d.data) { ocSetHtml('pf-config-grid', '<div class="oc-loading">No data</div>'); return; }
   const families = d.data.families || d.data;
   if (typeof families !== 'object') return;
 
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">';
+  const modeLabels = { disabled:'禁用 / Disabled', observe_only:'观察 / Observe', shadow_only:'影子 / Shadow' };
+  const capColors = { enabled:'var(--green)', disabled:'#f87171', observe_only:'var(--yellow)', shadow_only:'var(--accent)' };
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">';
   Object.entries(families).forEach(([name, f]) => {
-    html += '<div style="background:var(--bg);border:1px solid #21262d;border-radius:8px;padding:12px">';
-    html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">' + ocEsc(name) + '</div>';
-    html += '<div style="font-size:11px;color:var(--text-dim);display:grid;gap:4px">';
-    html += '<div>Enabled: ' + (f.enabled_switch ? '<span class="green">Yes</span>' : 'No') + '</div>';
-    html += '<div>Visible: ' + (f.visibility_switch ? '<span class="green">Yes</span>' : 'No') + '</div>';
-    html += '<div>Mode: ' + ocEsc(f.mode_switch || '--') + '</div>';
-    html += '<div>Capability: ' + ocEsc(f.capability || '--') + '</div>';
-    html += '</div></div>';
+    const facts = f.facts || {};
+    const ctrl = f.controls || {};
+    const derived = f.derived || {};
+    const cap = derived.capability_state || 'disabled';
+    const capColor = capColors[cap] || 'var(--text-dim)';
+    const enabled = !!ctrl.enabled_switch;
+    const visible = !!ctrl.visibility_switch;
+    const mode = ctrl.mode_switch || 'disabled';
+    const label = PF_LABELS[name] || name;
+    const support = PF_BYBIT_SUPPORT[name] || { demo: false, note: '' };
+
+    html += '<div class="pf-card">';
+    html += '<div class="pf-card-title">' + ocEsc(label);
+    html += ' <span class="pf-cap" style="color:' + capColor + ';border:1px solid ' + capColor + '">' + ocEsc(cap) + '</span>';
+    if (!support.demo) html += ' <span class="pf-cap" style="color:#f87171;border:1px solid #f87171;font-size:10px">N/A</span>';
+    html += '</div>';
+    if (support.note) html += '<div style="font-size:10px;color:var(--text-dim);margin:-6px 0 8px">' + ocEsc(support.note) + '</div>';
+
+    // 启用开关 / Enabled switch
+    html += '<div class="pf-row"><span>启用 / Enabled</span>';
+    html += '<label class="pf-toggle"><input type="checkbox"' + (enabled ? ' checked' : '') + ' onchange="pfToggle(\'' + name + '\',\'enabled_switch\',this.checked)">';
+    html += '<span class="slider"></span></label></div>';
+
+    // 可见开关 / Visibility switch
+    html += '<div class="pf-row"><span>可见 / Visible</span>';
+    html += '<label class="pf-toggle"><input type="checkbox"' + (visible ? ' checked' : '') + ' onchange="pfToggle(\'' + name + '\',\'visibility_switch\',this.checked)">';
+    html += '<span class="slider"></span></label></div>';
+
+    // 模式选择 / Mode switch
+    html += '<div class="pf-row"><span>模式 / Mode</span>';
+    html += '<select class="pf-mode-select" onchange="pfToggle(\'' + name + '\',\'mode_switch\',this.value)">';
+    ['disabled','observe_only','shadow_only'].forEach(function(m) {
+      html += '<option value="' + m + '"' + (m === mode ? ' selected' : '') + '>' + (modeLabels[m] || m) + '</option>';
+    });
+    html += '</select></div>';
+
+    // 交易所权限 / Exchange permission (只读)
+    const exPerm = facts.exchange_permission_fact;
+    html += '<div class="pf-row"><span>交易所权限</span><span style="color:' + (exPerm ? 'var(--green)' : '#f87171') + '">' + (exPerm ? '已授权' : '未授权') + '</span></div>';
+
+    html += '</div>';
   });
   html += '</div>';
   ocSetHtml('pf-config-grid', html);
+}
+
+async function pfToggle(family, field, value) {
+  // 必须先获取最新 stateRevision，避免 409 revision mismatch
+  try {
+    const fresh = await ocApi('/api/v1/system/overview');
+    if (fresh && fresh.state_revision) stateRevision = fresh.state_revision;
+  } catch (e) {}
+
+  const payload = {};
+  payload[field] = value;
+  const body = ocEnvelope(payload, stateRevision);
+  const d = await ocPost('/api/v1/control/product-family/' + encodeURIComponent(family) + '/config', body);
+  if (d) {
+    ocToast(family + ' ' + field + ' 已更新', 'success');
+    if (d.state_revision) stateRevision = d.state_revision;
+    await loadProductFamilyConfig();
+  } else {
+    ocToast('更新失败', 'error');
+    await loadProductFamilyConfig();
+  }
 }
 
 async function loadDebug() {
