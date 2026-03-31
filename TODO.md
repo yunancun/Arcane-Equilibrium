@@ -173,6 +173,9 @@ E1-Alpha（P1-NEW-2）‖ E1-Beta（P1-NEW-3）‖ E1-Gamma（P1-NEW-4+5+6）‖
   - **測試**：54/54 test_governance_hub.py 全部通過（含 TestThreadSafety / TestEdgeCasesCacheExpiryRace）
 
 ### [ ] P1-16：H0 Gate 確定性門控（3天，獨立 branch，Live 前必須）
+> Day 1 ✅ 完成：commit 3ccd982（2026-03-31）— H0GateConfig/Snapshot dataclass + 5 check + 37 tests
+> Day 2 ✅ 完成：commit 5d53619（2026-03-31）— H0HealthWorker + 40 新測試（health/risk/cooldown/SLA/worker）
+> Day 3 🔄 進行中：pipeline_bridge 集成 + API 端點 + E2+E4 → merge PR
 - **要求**：DOC-02 §3.1 · <1ms SLA · 純確定性邏輯 · 無 AI 調用
 - **branch**：`feature/p1-16-h0-gate-deterministic`
 - **新增文件**：`app/h0_gate.py`（~350 行）+ `tests/test_h0_gate.py`（80+ 測試）
@@ -183,7 +186,7 @@ E1-Alpha（P1-NEW-2）‖ E1-Beta（P1-NEW-3）‖ E1-Gamma（P1-NEW-4+5+6）‖
 - **5 個 check**：Freshness（數據 <1000ms）/ Health（CPU/mem/db/network）/ Eligibility（品種白名單）/ Risk Envelope（倉位/曝險/kill switch）/ Cooldown（連虧暫停）
 - **集成點**：`pipeline_bridge._process_pending_intents()` 最前置（paper 模式 warn-only，Live 前改 fail-closed）
 - **⚠️ Live 前必須**：paper 模式 warn-only 改 fail-closed
-- **驗收**：SLA 測試通過（<1ms 均值） · 2520+ tests passed · E2 PASS
+- **驗收**：SLA 測試通過（<1ms 均值） · 2522+ tests passed · E2 PASS
 
 ### Wave 3c 工作鏈
 ```
