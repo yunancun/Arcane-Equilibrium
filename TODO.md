@@ -331,6 +331,174 @@ Phase 4（5+21天）：
 
 ---
 
+## ██ Wave 5：多 Agent 正式落地 + H1-H5 接通（CC 條件通過 · Sprint 0 先行）
+
+**CC 評級**：條件通過（G-01 + G-05 兩個 BLOCKER 修復後才能啟動 Sprint 5a）
+**Wave 5 目標**：≥ 2600 tests · 業務完整度 32% → ~45%
+**設計文件**：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-03-31--wave5_final_dispatch.md`
+
+---
+
+### ██ Sprint 0：BLOCKER 前置修復（並行執行，~6h 含 E2+E4）
+
+### [ ] G-05【硬阻塞 · 原則 3】`executor_agent.py` 缺少 `acquire_lease()`
+- **違反**：原則 3（AI 輸出≠命令）— Guardian 批准 ≠ Decision Lease
+- **文件**：`app/executor_agent.py`
+- **問題**：`execute_order()` 第 280 行 `submit_order()` 前無 `acquire_lease()` 調用；`__init__()` 無 `governance_hub` 參數
+- **修復**：
+  1. `__init__()` 新增 `governance_hub: Optional[Any] = None` → `self._governance_hub = governance_hub`
+  2. `execute_order()` 第 280 行前插入：
+     ```python
+     lease_id = self._governance_hub.acquire_lease(intent_id=intent_id, scope="TRADE_ENTRY", ttl_seconds=30) if self._governance_hub else None
+     if self._governance_hub and lease_id is None:
+         return ExecutionReport(..., success=False, error="governance_lease_acquisition_failed")
+     ```
+  3. 更新所有 `ExecutorAgent(...)` 初始化調用點（`phase2_strategy_routes.py` + 測試文件）傳入 `governance_hub`
+  4. 補充 lease=None fail-closed 測試用例
+- **指派**：E1-Alpha（2h）→ E2（1.5h）→ E4（1.5h，與 G-01 共用）
+- **前置**：無（直接開始）
+
+### [ ] G-01【硬阻塞 · DOC-08 §12】每日 AI 硬上限 `$15.0` → `$2.0`
+- **違反**：DOC-08 §12 安全不變量 + 原則 5（生存>利潤）
+- **修復文件**（5 處）：
+  - `app/layer2_types.py:58`：`DEFAULT_DAILY_HARD_CAP_USD = 15.0` → `= 2.0`
+  - `app/static/tab-ai.html:335`：`|| 15` → `|| 2`
+  - `app/static/tab-ai.html:426`：`|| 15` → `|| 2`
+  - `app/static/tab-ai.html:441`：`|| 15` → `|| 2`
+  - `tests/test_layer2.py:201`：`assert d["daily_hard_cap_usd"] == 15.0` → `== 2.0`
+- **指派**：E1-Beta（1h）→ 與 G-05 共用 E2+E4
+- **前置**：無（與 G-05 並行）
+
+---
+
+### ██ Sprint 5a：H1-H5 核心接通（Sprint 0 E2+E4 通過後啟動，~15h 含 E2+E4）
+
+### [ ] 5a-1：Scout→Strategist 情報鏈路追蹤確認
+- **文件**：`app/pipeline_bridge.py:903` 附近 `produce_intel()` 調用
+- **問題**：確認 `produce_intel()` 調用時 relevance_score 是否達到 threshold，intel 是否真實到達 StrategistAgent（`stats["intents_received"]` 需可觀察）
+- **修復**：追蹤調用鏈；若 threshold 過高則調整；補充 E4 觀察點
+- **指派**：E1-Alpha（1.5h）
+- **前置**：Sprint 0 完成
+
+### [ ] 5a-2：H0 Gate warn-only → blocking 正式啟用
+- **文件**：`app/pipeline_bridge.py` `_process_pending_intents()`
+- **問題**：H0 Gate 目前 warn-only，不實際攔截 TradeIntent
+- **修復**：H0 Gate 返回 False 時 skip 該 intent；確認 `max_pending_intents=50` 上限真實生效
+- **指派**：E1-Alpha（1h）
+- **前置**：Sprint 0 完成
+
+### [ ] 5a-3：H1 ThoughtGate MVP（budget / complexity / cooldown 三條規則）
+- **文件**：`app/strategist_agent.py` `_handle_intel()` 方法（第 287 行）
+- **實現**：AI 調用前插入 H1 判斷：(1) budget 充足？ (2) signal complexity（rule-based）(3) cooldown 檢查
+- **CC 強制**：Ollama 超時（timeout=5s）→ 必須走 `_heuristic_evaluate()`，**不可 allow-all**（原則 6）
+- **注意**：`_handle_intel()` 是同步方法（MessageBus 回調），Ollama 調用用同步 HTTP 或 threading.Thread，不可用 await
+- **指派**：E1-Beta（3h）
+- **前置**：Sprint 0 完成
+
+### [ ] 5a-4：Strategist shadow=False 驗證 + 正式切換
+- **文件**：`app/phase2_strategy_routes.py:155`（`StrategistConfig(shadow=True)`）
+- **實現**：
+  1. shadow=True 狀態先確認 AC-3（intel 到達 Strategist stats counter 遞增）
+  2. 通過 `SYSTEM_DIRECTIVE shadow_off` 切換 shadow=False
+  3. 確認 TradeIntent → Guardian → `acquire_lease()` → `execute_order()` 完整鏈路
+- **前置**：5a-1、5a-2、**G-05（必須先完成）**
+- **指派**：E1-Alpha（1.5h）
+
+### [ ] 5a-5：H2 預算門控接入 Strategist
+- **文件**：`app/strategist_agent.py` `_handle_intel()`
+- **實現**：H1 判斷 should_call_ai=True 後，調用 `layer2_cost_tracker.check_daily_budget(model_tier)` → 超預算降級 L1 或 block
+- **前置**：5a-3
+- **指派**：E1-Beta（1.5h）
+
+### [ ] 5a-6：H3 ModelRouter 路由接入（l1_9b / l1_27b / l2）
+- **文件**：`app/strategist_agent.py` `_handle_intel()`
+- **實現**：基於 complexity + urgency 路由模型 tier；**L2 必須在 threading.Thread 執行，不阻塞 on_tick**
+- **前置**：5a-5
+- **指派**：E1-Beta（2h）
+
+### Sprint 5a 工作鏈
+```
+E1-Alpha（5a-1+2+4）‖ E1-Beta（5a-3+5+6）完全並行
+  ↓ 均完成
+E2（2h，重點：H1 timeout 走 heuristic / L2 在獨立線程 / max_pending_intents 上限）
+  ↓
+E4（2h，AC-3 Scout intel 可觀察 + H1 timeout mock 測試 + ≥ 2575 passed）
+```
+
+---
+
+### ██ Sprint 5b：Agent 落地完善（Sprint 5a E2+E4 通過後啟動，~13h 含 E2+E4）
+
+### [ ] 5b-1：H4 AI 輸出驗證（validate_output）
+- **文件**：`app/strategist_agent.py`，H3 AI 調用後
+- **實現**：驗證輸出非空 / action 字段存在 / confidence ∈ [0,1] / 驗證失敗 → fallback heuristic
+- **指派**：E1-Gamma（1.5h）
+- **前置**：Sprint 5a 完成
+
+### [ ] 5b-2/6：H5 CostLogger 接入（Ollama 追蹤 + ROI disclaimer）
+- **文件**：`app/layer2_cost_tracker.py`
+- **實現**：
+  1. 新增 `record_ollama_call(model: str, duration_ms: float, prompt_tokens: int)` 方法
+  2. Strategist L1 調用後同步記錄
+  3. **CC 原則 10 要求**：`get_summary()` / `get_cost_edge_ratio()` 回傳 dict 加 `roi_basis: "paper_simulation_only"` + `roi_disclaimer: "基於模擬 PnL，非真實盈虧"`
+- **指派**：E1-Gamma（2.5h）
+- **前置**：Sprint 5a 完成
+
+### [ ] 5b-3：`apply_ai_consultation()` stub 替換為真實 H 鏈
+- **文件**：`app/main_legacy.py:3876`（stub 位置）
+- **實現**：接入 `strategist_agent._handle_intel()` 路徑，或標記廢棄並移除死代碼
+- **指派**：E1-Delta（2h）
+- **前置**：Sprint 5a 完成
+
+### [ ] 5b-4：ScoutWorker 後台定時掃描線程
+- **文件**：新建 `app/scout_worker.py`
+- **實現**：`threading.Thread(daemon=True)`，每 30min 觸發全品種掃描；進程退出正確停止
+- **指派**：E1-Delta（3h）
+- **前置**：5a-1 確認後
+
+### [ ] 5b-5：原則 14 集成測試（Mock Ollama 崩潰全流程）
+- **文件**：新建 `tests/test_h_chain_integration.py`
+- **實現**：Mock `is_available()=False` → 確認系統退化 L0 → 交易鏈路不中斷（FA AC-2 / CC 原則 14）
+- **指派**：E4 直接執行（1.5h）
+- **前置**：Sprint 5a 完成
+
+### Sprint 5b 工作鏈
+```
+E1-Gamma（5b-1+2/6）‖ E1-Delta（5b-3+4）‖ E4（5b-5）完全並行
+  ↓ 均完成
+E2（1.5h，重點：ScoutWorker 線程安全 / roi_basis 標記覆蓋完整）
+  ↓
+E4（2h，AC-1/2/7/8 驗收 + Mock Ollama 崩潰集成測試 + ≥ 2600 passed）
+```
+
+---
+
+## ██ 後續大方向（P3 / Phase 1-4）
+
+```
+P3 批次（~36h · 16 項）：
+  GUI 術語友好化（SM-01 等工程術語 → 中文操作員視角）— 用戶確認延後
+  性能優化（E5 報告 49 項中優先級最高的）
+
+Phase 1 Batch 1B（Wave 5 完成後）：
+  Cooldown 聯動確認（H0Gate → RiskManager set_h0_gate 注入驗證）
+  數據品質 → 風控降級（H0Gate freshness_score warn-only 先行）
+  ~~M-of-N 簽名驗證~~ — 移出，待有多個 Operator 時再設計
+
+Phase 2（~10天）：
+  L2 模式發現自動化 + Truth Source Registry 形式化
+  回測引擎 MVP（策略 alpha 驗證基礎設施）
+
+Phase 3（~15天）：
+  L3 假設與實驗管線 + L4 策略進化
+
+Phase 4（5+21天）：
+  Paper Trading 穩定運行 21 天觀察期
+  Live 前置條件核驗 + Supervised Live Gate（M 章）
+```
+
+---
+
 ## 已完成記錄（可查 git log）
 
 ```

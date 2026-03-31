@@ -380,3 +380,27 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 每阶段通常包含：`PHASE*_TASK_BOOK`, `PHASE*_PM_ACCEPTANCE_REPORT`, `FA_GAP_AUDIT_REPORT`。
 详见各子目录。
+
+---
+
+### CCAgentWorkSpace/ — Agent 獨立工作空間（2026-03-31 新增）
+
+15 個 Agent 角色各自的獨立工作空間。每個 Agent 有 `profile.md`（角色定位）、`memory.md`（工作記憶）、`workspace/`（報告存檔）。
+
+| 目錄 | Agent | 層次 |
+|------|-------|------|
+| `CCAgentWorkSpace/PM/` | Project Manager | 管理層 |
+| `CCAgentWorkSpace/FA/` | Functional Auditor | 管理層 |
+| `CCAgentWorkSpace/PA/` | Project Architect | 管理層 |
+| `CCAgentWorkSpace/CC/` | Compliance Checker | 質量保證層 |
+| `CCAgentWorkSpace/E2/` | Code Reviewer | 質量保證層 |
+| `CCAgentWorkSpace/E3/` | Security Auditor | 質量保證層 |
+| `CCAgentWorkSpace/E4/` | Test Engineer | 質量保證層 |
+| `CCAgentWorkSpace/E5/` | Optimization Engineer | 質量保證層 |
+| `CCAgentWorkSpace/E1/` | Backend Developer | 執行層 |
+| `CCAgentWorkSpace/E1a/` | Frontend Developer | 執行層 |
+| `CCAgentWorkSpace/A3/` | UX Auditor | 專項審查層 |
+| `CCAgentWorkSpace/R4/` | Document Auditor | 專項審查層 |
+| `CCAgentWorkSpace/TW/` | Technical Writer | 專項審查層 |
+| `CCAgentWorkSpace/AI-E/` | AI Effectiveness Evaluator | 分析層 |
+| `CCAgentWorkSpace/QA/` | Quality Assurance | 分析層 |

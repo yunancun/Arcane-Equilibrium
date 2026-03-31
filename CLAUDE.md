@@ -405,6 +405,28 @@ python3 scripts/bybit_runtime_state_resolver.py
 
 ## 十、代码与文档规范
 
+### 雙語注釋規範（強制，E1/E1a 寫代碼必須遵守，E2 審查必查）
+
+每個新建或修改的函數、類、模塊，必須包含中英對照注釋，供 Operator 和維護者閱讀：
+
+1. **模塊頂部 `MODULE_NOTE`**：中英雙語說明模塊用途、所屬層次、主要職責
+2. **函數/方法 docstring**：中英兩段，說明「做什麼」和「為什麼這樣設計」
+3. **關鍵邏輯 inline comment**：說明意圖，而非翻譯代碼本身
+4. **fail-closed / fallback 路徑**：必須注釋說明為何選擇此 fallback 行為
+5. **安全相關代碼**（認證/授權/XSS 防護）：必須注釋說明防護目的
+
+> E2 Code Review 必查：缺少雙語注釋 → 打回 E1/E1a 重做，不計為通過。
+
+### 大章節完成後強制同步（Sprint / Wave 結束時）
+
+每個 Sprint 或 Wave 完成（E2+E4 通過、PM 確認）後，在 commit 前必須：
+
+1. **更新 `CLAUDE.md`**：§三「當前系統狀態」+ §十三.4「當前任務狀態」+ §十四「一句話狀態」
+2. **更新 GitHub `README.md`**：反映最新完成狀態、測試數、功能摘要
+3. **一起 commit**：生產代碼 + TODO.md + CLAUDE.md + README.md 放同一個 commit
+
+> 不允許先 commit 代碼、事後補文檔。文檔同步是 Sprint 完成的必要條件，不是可選項。
+
 ### 新脚本规范
 1. 头部 `MODULE_NOTE`（中英双语）
 2. 输出 `latest` + `dated` 两份文件
@@ -642,10 +664,12 @@ Live 前置条件（M/N 前必须核验）：
   QA: 端到端集成测试
   PM: 最终确认 + 更新 CLAUDE.md 状态
 
-阶段 8【文档】（并行）
-  TW: 工程日志 + 注释
-  R4: 文档索引更新
-  → 更新 CLAUDE.md + docs/README.md
+阶段 8【文档同步，強制，Sprint/Wave 完成的必要條件】（并行）
+  TW: 工程日志 + 双语注释补全
+  R4: 文档索引更新（docs/README.md）
+  → 更新 CLAUDE.md（§三狀態 + §十三.4 + §十四一句話狀態）
+  → 更新 GitHub README.md（最新功能、測試數、完成狀態）
+  → 生產代碼 + TODO.md + CLAUDE.md + README.md 放同一個 commit
 ```
 
 #### 纯修复任务快速通道（P0 紧急修复）
@@ -695,6 +719,70 @@ Wave 5b：✅ Paper/Demo 同步修復 — 3 CRITICAL + 2 MODERATE（止損同步
 
 完整派发计划：docs/audit/March31/PA_review_2026-03-31.md（Part 2 任务派发）
 ```
+
+---
+
+### 13.5 Sub-Agent 啟動與完成強制協議（自動化記憶系統）
+
+> **強制規則：每次用 Agent tool 喚起任何 sub-agent，必須在 prompt 中包含啟動序列。每次 sub-agent 完成任務，必須執行完成序列。兩端均不可省略。**
+
+#### 啟動序列（每次 Agent tool prompt 的開頭必須包含）
+
+```
+你是 {角色代號}（{角色全名}）。在執行任何任務之前，必須先完成以下兩步：
+
+【Step 1 - 讀取自身記憶】
+讀取：docs/CCAgentWorkSpace/{角色代號}/memory.md
+理解你目前的工作狀態、已知問題、歷史決策。
+
+【Step 2 - 讀取最近上下文】
+讀取：docs/CCAgentWorkSpace/{角色代號}/workspace/reports/ 目錄中最新的一份報告（按文件名日期排序最後一個）。
+若目錄為空，跳過此步。
+
+完成以上兩步後，再執行以下任務：
+{實際任務內容}
+```
+
+#### 完成序列（每次 sub-agent 完成任務後必須執行）
+
+```
+任務完成後，必須執行以下兩步：
+
+【Step A - 更新記憶】
+更新 docs/CCAgentWorkSpace/{角色代號}/memory.md：
+- 追加本次任務的關鍵發現、重要決策、需要記住的教訓
+- 更新任何已過時的狀態信息
+- 不要刪除歷史記錄，追加到文件末尾
+
+【Step B - 存檔報告】
+若本次任務產生了報告或分析輸出：
+- 存至 docs/CCAgentWorkSpace/{角色代號}/workspace/reports/YYYY-MM-DD--描述.md
+- 同時確認是否需要存一份到 docs/CCAgentWorkSpace/Operator/（僅限最終結論性報告）
+
+若本次任務只是輔助性工作（如純代碼修復），跳過 Step B。
+```
+
+#### 角色代號 → workspace 路徑對照
+
+| 代號 | workspace 路徑 | 代號 | workspace 路徑 |
+|------|---------------|------|---------------|
+| PM | `docs/CCAgentWorkSpace/PM/` | E2 | `docs/CCAgentWorkSpace/E2/` |
+| FA | `docs/CCAgentWorkSpace/FA/` | E3 | `docs/CCAgentWorkSpace/E3/` |
+| PA | `docs/CCAgentWorkSpace/PA/` | E4 | `docs/CCAgentWorkSpace/E4/` |
+| CC | `docs/CCAgentWorkSpace/CC/` | E5 | `docs/CCAgentWorkSpace/E5/` |
+| E1 | `docs/CCAgentWorkSpace/E1/` | A3 | `docs/CCAgentWorkSpace/A3/` |
+| E1a | `docs/CCAgentWorkSpace/E1a/` | R4 | `docs/CCAgentWorkSpace/R4/` |
+| QA | `docs/CCAgentWorkSpace/QA/` | TW | `docs/CCAgentWorkSpace/TW/` |
+| AI-E | `docs/CCAgentWorkSpace/AI-E/` | | |
+
+#### 記憶更新範圍說明
+
+| 更新到 memory.md | 不需要更新 |
+|----------------|-----------|
+| 角色視角下的關鍵發現與教訓 | 可從代碼/git 直接查到的技術細節 |
+| 重要決策及其原因 | 當前會話臨時上下文 |
+| 與其他 Agent 的分歧或共識 | 已在報告文件中完整記錄的內容（報告存檔即可）|
+| 需要在下次啟動時注意的風險點 | 無法在未來會話中復用的一次性信息 |
 
 ---
 
