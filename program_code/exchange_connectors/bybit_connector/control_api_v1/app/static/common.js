@@ -158,6 +158,21 @@ function _ocSyncCurrencyBadges() {
   });
 }
 
+// Cross-iframe currency sync: when parent toggles currency, localStorage changes
+// fire a 'storage' event in all same-origin iframes. Re-read index and re-dispatch.
+// 跨 iframe 货币同步：父页面切换货币时 localStorage 变化会触发 storage 事件，
+// iframe 重新读取索引并派发 occurrencychange 以刷新显示。
+window.addEventListener('storage', function(e) {
+  if (e.key === 'oc_curr_idx' && e.newValue != null) {
+    const newIdx = parseInt(e.newValue);
+    if (!isNaN(newIdx) && newIdx !== _ocCurrIdx) {
+      _ocCurrIdx = newIdx;
+      _ocSyncCurrencyBadges();
+      window.dispatchEvent(new CustomEvent('occurrencychange', { detail: { currency: ocCurrCode() } }));
+    }
+  }
+});
+
 let _ocFxTimer = null;  // handle for the 60-second refresh loop / 60秒刷新定时器句柄
 
 async function ocInitFx() {
