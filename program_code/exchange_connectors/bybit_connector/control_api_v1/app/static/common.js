@@ -26,6 +26,18 @@ function ocLogout() {
   window.location.href = '/login';
 }
 
+// ─── UUID fallback (crypto.randomUUID requires Secure Context / HTTPS) ───────
+function _ocUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for HTTP (non-secure) contexts
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 // ─── API Helper ──────────────────────────────────────────────────────────────
 let _ocAuthFails = 0;
 const _OC_AUTH_MAX = 5;
@@ -34,9 +46,7 @@ async function ocApi(path, opts) {
   const token = ocGetToken();
   if (!token) return null;
   if (_ocAuthFails >= _OC_AUTH_MAX) {
-    console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' consecutive failures). Attempting reset probe...');
-    // Allow one probe request to check if auth is restored (e.g. after re-login)
-    // If it succeeds, counter resets; if it fails, counter increments further
+    console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' failures). Probing...');
   }
 
   const method = (opts && opts.method) || 'GET';
@@ -56,11 +66,20 @@ async function ocApi(path, opts) {
           ocToast('Authentication failed repeatedly — please re-login / 認證多次失敗，請重新登入', 'error');
         }
       }
-      return null;
+      // Try to parse error body so callers can show real error messages
+      try {
+        const errBody = await r.json();
+        console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status, errBody);
+        return { ok: false, _httpStatus: r.status, message: errBody.detail || errBody.message || ('HTTP ' + r.status) };
+      } catch (_) {
+        console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status);
+        return { ok: false, _httpStatus: r.status, message: 'HTTP ' + r.status };
+      }
     }
     _ocAuthFails = 0;
     return await r.json();
   } catch (e) {
+    console.warn('[ocApi] Network error: ' + path, e);
     return null;
   }
 }
@@ -72,8 +91,8 @@ async function ocPost(path, body) {
 // ─── Request Envelope ────────────────────────────────────────────────────────
 function ocEnvelope(payload, stateRevision) {
   return {
-    request_id: crypto.randomUUID(),
-    idempotency_key: crypto.randomUUID(),
+    request_id: _ocUUID(),
+    idempotency_key: _ocUUID(),
     operator_id: localStorage.getItem(OC_USER_KEY) || 'gui-operator',
     client_ts_ms: Date.now(),
     expected_state_revision: stateRevision || 0,

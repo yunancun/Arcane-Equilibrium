@@ -352,8 +352,8 @@ async function apiPost(path, payload) {
 function baseEnvelope(extra = {}) {
   // 构建标准请求 envelope / Build standard request envelope
   return {
-    request_id: crypto.randomUUID(),
-    idempotency_key: crypto.randomUUID(),
+    request_id: _ocUUID(),
+    idempotency_key: _ocUUID(),
     operator_id: "demo-operator",
     reason: "gui-triggered action",
     client_ts_ms: Date.now(),
