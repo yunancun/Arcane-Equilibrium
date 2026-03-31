@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-03-31（Wave 6 Sprint 2 + Cleanup Sprint + Phase 2 Batch 2A/2B 完成 · 2700 tests）
+# 最後更新：2026-04-01（Wave 7 Demo 同步修復 + Spot 品類啟用進行中）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -826,6 +826,71 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 - **Sharpe 計算**：ANNUALIZATION_FACTORS dict，<2 筆交易 → 返回 0.0
 - **測試**：`tests/test_backtest_engine.py`（57 個測試，B1-B9 驗收標準）
 - ✅ 完成：commit cf7ef5d（2026-03-31）
+
+---
+
+## ██ Wave 7a — Spot 品類啟用（進行中）
+
+> 目標：讓 Paper + Demo 雙引擎支持 Spot 現貨交易（634 個幣對）。
+> Bybit V5 API 4 個合法 category：linear（已啟用）、spot、inverse、option。
+
+### [ ] SPOT-1：市場掃描器支持 spot category
+- **檔案**：`program_code/local_model_tools/market_scanner.py`
+- **問題**：`scan()` 硬編碼 `category=linear`（第 120 行）
+- **修復**：`__init__` 加 `categories` 參數，支持多品類掃描
+- **工時**：1h
+
+### [ ] SPOT-2：Position 記錄 category 字段
+- **檔案**：`app/paper_trading_engine.py`（`project_position_after_fill()`）
+- **問題**：持倉不記錄 category，風控讀 `pos.get("category", "linear")` 把現貨當合約
+- **修復**：建立持倉時存入 category
+- **工時**：1h
+
+### [ ] SPOT-3：Spot 保證金邏輯（現貨 = 100% 名義價值）
+- **檔案**：`app/paper_trading_engine.py`
+- **問題**：保證金算法 `notional / leverage`，spot 無槓桿應為 100% notional
+- **修復**：`if category == "spot": margin = notional`
+- **工時**：1h
+
+### [ ] SPOT-4：策略部署器 + Pipeline 驗證
+- **檔案**：`strategy_auto_deployer.py` + `pipeline_bridge.py`
+- **驗證**：intent.metadata["category"] = "spot" 正確透傳
+- **工時**：1h
+
+### [ ] SPOT-5：端到端測試 + Demo 驗證
+- **內容**：Spot 品類 Paper+Demo 雙引擎下單/平倉/同步全流程
+- **工時**：2h
+
+---
+
+## ██ Wave 7b — Inverse 品類完善（待辦，Spot 完成後）
+
+> Inverse 幣本位合約（27 個幣對：BTCUSD, ETHUSD 等）。
+> PnL 計算公式與 linear 完全不同，需要更多改動。
+
+### [ ] INV-1：Paper Engine PnL 公式修正（CRITICAL）
+- **檔案**：`app/paper_trading_engine.py`（`update_unrealized_pnl()` + `_compute_close_pnl()`）
+- **問題**：當前 `pnl = (exit - entry) * qty` 只對 linear 正確
+- **Inverse 正確公式**：`pnl = qty * (1/entry - 1/exit)`（幣本位）
+- **工時**：3h
+
+### [ ] INV-2：市場掃描器支持 inverse（symbol 命名不同 BTCUSD vs BTCUSDT）
+- **檔案**：`market_scanner.py`
+- **問題**：USDT 過濾器會排除所有 inverse 合約
+- **工時**：2h
+
+### [ ] INV-3：qty 步長精度（inverse 多為整數合約）
+- **檔案**：`bybit_demo_connector.py`（`round_qty_for_exchange()`）
+- **問題**：BTCUSD step=1（整數），當前啟發式可能 round 錯
+- **工時**：1h
+
+### [ ] INV-4：Inverse 專用風控配置
+- **檔案**：`risk_manager.py`
+- **內容**：inverse 槓桿上限（通常 50x vs linear 125x）、保證金計算
+- **工時**：2h
+
+### [ ] INV-5：端到端測試 + Demo 驗證
+- **工時**：2h
 
 ---
 
