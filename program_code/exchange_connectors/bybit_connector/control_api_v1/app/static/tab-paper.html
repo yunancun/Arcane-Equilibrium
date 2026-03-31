@@ -208,10 +208,11 @@ async function loadSession() {
   $('btn-resume').disabled = (state !== 'paused');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
 
+  const _initBal = s.initial_paper_balance_usdt || s.initial_balance || 100000;
   if (!$('balance-val').dataset.fromMetrics) {
-    $('balance-val').textContent = ocBalance(s.initial_balance || 100000, 0);
+    $('balance-val').textContent = ocBalance(_initBal, 0);
   }
-  ocSetText('p-bal-initial', ocBalance(s.initial_balance || 100000, 2));
+  ocSetText('p-bal-initial', ocBalance(_initBal, 2));
 
   // PnL
   const pnl = d.data.pnl;
@@ -233,7 +234,7 @@ async function loadSession() {
 
   // Available balance = initial + realized + unrealized - margin (estimated)
   if (!$('p-bal-available').dataset.fromMetrics) {
-    const estBal = (s.initial_balance || 100000) + (pnl.realized_pnl || 0) + (pnl.unrealized_pnl || 0);
+    const estBal = _initBal + (pnl.realized_pnl || 0) + (pnl.unrealized_pnl || 0);
     ocSetText('p-bal-available', ocBalance(estBal, 2));
   }
 
