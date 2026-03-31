@@ -108,16 +108,31 @@
   <!-- ─── Sidebar ─── -->
   <div class="sidebar">
 
-    <h2>Paper PnL / 模拟盈亏</h2>
+    <h2>&#x1F512; Live / 实盘</h2>
+    <div class="mc" id="live-section" style="opacity:0.5">
+      <div class="mc-label">Mode</div>
+      <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
+      <div class="mc-sub" id="s-live-mode-detail"></div>
+    </div>
+    <div class="mc" id="live-balance-section" style="opacity:0.5">
+      <div class="mc-label">Balance</div>
+      <div class="mc-val" id="s-live-balance" style="font-size:14px">--</div>
+      <div class="mc-sub" id="s-live-balance-detail"></div>
+    </div>
+    <div class="mc" id="live-pnl-section" style="opacity:0.5">
+      <div class="mc-label">Net PnL</div>
+      <div class="mc-val" id="s-live-pnl">--</div>
+      <div class="mc-sub" id="s-live-pnl-detail"></div>
+    </div>
+
+    <h2>&#x1F4B0; Paper / 模拟</h2>
     <div class="mc">
       <div class="mc-label">Net PnL</div>
       <div class="mc-val" id="s-pnl">--</div>
       <div class="mc-sub" id="s-pnl-detail"></div>
     </div>
-
-    <h2>Session / 会话</h2>
     <div class="mc">
-      <div class="mc-label">State</div>
+      <div class="mc-label">Session</div>
       <div class="mc-val" id="s-session" style="font-size:14px">--</div>
       <div class="mc-sub" id="s-session-detail"></div>
     </div>
@@ -189,21 +204,21 @@ const BUILD_TS = Date.now();
 // ─── Tab Definitions ──────────────────────────────────────────
 const TABS = [
   // ── 儀表板 ──────────────────────────────────────────────────────
-  { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: '/static/tab-system.html?v=20260331n' },
+  { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: '/static/tab-system.html?v=20260331p' },
   // ── 交易核心 ─────────────────────────────────────────────────────
-  { id: 'live',       label: '实盘交易',  labelEn: 'Live 🔒',   icon: '&#x1F512;', src: '/static/tab-live.html?v=20260331n' },
-  { id: 'trading',    label: '测试交易',  labelEn: 'Test',      icon: '&#x1F9EA;', src: '/static/tab-trading.html?v=20260331n' },
+  { id: 'live',       label: '实盘交易',  labelEn: 'Live 🔒',   icon: '&#x1F512;', src: '/static/tab-live.html?v=20260331p' },
+  { id: 'trading',    label: '测试交易',  labelEn: 'Test',      icon: '&#x1F9EA;', src: '/static/tab-trading.html?v=20260331p' },
   // ── 市場與策略 ───────────────────────────────────────────────────
   { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
-  { id: 'strategy',   label: '策略中心',  labelEn: 'Strategy',  icon: '&#x2699;',  src: '/static/tab-strategy.html?v=20260331n' },
+  { id: 'strategy',   label: '策略中心',  labelEn: 'Strategy',  icon: '&#x2699;',  src: '/static/tab-strategy.html?v=20260331p' },
   // ── 風控與智能 ───────────────────────────────────────────────────
-  { id: 'risk',       label: '风控止损',  labelEn: 'Risk',      icon: '&#x1F6E1;', src: '/static/tab-risk.html?v=20260331n' },
-  { id: 'ai',         label: 'AI 引擎',   labelEn: 'AI',        icon: '&#x1F916;', src: '/static/tab-ai.html?v=20260331n' },
-  { id: 'learning',   label: '学习系统',  labelEn: 'Learning',  icon: '&#x1F4D6;', src: '/static/tab-learning.html?v=20260331n' },
+  { id: 'risk',       label: '风控止损',  labelEn: 'Risk',      icon: '&#x1F6E1;', src: '/static/tab-risk.html?v=20260331p' },
+  { id: 'ai',         label: 'AI 引擎',   labelEn: 'AI',        icon: '&#x1F916;', src: '/static/tab-ai.html?v=20260331p' },
+  { id: 'learning',   label: '学习系统',  labelEn: 'Learning',  icon: '&#x1F4D6;', src: '/static/tab-learning.html?v=20260331p' },
   // ── 治理與運維 ───────────────────────────────────────────────────
-  { id: 'governance', label: '治理控制',  labelEn: 'Governance',icon: '&#x2696;',  src: '/static/tab-governance.html?v=20260331n' },
-  { id: 'monitoring', label: '监控',      labelEn: 'Monitor',   icon: '&#x1F50D;', src: '/static/tab-monitoring.html?v=20260331n' },
-  { id: 'settings',   label: '设置',      labelEn: 'Settings',  icon: '&#x2699;',  src: '/static/tab-settings.html?v=20260331n' },
+  { id: 'governance', label: '治理控制',  labelEn: 'Governance',icon: '&#x2696;',  src: '/static/tab-governance.html?v=20260331p' },
+  { id: 'monitoring', label: '监控',      labelEn: 'Monitor',   icon: '&#x1F50D;', src: '/static/tab-monitoring.html?v=20260331p' },
+  { id: 'settings',   label: '设置',      labelEn: 'Settings',  icon: '&#x2699;',  src: '/static/tab-settings.html?v=20260331p' },
 ];
 
 let currentTab = 'system';
@@ -292,7 +307,76 @@ const OC = window.location.origin + '/openclaw';
 
 // ─── Sidebar Refresh ─────────────────────────────────────────
 async function refreshSidebar() {
-  // Paper Trading PnL + Session
+  // ── Live Section ──
+  // Read governance status to determine if live mode is active
+  // 读取治理状态判断是否进入实盘模式
+  let liveEnabled = false;
+  try {
+    const gov = await api('/api/v1/governance/status');
+    if (gov && gov.data) {
+      const gs = gov.data;
+      const execAuth = gs.execution_authority || gs.auth_state || 'not_granted';
+      const execState = gs.execution_state || 'disabled';
+      liveEnabled = (execAuth === 'granted' && execState === 'enabled');
+
+      const modeEl = document.getElementById('s-live-mode');
+      if (liveEnabled) {
+        modeEl.textContent = 'LIVE';
+        modeEl.className = 'mc-val red';
+        document.getElementById('s-live-mode-detail').textContent = 'execution: ' + execState;
+      } else {
+        modeEl.textContent = 'LOCKED';
+        modeEl.className = 'mc-val';
+        document.getElementById('s-live-mode-detail').textContent =
+          'auth: ' + execAuth + ' | exec: ' + execState;
+      }
+    }
+  } catch(e) {
+    document.getElementById('s-live-mode').textContent = 'LOCKED';
+    document.getElementById('s-live-mode').className = 'mc-val';
+    document.getElementById('s-live-mode-detail').textContent = 'governance unavailable';
+  }
+
+  // Live balance + PnL from Bybit account (pre-wired, shows N/A when locked)
+  // 实盘余额和盈亏从 Bybit 账户读取（预接入，锁定时显示 N/A）
+  const liveOpacity = liveEnabled ? '1' : '0.5';
+  document.getElementById('live-section').style.opacity = liveEnabled ? '1' : '0.5';
+  document.getElementById('live-balance-section').style.opacity = liveOpacity;
+  document.getElementById('live-pnl-section').style.opacity = liveOpacity;
+
+  if (liveEnabled) {
+    try {
+      const bd = await api('/api/v1/strategy/demo/balance');
+      if (bd && bd.data && bd.data.retCode === 0) {
+        let b = bd.data;
+        if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
+        const equity = parseFloat(b.totalEquity || 0);
+        const available = parseFloat(b.totalAvailableBalance || 0);
+        const unrealized = parseFloat(b.totalPerpUPL || 0);
+        const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
+        const net = realized + unrealized;
+
+        document.getElementById('s-live-balance').textContent = ocBalance(equity, 2);
+        document.getElementById('s-live-balance-detail').textContent =
+          'Available: ' + ocBalance(available, 2);
+
+        const pnlEl = document.getElementById('s-live-pnl');
+        pnlEl.textContent = ocMoney(net);
+        pnlEl.className = 'mc-val ' + (net >= 0 ? 'green' : 'red');
+        document.getElementById('s-live-pnl-detail').textContent =
+          'Realized: ' + realized.toFixed(2) + ' | UPL: ' + unrealized.toFixed(2);
+      }
+    } catch(e) {}
+  } else {
+    document.getElementById('s-live-balance').textContent = 'N/A';
+    document.getElementById('s-live-balance').className = 'mc-val';
+    document.getElementById('s-live-balance-detail').textContent = 'live mode not active';
+    document.getElementById('s-live-pnl').textContent = 'N/A';
+    document.getElementById('s-live-pnl').className = 'mc-val';
+    document.getElementById('s-live-pnl-detail').textContent = 'requires execution_authority';
+  }
+
+  // ── Paper Trading PnL + Session ──
   try {
     const d = await api('/api/v1/paper/session/status');
     if (d && d.data) {
