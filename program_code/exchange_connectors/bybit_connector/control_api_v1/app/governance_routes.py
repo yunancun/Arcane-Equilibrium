@@ -34,8 +34,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+import hmac
 import html
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,7 @@ def _get_h0_gate() -> Any:
         return None
 
 
-def _require_operator_auth() -> Any:
+def _require_operator_auth(authorization: str | None = Header(default=None)) -> Any:
     """FastAPI Depends: 驗證認證 + Operator 角色，返回已驗證的 actor。
     Validates authentication and Operator role; returns the authenticated actor.
 
@@ -124,30 +125,30 @@ def _require_operator_auth() -> Any:
         HTTPException(403) if authenticated but not Operator.
         HTTPException(503) if authentication system unavailable.
     """
-    actor = _get_auth_actor()
+    actor = _get_auth_actor(authorization)
     _require_operator_role(actor)
     return actor
 
 
-def _get_auth_actor() -> Any:
+def _get_auth_actor(authorization: str | None = Header(default=None)) -> Any:
     """
-    Lazy import of authentication dependency / 延迟导入认证依赖
+    FastAPI dependency — validates bearer token and returns authenticated actor.
+    FastAPI 依赖 — 验证 bearer token 并返回已认证的 actor。
 
-    Returns:
-        Actor dict with role and identity, or raises HTTPException(401/503)
+    Called by FastAPI at request time (use as Depends(_get_auth_actor) WITHOUT parentheses).
+    由 FastAPI 在请求时调用（使用 Depends(_get_auth_actor)，不加括号）。
     """
     try:
         from . import main_legacy as base
-        actor = base.current_actor
-        # FIX-02: Ensure we never return None silently
-        if actor is None:
-            raise HTTPException(status_code=401, detail="Authentication required")
-        return actor
-    except HTTPException:
-        raise
     except ImportError:
-        # SECURITY FIX #1: Fail explicitly if auth system unavailable (not fallback to "system")
         raise HTTPException(status_code=503, detail="Authentication system unavailable")
+
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.replace("Bearer ", "", 1).strip()
+    if not hmac.compare_digest(token.encode("utf-8"), base.settings.api_token.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return base.build_authenticated_actor()
 
 
 def _get_authenticated_actor_class() -> type:
@@ -301,7 +302,7 @@ class GovernanceResponse:
 
 @governance_router.get("/status")
 def get_governance_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get combined governance dashboard.
@@ -328,7 +329,7 @@ def get_governance_status(
 
 @governance_router.get("/status/detailed")
 def get_detailed_governance_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get detailed aggregated governance status.
@@ -452,7 +453,7 @@ def get_detailed_governance_status(
 
 @governance_router.get("/auth/status")
 def get_authorization_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get detailed Authorization SM state.
@@ -487,7 +488,7 @@ def get_authorization_status(
 @governance_router.post("/auth/request")
 def request_authorization(
     body: AuthRequestBody,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Request a new authorization (DRAFT → PENDING_APPROVAL).
@@ -563,7 +564,7 @@ def request_authorization(
 @governance_router.post("/auth/approve")
 def approve_authorization(
     body: AuthApprovalRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator approves pending authorization.
@@ -633,7 +634,7 @@ def approve_authorization(
 
 @governance_router.get("/risk/level")
 def get_risk_level(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get current risk governor level and history.
@@ -679,7 +680,7 @@ def get_risk_level(
 @governance_router.post("/risk/override")
 def override_risk_level(
     body: RiskOverrideRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator de-escalates risk level manually.
@@ -796,7 +797,7 @@ def override_risk_level(
 @governance_router.post("/risk/de-escalation/request")
 def request_de_escalation(
     body: DeEscalationRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Submit a de-escalation request for risk level.
@@ -854,7 +855,7 @@ def request_de_escalation(
 def approve_de_escalation_request(
     request_id: str,
     body: ApproveDeEscalationRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator approves and executes a de-escalation request.
@@ -909,7 +910,7 @@ def approve_de_escalation_request(
 @governance_router.post("/reconcile")
 def trigger_manual_reconciliation(
     body: ManualReconciliationRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Trigger manual reconciliation between paper and demo/exchange.
@@ -963,7 +964,7 @@ def trigger_manual_reconciliation(
 
 @governance_router.get("/recovery/pending")
 def get_pending_recovery_requests(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get all pending recovery approval requests.
@@ -989,7 +990,7 @@ def get_pending_recovery_requests(
 @governance_router.post("/recovery/{request_id}/approve")
 def approve_recovery_request(
     request_id: str,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator approves a pending recovery request.
@@ -1059,7 +1060,7 @@ def approve_recovery_request(
 @governance_router.get("/audit/changes")
 def get_change_history(
     limit: int = 50,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get change audit log history.
@@ -1091,7 +1092,7 @@ def get_change_history(
 
 @governance_router.get("/audit/pending")
 def get_pending_approvals(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get all changes awaiting approval.
@@ -1125,7 +1126,7 @@ class AuditApprovalBody(BaseModel):
 def approve_audit_change(
     change_id: str,
     body: AuditApprovalBody,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator approves a pending audit change record.
@@ -1162,7 +1163,7 @@ def approve_audit_change(
 def reject_audit_change(
     change_id: str,
     body: AuditApprovalBody,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Operator rejects a pending audit change record.
@@ -1198,7 +1199,7 @@ def reject_audit_change(
 
 @governance_router.get("/symbols/whitelist")
 def get_symbol_whitelist(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get current symbol whitelist across all categories.
@@ -1240,7 +1241,7 @@ def get_symbol_whitelist(
 @governance_router.post("/symbols/whitelist")
 def add_symbol_to_whitelist(
     body: SymbolWhitelistAddRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Add a symbol to the whitelist for a specific category.
@@ -1332,7 +1333,7 @@ def add_symbol_to_whitelist(
 def remove_symbol_from_whitelist(
     symbol: str,
     category: str | None = None,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Remove a symbol from the whitelist.
@@ -1431,7 +1432,7 @@ def remove_symbol_from_whitelist(
 
 @governance_router.get("/leases")
 def get_active_leases(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     List all active decision leases.
@@ -1488,7 +1489,7 @@ def get_active_leases(
 def get_governance_events(
     limit: int = 50,
     event_type: str | None = None,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     T9A.02: Retrieve governance events from the event stream.
@@ -1530,7 +1531,7 @@ def get_governance_events(
 
 @governance_router.get("/learning-tier/status")
 def get_learning_tier_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     T10.04: Retrieve current learning tier gate status and capabilities.
@@ -1558,7 +1559,7 @@ def get_learning_tier_status(
 @governance_router.post("/learning-tier/promote")
 def promote_learning_tier(
     request: dict[str, Any],
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     T10.04: Manually promote learning tier (operator only).
@@ -1605,7 +1606,7 @@ def promote_learning_tier(
 def get_oms_orders(
     state: str | None = None,
     limit: int = 50,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     T10.05: Retrieve OMS order states for governance visibility.
@@ -1643,7 +1644,7 @@ def get_oms_orders(
 
 @governance_router.post("/health-check")
 def governance_health_check(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Health check for governance hub and all SMs.
@@ -1683,7 +1684,7 @@ def governance_health_check(
 
 @governance_router.get("/paper-live-gate/status")
 def get_paper_live_gate_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get PaperLiveGate status (last evaluation result or "not_evaluated").
@@ -1708,7 +1709,7 @@ def get_paper_live_gate_status(
 @governance_router.post("/paper-live-gate/evaluate")
 def evaluate_paper_live_gate(
     request: PaperLiveGateEvaluateRequest,
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Trigger PaperLiveGate evaluation with provided metrics.
@@ -1790,7 +1791,7 @@ def evaluate_paper_live_gate(
 
 @governance_router.get("/h0-gate/status")
 def get_h0_gate_status(
-    actor: Any = Depends(_get_auth_actor()),
+    actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
     Get H0 Gate current state and statistics (P1-16).
