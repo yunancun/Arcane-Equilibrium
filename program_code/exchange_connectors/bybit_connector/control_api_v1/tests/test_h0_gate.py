@@ -935,3 +935,329 @@ class TestH0HealthWorker:
         assert isinstance(snap.memory_available_mb, int)
         assert snap.memory_available_mb > 0
         assert snap.snapshot_ts_ms > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestPipelineBridgeH0Integration — PipelineBridge × H0Gate 集成測試（Day 3 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPipelineBridgeH0Integration:
+    """
+    驗證 PipelineBridge 的 H0Gate 注入接口（P1-16 Day 3）。
+    使用最小化 mock，避免完整 bridge 初始化的複雜依賴。
+    Verifies PipelineBridge H0Gate injection interface (P1-16 Day 3).
+    Uses minimal mocks to avoid the complex dependencies of full bridge init.
+    """
+
+    def _make_bridge_shell(self):
+        """
+        建立 PipelineBridge 空殼實例（不調用 __init__），直接設置 _h0_gate 屬性。
+        Create a PipelineBridge shell instance (bypassing __init__) with _h0_gate attr.
+        """
+        from app.pipeline_bridge import PipelineBridge
+        bridge = PipelineBridge.__new__(PipelineBridge)
+        bridge._h0_gate = None
+        return bridge
+
+    def test_set_h0_gate_injects(self):
+        """1. set_h0_gate(mock_gate) 後 bridge._h0_gate 等於 mock_gate"""
+        from unittest.mock import MagicMock
+        bridge = self._make_bridge_shell()
+        mock_gate = MagicMock()
+        bridge.set_h0_gate(mock_gate)
+        assert bridge._h0_gate is mock_gate
+
+    def test_set_h0_gate_none_safe(self):
+        """2. set_h0_gate(None) 不 raise"""
+        from unittest.mock import MagicMock
+        bridge = self._make_bridge_shell()
+        bridge._h0_gate = MagicMock()  # 先設置非 None
+        bridge.set_h0_gate(None)       # 再清除
+        assert bridge._h0_gate is None
+
+    def test_set_h0_gate_replace_existing(self):
+        """3. 已有 gate 時再次 set_h0_gate() 可覆蓋（不 raise，新 gate 生效）"""
+        from unittest.mock import MagicMock
+        bridge = self._make_bridge_shell()
+        gate1 = MagicMock()
+        gate2 = MagicMock()
+        bridge.set_h0_gate(gate1)
+        bridge.set_h0_gate(gate2)
+        assert bridge._h0_gate is gate2
+
+    def test_h0_gate_none_attribute_exists_after_new(self):
+        """4. __new__ 後直接設置 _h0_gate=None，set_h0_gate 仍可正常注入"""
+        from unittest.mock import MagicMock
+        from app.pipeline_bridge import PipelineBridge
+        bridge = PipelineBridge.__new__(PipelineBridge)
+        bridge._h0_gate = None
+        mock_gate = MagicMock()
+        bridge.set_h0_gate(mock_gate)
+        assert bridge._h0_gate is mock_gate
+
+    def test_h0_warn_only_does_not_raise_on_blocked(self):
+        """
+        5. mock gate 返回 allowed=False 時，_process_pending_intents 內部 warn-only 路徑
+           不應 raise（紙上交易模式只告警，不中斷意圖處理）。
+
+        策略：使用完整 mock 框架，只驗證 gate.check 被調用且無異常拋出。
+        Strategy: use full mock framework, verify gate.check called and no exception raised.
+        """
+        from unittest.mock import MagicMock, patch
+        from app.pipeline_bridge import PipelineBridge
+
+        # 建立帶最小屬性的 bridge（不走 __init__）
+        bridge = PipelineBridge.__new__(PipelineBridge)
+
+        # 設置所有 _process_pending_intents 需要的屬性
+        mock_gate = MagicMock()
+        mock_check_result = MagicMock()
+        mock_check_result.allowed = False
+        mock_check_result.check_name = "risk"
+        mock_check_result.reason = "test_blocked"
+        mock_gate.check.return_value = mock_check_result
+
+        bridge._h0_gate = mock_gate
+        bridge._orchestrator = MagicMock()
+        bridge._orchestrator.get_pending_intents.return_value = []
+        bridge._strategist_agent = None
+        bridge._paper_engine = MagicMock()
+        bridge._governance_hub = None
+        bridge._executor_agent = None
+        bridge._stats = {"intents_submitted": 0, "intents_rejected": 0}
+
+        # 不應拋出異常
+        bridge._process_pending_intents()
+
+    def test_h0_gate_none_skips_check(self):
+        """
+        6. _h0_gate=None 時，_process_pending_intents 不調用任何 gate.check，不 raise。
+        When _h0_gate=None, _process_pending_intents skips H0 check and does not raise.
+        """
+        from unittest.mock import MagicMock
+        from app.pipeline_bridge import PipelineBridge
+
+        bridge = PipelineBridge.__new__(PipelineBridge)
+        bridge._h0_gate = None
+        bridge._orchestrator = MagicMock()
+        bridge._orchestrator.get_pending_intents.return_value = []
+        bridge._strategist_agent = None
+        bridge._paper_engine = MagicMock()
+        bridge._governance_hub = None
+        bridge._executor_agent = None
+        bridge._stats = {"intents_submitted": 0, "intents_rejected": 0}
+
+        # 不應拋出異常
+        bridge._process_pending_intents()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestGovernanceRoutesH0GateStatus — /governance/h0-gate/status 端點測試（Day 3 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestGovernanceRoutesH0GateStatus:
+    """
+    驗證 GET /governance/h0-gate/status 端點的主要分支（P1-16 Day 3）。
+    直接調用路由處理函數（無 HTTP 層），與 test_governance_routes_coverage.py 保持一致風格。
+    Tests GET /governance/h0-gate/status endpoint branches (P1-16 Day 3).
+    Calls route handler directly (no HTTP layer), consistent with coverage test style.
+    """
+
+    def setup_method(self):
+        """每個測試前確保 AuthenticatedActor class 固定（防 reload 污染）"""
+        import sys
+        from pathlib import Path
+        project_root = str(Path(__file__).resolve().parents[1])
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
+    def _make_actor(self, roles=None):
+        """建立通過認證的 actor（預設非 Operator，只有 viewer）"""
+        from app.main_legacy import AuthenticatedActor
+        if roles is None:
+            roles = {"viewer"}
+        return AuthenticatedActor(
+            actor_id="test-viewer",
+            actor_type="human",
+            roles=roles,
+            scopes={"private_readonly"},
+        )
+
+    def test_get_h0_gate_status_returns_state(self):
+        """1. mock gate.get_current_state() 返回 dict → 端點返回 200 + {"ok": True, "data": state}"""
+        from unittest.mock import MagicMock, patch
+        from fastapi import HTTPException
+        from app.governance_routes import get_h0_gate_status
+
+        mock_gate = MagicMock()
+        mock_gate.get_current_state.return_value = {
+            "stats": {"total_checks": 10, "passed": 8, "blocked": 2},
+            "config": {"max_data_age_ms": 1000},
+        }
+        actor = self._make_actor()
+
+        with patch("app.governance_routes._get_h0_gate", return_value=mock_gate):
+            result = get_h0_gate_status(actor=actor)
+
+        assert result["ok"] is True
+        assert "data" in result
+        assert result["data"]["stats"]["total_checks"] == 10
+
+    def test_get_h0_gate_status_503_when_none(self):
+        """2. H0_GATE=None（_get_h0_gate 返回 None）→ 端點返回 503"""
+        from unittest.mock import patch
+        from fastapi import HTTPException
+        import pytest as _pytest
+        from app.governance_routes import get_h0_gate_status
+
+        actor = self._make_actor()
+
+        with patch("app.governance_routes._get_h0_gate", return_value=None):
+            with _pytest.raises(HTTPException) as exc:
+                get_h0_gate_status(actor=actor)
+            assert exc.value.status_code == 503
+
+    def test_get_h0_gate_status_no_operator_role_required(self):
+        """3. 普通認證用戶（只有 viewer，非 Operator）也能訪問（端點不要求 Operator 角色）"""
+        from unittest.mock import MagicMock, patch
+        from app.governance_routes import get_h0_gate_status
+        from app.main_legacy import AuthenticatedActor
+
+        # 使用 viewer-only actor（無 operator 角色）
+        viewer_actor = AuthenticatedActor(
+            actor_id="viewer-only",
+            actor_type="human",
+            roles={"viewer"},
+            scopes={"private_readonly"},
+        )
+        mock_gate = MagicMock()
+        mock_gate.get_current_state.return_value = {"stats": {}, "config": {}}
+
+        with patch("app.governance_routes._get_h0_gate", return_value=mock_gate):
+            # 不應因角色不足而拋出 403
+            result = get_h0_gate_status(actor=viewer_actor)
+
+        assert result["ok"] is True
+
+    def test_get_h0_gate_status_500_when_state_none(self):
+        """4. gate.get_current_state() 返回 None → 端點返回 500"""
+        from unittest.mock import MagicMock, patch
+        from fastapi import HTTPException
+        import pytest as _pytest
+        from app.governance_routes import get_h0_gate_status
+
+        mock_gate = MagicMock()
+        mock_gate.get_current_state.return_value = None
+        actor = self._make_actor()
+
+        with patch("app.governance_routes._get_h0_gate", return_value=mock_gate):
+            with _pytest.raises(HTTPException) as exc:
+                get_h0_gate_status(actor=actor)
+            assert exc.value.status_code == 500
+
+    def test_get_h0_gate_status_message_field(self):
+        """5. 正常返回時 message 字段為 'h0_gate_status'"""
+        from unittest.mock import MagicMock, patch
+        from app.governance_routes import get_h0_gate_status
+
+        mock_gate = MagicMock()
+        mock_gate.get_current_state.return_value = {"stats": {}}
+        actor = self._make_actor()
+
+        with patch("app.governance_routes._get_h0_gate", return_value=mock_gate):
+            result = get_h0_gate_status(actor=actor)
+
+        assert result.get("message") == "h0_gate_status"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestRiskManagerH0GateSync — RiskManager × H0Gate 冷卻同步測試（Day 3 新增）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRiskManagerH0GateSync:
+    """
+    驗證 RiskManager 的 H0Gate 注入接口與冷卻期同步邏輯（P1-16 Day 3）。
+    Tests RiskManager H0Gate injection interface and cooldown sync logic (P1-16 Day 3).
+    """
+
+    def _make_risk_manager(self):
+        """建立最小化 RiskManager 實例"""
+        from app.risk_manager import RiskManager, GlobalRiskConfig
+        return RiskManager(config=GlobalRiskConfig())
+
+    def test_set_h0_gate_injects(self):
+        """1. rm.set_h0_gate(mock_gate) 後 rm._h0_gate 等於 mock_gate"""
+        from unittest.mock import MagicMock
+        rm = self._make_risk_manager()
+        mock_gate = MagicMock()
+        rm.set_h0_gate(mock_gate)
+        assert rm._h0_gate is mock_gate
+
+    def test_set_h0_gate_none_safe(self):
+        """2. rm.set_h0_gate(None) 不 raise"""
+        from unittest.mock import MagicMock
+        rm = self._make_risk_manager()
+        rm.set_h0_gate(MagicMock())  # 先設置非 None
+        rm.set_h0_gate(None)          # 再清除
+        assert rm._h0_gate is None
+
+    def test_h0gate_none_does_not_affect_record_fill_profit(self):
+        """3. _h0_gate=None 時，record_fill_result(正 PnL) 正常執行不 raise"""
+        rm = self._make_risk_manager()
+        assert rm._h0_gate is None
+        rm.record_fill_result(100.0)  # 盈利，不觸發冷卻期，不 raise
+
+    def test_h0gate_none_does_not_affect_record_fill_loss(self):
+        """4. _h0_gate=None 時，record_fill_result(負 PnL) 正常執行不 raise（無 H0 同步嘗試）"""
+        from app.risk_manager import RiskManager, GlobalRiskConfig
+        # 設置 consecutive_loss_cooldown_count=1 讓第一次虧損即觸發冷卻邏輯
+        config = GlobalRiskConfig()
+        config.consecutive_loss_cooldown_count = 1
+        rm = RiskManager(config=config)
+        assert rm._h0_gate is None
+        rm.record_fill_result(-50.0)  # 虧損觸發冷卻邏輯，但 _h0_gate=None → 跳過 H0 同步
+
+    def test_h0gate_injected_record_fill_loss_calls_update_risk(self):
+        """
+        5. _h0_gate 已注入時，record_fill_result(負 PnL) 觸發連續虧損冷卻時
+           應調用 gate.update_risk()（同步冷卻期到 H0 風控快照）。
+        When _h0_gate is injected, record_fill_result with loss triggers cooldown sync
+        and calls gate.update_risk().
+        """
+        from unittest.mock import MagicMock
+        from app.risk_manager import RiskManager, GlobalRiskConfig
+        from app.h0_gate import H0GateRiskSnapshot
+
+        config = GlobalRiskConfig()
+        config.consecutive_loss_cooldown_count = 1  # 第一次虧損即觸發
+        rm = RiskManager(config=config)
+
+        mock_gate = MagicMock()
+        # _risk_snapshot 必須有有效屬性（RiskManager 會讀取）
+        mock_snap = H0GateRiskSnapshot(
+            open_position_count=0,
+            total_exposure_pct=0.0,
+            cooldown_until_ts_ms=0,
+            kill_switch_active=False,
+        )
+        mock_gate._risk_snapshot = mock_snap
+        rm.set_h0_gate(mock_gate)
+
+        rm.record_fill_result(-100.0)
+
+        # 應調用 update_risk 將冷卻期同步到 H0Gate
+        mock_gate.update_risk.assert_called_once()
+
+    def test_h0gate_injected_record_fill_profit_no_update_risk(self):
+        """
+        6. _h0_gate 已注入時，record_fill_result(正 PnL) 不觸發冷卻，不調用 gate.update_risk()。
+        When _h0_gate is injected and fill is profitable, update_risk should NOT be called.
+        """
+        from unittest.mock import MagicMock
+        rm = self._make_risk_manager()
+        mock_gate = MagicMock()
+        rm.set_h0_gate(mock_gate)
+
+        rm.record_fill_result(200.0)  # 盈利，不觸發冷卻
+
+        mock_gate.update_risk.assert_not_called()

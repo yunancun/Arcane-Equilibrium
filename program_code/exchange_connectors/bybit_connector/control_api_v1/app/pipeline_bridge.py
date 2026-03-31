@@ -110,6 +110,7 @@ class PipelineBridge:
         self._analyst_agent = None  # Batch 10: Set externally for L2 pattern analysis / 分析师代理
         self._last_l2_cron_ts: float = 0.0  # Batch 10: Last L2 cron trigger timestamp / L2 Cron 上次触发时间
         self._executor_agent = None  # Batch 11: Set externally for ExecutorAgent / 执行者代理
+        self._h0_gate: Any = None  # P1-16: H0 deterministic gate / H0 確定性門控
 
         self._stats = {
             "ticks_received": 0,
@@ -235,6 +236,12 @@ class PipelineBridge:
         self._executor_agent = agent
         logger.info("ExecutorAgent set for execution wrapping / 已设置 ExecutorAgent 用于执行包装")
 
+    def set_h0_gate(self, gate: Any) -> None:
+        """Set H0Gate for deterministic pre-trade filtering (P1-16).
+        設置 H0 確定性門控以進行確定性交易前過濾（P1-16）。
+        """
+        self._h0_gate = gate
+
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
         self._active = True
@@ -316,6 +323,14 @@ class PipelineBridge:
 
         # Track latest prices for intent submission (fixes C1: positions is dict, not list)
         self._latest_prices[symbol] = price
+
+        # P1-16: Update H0Gate price timestamp for freshness check
+        # P1-16：更新 H0Gate 價格時間戳以供新鮮度檢查
+        if self._h0_gate is not None:
+            try:
+                self._h0_gate.update_price_ts(symbol, ts_ms)
+            except Exception as _h0_ts_err:
+                logger.debug("H0Gate price_ts update error: %s", _h0_ts_err)
 
         # 1. Feed KlineManager -> triggers IndicatorEngine -> triggers SignalEngine -> triggers Orchestrator.on_signal
         try:
@@ -482,6 +497,41 @@ class PipelineBridge:
                         # 意图无感知数据标记（假设交易所数据为 FACT）
                         # This is acceptable for exchange-sourced signals
                         pass
+
+                # ── P1-16: H0 Gate deterministic pre-check (warn-only in paper mode) ──
+                # P1-16：H0 確定性門控前置檢查（paper/模擬模式下僅警告，不拒絕）
+                # Paper mode: warn-only preserves paper testing paths while logging H0 perspective.
+                # Live mode (M/N chapters): harden to fail-closed (remove warn-only, add `continue`).
+                # Paper 模式：僅告警保留 paper 測試路徑同時記錄 H0 視角。
+                # Live 模式（M/N 章）：改為 fail-closed（移除僅告警，添加 `continue`）。
+                if self._h0_gate is not None:
+                    try:
+                        _h0_category = (
+                            intent.metadata.get("category", "linear")
+                            if hasattr(intent, "metadata") and intent.metadata
+                            else "linear"
+                        )
+                        _h0_result = self._h0_gate.check(intent.symbol, _h0_category)
+                        if not _h0_result.allowed:
+                            logger.warning(
+                                "H0Gate blocked (paper warn-only): %s %s "
+                                "check=%s reason=%s latency=%dμs — intent NOT rejected "
+                                "/ H0 門控阻擋（paper 僅警告）：intent 未被拒絕",
+                                intent.symbol,
+                                getattr(intent, "side", "?"),
+                                _h0_result.check_name,
+                                _h0_result.reason,
+                                _h0_result.latency_us,
+                            )
+                            # ⚠️ PAPER MODE: do NOT add `continue` here
+                            # ⚠️ LIVE MODE (future): uncomment below to fail-closed
+                            # continue
+                    except Exception as _h0_check_err:
+                        logger.warning(
+                            "H0Gate check error (non-fatal in paper mode): %s "
+                            "/ H0 門控檢查錯誤（paper 模式不影響業務）",
+                            _h0_check_err,
+                        )
 
                 # Governance Hub authorization check / 治理集線器授權檢查
                 if self._governance_hub:
