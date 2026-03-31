@@ -2139,8 +2139,9 @@ def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
 # ── 产品族配置写接口 / Product Family Config Write ───────────────────────────
 
 # 当前阶段允许的 mode_switch 值（live 相关值不在此阶段开放）
-# Allowed mode_switch values at this stage (live-related values are NOT opened yet)
-ALLOWED_MODE_SWITCHES: frozenset[str] = frozenset({"disabled", "observe_only", "shadow_only"})
+# Allowed mode_switch values at this stage (live_reserved NOT opened yet)
+# demo_reserved 已開放：Paper+Demo 雙引擎模式可用於 linear 和 spot
+ALLOWED_MODE_SWITCHES: frozenset[str] = frozenset({"disabled", "observe_only", "shadow_only", "demo_reserved"})
 
 
 def apply_product_family_config(
@@ -2155,10 +2156,10 @@ def apply_product_family_config(
     Supports modifying: enabled_switch / visibility_switch / mode_switch / action_permissions
 
     安全规则 / Safety rules:
-    - mode_switch 只允许: disabled / observe_only / shadow_only
-      mode_switch only allows: disabled / observe_only / shadow_only
-    - 不能直接把产品族升到 live 相关模式
-      Cannot directly set a product family to live-related modes
+    - mode_switch 允许: disabled / observe_only / shadow_only / demo_reserved
+      mode_switch allows: disabled / observe_only / shadow_only / demo_reserved
+    - 不能直接把产品族升到 live 相关模式（live_reserved 仍锁定）
+      Cannot directly set a product family to live-related modes (live_reserved still locked)
     - 需要 input:config scope
       Requires input:config scope
     """
@@ -4891,7 +4892,7 @@ def post_product_family_config(
     payload 支持字段 / Supported payload fields:
     - enabled_switch: bool      是否启用该产品族 / Enable this product family
     - visibility_switch: bool   是否在 GUI 可见 / Make visible in GUI
-    - mode_switch: str          模式切换（只允许 disabled/observe_only/shadow_only）
+    - mode_switch: str          模式切换（允许 disabled/observe_only/shadow_only/demo_reserved）
                                 Mode switch (only allows disabled/observe_only/shadow_only)
     - action_permissions: dict  每个动作的开关，例如 {"new_order": false, "cancel": false}
                                 Per-action switches, e.g. {"new_order": false, "cancel": false}

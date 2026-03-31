@@ -424,7 +424,7 @@ async function configAction(action) {
   } else if (action === 'enable-spot') {
     changes = [
       { path: 'product_family_status.spot.controls.enabled_switch', value: true },
-      { path: 'product_family_status.spot.controls.mode_switch', value: 'shadow_only' },
+      { path: 'product_family_status.spot.controls.mode_switch', value: 'demo_reserved' },
     ];
   }
 
@@ -526,10 +526,10 @@ const PF_LABELS = {
 };
 // Bybit 支持 + Agent 策略就绪情况 / Bybit support + Agent strategy readiness
 const PF_BYBIT_SUPPORT = {
-  spot:         { demo: true,  agentReady: false, note: 'Bybit 支持 · 策略未就绪（仅 Funding Arb 对冲腿）' },
-  margin:       { demo: false, agentReady: false, note: '归属 Spot 品类（保证金模式）· 策略未就绪' },
-  perp_linear:  { demo: true,  agentReady: true,  note: '主要交易品类 · 扫描器+策略已就绪' },
-  perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · 扫描器未覆盖 · 策略未就绪' },
+  spot:         { demo: true,  agentReady: true,  note: '扫描器+策略已就绪 · 634 交易对 · 可设 Demo' },
+  margin:       { demo: false, agentReady: false, note: '归属 Spot 品类（保证金模式）· 非独立品类' },
+  perp_linear:  { demo: true,  agentReady: true,  note: '主要交易品类 · 扫描器+策略已就绪 · 可设 Demo' },
+  perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · PnL 公式待修正 · 扫描器待覆盖' },
   options:      { demo: false, agentReady: false, note: '实盘支持 · Demo 不可用 · 策略未就绪' },
 };
 
@@ -585,7 +585,7 @@ async function loadProductFamilyConfig() {
       { v:'disabled',       locked:false },
       { v:'observe_only',   locked:false },
       { v:'shadow_only',    locked:false },
-      { v:'demo_reserved',  locked:true },
+      { v:'demo_reserved',  locked:false },
       { v:'live_reserved',  locked:true },
     ];
     modeOpts.forEach(function(o) {
