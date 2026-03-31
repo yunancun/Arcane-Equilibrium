@@ -320,7 +320,7 @@ def _quality_str_to_enum(quality: str) -> DataQualityLevel:
 
 
 @scout_router.post("/market-signal")
-async def post_market_signal(
+def post_market_signal(
     req: MarketSignalRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
@@ -426,7 +426,7 @@ async def post_market_signal(
 
 
 @scout_router.post("/event-alert")
-async def post_event_alert(
+def post_event_alert(
     req: EventAlertRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
@@ -529,7 +529,7 @@ async def post_event_alert(
 
 
 @scout_router.get("/status")
-async def get_status(
+def get_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
     """
@@ -588,7 +588,7 @@ async def get_status(
 
 
 @scout_router.get("/intel")
-async def get_intel(
+def get_intel(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
@@ -653,7 +653,7 @@ async def get_intel(
 
 
 @scout_router.get("/alerts")
-async def get_alerts(
+def get_alerts(
     limit: int = Query(default=10, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     actor: base.AuthenticatedActor = Depends(base.current_actor),

@@ -242,16 +242,14 @@ P1-16（獨立 branch，E1 × 2）
 - **工時**：30m
 - ✅ 完成：Sprint 4b（2026-03-31）
 
-### [ ] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
+### [x] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
+- ✅ 完成：條目已確認過時，Wave 3b P1-NEW-6 已修復，無需代碼改動
 
-### [ ] P2-NEW-9：`scout_routes.py` 2 個 async 路由阻塞 event loop（Live 前必須修復）
+### [x] P2-NEW-9：`scout_routes.py` async 路由阻塞 event loop（Live 前必須修復）
 - **來源**：FA-3 threading.Lock 系統性評估（2026-03-31）
-- **檔案**：`app/scout_routes.py`
-- **問題**：`async def post_market_signal()` + `async def post_event_alert()` 直接調用 `ScoutAgent` 同步方法，ScoutAgent 持有 `threading.Lock`，阻塞 event loop
-- **修復方案（PA 建議 A）**：改為 `def`（sync routes，FastAPI thread pool 執行）
-- **修復方案 B**：改用 `asyncio.to_thread(SCOUT_AGENT.produce_intel, ...)` 包裝
+- **修復（方案 A）**：5 個路由全部 `async def` → `def`（post_market_signal / post_event_alert / get_status / get_intel / get_alerts）
 - **工時**：1h + E4
-- **⚠️ Live 前必須修復**（高並發市場信號推送會累積 event loop 延遲）
+- ✅ 完成：Sprint 4e（2026-03-31）
 
 ### [x] P2-NEW-7：`POST /auth/request` 缺少 Operator 角色驗證
 - **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
