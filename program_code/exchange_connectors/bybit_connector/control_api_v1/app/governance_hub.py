@@ -523,9 +523,13 @@ class GovernanceHub:
             return False
 
         # Check cache first (lock-free read for hot path)
+        # P1-17 FIX: Assign to local variable first to avoid race with _invalidate_auth_cache()
+        # setting _cached_auth_state to None between the `is not None` check and the unpack.
+        # After local assignment, the tuple reference is stable even if the field is cleared.
         now_ms = int(time.time() * 1000)
-        if self._cached_auth_state is not None:
-            cached_result, cached_ts_ms = self._cached_auth_state
+        _cached = self._cached_auth_state  # single read into local var
+        if _cached is not None:
+            cached_result, cached_ts_ms = _cached
             if now_ms - cached_ts_ms < self._cache_ttl_ms:
                 return cached_result
 
@@ -799,9 +803,14 @@ class GovernanceHub:
                     return None
 
                 # Create lease draft and activate it (all within lock)
+                # TTL close-loop: set expires_at_ms so ExpiryGuardian can auto-EXPIRE
+                # TTL 閉環：設定 expires_at_ms，讓 ExpiryGuardian 可自動 EXPIRE
+                now_ms = int(time.time() * 1000)
+                expires_at_ms = now_ms + int(ttl_seconds * 1000)
                 lease_obj = self._lease_sm.create_draft(
                     intent={"intent_id": intent_id, "scope": scope},
                     created_by="GovernanceHub",
+                    expires_at_ms=expires_at_ms,
                 )
                 lease_id = lease_obj.lease_id
 

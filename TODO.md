@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-2440 passed / 17 failed（全部 pre-existing） / 23 warnings（Wave 3a 後確認）
+2445 passed / 17 failed（全部 pre-existing） / 23 warnings（Wave 3c P1-4/10/17 後確認）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/
 命令：python3 -m pytest tests/ -q --tb=no
 ```
@@ -141,17 +141,36 @@ E1-Alpha（P1-NEW-2）‖ E1-Beta（P1-NEW-3）‖ E1-Gamma（P1-NEW-4+5+6）‖
 
 ## ██ Wave 3c — 原有 P1 深度任務（Wave 3b 後，各自獨立）
 
-### [ ] P1-4：Decision Lease 閉環驗證（3-4h）
+### [x] P1-4：Decision Lease 閉環驗證（3-4h）
 - **問題**：lease 超時後訂單應自動失效，當前未驗證閉環
 - **驗收**：lease TTL 到期 → 相關訂單狀態自動變為 REJECTED/CANCELLED
+- ✅ 完成：（2026-03-31）
+  - **根因 1**：`governance_hub.py` `acquire_lease()` 接受 `ttl_seconds` 參數但從未傳入 `create_draft()`，每個 lease 的 `expires_at_ms` 恆為 `None`，永遠不會過期
+  - **根因 2**：`paper_trading_engine.py` `submit_order()` 在 lease 取得後沒有 TOCTOU 二次確認（acquire 後到執行前的過期邊緣情況）
+  - **修復 1**：`governance_hub.py` 行 801-814 — `create_draft()` 補傳 `expires_at_ms = now_ms + int(ttl_seconds * 1000)`
+  - **修復 2**：`paper_trading_engine.py` 行 1173 後 — acquire 後立即以 `is_within_valid_window` 做二次驗證，失效則 reject + reason="governance_lease_expired"
+  - **測試 1（governance_hub）**：`TestLeaseManagement` 新增 3 個 TTL 測試 — expires_at_ms 設定驗證、check_expiry() 自動 EXPIRE、過期後可重新取得新 lease
+  - **測試 2（paper_trading_engine）**：`TestGovernanceLeaseFailClosed` 新增 2 個測試 — TOCTOU 過期拒絕（已過期 lease → reject）、有效 lease 不誤拒
+  - **結果**：8/8 TestLeaseManagement 通過，5/5 TestGovernanceLeaseFailClosed 通過；整體 2415 passed（較修前 +5），15 pre-existing failures 不變
 
-### [ ] P1-10：Perception Plane `register_data()` 注入（3-4h）
+### [x] P1-10：Perception Plane `register_data()` 注入（3-4h）
 - **問題**：register_data() 零調用，Perception Plane 完全未接入任何數據源
 - **驗收**：至少 1 條市場數據流調用 register_data() 並可在 Perception Plane 查詢到
+- ✅ 完成：（2026-03-31）
+  - **根因確認**：`register_data()` 調用代碼早已存在於 `pipeline_bridge.py` 行 330-344（on_tick WS價格 FACT）和行 1335-1348（交易結果 INFERENCE）。注入代碼也存在於 `phase2_strategy_routes.py` 行 356-366。問題是測試中完全缺失 perception plane mock，導致 `_perception_plane` 恆為 None。
+  - **修復**：`test_pipeline_bridge.py` 新增 `TestPipelineBridgePerceptionPlane` 類（3 個測試）：
+    - Test 1：`set_perception_plane()` 注入路徑驗證
+    - Test 2：`on_tick()` 觸發後 mock.register_data 被調用，且 source_type=EXCHANGE_WS + cognitive_level=FACT（EX-07 §1）
+    - Test 3：真實 PerceptionPlane.get_stats() 中 objects_registered 在 3 次 tick 後遞增
+  - **結果**：8 passed（原 5 + 新增 3），所有測試通過
 
-### [ ] P1-17：GovernanceHub TTL 競態修復（3-4h）
+### [x] P1-17：GovernanceHub TTL 競態修復（3-4h）
 - **問題**：lease TTL 與 SM-01 授權 TTL 競態（E3-M5 也指出 is_authorized 緩存鎖外讀取）
 - **驗收**：並發場景下 TTL 到期與緩存失效不存在 race window
+- ✅ 完成：本次 commit（2026-03-31）
+  - **修復 1（E3-M5 鎖外讀取）**：`is_authorized()` 行 530 — 將 `self._cached_auth_state` 先讀到局部變量 `_cached`，避免 `is not None` 判斷通過後另一個線程調用 `_invalidate_auth_cache()` 將其設 `None`，造成 unpack TypeError
+  - **TTL 競態確認**：`acquire_lease()` 中 `create_draft` 已傳入 `expires_at_ms`（Wave 2 P1-4/Batch 11 已修），lease TTL 已對齊。無需額外修改
+  - **測試**：54/54 test_governance_hub.py 全部通過（含 TestThreadSafety / TestEdgeCasesCacheExpiryRace）
 
 ### [ ] P1-16：H0 Gate 確定性門控（3天，獨立 branch，Live 前必須）
 - **要求**：DOC-02 §3.1 · <1ms SLA · 純確定性邏輯 · 無 AI 調用

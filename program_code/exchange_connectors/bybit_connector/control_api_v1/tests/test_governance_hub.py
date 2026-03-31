@@ -370,6 +370,105 @@ class TestLeaseManagement:
 
         assert lease_id is None
 
+    # ── TTL close-loop tests (P1-4) ──
+
+    def _make_authorized_hub(self, tmp_audit_dir: str) -> "GovernanceHub":
+        """Helper: create an authorized hub for TTL tests."""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+        auth_obj = hub._authorization_sm.create_draft(
+            title="TTL Test Auth",
+            scope={"lease_scopes": ["TRADE_ENTRY"]},
+            created_by="test",
+            expires_at_ms=int(time.time() * 1000) + 3600_000,
+        )
+        hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+        hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+        return hub
+
+    def test_acquire_lease_sets_expires_at_ms(self, tmp_audit_dir):
+        """
+        P1-4 TTL close-loop: acquire_lease() must write expires_at_ms onto the
+        lease object so that ExpiryGuardian / check_expiry() can auto-EXPIRE it.
+        P1-4 TTL 閉環：acquire_lease() 必須將 expires_at_ms 寫入 lease，
+        讓 ExpiryGuardian / check_expiry() 能自動 EXPIRE。
+        """
+        hub = self._make_authorized_hub(tmp_audit_dir)
+
+        before_ms = int(time.time() * 1000)
+        lease_id = hub.acquire_lease("intent_ttl_001", "TRADE_ENTRY", ttl_seconds=30.0)
+        after_ms = int(time.time() * 1000)
+
+        assert lease_id is not None
+        lease_obj = hub._lease_sm.get(lease_id)
+        assert lease_obj is not None, "Lease must exist in state machine"
+        assert lease_obj.expires_at_ms is not None, (
+            "expires_at_ms must be set — previously was None (bug)"
+        )
+        # expires_at_ms should be approximately now + 30s
+        assert before_ms + 29_000 <= lease_obj.expires_at_ms <= after_ms + 31_000, (
+            f"expires_at_ms {lease_obj.expires_at_ms} not within expected 30s window"
+        )
+
+    def test_expired_lease_detected_by_check_expiry(self, tmp_audit_dir):
+        """
+        P1-4 TTL close-loop: a lease with expires_at_ms in the past must be
+        auto-transitioned to EXPIRED by check_expiry().
+        P1-4 TTL 閉環：expires_at_ms 在過去的 lease 必須被 check_expiry() 自動轉為 EXPIRED。
+        """
+        from app.decision_lease_state_machine import LeaseState
+
+        hub = self._make_authorized_hub(tmp_audit_dir)
+
+        lease_id = hub.acquire_lease("intent_ttl_002", "TRADE_ENTRY", ttl_seconds=30.0)
+        assert lease_id is not None
+
+        # Manually back-date the expires_at_ms to simulate TTL elapsed
+        # 手動倒撥 expires_at_ms 模擬 TTL 已到期
+        with hub._lock:
+            lease = hub._lease_sm._leases.get(lease_id)
+            assert lease is not None
+            lease.expires_at_ms = int(time.time() * 1000) - 1_000  # 1 second in the past
+
+        # ExpiryGuardian sweep must detect and expire the lease
+        expired_ids = hub._lease_sm.check_expiry()
+        assert lease_id in expired_ids, (
+            "check_expiry() must include the back-dated lease"
+        )
+
+        # State must now be EXPIRED (terminal)
+        expired_lease = hub._lease_sm.get(lease_id)
+        assert expired_lease is not None
+        assert expired_lease.state == LeaseState.EXPIRED
+        assert expired_lease.is_terminal is True
+        assert expired_lease.is_live is False
+
+    def test_acquire_new_lease_after_expiry_is_rejected_by_is_authorized(self, tmp_audit_dir):
+        """
+        P1-4 TTL close-loop: after all leases expire, is_authorized() itself
+        does not grant new leases if authorization is still valid but no lease
+        can be acquired (this is the upstream guard check path).
+        P1-4 TTL 閉環：驗證 acquire_lease() 在 lease TTL 到期後仍可重新取得新 lease。
+        """
+        hub = self._make_authorized_hub(tmp_audit_dir)
+
+        # Acquire a lease with a very short TTL (will be backdated to expired)
+        lease_id = hub.acquire_lease("intent_ttl_003", "TRADE_ENTRY", ttl_seconds=30.0)
+        assert lease_id is not None
+
+        # Back-date to expire
+        with hub._lock:
+            lease = hub._lease_sm._leases.get(lease_id)
+            lease.expires_at_ms = int(time.time() * 1000) - 1_000
+
+        # Drive expiry
+        hub._lease_sm.check_expiry()
+
+        # A NEW lease should still be acquirable (auth is still valid)
+        new_lease_id = hub.acquire_lease("intent_ttl_004", "TRADE_ENTRY", ttl_seconds=30.0)
+        assert new_lease_id is not None
+        assert new_lease_id != lease_id, "New lease must be a different ID"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test: Reconciliation Integration

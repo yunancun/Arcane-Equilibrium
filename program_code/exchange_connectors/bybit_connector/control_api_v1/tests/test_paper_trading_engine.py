@@ -653,6 +653,93 @@ class TestGovernanceLeaseFailClosed:
         assert result["order"]["state"] == "paper_order_filled"
         assert result["order"]["governance_lease_id"] == "lease_12345"
 
+    # ── P1-4 TTL close-loop tests ──
+
+    def test_order_rejected_when_lease_expired_between_acquire_and_execution(self, active_engine):
+        """
+        P1-4 TTL close-loop (TOCTOU guard): if a lease's expires_at_ms is in
+        the past at the moment submit_order validates it, the order must be
+        REJECTED with reason 'governance_lease_expired'.
+
+        P1-4 TTL 閉環（TOCTOU 防護）：lease 在 acquire 成功後到執行前過期，
+        submit_order 必須拒絕訂單，reason = 'governance_lease_expired'。
+        """
+        import time as _time
+        from unittest.mock import MagicMock
+        from app.decision_lease_state_machine import (
+            DecisionLeaseStateMachine, LeaseState,
+        )
+
+        # Build a real lease state machine with an already-expired lease
+        # 建立真實的 lease SM，並注入一個已過期的 lease
+        lease_sm = DecisionLeaseStateMachine()
+        expired_lease = lease_sm.create_draft(
+            intent={"intent_id": "intent_toctou", "scope": "TRADE_ENTRY"},
+            created_by="test",
+            expires_at_ms=int(_time.time() * 1000) - 5_000,  # 5s in the past
+        )
+        lease_sm.register(expired_lease.lease_id)
+        lease_sm.activate(expired_lease.lease_id)
+
+        # GovernanceHub mock: acquire returns the expired lease_id,
+        # but _lease_sm is the real SM so the TOCTOU check will detect expiry
+        mock_hub = MagicMock()
+        mock_hub.acquire_lease.return_value = expired_lease.lease_id
+        mock_hub._lease_sm = lease_sm
+
+        active_engine._governance_hub = mock_hub
+
+        result = active_engine.submit_order(
+            "BTCUSDT", "Buy", "market", 0.01,
+            market_prices={"BTCUSDT": 60000.0},
+        )
+
+        assert result["order"]["state"] == "paper_order_rejected", (
+            f"Expected rejected, got {result['order']['state']}"
+        )
+        assert result["order"]["reject_reason"] == "governance_lease_expired", (
+            f"Expected governance_lease_expired, got {result['order'].get('reject_reason')}"
+        )
+        assert result["rejected_reason"] == "governance_lease_expired"
+
+    def test_order_proceeds_when_lease_still_valid_at_execution(self, active_engine):
+        """
+        P1-4 TTL close-loop: if lease expires_at_ms is in the future,
+        submit_order must proceed normally (no false rejection).
+
+        P1-4 TTL 閉環：lease 仍在有效期內時，submit_order 正常執行，不誤拒。
+        """
+        import time as _time
+        from unittest.mock import MagicMock
+        from app.decision_lease_state_machine import DecisionLeaseStateMachine
+
+        # Build a real lease SM with a valid (future) lease
+        lease_sm = DecisionLeaseStateMachine()
+        valid_lease = lease_sm.create_draft(
+            intent={"intent_id": "intent_valid", "scope": "TRADE_ENTRY"},
+            created_by="test",
+            expires_at_ms=int(_time.time() * 1000) + 30_000,  # 30s in the future
+        )
+        lease_sm.register(valid_lease.lease_id)
+        lease_sm.activate(valid_lease.lease_id)
+
+        mock_hub = MagicMock()
+        mock_hub.acquire_lease.return_value = valid_lease.lease_id
+        mock_hub._lease_sm = lease_sm
+
+        active_engine._governance_hub = mock_hub
+
+        result = active_engine.submit_order(
+            "BTCUSDT", "Buy", "market", 0.01,
+            market_prices={"BTCUSDT": 60000.0},
+        )
+
+        # Should NOT be rejected for lease reasons
+        assert result["order"].get("reject_reason") != "governance_lease_expired", (
+            "Valid lease must not trigger lease_expired rejection"
+        )
+        assert result["order"]["state"] == "paper_order_filled"
+
 
 class TestGovernanceAuthorizationFailClosed:
     """T1.03 tests: is_authorized() exception handler fail-closed behavior."""

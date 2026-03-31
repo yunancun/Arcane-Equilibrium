@@ -1173,6 +1173,24 @@ class PaperTradingEngine:
                     order["governance_lease_id"] = lease_id
                     self._audit(state, "governance_lease_acquired",
                                 f"{order['order_id']} lease={lease_id}")
+
+                    # TTL close-loop: verify the lease has not expired between
+                    # acquire and order execution (TOCTOU guard).
+                    # TTL 閉環：再次確認 lease 尚未在 acquire 後過期（TOCTOU 防護）
+                    lease_obj = self._governance_hub._lease_sm.get(lease_id) if (
+                        self._governance_hub._lease_sm is not None) else None
+                    if lease_obj is not None and not lease_obj.is_within_valid_window:
+                        # Lease expired between acquire and execution — reject order
+                        # Lease 在 acquire 後到執行前已過期 — 拒絕訂單
+                        self._governance_hub._lease_sm.check_expiry()  # drive state to EXPIRED
+                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
+                        order["reject_reason"] = "governance_lease_expired"
+                        state["orders"].append(order)
+                        result["order"] = order
+                        result["rejected_reason"] = "governance_lease_expired"
+                        self._audit(state, "order_governance_lease_expired",
+                                    f"{symbol} {side} lease={lease_id} expired before execution — fail-closed")
+                        return state
                 except Exception as exc:
                     _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                     order["reject_reason"] = "governance_lease_error"
