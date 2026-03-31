@@ -1062,16 +1062,20 @@ class GovernanceHub:
             # Execute I/O-bound reconciliation outside lock
             report = reconciliation_engine.reconcile(
                 paper_state=paper_state,
-                demo_state=demo_state or paper_state,
+                remote_state=demo_state or paper_state,
             )
 
+            # Convert dataclass to dict for downstream consumers
+            report_dict = report.to_dict() if hasattr(report, "to_dict") else report
+
             # Check for major mismatches and escalate risk
-            if report.get("severity") in ["CRITICAL", "FATAL"]:
-                self._on_reconciliation_mismatch(report["severity"], report)
+            if report.critical_count > 0 if hasattr(report, "critical_count") else False:
+                severity = "CRITICAL"
+                self._on_reconciliation_mismatch(severity, report_dict)
 
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Reconciliation complete: {report.get('result')}")
-            return report
+                logger.debug("Reconciliation complete: %s", report_dict.get("overall_result", "unknown"))
+            return report_dict
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"Error in reconciliation: {e}")

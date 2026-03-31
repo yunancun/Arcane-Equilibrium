@@ -40,6 +40,25 @@ DEMO_BASE_URL = "https://api-demo.bybit.com"
 RECV_WINDOW = "5000"
 
 
+def round_qty_for_exchange(qty: float) -> float:
+    """
+    Round qty to Bybit exchange step precision.
+    四舍五入到 Bybit 交易所步長精度。
+
+    Bybit linear perps: BTC=0.001 step (3dp), ETH=0.01 step (2dp),
+    cheap tokens (price < $1) typically use integer step (1 unit).
+    Heuristic: qty >= 1 → round to nearest integer; qty < 1 → round to 3dp.
+
+    This function is shared between the demo connector and pipeline bridge
+    to ensure Paper and Demo use identical qty values.
+    此函數由 demo connector 和 pipeline bridge 共用，
+    確保 Paper 和 Demo 使用完全相同的 qty 值。
+    """
+    if qty >= 1.0:
+        return float(round(qty))
+    return round(qty, 3)
+
+
 class BybitDemoConnector:
     """
     Executes orders on Bybit Demo Trading API.
@@ -167,14 +186,9 @@ class BybitDemoConnector:
             return {"retCode": -1, "retMsg": "Demo connector not enabled"}
 
         # Round qty to exchange step precision to avoid "Qty invalid" rejections.
-        # Bybit linear perps: BTC=0.001 step (3dp), ETH=0.01 step (2dp),
-        # cheap tokens (price < $1) typically use integer step (1 unit).
-        # Heuristic: qty >= 1 → round to nearest integer; qty < 1 → round to 3dp.
-        # 四舍五入到交易所步长精度，避免「Qty invalid」拒绝
-        if qty >= 1.0:
-            qty = round(qty)        # integer step for cheap tokens
-        else:
-            qty = round(qty, 3)     # 0.001 step for BTC-class assets
+        # Uses shared round_qty_for_exchange() for consistency with Paper engine.
+        # 四舍五入到交易所步长精度，使用共用函數確保與 Paper 一致
+        qty = round_qty_for_exchange(qty)
         if qty <= 0:
             return {"retCode": -1, "retMsg": "qty rounds to zero, order skipped"}
 

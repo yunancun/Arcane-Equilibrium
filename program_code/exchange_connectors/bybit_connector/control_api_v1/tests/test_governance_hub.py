@@ -530,21 +530,23 @@ class TestReconciliation:
         assert hub._mode == GovernanceMode.FROZEN
 
     def test_reconcile_success(self, tmp_audit_dir):
-        """reconcile() returns report dict"""
+        """reconcile() returns report dict with overall_result"""
         hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
         hub._ensure_initialized()
 
         paper_state = {
             "orders": [],
-            "positions": [],
-            "balance": 10000.0,
+            "positions": {},
+            "fills": [],
+            "balances": {"USDT": 10000.0},
+            "snapshot_ts_ms": int(time.time() * 1000),
         }
 
         report = hub.reconcile(paper_state=paper_state)
 
         assert report is not None
         assert isinstance(report, dict)
-        assert "ok" in report or "result" in report
+        assert "overall_result" in report or "ok" in report
 
     def test_reconcile_disabled_returns_false(self, tmp_audit_dir):
         """reconcile() with disabled hub returns error dict"""

@@ -564,6 +564,19 @@ class PipelineBridge:
                         )
                     except Exception:
                         logger.debug("Dynamic qty fallback to intent.qty for %s", intent.symbol)
+
+                # Round qty to exchange step precision (shared with Demo connector)
+                # 統一四捨五入到交易所步長精度（與 Demo connector 共用）
+                # Ensures Paper and Demo receive identical qty values.
+                try:
+                    from .bybit_demo_connector import round_qty_for_exchange
+                    _submit_qty = round_qty_for_exchange(_submit_qty)
+                    if _submit_qty <= 0:
+                        logger.info("Qty rounds to zero for %s, skipping / qty 四捨五入為零，跳過", intent.symbol)
+                        continue
+                except ImportError:
+                    pass  # Demo connector not available, use raw qty
+
                 _submit_leverage = None
 
                 if self._guardian_agent:
@@ -724,8 +737,8 @@ class PipelineBridge:
                             self._on_round_trip_complete(intent, fill_price, close_pnl)
                         else:
                             # New position opened — start tracking
-                            # 新持仓开仓 — 开始追踪
-                            self._on_position_open(intent, fill_price)
+                            # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
+                            self._on_position_open(intent, fill_price, actual_qty=_submit_qty)
                         # Sync strategy position state via on_fill callback
                         # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
                         if self._auto_deployer:
@@ -748,6 +761,7 @@ class PipelineBridge:
                     # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
                     # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
                     if self._demo_connector and self._demo_connector.is_enabled:
+                        _demo_synced = False
                         try:
                             demo_result = self._demo_connector.submit_order(
                                 symbol=intent.symbol,
@@ -757,10 +771,29 @@ class PipelineBridge:
                                 price=intent.price,
                                 category=category,
                             )
-                            if demo_result.get("retCode") != 0:
-                                logger.warning("Demo order failed: %s", demo_result.get("retMsg"))
-                        except Exception:
-                            logger.debug("Demo connector error (non-fatal)")
+                            if demo_result.get("retCode") == 0:
+                                _demo_synced = True
+                            else:
+                                logger.warning(
+                                    "Demo order REJECTED: %s %s qty=%.6f reason=%s — Paper/Demo DIVERGED / "
+                                    "Demo 訂單被拒：Paper 已接受但 Demo 拒絕，數據已分歧",
+                                    intent.symbol, intent.side, _submit_qty,
+                                    demo_result.get("retMsg"),
+                                )
+                        except Exception as _demo_err:
+                            logger.warning(
+                                "Demo connector error: %s %s — %s — Paper/Demo DIVERGED / "
+                                "Demo 連接異常：數據已分歧",
+                                intent.symbol, intent.side, _demo_err,
+                            )
+                        # Track sync status in stats
+                        with self._lock:
+                            if _demo_synced:
+                                self._stats.setdefault("demo_synced", 0)
+                                self._stats["demo_synced"] += 1
+                            else:
+                                self._stats.setdefault("demo_diverged", 0)
+                                self._stats["demo_diverged"] += 1
                         if self._telegram and intent.order_type == "market":
                             price = market_prices.get(intent.symbol, 0)
                             self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
@@ -814,6 +847,40 @@ class PipelineBridge:
                     "STOP ORDER SUBMITTED: %s %s %.6f — %s / 止损单已提交",
                     stop["symbol"], stop["side"], stop["qty"], stop["reason"],
                 )
+
+                # ── Sync stop-loss to Demo (prevent ghost positions) ──
+                # 止損同步到 Demo（防止幽靈倉位）
+                if self._demo_connector and self._demo_connector.is_enabled:
+                    try:
+                        _demo_stop_qty = stop["qty"]
+                        if _demo_stop_qty >= 1.0:
+                            _demo_stop_qty = round(_demo_stop_qty)
+                        else:
+                            _demo_stop_qty = round(_demo_stop_qty, 3)
+                        if _demo_stop_qty > 0:
+                            demo_stop_result = self._demo_connector.submit_order(
+                                symbol=stop["symbol"],
+                                side=stop["side"],
+                                order_type="Market",
+                                qty=_demo_stop_qty,
+                                reduce_only=True,
+                            )
+                            if demo_stop_result.get("retCode") == 0:
+                                logger.info(
+                                    "Demo stop-loss synced: %s %s qty=%.6f / Demo 止損已同步",
+                                    stop["symbol"], stop["side"], _demo_stop_qty,
+                                )
+                            else:
+                                logger.warning(
+                                    "Demo stop-loss FAILED: %s reason=%s / Demo 止損失敗",
+                                    stop["symbol"], demo_stop_result.get("retMsg"),
+                                )
+                    except Exception as _demo_stop_err:
+                        logger.warning(
+                            "Demo stop-loss error: %s %s (non-fatal) / Demo 止損異常",
+                            stop["symbol"], _demo_stop_err,
+                        )
+
                 if self._telegram:
                     self._telegram.alert_stop(stop["symbol"], stop["stop_type"], stop["reason"])
             except Exception:
@@ -1036,16 +1103,19 @@ class PipelineBridge:
                 self._edge_filter_stats["errors"] += 1
             return True  # fail-open — never block trading due to filter errors
 
-    def _on_position_open(self, intent: Any, fill_price: float) -> None:
+    def _on_position_open(self, intent: Any, fill_price: float, actual_qty: float = 0.0) -> None:
         """
         Called when a new position is opened.
         Record it in _open_positions and register with StopManager using ATR-based stop.
         新持仓开仓时调用。记录到 _open_positions 并用 ATR 动态止损注册到 StopManager。
+
+        actual_qty: The rounded qty actually submitted (for Demo consistency).
+                    If 0, falls back to intent.qty.
         """
         symbol = intent.symbol
         strategy_name = getattr(intent, "strategy_name", "unknown")
         side = "long" if intent.side == "Buy" else "short"
-        qty = intent.qty
+        qty = actual_qty if actual_qty > 0 else intent.qty
         regime = (intent.metadata or {}).get("_regime", "unknown") if intent.metadata else "unknown"
         key = f"{strategy_name}:{symbol}"
 
