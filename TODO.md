@@ -515,7 +515,216 @@ Phase 4（5+21天）：
 
 ---
 
-## 已完成記錄（可查 git log）
+## ██ Wave 6：TD-1 修復 + FA-7 學習管線注入 + Batch 1B
+
+> **啟動條件**：Wave 5 全部完成（2610 passed），Wave 5a/5b commit 已 push。
+> **目標**：消除 Principle 3 雙重標準 + 打通學習管線輸入 + Batch 1B 安全閘補全
+> **工作鏈強制規則**：E1 完成 → E2 審查 → E4 回歸（任何情況不跳過）
+
+---
+
+### ██ Sprint 0（TD-1）：pipeline_bridge acquire_lease 補入（P1，~2h + E2+E4）
+
+> **優先順序最高**：PA 發現架構缺口，Principle 3 在 pipeline_bridge 直接路徑未完整實施。
+> **前置確認**：`_governance_hub` 已存在於 pipeline_bridge（`__init__` line 95，`set_governance_hub()` line 165）。`acquire_lease(intent_id, scope, ttl_seconds)` 簽名在 governance_hub.py line 772。
+
+### [x] TD-1：`pipeline_bridge.py` `_process_pending_intents()` 補入 `acquire_lease()`
+- **文件**：`app/pipeline_bridge.py`，line 695-710（Guardian APPROVED 後、`submit_order()` 前）
+- **問題**：Guardian 批准後直接調用 `self._engine.submit_order()`，跳過 Decision Lease 控制面
+- **修復方案**：
+  1. 在 line 700 的 `# B6: For limit orders...` 之前，Guardian APPROVED 分支結束後插入：
+     ```python
+     # Principle 3: acquire Decision Lease before submit (DOC-01 §5.3)
+     # 原則 3：提交訂單前必須獲取決策租約
+     if self._governance_hub:
+         _intent_id = getattr(intent, "intent_id", None) or str(id(intent))
+         _lease_token = self._governance_hub.acquire_lease(
+             intent_id=_intent_id,
+             scope="TRADE_ENTRY",
+             ttl_seconds=30.0,
+         )
+         if _lease_token is None:
+             # acquire_lease fail-closed: lease not granted → skip this intent
+             # acquire_lease fail-closed：租約未獲批 → 跳過此意圖
+             logger.warning(
+                 "Lease not granted for intent %s %s — skipped (fail-closed) / 租約未獲批，跳過意圖",
+                 intent.symbol, intent.side,
+             )
+             with self._lock:
+                 self._stats["intents_rejected"] += 1
+             continue
+     ```
+  2. 修改後須確認 `MODIFIED` 路徑（verdict.result == MODIFIED）也走同樣的 lease gate（目前 MODIFIED 路徑與 APPROVED 路徑合流至同一 `submit_order()` 調用，只需插入在 submit_order 之前即可）
+- **E2 審查重點**：租約在 `submit_order()` 失敗時是否需要 `release_lease()`？（確認 GovernanceHub TTL 到期自動釋放即可，無需手動 release）
+- **E4 新增測試**：
+  1. `test_process_pending_intents_acquire_lease_called`：Guardian APPROVED → `acquire_lease()` 被調用
+  2. `test_process_pending_intents_lease_fail_closed`：`acquire_lease()` 返回 None → intent 跳過，`intents_rejected` +1
+  3. `test_process_pending_intents_no_governance_hub`：`_governance_hub=None` → 跳過 lease 直接 submit（向後兼容）
+- **違反原則**：原則 3（AI 輸出 ≠ 即時命令）
+- **指派**：E1-Alpha
+- **工時**：2h（E1 實現 1h + E2 0.5h + E4 0.5h）
+- **目標測試數**：≥ 2615 passed（+5）
+- ✅ 完成：commit 待提交（2026-03-31）— 4 個新測試，2614 passed，E2 PASS，E4 PASS
+
+### Sprint 0 工作鏈
+```
+E1-Alpha（TD-1，~1h）
+  ↓
+E2 代碼審查（重點：fail-closed 路徑 / lease 在 MODIFIED+APPROVED 兩條路徑均覆蓋 / 無 release 遺漏）
+  ↓
+E4 全量回歸（新增 3 個 lease 測試 + ≥ 2615 passed 確認）
+  ↓
+PM 確認 + commit
+```
+
+---
+
+### ██ Sprint 1a（FA-7）：Perception Plane 學習管線注入（阻塞 Phase 2，~3h + E2+E4）
+
+> **重要性**：FA 判定 BLOCKER for learning。Principle 12（持續進化）唯一未實施原則。
+> `register_data()` 在 `on_tick()` 的 WS ticker 路徑已有調用（line 347），在 `_emit_round_trip()` 也有 (line 1473)。
+> 問題：`position_close` 事件（止損觸發路徑）未調用。需補 `_on_round_trip_complete` 調用後的注入路徑。
+
+### [ ] FA-7：`pipeline_bridge.py` position_close 事件注入 `register_data()`
+- **文件**：`app/pipeline_bridge.py`
+- **問題分析**：
+  - `_emit_round_trip()` （line 1470-1476）：已有 `register_data()` 調用 ✅
+  - `_on_round_trip_complete()` （line 1490-1498）：委託給 `_emit_round_trip()`，間接覆蓋 ✅
+  - `on_tick_result()` （line 1500+）：tick 路徑平倉（risk_auto_close/time stop/soft stop）只調用 `_emit_round_trip`，應已覆蓋
+  - **真正的缺口**：`_check_stops()` 的止損平倉路徑（line 839-844），`submit_order()` 結果後未觸發 `register_data()`
+- **修復方案**：
+  1. 確認 `_check_stops()` 的 `submit_order()` 成功後，仿照 `_on_round_trip_complete()` 調用 `self._emit_round_trip()`（或直接調用 `_perception_plane.register_data()`）
+  2. 在 `phase2_strategy_routes.py` 中確認 `set_perception_plane()` 已注入（確認不是死代碼）
+  3. 新增測試：mock `_perception_plane` → 觸發止損 → 確認 `register_data()` 被調用至少 1 次
+- **E2 審查重點**：`register_data()` 是否線程安全？（查 PerceptionPlane 實現，確認加鎖）
+- **E4 新增測試**（FA 驗收標準）：
+  1. `test_perception_plane_register_data_on_stop_close`：止損觸發 → `register_data()` 調用
+  2. `test_perception_plane_register_data_on_tick_close`：tick 路徑平倉 → `register_data()` 調用
+  3. `test_perception_plane_register_data_on_intent_close`：intent 路徑平倉 → `register_data()` 調用
+- **可觀察性要求**：L2 observation count 在一個交易週期後至少遞增 1（FA 驗收標準）
+- **違反原則**：原則 12（持續進化）
+- **指派**：E1-Beta
+- **工時**：3h（E1 實現 1.5h + E2 0.5h + E4 1h）
+- **前置**：Sprint 0 完成後（同一文件，避免衝突）
+- **目標測試數**：≥ 2620 passed（+5）
+
+### Sprint 1a 工作鏈
+```
+（Sprint 0 完成後啟動，避免同文件衝突）
+E1-Beta（FA-7，~1.5h）
+  ↓
+E2 代碼審查（重點：stop 路徑是否有 round_trip 完整鏈路 / perception_plane 線程安全 / register_data 參數正確）
+  ↓
+E4 全量回歸（3 個 register_data 場景測試 + ≥ 2620 passed 確認）
+  ↓
+PM 確認 + commit
+```
+
+---
+
+### ██ Sprint 1b（Batch 1B）：安全閘補全（可與 Sprint 1a 並行，~5.5h + E2+E4）
+
+> Sprint 1b 與 Sprint 1a 操作不同文件，可並行啟動。
+
+### [ ] 1B-1：Cooldown 聯動端到端 smoke test（E4，~2h）
+- **文件**：`tests/test_h0_gate_cooldown_integration.py`（新建）
+- **目標**：驗證 RiskManager 觸發 cooldown 事件後，H0Gate.update_risk() 接收並在下一次 check() 中阻塞
+- **測試場景**（FA 驗收標準，最少 5 個）：
+  1. RiskManager 觸發 cooldown → H0Gate.update_risk() 被調用
+  2. Cooldown 期間 H0Gate.check() 返回 allowed=False
+  3. Cooldown 到期後 H0Gate.check() 恢復 allowed=True
+  4. 邊界：cooldown_seconds=0 不阻塞
+  5. 邊界：cooldown 期間不同 symbol 仍可通過（若設計為 global，全阻；若 symbol 粒度，僅阻同 symbol）
+- **指派**：E4 直接執行（不需 E1）
+- **工時**：2h
+
+### [ ] 1B-2：H0Gate freshness 狀態 API 擴充（E1，~1.5h）
+- **文件**：`app/governance_routes.py`（`/governance/h0-gate/status` 端點擴充）
+- **問題**：現有 `/governance/h0-gate/status` 返回基礎狀態，但 freshness 原始值（`price_ts` 距今毫秒數）和 freshness_score 未暴露，Operator 無法判斷數據新鮮度
+- **修復方案**：在現有端點回應 dict 中增加：
+  ```python
+  "freshness_age_ms": int(time.time() * 1000) - gate._last_price_ts if gate._last_price_ts else None,
+  "freshness_score": gate._freshness_score if hasattr(gate, "_freshness_score") else None,
+  "data_quality_warn_only": True,  # 說明 freshness 目前為 warn-only 模式
+  ```
+- **指派**：E1-Gamma
+- **工時**：1.5h
+
+### [ ] 1B-3：TD-3 H5 cost_tracker 靜默異常修復（E1，~15m）
+- **文件**：`app/strategist_agent.py`（約 line 485，`record_ollama_call()` except Exception: pass）
+- **問題**：記錄 AI 成本失敗時靜默吞異常（PA TD-3）
+- **修復**：改為 `logger.warning("H5 cost record failed: %s", e)`
+- **指派**：E1-Gamma（與 1B-2 同時執行）
+- **工時**：15m
+
+### [ ] 1B-4：TD-4 _h1_cooldown LRU cap（E1，~30m）
+- **文件**：`app/strategist_agent.py`（_h1_cooldown 字典）
+- **問題**：無容量上限（PA TD-4），650 symbol 長期運行後無清理機制
+- **修復**：改用 `collections.OrderedDict` 手動 LRU（容量上限 1000）或直接設時間窗口清理
+- **指派**：E1-Gamma（與 1B-2 同時執行）
+- **工時**：30m
+
+### Sprint 1b 工作鏈
+```
+E4（1B-1 Cooldown smoke test，~2h）‖ E1-Gamma（1B-2+TD-3+TD-4，~2.5h）完全並行
+  ↓ 均完成
+E2 代碼審查（E1-Gamma 改動：freshness API + cost_tracker logger + LRU cap）
+  ↓
+E4 全量回歸（1B-1 新測試 + 1B-2 端點測試 + ≥ 2630 passed 確認）
+  ↓
+PM 確認 + commit
+```
+
+---
+
+### ██ Sprint 2（P2 批次選擇性，可分批，~20h）
+
+> Sprint 1a+1b 完成後啟動。以下為初步清單，正式啟動前 PA 確認文件/行號。
+
+### [ ] P2-6/7/8：RiskManager 邊界值與極端市況測試（E1+E4，~6h）
+- **文件**：`app/risk_manager.py`
+- **內容**：邊界值（position limit 剛好觸發）+ 極端市況（price=0, qty=0, NaN）+ 連虧止損重置
+- **指派**：E1-Alpha + E4
+
+### [ ] P2-12/15：pipeline_bridge 邊界用例（E1+E4，~4h）
+- **文件**：`app/pipeline_bridge.py`
+- **內容**：on_tick 邊界（price=None, ts 超前）+ pending_intents 清理邏輯（積壓 > max_pending_intents）
+- **指派**：E1-Beta + E4
+
+### [ ] TD-2：廢棄 StrategistAgent collect 路徑（E1+E2+E4，~3h）
+- **文件**：`app/pipeline_bridge.py` + `app/strategist_agent.py`
+- **內容**：所有 AI intent 強制走 MessageBus → ExecutorAgent（PA 建議，消除語義模糊）
+- **前置**：Sprint 0 TD-1 完成後（同文件）
+- **指派**：E1-Alpha
+
+### [ ] FA-8：GUI cost_edge_ratio None 處理（E1a，~1h）
+- **文件**：`static/tabs/tab-ai.html`（或對應 JS 文件）
+- **內容**：`get_cost_edge_ratio()` 返回 None 時顯示 "N/A（數據不足）" 而非崩潰
+- **指派**：E1a
+
+### Sprint 2 工作鏈
+```
+PA 確認具體行號 → E1-Alpha（P2-6/7/8）‖ E1-Beta（P2-12/15）‖ E1-Alpha-2（TD-2）‖ E1a（FA-8）並行
+  ↓
+E2 + E4
+  ↓
+PM 確認 + commit
+```
+
+---
+
+### Wave 6 測試目標
+
+| Sprint | 目標 | 新增測試說明 |
+|--------|------|------------|
+| Sprint 0 完成後 | ≥ 2615 passed | +5（TD-1：lease gate 3 個 + 向後兼容 2 個）|
+| Sprint 1a 完成後 | ≥ 2620 passed | +5（FA-7：register_data 3 個場景 + 2 個邊界）|
+| Sprint 1b 完成後 | ≥ 2630 passed | +10（1B-1 smoke test 5 個 + 1B-2 端點 3 個 + 其他）|
+| Sprint 2 完成後 | ≥ 2650 passed | +20（P2-6/7/8 + P2-12/15 + TD-2 + FA-8）|
+
+---
+
+## ██ 後續大方向（P3 / Phase 1-4）
 
 ```
 bf75254 — fix(governance): Wave 3c — Lease TTL 閉環 + Perception 測試 + TTL 競態

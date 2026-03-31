@@ -40,9 +40,40 @@
 - 改 governance endpoint 的 response field name = 高風險（前端 JS 讀取失敗）
 - GUI 術語友好化應只改顯示文字，不改 API schema
 
+## Wave 5 架構評估結論（2026-03-31 完成後）
+
+### 關鍵新發現：雙執行路徑並存
+- **路徑 A（推薦）**：StrategistAgent → MessageBus → APPROVED_INTENT → ExecutorAgent.acquire_lease() → submit_order() — 完整實施 Principle 3
+- **路徑 B（遺留）**：pipeline_bridge._process_pending_intents() → Guardian → submit_order() 直接調用 — **缺少 acquire_lease**
+- **影響**：Principle 3 在路徑 B 未完整實施；demo_only 模式下 PaperTradingEngine GovernanceHub gate 兜底，影響有限
+- **修復**：TD-1 = pipeline_bridge 注入 governance_hub，Guardian APPROVED 後加 acquire_lease（2h）
+
+### Wave 5 完成狀態
+- H0 Gate：blocking 模式已啟用（on_tick 中 continue 替換 warn-only）
+- H1-H5：全部接入 StrategistAgent，fail-closed，無 allow-all
+- ScoutWorker：daemon thread，30min 定期掃描，produce_intel → MessageBus → StrategistAgent
+- ExecutorAgent：訂閱 APPROVED_INTENT，acquire_lease → submit_order 路徑閉合
+- 測試：2912 passed（24 pre-existing failures + 17 errors）
+
+### 架構健康度評分：7.2/10
+- 治理閉環 8.5 / AI 治理 8.0 / Scout 鏈路 8.5 / 執行路徑一致性 5.5 / 技術債 6.0
+
+### 遺留技術債優先級
+- TD-1 (P1)：pipeline_bridge 缺 acquire_lease（pipeline_bridge.py:701）
+- TD-2 (P2)：StrategistAgent 雙路徑語義模糊（collect vs bus.send）
+- TD-3 (P2)：H5 cost_tracker except Exception: pass 無 logger（strategist_agent.py:485）
+- TD-4 (P2)：_h1_cooldown 無容量上限（strategist_agent.py）
+
+### 下一步派發建議摘要
+Wave 6 第一批（最大並行）：
+- E1-Alpha：TD-1 pipeline_bridge acquire_lease（2h）
+- E1-Beta：Batch 1B Cooldown 聯動（1.5h）
+- E1a：GUI 術語友好化第一批（3h）
+
 ## 報告索引
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
 | 2026-03-31 | Wave 5 B 方案技術設計 | workspace/reports/2026-03-31--wave5_tech_design.md |
 | 2026-03-31 | Phase 1 Batch 1B 可行性評估 | workspace/reports/2026-03-31--batch1b_feasibility.md |
+| 2026-03-31 | Wave 5 完成後全鏈路評估（本報告）| workspace/reports/2026-03-31--wave5_architecture_review.md |

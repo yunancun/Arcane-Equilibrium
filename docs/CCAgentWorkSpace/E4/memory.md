@@ -79,10 +79,29 @@
 - pytest 收集 `test_app` 時有 PytestCollectionWarning（fastapi app instance，非真正問題）
 - Pydantic V1 deprecated warnings 在 scout_routes.py（不影響功能）
 
+### 2026-03-31 Wave 6 Sprint 0 TD-1 全量回歸（pipeline_bridge acquire_lease）
+
+**結論：PASS**
+- 總計：2614 passed, 17 failed（全部 pre-existing）, 1 skipped
+- 收集：2632 tests collected
+- 執行時間：~63.27s
+- 目標 ≥ 2614：✅ 達成（2614 passed）
+- 17 pre-existing failures 清單與預期完全一致，無新增 failure
+- 測試基準更新：**2614 passed**（較上次 2610 +4）
+
+**4 個 TestPipelineBridgeDecisionLease 測試（全部 PASS）：**
+1. `test_td1_no_hub_fail_open_submit_proceeds`：hub=None → fail-open，submit 繼續
+2. `test_td1_acquire_lease_none_fail_closed_submit_blocked`：acquire_lease()=None → fail-closed，submit 阻擋
+3. `test_td1_acquire_lease_success_submit_proceeds`：acquire_lease() 成功 → submit 繼續
+4. `test_td1_acquire_lease_exception_fail_closed`：acquire_lease() 拋異常 → fail-closed，submit 阻擋
+
+**位置：** `tests/test_edge_filter_integration.py::TestPipelineBridgeDecisionLease`
+
 ## 報告索引
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
+| 2026-03-31 | Wave 6 Sprint 0 TD-1 全量回歸（2614 passed，acquire_lease 修復驗收） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint0_td1_regression.md` |
 | 2026-03-31 | Sprint 5b 全量回歸（2610 passed，Sprint 5b 最終驗收） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint5b_regression.md` |
 | 2026-03-31 | Sprint 5b-5 根原則 14 集成測試（Principle 14 Ollama Fallback，6 tests） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint5b_p14_tests.md` |
 | 2026-03-31 | Sprint 5a 全量回歸（Position Sizing + Paper/Demo Sync） | `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--sprint5a_regression.md` |

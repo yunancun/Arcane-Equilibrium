@@ -2,8 +2,8 @@
 
 ## 項目上下文（2026-03-31 更新）
 
-- 當前 Wave：Wave 5b 完成（H4 validate_output + H5 record_ollama_call + ScoutWorker + Principle 14 集成測試）
-- 測試基準：2609 passed（Sprint 5b 後，全量 passed 比 Sprint 5a 多 54 個）
+- 當前 Wave：Wave 6 Sprint 0 進行中（TD-1 acquire_lease 門控完成）
+- 測試基準：2614 passed（Sprint 0 TD-1 後，+4 個 TestPipelineBridgeDecisionLease）
 - 系統模式：demo_only
 
 ## 審查強制清單（每次 Code Review 必查項）
@@ -42,6 +42,7 @@
 | 2026-03-31 | Sprint 0 G-05+G-01 審查 | workspace/reports/2026-03-31--sprint0_g05_g01_review.md |
 | 2026-03-31 | Sprint 5a 完整審查 | workspace/reports/2026-03-31--sprint5a_review.md |
 | 2026-03-31 | Sprint 5b 完整審查 | workspace/reports/2026-03-31--sprint5b_review.md |
+| 2026-03-31 | Wave 6 Sprint 0 TD-1 審查 | workspace/reports/2026-03-31--sprint0_td1_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -74,6 +75,13 @@
 - **WARN-1（P2）**: `_ollama_stats` 懶初始化在方法體，建議遷移至 `__init__`（功能正確，純可讀性）
 - **WARN-2（P2）**: ScoutWorker interval 不可運行時配置（建議 P3 環境變量覆蓋）
 - **WARN-3（P2 繼承）**: `cost_tracker.record_call()` 的 `except Exception: pass`（Sprint 5a 遺留）
+
+### 2026-03-31 Wave 6 Sprint 0 TD-1（pipeline_bridge acquire_lease 門控）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2614 passed（Sprint 0 TD-1 新增 4 個 TestPipelineBridgeDecisionLease 測試）
+- **架構確認**: acquire_lease() 在 submit_order() 之前，APPROVED/MODIFIED 兩分支共用同一 acquire_lease 門控（L697），REJECTED 分支直接 continue 不到達門控（正確）
+- **fail-open/fail-closed 確認**: hub=None → fail-open 正確；lease=None → fail-closed + 計數器；異常 → try/except logger.error + 計數器（無吞異常）
+- **WARN（P2）**: `intents_lease_failed` 未在 `__init__` self._stats 初始化塊預設為 0，其他 stats 均預初始化。功能正確（.get() 防 KeyError），但 GUI/API 消費者若期待 key 始終存在可能遇到 None。建議 P2 在 L114 的 `_stats` dict 中加 `"intents_lease_failed": 0`。
 
 ### 跨審查觀察（模式記憶）
 - ExecutorAgent 的異常 error 字段格式問題已出現兩次，建議建立統一規範：審計字段使用固定 snake_case 錯誤碼，動態信息僅進入 logger。

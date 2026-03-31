@@ -46,9 +46,10 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-03-31 | Sprint 5a-1/5a-2/5a-4: Scout→Strategist chain + H0 blocking + shadow=False | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5a_alpha.md` |
 | 2026-03-31 | Sprint 5b-1+5b-2/6: H4 AI輸出驗證 + H5 Ollama CostLogger | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5b_gamma.md` |
 | 2026-03-31 | Sprint 5b-3+5b-4: apply_ai_consultation 廢棄 + ScoutWorker daemon | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5b_delta.md` |
+| 2026-03-31 | Wave 6 Sprint 0 TD-1: pipeline_bridge acquire_lease 插入 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint0_td1_pipeline_lease.md` |
 
 ## 當前測試基準線
-2609 passed（Sprint 5b-3+5b-4 完成後，+11 新測試（10 ScoutWorker + 1 deprecation），18 pre-existing failures）
+2614 passed（Wave 6 Sprint 0 TD-1 完成後，+4 新測試（TestPipelineBridgeDecisionLease），17 pre-existing failures）
 
 ## 關鍵發現與教訓
 
@@ -100,6 +101,21 @@ def acquire_lease(self, intent_id: str) -> bool:
   → ScoutWorker 的職責是更高頻（30 分鐘）呼叫 `MARKET_SCANNER.scan()` 並將結果通過 `SCOUT_AGENT.produce_intel()` 注入 Strategist 鏈路
   → `_make_scout_scan_fn()` wrapper 負責：取前 5 機會 → 構建 `symbols` 和 `content` → 調用 `produce_intel()`
 - ScoutWorker 初始化失敗是 non-fatal：在 `phase2_strategy_routes.py` 用 `try/except` 包裹，失敗只記 `logger.warning`
+
+### 2026-03-31 Wave 6 Sprint 0 TD-1
+
+- 插入位置：`_process_pending_intents()` 中，邊界過濾器之後（line ~676）、`submit_order()` 之前（line ~701）
+  — 這個位置是 Guardian APPROVED 和 MODIFIED 兩條路徑的交匯點，只需插入一次即可覆蓋兩種情況
+- `intent` 物件有些是用 `type("StrategyIntent", (), {...})()` 動態創建的，沒有 `intent_id` 屬性
+  → 使用 `getattr(intent, "intent_id", None) or f"pb-{intent.symbol}-{intent.side}-{id(intent)}"` 構建穩定的 lease ID
+- fail-open vs fail-closed 分層設計（與 G-05 ExecutorAgent 保持一致）：
+  - `governance_hub is None` → fail-open（無 Hub 時不阻塞，向後兼容）
+  - `acquire_lease() returns None` → fail-closed（Hub 存在但拒絕，跳過 intent）
+  - `acquire_lease() raises exception` → fail-closed（治理狀態不明，不允許執行）
+- 新增計數器 `intents_lease_failed`：用 `self._stats.get("intents_lease_failed", 0) + 1` 安全遞增
+  （不在 `__init__` 中初始化，防止破壞現有測試的 stats 斷言）
+- 測試加在 `test_edge_filter_integration.py` 最末：`TestPipelineBridgeDecisionLease` 4 個測試
+  — 沿用該文件已有的 `MockIntent`、`mock_paper_engine` 等 fixture 結構，零新增 fixture 依賴
 
 ### 2026-03-31 G-05
 - `governance_hub.acquire_lease()` 實際簽名為 `(intent_id, scope, ttl_seconds)`，任務規格中描述的 `requester` 參數不存在 → 實際使用 `scope="TRADE_ENTRY"` 正確對應規格意圖

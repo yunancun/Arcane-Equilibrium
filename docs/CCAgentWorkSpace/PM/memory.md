@@ -2,10 +2,10 @@
 
 ## 項目狀態快照（2026-03-31）
 
-- 測試基準：2555 passed / 17 pre-existing failed
+- 測試基準：2610 passed / 18 pre-existing failed（Wave 5 全部完成後）
 - 安全狀態：0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW
 - 系統模式：demo_only，live_execution_allowed = false
-- 完成里程碑：Wave 0-4 全部完成（Sprint 4a-4e）
+- 完成里程碑：Wave 0-5 全部完成（Sprint 0+5a+5b + Wave 5a Position Sizing + Wave 5b Paper/Demo 同步）
 
 ## 決策記憶
 
@@ -59,6 +59,60 @@
 
 **記住**：5b-3 apply_ai_consultation 保留兼容性，不刪除函數，調用點 :5082 必須繼續通過測試
 
+## Wave 5 完成狀態（2026-03-31 最終確認）
+
+- **Sprint 0**：+6 tests（d57ed05）— G-05 acquire_lease + G-01 AI daily cap
+- **Sprint 5a**：+33 tests（ccdff73）— H1 ThoughtGate + H0 blocking + shadow=False + H2 預算 + H3 ModelRouter
+- **Sprint 5b**：+16 tests（9478c00）— H4 validate_output + H5 CostLogger + ScoutWorker + 原則14集成測試
+- **Wave 5a Position Sizing**：3% risk/trade + 25 symbols + 動態 qty + Portfolio Rebalancer（8223eb9）
+- **Wave 5b Paper/Demo 同步**：止損同步 + DIVERGED 標記 + 對賬引擎首次真正運行（f6ae91e 含）
+- **測試基準**：2610 passed / 18 pre-existing failed
+
+## 下一步工作安排（Wave 5 後）
+
+**優先 1（建議下一 Sprint）**：Phase 1 Batch 1B
+  - Cooldown 聯動端到端 smoke test（E4 + PA，2h）
+  - H0Gate freshness 狀態 API 端點（E1，3h）
+  - GUI H0 狀態卡片（E1a，2h）
+  - 工作鏈：PA確認 → E1+E1a並行 → E2 → E4
+
+**優先 2（可分批）**：P2 批次選擇性
+  - P2-6/7/8 風控覆蓋補強（E1+E4，6h）
+  - P2-12/15 pipeline_bridge 邊界（E1+E4，4h）
+
+**優先 3（~10天）**：Phase 2 回測引擎 MVP
+  - 前置：Batch 1B + Paper Trading ≥ 100 筆記錄
+
+**長期**：21 天 Paper Trading 觀察期 → M 章 Live 前置條件核驗
+
+## 主要風險記錄（Wave 5 後）
+
+- R1 HIGH：策略無 alpha（RSI/MACD/MA 未回測），Phase 2 回測引擎是根本解
+- R2 MED：Perception Plane register_data() 生產路徑仍零調用
+- R3 LOW：Cooldown 聯動端到端尚未 smoke test（Batch 1B 第一項解決）
+- R4 LONG：Live 距今最快 5-6 週（Phase 1+2 + 21天觀察）
+
+## Wave 6 派發計劃摘要（2026-03-31）
+
+### Sprint 安排
+- **Sprint 0（TD-1，P1，2h）**：pipeline_bridge `_process_pending_intents()` line 695 補入 `acquire_lease()`，E1-Alpha，目標 ≥ 2615 passed
+- **Sprint 1a（FA-7，3h，Sprint 0 後）**：pipeline_bridge `_check_stops()` 止損成功後補入 `register_data()`，E1-Beta，目標 ≥ 2620 passed
+- **Sprint 1b（Batch 1B，5.5h，可與 1a 並行）**：E4 cooldown smoke test + E1-Gamma freshness API + TD-3/TD-4 清理，目標 ≥ 2630 passed
+- **Sprint 2（P2 批次，~20h，1a+1b 後）**：P2-6/7/8 + P2-12/15 + TD-2 + FA-8，目標 ≥ 2650 passed
+
+### 關鍵技術決策
+- `_governance_hub=None` 時不 fail-closed（跳過 lease 直接 submit，向後兼容）
+- Sprint 0 和 1a 強制順序（同文件 pipeline_bridge.py，避免 merge 衝突）
+- M-of-N、P3 GUI 術語繼續推遲
+
+### 測試目標
+| Sprint | 目標 |
+|--------|------|
+| Sprint 0 | ≥ 2615 |
+| Sprint 1a | ≥ 2620 |
+| Sprint 1b | ≥ 2630 |
+| Sprint 2 | ≥ 2650 |
+
 ## 報告索引
 
 | 日期 | 報告類型 | 文件位置 |
@@ -67,3 +121,5 @@
 | 2026-03-31 | Wave 5 最終派發計劃（Sprint 0+5a+5b 結構） | workspace/reports/2026-03-31--wave5_final_dispatch.md |
 | 2026-03-31 | Sprint 5a 詳細派發計劃 | workspace/reports/2026-03-31--sprint5a_dispatch.md |
 | 2026-03-31 | Sprint 5b 詳細派發計劃 | workspace/reports/2026-03-31--sprint5b_dispatch.md |
+| 2026-03-31 | Wave 5 完成進度報告 + 下一步安排 | workspace/reports/2026-03-31--wave5_completion_progress_report.md |
+| 2026-03-31 | Wave 6 正式派發計劃（Sprint 0~2）| workspace/reports/2026-03-31--wave6_dispatch.md |
