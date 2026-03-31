@@ -508,6 +508,8 @@ def request_authorization(
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
+        _require_operator_role(actor)
+
         # Sanitize reason before use / 清理 reason 防注入
         sanitized_reason = _sanitize_string(body.reason, max_len=500)
 
@@ -809,6 +811,8 @@ def request_de_escalation(
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
+        _require_operator_role(actor)
+
         # Sanitize inputs
         sanitized_reason = _sanitize_string(body.reason, max_len=500)
         sanitized_requester = _sanitize_string(body.requested_by, max_len=100)
@@ -827,7 +831,7 @@ def request_de_escalation(
                 status_code=500
             )
 
-        logger.info(f"De-escalation request submitted: {request_id} by {sanitized_requester}")
+        logger.info("De-escalation request submitted: %s by %s", request_id, sanitized_requester)
 
         return GovernanceResponse.success(
             data={
@@ -838,8 +842,10 @@ def request_de_escalation(
             },
             message="deescalation_requested"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error submitting de-escalation request: {e}", exc_info=True)
+        logger.error("Error submitting de-escalation request: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

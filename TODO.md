@@ -244,19 +244,21 @@ P1-16（獨立 branch，E1 × 2）
 
 ### [ ] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
 
-### [ ] P2-NEW-7：`POST /auth/request` 缺少 Operator 角色驗證
+### [x] P2-NEW-7：`POST /auth/request` 缺少 Operator 角色驗證
 - **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
 - **檔案**：`app/governance_routes.py`（`request_authorization` 函數）
 - **問題**：調用 `create_draft()` + `submit_for_approval()`，屬寫入操作，但無 `_require_operator_role(actor)`
 - **修復**：函數體開頭添加 `_require_operator_role(actor)` + `except HTTPException: raise`
 - **工時**：20m
+- ✅ 完成：Sprint 4c（2026-03-31）
 
-### [ ] P2-NEW-8：`POST /risk/de-escalation/request` 缺少 Operator 角色驗證
+### [x] P2-NEW-8：`POST /risk/de-escalation/request` 缺少 Operator 角色驗證
 - **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
 - **檔案**：`app/governance_routes.py`（`request_de_escalation` 函數）
 - **問題**：調用 `hub.request_de_escalation()`，向降級隊列寫入，但無 `_require_operator_role(actor)`
-- **修復**：函數體開頭添加 `_require_operator_role(actor)` + `except HTTPException: raise`
+- **修復**：函數體開頭添加 `_require_operator_role(actor)` + `except HTTPException: raise`；logger f-string → %s
 - **工時**：20m
+- ✅ 完成：Sprint 4c（2026-03-31）
 
 ### [x] P2-NEW-6：trading.html class 屬性 CSS injection（降為 LOW）
 - **說明**：PA 確認影響極小（不可執行 JS），降為低優先級
