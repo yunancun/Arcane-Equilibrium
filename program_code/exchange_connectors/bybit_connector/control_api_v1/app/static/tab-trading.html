@@ -249,10 +249,11 @@ async function doStop(liquidate) {
     } catch (e) { ocToast('平仓时出错', 'error'); }
   }
 
-  // Stop Paper session
+  // Stop Paper session (backend also cancels all Demo orders + closes Demo positions)
+  // 停止 Paper 引擎（後端會自動取消 Demo 所有掛單 + 平掉 Demo 所有倉位）
   const d = await ocPost('/api/v1/paper/session/stop', {});
   if (d) {
-    ocToast('Paper 引擎已停止', 'success');
+    ocToast('引擎已停止（Demo 掛單已取消、倉位已平倉）', 'success');
     refreshIframes();
     checkUnifiedStatus();
   } else {

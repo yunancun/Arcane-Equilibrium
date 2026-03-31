@@ -1065,9 +1065,26 @@ class PaperTradingEngine:
                 if order["state"] in ACTIVE_STATES:
                     _transition_order(order, ORDER_STATE_CANCELED)
 
-            # ── Close all Demo positions before finalizing ──
-            # 停止引擎時平掉 Demo 所有倉位，防止幽靈倉殘留
+            # ── Cancel all Demo orders before closing positions ──
+            # 停止引擎時先取消 Demo 所有掛單（普通單+條件止損單），再平倉
             if self._demo_connector and self._demo_connector.is_enabled:
+                try:
+                    cancel_summary = self._demo_connector.cancel_all_orders()
+                    total = cancel_summary.get("regular_canceled", 0) + cancel_summary.get("conditional_canceled", 0)
+                    if total > 0:
+                        logger.info(
+                            "Session stop — Demo orders canceled: %d regular + %d conditional",
+                            cancel_summary.get("regular_canceled", 0),
+                            cancel_summary.get("conditional_canceled", 0),
+                        )
+                        self._audit(state, "demo_orders_canceled",
+                                    f"regular={cancel_summary.get('regular_canceled', 0)} "
+                                    f"conditional={cancel_summary.get('conditional_canceled', 0)}")
+                except Exception as e:
+                    logger.warning("Session stop — Demo cancel orders error: %s (non-fatal)", e)
+
+                # ── Close all Demo positions ──
+                # 平掉 Demo 所有倉位，防止幽靈倉殘留
                 self._close_all_demo_positions(state.get("positions", {}))
 
             # Finalize PnL

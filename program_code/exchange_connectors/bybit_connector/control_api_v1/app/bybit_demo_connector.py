@@ -316,6 +316,51 @@ class BybitDemoConnector:
 
         return result
 
+    def cancel_all_orders(self, category: str = "linear") -> dict[str, int]:
+        """
+        Cancel ALL open orders on Demo (regular + conditional).
+        取消 Demo 所有掛單（普通單 + 條件止損單）。
+
+        Returns summary dict with regular_canceled and conditional_canceled counts.
+        回傳取消數量摘要。
+        """
+        summary = {"regular_canceled": 0, "conditional_canceled": 0}
+        if not self._enabled:
+            return summary
+
+        # Pass 1: Cancel all regular (limit) orders
+        # 第一遍：取消所有普通掛單
+        try:
+            result = self._request("POST", "/v5/order/cancel-all", {
+                "category": category,
+            })
+            if result.get("retCode") == 0:
+                cancelled = result.get("result", {}).get("list", [])
+                summary["regular_canceled"] = len(cancelled)
+                logger.info("Demo cancel-all regular orders: %d canceled", len(cancelled))
+            else:
+                logger.warning("Demo cancel-all regular failed: %s", result.get("retMsg"))
+        except Exception as e:
+            logger.warning("Demo cancel-all regular error: %s (non-fatal)", e)
+
+        # Pass 2: Cancel all conditional (stop) orders
+        # 第二遍：取消所有條件止損單
+        try:
+            result = self._request("POST", "/v5/order/cancel-all", {
+                "category": category,
+                "orderFilter": "StopOrder",
+            })
+            if result.get("retCode") == 0:
+                cancelled = result.get("result", {}).get("list", [])
+                summary["conditional_canceled"] = len(cancelled)
+                logger.info("Demo cancel-all conditional orders: %d canceled", len(cancelled))
+            else:
+                logger.warning("Demo cancel-all conditional failed: %s", result.get("retMsg"))
+        except Exception as e:
+            logger.warning("Demo cancel-all conditional error: %s (non-fatal)", e)
+
+        return summary
+
     def cancel_all_conditional_orders(self, symbol: str, category: str = "linear") -> dict[str, Any]:
         """
         Cancel all conditional (stop) orders for a symbol on Demo.
