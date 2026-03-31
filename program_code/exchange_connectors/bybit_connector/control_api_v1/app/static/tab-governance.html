@@ -1477,17 +1477,25 @@ function showUnavailable() {
 function renderPendingRecovery(requests) {
   const el = document.getElementById('pending-recovery-content');
   if (!requests || requests.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No pending recovery requests / 無待審批恢復請求</p>';
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前没有待审批的恢复请求</p>';
     return;
   }
 
+  const _RECOVERY_STATUS_CN = { PENDING: '待批准', APPROVED: '已批准', REJECTED: '已拒绝', EXPIRED: '已过期' };
+
   let html = '<div style="display:flex;flex-direction:column;gap:8px">';
   for (const req of requests) {
-    html += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px">';
-    html += '<div style="margin-bottom:4px"><strong>ID:</strong> ' + ocEsc(req.request_id || req.id || '--') + '</div>';
-    html += '<div style="margin-bottom:4px"><strong>Status:</strong> ' + ocChip(ocEsc(req.status || 'PENDING'), 'warn') + '</div>';
-    html += '<div style="margin-bottom:8px;color:var(--text-dim)">' + ocEsc(req.description || '') + '</div>';
-    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:4px 12px" onclick="confirmApproveRecovery(\'' + ocEsc(req.request_id || req.id) + '\')">Approve / 批准</button>';
+    const statusCn = _RECOVERY_STATUS_CN[req.status] || req.status || '待批准';
+    html += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' + ocChip(statusCn, 'warn') + '</div>';
+    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(req.description || '系统请求恢复到安全状态') + '</div>';
+    html += '<div style="margin-top:8px;padding:8px;background:rgba(56,139,253,0.06);border-radius:6px;font-size:11px;color:var(--text-dim);line-height:1.6">'
+      + '批准 = 允许系统从异常状态恢复；拒绝 = 保持当前状态不变。'
+      + '</div>';
+    html += '<div style="display:flex;gap:8px;margin-top:8px">';
+    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(req.request_id || req.id) + '\')">✔ 批准恢复</button>';
+    html += '</div>';
+    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + ocEsc(req.request_id || req.id || '--') + '</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -1496,25 +1504,84 @@ function renderPendingRecovery(requests) {
 
 // Change type → human-readable label / 变更类型标签映射
 const _CHANGE_TYPE_LABELS = {
-  STATE_CHANGE:     '状态变更 State Change',
-  CONFIG_CHANGE:    '配置变更 Config Change',
-  RISK_OVERRIDE:    '风控覆盖 Risk Override',
-  PERMISSION_CHANGE:'权限变更 Permission Change',
-  CODE_DEPLOYMENT:  '代码部署 Code Deploy',
-  ROLLBACK:         '回滚 Rollback',
-  EMERGENCY_CHANGE: '紧急变更 Emergency Change',
+  STATE_CHANGE:     '状态变更',
+  CONFIG_CHANGE:    '配置变更',
+  RISK_OVERRIDE:    '风控覆盖',
+  PERMISSION_CHANGE:'权限变更',
+  CODE_DEPLOYMENT:  '代码部署',
+  ROLLBACK:         '回滚',
+  EMERGENCY_CHANGE: '紧急变更',
+};
+
+// Approval status → Chinese label
+const _APPROVAL_STATUS_CN = {
+  PENDING:            '待批准',
+  AUTO_APPROVED:      '自动批准',
+  APPROVED:           '已批准',
+  REJECTED:           '已拒绝',
+  EMERGENCY_BYPASSED: '紧急跳过（需补批）',
 };
 
 function _changeTypeBadge(ct) {
-  const label = _CHANGE_TYPE_LABELS[ct] || ct || 'Unknown';
+  const label = _CHANGE_TYPE_LABELS[ct] || ct || '未知';
   const isRisk = ct === 'RISK_OVERRIDE' || ct === 'EMERGENCY_CHANGE';
   return ocChip(label, isRisk ? 'bad' : 'info');
+}
+
+// Translate English `what` descriptions to Chinese for Operator readability
+// 将英文 what 描述翻译为中文，方便 Operator 快速理解变更内容
+function _translateWhat(what) {
+  if (!what) return '（無描述）';
+  let cn = what;
+  // Symbol whitelist changes
+  cn = cn.replace(/Symbol added to (\w+) whitelist: (\w+)/,  '新增交易对 $2 到 $1 白名单');
+  cn = cn.replace(/Symbol removed from (\w+) whitelist: (\w+)/, '从 $1 白名单移除交易对 $2');
+  // PaperLiveGate evaluation
+  cn = cn.replace(/PaperLiveGate evaluation: (.+)/, 'Paper→Live 准入评估结果：$1');
+  // Generic state/config
+  cn = cn.replace(/Authorization state changed to (\w+)/, '授权状态变更为 $1');
+  cn = cn.replace(/Risk level changed to (\w+)/, '风控等级变更为 $1');
+  cn = cn.replace(/Reconciliation triggered/, '触发对账');
+  return cn;
+}
+
+// Format old/new value for human readability
+// 将 JSON 序列化的 old/new value 转为可读格式
+function _formatValue(val) {
+  if (val == null || val === '--') return '--';
+  try {
+    const parsed = JSON.parse(val);
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return '（空列表）';
+      return parsed.join(', ');
+    }
+    if (typeof parsed === 'object') return JSON.stringify(parsed, null, 1);
+    return String(parsed);
+  } catch (_) {
+    return String(val);
+  }
+}
+
+// Component name → Chinese
+const _COMP_CN = {
+  risk_manager: '风控管理器', linear: '合约', spot: '现货', inverse: '反向合约',
+  option: '期权', governance_hub: '治理中枢', paper_engine: 'Paper 引擎',
+};
+function _translateComp(c) { return _COMP_CN[c] || c; }
+
+// Who → readable name
+function _translateWho(who) {
+  if (!who) return '--';
+  if (who === 'demo-operator' || who === 'operator') return 'Operator（操作员）';
+  if (who === 'system') return '系统自动';
+  if (who.includes('agent') || who.includes('Agent')) return 'AI Agent';
+  return who;
 }
 
 function renderPendingAudit(changes) {
   const el = document.getElementById('pending-audit-content');
   if (!changes || changes.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No pending change approvals / 無待批准的變更</p>';
+    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前没有待批准的变更</p>';
     return;
   }
 
@@ -1522,24 +1589,28 @@ function renderPendingAudit(changes) {
   for (const c of changes) {
     const cid = ocEsc(c.change_id || '');
     const cidJs = (c.change_id || '').replace(/'/g, "\\'");
-    const statusChip = ocChip(c.approval_status || 'PENDING', 'warn');
+    const statusLabel = _APPROVAL_STATUS_CN[c.approval_status] || c.approval_status || '待批准';
+    const statusChip = ocChip(statusLabel, 'warn');
 
-    // Parse old→new values if present
+    // Translate description
+    const whatCn = _translateWhat(c.what);
+
+    // Parse old→new values into readable format
     let changeDetail = '';
     if (c.old_value != null || c.new_value != null) {
-      const oldStr = c.old_value != null ? c.old_value : '--';
-      const newStr = c.new_value != null ? c.new_value : '--';
-      changeDetail = '<div style="margin:6px 0;padding:6px 8px;background:var(--bg);border-radius:4px;font-family:monospace;font-size:11px">'
-        + '<span style="color:var(--red)">- ' + ocEsc(String(oldStr)) + '</span><br>'
-        + '<span style="color:var(--green)">+ ' + ocEsc(String(newStr)) + '</span>'
+      const oldStr = _formatValue(c.old_value);
+      const newStr = _formatValue(c.new_value);
+      changeDetail = '<div style="margin:6px 0;padding:8px 10px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.8">'
+        + '<div><span style="color:var(--text-dim)">变更前：</span><span style="color:var(--red)">' + ocEsc(oldStr) + '</span></div>'
+        + '<div><span style="color:var(--text-dim)">变更后：</span><span style="color:var(--green)">' + ocEsc(newStr) + '</span></div>'
         + '</div>';
     }
 
-    // Affected components
+    // Affected components (translated)
     let comps = '';
     if (c.affected_components && c.affected_components.length > 0) {
-      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影響組件 Components: '
-        + c.affected_components.map(x => ocEsc(x)).join(' · ')
+      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影响范围：'
+        + c.affected_components.map(x => _translateComp(x)).join('、')
         + '</div>';
     }
 
@@ -1550,28 +1621,31 @@ function renderPendingAudit(changes) {
     html += statusChip;
     html += '<span style="margin-left:auto;font-size:11px;color:var(--text-dim)">' + ocTime(c.when_ms || c.when) + '</span>';
     html += '</div>';
-    // What — main description
-    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(c.what || '(無描述 No description)') + '</div>';
-    // Who + reason
-    html += '<div style="color:var(--text-dim);margin-bottom:4px">發起人 By: <strong style="color:var(--text)">' + ocEsc(c.who || '--') + '</strong></div>';
+    // What — main description (Chinese)
+    html += '<div style="font-weight:600;margin-bottom:6px;font-size:13px">' + ocEsc(whatCn) + '</div>';
+    // Who + reason (Chinese labels)
+    html += '<div style="color:var(--text-dim);margin-bottom:4px">发起人：<strong style="color:var(--text)">' + ocEsc(_translateWho(c.who)) + '</strong></div>';
     if (c.reason) {
-      html += '<div style="color:var(--text-dim);margin-bottom:4px">原因 Reason: ' + ocEsc(c.reason) + '</div>';
+      html += '<div style="color:var(--text-dim);margin-bottom:4px">原因：' + ocEsc(c.reason) + '</div>';
     }
     // Old→New value diff
     html += changeDetail;
     // Affected components
     html += comps;
-    // Approve / Reject buttons (only for PENDING / EMERGENCY_BYPASSED)
+    // Approve / Reject buttons with clear Chinese guidance
     const isPending = c.approval_status === 'PENDING' || c.approval_status === 'EMERGENCY_BYPASSED';
     if (isPending) {
-      html += '<div style="display:flex;gap:8px;margin-top:10px">';
-      html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:4px 12px" '
-        + 'onclick="auditApprove(\'' + cidJs + '\')">✔ Approve / 批准</button>';
-      html += '<button class="oc-btn oc-btn-danger" style="font-size:11px;padding:4px 12px" '
-        + 'onclick="auditReject(\'' + cidJs + '\')">✖ Reject / 拒絕</button>';
+      html += '<div style="margin-top:8px;padding:8px;background:rgba(56,139,253,0.06);border-radius:6px;font-size:11px;color:var(--text-dim);line-height:1.6">'
+        + '批准 = 确认此变更有效，允许系统执行；拒绝 = 撤销此变更，恢复到变更前状态。'
+        + '</div>';
+      html += '<div style="display:flex;gap:8px;margin-top:8px">';
+      html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" '
+        + 'onclick="auditApprove(\'' + cidJs + '\')">✔ 批准</button>';
+      html += '<button class="oc-btn oc-btn-danger" style="font-size:11px;padding:5px 16px" '
+        + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒绝</button>';
       html += '</div>';
     }
-    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px">ID: ' + cid + '</div>';
+    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + cid + '</div>';
     html += '</div>';
   }
   html += '</div>';
