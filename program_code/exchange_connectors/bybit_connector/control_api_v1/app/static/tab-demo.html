@@ -135,12 +135,15 @@ $('explain-comparison').innerHTML = ocExplain(
   '常见偏差来源：滑点模型差异（本地固定 0.01%，Demo 受真实订单簿影响）、成交时间差（本地即时，Demo 需要网络往返）、费率差异（本地使用配置费率，Demo 使用 Bybit 实际费率）。'
 );
 
-// Initial equity stored to approximate "initial balance"
+// Session baseline tracking — cleared on each engine start, captured on first load
+// 会话基准追踪 — 每次启动引擎时清除，首次加载时捕获
 let _demoInitialEquity = null;
 let _demoPeakEquity = null;
+let _demoRealizedBaseline = null; // cumRealisedPnl baseline at session start
 let _demoFillsCache = []; // Cache fills for metrics calculation
 const STORAGE_KEY = 'oc_demo_initial_equity';
 const PEAK_KEY = 'oc_demo_peak_equity';
+const BASELINE_KEY = 'oc_demo_realized_baseline';
 
 // Try to load saved values
 try {
@@ -148,6 +151,8 @@ try {
   if (saved) _demoInitialEquity = parseFloat(saved);
   const savedPeak = localStorage.getItem(PEAK_KEY);
   if (savedPeak) _demoPeakEquity = parseFloat(savedPeak);
+  const savedBase = localStorage.getItem(BASELINE_KEY);
+  if (savedBase) _demoRealizedBaseline = parseFloat(savedBase);
 } catch (e) {}
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -187,7 +192,16 @@ function renderBalance(raw) {
   const available = parseFloat(b.totalAvailableBalance || b.availableBalance || b.available_balance || 0);
   const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0);
   const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealized_pnl || 0);
-  const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
+  const cumRealized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
+
+  // Save baseline cumRealisedPnl on first load (Bybit's value is lifetime cumulative)
+  // 首次加载时保存基准已实现盈亏（Bybit 返回的是账户生命周期累计值）
+  if (_demoRealizedBaseline == null) {
+    _demoRealizedBaseline = cumRealized;
+    try { localStorage.setItem(BASELINE_KEY, String(cumRealized)); } catch (e) {}
+  }
+  // Session-relative realized PnL = cumulative - baseline
+  const realized = cumRealized - (_demoRealizedBaseline || 0);
 
   // Save initial equity on first load
   if (_demoInitialEquity == null && equity > 0) {
@@ -366,12 +380,13 @@ async function loadComparison() {
   if (demo.result && demo.result.list && demo.result.list[0]) {
     demoB = demo.result.list[0];
   }
-  const demoRealized = (demoB.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
+  const demoCumRealized = (demoB.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
+  const demoRealized = demoCumRealized - (_demoRealizedBaseline || 0);
   const rows = [
     ['已实现盈亏', ocMoney(paperPnl.realized_pnl || 0), ocMoney(demoRealized)],
     ['未实现盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
     ['净盈亏', ocMoney(paperPnl.net_paper_pnl || 0), ocMoney(demoRealized + parseFloat(demoB.totalPerpUPL || 0))],
-    ['当前余额', ocBalance(100000 + (paperPnl.net_paper_pnl || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
+    ['当前余额', ocBalance((_demoInitialEquity || 0) + demoRealized + parseFloat(demoB.totalPerpUPL || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
     ['可用余额', '--', ocBalance(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 

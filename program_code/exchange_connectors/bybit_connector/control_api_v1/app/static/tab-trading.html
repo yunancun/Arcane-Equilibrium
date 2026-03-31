@@ -118,8 +118,8 @@
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331k"></iframe>
-  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331k"></iframe>
+  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331m"></iframe>
+  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331m"></iframe>
 </div>
 
 <!-- ── Start Confirmation Dialog ────────────────────────────────── -->
@@ -198,6 +198,14 @@ async function doStart(fresh) {
       }
     }
   } catch (e) { /* fallback to default 100000 */ }
+
+  // Clear Demo baseline so iframe picks up fresh values on reload
+  // 清除 Demo 基准数据，iframe 重载时会重新捕获
+  try {
+    localStorage.removeItem('oc_demo_initial_equity');
+    localStorage.removeItem('oc_demo_peak_equity');
+    localStorage.removeItem('oc_demo_realized_baseline');
+  } catch (e) {}
 
   // Start Paper session
   const d = await ocPost('/api/v1/paper/session/start', { initial_balance: initialBalance });
