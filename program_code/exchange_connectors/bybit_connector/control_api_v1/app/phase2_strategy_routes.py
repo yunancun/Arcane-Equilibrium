@@ -734,20 +734,37 @@ except Exception as _e1_e:
     logger.info("Auto-observation writer not wired: %s", _e1_e)
 
 
-# ── Auto-start market feed if a paper session is already active ──
-# 若纸上交易 session 已存在（服务重启场景），自动重启行情数据流
-# This prevents the "frozen system" state after systemctl restart.
-# 防止 systemctl restart 后系统进入"活死人"状态（策略激活但无数据）。
+# ── Auto-start market feed based on global mode ──
+# 根据全局模式决定是否自动启动行情数据流（服务重启场景下的自动恢复）
+# observe_only / shadow_only / demo_reserved / live_reserved → start background feed
+# design_only / disabled → do not start (operator must explicitly set mode first)
+# observe_only 及以上 → 启动后台行情流；design_only / disabled → 不启动（需 Operator 先切换模式）
+_FEED_AUTO_MODES = {"observe_only", "shadow_only", "demo_reserved", "live_reserved"}
 try:
     from . import paper_trading_routes as _paper_ptr
     from .paper_trading_routes import MarketDataDispatcher
 
-    if _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None:
-        # Always start background market feed regardless of paper/demo session state.
-        # Data (K-lines, indicators, observations) accumulates continuously so paper/demo
-        # can be toggled on/off without waiting for data warm-up.
-        # 无论 paper/demo session 状态如何，始终启动后台行情流。
-        # 数据（K线、指标、观察值）持续积累，开关 paper/demo 无需等待数据预热。
+    # Read current global mode from state store.
+    # 从状态存储读取当前全局模式。
+    _global_mode = "design_only"
+    try:
+        from .main_legacy import get_latest_snapshot as _get_snap
+        _snap_data, _ = _get_snap()
+        _global_mode = (
+            _snap_data
+            .get("global_runtime", {})
+            .get("controls", {})
+            .get("global_execution_mode_switch", "design_only")
+        )
+    except Exception as _mode_read_e:
+        logger.debug("Could not read global mode for feed auto-start: %s", _mode_read_e)
+
+    if _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None and _global_mode in _FEED_AUTO_MODES:
+        # Start background market feed when global mode is observe_only or above.
+        # Data (K-lines, indicators, observations) accumulates independently of paper/demo
+        # session state—opening/closing sessions does not interrupt data accumulation.
+        # 在全局模式为 observe_only 或以上时启动后台行情流。
+        # 数据（K线、指标、观察值）独立于 paper/demo 会话状态持续积累。
         _auto_symbols = ["BTCUSDT", "ETHUSDT"]
         _paper_ptr.DISPATCHER = MarketDataDispatcher(
             engine=_paper_ptr.ENGINE,
@@ -756,16 +773,19 @@ try:
         _paper_ptr.DISPATCHER.start()
         _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
         PIPELINE_BRIDGE.activate()
-        _sess_state = ""
-        if _paper_ptr.PAPER_STORE is not None:
-            _sess_state = _paper_ptr.PAPER_STORE.read().get("session", {}).get("session_state", "none")
         logger.info(
-            "Background market feed started (always-on, paper_state=%s) / "
-            "后台行情流已启动（始终运行，paper_state=%s）",
-            _sess_state, _sess_state,
+            "Background market feed started (global_mode=%s) / "
+            "后台行情流已启动（global_mode=%s）",
+            _global_mode, _global_mode,
+        )
+    elif _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None:
+        logger.info(
+            "Background market feed NOT started: global_mode=%s not in observe_only+ / "
+            "后台行情流未启动：global_mode=%s 未达到 observe_only+",
+            _global_mode, _global_mode,
         )
 except Exception as _auto_e:
-    logger.warning("Background market feed start failed: %s / 后台行情流启动失败: %s", _auto_e, _auto_e)
+    logger.warning("Background market feed auto-start failed: %s / 后台行情流自动启动失败: %s", _auto_e, _auto_e)
 
 
 # =============================================================================

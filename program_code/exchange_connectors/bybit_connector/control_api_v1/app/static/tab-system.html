@@ -25,6 +25,19 @@
   .qa-btn .qa-dot { width: 8px; height: 8px; border-radius: 50%; }
   .qa-dot-on { background: var(--green); }
   .qa-dot-off { background: var(--text-dim); }
+  /* Mode Buttons */
+  .mode-btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .mode-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 12px; text-align: left; cursor: pointer; transition: all 0.15s;
+    color: var(--text); position: relative; }
+  .mode-btn:hover { border-color: var(--accent); background: rgba(88,166,255,0.05); }
+  .mode-btn.active { border-color: var(--accent); background: rgba(88,166,255,0.1); }
+  .mode-btn.active::after { content: '✓ 当前'; position: absolute; top: 8px; right: 10px;
+    font-size: 10px; color: var(--accent); }
+  .mode-btn-icon { font-size: 22px; margin-bottom: 6px; }
+  .mode-btn-name { font-size: 14px; font-weight: 600; }
+  .mode-btn-sub { font-size: 10px; color: var(--accent); font-family: monospace; margin: 2px 0 6px; }
+  .mode-btn-desc { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
   /* Confirm Modal */
   .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
   .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
@@ -73,6 +86,50 @@
     <button class="qa-btn" id="qa-scanner" onclick="confirmAction('scanner')">
       <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner
     </button>
+  </div>
+</div>
+
+<!-- ═══ Global Mode Control ═══ -->
+<div class="oc-card" id="mode-control-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <div>
+      <h3 style="margin:0">🎛️ 全局模式控制 / Global Mode Control</h3>
+      <div class="subtitle" style="margin-top:4px">切换系统运行阶段 — 每次切换需二次确认</div>
+    </div>
+    <span id="cur-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
+  </div>
+
+  <div class="mode-btn-grid" id="mode-btn-grid">
+    <button class="mode-btn" id="mbtn-design_only"    onclick="confirmMode('design_only')">
+      <div class="mode-btn-icon">🔒</div>
+      <div class="mode-btn-name">仅设计</div>
+      <div class="mode-btn-sub">design_only</div>
+      <div class="mode-btn-desc">完全静默，不执行任何自动操作</div>
+    </button>
+    <button class="mode-btn" id="mbtn-observe_only"   onclick="confirmMode('observe_only')">
+      <div class="mode-btn-icon">👁️</div>
+      <div class="mode-btn-name">仅观察</div>
+      <div class="mode-btn-sub">observe_only</div>
+      <div class="mode-btn-desc">后台行情流 + 数据积累，无任何交易</div>
+    </button>
+    <button class="mode-btn" id="mbtn-shadow_only"    onclick="confirmMode('shadow_only')">
+      <div class="mode-btn-icon">🌑</div>
+      <div class="mode-btn-name">影子模式</div>
+      <div class="mode-btn-sub">shadow_only</div>
+      <div class="mode-btn-desc">Paper Trading 引擎激活，影子决策运行</div>
+    </button>
+    <button class="mode-btn" id="mbtn-demo_reserved"  onclick="confirmMode('demo_reserved')">
+      <div class="mode-btn-icon">🧪</div>
+      <div class="mode-btn-name">Demo 预留</div>
+      <div class="mode-btn-sub">demo_reserved</div>
+      <div class="mode-btn-desc">Paper + Bybit Demo 沙盒双重执行</div>
+    </button>
+  </div>
+
+  <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.7">
+    <strong style="color:var(--text)">模式升级路径：</strong>
+    设计 → 观察（行情流启动）→ 影子（Paper引擎启动）→ Demo 预留（Bybit Demo 双执行）→ <span style="color:var(--text-dim)">实盘（Phase 4 后开放）</span><br>
+    <strong style="color:var(--text)">注意：</strong>降级模式不会自动停止已运行的服务（Paper/Demo），需要在「测试交易」Tab 手动关闭。
   </div>
 </div>
 
@@ -211,6 +268,65 @@ $('explain-pf').innerHTML = ocExplain(
 let _paperActive = false, _feedRunning = false, _demoConnected = false, _scannerRunning = false;
 let _pendingAction = null;
 let _stateRevision = 0;
+let _currentGlobalMode = '';
+let _pendingMode = null;
+
+// ─── Mode Confirm Descriptions ───────────────────────────────
+const MODE_CONFIRM = {
+  design_only: {
+    icon: '🔒', label: '仅设计模式',
+    title: '🔒 切换到仅设计模式 / design_only',
+    body: `<strong>系统将进入完全静默状态。</strong>
+<ul style="margin:8px 0;padding-left:18px;line-height:2">
+  <li>后台行情流：<strong>不会自动启动</strong>（重启服务后）</li>
+  <li>Paper Trading：不受影响（已启动的不会自动停止）</li>
+  <li>Bybit Demo：不受影响</li>
+  <li>扫描器：继续运行</li>
+</ul>
+<div class="warn-box">⚠ 降级模式不会自动停止已运行的服务，需手动在「测试交易」Tab 关闭。</div>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完全暂停系统，准备维护或配置修改。</p>`
+  },
+  observe_only: {
+    icon: '👁️', label: '仅观察模式',
+    title: '👁️ 切换到仅观察模式 / observe_only',
+    body: `<strong>系统将进入纯数据收集状态。</strong>
+<ul style="margin:8px 0;padding-left:18px;line-height:2">
+  <li>后台行情流：<strong>服务重启后自动启动</strong>（BTCUSDT + ETHUSDT）</li>
+  <li>K线 / 指标 / 观察值：持续积累，为 AI 分析建立数据基础</li>
+  <li>Paper Trading：<strong>不会自动开启</strong>（需在快捷按钮手动启动）</li>
+  <li>Bybit Demo：不激活，不发送任何订单</li>
+  <li>执行路径：完全关闭，只读</li>
+</ul>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：系统冷启动、数据预热、暂停交易但继续积累市场数据。</p>`
+  },
+  shadow_only: {
+    icon: '🌑', label: '影子模式',
+    title: '🌑 切换到影子模式 / shadow_only',
+    body: `<strong>系统将激活 Paper Trading 执行引擎。</strong>
+<ul style="margin:8px 0;padding-left:18px;line-height:2">
+  <li>后台行情流：<strong>自动启动</strong></li>
+  <li>Paper Trading：<strong>需手动在快捷按钮启动会话</strong></li>
+  <li>影子决策管线：激活（策略信号 → 风控 → 模拟执行）</li>
+  <li>Bybit Demo：<strong>不激活</strong>，只在本地模拟</li>
+  <li>学习系统：积累数据，自动晋升判断</li>
+</ul>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：在完全隔离环境中测试策略，无任何外部订单。</p>`
+  },
+  demo_reserved: {
+    icon: '🧪', label: 'Demo 预留',
+    title: '🧪 切换到 Demo 预留模式 / demo_reserved',
+    body: `<strong>系统将允许 Bybit Demo 沙盒执行。</strong>
+<ul style="margin:8px 0;padding-left:18px;line-height:2">
+  <li>后台行情流：<strong>自动启动</strong></li>
+  <li>Paper Trading：可启动（本地虚拟资金模拟）</li>
+  <li>Bybit Demo：<strong>双重执行</strong> — 订单同时在本地 Paper Engine 和 Bybit 官方 Demo 沙盒执行</li>
+  <li>Demo 激活：仍需通过 Arm → Enable 流程（在治理控制 Tab）</li>
+  <li>真实资金：<strong>无任何风险</strong>，Demo 账户使用虚拟资金</li>
+</ul>
+<div class="warn-box">⚠ Bybit Demo 账户余额不足时需在 Bybit 官网手动补充（无 API 接口）。</div>
+<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完整测试交易链路（含 Bybit 订单撮合），验证策略在真实订单流中的表现。</p>`
+  },
+};
 
 // ─── Confirm Dialog ──────────────────────────────────────────
 const CONFIRM_MSGS = {
@@ -257,9 +373,15 @@ function confirmAction(action) {
 function closeConfirm() {
   $('confirm-overlay').classList.remove('show');
   _pendingAction = null;
+  _pendingMode = null;
 }
 
 async function executeConfirmed() {
+  // Mode change takes priority
+  if (_pendingMode) {
+    await executeModeChange();
+    return;
+  }
   closeConfirm();
   const action = _pendingAction;
   if (!action) return;
@@ -285,6 +407,77 @@ async function executeConfirmed() {
   }
 
   setTimeout(loadAll, 1000);
+}
+
+// ─── Global Mode Control ─────────────────────────────────────
+function confirmMode(mode) {
+  if (mode === _currentGlobalMode) {
+    ocToast('当前已处于 ' + mode + ' 模式', 'info');
+    return;
+  }
+  const info = MODE_CONFIRM[mode];
+  if (!info) return;
+  _pendingMode = mode;
+  $('confirm-title').innerHTML = info.title;
+  $('confirm-body').innerHTML = info.body;
+  $('confirm-overlay').classList.add('show');
+}
+
+async function executeModeChange() {
+  const mode = _pendingMode;
+  closeConfirm();
+  if (!mode) return;
+
+  try {
+    // Fetch current state_revision from control-plane
+    const cp = await ocApi('/api/v1/system/control-plane');
+    const rev = (cp && cp.state_revision) ? cp.state_revision : 0;
+
+    const envelope = ocEnvelope(
+      { changes: [{ path: 'global_runtime.controls.global_execution_mode_switch', value: mode }] },
+      rev
+    );
+    const result = await ocApi('/api/v1/input/config-change', { method: 'POST', body: envelope });
+    if (result && result.action_result === 'success') {
+      ocToast('✅ 全局模式已切换为 ' + (MODE_CONFIRM[mode] ? MODE_CONFIRM[mode].label : mode), 'success');
+      // If switching to observe_only+, also start market feed if not running
+      if (['observe_only','shadow_only','demo_reserved'].includes(mode) && !_feedRunning) {
+        await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
+        ocToast('行情流已自动启动', 'info');
+      }
+    } else {
+      const codes = result && result.reason_codes ? result.reason_codes.join(', ') : '未知错误';
+      ocToast('❌ 模式切换失败：' + codes, 'error');
+    }
+  } catch(e) {
+    ocToast('❌ 请求失败：' + e.message, 'error');
+  }
+  setTimeout(loadAll, 800);
+}
+
+function updateModeBtns(currentMode) {
+  _currentGlobalMode = currentMode;
+  // Map overview mode_state back to control switch value
+  const modeMap = {
+    'design_only': 'design_only', 'observe_only': 'observe_only',
+    'shadow_only': 'shadow_only', 'demo_reserved': 'demo_reserved',
+    'demo_enabled': 'demo_reserved', 'live_reserved': 'live_reserved',
+  };
+  const switchVal = modeMap[currentMode] || currentMode;
+  ['design_only','observe_only','shadow_only','demo_reserved'].forEach(m => {
+    const btn = $('mbtn-' + m);
+    if (btn) btn.classList.toggle('active', m === switchVal);
+  });
+  // Update chip
+  const chip = $('cur-mode-chip');
+  if (chip) {
+    const info = MODE_CONFIRM[switchVal];
+    chip.textContent = (info ? info.icon + ' ' + info.label : switchVal);
+    chip.className = 'oc-chip ' + (
+      switchVal === 'demo_reserved' ? 'oc-chip-warn' :
+      switchVal === 'observe_only' || switchVal === 'shadow_only' ? 'oc-chip-good' : 'oc-chip-neutral'
+    );
+  }
 }
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -329,9 +522,22 @@ async function loadOverview() {
 
   // Mode badge
   const badge = $('mode-badge');
-  if (modeRaw.includes('live')) { badge.textContent = '&#x1F534; LIVE 模式'; badge.className = 'oc-chip oc-chip-bad'; }
-  else if (modeRaw.includes('demo') && !modeRaw.includes('design')) { badge.textContent = '&#x1F7E1; DEMO 模式'; badge.className = 'oc-chip oc-chip-warn'; }
-  else { badge.textContent = '&#x1F7E2; 安全模式'; badge.className = 'oc-chip oc-chip-good'; }
+  if (modeRaw.includes('live')) { badge.textContent = '🔴 LIVE 模式'; badge.className = 'oc-chip oc-chip-bad'; }
+  else if (modeRaw.includes('demo') && !modeRaw.includes('design')) { badge.textContent = '🟡 DEMO 模式'; badge.className = 'oc-chip oc-chip-warn'; }
+  else { badge.textContent = '🟢 安全模式'; badge.className = 'oc-chip oc-chip-good'; }
+
+  // Sync mode control buttons
+  updateModeBtns(modeRaw);
+
+  // Also read the actual control switch value for accurate button state
+  try {
+    const cpd = await ocApi('/api/v1/system/control-plane');
+    if (cpd && cpd.execution_control_summary) {
+      const sw = cpd.execution_control_summary.global_execution_mode_switch_summary || modeRaw;
+      updateModeBtns(sw);
+      if (cpd.state_revision) _stateRevision = cpd.state_revision;
+    }
+  } catch(_) {}
 }
 
 async function loadSourceContext() {
