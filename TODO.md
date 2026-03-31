@@ -585,7 +585,7 @@ PM 確認 + commit
 > `register_data()` 在 `on_tick()` 的 WS ticker 路徑已有調用（line 347），在 `_emit_round_trip()` 也有 (line 1473)。
 > 問題：`position_close` 事件（止損觸發路徑）未調用。需補 `_on_round_trip_complete` 調用後的注入路徑。
 
-### [ ] FA-7：`pipeline_bridge.py` position_close 事件注入 `register_data()`
+### [x] FA-7：`pipeline_bridge.py` position_close 事件注入 `register_data()`
 - **文件**：`app/pipeline_bridge.py`
 - **問題分析**：
   - `_emit_round_trip()` （line 1470-1476）：已有 `register_data()` 調用 ✅
@@ -607,6 +607,7 @@ PM 確認 + commit
 - **工時**：3h（E1 實現 1.5h + E2 0.5h + E4 1h）
 - **前置**：Sprint 0 完成後（同一文件，避免衝突）
 - **目標測試數**：≥ 2620 passed（+5）
+- ✅ 完成：commit 8f123a7（2026-03-31）— 5 個新測試，含 P1-1 rejected_reason 守衛修復
 
 ### Sprint 1a 工作鏈
 ```
@@ -626,7 +627,7 @@ PM 確認 + commit
 
 > Sprint 1b 與 Sprint 1a 操作不同文件，可並行啟動。
 
-### [ ] 1B-1：Cooldown 聯動端到端 smoke test（E4，~2h）
+### [x] 1B-1：Cooldown 聯動端到端 smoke test（E4，~2h）
 - **文件**：`tests/test_h0_gate_cooldown_integration.py`（新建）
 - **目標**：驗證 RiskManager 觸發 cooldown 事件後，H0Gate.update_risk() 接收並在下一次 check() 中阻塞
 - **測試場景**（FA 驗收標準，最少 5 個）：
@@ -637,8 +638,9 @@ PM 確認 + commit
   5. 邊界：cooldown 期間不同 symbol 仍可通過（若設計為 global，全阻；若 symbol 粒度，僅阻同 symbol）
 - **指派**：E4 直接執行（不需 E1）
 - **工時**：2h
+- ✅ 完成：commit 8f123a7（2026-03-31）— 5 個 smoke test，RiskManager→H0Gate 聯動鏈路驗證通過
 
-### [ ] 1B-2：H0Gate freshness 狀態 API 擴充（E1，~1.5h）
+### [x] 1B-2：H0Gate freshness 狀態 API 擴充（E1，~1.5h）
 - **文件**：`app/governance_routes.py`（`/governance/h0-gate/status` 端點擴充）
 - **問題**：現有 `/governance/h0-gate/status` 返回基礎狀態，但 freshness 原始值（`price_ts` 距今毫秒數）和 freshness_score 未暴露，Operator 無法判斷數據新鮮度
 - **修復方案**：在現有端點回應 dict 中增加：
@@ -649,20 +651,23 @@ PM 確認 + commit
   ```
 - **指派**：E1-Gamma
 - **工時**：1.5h
+- ✅ 完成：commit 8f123a7（2026-03-31）— freshness_age_ms + freshness_score + data_quality_warn_only 三個字段
 
-### [ ] 1B-3：TD-3 H5 cost_tracker 靜默異常修復（E1，~15m）
+### [x] 1B-3：TD-3 H5 cost_tracker 靜默異常修復（E1，~15m）
 - **文件**：`app/strategist_agent.py`（約 line 485，`record_ollama_call()` except Exception: pass）
 - **問題**：記錄 AI 成本失敗時靜默吞異常（PA TD-3）
 - **修復**：改為 `logger.warning("H5 cost record failed: %s", e)`
 - **指派**：E1-Gamma（與 1B-2 同時執行）
 - **工時**：15m
+- ✅ 完成：commit 8f123a7（2026-03-31）
 
-### [ ] 1B-4：TD-4 _h1_cooldown LRU cap（E1，~30m）
+### [x] 1B-4：TD-4 _h1_cooldown LRU cap（E1，~30m）
 - **文件**：`app/strategist_agent.py`（_h1_cooldown 字典）
 - **問題**：無容量上限（PA TD-4），650 symbol 長期運行後無清理機制
 - **修復**：改用 `collections.OrderedDict` 手動 LRU（容量上限 1000）或直接設時間窗口清理
 - **指派**：E1-Gamma（與 1B-2 同時執行）
 - **工時**：30m
+- ✅ 完成：commit 8f123a7（2026-03-31）— 過期清理策略，容量上限 1000
 
 ### Sprint 1b 工作鏈
 ```
