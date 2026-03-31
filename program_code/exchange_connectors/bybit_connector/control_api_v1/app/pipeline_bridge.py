@@ -107,7 +107,6 @@ class PipelineBridge:
         self._edge_filter_stats = {"checked": 0, "passed": 0, "rejected": 0, "errors": 0}
         # Batch 8: Guardian verdict stats / Guardian 裁决统计
         self._guardian_stats = {"checked": 0, "approved": 0, "rejected": 0, "modified": 0, "errors": 0}
-        self._analyst_agent = None  # Batch 10: Set externally for L2 pattern analysis / 分析师代理
         self._last_l2_cron_ts: float = 0.0  # Batch 10: Last L2 cron trigger timestamp / L2 Cron 上次触发时间
         self._executor_agent = None  # Batch 11: Set externally for ExecutorAgent / 执行者代理
         self._h0_gate: Any = None  # P1-16: H0 deterministic gate / H0 確定性門控

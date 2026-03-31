@@ -458,7 +458,7 @@ async function loadStrategies() {
     const state = s.state || s.status || 'idle';
     const name = (s.name || s.strategy_name || '--').replace(/_/g, ' ');
     return `<div class="strat-row">
-      <div class="strat-dot ${ocEsc(state)}"></div>
+      <div class="strat-dot ${ocSanitizeClass(state)}"></div>
       <div class="strat-name">${ocEsc(name)}</div>
       <div class="strat-state">${ocEsc(state)}</div>
     </div>`;

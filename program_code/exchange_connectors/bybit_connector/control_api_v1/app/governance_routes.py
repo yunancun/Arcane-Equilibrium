@@ -1708,6 +1708,9 @@ def evaluate_paper_live_gate(
     hub = _get_governance_hub()
 
     try:
+        # SECURITY FIX: Require Operator role
+        _require_operator_role(actor)
+
         # Prepare evaluation metrics dict from request
         metrics = {
             "paper_start_time_ms": request.paper_start_time_ms,
@@ -1749,8 +1752,10 @@ def evaluate_paper_live_gate(
             data=result_dict,
             message="paper_live_gate_evaluated"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error evaluating PaperLiveGate: {e}")
+        logger.error("Error evaluating PaperLiveGate: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

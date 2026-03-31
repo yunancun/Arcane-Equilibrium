@@ -233,6 +233,14 @@ function ocEsc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// ─── Sanitize CSS class name (P2-NEW-6) ─────────────────────────────────────
+// Only allow letters, digits, hyphens, underscores — strip everything else.
+// 僅允許字母、數字、連字符、底線，其餘字符全部過濾。
+function ocSanitizeClass(s) {
+  if (s == null) return '';
+  return String(s).replace(/[^a-zA-Z0-9\-_]/g, '');
+}
+
 // ─── Auto Refresh ────────────────────────────────────────────────────────────
 let _ocRefreshTimer = null;
 let _ocRefreshFn = null;

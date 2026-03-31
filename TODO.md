@@ -215,15 +215,17 @@ P1-16（獨立 branch，E1 × 2）
 - **問題**：`_invalidate_auth_cache()` 在鎖釋放後調用，非功能 bug（fail-closed 安全），但 cache 新鮮度有短暫窗口
 - **工時**：20m
 
-### [ ] P2-NEW-1：`/paper-live-gate/evaluate` 缺少 Operator 角色（審計污染）
+### [x] P2-NEW-1：`/paper-live-gate/evaluate` 缺少 Operator 角色（審計污染）
 - **檔案**：`app/governance_routes.py`（第 1657 行）
-- **修復**：添加 `_require_operator_role(actor)`
+- **修復**：添加 `_require_operator_role(actor)` + `except HTTPException: raise` 穿透 + logger %s 佔位符
 - **工時**：20m
+- ✅ 完成：Sprint 4a（2026-03-31）
 
-### [ ] P2-NEW-2：`pipeline_bridge.py` `_analyst_agent` 重複 None 賦值清理
+### [x] P2-NEW-2：`pipeline_bridge.py` `_analyst_agent` 重複 None 賦值清理
 - **檔案**：`app/pipeline_bridge.py`（第 110 行）
 - **修復**：移除重複賦值，保留第 104 行
 - **工時**：5m
+- ✅ 完成：Sprint 4a（2026-03-31）
 
 ### [ ] P2-NEW-3：`governance_routes.py` Depends 括號歧義重構
 - **檔案**：`app/governance_routes.py`（全部 26 處 `Depends(_get_auth_actor())`）
@@ -239,9 +241,11 @@ P1-16（獨立 branch，E1 × 2）
 
 ### [ ] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
 
-### [ ] P2-NEW-6：trading.html class 屬性 CSS injection（降為 LOW）
+### [x] P2-NEW-6：trading.html class 屬性 CSS injection（降為 LOW）
 - **說明**：PA 確認影響極小（不可執行 JS），降為低優先級
+- **修復**：`common.js` 新增 `ocSanitizeClass()` 白名單函數；`trading.html` 行 461 改用 `ocSanitizeClass(state)`
 - **工時**：45m（E1a 前端）
+- ✅ 完成：Sprint 4a（2026-03-31）
 
 ---
 
