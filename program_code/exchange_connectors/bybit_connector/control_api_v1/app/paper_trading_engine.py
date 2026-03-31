@@ -1177,12 +1177,12 @@ class PaperTradingEngine:
                     # TTL close-loop: verify the lease has not expired between
                     # acquire and order execution (TOCTOU guard).
                     # TTL 閉環：再次確認 lease 尚未在 acquire 後過期（TOCTOU 防護）
-                    lease_obj = self._governance_hub._lease_sm.get(lease_id) if (
-                        self._governance_hub._lease_sm is not None) else None
+                    # P3-TECH-1: use public get_lease() instead of private _lease_sm.get()
+                    lease_obj = self._governance_hub.get_lease(lease_id)
                     if lease_obj is not None and not lease_obj.is_within_valid_window:
                         # Lease expired between acquire and execution — reject order
                         # Lease 在 acquire 後到執行前已過期 — 拒絕訂單
-                        self._governance_hub._lease_sm.check_expiry()  # drive state to EXPIRED
+                        self._governance_hub.drive_lease_expiry()  # drive state to EXPIRED
                         _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
                         order["reject_reason"] = "governance_lease_expired"
                         state["orders"].append(order)

@@ -682,10 +682,13 @@ class TestGovernanceLeaseFailClosed:
         lease_sm.activate(expired_lease.lease_id)
 
         # GovernanceHub mock: acquire returns the expired lease_id,
-        # but _lease_sm is the real SM so the TOCTOU check will detect expiry
+        # get_lease() returns the real (expired) lease object so the TOCTOU
+        # check will detect expiry. drive_lease_expiry() is a no-op for the test.
+        # P3-TECH-1: use public get_lease() / drive_lease_expiry() on mock hub.
         mock_hub = MagicMock()
         mock_hub.acquire_lease.return_value = expired_lease.lease_id
-        mock_hub._lease_sm = lease_sm
+        mock_hub.get_lease.return_value = lease_sm.get(expired_lease.lease_id)
+        mock_hub.drive_lease_expiry.return_value = [expired_lease.lease_id]
 
         active_engine._governance_hub = mock_hub
 
@@ -723,9 +726,11 @@ class TestGovernanceLeaseFailClosed:
         lease_sm.register(valid_lease.lease_id)
         lease_sm.activate(valid_lease.lease_id)
 
+        # P3-TECH-1: use public get_lease() on mock hub instead of _lease_sm.
         mock_hub = MagicMock()
         mock_hub.acquire_lease.return_value = valid_lease.lease_id
-        mock_hub._lease_sm = lease_sm
+        mock_hub.get_lease.return_value = lease_sm.get(valid_lease.lease_id)
+        mock_hub.drive_lease_expiry.return_value = []
 
         active_engine._governance_hub = mock_hub
 

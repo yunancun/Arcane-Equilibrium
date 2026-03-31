@@ -57,6 +57,9 @@ class OllamaConfig:
     model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", DEFAULT_MODEL))
     timeout_seconds: int = field(default_factory=lambda: int(os.getenv("OLLAMA_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS))))
     temperature: float = DEFAULT_TEMPERATURE
+    # NOTE: max_retries=0 is a CLAUDE.md hard boundary (single-attempt mode).
+    # Changing this value requires explicit Operator approval and CLAUDE.md update.
+    # 注意：max_retries=0 為 CLAUDE.md 硬邊界（單次嘗試模式），變更須 Operator 核准並更新 CLAUDE.md。
     max_retries: int = 0
 
 
@@ -384,6 +387,11 @@ class OllamaClient:
 
             except urllib.error.URLError as e:
                 latency_ms = (time.time() - start) * 1000
+                # NOTE: max_retries defaults to 0 (single-attempt mode per CLAUDE.md hard boundary).
+                # The retry branches below are intentionally dormant under current config.
+                # To enable retries, pass max_retries >= 1 to OllamaConfig. Dead-code by design.
+                # 注意：max_retries 預設為 0（CLAUDE.md 硬邊界，單次嘗試模式）。
+                # 以下 retry 分支在當前配置下為死代碼，屬設計意圖。如需啟用，傳入 max_retries >= 1。
                 if attempt < self._config.max_retries:
                     logger.warning(f"Ollama request failed (attempt {attempt + 1}), retrying: {e}")
                     time.sleep(0.5)
@@ -415,6 +423,7 @@ class OllamaClient:
                     error=f"Unexpected error: {str(e)[:200]}",
                 )
 
+        # NOTE: This line is unreachable when max_retries=0. Dead-code by design.
         # Should not reach here, but just in case
         return OllamaResponse(
             text="", model=model, success=False,

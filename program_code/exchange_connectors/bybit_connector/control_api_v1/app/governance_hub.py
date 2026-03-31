@@ -750,9 +750,11 @@ class GovernanceHub:
                     reason="Paper trading carries zero real-funds risk; auto-approved by system. / 纸盘无真实资金风险，系统自动批准。",
                 )
 
-            # Invalidate cache so is_authorized() picks up the new ACTIVE auth immediately
-            # 使缓存失效，让 is_authorized() 立即感知到新 ACTIVE 授权
-            self._invalidate_auth_cache()
+                # P3-TECH-3: Invalidate cache inside the lock so is_authorized() picks up
+                # the new ACTIVE auth immediately with no stale-cache window.
+                # 使缓存失效移入 lock 內，讓 is_authorized() 立即感知新 ACTIVE 授权（無短暫舊快取視窗）
+                # RLock is reentrant — safe to call _invalidate_auth_cache() here.
+                self._invalidate_auth_cache()
 
             logger.info(
                 "Paper trading authorization auto-granted (id=%s, ttl=%dh) / "
@@ -858,6 +860,26 @@ class GovernanceHub:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(f"Error releasing lease {lease_id}: {e}")
             return False
+
+    def get_lease(self, lease_id: str) -> Any:
+        """查詢指定 ID 的 Decision Lease（P3-TECH-1）。
+        Returns the lease object, or None if not found or hub not ready.
+        Query a specific Decision Lease by ID without accessing private SM.
+        """
+        with self._lock:
+            if self._lease_sm is None:
+                return None
+            return self._lease_sm.get(lease_id)
+
+    def drive_lease_expiry(self) -> list:
+        """驅動 lease 到期狀態機，返回已過期的 lease ID 列表（P3-TECH-1）。
+        Drive the lease state machine expiry check without accessing private SM.
+        Returns list of expired lease IDs, or empty list if hub not ready.
+        """
+        with self._lock:
+            if self._lease_sm is None:
+                return []
+            return self._lease_sm.check_expiry()
 
     # ── T5.05: De-escalation via RecoveryApprovalGate / 通过恢復審批門禁解除升級 ──
 

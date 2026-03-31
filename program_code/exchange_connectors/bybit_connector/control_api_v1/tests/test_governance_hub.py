@@ -443,7 +443,7 @@ class TestLeaseManagement:
         assert expired_lease.is_terminal is True
         assert expired_lease.is_live is False
 
-    def test_acquire_new_lease_after_expiry_is_rejected_by_is_authorized(self, tmp_audit_dir):
+    def test_new_lease_acquirable_after_expiry(self, tmp_audit_dir):
         """
         P1-4 TTL close-loop: after all leases expire, is_authorized() itself
         does not grant new leases if authorization is still valid but no lease

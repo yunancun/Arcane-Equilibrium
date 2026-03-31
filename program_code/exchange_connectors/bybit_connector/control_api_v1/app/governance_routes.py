@@ -107,6 +107,28 @@ def _get_h0_gate() -> Any:
         return None
 
 
+def _require_operator_auth() -> Any:
+    """FastAPI Depends: 驗證認證 + Operator 角色，返回已驗證的 actor。
+    Validates authentication and Operator role; returns the authenticated actor.
+
+    用於所有需要 Operator 角色的端點簽名，替代手動調用 _require_operator_role()。
+    Intended as the standard Depends() target for all write/state-change endpoints,
+    replacing the current pattern of manually calling _require_operator_role(actor)
+    inside the function body. (P2-NEW-3)
+
+    Usage in new endpoints:
+        actor: Any = Depends(_require_operator_auth)
+
+    Raises:
+        HTTPException(401) if not authenticated.
+        HTTPException(403) if authenticated but not Operator.
+        HTTPException(503) if authentication system unavailable.
+    """
+    actor = _get_auth_actor()
+    _require_operator_role(actor)
+    return actor
+
+
 def _get_auth_actor() -> Any:
     """
     Lazy import of authentication dependency / 延迟导入认证依赖

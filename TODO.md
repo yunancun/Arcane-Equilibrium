@@ -200,20 +200,21 @@ P1-16（獨立 branch，E1 × 2）
 
 ## ██ P2 批次（Wave 3 全部完成後）
 
-### [ ] P3-TECH-1：`GovernanceHub.get_lease(id)` 公開方法（消除 _lease_sm 私有穿透）
+### [x] P3-TECH-1：`GovernanceHub.get_lease(id)` 公開方法（消除 _lease_sm 私有穿透）
 - **來源**：E2 Wave 3c 審查 P1-4
-- **檔案**：`app/governance_hub.py` + `app/paper_trading_engine.py`
+- **修復**：新增 `get_lease()` + `drive_lease_expiry()` 公開方法；`paper_trading_engine.py` 改用公開 API
 - **工時**：30m
+- ✅ 完成：Sprint 4b（2026-03-31）
 
-### [ ] P3-TECH-2：`test_acquire_new_lease_after_expiry_is_rejected_by_is_authorized` 命名修正
-- **來源**：E2 Wave 3c 審查 P1-4
+### [x] P3-TECH-2：`test_acquire_new_lease_after_expiry_is_rejected_by_is_authorized` 命名修正
 - **改為**：`test_new_lease_acquirable_after_expiry`
 - **工時**：5m
+- ✅ 完成：Sprint 4b（2026-03-31）
 
-### [ ] P3-TECH-3：`governance_hub.py` 行 755 `grant_paper_authorization` lock 外 invalidate
-- **來源**：E2 Wave 3c 審查 P1-17
-- **問題**：`_invalidate_auth_cache()` 在鎖釋放後調用，非功能 bug（fail-closed 安全），但 cache 新鮮度有短暫窗口
+### [x] P3-TECH-3：`governance_hub.py` 行 755 `grant_paper_authorization` lock 外 invalidate
+- **修復**：`_invalidate_auth_cache()` 移入 `with self._lock:` 塊末尾（RLock 可重入，無死鎖風險）
 - **工時**：20m
+- ✅ 完成：Sprint 4b（2026-03-31）
 
 ### [x] P2-NEW-1：`/paper-live-gate/evaluate` 缺少 Operator 角色（審計污染）
 - **檔案**：`app/governance_routes.py`（第 1657 行）
@@ -227,19 +228,35 @@ P1-16（獨立 branch，E1 × 2）
 - **工時**：5m
 - ✅ 完成：Sprint 4a（2026-03-31）
 
-### [ ] P2-NEW-3：`governance_routes.py` Depends 括號歧義重構
+### [x] P2-NEW-3：`governance_routes.py` Depends 括號歧義重構
 - **檔案**：`app/governance_routes.py`（全部 26 處 `Depends(_get_auth_actor())`）
-- **方案（PA 建議）**：新增 `_require_operator` Depends 函數，讓端點签名直接聲明所需角色，消除遺漏可能
+- **方案（PA 建議）**：新增 `_require_operator_auth()` 函數定義（行 110-129），不替換現有端點（副作用風險控制）
 - **⚠️ 注意**：語義變化需先在測試環境確認再合並，副作用風險中等
 - **工時**：30m（謹慎）
+- ✅ 完成：Sprint 4b（2026-03-31）
+- **FA-1 發現**：`POST /auth/request` + `POST /risk/de-escalation/request` 缺 Operator 驗證 → 追加為 P2-NEW-7/8
 
-### [ ] P2-NEW-4：`ollama_client.py` retry 死代碼清理（可選）
+### [x] P2-NEW-4：`ollama_client.py` retry 死代碼清理（可選）
 - **說明**：`max_retries=0`（CLAUDE.md 硬邊界），retry 循環實際只執行一次，分支永不觸發
-- **方案 A**：添加注釋說明死代碼為硬邊界執行結果
-- **方案 B**：移除 retry 分支（需 PA 確認是否永久硬邊界）
+- **修復（方案 A）**：3 處 NOTE 注釋（OllamaConfig 欄位 + retry 分支 + 不可達 return）
 - **工時**：30m
+- ✅ 完成：Sprint 4b（2026-03-31）
 
 ### [ ] P2-NEW-5：`main.py` GATEWAY_HOST 已在 Wave 3b 修復（此項可刪）
+
+### [ ] P2-NEW-7：`POST /auth/request` 缺少 Operator 角色驗證
+- **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
+- **檔案**：`app/governance_routes.py`（`request_authorization` 函數）
+- **問題**：調用 `create_draft()` + `submit_for_approval()`，屬寫入操作，但無 `_require_operator_role(actor)`
+- **修復**：函數體開頭添加 `_require_operator_role(actor)` + `except HTTPException: raise`
+- **工時**：20m
+
+### [ ] P2-NEW-8：`POST /risk/de-escalation/request` 缺少 Operator 角色驗證
+- **來源**：FA-1 端點角色矩陣審計（Sprint 4b）
+- **檔案**：`app/governance_routes.py`（`request_de_escalation` 函數）
+- **問題**：調用 `hub.request_de_escalation()`，向降級隊列寫入，但無 `_require_operator_role(actor)`
+- **修復**：函數體開頭添加 `_require_operator_role(actor)` + `except HTTPException: raise`
+- **工時**：20m
 
 ### [x] P2-NEW-6：trading.html class 屬性 CSS injection（降為 LOW）
 - **說明**：PA 確認影響極小（不可執行 JS），降為低優先級
