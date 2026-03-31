@@ -33,7 +33,11 @@ const _OC_AUTH_MAX = 5;
 async function ocApi(path, opts) {
   const token = ocGetToken();
   if (!token) return null;
-  if (_ocAuthFails >= _OC_AUTH_MAX) return null;
+  if (_ocAuthFails >= _OC_AUTH_MAX) {
+    console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' consecutive failures). Attempting reset probe...');
+    // Allow one probe request to check if auth is restored (e.g. after re-login)
+    // If it succeeds, counter resets; if it fails, counter increments further
+  }
 
   const method = (opts && opts.method) || 'GET';
   const headers = { 'Authorization': 'Bearer ' + token };
@@ -46,7 +50,12 @@ async function ocApi(path, opts) {
       body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
     });
     if (!r.ok) {
-      if (r.status === 401 || r.status === 403) _ocAuthFails++;
+      if (r.status === 401 || r.status === 403) {
+        _ocAuthFails++;
+        if (_ocAuthFails >= _OC_AUTH_MAX) {
+          ocToast('Authentication failed repeatedly — please re-login / 認證多次失敗，請重新登入', 'error');
+        }
+      }
       return null;
     }
     _ocAuthFails = 0;

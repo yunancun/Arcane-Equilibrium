@@ -1606,11 +1606,17 @@ async function loadPendingApprovals() {
   const recovery = await govGetPendingRecovery();
   if (recovery && recovery.ok) {
     renderPendingRecovery(recovery.data || []);
+  } else {
+    const el = document.getElementById('pending-recovery-content');
+    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load recovery requests / 載入恢復請求失敗（治理中枢可能未启用）</p>';
   }
 
   const audit = await govGetPendingAudit();
   if (audit && audit.ok) {
     renderPendingAudit(audit.data || []);
+  } else {
+    const el = document.getElementById('pending-audit-content');
+    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load pending approvals / 載入待批准項目失敗（治理中枢可能未启用）</p>';
   }
 }
 

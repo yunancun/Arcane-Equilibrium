@@ -399,11 +399,17 @@ async function bundleRecheck() {
 }
 
 async function configAction(action) {
-  let payload = {};
-  if (action === 'set-demo-mode') payload = { key: 'global_execution_mode_switch', value: 'demo_reserved' };
-  else if (action === 'enable-spot') payload = { product_family: 'spot', key: 'enabled_switch', value: true };
+  let changes = [];
+  if (action === 'set-demo-mode') {
+    changes = [{ path: 'global_runtime.controls.global_execution_mode_switch', value: 'demo_reserved' }];
+  } else if (action === 'enable-spot') {
+    changes = [
+      { path: 'product_family_status.spot.controls.enabled_switch', value: true },
+      { path: 'product_family_status.spot.controls.mode_switch', value: 'shadow_only' },
+    ];
+  }
 
-  const body = ocEnvelope(payload, stateRevision);
+  const body = ocEnvelope({ changes: changes }, stateRevision);
   const d = await ocPost('/api/v1/input/config-change', body);
   if (d) { ocToast('Config change OK', 'success'); if (d.state_revision) stateRevision = d.state_revision; loadAll(); }
   else ocToast('Config change failed', 'error');
