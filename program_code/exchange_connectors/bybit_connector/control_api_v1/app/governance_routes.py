@@ -285,7 +285,7 @@ def get_governance_status(
         raise
     except Exception as e:
         logger.error(f"Error getting governance status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/status/detailed")
@@ -443,7 +443,7 @@ def get_authorization_status(
         raise
     except Exception as e:
         logger.error(f"Error getting authorization status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/auth/request")
@@ -633,7 +633,7 @@ def get_risk_level(
         return GovernanceResponse.success(data=level_detail, message="risk_level_status")
     except Exception as e:
         logger.error(f"Error getting risk level: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/risk/override")
@@ -881,7 +881,12 @@ def trigger_manual_reconciliation(
         raise HTTPException(status_code=403, detail="Governance hub disabled")
 
     try:
-        logger.info(f"Manual reconciliation triggered by {actor}: {body.reason}")
+        _require_operator_role(actor)
+
+        logger.info(
+            "Manual reconciliation triggered by %s: %s",
+            _sanitize_log(actor.actor_id), _sanitize_log(body.reason),
+        )
 
         report = hub.reconcile(
             paper_state=body.paper_state,
@@ -905,9 +910,11 @@ def trigger_manual_reconciliation(
             },
             message="reconciliation_complete"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error in manual reconciliation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in manual reconciliation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/recovery/pending")
@@ -932,7 +939,7 @@ def get_pending_recovery_requests(
         return GovernanceResponse.success(data=pending, message="recovery_pending_list")
     except Exception as e:
         logger.error(f"Error getting pending recovery requests: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/recovery/{request_id}/approve")
@@ -1035,7 +1042,7 @@ def get_change_history(
         )
     except Exception as e:
         logger.error(f"Error getting change history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/audit/pending")
@@ -1062,7 +1069,7 @@ def get_pending_approvals(
         return GovernanceResponse.success(data=pending_data, message="audit_pending_list")
     except Exception as e:
         logger.error(f"Error getting pending approvals: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 class AuditApprovalBody(BaseModel):
@@ -1104,7 +1111,7 @@ def approve_audit_change(
         raise
     except Exception as e:
         logger.error(f"Error approving audit change {change_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/audit/reject/{change_id}")
@@ -1142,7 +1149,7 @@ def reject_audit_change(
         raise
     except Exception as e:
         logger.error(f"Error rejecting audit change {change_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/symbols/whitelist")
@@ -1183,7 +1190,7 @@ def get_symbol_whitelist(
         return GovernanceResponse.success(data=whitelist_data, message="symbol_whitelist")
     except Exception as e:
         logger.error(f"Error getting symbol whitelist: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/symbols/whitelist")
@@ -1430,7 +1437,7 @@ def get_active_leases(
         raise
     except Exception as e:
         logger.error(f"Error getting leases: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/events")
@@ -1474,7 +1481,7 @@ def get_governance_events(
         raise
     except Exception as e:
         logger.error(f"Error retrieving governance events: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/learning-tier/status")
@@ -1501,7 +1508,7 @@ def get_learning_tier_status(
         raise
     except Exception as e:
         logger.error(f"Error retrieving learning tier status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/learning-tier/promote")
@@ -1547,7 +1554,7 @@ def promote_learning_tier(
         raise
     except Exception as e:
         logger.error(f"Error promoting learning tier: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.get("/oms/orders")
@@ -1587,7 +1594,7 @@ def get_oms_orders(
         raise
     except Exception as e:
         logger.error(f"Error retrieving OMS orders: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/health-check")
@@ -1624,7 +1631,7 @@ def governance_health_check(
         return GovernanceResponse.success(data=health, message="health_check")
     except Exception as e:
         logger.error(f"Error in health check: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── Batch 12: Paper→Live Gate Endpoints ──
@@ -1651,7 +1658,7 @@ def get_paper_live_gate_status(
         return GovernanceResponse.success(data=status_info, message="paper_live_gate_status")
     except Exception as e:
         logger.error(f"Error getting PaperLiveGate status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @governance_router.post("/paper-live-gate/evaluate")
@@ -1729,7 +1736,7 @@ def evaluate_paper_live_gate(
         )
     except Exception as e:
         logger.error(f"Error evaluating PaperLiveGate: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 __all__ = ["governance_router"]
