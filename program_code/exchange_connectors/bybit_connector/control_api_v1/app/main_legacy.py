@@ -13,6 +13,7 @@ OpenClaw / Bybit 控制 API 与 GUI 的可运行 MVP
 - To connect a real OpenClaw runtime later, replace the source-context and fact-loading logic.
 """
 
+import asyncio
 import copy
 import hashlib
 import hmac
@@ -24,6 +25,7 @@ import secrets
 import tempfile
 import threading
 import time
+import weakref
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
@@ -51,6 +53,8 @@ def _split_csv(value: str) -> set[str]:
 _login_fail_counts: dict[str, tuple[int, float]] = {}
 _LOGIN_MAX_FAILURES = 5        # 同一IP最多失败次数 / max failures per IP
 _LOGIN_LOCKOUT_WINDOW = 900.0  # 锁定窗口（秒）/ lockout window in seconds (15 min)
+_login_fail_lock = asyncio.Lock()  # 保护 _login_fail_counts 的并发锁 / asyncio lock for _login_fail_counts (P1-NEW-3)
+_LOGIN_FAIL_MAX_IPS = 2000         # 最多追踪 IP 数，防止 OOM / max tracked IPs to prevent OOM (P1-NEW-3)
 
 # ── Auth credentials cache (P1-12) ────────────────────────────────────────────
 # Loaded once at startup; avoids per-request file I/O on the login endpoint.
@@ -652,10 +656,12 @@ _MAX_TEXT_REASON = 500  # 理由 / reason 类
 _MAX_PAYLOAD_SIZE = 50000  # payload JSON 总字节 / total payload bytes
 
 # Module-level cache for compile_state signature inspection.
-# Keyed by function object id() so tests that monkey-patch compile_state get a fresh lookup.
-# 模块级签名缓存：以函数对象 id 为键，避免高频 _compile_for_response 路径重复调用
-# inspect.signature()；当测试替换 compile_state 时自动失效并重新检测。
-_COMPILE_STATE_SIG_CACHE: dict[int, bool] = {}
+# Uses WeakKeyDictionary so the function object itself is the key; when compile_state is
+# monkey-patched (e.g. in tests) the old entry is automatically GC'd and the new function
+# gets a fresh lookup.  id()-keyed plain dicts risk false hits after GC id reuse.
+# 模块级签名缓存：以函数对象为键（WeakKeyDictionary），避免高频 _compile_for_response
+# 路径重复调用 inspect.signature()；GC 回收旧函数后条目自动消失，不存在 id 重用误判。
+_COMPILE_STATE_SIG_CACHE: weakref.WeakKeyDictionary[Any, bool] = weakref.WeakKeyDictionary()
 
 
 def _validate_text_length(value: str, field_name: str, max_len: int) -> str:
@@ -1014,18 +1020,19 @@ def _compile_for_response(state: dict[str, Any]) -> dict[str, Any]:
     This handles both the original compile_state and the patched stable_compile_state.
     兼容原始 compile_state 和 patched stable_compile_state。
 
-    Uses _COMPILE_STATE_SIG_CACHE (keyed by function id) to avoid repeated
-    inspect.signature() calls on this high-frequency path (every mutator operation).
-    Cache auto-invalidates when compile_state is monkey-patched (e.g. in tests).
-    使用模块级字典缓存（以函数 id 为键）避免高频路径重复调用 inspect.signature()；
-    compile_state 被替换（如测试 monkeypatch）时自动失效并重新检测。
+    Uses _COMPILE_STATE_SIG_CACHE (WeakKeyDictionary keyed by function object) to avoid
+    repeated inspect.signature() calls on this high-frequency path (every mutator operation).
+    Cache auto-invalidates when compile_state is monkey-patched (e.g. in tests) because the
+    old function object becomes unreachable and its entry is automatically removed by GC.
+    使用 WeakKeyDictionary 缓存（以函数对象本身为键）避免高频路径重复调用 inspect.signature()；
+    compile_state 被替换（如测试 monkeypatch）时旧函数对象被 GC 回收，缓存条目自动消失，
+    新函数对象触发重新检测，不存在 id 重用后的错误命中问题。
     """
     fn = compile_state
-    fn_id = id(fn)
-    has_refresh = _COMPILE_STATE_SIG_CACHE.get(fn_id)
+    has_refresh = _COMPILE_STATE_SIG_CACHE.get(fn)
     if has_refresh is None:
         has_refresh = "refresh_identity" in _inspect.signature(fn).parameters
-        _COMPILE_STATE_SIG_CACHE[fn_id] = has_refresh
+        _COMPILE_STATE_SIG_CACHE[fn] = has_refresh
     if has_refresh:
         return fn(state, refresh_identity=False)
     return fn(state)
@@ -4162,23 +4169,26 @@ async def auth_login(request: Request, req: _LoginRequest):
 
     # --- IP-level lockout check — runs before any credential work ---
     # --- IP 级别锁定检查（在验证凭证之前执行）---
-    if client_ip in _login_fail_counts:
-        fail_count, first_fail_ts = _login_fail_counts[client_ip]
-        elapsed = now - first_fail_ts
-        if elapsed > _LOGIN_LOCKOUT_WINDOW:
-            # Window expired — reset counter automatically
-            # 窗口期已过，自动重置计数器
-            del _login_fail_counts[client_ip]
-        elif fail_count >= _LOGIN_MAX_FAILURES:
-            retry_after = int(_LOGIN_LOCKOUT_WINDOW - elapsed)
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "reason_codes": ["login_locked"],
-                    "message": "Too many failed login attempts. Try again later.",
-                    "retry_after": retry_after,
-                },
-            )
+    # Lock wraps the read-modify-write to avoid race conditions (P1-NEW-3)
+    # 用 Lock 包裹读-改-写，防止并发竞态（P1-NEW-3）
+    async with _login_fail_lock:
+        if client_ip in _login_fail_counts:
+            fail_count, first_fail_ts = _login_fail_counts[client_ip]
+            elapsed = now - first_fail_ts
+            if elapsed > _LOGIN_LOCKOUT_WINDOW:
+                # Window expired — reset counter automatically
+                # 窗口期已过，自动重置计数器
+                del _login_fail_counts[client_ip]
+            elif fail_count >= _LOGIN_MAX_FAILURES:
+                retry_after = int(_LOGIN_LOCKOUT_WINDOW - elapsed)
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "reason_codes": ["login_locked"],
+                        "message": "Too many failed login attempts. Try again later.",
+                        "retry_after": retry_after,
+                    },
+                )
 
     # Load credentials from startup cache (P1-12: avoid per-request file I/O)
     # 从启动缓存读取凭证（P1-12 修复：避免每次请求读文件）
@@ -4194,30 +4204,39 @@ async def auth_login(request: Request, req: _LoginRequest):
 
     if not (hmac.compare_digest(req.username, _expected_user) and
             hmac.compare_digest(req.password, _expected_pass)):
-        # Increment failure counter for this IP
-        # 遞增此 IP 的失败计数器
-        if client_ip in _login_fail_counts:
-            prev_count, first_ts = _login_fail_counts[client_ip]
-            _login_fail_counts[client_ip] = (prev_count + 1, first_ts)
-        else:
-            _login_fail_counts[client_ip] = (1, now)
+        # Increment failure counter for this IP, with capacity eviction (P1-NEW-3)
+        # 遞增此 IP 的失败计数器，加容量上限清理（P1-NEW-3）
+        async with _login_fail_lock:
+            # Evict expired / oldest entries if dict is at capacity (prevents OOM)
+            # 超过容量上限时先清过期，再 FIFO 删最旧条目，防止 OOM
+            if len(_login_fail_counts) >= _LOGIN_FAIL_MAX_IPS:
+                _now = time.time()
+                expired = [
+                    ip for ip, (cnt, ts) in _login_fail_counts.items()
+                    if _now - ts > _LOGIN_LOCKOUT_WINDOW
+                ]
+                for ip in expired:
+                    del _login_fail_counts[ip]
+                # If still at capacity after expiry eviction, remove oldest entry (FIFO)
+                # 清完过期后仍超限，FIFO 删最旧条目
+                if len(_login_fail_counts) >= _LOGIN_FAIL_MAX_IPS:
+                    oldest_ip = next(iter(_login_fail_counts))
+                    del _login_fail_counts[oldest_ip]
+            if client_ip in _login_fail_counts:
+                prev_count, first_ts = _login_fail_counts[client_ip]
+                _login_fail_counts[client_ip] = (prev_count + 1, first_ts)
+            else:
+                _login_fail_counts[client_ip] = (1, now)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Login succeeded — clear any failure record for this IP
     # 登录成功，清除该 IP 的失败记录
-    _login_fail_counts.pop(client_ip, None)
+    async with _login_fail_lock:
+        _login_fail_counts.pop(client_ip, None)
 
-    # Return the API bearer token (.secrets is at control_api_v1/ level, one up from app/)
-    _token_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".secrets", "api_token"
-    )
-    try:
-        with open(_token_path) as f:
-            api_token = f.read().strip()
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="API token not found")
-
-    return {"token": api_token, "username": req.username}
+    # Return the API bearer token from startup-cached settings (no per-request file I/O)
+    # 使用启动时缓存的 settings.api_token，避免每次请求重读磁盘
+    return {"token": settings.api_token, "username": req.username}
 
 
 @app.get("/", include_in_schema=False)

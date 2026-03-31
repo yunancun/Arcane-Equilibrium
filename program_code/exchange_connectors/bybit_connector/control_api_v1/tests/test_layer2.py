@@ -530,10 +530,11 @@ class TestLayer2Engine:
     def test_concurrent_session_blocked(self, engine_setup):
         """Second concurrent session should fail"""
         engine, _ = engine_setup
-        # Acquire the lock manually
-        engine._session_lock.acquire()
+        loop = asyncio.get_event_loop()
+        # Acquire the asyncio lock to simulate a running session (P1-NEW-7: asyncio.Lock)
+        loop.run_until_complete(engine._session_lock.acquire())
         try:
-            session = asyncio.get_event_loop().run_until_complete(
+            session = loop.run_until_complete(
                 engine.run_session(trigger="manual")
             )
             assert session.state == SESSION_STATE_FAILED

@@ -182,7 +182,7 @@ class Layer2Engine:
         self._cost_tracker = cost_tracker
         self._paper_engine = paper_engine
         self._shadow_consumer = shadow_consumer
-        self._session_lock = threading.Lock()
+        self._session_lock = asyncio.Lock()
         self._current_session: Layer2Session | None = None
 
     @property
@@ -353,17 +353,15 @@ class Layer2Engine:
         Run a complete L2 reasoning session.
         运行一次完整的 L2 推理 session。
         """
-        if not self._session_lock.acquire(blocking=False):
+        if self._session_lock.locked():
             session = Layer2Session(state=SESSION_STATE_FAILED)
             session.final_summary = "Another L2 session is already running"
             return session
 
-        try:
+        async with self._session_lock:
             return await self._run_session_inner(
                 trigger=trigger, symbol=symbol, context=context, market_prices=market_prices,
             )
-        finally:
-            self._session_lock.release()
 
     async def _run_session_inner(
         self,

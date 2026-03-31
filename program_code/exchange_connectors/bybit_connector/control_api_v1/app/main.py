@@ -180,23 +180,28 @@ app.include_router(scout_router)
 # Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789
 # 将 /openclaw/* 代理到 localhost:18789，远程客户端无需直接访问 18789 端口
 import asyncio as _asyncio  # noqa: E402
+import os as _oc_os  # noqa: E402
 import urllib.request as _oc_urllib  # noqa: E402
 from fastapi import Depends, Request  # noqa: E402
 from fastapi.responses import Response  # noqa: E402
+
+# P1-NEW-6: 模組頂層緩存 OPENCLAW_GATEWAY_HOST，避免每次請求重新讀取 env
+# P1-NEW-6: Cache OPENCLAW_GATEWAY_HOST at module level to avoid per-request env lookup
+_OC_HOST = _oc_os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
 
 @app.api_route("/openclaw/{path:path}", methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
 async def openclaw_proxy(path: str, request: Request, actor=Depends(base.current_actor)):
     """Reverse proxy to OpenClaw Gateway — requires authenticated actor / 需要已認證 Actor"""
     # Gateway binds to loopback when using --tailscale serve
-    import os as _os
-    _oc_host = _os.getenv("OPENCLAW_GATEWAY_HOST", "127.0.0.1")
-    target = f"http://{_oc_host}:18789/{path}"
+    target = f"http://{_OC_HOST}:18789/{path}"
     try:
         body = await request.body()
         req = _oc_urllib.Request(
             target,
             data=body if body else None,
-            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding")},
+            # P1-NEW-1: 過濾 authorization header — Gateway 綁 loopback 信任域，不應接收用戶 Token
+            # P1-NEW-1: Strip authorization header — Gateway is loopback-only trusted domain
+            headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "transfer-encoding", "authorization")},
             method=request.method,
         )
 
@@ -211,5 +216,7 @@ async def openclaw_proxy(path: str, request: Request, actor=Depends(base.current
         return Response(content=content, status_code=status_code, headers=headers)
     except _oc_urllib.HTTPError as e:
         return Response(content=e.read(), status_code=e.code)
-    except Exception:
+    except Exception as e:
+        # P1-NEW-5: 記錄代理異常，便於排障 / Log proxy errors for diagnostics
+        base.logger.warning("openclaw_proxy error [%s]: %s", path, type(e).__name__)
         return Response(content=b'{"error":"OpenClaw Gateway unreachable"}', status_code=502)
