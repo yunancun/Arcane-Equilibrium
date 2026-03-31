@@ -34,8 +34,8 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 ## 当前状态 (2026-03-31 Wave 3a/3b/3c 全部完成 + P1-16 H0 Gate Day 1+2+3 全部完成)
 
 ```
-系统模式:     read_only（不变）
-执行权限:     disabled / not_granted（不变）
+系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
+执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
 测试:         2,539 passed / 17 pre-existing failed（Wave 3a/3b/3c + P1-16 Day 1+2+3 後）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
@@ -399,10 +399,10 @@ OpenClaw 与 BybitOpenClaw 通过以下方式互联：
 ## 硬边界（永远不可违背）
 
 ```python
-system_mode            = "read_only"      # 不可改
-execution_state        = "disabled"       # 不可改
-execution_authority    = "not_granted"    # 不可改
-live_execution_allowed = False            # 不可改
+system_mode            = "demo_only"      # Operator 授权 2026-03-31（Paper + Bybit Demo only）
+execution_state        = "disabled"       # 不可改（live 前必须保持）
+execution_authority    = "not_granted"    # 不可改（live 前必须保持）
+live_execution_allowed = False            # 不可改（live 防护硬边界）
 ```
 
 ---
