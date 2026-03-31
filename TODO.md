@@ -348,4 +348,9 @@ Wave 3a：✅ P0-NEW-1/2/3 全部完成（E2+E4 通過，2026-03-31）
 Wave 3b：✅ P1-NEW-1~7 全部完成（E2+E4 通過，2026-03-31）
 Wave 3c：✅ P1-4/P1-10/P1-17 完成（E2+E4 通過，2026-03-31）
 P1-16：✅ Day 1+2+3 全部完成（commit 3ccd982/5d53619/2ed20f0，2026-03-31）· 已 merge（commit 03a5b29）
+Wave 4 Sprint 4a：✅ P2-NEW-1/2/6 安全修復 + CSS（commit a2f4c70，2026-03-31）
+Wave 4 Sprint 4b：✅ P2-NEW-3/4 + P3-TECH-1/2/3 技術清理（commit 6c80bc9，2026-03-31）
+Wave 4 Sprint 4c：✅ P2-NEW-7/8 Operator 驗證補齊（commit 448f1e7，2026-03-31）
+Wave 4 Sprint 4d：✅ FA-2/3/4 邊界值防護 + threading 評估（commit 9cc134a，2026-03-31）
+Wave 4 Sprint 4e：✅ P2-NEW-9 async→sync + P2-NEW-5 清理（commit 87c2651，2026-03-31）
 ```
