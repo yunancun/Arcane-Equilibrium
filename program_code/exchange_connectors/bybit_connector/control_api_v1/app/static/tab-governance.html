@@ -293,7 +293,10 @@
       <div style="margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <h4 style="font-size:12px;color:var(--text-dim);margin:0">Change Approvals / 變更批准</h4>
-          <button class="oc-btn oc-btn-danger" id="btn-dismiss-all" style="font-size:11px;padding:3px 10px;margin-left:auto;display:none" onclick="dismissAllAudit()">清除全部 Dismiss All</button>
+          <span id="btn-bulk-actions" style="margin-left:auto;display:none">
+            <button class="oc-btn oc-btn-success" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('approve')">全部同意 Approve All</button>
+            <button class="oc-btn oc-btn-danger" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('reject')">全部拒绝 Reject All</button>
+          </span>
         </div>
         <div id="pending-audit-content" style="padding:8px 0">
           <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
@@ -1774,13 +1777,13 @@ function _formatValue(val) {
 
 function renderPendingAudit(changes) {
   const el = document.getElementById('pending-audit-content');
-  const btnDismiss = document.getElementById('btn-dismiss-all');
+  const btnBulk = document.getElementById('btn-bulk-actions');
   if (!changes || changes.length === 0) {
     el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前没有待批准的变更</p>';
-    if (btnDismiss) btnDismiss.style.display = 'none';
+    if (btnBulk) btnBulk.style.display = 'none';
     return;
   }
-  if (btnDismiss) btnDismiss.style.display = '';
+  if (btnBulk) btnBulk.style.display = '';
 
   let html = '<div style="display:flex;flex-direction:column;gap:12px">';
   for (const c of changes) {
@@ -1893,16 +1896,31 @@ async function auditReject(changeId) {
   }
 }
 
-async function dismissAllAudit() {
-  if (!confirm('确认清除全部待批准项目？\nDismiss all pending audit changes?')) return;
-  const d = await govDismissAllAudit('Operator bulk dismissed');
-  if (d && d.ok) {
-    const n = (d.data && d.data.dismissed) || 0;
-    ocToast('已清除 ' + n + ' 项 / ' + n + ' items dismissed', 'success');
-    loadPendingApprovals();
-  } else {
-    ocToast((d && d.message) || 'Dismiss failed / 清除失败', 'error');
+async function bulkAudit(action) {
+  const isApprove = action === 'approve';
+  const msg = isApprove
+    ? '确认全部同意？\nApprove all pending changes?'
+    : '确认全部拒绝？\nReject all pending changes?';
+  if (!confirm(msg)) return;
+
+  const reason = isApprove ? 'Operator bulk approved' : (prompt('拒绝原因 Rejection reason:') || '').trim();
+  if (!isApprove && !reason) { ocToast('请输入拒绝原因', 'error'); return; }
+
+  // Fetch current pending list and process one by one
+  const pending = await govGetPendingAudit();
+  if (!pending || !pending.ok || !pending.data) { ocToast('获取待审批列表失败', 'error'); return; }
+
+  let ok = 0, fail = 0;
+  for (const c of pending.data) {
+    const d = isApprove
+      ? await govApproveAuditChange(c.change_id, reason)
+      : await govRejectAuditChange(c.change_id, reason);
+    if (d && d.ok) ok++; else fail++;
   }
+
+  const label = isApprove ? '同意 approved' : '拒绝 rejected';
+  ocToast(ok + ' 项已' + label + (fail ? '，' + fail + ' 项失败' : ''), ok ? 'success' : 'error');
+  loadPendingApprovals();
 }
 
 async function loadPendingApprovals() {
