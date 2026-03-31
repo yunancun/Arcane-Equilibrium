@@ -524,13 +524,13 @@ const PF_LABELS = {
   perp_inverse: '币本位合约 / Inverse Perp',
   options:      '期权 / Options',
 };
-// Bybit 支持情况 / Bybit support status
+// Bybit 支持 + Agent 策略就绪情况 / Bybit support + Agent strategy readiness
 const PF_BYBIT_SUPPORT = {
-  spot:         { demo: true,  note: 'Bybit Demo 支持' },
-  margin:       { demo: false, note: '归属 Spot 品类（保证金模式）' },
-  perp_linear:  { demo: true,  note: 'Bybit Demo 支持（主要交易品类）' },
-  perp_inverse: { demo: true,  note: 'Bybit Demo 支持' },
-  options:      { demo: false, note: '实盘支持 · Demo 环境不可用' },
+  spot:         { demo: true,  agentReady: false, note: 'Bybit 支持 · 策略未就绪（仅 Funding Arb 对冲腿）' },
+  margin:       { demo: false, agentReady: false, note: '归属 Spot 品类（保证金模式）· 策略未就绪' },
+  perp_linear:  { demo: true,  agentReady: true,  note: '主要交易品类 · 扫描器+策略已就绪' },
+  perp_inverse: { demo: true,  agentReady: false, note: 'Bybit 支持 · 扫描器未覆盖 · 策略未就绪' },
+  options:      { demo: false, agentReady: false, note: '实盘支持 · Demo 不可用 · 策略未就绪' },
 };
 
 async function loadProductFamilyConfig() {
@@ -539,7 +539,7 @@ async function loadProductFamilyConfig() {
   const families = d.data.families || d.data;
   if (typeof families !== 'object') return;
 
-  const modeLabels = { disabled:'禁用 / Disabled', observe_only:'观察 / Observe', shadow_only:'影子 / Shadow' };
+  const modeLabels = { disabled:'禁用 / Disabled', observe_only:'观察 / Observe', shadow_only:'影子 / Shadow', demo_reserved:'Demo 模式', live_reserved:'实盘 / Live' };
   const capColors = { enabled:'var(--green)', disabled:'#f87171', observe_only:'var(--yellow)', shadow_only:'var(--accent)' };
 
   let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">';
@@ -558,7 +558,11 @@ async function loadProductFamilyConfig() {
     html += '<div class="pf-card">';
     html += '<div class="pf-card-title">' + ocEsc(label);
     html += ' <span class="pf-cap" style="color:' + capColor + ';border:1px solid ' + capColor + '">' + ocEsc(cap) + '</span>';
-    if (!support.demo) html += ' <span class="pf-cap" style="color:#f87171;border:1px solid #f87171;font-size:10px">N/A</span>';
+    if (support.agentReady) {
+      html += ' <span class="pf-cap" style="color:var(--green);border:1px solid var(--green);font-size:10px">策略就绪</span>';
+    } else {
+      html += ' <span class="pf-cap" style="color:#f87171;border:1px solid #f87171;font-size:10px">策略未就绪</span>';
+    }
     html += '</div>';
     if (support.note) html += '<div style="font-size:10px;color:var(--text-dim);margin:-6px 0 8px">' + ocEsc(support.note) + '</div>';
 
@@ -573,10 +577,22 @@ async function loadProductFamilyConfig() {
     html += '<span class="slider"></span></label></div>';
 
     // 模式选择 / Mode switch
+    // 后端 ALLOWED_MODE_SWITCHES 当前只允许 disabled/observe_only/shadow_only
+    // demo_reserved 和 live_reserved 预留展示但标记 locked，后端开放后自动生效
     html += '<div class="pf-row"><span>模式 / Mode</span>';
     html += '<select class="pf-mode-select" onchange="pfToggle(\'' + name + '\',\'mode_switch\',this.value)">';
-    ['disabled','observe_only','shadow_only'].forEach(function(m) {
-      html += '<option value="' + m + '"' + (m === mode ? ' selected' : '') + '>' + (modeLabels[m] || m) + '</option>';
+    var modeOpts = [
+      { v:'disabled',       locked:false },
+      { v:'observe_only',   locked:false },
+      { v:'shadow_only',    locked:false },
+      { v:'demo_reserved',  locked:true },
+      { v:'live_reserved',  locked:true },
+    ];
+    modeOpts.forEach(function(o) {
+      var sel = (o.v === mode) ? ' selected' : '';
+      var dis = o.locked ? ' disabled' : '';
+      var suffix = o.locked ? ' (locked)' : '';
+      html += '<option value="' + o.v + '"' + sel + dis + '>' + (modeLabels[o.v] || o.v) + suffix + '</option>';
     });
     html += '</select></div>';
 
@@ -602,8 +618,18 @@ async function pfToggle(family, field, value) {
   const body = ocEnvelope(payload, stateRevision);
   const d = await ocPost('/api/v1/control/product-family/' + encodeURIComponent(family) + '/config', body);
   if (d) {
-    ocToast(family + ' ' + field + ' 已更新', 'success');
     if (d.state_revision) stateRevision = d.state_revision;
+    // 检查后端是否真正应用了变更 / Check if backend actually applied the change
+    const respData = d.data || {};
+    const rejected = respData.rejected_fields || [];
+    const applied = respData.applied_changes || {};
+    if (rejected.length > 0 && Object.keys(applied).length === 0) {
+      ocToast(family + ' ' + field + ' 被拒绝：' + rejected.join(', '), 'error');
+    } else if (rejected.length > 0) {
+      ocToast(family + ' 部分应用，被拒绝：' + rejected.join(', '), 'warn');
+    } else {
+      ocToast(family + ' ' + field + ' 已更新', 'success');
+    }
     await loadProductFamilyConfig();
   } else {
     ocToast('更新失败', 'error');
