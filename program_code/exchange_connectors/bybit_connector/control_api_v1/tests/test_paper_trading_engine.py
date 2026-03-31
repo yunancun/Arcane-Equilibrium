@@ -35,10 +35,18 @@ if str(PROJECT_ROOT) not in sys.path:
 def paper_engine():
     """Create an isolated PaperTradingEngine with temp state file."""
     from app.paper_trading_engine import PaperStateStore, PaperTradingEngine
+    from unittest.mock import MagicMock
 
     tmpdir = tempfile.mkdtemp(prefix="openclaw_paper_test_")
     store = PaperStateStore(os.path.join(tmpdir, "paper_state.json"))
-    return PaperTradingEngine(store)
+    engine = PaperTradingEngine(store)
+    # P0-1: provide mock governance_hub so fail-closed check passes
+    mock_hub = MagicMock()
+    mock_hub.is_authorized.return_value = True
+    mock_hub.acquire_lease.return_value = "test-lease"
+    mock_hub.release_lease.return_value = None
+    engine.set_governance_hub(mock_hub)
+    return engine
 
 
 @pytest.fixture
@@ -668,8 +676,8 @@ class TestGovernanceAuthorizationFailClosed:
         assert result["order"]["reject_reason"] == "governance_check_error"
         assert result["rejected_reason"] == "governance_check_error"
 
-    def test_no_governance_hub_orders_pass(self, active_engine):
-        """When no GovernanceHub is set, orders should proceed (backward compatible)."""
+    def test_no_governance_hub_orders_rejected_fail_closed(self, active_engine):
+        """P0-1 FIX: When no GovernanceHub is set, orders must be REJECTED (fail-closed, DOC-01 §5.6)."""
         # Ensure no governance hub
         active_engine._governance_hub = None
 
@@ -678,9 +686,10 @@ class TestGovernanceAuthorizationFailClosed:
             market_prices={"BTCUSDT": 60000.0},
         )
 
-        # Order should fill normally
-        assert result["order"]["state"] == "paper_order_filled"
-        assert "governance_lease_id" not in result["order"]
+        # Order must be REJECTED with governance_hub_unavailable (fail-closed)
+        assert result["order"]["state"] == "paper_order_rejected"
+        assert result["order"]["reject_reason"] == "governance_hub_unavailable"
+        assert result["rejected_reason"] == "governance_hub_unavailable"
 
 
 class TestRiskManagerGovernanceFailClosed:

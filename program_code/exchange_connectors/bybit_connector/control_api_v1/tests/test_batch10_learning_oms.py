@@ -141,10 +141,15 @@ class TestOMSSM03Integration(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
         self.oms = OmsStateMachine()
+        # P0-1: provide mock governance_hub so fail-closed check passes
+        self.mock_hub = MagicMock()
+        self.mock_hub.is_authorized.return_value = True
+        self.mock_hub.acquire_lease.return_value = "test-lease"
+        self.mock_hub.release_lease.return_value = None
 
     def test_submit_order_creates_oms_order(self):
         """submit_order creates an OMS order with matching order_id."""
-        engine = _make_engine(self._tmp, oms_sm=self.oms)
+        engine = _make_engine(self._tmp, oms_sm=self.oms, governance_hub=self.mock_hub)
         result = engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},
@@ -158,7 +163,7 @@ class TestOMSSM03Integration(unittest.TestCase):
 
     def test_submit_order_oms_state_synced(self):
         """After a market fill, OMS state is COMPLETED (post-reconciliation)."""
-        engine = _make_engine(self._tmp, oms_sm=self.oms)
+        engine = _make_engine(self._tmp, oms_sm=self.oms, governance_hub=self.mock_hub)
         result = engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},
@@ -172,7 +177,7 @@ class TestOMSSM03Integration(unittest.TestCase):
 
     def test_submit_order_rejected_syncs_oms(self):
         """Rejected order (insufficient margin) syncs OMS to REJECTED."""
-        engine = _make_engine(self._tmp, oms_sm=self.oms)
+        engine = _make_engine(self._tmp, oms_sm=self.oms, governance_hub=self.mock_hub)
         # Start a session with very low balance
         engine.store.mutate(lambda s: {**s, "session": {**s["session"], "current_paper_balance_usdt": 0.01}})
         result = engine.submit_order(
@@ -219,10 +224,15 @@ class TestOMSSM03Fallback(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
+        # P0-1: provide mock governance_hub so fail-closed check passes
+        self.mock_hub = MagicMock()
+        self.mock_hub.is_authorized.return_value = True
+        self.mock_hub.acquire_lease.return_value = "test-lease"
+        self.mock_hub.release_lease.return_value = None
 
     def test_no_oms_sm_works_normally(self):
         """Engine works normally without OMS SM (legacy mode)."""
-        engine = _make_engine(self._tmp, oms_sm=None)
+        engine = _make_engine(self._tmp, oms_sm=None, governance_hub=self.mock_hub)
         result = engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},
@@ -236,7 +246,7 @@ class TestOMSSM03Fallback(unittest.TestCase):
     def test_oms_disabled_skips_oms(self):
         """When OMS_SM03_ENABLED=False, OMS SM is not consulted."""
         oms = MagicMock()
-        engine = _make_engine(self._tmp, oms_sm=oms)
+        engine = _make_engine(self._tmp, oms_sm=oms, governance_hub=self.mock_hub)
         result = engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},
@@ -508,11 +518,16 @@ class TestOMSSM03FullOrderLifecycle(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
+        # P0-1: provide mock governance_hub so fail-closed check passes
+        self.mock_hub = MagicMock()
+        self.mock_hub.is_authorized.return_value = True
+        self.mock_hub.acquire_lease.return_value = "test-lease"
+        self.mock_hub.release_lease.return_value = None
 
     def test_market_order_full_lifecycle(self):
         """Market order: CREATED→SUBMITTED→WORKING→FILLED + OMS COMPLETED."""
         oms = OmsStateMachine()
-        engine = _make_engine(self._tmp, oms_sm=oms)
+        engine = _make_engine(self._tmp, oms_sm=oms, governance_hub=self.mock_hub)
         result = engine.submit_order(
             "ETHUSDT", "Buy", "market", 0.01,
             market_prices={"ETHUSDT": 3000.0},
@@ -527,7 +542,7 @@ class TestOMSSM03FullOrderLifecycle(unittest.TestCase):
     def test_oms_status_summary(self):
         """OMS status_summary reflects orders tracked."""
         oms = OmsStateMachine()
-        engine = _make_engine(self._tmp, oms_sm=oms)
+        engine = _make_engine(self._tmp, oms_sm=oms, governance_hub=self.mock_hub)
         engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},
@@ -540,7 +555,7 @@ class TestOMSSM03FullOrderLifecycle(unittest.TestCase):
     def test_oms_order_id_persists_in_state(self):
         """OMS order ID is written into the paper trading state file."""
         oms = OmsStateMachine()
-        engine = _make_engine(self._tmp, oms_sm=oms)
+        engine = _make_engine(self._tmp, oms_sm=oms, governance_hub=self.mock_hub)
         engine.submit_order(
             "BTCUSDT", "Buy", "market", 0.001,
             market_prices={"BTCUSDT": 50000.0},

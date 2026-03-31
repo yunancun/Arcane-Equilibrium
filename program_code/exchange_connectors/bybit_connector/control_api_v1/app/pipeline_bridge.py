@@ -211,14 +211,6 @@ class PipelineBridge:
         self._guardian_agent = agent
         logger.info("GuardianAgent set as primary gate (fail-closed) / 已设置 GuardianAgent 为主门控")
 
-    def set_analyst_agent(self, agent: Any) -> None:
-        """
-        Batch 9: Set AnalystAgent for trade result analysis and LearningTierGate updates.
-        Batch 9：设置 AnalystAgent 用于交易结果分析和 LearningTierGate 指标更新。
-        """
-        self._analyst_agent = agent
-        logger.info("AnalystAgent set for trade analysis / 已设置 AnalystAgent 用于交易分析")
-
     def set_ollama_client(self, client: Any) -> None:
         """
         Set OllamaClient for L1 pre-trade edge filter.
@@ -592,6 +584,17 @@ class PipelineBridge:
                             self._stats["intents_rejected"] += 1
                         continue
 
+                else:
+                    # P0-2 FIX: Guardian unavailable → fail-closed REJECT (DOC-01 §5.6)
+                    # Guardian 不可用 → fail-closed 拒绝
+                    logger.error(
+                        "Guardian unavailable — fail-closed REJECT: %s %s",
+                        getattr(intent, "symbol", "?"), getattr(intent, "side", "?")
+                    )
+                    with self._lock:
+                        self._stats["intents_rejected"] += 1
+                    continue
+
                 # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
                 # L1 交易前 edge 过滤（辅助参考 — 仅记录，不阻塞）
                 # Batch 8: Guardian is now the primary gate; edge filter demoted to advisory
@@ -702,7 +705,7 @@ class PipelineBridge:
                             logger.debug("Demo connector error (non-fatal)")
                         if self._telegram and intent.order_type == "market":
                             price = market_prices.get(intent.symbol, 0)
-                            self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, intent.reason[:100])
+                            self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
 
             except Exception:
                 logger.exception(

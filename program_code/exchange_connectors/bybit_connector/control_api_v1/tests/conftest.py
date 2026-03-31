@@ -95,7 +95,15 @@ def paper_engine(paper_state_store):
     基础纸上交易引擎实例（不含风控管理器）。
     """
     from app.paper_trading_engine import PaperTradingEngine
-    return PaperTradingEngine(paper_state_store)
+    from unittest.mock import MagicMock
+    engine = PaperTradingEngine(paper_state_store)
+    # P0-1: provide mock governance_hub so fail-closed check passes in tests
+    mock_hub = MagicMock()
+    mock_hub.is_authorized.return_value = True
+    mock_hub.acquire_lease.return_value = "test-lease"
+    mock_hub.release_lease.return_value = None
+    engine.set_governance_hub(mock_hub)
+    return engine
 
 
 @pytest.fixture
@@ -117,9 +125,16 @@ def paper_engine_with_risk(tmp_state_file):
     from app.paper_trading_engine import PaperStateStore, PaperTradingEngine
     from app.risk_manager import RiskManager
 
+    from unittest.mock import MagicMock
     store = PaperStateStore(tmp_state_file)
     rm = RiskManager()
     eng = PaperTradingEngine(store, risk_manager=rm)
+    # P0-1: provide mock governance_hub so fail-closed check passes in tests
+    mock_hub = MagicMock()
+    mock_hub.is_authorized.return_value = True
+    mock_hub.acquire_lease.return_value = "test-lease"
+    mock_hub.release_lease.return_value = None
+    eng.set_governance_hub(mock_hub)
     eng.start_session(initial_balance=10000.0)
     return eng, rm
 

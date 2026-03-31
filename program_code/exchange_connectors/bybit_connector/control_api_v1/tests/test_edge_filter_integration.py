@@ -155,6 +155,14 @@ def pipeline_bridge(
         auto_submit_intents=True,
         max_intents_per_tick=20,
     )
+    # P0-2: provide mock guardian_agent so fail-closed check passes in tests
+    mock_guardian = MagicMock()
+    mock_verdict = MagicMock()
+    mock_verdict.result = MagicMock()
+    mock_verdict.result.__eq__ = lambda self, other: False  # Not REJECTED, not MODIFIED → APPROVED
+    mock_guardian.review_intent = MagicMock(return_value=mock_verdict)
+    mock_guardian.update_active_positions = MagicMock()
+    bridge.set_guardian_agent(mock_guardian)
     return bridge
 
 

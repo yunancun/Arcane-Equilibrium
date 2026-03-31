@@ -1078,6 +1078,22 @@ class PaperTradingEngine:
             _transition_order(order, ORDER_STATE_SUBMITTED, oms_sm=_oms)
 
             # Governance Hub authorization check (H0 gate) / 治理集線器授權檢查（H0 门）
+            # P0-1 FIX: GovernanceHub=None → fail-closed REJECT (DOC-01 §5.6)
+            # GovernanceHub 为 None → fail-closed 拒绝
+            if self._governance_hub is None:
+                logger.error(
+                    "governance_hub is None — fail-closed REJECT: %s %s",
+                    symbol, side
+                )
+                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
+                order["reject_reason"] = "governance_hub_unavailable"
+                state["orders"].append(order)
+                result["order"] = order
+                result["rejected_reason"] = "governance_hub_unavailable"
+                self._audit(state, "order_governance_rejected",
+                            f"{symbol} {side} governance_hub unavailable — fail-closed")
+                return state
+
             if self._governance_hub:
                 try:
                     if not self._governance_hub.is_authorized():

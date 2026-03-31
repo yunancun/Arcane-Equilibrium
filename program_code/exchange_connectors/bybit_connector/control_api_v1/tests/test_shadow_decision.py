@@ -56,8 +56,16 @@ def tmp_state_file():
 
 @pytest.fixture
 def engine(tmp_state_file):
+    from unittest.mock import MagicMock
     store = PaperStateStore(tmp_state_file)
-    return PaperTradingEngine(store)
+    eng = PaperTradingEngine(store)
+    # P0-1: provide mock governance_hub so fail-closed check passes in tests
+    mock_hub = MagicMock()
+    mock_hub.is_authorized.return_value = True
+    mock_hub.acquire_lease.return_value = "test-lease"
+    mock_hub.release_lease.return_value = None
+    eng.set_governance_hub(mock_hub)
+    return eng
 
 
 @pytest.fixture

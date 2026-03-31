@@ -124,11 +124,18 @@ class TestEngineTierEnforcement:
 
     def _make_engine(self):
         from app.paper_trading_engine import PaperTradingEngine, PaperStateStore
+        from unittest.mock import MagicMock
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             f.write('{}')
             temp_path = f.name
         store = PaperStateStore(temp_path)
         engine = PaperTradingEngine(store)
+        # P0-1: provide mock governance_hub so fail-closed check passes in tests
+        mock_hub = MagicMock()
+        mock_hub.is_authorized.return_value = True
+        mock_hub.acquire_lease.return_value = "test-lease"
+        mock_hub.release_lease.return_value = None
+        engine.set_governance_hub(mock_hub)
         return engine, temp_path
 
     def test_submit_order_rejected_at_l1(self):
