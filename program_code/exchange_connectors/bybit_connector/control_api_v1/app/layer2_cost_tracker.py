@@ -472,6 +472,115 @@ class Layer2CostTracker:
                 "total_sessions": total_sessions,
             },
             "pricing_stale": self._pricing.is_stale(),
+            # Principle 10 (cognitive honesty): all PnL-based metrics are paper simulation only
+            # 根原則 10（認知誠實）：所有 PnL 相關指標均基於模擬，非真實盈虧
+            "roi_basis": "paper_simulation_only",
+            "roi_disclaimer": "基於模擬 PnL，非真實盈虧",
+        }
+
+    # ── Ollama Call Tracking / Ollama 調用追蹤 ──
+
+    def record_ollama_call(
+        self,
+        model: str,
+        duration_ms: float = 0.0,
+        prompt_tokens: int = 0,
+    ) -> None:
+        """
+        Record a local Ollama model call for cost and performance tracking.
+        記錄本地 Ollama 模型調用，追蹤次數、延遲與 token 使用量。
+
+        Ollama calls are free but tracked for ROI and resource awareness (principle 13).
+        Ollama 調用免費，但仍追蹤以支持 AI 使用效果評估（根原則 13）。
+
+        Increments per-model and total counters in a lightweight in-memory dict.
+        Uses a persistent entry in the daily_spend state file under 'ollama_calls'.
+        在輕量記憶體字典中更新每個模型和總計數器。
+        也寫入每日花費狀態檔中的 'ollama_calls' 分區。
+        """
+        with self._lock:
+            # In-memory tracking — survives only until process restart
+            # 記憶體追蹤 — 僅在進程重啟前有效
+            if not hasattr(self, "_ollama_stats"):
+                # Lazy init: keep model-level stats in memory
+                # 懶初始化：在記憶體中保存模型級別統計
+                self._ollama_stats: dict = {}
+            entry = self._ollama_stats.setdefault(
+                model,
+                {"call_count": 0, "total_duration_ms": 0.0, "total_prompt_tokens": 0},
+            )
+            entry["call_count"] += 1
+            entry["total_duration_ms"] = round(entry["total_duration_ms"] + duration_ms, 2)
+            entry["total_prompt_tokens"] += prompt_tokens
+
+        # Also persist to state file under a lightweight 'ollama_calls' section
+        # 同時持久化到狀態檔的 'ollama_calls' 分區（輕量追蹤，不含 USD 成本）
+        try:
+            raw = self._read_raw()
+            ollama_section = raw.setdefault("ollama_calls", {})
+            model_entry = ollama_section.setdefault(
+                model,
+                {"call_count": 0, "total_duration_ms": 0.0},
+            )
+            model_entry["call_count"] = model_entry.get("call_count", 0) + 1
+            model_entry["total_duration_ms"] = round(
+                model_entry.get("total_duration_ms", 0.0) + duration_ms, 2
+            )
+            self._write_raw(raw)
+        except Exception:
+            # Persistence failure is non-fatal — in-memory stats still updated
+            # 持久化失敗是非致命的 — 記憶體統計已更新
+            logger.warning("record_ollama_call: failed to persist to state file, non-fatal")
+
+    def get_ollama_stats(self) -> dict:
+        """
+        Return in-memory Ollama call statistics per model.
+        返回記憶體中每個模型的 Ollama 調用統計。
+
+        Returns empty dict if no calls have been recorded this session.
+        若本 session 未記錄任何調用，返回空字典。
+        """
+        with self._lock:
+            if not hasattr(self, "_ollama_stats"):
+                return {}
+            return dict(self._ollama_stats)
+
+    def get_cost_edge_ratio(self) -> dict:
+        """
+        Calculate AI cost-to-edge ratio for the current session.
+        計算當前 session 的 AI 成本效益比（cost_edge_ratio）。
+
+        cost_edge_ratio = paper_pnl_7d_usd / ai_spend_7d_usd (when data is available).
+        cost_edge_ratio = 7 日模擬 PnL / 7 日 AI 花費（數據充足時計算）。
+
+        All values are based on paper simulation PnL — not real trading results.
+        所有數值基於模擬 PnL，非真實交易結果。原則 10：認知誠實。
+
+        Returns dict with roi_basis marker per principle 10 (cognitive honesty).
+        返回含 roi_basis 標記的字典，符合根原則 10（認知誠實）要求。
+
+        If insufficient data (< ADAPTIVE_MIN_DAYS), ratio is None.
+        若數據不足（< ADAPTIVE_MIN_DAYS 天），比率返回 None。
+        """
+        state = self._adaptive
+        ai_spend = state.ai_spend_7d_usd
+        paper_pnl = state.paper_pnl_7d_usd
+        data_days = state.data_days
+
+        if data_days >= ADAPTIVE_MIN_DAYS and ai_spend > 0:
+            ratio = round(paper_pnl / ai_spend, 4)
+        else:
+            ratio = None
+
+        return {
+            "cost_edge_ratio": ratio,
+            "ai_spend_7d_usd": ai_spend,
+            "paper_pnl_7d_usd": paper_pnl,
+            "data_days": data_days,
+            # Principle 10 (cognitive honesty): all ROI data is paper simulation only
+            # 根原則 10（認知誠實）：所有 ROI 數據均基於模擬，非真實盈虧
+            "roi_basis": "paper_simulation_only",
+            "roi_disclaimer": "基於模擬 PnL，非真實盈虧",
         }
 
     # ── Budget Check for Session / Session 预算检查 ──

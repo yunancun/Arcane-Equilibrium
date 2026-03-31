@@ -706,6 +706,95 @@ except Exception as e:
     AUTO_DEPLOYER = None
     logger.warning("Market scanner not available: %s", e)
 
+# ── ScoutWorker: 30-minute periodic intel injection into Strategist chain ──
+# ScoutWorker：每 30 分鐘定時掃描並通過 ScoutAgent → MessageBus 向策略師注入情報
+# This complements MarketScanner's own 5-minute loop (which feeds AUTO_DEPLOYER).
+# ScoutWorker 補充 MarketScanner 自身的 5 分鐘循環（後者只饋送 AUTO_DEPLOYER）。
+# ScoutWorker covers the Scout→Strategist intel pipeline for AI-driven analysis.
+# ScoutWorker 覆蓋 Scout→策略師情報管線，供 AI 驅動的策略分析使用。
+_SCOUT_WORKER = None
+try:
+    from .scout_worker import ScoutWorker as _ScoutWorkerClass
+
+    def _make_scout_scan_fn():
+        """
+        Build a scan function that runs one full scan and injects intel via ScoutAgent.
+        構建掃描函數：執行一次完整掃描，並通過 ScoutAgent.produce_intel() 注入情報。
+
+        Uses module-level MARKET_SCANNER and SCOUT_AGENT captured at init time.
+        捕獲模塊級別的 MARKET_SCANNER 和 SCOUT_AGENT，在初始化時綁定。
+
+        Returns None if either dependency is unavailable (fail-open for scout intel).
+        若任一依賴不可用，返回 None（情報注入 fail-open，不影響主程序）。
+        """
+        _ms = MARKET_SCANNER
+        _sa = SCOUT_AGENT
+        if _ms is None or _sa is None:
+            return None
+
+        def _scan_and_produce_intel() -> None:
+            """
+            Execute one scan cycle and push top opportunities as Scout intel.
+            執行一次掃描週期，將頂部機會推送為 Scout 情報供策略師分析。
+
+            Fail-open: exceptions are caught in ScoutWorker._run_loop(), so
+            this function only needs to raise on genuine failures.
+            Fail-open：ScoutWorker._run_loop() 已捕獲異常，此函數只需在真正失敗時拋出。
+            """
+            opportunities = _ms.scan()
+            if not opportunities:
+                logger.debug(
+                    "ScoutWorker: scan returned no opportunities / 掃描未返回機會，跳過情報注入"
+                )
+                return
+            # Take top-5 opportunities by score to avoid intel flooding.
+            # 取評分最高的前 5 個機會，避免情報洪泛策略師消息隊列。
+            top = sorted(opportunities, key=lambda o: getattr(o, "score", 0.0), reverse=True)[:5]
+            symbols = [getattr(o, "symbol", str(o)) for o in top]
+            summary = ", ".join(
+                f"{getattr(o, 'symbol', '?')}({getattr(o, 'score', 0.0):.2f})"
+                for o in top
+            )
+            _sa.produce_intel(
+                source="ScoutWorker",
+                content=f"30-min periodic scan top opportunities: {summary}",
+                symbols=symbols,
+                relevance_score=0.6,
+                freshness_seconds=0,
+                metadata={"trigger": "scout_worker_30min", "total_opportunities": len(opportunities)},
+            )
+            logger.info(
+                "ScoutWorker: intel produced for %d symbols (top 5 of %d opportunities) "
+                "/ ScoutWorker：已為 %d 個幣種生成情報（%d 個機會中的前 5）",
+                len(symbols), len(opportunities), len(symbols), len(opportunities),
+            )
+
+        return _scan_and_produce_intel
+
+    _scout_scan_fn = _make_scout_scan_fn()
+    if _scout_scan_fn is not None:
+        _SCOUT_WORKER = _ScoutWorkerClass(scan_fn=_scout_scan_fn)
+        _SCOUT_WORKER.start()
+        logger.info(
+            "ScoutWorker initialized and started (30-min intel injection) "
+            "/ ScoutWorker 已初始化並啟動（30 分鐘情報注入）"
+        )
+    else:
+        logger.warning(
+            "ScoutWorker not started: MARKET_SCANNER or SCOUT_AGENT unavailable "
+            "/ ScoutWorker 未啟動：MARKET_SCANNER 或 SCOUT_AGENT 不可用"
+        )
+except Exception as _scout_worker_exc:
+    # Scout intel injection failure is non-fatal; main pipeline continues.
+    # Scout 情報注入失敗不影響主程序；繼續運行。
+    logger.warning(
+        "ScoutWorker initialization failed (non-fatal): %s "
+        "/ ScoutWorker 初始化失敗（非致命）：%s",
+        type(_scout_worker_exc).__name__,
+        _scout_worker_exc,
+    )
+    _SCOUT_WORKER = None
+
 # --- Wire ScoutAgent + MessageBus into scout_routes ---
 try:
     from . import scout_routes

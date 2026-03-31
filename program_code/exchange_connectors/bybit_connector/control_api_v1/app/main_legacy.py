@@ -25,6 +25,7 @@ import secrets
 import tempfile
 import threading
 import time
+import warnings
 import weakref
 
 logger = logging.getLogger(__name__)
@@ -591,6 +592,9 @@ class AIConsultationResultData(BaseModel):
     ai_response: str | None = None
     cost_usd: float = 0.0
     consultation_status: str = "stub_pending_h_chain_integration"
+    # DEPRECATED notice field — callers should migrate to the active AI pipeline endpoint.
+    # 廢棄通知字段 — 調用方應遷移至現有 AI 管線端點。
+    deprecation_notice: str | None = None
 
 
 # ── L 章学习系统常量 / L-chapter Learning System Constants ────────────────────
@@ -3882,18 +3886,27 @@ def apply_ai_consultation(
     envelope: RequestEnvelope, actor: AuthenticatedActor, packet_id: str
 ) -> tuple[dict[str, Any], str]:
     """
-    执行 AI 咨询（当前为 stub）/ Execute AI consultation (currently a stub).
+    执行 AI 咨询（当前为 stub，已废弃）/ Execute AI consultation (stub, deprecated).
 
-    未来接入 H1-H5 治理链后，此函数将：
-    1. 调用 H1 thought_gate 判断是否需要 AI
-    2. 通过 H2 query_budget 验证预算
-    3. 通过 H3 model_router 选择模型
-    4. 通过 H4 compute_governor 执行约束
-    5. 记录成本到 H5
+    [DEPRECATED] 此函數是 Learning Cockpit 審核隊列的占位符，非現有 AI 管線。
+    [DEPRECATED] This function is a stub for the Learning Cockpit Review Queue,
+    not the active AI pipeline. Use /phase2/strategist/intel-log for Strategist decisions.
 
-    当前返回 stub 响应，包含预生成的问题和占位回复。
-    Currently returns stub response with pre-built question and placeholder reply.
+    若需查看策略師 AI 決策記錄，請使用 /phase2/strategist/intel-log 端點。
+    For Strategist AI decisions via the active pipeline, use /phase2/strategist/intel-log.
+
+    兼容性：函數簽名不變，返回值包含 deprecation_notice 字段。
+    Compatibility: function signature unchanged; return value includes deprecation_notice.
     """
+    # Emit DeprecationWarning so callers (e.g. tests) can detect the deprecation.
+    # 發出 DeprecationWarning，讓調用方（如測試）可以感知廢棄狀態。
+    # stacklevel=2 points at the caller of apply_ai_consultation, not this function itself.
+    warnings.warn(
+        "apply_ai_consultation() is deprecated. "
+        "Use /phase2/strategist/intel-log for AI pipeline decisions.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     require_scope(actor, "learning:manage")
     snapshot, _ = get_latest_snapshot()
     verify_operator_identity(envelope, actor)
@@ -3925,6 +3938,13 @@ def apply_ai_consultation(
             ),
             "cost_usd": 0.0,
             "consultation_status": "stub_pending_h_chain_integration",
+            # DEPRECATED: indicate callers to migrate to the active Strategist pipeline.
+            # 廢棄通知：提示調用方遷移至現有策略師 AI 管線端點。
+            "deprecation_notice": (
+                "This endpoint is deprecated. "
+                "Use /phase2/strategist/intel-log for Strategist AI pipeline decisions. "
+                "此端點已廢棄，請改用 /phase2/strategist/intel-log。"
+            ),
         },
         "snapshot": snapshot,
     }, "success"
@@ -5074,10 +5094,16 @@ def post_review_ai_consult(
     packet_id: str, envelope: RequestEnvelope, actor=Depends(current_actor)
 ) -> ResponseEnvelope[AIConsultationResultData]:
     """
-    对审核包执行 AI 咨询（当前 stub）/ AI consultation on review packet (currently stub).
+    [DEPRECATED] 对审核包执行 AI 咨询（Learning Cockpit stub，已廢棄）。
+    [DEPRECATED] AI consultation on review packet (Learning Cockpit stub, deprecated).
 
-    当前返回预生成的问题和占位回复。
-    未来接入 H1-H5 治理链后将执行真实 AI 调用。
+    此端點是 Learning Cockpit 審核隊列的占位符，非現有 AI 管線。
+    This endpoint is a stub for the Learning Cockpit Review Queue, not the active AI pipeline.
+    請改用 /phase2/strategist/intel-log 查看策略師 AI 決策記錄。
+    Use /phase2/strategist/intel-log for Strategist AI pipeline decisions instead.
+
+    回傳值中包含 deprecation_notice 字段提示遷移。
+    Response includes a deprecation_notice field to guide migration.
     """
     result, action_result = apply_ai_consultation(envelope, actor, packet_id)
     return envelope_response(

@@ -635,5 +635,309 @@ class TestStrategistShadowFalse(unittest.TestCase):
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestH4OutputValidation
+# Sprint 5b-1: H4 AI 輸出驗證 — _validate_ai_output() 行為測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestH4OutputValidation(unittest.TestCase):
+    """
+    Sprint 5b-1: Verify H4 AI output validation method and its integration in _ai_evaluate().
+    Sprint 5b-1：驗證 H4 AI 輸出驗證方法及其在 _ai_evaluate() 中的集成行為。
+
+    Tests:
+    1. Valid parsed dict → _validate_ai_output returns True
+    2. Missing 'confidence' → returns False → _ai_evaluate falls back to heuristic
+    3. Non-numeric confidence → returns False
+    4. Out-of-range confidence → returns False
+    測試：
+    1. 合法 dict → _validate_ai_output 返回 True
+    2. 缺少 confidence → 返回 False → _ai_evaluate 降級啟發式
+    3. confidence 非數值 → 返回 False
+    4. confidence 超出範圍 → 返回 False
+    """
+
+    def _make_agent(self) -> "StrategistAgent":
+        """Create a minimal StrategistAgent for unit testing _validate_ai_output.
+        構建用於單元測試 _validate_ai_output 的最小 StrategistAgent。"""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1)
+        return StrategistAgent(config=config)
+
+    def _make_intel(self, symbol: str = "BTCUSDT") -> "IntelObject":
+        """Build a minimal IntelObject for _ai_evaluate tests.
+        構建 _ai_evaluate 測試用的最小 IntelObject。"""
+        return IntelObject(
+            source="test",
+            content="test signal",
+            symbols=[symbol],
+            data_quality=DataQualityLevel.FACT,
+            sentiment=SentimentScore.POSITIVE,
+            relevance_score=0.8,
+            freshness_seconds=5,
+            metadata={},
+        )
+
+    # ── _validate_ai_output unit tests / 單元測試 ──
+
+    def test_h4_valid_output_returns_true(self):
+        """Valid parsed dict with confidence in [0, 1] should return True.
+        合法 dict 且 confidence 在 [0, 1] 範圍應返回 True。"""
+        agent = self._make_agent()
+        parsed = {"has_edge": True, "confidence": 0.75, "reason": "looks good"}
+        self.assertTrue(agent._validate_ai_output(parsed))
+
+    def test_h4_valid_output_confidence_zero(self):
+        """Confidence exactly 0.0 is valid (boundary).
+        confidence 精確為 0.0 是合法值（邊界測試）。"""
+        agent = self._make_agent()
+        parsed = {"confidence": 0.0}
+        self.assertTrue(agent._validate_ai_output(parsed))
+
+    def test_h4_valid_output_confidence_one(self):
+        """Confidence exactly 1.0 is valid (boundary).
+        confidence 精確為 1.0 是合法值（邊界測試）。"""
+        agent = self._make_agent()
+        parsed = {"confidence": 1.0}
+        self.assertTrue(agent._validate_ai_output(parsed))
+
+    def test_h4_missing_confidence_returns_false(self):
+        """Missing 'confidence' key → should return False.
+        缺少 'confidence' 鍵 → 應返回 False。"""
+        agent = self._make_agent()
+        parsed = {"has_edge": True, "reason": "no confidence here"}
+        self.assertFalse(agent._validate_ai_output(parsed))
+
+    def test_h4_non_dict_returns_false(self):
+        """Non-dict input (list, string, None) → should return False.
+        非 dict 輸入（列表、字符串、None）→ 應返回 False。"""
+        agent = self._make_agent()
+        self.assertFalse(agent._validate_ai_output([{"confidence": 0.5}]))
+        self.assertFalse(agent._validate_ai_output("confidence: 0.5"))
+        self.assertFalse(agent._validate_ai_output(None))
+
+    def test_h4_confidence_out_of_range_high(self):
+        """confidence=1.5 (above 1.0) → should return False.
+        confidence=1.5（超出上限）→ 應返回 False。"""
+        agent = self._make_agent()
+        parsed = {"has_edge": True, "confidence": 1.5}
+        self.assertFalse(agent._validate_ai_output(parsed))
+
+    def test_h4_confidence_out_of_range_low(self):
+        """confidence=-0.1 (below 0.0) → should return False.
+        confidence=-0.1（低於下限）→ 應返回 False。"""
+        agent = self._make_agent()
+        parsed = {"has_edge": True, "confidence": -0.1}
+        self.assertFalse(agent._validate_ai_output(parsed))
+
+    def test_h4_non_numeric_confidence_returns_false(self):
+        """Non-numeric confidence (string) → should return False.
+        非數值型 confidence（字符串）→ 應返回 False。"""
+        agent = self._make_agent()
+        parsed = {"has_edge": True, "confidence": "high"}
+        self.assertFalse(agent._validate_ai_output(parsed))
+
+    def test_h4_integer_confidence_valid(self):
+        """Integer confidence (0 or 1) should be accepted (isinstance int/float).
+        整數型 confidence (0 或 1) 應被接受（isinstance int/float 均可）。"""
+        agent = self._make_agent()
+        self.assertTrue(agent._validate_ai_output({"confidence": 1}))
+        self.assertTrue(agent._validate_ai_output({"confidence": 0}))
+
+    # ── Integration: _ai_evaluate falls back to heuristic on H4 fail ──
+    # 集成測試：H4 驗證失敗時 _ai_evaluate 降級到啟發式
+
+    def test_h4_fallback_to_heuristic_on_invalid_output(self):
+        """When judge_edge returns invalid output, _ai_evaluate falls back to heuristic
+        and increments h4_validation_fail counter (not allow-all).
+        當 judge_edge 返回無效輸出時，_ai_evaluate 降級到啟發式，
+        並遞增 h4_validation_fail 計數器（不可 allow-all）。"""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1,
+                                  heuristic_min_relevance=0.1,
+                                  heuristic_min_freshness=300)
+        agent = StrategistAgent(config=config)
+
+        mock_response = MagicMock()
+        mock_response.success = True
+        # Return JSON without 'confidence' key → H4 validation fails
+        # 返回缺少 'confidence' 的 JSON → H4 驗證失敗
+        mock_response.text = '{"has_edge": true, "reason": "missing confidence"}'
+
+        mock_ollama = MagicMock()
+        mock_ollama.is_available.return_value = True
+        mock_ollama.judge_edge.return_value = mock_response
+        agent._ollama = mock_ollama
+
+        intel = self._make_intel()
+        result = agent._ai_evaluate(intel)
+
+        # Should have fallen back to heuristic (source = "heuristic")
+        # 應降級到啟發式（source = "heuristic"）
+        self.assertEqual(result.source, "heuristic",
+                         "H4 validation failure must produce heuristic result, not allow-all")
+
+        # h4_validation_fail counter should be incremented
+        # h4_validation_fail 計數器應已遞增
+        with agent._lock:
+            fail_count = agent._stats.get("h4_validation_fail", 0)
+        self.assertGreater(fail_count, 0,
+                           "h4_validation_fail counter must increment on H4 rejection")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TestCostTrackerOllama
+# Sprint 5b-2/6: H5 CostLogger — record_ollama_call / get_cost_edge_ratio 測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCostTrackerOllama(unittest.TestCase):
+    """
+    Sprint 5b-2/6: Verify Ollama call tracking and cost-edge ratio in Layer2CostTracker.
+    Sprint 5b-2/6：驗證 Layer2CostTracker 中的 Ollama 調用追蹤和成本效益比。
+
+    Tests:
+    1. record_ollama_call increments in-memory counter
+    2. get_cost_edge_ratio returns dict with roi_basis = "paper_simulation_only"
+    3. get_cost_summary returns dict with roi_basis = "paper_simulation_only"
+    4. StrategistAgent with cost_tracker=None does not crash
+    測試：
+    1. record_ollama_call 遞增記憶體計數器
+    2. get_cost_edge_ratio 返回含 roi_basis = "paper_simulation_only" 的 dict
+    3. get_cost_summary 返回含 roi_basis = "paper_simulation_only" 的 dict
+    4. cost_tracker=None 時 StrategistAgent 不崩潰
+    """
+
+    def _make_tracker(self) -> "Layer2CostTracker":
+        """Create a Layer2CostTracker with a temp state file.
+        使用臨時狀態文件創建 Layer2CostTracker。"""
+        import tempfile
+        from app.layer2_cost_tracker import Layer2CostTracker
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        return Layer2CostTracker(state_file=tmp.name)
+
+    def test_record_ollama_call_increments_counter(self):
+        """record_ollama_call should increment per-model in-memory counter.
+        record_ollama_call 應遞增記憶體中對應模型的計數器。"""
+        tracker = self._make_tracker()
+        tracker.record_ollama_call(model="l1_9b", duration_ms=150.0)
+        tracker.record_ollama_call(model="l1_9b", duration_ms=200.0)
+        tracker.record_ollama_call(model="l1_27b", duration_ms=500.0)
+
+        stats = tracker.get_ollama_stats()
+        self.assertIn("l1_9b", stats)
+        self.assertEqual(stats["l1_9b"]["call_count"], 2)
+        self.assertIn("l1_27b", stats)
+        self.assertEqual(stats["l1_27b"]["call_count"], 1)
+
+    def test_record_ollama_call_duration_accumulated(self):
+        """record_ollama_call should accumulate total_duration_ms correctly.
+        record_ollama_call 應正確累積 total_duration_ms。"""
+        tracker = self._make_tracker()
+        tracker.record_ollama_call(model="l1_9b", duration_ms=100.0)
+        tracker.record_ollama_call(model="l1_9b", duration_ms=200.5)
+
+        stats = tracker.get_ollama_stats()
+        self.assertAlmostEqual(stats["l1_9b"]["total_duration_ms"], 300.5, places=1)
+
+    def test_get_cost_edge_ratio_has_roi_basis(self):
+        """get_cost_edge_ratio must return dict with roi_basis = 'paper_simulation_only'.
+        get_cost_edge_ratio 必須返回含 roi_basis = 'paper_simulation_only' 的 dict。"""
+        tracker = self._make_tracker()
+        result = tracker.get_cost_edge_ratio()
+        self.assertIn("roi_basis", result)
+        self.assertEqual(result["roi_basis"], "paper_simulation_only")
+        self.assertIn("roi_disclaimer", result)
+        self.assertIn("cost_edge_ratio", result)
+
+    def test_get_cost_edge_ratio_none_when_insufficient_data(self):
+        """cost_edge_ratio should be None when data_days < ADAPTIVE_MIN_DAYS.
+        data_days 不足時 cost_edge_ratio 應為 None。"""
+        tracker = self._make_tracker()
+        result = tracker.get_cost_edge_ratio()
+        # Fresh tracker has no data, so ratio should be None
+        # 全新追蹤器無數據，比率應為 None
+        self.assertIsNone(result["cost_edge_ratio"])
+
+    def test_get_cost_summary_has_roi_basis(self):
+        """get_cost_summary must include roi_basis = 'paper_simulation_only'.
+        get_cost_summary 必須包含 roi_basis = 'paper_simulation_only'。"""
+        tracker = self._make_tracker()
+        summary = tracker.get_cost_summary()
+        self.assertIn("roi_basis", summary)
+        self.assertEqual(summary["roi_basis"], "paper_simulation_only")
+        self.assertIn("roi_disclaimer", summary)
+
+    def test_record_ollama_call_none_tracker_strategist_no_crash(self):
+        """StrategistAgent with cost_tracker=None should not crash when processing intel.
+        cost_tracker=None 時 StrategistAgent 處理 intel 不得崩潰。"""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        config = StrategistConfig(shadow=True, min_relevance=0.1)
+        agent = StrategistAgent(config=config, cost_tracker=None)
+
+        mock_response = MagicMock()
+        mock_response.success = True
+        mock_response.text = '{"has_edge": false, "confidence": 0.3, "reason": "no signal"}'
+        mock_ollama = MagicMock()
+        mock_ollama.is_available.return_value = True
+        mock_ollama.judge_edge.return_value = mock_response
+        agent._ollama = mock_ollama
+
+        intel = IntelObject(
+            source="test",
+            content="no signal",
+            symbols=["BTCUSDT"],
+            data_quality=DataQualityLevel.FACT,
+            sentiment=SentimentScore.NEUTRAL,
+            relevance_score=0.5,
+            freshness_seconds=10,
+            metadata={},
+        )
+        # Should not raise even with cost_tracker=None
+        # cost_tracker=None 時不應拋出異常
+        try:
+            result = agent._ai_evaluate(intel)
+            self.assertIsNotNone(result)
+        except Exception as e:
+            self.fail(f"_ai_evaluate raised exception with cost_tracker=None: {e}")
+
+    def test_record_ollama_call_via_strategist_increments_stat(self):
+        """When cost_tracker has record_ollama_call, strategist increments ollama_calls_tracked.
+        cost_tracker 有 record_ollama_call 時，strategist 應遞增 ollama_calls_tracked 統計。"""
+        from app.strategist_agent import StrategistAgent, StrategistConfig
+        tracker = self._make_tracker()
+        config = StrategistConfig(shadow=True, min_relevance=0.1,
+                                  heuristic_min_relevance=0.1,
+                                  heuristic_min_freshness=300)
+        agent = StrategistAgent(config=config, cost_tracker=tracker)
+
+        mock_response = MagicMock()
+        mock_response.success = True
+        # Valid output with confidence
+        # 有效輸出含 confidence
+        mock_response.text = '{"has_edge": true, "confidence": 0.8, "reason": "strong signal"}'
+        mock_ollama = MagicMock()
+        mock_ollama.is_available.return_value = True
+        mock_ollama.judge_edge.return_value = mock_response
+        agent._ollama = mock_ollama
+
+        intel = IntelObject(
+            source="test",
+            content="strong signal",
+            symbols=["BTCUSDT"],
+            data_quality=DataQualityLevel.FACT,
+            sentiment=SentimentScore.POSITIVE,
+            relevance_score=0.8,
+            freshness_seconds=5,
+            metadata={},
+        )
+        agent._ai_evaluate(intel)
+
+        with agent._lock:
+            tracked = agent._stats.get("ollama_calls_tracked", 0)
+        self.assertGreater(tracked, 0,
+                           "ollama_calls_tracked must increment after successful AI evaluation")
+
+
 if __name__ == "__main__":
     unittest.main()

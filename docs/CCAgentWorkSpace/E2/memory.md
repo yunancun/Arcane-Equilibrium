@@ -2,8 +2,8 @@
 
 ## 項目上下文（2026-03-31 更新）
 
-- 當前 Wave：Wave 5a 完成（H0 blocking + H1 ThoughtGate + shadow=False + H3 ModelRouter）
-- 測試基準：2879 passed（Sprint 5a 後，比任務前 +15 個）
+- 當前 Wave：Wave 5b 完成（H4 validate_output + H5 record_ollama_call + ScoutWorker + Principle 14 集成測試）
+- 測試基準：2609 passed（Sprint 5b 後，全量 passed 比 Sprint 5a 多 54 個）
 - 系統模式：demo_only
 
 ## 審查強制清單（每次 Code Review 必查項）
@@ -41,6 +41,7 @@
 |------|------|---------|
 | 2026-03-31 | Sprint 0 G-05+G-01 審查 | workspace/reports/2026-03-31--sprint0_g05_g01_review.md |
 | 2026-03-31 | Sprint 5a 完整審查 | workspace/reports/2026-03-31--sprint5a_review.md |
+| 2026-03-31 | Sprint 5b 完整審查 | workspace/reports/2026-03-31--sprint5b_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -62,6 +63,17 @@
 - **WARN-1（P2）**: `cost_tracker.record_call()` 的 `except Exception: pass` 缺少 logger（L485）
 - **WARN-2（P2）**: `_h1_cooldown` 字典無容量上限（650 符號場景安全，但建議 P2 追蹤加 LRU cap）
 - **重要觀察**: Sprint 5a 代碼順帶修復了 11 個 pre-existing test failures（34 → 23 FAILED）
+
+### 2026-03-31 Sprint 5b（H4 validate_output + H5 record_ollama_call + ScoutWorker + P14 集成測試）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2609 passed（新增 54 個 Sprint 5b 測試）
+- **H4 fail-closed 確認**: `_validate_ai_output()` 返回 False → `_heuristic_evaluate()`（無 allow-all）；h4_validation_fail + heuristic_evaluations 雙重計數器在位
+- **原則 10 roi_basis 確認**: `get_cost_summary()` 和 `get_cost_edge_ratio()` 均含 `roi_basis: "paper_simulation_only"` + `roi_disclaimer` 中文字段
+- **ScoutWorker daemon 確認**: daemon=True + except Exception 吞但記錄日誌 + phase2 初始化在 try/except 包裹 + 非致命
+- **新 failure 調查**: 18 FAILED = 17 pre-existing + 0 Sprint 5b 新增（git stash diff 驗證）
+- **WARN-1（P2）**: `_ollama_stats` 懶初始化在方法體，建議遷移至 `__init__`（功能正確，純可讀性）
+- **WARN-2（P2）**: ScoutWorker interval 不可運行時配置（建議 P3 環境變量覆蓋）
+- **WARN-3（P2 繼承）**: `cost_tracker.record_call()` 的 `except Exception: pass`（Sprint 5a 遺留）
 
 ### 跨審查觀察（模式記憶）
 - ExecutorAgent 的異常 error 字段格式問題已出現兩次，建議建立統一規範：審計字段使用固定 snake_case 錯誤碼，動態信息僅進入 logger。

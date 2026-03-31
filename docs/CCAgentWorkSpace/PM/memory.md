@@ -42,10 +42,28 @@
 - **記住**：5a-4 shadow=False 需要 5a-1+5a-2+G-05 三個前置都完成才可啟動
 - **記住**：CC 強制 — H1 `should_call_ai=False` 必須走 heuristic，不是 allow-all
 
+## Sprint 5b 派發狀態（2026-03-31）
+
+- 測試基準：2594 collected（Sprint 5a 後確認）
+- Sprint 5b 目標：≥ 2600 passed
+- 三流並行：E1-Gamma（5b-1→5b-2/6）‖ E1-Delta（5b-3→5b-4）‖ E4（5b-5）
+- E1-Gamma 負責：strategist_agent.py H4 validate_output + layer2_cost_tracker.py 三個新方法
+- E1-Delta 負責：main_legacy.py apply_ai_consultation 廢棄 + scout_worker.py 新建
+- E4 直接：test_h_chain_integration.py 原則 14 集成測試
+
+**關鍵決策（代碼審計確認）**：
+- `_ai_evaluate()` 已有 JSON parse error 處理，H4 是在 json.loads 成功後插入的顯式驗證層
+- `apply_ai_consultation` 不直接接入 _handle_intel（語義不同），改為廢棄+指向 /phase2/strategist/intel-log
+- ScoutWorker 使用 `_stop_event.wait(interval)` 而非 `sleep`，支持快速 stop() 響應
+- 所有三個 cost_tracker 新方法必須含 `roi_basis: "paper_simulation_only"`（CC 原則 10）
+
+**記住**：5b-3 apply_ai_consultation 保留兼容性，不刪除函數，調用點 :5082 必須繼續通過測試
+
 ## 報告索引
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
 | 2026-03-31 | Wave 5 B 方案計劃 | workspace/reports/2026-03-31--wave5_plan_b_multiagent.md |
 | 2026-03-31 | Wave 5 最終派發計劃（Sprint 0+5a+5b 結構） | workspace/reports/2026-03-31--wave5_final_dispatch.md |
-| 2026-03-31 | Sprint 5a 詳細派發計劃（本文） | workspace/reports/2026-03-31--sprint5a_dispatch.md |
+| 2026-03-31 | Sprint 5a 詳細派發計劃 | workspace/reports/2026-03-31--sprint5a_dispatch.md |
+| 2026-03-31 | Sprint 5b 詳細派發計劃 | workspace/reports/2026-03-31--sprint5b_dispatch.md |

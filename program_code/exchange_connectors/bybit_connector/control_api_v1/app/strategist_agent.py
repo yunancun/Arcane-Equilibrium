@@ -248,6 +248,10 @@ class StrategistAgent:
             "h1_budget_skip": 0,
             "h1_complexity_skip": 0,
             "h1_cooldown_skip": 0,
+            # H4 output validation counter / H4 輸出驗證拒絕計數器
+            "h4_validation_fail": 0,
+            # H5 Ollama cost tracking counter / H5 Ollama 調用計數
+            "ollama_calls_tracked": 0,
         }
 
         # Evaluation log (recent evaluations for diagnostics)
@@ -665,6 +669,39 @@ class StrategistAgent:
             self._stats["heuristic_evaluations"] += 1
         return _heuristic_evaluate(intel, self.config)
 
+    def _validate_ai_output(self, parsed: dict) -> bool:
+        """
+        H4 validation: verify AI output structure before constructing EdgeEvaluation.
+        H4 輸出驗證：在構造 EdgeEvaluation 前確認 AI 輸出結構完整且合理。
+
+        Returns True if valid, False if output should be rejected (fallback to heuristic).
+        返回 True 表示有效，False 表示應拒絕並降級到啟發式評估。
+
+        Principle 6: reject → heuristic, never allow-all.
+        原則 6：拒絕時走啟發式，不可直接放行（allow-all 等於放棄治理）。
+
+        Validates:
+        - parsed must be a dict (not list, string, None, etc.)
+        - 'confidence' key must be present (primary safety-critical field)
+        - confidence must be a numeric type
+        - confidence must be in [0.0, 1.0] range
+        驗證項目：
+        - parsed 必須是 dict（不可是 list、string、None 等）
+        - 必須包含 'confidence' 鍵（主要安全關鍵字段）
+        - confidence 必須是數值型別
+        - confidence 必須在 [0.0, 1.0] 範圍內
+        """
+        if not isinstance(parsed, dict):
+            return False
+        if "confidence" not in parsed:
+            return False
+        confidence = parsed.get("confidence", -1)
+        if not isinstance(confidence, (int, float)):
+            return False
+        if not (0.0 <= float(confidence) <= 1.0):
+            return False
+        return True
+
     def _ai_evaluate(self, intel: IntelObject) -> EdgeEvaluation:
         """
         Evaluate edge using Qwen 3.5 via judge_edge().
@@ -704,9 +741,36 @@ class StrategistAgent:
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             result = json.loads(text)
+
+            # H4: Validate AI output structure — principle 6: invalid → heuristic, never allow-all
+            # H4 輸出驗證：結構不合格則降級啟發式，根原則 6（失敗默認收縮）
+            if not self._validate_ai_output(result):
+                logger.warning(
+                    "H4 validation failed for AI output (missing/invalid confidence), "
+                    "falling back to heuristic / H4 驗證失敗，降級到啟發式"
+                )
+                with self._lock:
+                    self._stats["h4_validation_fail"] = self._stats.get("h4_validation_fail", 0) + 1
+                    self._stats["heuristic_evaluations"] += 1
+                return _heuristic_evaluate(intel, self.config)
+
             has_edge = bool(result.get("has_edge", False))
             confidence = float(result.get("confidence", 0.0))
             reason = str(result.get("reason", "AI evaluation"))
+
+            # H5: Record Ollama call for cost/resource awareness (principle 13)
+            # H5 成本感知：記錄 Ollama 調用，支持 AI 使用效果評估（根原則 13）
+            if self.cost_tracker is not None:
+                try:
+                    record_fn = getattr(self.cost_tracker, "record_ollama_call", None)
+                    if record_fn is not None:
+                        record_fn(model="l1_9b", duration_ms=latency_ms)
+                    with self._lock:
+                        self._stats["ollama_calls_tracked"] += 1
+                except Exception:
+                    # Cost recording failure must not block execution — principle 13 is observational
+                    # 成本記錄失敗不可阻擋執行，根原則 13 是觀察性要求
+                    logger.warning("cost_tracker.record_ollama_call failed, non-fatal / 成本記錄失敗，非致命")
 
             return EdgeEvaluation(
                 has_edge=has_edge,
