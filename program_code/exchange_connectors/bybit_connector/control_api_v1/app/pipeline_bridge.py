@@ -497,12 +497,14 @@ class PipelineBridge:
                         # This is acceptable for exchange-sourced signals
                         pass
 
-                # ── P1-16: H0 Gate deterministic pre-check (warn-only in paper mode) ──
-                # P1-16：H0 確定性門控前置檢查（paper/模擬模式下僅警告，不拒絕）
-                # Paper mode: warn-only preserves paper testing paths while logging H0 perspective.
-                # Live mode (M/N chapters): harden to fail-closed (remove warn-only, add `continue`).
-                # Paper 模式：僅告警保留 paper 測試路徑同時記錄 H0 視角。
-                # Live 模式（M/N 章）：改為 fail-closed（移除僅告警，添加 `continue`）。
+                # ── Sprint 5a: H0 Gate blocking — fail-closed (principle 5: survival > profit) ──
+                # Sprint 5a：H0 Gate 阻擋模式 — fail-closed（根原則 5：生存 > 利潤）
+                # H0 Gate blocking: stale data or unhealthy system state → reject intent entirely.
+                # This is activated in Sprint 5a after H0 Gate SLA validation and Day 3 integration
+                # confirmed the gate is safe to enforce. Previously warn-only (paper mode), now
+                # fully blocking to protect against trading on bad market data.
+                # H0 Gate 阻擋：數據過期或系統不健康時拒絕 intent，防止基於錯誤市場數據交易。
+                # Sprint 5a 之前為 warn-only（paper 模式），現已切換為全面阻擋。
                 if self._h0_gate is not None:
                     try:
                         _h0_category = (
@@ -512,23 +514,28 @@ class PipelineBridge:
                         )
                         _h0_result = self._h0_gate.check(intent.symbol, _h0_category)
                         if not _h0_result.allowed:
+                            # H0 Gate blocking — fail-closed to protect against stale/unhealthy market data
+                            # H0 Gate 阻擋模式 — 數據過期或系統不健康時拒絕意圖，原則 5（生存 > 利潤）
+                            with self._lock:
+                                self._stats["intents_h0_blocked"] = self._stats.get(
+                                    "intents_h0_blocked", 0
+                                ) + 1
                             logger.warning(
-                                "H0Gate blocked (paper warn-only): %s %s "
-                                "check=%s reason=%s latency=%dμs — intent NOT rejected "
-                                "/ H0 門控阻擋（paper 僅警告）：intent 未被拒絕",
+                                "H0Gate BLOCKED intent %s %s check=%s reason=%s latency=%dμs"
+                                " / H0 門控已拒絕 intent：%s %s",
                                 intent.symbol,
                                 getattr(intent, "side", "?"),
                                 _h0_result.check_name,
                                 _h0_result.reason,
                                 _h0_result.latency_us,
+                                intent.symbol,
+                                getattr(intent, "side", "?"),
                             )
-                            # ⚠️ PAPER MODE: do NOT add `continue` here
-                            # ⚠️ LIVE MODE (future): uncomment below to fail-closed
-                            # continue
+                            continue  # skip this intent, do not submit
                     except Exception as _h0_check_err:
                         logger.warning(
-                            "H0Gate check error (non-fatal in paper mode): %s "
-                            "/ H0 門控檢查錯誤（paper 模式不影響業務）",
+                            "H0Gate check error (fail-open on exception, non-fatal): %s "
+                            "/ H0 門控檢查異常（異常時 fail-open，非致命）",
                             _h0_check_err,
                         )
 

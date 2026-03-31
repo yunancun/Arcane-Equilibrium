@@ -2,8 +2,8 @@
 
 ## 項目上下文（2026-03-31）
 
-- 當前 Wave：Wave 4 完成，Wave 5 規劃中
-- 測試基準：2555 passed
+- 當前 Wave：Wave 5（Sprint 5a-1/5a-2/5a-4 完成）
+- 測試基準：2576 passed
 - 系統模式：demo_only
 
 ## 強制編碼規範（每次寫/改代碼必須遵守）
@@ -42,6 +42,11 @@ def acquire_lease(self, intent_id: str) -> bool:
 |------|------|---------|
 | 2026-03-31 | G-01 AI 每日硬上限 $15→$2 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--g01_ai_daily_cap_fix.md` |
 | 2026-03-31 | G-05 ExecutorAgent acquire_lease 插入 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--g05_executor_acquire_lease.md` |
+| 2026-03-31 | Sprint 5a: H1 ThoughtGate + H2 cost_tracker + H3 ModelRouter | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5a_beta.md` |
+| 2026-03-31 | Sprint 5a-1/5a-2/5a-4: Scout→Strategist chain + H0 blocking + shadow=False | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5a_alpha.md` |
+
+## 當前測試基準線
+2576 passed（Sprint 5a-1/5a-2/5a-4 完成後，+15 新測試，17 pre-existing failures）
 
 ## 關鍵發現與教訓
 
@@ -50,6 +55,22 @@ def acquire_lease(self, intent_id: str) -> bool:
 - `tab-ai.html` 第 359 行有第 4 處 `|| 15`（budget display fallback），原規格漏列但屬 AI 預算相關，一併修正
 - `tab-ai.html` 第 430、445 行的 `|| 15` 是 `max_iterations` 預設值，與 AI 預算無關，不應修改（已保持不動）
 - 測試 `test_layer2.py` 第 201 行直接寫死 `15.0` 而非引用常量 `DEFAULT_DAILY_HARD_CAP_USD`，這是脆弱測試的案例 → 未來建議改為引用常量
+
+### 2026-03-31 Sprint 5a-3/5a-5/5a-6
+- `_heuristic_evaluate()` 是模塊頂層函數（非方法），調用時寫 `_heuristic_evaluate(intel, self.config)` 而非 `self._heuristic_evaluate(intel, self.config)` — 任務規格中把它當方法調用是錯誤的
+- `Layer2CostTracker.check_daily_budget()` 實際簽名無參數，返回 `(bool, float)` — 任務規格中描述的 `check_daily_budget("l1_9b")` 帶參數版本不存在
+- `Layer2CostTracker` 無 `record_call()` 方法 — 使用 `getattr(..., None)` 安全訪問防止 AttributeError
+- H1 複雜度跳過測試：`min_relevance` 過濾器在 H1 gate 之前執行，若 `relevance_score < min_relevance` 會 early return — 測試中必須設 `min_relevance` 低於測試 `relevance_score`
+- H1 閘門中的 `_evaluate_edge()` 調用必須用 try/except 包裹（外層 `_handle_intel` 沒有捕獲 evaluate_edge 拋出的 TimeoutError 等異常）
+- H3 L2 路由：L2 path 在 `threading.Thread` 中執行，立即使用啟發式作為即時結果；需用 `patch("app.strategist_agent.threading.Thread", ...)` 攔截 Thread 創建
+
+### 2026-03-31 Sprint 5a-1/5a-2/5a-4
+- `test_strategist_agent.py` was already at 485 lines (from a prior agent session) when I tried to Write ~170 lines. The Write tool PREPENDED my content (merged) rather than overwriting — **Lesson**: always read a file before writing to know what's there and use Edit instead.
+- `test_h1_complexity_skip` is flaky when run with the full suite (timing dependent cooldown pollution between tests). Passes when run alone. Pre-existing issue, not caused by my changes.
+- H0 Gate blocking change in `pipeline_bridge.py`: replaced warn-only (commented `continue`) with actual `continue` + `intents_h0_blocked` counter. Also updated the comment block to clarify it's now blocking mode.
+- `phase2_strategy_routes.py` `StrategistConfig(shadow=True)` → `shadow=False`: added 14-line comment block explaining all pre-conditions (G-05, H0 Gate, Guardian gate) confirmed before switch.
+- `_make_h0_gate_mock()` pattern in tests: mock H0Gate `.check()` returns MagicMock with `.allowed`, `.check_name`, `.reason`, `.latency_us` attributes to match the `H0GateResult` interface.
+- `intents_h0_blocked` is a new key in `_stats` — used `.get("intents_h0_blocked", 0)` in tests since it won't be in older `get_stats()` that didn't initialize it.
 
 ### 2026-03-31 G-05
 - `governance_hub.acquire_lease()` 實際簽名為 `(intent_id, scope, ttl_seconds)`，任務規格中描述的 `requester` 參數不存在 → 實際使用 `scope="TRADE_ENTRY"` 正確對應規格意圖

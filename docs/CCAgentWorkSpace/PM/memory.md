@@ -31,8 +31,21 @@
 - 估算工時要留 buffer：E2+E4 佔用 30-40% 總工時，不能只估 E1 部分
 - Strategist shadow=True → False 是高風險操作，需要單獨 Sprint 驗證，不能和其他改動綁在一起
 
+## Sprint 5a 派發狀態（2026-03-31）
+
+- Sprint 0 已完成（commit d57ed05，2561 passed，G-05 + G-01 已清除）
+- Sprint 5a 派發計劃已制定（2026-03-31--sprint5a_dispatch.md）
+- E1-Alpha 負責：5a-1（情報鏈路驗證）→ 5a-2（H0 blocking）→ 5a-4（shadow=False）
+- E1-Beta 負責：5a-3（H1 ThoughtGate）→ 5a-5（H2 預算）→ 5a-6（H3 ModelRouter）
+- Sprint 5a 測試目標：≥ 2575 passed（預計 2578）
+- **記住**：5a-3 H1 ThoughtGate 中 `_handle_intel()` 是同步方法，不可用 await
+- **記住**：5a-4 shadow=False 需要 5a-1+5a-2+G-05 三個前置都完成才可啟動
+- **記住**：CC 強制 — H1 `should_call_ai=False` 必須走 heuristic，不是 allow-all
+
 ## 報告索引
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
 | 2026-03-31 | Wave 5 B 方案計劃 | workspace/reports/2026-03-31--wave5_plan_b_multiagent.md |
+| 2026-03-31 | Wave 5 最終派發計劃（Sprint 0+5a+5b 結構） | workspace/reports/2026-03-31--wave5_final_dispatch.md |
+| 2026-03-31 | Sprint 5a 詳細派發計劃（本文） | workspace/reports/2026-03-31--sprint5a_dispatch.md |

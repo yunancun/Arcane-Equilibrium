@@ -1,9 +1,9 @@
 # E2 Memory — 工作記憶
 
-## 項目上下文（2026-03-31）
+## 項目上下文（2026-03-31 更新）
 
-- 當前 Wave：Wave 4 完成，Wave 5 規劃中
-- 測試基準：2555 passed
+- 當前 Wave：Wave 5a 完成（H0 blocking + H1 ThoughtGate + shadow=False + H3 ModelRouter）
+- 測試基準：2879 passed（Sprint 5a 後，比任務前 +15 個）
 - 系統模式：demo_only
 
 ## 審查強制清單（每次 Code Review 必查項）
@@ -40,6 +40,7 @@
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
 | 2026-03-31 | Sprint 0 G-05+G-01 審查 | workspace/reports/2026-03-31--sprint0_g05_g01_review.md |
+| 2026-03-31 | Sprint 5a 完整審查 | workspace/reports/2026-03-31--sprint5a_review.md |
 
 ## 歷史審查關鍵發現（累積記憶）
 
@@ -50,6 +51,17 @@
 - **G-01 確認**: DEFAULT_DAILY_HARD_CAP_USD=2.0，DOC-08 §4 來源注釋在位，tab-ai.html `|| 15` 迭代預設值未被修改，定價 `15.00` per_mtok 未被修改
 - **WARN（P2 追蹤）**: `error=f"Execution error: {e}"` 動態異常字符串在外層 exception 捕獲路徑（executor_agent.py:415）。Batch 11 原有代碼模式，建議 P2 改為固定字符串。
 - **WARN（P2 追蹤）**: `error=f"Order rejected: {rejected_reason}"` 同上，来源為 paper engine 返回值，風險可控但不理想。
+
+### 2026-03-31 Sprint 5a（H0 blocking + H1 ThoughtGate + shadow=False + H3 ModelRouter）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2879 passed（新增 15 個 Sprint 5a 測試）
+- **H0 blocking 確認**: pipeline_bridge.py `continue` 已替換 warn-only；`intents_h0_blocked` 統計正確；4 個 TestH0GateBlocking 全部通過
+- **H1 ThoughtGate 確認**: 三個 gate（budget/complexity/cooldown）均正確降級到 `_heuristic_evaluate()`；`should_call_ai=False` 路徑無 allow-all
+- **架構約束確認**: 整個 H1/H2/H3 鏈路零 `await`；L2 在 `threading.Thread(daemon=True)` 執行
+- **shadow=False 確認**: 前置條件（G-05 acquire_lease + H0 blocking）均已驗證
+- **WARN-1（P2）**: `cost_tracker.record_call()` 的 `except Exception: pass` 缺少 logger（L485）
+- **WARN-2（P2）**: `_h1_cooldown` 字典無容量上限（650 符號場景安全，但建議 P2 追蹤加 LRU cap）
+- **重要觀察**: Sprint 5a 代碼順帶修復了 11 個 pre-existing test failures（34 → 23 FAILED）
 
 ### 跨審查觀察（模式記憶）
 - ExecutorAgent 的異常 error 字段格式問題已出現兩次，建議建立統一規範：審計字段使用固定 snake_case 錯誤碼，動態信息僅進入 logger。

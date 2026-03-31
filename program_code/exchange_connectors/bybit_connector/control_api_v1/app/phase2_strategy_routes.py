@@ -133,6 +133,23 @@ from .multi_agent_framework import AgentRole, Conductor, AgentState as _AgentSta
 from .strategist_agent import StrategistAgent, StrategistConfig
 from .ollama_client import OllamaClient
 
+# Layer2CostTracker for H1/H5 budget gate injection into StrategistAgent
+# Layer2CostTracker 用於 H1/H5 預算門控注入到 StrategistAgent
+_COST_TRACKER_FOR_STRATEGIST: Any = None
+try:
+    from .layer2_cost_tracker import Layer2CostTracker
+    _COST_TRACKER_FOR_STRATEGIST = Layer2CostTracker()
+    logger.info(
+        "Layer2CostTracker for StrategistAgent initialized / "
+        "StrategistAgent 用 Layer2CostTracker 已初始化"
+    )
+except Exception as _ct_e:
+    logger.warning(
+        "Layer2CostTracker init failed, StrategistAgent will run without budget gate: %s / "
+        "Layer2CostTracker 初始化失敗，StrategistAgent 將無預算門控運行: %s",
+        _ct_e, _ct_e,
+    )
+
 # Create Conductor with shared MessageBus / 创建 Conductor 并使用共享消息总线
 CONDUCTOR = Conductor(message_bus=MESSAGE_BUS)
 
@@ -149,12 +166,26 @@ try:
 except Exception as _oc_e:
     logger.warning("OllamaClient init failed: %s / OllamaClient 初始化失败: %s", _oc_e, _oc_e)
 
-# Create StrategistAgent (shadow=True by default — log only, no live intents)
-# 创建 StrategistAgent（默认 shadow=True — 仅记录，不产生实际 intent）
+# Sprint 5a: Switch Strategist from shadow mode to live mode.
+# After G-05 (acquire_lease) and H0 Gate blocking are confirmed, the full
+# Scout→Strategist→Guardian→ExecutorAgent pipeline is safe to activate.
+# Sprint 5a：策略師從影子模式切換到真實模式。
+# G-05（acquire_lease）和 H0 Gate blocking 確認後，完整鏈路已具備安全條件。
+# Pre-conditions confirmed (2026-03-31):
+#   - G-05: ExecutorAgent.execute_order() calls governance_hub.acquire_lease() (fail-closed)
+#   - H0 Gate blocking: _process_pending_intents() now rejects intents when allowed=False
+#   - Guardian gate: pipeline_bridge.py routes intents through GuardianAgent review
+# 前置條件確認（2026-03-31）：
+#   - G-05：ExecutorAgent 已插入 acquire_lease()（fail-closed）
+#   - H0 Gate 阻擋：_process_pending_intents() 在 allowed=False 時拒絕 intent
+#   - Guardian 門控：pipeline_bridge.py 將 intent 路由至 GuardianAgent 審查
+# cost_tracker injected for H1/H5 budget gate; None = no budget constraint (fail-open)
+# cost_tracker 注入以啟用 H1/H5 預算門控；None 表示無預算限制（fail-open）
 STRATEGIST_AGENT = StrategistAgent(
-    config=StrategistConfig(shadow=True),
+    config=StrategistConfig(shadow=False),
     message_bus=MESSAGE_BUS,
     ollama_client=OLLAMA_CLIENT,
+    cost_tracker=_COST_TRACKER_FOR_STRATEGIST,
 )
 STRATEGIST_AGENT.start()
 

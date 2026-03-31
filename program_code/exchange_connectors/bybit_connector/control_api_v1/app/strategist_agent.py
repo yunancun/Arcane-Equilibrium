@@ -213,6 +213,7 @@ class StrategistAgent:
         message_bus: Optional[MessageBus] = None,
         ollama_client: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
+        cost_tracker: Optional[Any] = None,
     ):
         self.config = config or StrategistConfig()
         self.bus = message_bus
@@ -220,6 +221,14 @@ class StrategistAgent:
         self._audit_callback = audit_callback
         self.state = AgentState.INITIALIZING
         self._lock = threading.Lock()
+
+        # cost_tracker: injected externally; None = no budget tracking
+        # cost_tracker：外部注入；None 表示不做預算追蹤（fail-open）
+        self.cost_tracker = cost_tracker
+
+        # H1 cooldown: per-symbol last-intel timestamp for 30-second dedup
+        # H1 冷卻期記錄：每個幣種上次情報時間戳，30 秒內重複信號跳過 AI
+        self._h1_cooldown: Dict[str, float] = {}
 
         # Pending intents buffer (collected by PipelineBridge)
         # 待处理 intent 缓冲区（由 PipelineBridge 收集）
@@ -235,6 +244,10 @@ class StrategistAgent:
             "heuristic_evaluations": 0,
             "evaluations_rejected": 0,
             "errors": 0,
+            # H1 ThoughtGate skip counters / H1 思考閘門跳過計數器
+            "h1_budget_skip": 0,
+            "h1_complexity_skip": 0,
+            "h1_cooldown_skip": 0,
         }
 
         # Evaluation log (recent evaluations for diagnostics)
@@ -258,6 +271,76 @@ class StrategistAgent:
         """Stop the agent / 停止代理"""
         self.state = AgentState.STOPPED
         logger.info("StrategistAgent stopped / 策略师代理已停止")
+
+    # ── H1 ThoughtGate Methods / H1 思考閘門方法 ──
+    # All three methods are synchronous — required by MessageBus callback constraint.
+    # 全部同步方法 — MessageBus 回調不可使用 await，此處嚴格遵守。
+
+    def _h1_check_budget(self) -> bool:
+        """
+        H1 budget check: return True if AI call is affordable.
+        H1 預算檢查：若 AI 調用在預算內則返回 True，否則降級到啟發式評估。
+
+        If cost_tracker is None, fail-open and allow AI call.
+        若 cost_tracker 為 None，fail-open 允許 AI 調用（向後兼容無預算追蹤部署）。
+
+        If cost_tracker.check_daily_budget() returns (False, _), budget is exceeded.
+        若 check_daily_budget() 返回 (False, _)，表示預算已超，降級到啟發式。
+        """
+        if self.cost_tracker is None:
+            # fail-open: no tracker means no budget constraint
+            # fail-open：無追蹤器表示無預算限制
+            return True
+        try:
+            allowed, _ = self.cost_tracker.check_daily_budget()
+            return allowed
+        except Exception:
+            # fail-open: tracker error must not block evaluation
+            # fail-open：追蹤器異常不得阻止評估
+            return True
+
+    def _h1_complexity_score(self, intel: Any) -> float:
+        """
+        H1 complexity scoring: rule-based, synchronous, no AI calls.
+        H1 複雜度評分：純規則，同步執行，不調用 AI。
+
+        Returns 0.0–1.0. Score < 0.3 means signal is too simple for AI evaluation.
+        返回 0.0–1.0。分數 < 0.3 表示信號過於簡單，不值得調用 AI。
+
+        Base score from Scout's relevance_score; boosted by multi-symbol and urgency.
+        基礎分數來自 Scout 的 relevance_score；多幣種或高緊迫度時加分。
+        """
+        score = intel.relevance_score  # base from Scout / Scout 基礎分數
+        # Boost for multiple symbols: broader market signals warrant AI attention
+        # 多幣種加分：較廣泛的市場信號值得 AI 關注
+        if len(intel.symbols) > 3:
+            score = min(1.0, score + 0.2)
+        # Boost for high-urgency metadata signals
+        # 高緊迫度元數據加分
+        if getattr(intel, "metadata", {}).get("urgency") == "high":
+            score = min(1.0, score + 0.2)
+        return score
+
+    def _h1_check_cooldown(self, intel: Any) -> bool:
+        """
+        H1 cooldown check: return True if symbol is not in cooldown window.
+        H1 冷卻期檢查：同一符號 30 秒內重複信號跳過 AI，避免頻繁調用。
+
+        Returns True if AI call is allowed, False if any symbol is in cooldown.
+        若任意幣種在冷卻期內則返回 False（跳過 AI）；否則更新時間戳並返回 True。
+        """
+        now = time.time()
+        for symbol in intel.symbols:
+            last = self._h1_cooldown.get(symbol, 0.0)
+            if now - last < 30.0:
+                # Symbol still in cooldown window — skip AI
+                # 幣種仍在冷卻期 — 跳過 AI
+                return False
+        # All symbols passed cooldown check — update timestamps
+        # 所有幣種通過冷卻期檢查 — 更新時間戳
+        for symbol in intel.symbols:
+            self._h1_cooldown[symbol] = now
+        return True
 
     # ── Message Handler / 消息处理 ──
 
@@ -329,8 +412,78 @@ class StrategistAgent:
             logger.debug("Intel too old: %.0fs > %ds", age_seconds, self.config.max_intel_age_seconds)
             return
 
-        # Evaluate edge / 评估 edge
-        evaluation = self._evaluate_edge(intel)
+        # ── H1 ThoughtGate: pre-AI determination gate (synchronous, no await) ──
+        # H1 思考閘門：AI 調用前的確定性判斷，全部同步執行，符合 MessageBus 回調限制。
+        # CC 原則 6：should_call_ai=False 時必須走啟發式評估，不可直接 allow-all 或 return。
+        should_call_ai = True
+
+        if not self._h1_check_budget():
+            with self._lock:
+                self._stats["h1_budget_skip"] += 1
+            should_call_ai = False
+
+        if should_call_ai and self._h1_complexity_score(intel) < 0.3:
+            with self._lock:
+                self._stats["h1_complexity_skip"] += 1
+            should_call_ai = False
+
+        if should_call_ai and not self._h1_check_cooldown(intel):
+            with self._lock:
+                self._stats["h1_cooldown_skip"] += 1
+            should_call_ai = False
+
+        if not should_call_ai:
+            # Principle 6: fail-closed means use conservative heuristic, NOT allow-all
+            # 原則 6：失敗默認收縮 — 降級用啟發式評估，不可直接放行（allow-all 等於失去治理）
+            evaluation = _heuristic_evaluate(intel, self.config)
+            with self._lock:
+                self._stats["heuristic_evaluations"] += 1
+        else:
+            # H3 ModelRouter: select model tier based on signal complexity
+            # H3 模型路由：根據信號複雜度選擇模型層，平衡速度與精度
+            model_tier = self._h3_route_model(intel)
+            if model_tier == "l2":
+                # L2 must run in background thread — cannot block synchronous on_tick callback
+                # L2 必須在後台線程執行，避免阻塞 MessageBus 的同步 on_tick 回調
+                threading.Thread(
+                    target=self._evaluate_edge_l2,
+                    args=(intel,),
+                    daemon=True,
+                ).start()
+                # Use heuristic as immediate result; L2 result will be logged asynchronously
+                # 立即使用啟發式結果；L2 結果將在後台異步記錄
+                evaluation = _heuristic_evaluate(intel, self.config)
+                with self._lock:
+                    self._stats["heuristic_evaluations"] += 1
+            else:
+                # L1 runs synchronously with timeout — acceptable blocking window
+                # L1 同步執行，有 timeout 保護，阻塞時間可接受
+                try:
+                    evaluation = self._evaluate_edge(intel)
+                except Exception as _edge_exc:
+                    # fail-closed: any unexpected error in evaluate_edge → heuristic fallback
+                    # fail-closed：evaluate_edge 任何異常 → 啟發式回退，不得拋出到外層
+                    logger.warning(
+                        "_evaluate_edge raised %s, falling back to heuristic / "
+                        "_evaluate_edge 拋出 %s，回退到啟發式",
+                        type(_edge_exc).__name__, type(_edge_exc).__name__,
+                    )
+                    with self._lock:
+                        self._stats["errors"] += 1
+                        self._stats["heuristic_evaluations"] += 1
+                    evaluation = _heuristic_evaluate(intel, self.config)
+
+            # H5 light: record Ollama call for cost tracking (Ollama is free, track call count)
+            # H5 輕量版：記錄 Ollama 調用以追蹤調用次數（Ollama 免費，僅計次）
+            # Uses record_call() if available; cost tracking failure must never block execution.
+            # 使用 record_call()（若存在）；成本追蹤失敗不得阻塞執行。
+            if self.cost_tracker is not None and model_tier != "l2":
+                try:
+                    _record = getattr(self.cost_tracker, "record_call", None)
+                    if _record is not None:
+                        _record(model="l1_9b", cost_usd=0.0)
+                except Exception:
+                    pass
 
         with self._lock:
             self._stats["intel_evaluated"] += 1
@@ -443,6 +596,48 @@ class StrategistAgent:
             self.config.shadow = False
             logger.info("StrategistAgent shadow mode OFF / 策略师影子模式关闭")
         self._audit("directive_received", message.payload)
+
+    # ── H3 ModelRouter + L2 Background Evaluation / H3 模型路由 + L2 背景評估 ──
+
+    def _h3_route_model(self, intel: Any) -> str:
+        """
+        H3 ModelRouter: select model tier based on signal complexity.
+        H3 模型路由：根據信號複雜度選擇模型層，平衡速度與精度。
+
+        Returns: 'l1_9b' | 'l1_27b' | 'l2'
+        - l1_9b  → complexity < 0.5  (fast, simple signals)
+        - l1_27b → 0.5 <= complexity < 0.8 (moderate complexity)
+        - l2     → complexity >= 0.8  (high complexity, runs in background thread)
+
+        L2 MUST be dispatched in threading.Thread to avoid blocking on_tick.
+        L2 必須在 threading.Thread 中執行，不可阻塞 on_tick 主線程。
+        """
+        complexity = self._h1_complexity_score(intel)
+        if complexity >= 0.8:
+            return "l2"
+        elif complexity >= 0.5:
+            return "l1_27b"
+        else:
+            return "l1_9b"
+
+    def _evaluate_edge_l2(self, intel: Any) -> None:
+        """
+        Async L2 evaluation executed in a background daemon thread. Results are logged only.
+        在後台 daemon 線程執行的 L2 深度評估，結果僅記錄，不影響已派出的啟發式 intent。
+
+        This method must NEVER be called from the main on_tick callback path.
+        此方法絕對不能從 on_tick 主回調路徑直接調用。
+        """
+        try:
+            result = self._evaluate_edge(intel)
+            logger.info(
+                "L2 async result for %s: has_edge=%s confidence=%.2f / L2 異步結果",
+                intel.symbols, result.has_edge, result.confidence,
+            )
+        except Exception as e:
+            # Log and swallow — background thread must not crash
+            # 記錄並吞掉異常 — 後台線程不得崩潰
+            logger.warning("L2 async evaluation failed: %s", type(e).__name__)
 
     # ── Edge Evaluation / Edge 评估 ──
 

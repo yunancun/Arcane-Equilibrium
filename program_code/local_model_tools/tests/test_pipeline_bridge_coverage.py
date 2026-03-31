@@ -961,4 +961,136 @@ class TestAutoSubmitFlag:
         assert engine.submitted_orders == []
 
 
+# ===========================================================================
+# 14. Sprint 5a — H0 Gate Blocking（原則 5：生存 > 利潤）
+# Sprint 5a H0 Gate now blocks intents (fail-closed) instead of warn-only.
+# ===========================================================================
+
+class TestH0GateBlocking:
+    """
+    Sprint 5a: H0 Gate is now blocking (fail-closed) for allowed=False results.
+    Sprint 5a：H0 Gate 現已切換為阻擋模式（allowed=False 時拒絕 intent），不再只是警告。
+
+    Verifies:
+    - H0 Gate allowed=False → intent NOT submitted, intents_h0_blocked incremented
+    - H0 Gate allowed=True  → intent submitted normally
+    驗證：
+    - H0 Gate allowed=False → intent 不被提交，intents_h0_blocked 遞增
+    - H0 Gate allowed=True  → intent 正常提交
+    """
+
+    def _make_h0_gate_mock(self, *, allowed: bool) -> MagicMock:
+        """
+        Build an H0Gate mock returning the specified allowed state.
+        構建返回指定 allowed 狀態的 H0Gate mock。
+        """
+        gate = MagicMock()
+        result = MagicMock()
+        result.allowed = allowed
+        result.check_name = "freshness" if not allowed else "all_pass"
+        result.reason = "stale_data" if not allowed else ""
+        result.latency_us = 50
+        gate.check.return_value = result
+        return gate
+
+    def test_h0_gate_blocked_intent_not_submitted(self):
+        """
+        When H0 Gate returns allowed=False, the intent must NOT be submitted to the engine.
+        H0 Gate 返回 allowed=False 時，intent 不得提交到引擎。
+
+        This is the core safety guarantee of Sprint 5a H0 blocking:
+        stale/unhealthy market data should never reach order execution.
+        這是 Sprint 5a H0 阻擋的核心安全保證：
+        過期或不健康的市場數據不得流入訂單執行。
+        """
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        bridge.set_h0_gate(self._make_h0_gate_mock(allowed=False))
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+        bridge._process_pending_intents()
+
+        # Intent must NOT have reached the engine
+        # intent 不得到達引擎
+        assert len(engine.submitted_orders) == 0, (
+            "H0Gate blocked intent should not reach engine"
+        )
+
+    def test_h0_gate_blocked_increments_counter(self):
+        """
+        When H0 Gate returns allowed=False, intents_h0_blocked counter must increment.
+        H0 Gate 返回 allowed=False 時，intents_h0_blocked 計數器必須遞增。
+
+        The counter is the observable evidence that the H0 Gate is actively blocking.
+        計數器是 H0 Gate 正在主動阻擋的可觀察憑據。
+        """
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        bridge.set_h0_gate(self._make_h0_gate_mock(allowed=False))
+
+        stats_before = bridge.get_stats()
+        baseline = stats_before.get("intents_h0_blocked", 0)
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+        bridge._process_pending_intents()
+
+        stats_after = bridge.get_stats()
+        after_count = stats_after.get("intents_h0_blocked", 0)
+        assert after_count == baseline + 1, (
+            f"Expected intents_h0_blocked to increment from {baseline} to {baseline + 1}, "
+            f"got {after_count}"
+        )
+
+    def test_h0_gate_allowed_intent_reaches_engine(self):
+        """
+        When H0 Gate returns allowed=True, the intent proceeds normally through the pipeline.
+        H0 Gate 返回 allowed=True 時，intent 正常流過管線。
+
+        Ensures that valid market conditions allow normal intent processing.
+        確保有效市場條件下 intent 可以正常處理。
+        """
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        bridge.set_h0_gate(self._make_h0_gate_mock(allowed=True))
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+        bridge._process_pending_intents()
+
+        # Intent must have been submitted to the engine
+        # intent 必須被提交到引擎
+        assert len(engine.submitted_orders) == 1, (
+            "H0Gate allowed intent should reach engine"
+        )
+
+    def test_h0_gate_allowed_does_not_increment_blocked_counter(self):
+        """
+        When H0 Gate returns allowed=True, intents_h0_blocked must NOT increment.
+        H0 Gate 返回 allowed=True 時，intents_h0_blocked 不得遞增。
+        """
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
+        bridge.set_h0_gate(self._make_h0_gate_mock(allowed=True))
+
+        stats_before = bridge.get_stats()
+        baseline = stats_before.get("intents_h0_blocked", 0)
+
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+        bridge._process_pending_intents()
+
+        stats_after = bridge.get_stats()
+        after_count = stats_after.get("intents_h0_blocked", 0)
+        assert after_count == baseline, (
+            f"intents_h0_blocked should not change when H0Gate allows, "
+            f"but changed from {baseline} to {after_count}"
+        )
+
+
 # (pytest imported at top of file)
