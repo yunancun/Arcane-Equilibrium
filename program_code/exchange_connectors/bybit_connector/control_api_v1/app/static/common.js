@@ -63,18 +63,22 @@ async function ocApi(path, opts) {
       if (r.status === 401 || r.status === 403) {
         _ocAuthFails++;
         if (_ocAuthFails >= _OC_AUTH_MAX) {
-          ocToast('Authentication failed repeatedly — please re-login / 認證多次失敗，請重新登入', 'error');
+          ocToast('認證多次失敗，請重新登入 / Auth failed, please re-login', 'error');
         }
       }
-      // Try to parse error body so callers can show real error messages
+      // Parse error body and show toast with real error, then return null for backward compat
+      let errMsg = 'HTTP ' + r.status;
       try {
         const errBody = await r.json();
-        console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status, errBody);
-        return { ok: false, _httpStatus: r.status, message: errBody.detail || errBody.message || ('HTTP ' + r.status) };
-      } catch (_) {
-        console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status);
-        return { ok: false, _httpStatus: r.status, message: 'HTTP ' + r.status };
-      }
+        const detail = errBody.detail;
+        if (typeof detail === 'string') errMsg = detail;
+        else if (detail && detail.reason_codes) errMsg = detail.reason_codes.join(', ');
+        else if (detail) errMsg = JSON.stringify(detail);
+        if (errBody.message && typeof errBody.message === 'string') errMsg = errBody.message;
+      } catch (_) { /* no JSON body */ }
+      console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status + ': ' + errMsg);
+      if (method === 'POST') ocToast(errMsg + ' (' + r.status + ')', 'error');
+      return null;
     }
     _ocAuthFails = 0;
     return await r.json();
