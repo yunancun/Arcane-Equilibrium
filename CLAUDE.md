@@ -1,7 +1,7 @@
 # OpenClaw / Bybit AI Agent 交易系统
 # CLAUDE.md — 主项目日志（Claude Code 项目指令文件）
 # 备注：本文件即"主日志"，GitHub 根目录 README.md 为"Git 日志"
-# 最后更新：2026-03-31（Wave 6 Sprint 0+1a+1b 全部完成 · 2624 tests · demo_only 模式）
+# 最后更新：2026-03-31（Wave 6 Sprint 2 全部完成 · 2631 tests · demo_only 模式）
 
 ---
 
@@ -757,8 +757,9 @@ Wave 5 Sprint 5b：✅ H4 validate_output + H5 record_ollama_call + ScoutWorker 
 Wave 6 Sprint 0：✅ TD-1 pipeline_bridge acquire_lease（原則 3 缺口）（commit aafb18b）
 Wave 6 Sprint 1a：✅ FA-7 _check_stops 學習管線注入（原則 12）（commit 8f123a7）
 Wave 6 Sprint 1b：✅ 1B-1 Cooldown smoke test + 1B-2 freshness API + TD-3/TD-4（commit 8f123a7）
+Wave 6 Sprint 2：✅ P2-6/7/8 risk bounds + P2-12/15 pipeline edge + TD-2 collect deprecated + FA-8 GUI null fix（commit 43dd2f5）
 
-下一步：Sprint 2（P2 批次）— P2-6/7/8 風控覆蓋補強 + P2-12/15 pipeline_bridge 邊界
+下一步：Phase 1 Batch 1A — H0 Gate 確定性門控 + 策略 alpha 驗證
 
 完整派发计划：docs/audit/March31/PA_review_2026-03-31.md（Part 2 任务派发）
 ```
@@ -804,4 +805,4 @@ Wave 6 Sprint 1b：✅ 1B-1 Cooldown smoke test + 1B-2 freshness API + TD-3/TD-4
 
 ## 十四、一句话状态
 
-> 截至 2026-03-31 Wave 6 Sprint 0+1a+1b 全部完成：TD-1 pipeline_bridge acquire_lease 補入（原則 3 架構閉合）；FA-7 _check_stops 學習管線注入（原則 12 接通）；Batch 1B（Cooldown smoke test + freshness API + TD-3/TD-4 清理）；2624 tests 通過；sub-agent 越界修改（WARMUP_SECONDS 等）已識別並還原；下一步 Sprint 2 P2 批次；系統 demo_only 模式；live_execution_allowed 仍為 false。
+> 截至 2026-03-31 Wave 6 Sprint 2 全部完成：P2-6/7/8 RiskManager qty/price=0 防禦 +5 測試；P2-12/15 pipeline_bridge 雙源截斷 + exception fallback +2 測試；TD-2 StrategistAgent collect 路徑廢棄（MessageBus 為唯一路徑）；FA-8 GUI cost_edge_ratio null 安全修復；§13.5 workspace 協議精簡化（移除強制啟動/完成序列）；2631 tests 通過；系統 demo_only 模式；live_execution_allowed 仍為 false。

@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-03-31（Wave 0-2 完成後 · E5/E3/PM/PA/FA 審計後）
+# 最後更新：2026-03-31（Wave 6 Sprint 2 完成 · 2631 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-2610 passed / 18 pre-existing failed / 23 warnings（Wave 5 Sprint 0+5a+5b 全部完成後）
+2631 passed / 17 pre-existing failed / 25 warnings（Wave 6 Sprint 2 完成後）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/
 命令：python3 -m pytest tests/ -q --tb=no
 ```
@@ -686,26 +686,30 @@ PM 確認 + commit
 
 > Sprint 1a+1b 完成後啟動。以下為初步清單，正式啟動前 PA 確認文件/行號。
 
-### [ ] P2-6/7/8：RiskManager 邊界值與極端市況測試（E1+E4，~6h）
+### [x] P2-6/7/8：RiskManager 邊界值與極端市況測試（E1+E4，~6h）
 - **文件**：`app/risk_manager.py`
 - **內容**：邊界值（position limit 剛好觸發）+ 極端市況（price=0, qty=0, NaN）+ 連虧止損重置
 - **指派**：E1-Alpha + E4
+- ✅ 完成：commit 43dd2f5（2026-03-31）
 
-### [ ] P2-12/15：pipeline_bridge 邊界用例（E1+E4，~4h）
+### [x] P2-12/15：pipeline_bridge 邊界用例（E1+E4，~4h）
 - **文件**：`app/pipeline_bridge.py`
 - **內容**：on_tick 邊界（price=None, ts 超前）+ pending_intents 清理邏輯（積壓 > max_pending_intents）
 - **指派**：E1-Beta + E4
+- ✅ 完成：commit 43dd2f5（2026-03-31）
 
-### [ ] TD-2：廢棄 StrategistAgent collect 路徑（E1+E2+E4，~3h）
+### [x] TD-2：廢棄 StrategistAgent collect 路徑（E1+E2+E4，~3h）
 - **文件**：`app/pipeline_bridge.py` + `app/strategist_agent.py`
 - **內容**：所有 AI intent 強制走 MessageBus → ExecutorAgent（PA 建議，消除語義模糊）
 - **前置**：Sprint 0 TD-1 完成後（同文件）
 - **指派**：E1-Alpha
+- ✅ 完成：commit 43dd2f5（2026-03-31）
 
-### [ ] FA-8：GUI cost_edge_ratio None 處理（E1a，~1h）
+### [x] FA-8：GUI cost_edge_ratio None 處理（E1a，~1h）
 - **文件**：`static/tabs/tab-ai.html`（或對應 JS 文件）
 - **內容**：`get_cost_edge_ratio()` 返回 None 時顯示 "N/A（數據不足）" 而非崩潰
 - **指派**：E1a
+- ✅ 完成：commit 43dd2f5（2026-03-31）
 
 ### Sprint 2 工作鏈
 ```

@@ -31,12 +31,12 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-03-31 Wave 6 Sprint 0+1a+1b 全部完成)
+## 当前状态 (2026-03-31 Wave 6 Sprint 2 全部完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         2,624 passed / 17 pre-existing failed（Wave 6 Sprint 0+1a+1b 完成後，+14 新测试）
+测试:         2,631 passed / 17 pre-existing failed（Wave 6 Sprint 2 完成後，+7 新测试）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
 信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
@@ -64,7 +64,7 @@ H0 Gate:      ✅ Day 1+2+3 完成（5 check + H0HealthWorker + pipeline 集成 
 Wave 3:       ✅ 3a/3b/3c 全部完成
 Wave 4:       ✅ Sprint 4a-4e 全部完成（P2-NEW-1~9 + P3-TECH-1~3 + FA-2/3/4）
 Wave 5:       ✅ Sprint 0+5a+5b 全部完成（G-05/G-01 BLOCKER修復 + H1-H5全接通 + ScoutWorker + P14集成測試）
-Wave 6:       ✅ Sprint 0+1a+1b 全部完成（TD-1 原則3閉合 + FA-7 原則12接通 + Batch 1B 安全閘補全）
+Wave 6:       ✅ Sprint 0+1a+1b+2 全部完成（TD-1/TD-2原則3閉合 + FA-7原則12接通 + P2-6/7/8/12/15邊界測試 + FA-8 GUI修復）
 安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（Wave 4 修復後，已知安全问题清零）
 对账边界:     ★ reconciliation_engine NaN/inf/负数qty边界值防护已修复（FA-2，3 BUG + 11 测试）
 ```
