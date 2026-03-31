@@ -50,8 +50,8 @@
     <h3>&#x1F4CA; 持仓 / Positions</h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th></tr></thead>
-        <tbody id="demo-positions"><tr class="empty-row"><td colspan="8">加载中...</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -61,8 +61,8 @@
     <h3>&#x1F4DD; 活跃订单 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
-        <tbody id="demo-orders"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
+        <tbody id="demo-orders"><tr class="empty-row"><td colspan="8">暂无订单</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -79,8 +79,8 @@
     <div class="oc-collapse-body">
       <div class="oc-table-wrap">
         <table class="oc-table">
-          <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
-          <tbody id="demo-fills"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
+          <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
+          <tbody id="demo-fills"><tr class="empty-row"><td colspan="7">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -267,15 +267,19 @@ async function loadPositions() {
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
-    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="8">暂无持仓</td></tr>');
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="9">暂无持仓</td></tr>');
     return;
   }
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
     const sideLabel = p.side === 'Buy' ? '做多' : '做空';
+    // Bybit API: category from symbol suffix heuristic (USDT=linear, USD=inverse, else spot)
+    const sym = p.symbol || '';
+    const cat = p.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
     html += '<td>' + ocNum(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0), 2) + '</td>';
@@ -310,7 +314,7 @@ async function loadDemoOrders() {
   if (countsEl) countsEl.textContent = '（普通 ' + regCount + ' / 条件止损 ' + condCount + '）';
 
   if (!orders.length) {
-    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="7">暂无订单</td></tr>');
+    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="8">暂无订单</td></tr>');
     return;
   }
   let html = '';
@@ -323,8 +327,11 @@ async function loadDemoOrders() {
     const isConditional = o._orderFilter === 'StopOrder' || status === 'Untriggered';
     const typeLabel = isConditional ? '条件止损' : (typeMap[orderType] || ocEsc(orderType));
     const triggerPrice = parseFloat(o.triggerPrice || 0);
+    const sym = o.symbol || '';
+    const cat = o.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + typeLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(o.qty || o.origQty || 0), 4) + '</td>';
@@ -339,7 +346,7 @@ async function loadDemoOrders() {
 async function loadDemoFills() {
   const d = await ocApi('/api/v1/strategy/demo/fills');
   if (!d || !d.data) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="7">暂无成交</td></tr>');
     return;
   }
   let fills = [];
@@ -350,7 +357,7 @@ async function loadDemoFills() {
   }
   _demoFillsCache = fills;
   if (!fills.length) {
-    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="7">暂无成交</td></tr>');
     return;
   }
   let html = '';
@@ -360,9 +367,12 @@ async function loadDemoFills() {
     const price = parseFloat(f.execPrice || f.price || 0);
     const qty = parseFloat(f.execQty || f.qty || 0);
     const fee = parseFloat(f.execFee || f.fee || 0);
+    const sym = f.symbol || '';
+    const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
     html += '<tr>';
     html += '<td>' + (ts ? ocTimeShort(parseInt(ts) || ts) : '--') + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
     html += '<td>' + ocNum(price, 2) + '</td>';

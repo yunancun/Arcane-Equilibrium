@@ -71,8 +71,8 @@
   <h3>&#x1F4CA; 持仓 / Positions</h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>交易对</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th></tr></thead>
-      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="7">暂无持仓</td></tr></tbody>
+      <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th></tr></thead>
+      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="8">暂无持仓</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -82,8 +82,8 @@
   <h3>&#x1F4DD; 活跃订单 / Active Orders</h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>交易对</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody id="orders-tbody"><tr class="empty-row"><td colspan="7">暂无订单</td></tr></tbody>
+      <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="orders-tbody"><tr class="empty-row"><td colspan="8">暂无订单</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -100,8 +100,8 @@
   <div class="oc-collapse-body">
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>时间</th><th>交易对</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
-        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="6">加载中...</td></tr></tbody>
+        <thead><tr><th>时间</th><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>价格</th><th>手续费</th></tr></thead>
+        <tbody id="fills-tbody"><tr class="empty-row"><td colspan="7">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -259,7 +259,7 @@ async function loadPositions() {
   ocSetText('p-bal-margin', totalMargin > 0 ? ocBalance(totalMargin, 2) : '$0.00');
 
   if (!positions.length) {
-    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="7">暂无持仓</td></tr>');
+    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="8">暂无持仓</td></tr>');
     return;
   }
   let html = '';
@@ -275,8 +275,10 @@ async function loadPositions() {
     }
     const decimals = entryPrice < 1 ? 4 : 2;
     const sideLabel = p.side === 'Buy' ? '做多' : '做空';
+    const cat = p.category || 'linear';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
     html += '<td>' + ocNum(entryPrice, decimals) + '</td>';
@@ -294,7 +296,7 @@ async function loadOrders() {
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
-    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="7">暂无活跃订单</td></tr>');
+    ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8">暂无活跃订单</td></tr>');
     return;
   }
   let html = '';
@@ -302,8 +304,10 @@ async function loadOrders() {
   const stateLabels = { paper_order_working: '挂单中', paper_order_partially_filled: '部分成交' };
   active.forEach(o => {
     const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
+    const cat = o.category || 'linear';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + (typeLabels[o.order_type] || ocEsc(o.order_type)) + '</td>';
     html += '<td>' + ocNum(o.qty, 4) + '</td>';
@@ -348,15 +352,17 @@ async function loadFills() {
   if (!d || !d.data) return;
   const fills = d.data.fills || d.data || [];
   if (!fills.length) {
-    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="7">暂无成交</td></tr>');
     return;
   }
   let html = '';
   fills.slice(0, 50).forEach(f => {
     const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
+    const cat = f.category || 'linear';
     html += '<tr>';
     html += '<td>' + ocTimeShort(f.ts_ms || f.filled_at || f.timestamp) + '</td>';
     html += '<td>' + ocEsc(f.symbol) + '</td>';
+    html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(f.qty, 4) + '</td>';
     html += '<td>' + ocNum(f.price, 2) + '</td>';

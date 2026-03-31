@@ -289,6 +289,23 @@ function ocSanitizeClass(s) {
   return String(s).replace(/[^a-zA-Z0-9\-_]/g, '');
 }
 
+// ─── Product Category Tag / 產品品類標籤 ─────────────────────────────────────
+// Renders a colored chip showing the Bybit product category for positions/orders/fills.
+// 在持倉/訂單/成交旁顯示帶顏色的品類標籤，便於區分不同產品類型。
+const _OC_CAT_CONFIG = {
+  linear:  { label: 'U本位',   color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+  spot:    { label: '现货',     color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
+  inverse: { label: '币本位',   color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  option:  { label: '期权',     color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
+};
+function ocCategoryTag(category) {
+  const cat = (category || 'linear').toLowerCase();
+  const cfg = _OC_CAT_CONFIG[cat] || { label: cat, color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
+  return '<span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;'
+    + 'color:' + cfg.color + ';background:' + cfg.bg + ';border:1px solid ' + cfg.color + ';'
+    + 'margin-left:4px;vertical-align:middle;line-height:14px">' + ocEsc(cfg.label) + '</span>';
+}
+
 // ─── Auto Refresh ────────────────────────────────────────────────────────────
 let _ocRefreshTimer = null;
 let _ocRefreshFn = null;
