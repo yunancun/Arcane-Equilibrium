@@ -126,11 +126,11 @@ function ocCurrCode() {
 }
 
 function ocCurrSymbol() {
-  // Display symbol for current currency: 'USDT ', '$', or '€'
-  // 当前货币显示符号
+  // Display symbol for current currency: '₮', '$', or '€'
+  // 当前货币显示符号（₮ = USDT/Tether）
   const c = ocCurrCode();
   if (c === 'EUR')  return '€';
-  if (c === 'USDT') return 'USDT ';
+  if (c === 'USDT') return '₮';
   return '$';  // USD
 }
 
@@ -507,6 +507,9 @@ function ocInjectBaseCSS() {
       background: rgba(56,139,253,0.12); border: 1px solid rgba(56,139,253,0.3);
       color: var(--blue); user-select: none; transition: background 0.15s; }
     .oc-curr-badge:hover { background: rgba(56,139,253,0.25); }
+
+    /* Tooltip on metric labels — shows on hover */
+    .oc-metric-label[title] { cursor: help; border-bottom: 1px dotted var(--text-dim); display: inline-block; }
   `;
   document.head.appendChild(style);
 }

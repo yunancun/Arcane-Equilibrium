@@ -61,10 +61,8 @@
     <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="p-net">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="p-realized">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="p-unrealized">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">总手续费 / Total Fees</div><div class="oc-metric-val" id="p-fees">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">AI 成本 / AI Cost</div><div class="oc-metric-val blue" id="p-aicost">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades out of total. Above 50% is generally considered good.">胜率 / Win Rate</div><div class="oc-metric-val" id="p-winrate">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
   </div>
 </div>
 
@@ -91,12 +89,10 @@
 </div>
 
 <!-- Performance Metrics / 性能指标 -->
-<details class="oc-collapse">
-  <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
-  <div class="oc-collapse-body">
-    <div class="oc-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
-  </div>
-</details>
+<div class="oc-card">
+  <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
+  <div class="oc-metrics" id="perf-metrics"><div class="oc-loading">加载中...</div></div>
+</div>
 
 <!-- Fill History / 成交历史 -->
 <details class="oc-collapse">
@@ -155,6 +151,7 @@ $('explain-order').innerHTML = ocExplain(
 // ─── Session Actions ──────────────────────────────────────────
 let stateRevision = 0;
 let _cachedPositions = []; // Cache for margin calculation
+let _cachedPnlAiCost = null; // Cache AI cost from session PnL for metrics
 
 async function sessionAction(action) {
   let body = {};
@@ -218,6 +215,7 @@ async function loadSession() {
 
   // PnL
   const pnl = d.data.pnl;
+  _cachedPnlAiCost = pnl.total_ai_cost || 0;
   const net = pnl.net_paper_pnl || 0;
   const elNet = $('p-net');
   elNet.textContent = ocMoney(net);
@@ -232,9 +230,6 @@ async function loadSession() {
   const elUnrealized = $('p-unrealized');
   elUnrealized.textContent = ocMoney(unrealized);
   elUnrealized.className = 'oc-metric-val ' + ocPnlClass(unrealized);
-
-  ocSetText('p-fees', ocBalance(pnl.total_fees_paid || 0, 4));
-  ocSetText('p-aicost', ocBalance(pnl.total_ai_cost || 0, 4));
 
   // Available balance = initial + realized + unrealized - margin (estimated)
   if (!$('p-bal-available').dataset.fromMetrics) {
@@ -381,23 +376,24 @@ async function loadMetrics() {
 
   let html = '';
   const items = [
-    ['总成交笔数', tm.total_fills || m.total_fills],
-    ['完整交易次数', tm.total_round_trips || m.total_trades],
-    ['胜率', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
-    ['盈亏比', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
-    ['最大回撤', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
-    ['峰值余额', dm.peak_balance != null ? ocBalance(dm.peak_balance, 2) : null],
-    ['夏普比率', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
-    ['平均持仓时间', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' 分钟' : null],
-    ['最大单笔盈利', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
-    ['最大单笔亏损', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
-    ['平均亏损', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
-    ['总手续费', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
+    ['总成交笔数 / Total Fills', '', tm.total_fills || m.total_fills],
+    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', tm.total_round_trips || m.total_trades],
+    ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
+    ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损；配合胜率使用更有意义。/ Ratio of avg win to avg loss. >1 means wins are larger than losses; use with win rate.', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
+    ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
+    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。数值越高，每单位风险获得的回报越多。/ Risk-adjusted return. >1 good, >2 excellent, <0 means underperforming risk-free rate.', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
+    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。过短可能过度交易，过长可能错过止损时机。/ Average duration from open to close. Too short may indicate overtrading.', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
+    ['单笔最高盈利 / Largest Win', '', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
+    ['单笔最高亏损 / Largest Loss', '', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
+    ['平均亏损 / Avg Loss', '', tm.avg_loss != null ? ocMoney(-Math.abs(tm.avg_loss)) : null],
+    ['总手续费 / Total Fees', '所有交易产生的手续费总和。/ Sum of all trading fees incurred.', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
+    ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。系统会跟踪每次 AI 咨询的成本。/ Cumulative cost of AI inference calls.', ocBalance(m.total_ai_cost || _cachedPnlAiCost || 0, 4)],
   ];
-  items.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+  items.forEach(([label, tip, val]) => {
+    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
+    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
   });
-  ocSetHtml('perf-metrics', '<div class="oc-metrics">' + html + '</div>');
+  ocSetHtml('perf-metrics', html);
 
   // Update PnL card fields from metrics (authoritative source)
   ocSetText('p-winrate', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : '--');

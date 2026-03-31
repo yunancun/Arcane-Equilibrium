@@ -40,10 +40,8 @@
       <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="d-net">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="d-realized">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">总手续费 / Total Fees</div><div class="oc-metric-val" id="d-fees">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">AI 成本 / AI Cost</div><div class="oc-metric-val blue" id="d-aicost">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">胜率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.">胜率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
     </div>
   </div>
 
@@ -70,12 +68,10 @@
   </div>
 
   <!-- Performance Metrics / 性能指标 -->
-  <details class="oc-collapse">
-    <summary>&#x1F4CB; 性能指标 / Performance Metrics</summary>
-    <div class="oc-collapse-body">
-      <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
-    </div>
-  </details>
+  <div class="oc-card">
+    <h3>&#x1F4CB; 性能指标 / Performance Metrics</h3>
+    <div class="oc-metrics" id="demo-perf-metrics"><div class="oc-loading">加载中...</div></div>
+  </div>
 
   <!-- Fill History / 成交历史 -->
   <details class="oc-collapse">
@@ -142,6 +138,7 @@ $('explain-comparison').innerHTML = ocExplain(
 // Initial equity stored to approximate "initial balance"
 let _demoInitialEquity = null;
 let _demoPeakEquity = null;
+let _demoFillsCache = []; // Cache fills for metrics calculation
 const STORAGE_KEY = 'oc_demo_initial_equity';
 const PEAK_KEY = 'oc_demo_peak_equity';
 
@@ -165,8 +162,8 @@ async function loadDemoStatus() {
     renderBalance(balD.data);
     loadPositions();
     loadDemoOrders();
+    await loadDemoFills();
     loadDemoMetrics(balD.data);
-    loadDemoFills();
     loadComparison();
     return;
   }
@@ -233,9 +230,7 @@ function renderBalance(raw) {
   elR.textContent = ocMoney(realized);
   elR.className = 'oc-metric-val ' + ocPnlClass(realized);
 
-  // Fees & AI cost not available from Bybit API
-  ocSetText('d-fees', 'N/A');
-  ocSetText('d-aicost', 'N/A');
+  // Win rate — not directly available from Bybit balance API, set from fills if available
   ocSetText('d-winrate', 'N/A');
 
   // Max drawdown: from peak equity
@@ -328,6 +323,7 @@ async function loadDemoFills() {
   } else {
     fills = d.data.fills || d.data || [];
   }
+  _demoFillsCache = fills;
   if (!fills.length) {
     ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="6">暂无成交</td></tr>');
     return;
@@ -400,27 +396,31 @@ function loadDemoMetrics(raw) {
   if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>'); return; }
 
   const equity = parseFloat(b.totalEquity || 0);
-  const available = parseFloat(b.totalAvailableBalance || b.availableBalance || 0);
-  const marginUsed = parseFloat(b.totalInitialMargin || 0);
-  const unrealized = parseFloat(b.totalPerpUPL || 0);
-  const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
-  const imRate = parseFloat(b.accountIMRate || 0);
-  const mmRate = parseFloat(b.accountMMRate || 0);
+  const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
+  const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
+  const totalFills = _demoFillsCache.length;
+  // Estimate cumulative fees from cached fills
+  const totalFees = _demoFillsCache.reduce((s, f) => s + Math.abs(parseFloat(f.execFee || f.fee || 0)), 0);
 
   const items = [
-    ['总权益', ocBalance(equity, 2)],
-    ['可用余额', ocBalance(available, 2)],
-    ['已用保证金', ocBalance(marginUsed, 4)],
-    ['初始保证金率', (imRate * 100).toFixed(2) + '%'],
-    ['维持保证金率', (mmRate * 100).toFixed(2) + '%'],
-    ['未实现盈亏', ocMoney(unrealized)],
-    ['已实现盈亏', ocMoney(realized)],
-    ['账户类型', b.accountType || 'UNIFIED'],
+    ['总成交笔数 / Total Fills', '', totalFills > 0 ? totalFills : 'N/A'],
+    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', 'N/A'],
+    ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', 'N/A'],
+    ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损。/ Ratio of avg win to avg loss. >1 means wins outsize losses.', 'N/A'],
+    ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', ddPct],
+    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。/ Risk-adjusted return. >1 good, >2 excellent, <0 underperforming risk-free rate.', 'N/A'],
+    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。/ Average duration from open to close.', 'N/A'],
+    ['单笔最高盈利 / Largest Win', '', 'N/A'],
+    ['单笔最高亏损 / Largest Loss', '', 'N/A'],
+    ['平均亏损 / Avg Loss', '', 'N/A'],
+    ['总手续费 / Total Fees', '所有交易产生的手续费总和。/ Sum of all trading fees incurred.', totalFees > 0 ? ocBalance(totalFees, 4) : 'N/A'],
+    ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。/ Cumulative cost of AI inference calls.', 'N/A'],
   ];
 
   let html = '';
-  items.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + val + '</div></div>';
+  items.forEach(([label, tip, val]) => {
+    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
+    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
   });
   ocSetHtml('demo-perf-metrics', html);
 }
