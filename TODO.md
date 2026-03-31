@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Wave 7 Demo 同步修復 + Spot 品類啟用進行中）
+# 最後更新：2026-04-01（Phase 2 Batch 2C + Wave 7 Demo 同步 · 3103 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-2700 passed / 19 pre-existing failed（Wave 6 Sprint 2 + Cleanup Sprint + Phase 2 Batch 2A/2B 完成後）
+3103 passed / 19 pre-existing failed（Phase 2 Batch 2C + Wave 7 完成後）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/ program_code/local_model_tools/ -q --tb=no
 ```
@@ -894,6 +894,27 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 
 ---
 
+## ██ Phase 2 Batch 2C（已完成 · 2026-04-01）
+
+### [x] 2C-1：_register_pattern_claims() 接通雙路徑
+- **修復**：_ai_pattern_analysis() + _statistical_pattern_analysis() 均在 bus.send() 前調用
+- **修復**：_extract_strategy_from_pattern() 確保 applies_to_strategy 永不為 "all"
+- **修復**：補入 losing_patterns 循環（confidence=0.4，"losing: " 前綴）
+- ✅ 完成：commit 5794db1（2026-04-01）
+
+### [x] 2C-2：BacktestEngine API 路由
+- **新建**：backtest_routes.py（POST /api/v1/backtest/run + GET /api/v1/backtest/status）
+- **特性**：Operator 認證 + asyncio.to_thread + sharpe>1.0 自動注入 TruthSourceRegistry
+- **隔離**：原則 7，不導入任何 live 模組
+- ✅ 完成：commit 5794db1（2026-04-01）
+
+### [x] 2C-3：StrategistAgent 決策路徑使用 _strategy_preference_weights
+- **修復**：adjusted_confidence = min(1.0, evaluation.confidence * weight)
+- **可觀察**：metadata 新增 raw_confidence + strategy_weight 供審計追溯
+- ✅ 完成：commit 5794db1（2026-04-01）
+
+---
+
 ## ██ 已知待辦（已文件化，非緊急）
 
 ### MessageBus 架構問題（ISSUE-1/ISSUE-2）
@@ -902,11 +923,6 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 - **建議**：換用 `collections.deque(maxlen=N)` 或獨立分發線程
 - **優先級**：P3（非緊急，測試已文件化）
 
-### BacktestEngine API 路由（可選）
-- `POST /api/v1/backtest/run`、`GET /api/v1/backtest/status`
-- BacktestEngine.get_status() 已就緒，等待 E1 接線
-- **優先級**：P3（Phase 3 前完成即可）
-
-### AnalystAgent `_register_pattern_claims` 完整集成
-- 目前只從 `winning_patterns` 注入，未接 PerceptionPlane register_data()（P1-10 修復）
-- **優先級**：P2（Phase 2 Batch 2C 候選）
+### TruthSourceRegistry 持久化（跨 session 清零問題）
+- 目前僅記憶體，重啟清零
+- **優先級**：Phase 3 Batch 3A 候選
