@@ -118,8 +118,8 @@
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331h"></iframe>
-  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331h"></iframe>
+  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331i"></iframe>
+  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260331i"></iframe>
 </div>
 
 <!-- ── Start Confirmation Dialog ────────────────────────────────── -->
@@ -183,17 +183,20 @@ function unifiedStart() {
 async function doStart(fresh) {
   closeDialog('dlg-start');
 
-  // Always sync initial balance from Bybit Demo equity
-  // 始终从 Bybit Demo 余额同步初始资金
+  // Always sync initial balance from Bybit Demo wallet balance (stable, excludes unrealized PnL)
+  // 始终从 Bybit Demo 钱包余额同步（稳定值，不含浮动盈亏）
   let initialBalance = 100000;
   try {
     const balD = await ocApi('/api/v1/strategy/demo/balance');
     if (balD && balD.data && balD.data.retCode === 0) {
       let b = balD.data;
       if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
-      const equity = parseFloat(b.totalEquity || 0);
-      if (equity > 0) {
-        initialBalance = equity;
+      // Prefer walletBalance (stable) over totalEquity (fluctuates with unrealized PnL)
+      // 优先使用 walletBalance（稳定）而非 totalEquity（随浮动盈亏波动）
+      const wallet = parseFloat(b.totalWalletBalance || b.walletBalance || 0);
+      const bal = wallet > 0 ? wallet : parseFloat(b.totalEquity || 0);
+      if (bal > 0) {
+        initialBalance = bal;
         ocToast('Paper 初始余额同步 Demo: ₮' + initialBalance.toFixed(2), 'success');
       }
     }
