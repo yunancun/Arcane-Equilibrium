@@ -769,14 +769,19 @@ def _compile_global_stage_label(state: dict[str, Any]) -> str:
 
 
 def _compile_global_mode_state(state: dict[str, Any]) -> str:
+    # Derive from control switch (user intent) rather than fact (static init value).
+    # The fact is initialized as "design_only" and never updated by config-change,
+    # while the control switch reflects the operator's actual mode selection.
+    # 从控制开关（用户意图）派生，而非从 fact（静态初始值）读取。
+    control_mode = state["global_runtime"]["controls"]["global_execution_mode_switch"]
     mapping = {
+        "disabled": "design_only",
         "observe_only": "observe_only",
         "shadow_only": "shadow_only",
-        "design_only": "design_only",
         "demo_reserved": "demo_reserved",
         "live_reserved": "live_reserved",
     }
-    return mapping.get(state["global_runtime"]["facts"]["system_mode_fact"], "design_only")
+    return mapping.get(control_mode, "design_only")
 
 
 def _compile_effective_risk_envelope_state(state: dict[str, Any]) -> EffectiveRiskEnvelopeState:
