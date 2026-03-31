@@ -373,11 +373,14 @@ Phase 4（5+21天）：
 
 ### ██ Sprint 5a：H1-H5 核心接通（Sprint 0 E2+E4 通過後啟動，~15h 含 E2+E4）
 
-### [ ] 5a-1：Scout→Strategist 情報鏈路追蹤確認
-- **文件**：`app/pipeline_bridge.py:903` 附近 `produce_intel()` 調用
-- **問題**：確認 `produce_intel()` 調用時 relevance_score 是否達到 threshold，intel 是否真實到達 StrategistAgent（`stats["intents_received"]` 需可觀察）
-- **修復**：追蹤調用鏈；若 threshold 過高則調整；補充 E4 觀察點
-- **指派**：E1-Alpha（1.5h）
+### [ ] 5a-1：Scout→Strategist 情報鏈路端到端驗證
+- **代碼已確認**：`produce_intel()` 已有 `bus.send(STRATEGIST, INTEL_OBJECT)` 實現（multi_agent_framework.py:428），bus 已注入，Strategist 已訂閱。此任務是**驗證**而非**實現**。
+- **驗證清單**：
+  1. pipeline_bridge.py:903 的 produce_intel() 調用確認 relevance_score ≥ 0.3（threshold）
+  2. Strategist on_message() INTEL_OBJECT 收到後 `stats["intel_received"]` 遞增可觀察
+  3. 端到端：scout_routes 手動觸發 → bus.send → Strategist._handle_intel() 確認執行
+- **如發現 relevance_score 低於 threshold**：調整 threshold 或提高調用端 score
+- **指派**：E1-Alpha（1h，純驗證 + E4 觀察點補充）
 - **前置**：Sprint 0 完成
 
 ### [ ] 5a-2：H0 Gate warn-only → blocking 正式啟用

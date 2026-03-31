@@ -491,10 +491,19 @@ try:
         from .executor_agent import ExecutorAgent, ExecutorConfig
         from .multi_agent_framework import MessageType as _MT11, AgentRole as _AR11
 
+        # Import GovernanceHub for Decision Lease acquisition (principle 3)
+        # 導入 GovernanceHub 用於 Decision Lease 申請（根原則 3）
+        _GOV_HUB_FOR_EXECUTOR: Any = None
+        try:
+            from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_EXECUTOR
+        except ImportError:
+            pass
+
         EXECUTOR_AGENT = ExecutorAgent(
             config=ExecutorConfig(),
             message_bus=MESSAGE_BUS,
             paper_engine=PAPER_ENGINE,
+            governance_hub=_GOV_HUB_FOR_EXECUTOR,
         )
         EXECUTOR_AGENT.start()
 

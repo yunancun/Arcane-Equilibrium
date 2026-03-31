@@ -534,6 +534,162 @@ class TestDualStopLossDefense(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Test Group G-05: ExecutorAgent Decision Lease (Principle 3)
+# G-05 測試組：ExecutorAgent Decision Lease（根原則 3）
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestExecutorAgentDecisionLease(unittest.TestCase):
+    """
+    Tests 26-31: Decision Lease integration — principle 3 enforcement.
+    G-05 Decision Lease 集成測試 — 根原則 3（AI 輸出 ≠ 即時命令）落實驗證。
+
+    Three scenarios must hold:
+    1. governance_hub=None → fail-open (backward compat), execution proceeds.
+    2. acquire_lease() returns None → fail-closed, execution rejected.
+    3. acquire_lease() returns valid lease_id → execution proceeds normally.
+    三個場景必須成立：
+    1. governance_hub=None → 允許通過（向後兼容），執行繼續。
+    2. acquire_lease() 返回 None → 失敗默認收縮，拒絕執行。
+    3. acquire_lease() 返回有效 lease_id → 執行正常進行。
+    """
+
+    def _make_hub(self, *, lease_result: object = "lease_abc123"):
+        """
+        Create a mock GovernanceHub with configurable acquire_lease return value.
+        創建 mock GovernanceHub，可配置 acquire_lease 返回值。
+        """
+        hub = MagicMock()
+        hub.acquire_lease.return_value = lease_result
+        return hub
+
+    def test_26_no_governance_hub_allows_execution(self):
+        """governance_hub=None → fail-open, submit_order() is called normally."""
+        # governance_hub=None 時允許通過，submit_order() 正常調用
+        engine = FakePaperEngine(fill_price=67000.0)
+        agent = ExecutorAgent(paper_engine=engine)
+        agent.start()
+        agent.update_market_prices({"BTCUSDT": 67000.0})
+
+        report = agent.execute_order(
+            intent_id="lease_test_no_hub",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(len(engine.calls), 1)
+
+    def test_27_acquire_lease_returns_none_rejects_execution(self):
+        """acquire_lease() returns None → fail-closed, execution is rejected."""
+        # acquire_lease() 返回 None → 失敗默認收縮，拒絕執行
+        engine = FakePaperEngine(fill_price=67000.0)
+        hub = self._make_hub(lease_result=None)
+
+        agent = ExecutorAgent(paper_engine=engine, governance_hub=hub)
+        agent.start()
+        agent.update_market_prices({"BTCUSDT": 67000.0})
+
+        report = agent.execute_order(
+            intent_id="lease_test_denied",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+        )
+
+        self.assertFalse(report.success)
+        self.assertEqual(report.error, "governance_lease_acquisition_failed")
+        # submit_order() must NOT have been called — no execution without lease
+        # 沒有 lease 就不能下單，submit_order() 不應被調用
+        self.assertEqual(len(engine.calls), 0)
+
+    def test_28_acquire_lease_success_allows_execution(self):
+        """acquire_lease() returns valid lease_id → execution proceeds normally."""
+        # acquire_lease() 返回有效 lease_id → 執行正常進行
+        engine = FakePaperEngine(fill_price=67000.0)
+        hub = self._make_hub(lease_result="lease_valid_001")
+
+        agent = ExecutorAgent(paper_engine=engine, governance_hub=hub)
+        agent.start()
+        agent.update_market_prices({"BTCUSDT": 67000.0})
+
+        report = agent.execute_order(
+            intent_id="lease_test_ok",
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+        )
+
+        self.assertTrue(report.success)
+        self.assertEqual(len(engine.calls), 1)
+        # Verify acquire_lease was called with correct arguments
+        # 驗證 acquire_lease 以正確參數被調用
+        hub.acquire_lease.assert_called_once_with(
+            intent_id="lease_test_ok",
+            scope="TRADE_ENTRY",
+            ttl_seconds=30.0,
+        )
+
+    def test_29_lease_rejection_stats_updated(self):
+        """Stats correctly reflect lease-rejected executions."""
+        # 統計正確反映被 lease 拒絕的執行
+        engine = FakePaperEngine(fill_price=67000.0)
+        hub = self._make_hub(lease_result=None)
+
+        agent = ExecutorAgent(paper_engine=engine, governance_hub=hub)
+        agent.start()
+
+        agent.execute_order(intent_id="r1", symbol="BTCUSDT", side="Buy", qty=0.001)
+        agent.execute_order(intent_id="r2", symbol="BTCUSDT", side="Sell", qty=0.001)
+
+        stats = agent.get_stats()
+        self.assertEqual(stats["executions_attempted"], 2)
+        self.assertEqual(stats["executions_failed"], 2)
+        self.assertEqual(stats["executions_success"], 0)
+        self.assertEqual(stats["errors"], 2)
+
+    def test_30_lease_rejection_produces_report(self):
+        """Lease rejection produces a stored ExecutionReport with correct fields."""
+        # lease 拒絕會產生一份包含正確欄位的 ExecutionReport 並存檔
+        engine = FakePaperEngine(fill_price=67000.0)
+        hub = self._make_hub(lease_result=None)
+
+        agent = ExecutorAgent(paper_engine=engine, governance_hub=hub)
+        agent.start()
+
+        report = agent.execute_order(
+            intent_id="rpt_test",
+            symbol="ETHUSDT",
+            side="Sell",
+            qty=0.01,
+        )
+
+        self.assertFalse(report.success)
+        self.assertEqual(report.intent_id, "rpt_test")
+        self.assertEqual(report.symbol, "ETHUSDT")
+        self.assertEqual(report.side, "Sell")
+        self.assertEqual(report.error, "governance_lease_acquisition_failed")
+
+        # Report should be stored in agent._reports
+        # 報告應被存入 agent._reports
+        recent = agent.get_recent_reports(limit=5)
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["intent_id"], "rpt_test")
+        self.assertFalse(recent[0]["success"])
+
+    def test_31_governance_hub_stored_as_attribute(self):
+        """ExecutorAgent stores governance_hub as _governance_hub attribute."""
+        # ExecutorAgent 正確存儲 governance_hub 為 _governance_hub 屬性
+        hub = self._make_hub()
+        agent = ExecutorAgent(governance_hub=hub)
+        self.assertIs(agent._governance_hub, hub)
+
+        # None case
+        agent_no_hub = ExecutorAgent()
+        self.assertIsNone(agent_no_hub._governance_hub)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Run
 # ═══════════════════════════════════════════════════════════════════════
 

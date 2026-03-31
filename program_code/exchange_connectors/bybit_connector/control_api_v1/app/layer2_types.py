@@ -55,7 +55,9 @@ MODEL_IDS: dict[str, str] = {
 }
 
 # Default budget limits / 默认预算限制
-DEFAULT_DAILY_HARD_CAP_USD = 15.0
+# DOC-08 §4 specifies $2.00/day hard cap to satisfy root principle 5 (survival > profit)
+# DOC-08 §4 规定每日 AI 硬上限为 $2.00，遵从根原则 5（生存 > 利润），防止 AI 成本失控
+DEFAULT_DAILY_HARD_CAP_USD = 2.0
 DEFAULT_SESSION_BUDGET_SONNET_USD = 1.50
 DEFAULT_SESSION_BUDGET_OPUS_USD = 4.00
 DEFAULT_ADAPTIVE_BASE_DAILY_USD = 8.0

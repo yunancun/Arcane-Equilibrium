@@ -40,4 +40,20 @@ def acquire_lease(self, intent_id: str) -> bool:
 
 | 日期 | 任務 | 文件位置 |
 |------|------|---------|
-| — | — | — |
+| 2026-03-31 | G-01 AI 每日硬上限 $15→$2 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--g01_ai_daily_cap_fix.md` |
+| 2026-03-31 | G-05 ExecutorAgent acquire_lease 插入 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--g05_executor_acquire_lease.md` |
+
+## 關鍵發現與教訓
+
+### 2026-03-31 G-01
+- `layer2_cost_tracker.py` 的 MODULE_NOTE 中也有 `$15/day` 硬編碼（中英兩處）→ 不在原規格中，但必須一併修改保持一致性
+- `tab-ai.html` 第 359 行有第 4 處 `|| 15`（budget display fallback），原規格漏列但屬 AI 預算相關，一併修正
+- `tab-ai.html` 第 430、445 行的 `|| 15` 是 `max_iterations` 預設值，與 AI 預算無關，不應修改（已保持不動）
+- 測試 `test_layer2.py` 第 201 行直接寫死 `15.0` 而非引用常量 `DEFAULT_DAILY_HARD_CAP_USD`，這是脆弱測試的案例 → 未來建議改為引用常量
+
+### 2026-03-31 G-05
+- `governance_hub.acquire_lease()` 實際簽名為 `(intent_id, scope, ttl_seconds)`，任務規格中描述的 `requester` 參數不存在 → 實際使用 `scope="TRADE_ENTRY"` 正確對應規格意圖
+- `governance_hub=None` 採用 fail-open（向後兼容）設計，`governance_hub` 存在但 `acquire_lease()` 返回 `None` 採用 fail-closed — 這兩層行為必須區分，測試 26 和 27 各自覆蓋
+- `phase2_strategy_routes.py` 中 `GOV_HUB` 從 `paper_trading_routes` 導入，使用 `_GOV_HUB_FOR_EXECUTOR` 本地別名防止與其他導入衝突
+- 測試基準從 2555 升至 2561（新增 6 個 G-05 tests，test_26~31）
+- 所有 17 個失敗均為預存在問題（test_batch10_learning_oms/test_ollama_integration/test_integration_phase11/test_learning_tier_gate），與本次改動無關

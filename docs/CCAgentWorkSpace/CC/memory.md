@@ -4,7 +4,7 @@
 
 - 合規評級：B 級（11/16 完全合規，4/16 部分合規，1/16 未實施）
 - 未實施：原則 12（持續進化）— 學習管線斷裂，L2 有觸發但輸入數據為零
-- 部分合規：原則 3（H1-H5 斷開）/ 原則 13（cost_edge_ratio 計算存在但 AI 成本未計入）/ 原則 15（Agent 通信存在但 Scout→Strategist 情報死代碼）/ 原則 16（組合級風控未實施）
+- 部分合規：原則 3（H1-H5 斷開）/ 原則 13（cost_edge_ratio 計算存在但 AI 成本未計入）/ 原則 15（Scout→Strategist bus.send 已實現，shadow=True 阻止 TradeIntent 產生，待 5a-4 切換）/ 原則 16（組合級風控未實施）
 
 ## 重要合規事項
 
@@ -51,6 +51,17 @@
 ### Wave 5 整體評級：條件通過
 - G-01 + G-05 兩個 BLOCKER 修復後可啟動
 - 預期評級改善：B → A-（Wave 5 全部完成後）
+
+## 代碼事實修正（2026-03-31 主 Claude 代碼驗證後）
+
+### B-MVP-1 修正：produce_intel() bus.send 已實現（CC 審查報告有誤）
+- CC 報告曾說「Scout→Strategist 情報路徑是死代碼，produce_intel() 只存本地列表，未 bus.send」— **此結論錯誤**
+- 實際代碼（multi_agent_framework.py:428）：`if self.bus and relevance_score >= self.config.relevance_threshold: self.bus.send(msg)`
+- ScoutAgent 初始化時傳入 `message_bus=MESSAGE_BUS`，bus 不為 None
+- relevance_threshold = 0.3，pipeline_bridge 調用時傳入 relevance_score 最低 0.4（vol_ratio > 2.0 時）
+- Strategist 已訂閱：`MESSAGE_BUS.subscribe(AgentRole.STRATEGIST, STRATEGIST_AGENT.on_message)`
+- **結論**：B-MVP-1 完整鏈路已存在。5a-1 是驗證任務，不是實現任務（約 1h，非 2h）
+- **教訓**：CC 審查必須實際讀代碼驗證，不可僅憑架構圖推斷「死代碼」
 
 ## 報告索引
 

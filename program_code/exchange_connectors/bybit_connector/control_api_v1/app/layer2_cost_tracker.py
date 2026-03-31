@@ -8,7 +8,7 @@ MODULE_NOTE (中文):
   本模块负责 Layer 2 推理引擎的所有成本追踪与预算管理：
   - 每次 Claude API 调用的 token 用量与 USD 成本计入
   - 每次 Perplexity 搜索成本计入
-  - 每日花费汇总 + 硬上限检查（$15/天，不可突破）
+  - 每日花费汇总 + 硬上限检查（$2/天，不可突破，DOC-08 §4）
   - 自适应预算：根据近 7 天 AI ROI 动态调整预算倍率
   - PnL 归因回填：session 推荐执行后追踪 paper PnL → 计算 ROI
   - 定价表管理：30 天核实提醒，支持手动更新
@@ -18,7 +18,7 @@ MODULE_NOTE (English):
   Cost tracking and budget management for the Layer 2 reasoning engine:
   - Token usage & USD cost accounting for each Claude API call
   - Perplexity search cost accounting
-  - Daily spend aggregation + hard cap enforcement ($15/day, absolute)
+  - Daily spend aggregation + hard cap enforcement ($2/day, absolute, per DOC-08 §4)
   - Adaptive budget: dynamic multiplier based on 7-day AI ROI
   - PnL attribution backfill: track paper PnL after session recommendation execution
   - Pricing table management: 30-day verification reminders, manual update support

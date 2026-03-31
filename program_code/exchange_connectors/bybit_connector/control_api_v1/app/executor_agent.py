@@ -126,11 +126,24 @@ class ExecutorAgent:
         message_bus: Optional[MessageBus] = None,
         paper_engine: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
+        governance_hub: Optional[Any] = None,
     ):
+        """
+        Initialize ExecutorAgent with optional GovernanceHub for Decision Lease acquisition.
+        初始化 ExecutorAgent，支持可選的 GovernanceHub 用於 Decision Lease 申請。
+
+        governance_hub: If provided, acquire_lease() will be called before any submit_order().
+                        This enforces principle 3: AI output ≠ immediate command.
+        governance_hub：若提供，執行訂單前會先調用 acquire_lease()。
+                        這強制落實根原則 3：AI 輸出不等於即時命令。
+        """
         self.config = config or ExecutorConfig()
         self.bus = message_bus
         self._paper_engine = paper_engine
         self._audit_callback = audit_callback
+        # GovernanceHub for Decision Lease — principle 3 enforcement
+        # GovernanceHub 用於 Decision Lease 申請，落實根原則 3
+        self._governance_hub = governance_hub
         self.state = AgentState.INITIALIZING
         self._lock = threading.Lock()
 
@@ -250,16 +263,66 @@ class ExecutorAgent:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ExecutionReport:
         """
-        Execute an order through PaperTradingEngine.
-        通过 PaperTradingEngine 执行订单。
+        Execute an order through PaperTradingEngine, after acquiring a Decision Lease.
+        通過 PaperTradingEngine 執行訂單，執行前必須先取得 Decision Lease。
 
-        fail-closed: errors produce a failed report, never silently succeed.
+        Principle 3 enforcement: Guardian approval (quality gate) ≠ Decision Lease (temporal
+        authorization). Both control layers must be satisfied before execution proceeds.
+        根原則 3 落實：Guardian 批准（質量門）≠ Decision Lease（時效授權）。
+        兩個控制層都必須通過，才允許執行訂單。
+
+        fail-closed: If governance_hub is present but acquire_lease() returns None,
+        execution is rejected. Missing governance_hub is fail-open (backward compat).
+        失敗默認收縮：若 governance_hub 存在但 acquire_lease() 返回 None，
+        則拒絕執行。無 governance_hub 時允許通過（向後兼容）。
         """
         start_time = time.time()
 
         with self._lock:
             self._stats["executions_attempted"] += 1
             expected_price = self._market_prices.get(symbol, 0.0)
+
+        # ── Decision Lease acquisition — principle 3: AI output ≠ immediate command ──
+        # ── Decision Lease 申請 — 根原則 3：AI 輸出不等於即時命令 ──
+        # Guardian approval is a quality gate; the lease provides temporal authorization.
+        # Both layers are independent and must both pass before execution.
+        # Guardian 批准是質量門；Lease 提供時效授權。兩層獨立，必須同時通過。
+        lease_id: Optional[str] = None
+        if self._governance_hub is not None:
+            lease_id = self._governance_hub.acquire_lease(
+                intent_id=intent_id,
+                scope="TRADE_ENTRY",
+                ttl_seconds=30.0,
+            )
+            if lease_id is None:
+                # fail-closed: lease acquisition failed → reject execution
+                # Reasons: hub disabled, not authorized, auth doesn't permit TRADE_ENTRY,
+                # or hub is in FROZEN mode. Never proceed without temporal authorization.
+                # 失敗默認收縮：lease 申請失敗 → 拒絕執行。
+                # 原因可能是：hub 禁用、未授權、auth 不允許 TRADE_ENTRY、或 FROZEN 模式。
+                # 無時效授權絕不允許下單。
+                logger.warning(
+                    "Decision Lease acquisition failed for intent %s symbol %s — "
+                    "rejecting execution (fail-closed, principle 3) / "
+                    "Decision Lease 申請失敗，intent=%s symbol=%s — "
+                    "拒絕執行（失敗默認收縮，根原則 3）",
+                    intent_id, symbol, intent_id, symbol,
+                )
+                report = ExecutionReport(
+                    intent_id=intent_id,
+                    symbol=symbol,
+                    side=side,
+                    requested_qty=qty,
+                    expected_price=expected_price,
+                    success=False,
+                    error="governance_lease_acquisition_failed",
+                    metadata=metadata or {},
+                )
+                with self._lock:
+                    self._stats["executions_failed"] += 1
+                    self._stats["errors"] += 1
+                self._store_report(report)
+                return report
 
         if not self._paper_engine:
             report = ExecutionReport(

@@ -31,7 +31,8 @@
 
 ## Wave 5 計劃
 
-### Sprint 5a（Scout→Strategist + H1，~36h）
+### Sprint 5a（Scout→Strategist + H1，~10.5h E1 / ~15h 含 E2+E4）
+> ⚠️ 原標題「~36h」為筆誤，任務明細相加為 10.5h，含 E2+E4 為 ~15h（Final Dispatch 正確）
 
 | 任務 | 指派 | 工時 |
 |------|------|------|
@@ -44,7 +45,8 @@
 
 目標：2575+ tests passed
 
-### Sprint 5b（H2-H5 薄層 + Ollama Tracking，~28h）
+### Sprint 5b（H2-H5 薄層 + Ollama Tracking，~10h E1 / ~13h 含 E2+E4）
+> ⚠️ 原標題「~28h」為筆誤，任務明細相加為 10h，含 E2+E4 為 ~13h（Final Dispatch 正確）
 
 | 任務 | 指派 | 工時 |
 |------|------|------|

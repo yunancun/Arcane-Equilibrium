@@ -198,7 +198,7 @@ class TestLayer2Types:
     def test_layer2_config_to_dict(self):
         c = Layer2Config()
         d = c.to_dict()
-        assert d["daily_hard_cap_usd"] == 15.0
+        assert d["daily_hard_cap_usd"] == 2.0
         assert d["adaptive_enabled"] is True
 
     def test_adaptive_budget_state_to_dict(self):

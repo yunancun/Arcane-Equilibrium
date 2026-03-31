@@ -332,7 +332,7 @@ async function saveProviderKey(provider) {
 // ─── Save AI Config ──────────────────────────────────────────
 async function saveAIConfig() {
   const body = {
-    daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 15,
+    daily_hard_cap_usd: parseFloat($('ai-hard-cap').value) || 2,
     adaptive_base_daily_usd: parseFloat($('ai-base-daily').value) || 8,
     adaptive_max_multiplier: parseFloat($('ai-max-mult').value) || 2,
     adaptive_min_multiplier: parseFloat($('ai-min-mult').value) || 0.3,
@@ -356,7 +356,7 @@ async function loadCost() {
   const c = d.data;
   const todayCost = c.today_cost || c.cost_today || 0;
   const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
-  const budget = c.daily_budget || c.budget_limit || 15;
+  const budget = c.daily_budget || c.budget_limit || 2;
   ocSetText('a-today', ocBalance(todayCost, 4));
   ocSetText('a-total', ocBalance(totalCost, 2));
   ocSetText('a-budget', ocBalance(budget, 2));
@@ -423,7 +423,7 @@ async function loadConfig() {
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr">';
   const fields = [
     ['默认模型', cfg.default_model || 'sonnet'],
-    ['日硬上限', '$' + (cfg.daily_hard_cap_usd || 15)],
+    ['日硬上限', '$' + (cfg.daily_hard_cap_usd || 2)],
     ['弹性基准', '$' + (cfg.adaptive_base_daily_usd || 8)],
     ['弹性范围', (cfg.adaptive_min_multiplier || 0.3) + 'x - ' + (cfg.adaptive_max_multiplier || 2) + 'x'],
     ['自适应', cfg.adaptive_enabled !== false ? '启用' : '禁用'],
@@ -438,7 +438,7 @@ async function loadConfig() {
   ocSetHtml('ai-config', html);
 
   // Populate input fields
-  if (!$('ai-hard-cap').value) $('ai-hard-cap').value = cfg.daily_hard_cap_usd || 15;
+  if (!$('ai-hard-cap').value) $('ai-hard-cap').value = cfg.daily_hard_cap_usd || 2;
   if (!$('ai-base-daily').value) $('ai-base-daily').value = cfg.adaptive_base_daily_usd || 8;
   if (!$('ai-max-mult').value) $('ai-max-mult').value = cfg.adaptive_max_multiplier || 2;
   if (!$('ai-min-mult').value) $('ai-min-mult').value = cfg.adaptive_min_multiplier || 0.3;
