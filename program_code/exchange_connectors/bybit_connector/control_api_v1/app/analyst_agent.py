@@ -178,6 +178,10 @@ class AnalystAgent:
         self._pattern_insights: List[PatternInsight] = []
         self._last_l2_analysis_count: int = 0
 
+        # Truth Source Registry: injected externally for claim registration
+        # 知識登記表：外部注入，用於登記模式聲明（Principle 7 隔離）
+        self._truth_registry: Optional[Any] = None
+
         # Stats / 统计
         self._stats = {
             "trades_analyzed": 0,
@@ -376,6 +380,41 @@ class AnalystAgent:
                     "total_pnl": round(stats["total_pnl"], 6),
                 }
             return result
+
+    def set_truth_registry(self, registry: Any) -> None:
+        """
+        Inject TruthSourceRegistry for pattern claim registration.
+        注入知識登記表，供模式洞察登記聲明使用。
+
+        Fail-open: if registry is None, analyze_patterns() continues without registration.
+        失敗開放：registry 為 None 時，分析繼續正常運行，不登記聲明。
+        """
+        self._truth_registry = registry
+
+    def _register_pattern_claims(self, insight: Any) -> None:
+        """
+        Register winning/losing patterns from insight into TruthSourceRegistry.
+        將洞察中的贏/輸模式登記到知識登記表。
+
+        Fail-open: any error → log warning, never raises.
+        失敗開放：任何異常 → 記錄警告，不向上拋出。
+        """
+        if self._truth_registry is None:
+            return
+        try:
+            n_obs = len(self._records)
+            confidence = min(0.85, 0.5 + n_obs * 0.001)
+            for pattern_text in (getattr(insight, "winning_patterns", None) or []):
+                self._truth_registry.register_claim(
+                    pattern_text=str(pattern_text),
+                    evidence_source="ai",
+                    observation_count=n_obs,
+                    confidence=confidence,
+                    applies_to_regime="all",
+                    applies_to_strategy="all",
+                )
+        except Exception as e:
+            logger.warning("_register_pattern_claims failed (fail-open): %s", e)
 
     # ── L2: AI Pattern Discovery / L2：AI 模式发现 ──
 

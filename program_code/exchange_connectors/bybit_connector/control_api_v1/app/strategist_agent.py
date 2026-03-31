@@ -231,6 +231,14 @@ class StrategistAgent:
         # H1 冷卻期記錄：每個幣種上次情報時間戳，30 秒內重複信號跳過 AI
         self._h1_cooldown: Dict[str, float] = {}
 
+        # Truth Source Registry: injected externally for pattern-driven weight updates
+        # 知識登記表：外部注入，用於模式洞察驅動的策略權重更新（Principle 7 隔離）
+        self._truth_registry: Optional[Any] = None
+
+        # Strategy preference weights: 1.0 = neutral, >1.0 = preferred, <1.0 = avoid
+        # 策略偏好權重：1.0=中性，>1.0=偏好，<1.0=迴避。範圍限幅 [0.2, 2.0]
+        self._strategy_preference_weights: Dict[str, float] = {}
+
         # Pending intents buffer (collected by PipelineBridge)
         # 待处理 intent 缓冲区（由 PipelineBridge 收集）
         self._pending_intents: List[TradeIntent] = []
@@ -626,10 +634,57 @@ class StrategistAgent:
         self._audit("risk_verdict_received", message.payload)
         logger.info("Received risk verdict: %s", message.payload.get("result", "unknown"))
 
+    def set_truth_registry(self, registry: Any) -> None:
+        """
+        Inject TruthSourceRegistry for pattern-driven strategy weight updates.
+        注入知識登記表，供模式洞察更新策略偏好權重使用。
+
+        Principle 7: registry only influences recommendation weights,
+        never modifies strategy parameters or risk thresholds directly.
+        原則 7：登記表只影響建議權重，不直接修改策略參數或風控閾值。
+        """
+        self._truth_registry = registry
+
+    def _apply_pattern_insight(self, insight_payload: dict) -> None:
+        """
+        Apply pattern insight to update strategy preference weights.
+        將模式洞察應用到策略偏好權重更新。
+
+        Queries active claims from registry for current regime,
+        adjusts weights by ±0.1 × confidence, clamped to [0.2, 2.0].
+        從登記表查詢當前 regime 的有效聲明，按 ±0.1×信度調整權重，限幅 [0.2, 2.0]。
+
+        Fail-open: any error → log warning, leave weights unchanged.
+        失敗開放：任何異常 → 記錄警告，不改變現有權重。
+        """
+        if self._truth_registry is None:
+            return
+        try:
+            # Pass regime=None to get all active claims regardless of regime
+            # 傳入 regime=None 以取得所有有效聲明，不限制 regime 過濾
+            claims = self._truth_registry.get_active_claims(
+                regime=None, min_confidence=0.5
+            )
+            for claim in claims:
+                strategy = claim.applies_to_strategy
+                if strategy == "all":
+                    continue
+                current = self._strategy_preference_weights.get(strategy, 1.0)
+                # winning patterns → increase weight, losing → decrease
+                # 贏家模式 → 增加權重，輸家模式 → 降低權重
+                delta = 0.1 * claim.confidence
+                if "losing" in claim.pattern_text.lower():
+                    delta = -delta
+                new_weight = max(0.2, min(2.0, current + delta))
+                self._strategy_preference_weights[strategy] = new_weight
+        except Exception as e:
+            logger.warning("_apply_pattern_insight failed (fail-open): %s", e)
+
     def _handle_pattern_insight(self, message: AgentMessage) -> None:
         """Handle Analyst's pattern insight feedback / 处理 Analyst 模式洞察反馈"""
         self._audit("pattern_insight_received", message.payload)
         logger.info("Received pattern insight from Analyst")
+        self._apply_pattern_insight(message.payload)
 
     def _handle_directive(self, message: AgentMessage) -> None:
         """Handle Conductor system directive / 处理 Conductor 系统指令"""
@@ -884,6 +939,7 @@ class StrategistAgent:
                 "state": self.state.value,
                 "shadow": self.config.shadow,
                 "pending_intents": len(self._pending_intents),
+                "strategy_preference_weights": dict(self._strategy_preference_weights),
                 **dict(self._stats),
             }
 
