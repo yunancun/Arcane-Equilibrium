@@ -1494,6 +1494,23 @@ function renderPendingRecovery(requests) {
   el.innerHTML = html;
 }
 
+// Change type → human-readable label / 变更类型标签映射
+const _CHANGE_TYPE_LABELS = {
+  STATE_CHANGE:     '状态变更 State Change',
+  CONFIG_CHANGE:    '配置变更 Config Change',
+  RISK_OVERRIDE:    '风控覆盖 Risk Override',
+  PERMISSION_CHANGE:'权限变更 Permission Change',
+  CODE_DEPLOYMENT:  '代码部署 Code Deploy',
+  ROLLBACK:         '回滚 Rollback',
+  EMERGENCY_CHANGE: '紧急变更 Emergency Change',
+};
+
+function _changeTypeBadge(ct) {
+  const label = _CHANGE_TYPE_LABELS[ct] || ct || 'Unknown';
+  const isRisk = ct === 'RISK_OVERRIDE' || ct === 'EMERGENCY_CHANGE';
+  return ocChip(label, isRisk ? 'bad' : 'info');
+}
+
 function renderPendingAudit(changes) {
   const el = document.getElementById('pending-audit-content');
   if (!changes || changes.length === 0) {
@@ -1501,17 +1518,88 @@ function renderPendingAudit(changes) {
     return;
   }
 
-  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
-  for (const change of changes) {
-    html += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:12px">';
-    html += '<div style="margin-bottom:4px"><strong>What:</strong> ' + ocEsc(change.what || '--') + '</div>';
-    html += '<div style="margin-bottom:4px"><strong>Who:</strong> ' + ocEsc(change.who || '--') + '</div>';
-    html += '<div style="margin-bottom:4px"><strong>Status:</strong> ' + ocChip(ocEsc(change.status || 'PENDING'), 'warn') + '</div>';
-    html += '<div style="margin-bottom:8px;color:var(--text-dim);font-size:11px">' + ocEsc(change.reason || '') + '</div>';
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  for (const c of changes) {
+    const cid = ocEsc(c.change_id || '');
+    const cidJs = (c.change_id || '').replace(/'/g, "\\'");
+    const statusChip = ocChip(c.approval_status || 'PENDING', 'warn');
+
+    // Parse old→new values if present
+    let changeDetail = '';
+    if (c.old_value != null || c.new_value != null) {
+      const oldStr = c.old_value != null ? c.old_value : '--';
+      const newStr = c.new_value != null ? c.new_value : '--';
+      changeDetail = '<div style="margin:6px 0;padding:6px 8px;background:var(--bg);border-radius:4px;font-family:monospace;font-size:11px">'
+        + '<span style="color:var(--red)">- ' + ocEsc(String(oldStr)) + '</span><br>'
+        + '<span style="color:var(--green)">+ ' + ocEsc(String(newStr)) + '</span>'
+        + '</div>';
+    }
+
+    // Affected components
+    let comps = '';
+    if (c.affected_components && c.affected_components.length > 0) {
+      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影響組件 Components: '
+        + c.affected_components.map(x => ocEsc(x)).join(' · ')
+        + '</div>';
+    }
+
+    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px">';
+    // Header row: type badge + status + time
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
+    html += _changeTypeBadge(c.change_type);
+    html += statusChip;
+    html += '<span style="margin-left:auto;font-size:11px;color:var(--text-dim)">' + ocTime(c.when_ms || c.when) + '</span>';
+    html += '</div>';
+    // What — main description
+    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(c.what || '(無描述 No description)') + '</div>';
+    // Who + reason
+    html += '<div style="color:var(--text-dim);margin-bottom:4px">發起人 By: <strong style="color:var(--text)">' + ocEsc(c.who || '--') + '</strong></div>';
+    if (c.reason) {
+      html += '<div style="color:var(--text-dim);margin-bottom:4px">原因 Reason: ' + ocEsc(c.reason) + '</div>';
+    }
+    // Old→New value diff
+    html += changeDetail;
+    // Affected components
+    html += comps;
+    // Approve / Reject buttons (only for PENDING / EMERGENCY_BYPASSED)
+    const isPending = c.approval_status === 'PENDING' || c.approval_status === 'EMERGENCY_BYPASSED';
+    if (isPending) {
+      html += '<div style="display:flex;gap:8px;margin-top:10px">';
+      html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:4px 12px" '
+        + 'onclick="auditApprove(\'' + cidJs + '\')">✔ Approve / 批准</button>';
+      html += '<button class="oc-btn oc-btn-danger" style="font-size:11px;padding:4px 12px" '
+        + 'onclick="auditReject(\'' + cidJs + '\')">✖ Reject / 拒絕</button>';
+      html += '</div>';
+    }
+    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px">ID: ' + cid + '</div>';
     html += '</div>';
   }
   html += '</div>';
   el.innerHTML = html;
+}
+
+async function auditApprove(changeId) {
+  const reason = prompt('批准原因 Approval reason (optional):') ?? '';
+  if (reason === null) return;  // cancelled
+  const d = await govApproveAuditChange(changeId, reason);
+  if (d && d.ok) {
+    ocToast('Change approved / 变更已批准', 'success');
+    loadPendingApprovals();
+  } else {
+    ocToast((d && d.message) || 'Approve failed / 批准失败', 'error');
+  }
+}
+
+async function auditReject(changeId) {
+  const reason = prompt('拒绝原因 Rejection reason (required):');
+  if (!reason || !reason.trim()) { ocToast('Please enter a rejection reason / 请输入拒绝原因', 'error'); return; }
+  const d = await govRejectAuditChange(changeId, reason.trim());
+  if (d && d.ok) {
+    ocToast('Change rejected / 变更已拒绝', 'success');
+    loadPendingApprovals();
+  } else {
+    ocToast((d && d.message) || 'Reject failed / 拒绝失败', 'error');
+  }
 }
 
 async function loadPendingApprovals() {

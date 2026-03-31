@@ -1038,6 +1038,82 @@ def get_pending_approvals(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AuditApprovalBody(BaseModel):
+    """Request body for audit change approve/reject / 审计变更批准/拒绝请求体"""
+    reason: str = Field("", max_length=500, description="Approval or rejection reason / 批准或拒绝原因")
+
+
+@governance_router.post("/audit/approve/{change_id}")
+def approve_audit_change(
+    change_id: str,
+    body: AuditApprovalBody,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Operator approves a pending audit change record.
+    操作员批准待处理的审计变更记录。
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        _require_operator_role(actor)
+        if hub._change_audit_log is None:
+            return GovernanceResponse.error("Change audit log not available", code="log_unavailable", status_code=503)
+
+        approver = actor.get("user", "operator") if isinstance(actor, dict) else "operator"
+        result = hub._change_audit_log.approve_change(
+            change_id=change_id,
+            approved_by=approver,
+            approval_reason=body.reason or "Operator approved via GUI",
+        )
+        if result is None:
+            return GovernanceResponse.error(f"Change {change_id} not found", code="not_found", status_code=404)
+
+        logger.info(f"Audit change {change_id} approved by {approver}")
+        return GovernanceResponse.success(data=result.to_dict(), message="audit_change_approved")
+    except Exception as e:
+        logger.error(f"Error approving audit change {change_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@governance_router.post("/audit/reject/{change_id}")
+def reject_audit_change(
+    change_id: str,
+    body: AuditApprovalBody,
+    actor: Any = Depends(_get_auth_actor()),
+) -> dict[str, Any]:
+    """
+    Operator rejects a pending audit change record.
+    操作员拒绝待处理的审计变更记录。
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        _require_operator_role(actor)
+        if hub._change_audit_log is None:
+            return GovernanceResponse.error("Change audit log not available", code="log_unavailable", status_code=503)
+
+        rejector = actor.get("user", "operator") if isinstance(actor, dict) else "operator"
+        rejection_reason = body.reason.strip() if body.reason.strip() else "Operator rejected via GUI"
+        result = hub._change_audit_log.reject_change(
+            change_id=change_id,
+            rejected_by=rejector,
+            rejection_reason=rejection_reason,
+        )
+        if result is None:
+            return GovernanceResponse.error(f"Change {change_id} not found", code="not_found", status_code=404)
+
+        logger.info(f"Audit change {change_id} rejected by {rejector}")
+        return GovernanceResponse.success(data=result.to_dict(), message="audit_change_rejected")
+    except Exception as e:
+        logger.error(f"Error rejecting audit change {change_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @governance_router.get("/symbols/whitelist")
 def get_symbol_whitelist(
     actor: Any = Depends(_get_auth_actor()),

@@ -165,6 +165,16 @@ async function govGetPendingAudit() {
   return ocApi('/api/v1/governance/audit/pending');
 }
 
+async function govApproveAuditChange(changeId, reason) {
+  // POST /api/v1/governance/audit/approve/{change_id}
+  return ocPost(`/api/v1/governance/audit/approve/${changeId}`, { reason: reason || '' });
+}
+
+async function govRejectAuditChange(changeId, reason) {
+  // POST /api/v1/governance/audit/reject/{change_id}
+  return ocPost(`/api/v1/governance/audit/reject/${changeId}`, { reason: reason || '' });
+}
+
 async function govGetSymbolWhitelist() {
   // GET /api/v1/governance/symbols/whitelist
   return ocApi('/api/v1/governance/symbols/whitelist');
