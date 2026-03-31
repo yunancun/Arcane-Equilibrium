@@ -939,5 +939,110 @@ class TestCostTrackerOllama(unittest.TestCase):
                            "ollama_calls_tracked must increment after successful AI evaluation")
 
 
+class TestH1CooldownLRUCap(unittest.TestCase):
+    """
+    TD-4: Verify that _h1_cooldown does not grow unboundedly.
+    TD-4：確認 _h1_cooldown 字典不會無限增長。
+
+    When the dict exceeds _H1_COOLDOWN_MAX_SIZE, expired entries (older than
+    30s cooldown window) must be evicted to keep memory bounded.
+    當字典超過 _H1_COOLDOWN_MAX_SIZE 時，必須清理已過期條目（超過 30 秒冷卻窗口）
+    以保持記憶體有界。
+    """
+
+    def _make_agent(self) -> StrategistAgent:
+        """Build a StrategistAgent with default config. / 用默認配置構建 StrategistAgent。"""
+        config = StrategistConfig(
+            shadow=True,
+            min_relevance=0.1,
+            heuristic_min_relevance=0.1,
+            heuristic_min_freshness=300,
+        )
+        return StrategistAgent(config=config)
+
+    def _make_intel(self, symbols: list) -> IntelObject:
+        """Build an IntelObject for the given symbols. / 為指定幣種構建 IntelObject。"""
+        return IntelObject(
+            source="test",
+            content="test content",
+            symbols=symbols,
+            data_quality=DataQualityLevel.FACT,
+            sentiment=SentimentScore.NEUTRAL,
+            relevance_score=0.5,
+            freshness_seconds=10,
+            metadata={},
+        )
+
+    def test_cooldown_dict_does_not_grow_beyond_cap_with_expired_entries(self):
+        """
+        Insert more than _H1_COOLDOWN_MAX_SIZE expired entries into _h1_cooldown,
+        then trigger a new cooldown update. The dict size must not exceed cap + new entry.
+
+        插入超過 _H1_COOLDOWN_MAX_SIZE 個過期條目，然後觸發新的冷卻更新。
+        字典大小不得超過上限 + 新條目數。
+        """
+        import time
+
+        agent = self._make_agent()
+        cap = agent._H1_COOLDOWN_MAX_SIZE
+
+        # Fill _h1_cooldown with expired entries (timestamp = now - 60s, > 30s cooldown)
+        # 用過期條目填充 _h1_cooldown（時間戳 = 現在 - 60s，超過 30 秒冷卻期）
+        expired_ts = time.time() - 60.0  # 60 seconds ago, well past the 30s window
+        for i in range(cap + 10):
+            agent._h1_cooldown[f"EXPIRED{i}USDT"] = expired_ts
+
+        initial_size = len(agent._h1_cooldown)
+        self.assertGreaterEqual(initial_size, cap,
+                                "Pre-condition: dict must be at or above cap before eviction")
+
+        # Trigger cooldown check with a new symbol — this should evict expired entries first
+        # 用新幣種觸發冷卻期檢查，應先清理過期條目
+        intel = self._make_intel(["NEWUSDT"])
+        result = agent._h1_check_cooldown(intel)
+
+        # The new symbol should be allowed (not in cooldown)
+        # 新幣種應被允許（不在冷卻期中）
+        self.assertTrue(result, "New symbol not in cooldown must be allowed")
+
+        # After eviction of expired entries and insertion of the new entry,
+        # dict size must be much less than cap + original overflow.
+        # 清理過期條目並插入新條目後，字典大小必須遠小於 cap + 原溢出量。
+        final_size = len(agent._h1_cooldown)
+        # All expired entries should be evicted; only NEWUSDT remains (plus any that were fresh)
+        # 所有過期條目應被清理；只剩 NEWUSDT（以及任何剛更新的新鮮條目）
+        self.assertLessEqual(
+            final_size, 2,  # NEWUSDT only (1 entry), tolerance for test timing
+            f"After eviction, dict should contain only fresh entries, got {final_size}"
+        )
+        self.assertIn("NEWUSDT", agent._h1_cooldown,
+                      "NEWUSDT must be recorded in cooldown after passing the check")
+
+    def test_cooldown_not_triggered_below_cap(self):
+        """
+        When dict is below cap, no eviction happens (hot-path cost check).
+        字典未達上限時，不觸發清理（保持熱路徑開銷最小）。
+        """
+        import time
+
+        agent = self._make_agent()
+
+        # Insert a small number of entries (well below cap)
+        # 插入少量條目（遠低於上限）
+        recent_ts = time.time() - 10.0  # still in cooldown window
+        for i in range(5):
+            agent._h1_cooldown[f"SYM{i}USDT"] = recent_ts
+
+        # A different symbol not in cooldown should pass
+        # 不在冷卻期的不同幣種應通過
+        intel = self._make_intel(["NEWUSDT"])
+        result = agent._h1_check_cooldown(intel)
+        self.assertTrue(result)
+
+        # Dict grew by 1 (NEWUSDT added) — no eviction needed
+        # 字典增加 1 個（NEWUSDT 已加入），無需清理
+        self.assertEqual(len(agent._h1_cooldown), 6)
+
+
 if __name__ == "__main__":
     unittest.main()

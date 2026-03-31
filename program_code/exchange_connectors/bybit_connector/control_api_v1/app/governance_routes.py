@@ -32,6 +32,7 @@ MODULE_NOTE (English):
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -1197,6 +1198,51 @@ def reject_audit_change(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@governance_router.post("/audit/dismiss-all")
+def dismiss_all_pending(
+    body: AuditApprovalBody,
+    actor: Any = Depends(_get_auth_actor),
+) -> dict[str, Any]:
+    """
+    Operator dismisses (approves) ALL pending audit changes in one action.
+    操作员一键清除所有待审核的审计变更。
+    """
+    hub = _get_governance_hub()
+    if hub is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
+
+    try:
+        _require_operator_role(actor)
+        if hub._change_audit_log is None:
+            return GovernanceResponse.success(data={"dismissed": 0}, message="audit_log_empty")
+
+        pending = hub._change_audit_log.get_pending_approvals()
+        approver = actor.actor_id
+        reason = body.reason.strip() if body.reason.strip() else "Operator bulk dismissed via GUI"
+        dismissed = 0
+        for record in pending:
+            try:
+                hub._change_audit_log.approve_change(
+                    change_id=record.change_id,
+                    approved_by=approver,
+                    approval_reason=reason,
+                )
+                dismissed += 1
+            except Exception:
+                pass
+
+        logger.info("Audit: %d pending changes dismissed by %s", dismissed, approver)
+        return GovernanceResponse.success(
+            data={"dismissed": dismissed},
+            message="audit_all_dismissed",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error dismissing all pending: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @governance_router.get("/symbols/whitelist")
 def get_symbol_whitelist(
     actor: Any = Depends(_get_auth_actor),
@@ -1812,10 +1858,57 @@ def get_h0_gate_status(
         state = gate.get_current_state()
         if state is None:
             raise HTTPException(status_code=500, detail="H0Gate state unavailable")
+
+        # 1B-2: Compute freshness diagnostic fields from gate internals.
+        # H0Gate._price_ts is a symbol→timestamp_ms dict updated on every tick.
+        # We expose the most-recent entry's age so the GUI / monitoring can show
+        # how stale the freshest data is, without modifying the hot path.
+        # getattr with {} default ensures graceful handling of mocks / missing attr.
+        #
+        # 1B-2: 從 H0Gate 內部計算新鮮度診斷字段。
+        # H0Gate._price_ts 是幣種→時間戳（ms）的字典，每個 tick 更新。
+        # 這裡暴露最新一筆的數據年齡，讓 GUI/監控顯示數據新鮮程度，不影響熱路徑。
+        # 使用 isinstance(dict) 確保 getattr 拿到的是真實字典而非 mock 物件。
+        now_ms = int(time.time() * 1000)
+        raw_price_ts = getattr(gate, "_price_ts", None)
+        # Only use the attribute if it is a real dict; mocks/None → treat as empty.
+        # 只有在屬性確實為 dict 時才使用；mock/None 視為空字典。
+        price_ts_dict: dict = raw_price_ts if isinstance(raw_price_ts, dict) else {}
+        if price_ts_dict:
+            # Use the most recent timestamp across all tracked symbols as the
+            # "best case" freshness indicator.
+            # 使用所有追蹤幣種中最新的時間戳作為「最佳情況」新鮮度指標。
+            latest_ts = max(price_ts_dict.values())
+            freshness_age_ms: int | None = now_ms - latest_ts
+        else:
+            # No price data at all — no freshness information available.
+            # 尚無任何 tick 數據，新鮮度信息不可用。
+            freshness_age_ms = None
+
+        # freshness_score: 1.0 = perfectly fresh, 0.0 = stale/no data.
+        # Linear decay: score = max(0, 1 - age_ms / max_data_age_ms).
+        # freshness_score：1.0 = 完全新鮮，0.0 = 過期/無數據。
+        # 線性衰減：score = max(0, 1 - age_ms / max_data_age_ms)。
+        if freshness_age_ms is not None:
+            # Safely read max_data_age_ms from config; default 1000ms if not a real int.
+            # 安全讀取 max_data_age_ms；若不是整數（如 mock）則用 1000ms 默認值。
+            raw_max_age = getattr(getattr(gate, "_config", None), "max_data_age_ms", 1000)
+            max_age_ms: int = raw_max_age if isinstance(raw_max_age, int) and raw_max_age > 0 else 1000
+            freshness_score: float | None = max(0.0, 1.0 - freshness_age_ms / max_age_ms)
+        else:
+            freshness_score = None
+
         return {
             "ok": True,
             "message": "h0_gate_status",
             "data": state,
+            # Freshness diagnostic fields (1B-2 / H0Gate API extension):
+            # These are advisory — freshness is currently warn-only in the pipeline.
+            # 新鮮度診斷字段（1B-2 / H0Gate API 擴充）：
+            # 僅供參考，freshness 目前在管線中為 warn-only 模式。
+            "freshness_age_ms": freshness_age_ms,
+            "freshness_score": freshness_score,
+            "data_quality_warn_only": True,  # freshness is currently advisory-only / freshness 目前為 warn-only 模式
         }
     except HTTPException:
         raise

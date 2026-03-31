@@ -758,6 +758,214 @@ class TestCheckStops:
 
 
 # ===========================================================================
+# 9b. FA-7 _check_stops → PerceptionPlane.register_data() 注入（原則 12）
+# ===========================================================================
+
+class TestCheckStopsPerceptionPlane:
+    """
+    FA-7: Verify that _check_stops() injects stop-loss close events into the
+    PerceptionPlane learning pipeline via _emit_round_trip().
+
+    FA-7：驗證 _check_stops() 在止損觸發後通過 _emit_round_trip() 將事件注入
+    PerceptionPlane 學習管線，滿足原則 12（持續進化）。
+    """
+
+    def _setup_with_stop_and_perception(
+        self,
+        triggered_stops: list[dict],
+        *,
+        perception_plane: object = None,
+    ):
+        """
+        Build a bridge with mocked stop manager and optional perception plane.
+        構建帶有 mock StopManager 和可選 PerceptionPlane 的 bridge。
+        """
+        bridge, engine = _make_bridge()
+        bridge.activate()
+        stop_mgr = MagicMock()
+        stop_mgr.check_stops.return_value = triggered_stops
+        stop_mgr.untrack_position = MagicMock()
+        bridge._stop_mgr = stop_mgr
+        bridge._latest_prices = {"BTCUSDT": 59000.0, "ETHUSDT": 2000.0}
+        if perception_plane is not None:
+            bridge._perception_plane = perception_plane
+        return bridge, engine, stop_mgr
+
+    def test_register_data_called_on_stop_loss_close(self):
+        """
+        After a successful stop-loss close, register_data() must be called at
+        least once on the PerceptionPlane (via _emit_round_trip).
+
+        止損平倉成功後，register_data() 必須至少被調用一次（通過 _emit_round_trip）。
+        """
+        stop = {
+            "symbol": "BTCUSDT",
+            "side": "Sell",       # long position closed → pnl = (exit - entry) * qty
+            "qty": 0.001,
+            "reason": "Hard stop: price 59000.00 <= 59500.00 (-0.8%)",
+            "stop_type": "hard_stop",
+            "strategy_name": "test_strategy",
+            "entry_price": 60000.0,
+            "current_price": 59000.0,
+        }
+        plane = MagicMock()
+        bridge, engine, _ = self._setup_with_stop_and_perception([stop], perception_plane=plane)
+        # Engine must report position as still open so stop is not skipped
+        # engine 必須回報倉位仍開著，止損才不會被跳過
+        engine._state = {"positions": {"BTCUSDT": {"qty": 0.001}}}
+
+        bridge._check_stops()
+
+        # Submit order must have happened
+        assert len(engine.submitted_orders) == 1
+        # register_data() must have been called (feeds learning pipeline)
+        # register_data() 必須被調用（注入學習管線）
+        assert plane.register_data.called, (
+            "register_data() was never called — stop-loss events are invisible to learning pipeline"
+        )
+
+    def test_register_data_not_called_when_perception_plane_none(self):
+        """
+        When perception_plane is None, _check_stops() must not raise AttributeError.
+        Principle 6 (fail safely): if the learning plane is absent, stop-loss
+        processing must still succeed.
+
+        當 perception_plane 為 None 時，_check_stops() 不能拋出 AttributeError。
+        原則 6（失敗默認收縮）：學習管線缺失不應影響止損單的正常執行。
+        """
+        stop = {
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "qty": 0.001,
+            "reason": "Hard stop",
+            "stop_type": "hard_stop",
+            "strategy_name": "test_strategy",
+            "entry_price": 60000.0,
+            "current_price": 59000.0,
+        }
+        bridge, engine, _ = self._setup_with_stop_and_perception([stop], perception_plane=None)
+        engine._state = {"positions": {"BTCUSDT": {"qty": 0.001}}}
+
+        # Must not raise — absence of perception plane is non-fatal
+        # 不能拋異常——學習管線缺失為非致命錯誤
+        bridge._check_stops()
+
+        # Stop order must still have been submitted
+        assert len(engine.submitted_orders) == 1
+        assert bridge.get_stats()["stops_triggered"] == 1
+
+    def test_register_data_called_on_time_stop_close(self):
+        """
+        Time-stop exits are also stop-loss paths and must trigger register_data().
+        All three stop types (hard/trailing/time) go through the same _check_stops()
+        branch, so one test covering time_stop confirms full generalization.
+
+        時間止損也是止損路徑，必須觸發 register_data()。
+        三種止損類型（hard/trailing/time）走同一分支，覆蓋一種即驗證全部。
+        """
+        stop = {
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "qty": 0.01,
+            "reason": "Time stop: held 25.0h >= max 24h",
+            "stop_type": "time_stop",
+            "strategy_name": "ma_crossover",
+            "entry_price": 2050.0,
+            "current_price": 2000.0,
+        }
+        plane = MagicMock()
+        bridge, engine, _ = self._setup_with_stop_and_perception([stop], perception_plane=plane)
+        bridge._latest_prices = {"ETHUSDT": 2000.0}
+        engine._state = {"positions": {"ETHUSDT": {"qty": 0.01}}}
+
+        bridge._check_stops()
+
+        assert len(engine.submitted_orders) == 1
+        assert plane.register_data.called, (
+            "register_data() was not called for time_stop close — learning pipeline missing time-stop data"
+        )
+
+    def test_pnl_calculation_correct_for_long_position(self):
+        """
+        For a long position (close side = 'Sell'), PnL = (exit - entry) * qty.
+        A hard stop at a lower price must produce a negative PnL value passed to
+        _emit_round_trip, confirming correct attribution sign.
+
+        多頭止損（close side='Sell'）的盈虧 = (出場 - 入場) * qty，止損必為負值。
+        驗證傳入 _emit_round_trip 的 close_pnl 符號正確（負值 = 虧損）。
+        """
+        stop = {
+            "symbol": "BTCUSDT",
+            "side": "Sell",          # long closed below entry → pnl < 0
+            "qty": 0.001,
+            "reason": "Hard stop",
+            "stop_type": "hard_stop",
+            "strategy_name": "trend_follow",
+            "entry_price": 60000.0,
+            "current_price": 59000.0,  # exit below entry → loss
+        }
+        plane = MagicMock()
+        bridge, engine, _ = self._setup_with_stop_and_perception([stop], perception_plane=plane)
+        engine._state = {"positions": {"BTCUSDT": {"qty": 0.001}}}
+
+        with patch.object(bridge, "_emit_round_trip", wraps=bridge._emit_round_trip) as mock_rt:
+            bridge._check_stops()
+
+        mock_rt.assert_called_once()
+        _args = mock_rt.call_args
+        # close_pnl should be negative for a long position stopped out below entry
+        # 多頭止損低於入場價，close_pnl 應為負
+        close_pnl = _args.kwargs.get("close_pnl") or _args[0][3]
+        assert close_pnl < 0, f"Expected negative PnL for long stop-loss, got {close_pnl}"
+
+    def test_register_data_not_called_when_order_rejected(self):
+        """
+        Sprint 1a P1-1: If submit_order() returns a rejected_reason, the stop
+        order was NOT executed — _emit_round_trip() must NOT be called, to avoid
+        injecting a fabricated (ghost) learning signal into the perception plane.
+
+        P1-1：若 submit_order() 返回 rejected_reason，止損單未成交，
+        不應調用 _emit_round_trip()，防止向學習管線注入虛假數據（幽靈交易）。
+
+        The engine's submit_order is monkey-patched to return a rejected result.
+        register_data() on the PerceptionPlane must never be called in this scenario.
+        使用 monkey-patch 讓 submit_order 返回拒絕結果，驗證 register_data() 不被調用。
+        """
+        stop = {
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "qty": 0.001,
+            "reason": "Hard stop",
+            "stop_type": "hard_stop",
+            "strategy_name": "test_strategy",
+            "entry_price": 60000.0,
+            "current_price": 59000.0,
+        }
+        plane = MagicMock()
+        bridge, engine, _ = self._setup_with_stop_and_perception([stop], perception_plane=plane)
+        engine._state = {"positions": {"BTCUSDT": {"qty": 0.001}}}
+
+        # Patch submit_order to return a rejected result.
+        # submit_order 被 patch 為返回拒絕結果（模擬 governance / risk 拒絕）。
+        rejected_result = {"rejected_reason": "guardian_rejected: risk limit exceeded"}
+        engine.submit_order = MagicMock(return_value=rejected_result)
+
+        with patch.object(bridge, "_emit_round_trip") as mock_rt:
+            bridge._check_stops()
+
+        # _emit_round_trip must NOT be called — the stop order was rejected, no
+        # position was actually closed, so no learning signal should be emitted.
+        # 止損單被拒，倉位未真正平倉，不能注入學習信號。
+        mock_rt.assert_not_called(), (
+            "_emit_round_trip() was called despite order rejection — "
+            "this injects a ghost learning signal into the perception plane"
+        )
+        # register_data() on PerceptionPlane also must not be called
+        # register_data() 同樣不能被調用
+        plane.register_data.assert_not_called()
+
+
+# ===========================================================================
 # 10. get_stats 返回格式
 # ===========================================================================
 

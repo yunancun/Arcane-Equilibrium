@@ -934,6 +934,77 @@ class PipelineBridge:
 
                 if self._telegram:
                     self._telegram.alert_stop(stop["symbol"], stop["stop_type"], stop["reason"])
+
+                # ── FA-7 / Sprint 1a P1-1: Inject into Perception Plane via _emit_round_trip ──
+                # Principle 12 (Continuous Evolution): every closed position — including
+                # stop-loss exits — must reach the learning pipeline so the system can
+                # learn from losses and improve strategy selection over time.
+                # 原則 12（持續進化）：每個被止損平倉的倉位都必須進入學習管線，
+                # 系統才能從虧損中學習並持續改進策略選擇。
+                #
+                # P1-1 Guard: only emit round_trip if the stop order was actually executed
+                # (not rejected). A rejected order means no position was closed — emitting
+                # a round_trip would inject a fabricated learning signal and corrupt the
+                # learning pipeline with ghost trades.
+                # P1-1 守衛：只有止損單真正成交才注入學習信號；若訂單被拒（rejected_reason
+                # 存在），跳過 _emit_round_trip()，避免向學習管線注入虛假數據（幽靈交易）。
+                #
+                # _emit_round_trip() handles:
+                #   1. _open_positions pop (position metadata cleanup)
+                #   2. E1 observation_writer callback
+                #   3. G1 auto_deployer.on_trade_result (consecutive-loss tracking)
+                #   4. L1.01 trade attribution
+                #   5. EX-05 learning tier auto-promotion check
+                #   6. MessageBus ROUND_TRIP_COMPLETE → AnalystAgent
+                #   7. PerceptionPlane.register_data() — feeds Layer 2 AI reasoning
+                # _emit_round_trip() 一次性觸發 7 個學習/歸因回調，統一複用意圖路徑的邏輯。
+                #
+                # Safety fallback: if result is not a dict (e.g. None), isinstance() returns
+                # False → _stop_order_rejected = False → we still attempt to emit.
+                # This is the safe default: a non-dict result means we cannot confirm
+                # rejection, so we treat it as executed to avoid dropping valid learning data.
+                # 安全 fallback：若 result 非 dict（例如 None），無法確認拒絕，
+                # 預設為已成交（不丟棄潛在有效學習數據）。
+                _stop_order_rejected = isinstance(result, dict) and bool(
+                    result.get("rejected_reason")
+                )
+                if not _stop_order_rejected:
+                    # Only emit round_trip when the stop order was actually executed.
+                    # 只有止損單真正成交時才注入學習信號。
+                    try:
+                        _stop_symbol = stop["symbol"]
+                        _stop_strategy = stop.get("strategy_name", "unknown")
+                        # exit_price: use current_price from StopManager (exact trigger price);
+                        # fall back to latest_prices snapshot if field is missing.
+                        # 出場價格：優先用 StopManager 記錄的觸發價，否則取最新行情快照。
+                        _exit_price = float(
+                            stop.get("current_price")
+                            or market_prices.get(_stop_symbol, 0.0)
+                        )
+                        _entry_price = float(stop.get("entry_price", 0.0))
+                        _qty = float(stop.get("qty", 0.0))
+                        # stop["side"] is the CLOSE-side order direction:
+                        #   "Sell" means the original position was long → pnl = (exit - entry) * qty
+                        #   "Buy"  means the original position was short → pnl = (entry - exit) * qty
+                        # stop["side"] 是平倉方向：Sell=多頭平倉（虧則為負），Buy=空頭平倉。
+                        if stop["side"] == "Sell":
+                            _close_pnl = (_exit_price - _entry_price) * _qty
+                        else:
+                            _close_pnl = (_entry_price - _exit_price) * _qty
+                        self._emit_round_trip(
+                            symbol=_stop_symbol,
+                            strategy_name=_stop_strategy,
+                            exit_price=_exit_price,
+                            close_pnl=_close_pnl,
+                        )
+                    except Exception as _rt_err:
+                        # Non-fatal: do not let learning pipeline injection block stop processing.
+                        # 非致命：不允許學習管線注入阻擋止損單的正常流程。
+                        logger.warning(
+                            "Stop-loss round-trip emit error (non-fatal): %s %s / 止損 round-trip 觸發失敗",
+                            stop.get("symbol"), _rt_err,
+                        )
+
             except Exception:
                 logger.exception("Stop order submit failed / 止损单提交失败: %s", stop)
 

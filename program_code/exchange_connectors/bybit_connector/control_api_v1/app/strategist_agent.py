@@ -325,6 +325,10 @@ class StrategistAgent:
             score = min(1.0, score + 0.2)
         return score
 
+    # Capacity cap for _h1_cooldown: prevent unbounded growth in multi-symbol scenarios.
+    # _h1_cooldown 容量上限：防止掃描大量幣種時字典無限增長（記憶體安全保護）。
+    _H1_COOLDOWN_MAX_SIZE: int = 1000
+
     def _h1_check_cooldown(self, intel: Any) -> bool:
         """
         H1 cooldown check: return True if symbol is not in cooldown window.
@@ -332,8 +336,37 @@ class StrategistAgent:
 
         Returns True if AI call is allowed, False if any symbol is in cooldown.
         若任意幣種在冷卻期內則返回 False（跳過 AI）；否則更新時間戳並返回 True。
+
+        TD-4: Capacity protection — when dict exceeds _H1_COOLDOWN_MAX_SIZE, evict
+        all expired entries first (entries older than 30s cooldown window). This is
+        preferred over hard LRU eviction because expired entries carry no business
+        value and cleaning them is semantically correct.
+        TD-4: 容量保護 — 字典超過 _H1_COOLDOWN_MAX_SIZE 時，先清理所有已過期條目
+        （超過 30 秒冷卻窗口的條目）。優先選擇過期清理而非 LRU 強制淘汰，
+        因為過期條目已無業務價值，清理行為語義正確。
         """
         now = time.time()
+
+        # TD-4: Capacity guard — evict expired entries before inserting new ones.
+        # Triggered only when at cap to keep hot-path cost minimal.
+        # TD-4: 容量守衛 — 超過上限時才執行過期清理，保持熱路徑開銷最小。
+        if len(self._h1_cooldown) >= self._H1_COOLDOWN_MAX_SIZE:
+            # Collect keys to evict: entries older than 30s cooldown window.
+            # 收集要清理的鍵：超過 30 秒冷卻窗口的條目。
+            expired_keys = [
+                sym for sym, ts in self._h1_cooldown.items()
+                if now - ts >= 30.0
+            ]
+            for sym in expired_keys:
+                del self._h1_cooldown[sym]
+            if expired_keys:
+                logger.debug(
+                    "TD-4 _h1_cooldown evicted %d expired entries, size now %d / "
+                    "已清理 %d 個過期條目，當前大小 %d",
+                    len(expired_keys), len(self._h1_cooldown),
+                    len(expired_keys), len(self._h1_cooldown),
+                )
+
         for symbol in intel.symbols:
             last = self._h1_cooldown.get(symbol, 0.0)
             if now - last < 30.0:
@@ -486,8 +519,12 @@ class StrategistAgent:
                     _record = getattr(self.cost_tracker, "record_call", None)
                     if _record is not None:
                         _record(model="l1_9b", cost_usd=0.0)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # TD-3: Log cost tracking failures instead of silently swallowing them.
+                    # H5 成本記錄失敗不應靜默忽略，改為 warning 日誌以便追蹤問題。
+                    logger.warning(
+                        "H5 cost record failed for model l1_9b: %s / H5 成本記錄失敗", e
+                    )
 
         with self._lock:
             self._stats["intel_evaluated"] += 1

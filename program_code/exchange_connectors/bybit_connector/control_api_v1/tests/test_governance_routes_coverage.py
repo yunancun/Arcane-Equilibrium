@@ -1245,3 +1245,105 @@ class TestRequestDeEscalation:
         assert result["ok"] is True
         assert result["data"]["request_id"] == "REQ-001"
         assert result["data"]["status"] == "pending_approval"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1B-2: H0 Gate Status Freshness Fields
+# 1B-2: H0 確定性門控狀態端點新鮮度字段測試
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGetH0GateStatusFreshnessFields:
+    """
+    Tests for the freshness diagnostic fields added by 1B-2 to the
+    GET /api/v1/governance/h0-gate/status endpoint.
+
+    驗證 1B-2 新增的新鮮度診斷字段是否正確出現在
+    GET /api/v1/governance/h0-gate/status 的回應中。
+    """
+
+    def _make_gate(self, price_ts: dict | None = None) -> MagicMock:
+        """
+        Build a mock H0Gate with get_current_state() and optional _price_ts.
+        構建一個帶有 get_current_state() 和可選 _price_ts 的模擬 H0Gate。
+        """
+        gate = MagicMock()
+        gate.get_current_state.return_value = {"system_mode": "demo_only", "stats": {}}
+        # Attach _price_ts dict to simulate gate internals.
+        # 設置 _price_ts 字典模擬 gate 內部狀態。
+        if price_ts is not None:
+            gate._price_ts = price_ts
+            gate._config = MagicMock()
+            gate._config.max_data_age_ms = 1000
+        else:
+            # No _price_ts attribute at all (simulate bare mock).
+            # 完全沒有 _price_ts 屬性（模擬裸 mock 情況）。
+            del gate._price_ts
+        return gate
+
+    def test_freshness_fields_present_when_gate_has_price_data(self):
+        """
+        When gate._price_ts has entries, response includes freshness_age_ms,
+        freshness_score, and data_quality_warn_only.
+
+        gate._price_ts 有數據時，回應應包含 freshness_age_ms、freshness_score、
+        data_quality_warn_only 三個字段。
+        """
+        import time as _time
+        from app.governance_routes import get_h0_gate_status
+
+        # Fresh data: timestamp = now - 100ms (should give high freshness score)
+        # 新鮮數據：時間戳 = 現在 - 100ms（應給出高新鮮度分數）
+        now_ms = int(_time.time() * 1000)
+        gate = self._make_gate(price_ts={"BTCUSDT": now_ms - 100})
+        actor = _make_actor()
+
+        with patch(f"{GOV_MOD}._get_h0_gate", return_value=gate):
+            result = get_h0_gate_status(actor=actor)
+
+        assert result["ok"] is True
+        assert "freshness_age_ms" in result, "freshness_age_ms must be present"
+        assert "freshness_score" in result, "freshness_score must be present"
+        assert "data_quality_warn_only" in result, "data_quality_warn_only must be present"
+        # freshness_age_ms should be roughly 100ms (tolerance 500ms for CI)
+        # freshness_age_ms 應大約為 100ms（容許 CI 下 500ms 誤差）
+        assert result["freshness_age_ms"] is not None
+        assert result["freshness_age_ms"] >= 0
+        assert result["data_quality_warn_only"] is True
+
+    def test_freshness_age_ms_is_none_when_no_price_data(self):
+        """
+        When gate._price_ts is empty, freshness_age_ms should be None
+        (no data available — cognitive honesty, principle 10).
+
+        gate._price_ts 為空時，freshness_age_ms 應為 None
+        （無數據 — 認知誠實，根原則 10）。
+        """
+        from app.governance_routes import get_h0_gate_status
+
+        gate = MagicMock()
+        gate.get_current_state.return_value = {"system_mode": "demo_only", "stats": {}}
+        gate._price_ts = {}  # empty dict — no ticks yet / 空字典，尚無 tick
+        gate._config = MagicMock()
+        gate._config.max_data_age_ms = 1000
+        actor = _make_actor()
+
+        with patch(f"{GOV_MOD}._get_h0_gate", return_value=gate):
+            result = get_h0_gate_status(actor=actor)
+
+        assert result["ok"] is True
+        assert result["freshness_age_ms"] is None
+        assert result["freshness_score"] is None
+        assert result["data_quality_warn_only"] is True
+
+    def test_h0_gate_unavailable_raises_503(self):
+        """
+        When _get_h0_gate() returns None, route must raise 503.
+        _get_h0_gate() 返回 None 時，路由必須拋出 503。
+        """
+        from app.governance_routes import get_h0_gate_status
+
+        actor = _make_actor()
+        with patch(f"{GOV_MOD}._get_h0_gate", return_value=None):
+            with pytest.raises(HTTPException) as exc:
+                get_h0_gate_status(actor=actor)
+        assert exc.value.status_code == 503

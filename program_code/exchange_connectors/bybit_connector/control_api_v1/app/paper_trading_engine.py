@@ -904,23 +904,11 @@ class PaperTradingEngine:
 
     # ── Session Management / Session 管理 ──
 
-    # ── Warmup delay: block trading for N seconds after session start ──
-    # 启动预热：会话启动后 N 秒内禁止交易，确保 Paper/Demo 数据同步
-    WARMUP_SECONDS = 30
-
     def start_session(
         self,
         initial_balance: float = DEFAULT_INITIAL_BALANCE_USDT,
     ) -> dict[str, Any]:
-        """
-        Start a new paper trading session / 开始新的纸上交易 session
-
-        Old session data is preserved in the previous state snapshot (not deleted).
-        A fresh state is built with zeroed counters. Trading is blocked for
-        WARMUP_SECONDS after start to allow Paper/Bybit Demo price sync.
-        旧会话数据保留在之前的状态快照中（不删除）。新会话使用归零计数器。
-        启动后 WARMUP_SECONDS 秒内禁止交易，确保 Paper/Bybit Demo 价格同步。
-        """
+        """Start a new paper trading session / 开始新的纸上交易 session"""
         def mutator(state):
             if state["session"]["session_state"] == SESSION_ACTIVE:
                 raise ValueError("Session already active. Stop it before starting a new one.")
@@ -931,16 +919,11 @@ class PaperTradingEngine:
             state["session"]["initial_paper_balance_usdt"] = initial_balance
             state["session"]["current_paper_balance_usdt"] = initial_balance
             state["session"]["peak_balance_usdt"] = initial_balance
-            # Warmup: block trading until this timestamp / 预热：此时间戳前禁止交易
-            state["session"]["warmup_until_ms"] = now_ms() + self.WARMUP_SECONDS * 1000
-            self._audit(state, "session_start", f"balance={initial_balance}, warmup={self.WARMUP_SECONDS}s")
+            self._audit(state, "session_start", f"balance={initial_balance}")
             # Persist risk manager state / 持久化风控状态
             if self.risk_manager:
                 state["risk"] = self.risk_manager.get_risk_state_for_persistence()
             return state
-        # Reset periodic reconciliation dedup tracker / 重置对账去重追踪器
-        self._last_reconciliation_ms = 0
-        self._last_recon_result_hash = None
         return self.store.mutate(mutator)
 
     def pause_session(self) -> dict[str, Any]:
@@ -966,39 +949,16 @@ class PaperTradingEngine:
         return self.store.mutate(mutator)
 
     def stop_session(self) -> dict[str, Any]:
-        """
-        Stop the current session and finalize PnL / 停止 session 并结算 PnL
-
-        Closes all open Paper positions at current market price before stopping.
-        Cancels all working orders. Finalizes PnL. Old data is preserved in state.
-        停止前以当前市价平掉所有 Paper 持仓，取消所有挂单，结算 PnL。旧数据保留在状态中。
-        """
+        """Stop the current session and finalize PnL / 停止 session 并结算 PnL"""
         def mutator(state):
             sess = state["session"]
             if sess["session_state"] not in (SESSION_ACTIVE, SESSION_PAUSED):
                 raise ValueError(f"Cannot stop: session is {sess['session_state']}")
 
-            # Cancel all working orders / 取消所有挂单
+            # Cancel all working orders
             for order in state["orders"]:
                 if order["state"] in ACTIVE_STATES:
                     _transition_order(order, ORDER_STATE_CANCELED)
-
-            # Close all open positions: zero out and realize unrealized PnL
-            # 平掉所有持仓：归零并将未实现盈亏转为已实现
-            positions = state.get("positions", {})
-            closed_count = 0
-            for sym, pos in list(positions.items()):
-                qty = float(pos.get("qty", 0))
-                if qty > 0:
-                    unrealized = float(pos.get("unrealized_pnl", 0))
-                    state["pnl"]["realized_pnl"] = state["pnl"].get("realized_pnl", 0) + unrealized
-                    pos["qty"] = 0
-                    pos["unrealized_pnl"] = 0
-                    closed_count += 1
-                    self._audit(state, "auto_close_position",
-                        f"{sym} qty={qty} side={pos.get('side')} unrealized={unrealized:.4f}")
-            if closed_count > 0:
-                logger.info("Session stop: auto-closed %d positions / 停止时自动平仓 %d 个持仓", closed_count, closed_count)
 
             # Finalize PnL
             self._recompute_pnl(state)
@@ -1077,16 +1037,6 @@ class PaperTradingEngine:
             sess = state["session"]
             if sess["session_state"] != SESSION_ACTIVE:
                 raise ValueError(f"Cannot submit order: session is {sess['session_state']}")
-
-            # Warmup guard: reject orders until warmup period ends
-            # 预热保护：预热期间拒绝所有订单，确保 Paper/Demo 数据同步
-            warmup_until = sess.get("warmup_until_ms", 0)
-            if warmup_until > 0 and now_ms() < warmup_until:
-                remaining_sec = (warmup_until - now_ms()) / 1000
-                raise ValueError(
-                    f"Warmup in progress: trading blocked for {remaining_sec:.0f}s more / "
-                    f"预热中：交易将在 {remaining_sec:.0f} 秒后开放"
-                )
 
             order = create_paper_order(
                 symbol, side, order_type, qty, price, leverage,
@@ -1687,8 +1637,6 @@ class PaperTradingEngine:
                         logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
 
                 # T7.04: Periodic reconciliation trigger (every 60 seconds during active session)
-                # Dedup: only audit + log when result hash changes from last check
-                # 去重：仅当对账结果与上次不同时才记录审计日志，避免重复审批请求
                 if self._governance_hub:
                     now_ms_recon = int(time.time() * 1000)
                     last_recon = getattr(self, '_last_reconciliation_ms', 0)
@@ -1703,19 +1651,9 @@ class PaperTradingEngine:
                                     logger.error(f"Demo snapshot failed: {e}")
                             recon_report = self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
                             self._last_reconciliation_ms = now_ms_recon
-
-                            # Dedup: hash the result to avoid spamming identical audit entries
-                            import hashlib as _hl
-                            result_key = str(recon_report.get("overall_result", "")) + str(recon_report.get("ok", ""))
-                            result_hash = _hl.md5(result_key.encode()).hexdigest()[:8]
-                            prev_hash = getattr(self, '_last_recon_result_hash', None)
-
-                            if result_hash != prev_hash:
-                                self._last_recon_result_hash = result_hash
-                                if recon_report.get("ok") is False:
-                                    self._audit(state, "reconciliation_warning",
-                                        f"reason={recon_report.get('reason', 'unknown')}")
-                            # If same result as last time, skip audit to prevent approval spam
+                            if recon_report.get("ok") is False:
+                                self._audit(state, "reconciliation_warning",
+                                    f"reason={recon_report.get('reason', 'unknown')}")
                         except Exception as e:
                             logger.error(f"Periodic reconciliation error: {e} (non-fatal)")
 

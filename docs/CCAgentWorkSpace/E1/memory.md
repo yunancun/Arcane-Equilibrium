@@ -47,9 +47,13 @@ def acquire_lease(self, intent_id: str) -> bool:
 | 2026-03-31 | Sprint 5b-1+5b-2/6: H4 AI輸出驗證 + H5 Ollama CostLogger | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5b_gamma.md` |
 | 2026-03-31 | Sprint 5b-3+5b-4: apply_ai_consultation 廢棄 + ScoutWorker daemon | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint5b_delta.md` |
 | 2026-03-31 | Wave 6 Sprint 0 TD-1: pipeline_bridge acquire_lease 插入 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint0_td1_pipeline_lease.md` |
+| 2026-03-31 | Wave 6 Sprint 1a FA-7: _check_stops register_data 注入 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint1a_fa7_register_data.md` |
+| 2026-03-31 | Wave 6 Sprint 1b: 1B-2 H0Gate freshness API + TD-3 silent exception + TD-4 LRU cap | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint1b_gamma_1b2_td3_td4.md` |
+| 2026-03-31 | Sprint 1a P1-1: submit_order rejected 時不注入學習信號 | `docs/CCAgentWorkSpace/E1/workspace/reports/2026-03-31--sprint1a_p1_fix.md` |
 
 ## 當前測試基準線
-2614 passed（Wave 6 Sprint 0 TD-1 完成後，+4 新測試（TestPipelineBridgeDecisionLease），17 pre-existing failures）
+2827 passed（Sprint 1a P1-1 完成後，both test dirs，128 pre-existing failures，17 errors）
+注：測試基準線現改為從 srv 根目錄同時執行 program_code/exchange_connectors/.../tests/ + program_code/local_model_tools/tests/
 
 ## 關鍵發現與教訓
 
@@ -101,6 +105,43 @@ def acquire_lease(self, intent_id: str) -> bool:
   → ScoutWorker 的職責是更高頻（30 分鐘）呼叫 `MARKET_SCANNER.scan()` 並將結果通過 `SCOUT_AGENT.produce_intel()` 注入 Strategist 鏈路
   → `_make_scout_scan_fn()` wrapper 負責：取前 5 機會 → 構建 `symbols` 和 `content` → 調用 `produce_intel()`
 - ScoutWorker 初始化失敗是 non-fatal：在 `phase2_strategy_routes.py` 用 `try/except` 包裹，失敗只記 `logger.warning`
+
+### 2026-03-31 Wave 6 Sprint 1b (1B-2 / TD-3 / TD-4)
+
+- `getattr(gate, "_price_ts", {})` is NOT safe when gate is a MagicMock: MagicMock auto-creates `_price_ts` as a MagicMock, which is truthy, causing `max(MagicMock().values())` to fail with ValueError.
+  → Fix: use `isinstance(raw_price_ts, dict)` to distinguish real dict from mock.
+- `getattr(obj, "some_attr", 1000)` where obj is a MagicMock will return a MagicMock, not 1000.
+  → Same fix: use `isinstance(result, int)` before trusting the value.
+- `time` module was NOT imported in `governance_routes.py` before this sprint → must add `import time`.
+- `_H1_COOLDOWN_MAX_SIZE` as a class-level constant (not instance attribute) is the right place for capacity constants — keeps it visible and overridable in tests without needing instance access.
+- TD-4 cleanup is lazy (only triggered at cap) — this is intentional to keep hot-path cost O(1) in the normal case.
+- Pre-existing test_batch10 + test_edge_filter flaky failures stopped appearing in this run (non-deterministic, likely timing-dependent).
+
+### 2026-03-31 Sprint 1a P1-1 (ghost learning signal guard)
+
+- E2 發現 FA-7 新增的 `_emit_round_trip()` 調用塊未考慮 `submit_order()` 返回拒絕結果的情況。
+- 修復方法：在 FA-7 塊前加 `_stop_order_rejected = isinstance(result, dict) and bool(result.get("rejected_reason"))` 判斷，用 `if not _stop_order_rejected:` 包裹整個 `try/except` 塊。
+- 重要技巧：`if not _stop_order_rejected:` 需要包裹整個 `try/except`（連帶縮排），不能只包裹 `_emit_round_trip()` 調用本身 — 若只包裹調用，`except` 的縮排就不匹配了。
+- isinstance safety fallback：`result` 非 dict（如 None）→ `_stop_order_rejected = False` → 仍嘗試 emit（安全預設，不丟棄潛在有效學習數據）。
+- 新增測試 `test_register_data_not_called_when_order_rejected`：monkey-patch `engine.submit_order` 返回 `{"rejected_reason": "..."}` → assert `_emit_round_trip` 未被調用 + `plane.register_data` 未被調用。
+- 測試從 2817 → 2827 passed（+10，包含本 P1-1 的 1 個新測試）；128 個 pre-existing 失敗不變。
+
+### 2026-03-31 Wave 6 Sprint 1a FA-7
+
+- `_check_stops()` 止損路徑的 register_data 缺口：止損觸發後 submit_order 成功，但沒有走 _emit_round_trip，學習管線永遠看不到止損事件。
+- 修復方案：在 submit_order 成功後、Telegram alert 之後插入 `_emit_round_trip()` 調用，複用全部 7 個學習/歸因回調。
+- `stop` dict 包含 `entry_price` 和 `current_price`（StopManager 已記錄觸發價），可以精確計算 PnL：
+  - `stop["side"]` 是**平倉方向**（"Sell" = 多頭平倉，"Buy" = 空頭平倉）
+  - Long (side=Sell): pnl = (exit - entry) * qty
+  - Short (side=Buy): pnl = (entry - exit) * qty
+- StopManager 的 `check_stops()` 已在返回 triggered 列表前從 `_positions` 中刪除觸發的倉位，
+  所以 `_emit_round_trip()` 內的 `untrack_position()` 會是 no-op（pop 不存在的 key = 靜默忽略）。
+- 整個注入塊用 try/except 包裹（non-fatal），確保學習管線失敗不影響止損單的主路徑。
+- 測試加在 `test_pipeline_bridge_coverage.py` 的 `TestCheckStopsPerceptionPlane` 新類（4 個測試）：
+  - test_register_data_called_on_stop_loss_close（hard stop 主路徑）
+  - test_register_data_not_called_when_perception_plane_none（None 不崩潰）
+  - test_register_data_called_on_time_stop_close（time stop 路徑）
+  - test_pnl_calculation_correct_for_long_position（PnL 符號正確，用 wraps 驗證傳參）
 
 ### 2026-03-31 Wave 6 Sprint 0 TD-1
 
