@@ -403,6 +403,55 @@ async function loadComparison() {
   ocSetHtml('comparison-tbody', html);
 }
 
+// Reconstruct round trips from fills: pair Buy opens with Sell closes (and vice versa)
+// 从成交记录重建完整交易：配对买入开仓与卖出平仓
+function _calcRoundTrips(fills) {
+  if (!fills || fills.length === 0) return [];
+  // Group by symbol, then pair opens with closes
+  const bySymbol = {};
+  fills.forEach(f => {
+    const sym = f.symbol || '';
+    if (!bySymbol[sym]) bySymbol[sym] = [];
+    bySymbol[sym].push(f);
+  });
+
+  const trips = [];
+  Object.values(bySymbol).forEach(group => {
+    // Sort by time ascending
+    group.sort((a, b) => Number(a.execTime || 0) - Number(b.execTime || 0));
+    let openSide = null, openPrice = 0, openQty = 0, openTime = 0;
+
+    group.forEach(f => {
+      const side = f.side;
+      const qty = parseFloat(f.execQty || f.qty || 0);
+      const price = parseFloat(f.execPrice || f.price || 0);
+      const time = Number(f.execTime || 0);
+      const fee = Math.abs(parseFloat(f.execFee || f.fee || 0));
+
+      if (openSide == null) {
+        // Start new position
+        openSide = side; openPrice = price; openQty = qty; openTime = time;
+      } else if (side !== openSide) {
+        // Closing fill — compute PnL
+        const closeQty = Math.min(qty, openQty);
+        const pnl = openSide === 'Buy'
+          ? (price - openPrice) * closeQty - fee
+          : (openPrice - price) * closeQty - fee;
+        const holdMs = time - openTime;
+        trips.push({ pnl, holdMs });
+        openQty -= closeQty;
+        if (openQty <= 0.0001) { openSide = null; openQty = 0; }
+      } else {
+        // Adding to position — average price
+        const totalQty = openQty + qty;
+        openPrice = (openPrice * openQty + price * qty) / totalQty;
+        openQty = totalQty;
+      }
+    });
+  });
+  return trips;
+}
+
 function loadDemoMetrics(raw) {
   let b = raw;
   if (raw && raw.result && raw.result.list && raw.result.list[0]) {
@@ -414,20 +463,39 @@ function loadDemoMetrics(raw) {
   const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
   const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
   const totalFills = _demoFillsCache.length;
-  // Estimate cumulative fees from cached fills
   const totalFees = _demoFillsCache.reduce((s, f) => s + Math.abs(parseFloat(f.execFee || f.fee || 0)), 0);
+
+  // Compute round-trip metrics from fills
+  const trips = _calcRoundTrips(_demoFillsCache);
+  const tripCount = trips.length;
+  const wins = trips.filter(t => t.pnl > 0);
+  const losses = trips.filter(t => t.pnl <= 0);
+  const winRate = tripCount > 0 ? (wins.length / tripCount * 100).toFixed(1) + '%' : 'N/A';
+  const avgWin = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
+  const avgLoss = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length) : 0;
+  const winLossRatio = (avgWin > 0 && avgLoss > 0) ? (avgWin / avgLoss).toFixed(2) : 'N/A';
+  const largestWin = wins.length > 0 ? Math.max(...wins.map(t => t.pnl)) : null;
+  const largestLoss = losses.length > 0 ? Math.min(...losses.map(t => t.pnl)) : null;
+  const avgHoldMs = tripCount > 0 ? trips.reduce((s, t) => s + t.holdMs, 0) / tripCount : 0;
+
+  // Format hold time
+  let holdStr = 'N/A';
+  if (avgHoldMs > 0) {
+    const mins = Math.round(avgHoldMs / 60000);
+    holdStr = mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
+  }
 
   const items = [
     ['总成交笔数 / Total Fills', '', totalFills > 0 ? totalFills : 'N/A'],
-    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', 'N/A'],
-    ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', 'N/A'],
-    ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损。/ Ratio of avg win to avg loss. >1 means wins outsize losses.', 'N/A'],
+    ['完整交易次数 / Round Trips', '一次开仓到完全平仓为一次完整交易。/ A complete open-to-close cycle counts as one round trip.', tripCount > 0 ? tripCount : 'N/A'],
+    ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', winRate],
+    ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损。/ Ratio of avg win to avg loss. >1 means wins outsize losses.', winLossRatio],
     ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', ddPct],
     ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。/ Risk-adjusted return. >1 good, >2 excellent, <0 underperforming risk-free rate.', 'N/A'],
-    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。/ Average duration from open to close.', 'N/A'],
-    ['单笔最高盈利 / Largest Win', '', 'N/A'],
-    ['单笔最高亏损 / Largest Loss', '', 'N/A'],
-    ['平均亏损 / Avg Loss', '', 'N/A'],
+    ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。/ Average duration from open to close.', holdStr],
+    ['单笔最高盈利 / Largest Win', '', largestWin != null ? ocMoney(largestWin) : 'N/A'],
+    ['单笔最高亏损 / Largest Loss', '', largestLoss != null ? ocMoney(largestLoss) : 'N/A'],
+    ['平均亏损 / Avg Loss', '', avgLoss > 0 ? ocMoney(-avgLoss) : 'N/A'],
     ['总手续费 / Total Fees', '所有交易产生的手续费总和。/ Sum of all trading fees incurred.', totalFees > 0 ? ocBalance(totalFees, 4) : 'N/A'],
     ['总 AI 成本 / Total AI Cost', 'AI 推理调用的累计花费。/ Cumulative cost of AI inference calls.', 'N/A'],
   ];
