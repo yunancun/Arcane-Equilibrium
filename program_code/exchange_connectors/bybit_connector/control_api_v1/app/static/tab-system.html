@@ -67,8 +67,7 @@
     <div class="oc-metric tip-metric" id="m-mode-wrap"><div class="oc-metric-label">全局模式</div><div class="oc-metric-val" id="m-mode">--</div><div class="tip-box" id="m-mode-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-auth-wrap"><div class="oc-metric-label">执行权限</div><div class="oc-metric-val" id="m-auth">--</div><div class="tip-box" id="m-auth-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系统能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-snap-wrap"><div class="oc-metric-label">快照绑定</div><div class="oc-metric-val" id="m-snap" style="font-size:13px">--</div><div class="tip-box" id="m-snap-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">运行保护</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">误操作保护</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">阶段标签</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
   </div>
 
@@ -256,7 +255,7 @@ function setTip(id, raw, desc) {
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-runtime').innerHTML = ocExplain(
   '这里显示系统的核心运行状态。鼠标悬停在每个指标上可以看到原始状态值和详细说明。下方的快速按钮可以直接开关关键功能。',
-  '系统使用多层保护机制：全局模式控制整体运行阶段（仅设计 → 仅观察 → Demo → Live）；执行权限控制是否允许下单；系统能力表示当前可用的功能级别；运行保护确保关键状态不会被意外修改。'
+  '系统使用多层保护机制：全局模式控制整体运行阶段（仅设计 → 仅观察 → Demo → Live）；执行权限控制是否允许下单；系统能力表示当前可用的功能级别；误操作保护确保关键状态不会被意外修改。'
 );
 
 $('explain-pf').innerHTML = ocExplain(
@@ -519,16 +518,13 @@ async function loadOverview() {
   ocSetText('m-demo', cnLabel(capRaw, CAP_CN));
   setTip('m-demo-tip', capRaw, '系统能力状态。shadow_control_ready = 影子控制面板就绪（可以模拟决策流程但不执行）；demo_ready = Demo 模式就绪；live_ready = 生产模式就绪。');
 
-  // Snapshot
-  const snapProtected = gr.runtime_still_protected;
-  ocSetText('m-snap', snapProtected ? '已保护' : '未保护');
-  $('m-snap').className = 'oc-metric-val ' + (snapProtected ? 'green' : 'yellow');
-  setTip('m-snap-tip', 'runtime_still_protected = ' + snapProtected, '运行时快照保护。已保护 = 关键状态不会被意外修改，所有变更需要通过正式 Control Plane 流程。');
-
-  // Runtime Protected
-  ocSetText('m-prot', snapProtected ? '&#x2705; 已启用' : '&#x274C; 未启用');
-  $('m-prot').className = 'oc-metric-val ' + (snapProtected ? 'green' : 'red');
-  setTip('m-prot-tip', 'runtime_still_protected = ' + snapProtected, '运行保护机制。已启用 = 系统处于保护状态，execution_authority 不会被意外授予。这是防止误操作的关键安全层。');
+  // Runtime Protection (merged from 快照绑定 + 运行保护)
+  // 误操作保护：execution_authority 未授予时为 True，防止意外执行
+  const runtimeProtected = gr.runtime_still_protected;
+  ocSetText('m-prot', runtimeProtected ? '已启用' : '未启用');
+  $('m-prot').className = 'oc-metric-val ' + (runtimeProtected ? 'green' : 'yellow');
+  setTip('m-prot-tip', 'runtime_still_protected = ' + runtimeProtected,
+    '误操作保护。已启用 = 执行权限未授予，关键状态不会被意外修改。未启用 = 执行权限已开放（当前为 Demo 模式），变更需通过 Control Plane 流程。');
 
   // Stage Label
   const stageRaw = gr.global_stage_label || '';
