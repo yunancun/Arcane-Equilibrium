@@ -310,10 +310,10 @@ class StrategyOrchestrator:
         Returns the intents and clears them from the strategies.
         返回意图并从策略中清除。
 
-        In the future, these intents will go through:
-          Risk Manager → Paper Trading Engine
-        未来这些意图将经过：
-          风控管理器 → Paper Trading Engine
+        Each intent gets a `_history_ref` attribute pointing to its history dict,
+        allowing PipelineBridge to update status after processing.
+        每个 intent 获得 `_history_ref` 属性，指向历史记录 dict，
+        允许 PipelineBridge 在处理后更新状态。
         """
         all_intents: list[OrderIntent] = []
 
@@ -323,12 +323,17 @@ class StrategyOrchestrator:
                 all_intents.extend(intents)
 
             # Record in history (deque auto-trims at maxlen) / 记录到历史（deque 自动裁剪）
+            # Attach history dict ref to each intent for downstream status updates
+            # 将历史 dict 引用附加到每个 intent，供下游更新状态
             now_ms = int(time.time() * 1000)
             for intent in all_intents:
-                self._intent_history.append({
+                history_entry = {
                     **intent.to_dict(),
                     "collected_ts_ms": now_ms,
-                })
+                    "status": "pending",
+                }
+                self._intent_history.append(history_entry)
+                intent._history_ref = history_entry
 
             # Detect conflicting intents for same symbol (different strategies, opposite sides)
             # 检测同一交易对的冲突意图（不同策略、相反方向）

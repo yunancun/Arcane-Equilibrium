@@ -88,6 +88,7 @@ class OrderIntent:
     __slots__ = (
         "symbol", "side", "order_type", "qty", "price",
         "strategy_name", "reason", "confidence", "metadata",
+        "_history_ref",
     )
 
     def __init__(
@@ -111,6 +112,7 @@ class OrderIntent:
         self.reason = reason
         self.confidence = confidence
         self.metadata = metadata or {}
+        self._history_ref = None  # Set by StrategyOrchestrator for status tracking / 由编排器设置用于状态追踪
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -472,6 +472,16 @@ class PipelineBridge:
         if self._stop_mgr and self._latest_prices:
             self._check_stops()
 
+    @staticmethod
+    def _mark_intent(intent: Any, status: str) -> None:
+        """
+        Update intent history status via _history_ref (set by StrategyOrchestrator).
+        通过 _history_ref 更新 intent 历史状态（由 StrategyOrchestrator 设置）。
+        """
+        ref = getattr(intent, "_history_ref", None)
+        if ref is not None:
+            ref["status"] = status
+
     def _process_pending_intents(self) -> None:
         """
         Collect OrderIntents from orchestrator, submit to paper engine.
@@ -523,6 +533,7 @@ class PipelineBridge:
                             )
                             with self._lock:
                                 self._stats["intents_rejected"] += 1
+                            self._mark_intent(intent, "rejected_perception")
                             continue
                     else:
                         # Intent has no perception data marked (implicit FACT assumption for exchange data)
@@ -564,6 +575,7 @@ class PipelineBridge:
                                 intent.symbol,
                                 getattr(intent, "side", "?"),
                             )
+                            self._mark_intent(intent, "blocked_h0")
                             continue  # skip this intent, do not submit
                     except Exception as _h0_check_err:
                         logger.warning(
@@ -582,11 +594,13 @@ class PipelineBridge:
                             )
                             with self._lock:
                                 self._stats["intents_rejected"] += 1
+                            self._mark_intent(intent, "rejected_governance")
                             continue
                     except Exception as exc:
                         logger.error("Governance is_authorized error — fail-closed: %s", exc)
                         with self._lock:
                             self._stats["intents_rejected"] += 1
+                        self._mark_intent(intent, "rejected_governance")
                         continue
 
                 # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
@@ -620,6 +634,7 @@ class PipelineBridge:
                     _submit_qty = round_qty_for_exchange(_submit_qty, category=_intent_category)
                     if _submit_qty <= 0:
                         logger.info("Qty rounds to zero for %s, skipping / qty 四捨五入為零，跳過", intent.symbol)
+                        self._mark_intent(intent, "rejected_qty_zero")
                         continue
                 except ImportError:
                     pass  # Demo connector not available, use raw qty
@@ -664,6 +679,7 @@ class PipelineBridge:
                                 "意图被 Guardian 拒绝",
                                 intent.symbol, intent.side, verdict.reason, verdict.risk_score,
                             )
+                            self._mark_intent(intent, "rejected_guardian")
                             continue
 
                         elif verdict.result == _RVR.MODIFIED:
@@ -700,6 +716,7 @@ class PipelineBridge:
                         with self._lock:
                             self._guardian_stats["errors"] += 1
                             self._stats["intents_rejected"] += 1
+                        self._mark_intent(intent, "rejected_guardian")
                         continue
 
                 else:
@@ -711,6 +728,7 @@ class PipelineBridge:
                     )
                     with self._lock:
                         self._stats["intents_rejected"] += 1
+                    self._mark_intent(intent, "rejected_no_guardian")
                     continue
 
                 # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
@@ -757,6 +775,7 @@ class PipelineBridge:
                                 self._stats["intents_lease_failed"] = (
                                     self._stats.get("intents_lease_failed", 0) + 1
                                 )
+                            self._mark_intent(intent, "rejected_lease")
                             continue
                     except Exception as _lease_err:
                         # Lease acquisition error → fail-closed (DOC-01 §5.6)
@@ -770,6 +789,7 @@ class PipelineBridge:
                             self._stats["intents_lease_failed"] = (
                                 self._stats.get("intents_lease_failed", 0) + 1
                             )
+                        self._mark_intent(intent, "rejected_lease")
                         continue
 
                 # Extract category from intent metadata (default: linear)
@@ -812,6 +832,7 @@ class PipelineBridge:
                 if rejected:
                     with self._lock:
                         self._stats["intents_rejected"] += 1
+                    self._mark_intent(intent, "rejected_risk")
                     logger.info(
                         "Intent rejected: %s %s %s qty=%.6f reason=%s / 意图被拒",
                         intent.symbol, intent.side, intent.order_type,
@@ -820,6 +841,7 @@ class PipelineBridge:
                 else:
                     with self._lock:
                         self._stats["intents_accepted"] += 1
+                    self._mark_intent(intent, "submitted")
                     logger.info(
                         "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
                         intent.symbol, intent.side, intent.order_type, intent.qty,

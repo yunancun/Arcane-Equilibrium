@@ -306,14 +306,19 @@ async function loadIntents() {
   }
   let html = '';
   intents.slice(0, 30).forEach(i => {
+    const status = i.status || 'pending';
+    let statusChip = 'neutral';
+    if (status === 'submitted') statusChip = 'good';
+    else if (status.startsWith('rejected') || status.startsWith('blocked')) statusChip = 'bad';
+    else if (status === 'pending') statusChip = 'warn';
     html += '<tr>';
-    html += '<td>' + ocTimeShort(i.timestamp || i.ts_ms) + '</td>';
+    html += '<td>' + ocTimeShort(i.collected_ts_ms) + '</td>';
     html += '<td>' + ocEsc(i.symbol) + '</td>';
     html += '<td class="' + (i.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(i.side) + '</td>';
     html += '<td>' + ocEsc(i.order_type || 'market') + '</td>';
     html += '<td>' + ocNum(i.qty, 4) + '</td>';
     html += '<td style="font-size:11px">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
-    html += '<td>' + ocEsc(i.status || i.state || '--') + '</td>';
+    html += '<td>' + ocChip(status, statusChip) + '</td>';
     html += '</tr>';
   });
   ocSetHtml('intents-tbody', html);

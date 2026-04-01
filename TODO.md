@@ -1004,6 +1004,27 @@ E4 全量回歸 ✅ 3330 passed（+20 新測試）
 - 目前僅記憶體，重啟清零
 - **優先級**：Phase 3 Batch 3A 候選
 
+### Paper-Demo 差異校準系統（長期）
+
+Paper 與 Demo 是「內部模擬 + 外部驗證」雙軌架構，差異本身是系統健康度信號。
+
+**短期（現狀維持）：**
+- 現有 fail-open + DIVERGED 日誌 + 雙遍歷清倉已處理分歧，無需改動
+
+**中期 — GUI 差異可視化：**
+- [ ] tab-trading.html 明確標示「Paper 數據」vs「Demo 數據」來源
+- [ ] 新增 Paper-Demo 差異率儀表板卡片（持倉數量差異、PnL 差異百分比）
+- [ ] 對賬引擎 reconcile() 結果在 GUI 上可視化（MATCH / MISMATCH_MINOR / DIVERGED）
+
+**長期 — 自動滑點模型校準：**
+- [ ] 累積 Demo 實際成交數據（滑點、費率、成交率）到 PostgreSQL
+- [ ] 定期（如每1000筆交易後）用 Demo 實際滑點統計反推 Paper SLIPPAGE_TIERS 參數準確度
+- [ ] 若 Paper-Demo 滑點偏差 > 閾值，自動建議調整 SLIPPAGE_TIERS（不自動改，原則 3）
+- [ ] 費率校準：比較 Paper 硬編碼費率 vs Demo 實際費率，標記偏差
+- **相關檔案**：`paper_trading_engine.py`（SLIPPAGE_TIERS, DEFAULT_TAKER_FEE_RATE）、`bybit_demo_sync.py`（_sync_executions）
+- **優先級**：Phase 4 觀察期候選（需先累積足夠 Paper+Demo 並行交易數據）
+- **定位**：Paper = System of Record（風控/學習以此為準）；Demo = Validation Oracle（校準/Live Gate 權重更高）
+
 ---
 
 # ═══════════════════════════════════════════════════════════════
