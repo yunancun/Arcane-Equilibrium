@@ -40,7 +40,8 @@
       <div class="oc-metric"><div class="oc-metric-label">净盈亏 / Net PnL</div><div class="oc-metric-val" id="d-net">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">已实现盈亏 / Realized PnL</div><div class="oc-metric-val" id="d-realized">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">未实现盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.">胜率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占总交易的百分比。注意：高胜率不等于盈利，需结合盈亏比。/ Win percentage. High win rate does not guarantee profit — check win/loss ratio.">胜率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="平均盈利 / 平均亏损。>1 表示赢的比输的多。与胜率结合看：胜率高但盈亏比<1 仍可能总体亏损。/ Avg win ÷ avg loss. >1 means wins are larger than losses.">盈亏比 / W/L Ratio</div><div class="oc-metric-val" id="d-wlratio">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的资金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
     </div>
   </div>
@@ -244,8 +245,33 @@ function renderBalance(raw) {
   elR.textContent = ocMoney(realized);
   elR.className = 'oc-metric-val ' + ocPnlClass(realized);
 
-  // Win rate — not directly available from Bybit balance API, set from fills if available
-  ocSetText('d-winrate', 'N/A');
+  // Win rate + W/L ratio from round-trip analysis / 从完整交易分析计算胜率和盈亏比
+  const trips = _calcRoundTrips(_demoFillsCache);
+  if (trips.length > 0) {
+    const wins = trips.filter(t => t.pnl > 0);
+    const losses = trips.filter(t => t.pnl <= 0);
+    const wr = (wins.length / trips.length * 100);
+    const wrEl = $('d-winrate');
+    wrEl.textContent = wr.toFixed(1) + '%';
+    // Color: green only if net PnL is positive; yellow if win rate high but losing money
+    // 颜色：仅净盈亏为正时显示绿色；胜率高但亏钱时显示黄色警告
+    const totalPnl = trips.reduce((s, t) => s + t.pnl, 0);
+    wrEl.className = 'oc-metric-val ' + (totalPnl > 0 ? 'green' : (wr > 50 ? 'yellow' : 'red'));
+
+    const avgW = wins.length > 0 ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length : 0;
+    const avgL = losses.length > 0 ? Math.abs(losses.reduce((s, t) => s + t.pnl, 0) / losses.length) : 0;
+    const wlEl = $('d-wlratio');
+    if (avgW > 0 && avgL > 0) {
+      const ratio = avgW / avgL;
+      wlEl.textContent = ratio.toFixed(2);
+      wlEl.className = 'oc-metric-val ' + (ratio >= 1 ? 'green' : 'red');
+    } else {
+      wlEl.textContent = 'N/A';
+    }
+  } else {
+    ocSetText('d-winrate', 'N/A');
+    ocSetText('d-wlratio', 'N/A');
+  }
 
   // Max drawdown: from peak equity
   const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
