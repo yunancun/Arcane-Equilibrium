@@ -257,14 +257,14 @@ async def _startup_integrity_check() -> None:
     # 服務器重啟後，現有 session 從文件載入，不會重新觸發 start，導致授權缺失。
     # 修復：啟動時檢查 session 狀態，若需要則補授權（fail-open，不阻斷啟動）。
     try:
-        _session_state = ENGINE.get_session_state() if hasattr(ENGINE, "get_session_state") else None
+        # get_session_status() is the correct method name (get_session_state does not exist)
+        # get_session_status() 是正確方法名（get_session_state 不存在）
+        _session_state = ENGINE.get_session_status() if hasattr(ENGINE, "get_session_status") else None
         _is_active = False
         if _session_state is not None:
-            _is_active = _session_state.get("session_state") == "active"
-        else:
-            # Fallback: check raw state
-            _raw = ENGINE._store.load() if hasattr(ENGINE, "_store") else {}
-            _is_active = _raw.get("session", {}).get("session_state") == "active"
+            # get_session_status returns {"session": {...}, "pnl": {...}, ...}
+            _sess = _session_state.get("session") or _session_state
+            _is_active = _sess.get("session_state") == "active"
 
         if _is_active and GOV_HUB is not None:
             if not GOV_HUB.is_authorized():

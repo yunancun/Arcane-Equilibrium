@@ -396,6 +396,7 @@ class ScoutAgent:
     ):
         self.config = config or ScoutConfig()
         self.bus = message_bus
+        self.role = AgentRole.SCOUT  # Required by scout_routes.py get_status()
         self.state = AgentState.INITIALIZING
         self._lock = threading.Lock()
         self._intel_log: List[IntelObject] = []

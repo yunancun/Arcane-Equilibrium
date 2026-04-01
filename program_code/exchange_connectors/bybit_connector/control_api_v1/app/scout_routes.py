@@ -35,6 +35,8 @@ from pydantic import BaseModel, Field, validator
 
 from . import main_legacy as base
 from .multi_agent_framework import (
+    AgentRole,
+    AgentState,
     DataQualityLevel,
     EventAlert,
     IntelObject,
@@ -546,12 +548,14 @@ def get_status(
 
     try:
         # Get agent info
-        agent_role = SCOUT_AGENT.role.name if hasattr(SCOUT_AGENT.role, "name") else str(SCOUT_AGENT.role)
-        agent_state = SCOUT_AGENT.state.name if hasattr(SCOUT_AGENT.state, "name") else str(SCOUT_AGENT.state)
-        is_running = SCOUT_AGENT.is_running
+        _role = getattr(SCOUT_AGENT, "role", AgentRole.SCOUT)
+        agent_role = _role.name if hasattr(_role, "name") else str(_role)
+        _state = getattr(SCOUT_AGENT, "state", AgentState.INITIALIZING)
+        agent_state = _state.name if hasattr(_state, "name") else str(_state)
+        is_running = getattr(SCOUT_AGENT, "is_running", _state == AgentState.RUNNING)
 
         # Get message bus stats
-        total_messages = MESSAGE_BUS.total_messages() if hasattr(MESSAGE_BUS, "total_messages") else 0
+        total_messages = MESSAGE_BUS.total_messages if hasattr(MESSAGE_BUS, "total_messages") else 0
 
         # Get recent intel and alerts
         recent_intel = SCOUT_AGENT.get_recent_intel(limit=100)
