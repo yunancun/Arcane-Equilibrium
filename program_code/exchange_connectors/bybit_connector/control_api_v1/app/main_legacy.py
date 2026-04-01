@@ -4134,6 +4134,43 @@ from slowapi.middleware import SlowAPIMiddleware
 app.add_middleware(SlowAPIMiddleware)
 
 
+# ── 安全响应头中间件 / Security response headers middleware ────────────────────
+# APR01-MEDIUM-3: 为所有响应添加安全 HTTP 头，防止常见 Web 攻击向量。
+# APR01-MEDIUM-3: Add security HTTP headers to ALL responses to mitigate
+# common web attack vectors (clickjacking, MIME-sniffing, XSS, info leakage).
+#
+# CSP 注意事项 / CSP notes:
+#   - 'unsafe-inline' 用于 script-src 和 style-src，因为 GUI HTML 使用内联 <script>/<style>
+#     'unsafe-inline' needed for script/style because GUI HTML uses inline <script>/<style>
+#   - https://unpkg.com 用于 trading.html 的 TradingView 图表库
+#     https://unpkg.com needed for TradingView charting library in trading.html
+#   - http://trade-core:3000 用于 tab-monitoring.html 的 Grafana iframe
+#     http://trade-core:3000 needed for Grafana iframe in tab-monitoring.html
+#   - data: 用于 img-src（内联图片，如 base64 编码的图标）
+#     data: for img-src (inline images such as base64-encoded icons)
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """
+    Inject security headers into every HTTP response.
+    为每个 HTTP 响应注入安全头，降低 XSS / 点击劫持 / MIME 嗅探等风险。
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-src 'self' http://trade-core:3000; "
+        "frame-ancestors 'self'"
+    )
+    return response
+
+
 @app.exception_handler(RateLimitExceeded)
 async def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     from starlette.responses import JSONResponse

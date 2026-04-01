@@ -314,5 +314,178 @@ class TestGuardianVerdictLog(unittest.TestCase):
         self.assertEqual(len(verdicts), 3)
 
 
+class TestGuardianApprovedIntentEmission(unittest.TestCase):
+    """APR01-P1-5: Test that Guardian emits APPROVED_INTENT to Executor via MessageBus.
+    APR01-P1-5：测试 Guardian 通过 MessageBus 向 Executor 发送 APPROVED_INTENT。
+    """
+
+    def _make_trade_intent_message(self, symbol="BTCUSDT", direction="long", size=0.01, leverage=1.0):
+        """Helper: create a TRADE_INTENT AgentMessage as Strategist would send."""
+        return AgentMessage(
+            sender=AgentRole.STRATEGIST,
+            receiver=AgentRole.GUARDIAN,
+            message_type=MessageType.TRADE_INTENT,
+            payload={
+                "intent_id": "test_intent_001",
+                "symbol": symbol,
+                "strategy": "test_strategy",
+                "direction": direction,
+                "size": size,
+                "params": {"leverage": leverage},
+                "confidence": 0.7,
+                "thesis": "test thesis",
+                "invalidation_condition": "",
+                "metadata": {"source": "unit_test"},
+            },
+        )
+
+    def test_approved_intent_emitted_on_approval(self):
+        """When Guardian approves, APPROVED_INTENT is sent to Executor via bus.
+        当 Guardian 批准时，APPROVED_INTENT 通过 bus 发送给 Executor。
+        """
+        bus = MessageBus()
+        executor_received = []
+        bus.subscribe(AgentRole.EXECUTOR, lambda m: executor_received.append(m))
+
+        agent = GuardianAgent(message_bus=bus, config=GuardianConfig())
+        agent.start()
+
+        msg = self._make_trade_intent_message()
+        agent.on_message(msg)
+
+        # Executor should receive exactly 1 APPROVED_INTENT
+        approved = [m for m in executor_received if m.message_type == MessageType.APPROVED_INTENT]
+        self.assertEqual(len(approved), 1, "Executor should receive 1 APPROVED_INTENT")
+        self.assertEqual(approved[0].payload["symbol"], "BTCUSDT")
+        self.assertEqual(approved[0].payload["direction"], "long")
+        self.assertEqual(approved[0].payload["intent_id"], "test_intent_001")
+
+    def test_approved_intent_not_emitted_on_rejection(self):
+        """When Guardian rejects, NO APPROVED_INTENT is sent.
+        当 Guardian 拒绝时，不发送 APPROVED_INTENT。
+        """
+        bus = MessageBus()
+        executor_received = []
+        bus.subscribe(AgentRole.EXECUTOR, lambda m: executor_received.append(m))
+
+        # Force rejection: excessive leverage
+        config = GuardianConfig(max_leverage=5.0)
+        agent = GuardianAgent(message_bus=bus, config=config)
+        agent.start()
+
+        msg = self._make_trade_intent_message(leverage=15.0)
+        agent.on_message(msg)
+
+        approved = [m for m in executor_received if m.message_type == MessageType.APPROVED_INTENT]
+        self.assertEqual(len(approved), 0, "Executor should NOT receive APPROVED_INTENT on rejection")
+
+    def test_modified_intent_emitted_with_adjustments(self):
+        """When Guardian modifies, APPROVED_INTENT is sent with adjusted params.
+        当 Guardian 修改时，APPROVED_INTENT 带修改后参数发送。
+        """
+        bus = MessageBus()
+        executor_received = []
+        bus.subscribe(AgentRole.EXECUTOR, lambda m: executor_received.append(m))
+
+        # Trigger modification: leverage slightly over cap
+        config = GuardianConfig(max_leverage=5.0, modification_size_factor=0.5)
+        agent = GuardianAgent(message_bus=bus, config=config)
+        agent.start()
+
+        msg = self._make_trade_intent_message(leverage=7.0, size=0.1)
+        agent.on_message(msg)
+
+        approved = [m for m in executor_received if m.message_type == MessageType.APPROVED_INTENT]
+        self.assertEqual(len(approved), 1, "Executor should receive 1 APPROVED_INTENT for MODIFIED")
+        payload = approved[0].payload
+        # Size should be reduced by modification_size_factor
+        self.assertAlmostEqual(payload["size"], 0.1 * 0.5)
+        # guardian_modified flag should be set
+        self.assertTrue(payload.get("metadata", {}).get("guardian_modified"))
+
+    def test_approved_intent_sender_is_strategist(self):
+        """APPROVED_INTENT sender must be STRATEGIST to match VALID_ROUTES.
+        APPROVED_INTENT 发送者必须是 STRATEGIST 以匹配路由表。
+        """
+        bus = MessageBus()
+        executor_received = []
+        bus.subscribe(AgentRole.EXECUTOR, lambda m: executor_received.append(m))
+
+        agent = GuardianAgent(message_bus=bus, config=GuardianConfig())
+        agent.start()
+
+        msg = self._make_trade_intent_message()
+        agent.on_message(msg)
+
+        approved = [m for m in executor_received if m.message_type == MessageType.APPROVED_INTENT]
+        self.assertEqual(len(approved), 1)
+        self.assertEqual(approved[0].sender, AgentRole.STRATEGIST)
+
+    def test_bus_send_failure_is_fail_open(self):
+        """If bus.send raises, _handle_trade_intent still completes (fail-open).
+        如果 bus.send 抛出异常，_handle_trade_intent 仍然完成（失败开放）。
+        """
+        bus = MessageBus()
+        original_send = bus.send
+
+        call_count = {"n": 0}
+
+        def failing_send(msg):
+            call_count["n"] += 1
+            # Let the RISK_VERDICT through (first call), fail on APPROVED_INTENT (second call)
+            if msg.message_type == MessageType.APPROVED_INTENT:
+                raise RuntimeError("Simulated bus failure")
+            return original_send(msg)
+
+        bus.send = failing_send
+
+        agent = GuardianAgent(message_bus=bus, config=GuardianConfig())
+        agent.start()
+
+        msg = self._make_trade_intent_message()
+        # Should not raise — fail-open
+        agent.on_message(msg)
+        # Verify review_intent still completed (stats updated)
+        stats = agent.get_stats()
+        self.assertEqual(stats["verdicts_approved"], 1)
+
+    def test_no_bus_no_emission(self):
+        """If no MessageBus, no APPROVED_INTENT is emitted (no crash).
+        如果没有 MessageBus，不发送 APPROVED_INTENT（也不会崩溃）。
+        """
+        agent = GuardianAgent(message_bus=None, config=GuardianConfig())
+        agent.start()
+
+        msg = self._make_trade_intent_message()
+        # Should not raise
+        agent.on_message(msg)
+        stats = agent.get_stats()
+        self.assertEqual(stats["verdicts_approved"], 1)
+
+    def test_risk_verdict_still_sent_to_strategist(self):
+        """RISK_VERDICT is still sent to Strategist (existing behavior unchanged).
+        RISK_VERDICT 仍然发送给 Strategist（现有行为不变）。
+        """
+        bus = MessageBus()
+        strategist_received = []
+        executor_received = []
+        bus.subscribe(AgentRole.STRATEGIST, lambda m: strategist_received.append(m))
+        bus.subscribe(AgentRole.EXECUTOR, lambda m: executor_received.append(m))
+
+        agent = GuardianAgent(message_bus=bus, config=GuardianConfig())
+        agent.start()
+
+        msg = self._make_trade_intent_message()
+        agent.on_message(msg)
+
+        # Strategist gets RISK_VERDICT
+        verdicts = [m for m in strategist_received if m.message_type == MessageType.RISK_VERDICT]
+        self.assertEqual(len(verdicts), 1, "Strategist should still receive RISK_VERDICT")
+
+        # Executor gets APPROVED_INTENT
+        approved = [m for m in executor_received if m.message_type == MessageType.APPROVED_INTENT]
+        self.assertEqual(len(approved), 1, "Executor should receive APPROVED_INTENT")
+
+
 if __name__ == "__main__":
     unittest.main()

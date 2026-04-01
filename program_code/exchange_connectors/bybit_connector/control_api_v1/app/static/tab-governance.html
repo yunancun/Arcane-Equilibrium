@@ -1062,7 +1062,7 @@ function renderRiskCard(riskData) {
   selectEl.innerHTML = '<option value="">-- Select Level --</option>';
   for (let i = 0; i < level; i++) {
     const levelName = GOV_RISK_LEVELS[i] || 'LEVEL_' + i;
-    selectEl.innerHTML += '<option value="' + levelName + '">' + i + ' — ' + levelName + '</option>';
+    selectEl.innerHTML += '<option value="' + ocEsc(levelName) + '">' + i + ' — ' + ocEsc(levelName) + '</option>'; /* APR01-MEDIUM-4 XSS fix */
   }
 
   // Disable override button if already at NORMAL
@@ -1499,7 +1499,8 @@ function renderPendingRecovery(requests) {
       + '批准 = 允许系统从异常状态恢复；拒绝 = 保持当前状态不变。'
       + '</div>';
     html += '<div style="display:flex;gap:8px;margin-top:8px">';
-    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(req.request_id || req.id) + '\')">✔ 批准恢复</button>';
+    var _reqIdJs = (req.request_id || req.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); /* APR01-MEDIUM-4 XSS fix: JS string escape */
+    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(_reqIdJs) + '\')">✔ 批准恢复</button>';
     html += '</div>';
     html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + ocEsc(req.request_id || req.id || '--') + '</div>';
     html += '</div>';
@@ -1811,7 +1812,7 @@ function renderPendingAudit(changes) {
     let comps = '';
     if (c.affected_components && c.affected_components.length > 0) {
       comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影响范围：'
-        + c.affected_components.map(x => _translateComp(x)).join('、')
+        + c.affected_components.map(x => ocEsc(_translateComp(x))).join('、') /* APR01-MEDIUM-4 XSS fix */
         + '</div>';
     }
 
@@ -1968,7 +1969,8 @@ async function loadSymbolWhitelist() {
       for (const sym of symbols) {
         html += '<div class="oc-whitelist-item">';
         html += '<span class="symbol">' + ocEsc(sym) + '</span>';
-        html += '<button class="remove-btn" onclick="showRemoveWhitelistModal(\'' + ocEsc(sym) + '\', \'' + cat + '\')">Remove / 移除</button>';
+        var _symJs = sym.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); /* APR01-MEDIUM-4 XSS fix: JS string escape */
+        html += '<button class="remove-btn" onclick="showRemoveWhitelistModal(\'' + ocEsc(_symJs) + '\', \'' + ocEsc(cat) + '\')">Remove / 移除</button>';
         html += '</div>';
       }
       html += '</div>';

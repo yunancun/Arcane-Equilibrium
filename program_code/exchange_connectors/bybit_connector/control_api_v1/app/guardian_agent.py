@@ -366,7 +366,20 @@ class GuardianAgent:
     # ── Event Alert Handling / 事件告警处理 ──
 
     def _handle_trade_intent(self, message: AgentMessage) -> None:
-        """Handle TradeIntent from Strategist / 处理来自 Strategist 的 TradeIntent"""
+        """Handle TradeIntent from Strategist via MessageBus, review and forward approved intents.
+        处理来自 Strategist 的 TradeIntent（经 MessageBus），审查后将批准的 intent 转发给 Executor。
+
+        After review_intent(), if the verdict is APPROVED or MODIFIED, emit an APPROVED_INTENT
+        message on the bus so ExecutorAgent can pick it up. This connects the designed but
+        previously broken Guardian→Executor MessageBus path (APR01-P1-5).
+
+        审查完成后，若裁决为 APPROVED 或 MODIFIED，通过 bus 发送 APPROVED_INTENT 消息，
+        使 ExecutorAgent 能够接收。这接通了原本设计但从未连接的 Guardian→Executor 消息总线路径。
+
+        Fail-open: bus.send failure only logs a warning — does NOT block the existing
+        pipeline_bridge direct execution path (which remains the primary path).
+        失败开放：bus.send 失败仅记录警告，不阻塞现有 pipeline_bridge 直接执行路径。
+        """
         payload = message.payload
         if not payload:
             return
@@ -383,7 +396,81 @@ class GuardianAgent:
                 invalidation_condition=payload.get("invalidation_condition", ""),
                 metadata=payload.get("metadata", {}),
             )
-            self.review_intent(intent)
+            verdict = self.review_intent(intent)
+
+            # ── APR01-P1-5: Emit APPROVED_INTENT to Executor via MessageBus ──
+            # ── APR01-P1-5：通过 MessageBus 向 Executor 发送 APPROVED_INTENT ──
+            # This is ADDITIVE — the existing pipeline_bridge direct path is unchanged.
+            # 这是附加逻辑，现有 pipeline_bridge 直接路径不受影响。
+            #
+            # ⚠ MUTUAL EXCLUSIVITY ASSUMPTION (E2 review 2026-04-01):
+            # This bus-based path is ONLY reachable when Strategist sends TRADE_INTENT
+            # via MessageBus. The pipeline_bridge path calls review_intent() DIRECTLY
+            # without sending TRADE_INTENT on the bus, so _handle_trade_intent() never
+            # fires. The two paths are currently mutually exclusive per intent.
+            # TODO: Before activating bus-based flow in production, add intent_id
+            # deduplication in ExecutorAgent to prevent double execution if both paths
+            # are ever active simultaneously.
+            # ⚠ 互斥假设（E2 审查 2026-04-01）：
+            # 此 bus 路径仅在 Strategist 通过 MessageBus 发送 TRADE_INTENT 时触发。
+            # pipeline_bridge 直接调用 review_intent()，不发送 TRADE_INTENT，
+            # 因此 _handle_trade_intent() 不会触发。两条路径当前互斥。
+            # TODO：在生产启用 bus 流程前，需在 ExecutorAgent 中添加 intent_id 去重，
+            # 防止两条路径同时激活时重复下单。
+            if self.bus and verdict.result in (
+                RiskVerdictResult.APPROVED,
+                RiskVerdictResult.MODIFIED,
+            ):
+                # Build the payload ExecutorAgent._handle_approved_intent() expects:
+                # intent_id, symbol, direction, size, metadata
+                # 构建 ExecutorAgent._handle_approved_intent() 期望的负载格式
+                approved_payload = intent.to_dict()
+                if verdict.result == RiskVerdictResult.MODIFIED:
+                    # Apply Guardian's modifications before forwarding
+                    # 转发前应用 Guardian 的修改参数
+                    approved_payload["size"] = verdict.modified_params.get(
+                        "size", intent.size
+                    )
+                    approved_payload["params"] = {
+                        **intent.params,
+                        **verdict.modified_params,
+                    }
+                    approved_payload.setdefault("metadata", {})["guardian_modified"] = True
+
+                try:
+                    # sender=STRATEGIST to match VALID_ROUTES table
+                    # (STRATEGIST, EXECUTOR) → [APPROVED_INTENT]
+                    # 使用 STRATEGIST 作为发送者以匹配路由表定义
+                    approved_msg = AgentMessage(
+                        sender=AgentRole.STRATEGIST,
+                        receiver=AgentRole.EXECUTOR,
+                        message_type=MessageType.APPROVED_INTENT,
+                        priority=2,
+                        payload=approved_payload,
+                    )
+                    sent = self.bus.send(approved_msg)
+                    if sent:
+                        logger.info(
+                            "APPROVED_INTENT emitted to Executor for %s %s (verdict=%s) / "
+                            "已向 Executor 发送 APPROVED_INTENT：%s %s（裁决=%s）",
+                            intent.symbol, intent.intent_id, verdict.result.value,
+                            intent.symbol, intent.intent_id, verdict.result.value,
+                        )
+                    else:
+                        logger.warning(
+                            "APPROVED_INTENT bus.send returned False for %s — "
+                            "route validation may have failed (fail-open) / "
+                            "bus.send 返回 False：%s — 路由验证可能失败（失败开放）",
+                            intent.intent_id, intent.intent_id,
+                        )
+                except Exception as e:
+                    # Fail-open: log but don't block — pipeline_bridge is the primary path
+                    # 失败开放：仅记录，不阻塞 — pipeline_bridge 是主要执行路径
+                    logger.warning(
+                        "Failed to emit APPROVED_INTENT on bus (fail-open): %s / "
+                        "通过 bus 发送 APPROVED_INTENT 失败（失败开放）：%s",
+                        e, e,
+                    )
         except Exception as e:
             logger.error("Failed to handle trade intent: %s / 处理交易意图失败: %s", e, e)
             with self._lock:
