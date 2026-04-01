@@ -21,26 +21,77 @@ const OC_USER_KEY = 'oc_username';
 })();
 
 function ocAuthCheck() {
-  // Synchronous check: send a quick XHR to /api/v1/auth/check.
-  // If not authenticated, redirect to login. Uses sync XHR because this runs
-  // at page top before any async code.
-  // 同步检查：向 /api/v1/auth/check 发送快速请求。未认证则跳转登录页。
-  // 使用同步 XHR 因为这在页面顶部、任何异步代码之前执行。
-  try {
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', '/api/v1/auth/check', false);  // synchronous
-    xhr.send();
-    if (xhr.status !== 200) {
-      sessionStorage.setItem('oc_login_redirect', '/console');
-      window.location.href = '/login';
-      return false;
+  // Async auth check: replaces blocking synchronous XHR (which froze the entire page
+  // when the server was not yet ready after a restart).
+  // 非同步認證檢查：取代同步 XHR（同步 XHR 在服務器重啟後未就緒時會凍結整個頁面）。
+  //
+  // Strategy: kick off an async fetch in the background. If the server responds
+  // with 401/403, redirect immediately. If the server is not up yet (network error
+  // or timeout), wait for it via waitForServerUp() before redirecting — this avoids
+  // a false-positive redirect to /login while the server is still starting.
+  // 策略：在背景發起 async fetch。若 401/403 立即跳轉。若服務器未就緒（網絡錯誤或超時），
+  // 先等待服務器就緒再判斷，避免啟動期間誤跳轉登錄頁。
+  (async function _asyncAuthCheck() {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 3000);  // 3s timeout
+      const r = await fetch('/api/v1/auth/check', {
+        credentials: 'same-origin',
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      if (r.status === 401 || r.status === 403) {
+        sessionStorage.setItem('oc_login_redirect', window.location.pathname || '/console');
+        window.location.href = '/login';
+      }
+      // 200: already authenticated, continue page load
+      // other: server might be starting up, treat as auth ok for now
+    } catch (e) {
+      // Network error or timeout: server may still be starting.
+      // Do not redirect to login — the page will handle retries via waitForServerUp().
+      // 網絡錯誤或超時：服務器可能正在啟動，不跳轉登錄頁，由 waitForServerUp() 處理重試。
+      console.warn('[ocAuthCheck] server not reachable, will retry:', e && e.message);
     }
-    return true;
-  } catch (e) {
-    sessionStorage.setItem('oc_login_redirect', '/console');
-    window.location.href = '/login';
-    return false;
+  })();
+  // Return true synchronously so callers that check the return value still work.
+  // 同步返回 true，保持向後兼容（調用方若檢查返回值仍能正常工作）。
+  return true;
+}
+
+/**
+ * Poll /api/v1/system/startup-status until the server is up (or timeout).
+ * 輪詢 startup-status 端點，直到服務器響應（或超時）。
+ *
+ * Replaces the old fixed `setTimeout(callback, 2000)` pattern used in console.html sidebar.
+ * The server is considered "up" as soon as any response is received from the endpoint,
+ * regardless of whether background tasks (e.g. SymbolCategoryRegistry) are complete.
+ *
+ * @param {Function} callback - called once server is up (or timeout reached)
+ * @param {number} maxWaitMs - max wait in ms before forcing callback (default 15000)
+ * @param {number} intervalMs - poll interval in ms (default 400)
+ */
+async function waitForServerUp(callback, maxWaitMs = 15000, intervalMs = 400) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 2000);
+      const r = await fetch('/api/v1/system/startup-status', {
+        credentials: 'same-origin',
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      if (r.ok) {
+        callback();
+        return;
+      }
+    } catch (_) { /* server not up yet, keep polling */ }
+    await new Promise(res => setTimeout(res, intervalMs));
   }
+  // Timeout: call anyway (fail-open), server may have started but startup-status route not available
+  // 超時後仍強制執行回調（fail-open），避免 GUI 永久等待
+  console.warn('[waitForServerUp] timeout reached, proceeding anyway');
+  callback();
 }
 
 function ocGetToken() {

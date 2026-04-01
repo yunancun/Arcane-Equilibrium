@@ -215,11 +215,34 @@ try:
 except ImportError:
     _SYMBOL_REGISTRY_AVAILABLE = False
 
+# ── Startup Readiness State（模塊頂層，GIL 保護，dict key-level 替換是原子操作）──
+# Tracks background init progress. GUI polls /api/v1/system/startup-status to detect readiness.
+# 追蹤背景初始化進度。GUI 輪詢端點確認就緒狀態，取代盲等 2s。
+_STARTUP_STATE: dict[str, dict] = {
+    "symbol_registry": {"status": "pending"},  # pending | initializing | ready | failed | error
+}
+
 @app.on_event("startup")
 async def _startup_integrity_check() -> None:
     """Startup integrity check — fail-closed if non-optional deps are missing.
     啟動完整性驗證 — 非可選依賴缺失時 fail-closed 拒絕啟動。
+
+    ARCHITECTURE RULE（嚴禁違反 / DO NOT VIOLATE）:
+      This handler MUST complete in < 100ms.
+      ALL slow I/O operations (HTTP, file, time.sleep) MUST be offloaded to daemon threads.
+      此 handler 必須在 < 100ms 內完成。
+      所有慢速 I/O（HTTP、文件、sleep）必須放入 daemon thread 執行。
+
+      ✅ DO:   threading.Thread(target=slow_fn, daemon=True).start()
+      ❌ NEVER: await asyncio.to_thread(anything_with_network_io)
+      ❌ NEVER: await httpx/aiohttp/requests calls
+      ❌ NEVER: time.sleep(), urllib.request.urlopen() without thread offload
+
+      Reference pattern: ccbed0d (pipeline_bridge K-line bootstrap fix)
+                         This file Phase 4 (SymbolCategoryRegistry daemon thread)
     """
+    import time as _time
+    _t0 = _time.monotonic()
     from .paper_trading_routes import GOV_HUB, ENGINE, RISK_MANAGER, H0_GATE  # noqa: PLC0415
     from .phase2_strategy_routes import PIPELINE_BRIDGE  # noqa: PLC0415
 
@@ -298,40 +321,59 @@ async def _startup_integrity_check() -> None:
             _reauth_exc, _reauth_exc,
         )
 
-    # 軟性依賴：symbol_category_registry（可選，啟動時預填 symbol→category 映射）
-    # Soft dep: symbol_category_registry (optional; pre-seeds symbol→category map at startup)
+    # ── Phase 4: SymbolCategoryRegistry 背景初始化（daemon thread，不阻斷 startup）──
+    # 原先使用 await asyncio.to_thread() 會阻擋 startup handler return（uvicorn 須等 handler 完成才接受連線）。
+    # 改為 daemon thread：handler 立刻 return，HTTP 服務立即就緒，registry 在背景填充。
+    # Previously used await asyncio.to_thread() which blocked the startup handler return.
+    # Changed to daemon thread: handler returns immediately, HTTP service is ready at once.
+    # Pattern: identical to ccbed0d pipeline_bridge K-line bootstrap fix.
     if _SYMBOL_REGISTRY_AVAILABLE and PIPELINE_BRIDGE is not None:
-        try:
-            import os as _os
-            import asyncio as _asyncio
-            _bybit_host = _os.environ.get("BYBIT_API_HOST", "https://api-testnet.bybit.com")
-            _registry = _SymbolCategoryRegistry(bybit_host=_bybit_host)
-            _refreshed = await _asyncio.to_thread(_registry.refresh)
-            if _refreshed:
-                _count = await _asyncio.to_thread(_registry.seed_pipeline_bridge, PIPELINE_BRIDGE)
-                # ★ 注入 registry 給 PipelineBridge，用於 tick_size/qty_step 查詢（止損價精度取整）
-                # Inject registry into PipelineBridge for tick_size/qty_step lookup (stop price rounding).
-                if hasattr(PIPELINE_BRIDGE, "set_symbol_registry"):
-                    PIPELINE_BRIDGE.set_symbol_registry(_registry)
-                base.logger.info(
-                    "SymbolCategoryRegistry seeded %d symbol→category entries into PipelineBridge "
-                    "/ SymbolCategoryRegistry 已注入 %d 條 symbol→category 映射",
-                    _count, _count,
-                )
-            else:
+        import threading as _threading
+        import os as _os
+
+        _captured_bridge = PIPELINE_BRIDGE  # capture before thread start to avoid closure issues
+
+        def _registry_init_bg() -> None:
+            """Background daemon: refresh SymbolCategoryRegistry and seed PipelineBridge.
+            背景 daemon：刷新 SymbolCategoryRegistry 並注入 PipelineBridge。
+            """
+            try:
+                _bybit_host = _os.environ.get("BYBIT_API_HOST", "https://api-testnet.bybit.com")
+                _registry = _SymbolCategoryRegistry(bybit_host=_bybit_host)
+                _refreshed = _registry.refresh()
+                if _refreshed:
+                    _count = _registry.seed_pipeline_bridge(_captured_bridge)
+                    # Inject registry for tick_size/qty_step lookup (stop price rounding).
+                    # 注入 registry 供止損價精度取整使用。
+                    if hasattr(_captured_bridge, "set_symbol_registry"):
+                        _captured_bridge.set_symbol_registry(_registry)
+                    base.logger.info(
+                        "SymbolCategoryRegistry seeded %d symbol→category entries (bg thread) "
+                        "/ SymbolCategoryRegistry 背景注入 %d 條 symbol→category 映射",
+                        _count, _count,
+                    )
+                    _STARTUP_STATE["symbol_registry"] = {"status": "ready", "count": _count}
+                else:
+                    base.logger.warning(
+                        "SymbolCategoryRegistry.refresh() failed (bg thread); "
+                        "PipelineBridge will rely on Plan B runtime registration "
+                        "/ 背景 refresh() 失敗，PipelineBridge 將依賴方案 B 的運行時登記"
+                    )
+                    _STARTUP_STATE["symbol_registry"] = {"status": "failed"}
+            except Exception as _exc:
                 base.logger.warning(
-                    "SymbolCategoryRegistry.refresh() failed at startup; "
-                    "PipelineBridge will rely on Plan B runtime registration "
-                    "/ 啟動時 refresh() 失敗，PipelineBridge 將依賴方案 B 的運行時登記"
+                    "SymbolCategoryRegistry bg init failed (non-fatal): %s "
+                    "/ SymbolCategoryRegistry 背景初始化失敗（不阻斷）：%s",
+                    _exc, _exc,
                 )
-        except Exception as _reg_exc:
-            # soft dep：任何例外不阻斷啟動
-            # soft dep: any exception must not block startup
-            base.logger.warning(
-                "SymbolCategoryRegistry startup init failed (non-fatal): %s "
-                "/ SymbolCategoryRegistry 啟動初始化失敗（不阻斷啟動）：%s",
-                _reg_exc, _reg_exc,
-            )
+                _STARTUP_STATE["symbol_registry"] = {"status": "error"}
+
+        _STARTUP_STATE["symbol_registry"] = {"status": "initializing"}
+        _threading.Thread(target=_registry_init_bg, daemon=True, name="registry-init").start()
+        base.logger.info(
+            "SymbolCategoryRegistry background init started (non-blocking) "
+            "/ SymbolCategoryRegistry 背景初始化已啟動（非阻塞）"
+        )
 
     # ── Phase 3: ExperimentLedger startup auto-seed from TruthSourceRegistry snapshot ──
     # 啟動時從 TruthSourceRegistry 快照自動填充初始假設（fail-open，不阻斷啟動）
@@ -375,6 +417,40 @@ async def _startup_integrity_check() -> None:
             "EvolutionScheduler startup failed (fail-open): %s / 進化排程器啟動失敗（不阻斷）：%s",
             _sched_exc, _sched_exc,
         )
+
+    _elapsed_ms = (_time.monotonic() - _t0) * 1000
+    base.logger.info(
+        "Startup handler completed in %.1f ms (target < 100 ms) "
+        "/ 啟動 handler 耗時 %.1f ms（目標 < 100 ms）",
+        _elapsed_ms, _elapsed_ms,
+    )
+    if _elapsed_ms > 500:
+        base.logger.warning(
+            "Startup handler took %.1f ms — exceeds 500 ms budget. "
+            "Check for blocking await calls above. / 啟動 handler 耗時超過 500 ms，請檢查是否有阻塞 await",
+            _elapsed_ms,
+        )
+
+
+@app.get("/api/v1/system/startup-status", include_in_schema=False)
+async def _system_startup_status():
+    """
+    Returns background initialization progress. No auth required — read-only public metadata.
+    返回背景初始化進度。不需認證，僅返回只讀公開元數據（無業務數據、無授權信息）。
+
+    GUI polls this after server restart to know when HTTP service is accepting requests.
+    GUI 在服務器重啟後輪詢此端點，確認 HTTP 服務已就緒。
+
+    Response:
+      server: "up" — always present when this endpoint responds
+      background_init: dict per component {"status": pending|initializing|ready|failed|error}
+      all_ready: true when all background tasks have completed (success or failure)
+    """
+    all_ready = all(
+        v.get("status") in ("ready", "failed", "error")
+        for v in _STARTUP_STATE.values()
+    )
+    return {"server": "up", "background_init": _STARTUP_STATE, "all_ready": all_ready}
 
 
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
