@@ -220,19 +220,40 @@ class PaperStateStore:
         self.file_path = Path(file_path)
         self.file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._lock = threading.RLock()
+        # In-memory cache: avoids re-reading from disk on every tick.
+        # 內存緩存：避免每次 tick 都從磁碟讀取。
+        self._cache: dict[str, Any] | None = None
+        # Debounced disk write: tick() calls mutate() many times per second,
+        # but actual disk I/O only happens every WRITE_INTERVAL_S seconds.
+        # 防抖磁碟寫入：tick() 每秒多次 mutate()，但磁碟 I/O 最多每 5 秒一次。
+        self._WRITE_INTERVAL_S = 5.0
+        self._last_disk_write_ts: float = 0.0
+        self._dirty = False
         if not self.file_path.exists():
-            self.write(build_default_paper_state())
+            self.write(build_default_paper_state(), force=True)
 
     def read(self) -> dict[str, Any]:
         with self._lock:
+            if self._cache is not None:
+                return copy.deepcopy(self._cache)
             with self.file_path.open("r", encoding="utf-8") as handle:
-                return json.load(handle)
+                self._cache = json.load(handle)
+                return copy.deepcopy(self._cache)
 
-    def write(self, state: dict[str, Any]) -> dict[str, Any]:
+    def write(self, state: dict[str, Any], force: bool = False) -> dict[str, Any]:
         import tempfile
         with self._lock:
             state["meta"]["revision"] = state["meta"].get("revision", 0) + 1
             state["meta"]["updated_ts_ms"] = now_ms()
+            self._cache = state
+            self._dirty = True
+
+            # Debounce: skip disk write if interval hasn't elapsed (unless forced)
+            # 防抖：如果間隔未達到則跳過磁碟寫入（除非強制）
+            _now = time.time()
+            if not force and (_now - self._last_disk_write_ts) < self._WRITE_INTERVAL_S:
+                return state
+
             # Atomic write: write to temp file then rename (crash-safe)
             # 原子写入：先写临时文件再重命名（崩溃安全）
             dir_path = self.file_path.parent
@@ -242,6 +263,8 @@ class PaperStateStore:
                     json.dump(state, handle, ensure_ascii=False, indent=2)
                 os.chmod(tmp_path, 0o600)
                 os.replace(tmp_path, str(self.file_path))
+                self._last_disk_write_ts = _now
+                self._dirty = False
             except Exception:
                 try:
                     os.unlink(tmp_path)
@@ -250,10 +273,16 @@ class PaperStateStore:
                 raise
             return state
 
+    def flush(self) -> None:
+        """Force write cached state to disk / 強制將緩存狀態寫入磁碟"""
+        with self._lock:
+            if self._cache is not None and self._dirty:
+                self.write(self._cache, force=True)
+
     def mutate(self, mutator) -> dict[str, Any]:
         with self._lock:
             current = self.read()
-            mutated = mutator(copy.deepcopy(current))
+            mutated = mutator(current)  # No deepcopy needed — read() returns a copy
             return self.write(mutated)
 
 
@@ -1239,7 +1268,9 @@ class PaperTradingEngine:
             if self.risk_manager:
                 state["risk"] = self.risk_manager.get_risk_state_for_persistence()
             return state
-        return self.store.mutate(mutator)
+        result = self.store.mutate(mutator)
+        self.store.flush()  # stop_session: force disk write / 停止會話：強制寫磁碟
+        return result
 
     def get_session_status(self) -> dict[str, Any]:
         """Get current session status / 获取 session 状态"""
