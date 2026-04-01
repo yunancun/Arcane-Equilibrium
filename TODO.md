@@ -914,6 +914,126 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 
 ---
 
+## ██ Phase 3 Batch 3A — L3 假設與實驗管線基礎設施（明日啟動）
+
+> **目標**：建立管線讓系統能提出假設（Hypothesis）並用 BacktestEngine 驗證，
+> 驗證結果自動回饋 TruthSourceRegistry + StrategistAgent 決策權重。
+> 基礎設施先建好，等 Paper Trading 數據積累後自然生效。
+>
+> **前置條件（已全部就緒）**：TruthSourceRegistry ✅ · BacktestEngine ✅ · AnalystAgent ✅ · StrategistAgent ✅
+> **原則遵守**：原則 7（學習平面隔離）· 原則 10（認知誠實，HYPOTHESIS 最低信心級別）
+
+---
+
+### [ ] 3A-1：HypothesisEngine（新建，~3h）
+- **檔案**：`app/hypothesis_engine.py`（新建）
+- **職責**：從 TruthSourceRegistry 的 PatternClaims 生成可測試的假設
+- **核心類**：
+  ```
+  Hypothesis(dataclass)
+    hypothesis_id: str
+    symbol: str
+    strategy: str
+    parameter_delta: dict  # 例如 {"rsi_period": 14→21, "fast_ma": 9→12}
+    source_claim_ids: list[str]  # 來自哪些 PatternClaim
+    confidence: float  # 繼承 source claims 的信心度，最高 0.7（HYPOTHESIS 級別）
+    created_at: float
+    status: "pending" | "running" | "validated" | "rejected" | "expired"
+
+  HypothesisEngine
+    generate_from_claims(registry, symbol, strategy) → list[Hypothesis]
+      - 只對 confidence ≥ 0.5 的 PatternClaim 生成假設
+      - 每個 claim 最多生成 3 個參數變體假設
+      - 永不生成 "all" strategy 假設（原則 10）
+    get_pending(limit=10) → list[Hypothesis]
+    mark_validated(hypothesis_id, sharpe_ratio)
+    mark_rejected(hypothesis_id, reason)
+  ```
+- **原則 7 隔離**：零 live 模組 import（不可 import PipelineBridge / PaperTradingEngine）
+- **測試**：`tests/test_hypothesis_engine.py`（≥ 15 個）
+- **E1 指派**：E1-Alpha
+- **工時**：3h + E2 + E4
+
+---
+
+### [ ] 3A-2：ExperimentRunner（新建，~3h）
+- **檔案**：`app/experiment_runner.py`（新建）
+- **職責**：取出 pending Hypothesis，用 BacktestEngine 驗證，寫回結果
+- **核心邏輯**：
+  ```python
+  async def run_pending_experiments(
+      engine: BacktestEngine,
+      hypothesis_engine: HypothesisEngine,
+      kline_data: dict,  # symbol → list of KlineBar
+      max_per_run: int = 5,
+  ) → list[ExperimentResult]:
+      # 取最多 max_per_run 個 pending hypotheses
+      # 對每個：構造 BacktestConfig（帶 parameter_delta）→ engine.run()
+      # sharpe_ratio > 1.0 and total_trades ≥ 10 → mark_validated
+      # else → mark_rejected
+      # 返回 ExperimentResult 列表
+  ```
+- **ExperimentResult(dataclass)**：hypothesis_id, sharpe_ratio, total_trades, win_rate, passed
+- **原則 7 隔離**：使用已有 BacktestEngine，不調用 live 模組
+- **asyncio.to_thread**：BacktestEngine.run() 是同步，需包裝
+- **測試**：`tests/test_experiment_runner.py`（≥ 12 個，含 mock BacktestEngine）
+- **E1 指派**：E1-Beta
+- **工時**：3h + E2 + E4
+
+---
+
+### [ ] 3A-3：ExperimentRoutes API（新建，~2h）
+- **檔案**：`app/experiment_routes.py`（新建，仿 backtest_routes.py 模式）
+- **端點**：
+  - `POST /api/v1/experiments/generate` — 從 TruthSourceRegistry 生成假設（Operator 認證）
+  - `POST /api/v1/experiments/run` — 執行 pending 假設（Operator 認證，asyncio.to_thread）
+  - `GET /api/v1/experiments/status` — 查看假設狀態統計（只讀）
+- **原則 7 隔離**：不 import live 模組（sys.path 5 級上溯複用 phase2_strategy_routes 模式）
+- **掛載**：`main.py` 加 `app.include_router(experiment_router)`
+- **測試**：`tests/test_experiment_routes.py`（≥ 12 個）
+- **E1 指派**：E1-Gamma
+- **工時**：2h + E2 + E4
+
+---
+
+### [ ] 3A-4：TruthSourceRegistry 持久化（~2h）
+- **檔案**：`app/truth_source_registry.py`（修改）
+- **問題**：目前僅記憶體，重啟清零，假設驗證結果無法跨 session 保留
+- **方案**：新增 `save_snapshot(path)` / `load_snapshot(path)` JSON 序列化
+  - startup：`_startup_integrity_check()` 嘗試 load（fail-open）
+  - 每次 `register_claim()` 後非同步觸發保存（debounce 30s，不阻塞主路徑）
+- **原則 7 隔離**：保存路徑用 env var `OPENCLAW_TRUTH_REGISTRY_PATH`，默認 `settings/truth_registry_snapshot.json`
+- **測試**：`tests/test_truth_source_registry.py` 補充 5 個持久化測試
+- **E1 指派**：E1-Delta
+- **工時**：2h + E2 + E4
+
+---
+
+### Phase 3 Batch 3A 工作鏈
+
+```
+PM + FA + PA 規劃確認（本條目即為計劃）
+  ↓
+E1-Alpha（3A-1）‖ E1-Beta（3A-2）‖ E1-Delta（3A-4）  ← 完全並行（不同文件）
+  ↓ 均完成
+E1-Gamma（3A-3，依賴 3A-1+3A-2 接口定義）
+  ↓
+E2 統一代碼審查（重點：原則 7 隔離 / HYPOTHESIS 信心上限 / asyncio 安全）
+  ↓
+E4 全量回歸（目標：≥ 3240 passed，新增 ~40 個測試）
+  ↓
+PM 確認 + CLAUDE.md + commit
+```
+
+### 驗收標準（FA 定義）
+- HypothesisEngine 可從 TruthSourceRegistry 自動生成假設（零 AI 調用）
+- ExperimentRunner 可驗證假設並返回 sharpe/win_rate
+- TruthSourceRegistry 重啟後 claims 不清零
+- 所有模組零 live 模組 import（原則 7 可審計）
+- E2 PASS + E4 ≥ 3240 passed
+
+---
+
 ## ██ 已知待辦（已文件化，非緊急）
 
 ### MessageBus 架構問題（ISSUE-1/ISSUE-2）
