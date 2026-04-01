@@ -32,6 +32,7 @@ import os
 import stat
 import threading
 import time
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -225,7 +226,7 @@ class Layer2CostTracker:
         """
         with self._lock:
             if model_tier not in self._pricing.models:
-                logger.warning(f"Unknown model tier: {model_tier}, using sonnet pricing")
+                logger.warning("Unknown model tier: %s, using sonnet pricing", model_tier)
                 model_tier = "sonnet"
             cost = self._pricing.models[model_tier].cost_for_tokens(input_tokens, output_tokens)
             session.cost_usd = round(session.cost_usd + cost, 6)
@@ -478,48 +479,58 @@ class Layer2CostTracker:
             "roi_disclaimer": "基於模擬 PnL，非真實盈虧",
         }
 
-    # ── Ollama Call Tracking / Ollama 調用追蹤 ──
+    # ── Unified Call Recording / 統一調用記錄 ──
 
-    def record_ollama_call(
+    def record_call(
         self,
+        provider: str,
         model: str,
         duration_ms: float = 0.0,
         prompt_tokens: int = 0,
+        cost_usd: float = 0.0,
     ) -> None:
         """
-        Record a local Ollama model call for cost and performance tracking.
-        記錄本地 Ollama 模型調用，追蹤次數、延遲與 token 使用量。
+        Unified method to record any AI model call (Ollama, Claude, etc.).
+        統一的 AI 模型調用記錄方法（Ollama、Claude 等均可使用）。
 
-        Ollama calls are free but tracked for ROI and resource awareness (principle 13).
-        Ollama 調用免費，但仍追蹤以支持 AI 使用效果評估（根原則 13）。
+        This is the preferred entry point for all AI call tracking (principle 13).
+        For Ollama calls, cost_usd is always 0.0 (local inference).
+        For Claude calls, cost_usd should be the computed token cost.
+        這是所有 AI 調用追蹤的首選入口（根原則 13）。
+        Ollama 調用 cost_usd 始終為 0.0（本地推理）；
+        Claude 調用應傳入計算後的 token 成本。
 
-        Increments per-model and total counters in a lightweight in-memory dict.
-        Uses a persistent entry in the daily_spend state file under 'ollama_calls'.
-        在輕量記憶體字典中更新每個模型和總計數器。
-        也寫入每日花費狀態檔中的 'ollama_calls' 分區。
+        Args:
+            provider: AI provider name (e.g., "ollama", "claude", "perplexity")
+                      AI 供應商名稱
+            model: Model identifier (e.g., "l1_9b", "sonnet")
+                   模型識別符
+            duration_ms: Call duration in milliseconds / 調用耗時毫秒
+            prompt_tokens: Number of prompt tokens used / 使用的 prompt token 數
+            cost_usd: USD cost of the call (0.0 for local models) / 調用的 USD 成本
         """
+        # Delegate to the internal Ollama tracking path for backward compatibility.
+        # For non-Ollama providers, the same in-memory + persistent tracking applies.
+        # 委派到內部 Ollama 追蹤路徑以保持向後兼容。
+        # 非 Ollama 供應商同樣使用相同的記憶體 + 持久化追蹤。
         with self._lock:
-            # In-memory tracking — survives only until process restart
-            # 記憶體追蹤 — 僅在進程重啟前有效
             if not hasattr(self, "_ollama_stats"):
-                # Lazy init: keep model-level stats in memory
-                # 懶初始化：在記憶體中保存模型級別統計
                 self._ollama_stats: dict = {}
+            key = f"{provider}/{model}"
             entry = self._ollama_stats.setdefault(
-                model,
-                {"call_count": 0, "total_duration_ms": 0.0, "total_prompt_tokens": 0},
+                key,
+                {"call_count": 0, "total_duration_ms": 0.0, "total_prompt_tokens": 0, "total_cost_usd": 0.0},
             )
             entry["call_count"] += 1
             entry["total_duration_ms"] = round(entry["total_duration_ms"] + duration_ms, 2)
             entry["total_prompt_tokens"] += prompt_tokens
+            entry["total_cost_usd"] = round(entry.get("total_cost_usd", 0.0) + cost_usd, 6)
 
-        # Also persist to state file under a lightweight 'ollama_calls' section
-        # 同時持久化到狀態檔的 'ollama_calls' 分區（輕量追蹤，不含 USD 成本）
         try:
             raw = self._read_raw()
             ollama_section = raw.setdefault("ollama_calls", {})
             model_entry = ollama_section.setdefault(
-                model,
+                key,
                 {"call_count": 0, "total_duration_ms": 0.0},
             )
             model_entry["call_count"] = model_entry.get("call_count", 0) + 1
@@ -530,7 +541,39 @@ class Layer2CostTracker:
         except Exception:
             # Persistence failure is non-fatal — in-memory stats still updated
             # 持久化失敗是非致命的 — 記憶體統計已更新
-            logger.warning("record_ollama_call: failed to persist to state file, non-fatal")
+            logger.warning("record_call: failed to persist to state file, non-fatal")
+
+    # ── Ollama Call Tracking (deprecated wrapper) / Ollama 調用追蹤（已棄用包裝） ──
+
+    def record_ollama_call(
+        self,
+        model: str,
+        duration_ms: float = 0.0,
+        prompt_tokens: int = 0,
+    ) -> None:
+        """
+        DEPRECATED: Use record_call(provider="ollama", ...) instead.
+        已棄用：請改用 record_call(provider="ollama", ...)。
+
+        Record a local Ollama model call for cost and performance tracking.
+        記錄本地 Ollama 模型調用，追蹤次數、延遲與 token 使用量。
+
+        Ollama calls are free but tracked for ROI and resource awareness (principle 13).
+        Ollama 調用免費，但仍追蹤以支持 AI 使用效果評估（根原則 13）。
+        """
+        warnings.warn(
+            "record_ollama_call() is deprecated, use record_call(provider='ollama', ...) instead. "
+            "record_ollama_call() 已棄用，請改用 record_call(provider='ollama', ...)。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.record_call(
+            provider="ollama",
+            model=model,
+            duration_ms=duration_ms,
+            prompt_tokens=prompt_tokens,
+            cost_usd=0.0,
+        )
 
     def get_ollama_stats(self) -> dict:
         """
@@ -543,7 +586,15 @@ class Layer2CostTracker:
         with self._lock:
             if not hasattr(self, "_ollama_stats"):
                 return {}
-            return dict(self._ollama_stats)
+            # Strip "ollama/" prefix for backward compatibility with callers
+            # expecting bare model names (e.g., "l1_9b" not "ollama/l1_9b").
+            # 去除 "ollama/" 前綴，向後兼容調用者期望的裸模型名稱。
+            result: dict = {}
+            for key, val in self._ollama_stats.items():
+                short_key = key.split("/", 1)[1] if "/" in key else key
+                if key.startswith("ollama/") or "/" not in key:
+                    result[short_key] = val
+            return result
 
     def get_cost_edge_ratio(self) -> dict:
         """
@@ -606,5 +657,5 @@ class Layer2CostTracker:
             zeroed = {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0}
             raw.setdefault("daily_spend", {})[key] = zeroed
             self._write_raw(raw)
-            logger.info(f"Layer2CostTracker: today's costs reset to zero (date={key})")
+            logger.info("Layer2CostTracker: today's costs reset to zero (date=%s)", key)
             return {"date": key, **zeroed}

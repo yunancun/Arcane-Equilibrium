@@ -324,7 +324,7 @@ def get_governance_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting governance status: {e}")
+        logger.error("Error getting governance status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -388,7 +388,7 @@ def get_detailed_governance_status(
             else:
                 detailed["recovery_gate"] = None
         except Exception as e:
-            logger.debug(f"Error getting recovery gate status: {e}")
+            logger.debug("Error getting recovery gate status: %s", e)
             detailed["recovery_gate"] = None
 
         # Change Audit Log pending count
@@ -402,7 +402,7 @@ def get_detailed_governance_status(
             else:
                 detailed["change_audit_log"] = None
         except Exception as e:
-            logger.debug(f"Error getting change audit log status: {e}")
+            logger.debug("Error getting change audit log status: %s", e)
             detailed["change_audit_log"] = None
 
         # OMS State Machine status if available
@@ -417,7 +417,7 @@ def get_detailed_governance_status(
             else:
                 detailed["oms"] = None
         except Exception as e:
-            logger.debug(f"Error getting OMS status: {e}")
+            logger.debug("Error getting OMS status: %s", e)
             detailed["oms"] = None
 
         # Demo connector status if available
@@ -432,7 +432,7 @@ def get_detailed_governance_status(
             else:
                 detailed["demo_connector"] = None
         except Exception as e:
-            logger.debug(f"Error getting demo connector status: {e}")
+            logger.debug("Error getting demo connector status: %s", e)
             detailed["demo_connector"] = None
 
         # Overall health
@@ -448,7 +448,7 @@ def get_detailed_governance_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting detailed governance status: {e}", exc_info=True)
+        logger.error("Error getting detailed governance status: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -482,7 +482,7 @@ def get_authorization_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting authorization status: {e}")
+        logger.error("Error getting authorization status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -613,7 +613,7 @@ def approve_authorization(
                 else:
                     return GovernanceResponse.error("No pending authorization found", code="not_found", status_code=404)
             except Exception as e:
-                logger.error(f"Error calling approval method: {e}")
+                logger.error("Error calling approval method: %s", e)
                 # SECURITY FIX #6: Generic error to client, full details logged server-side
                 raise HTTPException(status_code=500, detail="Failed to process approval")
 
@@ -628,7 +628,7 @@ def approve_authorization(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error approving authorization: {e}", exc_info=True)
+        logger.error("Error approving authorization: %s", e, exc_info=True)
         # SECURITY FIX #6: Return generic error message
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -674,7 +674,7 @@ def get_risk_level(
 
         return GovernanceResponse.success(data=level_detail, message="risk_level_status")
     except Exception as e:
-        logger.error(f"Error getting risk level: {e}")
+        logger.error("Error getting risk level: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -774,7 +774,7 @@ def override_risk_level(
                     _sanitize_log(actor.actor_id), current_level, target_level, sanitized_reason,
                 )
             except Exception as e:
-                logger.error(f"Error applying risk de-escalation: {e}")
+                logger.error("Error applying risk de-escalation: %s", e)
                 # SECURITY FIX #6: Return generic error to client
                 raise HTTPException(status_code=500, detail="Failed to apply risk override")
 
@@ -790,7 +790,7 @@ def override_risk_level(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in risk override: {e}", exc_info=True)
+        logger.error("Error in risk override: %s", e, exc_info=True)
         # SECURITY FIX #6: Return generic error message
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -891,7 +891,7 @@ def approve_de_escalation_request(
                 status_code=500
             )
 
-        logger.info(f"De-escalation request approved: {request_id} by {sanitized_approver}")
+        logger.info("De-escalation request approved: %s by %s", request_id, sanitized_approver)
 
         return GovernanceResponse.success(
             data={
@@ -904,7 +904,7 @@ def approve_de_escalation_request(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error approving de-escalation: {e}", exc_info=True)
+        logger.error("Error approving de-escalation: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -959,7 +959,7 @@ def trigger_manual_reconciliation(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in manual reconciliation: {e}", exc_info=True)
+        logger.error("Error in manual reconciliation: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -984,7 +984,7 @@ def get_pending_recovery_requests(
         pending = hub._recovery_gate.get_pending_requests()
         return GovernanceResponse.success(data=pending, message="recovery_pending_list")
     except Exception as e:
-        logger.error(f"Error getting pending recovery requests: {e}")
+        logger.error("Error getting pending recovery requests: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1054,7 +1054,7 @@ def approve_recovery_request(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error approving recovery request: {e}", exc_info=True)
+        logger.error("Error approving recovery request: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1087,7 +1087,7 @@ def get_change_history(
             message="audit_changes_list"
         )
     except Exception as e:
-        logger.error(f"Error getting change history: {e}")
+        logger.error("Error getting change history: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1114,7 +1114,7 @@ def get_pending_approvals(
 
         return GovernanceResponse.success(data=pending_data, message="audit_pending_list")
     except Exception as e:
-        logger.error(f"Error getting pending approvals: {e}")
+        logger.error("Error getting pending approvals: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1151,12 +1151,12 @@ def approve_audit_change(
         if result is None:
             return GovernanceResponse.error(f"Change {change_id} not found", code="not_found", status_code=404)
 
-        logger.info(f"Audit change {change_id} approved by {approver}")
+        logger.info("Audit change %s approved by %s", change_id, approver)
         return GovernanceResponse.success(data=result.to_dict(), message="audit_change_approved")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error approving audit change {change_id}: {e}")
+        logger.error("Error approving audit change %s: %s", change_id, e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1189,12 +1189,12 @@ def reject_audit_change(
         if result is None:
             return GovernanceResponse.error(f"Change {change_id} not found", code="not_found", status_code=404)
 
-        logger.info(f"Audit change {change_id} rejected by {rejector}")
+        logger.info("Audit change %s rejected by %s", change_id, rejector)
         return GovernanceResponse.success(data=result.to_dict(), message="audit_change_rejected")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error rejecting audit change {change_id}: {e}")
+        logger.error("Error rejecting audit change %s: %s", change_id, e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1275,12 +1275,12 @@ def get_symbol_whitelist(
                 else:
                     whitelist_data[category] = []
             except Exception as e:
-                logger.debug(f"Error getting whitelist for {category}: {e}")
+                logger.debug("Error getting whitelist for %s: %s", category, e)
                 whitelist_data[category] = []
 
         return GovernanceResponse.success(data=whitelist_data, message="symbol_whitelist")
     except Exception as e:
-        logger.error(f"Error getting symbol whitelist: {e}")
+        logger.error("Error getting symbol whitelist: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1342,7 +1342,7 @@ def add_symbol_to_whitelist(
                         auto_approve=True,
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to record whitelist change: {e}")
+                    logger.warning("Failed to record whitelist change: %s", e)
 
             logger.info(
                 "Symbol %s added to %s whitelist by %s",
@@ -1372,7 +1372,7 @@ def add_symbol_to_whitelist(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error adding symbol to whitelist: {e}", exc_info=True)
+        logger.error("Error adding symbol to whitelist: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1445,9 +1445,9 @@ def remove_symbol_from_whitelist(
                                 auto_approve=True,
                             )
                         except Exception as e:
-                            logger.warning(f"Failed to record whitelist change: {e}")
+                            logger.warning("Failed to record whitelist change: %s", e)
             except Exception as e:
-                logger.warning(f"Error updating whitelist for {cat}: {e}")
+                logger.warning("Error updating whitelist for %s: %s", cat, e)
 
         if changes_made:
             logger.info(
@@ -1474,7 +1474,7 @@ def remove_symbol_from_whitelist(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error removing symbol from whitelist: {e}", exc_info=True)
+        logger.error("Error removing symbol from whitelist: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1508,13 +1508,13 @@ def get_active_leases(
             try:
                 all_leases = [lease.to_dict() for lease in hub._lease_sm.get_all()]
             except Exception as _e:
-                logger.warning(f"Failed to fetch all leases: {_e}")
+                logger.warning("Failed to fetch all leases: %s", _e)
             # get_live() 仅返回 ACTIVE + BRIDGED 的活跃租约
             # get_live() returns only ACTIVE and BRIDGED leases
             try:
                 live_leases = [lease.to_dict() for lease in hub._lease_sm.get_live()]
             except Exception as _e:
-                logger.warning(f"Failed to fetch live leases: {_e}")
+                logger.warning("Failed to fetch live leases: %s", _e)
 
         lease_detail = {
             "active_count": status.active_leases_count,
@@ -1529,7 +1529,7 @@ def get_active_leases(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting leases: {e}")
+        logger.error("Error getting leases: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1573,7 +1573,7 @@ def get_governance_events(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving governance events: {e}")
+        logger.error("Error retrieving governance events: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1600,7 +1600,7 @@ def get_learning_tier_status(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving learning tier status: {e}")
+        logger.error("Error retrieving learning tier status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1646,7 +1646,7 @@ def promote_learning_tier(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error promoting learning tier: {e}")
+        logger.error("Error promoting learning tier: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1686,7 +1686,7 @@ def get_oms_orders(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error retrieving OMS orders: {e}")
+        logger.error("Error retrieving OMS orders: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1723,7 +1723,7 @@ def governance_health_check(
 
         return GovernanceResponse.success(data=health, message="health_check")
     except Exception as e:
-        logger.error(f"Error in health check: {e}")
+        logger.error("Error in health check: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -1750,7 +1750,7 @@ def get_paper_live_gate_status(
         status_info = raw_status.to_dict() if raw_status is not None and hasattr(raw_status, 'to_dict') else {"status": "not_evaluated"}
         return GovernanceResponse.success(data=status_info, message="paper_live_gate_status")
     except Exception as e:
-        logger.error(f"Error getting PaperLiveGate status: {e}")
+        logger.error("Error getting PaperLiveGate status: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

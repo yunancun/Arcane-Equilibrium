@@ -171,8 +171,8 @@ class AuditFileWriter:
         if self._current_file:
             try:
                 self._current_file.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("audit_persistence: %s", e)
             self._current_file = None
 
         # Determine new file path / 确定新文件路径
@@ -194,8 +194,8 @@ class AuditFileWriter:
                     seq += 1
                     path = self._build_file_path(date_str, seq)
                     continue
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("audit_persistence: %s", e)
             break
 
         # If file exists and is under size limit, append to it
@@ -209,7 +209,8 @@ class AuditFileWriter:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     self._records_in_file = sum(1 for _ in f)
-            except Exception:
+            except Exception as e:
+                logger.debug("audit_persistence: %s", e)
                 self._records_in_file = 0
         else:
             self._records_in_file = 0
@@ -266,8 +267,8 @@ class AuditFileWriter:
                 try:
                     self._current_file.flush()
                     os.fsync(self._current_file.fileno())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("audit_persistence: %s", e)
 
         return ids
 
@@ -277,8 +278,8 @@ class AuditFileWriter:
             if self._current_file:
                 try:
                     self._current_file.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("audit_persistence: %s", e)
                 self._current_file = None
 
     @property

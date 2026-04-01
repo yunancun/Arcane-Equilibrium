@@ -672,3 +672,45 @@ class TestAnnualizationFactors:
 
     def test_1d_factor_is_365(self):
         assert ANNUALIZATION_FACTORS["1d"] == 365
+
+
+# =============================================================================
+# E4 Edge Cases: Empty and Minimal Data / E4 边界: 空数据与最小数据
+# =============================================================================
+
+class TestBacktestEdgeCasesE4:
+    """Edge case tests for BacktestEngine with degenerate inputs (E4 追加).
+    回测引擎退化输入边界条件测试。"""
+
+    def test_zero_bars_returns_warning(self):
+        """0 bars (empty lists) should return a result with warning, not raise.
+        0 根 K 线（空列表）应返回带 warning 的结果，不应抛出异常。"""
+        engine = BacktestEngine()
+        config = _make_default_config()
+        result = engine.run(config, {"open": [], "high": [], "low": [], "close": [], "volume": []})
+        assert isinstance(result, BacktestResult)
+        assert result.warning is not None and len(result.warning) > 0
+        assert result.total_trades == 0
+        assert result.sharpe_ratio == 0.0
+
+    def test_single_bar_returns_warning(self):
+        """1 bar (below MIN_BARS_REQUIRED) should return a result with warning.
+        1 根 K 线（低于 MIN_BARS_REQUIRED）应返回带 warning 的结果。"""
+        engine = BacktestEngine()
+        config = _make_default_config()
+        ohlcv = {"open": [100.0], "high": [101.0], "low": [99.0], "close": [100.0], "volume": [1000.0]}
+        result = engine.run(config, ohlcv)
+        assert isinstance(result, BacktestResult)
+        assert result.warning is not None
+        assert "1 bars" in result.warning or "Insufficient" in result.warning
+        assert result.total_trades == 0
+
+    def test_flat_data_produces_valid_result(self):
+        """Flat OHLCV data (no price movement) should produce valid result.
+        完全平坦的 OHLCV（无价格变化）应产生有效结果。"""
+        engine = BacktestEngine()
+        config = _make_default_config()
+        ohlcv = _make_flat_ohlcv(100, price=100.0)
+        result = engine.run(config, ohlcv)
+        assert isinstance(result, BacktestResult)
+        assert result.sharpe_ratio is not None

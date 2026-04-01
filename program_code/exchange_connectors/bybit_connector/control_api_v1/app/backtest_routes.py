@@ -47,7 +47,7 @@ import urllib.request
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ── sys.path 注入（統一由 _path_setup 模塊處理）──────────────────────────────────
 # sys.path injection — centralized in _path_setup.py (APR01-MEDIUM-11 dedup)
@@ -237,9 +237,9 @@ class BacktestRunRequest(BaseModel):
       lookback_days  — number of historical days to use / 歷史天數（默認 30）
       backtest_mode  — MUST be True; route enforces this / 必須為 True（端點強制）
     """
-    symbol: str
-    timeframe: str       # e.g. "5m", "1h"
-    strategy_name: str
+    symbol: str = Field(..., max_length=40)           # e.g. "BTCUSDT" — 40 chars covers all Bybit pairs
+    timeframe: str = Field(..., max_length=10)       # e.g. "5m", "1h"
+    strategy_name: str = Field(..., max_length=200)  # strategy identifier
     lookback_days: int = 30
     backtest_mode: bool = True
 

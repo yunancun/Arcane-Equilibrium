@@ -49,7 +49,7 @@ import threading
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
 # ── sys.path 注入（統一由 _path_setup 模塊處理）──────────────────────────────────
 # sys.path injection — centralized in _path_setup.py (APR01-MEDIUM-11 dedup)
@@ -109,14 +109,23 @@ class EvolutionRunRequest(BaseModel):
       min_sharpe       — 注入 TruthRegistry 的最低 Sharpe / Min sharpe for registry injection (default 1.0)
       max_combinations — 最大組合數上限（默認 50）/ Max combinations cap (default 50)
     """
-    strategy_name: str
-    symbol: str
-    timeframe: str = "1h"
+    strategy_name: str = Field(..., max_length=200)  # strategy identifier
+    symbol: str = Field(..., max_length=40)          # e.g. "BTCUSDT"
+    timeframe: str = Field(default="1h", max_length=10)
     # list of {name: str, values: list} — validated in endpoint before ParameterGrid construction
     # 字典列表，{name: str, values: list}，在端點構造 ParameterGrid 前驗證格式
     parameter_grids: list
     min_sharpe: float = 1.0
-    max_combinations: int = 50
+    max_combinations: int = Field(default=50, le=200)  # cap at 200 to prevent combinatorial explosion
+
+    @validator("parameter_grids", each_item=True)
+    def _cap_values_list(cls, item: Any) -> Any:  # noqa: N805
+        """Cap each parameter grid's values list at 50 items to bound search space.
+        限制每個參數網格的 values 列表最多 50 項，防止搜索空間爆炸。"""
+        if isinstance(item, dict) and isinstance(item.get("values"), list):
+            if len(item["values"]) > 50:
+                item["values"] = item["values"][:50]
+        return item
 
 
 # ── POST /api/v1/evolution/run ────────────────────────────────────────────────────

@@ -516,7 +516,7 @@ class AuthorizationStateMachine:
                         new_value=to_state.value,
                     )
                 except Exception as e:
-                    logger.error(f"Failed to record change audit: {e}")
+                    logger.error("Failed to record change audit: %s", e)
 
             # Return a copy / 返回副本
             result = copy.deepcopy(auth)

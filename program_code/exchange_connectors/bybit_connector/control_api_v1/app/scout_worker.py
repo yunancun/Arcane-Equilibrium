@@ -54,6 +54,7 @@ class ScoutWorker:
         self,
         scan_fn: Callable[[], None],
         interval_seconds: int = SCAN_INTERVAL_SECONDS,
+        scan_interval_seconds: Optional[int] = None,
     ) -> None:
         """
         Initialize ScoutWorker with a scan function and interval.
@@ -64,9 +65,15 @@ class ScoutWorker:
             每輪掃描執行一次的可調用對象，必須是線程安全的（在 daemon 線程中調用）。
         :param interval_seconds: Seconds between scan cycles (default 1800 = 30 min).
             掃描間隔秒數（默認 1800 = 30 分鐘）。
+        :param scan_interval_seconds: Optional override for scan interval (takes precedence
+            over interval_seconds when not None). Allows runtime configuration.
+            可選的掃描間隔覆蓋（非 None 時優先於 interval_seconds），支持運行時配置。
         """
         self._scan_fn: Callable[[], None] = scan_fn
-        self._interval: int = interval_seconds
+        # scan_interval_seconds takes precedence when provided (runtime configurability)
+        # scan_interval_seconds 非 None 時優先使用（支持運行時可配置）
+        self._scan_interval: int = scan_interval_seconds if scan_interval_seconds is not None else interval_seconds
+        self._interval: int = self._scan_interval
         # Event for interruptible sleep and stop signalling.
         # 用於可中斷睡眠和停止信號的事件對象。
         self._stop_event: threading.Event = threading.Event()

@@ -152,8 +152,15 @@ class AnalystAgent:
         ollama_client: Optional[Any] = None,
         learning_tier_gate: Optional[Any] = None,
         audit_callback: Optional[Callable] = None,
+        min_observations_for_ai: Optional[int] = None,
     ):
         self.config = config or AnalystConfig()
+        # Configurable observation threshold for L2 AI analysis trigger.
+        # Only overrides config.l2_min_observations when explicitly provided.
+        # 可配置的 L2 AI 分析觸發觀察數閾值。僅在顯式提供時覆蓋 config 值。
+        if min_observations_for_ai is not None:
+            self.config.l2_min_observations = min_observations_for_ai
+        self._min_observations_for_ai: int = self.config.l2_min_observations
         self.bus = message_bus
         self._ollama = ollama_client
         self._learning_tier_gate = learning_tier_gate

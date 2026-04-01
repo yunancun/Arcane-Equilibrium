@@ -715,7 +715,7 @@ class PaperLiveGate:
             try:
                 self.audit_callback(event_type, event_data)
             except Exception as e:
-                logger.warning(f"Audit callback failed: {e}")
+                logger.warning("Audit callback failed: %s", e)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize gate state to dict / 序列化闸门状态为字典"""

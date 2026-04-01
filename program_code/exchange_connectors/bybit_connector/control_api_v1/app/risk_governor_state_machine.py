@@ -556,7 +556,7 @@ class RiskGovernorStateMachine:
                         new_value=to_level.name,
                     )
                 except Exception as e:
-                    logger.error(f"Failed to record change audit: {e}")
+                    logger.error("Failed to record change audit: %s", e)
 
             result = copy.deepcopy(self._state)
 

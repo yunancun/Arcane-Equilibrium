@@ -290,7 +290,7 @@ class GovernanceHub:
             return bool(method())
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error checking learning tier capability {capability}: {e}")
+                logger.debug("Error checking learning tier capability %s: %s", capability, e)
             return False  # Fail-closed
 
     def get_learning_tier_status(self) -> dict[str, Any]:
@@ -397,7 +397,7 @@ class GovernanceHub:
                     self._lease_sm.set_change_audit_log(self._change_audit_log)
                     logger.debug("ChangeAuditLog injected into all SMs")
                 except Exception as e:
-                    logger.warning(f"Failed to inject ChangeAuditLog into SMs: {e}")
+                    logger.warning("Failed to inject ChangeAuditLog into SMs: %s", e)
 
             # Wire cross-SM callbacks
             self._wire_callbacks()
@@ -405,7 +405,7 @@ class GovernanceHub:
             self._initialized = True
             logger.info("GovernanceHub initialized with all 4 SMs")
         except Exception as e:
-            logger.error(f"Failed to initialize GovernanceHub: {e}", exc_info=True)
+            logger.error("Failed to initialize GovernanceHub: %s", e, exc_info=True)
             self._enabled = False
             raise
 
@@ -429,7 +429,7 @@ class GovernanceHub:
                 os.chmod(audit_file, 0o600)
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Audit callback error for {sm_name}: {e}")
+                    logger.debug("Audit callback error for %s: %s", sm_name, e)
                 with self._lock:
                     self._callback_errors += 1
 
@@ -451,7 +451,7 @@ class GovernanceHub:
                     elif severity == "WARNING":
                         # Minor mismatch - log but don't escalate
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Reconciliation warning: {report.get('result')}")
+                            logger.debug("Reconciliation warning: %s", report.get('result'))
 
                 # T5.03: Handle OMS reconciliation state transitions if available
                 if action == "reconciliation_complete" and self._oms_sm is not None:
@@ -459,13 +459,13 @@ class GovernanceHub:
                         self._handle_oms_reconciliation(report)
                     except Exception as e:
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error handling OMS reconciliation: {e}")
+                            logger.debug("Error handling OMS reconciliation: %s", e)
                         with self._lock:
                             self._callback_errors += 1
 
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Incident callback error for action {action}: {e}")
+                    logger.debug("Incident callback error for action %s: %s", action, e)
                 with self._lock:
                     self._callback_errors += 1
 
@@ -480,7 +480,7 @@ class GovernanceHub:
                 self._risk_governor_sm._on_level_change = lambda old, new: self._on_risk_escalation(old, new)
             logger.debug("Wired risk escalation callback")
         except Exception as e:
-            logger.warning(f"Failed to wire risk escalation callback: {e}")
+            logger.warning("Failed to wire risk escalation callback: %s", e)
 
         # Note: Reconciliation engine incident_callback is already set during initialization
         # in _ensure_initialized() to avoid race conditions
@@ -499,7 +499,7 @@ class GovernanceHub:
                     auto_approve=True,
                 )
             except Exception as e:
-                logger.debug(f"ChangeAuditLog record failed (non-fatal): {e}")
+                logger.debug("ChangeAuditLog record failed (non-fatal): %s", e)
 
     def _check_de_escalation_gate(self, from_state: str, to_state: str, reason: str) -> bool:
         """
@@ -575,13 +575,13 @@ class GovernanceHub:
                 except Exception as e:
                     # On re-check failure, return False (fail-closed) and don't cache
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error in authorization check: {e}")
+                        logger.debug("Error in authorization check: %s", e)
                     return False
 
                 return result
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error acquiring lock in is_authorized: {e}")
+                logger.debug("Error acquiring lock in is_authorized: %s", e)
             return False  # Fail closed
 
     def get_risk_level(self) -> Optional[int]:
@@ -602,7 +602,7 @@ class GovernanceHub:
                 state = self._risk_governor_sm.get_state()
                 return int(state.level) if hasattr(state, "level") else None
         except Exception as e:
-            logger.error(f"Error in get_risk_level: {e}")
+            logger.error("Error in get_risk_level: %s", e)
             return None
 
     def check_risk_and_act(self, metrics: dict[str, Any]) -> Optional[int]:
@@ -628,7 +628,7 @@ class GovernanceHub:
                 state = self._risk_governor_sm.get_state()
                 return int(state.level)
         except Exception as e:
-            logger.error(f"Error in check_risk_and_act: {e}")
+            logger.error("Error in check_risk_and_act: %s", e)
             return None
 
     def trigger_risk_upgrade(self, event_record: dict[str, Any]) -> None:
@@ -821,7 +821,7 @@ class GovernanceHub:
                 auth_dict = auth.to_dict()
                 if not self._auth_permits_scope(auth_dict, scope):
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Authorization does not permit lease scope: {scope}")
+                        logger.debug("Authorization does not permit lease scope: %s", scope)
                     return None
 
                 # Create lease draft and activate it (all within lock)
@@ -841,11 +841,11 @@ class GovernanceHub:
                 self._lease_sm.activate(lease_id)
 
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Lease acquired: {lease_id} for intent {intent_id}")
+                    logger.debug("Lease acquired: %s for intent %s", lease_id, intent_id)
                 return lease_id
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error acquiring lease for {intent_id}: {e}")
+                logger.debug("Error acquiring lease for %s: %s", intent_id, e)
             return None
 
     def release_lease(self, lease_id: str, consumed: bool = False) -> bool:
@@ -874,11 +874,11 @@ class GovernanceHub:
                     self._lease_sm.revoke(lease_id, approved_by="GovernanceHub")
 
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Lease released: {lease_id} as {'CONSUMED' if consumed else 'REVOKED'}")
+                    logger.debug("Lease released: %s as %s", lease_id, 'CONSUMED' if consumed else 'REVOKED')
                 return True
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error releasing lease {lease_id}: {e}")
+                logger.debug("Error releasing lease %s: %s", lease_id, e)
             return False
 
     def get_lease(self, lease_id: str) -> Any:
@@ -921,7 +921,7 @@ class GovernanceHub:
 
         # T10.03: LearningTierGate enforcement — de-escalation requires L4+ (can_evolve_strategies)
         if not self.check_learning_tier_capability("can_evolve_strategies"):
-            logger.warning(f"De-escalation request denied: learning tier too low for {requested_by}")
+            logger.warning("De-escalation request denied: learning tier too low for %s", requested_by)
             return None
 
         try:
@@ -938,7 +938,7 @@ class GovernanceHub:
                 # Ensure we're actually de-escalating
                 if target_level >= current_level:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"De-escalation target {target_level} must be lower than current {current_level}")
+                        logger.debug("De-escalation target %s must be lower than current %s", target_level, current_level)
                     return None
 
                 # Submit recovery request
@@ -951,12 +951,12 @@ class GovernanceHub:
                 )
 
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"De-escalation request submitted: {req.request_id}")
+                    logger.debug("De-escalation request submitted: %s", req.request_id)
                 return req.request_id
 
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error submitting de-escalation request: {e}")
+                logger.debug("Error submitting de-escalation request: %s", e)
             return None
 
     def approve_de_escalation(self, request_id: str, approved_by: str) -> bool:
@@ -983,7 +983,7 @@ class GovernanceHub:
                 req = self._recovery_gate._requests.get(request_id)
                 if req is None:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Request {request_id} not found")
+                        logger.debug("Request %s not found", request_id)
                     return False
 
                 # Approve the recovery
@@ -994,7 +994,7 @@ class GovernanceHub:
 
                 if approval is None:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Failed to approve recovery {request_id}")
+                        logger.debug("Failed to approve recovery %s", request_id)
                     return False
 
                 # Execute de-escalation on the risk SM
@@ -1021,7 +1021,7 @@ class GovernanceHub:
                                 auto_approve=True,
                             )
                         except Exception as e:
-                            logger.error(f"Failed to record change audit: {e}")
+                            logger.error("Failed to record change audit: %s", e)
 
                     # T8.06: Send success alert to Telegram if alerter available
                     if self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
@@ -1036,19 +1036,19 @@ class GovernanceHub:
                             self._alerter.send(alert_msg, parse_mode="HTML")
                         except Exception as e:
                             if logger.isEnabledFor(logging.DEBUG):
-                                logger.debug(f"Error sending de-escalation approval alert: {e}")
+                                logger.debug("Error sending de-escalation approval alert: %s", e)
 
-                    logger.info(f"De-escalation approved and executed for request {request_id}")
+                    logger.info("De-escalation approved and executed for request %s", request_id)
                     return True
 
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error executing de-escalation: {e}")
+                        logger.debug("Error executing de-escalation: %s", e)
                     return False
 
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error approving de-escalation: {e}")
+                logger.debug("Error approving de-escalation: %s", e)
             return False
 
     def reconcile(
@@ -1099,7 +1099,7 @@ class GovernanceHub:
             return report_dict
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in reconciliation: {e}")
+                logger.debug("Error in reconciliation: %s", e)
             return {"ok": False, "reason": "reconciliation_error", "error": str(e)}
 
     def get_status(self) -> GovernanceStatus:
@@ -1117,7 +1117,7 @@ class GovernanceHub:
                 self._ensure_initialized()
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Cross-SM callback error: {e}")
+                    logger.debug("Cross-SM callback error: %s", e)
                 with self._lock:
                     self._callback_errors += 1
 
@@ -1163,7 +1163,7 @@ class GovernanceHub:
                             pass
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error reading auth state: {e}")
+                        logger.debug("Error reading auth state: %s", e)
 
             # Get Risk state
             if self._risk_governor_sm is not None:
@@ -1173,7 +1173,7 @@ class GovernanceHub:
                     risk_level_name = risk_state.level.name
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error reading risk state: {e}")
+                        logger.debug("Error reading risk state: %s", e)
 
             # Get Lease counts
             if self._lease_sm is not None:
@@ -1184,7 +1184,7 @@ class GovernanceHub:
                     total_leases_tracked = len(leases)
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error reading lease state: {e}")
+                        logger.debug("Error reading lease state: %s", e)
 
         # Construct status object outside of lock
         status = GovernanceStatus(
@@ -1258,7 +1258,7 @@ class GovernanceHub:
                 return orders[:limit]
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Error getting OMS orders: {e}")
+                    logger.debug("Error getting OMS orders: %s", e)
                 return []
 
     def _append_governance_event(self, event: dict[str, Any]) -> None:
@@ -1296,7 +1296,7 @@ class GovernanceHub:
 
             with self._lock:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Risk escalated: {old_level} → {new_level}")
+                    logger.debug("Risk escalated: %s → %s", old_level, new_level)
                 self._incident_count += 1
 
                 # T9A.02: Emit governance event for risk escalation
@@ -1312,7 +1312,7 @@ class GovernanceHub:
                     self._append_governance_event(event.to_dict())
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error emitting risk escalation event: {e}")
+                        logger.debug("Error emitting risk escalation event: %s", e)
 
                 # Record change in audit log
                 if self._change_audit_log:
@@ -1327,7 +1327,7 @@ class GovernanceHub:
                             auto_approve=True,
                         )
                     except Exception as e:
-                        logger.error(f"ChangeAuditLog record failed (non-fatal): {e}")
+                        logger.error("ChangeAuditLog record failed (non-fatal): %s", e)
 
                 # Risk level 2 (REDUCED) or higher → restrict auth
                 if new_level >= 2 and self._authorization_sm is not None:
@@ -1339,7 +1339,7 @@ class GovernanceHub:
                         ]
                     except Exception as e:
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error collecting auth IDs on risk escalation: {e}")
+                            logger.debug("Error collecting auth IDs on risk escalation: %s", e)
                         self._callback_errors += 1
 
                 # Risk level 4 (CIRCUIT_BREAKER) or higher → freeze auth
@@ -1350,7 +1350,7 @@ class GovernanceHub:
                         should_freeze_auth = True
                     except Exception as e:
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error collecting auth IDs for freeze: {e}")
+                            logger.debug("Error collecting auth IDs for freeze: %s", e)
                         self._callback_errors += 1
 
                 # Update governance mode
@@ -1391,7 +1391,7 @@ class GovernanceHub:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error restricting auth on risk escalation: {e}")
+                        logger.debug("Error restricting auth on risk escalation: %s", e)
 
             if auth_ids_to_freeze:
                 try:
@@ -1422,7 +1422,7 @@ class GovernanceHub:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error freezing auth on circuit breaker: {e}")
+                        logger.debug("Error freezing auth on circuit breaker: %s", e)
 
             # T8.06: Send alert to Telegram if escalated to CIRCUIT_BREAKER and alerter available
             if new_level >= 4 and self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
@@ -1436,13 +1436,13 @@ class GovernanceHub:
                     self._alerter.send(alert_msg, parse_mode="HTML")
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error sending risk escalation alert: {e}")
+                        logger.debug("Error sending risk escalation alert: %s", e)
 
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in _on_risk_escalation: {e}")
+                logger.debug("Error in _on_risk_escalation: %s", e)
 
     def _on_reconciliation_mismatch(self, severity: str, details: dict[str, Any]) -> None:
         """
@@ -1470,7 +1470,7 @@ class GovernanceHub:
 
             with self._lock:
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"Reconciliation mismatch ({severity}): {details}")
+                    logger.debug("Reconciliation mismatch (%s): %s", severity, details)
                 self._incident_count += 1
 
                 # T9A.02: Emit governance event for reconciliation mismatch
@@ -1486,12 +1486,12 @@ class GovernanceHub:
                     self._append_governance_event(event.to_dict())
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error emitting reconciliation event: {e}")
+                        logger.debug("Error emitting reconciliation event: %s", e)
 
                 # T5.06: Determine escalation level based on severity / 根据严重性确定升级级别
                 if severity == "MISMATCH_MINOR":
                     # Minor mismatch - log warning only
-                    logger.warning(f"Reconciliation warning (minor): {details}")
+                    logger.warning("Reconciliation warning (minor): %s", details)
                     return
 
                 elif severity == "MISMATCH_MAJOR":
@@ -1507,7 +1507,7 @@ class GovernanceHub:
                                 target_risk_level = RiskLevel.DEFENSIVE
                         except Exception as e:
                             if logger.isEnabledFor(logging.DEBUG):
-                                logger.debug(f"Error getting risk level for major mismatch: {e}")
+                                logger.debug("Error getting risk level for major mismatch: %s", e)
                             self._callback_errors += 1
 
                 elif severity == "FATAL":
@@ -1518,7 +1518,7 @@ class GovernanceHub:
                             target_risk_level = RiskLevel.CIRCUIT_BREAKER
                         except Exception as e:
                             if logger.isEnabledFor(logging.DEBUG):
-                                logger.debug(f"Error setting fatal escalation: {e}")
+                                logger.debug("Error setting fatal escalation: %s", e)
                             self._callback_errors += 1
 
                     # Collect auth IDs for freeze
@@ -1528,7 +1528,7 @@ class GovernanceHub:
                             auth_ids_to_freeze = [auth.authorization_id for auth in effective_auths]
                         except Exception as e:
                             if logger.isEnabledFor(logging.DEBUG):
-                                logger.debug(f"Error collecting auth IDs for fatal mismatch: {e}")
+                                logger.debug("Error collecting auth IDs for fatal mismatch: %s", e)
                             self._callback_errors += 1
                     self._mode = GovernanceMode.FROZEN
 
@@ -1544,12 +1544,12 @@ class GovernanceHub:
                                 initiator=RiskInitiator.RISK_GOVERNOR,
                             )
                             if logger.isEnabledFor(logging.DEBUG):
-                                logger.debug(f"Risk escalated to {target_risk_level.name} due to {severity}")
+                                logger.debug("Risk escalated to %s due to %s", target_risk_level.name, severity)
                 except Exception as e:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error escalating risk for {severity}: {e}")
+                        logger.debug("Error escalating risk for %s: %s", severity, e)
 
             if auth_ids_to_freeze:
                 try:
@@ -1580,7 +1580,7 @@ class GovernanceHub:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error freezing auth for fatal mismatch: {e}")
+                        logger.debug("Error freezing auth for fatal mismatch: %s", e)
 
             # T8.06: Send FATAL alert to Telegram if alerter available
             if severity == "FATAL" and self._alerter is not None and hasattr(self._alerter, "is_enabled") and self._alerter.is_enabled:
@@ -1594,7 +1594,7 @@ class GovernanceHub:
                     self._alerter.send(alert_msg, parse_mode="HTML")
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error sending fatal reconciliation alert: {e}")
+                        logger.debug("Error sending fatal reconciliation alert: %s", e)
 
             # Batch 12: Record reconciliation mismatch to ChangeAuditLog
             # Dedup: only create a new entry if no identical PENDING entry exists.
@@ -1627,7 +1627,7 @@ class GovernanceHub:
             with self._lock:
                 self._callback_errors += 1
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in _on_reconciliation_mismatch: {e}")
+                logger.debug("Error in _on_reconciliation_mismatch: %s", e)
 
     def _on_auth_frozen(self, correlation_id: str | None = None, parent_event_id: str | None = None) -> None:
         """
@@ -1652,7 +1652,7 @@ class GovernanceHub:
                         lease_ids = [lease.lease_id for lease in live_leases]
                     except Exception as e:
                         if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(f"Error collecting leases on auth freeze: {e}")
+                            logger.debug("Error collecting leases on auth freeze: %s", e)
                         self._callback_errors += 1
 
             # Revoke leases outside lock
@@ -1700,13 +1700,13 @@ class GovernanceHub:
                     with self._lock:
                         self._callback_errors += 1
                     if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"Error revoking leases on auth freeze: {e}")
+                        logger.debug("Error revoking leases on auth freeze: %s", e)
 
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in _on_auth_frozen: {e}")
+                logger.debug("Error in _on_auth_frozen: %s", e)
 
     def handle_incident_auth_action(self, action: str, context: dict[str, Any]) -> None:
         """
@@ -1745,11 +1745,11 @@ class GovernanceHub:
                     self._invalidate_auth_cache()
                     self._on_auth_frozen()
 
-                logger.info(f"Incident auth action executed: {action}")
+                logger.info("Incident auth action executed: %s", action)
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
-            logger.error(f"Error in handle_incident_auth_action({action}): {e}")
+            logger.error("Error in handle_incident_auth_action(%s): %s", action, e)
 
     def handle_incident_risk_action(self, action: str, context: dict[str, Any]) -> None:
         """
@@ -1788,11 +1788,11 @@ class GovernanceHub:
                             initiator=RiskInitiator.INCIDENT_POLICY,
                         )
 
-                logger.info(f"Incident risk action executed: {action}")
+                logger.info("Incident risk action executed: %s", action)
         except Exception as e:
             with self._lock:
                 self._callback_errors += 1
-            logger.error(f"Error in handle_incident_risk_action({action}): {e}")
+            logger.error("Error in handle_incident_risk_action(%s): %s", action, e)
 
     def handle_incident_operator_alert(self, context: dict[str, Any]) -> None:
         """
@@ -1803,8 +1803,8 @@ class GovernanceHub:
             context: Event context dict
         """
         logger.critical(
-            f"OPERATOR_ALERT: Incident {context.get('event_id')} "
-            f"severity={context.get('severity')} reason={context.get('reason_code')}"
+            "OPERATOR_ALERT: Incident %s severity=%s reason=%s",
+            context.get('event_id'), context.get('severity'), context.get('reason_code'),
         )
         # NOTE: Notification integration handled by TelegramAlerter (set_alerter, T8.06).
         # Additional notification channels (Slack, webhook) deferred to future enhancement.
@@ -1852,7 +1852,7 @@ class GovernanceHub:
                             OrderInitiator.RECONCILIATION_ENGINE,
                             reason="Reconciliation passed",
                         )
-                        logger.info(f"OMS order {order_id} transitioned to COMPLETED after reconciliation")
+                        logger.info("OMS order %s transitioned to COMPLETED after reconciliation", order_id)
                         # T11.01: Emit OMS event for reconciliation pass
                         try:
                             evt = oms_event(
@@ -1866,7 +1866,7 @@ class GovernanceHub:
                         except Exception as _evt_err:
                             pass  # Non-fatal: event emission failure does not block governance action
                     except Exception as e:
-                        logger.error(f"Failed to complete order {order_id}: {e}")
+                        logger.error("Failed to complete order %s: %s", order_id, e)
 
             elif overall_result in ["MISMATCH_MINOR", "MISMATCH_MAJOR", "FAIL"]:
                 # Reconciliation failed - mark orders as REJECTED
@@ -1878,7 +1878,7 @@ class GovernanceHub:
                             OrderInitiator.RECONCILIATION_ENGINE,
                             reason=f"Reconciliation failed: {overall_result}",
                         )
-                        logger.info(f"OMS order {order_id} transitioned to REJECTED after reconciliation")
+                        logger.info("OMS order %s transitioned to REJECTED after reconciliation", order_id)
                         # T11.01: Emit OMS event for reconciliation fail
                         try:
                             evt = oms_event(
@@ -1892,11 +1892,11 @@ class GovernanceHub:
                         except Exception as _evt_err:
                             pass  # Non-fatal: event emission failure does not block governance action
                     except Exception as e:
-                        logger.error(f"Failed to reject order {order_id}: {e}")
+                        logger.error("Failed to reject order %s: %s", order_id, e)
 
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Error in _handle_oms_reconciliation: {e}")
+                logger.debug("Error in _handle_oms_reconciliation: %s", e)
 
 
 __all__ = ["GovernanceHub", "GovernanceStatus", "GovernanceMode"]

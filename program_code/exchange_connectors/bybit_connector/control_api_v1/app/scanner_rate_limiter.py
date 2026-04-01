@@ -1,23 +1,21 @@
 """
-Scanner Rate Limiter — T2.22 GAP-L3 Implementation
+MODULE_NOTE (中文):
+  掃描器速率限制器 — 強制市場全量掃描之間的最小間隔（默認 300 秒），
+  防止過於頻繁的掃描。追蹤掃描生命週期（pending/active/complete/failed），
+  失敗後強制冷卻。屬於治理層（T2.22 GAP-L3），實現 DOC-02 §9.2 時序邊界。
 
-Enforces the 5-minute minimum interval between full market scans per DOC-02 §9.2.
+MODULE_NOTE (English):
+  Scanner Rate Limiter — enforces the 5-minute minimum interval between full
+  market scans (DOC-02 §9.2). Tracks scan lifecycle (pending, active, complete,
+  failed), enforces error cooldowns after failures, provides audit trails and
+  scheduling recommendations. Thread-safe with optional audit callback.
+  Part of governance layer (T2.22 GAP-L3).
 
-This module implements the ScannerRateLimiter engine that:
-  - Prevents scanning more frequently than the minimum interval (300 seconds default)
-  - Tracks scan lifecycle (pending, active, complete, failed)
-  - Enforces error cooldowns after failed scans
-  - Provides audit trails and scheduling recommendations
-  - Thread-safe with optional audit callback support
+Safety invariant:
+  掃描頻率超限時直接拒絕（fail-closed），不允許繞過冷卻期。
+  Scan requests exceeding rate limit are rejected (fail-closed).
 
-Requirements from DOC-02:
-  - Line 122: "Scanner cycle: 5-minute minimum interval between full market scans"
-  - Table 9: Scanner cooldown in operational timing boundaries
-  - Scout Agent (Table 3): "scans 650+ symbols every 5 min"
-
-典范符合 / Specification Compliance:
-  - DOC-02 §9.2 (Temporal Boundaries — Cooldown)
-  - DOC-02 Table 9 (Operational Latency Budget)
+Spec refs: DOC-02 §9.2 (Temporal Boundaries), DOC-02 Table 9 (Operational Latency Budget)
 """
 
 from __future__ import annotations

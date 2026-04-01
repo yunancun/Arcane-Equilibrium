@@ -968,6 +968,10 @@ class StrategistAgent:
             self._stats["heuristic_evaluations"] += 1
         return _heuristic_evaluate(intel, self.config)
 
+    # Valid AI output actions — fail-closed: unknown action → reject
+    # 合法的 AI 輸出動作 — fail-closed：未知動作 → 拒絕
+    _VALID_ACTIONS = frozenset({"BUY", "SELL", "HOLD", "SKIP"})
+
     def _validate_ai_output(self, parsed: dict) -> bool:
         """
         H4 validation: verify AI output structure before constructing EdgeEvaluation.
@@ -984,11 +988,17 @@ class StrategistAgent:
         - 'confidence' key must be present (primary safety-critical field)
         - confidence must be a numeric type
         - confidence must be in [0.0, 1.0] range
+        - 'has_edge' must be bool if present (type safety for downstream logic)
+        - 'reason' must be a non-empty string if present (traceability, principle 8)
+        - 'action' must be one of BUY/SELL/HOLD/SKIP if present (prevent garbage actions)
         驗證項目：
         - parsed 必須是 dict（不可是 list、string、None 等）
         - 必須包含 'confidence' 鍵（主要安全關鍵字段）
         - confidence 必須是數值型別
         - confidence 必須在 [0.0, 1.0] 範圍內
+        - has_edge 若存在必須是 bool（下游邏輯的型別安全）
+        - reason 若存在必須是非空字串（可追溯性，根原則 8）
+        - action 若存在必須是 BUY/SELL/HOLD/SKIP 之一（防止垃圾動作）
         """
         if not isinstance(parsed, dict):
             return False
@@ -999,6 +1009,29 @@ class StrategistAgent:
             return False
         if not (0.0 <= float(confidence) <= 1.0):
             return False
+
+        # has_edge: must be bool if present — fail-closed on type mismatch
+        # has_edge 若存在必須是 bool，型別不符則拒絕（fail-closed）
+        if "has_edge" in parsed and not isinstance(parsed["has_edge"], bool):
+            logger.warning("H4 validation: has_edge is not bool (%s) / has_edge 非布林型", type(parsed["has_edge"]).__name__)
+            return False
+
+        # reason: must be non-empty str if present — principle 8 traceability
+        # reason 若存在必須是非空字串（根原則 8：交易可解釋）
+        if "reason" in parsed:
+            reason = parsed["reason"]
+            if not isinstance(reason, str) or not reason.strip():
+                logger.warning("H4 validation: reason is empty or not str / reason 為空或非字串")
+                return False
+
+        # action: must be in valid set if present — prevent garbage actions
+        # action 若存在必須在合法集合內，防止垃圾動作通過治理層
+        if "action" in parsed:
+            action = parsed["action"]
+            if not isinstance(action, str) or action.upper() not in self._VALID_ACTIONS:
+                logger.warning("H4 validation: action '%s' not in %s / 動作不在合法集合內", action, self._VALID_ACTIONS)
+                return False
+
         return True
 
     def _ai_evaluate(self, intel: IntelObject) -> EdgeEvaluation:

@@ -639,7 +639,7 @@ class ToolExecutor:
             result = await handler(tool_input)
             return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            logger.error(f"Tool {tool_name} error: {e}")
+            logger.error("Tool %s error: %s", tool_name, e)
             return json.dumps({"error": str(e)})
 
     # ── Data Reads / 数据读取 ──

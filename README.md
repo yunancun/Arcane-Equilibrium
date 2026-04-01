@@ -31,12 +31,12 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-01 April 1 Audit Batch 1-6 全部完成)
+## 当前状态 (2026-04-01 Batch 7 積壓清掃完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,387 passed（April 1 Audit Batch 1-6 全部完成 · +57 新測試）
+测试:         3,440 passed（Batch 7 積壓清掃 · +53 新測試 · 0 新回歸）
 API 路由:     126+ 条（含 8 治理 + 5 Scout + 4 實驗 + 2 進化端点）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
 三品類:       ✅ linear / spot / inverse 全部就緒
@@ -47,7 +47,8 @@ H0 Gate:      ✅ 完成（5 check + H0HealthWorker + pipeline 集成 + 94 tests
 H1-H5:        ✅ 全部接通（ThoughtGate + 预算 + ModelRouter + validate_output + CostLogger）
 Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEngine O(n) 285x加速 + L2 結果快取）
 Phase 3:      ✅ 全完成（ExperimentLedger 持久化 + EvolutionEngine + EvolutionScheduler）
-April 1 審計: ✅ 8 份報告 · 78 項去重 · 6 批次全修復（知識閉環/性能/安全/記憶體/文檔/技術債）
+April 1 審計: ✅ 8 份報告 · 78 項去重 · Batch 1-7 全部完成
+Batch 7:      ✅ pipeline拆分 + Conductor編排 + 194 logger %s + Pydantic驗證 + 38邊界測試
 認證安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 響應頭 + XSS 修復
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行

@@ -140,7 +140,10 @@ class OllamaClient:
             try:
                 url = f"{self._config.base_url}/api/tags"
                 req = urllib.request.Request(url, method="GET")
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                # timeout=1: health check should be fast; 5s was too generous and
+                # blocked callers when Ollama was unreachable.
+                # timeout=1：健康檢查應快速完成；原 5s 過長，Ollama 不可達時阻塞調用者。
+                with urllib.request.urlopen(req, timeout=1) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     models = [m.get("name", "") for m in data.get("models", [])]
                     # Check if our target model is available (partial match)
@@ -157,7 +160,7 @@ class OllamaClient:
                     self._available_ts = time.time()
                     return self._available
             except Exception as e:
-                logger.debug(f"Ollama availability check failed: {e}")
+                logger.debug("Ollama availability check failed: %s", e)
                 self._available = False
                 self._available_ts = time.time()
                 return False
@@ -171,7 +174,7 @@ class OllamaClient:
                 data = json.loads(resp.read().decode("utf-8"))
                 return [m.get("name", "") for m in data.get("models", [])]
         except Exception as e:
-            logger.error(f"Failed to list Ollama models: {e}")
+            logger.error("Failed to list Ollama models: %s", e)
             return []
 
     # ── Generate (single-turn) / 单轮生成 ──
@@ -393,7 +396,7 @@ class OllamaClient:
                 # 注意：max_retries 預設為 0（CLAUDE.md 硬邊界，單次嘗試模式）。
                 # 以下 retry 分支在當前配置下為死代碼，屬設計意圖。如需啟用，傳入 max_retries >= 1。
                 if attempt < self._config.max_retries:
-                    logger.warning(f"Ollama request failed (attempt {attempt + 1}), retrying: {e}")
+                    logger.warning("Ollama request failed (attempt %s), retrying: %s", attempt + 1, e)
                     time.sleep(0.5)
                     continue
                 return OllamaResponse(

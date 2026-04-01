@@ -708,5 +708,5 @@ class LearningTierGate:
                 self._state.version = exported.get("version", 1)
             return True
         except (KeyError, ValueError, TypeError) as e:
-            logger.error(f"Failed to import learning tier state: {e}")
+            logger.error("Failed to import learning tier state: %s", e)
             return False

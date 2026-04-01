@@ -1267,7 +1267,7 @@ class PaperTradingEngine:
                         try:
                             demo_snap = self._demo_sync.get_current_snapshot()
                         except Exception as e:
-                            logger.error(f"Demo snapshot failed: {e}")
+                            logger.error("Demo snapshot failed: %s", e)
                     self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
                     self._audit(state, "governance_reconciliation", "session_stop reconciliation triggered")
                 except Exception:
@@ -1556,7 +1556,7 @@ class PaperTradingEngine:
                                 )
                                 self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
                             except Exception as e:
-                                logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
+                                logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
                         self._audit(state, "fok_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
                         _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
@@ -1595,7 +1595,7 @@ class PaperTradingEngine:
                                 )
                                 self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
                             except Exception as e:
-                                logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
+                                logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
                         self._audit(state, "ioc_filled", f"{order['order_id']} price={fill_price:.4f}")
                     else:
                         _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
@@ -1646,7 +1646,7 @@ class PaperTradingEngine:
                         )
                         self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
                     except Exception as e:
-                        logger.error(f"Failed to create protective order: {e} (non-fatal for paper)")
+                        logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
 
                 # Update balance
                 sess["current_paper_balance_usdt"] = project_balance_after_fill(
@@ -1947,7 +1947,7 @@ class PaperTradingEngine:
                                 self._audit(state, "protective_order_triggered",
                                     f"{trig_order.symbol} type={trig_order.order_type.value} trigger_price={trig_order.trigger_price}")
                     except Exception as e:
-                        logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
+                        logger.error("ProtectiveOrderManager check_triggers error: %s (non-fatal)", e)
 
                 # T7.04: Periodic reconciliation — moved OUTSIDE mutator to avoid
                 # holding _lock during Demo API HTTP calls (which caused service hangs).
@@ -1984,7 +1984,7 @@ class PaperTradingEngine:
                                         auto_approve=True,
                                     )
                                 except Exception as e:
-                                    logger.error(f"Failed to record session halt in audit log: {e} (non-fatal)")
+                                    logger.error("Failed to record session halt in audit log: %s (non-fatal)", e)
 
                 # Re-recompute PnL after risk closes
                 if close_orders:

@@ -482,7 +482,7 @@ class TTLEnforcer:
             name="TTLEnforcer-DaemonSweep",
         )
         self._sweep_thread.start()
-        logger.info(f"TTL enforcer daemon sweep started (interval: {interval_seconds}s)")
+        logger.info("TTL enforcer daemon sweep started (interval: %ss)", interval_seconds)
 
     def stop_daemon_sweep(self, timeout_seconds: float = 10) -> bool:
         """
@@ -512,9 +512,9 @@ class TTLEnforcer:
             try:
                 expired = self.sweep_expired()
                 if expired:
-                    logger.debug(f"Daemon sweep: {len(expired)} entries expired")
+                    logger.debug("Daemon sweep: %s entries expired", len(expired))
             except Exception as e:
-                logger.exception(f"Error in daemon sweep: {e}")
+                logger.exception("Error in daemon sweep: %s", e)
 
             time.sleep(self._sweep_interval_seconds)
 
@@ -595,7 +595,7 @@ class TTLEnforcer:
                 }
             )
         except Exception as e:
-            logger.exception(f"Error in audit callback: {e}")
+            logger.exception("Error in audit callback: %s", e)
 
     def __repr__(self) -> str:
         stats = self.get_stats()

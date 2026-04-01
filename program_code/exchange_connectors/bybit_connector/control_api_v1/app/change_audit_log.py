@@ -233,7 +233,7 @@ class ChangeAuditLog:
             # Append to immutable log
             self._changes.append(record)
             logger.info(
-                f"Change recorded: {change_id} ({change_type.value}) by {who} - {what}"
+                "Change recorded: %s (%s) by %s - %s", change_id, change_type.value, who, what
             )
 
             # Trigger callback if provided
@@ -241,7 +241,7 @@ class ChangeAuditLog:
                 try:
                     self.audit_callback(record)
                 except Exception as e:
-                    logger.warning(f"Audit callback error: {e}", exc_info=True)
+                    logger.warning("Audit callback error: %s", e, exc_info=True)
 
             return record
 
@@ -311,14 +311,14 @@ class ChangeAuditLog:
 
             self._changes.append(record)
             logger.warning(
-                f"EMERGENCY change recorded: {change_id} ({change_type.value}) by {who} - {what}"
+                "EMERGENCY change recorded: %s (%s) by %s - %s", change_id, change_type.value, who, what
             )
 
             if self.audit_callback:
                 try:
                     self.audit_callback(record)
                 except Exception as e:
-                    logger.warning(f"Audit callback error: {e}", exc_info=True)
+                    logger.warning("Audit callback error: %s", e, exc_info=True)
 
             return record
 
@@ -349,15 +349,15 @@ class ChangeAuditLog:
                     break
 
             if original is None:
-                logger.warning(f"Change {change_id} not found")
+                logger.warning("Change %s not found", change_id)
                 return None
 
             if original.approval_status == ChangeApprovalStatus.APPROVED:
-                logger.warning(f"Change {change_id} already approved")
+                logger.warning("Change %s already approved", change_id)
                 return original
 
             if original.approval_status == ChangeApprovalStatus.REJECTED:
-                logger.warning(f"Change {change_id} already rejected")
+                logger.warning("Change %s already rejected", change_id)
                 return original
 
             # Create new record with approval (immutability preserved)
@@ -386,14 +386,14 @@ class ChangeAuditLog:
             self._changes[idx] = approved_record
 
             logger.info(
-                f"Change approved: {change_id} by {approved_by} - {approval_reason or ''}"
+                "Change approved: %s by %s - %s", change_id, approved_by, approval_reason or ''
             )
 
             if self.audit_callback:
                 try:
                     self.audit_callback(approved_record)
                 except Exception as e:
-                    logger.warning(f"Audit callback error: {e}", exc_info=True)
+                    logger.warning("Audit callback error: %s", e, exc_info=True)
 
             return approved_record
 
@@ -424,15 +424,15 @@ class ChangeAuditLog:
                     break
 
             if original is None:
-                logger.warning(f"Change {change_id} not found")
+                logger.warning("Change %s not found", change_id)
                 return None
 
             if original.approval_status == ChangeApprovalStatus.APPROVED:
-                logger.warning(f"Change {change_id} already approved")
+                logger.warning("Change %s already approved", change_id)
                 return original
 
             if original.approval_status == ChangeApprovalStatus.REJECTED:
-                logger.warning(f"Change {change_id} already rejected")
+                logger.warning("Change %s already rejected", change_id)
                 return original
 
             # Create new record with rejection
@@ -459,13 +459,13 @@ class ChangeAuditLog:
             idx = self._changes.index(original)
             self._changes[idx] = rejected_record
 
-            logger.info(f"Change rejected: {change_id} by {rejected_by} - {rejection_reason}")
+            logger.info("Change rejected: %s by %s - %s", change_id, rejected_by, rejection_reason)
 
             if self.audit_callback:
                 try:
                     self.audit_callback(rejected_record)
                 except Exception as e:
-                    logger.warning(f"Audit callback error: {e}", exc_info=True)
+                    logger.warning("Audit callback error: %s", e, exc_info=True)
 
             return rejected_record
 

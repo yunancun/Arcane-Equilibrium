@@ -1,21 +1,24 @@
 """
-T2.16 — Data Source Enforcer: External Data Marking Enforcement (GAP-M7)
-=========================================================================
+MODULE_NOTE (中文):
+  數據源標記強制器 — 確保所有外部數據在進入系統前被正確標記來源和認知層級。
+  屬於治理層（T2.16），實現 DOC-01 §5.10 認知誠實原則。
+  功能：DataSourceTag 不可變標記 / DataSourceEnforcer 驗證與標記 /
+  來源自動分類（Bybit API→FACT, 搜索/AI→INFERENCE）/ 統計追蹤。
+
+MODULE_NOTE (English):
+  Data Source Enforcer — ensures all external data is properly tagged with source
+  and cognitive level before entering the system. Part of governance layer (T2.16),
+  implementing DOC-01 §5.10 (Cognitive Honesty). Features: DataSourceTag immutable
+  marking / DataSourceEnforcer validation / source auto-classification (Bybit API
+  → FACT, searches/AI → INFERENCE) / reject_untagged_data() / statistics tracking.
+
+Safety invariant:
+  未標記的數據默認被阻擋（fail-closed），不允許無來源標記的數據進入決策管線。
+  Untagged data is blocked by default (fail-closed); no untagged data may enter
+  the decision pipeline.
+
 Governance refs: DOC-01 §5.10 (Root Principle #8: Cognitive Honesty)
-
-Implements the ENFORCEMENT LAYER for cognitive honesty:
-  - DataSourceTag: immutable marking of external data with source, fetched time, and cognitive level
-  - DataSourceEnforcer: validates and tags all external data before pipeline entry
-  - Source-based auto-classification: Bybit API → FACT, searches/AI output → INFERENCE
-  - Pipeline integration points: wrap_exchange_response(), wrap_search_result(), wrap_ai_output()
-  - Enforcement: reject_untagged_data() blocks unmarked data from decision chain
-  - Statistics: tagged_count, rejected_count, by_level breakdown
-  - Thread-safe with optional audit callback
-
-Core principle (DOC-01 §5.10):
-  "系统的所有结论必须明确区分事实、推断与假设。不得将推断伪装为事实，
-   外部数据源（新闻、情绪信号、搜索结果）默认为推断级别，不得等同于
-   交易所返回的事实数据。"
+Spec ref: T2.16 GAP-M7
 """
 
 from __future__ import annotations

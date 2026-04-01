@@ -672,3 +672,54 @@ class TestAdditionalEdgeCases:
         )
         assert "stop_loss_pct" in result.best_params
         assert "position_size_pct" in result.best_params
+
+
+# ---------------------------------------------------------------------------
+# E4 Edge Cases: Degenerate Inputs / E4 边界: 退化输入
+# 3 tests
+# ---------------------------------------------------------------------------
+
+class TestEvolutionEdgeCasesE4:
+    """Edge case tests for EvolutionEngine with degenerate parameters (E4 追加).
+    进化引擎退化参数边界条件测试。"""
+
+    def test_max_combinations_zero_produces_empty_result(self):
+        """max_combinations=0 should produce result with 0 evaluated combinations.
+        max_combinations=0 应产生 0 个已评估组合的结果。"""
+        mock_engine = _make_mock_engine(sharpe=1.5)
+        evolution = EvolutionEngine(backtest_engine=mock_engine, max_combinations=0)
+        grids = [ParameterGrid(name="stop_loss_pct", values=[0.01, 0.02])]
+        result = evolution.run_evolution(
+            strategy_name="test", symbol="BTCUSDT", timeframe="1h",
+            parameter_grids=grids,
+        )
+        assert result.evaluated_combinations == 0
+        assert result.best_params == {}
+        assert result.is_simulated is True
+
+    def test_all_negative_sharpe_still_picks_best(self):
+        """All backtests returning negative Sharpe should still select the least negative.
+        所有回测返回负 Sharpe 时应选择最不负的。"""
+        mock_engine = MagicMock()
+        mock_engine.run.return_value = _make_mock_result(sharpe=-2.0, win_rate=0.2)
+        evolution = EvolutionEngine(backtest_engine=mock_engine, max_combinations=50)
+        grids = [ParameterGrid(name="stop_loss_pct", values=[0.01, 0.02, 0.03])]
+        result = evolution.run_evolution(
+            strategy_name="test", symbol="BTCUSDT", timeframe="1h",
+            parameter_grids=grids,
+        )
+        assert result.best_sharpe == -2.0
+        assert result.evaluated_combinations == 3
+        assert result.is_simulated is True
+
+    def test_empty_parameter_grid_produces_valid_result(self):
+        """Empty parameter_grids list should produce a valid (possibly trivial) result.
+        空的 parameter_grids 列表应产生有效结果。"""
+        mock_engine = _make_mock_engine(sharpe=1.5)
+        evolution = EvolutionEngine(backtest_engine=mock_engine)
+        result = evolution.run_evolution(
+            strategy_name="test", symbol="BTCUSDT", timeframe="1h",
+            parameter_grids=[],
+        )
+        assert result.is_simulated is True
+        assert result.best_params is not None  # should not crash

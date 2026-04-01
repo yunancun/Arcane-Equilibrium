@@ -739,7 +739,7 @@ class RiskManager:
                             auto_approve=True,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to record config change in audit log: {e} (non-fatal)")
+                        logger.warning("Failed to record config change in audit log: %s (non-fatal)", e)
         # Persist Operator config to file so it survives restart
         # 持久化 Operator 配置到文件，重啟後不丟失
         self._save_operator_config()
@@ -1298,7 +1298,7 @@ class RiskManager:
                             auto_approve=True,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to record session halt in audit log: {e} (non-fatal)")
+                        logger.warning("Failed to record session halt in audit log: %s (non-fatal)", e)
 
         return close_orders
 

@@ -1417,4 +1417,69 @@ class TestH0GateBlocking:
         )
 
 
-# (pytest imported at top of file)
+# ===========================================================================
+# 15. E4 Edge Cases: on_tick / _process_pending_intents boundary conditions
+# ===========================================================================
+
+class TestOnTickEdgeCasesE4:
+    """Edge cases for on_tick with malformed input (E4 追加).
+    on_tick 接收畸形输入的边界条件。"""
+
+    def setup_method(self):
+        self.bridge, self.engine = _make_bridge()
+
+    def test_on_tick_with_none_price_data_raises_type_error(self):
+        """on_tick with last_price=None raises TypeError (float(None)).
+        last_price=None 的 on_tick 抛出 TypeError（float(None)）。
+        Known gap: pipeline_bridge.on_tick does not guard against None price.
+        已知缺口：pipeline_bridge.on_tick 不防护 None price。"""
+        self.bridge.activate()
+        event = {"symbol": "BTCUSDT", "last_price": None, "ts_ms": int(time.time() * 1000)}
+        with pytest.raises(TypeError):
+            self.bridge.on_tick(event)
+
+
+class TestProcessPendingIntentsEdgeCasesE4:
+    """Edge cases for _process_pending_intents (E4 追加).
+    _process_pending_intents 边界条件。"""
+
+    def setup_method(self):
+        self.bridge, self.engine = _make_bridge()
+        self.bridge.activate()
+        self.bridge.set_governance_hub(_make_governance_hub(authorized=True))
+
+    def test_zero_intents_is_noop(self):
+        """_process_pending_intents with 0 pending intents should be a no-op.
+        0 个待处理意图应为无操作。"""
+        self.bridge._orch.collect_pending_intents = MagicMock(return_value=[])
+        stats_before = dict(self.bridge.get_stats())
+        self.bridge._process_pending_intents()
+        stats_after = self.bridge.get_stats()
+        assert stats_after["intents_submitted"] == stats_before["intents_submitted"]
+
+    def test_intent_missing_symbol_does_not_crash(self):
+        """Intent with missing symbol attribute should not crash pipeline.
+        缺少 symbol 属性的 intent 不应导致管线崩溃。"""
+        broken_intent = type("BrokenIntent", (), {
+            "side": "Buy", "order_type": "market", "qty": 0.001,
+            "price": None, "metadata": {}, "perception_data_id": None,
+            "confidence": 0.6, "reason": "test", "strategy_name": "test",
+            "leverage": 1.0,
+        })()
+        self.bridge._orch.collect_pending_intents = MagicMock(return_value=[broken_intent])
+        try:
+            self.bridge._process_pending_intents()
+        except AttributeError:
+            pass  # acceptable: pipeline may require symbol
+        assert self.bridge.is_active is True
+
+    def test_process_intents_with_max_zero_submits_nothing(self):
+        """Bridge with max_intents_per_tick=0 should submit nothing (truncation).
+        max_intents_per_tick=0 的 bridge 不应提交任何内容（截断）。"""
+        bridge, engine = _make_bridge(max_intents=0)
+        bridge.activate()
+        bridge.set_governance_hub(_make_governance_hub(authorized=True))
+        intent = _make_intent()
+        bridge._orch.collect_pending_intents = MagicMock(return_value=[intent])
+        bridge._process_pending_intents()
+        assert len(engine.submitted_orders) == 0

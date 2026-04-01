@@ -1,10 +1,14 @@
 """
-Unified Governance Event Model (GAP-M1)
+MODULE_NOTE (中文):
+  統一治理事件模型 — 提供 GovernanceEvent 基類和 EventCategory 分類體系，
+  用於跨模組事件處理。各 SM 模組保留自己的事件枚舉，本模組提供統一抽象層。
+  屬於治理層（GAP-M1），涵蓋授權/風控/租約/訂單管理/對賬等事件類別。
 
-Provides a base GovernanceEvent class and EventCategory taxonomy
-for cross-module event handling. Individual SM event enums remain
-in their respective modules; this module provides the unified
-abstraction layer.
+MODULE_NOTE (English):
+  Unified Governance Event Model — provides a base GovernanceEvent class and
+  EventCategory taxonomy for cross-module event handling. Individual SM event
+  enums remain in their respective modules; this module provides the unified
+  abstraction layer. Part of governance layer (GAP-M1).
 
 Spec References: SM-01, SM-02, SM-04, EX-02, EX-04
 """

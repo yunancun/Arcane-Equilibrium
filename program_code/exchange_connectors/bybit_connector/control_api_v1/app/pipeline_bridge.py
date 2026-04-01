@@ -516,8 +516,17 @@ class PipelineBridge:
 
     def _process_pending_intents(self) -> None:
         """
-        Collect OrderIntents from orchestrator, submit to paper engine.
-        从编排器收集 OrderIntent 并提交到纸上交易引擎。
+        Orchestrator: collect intents, gate each one, submit approved, run post-execution hooks.
+        編排器：收集意圖、逐個門控、提交已批准的、執行後置鉤子。
+
+        APR01-HIGH-4 refactor: this method was a 462-line mega-method. Now delegates to
+        four focused sub-methods while preserving exact behavioral semantics:
+          1. _collect_pending_intents()    — gather + cap
+          2. _gate_intent()               — H0 / governance / Guardian / edge filter
+          3. _submit_approved_intent()     — lease + OMS + Demo sync + stop registration
+          4. _post_execution_hooks()       — round-trip / learning / deployer notify / Telegram
+
+        APR01-HIGH-4 重構：原為 462 行巨型方法，現委派給四個專注子方法，完全保留原始行為語義。
 
         APR01-MEDIUM-12: Stats are accumulated in local counters and flushed
         once at the end, reducing lock acquisitions from ~27 per call to 1.
@@ -530,25 +539,9 @@ class PipelineBridge:
         注意：已移除对 StrategistAgent.collect_pending_intents() 的调用（APR01-P1-3）。
         该方法在 TD-2 中已废弃（始终返回 []），策略意图现通过 MessageBus → add_trade_intent() 路径传递。
         """
-        try:
-            intents = self._orch.collect_pending_intents()
-        except Exception:
-            logger.exception("Failed to collect orchestrator intents / 收集编排器意图失败")
-            intents = []
-
+        intents = self._collect_pending_intents()
         if not intents:
             return
-
-        # Limit intents per tick to prevent flooding
-        if len(intents) > self._max_intents_per_tick:
-            logger.warning(
-                "Too many intents (%d > %d), processing first %d / "
-                "意图过多，只处理前 %d 个",
-                len(intents), self._max_intents_per_tick,
-                self._max_intents_per_tick,
-                self._max_intents_per_tick,
-            )
-            intents = intents[: self._max_intents_per_tick]
 
         # Get current market prices from tick history (fixes C1: positions is dict, not list)
         market_prices = dict(self._latest_prices)
@@ -559,433 +552,40 @@ class PipelineBridge:
         _local_stats: dict[str, int] = {}
         _local_guardian: dict[str, int] = {}
 
-        def _bump(counter: dict, key: str, amount: int = 1) -> None:
-            """Increment a local counter (no lock needed). / 累加本地计数器（无需锁）。"""
-            counter[key] = counter.get(key, 0) + amount
-
         for intent in intents:
             try:
-                # T2.02: Cognitive honesty check (perception plane validation)
-                # 认知诚实检查（感知平面验证）
-                if self._perception_plane:
-                    data_id = getattr(intent, "perception_data_id", None)
-                    if data_id:
-                        # Intent references perception data — validate before proceeding
-                        # 意图引用了感知数据 — 在继续前验证
-                        eligible, reason = self._perception_plane.validate_for_decision(data_id)
-                        if not eligible:
-                            logger.info(
-                                "Intent rejected by perception honesty: %s %s (reason: %s) / 意图被感知拒絕",
-                                intent.symbol, intent.side, reason
-                            )
-                            _bump(_local_stats, "intents_rejected")
-                            self._mark_intent(intent, "rejected_perception")
-                            continue
-                    else:
-                        # Intent has no perception data marked (implicit FACT assumption for exchange data)
-                        # 意图无感知数据标记（假设交易所数据为 FACT）
-                        # This is acceptable for exchange-sourced signals
-                        pass
-
-                # ── Sprint 5a: H0 Gate blocking — fail-closed (principle 5: survival > profit) ──
-                # Sprint 5a：H0 Gate 阻擋模式 — fail-closed（根原則 5：生存 > 利潤）
-                # H0 Gate blocking: stale data or unhealthy system state → reject intent entirely.
-                # This is activated in Sprint 5a after H0 Gate SLA validation and Day 3 integration
-                # confirmed the gate is safe to enforce. Previously warn-only (paper mode), now
-                # fully blocking to protect against trading on bad market data.
-                # H0 Gate 阻擋：數據過期或系統不健康時拒絕 intent，防止基於錯誤市場數據交易。
-                # Sprint 5a 之前為 warn-only（paper 模式），現已切換為全面阻擋。
-                if self._h0_gate is not None:
-                    try:
-                        _h0_category = (
-                            intent.metadata.get("category", "linear")
-                            if hasattr(intent, "metadata") and intent.metadata
-                            else "linear"
-                        )
-                        _h0_result = self._h0_gate.check(intent.symbol, _h0_category)
-                        if not _h0_result.allowed:
-                            # H0 Gate blocking — fail-closed to protect against stale/unhealthy market data
-                            # H0 Gate 阻擋模式 — 數據過期或系統不健康時拒絕意圖，原則 5（生存 > 利潤）
-                            _bump(_local_stats, "intents_h0_blocked")
-                            logger.warning(
-                                "H0Gate BLOCKED intent %s %s check=%s reason=%s latency=%dμs"
-                                " / H0 門控已拒絕 intent：%s %s",
-                                intent.symbol,
-                                getattr(intent, "side", "?"),
-                                _h0_result.check_name,
-                                _h0_result.reason,
-                                _h0_result.latency_us,
-                                intent.symbol,
-                                getattr(intent, "side", "?"),
-                            )
-                            self._mark_intent(intent, "blocked_h0")
-                            continue  # skip this intent, do not submit
-                    except Exception as _h0_check_err:
-                        logger.warning(
-                            "H0Gate check error (fail-open on exception, non-fatal): %s "
-                            "/ H0 門控檢查異常（異常時 fail-open，非致命）",
-                            _h0_check_err,
-                        )
-
-                # Governance Hub authorization check / 治理集線器授權檢查
-                if self._governance_hub:
-                    try:
-                        if not self._governance_hub.is_authorized():
-                            logger.info(
-                                "Intent rejected by governance: %s %s (not authorized) / 意图被治理拒絕",
-                                intent.symbol, intent.side
-                            )
-                            _bump(_local_stats, "intents_rejected")
-                            self._mark_intent(intent, "rejected_governance")
-                            continue
-                    except Exception as exc:
-                        logger.error("Governance is_authorized error — fail-closed: %s", exc)
-                        _bump(_local_stats, "intents_rejected")
-                        self._mark_intent(intent, "rejected_governance")
-                        continue
-
-                # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
-                # Batch 8：Guardian Agent 作为主门控（fail-closed）
-                # Guardian verdict overrides all other filters (EX-06 §9).
-                # If Guardian is unavailable → REJECTED (fail-closed, DOC-01 §5.6).
-                # Original edge filter demoted to auxiliary reference (logged only).
-                # Dynamic qty: recalculate based on current balance at submission time
-                # 動態倉位：在提交時根據當前餘額重新計算
-                _submit_qty = intent.qty
-                if self._auto_deployer and market_prices.get(intent.symbol):
-                    try:
-                        _submit_qty = self._auto_deployer.compute_dynamic_qty(
-                            intent.symbol, market_prices[intent.symbol]
-                        )
-                    except Exception:
-                        logger.debug("Dynamic qty fallback to intent.qty for %s", intent.symbol)
-
-                # Round qty to exchange step precision (shared with Demo connector)
-                # 統一四捨五入到交易所步長精度（與 Demo connector 共用）
-                # Ensures Paper and Demo receive identical qty values.
-                # INV-3: Pass category so inverse contracts round to integer contracts.
-                # INV-3：傳入 category，確保 inverse 合約正確取整（整數張數）。
-                try:
-                    from .bybit_demo_connector import round_qty_for_exchange
-                    _intent_category = (
-                        intent.metadata.get("category", "linear")
-                        if hasattr(intent, "metadata") and intent.metadata
-                        else "linear"
-                    )
-                    _submit_qty = round_qty_for_exchange(_submit_qty, category=_intent_category)
-                    if _submit_qty <= 0:
-                        logger.info("Qty rounds to zero for %s, skipping / qty 四捨五入為零，跳過", intent.symbol)
-                        self._mark_intent(intent, "rejected_qty_zero")
-                        continue
-                except ImportError:
-                    pass  # Demo connector not available, use raw qty
-
-                _submit_leverage = None  # may be overridden by Guardian MODIFIED verdict
-
-                if self._guardian_agent:
-                    try:
-                        from .multi_agent_framework import TradeIntent as _TI, RiskVerdictResult as _RVR
-
-                        # Sync active positions to Guardian for context
-                        # 同步活跃仓位到 Guardian 用于上下文判断
-                        if self._open_positions:
-                            self._guardian_agent.update_active_positions(self._open_positions)
-
-                        # Build TradeIntent from OrderIntent / 从 OrderIntent 构建 TradeIntent
-                        _direction = "long" if intent.side == "Buy" else "short"
-                        _strategy = (
-                            intent.metadata.get("strategy_name", "unknown")
-                            if intent.metadata else "unknown"
-                        )
-                        _ti = _TI(
-                            symbol=intent.symbol,
-                            strategy=_strategy,
-                            direction=_direction,
-                            size=intent.qty,
-                            params={"leverage": getattr(intent, "leverage", 1.0) or 1.0},
-                            confidence=getattr(intent, "confidence", 0.5) or 0.5,
-                        )
-
-                        verdict = self._guardian_agent.review_intent(_ti)
-
-                        _bump(_local_guardian, "checked")
-
-                        if verdict.result == _RVR.REJECTED:
-                            _bump(_local_guardian, "rejected")
-                            _bump(_local_stats, "intents_rejected")
-                            logger.info(
-                                "Intent REJECTED by Guardian: %s %s (reason: %s, risk=%.2f) / "
-                                "意图被 Guardian 拒绝",
-                                intent.symbol, intent.side, verdict.reason, verdict.risk_score,
-                            )
-                            self._mark_intent(intent, "rejected_guardian")
-                            continue
-
-                        elif verdict.result == _RVR.MODIFIED:
-                            _bump(_local_guardian, "modified")
-                            # Apply modifications: adjust qty and/or leverage
-                            # 应用修改：调整数量和/或杠杆
-                            if "size" in verdict.modified_params:
-                                _submit_qty = float(verdict.modified_params["size"])
-                            if "leverage" in verdict.modified_params:
-                                _submit_leverage = float(verdict.modified_params["leverage"])
-                            logger.info(
-                                "Intent MODIFIED by Guardian: %s %s (qty %.6f→%.6f, reason: %s) / "
-                                "意图被 Guardian 修改",
-                                intent.symbol, intent.side, intent.qty, _submit_qty, verdict.reason,
-                            )
-                        else:
-                            # APPROVED
-                            _bump(_local_guardian, "approved")
-                            logger.debug(
-                                "Intent APPROVED by Guardian: %s %s / 意图被 Guardian 批准",
-                                intent.symbol, intent.side,
-                            )
-
-                    except Exception as _guardian_err:
-                        # Guardian error → fail-closed: REJECT (DOC-01 §5.6)
-                        # Guardian 错误 → fail-closed：拒绝
-                        logger.error(
-                            "Guardian error — fail-closed REJECT: %s %s (%s) / "
-                            "Guardian 异常 — fail-closed 拒绝",
-                            intent.symbol, intent.side, _guardian_err,
-                        )
-                        _bump(_local_guardian, "errors")
-                        _bump(_local_stats, "intents_rejected")
-                        self._mark_intent(intent, "rejected_guardian")
-                        continue
-
-                else:
-                    # P0-2 FIX: Guardian unavailable → fail-closed REJECT (DOC-01 §5.6)
-                    # Guardian 不可用 → fail-closed 拒绝
-                    logger.error(
-                        "Guardian unavailable — fail-closed REJECT: %s %s",
-                        getattr(intent, "symbol", "?"), getattr(intent, "side", "?")
-                    )
-                    _bump(_local_stats, "intents_rejected")
-                    self._mark_intent(intent, "rejected_no_guardian")
+                # Phase 1: Gate checks (H0 + governance + Guardian + edge filter)
+                # 階段 1：門控檢查（H0 + 治理 + Guardian + edge 過濾）
+                gate_result = self._gate_intent(intent, market_prices, _local_stats, _local_guardian)
+                if gate_result is None:
+                    # Intent was rejected by one of the gates — skip to next intent
+                    # 意圖被某個門控拒絕 — 跳到下一個意圖
                     continue
 
-                # Resolve final effective leverage:
-                # Guardian MODIFIED value > intent.metadata["leverage"] > intent.leverage attr > 1.0
-                # 确定最终有效杠杆：Guardian 修改值 > metadata > intent 属性 > 默认 1.0
-                _effective_leverage = float(
-                    _submit_leverage
-                    or (intent.metadata or {}).get("leverage")
-                    or getattr(intent, "leverage", None)
-                    or 1.0
+                _submit_qty, _submit_leverage, _effective_leverage = gate_result
+
+                # Phase 2: Submit to paper engine + acquire lease
+                # 階段 2：提交到 Paper 引擎 + 申請 lease
+                result, category = self._submit_approved_intent(
+                    intent, _submit_qty, _effective_leverage, market_prices, _local_stats,
                 )
+                if result is None:
+                    # Lease acquisition failed — already counted in _local_stats
+                    # Lease 申請失敗 — 已計入 _local_stats
+                    continue
 
-                # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
-                # L1 交易前 edge 过滤（辅助参考 — 仅记录，不阻塞）
-                # Batch 8: Guardian is now the primary gate; edge filter demoted to advisory
-                # Batch 8：Guardian 已成为主门控；edge filter 降级为参考
-                if self._ollama_client and self._edge_filter_enabled:
-                    edge_ok = self._check_edge_filter(intent, market_prices)
-                    if not edge_ok:
-                        logger.info(
-                            "Edge filter advisory: would reject %s %s (Guardian already approved) / "
-                            "Edge 过滤器建议：会拒绝 %s %s（Guardian 已批准）",
-                            intent.symbol, intent.side, intent.symbol, intent.side,
-                        )
-                        # Note: no longer blocking — Guardian verdict is authoritative
-                        # 注意：不再阻塞 — Guardian 裁决为权威
-
-                # H6: Acquire Decision Lease before execution (Principle 3: AI output ≠ command)
-                # H6：執行前申請 Decision Lease，確保 Guardian 批准不直接等於執行命令（根原則 3）
-                # fail-open when governance_hub is None (backward compat, no hub deployed)
-                # fail-closed when hub exists but acquire_lease() returns None (hub denied the lease)
-                # 若 governance_hub 為 None：fail-open（向後兼容，無 Hub 時不阻塞）
-                # 若 Hub 存在但 acquire_lease 返回 None：fail-closed（Hub 拒絕，跳過此 intent）
-                if self._governance_hub is not None:
-                    try:
-                        _intent_id_for_lease = (
-                            getattr(intent, "intent_id", None)
-                            or f"pb-{intent.symbol}-{intent.side}-{id(intent)}"
-                        )
-                        _lease_id = self._governance_hub.acquire_lease(
-                            intent_id=_intent_id_for_lease,
-                            scope="TRADE_ENTRY",
-                            ttl_seconds=30,
-                        )
-                        if _lease_id is None:
-                            # fail-closed: Guardian approved but lease acquisition failed
-                            # 失敗默認收縮：Guardian 已批准但 lease 申請失敗，拒絕執行（DOC-01 §5.6）
-                            logger.warning(
-                                "pipeline_bridge: lease acquisition failed for intent %s %s, "
-                                "skipping (fail-closed) / lease 申請失敗，跳過執行（fail-closed）",
-                                intent.symbol, intent.side,
-                            )
-                            _bump(_local_stats, "intents_lease_failed")
-                            self._mark_intent(intent, "rejected_lease")
-                            continue
-                    except Exception as _lease_err:
-                        # Lease acquisition error → fail-closed (DOC-01 §5.6)
-                        # Lease 申請異常 → fail-closed（不允許在治理狀態不明時執行）
-                        logger.error(
-                            "pipeline_bridge: lease acquisition error — fail-closed: %s %s (%s) / "
-                            "lease 申請異常 — fail-closed 拒絕",
-                            intent.symbol, intent.side, _lease_err,
-                        )
-                        _bump(_local_stats, "intents_lease_failed")
-                        self._mark_intent(intent, "rejected_lease")
-                        continue
-
-                # Extract category from intent metadata (default: linear)
-                # 从意图元数据提取品类（默认：linear）
-                category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
-                # Wave 7a 方案 B：如果 category 是 fallback 且 symbol 未在運行時映射中登記，記錄 warning。
-                # Wave 7a Plan B: warn when category defaults to linear for an unregistered symbol.
-                # This helps detect symbols deployed without category registration.
-                if category == "linear" and intent.symbol not in self._symbol_category_map:
-                    logger.warning(
-                        "Intent for %s has no explicit category and symbol is not in category map; "
-                        "defaulting to linear. Register via StrategyAutoDeployer to fix. "
-                        "/ intent 無明確 category 且 symbol 未在映射中登記，使用 linear 作 fallback：%s",
-                        intent.symbol,
-                        intent.symbol,
-                    )
-
-                # B6: For limit orders without explicit price, use current market price
-                # B6：limit 单如无明确价格，使用当前市场价
-                submit_price = intent.price
-                if intent.order_type == "limit" and submit_price is None:
-                    submit_price = market_prices.get(intent.symbol)
-
-                result = self._engine.submit_order(
-                    symbol=intent.symbol,
-                    side=intent.side,
-                    order_type=intent.order_type,
-                    qty=_submit_qty,  # Batch 8: may be modified by Guardian / 可能被 Guardian 修改
-                    price=submit_price,
-                    market_prices=market_prices,
-                    category=category,
-                    strategy_name=getattr(intent, "strategy_name", "") or "",
-                    leverage=_effective_leverage,  # propagate resolved leverage to Paper engine
+                # Phase 3: Post-execution hooks (round-trip, learning, Telegram)
+                # 階段 3：後置鉤子（交易回合、學習、Telegram）
+                self._post_execution_hooks(
+                    intent, result, _submit_qty, _effective_leverage,
+                    category, market_prices, _local_stats,
                 )
-
-                _bump(_local_stats, "intents_submitted")
-
-                order = result.get("order", {}) if isinstance(result, dict) else {}
-                rejected = result.get("rejected_reason") if isinstance(result, dict) else None
-
-                if rejected:
-                    _bump(_local_stats, "intents_rejected")
-                    self._mark_intent(intent, "rejected_risk")
-                    logger.info(
-                        "Intent rejected: %s %s %s qty=%.6f reason=%s / 意图被拒",
-                        intent.symbol, intent.side, intent.order_type,
-                        intent.qty, rejected,
-                    )
-                else:
-                    _bump(_local_stats, "intents_accepted")
-                    self._mark_intent(intent, "submitted")
-                    logger.info(
-                        "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
-                        intent.symbol, intent.side, intent.order_type, intent.qty,
-                    )
-
-                    # H1: track position or detect close for E1/G1 hooks
-                    # H1：追踪持仓，或检测关闭触发 E1/G1
-                    fills = result.get("fills", []) if isinstance(result, dict) else []
-                    close_pnl = result.get("close_pnl", 0.0) if isinstance(result, dict) else 0.0
-                    if fills:
-                        fill = fills[0]
-                        fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
-                        is_open_fill = close_pnl == 0.0
-                        if close_pnl != 0.0:
-                            # Position closed — round-trip complete
-                            # 持仓已关闭 — 一轮交易完成
-                            self._on_round_trip_complete(intent, fill_price, close_pnl)
-                        else:
-                            # New position opened — start tracking
-                            # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
-                            self._on_position_open(intent, fill_price, actual_qty=_submit_qty)
-                        # Sync strategy position state via on_fill callback
-                        # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
-                        if self._auto_deployer:
-                            strategy_name = getattr(intent, "strategy_name", None)
-                            if strategy_name:
-                                fill_for_callback = {
-                                    "symbol": intent.symbol,
-                                    "side": intent.side,
-                                    "qty": intent.qty,
-                                    "price": fill_price,
-                                    "strategy_name": strategy_name,
-                                }
-                                self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
-
-                    # Also submit to Bybit Demo — ONLY when paper engine accepted.
-                    # Demo must mirror paper exactly: rejected paper orders must not
-                    # reach demo, otherwise positions diverge (paper=0, demo>0).
-                    # Also use _submit_qty (Guardian-modified) not intent.qty (original).
-                    # 仅在 Paper Engine 接受订单后才提交 Demo — 两者必须严格同步。
-                    # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
-                    # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
-                    if self._demo_connector and self._demo_connector.is_enabled:
-                        # SPOT-DEMO: Bybit spot trades appear as wallet balance changes,
-                        # not as positions.  Comparing Paper spot positions against Demo
-                        # positions will always mismatch (Demo side is always empty).
-                        # Skip Demo submission for spot — track Paper-side only.
-                        # 现货交易在 Demo 端体现为余额变化而非持仓，跳过 Demo 提交，仅记录 Paper。
-                        if category == "spot":
-                            logger.debug(
-                                "Skipping Demo submission for spot %s %s (spot=wallet-only on Demo) / "
-                                "跳过现货 Demo 提交（现货体现为余额变化）",
-                                intent.symbol, intent.side,
-                            )
-                            _bump(_local_stats, "demo_spot_skipped")
-                        else:
-                            _demo_synced = False
-                            try:
-                                # Set leverage on Demo before placing the order so that
-                                # margin math and PnL match Paper (Paper always uses
-                                # _effective_leverage; Demo would otherwise keep whatever
-                                # the Bybit account last had configured per-symbol).
-                                # 在下单前先同步杠杆，确保 Demo 保证金计算与 Paper 一致。
-                                self._demo_connector.set_leverage(
-                                    symbol=intent.symbol,
-                                    buy_leverage=_effective_leverage,
-                                    category=category,
-                                )
-                                demo_result = self._demo_connector.submit_order(
-                                    symbol=intent.symbol,
-                                    side=intent.side,
-                                    order_type="Market" if intent.order_type == "market" else "Limit",
-                                    qty=_submit_qty,
-                                    price=intent.price,
-                                    category=category,
-                                )
-                                if demo_result.get("retCode") == 0:
-                                    _demo_synced = True
-                                else:
-                                    logger.warning(
-                                        "Demo order REJECTED: %s %s qty=%.6f reason=%s — Paper/Demo DIVERGED / "
-                                        "Demo 訂單被拒：Paper 已接受但 Demo 拒絕，數據已分歧",
-                                        intent.symbol, intent.side, _submit_qty,
-                                        demo_result.get("retMsg"),
-                                    )
-                            except Exception as _demo_err:
-                                logger.warning(
-                                    "Demo connector error: %s %s — %s — Paper/Demo DIVERGED / "
-                                    "Demo 連接異常：數據已分歧",
-                                    intent.symbol, intent.side, _demo_err,
-                                )
-                            # Track sync status in local counters (flushed at end)
-                            # 在本地计数器中追踪同步状态（最后一次性刷入）
-                            if _demo_synced:
-                                _bump(_local_stats, "demo_synced")
-                            else:
-                                _bump(_local_stats, "demo_diverged")
-                        if self._telegram and intent.order_type == "market":
-                            price = market_prices.get(intent.symbol, 0)
-                            self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
 
             except Exception:
                 logger.exception(
                     "Failed to submit intent: %s / 提交意图失败", intent,
                 )
-                _bump(_local_stats, "errors")
+                _local_stats["errors"] = _local_stats.get("errors", 0) + 1
 
         # APR01-MEDIUM-12: Flush all accumulated stats in a single lock acquisition.
         # This replaces ~27 scattered `with self._lock` blocks with one batch update.
@@ -1001,6 +601,576 @@ class PipelineBridge:
                     self._stats[key] = self._stats.get(key, 0) + delta
                 for key, delta in _local_guardian.items():
                     self._guardian_stats[key] = self._guardian_stats.get(key, 0) + delta
+
+    # ── Sub-method 1: Collect and cap pending intents ──
+    # 子方法 1：收集並限制待處理意圖
+
+    def _collect_pending_intents(self) -> list:
+        """
+        Gather OrderIntents from orchestrator and apply the per-tick cap.
+        從編排器收集 OrderIntent 並應用每 tick 上限。
+
+        Returns a (possibly empty) list of intents capped to max_intents_per_tick.
+        Orchestrator errors are caught and logged — returns [] on failure (fail-open
+        for collection, since downstream gates will reject bad intents anyway).
+        返回一個（可能為空的）意圖列表，已限制為 max_intents_per_tick。
+        編排器錯誤會被捕獲並記錄 — 失敗時返回 []（收集階段 fail-open，
+        因為下游門控會拒絕有問題的意圖）。
+        """
+        try:
+            intents = self._orch.collect_pending_intents()
+        except Exception:
+            logger.exception("Failed to collect orchestrator intents / 收集编排器意图失败")
+            intents = []
+
+        if not intents:
+            return []
+
+        # Limit intents per tick to prevent flooding
+        if len(intents) > self._max_intents_per_tick:
+            logger.warning(
+                "Too many intents (%d > %d), processing first %d / "
+                "意图过多，只处理前 %d 个",
+                len(intents), self._max_intents_per_tick,
+                self._max_intents_per_tick,
+                self._max_intents_per_tick,
+            )
+            intents = intents[: self._max_intents_per_tick]
+
+        return intents
+
+    # ── Sub-method 2: Gate an individual intent ──
+    # 子方法 2：對單個意圖進行門控檢查
+
+    def _gate_intent(
+        self,
+        intent: Any,
+        market_prices: dict[str, float],
+        _local_stats: dict[str, int],
+        _local_guardian: dict[str, int],
+    ) -> tuple[float, float | None, float] | None:
+        """
+        Run all pre-submission gate checks on a single intent.
+        對單個意圖執行所有提交前門控檢查。
+
+        Gate pipeline (in order):
+          1. Perception plane cognitive honesty check (Principle 10)
+          2. H0 Gate deterministic filter — fail-closed (Principle 5: survival > profit)
+          3. Governance Hub authorization — fail-closed
+          4. Dynamic qty calculation + exchange rounding
+          5. Guardian Agent verdict — fail-closed (DOC-01 §5.6)
+          6. Edge filter — advisory only (logged, not blocking)
+
+        門控管線（按順序）：
+          1. 感知平面認知誠實檢查（原則 10）
+          2. H0 確定性過濾 — fail-closed（原則 5：生存 > 利潤）
+          3. 治理授權 — fail-closed
+          4. 動態數量計算 + 交易所精度四捨五入
+          5. Guardian 裁決 — fail-closed（DOC-01 §5.6）
+          6. Edge 過濾 — 僅建議（記錄但不阻塞）
+
+        Returns:
+            (submit_qty, submit_leverage, effective_leverage) if approved.
+            None if the intent was rejected by any gate (already logged + stats bumped).
+        返回：
+            若批准：(submit_qty, submit_leverage, effective_leverage)。
+            若被任何門控拒絕：None（已記錄日誌並更新統計）。
+        """
+        def _bump(counter: dict, key: str, amount: int = 1) -> None:
+            """Increment a local counter (no lock needed). / 累加本地计数器（无需锁）。"""
+            counter[key] = counter.get(key, 0) + amount
+
+        # T2.02: Cognitive honesty check (perception plane validation)
+        # 认知诚实检查（感知平面验证）
+        if self._perception_plane:
+            data_id = getattr(intent, "perception_data_id", None)
+            if data_id:
+                # Intent references perception data — validate before proceeding
+                # 意图引用了感知数据 — 在继续前验证
+                eligible, reason = self._perception_plane.validate_for_decision(data_id)
+                if not eligible:
+                    logger.info(
+                        "Intent rejected by perception honesty: %s %s (reason: %s) / 意图被感知拒絕",
+                        intent.symbol, intent.side, reason
+                    )
+                    _bump(_local_stats, "intents_rejected")
+                    self._mark_intent(intent, "rejected_perception")
+                    return None
+            else:
+                # Intent has no perception data marked (implicit FACT assumption for exchange data)
+                # 意图无感知数据标记（假设交易所数据为 FACT）
+                # This is acceptable for exchange-sourced signals
+                pass
+
+        # ── Sprint 5a: H0 Gate blocking — fail-closed (principle 5: survival > profit) ──
+        # Sprint 5a：H0 Gate 阻擋模式 — fail-closed（根原則 5：生存 > 利潤）
+        # H0 Gate blocking: stale data or unhealthy system state → reject intent entirely.
+        # This is activated in Sprint 5a after H0 Gate SLA validation and Day 3 integration
+        # confirmed the gate is safe to enforce. Previously warn-only (paper mode), now
+        # fully blocking to protect against trading on bad market data.
+        # H0 Gate 阻擋：數據過期或系統不健康時拒絕 intent，防止基於錯誤市場數據交易。
+        # Sprint 5a 之前為 warn-only（paper 模式），現已切換為全面阻擋。
+        if self._h0_gate is not None:
+            try:
+                _h0_category = (
+                    intent.metadata.get("category", "linear")
+                    if hasattr(intent, "metadata") and intent.metadata
+                    else "linear"
+                )
+                _h0_result = self._h0_gate.check(intent.symbol, _h0_category)
+                if not _h0_result.allowed:
+                    # H0 Gate blocking — fail-closed to protect against stale/unhealthy market data
+                    # H0 Gate 阻擋模式 — 數據過期或系統不健康時拒絕意圖，原則 5（生存 > 利潤）
+                    _bump(_local_stats, "intents_h0_blocked")
+                    logger.warning(
+                        "H0Gate BLOCKED intent %s %s check=%s reason=%s latency=%dμs"
+                        " / H0 門控已拒絕 intent：%s %s",
+                        intent.symbol,
+                        getattr(intent, "side", "?"),
+                        _h0_result.check_name,
+                        _h0_result.reason,
+                        _h0_result.latency_us,
+                        intent.symbol,
+                        getattr(intent, "side", "?"),
+                    )
+                    self._mark_intent(intent, "blocked_h0")
+                    return None  # skip this intent, do not submit
+            except Exception as _h0_check_err:
+                logger.warning(
+                    "H0Gate check error (fail-open on exception, non-fatal): %s "
+                    "/ H0 門控檢查異常（異常時 fail-open，非致命）",
+                    _h0_check_err,
+                )
+
+        # Governance Hub authorization check / 治理集線器授權檢查
+        if self._governance_hub:
+            try:
+                if not self._governance_hub.is_authorized():
+                    logger.info(
+                        "Intent rejected by governance: %s %s (not authorized) / 意图被治理拒絕",
+                        intent.symbol, intent.side
+                    )
+                    _bump(_local_stats, "intents_rejected")
+                    self._mark_intent(intent, "rejected_governance")
+                    return None
+            except Exception as exc:
+                logger.error("Governance is_authorized error — fail-closed: %s", exc)
+                _bump(_local_stats, "intents_rejected")
+                self._mark_intent(intent, "rejected_governance")
+                return None
+
+        # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
+        # Batch 8：Guardian Agent 作为主门控（fail-closed）
+        # Guardian verdict overrides all other filters (EX-06 §9).
+        # If Guardian is unavailable → REJECTED (fail-closed, DOC-01 §5.6).
+        # Original edge filter demoted to auxiliary reference (logged only).
+        # Dynamic qty: recalculate based on current balance at submission time
+        # 動態倉位：在提交時根據當前餘額重新計算
+        _submit_qty = intent.qty
+        if self._auto_deployer and market_prices.get(intent.symbol):
+            try:
+                _submit_qty = self._auto_deployer.compute_dynamic_qty(
+                    intent.symbol, market_prices[intent.symbol]
+                )
+            except Exception:
+                logger.debug("Dynamic qty fallback to intent.qty for %s", intent.symbol)
+
+        # Round qty to exchange step precision (shared with Demo connector)
+        # 統一四捨五入到交易所步長精度（與 Demo connector 共用）
+        # Ensures Paper and Demo receive identical qty values.
+        # INV-3: Pass category so inverse contracts round to integer contracts.
+        # INV-3：傳入 category，確保 inverse 合約正確取整（整數張數）。
+        try:
+            from .bybit_demo_connector import round_qty_for_exchange
+            _intent_category = (
+                intent.metadata.get("category", "linear")
+                if hasattr(intent, "metadata") and intent.metadata
+                else "linear"
+            )
+            _submit_qty = round_qty_for_exchange(_submit_qty, category=_intent_category)
+            if _submit_qty <= 0:
+                logger.info("Qty rounds to zero for %s, skipping / qty 四捨五入為零，跳過", intent.symbol)
+                self._mark_intent(intent, "rejected_qty_zero")
+                return None
+        except ImportError:
+            pass  # Demo connector not available, use raw qty
+
+        _submit_leverage = None  # may be overridden by Guardian MODIFIED verdict
+
+        if self._guardian_agent:
+            try:
+                from .multi_agent_framework import TradeIntent as _TI, RiskVerdictResult as _RVR
+
+                # Sync active positions to Guardian for context
+                # 同步活跃仓位到 Guardian 用于上下文判断
+                if self._open_positions:
+                    self._guardian_agent.update_active_positions(self._open_positions)
+
+                # Build TradeIntent from OrderIntent / 从 OrderIntent 构建 TradeIntent
+                _direction = "long" if intent.side == "Buy" else "short"
+                _strategy = (
+                    intent.metadata.get("strategy_name", "unknown")
+                    if intent.metadata else "unknown"
+                )
+                _ti = _TI(
+                    symbol=intent.symbol,
+                    strategy=_strategy,
+                    direction=_direction,
+                    size=intent.qty,
+                    params={"leverage": getattr(intent, "leverage", 1.0) or 1.0},
+                    confidence=getattr(intent, "confidence", 0.5) or 0.5,
+                )
+
+                verdict = self._guardian_agent.review_intent(_ti)
+
+                _bump(_local_guardian, "checked")
+
+                if verdict.result == _RVR.REJECTED:
+                    _bump(_local_guardian, "rejected")
+                    _bump(_local_stats, "intents_rejected")
+                    logger.info(
+                        "Intent REJECTED by Guardian: %s %s (reason: %s, risk=%.2f) / "
+                        "意图被 Guardian 拒绝",
+                        intent.symbol, intent.side, verdict.reason, verdict.risk_score,
+                    )
+                    self._mark_intent(intent, "rejected_guardian")
+                    return None
+
+                elif verdict.result == _RVR.MODIFIED:
+                    _bump(_local_guardian, "modified")
+                    # Apply modifications: adjust qty and/or leverage
+                    # 应用修改：调整数量和/或杠杆
+                    if "size" in verdict.modified_params:
+                        _submit_qty = float(verdict.modified_params["size"])
+                    if "leverage" in verdict.modified_params:
+                        _submit_leverage = float(verdict.modified_params["leverage"])
+                    logger.info(
+                        "Intent MODIFIED by Guardian: %s %s (qty %.6f→%.6f, reason: %s) / "
+                        "意图被 Guardian 修改",
+                        intent.symbol, intent.side, intent.qty, _submit_qty, verdict.reason,
+                    )
+                else:
+                    # APPROVED
+                    _bump(_local_guardian, "approved")
+                    logger.debug(
+                        "Intent APPROVED by Guardian: %s %s / 意图被 Guardian 批准",
+                        intent.symbol, intent.side,
+                    )
+
+            except Exception as _guardian_err:
+                # Guardian error → fail-closed: REJECT (DOC-01 §5.6)
+                # Guardian 错误 → fail-closed：拒绝
+                logger.error(
+                    "Guardian error — fail-closed REJECT: %s %s (%s) / "
+                    "Guardian 异常 — fail-closed 拒绝",
+                    intent.symbol, intent.side, _guardian_err,
+                )
+                _bump(_local_guardian, "errors")
+                _bump(_local_stats, "intents_rejected")
+                self._mark_intent(intent, "rejected_guardian")
+                return None
+
+        else:
+            # P0-2 FIX: Guardian unavailable → fail-closed REJECT (DOC-01 §5.6)
+            # Guardian 不可用 → fail-closed 拒绝
+            logger.error(
+                "Guardian unavailable — fail-closed REJECT: %s %s",
+                getattr(intent, "symbol", "?"), getattr(intent, "side", "?")
+            )
+            _bump(_local_stats, "intents_rejected")
+            self._mark_intent(intent, "rejected_no_guardian")
+            return None
+
+        # Resolve final effective leverage:
+        # Guardian MODIFIED value > intent.metadata["leverage"] > intent.leverage attr > 1.0
+        # 确定最终有效杠杆：Guardian 修改值 > metadata > intent 属性 > 默认 1.0
+        _effective_leverage = float(
+            _submit_leverage
+            or (intent.metadata or {}).get("leverage")
+            or getattr(intent, "leverage", None)
+            or 1.0
+        )
+
+        # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
+        # L1 交易前 edge 过滤（辅助参考 — 仅记录，不阻塞）
+        # Batch 8: Guardian is now the primary gate; edge filter demoted to advisory
+        # Batch 8：Guardian 已成为主门控；edge filter 降级为参考
+        if self._ollama_client and self._edge_filter_enabled:
+            edge_ok = self._check_edge_filter(intent, market_prices)
+            if not edge_ok:
+                logger.info(
+                    "Edge filter advisory: would reject %s %s (Guardian already approved) / "
+                    "Edge 过滤器建议：会拒绝 %s %s（Guardian 已批准）",
+                    intent.symbol, intent.side, intent.symbol, intent.side,
+                )
+                # Note: no longer blocking — Guardian verdict is authoritative
+                # 注意：不再阻塞 — Guardian 裁决为权威
+
+        return (_submit_qty, _submit_leverage, _effective_leverage)
+
+    # ── Sub-method 3: Submit an approved intent to the paper engine ──
+    # 子方法 3：將已批准的意圖提交到 Paper 引擎
+
+    def _submit_approved_intent(
+        self,
+        intent: Any,
+        _submit_qty: float,
+        _effective_leverage: float,
+        market_prices: dict[str, float],
+        _local_stats: dict[str, int],
+    ) -> tuple[dict | None, str]:
+        """
+        Acquire Decision Lease, submit order to Paper engine, return result.
+        申請 Decision Lease，將訂單提交到 Paper 引擎，返回結果。
+
+        Handles:
+          - Decision Lease acquisition (Principle 3: AI output != command)
+          - Category extraction + unregistered symbol warning
+          - Limit order price fallback
+          - Paper engine submit_order() call
+
+        處理：
+          - Decision Lease 申請（原則 3：AI 輸出 != 命令）
+          - 品類提取 + 未註冊 symbol 警告
+          - Limit 單價格回退
+          - Paper 引擎 submit_order() 調用
+
+        Returns:
+            (result_dict, category) on success; (None, category) if lease was denied.
+        返回：
+            成功時 (result_dict, category)；lease 被拒時 (None, category)。
+        """
+        def _bump(counter: dict, key: str, amount: int = 1) -> None:
+            """Increment a local counter (no lock needed). / 累加本地计数器（无需锁）。"""
+            counter[key] = counter.get(key, 0) + amount
+
+        # H6: Acquire Decision Lease before execution (Principle 3: AI output ≠ command)
+        # H6：執行前申請 Decision Lease，確保 Guardian 批准不直接等於執行命令（根原則 3）
+        # fail-open when governance_hub is None (backward compat, no hub deployed)
+        # fail-closed when hub exists but acquire_lease() returns None (hub denied the lease)
+        # 若 governance_hub 為 None：fail-open（向後兼容，無 Hub 時不阻塞）
+        # 若 Hub 存在但 acquire_lease 返回 None：fail-closed（Hub 拒絕，跳過此 intent）
+        if self._governance_hub is not None:
+            try:
+                _intent_id_for_lease = (
+                    getattr(intent, "intent_id", None)
+                    or f"pb-{intent.symbol}-{intent.side}-{id(intent)}"
+                )
+                _lease_id = self._governance_hub.acquire_lease(
+                    intent_id=_intent_id_for_lease,
+                    scope="TRADE_ENTRY",
+                    ttl_seconds=30,
+                )
+                if _lease_id is None:
+                    # fail-closed: Guardian approved but lease acquisition failed
+                    # 失敗默認收縮：Guardian 已批准但 lease 申請失敗，拒絕執行（DOC-01 §5.6）
+                    logger.warning(
+                        "pipeline_bridge: lease acquisition failed for intent %s %s, "
+                        "skipping (fail-closed) / lease 申請失敗，跳過執行（fail-closed）",
+                        intent.symbol, intent.side,
+                    )
+                    _bump(_local_stats, "intents_lease_failed")
+                    self._mark_intent(intent, "rejected_lease")
+                    return None, ""
+            except Exception as _lease_err:
+                # Lease acquisition error → fail-closed (DOC-01 §5.6)
+                # Lease 申請異常 → fail-closed（不允許在治理狀態不明時執行）
+                logger.error(
+                    "pipeline_bridge: lease acquisition error — fail-closed: %s %s (%s) / "
+                    "lease 申請異常 — fail-closed 拒絕",
+                    intent.symbol, intent.side, _lease_err,
+                )
+                _bump(_local_stats, "intents_lease_failed")
+                self._mark_intent(intent, "rejected_lease")
+                return None, ""
+
+        # Extract category from intent metadata (default: linear)
+        # 从意图元数据提取品类（默认：linear）
+        category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
+        # Wave 7a 方案 B：如果 category 是 fallback 且 symbol 未在運行時映射中登記，記錄 warning。
+        # Wave 7a Plan B: warn when category defaults to linear for an unregistered symbol.
+        # This helps detect symbols deployed without category registration.
+        if category == "linear" and intent.symbol not in self._symbol_category_map:
+            logger.warning(
+                "Intent for %s has no explicit category and symbol is not in category map; "
+                "defaulting to linear. Register via StrategyAutoDeployer to fix. "
+                "/ intent 無明確 category 且 symbol 未在映射中登記，使用 linear 作 fallback：%s",
+                intent.symbol,
+                intent.symbol,
+            )
+
+        # B6: For limit orders without explicit price, use current market price
+        # B6：limit 单如无明确价格，使用当前市场价
+        submit_price = intent.price
+        if intent.order_type == "limit" and submit_price is None:
+            submit_price = market_prices.get(intent.symbol)
+
+        result = self._engine.submit_order(
+            symbol=intent.symbol,
+            side=intent.side,
+            order_type=intent.order_type,
+            qty=_submit_qty,  # Batch 8: may be modified by Guardian / 可能被 Guardian 修改
+            price=submit_price,
+            market_prices=market_prices,
+            category=category,
+            strategy_name=getattr(intent, "strategy_name", "") or "",
+            leverage=_effective_leverage,  # propagate resolved leverage to Paper engine
+        )
+
+        _bump(_local_stats, "intents_submitted")
+
+        return result, category
+
+    # ── Sub-method 4: Post-execution hooks ──
+    # 子方法 4：執行後置鉤子
+
+    def _post_execution_hooks(
+        self,
+        intent: Any,
+        result: Any,
+        _submit_qty: float,
+        _effective_leverage: float,
+        category: str,
+        market_prices: dict[str, float],
+        _local_stats: dict[str, int],
+    ) -> None:
+        """
+        Handle everything after Paper engine submit_order() returns.
+        處理 Paper 引擎 submit_order() 返回後的所有事項。
+
+        Responsibilities:
+          - Classify result as accepted/rejected and update stats + intent status
+          - On accepted fill: track position open or detect round-trip close
+          - Notify auto-deployer of fills (strategy position state sync)
+          - Sync to Bybit Demo (mirror paper, fail-open for Demo errors)
+          - Fire Telegram alert for market orders
+
+        職責：
+          - 將結果分類為已接受/已拒絕，更新統計和意圖狀態
+          - 成交時：追蹤開倉或偵測交易回合完成
+          - 通知自動部署器成交情況（策略倉位狀態同步）
+          - 同步到 Bybit Demo（鏡像 Paper，Demo 錯誤 fail-open）
+          - 市價單發送 Telegram 告警
+        """
+        def _bump(counter: dict, key: str, amount: int = 1) -> None:
+            """Increment a local counter (no lock needed). / 累加本地计数器（无需锁）。"""
+            counter[key] = counter.get(key, 0) + amount
+
+        order = result.get("order", {}) if isinstance(result, dict) else {}
+        rejected = result.get("rejected_reason") if isinstance(result, dict) else None
+
+        if rejected:
+            _bump(_local_stats, "intents_rejected")
+            self._mark_intent(intent, "rejected_risk")
+            logger.info(
+                "Intent rejected: %s %s %s qty=%.6f reason=%s / 意图被拒",
+                intent.symbol, intent.side, intent.order_type,
+                intent.qty, rejected,
+            )
+            return
+
+        _bump(_local_stats, "intents_accepted")
+        self._mark_intent(intent, "submitted")
+        logger.info(
+            "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
+            intent.symbol, intent.side, intent.order_type, intent.qty,
+        )
+
+        # H1: track position or detect close for E1/G1 hooks
+        # H1：追踪持仓，或检测关闭触发 E1/G1
+        fills = result.get("fills", []) if isinstance(result, dict) else []
+        close_pnl = result.get("close_pnl", 0.0) if isinstance(result, dict) else 0.0
+        if fills:
+            fill = fills[0]
+            fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
+            is_open_fill = close_pnl == 0.0
+            if close_pnl != 0.0:
+                # Position closed — round-trip complete
+                # 持仓已关闭 — 一轮交易完成
+                self._on_round_trip_complete(intent, fill_price, close_pnl)
+            else:
+                # New position opened — start tracking
+                # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
+                self._on_position_open(intent, fill_price, actual_qty=_submit_qty)
+            # Sync strategy position state via on_fill callback
+            # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
+            if self._auto_deployer:
+                strategy_name = getattr(intent, "strategy_name", None)
+                if strategy_name:
+                    fill_for_callback = {
+                        "symbol": intent.symbol,
+                        "side": intent.side,
+                        "qty": intent.qty,
+                        "price": fill_price,
+                        "strategy_name": strategy_name,
+                    }
+                    self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
+
+        # Also submit to Bybit Demo — ONLY when paper engine accepted.
+        # Demo must mirror paper exactly: rejected paper orders must not
+        # reach demo, otherwise positions diverge (paper=0, demo>0).
+        # Also use _submit_qty (Guardian-modified) not intent.qty (original).
+        # 仅在 Paper Engine 接受订单后才提交 Demo — 两者必须严格同步。
+        # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
+        # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
+        if self._demo_connector and self._demo_connector.is_enabled:
+            # SPOT-DEMO: Bybit spot trades appear as wallet balance changes,
+            # not as positions.  Comparing Paper spot positions against Demo
+            # positions will always mismatch (Demo side is always empty).
+            # Skip Demo submission for spot — track Paper-side only.
+            # 现货交易在 Demo 端体现为余额变化而非持仓，跳过 Demo 提交，仅记录 Paper。
+            if category == "spot":
+                logger.debug(
+                    "Skipping Demo submission for spot %s %s (spot=wallet-only on Demo) / "
+                    "跳过现货 Demo 提交（现货体现为余额变化）",
+                    intent.symbol, intent.side,
+                )
+                _bump(_local_stats, "demo_spot_skipped")
+            else:
+                _demo_synced = False
+                try:
+                    # Set leverage on Demo before placing the order so that
+                    # margin math and PnL match Paper (Paper always uses
+                    # _effective_leverage; Demo would otherwise keep whatever
+                    # the Bybit account last had configured per-symbol).
+                    # 在下单前先同步杠杆，确保 Demo 保证金计算与 Paper 一致。
+                    self._demo_connector.set_leverage(
+                        symbol=intent.symbol,
+                        buy_leverage=_effective_leverage,
+                        category=category,
+                    )
+                    demo_result = self._demo_connector.submit_order(
+                        symbol=intent.symbol,
+                        side=intent.side,
+                        order_type="Market" if intent.order_type == "market" else "Limit",
+                        qty=_submit_qty,
+                        price=intent.price,
+                        category=category,
+                    )
+                    if demo_result.get("retCode") == 0:
+                        _demo_synced = True
+                    else:
+                        logger.warning(
+                            "Demo order REJECTED: %s %s qty=%.6f reason=%s — Paper/Demo DIVERGED / "
+                            "Demo 訂單被拒：Paper 已接受但 Demo 拒絕，數據已分歧",
+                            intent.symbol, intent.side, _submit_qty,
+                            demo_result.get("retMsg"),
+                        )
+                except Exception as _demo_err:
+                    logger.warning(
+                        "Demo connector error: %s %s — %s — Paper/Demo DIVERGED / "
+                        "Demo 連接異常：數據已分歧",
+                        intent.symbol, intent.side, _demo_err,
+                    )
+                # Track sync status in local counters (flushed at end)
+                # 在本地计数器中追踪同步状态（最后一次性刷入）
+                if _demo_synced:
+                    _bump(_local_stats, "demo_synced")
+                else:
+                    _bump(_local_stats, "demo_diverged")
+            if self._telegram and intent.order_type == "market":
+                price = market_prices.get(intent.symbol, 0)
+                self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
 
     def _check_stops(self) -> None:
         """Check stop-losses and submit close orders if triggered / 检查止损并提交平仓"""
@@ -1336,13 +1506,14 @@ class PipelineBridge:
                 return True  # fail-open
 
             # Parse response / 解析响应
-            import json as _json
+            # E5 NEW-S4: Use module-level _json_mod alias (consistency fix)
+            # E5 NEW-S4：使用模塊級 _json_mod 別名（一致性修復）
             try:
-                result = _json.loads(resp.text)
+                result = _json_mod.loads(resp.text)
                 has_edge = result.get("has_edge", True)  # default: allow
                 edge_confidence = result.get("confidence", 0.5)
                 edge_reason = result.get("reason", "")
-            except (_json.JSONDecodeError, AttributeError):
+            except (_json_mod.JSONDecodeError, AttributeError):
                 # If Qwen returns non-JSON, try heuristic
                 text_lower = resp.text.lower()
                 has_edge = "true" in text_lower or "yes" in text_lower
@@ -1868,7 +2039,8 @@ class PipelineBridge:
         SPOT-4：現在為每個 symbol 推斷正確的 category，避免 spot symbol 查到錯誤端點。
         """
         import urllib.request
-        import json as _json
+        # E5 NEW-S4: Use module-level _json_mod instead of local re-import
+        # E5 NEW-S4：使用模塊級 _json_mod 而非局部重新導入
 
         tf_map = {"1m": "1", "5m": "5", "15m": "15", "1h": "60"}
 
@@ -1893,7 +2065,7 @@ class PipelineBridge:
                     )
                     req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
                     with urllib.request.urlopen(req, timeout=5) as resp:
-                        data = _json.loads(resp.read().decode())
+                        data = _json_mod.loads(resp.read().decode())
 
                     if data.get("retCode") != 0:
                         continue
@@ -1929,7 +2101,8 @@ class PipelineBridge:
         SPOT-4：現貨（spot）和期權（option）沒有資金費率，立即返回 None。
         """
         import urllib.request
-        import json as _json
+        # E5 NEW-S4: Use module-level _json_mod instead of local re-import
+        # E5 NEW-S4：使用模塊級 _json_mod 而非局部重新導入
 
         # SPOT-4: Funding rate only applies to perpetual contracts (linear / inverse).
         # Spot and option have no funding mechanism — skip API call entirely to avoid
@@ -1951,7 +2124,7 @@ class PipelineBridge:
             url = f"https://api.bybit.com/v5/market/tickers?category={resolved_category}&symbol={symbol}"
             req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
             with urllib.request.urlopen(req, timeout=5) as resp:
-                data = _json.loads(resp.read().decode())
+                data = _json_mod.loads(resp.read().decode())
 
             if data.get("retCode") != 0:
                 return None

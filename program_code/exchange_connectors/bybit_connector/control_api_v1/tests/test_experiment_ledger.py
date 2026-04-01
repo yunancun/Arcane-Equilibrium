@@ -949,5 +949,68 @@ class TestSnapshotPersistence(unittest.TestCase):
             ledger._save_timer.cancel()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# I. E4 Edge Cases: ExperimentLedger Boundary Conditions / 边界条件
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExperimentLedgerEdgeCases(unittest.TestCase):
+    """Edge case tests for ExperimentLedger.
+    ExperimentLedger 边界条件测试。"""
+
+    def setUp(self) -> None:
+        self.ledger = ExperimentLedger()
+
+    def test_observe_invalid_hypothesis_id_returns_pending(self):
+        """record_observation with nonexistent ID should return PENDING (no crash).
+        不存在的 ID 调用 record_observation 应返回 PENDING（不崩溃）。"""
+        result = self.ledger.record_observation("nonexistent_id_12345", "supporting")
+        assert result == HypothesisStatus.PENDING
+
+    def test_observe_many_observations_does_not_crash(self):
+        """Recording many observations should not crash (no hard limit on obs count).
+        大量记录观测不应崩溃（观测数量无硬限制）。"""
+        hid = self.ledger.propose_hypothesis(
+            description="Test many observations",
+            strategy_name="test_strategy",
+        )
+        for i in range(100):
+            verdict = "supporting" if i % 2 == 0 else "refuting"
+            self.ledger.record_observation(hid, verdict)
+        hyp = self.ledger.get_hypothesis(hid)
+        assert hyp is not None
+        # supporting_count + refuting_count should total 100
+        assert hyp.supporting_count + hyp.refuting_count == 100
+
+    def test_concurrent_observe_from_multiple_threads(self):
+        """Concurrent record_observation calls should not corrupt state.
+        并发 record_observation 调用不应损坏状态。"""
+        hid = self.ledger.propose_hypothesis(
+            description="Thread safety test",
+            strategy_name="concurrent_strategy",
+        )
+        errors = []
+
+        def observe_n(n: int) -> None:
+            try:
+                for _ in range(50):
+                    self.ledger.record_observation(hid, "supporting")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=observe_n, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert len(errors) == 0, f"Thread errors: {errors}"
+        hyp = self.ledger.get_hypothesis(hid)
+        assert hyp is not None
+        # Hypothesis concludes at min_observations (default 20) so count may cap.
+        # Key assertion: no corruption from concurrency — count >= 1 and status valid.
+        assert hyp.supporting_count >= 1
+        assert hyp.status in (HypothesisStatus.RUNNING, HypothesisStatus.CONFIRMED)
+
+
 if __name__ == "__main__":
     unittest.main()

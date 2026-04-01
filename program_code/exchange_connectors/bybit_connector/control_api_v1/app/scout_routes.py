@@ -415,7 +415,7 @@ def post_market_signal(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error processing market signal: {e}")
+        logger.exception("Error processing market signal: %s", e)
         raise HTTPException(
             status_code=500,
             detail={
@@ -518,7 +518,7 @@ def post_event_alert(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error processing event alert: {e}")
+        logger.exception("Error processing event alert: %s", e)
         raise HTTPException(
             status_code=500,
             detail={
@@ -577,7 +577,7 @@ def get_status(
         }
 
     except Exception as e:
-        logger.exception(f"Error getting status: {e}")
+        logger.exception("Error getting status: %s", e)
         raise HTTPException(
             status_code=500,
             detail={
@@ -642,7 +642,7 @@ def get_intel(
         }
 
     except Exception as e:
-        logger.exception(f"Error getting intel: {e}")
+        logger.exception("Error getting intel: %s", e)
         raise HTTPException(
             status_code=500,
             detail={
@@ -708,7 +708,7 @@ def get_alerts(
         }
 
     except Exception as e:
-        logger.exception(f"Error getting alerts: {e}")
+        logger.exception("Error getting alerts: %s", e)
         raise HTTPException(
             status_code=500,
             detail={

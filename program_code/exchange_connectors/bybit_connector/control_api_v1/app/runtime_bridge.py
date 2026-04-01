@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 """
-Runtime snapshot bridge for OpenClaw / Bybit Control API.
-OpenClaw / Bybit 控制 API 的 runtime 快照桥接层。
+MODULE_NOTE (中文):
+  Runtime 快照橋接層 — 允許控制 API 從外部 runtime 產出的標準 JSON 快照文件
+  讀取真實事實（system_mode / execution_state 等）。若無快照文件則保持本地
+  guarded-demo 行為不變。屬於數據層，連接外部 runtime 與內部狀態編譯。
 
-Design intent / 设计意图:
-- 允许 control API 从外部 runtime 产出的标准 JSON 快照文件读取真实事实。
-- Allow the control API to read real facts from a normalized JSON snapshot file produced by the external runtime.
-- 若未提供 runtime snapshot file，则保持当前本地 guarded demo 行为不变。
-- If no runtime snapshot file is provided, keep the current local guarded-demo behavior unchanged.
+MODULE_NOTE (English):
+  Runtime Snapshot Bridge — allows the Control API to read real facts from a
+  normalized JSON snapshot file produced by the external runtime (system_mode,
+  execution_state, etc.). Falls back to local guarded-demo behavior when no
+  snapshot file is provided. Part of data layer, bridging external runtime
+  with internal state compilation.
+
+Safety invariant:
+  快照文件缺失或損壞時回退至本地默認值（fail-safe），不會暴露未驗證的狀態。
+  Missing or corrupted snapshot falls back to local defaults (fail-safe).
 """
 
 import copy

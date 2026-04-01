@@ -231,7 +231,7 @@ class ProtectiveOrderManager:
 
         self._configs: Dict[str, ProtectiveOrderConfig] = {}  # For standard templates
 
-        logger.info(f"ProtectiveOrderManager initialized (audit_callback: {audit_callback is not None})")
+        logger.info("ProtectiveOrderManager initialized (audit_callback: %s)", audit_callback is not None)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Create and Track
@@ -342,8 +342,8 @@ class ProtectiveOrderManager:
                 "position_id": position_id,
             })
 
-        logger.info(f"Created protective order {order.order_id} ({order_type.value}) "
-                    f"for {symbol} {side.value} @ {trigger_price:.8f}")
+        logger.info("Created protective order %s (%s) for %s %s @ %.8f",
+                    order.order_id, order_type.value, symbol, side.value, trigger_price)
 
         return order
 
@@ -442,7 +442,7 @@ class ProtectiveOrderManager:
         )
 
         if triggered:
-            logger.warning(f"Protective order trigger check: {len(triggered)} orders triggered")
+            logger.warning("Protective order trigger check: %s orders triggered", len(triggered))
 
         return result
 
@@ -513,7 +513,7 @@ class ProtectiveOrderManager:
             True if execution successful, False otherwise
         """
         if order.status not in (ProtectiveOrderStatus.TRIGGERED, ProtectiveOrderStatus.ARMED):
-            logger.warning(f"Cannot execute order {order.order_id} in status {order.status}")
+            logger.warning("Cannot execute order %s in status %s", order.order_id, order.status)
             return False
 
         try:
@@ -536,13 +536,13 @@ class ProtectiveOrderManager:
                     "market_state": market_state,
                 })
 
-            logger.info(f"Executed protective action {order.order_id} "
-                        f"({order.order_type.value}) for {order.symbol}")
+            logger.info("Executed protective action %s (%s) for %s",
+                        order.order_id, order.order_type.value, order.symbol)
 
             return True
 
         except Exception as e:
-            logger.error(f"Failed to execute protective action {order.order_id}: {e}")
+            logger.error("Failed to execute protective action %s: %s", order.order_id, e)
             with self._lock:
                 order.status = ProtectiveOrderStatus.FAILED
             if self._audit_callback:
@@ -687,7 +687,7 @@ class ProtectiveOrderManager:
 
             # Hard stops cannot be disabled
             if order.order_type == ProtectiveOrderType.HARD_STOP_LOSS:
-                logger.warning(f"Cannot cancel hard stop-loss {order_id} (DOC-01 §5.9)")
+                logger.warning("Cannot cancel hard stop-loss %s (DOC-01 §5.9)", order_id)
                 if self._audit_callback:
                     self._audit_callback("hard_stop_cancel_rejected", {
                         "order_id": order_id,
@@ -696,7 +696,7 @@ class ProtectiveOrderManager:
                 return False
 
             if not order.can_be_disabled:
-                logger.warning(f"Order {order_id} cannot be disabled")
+                logger.warning("Order %s cannot be disabled", order_id)
                 return False
 
             order.status = ProtectiveOrderStatus.CANCELLED
@@ -708,7 +708,7 @@ class ProtectiveOrderManager:
                 "reason": reason,
             })
 
-        logger.info(f"Cancelled protective order {order_id}: {reason}")
+        logger.info("Cancelled protective order %s: %s", order_id, reason)
         return True
 
     def emergency_close_all(
@@ -761,8 +761,8 @@ class ProtectiveOrderManager:
                 "reason": reason,
             })
 
-        logger.critical(f"EMERGENCY CLOSE ALL: {closed_count} positions "
-                       f"(reason: {reason})")
+        logger.critical("EMERGENCY CLOSE ALL: %s positions (reason: %s)",
+                       closed_count, reason)
 
         return closed_count
 
@@ -799,7 +799,7 @@ class ProtectiveOrderManager:
                 "order_count": len(self._orders),
             })
 
-        logger.info(f"Restored ProtectiveOrderManager state: {len(self._orders)} orders")
+        logger.info("Restored ProtectiveOrderManager state: %s orders", len(self._orders))
 
     def export_json(self) -> str:
         """Export to JSON string"""

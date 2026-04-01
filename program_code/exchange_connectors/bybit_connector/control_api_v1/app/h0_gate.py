@@ -171,7 +171,7 @@ class H0Gate:
         # Hot path:
         result = gate.check("BTCUSDT", "linear")
         if not result.allowed:
-            logger.warning(f"H0 blocked: {result.reason}")
+            logger.warning("H0 blocked: %s", result.reason)
     """
 
     def __init__(self, config: H0GateConfig | None = None) -> None:

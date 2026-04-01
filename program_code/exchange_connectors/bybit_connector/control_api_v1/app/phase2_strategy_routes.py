@@ -303,10 +303,19 @@ except Exception as _e:
 # 注意：此為初始參考值 — 實際倉位大小在下單時由 compute_dynamic_qty() 動態重算。
 _BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
 # 3% risk / 5% stop = 60% max notional, capped at 15%
-_risk_usdt = _ACCOUNT_BALANCE_USDT * 3.0 / 100.0  # 3% risk budget
-_notional_usdt = min(_risk_usdt / 0.05, _ACCOUNT_BALANCE_USDT * 0.15)  # risk/stop, cap 15%
-_notional_usdt = max(20.0, _notional_usdt)
-_DEFAULT_BTC_QTY = max(0.001, round(_notional_usdt / _BTC_PRICE_HINT, 3))
+# Position sizing formula (risk-based):
+#   risk_usdt       = balance * 3%       → max USD loss per trade (Principle 5: survival > profit)
+#   notional_usdt   = risk / stop_pct    → implied position notional (stop_pct = 5% default)
+#   cap at 15% of balance               → single-position concentration limit (RiskManager max_single_position_pct)
+#   floor at $20                         → minimum viable order size for Bybit
+#   BTC qty floor 0.001                  → Bybit BTCUSDT minimum order qty
+_risk_usdt = _ACCOUNT_BALANCE_USDT * 3.0 / 100.0       # 3% of balance = max acceptable loss per trade
+_notional_usdt = min(
+    _risk_usdt / 0.05,                                  # 0.05 = 5% hard stop distance → implied notional
+    _ACCOUNT_BALANCE_USDT * 0.15,                        # 15% = max single-position concentration cap
+)
+_notional_usdt = max(20.0, _notional_usdt)               # $20 = Bybit minimum viable order notional
+_DEFAULT_BTC_QTY = max(0.001, round(_notional_usdt / _BTC_PRICE_HINT, 3))  # 0.001 = Bybit BTCUSDT min qty
 logger.info(
     "Default strategy qty (initial hint): $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位（初始參考值）",
     _notional_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,

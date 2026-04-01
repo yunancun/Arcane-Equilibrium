@@ -849,5 +849,84 @@ class TestPersistence(unittest.TestCase):
             self.assertIs(second_timer, timers_created[1])
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# E4 Edge Cases: TruthSourceRegistry Boundary Conditions / 边界条件
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTruthSourceRegistryEdgeCases(unittest.TestCase):
+    """Edge case tests for TruthSourceRegistry.
+    TruthSourceRegistry 边界条件测试。"""
+
+    def test_register_claim_confidence_zero(self):
+        """Registering a claim with confidence=0.0 should succeed.
+        注册 confidence=0.0 的 claim 应成功。"""
+        registry = TruthSourceRegistry()
+        cid = registry.register_claim(
+            pattern_text="Zero confidence pattern",
+            evidence_source="statistical_N=50",
+            observation_count=50,
+            confidence=0.0,
+            applies_to_regime="ranging",
+            applies_to_strategy="rsi_reversal",
+            claim_id="zero_conf",
+        )
+        claims = registry.get_active_claims()
+        found = [c for c in claims if c.claim_id == cid]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].confidence, 0.0)
+
+    def test_register_claim_confidence_one_capped(self):
+        """Registering with confidence=1.0 should be capped to source-specific max.
+        注册 confidence=1.0 应被限制为来源特定的最大值。"""
+        registry = TruthSourceRegistry()
+        cid = registry.register_claim(
+            pattern_text="Max confidence pattern",
+            evidence_source="statistical_N=50",
+            observation_count=50,
+            confidence=1.0,
+            applies_to_regime="ranging",
+            applies_to_strategy="rsi_reversal",
+            claim_id="max_conf",
+        )
+        claims = registry.get_active_claims()
+        found = [c for c in claims if c.claim_id == cid]
+        self.assertEqual(len(found), 1)
+        # AI/statistical output cap is 0.85 per epistemic constraint
+        self.assertLessEqual(found[0].confidence, 0.85)
+
+    def test_concurrent_register_claim_thread_safety(self):
+        """Concurrent register_claim from multiple threads should not corrupt state.
+        多线程并发 register_claim 不应损坏状态。"""
+        registry = TruthSourceRegistry()
+        errors = []
+
+        def register_batch(batch_id: int) -> None:
+            try:
+                for i in range(20):
+                    registry.register_claim(
+                        pattern_text=f"Pattern from thread {batch_id} #{i}",
+                        evidence_source="statistical_N=10",
+                        observation_count=10,
+                        confidence=0.5,
+                        applies_to_regime="ranging",
+                        applies_to_strategy="test",
+                        claim_id=f"thread_{batch_id}_claim_{i}",
+                    )
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=register_batch, args=(i,)) for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        self.assertEqual(len(errors), 0, f"Thread errors: {errors}")
+        # All claims should be registered (supersession may reduce count,
+        # but no crashes or corruption)
+        stats = registry.get_stats()
+        self.assertGreaterEqual(stats["total_claims"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

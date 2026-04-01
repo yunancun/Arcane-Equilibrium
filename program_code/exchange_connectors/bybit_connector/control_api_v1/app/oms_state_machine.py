@@ -474,7 +474,7 @@ class OMSStateMachine:
                         new_value=target_state.value,
                     )
                 except Exception as e:
-                    logger.error(f"Failed to record change audit: {e}")
+                    logger.error("Failed to record change audit: %s", e)
 
             # Audit
             if self._audit_callback:

@@ -253,7 +253,7 @@ class Layer2Engine:
             logger.error("L1 triage timed out after 60s / L1 分诊超时")
             return {"worth_investigating": False, "reason": "Triage timed out after 60s", "error": True}
         except Exception as e:
-            logger.error(f"L1 triage error: {e}")
+            logger.error("L1 triage error: %s", e)
             return {"worth_investigating": False, "reason": f"Triage error: {str(e)[:100]}", "error": True}
 
     async def _l1_triage_local(self, context: str) -> dict[str, Any]:
@@ -287,7 +287,7 @@ class Layer2Engine:
             )
 
             if not resp.success:
-                logger.warning(f"L1 local triage failed: {resp.error}")
+                logger.warning("L1 local triage failed: %s", resp.error)
                 return {
                     "worth_investigating": False,
                     "reason": f"Local triage error: {resp.error}",
@@ -331,7 +331,7 @@ class Layer2Engine:
                 "triage_cost_usd": 0.0,
             }
         except Exception as e:
-            logger.error(f"L1 local triage error: {e}")
+            logger.error("L1 local triage error: %s", e)
             return {
                 "worth_investigating": False,
                 "reason": f"Local triage error: {str(e)[:100]}",
@@ -539,7 +539,7 @@ class Layer2Engine:
                 session.final_summary = f"Reached max iterations ({config.max_iterations})"
 
         except Exception as e:
-            logger.error(f"L2 session error: {e}")
+            logger.error("L2 session error: %s", e)
             session.state = SESSION_STATE_FAILED
             session.final_summary = f"Error: {str(e)[:500]}"
         finally:
@@ -595,13 +595,13 @@ class Layer2Engine:
                 upgrade = result.get("upgrade_to_opus", False)
                 if upgrade:
                     session.upgrade_reason = result.get("reason", "haiku_triage_recommended")
-                    logger.info(f"Model upgrade: Sonnet → Opus. Reason: {session.upgrade_reason}")
+                    logger.info("Model upgrade: Sonnet → Opus. Reason: %s", session.upgrade_reason)
                 return upgrade
             except json.JSONDecodeError:
                 return False
 
         except Exception as e:
-            logger.warning(f"Model upgrade triage error: {e}")
+            logger.warning("Model upgrade triage error: %s", e)
             return False
 
     # ── Paper Trading Integration / 纸上交易集成 ──
@@ -629,10 +629,10 @@ class Layer2Engine:
 
         config = self._cost_tracker.get_config()
         if rec.confidence < config.confidence_threshold:
-            logger.info(f"Recommendation confidence {rec.confidence} below threshold {config.confidence_threshold}")
+            logger.info("Recommendation confidence %s below threshold %s", rec.confidence, config.confidence_threshold)
             return
         if rec.edge_bps < config.edge_threshold_bps:
-            logger.info(f"Recommendation edge {rec.edge_bps}bps below threshold {config.edge_threshold_bps}bps")
+            logger.info("Recommendation edge %sbps below threshold %sbps", rec.edge_bps, config.edge_threshold_bps)
             return
 
         # Map recommendation to governed_observation for shadow decision builder
@@ -674,7 +674,7 @@ class Layer2Engine:
                 session.session_id, decision["decision_id"], consumption.get("order_id"),
             )
         except Exception as e:
-            logger.error(f"Paper submission error: {e}")
+            logger.error("Paper submission error: %s", e)
 
     # ── Helper / 辅助 ──
 

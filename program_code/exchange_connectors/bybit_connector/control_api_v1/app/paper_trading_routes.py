@@ -86,7 +86,7 @@ DEMO_CONNECTOR = None
 try:
     DEMO_CONNECTOR = BybitDemoConnector()
 except Exception as e:
-    logger.warning(f"Failed to initialize BybitDemoConnector: {e}")
+    logger.warning("Failed to initialize BybitDemoConnector: %s", e)
 
 # T7.04: Initialize BybitDemoSync for demo state snapshots / 初始化 Demo 同步器
 DEMO_SYNC = None
@@ -94,7 +94,7 @@ if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
     try:
         DEMO_SYNC = BybitDemoSync(DEMO_CONNECTOR)
     except Exception as e:
-        logger.warning(f"Failed to initialize BybitDemoSync: {e}")
+        logger.warning("Failed to initialize BybitDemoSync: %s", e)
 
 # T2.03: Initialize and inject ProtectiveOrderManager / 初始化并注入保护性订单管理器
 from .protective_order_manager import ProtectiveOrderManager, ProtectiveOrderSide, ProtectiveOrderType  # noqa: E402
@@ -102,7 +102,7 @@ from .protective_order_manager import ProtectiveOrderManager, ProtectiveOrderSid
 # T7.02: Enhanced ProtectiveOrderManager execute callback → Demo API
 def _protective_order_execute_callback(order, market_state):
     """Execute protective order via Demo API if available / 通过 Demo API 执行保护性订单"""
-    logger.info(f"Protective order triggered: {order.order_id} {order.symbol} {order.order_type.value}")
+    logger.info("Protective order triggered: %s %s %s", order.order_id, order.symbol, order.order_type.value)
 
     if DEMO_CONNECTOR is None:
         logger.warning("Demo connector unavailable, protective order not submitted to exchange")
@@ -115,7 +115,7 @@ def _protective_order_execute_callback(order, market_state):
         elif order.side == ProtectiveOrderSide.SHORT_POSITION:
             bybit_side = "Buy"
         else:
-            logger.warning(f"Unsupported protective order side: {order.side.value}")
+            logger.warning("Unsupported protective order side: %s", order.side.value)
             return
 
         # Map order type
@@ -139,9 +139,9 @@ def _protective_order_execute_callback(order, market_state):
             reduce_only=True,
             category="linear",
         )
-        logger.info(f"Protective order {order.order_id} submitted to Demo API: {result}")
+        logger.info("Protective order %s submitted to Demo API: %s", order.order_id, result)
     except Exception as e:
-        logger.error(f"Failed to submit protective order {order.order_id} to Demo API: {e}")
+        logger.error("Failed to submit protective order %s to Demo API: %s", order.order_id, e)
 
 PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager(on_execute_callback=_protective_order_execute_callback)
 ENGINE.set_protective_order_manager(PROTECTIVE_ORDER_MANAGER)
@@ -198,7 +198,7 @@ def _make_ttl_expiry_callback():
             # This allows the SMs to be initialized after the callback is created
             gov_hub = globals().get("GOV_HUB")
             if gov_hub is None:
-                logger.warning(f"GovernanceHub not available in TTL callback")
+                logger.warning("GovernanceHub not available in TTL callback")
                 return
 
             # Handle different SM types based on entry.state_machine_name
@@ -215,12 +215,12 @@ def _make_ttl_expiry_callback():
                                 entry.object_id,
                                 reason=f"TTL expired: {action}"
                             )
-                            logger.info(f"TTL expired Authorization {entry.object_id}: auto-rejected to {result.state.value}")
+                            logger.info("TTL expired Authorization %s: auto-rejected to %s", entry.object_id, result.state.value)
                         else:
-                            logger.warning(f"Authorization SM not available for TTL callback")
+                            logger.warning("Authorization SM not available for TTL callback")
                     except Exception as e:
                         _ttl_enforcement_failures += 1
-                        logger.critical(f"Failed to reject authorization {entry.object_id} on TTL: {e}")
+                        logger.critical("Failed to reject authorization %s on TTL: %s", entry.object_id, e)
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
                         if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                             try:
@@ -241,12 +241,12 @@ def _make_ttl_expiry_callback():
                                 entry.object_id,
                                 reason=f"TTL expired: {action}"
                             )
-                            logger.info(f"TTL expired Lease {entry.object_id}: auto-expired to {result.state.value}")
+                            logger.info("TTL expired Lease %s: auto-expired to %s", entry.object_id, result.state.value)
                         else:
-                            logger.warning(f"DecisionLease SM not available for TTL callback")
+                            logger.warning("DecisionLease SM not available for TTL callback")
                     except Exception as e:
                         _ttl_enforcement_failures += 1
-                        logger.critical(f"Failed to expire lease {entry.object_id} on TTL: {e}")
+                        logger.critical("Failed to expire lease %s on TTL: %s", entry.object_id, e)
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
                         if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                             try:
@@ -267,12 +267,12 @@ def _make_ttl_expiry_callback():
                                 initiator=OrderInitiator.SYSTEM,
                                 reason=f"TTL expired: {action}",
                             )
-                            logger.info(f"TTL expired OMS {entry.object_id}: auto-canceled")
+                            logger.info("TTL expired OMS %s: auto-canceled", entry.object_id)
                         else:
                             logger.warning("OMS SM not available for TTL callback")
                     except Exception as e:
                         _ttl_enforcement_failures += 1
-                        logger.critical(f"Failed to cancel OMS order {entry.object_id} on TTL: {e}")
+                        logger.critical("Failed to cancel OMS order %s on TTL: %s", entry.object_id, e)
                         if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                             try:
                                 TELEGRAM_ALERTER.alert(f"TTL enforcement failure: OMS {entry.object_id} cancel failed: {e}")
@@ -291,12 +291,12 @@ def _make_ttl_expiry_callback():
                             result = gov_hub._risk_governor_sm.request_manual_review(
                                 reason=f"TTL expired: Circuit breaker requires manual review"
                             )
-                            logger.info(f"TTL expired Risk state: escalated to MANUAL_REVIEW (level={result.level})")
+                            logger.info("TTL expired Risk state: escalated to MANUAL_REVIEW (level=%s)", result.level)
                         else:
-                            logger.warning(f"RiskGovernor SM not available for TTL callback")
+                            logger.warning("RiskGovernor SM not available for TTL callback")
                     except Exception as e:
                         _ttl_enforcement_failures += 1
-                        logger.critical(f"Failed to request manual review on TTL: {e}")
+                        logger.critical("Failed to request manual review on TTL: %s", e)
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
                         if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                             try:
@@ -315,12 +315,12 @@ def _make_ttl_expiry_callback():
                             result = gov_hub._risk_governor_sm.request_manual_review(
                                 reason=f"TTL expired: Manual review timeout, escalating"
                             )
-                            logger.info(f"TTL expired Risk MANUAL_REVIEW: escalated (level={result.level})")
+                            logger.info("TTL expired Risk MANUAL_REVIEW: escalated (level=%s)", result.level)
                         else:
-                            logger.warning(f"RiskGovernor SM not available for TTL callback")
+                            logger.warning("RiskGovernor SM not available for TTL callback")
                     except Exception as e:
                         _ttl_enforcement_failures += 1
-                        logger.critical(f"Failed to escalate risk on TTL: {e}")
+                        logger.critical("Failed to escalate risk on TTL: %s", e)
                         # FIX-04: Send alert via TELEGRAM_ALERTER if available
                         if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                             try:
@@ -330,7 +330,7 @@ def _make_ttl_expiry_callback():
 
         except Exception as e:
             _ttl_enforcement_failures += 1
-            logger.critical(f"Error in TTL expiry callback: {e}")
+            logger.critical("Error in TTL expiry callback: %s", e)
             # FIX-04: Send alert via TELEGRAM_ALERTER if available
             if TELEGRAM_ALERTER and TELEGRAM_ALERTER.is_enabled:
                 try:
@@ -354,7 +354,7 @@ def _shutdown_ttl_enforcer():
         TTL_ENFORCER.stop_daemon_sweep(timeout_seconds=10)
         logger.info("TTL Enforcer daemon stopped")
     except Exception as e:
-        logger.error(f"Error stopping TTL Enforcer: {e}")
+        logger.error("Error stopping TTL Enforcer: %s", e)
 
 _atexit.register(_shutdown_ttl_enforcer)
 
@@ -443,9 +443,9 @@ try:
                         "data": promotion_record,
                         "timestamp_ms": int(promotion_record.get("effective_at_ms", 0)),
                     })
-                logger.info(f"Learning tier promotion recorded: {promotion_record.get('promotion_id')}")
+                logger.info("Learning tier promotion recorded: %s", promotion_record.get('promotion_id'))
             except Exception as e:
-                logger.error(f"Error in learning tier audit callback: {e}")
+                logger.error("Error in learning tier audit callback: %s", e)
         return callback
 
     LEARNING_TIER_GATE = LearningTierGate(audit_callback=_make_learning_tier_audit_callback())
@@ -453,7 +453,7 @@ try:
     GOV_HUB.set_learning_tier_gate(LEARNING_TIER_GATE)
     logger.info("LearningTierGate injected into ENGINE and GovernanceHub")
 except Exception as e:
-    logger.error(f"Failed to initialize LearningTierGate: {e}")
+    logger.error("Failed to initialize LearningTierGate: %s", e)
     LEARNING_TIER_GATE = None
 
 # Export GOV_HUB as _GOVERNANCE_HUB for governance_routes.py to import

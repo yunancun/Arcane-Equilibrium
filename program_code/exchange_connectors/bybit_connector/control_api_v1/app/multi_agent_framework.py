@@ -698,6 +698,54 @@ class Conductor:
             info.last_heartbeat_ms = int(time.time() * 1000)
         return True
 
+    def on_agent_message_received(self, role: AgentRole) -> None:
+        """
+        Track that an agent received a message — updates heartbeat and message counter.
+        追蹤 Agent 收到消息 — 更新心跳和消息計數器。
+
+        Called from MessageBus subscriber wrappers to automatically track agent health
+        whenever a message is delivered. This is the APR01-CC-1 health-tracking hook.
+        當消息被傳遞時，由 MessageBus 訂閱者包裝器自動調用以追蹤 Agent 健康。
+
+        Args:
+            role: The agent role that received the message
+        """
+        with self._lock:
+            info = self._agents.get(role)
+            if info is not None:
+                info.last_heartbeat_ms = int(time.time() * 1000)
+                info.messages_received += 1
+
+    def make_tracked_subscriber(self, role: AgentRole, callback: Callable) -> Callable:
+        """
+        Wrap a MessageBus subscriber callback to auto-track heartbeats.
+        包裝 MessageBus 訂閱者回調以自動追蹤心跳。
+
+        Usage / 用法:
+            conductor.bus.subscribe(
+                AgentRole.SCOUT,
+                conductor.make_tracked_subscriber(AgentRole.SCOUT, scout.on_message)
+            )
+
+        This ensures every message delivery updates the agent's heartbeat timestamp
+        and message_count, enabling get_agent_health() to detect stale agents.
+        確保每次消息傳遞都更新 Agent 的心跳時間戳和消息計數，使 get_agent_health()
+        能偵測過時的 Agent。
+
+        Args:
+            role: The agent role being subscribed
+            callback: The original message handler callback
+
+        Returns:
+            Wrapped callback that tracks heartbeats before delegating to original
+        """
+        def _tracked_callback(message: AgentMessage) -> None:
+            # Update heartbeat tracking before delegating
+            # 在委派前更新心跳追蹤
+            self.on_agent_message_received(role)
+            callback(message)
+        return _tracked_callback
+
     def get_agent_info(self, role: AgentRole) -> Optional[AgentInfo]:
         with self._lock:
             return self._agents.get(role)
@@ -916,6 +964,112 @@ class Conductor:
         else:
             # REJECTED — do not forward
             return (False, verdict)
+
+    # ── Task Dispatch by Type (APR01-CC-1) / 按任務類型派發 ──
+
+    # Mapping from task_type to the best-fit agent role.
+    # 任務類型 → 最佳匹配 Agent 角色的映射表。
+    _TASK_TYPE_TO_ROLE: Dict[str, AgentRole] = {
+        "SCAN": AgentRole.SCOUT,
+        "EVALUATE": AgentRole.STRATEGIST,
+        "RISK_CHECK": AgentRole.GUARDIAN,
+        "ANALYZE": AgentRole.ANALYST,
+        "EXECUTE": AgentRole.EXECUTOR,
+    }
+
+    def dispatch_to_agent(self, task_type: str, payload: Dict[str, Any]) -> bool:
+        """
+        Route a task to the best-fit agent based on task_type.
+        根據任務類型將任務路由到最匹配的 Agent。
+
+        Supported task_type values:
+          "SCAN"       → Scout（市場掃描）
+          "EVALUATE"   → Strategist（策略評估）
+          "RISK_CHECK" → Guardian（風控檢查）
+          "ANALYZE"    → Analyst（模式分析）
+          "EXECUTE"    → Executor（訂單執行）
+
+        Design rationale / 設計理由:
+          Conductor as central dispatcher (EX-06 §2.3) — all task routing goes
+          through Conductor so the orchestrator has full visibility of workload
+          distribution. Unknown task_type returns False (fail-closed).
+
+        Args:
+            task_type: One of SCAN / EVALUATE / RISK_CHECK / ANALYZE / EXECUTE
+            payload: Task-specific data dict to include in the directive
+
+        Returns:
+            True if the directive was sent to an available agent; False otherwise
+        """
+        target_role = self._TASK_TYPE_TO_ROLE.get(task_type.upper() if task_type else "")
+        if target_role is None:
+            # Unknown task type — fail-closed, do not guess
+            # 未知任務類型 — fail-closed，不猜測
+            return False
+
+        if not self._is_agent_available(target_role):
+            # Target agent not in RUNNING or DEGRADED state
+            # 目標 Agent 未處於 RUNNING 或 DEGRADED 狀態
+            return False
+
+        # Send a SYSTEM_DIRECTIVE carrying the task payload
+        # 發送攜帶任務 payload 的 SYSTEM_DIRECTIVE
+        msg = AgentMessage(
+            sender=AgentRole.CONDUCTOR,
+            receiver=target_role,
+            message_type=MessageType.SYSTEM_DIRECTIVE,
+            priority=2,
+            payload={"directive_type": "task_dispatch", "task_type": task_type, **payload},
+        )
+        sent = self.bus.send(msg)
+        if sent:
+            with self._lock:
+                self._directives_issued += 1
+                # Update heartbeat tracking for the target agent on successful dispatch
+                # 派發成功時更新目標 Agent 的心跳追蹤
+                info = self._agents.get(target_role)
+                if info is not None:
+                    info.messages_received += 1
+        return sent
+
+    # ── Agent Health Monitoring (APR01-CC-1) / Agent 健康監控 ──
+
+    def get_agent_health(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Return health status for all registered agents.
+        返回所有已註冊 Agent 的健康狀態。
+
+        Each entry contains:
+          - last_heartbeat: epoch ms of last heartbeat (0 = never)
+          - status: current AgentState value (e.g. "running", "degraded")
+          - message_count: total messages received by this agent
+
+        Design rationale / 設計理由:
+          Provides a lightweight health snapshot for the Conductor to detect
+          unresponsive agents (stale heartbeats) and trigger DEGRADED/STOPPED
+          transitions. Called by the /governance/agents/health API endpoint.
+          提供輕量級健康快照，讓 Conductor 偵測無回應的 Agent（過時心跳）並
+          觸發 DEGRADED/STOPPED 狀態轉換。
+
+        Returns:
+            Dict mapping agent_name (str) to health info dict
+        """
+        now_ms = int(time.time() * 1000)
+        result: Dict[str, Dict[str, Any]] = {}
+        with self._lock:
+            for role, info in self._agents.items():
+                # Determine staleness — if no heartbeat for >60s, flag as stale
+                # 判斷陳舊性 — 超過 60 秒未收到心跳則標記為 stale
+                heartbeat_age_ms = now_ms - info.last_heartbeat_ms if info.last_heartbeat_ms > 0 else -1
+                result[role.value] = {
+                    "last_heartbeat": info.last_heartbeat_ms,
+                    "heartbeat_age_ms": heartbeat_age_ms,
+                    "status": info.state.value,
+                    "message_count": info.messages_received,
+                    "errors": info.errors,
+                    "stale": heartbeat_age_ms > 60_000 if heartbeat_age_ms >= 0 else True,
+                }
+        return result
 
     # ── Status ──
 

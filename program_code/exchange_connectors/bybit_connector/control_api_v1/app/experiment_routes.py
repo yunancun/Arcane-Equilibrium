@@ -48,7 +48,7 @@ MODULE_NOTE (English):
 import asyncio
 import logging
 import threading
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -157,7 +157,7 @@ class RecordObservationRequest(BaseModel):
     max_length 約束防止超長字符串濫用。
     max_length constraint prevents oversized string abuse.
     """
-    outcome: str = Field(..., max_length=50)  # "supporting" | "refuting"
+    outcome: Literal["supporting", "refuting", "neutral"] = Field(...)  # constrained to valid observation outcomes
 
 
 # ── POST /api/v1/experiments/propose ─────────────────────────────────────────────

@@ -343,12 +343,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-27--system_reference_handbook.md` | ★ 系统参考手册（从 CLAUDE.md 移出的参考性内容：能力目标/API路由/安全加固/产品族/订单类型/风控/部署/历史编号） |
 | `2026-03-27--phase2_round2_strategic_audit_report.md` | Phase 2 第二轮审核：实战适用性（策略盈利性/管线连通性/数据质量/风控集成/信号可靠性） |
 | `2026-03-27--full_system_audit_A_to_K.md` | ★★ 全系统审核 A-K：569 文件 63,874 行，7 CRITICAL + 19 HIGH + 28 MEDIUM + 16 LOW |
-| `2026-03-27--phase2_round2_strategic_audit_report.md` | Phase 2 第二轮审核：实战适用性审核（策略盈利性/管线连通性/数据质量/风控集成/信号可靠性） |
 | `2026-03-27--remote_access_guide.md` | 远程访问完整指南：Tailscale 安装配置 + Bybit Demo 访问地址 + secrets 权限加固 |
 | `2026-03-22--local_private_layout.md` | 本地私有布局说明：Git 仓库 vs 本地私有目录结构（secrets/srv 分离） |
 | `2026-03-30--local_ai_expansion_analysis.md` | 本地 AI 擴展用途分析（Ollama/Qwen 3.5 應用場景，DOC-08 依據） |
 
 ### governance_dev/ — 治理开发文档
+
+> 注意：governance_dev/ 下早期文件使用大寫命名（如 `T2_EXECUTION_SUMMARY.md`），
+> 晚於 2026-03-31 的新文件必須遵循 `YYYY-MM-DD--描述.md` 命名規範。
 
 #### governance_dev/audits/ — ★ 审计报告
 
