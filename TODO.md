@@ -1022,6 +1022,21 @@ E4 全量回歸 ✅ 3330 passed（+20 新測試）
 - **相關檔案**：`pipeline_bridge.py`（_gate_intent 拒絕路徑）、`strategies/base.py`（_current_position）
 - **優先級**：P2（非緊急但會造成假開倉虧損，授權恢復後不再觸發）
 
+### Grid 策略同一 tick 產生大量重複 intent（P2 · 已復現）
+
+**問題**：Grid_Trading 策略在同一個 tick 產生 9 個完全相同的 Sell intent（1 submitted + 8 blocked_h0）。
+說明 `on_tick()` 每次被調用時都重新判定穿越網格線，但不檢查是否已為該網格線發出過 intent。
+
+**復現案例（2026-04-01 13:40 KASUSDT）**：
+1. 13:40:31 同一秒產生 9 個 Sell intent（qty=4786, reason="Grid sell at 0.03"）
+2. 第 1 個 submitted，其餘 8 個被 H0 Gate 攔截
+3. 若 H0 沒攔住，可能開出 9 倍倉位
+
+**修復方向**：
+- [ ] Grid 策略 `on_tick()` 加 cooldown 或已發 intent 的網格線去重（`_pending_grid_levels` set）
+- **相關檔案**：`strategies/grid_trading.py`（on_tick）
+- **優先級**：P2（H0 Gate 已擋住重複，但依賴 H0 不可靠）
+
 ### Paper-Demo 差異校準系統（長期）
 
 Paper 與 Demo 是「內部模擬 + 外部驗證」雙軌架構，差異本身是系統健康度信號。
