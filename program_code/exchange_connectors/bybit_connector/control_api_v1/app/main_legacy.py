@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 """
-OpenClaw / Bybit Control API + GUI MVP
-OpenClaw / Bybit 控制 API 与 GUI 的可运行 MVP
+MODULE_NOTE (中文):
+  遺留版控制 API 主模組（~5000 行單體）。包含 FastAPI 應用定義、全部路由、
+  GUI 靜態服務、狀態編譯、治理集成等。已被 main.py 取代為主入口，本文件保留
+  供歷史參考和部分內部工具鏈使用。不應新增功能到此文件。
 
-说明 / Notes:
-- 这是一个面向当前 RC2 合同的可运行实现。
-- This is a runnable implementation aligned with the current RC2 contract.
-- 它默认保持 execution disabled / protected。
-- It keeps execution disabled / protected by default.
-- 后续若要接 OpenClaw runtime，只需要替换 source-context 与事实获取逻辑。
-- To connect a real OpenClaw runtime later, replace the source-context and fact-loading logic.
+MODULE_NOTE (English):
+  Legacy Control API main module (~5000-line monolith). Contains FastAPI app
+  definition, all routes, GUI static serving, state compilation, governance
+  integration, etc. Superseded by main.py as the primary entrypoint; this file
+  is retained for historical reference and some internal toolchain usage.
+  No new features should be added to this file.
+
+Safety invariant:
+  execution_state remains "disabled" and live_execution_allowed remains False
+  by default. All execution guards from the active main.py apply here as well.
 """
 
 import asyncio
@@ -33,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Generic, Literal, TypeVar
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -4254,7 +4259,7 @@ class _LoginRequest(BaseModel):
 
 @app.post("/api/v1/auth/login", include_in_schema=False)
 @limiter.limit("5/minute")
-async def auth_login(request: Request, req: _LoginRequest):
+async def auth_login(request: Request, req: _LoginRequest = Body(...)):
     """
     Authenticate with username/password, return bearer token.
     用户名密码认证，返回 bearer token。
