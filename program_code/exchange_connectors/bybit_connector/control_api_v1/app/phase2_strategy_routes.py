@@ -685,12 +685,13 @@ try:
         orchestrator=ORCHESTRATOR,
         kline_manager=KLINE_MANAGER,
         paper_engine=PAPER_ENGINE,
-        max_symbols=25,            # Agent can trade up to 25 symbols simultaneously
+        max_symbols=30,            # 25 linear + 5 spot reserved
         risk_per_trade_pct=3.0,    # Risk 3% of balance per trade (max loss per trade)
         min_qty_usdt=20.0,         # Minimum $20 per trade
         max_qty_pct=15.0,          # Max 15% of balance per single trade
         market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
         pinned_symbols=["BTCUSDT", "ETHUSDT"],  # Always monitor + attempt to trade (learning/evolution)
+        reserved_slots={"spot": 5},  # 5 slots reserved for spot — linear can't squeeze them out
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()

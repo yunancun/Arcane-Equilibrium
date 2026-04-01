@@ -64,6 +64,7 @@ class StrategyAutoDeployer:
         max_qty_pct: float = 10.0,        # Max 10% of balance per single trade
         market_feed_add_fn: Any = None,   # Optional: callable(symbol) to subscribe market feed
         pinned_symbols: list[str] | None = None,  # Always-deployed symbols (e.g. BTCUSDT, ETHUSDT)
+        reserved_slots: dict[str, int] | None = None,  # Reserved slots per api_category
     ) -> None:
         self._orch = orchestrator
         self._km = kline_manager
@@ -79,6 +80,10 @@ class StrategyAutoDeployer:
         # 這些是最活躍、競爭最激烈的交易對 — 對學習和進化極有價值。
         self._pinned_symbols: set[str] = set(pinned_symbols or [])
         self._pinned_deployed: bool = False  # Track if pinned symbols have been deployed
+        # Reserved slots per api_category — guarantees capacity for underrepresented categories.
+        # 每個 api_category 的預留槽位 — 保證少數品類（如 spot）不被多數品類（linear）擠佔。
+        # Example: {"spot": 5} reserves 5 slots exclusively for spot strategies.
+        self._reserved_slots: dict[str, int] = reserved_slots or {}
         self._lock = threading.Lock()
 
         # Track auto-deployed strategies: {strategy_name: {symbol, category, deployed_ts, ...}}
@@ -309,6 +314,14 @@ class StrategyAutoDeployer:
             current_symbols = set(d["symbol"] for d in self._deployed.values())
             available_slots = self._max_symbols - len(current_symbols)
 
+            # ── Reserved slot accounting ──
+            # Count deployed per api_category to enforce reserved slots
+            # 統計每個 api_category 已部署數量，用於預留槽位機制
+            _deployed_by_api_cat: dict[str, int] = {}
+            for _d in self._deployed.values():
+                _ac = _d.get("api_category", "linear")
+                _deployed_by_api_cat[_ac] = _deployed_by_api_cat.get(_ac, 0) + 1
+
             # Apply category priority: funding arb > grid > trend (risk-adjusted ordering)
             # 套利優先：funding arb 風險最低 → 優先部署
             prioritized = sorted(
@@ -326,7 +339,15 @@ class StrategyAutoDeployer:
                 if key in self._deployed:
                     continue
 
-                if available_slots <= 0:
+                # ── Reserved slot enforcement ──
+                # If this category has reserved slots, check if slots are truly full
+                # 預留槽位：若此品類有預留，即使總槽位滿也允許部署（從其他品類的配額中借）
+                opp_api_cat = getattr(opp, "api_category", "linear")
+                reserved = self._reserved_slots.get(opp_api_cat, 0)
+                deployed_in_cat = _deployed_by_api_cat.get(opp_api_cat, 0)
+                has_reserved_room = reserved > 0 and deployed_in_cat < reserved
+
+                if available_slots <= 0 and not has_reserved_room:
                     # ── Smart rebalancing: slots full, try to replace weak positions ──
                     # Only rebalance for high-quality opportunities (score >= 70)
                     if opp.score < 70:
@@ -556,9 +577,11 @@ class StrategyAutoDeployer:
                     )
 
         _reason = getattr(opp, "reason", "") or ""
+        _api_cat = getattr(opp, "api_category", "linear")
         self._deployed[key] = {
             "symbol": symbol,
             "category": category,
+            "api_category": _api_cat,
             "strategy_name": unique_name,
             "score": opp.score,
             "deployed_ts_ms": int(time.time() * 1000),
