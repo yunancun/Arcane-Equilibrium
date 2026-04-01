@@ -280,9 +280,13 @@ class PaperStateStore:
                 self.write(self._cache, force=True)
 
     def mutate(self, mutator) -> dict[str, Any]:
+        # Read a copy of current state (briefly acquires lock)
+        current = self.read()
+        # Run mutator WITHOUT holding lock — allows concurrent reads during computation.
+        # 在不持鎖的情況下執行 mutator — 允許計算期間併發讀取。
+        mutated = mutator(current)
+        # Briefly lock to write result back
         with self._lock:
-            current = self.read()
-            mutated = mutator(current)  # No deepcopy needed — read() returns a copy
             return self.write(mutated)
 
 
