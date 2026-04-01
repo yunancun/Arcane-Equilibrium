@@ -102,6 +102,27 @@ def get_experiment_ledger() -> Any:
             if _ledger is None:
                 from .experiment_ledger import ExperimentLedger  # noqa: PLC0415
                 _ledger = ExperimentLedger()
+
+                # Restore persisted state from snapshot (fail-open: missing/corrupt file → start fresh)
+                # 从快照恢复持久化状态（fail-open：文件缺失/损坏 → 从空白开始）
+                try:
+                    snapshot_path = _ledger._resolve_snapshot_path()
+                    loaded = _ledger.load_snapshot(snapshot_path)
+                    if loaded > 0:
+                        logger.info(
+                            "ExperimentLedger: restored %d hypotheses from snapshot / "
+                            "从快照恢复了 %d 条假设",
+                            loaded, loaded,
+                        )
+                except Exception as exc:
+                    # fail-open: snapshot load failure must not prevent ledger from starting
+                    # fail-open：快照加载失败不得阻止账本启动
+                    logger.warning(
+                        "ExperimentLedger: snapshot load failed (fail-open, starting fresh): %s / "
+                        "快照加载失败（fail-open，从空白开始）：%s",
+                        exc, exc,
+                    )
+
                 logger.info(
                     "ExperimentLedger singleton initialized / ExperimentLedger 單例已初始化"
                 )

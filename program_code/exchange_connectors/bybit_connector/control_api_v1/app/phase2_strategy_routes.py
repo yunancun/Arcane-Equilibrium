@@ -968,6 +968,44 @@ except (ImportError, AttributeError) as _h0_rm_err:
         _h0_rm_err, _h0_rm_err,
     )
 
+# ─────────────────────────────────────────────────────────────────────
+# APR01-P0-1: Inject TruthSourceRegistry into StrategistAgent + AnalystAgent
+# APR01-P0-1：注入 TruthSourceRegistry 到 StrategistAgent + AnalystAgent
+#
+# Without this injection, set_truth_registry() was defined but never called,
+# making the entire Phase 2 learning loop (pattern claims → strategy weights)
+# dead code. The singleton also loads persisted claims from disk on first
+# access (APR01-P1-1), so knowledge survives restarts.
+# 若缺少此注入，set_truth_registry() 虽已定义却从未被调用，
+# 导致整个 Phase 2 学习循环（模式声明 → 策略权重）成为死代码。
+# 单例在首次访问时从磁盘加载已持久化的声明，使知识在重启后可恢复。
+# ─────────────────────────────────────────────────────────────────────
+try:
+    from .truth_source_registry import get_truth_registry
+    _TRUTH_REGISTRY = get_truth_registry()
+
+    if STRATEGIST_AGENT is not None:
+        STRATEGIST_AGENT.set_truth_registry(_TRUTH_REGISTRY)
+        logger.info(
+            "TruthSourceRegistry injected into StrategistAgent "
+            "/ TruthSourceRegistry 已注入 StrategistAgent"
+        )
+    if ANALYST_AGENT is not None:
+        ANALYST_AGENT.set_truth_registry(_TRUTH_REGISTRY)
+        logger.info(
+            "TruthSourceRegistry injected into AnalystAgent "
+            "/ TruthSourceRegistry 已注入 AnalystAgent"
+        )
+except (ImportError, Exception) as _tsr_err:
+    # fail-open: agents continue without registry — pattern learning disabled
+    # fail-open：agents 继续运行但无 registry — 模式学习已禁用
+    _TRUTH_REGISTRY = None
+    logger.warning(
+        "Could not inject TruthSourceRegistry into agents (fail-open): %s "
+        "/ 無法注入 TruthSourceRegistry 到 agents（fail-open）：%s",
+        _tsr_err, _tsr_err,
+    )
+
 
 # =============================================================================
 # Router / 路由

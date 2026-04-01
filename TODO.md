@@ -1003,3 +1003,320 @@ E4 全量回歸 ✅ 3330 passed（+20 新測試）
 ### TruthSourceRegistry 持久化（跨 session 清零問題）
 - 目前僅記憶體，重啟清零
 - **優先級**：Phase 3 Batch 3A 候選
+
+---
+
+# ═══════════════════════════════════════════════════════════════
+# April 1 審計修復批次（8 份審計報告 · PA 交叉驗證 · 78 項去重）
+# PM 執行計劃：2026-04-01
+# 完整報告：docs/audit/April01/PM_execution_plan_2026-04-01.md
+# ═══════════════════════════════════════════════════════════════
+
+## ██ April 1 Audit — Batch 1: P0 知識閉環 + 快速 P1（~3.5h）
+
+> 激活 Phase 2 學習管線死代碼 + 確保知識跨重啟保留。ROI 最高的一批修復。
+> 前置：無。並行度：3 E1。
+
+### [ ] APR01-P0-1: TruthSourceRegistry 從未注入 StrategistAgent/AnalystAgent — Phase 2 知識閉環死代碼
+- **檔案**: `app/phase2_strategy_routes.py`（+ `app/main.py` singleton 統一）
+- **修復**: 統一 `_seed_registry`（main.py）為全局 singleton；在 phase2_strategy_routes 中調用 `STRATEGIST_AGENT.set_truth_registry(registry)` + `ANALYST_AGENT.set_truth_registry(registry)`
+- **來源**: FA P0-FA-1 + AI-E §5.2
+- **工時**: 0.5h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-P1-1: TruthSourceRegistry save_snapshot() 從未被自動調用 — 重啟丟失所有知識
+- **檔案**: `app/truth_source_registry.py`, `app/phase2_strategy_routes.py`
+- **修復**: register_claim() 中 debounced auto_save（或 atexit hook + 定時 save）；確保 main.py 啟動時 load_snapshot 路徑對齊
+- **來源**: FA P1-FA-6 + AI-E P1-AI-1
+- **工時**: 1h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-P1-2: ExperimentLedger 純記憶體狀態 — 重啟歸零
+- **檔案**: `app/experiment_ledger.py`
+- **修復**: 新增 save_snapshot()/load_snapshot() + debounced auto_save + 啟動時 load
+- **來源**: AI-E P1-AI-1
+- **工時**: 1.5h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-P1-3: pipeline_bridge 仍調用已廢棄的 collect_pending_intents() — 每 tick 日誌噪音
+- **檔案**: `app/pipeline_bridge.py`（line 482-510）
+- **修復**: 移除 strategist collect 調用（TD-2 已標記 DEPRECATED，永遠返回 []）
+- **來源**: FA P1-FA-4
+- **工時**: 0.3h
+- **E1 指派**: E1-Gamma
+
+### Batch 1 工作鏈
+```
+E1-Alpha（APR01-P0-1 + APR01-P1-1）‖ E1-Beta（APR01-P1-2）‖ E1-Gamma（APR01-P1-3）
+           ↓ 全部完成
+    E2 代碼審查（重點：singleton 唯一性、auto_save 邊界）
+           ↓
+    E4 全量回歸（≥ 3330 passed）
+           ↓
+    commit: fix(learning): Batch 1 — 知識閉環激活 + 持久化 + 廢棄路徑清理
+```
+
+---
+
+## ██ April 1 Audit — Batch 2: BacktestEngine 接通 + 安全加固（~3h）
+
+> 解鎖回測 API + CORS 安全校驗 + 信息洩露修復。
+> 前置：Batch 1。並行度：3 E1。
+
+### [ ] APR01-P1-4: BacktestEngine API 無數據源（KlineManager 未注入）
+- **檔案**: `app/backtest_routes.py`
+- **修復**: get_backtest_engine() 注入 KlineManager（從 phase2_strategy_routes 導入）；或在 POST /run handler 中從 Bybit API 直接拉取歷史 K 線
+- **來源**: FA P0-FA-2（PA 降級為 P1）
+- **工時**: 1h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-HIGH-1: CORS allow_credentials=True 缺少啟動校驗
+- **檔案**: `app/main_legacy.py`（CORS 配置處）
+- **修復**: 啟動時校驗 _cors_origins 不含 `*`；若含 → 拒絕啟動或 warning + 自動移除
+- **來源**: E3 HIGH-LEGACY-1
+- **工時**: 0.5h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-MEDIUM-1: paper_trading_routes + backtest_routes detail=str(e) 信息洩露
+- **檔案**: `app/paper_trading_routes.py`（5 處）, `app/backtest_routes.py`（1 處）
+- **修復**: 全部改為 `detail="Internal server error"` + 保留 logger.error
+- **來源**: E3 MEDIUM-NEW-3 + LOW-NEW-3
+- **工時**: 0.5h
+- **E1 指派**: E1-Gamma
+
+### [ ] APR01-MEDIUM-2: experiment_routes ProposeHypothesisRequest 無 max_length 驗證
+- **檔案**: `app/experiment_routes.py`
+- **修復**: 對 title/description/conditions 加 `max_length` Field 約束
+- **來源**: E3 MEDIUM-NEW-2
+- **工時**: 0.5h
+- **E1 指派**: E1-Gamma
+
+### Batch 2 工作鏈
+```
+E1-Alpha（APR01-P1-4）‖ E1-Beta（APR01-HIGH-1）‖ E1-Gamma（APR01-MEDIUM-1 + MEDIUM-2）
+           ↓
+    E2 + E4（≥ 3330）→ commit
+```
+
+---
+
+## ██ April 1 Audit — Batch 3: MessageBus 路徑 + 安全響應頭（~4h）
+
+> 5-Agent MessageBus 全路徑接通 + HTTP 安全加固。
+> 前置：Batch 1。並行度：2 E1 + 1 E1a。
+
+### [ ] APR01-P1-5: MessageBus Guardian→Executor APPROVED_INTENT 路徑斷裂
+- **檔案**: `app/guardian_agent.py` 或 `app/multi_agent_framework.py`
+- **修復**: PA 建議方案 B：pipeline_bridge 調用 Conductor.process_trade_intent()；或方案 A：Guardian._handle_trade_intent() APPROVED 後發送 APPROVED_INTENT 到 Executor
+- **來源**: FA P1-FA-2
+- **工時**: 2h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-MEDIUM-3: 缺乏安全 HTTP 響應頭（CSP/X-Frame-Options/X-Content-Type-Options）
+- **檔案**: `app/main.py` 或 `app/main_legacy.py`
+- **修復**: 添加安全中間件（SecurityHeaderMiddleware 或自定義）
+- **來源**: E3 MEDIUM-LEGACY-3
+- **工時**: 1h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-MEDIUM-4: tab-governance.html 30+ 處 innerHTML 未轉義
+- **檔案**: `app/static/tab-governance.html`
+- **修復**: 動態數據來源逐一用 ocEsc() 包裹
+- **來源**: E3 MEDIUM-NEW-1
+- **工時**: 1h
+- **E1 指派**: E1a-Alpha
+
+### Batch 3 工作鏈
+```
+E1-Alpha（APR01-P1-5）‖ E1-Beta（APR01-MEDIUM-3）‖ E1a-Alpha（APR01-MEDIUM-4）
+           ↓
+    E2 + E4（≥ 3330）→ commit
+```
+
+---
+
+## ██ April 1 Audit — Batch 4: 記憶體保護 + 文檔索引（~4h）
+
+> Registry/Ledger 記憶體上限 + 文檔索引補全。
+> 前置：Batch 1（持久化完成後再加上限）。並行度：2 E1 + R4。
+
+### [ ] APR01-MEDIUM-5: TruthSourceRegistry _claims 無上限 + 過期不清理
+- **檔案**: `app/truth_source_registry.py`
+- **修復**: MAX_CLAIMS=5000 + register_claim() 中定期清理 is_expired() 條目
+- **來源**: E5 NEW-P2（PA 降級為 MEDIUM）
+- **工時**: 1h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-MEDIUM-6: ExperimentLedger _hypotheses 無上限
+- **檔案**: `app/experiment_ledger.py`
+- **修復**: MAX_HYPOTHESES=2000 + 清理已結案超 TTL 條目
+- **來源**: E5 NEW-P3（PA 降級為 MEDIUM）
+- **工時**: 1h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-HIGH-2: audit/March31/ 7 份核心報告 + README 結構圖缺 audit/ 目錄
+- **檔案**: `docs/README.md`
+- **修復**: 補 audit/March31/ 和 audit/April01/ 索引區塊
+- **來源**: R4 R4-01/02
+- **工時**: 1h
+- **E1 指派**: R4
+
+### [ ] APR01-MEDIUM-7: decisions/ .docx 未索引 + governance_dev ~14 文件未索引
+- **檔案**: `docs/README.md`
+- **修復**: 在索引中添加 decisions/ 專區 + governance_dev 補全
+- **來源**: R4 R4-03/04
+- **工時**: 1h
+- **E1 指派**: R4
+
+### Batch 4 工作鏈
+```
+E1-Alpha（APR01-MEDIUM-5）‖ E1-Beta（APR01-MEDIUM-6）‖ R4（APR01-HIGH-2 + MEDIUM-7）
+           ↓
+    E2 + E4（≥ 3330）→ commit
+```
+
+---
+
+## ██ April 1 Audit — Batch 5: 性能優化 + 覆蓋率提升（~8h）
+
+> BacktestEngine O(n^2) 修復 + 關鍵模塊測試覆蓋率。
+> 前置：Batch 2（BacktestEngine API 接通後）。並行度：3 E1 + E4。
+
+### [ ] APR01-HIGH-3: backtest_engine O(n^2) 列表切片 + EMA/RSI 從頭重算
+- **檔案**: `program_code/local_model_tools/backtest_engine.py`
+- **修復**: 使用索引而非切片：_compute_indicators_pure 接收 end_idx 參數；增量 EMA 計算
+- **來源**: E5 NEW-P1/P4（PA 降級為 HIGH）
+- **工時**: 3h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-MEDIUM-8: backtest_engine 指標函數與 indicators/ 重複
+- **檔案**: `program_code/local_model_tools/backtest_engine.py`, `program_code/local_model_tools/indicators/`
+- **修復**: 提取純函數到 indicators/pure.py；backtest_engine 從此導入（保持原則 7 隔離）
+- **來源**: E5 NEW-S1
+- **工時**: 1h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-MEDIUM-9: L2 後台線程結果被完全丟棄
+- **檔案**: `app/strategist_agent.py`
+- **修復**: L2 結果回注 _strategy_preference_weights 或 cache 供下次決策參考
+- **來源**: AI-E P2-AI-2
+- **工時**: 2h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-MEDIUM-10: MarketScanner MAX_SYMBOLS_TO_TRADE=5 vs deployer 25 不一致
+- **檔案**: `program_code/local_model_tools/market_scanner.py`
+- **修復**: 統一為可配置常量，從 deployer 配置讀取
+- **來源**: FA P2-FA-1
+- **工時**: 0.5h
+- **E1 指派**: E1-Gamma
+
+### [ ] APR01-E4-1: strategy_auto_deployer 0% 測試覆蓋率
+- **檔案**: `tests/test_strategy_auto_deployer.py`（新建）
+- **修復**: 至少 15 個核心測試（部署/撤回/symbol 限制/掃描回調）
+- **來源**: E4 報告 2.5
+- **工時**: 2h
+- **E1 指派**: E4
+
+### Batch 5 工作鏈
+```
+E1-Alpha（APR01-HIGH-3 + MEDIUM-8）‖ E1-Beta（APR01-MEDIUM-9）‖ E1-Gamma（APR01-MEDIUM-10）‖ E4（APR01-E4-1）
+           ↓
+    E2 + E4（≥ 3330）→ commit
+```
+
+---
+
+## ██ April 1 Audit — Batch 6: 技術債精選 + 文檔合規（~6h）
+
+> sys.path 重複消除 + MODULE_NOTE 補全 + 鎖範圍收窄。
+> 前置：無（可與 Batch 3-5 並行）。並行度：3 E1 + TW。
+
+### [ ] APR01-MEDIUM-11: 4 個路由文件重複 sys.path 5 層 dirname
+- **檔案**: `app/backtest_routes.py`, `app/evolution_routes.py`, `app/experiment_routes.py`, `app/phase2_strategy_routes.py`
+- **修復**: 提取公共函數 `_ensure_program_code_on_path()` 到共用模塊
+- **來源**: E5 NEW-S2 + #44
+- **工時**: 1h
+- **E1 指派**: E1-Alpha
+
+### [ ] APR01-MEDIUM-12: _process_pending_intents 鎖持有範圍過大
+- **檔案**: `app/pipeline_bridge.py`
+- **修復**: 收窄鎖範圍：鎖內只讀共享狀態 + 收集 intents，解鎖後執行 Guardian/edge filter 等 I/O
+- **來源**: E5 NEW-P5
+- **工時**: 2h
+- **E1 指派**: E1-Beta
+
+### [ ] APR01-MEDIUM-13: Token 存儲在 localStorage（安全風險）
+- **檔案**: `app/static/common.js`, `app/main_legacy.py`
+- **修復**: 改用 HttpOnly secure cookie（後端 Set-Cookie + 前端移除 localStorage）
+- **來源**: E3 MEDIUM-LEGACY-2
+- **工時**: 2h
+- **E1 指派**: E1-Gamma
+
+### [ ] APR01-TW-1: main.py / multi_agent_framework / perception_data_plane 缺 MODULE_NOTE
+- **檔案**: `app/main.py`, `app/multi_agent_framework.py`, `app/perception_data_plane.py`
+- **修復**: 補充中英雙語 MODULE_NOTE 區塊
+- **來源**: TW B1/B2/B3
+- **工時**: 1h
+- **E1 指派**: TW
+
+### Batch 6 工作鏈
+```
+E1-Alpha（APR01-MEDIUM-11）‖ E1-Beta（APR01-MEDIUM-12）‖ E1-Gamma（APR01-MEDIUM-13）‖ TW（APR01-TW-1）
+           ↓
+    E2 + E4（≥ 3330）→ commit
+```
+
+---
+
+## ██ April 1 Audit — Batch 7: 延後積壓（不排程 · 記錄供未來 Sprint）
+
+> 以下為中長期項目。不進入本輪排程。
+
+### [ ] APR01-HIGH-4: _process_pending_intents 462 行超巨方法拆分
+- **來源**: E5 NEW-R1
+- **工時**: 4h（高風險重構，需專門 Sprint）
+
+### [ ] APR01-CC-1: 原則 15 Conductor 自動編排完善
+- **來源**: CC §二（部分合規）
+- **工時**: 6h
+
+### [ ] APR01-CC-2: 原則 12 L5 元學習實施
+- **來源**: CC §二（部分合規）
+- **工時**: 15h+
+
+### [ ] APR01-FA-P2-2: Regime-aware 策略選擇
+- **來源**: FA P2-FA-2
+- **工時**: 8h（功能型需求）
+
+### [ ] APR01-FA-P2-3: 策略優化→部署自動化循環
+- **來源**: FA P2-FA-3
+- **工時**: 10h（功能型需求）
+
+### [ ] APR01-E5-LEGACY: main_legacy.py 5113 行單文件重構
+- **來源**: E5 #15
+- **工時**: 20h+（需整體重構規劃）
+
+### [ ] APR01-E5-LOGGER: 182 處 logger f-string → %s 佔位符
+- **來源**: E5 #20
+- **工時**: 4h（可漸進修復）
+
+### ~50 項 LOW/P3 問題
+- 詳見各原始審計報告（E5 Low 15 項 / TW P3 7 項 / R4 Low 4 項 / FA P3 4 項 / E3 Low 4 項 / AI-E P3 1 項）
+
+---
+
+## ██ April 1 Audit — 依賴關係圖
+
+```
+Batch 1（P0 知識閉環 · 0.5 天）
+  ├─→ Batch 2（BacktestEngine + 安全 · 0.5 天）
+  │     └─→ Batch 5（性能 + 覆蓋率 · 1 天）
+  ├─→ Batch 3（MessageBus + 安全頭 · 0.5 天）
+  └─→ Batch 4（記憶體保護 + 文檔 · 0.5 天）
+
+Batch 6（技術債 + 文檔合規 · 1 天 · 無前置依賴，可任意並行）
+
+關鍵路徑：Batch 1 → Batch 2 → Batch 5 = 2 天
+最短完成時間：2 天（Batch 1-6 全部）
+Batch 7 延後不排程
+```

@@ -794,7 +794,7 @@ class TruthSourceRegistry:
             # 在调度时解析路径，以便环境变量更改生效
             path = os.environ.get(
                 "OPENCLAW_TRUTH_REGISTRY_PATH",
-                "settings/truth_registry_snapshot.json",
+                _TRUTH_REGISTRY_DEFAULT_PATH,
             )
             # 30s debounce window: if many claims are registered quickly, only one save fires
             # 30s 防抖窗口：若快速注册多条声明，只触发一次保存
@@ -802,6 +802,16 @@ class TruthSourceRegistry:
             timer.daemon = True  # don't block process exit / 不阻塞进程退出
             timer.start()
             self._save_timer = timer
+
+    def get_all_claims(self) -> Dict[str, PatternClaim]:
+        """Return a shallow copy of the full claims dict (active + inactive).
+        返回完整声明字典的浅拷贝（含活跃和非活跃）。
+
+        Used by ExperimentLedger auto-seed and other audit consumers.
+        供 ExperimentLedger 自动填充和其他审计消费者使用。
+        """
+        with self._lock:
+            return dict(self._claims)
 
     def _do_save(self, path: str) -> None:
         """Internal callback invoked by the debounce timer to persist the registry.
@@ -819,3 +829,66 @@ class TruthSourceRegistry:
         # 保存完成后清除定时器引用
         with self._lock:
             self._save_timer = None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Module-level singleton / 模块级单例
+# ═══════════════════════════════════════════════════════════════════════════════
+# 整个进程共享同一个 TruthSourceRegistry 实例，避免多处各自创建导致知识分裂。
+# The entire process shares one TruthSourceRegistry instance to prevent
+# knowledge fragmentation from multiple independent instances.
+#
+# Startup load: the singleton loads persisted claims from disk on first access,
+# so knowledge survives restarts (APR01-P1-1).
+# 启动加载：单例在首次访问时从磁盘加载已持久化的声明，使知识在重启后可恢复。
+
+_SINGLETON_LOCK = threading.Lock()
+_SINGLETON: Optional[TruthSourceRegistry] = None
+
+
+def get_truth_registry() -> TruthSourceRegistry:
+    """Return the process-wide TruthSourceRegistry singleton.
+    返回进程级 TruthSourceRegistry 单例。
+
+    On first call, creates the instance and loads any persisted snapshot from disk.
+    首次调用时创建实例并从磁盘加载已持久化的快照。
+
+    Fail-open: if load_snapshot() fails, the registry starts empty — no crash.
+    fail-open：若 load_snapshot() 失败，registry 以空状态启动，不崩溃。
+    """
+    global _SINGLETON
+    if _SINGLETON is not None:
+        return _SINGLETON
+
+    with _SINGLETON_LOCK:
+        # Double-check after acquiring lock / 获取锁后双重检查
+        if _SINGLETON is not None:
+            return _SINGLETON
+
+        registry = TruthSourceRegistry()
+
+        # Load persisted claims from disk (fail-open)
+        # 从磁盘加载已持久化的声明（fail-open）
+        snapshot_path = os.environ.get(
+            "OPENCLAW_TRUTH_REGISTRY_PATH",
+            _TRUTH_REGISTRY_DEFAULT_PATH,
+        )
+        try:
+            loaded = registry.load_snapshot(snapshot_path)
+            if loaded > 0:
+                logger.info(
+                    "TruthSourceRegistry singleton: loaded %d claims from %s / "
+                    "TruthSourceRegistry 单例：从 %s 加载了 %d 条声明",
+                    loaded, snapshot_path, snapshot_path, loaded,
+                )
+        except Exception as exc:
+            # fail-open: log warning, start with empty registry
+            # fail-open：记录警告，以空 registry 启动
+            logger.warning(
+                "TruthSourceRegistry singleton load_snapshot failed (fail-open): %s / "
+                "TruthSourceRegistry 单例 load_snapshot 失败（fail-open）：%s",
+                exc, exc,
+            )
+
+        _SINGLETON = registry
+        return _SINGLETON

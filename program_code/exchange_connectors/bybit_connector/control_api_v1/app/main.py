@@ -244,6 +244,50 @@ async def _startup_integrity_check() -> None:
         f"; degraded: {degraded}" if degraded else "",
     )
 
+    # ── Auto-reauth on startup: if active paper session exists but no auth, re-grant ──
+    # 啟動時自動重授權：如果存在活躍 paper session 但 GovernanceHub 無有效授權，自動補授權。
+    # Root cause: grant_paper_authorization() is only called on POST /paper/session/start.
+    # On server restart, the existing session is loaded from state file without triggering start.
+    # Fix: check session state on startup and re-grant authorization if needed (fail-open).
+    # 根因：grant_paper_authorization() 只在 POST /paper/session/start 時調用。
+    # 服務器重啟後，現有 session 從文件載入，不會重新觸發 start，導致授權缺失。
+    # 修復：啟動時檢查 session 狀態，若需要則補授權（fail-open，不阻斷啟動）。
+    try:
+        _session_state = ENGINE.get_session_state() if hasattr(ENGINE, "get_session_state") else None
+        _is_active = False
+        if _session_state is not None:
+            _is_active = _session_state.get("session_state") == "active"
+        else:
+            # Fallback: check raw state
+            _raw = ENGINE._store.load() if hasattr(ENGINE, "_store") else {}
+            _is_active = _raw.get("session", {}).get("session_state") == "active"
+
+        if _is_active and GOV_HUB is not None:
+            if not GOV_HUB.is_authorized():
+                _granted = GOV_HUB.grant_paper_authorization()
+                if _granted:
+                    base.logger.info(
+                        "Startup auto-reauth: active paper session detected, paper authorization re-granted "
+                        "/ 啟動自動重授權：檢測到活躍 paper session，已補授 paper 授權"
+                    )
+                else:
+                    base.logger.warning(
+                        "Startup auto-reauth: active paper session but grant_paper_authorization() returned False "
+                        "/ 啟動自動重授權：活躍 session 但 grant_paper_authorization() 返回 False"
+                    )
+            else:
+                base.logger.info(
+                    "Startup auto-reauth: paper authorization already active — no-op "
+                    "/ 啟動自動重授權：授權已有效，跳過"
+                )
+    except Exception as _reauth_exc:
+        # fail-open: must not block startup
+        # fail-open：不阻斷啟動
+        base.logger.warning(
+            "Startup auto-reauth failed (fail-open): %s / 啟動自動重授權失敗（不阻斷）：%s",
+            _reauth_exc, _reauth_exc,
+        )
+
     # 軟性依賴：symbol_category_registry（可選，啟動時預填 symbol→category 映射）
     # Soft dep: symbol_category_registry (optional; pre-seeds symbol→category map at startup)
     if _SYMBOL_REGISTRY_AVAILABLE and PIPELINE_BRIDGE is not None:
@@ -279,24 +323,25 @@ async def _startup_integrity_check() -> None:
     # 啟動時從 TruthSourceRegistry 快照自動填充初始假設（fail-open，不阻斷啟動）
     # On startup, auto-seed ExperimentLedger from persisted TruthSourceRegistry snapshot.
     # fail-open: any failure must not block startup.
+    # APR01-P0-1: Use the singleton (which already loaded from disk) instead of a
+    # throwaway instance. This ensures Agents and auto-seed share the same registry.
+    # APR01-P0-1：使用单例（已从磁盘加载）而非创建临时实例，确保 Agents 和
+    # auto-seed 共享同一个 registry。
     try:
-        _snapshot_path = os.environ.get(
-            "OPENCLAW_TRUTH_REGISTRY_PATH", "settings/truth_registry_snapshot.json"
-        )
         from .experiment_routes import get_experiment_ledger  # noqa: PLC0415
-        from .truth_source_registry import TruthSourceRegistry as _TruthSourceRegistry  # noqa: PLC0415
-        _seed_registry = _TruthSourceRegistry()
-        loaded = _seed_registry.load_snapshot(_snapshot_path)
-        if loaded > 0:
+        from .truth_source_registry import get_truth_registry  # noqa: PLC0415
+        _seed_registry = get_truth_registry()
+        _all_claims = _seed_registry.get_all_claims()
+        if _all_claims:
             _ledger = get_experiment_ledger()
             seeded = _ledger.auto_seed_from_claims(
-                list(_seed_registry.get_all_claims().values()),
+                list(_all_claims.values()),
                 min_confidence=0.5,
             )
             base.logger.info(
-                "Startup auto-seed: loaded %d claims, seeded %d hypotheses / "
-                "啟動自動填充：載入 %d 條 claim，生成 %d 個假設",
-                loaded, seeded, loaded, seeded,
+                "Startup auto-seed: %d claims in registry, seeded %d hypotheses / "
+                "啟動自動填充：registry 中 %d 條 claim，生成 %d 個假設",
+                len(_all_claims), seeded, len(_all_claims), seeded,
             )
     except Exception as _e:
         # fail-open：自動填充失敗不阻斷啟動 / fail-open: auto-seed failure must not block startup

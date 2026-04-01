@@ -1,6 +1,6 @@
 """
-Tests for ExperimentLedger — Phase 3 Batch 3A
-==============================================
+Tests for ExperimentLedger — Phase 3 Batch 3A + APR01-P1-2 Persistence
+=======================================================================
 Coverage categories:
   A. TestHypothesisDataclass (8 tests)
   B. TestRecordObservation (8 tests)
@@ -8,12 +8,16 @@ Coverage categories:
   D. TestExpireStale (4 tests)
   E. TestQueryAndStats (4 tests)
   F. TestThreadSafety (2 tests)
+  G. TestAutoSeedFromClaims (3 tests)
+  H. TestSnapshotPersistence (10 tests) — APR01-P1-2
 
-Total: 32 tests (>= 30 required)
+Total: 45 tests
 """
 
 from __future__ import annotations
 
+import json
+import tempfile
 import threading
 import time
 import unittest
@@ -682,6 +686,267 @@ class TestAutoSeedFromClaims(unittest.TestCase):
         self.assertNotEqual(all_hyps[0].strategy_name, "all",
                             "Proposed hypothesis must not have strategy_name='all'")
         self.assertEqual(all_hyps[0].strategy_name, "ma_crossover")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H. TestSnapshotPersistence — APR01-P1-2
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSnapshotPersistence(unittest.TestCase):
+    """Tests for ExperimentLedger save_snapshot() / load_snapshot() persistence.
+    测试 ExperimentLedger 的 save_snapshot() / load_snapshot() 持久化功能。
+
+    APR01-P1-2: Experiment state must survive service restarts.
+    APR01-P1-2：实验状态必须在服务重启后保留。
+    """
+
+    def _make_ledger_with_data(self) -> ExperimentLedger:
+        """Create a ledger with 2 hypotheses (one PENDING, one CONFIRMED) for testing.
+        创建一个包含 2 条假设（一条 PENDING，一条 CONFIRMED）的账本用于测试。
+        """
+        ledger = ExperimentLedger()
+        # Hypothesis 1: PENDING
+        ledger.propose_hypothesis(
+            description="MA crossover trending hypothesis",
+            strategy_name="ma_crossover",
+            regime="trending",
+            hypothesis_id="h_pending_001",
+            min_observations=20,
+        )
+        # Hypothesis 2: will be CONFIRMED (13 wins + 7 losses = 65% win)
+        ledger.propose_hypothesis(
+            description="RSI divergence works in ranging",
+            strategy_name="rsi_divergence",
+            regime="ranging",
+            hypothesis_id="h_confirmed_002",
+            min_observations=20,
+        )
+        for _ in range(13):
+            ledger.record_observation("h_confirmed_002", "win")
+        for _ in range(7):
+            ledger.record_observation("h_confirmed_002", "loss")
+        return ledger
+
+    # H1: save_snapshot writes valid JSON to disk
+    def test_save_snapshot_writes_json(self) -> None:
+        """save_snapshot() must write a valid JSON file containing all hypotheses."""
+        ledger = self._make_ledger_with_data()
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            result = ledger.save_snapshot(path)
+            self.assertTrue(result, "save_snapshot() must return True on success")
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertIsInstance(data, list)
+            self.assertEqual(len(data), 2)
+            ids = {entry["hypothesis_id"] for entry in data}
+            self.assertIn("h_pending_001", ids)
+            self.assertIn("h_confirmed_002", ids)
+        finally:
+            import os
+            os.unlink(path)
+
+    # H2: load_snapshot restores hypotheses correctly
+    def test_load_snapshot_restores_hypotheses(self) -> None:
+        """load_snapshot() must restore hypotheses with correct fields and status."""
+        ledger = self._make_ledger_with_data()
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            ledger.save_snapshot(path)
+
+            # Create a fresh ledger and load the snapshot
+            # 创建一个空账本并加载快照
+            ledger2 = ExperimentLedger()
+            loaded = ledger2.load_snapshot(path)
+            self.assertEqual(loaded, 2, "Should load 2 hypotheses from snapshot")
+
+            # Verify PENDING hypothesis fields
+            h1 = ledger2.get_hypothesis("h_pending_001")
+            self.assertIsNotNone(h1)
+            self.assertEqual(h1.status, HypothesisStatus.PENDING)
+            self.assertEqual(h1.strategy_name, "ma_crossover")
+            self.assertEqual(h1.regime, "trending")
+
+            # Verify CONFIRMED hypothesis fields
+            h2 = ledger2.get_hypothesis("h_confirmed_002")
+            self.assertIsNotNone(h2)
+            self.assertEqual(h2.status, HypothesisStatus.CONFIRMED)
+            self.assertEqual(h2.supporting_count, 13)
+            self.assertEqual(h2.refuting_count, 7)
+        finally:
+            import os
+            os.unlink(path)
+
+    # H3: load_snapshot with missing file returns 0 (fail-open)
+    def test_load_snapshot_missing_file_returns_zero(self) -> None:
+        """load_snapshot() with a nonexistent path must return 0 (fail-open)."""
+        ledger = ExperimentLedger()
+        result = ledger.load_snapshot("/tmp/nonexistent_snapshot_xyz_12345.json")
+        self.assertEqual(result, 0)
+
+    # H4: load_snapshot with corrupt JSON returns 0 (fail-open)
+    def test_load_snapshot_corrupt_json_returns_zero(self) -> None:
+        """load_snapshot() with corrupt JSON must return 0 (fail-open, start fresh)."""
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            f.write("{{{invalid json ,,, !!!}")
+            path = f.name
+        try:
+            ledger = ExperimentLedger()
+            result = ledger.load_snapshot(path)
+            self.assertEqual(result, 0, "Corrupt JSON should return 0 (fail-open)")
+        finally:
+            import os
+            os.unlink(path)
+
+    # H5: load_snapshot with non-list root returns 0 (fail-open)
+    def test_load_snapshot_non_list_root_returns_zero(self) -> None:
+        """load_snapshot() with a JSON dict (not list) root must return 0."""
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            json.dump({"not": "a list"}, f)
+            path = f.name
+        try:
+            ledger = ExperimentLedger()
+            result = ledger.load_snapshot(path)
+            self.assertEqual(result, 0, "Non-list root should return 0 (fail-open)")
+        finally:
+            import os
+            os.unlink(path)
+
+    # H6: load_snapshot skips malformed entries but loads valid ones
+    def test_load_snapshot_skips_malformed_entries(self) -> None:
+        """load_snapshot() must skip malformed entries and still load valid ones."""
+        valid_entry = {
+            "hypothesis_id": "h_valid",
+            "description": "valid hypothesis",
+            "strategy_name": "rsi",
+            "regime": "all",
+            "proposed_by": "system",
+            "proposed_at_ms": int(time.time() * 1000),
+            "expires_at_ms": int(time.time() * 1000) + 86_400_000,
+            "status": "PENDING",
+            "min_observations": 20,
+            "supporting_count": 0,
+            "refuting_count": 0,
+            "claim_id": None,
+            "concluded_at_ms": None,
+            "notes": "",
+        }
+        malformed_entry = {"hypothesis_id": "h_bad"}  # missing required fields
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            json.dump([malformed_entry, valid_entry], f)
+            path = f.name
+        try:
+            ledger = ExperimentLedger()
+            loaded = ledger.load_snapshot(path)
+            self.assertEqual(loaded, 1, "Should load 1 valid entry, skip 1 malformed")
+            h = ledger.get_hypothesis("h_valid")
+            self.assertIsNotNone(h)
+            self.assertIsNone(ledger.get_hypothesis("h_bad"))
+        finally:
+            import os
+            os.unlink(path)
+
+    # H7: load_snapshot does not overwrite existing in-memory hypotheses
+    def test_load_snapshot_no_overwrite_existing(self) -> None:
+        """load_snapshot() must skip hypothesis_ids that already exist in memory."""
+        ledger = ExperimentLedger()
+        ledger.propose_hypothesis(
+            description="In-memory version",
+            strategy_name="grid",
+            hypothesis_id="h_existing",
+        )
+
+        snapshot_entry = {
+            "hypothesis_id": "h_existing",
+            "description": "Snapshot version (should be skipped)",
+            "strategy_name": "rsi",
+            "regime": "all",
+            "proposed_by": "snapshot",
+            "proposed_at_ms": int(time.time() * 1000),
+            "expires_at_ms": int(time.time() * 1000) + 86_400_000,
+            "status": "RUNNING",
+            "min_observations": 20,
+            "supporting_count": 5,
+            "refuting_count": 3,
+            "claim_id": None,
+            "concluded_at_ms": None,
+            "notes": "",
+        }
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as f:
+            json.dump([snapshot_entry], f)
+            path = f.name
+        try:
+            loaded = ledger.load_snapshot(path)
+            self.assertEqual(loaded, 0, "Should skip already-existing hypothesis_id")
+            h = ledger.get_hypothesis("h_existing")
+            # Original in-memory version must be preserved
+            self.assertEqual(h.description, "In-memory version")
+            self.assertEqual(h.strategy_name, "grid")
+        finally:
+            import os
+            os.unlink(path)
+
+    # H8: save_snapshot to invalid path returns False (fail-open)
+    def test_save_snapshot_invalid_path_returns_false(self) -> None:
+        """save_snapshot() to an unwritable path must return False (fail-open)."""
+        ledger = ExperimentLedger()
+        ledger.propose_hypothesis(description="Test", strategy_name="rsi")
+        # /proc is not writable on Linux
+        result = ledger.save_snapshot("/proc/nonexistent_dir/snapshot.json")
+        self.assertFalse(result, "save_snapshot to invalid path should return False")
+
+    # H9: round-trip preserves concluded_at_ms and claim_id
+    def test_round_trip_preserves_concluded_fields(self) -> None:
+        """save + load round-trip must preserve concluded_at_ms and claim_id."""
+        registry = MagicMock()
+        registry.register_claim.return_value = "claim_rt_001"
+        ledger = ExperimentLedger(truth_registry=registry)
+        ledger.propose_hypothesis(
+            description="Round-trip test",
+            strategy_name="ma_crossover",
+            hypothesis_id="h_roundtrip",
+            min_observations=20,
+        )
+        for _ in range(13):
+            ledger.record_observation("h_roundtrip", "win")
+        for _ in range(7):
+            ledger.record_observation("h_roundtrip", "loss")
+        h_orig = ledger.get_hypothesis("h_roundtrip")
+        self.assertEqual(h_orig.status, HypothesisStatus.CONFIRMED)
+        self.assertEqual(h_orig.claim_id, "claim_rt_001")
+        self.assertIsNotNone(h_orig.concluded_at_ms)
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            path = f.name
+        try:
+            ledger.save_snapshot(path)
+            ledger2 = ExperimentLedger()
+            ledger2.load_snapshot(path)
+            h_loaded = ledger2.get_hypothesis("h_roundtrip")
+            self.assertEqual(h_loaded.claim_id, "claim_rt_001")
+            self.assertEqual(h_loaded.concluded_at_ms, h_orig.concluded_at_ms)
+        finally:
+            import os
+            os.unlink(path)
+
+    # H10: _schedule_debounced_save does not crash (fail-open smoke test)
+    def test_schedule_debounced_save_no_crash(self) -> None:
+        """_schedule_debounced_save() must not raise exceptions (fail-open)."""
+        ledger = ExperimentLedger()
+        # Force last_save_ts far in the past so debounce doesn't skip
+        ledger._last_save_ts = 0.0
+        # Should not raise even though snapshot dir may not exist
+        try:
+            ledger._schedule_debounced_save()
+        except Exception as exc:
+            self.fail(f"_schedule_debounced_save() raised: {exc}")
+        # Clean up timer
+        if ledger._save_timer is not None:
+            ledger._save_timer.cancel()
 
 
 if __name__ == "__main__":

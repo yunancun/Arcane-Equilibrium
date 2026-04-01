@@ -634,71 +634,59 @@ class TestProcessPendingIntents:
 
         验证当 orchestrator 和 StrategistAgent 合计超过 max_intents_per_tick
         时，只有前 max_intents_per_tick 个被处理。
-        Verify that when orchestrator + StrategistAgent combined intents exceed
-        max_intents_per_tick, only the first max_intents_per_tick are processed.
+        Verify that when orchestrator intents exceed max_intents_per_tick,
+        only the first max_intents_per_tick are processed.
+
+        APR01-P1-3: Updated — StrategistAgent.collect_pending_intents() path removed
+        (deprecated TD-2, always returned []). Only orchestrator source remains.
+        APR01-P1-3：已更新 — 移除 StrategistAgent.collect_pending_intents() 路径
+        （TD-2 已废弃，始终返回 []）。仅保留编排器来源。
         """
-        # max_intents=20，orchestrator 返回 15 個，strategist 返回 10 個，合計 25
+        # max_intents=20，orchestrator 返回 25 個，超過上限
+        # max_intents=20, orchestrator returns 25, exceeds cap
         bridge, engine = _make_bridge(max_intents=20, reject=False)
         bridge.activate()
         bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
 
-        # Orchestrator provides 15 intents
-        orch_intents = [_make_intent() for _ in range(15)]
+        # Orchestrator provides 25 intents (exceeds max of 20)
+        orch_intents = [_make_intent() for _ in range(25)]
         bridge._orch.collect_pending_intents = MagicMock(return_value=orch_intents)
-
-        # StrategistAgent provides 10 TradeIntents (will be converted internally)
-        mock_strategist = MagicMock()
-        strategist_trade_intents = []
-        for i in range(10):
-            ti = MagicMock()
-            ti.direction = "long"
-            ti.symbol = "ETHUSDT"
-            ti.size = 0.01
-            ti.metadata = {"strategy_name": "momentum", "category": "linear"}
-            strategist_trade_intents.append(ti)
-        mock_strategist.collect_pending_intents.return_value = strategist_trade_intents
-        bridge._strategist_agent = mock_strategist
 
         bridge._process_pending_intents()
 
-        # 合計 25 > max 20，截斷後只提交 20 個（engine.submitted_orders <= 20）
-        # Combined 25 > max 20; after capping only 20 are submitted to paper engine
+        # 25 > max 20，截斷後只提交 20 個（engine.submitted_orders <= 20）
+        # 25 > max 20; after capping only 20 are submitted to paper engine
         assert len(engine.submitted_orders) <= 20, (
             f"Expected at most 20 submitted orders, got {len(engine.submitted_orders)}"
         )
-        # 必須確認 StrategistAgent.collect_pending_intents 被呼叫（雙源都要合併）
-        # Confirm both sources were consulted — strategist was called
-        mock_strategist.collect_pending_intents.assert_called_once()
 
-    def test_strategist_collect_exception_falls_back_to_orchestrator(self):
-        """P2-15: StrategistAgent.collect_pending_intents() 拋異常時，
-        系統應 fallback 到 orchestrator intents，不崩潰。
+    def test_orchestrator_collect_exception_returns_empty(self):
+        """APR01-P1-3: orchestrator.collect_pending_intents() 拋異常時，
+        系統應 fallback 到空列表，不崩潰，不提交任何訂單。
 
-        When StrategistAgent.collect_pending_intents() raises RuntimeError,
-        the pipeline must not crash; orchestrator intents must still be processed.
+        When orchestrator.collect_pending_intents() raises RuntimeError,
+        the pipeline must not crash; no orders should be submitted.
+        （替代原 test_strategist_collect_exception_falls_back_to_orchestrator，
+        因 strategist collect 路径已移除。）
         """
         bridge, engine = _make_bridge(max_intents=20, reject=False)
         bridge.activate()
         bridge.set_guardian_agent(_make_guardian(RiskVerdictResult.APPROVED))
 
-        # Orchestrator returns 3 valid intents
-        orch_intents = [_make_intent() for _ in range(3)]
-        bridge._orch.collect_pending_intents = MagicMock(return_value=orch_intents)
+        # Orchestrator 拋出 RuntimeError — 模擬外部異常
+        # Orchestrator raises RuntimeError — simulates external failure
+        bridge._orch.collect_pending_intents = MagicMock(
+            side_effect=RuntimeError("test error")
+        )
 
-        # StrategistAgent 拋出 RuntimeError — 模擬外部異常
-        # StrategistAgent raises RuntimeError — simulates external failure
-        mock_strategist = MagicMock()
-        mock_strategist.collect_pending_intents.side_effect = RuntimeError("test error")
-        bridge._strategist_agent = mock_strategist
-
-        # 不應拋出，系統應繼續處理 orchestrator intents
-        # Must not raise; orchestrator intents should proceed normally
+        # 不應拋出，系統應安全返回（intents=[] → early return）
+        # Must not raise; empty intents → early return, no orders submitted
         bridge._process_pending_intents()
 
-        # 3 個 orchestrator intents 正常提交
-        # All 3 orchestrator intents still submitted
-        assert len(engine.submitted_orders) == 3, (
-            f"Expected 3 orders from orchestrator fallback, got {len(engine.submitted_orders)}"
+        # 無訂單提交（orchestrator 異常 → intents=[]）
+        # No orders submitted (orchestrator exception → intents=[])
+        assert len(engine.submitted_orders) == 0, (
+            f"Expected 0 orders after orchestrator exception, got {len(engine.submitted_orders)}"
         )
 
 

@@ -474,49 +474,20 @@ class PipelineBridge:
 
     def _process_pending_intents(self) -> None:
         """
-        Collect OrderIntents from orchestrator AND StrategistAgent, submit to paper engine.
-        从编排器和 StrategistAgent 收集 OrderIntent 并提交到纸上交易引擎。
+        Collect OrderIntents from orchestrator, submit to paper engine.
+        从编排器收集 OrderIntent 并提交到纸上交易引擎。
 
-        Batch 7: Extended to also collect intents from StrategistAgent
-        (AI-evaluated intents that passed Guardian review or shadow=False).
+        Note: StrategistAgent.collect_pending_intents() was removed here (APR01-P1-3).
+        It was deprecated in TD-2 (Wave 6 Sprint 2) — always returned [].
+        StrategyAgent intents now flow via MessageBus → add_trade_intent() path.
+        注意：已移除对 StrategistAgent.collect_pending_intents() 的调用（APR01-P1-3）。
+        该方法在 TD-2 中已废弃（始终返回 []），策略意图现通过 MessageBus → add_trade_intent() 路径传递。
         """
         try:
             intents = self._orch.collect_pending_intents()
         except Exception:
             logger.exception("Failed to collect orchestrator intents / 收集编排器意图失败")
             intents = []
-
-        # Batch 7: Also collect from StrategistAgent (non-shadow intents)
-        # Batch 7：同时从 StrategistAgent 收集（非 shadow 模式下的 intent）
-        if self._strategist_agent:
-            try:
-                strategist_intents = self._strategist_agent.collect_pending_intents()
-                if strategist_intents:
-                    logger.info(
-                        "Collected %d intents from StrategistAgent / 从 StrategistAgent 收集了 %d 个 intent",
-                        len(strategist_intents), len(strategist_intents),
-                    )
-                    # Convert TradeIntent to OrderIntent-compatible format
-                    # 将 TradeIntent 转换为与 OrderIntent 兼容的格式
-                    for ti in strategist_intents:
-                        try:
-                            # Create a minimal OrderIntent-like object from TradeIntent
-                            # This bridges the multi-agent TradeIntent → legacy OrderIntent
-                            _side = "Buy" if ti.direction == "long" else "Sell"
-                            _intent_obj = type("StrategyIntent", (), {
-                                "symbol": ti.symbol,
-                                "side": _side,
-                                "order_type": "market",
-                                "qty": ti.size,
-                                "price": None,
-                                "metadata": ti.metadata,
-                                "perception_data_id": None,
-                            })()
-                            intents.append(_intent_obj)
-                        except Exception as _si_e:
-                            logger.warning("Failed to convert StrategistAgent intent: %s / 转换 StrategistAgent intent 失败", _si_e)
-            except Exception as _strat_e:
-                logger.warning("Failed to collect StrategistAgent intents: %s / 收集 StrategistAgent intent 失败", _strat_e)
 
         if not intents:
             return

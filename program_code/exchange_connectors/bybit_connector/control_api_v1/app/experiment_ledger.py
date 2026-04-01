@@ -39,7 +39,9 @@ MODULE_NOTE (English):
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -54,6 +56,20 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _MS_PER_DAY = 86_400_000
+
+# Default snapshot path / 默认快照路径
+# Resolution: OPENCLAW_EXPERIMENT_LEDGER_PATH env var → fallback: settings/experiment_ledger_snapshot.json
+# 解析顺序：环境变量 OPENCLAW_EXPERIMENT_LEDGER_PATH → 回退：settings/experiment_ledger_snapshot.json
+_EXPERIMENT_LEDGER_DEFAULT_PATH: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),  # app/
+    "..", "..", "..", "..",                        # up to srv/
+    "settings",
+    "experiment_ledger_snapshot.json",
+)
+
+# Debounce interval for auto-save (seconds)
+# 自动保存的去抖间隔（秒）
+_SAVE_DEBOUNCE_SECONDS = 60.0
 
 # Confirmation threshold: 65% of observations must be supporting/refuting
 # 确认阈值：65% 的观察必须为支持或反驳
@@ -238,6 +254,12 @@ class ExperimentLedger:
         # hypothesis_id → Hypothesis / 假设存储
         self._hypotheses: Dict[str, Hypothesis] = {}
 
+        # Debounced auto-save state / 去抖自动保存状态
+        # _save_timer: pending background save timer (daemon thread)
+        # _last_save_ts: monotonic timestamp of last successful save, for debounce check
+        self._save_timer: Optional[threading.Timer] = None
+        self._last_save_ts: float = 0.0
+
     # ── Proposal / 提出 ──────────────────────────────────────────────────────
 
     def propose_hypothesis(
@@ -294,6 +316,11 @@ class ExperimentLedger:
             "Hypothesis proposed: id=%s strategy=%s regime=%s ttl_days=%d",
             hid, strategy_name, regime, ttl,
         )
+
+        # Trigger debounced auto-save after state mutation
+        # 状态变更后触发去抖自动保存
+        self._schedule_debounced_save()
+
         return hid
 
     # ── Observation / 观察 ──────────────────────────────────────────────────
@@ -315,6 +342,9 @@ class ExperimentLedger:
             处理观察后的当前 HypothesisStatus。
         """
         outcome_lower = outcome.lower()
+        # Track whether state was mutated to trigger debounced save
+        # 追踪状态是否变更，以触发去抖保存
+        _state_mutated = False
 
         with self._lock:
             h = self._hypotheses.get(hypothesis_id)
@@ -343,8 +373,10 @@ class ExperimentLedger:
             # 分类结果并递增对应计数器
             if outcome_lower in _SUPPORTING_OUTCOMES:
                 h.supporting_count += 1
+                _state_mutated = True
             elif outcome_lower in _REFUTING_OUTCOMES:
                 h.refuting_count += 1
+                _state_mutated = True
             else:
                 # Unknown outcome: recorded but not classified (neither supports nor refutes)
                 # 未知结果：记录但不分类（既不支持也不反驳）
@@ -367,6 +399,7 @@ class ExperimentLedger:
                 if support_ratio >= _CONFIRM_THRESHOLD:
                     concluded_status = HypothesisStatus.CONFIRMED
                     self._conclude(hypothesis_id, concluded_status)
+                    self._schedule_debounced_save()
                     return concluded_status
 
                 # 65% refuting observations → REFUTED
@@ -374,9 +407,17 @@ class ExperimentLedger:
                 elif refute_ratio >= _CONFIRM_THRESHOLD:
                     concluded_status = HypothesisStatus.REFUTED
                     self._conclude(hypothesis_id, concluded_status)
+                    self._schedule_debounced_save()
                     return concluded_status
 
-            return h.status
+            result_status = h.status
+
+        # Trigger debounced auto-save outside the lock if state was mutated
+        # 若状态已变更，在锁外触发去抖自动保存
+        if _state_mutated:
+            self._schedule_debounced_save()
+
+        return result_status
 
     # ── Conclusion / 结案 ────────────────────────────────────────────────────
 
@@ -615,3 +656,228 @@ class ExperimentLedger:
         """
         with self._lock:
             return [h.to_dict() for h in self._hypotheses.values()]
+
+    # ── Persistence / 持久化 ────────────────────────────────────────────────
+
+    def save_snapshot(self, path: str) -> bool:
+        """Serialize all current hypotheses to a JSON file at *path*.
+        将当前所有假设序列化到 *path* 指定的 JSON 文件。
+
+        Thread-safety design / 线程安全设计：
+          1. 持锁读取假设数据，复制到局部列表后立即释放锁
+             (Hold lock only to copy hypothesis data; release before disk I/O)
+          2. 磁盘 I/O 在锁外进行，不阻塞并发操作
+             (Disk I/O outside the lock so concurrent operations are not blocked)
+
+        Principle 7 isolation / 原则 7 隔离：
+          只序列化 Hypothesis 字段。不写入策略配置、风控阈值或任何实盘参数。
+          Only Hypothesis fields are serialized. No strategy config, risk thresholds,
+          or live trading parameters are written.
+
+        Fail-open / fail-open（写失败不中断交易）：
+          Any I/O or serialization error is caught, logged as WARNING, and returns False.
+          任何 I/O 或序列化错误均被捕获，记录为 WARNING，返回 False。
+
+        Returns:
+            True on success, False on any exception.
+            成功返回 True；任何异常返回 False。
+        """
+        # Step 1: read hypotheses under lock, then release before I/O
+        # 步骤 1：持锁读取假设数据，然后在 I/O 前释放锁
+        with self._lock:
+            data = [h.to_dict() for h in self._hypotheses.values()]
+
+        # Step 2: perform disk write outside the lock
+        # 步骤 2：在锁外执行磁盘写入
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+            self._last_save_ts = time.monotonic()
+            logger.debug(
+                "save_snapshot: wrote %d hypotheses to %s / 快照已写入 %d 条假设至 %s",
+                len(data), path, len(data), path,
+            )
+            return True
+        except Exception as exc:
+            # fail-open: log warning, do not crash the trading pipeline
+            # fail-open：记录警告，不中断交易管线
+            logger.warning(
+                "save_snapshot failed (fail-open): %s — path=%s / "
+                "save_snapshot 失败（fail-open）：%s — 路径=%s",
+                exc, path, exc, path,
+            )
+            return False
+
+    def load_snapshot(self, path: str) -> int:
+        """Load hypotheses from a JSON snapshot file and restore them into the ledger.
+        从 JSON 快照文件加载假设并恢复到账本中。
+
+        Behaviour / 行为：
+          - Missing file  → log DEBUG, return 0 (no crash)
+            文件不存在 → 记录 DEBUG，返回 0（不崩溃）
+          - Corrupted JSON → log WARNING, return 0 (no crash, start fresh)
+            JSON 损坏 → 记录 WARNING，返回 0（不崩溃，从空白开始）
+          - Existing hypothesis_id → skip (do NOT overwrite newer in-memory data)
+            已存在的 hypothesis_id → 跳过（不覆盖内存中更新的数据）
+
+        Principle 7 isolation / 原则 7 隔离：
+          Only Hypothesis fields are read. No strategy or risk configuration
+          is loaded or modified.
+          只读取 Hypothesis 字段，不加载或修改策略或风控配置。
+
+        Returns:
+            Count of hypotheses successfully loaded (0 if file missing or corrupted).
+            成功加载的假设数（文件缺失或损坏时返回 0）。
+        """
+        # Step 1: check file existence (fail-open on missing file)
+        # 步骤 1：检查文件是否存在（文件缺失时 fail-open）
+        if not os.path.exists(path):
+            logger.debug(
+                "load_snapshot: file not found (no-op) — path=%s / "
+                "load_snapshot：文件不存在（无操作）— 路径=%s",
+                path, path,
+            )
+            return 0
+
+        # Step 2: read and parse JSON (fail-open on corrupted JSON)
+        # 步骤 2：读取并解析 JSON（JSON 损坏时 fail-open）
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            logger.warning(
+                "load_snapshot: failed to parse snapshot (fail-open): %s — path=%s / "
+                "load_snapshot：快照解析失败（fail-open）：%s — 路径=%s",
+                exc, path, exc, path,
+            )
+            return 0
+
+        if not isinstance(raw, list):
+            logger.warning(
+                "load_snapshot: snapshot root is not a list (fail-open) — path=%s / "
+                "load_snapshot：快照根节点不是列表（fail-open）— 路径=%s",
+                path, path,
+            )
+            return 0
+
+        # Step 3: restore hypotheses, skipping any hypothesis_id that already exists
+        # 步骤 3：恢复假设，跳过已存在的 hypothesis_id（不覆盖内存中更新的数据）
+        loaded = 0
+        with self._lock:
+            for entry in raw:
+                try:
+                    hid = entry["hypothesis_id"]
+                    # Skip if already in ledger — don't overwrite newer in-memory data
+                    # 若已存在则跳过 — 不覆盖内存中更新的数据
+                    if hid in self._hypotheses:
+                        continue
+                    h = Hypothesis(
+                        hypothesis_id=hid,
+                        description=entry["description"],
+                        strategy_name=entry["strategy_name"],
+                        regime=entry.get("regime", "all"),
+                        proposed_by=entry.get("proposed_by", "snapshot"),
+                        proposed_at_ms=int(entry["proposed_at_ms"]),
+                        expires_at_ms=int(entry["expires_at_ms"]),
+                        status=HypothesisStatus(entry["status"]),
+                        min_observations=int(entry.get("min_observations", 20)),
+                        supporting_count=int(entry.get("supporting_count", 0)),
+                        refuting_count=int(entry.get("refuting_count", 0)),
+                        claim_id=entry.get("claim_id"),
+                        concluded_at_ms=(
+                            int(entry["concluded_at_ms"])
+                            if entry.get("concluded_at_ms") is not None
+                            else None
+                        ),
+                        notes=entry.get("notes", ""),
+                    )
+                    self._hypotheses[hid] = h
+                    loaded += 1
+                except (KeyError, TypeError, ValueError) as exc:
+                    # Skip malformed entries, log warning
+                    # 跳过格式错误的条目，记录警告
+                    logger.warning(
+                        "load_snapshot: skipping malformed entry %s: %s / "
+                        "load_snapshot：跳过格式错误的条目 %s：%s",
+                        entry.get("hypothesis_id", "?"), exc,
+                        entry.get("hypothesis_id", "?"), exc,
+                    )
+
+        logger.debug(
+            "load_snapshot: loaded %d hypotheses from %s / 从 %s 加载了 %d 条假设",
+            loaded, path, path, loaded,
+        )
+        return loaded
+
+    # ── Debounced save internals / 去抖动保存内部实现 ──
+
+    def _resolve_snapshot_path(self) -> str:
+        """Resolve the snapshot file path from env var or default.
+        从环境变量或默认值解析快照文件路径。
+
+        Resolution order / 解析顺序：
+          1. OPENCLAW_EXPERIMENT_LEDGER_PATH env var
+          2. _EXPERIMENT_LEDGER_DEFAULT_PATH (settings/experiment_ledger_snapshot.json)
+        """
+        return os.environ.get(
+            "OPENCLAW_EXPERIMENT_LEDGER_PATH",
+            _EXPERIMENT_LEDGER_DEFAULT_PATH,
+        )
+
+    def _schedule_debounced_save(self) -> None:
+        """Schedule a debounced background save if enough time has elapsed since last save.
+        若距上次保存已过去足够时间，调度去抖后台保存。
+
+        Design / 设计：
+          - 使用简单的时间检查：若距上次保存 < _SAVE_DEBOUNCE_SECONDS，跳过
+            Simple time check: if last save was < _SAVE_DEBOUNCE_SECONDS ago, skip.
+          - 使用 threading.Timer（非 asyncio），因为 ExperimentLedger 是纯同步代码。
+            Uses threading.Timer (not asyncio) because ExperimentLedger is sync.
+          - 若已有定时器挂起，不重复调度。
+            If a timer is already pending, do not schedule another.
+          - 定时器线程设为 daemon，进程退出时不阻塞。
+            Timer thread is daemon so it won't block process exit.
+
+        Fail-open / fail-open：调度失败仅 log warning，不影响主路径。
+        """
+        try:
+            now = time.monotonic()
+            # Debounce: skip if last save was recent enough
+            # 去抖：若上次保存足够近，跳过
+            if (now - self._last_save_ts) < _SAVE_DEBOUNCE_SECONDS:
+                return
+
+            # Don't schedule if a timer is already pending
+            # 若已有定时器挂起，不重复调度
+            if self._save_timer is not None and self._save_timer.is_alive():
+                return
+
+            path = self._resolve_snapshot_path()
+            timer = threading.Timer(5.0, self._do_save, args=(path,))
+            timer.daemon = True  # don't block process exit / 不阻塞进程退出
+            timer.start()
+            self._save_timer = timer
+        except Exception as exc:
+            # fail-open: scheduling failure must not disrupt the trading pipeline
+            # fail-open：调度失败不得干扰交易管线
+            logger.warning(
+                "ExperimentLedger._schedule_debounced_save failed (fail-open): %s",
+                exc,
+            )
+
+    def _do_save(self, path: str) -> None:
+        """Internal callback invoked by the debounce timer to persist the ledger.
+        去抖动定时器触发的内部回调，用于持久化账本。
+
+        After the save completes (success or fail), clear self._save_timer so the
+        next mutation can schedule a fresh save.
+        保存完成（成功或失败）后清除 self._save_timer，使下次变更可以调度新的保存。
+        """
+        # Delegate actual I/O to save_snapshot (fail-open, handles all exceptions)
+        # 将实际 I/O 委托给 save_snapshot（fail-open，处理所有异常）
+        self.save_snapshot(path)
+        # Clear the timer reference under lock for thread safety (E2-1 fix)
+        # 在锁保护下清除定时器引用，确保线程安全（E2-1 修复）
+        with self._lock:
+            self._save_timer = None
