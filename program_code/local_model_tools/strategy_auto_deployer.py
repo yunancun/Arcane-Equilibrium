@@ -35,6 +35,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Category priority bonus for deployment ordering.
+# Funding arb is delta-neutral (lowest risk) → highest priority.
+# 品類優先級加分：funding arb 為 delta-neutral（最低風險）→ 最高優先。
+CATEGORY_PRIORITY_BONUS = {
+    "funding_arb": 50,
+    "grid": 20,
+    "reversion": 10,
+    "trend": 0,
+    "breakout": 0,
+}
+
 
 class StrategyAutoDeployer:
     """
@@ -298,7 +309,15 @@ class StrategyAutoDeployer:
             current_symbols = set(d["symbol"] for d in self._deployed.values())
             available_slots = self._max_symbols - len(current_symbols)
 
-            for opp in opportunities:
+            # Apply category priority: funding arb > grid > trend (risk-adjusted ordering)
+            # 套利優先：funding arb 風險最低 → 優先部署
+            prioritized = sorted(
+                opportunities,
+                key=lambda o: getattr(o, 'score', 0) + CATEGORY_PRIORITY_BONUS.get(getattr(o, 'category', ''), 0),
+                reverse=True,
+            )
+
+            for opp in prioritized:
                 symbol = opp.symbol
                 category = opp.category
 

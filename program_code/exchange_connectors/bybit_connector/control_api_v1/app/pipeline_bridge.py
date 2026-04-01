@@ -279,6 +279,28 @@ class PipelineBridge:
         except Exception:
             logger.exception("Kline bootstrap failed (non-fatal) / K线引导失败（非致命）")
 
+        # Bootstrap ATR price history from klines so risk manager has ATR immediately
+        # 从 K线引导 ATR 价格历史，使风控管理器立即拥有 ATR 数据
+        try:
+            if self._engine and hasattr(self._engine, "risk_manager") and self._engine.risk_manager:
+                tracker = self._engine.risk_manager._price_tracker
+                bootstrapped_total = 0
+                for symbol in (self._km.get_tracked_symbols() if hasattr(self._km, "get_tracked_symbols") else []):
+                    # Use 5m klines — good balance of granularity vs coverage
+                    # 使用 5 分钟 K线 — 颗粒度与覆盖范围的良好平衡
+                    buf = self._km.get_buffer(symbol, "5m")
+                    if buf and len(buf) > 0:
+                        klines_data = buf.latest(60)
+                        count = tracker.bootstrap_from_klines(symbol, klines_data)
+                        bootstrapped_total += count
+                if bootstrapped_total > 0:
+                    logger.info(
+                        "ATR bootstrap seeded %d price points / ATR 引导注入 %d 个价格点",
+                        bootstrapped_total, bootstrapped_total,
+                    )
+        except Exception:
+            logger.exception("ATR bootstrap failed (non-fatal) / ATR 引导失败（非致命）")
+
         # Restore strategy state if available / 恢复策略状态
         try:
             if os.path.exists(self._strategy_state_path):
@@ -595,9 +617,16 @@ class PipelineBridge:
                 # Round qty to exchange step precision (shared with Demo connector)
                 # 統一四捨五入到交易所步長精度（與 Demo connector 共用）
                 # Ensures Paper and Demo receive identical qty values.
+                # INV-3: Pass category so inverse contracts round to integer contracts.
+                # INV-3：傳入 category，確保 inverse 合約正確取整（整數張數）。
                 try:
                     from .bybit_demo_connector import round_qty_for_exchange
-                    _submit_qty = round_qty_for_exchange(_submit_qty)
+                    _intent_category = (
+                        intent.metadata.get("category", "linear")
+                        if hasattr(intent, "metadata") and intent.metadata
+                        else "linear"
+                    )
+                    _submit_qty = round_qty_for_exchange(_submit_qty, category=_intent_category)
                     if _submit_qty <= 0:
                         logger.info("Qty rounds to zero for %s, skipping / qty 四捨五入為零，跳過", intent.symbol)
                         continue

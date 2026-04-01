@@ -145,6 +145,53 @@ class PriceHistoryTracker:
             for s in stale_symbols:
                 del self._history[s]
 
+    def bootstrap_from_klines(self, symbol: str, klines: list) -> int:
+        """
+        Seed price history from historical kline close prices so ATR is
+        immediately available after restart (eliminates cold-start blind period).
+        从历史 K线收盘价初始化价格历史，使重启后 ATR 立即可用（消除冷启动盲期）。
+
+        Args:
+            symbol  — trading pair / 交易对
+            klines  — list of KlineBar objects (oldest-to-newest) with .close attribute
+                      K线列表（从旧到新），需含 .close 属性
+
+        Returns:
+            Number of price points seeded / 注入的价格点数量
+        """
+        if not klines:
+            return 0
+
+        # Take the last ~60 klines to fill the ATR window
+        # 取最近约 60 根 K线填充 ATR 窗口
+        sample = klines[-60:] if len(klines) > 60 else list(klines)
+
+        now = time.time()
+        count = len(sample)
+        if count == 0:
+            return 0
+
+        # Spread synthetic timestamps evenly across the ATR window so they
+        # survive the pruning cutoff (now - window_sec)
+        # 将合成时间戳均匀分布在 ATR 窗口内，确保不被清理截断
+        spacing = self._window_sec / (count + 1)
+
+        if symbol not in self._history:
+            self._history[symbol] = []
+
+        seeded = 0
+        for i, bar in enumerate(sample):
+            close_price = getattr(bar, "close", None)
+            if close_price is None or close_price <= 0:
+                continue
+            # Oldest sample gets timestamp closest to (now - window_sec)
+            # 最旧的样本获得最接近 (now - window_sec) 的时间戳
+            synthetic_ts = now - self._window_sec + spacing * (i + 1)
+            self._history[symbol].append((synthetic_ts, close_price))
+            seeded += 1
+
+        return seeded
+
     def get_prices(self, symbol: str) -> list[tuple[float, float]]:
         return self._history.get(symbol, [])
 
@@ -1051,11 +1098,23 @@ class RiskManager:
                     })
                     continue
 
-            # 4. Trailing stop
+            # 4. Trailing stop (ATR-dynamic distance)
+            # 追踪止损（ATR 动态距离）
             if self._agent_params.trailing_stop_enabled and pnl_pct > 0:
                 ts_state = self._trailing_stops.get(symbol, {})
                 activation = self._agent_params.trailing_stop_activation_pct
-                distance = self._agent_params.trailing_stop_distance_pct
+                base_distance = self._agent_params.trailing_stop_distance_pct
+
+                # ATR-dynamic trailing distance: tighter than stop loss (1.2x vs 1.5x),
+                # capped at 80% of hard stop to leave headroom for hard defense
+                # ATR 动态追踪距离：比止损更紧（1.2x vs 1.5x），
+                # 上限为硬止损的 80%，为硬防线留出空间
+                if atr_pct is not None and atr_pct > 0:
+                    atr_trail = atr_pct * 1.2
+                    dynamic_cap = hard_sl * 0.8
+                    distance = max(base_distance, min(atr_trail, dynamic_cap))
+                else:
+                    distance = base_distance
 
                 if pnl_pct >= activation and "peak_pnl_pct" not in ts_state:
                     # First entry into activation zone — initialize peak
