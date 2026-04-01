@@ -660,8 +660,18 @@ async function loadDynamicRisk() {
 async function toggleDynamicRisk() {
   const enabled = document.getElementById('dr-toggle').checked;
   const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled });
-  if (d) { ocToast(enabled ? '动态风控已启用' : '动态风控已禁用', 'success'); loadDynamicRisk(); }
-  else { ocToast('设置失败', 'error'); }
+  if (d) {
+    if (enabled) {
+      ocToast('动态风控已启用 — 数据充足后自动生效', 'success');
+    } else {
+      ocToast('动态风控已禁用 — 已恢复基准值', 'success');
+    }
+    loadDynamicRisk();
+  } else {
+    // Revert toggle on failure
+    document.getElementById('dr-toggle').checked = !enabled;
+    ocToast('设置失败', 'error');
+  }
 }
 
 $('explain-auto-adjust').innerHTML = ocExplain(
