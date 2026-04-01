@@ -188,6 +188,15 @@ app.include_router(backtest_router)
 # 驗證非可選關鍵依賴在模塊初始化時已成功注入。
 # PIPELINE_BRIDGE 和 H0_GATE 允許為 None（降級/測試環境）；
 # 其餘三個依賴必須存在 — 若為 None 則服務拒絕啟動。
+
+# SymbolCategoryRegistry soft import — 可選，失敗不阻斷 import
+# SymbolCategoryRegistry soft import — optional; import failure does not block module load
+try:
+    from .symbol_category_registry import SymbolCategoryRegistry as _SymbolCategoryRegistry
+    _SYMBOL_REGISTRY_AVAILABLE = True
+except ImportError:
+    _SYMBOL_REGISTRY_AVAILABLE = False
+
 @app.on_event("startup")
 async def _startup_integrity_check() -> None:
     """Startup integrity check — fail-closed if non-optional deps are missing.
@@ -226,6 +235,37 @@ async def _startup_integrity_check() -> None:
         "Startup integrity check passed — hard deps all present%s",
         f"; degraded: {degraded}" if degraded else "",
     )
+
+    # 軟性依賴：symbol_category_registry（可選，啟動時預填 symbol→category 映射）
+    # Soft dep: symbol_category_registry (optional; pre-seeds symbol→category map at startup)
+    if _SYMBOL_REGISTRY_AVAILABLE and PIPELINE_BRIDGE is not None:
+        try:
+            import os as _os
+            import asyncio as _asyncio
+            _bybit_host = _os.environ.get("BYBIT_API_HOST", "https://api-testnet.bybit.com")
+            _registry = _SymbolCategoryRegistry(bybit_host=_bybit_host)
+            _refreshed = await _asyncio.to_thread(_registry.refresh)
+            if _refreshed:
+                _count = await _asyncio.to_thread(_registry.seed_pipeline_bridge, PIPELINE_BRIDGE)
+                base.logger.info(
+                    "SymbolCategoryRegistry seeded %d symbol→category entries into PipelineBridge "
+                    "/ SymbolCategoryRegistry 已注入 %d 條 symbol→category 映射",
+                    _count, _count,
+                )
+            else:
+                base.logger.warning(
+                    "SymbolCategoryRegistry.refresh() failed at startup; "
+                    "PipelineBridge will rely on Plan B runtime registration "
+                    "/ 啟動時 refresh() 失敗，PipelineBridge 將依賴方案 B 的運行時登記"
+                )
+        except Exception as _reg_exc:
+            # soft dep：任何例外不阻斷啟動
+            # soft dep: any exception must not block startup
+            base.logger.warning(
+                "SymbolCategoryRegistry startup init failed (non-fatal): %s "
+                "/ SymbolCategoryRegistry 啟動初始化失敗（不阻斷啟動）：%s",
+                _reg_exc, _reg_exc,
+            )
 
 
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──

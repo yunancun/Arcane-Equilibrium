@@ -1728,6 +1728,16 @@ class PipelineBridge:
             return "option"
         if sym.endswith("USD") and not sym.endswith("USDT") and not sym.endswith("USDC"):
             return "inverse"
+        # fallback：命名規則無法區分 linear 與 spot，可能推斷錯誤。
+        # Fallback: naming convention cannot distinguish linear from spot; may be incorrect.
+        # 呼叫端應通過 register_symbol_category() 或 SymbolCategoryRegistry 提供正確 category。
+        # Callers should provide correct category via register_symbol_category() or SymbolCategoryRegistry.
+        logger.warning(
+            "Category inferred as linear for symbol=%s — may be incorrect for spot symbols. "
+            "Register via StrategyAutoDeployer or SymbolCategoryRegistry to fix. "
+            "/ symbol=%s 的 category 被推斷為 linear，對 spot symbol 可能錯誤",
+            symbol, symbol,
+        )
         return "linear"
 
     def _refresh_kline_volume(self) -> None:
