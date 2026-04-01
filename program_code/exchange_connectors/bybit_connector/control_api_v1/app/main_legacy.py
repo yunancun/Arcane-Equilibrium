@@ -130,12 +130,8 @@ from .state_compiler import (  # noqa: F401
     OBSERVATION_CATEGORIES,
     PRODUCT_FAMILIES,
     REVIEW_DECISION_ACTIONS,
-    REVIEW_PACKET_STATUSES,
-    REVIEW_PACKET_TYPES,
     _COMPILE_STATE_SIG_CACHE,
-    _MAX_PAYLOAD_SIZE,
     _MAX_TEXT_LONG,
-    _MAX_TEXT_REASON,
     _MAX_TEXT_SHORT,
     _compile_demo_gate_states,
     _compile_effective_action_permissions,
@@ -208,29 +204,10 @@ from .pnl_ops import (  # noqa: F401
 # ── Wave C re-exports: learning_ops (learning system operations) ──
 # 從 learning_ops.py 重新導出學習系統操作函數，保持向後兼容。
 # Re-export learning system operations from learning_ops.py for backward compat.
-from .learning_ops import (  # noqa: F401
-    _build_ai_question_for_hypothesis,
-    _build_ai_question_for_lesson,
-    _build_ai_question_for_observation,
-    _build_review_packet,
-    _content_hash,
-    apply_ai_consultation,
-    apply_auto_generate,
-    apply_experiment_approval,
-    apply_experiment_completion,
-    apply_hypothesis_verdict,
-    apply_learning_experiment,
-    apply_learning_hypothesis,
-    apply_learning_lesson,
-    apply_learning_observation,
-    apply_review_decision,
-    build_learning_experiments,
-    build_learning_feed,
-    build_review_queue,
-    generate_auto_hypotheses,
-    generate_auto_lessons,
-    generate_auto_observations,
-)
+# ★ 學習系統函數不再從此處 re-export（消除循環 import）。
+# ★ Learning system functions no longer re-exported here (eliminates circular import).
+# 消費者應直接 import learning_ops / learning_records / learning_auto_pipeline / learning_queries。
+# Consumers should import from learning_ops / learning_records / learning_auto_pipeline / learning_queries directly.
 
 
 
