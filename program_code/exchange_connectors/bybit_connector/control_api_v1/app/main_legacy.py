@@ -4259,7 +4259,7 @@ class _LoginRequest(BaseModel):
 
 @app.post("/api/v1/auth/login", include_in_schema=False)
 @limiter.limit("5/minute")
-async def auth_login(request: Request, req: _LoginRequest = Body(...)):
+async def auth_login(request: Request):
     """
     Authenticate with username/password, return bearer token.
     用户名密码认证，返回 bearer token。
@@ -4267,7 +4267,16 @@ async def auth_login(request: Request, req: _LoginRequest = Body(...)):
     Rate-limited to 5/minute per IP. IPs that fail ≥5 times within 15 minutes
     are locked out with HTTP 429 until the window expires.
     每IP限速5次/分钟。同一IP在15分钟内失败≥5次，返回429并锁定至窗口期结束。（P1-8 修复）
+
+    Note: Body parsed manually because @limiter.limit breaks FastAPI's Body() injection.
+    注意：手动解析 body，因为 @limiter.limit 装饰器破坏 FastAPI 的 Body() 注入。
     """
+    try:
+        body = await request.json()
+        req = _LoginRequest(**body)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Invalid request body")
+
     client_ip: str = request.client.host if request.client else "unknown"
     now = time.time()
 
