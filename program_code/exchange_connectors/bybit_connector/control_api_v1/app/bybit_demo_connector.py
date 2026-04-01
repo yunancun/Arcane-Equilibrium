@@ -72,6 +72,33 @@ def round_qty_for_exchange(qty: float, category: str = "linear") -> float:
     return round(qty, 3)
 
 
+def round_price_for_exchange(price: float, tick_size: float | None = None) -> float:
+    """
+    Round price to exchange tick size precision.
+    按交易所 tickSize 精度取整價格。
+
+    If tick_size is provided (from SymbolCategoryRegistry), round to tick_size grid.
+    Otherwise fall back to 8 decimal places (safe for all Bybit symbols).
+    如果提供了 tick_size（來自 SymbolCategoryRegistry），對齊到 tick_size 網格。
+    否則回退到 8 位小數（對所有 Bybit 品種安全）。
+
+    CRITICAL: 之前硬編碼 round(..., 2) 導致低價幣（如 PIPPINUSDT $0.06）
+    止損觸發價被錯誤進位到市價附近，19 秒內觸發假止損。
+    CRITICAL: Previously hardcoded round(..., 2) caused low-price coins
+    (e.g. PIPPINUSDT $0.06) stop trigger price to round UP to near market price,
+    triggering false stop loss within 19 seconds.
+    """
+    if tick_size and tick_size > 0:
+        # Round DOWN for long stop-loss, round UP for short stop-loss
+        # This function rounds to nearest tick — caller handles direction
+        # 取整到最近的 tick — 方向由調用者處理
+        import math
+        return round(math.floor(price / tick_size) * tick_size, 10)
+    # Fallback: 8 decimal places covers all Bybit price precisions
+    # 回退：8 位小數覆蓋所有 Bybit 品種的價格精度
+    return round(price, 8)
+
+
 class BybitDemoConnector:
     """
     Executes orders on Bybit Demo Trading API.

@@ -309,6 +309,10 @@ async def _startup_integrity_check() -> None:
             _refreshed = await _asyncio.to_thread(_registry.refresh)
             if _refreshed:
                 _count = await _asyncio.to_thread(_registry.seed_pipeline_bridge, PIPELINE_BRIDGE)
+                # ★ 注入 registry 給 PipelineBridge，用於 tick_size/qty_step 查詢（止損價精度取整）
+                # Inject registry into PipelineBridge for tick_size/qty_step lookup (stop price rounding).
+                if hasattr(PIPELINE_BRIDGE, "set_symbol_registry"):
+                    PIPELINE_BRIDGE.set_symbol_registry(_registry)
                 base.logger.info(
                     "SymbolCategoryRegistry seeded %d symbol→category entries into PipelineBridge "
                     "/ SymbolCategoryRegistry 已注入 %d 條 symbol→category 映射",

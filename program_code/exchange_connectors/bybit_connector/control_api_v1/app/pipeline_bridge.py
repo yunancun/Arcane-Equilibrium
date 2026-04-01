@@ -146,6 +146,9 @@ class PipelineBridge:
         # Wave 7a Plan B: runtime symbol-to-category map, populated by StrategyAutoDeployer on
         # strategy deployment. Prevents _infer_category_from_symbol from guessing for known symbols.
         self._symbol_category_map: dict[str, str] = {}
+        # tick_size 快取：symbol → float，用於 Demo 止損價精度取整
+        # Tick size cache: symbol → float, for Demo stop-loss price rounding precision
+        self._symbol_registry: Any = None  # SymbolCategoryRegistry（外部注入）
 
         self._stats = {
             "ticks_received": 0,
@@ -276,6 +279,12 @@ class PipelineBridge:
         設置 H0 確定性門控以進行確定性交易前過濾（P1-16）。
         """
         self._h0_gate = gate
+
+    def set_symbol_registry(self, registry: Any) -> None:
+        """Set SymbolCategoryRegistry for tick_size lookup (price rounding).
+        設置 SymbolCategoryRegistry 以查詢 tickSize（價格取整精度）。
+        """
+        self._symbol_registry = registry
 
     def register_symbol_category(self, symbol: str, category: str) -> None:
         """
@@ -1101,43 +1110,11 @@ class PipelineBridge:
             intent.symbol, intent.side, intent.order_type, intent.qty,
         )
 
-        # H1: track position or detect close for E1/G1 hooks
-        # H1：追踪持仓，或检测关闭触发 E1/G1
-        fills = result.get("fills", []) if isinstance(result, dict) else []
-        close_pnl = result.get("close_pnl", 0.0) if isinstance(result, dict) else 0.0
-        if fills:
-            fill = fills[0]
-            fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
-            is_open_fill = close_pnl == 0.0
-            if close_pnl != 0.0:
-                # Position closed — round-trip complete
-                # 持仓已关闭 — 一轮交易完成
-                self._on_round_trip_complete(intent, fill_price, close_pnl)
-            else:
-                # New position opened — start tracking
-                # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
-                self._on_position_open(intent, fill_price, actual_qty=_submit_qty)
-            # Sync strategy position state via on_fill callback
-            # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
-            if self._auto_deployer:
-                strategy_name = getattr(intent, "strategy_name", None)
-                if strategy_name:
-                    fill_for_callback = {
-                        "symbol": intent.symbol,
-                        "side": intent.side,
-                        "qty": intent.qty,
-                        "price": fill_price,
-                        "strategy_name": strategy_name,
-                    }
-                    self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
-
-        # Also submit to Bybit Demo — ONLY when paper engine accepted.
-        # Demo must mirror paper exactly: rejected paper orders must not
-        # reach demo, otherwise positions diverge (paper=0, demo>0).
-        # Also use _submit_qty (Guardian-modified) not intent.qty (original).
-        # 仅在 Paper Engine 接受订单后才提交 Demo — 两者必须严格同步。
-        # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
-        # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
+        # ── Submit to Bybit Demo FIRST (before position tracking) ──
+        # Demo 必須先於持倉追蹤提交，這樣 _on_position_open 才能查到 Demo 成交價
+        # Demo submission must happen before position tracking so that
+        # _on_position_open can query Demo's actual fill price for stop-loss.
+        _demo_synced = False
         if self._demo_connector and self._demo_connector.is_enabled:
             # SPOT-DEMO: Bybit spot trades appear as wallet balance changes,
             # not as positions.  Comparing Paper spot positions against Demo
@@ -1152,7 +1129,6 @@ class PipelineBridge:
                 )
                 _bump(_local_stats, "demo_spot_skipped")
             else:
-                _demo_synced = False
                 try:
                     # Set leverage on Demo before placing the order so that
                     # margin math and PnL match Paper (Paper always uses
@@ -1193,9 +1169,70 @@ class PipelineBridge:
                     _bump(_local_stats, "demo_synced")
                 else:
                     _bump(_local_stats, "demo_diverged")
-            if self._telegram and intent.order_type == "market":
-                price = market_prices.get(intent.symbol, 0)
-                self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
+
+        # H1: track position or detect close for E1/G1 hooks
+        # H1：追踪持仓，或检测关闭触发 E1/G1
+        fills = result.get("fills", []) if isinstance(result, dict) else []
+        close_pnl = result.get("close_pnl", 0.0) if isinstance(result, dict) else 0.0
+        if fills:
+            fill = fills[0]
+            fill_price = fill.get("price", market_prices.get(intent.symbol, 0.0))
+            is_open_fill = close_pnl == 0.0
+            if close_pnl != 0.0:
+                # Position closed — round-trip complete
+                # 持仓已关闭 — 一轮交易完成
+                self._on_round_trip_complete(intent, fill_price, close_pnl)
+            else:
+                # New position opened — start tracking
+                # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
+                # ★ FIX: 從 Demo 取得真實成交價，用於交易所條件止損單
+                # Query Demo position avgPrice for accurate stop-loss trigger.
+                # Market orders fill instantly on Bybit; position avgPrice is available.
+                _demo_fill = 0.0
+                if _demo_synced:
+                    try:
+                        _pos_resp = self._demo_connector.get_positions(
+                            category=category, symbol=intent.symbol,
+                        )
+                        _pos_list = _pos_resp.get("result", {}).get("list", [])
+                        for _p in _pos_list:
+                            if _p.get("symbol") == intent.symbol and float(_p.get("size", 0)) > 0:
+                                _demo_fill = float(_p.get("avgPrice", 0))
+                                break
+                        if _demo_fill > 0:
+                            logger.debug(
+                                "Demo fill price for %s: %.8f (Paper: %.8f) / "
+                                "Demo 成交價：%.8f（Paper：%.8f）",
+                                intent.symbol, _demo_fill, fill_price,
+                                _demo_fill, fill_price,
+                            )
+                    except Exception as _demo_price_err:
+                        logger.debug(
+                            "Could not get Demo fill price for %s: %s — using Paper price / "
+                            "無法取得 Demo 成交價，使用 Paper 價格",
+                            intent.symbol, _demo_price_err,
+                        )
+                self._on_position_open(
+                    intent, fill_price, actual_qty=_submit_qty,
+                    demo_fill_price=_demo_fill,
+                )
+            # Sync strategy position state via on_fill callback
+            # 通过 on_fill 回调同步策略仓位状态，防止意图态漂移
+            if self._auto_deployer:
+                strategy_name = getattr(intent, "strategy_name", None)
+                if strategy_name:
+                    fill_for_callback = {
+                        "symbol": intent.symbol,
+                        "side": intent.side,
+                        "qty": intent.qty,
+                        "price": fill_price,
+                        "strategy_name": strategy_name,
+                    }
+                    self._auto_deployer.notify_fill(strategy_name, fill_for_callback, is_open_fill)
+
+        if self._telegram and intent.order_type == "market":
+            price = market_prices.get(intent.symbol, 0)
+            self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
 
     def _check_stops(self) -> None:
         """Check stop-losses and submit close orders if triggered / 检查止损并提交平仓"""
@@ -1567,7 +1604,10 @@ class PipelineBridge:
                 self._edge_filter_stats["errors"] += 1
             return True  # fail-open — never block trading due to filter errors
 
-    def _on_position_open(self, intent: Any, fill_price: float, actual_qty: float = 0.0) -> None:
+    def _on_position_open(
+        self, intent: Any, fill_price: float, actual_qty: float = 0.0,
+        demo_fill_price: float = 0.0,
+    ) -> None:
         """
         Called when a new position is opened.
         Record it in _open_positions and register with StopManager using ATR-based stop.
@@ -1575,6 +1615,10 @@ class PipelineBridge:
 
         actual_qty: The rounded qty actually submitted (for Demo consistency).
                     If 0, falls back to intent.qty.
+        demo_fill_price: Demo 的真實成交價，用於計算交易所端條件止損單的觸發價。
+                         若為 0 則回退到 Paper fill_price（向後兼容）。
+                         Demo's actual fill price for exchange conditional stop-loss trigger.
+                         Falls back to Paper fill_price if 0 (backward compatible).
         """
         symbol = intent.symbol
         strategy_name = getattr(intent, "strategy_name", "unknown")
@@ -1663,17 +1707,35 @@ class PipelineBridge:
         # 失败安全：条件单创建失败仅记录日志，不阻止本地止损
         if self._demo_connector and self._demo_connector.is_enabled and fill_price > 0:
             try:
+                from .bybit_demo_connector import round_price_for_exchange
                 # Close side is opposite of position side
                 # 平仓方向与持仓方向相反
                 close_side = "Sell" if side == "long" else "Buy"
-                # Stop trigger price = entry_price × (1 - hard_stop_pct/100) for long,
-                #                      entry_price × (1 + hard_stop_pct/100) for short
-                # 止损触发价 = 入场价 × (1 ± 硬止损百分比/100)
+
+                # ★ FIX: 使用 Demo 真實成交價計算止損觸發價（而非 Paper 模擬價）
+                # Demo entry price may differ from Paper due to real orderbook vs simulated slippage.
+                # Using Paper price caused PIPPINUSDT to round(0.056859, 2) = 0.06 ≈ market price,
+                # triggering false stop loss within 19 seconds.
+                # ★ FIX: Use Demo actual fill price for stop trigger (not Paper simulated price).
+                _stop_base_price = demo_fill_price if demo_fill_price > 0 else fill_price
+
                 _hard_stop_pct = atr_stop_pct
                 if side == "long":
-                    trigger_price = round(fill_price * (1 - _hard_stop_pct / 100), 2)
+                    raw_trigger = _stop_base_price * (1 - _hard_stop_pct / 100)
                 else:
-                    trigger_price = round(fill_price * (1 + _hard_stop_pct / 100), 2)
+                    raw_trigger = _stop_base_price * (1 + _hard_stop_pct / 100)
+
+                # ★ FIX: 用交易所 tickSize 取整，而非硬編碼 round(..., 2)
+                # round(..., 2) 對低價幣（$0.06）會把 0.056859 進位到 0.06 = 市價
+                # ★ FIX: Round using exchange tick_size, not hardcoded round(..., 2).
+                # round(..., 2) on low-price coins ($0.06) rounds 0.056859 UP to 0.06 = market price.
+                tick_size = None
+                if self._symbol_registry:
+                    try:
+                        tick_size = self._symbol_registry.get_tick_size(symbol)
+                    except Exception:
+                        pass  # fallback to 8dp
+                trigger_price = round_price_for_exchange(raw_trigger, tick_size)
 
                 cond_result = self._demo_connector.place_conditional_order(
                     symbol=symbol,
@@ -1683,19 +1745,21 @@ class PipelineBridge:
                 )
                 if cond_result.get("retCode") == 0:
                     logger.info(
-                        "Batch 11 dual defense: exchange stop-loss created %s %s trigger=%.2f / "
+                        "Dual defense: exchange stop-loss created %s %s trigger=%s "
+                        "(base_price=%s tick_size=%s) / "
                         "双重防线：交易所止损单已创建",
                         symbol, close_side, trigger_price,
+                        _stop_base_price, tick_size,
                     )
                 else:
                     logger.warning(
-                        "Batch 11 dual defense: exchange stop-loss FAILED %s reason=%s (local stop still active) / "
+                        "Dual defense: exchange stop-loss FAILED %s reason=%s (local stop still active) / "
                         "双重防线：交易所止损单创建失败（本地止损仍然有效）",
                         symbol, cond_result.get("retMsg"),
                     )
             except Exception as _cond_err:
                 logger.warning(
-                    "Batch 11 dual defense: conditional order error %s: %s (local stop still active) / "
+                    "Dual defense: conditional order error %s: %s (local stop still active) / "
                     "双重防线：条件单创建异常（本地止损仍然有效）",
                     symbol, _cond_err,
                 )

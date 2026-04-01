@@ -29,14 +29,17 @@ _CATEGORIES_TO_FETCH = ("linear", "spot", "inverse")
 
 class SymbolCategoryRegistry:
     """
-    啟動時從 Bybit API 拉取全量 symbol→category 映射，TTL 6 小時自動刷新。
-    Fetches the full symbol→category mapping from Bybit API at startup,
+    啟動時從 Bybit API 拉取全量 symbol→category 映射 + tickSize/qtyStep，TTL 6 小時自動刷新。
+    Fetches the full symbol→category mapping plus tickSize/qtyStep from Bybit API at startup,
     with 6-hour TTL auto-refresh.
     """
 
     def __init__(self, bybit_host: str = "https://api-testnet.bybit.com"):
         self._host = bybit_host.rstrip("/")
         self._cache: dict[str, str] = {}
+        # tick_size / qty_step 快取：symbol → {"tick_size": float, "qty_step": float}
+        # Used for round_price_for_exchange / round_qty_for_exchange precision
+        self._instrument_cache: dict[str, dict[str, float]] = {}
         self._last_refresh_ts: float = 0.0
         self._lock = threading.Lock()
 
@@ -47,6 +50,24 @@ class SymbolCategoryRegistry:
         """
         with self._lock:
             return self._cache.get(symbol)
+
+    def get_tick_size(self, symbol: str) -> Optional[float]:
+        """
+        取得 symbol 的 tickSize（最小價格步長）。未知返回 None。
+        Get the tickSize (minimum price step) for a symbol. Returns None if unknown.
+        """
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+            return info["tick_size"] if info else None
+
+    def get_qty_step(self, symbol: str) -> Optional[float]:
+        """
+        取得 symbol 的 qtyStep（最小數量步長）。未知返回 None。
+        Get the qtyStep (minimum qty step) for a symbol. Returns None if unknown.
+        """
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+            return info["qty_step"] if info else None
 
     def known_count(self) -> int:
         """返回快取中已知 symbol 的數量。Returns number of known symbols in cache."""
@@ -67,6 +88,7 @@ class SymbolCategoryRegistry:
         # TODO: pagination for spot (>1000 symbols when Bybit expands beyond limit)
         """
         new_cache: dict[str, str] = {}
+        new_instruments: dict[str, dict[str, float]] = {}
         for category in _CATEGORIES_TO_FETCH:
             url = self._host + _INSTRUMENTS_PATH.format(category=category)
             try:
@@ -79,6 +101,20 @@ class SymbolCategoryRegistry:
                     sym = item.get("symbol")
                     if sym:
                         new_cache[sym] = category
+                        # Extract tickSize + qtyStep from filters for price/qty rounding
+                        # 從 priceFilter/lotSizeFilter 提取 tickSize/qtyStep 用於精度取整
+                        price_filter = item.get("priceFilter", {})
+                        lot_filter = item.get("lotSizeFilter", {})
+                        try:
+                            tick_size = float(price_filter.get("tickSize", 0))
+                            qty_step = float(lot_filter.get("qtyStep", 0))
+                            if tick_size > 0 or qty_step > 0:
+                                new_instruments[sym] = {
+                                    "tick_size": tick_size if tick_size > 0 else 0.01,
+                                    "qty_step": qty_step if qty_step > 0 else 1.0,
+                                }
+                        except (ValueError, TypeError):
+                            pass  # skip invalid filter data
                 logger.debug(
                     "SymbolCategoryRegistry: loaded %d symbols for category=%s "
                     "/ 已載入 %d 個 symbol（品類：%s）",
@@ -104,12 +140,13 @@ class SymbolCategoryRegistry:
 
         with self._lock:
             self._cache = new_cache
+            self._instrument_cache = new_instruments
             self._last_refresh_ts = time.monotonic()
 
         logger.info(
-            "SymbolCategoryRegistry: refreshed — %d symbols cached "
-            "/ 刷新完成，共快取 %d 個 symbol",
-            len(new_cache), len(new_cache),
+            "SymbolCategoryRegistry: refreshed — %d symbols cached (%d with tick_size) "
+            "/ 刷新完成，共快取 %d 個 symbol（%d 有 tickSize）",
+            len(new_cache), len(new_instruments), len(new_cache), len(new_instruments),
         )
         return True
 
