@@ -463,6 +463,54 @@ class StrategyAutoDeployer:
                     break
         return self._compute_qty(symbol, price, score)
 
+    def _compute_leverage(self, opp: Any) -> float:
+        """
+        Compute leverage based on category + volatility, within risk limits.
+        根據品類和波動率計算槓桿，在風控上限內。
+
+        Logic:
+        - Category base: spot=1x, linear=5x, inverse=3x
+        - Volatility adjustment: high vol → lower leverage (conservative)
+        - Hard cap from RiskManager.max_leverage per category
+        品類基準：spot=1x（無槓桿）, linear=5x, inverse=3x
+        波動率調整：高波動 → 降低槓桿（保守）
+        硬上限來自 RiskManager 的 max_leverage
+        """
+        api_cat = getattr(opp, "api_category", "linear")
+        vol_pct = getattr(opp, "volatility_pct", 5.0)
+
+        # Category base leverage / 品類基礎槓桿
+        if api_cat == "spot":
+            return 1.0  # Spot has no leverage / 現貨無槓桿
+        elif api_cat == "inverse":
+            base = 3.0
+            hard_cap = 10.0
+        else:  # linear
+            base = 5.0
+            hard_cap = 20.0
+
+        # Volatility factor: target ~5% daily vol as "normal"
+        # vol_pct < 3% (low vol) → boost up to 1.5x base
+        # vol_pct 3-8% (normal) → use base
+        # vol_pct > 8% (high vol) → reduce to 0.5x base
+        # 波動率因子：以 5% 日波動為「正常」基準
+        if vol_pct <= 0:
+            vol_factor = 1.0
+        elif vol_pct < 3.0:
+            vol_factor = 1.5  # Low vol → can afford more leverage / 低波動 → 可加槓桿
+        elif vol_pct <= 8.0:
+            vol_factor = 1.0  # Normal range / 正常範圍
+        else:
+            vol_factor = max(0.3, 5.0 / vol_pct)  # High vol → reduce / 高波動 → 降低
+
+        leverage = base * vol_factor
+
+        # Clamp to hard cap (from risk manager category config)
+        leverage = max(1.0, min(leverage, hard_cap))
+
+        # Round to 1 decimal for clean values
+        return round(leverage, 1)
+
     def _deploy_strategy(self, symbol: str, category: str, opp: Any) -> None:
         """Create and register a strategy instance with intelligent sizing."""
         from .strategies.ma_crossover import MACrossoverStrategy
@@ -513,12 +561,16 @@ class StrategyAutoDeployer:
         if strategy is None:
             return
 
-        # Inject api_category into strategy default metadata so all intents carry it.
-        # Pipeline bridge reads intent.metadata["category"] to route to correct Bybit API.
-        # 注入 api_category 到策略預設元數據，所有 intent 自動攜帶品類信息。
+        # Inject api_category + leverage into strategy default metadata so all intents carry them.
+        # Pipeline bridge reads intent.metadata["category"] and intent.metadata["leverage"].
+        # 注入 api_category 和 leverage 到策略預設元數據，所有 intent 自動攜帶。
         api_category = getattr(opp, "api_category", "linear")
         if api_category != "linear":
             strategy._default_metadata["category"] = api_category
+
+        # Compute and inject leverage based on category + volatility / 根據品類+波動率計算槓桿
+        leverage = self._compute_leverage(opp)
+        strategy._default_metadata["leverage"] = leverage
 
         # Wave 7a 方案 B：通知 PipelineBridge 登記此 symbol 的 category。
         # Wave 7a Plan B: notify PipelineBridge to register this symbol's category for
@@ -584,14 +636,15 @@ class StrategyAutoDeployer:
             "api_category": _api_cat,
             "strategy_name": unique_name,
             "score": opp.score,
+            "leverage": leverage,
             "deployed_ts_ms": int(time.time() * 1000),
             "reason": _reason,
         }
         self._stats["strategies_deployed"] += 1
 
         logger.info(
-            "Auto-deployed %s for %s (score=%.0f): %s / 自动部署策略",
-            category, symbol, opp.score, _reason,
+            "Auto-deployed %s for %s (score=%.0f, leverage=%.1fx): %s / 自动部署策略",
+            category, symbol, opp.score, leverage, _reason,
         )
 
     def notify_fill(self, strategy_name: str, fill: dict, is_open: bool) -> None:
