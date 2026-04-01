@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Wave 7a Spot 品類啟用 · 3151 tests）
+# 最後更新：2026-04-01（方案 A SymbolCategoryRegistry · 3161 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-3151 passed / 19 pre-existing failed（Wave 7a Spot 品類啟用後）
+3161 passed / 28 failed（方案 A 後；9 個新 failures 為 1aec8ea operator_risk_config.json 載入所致，非本工作引入）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/ program_code/local_model_tools/ -q --tb=no
 ```
@@ -854,12 +854,9 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 - **設計決策**：`docs/decisions/2026-04-01--symbol_category_mapping_design.md`
 - **待辦（Wave 7b）**：方案 A `SymbolCategoryRegistry` 啟動時 API 批量填充；`spot_allow_margin` enforce
 
-### [ ] 方案 A：SymbolCategoryRegistry（長期穩定，Wave 7b 前置）
-- **文件**：新建 `app/symbol_category_registry.py`（或嵌入 pipeline_bridge.py）
-- **內容**：啟動時從 Bybit `/v5/market/instruments-info` 批量填充 linear/spot/inverse 完整映射，TTL 6 小時
-- **接入**：`_startup_integrity_check` soft dep 初始化；填充 `PipelineBridge._symbol_category_map`
-- **同步**：評估 `TradeIntent.metadata["category"]` 改為必填（有 Registry 後才安全）
-- **工時**：3h
+### [x] 方案 A：SymbolCategoryRegistry（長期穩定）
+- ✅ 完成：symbol_category_registry.py 新建；main.py soft dep 初始化；pipeline_bridge.py fallback warning（commit a0f87b6）
+- **待辦（Wave 7b）**：TradeIntent.metadata["category"] 改為必填；分頁支持（spot >1000 symbols）
 
 ---
 
