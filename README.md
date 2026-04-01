@@ -31,30 +31,27 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-01 Phase 3 全部完成 + 訂單解封)
+## 当前状态 (2026-04-01 April 1 Audit Batch 1-6 全部完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,341 passed（Phase 3 全完成 + Governance Auth 修復後）
-API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
+测试:         3,387 passed（April 1 Audit Batch 1-6 全部完成 · +57 新測試）
+API 路由:     126+ 条（含 8 治理 + 5 Scout + 4 實驗 + 2 進化端点）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
-三品類:       ✅ linear / spot / inverse 全部就緒（Wave 7a SPOT-1~5 + Wave 7b INV-1~5）
+三品類:       ✅ linear / spot / inverse 全部就緒
 自动部署:     最优 25 品种自动匹配策略（3% risk/trade，动态qty）
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时 · fail-closed 已验证
-              ✅ 重啟後授權自動補授（startup_integrity_check）· /session/reauth 端點可用
-              ✅ get_status() auth_pending_approval 修復（approve 端點恢復正常）
 H0 Gate:      ✅ 完成（5 check + H0HealthWorker + pipeline 集成 + 94 tests，SLA <5μs）
 H1-H5:        ✅ 全部接通（ThoughtGate + 预算 + ModelRouter + validate_output + CostLogger）
-Phase 2:      ✅ 全完成（TruthSourceRegistry + BacktestEngine + _register_pattern_claims + backtest_routes）
-Phase 3:      ✅ 全完成（ExperimentLedger + EvolutionEngine + TruthSourceRegistry 持久化 + EvolutionScheduler）
-              週日 UTC 00:30 自動策略進化 + GUI 假設實驗狀態 / 進化 dashboard（30s 刷新）
-Wave 7:       ✅ Spot 品類（SPOT-1~5 + 方案A/B）+ Inverse 品類（INV-1~5）+ Demo 同步修復 全完成
-Paper Trading: ✅ 訂單正常流入（授權丟失根因已修復，FARTCOINUSDT 首筆成交）
+Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEngine O(n) 285x加速 + L2 結果快取）
+Phase 3:      ✅ 全完成（ExperimentLedger 持久化 + EvolutionEngine + EvolutionScheduler）
+April 1 審計: ✅ 8 份報告 · 78 項去重 · 6 批次全修復（知識閉環/性能/安全/記憶體/文檔/技術債）
+認證安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 響應頭 + XSS 修復
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
-安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW
+安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（April 1 E3 審計）
 ```
 
 **★ Round 2 冷酷功能审核结论（2026-03-30）**
