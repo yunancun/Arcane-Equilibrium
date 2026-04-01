@@ -31,49 +31,30 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-01 Phase 2 全部完成 + Wave 7 Demo 同步)
+## 当前状态 (2026-04-01 Phase 3 全部完成 + 訂單解封)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,103 passed / 19 pre-existing failed（Phase 2 Batch 2C + Wave 7 完成後，+403 净新增）
+测试:         3,341 passed（Phase 3 全完成 + Governance Auth 修復後）
 API 路由:     126+ 条（含 8 治理 + 5 Scout 端点）
-信号规则:     8 条（4入场 + 2退出 + 1regime + 1divergence）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
-市场扫描:     650+ 交易对每 5 分钟全扫描
-自动部署:     最优 5 品种自动匹配策略
+三品類:       ✅ linear / spot / inverse 全部就緒（Wave 7a SPOT-1~5 + Wave 7b INV-1~5）
+自动部署:     最优 25 品种自动匹配策略（3% risk/trade，动态qty）
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时 · fail-closed 已验证
-              ★ 28 个治理端点 Operator 角色验证全部完整（FA-1 矩阵审计通过）
-Scout:        ScoutAgent + MessageBus 已接入 PipelineBridge（Plan A2 本地代理模式）
-              ★ scout_routes.py 5 个路由 async→sync（消除 event loop 阻塞，P2-NEW-9）
-              ★ ScoutWorker daemon 线程（30min 定時全品種掃描 → produce_intel → Strategist 鏈路）
-H1-H5:        ✅ 全部接通（H1 ThoughtGate + H2 预算门控 + H3 ModelRouter + H4 validate_output + H5 CostLogger）
-              shadow=False 已切換，acquire_lease 前置，H0 Gate fail-closed 已啟用
-              roi_basis:"paper_simulation_only" 标记已加入所有 AI ROI 回传字段
-学习晋升:     L1→L2 自动晋升已接通（PipelineBridge → promote_tier()）
-L1 本地推理:  Ollama 9B（think=False，~1.9s，快速路径）/ 27B（复杂任务，~9.9s，AnalystAgent 周报）
-后台市场流:   BTCUSDT+ETHUSDT 服务启动即常驻，无需等待 Paper/Demo 会话开启
-周报调度:     周三 UTC 0:00 简报（27B Ollama）/ 周日 UTC 0:00 详报（Claude L2）
-胜率修复:     ★ 4/4 根因已修复（edge filter + 止损加宽 + limit order + squeeze 乘数）
-接入率:       19/22 = 86%（Batch 4 审计修正 · 仅 3 模组真正 STANDALONE）
-合规度:       76%（287 条治理规格 · 67 已实施 + 18 部分 + 8 占位 + 2 缺失）
+              ✅ 重啟後授權自動補授（startup_integrity_check）· /session/reauth 端點可用
+              ✅ get_status() auth_pending_approval 修復（approve 端點恢復正常）
+H0 Gate:      ✅ 完成（5 check + H0HealthWorker + pipeline 集成 + 94 tests，SLA <5μs）
+H1-H5:        ✅ 全部接通（ThoughtGate + 预算 + ModelRouter + validate_output + CostLogger）
+Phase 2:      ✅ 全完成（TruthSourceRegistry + BacktestEngine + _register_pattern_claims + backtest_routes）
+Phase 3:      ✅ 全完成（ExperimentLedger + EvolutionEngine + TruthSourceRegistry 持久化 + EvolutionScheduler）
+              週日 UTC 00:30 自動策略進化 + GUI 假設實驗狀態 / 進化 dashboard（30s 刷新）
+Wave 7:       ✅ Spot 品類（SPOT-1~5 + 方案A/B）+ Inverse 品類（INV-1~5）+ Demo 同步修復 全完成
+Paper Trading: ✅ 訂單正常流入（授權丟失根因已修復，FARTCOINUSDT 首筆成交）
+L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
-PaperLiveGate: 已部署（11 项准入评估 + GET/POST API + ChangeAuditLog 联动）
-H0 Gate:      ✅ Day 1+2+3 完成（5 check + H0HealthWorker + pipeline 集成 + API 端點 + 94 tests，SLA <5μs）
-Wave 3:       ✅ 3a/3b/3c 全部完成
-Wave 4:       ✅ Sprint 4a-4e 全部完成（P2-NEW-1~9 + P3-TECH-1~3 + FA-2/3/4）
-Wave 5:       ✅ Sprint 0+5a+5b 全部完成（G-05/G-01 BLOCKER修復 + H1-H5全接通 + ScoutWorker + P14集成測試）
-Wave 6:       ✅ Sprint 0+1a+1b+2 全部完成（TD-1/TD-2原則3閉合 + FA-7原則12接通 + P2-6/7/8/12/15邊界測試 + FA-8 GUI修復）
-              ✅ Cleanup Sprint（H0 stale→False + GovernanceHub.is_globally_enabled() + startup integrity + MessageBus load tests）
-Phase 2:      ✅ Batch 2A TruthSourceRegistry（原則7隔離 · AI信心上限0.85 · 46測試）
-              ✅ Batch 2B BacktestEngine MVP（純函數指標 · _BacktestKlineAdapter no-op · 57測試）
-              ✅ Batch 2C _register_pattern_claims接通 + backtest_routes API + 決策權重集成（+35測試）
-Wave 7:       ✅ Demo 同步修復（Paper 內部平倉路徑自動同步 Demo + stop_session 雙遍歷清倉）
-              ✅ Demo 停止補強（cancel_all_orders 先取消掛單再清倉）
-              🔄 Wave 7a Spot 品類啟用進行中（掃描器 + position category + 保證金邏輯）
-安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（Wave 4 修復後，已知安全问题清零）
-对账边界:     ★ reconciliation_engine NaN/inf/负数qty边界值防护已修复（FA-2，3 BUG + 11 测试）
+安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW
 ```
 
 **★ Round 2 冷酷功能审核结论（2026-03-30）**
