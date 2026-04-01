@@ -1468,7 +1468,7 @@ def _mutator_tick_check_stops(
             engine._sync_close_to_demo(symbol, close_side, close_qty, f"tp_sl:{triggered_reason}")
 
     # Auto-cancel stale working orders (TTL: 24 hours)
-    now_ms_val = int(time.time() * 1000)
+    now_ms_val = now_ms()
     ORDER_TTL_MS = 86_400_000
     for order in state.get("orders", []):
         if order.get("state") in ACTIVE_STATES:
@@ -1531,7 +1531,7 @@ def _mutator_tick_check_stops(
 
         # T7.04: Periodic reconciliation flag (actual HTTP runs OUTSIDE mutator)
         if engine._governance_hub:
-            now_ms_recon = int(time.time() * 1000)
+            now_ms_recon = now_ms()
             last_recon = getattr(engine, '_last_reconciliation_ms', 0)
             if now_ms_recon - last_recon >= 60_000:
                 tick_result["_needs_reconciliation"] = True
@@ -1952,6 +1952,8 @@ class PaperTradingEngine:
             return result
 
         def mutator(state):
+            """Thin dispatcher: validate → execute → return state.
+            薄调度器：验证 → 执行 → 返回 state。"""
             sess = state["session"]
             if sess["session_state"] != SESSION_ACTIVE:
                 raise ValueError(f"Cannot submit order: session is {sess['session_state']}")
@@ -1993,305 +1995,23 @@ class PaperTradingEngine:
                     self._audit(state, "order_oms_create_failed", f"{symbol} {side} OMS error: {e}")
                     return state
 
-            # Transition: created → submitted
-            _transition_order(order, ORDER_STATE_SUBMITTED, oms_sm=_oms)
+            # Phase 1: Validate order (governance, risk, margin)
+            # 阶段 1：验证订单（治理、风控、保证金）
+            rejected = _mutator_validate_order(
+                state, result, order, symbol, side, qty, price, leverage,
+                order_type, category, market_prices, self, _oms,
+            )
+            if rejected is not None:
+                return rejected
 
-            # Governance Hub authorization check (H0 gate) / 治理集線器授權檢查（H0 门）
-            # P0-1 FIX: GovernanceHub=None → fail-closed REJECT (DOC-01 §5.6)
-            # GovernanceHub 为 None → fail-closed 拒绝
-            if self._governance_hub is None:
-                logger.error(
-                    "governance_hub is None — fail-closed REJECT: %s %s",
-                    symbol, side
-                )
-                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                order["reject_reason"] = "governance_hub_unavailable"
-                state["orders"].append(order)
-                result["order"] = order
-                result["rejected_reason"] = "governance_hub_unavailable"
-                self._audit(state, "order_governance_rejected",
-                            f"{symbol} {side} governance_hub unavailable — fail-closed")
-                return state
-
-            if self._governance_hub:
-                try:
-                    if not self._governance_hub.is_authorized():
-                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                        order["reject_reason"] = "governance_not_authorized"
-                        state["orders"].append(order)
-                        result["order"] = order
-                        result["rejected_reason"] = "governance_not_authorized"
-                        self._audit(state, "order_governance_rejected", f"{symbol} {side} not authorized by governance")
-                        return state
-                except Exception as exc:
-                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                    order["reject_reason"] = "governance_check_error"
-                    state["orders"].append(order)
-                    result["order"] = order
-                    result["rejected_reason"] = "governance_check_error"
-                    self._audit(state, "order_governance_error",
-                                f"{symbol} {side} governance error: {exc} — fail-closed")
-                    return state
-
-            # Risk manager pre-order check / 风控管理器下单前检查
-            if self.risk_manager:
-                price_est = price or (market_prices or {}).get(symbol, 0)
-                allowed, reason = self.risk_manager.check_order_allowed(
-                    state, symbol, side, qty, price_est, leverage,
-                    category=category,
-                    market_prices=market_prices,
-                )
-                if not allowed:
-                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                    order["reject_reason"] = reason
-                    state["orders"].append(order)
-                    result["order"] = order
-                    result["rejected_reason"] = reason
-                    self._audit(state, "order_risk_rejected", f"{symbol} {side} qty={qty} reason={reason}")
-                    return state
-
-            # Pre-trade risk check: sufficient balance for margin + fees?
-            # 开仓前风控：余额是否足够覆盖保证金 + 手续费？
-            price_estimate = price or (market_prices or {}).get(symbol, 0)
-            notional = qty * price_estimate
-            # SPOT-3 FIX: 现货品类不使用杠杆保证金，名义价值即所需保证金（全额）
-            # SPOT-3 FIX: Spot category requires full notional as margin (no leverage);
-            # linear/inverse use notional / leverage for margin-based requirement.
-            if category == CATEGORY_SPOT:
-                required_margin = notional
-            else:
-                required_margin = notional / leverage if leverage > 0 else notional
-            estimated_fee = compute_fee(qty, price_estimate)
-            required_total = required_margin + estimated_fee
-            if sess["current_paper_balance_usdt"] < required_total:
-                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                order["reject_reason"] = "insufficient_margin"
-                state["orders"].append(order)
-                result["order"] = order
-                result["rejected_reason"] = "insufficient_margin"
-                self._audit(state, "order_rejected", f"{symbol} {side} qty={qty} reason=insufficient_margin need={required_total:.2f} have={sess['current_paper_balance_usdt']:.2f}")
-                return state
-
-            # Check session halted / 检查 session 是否已熔断
-            if sess.get("session_halted"):
-                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                order["reject_reason"] = "session_halted"
-                state["orders"].append(order)
-                result["order"] = order
-                result["rejected_reason"] = "session_halted"
-                self._audit(state, "order_rejected", f"{symbol} {side} reason=session_halted")
-                return state
-
-            # Governance Hub lease acquisition / 治理集線器租約獲取（在進入 WORKING 前檢查）
-            if self._governance_hub:
-                try:
-                    lease_id = self._governance_hub.acquire_lease(order["order_id"], scope={"symbol": symbol, "side": side})
-                    if not lease_id:
-                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                        order["reject_reason"] = "governance_lease_denied"
-                        state["orders"].append(order)
-                        result["order"] = order
-                        result["rejected_reason"] = "governance_lease_denied"
-                        self._audit(state, "order_governance_lease_denied",
-                                    f"{symbol} {side} lease denied — fail-closed")
-                        return state
-                    order["governance_lease_id"] = lease_id
-                    self._audit(state, "governance_lease_acquired",
-                                f"{order['order_id']} lease={lease_id}")
-
-                    # TTL close-loop: verify the lease has not expired between
-                    # acquire and order execution (TOCTOU guard).
-                    # TTL 閉環：再次確認 lease 尚未在 acquire 後過期（TOCTOU 防護）
-                    # P3-TECH-1: use public get_lease() instead of private _lease_sm.get()
-                    lease_obj = self._governance_hub.get_lease(lease_id)
-                    if lease_obj is not None and not lease_obj.is_within_valid_window:
-                        # Lease expired between acquire and execution — reject order
-                        # Lease 在 acquire 後到執行前已過期 — 拒絕訂單
-                        self._governance_hub.drive_lease_expiry()  # drive state to EXPIRED
-                        _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                        order["reject_reason"] = "governance_lease_expired"
-                        state["orders"].append(order)
-                        result["order"] = order
-                        result["rejected_reason"] = "governance_lease_expired"
-                        self._audit(state, "order_governance_lease_expired",
-                                    f"{symbol} {side} lease={lease_id} expired before execution — fail-closed")
-                        return state
-                except Exception as exc:
-                    _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                    order["reject_reason"] = "governance_lease_error"
-                    state["orders"].append(order)
-                    result["order"] = order
-                    result["rejected_reason"] = "governance_lease_error"
-                    self._audit(state, "order_governance_lease_error",
-                                f"{symbol} {side} lease error: {exc} — fail-closed")
-                    return state
-
-            # Transition: submitted → working
-            _transition_order(order, ORDER_STATE_WORKING, oms_sm=_oms)
-            state["orders"].append(order)
-            result["order"] = order
-            self._audit(state, "order_submitted", f"{order['order_id']} {symbol} {side} {order_type} qty={qty}")
-
-            # TIF enforcement for limit orders / 限价单 TIF 执行
-            # PostOnly: reject if order would fill immediately (guarantees maker fee)
-            # IOC: attempt immediate fill, cancel unfilled remainder
-            # FOK: fill entirely or cancel (simulated: fill if price crosses, else cancel)
-            if order_type == ORDER_TYPE_LIMIT and market_prices and symbol in market_prices:
-                mp = market_prices[symbol]
-                would_fill = should_fill_limit_order(order, mp)
-
-                if time_in_force == TIF_POST_ONLY and would_fill:
-                    _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
-                    order["cancel_reason"] = "post_only_would_fill"
-                    result["order"] = order
-                    result["rejected_reason"] = "post_only_would_fill"
-                    self._audit(state, "order_post_only_canceled", f"{symbol} {side} limit would fill immediately")
-                    return state
-
-                if time_in_force == TIF_FOK:
-                    if would_fill:
-                        fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
-                        fee = compute_fee(qty, fill_price, is_taker=False)
-                        fill_record = execute_fill(order, qty, fill_price, fee)
-                        state["fills"].append(fill_record)
-                        result["fills"].append(fill_record)
-                        _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
-                        state["pnl"]["closed_position_pnl"] += close_pnl
-                        result["close_pnl"] += close_pnl
-                        sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                            sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
-                        )
-                        # Create protective order for newly opened position
-                        if self._protective_order_manager and symbol in state["positions"]:
-                            try:
-                                from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
-                                if side == SIDE_BUY:
-                                    pom_side = ProtectiveOrderSide.LONG_POSITION
-                                else:
-                                    pom_side = ProtectiveOrderSide.SHORT_POSITION
-                                self._protective_order_manager.create_protective_order(
-                                    symbol=symbol,
-                                    side=pom_side,
-                                    order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-                                    entry_price=fill_price,
-                                    trigger_price_pct=2.0,
-                                    quantity=qty,
-                                )
-                                self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
-                            except Exception as e:
-                                logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
-                        self._audit(state, "fok_filled", f"{order['order_id']} price={fill_price:.4f}")
-                    else:
-                        _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
-                        order["cancel_reason"] = "fok_not_fillable"
-                        self._audit(state, "fok_canceled", f"{order['order_id']} price not crossed")
-                    return state
-
-                if time_in_force == TIF_IOC:
-                    if would_fill:
-                        fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
-                        fee = compute_fee(qty, fill_price, is_taker=False)
-                        fill_record = execute_fill(order, qty, fill_price, fee)
-                        state["fills"].append(fill_record)
-                        result["fills"].append(fill_record)
-                        _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price)
-                        state["pnl"]["closed_position_pnl"] += close_pnl
-                        result["close_pnl"] += close_pnl
-                        sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                            sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
-                        )
-                        # Create protective order for newly opened position
-                        if self._protective_order_manager and symbol in state["positions"]:
-                            try:
-                                from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
-                                if side == SIDE_BUY:
-                                    pom_side = ProtectiveOrderSide.LONG_POSITION
-                                else:
-                                    pom_side = ProtectiveOrderSide.SHORT_POSITION
-                                self._protective_order_manager.create_protective_order(
-                                    symbol=symbol,
-                                    side=pom_side,
-                                    order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-                                    entry_price=fill_price,
-                                    trigger_price_pct=2.0,
-                                    quantity=qty,
-                                )
-                                self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
-                            except Exception as e:
-                                logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
-                        self._audit(state, "ioc_filled", f"{order['order_id']} price={fill_price:.4f}")
-                    else:
-                        _transition_order(order, ORDER_STATE_CANCELED, oms_sm=_oms)
-                        order["cancel_reason"] = "ioc_not_fillable"
-                        self._audit(state, "ioc_canceled", f"{order['order_id']} price not crossed")
-                    return state
-
-            # For market orders: immediate fill (dynamic slippage per symbol)
-            # 市場單立即成交（依幣種動態滑點）
-            if order_type == ORDER_TYPE_MARKET and market_prices and symbol in market_prices:
-                mp = market_prices[symbol]
-                fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
-                fee = compute_fee(qty, fill_price, is_taker=True)
-                fill_record = execute_fill(order, qty, fill_price, fee)
-                state["fills"].append(fill_record)
-                result["fills"].append(fill_record)
-
-                # Governance Hub lease release / 治理集線器租約釋放
-                if self._governance_hub and "governance_lease_id" in order:
-                    try:
-                        self._governance_hub.release_lease(order["governance_lease_id"], consumed=True)
-                        self._audit(state, "governance_lease_released", f"{order['order_id']} consumed=true")
-                    except Exception:
-                        import logging as _log
-                        _log.warning("Governance lease release failed (non-fatal) / 租約釋放失敗（非致命）")
-
-                # Update position (pass category + strategy_name so new positions record their source)
-                _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price, category=category, strategy_name=order.get("strategy_name", ""))
-                state["pnl"]["closed_position_pnl"] += close_pnl
-                result["close_pnl"] += close_pnl
-
-                # Create protective order for newly opened position
-                if self._protective_order_manager and symbol in state["positions"]:
-                    try:
-                        from .protective_order_manager import ProtectiveOrderSide, ProtectiveOrderType
-                        # Map paper trading side to protective order side
-                        if side == SIDE_BUY:
-                            pom_side = ProtectiveOrderSide.LONG_POSITION
-                        else:
-                            pom_side = ProtectiveOrderSide.SHORT_POSITION
-                        self._protective_order_manager.create_protective_order(
-                            symbol=symbol,
-                            side=pom_side,
-                            order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-                            entry_price=fill_price,
-                            trigger_price_pct=2.0,  # 2% below entry
-                            quantity=qty,
-                        )
-                        self._audit(state, "protective_order_created", f"{symbol} {side} qty={qty}")
-                    except Exception as e:
-                        logger.error("Failed to create protective order: %s (non-fatal for paper)", e)
-
-                # Update balance
-                sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                    sess["current_paper_balance_usdt"], side, qty, fill_price, fee, leverage
-                )
-
-                # Update PnL
-                self._recompute_pnl(state)
-                self._audit(state, "order_filled", f"{order['order_id']} price={fill_price:.4f} fee={fee:.6f}")
-
-                # Batch 10: OMS SM-03 post-fill reconciliation (FILLED→RECONCILING→COMPLETED)
-                _oms_complete_reconciliation(order, _oms)
-
-            # C2 fix: If market order could not be filled immediately (no market price), reject it
-            # Market orders stuck in WORKING will never fill via tick(), so reject now.
-            if order_type == ORDER_TYPE_MARKET and order["state"] == ORDER_STATE_WORKING:
-                _transition_order(order, ORDER_STATE_REJECTED, oms_sm=_oms)
-                order["reject_reason"] = "no_market_price"
-                result["order"] = order
-                result["rejected_reason"] = "no_market_price"
-                self._audit(state, "order_rejected", f"{symbol} {side} market order: no market price available")
-                return state
+            # Phase 2: Execute order (TIF enforcement, fills, position updates)
+            # 阶段 2：执行订单（TIF 执行、成交、持仓更新）
+            early_return = _mutator_execute_order(
+                state, result, order, symbol, side, qty, price, leverage,
+                order_type, time_in_force, category, market_prices, self, _oms,
+            )
+            if early_return is not None:
+                return early_return
 
             return state
 
@@ -2365,256 +2085,25 @@ class PaperTradingEngine:
             return tick_result  # Silent no-op at L0 (gate not yet initialized to L1)
 
         def mutator(state):
+            """Thin dispatcher: check fills → update prices → check stops → return state.
+            薄调度器：检查成交 → 更新价格 → 检查止损 → 返回 state。
+            Order matches original: fills first, then unrealized PnL update, then risk checks.
+            顺序与原始一致：先成交，再更新未实现 PnL，最后风控检查。"""
             sess = state["session"]
             if sess["session_state"] != SESSION_ACTIVE:
                 return state
 
-            for order in state["orders"]:
-                if order["state"] not in ACTIVE_STATES:
-                    continue
+            # Phase 1: Check conditional triggers and limit order fills
+            # 阶段 1：检查条件单触发和限价单成交
+            _mutator_tick_check_fills(state, tick_result, market_prices, self)
 
-                symbol = order["symbol"]
-                mp = market_prices.get(symbol)
-                if mp is None:
-                    continue
-                otype = order["order_type"]
+            # Phase 2: Update unrealized PnL from current market prices
+            # 阶段 2：从当前市价更新未实现 PnL（必须在风控检查前执行）
+            _mutator_tick_update_prices(state, market_prices, self)
 
-                # ── Conditional order trigger check / 条件单触发检查 ──
-                if otype == ORDER_TYPE_CONDITIONAL and not order.get("triggered"):
-                    tp = order.get("trigger_price")
-                    if tp is not None:
-                        triggered = False
-                        if order["side"] == SIDE_BUY and mp >= tp:
-                            triggered = True
-                        elif order["side"] == SIDE_SELL and mp <= tp:
-                            triggered = True
-                        if triggered:
-                            order["triggered"] = True
-                            # Conditional becomes market fill at trigger
-                            fill_qty = order["remaining_qty"]
-                            fill_price = compute_fill_price(
-                                {**order, "order_type": ORDER_TYPE_MARKET}, mp,
-                                slippage_rate=self._get_slippage(symbol),
-                            )
-                            fee = compute_fee(fill_qty, fill_price, is_taker=True)
-                            fill_record = execute_fill(order, fill_qty, fill_price, fee)
-                            state["fills"].append(fill_record)
-                            tick_result["fills"].append(fill_record)
-                            tick_result["orders_filled"] += 1
-                            _, close_pnl = project_position_after_fill(
-                                state["positions"], symbol, order["side"], fill_qty, fill_price
-                            )
-                            state["pnl"]["closed_position_pnl"] += close_pnl
-                            sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                                sess["current_paper_balance_usdt"], order["side"],
-                                fill_qty, fill_price, fee, order.get("leverage", 1.0)
-                            )
-                            self._audit(state, "conditional_triggered", f"{order['order_id']} trigger={tp} market={mp:.2f}")
-                            if self.risk_manager and close_pnl != 0:
-                                self.risk_manager.record_fill_result(close_pnl)
-                                self.risk_manager.clear_trailing_stop(symbol)
-                    continue
-
-                # ── Limit order fill check / 限价单成交检查 ──
-                if otype == ORDER_TYPE_LIMIT and should_fill_limit_order(order, mp):
-                    fill_qty = compute_partial_fill_qty(order, mp, rng=self._partial_fill_rng)
-                    fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
-                    # Resting limit orders are always maker fee / 挂单限价单始终 maker 费率
-                    fee = compute_fee(fill_qty, fill_price, is_taker=False)
-                    fill_record = execute_fill(order, fill_qty, fill_price, fee)
-                    state["fills"].append(fill_record)
-                    tick_result["fills"].append(fill_record)
-                    tick_result["orders_filled"] += 1
-
-                    _, close_pnl = project_position_after_fill(
-                        state["positions"], symbol, order["side"], fill_qty, fill_price
-                    )
-                    state["pnl"]["closed_position_pnl"] += close_pnl
-                    sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                        sess["current_paper_balance_usdt"], order["side"],
-                        fill_qty, fill_price, fee, order.get("leverage", 1.0)
-                    )
-                    self._audit(state, "limit_fill", f"{order['order_id']} price={fill_price:.4f}")
-                    if self.risk_manager and close_pnl != 0:
-                        self.risk_manager.record_fill_result(close_pnl)
-                        if symbol not in state["positions"]:
-                            self.risk_manager.clear_trailing_stop(symbol)
-
-            # ── Order-level TP/SL check / 订单级止盈止损检查 ──
-            for order in state["orders"]:
-                if order["state"] not in TERMINAL_STATES:
-                    continue
-                if order["state"] != ORDER_STATE_FILLED:
-                    continue
-                tp_sl = order.get("tp_sl")
-                if not tp_sl or tp_sl.get("_triggered"):
-                    continue
-                symbol = order["symbol"]
-                pos = state["positions"].get(symbol)
-                if not pos:
-                    continue
-                mp = market_prices.get(symbol)
-                if mp is None:
-                    continue
-
-                tp_price = tp_sl.get("take_profit")
-                sl_price = tp_sl.get("stop_loss")
-                triggered_reason = None
-
-                if tp_price is not None:
-                    if (pos["side"] == SIDE_BUY and mp >= tp_price) or \
-                       (pos["side"] == SIDE_SELL and mp <= tp_price):
-                        triggered_reason = f"order_tp_{tp_price}"
-
-                if sl_price is not None and triggered_reason is None:
-                    if (pos["side"] == SIDE_BUY and mp <= sl_price) or \
-                       (pos["side"] == SIDE_SELL and mp >= sl_price):
-                        triggered_reason = f"order_sl_{sl_price}"
-
-                if triggered_reason:
-                    tp_sl["_triggered"] = True
-                    close_side = SIDE_SELL if pos["side"] == SIDE_BUY else SIDE_BUY
-                    close_qty = pos["qty"]
-                    # Dynamic slippage for TP/SL close / TP/SL 平倉使用動態滑點
-                    _slip = self._get_slippage(symbol)
-                    fp = mp * (1 + _slip) if close_side == SIDE_BUY else mp * (1 - _slip)
-                    fee = compute_fee(close_qty, fp, is_taker=True)
-                    close_order = create_paper_order(symbol, close_side, ORDER_TYPE_MARKET, close_qty)
-                    _transition_order(close_order, ORDER_STATE_SUBMITTED)
-                    _transition_order(close_order, ORDER_STATE_WORKING)
-                    fill_record = execute_fill(close_order, close_qty, fp, fee)
-                    state["orders"].append(close_order)
-                    state["fills"].append(fill_record)
-                    tick_result["fills"].append(fill_record)
-                    _, close_pnl = project_position_after_fill(
-                        state["positions"], symbol, close_side, close_qty, fp
-                    )
-                    state["pnl"]["closed_position_pnl"] += close_pnl
-                    sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                        sess["current_paper_balance_usdt"], close_side, close_qty, fp, fee, 1.0
-                    )
-                    self._audit(state, "tp_sl_triggered", f"{order['order_id']} {triggered_reason}")
-                    if self.risk_manager:
-                        self.risk_manager.record_fill_result(close_pnl)
-                        self.risk_manager.clear_trailing_stop(symbol)
-                    # Sync to Demo — tp_sl bypasses PipelineBridge
-                    # TP/SL 觸發繞過 PipelineBridge，需手動同步 Demo
-                    self._sync_close_to_demo(symbol, close_side, close_qty, f"tp_sl:{triggered_reason}")
-
-            # Auto-cancel stale working orders (TTL: 24 hours)
-            # 自动取消过期的挂单（TTL: 24 小时）
-            now_ms_val = now_ms()
-            ORDER_TTL_MS = 86_400_000  # 24 hours
-            for order in state.get("orders", []):
-                if order.get("state") in ACTIVE_STATES:
-                    created = order.get("created_ts_ms", 0)
-                    if created > 0 and (now_ms_val - created) > ORDER_TTL_MS:
-                        _transition_order(order, ORDER_STATE_CANCELED)
-                        order["cancel_reason"] = "ttl_expired"
-                        self._audit(state, "order_ttl_canceled", f"{order.get('symbol')} {order.get('side')} order expired after 24h")
-
-            # Update unrealized PnL
-            update_unrealized_pnl(state["positions"], market_prices)
-            self._recompute_pnl(state)
-
-            # Risk manager tick checks / 风控管理器 tick 检查
-            if self.risk_manager:
-                # T2.01: Record market prices for portfolio risk correlation tracking
-                self.risk_manager.record_market_prices_for_portfolio_risk(market_prices)
-                close_orders = self.risk_manager.check_positions_on_tick(state, market_prices)
-                for co in close_orders:
-                    sym = co["symbol"]
-                    pos = state["positions"].get(sym)
-                    if not pos:
-                        continue
-                    close_side = SIDE_SELL if pos["side"] == SIDE_BUY else SIDE_BUY
-                    close_qty = co.get("qty", pos["qty"])
-                    mp = market_prices.get(sym)
-                    if mp is None:
-                        continue
-                    # Market close with dynamic slippage / 市場平倉使用動態滑點
-                    _slip = self._get_slippage(sym)
-                    if close_side == SIDE_BUY:
-                        fp = mp * (1 + _slip)
-                    else:
-                        fp = mp * (1 - _slip)
-                    fee = compute_fee(close_qty, fp, is_taker=True)
-                    close_order = create_paper_order(sym, close_side, ORDER_TYPE_MARKET, close_qty)
-                    _transition_order(close_order, ORDER_STATE_SUBMITTED)
-                    _transition_order(close_order, ORDER_STATE_WORKING)
-                    fill_record = execute_fill(close_order, close_qty, fp, fee)
-                    state["orders"].append(close_order)
-                    state["fills"].append(fill_record)
-                    tick_result["fills"].append(fill_record)
-                    _, close_pnl = project_position_after_fill(
-                        state["positions"], sym, close_side, close_qty, fp
-                    )
-                    state["pnl"]["closed_position_pnl"] += close_pnl
-                    sess["current_paper_balance_usdt"] = project_balance_after_fill(
-                        sess["current_paper_balance_usdt"], close_side, close_qty, fp, fee, 1.0
-                    )
-                    self._audit(state, "risk_auto_close", f"{sym} reason={co['reason']}")
-                    self.risk_manager.record_fill_result(close_pnl)
-                    self.risk_manager.clear_trailing_stop(sym)
-                    # Sync to Demo — risk_auto_close bypasses PipelineBridge
-                    # 風控自動平倉繞過 PipelineBridge，需手動同步 Demo
-                    self._sync_close_to_demo(sym, close_side, close_qty, f"risk_auto_close:{co['reason']}")
-
-                # T3.03: Check protective orders on tick (last line of defense)
-                if self._protective_order_manager:
-                    try:
-                        market_state = {sym: {"price": p} for sym, p in market_prices.items()}
-                        pom_result = self._protective_order_manager.check_triggers(market_state)
-                        if pom_result and pom_result.triggered_orders:
-                            for trig_order in pom_result.triggered_orders:
-                                self._audit(state, "protective_order_triggered",
-                                    f"{trig_order.symbol} type={trig_order.order_type.value} trigger_price={trig_order.trigger_price}")
-                    except Exception as e:
-                        logger.error("ProtectiveOrderManager check_triggers error: %s (non-fatal)", e)
-
-                # T7.04: Periodic reconciliation — moved OUTSIDE mutator to avoid
-                # holding _lock during Demo API HTTP calls (which caused service hangs).
-                # T7.04：定期對賬已移至 mutator 外部，避免在持有 _lock 時做 Demo API HTTP
-                # 調用（此前會導致服務 hang）。標記需要對賬，在 mutate() 之後執行。
-                if self._governance_hub:
-                    now_ms_recon = now_ms()
-                    last_recon = getattr(self, '_last_reconciliation_ms', 0)
-                    if now_ms_recon - last_recon >= 60_000:
-                        tick_result["_needs_reconciliation"] = True
-                        self._last_reconciliation_ms = now_ms_recon
-
-                # Session drawdown circuit breaker
-                peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
-                current = sess.get("current_paper_balance_usdt", 0)
-                if peak > 0:
-                    dd_pct = ((peak - current) / peak) * 100
-                    if dd_pct >= self.risk_manager.config.max_session_drawdown_pct:
-                        if not sess.get("session_halted"):
-                            sess["session_halted"] = True
-                            sess["session_halt_reason"] = f"max_drawdown_{dd_pct:.1f}pct"
-                            self._audit(state, "session_halted", f"drawdown={dd_pct:.1f}%")
-                            # T3.06: Record session halt in audit log
-                            if self._change_audit_log:
-                                try:
-                                    from .change_audit_log import ChangeType
-                                    self._change_audit_log.record_change(
-                                        change_type=ChangeType.STATE_CHANGE,
-                                        who="system",
-                                        what="Session halted due to drawdown limit exceeded",
-                                        reason=f"Drawdown {dd_pct:.1f}% exceeded limit {self.risk_manager.config.max_session_drawdown_pct:.1f}%",
-                                        new_value={"session_halted": True, "halt_reason": sess["session_halt_reason"]},
-                                        affected_components=["PaperTradingEngine", "RiskManager"],
-                                        auto_approve=True,
-                                    )
-                                except Exception as e:
-                                    logger.error("Failed to record session halt in audit log: %s (non-fatal)", e)
-
-                # Re-recompute PnL after risk closes
-                if close_orders:
-                    self._recompute_pnl(state)
-
-                # Persist risk state
-                state["risk"] = self.risk_manager.get_risk_state_for_persistence()
+            # Phase 3: Check TP/SL, stale orders, risk manager, drawdown breaker
+            # 阶段 3：检查止盈止损、过期订单、风控、回撤熔断
+            _mutator_tick_check_stops(state, tick_result, market_prices, self)
 
             return state
 
