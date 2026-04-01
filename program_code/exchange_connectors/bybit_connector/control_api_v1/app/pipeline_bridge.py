@@ -298,40 +298,50 @@ class PipelineBridge:
         self._active = True
         logger.info("PipelineBridge activated / 管线桥接器已激活")
 
-        # Bootstrap historical klines on activation (eliminates cold-start blind period)
-        # 激活时引导历史 K线（消除冷启动盲期）
+        # Bootstrap in background thread to avoid blocking the async event loop.
+        # Previously this ran synchronously and blocked ALL API requests during startup
+        # (8-120+ HTTP calls to Bybit, each ~1-2s) — causing GUI freeze after restart.
+        # 在背景線程中引導，避免阻塞 async 事件循環。
+        # 之前同步執行會阻塞啟動時所有 API 請求（8-120+ 個 HTTP 調用）— 導致重啟後 GUI 卡死。
+        import threading
+        threading.Thread(
+            target=self._bootstrap_historical_data,
+            daemon=True,
+            name="bridge-bootstrap",
+        ).start()
+        logger.info("Kline+ATR bootstrap started in background / K線+ATR 引導已在背景啟動")
+
+    def _bootstrap_historical_data(self) -> None:
+        """
+        Bootstrap klines + ATR in background thread (non-blocking).
+        在背景線程中引導 K 線 + ATR（不阻塞事件循環）。
+        """
+        # 1. Bootstrap historical klines
         try:
             results = self._km.bootstrap_from_rest(limit=200)
             total = sum(results.values()) if results else 0
             if total > 0:
-                logger.info(
-                    "Kline bootstrap loaded %d klines / K线引导加载了 %d 根",
-                    total, total,
-                )
+                logger.info("Kline bootstrap loaded %d klines / K线引导加载了 %d 根", total, total)
         except Exception:
             logger.exception("Kline bootstrap failed (non-fatal) / K线引导失败（非致命）")
 
-        # Bootstrap ATR price history from klines so risk manager has ATR immediately
-        # 从 K线引导 ATR 价格历史，使风控管理器立即拥有 ATR 数据
+        # 2. Bootstrap ATR price history from klines
         try:
             if self._engine and hasattr(self._engine, "risk_manager") and self._engine.risk_manager:
                 tracker = self._engine.risk_manager._price_tracker
                 bootstrapped_total = 0
                 for symbol in (self._km.get_tracked_symbols() if hasattr(self._km, "get_tracked_symbols") else []):
-                    # Use 5m klines — good balance of granularity vs coverage
-                    # 使用 5 分钟 K线 — 颗粒度与覆盖范围的良好平衡
                     buf = self._km.get_buffer(symbol, "5m")
                     if buf and len(buf) > 0:
                         klines_data = buf.latest(60)
                         count = tracker.bootstrap_from_klines(symbol, klines_data)
                         bootstrapped_total += count
                 if bootstrapped_total > 0:
-                    logger.info(
-                        "ATR bootstrap seeded %d price points / ATR 引导注入 %d 个价格点",
-                        bootstrapped_total, bootstrapped_total,
-                    )
+                    logger.info("ATR bootstrap seeded %d price points / ATR 引导注入 %d 个价格点", bootstrapped_total, bootstrapped_total)
         except Exception:
             logger.exception("ATR bootstrap failed (non-fatal) / ATR 引导失败（非致命）")
+
+        logger.info("Background bootstrap complete / 背景引導完成")
 
         # Restore strategy state if available / 恢复策略状态
         try:
