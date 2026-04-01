@@ -496,6 +496,14 @@ class PipelineBridge:
             self._last_l2_cron_ts = _now
             self._try_l2_cron_trigger(_now)
 
+        # 4.7 Dynamic risk adjustment: update risk_per_trade_pct from Sharpe (every 5 min)
+        # 動態風控：根據 Sharpe 更新 risk_per_trade_pct（每 5 分鐘）
+        if self._auto_deployer:
+            try:
+                self._auto_deployer.update_risk_from_sharpe()
+            except Exception:
+                pass  # Non-fatal / 非致命
+
         # 5. Process pending intents -> submit to paper engine
         if self._auto_submit:
             self._process_pending_intents()

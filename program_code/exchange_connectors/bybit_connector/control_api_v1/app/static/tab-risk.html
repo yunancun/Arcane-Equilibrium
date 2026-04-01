@@ -168,6 +168,36 @@
   </div>
 </div>
 
+<!-- ═══ Dynamic Auto-Adjustment Toggles / 自動動態調整開關 ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+  <h3>&#x2699; 自动动态调整 / Auto Dynamic Adjustment</h3>
+  <div class="subtitle">Agent 自主调节的功能开关 — 关闭后恢复为手动设定值</div>
+  <div id="explain-auto-adjust"></div>
+  <div style="display:grid;gap:12px;margin-top:10px">
+    <!-- Dynamic Risk (Sharpe-based) -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
+      <div>
+        <div style="font-size:13px;font-weight:600">Sharpe 动态风控 / Dynamic Risk Sizing</div>
+        <div style="font-size:10px;color:var(--text-dim)">根据 Sharpe 比率自动调整每笔风险比例（需 50+ 笔交易数据）</div>
+        <div style="font-size:10px;margin-top:2px">
+          当前: <strong id="dr-current-risk">--</strong>% (基准 <span id="dr-base-risk">--</span>%)
+          | 状态: <span id="dr-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
+        </div>
+      </div>
+      <label class="pf-toggle"><input type="checkbox" id="dr-toggle" onchange="toggleDynamicRisk()"><span class="slider"></span></label>
+    </div>
+    <!-- Dynamic Leverage (Volatility-based) -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
+      <div>
+        <div style="font-size:13px;font-weight:600">波动率自动杠杆 / Auto Leverage (Volatility)</div>
+        <div style="font-size:10px;color:var(--text-dim)">部署策略时根据品类和波动率自动设定杠杆（始终在硬上限内）</div>
+        <div style="font-size:10px;margin-top:2px">规则: spot=1x, linear 基准5x, inverse 基准3x; 高波动自动降低</div>
+      </div>
+      <span class="oc-chip oc-chip-good" style="font-size:10px">始终启用</span>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ AI Stop-Loss Consultation ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
   <h3>&#x1F916; AI 止损建议 / AI Stop-Loss Consultation</h3>
@@ -614,8 +644,33 @@ async function loadAIContext() {
   ocSetHtml('ai-risk-body', html);
 }
 
+async function loadDynamicRisk() {
+  const d = await ocApi('/api/v1/strategy/dynamic-risk/status');
+  if (!d || !d.data) return;
+  const dr = d.data;
+  document.getElementById('dr-toggle').checked = dr.enabled;
+  ocSetText('dr-current-risk', (dr.current_risk_pct || 0).toFixed(1));
+  ocSetText('dr-base-risk', (dr.base_risk_pct || 0).toFixed(1));
+  const statusEl = document.getElementById('dr-status');
+  if (!dr.enabled) { statusEl.textContent = '已禁用'; statusEl.className = 'oc-chip oc-chip-neutral'; }
+  else if (dr.active) { statusEl.textContent = '运行中'; statusEl.className = 'oc-chip oc-chip-good'; }
+  else { statusEl.textContent = '等待数据(' + dr.min_trades + '笔)'; statusEl.className = 'oc-chip oc-chip-warn'; }
+}
+
+async function toggleDynamicRisk() {
+  const enabled = document.getElementById('dr-toggle').checked;
+  const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled });
+  if (d) { ocToast(enabled ? '动态风控已启用' : '动态风控已禁用', 'success'); loadDynamicRisk(); }
+  else { ocToast('设置失败', 'error'); }
+}
+
+$('explain-auto-adjust').innerHTML = ocExplain(
+  'Agent 根据交易表现自动调整参数。Sharpe 动态风控在累积足够数据后自动启用，表现好时增加风险，表现差时自动缩减。',
+  'Sharpe 动态风控调整 risk_per_trade_pct（每笔风险比例），与 ATR 止损互补：Sharpe 管「投多少」，ATR 管「止损放多远」。Sharpe>1 时逐步加仓（最高 5%），Sharpe<0 时逐步减仓（最低 1%），每次最多 ±0.5%，每 5 分钟调一次。需要 50 笔以上交易数据才会启用。'
+);
+
 async function loadAll() {
-  await Promise.allSettled([loadRiskGovernor(), loadRiskStatus(), loadRiskConfig(), loadAIContext()]);
+  await Promise.allSettled([loadRiskGovernor(), loadRiskStatus(), loadRiskConfig(), loadAIContext(), loadDynamicRisk()]);
 }
 
 loadAll();

@@ -104,6 +104,21 @@ class StrategyAutoDeployer:
         # Optional; if None, category registration is silently skipped (non-blocking).
         self._pipeline_bridge: Any = None
 
+        # ── Dynamic risk adjustment (Sharpe-based) / 動態風控調整（基於 Sharpe） ──
+        # Adjusts risk_per_trade_pct based on portfolio Sharpe ratio.
+        # Auto-enables when sufficient trade data is available (>= 50 round trips).
+        # 根據組合 Sharpe 比率調整 risk_per_trade_pct。
+        # 當交易數據足夠時（>= 50 筆往返）自動啟用。
+        self._dynamic_risk_enabled: bool = True  # Master toggle / 主開關
+        self._dynamic_risk_active: bool = False   # True when enough data / 數據充足時為 True
+        self._base_risk_pct: float = risk_per_trade_pct  # Original value, never mutated / 原始值，不可變
+        self._min_trades_for_dynamic: int = 50    # Minimum round trips before activation / 啟用前最少交易數
+        self._risk_pct_floor: float = 1.0         # Absolute minimum / 絕對下限
+        self._risk_pct_ceil: float = 5.0          # Absolute maximum / 絕對上限
+        self._risk_adjust_step: float = 0.5       # Max change per adjustment / 每次最大調幅
+        self._last_risk_adjust_ts: float = 0.0    # Timestamp of last adjustment / 上次調整時間
+        self._risk_adjust_interval: float = 300.0  # Adjust at most every 5 min / 最多每 5 分鐘調一次
+
     # ── Portfolio position evaluation ──
 
     def _get_open_positions(self) -> dict[str, Any]:
@@ -445,6 +460,122 @@ class StrategyAutoDeployer:
             symbol, balance, score, allocated_usdt, qty,
         )
         return qty
+
+    # ── Dynamic Risk Adjustment (Sharpe-based) / 動態風控調整 ──
+
+    def update_risk_from_sharpe(self) -> None:
+        """
+        Periodically adjust risk_per_trade_pct based on portfolio Sharpe ratio.
+        定期根據組合 Sharpe 比率調整 risk_per_trade_pct。
+
+        Rules:
+        - Disabled if _dynamic_risk_enabled=False (master toggle)
+        - Only activates when return_count >= 50 (enough data)
+        - Sharpe > 1.0: gradually increase risk (good performance)
+        - Sharpe 0~1.0: maintain base risk (neutral)
+        - Sharpe < 0: gradually decrease risk (losing)
+        - Max ±0.5% per adjustment, clamped to [1%, 5%]
+        - Adjusts at most every 5 minutes (damping)
+
+        規則：
+        - _dynamic_risk_enabled=False 時完全禁用（主開關）
+        - 僅在 return_count >= 50 時啟用（數據充足）
+        - Sharpe > 1.0：逐步增加風險（表現好）
+        - Sharpe 0~1.0：維持基準（中性）
+        - Sharpe < 0：逐步降低風險（虧損中）
+        - 每次最多 ±0.5%，鉗位在 [1%, 5%]
+        - 最多每 5 分鐘調一次（阻尼）
+        """
+        if not self._dynamic_risk_enabled:
+            return
+        if not self._engine:
+            return
+
+        now = time.time()
+        if now - self._last_risk_adjust_ts < self._risk_adjust_interval:
+            return
+        self._last_risk_adjust_ts = now
+
+        # Get Sharpe data from paper engine
+        try:
+            from exchange_connectors.bybit_connector.control_api_v1.app.paper_trading_metrics import (
+                compute_sharpe_ratio,
+            )
+            state = self._engine.get_state()
+            fills = state.get("fills", [])
+            session = state.get("session", {})
+            initial_balance = session.get("initial_paper_balance_usdt", 1000.0)
+            pnl = state.get("pnl")
+
+            sharpe_data = compute_sharpe_ratio(fills, initial_balance, pnl)
+        except Exception as e:
+            logger.debug("Dynamic risk: could not compute Sharpe: %s", e)
+            return
+
+        return_count = sharpe_data.get("return_count", 0)
+        sharpe = sharpe_data.get("sharpe_ratio", 0.0)
+        note = sharpe_data.get("note", "")
+
+        # Not enough data → stay inactive, use base risk / 數據不足 → 不啟用，用基準值
+        if return_count < self._min_trades_for_dynamic or note in ("insufficient_data", "insufficient_returns", "zero_volatility"):
+            if self._dynamic_risk_active:
+                # Was active but data became stale → revert to base / 曾啟用但數據過期 → 恢復基準
+                self._risk_pct = self._base_risk_pct
+                self._dynamic_risk_active = False
+                logger.info("Dynamic risk deactivated (data stale): reverting to base %.1f%% / 動態風控停用，恢復基準", self._base_risk_pct)
+            return
+
+        self._dynamic_risk_active = True
+
+        # Compute target risk_pct based on Sharpe / 根據 Sharpe 計算目標 risk_pct
+        if sharpe > 1.0:
+            # Strong performance → increase toward ceil / 表現好 → 向上限靠近
+            target = self._base_risk_pct + min(sharpe - 1.0, 2.0)  # +1% per Sharpe above 1.0, max +2%
+        elif sharpe >= 0:
+            # Neutral → stay at base / 中性 → 維持基準
+            target = self._base_risk_pct
+        else:
+            # Losing → decrease toward floor / 虧損 → 向下限靠近
+            target = self._base_risk_pct + max(sharpe, -2.0)  # -1% per Sharpe below 0, max -2%
+
+        target = max(self._risk_pct_floor, min(target, self._risk_pct_ceil))
+
+        # Damped adjustment: max ±step per interval / 阻尼調整：每次最多 ±step
+        old = self._risk_pct
+        delta = target - old
+        if abs(delta) > self._risk_adjust_step:
+            delta = self._risk_adjust_step if delta > 0 else -self._risk_adjust_step
+        new_risk = max(self._risk_pct_floor, min(old + delta, self._risk_pct_ceil))
+
+        if abs(new_risk - old) > 0.01:
+            self._risk_pct = new_risk
+            logger.info(
+                "Dynamic risk adjusted: %.1f%% → %.1f%% (Sharpe=%.2f, trades=%d) / 動態風控調整",
+                old, new_risk, sharpe, return_count,
+            )
+
+    def get_dynamic_risk_status(self) -> dict[str, Any]:
+        """Get current dynamic risk adjustment status / 獲取動態風控調整狀態"""
+        return {
+            "enabled": self._dynamic_risk_enabled,
+            "active": self._dynamic_risk_active,
+            "base_risk_pct": self._base_risk_pct,
+            "current_risk_pct": self._risk_pct,
+            "floor": self._risk_pct_floor,
+            "ceil": self._risk_pct_ceil,
+            "min_trades": self._min_trades_for_dynamic,
+        }
+
+    def set_dynamic_risk_enabled(self, enabled: bool) -> None:
+        """Toggle dynamic risk adjustment / 切換動態風控調整開關"""
+        self._dynamic_risk_enabled = enabled
+        if not enabled:
+            # Revert to base when disabled / 禁用時恢復基準
+            self._risk_pct = self._base_risk_pct
+            self._dynamic_risk_active = False
+            logger.info("Dynamic risk DISABLED: reverting to base %.1f%% / 動態風控已禁用", self._base_risk_pct)
+        else:
+            logger.info("Dynamic risk ENABLED / 動態風控已啟用")
 
     def compute_dynamic_qty(self, symbol: str, price: float) -> float:
         """

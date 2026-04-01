@@ -1588,3 +1588,39 @@ async def get_auto_deployed(actor: base.AuthenticatedActor = Depends(base.curren
         })
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/dynamic-risk/status")
+async def get_dynamic_risk_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """
+    Get dynamic risk adjustment status (Sharpe-based).
+    获取动态风控调整状态（基于 Sharpe）。
+    """
+    if AUTO_DEPLOYER is None:
+        return _envelope({"enabled": False, "active": False, "available": False})
+    try:
+        return _envelope(AUTO_DEPLOYER.get_dynamic_risk_status())
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.post("/dynamic-risk/toggle")
+async def toggle_dynamic_risk(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    Toggle dynamic risk adjustment on/off.
+    切换动态风控调整开关。
+    """
+    if AUTO_DEPLOYER is None:
+        raise HTTPException(status_code=404, detail="Auto deployer not available")
+    try:
+        body = await request.json()
+        enabled = bool(body.get("enabled", False))
+        AUTO_DEPLOYER.set_dynamic_risk_enabled(enabled)
+        return _envelope({"enabled": enabled, "message": "Dynamic risk " + ("enabled" if enabled else "disabled")})
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
