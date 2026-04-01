@@ -1,3 +1,6 @@
+> ⚠️ FROZEN — 本文件為歷史提取物，內容已整合至後續文檔。僅供歷史參考，不再更新。
+> ⚠️ FROZEN — This file is a historical extract. Content has been consolidated into later documents. For reference only.
+
 # OpenClaw / Bybit Trading Agent - Governance Documentation Index
 
 **Generated:** 2026-03-30

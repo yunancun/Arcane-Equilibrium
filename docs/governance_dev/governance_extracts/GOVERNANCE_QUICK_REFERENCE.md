@@ -1,3 +1,6 @@
+> ⚠️ FROZEN — 本文件為歷史提取物，內容已整合至後續文檔。僅供歷史參考，不再更新。
+> ⚠️ FROZEN — This file is a historical extract. Content has been consolidated into later documents. For reference only.
+
 # OpenClaw ByBit Governance - Quick Reference Guide
 
 ## 16 Root Principles (DOC-01 §5.1–§5.16)

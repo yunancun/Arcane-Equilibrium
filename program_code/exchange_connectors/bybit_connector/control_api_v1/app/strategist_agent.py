@@ -42,7 +42,7 @@ import threading
 import time
 import uuid
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from .multi_agent_framework import (
@@ -55,136 +55,14 @@ from .multi_agent_framework import (
     MessageType,
     TradeIntent,
 )
+from .strategist_models import (  # noqa: F401 — re-export for backward compatibility
+    EdgeEvaluation,
+    StrategistConfig,
+    _heuristic_evaluate,
+    _parse_sentiment,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Configuration / 配置
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class StrategistConfig:
-    """Configuration for StrategistAgent / StrategistAgent 配置"""
-    # Minimum confidence threshold to produce a TradeIntent
-    # 产出 TradeIntent 的最低置信度阈值
-    min_confidence: float = 0.4
-    # Minimum relevance score from Scout intel to consider
-    # Scout 情报的最低相关性分数
-    min_relevance: float = 0.3
-    # Maximum age of intel to evaluate (seconds)
-    # 情报的最大可接受年龄（秒）
-    max_intel_age_seconds: int = 300
-    # Default position size (BTC)
-    # 默认仓位大小
-    default_size: float = 0.001
-    # Shadow mode: log only, do not produce intents to bus
-    # 影子模式：仅记录日志，不产出 intent 到消息总线
-    shadow: bool = True
-    # Maximum pending intents to buffer
-    # 最大待处理 intent 缓冲数
-    max_pending_intents: int = 50
-    # Heuristic thresholds for fallback evaluation
-    # 回退评估的启发式阈值
-    heuristic_min_relevance: float = 0.6
-    heuristic_min_freshness: int = 120  # seconds
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Heuristic Edge Evaluation (Ollama fallback) / 启发式 Edge 评估（Ollama 回退）
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class EdgeEvaluation:
-    """Result of edge evaluation (AI or heuristic) / Edge 评估结果"""
-    has_edge: bool = False
-    confidence: float = 0.0
-    reason: str = ""
-    source: str = "unknown"  # "ai" or "heuristic"
-    latency_ms: float = 0.0
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "has_edge": self.has_edge,
-            "confidence": self.confidence,
-            "reason": self.reason,
-            "source": self.source,
-            "latency_ms": self.latency_ms,
-        }
-
-
-def _heuristic_evaluate(intel: IntelObject, config: StrategistConfig) -> EdgeEvaluation:
-    """
-    Local heuristic edge evaluation — used when Ollama is unavailable.
-    本地启发式 edge 评估 — Ollama 不可用时使用。
-
-    This is deliberately conservative (fail-closed).
-    刻意保守（fail-closed）。
-    """
-    start = time.time()
-
-    # Rule 1: Relevance must be high enough / 相关性必须足够高
-    if intel.relevance_score < config.heuristic_min_relevance:
-        return EdgeEvaluation(
-            has_edge=False,
-            confidence=0.0,
-            reason=f"Relevance too low: {intel.relevance_score:.2f} < {config.heuristic_min_relevance}",
-            source="heuristic",
-            latency_ms=(time.time() - start) * 1000,
-        )
-
-    # Rule 2: Data must be fresh / 数据必须新鲜
-    if intel.freshness_seconds > config.heuristic_min_freshness:
-        return EdgeEvaluation(
-            has_edge=False,
-            confidence=0.0,
-            reason=f"Intel too stale: {intel.freshness_seconds}s > {config.heuristic_min_freshness}s",
-            source="heuristic",
-            latency_ms=(time.time() - start) * 1000,
-        )
-
-    # Rule 3: Data quality must be FACT or INFERENCE (not HYPOTHESIS)
-    # 数据质量必须是 FACT 或 INFERENCE（不是 HYPOTHESIS）
-    if intel.data_quality == DataQualityLevel.HYPOTHESIS:
-        return EdgeEvaluation(
-            has_edge=False,
-            confidence=0.0,
-            reason="HYPOTHESIS-quality intel rejected by heuristic",
-            source="heuristic",
-            latency_ms=(time.time() - start) * 1000,
-        )
-
-    # Rule 4: Sentiment must be directional (not NEUTRAL) / 情绪必须有方向性
-    from .multi_agent_framework import SentimentScore
-    if intel.sentiment == SentimentScore.NEUTRAL:
-        return EdgeEvaluation(
-            has_edge=False,
-            confidence=0.0,
-            reason="Neutral sentiment — no directional edge",
-            source="heuristic",
-            latency_ms=(time.time() - start) * 1000,
-        )
-
-    # Rule 5: Must have at least one symbol / 必须至少有一个交易对
-    if not intel.symbols:
-        return EdgeEvaluation(
-            has_edge=False,
-            confidence=0.0,
-            reason="No symbols in intel",
-            source="heuristic",
-            latency_ms=(time.time() - start) * 1000,
-        )
-
-    # Passed all heuristic checks — conservative confidence
-    # 通过所有启发式检查 — 保守置信度
-    confidence = min(intel.relevance_score * 0.7, 0.6)  # Cap at 0.6 for heuristic
-    return EdgeEvaluation(
-        has_edge=True,
-        confidence=confidence,
-        reason="Heuristic: high relevance + fresh + directional sentiment",
-        source="heuristic",
-        latency_ms=(time.time() - start) * 1000,
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1188,16 +1066,3 @@ class StrategistAgent:
         """Get recent edge evaluations for diagnostics / 获取最近的 edge 评估用于诊断"""
         with self._lock:
             return list(self._eval_log[-limit:])
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Helpers / 辅助函数
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _parse_sentiment(value: str) -> Any:
-    """Parse sentiment string to SentimentScore enum / 解析情绪字符串为 SentimentScore 枚举"""
-    from .multi_agent_framework import SentimentScore
-    try:
-        return SentimentScore(value)
-    except (ValueError, KeyError):
-        return SentimentScore.NEUTRAL

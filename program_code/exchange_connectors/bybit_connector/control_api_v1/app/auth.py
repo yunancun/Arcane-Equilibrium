@@ -230,6 +230,20 @@ def require_scope(actor: AuthenticatedActor, scope: str) -> None:
 
 
 def verify_operator_identity(envelope: RequestEnvelope, actor: AuthenticatedActor) -> None:
+    """Verify that the request envelope's operator_id matches the authenticated actor.
+    验证请求信封中的 operator_id 与已认证操作者是否一致。
+
+    TOCTOU note (E3-LOW-LEGACY-1) — ACKNOWLEDGED, not exploitable in current architecture:
+    TOCTOU 备注（E3-LOW-LEGACY-1）— 已确认，在当前架构下不可利用：
+      - actor is a fresh per-request dataclass built from the immutable settings singleton
+        actor 是每次请求新建的 dataclass，来源于不可变的 settings 单例
+      - envelope.operator_id is parsed from the request body (immutable within request)
+        envelope.operator_id 来自请求体（请求内不可变）
+      - No await point exists between check and subsequent use in callers
+        调用者在检查和后续使用之间没有 await 点
+      - settings.auth_actor_id is set once at startup and never mutated
+        settings.auth_actor_id 在启动时设置一次，此后不再变更
+    """
     if envelope.operator_id != actor.actor_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

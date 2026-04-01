@@ -1,5 +1,24 @@
-fastapi==0.115.12
-uvicorn[standard]==0.34.0
-pydantic==2.11.2
-pytest==8.3.5
-httpx==0.28.1
+# requirements.txt — control_api_v1 direct dependencies
+# 直接依賴清單（僅列出代碼中實際 import 的第三方套件，不含 stdlib 和傳遞依賴）
+# Transitive deps (e.g. starlette via fastapi) are NOT listed here.
+# 傳遞依賴（如 starlette 由 fastapi 帶入）不在此列。
+
+# --- Core / 核心 ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.11.0
+
+# --- HTTP client / HTTP 客戶端 ---
+httpx>=0.28.0
+
+# --- Rate limiting / 速率限制 ---
+slowapi>=0.1.9
+
+# --- WebSocket client (Bybit WS listener) / WebSocket 客戶端（Bybit WS 監聽）---
+websocket-client>=1.8.0
+
+# --- System monitoring (optional, H0 health worker) / 系統監控（可選，H0 健康採樣）---
+psutil>=5.9.0
+
+# --- Testing / 測試 ---
+pytest>=8.0.0

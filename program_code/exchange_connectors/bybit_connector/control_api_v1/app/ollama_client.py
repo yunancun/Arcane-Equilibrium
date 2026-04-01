@@ -233,6 +233,7 @@ class OllamaClient:
         temperature: float | None = None,
         max_tokens: int = 1024,
         timeout: int | None = None,
+        think: bool = False,
     ) -> OllamaResponse:
         """
         Multi-turn chat via /api/chat.
@@ -245,6 +246,8 @@ class OllamaClient:
             temperature: Override temperature / 覆盖温度
             max_tokens: Maximum tokens to generate / 最大生成 token 数
             timeout: Override timeout in seconds / 覆盖超时秒数
+            think: Enable chain-of-thought (Qwen3.5); must be top-level, not inside options
+                   启用思维链（Qwen3.5 要求放 JSON 顶层，不可放 options 内）
         """
         start = time.time()
         use_model = model or self._config.model
@@ -259,6 +262,7 @@ class OllamaClient:
             "model": use_model,
             "messages": chat_messages,
             "stream": False,
+            "think": think,  # top-level flag required by Ollama for Qwen3.5 think control
             "options": {
                 "temperature": use_temp,
                 "num_predict": max_tokens,
