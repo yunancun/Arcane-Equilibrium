@@ -948,6 +948,10 @@ def _oms_complete_reconciliation(order: dict, oms_sm) -> None:
 # submit_order mutator sub-functions (module-level, called by mutator closure)
 # submit_order mutator 子函数（模块级别，由 mutator 闭包调用）
 # ═══════════════════════════════════════════════════════════════════════════════
+# Mutator return protocol / Mutator 返回協議:
+#   return state  → early exit (rejection/error), mutator dispatcher returns immediately
+#   return None   → continue to next step, mutator dispatcher proceeds
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def _mutator_validate_order(

@@ -87,7 +87,7 @@ class H1ThoughtGate:
             stats["h1_budget_skip"] = stats.get("h1_budget_skip", 0) + 1
             return False
 
-        if self._complexity_score(intel) < self._COMPLEXITY_THRESHOLD:
+        if self.complexity_score(intel) < self._COMPLEXITY_THRESHOLD:
             stats["h1_complexity_skip"] = stats.get("h1_complexity_skip", 0) + 1
             return False
 
@@ -119,7 +119,7 @@ class H1ThoughtGate:
 
     # ── Complexity scoring / 複雜度評分 ──
 
-    def _complexity_score(self, intel: Any) -> float:
+    def complexity_score(self, intel: Any) -> float:
         """
         H1 complexity scoring: rule-based, synchronous, no AI calls.
         H1 複雜度評分：純規則，同步執行，不調用 AI。

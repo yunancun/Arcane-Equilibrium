@@ -318,7 +318,7 @@ class StrategistAgent:
             else:
                 # H3 ModelRouter: select model tier based on signal complexity
                 # H3 模型路由：根據信號複雜度選擇模型層（委託給 ModelRouter 模組）
-                complexity = self._h1_gate._complexity_score(intel)
+                complexity = self._h1_gate.complexity_score(intel)
                 model_tier = self._model_router.route(complexity)
                 if model_tier == "l2":
                     # L2 must run in background thread — cannot block synchronous on_tick callback
@@ -731,7 +731,7 @@ class StrategistAgent:
 
     def _h1_complexity_score(self, intel: Any) -> float:
         """Backward-compatible delegator to H1ThoughtGate / 向後兼容委託"""
-        return self._h1_gate._complexity_score(intel)
+        return self._h1_gate.complexity_score(intel)
 
     def _h1_check_cooldown(self, intel: Any) -> bool:
         """Backward-compatible delegator to H1ThoughtGate / 向後兼容委託"""
@@ -743,7 +743,7 @@ class StrategistAgent:
 
     def _h3_route_model(self, intel: Any) -> str:
         """Backward-compatible delegator to ModelRouter / 向後兼容委託"""
-        complexity = self._h1_gate._complexity_score(intel)
+        complexity = self._h1_gate.complexity_score(intel)
         return self._model_router.route(complexity)
 
     # ── Audit / 審計 ──
