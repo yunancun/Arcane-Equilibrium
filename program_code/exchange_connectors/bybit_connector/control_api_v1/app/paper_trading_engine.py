@@ -1908,26 +1908,16 @@ class PaperTradingEngine:
                     except Exception as e:
                         logger.error(f"ProtectiveOrderManager check_triggers error: {e} (non-fatal)")
 
-                # T7.04: Periodic reconciliation trigger (every 60 seconds during active session)
+                # T7.04: Periodic reconciliation — moved OUTSIDE mutator to avoid
+                # holding _lock during Demo API HTTP calls (which caused service hangs).
+                # T7.04：定期對賬已移至 mutator 外部，避免在持有 _lock 時做 Demo API HTTP
+                # 調用（此前會導致服務 hang）。標記需要對賬，在 mutate() 之後執行。
                 if self._governance_hub:
                     now_ms_recon = int(time.time() * 1000)
                     last_recon = getattr(self, '_last_reconciliation_ms', 0)
-                    if now_ms_recon - last_recon >= 60_000:  # 60 seconds
-                        try:
-                            paper_snap = _paper_state_to_recon_format(state)
-                            demo_snap = None
-                            if self._demo_sync:
-                                try:
-                                    demo_snap = self._demo_sync.get_current_snapshot()
-                                except Exception as e:
-                                    logger.error(f"Demo snapshot failed: {e}")
-                            recon_report = self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
-                            self._last_reconciliation_ms = now_ms_recon
-                            if recon_report.get("ok") is False:
-                                self._audit(state, "reconciliation_warning",
-                                    f"reason={recon_report.get('reason', 'unknown')}")
-                        except Exception as e:
-                            logger.error(f"Periodic reconciliation error: {e} (non-fatal)")
+                    if now_ms_recon - last_recon >= 60_000:
+                        tick_result["_needs_reconciliation"] = True
+                        self._last_reconciliation_ms = now_ms_recon
 
                 # Session drawdown circuit breaker
                 peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
@@ -1965,6 +1955,27 @@ class PaperTradingEngine:
             return state
 
         self.store.mutate(mutator)
+
+        # T7.04: Run reconciliation OUTSIDE mutator to avoid holding _lock during HTTP.
+        # T7.04：在 mutator 外部執行對賬，避免持鎖時做 HTTP 調用。
+        if tick_result.pop("_needs_reconciliation", False):
+            import threading as _recon_threading
+            def _run_reconciliation():
+                try:
+                    paper_snap = _paper_state_to_recon_format(self.store.read())
+                    demo_snap = None
+                    if self._demo_sync:
+                        try:
+                            demo_snap = self._demo_sync.get_current_snapshot()
+                        except Exception as e:
+                            logger.error("Demo snapshot failed: %s", e)
+                    recon_report = self._governance_hub.reconcile(paper_snap, demo_state=demo_snap)
+                    if recon_report.get("ok") is False:
+                        logger.warning("Reconciliation warning: %s", recon_report.get("reason", "unknown"))
+                except Exception as e:
+                    logger.error("Periodic reconciliation error: %s (non-fatal)", e)
+            _recon_threading.Thread(target=_run_reconciliation, daemon=True, name="recon-tick").start()
+
         return tick_result
 
     # ── PnL Computation / PnL 计算 ──
