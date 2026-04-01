@@ -421,26 +421,35 @@ class PipelineBridge:
         # 3. Periodic volume refresh from REST API (every 60 real seconds, time-driven)
         # 定期从 REST API 刷新成交量（每 60 秒真实时间，时间驱动）
         # T2.07: Check scanner rate limiter before full market scan
+        # NOTE: Runs in background thread to avoid blocking tick processing.
+        # 注意：在背景線程中執行以避免阻塞 tick 處理管線。
         _now = time.time()
         if _now - self._last_volume_refresh_ts >= 60.0:
-            # Check if rate limiter permits scan
+            self._last_volume_refresh_ts = _now
             if self._scanner_rate_limiter:
                 can_scan, reason = self._scanner_rate_limiter.can_scan()
                 if can_scan:
-                    self._refresh_kline_volume()
+                    threading.Thread(
+                        target=self._refresh_kline_volume, daemon=True,
+                        name="bridge-volume-refresh",
+                    ).start()
                     self._scanner_rate_limiter.record_scan_complete()
-                    self._last_volume_refresh_ts = _now
-                # else: skip scan due to rate limit, will try again next tick
             else:
-                # No rate limiter installed, allow scan by default
-                self._refresh_kline_volume()
-                self._last_volume_refresh_ts = _now
+                threading.Thread(
+                    target=self._refresh_kline_volume, daemon=True,
+                    name="bridge-volume-refresh",
+                ).start()
 
         # 4. Periodic funding rate check (every 300 real seconds = 5 minutes, time-driven)
         # 定期 funding rate 检查（每 300 秒真实时间 = 5 分钟，时间驱动）
+        # NOTE: Runs in background thread to avoid blocking tick processing.
+        # 注意：在背景線程中執行以避免阻塞 tick 處理管線。
         if _now - self._last_funding_check_ts >= 300.0:
-            self._check_funding_rates()
             self._last_funding_check_ts = _now
+            threading.Thread(
+                target=self._check_funding_rates, daemon=True,
+                name="bridge-funding-check",
+            ).start()
 
         # 4.5. Periodic Scout local scan (every 300s = 5 minutes, time-driven)
         # 定期 Scout 本地扫描（每 300 秒 = 5 分钟，时间驱动）
