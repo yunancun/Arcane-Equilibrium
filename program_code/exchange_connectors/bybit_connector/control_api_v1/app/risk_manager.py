@@ -229,22 +229,35 @@ def compute_dynamic_stop_pct(
     symbol: str,
     entry_ts_ms: int,
     regime: str = "unknown",
+    hard_stop_pct: float = 5.0,
 ) -> float:
     """
     Compute ATR-adjusted stop loss with anti-clustering random offset and regime scaling.
     计算 ATR 自适应止损 + 反聚集随机偏移 + 市场状态缩放。
 
-    If ATR available: stop = max(base, 1.5 × ATR) + random offset
-    If no ATR: stop = base + small random offset (still unpredictable)
-    Regime multiplier widens stop in volatile/trending markets, tightens in ranging/squeeze.
+    ATR dynamic cap is derived from Operator hard limit: cap = hard_stop_pct × 0.5
+    This ensures high-volatility tokens get enough breathing room while staying
+    well below the hard stop (50% safety buffer to absolute defense line).
+    ATR 動態上限與 Operator 硬止損關聯：上限 = 硬止損 × 0.5
+    確保高波動幣種有足夠呼吸空間，同時到硬止損仍有 50% 安全距離。
+
+    Examples with base=2%:
+      hard=15% → cap=7.5% → SIRENUSDT(ATR=5.7%) dynamic stop ≈ 7.5% (was capped at 4%)
+      hard=10% → cap=5.0% → KERNELUSDT(ATR=2.1%) dynamic stop ≈ 3.1%
+      hard=5%  → cap=2.5% → BTC(ATR=0.16%) dynamic stop = 2% (uses base)
     """
     regime_mult = REGIME_STOP_MULTIPLIERS.get(regime, 1.0)
     base_stop_pct = base_stop_pct * regime_mult
 
+    # ATR dynamic cap linked to Operator hard limit (50% of hard stop)
+    # ATR 動態上限與 Operator 硬止損關聯（硬止損的 50%）
+    dynamic_cap = hard_stop_pct * 0.5
+
     if atr_pct is not None and atr_pct > 0:
-        # ATR-based: use 1.5x ATR as minimum, but don't exceed base cap
+        # ATR-based: use 1.5x ATR, capped at dynamic_cap (linked to hard limit)
+        # ATR 動態：1.5 倍 ATR，上限為 dynamic_cap（與硬止損關聯）
         atr_stop = atr_pct * 1.5
-        effective = max(base_stop_pct, min(atr_stop, base_stop_pct * 2.0))
+        effective = max(base_stop_pct, min(atr_stop, dynamic_cap))
     else:
         effective = base_stop_pct
 
@@ -974,7 +987,10 @@ class RiskManager:
             base_soft_sl = self.effective_stop_loss_pct(category)
             atr_pct = self._price_tracker.compute_atr_pct(symbol)
             entry_ts = pos.get("opened_ts_ms", now_ms_val)
-            dynamic_sl = compute_dynamic_stop_pct(base_soft_sl, atr_pct, symbol, entry_ts, regime=regime)
+            dynamic_sl = compute_dynamic_stop_pct(
+                base_soft_sl, atr_pct, symbol, entry_ts,
+                regime=regime, hard_stop_pct=hard_sl,
+            )
 
             if pnl_pct <= -dynamic_sl:
                 # Check for spike (possible stop hunting) / 检查尖刺（可能的止损猎杀）
