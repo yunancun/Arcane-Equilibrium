@@ -84,6 +84,10 @@
           <tbody id="demo-fills"><tr class="empty-row"><td colspan="7">加载中...</td></tr></tbody>
         </table>
       </div>
+    <div class="oc-metrics" style="margin-top:8px">
+      <div class="oc-metric"><div class="oc-metric-label" title="本次会话的初始投入资金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="d-fills-capital">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="已实现 + 未实现盈亏 = 当前净收益。正值盈利，负值亏损。/ Realized + Unrealized PnL = current net return.">累计收益 / Net Return</div><div class="oc-metric-val" id="d-fills-return">--</div></div>
+    </div>
     </div>
   </details>
 
@@ -244,6 +248,13 @@ function renderBalance(raw) {
   const elR = $('d-realized');
   elR.textContent = ocMoney(realized);
   elR.className = 'oc-metric-val ' + ocPnlClass(realized);
+
+  // Fill history summary: initial capital + net return (from balance data)
+  // 成交歷史摘要：初始投入 + 累計收益（取自 balance 已有數據）
+  ocSetText('d-fills-capital', ocBalance(initialApprox, 2));
+  const elFillsReturn = $('d-fills-return');
+  elFillsReturn.textContent = ocMoney(net);
+  elFillsReturn.className = 'oc-metric-val ' + ocPnlClass(net);
 
   // Win rate + W/L ratio from round-trip analysis / 从完整交易分析计算胜率和盈亏比
   const trips = _calcRoundTrips(_demoFillsCache);

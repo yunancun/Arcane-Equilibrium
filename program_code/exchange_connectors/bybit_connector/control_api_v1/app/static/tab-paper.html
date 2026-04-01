@@ -104,6 +104,10 @@
         <tbody id="fills-tbody"><tr class="empty-row"><td colspan="7">加载中...</td></tr></tbody>
       </table>
     </div>
+    <div class="oc-metrics" style="margin-top:8px">
+      <div class="oc-metric"><div class="oc-metric-label" title="本次会话的初始投入资金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="p-fills-capital">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="已实现 + 未实现盈亏 = 当前净收益。正值盈利，负值亏损。/ Realized + Unrealized PnL = current net return.">累计收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
+    </div>
   </div>
 </details>
 
@@ -248,6 +252,13 @@ async function loadSession() {
   const elUnrealized = $('p-unrealized');
   elUnrealized.textContent = ocMoney(unrealized);
   elUnrealized.className = 'oc-metric-val ' + ocPnlClass(unrealized);
+
+  // Fill history summary: initial capital + net return (from session data)
+  // 成交歷史摘要：初始投入 + 累計收益（取自 session 已有數據）
+  ocSetText('p-fills-capital', ocBalance(_initBal, 2));
+  const elFillsReturn = $('p-fills-return');
+  elFillsReturn.textContent = ocMoney(net);
+  elFillsReturn.className = 'oc-metric-val ' + ocPnlClass(net);
 
   // Available balance = initial + realized + unrealized - margin (estimated)
   if (!$('p-bal-available').dataset.fromMetrics) {
