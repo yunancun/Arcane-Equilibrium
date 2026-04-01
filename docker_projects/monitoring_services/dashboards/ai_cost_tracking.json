@@ -1,35 +1,66 @@
 {
   "uid": "openclaw-ai-cost",
-  "title": "3. AI Cost Tracking / AI 成本追踪",
+  "title": "3. AI Cost Tracking / AI \u6210\u672c\u8ffd\u8e2a",
   "description": "AI API costs, token usage, cost efficiency, budget monitoring",
-  "tags": ["openclaw", "ai", "cost"],
+  "tags": [
+    "openclaw",
+    "ai",
+    "cost"
+  ],
   "timezone": "browser",
   "editable": true,
   "refresh": "1m",
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
-      "title": "Cumulative AI Cost / 累计 AI 成本",
+      "title": "Cumulative AI Cost / \u7d2f\u8ba1 AI \u6210\u672c",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, SUM(cost_usd) OVER (ORDER BY ts) AS cumulative_cost FROM ai_cost_events WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, SUM(cost_usd) OVER (ORDER BY ts) AS cumulative_cost FROM ai_cost_events WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": { "fillOpacity": 20 },
-          "color": { "fixedColor": "red", "mode": "fixed" },
+          "custom": {
+            "fillOpacity": 20
+          },
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixed"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 15 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
             ]
           }
         }
@@ -37,24 +68,43 @@
     },
     {
       "id": 2,
-      "title": "Today's AI Spend / 今日 AI 花费",
+      "title": "Today's AI Spend / \u4eca\u65e5 AI \u82b1\u8d39",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) AS today_cost FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) AS today_cost FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "red", "value": 15 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
             ]
           }
         }
@@ -62,15 +112,25 @@
     },
     {
       "id": 3,
-      "title": "Daily Budget Limit / 日预算上限",
+      "title": "Daily Budget Limit / \u65e5\u9884\u7b97\u4e0a\u9650",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) / 15.0 * 100 AS budget_pct FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(SUM(cost_usd), 0) / 15.0 * 100 AS budget_pct FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
@@ -79,9 +139,18 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           }
         }
@@ -89,73 +158,133 @@
     },
     {
       "id": 4,
-      "title": "Total Calls Today / 今日总调用",
+      "title": "Total Calls Today / \u4eca\u65e5\u603b\u8c03\u7528",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 4 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COUNT(*) AS calls FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) AS calls FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 5,
-      "title": "Avg Latency / 平均延迟",
+      "title": "Avg Latency / \u5e73\u5747\u5ef6\u8fdf",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 4 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ROUND(AVG(latency_ms)) AS avg_latency FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(AVG(latency_ms)) AS avg_latency FROM ai_cost_events WHERE ts >= CURRENT_DATE;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
-        "defaults": { "unit": "ms" }
+        "defaults": {
+          "unit": "ms"
+        }
       }
     },
     {
       "id": 6,
-      "title": "Cost by Provider / 按提供商分",
+      "title": "Cost by Provider / \u6309\u63d0\u4f9b\u5546\u5206",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT provider, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY provider ORDER BY cost DESC;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT provider, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY provider ORDER BY cost DESC;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 7,
-      "title": "Cost by Tier / 按层级分",
+      "title": "Cost by Tier / \u6309\u5c42\u7ea7\u5206",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(tier, 'unknown') AS tier, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY tier ORDER BY cost DESC;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(tier, 'unknown') AS tier, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY tier ORDER BY cost DESC;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 8,
-      "title": "Cost by Purpose / 按用途分",
+      "title": "Cost by Purpose / \u6309\u7528\u9014\u5206",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(purpose, 'unknown') AS purpose, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY purpose ORDER BY cost DESC;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(purpose, 'unknown') AS purpose, SUM(cost_usd) AS cost FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY purpose ORDER BY cost DESC;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 9,
-      "title": "Token Usage Over Time / Token 用量趋势",
+      "title": "Token Usage Over Time / Token \u7528\u91cf\u8d8b\u52bf",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
           "rawSql": "SELECT date_trunc('hour', ts) AS time, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
@@ -165,35 +294,62 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } }
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
         }
       }
     },
     {
       "id": 10,
-      "title": "Model Usage Table / 模型使用明细",
+      "title": "Model Usage Table / \u6a21\u578b\u4f7f\u7528\u660e\u7ec6",
       "type": "table",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT model, COUNT(*) AS calls, SUM(input_tokens) AS total_input, SUM(output_tokens) AS total_output, ROUND(SUM(cost_usd)::numeric, 4) AS total_cost, ROUND(AVG(latency_ms)::numeric) AS avg_latency_ms, ROUND(SUM(CASE WHEN success THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS success_pct FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY model ORDER BY total_cost DESC;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT model, COUNT(*) AS calls, SUM(input_tokens) AS total_input, SUM(output_tokens) AS total_output, ROUND(SUM(cost_usd)::numeric, 4) AS total_cost, ROUND(AVG(latency_ms)::numeric) AS avg_latency_ms, ROUND(SUM(CASE WHEN success THEN 1 ELSE 0 END)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS success_pct FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY model ORDER BY total_cost DESC;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 11,
-      "title": "Daily Cost Trend / 每日成本趋势",
+      "title": "Daily Cost Trend / \u6bcf\u65e5\u6210\u672c\u8d8b\u52bf",
       "type": "barchart",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT date_trunc('day', ts)::date AS day, SUM(cost_usd) AS daily_cost, COUNT(*) AS calls FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', ts)::date AS day, SUM(cost_usd) AS daily_cost, COUNT(*) AS calls FROM ai_cost_events WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
-        "defaults": { "unit": "currencyUSD" }
+        "defaults": {
+          "unit": "currencyUSD"
+        }
       },
       "options": {
         "barWidth": 0.6

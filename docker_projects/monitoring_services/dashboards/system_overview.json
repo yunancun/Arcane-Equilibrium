@@ -1,139 +1,263 @@
 {
   "uid": "openclaw-system-overview",
-  "title": "1. System Overview / 系统总览",
+  "title": "1. System Overview / \u7cfb\u7edf\u603b\u89c8",
   "description": "OpenClaw Trading AI - System health, observer status, runtime state",
-  "tags": ["openclaw", "system", "overview"],
+  "tags": [
+    "openclaw",
+    "system",
+    "overview"
+  ],
   "timezone": "browser",
   "editable": true,
   "refresh": "30s",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
-      "title": "System Health Status / 系统健康状态",
+      "title": "System Health Status / \u7cfb\u7edf\u5065\u5eb7\u72b6\u6001",
       "type": "table",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT component, status, latency_ms, detail, ts FROM system_health WHERE ts = (SELECT MAX(ts) FROM system_health sh2 WHERE sh2.component = system_health.component) ORDER BY component;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT component, status, latency_ms, detail, ts FROM system_health WHERE ts = (SELECT MAX(ts) FROM system_health sh2 WHERE sh2.component = system_health.component) ORDER BY component;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "status" },
-            "properties": [{
-              "id": "custom.cellOptions",
-              "value": {
-                "type": "color-background",
-                "mode": "basic"
-              }
+            "matcher": {
+              "id": "byName",
+              "options": "status"
             },
-            {
-              "id": "mappings",
-              "value": [
-                { "type": "value", "options": { "healthy": { "color": "green", "text": "Healthy" }, "degraded": { "color": "yellow", "text": "Degraded" }, "down": { "color": "red", "text": "DOWN" } } }
-              ]
-            }]
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "healthy": {
+                        "color": "green",
+                        "text": "Healthy"
+                      },
+                      "degraded": {
+                        "color": "yellow",
+                        "text": "Degraded"
+                      },
+                      "down": {
+                        "color": "red",
+                        "text": "DOWN"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
           }
         ]
       }
     },
     {
       "id": 2,
-      "title": "Observer Verdicts Over Time / 观察者判定趋势",
+      "title": "Observer Verdicts Over Time / \u89c2\u5bdf\u8005\u5224\u5b9a\u8d8b\u52bf",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, CASE WHEN verdict = 'pass' THEN 1 WHEN verdict = 'skip' THEN 0 ELSE -1 END AS verdict_score, verdict FROM observer_verdicts WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, CASE WHEN verdict = 'pass' THEN 1 WHEN verdict = 'skip' THEN 0 ELSE -1 END AS verdict_score, verdict FROM observer_verdicts WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "fillOpacity": 20 },
-          "color": { "mode": "palette-classic" }
+          "custom": {
+            "fillOpacity": 20
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         }
       }
     },
     {
       "id": 3,
-      "title": "Component Latency Trend / 组件延迟趋势",
+      "title": "Component Latency Trend / \u7ec4\u4ef6\u5ef6\u8fdf\u8d8b\u52bf",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, latency_ms, component FROM system_health WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, latency_ms, component FROM system_health WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "ms",
-          "custom": { "fillOpacity": 10 }
+          "custom": {
+            "fillOpacity": 10
+          }
         }
       }
     },
     {
       "id": 4,
-      "title": "AI Tier Distribution / AI 层级分布",
+      "title": "AI Tier Distribution / AI \u5c42\u7ea7\u5206\u5e03",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(ai_tier, 'none') AS tier, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY ai_tier;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(ai_tier, 'none') AS tier, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY ai_tier;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 5,
-      "title": "Thought Gate Decisions / 思考门决策",
+      "title": "Thought Gate Decisions / \u601d\u8003\u95e8\u51b3\u7b56",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT COALESCE(thought_gate, 'unknown') AS gate, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY thought_gate;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(thought_gate, 'unknown') AS gate, COUNT(*) AS count FROM observer_verdicts WHERE $__timeFilter(ts) GROUP BY thought_gate;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 6,
-      "title": "Risk Events / 风控事件",
+      "title": "Risk Events / \u98ce\u63a7\u4e8b\u4ef6",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts, event_type, symbol, severity, layer, detail FROM risk_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 50;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts, event_type, symbol, severity, layer, detail FROM risk_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 50;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
-        "overrides": [{
-          "matcher": { "id": "byName", "options": "severity" },
-          "properties": [{
-            "id": "mappings",
-            "value": [
-              { "type": "value", "options": { "critical": { "color": "red" }, "warning": { "color": "yellow" }, "info": { "color": "blue" } } }
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "severity"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "color": "red"
+                      },
+                      "warning": {
+                        "color": "yellow"
+                      },
+                      "info": {
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
             ]
-          }]
-        }]
+          }
+        ]
       }
     },
     {
       "id": 7,
-      "title": "Runtime State / 运行时状态",
+      "title": "Runtime State / \u8fd0\u884c\u65f6\u72b6\u6001",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 24 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT 'read_only' AS system_mode, 'disabled' AS execution_state, 'not_granted' AS execution_authority, (SELECT COUNT(*) FROM system_health WHERE status = 'healthy' AND ts > NOW() - INTERVAL '5 minutes') AS healthy_components;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT 'read_only' AS system_mode, 'disabled' AS execution_state, 'not_granted' AS execution_authority, (SELECT COUNT(*) FROM system_health WHERE status = 'healthy' AND ts > NOW() - INTERVAL '5 minutes') AS healthy_components;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     }
   ],
   "schemaVersion": 39,

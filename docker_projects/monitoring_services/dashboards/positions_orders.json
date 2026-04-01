@@ -1,125 +1,313 @@
 {
   "uid": "openclaw-positions-orders",
-  "title": "4. Positions & Orders / 持仓与订单",
+  "title": "4. Positions & Orders / \u6301\u4ed3\u4e0e\u8ba2\u5355",
   "description": "Live/paper positions, order flow, execution history",
-  "tags": ["openclaw", "positions", "orders"],
+  "tags": [
+    "openclaw",
+    "positions",
+    "orders"
+  ],
   "timezone": "browser",
   "editable": true,
   "refresh": "30s",
-  "time": { "from": "now-24h", "to": "now" },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
-      "title": "Open Positions / 当前持仓",
+      "title": "Open Positions / \u5f53\u524d\u6301\u4ed3",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT DISTINCT ON (symbol, side) symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category, ts FROM position_snapshots ORDER BY symbol, side, ts DESC;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT DISTINCT ON (symbol, side) symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category, ts FROM position_snapshots ORDER BY symbol, side, ts DESC;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "overrides": [
-          { "matcher": { "id": "byName", "options": "side" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "Buy": { "color": "green", "text": "LONG" }, "Sell": { "color": "red", "text": "SHORT" } } }] }] },
-          { "matcher": { "id": "byName", "options": "unrealized_pnl" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] },
-          { "matcher": { "id": "byName", "options": "position_value" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "side"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Buy": {
+                        "color": "green",
+                        "text": "LONG"
+                      },
+                      "Sell": {
+                        "color": "red",
+                        "text": "SHORT"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unrealized_pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "position_value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          }
         ]
       }
     },
     {
       "id": 2,
-      "title": "Position Count Over Time / 持仓数量趋势",
+      "title": "Position Count Over Time / \u6301\u4ed3\u6570\u91cf\u8d8b\u52bf",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, COUNT(DISTINCT symbol) AS position_count FROM position_snapshots WHERE $__timeFilter(ts) GROUP BY ts ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, COUNT(DISTINCT symbol) AS position_count FROM position_snapshots WHERE $__timeFilter(ts) GROUP BY ts ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 3,
-      "title": "Total Unrealized PnL / 总未实现损益",
+      "title": "Total Unrealized PnL / \u603b\u672a\u5b9e\u73b0\u635f\u76ca",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, SUM(unrealized_pnl) AS total_unrealized FROM position_snapshots WHERE $__timeFilter(ts) GROUP BY ts ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, SUM(unrealized_pnl) AS total_unrealized FROM position_snapshots WHERE $__timeFilter(ts) GROUP BY ts ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": { "fillOpacity": 15 },
+          "custom": {
+            "fillOpacity": 15
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 0 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
             ]
           },
-          "color": { "mode": "continuous-GrYlRd" }
+          "color": {
+            "mode": "continuous-GrYlRd"
+          }
         }
       }
     },
     {
       "id": 4,
-      "title": "Recent Orders / 最近订单",
+      "title": "Recent Orders / \u6700\u8fd1\u8ba2\u5355",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts, order_id, symbol, side, order_type, qty, price, status, filled_qty, avg_price, fee, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM order_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts, order_id, symbol, side, order_type, qty, price, status, filled_qty, avg_price, fee, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM order_events WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "overrides": [
-          { "matcher": { "id": "byName", "options": "side" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "Buy": { "color": "green" }, "Sell": { "color": "red" } } }] }] },
-          { "matcher": { "id": "byName", "options": "status" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "Filled": { "color": "green" }, "Cancelled": { "color": "orange" }, "Rejected": { "color": "red" }, "New": { "color": "blue" } } }] }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "side"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Buy": {
+                        "color": "green"
+                      },
+                      "Sell": {
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Filled": {
+                        "color": "green"
+                      },
+                      "Cancelled": {
+                        "color": "orange"
+                      },
+                      "Rejected": {
+                        "color": "red"
+                      },
+                      "New": {
+                        "color": "blue"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
         ]
       }
     },
     {
       "id": 5,
-      "title": "Order Type Distribution / 订单类型分布",
+      "title": "Order Type Distribution / \u8ba2\u5355\u7c7b\u578b\u5206\u5e03",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 26 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT order_type, COUNT(*) AS count FROM order_events WHERE $__timeFilter(ts) GROUP BY order_type;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT order_type, COUNT(*) AS count FROM order_events WHERE $__timeFilter(ts) GROUP BY order_type;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 6,
-      "title": "Order Status Distribution / 订单状态分布",
+      "title": "Order Status Distribution / \u8ba2\u5355\u72b6\u6001\u5206\u5e03",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT status, COUNT(*) AS count FROM order_events WHERE $__timeFilter(ts) GROUP BY status;",
-        "format": "table",
-        "refId": "A"
-      }]
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT status, COUNT(*) AS count FROM order_events WHERE $__timeFilter(ts) GROUP BY status;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
     },
     {
       "id": 7,
-      "title": "Fees Paid / 已付手续费",
+      "title": "Fees Paid / \u5df2\u4ed8\u624b\u7eed\u8d39",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 26 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT date_trunc('hour', ts) AS time, SUM(fee) AS hourly_fees FROM trade_executions WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', ts) AS time, SUM(fee) AS hourly_fees FROM trade_executions WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
-        "defaults": { "unit": "currencyUSD" }
+        "defaults": {
+          "unit": "currencyUSD"
+        }
       }
     }
   ],

@@ -1,75 +1,172 @@
 {
   "uid": "openclaw-trading-pnl",
-  "title": "2. Trading PnL / 交易损益",
+  "title": "2. Trading PnL / \u4ea4\u6613\u635f\u76ca",
   "description": "Net PnL tracking, paper trading performance, cost breakdown",
-  "tags": ["openclaw", "trading", "pnl"],
+  "tags": [
+    "openclaw",
+    "trading",
+    "pnl"
+  ],
   "timezone": "browser",
   "editable": true,
   "refresh": "1m",
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
-      "title": "Net PnL Over Time / 净损益趋势",
+      "title": "Net PnL Over Time / \u51c0\u635f\u76ca\u8d8b\u52bf",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, net_pnl, realized_pnl, unrealized_pnl FROM paper_pnl_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, net_pnl, realized_pnl, unrealized_pnl FROM paper_pnl_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": { "fillOpacity": 15, "lineWidth": 2 }
+          "custom": {
+            "fillOpacity": 15,
+            "lineWidth": 2
+          }
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "net_pnl" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "realized_pnl" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
-          { "matcher": { "id": "byName", "options": "unrealized_pnl" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "net_pnl"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "realized_pnl"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unrealized_pnl"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
         ]
       }
     },
     {
       "id": 2,
-      "title": "Current PnL Summary / 当前损益摘要",
+      "title": "Current PnL Summary / \u5f53\u524d\u635f\u76ca\u6458\u8981",
       "type": "stat",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT net_pnl AS \"Net PnL\", realized_pnl AS \"Realized\", unrealized_pnl AS \"Unrealized\", total_fees AS \"Total Fees\", ai_cost AS \"AI Cost\" FROM paper_pnl_snapshots ORDER BY ts DESC LIMIT 1;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT net_pnl AS \"Net PnL\", realized_pnl AS \"Realized\", unrealized_pnl AS \"Unrealized\", total_fees AS \"Total Fees\", ai_cost AS \"AI Cost\" FROM paper_pnl_snapshots ORDER BY ts DESC LIMIT 1;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
-        "defaults": { "unit": "currencyUSD" }
+        "defaults": {
+          "unit": "currencyUSD"
+        }
       }
     },
     {
       "id": 3,
-      "title": "Cost Breakdown / 成本分解",
+      "title": "Cost Breakdown / \u6210\u672c\u5206\u89e3",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, total_fees AS trading_fees, ai_cost FROM paper_pnl_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, total_fees AS trading_fees, ai_cost FROM paper_pnl_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" } }
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
         }
       }
     },
     {
       "id": 4,
-      "title": "Win Rate & Sharpe / 胜率与夏普",
+      "title": "Win Rate & Sharpe / \u80dc\u7387\u4e0e\u590f\u666e",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
       "targets": [
         {
           "rawSql": "SELECT ts AS time, win_rate FROM paper_pnl_snapshots WHERE $__timeFilter(ts) AND win_rate IS NOT NULL ORDER BY ts;",
@@ -84,44 +181,122 @@
       ],
       "fieldConfig": {
         "overrides": [
-          { "matcher": { "id": "byName", "options": "win_rate" }, "properties": [{ "id": "unit", "value": "percent" }] },
-          { "matcher": { "id": "byName", "options": "sharpe_ratio" }, "properties": [{ "id": "custom.axisPlacement", "value": "right" }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "win_rate"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sharpe_ratio"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
         ]
       }
     },
     {
       "id": 5,
-      "title": "Trade Executions / 成交记录",
+      "title": "Trade Executions / \u6210\u4ea4\u8bb0\u5f55",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts, symbol, side, exec_type, exec_qty, exec_price, fee, realized_pnl, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM trade_executions WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
-        "format": "table",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts, symbol, side, exec_type, exec_qty, exec_price, fee, realized_pnl, CASE WHEN is_paper THEN 'Paper' ELSE 'Live' END AS mode FROM trade_executions WHERE $__timeFilter(ts) ORDER BY ts DESC LIMIT 100;",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "overrides": [
-          { "matcher": { "id": "byName", "options": "side" }, "properties": [{ "id": "mappings", "value": [{ "type": "value", "options": { "Buy": { "color": "green" }, "Sell": { "color": "red" } } }] }] },
-          { "matcher": { "id": "byName", "options": "realized_pnl" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "side"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Buy": {
+                        "color": "green"
+                      },
+                      "Sell": {
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "realized_pnl"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          }
         ]
       }
     },
     {
       "id": 6,
-      "title": "Account Equity / 账户权益",
+      "title": "Account Equity / \u8d26\u6237\u6743\u76ca",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
-      "datasource": { "type": "postgres", "uid": "" },
-      "targets": [{
-        "rawSql": "SELECT ts AS time, total_equity, available_balance, used_margin FROM account_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
-        "format": "time_series",
-        "refId": "A"
-      }],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "PCC52D03280B7034C"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT ts AS time, total_equity, available_balance, used_margin FROM account_snapshots WHERE $__timeFilter(ts) ORDER BY ts;",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": { "fillOpacity": 10 }
+          "custom": {
+            "fillOpacity": 10
+          }
         }
       }
     }
