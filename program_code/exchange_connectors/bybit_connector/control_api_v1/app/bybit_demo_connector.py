@@ -483,10 +483,20 @@ class BybitDemoConnector:
         """
         Get open conditional orders from Demo.
         获取 Demo 环境的挂起条件单。
+
+        Bybit V5 /v5/order/realtime requires at least one of symbol/settleCoin/baseCoin
+        for linear category. We add settleCoin=USDT as default for linear so the query
+        succeeds without a specific symbol. Without this the API returns retCode=10001.
+        Bybit V5 linear 分类需要至少传 symbol/settleCoin/baseCoin 之一，
+        否则返回 retCode=10001。此处默认加 settleCoin=USDT 确保查询成功。
         """
-        params: dict[str, Any] = {"category": category, "orderFilter": "StopOrder"}
+        params: dict[str, Any] = {"category": category, "orderFilter": "StopOrder", "limit": 50}
         if symbol:
             params["symbol"] = symbol
+        elif category == "linear":
+            params["settleCoin"] = "USDT"  # Required for linear without symbol
+        elif category == "inverse":
+            params["settleCoin"] = "BTC"   # Default settle coin for inverse
         return self._request("GET", "/v5/order/realtime", params)
 
     def get_status(self) -> dict[str, Any]:
