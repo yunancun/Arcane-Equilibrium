@@ -96,6 +96,7 @@ async function ocApi(path, opts) {
       headers: headers,
       credentials: 'same-origin',  // Send HttpOnly cookie automatically / 自动发送 HttpOnly cookie
       body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
+      signal: AbortSignal.timeout(8000),  // 8s timeout prevents GUI freeze on slow API / 8 秒超时防止 API 慢时 GUI 卡死
     });
     if (!r.ok) {
       if (r.status === 401 || r.status === 403) {
