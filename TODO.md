@@ -1004,6 +1004,24 @@ E4 全量回歸 ✅ 3330 passed（+20 新測試）
 - 目前僅記憶體，重啟清零
 - **優先級**：Phase 3 Batch 3A 候選
 
+### Intent 被拒時策略內部狀態不回退（P2 · 已復現）
+
+**問題**：當 intent 被 governance/H0/Guardian 拒絕時，策略的 `_current_position` 不會回退。
+策略以為自己開了倉（因為已發出 intent），但 Paper Engine 實際沒有持倉。
+後續信號觸發「平倉」時，策略發出反向 intent，意外開了不該存在的新倉位。
+
+**復現案例（2026-04-01 13:16–13:32 PIPPINUSDT）**：
+1. 13:16 MA 死叉 → Sell intent → `rejected_governance`（重啟後授權丟失）
+2. 策略內部 `_current_position = "short"`，但 Paper Engine 無持倉
+3. 13:31 MA 金叉 → Buy intent（reason: "Close short"）→ submitted → 意外開了多單
+4. 37 秒後止損自動平掉 → 淨虧損 $0.09（毛利 +$0.07 被手續費 $0.16 吃掉）
+
+**修復方向**：
+- [ ] `pipeline_bridge` 在 intent 被拒後，回調通知策略清除 `_current_position`
+- [ ] 或：策略在 `_emit_intent()` 時不立即更新 position，等收到 execution report 再更新
+- **相關檔案**：`pipeline_bridge.py`（_gate_intent 拒絕路徑）、`strategies/base.py`（_current_position）
+- **優先級**：P2（非緊急但會造成假開倉虧損，授權恢復後不再觸發）
+
 ### Paper-Demo 差異校準系統（長期）
 
 Paper 與 Demo 是「內部模擬 + 外部驗證」雙軌架構，差異本身是系統健康度信號。
