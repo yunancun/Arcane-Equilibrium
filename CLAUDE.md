@@ -951,7 +951,12 @@ main_legacy.py 重構 Wave C：✅ control_ops + pnl_ops + learning_ops — 3802
   ★ 通過 _base.STORE / _base.get_latest_snapshot() 間接訪問單例（monkey-patch 安全）
   ★ re-export 向後兼容，3005 tests 零回歸
 
-下一步：Wave D（legacy_routes ~1200 行 → main_legacy.py 瘦身到 ~200 行）或 Paper Trading 21 天觀察期
+main_legacy.py 重構 Wave D：✅ legacy_routes — 1439→423 行（-1016）
+  ★ register_legacy_routes(app) 模式：路由函數包裝在函數內，app 創建後調用
+  ★ monkey-patched 函數（envelope_response/get_latest_snapshot/current_actor）在路由內通過 _base.xxx 延遲查找
+  ★ 重構總計：5265→423 行（-4842，-92%），拆出 8 模塊，3005 tests 零回歸
+
+下一步：Paper Trading 21 天觀察期 或 Wave C/D 模塊進一步細分（如 learning_ops 1624 行超 §14.1 警告線）
 
 完整派发计划：docs/audit/April01/PM_execution_plan_2026-04-01.md（Batch 1-7 計劃）
 ```
@@ -1087,11 +1092,15 @@ Wave C（已完成）：control_ops.py（654 行）+ pnl_ops.py（305 行）+ le
   ★ 所有寫操作通過 _base.STORE / _base.get_latest_snapshot() 間接訪問 main_legacy 單例
   ★ re-export 向後兼容，3005 tests 零回歸
 
-Wave D（待執行）：legacy_routes.py = ~1200 行 → main_legacy.py 瘦身到 ~200 行
+Wave D（已完成）：legacy_routes.py（1273 行）= -1016 行
+  423 行殘留（原 1439 行）
+  ★ register_legacy_routes(app) 模式避免循環 import（路由需要 app，app 在 main_legacy 創建）
+  ★ monkey-patched 函數必須在路由內通過 _base.xxx 延遲查找，不可在註冊時捕獲
+  ★ 重構總計：5265→423 行（-92%），8 模塊拆分完成
 ```
 
 ---
 
 ## 十五、一句话状态
 
-> 截至 2026-04-01 main_legacy.py Wave A+B+C 重構完成：5265→1439 行（-3826 行），拆出 8 模塊（state_models/state_compiler/state_store/auth/state_helpers/control_ops/pnl_ops/learning_ops），re-export 向後兼容，monkey-patch + importlib.reload 雙重安全驗證通過；§十四 代碼結構約定建立；系統 demo_only 模式；live_execution_allowed 仍為 false。
+> 截至 2026-04-01 main_legacy.py Wave A-D 重構全部完成：5265→423 行（-92%），拆出 8 模塊（state_models/state_compiler/state_store/auth/state_helpers/control_ops/pnl_ops/learning_ops/legacy_routes），re-export 向後兼容，monkey-patch 延遲查找 + importlib.reload 雙重安全驗證通過，3005 tests 零回歸；§十四 代碼結構約定建立；系統 demo_only 模式；live_execution_allowed 仍為 false。
