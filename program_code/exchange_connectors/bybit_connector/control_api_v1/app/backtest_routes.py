@@ -44,6 +44,7 @@ import logging
 import os
 import sys
 import threading
+import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
@@ -147,8 +148,8 @@ def _fetch_ohlcv_from_bybit(
     try:
         url = (
             f"{_BYBIT_BASE_URL}/v5/market/kline"
-            f"?category=linear&symbol={symbol}"
-            f"&interval={bybit_interval}&limit={limit}"
+            f"?category=linear&symbol={urllib.parse.quote(symbol, safe='')}"
+            f"&interval={urllib.parse.quote(bybit_interval, safe='')}&limit={limit}"
         )
         req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
