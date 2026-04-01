@@ -42,7 +42,9 @@ MODULE_NOTE (English):
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import threading
 import time
@@ -52,6 +54,24 @@ from enum import Enum
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Default snapshot path / 默认快照路径
+#
+# 优先读取环境变量 OPENCLAW_TRUTH_REGISTRY_PATH；
+# 若未设置，则使用项目根目录下的 settings/ 文件夹。
+#
+# Resolution order (priority high → low):
+#   1. OPENCLAW_TRUTH_REGISTRY_PATH env var
+#   2. <this_file>/../../../../settings/truth_registry_snapshot.json
+#      (i.e.  app/ → control_api_v1/ → bybit_connector/ → exchange_connectors/ → settings/)
+# ─────────────────────────────────────────────────────────────────────────────
+_TRUTH_REGISTRY_DEFAULT_PATH: str = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),  # app/
+    "..", "..", "..", "..",                        # up to srv/
+    "settings",
+    "truth_registry_snapshot.json",
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Enums / 枚举
@@ -317,6 +337,9 @@ class TruthSourceRegistry:
             "total_falsified": 0,
             "total_superseded": 0,
         }
+        # Debounced save timer — None means no save is currently scheduled
+        # 去抖动保存定时器 — None 表示当前没有计划保存
+        self._save_timer: Optional[threading.Timer] = None
 
     # ── Registration / 登记 ──
 
@@ -420,6 +443,9 @@ class TruthSourceRegistry:
             cid, cognitive_level.value, capped_confidence, applies_to_regime, applies_to_strategy,
             cid, cognitive_level.value, capped_confidence, applies_to_regime, applies_to_strategy,
         )
+        # Schedule debounced persistence so the new claim survives restarts
+        # 调度去抖动持久化，确保新声明在重启后仍可恢复
+        self._schedule_debounced_save()
         return cid
 
     # ── Query / 查询 ──
@@ -590,3 +616,206 @@ class TruthSourceRegistry:
         """
         with self._lock:
             return [claim.to_dict() for claim in self._claims.values()]
+
+    # ── Persistence / 持久化 ──
+
+    def save_snapshot(self, path: str) -> bool:
+        """Serialize all current claims to a JSON file at *path*.
+        将当前所有声明序列化到 *path* 指定的 JSON 文件。
+
+        Thread-safety design / 线程安全设计：
+          1. 持锁读取声明数据，复制到局部列表后立即释放锁
+             (Hold lock only to copy claim data; release before disk I/O)
+          2. 磁盘 I/O 在锁外进行，不阻塞并发注册操作
+             (Disk I/O outside the lock so concurrent register_claim() is not blocked)
+
+        Principle 7 isolation / 原则 7 隔离：
+          只序列化 PatternClaim 字段。不写入策略配置、风控阈值或任何实盘参数。
+          Only PatternClaim fields are serialized. No strategy config, risk thresholds,
+          or live trading parameters are written.
+
+        Fail-open / fail-open（写失败不中断交易）：
+          Any I/O or serialization error is caught, logged as WARNING, and returns False.
+          任何 I/O 或序列化错误均被捕获，记录为 WARNING，返回 False。
+
+        Returns:
+            True on success, False on any exception.
+            成功返回 True；任何异常返回 False。
+        """
+        # Step 1: read claims under lock, then release before I/O
+        # 步骤 1：持锁读取声明数据，然后在 I/O 前释放锁
+        with self._lock:
+            data = [claim.to_dict() for claim in self._claims.values()]
+
+        # Step 2: perform disk write outside the lock
+        # 步骤 2：在锁外执行磁盘写入
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+            logger.debug(
+                "save_snapshot: wrote %d claims to %s / 快照已写入 %d 条声明至 %s",
+                len(data), path, len(data), path,
+            )
+            return True
+        except Exception as exc:
+            # fail-open: log warning, do not crash the trading pipeline
+            # fail-open：记录警告，不中断交易管线
+            logger.warning(
+                "save_snapshot failed (fail-open): %s — path=%s / "
+                "save_snapshot 失败（fail-open）：%s — 路径=%s",
+                exc, path, exc, path,
+            )
+            return False
+
+    def load_snapshot(self, path: str) -> int:
+        """Load claims from a JSON snapshot file and restore them into the registry.
+        从 JSON 快照文件加载声明并恢复到存储中心。
+
+        Behaviour / 行为：
+          - Missing file  → log DEBUG, return 0 (no crash)
+            文件不存在 → 记录 DEBUG，返回 0（不崩溃）
+          - Corrupted JSON → log WARNING, return 0 (no crash)
+            JSON 损坏 → 记录 WARNING，返回 0（不崩溃）
+          - Existing claim_id → skip (do NOT overwrite newer in-memory data)
+            已存在的 claim_id → 跳过（不覆盖内存中更新的数据）
+
+        Principle 7 isolation / 原则 7 隔离：
+          Only PatternClaim fields are read. No strategy or risk configuration
+          is loaded or modified. Only PatternClaim 字段被读取，不加载或修改策略或风控配置。
+
+        Returns:
+            Count of claims successfully loaded (0 if file missing or corrupted).
+            成功加载的声明数（文件缺失或损坏时返回 0）。
+        """
+        # Step 1: check file existence (fail-open on missing file)
+        # 步骤 1：检查文件是否存在（文件缺失时 fail-open）
+        if not os.path.exists(path):
+            logger.debug(
+                "load_snapshot: file not found (no-op) — path=%s / "
+                "load_snapshot：文件不存在（无操作）— 路径=%s",
+                path, path,
+            )
+            return 0
+
+        # Step 2: read and parse JSON (fail-open on corrupted JSON)
+        # 步骤 2：读取并解析 JSON（JSON 损坏时 fail-open）
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (json.JSONDecodeError, OSError, ValueError) as exc:
+            logger.warning(
+                "load_snapshot: failed to parse snapshot (fail-open): %s — path=%s / "
+                "load_snapshot：快照解析失败（fail-open）：%s — 路径=%s",
+                exc, path, exc, path,
+            )
+            return 0
+
+        if not isinstance(raw, list):
+            logger.warning(
+                "load_snapshot: snapshot root is not a list (fail-open) — path=%s / "
+                "load_snapshot：快照根节点不是列表（fail-open）— 路径=%s",
+                path, path,
+            )
+            return 0
+
+        # Step 3: restore claims, skipping any claim_id that already exists
+        # 步骤 3：恢复声明，跳过已存在的 claim_id（不覆盖内存中更新的数据）
+        loaded = 0
+        with self._lock:
+            for entry in raw:
+                try:
+                    cid = entry["claim_id"]
+                    # Skip if already in registry — don't overwrite newer in-memory data
+                    # 若已存在则跳过 — 不覆盖内存中更新的数据
+                    if cid in self._claims:
+                        continue
+                    claim = PatternClaim(
+                        claim_id=cid,
+                        pattern_text=entry["pattern_text"],
+                        cognitive_level=CognitiveLevel(entry["cognitive_level"]),
+                        evidence_source=entry["evidence_source"],
+                        observation_count=int(entry["observation_count"]),
+                        confidence=float(entry["confidence"]),
+                        applies_to_regime=entry["applies_to_regime"],
+                        applies_to_strategy=entry["applies_to_strategy"],
+                        created_at_ms=int(entry["created_at_ms"]),
+                        expires_at_ms=int(entry["expires_at_ms"]),
+                        is_active=bool(entry.get("is_active", True)),
+                        superseded_by=entry.get("superseded_by"),
+                        falsification_count=int(entry.get("falsification_count", 0)),
+                        falsification_threshold=int(entry.get("falsification_threshold", 5)),
+                    )
+                    self._claims[cid] = claim
+                    loaded += 1
+                except (KeyError, TypeError, ValueError) as exc:
+                    # Skip malformed entries, log warning
+                    # 跳过格式错误的条目，记录警告
+                    logger.warning(
+                        "load_snapshot: skipping malformed entry %s: %s / "
+                        "load_snapshot：跳过格式错误的条目 %s：%s",
+                        entry.get("claim_id", "?"), exc,
+                        entry.get("claim_id", "?"), exc,
+                    )
+
+        logger.debug(
+            "load_snapshot: loaded %d claims from %s / 从 %s 加载了 %d 条声明",
+            loaded, path, path, loaded,
+        )
+        return loaded
+
+    # ── Debounced save internals / 去抖动保存内部实现 ──
+
+    def _schedule_debounced_save(self) -> None:
+        """Schedule a debounced background save, resetting the window on each call.
+        调度去抖动后台保存；每次调用都重置防抖窗口。
+
+        Design / 设计：
+          - 使用 threading.Timer（非 asyncio），因为 TruthSourceRegistry 是纯同步代码。
+            Uses threading.Timer (not asyncio) because TruthSourceRegistry is sync.
+          - 若已有定时器挂起，先取消再重新调度（重置 30s 窗口）。
+            If a timer is already pending, cancel it and reschedule (reset 30s window).
+          - 定时器线程设为 daemon，进程退出时不阻塞。
+            Timer thread is daemon so it won't block process exit.
+          - 此方法本身非阻塞，不影响 register_claim() 主路径延迟。
+            This method is non-blocking; it does not add latency to register_claim().
+
+        Path for save file / 保存路径：
+          OPENCLAW_TRUTH_REGISTRY_PATH env var → fallback: "settings/truth_registry_snapshot.json"
+          环境变量 OPENCLAW_TRUTH_REGISTRY_PATH → 回退：相对路径
+        """
+        with self._lock:
+            # Cancel any previously scheduled save (reset debounce window)
+            # 取消之前已调度的保存（重置防抖窗口）
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+
+            # Resolve path at schedule time so env var changes are picked up
+            # 在调度时解析路径，以便环境变量更改生效
+            path = os.environ.get(
+                "OPENCLAW_TRUTH_REGISTRY_PATH",
+                "settings/truth_registry_snapshot.json",
+            )
+            # 30s debounce window: if many claims are registered quickly, only one save fires
+            # 30s 防抖窗口：若快速注册多条声明，只触发一次保存
+            timer = threading.Timer(30.0, self._do_save, args=(path,))
+            timer.daemon = True  # don't block process exit / 不阻塞进程退出
+            timer.start()
+            self._save_timer = timer
+
+    def _do_save(self, path: str) -> None:
+        """Internal callback invoked by the debounce timer to persist the registry.
+        去抖动定时器触发的内部回调，用于持久化存储。
+
+        After the save completes (success or fail), clear self._save_timer so the
+        next register_claim() call can schedule a fresh save.
+        保存完成（成功或失败）后清除 self._save_timer，使下次 register_claim()
+        可以调度新的保存。
+        """
+        # Delegate actual I/O to save_snapshot (fail-open, handles all exceptions)
+        # 将实际 I/O 委托给 save_snapshot（fail-open，处理所有异常）
+        self.save_snapshot(path)
+        # Clear the timer reference after save completes
+        # 保存完成后清除定时器引用
+        with self._lock:
+            self._save_timer = None

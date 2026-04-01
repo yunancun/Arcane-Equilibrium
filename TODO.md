@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Phase 3 Batch 3A ExperimentLedger + ExperimentRoutes + EvolutionEngine · 3289 tests）
+# 最後更新：2026-04-01（Phase 3 Batch 3B L3 管線接通 + 3A-4 TruthSourceRegistry 持久化 · 3310 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-3289 passed / 20 failed（Phase 3 Batch 3A 後；+88 新測試：ExperimentLedger 32 + ExperimentRoutes 25 + EvolutionEngine 31；pre-existing failures 不影響本工作）
+3310 passed / 21 failed（Phase 3 Batch 3B 後；+21 新測試：persistence 6 + AnalystAgent 3 + auto_seed 3 + evolution_routes 10 - 1 skipped；pre-existing failures 不影響本工作）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
@@ -957,28 +957,35 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 
 ---
 
-### [ ] 3A-4：TruthSourceRegistry 持久化（~2h，延至下一 Batch）
-- **檔案**：`app/truth_source_registry.py`（修改）
-- **問題**：目前僅記憶體，重啟清零，假設驗證結果無法跨 session 保留
-- **方案**：新增 `save_snapshot(path)` / `load_snapshot(path)` JSON 序列化
-- **E1 指派**：待派發
-- **工時**：2h + E2 + E4
+### [x] 3A-4：TruthSourceRegistry 持久化
+- **實際實作**：`app/truth_source_registry.py` 新增 `save_snapshot()` / `load_snapshot()` / `_schedule_debounced_save()`
+- `register_claim()` 後自動觸發 30s debounced save（threading.Timer daemon）
+- 啟動時 `_startup_integrity_check()` 自動 load snapshot（fail-open）
+- 環境變數 `OPENCLAW_TRUTH_REGISTRY_PATH`，默認 `settings/truth_registry_snapshot.json`
+- **測試**：`test_truth_source_registry.py` +6（52 total）
+- ✅ 完成：commit Phase3Batch3B（2026-04-01）
 
 ---
 
-### Phase 3 Batch 3A 工作鏈（✅ 已完成 3A-1/2/3，3A-4 待下次）
+### Phase 3 Batch 3A + 3B 工作鏈（✅ 全部完成）
 
 ```
-E2 統一代碼審查 ✅ PASS（無阻塞問題）
-E4 全量回歸 ✅ 3289 passed（+88 新測試：ExperimentLedger 32 + ExperimentRoutes 25 + EvolutionEngine 31）
+3A-1/2/3 ExperimentLedger + ExperimentRoutes + EvolutionEngine ✅ 3289 passed
+3A-4 TruthSourceRegistry 持久化 ✅
+3B-1 AnalystAgent → ExperimentLedger 觀測記錄 ✅
+3B-2 ExperimentLedger.auto_seed_from_claims() ✅
+3B-3 EvolutionRoutes POST /run + GET /status ✅
+3B-4 main.py 啟動自動填充（load_snapshot + auto_seed_from_claims）✅
+E4 全量回歸 ✅ 3310 passed（+21 新測試）
 ```
 
-### 驗收標準（FA 定義，已達成）
-- ✅ ExperimentLedger 完整假設生命週期（PENDING→CONFIRMED/REFUTED/EXPIRED）
-- ✅ ExperimentRoutes 4 個 REST 端點（Operator auth + read-only 分離）
-- ✅ EvolutionEngine 策略參數自動優化（原則 7 隔離 + 原則 5 資源上限）
-- ✅ 所有模組零 live 模組 import（原則 7 可審計）
-- ✅ E2 PASS + E4 3289 passed
+### 驗收標準（全部達成）
+- ✅ TruthSourceRegistry 持久化（save/load/debounced，跨重啟保留）
+- ✅ AnalystAgent winning/losing → ExperimentLedger 觀測（fail-open）
+- ✅ ExperimentLedger 啟動自動從快照填充（min_confidence=0.5）
+- ✅ EvolutionRoutes POST /run（Operator auth）+ GET /status
+- ✅ 所有模組零 live 模組 import（原則 7）
+- ✅ E4 3310 passed
 
 ---
 

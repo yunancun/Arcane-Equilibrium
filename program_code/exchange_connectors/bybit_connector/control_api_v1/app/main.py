@@ -184,6 +184,10 @@ app.include_router(backtest_router)
 from .experiment_routes import router as experiment_router  # noqa: E402
 app.include_router(experiment_router)
 
+# ── Evolution Engine Router / 進化引擎路由注册 ──
+from .evolution_routes import router as evolution_router  # noqa: E402
+app.include_router(evolution_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
@@ -270,6 +274,33 @@ async def _startup_integrity_check() -> None:
                 "/ SymbolCategoryRegistry 啟動初始化失敗（不阻斷啟動）：%s",
                 _reg_exc, _reg_exc,
             )
+
+    # ── Phase 3: ExperimentLedger startup auto-seed from TruthSourceRegistry snapshot ──
+    # 啟動時從 TruthSourceRegistry 快照自動填充初始假設（fail-open，不阻斷啟動）
+    # On startup, auto-seed ExperimentLedger from persisted TruthSourceRegistry snapshot.
+    # fail-open: any failure must not block startup.
+    try:
+        _snapshot_path = os.environ.get(
+            "OPENCLAW_TRUTH_REGISTRY_PATH", "settings/truth_registry_snapshot.json"
+        )
+        from .experiment_routes import get_experiment_ledger  # noqa: PLC0415
+        from .truth_source_registry import TruthSourceRegistry as _TruthSourceRegistry  # noqa: PLC0415
+        _seed_registry = _TruthSourceRegistry()
+        loaded = _seed_registry.load_snapshot(_snapshot_path)
+        if loaded > 0:
+            _ledger = get_experiment_ledger()
+            seeded = _ledger.auto_seed_from_claims(
+                list(_seed_registry.get_all_claims().values()),
+                min_confidence=0.5,
+            )
+            base.logger.info(
+                "Startup auto-seed: loaded %d claims, seeded %d hypotheses / "
+                "啟動自動填充：載入 %d 條 claim，生成 %d 個假設",
+                loaded, seeded, loaded, seeded,
+            )
+    except Exception as _e:
+        # fail-open：自動填充失敗不阻斷啟動 / fail-open: auto-seed failure must not block startup
+        base.logger.warning("ExperimentLedger startup auto-seed failed (fail-open): %s", _e)
 
 
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──

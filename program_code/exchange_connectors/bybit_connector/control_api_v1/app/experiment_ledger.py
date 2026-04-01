@@ -553,6 +553,62 @@ class ExperimentLedger:
 
         return counts
 
+    def auto_seed_from_claims(self, claims: list, min_confidence: float = 0.5) -> int:
+        """
+        從 TruthSourceRegistry 的高信心 claims 自動生成初始假設。
+        Auto-generate initial hypotheses from high-confidence TruthSourceRegistry claims.
+
+        只為 confidence >= min_confidence 的 claim 生成假設，避免低質量信號污染。
+        Only generate hypotheses for claims with confidence >= min_confidence to avoid
+        low-quality noise polluting the hypothesis pool.
+
+        fail-open：單條 claim 失敗不阻斷整體；返回成功生成數量。
+        fail-open: single claim failure does not abort; returns count of successfully
+        proposed hypotheses.
+
+        原則 10 認知誠實：跳過 applies_to_strategy=="all" 的聲明，
+        避免生成過於寬泛的假設污染學習平面。
+        Principle 10 Cognitive Honesty: skip claims with strategy="all" to avoid
+        overly broad hypotheses polluting the learning plane.
+
+        Args:
+            claims: list of PatternClaim objects (e.g. from TruthSourceRegistry.get_active_claims())
+                    PatternClaim 對象列表（例如來自 TruthSourceRegistry.get_active_claims()）
+            min_confidence: minimum confidence threshold (default 0.5)
+                            最低置信度閾值（默認 0.5）
+
+        Returns:
+            int: count of hypotheses successfully proposed
+                 成功提出的假設數量
+        """
+        count = 0
+        for claim in claims:
+            # 低信心 claim 跳過（噪音過濾）/ Skip low-confidence claims (noise filter)
+            confidence = getattr(claim, "confidence", 0.0)
+            if confidence < min_confidence:
+                continue
+            try:
+                strategy = getattr(claim, "applies_to_strategy", "unknown")
+                regime = getattr(claim, "applies_to_regime", "all")
+                pattern_text = getattr(claim, "pattern_text", str(claim))
+
+                # 避免生成 applies_to_strategy="all" 的假設（原則 10 認知誠實）
+                # Avoid generating hypotheses with strategy="all" (Principle 10: cognitive honesty)
+                if strategy == "all":
+                    continue
+
+                self.propose_hypothesis(
+                    description=f"[auto-seed] {pattern_text}",
+                    strategy_name=strategy,
+                    regime=regime,
+                    proposed_by="truth_registry_autoseed",
+                )
+                count += 1
+            except Exception as e:
+                # fail-open：跳過此 claim，繼續處理其餘 / fail-open: skip this claim
+                logger.debug("auto_seed_from_claims skipped claim: %s", e)
+        return count
+
     def to_snapshot(self) -> List[Dict[str, Any]]:
         """Return a serializable snapshot of all hypotheses.
         返回所有假设的可序列化快照。

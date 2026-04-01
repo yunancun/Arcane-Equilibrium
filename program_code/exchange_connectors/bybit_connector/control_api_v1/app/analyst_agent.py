@@ -182,6 +182,10 @@ class AnalystAgent:
         # 知識登記表：外部注入，用於登記模式聲明（Principle 7 隔離）
         self._truth_registry: Optional[Any] = None
 
+        # ExperimentLedger: injected externally for hypothesis observation recording
+        # 實驗帳本：外部注入，用於記錄模式假設觀測（原則 7：學習平面隔離）
+        self._experiment_ledger: Optional[Any] = None
+
         # Stats / 统计
         self._stats = {
             "trades_analyzed": 0,
@@ -391,6 +395,19 @@ class AnalystAgent:
         """
         self._truth_registry = registry
 
+    def set_experiment_ledger(self, ledger: Any) -> None:
+        """
+        注入 ExperimentLedger 實例，供假設觀測記錄使用。
+        Inject ExperimentLedger instance for hypothesis observation recording.
+
+        原則 7：ExperimentLedger 屬於學習平面，不影響 live 交易決策。
+        Principle 7: ExperimentLedger belongs to learning plane, does not affect live decisions.
+
+        fail-open：ledger 為 None 時，分析繼續正常運行，不記錄觀測。
+        fail-open: if ledger is None, analysis continues without recording observations.
+        """
+        self._experiment_ledger = ledger
+
     # 已知策略名稱清單，供從 pattern_text 中提取策略名使用
     # Known strategy names used to extract applies_to_strategy from pattern_text
     _KNOWN_STRATEGIES = frozenset([
@@ -450,54 +467,104 @@ class AnalystAgent:
         Fail-open: any error → log warning, never raises.
         失敗開放：任何異常 → 記錄警告，不向上拋出。
         """
-        if self._truth_registry is None:
-            # registry 未注入，正常運行，直接返回（fail-open）
-            # registry not injected — normal operation, return silently (fail-open)
-            return
         try:
             n_obs = len(self._records)
             # 置信度上限 0.85（原則 7：AI 輸出永遠不是 FACT）
             # Confidence capped at 0.85 (Principle 7: AI output is never FACT)
             win_confidence = min(0.85, 0.5 + n_obs * 0.001)
 
-            # ── 贏模式登記 / Register winning patterns ──
-            for pattern_text in (getattr(insight, "winning_patterns", None) or []):
-                pt_str = str(pattern_text)
-                # 提取策略 key；_extract_strategy_from_pattern 永不返回 "all"
-                # Extract strategy key; _extract_strategy_from_pattern never returns "all"
-                strategy = self._extract_strategy_from_pattern(pt_str)
-                self._truth_registry.register_claim(
-                    pattern_text=pt_str,
-                    evidence_source="ai",
-                    observation_count=n_obs,
-                    confidence=win_confidence,
-                    applies_to_regime="all",
-                    applies_to_strategy=strategy,
-                )
+            # ── 贏模式登記到 TruthSourceRegistry / Register winning patterns to TruthSourceRegistry ──
+            # registry 未注入時跳過此區塊，但後面的 ExperimentLedger 記錄仍會執行
+            # Skip this block when registry is not injected; ExperimentLedger recording still runs
+            if self._truth_registry is not None:
+                for pattern_text in (getattr(insight, "winning_patterns", None) or []):
+                    pt_str = str(pattern_text)
+                    # 提取策略 key；_extract_strategy_from_pattern 永不返回 "all"
+                    # Extract strategy key; _extract_strategy_from_pattern never returns "all"
+                    strategy = self._extract_strategy_from_pattern(pt_str)
+                    self._truth_registry.register_claim(
+                        pattern_text=pt_str,
+                        evidence_source="ai",
+                        observation_count=n_obs,
+                        confidence=win_confidence,
+                        applies_to_regime="all",
+                        applies_to_strategy=strategy,
+                    )
 
-            # ── 輸模式登記 / Register losing patterns ──
+            # 向 ExperimentLedger 記錄贏模式觀測（fail-open，獨立於 truth_registry）
+            # Record winning pattern observations to ExperimentLedger (fail-open, independent of truth_registry)
+            if self._experiment_ledger is not None:
+                self._record_pattern_observations(insight, is_winning=True)
+
+            # ── 輸模式登記到 TruthSourceRegistry / Register losing patterns to TruthSourceRegistry ──
             # 置信度反轉：輸模式固定使用低置信度 0.4，讓 StrategistAgent 降低對應策略偏好
             # Confidence inverted: losing patterns use fixed low confidence 0.4
             # so StrategistAgent reduces preference for those strategies
             losing_confidence = 0.4
-            for pattern_text in (getattr(insight, "losing_patterns", None) or []):
-                pt_str = str(pattern_text)
-                # 提取策略 key，不使用 "all"
-                # Extract strategy key, never "all"
-                strategy = self._extract_strategy_from_pattern(pt_str)
-                # 加 "losing: " 前綴，讓 StrategistAgent._apply_pattern_insight() 識別為負向信號
-                # Prefix with "losing: " so StrategistAgent identifies it as a negative signal
-                self._truth_registry.register_claim(
-                    pattern_text=f"losing: {pt_str}",
-                    evidence_source="ai",
-                    observation_count=n_obs,
-                    confidence=losing_confidence,
-                    applies_to_regime="all",
-                    applies_to_strategy=strategy,
-                )
+            if self._truth_registry is not None:
+                for pattern_text in (getattr(insight, "losing_patterns", None) or []):
+                    pt_str = str(pattern_text)
+                    # 提取策略 key，不使用 "all"
+                    # Extract strategy key, never "all"
+                    strategy = self._extract_strategy_from_pattern(pt_str)
+                    # 加 "losing: " 前綴，讓 StrategistAgent._apply_pattern_insight() 識別為負向信號
+                    # Prefix with "losing: " so StrategistAgent identifies it as a negative signal
+                    self._truth_registry.register_claim(
+                        pattern_text=f"losing: {pt_str}",
+                        evidence_source="ai",
+                        observation_count=n_obs,
+                        confidence=losing_confidence,
+                        applies_to_regime="all",
+                        applies_to_strategy=strategy,
+                    )
+
+            # 向 ExperimentLedger 記錄輸模式觀測（fail-open，獨立於 truth_registry）
+            # Record losing pattern observations to ExperimentLedger (fail-open, independent of truth_registry)
+            if self._experiment_ledger is not None:
+                self._record_pattern_observations(insight, is_winning=False)
 
         except Exception as e:
             logger.warning("_register_pattern_claims failed (fail-open): %s", e)
+
+    def _record_pattern_observations(self, insight: Any, is_winning: bool) -> None:
+        """
+        根據分析結果向 ExperimentLedger 記錄觀測。
+        Record pattern analysis observations to ExperimentLedger.
+
+        winning patterns → outcome="supporting"
+        losing patterns  → outcome="refuting"
+
+        fail-open：單條失敗不傳播，繼續記錄其餘假設。
+        fail-open: single failure does not propagate; continue recording other hypotheses.
+
+        原則 7：本方法僅操作學習平面（ExperimentLedger），不影響交易決策。
+        Principle 7: This method only operates on the learning plane (ExperimentLedger),
+        and does not affect trading decisions.
+
+        Args:
+            insight: PatternInsight object from L2 analysis / L2 分析產生的模式洞察對象
+            is_winning: True for winning patterns (supporting), False for losing (refuting)
+                        True 表示贏模式（支持），False 表示輸模式（反駁）
+        """
+        # 根據贏/輸確定 outcome 字串 / Determine outcome string based on win/loss
+        outcome = "supporting" if is_winning else "refuting"
+        try:
+            # 取所有活躍假設（PENDING / RUNNING 狀態）/ Get all active (non-concluded) hypotheses
+            all_hyps = self._experiment_ledger.get_all_hypotheses()
+            for hyp in all_hyps:
+                # 只對尚未結案的假設記錄觀測 / Only record for non-concluded hypotheses
+                if hyp.status.value in ("PENDING", "RUNNING"):
+                    try:
+                        self._experiment_ledger.record_observation(hyp.hypothesis_id, outcome)
+                    except Exception as e:
+                        # fail-open：跳過此假設，繼續處理其餘 / fail-open: skip this hypothesis
+                        logger.debug(
+                            "ExperimentLedger record_observation skipped hyp=%s: %s",
+                            hyp.hypothesis_id, e,
+                        )
+        except Exception as e:
+            # fail-open：不阻塞分析路徑 / fail-open: do not block the analysis path
+            logger.warning("_record_pattern_observations failed (fail-open): %s", e)
 
     # ── L2: AI Pattern Discovery / L2：AI 模式发现 ──
 

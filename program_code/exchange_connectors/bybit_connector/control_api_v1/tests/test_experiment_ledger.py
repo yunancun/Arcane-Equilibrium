@@ -571,5 +571,118 @@ class TestThreadSafety(unittest.TestCase):
         self.assertEqual(len(set(ids)), 20, "Duplicate hypothesis IDs detected")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# G. TestAutoSeedFromClaims
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAutoSeedFromClaims(unittest.TestCase):
+    """
+    E1-Beta Batch 3B — Tests for ExperimentLedger.auto_seed_from_claims().
+    驗收標準：
+      G1. 高信心 claims 自動生成 PENDING 假設
+      G2. 低信心 claims 被跳過，不生成假設
+      G3. applies_to_strategy="all" 的 claims 被跳過（原則 10）
+    """
+
+    def _make_claim(
+        self,
+        pattern_text: str = "test pattern",
+        confidence: float = 0.7,
+        strategy: str = "ma_crossover",
+        regime: str = "trending",
+    ) -> MagicMock:
+        """
+        Create a mock PatternClaim object for testing.
+        建立用於測試的 mock PatternClaim 對象。
+        """
+        claim = MagicMock()
+        claim.pattern_text = pattern_text
+        claim.confidence = confidence
+        claim.applies_to_strategy = strategy
+        claim.applies_to_regime = regime
+        return claim
+
+    # ── G1: 高信心 claims 自動生成假設 ──────────────────────────────────────
+    def test_auto_seed_creates_hypotheses_for_high_confidence(self):
+        """
+        Claims with confidence >= min_confidence (default 0.5) should generate PENDING hypotheses.
+        confidence >= min_confidence 的 claims 應生成 PENDING 假設。
+        """
+        ledger = ExperimentLedger()
+
+        claims = [
+            self._make_claim("ma_crossover trending signal", confidence=0.7, strategy="ma_crossover"),
+            self._make_claim("grid ranging profit", confidence=0.65, strategy="grid"),
+        ]
+
+        count = ledger.auto_seed_from_claims(claims, min_confidence=0.5)
+
+        # 應成功生成 2 個假設 / Should successfully propose 2 hypotheses
+        self.assertEqual(count, 2, "Should propose one hypothesis per high-confidence claim")
+
+        # 所有假設應為 PENDING 狀態 / All hypotheses should be PENDING
+        all_hyps = ledger.get_all_hypotheses(status=HypothesisStatus.PENDING)
+        self.assertEqual(len(all_hyps), 2, "All auto-seeded hypotheses should be PENDING")
+
+        # 假設描述應含 "[auto-seed]" 前綴 / Descriptions should contain "[auto-seed]" prefix
+        for h in all_hyps:
+            self.assertTrue(
+                h.description.startswith("[auto-seed]"),
+                f"Description '{h.description}' should start with '[auto-seed]'",
+            )
+            # proposed_by 應為 "truth_registry_autoseed" / proposed_by should be autoseed
+            self.assertEqual(h.proposed_by, "truth_registry_autoseed")
+
+    # ── G2: 低信心 claims 被跳過 ──────────────────────────────────────────────
+    def test_auto_seed_skips_low_confidence(self):
+        """
+        Claims with confidence < min_confidence should be skipped — no hypotheses created.
+        confidence < min_confidence 的 claims 應被跳過，不生成假設。
+        """
+        ledger = ExperimentLedger()
+
+        claims = [
+            self._make_claim("weak signal A", confidence=0.3, strategy="grid"),
+            self._make_claim("weak signal B", confidence=0.49, strategy="ma_crossover"),
+        ]
+
+        count = ledger.auto_seed_from_claims(claims, min_confidence=0.5)
+
+        # 應生成 0 個假設（全部低信心）/ Should propose 0 hypotheses (all low-confidence)
+        self.assertEqual(count, 0, "Low-confidence claims should be skipped entirely")
+
+        # 帳本應為空 / Ledger should be empty
+        stats = ledger.get_stats()
+        self.assertEqual(stats["total"], 0, "No hypotheses should be in ledger")
+
+    # ── G3: applies_to_strategy="all" 的 claims 被跳過（原則 10 認知誠實）────────
+    def test_auto_seed_skips_strategy_all(self):
+        """
+        Claims with applies_to_strategy="all" should be skipped (Principle 10: Cognitive Honesty).
+        applies_to_strategy="all" 的 claims 應被跳過（原則 10：認知誠實）。
+        """
+        ledger = ExperimentLedger()
+
+        claims = [
+            # 這個應被跳過 / This should be skipped
+            self._make_claim("generic signal", confidence=0.8, strategy="all"),
+            # 這個應被保留 / This should be kept
+            self._make_claim("ma_crossover specific", confidence=0.8, strategy="ma_crossover"),
+        ]
+
+        count = ledger.auto_seed_from_claims(claims, min_confidence=0.5)
+
+        # 只有 1 個假設應被生成（strategy="all" 的被跳過）
+        # Only 1 hypothesis should be proposed (strategy="all" is skipped)
+        self.assertEqual(count, 1, "Claims with strategy='all' should be skipped")
+
+        # 驗證生成的假設不是 "all" 策略 / Verify proposed hypothesis is not "all" strategy
+        all_hyps = ledger.get_all_hypotheses()
+        self.assertEqual(len(all_hyps), 1)
+        self.assertNotEqual(all_hyps[0].strategy_name, "all",
+                            "Proposed hypothesis must not have strategy_name='all'")
+        self.assertEqual(all_hyps[0].strategy_name, "ma_crossover")
+
+
 if __name__ == "__main__":
     unittest.main()

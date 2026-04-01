@@ -472,5 +472,106 @@ class TestRegistryClaimGrowthMultipleAnalyses(unittest.TestCase):
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# New tests: ExperimentLedger integration
+# 新測試：ExperimentLedger 集成
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExperimentLedgerIntegration(unittest.TestCase):
+    """
+    E1-Beta Batch 3B — ExperimentLedger integration with AnalystAgent.
+    驗收標準：
+      - set_experiment_ledger 正確注入
+      - winning pattern 分析 → record_observation("supporting") 被呼叫
+      - _experiment_ledger=None 時分析不崩潰（fail-open）
+    """
+
+    # ── 測試 1：set_experiment_ledger 正確注入 ──────────────────────────────
+    def test_set_experiment_ledger_injects_correctly(self):
+        """
+        After set_experiment_ledger(mock), _experiment_ledger attribute is set.
+        呼叫 set_experiment_ledger(mock) 後，_experiment_ledger 屬性應正確設置。
+        """
+        agent = AnalystAgent()
+        agent.start()
+
+        # 初始時應為 None / Should be None initially
+        self.assertIsNone(agent._experiment_ledger)
+
+        mock_ledger = MagicMock()
+        agent.set_experiment_ledger(mock_ledger)
+
+        # 注入後應為 mock_ledger / After injection should be mock_ledger
+        self.assertIs(agent._experiment_ledger, mock_ledger)
+
+    # ── 測試 2：Winning pattern 分析 → record_observation("supporting") 被呼叫 ──
+    def test_record_pattern_observations_calls_ledger(self):
+        """
+        Winning pattern analysis triggers record_observation("supporting") on active hypotheses.
+        贏模式分析應觸發 ExperimentLedger.record_observation("supporting") 呼叫。
+        """
+        from app.experiment_ledger import ExperimentLedger, HypothesisStatus
+
+        # 建立真實的 ExperimentLedger 並注入一個活躍假設
+        # Create a real ExperimentLedger with an active hypothesis
+        ledger = ExperimentLedger()
+        hid = ledger.propose_hypothesis(
+            description="ma_crossover works in trending",
+            strategy_name="ma_crossover",
+            min_observations=100,  # 高閾值，不讓假設提前結案 / High threshold to avoid premature conclusion
+        )
+        # 假設應處於 PENDING 狀態 / Hypothesis should be in PENDING state
+        self.assertEqual(ledger.get_hypothesis(hid).status, HypothesisStatus.PENDING)
+
+        # 建立帶 mock Ollama 的 AnalystAgent 並注入 ledger
+        # Create AnalystAgent with mock Ollama and inject ledger
+        mock_ollama = _mock_ollama_returning(
+            winning=["ma_crossover performs well in trending"],
+            losing=[],
+        )
+        config = AnalystConfig(l2_min_observations=5)
+        agent = AnalystAgent(config=config, ollama_client=mock_ollama)
+        agent.start()
+        agent.set_experiment_ledger(ledger)
+        _fill_agent(agent, count=10)
+
+        # 觸發分析 / Trigger analysis
+        agent.analyze_patterns(force=True)
+
+        # 假設應已從 PENDING 轉為 RUNNING（表示有 observation 被記錄）
+        # Hypothesis should have transitioned PENDING → RUNNING (observation was recorded)
+        h = ledger.get_hypothesis(hid)
+        self.assertEqual(
+            h.status, HypothesisStatus.RUNNING,
+            "Hypothesis should be RUNNING after winning pattern observation was recorded",
+        )
+        # supporting_count 應大於 0 / supporting_count should be > 0
+        self.assertGreater(h.supporting_count, 0, "supporting_count should be > 0 after supporting observation")
+
+    # ── 測試 3：_experiment_ledger=None 時分析不崩潰（fail-open）──────────────
+    def test_experiment_ledger_none_is_noop(self):
+        """
+        When _experiment_ledger=None (not injected), analysis completes without crash.
+        _experiment_ledger=None（未注入）時，分析應正常完成，不崩潰。
+        """
+        mock_ollama = _mock_ollama_returning(
+            winning=["some winning pattern"],
+            losing=["some losing pattern"],
+        )
+        config = AnalystConfig(l2_min_observations=5)
+        agent = AnalystAgent(config=config, ollama_client=mock_ollama)
+        agent.start()
+        # 故意不注入 ExperimentLedger / Intentionally do NOT inject ExperimentLedger
+        self.assertIsNone(agent._experiment_ledger)
+
+        registry = TruthSourceRegistry()
+        agent.set_truth_registry(registry)
+        _fill_agent(agent, count=10)
+
+        # 不應拋出任何異常 / Must not raise any exception
+        result = agent.analyze_patterns(force=True)
+        self.assertIsNotNone(result, "analyze_patterns should return insight even without ledger")
+
+
 if __name__ == "__main__":
     unittest.main()

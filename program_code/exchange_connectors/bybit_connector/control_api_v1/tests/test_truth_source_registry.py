@@ -658,5 +658,196 @@ class TestStrategistAgentRegistryIntegration(unittest.TestCase):
         agent.on_message(msg)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Persistence tests: save_snapshot / load_snapshot / debounced save
+# 持久化测试：快照保存 / 快照加载 / 去抖动保存
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPersistence(unittest.TestCase):
+    """Persistence layer: save_snapshot / load_snapshot / _schedule_debounced_save.
+    持久化层：save_snapshot / load_snapshot / _schedule_debounced_save。
+    """
+
+    # Helper to register a minimal claim / 注册一条最简声明的辅助函数
+    def _register_one(self, registry: TruthSourceRegistry, claim_id: str = "persist_test_001") -> str:
+        return registry.register_claim(
+            pattern_text="test persistence pattern",
+            evidence_source="statistical_N=50",
+            observation_count=50,
+            confidence=0.65,
+            applies_to_regime="trending",
+            applies_to_strategy="ma_crossover",
+            claim_id=claim_id,
+        )
+
+    def test_save_creates_file(self):
+        """save_snapshot() creates a JSON file at the specified path.
+        save_snapshot() 在指定路径创建 JSON 文件。
+        """
+        import tempfile, json as _json
+        registry = TruthSourceRegistry()
+        self._register_one(registry)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "snapshot.json")
+            result = registry.save_snapshot(path)
+
+            # Return value should be True on success / 成功时返回值应为 True
+            self.assertTrue(result)
+            # File should exist / 文件应存在
+            self.assertTrue(os.path.exists(path))
+            # File should contain valid JSON with at least one claim
+            # 文件应包含至少一条声明的有效 JSON
+            with open(path, "r", encoding="utf-8") as fh:
+                data = _json.load(fh)
+            self.assertIsInstance(data, list)
+            self.assertGreaterEqual(len(data), 1)
+            self.assertEqual(data[0]["claim_id"], "persist_test_001")
+
+    def test_load_restores_claims(self):
+        """save + load round-trip restores the same claim.
+        保存 + 加载往返恢复相同的声明。
+        """
+        import tempfile
+        registry = TruthSourceRegistry()
+        self._register_one(registry, "roundtrip_claim")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "snapshot.json")
+            registry.save_snapshot(path)
+
+            # Create a fresh registry and load from file
+            # 创建新存储并从文件加载
+            registry2 = TruthSourceRegistry()
+            loaded = registry2.load_snapshot(path)
+
+            self.assertEqual(loaded, 1)
+            claims = registry2.get_active_claims()
+            self.assertEqual(len(claims), 1)
+            # Verify key fields match / 验证关键字段匹配
+            c = claims[0]
+            self.assertEqual(c.claim_id, "roundtrip_claim")
+            self.assertEqual(c.pattern_text, "test persistence pattern")
+            self.assertAlmostEqual(c.confidence, 0.65, places=3)
+
+    def test_load_missing_file_returns_zero(self):
+        """load_snapshot() on a non-existent path returns 0, no exception.
+        对不存在的路径调用 load_snapshot() 返回 0，不抛出异常。
+        """
+        import tempfile
+        registry = TruthSourceRegistry()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_path = os.path.join(tmpdir, "does_not_exist.json")
+            try:
+                result = registry.load_snapshot(missing_path)
+            except Exception as exc:
+                self.fail(f"load_snapshot raised on missing file: {exc}")
+            self.assertEqual(result, 0)
+            # Registry should remain empty / 存储应保持为空
+            self.assertEqual(len(registry.get_active_claims()), 0)
+
+    def test_load_corrupted_json_returns_zero(self):
+        """load_snapshot() on corrupted JSON returns 0, no exception.
+        对损坏的 JSON 文件调用 load_snapshot() 返回 0，不抛出异常。
+        """
+        import tempfile
+        registry = TruthSourceRegistry()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = os.path.join(tmpdir, "corrupt.json")
+            with open(bad_path, "w", encoding="utf-8") as fh:
+                fh.write("{this is not: valid json ][")
+
+            try:
+                result = registry.load_snapshot(bad_path)
+            except Exception as exc:
+                self.fail(f"load_snapshot raised on corrupted JSON: {exc}")
+            self.assertEqual(result, 0)
+
+    def test_load_skips_existing_claims(self):
+        """load_snapshot() skips claim_ids already in the registry.
+        load_snapshot() 跳过已在存储中存在的 claim_id。
+        """
+        import tempfile
+        registry = TruthSourceRegistry()
+        self._register_one(registry, "existing_claim")  # already in memory / 已在内存中
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "snapshot.json")
+            # Save a snapshot that contains "existing_claim"
+            # 保存包含 "existing_claim" 的快照
+            registry.save_snapshot(path)
+
+            # Now load into the same registry — the claim already exists, must be skipped
+            # 现在加载到同一存储 — 声明已存在，必须跳过
+            loaded = registry.load_snapshot(path)
+            # Return count should be 0 (nothing newly loaded)
+            # 返回计数应为 0（没有新加载任何内容）
+            self.assertEqual(loaded, 0)
+            # Total claims in registry must not be doubled
+            # 存储中的声明总数不得翻倍
+            snapshot = registry.to_snapshot()
+            ids = [c["claim_id"] for c in snapshot]
+            self.assertEqual(ids.count("existing_claim"), 1)
+
+    def test_debounce_schedules_save(self):
+        """After register_claim(), _save_timer is not None (a save is scheduled).
+        register_claim() 后，_save_timer 不为 None（已调度保存）。
+        Calling register_claim() again cancels and reschedules (debounce resets).
+        再次调用 register_claim() 取消并重新调度（防抖窗口重置）。
+        """
+        registry = TruthSourceRegistry()
+        # Patch timer delay to 0.01s so we can observe lifecycle quickly
+        # 将定时器延迟 patch 为 0.01s 以便快速观察生命周期
+        original_timer = threading.Timer
+
+        timers_created = []
+
+        class SpyTimer:
+            """Thin spy wrapper around threading.Timer.
+            threading.Timer 的轻量监视包装器。
+            """
+            def __init__(self, delay, fn, args=()):
+                self._inner = original_timer(0.01, fn, args)  # fast for test / 测试用快速延迟
+                self._cancelled = False
+                timers_created.append(self)
+
+            def cancel(self):
+                self._cancelled = True
+                self._inner.cancel()
+
+            @property
+            def daemon(self):
+                return self._inner.daemon
+
+            @daemon.setter
+            def daemon(self, val):
+                self._inner.daemon = val
+
+            def start(self):
+                self._inner.start()
+
+        with patch("threading.Timer", SpyTimer):
+            # First registration: timer should be scheduled
+            # 第一次注册：应调度定时器
+            self._register_one(registry, "debounce_claim_1")
+            self.assertIsNotNone(registry._save_timer)
+
+            first_timer = registry._save_timer
+
+            # Second registration: previous timer should be cancelled, new one scheduled
+            # 第二次注册：之前的定时器应被取消，新定时器被调度
+            self._register_one(registry, "debounce_claim_2")
+            second_timer = registry._save_timer
+
+            # Two timers were created / 应创建两个定时器
+            self.assertEqual(len(timers_created), 2)
+            # The first timer was cancelled / 第一个定时器应被取消
+            self.assertTrue(timers_created[0]._cancelled)
+            # The second timer is still the active one / 第二个定时器仍为活跃定时器
+            self.assertIs(second_timer, timers_created[1])
+
+
 if __name__ == "__main__":
     unittest.main()
