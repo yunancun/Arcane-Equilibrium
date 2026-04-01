@@ -211,6 +211,18 @@ _TTL_MS: Dict[str, int] = {
 _N_THRESHOLD_CONFIDENCE = 30  # N threshold for confidence cap
 _N_THRESHOLD_TTL = 50         # N threshold for TTL selection
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory safety: maximum number of claims before purging
+# 内存安全：触发清理的最大声明数量上限
+#
+# APR01-MEDIUM-5: Without a size limit, _claims dict grows unbounded and
+# expired entries are never removed. This cap triggers periodic cleanup
+# inside register_claim() to keep memory usage under control.
+# APR01-MEDIUM-5：若无大小限制，_claims 字典将无限增长且过期条目永不被移除。
+# 此上限在 register_claim() 内触发周期性清理，控制内存使用。
+# ─────────────────────────────────────────────────────────────────────────────
+MAX_CLAIMS = 5000
+
 
 def _parse_evidence_source(evidence_source: str) -> tuple[str, int]:
     """Parse evidence_source string to (source_type, observation_N).
@@ -336,6 +348,7 @@ class TruthSourceRegistry:
             "total_expired": 0,
             "total_falsified": 0,
             "total_superseded": 0,
+            "total_purged": 0,  # APR01-MEDIUM-5: claims removed by size-limit purge / 因大小限制清理而移除的声明数
         }
         # Debounced save timer — None means no save is currently scheduled
         # 去抖动保存定时器 — None 表示当前没有计划保存
@@ -437,6 +450,11 @@ class TruthSourceRegistry:
             self._claims[cid] = new_claim
             self._stats["total_registered"] += 1
 
+            # APR01-MEDIUM-5: Purge if over size limit to prevent unbounded memory growth
+            # APR01-MEDIUM-5：超出大小限制时清理，防止内存无限增长
+            if len(self._claims) > MAX_CLAIMS:
+                self._purge_over_limit(now_ms)
+
         logger.debug(
             "Registered claim %s: level=%s confidence=%.3f regime=%s strategy=%s / "
             "已登记声明 %s：级别=%s 信度=%.3f regime=%s 策略=%s",
@@ -447,6 +465,71 @@ class TruthSourceRegistry:
         # 调度去抖动持久化，确保新声明在重启后仍可恢复
         self._schedule_debounced_save()
         return cid
+
+    # ── Size-limit purge / 大小限制清理 ──
+
+    def _purge_over_limit(self, now_ms: int) -> None:
+        """Remove expired and then oldest claims when _claims exceeds MAX_CLAIMS.
+        当 _claims 超过 MAX_CLAIMS 时，先移除过期声明，再移除最旧声明。
+
+        MUST be called while self._lock is already held (called from register_claim).
+        必须在已持有 self._lock 的情况下调用（由 register_claim 调用）。
+
+        Strategy / 策略：
+          1. First pass: remove all expired claims (is_expired == True)
+             第一遍：移除所有已过期的声明
+          2. If still over limit: remove oldest claims by created_at_ms until under limit
+             若仍超限：按 created_at_ms 从旧到新移除，直到低于上限
+
+        Fail-open / fail-open：
+          If purge logic raises an exception, log and continue — the new claim
+          is already in the dict and must not be lost.
+          若清理逻辑抛出异常，记录日志并继续 — 新声明已在字典中，不能丢失。
+        """
+        try:
+            pre_count = len(self._claims)
+
+            # Pass 1: remove expired claims / 第一遍：移除过期声明
+            expired_ids = [
+                cid for cid, claim in self._claims.items()
+                if claim.is_expired(now_ms)
+            ]
+            for cid in expired_ids:
+                del self._claims[cid]
+            purged_expired = len(expired_ids)
+
+            # Pass 2: if still over limit, remove oldest by created_at_ms
+            # 第二遍：若仍超限，按 created_at_ms 移除最旧的声明
+            purged_oldest = 0
+            if len(self._claims) > MAX_CLAIMS:
+                excess = len(self._claims) - MAX_CLAIMS
+                # Sort by created_at_ms ascending (oldest first) / 按创建时间升序（最旧优先）
+                sorted_ids = sorted(
+                    self._claims.keys(),
+                    key=lambda cid: self._claims[cid].created_at_ms,
+                )
+                for cid in sorted_ids[:excess]:
+                    del self._claims[cid]
+                    purged_oldest += 1
+
+            total_purged = purged_expired + purged_oldest
+            if total_purged > 0:
+                self._stats["total_purged"] += total_purged
+                logger.info(
+                    "_purge_over_limit: removed %d claims (%d expired + %d oldest) — "
+                    "%d → %d / 清理：移除 %d 条声明（%d 过期 + %d 最旧）— %d → %d",
+                    total_purged, purged_expired, purged_oldest, pre_count, len(self._claims),
+                    total_purged, purged_expired, purged_oldest, pre_count, len(self._claims),
+                )
+
+        except Exception as exc:
+            # Fail-open: purge failure must not lose the newly registered claim
+            # fail-open：清理失败不能导致新注册的声明丢失
+            logger.warning(
+                "_purge_over_limit failed (fail-open): %s / "
+                "清理失败（fail-open）：%s",
+                exc, exc,
+            )
 
     # ── Query / 查询 ──
 

@@ -81,6 +81,14 @@ _SUPPORTING_OUTCOMES = {"win", "success", "confirmed", "supporting", "profit", "
 # Outcomes treated as refuting evidence / 视为反驳证据的 outcome 字符串
 _REFUTING_OUTCOMES = {"loss", "fail", "refuted", "refuting", "failure", "stop"}
 
+# Maximum number of hypotheses kept in memory (防止 _hypotheses 无界增长)
+# Safety cap to prevent unbounded memory growth from concluded hypotheses
+MAX_HYPOTHESES = 2000
+
+# Concluded hypotheses older than this TTL are eligible for purging (days)
+# 已结案假设超过此 TTL 即可被清理（天数）
+_CONCLUDED_PURGE_TTL_DAYS = 30
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HypothesisStatus enum / 假设状态枚举
@@ -311,6 +319,9 @@ class ExperimentLedger:
 
         with self._lock:
             self._hypotheses[hid] = h
+            # Purge concluded hypotheses if dict exceeds size limit
+            # 若假设字典超过容量上限，清理已结案的旧假设
+            self._purge_concluded_if_needed(now_ms)
 
         logger.debug(
             "Hypothesis proposed: id=%s strategy=%s regime=%s ttl_days=%d",
@@ -322,6 +333,86 @@ class ExperimentLedger:
         self._schedule_debounced_save()
 
         return hid
+
+    # ── Purge / 清理 ──────────────────────────────────────────────────────
+
+    def _purge_concluded_if_needed(self, now_ms: int) -> None:
+        """Remove stale concluded hypotheses when dict exceeds MAX_HYPOTHESES.
+        当假设字典超过 MAX_HYPOTHESES 上限时，清理已结案的旧假设。
+
+        MUST be called while self._lock is held (caller ensures thread safety).
+        必须在持有 self._lock 时调用（调用方确保线程安全）。
+
+        Purge strategy (never removes PENDING or RUNNING hypotheses):
+        清理策略（绝不移除 PENDING 或 RUNNING 假设）：
+          1. First pass: remove concluded hypotheses older than _CONCLUDED_PURGE_TTL_DAYS
+             第一轮：移除结案时间超过 _CONCLUDED_PURGE_TTL_DAYS 的已结案假设
+          2. If still over limit: remove oldest concluded hypotheses by concluded_at_ms
+             若仍超限：按 concluded_at_ms 从旧到新移除已结案假设
+
+        Fail-open: any error during purge is logged and silently ignored.
+        Fail-open：清理过程中任何错误仅记录日志，不影响主流程。
+        """
+        if len(self._hypotheses) <= MAX_HYPOTHESES:
+            return
+
+        try:
+            _CONCLUDED_STATUSES = {
+                HypothesisStatus.CONFIRMED,
+                HypothesisStatus.REFUTED,
+                HypothesisStatus.EXPIRED,
+            }
+            ttl_cutoff_ms = now_ms - (_CONCLUDED_PURGE_TTL_DAYS * _MS_PER_DAY)
+
+            # Pass 1: purge concluded hypotheses older than TTL cutoff
+            # 第一轮：清理结案时间超过 TTL 的已结案假设
+            stale_ids = [
+                hid for hid, h in self._hypotheses.items()
+                if h.status in _CONCLUDED_STATUSES
+                and h.concluded_at_ms is not None
+                and h.concluded_at_ms < ttl_cutoff_ms
+            ]
+            for hid in stale_ids:
+                del self._hypotheses[hid]
+
+            if stale_ids:
+                logger.info(
+                    "ExperimentLedger purge pass-1: removed %d stale concluded hypotheses (older than %d days)",
+                    len(stale_ids), _CONCLUDED_PURGE_TTL_DAYS,
+                )
+
+            if len(self._hypotheses) <= MAX_HYPOTHESES:
+                return
+
+            # Pass 2: still over limit — remove oldest concluded by concluded_at_ms
+            # 第二轮：仍超限 — 按 concluded_at_ms 从旧到新移除
+            concluded = [
+                (hid, h.concluded_at_ms or 0)
+                for hid, h in self._hypotheses.items()
+                if h.status in _CONCLUDED_STATUSES
+            ]
+            # Sort ascending by concluded_at_ms (oldest first) / 按结案时间升序排列
+            concluded.sort(key=lambda x: x[1])
+
+            excess = len(self._hypotheses) - MAX_HYPOTHESES
+            removed_pass2 = 0
+            for hid, _ in concluded[:excess]:
+                del self._hypotheses[hid]
+                removed_pass2 += 1
+
+            if removed_pass2:
+                logger.info(
+                    "ExperimentLedger purge pass-2: removed %d oldest concluded hypotheses to enforce MAX_HYPOTHESES=%d",
+                    removed_pass2, MAX_HYPOTHESES,
+                )
+
+        except Exception:
+            # Fail-open: purge failure must not break propose_hypothesis
+            # Fail-open：清理失败不得阻塞 propose_hypothesis
+            logger.warning(
+                "ExperimentLedger._purge_concluded_if_needed failed (fail-open, continuing)",
+                exc_info=True,
+            )
 
     # ── Observation / 观察 ──────────────────────────────────────────────────
 

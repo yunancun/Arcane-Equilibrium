@@ -35,9 +35,11 @@ docs/
 ├── handoffs/                          ← 阶段交接文档（按日期+主题分文件夹）
 │   └── YYYY-MM-DD_主题名/
 │
-├── decisions/                         ← 重大架构/设计决策记录
+├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
 │
-├── incidents/                         ← 故障/异常事件记录（待填充）
+├── audit/                             ← ★ 全系统审计报告（按月份分目录）
+│   ├── March31/                       ← 2026-03-31 七Agent全系统审计（8 份报告）
+│   └── April01/                       ← 2026-04-01 十Agent全系统审计（10 份报告）
 │
 ├── references/                        ← 长期参考文档（规范、合同、规格书）
 │   ├── state_dictionary/              ← 状态字典 / 数据字典
@@ -117,9 +119,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 ## 影响 (Consequences)
 ```
 
-### 4. incidents/ — 故障/异常记录
+### 4. audit/ — 全系统审计报告
 
-**用途**：记录生产或开发环境中的故障、异常事件及处理过程。
+**用途**：全系统审计报告归档。按月份分子目录（March31、April01 等），每次审计产出多角色报告。
 
 ### 5. references/ — 长期参考文档
 
@@ -254,7 +256,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 |------|------|
 | `2026-03-25_api_gui_handoff/` | Control API v1 + GUI v1 阶段交接（含 12 份文档 + source_docs） |
 
-### decisions/ — 架构/设计决策记录
+### decisions/ — 架构/设计决策记录 + 治理源文件
 
 | 文件 | 内容 |
 |------|------|
@@ -262,6 +264,57 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-17--工程一审修改建议报告_终稿.md` | Revision 2 工程一审修改建议报告（md 终稿） |
 | `2026-03-17--工程一审修改建议报告_终稿.txt` | Revision 2 工程一审修改建议报告（txt 终稿） |
 | `2026-03-20--关于h和i部分的核心设计讨论.txt` | H-I 核心设计讨论（AI 成本均衡 / 本地计算 / 延迟框架 / 设备容错） |
+| **治理源文件（.docx，Operator 原始治理规格）** | |
+| `DOC-NAV_...治理文件导航_V3.docx` | 治理文件导航 V3（13 份文件总入口） |
+| `DOC-01_...项目宪法与根原则_V2.docx` | 项目宪法：16 条根原则（§5.1–§5.16） |
+| `DOC-02_...边界定义_V2.docx` | 系统边界定义（H0 <1ms SLA、执行权限、数据平面） |
+| `DOC-03_...字段级与状态级规范_V1.1.docx` | 字段级与状态级规范 |
+| `DOC-04_...Agent能力蓝图_V2.docx` | Agent 能力蓝图（A-J 十大能力目标） |
+| `DOC-05_...真相源与所有权矩阵_V1.1.docx` | 真相源与所有权矩阵 |
+| `DOC-06_...变更治理_V2.docx` | 变更治理流程 |
+| `DOC-07_...审计事故与熔断政策_V1.1.docx` | 审计/事故/熔断政策 |
+| `DOC-08_...实施桥梁_V1.docx` | 实施桥梁（AI 成本上限 $2/天、provider 配置） |
+| `SM-01_...授权状态机规范_V1.docx` | SM-01 授权状态机规范 |
+| `SM-02_...决策租约状态机规范_V1.docx` | SM-02 决策租约状态机规范 |
+| `SM-03_...执行状态机规范_V1.1.docx` | SM-03 OMS 执行状态机规范 |
+| `SM-04_...风控状态机规范_V1.docx` | SM-04 风控状态机规范 |
+| `EX-01_...风控边界定义_V2.docx` | 风控边界定义 |
+| `EX-02_...OMS与执行正式边界定义_V1.docx` | OMS 与执行正式边界定义 |
+| `EX-03_...控制平面正式边界定义_V1.docx` | 控制平面正式边界定义 |
+| `EX-04_...对账正式边界定义_V1.docx` | 对账正式边界定义 |
+| `EX-05_...学习边界定义_V2.docx` | 学习边界定义 |
+| `EX-06_...多Agent编排正式边界定义_V1.docx` | 多 Agent 编排正式边界定义 |
+| `EX-07_...感知平面正式边界定义_V1.docx` | 感知/数据平面正式边界定义 |
+| `HIST-01_...核心设计总纲_V1.docx` | 历史参考：核心设计总纲 |
+| `HIST-02_...治理设计交付包_V1.docx` | 历史参考：治理设计交付包 |
+
+### audit/March31/ — ★★★ 2026-03-31 七Agent全系统审计（7 份报告 + 1 份双语注释审计）
+
+| 文件 | 内容 |
+|------|------|
+| `E3_security_audit_2026-03-31.md` | E3 安全审计：3 CRITICAL / 5 HIGH / 6 MEDIUM / 5 LOW（gate 绕过 · 注入 · 密钥泄漏） |
+| `CC_compliance_check_2026-03-31.md` | CC 合规检查：11/16 原则完全合规，B 级，1 硬违规，9 缺口 |
+| `E4_testing_report_2026-03-31.md` | E4 测试评估：71 文件/2480 用例，pipeline_bridge 15%，governance_routes 10% |
+| `E5_optimization_report_2026-03-31.md` | E5 优化评估：49 项（3 Critical · 14 High · 22 Medium · 10 Low），含性能/重复/可读性 |
+| `A3_gui_usability_report_2026-03-31.md` | A3 GUI 可用性：6.2/10，工程师视角设计，术语友好化建议 |
+| `PM_review_2026-03-31.md` | ★ PM 整合审核：71 项去重，P0-P3 批次计划，~110h 工时，依赖图 |
+| `PA_review_2026-03-31.md` | ★ PA 技术复验：4 CRITICAL 确认属实，1 误报，6 架构层补充问题 |
+| `bilingual_comment_audit_report.md` | TW 双语注释审计报告（模块级双语覆盖评估） |
+
+### audit/April01/ — ★★★ 2026-04-01 十Agent全系统审计（10 份报告）
+
+| 文件 | 内容 |
+|------|------|
+| `AI-E_ai_effectiveness_audit_2026-04-01.md` | AI-E AI 效果审计：AI 使用效率/成本分析/模型分配评估/Ollama 优化建议 |
+| `CC_compliance_check_2026-04-01.md` | CC 合规检查：16 条根原则逐一验证 + 硬边界合规状态 |
+| `E3_security_audit_2026-04-01.md` | E3 安全审计：认证授权/注入/密钥管理/OWASP 安全扫描 |
+| `E4_testing_report_2026-04-01.md` | E4 测试评估：测试覆盖/回归/边界用例/并发测试评估 |
+| `E5_optimization_report_2026-04-01.md` | E5 优化评估：代码精简/性能/可读性评估建议 |
+| `FA_functional_gap_audit_2026-04-01.md` | FA 功能缺口审计：功能规格验证/Gap 分析/业务逻辑审查 |
+| `TW_documentation_quality_2026-04-01.md` | TW 文档与注释品质审计：双语注释/MODULE_NOTE 规范评估 |
+| `R4_document_index_audit_2026-04-01.md` | R4 文档索引审计：文档目录完整性/交叉引用准确性 |
+| `PA_review_2026-04-01.md` | PA 技术复验：架构决策/可行性评估/副作用识别 |
+| `PM_execution_plan_2026-04-01.md` | PM 执行计划：优先级整合/批次计划/风险管理 |
 
 ### references/ — 长期参考文档
 
@@ -304,6 +357,13 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-30--round2_cold_functional_audit.md` | ★★★ Round 2 冷酷功能审核（任务 1/2/3：32% 完成度 + 架构融合 + Paper Trading 路线图） |
 | `2026-03-30--governance_compliance_audit.md` | 治理合规审计（EX-05/06/07/DOC-01~08，合规度 ~65%） |
 | `2026-03-30--pipeline_bridge_paper_engine_audit.md` | PipelineBridge + PaperTradingEngine 代码级审计（治理 gate 验证 + 止损验证 + 学习回调验证） |
+| `2026-03-31--gap_analysis_287_specs.md` | ★ 287 条治理规格 Gap 分析报告（76% 已实施：67A + 18B + 8C + 2D） |
+| `2026-03-31--spec_requirements_287.md` | 287 条规格完整列表（Markdown 版，与 Gap 分析配套） |
+| `2026-03-31--spec_requirements_287.json` | 287 条规格完整列表（JSON 机器可读版） |
+| `2026-03-31--gap_analysis_findings.json` | Gap 分析发现结果（JSON 结构化输出） |
+| `2026-03-31--gap_analysis_file_reference.md` | Gap 分析文件引用索引 |
+| `2026-03-31--development_roadmap_v2.md` | 4-Phase 开发路线图 V2（基于 Gap 分析制定） |
+| `2026-03-31--phase0_round2.5_audit_report.md` | Phase 0 Round 2.5 审计报告（2 P0 + 1 P1 修复 + 287 spec Gap 分析） |
 
 #### governance_dev/audits/2026-03-30--全面審核/ — ★★★ 全系统冷酷功能审核（9 Batch）
 
@@ -329,6 +389,19 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-30--round2_fix_plan_EXECUTIVE_SUMMARY.md` | 修复计划管理摘要（缺口分析 + 策略 + 风险） |
 | `2026-03-30--round2_fix_plan_QUICK_REFERENCE.md` | 修复计划开发速查（批次清单 + 依赖图 + 成本） |
 | `2026-03-30--ROUND2_FIX_PLAN_INDEX.md` | 修复计划导航索引 |
+| `2026-03-30--round2_pragmatic_fix_plan.md` | Round 2 务实修复计划（优先级排序 + 实施策略） |
+
+#### governance_dev/ — 规格提取与287条治理规格（根目录文件）
+
+| 文件 | 内容 |
+|------|------|
+| `README.md` | governance_dev 子目录自述文件 |
+| `COMPREHENSIVE_SPEC_REQUIREMENTS.md` | 287 条治理规格完整列表（Markdown 版） |
+| `COMPREHENSIVE_SPEC_REQUIREMENTS.json` | 287 条治理规格完整列表（JSON 机器可读版） |
+| `SPECIFICATION_EXTRACTION_SUMMARY.md` | 规格提取摘要（13 份 .docx → 287 条结构化提取过程） |
+| `SPECIFICATION_REGISTER.md` | 规格登记册（DOC/SM/EX 文件版本追踪） |
+| `EXTRACTION_VALIDATION.txt` | 提取验证报告（规格数量/覆盖度/交叉引用校验） |
+| `QUICK_START_REFERENCE.txt` | 治理开发快速入门参考 |
 
 #### governance_dev/governance_extracts/ — 治理规格提取（5 份参考文档）
 
