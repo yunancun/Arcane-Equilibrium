@@ -1513,6 +1513,17 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
 
 # ── Market Scanner Routes / 市场扫描路由 ──
 
+@phase2_router.get("/pipeline/stats")
+async def get_pipeline_stats(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """Get pipeline bridge statistics / 获取管线桥接器统计"""
+    if PIPELINE_BRIDGE is None:
+        return _envelope({"available": False})
+    try:
+        return _envelope(PIPELINE_BRIDGE.get_stats())
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
 @phase2_router.get("/scanner/opportunities")
 async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get latest market scan opportunities / 获取最新市场扫描机会"""

@@ -108,20 +108,16 @@ class MACrossoverStrategy(StrategyBase):
             return
 
         with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
-            # Multi-TF regime filter: skip trend-following in ranging/squeeze markets
-            # 多时间框架 regime 过滤：震荡/收窄市场中跳过趋势跟踪
-            # Note: "unknown" passes through — when regime detection is unavailable for
-            # this symbol (no BB/ATR history yet), we still allow trading.
-            # "trending" and "volatile" also pass through (favorable for trend-following).
-            # Only "ranging" and "squeeze" are filtered (unfavorable for MA crossover).
-            # 注意："unknown" 允许通过 — 当该品种尚无 regime 检测（缺少 BB/ATR 历史）时，仍允许交易。
+            # Multi-TF regime filter: skip trend-following in ranging markets
+            # 多时间框架 regime 过滤：震荡市场中跳过趋势跟踪
+            # "unknown" passes through — cold-start symbols still need to trade for learning.
+            # "squeeze" passes through — low volatility but crossover signals still valid.
+            # "trending" and "volatile" pass through (favorable for trend-following).
+            # Only "ranging" is filtered (MA crossover whipsaws badly in ranging markets).
+            # 注意："unknown" 和 "squeeze" 允许通过 — 冷启动品种和窄幅盘整仍可交易以积累学习数据。
+            # 仅 "ranging" 被过滤（MA 交叉在震荡市场中频繁假突破）。
             signal_regime = getattr(signal, "metadata", {}).get("_regime", "unknown")
-            # Reject ranging/squeeze (unfavorable) AND unknown (insufficient history).
-            # "unknown" means no BB/ATR data yet — new symbols with cold-start data should
-            # not trade immediately. Only "trending" and "volatile" pass through.
-            # 拒绝 ranging/squeeze（不利）以及 unknown（数据不足）。
-            # "unknown" 表示尚无 BB/ATR 历史，新上线品种不应立即入场。
-            if signal_regime in ("ranging", "squeeze", "unknown"):
+            if signal_regime == "ranging":
                 return
 
             if direction == "long" and self._current_position != "long":
