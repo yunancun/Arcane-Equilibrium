@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Phase 2 Batch 2C + Wave 7 Demo 同步 · 3103 tests）
+# 最後更新：2026-04-01（Wave 7a Spot 品類啟用 · 3151 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-3103 passed / 19 pre-existing failed（Phase 2 Batch 2C + Wave 7 完成後）
+3151 passed / 19 pre-existing failed（Wave 7a Spot 品類啟用後）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/ program_code/local_model_tools/ -q --tb=no
 ```
@@ -829,37 +829,37 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 
 ---
 
-## ██ Wave 7a — Spot 品類啟用（進行中）
+## ██ Wave 7a — Spot 品類啟用（已完成 · 2026-04-01）
 
 > 目標：讓 Paper + Demo 雙引擎支持 Spot 現貨交易（634 個幣對）。
 > Bybit V5 API 4 個合法 category：linear（已啟用）、spot、inverse、option。
 
-### [ ] SPOT-1：市場掃描器支持 spot category
-- **檔案**：`program_code/local_model_tools/market_scanner.py`
-- **問題**：`scan()` 硬編碼 `category=linear`（第 120 行）
-- **修復**：`__init__` 加 `categories` 參數，支持多品類掃描
-- **工時**：1h
+### [x] SPOT-1：市場掃描器支持 spot category
+- ✅ 完成：注入點已確認有 `categories=["linear","spot"]`；補 `test_market_scanner.py` 16 個測試（commit 054d1ae）
 
-### [ ] SPOT-2：Position 記錄 category 字段
-- **檔案**：`app/paper_trading_engine.py`（`project_position_after_fill()`）
-- **問題**：持倉不記錄 category，風控讀 `pos.get("category", "linear")` 把現貨當合約
-- **修復**：建立持倉時存入 category
-- **工時**：1h
+### [x] SPOT-2：Position 記錄 category 字段
+- ✅ 完成：flip 路徑補 `pos.get("category","linear")`（commit 054d1ae）
 
-### [ ] SPOT-3：Spot 保證金邏輯（現貨 = 100% 名義價值）
-- **檔案**：`app/paper_trading_engine.py`
-- **問題**：保證金算法 `notional / leverage`，spot 無槓桿應為 100% notional
-- **修復**：`if category == "spot": margin = notional`
-- **工時**：1h
+### [x] SPOT-3：Spot 保證金邏輯（現貨 = 100% 名義價值）
+- ✅ 完成：paper_trading_engine `if category=="spot": required_margin=notional`；risk_manager spot max_leverage=1.0 P0 override（commit 054d1ae）
 
-### [ ] SPOT-4：策略部署器 + Pipeline 驗證
-- **檔案**：`strategy_auto_deployer.py` + `pipeline_bridge.py`
-- **驗證**：intent.metadata["category"] = "spot" 正確透傳
-- **工時**：1h
+### [x] SPOT-4：策略部署器 + Pipeline 驗證
+- ✅ 完成：pipeline_bridge `_infer_category_from_symbol` + kline/funding category 修正；spot funding rate 跳過 HTTP（commit 054d1ae）
 
-### [ ] SPOT-5：端到端測試 + Demo 驗證
-- **內容**：Spot 品類 Paper+Demo 雙引擎下單/平倉/同步全流程
-- **工時**：2h
+### [x] SPOT-5：端到端測試 + Demo 驗證
+- ✅ 完成：test_pipeline_bridge_spot.py（20 個）+ test_risk_manager.py（+6）+ test_paper_trading_engine.py（+3）（commit 054d1ae）
+
+### [x] 方案 B：PipelineBridge `_symbol_category_map` 運行時映射
+- ✅ 完成：pipeline_bridge + strategy_auto_deployer + phase2_strategy_routes 雙向注入（commit 054d1ae）
+- **設計決策**：`docs/decisions/2026-04-01--symbol_category_mapping_design.md`
+- **待辦（Wave 7b）**：方案 A `SymbolCategoryRegistry` 啟動時 API 批量填充；`spot_allow_margin` enforce
+
+### [ ] 方案 A：SymbolCategoryRegistry（長期穩定，Wave 7b 前置）
+- **文件**：新建 `app/symbol_category_registry.py`（或嵌入 pipeline_bridge.py）
+- **內容**：啟動時從 Bybit `/v5/market/instruments-info` 批量填充 linear/spot/inverse 完整映射，TTL 6 小時
+- **接入**：`_startup_integrity_check` soft dep 初始化；填充 `PipelineBridge._symbol_category_map`
+- **同步**：評估 `TradeIntent.metadata["category"]` 改為必填（有 Registry 後才安全）
+- **工時**：3h
 
 ---
 
