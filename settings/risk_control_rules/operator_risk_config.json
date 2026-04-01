@@ -1,0 +1,113 @@
+{
+  "global_config": {
+    "max_stop_loss_pct": 20.0,
+    "max_take_profit_pct": 20.0,
+    "max_single_position_pct": 20.0,
+    "max_total_exposure_pct": 100.0,
+    "max_correlated_exposure_pct": 60.0,
+    "max_leverage": 50.0,
+    "max_session_drawdown_pct": 15.0,
+    "max_daily_loss_pct": 10.0,
+    "consecutive_loss_cooldown_count": 3,
+    "consecutive_loss_cooldown_minutes": 30.0,
+    "max_holding_hours": 72.0,
+    "allowed_categories": [
+      "spot",
+      "linear",
+      "inverse"
+    ],
+    "preferred_margin_mode": "isolated",
+    "preferred_position_mode": "one_way",
+    "max_cost_edge_ratio": 0.8
+  },
+  "category_configs": {
+    "spot": {
+      "category": "spot",
+      "enabled": true,
+      "max_leverage": 1.0,
+      "max_single_position_pct": null,
+      "max_total_exposure_pct": null,
+      "max_stop_loss_pct": null,
+      "max_holding_hours": null,
+      "allowed_symbols": null,
+      "spot_allow_margin": false,
+      "perp_max_funding_rate_abs": 0.03,
+      "perp_auto_deleverage_threshold": 0.8,
+      "option_max_premium_pct": 5.0,
+      "option_max_delta_exposure": 0.5,
+      "option_allowed_strategies": [
+        "long_call",
+        "long_put",
+        "covered_call",
+        "protective_put"
+      ]
+    },
+    "linear": {
+      "category": "linear",
+      "enabled": true,
+      "max_leverage": 10.0,
+      "max_single_position_pct": null,
+      "max_total_exposure_pct": null,
+      "max_stop_loss_pct": null,
+      "max_holding_hours": null,
+      "allowed_symbols": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "spot_allow_margin": false,
+      "perp_max_funding_rate_abs": 0.03,
+      "perp_auto_deleverage_threshold": 0.8,
+      "option_max_premium_pct": 5.0,
+      "option_max_delta_exposure": 0.5,
+      "option_allowed_strategies": [
+        "long_call",
+        "long_put",
+        "covered_call",
+        "protective_put"
+      ]
+    },
+    "option": {
+      "category": "option",
+      "enabled": true,
+      "max_leverage": 2.0,
+      "max_single_position_pct": null,
+      "max_total_exposure_pct": null,
+      "max_stop_loss_pct": null,
+      "max_holding_hours": null,
+      "allowed_symbols": null,
+      "spot_allow_margin": false,
+      "perp_max_funding_rate_abs": 0.03,
+      "perp_auto_deleverage_threshold": 0.8,
+      "option_max_premium_pct": 5.0,
+      "option_max_delta_exposure": 0.5,
+      "option_allowed_strategies": [
+        "long_call",
+        "long_put",
+        "covered_call",
+        "protective_put"
+      ]
+    },
+    "inverse": {
+      "category": "inverse",
+      "enabled": true,
+      "max_leverage": 50.0,
+      "max_single_position_pct": null,
+      "max_total_exposure_pct": null,
+      "max_stop_loss_pct": null,
+      "max_holding_hours": null,
+      "allowed_symbols": null,
+      "spot_allow_margin": false,
+      "perp_max_funding_rate_abs": 0.03,
+      "perp_auto_deleverage_threshold": 0.8,
+      "option_max_premium_pct": 5.0,
+      "option_max_delta_exposure": 0.5,
+      "option_allowed_strategies": [
+        "long_call",
+        "long_put",
+        "covered_call",
+        "protective_put"
+      ]
+    }
+  },
+  "saved_ts_ms": 1775055891895
+}

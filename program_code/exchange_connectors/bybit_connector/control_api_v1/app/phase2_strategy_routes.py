@@ -306,13 +306,13 @@ _BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
 # Position sizing formula (risk-based):
 #   risk_usdt       = balance * 3%       → max USD loss per trade (Principle 5: survival > profit)
 #   notional_usdt   = risk / stop_pct    → implied position notional (stop_pct = 5% default)
-#   cap at 15% of balance               → single-position concentration limit (RiskManager max_single_position_pct)
+#   cap at 18% of balance               → sizing cap (90% of RiskManager max_single_position_pct=20%, avoids boundary collision)
 #   floor at $20                         → minimum viable order size for Bybit
 #   BTC qty floor 0.001                  → Bybit BTCUSDT minimum order qty
 _risk_usdt = _ACCOUNT_BALANCE_USDT * 3.0 / 100.0       # 3% of balance = max acceptable loss per trade
 _notional_usdt = min(
     _risk_usdt / 0.05,                                  # 0.05 = 5% hard stop distance → implied notional
-    _ACCOUNT_BALANCE_USDT * 0.15,                        # 15% = max single-position concentration cap
+    _ACCOUNT_BALANCE_USDT * 0.18,                        # 18% = sizing cap (90% of 20% risk limit, 10% headroom avoids boundary rejection)
 )
 _notional_usdt = max(20.0, _notional_usdt)               # $20 = Bybit minimum viable order notional
 _DEFAULT_BTC_QTY = max(0.001, round(_notional_usdt / _BTC_PRICE_HINT, 3))  # 0.001 = Bybit BTCUSDT min qty
@@ -688,7 +688,7 @@ try:
         max_symbols=30,            # 25 linear + 5 spot reserved
         risk_per_trade_pct=3.0,    # Risk 3% of balance per trade (max loss per trade)
         min_qty_usdt=20.0,         # Minimum $20 per trade
-        max_qty_pct=15.0,          # Max 15% of balance per single trade
+        max_qty_pct=18.0,          # Max 18% of balance per single trade (90% of 20% risk limit, 10% headroom)
         market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
         pinned_symbols=["BTCUSDT", "ETHUSDT"],  # Always monitor + attempt to trade (learning/evolution)
         reserved_slots={"spot": 5},  # 5 slots reserved for spot — linear can't squeeze them out
