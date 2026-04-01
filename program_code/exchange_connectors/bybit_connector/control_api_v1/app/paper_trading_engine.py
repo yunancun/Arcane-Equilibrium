@@ -108,7 +108,36 @@ DEFAULT_TAKER_FEE_RATE = 0.00055   # 0.055%
 DEFAULT_MAKER_FEE_RATE = 0.0002    # 0.02%
 
 # Simulated slippage for market orders
+# 市場單模擬滑點（默認值，低流動性品種或無成交量數據時使用）
 DEFAULT_SLIPPAGE_RATE = 0.0005  # 0.05%
+
+# Dynamic slippage tiers based on 24h USD turnover (more realistic Paper simulation)
+# 動態滑點分級（基於 24h 成交額），讓 Paper PnL 更貼近實際交易成本
+# BTC/ETH 等大幣種滑點極低 (~1 bps)，小幣種可達 30 bps
+SLIPPAGE_TIERS: list[tuple[float, float]] = [
+    (1_000_000_000, 0.0001),   # >$1B turnover: 1 bps (BTC/ETH)
+    (100_000_000,   0.0002),   # >$100M: 2 bps
+    (10_000_000,    0.0005),   # >$10M: 5 bps (same as old default)
+    (1_000_000,     0.0015),   # >$1M: 15 bps
+    (0,             0.0030),   # <$1M: 30 bps (illiquid alts)
+]
+
+
+def compute_dynamic_slippage(volume_24h: float) -> float:
+    """
+    Return slippage rate based on 24h trading volume.
+    根據 24h 成交量返回對應的滑點率。
+
+    Higher volume = tighter spread = lower slippage.
+    成交量越大，價差越小，滑點越低。
+    Falls back to DEFAULT_SLIPPAGE_RATE if volume is non-positive.
+    """
+    if volume_24h <= 0:
+        return DEFAULT_SLIPPAGE_RATE
+    for threshold, rate in SLIPPAGE_TIERS:
+        if volume_24h >= threshold:
+            return rate
+    return DEFAULT_SLIPPAGE_RATE
 
 # Default initial paper balance
 DEFAULT_INITIAL_BALANCE_USDT = 10000.0
@@ -667,11 +696,51 @@ def project_position_after_fill(
 
 
 def _compute_close_pnl(pos: dict, close_qty: float, close_price: float) -> float:
-    """Compute realized PnL for closing a position / 计算平仓实现盈亏"""
-    if pos["side"] == SIDE_BUY:
-        return (close_price - pos["avg_entry_price"]) * close_qty
+    """
+    Compute realized PnL for closing a position.
+    计算平仓实现盈亏。
+
+    Two formulas depending on contract category:
+    根据合约品类使用不同公式：
+
+    Linear / Spot (USDT-margined):
+      Long PnL  = (close_price - entry_price) * qty   [quote currency, e.g. USDT]
+      Short PnL = (entry_price - close_price) * qty
+
+    Inverse (coin-margined, e.g. BTCUSD):
+      Long PnL  = qty * (1/entry_price - 1/close_price)  [base currency, e.g. BTC]
+      Short PnL = qty * (1/close_price - 1/entry_price)
+      Zero-division guard: entry <= 0 or close <= 0 → return 0.0
+      除零保護：entry 或 close 價格 ≤ 0 時返回 0.0，不拋異常
+
+    Numerical validation / 數值驗證:
+      Long  qty=100, entry=50000, close=55000 → 100*(1/50000-1/55000) ≈ 0.0001818 BTC
+      Short qty=100, entry=50000, close=45000 → 100*(1/45000-1/50000) ≈ 0.0002222 BTC
+    """
+    # Determine contract category; default to "linear" for backward compatibility
+    # 讀取合約品類；預設為 "linear" 以向後兼容
+    category = pos.get("category", "linear")
+
+    entry = pos["avg_entry_price"]
+
+    if category == "inverse":
+        # Inverse (coin-margined): PnL denominated in base currency (e.g. BTC)
+        # 幣本位合約：PnL 以基礎幣計價（如 BTC）
+        # Fail-closed: return 0.0 on zero-price to avoid ZeroDivisionError
+        # fail-closed 除零保護：價格為 0 時返回 0.0
+        if entry <= 0.0 or close_price <= 0.0:
+            return 0.0
+        if pos["side"] == SIDE_BUY:
+            return close_qty * (1.0 / entry - 1.0 / close_price)
+        else:
+            return close_qty * (1.0 / close_price - 1.0 / entry)
     else:
-        return (pos["avg_entry_price"] - close_price) * close_qty
+        # Linear / Spot (USDT-margined): PnL denominated in quote currency (e.g. USDT)
+        # U 本位 / 現貨合約：PnL 以計價幣計價（如 USDT）
+        if pos["side"] == SIDE_BUY:
+            return (close_price - entry) * close_qty
+        else:
+            return (entry - close_price) * close_qty
 
 
 def project_balance_after_fill(
@@ -720,15 +789,49 @@ def update_unrealized_pnl(
     """
     Update unrealized PnL for all positions based on current market prices.
     根据当前市场价格更新所有持仓的未实现盈亏。
+
+    Two formulas depending on contract category:
+    根据合约品类使用不同公式：
+
+    Linear / Spot (USDT-margined):
+      Long  unrealized = (mark_price - entry_price) * qty   [USDT]
+      Short unrealized = (entry_price - mark_price) * qty
+
+    Inverse (coin-margined, e.g. BTCUSD):
+      Long  unrealized = qty * (1/entry_price - 1/mark_price)  [BTC]
+      Short unrealized = qty * (1/mark_price - 1/entry_price)
+      Zero-division guard: entry <= 0 or mark_price <= 0 → unrealized_pnl = 0.0
+      除零保護：entry 或 mark_price ≤ 0 時設為 0.0，不拋異常
     """
     for symbol, pos in positions.items():
         price = market_prices.get(symbol)
         if price is None:
             continue
-        if pos["side"] == SIDE_BUY:
-            pos["unrealized_pnl"] = (price - pos["avg_entry_price"]) * pos["qty"]
+
+        # Determine contract category; default to "linear" for backward compatibility
+        # 讀取合約品類；預設為 "linear" 以向後兼容
+        category = pos.get("category", "linear")
+        entry = pos["avg_entry_price"]
+
+        if category == "inverse":
+            # Inverse (coin-margined): unrealized PnL in base currency (e.g. BTC)
+            # 幣本位合約：未實現 PnL 以基礎幣計價（如 BTC）
+            # Fail-closed: set to 0.0 on zero-price to avoid ZeroDivisionError
+            # fail-closed 除零保護：價格為 0 時設為 0.0
+            if entry <= 0.0 or price <= 0.0:
+                pos["unrealized_pnl"] = 0.0
+            elif pos["side"] == SIDE_BUY:
+                pos["unrealized_pnl"] = pos["qty"] * (1.0 / entry - 1.0 / price)
+            else:
+                pos["unrealized_pnl"] = pos["qty"] * (1.0 / price - 1.0 / entry)
         else:
-            pos["unrealized_pnl"] = (pos["avg_entry_price"] - price) * pos["qty"]
+            # Linear / Spot: unrealized PnL in quote currency (e.g. USDT)
+            # U 本位 / 現貨：未實現 PnL 以計價幣計價（如 USDT）
+            if pos["side"] == SIDE_BUY:
+                pos["unrealized_pnl"] = (price - entry) * pos["qty"]
+            else:
+                pos["unrealized_pnl"] = (entry - price) * pos["qty"]
+
         pos["updated_ts_ms"] = now_ms()
     return positions
 
@@ -834,6 +937,9 @@ class PaperTradingEngine:
         self._demo_sync = None  # T7.04: Optional BybitDemoSync for demo state snapshots
         self._learning_tier_gate = None  # T9A.01: Optional LearningTierGate for analyst agent evolution
         self._oms_sm = None  # Batch 10: Optional OMS State Machine (SM-03) for 11-state lifecycle
+        # Dynamic slippage cache: symbol → slippage rate (updated from WS volume data)
+        # 動態滑點緩存：幣種 → 滑點率（由 WS 成交量數據更新）
+        self._slippage_cache: dict[str, float] = {}
 
     def _read(self) -> dict[str, Any]:
         return self.store.read()
@@ -854,6 +960,24 @@ class PaperTradingEngine:
         # Cap audit trail at 500 entries
         if len(state["audit_trail"]) > 500:
             state["audit_trail"] = state["audit_trail"][-500:]
+
+    def update_slippage_cache(self, symbol_volumes: dict[str, float]) -> None:
+        """
+        Update per-symbol slippage rates from volume data.
+        從成交量數據更新各幣種的動態滑點率。
+
+        Called by PipelineBridge on_tick with WS volume_24h data.
+        由 PipelineBridge 在 on_tick 中傳入 WS 的 volume_24h 數據。
+        """
+        for symbol, vol in symbol_volumes.items():
+            self._slippage_cache[symbol] = compute_dynamic_slippage(vol)
+
+    def _get_slippage(self, symbol: str) -> float:
+        """
+        Get slippage rate for a symbol (falls back to DEFAULT_SLIPPAGE_RATE).
+        獲取幣種的滑點率（無數據時回退到默認值）。
+        """
+        return self._slippage_cache.get(symbol, DEFAULT_SLIPPAGE_RATE)
 
     def set_governance_hub(self, hub: Any) -> None:
         """Inject GovernanceHub for governance state machine integration / 注入治理集線器"""
@@ -1362,7 +1486,7 @@ class PaperTradingEngine:
 
                 if time_in_force == TIF_FOK:
                     if would_fill:
-                        fill_price = compute_fill_price(order, mp)
+                        fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
                         fee = compute_fee(qty, fill_price, is_taker=False)
                         fill_record = execute_fill(order, qty, fill_price, fee)
                         state["fills"].append(fill_record)
@@ -1401,7 +1525,7 @@ class PaperTradingEngine:
 
                 if time_in_force == TIF_IOC:
                     if would_fill:
-                        fill_price = compute_fill_price(order, mp)
+                        fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
                         fee = compute_fee(qty, fill_price, is_taker=False)
                         fill_record = execute_fill(order, qty, fill_price, fee)
                         state["fills"].append(fill_record)
@@ -1438,10 +1562,11 @@ class PaperTradingEngine:
                         self._audit(state, "ioc_canceled", f"{order['order_id']} price not crossed")
                     return state
 
-            # For market orders: immediate fill
+            # For market orders: immediate fill (dynamic slippage per symbol)
+            # 市場單立即成交（依幣種動態滑點）
             if order_type == ORDER_TYPE_MARKET and market_prices and symbol in market_prices:
                 mp = market_prices[symbol]
-                fill_price = compute_fill_price(order, mp)
+                fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
                 fee = compute_fee(qty, fill_price, is_taker=True)
                 fill_record = execute_fill(order, qty, fill_price, fee)
                 state["fills"].append(fill_record)
@@ -1604,7 +1729,8 @@ class PaperTradingEngine:
                             # Conditional becomes market fill at trigger
                             fill_qty = order["remaining_qty"]
                             fill_price = compute_fill_price(
-                                {**order, "order_type": ORDER_TYPE_MARKET}, mp
+                                {**order, "order_type": ORDER_TYPE_MARKET}, mp,
+                                slippage_rate=self._get_slippage(symbol),
                             )
                             fee = compute_fee(fill_qty, fill_price, is_taker=True)
                             fill_record = execute_fill(order, fill_qty, fill_price, fee)
@@ -1628,7 +1754,7 @@ class PaperTradingEngine:
                 # ── Limit order fill check / 限价单成交检查 ──
                 if otype == ORDER_TYPE_LIMIT and should_fill_limit_order(order, mp):
                     fill_qty = compute_partial_fill_qty(order, mp, rng=self._partial_fill_rng)
-                    fill_price = compute_fill_price(order, mp)
+                    fill_price = compute_fill_price(order, mp, slippage_rate=self._get_slippage(symbol))
                     # Resting limit orders are always maker fee / 挂单限价单始终 maker 费率
                     fee = compute_fee(fill_qty, fill_price, is_taker=False)
                     fill_record = execute_fill(order, fill_qty, fill_price, fee)
@@ -1685,7 +1811,9 @@ class PaperTradingEngine:
                     tp_sl["_triggered"] = True
                     close_side = SIDE_SELL if pos["side"] == SIDE_BUY else SIDE_BUY
                     close_qty = pos["qty"]
-                    fp = mp * (1 + DEFAULT_SLIPPAGE_RATE) if close_side == SIDE_BUY else mp * (1 - DEFAULT_SLIPPAGE_RATE)
+                    # Dynamic slippage for TP/SL close / TP/SL 平倉使用動態滑點
+                    _slip = self._get_slippage(symbol)
+                    fp = mp * (1 + _slip) if close_side == SIDE_BUY else mp * (1 - _slip)
                     fee = compute_fee(close_qty, fp, is_taker=True)
                     close_order = create_paper_order(symbol, close_side, ORDER_TYPE_MARKET, close_qty)
                     _transition_order(close_order, ORDER_STATE_SUBMITTED)
@@ -1740,11 +1868,12 @@ class PaperTradingEngine:
                     mp = market_prices.get(sym)
                     if mp is None:
                         continue
-                    # Market close with slippage
+                    # Market close with dynamic slippage / 市場平倉使用動態滑點
+                    _slip = self._get_slippage(sym)
                     if close_side == SIDE_BUY:
-                        fp = mp * (1 + DEFAULT_SLIPPAGE_RATE)
+                        fp = mp * (1 + _slip)
                     else:
-                        fp = mp * (1 - DEFAULT_SLIPPAGE_RATE)
+                        fp = mp * (1 - _slip)
                     fee = compute_fee(close_qty, fp, is_taker=True)
                     close_order = create_paper_order(sym, close_side, ORDER_TYPE_MARKET, close_qty)
                     _transition_order(close_order, ORDER_STATE_SUBMITTED)

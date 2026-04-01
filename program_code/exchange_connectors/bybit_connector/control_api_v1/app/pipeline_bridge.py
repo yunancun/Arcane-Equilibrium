@@ -347,23 +347,34 @@ class PipelineBridge:
             self._stats["ticks_received"] += 1
             self._stats["last_tick_ts_ms"] = int(time.time() * 1000)
 
-        # Extract event fields
+        # Extract event fields (including volume for dynamic slippage)
+        # 提取事件欄位（含成交量，用於動態滑點計算）
         if isinstance(event, dict):
             symbol = event.get("symbol", "")
             price = float(event.get("last_price", 0.0))
             raw_ts = event.get("ts_ms")
             ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+            _vol_24h = event.get("volume_24h")
         else:
             symbol = getattr(event, "symbol", "")
             price = float(getattr(event, "last_price", 0.0))
             raw_ts = getattr(event, "ts_ms", None)
             ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+            _vol_24h = getattr(event, "volume_24h", None)
 
         if not symbol or price <= 0:
             return
 
         # Track latest prices for intent submission (fixes C1: positions is dict, not list)
         self._latest_prices[symbol] = price
+
+        # Update dynamic slippage cache from WS volume data (non-critical, best-effort)
+        # 從 WS 成交量數據更新動態滑點緩存（非關鍵路徑，盡力更新）
+        if _vol_24h is not None and _vol_24h > 0:
+            try:
+                self._engine.update_slippage_cache({symbol: float(_vol_24h)})
+            except Exception:
+                pass  # Slippage update failure is non-fatal / 滑點更新失敗不影響主流程
 
         # P1-16: Update H0Gate price timestamp for freshness check
         # P1-16：更新 H0Gate 價格時間戳以供新鮮度檢查
