@@ -6,10 +6,20 @@
   <title>OpenClaw / Bybit Control Center</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <script>
-  // Auth check: redirect to login if no token
+  // Auth check: verify HttpOnly cookie via /api/v1/auth/check (APR01-MEDIUM-13)
+  // 认证检查：通过 /api/v1/auth/check 验证 HttpOnly cookie
   (function() {
-    var token = localStorage.getItem('oc_trading_token');
-    if (!token) {
+    // Clean up legacy localStorage token / 清理旧的 localStorage token
+    localStorage.removeItem('oc_trading_token');
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/api/v1/auth/check', false);
+      xhr.send();
+      if (xhr.status !== 200) {
+        sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+        window.location.href = '/login';
+      }
+    } catch(e) {
       sessionStorage.setItem('oc_login_redirect', window.location.pathname);
       window.location.href = '/login';
     }
@@ -27,7 +37,7 @@
       <div class="token-row">
         <input id="tokenInput" type="password" placeholder="Auto-filled from login" />
         <button id="connectButton">连接 / Connect</button>
-        <button onclick="localStorage.removeItem('oc_trading_token');localStorage.removeItem('oc_username');window.location.href='/login'" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
+        <button onclick="fetch('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
       </div>
       <div id="connectionStatus" class="status-chip neutral">未连接 / Disconnected</div>
     </div>

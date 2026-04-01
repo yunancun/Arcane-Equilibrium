@@ -239,6 +239,16 @@ class StrategistAgent:
         # 策略偏好權重：1.0=中性，>1.0=偏好，<1.0=迴避。範圍限幅 [0.2, 2.0]
         self._strategy_preference_weights: Dict[str, float] = {}
 
+        # L2 result cache: stores background L2 evaluation results for use in next decision cycle.
+        # L2 結果快取：儲存後台 L2 評估結果，供下次決策週期使用（避免 L2 計算資源浪費）。
+        # Key: symbol string; Value: dict with "evaluation", "timestamp", "intel_id".
+        # TTL: 3600s (1 hour) — L2 results become stale after this window.
+        # 鍵：幣種字串；值：包含 evaluation/timestamp/intel_id 的字典。TTL 1 小時。
+        self._l2_result_cache: Dict[str, Dict[str, Any]] = {}
+        self._l2_cache_lock = threading.Lock()
+        self._L2_CACHE_TTL_S: float = 3600.0  # 1 hour / 1 小時
+        self._L2_CACHE_MAX_SIZE: int = 200  # cap to prevent unbounded growth / 上限防止無限增長
+
         # Pending intents buffer (collected by PipelineBridge)
         # 待处理 intent 缓冲区（由 PipelineBridge 收集）
         self._pending_intents: List[TradeIntent] = []
@@ -261,6 +271,11 @@ class StrategistAgent:
             "h4_validation_fail": 0,
             # H5 Ollama cost tracking counter / H5 Ollama 調用計數
             "ollama_calls_tracked": 0,
+            # L2 cache counters / L2 快取計數器
+            "l2_cache_stored": 0,
+            "l2_cache_hit": 0,
+            "l2_cache_expired": 0,
+            "l2_cache_weight_applied": 0,
         }
 
         # Evaluation log (recent evaluations for diagnostics)
@@ -458,82 +473,102 @@ class StrategistAgent:
             logger.debug("Intel too old: %.0fs > %ds", age_seconds, self.config.max_intel_age_seconds)
             return
 
-        # ── H1 ThoughtGate: pre-AI determination gate (synchronous, no await) ──
-        # H1 思考閘門：AI 調用前的確定性判斷，全部同步執行，符合 MessageBus 回調限制。
-        # CC 原則 6：should_call_ai=False 時必須走啟發式評估，不可直接 allow-all 或 return。
-        should_call_ai = True
-
-        if not self._h1_check_budget():
-            with self._lock:
-                self._stats["h1_budget_skip"] += 1
-            should_call_ai = False
-
-        if should_call_ai and self._h1_complexity_score(intel) < 0.3:
-            with self._lock:
-                self._stats["h1_complexity_skip"] += 1
-            should_call_ai = False
-
-        if should_call_ai and not self._h1_check_cooldown(intel):
-            with self._lock:
-                self._stats["h1_cooldown_skip"] += 1
-            should_call_ai = False
-
-        if not should_call_ai:
-            # Principle 6: fail-closed means use conservative heuristic, NOT allow-all
-            # 原則 6：失敗默認收縮 — 降級用啟發式評估，不可直接放行（allow-all 等於失去治理）
-            evaluation = _heuristic_evaluate(intel, self.config)
-            with self._lock:
-                self._stats["heuristic_evaluations"] += 1
+        # ── L2 cache check: use previous L2 background result if available ──
+        # L2 快取檢查：若之前的 L2 後台評估已完成且未過期，直接使用其結果
+        # APR01-MEDIUM-9: This is the consumption side of the L2 cache — previous L2 background
+        # threads stored results that we now retrieve, ensuring L2 compute is not wasted.
+        # APR01-MEDIUM-9：這是 L2 快取的消費端 — 之前的 L2 後台線程儲存了結果，
+        # 現在我們檢索它們，確保 L2 計算資源不被浪費。
+        l2_cached = None
+        for sym in intel.symbols:
+            l2_cached = self._check_l2_cache(sym)
+            if l2_cached is not None:
+                break
+        if l2_cached is not None:
+            # Use cached L2 result directly — skip H1 gate and model routing
+            # 直接使用快取的 L2 結果 — 跳過 H1 閘門和模型路由
+            evaluation = l2_cached
+            logger.info(
+                "Using cached L2 result for %s (confidence=%.2f) / 使用快取 L2 結果",
+                intel.symbols, evaluation.confidence,
+            )
         else:
-            # H3 ModelRouter: select model tier based on signal complexity
-            # H3 模型路由：根據信號複雜度選擇模型層，平衡速度與精度
-            model_tier = self._h3_route_model(intel)
-            if model_tier == "l2":
-                # L2 must run in background thread — cannot block synchronous on_tick callback
-                # L2 必須在後台線程執行，避免阻塞 MessageBus 的同步 on_tick 回調
-                threading.Thread(
-                    target=self._evaluate_edge_l2,
-                    args=(intel,),
-                    daemon=True,
-                ).start()
-                # Use heuristic as immediate result; L2 result will be logged asynchronously
-                # 立即使用啟發式結果；L2 結果將在後台異步記錄
+            # ── H1 ThoughtGate: pre-AI determination gate (synchronous, no await) ──
+            # H1 思考閘門：AI 調用前的確定性判斷，全部同步執行，符合 MessageBus 回調限制。
+            # CC 原則 6：should_call_ai=False 時必須走啟發式評估，不可直接 allow-all 或 return。
+            should_call_ai = True
+
+            if not self._h1_check_budget():
+                with self._lock:
+                    self._stats["h1_budget_skip"] += 1
+                should_call_ai = False
+
+            if should_call_ai and self._h1_complexity_score(intel) < 0.3:
+                with self._lock:
+                    self._stats["h1_complexity_skip"] += 1
+                should_call_ai = False
+
+            if should_call_ai and not self._h1_check_cooldown(intel):
+                with self._lock:
+                    self._stats["h1_cooldown_skip"] += 1
+                should_call_ai = False
+
+            if not should_call_ai:
+                # Principle 6: fail-closed means use conservative heuristic, NOT allow-all
+                # 原則 6：失敗默認收縮 — 降級用啟發式評估，不可直接放行（allow-all 等於失去治理）
                 evaluation = _heuristic_evaluate(intel, self.config)
                 with self._lock:
                     self._stats["heuristic_evaluations"] += 1
             else:
-                # L1 runs synchronously with timeout — acceptable blocking window
-                # L1 同步執行，有 timeout 保護，阻塞時間可接受
-                try:
-                    evaluation = self._evaluate_edge(intel)
-                except Exception as _edge_exc:
-                    # fail-closed: any unexpected error in evaluate_edge → heuristic fallback
-                    # fail-closed：evaluate_edge 任何異常 → 啟發式回退，不得拋出到外層
-                    logger.warning(
-                        "_evaluate_edge raised %s, falling back to heuristic / "
-                        "_evaluate_edge 拋出 %s，回退到啟發式",
-                        type(_edge_exc).__name__, type(_edge_exc).__name__,
-                    )
-                    with self._lock:
-                        self._stats["errors"] += 1
-                        self._stats["heuristic_evaluations"] += 1
+                # H3 ModelRouter: select model tier based on signal complexity
+                # H3 模型路由：根據信號複雜度選擇模型層，平衡速度與精度
+                model_tier = self._h3_route_model(intel)
+                if model_tier == "l2":
+                    # L2 must run in background thread — cannot block synchronous on_tick callback
+                    # L2 必須在後台線程執行，避免阻塞 MessageBus 的同步 on_tick 回調
+                    threading.Thread(
+                        target=self._evaluate_edge_l2,
+                        args=(intel,),
+                        daemon=True,
+                    ).start()
+                    # Use heuristic as immediate result; L2 result cached for next cycle
+                    # 立即使用啟發式結果；L2 結果快取供下次週期使用
                     evaluation = _heuristic_evaluate(intel, self.config)
+                    with self._lock:
+                        self._stats["heuristic_evaluations"] += 1
+                else:
+                    # L1 runs synchronously with timeout — acceptable blocking window
+                    # L1 同步執行，有 timeout 保護，阻塞時間可接受
+                    try:
+                        evaluation = self._evaluate_edge(intel)
+                    except Exception as _edge_exc:
+                        # fail-closed: any unexpected error in evaluate_edge → heuristic fallback
+                        # fail-closed：evaluate_edge 任何異常 → 啟發式回退，不得拋出到外層
+                        logger.warning(
+                            "_evaluate_edge raised %s, falling back to heuristic / "
+                            "_evaluate_edge 拋出 %s，回退到啟發式",
+                            type(_edge_exc).__name__, type(_edge_exc).__name__,
+                        )
+                        with self._lock:
+                            self._stats["errors"] += 1
+                            self._stats["heuristic_evaluations"] += 1
+                        evaluation = _heuristic_evaluate(intel, self.config)
 
-            # H5 light: record Ollama call for cost tracking (Ollama is free, track call count)
-            # H5 輕量版：記錄 Ollama 調用以追蹤調用次數（Ollama 免費，僅計次）
-            # Uses record_call() if available; cost tracking failure must never block execution.
-            # 使用 record_call()（若存在）；成本追蹤失敗不得阻塞執行。
-            if self.cost_tracker is not None and model_tier != "l2":
-                try:
-                    _record = getattr(self.cost_tracker, "record_call", None)
-                    if _record is not None:
-                        _record(model="l1_9b", cost_usd=0.0)
-                except Exception as e:
-                    # TD-3: Log cost tracking failures instead of silently swallowing them.
-                    # H5 成本記錄失敗不應靜默忽略，改為 warning 日誌以便追蹤問題。
-                    logger.warning(
-                        "H5 cost record failed for model l1_9b: %s / H5 成本記錄失敗", e
-                    )
+                # H5 light: record Ollama call for cost tracking (Ollama is free, track call count)
+                # H5 輕量版：記錄 Ollama 調用以追蹤調用次數（Ollama 免費，僅計次）
+                # Uses record_call() if available; cost tracking failure must never block execution.
+                # 使用 record_call()（若存在）；成本追蹤失敗不得阻塞執行。
+                if self.cost_tracker is not None and model_tier != "l2":
+                    try:
+                        _record = getattr(self.cost_tracker, "record_call", None)
+                        if _record is not None:
+                            _record(model="l1_9b", cost_usd=0.0)
+                    except Exception as e:
+                        # TD-3: Log cost tracking failures instead of silently swallowing them.
+                        # H5 成本記錄失敗不應靜默忽略，改為 warning 日誌以便追蹤問題。
+                        logger.warning(
+                            "H5 cost record failed for model l1_9b: %s / H5 成本記錄失敗", e
+                        )
 
         with self._lock:
             self._stats["intel_evaluated"] += 1
@@ -754,11 +789,20 @@ class StrategistAgent:
 
     def _evaluate_edge_l2(self, intel: Any) -> None:
         """
-        Async L2 evaluation executed in a background daemon thread. Results are logged only.
-        在後台 daemon 線程執行的 L2 深度評估，結果僅記錄，不影響已派出的啟發式 intent。
+        Async L2 evaluation executed in a background daemon thread.
+        Results are cached per-symbol so the next decision cycle can benefit from
+        the deeper L2 analysis (APR01-MEDIUM-9 fix: previously results were discarded).
+        在後台 daemon 線程執行的 L2 深度評估。
+        結果按幣種快取，供下次決策週期使用（APR01-MEDIUM-9 修復：之前結果被完全丟棄）。
 
         This method must NEVER be called from the main on_tick callback path.
         此方法絕對不能從 on_tick 主回調路徑直接調用。
+
+        Cache flow / 快取流程：
+        1. L2 completes → result stored in _l2_result_cache[symbol]
+        2. Next _handle_intel() for same symbol → _check_l2_cache() finds cached result
+        3. Cached L2 evaluation replaces heuristic/L1 evaluation if still within TTL
+        4. High-confidence L2 results also update _strategy_preference_weights
         """
         try:
             result = self._evaluate_edge(intel)
@@ -766,10 +810,137 @@ class StrategistAgent:
                 "L2 async result for %s: has_edge=%s confidence=%.2f / L2 異步結果",
                 intel.symbols, result.has_edge, result.confidence,
             )
+            # Store L2 result in cache for each symbol — next decision cycle can use it.
+            # 將 L2 結果存入快取（按幣種），下次決策週期可使用深度 AI 分析結果。
+            self._store_l2_result(intel, result)
         except Exception as e:
             # Log and swallow — background thread must not crash
             # 記錄並吞掉異常 — 後台線程不得崩潰
             logger.warning("L2 async evaluation failed: %s", type(e).__name__)
+
+    def _store_l2_result(self, intel: Any, evaluation: EdgeEvaluation) -> None:
+        """
+        Store L2 background evaluation result in per-symbol cache.
+        將 L2 後台評估結果存入按幣種的快取。
+
+        Also updates _strategy_preference_weights when L2 provides high-confidence
+        directional signal — this is the primary value-capture mechanism for L2 compute.
+        當 L2 提供高信心方向性信號時，同步更新策略偏好權重 — 這是 L2 計算資源的主要價值捕獲機制。
+
+        Thread-safe: uses dedicated _l2_cache_lock (separate from main _lock to avoid contention).
+        線程安全：使用專用 _l2_cache_lock（與主 _lock 分離以避免競爭）。
+
+        Fail-open: any error in cache storage does not affect system behavior.
+        失敗開放：快取儲存的任何異常不影響系統行為。
+        """
+        try:
+            now = time.time()
+            cache_entry = {
+                "evaluation": evaluation,
+                "timestamp": now,
+                "intel_id": getattr(intel, "intel_id", "unknown"),
+            }
+
+            with self._l2_cache_lock:
+                # Capacity guard: evict expired entries when at cap
+                # 容量守衛：超過上限時清理過期條目
+                if len(self._l2_result_cache) >= self._L2_CACHE_MAX_SIZE:
+                    expired = [
+                        k for k, v in self._l2_result_cache.items()
+                        if now - v["timestamp"] >= self._L2_CACHE_TTL_S
+                    ]
+                    for k in expired:
+                        del self._l2_result_cache[k]
+
+                for symbol in getattr(intel, "symbols", []):
+                    self._l2_result_cache[symbol] = cache_entry
+
+            with self._lock:
+                self._stats["l2_cache_stored"] += 1
+
+            # High-confidence L2 results update strategy preference weights
+            # 高信心 L2 結果更新策略偏好權重（原則 12：持續進化）
+            if evaluation.has_edge and evaluation.confidence >= 0.6:
+                self._apply_l2_weight_update(intel, evaluation)
+
+            logger.debug(
+                "L2 result cached for %s (confidence=%.2f, has_edge=%s) / "
+                "L2 結果已快取（信心=%.2f，有邊際=%s）",
+                getattr(intel, "symbols", []), evaluation.confidence,
+                evaluation.has_edge, evaluation.confidence, evaluation.has_edge,
+            )
+        except Exception as e:
+            # Fail-open: cache write failure must not affect system
+            # 失敗開放：快取寫入失敗不影響系統運作
+            logger.warning("_store_l2_result failed (fail-open): %s / L2 快取寫入失敗", e)
+
+    def _apply_l2_weight_update(self, intel: Any, evaluation: EdgeEvaluation) -> None:
+        """
+        Update strategy preference weights based on high-confidence L2 evaluation.
+        根據高信心 L2 評估更新策略偏好權重。
+
+        L2 is the deepest AI analysis tier — its high-confidence results carry more
+        signal than L1 heuristics, so weight adjustments are ±0.15 (vs ±0.1 for pattern insights).
+        L2 是最深層的 AI 分析 — 高信心結果比 L1 啟發式攜帶更多信號，
+        因此權重調整為 ±0.15（相比模式洞察的 ±0.1 更大）。
+
+        Weight range clamped to [0.2, 2.0] consistent with _apply_pattern_insight.
+        權重範圍限幅 [0.2, 2.0]，與 _apply_pattern_insight 一致。
+        """
+        try:
+            for symbol in getattr(intel, "symbols", []):
+                strategy_key = f"ai_{symbol}"
+                with self._lock:
+                    current = self._strategy_preference_weights.get(strategy_key, 1.0)
+                    # L2 confirmed edge → boost weight; L2 rejected → reduce weight
+                    # L2 確認有邊際 → 提高權重；L2 拒絕 → 降低權重
+                    delta = 0.15 * evaluation.confidence if evaluation.has_edge else -0.1
+                    new_weight = max(0.2, min(2.0, current + delta))
+                    self._strategy_preference_weights[strategy_key] = new_weight
+                    self._stats["l2_cache_weight_applied"] += 1
+                logger.debug(
+                    "L2 weight update for %s: %.2f → %.2f (delta=%.3f) / "
+                    "L2 權重更新：%.2f → %.2f",
+                    strategy_key, current, new_weight, delta, current, new_weight,
+                )
+        except Exception as e:
+            # Fail-open: weight update failure must not crash background thread
+            # 失敗開放：權重更新失敗不得崩潰後台線程
+            logger.warning("_apply_l2_weight_update failed (fail-open): %s", e)
+
+    def _check_l2_cache(self, symbol: str) -> Optional[EdgeEvaluation]:
+        """
+        Check if a valid (non-expired) L2 result exists for this symbol.
+        檢查此幣種是否有尚未過期的 L2 快取結果。
+
+        Returns the cached EdgeEvaluation if found and within TTL, else None.
+        若找到且在 TTL 內則返回快取的 EdgeEvaluation，否則返回 None。
+
+        Fail-open: any error reading cache → return None (proceed without L2 input).
+        失敗開放：讀取快取的任何異常 → 返回 None（不使用 L2 輸入繼續）。
+        """
+        try:
+            now = time.time()
+            with self._l2_cache_lock:
+                entry = self._l2_result_cache.get(symbol)
+                if entry is None:
+                    return None
+                age = now - entry["timestamp"]
+                if age >= self._L2_CACHE_TTL_S:
+                    # Expired — remove and return None
+                    # 已過期 — 移除並返回 None
+                    del self._l2_result_cache[symbol]
+                    with self._lock:
+                        self._stats["l2_cache_expired"] += 1
+                    return None
+                with self._lock:
+                    self._stats["l2_cache_hit"] += 1
+                return entry["evaluation"]
+        except Exception as e:
+            # Fail-open: cache read failure → proceed without L2
+            # 失敗開放：快取讀取失敗 → 不使用 L2 繼續
+            logger.warning("_check_l2_cache failed (fail-open): %s / L2 快取讀取失敗", e)
+            return None
 
     # ── Edge Evaluation / Edge 评估 ──
 
@@ -966,7 +1137,7 @@ class StrategistAgent:
     def get_stats(self) -> Dict[str, Any]:
         """Get agent statistics / 获取代理统计"""
         with self._lock:
-            return {
+            stats = {
                 "role": AgentRole.STRATEGIST.value,
                 "state": self.state.value,
                 "shadow": self.config.shadow,
@@ -974,6 +1145,11 @@ class StrategistAgent:
                 "strategy_preference_weights": dict(self._strategy_preference_weights),
                 **dict(self._stats),
             }
+        # L2 cache size is read under its own lock to avoid holding both locks
+        # L2 快取大小使用專用鎖讀取，避免同時持有兩把鎖
+        with self._l2_cache_lock:
+            stats["l2_cache_size"] = len(self._l2_result_cache)
+        return stats
 
     def get_recent_evaluations(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Get recent edge evaluations for diagnostics / 获取最近的 edge 评估用于诊断"""

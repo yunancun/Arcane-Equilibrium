@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 """
-OpenClaw / Bybit Control API + GUI
-OpenClaw / Bybit 控制 API 与 GUI 默认入口（快照稳定版 + runtime bridge）
+MODULE_NOTE (中文):
+  FastAPI 应用主入口模块，在 main_legacy 基础上叠加快照稳定性编译与 runtime bridge 覆盖。
+  负责状态读写的确定性重编译（snapshot identity 不变性）、runtime 事实层叠加、以及
+  所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
+  属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。
+
+MODULE_NOTE (English):
+  Main FastAPI application entry point, layering snapshot-stable compilation and a
+  runtime bridge on top of main_legacy. Responsible for deterministic state recompilation
+  (preserving snapshot identity on reads), runtime fact overlay, and unified registration
+  of all sub-routers (Paper Trading / L2 AI / Risk / Strategy / Governance / Scout).
+  Part of the Control API v1 layer; serves as the single HTTP service exposure point.
 
 说明 / Notes:
 - 当前默认入口已经通过 snapshot identity 稳定性验证。

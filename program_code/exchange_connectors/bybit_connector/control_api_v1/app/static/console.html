@@ -197,23 +197,35 @@
 </div>
 
 <script>
-// ─── Auth ─────────────────────────────────────────────────────
-const TOKEN_KEY = 'oc_trading_token';
+// ─── Auth (APR01-MEDIUM-13: HttpOnly cookie, no localStorage token) ─────────
 const USER_KEY = 'oc_username';
+// Clean up legacy localStorage token if present / 清理旧的 localStorage token
+localStorage.removeItem('oc_trading_token');
+
 (function() {
-  if (!localStorage.getItem(TOKEN_KEY)) {
+  // Synchronous auth check via cookie / 通过 cookie 同步验证认证
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/v1/auth/check', false);
+    xhr.send();
+    if (xhr.status !== 200) {
+      sessionStorage.setItem('oc_login_redirect', '/console');
+      window.location.href = '/login';
+    }
+  } catch(e) {
     sessionStorage.setItem('oc_login_redirect', '/console');
     window.location.href = '/login';
   }
 })();
 
-function ocLogout() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  window.location.href = '/login';
-}
+// ocLogout is defined in common.js (calls /api/v1/auth/logout + clears cookie)
+// ocLogout 已在 common.js 中定义（调用登出端点 + 清除 cookie）
 
-function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function getToken() {
+  // DEPRECATED: Token is in HttpOnly cookie, not accessible from JS.
+  // 已弃用：Token 在 HttpOnly cookie 中，JS 无法访问。
+  return '';
+}
 
 // Cache-bust timestamp — ensures iframe tabs reload on each console.html refresh
 const BUILD_TS = Date.now();
@@ -320,12 +332,11 @@ function toggleSidePanel(clicked) {
   document.getElementById('dot-paper').className = 'panel-dot' + (_sidePanel === 'paper' ? ' panel-dot-active' : '');
 }
 
-// ─── Sidebar API helper ──────────────────────────────────────
+// ─── Sidebar API helper (APR01-MEDIUM-13: cookie-based auth) ─
 async function api(path) {
-  const t = getToken();
-  if (!t) return null;
+  // HttpOnly cookie sent automatically / HttpOnly cookie 自动发送
   try {
-    const r = await fetch(path, { headers: { 'Authorization': 'Bearer ' + t } });
+    const r = await fetch(path, { credentials: 'same-origin' });
     if (!r.ok) return null;
     return await r.json();
   } catch(e) { return null; }
@@ -449,7 +460,7 @@ async function refreshSidebar() {
   // OpenClaw
   try {
     const r = await fetch(OC + '/health', {
-      headers: { 'Authorization': 'Bearer ' + getToken() }
+      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自动发送 HttpOnly cookie
     });
     const h = await r.json();
     document.getElementById('s-oc').textContent = h.ok ? 'Online' : 'Down';

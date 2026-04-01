@@ -128,10 +128,15 @@ const LONG_TERM_SWITCHES = [
 // ── 基础工具函数 / Basic utility functions ───────────────────────────────────
 
 function headers() {
-  return {
-    Authorization: `Bearer ${inMemoryToken}`,
-    "Content-Type": "application/json"
-  };
+  // APR01-MEDIUM-13: Token is in HttpOnly cookie, sent automatically.
+  // Authorization header kept only if inMemoryToken was manually set (legacy/API mode).
+  // APR01-MEDIUM-13：Token 在 HttpOnly cookie 中，自动发送。
+  // 仅在手动设置 inMemoryToken 时保留 Authorization header（旧版/API 模式）。
+  const h = { "Content-Type": "application/json" };
+  if (inMemoryToken) {
+    h.Authorization = `Bearer ${inMemoryToken}`;
+  }
+  return h;
 }
 
 function pretty(value) { return JSON.stringify(value, null, 2); }
@@ -332,7 +337,7 @@ function openConfirmModal(actionName) {
 // ── API 调用 / API calls ──────────────────────────────────────────────────────
 
 async function apiGet(path) {
-  const response = await fetch(path, { headers: headers() });
+  const response = await fetch(path, { headers: headers(), credentials: 'same-origin' });
   const data = await response.json();
   if (!response.ok) throw new Error(pretty(data));
   return data;
@@ -342,6 +347,7 @@ async function apiPost(path, payload) {
   const response = await fetch(path, {
     method: "POST",
     headers: headers(),
+    credentials: 'same-origin',
     body: JSON.stringify(payload)
   });
   const data = await response.json();
@@ -2147,13 +2153,13 @@ async function requestAIConsult(packetId) {
 document.addEventListener("DOMContentLoaded", () => {
   ensureGuiEnhancements();
 
-  // Auto-fill token from login page localStorage
-  const savedToken = localStorage.getItem('oc_trading_token');
-  if (savedToken) {
-    document.getElementById('tokenInput').value = savedToken;
-    // Auto-connect after a short delay to let UI initialize
-    setTimeout(() => { document.getElementById('connectButton').click(); }, 200);
-  }
+  // APR01-MEDIUM-13: Token is now in HttpOnly cookie. Clean up legacy localStorage.
+  // Auto-connect using cookie auth (no manual token input needed).
+  // APR01-MEDIUM-13：Token 已移至 HttpOnly cookie。清理旧 localStorage。
+  // 使用 cookie 认证自动连接（无需手动输入 token）。
+  localStorage.removeItem('oc_trading_token');
+  // Auto-connect: cookie is sent automatically, so just trigger loadDashboard.
+  setTimeout(() => { document.getElementById('connectButton').click(); }, 200);
 
   // 连接按钮 / Connect button
   document.getElementById("connectButton").addEventListener("click", async () => {

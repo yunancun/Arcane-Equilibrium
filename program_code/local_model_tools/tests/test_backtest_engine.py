@@ -38,6 +38,7 @@ from program_code.local_model_tools.backtest_engine import (
     _compute_rsi,
     _compute_sharpe,
     _compute_sma,
+    _precompute_indicator_series,
 )
 
 
@@ -522,12 +523,14 @@ class TestPrinciple7Isolation:
         # If MessageBus were imported and called, we'd see it
         # 若 MessageBus 被导入并调用，此处会捕获
         with patch(
-            "program_code.local_model_tools.backtest_engine._compute_indicators_pure",
-            wraps=_compute_indicators_pure,
+            "program_code.local_model_tools.backtest_engine._precompute_indicator_series",
+            wraps=_precompute_indicator_series,
         ) as mock_fn:
             result = engine.run(config, _make_trending_up_ohlcv(100))
-            # _compute_indicators_pure should be called (our computation)
+            # _precompute_indicator_series should be called (our computation)
             # but no live pipeline calls
+            # _precompute_indicator_series 应被调用（我们的指标计算），
+            # 但不调用任何线上管线
             assert mock_fn.called  # backtest did run indicators
         assert isinstance(result, BacktestResult)
 

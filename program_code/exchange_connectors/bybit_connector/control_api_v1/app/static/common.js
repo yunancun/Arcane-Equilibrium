@@ -4,24 +4,61 @@
  */
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
-const OC_TOKEN_KEY = 'oc_trading_token';
+// APR01-MEDIUM-13: Token moved from localStorage to HttpOnly cookie.
+// Cookie is set by /api/v1/auth/login, cleared by /api/v1/auth/logout.
+// JS never touches the token — browser sends the cookie automatically.
+// APR01-MEDIUM-13：Token 从 localStorage 移至 HttpOnly cookie。
+// Cookie 由登录端点设置，由登出端点清除。JS 永远不碰 token，浏览器自动发送 cookie。
+const OC_TOKEN_KEY = 'oc_trading_token';   // Legacy key — used only for migration cleanup
 const OC_USER_KEY = 'oc_username';
 
+// On load, clean up any legacy localStorage tokens (one-time migration).
+// 页面加载时清理旧的 localStorage token（一次性迁移）。
+(function _ocMigrateLegacyToken() {
+  if (localStorage.getItem(OC_TOKEN_KEY)) {
+    localStorage.removeItem(OC_TOKEN_KEY);
+  }
+})();
+
 function ocAuthCheck() {
-  if (!localStorage.getItem(OC_TOKEN_KEY)) {
+  // Synchronous check: send a quick XHR to /api/v1/auth/check.
+  // If not authenticated, redirect to login. Uses sync XHR because this runs
+  // at page top before any async code.
+  // 同步检查：向 /api/v1/auth/check 发送快速请求。未认证则跳转登录页。
+  // 使用同步 XHR 因为这在页面顶部、任何异步代码之前执行。
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/v1/auth/check', false);  // synchronous
+    xhr.send();
+    if (xhr.status !== 200) {
+      sessionStorage.setItem('oc_login_redirect', '/console');
+      window.location.href = '/login';
+      return false;
+    }
+    return true;
+  } catch (e) {
     sessionStorage.setItem('oc_login_redirect', '/console');
     window.location.href = '/login';
     return false;
   }
-  return true;
 }
 
 function ocGetToken() {
-  return localStorage.getItem(OC_TOKEN_KEY) || '';
+  // DEPRECATED: Token is now in HttpOnly cookie, not accessible from JS.
+  // Returns empty string. Kept for backward compatibility — callers should
+  // not rely on this value. fetch() with credentials:'same-origin' sends
+  // the cookie automatically.
+  // 已弃用：Token 现在在 HttpOnly cookie 中，JS 无法访问。
+  // 返回空字符串。保留仅为向后兼容。
+  return '';
 }
 
-function ocLogout() {
-  localStorage.removeItem(OC_TOKEN_KEY);
+async function ocLogout() {
+  // Call server to clear the HttpOnly cookie, then redirect to login.
+  // 调用服务端清除 HttpOnly cookie，然后跳转登录页。
+  try {
+    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  } catch (e) { /* best-effort / 尽力而为 */ }
   localStorage.removeItem(OC_USER_KEY);
   window.location.href = '/login';
 }
@@ -43,20 +80,21 @@ let _ocAuthFails = 0;
 const _OC_AUTH_MAX = 5;
 
 async function ocApi(path, opts) {
-  const token = ocGetToken();
-  if (!token) return null;
+  // Auth is handled by HttpOnly cookie — no token in JS needed.
+  // 认证由 HttpOnly cookie 处理，JS 中无需 token。
   if (_ocAuthFails >= _OC_AUTH_MAX) {
     console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' failures). Probing...');
   }
 
   const method = (opts && opts.method) || 'GET';
-  const headers = { 'Authorization': 'Bearer ' + token };
+  const headers = {};
   if (opts && opts.body) headers['Content-Type'] = 'application/json';
 
   try {
     const r = await fetch(path, {
       method: method,
       headers: headers,
+      credentials: 'same-origin',  // Send HttpOnly cookie automatically / 自动发送 HttpOnly cookie
       body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
     });
     if (!r.ok) {

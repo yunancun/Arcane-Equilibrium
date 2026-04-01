@@ -181,7 +181,7 @@ async function loadTelegram() {
 async function loadOpenClaw() {
   try {
     const r = await fetch(window.location.origin + '/openclaw/health', {
-      headers: { 'Authorization': 'Bearer ' + ocGetToken() }
+      credentials: 'same-origin'  // HttpOnly cookie sent automatically / 自动发送 HttpOnly cookie
     });
     const h = await r.json();
     const el = $('oc-status');

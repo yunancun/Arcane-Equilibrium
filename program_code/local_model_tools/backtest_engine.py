@@ -363,61 +363,201 @@ class _BacktestKlineAdapter:
 
 
 # =============================================================================
-# Pure helper functions for indicator computation in backtest
-# 回测专用纯函数指标计算辅助函数（不依赖 IndicatorEngine 框架，避免副作用）
+# Indicator imports from indicators/ package (APR01-MEDIUM-8 dedup)
+# 从 indicators/ 包导入纯函数（APR01-MEDIUM-8 去重）
+#
+# PRINCIPLE 7 SAFE: The indicators/ package contains only pure math functions
+# with zero live-module imports. Importing them does NOT violate Principle 7.
+# 原则 7 安全：indicators/ 包仅含纯数学函数，不导入任何 live 模块。
+#
+# Previously, backtest_engine.py duplicated _compute_sma, _compute_ema,
+# _compute_rsi locally. Now we reuse the canonical implementations from
+# indicators/ to avoid drift and reduce maintenance burden.
+# 之前 backtest_engine.py 本地重复了 _compute_sma/_compute_ema/_compute_rsi。
+# 现在复用 indicators/ 的规范实现，避免代码漂移和维护负担。
 # =============================================================================
-
-def _compute_sma(close: list[float], period: int) -> float | None:
-    """Simple Moving Average / 简单移动平均"""
-    if len(close) < period:
-        return None
-    window = close[-period:]
-    return sum(window) / period
-
-
-def _compute_ema(close: list[float], period: int) -> float | None:
-    """Exponential Moving Average / 指数移动平均"""
-    if len(close) < period:
-        return None
-    k = 2.0 / (period + 1)
-    ema = sum(close[:period]) / period
-    for price in close[period:]:
-        ema = price * k + ema * (1 - k)
-    return ema
+from .indicators.moving_averages import (
+    compute_sma as _compute_sma,
+    compute_ema as _compute_ema,
+    compute_sma_series as _compute_sma_series,
+    compute_ema_series as _compute_ema_series,
+)
+from .indicators.rsi import (
+    compute_rsi as _compute_rsi,
+    compute_rsi_series as _compute_rsi_series,
+)
+from .indicators.macd import compute_macd as _compute_macd
 
 
-def _compute_rsi(close: list[float], period: int = 14) -> float | None:
-    """RSI using Wilder's smoothing / 使用 Wilder 平滑法的 RSI"""
-    if len(close) < period + 1:
-        return None
-    changes = [close[i] - close[i - 1] for i in range(1, len(close))]
-    gains = [max(c, 0.0) for c in changes]
-    losses = [max(-c, 0.0) for c in changes]
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    for i in range(period, len(changes)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-    if avg_loss < 1e-10:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100.0 - 100.0 / (1.0 + rs)
+def _precompute_indicator_series(close: list[float]) -> dict[str, list[float]]:
+    """
+    Pre-compute ALL indicator series for the full bar array in O(n) time.
+    一次性对完整 K 线序列预计算所有指标序列，时间复杂度 O(n)。
+
+    APR01-HIGH-3 FIX: Previously, _compute_indicators_pure() was called
+    per-bar inside the simulation loop, and each call recomputed EMA/RSI
+    from scratch on an ever-growing slice — resulting in O(n^2) total work.
+    Now we compute each indicator series ONCE here, and the simulation loop
+    simply looks up pre-computed values by index.
+    APR01-HIGH-3 修复：之前 _compute_indicators_pure() 在模拟循环中逐 bar 调用，
+    每次在不断增长的切片上从头重算 EMA/RSI，总计 O(n^2)。
+    现在在此处一次性计算所有指标序列，模拟循环只需按索引查找预计算值。
+
+    Returns a dict mapping series name to a list of float values (same length
+    as `close`). NaN values indicate insufficient warmup data.
+    返回字典：键为序列名，值为与 close 等长的 float 列表。NaN 表示预热不足。
+
+    Args:
+      close — full close price series / 完整收盘价序列
+
+    Returns:
+      Pre-computed indicator series indexed by bar position /
+      按 bar 索引对齐的预计算指标序列
+    """
+    result: dict[str, list[float]] = {}
+    n = len(close)
+    if n == 0:
+        return result
+
+    # SMA series / SMA 序列
+    result["sma20"] = _compute_sma_series(close, 20) or [float("nan")] * n
+    result["sma50"] = _compute_sma_series(close, 50) or [float("nan")] * n
+
+    # EMA series / EMA 序列
+    result["ema12"] = _compute_ema_series(close, 12) or [float("nan")] * n
+    result["ema26"] = _compute_ema_series(close, 26) or [float("nan")] * n
+
+    # RSI series / RSI 序列
+    # compute_rsi_series returns a list of same length as input,
+    # with the first `period` values as NaN (already aligned).
+    # compute_rsi_series 返回与输入同长度的列表，
+    # 前 `period` 个值为 NaN（已对齐）。
+    rsi_raw = _compute_rsi_series(close, 14)
+    if rsi_raw and len(rsi_raw) == n:
+        result["rsi14"] = rsi_raw
+    else:
+        result["rsi14"] = [float("nan")] * n
+
+    # MACD: compute full series via the canonical function on full data,
+    # then build per-bar aligned arrays for macd/signal/histogram.
+    # MACD：用规范函数对完整数据计算完整序列，
+    # 然后构建按 bar 对齐的 macd/signal/histogram 数组。
+    ema12_series = result["ema12"]
+    ema26_series = result["ema26"]
+    # MACD line series = ema12 - ema26 (valid where both are not NaN)
+    # MACD 线序列 = ema12 - ema26（两者均非 NaN 时有效）
+    macd_line_series: list[float] = []
+    for i in range(n):
+        e12 = ema12_series[i] if i < len(ema12_series) else float("nan")
+        e26 = ema26_series[i] if i < len(ema26_series) else float("nan")
+        if math.isnan(e12) or math.isnan(e26):
+            macd_line_series.append(float("nan"))
+        else:
+            macd_line_series.append(e12 - e26)
+    result["macd_line"] = macd_line_series
+
+    # Signal line: EMA(9) of the valid MACD line values
+    # 信号线：有效 MACD 线值的 EMA(9)
+    # Find first valid MACD index / 找到第一个有效 MACD 索引
+    first_valid = -1
+    for i in range(n):
+        if not math.isnan(macd_line_series[i]):
+            first_valid = i
+            break
+
+    macd_signal_series: list[float] = [float("nan")] * n
+    macd_histogram_series: list[float] = [float("nan")] * n
+    if first_valid >= 0:
+        valid_macd = macd_line_series[first_valid:]
+        signal_raw = _compute_ema_series(valid_macd, 9)
+        if signal_raw:
+            for j, val in enumerate(signal_raw):
+                idx = first_valid + j
+                if idx < n:
+                    macd_signal_series[idx] = val
+                    if not math.isnan(val) and not math.isnan(macd_line_series[idx]):
+                        macd_histogram_series[idx] = macd_line_series[idx] - val
+
+    result["macd_signal"] = macd_signal_series
+    result["macd_histogram"] = macd_histogram_series
+
+    return result
+
+
+def _lookup_indicators_at_bar(
+    series: dict[str, list[float]],
+    bar_idx: int,
+) -> dict[str, Any]:
+    """
+    Look up pre-computed indicator values at a specific bar index.
+    查找指定 bar 索引处的预计算指标值。
+
+    Converts the per-series arrays into the same dict format that
+    _compute_indicators_pure() used to return, so signal rules see
+    identical data structures. Returns only non-NaN values.
+    将按序列存储的数组转换为与旧 _compute_indicators_pure() 相同的字典格式，
+    使信号规则看到完全相同的数据结构。只返回非 NaN 的值。
+
+    Args:
+      series  — pre-computed indicator series from _precompute_indicator_series()
+                来自 _precompute_indicator_series() 的预计算序列
+      bar_idx — current bar index (0-based) / 当前 bar 索引（0 起始）
+
+    Returns:
+      Indicator dict compatible with signal rules / 与信号规则兼容的指标字典
+    """
+    result: dict[str, Any] = {}
+
+    def _get(key: str, idx: int) -> float | None:
+        arr = series.get(key)
+        if arr is None or idx >= len(arr):
+            return None
+        v = arr[idx]
+        return None if math.isnan(v) else v
+
+    sma20 = _get("sma20", bar_idx)
+    sma50 = _get("sma50", bar_idx)
+    ema12 = _get("ema12", bar_idx)
+    ema26 = _get("ema26", bar_idx)
+    rsi14 = _get("rsi14", bar_idx)
+
+    if sma20 is not None:
+        result["SMA(20)"] = {"sma": sma20}
+    if sma50 is not None:
+        result["SMA(50)"] = {"sma": sma50}
+    if ema12 is not None:
+        result["EMA(12)"] = {"ema": ema12}
+    if ema26 is not None:
+        result["EMA(26)"] = {"ema": ema26}
+    if rsi14 is not None:
+        result["RSI(14)"] = {"rsi": rsi14}
+
+    # MACD / MACD 指标
+    macd_val = _get("macd_line", bar_idx)
+    if macd_val is not None:
+        signal_val = _get("macd_signal", bar_idx)
+        histogram_val = _get("macd_histogram", bar_idx)
+        result["MACD(12,26,9)"] = {
+            "macd": macd_val,
+            "signal": signal_val,
+            "histogram": histogram_val,
+        }
+
+    return result
 
 
 def _compute_indicators_pure(ohlcv: dict[str, list[float]]) -> dict[str, Any]:
     """
     Compute a minimal indicator set from raw OHLCV using pure functions.
-    使用纯函数从原始 OHLCV 计算最小指标集（不依赖 IndicatorEngine 框架）。
+    使用纯函数从原始 OHLCV 计算最小指标集。
 
-    This is the fallback used inside BacktestEngine when the injected
-    IndicatorEngine cannot easily be driven manually (e.g., it relies on
-    live KlineManager state). The pure-function approach guarantees:
-    - No side effects on any online state
-    - Correct look-ahead prevention (caller controls which bars are fed)
-    当注入的 IndicatorEngine 无法手动驱动时（如依赖线上 KlineManager 状态），
-    此函数作为 BacktestEngine 内部的后备方案。纯函数方法保证：
-    - 对线上状态无副作用
-    - 正确防止未来数据泄露（调用者控制喂入哪些 bar）
+    BACKWARD COMPATIBILITY WRAPPER: This function is retained for any
+    external callers or tests that still use it. Internally, BacktestEngine
+    now uses _precompute_indicator_series() + _lookup_indicators_at_bar()
+    for O(n) performance instead of calling this per-bar.
+    向后兼容包装：保留此函数供外部调用者或测试使用。内部 BacktestEngine
+    现在使用 _precompute_indicator_series() + _lookup_indicators_at_bar()
+    实现 O(n) 性能，而非逐 bar 调用此函数。
 
     Returns dict with keys used by built-in signal rules:
     返回内置信号规则使用的指标键：
@@ -446,36 +586,17 @@ def _compute_indicators_pure(ohlcv: dict[str, list[float]]) -> dict[str, Any]:
     if rsi14 is not None:
         result["RSI(14)"] = {"rsi": rsi14}
 
-    # MACD / MACD 指标
-    if ema12 is not None and ema26 is not None:
-        macd_line = ema12 - ema26
-        # Approximate signal line: EMA(9) of MACD values computed over last 35 bars
-        # 信号线：最近 35 根 bar 的 MACD 序列的 EMA(9)
-        if len(close) >= 35:
-            macd_series = []
-            for i in range(9, min(len(close), 35) + 1):
-                sub = close[:i]
-                e12 = _compute_ema(sub, 12)
-                e26 = _compute_ema(sub, 26)
-                if e12 is not None and e26 is not None:
-                    macd_series.append(e12 - e26)
-            if len(macd_series) >= 9:
-                signal_line = _compute_ema(macd_series, 9)
-                if signal_line is not None:
-                    histogram = macd_line - signal_line
-                    result["MACD(12,26,9)"] = {
-                        "macd": macd_line,
-                        "signal": signal_line,
-                        "histogram": histogram,
-                    }
-        # Fallback without signal line
-        # 无信号线的后备
-        if "MACD(12,26,9)" not in result:
-            result["MACD(12,26,9)"] = {
-                "macd": macd_line,
-                "signal": None,
-                "histogram": None,
-            }
+    # MACD via canonical function / 使用规范函数计算 MACD
+    macd_result = _compute_macd(close, 12, 26, 9)
+    if macd_result is not None:
+        result["MACD(12,26,9)"] = macd_result
+    elif ema12 is not None and ema26 is not None:
+        # Fallback without signal line / 无信号线的后备
+        result["MACD(12,26,9)"] = {
+            "macd": ema12 - ema26,
+            "signal": None,
+            "histogram": None,
+        }
 
     return result
 
@@ -777,19 +898,22 @@ class BacktestEngine:
         # 为本次回测构建信号规则（独立实例，不复用线上 SignalEngine）
         signal_rules = self._build_signal_rules(config.strategy_name)
 
+        # APR01-HIGH-3 FIX: Pre-compute ALL indicator series ONCE in O(n).
+        # Previously, per-bar slicing + recomputation was O(n^2).
+        # APR01-HIGH-3 修复：一次性 O(n) 预计算所有指标序列。
+        # 之前逐 bar 切片 + 重算总复杂度为 O(n^2)。
+        indicator_series = _precompute_indicator_series(close_prices)
+
         # Warmup offset: start iterating from MIN_BARS_REQUIRED to allow indicator calc
         # 预热偏移：从 MIN_BARS_REQUIRED 开始迭代以允许指标计算
         for bar_idx in range(MIN_BARS_REQUIRED, n_bars):
             current_price = close_prices[bar_idx]
 
-            # PRINCIPLE 7: Compute indicators using pure functions on sliced data
-            # 原则 7：使用纯函数在切片数据上计算指标（不修改线上缓存）
-            ohlcv_slice = {
-                key: arr[: bar_idx + 1]  # bars up to and including current bar
-                for key, arr in ohlcv_data.items()
-                if isinstance(arr, list)
-            }
-            indicators = _compute_indicators_pure(ohlcv_slice)
+            # PRINCIPLE 7: Look up pre-computed indicators at current bar index.
+            # No data slicing, no per-bar recomputation — O(1) per bar.
+            # 原则 7：查找当前 bar 索引处的预计算指标。
+            # 无数据切片、无逐 bar 重算 — 每 bar O(1)。
+            indicators = _lookup_indicators_at_bar(indicator_series, bar_idx)
 
             # Check stop-loss first if in position / 有仓位时先检查止损
             if position is not None:

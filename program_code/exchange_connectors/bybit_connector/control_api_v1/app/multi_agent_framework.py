@@ -1,4 +1,17 @@
 """
+MODULE_NOTE (中文):
+  5-Agent 多智能体框架核心模块（Scout / Strategist / Guardian / Analyst / Executor + Conductor 编排）。
+  实现结构化 Agent 间消息协议（MessageBus 发布/订阅）、冲突仲裁（Guardian 永远优先于 Strategist）、
+  Agent 生命周期管理（INITIALIZING→RUNNING→DEGRADED→PAUSED→STOPPED）以及数据质量标记（fact/inference/hypothesis）。
+  属于治理层（Governance T2.07），是原则 15（多 Agent 协作）的底层基础设施。
+
+MODULE_NOTE (English):
+  Core 5-agent multi-agent framework (Scout / Strategist / Guardian / Analyst / Executor + Conductor orchestration).
+  Implements structured inter-agent message protocol (MessageBus pub/sub), conflict arbitration (Guardian always
+  wins over Strategist), agent lifecycle management (INITIALIZING->RUNNING->DEGRADED->PAUSED->STOPPED), and
+  data quality marking (fact/inference/hypothesis). Part of the governance layer (T2.07); foundational
+  infrastructure for Principle 15 (multi-agent collaboration).
+
 T2.07 — Scout Agent + Conductor Framework (GAP-H2)
 ===================================================
 Governance refs: EX-06 §2-§10, DOC-04 §G Multi-Agent

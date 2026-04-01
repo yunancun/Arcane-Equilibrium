@@ -55,7 +55,6 @@ MODULE_NOTE (English):
 
 import logging
 import re
-import sys
 import os
 from typing import Any
 
@@ -63,15 +62,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from . import main_legacy as base  # Auth helpers (current_actor, AuthenticatedActor)
 
-# Add program_code to path so local_model_tools is importable
-# 将 program_code 加入路径以便导入 local_model_tools
-_app_dir = os.path.dirname(os.path.abspath(__file__))
-_control_api_dir = os.path.dirname(_app_dir)
-_bybit_connector_dir = os.path.dirname(_control_api_dir)
-_exchange_connectors_dir = os.path.dirname(_bybit_connector_dir)
-_program_code_dir = os.path.dirname(_exchange_connectors_dir)
-if _program_code_dir not in sys.path:
-    sys.path.insert(0, _program_code_dir)
+# ── sys.path 注入（統一由 _path_setup 模塊處理）──────────────────────────────────
+# sys.path injection — centralized in _path_setup.py (APR01-MEDIUM-11 dedup)
+from . import _path_setup  # noqa: F401  — ensures program_code/ is on sys.path
 
 from local_model_tools.kline_manager import KlineManager
 from local_model_tools.indicator_engine import IndicatorEngine
@@ -357,10 +350,8 @@ try:
     # 止损管理器：5% 硬止损 + 5% 追踪止损 + 48h 时间止损
     # B6: trailing_stop_pct widened from 3.0→5.0 to avoid noise-triggered stops in crypto
     # B6：追踪止损从 3.0% 加宽至 5.0%，避免加密货币正常波动触发止损
-    import sys as _sys
-    _lmt_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-    if _lmt_dir not in _sys.path:
-        _sys.path.insert(0, _lmt_dir)
+    # program_code/ already on sys.path via _path_setup (APR01-MEDIUM-11)
+    # program_code/ 已由 _path_setup 注入 sys.path
     from local_model_tools.stop_manager import StopManager, StopConfig
     STOP_MANAGER = StopManager(StopConfig(hard_stop_pct=5.0, trailing_stop_pct=5.0, time_stop_hours=48.0))
 

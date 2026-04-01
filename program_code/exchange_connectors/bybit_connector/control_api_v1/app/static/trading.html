@@ -228,10 +228,21 @@
 </div>
 
 <script>
-// Auth check: redirect to login if no token
+// Auth check: verify HttpOnly cookie via /api/v1/auth/check
+// 认证检查：通过 /api/v1/auth/check 验证 HttpOnly cookie
 (function() {
-  var token = localStorage.getItem('oc_trading_token');
-  if (!token) {
+  // Clean up legacy localStorage token / 清理旧的 localStorage token
+  localStorage.removeItem('oc_trading_token');
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/v1/auth/check', false);
+    xhr.send();
+    if (xhr.status !== 200) {
+      sessionStorage.setItem('oc_login_redirect', window.location.pathname);
+      window.location.href = '/login';
+      return;
+    }
+  } catch(e) {
     sessionStorage.setItem('oc_login_redirect', window.location.pathname);
     window.location.href = '/login';
     return;
@@ -241,7 +252,6 @@
 // ============================================================
 // State
 // ============================================================
-const TOKEN_KEY = 'oc_trading_token';
 let currentSymbol = 'BTCUSDT';
 let currentTF = '5m';
 let chart = null;
@@ -251,15 +261,14 @@ let autoRefreshOn = true;
 let refreshTimer = null;
 
 // ============================================================
-// Auth
+// Auth (APR01-MEDIUM-13: HttpOnly cookie, no localStorage token)
+// 认证由 HttpOnly cookie 处理，JS 无需操作 token
 // ============================================================
 function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || '';
+  // DEPRECATED: Token is in HttpOnly cookie. Returns empty string.
+  // 已弃用：Token 在 HttpOnly cookie 中。返回空字符串。
+  return '';
 }
-
-// saveToken removed — managed by login page
-
-// Token is managed by login page via localStorage — no manual input needed
 
 // ============================================================
 // API helper
@@ -267,16 +276,15 @@ function getToken() {
 let _authFailCount = 0;
 const _AUTH_FAIL_MAX = 3;  // Stop polling after 3 consecutive 401s
 async function api(path) {
-  const t = getToken();
-  if (!t) return null;
-  // Stop hammering server after repeated auth failures / 连续认证失败后停止请求
+  // Cookie-based auth — browser sends HttpOnly cookie automatically.
+  // Cookie 认证 — 浏览器自动发送 HttpOnly cookie。
   if (_authFailCount >= _AUTH_FAIL_MAX) {
     document.getElementById('api-dot').className = 'status-dot err';
     stopAutoRefresh();
     return null;
   }
   try {
-    const r = await fetch(path, { headers: { 'Authorization': 'Bearer ' + t } });
+    const r = await fetch(path, { credentials: 'same-origin' });
     if (!r.ok) {
       if (r.status === 401 || r.status === 403) {
         _authFailCount++;

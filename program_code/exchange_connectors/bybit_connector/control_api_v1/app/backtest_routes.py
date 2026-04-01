@@ -41,8 +41,6 @@ MODULE_NOTE (English):
 import asyncio
 import json as _json
 import logging
-import os
-import sys
 import threading
 import urllib.parse
 import urllib.request
@@ -51,17 +49,9 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-# ── sys.path 注入（複用 phase2_strategy_routes.py 的 5 級目錄上溯模式）──────────
-# sys.path injection — 5-level traversal to reach program_code/ root
-# Matches the pattern in phase2_strategy_routes.py to ensure consistent import paths.
-# 與 phase2_strategy_routes.py 保持一致，確保 import 路徑穩定。
-_app_dir = os.path.dirname(os.path.abspath(__file__))          # app/
-_control_api_dir = os.path.dirname(_app_dir)                    # control_api_v1/
-_bybit_connector_dir = os.path.dirname(_control_api_dir)        # bybit_connector/
-_exchange_connectors_dir = os.path.dirname(_bybit_connector_dir)  # exchange_connectors/
-_program_code_dir = os.path.dirname(_exchange_connectors_dir)   # program_code/
-if _program_code_dir not in sys.path:
-    sys.path.insert(0, _program_code_dir)
+# ── sys.path 注入（統一由 _path_setup 模塊處理）──────────────────────────────────
+# sys.path injection — centralized in _path_setup.py (APR01-MEDIUM-11 dedup)
+from . import _path_setup  # noqa: F401  — ensures program_code/ is on sys.path
 
 from local_model_tools.backtest_engine import BacktestEngine, BacktestConfig
 

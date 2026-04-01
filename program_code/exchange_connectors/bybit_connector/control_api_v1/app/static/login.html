@@ -47,7 +47,6 @@
 </div>
 <script>
 const REDIRECT_KEY = 'oc_login_redirect';
-const TOKEN_KEY = 'oc_trading_token';
 const USER_KEY = 'oc_username';
 
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -59,9 +58,12 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   btn.textContent = 'Authenticating...';
 
   try {
+    // Login endpoint sets HttpOnly cookie — no need to store token in JS.
+    // 登录端点设置 HttpOnly cookie，无需在 JS 中存储 token。
     const resp = await fetch('/api/v1/auth/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
       body: JSON.stringify({
         username: document.getElementById('username').value,
         password: document.getElementById('password').value,
@@ -74,8 +76,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     }
 
     const data = await resp.json();
-    localStorage.setItem(TOKEN_KEY, data.token);
+    // Only store username for display; token is in HttpOnly cookie.
+    // 只存用户名用于显示；token 在 HttpOnly cookie 中。
     localStorage.setItem(USER_KEY, data.username);
+    // Clean up legacy token if present / 清理旧的 localStorage token
+    localStorage.removeItem('oc_trading_token');
 
     // Redirect to original page or default to /console
     const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
@@ -90,12 +95,18 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   }
 });
 
-// If already logged in, redirect
-if (localStorage.getItem(TOKEN_KEY)) {
-  const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
-  sessionStorage.removeItem(REDIRECT_KEY);
-  window.location.href = redirect;
-}
+// If already logged in (cookie valid), redirect.
+// 如果已登录（cookie 有效），直接跳转。
+(async function() {
+  try {
+    const r = await fetch('/api/v1/auth/check', { credentials: 'same-origin' });
+    if (r.ok) {
+      const redirect = sessionStorage.getItem(REDIRECT_KEY) || '/console';
+      sessionStorage.removeItem(REDIRECT_KEY);
+      window.location.href = redirect;
+    }
+  } catch(e) { /* not logged in, stay on login page / 未登录，留在登录页 */ }
+})();
 </script>
 </body>
 </html>

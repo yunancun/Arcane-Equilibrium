@@ -487,6 +487,11 @@ class PipelineBridge:
         Collect OrderIntents from orchestrator, submit to paper engine.
         从编排器收集 OrderIntent 并提交到纸上交易引擎。
 
+        APR01-MEDIUM-12: Stats are accumulated in local counters and flushed
+        once at the end, reducing lock acquisitions from ~27 per call to 1.
+        APR01-MEDIUM-12：统计量先累积在本地计数器，最后一次性刷入共享 stats，
+        将锁获取次数从每次调用约 27 次降至 1 次。
+
         Note: StrategistAgent.collect_pending_intents() was removed here (APR01-P1-3).
         It was deprecated in TD-2 (Wave 6 Sprint 2) — always returned [].
         StrategyAgent intents now flow via MessageBus → add_trade_intent() path.
@@ -516,6 +521,16 @@ class PipelineBridge:
         # Get current market prices from tick history (fixes C1: positions is dict, not list)
         market_prices = dict(self._latest_prices)
 
+        # APR01-MEDIUM-12: Local counters to batch stats updates — no lock needed until flush.
+        # Reduces lock contention from ~27 acquisitions to 1 per method call.
+        # APR01-MEDIUM-12：本地计数器批量累积统计更新 — 处理期间不需要锁，最后一次性刷入。
+        _local_stats: dict[str, int] = {}
+        _local_guardian: dict[str, int] = {}
+
+        def _bump(counter: dict, key: str, amount: int = 1) -> None:
+            """Increment a local counter (no lock needed). / 累加本地计数器（无需锁）。"""
+            counter[key] = counter.get(key, 0) + amount
+
         for intent in intents:
             try:
                 # T2.02: Cognitive honesty check (perception plane validation)
@@ -531,8 +546,7 @@ class PipelineBridge:
                                 "Intent rejected by perception honesty: %s %s (reason: %s) / 意图被感知拒絕",
                                 intent.symbol, intent.side, reason
                             )
-                            with self._lock:
-                                self._stats["intents_rejected"] += 1
+                            _bump(_local_stats, "intents_rejected")
                             self._mark_intent(intent, "rejected_perception")
                             continue
                     else:
@@ -560,10 +574,7 @@ class PipelineBridge:
                         if not _h0_result.allowed:
                             # H0 Gate blocking — fail-closed to protect against stale/unhealthy market data
                             # H0 Gate 阻擋模式 — 數據過期或系統不健康時拒絕意圖，原則 5（生存 > 利潤）
-                            with self._lock:
-                                self._stats["intents_h0_blocked"] = self._stats.get(
-                                    "intents_h0_blocked", 0
-                                ) + 1
+                            _bump(_local_stats, "intents_h0_blocked")
                             logger.warning(
                                 "H0Gate BLOCKED intent %s %s check=%s reason=%s latency=%dμs"
                                 " / H0 門控已拒絕 intent：%s %s",
@@ -592,14 +603,12 @@ class PipelineBridge:
                                 "Intent rejected by governance: %s %s (not authorized) / 意图被治理拒絕",
                                 intent.symbol, intent.side
                             )
-                            with self._lock:
-                                self._stats["intents_rejected"] += 1
+                            _bump(_local_stats, "intents_rejected")
                             self._mark_intent(intent, "rejected_governance")
                             continue
                     except Exception as exc:
                         logger.error("Governance is_authorized error — fail-closed: %s", exc)
-                        with self._lock:
-                            self._stats["intents_rejected"] += 1
+                        _bump(_local_stats, "intents_rejected")
                         self._mark_intent(intent, "rejected_governance")
                         continue
 
@@ -667,13 +676,11 @@ class PipelineBridge:
 
                         verdict = self._guardian_agent.review_intent(_ti)
 
-                        with self._lock:
-                            self._guardian_stats["checked"] += 1
+                        _bump(_local_guardian, "checked")
 
                         if verdict.result == _RVR.REJECTED:
-                            with self._lock:
-                                self._guardian_stats["rejected"] += 1
-                                self._stats["intents_rejected"] += 1
+                            _bump(_local_guardian, "rejected")
+                            _bump(_local_stats, "intents_rejected")
                             logger.info(
                                 "Intent REJECTED by Guardian: %s %s (reason: %s, risk=%.2f) / "
                                 "意图被 Guardian 拒绝",
@@ -683,8 +690,7 @@ class PipelineBridge:
                             continue
 
                         elif verdict.result == _RVR.MODIFIED:
-                            with self._lock:
-                                self._guardian_stats["modified"] += 1
+                            _bump(_local_guardian, "modified")
                             # Apply modifications: adjust qty and/or leverage
                             # 应用修改：调整数量和/或杠杆
                             if "size" in verdict.modified_params:
@@ -698,8 +704,7 @@ class PipelineBridge:
                             )
                         else:
                             # APPROVED
-                            with self._lock:
-                                self._guardian_stats["approved"] += 1
+                            _bump(_local_guardian, "approved")
                             logger.debug(
                                 "Intent APPROVED by Guardian: %s %s / 意图被 Guardian 批准",
                                 intent.symbol, intent.side,
@@ -713,9 +718,8 @@ class PipelineBridge:
                             "Guardian 异常 — fail-closed 拒绝",
                             intent.symbol, intent.side, _guardian_err,
                         )
-                        with self._lock:
-                            self._guardian_stats["errors"] += 1
-                            self._stats["intents_rejected"] += 1
+                        _bump(_local_guardian, "errors")
+                        _bump(_local_stats, "intents_rejected")
                         self._mark_intent(intent, "rejected_guardian")
                         continue
 
@@ -726,8 +730,7 @@ class PipelineBridge:
                         "Guardian unavailable — fail-closed REJECT: %s %s",
                         getattr(intent, "symbol", "?"), getattr(intent, "side", "?")
                     )
-                    with self._lock:
-                        self._stats["intents_rejected"] += 1
+                    _bump(_local_stats, "intents_rejected")
                     self._mark_intent(intent, "rejected_no_guardian")
                     continue
 
@@ -771,10 +774,7 @@ class PipelineBridge:
                                 "skipping (fail-closed) / lease 申請失敗，跳過執行（fail-closed）",
                                 intent.symbol, intent.side,
                             )
-                            with self._lock:
-                                self._stats["intents_lease_failed"] = (
-                                    self._stats.get("intents_lease_failed", 0) + 1
-                                )
+                            _bump(_local_stats, "intents_lease_failed")
                             self._mark_intent(intent, "rejected_lease")
                             continue
                     except Exception as _lease_err:
@@ -785,10 +785,7 @@ class PipelineBridge:
                             "lease 申請異常 — fail-closed 拒絕",
                             intent.symbol, intent.side, _lease_err,
                         )
-                        with self._lock:
-                            self._stats["intents_lease_failed"] = (
-                                self._stats.get("intents_lease_failed", 0) + 1
-                            )
+                        _bump(_local_stats, "intents_lease_failed")
                         self._mark_intent(intent, "rejected_lease")
                         continue
 
@@ -823,15 +820,13 @@ class PipelineBridge:
                     category=category,
                 )
 
-                with self._lock:
-                    self._stats["intents_submitted"] += 1
+                _bump(_local_stats, "intents_submitted")
 
                 order = result.get("order", {}) if isinstance(result, dict) else {}
                 rejected = result.get("rejected_reason") if isinstance(result, dict) else None
 
                 if rejected:
-                    with self._lock:
-                        self._stats["intents_rejected"] += 1
+                    _bump(_local_stats, "intents_rejected")
                     self._mark_intent(intent, "rejected_risk")
                     logger.info(
                         "Intent rejected: %s %s %s qty=%.6f reason=%s / 意图被拒",
@@ -839,8 +834,7 @@ class PipelineBridge:
                         intent.qty, rejected,
                     )
                 else:
-                    with self._lock:
-                        self._stats["intents_accepted"] += 1
+                    _bump(_local_stats, "intents_accepted")
                     self._mark_intent(intent, "submitted")
                     logger.info(
                         "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
@@ -910,14 +904,12 @@ class PipelineBridge:
                                 "Demo 連接異常：數據已分歧",
                                 intent.symbol, intent.side, _demo_err,
                             )
-                        # Track sync status in stats
-                        with self._lock:
-                            if _demo_synced:
-                                self._stats.setdefault("demo_synced", 0)
-                                self._stats["demo_synced"] += 1
-                            else:
-                                self._stats.setdefault("demo_diverged", 0)
-                                self._stats["demo_diverged"] += 1
+                        # Track sync status in local counters (flushed at end)
+                        # 在本地计数器中追踪同步状态（最后一次性刷入）
+                        if _demo_synced:
+                            _bump(_local_stats, "demo_synced")
+                        else:
+                            _bump(_local_stats, "demo_diverged")
                         if self._telegram and intent.order_type == "market":
                             price = market_prices.get(intent.symbol, 0)
                             self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
@@ -926,8 +918,22 @@ class PipelineBridge:
                 logger.exception(
                     "Failed to submit intent: %s / 提交意图失败", intent,
                 )
-                with self._lock:
-                    self._stats["errors"] += 1
+                _bump(_local_stats, "errors")
+
+        # APR01-MEDIUM-12: Flush all accumulated stats in a single lock acquisition.
+        # This replaces ~27 scattered `with self._lock` blocks with one batch update.
+        # APR01-MEDIUM-12：一次性刷入所有累积的统计量，替代原来约 27 次分散的锁获取。
+        if _local_stats or _local_guardian:
+            with self._lock:
+                for key, delta in _local_stats.items():
+                    if key in ("intents_h0_blocked", "intents_lease_failed",
+                               "demo_synced", "demo_diverged"):
+                        # These keys may not exist yet — use setdefault for first access
+                        # 这些键可能尚不存在 — 首次访问时用 setdefault 初始化
+                        self._stats.setdefault(key, 0)
+                    self._stats[key] = self._stats.get(key, 0) + delta
+                for key, delta in _local_guardian.items():
+                    self._guardian_stats[key] = self._guardian_stats.get(key, 0) + delta
 
     def _check_stops(self) -> None:
         """Check stop-losses and submit close orders if triggered / 检查止损并提交平仓"""

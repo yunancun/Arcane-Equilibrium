@@ -43,7 +43,9 @@ logger = logging.getLogger(__name__)
 # Minimum thresholds for symbol eligibility
 MIN_VOLUME_24H_USDT = 5_000_000    # $5M daily volume minimum
 MIN_PRICE_USDT = 0.01               # Skip sub-penny tokens
-MAX_SYMBOLS_TO_TRADE = 5            # Max simultaneous symbols
+# 最大同时交易品种数，与 StrategyAutoDeployer.max_symbols 对齐（Wave 5a Position Sizing 决策）
+# Max simultaneous symbols — aligned with StrategyAutoDeployer default (25).
+MAX_SYMBOLS_TO_TRADE = 25
 
 
 @dataclass

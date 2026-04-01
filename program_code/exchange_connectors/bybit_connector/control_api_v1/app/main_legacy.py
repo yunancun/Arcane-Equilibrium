@@ -4184,10 +4184,32 @@ static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
-def current_actor(authorization: str | None = Header(default=None)) -> Any:
-    if authorization is None or not authorization.startswith("Bearer "):
+def current_actor(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Any:
+    """
+    Authenticate the caller via HttpOnly cookie (GUI) or Authorization header (API clients).
+    Cookie takes priority; header is fallback for programmatic access.
+    通过 HttpOnly cookie（GUI）或 Authorization header（API 客户端）验证调用者。
+    Cookie 优先；header 为编程接口的后备方案。
+    """
+    token: str | None = None
+
+    # Priority 1: HttpOnly cookie (XSS-safe, set by /api/v1/auth/login)
+    # 优先级 1：HttpOnly cookie（防 XSS，由登录端点设置）
+    cookie_token = request.cookies.get("oc_auth_token")
+    if cookie_token:
+        token = cookie_token
+
+    # Priority 2: Authorization header (for programmatic API clients)
+    # 优先级 2：Authorization header（供编程 API 客户端使用）
+    if token is None and authorization is not None and authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "", 1).strip()
+
+    if token is None:
         raise HTTPException(status_code=401, detail={"reason_codes": ["unauthenticated"]})
-    token = authorization.replace("Bearer ", "", 1).strip()
+
     # 常数时间比较，防止时序攻击 / Constant-time comparison to prevent timing attacks
     if not hmac.compare_digest(token.encode("utf-8"), settings.api_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail={"reason_codes": ["unauthenticated"]})
@@ -4311,9 +4333,55 @@ async def auth_login(request: Request, req: _LoginRequest):
     async with _login_fail_lock:
         _login_fail_counts.pop(client_ip, None)
 
-    # Return the API bearer token from startup-cached settings (no per-request file I/O)
-    # 使用启动时缓存的 settings.api_token，避免每次请求重读磁盘
-    return {"token": settings.api_token, "username": req.username}
+    # Set HttpOnly cookie so GUI never needs to touch the token in JS.
+    # Also return token in JSON body for backward compatibility with programmatic clients.
+    # 设置 HttpOnly cookie，GUI 不再需要在 JS 中操作 token。
+    # 同时在 JSON body 中返回 token，保持编程客户端的向后兼容。
+    from starlette.responses import JSONResponse
+    resp = JSONResponse({"token": settings.api_token, "username": req.username})
+    resp.set_cookie(
+        key="oc_auth_token",
+        value=settings.api_token,
+        httponly=True,           # JS 不可读取，防 XSS / Not accessible from JS, prevents XSS
+        samesite="strict",       # 防 CSRF / Prevents CSRF
+        secure=False,            # TODO: 启用 HTTPS 后改为 True / Set True when HTTPS is enabled
+        max_age=86400,           # 24 小时有效 / 24h TTL
+        path="/",                # 全站可用 / Available site-wide
+    )
+    return resp
+
+
+@app.post("/api/v1/auth/logout", include_in_schema=False)
+async def auth_logout(request: Request):
+    """
+    Clear the HttpOnly auth cookie. GUI calls this on logout.
+    清除 HttpOnly 认证 cookie。GUI 登出时调用此端点。
+    """
+    from starlette.responses import JSONResponse
+    resp = JSONResponse({"status": "logged_out"})
+    resp.delete_cookie(
+        key="oc_auth_token",
+        path="/",
+        httponly=True,
+        samesite="strict",
+        secure=False,  # TODO: 启用 HTTPS 后改为 True / Set True when HTTPS is enabled
+    )
+    return resp
+
+
+@app.get("/api/v1/auth/check", include_in_schema=False)
+async def auth_check(request: Request):
+    """
+    Lightweight endpoint for GUI to verify if the auth cookie is valid.
+    No Authorization header needed — reads cookie directly.
+    GUI 用来验证 cookie 是否有效的轻量端点。无需 Authorization header，直接读 cookie。
+    """
+    cookie_token = request.cookies.get("oc_auth_token")
+    if not cookie_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not hmac.compare_digest(cookie_token.encode("utf-8"), settings.api_token.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"authenticated": True}
 
 
 @app.get("/", include_in_schema=False)

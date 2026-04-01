@@ -1,4 +1,18 @@
 """
+MODULE_NOTE (中文):
+  感知数据平面（Perception Data Plane），为所有 Agent 提供统一的数据注册与查询接口。
+  每条数据强制标注认知层级（fact/inference/hypothesis）和新鲜度（FRESH→EXPIRED），
+  未标注的推断数据禁止进入决策链。支持数据质量评估、Agent 访问控制、漂移检测。
+  属于治理层（T2.11），是原则 8（交易可解释）和原则 10（认知诚实）的数据基础设施。
+
+MODULE_NOTE (English):
+  Perception Data Plane providing a unified data registration and query interface for all agents.
+  Every data entry must carry a cognitive level tag (fact/inference/hypothesis) and freshness
+  tracking (FRESH->EXPIRED); unmarked inferences are blocked from the decision chain.
+  Supports data quality assessment, agent-level access control, and drift detection.
+  Part of the governance layer (T2.11); data infrastructure for Principle 8 (trade explainability)
+  and Principle 10 (cognitive honesty).
+
 T2.11 — Perception Data Plane: Fact/Inference Marking (GAP-M2)
 ===============================================================
 Governance refs: EX-07 §1-§8, DOC-01 §5.10 (Root Principle #8)
