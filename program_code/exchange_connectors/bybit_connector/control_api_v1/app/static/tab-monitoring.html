@@ -111,12 +111,14 @@ $('explain-openclaw').innerHTML = ocExplain(
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function checkGrafana() {
+  // Proxy health check through Trading API to avoid browser CORS block.
+  // Grafana runs on :3000 but browser fetch from :8000 origin is blocked by CORS.
+  // 通过 Trading API 代理健康检查，避免浏览器 CORS 拦截。
   try {
-    const r = await fetch('http://trade-core:3000/api/health', { signal: AbortSignal.timeout(5000) });
-    if (r.ok) {
+    const r = await ocApi('/api/v1/system/grafana-health');
+    if (r && r.data && r.data.ok) {
       $('grafana-badge').textContent = 'Connected';
       $('grafana-badge').className = 'oc-chip oc-chip-good';
-      // Load Grafana in iframe
       const wrap = $('grafana-wrap');
       wrap.innerHTML = '<iframe src="http://trade-core:3000/d/openclaw-trading-pnl?orgId=1&kiosk" allowfullscreen></iframe>';
     } else {

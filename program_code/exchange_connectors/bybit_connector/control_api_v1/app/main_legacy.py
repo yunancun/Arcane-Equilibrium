@@ -4463,6 +4463,25 @@ def get_health(actor=Depends(current_actor)) -> ResponseEnvelope[dict[str, Any]]
     return envelope_response(snapshot=snapshot, request_id=None, action_result="success", data=snapshot["health_telemetry"])
 
 
+@app.get(f"{settings.api_prefix}/system/grafana-health", include_in_schema=False)
+async def grafana_health_proxy(actor=Depends(current_actor)):
+    """
+    Proxy Grafana health check to avoid browser CORS block.
+    代理 Grafana 健康检查，避免浏览器 CORS 拦截。
+    """
+    import asyncio
+    try:
+        def _check():
+            import urllib.request
+            with urllib.request.urlopen("http://localhost:3000/api/health", timeout=3) as resp:
+                import json
+                return json.loads(resp.read().decode())
+        data = await asyncio.to_thread(_check)
+        return {"action_result": "success", "data": {"ok": True, "version": data.get("version", "?")}}
+    except Exception:
+        return {"action_result": "success", "data": {"ok": False}}
+
+
 @app.get(f"{settings.api_prefix}/system/audit-summary", response_model=ResponseEnvelope[dict[str, Any]])
 def get_audit_summary(actor=Depends(current_actor)) -> ResponseEnvelope[dict[str, Any]]:
     snapshot, _ = get_latest_snapshot()
