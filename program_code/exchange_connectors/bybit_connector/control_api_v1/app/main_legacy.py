@@ -26,17 +26,14 @@ import inspect as _inspect
 import json
 import logging
 import os
-import secrets
 import tempfile
 import threading
 import time
 import warnings
-import weakref
 
 logger = logging.getLogger(__name__)
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,185 +45,24 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 
-def _split_csv(value: str) -> set[str]:
-    return {item.strip() for item in value.split(",") if item.strip()}
-
-
-# Login failure tracking — IP → (failure_count, first_failure_timestamp)
-# 登录失败追踪：IP → (失败次数, 首次失败时间戳)
-# Locked out after 5 failures within 15 minutes; auto-resets after window expires.
-# 15分钟内失败5次后锁定；超过窗口期自动重置。（P1-8 修复）
-_login_fail_counts: dict[str, tuple[int, float]] = {}
-_LOGIN_MAX_FAILURES = 5        # 同一IP最多失败次数 / max failures per IP
-_LOGIN_LOCKOUT_WINDOW = 900.0  # 锁定窗口（秒）/ lockout window in seconds (15 min)
-_login_fail_lock = asyncio.Lock()  # 保护 _login_fail_counts 的并发锁 / asyncio lock for _login_fail_counts (P1-NEW-3)
-_LOGIN_FAIL_MAX_IPS = 2000         # 最多追踪 IP 数，防止 OOM / max tracked IPs to prevent OOM (P1-NEW-3)
-
-# ── Auth credentials cache (P1-12) ────────────────────────────────────────────
-# Loaded once at startup; avoids per-request file I/O on the login endpoint.
-# 启动时一次性加载凭证，避免每次登录请求都读文件。
-_AUTH_CREDENTIALS: dict[str, str] | None = None
-
-
-def _load_auth_credentials() -> dict[str, str]:
-    """Load auth credentials once at startup and cache.
-    启动时加载一次认证凭证并缓存，后续直接返回缓存值。
-    """
-    global _AUTH_CREDENTIALS
-    if _AUTH_CREDENTIALS is not None:
-        return _AUTH_CREDENTIALS
-    creds: dict[str, str] = {}
-    env_path = Path(os.path.expanduser("~/BybitOpenClaw/secrets/gui_auth.env"))
-    if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if "=" in line and not line.startswith("#"):
-                    k, _, v = line.partition("=")
-                    creds[k.strip()] = v.strip()
-    _AUTH_CREDENTIALS = creds
-    return creds
-
-
-def _resolve_api_token() -> str:
-    """
-    API Token 解析顺序 / API Token resolution order:
-    1. 环境变量 OPENCLAW_API_TOKEN（推荐）/ Environment variable (recommended)
-    2. Token 文件 OPENCLAW_API_TOKEN_FILE 指向的文件 / File pointed to by env var
-    3. 默认 token 文件路径 ../.secrets/api_token / Default token file path
-    4. 自动生成并保存到默认路径 / Auto-generate and save to default path
-
-    安全规则 / Safety rules:
-    - 不接受 "change-me" 或空值 / Rejects "change-me" or empty values
-    - 自动生成时会打印到 stderr 提醒 / Prints to stderr when auto-generating
-    """
-    import sys
-
-    # 1. 环境变量 / Environment variable
-    env_token = os.getenv("OPENCLAW_API_TOKEN", "").strip()
-    if env_token and env_token != "change-me":
-        return env_token
-
-    # 2. Token 文件（环境变量指定路径）/ Token file (env-specified path)
-    token_file_env = os.getenv("OPENCLAW_API_TOKEN_FILE", "").strip()
-    if token_file_env:
-        token_file = Path(token_file_env)
-    else:
-        # 3. 默认 token 文件路径 / Default token file path
-        token_file = Path(__file__).resolve().parent.parent / ".secrets" / "api_token"
-
-    if token_file.exists():
-        saved_token = token_file.read_text(encoding="utf-8").strip()
-        if saved_token and saved_token != "change-me":
-            return saved_token
-
-    # 4. 自动生成 / Auto-generate
-    new_token = secrets.token_urlsafe(32)
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(new_token + "\n", encoding="utf-8")
-    os.chmod(str(token_file), 0o600)
-    os.chmod(str(token_file.parent), 0o700)
-
-    print(
-        f"\n{'='*60}\n"
-        f"  [OpenClaw] API Token 已自动生成并保存\n"
-        f"  [OpenClaw] API Token auto-generated and saved\n"
-        f"\n"
-        f"  Token: {new_token}\n"
-        f"  文件 / File: {token_file}\n"
-        f"\n"
-        f"  请妥善保管此 Token。重置方法见：\n"
-        f"  Keep this token safe. Reset instructions:\n"
-        f"    docs/references/API_TOKEN_RESET_GUIDE.md\n"
-        f"{'='*60}\n",
-        file=sys.stderr,
-    )
-    return new_token
-
-
-@dataclass(slots=True)
-class Settings:
-    api_prefix: str = "/api/v1"
-    api_version: str = "v1"
-    schema_version: str = "v1"
-    service_name: str = "OpenClaw / Bybit Control API"
-    gui_title: str = "OpenClaw / Bybit Control Center"
-
-    api_token: str = field(default_factory=_resolve_api_token)
-    auth_actor_id: str = field(default_factory=lambda: os.getenv("OPENCLAW_AUTH_ACTOR_ID", "demo-operator"))
-    auth_actor_type: str = field(default_factory=lambda: os.getenv("OPENCLAW_AUTH_ACTOR_TYPE", "human"))
-    auth_roles: set[str] = field(
-        default_factory=lambda: _split_csv(
-            os.getenv(
-                "OPENCLAW_AUTH_ROLES",
-                "viewer,operator,operator_guarded,config_admin,finance_input",
-            )
-        )
-    )
-    auth_scopes: set[str] = field(
-        default_factory=lambda: _split_csv(
-            os.getenv(
-                "OPENCLAW_AUTH_SCOPES",
-                ",".join(
-                    [
-                        "state:read",
-                        "learning:read",
-                        "control:recheck",
-                        "control:validate",
-                        "control:arm",
-                        "control:enable",
-                        "control:relock",
-                        "control:bundle",
-                        "input:cost",
-                        "input:event",
-                        "input:note",
-                        "input:config",
-                        # ── L 章学习系统权限 / L-chapter learning system scopes ──
-                        "learning:write",   # 录入观察/经验/假设/实验 / Record observations/lessons/hypotheses/experiments
-                        "learning:manage",  # 审批假设/实验、完成实验 / Approve hypotheses/experiments, complete experiments
-                        # ── 纸上交易权限 / Paper trading scopes ──
-                        "paper:read",       # 查看纸上交易数据 / View paper trading data
-                        "paper:trade",      # 提交/取消纸上订单 / Submit/cancel paper orders
-                    ]
-                ),
-            )
-        )
-    )
-    state_file_path: str = field(
-        default_factory=lambda: os.getenv(
-            "OPENCLAW_STATE_FILE",
-            os.path.abspath(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "runtime",
-                    "openclaw_bybit_control_state.json",
-                )
-            ),
-        )
-    )
-    readonly_connector_name: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_READONLY_CONNECTOR_NAME", "bybit_prod_readonly_main")
-    )
-    execution_connector_name: str | None = field(
-        default_factory=lambda: os.getenv("OPENCLAW_EXECUTION_CONNECTOR_NAME") or None
-    )
-    rest_private_connection_state: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_REST_PRIVATE_CONNECTION_STATE", "ready")
-    )
-    ws_private_connection_state: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_WS_PRIVATE_CONNECTION_STATE", "ready")
-    )
-    runtime_connection_state: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_RUNTIME_CONNECTION_STATE", "healthy")
-    )
-    account_fact_completeness_state: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_ACCOUNT_FACT_COMPLETENESS_STATE", "complete")
-    )
-    source_snapshot_completeness_state: str = field(
-        default_factory=lambda: os.getenv("OPENCLAW_SOURCE_SNAPSHOT_COMPLETENESS_STATE", "complete")
-    )
-
+# ── Wave B re-exports: auth (Settings class + credentials + AuthenticatedActor) ──
+# 從 auth.py 重新導出認證相關類和函數，保持向後兼容。
+# ★ settings 單例和依賴它的函數留在本文件（reload 安全）。
+from .auth import (  # noqa: F401
+    AuthenticatedActor,
+    Settings,
+    _AUTH_CREDENTIALS,
+    _LOGIN_FAIL_MAX_IPS,
+    _LOGIN_LOCKOUT_WINDOW,
+    _LOGIN_MAX_FAILURES,
+    _load_auth_credentials,
+    _login_fail_counts,
+    _login_fail_lock,
+    _resolve_api_token,
+    _split_csv,
+    require_scope,
+    verify_operator_identity,
+)
 
 settings = Settings()
 
@@ -326,13 +162,24 @@ from .state_store import JsonStateStore, build_default_state  # noqa: F401
 
 STORE = JsonStateStore(settings.state_file_path)
 
+# ── Wave B re-exports: state_helpers (state operation helpers) ────────────────
+# 從 state_helpers.py 重新導出狀態操作輔助函數，保持向後兼容。
+# ★ build_source_context / envelope_response / get_latest_snapshot 留在本文件。
+from .state_helpers import (  # noqa: F401
+    _IDEMPOTENCY_MAX_ENTRIES,
+    _IDEMPOTENCY_TTL_MS,
+    _assert_previous_state,
+    _assert_revision,
+    _blocked,
+    _bump_revision,
+    _check_idempotency,
+    _cleanup_idempotency_cache,
+    _store_idempotent_response,
+    _write_audit_fields,
+    ensure_source_is_usable,
+    request_fingerprint,
+)
 
-@dataclass(slots=True)
-class AuthenticatedActor:
-    actor_id: str
-    actor_type: str
-    roles: set[str]
-    scopes: set[str]
 
 
 def build_authenticated_actor() -> AuthenticatedActor:
@@ -342,27 +189,6 @@ def build_authenticated_actor() -> AuthenticatedActor:
         roles=set(settings.auth_roles),
         scopes=set(settings.auth_scopes),
     )
-
-
-def require_scope(actor: AuthenticatedActor, scope: str) -> None:
-    if scope not in actor.scopes:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"reason_codes": ["forbidden_scope"]},
-        )
-
-
-def verify_operator_identity(envelope: RequestEnvelope, actor: AuthenticatedActor) -> None:
-    if envelope.operator_id != actor.actor_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"reason_codes": ["operator_identity_mismatch"]},
-        )
-
-
-def request_fingerprint(envelope: RequestEnvelope) -> str:
-    payload = envelope.model_dump(mode="json")
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def build_source_context(snapshot: dict[str, Any]) -> SourceContext:
@@ -383,125 +209,6 @@ def build_source_context(snapshot: dict[str, Any]) -> SourceContext:
         pinned_runtime_snapshot_id=f"runtime:{snapshot['meta']['snapshot_id']}",
         pinned_runtime_snapshot_ts_ms=snapshot["meta"]["snapshot_ts_ms"],
     )
-
-
-def ensure_source_is_usable(source_context: SourceContext) -> None:
-    if source_context.runtime_connection_state in {"down", "unknown"}:
-        raise HTTPException(status_code=503, detail={"reason_codes": ["runtime_fact_unavailable"]})
-    if source_context.rest_private_connection_state in {"down", "unknown"}:
-        raise HTTPException(status_code=503, detail={"reason_codes": ["connector_unavailable"]})
-    if source_context.source_snapshot_completeness_state == "missing":
-        raise HTTPException(status_code=503, detail={"reason_codes": ["source_snapshot_incomplete"]})
-
-
-def _assert_revision(snapshot: dict[str, Any], envelope: RequestEnvelope) -> None:
-    # KNOWN LIMITATION: This revision check runs BEFORE STORE.mutate() acquires the lock.
-    # Under concurrent requests, the revision could change between this check and the
-    # actual mutation. The risk is low because the mutator re-reads current state inside
-    # the lock. A full fix would move revision checking into mutate() itself.
-    # 已知限制：此版本检查在 STORE.mutate() 获取锁之前运行。
-    if envelope.expected_state_revision != snapshot["meta"]["state_revision"]:
-        raise HTTPException(status_code=409, detail={"reason_codes": ["state_revision_mismatch"]})
-
-
-def _assert_previous_state(snapshot: dict[str, Any], envelope: RequestEnvelope, allowed: set[str] | None = None) -> None:
-    current = snapshot["control_plane"]["demo_control"]["demo_state_switch"]
-    expected = envelope.expected_previous_state
-    if expected is None or expected != current or (allowed is not None and current not in allowed):
-        raise HTTPException(status_code=409, detail={"reason_codes": ["previous_state_mismatch"]})
-
-
-def _check_idempotency(snapshot: dict[str, Any], envelope: RequestEnvelope) -> dict[str, Any] | None:
-    record = snapshot["records"]["idempotency"].get(envelope.idempotency_key)
-    if record is None:
-        return None
-    if record["fingerprint"] != request_fingerprint(envelope):
-        raise HTTPException(status_code=409, detail={"reason_codes": ["idempotency_conflict"]})
-    return record["response"]
-
-
-_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000  # 24 小时 / 24 hours
-_IDEMPOTENCY_MAX_ENTRIES = 500  # 最大缓存条目 / Max cached entries
-
-
-def _store_idempotent_response(state: dict[str, Any], envelope: RequestEnvelope, response: dict[str, Any]) -> None:
-    stored_response = dict(response)
-    stored_response.pop("snapshot", None)
-    cache = state["records"]["idempotency"]
-    cache[envelope.idempotency_key] = {
-        "request_id": envelope.request_id,
-        "fingerprint": request_fingerprint(envelope),
-        "stored_ts_ms": now_ms(),
-        "response": stored_response,
-    }
-    # 清理过期和超量条目 / Cleanup expired and overflow entries
-    _cleanup_idempotency_cache(cache)
-
-
-def _cleanup_idempotency_cache(cache: dict[str, Any]) -> None:
-    """移除过期和超量的幂等性缓存条目 / Remove expired and overflow idempotency cache entries."""
-    # Fast path: skip all work when cache is well under limit (avoids O(n) scan on every store)
-    if len(cache) <= _IDEMPOTENCY_MAX_ENTRIES // 2:
-        return
-    cutoff = now_ms() - _IDEMPOTENCY_TTL_MS
-    expired_keys = [k for k, v in cache.items() if v.get("stored_ts_ms", 0) < cutoff]
-    for k in expired_keys:
-        del cache[k]
-    # O(n log n) sort only when over limit — guarded by size check
-    if len(cache) > _IDEMPOTENCY_MAX_ENTRIES:
-        sorted_keys = sorted(cache.keys(), key=lambda k: cache[k].get("stored_ts_ms", 0))
-        for k in sorted_keys[: len(cache) - _IDEMPOTENCY_MAX_ENTRIES]:
-            del cache[k]
-
-
-def _write_audit_fields(
-    state: dict[str, Any],
-    *,
-    action_type: str,
-    operator_id: str,
-    request_id: str,
-    result: str,
-    reason_codes: list[str],
-    is_control_action: bool,
-) -> str:
-    ts = now_ms()
-    audit_ref = f"audit:{action_type}:{ts}"
-    audit = state["audit_context"]
-    audit["last_state_revision_before"] = state["meta"]["state_revision"]
-    audit["last_state_revision_after"] = state["meta"]["state_revision"] + 1
-
-    audit["last_write_action_type"] = action_type
-    audit["last_write_action_request_id"] = request_id
-    audit["last_write_action_ts_ms"] = ts
-    audit["last_write_action_by"] = operator_id
-    audit["last_write_action_result"] = result
-    audit["last_write_action_reason_codes"] = list(reason_codes)
-    audit["last_write_action_audit_ref"] = audit_ref
-
-    if is_control_action:
-        audit["last_control_action_type"] = action_type
-        audit["last_control_action_request_id"] = request_id
-        audit["last_control_action_ts_ms"] = ts
-        audit["last_control_action_by"] = operator_id
-        audit["last_control_action_result"] = result
-        audit["last_control_action_reason_codes"] = list(reason_codes)
-        audit["last_control_action_audit_ref"] = audit_ref
-
-        audit["last_operator_action_type"] = action_type
-        audit["last_operator_action_ts_ms"] = ts
-        audit["last_operator_action_result"] = result
-        audit["last_operator_action_operator"] = operator_id
-        audit["last_operator_action_target"] = "control_plane"
-        audit["last_operator_action_request_id"] = request_id
-        audit["last_operator_action_reason_codes"] = list(reason_codes)
-        audit["last_operator_action_audit_ref"] = audit_ref
-
-    return audit_ref
-
-
-def _bump_revision(state: dict[str, Any]) -> None:
-    state["meta"]["state_revision"] += 1
-
 
 def get_latest_snapshot() -> tuple[dict[str, Any], SourceContext]:
     snapshot = STORE.read()
@@ -680,10 +387,6 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
         },
         "snapshot": final_state,
     }, "success"
-
-
-def _blocked(reason_codes: list[str]) -> None:
-    raise HTTPException(status_code=422, detail={"reason_codes": reason_codes})
 
 
 def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor, action: str) -> tuple[dict[str, Any], str]:
