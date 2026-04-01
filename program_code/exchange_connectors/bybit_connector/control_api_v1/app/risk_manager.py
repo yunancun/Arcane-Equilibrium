@@ -27,7 +27,9 @@ MODULE_NOTE (English):
 
 import datetime
 import hashlib
+import json
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -465,6 +467,19 @@ def resolve_effective_limit(
 # Risk Manager / 风控管理器
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Operator risk config path — lives in srv/settings/ (not in git)
+# Override with OPENCLAW_RISK_CONFIG_PATH env var for testing
+# 操作員風控配置路徑 — 存在 srv/settings/（不進 git）
+# 測試時可用 OPENCLAW_RISK_CONFIG_PATH 環境變量覆蓋
+_OPERATOR_CONFIG_PATH = os.environ.get(
+    "OPENCLAW_RISK_CONFIG_PATH",
+    os.path.join(
+        os.path.expanduser("~"), "BybitOpenClaw", "srv", "settings",
+        "risk_control_rules", "operator_risk_config.json",
+    ),
+)
+
+
 class RiskManager:
     """
     Auto Risk Control Layer with 3-tier priority.
@@ -472,6 +487,12 @@ class RiskManager:
 
     Hooks into PaperTradingEngine's submit_order() and tick() flow.
     接入 Paper Trading Engine 的 submit_order() 和 tick() 流程。
+
+    Persistence: Operator P1 config persists to settings/risk_control_rules/operator_risk_config.json.
+    On restart, operator config is loaded from file → overrides code defaults.
+    Agent P2 params are restored from paper_state.json (session-scoped).
+    持久化：Operator P1 配置持久化到 JSON 文件。重啟時從文件恢復，覆蓋代碼默認值。
+    Agent P2 參數從 paper_state.json 恢復（Session 範圍）。
     """
 
     def __init__(
@@ -482,6 +503,10 @@ class RiskManager:
     ) -> None:
         self._config = config or GlobalRiskConfig()
         self._category_configs: dict[str, CategoryRiskConfig] = category_configs or {}
+
+        # Load operator config from persistent file (overrides code defaults)
+        # 從持久化文件載入 Operator 配置（覆蓋代碼默認值）
+        self._load_operator_config()
 
         # SPOT-3: Inject default Spot category config if caller didn't supply one.
         # Spot (現貨) 不應使用槓桿：max_leverage=1.0，spot_allow_margin=False。
@@ -507,6 +532,74 @@ class RiskManager:
         self._change_audit_log = None  # Optional ChangeAuditLog for audit tracking
         # T2.01: Portfolio Risk Control integration / 组合级风控
         self._portfolio_risk_control = PortfolioRiskControl(config=PortfolioRiskConfig())
+
+    # ── Operator Config Persistence / Operator 配置持久化 ──
+
+    def _load_operator_config(self) -> None:
+        """
+        Load Operator P1 risk config from persistent JSON file.
+        從持久化 JSON 文件載入 Operator P1 風控配置。
+
+        Called once at __init__. If file exists and is valid, its values override
+        code defaults in GlobalRiskConfig. If file is missing or corrupt, code
+        defaults are used (fail-safe) and a warning is logged.
+        初始化時調用一次。文件存在且合法時覆蓋代碼默認值；
+        文件不存在或損壞時使用代碼默認值（fail-safe）。
+        """
+        path = os.path.normpath(_OPERATOR_CONFIG_PATH)
+        if not os.path.isfile(path) or path == "/dev/null":
+            return  # First run or test mode — use code defaults
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            gc = data.get("global_config")
+            if gc and isinstance(gc, dict):
+                valid_fields = GlobalRiskConfig.__dataclass_fields__
+                for k, v in gc.items():
+                    if k in valid_fields and v is not None:
+                        setattr(self._config, k, v)
+            cc = data.get("category_configs", {})
+            for cat, cd in cc.items():
+                if isinstance(cd, dict):
+                    self._category_configs[cat] = CategoryRiskConfig.from_dict(cd)
+            logger.info(
+                "Operator risk config loaded from %s / Operator 風控配置已從文件恢復", path,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to load operator risk config from %s: %s — using code defaults / "
+                "載入 Operator 風控配置失敗，使用代碼默認值", path, e,
+            )
+
+    def _save_operator_config(self) -> None:
+        """
+        Persist current Operator P1 config to JSON file.
+        將當前 Operator P1 配置持久化到 JSON 文件。
+
+        Called after every GUI/API config update. Agent P2 params are NOT saved
+        here (they live in paper_state.json, session-scoped).
+        每次 GUI/API 配置更新後調用。Agent P2 參數不在此保存（它們在 paper_state.json 中）。
+        """
+        path = os.path.normpath(_OPERATOR_CONFIG_PATH)
+        if path == "/dev/null":
+            return  # Test mode — skip save
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            data = {
+                "global_config": self._config.to_dict(),
+                "category_configs": {k: v.to_dict() for k, v in self._category_configs.items()},
+                "saved_ts_ms": int(time.time() * 1000),
+            }
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)  # Atomic on POSIX
+            logger.debug("Operator risk config saved to %s", path)
+        except Exception as e:
+            logger.warning(
+                "Failed to save operator risk config to %s: %s (non-fatal) / "
+                "保存 Operator 風控配置失敗（非致命）", path, e,
+            )
 
     # ── Properties ──
 
@@ -569,6 +662,9 @@ class RiskManager:
                         )
                     except Exception as e:
                         logger.warning(f"Failed to record config change in audit log: {e} (non-fatal)")
+        # Persist Operator config to file so it survives restart
+        # 持久化 Operator 配置到文件，重啟後不丟失
+        self._save_operator_config()
         return self._config
 
     def update_category_config(self, category: str, updates: dict[str, Any]) -> CategoryRiskConfig:
@@ -580,6 +676,8 @@ class RiskManager:
         for k, v in updates.items():
             if v is not None and k in valid_fields:
                 setattr(cfg, k, v)
+        # Persist Operator config to file so it survives restart
+        self._save_operator_config()
         return cfg
 
     def get_category_config(self, category: str) -> CategoryRiskConfig | None:

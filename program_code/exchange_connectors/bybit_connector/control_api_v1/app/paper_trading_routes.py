@@ -57,7 +57,7 @@ PAPER_STORE = PaperStateStore(_paper_state_path)
 from .risk_manager import RiskManager  # noqa: E402
 from .portfolio_risk_control import PortfolioRiskControl, PortfolioRiskConfig  # noqa: E402
 from .perception_data_plane import PerceptionPlane  # noqa: E402
-RISK_MANAGER = RiskManager()
+RISK_MANAGER = RiskManager()  # Loads operator config from file automatically
 # T2.01: Initialize and inject PortfolioRiskControl / 初始化并注入组合风控
 PORTFOLIO_RISK_CONTROL = PortfolioRiskControl(config=PortfolioRiskConfig())
 RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
@@ -69,6 +69,17 @@ if _init_symbol_whitelist:
 # T2.02: Initialize and inject PerceptionPlane / 初始化并注入感知平面
 PERCEPTION_PLANE = PerceptionPlane()
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
+
+# Restore agent P2 risk params from paper state (session-scoped, e.g. trailing stops, cooldowns)
+# 從 paper state 恢復 Agent P2 風控參數（Session 範圍：trailing stops、cooldown 等運行狀態）
+try:
+    _paper_state = PAPER_STORE.read()
+    _risk_state = _paper_state.get("risk")
+    if _risk_state:
+        RISK_MANAGER.load_risk_state(_risk_state)
+        logger.info("Agent risk state restored from paper state / Agent 風控狀態已從 paper state 恢復")
+except Exception as _e:
+    logger.warning("Failed to restore agent risk state: %s (non-fatal)", _e)
 
 # T7.01: Initialize BybitDemoConnector / 初始化 Bybit Demo 连接器
 from .bybit_demo_connector import BybitDemoConnector  # noqa: E402
