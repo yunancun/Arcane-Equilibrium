@@ -1339,6 +1339,7 @@ def add_symbol_to_whitelist(
                         old_value=old_whitelist,
                         new_value=new_whitelist,
                         affected_components=["risk_manager", sanitized_category],
+                        auto_approve=True,
                     )
                 except Exception as e:
                     logger.warning(f"Failed to record whitelist change: {e}")
@@ -1441,6 +1442,7 @@ def remove_symbol_from_whitelist(
                                 old_value=old_whitelist,
                                 new_value=new_whitelist,
                                 affected_components=["risk_manager", cat],
+                                auto_approve=True,
                             )
                         except Exception as e:
                             logger.warning(f"Failed to record whitelist change: {e}")
@@ -1820,6 +1822,7 @@ def evaluate_paper_live_gate(
                     reason="API evaluation request",
                     old_value=None,
                     new_value=gate_status_str,
+                    auto_approve=True,
                 )
             except Exception as e:
                 logger.warning("Failed to record PaperLiveGate evaluation to ChangeAuditLog: %s", e)

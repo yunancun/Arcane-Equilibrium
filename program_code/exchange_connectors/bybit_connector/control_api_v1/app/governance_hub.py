@@ -496,6 +496,7 @@ class GovernanceHub:
                     who="GovernanceHub",
                     what="Authorization cache invalidated",
                     reason="State machine transition detected",
+                    auto_approve=True,
                 )
             except Exception as e:
                 logger.debug(f"ChangeAuditLog record failed (non-fatal): {e}")
@@ -1017,6 +1018,7 @@ class GovernanceHub:
                                 reason=req.reason,
                                 old_value=req.from_state,
                                 new_value=req.to_state,
+                                auto_approve=True,
                             )
                         except Exception as e:
                             logger.error(f"Failed to record change audit: {e}")
@@ -1309,6 +1311,7 @@ class GovernanceHub:
                             reason="Automatic risk escalation",
                             old_value=old_level,
                             new_value=new_level,
+                            auto_approve=True,
                         )
                     except Exception as e:
                         logger.error(f"ChangeAuditLog record failed (non-fatal): {e}")
@@ -1602,6 +1605,7 @@ class GovernanceHub:
                             reason=str(details.get('reason', 'reconciliation_mismatch')),
                             old_value="consistent",
                             new_value="mismatch",
+                            auto_approve=True,
                         )
                 except Exception as e:
                     logger.warning("ChangeAuditLog record failed for reconciliation mismatch (non-fatal): %s", e)
@@ -1675,6 +1679,7 @@ class GovernanceHub:
                                 reason="Authorization frozen cascade",
                                 old_value="ACTIVE",
                                 new_value="FROZEN",
+                                auto_approve=True,
                             )
                         except Exception as e:
                             logger.warning("ChangeAuditLog record failed for auth freeze (non-fatal): %s", e)
