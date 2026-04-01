@@ -1013,8 +1013,21 @@ class RiskManager:
                 })
                 continue
 
-            # 3. Take profit (regime-adjusted)
-            tp = self.effective_take_profit_pct(category) * REGIME_TP_MULTIPLIERS.get(regime, 1.0)
+            # 3. Take profit (ATR-adjusted + regime-adjusted)
+            # ATR 動態止盈：高波動幣種讓利潤充分奔跑，低波動幣種用 base TP
+            # Dynamic cap linked to Operator hard TP limit (80%), same logic as stop loss
+            # 動態上限與 Operator 硬止盈關聯（80%），與止損相同邏輯
+            base_tp = self.effective_take_profit_pct(category)
+            tp_regime_mult = REGIME_TP_MULTIPLIERS.get(regime, 1.0)
+            base_tp_adj = base_tp * tp_regime_mult
+            tp_hard_cap = self._config.max_take_profit_pct * 0.8
+            if atr_pct is not None and atr_pct > 0:
+                # ATR-based TP: 2.5× ATR (wider than stop's 1.5× — let profits run)
+                # ATR 止盈用 2.5 倍（比止損的 1.5 倍更寬 — 讓利潤奔跑）
+                atr_tp = atr_pct * 2.5
+                tp = max(base_tp_adj, min(atr_tp, tp_hard_cap))
+            else:
+                tp = base_tp_adj
             if pnl_pct >= tp:
                 close_orders.append({
                     "symbol": symbol, "qty": qty,
