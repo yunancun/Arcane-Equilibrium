@@ -72,7 +72,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
-      throw new Error(data.detail || 'Login failed');
+      const detail = data.detail;
+      const msg = typeof detail === 'string' ? detail
+        : (detail && detail.message) ? detail.message
+        : 'Login failed';
+      throw new Error(msg);
     }
 
     const data = await resp.json();
