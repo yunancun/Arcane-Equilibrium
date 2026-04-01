@@ -151,17 +151,26 @@ function showGrafanaOffline() {
 }
 
 async function loadPipeline() {
-  // Pipeline data comes from orchestrator status
-  const d = await ocApi('/api/v1/strategy/status');
+  // Pipeline stats from paper session (pipeline_bridge stats live there)
+  // 管线统计从 paper session 获取（pipeline_bridge 的统计在那里）
+  const d = await ocApi('/api/v1/paper/session/status');
   if (!d || !d.data) return;
-  const o = d.data;
-  const active = o.pipeline_active || o.pipeline_running;
+  const sess = d.data.session || d.data;
+  const isActive = sess.session_state === 'active';
   const el = $('pipe-status');
-  el.textContent = active ? 'Active' : 'Inactive';
-  el.className = 'oc-metric-val ' + (active ? 'green' : '');
-  ocSetText('pipe-ticks', o.tick_count || 0);
-  ocSetText('pipe-intents', o.total_intents || o.intent_count || 0);
-  ocSetText('pipe-last', ocTimeShort(o.last_tick_ts));
+  el.textContent = isActive ? 'Active' : (sess.session_state || 'Inactive');
+  el.className = 'oc-metric-val ' + (isActive ? 'green' : '');
+
+  // Also fetch orchestrator for intent/tick stats
+  const d2 = await ocApi('/api/v1/strategy/status');
+  if (d2 && d2.data) {
+    const stats = d2.data.stats || {};
+    const km = d2.data.kline_manager_status || {};
+    const kmStats = km.stats || {};
+    ocSetText('pipe-ticks', kmStats.total_ticks_processed || 0);
+    ocSetText('pipe-intents', stats.intents_collected || 0);
+    ocSetText('pipe-last', ocTimeShort(kmStats.last_tick_ts_ms));
+  }
 }
 
 async function loadTelegram() {
@@ -201,14 +210,30 @@ async function loadHealthDetail() {
   const d = await ocApi('/api/v1/system/health');
   if (!d) { ocSetHtml('health-detail', '<div class="oc-loading">Failed to load</div>'); return; }
   const h = d.data || d;
+
+  // Flatten nested dicts into displayable key-value pairs
+  // 将嵌套 dict 展平为可显示的键值对
+  function flatEntries(obj, prefix) {
+    let entries = [];
+    Object.entries(obj).forEach(([key, val]) => {
+      const fullKey = prefix ? prefix + '.' + key : key;
+      if (val != null && typeof val === 'object' && !Array.isArray(val)) {
+        entries = entries.concat(flatEntries(val, fullKey));
+      } else {
+        entries.push([fullKey, val]);
+      }
+    });
+    return entries;
+  }
+
   let html = '<div class="oc-metrics">';
-  Object.entries(h).forEach(([key, val]) => {
+  flatEntries(h, '').forEach(([key, val]) => {
     const v = val != null ? String(val) : '--';
     const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     let cls = '';
-    if (v === 'true' || v === 'pass' || v === 'healthy') cls = 'green';
-    else if (v === 'false' || v === 'fail') cls = 'red';
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:13px">' + ocEsc(v) + '</div></div>';
+    if (v === 'true' || v === 'passed' || v === 'healthy') cls = 'green';
+    else if (v === 'false' || v === 'failed' || v === 'fail') cls = 'red';
+    html += '<div class="oc-metric"><div class="oc-metric-label" style="font-size:10px">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:13px">' + ocEsc(v) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('health-detail', html);
