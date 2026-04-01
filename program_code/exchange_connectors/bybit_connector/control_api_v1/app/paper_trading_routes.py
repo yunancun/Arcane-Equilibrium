@@ -61,11 +61,8 @@ RISK_MANAGER = RiskManager()  # Loads operator config from file automatically
 # T2.01: Initialize and inject PortfolioRiskControl / 初始化并注入组合风控
 PORTFOLIO_RISK_CONTROL = PortfolioRiskControl(config=PortfolioRiskConfig())
 RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
-# T5.04: Initialize symbol whitelist for "linear" category / 初始化"linear"品类的符号白名单
-# Only initialize if environment variable is set or if not in test mode
-_init_symbol_whitelist = os.getenv("OPENCLAW_INIT_SYMBOL_WHITELIST", "false").lower() == "true"
-if _init_symbol_whitelist:
-    RISK_MANAGER.update_category_config("linear", {"allowed_symbols": ["BTCUSDT", "ETHUSDT", "DOGEUSDT"]})
+# T5.04: Symbol whitelist removed — Scanner + Guardian + H0 Gate provide sufficient filtering.
+# 符号白名单已移除 — 掃描器 + Guardian + H0 Gate 提供了足夠的篩選機制。
 # T2.02: Initialize and inject PerceptionPlane / 初始化并注入感知平面
 PERCEPTION_PLANE = PerceptionPlane()
 ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
