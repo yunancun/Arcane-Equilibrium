@@ -288,6 +288,9 @@ class GlobalRiskConfig:
     # Stop loss / take profit
     max_stop_loss_pct: float = 5.0
     max_take_profit_pct: float = 20.0
+    # Take profit enforcement: OFF by default — exits driven by strategy signals
+    # 止盈強制執行：默認關閉 — 退出由策略信號決定
+    tp_enabled: bool = False
 
     # Position sizing
     max_single_position_pct: float = 15.0
@@ -533,6 +536,20 @@ class RiskManager:
                 category="spot",
                 max_leverage=1.0,        # Spot has no leverage / 現貨不允許槓桿
                 spot_allow_margin=False, # Spot margin trading disabled / 禁止現貨保證金
+            )
+
+        # INV-4: Inject default Inverse category config if caller didn't supply one.
+        # Inverse (coin-margined) contracts typically allow up to 50x leverage
+        # (lower than linear 125x). Conservative default: max_leverage=50.0.
+        # INV-4：若調用者未提供 inverse 配置，自動注入默認值。
+        # 幣本位合約通常最大 50x 槓桿（低於 linear 的 125x）。保守默認：50.0。
+        # This runs after _load_operator_config(), so user-supplied JSON config takes
+        # precedence (the "not in" guard prevents overwriting it).
+        # 此處在 _load_operator_config() 之後執行，若 JSON 已有 inverse 配置則不覆蓋。
+        if "inverse" not in self._category_configs:
+            self._category_configs["inverse"] = CategoryRiskConfig(
+                category="inverse",
+                max_leverage=50.0,  # Bybit BTCUSD max leverage / 幣本位合約最大槓桿
             )
 
         self._agent_params = agent_params or AgentRiskParams()
@@ -1013,27 +1030,26 @@ class RiskManager:
                 })
                 continue
 
-            # 3. Take profit (ATR-adjusted + regime-adjusted)
-            # ATR 動態止盈：高波動幣種讓利潤充分奔跑，低波動幣種用 base TP
-            # Dynamic cap linked to Operator hard TP limit (80%), same logic as stop loss
-            # 動態上限與 Operator 硬止盈關聯（80%），與止損相同邏輯
-            base_tp = self.effective_take_profit_pct(category)
-            tp_regime_mult = REGIME_TP_MULTIPLIERS.get(regime, 1.0)
-            base_tp_adj = base_tp * tp_regime_mult
-            tp_hard_cap = self._config.max_take_profit_pct * 0.8
-            if atr_pct is not None and atr_pct > 0:
-                # ATR-based TP: 2.5× ATR (wider than stop's 1.5× — let profits run)
-                # ATR 止盈用 2.5 倍（比止損的 1.5 倍更寬 — 讓利潤奔跑）
-                atr_tp = atr_pct * 2.5
-                tp = max(base_tp_adj, min(atr_tp, tp_hard_cap))
-            else:
-                tp = base_tp_adj
-            if pnl_pct >= tp:
-                close_orders.append({
-                    "symbol": symbol, "qty": qty,
-                    "reason": f"take_profit_{pnl_pct:.2f}pct",
-                })
-                continue
+            # 3. Take profit (optional — OFF by default, exits driven by strategy signals)
+            # 止盈強制執行（可選 — 默認關閉，退出由策略信號決定）
+            # When enabled: ATR-adjusted + regime-adjusted, cap at 80% of hard TP limit
+            # 啟用時：ATR 動態 + regime 調整，上限為硬止盈的 80%
+            if self._config.tp_enabled:
+                base_tp = self.effective_take_profit_pct(category)
+                tp_regime_mult = REGIME_TP_MULTIPLIERS.get(regime, 1.0)
+                base_tp_adj = base_tp * tp_regime_mult
+                tp_hard_cap = self._config.max_take_profit_pct * 0.8
+                if atr_pct is not None and atr_pct > 0:
+                    atr_tp = atr_pct * 2.5
+                    tp = max(base_tp_adj, min(atr_tp, tp_hard_cap))
+                else:
+                    tp = base_tp_adj
+                if pnl_pct >= tp:
+                    close_orders.append({
+                        "symbol": symbol, "qty": qty,
+                        "reason": f"take_profit_{pnl_pct:.2f}pct",
+                    })
+                    continue
 
             # 4. Trailing stop
             if self._agent_params.trailing_stop_enabled and pnl_pct > 0:

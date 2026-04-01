@@ -41,6 +41,34 @@ from conftest import (
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Module-level isolation: block operator JSON from overriding code defaults
+# 模塊級隔離：阻止 operator JSON 覆蓋代碼默認值
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture(autouse=True, scope="function")
+def _block_operator_json(monkeypatch):
+    """
+    Isolate RiskManager from operator_risk_config.json during tests.
+    測試期間隔離 RiskManager 與 operator_risk_config.json。
+
+    The production JSON in settings/ overrides code defaults (e.g.
+    max_stop_loss_pct 5.0→3.0, max_leverage 20.0→10.0). Unit tests
+    assert against code-default values.
+
+    _OPERATOR_CONFIG_PATH is a module-level constant resolved at import time,
+    so setting the env var after import has no effect. We patch the constant
+    directly to /dev/null so _load_operator_config() returns early for every
+    RiskManager() instantiation within this test module.
+
+    _OPERATOR_CONFIG_PATH 是模塊級常量，在 import 時已確定。
+    設置環境變量無效；改用 monkeypatch 直接覆蓋常量為 /dev/null，
+    使 _load_operator_config() 在每次 RiskManager() 初始化時直接跳過。
+    """
+    import app.risk_manager as _rm_module
+    monkeypatch.setattr(_rm_module, "_OPERATOR_CONFIG_PATH", "/dev/null")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Test-Specific Fixtures
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -218,6 +246,7 @@ class TestTickChecks:
 
     def test_take_profit_triggers(self, engine_with_risk):
         eng, rm = engine_with_risk
+        rm.update_global_config({"tp_enabled": True})  # TP is off by default, enable for test
         rm.agent_adjust({"effective_take_profit_pct": 3.0})
         eng.submit_order("BTCUSDT", "Buy", "market", 0.01, market_prices={"BTCUSDT": 60000.0})
         # Price rises to 62000 → +3.3% → hits TP (3%)

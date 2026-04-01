@@ -121,6 +121,15 @@
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-hard-stop" type="number" step="0.5" min="0.5" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--green)">Take Profit / 强制止盈
+              <label class="pf-toggle" style="margin-left:8px;vertical-align:middle"><input type="checkbox" id="in-tp-enabled" onchange="toggleTPInputs()"><span class="slider"></span></label>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim)">默认关闭，由策略信号决定退出。开启后按 ATR 动态止盈</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-take-profit" type="number" step="1" min="1" max="50" style="width:80px" disabled /><span style="font-size:12px">%</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
           <div><div style="font-size:12px;font-weight:600;color:var(--yellow)">Trailing Stop / 跟踪止损</div><div style="font-size:10px;color:var(--text-dim)">从最高盈利回撤此百分比后平仓</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-trailing" type="number" step="0.5" min="0" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
@@ -148,6 +157,7 @@
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
       <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
         <div class="oc-metric"><div class="oc-metric-label">Hard Stop</div><div class="oc-metric-val red" id="s-hard" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Take Profit</div><div class="oc-metric-val green" id="s-tp" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Trailing Stop</div><div class="oc-metric-val yellow" id="s-trailing" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Time Stop</div><div class="oc-metric-val" id="s-time" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="s-drawdown" style="font-size:16px">--</div></div>
@@ -350,10 +360,19 @@ $('explain-danger').innerHTML = ocExplain(
 );
 
 // ─── Save Risk Config ─────────────────────────────────────────
+function toggleTPInputs() {
+  const enabled = $('in-tp-enabled').checked;
+  $('in-take-profit').disabled = !enabled;
+  if (!enabled) $('in-take-profit').style.opacity = '0.4';
+  else $('in-take-profit').style.opacity = '1';
+}
+
 async function saveRiskConfig() {
+  const tpEnabled = $('in-tp-enabled').checked;
   const body = {
     max_stop_loss_pct: parseFloat($('in-hard-stop').value) || 5,
-    max_take_profit_pct: 20,
+    tp_enabled: tpEnabled,
+    max_take_profit_pct: tpEnabled ? (parseFloat($('in-take-profit').value) || 20) : 20,
     max_session_drawdown_pct: parseFloat($('in-drawdown').value) || 15,
     max_daily_loss_pct: parseFloat($('in-daily-loss').value) || 5,
     max_leverage: parseFloat($('in-leverage').value) || 20,
@@ -550,6 +569,9 @@ async function loadRiskConfig() {
 
   // Stop Manager — populate display and input fields
   ocSetText('s-hard', gc.max_stop_loss_pct != null ? gc.max_stop_loss_pct + '%' : '--');
+  const tpOn = gc.tp_enabled === true;
+  ocSetText('s-tp', tpOn ? (gc.max_take_profit_pct + '% (ATR)') : '关闭 / OFF');
+  $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
   ocSetText('s-trailing', p2.trailing_stop_pct != null ? p2.trailing_stop_pct + '%' : '--');
   ocSetText('s-time', gc.max_holding_hours != null ? gc.max_holding_hours + 'h' : '--');
   ocSetText('s-drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : '--');
@@ -558,6 +580,9 @@ async function loadRiskConfig() {
 
   // Populate input fields (only if not already edited by user)
   if (!$('in-hard-stop').value) $('in-hard-stop').value = gc.max_stop_loss_pct || 5;
+  $('in-tp-enabled').checked = tpOn;
+  if (!$('in-take-profit').value) $('in-take-profit').value = gc.max_take_profit_pct || 20;
+  toggleTPInputs();
   if (!$('in-trailing').value) $('in-trailing').value = p2.trailing_stop_pct || 3;
   if (!$('in-time-stop').value) $('in-time-stop').value = gc.max_holding_hours || 72;
   if (!$('in-drawdown').value) $('in-drawdown').value = gc.max_session_drawdown_pct || 15;
