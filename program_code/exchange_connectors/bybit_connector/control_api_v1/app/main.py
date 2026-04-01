@@ -180,6 +180,10 @@ app.include_router(scout_router)
 from .backtest_routes import router as backtest_router  # noqa: E402
 app.include_router(backtest_router)
 
+# ── Experiment Ledger Router / 實驗假設管理路由注册 ──
+from .experiment_routes import router as experiment_router  # noqa: E402
+app.include_router(experiment_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
