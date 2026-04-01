@@ -118,7 +118,7 @@
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-paper" src="/static/tab-paper.html?v=20260331p"></iframe>
+  <iframe id="if-paper" src="/static/tab-paper.html?v=20260401e"></iframe>
   <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260401d"></iframe>
 </div>
 
@@ -126,12 +126,12 @@
 <div class="oc-dialog-overlay" id="dlg-start">
   <div class="oc-dialog">
     <h3>&#x25B6; 启动双引擎</h3>
-    <p>是否从头开始计算？选择「是」将重置 Paper 引擎账户，初始余额同步 Bybit Demo 账户余额。</p>
-    <div class="note">&#x26A0; Bybit Demo 如需重置余额，请到 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 手动操作。</div>
+    <p>将启动新的 Paper 引擎会话，初始余额自动同步 Bybit Demo 账户余额。之前的会话数据将被重置。</p>
+    <div class="note">&#x26A0; Bybit Demo 如需重置余额，请先到 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 手动操作后再启动。</div>
+    <div id="dlg-start-balance" style="font-size:13px;margin-bottom:12px;color:var(--text)"></div>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-start')">取消</button>
-      <button class="oc-btn" onclick="doStart(false)">继续（保留数据）</button>
-      <button class="oc-btn oc-btn-success" onclick="doStart(true)">是，从头开始</button>
+      <button class="oc-btn oc-btn-success" id="btn-dlg-confirm-start" onclick="doStart()">启动</button>
     </div>
   </div>
 </div>
@@ -140,8 +140,7 @@
 <div class="oc-dialog-overlay" id="dlg-stop">
   <div class="oc-dialog">
     <h3>&#x23F9; 停止双引擎</h3>
-    <p>是否在停止前清仓所有持仓？选择「清仓」将平掉 Paper 引擎中所有持仓后再停止会话。</p>
-    <div class="note">&#x26A0; Bybit Demo 持仓不会自动平仓，如需平仓请到 Demo 页面手动操作或使用 Bybit 界面。</div>
+    <p>停止引擎前是否先清仓 Paper 持仓？<br>停止后系统将自动取消 Demo 所有挂单并平掉 Demo 所有仓位。</p>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-stop')">取消</button>
       <button class="oc-btn oc-btn-danger" onclick="doStop(false)">直接停止</button>
@@ -176,16 +175,18 @@ function switchSub(which) {
 function closeDialog(id) { document.getElementById(id).classList.remove('show'); }
 
 // ── Unified Start ───────────────────────────────────────────────
-function unifiedStart() {
+// 打开启动对话框时预读 Demo 余额，显示在弹窗中
+// Pre-fetch Demo balance when opening start dialog, show in popup
+let _pendingStartBalance = 0;
+
+async function unifiedStart() {
+  const balEl = document.getElementById('dlg-start-balance');
+  const confirmBtn = document.getElementById('btn-dlg-confirm-start');
+  balEl.textContent = '正在读取 Demo 余额...';
+  confirmBtn.disabled = true;
   document.getElementById('dlg-start').classList.add('show');
-}
 
-async function doStart(fresh) {
-  closeDialog('dlg-start');
-
-  // Always sync initial balance from Bybit Demo totalEquity (same field Demo tab displays)
-  // 始终从 Bybit Demo totalEquity 同步（与 Demo 页面显示一致）
-  let initialBalance = 100000;
+  _pendingStartBalance = 0;
   try {
     const balD = await ocApi('/api/v1/strategy/demo/balance');
     if (balD && balD.data && balD.data.retCode === 0) {
@@ -193,11 +194,24 @@ async function doStart(fresh) {
       if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
       const equity = parseFloat(b.totalEquity || 0);
       if (equity > 0) {
-        initialBalance = equity;
-        ocToast('Paper 初始余额同步 Demo: ₮' + initialBalance.toFixed(2), 'success');
+        _pendingStartBalance = equity;
+        balEl.innerHTML = '&#x1F4B0; Demo 账户余额：<strong style="color:var(--green)">₮' + equity.toFixed(2) + '</strong>（将作为 Paper 初始余额）';
+        confirmBtn.disabled = false;
+        return;
       }
     }
-  } catch (e) { /* fallback to default 100000 */ }
+  } catch (e) {}
+  balEl.innerHTML = '&#x26A0; 无法读取 Demo 余额，请检查 Demo API 连接';
+  confirmBtn.disabled = true;
+}
+
+async function doStart() {
+  closeDialog('dlg-start');
+
+  if (_pendingStartBalance <= 0) {
+    ocToast('无法获取 Demo 余额，启动已取消', 'error');
+    return;
+  }
 
   // Clear Demo baseline so iframe picks up fresh values on reload
   // 清除 Demo 基准数据，iframe 重载时会重新捕获
@@ -207,10 +221,11 @@ async function doStart(fresh) {
     localStorage.removeItem('oc_demo_realized_baseline');
   } catch (e) {}
 
-  // Start Paper session
-  const d = await ocPost('/api/v1/paper/session/start', { initial_balance: initialBalance });
+  // Start Paper session with Demo balance
+  // 用 Demo 余额启动 Paper 引擎
+  const d = await ocPost('/api/v1/paper/session/start', { initial_balance: _pendingStartBalance });
   if (d) {
-    ocToast('Paper 引擎已启动', 'success');
+    ocToast('引擎已启动，初始余额 ₮' + _pendingStartBalance.toFixed(2), 'success');
     refreshIframes();
     checkUnifiedStatus();
   } else {
