@@ -648,6 +648,10 @@ def project_position_after_fill(
                 "opened_ts_ms": now_ms(),
                 "updated_ts_ms": now_ms(),
                 "is_simulated": True,
+                # SPOT-2 FIX: 翻转路径保留原持仓的 category，避免丢失品类信息
+                # SPOT-2 FIX: Preserve category from existing position during flip;
+                # fallback to "linear" if original position lacked the field.
+                "category": pos.get("category", "linear"),
                 "holding_cost": {
                     "financial_cost_usd": 0.0,
                     "ai_cost_attributed_usd": 0.0,
@@ -1262,7 +1266,13 @@ class PaperTradingEngine:
             # 开仓前风控：余额是否足够覆盖保证金 + 手续费？
             price_estimate = price or (market_prices or {}).get(symbol, 0)
             notional = qty * price_estimate
-            required_margin = notional / leverage if leverage > 0 else notional
+            # SPOT-3 FIX: 现货品类不使用杠杆保证金，名义价值即所需保证金（全额）
+            # SPOT-3 FIX: Spot category requires full notional as margin (no leverage);
+            # linear/inverse use notional / leverage for margin-based requirement.
+            if category == CATEGORY_SPOT:
+                required_margin = notional
+            else:
+                required_margin = notional / leverage if leverage > 0 else notional
             estimated_fee = compute_fee(qty, price_estimate)
             required_total = required_margin + estimated_fee
             if sess["current_paper_balance_usdt"] < required_total:

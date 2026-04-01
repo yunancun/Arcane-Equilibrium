@@ -1312,3 +1312,144 @@ class TestCheckOrderAllowedEdgeCases:
         allowed, reason = result
         assert isinstance(allowed, bool), "Return value must be (bool, str)"
         assert isinstance(reason, str), "Return value must be (bool, str)"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPOT-3: Spot Category Risk Config Tests
+# 現貨品類風控配置測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSpotCategoryRiskConfig:
+    """
+    SPOT-3 acceptance tests: verify that RiskManager automatically injects
+    a Spot category config that enforces max_leverage=1.0 and spot_allow_margin=False.
+
+    SPOT-3 驗收測試：確認 RiskManager 自動注入 Spot 品類配置，
+    強制 max_leverage=1.0 且 spot_allow_margin=False。
+    """
+
+    def test_spot_category_max_leverage_is_one(self):
+        """
+        SPOT-3-T1: A freshly constructed RiskManager must have a Spot category config
+        with max_leverage=1.0 out of the box (no operator action needed).
+
+        SPOT-3-T1：新建 RiskManager 應自動包含 Spot 品類配置，max_leverage=1.0。
+        不需要 Operator 手動配置。
+        """
+        rm = RiskManager()
+        spot_cfg = rm.get_category_config("spot")
+        assert spot_cfg is not None, "Spot category config should be auto-injected on init"
+        assert spot_cfg.max_leverage == 1.0, (
+            f"Spot max_leverage must be 1.0 (no leverage), got {spot_cfg.max_leverage}"
+        )
+        assert spot_cfg.spot_allow_margin is False, (
+            "Spot margin trading must be disabled by default"
+        )
+
+    def test_spot_effective_max_leverage_is_one(self):
+        """
+        SPOT-3-T2: effective_max_leverage("spot") must resolve to 1.0 via the
+        3-tier resolution logic (P0 spot config overrides P1 global=20.0).
+
+        SPOT-3-T2：effective_max_leverage("spot") 必須通過三層合并邏輯返回 1.0。
+        P0 Spot 配置（1.0）覆蓋 P1 全局（20.0），取較嚴格（較小）值。
+        """
+        rm = RiskManager()
+        eff_lev = rm.effective_max_leverage("spot")
+        # resolve_effective_limit takes min(P0=1.0, P1=20.0) = 1.0
+        # resolve_effective_limit 取 min(P0=1.0, P1=20.0) = 1.0
+        assert eff_lev == 1.0, (
+            f"Spot effective leverage must be 1.0 (no leverage), got {eff_lev}"
+        )
+
+    def test_spot_order_rejected_if_leverage_gt_one(self, engine_with_risk):
+        """
+        SPOT-3-T3: An order for a Spot symbol with leverage > 1 must be rejected
+        by check_order_allowed() with a 'leverage' reason.
+
+        SPOT-3-T3：對 Spot symbol 提交 leverage > 1 的訂單，
+        check_order_allowed() 必須拒絕並在 reason 中包含 'leverage'。
+        """
+        eng, rm = engine_with_risk
+        state = eng.get_state()
+        # Attempt a Spot order with leverage=2.0 — must be rejected
+        # 嘗試提交 leverage=2.0 的現貨訂單，應被拒絕
+        ok, reason = rm.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+            price=60000.0,
+            leverage=2.0,
+            category="spot",
+        )
+        assert ok is False, "Spot order with leverage=2.0 must be rejected"
+        assert "leverage" in reason, (
+            f"Rejection reason should mention 'leverage', got: {reason!r}"
+        )
+
+    def test_spot_order_allowed_at_leverage_one(self, engine_with_risk):
+        """
+        SPOT-3-T4: A Spot order with leverage=1.0 (no leverage) must pass the
+        leverage gate (other checks may still apply, but not the leverage gate).
+
+        SPOT-3-T4：leverage=1.0 的現貨訂單，槓桿門控應通過
+        （其他風控檢查可能仍然適用，但槓桿門控必須通過）。
+        """
+        eng, rm = engine_with_risk
+        state = eng.get_state()
+        # A very small order — should pass leverage check (≤ 1.0)
+        # 非常小的訂單，應通過槓桿檢查
+        ok, reason = rm.check_order_allowed(
+            state,
+            symbol="BTCUSDT",
+            side="Buy",
+            qty=0.001,
+            price=60000.0,
+            leverage=1.0,
+            category="spot",
+        )
+        # The leverage gate specifically must NOT be the rejection reason
+        # 拒絕原因不應是 leverage（即槓桿門控通過）
+        assert "leverage_" not in reason, (
+            f"Spot order with leverage=1.0 must pass the leverage gate, got: {reason!r}"
+        )
+
+    def test_linear_max_leverage_unchanged(self):
+        """
+        SPOT-3-T5: The Spot default config injection must NOT affect linear category.
+        Linear max_leverage should remain at the P1 global default (20.0).
+
+        SPOT-3-T5：注入 Spot 默認配置不得影響 linear 品類。
+        Linear effective_max_leverage 仍應為 P1 全局默認值 20.0。
+        """
+        rm = RiskManager()
+        # No category config for linear → falls back to global 20.0
+        # linear 無 P0 覆蓋 → 回退到 P1 全局 20.0
+        eff_lev = rm.effective_max_leverage("linear")
+        assert eff_lev == 20.0, (
+            f"Linear effective leverage must stay at global default 20.0, got {eff_lev}"
+        )
+
+    def test_caller_supplied_spot_config_is_not_overwritten(self):
+        """
+        SPOT-3-T6: If the caller explicitly provides a Spot category config,
+        the auto-injection logic must NOT overwrite it.
+
+        SPOT-3-T6：若呼叫端明確提供 Spot 品類配置，自動注入邏輯不得覆蓋。
+        這確保 Operator 可以更嚴格地配置（如更低的倉位上限），不被默認值干擾。
+        """
+        custom_spot = CategoryRiskConfig(
+            category="spot",
+            max_leverage=1.0,
+            max_single_position_pct=5.0,  # stricter than default
+            spot_allow_margin=False,
+        )
+        rm = RiskManager(category_configs={"spot": custom_spot})
+        spot_cfg = rm.get_category_config("spot")
+        assert spot_cfg is custom_spot, (
+            "Caller-supplied Spot config should not be replaced by auto-injection"
+        )
+        assert spot_cfg.max_single_position_pct == 5.0, (
+            "Custom Spot max_single_position_pct must be preserved"
+        )

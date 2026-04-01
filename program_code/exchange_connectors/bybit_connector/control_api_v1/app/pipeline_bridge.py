@@ -110,6 +110,10 @@ class PipelineBridge:
         self._last_l2_cron_ts: float = 0.0  # Batch 10: Last L2 cron trigger timestamp / L2 Cron 上次触发时间
         self._executor_agent = None  # Batch 11: Set externally for ExecutorAgent / 执行者代理
         self._h0_gate: Any = None  # P1-16: H0 deterministic gate / H0 確定性門控
+        # Wave 7a 方案 B：運行時 symbol → category 映射，由 StrategyAutoDeployer 部署策略時填充。
+        # Wave 7a Plan B: runtime symbol-to-category map, populated by StrategyAutoDeployer on
+        # strategy deployment. Prevents _infer_category_from_symbol from guessing for known symbols.
+        self._symbol_category_map: dict[str, str] = {}
 
         self._stats = {
             "ticks_received": 0,
@@ -240,6 +244,22 @@ class PipelineBridge:
         設置 H0 確定性門控以進行確定性交易前過濾（P1-16）。
         """
         self._h0_gate = gate
+
+    def register_symbol_category(self, symbol: str, category: str) -> None:
+        """
+        登記 symbol 的 Bybit API category，供 kline/funding 查詢使用。
+        Register symbol's Bybit API category for use in kline/funding queries.
+
+        由 StrategyAutoDeployer 在部署策略時調用，確保 category 來自掃描器的真相源。
+        Called by StrategyAutoDeployer on strategy deployment; category comes from scanner,
+        which is the authoritative source of truth for symbol classification.
+
+        優先級高於 _infer_category_from_symbol() 的命名啟發式推斷。
+        Takes precedence over _infer_category_from_symbol() heuristic name inference.
+        """
+        self._symbol_category_map[symbol] = category
+        logger.debug("Registered symbol category: %s → %s / 登記 symbol 品類：%s → %s",
+                     symbol, category, symbol, category)
 
     def activate(self) -> None:
         """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
@@ -735,6 +755,17 @@ class PipelineBridge:
                 # Extract category from intent metadata (default: linear)
                 # 从意图元数据提取品类（默认：linear）
                 category = intent.metadata.get("category", "linear") if intent.metadata else "linear"
+                # Wave 7a 方案 B：如果 category 是 fallback 且 symbol 未在運行時映射中登記，記錄 warning。
+                # Wave 7a Plan B: warn when category defaults to linear for an unregistered symbol.
+                # This helps detect symbols deployed without category registration.
+                if category == "linear" and intent.symbol not in self._symbol_category_map:
+                    logger.warning(
+                        "Intent for %s has no explicit category and symbol is not in category map; "
+                        "defaulting to linear. Register via StrategyAutoDeployer to fix. "
+                        "/ intent 無明確 category 且 symbol 未在映射中登記，使用 linear 作 fallback：%s",
+                        intent.symbol,
+                        intent.symbol,
+                    )
 
                 # B6: For limit orders without explicit price, use current market price
                 # B6：limit 单如无明确价格，使用当前市场价
@@ -1674,6 +1705,31 @@ class PipelineBridge:
                 already_emitted.add(key)
                 break  # one emit per tracked position per tick
 
+    @staticmethod
+    def _infer_category_from_symbol(symbol: str) -> str:
+        """Infer Bybit V5 category from symbol naming convention.
+        根據 Bybit V5 symbol 命名規則推斷品類。
+
+        Rules (Bybit naming convention):
+          - Ends with "USD" but not "USDT" or "USDC" → "inverse"  (e.g. BTCUSD, ETHUSD)
+          - Contains "-" (option format, e.g. BTC-1JAN25-50000-C) → "option"
+          - "USDT" / "USDC" perpetuals or spot share the same suffix; we default to "linear"
+            because spot symbols are also tracked in market_scanner with category metadata.
+            Callers that know the true category should pass it explicitly.
+          - Fallback → "linear"
+
+        規則（Bybit 命名慣例）：
+          - 以 "USD" 結尾但不以 "USDT"/"USDC" 結尾 → inverse（如 BTCUSD、ETHUSD）
+          - 包含 "-" → option（如 BTC-1JAN25-50000-C）
+          - 其餘情況默認 linear；真正的 spot symbol 需呼叫端明確指定 category
+        """
+        sym = symbol.upper()
+        if "-" in sym:
+            return "option"
+        if sym.endswith("USD") and not sym.endswith("USDT") and not sym.endswith("USDC"):
+            return "inverse"
+        return "linear"
+
     def _refresh_kline_volume(self) -> None:
         """
         Periodically fetch latest kline from REST API to get real volume data.
@@ -1681,6 +1737,10 @@ class PipelineBridge:
 
         Dynamically covers all tracked symbols, not just BTC/ETH.
         动态覆盖所有已追踪的交易对，不仅限于 BTC/ETH。
+
+        SPOT-4: Category is now inferred per-symbol so Spot symbols query the correct
+        endpoint. Bybit v5 /market/kline requires the correct category to return data.
+        SPOT-4：現在為每個 symbol 推斷正確的 category，避免 spot symbol 查到錯誤端點。
         """
         import urllib.request
         import json as _json
@@ -1695,11 +1755,16 @@ class PipelineBridge:
         symbols = tracked[:10]
 
         for symbol in symbols:
+            # Wave 7a 方案 B：優先從運行時映射查詢，fallback 到名稱推斷（可能不準確）。
+            # Wave 7a Plan B: prefer runtime map; fallback to name inference (may be inaccurate
+            # for spot symbols that share the same suffix as linear, e.g. BTCUSDT).
+            kline_category = self._symbol_category_map.get(symbol) or self._infer_category_from_symbol(symbol)
+
             for tf, interval in tf_map.items():
                 try:
                     url = (
                         f"https://api.bybit.com/v5/market/kline"
-                        f"?category=linear&symbol={symbol}&interval={interval}&limit=2"
+                        f"?category={kline_category}&symbol={symbol}&interval={interval}&limit=2"
                     )
                     req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
                     with urllib.request.urlopen(req, timeout=5) as resp:
@@ -1727,19 +1792,38 @@ class PipelineBridge:
                 except Exception:
                     pass  # Non-critical, silently skip
 
-    def _fetch_single_funding_rate(self, symbol: str) -> tuple[float, int] | None:
+    def _fetch_single_funding_rate(self, symbol: str, category: str | None = None) -> tuple[float, int] | None:
         """Fetch funding rate for a single symbol from Bybit API.
         为单个品种从 Bybit API 获取 funding rate。
 
         Returns:
             (funding_rate, next_settle_ts_ms) or None if unavailable.
             返回 (funding_rate, next_settle_ts_ms)，不可用时返回 None。
+
+        SPOT-4: Spot and option symbols have no funding rate — return None immediately.
+        SPOT-4：現貨（spot）和期權（option）沒有資金費率，立即返回 None。
         """
         import urllib.request
         import json as _json
 
+        # SPOT-4: Funding rate only applies to perpetual contracts (linear / inverse).
+        # Spot and option have no funding mechanism — skip API call entirely to avoid
+        # spurious HTTP errors and unnecessary load on Bybit rate limits.
+        # SPOT-4：資金費率只適用於永續合約（linear/inverse）。
+        # Spot/option 沒有 funding 機制，直接跳過 API 調用，避免無效請求。
+        # Wave 7a 方案 B：優先用呼叫端傳入的 category，其次查運行時映射，最後才用名稱推斷。
+        # Wave 7a Plan B: explicit category arg > runtime map > name inference.
+        resolved_category = category or self._symbol_category_map.get(symbol) or self._infer_category_from_symbol(symbol)
+        if resolved_category in ("spot", "option"):
+            logger.debug(
+                "Skipping funding rate fetch for %s (category=%s, no funding rate) "
+                "/ 跳過資金費率查詢：%s 品類無資金費率",
+                symbol, resolved_category, symbol,
+            )
+            return None
+
         try:
-            url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={symbol}"
+            url = f"https://api.bybit.com/v5/market/tickers?category={resolved_category}&symbol={symbol}"
             req = urllib.request.Request(url, headers={"User-Agent": "OpenClaw/1.0"})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = _json.loads(resp.read().decode())

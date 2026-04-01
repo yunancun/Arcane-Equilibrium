@@ -346,6 +346,14 @@ class CategoryRiskConfig:
     allowed_symbols: list[str] | None = None
 
     # Spot-specific
+    # 记录意图：spot 不允许保证金/杠杆交易。
+    # Intent marker: spot should not allow margin/leveraged trading.
+    # NOTE: This field is NOT currently enforced in check_order_allowed().
+    # The active protection is max_leverage=1.0 (P0 override, auto-injected on RiskManager init).
+    # Full enforcement via SymbolCategoryRegistry is deferred to Wave 7b.
+    # 注意：此字段目前未在 check_order_allowed() 中 enforce。
+    # 当前有效保护是 max_leverage=1.0（P0 级别，RiskManager 初始化时自动注入）。
+    # 完整的 spot_allow_margin enforce 待 Wave 7b 实现 SymbolCategoryRegistry 后再加。
     spot_allow_margin: bool = False
 
     # Perpetual-specific
@@ -474,6 +482,20 @@ class RiskManager:
     ) -> None:
         self._config = config or GlobalRiskConfig()
         self._category_configs: dict[str, CategoryRiskConfig] = category_configs or {}
+
+        # SPOT-3: Inject default Spot category config if caller didn't supply one.
+        # Spot (現貨) 不應使用槓桿：max_leverage=1.0，spot_allow_margin=False。
+        # This is a P0 override — it can only be made stricter by the operator, never looser.
+        # SPOT-3：若呼叫者未提供 spot 配置，自動注入默認值。
+        # 現貨不允許槓桿（max_leverage=1.0），不允許保證金交易（spot_allow_margin=False）。
+        # 這是 P0 覆蓋，操作員只能收緊，不能放寬。
+        if "spot" not in self._category_configs:
+            self._category_configs["spot"] = CategoryRiskConfig(
+                category="spot",
+                max_leverage=1.0,        # Spot has no leverage / 現貨不允許槓桿
+                spot_allow_margin=False, # Spot margin trading disabled / 禁止現貨保證金
+            )
+
         self._agent_params = agent_params or AgentRiskParams()
         self._trailing_stops: dict[str, dict[str, float]] = {}
         self._consecutive_losses: int = 0
@@ -676,6 +698,13 @@ class RiskManager:
                     return False, f"daily_loss_{daily_loss_pct:.1f}pct_exceeds_max_{self._config.max_daily_loss_pct:.1f}pct"
 
         # Leverage check
+        # 杠杆检查：通过三层 P0/P1/P2 合并逻辑取有效上限，超出则拒单。
+        # Spot category auto-injects max_leverage=1.0 (P0) at RiskManager init,
+        # which is the active guard for spot margin-less enforcement.
+        # spot 品类在初始化时自动注入 max_leverage=1.0（P0 级别），是现货无杠杆的有效保护。
+        # TODO(Wave-7b): enforce CategoryRiskConfig.spot_allow_margin when SymbolCategoryRegistry is implemented.
+        # 待辦（Wave-7b）：实现 SymbolCategoryRegistry 后，在此处 enforce spot_allow_margin 字段，
+        # 明确拒绝任何向 spot 品类提交带保证金/杠杆意图的请求。
         max_lev = self.effective_max_leverage(category)
         if leverage > max_lev:
             return False, f"leverage_{leverage}_exceeds_max_{max_lev}"

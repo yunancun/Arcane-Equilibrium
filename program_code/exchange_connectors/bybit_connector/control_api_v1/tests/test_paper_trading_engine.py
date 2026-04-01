@@ -294,6 +294,114 @@ class TestPositionProjection:
         # Balance should be less than initial due to fees
         assert status["session"]["current_paper_balance_usdt"] < 10000.0
 
+    # ── SPOT-2 / SPOT-3 Tests ──────────────────────────────────────────────────
+
+    def test_spot_position_flip_preserves_category(self, active_engine):
+        """
+        SPOT-2 回归测试：持仓翻转（flip）路径必须保留 category 字段。
+        SPOT-2 regression: flip path must preserve category on the new position.
+
+        场景：以 spot 品类开多仓，然后用更大 sell 单触发翻转，验证新 short 仓位的
+        category 仍为 "spot"，而非丢失或变为 None。
+        Scenario: open spot long, flip via larger sell, verify new short position
+        retains category="spot" instead of missing or defaulting incorrectly.
+        """
+        from app.paper_trading_engine import project_position_after_fill, SIDE_BUY, SIDE_SELL
+
+        positions: dict = {}
+
+        # 开 spot 多仓 qty=1.0 / Open spot long
+        positions, _ = project_position_after_fill(
+            positions, "BTCUSDT", SIDE_BUY, 1.0, 60000.0, category="spot"
+        )
+        assert positions["BTCUSDT"]["category"] == "spot", "初始开仓 category 应为 spot"
+
+        # 翻转：sell qty=2.0 > long qty=1.0 / Flip: sell more than existing long
+        positions, close_pnl = project_position_after_fill(
+            positions, "BTCUSDT", SIDE_SELL, 2.0, 61000.0, category="spot"
+        )
+
+        # 验证新反向仓位存在且 category 保留 / Verify flipped position retains category
+        assert "BTCUSDT" in positions, "翻转后应有新 short 仓位"
+        assert positions["BTCUSDT"]["side"] == SIDE_SELL
+        assert positions["BTCUSDT"]["qty"] == pytest.approx(1.0)
+        assert positions["BTCUSDT"]["category"] == "spot", \
+            "SPOT-2 BUG: flip 路径未保留 category，新仓位 category 应为 spot"
+
+    def test_spot_margin_equals_notional(self):
+        """
+        SPOT-3 回归测试：spot 品类下单时，保证金要求 = 名义价值（不除以 leverage）。
+        SPOT-3 regression: spot orders require full notional as margin (no leverage division).
+
+        场景：balance=60, notional=0.01 * 60000 = 600, required_margin=600 (spot, full notional)
+        → 应被拒绝（即使 leverage=10 时 notional/leverage=60，余额本可通过 linear 判断）。
+        Scenario: balance=60, spot order with leverage=10, notional=600.
+        If spot incorrectly divided by leverage: 600/10=60 ≈ balance → might pass.
+        Correct spot behavior: margin=600 > 60 → reject.
+        """
+        import os
+        import tempfile
+        from unittest.mock import MagicMock
+        from app.paper_trading_engine import PaperStateStore, PaperTradingEngine
+
+        tmpdir = tempfile.mkdtemp(prefix="openclaw_spot3_test_")
+        store = PaperStateStore(os.path.join(tmpdir, "paper_state.json"))
+        engine = PaperTradingEngine(store)
+        mock_hub = MagicMock()
+        mock_hub.is_authorized.return_value = True
+        mock_hub.acquire_lease.return_value = "test-lease"
+        mock_hub.release_lease.return_value = None
+        engine.set_governance_hub(mock_hub)
+
+        # balance=60, notional=600, spot → margin=600 > 60 → reject
+        # balance=60, notional=600, linear leverage=10 → margin=60 ≈ balance → might pass
+        # We use spot: full notional is required, so should reject.
+        engine.start_session(initial_balance=60.0)
+        result = engine.submit_order(
+            "BTCUSDT", "Buy", "market", 0.01,
+            leverage=10.0,
+            market_prices={"BTCUSDT": 60000.0},
+            category="spot",
+        )
+        # 现货全额保证金：600 > 60 → 应拒单 / Full notional 600 > balance 60 → reject
+        assert result["rejected_reason"] == "insufficient_margin", \
+            "SPOT-3 BUG: spot 品类应使用全额 notional 作为保证金，余额不足应被拒"
+
+    def test_linear_margin_unchanged(self):
+        """
+        SPOT-3 线性合约回归测试：linear 品类保证金 = notional / leverage，行为不变。
+        SPOT-3 linear regression: linear category margin = notional / leverage (unchanged).
+
+        场景：balance=200, notional=0.01 * 60000 = 600, leverage=10 → required_margin=60
+        + fee ≈ 33 → total ≈ 93 < 200 → 应允许（至少不因保证金不足被拒）。
+        Scenario: balance=200, notional=600, leverage=10 → margin=60+fee~33 ≈ 93 < 200 → allowed.
+        """
+        import os
+        import tempfile
+        from unittest.mock import MagicMock
+        from app.paper_trading_engine import PaperStateStore, PaperTradingEngine
+
+        tmpdir = tempfile.mkdtemp(prefix="openclaw_linear_test_")
+        store = PaperStateStore(os.path.join(tmpdir, "paper_state.json"))
+        engine = PaperTradingEngine(store)
+        mock_hub = MagicMock()
+        mock_hub.is_authorized.return_value = True
+        mock_hub.acquire_lease.return_value = "test-lease"
+        mock_hub.release_lease.return_value = None
+        engine.set_governance_hub(mock_hub)
+
+        engine.start_session(initial_balance=200.0)
+        result = engine.submit_order(
+            "BTCUSDT", "Buy", "market", 0.01,
+            leverage=10.0,
+            market_prices={"BTCUSDT": 60000.0},
+            category="linear",
+        )
+        # linear 保证金 = 600/10 = 60，加手续费仍应小于 200，不应因保证金不足被拒
+        # linear margin = 60, + fee should be < 200, must not reject for insufficient_margin
+        assert result.get("rejected_reason") != "insufficient_margin", \
+            "SPOT-3 回归失败：linear 品类保证金计算不应受 spot 修复影响"
+
 
 class TestPnLComputation:
     """PnL tracking and computation."""

@@ -700,6 +700,15 @@ try:
     if PIPELINE_BRIDGE is not None:
         PIPELINE_BRIDGE.set_auto_deployer(AUTO_DEPLOYER)
         logger.info("Auto-deployer wired to pipeline bridge for loss tracking / 自动部署器已接入管线桥接器")
+        # 反向注入：让 AutoDeployer 持有 PipelineBridge 引用，部署策略时登记 symbol→category 映射。
+        # 若缺少此注入，_symbol_category_map 永远不会被填充，spot/inverse 品类的 kline/funding
+        # 查询将无法取得正确的 category，导致 _symbol_category_map 机制完全失效。
+        # Reverse injection: give AutoDeployer a PipelineBridge reference so it can call
+        # register_symbol_category() on deployment. Without this, _symbol_category_map in
+        # PipelineBridge is never populated, breaking category-aware kline/funding lookups
+        # for spot and inverse symbols that share names with linear contracts (e.g. BTCUSDT).
+        AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)
+        logger.info("PipelineBridge wired to auto-deployer for symbol-category mapping / 管线桥接器已注入自动部署器以支持品类映射")
 
     logger.info("Market scanner + auto-deployer started / 市场扫描器+自动部署器已启动")
 except Exception as e:

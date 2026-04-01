@@ -318,3 +318,87 @@ class TestPipelineBridgeGovernanceInjection:
         # PipelineBridge should have a method that checks authorization via governance_hub
         # This is a basic smoke test to ensure governance integration doesn't crash
         assert PIPELINE_BRIDGE._governance_hub is not None, "Governance hub not properly injected"
+
+
+# =============================================================================
+# AutoDeployer ↔ PipelineBridge Bidirectional Wiring Tests (BLOCKING-1 fix)
+# AutoDeployer 与 PipelineBridge 双向注入测试（修复 BLOCKING-1）
+# =============================================================================
+
+class TestAutoDeployerPipelineBridgeWiring:
+    """
+    Verify bidirectional wiring between StrategyAutoDeployer and PipelineBridge.
+    验证 StrategyAutoDeployer 与 PipelineBridge 的双向注入已在模块启动时完成。
+
+    Background / 背景：
+      PIPELINE_BRIDGE.set_auto_deployer(AUTO_DEPLOYER)  # PipelineBridge 持有 AutoDeployer
+      AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE) # 反向注入：AutoDeployer 持有 PipelineBridge
+    Without the reverse injection, _symbol_category_map is never populated and
+    spot/inverse category-aware kline/funding lookups silently use wrong defaults.
+    若缺少反向注入，_symbol_category_map 永远为空，spot/inverse 品类的 kline/funding
+    查询将静默使用错误的默认 category。
+    """
+
+    def test_auto_deployer_has_pipeline_bridge_after_startup(self):
+        """
+        AUTO_DEPLOYER._pipeline_bridge must not be None after module startup.
+        模块启动后 AUTO_DEPLOYER._pipeline_bridge 不得为 None。
+
+        This is the key regression guard for BLOCKING-1: if the reverse injection
+        (AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)) is ever removed from
+        the startup block in phase2_strategy_routes.py, this test will catch it.
+        这是 BLOCKING-1 的关键回归守卫：若 phase2_strategy_routes.py 的启动块中
+        删除了反向注入调用，本测试将立即失败。
+        """
+        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
+
+        assert AUTO_DEPLOYER is not None, (
+            "AUTO_DEPLOYER not initialized — cannot verify pipeline bridge wiring"
+        )
+        assert PIPELINE_BRIDGE is not None, (
+            "PIPELINE_BRIDGE not initialized — cannot verify pipeline bridge wiring"
+        )
+        assert AUTO_DEPLOYER._pipeline_bridge is not None, (
+            "AUTO_DEPLOYER._pipeline_bridge is None — reverse injection "
+            "(AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)) is missing from startup block. "
+            "Without this, _symbol_category_map is never populated for spot/inverse symbols."
+        )
+
+    def test_auto_deployer_pipeline_bridge_is_same_instance(self):
+        """
+        AUTO_DEPLOYER._pipeline_bridge must be the exact same object as PIPELINE_BRIDGE.
+        AUTO_DEPLOYER._pipeline_bridge 必须与模块级 PIPELINE_BRIDGE 是同一实例。
+
+        Ensures the startup wiring uses the correct module-level singleton and not
+        a stale or freshly constructed instance.
+        确保启动注入使用正确的模块级单例，而非过期或新建的实例。
+        """
+        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
+
+        assert AUTO_DEPLOYER is not None, "AUTO_DEPLOYER not initialized"
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
+        assert AUTO_DEPLOYER._pipeline_bridge is PIPELINE_BRIDGE, (
+            "AUTO_DEPLOYER._pipeline_bridge is not the same instance as PIPELINE_BRIDGE. "
+            "Symbol-category mappings will target the wrong bridge object."
+        )
+
+    def test_pipeline_bridge_has_auto_deployer_reference(self):
+        """
+        PIPELINE_BRIDGE must also hold a reference to AUTO_DEPLOYER (forward direction).
+        PIPELINE_BRIDGE 同样必须持有 AUTO_DEPLOYER 的引用（正向注入验证）。
+
+        Validates the existing forward injection is intact alongside the reverse injection.
+        验证正向注入（现有逻辑）与反向注入同时存在。
+        """
+        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
+
+        assert AUTO_DEPLOYER is not None, "AUTO_DEPLOYER not initialized"
+        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
+        # PipelineBridge stores auto_deployer in _auto_deployer attribute
+        # PipelineBridge 在 _auto_deployer 属性中存储 auto_deployer 引用
+        assert hasattr(PIPELINE_BRIDGE, "_auto_deployer"), (
+            "PIPELINE_BRIDGE missing _auto_deployer attribute — forward injection may have changed"
+        )
+        assert PIPELINE_BRIDGE._auto_deployer is not None, (
+            "PIPELINE_BRIDGE._auto_deployer is None — set_auto_deployer() call missing or failed"
+        )
