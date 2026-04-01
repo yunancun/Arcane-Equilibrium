@@ -128,6 +128,9 @@ class StrategyOrchestrator:
         # 注册的策略：名称 → 策略实例
         self._strategies: dict[str, StrategyBase] = {}
 
+        # Auto-incrementing strategy ID counter / 自增策略编号计数器
+        self._next_strategy_id: int = 1
+
         # Collected order intents / 收集的订单意图
         self._pending_intents: list[OrderIntent] = []
 
@@ -182,9 +185,15 @@ class StrategyOrchestrator:
                     "Strategy %s already registered, stopping old + replacing / 策略 %s 已注册，停止旧策略并替换",
                     key, key,
                 )
+                # Preserve the existing ID when replacing / 替换时保留旧编号
+                strategy.strategy_id = old.strategy_id
                 old.stop()
+            else:
+                # Assign new auto-incrementing ID / 分配新的自增编号
+                strategy.strategy_id = self._next_strategy_id
+                self._next_strategy_id += 1
             self._strategies[key] = strategy
-        logger.info("Registered strategy / 注册策略: %s", key)
+        logger.info("Registered strategy #%d / 注册策略 #%d: %s", strategy.strategy_id, strategy.strategy_id, key)
 
     def activate_strategy(self, name: str) -> bool:
         """
@@ -360,12 +369,19 @@ class StrategyOrchestrator:
             strategy = self._strategies.get(name)
             if strategy is None:
                 return None
-            return strategy.get_status()
+            status = strategy.get_status()
+            status["strategy_id"] = strategy.strategy_id
+            return status
 
     def get_all_strategies_status(self) -> list[dict[str, Any]]:
         """Get status of all registered strategies / 获取所有注册策略的状态"""
         with self._lock:
-            return [s.get_status() for s in self._strategies.values()]
+            result = []
+            for s in self._strategies.values():
+                status = s.get_status()
+                status["strategy_id"] = s.strategy_id
+                result.append(status)
+            return result
 
     def get_intent_history(self, n: int = 50) -> list[dict[str, Any]]:
         """Get recent OrderIntent history / 获取最近的 OrderIntent 历史"""

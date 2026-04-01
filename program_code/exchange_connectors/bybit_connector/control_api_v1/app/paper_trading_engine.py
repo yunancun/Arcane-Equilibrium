@@ -390,6 +390,7 @@ def create_paper_order(
     tp_trigger_by: str = TRIGGER_BY_LAST_PRICE,
     sl_trigger_by: str = TRIGGER_BY_LAST_PRICE,
     category: str = CATEGORY_LINEAR,
+    strategy_name: str = "",
 ) -> dict[str, Any]:
     """
     Create a new paper order object / 创建纸上订单对象
@@ -437,6 +438,7 @@ def create_paper_order(
         "time_in_force": time_in_force,
         "reduce_only": reduce_only,
         "category": category,
+        "strategy_name": strategy_name,
     }
 
     # Conditional order fields / 条件单字段
@@ -627,6 +629,7 @@ def project_position_after_fill(
     fill_qty: float,
     fill_price: float,
     category: str = "linear",
+    strategy_name: str = "",
 ) -> tuple[dict[str, Any], float]:
     """
     Project position state after a fill / 投影成交后的持仓状态
@@ -651,6 +654,7 @@ def project_position_after_fill(
             "updated_ts_ms": now_ms(),
             "is_simulated": True,
             "category": category,
+            "strategy_name": strategy_name,
             # AI attention tax tracking / AI 注意力税追踪
             "holding_cost": {
                 "financial_cost_usd": 0.0,
@@ -1309,6 +1313,7 @@ class PaperTradingEngine:
         take_profit: float | None = None,
         stop_loss: float | None = None,
         category: str = CATEGORY_LINEAR,
+        strategy_name: str = "",
     ) -> dict[str, Any]:
         """
         Submit a paper order / 提交纸上订单
@@ -1337,6 +1342,7 @@ class PaperTradingEngine:
                 take_profit=take_profit,
                 stop_loss=stop_loss,
                 category=category,
+                strategy_name=strategy_name,
             )
 
             # Batch 10: Register order in OMS SM-03 if enabled
@@ -1616,8 +1622,8 @@ class PaperTradingEngine:
                         import logging as _log
                         _log.warning("Governance lease release failed (non-fatal) / 租約釋放失敗（非致命）")
 
-                # Update position (pass category so new positions record their api_category)
-                _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price, category=category)
+                # Update position (pass category + strategy_name so new positions record their source)
+                _, close_pnl = project_position_after_fill(state["positions"], symbol, side, qty, fill_price, category=category, strategy_name=order.get("strategy_name", ""))
                 state["pnl"]["closed_position_pnl"] += close_pnl
                 result["close_pnl"] += close_pnl
 

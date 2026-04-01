@@ -201,6 +201,8 @@ async function loadStrategies() {
     html += '<div class="oc-strat-card">';
     html += '<div class="strat-header">';
     const stratName = s.strategy || s.name || s.strategy_name || '?';
+    const sid = s.strategy_id || 0;
+    html += '<span style="font-size:11px;color:var(--text-dim);margin-right:6px">#' + sid + '</span>';
     html += '<span class="strat-name">' + ocEsc(stratLabel(stratName)) + '</span>';
     html += '<span class="oc-chip oc-chip-' + chipType + '">' + ocEsc(state) + '</span>';
     html += '</div>';

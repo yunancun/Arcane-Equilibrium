@@ -818,6 +818,7 @@ class PipelineBridge:
                     price=submit_price,
                     market_prices=market_prices,
                     category=category,
+                    strategy_name=getattr(intent, "strategy_name", "") or "",
                 )
 
                 _bump(_local_stats, "intents_submitted")

@@ -153,6 +153,8 @@ class StrategyBase(ABC):
         self._total_fees: float = 0.0
         self._trade_history: list[dict[str, Any]] = []
         self._max_trade_history: int = 200
+        # Numeric ID assigned by StrategyOrchestrator on registration / 由编排器在注册时分配的数字编号
+        self.strategy_id: int = 0
         # Custom name override for auto-deployed multi-symbol strategies.
         # When set, orchestrator uses this as the registration key instead of self.name.
         # 自定义名称覆盖，用于自动部署的多品种策略。设置后，编排器用此名称作为注册键。

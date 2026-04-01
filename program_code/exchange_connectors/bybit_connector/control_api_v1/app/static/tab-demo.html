@@ -50,8 +50,8 @@
     <h3>&#x1F4CA; 持仓 / Positions</h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th></tr></thead>
-        <tbody id="demo-positions"><tr class="empty-row"><td colspan="9">加载中...</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="10">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -61,8 +61,8 @@
     <h3>&#x1F4DD; 活跃订单 / Active Orders <span id="demo-order-counts" style="font-size:11px;color:var(--text-dim);font-weight:400"></span></h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
-        <tbody id="demo-orders"><tr class="empty-row"><td colspan="8">暂无订单</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>触发价</th><th>状态</th></tr></thead>
+        <tbody id="demo-orders"><tr class="empty-row"><td colspan="9">暂无订单</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -256,6 +256,10 @@ function renderBalance(raw) {
   }
 }
 
+// Paper strategy map: symbol → strategy_name (cross-referenced for Demo display)
+// Paper 策略映射：symbol → strategy_name（用于 Demo 表格显示）
+let _paperStratMap = {};
+
 async function loadPositions() {
   const d = await ocApi('/api/v1/strategy/demo/positions');
   if (!d || !d.data) return;
@@ -267,9 +271,20 @@ async function loadPositions() {
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
-    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="9">暂无持仓</td></tr>');
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="10">暂无持仓</td></tr>');
     return;
   }
+  // Cross-reference with Paper positions to get strategy_name / 交叉参考 Paper 持仓获取策略名
+  let paperStratMap = {};
+  try {
+    const pd = await ocApi('/api/v1/paper/positions');
+    if (pd && pd.data) {
+      const pp = pd.data.positions || pd.data || {};
+      const ppList = Array.isArray(pp) ? pp : Object.values(pp);
+      ppList.forEach(p => { if (p.symbol && p.strategy_name) paperStratMap[p.symbol] = p.strategy_name; });
+    }
+  } catch(e) {}
+  _paperStratMap = paperStratMap;
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
@@ -277,8 +292,10 @@ async function loadPositions() {
     // Bybit API: category from symbol suffix heuristic (USDT=linear, USD=inverse, else spot)
     const sym = p.symbol || '';
     const cat = p.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
+    const strat = paperStratMap[sym] || '--';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
+    html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
@@ -314,7 +331,7 @@ async function loadDemoOrders() {
   if (countsEl) countsEl.textContent = '（普通 ' + regCount + ' / 条件止损 ' + condCount + '）';
 
   if (!orders.length) {
-    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="8">暂无订单</td></tr>');
+    ocSetHtml('demo-orders', '<tr class="empty-row"><td colspan="9">暂无订单</td></tr>');
     return;
   }
   let html = '';
@@ -329,8 +346,10 @@ async function loadDemoOrders() {
     const triggerPrice = parseFloat(o.triggerPrice || 0);
     const sym = o.symbol || '';
     const cat = o.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
+    const strat = _paperStratMap[sym] || '--';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
+    html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + typeLabel + '</td>';
