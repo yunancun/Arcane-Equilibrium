@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Phase 3 Batch 3B L3 管線接通 + 3A-4 TruthSourceRegistry 持久化 · 3310 tests）
+# 最後更新：2026-04-01（Phase 3 Batch 3C 排程器 + GUI · 3330 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-3310 passed / 21 failed（Phase 3 Batch 3B 後；+21 新測試：persistence 6 + AnalystAgent 3 + auto_seed 3 + evolution_routes 10 - 1 skipped；pre-existing failures 不影響本工作）
+3330 passed / 22 failed（Phase 3 Batch 3C 後；+20 新測試：evolution_scheduler 21 - 1 skipped；pre-existing failures 不影響本工作）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
@@ -967,7 +967,7 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 
 ---
 
-### Phase 3 Batch 3A + 3B 工作鏈（✅ 全部完成）
+### Phase 3 Batch 3A + 3B + 3C 工作鏈（✅ Phase 3 全部完成）
 
 ```
 3A-1/2/3 ExperimentLedger + ExperimentRoutes + EvolutionEngine ✅ 3289 passed
@@ -976,7 +976,10 @@ Phase 2 Batch 2B：✅ BacktestEngine MVP 57 tests（commit cf7ef5d，2026-03-31
 3B-2 ExperimentLedger.auto_seed_from_claims() ✅
 3B-3 EvolutionRoutes POST /run + GET /status ✅
 3B-4 main.py 啟動自動填充（load_snapshot + auto_seed_from_claims）✅
-E4 全量回歸 ✅ 3310 passed（+21 新測試）
+3C-1 tab-ai.html 假設實驗狀態 + 進化 dashboard（30s 刷新）✅
+3C-2 EvolutionScheduler 週進化 daemon（週日 UTC 00:30）✅
+3C-3 ExperimentLedger 小時清理 daemon ✅
+E4 全量回歸 ✅ 3330 passed（+20 新測試）
 ```
 
 ### 驗收標準（全部達成）

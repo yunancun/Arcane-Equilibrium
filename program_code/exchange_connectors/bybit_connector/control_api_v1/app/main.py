@@ -302,6 +302,21 @@ async def _startup_integrity_check() -> None:
         # fail-open：自動填充失敗不阻斷啟動 / fail-open: auto-seed failure must not block startup
         base.logger.warning("ExperimentLedger startup auto-seed failed (fail-open): %s", _e)
 
+    # ── Phase 3C: Evolution auto-scheduler startup (fail-open) ──────────────
+    # 啟動進化自動排程器（fail-open，不阻斷啟動）
+    # Start evolution auto-scheduler (fail-open; must not block startup).
+    try:
+        from .evolution_auto_scheduler import start_scheduler  # noqa: PLC0415
+        start_scheduler()
+        base.logger.info(
+            "EvolutionScheduler started / 進化排程器已啟動"
+        )
+    except Exception as _sched_exc:
+        base.logger.warning(
+            "EvolutionScheduler startup failed (fail-open): %s / 進化排程器啟動失敗（不阻斷）：%s",
+            _sched_exc, _sched_exc,
+        )
+
 
 # ── OpenClaw Gateway Proxy / OpenClaw Gateway 反向代理 ──
 # Proxies /openclaw/* to localhost:18789 so remote clients don't need direct access to port 18789

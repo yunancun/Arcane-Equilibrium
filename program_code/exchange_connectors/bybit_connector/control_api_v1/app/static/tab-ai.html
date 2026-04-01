@@ -245,6 +245,67 @@
   </div>
 </details>
 
+<!-- ═══ Experiment Status / 假設實驗狀態 ═══ -->
+<div class="oc-card">
+  <h3>
+    &#x1F9EA; 假設實驗狀態 / Experiment Status
+    <span class="oc-chip oc-chip-neutral" id="exp-status-badge" style="margin-left:6px">載入中</span>
+    <button class="oc-btn" onclick="refreshExperimentStatus()" title="手動刷新" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB;</button>
+  </h3>
+  <div class="oc-metrics" id="exp-status-grid" style="margin-top:10px">
+    <div class="oc-metric">
+      <div class="oc-metric-label">活躍假設</div>
+      <div class="oc-metric-val" id="exp-active">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">已確認</div>
+      <div class="oc-metric-val green" id="exp-confirmed">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">已反駁</div>
+      <div class="oc-metric-val red" id="exp-refuted">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">已過期</div>
+      <div class="oc-metric-val" id="exp-expired" style="color:var(--text-dim)">--</div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
+    每 30 秒自動刷新 · <a href="#" onclick="refreshExperimentStatus();return false;" style="color:var(--accent)">立即刷新</a>
+  </div>
+</div>
+
+<!-- ═══ Strategy Evolution / 策略參數進化 ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+  <h3>
+    &#x1F4C8; 策略參數進化 / Strategy Evolution
+    <span id="evo-status-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim);margin-left:6px;vertical-align:middle" title="進化引擎狀態"></span>
+  </h3>
+  <div class="oc-metrics" id="evo-status-grid" style="margin-top:10px">
+    <div class="oc-metric">
+      <div class="oc-metric-label">累計進化次數</div>
+      <div class="oc-metric-val" id="evo-total-runs">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">最大組合數上限</div>
+      <div class="oc-metric-val" id="evo-max-combos">--</div>
+    </div>
+  </div>
+
+  <!-- 手動觸發進化（需 Operator 權限）/ Manual trigger (requires Operator role) -->
+  <div id="evo-run-form" style="margin-top:12px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="evo-strategy" type="text" class="oc-input" placeholder="策略名 (e.g. ma_crossover)" style="flex:1;min-width:140px">
+      <input id="evo-symbol" type="text" class="oc-input" placeholder="Symbol (e.g. BTCUSDT)" style="flex:1;min-width:120px" value="BTCUSDT">
+      <button class="oc-btn oc-btn-primary" onclick="runEvolution()" id="evo-run-btn">執行進化</button>
+    </div>
+    <div id="evo-result" style="margin-top:8px;font-size:12px;color:var(--text-dim)"></div>
+  </div>
+  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
+    自動排程：每週日 UTC 00:30 · Operator 認證後可手動觸發
+  </div>
+</div>
+
 <!-- ═══ Trigger Confirm Modal ═══ -->
 <div class="confirm-overlay" id="trigger-confirm">
   <div class="confirm-dialog">
@@ -526,6 +587,106 @@ loadAll();
 ocStartRefresh(loadAll, 30000);
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
+
+// ── Experiment Status / 假設實驗狀態 ──────────────────────────────────────────
+// 從 /api/v1/experiments/status 拉取實驗統計匯總 / Fetch aggregate experiment stats
+async function refreshExperimentStatus() {
+  const badge = $('exp-status-badge');
+  try {
+    const d = await ocApi('/api/v1/experiments/status');
+    if (!d) throw new Error('no data');
+    // 活躍 = pending + running / Active = pending + running
+    const active = (d.pending ?? 0) + (d.running ?? 0);
+    ocSetText('exp-active', active);
+    ocSetText('exp-confirmed', d.confirmed ?? '--');
+    ocSetText('exp-refuted', d.refuted ?? '--');
+    ocSetText('exp-expired', d.expired ?? '--');
+    badge.textContent = '共 ' + (d.total ?? 0) + ' 個';
+    badge.className = 'oc-chip oc-chip-good';
+  } catch (e) {
+    // fail-open：顯示錯誤狀態但不拋出例外 / fail-open: show error state without throwing
+    badge.textContent = '錯誤';
+    badge.className = 'oc-chip oc-chip-bad';
+  }
+}
+
+// ── Evolution Status / 進化引擎狀態 ──────────────────────────────────────────
+// 從 /api/v1/evolution/status 拉取進化引擎統計 / Fetch evolution engine stats
+async function refreshEvolutionStatus() {
+  const dot = $('evo-status-dot');
+  try {
+    const d = await ocApi('/api/v1/evolution/status');
+    if (!d) throw new Error('no data');
+    ocSetText('evo-total-runs', d.total_runs ?? '--');
+    ocSetText('evo-max-combos', d.max_combinations ?? '--');
+    // 若 last_run_ts 不為 null 則點亮狀態點為綠色 / Light dot green if last_run_ts is non-null
+    if (d.last_run_ts !== null && d.last_run_ts !== undefined) {
+      dot.style.background = 'var(--green)';
+      dot.title = '最後執行：' + new Date(d.last_run_ts * 1000).toLocaleString();
+    } else {
+      dot.style.background = 'var(--text-dim)';
+      dot.title = '尚未執行';
+    }
+  } catch (e) {
+    // 後端不可達時點亮紅色 / Show red dot when backend unreachable
+    dot.style.background = 'var(--red)';
+    dot.title = '狀態不可用';
+  }
+}
+
+// ── Run Evolution / 手動觸發進化（需 Operator 權限）────────────────────────────
+// POST /api/v1/evolution/run — 服務端強制 Operator 角色驗證 / Server enforces Operator role via 403
+async function runEvolution() {
+  const strategy = $('evo-strategy').value.trim();
+  const symbol = $('evo-symbol').value.trim() || 'BTCUSDT';
+  const resultEl = $('evo-result');
+  if (!strategy) {
+    resultEl.textContent = '請輸入策略名稱';
+    resultEl.style.color = 'var(--yellow)';
+    return;
+  }
+  const btn = $('evo-run-btn');
+  btn.disabled = true;
+  resultEl.textContent = '執行中...';
+  resultEl.style.color = 'var(--text-dim)';
+  try {
+    const d = await ocApi('/api/v1/evolution/run', {
+      method: 'POST',
+      body: {
+        strategy_name: strategy,
+        symbol: symbol,
+        timeframe: '1h',
+        parameter_grids: [
+          { name: 'stop_loss_pct', values: [0.02, 0.03, 0.05] },
+          { name: 'position_size_pct', values: [0.1, 0.2] }
+        ],
+        min_sharpe: 1.0
+      }
+    });
+    if (!d) throw new Error('request failed');
+    const sharpe = d.best_sharpe !== undefined
+      ? 'Sharpe=' + Number(d.best_sharpe).toFixed(2)
+      : '完成';
+    // 使用 ocEsc 防止 XSS（策略名由用戶輸入）/ Use ocEsc for XSS prevention (user input)
+    resultEl.textContent = ocEsc('進化完成 ' + sharpe + ' · 評估=' + (d.evaluated_combinations ?? '--'));
+    resultEl.style.color = 'var(--green)';
+    refreshEvolutionStatus();
+  } catch (e) {
+    resultEl.textContent = '執行失敗：' + ocEsc(String(e));
+    resultEl.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Phase 3 Dashboard Auto-refresh / Phase 3 面板自動刷新 ────────────────────
+// 頁面載入時立即拉取一次，之後每 30 秒輪詢 / Load immediately, then poll every 30s
+(function initPhase3Dashboard() {
+  refreshExperimentStatus();
+  refreshEvolutionStatus();
+  setInterval(refreshExperimentStatus, 30000);
+  setInterval(refreshEvolutionStatus, 30000);
+})();
 </script>
 </body>
 </html>
