@@ -421,48 +421,59 @@ class BybitDemoConnector:
 
         return result
 
-    def cancel_all_orders(self, category: str = "linear") -> dict[str, int]:
+    def cancel_all_orders(self, category: str = "all") -> dict[str, int]:
         """
-        Cancel ALL open orders on Demo (regular + conditional).
-        取消 Demo 所有掛單（普通單 + 條件止損單）。
+        Cancel ALL open orders on Demo across all active categories (regular + conditional).
+        取消 Demo 所有品類的掛單（普通單 + 條件止損單）。
+
+        When category="all" (default), iterates linear/spot/inverse to ensure complete cleanup.
+        category="all" 時遍歷 linear/spot/inverse，確保不遺漏任何品類。
 
         Returns summary dict with regular_canceled and conditional_canceled counts.
-        回傳取消數量摘要。
+        回傳各品類取消數量匯總。
         """
         summary = {"regular_canceled": 0, "conditional_canceled": 0}
         if not self._enabled:
             return summary
 
-        # Pass 1: Cancel all regular (limit) orders
-        # 第一遍：取消所有普通掛單
-        try:
-            result = self._request("POST", "/v5/order/cancel-all", {
-                "category": category,
-            })
-            if result.get("retCode") == 0:
-                cancelled = result.get("result", {}).get("list", [])
-                summary["regular_canceled"] = len(cancelled)
-                logger.info("Demo cancel-all regular orders: %d canceled", len(cancelled))
-            else:
-                logger.warning("Demo cancel-all regular failed: %s", result.get("retMsg"))
-        except Exception as e:
-            logger.warning("Demo cancel-all regular error: %s (non-fatal)", e)
+        categories = ["linear", "spot", "inverse"] if category == "all" else [category]
 
-        # Pass 2: Cancel all conditional (stop) orders
-        # 第二遍：取消所有條件止損單
-        try:
-            result = self._request("POST", "/v5/order/cancel-all", {
-                "category": category,
-                "orderFilter": "StopOrder",
-            })
-            if result.get("retCode") == 0:
-                cancelled = result.get("result", {}).get("list", [])
-                summary["conditional_canceled"] = len(cancelled)
-                logger.info("Demo cancel-all conditional orders: %d canceled", len(cancelled))
-            else:
-                logger.warning("Demo cancel-all conditional failed: %s", result.get("retMsg"))
-        except Exception as e:
-            logger.warning("Demo cancel-all conditional error: %s (non-fatal)", e)
+        # settle coin required for /v5/order/cancel-all StopOrder on linear/inverse
+        # Bybit cancel-all for stop orders needs settleCoin for linear, baseCoin for inverse
+        # 條件止損取消時 linear 需要 settleCoin，inverse 需要 baseCoin
+        _settle: dict[str, str] = {"linear": "USDT", "inverse": "BTC"}
+
+        for cat in categories:
+            # Pass 1: Cancel all regular (limit/market) orders
+            # 第一遍：取消所有普通掛單
+            try:
+                result = self._request("POST", "/v5/order/cancel-all", {"category": cat})
+                if result.get("retCode") == 0:
+                    n = len(result.get("result", {}).get("list", []))
+                    summary["regular_canceled"] += n
+                    if n:
+                        logger.info("Demo cancel-all regular [%s]: %d canceled", cat, n)
+                else:
+                    logger.warning("Demo cancel-all regular [%s] failed: %s", cat, result.get("retMsg"))
+            except Exception as e:
+                logger.warning("Demo cancel-all regular [%s] error: %s (non-fatal)", cat, e)
+
+            # Pass 2: Cancel all conditional (stop) orders
+            # 第二遍：取消所有條件止損單
+            try:
+                params: dict[str, Any] = {"category": cat, "orderFilter": "StopOrder"}
+                if cat in _settle:
+                    params[_settle_key := "settleCoin" if cat == "linear" else "baseCoin"] = _settle[cat]
+                result = self._request("POST", "/v5/order/cancel-all", params)
+                if result.get("retCode") == 0:
+                    n = len(result.get("result", {}).get("list", []))
+                    summary["conditional_canceled"] += n
+                    if n:
+                        logger.info("Demo cancel-all conditional [%s]: %d canceled", cat, n)
+                else:
+                    logger.warning("Demo cancel-all conditional [%s] failed: %s", cat, result.get("retMsg"))
+            except Exception as e:
+                logger.warning("Demo cancel-all conditional [%s] error: %s (non-fatal)", cat, e)
 
         return summary
 

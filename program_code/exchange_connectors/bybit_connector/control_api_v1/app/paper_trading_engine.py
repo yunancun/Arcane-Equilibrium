@@ -1712,54 +1712,73 @@ class PaperTradingEngine:
         """
         closed_symbols: set[str] = set()
 
-        # Pass 1: Close positions known to Paper
+        # Pass 1: Close positions known to Paper (use stored category for correct routing)
+        # 第一遍：根據 Paper 持倉平倉，使用記錄的 category 確保路由正確
         for symbol, pos in paper_positions.items():
             pos_side = pos.get("side", "Buy")
             close_side = "Sell" if pos_side == "Buy" else "Buy"
             qty = pos.get("qty", 0)
+            cat = pos.get("category", "linear")  # Use stored category, default linear
             if qty <= 0:
                 continue
             try:
                 from .bybit_demo_connector import round_qty_for_exchange
-                demo_qty = round_qty_for_exchange(qty)
+                demo_qty = round_qty_for_exchange(qty, category=cat)
                 if demo_qty <= 0:
                     continue
+                # Spot cannot use reduce_only (spot has no short concept in Bybit UTA)
+                # 現貨不能帶 reduce_only（Bybit UTA 現貨無空倉概念）
+                _reduce = cat != "spot"
                 result = self._demo_connector.submit_order(
                     symbol=symbol, side=close_side, order_type="Market",
-                    qty=demo_qty, reduce_only=True,
+                    qty=demo_qty, category=cat, reduce_only=_reduce,
                 )
                 if result.get("retCode") == 0:
                     closed_symbols.add(symbol)
-                    logger.info("Session stop — Demo closed: %s %s qty=%s", symbol, close_side, demo_qty)
+                    logger.info("Session stop — Demo closed [%s]: %s %s qty=%s", cat, symbol, close_side, demo_qty)
                 else:
-                    logger.warning("Session stop — Demo close failed: %s reason=%s", symbol, result.get("retMsg"))
+                    logger.warning("Session stop — Demo close failed [%s]: %s reason=%s", cat, symbol, result.get("retMsg"))
             except Exception as e:
-                logger.warning("Session stop — Demo close error: %s %s (non-fatal)", symbol, e)
+                logger.warning("Session stop — Demo close error [%s]: %s %s (non-fatal)", cat, symbol, e)
 
-        # Pass 2: Query Demo API for any remaining diverged positions
-        try:
-            demo_positions = self._demo_connector.get_positions()
-            pos_list = demo_positions.get("result", {}).get("list", [])
-            for dp in pos_list:
-                sym = dp.get("symbol", "")
-                size = float(dp.get("size", 0))
-                if sym in closed_symbols or size <= 0:
-                    continue
-                demo_side = dp.get("side", "")
-                close_side = "Buy" if demo_side == "Sell" else "Sell"
-                try:
-                    result = self._demo_connector.submit_order(
-                        symbol=sym, side=close_side, order_type="Market",
-                        qty=size, reduce_only=True,
-                    )
-                    if result.get("retCode") == 0:
-                        logger.info("Session stop — Demo DIVERGED position closed: %s %s qty=%s", sym, close_side, size)
-                    else:
-                        logger.warning("Session stop — Demo diverged close failed: %s reason=%s", sym, result.get("retMsg"))
-                except Exception as e:
-                    logger.warning("Session stop — Demo diverged close error: %s %s", sym, e)
-        except Exception as e:
-            logger.warning("Session stop — Could not query Demo positions: %s (non-fatal)", e)
+        # Pass 2: Query Demo API for any remaining diverged positions across ALL categories.
+        # 第二遍：查詢所有品類的 Demo 倉位，確保 spot/linear/inverse 殘留均被清倉。
+        # Spot positions use regular sell (no reduce_only); linear/inverse use reduce_only.
+        # 現貨使用普通賣出（無 reduce_only）；線性/反向使用 reduce_only。
+        for _cat in ("linear", "spot", "inverse"):
+            try:
+                demo_positions = self._demo_connector.get_positions(category=_cat)
+                pos_list = demo_positions.get("result", {}).get("list", [])
+                for dp in pos_list:
+                    sym = dp.get("symbol", "")
+                    size = float(dp.get("size", 0))
+                    if sym in closed_symbols or size <= 0:
+                        continue
+                    demo_side = dp.get("side", "")
+                    close_side = "Buy" if demo_side == "Sell" else "Sell"
+                    # Spot: no reduce_only (spot has no short positions, just sell the asset)
+                    # 現貨：不帶 reduce_only（現貨只需賣出資產即可）
+                    _reduce = _cat != "spot"
+                    try:
+                        result = self._demo_connector.submit_order(
+                            symbol=sym, side=close_side, order_type="Market",
+                            qty=size, reduce_only=_reduce,
+                        )
+                        if result.get("retCode") == 0:
+                            closed_symbols.add(sym)
+                            logger.info(
+                                "Session stop — Demo DIVERGED [%s] closed: %s %s qty=%s",
+                                _cat, sym, close_side, size,
+                            )
+                        else:
+                            logger.warning(
+                                "Session stop — Demo diverged close failed [%s]: %s reason=%s",
+                                _cat, sym, result.get("retMsg"),
+                            )
+                    except Exception as e:
+                        logger.warning("Session stop — Demo diverged close error [%s]: %s %s", _cat, sym, e)
+            except Exception as e:
+                logger.warning("Session stop — Could not query Demo positions [%s]: %s (non-fatal)", _cat, e)
 
     def set_demo_sync(self, sync: Any) -> None:
         """Inject BybitDemoSync for demo state snapshots / 注入 Demo 同步器"""
