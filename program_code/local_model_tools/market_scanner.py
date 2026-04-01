@@ -159,12 +159,25 @@ class MarketScanner:
                 low_24h = float(t.get("lowPrice24h", 0))
 
                 # Filter: minimum requirements
-                if volume_24h < self._min_volume:
+                # Volume filter: Inverse contracts report turnover24h in coin (e.g. BTC), not USDT.
+                # Skip volume check for inverse to avoid false negatives.
+                # 量能過濾：Inverse 合約的 turnover24h 以幣本位（如 BTC）計，非 USDT，跳過閾值比較防止誤過濾。
+                if api_category != "inverse" and volume_24h < self._min_volume:
                     continue
                 if price < MIN_PRICE_USDT:
                     continue
-                if not symbol.endswith("USDT"):
-                    continue  # Only USDT pairs (applies to both linear and spot)
+                # Symbol suffix filter: category-aware
+                # Inverse contracts end with "USD" (e.g. BTCUSD, ETHUSD), not "USDT".
+                # Linear and Spot only accept USDT pairs.
+                # Symbol 後綴過濾：區分品類
+                # Inverse 合約使用 "USD" 結尾（如 BTCUSD、ETHUSD），不帶 T
+                # Linear 和 Spot 僅接受 USDT 交易對
+                if api_category == "inverse":
+                    if not symbol.endswith("USD"):
+                        continue
+                else:
+                    if not symbol.endswith("USDT"):
+                        continue
 
                 # Calculate volatility (24h range as % of price)
                 volatility_pct = ((high_24h - low_24h) / price * 100) if price > 0 else 0

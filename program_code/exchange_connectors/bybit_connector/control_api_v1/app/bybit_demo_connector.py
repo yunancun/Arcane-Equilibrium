@@ -40,21 +40,34 @@ DEMO_BASE_URL = "https://api-demo.bybit.com"
 RECV_WINDOW = "5000"
 
 
-def round_qty_for_exchange(qty: float) -> float:
+def round_qty_for_exchange(qty: float, category: str = "linear") -> float:
     """
     Round qty to Bybit exchange step precision.
-    四舍五入到 Bybit 交易所步長精度。
+    四捨五入到 Bybit 交易所步長精度。
 
-    Bybit linear perps: BTC=0.001 step (3dp), ETH=0.01 step (2dp),
-    cheap tokens (price < $1) typically use integer step (1 unit).
-    Heuristic: qty >= 1 → round to nearest integer; qty < 1 → round to 3dp.
+    Linear perps: BTC=0.001 step, cheap tokens often use integer step.
+    Inverse perps: BTCUSD step=1 (integer contracts, e.g. 100 BTCUSD).
+    Spot: same heuristic as linear (base asset qty).
+
+    Linear perp：BTC=0.001 步長，便宜幣種通常整數步長。
+    Inverse perp：BTCUSD step=1（整數張數，如 100 BTCUSD）。
+    Spot：同 linear 啟發式（基礎資產數量）。
+
+    Heuristic: inverse or qty >= 1 → nearest integer; qty < 1 → 3dp.
+    Inverse 或 qty >= 1 → 取整；qty < 1 → 保留 3 位小數。
+
+    The ``category`` parameter defaults to "linear" for backwards compatibility.
+    All existing callers that omit it continue to work as before.
+    ``category`` 參數默認為 "linear"，確保向後兼容，現有調用者無需修改。
 
     This function is shared between the demo connector and pipeline bridge
     to ensure Paper and Demo use identical qty values.
     此函數由 demo connector 和 pipeline bridge 共用，
     確保 Paper 和 Demo 使用完全相同的 qty 值。
     """
-    if qty >= 1.0:
+    # INV-3: Inverse contracts use integer contract size (e.g. BTCUSD = 1 contract unit).
+    # INV-3：Inverse 合約使用整數張數（如 BTCUSD 最小 1 張），強制取整。
+    if category == "inverse" or qty >= 1.0:
         return float(round(qty))
     return round(qty, 3)
 
@@ -187,8 +200,10 @@ class BybitDemoConnector:
 
         # Round qty to exchange step precision to avoid "Qty invalid" rejections.
         # Uses shared round_qty_for_exchange() for consistency with Paper engine.
-        # 四舍五入到交易所步长精度，使用共用函數確保與 Paper 一致
-        qty = round_qty_for_exchange(qty)
+        # Pass category so inverse contracts are correctly rounded to integers.
+        # 四捨五入到交易所步長精度，使用共用函數確保與 Paper 一致。
+        # 傳入 category 確保 inverse 合約正確取整（整數張數）。
+        qty = round_qty_for_exchange(qty, category=category)
         if qty <= 0:
             return {"retCode": -1, "retMsg": "qty rounds to zero, order skipped"}
 
