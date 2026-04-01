@@ -690,6 +690,7 @@ try:
         min_qty_usdt=20.0,         # Minimum $20 per trade
         max_qty_pct=15.0,          # Max 15% of balance per single trade
         market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
+        pinned_symbols=["BTCUSDT", "ETHUSDT"],  # Always monitor + attempt to trade (learning/evolution)
     )
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()

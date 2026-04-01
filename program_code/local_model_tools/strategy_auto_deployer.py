@@ -52,6 +52,7 @@ class StrategyAutoDeployer:
         min_qty_usdt: float = 10.0,       # Minimum $10 per trade
         max_qty_pct: float = 10.0,        # Max 10% of balance per single trade
         market_feed_add_fn: Any = None,   # Optional: callable(symbol) to subscribe market feed
+        pinned_symbols: list[str] | None = None,  # Always-deployed symbols (e.g. BTCUSDT, ETHUSDT)
     ) -> None:
         self._orch = orchestrator
         self._km = kline_manager
@@ -61,6 +62,12 @@ class StrategyAutoDeployer:
         self._min_qty_usdt = min_qty_usdt
         self._max_qty_pct = max_qty_pct
         self._market_feed_add_fn = market_feed_add_fn
+        # Pinned symbols: always deployed, never evicted by rebalancer.
+        # 釘選幣種：始終部署，不會被智能再平衡驅逐。
+        # These are the most liquid and competitive pairs — valuable for learning/evolution.
+        # 這些是最活躍、競爭最激烈的交易對 — 對學習和進化極有價值。
+        self._pinned_symbols: set[str] = set(pinned_symbols or [])
+        self._pinned_deployed: bool = False  # Track if pinned symbols have been deployed
         self._lock = threading.Lock()
 
         # Track auto-deployed strategies: {strategy_name: {symbol, category, deployed_ts, ...}}
@@ -157,6 +164,10 @@ class StrategyAutoDeployer:
         for symbol, pos in positions.items():
             if exclude_symbols and symbol in exclude_symbols:
                 continue
+            # Pinned symbols are never evicted by rebalancer
+            # 釘選幣種不會被智能再平衡驅逐
+            if symbol in self._pinned_symbols:
+                continue
             keep_score = self._score_existing_position(symbol, pos)
             if keep_score < worst_score:
                 worst_score = keep_score
@@ -241,6 +252,44 @@ class StrategyAutoDeployer:
         """
         with self._lock:
             self._stats["scan_callbacks_received"] += 1
+
+            # ── Deploy pinned symbols on first scan (BTCUSDT, ETHUSDT etc) ──
+            # 首次掃描時部署釘選幣種（BTC、ETH 等最活躍交易對）
+            # Pinned symbols use MA_Crossover as default strategy (trend-following).
+            # Condition: only deploy if not already deployed. Scanner conditions still
+            # apply at order time (H0 Gate, Guardian) — pinned means "always monitor
+            # and attempt to trade", not "force trade regardless of conditions".
+            # 釘選意味著「始終監控並嘗試交易」，不是「無視條件強行交易」。
+            if not self._pinned_deployed and self._pinned_symbols:
+                for psym in self._pinned_symbols:
+                    key = f"trend_{psym}"
+                    if key not in self._deployed:
+                        from dataclasses import dataclass as _dc, field as _fld
+                        @_dc
+                        class _PinnedOpp:
+                            symbol: str = psym
+                            score: float = 50.0
+                            category: str = "trend"
+                            price: float = 0.0
+                            price_change_pct_24h: float = 0.0
+                            api_category: str = "linear"
+                        # Fetch current price for qty calculation
+                        _price = 0.0
+                        if self._engine:
+                            try:
+                                _state = self._engine.get_state()
+                                _feed = _state.get("market_feed", {})
+                                _price = _feed.get(psym, 0.0)
+                            except Exception:
+                                pass
+                        _popp = _PinnedOpp(price=_price if _price > 0 else 1.0)
+                        self._deploy_strategy(psym, "trend", _popp)
+                        logger.info(
+                            "Pinned symbol deployed: %s (always monitor) / 釘選幣種已部署: %s",
+                            psym, psym,
+                        )
+                self._pinned_deployed = True
+
             current_symbols = set(d["symbol"] for d in self._deployed.values())
             available_slots = self._max_symbols - len(current_symbols)
 
