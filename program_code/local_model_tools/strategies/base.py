@@ -279,6 +279,16 @@ class StrategyBase(ABC):
         with self._intent_lock:
             return len(self._pending_intents)
 
+    def on_intent_rejected(self, intent: OrderIntent) -> None:
+        """
+        Called when an intent is rejected by pipeline gates (governance/H0/Guardian).
+        当 intent 被管线门控（治理/H0/Guardian）拒绝时调用。
+
+        Subclasses should override to roll back optimistic state updates (e.g. _current_position).
+        子类应重写此方法以回滚乐观状态更新（如 _current_position）。
+        """
+        pass  # Default: no-op. Subclasses override as needed.
+
     def _emit_intent(self, intent: OrderIntent) -> None:
         """
         Internal: add an order intent to the pending queue / 内部：添加订单意图到待处理队列

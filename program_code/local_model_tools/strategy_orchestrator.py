@@ -383,6 +383,22 @@ class StrategyOrchestrator:
                 result.append(status)
             return result
 
+    def notify_intent_rejected(self, intent: "OrderIntent") -> None:
+        """
+        Notify the originating strategy that its intent was rejected by pipeline gates.
+        通知原始策略其 intent 被管线门控拒绝，以便策略回滚乐观状态。
+        """
+        strategy_name = getattr(intent, "strategy_name", "")
+        if not strategy_name:
+            return
+        with self._lock:
+            strategy = self._strategies.get(strategy_name)
+            if strategy is not None:
+                try:
+                    strategy.on_intent_rejected(intent)
+                except Exception as e:
+                    logger.warning("on_intent_rejected error for %s: %s", strategy_name, e)
+
     def get_intent_history(self, n: int = 50) -> list[dict[str, Any]]:
         """Get recent OrderIntent history / 获取最近的 OrderIntent 历史"""
         with self._lock:

@@ -157,6 +157,26 @@ class MACrossoverStrategy(StrategyBase):
                 self._trade_count += 1
                 self._last_trade_ts_ms = int(time.time() * 1000)
 
+    def on_intent_rejected(self, intent: OrderIntent) -> None:
+        """
+        Roll back optimistic _current_position when intent is rejected by pipeline gates.
+        当 intent 被管线门控拒绝时，回滚乐观的 _current_position 状态。
+
+        Without this, a rejected "Open short" leaves _current_position="short" but Paper Engine
+        has no position — subsequent "Close short" accidentally opens a long position.
+        若不回滚，被拒的「开空」会留下 _current_position="short"，但 Paper Engine 无仓位，
+        后续「平空」信号会意外开多。（2026-04-01 PIPPINUSDT 复现案例）
+        """
+        if getattr(intent, "symbol", None) != self._symbol:
+            return
+        with self._intent_lock:
+            self._current_position = None
+            logger.info(
+                "MA_Crossover %s: position reset to None after intent rejected / "
+                "intent 被拒后仓位回滚为 None",
+                self._symbol,
+            )
+
     def on_fill(self, fill: dict, is_open: bool) -> None:
         """
         Sync internal position state from confirmed fill.

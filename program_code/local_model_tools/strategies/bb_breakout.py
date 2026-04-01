@@ -174,6 +174,13 @@ class BBBreakoutStrategy(StrategyBase):
         self._was_squeezed = saved.get("was_squeezed", False)
         self._trade_count = saved.get("trade_count", 0)
 
+    def on_intent_rejected(self, intent: OrderIntent) -> None:
+        """Roll back _current_position on rejected intent / intent 被拒后回滚仓位状态"""
+        if getattr(intent, "symbol", None) != self._symbol:
+            return
+        with self._intent_lock:
+            self._current_position = None
+
     def get_status(self) -> dict[str, Any]:
         return {
             "strategy": self.name,

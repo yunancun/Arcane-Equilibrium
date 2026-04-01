@@ -127,6 +127,11 @@ class GridTradingStrategy(StrategyBase):
         self._max_inventory_qty: float = qty_per_grid * grid_count  # Max allowed inventory
         self._inventory_stop_triggered = False
 
+        # Cooldown: prevent rapid-fire duplicate intents when price oscillates around a grid line.
+        # 冷却：防止价格在网格线附近震荡时产生大量重复 intent。
+        self._last_emit_ts_ms: int = 0
+        self._emit_cooldown_ms: int = 60_000  # 60 seconds between grid emissions / 网格发射间隔 60 秒
+
     @property
     def name(self) -> str:
         return "Grid_Trading"
@@ -199,6 +204,15 @@ class GridTradingStrategy(StrategyBase):
                 self._last_price = price
                 return
 
+            # Cooldown: skip if emitted too recently (prevents duplicate intents on oscillation)
+            # 冷却：最近已发出过 intent 则跳过（防止震荡时重复发射）
+            if ts_ms - self._last_emit_ts_ms < self._emit_cooldown_ms:
+                # Still update grid index to avoid stale state — but don't emit
+                # 仍更新网格索引以避免状态过期 — 但不发射 intent
+                self._last_grid_index = current_index
+                self._last_price = price
+                return
+
             # Inventory stop: if accumulated inventory exceeds max, stop taking new positions
             # 库存止损：累计库存超过上限时，停止新建同方向仓位
             if abs(self._net_inventory) >= self._max_inventory_qty:
@@ -238,6 +252,7 @@ class GridTradingStrategy(StrategyBase):
                     self._sell_count += 1
                     self._net_inventory -= self._qty
                     self._trade_count += 1
+                self._last_emit_ts_ms = ts_ms
 
             else:
                 # Price moved down → buy / 价格下移 → 买入
@@ -265,6 +280,7 @@ class GridTradingStrategy(StrategyBase):
                     self._buy_count += 1
                     self._net_inventory += self._qty
                     self._trade_count += 1
+                self._last_emit_ts_ms = ts_ms
 
             self._last_grid_index = current_index
             self._last_price = price

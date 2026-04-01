@@ -324,6 +324,13 @@ class FundingRateArbStrategy(StrategyBase):
         self._funding_collected = saved.get("funding_collected", 0.0)
         self._funding_periods_held = saved.get("funding_periods_held", 0)
 
+    def on_intent_rejected(self, intent: OrderIntent) -> None:
+        """Roll back _current_position on rejected intent / intent 被拒后回滚仓位状态"""
+        if getattr(intent, "symbol", None) != self._symbol:
+            return
+        with self._intent_lock:
+            self._current_position = None
+
     def get_status(self) -> dict[str, Any]:
         return {
             "strategy": self.name,

@@ -504,15 +504,22 @@ class PipelineBridge:
         if self._stop_mgr and self._latest_prices:
             self._check_stops()
 
-    @staticmethod
-    def _mark_intent(intent: Any, status: str) -> None:
+    def _mark_intent(self, intent: Any, status: str) -> None:
         """
         Update intent history status via _history_ref (set by StrategyOrchestrator).
+        On rejection, also notify the originating strategy to roll back optimistic state.
         通过 _history_ref 更新 intent 历史状态（由 StrategyOrchestrator 设置）。
+        被拒时同时通知策略回滚乐观状态。
         """
         ref = getattr(intent, "_history_ref", None)
         if ref is not None:
             ref["status"] = status
+        # Notify strategy to roll back on rejection / 拒绝时通知策略回滚
+        if status.startswith("rejected") or status.startswith("blocked"):
+            try:
+                self._orch.notify_intent_rejected(intent)
+            except Exception:
+                pass  # Non-fatal: orchestrator may not support this yet / 非致命
 
     def _process_pending_intents(self) -> None:
         """
