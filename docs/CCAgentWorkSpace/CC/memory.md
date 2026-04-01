@@ -1,10 +1,18 @@
 # CC Memory — 工作記憶
 
-## 合規狀態快照（2026-03-31）
+## 合規狀態快照（2026-04-01）
 
-- 合規評級：B 級（11/16 完全合規，4/16 部分合規，1/16 未實施）
-- 未實施：原則 12（持續進化）— 學習管線斷裂，L2 有觸發但輸入數據為零
-- 部分合規：原則 3（H1-H5 斷開）/ 原則 13（cost_edge_ratio 計算存在但 AI 成本未計入）/ 原則 15（Scout→Strategist bus.send 已實現，shadow=True 阻止 TradeIntent 產生，待 5a-4 切換）/ 原則 16（組合級風控未實施）
+- 合規評級：A- 級（14/16 完全合規，2/16 部分合規，0/16 未實施）
+- 部分合規：原則 12（L5 元學習未實施，L1-L4 已完成）/ 原則 15（Conductor dispatch 未完成）
+- 硬違規：0 項（3/31 的 Guardian=None pass-through 已修復）
+- 硬邊界：6/6 全部合規
+
+### 3/31 → 4/01 主要升級
+- 原則 4：75%→95%（Guardian=None fail-closed + H0 Gate blocking）
+- 原則 8：70%→85%（register_data 注入 + round_trip 補完）
+- 原則 12：40%→70%（L3 ExperimentLedger + L4 EvolutionEngine）
+- max_retries：1→0（ollama_client.py 硬邊界對齊）
+- GOVERNANCE_ENABLED env var：已移除
 
 ## 重要合規事項
 
@@ -67,5 +75,6 @@
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
-| 2026-03-31 | 全系統合規報告 | docs/audit/March31/CC_compliance_check_2026-03-31.md |
+| 2026-04-01 | 全系統合規報告（A-級） | docs/audit/April01/CC_compliance_check_2026-04-01.md |
+| 2026-03-31 | 全系統合規報告（B 級） | docs/audit/March31/CC_compliance_check_2026-03-31.md |
 | 2026-03-31 | Wave 5 B 方案合規審查 | workspace/reports/2026-03-31--wave5_compliance_review.md |

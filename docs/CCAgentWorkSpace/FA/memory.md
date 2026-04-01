@@ -71,10 +71,48 @@
 - Wave 5 後：≈ 55%
 - 瓶頸：學習（25%）> Regime-aware 策略選擇（50%） > 進化（30%）
 
+## 2026-04-01 全鏈路功能審計（Phase 3 Batch 3A 後）
+
+### 關鍵發現（必須跨 session 記住）
+
+- **P0-FA-1 TruthSourceRegistry 從未注入到 Agents**：
+  `set_truth_registry()` 存在於 StrategistAgent 和 AnalystAgent，但 phase2_strategy_routes.py 中零處調用。
+  整個 Phase 2 Batch 2A 的 TruthSourceRegistry 在運行時是完全死代碼。
+  **記住**：未來任何新模塊若有 setter 注入方法，必須在啟動 wiring 代碼中驗證是否被調用。
+
+- **MessageBus Guardian→Executor 斷裂**：
+  Guardian 發送 RISK_VERDICT 回 Strategist（非 APPROVED_INTENT 給 Executor）。
+  ExecutorAgent 的 on_message(APPROVED_INTENT) handler 永遠不被觸發。
+  實際下單路徑全走 pipeline_bridge 直接調用。
+  **記住**：5-Agent MessageBus 全路徑是設計目標但尚未實現，下單靠 pipeline_bridge 直接調用。
+
+- **BacktestEngine API 無數據源**：
+  backtest_routes.py 的 singleton 未注入 KlineManager，API 回測返回空結果。
+  **記住**：所有 Phase 2-3 的 routes.py 模塊若依賴外部組件，需在啟動時注入。
+
+### 業務功能可用度更新（2026-04-01）
+
+```
+  自動掃描 = 92%
+  策略選擇 = 50%
+  AI 風險評估 = 78%
+  下單 = 88%
+  止損 = 93%
+  學習 = 40%
+  進化 = 35%
+  加權平均業務可用度 ≈ 52%
+```
+
+### 瓶頸排序
+1. 知識閉環斷裂（TruthSourceRegistry 死代碼）→ 0.5h 修復 → 學習+策略各升 10-15%
+2. 回測 API 不通 → 1h 修復 → 進化鏈路啟動
+3. MessageBus 全路徑不通 → 2h 修復 → Agent 架構完整性
+
 ## 報告索引
 
 | 日期 | 報告類型 | 文件位置 |
 |------|---------|---------|
+| 2026-04-01 | 全鏈路功能 Gap 審計 | workspace/reports/2026-04-01--functional_gap_audit.md |
 | 2026-03-31 | FA-1 端點角色矩陣 | ../E3/workspace/ (由 E3 存檔) |
 | 2026-03-31 | FA-2/3/4 深度審計 | workspace/reports/2026-03-31--fa_deep_audit.md |
 | 2026-03-31 | Wave 5 功能 Gap 分析 | workspace/reports/2026-03-31--wave5_gap_analysis.md |

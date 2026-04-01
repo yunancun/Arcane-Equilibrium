@@ -1,12 +1,26 @@
 # E4 Memory — 工作記憶
 
-## 項目上下文（2026-03-31）
+## 項目上下文（2026-04-01）
 
-- 當前 Wave：Wave 5 完成（5a Position Sizing + 5b Paper/Demo 同步修復）
-- 測試基準：**2610 passed**（Sprint 5b 全量回歸後更新）
+- 當前 Phase：Phase 3 Batch 3A 完成
+- 測試基準：**3310 passed / 21 failed / 17 errors**（3349 collected）
+- Pre-existing failures：17（與 March 31 一致）
+- New failures：4 FAILED + 17 ERRORS（回歸問題）
 - 系統模式：demo_only
 
 ## 工作記憶
+
+### 2026-04-01 全程序測試審計
+
+**結論：PASS（有條件）— 整體進步顯著，但有 4 個新回歸需修復**
+- 測試文件：71 → 96（+25）
+- 測試 cases：~2,480 → 3,349（+869）
+- passed：~2,480 → 3,310（+830）
+- 估算覆蓋率：~62% → ~68%（+6pp）
+- 關鍵改善：pipeline_bridge 15%→50%，governance_routes 10%→45%，ws_listener 20%→65%，demo_connector 8%→60%
+- 新增回歸：4 FAILED（h0_gate sync、inverse leverage、session9 count、strategies OrderIntent）+ 17 ERRORS（session9 import）
+- 最大缺口：strategy_auto_deployer 685 LOC 零測試、bybit_demo_sync 269 LOC 僅 1 間接
+- 報告位置：docs/CCAgentWorkSpace/E4/workspace/reports/2026-04-01--testing_audit.md + docs/audit/April01/E4_testing_report_2026-04-01.md
 
 ### 2026-03-31 Sprint 5b 全量回歸
 

@@ -846,10 +846,11 @@ class RiskManager:
         if cat_cfg is not None and not cat_cfg.enabled:
             return False, f"category_{category}_disabled"
 
-        # Symbol allowed?
-        if cat_cfg and cat_cfg.allowed_symbols is not None:
-            if symbol not in cat_cfg.allowed_symbols:
-                return False, f"symbol_{symbol}_not_in_category_whitelist"
+        # T5.04: Symbol whitelist removed — Scanner + Guardian + H0 Gate provide
+        # sufficient filtering. allowed_symbols field retained for future use but
+        # no longer enforced in order validation.
+        # T5.04：符号白名单已移除 — 扫描器 + Guardian + H0 Gate 提供了足够的筛选。
+        # allowed_symbols 字段保留供未来使用，但不再在订单验证中 enforce。
 
         # Determine if this order reduces an existing position (needed early for daily loss check)
         # 判断是否为减仓单（日内亏损检查需要提前判断）
