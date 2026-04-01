@@ -83,6 +83,10 @@ class StrategyAutoDeployer:
             "rebalance_triggered": 0,
             "rebalance_closed": 0,
         }
+        # Wave 7a 方案 B：PipelineBridge 引用，用於登記 symbol-category 映射。
+        # Wave 7a Plan B: PipelineBridge reference for registering symbol-category mappings.
+        # Optional; if None, category registration is silently skipped (non-blocking).
+        self._pipeline_bridge: Any = None
 
     # ── Portfolio position evaluation ──
 
@@ -273,6 +277,7 @@ class StrategyAutoDeployer:
                             price: float = 0.0
                             price_change_pct_24h: float = 0.0
                             api_category: str = "linear"
+                            reason: str = "Pinned symbol (always monitor)"
                         # Fetch current price for qty calculation
                         _price = 0.0
                         if self._engine:
@@ -475,6 +480,22 @@ class StrategyAutoDeployer:
         if api_category != "linear":
             strategy._default_metadata["category"] = api_category
 
+        # Wave 7a 方案 B：通知 PipelineBridge 登記此 symbol 的 category。
+        # Wave 7a Plan B: notify PipelineBridge to register this symbol's category for
+        # accurate downstream kline/funding queries. Always register (even linear) so the
+        # bridge knows this symbol was explicitly deployed and won't emit a "no category" warning.
+        if self._pipeline_bridge is not None:
+            try:
+                self._pipeline_bridge.register_symbol_category(symbol, api_category)
+            except Exception as _reg_err:
+                # 登記失敗不阻斷部署流程，記錄 warning 即可
+                # Registration failure must not block strategy deployment (non-critical)
+                logger.warning(
+                    "Failed to register symbol category %s→%s with PipelineBridge: %s "
+                    "/ 登記 symbol category 失敗（非致命）：%s→%s",
+                    symbol, api_category, _reg_err, symbol, api_category,
+                )
+
         # Unique registration key includes symbol to prevent name collision
         # 唯一注册键包含 symbol 以防止名称冲突（R1 fix）
         unique_name = f"{strategy.name}_{symbol}"
@@ -515,19 +536,20 @@ class StrategyAutoDeployer:
                         symbol, tf,
                     )
 
+        _reason = getattr(opp, "reason", "") or ""
         self._deployed[key] = {
             "symbol": symbol,
             "category": category,
             "strategy_name": unique_name,
             "score": opp.score,
             "deployed_ts_ms": int(time.time() * 1000),
-            "reason": opp.reason,
+            "reason": _reason,
         }
         self._stats["strategies_deployed"] += 1
 
         logger.info(
             "Auto-deployed %s for %s (score=%.0f): %s / 自动部署策略",
-            category, symbol, opp.score, opp.reason,
+            category, symbol, opp.score, _reason,
         )
 
     def notify_fill(self, strategy_name: str, fill: dict, is_open: bool) -> None:
@@ -594,6 +616,18 @@ class StrategyAutoDeployer:
                     logger.info("Removed stale strategy %s / 移除过期策略", info["strategy_name"])
                 except Exception:
                     pass
+
+    def set_pipeline_bridge(self, bridge: Any) -> None:
+        """
+        設置 PipelineBridge 引用，用於在部署策略時登記 symbol-category 映射。
+        Set PipelineBridge reference for registering symbol-category mappings on deployment.
+
+        讓 PipelineBridge 的 kline/funding 查詢能取得正確的 category，
+        解決 BTCUSDT(spot) 與 BTCUSDT(linear) 無法用命名區分的問題。
+        Enables PipelineBridge kline/funding queries to use the correct category,
+        fixing the ambiguity where BTCUSDT(spot) and BTCUSDT(linear) share the same name.
+        """
+        self._pipeline_bridge = bridge
 
     def get_deployed(self) -> list[dict[str, Any]]:
         with self._lock:
