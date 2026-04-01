@@ -664,6 +664,367 @@ class TestSymbolCategoryMap(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Leverage Sync Tests (Wave 8 Paper/Demo leverage parity fixes)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLeveragePropagation(unittest.TestCase):
+    """
+    Verify that _effective_leverage is resolved correctly and passed to both
+    the Paper engine and Demo connector.
+    驗證 _effective_leverage 解析順序正確，並傳遞給 Paper engine 和 Demo connector。
+    """
+
+    def _make_bridge_with_demo(self):
+        bridge = _make_bridge()
+        demo = MagicMock()
+        demo.is_enabled = True
+        demo.set_leverage.return_value = {"retCode": 0}
+        demo.submit_order.return_value = {"retCode": 0}
+        bridge.set_demo_connector(demo)
+        return bridge, demo
+
+    def _make_intent(self, symbol="BTCUSDT", side="Buy", leverage=None, category="linear"):
+        intent = MagicMock()
+        intent.symbol = symbol
+        intent.side = side
+        intent.order_type = "market"
+        intent.qty = 0.01
+        intent.price = None
+        intent.strategy_name = "test"
+        intent.confidence = 0.6
+        intent.metadata = {"category": category}
+        if leverage is not None:
+            intent.metadata["leverage"] = leverage
+            intent.leverage = leverage
+        else:
+            intent.leverage = None
+        intent.intent_id = f"test-{symbol}"
+        return intent
+
+    def test_default_leverage_1x_passed_to_paper_engine(self):
+        """Intent with no leverage → Paper engine receives leverage=1.0."""
+        bridge, demo = self._make_bridge_with_demo()
+        intent = self._make_intent()
+
+        gov = MagicMock()
+        gov.is_authorized.return_value = True
+        gov.acquire_lease.return_value = MagicMock()
+        bridge.set_governance_hub(gov)
+
+        guardian = MagicMock()
+        verdict = MagicMock()
+        verdict.result = "APPROVED"
+        verdict.risk_score = 0.1
+        guardian.review_intent.return_value = verdict
+        bridge.set_guardian_agent(guardian)
+
+        bridge._engine.submit_order.return_value = {
+            "order": {"order_id": "p1"}, "fills": [], "close_pnl": 0.0
+        }
+        bridge._engine.get_state.return_value = {
+            "session": {"current_paper_balance_usdt": 1000.0, "session_halted": False},
+            "positions": {}, "orders": [],
+        }
+        bridge._orch.collect_pending_intents.return_value = [intent]
+
+        with patch("app.pipeline_bridge.multi_agent_framework", create=True) as mock_maf:
+            mock_maf.TradeIntent = MagicMock(return_value=MagicMock())
+            mock_maf.RiskVerdictResult = MagicMock()
+            mock_maf.RiskVerdictResult.REJECTED = "REJECTED"
+            mock_maf.RiskVerdictResult.MODIFIED = "MODIFIED"
+            bridge._process_pending_intents()
+
+        call_kwargs = bridge._engine.submit_order.call_args
+        assert call_kwargs is not None
+        leverage_passed = call_kwargs.kwargs.get("leverage")
+        assert leverage_passed == 1.0, f"Expected 1.0, got {leverage_passed}"
+
+    def test_demo_set_leverage_called_before_submit_order(self):
+        """Demo set_leverage() must be called before submit_order() for non-spot."""
+        bridge, demo = self._make_bridge_with_demo()
+        intent = self._make_intent(leverage=2.0)
+
+        gov = MagicMock()
+        gov.is_authorized.return_value = True
+        gov.acquire_lease.return_value = MagicMock()
+        bridge.set_governance_hub(gov)
+
+        guardian = MagicMock()
+        verdict = MagicMock()
+        verdict.result = "APPROVED"
+        guardian.review_intent.return_value = verdict
+        bridge.set_guardian_agent(guardian)
+
+        call_order = []
+        demo.set_leverage.side_effect = lambda **kw: call_order.append("set_leverage") or {"retCode": 0}
+        demo.submit_order.side_effect = lambda **kw: call_order.append("submit_order") or {"retCode": 0}
+
+        bridge._engine.submit_order.return_value = {
+            "order": {"order_id": "p2"}, "fills": [], "close_pnl": 0.0
+        }
+        bridge._engine.get_state.return_value = {
+            "session": {"current_paper_balance_usdt": 1000.0, "session_halted": False},
+            "positions": {}, "orders": [],
+        }
+        bridge._orch.collect_pending_intents.return_value = [intent]
+
+        with patch("app.pipeline_bridge.multi_agent_framework", create=True) as mock_maf:
+            mock_maf.TradeIntent = MagicMock(return_value=MagicMock())
+            mock_maf.RiskVerdictResult = MagicMock()
+            mock_maf.RiskVerdictResult.REJECTED = "REJECTED"
+            mock_maf.RiskVerdictResult.MODIFIED = "MODIFIED"
+            bridge._process_pending_intents()
+
+        assert "set_leverage" in call_order, "set_leverage was not called"
+        assert "submit_order" in call_order, "submit_order was not called"
+        idx_set = call_order.index("set_leverage")
+        idx_sub = call_order.index("submit_order")
+        assert idx_set < idx_sub, "set_leverage must be called before submit_order"
+
+    def test_spot_demo_submission_skipped(self):
+        """Spot orders must NOT be submitted to Demo — only Paper-side."""
+        bridge, demo = self._make_bridge_with_demo()
+        intent = self._make_intent(symbol="HYPEUSDT", category="spot")
+        intent.metadata = {"category": "spot"}
+
+        gov = MagicMock()
+        gov.is_authorized.return_value = True
+        gov.acquire_lease.return_value = MagicMock()
+        bridge.set_governance_hub(gov)
+
+        guardian = MagicMock()
+        verdict = MagicMock()
+        verdict.result = "APPROVED"
+        guardian.review_intent.return_value = verdict
+        bridge.set_guardian_agent(guardian)
+
+        bridge._engine.submit_order.return_value = {
+            "order": {"order_id": "p3"}, "fills": [], "close_pnl": 0.0
+        }
+        bridge._engine.get_state.return_value = {
+            "session": {"current_paper_balance_usdt": 1000.0, "session_halted": False},
+            "positions": {}, "orders": [],
+        }
+        bridge._orch.collect_pending_intents.return_value = [intent]
+
+        with patch("app.pipeline_bridge.multi_agent_framework", create=True) as mock_maf:
+            mock_maf.TradeIntent = MagicMock(return_value=MagicMock())
+            mock_maf.RiskVerdictResult = MagicMock()
+            mock_maf.RiskVerdictResult.REJECTED = "REJECTED"
+            mock_maf.RiskVerdictResult.MODIFIED = "MODIFIED"
+            bridge._process_pending_intents()
+
+        demo.submit_order.assert_not_called()
+        demo.set_leverage.assert_not_called()
+
+    def test_spot_demo_skipped_counter_incremented(self):
+        """demo_spot_skipped stat must be incremented for spot orders."""
+        bridge, demo = self._make_bridge_with_demo()
+        intent = self._make_intent(symbol="SOLUSDT", category="spot")
+        intent.metadata = {"category": "spot"}
+
+        gov = MagicMock()
+        gov.is_authorized.return_value = True
+        gov.acquire_lease.return_value = MagicMock()
+        bridge.set_governance_hub(gov)
+
+        guardian = MagicMock()
+        verdict = MagicMock()
+        verdict.result = "APPROVED"
+        guardian.review_intent.return_value = verdict
+        bridge.set_guardian_agent(guardian)
+
+        bridge._engine.submit_order.return_value = {
+            "order": {"order_id": "p4"}, "fills": [], "close_pnl": 0.0
+        }
+        bridge._engine.get_state.return_value = {
+            "session": {"current_paper_balance_usdt": 1000.0, "session_halted": False},
+            "positions": {}, "orders": [],
+        }
+        bridge._orch.collect_pending_intents.return_value = [intent]
+
+        with patch("app.pipeline_bridge.multi_agent_framework", create=True) as mock_maf:
+            mock_maf.TradeIntent = MagicMock(return_value=MagicMock())
+            mock_maf.RiskVerdictResult = MagicMock()
+            mock_maf.RiskVerdictResult.REJECTED = "REJECTED"
+            mock_maf.RiskVerdictResult.MODIFIED = "MODIFIED"
+            bridge._process_pending_intents()
+
+        assert bridge._stats.get("demo_spot_skipped", 0) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Demo Sync Multi-Category Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDemoSyncMultiCategory(unittest.TestCase):
+    """
+    Verify bybit_demo_sync.get_current_snapshot() and _sync_positions() query
+    both linear and inverse categories.
+    驗證 bybit_demo_sync 的對賬快照和持倉同步覆蓋 linear 和 inverse 兩個品類。
+    """
+
+    def _make_sync(self):
+        import importlib, sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from app.bybit_demo_sync import BybitDemoSync
+        demo = MagicMock()
+        demo.is_enabled = True
+        sync = BybitDemoSync(demo_connector=demo, pg_pass="test")
+        return sync, demo
+
+    def test_get_current_snapshot_queries_linear_and_inverse(self):
+        """get_current_snapshot() must call get_positions for linear AND inverse."""
+        sync, demo = self._make_sync()
+
+        def mock_get_positions(category="linear"):
+            if category == "linear":
+                return {"retCode": 0, "result": {"list": [
+                    {"symbol": "BTCUSDT", "side": "Buy", "size": "0.01", "avgPrice": "50000"}
+                ]}}
+            elif category == "inverse":
+                return {"retCode": 0, "result": {"list": [
+                    {"symbol": "BTCUSD", "side": "Sell", "size": "100", "avgPrice": "49000"}
+                ]}}
+            return {"retCode": 0, "result": {"list": []}}
+
+        demo.get_positions.side_effect = mock_get_positions
+        demo.get_wallet_balance.return_value = {
+            "retCode": 0, "result": {"list": [{"coin": [{"coin": "USDT", "walletBalance": "500"}]}]}
+        }
+
+        snap = sync.get_current_snapshot()
+        assert snap is not None
+        assert "BTCUSDT" in snap["positions"]
+        assert "BTCUSD" in snap["positions"]
+        assert snap["positions"]["BTCUSDT"]["category"] == "linear"
+        assert snap["positions"]["BTCUSD"]["category"] == "inverse"
+        assert snap.get("spot_positions_excluded") is True
+
+        cats_queried = [
+            c.kwargs.get("category", c.args[0] if c.args else "linear")
+            for c in demo.get_positions.call_args_list
+        ]
+        assert "linear" in cats_queried
+        assert "inverse" in cats_queried
+
+    def test_get_current_snapshot_spot_not_in_positions(self):
+        """Spot category must not appear in snapshot positions."""
+        sync, demo = self._make_sync()
+        demo.get_positions.return_value = {"retCode": 0, "result": {"list": []}}
+        demo.get_wallet_balance.return_value = {
+            "retCode": 0, "result": {"list": [{"coin": []}]}
+        }
+        snap = sync.get_current_snapshot()
+        assert snap is not None
+        # No spot entries should exist — spot is wallet balance, not position
+        for sym, pos in snap["positions"].items():
+            assert pos.get("category") != "spot", f"{sym} should not be spot in positions"
+
+    def test_get_current_snapshot_partial_failure_does_not_crash(self):
+        """If inverse get_positions fails, linear still returned."""
+        sync, demo = self._make_sync()
+
+        def mock_get_positions(category="linear"):
+            if category == "linear":
+                return {"retCode": 0, "result": {"list": [
+                    {"symbol": "ETHUSDT", "side": "Buy", "size": "1.0", "avgPrice": "2000"}
+                ]}}
+            return {"retCode": 10001, "retMsg": "inverse error"}  # inverse fails
+
+        demo.get_positions.side_effect = mock_get_positions
+        demo.get_wallet_balance.return_value = {
+            "retCode": 0, "result": {"list": [{"coin": []}]}
+        }
+        snap = sync.get_current_snapshot()
+        assert snap is not None
+        assert "ETHUSDT" in snap["positions"]  # linear still present
+
+    def test_snapshot_includes_spot_excluded_flag(self):
+        """Snapshot must include spot_positions_excluded=True to signal reconciler."""
+        sync, demo = self._make_sync()
+        demo.get_positions.return_value = {"retCode": 0, "result": {"list": []}}
+        demo.get_wallet_balance.return_value = {
+            "retCode": 0, "result": {"list": [{"coin": []}]}
+        }
+        snap = sync.get_current_snapshot()
+        assert snap.get("spot_positions_excluded") is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# set_leverage() Tests (BybitDemoConnector)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSetLeverage(unittest.TestCase):
+    """
+    Verify BybitDemoConnector.set_leverage() behaviour.
+    驗證 BybitDemoConnector.set_leverage() 的各種場景。
+    """
+
+    def _make_connector(self):
+        from app.bybit_demo_connector import BybitDemoConnector
+        c = BybitDemoConnector(api_key="key", api_secret="secret")
+        return c
+
+    def test_spot_skipped_silently(self):
+        """set_leverage() must return success immediately for spot without any API call."""
+        c = self._make_connector()
+        with patch.object(c, "_request") as mock_req:
+            result = c.set_leverage("HYPEUSDT", 5.0, category="spot")
+        mock_req.assert_not_called()
+        assert result["retCode"] == 0
+
+    def test_linear_calls_set_leverage_endpoint(self):
+        """set_leverage() must call POST /v5/position/set-leverage for linear."""
+        c = self._make_connector()
+        with patch.object(c, "_request", return_value={"retCode": 0}) as mock_req:
+            c.set_leverage("BTCUSDT", 3.0, category="linear")
+        mock_req.assert_called_once()
+        call_args = mock_req.call_args
+        assert call_args.args[1] == "/v5/position/set-leverage"
+        params = call_args.args[2]
+        assert params["symbol"] == "BTCUSDT"
+        assert params["buyLeverage"] == "3.0"
+        assert params["sellLeverage"] == "3.0"  # both sides must match (one-way mode)
+
+    def test_sell_leverage_defaults_to_buy_leverage(self):
+        """When sell_leverage is None, it must default to buy_leverage (one-way mode)."""
+        c = self._make_connector()
+        with patch.object(c, "_request", return_value={"retCode": 0}) as mock_req:
+            c.set_leverage("ETHUSDT", 5.0, sell_leverage=None, category="linear")
+        params = mock_req.call_args.args[2]
+        assert params["buyLeverage"] == params["sellLeverage"] == "5.0"
+
+    def test_retcode_110043_treated_as_success(self):
+        """retCode 110043 (leverage not modified) must not raise or log as error."""
+        c = self._make_connector()
+        with patch.object(c, "_request", return_value={"retCode": 110043, "retMsg": "leverage not modified"}):
+            result = c.set_leverage("BTCUSDT", 10.0, category="linear")
+        assert result["retCode"] == 110043  # returned as-is, not an exception
+
+    def test_disabled_connector_returns_error(self):
+        """Disabled connector must return error without making API call."""
+        c = self._make_connector()
+        c._enabled = False  # force-disable for test
+        with patch.object(c, "_request") as mock_req:
+            result = c.set_leverage("BTCUSDT", 5.0)
+        mock_req.assert_not_called()
+        assert result["retCode"] == -1
+
+    def test_inverse_category_supported(self):
+        """set_leverage() must also work for inverse (coin-margined) category."""
+        c = self._make_connector()
+        with patch.object(c, "_request", return_value={"retCode": 0}) as mock_req:
+            c.set_leverage("BTCUSD", 10.0, category="inverse")
+        params = mock_req.call_args.args[2]
+        assert params["category"] == "inverse"
+        assert params["symbol"] == "BTCUSD"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
 

@@ -69,6 +69,38 @@ class PipelineBridge:
     to the paper trading pipeline (PaperTradingEngine).
     """
 
+    # ── External dependencies injected via set_*() methods (E5 #25) ──
+    # 通過 set_*() 方法注入的外部依賴（E5 #25）
+    #
+    # These dependencies are NOT passed in __init__ — they are set post-construction
+    # by the startup wiring code (phase2_strategy_routes.py / main.py).
+    # 這些依賴不在 __init__ 中傳入，而是由啟動階段接線代碼在構造後注入。
+    #
+    # Core execution pipeline / 核心執行管線:
+    #   1. _governance_hub   (set_governance_hub)       — GovernanceHub: SM-01 auth + SM-02 lease + SM-04 risk
+    #   2. _guardian_agent   (set_guardian_agent)        — GuardianAgent: primary trade gate (fail-closed)
+    #   3. _h0_gate          (set_h0_gate)              — H0Gate: deterministic pre-trade filter (<1ms SLA)
+    #   4. _demo_connector   (set_demo_connector)       — BybitDemoConnector: dual execution mirror
+    #   5. _executor_agent   (set_executor_agent)       — ExecutorAgent: order execution + quality feedback
+    #
+    # Data & intelligence / 數據與情報:
+    #   6. _ollama_client    (set_ollama_client)         — OllamaClient: L1 pre-trade edge filter (advisory)
+    #   7. _scout_agent      (set_scout_agent)           — ScoutAgent: local market intelligence
+    #   8. _strategist_agent (set_strategist_agent)      — StrategistAgent: AI-evaluated intents
+    #   9. _analyst_agent    (set_analyst_agent)         — AnalystAgent: L2 pattern analysis cron
+    #
+    # Observability & learning / 可觀測性與學習:
+    #  10. _perception_plane  (set_perception_plane)     — PerceptionPlane: cognitive honesty (Principle 10)
+    #  11. _trade_attribution (set_trade_attribution)    — TradeAttributionEngine: trade attribution
+    #  12. _message_bus       (set_message_bus)          — MessageBus: inter-agent communication
+    #  13. _learning_tier_gate(set_learning_tier_gate)   — LearningTierGate: auto-promotion of learning tiers
+    #
+    # Alerting & deployment / 告警與部署:
+    #  14. _telegram          (set_telegram)             — Telegram alerter: trade notifications
+    #  15. _observation_writer(set_observation_writer)   — Callback: auto-observations on round-trip close
+    #  16. _auto_deployer     (set_auto_deployer)        — StrategyAutoDeployer: consecutive-loss tracking
+    #  17. _scanner_rate_limiter(set_scanner_rate_limiter) — ScannerRateLimiter: scan rate control
+
     def __init__(
         self,
         kline_manager: Any,
@@ -648,7 +680,7 @@ class PipelineBridge:
                 except ImportError:
                     pass  # Demo connector not available, use raw qty
 
-                _submit_leverage = None
+                _submit_leverage = None  # may be overridden by Guardian MODIFIED verdict
 
                 if self._guardian_agent:
                     try:
@@ -733,6 +765,16 @@ class PipelineBridge:
                     _bump(_local_stats, "intents_rejected")
                     self._mark_intent(intent, "rejected_no_guardian")
                     continue
+
+                # Resolve final effective leverage:
+                # Guardian MODIFIED value > intent.metadata["leverage"] > intent.leverage attr > 1.0
+                # 确定最终有效杠杆：Guardian 修改值 > metadata > intent 属性 > 默认 1.0
+                _effective_leverage = float(
+                    _submit_leverage
+                    or (intent.metadata or {}).get("leverage")
+                    or getattr(intent, "leverage", None)
+                    or 1.0
+                )
 
                 # 5-B: L1 Pre-trade edge filter (auxiliary reference — logged but not blocking)
                 # L1 交易前 edge 过滤（辅助参考 — 仅记录，不阻塞）
@@ -819,6 +861,7 @@ class PipelineBridge:
                     market_prices=market_prices,
                     category=category,
                     strategy_name=getattr(intent, "strategy_name", "") or "",
+                    leverage=_effective_leverage,  # propagate resolved leverage to Paper engine
                 )
 
                 _bump(_local_stats, "intents_submitted")
@@ -880,37 +923,60 @@ class PipelineBridge:
                     # Paper 拒绝的订单不应发送到 Demo，否则持仓会分叉（paper=0, demo>0）。
                     # 使用 _submit_qty（Guardian 修改后的数量），而非原始 intent.qty。
                     if self._demo_connector and self._demo_connector.is_enabled:
-                        _demo_synced = False
-                        try:
-                            demo_result = self._demo_connector.submit_order(
-                                symbol=intent.symbol,
-                                side=intent.side,
-                                order_type="Market" if intent.order_type == "market" else "Limit",
-                                qty=_submit_qty,
-                                price=intent.price,
-                                category=category,
+                        # SPOT-DEMO: Bybit spot trades appear as wallet balance changes,
+                        # not as positions.  Comparing Paper spot positions against Demo
+                        # positions will always mismatch (Demo side is always empty).
+                        # Skip Demo submission for spot — track Paper-side only.
+                        # 现货交易在 Demo 端体现为余额变化而非持仓，跳过 Demo 提交，仅记录 Paper。
+                        if category == "spot":
+                            logger.debug(
+                                "Skipping Demo submission for spot %s %s (spot=wallet-only on Demo) / "
+                                "跳过现货 Demo 提交（现货体现为余额变化）",
+                                intent.symbol, intent.side,
                             )
-                            if demo_result.get("retCode") == 0:
-                                _demo_synced = True
-                            else:
-                                logger.warning(
-                                    "Demo order REJECTED: %s %s qty=%.6f reason=%s — Paper/Demo DIVERGED / "
-                                    "Demo 訂單被拒：Paper 已接受但 Demo 拒絕，數據已分歧",
-                                    intent.symbol, intent.side, _submit_qty,
-                                    demo_result.get("retMsg"),
-                                )
-                        except Exception as _demo_err:
-                            logger.warning(
-                                "Demo connector error: %s %s — %s — Paper/Demo DIVERGED / "
-                                "Demo 連接異常：數據已分歧",
-                                intent.symbol, intent.side, _demo_err,
-                            )
-                        # Track sync status in local counters (flushed at end)
-                        # 在本地计数器中追踪同步状态（最后一次性刷入）
-                        if _demo_synced:
-                            _bump(_local_stats, "demo_synced")
+                            _bump(_local_stats, "demo_spot_skipped")
                         else:
-                            _bump(_local_stats, "demo_diverged")
+                            _demo_synced = False
+                            try:
+                                # Set leverage on Demo before placing the order so that
+                                # margin math and PnL match Paper (Paper always uses
+                                # _effective_leverage; Demo would otherwise keep whatever
+                                # the Bybit account last had configured per-symbol).
+                                # 在下单前先同步杠杆，确保 Demo 保证金计算与 Paper 一致。
+                                self._demo_connector.set_leverage(
+                                    symbol=intent.symbol,
+                                    buy_leverage=_effective_leverage,
+                                    category=category,
+                                )
+                                demo_result = self._demo_connector.submit_order(
+                                    symbol=intent.symbol,
+                                    side=intent.side,
+                                    order_type="Market" if intent.order_type == "market" else "Limit",
+                                    qty=_submit_qty,
+                                    price=intent.price,
+                                    category=category,
+                                )
+                                if demo_result.get("retCode") == 0:
+                                    _demo_synced = True
+                                else:
+                                    logger.warning(
+                                        "Demo order REJECTED: %s %s qty=%.6f reason=%s — Paper/Demo DIVERGED / "
+                                        "Demo 訂單被拒：Paper 已接受但 Demo 拒絕，數據已分歧",
+                                        intent.symbol, intent.side, _submit_qty,
+                                        demo_result.get("retMsg"),
+                                    )
+                            except Exception as _demo_err:
+                                logger.warning(
+                                    "Demo connector error: %s %s — %s — Paper/Demo DIVERGED / "
+                                    "Demo 連接異常：數據已分歧",
+                                    intent.symbol, intent.side, _demo_err,
+                                )
+                            # Track sync status in local counters (flushed at end)
+                            # 在本地计数器中追踪同步状态（最后一次性刷入）
+                            if _demo_synced:
+                                _bump(_local_stats, "demo_synced")
+                            else:
+                                _bump(_local_stats, "demo_diverged")
                         if self._telegram and intent.order_type == "market":
                             price = market_prices.get(intent.symbol, 0)
                             self._telegram.alert_trade(intent.symbol, intent.side, _submit_qty, price, getattr(intent, "reason", "")[:100])
@@ -928,7 +994,7 @@ class PipelineBridge:
             with self._lock:
                 for key, delta in _local_stats.items():
                     if key in ("intents_h0_blocked", "intents_lease_failed",
-                               "demo_synced", "demo_diverged"):
+                               "demo_synced", "demo_diverged", "demo_spot_skipped"):
                         # These keys may not exist yet — use setdefault for first access
                         # 这些键可能尚不存在 — 首次访问时用 setdefault 初始化
                         self._stats.setdefault(key, 0)

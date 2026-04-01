@@ -180,6 +180,69 @@ class BybitDemoConnector:
             params["symbol"] = symbol
         return self._request("GET", "/v5/order/realtime", params)
 
+    def set_leverage(
+        self,
+        symbol: str,
+        buy_leverage: float,
+        sell_leverage: float | None = None,
+        category: str = "linear",
+    ) -> dict[str, Any]:
+        """
+        Set leverage for a symbol on Bybit Demo before placing an order.
+        在下单前为 Bybit Demo 设置每个品种的杠杆倍数。
+
+        Bybit requires buy_leverage and sell_leverage to be set via
+        POST /v5/position/set-leverage before placing leveraged orders.
+        For one-way mode both values must match.
+        Spot category is not supported — skipped silently.
+
+        Bybit 的线性/反向合约需要在下单前明确设置多空两侧杠杆。
+        现货品类不支持杠杆设置，静默跳过。
+
+        retCode 110043 means "leverage not modified" (already at the target
+        value) — treated as success, not an error.
+        retCode 110043 表示"杠杆未变更"（已是目标值）— 视为成功。
+        """
+        if not self._enabled:
+            return {"retCode": -1, "retMsg": "Demo connector not enabled"}
+
+        # Spot has no leverage on Bybit — skip silently
+        # 现货品类无杠杆概念，静默跳过
+        if category == "spot":
+            return {"retCode": 0, "retMsg": "spot: leverage not applicable"}
+
+        if sell_leverage is None:
+            sell_leverage = buy_leverage  # one-way mode: both sides must match
+
+        params: dict[str, Any] = {
+            "category": category,
+            "symbol": symbol,
+            "buyLeverage": str(float(buy_leverage)),
+            "sellLeverage": str(float(sell_leverage)),
+        }
+        result = self._request("POST", "/v5/position/set-leverage", params)
+
+        ret_code = result.get("retCode")
+        if ret_code == 0:
+            logger.info(
+                "Demo leverage set: %s category=%s leverage=%.1fx / Demo 杠杆已设置",
+                symbol, category, buy_leverage,
+            )
+        elif ret_code == 110043:
+            # "leverage not modified" — already at target value, not an error
+            # 杠杆未变更（已是目标值），非错误
+            logger.debug(
+                "Demo leverage unchanged (already at %.1fx): %s",
+                buy_leverage, symbol,
+            )
+        else:
+            logger.warning(
+                "Demo set-leverage failed: %s category=%s leverage=%.1fx reason=%s / "
+                "Demo 设置杠杆失败",
+                symbol, category, buy_leverage, result.get("retMsg"),
+            )
+        return result
+
     def submit_order(
         self,
         symbol: str,

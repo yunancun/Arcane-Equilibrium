@@ -165,38 +165,45 @@ class BybitDemoSync:
             logger.debug("Execution sync failed: %s", e)
 
     def _sync_positions(self, cur: Any, now_ms: int) -> None:
-        """Pull current positions from Bybit Demo."""
-        try:
-            result = self._demo.get_positions(category="linear")
-            if result.get("retCode") != 0:
-                return
-
-            positions = result.get("result", {}).get("list", [])
-            for pos in positions:
-                size = float(pos.get("size", 0))
-                if size == 0:
+        """Pull current positions from Bybit Demo — linear and inverse.
+        从 Bybit Demo 拉取持仓快照（线性 + 反向，现货无持仓概念跳过）。
+        """
+        # Spot is intentionally excluded: spot trades produce wallet balance changes,
+        # not position entries in /v5/position/list.
+        # 现货不走持仓接口，余额变动已在 _sync_wallet() 中记录。
+        for cat in ("linear", "inverse"):
+            try:
+                result = self._demo.get_positions(category=cat)
+                if result.get("retCode") != 0:
+                    logger.debug("get_positions failed category=%s: %s", cat, result.get("retMsg"))
                     continue
-                try:
-                    cur.execute("""
-                        INSERT INTO position_snapshots (ts, symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category)
-                        VALUES (to_timestamp(%s/1000.0), %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        now_ms,
-                        pos.get("symbol", ""),
-                        pos.get("side", ""),
-                        size,
-                        float(pos.get("avgPrice", 0)),
-                        float(pos.get("markPrice", 0)),
-                        float(pos.get("unrealisedPnl", 0)),
-                        float(pos.get("leverage", 1)),
-                        float(pos.get("positionValue", 0)),
-                        pos.get("category", "linear"),
-                    ))
-                    self._stats["positions_synced"] += 1
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.debug("Position sync failed: %s", e)
+
+                positions = result.get("result", {}).get("list", [])
+                for pos in positions:
+                    size = float(pos.get("size", 0))
+                    if size == 0:
+                        continue
+                    try:
+                        cur.execute("""
+                            INSERT INTO position_snapshots (ts, symbol, side, size, entry_price, mark_price, unrealized_pnl, leverage, position_value, category)
+                            VALUES (to_timestamp(%s/1000.0), %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            now_ms,
+                            pos.get("symbol", ""),
+                            pos.get("side", ""),
+                            size,
+                            float(pos.get("avgPrice", 0)),
+                            float(pos.get("markPrice", 0)),
+                            float(pos.get("unrealisedPnl", 0)),
+                            float(pos.get("leverage", 1)),
+                            float(pos.get("positionValue", 0)),
+                            cat,
+                        ))
+                        self._stats["positions_synced"] += 1
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug("Position sync failed category=%s: %s", cat, e)
 
     def _sync_wallet(self, cur: Any, now_ms: int) -> None:
         """Pull wallet balance from Bybit Demo."""
@@ -219,35 +226,52 @@ class BybitDemoSync:
 
     def get_current_snapshot(self) -> dict[str, Any] | None:
         """
-        T7.04: Build reconciliation-format snapshot from current Demo API state / 从当前 Demo API 状态构建对账格式快照
+        T7.04: Build reconciliation-format snapshot from current Demo API state.
+        从当前 Demo API 状态构建对账格式快照。
+
+        Queries linear and inverse positions.  Spot is intentionally excluded:
+        spot trades on Bybit produce wallet balance changes, not position entries.
+        Paper spot positions are never submitted to Demo (spot guard in
+        pipeline_bridge), so they should not appear in the Demo snapshot either.
+
+        查询线性和反向合约持仓。现货故意排除：Bybit 现货交易体现为余额变化，
+        不走持仓接口。pipeline_bridge 中的 spot guard 确保现货不提交到 Demo。
 
         Returns snapshot in reconciliation format:
         {
             "snapshot_ts_ms": int,
             "orders": [],
-            "positions": {symbol: {...}},
+            "positions": {symbol: {"side", "size", "avg_entry_price", "category"}},
             "fills": [],
-            "balances": {asset: balance}
+            "balances": {asset: balance},
+            "spot_positions_excluded": True,  # signal to reconciler
         }
         """
         try:
-            positions_raw = self._demo.get_positions()
+            # Query positions for linear and inverse categories
+            # 查询线性和反向合约持仓（各自独立请求）
+            positions_dict: dict[str, Any] = {}
+            for cat in ("linear", "inverse"):
+                cat_result = self._demo.get_positions(category=cat)
+                if cat_result.get("retCode") != 0:
+                    logger.warning(
+                        "Demo get_positions failed category=%s: %s",
+                        cat, cat_result.get("retMsg"),
+                    )
+                    continue
+                for pos in cat_result.get("result", {}).get("list", []):
+                    symbol = pos.get("symbol")
+                    if symbol and float(pos.get("size", 0)) > 0:
+                        positions_dict[symbol] = {
+                            "side": pos.get("side"),
+                            "size": float(pos.get("size")),
+                            "avg_entry_price": float(pos.get("avgPrice", 0)),
+                            "category": cat,
+                        }
+
             wallet_raw = self._demo.get_wallet_balance()
-
-            # Parse positions
-            positions_dict = {}
-            for pos in positions_raw.get("result", {}).get("list", []):
-                symbol = pos.get("symbol")
-                if symbol and float(pos.get("size", 0)) > 0:
-                    positions_dict[symbol] = {
-                        "side": pos.get("side"),
-                        "size": float(pos.get("size")),
-                        "avg_entry_price": float(pos.get("avgPrice", 0)),
-                    }
-
-            # Parse wallet
             coins = wallet_raw.get("result", {}).get("list", [{}])[0].get("coin", [])
-            balances = {}
+            balances: dict[str, float] = {}
             for c in coins:
                 coin_name = c.get("coin")
                 balance = float(c.get("walletBalance", 0))
@@ -260,9 +284,10 @@ class BybitDemoSync:
                 "positions": positions_dict,
                 "fills": [],
                 "balances": balances,
+                "spot_positions_excluded": True,  # signal: reconciler should skip spot symbols
             }
         except Exception as e:
-            logger.error(f"Failed to get demo snapshot for reconciliation: {e}")
+            logger.error("Failed to get demo snapshot for reconciliation: %s", e)
             return None
 
     def get_stats(self) -> dict[str, Any]:
