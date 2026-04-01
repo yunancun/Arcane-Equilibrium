@@ -4100,9 +4100,23 @@ app = FastAPI(
 # 默认仅允许同源访问；部署时通过 OPENCLAW_CORS_ORIGINS 设置允许的前端源
 # Default: same-origin only. Set OPENCLAW_CORS_ORIGINS for deployment.
 _cors_origins = os.getenv("OPENCLAW_CORS_ORIGINS", "").strip()
+_cors_origin_list: list[str] = _cors_origins.split(",") if _cors_origins else []
+
+# 安全校验：allow_credentials=True 时不允许通配符 "*"，否则浏览器会拒绝且存在安全风险
+# Security validation: wildcard "*" with allow_credentials=True is forbidden by CORS spec
+# and poses a credential-leaking risk. Remove "*" and log a warning at startup. (APR01-HIGH-1)
+if "*" in _cors_origin_list:
+    _cors_origin_list = [o for o in _cors_origin_list if o != "*"]
+    logger.warning(
+        "CORS: removed wildcard '*' from allow_origins because allow_credentials=True. "
+        "Wildcard + credentials is forbidden by the CORS specification. "
+        "Remaining origins: %s",
+        _cors_origin_list or "(none — same-origin only)",
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins.split(",") if _cors_origins else [],
+    allow_origins=_cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],

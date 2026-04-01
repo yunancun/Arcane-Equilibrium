@@ -1139,6 +1139,9 @@ class GovernanceHub:
             total_leases_tracked = 0
 
             # Get Auth state
+            # 获取授权状态：先读有效授权（ACTIVE/RESTRICTED），再检查待审批
+            # Get auth state: read effective (ACTIVE/RESTRICTED), then check pending approvals.
+            auth_pending_approval_flag = False
             if self._authorization_sm is not None:
                 try:
                     effective_auths = self._authorization_sm.get_effective()
@@ -1149,6 +1152,15 @@ class GovernanceHub:
                         auth_scope = auth.scope
                     else:
                         auth_state = "NONE"
+                        # Check for pending approvals so approve endpoint works
+                        # 检查是否有待审批授权，确保 approve 端点的 auth_pending_approval 检查正确
+                        try:
+                            all_auths = self._authorization_sm.list_all()
+                            auth_pending_approval_flag = any(
+                                a.state.value == "PENDING_APPROVAL" for a in all_auths
+                            )
+                        except Exception:
+                            pass
                 except Exception as e:
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"Error reading auth state: {e}")
@@ -1182,6 +1194,7 @@ class GovernanceHub:
             auth_state=auth_state,
             auth_expires_at_ms=auth_expires_at_ms,
             auth_scope=auth_scope,
+            auth_pending_approval=auth_pending_approval_flag,
             risk_level=risk_level,
             risk_level_name=risk_level_name,
             active_leases_count=active_leases_count,

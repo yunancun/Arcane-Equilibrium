@@ -557,7 +557,57 @@ def post_session_start(
 
         return _paper_response({"session": state["session"], "message": "Paper trading session started"})
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
+        logger.warning("Session start conflict: %s", e)
+        raise HTTPException(status_code=409, detail="Session state conflict")
+
+
+@paper_router.post("/session/reauth")
+def post_session_reauth(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    Re-grant paper trading authorization without resetting the session.
+    重新授予纸盘交易授权，无需重置当前 session。
+
+    Use case: server was restarted with an existing active session; the authorization
+    was not re-granted on startup (because grant_paper_authorization() is normally
+    called on session start, not on state-file load).
+    使用场景：服务器重启后加载了已有 active session；由于 grant_paper_authorization()
+    只在 session start 时调用，重启后授权丢失。此端点补授权，不影响现有 session 状态。
+
+    Returns: {granted: bool, is_authorized: bool, auth_state: str}
+    """
+    try:
+        if GOV_HUB is None:
+            raise HTTPException(status_code=503, detail="Governance hub not available")
+
+        already_authorized = GOV_HUB.is_authorized()
+        if already_authorized:
+            return _paper_response({
+                "granted": False,
+                "is_authorized": True,
+                "message": "Authorization already active — no-op / 授权已有效，跳过",
+            })
+
+        granted = GOV_HUB.grant_paper_authorization()
+        is_authorized_after = GOV_HUB.is_authorized()
+        logger.info(
+            "Paper session reauth: granted=%s, is_authorized_after=%s / "
+            "纸盘 session 补授权：granted=%s，授权后状态=%s",
+            granted, is_authorized_after, granted, is_authorized_after,
+        )
+        return _paper_response({
+            "granted": granted,
+            "is_authorized": is_authorized_after,
+            "message": "Paper authorization re-granted / 纸盘授权已补授" if granted
+                       else "grant_paper_authorization() returned False / 补授权返回 False",
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in session reauth: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @paper_router.post("/session/pause")
@@ -569,7 +619,9 @@ def post_session_pause(
         state = ENGINE.pause_session()
         return _paper_response({"session": state["session"]})
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
+        logger.warning("Session pause conflict: %s", e)
+        raise HTTPException(status_code=409, detail="Session state conflict")
 
 
 @paper_router.post("/session/resume")
@@ -581,7 +633,9 @@ def post_session_resume(
         state = ENGINE.resume_session()
         return _paper_response({"session": state["session"]})
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
+        logger.warning("Session resume conflict: %s", e)
+        raise HTTPException(status_code=409, detail="Session state conflict")
 
 
 @paper_router.post("/session/stop")
@@ -597,7 +651,9 @@ def post_session_stop(
             "message": "Paper trading session stopped and PnL finalized",
         })
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
+        logger.warning("Session stop conflict: %s", e)
+        raise HTTPException(status_code=409, detail="Session state conflict")
 
 
 @paper_router.get("/session/status")
@@ -644,7 +700,9 @@ def post_order_submit(
             )
         return _paper_response(result)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
+        logger.warning("Order submission validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid order parameters")
 
 
 @paper_router.post("/order/cancel")

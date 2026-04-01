@@ -53,7 +53,7 @@ import threading
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ── sys.path 注入（複用 backtest_routes.py 的 5 級目錄上溯模式）────────────────
 # sys.path injection — 5-level traversal to reach program_code/ root.
@@ -141,15 +141,18 @@ class ProposeHypothesisRequest(BaseModel):
     POST /api/v1/experiments/propose 的請求體。
 
     Fields / 字段:
-      description      — human-readable hypothesis description / 可讀假設描述
-      strategy_name    — strategy this hypothesis applies to / 所屬策略名稱
-      regime           — market regime: "all", "trending", "ranging", etc. / 市場 Regime
+      description      — human-readable hypothesis description / 可讀假設描述（max 2000 chars）
+      strategy_name    — strategy this hypothesis applies to / 所屬策略名稱（max 200 chars）
+      regime           — market regime: "all", "trending", "ranging", etc. / 市場 Regime（max 100 chars）
       min_observations — minimum observations before verdict / 最少觀測次數後才判定
       ttl_days         — optional time-to-live in days (None = no expiry) / 可選有效期（天）
+
+    max_length 約束防止超長字符串濫用（DoS / 存儲膨脹）。
+    max_length constraints prevent oversized string abuse (DoS / storage bloat).
     """
-    description: str
-    strategy_name: str
-    regime: str = "all"
+    description: str = Field(..., max_length=2000)
+    strategy_name: str = Field(..., max_length=200)
+    regime: str = Field(default="all", max_length=100)
     min_observations: int = 20
     ttl_days: Optional[int] = None
 
@@ -162,8 +165,11 @@ class RecordObservationRequest(BaseModel):
     Fields / 字段:
       outcome — "supporting" (evidence supports hypothesis) or "refuting" (evidence against)
                 "supporting"（證據支持假設）或 "refuting"（證據反對假設）
+
+    max_length 約束防止超長字符串濫用。
+    max_length constraint prevents oversized string abuse.
     """
-    outcome: str  # "supporting" | "refuting"
+    outcome: str = Field(..., max_length=50)  # "supporting" | "refuting"
 
 
 # ── POST /api/v1/experiments/propose ─────────────────────────────────────────────
