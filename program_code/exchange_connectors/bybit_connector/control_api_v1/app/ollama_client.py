@@ -125,8 +125,12 @@ class OllamaClient:
 
     def is_available(self, *, force_check: bool = False) -> bool:
         """
-        Check if Ollama server is reachable and model is loaded.
-        检测 Ollama 服务是否可达且模型已加载。
+        Check if Ollama server is reachable and model is loaded (synchronous).
+        检测 Ollama 服务是否可达且模型已加载（同步版本）。
+
+        DEPRECATION NOTE: This method blocks the event loop when called from async
+        code. Prefer is_available_async() in async contexts.
+        弃用提示：在 async 上下文中调用此方法会阻塞事件循环，请改用 is_available_async()。
         """
         now = time.time()
         if not force_check and self._available is not None and (now - self._available_ts) < self._available_ttl:
@@ -164,6 +168,17 @@ class OllamaClient:
                 self._available = False
                 self._available_ts = time.time()
                 return False
+
+    async def is_available_async(self, *, force_check: bool = False) -> bool:
+        """
+        Async wrapper for is_available() — runs the sync health check in a thread.
+        is_available() 的异步包装 — 在线程中运行同步健康检查，避免阻塞事件循环。
+
+        Usage / 用法:
+            available = await client.is_available_async()
+        """
+        import asyncio
+        return await asyncio.to_thread(self.is_available, force_check=force_check)
 
     def list_models(self) -> list[str]:
         """List all models available on Ollama server / 列出 Ollama 上所有可用模型"""

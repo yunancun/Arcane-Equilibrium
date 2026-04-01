@@ -6,12 +6,9 @@
 <title>OpenClaw Trading Chart</title>
 <script src="/static/common.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+<link rel="stylesheet" href="/static/styles.css" />
 <style>
-  :root {
-    --bg: #0d1117; --card-bg: #161b22; --border: #30363d;
-    --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #388bfd;
-  }
+  /* :root variables are in styles.css (canonical location) */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; }
@@ -261,48 +258,20 @@ let autoRefreshOn = true;
 let refreshTimer = null;
 
 // ============================================================
-// Auth (APR01-MEDIUM-13: HttpOnly cookie, no localStorage token)
-// 认证由 HttpOnly cookie 处理，JS 无需操作 token
+// API helper — delegates to ocApi() from common.js
+// API 辅助函数 — 委托给 common.js 中的 ocApi()
 // ============================================================
-function getToken() {
-  // DEPRECATED: Token is in HttpOnly cookie. Returns empty string.
-  // 已弃用：Token 在 HttpOnly cookie 中。返回空字符串。
-  return '';
-}
-
-// ============================================================
-// API helper
-// ============================================================
-let _authFailCount = 0;
-const _AUTH_FAIL_MAX = 3;  // Stop polling after 3 consecutive 401s
 async function api(path) {
-  // Cookie-based auth — browser sends HttpOnly cookie automatically.
-  // Cookie 认证 — 浏览器自动发送 HttpOnly cookie。
-  if (_authFailCount >= _AUTH_FAIL_MAX) {
-    document.getElementById('api-dot').className = 'status-dot err';
-    stopAutoRefresh();
-    return null;
-  }
-  try {
-    const r = await fetch(path, { credentials: 'same-origin' });
-    if (!r.ok) {
-      if (r.status === 401 || r.status === 403) {
-        _authFailCount++;
-        document.getElementById('api-dot').className = 'status-dot err';
-        if (_authFailCount >= _AUTH_FAIL_MAX) {
-          stopAutoRefresh();
-          console.warn('Auth failed ' + _authFailCount + ' times, auto-refresh stopped. Re-enter token to resume.');
-        }
-      }
-      return null;
-    }
-    _authFailCount = 0;  // Reset on success / 成功时重置计数器
+  // Thin wrapper around ocApi() that updates the status dot on success/failure.
+  // ocApi() handles auth counting, HttpOnly cookie, timeouts, and error toasts.
+  // 简单包装 ocApi()，在成功/失败时更新状态点。
+  const result = await ocApi(path);
+  if (result) {
     document.getElementById('api-dot').className = 'status-dot live';
-    return await r.json();
-  } catch (e) {
+  } else {
     document.getElementById('api-dot').className = 'status-dot err';
-    return null;
   }
+  return result;
 }
 
 // ============================================================
@@ -672,24 +641,11 @@ function stopAutoRefresh() {
 }
 
 // ============================================================
-// Init
+// Init — auth is handled by HttpOnly cookie (no token check needed)
+// 初始化 — 认证由 HttpOnly cookie 处理（无需检查 token）
 // ============================================================
-if (getToken()) {
-  loadAll();
-  startAutoRefresh();
-} else {
-  document.getElementById('api-dot').className = 'status-dot';
-}
-
-// If token is pasted, auto-load
-tokenInput.addEventListener('input', () => {
-  const v = tokenInput.value.trim();
-  if (v.length > 10) {
-    saveToken(v);
-    loadAll();
-    if (autoRefreshOn) startAutoRefresh();
-  }
-});
+loadAll();
+startAutoRefresh();
 
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);

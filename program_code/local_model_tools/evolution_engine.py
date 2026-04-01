@@ -118,8 +118,16 @@ class EvolutionResult:
         This is the core Principle 7 guard: ensures evolution results can never
         be mistaken for live trading data.
         """
+        # C6 fix: dataclass is not frozen — direct assignment replaces object.__setattr__ bypass
         # 原则 7：强制隔离标记，不可被覆盖 / Principle 7: force isolation marker, not overrideable
-        object.__setattr__(self, 'is_simulated', True)
+        self.is_simulated = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent is_simulated from being set to False after init (Principle 7 guard).
+        只允許 is_simulated 被設為 True，阻止任何設為 False 的嘗試。"""
+        if name == "is_simulated" and value is not True and hasattr(self, "is_simulated"):
+            return  # silently block attempts to set is_simulated=False
+        super().__setattr__(name, value)
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -192,6 +200,9 @@ class EvolutionEngine:
         self._lock = threading.Lock()
         self._total_runs: int = 0
         self._last_run_ts: Optional[float] = None
+        # B13: 存储最近一次进化结果，供外部查询（如 strategy_auto_deployer）
+        # B13: Store most recent evolution result for external queries (e.g., strategy_auto_deployer)
+        self._last_result: Optional[EvolutionResult] = None
 
     # ── Public API / 公开 API ──
 
@@ -339,9 +350,11 @@ class EvolutionEngine:
             strategy_name, best_sharpe, evaluated_count, now_ts - start_ts,
         )
 
-        # 步骤 5：返回 EvolutionResult（__post_init__ 强制 is_simulated=True）
-        # Step 5: return EvolutionResult (__post_init__ enforces is_simulated=True)
-        return EvolutionResult(
+        # 步骤 5：构建并存储 EvolutionResult，然后返回（__post_init__ 强制 is_simulated=True）
+        # Step 5: build and store EvolutionResult, then return (__post_init__ enforces is_simulated=True)
+        # B13: Store result for external query via get_last_result()
+        # B13: 存储结果以供外部通过 get_last_result() 查询
+        evolution_result = EvolutionResult(
             strategy_name=strategy_name,
             symbol=symbol,
             timeframe=timeframe,
@@ -354,6 +367,9 @@ class EvolutionEngine:
             completed_at_ms=completed_at_ms,
             is_simulated=True,  # __post_init__ 强制，此处冗余但明确意图 / __post_init__ forces; explicit intent
         )
+        with self._lock:
+            self._last_result = evolution_result
+        return evolution_result
 
     # ── Private helpers / 私有辅助方法 ──
 
@@ -475,14 +491,26 @@ class EvolutionEngine:
         Return current engine status for monitoring and API queries.
 
         Returns:
-            Dict with total_runs, last_run_ts, max_combinations.
+            Dict with total_runs, last_run_ts, max_combinations, last_result.
         """
         with self._lock:
             return {
                 "total_runs": self._total_runs,
                 "last_run_ts": self._last_run_ts,
                 "max_combinations": self._max_combinations,
+                "last_result": self._last_result.to_dict() if self._last_result else None,
             }
+
+    def get_last_result(self) -> Optional['EvolutionResult']:
+        """
+        返回最近一次进化搜索结果，供外部查询使用。
+        Return the most recent evolution result for external queries.
+
+        Returns:
+            EvolutionResult if available, None otherwise.
+        """
+        with self._lock:
+            return self._last_result
 
 
 # =============================================================================

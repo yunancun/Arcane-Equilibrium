@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import main_legacy as _base
-from .auth import AuthenticatedActor, require_scope, verify_operator_identity
+from .auth import AuthenticatedActor, require_scope_and_identity
 from .state_compiler import (
     AUTO_SCAN_TYPES,
     REVIEW_DECISION_ACTIONS,
@@ -552,9 +552,8 @@ def apply_auto_generate(
     安全保证 / Safety: 只生成审核包，不创建正式记录（原则 7）。
     Only generates review packets, never creates actual records (Principle 7).
     """
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -659,9 +658,8 @@ def apply_review_decision(
     Defer: marks as deferred, stays in queue
     Ask AI: marks as ai_consulted, returns pre-built question (actual AI call is stub)
     """
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -854,9 +852,8 @@ def apply_ai_consultation(
         DeprecationWarning,
         stacklevel=2,
     )
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
 
     queue = snapshot.get("learning_state", {}).get("records", {}).get("review_queue", [])
     target_pkt = None

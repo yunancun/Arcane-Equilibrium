@@ -42,6 +42,7 @@ import time
 from typing import Any
 
 from .risk_manager import REGIME_TIME_MULTIPLIERS
+from .utils.time_utils import now_ms
 
 # T2.07: Import Scout-related enums for local market scanning
 # Lazy import pattern to avoid circular dependencies
@@ -386,17 +387,19 @@ class PipelineBridge:
         Called by MarketDataDispatcher on every (non-throttled) price event.
         由 MarketDataDispatcher 在每次（未被节流的）价格事件时调用。
 
-        This is the main fan-out entry point:
-        1. Feed KlineManager (triggers indicator computation on kline close)
-        2. Feed StrategyOrchestrator.dispatch_tick (for tick-driven strategies)
-        3. Process pending intents (submit to paper engine)
+        Thin orchestrator that delegates to 4 sub-methods:
+        薄编排器，将工作委派给 4 个子方法：
+        1. _tick_update_market_data — price/kline/ATR/funding updates
+        2. _tick_run_strategies — strategy dispatch + intent collection
+        3. _tick_check_risk — stop checks, risk monitoring
+        4. _tick_update_stats — periodic scouts, analyst cron, risk adjustment
         """
         if not self._active:
             return
 
         with self._lock:
             self._stats["ticks_received"] += 1
-            self._stats["last_tick_ts_ms"] = int(time.time() * 1000)
+            self._stats["last_tick_ts_ms"] = now_ms()
 
         # Extract event fields (including volume for dynamic slippage)
         # 提取事件欄位（含成交量，用於動態滑點計算）
@@ -404,13 +407,13 @@ class PipelineBridge:
             symbol = event.get("symbol", "")
             price = float(event.get("last_price", 0.0))
             raw_ts = event.get("ts_ms")
-            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else now_ms()
             _vol_24h = event.get("volume_24h")
         else:
             symbol = getattr(event, "symbol", "")
             price = float(getattr(event, "last_price", 0.0))
             raw_ts = getattr(event, "ts_ms", None)
-            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else int(time.time() * 1000)
+            ts_ms = int(raw_ts) if raw_ts is not None and raw_ts != 0 else now_ms()
             _vol_24h = getattr(event, "volume_24h", None)
 
         if not symbol or price <= 0:
@@ -419,6 +422,17 @@ class PipelineBridge:
         # Track latest prices for intent submission (fixes C1: positions is dict, not list)
         self._latest_prices[symbol] = price
 
+        # Delegate to sub-methods / 委派给子方法
+        self._tick_update_market_data(symbol, price, ts_ms, event, _vol_24h)
+        self._tick_run_strategies(symbol, price, ts_ms)
+        self._tick_check_risk(symbol, price, ts_ms)
+        self._tick_update_stats(symbol, price, ts_ms)
+
+    def _tick_update_market_data(self, symbol: str, price: float, ts_ms: int, event: Any, _vol_24h: Any) -> None:
+        """
+        Sub-method 1: price updates, kline feed, slippage cache, H0Gate, perception plane.
+        子方法 1：价格更新、K线喂入、滑点缓存、H0Gate 时间戳、感知平面注册。
+        """
         # Update dynamic slippage cache from WS volume data (non-critical, best-effort)
         # 從 WS 成交量數據更新動態滑點緩存（非關鍵路徑，盡力更新）
         if _vol_24h is not None and _vol_24h > 0:
@@ -461,14 +475,6 @@ class PipelineBridge:
             except Exception:
                 pass  # Perception registration is non-fatal / 感知注册失败不影响主流程
 
-        # 2. Feed tick-driven strategies (Grid Trading, etc.)
-        try:
-            self._orch.dispatch_tick(symbol, price, ts_ms)
-        except Exception:
-            logger.exception("Orchestrator dispatch_tick error / 编排器 dispatch_tick 异常")
-            with self._lock:
-                self._stats["errors"] += 1
-
         # 3. Periodic volume refresh from REST API (every 60 real seconds, time-driven)
         # 定期从 REST API 刷新成交量（每 60 秒真实时间，时间驱动）
         # T2.07: Check scanner rate limiter before full market scan
@@ -502,6 +508,39 @@ class PipelineBridge:
                 name="bridge-funding-check",
             ).start()
 
+    def _tick_run_strategies(self, symbol: str, price: float, ts_ms: int) -> None:
+        """
+        Sub-method 2: strategy on_tick calls, intent collection and submission.
+        子方法 2：策略 on_tick 调用、意图收集与提交。
+        """
+        # 2. Feed tick-driven strategies (Grid Trading, etc.)
+        try:
+            self._orch.dispatch_tick(symbol, price, ts_ms)
+        except Exception:
+            logger.exception("Orchestrator dispatch_tick error / 编排器 dispatch_tick 异常")
+            with self._lock:
+                self._stats["errors"] += 1
+
+        # 5. Process pending intents -> submit to paper engine
+        if self._auto_submit:
+            self._process_pending_intents()
+
+    def _tick_check_risk(self, symbol: str, price: float, ts_ms: int) -> None:
+        """
+        Sub-method 3: stop-loss checks, risk monitoring.
+        子方法 3：止损检查、风控监控。
+        """
+        # 6. Check stop-losses against current prices / 检查止损
+        if self._stop_mgr and self._latest_prices:
+            self._check_stops()
+
+    def _tick_update_stats(self, symbol: str, price: float, ts_ms: int) -> None:
+        """
+        Sub-method 4: periodic scouts, analyst cron, dynamic risk adjustment, observability.
+        子方法 4：定期 Scout 扫描、Analyst cron、动态风控调整、可观察性。
+        """
+        _now = time.time()
+
         # 4.5. Periodic Scout local scan (every 300s = 5 minutes, time-driven)
         # 定期 Scout 本地扫描（每 300 秒 = 5 分钟，时间驱动）
         if self._scout_agent and _now - self._last_scout_scan_ts >= 300.0:
@@ -522,14 +561,6 @@ class PipelineBridge:
                 self._auto_deployer.update_risk_from_sharpe()
             except Exception:
                 pass  # Non-fatal / 非致命
-
-        # 5. Process pending intents -> submit to paper engine
-        if self._auto_submit:
-            self._process_pending_intents()
-
-        # 6. Check stop-losses against current prices / 检查止损
-        if self._stop_mgr and self._latest_prices:
-            self._check_stops()
 
     def _mark_intent(self, intent: Any, status: str) -> None:
         """
@@ -1634,7 +1665,7 @@ class PipelineBridge:
                 "side": side,
                 "entry_price": fill_price,
                 "qty": qty,
-                "entry_ts_ms": int(time.time() * 1000),
+                "entry_ts_ms": now_ms(),
                 "regime": regime,
             }
 
@@ -1863,14 +1894,14 @@ class PipelineBridge:
 
         hold_ms = 0
         regime = "unknown"
-        entry_ts_ms = int(time.time() * 1000)
+        entry_ts_ms = now_ms()
         entry_price = 0.0
         qty = 0.0
 
         if pos_info:
-            hold_ms = int(time.time() * 1000) - pos_info.get("entry_ts_ms", int(time.time() * 1000))
+            hold_ms = now_ms() - pos_info.get("entry_ts_ms", now_ms())
             regime = pos_info.get("regime", "unknown")
-            entry_ts_ms = pos_info.get("entry_ts_ms", int(time.time() * 1000))
+            entry_ts_ms = pos_info.get("entry_ts_ms", now_ms())
             entry_price = pos_info.get("entry_price", 0.0)
             qty = pos_info.get("qty", 0.0)
 
@@ -1915,7 +1946,7 @@ class PipelineBridge:
                 import datetime
                 import uuid
 
-                exit_ts_ms = int(time.time() * 1000)
+                exit_ts_ms = now_ms()
                 entry_dt = datetime.datetime.fromtimestamp(entry_ts_ms / 1000.0, tz=datetime.timezone.utc)
                 exit_dt = datetime.datetime.fromtimestamp(exit_ts_ms / 1000.0, tz=datetime.timezone.utc)
                 trade_id = f"{strategy_name}:{symbol}:{uuid.uuid4().hex[:8]}"
@@ -1979,7 +2010,7 @@ class PipelineBridge:
                         "pnl": close_pnl,
                         "hold_ms": hold_ms,
                         "regime": regime,
-                        "timestamp_ms": int(time.time() * 1000),
+                        "timestamp_ms": now_ms(),
                     },
                 )
                 self._message_bus.send(rt_msg)

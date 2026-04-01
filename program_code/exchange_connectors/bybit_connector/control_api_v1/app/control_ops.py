@@ -27,7 +27,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import main_legacy as _base
-from .auth import AuthenticatedActor, require_scope, verify_operator_identity
+from .auth import AuthenticatedActor, require_scope_and_identity
 from .state_compiler import (
     ACTION_NAMES,
     CONFIG_CHANGE_WHITELIST,
@@ -89,8 +89,7 @@ def build_overview(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapter: str, kind: str) -> tuple[dict[str, Any], str]:
     snapshot, source_context = _base.get_latest_snapshot()
-    require_scope(actor, "control:recheck")
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "control:recheck", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -153,8 +152,7 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
 
 def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tuple[dict[str, Any], str]:
     snapshot, source_context = _base.get_latest_snapshot()
-    require_scope(actor, "control:validate")
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "control:validate", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -227,10 +225,8 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
 
 def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor, action: str) -> tuple[dict[str, Any], str]:
     scope_map = {"arm": "control:arm", "enable": "control:enable", "relock": "control:relock"}
-    require_scope(actor, scope_map[action])
-
     snapshot, source_context = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, scope_map[action], envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -320,9 +316,8 @@ def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor
 
 
 def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tuple[dict[str, Any], str]:
-    require_scope(actor, "control:bundle")
     snapshot, source_context = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "control:bundle", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -402,10 +397,8 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
 
 def apply_input_action(envelope: RequestEnvelope, actor: AuthenticatedActor, action: str) -> tuple[dict[str, Any], str]:
     scope_map = {"cost": "input:cost", "event": "input:event", "manual-note": "input:note"}
-    require_scope(actor, scope_map[action])
-
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, scope_map[action], envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -456,9 +449,8 @@ def apply_input_action(envelope: RequestEnvelope, actor: AuthenticatedActor, act
 
 
 def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tuple[dict[str, Any], str]:
-    require_scope(actor, "input:config")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "input:config", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -548,9 +540,8 @@ def apply_product_family_config(
             detail={"reason_codes": ["invalid_product_family"]},
         )
 
-    require_scope(actor, "input:config")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "input:config", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot

@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import main_legacy as _base
-from .auth import AuthenticatedActor, require_scope, verify_operator_identity
+from .auth import AuthenticatedActor, require_scope_and_identity
 from .state_compiler import (
     CONFIDENCE_LEVELS,
     EXPERIMENT_APPROVAL_ACTIONS,
@@ -63,9 +63,8 @@ def apply_learning_observation(
     - related_hypothesis_id: str  关联假设 ID / Related hypothesis ID
     - tags: list[str]            标签 / Tags
     """
-    require_scope(actor, "learning:write")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:write", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -151,9 +150,8 @@ def apply_learning_lesson(
     - related_hypothesis_ids: list[str]  关联假设 ID 列表 / Related hypothesis IDs
     - tags: list[str]                    标签 / Tags
     """
-    require_scope(actor, "learning:write")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:write", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -237,9 +235,8 @@ def apply_learning_hypothesis(
     - supporting_lesson_ids: list[str]       支持该假设的经验 ID / Supporting lesson IDs
     - tags: list[str]                        标签 / Tags
     """
-    require_scope(actor, "learning:write")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:write", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -322,9 +319,8 @@ def apply_learning_experiment(
     - risk_assessment: str  风险评估 / Risk assessment
     - tags: list[str]       标签 / Tags
     """
-    require_scope(actor, "learning:write")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:write", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -421,9 +417,8 @@ def apply_hypothesis_verdict(
     - proposed → approved / rejected / archived
     - under_review → approved / rejected / archived
     """
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -495,9 +490,8 @@ def apply_experiment_approval(
     - action: str   审批动作（approved / rejected）
     - reason: str   理由 / Reason (optional but recommended)
     """
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -566,9 +560,8 @@ def apply_experiment_completion(
     - result_summary: str           实验结论摘要 / Experiment conclusion summary
     - result_confidence_level: str  结论置信度（fact/inference/hypothesis）
     """
-    require_scope(actor, "learning:manage")
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "learning:manage", envelope)
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot

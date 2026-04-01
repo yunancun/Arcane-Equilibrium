@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -121,7 +122,9 @@ class PatternInsight:
 class AnalystConfig:
     """Configuration for AnalystAgent / AnalystAgent 配置"""
     # L2 trigger: minimum observations before pattern analysis / L2 触发：最小观察数
-    l2_min_observations: int = 200
+    # C7 fix: lowered from 200 to 50, overridable via ANALYST_L2_MIN_OBS env var
+    # C7 修复：从 200 降至 50，可通过环境变量 ANALYST_L2_MIN_OBS 覆盖
+    l2_min_observations: int = int(os.environ.get("ANALYST_L2_MIN_OBS", "50"))
     # Rolling window for metrics / 滚动窗口大小
     rolling_window: int = 50
     # Strategy ranking minimum trades / 策略排名最小交易数

@@ -20,5 +20,9 @@ websocket-client>=1.8.0
 # --- System monitoring (optional, H0 health worker) / 系統監控（可選，H0 健康採樣）---
 psutil>=5.9.0
 
+# --- HTML scraping (optional, Layer 2 web search fallback) / HTML 解析（可選，L2 網頁搜索降級）---
+beautifulsoup4>=4.12.0
+
 # --- Testing / 測試 ---
 pytest>=8.0.0
+pytest-asyncio>=0.23.0

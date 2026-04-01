@@ -60,6 +60,7 @@ from .auth import (  # noqa: F401
     _resolve_api_token,
     _split_csv,
     require_scope,
+    require_scope_and_identity,
     verify_operator_identity,
 )
 
@@ -141,8 +142,11 @@ from .state_compiler import (  # noqa: F401
     _compile_global_execution_authority_state,
     _compile_global_mode_state,
     _compile_global_stage_label,
+    _compile_learning_derived,
     _compile_product_family_derived,
+    _do_compile_core,
     _permission_block,
+    mark_compile_dirty,
     _validate_text_length,
     build_snapshot_id,
     compile_state,
@@ -272,6 +276,17 @@ if "*" in _cors_origin_list:
         _cors_origin_list or "(none — same-origin only)",
     )
 
+# Security rationale for allow_credentials=True with dynamic origins:
+# HttpOnly cookies carry the session token (Batch 5+6). The browser enforces
+# that credentials are only sent to origins listed in Access-Control-Allow-Origin,
+# so we MUST enumerate explicit origins — never "*". The wildcard strip above
+# guarantees this invariant at startup.
+# 安全说明：allow_credentials=True 配合动态来源列表确保 HttpOnly cookie
+# 仅发送到白名单来源，浏览器层面强制执行 CORS 限制。
+logger.info(
+    "CORS: configured allow_origins=%s (credentials=True, methods=GET/POST)",
+    _cors_origin_list or "(none — same-origin only)",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origin_list,

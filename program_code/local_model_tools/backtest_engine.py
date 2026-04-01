@@ -989,7 +989,8 @@ class BacktestEngine:
             else:
                 equity_curve.append(capital)
 
-        # Compute summary statistics / 计算汇总统计
+        # Compute summary statistics (uses full equity_curve for accurate max drawdown)
+        # 计算汇总统计（使用完整 equity_curve 以确保 max drawdown 精度）
         return self._build_result(config, trades, equity_curve, capital, n_bars)
 
     def _open_position(
@@ -1246,8 +1247,26 @@ class BacktestEngine:
         sharpe = _compute_sharpe(pnl_list, config.timeframe)
 
         # Max drawdown / 最大回撤
+        # Compute on full curve BEFORE downsampling for accuracy.
+        # 在降采样前使用完整曲线计算，确保精度。
         full_curve = [config.initial_capital] + equity_curve
         max_dd = _compute_max_drawdown(full_curve)
+
+        # C7: Downsample equity_curve if it exceeds max_equity_points.
+        # C7: 若 equity_curve 超过 max_equity_points 则降采样。
+        # This reduces API payload size without losing visual curve shape.
+        # 减少 API 传输数据量，同时保留视觉曲线形状。
+        max_equity_points = 500
+        if len(equity_curve) > max_equity_points:
+            try:
+                import numpy as np
+                indices = np.linspace(0, len(equity_curve) - 1, max_equity_points, dtype=int)
+                equity_curve = [equity_curve[int(i)] for i in indices]
+            except ImportError:
+                # numpy not available — fall back to simple step sampling
+                # numpy 不可用 — 退而使用简单步进采样
+                step = len(equity_curve) / max_equity_points
+                equity_curve = [equity_curve[int(i * step)] for i in range(max_equity_points)]
 
         return BacktestResult(
             symbol=config.symbol,

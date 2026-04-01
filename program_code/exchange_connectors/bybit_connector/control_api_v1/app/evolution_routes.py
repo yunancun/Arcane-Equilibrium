@@ -70,6 +70,22 @@ logger = logging.getLogger(__name__)
 _evolution_engine: Optional[Any] = None
 _evolution_lock = threading.Lock()
 
+# B13: Optional auto-deployer reference for applying evolution results.
+# B13: 可選的自動部署器引用，用於應用進化結果到已部署策略。
+# Set via set_auto_deployer() from startup or phase2_strategy_routes.
+# 由啟動邏輯或 phase2_strategy_routes 通過 set_auto_deployer() 設置。
+_auto_deployer: Optional[Any] = None
+
+
+def set_auto_deployer(deployer: Any) -> None:
+    """
+    Inject the StrategyAutoDeployer reference for B13 auto-apply.
+    注入 StrategyAutoDeployer 引用，供 B13 自動應用進化結果。
+    """
+    global _auto_deployer
+    _auto_deployer = deployer
+    logger.info("B13: auto_deployer injected into evolution_routes / 自動部署器已注入進化路由")
+
 
 def get_evolution_engine() -> Any:
     """
@@ -110,7 +126,7 @@ class EvolutionRunRequest(BaseModel):
       max_combinations — 最大組合數上限（默認 50）/ Max combinations cap (default 50)
     """
     strategy_name: str = Field(..., max_length=200)  # strategy identifier
-    symbol: str = Field(..., max_length=40)          # e.g. "BTCUSDT"
+    symbol: str = Field(..., max_length=40, pattern=r"^[A-Z0-9]{1,40}$")  # e.g. "BTCUSDT"
     timeframe: str = Field(default="1h", max_length=10)
     # list of {name: str, values: list} — validated in endpoint before ParameterGrid construction
     # 字典列表，{name: str, values: list}，在端點構造 ParameterGrid 前驗證格式
@@ -192,7 +208,29 @@ async def run_evolution(
         "Evolution complete: strategy=%s symbol=%s best_sharpe=%.2f / 進化搜索完成",
         body.strategy_name, body.symbol, result.best_sharpe,
     )
-    return result.to_dict()
+
+    # B13: Optionally apply evolution result to auto-deployer if sharpe > 1.0
+    # B13: 若 Sharpe > 1.0 且配置了自動部署器，可選地將進化結果應用到自動部署器
+    # Fail-open: deployer errors must not block the evolution result return.
+    # fail-open：部署器異常不阻塞進化結果返回。
+    result_dict = result.to_dict()
+    if result.best_sharpe > 1.0 and _auto_deployer is not None:
+        try:
+            applied = _auto_deployer.apply_evolution_result(result_dict)
+            result_dict["auto_deploy_applied"] = applied
+            if applied:
+                logger.info(
+                    "B13: Evolution result auto-applied to deployer: strategy=%s sharpe=%.2f / "
+                    "進化結果已自動應用到部署器",
+                    body.strategy_name, result.best_sharpe,
+                )
+        except Exception as e:
+            # fail-open: deployer error does not block evolution result
+            # fail-open：部署器異常不阻塞進化結果返回
+            logger.warning("B13: auto-deploy apply failed (fail-open): %s", e)
+            result_dict["auto_deploy_applied"] = False
+
+    return result_dict
 
 
 # ── GET /api/v1/evolution/status ──────────────────────────────────────────────────

@@ -5,12 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OpenClaw Trading Console</title>
 <script src="/static/common.js"></script>
+<link rel="stylesheet" href="/static/styles.css" />
 <style>
-  :root {
-    --bg: #0d1117; --card-bg: #161b22; --border: #30363d;
-    --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #388bfd;
-  }
+  /* :root variables are in styles.css (canonical location) */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif;
@@ -221,11 +218,8 @@ localStorage.removeItem('oc_trading_token');
 // ocLogout is defined in common.js (calls /api/v1/auth/logout + clears cookie)
 // ocLogout 已在 common.js 中定义（调用登出端点 + 清除 cookie）
 
-function getToken() {
-  // DEPRECATED: Token is in HttpOnly cookie, not accessible from JS.
-  // 已弃用：Token 在 HttpOnly cookie 中，JS 无法访问。
-  return '';
-}
+// getToken() removed — auth handled by HttpOnly cookie (common.js ocGetToken() if needed)
+// getToken() 已移除 — 认证由 HttpOnly cookie 处理（如需可用 common.js 的 ocGetToken()）
 
 // Cache-bust timestamp — ensures iframe tabs reload on each console.html refresh
 const BUILD_TS = Date.now();
@@ -319,7 +313,9 @@ setInterval(() => {
 // ─── User Label ───────────────────────────────────────────────
 const user = localStorage.getItem(USER_KEY);
 if (user) document.getElementById('user-label').textContent = user;
-document.getElementById('s-token-status').textContent = getToken() ? 'authenticated' : 'none';
+// Auth status is determined by HttpOnly cookie, not a JS-accessible token.
+// 认证状态由 HttpOnly cookie 决定，非 JS 可访问的 token。
+document.getElementById('s-token-status').textContent = 'cookie-auth';
 
 // ─── Side Panel Toggle (Live ↔ Paper) ────────────────────────
 let _sidePanel = 'live';

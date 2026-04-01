@@ -57,6 +57,7 @@ from typing import Any, Callable, Optional
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .recovery_approval_gate import RecoveryApprovalGate
 from .governance_events import risk_event, recon_event, auth_event, lease_event, oms_event
+from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +420,7 @@ class GovernanceHub:
             try:
                 audit_file = self._audit_dir / f"{sm_name}_audit.jsonl"
                 event_with_meta = {
-                    "timestamp_ms": int(time.time() * 1000),
+                    "timestamp_ms": now_ms(),
                     "sm_name": sm_name,
                     **event,
                 }
@@ -546,11 +547,11 @@ class GovernanceHub:
         # P1-17 FIX: Assign to local variable first to avoid race with _invalidate_auth_cache()
         # setting _cached_auth_state to None between the `is not None` check and the unpack.
         # After local assignment, the tuple reference is stable even if the field is cleared.
-        now_ms = int(time.time() * 1000)
+        now_ms_val = now_ms()
         _cached = self._cached_auth_state  # single read into local var
         if _cached is not None:
             cached_result, cached_ts_ms = _cached
-            if now_ms - cached_ts_ms < self._cache_ttl_ms:
+            if now_ms_val - cached_ts_ms < self._cache_ttl_ms:
                 return cached_result
 
         if not self._initialized:
@@ -571,7 +572,7 @@ class GovernanceHub:
                         result = len(effective_auths) > 0
 
                     # Update cache only on successful check
-                    self._cached_auth_state = (result, now_ms)
+                    self._cached_auth_state = (result, now_ms())
                 except Exception as e:
                     # On re-check failure, return False (fail-closed) and don't cache
                     if logger.isEnabledFor(logging.DEBUG):
@@ -827,8 +828,8 @@ class GovernanceHub:
                 # Create lease draft and activate it (all within lock)
                 # TTL close-loop: set expires_at_ms so ExpiryGuardian can auto-EXPIRE
                 # TTL 閉環：設定 expires_at_ms，讓 ExpiryGuardian 可自動 EXPIRE
-                now_ms = int(time.time() * 1000)
-                expires_at_ms = now_ms + int(ttl_seconds * 1000)
+                now_ms_val = now_ms()
+                expires_at_ms = now_ms_val + int(ttl_seconds * 1000)
                 lease_obj = self._lease_sm.create_draft(
                     intent={"intent_id": intent_id, "scope": scope},
                     created_by="GovernanceHub",
@@ -1123,7 +1124,7 @@ class GovernanceHub:
 
         # Gather all necessary state under lock in a single shot
         with self._lock:
-            timestamp_ms = int(time.time() * 1000)
+            timestamp_ms = now_ms()
             enabled = self._enabled
             mode_value = self._mode.value
             callback_errors = self._callback_errors

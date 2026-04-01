@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from . import main_legacy as _base
-from .auth import AuthenticatedActor, require_scope, verify_operator_identity
+from .auth import AuthenticatedActor, require_scope_and_identity
 from .state_compiler import _compile_for_response, now_ms
 from .state_helpers import (
     _assert_revision,
@@ -55,9 +55,8 @@ def apply_pnl_entry(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tup
     注意：unrealized_pnl 取最新值覆盖（snapshot），realized_pnl 是累计增量。
     Note: unrealized_pnl is a snapshot (overwrite); realized_pnl is an accumulative delta.
     """
-    require_scope(actor, "input:cost")  # 复用 cost scope / reuse cost scope for PnL writes
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "input:cost", envelope)  # 复用 cost scope / reuse cost scope for PnL writes
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot
@@ -190,9 +189,8 @@ def apply_pnl_period_snapshot(
     payload 必填字段 / Required payload fields:
     - period_label: str  周期标签，例如 "2026-03-26" / Period label, e.g. "2026-03-26"
     """
-    require_scope(actor, "input:cost")  # 复用 cost scope / Reuse cost scope
     snapshot, _ = _base.get_latest_snapshot()
-    verify_operator_identity(envelope, actor)
+    require_scope_and_identity(actor, "input:cost", envelope)  # 复用 cost scope / Reuse cost scope
     replay = _check_idempotency(snapshot, envelope)
     if replay is not None:
         replay["snapshot"] = snapshot

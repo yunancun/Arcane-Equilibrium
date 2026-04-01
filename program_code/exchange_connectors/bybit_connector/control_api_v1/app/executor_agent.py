@@ -404,6 +404,10 @@ class ExecutorAgent:
 
         except Exception as e:
             fill_time_ms = (time.time() - start_time) * 1000
+            # Log full exception details server-side; expose only a generic message
+            # to the caller to prevent dynamic exception string leaks (A5 fix).
+            # 服务端记录完整异常；对调用方仅返回通用消息，防止动态异常字符串泄漏。
+            logger.error("ExecutorAgent execution error: %s", e, exc_info=True)
             report = ExecutionReport(
                 intent_id=intent_id,
                 symbol=symbol,
@@ -412,13 +416,12 @@ class ExecutorAgent:
                 expected_price=expected_price,
                 fill_time_ms=round(fill_time_ms, 2),
                 success=False,
-                error=f"Execution error: {e}",
+                error="Execution failed — see server logs",
                 metadata=metadata or {},
             )
             with self._lock:
                 self._stats["executions_failed"] += 1
                 self._stats["errors"] += 1
-            logger.error("ExecutorAgent execution failed: %s / 执行失败: %s", e, e)
 
         self._store_report(report)
         return report

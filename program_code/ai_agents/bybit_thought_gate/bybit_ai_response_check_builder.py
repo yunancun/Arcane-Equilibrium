@@ -44,7 +44,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def now_ms() -> int:
+def now_ms() -> int:  # TODO: consolidate with app.utils.time_utils.now_ms
     return int(time.time() * 1000)
 
 

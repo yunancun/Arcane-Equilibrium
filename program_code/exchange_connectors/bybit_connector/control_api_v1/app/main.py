@@ -39,50 +39,18 @@ def stable_compile_state(state: dict[str, Any], *, refresh_identity: bool) -> di
     """
     Recompile derived fields while keeping snapshot identity stable on read.
     只读路径不刷新 snapshot 身份；写入路径才刷新。
+    Delegates to _do_compile_core (shared helper in state_compiler) to eliminate
+    duplication with compile_state(). include_learning=False preserves the original
+    stable_compile_state behavior (no L-chapter learning derived fields).
+    委托给 state_compiler._do_compile_core（共享编译核心），消除与 compile_state
+    的代码重复。include_learning=False 保留原始 stable_compile_state 行为。
     """
     compiled = copy.deepcopy(state)
-
-    if refresh_identity:
-        compiled["meta"]["snapshot_ts_ms"] = base.now_ms()
-
-    compiled["global_runtime"]["derived"]["global_mode_state"] = base._compile_global_mode_state(compiled)
-    compiled["global_runtime"]["derived"]["global_stage_label"] = base._compile_global_stage_label(compiled)
-    compiled["control_plane"]["risk_envelope"]["effective_risk_envelope_state"] = base._compile_effective_risk_envelope_state(compiled)
-    base._compile_demo_gate_states(compiled)
-    compiled["global_runtime"]["derived"]["global_execution_authority_state"] = base._compile_global_execution_authority_state(compiled)
-    compiled["global_runtime"]["derived"]["global_capability_state"] = base._compile_global_capability_state(compiled)
-    base._compile_effective_action_permissions(compiled)
-
-    for pf in base.PRODUCT_FAMILIES:
-        base._compile_product_family_derived(compiled, pf)
-
-    compiled["global_runtime"]["derived"]["runtime_still_protected"] = (
-        compiled["global_runtime"]["derived"]["global_execution_authority_state"] != "demo_enabled"
-        and compiled["global_runtime"]["controls"]["global_execution_mode_switch"] != "live_reserved"
+    return base._do_compile_core(
+        compiled,
+        refresh_identity=refresh_identity,
+        include_learning=False,
     )
-
-    blockers: list[str] = []
-    if compiled["global_runtime"]["controls"]["global_execution_mode_switch"] == "disabled":
-        blockers.append("global_execution_blocked")
-    if compiled["control_plane"]["demo_control"]["demo_state_switch"] != "demo_enabled":
-        blockers.append("demo_not_enabled")
-    if compiled["control_plane"]["risk_envelope"]["effective_risk_envelope_state"] == "blocking":
-        blockers.append("risk_scope_blocked")
-    compiled["global_runtime"]["derived"]["overview_blocker_summary"] = blockers
-
-    compiled["control_plane"]["execution_control_summary"] = {
-        "global_execution_mode_switch_summary": compiled["global_runtime"]["controls"]["global_execution_mode_switch"],
-        "global_operator_mode_switch_summary": compiled["global_runtime"]["controls"]["global_operator_mode_switch"],
-    }
-    compiled["control_plane"]["health_gate_summary"] = {
-        "health_gates_overall_state_summary": compiled["health_telemetry"]["gates"]["health_gates_overall_state"],
-        "exchange_timeout_gate_state_summary": compiled["health_telemetry"]["gates"]["exchange_timeout_gate_state"],
-        "ws_disconnect_gate_state_summary": compiled["health_telemetry"]["gates"]["ws_disconnect_gate_state"],
-        "latency_gate_state_summary": compiled["health_telemetry"]["gates"]["latency_gate_state"],
-        "freshness_gate_state_summary": compiled["health_telemetry"]["gates"]["freshness_gate_state"],
-    }
-    compiled["meta"]["snapshot_id"] = base.build_snapshot_id(compiled)
-    return compiled
 
 
 def _patched_read(self) -> dict[str, Any]:
@@ -94,6 +62,9 @@ def _patched_read(self) -> dict[str, Any]:
 
 def _patched_write(self, state: dict[str, Any]) -> dict[str, Any]:
     with self._lock:
+        # Invalidate compile cache on write (B6 dirty-flag).
+        # 写入时使编译缓存失效（B6 脏标志）。
+        base.mark_compile_dirty()
         compiled_without_refresh = stable_compile_state(state, refresh_identity=False)
         incoming_snapshot_id = state.get("meta", {}).get("snapshot_id")
 

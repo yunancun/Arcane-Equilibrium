@@ -51,7 +51,7 @@ OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_PATH_LATEST = OUT_DIR / "bybit_observer_cycle_latest.json"
 
-def now_ms():
+def now_ms():  # TODO: consolidate with app.utils.time_utils.now_ms
     return int(time.time() * 1000)
 
 def clean_wrapper_stderr(stderr_text: str) -> str:

@@ -142,7 +142,8 @@ class TestExecutorExecution(unittest.TestCase):
             qty=0.01,
         )
         self.assertFalse(report.success)
-        self.assertIn("error", report.error.lower())
+        # A5 fix: error message is now generic to prevent exception string leak
+        self.assertIn("failed", report.error.lower())
         stats = agent.get_stats()
         self.assertGreater(stats["errors"], 0)
 

@@ -690,9 +690,8 @@ class TestAdversarialStopIntegration:
         # (unless the dynamic stop is wider than what we hit)
         # Hard stop at 57000 not hit, so position should survive
         pos = eng.get_positions()
-        # If spike detection worked, position survives. If not, it got closed.
-        # Either way, hard stop at 57000 wasn't hit.
-        assert True  # Just verify no crash; spike behavior is probabilistic
+        # Hard stop at 57000 was NOT hit, so position must survive regardless of spike detection
+        assert "BTCUSDT" in pos, "Position should survive: price above hard stop threshold"
 
     def test_hard_stop_overrides_spike(self, engine_with_risk):
         """Hard stop always triggers even during a spike."""

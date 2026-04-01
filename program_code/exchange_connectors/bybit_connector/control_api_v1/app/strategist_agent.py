@@ -61,6 +61,7 @@ from .strategist_models import (  # noqa: F401 — re-export for backward compat
     _heuristic_evaluate,
     _parse_sentiment,
 )
+from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,22 @@ class StrategistAgent:
     - Cannot directly place orders (must go via Executor)
     - fail-closed: errors → reject signal
     """
+
+    # C4: Regime-aware strategy selection preference multipliers.
+    # C4: Regime 感知策略選擇偏好倍率。
+    # These multipliers are applied additively (alongside existing TruthSourceRegistry
+    # adjustments) to _strategy_preference_weights when a regime is detected.
+    # 當偵測到 regime 時，這些倍率以加性方式（與現有 TruthSourceRegistry 調整並行）
+    # 應用到 _strategy_preference_weights。
+    # Values > 1.0 = preferred in this regime; < 1.0 = less suitable.
+    # 值 > 1.0 表示在此 regime 中偏好；< 1.0 表示不太適合。
+    _REGIME_STRATEGY_PREFERENCES: Dict[str, Dict[str, float]] = {
+        "trending_up": {"ma_crossover": 1.2, "bb_breakout": 1.1, "grid_trading": 0.8},
+        "trending_down": {"ma_crossover": 1.2, "bb_breakout": 1.1, "grid_trading": 0.8},
+        "ranging": {"grid_trading": 1.3, "bollinger_reversion": 1.2, "ma_crossover": 0.8},
+        "volatile": {"bollinger_reversion": 1.1, "funding_rate_arb": 1.0, "grid_trading": 0.7},
+        "unknown": {},  # no preference adjustment for unknown regime / 未知 regime 不調整
+    }
 
     def __init__(
         self,
@@ -116,6 +133,10 @@ class StrategistAgent:
         # Strategy preference weights: 1.0 = neutral, >1.0 = preferred, <1.0 = avoid
         # 策略偏好權重：1.0=中性，>1.0=偏好，<1.0=迴避。範圍限幅 [0.2, 2.0]
         self._strategy_preference_weights: Dict[str, float] = {}
+
+        # C4: Current detected market regime for regime-aware strategy selection.
+        # C4: 當前偵測到的市場 regime，用於 regime 感知策略選擇。
+        self._current_regime: str = "unknown"
 
         # L2 result cache: stores background L2 evaluation results for use in next decision cycle.
         # L2 結果快取：儲存後台 L2 評估結果，供下次決策週期使用（避免 L2 計算資源浪費）。
@@ -324,7 +345,7 @@ class StrategistAgent:
             intel = IntelObject(
                 intel_id=payload.get("intel_id", f"intel_{uuid.uuid4().hex[:12]}"),
                 source=payload.get("source", "unknown"),
-                timestamp_ms=payload.get("timestamp_ms", int(time.time() * 1000)),
+                timestamp_ms=payload.get("timestamp_ms", now_ms()),
                 freshness_seconds=payload.get("freshness_seconds", 0),
                 data_quality=DataQualityLevel(payload.get("data_quality", "fact")),
                 sentiment=_parse_sentiment(payload.get("sentiment", "neutral")),
@@ -339,6 +360,12 @@ class StrategistAgent:
                 self._stats["errors"] += 1
             return
 
+        # C4: Apply regime-aware strategy weights if regime info is available in metadata.
+        # C4: 若 metadata 中含有 regime 信息，應用 regime 感知策略權重。
+        regime = intel.metadata.get("regime") if isinstance(intel.metadata, dict) else None
+        if regime and isinstance(regime, str) and regime != self._current_regime:
+            self._apply_regime_weights(regime)
+
         # Check minimum relevance / 检查最低相关性
         if intel.relevance_score < self.config.min_relevance:
             logger.debug("Intel below relevance threshold: %.2f < %.2f",
@@ -346,7 +373,7 @@ class StrategistAgent:
             return
 
         # Check age / 检查年龄
-        age_seconds = max(0, (int(time.time() * 1000) - intel.timestamp_ms) / 1000)
+        age_seconds = max(0, (now_ms() - intel.timestamp_ms) / 1000)
         if age_seconds > self.config.max_intel_age_seconds:
             logger.debug("Intel too old: %.0fs > %ds", age_seconds, self.config.max_intel_age_seconds)
             return
@@ -438,9 +465,11 @@ class StrategistAgent:
                 # 使用 record_call()（若存在）；成本追蹤失敗不得阻塞執行。
                 if self.cost_tracker is not None and model_tier != "l2":
                     try:
+                        # A7 fix: unified to record_call() with provider parameter
+                        # A7 修復：統一使用 record_call() 並帶 provider 參數
                         _record = getattr(self.cost_tracker, "record_call", None)
                         if _record is not None:
-                            _record(model="l1_9b", cost_usd=0.0)
+                            _record(provider="ollama", model="l1_9b", cost_usd=0.0)
                     except Exception as e:
                         # TD-3: Log cost tracking failures instead of silently swallowing them.
                         # H5 成本記錄失敗不應靜默忽略，改為 warning 日誌以便追蹤問題。
@@ -458,7 +487,7 @@ class StrategistAgent:
             "relevance": intel.relevance_score,
             "sentiment": intel.sentiment.value if hasattr(intel.sentiment, 'value') else str(intel.sentiment),
             "evaluation": evaluation.to_dict(),
-            "timestamp_ms": int(time.time() * 1000),
+            "timestamp_ms": now_ms(),
         }
         with self._lock:
             self._eval_log.append(eval_record)
@@ -624,6 +653,59 @@ class StrategistAgent:
                 self._strategy_preference_weights[strategy] = new_weight
         except Exception as e:
             logger.warning("_apply_pattern_insight failed (fail-open): %s", e)
+
+    def _apply_regime_weights(self, regime: str) -> None:
+        """
+        C4: Apply regime-aware strategy preference multipliers.
+        C4: 應用 regime 感知策略偏好倍率。
+
+        Looks up _REGIME_STRATEGY_PREFERENCES for the given regime and applies
+        the multipliers additively to _strategy_preference_weights. This works
+        alongside existing TruthSourceRegistry adjustments (from _apply_pattern_insight),
+        not replacing them.
+        查詢 _REGIME_STRATEGY_PREFERENCES 中指定 regime 的倍率，以加性方式應用到
+        _strategy_preference_weights。與 TruthSourceRegistry 的現有調整並行工作，
+        而非替代它們。
+
+        Fail-open: any error leaves weights unchanged.
+        失敗開放：任何異常保持權重不變。
+
+        Args:
+            regime — detected market regime string (e.g., "trending_up", "ranging")
+                     偵測到的市場 regime 字符串
+        """
+        self._current_regime = regime
+        prefs = self._REGIME_STRATEGY_PREFERENCES.get(regime, {})
+        if not prefs:
+            return
+
+        try:
+            with self._lock:
+                # Reset all weights to 1.0 before applying new regime multipliers.
+                # This prevents oscillation drift when regime changes rapidly —
+                # without reset, repeated multiply→clamp cycles push weights to
+                # boundary values (0.2 or 2.0) and they never recover.
+                # 重置為 1.0 再應用新 regime 倍率，防止 regime 快速切換時
+                # 反覆 multiply→clamp 將權重推到邊界值（0.2 或 2.0）無法恢復。
+                for key in self._strategy_preference_weights:
+                    self._strategy_preference_weights[key] = 1.0
+                for strategy_name, multiplier in prefs.items():
+                    # Apply regime multiplier on top of base 1.0 (not existing weight).
+                    # TruthSourceRegistry adjustments (_apply_pattern_insight) are
+                    # applied separately and additively in the evaluation path.
+                    # 在基準 1.0 上應用 regime 倍率（非現有權重）。
+                    # TruthSourceRegistry 調整由 _apply_pattern_insight 獨立加性應用。
+                    new_weight = max(0.2, min(2.0, multiplier))
+                    self._strategy_preference_weights[strategy_name] = new_weight
+            logger.debug(
+                "C4: Regime weights applied for regime=%s: %s / "
+                "Regime 權重已應用：regime=%s",
+                regime, prefs, regime,
+            )
+        except Exception as e:
+            # fail-open: regime weight error must not affect evaluation pipeline
+            # fail-open：regime 權重異常不影響評估管線
+            logger.warning("_apply_regime_weights failed (fail-open): %s", e)
 
     def _handle_pattern_insight(self, message: AgentMessage) -> None:
         """Handle Analyst's pattern insight feedback / 处理 Analyst 模式洞察反馈"""
@@ -972,15 +1054,17 @@ class StrategistAgent:
             # H5 成本感知：記錄 Ollama 調用，支持 AI 使用效果評估（根原則 13）
             if self.cost_tracker is not None:
                 try:
-                    record_fn = getattr(self.cost_tracker, "record_ollama_call", None)
+                    # A7 fix: unified to record_call() — record_ollama_call() is deprecated
+                    # A7 修復：統一使用 record_call()，record_ollama_call() 已棄用
+                    record_fn = getattr(self.cost_tracker, "record_call", None)
                     if record_fn is not None:
-                        record_fn(model="l1_9b", duration_ms=latency_ms)
+                        record_fn(provider="ollama", model="l1_9b", duration_ms=latency_ms, cost_usd=0.0)
                     with self._lock:
                         self._stats["ollama_calls_tracked"] += 1
                 except Exception:
                     # Cost recording failure must not block execution — principle 13 is observational
                     # 成本記錄失敗不可阻擋執行，根原則 13 是觀察性要求
-                    logger.warning("cost_tracker.record_ollama_call failed, non-fatal / 成本記錄失敗，非致命")
+                    logger.warning("cost_tracker.record_call failed, non-fatal / 成本記錄失敗，非致命")
 
             return EdgeEvaluation(
                 has_edge=has_edge,

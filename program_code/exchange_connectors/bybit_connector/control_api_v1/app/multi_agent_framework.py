@@ -28,12 +28,15 @@ Implements:
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
 # 1. Enums
@@ -311,13 +314,19 @@ class MessageBus:
                 except Exception:
                     pass
 
-            # Notify subscribers
-            subs = self._subscribers.get(message.receiver, [])
-            for cb in subs:
-                try:
-                    cb(message)
-                except Exception:
-                    pass
+            # Copy subscriber list inside lock; invoke outside to avoid
+            # holding the lock during potentially slow callbacks (A8 fix).
+            # 在锁内复制订阅者列表；在锁外调用，避免慢回调阻塞整个 bus。
+            subscribers = list(self._subscribers.get(message.receiver, []))
+
+        # Notify subscribers outside the lock — each callback wrapped in
+        # try/except so one failing subscriber cannot block others.
+        # 在锁外通知订阅者 — 每个回调独立 try/except，单个失败不影响其余。
+        for cb in subscribers:
+            try:
+                cb(message)
+            except Exception as e:
+                logger.warning("MessageBus subscriber error: %s", e)
 
         return True
 

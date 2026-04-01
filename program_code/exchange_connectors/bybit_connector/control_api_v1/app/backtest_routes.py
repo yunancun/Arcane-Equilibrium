@@ -237,7 +237,7 @@ class BacktestRunRequest(BaseModel):
       lookback_days  — number of historical days to use / 歷史天數（默認 30）
       backtest_mode  — MUST be True; route enforces this / 必須為 True（端點強制）
     """
-    symbol: str = Field(..., max_length=40)           # e.g. "BTCUSDT" — 40 chars covers all Bybit pairs
+    symbol: str = Field(..., max_length=40, pattern=r"^[A-Z0-9]{1,40}$")  # e.g. "BTCUSDT" — 40 chars covers all Bybit pairs
     timeframe: str = Field(..., max_length=10)       # e.g. "5m", "1h"
     strategy_name: str = Field(..., max_length=200)  # strategy identifier
     lookback_days: int = 30

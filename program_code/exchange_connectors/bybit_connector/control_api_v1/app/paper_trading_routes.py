@@ -487,7 +487,7 @@ class SessionStartRequest(BaseModel):
 
 
 class OrderSubmitRequest(BaseModel):
-    symbol: str = Field(max_length=30)
+    symbol: str = Field(max_length=30, pattern=r"^[A-Z0-9]{1,30}$")
     side: str = Field(max_length=4)      # "Buy" or "Sell"
     order_type: str = Field(max_length=10)  # "market" or "limit"
     qty: float = Field(gt=0)
@@ -807,7 +807,7 @@ class MarketFeedStartRequest(BaseModel):
 
 
 class MarketFeedSymbolRequest(BaseModel):
-    symbol: str = Field(max_length=30)
+    symbol: str = Field(max_length=30, pattern=r"^[A-Z0-9]{1,30}$")
 
 
 @paper_router.post("/market-feed/start")
@@ -928,7 +928,7 @@ def post_market_feed_remove_symbol(
 
 class ShadowFeedRequest(BaseModel):
     market_prices: dict[str, float]
-    symbol: str = Field(default="BTCUSDT", max_length=30)
+    symbol: str = Field(default="BTCUSDT", max_length=30, pattern=r"^[A-Z0-9]{1,30}$")
 
 
 @paper_router.post("/shadow/feed")

@@ -51,7 +51,7 @@ def load_json(path: Path):
     except (json.JSONDecodeError, OSError):
         return None
 
-def now_ms():
+def now_ms():  # TODO: consolidate with app.utils.time_utils.now_ms
     return int(time.time() * 1000)
 
 def main():

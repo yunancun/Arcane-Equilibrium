@@ -1,14 +1,24 @@
 :root {
   color-scheme: dark;
-  --bg: #0f172a;
-  --card: #111827;
-  --muted: #94a3b8;
-  --border: #334155;
-  --text: #e5e7eb;
+
+  /* ── Canonical shared palette (used by console.html, trading.html, tab-* files) ── */
+  /* 共享主色板（console.html、trading.html、tab-* 文件使用） */
+  --bg: #0d1117; --card-bg: #161b22; --border: #30363d;
+  --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #388bfd;
+  --card-radius: 10px;
+
+  /* ── Aliases for login.html (uses shorter variable names) ── */
+  /* login.html 使用的简短别名 */
+  --card: #161b22; --dim: #8b949e;
+
+  /* ── styles.css original palette (used by index.html / settings pages) ── */
+  /* styles.css 原有色板（index.html / 设置页面使用） */
   --good: #16a34a;
   --warn: #d97706;
   --bad: #dc2626;
   --neutral: #475569;
+  --muted: #94a3b8;
 }
 
 * { box-sizing: border-box; }

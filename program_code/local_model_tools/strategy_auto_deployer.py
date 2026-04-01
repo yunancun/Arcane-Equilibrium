@@ -210,6 +210,69 @@ class StrategyAutoDeployer:
 
         return worst_symbol, worst_score
 
+    # ── B13: Evolution Result Application / B13: 进化结果应用 ──
+
+    def apply_evolution_result(self, result: dict) -> bool:
+        """
+        Apply evolution engine best parameters to a currently active deployed strategy.
+        将进化引擎最优参数应用到当前活跃的已部署策略。
+
+        B13: First connection between EvolutionEngine output and StrategyAutoDeployer.
+        This method receives the best parameters from evolution (e.g., best short_window,
+        long_window for MA crossover) and updates the deployed strategy's parameters
+        if the strategy is currently active.
+
+        B13：EvolutionEngine 输出与 StrategyAutoDeployer 的首次连接。
+        接收进化引擎的最优参数（如 MA 交叉的 short_window、long_window），
+        若对应策略当前为活跃状态则更新其参数。
+
+        Args:
+            result — dict with at least 'strategy_name', 'best_params', 'best_sharpe'.
+                     Must come from EvolutionResult.to_dict().
+                     至少包含 strategy_name、best_params、best_sharpe 的字典，
+                     应来自 EvolutionResult.to_dict()。
+
+        Returns:
+            True if parameters were applied to at least one active deployment.
+            若参数已成功应用到至少一个活跃部署则返回 True。
+        """
+        strategy_name = result.get("strategy_name", "")
+        best_params = result.get("best_params", {})
+        best_sharpe = result.get("best_sharpe", 0.0)
+
+        if not strategy_name or not best_params:
+            logger.warning(
+                "apply_evolution_result: missing strategy_name or best_params, skipping / "
+                "缺少 strategy_name 或 best_params，跳过"
+            )
+            return False
+
+        applied = False
+        with self._lock:
+            for deploy_key, info in self._deployed.items():
+                # Match by strategy_name substring — deployed keys often include symbol suffix
+                # 按 strategy_name 子串匹配 — 部署键通常包含幣種后缀
+                if strategy_name in deploy_key or strategy_name == info.get("strategy_name", ""):
+                    info["evolution_params"] = best_params
+                    info["evolution_sharpe"] = best_sharpe
+                    info["evolution_applied_ts"] = time.time()
+                    applied = True
+                    logger.info(
+                        "apply_evolution_result: updated strategy=%s with params=%s sharpe=%.2f / "
+                        "进化结果已应用：策略=%s 参数=%s Sharpe=%.2f",
+                        deploy_key, best_params, best_sharpe,
+                        deploy_key, best_params, best_sharpe,
+                    )
+
+        if not applied:
+            logger.info(
+                "apply_evolution_result: no active deployment found for strategy=%s / "
+                "未找到策略 %s 的活跃部署",
+                strategy_name, strategy_name,
+            )
+
+        return applied
+
     def _close_position_for_rebalance(self, symbol: str) -> bool:
         """
         Close a position by submitting a counter-side market order via paper engine.

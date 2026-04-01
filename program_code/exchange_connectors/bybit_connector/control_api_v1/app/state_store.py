@@ -34,6 +34,7 @@ from .state_compiler import (
     _compile_for_response,
     _permission_block,
     compile_state,
+    mark_compile_dirty,
     now_ms,
 )
 
@@ -369,6 +370,9 @@ class JsonStateStore:
 
     def write(self, state: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
+            # Invalidate compile cache on write (B6 dirty-flag).
+            # 写入时使编译缓存失效（B6 脏标志）。
+            mark_compile_dirty()
             compiled = _compile_for_response(state)
             # Atomic write: write to temp file, then rename (prevents corruption on crash)
             fd, tmp_path = tempfile.mkstemp(

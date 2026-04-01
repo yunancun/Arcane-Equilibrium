@@ -63,7 +63,7 @@ MIN_BUDGET_FOR_C_ENV = "BYBIT_ROUTE_MIN_BUDGET_FOR_C"
 ROUTE_C_ENABLED_ENV = "BYBIT_ROUTE_C_ENABLED"
 
 
-def now_ms() -> int:
+def now_ms() -> int:  # TODO: consolidate with app.utils.time_utils.now_ms
     """Return current unix time in milliseconds / 返回当前毫秒时间戳。"""
     return int(time.time() * 1000)
 

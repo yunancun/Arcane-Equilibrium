@@ -3,7 +3,7 @@ import json
 import time
 
 
-def now_ms():
+def now_ms():  # TODO: consolidate with app.utils.time_utils.now_ms
     return int(time.time() * 1000)
 
 

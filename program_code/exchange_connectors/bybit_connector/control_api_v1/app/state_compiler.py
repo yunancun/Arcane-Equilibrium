@@ -17,9 +17,12 @@ import copy
 import hashlib
 import inspect as _inspect
 import json
+import threading
 import time
 import weakref
 from typing import Any
+
+from .utils.time_utils import now_ms
 
 from fastapi import HTTPException
 
@@ -78,10 +81,6 @@ REVIEW_DECISION_ACTIONS = frozenset({
 AUTO_SCAN_TYPES = frozenset({"observations", "lessons", "hypotheses"})
 
 
-def now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 # ── 输入长度限制 / Input length limits ─────────────────────────────────────────
 _MAX_TEXT_SHORT = 200   # 标题 / title 类
 _MAX_TEXT_LONG = 2000   # 详情 / detail / description 类
@@ -95,6 +94,30 @@ _MAX_PAYLOAD_SIZE = 50000  # payload JSON 总字节 / total payload bytes
 # 模块级签名缓存：以函数对象为键（WeakKeyDictionary），避免高频 _compile_for_response
 # 路径重复调用 inspect.signature()；GC 回收旧函数后条目自动消失，不存在 id 重用误判。
 _COMPILE_STATE_SIG_CACHE: weakref.WeakKeyDictionary[Any, bool] = weakref.WeakKeyDictionary()
+
+# ── B6 dirty-flag memoization for compile_state ─────────────────────────────
+# Cache the last compiled result and skip recomputation when state has not
+# changed.  Any write/mutate operation must call mark_compile_dirty() to
+# invalidate the cache.  This avoids O(n) list scans on every read.
+# B6 脏标志缓存：缓存上次编译结果，在状态未变时跳过重复计算。
+# 任何写入/变更操作必须调用 mark_compile_dirty() 使缓存失效。
+_compile_cache: dict[str, Any] = {}
+_compile_dirty: bool = True
+# Lock protecting _compile_cache and _compile_dirty against concurrent access.
+# 保護 _compile_cache 和 _compile_dirty 的線程鎖，防止並發讀寫競態。
+_compile_cache_lock = threading.Lock()
+
+
+def mark_compile_dirty() -> None:
+    """
+    Mark the compile cache as dirty so the next compile_state() recomputes.
+    Called by any code path that mutates state (write / mutate operations).
+    标记编译缓存为脏，使下次 compile_state() 重新计算。
+    由任何修改状态的代码路径（写入/变更操作）调用。
+    """
+    global _compile_dirty
+    with _compile_cache_lock:
+        _compile_dirty = True
 
 
 def _validate_text_length(value: str, field_name: str, max_len: int) -> str:
@@ -476,9 +499,29 @@ def _compile_for_response(state: dict[str, Any]) -> dict[str, Any]:
     return fn(state)
 
 
-def compile_state(state: dict[str, Any]) -> dict[str, Any]:
-    state = copy.deepcopy(state)
-    state["meta"]["snapshot_ts_ms"] = now_ms()
+def _do_compile_core(
+    state: dict[str, Any],
+    *,
+    refresh_identity: bool = True,
+    include_learning: bool = True,
+) -> dict[str, Any]:
+    """
+    Shared compilation core used by both compile_state() and stable_compile_state().
+    将 compile_state 和 stable_compile_state 的共同编译逻辑提取为统一入口，
+    通过参数区分差异：refresh_identity 控制是否刷新时间戳，include_learning 控制
+    是否计算学习状态派生字段。
+
+    Args:
+        state: Deep-copied state dict (caller must deepcopy before calling).
+        refresh_identity: If True, update snapshot_ts_ms to now.
+        include_learning: If True, compute L-chapter learning derived fields.
+
+    Returns:
+        Compiled state dict with all derived fields populated.
+    """
+    if refresh_identity:
+        state["meta"]["snapshot_ts_ms"] = now_ms()
+
     state["global_runtime"]["derived"]["global_mode_state"] = _compile_global_mode_state(state)
     state["global_runtime"]["derived"]["global_stage_label"] = _compile_global_stage_label(state)
     state["control_plane"]["risk_envelope"]["effective_risk_envelope_state"] = _compile_effective_risk_envelope_state(state)
@@ -516,10 +559,18 @@ def compile_state(state: dict[str, Any]) -> dict[str, Any]:
         "freshness_gate_state_summary": state["health_telemetry"]["gates"]["freshness_gate_state"],
     }
 
-    # ── L 章学习状态派生字段 / L-chapter learning derived fields ──────────────
-    # 从 records 列表动态计算摘要统计，确保派生字段始终与底层数据一致。
-    # Dynamically compute summary statistics from records lists, ensuring
-    # derived fields always stay consistent with underlying data.
+    if include_learning:
+        _compile_learning_derived(state)
+
+    state["meta"]["snapshot_id"] = build_snapshot_id(state)
+    return state
+
+
+def _compile_learning_derived(state: dict[str, Any]) -> None:
+    """
+    Compute L-chapter learning state derived fields from records lists.
+    从 records 列表动态计算学习状态摘要统计，确保派生字段始终与底层数据一致。
+    """
     ls = state.get("learning_state", {})
     ls_records = ls.get("records", {})
 
@@ -552,5 +603,33 @@ def compile_state(state: dict[str, Any]) -> dict[str, Any]:
         [p for p in review_queue if p.get("status") == "pending_review"]
     )
 
-    state["meta"]["snapshot_id"] = build_snapshot_id(state)
-    return state
+
+def compile_state(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Full state compilation with identity refresh and learning derived fields.
+    完整状态编译，刷新 snapshot 身份并计算学习派生字段。
+
+    Uses dirty-flag memoization (B6): if the state has not been mutated since
+    the last call AND the input state_revision matches, returns the cached
+    result immediately without O(n) list scans.
+    使用脏标志缓存（B6）：若自上次调用以来状态未被修改且 state_revision 匹配，
+    直接返回缓存结果，避免每次 O(n) 列表扫描。
+    """
+    global _compile_dirty, _compile_cache
+    # Double-check: dirty flag AND state_revision must match to use cache.
+    # This prevents cross-contamination when different state dicts are compiled.
+    # 双重检查：脏标志 AND state_revision 必须匹配才能使用缓存，
+    # 防止不同 state dict 之间的交叉污染。
+    incoming_rev = state.get("meta", {}).get("state_revision")
+    with _compile_cache_lock:
+        cached_rev = _compile_cache.get("meta", {}).get("state_revision") if _compile_cache else None
+        if not _compile_dirty and _compile_cache and incoming_rev == cached_rev:
+            return copy.deepcopy(_compile_cache)
+    # Compile outside the lock to avoid holding it during O(n) computation.
+    # 在鎖外編譯，避免在 O(n) 計算期間持有鎖。
+    compiled = copy.deepcopy(state)
+    result = _do_compile_core(compiled, refresh_identity=True, include_learning=True)
+    with _compile_cache_lock:
+        _compile_cache = result
+        _compile_dirty = False
+    return copy.deepcopy(result)

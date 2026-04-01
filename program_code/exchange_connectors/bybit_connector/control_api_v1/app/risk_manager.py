@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .portfolio_risk_control import PortfolioRiskControl, PortfolioRiskConfig
+from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
 
@@ -666,7 +667,7 @@ class RiskManager:
             data = {
                 "global_config": self._config.to_dict(),
                 "category_configs": {k: v.to_dict() for k, v in self._category_configs.items()},
-                "saved_ts_ms": int(time.time() * 1000),
+                "saved_ts_ms": now_ms(),
             }
             tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -833,9 +834,9 @@ class RiskManager:
             return False, "session_halted"
 
         # Cooldown active?
-        now_ms = int(time.time() * 1000)
-        if self._cooldown_until_ts_ms > now_ms:
-            remaining_s = (self._cooldown_until_ts_ms - now_ms) / 1000
+        now_ms_val = now_ms()
+        if self._cooldown_until_ts_ms > now_ms_val:
+            remaining_s = (self._cooldown_until_ts_ms - now_ms_val) / 1000
             return False, f"cooldown_active_{remaining_s:.0f}s_remaining"
 
         # Category allowed?
@@ -1008,7 +1009,7 @@ class RiskManager:
         close_orders: list[dict[str, Any]] = []
         positions = state.get("positions", {})
         sess = state.get("session", {})
-        now_ms_val = int(time.time() * 1000)
+        now_ms_val = now_ms()
 
         # Record current prices for ATR + spike detection / 记录当前价格（ATR + 尖刺检测）
         for sym, mp in market_prices.items():
@@ -1310,7 +1311,7 @@ class RiskManager:
             self._consecutive_losses += 1
             if self._consecutive_losses >= self._config.consecutive_loss_cooldown_count:
                 cooldown_ms = int(self._config.consecutive_loss_cooldown_minutes * 60 * 1000)
-                self._cooldown_until_ts_ms = int(time.time() * 1000) + cooldown_ms
+                self._cooldown_until_ts_ms = now_ms() + cooldown_ms
                 logger.info(
                     "Consecutive losses %d → cooldown %d min",
                     self._consecutive_losses, self._config.consecutive_loss_cooldown_minutes,
@@ -1326,7 +1327,7 @@ class RiskManager:
                             total_exposure_pct=_current_h0_snap.total_exposure_pct,
                             cooldown_until_ts_ms=self._cooldown_until_ts_ms,
                             kill_switch_active=_current_h0_snap.kill_switch_active,
-                            snapshot_ts_ms=int(time.time() * 1000),
+                            snapshot_ts_ms=now_ms(),
                         )
                         self._h0_gate.update_risk(_h0_cooldown_snap)
                         logger.info(
@@ -1357,7 +1358,7 @@ class RiskManager:
         self._consecutive_losses = 0
 
     def is_in_cooldown(self) -> bool:
-        return self._cooldown_until_ts_ms > int(time.time() * 1000)
+        return self._cooldown_until_ts_ms > now_ms()
 
     # ── Risk Context for AI Decision / AI 决策用风控上下文 ──
 
@@ -1371,7 +1372,7 @@ class RiskManager:
         """
         sess = state.get("session", {})
         positions = state.get("positions", {})
-        now_ms_val = int(time.time() * 1000)
+        now_ms_val = now_ms()
 
         # Drawdown status
         peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
@@ -1442,10 +1443,10 @@ class RiskManager:
     # ── Status / Serialization ──
 
     def get_status(self) -> dict[str, Any]:
-        now_ms = int(time.time() * 1000)
+        now_ms_val = now_ms()
         return {
             "consecutive_losses": self._consecutive_losses,
-            "cooldown_active": self._cooldown_until_ts_ms > now_ms,
+            "cooldown_active": self._cooldown_until_ts_ms > now_ms_val,
             "cooldown_until_ts_ms": self._cooldown_until_ts_ms,
             "trailing_stops": dict(self._trailing_stops),
             "is_simulated": True,
@@ -1468,7 +1469,7 @@ class RiskManager:
             "trailing_stops": dict(self._trailing_stops),
             "consecutive_losses": self._consecutive_losses,
             "cooldown_until_ts_ms": self._cooldown_until_ts_ms,
-            "last_updated_ts_ms": int(time.time() * 1000),
+            "last_updated_ts_ms": now_ms(),
         }
 
     def load_risk_state(self, risk_state: dict[str, Any]) -> None:

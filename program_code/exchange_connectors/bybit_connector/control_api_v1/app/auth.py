@@ -229,6 +229,20 @@ def require_scope(actor: AuthenticatedActor, scope: str) -> None:
         )
 
 
+def require_scope_and_identity(
+    actor: AuthenticatedActor, scope: str, envelope: RequestEnvelope
+) -> None:
+    """Enforce scope permission AND operator identity in one call.
+    一次調用同時檢查權限範圍和操作員身份。
+
+    Every write operation requires both checks. Combining them into one function
+    ensures neither can be accidentally omitted.
+    每個寫操作都需要兩項檢查。合併為一個函數確保不會遺漏任何一項。
+    """
+    require_scope(actor, scope)
+    verify_operator_identity(envelope, actor)
+
+
 def verify_operator_identity(envelope: RequestEnvelope, actor: AuthenticatedActor) -> None:
     """Verify that the request envelope's operator_id matches the authenticated actor.
     验证请求信封中的 operator_id 与已认证操作者是否一致。

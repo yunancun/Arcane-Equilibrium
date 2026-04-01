@@ -93,6 +93,10 @@ class Layer2CostTracker:
         self._config = Layer2Config()
         self._pricing = PricingTable()
         self._adaptive = AdaptiveBudgetState()
+        # B14: Initialize _ollama_stats in __init__ instead of lazy hasattr check.
+        # B14: 在 __init__ 中初始化 _ollama_stats，而非延迟的 hasattr 检查。
+        self._ollama_stats: dict = {}
+        self._ollama_stats_initialized: bool = False
         self._load()
 
     # ── Persistence / 持久化 ──
@@ -514,9 +518,12 @@ class Layer2CostTracker:
         # 委派到內部 Ollama 追蹤路徑以保持向後兼容。
         # 非 Ollama 供應商同樣使用相同的記憶體 + 持久化追蹤。
         with self._lock:
-            if not hasattr(self, "_ollama_stats"):
-                self._ollama_stats: dict = {}
             key = f"{provider}/{model}"
+            # B14: Log when first entry is populated (observability improvement).
+            # B14: 首次填充时记录日志（可观察性改进）。
+            if not self._ollama_stats_initialized and not self._ollama_stats:
+                logger.debug("OllamaStats tracker initialized / OllamaStats 追踪器已初始化")
+                self._ollama_stats_initialized = True
             entry = self._ollama_stats.setdefault(
                 key,
                 {"call_count": 0, "total_duration_ms": 0.0, "total_prompt_tokens": 0, "total_cost_usd": 0.0},
@@ -580,20 +587,26 @@ class Layer2CostTracker:
         Return in-memory Ollama call statistics per model.
         返回記憶體中每個模型的 Ollama 調用統計。
 
-        Returns empty dict if no calls have been recorded this session.
-        若本 session 未記錄任何調用，返回空字典。
+        B14: Returns a meaningful response even when empty (status + total_calls).
+        B14: 即使无数据也返回有意义的响应（status + total_calls）。
         """
         with self._lock:
-            if not hasattr(self, "_ollama_stats"):
-                return {}
+            if not self._ollama_stats:
+                # B14: Return meaningful empty response instead of bare {}
+                # B14: 返回有意义的空响应而非裸 {}
+                return {"status": "no_data", "total_calls": 0}
             # Strip "ollama/" prefix for backward compatibility with callers
             # expecting bare model names (e.g., "l1_9b" not "ollama/l1_9b").
             # 去除 "ollama/" 前綴，向後兼容調用者期望的裸模型名稱。
             result: dict = {}
+            total_calls = 0
             for key, val in self._ollama_stats.items():
                 short_key = key.split("/", 1)[1] if "/" in key else key
                 if key.startswith("ollama/") or "/" not in key:
                     result[short_key] = val
+                    total_calls += val.get("call_count", 0)
+            result["status"] = "active"
+            result["total_calls"] = total_calls
             return result
 
     def get_cost_edge_ratio(self) -> dict:

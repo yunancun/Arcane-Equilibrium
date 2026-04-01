@@ -40,7 +40,7 @@ ALLOWED_ROUTE_STATES = {
 }
 
 
-def now_ms() -> int:
+def now_ms() -> int:  # TODO: consolidate with app.utils.time_utils.now_ms
     return int(time.time() * 1000)
 
 
