@@ -194,17 +194,30 @@ class BybitDemoConnector:
         return self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
 
     def get_positions(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
-        """Get open positions."""
+        """
+        Get open positions. Bybit V5 requires settleCoin for linear/inverse when no symbol specified.
+        查詢持倉。Bybit V5 在未指定 symbol 時，linear/inverse 需要 settleCoin 參數。
+        """
         params: dict[str, Any] = {"category": category}
         if symbol:
             params["symbol"] = symbol
+        else:
+            # Bybit V5: linear needs settleCoin=USDT, inverse needs settleCoin=BTC
+            # 未指定 symbol 時必須帶 settleCoin，否則報 "Missing some parameters"
+            _settle_map = {"linear": "USDT", "inverse": "BTC"}
+            if category in _settle_map:
+                params["settleCoin"] = _settle_map[category]
         return self._request("GET", "/v5/position/list", params)
 
     def get_open_orders(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
-        """Get open orders."""
+        """Get open orders. Bybit V5 requires settleCoin for linear/inverse when no symbol."""
         params: dict[str, Any] = {"category": category}
         if symbol:
             params["symbol"] = symbol
+        else:
+            _settle_map = {"linear": "USDT", "inverse": "BTC"}
+            if category in _settle_map:
+                params["settleCoin"] = _settle_map[category]
         return self._request("GET", "/v5/order/realtime", params)
 
     def set_leverage(
@@ -446,8 +459,13 @@ class BybitDemoConnector:
         for cat in categories:
             # Pass 1: Cancel all regular (limit/market) orders
             # 第一遍：取消所有普通掛單
+            # Bybit V5: linear/inverse cancel-all also needs settleCoin
+            # Bybit V5：linear/inverse 批量取消也需要 settleCoin
             try:
-                result = self._request("POST", "/v5/order/cancel-all", {"category": cat})
+                cancel_params: dict[str, Any] = {"category": cat}
+                if cat in _settle:
+                    cancel_params["settleCoin" if cat == "linear" else "baseCoin"] = _settle[cat]
+                result = self._request("POST", "/v5/order/cancel-all", cancel_params)
                 if result.get("retCode") == 0:
                     n = len(result.get("result", {}).get("list", []))
                     summary["regular_canceled"] += n
