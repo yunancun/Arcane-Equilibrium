@@ -316,11 +316,16 @@ class BybitDemoConnector:
             "side": side.capitalize(),
             "orderType": order_type.capitalize() if order_type.lower() in ("market", "limit") else order_type,
             "qty": str(qty),
-            "timeInForce": time_in_force,
         }
+        # Bybit V5: Market orders use IOC internally; only send timeInForce for Limit orders.
+        # Market 單內部使用 IOC；只有 Limit 單才需要發 timeInForce。
+        if order_type.lower() != "market":
+            params["timeInForce"] = time_in_force
         if price is not None and order_type.lower() == "limit":
             params["price"] = str(price)
-        if reduce_only:
+        # Bybit V5: reduceOnly not valid for spot (no position concept).
+        # 現貨無持倉概念，不能帶 reduceOnly。
+        if reduce_only and category != "spot":
             params["reduceOnly"] = True
 
         result = self._request("POST", "/v5/order/create", params)
@@ -392,11 +397,9 @@ class BybitDemoConnector:
         if trigger_direction is None:
             trigger_direction = 2 if side.capitalize() == "Sell" else 1
 
-        # Round qty same as submit_order / 四舍五入到交易所步长精度
-        if qty >= 1.0:
-            qty = round(qty)
-        else:
-            qty = round(qty, 3)
+        # Round qty using shared function (consistent with submit_order, handles inverse)
+        # 使用共用函數取整（與 submit_order 一致，正確處理 inverse 整數張數）
+        qty = round_qty_for_exchange(qty, category=category)
         if qty <= 0:
             return {"retCode": -1, "retMsg": "qty rounds to zero, conditional order skipped"}
 
@@ -408,10 +411,14 @@ class BybitDemoConnector:
             "qty": str(qty),
             "triggerPrice": str(trigger_price),
             "triggerDirection": trigger_direction,
-            "reduceOnly": True,
-            "timeInForce": "GTC",
             "orderFilter": "StopOrder",
         }
+        # Bybit V5: Market conditional orders use IOC; only Limit needs timeInForce.
+        if order_type.lower() != "market":
+            params["timeInForce"] = "GTC"
+        # Bybit V5: reduceOnly not valid for spot.
+        if reduce_only and category != "spot":
+            params["reduceOnly"] = True
 
         result = self._request("POST", "/v5/order/create", params)
 
