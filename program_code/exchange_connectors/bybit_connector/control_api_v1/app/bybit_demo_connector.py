@@ -193,32 +193,61 @@ class BybitDemoConnector:
         """Get account balance."""
         return self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
 
+    # Bybit V5 linear covers BOTH USDT and USDC settled contracts.
+    # Queries/cancels that use settleCoin must iterate both to avoid missing USDC pairs (e.g. BTCPERP).
+    # Inverse contracts all settle in BTC only.
+    # Bybit V5 linear 同時包含 USDT 和 USDC 結算合約。
+    # 使用 settleCoin 的查詢/取消必須遍歷兩者，否則會漏掉 USDC 合約（如 BTCPERP）。
+    _SETTLE_COINS: dict[str, list[str]] = {
+        "linear": ["USDT", "USDC"],
+        "inverse": ["BTC"],
+    }
+
     def get_positions(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
         """
-        Get open positions. Bybit V5 requires settleCoin for linear/inverse when no symbol specified.
-        查詢持倉。Bybit V5 在未指定 symbol 時，linear/inverse 需要 settleCoin 參數。
+        Get open positions. Queries all settleCoin variants for linear (USDT + USDC).
+        查詢持倉。linear 品類查詢 USDT + USDC 兩種結算幣，合併結果。
         """
-        params: dict[str, Any] = {"category": category}
         if symbol:
-            params["symbol"] = symbol
-        else:
-            # Bybit V5: linear needs settleCoin=USDT, inverse needs settleCoin=BTC
-            # 未指定 symbol 時必須帶 settleCoin，否則報 "Missing some parameters"
-            _settle_map = {"linear": "USDT", "inverse": "BTC"}
-            if category in _settle_map:
-                params["settleCoin"] = _settle_map[category]
-        return self._request("GET", "/v5/position/list", params)
+            return self._request("GET", "/v5/position/list", {"category": category, "symbol": symbol})
+        coins = self._SETTLE_COINS.get(category, [])
+        if not coins:
+            return self._request("GET", "/v5/position/list", {"category": category})
+        # Query each settleCoin and merge results / 逐個查詢並合併
+        merged_list: list[dict] = []
+        last_result: dict[str, Any] = {}
+        for coin in coins:
+            result = self._request("GET", "/v5/position/list", {"category": category, "settleCoin": coin})
+            last_result = result
+            merged_list.extend(result.get("result", {}).get("list", []))
+        # Return merged into standard Bybit response shape
+        if last_result.get("retCode") == 0 or merged_list:
+            merged = dict(last_result)
+            merged.setdefault("result", {})["list"] = merged_list
+            return merged
+        return last_result
 
     def get_open_orders(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
-        """Get open orders. Bybit V5 requires settleCoin for linear/inverse when no symbol."""
-        params: dict[str, Any] = {"category": category}
+        """
+        Get open orders. Queries all settleCoin variants for linear (USDT + USDC).
+        查詢掛單。linear 品類查詢 USDT + USDC 兩種結算幣，合併結果。
+        """
         if symbol:
-            params["symbol"] = symbol
-        else:
-            _settle_map = {"linear": "USDT", "inverse": "BTC"}
-            if category in _settle_map:
-                params["settleCoin"] = _settle_map[category]
-        return self._request("GET", "/v5/order/realtime", params)
+            return self._request("GET", "/v5/order/realtime", {"category": category, "symbol": symbol})
+        coins = self._SETTLE_COINS.get(category, [])
+        if not coins:
+            return self._request("GET", "/v5/order/realtime", {"category": category})
+        merged_list: list[dict] = []
+        last_result: dict[str, Any] = {}
+        for coin in coins:
+            result = self._request("GET", "/v5/order/realtime", {"category": category, "settleCoin": coin})
+            last_result = result
+            merged_list.extend(result.get("result", {}).get("list", []))
+        if last_result.get("retCode") == 0 or merged_list:
+            merged = dict(last_result)
+            merged.setdefault("result", {})["list"] = merged_list
+            return merged
+        return last_result
 
     def set_leverage(
         self,
@@ -458,49 +487,45 @@ class BybitDemoConnector:
 
         categories = ["linear", "spot", "inverse"] if category == "all" else [category]
 
-        # Bybit V5: cancel-all needs settleCoin for linear/inverse.
-        # Use settleCoin (not baseCoin) for inverse to cover ALL inverse symbols
-        # (BTCUSD, ETHUSD, EOSUSD etc. all settle in BTC).
-        # Bybit V5：批量取消 linear/inverse 需要 settleCoin。
-        # Inverse 用 settleCoin=BTC（而非 baseCoin）以涵蓋所有 inverse 幣種。
-        _settle: dict[str, str] = {"linear": "USDT", "inverse": "BTC"}
-
         for cat in categories:
-            # Pass 1: Cancel all regular (limit/market) orders
-            # 第一遍：取消所有普通掛單
-            # Bybit V5: linear/inverse cancel-all also needs settleCoin
-            # Bybit V5：linear/inverse 批量取消也需要 settleCoin
-            try:
-                cancel_params: dict[str, Any] = {"category": cat}
-                if cat in _settle:
-                    cancel_params["settleCoin"] = _settle[cat]
-                result = self._request("POST", "/v5/order/cancel-all", cancel_params)
-                if result.get("retCode") == 0:
-                    n = len(result.get("result", {}).get("list", []))
-                    summary["regular_canceled"] += n
-                    if n:
-                        logger.info("Demo cancel-all regular [%s]: %d canceled", cat, n)
-                else:
-                    logger.warning("Demo cancel-all regular [%s] failed: %s", cat, result.get("retMsg"))
-            except Exception as e:
-                logger.warning("Demo cancel-all regular [%s] error: %s (non-fatal)", cat, e)
+            # Get all settleCoin variants for this category (linear=USDT+USDC, inverse=BTC)
+            # 取得該品類的所有結算幣（linear=USDT+USDC，inverse=BTC）
+            coins = self._SETTLE_COINS.get(cat, [None])  # None = no settleCoin needed (spot)
 
-            # Pass 2: Cancel all conditional (stop) orders
-            # 第二遍：取消所有條件止損單
-            try:
-                params: dict[str, Any] = {"category": cat, "orderFilter": "StopOrder"}
-                if cat in _settle:
-                    params["settleCoin"] = _settle[cat]
-                result = self._request("POST", "/v5/order/cancel-all", params)
-                if result.get("retCode") == 0:
-                    n = len(result.get("result", {}).get("list", []))
-                    summary["conditional_canceled"] += n
-                    if n:
-                        logger.info("Demo cancel-all conditional [%s]: %d canceled", cat, n)
-                else:
-                    logger.warning("Demo cancel-all conditional [%s] failed: %s", cat, result.get("retMsg"))
-            except Exception as e:
-                logger.warning("Demo cancel-all conditional [%s] error: %s (non-fatal)", cat, e)
+            for coin in coins:
+                # Pass 1: Cancel all regular (limit/market) orders
+                # 第一遍：取消所有普通掛單
+                try:
+                    cancel_params: dict[str, Any] = {"category": cat}
+                    if coin:
+                        cancel_params["settleCoin"] = coin
+                    result = self._request("POST", "/v5/order/cancel-all", cancel_params)
+                    if result.get("retCode") == 0:
+                        n = len(result.get("result", {}).get("list", []))
+                        summary["regular_canceled"] += n
+                        if n:
+                            logger.info("Demo cancel-all regular [%s/%s]: %d canceled", cat, coin or "-", n)
+                    else:
+                        logger.warning("Demo cancel-all regular [%s/%s] failed: %s", cat, coin or "-", result.get("retMsg"))
+                except Exception as e:
+                    logger.warning("Demo cancel-all regular [%s/%s] error: %s (non-fatal)", cat, coin or "-", e)
+
+                # Pass 2: Cancel all conditional (stop) orders
+                # 第二遍：取消所有條件止損單
+                try:
+                    params: dict[str, Any] = {"category": cat, "orderFilter": "StopOrder"}
+                    if coin:
+                        params["settleCoin"] = coin
+                    result = self._request("POST", "/v5/order/cancel-all", params)
+                    if result.get("retCode") == 0:
+                        n = len(result.get("result", {}).get("list", []))
+                        summary["conditional_canceled"] += n
+                        if n:
+                            logger.info("Demo cancel-all conditional [%s/%s]: %d canceled", cat, coin or "-", n)
+                    else:
+                        logger.warning("Demo cancel-all conditional [%s/%s] failed: %s", cat, coin or "-", result.get("retMsg"))
+                except Exception as e:
+                    logger.warning("Demo cancel-all conditional [%s/%s] error: %s (non-fatal)", cat, coin or "-", e)
 
         return summary
 
@@ -519,23 +544,28 @@ class BybitDemoConnector:
 
     def get_conditional_orders(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
         """
-        Get open conditional orders from Demo.
-        获取 Demo 环境的挂起条件单。
-
-        Bybit V5 /v5/order/realtime requires at least one of symbol/settleCoin/baseCoin
-        for linear category. We add settleCoin=USDT as default for linear so the query
-        succeeds without a specific symbol. Without this the API returns retCode=10001.
-        Bybit V5 linear 分类需要至少传 symbol/settleCoin/baseCoin 之一，
-        否则返回 retCode=10001。此处默认加 settleCoin=USDT 确保查询成功。
+        Get open conditional orders from Demo. Queries USDT + USDC for linear.
+        查詢 Demo 條件單。linear 品類查詢 USDT + USDC 兩種結算幣。
         """
-        params: dict[str, Any] = {"category": category, "orderFilter": "StopOrder", "limit": 50}
         if symbol:
-            params["symbol"] = symbol
-        elif category == "linear":
-            params["settleCoin"] = "USDT"  # Required for linear without symbol
-        elif category == "inverse":
-            params["settleCoin"] = "BTC"   # Default settle coin for inverse
-        return self._request("GET", "/v5/order/realtime", params)
+            return self._request("GET", "/v5/order/realtime",
+                                 {"category": category, "orderFilter": "StopOrder", "limit": 50, "symbol": symbol})
+        coins = self._SETTLE_COINS.get(category, [])
+        if not coins:
+            return self._request("GET", "/v5/order/realtime",
+                                 {"category": category, "orderFilter": "StopOrder", "limit": 50})
+        merged_list: list[dict] = []
+        last_result: dict[str, Any] = {}
+        for coin in coins:
+            result = self._request("GET", "/v5/order/realtime",
+                                   {"category": category, "orderFilter": "StopOrder", "limit": 50, "settleCoin": coin})
+            last_result = result
+            merged_list.extend(result.get("result", {}).get("list", []))
+        if last_result.get("retCode") == 0 or merged_list:
+            merged = dict(last_result)
+            merged.setdefault("result", {})["list"] = merged_list
+            return merged
+        return last_result
 
     def get_status(self) -> dict[str, Any]:
         """Get connector status."""
