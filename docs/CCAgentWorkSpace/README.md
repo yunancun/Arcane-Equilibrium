@@ -42,6 +42,7 @@
 | [TW/](TW/) | Technical Writer — 雙語注釋 + 工程日誌 | 專項審查層 |
 | [AI-E/](AI-E/) | AI Effectiveness Evaluator — AI 使用效果 | 分析層 |
 | [QA/](QA/) | Quality Assurance — 端到端集成驗收 | 分析層 |
+| [QC/](QC/) | Quantitative Consultant — 量化策略審計 | 顧問層 |
 
 ## 工作流程約束
 - 所有 Agent 報告先存 workspace，再回報 PM/用戶

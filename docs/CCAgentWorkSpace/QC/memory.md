@@ -1,0 +1,57 @@
+# QC — Quantitative Consultant 工作記憶
+
+> 初始化日期：2026-04-02
+> 本文件隨每次任務完成後更新，記錄關鍵發現、決策依據、需記住的教訓。
+
+---
+
+## 當前系統策略狀態（首次評估前快照）
+
+### 已實現策略（5 個）
+| 策略 | 類型 | 數學基礎 | QC 初步印象 |
+|------|------|---------|------------|
+| MA_Crossover | 趨勢跟蹤 | EMA(12)×EMA(26) + MACD | 標準技術指標，無獨特 edge |
+| BB_Reversion | 均值回歸 | %B < 0.1 + RSI 超賣 | 有回歸邏輯但缺乏統計檢驗（half-life？協整？） |
+| BB_Breakout | 突破 | 布林帶擠壓→擴張 | 波動率 regime 切換信號，需驗證假突破率 |
+| FundingRateArb | 套利 | 永續-現貨基差 | 結構性 edge 最清晰，但需精算成本 |
+| GridTrading | 網格 | 等距掛單 | 本質是做空波動率，趨勢市場風險極大 |
+
+### FA 審計已指出的關鍵問題
+- 「策略层标准 RSI/MACD/MA，无可证明的 alpha」
+- 策略選擇完成度僅 40%
+- 無 AI、無回測驗證、無動態倉位（部分已改善）
+
+### 系統基礎設施（與 QC 相關）
+- **BacktestEngine**：已建好（純函數指標 + KlineAdapter），但缺乏 walk-forward 和過擬合檢測
+- **EvolutionEngine**：網格搜索（max 50 組合），無貝葉斯優化
+- **TruthSourceRegistry**：AI confidence 上限 0.85，TTL by source
+- **RiskManager**：P0/P1/P2 三層規則型，無統計風控（VaR/CVaR）
+- **H0 Gate**：<1ms 確定性門控（freshness/health/eligibility/risk/cooldown）
+
+### 風控參數
+- risk_per_trade_pct = 3%（每筆最大虧損佔總額）
+- max_symbols = 25（最多同時部署 25 個幣種）
+- max_single_position_pct = 15%
+- max_leverage: linear=10.0, spot=1.0, inverse=50.0
+
+---
+
+## 待辦評估清單（尚未執行，按優先級排序）
+
+1. **[ ] 五策略 Edge 審計** — 逐一評估每個策略是否存在可論證的 alpha
+2. **[ ] FundingRateArb 精算** — 這是最可能有結構性 edge 的策略，需要精確成本建模
+3. **[ ] 回測方法論設計** — 為 BacktestEngine 補充 walk-forward + 過擬合檢測框架
+4. **[ ] 組合風險模型提案** — 從規則型 → 統計型風控的路線圖
+5. **[ ] 新策略方向研究** — 基於 crypto 市場結構性特徵的 alpha 來源識別
+
+---
+
+## 關鍵教訓（任務完成後追加）
+
+（尚無記錄，首次任務完成後開始累積）
+
+---
+
+## 報告索引
+
+（尚無報告，首次任務完成後開始累積）

@@ -794,7 +794,7 @@ Live 前置条件（M/N 前必须核验）：
 
 > **强制规则：项目中所有任务（实现、审查、评估、文档）必须按角色分工派发，禁止 Claude 主会话身兼多职直接全部完成。**
 
-### 13.1 15 个标准角色定义
+### 13.1 16 个标准角色定义
 
 #### 管理层（Planning & Governance）
 | 代号 | 全称 | 职责范围 |
@@ -830,6 +830,11 @@ Live 前置条件（M/N 前必须核验）：
 |------|------|---------|
 | **AI-E** | AI Effectiveness Evaluator（AI 效果评估员） | AI 使用效果、成本/性能分析、模型分配评估、Ollama 优化 |
 | **QA** | Quality Assurance（最终集成验收） | 端到端集成测试、上线前系统验收、跨模块一致性确认 |
+
+#### 顧問層（Advisory）
+| 代号 | 全称 | 职责范围 |
+|------|------|---------|
+| **QC** | Quantitative Consultant（量化顧問） | 策略數學基礎審計、風控模型設計、回測方法論、Alpha 研究、新策略提案（不寫代碼） |
 
 ---
 
@@ -913,6 +918,10 @@ PA 读取问题报告 → 派发 E1 并行修复 → E2 review → E4 回归 →
 | 合规复查 | CC · FA · PM | PA | E1 · E1a |
 | 测试补充 | E4 · E2 | PA | E1（除非需要实现）|
 | AI 优化 | AI-E · E1 · E2 | E5 | A3 · R4 |
+| 新策略設計 | QC · PA · E1 · E2 · E4 | FA · CC | A3 · R4 · TW |
+| 風控模型升級 | QC · PA · E1 · E2 · E4 | CC · E3 | A3 · TW |
+| 策略表現診斷 | QC · FA | PM · PA | E1（除非需要修復）|
+| 回測方法論 | QC · PA · E1 · E4 | E5 | A3 · R4 |
 
 ---
 
@@ -1025,7 +1034,7 @@ main_legacy.py 重構 Wave D：✅ legacy_routes — 1439→423 行（-1016）
 | E1 | `docs/CCAgentWorkSpace/E1/` | A3 | `docs/CCAgentWorkSpace/A3/` |
 | E1a | `docs/CCAgentWorkSpace/E1a/` | R4 | `docs/CCAgentWorkSpace/R4/` |
 | QA | `docs/CCAgentWorkSpace/QA/` | TW | `docs/CCAgentWorkSpace/TW/` |
-| AI-E | `docs/CCAgentWorkSpace/AI-E/` | | |
+| AI-E | `docs/CCAgentWorkSpace/AI-E/` | QC | `docs/CCAgentWorkSpace/QC/` |
 
 ---
 
