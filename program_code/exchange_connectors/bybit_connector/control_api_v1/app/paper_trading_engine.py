@@ -1762,7 +1762,7 @@ class PaperTradingEngine:
                     try:
                         result = self._demo_connector.submit_order(
                             symbol=sym, side=close_side, order_type="Market",
-                            qty=size, reduce_only=_reduce,
+                            qty=size, category=_cat, reduce_only=_reduce,
                         )
                         if result.get("retCode") == 0:
                             closed_symbols.add(sym)
