@@ -529,18 +529,36 @@ class BybitDemoConnector:
 
         return summary
 
+    def cancel_symbol_orders(self, symbol: str, category: str = "linear", order_filter: str | None = None) -> dict[str, Any]:
+        """
+        Cancel all orders for a specific symbol. Supports both regular and conditional orders.
+        取消某個幣種的所有掛單。支持普通單和條件單。
+
+        Args:
+            symbol: e.g. "BTCUSDT"
+            category: "linear", "spot", "inverse"
+            order_filter: None = all orders, "StopOrder" = conditional only, "Order" = regular only
+                          None = 全部，"StopOrder" = 僅條件單，"Order" = 僅普通單
+
+        Use cases / 使用場景:
+          - Cancel hedge orders when market direction changes / 市場方向變化時取消對沖掛單
+          - Replace stale limit orders with updated prices / 用新價格替換過期限價單
+          - Clean up before closing a position / 平倉前清理相關掛單
+        """
+        if not self._enabled:
+            return {"retCode": -1, "retMsg": "Demo connector not enabled"}
+        params: dict[str, Any] = {"category": category, "symbol": symbol}
+        if order_filter:
+            params["orderFilter"] = order_filter
+        return self._request("POST", "/v5/order/cancel-all", params)
+
     def cancel_all_conditional_orders(self, symbol: str, category: str = "linear") -> dict[str, Any]:
         """
         Cancel all conditional (stop) orders for a symbol on Demo.
         取消某个交易对的所有条件单（Demo 环境）。
+        Convenience wrapper around cancel_symbol_orders.
         """
-        if not self._enabled:
-            return {"retCode": -1, "retMsg": "Demo connector not enabled"}
-        return self._request("POST", "/v5/order/cancel-all", {
-            "category": category,
-            "symbol": symbol,
-            "orderFilter": "StopOrder",
-        })
+        return self.cancel_symbol_orders(symbol, category, order_filter="StopOrder")
 
     def get_conditional_orders(self, category: str = "linear", symbol: str = "") -> dict[str, Any]:
         """
