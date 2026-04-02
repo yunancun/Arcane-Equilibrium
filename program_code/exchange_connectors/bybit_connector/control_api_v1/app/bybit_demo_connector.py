@@ -458,9 +458,11 @@ class BybitDemoConnector:
 
         categories = ["linear", "spot", "inverse"] if category == "all" else [category]
 
-        # settle coin required for /v5/order/cancel-all StopOrder on linear/inverse
-        # Bybit cancel-all for stop orders needs settleCoin for linear, baseCoin for inverse
-        # 條件止損取消時 linear 需要 settleCoin，inverse 需要 baseCoin
+        # Bybit V5: cancel-all needs settleCoin for linear/inverse.
+        # Use settleCoin (not baseCoin) for inverse to cover ALL inverse symbols
+        # (BTCUSD, ETHUSD, EOSUSD etc. all settle in BTC).
+        # Bybit V5：批量取消 linear/inverse 需要 settleCoin。
+        # Inverse 用 settleCoin=BTC（而非 baseCoin）以涵蓋所有 inverse 幣種。
         _settle: dict[str, str] = {"linear": "USDT", "inverse": "BTC"}
 
         for cat in categories:
@@ -471,7 +473,7 @@ class BybitDemoConnector:
             try:
                 cancel_params: dict[str, Any] = {"category": cat}
                 if cat in _settle:
-                    cancel_params["settleCoin" if cat == "linear" else "baseCoin"] = _settle[cat]
+                    cancel_params["settleCoin"] = _settle[cat]
                 result = self._request("POST", "/v5/order/cancel-all", cancel_params)
                 if result.get("retCode") == 0:
                     n = len(result.get("result", {}).get("list", []))
@@ -488,7 +490,7 @@ class BybitDemoConnector:
             try:
                 params: dict[str, Any] = {"category": cat, "orderFilter": "StopOrder"}
                 if cat in _settle:
-                    params[_settle_key := "settleCoin" if cat == "linear" else "baseCoin"] = _settle[cat]
+                    params["settleCoin"] = _settle[cat]
                 result = self._request("POST", "/v5/order/cancel-all", params)
                 if result.get("retCode") == 0:
                     n = len(result.get("result", {}).get("list", []))
