@@ -246,6 +246,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-01--main_legacy_refactor_wave_a_to_e.md` | ★★★★ main_legacy.py 重構全記錄：5265→407 行（-92%），Wave A-E 共拆出 11 模塊，monkey-patch 延遲查找修復，E5 審查 build_review_queue bug 修復，§14 約定建立，3005 tests 零回歸 |
 | `2026-04-01--completed_todo_archive.md` | ★★ TODO 已完成項目歸檔：Wave 0-7 / Phase 1-3 / Audit Batch 1-7 / main_legacy 重構全部完成記錄 |
 | `2026-04-01--wave8_pa_reality_check_and_parallel_fix.md` | ★★★★ Wave 8 工作日誌：PA 69 項實況檢查 + 6 軌道×2 批並行修復 38/39 項 + strategist 拆分 + on_tick/mutator 拆分 + now_ms 統一 + +148 測試 |
+| `2026-04-02--batch9a_deterministic_adaptive_risk.md` | ★★★ Batch 9A 確定性自適應風控：QC 量化審查驅動 · ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用 · 修復 ATR 止損死代碼 bug · +66 測試 · 3703 passed |
 
 ### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
 

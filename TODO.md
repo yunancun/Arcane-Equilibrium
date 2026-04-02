@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-01（Wave 8 完成 38/39 項 · 3637+ tests）
+# 最後更新：2026-04-02（Batch 9A 確定性自適應風控完成 · 3703 tests）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 當前測試基準線
 
 ```
-3637+ passed / 22 failed / 17 errors（pre-existing failures 不影響本工作）
+3703 passed / 24 failed / 17 errors（pre-existing failures 不影響本工作）
 路徑：program_code/exchange_connectors/bybit_connector/control_api_v1/ + program_code/local_model_tools/
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
@@ -38,7 +38,107 @@ PM 排程計劃：
 
 ---
 
-## ██ Wave 8A — 安全+正確性（本週，~11h）
+## ██ Batch 9A — 確定性自適應風控（QC 量化審查驅動，~9h）
+
+> QC 審查報告驅動。確定性適應立即做，統計適應暫緩。E2+E4 強制。
+
+### [x] U-03：追蹤止損利潤約束（QC M1，P0）
+- **檔案**：`app/risk_manager.py`（+24 行）
+- **修復**：`activation - distance > c_round_pct × 1.5` 約束，自動提高 activation
+- **測試**：12 個新測試（`test_trailing_stop_cost_constraint.py`）
+- **E1 指派**：E1-Alpha
+- ✅ 完成：commit d9b102f（2026-04-02）
+
+### [x] U-04：成本感知入場門檻（QC M2，P0）
+- **檔案**：新建 `cost_gate.py`（185 行）+ `pipeline_bridge.py`（+207 行注入）
+- **修復**：ATR% < c_round/win_rate×1.3 → 拒絕開倉；fail-open + 每日安全閥
+- **測試**：22 個新測試（`test_cost_gate.py`）
+- **E1 指派**：E1-Beta
+- ✅ 完成：commit d9b102f（2026-04-02）
+
+### [x] U-05：動態參數寫入 round-trip 記錄（QC M4，P0）
+- **檔案**：`pipeline_bridge.py` + `analyst_agent.py`
+- **修復**：fees_paid 從硬編碼 0→真實值；新增 param_snapshot（ATR/stops/regime/confidence）
+- **測試**：16 個新測試（`test_u05_round_trip_fees_params.py`）
+- **E1 指派**：E1-Gamma
+- ✅ 完成：commit d9b102f（2026-04-02）
+
+### [x] U-09：ATR 快/慢雙窗口（QC S1，P1）
+- **檔案**：`indicator_engine.py`（+71 行）+ `pipeline_bridge.py`（ATR 取值修復）
+- **修復**：max(ATR_5, ATR_14) 保守估計；修復 ATR 止損死代碼 bug（key "atr" vs "ATR(14)"）
+- **測試**：18 個新測試（`test_atr_dual_window.py`）
+- **E1 指派**：E1-Delta
+- ✅ 完成：commit d9b102f（2026-04-02）
+
+---
+
+## ██ Batch 9B — 學習閉環接通（P0，~8h）
+
+> FA P0-GAP-1/2。業務完成度 52%→~65%。
+
+### [ ] U-01：學習反饋閉環（FA P0-GAP-1）
+- **檔案**：`app/strategist_agent.py`
+- **修復**：`_apply_pattern_insight()` 接入決策路徑
+- **工時**：4h
+- **E1 指派**：E1-Alpha
+
+### [ ] U-02：進化參數自動重部署（FA P0-GAP-2）
+- **檔案**：`evolution_engine.py` + `strategy_auto_deployer.py`
+- **修復**：EvolutionEngine best_params → Deployer；paper/demo 免確認（Operator 決策 2026-04-02）
+- **工時**：4h
+- **E1 指派**：E1-Beta
+
+---
+
+## ██ Batch 9C — 管線連通（P1，~6h）
+
+### [ ] U-06：H0 Gate shadow 模式觀察（FA P1-GAP-3）
+- **修復**：shadow 記錄 would-have-blocked 但不攔截，觀察 1 週後切 blocking（Operator 決策 2026-04-02）
+- **工時**：1h
+
+### [ ] U-07：Scanner→Deployer 自動接通（FA P1-GAP-5）
+- **工時**：2h
+
+### [ ] U-08：Backtest 生產環境啟用（FA P1-GAP-6）
+- **工時**：2h
+
+### [ ] U-15：L2 觸發門檻降低 50→20（FA P2-GAP-7）
+- **工時**：1h
+
+---
+
+## ██ Batch 9D — 策略 Edge 驗證（P1，~15h）
+
+### [ ] U-10：FundingRateArb 完整成本模型精算（QC S3）
+- **修復**：QC 認定唯一有可論證 edge 的策略；精算手續費+滑點+funding rate+basis risk+持倉天數
+- **工時**：6h
+
+### [ ] U-11：交易所條件單 SL/TP（FA P1-GAP-4）
+- **修復**：Bybit Demo 側掛 SL/TP 條件單（原則 9 雙重防線）
+- **工時**：6h
+
+### [ ] U-14：Kelly fraction 計算 + GUI 展示（QC S4）
+- **修復**：讓 Operator 直觀看到策略是否值得交易；Agent 根據 Kelly 自動分配資本（Operator 決策 2026-04-02 選項 C）
+- **工時**：3h
+
+---
+
+## ██ 延後項（P2-P3，數據積累後啟用）
+
+### [ ] U-12：統計適應硬門檻（200+ trades/regime）
+### [ ] U-13：參數空間 step 字段
+### [ ] U-16：Walk-forward harness（BacktestEngine 擴展）
+### [ ] U-17：Deflated Sharpe Ratio 自動計算
+### [ ] U-18：Jump detection（K 線 body > 3σ → 加寬止損）
+
+PM 排程計劃：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-02--adaptive_params_execution_plan.md`
+FA 功能規格：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-02--adaptive_params_functional_spec.md`
+PA 技術方案：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-02--adaptive_params_technical_design.md`
+QC 量化審查：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-02--adaptive_params_architecture_review.md`
+
+---
+
+## ██ Wave 8A — 安全+正確性（已完成，~11h）
 
 > PA 確認的影響正確性/安全性項目。E2+E4 強制。
 
@@ -345,6 +445,59 @@ Live 前置條件（M/N 前必須核驗）：
   - authority grant contract + execution adapter contract
   - 遠程訪問安全方案（HTTPS + CSP）
 ```
+
+---
+
+## ██ OpenClaw 深度整合（後續開發，非緊急）
+
+> 2026-04-03 PM/PA/FA 聯合分析結論。OpenClaw 定位不變（通信+運維層，不碰交易決策）。
+> Canvas A2UI 已評估排除（A2UI push 是 WIP 未完成 + 手機端前台限制不實用）。
+> ClawHub Skills 已評估排除（金融系統安全考量，不跑未審計第三方代碼）。
+
+### [ ] OC-1：Webhook 告警通道（優先級：高 · 預估 1-2 天 · 零 AI 成本）
+- **目標**：Python 偵測異常 → HTTP POST → OpenClaw webhook → Telegram 即時推送
+- **場景**：Bybit WS 斷線 / 單筆虧損超閾值 / 服務健康異常 / 風控觸發
+- **優勢**：OpenClaw 已處理 Telegram 認證/重試/格式化，比自寫 Bot 簡單
+- **前置**：需先配置 Telegram 通道（`openclaw channels add --channel telegram`）
+
+### [ ] OC-2：Telegram 通道配置（優先級：高 · 預估 0.5 天 · 零 AI 成本）
+- **目標**：配置 OpenClaw Telegram 通道，啟用消息推送能力
+- **當前**：`openclaw channels list` 顯示 0 個通道
+- **依賴**：OC-1 依賴此項
+
+### [ ] OC-3：多通道分級告警（優先級：中 · 預估 1 天 · 零 AI 成本）
+- **目標**：按優先級分流告警到不同通道
+- **方案**：P0（帳戶安全）→ Telegram 緊急群 / P1（風控）→ Telegram 常規群 / P3（調試）→ Slack/Discord
+- **依賴**：OC-2 完成後
+
+### [ ] OC-4：MCP PostgreSQL 接入（優先級：中 · 預估 1 天 · 按需 AI 成本）
+- **目標**：Operator 在 Telegram 用自然語言查交易數據（「最近 7 天哪個策略勝率最高？」）
+- **方案**：OpenClaw MCP → PostgreSQL 直連 → AI 整合回答
+- **成本**：每次查詢一次 LLM 調用，Operator 主動觸發，低頻可接受
+- **不碰交易決策**，純態勢感知
+
+### [ ] OC-5：Cron 精細化健康心跳（優先級：低 · 待 OpenClaw --exec flag 發佈）
+- **目標**：5 分鐘心跳推送系統健康狀態到 Telegram（announce 模式）
+- **阻塞**：當前 cron 每次觸發仍需一次 LLM turn，成本不可接受
+- **等待**：GitHub Issue #24597 / #29907（--exec flag 直接跑 shell 不經 LLM）
+- **替代**：可用系統 crontab + 直接調 Telegram Bot API 繞過 OpenClaw
+
+### [ ] OC-6：Sub-agent 異步回測（優先級：低 · 預估 2 天 · 週頻 AI 成本）
+- **目標**：週日 Evolution 網格搜索 spawn 為 OpenClaw sub-agent 後台執行
+- **方案**：coding-agent skill（已 ready）→ 委派 Claude Code 跑 BacktestEngine
+- **成本**：每週一次 LLM session，可接受
+
+---
+
+## ██ GUI 實時推送優化（後續開發，非緊急）
+
+### [ ] WS-1：FastAPI WebSocket/SSE 實時推送（優先級：中 · 預估 1-2 天）
+- **目標**：將現有 30 秒 JS 輪詢改為服務端推送，延遲降至 <100ms
+- **範圍**：PnL 數據 / 持倉狀態 / 價格更新 / 風控狀態
+- **方案**：FastAPI 原生 WebSocket 端點（`@app.websocket("/ws/live")`）
+- **優勢**：完全自主可控 / 零外部依賴 / FastAPI 原生支持
+- **評估背景**：評估 OpenClaw Canvas A2UI 後決定不採用（A2UI push WIP 未完成 + 手機前台限制），自建 WebSocket 是更直接的路徑
+- **依賴**：無，可獨立排期
 
 ---
 
