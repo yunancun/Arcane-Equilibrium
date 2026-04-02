@@ -337,9 +337,9 @@ class GlobalRiskConfig:
     max_stop_loss_pct: float = 5.0
     max_take_profit_pct: float = 20.0
     # Take profit enforcement: OFF by default — exits driven by strategy signals
-    # 止盈強制執行：默認開啟（動態 ATR-based）— Agent P2 為 None 時自動計算
-    # Dynamic TP enabled by default: exits at ATR×3.0 or 4% floor, regime-adjusted.
-    tp_enabled: bool = True
+    # 止盈強制執行：默認關閉 — 盈利端由 trailing stop 管理（P2 trailing_stop_enabled）
+    # TP off by default: profit-taking managed by trailing stop, not fixed TP.
+    tp_enabled: bool = False
 
     # Position sizing
     max_single_position_pct: float = 20.0
@@ -474,9 +474,11 @@ class AgentRiskParams:
     effective_stop_loss_pct: float | None = None
     effective_take_profit_pct: float | None = None
 
-    trailing_stop_enabled: bool = False
-    trailing_stop_activation_pct: float = 1.0
-    trailing_stop_distance_pct: float = 0.8
+    # Trailing stop: default ON — lets winners run, exits on pullback from peak.
+    # 追蹤止盈：默認開啟 — 讓盈利奔跑，從高點回撤時出場。
+    trailing_stop_enabled: bool = True
+    trailing_stop_activation_pct: float = 1.0   # Activate after +1% profit / 盈利 1% 後啟動
+    trailing_stop_distance_pct: float = 0.8     # Exit on 0.8% pullback from peak / 從高點回撤 0.8% 出場
 
     position_size_multiplier: float = 1.0  # 0.1 - 1.0
 
