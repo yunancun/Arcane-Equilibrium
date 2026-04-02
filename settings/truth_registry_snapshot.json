@@ -1,0 +1,34 @@
+[
+  {
+    "claim_id": "debounce_claim_1",
+    "pattern_text": "test persistence pattern",
+    "cognitive_level": "INFERENCE",
+    "evidence_source": "statistical_N=50",
+    "observation_count": 50,
+    "confidence": 0.65,
+    "applies_to_regime": "trending",
+    "applies_to_strategy": "ma_crossover",
+    "created_at_ms": 1775014624846,
+    "expires_at_ms": 1777606624846,
+    "is_active": true,
+    "superseded_by": null,
+    "falsification_count": 0,
+    "falsification_threshold": 5
+  },
+  {
+    "claim_id": "debounce_claim_2",
+    "pattern_text": "test persistence pattern",
+    "cognitive_level": "INFERENCE",
+    "evidence_source": "statistical_N=50",
+    "observation_count": 50,
+    "confidence": 0.65,
+    "applies_to_regime": "trending",
+    "applies_to_strategy": "ma_crossover",
+    "created_at_ms": 1775014624846,
+    "expires_at_ms": 1777606624846,
+    "is_active": true,
+    "superseded_by": null,
+    "falsification_count": 0,
+    "falsification_threshold": 5
+  }
+]

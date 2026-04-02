@@ -324,6 +324,62 @@ def compute_dynamic_stop_pct(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Trailing Stop Cost Constraint / 追蹤止損成本約束
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Bybit linear taker fee rate (0.055% per side)
+# Bybit 線性合約 taker 手續費率（每邊 0.055%）
+BYBIT_TAKER_FEE_RATE = 0.00055
+
+# Slippage tiers mirrored from paper_trading_engine for cost estimation.
+# Avoids cross-module import; values must stay in sync with PaperTradingEngine.
+# 滑點分級從 paper_trading_engine 鏡像，用於成本估算。
+# 避免跨模塊 import；數值需與 PaperTradingEngine 保持同步。
+_SLIPPAGE_TIERS: list[tuple[float, float]] = [
+    (1_000_000_000, 0.0001),   # >$1B turnover: 1 bps (BTC/ETH)
+    (100_000_000,   0.0002),   # >$100M: 2 bps
+    (10_000_000,    0.0005),   # >$10M: 5 bps
+    (1_000_000,     0.0015),   # >$1M: 15 bps
+    (0,             0.0030),   # <$1M: 30 bps (illiquid alts)
+]
+_DEFAULT_SLIPPAGE_RATE = 0.0005  # fallback: 5 bps
+
+
+def _estimate_slippage(volume_24h: float) -> float:
+    """
+    Estimate slippage rate from 24h volume (mirrors paper_trading_engine tiers).
+    根據 24h 成交量估算滑點率（鏡像 paper_trading_engine 分級表）。
+    """
+    if volume_24h <= 0:
+        return _DEFAULT_SLIPPAGE_RATE
+    for threshold, rate in _SLIPPAGE_TIERS:
+        if volume_24h >= threshold:
+            return rate
+    return _DEFAULT_SLIPPAGE_RATE
+
+
+def compute_round_trip_cost_pct(volume_24h: float = 0.0) -> float:
+    """
+    Compute estimated round-trip cost as a percentage (open + close).
+    計算預估的往返交易成本百分比（開倉 + 平倉）。
+
+    cost = (taker_fee + slippage) × 2 sides × 100 (to convert to %)
+    Large coins (BTC/ETH, >$1B vol): ~0.13%
+    Small coins (<$1M vol):           ~0.71%
+
+    Used by trailing stop to ensure locked profit exceeds transaction cost.
+    用於追蹤止損，確保鎖定利潤超過交易成本。
+    """
+    slippage = _estimate_slippage(volume_24h)
+    return (BYBIT_TAKER_FEE_RATE + slippage) * 2 * 100
+
+
+# Safety margin multiplier for cost constraint (1.5x = require 50% buffer over cost)
+# 成本約束安全邊際倍數（1.5x = 要求鎖定利潤超過成本 50%）
+TRAILING_COST_SAFETY_MARGIN = 1.5
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # P1: Global Risk Config / 全局风控配置
 # ═══════════════════════════════════════════════════════════════════════════════
 
