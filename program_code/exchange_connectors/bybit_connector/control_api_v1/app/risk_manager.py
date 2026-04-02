@@ -372,6 +372,7 @@ class GlobalRiskConfig:
         return {
             "max_stop_loss_pct": self.max_stop_loss_pct,
             "max_take_profit_pct": self.max_take_profit_pct,
+            "tp_enabled": self.tp_enabled,
             "max_single_position_pct": self.max_single_position_pct,
             "max_total_exposure_pct": self.max_total_exposure_pct,
             "max_correlated_exposure_pct": self.max_correlated_exposure_pct,
@@ -775,8 +776,13 @@ class RiskManager:
         Agent 在有效上限内调整 P2 参数。
         Values exceeding caps are clamped silently.
         """
+        _nullable_fields = {"effective_stop_loss_pct", "effective_take_profit_pct"}
         for k, v in updates.items():
-            if v is None or not hasattr(self._agent_params, k):
+            if not hasattr(self._agent_params, k):
+                continue
+            # Allow None for SL/TP (dynamic mode); skip None for other fields
+            # 允許 SL/TP 為 None（動態模式）；其他字段跳過 None
+            if v is None and k not in _nullable_fields:
                 continue
 
             if k == "effective_stop_loss_pct":

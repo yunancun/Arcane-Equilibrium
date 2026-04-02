@@ -61,6 +61,7 @@ def _risk_response(data: Any) -> dict[str, Any]:
 class GlobalConfigUpdate(BaseModel):
     max_stop_loss_pct: float | None = Field(default=None, gt=0, le=100)
     max_take_profit_pct: float | None = Field(default=None, gt=0, le=100)
+    tp_enabled: bool | None = None
     max_single_position_pct: float | None = Field(default=None, gt=0, le=100)
     max_total_exposure_pct: float | None = Field(default=None, gt=0, le=100)
     max_correlated_exposure_pct: float | None = Field(default=None, gt=0, le=100)
@@ -92,8 +93,10 @@ class CategoryConfigUpdate(BaseModel):
 
 
 class AgentAdjustRequest(BaseModel):
-    effective_stop_loss_pct: float | None = Field(default=None, gt=0)
-    effective_take_profit_pct: float | None = Field(default=None, gt=0)
+    # None = dynamic ATR-based mode; float = fixed override (gt=0 only when float)
+    # None = 動態 ATR 模式；浮點數 = 固定覆蓋值
+    effective_stop_loss_pct: float | None = None
+    effective_take_profit_pct: float | None = None
     trailing_stop_enabled: bool | None = None
     trailing_stop_activation_pct: float | None = Field(default=None, gt=0)
     trailing_stop_distance_pct: float | None = Field(default=None, gt=0)
@@ -213,7 +216,11 @@ def agent_adjust(
 ):
     """Agent adjusts P2 params within caps / Agent 在上限内调整 P2 参数"""
     rm = _get_risk_manager()
-    updates = body.model_dump(exclude_none=True)
+    # Only include explicitly-set fields (model_fields_set tracks what the caller sent).
+    # This allows sending null for SL/TP to enter dynamic mode.
+    # 只包含顯式傳入的字段（model_fields_set 追蹤調用者發送了什麼）。
+    # 這允許發送 null 讓 SL/TP 進入動態模式。
+    updates = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
     if not updates:
         return _risk_response({"message": "no_updates", "agent_params": rm.agent_params.to_dict()})
     params = rm.agent_adjust(updates)
