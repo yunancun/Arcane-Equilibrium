@@ -70,6 +70,12 @@ from .kline_manager import KlineBar, KlineManager
 
 logger = logging.getLogger(__name__)
 
+# ATR dual-window constants / ATR 双窗口常量
+# Fast window reacts quickly to regime changes; slow window provides stability.
+# 快窗口对 regime 切换反应迅速；慢窗口提供稳定性。
+ATR_FAST_PERIOD = 5
+ATR_SLOW_PERIOD = 14
+
 
 # =============================================================================
 # Default Indicator Set / 默认指标集
@@ -104,7 +110,8 @@ def create_default_indicators() -> list[IndicatorBase]:
 
         # Volatility indicators / 波动率指标
         BollingerBands(),   # BB(20,2) — 布林带
-        ATR(period=14),     # ATR(14) — 14 周期平均真实波幅
+        ATR(period=ATR_FAST_PERIOD),   # ATR(5)  — 5 周期快窗口（regime 快速切换时反应更快）
+        ATR(period=ATR_SLOW_PERIOD),   # ATR(14) — 14 周期慢窗口（经典 Wilder 周期）
     ]
 
 
@@ -384,6 +391,68 @@ class IndicatorEngine:
                     for (sym, tf), ts in self._last_update.items()
                 },
             }
+
+    def get_conservative_atr(
+        self, symbol: str, timeframe: str = "1h",
+    ) -> dict[str, float | None]:
+        """
+        Get conservative (max) ATR from fast/slow dual windows.
+        获取快/慢双窗口的保守（取大）ATR 值。
+
+        Returns max(ATR_fast, ATR_slow) as the conservative estimate.
+        When regime switches rapidly, the fast window reacts first,
+        so max() ensures we always use the more cautious value.
+        当 regime 快速切换时，快窗口先反应，取 max 确保使用更保守的值。
+
+        Returns:
+          {
+            "atr_fast": float|None,       # ATR(5) raw value
+            "atr_slow": float|None,       # ATR(14) raw value
+            "atr_conservative": float|None,  # max(fast, slow) — the recommended value
+            "atr_fast_pct": float|None,   # ATR(5) as % of price
+            "atr_slow_pct": float|None,   # ATR(14) as % of price
+            "atr_conservative_pct": float|None,  # max(fast_pct, slow_pct)
+          }
+        """
+        fast_key = f"ATR({ATR_FAST_PERIOD})"
+        slow_key = f"ATR({ATR_SLOW_PERIOD})"
+
+        with self._lock:
+            cached = self._cache.get((symbol, timeframe), {})
+            fast_data = cached.get(fast_key)
+            slow_data = cached.get(slow_key)
+
+        atr_fast = fast_data.get("atr") if isinstance(fast_data, dict) else None
+        atr_slow = slow_data.get("atr") if isinstance(slow_data, dict) else None
+        atr_fast_pct = fast_data.get("atr_percent") if isinstance(fast_data, dict) else None
+        atr_slow_pct = slow_data.get("atr_percent") if isinstance(slow_data, dict) else None
+
+        # Conservative = max of available values; None if both are None
+        # 保守值 = 可用值中取大；两者都 None 则返回 None
+        atr_conservative: float | None = None
+        if atr_fast is not None and atr_slow is not None:
+            atr_conservative = max(atr_fast, atr_slow)
+        elif atr_fast is not None:
+            atr_conservative = atr_fast
+        elif atr_slow is not None:
+            atr_conservative = atr_slow
+
+        atr_conservative_pct: float | None = None
+        if atr_fast_pct is not None and atr_slow_pct is not None:
+            atr_conservative_pct = max(atr_fast_pct, atr_slow_pct)
+        elif atr_fast_pct is not None:
+            atr_conservative_pct = atr_fast_pct
+        elif atr_slow_pct is not None:
+            atr_conservative_pct = atr_slow_pct
+
+        return {
+            "atr_fast": atr_fast,
+            "atr_slow": atr_slow,
+            "atr_conservative": atr_conservative,
+            "atr_fast_pct": atr_fast_pct,
+            "atr_slow_pct": atr_slow_pct,
+            "atr_conservative_pct": atr_conservative_pct,
+        }
 
     def clear_cache(self) -> None:
         """Clear all cached indicator values / 清除所有缓存的指标值"""

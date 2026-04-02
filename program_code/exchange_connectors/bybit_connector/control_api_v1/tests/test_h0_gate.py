@@ -1025,6 +1025,8 @@ class TestPipelineBridgeH0Integration:
         bridge._governance_hub = None
         bridge._executor_agent = None
         bridge._stats = {"intents_submitted": 0, "intents_rejected": 0}
+        bridge._daily_trade_count = 0
+        bridge._daily_trade_date = ""
 
         # 不應拋出異常
         bridge._process_pending_intents()
@@ -1046,6 +1048,8 @@ class TestPipelineBridgeH0Integration:
         bridge._governance_hub = None
         bridge._executor_agent = None
         bridge._stats = {"intents_submitted": 0, "intents_rejected": 0}
+        bridge._daily_trade_count = 0
+        bridge._daily_trade_date = ""
 
         # 不應拋出異常
         bridge._process_pending_intents()

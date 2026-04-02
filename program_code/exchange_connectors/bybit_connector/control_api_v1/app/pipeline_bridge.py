@@ -151,6 +151,14 @@ class PipelineBridge:
         # Tick size cache: symbol → float, for Demo stop-loss price rounding precision
         self._symbol_registry: Any = None  # SymbolCategoryRegistry（外部注入）
 
+        # U-04: Cost-aware entry gate — reject trades where ATR < round-trip cost threshold
+        # U-04：成本感知入場門檻 — ATR 低於來回成本閾值時拒絕開倉
+        self._cost_gate_enabled: bool = True
+        # Daily trade counter — reset on date change for safety-valve logic
+        # 每日成交計數器 — 日期變更時重置，用於安全閥邏輯
+        self._daily_trade_count: int = 0
+        self._daily_trade_date: str = ""  # "YYYY-MM-DD" / 當日日期字串
+
         self._stats = {
             "ticks_received": 0,
             "intents_submitted": 0,
@@ -579,6 +587,57 @@ class PipelineBridge:
             except Exception:
                 pass  # Non-fatal: orchestrator may not support this yet / 非致命
 
+    # ── U-04 helper: ATR% lookup for cost gate ──
+    # U-04 輔助方法：從 IndicatorEngine 獲取 ATR% 用於成本門檻
+
+    def _get_atr_pct_for_cost_gate(self, symbol: str) -> float | None:
+        """
+        Retrieve ATR% from IndicatorEngine cache for cost gate evaluation.
+        從 IndicatorEngine 快取中獲取 ATR% 用於成本門檻評估。
+
+        Returns ATR as percentage of price (e.g. 1.5 = 1.5%), or None if unavailable.
+        返回 ATR 佔價格百分比（如 1.5 表示 1.5%），不可用時返回 None。
+        """
+        if not self._ie:
+            return None
+        try:
+            # Try 1h timeframe first (most common for strategy decisions)
+            # 先嘗試 1h 時間框架（策略決策最常用）
+            atr_result = self._ie.get_indicator(symbol, "1h", "ATR(14)")
+            if atr_result and "atr_percent" in atr_result:
+                return float(atr_result["atr_percent"])
+            # Fallback to 5m if 1h not available / 1h 不可用時回退到 5m
+            atr_result = self._ie.get_indicator(symbol, "5m", "ATR(14)")
+            if atr_result and "atr_percent" in atr_result:
+                return float(atr_result["atr_percent"])
+        except Exception:
+            pass  # fail-open: return None → cost gate will pass through
+        return None
+
+    def _get_volume_24h(self, symbol: str) -> float:
+        """
+        Get cached 24h volume for a symbol (used by cost gate for slippage lookup).
+        獲取快取的 24h 成交量（成本門檻用於滑點查找）。
+
+        Returns 0.0 if unavailable (→ default slippage tier).
+        不可用時返回 0.0（→ 使用默認滑點分級）。
+        """
+        if self._engine and hasattr(self._engine, "_volume_cache"):
+            vol = self._engine._volume_cache.get(symbol, 0.0)
+            return float(vol) if vol else 0.0
+        return 0.0
+
+    def _maybe_reset_daily_trade_count(self) -> None:
+        """
+        Reset daily trade counter on date change (UTC).
+        日期變更時重置每日成交計數器（UTC）。
+        """
+        import datetime
+        today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        if today != self._daily_trade_date:
+            self._daily_trade_count = 0
+            self._daily_trade_date = today
+
     def _process_pending_intents(self) -> None:
         """
         Orchestrator: collect intents, gate each one, submit approved, run post-execution hooks.
@@ -587,7 +646,7 @@ class PipelineBridge:
         APR01-HIGH-4 refactor: this method was a 462-line mega-method. Now delegates to
         four focused sub-methods while preserving exact behavioral semantics:
           1. _collect_pending_intents()    — gather + cap
-          2. _gate_intent()               — H0 / governance / Guardian / edge filter
+          2. _gate_intent()               — H0 / governance / cost gate / Guardian / edge filter
           3. _submit_approved_intent()     — lease + OMS + Demo sync + stop registration
           4. _post_execution_hooks()       — round-trip / learning / deployer notify / Telegram
 
@@ -604,6 +663,10 @@ class PipelineBridge:
         注意：已移除对 StrategistAgent.collect_pending_intents() 的调用（APR01-P1-3）。
         该方法在 TD-2 中已废弃（始终返回 []），策略意图现通过 MessageBus → add_trade_intent() 路径传递。
         """
+        # U-04: Reset daily trade counter on date change (for safety-valve logic)
+        # U-04：日期變更時重置每日成交計數器（用於安全閥邏輯）
+        self._maybe_reset_daily_trade_count()
+
         intents = self._collect_pending_intents()
         if not intents:
             return
@@ -659,6 +722,7 @@ class PipelineBridge:
             with self._lock:
                 for key, delta in _local_stats.items():
                     if key in ("intents_h0_blocked", "intents_lease_failed",
+                               "intents_cost_rejected",
                                "demo_synced", "demo_diverged", "demo_spot_skipped"):
                         # These keys may not exist yet — use setdefault for first access
                         # 这些键可能尚不存在 — 首次访问时用 setdefault 初始化
@@ -722,9 +786,10 @@ class PipelineBridge:
           1. Perception plane cognitive honesty check (Principle 10)
           2. H0 Gate deterministic filter — fail-closed (Principle 5: survival > profit)
           3. Governance Hub authorization — fail-closed
-          4. Dynamic qty calculation + exchange rounding
-          5. Guardian Agent verdict — fail-closed (DOC-01 §5.6)
-          6. Edge filter — advisory only (logged, not blocking)
+          4. Cost gate — ATR vs round-trip cost check — fail-open (Principle 13)
+          5. Dynamic qty calculation + exchange rounding
+          6. Guardian Agent verdict — fail-closed (DOC-01 §5.6)
+          7. Edge filter — advisory only (logged, not blocking)
 
         門控管線（按順序）：
           1. 感知平面認知誠實檢查（原則 10）
@@ -823,6 +888,38 @@ class PipelineBridge:
                 _bump(_local_stats, "intents_rejected")
                 self._mark_intent(intent, "rejected_governance")
                 return None
+
+        # ── U-04: Cost-aware entry gate (deterministic, fail-open) ──
+        # U-04：成本感知入場門檻（確定性規則，數據缺失時 fail-open）
+        # Reject entries where expected volatility (ATR%) is too low to cover round-trip costs.
+        # 當預期波動率（ATR%）不足以覆蓋來回交易成本時拒絕開倉。
+        if self._cost_gate_enabled:
+            try:
+                from local_model_tools.cost_gate import should_reject_for_cost
+                _atr_pct = self._get_atr_pct_for_cost_gate(intent.symbol)
+                _volume_24h = self._get_volume_24h(intent.symbol)
+                _cost_reject, _cost_reason = should_reject_for_cost(
+                    symbol=intent.symbol,
+                    atr_pct=_atr_pct,
+                    win_rate=0.5,  # default; future: dynamic from round-trip stats
+                    daily_trade_count=self._daily_trade_count,
+                    volume_24h=_volume_24h,
+                )
+                if _cost_reject:
+                    _bump(_local_stats, "intents_cost_rejected")
+                    logger.warning(
+                        "Cost gate rejected %s %s: %s / 成本門檻拒絕",
+                        intent.symbol, getattr(intent, "side", "?"), _cost_reason,
+                    )
+                    self._mark_intent(intent, "rejected_cost_gate")
+                    return None
+            except Exception as _cost_err:
+                # Fail-open: cost gate error must not block trading
+                # Fail-open：成本門檻異常不能阻塞交易
+                logger.warning(
+                    "Cost gate error (fail-open): %s / 成本門檻異常（fail-open）",
+                    _cost_err,
+                )
 
         # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
         # Batch 8：Guardian Agent 作为主门控（fail-closed）
@@ -1135,6 +1232,9 @@ class PipelineBridge:
             return
 
         _bump(_local_stats, "intents_accepted")
+        # U-04: Increment daily trade counter for cost gate safety-valve
+        # U-04：遞增每日成交計數器（成本門檻安全閥用）
+        self._daily_trade_count += 1
         self._mark_intent(intent, "submitted")
         logger.info(
             "Intent submitted: %s %s %s qty=%.6f / 意图已提交",
@@ -1212,7 +1312,10 @@ class PipelineBridge:
             if close_pnl != 0.0:
                 # Position closed — round-trip complete
                 # 持仓已关闭 — 一轮交易完成
-                self._on_round_trip_complete(intent, fill_price, close_pnl)
+                # U-05: Extract close fee from fill record for round-trip cost accounting.
+                # U-05：从成交记录提取平仓费用用于 round-trip 成本核算。
+                _close_fee = fill.get("fee", 0.0)
+                self._on_round_trip_complete(intent, fill_price, close_pnl, close_fee=_close_fee)
             else:
                 # New position opened — start tracking
                 # 新持仓开仓 — 开始追踪（用 rounded qty 確保與 Demo 一致）
@@ -1400,11 +1503,19 @@ class PipelineBridge:
                             _close_pnl = (_exit_price - _entry_price) * _qty
                         else:
                             _close_pnl = (_entry_price - _exit_price) * _qty
+                        # U-05: Extract close fee from stop order fill for round-trip cost.
+                        # U-05：从止损单成交记录提取平仓费用。
+                        _stop_close_fee = 0.0
+                        if isinstance(result, dict):
+                            _stop_fills = result.get("fills", [])
+                            if _stop_fills:
+                                _stop_close_fee = float(_stop_fills[0].get("fee", 0.0))
                         self._emit_round_trip(
                             symbol=_stop_symbol,
                             strategy_name=_stop_strategy,
                             exit_price=_exit_price,
                             close_pnl=_close_pnl,
+                            close_fee=_stop_close_fee,
                         )
                     except Exception as _rt_err:
                         # Non-fatal: do not let learning pipeline injection block stop processing.
@@ -1658,6 +1769,27 @@ class PipelineBridge:
         regime = (intent.metadata or {}).get("_regime", "unknown") if intent.metadata else "unknown"
         key = f"{strategy_name}:{symbol}"
 
+        # U-05: Capture entry fee from the fill record for accurate round-trip cost accounting.
+        # U-05：从成交记录中获取开仓费用，用于精确的 round-trip 成本核算。
+        _entry_fee = 0.0
+        if self._engine:
+            try:
+                _state = self._engine.get_state()
+                _fills = _state.get("fills", [])
+                # Find the most recent fill for this symbol (entry fill).
+                # 查找该 symbol 最近一次成交（开仓成交）。
+                for _f in reversed(_fills):
+                    if _f.get("symbol") == symbol:
+                        _entry_fee = float(_f.get("fee", 0.0))
+                        break
+            except Exception:
+                pass  # fail-open: missing fee won't block trading / 缺失费用不阻塞交易
+
+        # U-05: Capture confidence from intent for param_snapshot.
+        # U-05：从 intent 获取置信度用于参数快照。
+        _confidence = getattr(intent, "confidence", 0.0) or 0.0
+        _strategy = getattr(intent, "strategy_name", strategy_name) or strategy_name
+
         with self._lock:
             self._open_positions[key] = {
                 "symbol": symbol,
@@ -1667,6 +1799,12 @@ class PipelineBridge:
                 "qty": qty,
                 "entry_ts_ms": now_ms(),
                 "regime": regime,
+                # U-05: Entry fee for round-trip cost accounting (Principle 8 auditability).
+                # U-05：开仓费用，用于 round-trip 成本审计（原则 8 可审计性）。
+                "entry_fee": _entry_fee,
+                # U-05: Signal confidence at entry time.
+                # U-05：开仓时的信号置信度。
+                "confidence": _confidence,
             }
 
         # Write regime to paper engine position so RiskManager can use it for stop/TP/time scaling
@@ -1682,13 +1820,15 @@ class PipelineBridge:
             except Exception:
                 logger.debug("Could not write regime to position (non-fatal): %s", symbol)
 
-        # Compute ATR-based stop percentage (shared by StopManager + exchange conditional)
-        # 计算 ATR 止损百分比（本地止损 + 交易所条件单共用）
-        atr_stop_pct = 5.0  # default hard stop
+        # U-09: ATR dual-window stop — use max(ATR_fast, ATR_slow) for conservative estimate
+        # U-09：ATR 双窗口止损 — 取 max(快窗口, 慢窗口) 作为保守估计
+        # Fast window (5-period) reacts quicker to regime changes; slow (14) is stable.
+        # 快窗口（5 期）对 regime 切换反应更快；慢窗口（14 期）更稳定。取大值更保守。
+        atr_stop_pct = 5.0  # default hard stop / 默认硬止损
         if self._ie and fill_price > 0:
             try:
-                indics_atr = self._ie.get_indicators(symbol, "1h")
-                atr_raw = indics_atr.get("atr") if indics_atr else None
+                atr_data = self._ie.get_conservative_atr(symbol, "1h")
+                atr_raw = atr_data.get("atr_conservative")
                 if atr_raw and atr_raw > 0:
                     atr_stop_pct = min(15.0, max(2.0, (atr_raw * 2.0 / fill_price) * 100))
             except Exception as e:
@@ -1731,6 +1871,32 @@ class PipelineBridge:
                 )
             except Exception:
                 logger.exception("StopManager track error (non-fatal) / 止损追踪异常（非致命）")
+
+        # U-05: Snapshot dynamic parameters at entry time for round-trip auditing (Principle 8).
+        # U-05：开仓时快照动态参数，用于 round-trip 审计回溯（原则 8 可审计性）。
+        # These values are stored in _open_positions and written to round-trip records at close.
+        # 这些值存储在 _open_positions 中，平仓时写入 round-trip 记录。
+        _atr_pct = (atr_stop_pct / 2.0) if fill_price > 0 else 0.0  # ATR/price approx
+        _trail_activation_pct = atr_stop_pct * 0.5  # trailing activates at 50% of stop distance
+        _c_round_pct = 0.0
+        if fill_price > 0 and qty > 0:
+            # Estimate round-trip cost as 2x entry fee / notional
+            # 估算 round-trip 成本 = 2 倍开仓费 / 名义金额
+            _notional = fill_price * qty
+            _c_round_pct = (2 * _entry_fee / _notional * 100) if _notional > 0 else 0.0
+
+        with self._lock:
+            if key in self._open_positions:
+                self._open_positions[key]["param_snapshot"] = {
+                    "atr_pct": round(_atr_pct, 4),
+                    "stop_distance_pct": round(atr_stop_pct, 4),
+                    "trail_activation_pct": round(_trail_activation_pct, 4),
+                    "trail_distance_pct": round(trailing_pct if self._stop_mgr else 5.0, 4),
+                    "c_round_pct": round(_c_round_pct, 6),
+                    "regime": regime,
+                    "strategy_name": strategy_name,
+                    "confidence": round(_confidence, 4),
+                }
 
         # ── Batch 11: Exchange conditional stop-loss (DOC-01 §5.9 dual defense) ──
         # Batch 11：交易所条件止损单（DOC-01 §5.9 双重防线）
@@ -1880,12 +2046,22 @@ class PipelineBridge:
         except Exception as e:
             logger.debug("Learning tier gate error (non-fatal): %s", e)
 
-    def _emit_round_trip(self, symbol: str, strategy_name: str, exit_price: float, close_pnl: float) -> None:
+    def _emit_round_trip(
+        self, symbol: str, strategy_name: str, exit_price: float, close_pnl: float,
+        *, close_fee: float = 0.0,
+    ) -> None:
         """
         Core round-trip completion handler — shared by intent-path and tick-path closes.
         Pops _open_positions, fires G1 + E1 callbacks, unregisters from StopManager.
+
+        U-05: Now includes real fees_paid (entry_fee + close_fee) and param_snapshot in
+        round-trip records for accurate cost attribution and parameter auditing (Principle 8).
+
         核心 round-trip 完成处理器 — 被意图路径和 tick 路径共用。
         弹出 _open_positions，触发 G1 + E1 回调，从 StopManager 取消注册。
+
+        U-05：现在在 round-trip 记录中包含真实费用（开仓费 + 平仓费）和参数快照，
+        用于精确的成本归因和参数审计（原则 8 可审计性）。
         """
         key = f"{strategy_name}:{symbol}"
 
@@ -1897,6 +2073,8 @@ class PipelineBridge:
         entry_ts_ms = now_ms()
         entry_price = 0.0
         qty = 0.0
+        entry_fee = 0.0
+        param_snapshot: dict = {}
 
         if pos_info:
             hold_ms = now_ms() - pos_info.get("entry_ts_ms", now_ms())
@@ -1904,6 +2082,24 @@ class PipelineBridge:
             entry_ts_ms = pos_info.get("entry_ts_ms", now_ms())
             entry_price = pos_info.get("entry_price", 0.0)
             qty = pos_info.get("qty", 0.0)
+            # U-05: Extract entry fee and param_snapshot stored at open time.
+            # U-05：提取开仓时保存的入场费用和参数快照。
+            entry_fee = pos_info.get("entry_fee", 0.0)
+            param_snapshot = pos_info.get("param_snapshot", {})
+
+        # U-05: Compute real round-trip fees = entry_fee + close_fee.
+        # U-05：计算真实 round-trip 费用 = 开仓费 + 平仓费。
+        fees_paid = entry_fee + close_fee
+
+        # U-05: Compute slippage if entry_price is available.
+        # Slippage = |exit_price - entry_price| normalized by entry_price.
+        # For stop-loss exits this represents the actual price deviation.
+        # U-05：如果有入场价格，计算滑点 = |出场价 - 入场价| / 入场价。
+        slippage = 0.0
+        slippage_estimated = True
+        if entry_price > 0 and exit_price > 0:
+            slippage = abs(exit_price - entry_price) / entry_price
+            slippage_estimated = False
 
         # Untrack from StopManager (position is closed) / 从 StopManager 取消追踪
         if self._stop_mgr:
@@ -1968,9 +2164,9 @@ class PipelineBridge:
                     exit_timestamp=exit_dt,
                     market_prices_at_entry={},  # Empty dict as default
                     market_prices_at_exit={},   # Empty dict as default
-                    fees_paid=0.0,              # Could be enhanced with actual fees
-                    slippage=0.0,               # Could be enhanced with actual slippage
-                    ai_cost=0.0,                # Could be enhanced with model costs
+                    fees_paid=fees_paid,        # U-05: Real fees (entry + close)
+                    slippage=slippage,          # U-05: Real price slippage
+                    ai_cost=0.0,               # Could be enhanced with model costs
                 )
 
                 # Log attribution results for learning_tier
@@ -2011,6 +2207,10 @@ class PipelineBridge:
                         "hold_ms": hold_ms,
                         "regime": regime,
                         "timestamp_ms": now_ms(),
+                        # U-05: Real fees and parameter snapshot for auditing (Principle 8).
+                        # U-05：真实费用和参数快照用于审计（原则 8）。
+                        "fees_paid": fees_paid,
+                        "param_snapshot": param_snapshot,
                     },
                 )
                 self._message_bus.send(rt_msg)
@@ -2035,19 +2235,24 @@ class PipelineBridge:
                 pass  # Non-fatal / 非致命
 
         logger.info(
-            "Round-trip complete: %s %s pnl=%.4f hold=%.1fh regime=%s / 交易完成",
-            strategy_name, symbol, close_pnl, hold_ms / 3600000, regime,
+            "Round-trip complete: %s %s pnl=%.4f fees=%.6f hold=%.1fh regime=%s / 交易完成",
+            strategy_name, symbol, close_pnl, fees_paid, hold_ms / 3600000, regime,
         )
 
-    def _on_round_trip_complete(self, intent: Any, exit_price: float, close_pnl: float) -> None:
+    def _on_round_trip_complete(
+        self, intent: Any, exit_price: float, close_pnl: float,
+        *, close_fee: float = 0.0,
+    ) -> None:
         """
         Called when a position is closed via immediate market-order fill in submit_order().
         Delegates to _emit_round_trip.
+        U-05: Now passes close_fee for accurate round-trip cost accounting.
         通过 submit_order() 即时成交路径平仓时调用，委托给 _emit_round_trip。
+        U-05：现在传递平仓费用用于精确的 round-trip 成本核算。
         """
         symbol = intent.symbol
         strategy_name = getattr(intent, "strategy_name", "unknown")
-        self._emit_round_trip(symbol, strategy_name, exit_price, close_pnl)
+        self._emit_round_trip(symbol, strategy_name, exit_price, close_pnl, close_fee=close_fee)
 
     def on_tick_result(self, tick_result: dict) -> None:
         """
@@ -2107,7 +2312,9 @@ class PipelineBridge:
                     close_pnl = 0.0
 
                 strategy_name = pos_info.get("strategy_name", "unknown")
-                self._emit_round_trip(symbol, strategy_name, fill_price, close_pnl)
+                # U-05: Pass close_fee for accurate round-trip cost accounting.
+                # U-05：传递平仓费用用于精确的 round-trip 成本核算。
+                self._emit_round_trip(symbol, strategy_name, fill_price, close_pnl, close_fee=close_fee)
                 already_emitted.add(key)
                 break  # one emit per tracked position per tick
 

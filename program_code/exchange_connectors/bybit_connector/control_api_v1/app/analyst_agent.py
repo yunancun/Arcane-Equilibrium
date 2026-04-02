@@ -61,7 +61,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TradeRecord:
-    """A completed round-trip trade record / 已完成的交易回合记录"""
+    """
+    A completed round-trip trade record / 已完成的交易回合记录
+
+    U-05: Added fees_paid and param_snapshot for accurate cost attribution
+    and parameter auditing (Principle 8 auditability).
+    U-05：新增 fees_paid 和 param_snapshot 用于精确成本归因和参数审计（原则 8）。
+    """
     trade_id: str = ""
     symbol: str = ""
     strategy: str = ""
@@ -72,10 +78,19 @@ class TradeRecord:
     hold_ms: int = 0
     regime: str = "unknown"
     timestamp_ms: int = 0
+    # U-05: Real round-trip fees (entry_fee + close_fee) / 真实 round-trip 费用
+    fees_paid: float = 0.0
+    # U-05: Dynamic parameters snapshot at entry time / 开仓时动态参数快照
+    param_snapshot: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_win(self) -> bool:
         return self.pnl > 0
+
+    @property
+    def net_pnl(self) -> float:
+        """PnL after fees / 扣除费用后的净盈亏"""
+        return self.pnl - self.fees_paid
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -90,6 +105,11 @@ class TradeRecord:
             "regime": self.regime,
             "timestamp_ms": self.timestamp_ms,
             "is_win": self.is_win,
+            # U-05: Include fees and param_snapshot in serialized output.
+            # U-05：在序列化输出中包含费用和参数快照。
+            "fees_paid": self.fees_paid,
+            "net_pnl": self.net_pnl,
+            "param_snapshot": self.param_snapshot,
         }
 
 
@@ -249,6 +269,11 @@ class AnalystAgent:
                 hold_ms=int(payload.get("hold_ms", 0)),
                 regime=payload.get("regime", "unknown"),
                 timestamp_ms=int(payload.get("timestamp_ms", int(time.time() * 1000))),
+                # U-05: Read fees and param_snapshot with .get() for backward compat.
+                # Old round-trip messages without these fields default to 0/empty.
+                # U-05：用 .get() 读取费用和参数快照，确保向后兼容。
+                fees_paid=float(payload.get("fees_paid", 0.0)),
+                param_snapshot=payload.get("param_snapshot", {}),
             )
             self.analyze_trade(record)
         except Exception as e:

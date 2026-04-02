@@ -1229,6 +1229,30 @@ class RiskManager:
                 else:
                     distance = base_distance
 
+                # U-03: Trailing stop profit constraint — ensure locked profit > round-trip cost
+                # If activation - distance <= cost, trailing triggers lock in a loss after fees.
+                # Auto-raise activation so locked profit >= cost × safety margin.
+                # U-03: 追蹤止損利潤約束 — 確保鎖定利潤 > 往返交易成本
+                # 若 activation - distance <= 成本，追蹤觸發後扣除手續費反而虧錢。
+                # 自動提高 activation 使鎖定利潤 >= 成本 × 安全邊際。
+                vol_24h = pos.get("volume_24h", 0.0)
+                c_round_pct = compute_round_trip_cost_pct(vol_24h)
+                locked_profit = activation - distance
+                min_required = c_round_pct * TRAILING_COST_SAFETY_MARGIN
+                if locked_profit <= min_required:
+                    old_activation = activation
+                    activation = distance + min_required
+                    # Cap: never exceed hard stop (no point activating beyond loss limit)
+                    # 上限：不超過硬止損（超過虧損限制的激活無意義）
+                    activation = min(activation, hard_sl)
+                    logger.info(
+                        "U-03 trailing cost guard for %s: activation %.2f%%→%.2f%% "
+                        "(distance=%.2f%%, cost=%.3f%%, locked=%.3f%%→%.3f%%)",
+                        symbol, old_activation, activation,
+                        distance, c_round_pct, locked_profit,
+                        activation - distance,
+                    )
+
                 if pnl_pct >= activation and "peak_pnl_pct" not in ts_state:
                     # First entry into activation zone — initialize peak
                     ts_state["peak_pnl_pct"] = pnl_pct
