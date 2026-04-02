@@ -119,7 +119,8 @@ class TestCategoryRiskConfig:
 class TestAgentRiskParams:
     def test_defaults(self):
         p = AgentRiskParams()
-        assert p.effective_stop_loss_pct == 2.0
+        assert p.effective_stop_loss_pct is None  # Dynamic mode (ATR-based)
+        assert p.effective_take_profit_pct is None  # Dynamic mode (ATR-based)
         assert p.position_size_multiplier == 1.0
 
     def test_to_dict_round_trip(self):

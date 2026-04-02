@@ -337,8 +337,9 @@ class GlobalRiskConfig:
     max_stop_loss_pct: float = 5.0
     max_take_profit_pct: float = 20.0
     # Take profit enforcement: OFF by default — exits driven by strategy signals
-    # 止盈強制執行：默認關閉 — 退出由策略信號決定
-    tp_enabled: bool = False
+    # 止盈強制執行：默認開啟（動態 ATR-based）— Agent P2 為 None 時自動計算
+    # Dynamic TP enabled by default: exits at ATR×3.0 or 4% floor, regime-adjusted.
+    tp_enabled: bool = True
 
     # Position sizing
     max_single_position_pct: float = 20.0
@@ -467,8 +468,10 @@ class AgentRiskParams:
     Agent-adjustable risk parameters (P2). Bounded by effective P0/P1 cap.
     Agent 可调风控参数（P2）。受 P0/P1 有效上限约束。
     """
-    effective_stop_loss_pct: float = 2.0
-    effective_take_profit_pct: float = 4.0
+    # Dynamic mode: None = ATR-based auto (recommended). Float = fixed override.
+    # 動態模式：None = 基於 ATR 自動計算（推薦）。浮點數 = 固定覆蓋值。
+    effective_stop_loss_pct: float | None = None
+    effective_take_profit_pct: float | None = None
 
     trailing_stop_enabled: bool = False
     trailing_stop_activation_pct: float = 1.0
@@ -500,7 +503,11 @@ class AgentRiskParams:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AgentRiskParams:
-        return cls(**{k: v for k, v in d.items() if hasattr(cls, k) and v is not None})
+        # Allow None for dynamic SL/TP fields; filter None only for other fields
+        # 允許 SL/TP 為 None（動態模式）；其他字段過濾 None
+        _dynamic_fields = {"effective_stop_loss_pct", "effective_take_profit_pct"}
+        filtered = {k: v for k, v in d.items() if hasattr(cls, k) and (v is not None or k in _dynamic_fields)}
+        return cls(**filtered)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -773,11 +780,17 @@ class RiskManager:
                 continue
 
             if k == "effective_stop_loss_pct":
-                cap = self._config.max_stop_loss_pct
-                setattr(self._agent_params, k, min(v, cap))
+                if v is None:
+                    setattr(self._agent_params, k, None)  # Dynamic mode / 動態模式
+                else:
+                    cap = self._config.max_stop_loss_pct
+                    setattr(self._agent_params, k, min(v, cap))
             elif k == "effective_take_profit_pct":
-                cap = self._config.max_take_profit_pct
-                setattr(self._agent_params, k, min(v, cap))
+                if v is None:
+                    setattr(self._agent_params, k, None)  # Dynamic mode / 動態模式
+                else:
+                    cap = self._config.max_take_profit_pct
+                    setattr(self._agent_params, k, min(v, cap))
             elif k == "position_size_multiplier":
                 setattr(self._agent_params, k, max(0.1, min(v, 1.0)))
             else:
@@ -787,13 +800,47 @@ class RiskManager:
 
     # ── Effective Limit Helpers ──
 
-    def effective_stop_loss_pct(self, category: str = "linear") -> float:
-        cap = resolve_effective_limit("max_stop_loss_pct", self._config, self._category_configs.get(category))
-        return min(self._agent_params.effective_stop_loss_pct, cap)
+    def effective_stop_loss_pct(self, category: str = "linear", symbol: str | None = None) -> float:
+        """
+        Return effective stop-loss %. If Agent P2 is None (dynamic mode), compute from ATR.
+        返回有效止損 %。Agent P2 為 None（動態模式）時，基於 ATR 自動計算。
 
-    def effective_take_profit_pct(self, category: str = "linear") -> float:
+        Dynamic formula: max(ATR × 2.0, 3.0%) — at least 3% to avoid noise, scaled by ATR.
+        動態公式：max(ATR × 2.0, 3.0%) — 至少 3% 避免噪音，按 ATR 縮放。
+        """
+        cap = resolve_effective_limit("max_stop_loss_pct", self._config, self._category_configs.get(category))
+        agent_val = self._agent_params.effective_stop_loss_pct
+        if agent_val is not None:
+            return min(agent_val, cap)
+        # Dynamic: ATR-based with floor
+        # 動態：基於 ATR，帶下限保護
+        atr_pct = self._price_tracker.compute_atr_pct(symbol) if symbol else None
+        if atr_pct is not None and atr_pct > 0:
+            dynamic = max(atr_pct * 2.0, 3.0)
+        else:
+            dynamic = 5.0  # No ATR data → conservative default / 無 ATR 數據 → 保守默認
+        return min(dynamic, cap)
+
+    def effective_take_profit_pct(self, category: str = "linear", symbol: str | None = None) -> float:
+        """
+        Return effective take-profit %. If Agent P2 is None (dynamic mode), compute from ATR.
+        返回有效止盈 %。Agent P2 為 None（動態模式）時，基於 ATR 自動計算。
+
+        Dynamic formula: max(ATR × 3.0, 4.0%) — TP should be wider than SL for positive expectancy.
+        動態公式：max(ATR × 3.0, 4.0%) — 止盈應寬於止損以保持正期望值。
+        """
         cap = resolve_effective_limit("max_take_profit_pct", self._config, self._category_configs.get(category))
-        return min(self._agent_params.effective_take_profit_pct, cap)
+        agent_val = self._agent_params.effective_take_profit_pct
+        if agent_val is not None:
+            return min(agent_val, cap)
+        # Dynamic: ATR-based, wider than SL for positive R:R
+        # 動態：基於 ATR，寬於止損以維持正盈虧比
+        atr_pct = self._price_tracker.compute_atr_pct(symbol) if symbol else None
+        if atr_pct is not None and atr_pct > 0:
+            dynamic = max(atr_pct * 3.0, 4.0)
+        else:
+            dynamic = 8.0  # No ATR data → conservative default / 無 ATR 數據 → 保守默認
+        return min(dynamic, cap)
 
     def effective_max_leverage(self, category: str = "linear") -> float:
         return resolve_effective_limit("max_leverage", self._config, self._category_configs.get(category))
@@ -1051,7 +1098,7 @@ class RiskManager:
             # 2. Soft stop loss with adversarial logic / 对抗性软止损
             # Uses ATR-dynamic level + anti-clustering offset + spike detection + regime scaling
             regime = pos.get("regime", "unknown")
-            base_soft_sl = self.effective_stop_loss_pct(category)
+            base_soft_sl = self.effective_stop_loss_pct(category, symbol=symbol)
             atr_pct = self._price_tracker.compute_atr_pct(symbol)
             entry_ts = pos.get("opened_ts_ms", now_ms_val)
             dynamic_sl = compute_dynamic_stop_pct(
@@ -1084,7 +1131,7 @@ class RiskManager:
             # When enabled: ATR-adjusted + regime-adjusted, cap at 80% of hard TP limit
             # 啟用時：ATR 動態 + regime 調整，上限為硬止盈的 80%
             if self._config.tp_enabled:
-                base_tp = self.effective_take_profit_pct(category)
+                base_tp = self.effective_take_profit_pct(category, symbol=symbol)
                 tp_regime_mult = REGIME_TP_MULTIPLIERS.get(regime, 1.0)
                 base_tp_adj = base_tp * tp_regime_mult
                 tp_hard_cap = self._config.max_take_profit_pct * 0.8
@@ -1487,8 +1534,12 @@ class RiskManager:
             self._agent_params = AgentRiskParams.from_dict(ap)
             # Validate ranges on restore / 恢复时验证范围
             self._agent_params.position_size_multiplier = max(0.1, min(self._agent_params.position_size_multiplier, 1.0))
-            self._agent_params.effective_stop_loss_pct = max(0.1, min(self._agent_params.effective_stop_loss_pct, self._config.max_stop_loss_pct))
-            self._agent_params.effective_take_profit_pct = max(0.1, min(self._agent_params.effective_take_profit_pct, self._config.max_take_profit_pct))
+            # None = dynamic mode (ATR-based), keep as-is. Float = clamp to P1 cap.
+            # None = 動態模式（基於 ATR），保持不變。浮點數 = 鉗位到 P1 上限。
+            if self._agent_params.effective_stop_loss_pct is not None:
+                self._agent_params.effective_stop_loss_pct = max(0.1, min(self._agent_params.effective_stop_loss_pct, self._config.max_stop_loss_pct))
+            if self._agent_params.effective_take_profit_pct is not None:
+                self._agent_params.effective_take_profit_pct = max(0.1, min(self._agent_params.effective_take_profit_pct, self._config.max_take_profit_pct))
         self._trailing_stops = risk_state.get("trailing_stops", {})
         self._consecutive_losses = max(0, risk_state.get("consecutive_losses", 0))
         self._cooldown_until_ts_ms = max(0, risk_state.get("cooldown_until_ts_ms", 0))
