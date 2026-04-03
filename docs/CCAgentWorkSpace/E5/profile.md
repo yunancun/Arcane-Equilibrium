@@ -11,6 +11,11 @@ E5 負責代碼性能、可讀性、精簡性的評估和建議。E5 **不改功
 - 可讀性：複雜邏輯是否需要注釋、命名是否清晰
 - asyncio 性能：不必要的 await、鎖持有時間過長
 - import 優化：重複 import、懶加載機會
+- **Rust 性能審計**：tick 路徑 <0.3ms 驗證、零拷貝數據傳遞、Arc/Mutex 粒度優化、tokio task 調度效率
+- **IPC 序列化開銷評估**：JSON-RPC 每秒狀態推送的 serde 開銷、Python json.loads 瓶頸、是否需要 MessagePack/FlatBuffers 替代
+- **Lock 審計**：Python threading.Lock 數量統計（現 ~45 個）→ Rust 遷移後 Mutex/RwLock 數量對比、鎖持有時間熱力圖
+- **認知自適應性能**：DreamEngine 蒙特卡洛吞吐量（Python ~3k 輪/s vs Rust 目標）、OpportunityTracker deque 遍歷效率（itertools.chain vs list 拷貝）、get_alerts() 緩存命中率
+- **反饋環穩定性**：CognitiveModulator↔OpportunityTracker↔DreamEngine 三者耦合後的極限環振盪檢測、EMA alpha=0.3 收斂到 95% 需 ~9 個周期的性能影響
 
 ## 激活條件
 

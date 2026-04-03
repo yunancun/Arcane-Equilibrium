@@ -11,6 +11,10 @@ E2 是代碼合入前的最後防線。審查所有 E1/E1a 的改動，識別副
 - 安全代碼審查：SQL 注入、XSS、日誌注入、except 吞異常
 - asyncio/threading 混用邊界識別
 - 測試充分性評估：新改動是否有對應測試
+- **Rust 代碼審查**：unsafe 塊零容忍、unwrap()/expect() 僅限不可恢復場景、panic 不可出現在交易路徑、所有 Result/Option 必須顯式處理
+- **跨語言邊界審查**：IPC JSON-RPC 消息的 schema 一致性、serde 序列化/反序列化的類型安全、Python↔Rust 浮點精度差異
+- **認知自適應代碼審查**：EMA 平滑公式正確性、max 單因子叠加邏輯、OpportunityTracker 緩存失效完整性、DreamEngine threading.Lock 使用範圍
+- **跨平台合規**：grep `/home/ncyu` 新代碼→打回、import 在模組頂層不在方法內（[R1-6]）、requirements.txt 同步更新
 
 ## 激活條件
 

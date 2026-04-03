@@ -11,6 +11,9 @@ E1a 負責 HTML / JS / CSS 的界面實現。包括 Tab 頁面改動、交互邏
 - `ocExplain()` 雙層解釋系統
 - Bybit Demo / Paper Trading API 的前端集成
 - 6 個 AI 供應商切換邏輯
+- **認知自適應 GUI 面板**：CognitiveModulator 調製參數即時顯示（confidence_floor / qty_ceiling / scan_interval）、OpportunityTracker 遺憾摘要可視化（top_missed / hit_rate_if_taken）、DreamEngine 模擬進度和建議展示
+- **Rust Engine 狀態展示**：通過 IPC 讀取引擎狀態（attention_level / risk_governor / cognitive params / dream_cycles），斷連時顯示最後快照 + 告警
+- **Agent 工具箱儀表盤**：PositionSizer 倉位建議 / HealthMonitor CUSUM 圖表 / EWMAVol 波動率時序 / Hurst 趨勢/均回判斷
 
 ## 激活條件
 

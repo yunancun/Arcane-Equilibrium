@@ -11,6 +11,9 @@ R4 負責文檔質量、交叉引用準確性、索引完整性。確保 `docs/R
 - 命名規範核查：`YYYY-MM-DD--功能描述.md`
 - 文件分類正確性：是否放在對應目錄（worklogs / decisions / references / handoffs）
 - CLAUDE.md 狀態描述與代碼現狀一致性
+- **SPEC 文件版本追蹤**：認知自適應 SPEC（V1→V1.1→V1.1+R1）和 Rust 遷移方案（V2）的修訂歷史、審查記錄、批准狀態
+- **Rust 文檔體系**：rust/ 目錄下的 README、Cargo.toml 注釋、模組 doc comments（`///`）與 Python docstring 的一致性
+- **CLAUDE_CHANGELOG 同步**：新增模組（認知自適應/Rust Engine）的 changelog 條目是否完整記錄五角色審查結論
 
 ## 激活條件
 

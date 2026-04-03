@@ -10,6 +10,12 @@ E1 是功能實現的執行者。收到 PA 的技術方案後，負責 Python / 
 - GovernanceHub / PipelineBridge / RiskManager 等核心模塊的修改
 - 測試用例補充（pytest / unittest.mock）
 - 安全代碼規範：SQL 參數化、無 except:pass、logger %s 格式
+- **Rust / tokio / serde**：openclaw_engine 二進制 + openclaw_core 庫開發，Cargo workspace 管理
+- **跨語言 IPC**：JSON-RPC 2.0 over Unix domain socket，Python 側 ai_service.py / ipc_client.py 實現
+- **認知自適應模組實現**：CognitiveModulator（EMA 平滑 + max 單因子）、OpportunityTracker（虛擬 PnL + 緩存 + flush_closed）、DreamEngine（threading.Lock + binomial test + 獨立隨機源）
+- **Agent 感知工具箱**：PositionSizer（Kelly 四層）、HealthMonitor（CUSUM + rolling Sharpe）、EWMAVol、Hurst R/S、ContextDistiller
+- **策略 V2 升級**：KAMA + ADX + 多時間框架 + Regime-aware 信號邏輯
+- **灰度驗證代碼**：影子進程 Python 端 + tick 輸出 JSONL + 對比腳本
 
 ## 激活條件
 
