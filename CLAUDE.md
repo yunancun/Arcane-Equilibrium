@@ -138,6 +138,16 @@ GitHub repo:    yunancun/BybitOpenClaw
 git status && git log --oneline -5
 ```
 
+### ★ 灰度驗證檢查（每次啟動必做，直到 R-07 Go/No-Go 通過）
+Rust 引擎灰度驗證正在後台運行。**每次 session 啟動時先跑以下命令確認引擎健康：**
+```bash
+# 引擎存活？+ canary 記錄數 + 崩潰數 + 最新狀態
+python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 60 --status
+wc -l /tmp/openclaw/engine_results.jsonl
+grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes"
+```
+詳細操作指南見 TODO.md 頂部「灰度驗證檢查」段。如引擎掛了按 TODO.md 指引重啟。
+
 ### TODO.md 強制規則（每次接手必須遵守）
 
 **接手時：** 必須讀 `TODO.md` 確認當前工作狀態，找第一個 `[ ]` 未完成項作為起點。用戶有明確指令時以用戶為準。

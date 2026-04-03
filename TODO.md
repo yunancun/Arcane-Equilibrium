@@ -1,7 +1,53 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-03（Phase R-01 完成 · Rust 65 tests · Python 3703 passed · 關鍵路徑 R-02）
+# 最後更新：2026-04-03（R-07 代碼全部完成 · 灰度引擎已啟動 · 4429 tests 全綠）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
+
+---
+
+## ██ 每次啟動必做：灰度驗證檢查 ██
+
+**Rust 引擎灰度驗證正在後台運行（2026-04-03 22:47 啟動）。每次 Claude 啟動必須先執行以下檢查：**
+
+```bash
+# 1. 引擎是否存活？
+python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 60 --status
+
+# 2. canary 記錄數量（每日應增長 ~86,400 條 = 1 tick/sec × 86400s）
+wc -l /tmp/openclaw/engine_results.jsonl
+
+# 3. watchdog 日誌是否有崩潰記錄？
+grep -c "ENGINE_CRASH\|3-STRIKE" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes"
+
+# 4. 最新一筆 tick 狀態
+tail -1 /tmp/openclaw/engine_results.jsonl | python3 -c "
+import sys,json; r=json.load(sys.stdin)
+ps=r['paper_state']
+print(f'tick #{r[\"tick_number\"]} | {r[\"symbol\"]} @ {r[\"price\"]}')
+print(f'balance=\${ps[\"balance\"]:.2f} | fills={r[\"stats\"][\"total_fills\"]} | positions={len(ps[\"positions\"])}')
+"
+
+# 5. 如需跑比較器（Day 7 Go/No-Go 時執行）：
+# python3 helper_scripts/canary/canary_comparator.py \
+#   --engine /tmp/openclaw/engine_results.jsonl \
+#   --shadow /tmp/openclaw/canary/shadow_results.jsonl
+```
+
+**啟動資訊：**
+- 引擎 binary：`rust/target/release/openclaw-engine`
+- 啟動命令：`OPENCLAW_CANARY_MODE=1 OPENCLAW_DATA_DIR=/tmp/openclaw RUST_LOG=info ./openclaw-engine`
+- 引擎初始 PID：2089254（可能因重啟改變）
+- Watchdog PID：2090475（30s threshold, 10s poll）
+- Canary 數據：`/tmp/openclaw/engine_results.jsonl`
+- Python shadow：`/tmp/openclaw/canary/shadow_results.jsonl`（201,600 records，已完成）
+- Watchdog 日誌：`/tmp/openclaw/watchdog.log`
+- Go/No-Go 日期：**2026-04-10**（啟動後第 7 天）
+
+**如果引擎掛了（engine_alive=false）：**
+1. 檢查 watchdog.log 找崩潰原因
+2. 重啟：`OPENCLAW_CANARY_MODE=1 OPENCLAW_DATA_DIR=/tmp/openclaw RUST_LOG=info nohup rust/target/release/openclaw-engine > /tmp/openclaw/engine_stdout.log 2>&1 &`
+3. 重啟 watchdog：`nohup python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 30 --poll-interval 10 > /tmp/openclaw/watchdog.log 2>&1 &`
+4. 記錄崩潰到 docs/KNOWN_ISSUES.md
 
 ---
 
@@ -19,8 +65,11 @@
 ## 測試基準線
 
 ```
-3703 passed / 24 failed / 17 errors（post Phase 3 · test_create_basic 為 pre-existing）
-命令：python3 -m pytest --ignore=database_files -q --tb=no
+Python: 3839 passed / 0 failed / 0 errors / 1 skipped
+Rust:   555 passed / 0 failed
+Canary: 35 passed
+Total:  4429 tests 全綠
+命令：python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v1/tests/ program_code/local_model_tools/tests/ --tb=no -q
 ```
 
 ---
