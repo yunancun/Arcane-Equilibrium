@@ -1,5 +1,4 @@
 # trading_services
-# trading_services
 
 这里存放交易执行层相关服务的部署文件。
 This folder stores deployment files related to the trading execution layer.
@@ -7,20 +6,17 @@ This folder stores deployment files related to the trading execution layer.
 当前阶段系统状态：
 Current system state:
 
-- 交易环境：paper
-- Trading environment: paper
+- 交易环境：demo_only（Paper + Bybit Demo）
+- Trading environment: demo_only (Paper + Bybit Demo)
 
-- 主交易所：Bybit
-- Primary exchange: Bybit
+- 主交易所：Bybit（专攻）
+- Primary exchange: Bybit (exclusive focus)
 
-- 辅助交易所：Binance
-- Secondary exchange: Binance
+- Bybit 模式：demo_only
+- Bybit mode: demo_only
 
-- Bybit 模式：read_only
-- Bybit mode: read_only
-
-- Binance 模式：read_only
-- Binance mode: read_only
+- Binance：已排除当前开发范围，仅作为超长期可能方向保留
+- Binance: excluded from current scope, retained only as long-term possibility
 
 - Agent 权限等级：Level 0 / observer
 - Agent permission level: Level 0 / observer
@@ -35,13 +31,5 @@ At the current stage, only skeleton services are deployed and no real trading is
 Current skeleton services include:
 
 - bybit_connector
-- bybit_connector
-
-- binance_connector
-- binance_connector
-
 - pretrade_risk_gate
-- pretrade_risk_gate
-
-- audit_logger
 - audit_logger
