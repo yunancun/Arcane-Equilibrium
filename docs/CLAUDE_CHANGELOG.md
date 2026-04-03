@@ -3,6 +3,16 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### Tech Debt Zero + Engine Launch（2026-04-03 · Session 11 final）
+
+- Rust StateWriter atomic write（.tmp → rename）防止 IPC 讀半寫
+- 3 文件 DEPRECATED 標記（governance_hub / paper_trading_engine / strategy_auto_deployer）
+- 4 個 IPC 測試修復（Rust reader mock for pipeline_stats + session_status envelope）
+- Watchdog threshold 30s→60s（防假告警）
+- **Rust 引擎灰度模式啟動**：5 symbols × 4 strategies，Go/No-Go 2026-04-10
+
+---
+
 ### R07-1 Replay Runner + Accelerated Canary Plan（2026-04-03 · Session 11）
 
 **replay_runner.py**：歷史回放取代即時灰度（22 天 → ~7 天）
