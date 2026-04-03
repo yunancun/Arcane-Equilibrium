@@ -1,7 +1,12 @@
-> ⚠️ FROZEN — 本文件為歷史提取物，內容已整合至後續文檔。僅供歷史參考，不再更新。
-> ⚠️ FROZEN — This file is a historical extract. Content has been consolidated into later documents. For reference only.
+> ⚠️ **已過時 / OUTDATED** — 本文件為早期歷史提取物，多處內容已不反映當前系統狀態。
+> 已知過時項：Agent 數量（現為 5 非 6）、L1 模型（現為 Qwen 3.5 9B/27B 非 Qwen2.5 7B）、原則 #12 live 自動部署（demo 階段尚未啟用）。
+> **權威文件：CLAUDE.md（項目指令）+ README.md（概覽）+ TODO.md（工作計劃）**
+>
+> ⚠️ **OUTDATED** — This is an early historical extract. Multiple items no longer reflect current system state.
+> Known outdated: Agent count (now 5 not 6), L1 model (now Qwen 3.5 9B/27B not Qwen2.5 7B), Principle #12 live auto-deploy (not active in demo stage).
+> **Authoritative docs: CLAUDE.md (directives) + README.md (overview) + TODO.md (work plan)**
 
-# OpenClaw ByBit Governance - Quick Reference Guide
+# OpenClaw ByBit Governance - Quick Reference Guide (HISTORICAL)
 
 ## 16 Root Principles (DOC-01 §5.1–§5.16)
 

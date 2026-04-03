@@ -1,7 +1,7 @@
-> ⚠️ FROZEN — 本文件為歷史提取物，內容已整合至後續文檔。僅供歷史參考，不再更新。
-> ⚠️ FROZEN — This file is a historical extract. Content has been consolidated into later documents. For reference only.
+> ⚠️ **已過時 / OUTDATED** — 早期歷史提取物，部分內容不反映當前狀態。權威文件：CLAUDE.md + README.md + TODO.md
+> ⚠️ **OUTDATED** — Early historical extract. Some content no longer reflects current state. Authoritative: CLAUDE.md + README.md + TODO.md
 
-# OpenClaw ByBit Governance - Implementation Checklist & Codebase Mapping
+# OpenClaw ByBit Governance - Implementation Checklist & Codebase Mapping (HISTORICAL)
 
 **Purpose:** Map governance requirements to codebase components and track implementation completeness.
 
