@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 """
-MODULE_NOTE:
-- role: H0 public microstructure input builder.
-- purpose:
-  Pull Bybit public market data and normalize it into an auditable local
-  microstructure snapshot for H0-A market friction.
-- upstream:
-  1) runtime/bybit/bybit_runtime_state_latest.json
-- output:
-  runtime/bybit/local_judgment/bybit_public_microstructure_latest.json
-- notes:
-  1) v1 uses Bybit public REST only, no auth required.
-  2) This module does NOT authorize trading.
-  3) It exists only to supply public market structure facts to H0.
+MODULE_NOTE (中文):
+  H0 公開市場微觀結構輸入構建器。
+  從 Bybit 公開 REST API 拉取市場數據，標準化為可審計的本地微觀結構快照，
+  供 H0-A 市場摩擦判斷使用。
+  - 上游：runtime/bybit/bybit_runtime_state_latest.json
+  - 輸出：runtime/bybit/local_judgment/bybit_public_microstructure_latest.json
+  - v1 僅使用 Bybit 公開 REST，無需認證。
+  - 本模組不授權任何交易操作，僅提供公開市場結構事實給 H0。
+
+MODULE_NOTE (English):
+  H0 public microstructure input builder.
+  Pulls Bybit public market data and normalizes it into an auditable local
+  microstructure snapshot for H0-A market friction judgment.
+  - upstream: runtime/bybit/bybit_runtime_state_latest.json
+  - output: runtime/bybit/local_judgment/bybit_public_microstructure_latest.json
+  - v1 uses Bybit public REST only, no auth required.
+  - This module does NOT authorize trading — exists only to supply
+    public market structure facts to H0.
 """
 
 from __future__ import annotations

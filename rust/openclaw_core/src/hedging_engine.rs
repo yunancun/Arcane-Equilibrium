@@ -131,15 +131,9 @@ impl HedgingEngine {
     /// 正向/現貨：delta = ±qty * current_price
     /// 反向合約：delta = ±qty / current_price（合約價值以基礎幣計價）
     fn compute_portfolio_delta(&self, positions: Vec<Position>) -> PyResult<HashMap<String, f64>> {
-        let mut deltas: HashMap<String, f64> = HashMap::new();
-
-        for pos in &positions {
-            let raw_delta = Self::position_delta(pos);
-            let entry = deltas.entry(pos.symbol.clone()).or_insert(0.0);
-            *entry += raw_delta;
-        }
-
-        Ok(deltas)
+        // Delegate to internal helper to avoid duplicated logic
+        // 委託給內部方法以避免重複邏輯
+        Ok(self.compute_symbol_deltas(&positions))
     }
 
     /// Compute total net delta across all positions in USD.

@@ -64,6 +64,7 @@ from .multi_agent_framework import (
     MessageType,
     TradeIntent,
 )
+from .strategist_fast_channel import build_emergency_intents
 from .strategist_models import (  # noqa: F401 — re-export for backward compatibility
     EdgeEvaluation,
     StrategistConfig,
@@ -1050,48 +1051,14 @@ class StrategistAgent:
             # 清空正常通道隊列（緊急時期過期 intent 是危險的）
             self._normal_queue.clear()
 
-            emergency_intents: List[TradeIntent] = []
+            # Delegate intent construction to extracted module
+            # 委託提取的模組構建 intent
             target_symbols = symbols or []
-
-            if trigger in ("close_all", "flash_crash"):
-                # Generate close intents for all specified positions
-                # 為所有指定持倉生成平倉 intent
-                for symbol in target_symbols:
-                    intent = TradeIntent(
-                        symbol=symbol,
-                        strategy="fast_channel",
-                        direction="close",
-                        size=0.0,  # size determined by Executor based on current position
-                        confidence=1.0,
-                        thesis=f"Emergency {trigger} triggered / 緊急 {trigger} 觸發",
-                        invalidation_condition="N/A — emergency override",
-                        metadata={
-                            "intent_id": f"fast:{uuid.uuid4().hex[:8]}",
-                            "source": "fast_channel",
-                            "trigger": trigger,
-                            "priority": 1,
-                        },
-                    )
-                    emergency_intents.append(intent)
-
-            elif trigger == "reduce_all":
-                for symbol in target_symbols:
-                    intent = TradeIntent(
-                        symbol=symbol,
-                        strategy="fast_channel",
-                        direction="reduce",
-                        size=0.0,
-                        confidence=0.9,
-                        thesis=f"Emergency reduce_all triggered / 緊急減倉觸發",
-                        invalidation_condition="N/A — emergency override",
-                        metadata={
-                            "intent_id": f"fast:{uuid.uuid4().hex[:8]}",
-                            "source": "fast_channel",
-                            "trigger": trigger,
-                            "priority": 1,
-                        },
-                    )
-                    emergency_intents.append(intent)
+            emergency_intents = build_emergency_intents(
+                trigger=trigger,
+                symbols=target_symbols,
+                TradeIntent=TradeIntent,
+            )
 
             self._pending_intents.extend(emergency_intents)
             self._stats["intents_produced"] += len(emergency_intents)
