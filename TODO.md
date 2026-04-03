@@ -198,11 +198,33 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 ### [x] R-02：core 上半——感知 + 認知 + 風控（W3-4）— 10 模組 + 302 Rust tests + Golden Dataset 驗證
 ### [x] R-03：core 下半——SM + 執行 + 回測（W5-6）— 4 SM + GovernanceCore 級聯 + 9 模組 + 468 Rust tests + 極端組 PASS
 ### [x] R-04：Engine 完整交易路徑（W7-8）— tick_pipeline + 5 策略 + paper_state + persistence + 517 Rust tests
-### [ ] R-05：★ Week 8 硬決策點（Go/No-Go）
-### [ ] R-06：Python IPC 改造（W9-10）
+### [x] R-05：★ Conditional Go 簽核（2026-04-03）— 5/6 PASS + 3 風險待 soak test（見 KNOWN_ISSUES.md）
+### [~] R-06：Python IPC 改造（W9-10）— R06-A/B1/B2/E ✅，R06-C 延至 R-07，R06-D/E+/F 待做
 ### [ ] R-07：灰度驗證 + 穩定觀察（W11-14）
 
 > 每個 R-xx 的詳細子任務見 `docs/rust_migration/0x--*.md`
+
+---
+
+## ██ ★★★ 重點優化待辦（架構債務 · 高優先級）
+
+### [ ] ★ AGT-1：策略參數運行時可調 + Agent 真正「使用」策略模型工具
+
+**問題核心（2026-04-03 發現）：**
+Agent（Strategist）與策略模型（MA/BB/Grid 等）目前完全平行、互不干涉：
+- 策略靠 SignalEngine → StrategyOrchestrator → strategy.on_signal() 自動運行，Agent 從不調用策略
+- 所有 V2 參數（adx_threshold / use_kama / rsi_threshold / regime_aware / ou_dynamic 等）在構造後不可變
+- Create API 只傳 qty_per_trade，其他 V2 參數全靠硬編碼默認值
+- Agent 的學習只影響推薦置信度權重，不影響任何策略行為
+
+**需要實現的三件事：**
+1. **策略 `update_params()` 方法** — 允許運行時修改 V2 參數（線程安全）
+2. **`PATCH /api/v1/strategy/{name}/params` 端點** — Operator 或 Agent 可調整現有策略參數
+3. **Create API 傳入完整 V2 參數** — Auto-Deployer 和 Strategist 在部署策略時帶參數，而不是全用默認值
+
+**影響範圍：** `strategies/base.py` + 5 個策略文件 + `phase2_strategy_routes.py` + `strategy_auto_deployer.py`
+**優先級：** Phase 2 之後、Phase R 之前（L1 接口凍結前必須決定是否納入）
+**工作量估算：** ~2d（E1×2 並行）
 
 ---
 
