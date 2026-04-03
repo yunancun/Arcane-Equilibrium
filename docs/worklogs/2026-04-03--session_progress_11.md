@@ -70,12 +70,36 @@ Rust:   552 passed / 0 failed / 0 warnings
 | CLAUDE_CHANGELOG.md | R-06 completion entry |
 | TODO.md | R-06 [~] → [x] |
 
+### R07-3/5/6：灰度驗證工具（canary tooling）
+
+- `helper_scripts/canary/canary_schema.py`：JSONL schema V1.0.0 + 3 層容差映射 + 驗證
+- `helper_scripts/canary/canary_comparator.py`：tick 級比較 + 邊界偏差升級 + CLI
+- `helper_scripts/canary/engine_watchdog.py`：快照新鮮度監控 + 崩潰/恢復 + 3 振回滾
+- `helper_scripts/canary/rollback_drill.sh`：8 步回滾演練（SLA < 10 分鐘）
+- `helper_scripts/canary/test_canary.py`：35 個測試全 PASS
+
+### R07-2：Rust 灰度 JSONL 輸出
+
+- `tick_pipeline.rs`：新增 `CanaryRecord` struct + `canary_mode` flag + `maybe_canary_record()` 方法
+- `main.rs`：`OPENCLAW_CANARY_MODE=1` 環境變量啟用，寫入 `engine_results.jsonl`
+- 3 個新 Rust 測試：canary off/on + serializable
+
+---
+
+## 測試基準線（最終）
+
+```
+Python: 3794 passed / 28 failed / 17 errors / 1 skipped（零新回歸）
+Rust:   555 passed / 0 failed / 0 warnings
+  core:     376 lib + 8 golden + 19 extreme = 403
+  engine:   87 unit + 29 stress = 116（+3 canary 測試）
+  types:    36
+Canary:  35 passed（schema + comparator + watchdog）
+```
+
 ## 下一步
 
-1. **R-07：灰度驗證 + 穩定觀察**
-   - R07-1：影子計算進程搭建
-   - R07-2：Rust Engine 灰度模式
-   - R07-3：Comparator 自動化對比
-   - R07-5：完全回滾演練
-   - R07-6：止損接管演練
-2. 詳細計劃見 `docs/rust_migration/07--canary_validation.md`
+1. **R07-1**：Python 影子進程搭建（讀 WS → Python pipeline → shadow_results.jsonl）
+2. **R07-4**：啟動 7 天灰度運行
+3. **E5 flag**：Rust StateWriter atomic write（write .tmp → rename）
+4. 詳細計劃見 `docs/rust_migration/07--canary_validation.md`

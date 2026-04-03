@@ -53,6 +53,9 @@ pub struct TickPipeline {
     pub paper_state: PaperState,
     pub stats: TickStats,
     latest_prices: HashMap<String, f64>,
+    /// Enable canary mode — on_tick returns per-tick CanaryRecord (R07-2).
+    /// 啟用灰度模式 — on_tick 返回每 tick 的 CanaryRecord。
+    pub canary_mode: bool,
 }
 
 impl TickPipeline {
@@ -66,12 +69,15 @@ impl TickPipeline {
             paper_state: PaperState::new(10_000.0),
             stats: TickStats::default(),
             latest_prices: HashMap::new(),
+            canary_mode: false,
         }
     }
 
     /// Process a single price event through the full pipeline.
+    /// Returns a CanaryRecord when canary_mode is enabled (R07-2).
     /// 通過完整管線處理單個價格事件。
-    pub fn on_tick(&mut self, event: &PriceEvent) {
+    /// 灰度模式啟用時返回 CanaryRecord。
+    pub fn on_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
         self.latest_prices.insert(event.symbol.clone(), event.last_price);
@@ -90,7 +96,7 @@ impl TickPipeline {
                 self.paper_state.close_position(&sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
             }
-            return; // skip normal processing
+            return self.maybe_canary_record(event, None, vec![], vec![]);
         }
 
         // Step 1: Kline aggregation
@@ -115,8 +121,8 @@ impl TickPipeline {
             symbol: event.symbol.clone(),
             price: event.last_price,
             timestamp_ms: event.ts_ms,
-            indicators,
-            signals,
+            indicators: indicators.clone(),
+            signals: signals.clone(),
             h0_allowed: true, // simplified — full H0 gate check in intent_processor
         };
 
@@ -150,6 +156,35 @@ impl TickPipeline {
         if self.stats.total_ticks % 1000 == 0 {
             info!(ticks = self.stats.total_ticks, fills = self.stats.total_fills, "tick stats");
         }
+
+        self.maybe_canary_record(event, indicators, signals, intents)
+    }
+
+    /// Build a canary record if canary_mode is enabled (R07-2).
+    /// 灰度模式啟用時構建灰度記錄。
+    fn maybe_canary_record(
+        &self,
+        event: &PriceEvent,
+        indicators: Option<IndicatorSnapshot>,
+        signals: Vec<Signal>,
+        intents: Vec<crate::intent_processor::OrderIntent>,
+    ) -> Option<CanaryRecord> {
+        if !self.canary_mode {
+            return None;
+        }
+        Some(CanaryRecord {
+            schema_version: "1.0.0".into(),
+            source: "rust_engine".into(),
+            tick_number: self.stats.total_ticks,
+            timestamp_ms: event.ts_ms,
+            symbol: event.symbol.clone(),
+            price: event.last_price,
+            indicators,
+            signals,
+            order_intents: intents,
+            paper_state: self.paper_state.export_state(),
+            stats: self.stats.clone(),
+        })
     }
 
     fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
@@ -218,6 +253,23 @@ pub struct PipelineStatus {
     pub symbols_tracked: usize,
 }
 
+/// Per-tick canary record for Rust vs Python comparison (R07-2).
+/// 每 tick 灰度記錄，用於 Rust 與 Python 比較。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanaryRecord {
+    pub schema_version: String,
+    pub source: String,
+    pub tick_number: u64,
+    pub timestamp_ms: u64,
+    pub symbol: String,
+    pub price: f64,
+    pub indicators: Option<IndicatorSnapshot>,
+    pub signals: Vec<Signal>,
+    pub order_intents: Vec<crate::intent_processor::OrderIntent>,
+    pub paper_state: crate::paper_state::PaperStateSnapshot,
+    pub stats: TickStats,
+}
+
 /// Full pipeline snapshot for IPC consumers (R06-A).
 /// 完整管線快照供 IPC 消費者使用。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +319,42 @@ mod tests {
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         pipeline.grant_paper_auth().unwrap();
         assert!(pipeline.governance.is_authorized());
+    }
+
+    #[test]
+    fn test_canary_mode_off_returns_none() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert!(!pipeline.canary_mode);
+        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000));
+        assert!(record.is_none());
+    }
+
+    #[test]
+    fn test_canary_mode_on_returns_record() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.canary_mode = true;
+        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000));
+        assert!(record.is_some());
+        let r = record.unwrap();
+        assert_eq!(r.schema_version, "1.0.0");
+        assert_eq!(r.source, "rust_engine");
+        assert_eq!(r.tick_number, 1);
+        assert_eq!(r.symbol, "BTCUSDT");
+        assert_eq!(r.price, 50000.0);
+        assert_eq!(r.timestamp_ms, 1000);
+    }
+
+    #[test]
+    fn test_canary_record_serializable() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.canary_mode = true;
+        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000)).unwrap();
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains("\"schema_version\":\"1.0.0\""));
+        assert!(json.contains("\"source\":\"rust_engine\""));
+        // Deserialize back / 反序列化
+        let r2: CanaryRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(r2.tick_number, record.tick_number);
     }
 
     #[test]

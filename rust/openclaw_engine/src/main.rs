@@ -177,6 +177,21 @@ async fn async_main(config: Arc<ConfigManager>) {
             &data_path.join("paper_audit.jsonl"),
         );
 
+        // Canary mode: emit per-tick JSONL for comparison with Python shadow (R07-2)
+        // 灰度模式：每 tick 輸出 JSONL 用於與 Python 影子進程比較
+        let canary_mode = std::env::var("OPENCLAW_CANARY_MODE").unwrap_or_default() == "1";
+        pipeline.canary_mode = canary_mode;
+        let canary_writer = if canary_mode {
+            let canary_path = data_path.join("engine_results.jsonl");
+            info!(path = %canary_path.display(), "canary mode enabled / 灰度模式已啟用");
+            Some(std::fs::OpenOptions::new()
+                .create(true).append(true)
+                .open(&canary_path)
+                .expect("failed to open canary JSONL / 打開灰度 JSONL 失敗"))
+        } else {
+            None
+        };
+
         let mut last_status = Instant::now();
         let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
         let start_time = Instant::now();
@@ -188,7 +203,19 @@ async fn async_main(config: Arc<ConfigManager>) {
                     match event {
                         Some(ev) => {
                             let prev_fills = pipeline.stats.total_fills;
-                            pipeline.on_tick(&ev);
+                            let canary_record = pipeline.on_tick(&ev);
+
+                            // Write canary record if in canary mode (R07-2)
+                            // 灰度模式下寫入灰度記錄
+                            if let Some(record) = canary_record {
+                                if let Some(ref canary_file) = canary_writer {
+                                    use std::io::Write;
+                                    let mut f = canary_file;
+                                    if let Ok(json) = serde_json::to_string(&record) {
+                                        let _ = writeln!(f, "{}", json);
+                                    }
+                                }
+                            }
 
                             // Audit new fills / 審計新成交
                             if pipeline.stats.total_fills > prev_fills {
