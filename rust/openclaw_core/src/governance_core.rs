@@ -106,9 +106,9 @@ impl GovernanceCore {
         event: RiskEvent,
         reason: &str,
     ) -> CascadeResult {
-        // Snapshot current states for rollback
-        let auth_snapshot = self.auth.snapshot_states();
-        let _lease_snapshot = self.lease.snapshot_states();
+        // Clone SM states for all-or-nothing rollback [V3-PA-3]
+        let auth_backup = self.auth.clone();
+        let lease_backup = self.lease.clone();
         let risk_snapshot = self.risk.snapshot_level();
 
         let mut result = CascadeResult {
@@ -135,9 +135,10 @@ impl GovernanceCore {
                 if let Some(obj) = self.auth.get(*idx) {
                     if obj.state == AuthState::Active || obj.state == AuthState::Restricted {
                         if let Err(e) = self.auth.freeze(*idx, reason) {
-                            // Rollback: restore risk level
+                            // Rollback: restore all SM states [V3-PA-3]
                             self.rollback_risk(risk_snapshot);
-                            self.rollback_auth(&auth_snapshot);
+                            self.auth = auth_backup;
+                            self.lease = lease_backup;
                             result.error = Some(format!("auth freeze failed: {e}"));
                             return result;
                         }
@@ -152,7 +153,8 @@ impl GovernanceCore {
                     if obj.state == AuthState::Active {
                         if let Err(e) = self.auth.restrict(*idx, reason) {
                             self.rollback_risk(risk_snapshot);
-                            self.rollback_auth(&auth_snapshot);
+                            self.auth = auth_backup;
+                            self.lease = lease_backup;
                             result.error = Some(format!("auth restrict failed: {e}"));
                             return result;
                         }
@@ -286,26 +288,6 @@ impl GovernanceCore {
         self.risk.level = level;
     }
 
-    fn rollback_auth(&mut self, snapshot: &[(usize, AuthState)]) {
-        // Note: This is a simplified rollback that only restores the state field.
-        // In practice, the transition records from the failed cascade are still present.
-        // A full rollback would need to pop the last transition, but for fail-safety
-        // this is sufficient — the SM is back in a consistent state.
-        for &(idx, state) in snapshot {
-            if let Some(obj) = self.auth.get(idx) {
-                // Only rollback if state was changed
-                if obj.state != state {
-                    // Direct field mutation for rollback (not via transition())
-                    // This is safe because we're undoing a cascade that failed
-                    // We access the internal objects via the public API limitation
-                    // In the real engine, we'd clone the entire SM before cascade
-                }
-            }
-        }
-        // For true all-or-nothing, we'd need SM clone before cascade.
-        // Current impl: risk is rolled back, auth states may be partially changed.
-        // TODO R-04: Implement full SM clone for cascade
-    }
 }
 
 impl Default for GovernanceCore {

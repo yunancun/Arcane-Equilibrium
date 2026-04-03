@@ -184,10 +184,12 @@ pub fn compute_portfolio_metrics(
         }
     }
     let avg_corr = if corr_count > 0 { corr_sum / corr_count as f64 } else { 0.0 };
-    let effective_diversification = if avg_corr > 0.01 {
-        (1.0 / avg_corr).min(holdings.len() as f64)
+    // N_eff = N / (1 + (N-1) * avg_corr) — standard formula for effective independent bets
+    let n = holdings.len() as f64;
+    let effective_diversification = if avg_corr > 0.01 && n > 1.0 {
+        n / (1.0 + (n - 1.0) * avg_corr)
     } else {
-        holdings.len() as f64
+        n
     };
 
     PortfolioMetrics {

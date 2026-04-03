@@ -230,6 +230,7 @@ impl AuthorizationObject {
 ///
 /// Sole-owned by tick actor — no internal locks [V3-PA-1].
 /// 由 tick actor 獨佔 — 無內部鎖。
+#[derive(Clone)]
 pub struct AuthorizationSm {
     objects: Vec<AuthorizationObject>,
 }

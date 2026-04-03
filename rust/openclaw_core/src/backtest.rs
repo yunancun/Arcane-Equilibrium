@@ -198,20 +198,17 @@ impl BacktestEngine {
         let fill = execution::execute_market_fill(
             exit_price, pos.qty, !pos.is_long, self.config.turnover_24h,
         );
-        let pnl = execution::compute_realized_pnl(
-            pos.entry_price, fill.fill_price, pos.qty, pos.is_long,
-            pos.entry_fee, fill.fee,
-        );
-        self.balance += pnl + pos.entry_fee; // add back entry fee since realized includes it
-        // Actually: balance already had entry_fee deducted. Now add gross + deduct exit fee:
-        // Simpler: just track gross PnL
-        self.balance = self.balance + (if pos.is_long {
+        // Gross PnL (no fees) — entry fee already deducted when opening
+        let gross = if pos.is_long {
             (fill.fill_price - pos.entry_price) * pos.qty
         } else {
             (pos.entry_price - fill.fill_price) * pos.qty
-        }) - fill.fee;
+        };
+        self.balance += gross - fill.fee;
         self.total_fees += fill.fee;
-        self.trade_pnls.push(pnl);
+        // Net PnL for attribution (includes both fees)
+        let net_pnl = gross - pos.entry_fee - fill.fee;
+        self.trade_pnls.push(net_pnl);
         self.peak_balance = self.peak_balance.max(self.balance);
     }
 

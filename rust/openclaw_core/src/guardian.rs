@@ -148,8 +148,7 @@ impl Guardian {
             risk_score += 0.35;
         }
 
-        let risk_score: f64 = risk_score;
-        let risk_score = risk_score.min(1.0);
+        let risk_score = (risk_score as f64).min(1.0);
 
         // Verdict logic
         let verdict = if reasons.iter().any(|r| {

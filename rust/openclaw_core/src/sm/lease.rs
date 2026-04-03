@@ -242,6 +242,7 @@ impl LeaseObject {
 // State Machine / 狀態機
 // ═══════════════════════════════════════════════════════════════════════════════
 
+#[derive(Clone)]
 pub struct DecisionLeaseSm {
     objects: Vec<LeaseObject>,
 }

@@ -7,7 +7,7 @@
 use openclaw_core::{
     governance_core::GovernanceCore,
     indicators::{IndicatorEngine, IndicatorSnapshot},
-    klines::{KlineManager, OhlcvArrays},
+    klines::KlineManager,
     signals::{IndicatorInput, Signal, SignalEngine},
 };
 use openclaw_types::PriceEvent;
@@ -76,6 +76,22 @@ impl TickPipeline {
         self.stats.last_tick_ms = event.ts_ms;
         self.latest_prices.insert(event.symbol.clone(), event.last_price);
         self.paper_state.set_latest_price(&event.symbol, event.last_price);
+
+        // Step 0: Fast track check — emergency actions before normal processing
+        let ft_action = crate::fast_track::evaluate_fast_track(
+            self.governance.risk.level,
+            0.0, // price_drop_pct computed externally
+            0.0, // margin_utilization computed externally
+        );
+        if ft_action == crate::fast_track::FastTrackAction::CloseAll {
+            let symbols: Vec<String> = self.paper_state.positions().iter()
+                .map(|p| p.symbol.clone()).collect();
+            for sym in symbols {
+                self.paper_state.close_position(&sym, event.last_price, event.ts_ms);
+                self.stats.total_stops += 1;
+            }
+            return; // skip normal processing
+        }
 
         // Step 1: Kline aggregation
         self.kline_manager.on_tick(

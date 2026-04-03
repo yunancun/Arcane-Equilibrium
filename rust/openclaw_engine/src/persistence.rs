@@ -105,7 +105,6 @@ impl AuditWriter {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::io::Read;
 
     #[test]
     fn test_state_writer_debounce() {

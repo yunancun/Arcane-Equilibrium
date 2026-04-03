@@ -5,7 +5,6 @@
 //! 通過治理管線處理交易意圖。
 
 use openclaw_core::{
-    cost_gate,
     execution::{self, FillResult},
     governance_core::GovernanceCore,
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},

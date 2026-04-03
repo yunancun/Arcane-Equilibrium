@@ -100,7 +100,6 @@ impl GridTrading {
 
         if step > 0.0 && mu > 0.0 {
             let lower = mu - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
-            let upper = mu + step * (DEFAULT_GRID_COUNT as f64 / 2.0);
             self.grid_levels.clear();
             for i in 0..DEFAULT_GRID_COUNT {
                 self.grid_levels.push(lower + step * i as f64);

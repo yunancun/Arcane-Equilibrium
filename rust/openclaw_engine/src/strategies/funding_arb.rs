@@ -8,12 +8,18 @@ use super::Strategy;
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 
+#[allow(dead_code)] // Wired in R-06 when funding rate IPC is available
 const TOTAL_COST_BPS: f64 = 34.0; // perp(11) + spot(20) + slippage(3)
+#[allow(dead_code)]
 const DEFAULT_EXPECTED_PERIODS: f64 = 3.0; // 8h funding periods
+#[allow(dead_code)]
 const FUNDING_THRESHOLD: f64 = 0.0005; // 5 bps
+#[allow(dead_code)]
 const MAX_BASIS_PCT: f64 = 0.5;
+#[allow(dead_code)]
 const MAX_HOLD_MS: u64 = 72 * 3_600_000;
 
+#[allow(dead_code)] // Fields used when funding rate IPC is wired in R-06
 pub struct FundingArb {
     active: bool,
     position: Option<FundingPosition>,
@@ -23,6 +29,7 @@ pub struct FundingArb {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FundingPosition {
     is_positive_funding: bool, // true = short perp + long spot
     entry_ms: u64,
@@ -37,11 +44,13 @@ impl FundingArb {
         }
     }
 
+    #[allow(dead_code)]
     fn compute_edge(funding_rate: f64) -> f64 {
         let amortized_fee = TOTAL_COST_BPS / 10_000.0 / DEFAULT_EXPECTED_PERIODS;
         funding_rate.abs() - amortized_fee
     }
 
+    #[allow(dead_code)]
     fn should_exit(&self, funding_rate: f64, basis_pct: f64, now_ms: u64) -> bool {
         let pos = match &self.position { Some(p) => p, None => return false };
 

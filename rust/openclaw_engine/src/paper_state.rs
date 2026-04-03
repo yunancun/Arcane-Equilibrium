@@ -22,7 +22,7 @@ pub struct PaperPosition {
 /// Paper trading state manager.
 /// 紙盤交易狀態管理器。
 pub struct PaperState {
-    initial_balance: f64,
+    _initial_balance: f64,
     balance: f64,
     peak_balance: f64,
     positions: HashMap<String, PaperPosition>,
@@ -37,7 +37,7 @@ pub struct PaperState {
 impl PaperState {
     pub fn new(initial_balance: f64) -> Self {
         Self {
-            initial_balance,
+            _initial_balance: initial_balance,
             balance: initial_balance,
             peak_balance: initial_balance,
             positions: HashMap::new(),
