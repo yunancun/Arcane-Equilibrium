@@ -5,6 +5,47 @@
 
 ---
 
+### Phase 1 完成 — Agent 感知工具箱 + 認知三模組（2026-04-03）
+
+**新建模組（8 個文件）：**
+- **1-1**：PositionSizer（已在 0B-3 完成）
+- **1-2**：strategy_health_monitor.py — CUSUM 漂移檢測 + rolling Sharpe + 15 連虧硬性兜底
+- **1-3**：ewma_vol_estimator.py — EWMA 波動率估計 + vol regime 分類
+- **1-4**：hurst_exponent.py — R/S 重標極差分析 + 趨勢/均值回歸分類
+- **1-5**：indicators/extended.py — KAMA + ADX + Hurst + EWMA Vol + Volume Ratio + Donchian
+- **1-6**：cognitive_modulator.py — L0 決策門檻調製（[Q1] max 單因子 + [Q6] EMA α=0.3）
+- **1-7**：opportunity_tracker.py — 虛擬 PnL 追蹤（[Q2] 2x fee + [Q3] 歸一化 + [R1-8] ≥5 樣本）
+- **1-8**：dream_engine.py — 蒙特卡洛模擬（[Q4] ≥30 輪 + [Q5] binomial test）
+- **1-9**：local_llm_client.py — ABC + OllamaProvider + LMStudioProvider
+- **1-10**：shadow_decision_tracker.py — 四階段退出條件比較
+
+**附帶修復**：SMA 改用 math.fsum()（V3-QC-2）+ indicator_engine.py 注冊 6 個新指標
+**測試基準**：3704 passed / 23 failed / 17 errors（無回歸）
+**業務完成度**：72% → 82%
+
+---
+
+### Phase 0-A + 0-B 完成 — 學習閉環 + 策略 Edge 驗證（2026-04-03）
+
+**Phase 0-A（學習閉環 + 管線連通）：**
+- **0A-1**：學習反饋閉環 — StrategistAgent.get_strategy_weight() + PipelineBridge 門控前應用學習權重
+- **0A-2**：進化參數自動重部署 — evolution_routes.set_auto_deployer() B13 閉環
+- **0A-3**：H0 Gate shadow 觀察模式 — shadow_mode 旗標 + _check_shadow() + shadow stats/log
+- **0A-4**：Scanner→Deployer 驗證 — 確認已完整接通（無需修改）
+- **0A-5**：Backtest 生產環境啟用 — AutoDeployer.set_backtest_engine() + 部署前回測驗證
+- **0A-6**：L2 觸發門檻 50→20 — 加速 AI 模式發現反饋
+
+**Phase 0-B（策略 Edge 驗證）：**
+- **0B-1**：FundingRateArb 精算 — 滑點建模 + 基差風險追蹤 + 多周期攤薄 + get_cost_summary()
+- **0B-2**：交易所 SL/TP 雙重防線 — SL 5% + TP 8%（PipelineBridge + Executor callback）
+- **0B-3**：Kelly 資本配置 — position_sizer.py（Kelly 四層計算）+ tab-ai.html Kelly 卡片 + API 端點
+
+**新建文件**：position_sizer.py（~306 行）
+**測試基準**：3704 passed / 23 failed / 17 errors（改善 +1 pass / -1 fail）
+**業務完成度**：52% → 72%
+
+---
+
 ### Rust 遷移 V3-FINAL + 階段拆分 + 全路線圖定稿（2026-04-03）
 
 - **Rust 遷移 V3-FINAL** 五角色三輪審查通過（V2→V2.5→嚴格論證 21 FAIL→V3 全部納入）

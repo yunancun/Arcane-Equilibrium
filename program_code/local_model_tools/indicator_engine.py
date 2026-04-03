@@ -61,6 +61,9 @@ from typing import Any, Callable
 
 from .indicators.atr import ATR
 from .indicators.bollinger_bands import BollingerBands
+from .indicators.extended import (
+    KAMA, ADX, HurstIndicator, EWMAVolIndicator, VolumeRatio, DonchianChannel,
+)
 from .indicators.macd import MACD
 from .indicators.moving_averages import EMA, SMA
 from .indicators.rsi import RSI
@@ -112,6 +115,14 @@ def create_default_indicators() -> list[IndicatorBase]:
         BollingerBands(),   # BB(20,2) — 布林带
         ATR(period=ATR_FAST_PERIOD),   # ATR(5)  — 5 周期快窗口（regime 快速切换时反应更快）
         ATR(period=ATR_SLOW_PERIOD),   # ATR(14) — 14 周期慢窗口（经典 Wilder 周期）
+
+        # 1-5: Extended indicators / 擴展指標
+        KAMA(period=10),            # KAMA(10) — 自適應移動平均
+        ADX(period=14),             # ADX(14) — 趨勢強度（>20=趨勢，<20=震盪）
+        HurstIndicator(),           # Hurst — R/S 分析（趨勢性 vs 均值回歸）
+        EWMAVolIndicator(),         # EWMA Vol — 指數加權波動率
+        VolumeRatio(period=20),     # Volume Ratio — 成交量相對均量
+        DonchianChannel(period=20), # Donchian(20) — 唐奇安通道
     ]
 
 

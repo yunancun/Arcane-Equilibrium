@@ -38,6 +38,7 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .base import IndicatorBase
@@ -64,7 +65,9 @@ def compute_sma(values: list[float], period: int) -> float | None:
     if len(values) < period or period <= 0:
         return None
     window = values[-period:]
-    return sum(window) / period
+    # 1-5 [V3-QC-2]: Use math.fsum() for numerically stable summation.
+    # 使用 math.fsum() 保證數值穩定的求和。
+    return math.fsum(window) / period
 
 
 def compute_sma_series(values: list[float], period: int) -> list[float]:
@@ -86,7 +89,8 @@ def compute_sma_series(values: list[float], period: int) -> list[float]:
         return []
     result = [float('nan')] * (period - 1)
     # Initial SMA: average of first `period` values / 初始 SMA：前 period 个值的平均
-    window_sum = sum(values[:period])
+    # 1-5 [V3-QC-2]: math.fsum for numerically stable summation.
+    window_sum = math.fsum(values[:period])
     result.append(window_sum / period)
     # Sliding window / 滑动窗口
     for i in range(period, len(values)):

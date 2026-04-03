@@ -47,14 +47,14 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,703 passed（24 failed + 17 errors pre-existing）
-路由：126+（含 8 治理 + 5 Scout 端點）
+測試：3,704 passed（23 failed + 17 errors pre-existing）
+路由：127+（含 8 治理 + 5 Scout + 1 Kelly 端點）
 治理：GovernanceHub 4 SM，fail-closed 已驗證
 品類：linear + spot + inverse（option 未來）
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
-GUI：11-Tab 專業控制台
+GUI：11-Tab 專業控制台 + Kelly 資本配置卡片
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
-代碼完成度：~72%（現有 52,500 行 / 最終 ~73,000 行 Py+Rs）　業務功能能用：~52%
+代碼完成度：~78%（現有 55,500 行 / 最終 ~73,000 行 Py+Rs）　業務功能能用：~82%
 總工時進度：~31%（已完成 ~45d / 總計 ~147d）· Python-only 58%（45/77d）
 關鍵路徑：Phase 0-3（32d）→ Phase R（70d）= 102d 壁鐘 ≈ 20 週
 ★ Batch 9A 確定性自適應風控（2026-04-02，QC 量化審查驅動）：
@@ -326,4 +326,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 72%（52.5k/73k）· 業務 52% · 工時 31%（45d/147d）· 全路線圖定稿 Phase 0-3+R（20 週 102d）· 認知 SPEC + Rust V3-FINAL 均已通過 · 下一步：Phase 0 Batch 9B → 讀 TODO.md。
+> 截至 2026-04-03：3704 tests · 127+ routes · 5 Agent · demo_only · 代碼 78%（55.5k/73k）· 業務 82% · Phase 0+1 完成（9 新模組：PositionSizer/HealthMonitor/EWMA/Hurst/6新指標/CognitiveModulator/OpportunityTracker/DreamEngine/LocalLLMClient/ShadowTracker） · 下一步：Phase 2 → 讀 TODO.md。

@@ -26,7 +26,7 @@
 
 ## 具體任務
 
-### [ ] R00-1：Cargo workspace 初始化
+### [x] R00-1：Cargo workspace 初始化
 - **E1 指派**：E1-Alpha（Phase 1 間隙）
 - **操作**：
   ```
@@ -38,13 +38,13 @@
 - **交付**：`rust/Cargo.toml`（workspace）+ `rust/openclaw_types/` + `rust/openclaw_core/` + `rust/openclaw_engine/` 三個 crate 骨架
 - **驗收**：`cargo build` 零錯誤
 
-### [ ] R00-2：CI pipeline（GitHub Actions）
+### [x] R00-2：CI pipeline（GitHub Actions）
 - **E1 指派**：E1-Alpha
 - **操作**：`.github/workflows/rust.yml` — `cargo test` + `cargo clippy` + `cargo fmt --check`
 - **交付**：PR 自動跑 Rust CI
 - **驗收**：空 crate 的 CI 綠色
 
-### [ ] R00-3：openclaw_types crate 完整定義
+### [x] R00-3：openclaw_types crate 完整定義
 - **E1 指派**：E1-Beta（Phase 1 Day 3+）
 - **操作**：根據 V3 §2.2，實現全部類型：
   - `types/price.rs`：PriceEvent, Kline, OHLCV
@@ -68,7 +68,7 @@
 - **凍結範圍**：governance_hub / 4 SM / authorization 相關接口
 - **操作**：git tag `l2-interface-freeze`
 
-### [ ] R00-6：Python SMA 改用 math.fsum() [V3-QC-2]
+### [x] R00-6：Python SMA 改用 math.fsum() [V3-QC-2]（Phase 1 task 1-5 已完成）
 - **E1 指派**：E1-Gamma（Phase 1 開發 indicator 時同步完成）
 - **操作**：indicator_engine.py / indicators/moving_averages.py 的 sum() → math.fsum()
 - **驗收**：現有測試全部通過 + 數值差異 < 1e-14
@@ -83,13 +83,13 @@
 ## Go/No-Go 門控
 
 全部滿足後方可進入 01 階段：
-- [ ] Cargo workspace + 3 crate 骨架編譯通過
-- [ ] CI pipeline 綠色
-- [ ] openclaw_types 全部類型定義 + serde 測試通過
-- [ ] L1 接口凍結 tag 已打
+- [x] Cargo workspace + 3 crate 骨架編譯通過（2026-04-03）
+- [x] CI pipeline 綠色（2026-04-03，.github/workflows/rust.yml）
+- [x] openclaw_types 全部類型定義 + serde 測試通過（30 tests, 2026-04-03）
+- [ ] L1 接口凍結 tag 已打（Phase 2 結束時）
 - [ ] L2 接口凍結 tag 已打（Phase 3 結束後）
-- [ ] Python SMA fsum() 已替換
-- [ ] Paper Trading 告警 bot 運行中
+- [x] Python SMA fsum() 已替換（Phase 1 task 1-5 已完成）
+- [ ] Paper Trading 告警 bot 運行中（延後至 Phase 2 末尾）
 
 ---
 
@@ -108,16 +108,19 @@
 
 | 任務 | 狀態 | 完成日期 | commit |
 |------|------|---------|--------|
-| R00-1 Cargo workspace | [ ] | | |
-| R00-2 CI pipeline | [ ] | | |
-| R00-3 types crate | [ ] | | |
-| R00-4 L1 凍結 | [ ] | | |
-| R00-5 L2 凍結 | [ ] | | |
-| R00-6 fsum() | [ ] | | |
-| R00-7 告警 bot | [ ] | | |
+| R00-1 Cargo workspace | [x] | 2026-04-03 | pending |
+| R00-2 CI pipeline | [x] | 2026-04-03 | pending |
+| R00-3 types crate | [x] | 2026-04-03 | pending |
+| R00-4 L1 凍結 | [ ] | | Phase 2 結束時 |
+| R00-5 L2 凍結 | [ ] | | Phase 3 結束時 |
+| R00-6 fsum() | [x] | 2026-04-03 | Phase 1 task 1-5 已完成 |
+| R00-7 告警 bot | [ ] | | 延後至 Phase 2 末尾 |
 
 ---
 
 ## 問題與變更（執行期間發現的問題記錄於此）
 
-（空）
+### 2026-04-03
+- types crate 實際 1,242 行（vs 預估 4,500 行）：骨架已完整涵蓋 V3 §3.2 全部 10 個 shared_types + 認知/配置類型。剩餘行數將在 R-01 的 IPC 消息定義 + 更細粒度的策略/指標類型中補充。
+- E2 審查 P2 建議：intent.rs/cognitive.rs 的 direction/side/order_type 等 String 字段應改為 enum，計劃 R-01 IPC 對齊時統一處理。
+- R00-7 Telegram bot 延後：需外部 bot token 配置，不在關鍵路徑。

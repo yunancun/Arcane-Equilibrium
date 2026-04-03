@@ -8,7 +8,7 @@ MODULE_NOTE (中文):
   职责：
   1. 消费 ROUND_TRIP_COMPLETE 消息，分析每笔交易结果
   2. L1 层：计算滚动胜率、策略排名、regime 适配度，更新 LearningTierGate 指标
-  3. L2 层：observations ≥ 200 后，调用 Qwen analyze_patterns() 产出 PatternInsight
+  3. L2 层：observations ≥ 20 后，调用 Qwen analyze_patterns() 产出 PatternInsight
   4. PatternInsight 包含：winning_patterns, losing_patterns, regime_strategy_matrix
   5. 所有分析结果写入审计日志
 
@@ -22,7 +22,7 @@ MODULE_NOTE (English):
   Responsibilities:
   1. Consume ROUND_TRIP_COMPLETE messages, analyze each trade result
   2. L1: Calculate rolling win rate, strategy ranking, regime fit, update LearningTierGate metrics
-  3. L2: After observations >= 200, call Qwen analyze_patterns() to produce PatternInsight
+  3. L2: After observations >= 20, call Qwen analyze_patterns() to produce PatternInsight
   4. PatternInsight contains: winning_patterns, losing_patterns, regime_strategy_matrix
   5. All analysis results written to audit log
 
@@ -142,9 +142,9 @@ class PatternInsight:
 class AnalystConfig:
     """Configuration for AnalystAgent / AnalystAgent 配置"""
     # L2 trigger: minimum observations before pattern analysis / L2 触发：最小观察数
-    # C7 fix: lowered from 200 to 50, overridable via ANALYST_L2_MIN_OBS env var
-    # C7 修复：从 200 降至 50，可通过环境变量 ANALYST_L2_MIN_OBS 覆盖
-    l2_min_observations: int = int(os.environ.get("ANALYST_L2_MIN_OBS", "50"))
+    # 0A-6: lowered from 50 to 20 for faster L2 pattern discovery feedback loop
+    # 0A-6：从 50 降至 20，加速 L2 模式发现反馈闭环（可通过 ANALYST_L2_MIN_OBS 覆盖）
+    l2_min_observations: int = int(os.environ.get("ANALYST_L2_MIN_OBS", "20"))
     # Rolling window for metrics / 滚动窗口大小
     rolling_window: int = 50
     # Strategy ranking minimum trades / 策略排名最小交易数

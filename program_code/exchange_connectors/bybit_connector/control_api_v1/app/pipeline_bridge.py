@@ -832,6 +832,32 @@ class PipelineBridge:
                 # This is acceptable for exchange-sourced signals
                 pass
 
+        # ── 0A-1: Apply learning feedback weights from StrategistAgent ──
+        # 0A-1：應用 StrategistAgent 的學習反饋權重（模式洞察 → 策略偏好）
+        # Pattern insights adjust strategy weights in [0.2, 2.0]; multiply into confidence.
+        # Fail-open: if StrategistAgent unavailable, weight defaults to 1.0 (neutral).
+        # 模式洞察調整策略權重 [0.2, 2.0]，乘入 confidence。
+        # Fail-open：StrategistAgent 不可用時，權重默認 1.0（中性）。
+        if self._strategist_agent is not None:
+            try:
+                _strategy_name = getattr(intent, "strategy_name", "") or ""
+                _learning_weight = self._strategist_agent.get_strategy_weight(_strategy_name)
+                if _learning_weight != 1.0:
+                    _old_conf = getattr(intent, "confidence", None)
+                    if _old_conf is not None and isinstance(_old_conf, (int, float)):
+                        _new_conf = max(0.0, min(1.0, _old_conf * _learning_weight))
+                        intent.confidence = _new_conf
+                        logger.debug(
+                            "0A-1: Learning weight applied to %s/%s: %.2f × %.2f = %.2f / "
+                            "學習權重已應用：置信度 %.2f × 權重 %.2f = %.2f",
+                            intent.symbol, _strategy_name,
+                            _old_conf, _learning_weight, _new_conf,
+                            _old_conf, _learning_weight, _new_conf,
+                        )
+            except Exception as _lw_err:
+                # fail-open: learning weight error is non-fatal / 學習權重異常不阻塞
+                logger.debug("0A-1: Learning weight lookup failed (fail-open): %s", _lw_err)
+
         # ── Sprint 5a: H0 Gate blocking — fail-closed (principle 5: survival > profit) ──
         # Sprint 5a：H0 Gate 阻擋模式 — fail-closed（根原則 5：生存 > 利潤）
         # H0 Gate blocking: stale data or unhealthy system state → reject intent entirely.
@@ -1954,6 +1980,35 @@ class PipelineBridge:
                         "双重防线：交易所止损单创建失败（本地止损仍然有效）",
                         symbol, cond_result.get("retMsg"),
                     )
+
+                # 0B-2: Place TP (take-profit) conditional order alongside SL.
+                # 0B-2：在 SL 旁邊同時掛 TP（止盈）條件單。
+                # TP at 2× the SL distance (risk:reward ~1:2). Fail-open: TP failure doesn't block.
+                # TP 距離 = 2× SL 距離（風險回報比 ~1:2）。TP 失敗不阻擋。
+                try:
+                    _tp_mult = 2.0  # TP = 2× SL distance for 1:2 R:R
+                    if side == "long":
+                        tp_raw = _stop_base_price * (1 + _hard_stop_pct * _tp_mult / 100)
+                        tp_dir = 1  # Sell TP triggers on price rise
+                    else:
+                        tp_raw = _stop_base_price * (1 - _hard_stop_pct * _tp_mult / 100)
+                        tp_dir = 2  # Buy TP triggers on price fall
+                    tp_price = round_price_for_exchange(tp_raw, tick_size)
+                    tp_result = self._demo_connector.place_conditional_order(
+                        symbol=symbol,
+                        side=close_side,
+                        qty=qty,
+                        trigger_price=tp_price,
+                        trigger_direction=tp_dir,
+                    )
+                    if tp_result.get("retCode") == 0:
+                        logger.info(
+                            "0B-2: TP order created %s %s trigger=%s / 止盈單已創建",
+                            symbol, close_side, tp_price,
+                        )
+                except Exception as _tp_err:
+                    logger.debug("0B-2: TP order failed (SL still active): %s", _tp_err)
+
             except Exception as _cond_err:
                 logger.warning(
                     "Dual defense: conditional order error %s: %s (local stop still active) / "

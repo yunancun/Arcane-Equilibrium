@@ -31,7 +31,7 @@ Rust 遷移（14 週主開發）
 
 | 文件 | 階段 | 週 | 前置 | 狀態 |
 |------|------|-----|------|------|
-| [00--preparation_parallel.md](00--preparation_parallel.md) | 提前並行 | Phase 1-3 期間 | 無 | [ ] 待開始 |
+| [00--preparation_parallel.md](00--preparation_parallel.md) | 提前並行 | Phase 1-3 期間 | 無 | [~] R00-1/2/3/6 完成，R00-4/5/7 待 Phase 2-3 |
 | [01--ipc_shared_types_ws.md](01--ipc_shared_types_ws.md) | IPC + 基礎設施 | W1-2 | 00 + L1 凍結 | [ ] 待開始 |
 | [02--core_upper.md](02--core_upper.md) | 感知 + 認知 + 風控 | W3-4 | 01 Go | [ ] 待開始 |
 | [03--core_lower.md](03--core_lower.md) | SM + 執行 + 回測 | W5-6 | 02 Go | [ ] 待開始 |

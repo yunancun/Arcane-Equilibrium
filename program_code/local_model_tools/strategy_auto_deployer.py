@@ -119,6 +119,38 @@ class StrategyAutoDeployer:
         self._last_risk_adjust_ts: float = 0.0    # Timestamp of last adjustment / 上次調整時間
         self._risk_adjust_interval: float = 300.0  # Adjust at most every 5 min / 最多每 5 分鐘調一次
 
+        # 0A-5: Optional BacktestEngine for pre-deployment validation.
+        # 0A-5：可選的 BacktestEngine，用於部署前回測驗證。
+        # If injected, _deploy_strategy runs a quick backtest on recent klines.
+        # Deploy proceeds only if Sharpe >= min threshold (or backtest unavailable → fail-open).
+        # 若已注入，_deploy_strategy 在近期 K 線上快速回測，Sharpe >= 閾值才允許部署。
+        # 回測不可用時 fail-open（不阻擋部署）。
+        self._backtest_engine: Any = None
+        self._backtest_min_sharpe: float = 0.0  # 0.0 = deploy any positive expectation
+        self._backtest_stats: dict[str, int] = {
+            "validations_run": 0,
+            "validations_passed": 0,
+            "validations_failed": 0,
+            "validations_skipped": 0,
+        }
+
+    def set_backtest_engine(self, engine: Any, min_sharpe: float = 0.0) -> None:
+        """
+        0A-5: Inject BacktestEngine for pre-deployment strategy validation.
+        注入 BacktestEngine，用於部署前策略回測驗證。
+
+        Args:
+            engine: BacktestEngine instance (read-only usage, Principle 7 safe).
+            min_sharpe: Minimum Sharpe ratio to allow deployment (default 0.0).
+        """
+        self._backtest_engine = engine
+        self._backtest_min_sharpe = min_sharpe
+        logger.info(
+            "0A-5: BacktestEngine injected into auto-deployer (min_sharpe=%.2f) / "
+            "BacktestEngine 已注入自動部署器（最低 Sharpe=%.2f）",
+            min_sharpe, min_sharpe,
+        )
+
     # ── Portfolio position evaluation ──
 
     def _get_open_positions(self) -> dict[str, Any]:
@@ -657,6 +689,71 @@ class StrategyAutoDeployer:
                     break
         return self._compute_qty(symbol, price, score)
 
+    def _validate_strategy_backtest(
+        self, symbol: str, strategy_name: str, category: str,
+    ) -> bool:
+        """
+        0A-5: Run quick backtest on recent klines before deploying a strategy.
+        部署策略前在近期 K 線上快速回測驗證。
+
+        Returns True if strategy passes validation (or validation is unavailable).
+        Fail-open: any error → return True (don't block deployment).
+        返回 True 表示策略通過驗證（或驗證不可用）。
+        Fail-open：任何異常 → 返回 True（不阻擋部署）。
+        """
+        try:
+            from .backtest_engine import BacktestConfig
+
+            config = BacktestConfig(
+                symbol=symbol,
+                timeframe="1h",
+                strategy_name=strategy_name,
+                backtest_mode=True,
+            )
+            result = self._backtest_engine.run(config)
+            self._backtest_stats["validations_run"] += 1
+
+            if result.total_trades < 3:
+                # Not enough trades to judge — allow deployment (fail-open)
+                # 交易次數不足以判斷 — 允許部署（fail-open）
+                self._backtest_stats["validations_skipped"] += 1
+                logger.info(
+                    "0A-5: Backtest for %s/%s: only %d trades, skipping validation / "
+                    "回測驗證跳過：交易數不足",
+                    symbol, strategy_name, result.total_trades,
+                )
+                return True
+
+            if result.sharpe_ratio >= self._backtest_min_sharpe:
+                self._backtest_stats["validations_passed"] += 1
+                logger.info(
+                    "0A-5: Backtest PASSED for %s/%s: sharpe=%.2f trades=%d / "
+                    "回測驗證通過：Sharpe=%.2f 交易數=%d",
+                    symbol, strategy_name, result.sharpe_ratio, result.total_trades,
+                    result.sharpe_ratio, result.total_trades,
+                )
+                return True
+            else:
+                self._backtest_stats["validations_failed"] += 1
+                logger.info(
+                    "0A-5: Backtest FAILED for %s/%s: sharpe=%.2f < min=%.2f — skipping deploy / "
+                    "回測驗證未通過：Sharpe=%.2f < 閾值=%.2f — 跳過部署",
+                    symbol, strategy_name, result.sharpe_ratio, self._backtest_min_sharpe,
+                    result.sharpe_ratio, self._backtest_min_sharpe,
+                )
+                return False
+
+        except Exception as e:
+            # Fail-open: backtest error does not block deployment
+            # Fail-open：回測異常不阻擋部署
+            self._backtest_stats["validations_skipped"] += 1
+            logger.warning(
+                "0A-5: Backtest validation error for %s/%s (fail-open): %s / "
+                "回測驗證異常（fail-open）：%s",
+                symbol, strategy_name, e, e,
+            )
+            return True
+
     def _compute_leverage(self, opp: Any) -> float:
         """
         Compute leverage based on category + volatility, within risk limits.
@@ -754,6 +851,12 @@ class StrategyAutoDeployer:
 
         if strategy is None:
             return
+
+        # 0A-5: Pre-deployment backtest validation (fail-open).
+        # 0A-5：部署前回測驗證（fail-open，回測失敗不阻擋部署）。
+        if self._backtest_engine is not None:
+            if not self._validate_strategy_backtest(symbol, strategy.name, category):
+                return  # Backtest Sharpe too low — skip deployment / 回測 Sharpe 過低 — 跳過部署
 
         # Inject api_category + leverage into strategy default metadata so all intents carry them.
         # Pipeline bridge reads intent.metadata["category"] and intent.metadata["leverage"].
@@ -922,6 +1025,96 @@ class StrategyAutoDeployer:
         with self._lock:
             return list(self._deployed.values())
 
+    def get_kelly_recommendations(self) -> dict[str, Any]:
+        """
+        0B-3: Compute Kelly-based sizing recommendations for all deployed strategies.
+        計算所有已部署策略的 Kelly 倉位建議。
+
+        Uses trade outcome data from PaperTradingEngine (if available) to compute
+        win_rate, avg_win, avg_loss per strategy. Falls back to minimal defaults.
+        使用 PaperTradingEngine 的交易數據（如有）計算每策略勝率、平均盈虧。
+
+        Returns:
+            Dict with "strategies" key containing per-strategy recommendations.
+        """
+        if self._backtest_engine is None and not hasattr(self, '_position_sizer'):
+            # Try lazy import / 嘗試惰性導入
+            try:
+                from .position_sizer import PositionSizer
+                self._position_sizer = PositionSizer(p1_max_pct=2.0, risk_pct_default=self._risk_pct)
+            except ImportError:
+                return {"strategies": {}, "error": "PositionSizer not available"}
+
+        sizer = getattr(self, '_position_sizer', None)
+        if sizer is None:
+            try:
+                from .position_sizer import PositionSizer
+                self._position_sizer = PositionSizer(p1_max_pct=2.0, risk_pct_default=self._risk_pct)
+                sizer = self._position_sizer
+            except ImportError:
+                return {"strategies": {}, "error": "PositionSizer not available"}
+
+        # Get balance and trade data from paper engine / 從 paper engine 獲取餘額和交易數據
+        balance = 10000.0  # default
+        trade_history: list = []
+        if self._engine:
+            try:
+                state = self._engine.get_state()
+                balance = state.get("balance", 10000.0)
+                trade_history = state.get("trade_history", [])
+            except Exception:
+                pass
+
+        # Aggregate per-strategy stats from trade history / 從交易歷史聚合每策略統計
+        strategy_stats: dict[str, dict] = {}
+        for trade in trade_history:
+            sname = trade.get("strategy_name", "unknown")
+            if sname not in strategy_stats:
+                strategy_stats[sname] = {"wins": 0, "losses": 0, "win_pnls": [], "loss_pnls": []}
+            pnl = trade.get("pnl", 0.0)
+            if pnl > 0:
+                strategy_stats[sname]["wins"] += 1
+                strategy_stats[sname]["win_pnls"].append(pnl)
+            else:
+                strategy_stats[sname]["losses"] += 1
+                strategy_stats[sname]["loss_pnls"].append(abs(pnl))
+
+        # Compute recommendations for each deployed strategy / 為每個已部署策略計算建議
+        result: dict[str, Any] = {}
+        with self._lock:
+            for key, info in self._deployed.items():
+                symbol = info["symbol"]
+                sname = info.get("strategy_name", key)
+                stats = strategy_stats.get(sname, {})
+
+                total = stats.get("wins", 0) + stats.get("losses", 0)
+                win_rate = stats["wins"] / total if total > 0 else 0.0
+                avg_win = (sum(stats.get("win_pnls", [])) / len(stats["win_pnls"])
+                          if stats.get("win_pnls") else 0.0)
+                avg_loss = (sum(stats.get("loss_pnls", [])) / len(stats["loss_pnls"])
+                           if stats.get("loss_pnls") else 0.0)
+
+                # Get approximate price / 獲取大約價格
+                price = 1.0
+                try:
+                    ohlcv = self._km.get_ohlcv(symbol, "1h")
+                    if ohlcv and ohlcv.get("close"):
+                        price = ohlcv["close"][-1]
+                except Exception:
+                    pass
+
+                rec = sizer.compute_recommendation(
+                    balance=balance,
+                    price=price,
+                    win_rate=win_rate,
+                    avg_win=avg_win,
+                    avg_loss=avg_loss,
+                    trade_count=total,
+                )
+                result[sname] = rec.to_dict()
+
+        return {"strategies": result, "balance": balance}
+
     def get_stats(self) -> dict[str, Any]:
         with self._lock:
             return {
@@ -929,4 +1122,5 @@ class StrategyAutoDeployer:
                 "deployed_count": len(self._deployed),
                 "deployed_symbols": list(set(d["symbol"] for d in self._deployed.values())),
                 **self._stats,
+                "backtest_validation": dict(self._backtest_stats),
             }

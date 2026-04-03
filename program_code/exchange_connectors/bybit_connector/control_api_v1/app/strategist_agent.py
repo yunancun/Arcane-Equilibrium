@@ -545,6 +545,38 @@ class StrategistAgent:
         except Exception as e:
             logger.warning("_apply_pattern_insight failed (fail-open): %s", e)
 
+    def get_strategy_weight(self, strategy_name: str) -> float:
+        """
+        0A-1: Return the current preference weight for a strategy.
+        返回某策略的當前偏好權重。
+
+        Used by PipelineBridge to apply learning feedback to strategy signals.
+        Normalizes strategy name for lookup (strips symbol suffix, lowercases).
+        供 PipelineBridge 在策略信號上應用學習反饋。
+        對策略名稱標準化（去除 symbol 後綴，小寫化）。
+
+        Args:
+            strategy_name: Strategy identifier (e.g. "MACrossover_BTCUSDT" or "ma_crossover").
+
+        Returns:
+            Weight in [0.2, 2.0]. Default 1.0 (neutral) if no pattern data.
+        """
+        # Normalize: strip symbol suffix (e.g. "MACrossover_BTCUSDT" → "macrossover")
+        # 標準化：去除 symbol 後綴
+        base_name = strategy_name.split("_")[0].lower() if strategy_name else ""
+        # Also try common name mappings / 嘗試常見名稱映射
+        name_variants = [
+            strategy_name,
+            base_name,
+            strategy_name.lower(),
+        ]
+        with self._lock:
+            for variant in name_variants:
+                w = self._strategy_preference_weights.get(variant)
+                if w is not None:
+                    return w
+        return 1.0
+
     def _apply_regime_weights(self, regime: str) -> None:
         """
         C4: Apply regime-aware strategy preference multipliers.

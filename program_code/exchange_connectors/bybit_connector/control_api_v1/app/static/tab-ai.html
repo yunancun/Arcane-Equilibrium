@@ -275,6 +275,46 @@
   </div>
 </div>
 
+<!-- ═══ 0B-3: Kelly Capital Allocation / Kelly 資本配置 ═══ -->
+<div class="oc-card">
+  <h3>
+    &#x1F4CA; Kelly 資本配置 / Kelly Capital Allocation
+    <button class="oc-btn" onclick="refreshKellyData()" title="手動刷新" style="padding:2px 8px;font-size:11px;margin-left:6px">&#x21BB;</button>
+  </h3>
+  <div class="oc-metrics" id="kelly-summary-grid" style="margin-top:10px">
+    <div class="oc-metric">
+      <div class="oc-metric-label">策略數</div>
+      <div class="oc-metric-val" id="kelly-strategy-count">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">平均 Kelly%</div>
+      <div class="oc-metric-val" id="kelly-avg-fraction">--</div>
+    </div>
+    <div class="oc-metric">
+      <div class="oc-metric-label">總樣本量</div>
+      <div class="oc-metric-val" id="kelly-total-samples">--</div>
+    </div>
+  </div>
+  <div class="oc-table-wrap" style="margin-top:10px">
+    <table class="oc-table" id="kelly-table">
+      <thead><tr>
+        <th>策略 / Strategy</th>
+        <th>Kelly%</th>
+        <th>建議 Qty</th>
+        <th>勝率</th>
+        <th>樣本</th>
+        <th>層級</th>
+      </tr></thead>
+      <tbody id="kelly-tbody">
+        <tr><td colspan="6" style="text-align:center;color:var(--text-dim)">載入中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
+    每 60 秒自動刷新 · <a href="#" onclick="refreshKellyData();return false;" style="color:var(--accent)">立即刷新</a>
+  </div>
+</div>
+
 <!-- ═══ Strategy Evolution / 策略參數進化 ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
   <h3>
@@ -679,13 +719,57 @@ async function runEvolution() {
   }
 }
 
+// ── 0B-3: Kelly Capital Allocation refresh / Kelly 資本配置刷新 ────────────────
+async function refreshKellyData() {
+  try {
+    const r = await ocFetch('/api/v1/strategy/kelly-recommendations');
+    if (!r.ok) { return; }
+    const data = await r.json();
+    const strategies = data.strategies || {};
+    const keys = Object.keys(strategies);
+
+    document.getElementById('kelly-strategy-count').textContent = keys.length;
+
+    let totalFrac = 0, totalSamples = 0;
+    keys.forEach(k => {
+      totalFrac += (strategies[k].kelly_fraction || 0);
+      totalSamples += (strategies[k].sample_size || 0);
+    });
+    document.getElementById('kelly-avg-fraction').textContent =
+      keys.length > 0 ? (totalFrac / keys.length * 100).toFixed(2) + '%' : '--';
+    document.getElementById('kelly-total-samples').textContent = totalSamples;
+
+    const tbody = document.getElementById('kelly-tbody');
+    if (keys.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim)">無策略數據</td></tr>';
+      return;
+    }
+    tbody.innerHTML = keys.map(k => {
+      const s = strategies[k];
+      const tierColor = s.kelly_tier === 'normal' ? 'green' : (s.kelly_tier === 'moderate' ? 'var(--accent)' : 'var(--text-dim)');
+      return `<tr>
+        <td>${k}</td>
+        <td>${(s.kelly_fraction * 100).toFixed(2)}%</td>
+        <td>${s.recommended_qty.toFixed(4)}</td>
+        <td>${(s.win_rate * 100).toFixed(1)}%</td>
+        <td>${s.sample_size}</td>
+        <td style="color:${tierColor}">${s.kelly_tier}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    console.warn('Kelly data load error:', e);
+  }
+}
+
 // ── Phase 3 Dashboard Auto-refresh / Phase 3 面板自動刷新 ────────────────────
 // 頁面載入時立即拉取一次，之後每 30 秒輪詢 / Load immediately, then poll every 30s
 (function initPhase3Dashboard() {
   refreshExperimentStatus();
   refreshEvolutionStatus();
+  refreshKellyData();
   setInterval(refreshExperimentStatus, 30000);
   setInterval(refreshEvolutionStatus, 30000);
+  setInterval(refreshKellyData, 60000);
 })();
 </script>
 </body>

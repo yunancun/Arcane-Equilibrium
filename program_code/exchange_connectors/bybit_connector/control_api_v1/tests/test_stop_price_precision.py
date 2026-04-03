@@ -168,10 +168,12 @@ class TestPipelineBridgeDemoFillPrice(unittest.TestCase):
 
         bridge._on_position_open(intent, paper_price, actual_qty=2493.0, demo_fill_price=demo_price)
 
-        # Verify conditional order was placed
+        # Verify conditional order was placed (0B-2: SL + TP = 2 calls)
         self.assertTrue(demo.place_conditional_order.called)
-        call_kwargs = demo.place_conditional_order.call_args
-        trigger = call_kwargs[1]["trigger_price"] if call_kwargs[1] else call_kwargs[0][2]
+        # First call is SL — check that one
+        sl_call = demo.place_conditional_order.call_args_list[0]
+        sl_kwargs = sl_call[1] if sl_call[1] else {}
+        trigger = sl_kwargs.get("trigger_price", sl_call[0][2] if len(sl_call[0]) > 2 else None)
 
         # Trigger should be based on demo_price (0.06052), not paper_price (0.059852)
         # For a Buy/long position, stop = demo_price * (1 - hard_stop_pct/100)

@@ -99,6 +99,11 @@ class H0GateConfig:
     # Health snapshot TTL / 健康快照有效期
     health_snapshot_max_age_ms: int = 30_000  # 30 秒，超過視為快照過期
 
+    # 0A-3: Shadow observation mode / 影子觀察模式
+    # When True, records would-have-blocked decisions but still returns allowed=True.
+    # shadow=True 時記錄「本來會阻擋」的決策，但仍返回 allowed=True，觀察 1 週後切 blocking。
+    shadow_mode: bool = False
+
 
 @dataclass
 class H0GateHealthSnapshot:
@@ -209,6 +214,22 @@ class H0Gate:
             "max_latency_us": 0,
             "total_latency_us": 0,
         }
+
+        # 0A-3: Shadow observation stats / 影子觀察統計
+        # Tracks would-have-blocked decisions when shadow_mode=True.
+        # shadow_mode=True 時追蹤「本來會阻擋」的決策。
+        self._shadow_stats: dict[str, int] = {
+            "shadow_would_block_freshness": 0,
+            "shadow_would_block_health": 0,
+            "shadow_would_block_eligibility": 0,
+            "shadow_would_block_risk": 0,
+            "shadow_would_block_cooldown": 0,
+            "shadow_total_would_block": 0,
+        }
+        # Recent shadow block log (circular buffer, last N entries)
+        # 最近影子阻擋日誌（環形緩衝區，最近 N 條）
+        self._shadow_log: list[dict[str, Any]] = []
+        self._shadow_log_max: int = 100
 
     # ── Property access / 屬性訪問 ───────────────────────────────────────────
 
@@ -322,9 +343,16 @@ class H0Gate:
         """
         t0 = time.perf_counter()
         now_ms = int(time.time() * 1000)
+        shadow = self._config.shadow_mode
 
         self._stats["total_checks"] += 1
 
+        # 0A-3: In shadow mode, run ALL checks and collect blocks but return allowed=True.
+        # 影子模式下，執行所有檢查並收集阻擋，但最終返回 allowed=True。
+        if shadow:
+            return self._check_shadow(symbol, category, now_ms, t0)
+
+        # Normal (blocking) mode / 正常（阻擋）模式
         # 1. Freshness check / 數據新鮮度檢查
         ok, reason = self.check_freshness(symbol, now_ms)
         if not ok:
@@ -397,6 +425,109 @@ class H0Gate:
             reason="",
             check_name="all_passed",
             latency_us=latency_us,
+        )
+
+    # ── Shadow mode check / 影子模式檢查 ───────────────────────────────────
+
+    def _check_shadow(
+        self, symbol: str, category: str, now_ms: int, t0: float
+    ) -> H0GateCheckResult:
+        """
+        0A-3: Run all 5 sub-checks, record would-have-blocked, but return allowed=True.
+        執行全部 5 個子檢查，記錄「本來會阻擋」但最終返回 allowed=True。
+
+        This allows observing H0 Gate blocking behavior for ~1 week before
+        switching to actual blocking mode. All shadow blocks are logged to
+        _shadow_stats and _shadow_log for analysis.
+
+        觀察約 1 週後再切換為實際阻擋模式。所有影子阻擋記錄到
+        _shadow_stats 和 _shadow_log 供分析。
+        """
+        blocks: list[tuple[str, str]] = []
+
+        ok, reason = self.check_freshness(symbol, now_ms)
+        if not ok:
+            blocks.append(("freshness", reason))
+
+        ok, reason = self.check_health(now_ms)
+        if not ok:
+            blocks.append(("health", reason))
+
+        ok, reason = self.check_eligibility(symbol, category)
+        if not ok:
+            blocks.append(("eligibility", reason))
+
+        ok, reason = self.check_risk_envelope()
+        if not ok:
+            blocks.append(("risk", reason))
+
+        ok, reason = self.check_cooldown(now_ms)
+        if not ok:
+            blocks.append(("cooldown", reason))
+
+        latency_us = int((time.perf_counter() - t0) * 1_000_000)
+
+        if blocks:
+            self._record_shadow_blocks(symbol, blocks, now_ms)
+
+        # Always count as allowed in shadow mode / 影子模式下始終計為通過
+        self._stats["allowed"] += 1
+        self._stats["total_latency_us"] += latency_us
+        if latency_us > self._stats["max_latency_us"]:
+            self._stats["max_latency_us"] = latency_us
+
+        # Return allowed=True with shadow annotation / 返回通過並附帶影子註解
+        shadow_reason = (
+            f"shadow_would_block:[{','.join(c for c, _ in blocks)}]"
+            if blocks else ""
+        )
+        return H0GateCheckResult(
+            allowed=True,
+            reason=shadow_reason,
+            check_name="shadow_all_passed" if not blocks else "shadow_would_block",
+            latency_us=latency_us,
+        )
+
+    def _record_shadow_blocks(
+        self, symbol: str, blocks: list[tuple[str, str]], now_ms: int
+    ) -> None:
+        """
+        Record shadow would-have-blocked events for analysis.
+        記錄影子「本來會阻擋」事件供分析。
+        """
+        for check_name, reason in blocks:
+            stat_key = f"shadow_would_block_{check_name}"
+            self._shadow_stats[stat_key] = self._shadow_stats.get(stat_key, 0) + 1
+        self._shadow_stats["shadow_total_would_block"] += 1
+
+        entry = {
+            "ts_ms": now_ms,
+            "symbol": symbol,
+            "blocks": [{"check": c, "reason": r} for c, r in blocks],
+        }
+        self._shadow_log.append(entry)
+        if len(self._shadow_log) > self._shadow_log_max:
+            self._shadow_log = self._shadow_log[-self._shadow_log_max:]
+
+        logger.info(
+            "H0 SHADOW would-have-blocked %s: %s / "
+            "H0 影子模式：%s 本來會被阻擋：%s",
+            symbol, [c for c, _ in blocks],
+            symbol, [r for _, r in blocks],
+        )
+
+    def set_shadow_mode(self, enabled: bool) -> None:
+        """
+        Toggle shadow observation mode at runtime.
+        運行時切換影子觀察模式。
+
+        Args:
+            enabled: True to enable shadow (observe only), False to block.
+        """
+        self._config.shadow_mode = enabled
+        logger.info(
+            "H0Gate shadow_mode set to %s / H0 影子模式設為 %s",
+            enabled, enabled,
         )
 
     # ── Sub-checks / 子檢查 ──────────────────────────────────────────────────
@@ -609,6 +740,10 @@ class H0Gate:
             + stats.get("blocked_cooldown", 0)
         )
 
+        # 0A-3: Include shadow stats / 包含影子觀察統計
+        if self._config.shadow_mode:
+            stats["shadow"] = dict(self._shadow_stats)
+
         return stats
 
     def get_current_state(self) -> dict[str, Any]:
@@ -659,6 +794,10 @@ class H0Gate:
                 sym: elig for sym, elig in self._symbol_eligibility.items()
             },
             "stats": self.get_stats(),
+            # 0A-3: Shadow observation state / 影子觀察狀態
+            "shadow_mode": self._config.shadow_mode,
+            "shadow_log_count": len(self._shadow_log),
+            "shadow_recent": self._shadow_log[-5:] if self._shadow_log else [],
         }
 
 

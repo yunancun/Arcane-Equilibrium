@@ -546,24 +546,59 @@ try:
         # 订阅 Executor 到消息总线 — 接收 Guardian 批准的 APPROVED_INTENT
         MESSAGE_BUS.subscribe(_AR11.EXECUTOR, EXECUTOR_AGENT.on_message)
 
-        # Wire conditional order callback (Batch 11: exchange stop-loss)
-        # 接入条件单回调（Batch 11：交易所止损单）
+        # Wire conditional order callback (Batch 11 + 0B-2: exchange SL/TP dual defense)
+        # 接入条件单回调（Batch 11 + 0B-2：交易所 SL/TP 雙重防線，原則 9）
         if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
             def _exchange_stop_callback(symbol: str, side: str, price: float, qty: float) -> None:
-                """Create exchange conditional stop-loss after order fill / 成交后创建交易所条件止损"""
+                """
+                0B-2: Create exchange conditional SL + TP after order fill.
+                成交後同時掛交易所 SL + TP 條件單（原則 9：雙重防線）。
+
+                SL: 5% hard stop (fail-safe, exchange-side protection).
+                TP: 8% take-profit (lock in gains, prevent round-trip erosion).
+                """
                 close_side = "Sell" if side.capitalize() == "Buy" else "Buy"
-                # Use 5% hard stop as default for executor-initiated stops
-                hard_pct = 5.0
+                sl_pct = 5.0   # Stop-loss / 止損
+                tp_pct = 8.0   # Take-profit / 止盈
+
                 if side.capitalize() == "Buy":
-                    trigger = round(price * (1 - hard_pct / 100), 2)
+                    # Long position: SL below entry, TP above entry
+                    sl_trigger = round(price * (1 - sl_pct / 100), 2)
+                    tp_trigger = round(price * (1 + tp_pct / 100), 2)
+                    tp_direction = 1  # Sell TP triggers when price rises above
                 else:
-                    trigger = round(price * (1 + hard_pct / 100), 2)
+                    # Short position: SL above entry, TP below entry
+                    sl_trigger = round(price * (1 + sl_pct / 100), 2)
+                    tp_trigger = round(price * (1 - tp_pct / 100), 2)
+                    tp_direction = 2  # Buy TP triggers when price falls below
+
+                # Place SL order / 掛止損單
                 DEMO_CONNECTOR.place_conditional_order(
-                    symbol=symbol, side=close_side, qty=qty, trigger_price=trigger,
+                    symbol=symbol, side=close_side, qty=qty, trigger_price=sl_trigger,
                 )
+                # 0B-2: Place TP order / 掛止盈單
+                try:
+                    DEMO_CONNECTOR.place_conditional_order(
+                        symbol=symbol, side=close_side, qty=qty,
+                        trigger_price=tp_trigger, trigger_direction=tp_direction,
+                    )
+                    logger.info(
+                        "0B-2: TP order placed: %s %s trigger=%.2f / 止盈單已掛",
+                        symbol, close_side, tp_trigger,
+                    )
+                except Exception as _tp_err:
+                    # SL placed successfully, TP failure is non-fatal
+                    # SL 已成功掛出，TP 失敗為非致命
+                    logger.warning(
+                        "0B-2: TP order failed (SL still active): %s / 止盈單失敗（止損仍有效）",
+                        _tp_err,
+                    )
 
             EXECUTOR_AGENT.set_conditional_order_callback(_exchange_stop_callback)
-            logger.info("ExecutorAgent conditional order callback wired to DemoConnector / Executor 条件单回调已接入 Demo 连接器")
+            logger.info(
+                "0B-2: ExecutorAgent SL/TP callback wired to DemoConnector (Principle 9 dual defense) / "
+                "Executor SL/TP 回調已接入 Demo 連接器（原則 9 雙重防線）"
+            )
 
         # Inject ExecutorAgent into PipelineBridge for status tracking
         # 将 ExecutorAgent 注入管线桥接器用于状态追踪
@@ -710,6 +745,39 @@ try:
         # for spot and inverse symbols that share names with linear contracts (e.g. BTCUSDT).
         AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)
         logger.info("PipelineBridge wired to auto-deployer for symbol-category mapping / 管线桥接器已注入自动部署器以支持品类映射")
+
+    # 0A-5: Inject BacktestEngine into auto-deployer for pre-deployment validation.
+    # 0A-5：注入 BacktestEngine 到自動部署器，供部署前回測驗證使用。
+    try:
+        from .backtest_routes import get_backtest_engine as _get_bt_engine
+        _bt_engine = _get_bt_engine()
+        AUTO_DEPLOYER.set_backtest_engine(_bt_engine, min_sharpe=0.0)
+        logger.info(
+            "0A-5: BacktestEngine injected into auto-deployer / "
+            "BacktestEngine 已注入自動部署器供部署前驗證"
+        )
+    except Exception as _bt_wire_err:
+        logger.warning(
+            "0A-5: Could not wire BacktestEngine to auto-deployer (fail-open): %s",
+            _bt_wire_err,
+        )
+
+    # 0A-2: Inject auto-deployer into evolution_routes for B13 auto-apply on evolution completion.
+    # 0A-2：注入自動部署器到 evolution_routes，使進化完成後自動應用最優參數（B13 閉環）。
+    # Paper/demo mode: no confirmation needed (per Operator decision in Batch 9).
+    # Paper/demo 模式：免確認（依 Batch 9 Operator 決策）。
+    try:
+        from . import evolution_routes as _evolution_routes
+        _evolution_routes.set_auto_deployer(AUTO_DEPLOYER)
+        logger.info(
+            "0A-2: Auto-deployer injected into evolution_routes for B13 auto-apply / "
+            "自動部署器已注入 evolution_routes 供 B13 進化結果自動應用"
+        )
+    except Exception as _evo_wire_err:
+        logger.warning(
+            "0A-2: Could not wire auto-deployer to evolution_routes (fail-open): %s",
+            _evo_wire_err,
+        )
 
     logger.info("Market scanner + auto-deployer started / 市场扫描器+自动部署器已启动")
 except Exception as e:
@@ -1619,6 +1687,20 @@ async def get_auto_deployed(actor: base.AuthenticatedActor = Depends(base.curren
             "deployed": AUTO_DEPLOYER.get_deployed(),
             "stats": AUTO_DEPLOYER.get_stats(),
         })
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+
+@phase2_router.get("/kelly-recommendations")
+async def get_kelly_recommendations(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+    """
+    0B-3: Get Kelly-based position sizing recommendations for all deployed strategies.
+    獲取所有已部署策略的 Kelly 倉位建議。
+    """
+    if AUTO_DEPLOYER is None:
+        return _envelope({"strategies": {}, "available": False})
+    try:
+        return _envelope(AUTO_DEPLOYER.get_kelly_recommendations())
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
 
