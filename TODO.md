@@ -182,7 +182,7 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 ### [x] 3-5：PnLAttributor + API + GUI（報告 §5.6）· Python 擴展現有 TradeAttributionEngine
 ### [x] 3-6：OB Imbalance + Orderbook WS（報告）
 ### [x] 3-7：四階段放權框架 — DelegationFramework 獨立模組 + 自動降級（報告 §2）
-### [ ] 3-L2：★ L2 接口凍結簽核 → git tag `l2-interface-freeze`
+### [x] 3-L2：★ L2 接口凍結簽核 → git tag `l2-interface-freeze`（2026-04-03 Operator 確認）
 
 ---
 
