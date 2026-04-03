@@ -136,6 +136,26 @@ git status && git log --oneline -5
 
 ## 七、代碼與文檔規範
 
+### ★★ 跨平台兼容性（強制，所有開發必須遵守）
+
+**大前提：項目必須隨時可以部署在 macOS 上運行。**
+
+1. **路徑不硬編碼** — 所有路徑使用環境變量或 config，禁止硬編碼 `/home/ncyu/`。
+   用 `os.environ.get("OPENCLAW_BASE_DIR", ...)` 或 `Path(__file__).parent` 相對路徑。
+   E2 必查：grep `/home/ncyu` 新代碼 → 打回。
+
+2. **LocalLLMClient 抽象乾淨** — 不洩漏 Ollama-specific 細節。
+   所有 LLM 調用通過 `LocalLLMClient` ABC 接口（Phase 1 任務 1.8）。
+   禁止在業務邏輯中直接調用 Ollama HTTP endpoint。
+
+3. **服務部署可遷移** — systemd → launchd 遷移路徑清晰。
+   服務配置邏輯寫成文檔或腳本（`helper_scripts/deploy/`）。
+   不依賴 systemd-specific 特性（如 `sd_notify`）。
+
+4. **依賴管理乾淨** — `requirements.txt` 保持更新，禁止隱式依賴。
+   新增 `import` 時同步更新 requirements。E2 必查。
+   避免 Linux-only 依賴（如 `psutil` 的 Linux 特定 API），需要時加平台守衛。
+
 ### 雙語注釋（強制）
 每個新建/修改的函數、類、模塊必須中英對照注釋（MODULE_NOTE / docstring / inline / fail-closed 路徑 / 安全代碼）。E2 必查。
 

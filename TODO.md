@@ -72,6 +72,34 @@ PM 排程計劃：
 
 ---
 
+## ★★★★ P0 前置 — 跨平台兼容性全盤修改（Mac 遷移準備）
+
+> **大前提：項目必須隨時可以部署在 macOS 上運行。**
+> 此項優先於所有 Phase 0-3 開發。先完成兼容性調整，再帶著準則完成後續開發。
+> 準則寫入 CLAUDE.md §七，E2 強制審查。
+
+### [ ] XP-1：路徑硬編碼掃描與修復
+- **範圍**：全項目 grep `/home/ncyu`、grep 絕對路徑，改為 `os.environ` 或相對路徑
+- **涉及**：config 文件、shell 腳本、Python 代碼、systemd unit 文件
+- **工時**：4h · **E1**：E1-Alpha
+
+### [ ] XP-2：LocalLLMClient 抽象層預審
+- **範圍**：掃描所有直接調用 `http://localhost:11434`（Ollama）的代碼
+- **修復**：標記需要走 ABC 接口的調用點（Phase 1 任務 1.8 正式實現）
+- **工時**：2h · **E1**：E1-Beta
+
+### [ ] XP-3：服務部署遷移文檔
+- **產出**：`helper_scripts/deploy/README.md`（systemd→launchd 遷移指南）
+- **包含**：環境變量清單、端口配置、啟動順序、依賴服務
+- **工時**：2h · **E1**：E1-Gamma
+
+### [ ] XP-4：requirements.txt 全量審計
+- **範圍**：比對所有 `import` vs `requirements.txt`，補齊缺失項
+- **檢查**：Linux-only 依賴加平台守衛（`sys.platform` 條件 import）
+- **工時**：1h · **E1**：E1-Delta
+
+---
+
 ## ★★★ 統一路線圖（改善報告 V3 + Batch 9 合併 · 4-Agent 分析 · 2026-04-03）
 
 > 主計劃文件：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md`
