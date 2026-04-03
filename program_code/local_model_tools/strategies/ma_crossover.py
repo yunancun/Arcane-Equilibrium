@@ -1,29 +1,40 @@
 """
-MA Crossover Strategy / 均线交叉策略
+MA Crossover Strategy V2 / 均线交叉策略 V2
 
 MODULE_NOTE (中文):
-  经典的趋势跟踪策略：当快速均线（EMA12）上穿慢速均线（EMA26）时做多，
-  下穿时做空。结合 MACD 和 RSI 过滤假信号。
+  经典的趋势跟踪策略：当快速均线上穿慢速均线时做多，下穿时做空。
+  结合 regime 过滤、ADX 趋势强度确认和多时间框架方向一致性过滤假信号。
 
   适用场景：趋势明显的市场
   不适用：震荡/横盘市场（会频繁假突破）
 
   入场条件：
-  1. MA 交叉信号（快线穿越慢线）
-  2. MACD 方向确认（同向）
-  3. RSI 不在极端区域（避免追高追低）
+  1. MA/KAMA 交叉信号（快线穿越慢线）
+  2. Regime 过滤（排除 ranging）
+  3. ADX > 20 趋势强度确认
+  4. 多时间框架方向一致性确认
 
   出场条件：
   1. 反向交叉信号
   2. 硬止损（由风控框架管理）
 
+  V2 升级（Phase 2-1）：
+  1. KAMA 替代 EMA — 自适应平滑，趋势市跟随、震荡市平滑
+  2. ADX > 20 过滤 — 只在有趋势时交易
+  3. 多时间框架确认 — 要求更高 TF 同向
+
 MODULE_NOTE (English):
-  Classic trend-following strategy: go long when fast MA (EMA12) crosses above
-  slow MA (EMA26), go short when it crosses below. Uses MACD and RSI to filter
-  false signals.
+  Trend-following strategy V2: go long when fast MA crosses above slow MA,
+  go short when it crosses below. Filters false signals with regime detection,
+  ADX trend strength confirmation, and multi-timeframe directional alignment.
 
   Suitable: trending markets
   Not suitable: ranging/sideways markets (frequent false breakouts)
+
+  V2 upgrades (Phase 2-1):
+  1. KAMA replaces EMA — adaptive smoothing, follows trends, flattens in chop
+  2. ADX > 20 filter — only trade when a trend exists
+  3. Multi-timeframe confirmation — require higher TF directional agreement
 
 Safety invariant / 安全不变量:
   - 只产生 OrderIntent / Only generates OrderIntents
@@ -31,21 +42,33 @@ Safety invariant / 安全不变量:
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from .base import OrderIntent, StrategyBase, STRATEGY_ACTIVE
 
+logger = logging.getLogger(__name__)
+
 
 class MACrossoverStrategy(StrategyBase):
     """
-    Moving Average Crossover trend-following strategy.
-    均线交叉趋势跟踪策略。
+    Moving Average Crossover trend-following strategy V2.
+    均线交叉趋势跟踪策略 V2。
+
+    V2 adds KAMA signal support, ADX trend strength filtering, and
+    multi-timeframe directional confirmation on top of V1 regime filtering.
+    V2 在 V1 regime 过滤基础上新增 KAMA 信号支持、ADX 趋势强度过滤、
+    多时间框架方向确认。
 
     Parameters:
-      symbol            — trading pair to trade / 交易的交易对
-      qty_per_trade     — position size per trade / 每次交易的仓位大小
-      min_confidence    — minimum signal confidence to act / 最小信号置信度
+      symbol            — trading pair / 交易对
+      qty_per_trade     — position size per trade / 每次交易仓位
+      min_confidence    — minimum signal confidence / 最小信号置信度
+      cooldown_ms       — cooldown between trades in ms / 交易冷却期（毫秒）
+      adx_threshold     — ADX minimum for trend confirmation / ADX 趋势确认最低值
+      use_kama          — accept KAMA crossover signals / 接受 KAMA 交叉信号
+      multi_tf_confirm  — require higher-TF directional agreement / 要求更高 TF 同向
     """
 
     def __init__(
@@ -54,6 +77,10 @@ class MACrossoverStrategy(StrategyBase):
         qty_per_trade: float = 0.001,
         min_confidence: float = 0.3,
         cooldown_ms: int = 300_000,
+        # V2 parameters / V2 参数
+        adx_threshold: float = 20.0,      # ADX minimum for trend confirmation / ADX 趋势确认最低值
+        use_kama: bool = True,             # Use KAMA signals instead of EMA / 使用 KAMA 信号替代 EMA
+        multi_tf_confirm: bool = True,     # Require multi-timeframe confirmation / 需要多时间框架确认
     ) -> None:
         super().__init__()
         if qty_per_trade <= 0:
@@ -61,6 +88,10 @@ class MACrossoverStrategy(StrategyBase):
         self._symbol = symbol
         self._qty = qty_per_trade
         self._min_confidence = min_confidence
+        # V2 config / V2 配置
+        self._adx_threshold: float = adx_threshold
+        self._use_kama: bool = use_kama
+        self._multi_tf_confirm: bool = multi_tf_confirm
         # Position state is "intended" — updated when intent is emitted, not when confirmed.
         # In paper trading without execution callback, this is a known limitation.
         # 仓位状态为"意图态" — 在意图发出时更新，非确认后更新。
@@ -77,8 +108,8 @@ class MACrossoverStrategy(StrategyBase):
     @property
     def description(self) -> str:
         return (
-            "均线交叉趋势跟踪策略 / MA Crossover trend-following strategy. "
-            "EMA(12) × EMA(26) 交叉 + MACD 确认"
+            "均线交叉趋势跟踪策略 V2 / MA Crossover V2 trend-following strategy. "
+            "KAMA + ADX>{} 确认 + 多时间框架".format(self._adx_threshold)
         )
 
     def on_signal(self, signal: Any) -> None:
@@ -103,8 +134,9 @@ class MACrossoverStrategy(StrategyBase):
         source = getattr(signal, "source", "")
         direction = getattr(signal, "direction", "")
 
-        # Only act on MA crossover signals / 只对 MA 交叉信号行动
-        if "MA_Cross" not in source:
+        # V2: Accept both EMA and KAMA crossover signals
+        # V2：同时接受 EMA 和 KAMA 交叉信号
+        if "MA_Cross" not in source and "KAMA_Cross" not in source:
             return
 
         with self._intent_lock:  # Protect _current_position read+write+emit atomically / 原子保护仓位状态
@@ -119,6 +151,25 @@ class MACrossoverStrategy(StrategyBase):
             signal_regime = getattr(signal, "metadata", {}).get("_regime", "unknown")
             if signal_regime == "ranging":
                 return
+
+            # V2 Step 2: ADX trend strength filter — only trade when ADX > threshold
+            # ADX 趋势强度过滤 — 只在 ADX > 阈值时交易
+            # ADX data comes from IndicatorEngine via signal metadata
+            # ADX 数据来自 IndicatorEngine 通过信号元数据
+            _metadata = getattr(signal, "metadata", {}) or {}
+            signal_adx = _metadata.get("adx")
+            if self._adx_threshold > 0 and signal_adx is not None:
+                if signal_adx < self._adx_threshold:
+                    return  # No trend / 无趋势
+
+            # V2 Step 3: Multi-timeframe confirmation
+            # 多时间框架确认 — 要求更高时间框架同向
+            # Higher TF regime comes from signal metadata (set by SignalEngine)
+            # 更高 TF regime 来自信号元数据（由 SignalEngine 设置）
+            if self._multi_tf_confirm:
+                htf_direction = _metadata.get("htf_direction")
+                if htf_direction is not None and htf_direction != direction:
+                    return  # Higher timeframe disagrees / 更高时间框架方向不一致
 
             if direction == "long" and self._current_position != "long":
                 # Close short if exists, then go long / 有空仓先平仓，再开多
@@ -214,4 +265,8 @@ class MACrossoverStrategy(StrategyBase):
             "trade_count": self._trade_count,
             "cooldown_ms": self._cooldown_ms,
             "last_trade_ts_ms": self._last_trade_ts_ms,
+            # V2 parameters / V2 参数
+            "adx_threshold": self._adx_threshold,
+            "use_kama": self._use_kama,
+            "multi_tf_confirm": self._multi_tf_confirm,
         }

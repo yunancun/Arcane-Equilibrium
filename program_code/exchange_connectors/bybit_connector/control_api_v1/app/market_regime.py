@@ -270,6 +270,116 @@ class RegimeTransition:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Hurst Hysteresis Filter / Hurst 滯後過濾器
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class HurstHysteresis:
+    """
+    Hurst-based regime hysteresis filter to prevent whipsaw regime switching.
+    基於 Hurst 的 regime 滯後過濾器，防止 regime 切換來回震盪。
+
+    Regime switches require H to stay outside threshold for N consecutive periods.
+    Regime 切換需要 H 連續 N 個週期停留在閾值外。
+
+    Per Improvement Report Appendix B.2.1:
+      - H > 0.60 for 6 consecutive bars → "trending"
+      - H < 0.40 for 6 consecutive bars → "mean_reverting"
+      - In between → slowly decay counts, keep current regime (hysteresis)
+    根據改善報告附錄 B.2.1：
+      - H > 0.60 連續 6 根 bar → "trending"
+      - H < 0.40 連續 6 根 bar → "mean_reverting"
+      - 介於兩者之間 → 緩慢衰減計數，保持當前 regime（滯後）
+    """
+
+    def __init__(
+        self,
+        trend_threshold: float = 0.60,
+        revert_threshold: float = 0.40,
+        required_consecutive: int = 6,  # 6 × 1h bar = 6 hours
+    ):
+        self._trend_th = trend_threshold
+        self._revert_th = revert_threshold
+        self._required = required_consecutive
+        self._consecutive_trend = 0
+        self._consecutive_revert = 0
+        self._current_regime = "uncertain"  # "trending" / "mean_reverting" / "uncertain"
+
+    def update(self, hurst: float) -> str:
+        """
+        Update with new Hurst value, return confirmed regime.
+        用新 Hurst 值更新，返回確認的 regime。
+
+        Args:
+            hurst: Hurst exponent value (0.0 – 1.0 typical range)
+
+        Returns:
+            Current confirmed regime string: "trending" / "mean_reverting" / "uncertain"
+        """
+        if hurst > self._trend_th:
+            self._consecutive_trend += 1
+            self._consecutive_revert = 0
+        elif hurst < self._revert_th:
+            self._consecutive_revert += 1
+            self._consecutive_trend = 0
+        else:
+            # In uncertain zone, slowly decay counts (don't immediately zero)
+            # 在不確定區間，緩慢衰減計數（不立即歸零）
+            self._consecutive_trend = max(0, self._consecutive_trend - 1)
+            self._consecutive_revert = max(0, self._consecutive_revert - 1)
+
+        if self._consecutive_trend >= self._required:
+            self._current_regime = "trending"
+        elif self._consecutive_revert >= self._required:
+            self._current_regime = "mean_reverting"
+        # If neither threshold met, keep current regime unchanged
+        # 不滿足任一條件時保持當前 regime 不變
+
+        return self._current_regime
+
+    @property
+    def current_regime(self) -> str:
+        """Current confirmed regime / 當前確認的 regime"""
+        return self._current_regime
+
+    def get_state(self) -> dict:
+        """
+        Get full internal state for serialization / diagnostics.
+        獲取完整內部狀態用於序列化/診斷。
+        """
+        return {
+            "current_regime": self._current_regime,
+            "consecutive_trend": self._consecutive_trend,
+            "consecutive_revert": self._consecutive_revert,
+            "trend_threshold": self._trend_th,
+            "revert_threshold": self._revert_th,
+            "required_consecutive": self._required,
+        }
+
+    def reset(self) -> None:
+        """Reset all counters and regime to initial state / 重置所有計數器和 regime 到初始狀態"""
+        self._consecutive_trend = 0
+        self._consecutive_revert = 0
+        self._current_regime = "uncertain"
+
+    @classmethod
+    def from_state(cls, state: Dict[str, Any]) -> "HurstHysteresis":
+        """
+        Restore HurstHysteresis from serialized state dict.
+        從序列化的狀態字典還原 HurstHysteresis。
+        """
+        obj = cls(
+            trend_threshold=state.get("trend_threshold", 0.60),
+            revert_threshold=state.get("revert_threshold", 0.40),
+            required_consecutive=state.get("required_consecutive", 6),
+        )
+        obj._consecutive_trend = state.get("consecutive_trend", 0)
+        obj._consecutive_revert = state.get("consecutive_revert", 0)
+        obj._current_regime = state.get("current_regime", "uncertain")
+        return obj
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Market Regime Tracker / 市场体制追踪器
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -325,6 +435,9 @@ class MarketRegimeTracker:
         ] = {}
 
         self._max_history = max_history_per_symbol_tf
+        # Hurst hysteresis filters per symbol / 每品種的 Hurst 滯後過濾器
+        self._hurst_hysteresis: Dict[str, HurstHysteresis] = {}
+
         self._stats = {
             "updates": 0,
             "transitions": 0,
@@ -510,6 +623,110 @@ class MarketRegimeTracker:
             return None
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Hurst + EWMA Vol Regime Integration / Hurst + EWMA Vol 體制整合
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def update_hurst_regime(
+        self,
+        symbol: str,
+        hurst_value: float,
+        ewma_vol_regime: str = "normal",  # "low" / "normal" / "high"
+        timeframe: RegimeTimeframe = RegimeTimeframe.H1,
+    ) -> Tuple[str, bool]:
+        """
+        Update regime using Hurst exponent with hysteresis + EWMA Vol.
+        使用帶滯後的 Hurst 指數 + EWMA Vol 更新 regime。
+
+        Combines Hurst-based trend/mean-reversion detection (with hysteresis to
+        avoid whipsaw) and EWMA volatility regime to produce a final MarketRegime.
+        結合基於 Hurst 的趨勢/均值回歸檢測（帶滯後防抖）和 EWMA 波動率 regime
+        產生最終的 MarketRegime。
+
+        Args:
+            symbol: Trading symbol (e.g. "BTCUSDT")
+            hurst_value: Hurst exponent (typically 0.0 – 1.0)
+            ewma_vol_regime: EWMA volatility regime — "low" / "normal" / "high"
+            timeframe: Timeframe for this regime update
+
+        Returns:
+            (hurst_regime, is_transition) where hurst_regime is
+            "trending" / "mean_reverting" / "uncertain"
+        """
+        with self._lock:
+            if symbol not in self._hurst_hysteresis:
+                self._hurst_hysteresis[symbol] = HurstHysteresis()
+
+            hurst_regime = self._hurst_hysteresis[symbol].update(hurst_value)
+
+            # Map hurst_regime + ewma_vol to MarketRegime
+            # 將 hurst_regime + ewma_vol 映射到 MarketRegime
+            regime = self._map_hurst_vol_to_regime(hurst_regime, ewma_vol_regime)
+
+            # Compute confidence from Hurst distance to threshold
+            # 根據 Hurst 到閾值的距離計算置信度
+            if hurst_regime == "trending":
+                confidence = min(1.0, 0.5 + (hurst_value - 0.60) * 5)
+            elif hurst_regime == "mean_reverting":
+                confidence = min(1.0, 0.5 + (0.40 - hurst_value) * 5)
+            else:
+                confidence = 0.4  # uncertain → low confidence / 不確定 → 低置信度
+
+            is_transition, transition = self.update_regime(
+                symbol=symbol,
+                regime=regime,
+                confidence=confidence,
+                timeframe=timeframe,
+                trigger_reason=f"hurst={hurst_value:.3f},vol={ewma_vol_regime}",
+                supporting_indicators={"hurst": hurst_value, "ewma_vol_regime": ewma_vol_regime},
+            )
+
+            return hurst_regime, is_transition
+
+    @staticmethod
+    def _map_hurst_vol_to_regime(hurst_regime: str, vol_regime: str) -> MarketRegime:
+        """
+        Map Hurst regime + EWMA vol regime to MarketRegime enum.
+        將 Hurst regime + EWMA vol regime 映射到 MarketRegime 枚舉。
+
+        Mapping logic (per Improvement Report Appendix B.2.1):
+          trending + high vol   → HIGH_VOLATILITY (volatile breakout / momentum)
+          trending + normal/low → TRENDING_UP     (direction from price action elsewhere)
+          mean_reverting + low  → LOW_VOLATILITY  (quiet range-bound)
+          mean_reverting + else → RANGING          (oscillating in range)
+          uncertain + high      → HIGH_VOLATILITY
+          uncertain + low       → SQUEEZE          (compressed, pending breakout)
+          uncertain + normal    → UNKNOWN
+        """
+        if hurst_regime == "trending":
+            if vol_regime == "high":
+                return MarketRegime.HIGH_VOLATILITY
+            return MarketRegime.TRENDING_UP  # Direction determined by price action elsewhere
+        elif hurst_regime == "mean_reverting":
+            if vol_regime == "low":
+                return MarketRegime.LOW_VOLATILITY
+            return MarketRegime.RANGING
+        else:  # uncertain
+            if vol_regime == "high":
+                return MarketRegime.HIGH_VOLATILITY
+            elif vol_regime == "low":
+                return MarketRegime.SQUEEZE
+            return MarketRegime.UNKNOWN
+
+    def get_hurst_state(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Get Hurst hysteresis state for a symbol.
+        獲取品種的 Hurst 滯後狀態。
+
+        Returns None if no Hurst data has been recorded for this symbol.
+        如果該品種沒有 Hurst 數據則返回 None。
+        """
+        with self._lock:
+            hysteresis = self._hurst_hysteresis.get(symbol)
+            if hysteresis:
+                return hysteresis.get_state()
+            return None
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Stats / 统计
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -541,9 +758,15 @@ class MarketRegimeTracker:
                 key = f"{symbol}:{tf.value}"
                 history[key] = [t.to_dict() for t in transitions]
 
+            # Serialize Hurst hysteresis states / 序列化 Hurst 滯後狀態
+            hurst_states = {}
+            for symbol, hysteresis in self._hurst_hysteresis.items():
+                hurst_states[symbol] = hysteresis.get_state()
+
             return {
                 "current_regimes": current,
                 "transition_history": history,
+                "hurst_states": hurst_states,
                 "stats": dict(self._stats),
             }
 
@@ -573,6 +796,11 @@ class MarketRegimeTracker:
                     for t_dict in transitions_dicts:
                         history_deque.append(RegimeTransition.from_dict(t_dict))
                     self._transition_history[(symbol, tf)] = history_deque
+
+            # Restore Hurst hysteresis states / 還原 Hurst 滯後狀態
+            self._hurst_hysteresis.clear()
+            for symbol, hurst_state in data.get("hurst_states", {}).items():
+                self._hurst_hysteresis[symbol] = HurstHysteresis.from_state(hurst_state)
 
             if "stats" in data:
                 self._stats.update(data["stats"])

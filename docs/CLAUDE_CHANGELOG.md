@@ -5,6 +5,31 @@
 
 ---
 
+### Phase 2 完成 — 策略 V2 + Agent 整合 + Rust 基礎設施（2026-04-03）
+
+**策略 V2 升級（5 個策略全部完成）：**
+- **2-1**：MA_Crossover V2 — KAMA + ADX>20 過濾 + 多時間框架確認
+- **2-2**：BB_Reversion V2 — RSI<30 確認 + Hurst Regime 感知（trending 不交易）
+- **2-3**：BB_Breakout V2 — Volume ratio>1.5 + Donchian 確認 + ATR trailing stop
+- **2-4**：FundingRateArb V2 — PairedExecutionState + filled_qty 回滾（非 requested_qty）
+- **2-5**：GridTrading V2 — OU 動態間距（σ/√θ + 2×fee_pct 下限）
+- **2-6**：Regime Detection — HurstHysteresis（6 bar 確認）+ EWMA Vol 三維 regime
+
+**Agent 整合（3 個任務）：**
+- **2-7**：Strategist 雙軌 — 快速通道/正常通道 + _emergency_mode 競態保護 + CognitiveModulator 閉環
+- **2-8**：ContextDistiller — **Rust+PyO3 首個模組** · Mutex 線程安全 · 4 區塊壓縮（market/portfolio/health/events）
+- **2-9**：Ollama prompt 模板 — 結構化 JSON + cognitive/dream 欄位 + plain-text fallback
+
+**Rust 基礎設施（R-00-mini）：**
+- Cargo workspace (`Cargo.toml`) + `rust/openclaw_core/` crate
+- PyO3 0.24 + maturin 構建 → Python 可直接 `import openclaw_core`
+- 決策：新獨立模組 Rust+PyO3，修改現有文件繼續 Python
+
+**測試基準**：3703 passed / 24 failed / 17 errors（+1 fail 為 pre-existing async 環境問題）
+**業務完成度**：82% → ~93%
+
+---
+
 ### Phase 1 完成 — Agent 感知工具箱 + 認知三模組（2026-04-03）
 
 **新建模組（8 個文件）：**

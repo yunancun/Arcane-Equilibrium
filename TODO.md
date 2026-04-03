@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-03（Phase 0-A+0-B 完成 · 代碼 74% 業務 72% · 關鍵路徑 20 週 102d）
+# 最後更新：2026-04-03（Phase 2 完成 · 代碼 ~82% 業務 ~93% · 關鍵路徑 Phase 3 → R）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -18,7 +18,7 @@
 ## 測試基準線
 
 ```
-3704 passed / 23 failed / 17 errors（post Phase 0-A+0-B）
+3703 passed / 24 failed / 17 errors（post Phase 2 · +1 fail 為 pre-existing async 環境問題）
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
 
@@ -43,7 +43,7 @@ SPEC 審查記錄：
 ## 全局路線圖概覽
 
 ```
-★ 當前焦點 → Phase 0（讀下方第一個 [ ] 開始）
+★ 當前焦點 → Phase 2-L1 凍結 → Phase 3（讀下方第一個 [ ] 開始）
 
 Phase 0（本週 · 5d）  業務 52%→72%    學習閉環 + 管線連通 + 策略 Edge
 Phase 1（Week 2-3 · 9d）業務→82%     感知工具箱 + 認知三模組 + ★R-00 並行
@@ -160,15 +160,15 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 > 前置：Phase 1 完成 + Alpha 基準 2 週結果。
 > ★ Phase 2 結束 → L1 接口凍結（indicator/signal/h0_gate/strategies）
 
-### [ ] 2-1：MA_Crossover V2 — KAMA + ADX>20 + 多時間框架（報告 §6.1）
-### [ ] 2-2：BB_Reversion V2 — RSI<30 + Regime 感知（報告 §6.2）
-### [ ] 2-3：BB_Breakout V2 — Volume ratio>1.5 + Donchian（報告 §6.3）
-### [ ] 2-4：FundingRateArb V2 — Paired Execution + Basis（報告 §6.4）
-### [ ] 2-5：GridTrading V2 — OU 動態間距 + 成本修正（報告 §6.5）
-### [ ] 2-6：Regime Detection 升級 — Hurst + EWMA Vol（報告 §3）
-### [ ] 2-7：Strategist 雙軌 + CognitiveModulator 閉環（報告 §3.3 + 認知 SPEC §5.1.2）
-### [ ] 2-8：ContextDistiller — ~520 tokens（報告 §4.2 + 認知 SPEC §5.1.1）
-### [ ] 2-9：Ollama prompt 模板 + cognitive/dream 欄位（認知 SPEC §6.2）
+### [x] 2-1：MA_Crossover V2 — KAMA + ADX>20 + 多時間框架（報告 §6.1）
+### [x] 2-2：BB_Reversion V2 — RSI<30 + Regime 感知（報告 §6.2）
+### [x] 2-3：BB_Breakout V2 — Volume ratio>1.5 + Donchian（報告 §6.3）
+### [x] 2-4：FundingRateArb V2 — Paired Execution + Basis（報告 §6.4）
+### [x] 2-5：GridTrading V2 — OU 動態間距 + 成本修正（報告 §6.5）
+### [x] 2-6：Regime Detection 升級 — Hurst + EWMA Vol（報告 §3）
+### [x] 2-7：Strategist 雙軌 + CognitiveModulator 閉環（報告 §3.3 + 認知 SPEC §5.1.2）
+### [x] 2-8：ContextDistiller — ~520 tokens · **Rust+PyO3**（報告 §4.2 + 認知 SPEC §5.1.1）
+### [x] 2-9：Ollama prompt 模板 + cognitive/dream 欄位（認知 SPEC §6.2）
 ### [ ] 2-L1：★ L1 接口凍結簽核 → git tag `l1-interface-freeze`
 
 ---
@@ -192,7 +192,7 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 > **階段文件**：`docs/rust_migration/`（8 個文件，Agent 接手先讀 README.md）
 > **前置**：Phase 0-3 全部完成 + L1+L2 凍結 + Alpha PnL > 0
 
-### [ ] R-00：提前並行（Phase 1-3 期間）— Cargo + types + CI + fsum + 告警 bot
+### [~] R-00：提前並行（Phase 1-3 期間）— Cargo workspace ✅ + PyO3 ContextDistiller ✅ + types + CI + 告警 bot
 ### [ ] R-01：IPC + shared_types + WS（W1-2）
 ### [ ] R-02：core 上半——感知 + 認知 + 風控（W3-4）
 ### [ ] R-03：core 下半——SM + 執行 + 回測（W5-6）

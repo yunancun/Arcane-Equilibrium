@@ -196,6 +196,17 @@ class StrategistAgent:
         self._eval_log: List[Dict[str, Any]] = []
         self._max_eval_log = 100
 
+        # V2: Dual-track mechanism / 雙軌機制
+        # Fast channel: deterministic risk rules (<10ms) / 快速通道：確定性風控規則
+        # Normal channel: AI-evaluated signals (2-8s) / 正常通道：AI 評估信號
+        self._emergency_mode = threading.Event()  # Atomic flag for fast channel / 快速通道原子標誌
+        self._normal_queue: List[TradeIntent] = []  # Normal channel pending queue / 正常通道待處理隊列
+
+        # V2: CognitiveModulator integration / 認知門檻調製整合
+        # Injected externally; None = no cognitive modulation (bypass)
+        # 外部注入；None = 不做認知調製（跳過）
+        self._cognitive_modulator: Optional[Any] = None
+
     # ── Lifecycle / 生命週期 ──
 
     def start(self) -> None:
@@ -243,6 +254,15 @@ class StrategistAgent:
         Orchestration only — delegates H1/H3/H4 to extracted modules.
         僅做編排 — H1/H3/H4 委託給拆分模組。
         """
+        # V2: Emergency mode check — discard normal channel intents during emergency
+        # 緊急模式檢查 — 緊急時期丟棄正常通道 intent
+        if self._emergency_mode.is_set():
+            logger.debug(
+                "Normal channel intel discarded (emergency mode active) / "
+                "正常通道情報已丟棄（緊急模式）"
+            )
+            return
+
         with self._lock:
             self._stats["intel_received"] += 1
 
@@ -390,11 +410,16 @@ class StrategistAgent:
                         intel.symbols, evaluation.reason)
             return
 
-        if evaluation.confidence < self.config.min_confidence:
+        # V2: Apply CognitiveModulator threshold if available / 應用認知調製門檻
+        conf_floor, _qty_ceil = self._apply_cognitive_modulation(evaluation.confidence)
+        if evaluation.confidence < conf_floor:
             with self._lock:
                 self._stats["evaluations_rejected"] += 1
-            logger.info("Edge confidence too low: %.2f < %.2f / Edge 置信度過低",
-                        evaluation.confidence, self.config.min_confidence)
+            logger.info(
+                "Edge confidence too low: %.2f < %.2f (cognitive floor) / "
+                "Edge 置信度過低（認知門檻）",
+                evaluation.confidence, conf_floor,
+            )
             return
 
         # Produce TradeIntent(s) for each symbol / 為每個交易對產出 TradeIntent
@@ -632,6 +657,83 @@ class StrategistAgent:
         except Exception as e:
             logger.warning("_apply_l2_weight_update failed (fail-open): %s", e)
 
+    # ── Prompt Construction / Prompt 構建 ──
+
+    def _build_prompt_context(self, intel: IntelObject) -> str:
+        """
+        V2: Build structured JSON prompt context for Ollama evaluation.
+        V2：構建結構化 JSON prompt 上下文供 Ollama 評估。
+
+        Includes cognitive modulator state and dream engine insights
+        when available, per Cognitive Adaptation Spec §6.2.
+        包含認知調製器狀態和蒙特卡洛洞察（若可用），
+        依據認知自適應 SPEC §6.2。
+
+        Returns:
+            JSON-formatted context string prefixed with evaluation instruction
+            帶評估指令前綴的 JSON 格式上下文字串
+        """
+        # Base intel context / 基礎情報上下文
+        context_dict: dict = {
+            "symbols": intel.symbols,
+            "source": intel.source,
+            "sentiment": intel.sentiment.value if hasattr(intel.sentiment, "value") else str(intel.sentiment),
+            "relevance": round(intel.relevance_score, 2),
+            "data_quality": intel.data_quality.value if hasattr(intel.data_quality, "value") else str(intel.data_quality),
+            "freshness_s": intel.freshness_seconds,
+            "content": intel.content[:500],
+            "regime": self._current_regime,
+        }
+
+        # V2: CognitiveModulator state (if connected)
+        # 認知調製器狀態（若已連接）
+        if self._cognitive_modulator is not None:
+            try:
+                cog_params = self._cognitive_modulator.get_current_params()
+                context_dict["cognitive"] = {
+                    "confidence_floor": round(cog_params.get("confidence_floor", 0.6), 3),
+                    "qty_ceiling": round(cog_params.get("qty_ceiling", 1.0), 3),
+                    "stoploss_multiplier": round(cog_params.get("stoploss_multiplier", 1.0), 3),
+                }
+            except Exception:
+                pass  # No cognitive data available — skip silently / 無認知數據，靜默跳過
+
+        # V2: DreamEngine insights (if available via cognitive modulator)
+        # 蒙特卡洛洞察（若可用）
+        if self._cognitive_modulator is not None:
+            try:
+                dream_data = getattr(self._cognitive_modulator, "last_dream_summary", None)
+                if dream_data and isinstance(dream_data, dict):
+                    context_dict["dream_insights"] = {
+                        "suggested_params": dream_data.get("suggested_params"),
+                        "confidence": dream_data.get("confidence"),
+                    }
+            except Exception:
+                pass  # No dream data — skip silently / 無蒙特卡洛數據，靜默跳過
+
+        # Format as structured text for LLM / 格式化為 LLM 的結構化文本
+        try:
+            context_json = json.dumps(context_dict, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            # Fallback to plain text if JSON serialization fails
+            # JSON 序列化失敗時回退到純文字
+            return (
+                f"Symbol(s): {', '.join(intel.symbols)}\n"
+                f"Source: {intel.source}\n"
+                f"Sentiment: {context_dict['sentiment']}\n"
+                f"Relevance: {context_dict['relevance']}\n"
+                f"Content: {intel.content[:500]}"
+            )
+
+        # Prefix with evaluation instruction for judge_edge()
+        # 為 judge_edge() 加上評估指令前綴
+        return (
+            "Evaluate this trading signal. Respond in JSON: "
+            '{"has_edge":bool,"confidence":0-1,"reason":"..."}. '
+            "Consider cognitive state if present.\n\n"
+            + context_json
+        )
+
     # ── Edge Evaluation / Edge 評估 ──
 
     def _evaluate_edge(self, intel: IntelObject) -> EdgeEvaluation:
@@ -662,15 +764,9 @@ class StrategistAgent:
         """
         start = time.time()
 
-        context = (
-            f"Symbol(s): {', '.join(intel.symbols)}\n"
-            f"Source: {intel.source}\n"
-            f"Sentiment: {intel.sentiment.value if hasattr(intel.sentiment, 'value') else intel.sentiment}\n"
-            f"Relevance: {intel.relevance_score:.2f}\n"
-            f"Data quality: {intel.data_quality.value if hasattr(intel.data_quality, 'value') else intel.data_quality}\n"
-            f"Freshness: {intel.freshness_seconds}s ago\n"
-            f"Content: {intel.content[:500]}"
-        )
+        # V2: Use structured JSON prompt with cognitive/dream fields
+        # V2：使用含認知/蒙特卡洛欄位的結構化 JSON prompt
+        context = self._build_prompt_context(intel)
 
         response = self._ollama.judge_edge(context)
         latency_ms = (time.time() - start) * 1000
@@ -778,6 +874,144 @@ class StrategistAgent:
         complexity = self._h1_gate.complexity_score(intel)
         return self._model_router.route(complexity)
 
+    # ── V2: Dual-track Fast Channel / 雙軌快速通道 ──
+
+    def handle_fast_channel(self, trigger: str, symbols: list[str] | None = None) -> List[TradeIntent]:
+        """
+        V2 Fast channel: deterministic risk-driven actions (<10ms).
+        V2 快速通道：確定性風控驅動的行動（<10ms）。
+
+        Triggers: risk_governor >= DEFENSIVE -> reduce_all / close_all / flash_crash
+        觸發條件：risk_governor >= DEFENSIVE -> 減倉/全平/閃崩保護
+
+        Sets _emergency_mode flag to block normal channel, then generates
+        pre-defined intents. Normal channel checks this flag before emitting.
+        設置 _emergency_mode 標誌阻斷正常通道，然後生成預定義 intent。
+        正常通道在發射前檢查此標誌。
+
+        Args:
+            trigger: Action type — "reduce_all" / "close_all" / "flash_crash"
+            symbols: Specific symbols to act on (None = all)
+
+        Returns:
+            List of emergency TradeIntents
+        """
+        # Set emergency mode — blocks normal channel
+        # 設置緊急模式 — 阻斷正常通道
+        self._emergency_mode.set()
+
+        with self._lock:
+            # Clear normal channel queue (stale intents are dangerous during emergency)
+            # 清空正常通道隊列（緊急時期過期 intent 是危險的）
+            self._normal_queue.clear()
+
+            emergency_intents: List[TradeIntent] = []
+            target_symbols = symbols or []
+
+            if trigger in ("close_all", "flash_crash"):
+                # Generate close intents for all specified positions
+                # 為所有指定持倉生成平倉 intent
+                for symbol in target_symbols:
+                    intent = TradeIntent(
+                        symbol=symbol,
+                        strategy="fast_channel",
+                        direction="close",
+                        size=0.0,  # size determined by Executor based on current position
+                        confidence=1.0,
+                        thesis=f"Emergency {trigger} triggered / 緊急 {trigger} 觸發",
+                        invalidation_condition="N/A — emergency override",
+                        metadata={
+                            "intent_id": f"fast:{uuid.uuid4().hex[:8]}",
+                            "source": "fast_channel",
+                            "trigger": trigger,
+                            "priority": 1,
+                        },
+                    )
+                    emergency_intents.append(intent)
+
+            elif trigger == "reduce_all":
+                for symbol in target_symbols:
+                    intent = TradeIntent(
+                        symbol=symbol,
+                        strategy="fast_channel",
+                        direction="reduce",
+                        size=0.0,
+                        confidence=0.9,
+                        thesis=f"Emergency reduce_all triggered / 緊急減倉觸發",
+                        invalidation_condition="N/A — emergency override",
+                        metadata={
+                            "intent_id": f"fast:{uuid.uuid4().hex[:8]}",
+                            "source": "fast_channel",
+                            "trigger": trigger,
+                            "priority": 1,
+                        },
+                    )
+                    emergency_intents.append(intent)
+
+            self._pending_intents.extend(emergency_intents)
+            self._stats["intents_produced"] += len(emergency_intents)
+
+            logger.warning(
+                "Fast channel triggered: %s, %d intents generated / "
+                "快速通道觸發：%s，生成 %d 個 intent",
+                trigger, len(emergency_intents), trigger, len(emergency_intents),
+            )
+
+            return emergency_intents
+
+    def clear_emergency_mode(self) -> None:
+        """
+        V2: Clear emergency mode after fast channel actions are processed.
+        V2：快速通道行動處理完畢後清除緊急模式。
+
+        Normal channel resumes accepting signals after this call.
+        此調用後正常通道恢復接收信號。
+        """
+        self._emergency_mode.clear()
+        logger.info("Emergency mode cleared, normal channel resumed / 緊急模式清除，正常通道恢復")
+
+    # ── V2: CognitiveModulator Integration / 認知調製器整合 ──
+
+    def set_cognitive_modulator(self, modulator: Any) -> None:
+        """
+        V2: Inject CognitiveModulator for decision threshold adjustment.
+        V2：注入 CognitiveModulator 用於決策門檻調整。
+
+        Principle: cognitive modulation != capability restriction (see root principle derivative).
+        原則：認知調製 != 能力限制（見根原則衍生準則）。
+        """
+        self._cognitive_modulator = modulator
+        logger.info(
+            "CognitiveModulator injected into StrategistAgent / "
+            "認知調製器已注入 StrategistAgent"
+        )
+
+    def _apply_cognitive_modulation(self, confidence: float) -> tuple[float, float]:
+        """
+        V2: Apply CognitiveModulator thresholds to confidence and qty.
+        V2：應用認知門檻調製到信心和倉位。
+
+        Returns (adjusted_min_confidence, qty_ceiling_multiplier).
+        返回 (調整後最低信心門檻, 倉位上限乘數)。
+
+        If no modulator is injected, returns default config values (bypass).
+        若未注入調製器，返回默認配置值（跳過）。
+        """
+        if self._cognitive_modulator is None:
+            return (self.config.min_confidence, 1.0)
+
+        try:
+            params = self._cognitive_modulator.get_current_params()
+            conf_floor = params.get("confidence_floor", self.config.min_confidence)
+            qty_ceil = params.get("qty_ceiling", 1.0)
+            return (conf_floor, qty_ceil)
+        except Exception as e:
+            logger.warning(
+                "CognitiveModulator error, using defaults: %s / "
+                "認知調製器錯誤，使用默認值: %s", e, e,
+            )
+            return (self.config.min_confidence, 1.0)
+
     # ── Audit / 審計 ──
 
     def _audit(self, event_type: str, data: Any) -> None:
@@ -799,6 +1033,10 @@ class StrategistAgent:
                 "shadow": self.config.shadow,
                 "pending_intents": len(self._pending_intents),
                 "strategy_preference_weights": dict(self._strategy_preference_weights),
+                # V2: dual-track + cognitive modulator status / 雙軌 + 認知調製狀態
+                "emergency_mode_active": self._emergency_mode.is_set(),
+                "normal_queue_size": len(self._normal_queue),
+                "cognitive_modulator_connected": self._cognitive_modulator is not None,
                 **dict(self._stats),
             }
         # L2 cache size from ModelRouter's own lock

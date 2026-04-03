@@ -2,7 +2,7 @@
 Bollinger Band Mean Reversion Strategy / 布林带均值回归策略
 
 MODULE_NOTE (中文):
-  均值回归策略：当价格触及布林带下轨（且 RSI 确认超卖）时做多，
+  均值回归策略 V2：当价格触及布林带下轨（且 RSI 确认超卖）时做多，
   价格回归中轨时平仓。上轨对称处理做空。
 
   核心假设：价格偏离均值后倾向于回归。
@@ -14,18 +14,28 @@ MODULE_NOTE (中文):
   2. RSI < 40 确认超卖
   3. 带宽 > 0.01（非收窄期）
 
+  V2 升级（Phase 2-2）：
+  1. RSI < 30 确认（做多）/ RSI > 70 确认（做空）— 比 V1 更严格
+  2. Regime 感知 — trending 市场不做反转交易（基于 Hurst 滞后判定）
+  3. Limit order 预留 — Phase 2 预设关闭，未来可开启
+
   出场条件：
   1. %B 回归到 0.4-0.6（接近中轨）→ 平仓获利
   2. %B 进一步恶化（极端情况）→ 由风控止损
 
 MODULE_NOTE (English):
-  Mean reversion strategy: go long when price touches lower Bollinger Band
+  Mean reversion strategy V2: go long when price touches lower Bollinger Band
   (with RSI oversold confirmation), close when price reverts to middle band.
   Short is symmetric for upper band.
 
   Core assumption: prices tend to revert to the mean after deviation.
   Suitable: ranging/sideways markets
   Not suitable: strong trending markets (will keep breaking through bands)
+
+  V2 upgrades (Phase 2-2):
+  1. RSI < 30 confirmation (long) / RSI > 70 confirmation (short) — stricter than V1
+  2. Regime awareness — skip mean reversion in trending markets (Hurst-based)
+  3. Limit order placeholder — disabled by default, future enablement
 
 Safety invariant / 安全不变量:
   - 只产生 OrderIntent / Only generates OrderIntents
@@ -44,11 +54,15 @@ class BollingerReversionStrategy(StrategyBase):
     布林带均值回归策略。
 
     Parameters:
-      symbol         — trading pair / 交易对
-      qty_per_trade  — position size / 每次仓位
-      entry_pct_b    — %B threshold for entry (default 0.1) / 入场 %B 阈值
-      exit_pct_b     — %B threshold for exit (default 0.5) / 出场 %B 阈值
-      min_confidence — minimum signal confidence / 最小信号置信度
+      symbol              — trading pair / 交易对
+      qty_per_trade       — position size / 每次仓位
+      entry_pct_b         — %B threshold for entry (default 0.1) / 入场 %B 阈值
+      exit_pct_b          — %B threshold for exit (default 0.5) / 出场 %B 阈值
+      min_confidence      — minimum signal confidence / 最小信号置信度
+      rsi_threshold       — RSI must be below this for long entry (V2) / 做多入场 RSI 上限
+      rsi_short_threshold — RSI must be above this for short entry (V2) / 做空入场 RSI 下限
+      regime_aware        — skip entries in trending regime (V2) / 趋势市场跳过入场
+      use_limit_orders    — use limit orders instead of market (V2 placeholder) / 限价单预留
     """
 
     def __init__(
@@ -58,6 +72,11 @@ class BollingerReversionStrategy(StrategyBase):
         entry_pct_b: float = 0.1,
         exit_pct_b: float = 0.5,
         min_confidence: float = 0.35,
+        # V2 parameters / V2 参数
+        rsi_threshold: float = 30.0,
+        rsi_short_threshold: float = 70.0,
+        regime_aware: bool = True,
+        use_limit_orders: bool = False,
     ) -> None:
         super().__init__()
         if qty_per_trade <= 0:
@@ -70,6 +89,11 @@ class BollingerReversionStrategy(StrategyBase):
         self._current_position: str | None = None
         self._entry_pct_b_at_open: float | None = None  # %B when we opened / 开仓时的 %B
         self._trade_count = 0
+        # V2 state / V2 状态
+        self._rsi_threshold = rsi_threshold
+        self._rsi_short_threshold = rsi_short_threshold
+        self._regime_aware = regime_aware
+        self._use_limit_orders = use_limit_orders
 
     @property
     def name(self) -> str:
@@ -78,8 +102,8 @@ class BollingerReversionStrategy(StrategyBase):
     @property
     def description(self) -> str:
         return (
-            "布林带均值回归策略 / Bollinger Band Mean Reversion strategy. "
-            "价格触及下轨+RSI超卖→做多，回归中轨→平仓"
+            "布林带均值回归策略 V2 / Bollinger Band Mean Reversion V2. "
+            "RSI<{} 确认 + Regime 感知 + %B 回归中轨".format(self._rsi_threshold)
         )
 
     def on_signal(self, signal: Any) -> None:
@@ -106,6 +130,31 @@ class BollingerReversionStrategy(StrategyBase):
 
             if "BB_Reversion" not in source:
                 return
+
+            # --- V2 filters (applied before entry) / V2 过滤（入场前应用） ---
+
+            # V2: RSI confirmation filter — stricter than V1 implicit RSI<40
+            # RSI 确认过滤 — 比 V1 隐含的 RSI<40 更严格
+            signal_meta = getattr(signal, "metadata", {}) or {}
+            signal_rsi = signal_meta.get("rsi")
+            if signal_rsi is not None:
+                if direction == "long" and signal_rsi > self._rsi_threshold:
+                    return  # Not oversold enough / 未充分超卖
+                if direction == "short" and signal_rsi < self._rsi_short_threshold:
+                    return  # Not overbought enough / 未充分超买
+
+            # V2: Regime awareness — skip mean reversion in trending markets
+            # Regime 感知 — 趋势市场中跳过均值回归交易
+            # Hurst-based regime comes via signal metadata / 基于 Hurst 的 regime 通过信号元数据传递
+            if self._regime_aware:
+                signal_regime = signal_meta.get("_regime", "unknown")
+                hurst_regime = signal_meta.get("_hurst_regime", "uncertain")
+                # In trending markets, mean reversion is dangerous
+                # 趋势市场中均值回归是危险的
+                if signal_regime in ("trending_up", "trending_down") or hurst_regime == "trending":
+                    return
+
+            # --- End V2 filters / V2 过滤结束 ---
 
             # Entry: open position based on BB signal / 入场：根据 BB 信号开仓
             if direction == "long" and self._current_position is None:
@@ -196,4 +245,9 @@ class BollingerReversionStrategy(StrategyBase):
             "entry_pct_b": self._entry_pct_b,
             "exit_pct_b": self._exit_pct_b,
             "trade_count": self._trade_count,
+            # V2 parameters / V2 参数
+            "rsi_threshold": self._rsi_threshold,
+            "rsi_short_threshold": self._rsi_short_threshold,
+            "regime_aware": self._regime_aware,
+            "use_limit_orders": self._use_limit_orders,
         }

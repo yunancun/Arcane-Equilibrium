@@ -8,6 +8,11 @@ MODULE_NOTE (中文):
 
   两腿同时开仓，价格波动相互抵消，只赚 funding rate 差额。
 
+  V2 升級（Phase 2-4）：
+  1. PairedExecutionState — 追蹤雙腿配對執行狀態
+  2. filled_qty 回滾 — 部分成交時回滾使用實際成交量（非請求量）
+  3. handle_leg_failure() — 一腿失敗時自動生成回滾 intent
+
   与旧版的区别：
   - 旧版只开永续单腿（裸方向性敞口，不是真套利）
   - 新版同时开 perp + spot 两腿，delta-neutral
@@ -45,6 +50,7 @@ Safety invariant / 安全不变量:
   - 只产生 OrderIntent / Only generates OrderIntents
   - 每次入场同时发出 2 个意图（perp + spot）/ Each entry emits 2 intents
   - funding rate 数据是只读的 / Funding rate data is read-only
+  - V2: 回滾使用 filled_qty 非 requested_qty / V2: Rollback uses filled_qty not requested_qty
 """
 
 from __future__ import annotations
@@ -56,6 +62,63 @@ from typing import Any
 from .base import OrderIntent, StrategyBase, STRATEGY_ACTIVE
 
 logger = logging.getLogger(__name__)
+
+
+class PairedExecutionState:
+    """
+    Track paired execution state for dual-leg strategies.
+    追蹤雙腿策略的配對執行狀態。
+
+    Ensures rollback uses filled_qty (not requested_qty) when one leg fails.
+    確保回滾使用 filled_qty（非 requested_qty）當一腿失敗時。
+
+    Per Improvement Report Appendix B.1.3.
+    """
+
+    def __init__(self, group_id: str):
+        self.group_id = group_id
+        self.legs: dict[str, dict] = {}  # leg_id → {requested_qty, filled_qty, status, side, category}
+        self.created_at_ms: int = int(time.time() * 1000)
+
+    def add_leg(self, leg_id: str, side: str, requested_qty: float, category: str = "linear") -> None:
+        """Register a leg / 註冊一腿"""
+        self.legs[leg_id] = {
+            "requested_qty": requested_qty,
+            "filled_qty": 0.0,
+            "status": "pending",  # pending → filled → rolled_back
+            "side": side,
+            "category": category,
+        }
+
+    def record_fill(self, leg_id: str, filled_qty: float) -> None:
+        """Record actual fill quantity / 記錄實際成交量"""
+        if leg_id in self.legs:
+            self.legs[leg_id]["filled_qty"] = filled_qty
+            self.legs[leg_id]["status"] = "filled"
+
+    def compute_rollback_qty(self, leg_id: str) -> float:
+        """
+        Rollback quantity = actual filled_qty, NOT requested_qty.
+        回滾量 = 實際 filled_qty，非 requested_qty。
+        """
+        return self.legs.get(leg_id, {}).get("filled_qty", 0.0)
+
+    def needs_rollback(self) -> bool:
+        """Check if any leg failed while another succeeded / 檢查是否有腿失敗而另一腿成功"""
+        statuses = [leg["status"] for leg in self.legs.values()]
+        return "filled" in statuses and "pending" in statuses
+
+    def get_filled_legs(self) -> list[str]:
+        """Get leg IDs that were filled / 獲取已成交的腿 ID"""
+        return [lid for lid, leg in self.legs.items() if leg["status"] == "filled"]
+
+    def to_dict(self) -> dict:
+        """Serialize to dict for status/audit / 序列化為字典供狀態/審計"""
+        return {
+            "group_id": self.group_id,
+            "legs": dict(self.legs),
+            "created_at_ms": self.created_at_ms,
+        }
 
 
 class FundingRateArbStrategy(StrategyBase):
@@ -120,6 +183,8 @@ class FundingRateArbStrategy(StrategyBase):
         # 0B-1: Real cost tracking (populated via record_actual_fees) / 真實成本追蹤
         self._actual_entry_fees: float = 0.0
         self._actual_slippage_bps: float = 0.0
+        # V2: Paired execution tracking / 配對執行追蹤
+        self._paired_state: PairedExecutionState | None = None
 
     @property
     def name(self) -> str:
@@ -127,7 +192,7 @@ class FundingRateArbStrategy(StrategyBase):
 
     @property
     def description(self) -> str:
-        mode = "Delta-Neutral" if self._delta_neutral else "Directional"
+        mode = "Delta-Neutral V2" if self._delta_neutral else "Directional V2"
         return (
             f"Funding Rate {mode} 套利策略 / Funding Rate {mode} Arbitrage. "
             f"Threshold={self._threshold*10000:.0f}bps, Fees={self._total_fee_bps:.0f}bps"
@@ -293,6 +358,11 @@ class FundingRateArbStrategy(StrategyBase):
             f"edge={edge_bps:.1f}bps, settle={hours_to_settle:.1f}h"
         )
 
+        # V2: Create paired execution state for rollback tracking
+        # 創建配對執行狀態用於回滾追蹤
+        group_id = f"funding_arb_{self._symbol}_{int(time.time() * 1000)}"
+        self._paired_state = PairedExecutionState(group_id)
+
         # Leg 1: Perpetual / 永续腿
         self._emit_intent(OrderIntent(
             symbol=self._symbol,
@@ -307,8 +377,11 @@ class FundingRateArbStrategy(StrategyBase):
                 "edge_bps": edge_bps,
                 "leg": "perp",
                 "category": "linear",
+                "paired_group_id": group_id,
+                "leg_id": "perp",
             },
         ))
+        self._paired_state.add_leg("perp", perp_side, self._qty, "linear")
 
         # Leg 2: Spot hedge (if delta-neutral) / 现货对冲腿
         if self._delta_neutral:
@@ -325,8 +398,11 @@ class FundingRateArbStrategy(StrategyBase):
                     "edge_bps": edge_bps,
                     "leg": "spot_hedge",
                     "category": "spot",
+                    "paired_group_id": group_id,
+                    "leg_id": "spot_hedge",
                 },
             ))
+            self._paired_state.add_leg("spot_hedge", spot_side, self._qty, "spot")
 
         self._current_position = position_label
         self._entry_funding_rate = funding_rate
@@ -379,6 +455,91 @@ class FundingRateArbStrategy(StrategyBase):
         logger.info(
             "Funding arb exit: %s reason=%s / 出场", self._current_position, reason,
         )
+
+    def on_fill(self, fill: dict, is_open: bool) -> None:
+        """
+        V2: Track paired execution fills for rollback calculation.
+        V2：追蹤配對執行成交用於回滾計算。
+
+        Args:
+            fill: Fill report dict with symbol, qty, metadata.
+            is_open: True if this fill is for an opening trade.
+        """
+        if fill.get("symbol") != self._symbol:
+            return
+        if self._paired_state is None:
+            return
+
+        leg_id = fill.get("metadata", {}).get("leg_id", "")
+        filled_qty = fill.get("qty", 0.0)
+
+        if leg_id and filled_qty > 0:
+            self._paired_state.record_fill(leg_id, filled_qty)
+            logger.info(
+                "Funding arb fill recorded: leg=%s filled=%.6f / 套利成交記錄",
+                leg_id, filled_qty,
+            )
+
+    def handle_leg_failure(self, failed_leg_id: str) -> list[OrderIntent]:
+        """
+        V2: Handle partial execution failure — rollback filled legs.
+        V2：處理部分執行失敗 — 回滾已成交的腿。
+
+        When one leg of a paired trade fails, this generates rollback intents
+        for the successfully filled legs using filled_qty (not requested_qty).
+        當配對交易的一腿失敗時，為已成交的腿生成回滾 intent，
+        使用 filled_qty（非 requested_qty）。
+
+        Args:
+            failed_leg_id: The leg that failed to fill
+
+        Returns:
+            List of rollback OrderIntents
+        """
+        if self._paired_state is None:
+            return []
+
+        rollback_intents: list[OrderIntent] = []
+        for leg_id in self._paired_state.get_filled_legs():
+            rollback_qty = self._paired_state.compute_rollback_qty(leg_id)
+            if rollback_qty <= 0:
+                continue
+
+            leg_info = self._paired_state.legs[leg_id]
+            # Reverse the side for rollback / 回滾時反轉方向
+            rollback_side = "Sell" if leg_info["side"] == "Buy" else "Buy"
+
+            intent = OrderIntent(
+                symbol=self._symbol,
+                side=rollback_side,
+                order_type="market",
+                qty=rollback_qty,  # Use filled_qty, NOT requested_qty / 使用 filled_qty
+                strategy_name=self.name,
+                reason=(
+                    f"[ROLLBACK] Leg {failed_leg_id} failed, rolling back {leg_id}: "
+                    f"filled={rollback_qty:.6f} (requested={leg_info['requested_qty']:.6f})"
+                ),
+                confidence=1.0,  # Rollback is mandatory / 回滾是強制的
+                metadata={
+                    "leg": f"{leg_id}_rollback",
+                    "category": leg_info["category"],
+                    "paired_group_id": self._paired_state.group_id,
+                    "original_filled_qty": rollback_qty,
+                },
+            )
+            rollback_intents.append(intent)
+            self._paired_state.legs[leg_id]["status"] = "rolled_back"
+
+            logger.warning(
+                "Funding arb rollback: leg=%s qty=%.6f (requested=%.6f) / 套利回滾",
+                leg_id, rollback_qty, leg_info["requested_qty"],
+            )
+
+        # Reset position state after rollback / 回滾後重置持倉狀態
+        self._current_position = None
+        self._entry_ts_ms = 0
+
+        return rollback_intents
 
     def record_funding_payment(self, amount_usdt: float) -> None:
         """Record a funding payment received / 记录收到的 funding 支付"""
@@ -434,6 +595,7 @@ class FundingRateArbStrategy(StrategyBase):
             "last_basis_pct": self._last_basis_pct,
             "max_basis_observed": self._max_basis_observed,
             "actual_entry_fees": self._actual_entry_fees,
+            "paired_state": self._paired_state.to_dict() if self._paired_state else None,
         })
         return base
 
@@ -477,4 +639,5 @@ class FundingRateArbStrategy(StrategyBase):
             "max_hold_hours": self._max_hold_hours,
             "max_basis_pct": self._max_basis_pct,
             "cost_summary": self.get_cost_summary(),
+            "paired_state": self._paired_state.to_dict() if self._paired_state else None,
         }
