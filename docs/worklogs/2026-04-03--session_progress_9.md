@@ -87,7 +87,8 @@
 | core 單元測試 | 全部通過 | 548 passed / 0 failed | **PASS** |
 | 集成測試 | ≥ 20 場景 | 29 stress + 27 golden = 56 | **PASS** |
 
-**6/6 全部 PASS → 建議 Go（繼續 R-06 Python IPC 改造）**
+**5/6 PASS + 1 部分達標 → Operator 簽核：Conditional Go（2026-04-03）**
+**附帶條件**：R-06 期間後台並行 24h soak test，驗證 3 項未覆蓋風險（記憶體洩漏 / WS 斷線重連 / UTC 日切）
 
 ---
 
@@ -117,7 +118,7 @@ API compat: 42 Python tests
 
 ## 下一步指引
 
-1. **R-05 Go 決策等待 Operator 簽核**
-2. Go → R-06 Python IPC 改造（W9-10）：`docs/rust_migration/06--python_ipc_integration.md`
-3. No-Go → PyO3 降級路徑（見 `docs/rust_migration/05--week8_decision_gate.md`）
+1. **✅ R-05 Conditional Go — Operator 已簽核（2026-04-03）**
+2. → R-06 Python IPC 改造（W9-10）：`docs/rust_migration/06--python_ipc_integration.md`
+3. → 並行：24h soak test 驗證 3 項風險（見 `05--week8_decision_gate.md` 風險備註）
 4. V3 集成驗證（Rust→Python IPC→Bybit）需在 R-06 後執行

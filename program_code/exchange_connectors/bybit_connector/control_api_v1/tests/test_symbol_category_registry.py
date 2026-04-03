@@ -95,14 +95,14 @@ class TestSymbolCategoryRegistryRefreshSuccess:
         reg = SymbolCategoryRegistry(bybit_host="https://mock.bybit.com")
         responses = {
             "linear": ["BTCUSDT"],
-            "spot": ["BTCUSDT"],  # 後寫入，覆蓋 linear | written after linear, overrides it
+            "spot": ["BTCUSDT"],  # linear 優先，不被 spot 覆蓋 | linear takes priority, not overridden by spot
             "inverse": [],
         }
         with patch("urllib.request.urlopen", side_effect=_make_mock_urlopen(responses)):
             reg.refresh()
-        # spot 覆蓋 linear 是明確設計；StrategyAutoDeployer 部署時會再次覆蓋為正確值
-        # spot overrides linear by design; deployer will override again with correct value
-        assert reg.get("BTCUSDT") == "spot"
+        # Session 9 修正：linear 優先於 spot（避免 qtyStep 被 spot 覆蓋）
+        # Session 9 fix: linear takes priority over spot (prevents qtyStep overwrite)
+        assert reg.get("BTCUSDT") == "linear"
 
     def test_get_inverse_symbol(self):
         # T-A4: inverse symbol 正確返回 / inverse symbol returns correctly

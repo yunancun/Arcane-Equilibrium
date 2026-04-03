@@ -232,6 +232,7 @@ class PositionSizer:
         avg_loss: float = 0.0,
         trade_count: int = 0,
         atr: float = 0.0,
+        unrealized_pnl: float = 0.0,
     ) -> SizingRecommendation:
         """
         Compute full position sizing recommendation.
@@ -250,6 +251,8 @@ class PositionSizer:
             price: Current price.
             win_rate, avg_win, avg_loss, trade_count: For Kelly calculation.
             atr: For volatility adjustment.
+            unrealized_pnl: Current unrealized PnL; if negative, dampens Kelly fraction.
+                            當前未實現盈虧；若為負值，抑制 Kelly 分數。
 
         Returns:
             SizingRecommendation with all computed values.
@@ -265,6 +268,13 @@ class PositionSizer:
         rec.kelly_fraction = self.compute_kelly_fraction(
             win_rate, avg_win, avg_loss, trade_count,
         )
+        # Dampen Kelly when unrealized losses exist — prevents overly aggressive
+        # sizing while holding losing positions.
+        # 當存在未實現虧損時抑制 Kelly — 防止持有虧損倉位時倉位過大。
+        if unrealized_pnl < 0 and balance > 0:
+            dampening = max(0.5, 1.0 - abs(unrealized_pnl) / balance)
+            rec.kelly_fraction *= dampening
+
         if avg_loss > 0:
             rec.payoff_ratio = abs(avg_win) / abs(avg_loss)
 

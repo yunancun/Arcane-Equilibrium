@@ -1,6 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 # 最後更新：2026-04-03（Phase R-01 完成 · Rust 65 tests · Python 3703 passed · 關鍵路徑 R-02）
 # 注意：compact 後從此文件恢復工作狀態
+# ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 
 ---
 

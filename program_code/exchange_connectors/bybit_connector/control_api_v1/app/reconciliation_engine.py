@@ -389,6 +389,16 @@ class ReconciliationEngine:
         """Compare paper orders vs remote orders / 比对纸上订单与远端订单"""
         discs: list[Discrepancy] = []
 
+        # Skip terminal-state orders (REJECTED/CANCELED) — they will never have remote
+        # counterparts and create false FREEZE_TRADING alerts.
+        # 跳過終態訂單（REJECTED/CANCELED）— 它們不會有遠端對應，會產生虛假凍結告警。
+        _TERMINAL_STATES = {"rejected", "canceled", "cancelled", "expired"}
+        paper_orders = [
+            o for o in paper_orders
+            if o.get("state", "").lower().replace("paper_order_", "").replace("paper_", "")
+            not in _TERMINAL_STATES
+        ]
+
         paper_by_id = {o.get("order_id", ""): o for o in paper_orders}
         remote_by_id = {o.get("order_id", o.get("orderId", "")): o for o in remote_orders}
 

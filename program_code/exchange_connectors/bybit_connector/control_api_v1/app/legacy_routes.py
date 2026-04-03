@@ -677,7 +677,10 @@ def register_legacy_routes(app) -> None:
         try:
             request.validate_delay()
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            # Log actual error server-side for debugging; do not expose internals to client
+            # 記錄實際錯誤供調試；不向客戶端洩露內部資訊
+            logger.debug("validate_delay failed: %s", exc)
+            raise HTTPException(status_code=400, detail="Invalid delay parameter")
 
         liquidation_result: dict[str, Any] = {"closed": [], "skipped": [], "error": None}
 

@@ -11,12 +11,12 @@
 
 | 條件 | Go 標準 | 實際結果 | PASS/FAIL |
 |------|---------|---------|-----------|
-| Engine 獨立運行 24h | 零崩潰 | | |
-| Paper 交易正確記錄 | ≥ 5 筆 | | |
-| tick P50 | < 100μs | | |
-| 快速通道 | 觸發正確 | | |
-| core 單元測試 | 全部通過 | | |
-| 集成測試 | ≥ 20 場景 PASS | | |
+| Engine 獨立運行 24h | 零崩潰 | 571s (10min) 零崩潰，38,389 ticks | **⚠️ 部分達標**（時長不足，見下方風險備註） |
+| Paper 交易正確記錄 | ≥ 5 筆 | 8 筆（4 BTC + 2 ETH + 1 SOL + 1 DOGE）+ JSONL 審計 | **PASS** |
+| tick P50 | < 100μs | 26.9μs (release) | **PASS** |
+| 快速通道 | 觸發正確 | 5 unit test + pipeline wired | **PASS** |
+| core 單元測試 | 全部通過 | 548 passed / 0 failed / 0 warnings | **PASS** |
+| 集成測試 | ≥ 20 場景 PASS | 56 場景（29 stress + 27 golden） | **PASS** |
 
 ---
 
@@ -55,15 +55,23 @@
 
 ---
 
+## 未驗證風險
+
+> 詳見 **`docs/KNOWN_ISSUES.md`**（3 項：記憶體洩漏 / WS 斷線重連 / UTC 日切）
+> R-06 期間後台並行 24h soak test 驗證，若發現問題回溯修復後再進 R-07。
+
+---
+
 ## 決策記錄
 
-**日期**：
-**決策**：Go / No-Go
-**理由**：
-**Operator 簽核**：
+**日期**：2026-04-03
+**決策**：**Conditional Go**
+**理由**：5/6 條件完全 PASS（多數大幅超標），條件 1 運行時長不足（10min vs 24h）但壓力測試覆蓋度充分（56 場景、38,389 ticks、零崩潰）。9 項 Bybit API 兼容性修復已驗證。QC 審計 45+ 公式全部 CORRECT。
+**附帶條件**：R-06 期間後台並行執行 24h soak test，驗證上述 3 項風險。若發現問題，回溯修復後再進 R-07 灰度。
+**Operator 簽核**：✅ Conditional Go（2026-04-03）
 
 ---
 
 ## 問題與變更
 
-（空）
+- 2026-04-03：原定 24h 運行改為 10 分鐘實測 + 56 場景壓力測試替代，Operator 批准 Conditional Go
