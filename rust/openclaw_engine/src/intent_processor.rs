@@ -63,6 +63,23 @@ impl IntentProcessor {
             };
         }
 
+        // Gate 1.5: Reject same-direction duplicate (prevent fee drain)
+        // 拒絕同方向重複開倉（防止手續費消耗）
+        if let Some(existing) = paper_state.get_position(&intent.symbol) {
+            if existing.is_long == intent.is_long {
+                return IntentResult {
+                    submitted: false,
+                    rejected_reason: Some(format!(
+                        "duplicate_position: {} already {} {}",
+                        intent.symbol,
+                        if existing.is_long { "LONG" } else { "SHORT" },
+                        existing.qty,
+                    )),
+                    fill: None,
+                };
+            }
+        }
+
         // Gate 2: Guardian 4-check
         let positions: Vec<ExistingPosition> = paper_state.positions()
             .iter()

@@ -58,6 +58,12 @@ impl PaperState {
         self.positions.values().collect()
     }
 
+    /// Get a specific position by symbol (for duplicate check).
+    /// 按交易對獲取特定持倉（用於重複檢查）。
+    pub fn get_position(&self, symbol: &str) -> Option<&PaperPosition> {
+        self.positions.get(symbol)
+    }
+
     pub fn drawdown_pct(&self) -> f64 {
         if self.forced_drawdown > 0.0 { return self.forced_drawdown; }
         if self.peak_balance <= 0.0 { return 0.0; }
@@ -90,11 +96,13 @@ impl PaperState {
 
         if let Some(pos) = self.positions.get(symbol) {
             if pos.is_long != is_long {
-                // Closing position
+                // Closing position (opposite direction)
+                // 平倉（反方向）
+                let close_qty = pos.qty.min(qty);
                 let pnl = if pos.is_long {
-                    (fill_price - pos.entry_price) * pos.qty.min(qty)
+                    (fill_price - pos.entry_price) * close_qty
                 } else {
-                    (pos.entry_price - fill_price) * pos.qty.min(qty)
+                    (pos.entry_price - fill_price) * close_qty
                 };
                 self.balance += pnl;
                 self.total_realized_pnl += pnl;
@@ -102,10 +110,24 @@ impl PaperState {
                 self.positions.remove(symbol);
                 self.peak_balance = self.peak_balance.max(self.balance);
                 return;
+            } else {
+                // Same direction — accumulate (weighted average entry price)
+                // 同方向 — 累加（加權平均入場價）
+                let old_qty = pos.qty;
+                let old_entry = pos.entry_price;
+                let new_qty = old_qty + qty;
+                let avg_entry = (old_entry * old_qty + fill_price * qty) / new_qty;
+                let mut updated = pos.clone();
+                updated.qty = new_qty;
+                updated.entry_price = avg_entry;
+                updated.entry_fee += fee;
+                self.positions.insert(symbol.to_string(), updated);
+                return;
             }
         }
 
-        // Opening or adding to position
+        // Opening new position (no existing position for this symbol)
+        // 開新倉（此交易對無現有持倉）
         self.positions.insert(symbol.to_string(), PaperPosition {
             symbol: symbol.to_string(),
             is_long,
@@ -263,5 +285,52 @@ mod tests {
         let snap = s.export_state();
         assert_eq!(snap.balance, 10000.0);
         assert!(snap.positions.is_empty());
+    }
+
+    #[test]
+    fn test_same_direction_accumulates() {
+        // Same-direction fills should accumulate qty with weighted avg entry.
+        // 同方向成交應累加 qty 並加權平均入場價。
+        let mut s = PaperState::new(10000.0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 1.0, 0);  // buy 0.1 @ 50000
+        s.apply_fill("BTC", true, 0.1, 52000.0, 1.0, 1000); // buy 0.1 @ 52000
+        assert_eq!(s.position_count(), 1);
+        let pos = s.get_position("BTC").unwrap();
+        assert!((pos.qty - 0.2).abs() < 1e-10);  // 0.1 + 0.1
+        assert!((pos.entry_price - 51000.0).abs() < 0.01); // avg(50000, 52000)
+    }
+
+    #[test]
+    fn test_same_direction_does_not_reset_entry() {
+        // Verify same-direction fill doesn't replace position (old bug: insert overwrites).
+        // 驗證同方向成交不會覆蓋持倉（舊 bug：insert 直接替換）。
+        let mut s = PaperState::new(10000.0);
+        s.apply_fill("BTC", false, 0.05, 60000.0, 0.5, 0);
+        let initial_fee = s.get_position("BTC").unwrap().entry_fee;
+        s.apply_fill("BTC", false, 0.05, 61000.0, 0.5, 1000);
+        let pos = s.get_position("BTC").unwrap();
+        assert!((pos.qty - 0.10).abs() < 1e-10);
+        assert!((pos.entry_price - 60500.0).abs() < 0.01);
+        assert!((pos.entry_fee - 1.0).abs() < 1e-10); // accumulated fees
+    }
+
+    #[test]
+    fn test_opposite_direction_closes() {
+        // Opposite direction fill closes the position with PnL.
+        // 反方向成交平倉並計算 PnL。
+        let mut s = PaperState::new(10000.0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.apply_fill("BTC", false, 0.1, 51000.0, 0.0, 1000); // close
+        assert_eq!(s.position_count(), 0);
+        assert!((s.total_realized_pnl - 100.0).abs() < 0.01); // (51000-50000)*0.1
+    }
+
+    #[test]
+    fn test_get_position() {
+        let mut s = PaperState::new(10000.0);
+        assert!(s.get_position("BTC").is_none());
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        assert!(s.get_position("BTC").is_some());
+        assert!(s.get_position("ETH").is_none());
     }
 }
