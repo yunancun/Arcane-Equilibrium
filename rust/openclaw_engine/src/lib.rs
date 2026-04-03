@@ -9,7 +9,14 @@
 //!   二進制入口在 main.rs。
 
 pub mod config;
+pub mod fast_track;
+pub mod intent_processor;
 pub mod ipc_server;
+pub mod orchestrator;
+pub mod paper_state;
+pub mod persistence;
+pub mod strategies;
+pub mod tick_pipeline;
 pub mod ws_client;
 
 pub use openclaw_core;

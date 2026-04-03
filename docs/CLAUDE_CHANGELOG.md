@@ -5,6 +5,33 @@
 
 ---
 
+### Phase R-04 完成 — Engine 完整交易路徑（2026-04-03）
+
+**Batch 1（核心管線）：**
+- `tick_pipeline.rs`：on_tick 6 步編排 + KlineManager→IndicatorEngine→SignalEngine→策略→執行→止損
+- `intent_processor.rs`：H0→Guardian→CostGate→Governance→OMS 意圖處理管線
+- `fast_track.rs`：緊急路徑（CircuitBreaker→CloseAll / Defensive→ReduceToHalf）
+
+**Batch 2（5 策略）：**
+- `strategies/ma_crossover.rs`：KAMA + ADX≥20 + 5min cooldown
+- `strategies/bb_reversion.rs`：%B<0+RSI<30 入場 / %B 0.2-0.8 出場
+- `strategies/bb_breakout.rs`：壓縮→擴張+Volume≥1.5x+Donchian 確認
+- `strategies/grid_trading.rs`：OU 動態間距 + 2×fee floor + 庫存上限
+- `strategies/funding_arb.rs`：delta 中性 + 34bps 成本模型 + 72h 最大持倉（等 R-06 IPC 接入資金費率）
+
+**Batch 3（狀態+持久化）：**
+- `paper_state.rs`：持倉追蹤 + 止損檢查 + PnL 計算 + 狀態導出
+- `persistence.rs`：JSON debounced write + JSONL append-only 審計
+
+**API 適配：**
+- `IndicatorSnapshot` 添加 `Default` derive
+- `snapshot_to_input()` 適配器：IndicatorSnapshot（nested）→ IndicatorInput（flat）
+- 策略 cooldown 修復：首次交易允許通過（`last_trade_ms > 0` guard）
+
+**測試基準線：** Rust 517 (376 core + 8 golden + 19 extreme + 78 engine + 36 types)
+
+---
+
 ### Phase R-03 完成 — core 下半：SM + 執行 + 回測（2026-04-03）
 
 **Batch 1（4 SM 狀態機）：**

@@ -99,7 +99,7 @@ impl IndicatorEngine {
 
 /// Snapshot of all indicator values at a single point in time.
 /// 單一時間點的所有指標值快照。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndicatorSnapshot {
     pub sma_20: Option<f64>,
     pub ema_12: Option<f64>,

@@ -35,7 +35,7 @@ Rust 遷移（14 週主開發）
 | [01--ipc_shared_types_ws.md](01--ipc_shared_types_ws.md) | IPC + 基礎設施 | W1-2 | 00 + L1 凍結 | [x] 完成 |
 | [02--core_upper.md](02--core_upper.md) | 感知 + 認知 + 風控 | W3-4 | 01 Go | [x] 完成 |
 | [03--core_lower.md](03--core_lower.md) | SM + 執行 + 回測 | W5-6 | 02 Go | [x] 完成 |
-| [04--engine_full_path.md](04--engine_full_path.md) | 完整交易路徑 | W7-8 | 03 Go | [ ] 待開始 |
+| [04--engine_full_path.md](04--engine_full_path.md) | 完整交易路徑 | W7-8 | 03 Go | [x] 完成 |
 | [05--week8_decision_gate.md](05--week8_decision_gate.md) | 硬決策點 | W8 末 | 04 完成 | [ ] 待決策 |
 | [06--python_ipc_integration.md](06--python_ipc_integration.md) | Python 改造 | W9-10 | 05 Go | [ ] 待開始 |
 | [07--canary_validation.md](07--canary_validation.md) | 灰度 + 穩定觀察 | W11-14 | 06 Go | [ ] 待開始 |

@@ -196,7 +196,7 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 ### [x] R-01：IPC + shared_types + WS（W1-2）— workspace 統一 + openclaw_pyo3 crate + 4 engine 模組 + 3 Python 模組 + schema diff CI
 ### [x] R-02：core 上半——感知 + 認知 + 風控（W3-4）— 10 模組 + 302 Rust tests + Golden Dataset 驗證
 ### [x] R-03：core 下半——SM + 執行 + 回測（W5-6）— 4 SM + GovernanceCore 級聯 + 9 模組 + 468 Rust tests + 極端組 PASS
-### [ ] R-04：Engine 完整交易路徑（W7-8）
+### [x] R-04：Engine 完整交易路徑（W7-8）— tick_pipeline + 5 策略 + paper_state + persistence + 517 Rust tests
 ### [ ] R-05：★ Week 8 硬決策點（Go/No-Go）
 ### [ ] R-06：Python IPC 改造（W9-10）
 ### [ ] R-07：灰度驗證 + 穩定觀察（W11-14）
