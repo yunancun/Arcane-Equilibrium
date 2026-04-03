@@ -1,0 +1,40 @@
+# 融合方案執行計劃 V1 — 索引
+# Agent 接手入口：讀此文件��定要做哪個 Phase，然後只讀對應的 Phase 文件
+
+## 排期總覽（20 週 · 起算 4/11）
+
+```
+Phase 0a  (W1,    4/11-4/17):  PG Schema 基礎
+Phase 0b  (W2-3,  4/18-4/30):  TimescaleDB 啟用 + 依賴
+Phase 1   (W4-5,  5/01-5/14):  市場數據 + FeatureCollector + PSI
+Phase 2   (W6-9,  5/15-6/11):  交易鏈 + Scorer + ONNX [+buffer]
+Phase 3a  (W9-10, 6/05-6/18):  update_params() = AGT-1
+Phase 3b  (W11-12,6/19-7/02):  Optuna + TS + CPCV + 黑天鵝
+Phase 4   (W13-15,7/03-7/23):  Claude Teacher + News + DL-3
+Phase 5   (W16-18,7/24-8/13):  James-Stein + DL-1 + DL-2
+Phase 6   (W19-20,8/14-8/27):  驗收
+```
+
+## 文件索引
+
+| 文件 | 內容 | Agent 何時讀 |
+|------|------|-------------|
+| [phase_0a.md](phase_0a.md) | PG Schema DDL + Grafana VIEW（19 任務） | 開始 Phase 0a 時 |
+| [phase_0b.md](phase_0b.md) | TimescaleDB + 壓縮 + ML 依賴（19 任務） | 開始 Phase 0b 時 |
+| [phase_1.md](phase_1.md) | 市場數據 + FeatureCollector + PSI（20 任務） | 開始 Phase 1 時 |
+| [phase_2.md](phase_2.md) | 交易鏈 + Scorer + ONNX（28 任務，最大 Phase） | 開始 Phase 2 時 |
+| [phase_3a.md](phase_3a.md) | update_params() Python+Rust 10 策略（17 任務） | 開始 Phase 3a 時 |
+| [phase_3b.md](phase_3b.md) | Optuna + TS + CPCV + 黑天鵝（17 任務） | 開始 Phase 3b 時 |
+| [phase_4.md](phase_4.md) | Claude Teacher + LinUCB + News + DL-3（20 任務） | 開始 Phase 4 時 |
+| [phase_5.md](phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
+| [phase_6.md](phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
+| [critical_path.md](critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
+
+## 設計文件（按需讀��不需每次都讀）
+
+| 文件 | 用途 |
+|------|------|
+| `docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md` | 融合方案 v0.5 完整設計（889 行） |
+| `docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md` | ML/DL 架構設計 |
+| `docs/references/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | DB 原始設計 |
+| `docs/references/2026-04-04--execution_plan_v1.md` | 完整執行計劃（本目錄的合併版） |
