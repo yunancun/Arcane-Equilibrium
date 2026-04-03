@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from .ipc_state_reader import get_rust_reader
 from .paper_trading_engine import (
     DEFAULT_INITIAL_BALANCE_USDT,
     PaperStateStore,
@@ -661,6 +662,20 @@ def get_session_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get current session status / 获取 session 状态"""
+    # R06-B: try Rust engine snapshot first, fall back to Python ENGINE
+    # 優先讀取 Rust 引擎快照，降級到 Python ENGINE
+    rust = get_rust_reader()
+    rust_state = rust.get_paper_state() if rust.is_available() else None
+    if rust_state is not None:
+        return _paper_response({
+            "source": "rust_engine",
+            "balance": rust_state.get("balance", 0),
+            "peak_balance": rust_state.get("peak_balance", 0),
+            "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
+            "total_fees": rust_state.get("total_fees", 0),
+            "trade_count": rust_state.get("trade_count", 0),
+            "positions_count": len(rust_state.get("positions", [])),
+        })
     return _paper_response(ENGINE.get_session_status())
 
 
@@ -675,10 +690,10 @@ def post_order_submit(
 ):
     """Submit a paper order / 提交纸上订单"""
     try:
-        # Use live market prices from dispatcher if available, fall back to order price
-        # 优先使用来自行情分发器的实时价格，否则回退到订单价格
-        live_prices = None
-        if DISPATCHER and DISPATCHER.is_running():
+        # Use live market prices: Rust engine → Dispatcher → order price (R06-B)
+        # 優先使用實時價格：Rust 引擎 → 行情分發器 → 訂單價格
+        live_prices = get_rust_reader().get_latest_prices()
+        if not live_prices and DISPATCHER and DISPATCHER.is_running():
             live_prices = DISPATCHER.get_status().get("latest_prices", {})
         if not live_prices:
             live_prices = {req.symbol: req.price} if req.price else None
@@ -736,6 +751,12 @@ def get_positions(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get current paper positions / 获取纸上持仓"""
+    # R06-B: try Rust engine snapshot first / 優先讀取 Rust 引擎快照
+    rust = get_rust_reader()
+    rust_state = rust.get_paper_state() if rust.is_available() else None
+    if rust_state is not None:
+        positions = rust_state.get("positions", [])
+        return _paper_response({"positions": positions, "count": len(positions), "source": "rust_engine"})
     positions = ENGINE.get_positions()
     return _paper_response({"positions": positions, "count": len(positions)})
 
@@ -755,6 +776,20 @@ def get_pnl(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get paper PnL summary / 获取纸上 PnL 汇总"""
+    # R06-B: try Rust engine snapshot first / 優先讀取 Rust 引擎快照
+    rust = get_rust_reader()
+    rust_state = rust.get_paper_state() if rust.is_available() else None
+    if rust_state is not None:
+        positions = rust_state.get("positions", [])
+        total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+        return _paper_response({
+            "source": "rust_engine",
+            "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
+            "total_unrealized_pnl": total_unrealized,
+            "total_fees": rust_state.get("total_fees", 0),
+            "net_pnl": rust_state.get("total_realized_pnl", 0) + total_unrealized - rust_state.get("total_fees", 0),
+            "trade_count": rust_state.get("trade_count", 0),
+        })
     return _paper_response(ENGINE.get_pnl())
 
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import main_legacy as _base
+from .ipc_state_reader import get_rust_reader
 from .auth import (
     AuthenticatedActor,
     _load_auth_credentials,
@@ -147,8 +148,9 @@ def _close_profitable_paper_positions() -> dict[str, Any]:
         return {"closed": [], "skipped": [], "error": str(exc)}
 
     positions = state.get("positions", {})
-    latest_prices: dict[str, float] = {}
-    if PIPELINE_BRIDGE is not None:
+    # R06-B: Rust engine prices → PipelineBridge fallback / Rust 引擎價格 → PipelineBridge 降級
+    latest_prices: dict[str, float] = get_rust_reader().get_latest_prices() or {}
+    if not latest_prices and PIPELINE_BRIDGE is not None:
         try:
             latest_prices = dict(PIPELINE_BRIDGE._latest_prices)
         except Exception:
