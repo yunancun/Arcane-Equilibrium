@@ -171,6 +171,23 @@ impl TickPipeline {
             symbols_tracked: self.latest_prices.len(),
         }
     }
+
+    /// Create a full snapshot for IPC / persistence (R06-A).
+    /// 創建完整快照供 IPC / 持久化使用。
+    pub fn snapshot(&self) -> PipelineSnapshot {
+        PipelineSnapshot {
+            paper_state: self.paper_state.export_state(),
+            latest_prices: self.latest_prices.clone(),
+            stats: self.stats.clone(),
+            source: "rust_engine".into(),
+        }
+    }
+
+    /// Read-only access to latest prices map (R06-A).
+    /// 最新價格映射的唯讀訪問。
+    pub fn latest_prices(&self) -> &HashMap<String, f64> {
+        &self.latest_prices
+    }
 }
 
 /// Convert IndicatorSnapshot to flat IndicatorInput for signal rules.
@@ -199,6 +216,20 @@ pub struct PipelineStatus {
     pub positions: usize,
     pub balance: f64,
     pub symbols_tracked: usize,
+}
+
+/// Full pipeline snapshot for IPC consumers (R06-A).
+/// 完整管線快照供 IPC 消費者使用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineSnapshot {
+    /// Paper trading state / 紙盤交易狀態
+    pub paper_state: crate::paper_state::PaperStateSnapshot,
+    /// Latest per-symbol prices / 每交易對最新價格
+    pub latest_prices: HashMap<String, f64>,
+    /// Tick statistics / Tick 統計
+    pub stats: TickStats,
+    /// Data source discriminator / 數據源標識
+    pub source: String,
 }
 
 #[cfg(test)]

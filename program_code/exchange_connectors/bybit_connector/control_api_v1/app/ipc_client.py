@@ -291,6 +291,29 @@ class EngineIPCClient:
             timeout=5.0,
         )
 
+    # ─── R06-A: Pipeline state queries / 管線狀態查詢 ────────────────────────
+
+    async def get_paper_state(self) -> dict[str, Any]:
+        """
+        Get paper trading state snapshot (balance, positions, PnL, fees).
+        獲取紙盤交易狀態快照（餘額、持倉、損益、手續費）。
+        """
+        return await self.call("get_paper_state")
+
+    async def get_latest_prices(self) -> dict[str, float]:
+        """
+        Get latest per-symbol prices from the tick pipeline.
+        從 tick 管線獲取每交易對最新價格。
+        """
+        return await self.call("get_latest_prices")
+
+    async def get_tick_stats(self) -> dict[str, Any]:
+        """
+        Get tick processing statistics (total_ticks, fills, intents, stops).
+        獲取 tick 處理統計（總 ticks、成交、意圖、止損）。
+        """
+        return await self.call("get_tick_stats")
+
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────
 
     async def _try_connect(self) -> bool:

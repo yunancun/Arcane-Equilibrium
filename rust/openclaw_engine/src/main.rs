@@ -98,7 +98,11 @@ async fn async_main(config: Arc<ConfigManager>) {
     // ------------------------------------------------------------------
     // Start IPC server / 啟動 IPC 服務器
     // ------------------------------------------------------------------
-    let ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone());
+    // IPC server data_dir for file-based state reads (R06-A)
+    // IPC 服務器數據目錄，用於基於文件的狀態讀取
+    let ipc_data_dir = std::env::var("OPENCLAW_DATA_DIR")
+        .unwrap_or_else(|_| "/tmp/openclaw".into());
+    let ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir);
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -164,6 +168,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         let mut state_writer = StateWriter::new(
             &data_path.join("paper_state.json"), 30_000,
         );
+        // Full pipeline snapshot for IPC file-read (R06-A)
+        // 完整管線快照供 IPC 文件讀取使用
+        let mut snapshot_writer = StateWriter::new(
+            &data_path.join("pipeline_snapshot.json"), 5_000,
+        );
         let audit_writer = AuditWriter::new(
             &data_path.join("paper_audit.jsonl"),
         );
@@ -220,6 +229,9 @@ async fn async_main(config: Arc<ConfigManager>) {
                                 );
                                 let snap = pipeline.paper_state.export_state();
                                 state_writer.maybe_write(&snap);
+                                // Write full pipeline snapshot for IPC (R06-A)
+                                let full_snap = pipeline.snapshot();
+                                snapshot_writer.maybe_write(&full_snap);
                                 last_status = Instant::now();
                             }
                         }
@@ -232,6 +244,8 @@ async fn async_main(config: Arc<ConfigManager>) {
         // Shutdown: force-write final state / 關閉：強制寫入最終狀態
         let snap = pipeline.paper_state.export_state();
         state_writer.force_write(&snap);
+        let full_snap = pipeline.snapshot();
+        snapshot_writer.force_write(&full_snap);
         let status = pipeline.status();
         info!(
             ticks = status.stats.total_ticks,

@@ -160,16 +160,30 @@ impl PaperState {
         triggers
     }
 
-    /// Export state for persistence.
-    /// 導出狀態用於持久化。
+    /// Export state for persistence (with real-time unrealized PnL).
+    /// 導出狀態用於持久化（含即時未實現損益）。
     pub fn export_state(&self) -> PaperStateSnapshot {
+        let positions: Vec<PaperPosition> = self.positions.values().map(|pos| {
+            // Compute real unrealized PnL using latest price for this symbol (QC fix).
+            // 使用該交易對最新價格計算真實未實現損益。
+            let current_price = self.latest_prices.get(&pos.symbol).copied().unwrap_or(pos.entry_price);
+            let unrealized_pnl = if pos.is_long {
+                (current_price - pos.entry_price) * pos.qty
+            } else {
+                (pos.entry_price - current_price) * pos.qty
+            };
+            PaperPosition {
+                unrealized_pnl,
+                ..pos.clone()
+            }
+        }).collect();
         PaperStateSnapshot {
             balance: self.balance,
             peak_balance: self.peak_balance,
             total_realized_pnl: self.total_realized_pnl,
             total_fees: self.total_fees,
             trade_count: self.trade_count,
-            positions: self.positions.values().cloned().collect(),
+            positions,
         }
     }
 }
