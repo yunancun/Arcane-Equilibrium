@@ -132,10 +132,10 @@ class TestRiskManagerEdgeCases:
         """Position size just above max_single_position_pct should be rejected.
         仓位大小刚超过上限应被拒绝。"""
         rm = self._make_rm()
-        # notional = 0.0251 * 60000 = 1506 → 15.06%
+        # notional = 0.035 * 60000 = 2100 → 21.0% > max_single_position_pct (20.0%)
         allowed, reason = rm.check_order_allowed(
             _make_state(balance=10000.0),
-            "BTCUSDT", "Buy", qty=0.0251, price=60000.0,
+            "BTCUSDT", "Buy", qty=0.035, price=60000.0,
         )
         assert allowed is False
         assert "position_size" in reason

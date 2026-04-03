@@ -35,7 +35,7 @@ class TestOrderIntent:
         assert oi.symbol == "BTCUSDT"
         assert oi.side == "Buy"
         assert oi.qty == 0.1
-        assert oi.order_type == "market"
+        assert oi.order_type == "limit"  # default changed from "market" to "limit"
 
     def test_to_dict(self):
         oi = OrderIntent(symbol="ETHUSDT", side="Sell", qty=1.0, price=3000.0,

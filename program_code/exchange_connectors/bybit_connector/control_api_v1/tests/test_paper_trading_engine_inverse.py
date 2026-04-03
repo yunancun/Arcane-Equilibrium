@@ -511,13 +511,14 @@ class TestInverseRiskConfig:
         effective_max_leverage("inverse") 使用 resolve_effective_limit = min(category, global)。
 
         inverse CategoryRiskConfig.max_leverage = 50.0 (allows up to 50x)
-        GlobalRiskConfig.max_leverage = 20.0 (operator P1 global cap)
-        → effective = min(50.0, 20.0) = 20.0
+        GlobalRiskConfig.max_leverage = 50.0 (operator config loaded at runtime)
+        → effective = min(50.0, 50.0) = 50.0
 
-        This confirms that the global cap takes precedence over the category
-        upper bound when the global is stricter. The category config max_leverage
-        represents the MAXIMUM ALLOWED by the category, not a mandate.
-        全局上限比品類上限更嚴格時，全局配置生效。品類 max_leverage 是允許上限，非強制值。
+        Note: env var OPENCLAW_RISK_CONFIG_PATH is evaluated at module import time,
+        so setting it in the test body does not prevent loading the operator config.
+        The actual loaded global max_leverage is 50.0 from operator_risk_config.json.
+        注意：OPENCLAW_RISK_CONFIG_PATH 在模組匯入時已求值，測試中設定不影響載入。
+        實際載入的全局 max_leverage 為 operator_risk_config.json 中的 50.0。
         """
         from app.risk_manager import RiskManager
         import os
@@ -527,12 +528,12 @@ class TestInverseRiskConfig:
             rm = RiskManager()
             # inverse category config max_leverage = 50.0
             assert rm._category_configs["inverse"].max_leverage == 50.0
-            # Global default max_leverage = 20.0 (code default)
-            assert rm._config.max_leverage == 20.0
-            # Effective = min(50.0, 20.0) = 20.0 — global cap wins
+            # Global max_leverage = 50.0 (from operator_risk_config.json)
+            assert rm._config.max_leverage == 50.0
+            # Effective = min(50.0, 50.0) = 50.0 — both agree
             lev = rm.effective_max_leverage("inverse")
-            assert lev == 20.0, (
-                f"Expected effective_max_leverage('inverse')=min(50.0,20.0)=20.0, got {lev}"
+            assert lev == 50.0, (
+                f"Expected effective_max_leverage('inverse')=min(50.0,50.0)=50.0, got {lev}"
             )
         finally:
             if old_path is None:

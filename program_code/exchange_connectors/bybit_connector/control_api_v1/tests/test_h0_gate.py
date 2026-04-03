@@ -1227,14 +1227,23 @@ class TestRiskManagerH0GateSync:
            應調用 gate.update_risk()（同步冷卻期到 H0 風控快照）。
         When _h0_gate is injected, record_fill_result with loss triggers cooldown sync
         and calls gate.update_risk().
+
+        Note: Must isolate from operator config file which overrides consecutive_loss_cooldown_count.
+        注意：必須隔離 operator 配置文件，否則 consecutive_loss_cooldown_count 會被覆蓋。
         """
-        from unittest.mock import MagicMock
-        from app.risk_manager import RiskManager, GlobalRiskConfig
+        from unittest.mock import MagicMock, patch
         from app.h0_gate import H0GateRiskSnapshot
 
-        config = GlobalRiskConfig()
-        config.consecutive_loss_cooldown_count = 1  # 第一次虧損即觸發
-        rm = RiskManager(config=config)
+        # Isolate from operator config: patch _OPERATOR_CONFIG_PATH to /dev/null
+        # so _load_operator_config() skips file loading and uses code defaults.
+        # 隔離 operator 配置：將 _OPERATOR_CONFIG_PATH 設為 /dev/null，
+        # 使 _load_operator_config() 跳過文件加載，使用代碼默認值。
+        with patch("app.risk_manager._OPERATOR_CONFIG_PATH", "/dev/null"):
+            from app.risk_manager import RiskManager, GlobalRiskConfig
+
+            config = GlobalRiskConfig()
+            config.consecutive_loss_cooldown_count = 1  # 第一次虧損即觸發
+            rm = RiskManager(config=config)
 
         mock_gate = MagicMock()
         # _risk_snapshot 必須有有效屬性（RiskManager 會讀取）

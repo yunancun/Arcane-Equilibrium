@@ -441,8 +441,8 @@ class TestEdgeFilterIntegration:
         assert "Sell" in context
 
     def test_edge_filter_respects_timeout(self, pipeline_bridge, mock_ollama_client, mock_orchestrator):
-        """Test: judge_edge is called with timeout=10 parameter.
-        测试：judge_edge 被调用时包含 timeout=10 参数。
+        """Test: judge_edge is called with timeout=15 parameter.
+        测试：judge_edge 被调用时包含 timeout=15 参数。
         """
         pipeline_bridge.set_ollama_client(mock_ollama_client)
 
@@ -455,7 +455,7 @@ class TestEdgeFilterIntegration:
         # Verify timeout parameter was passed
         assert mock_ollama_client.judge_edge.called
         call_kwargs = mock_ollama_client.judge_edge.call_args.kwargs
-        assert call_kwargs.get("timeout") == 10
+        assert call_kwargs.get("timeout") == 15  # default timeout changed from 10 to 15
 
     def test_edge_filter_json_parsing_with_extra_fields(
         self, pipeline_bridge, mock_ollama_client, mock_orchestrator

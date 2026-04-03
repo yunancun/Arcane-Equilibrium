@@ -77,7 +77,7 @@ def test_l1_capabilities():
     assert caps.can_generate_hypotheses is False
     assert caps.can_design_experiments is False
     assert caps.can_evolve_strategies is False
-    assert caps.can_auto_deploy_to_paper is False
+    assert caps.can_auto_deploy_to_paper is True  # L1 now allows auto-deploy to paper
     assert caps.can_optimize_learning_pipeline is False
     # All tiers cannot modify live config per EX-05 §8.2
     assert caps.can_modify_live_config is False

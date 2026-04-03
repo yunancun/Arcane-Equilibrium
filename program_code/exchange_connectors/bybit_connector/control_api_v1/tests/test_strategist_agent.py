@@ -443,12 +443,20 @@ class TestH1ThoughtGate(unittest.TestCase):
 
     def test_h3_routes_l2_thread(self):
         """
-        High complexity (relevance=0.9) → threading.Thread spawned, evaluate_edge NOT called
-        synchronously; heuristic used as immediate result.
-        高複雜度 → threading.Thread 被創建，evaluate_edge 不被同步調用，立即走啟發式。
+        When ModelRouter routes to 'l2', a background thread is spawned via
+        ModelRouter.run_l2_background(); evaluate_edge is NOT called synchronously;
+        heuristic is used as immediate result.
+        當 ModelRouter 路由到 'l2' 時，經 run_l2_background() 創建後台線程，
+        evaluate_edge 不被同步調用，立即走啟發式。
+
+        Note: L2 dispatch now goes through ModelRouter.run_l2_background() which uses
+        threading.Thread internally in app.model_router, not app.strategist_agent.
+        ModelRouter.route() with context may not return 'l2' without upgrade conditions,
+        so we force the route to 'l2' to isolate the threading behavior test.
+        注意：帶 context 的 route() 需要滿足升級條件才返回 'l2'，
+        此處強制路由到 'l2' 以隔離測試線程行為。
         """
         agent = self._make_strategist()
-        # High relevance_score → complexity >= 0.8 → l2 route
         intel = self._make_intel(relevance_score=0.9)
 
         # Track if _evaluate_edge is called synchronously
@@ -462,11 +470,12 @@ class TestH1ThoughtGate(unittest.TestCase):
 
         agent._evaluate_edge = mock_eval_sync
 
-        # Patch threading.Thread to capture if it's created
-        # 攔截 threading.Thread 確認其被創建
-        thread_calls = []
-        original_thread_init = __import__("threading").Thread.__init__
+        # Force ModelRouter.route() to return 'l2' regardless of context
+        # 強制 ModelRouter.route() 返回 'l2'，無論 context 內容
+        agent._model_router.route = MagicMock(return_value="l2")
 
+        # Patch threading.Thread in model_router where run_l2_background() creates it
+        # 在 model_router 中攔截 threading.Thread（run_l2_background() 的創建位置）
         import threading as _threading
         created_threads = []
 
@@ -477,7 +486,7 @@ class TestH1ThoughtGate(unittest.TestCase):
             def start(self):
                 pass  # don't actually start — we just check it was created
 
-        with patch("app.strategist_agent.threading.Thread", SpyThread):
+        with patch("app.model_router.threading.Thread", SpyThread):
             agent._handle_intel(self._make_intel_message(intel))
 
         # Thread must have been created for L2 evaluation

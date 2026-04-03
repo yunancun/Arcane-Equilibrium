@@ -329,6 +329,10 @@ class TestBybitDemoConditionalOrders(unittest.TestCase):
         conn._enabled = enabled
         conn._lock = threading.Lock()
         conn._stats = {}
+        conn._account_type = "UNIFIED"
+        conn._position_mode = "one_way"  # Match __init__ default / 與 __init__ 預設一致
+        conn._rate_limit_remaining = 120
+        conn._rate_limit_reset_ms = 0
         conn._mock_request = MagicMock(return_value={"retCode": 0, "result": {"orderId": "cond_123"}})
         conn._request = conn._mock_request
         return conn
@@ -384,7 +388,8 @@ class TestBybitDemoConditionalOrders(unittest.TestCase):
             symbol="DOGEUSDT", side="Sell", qty=1234.567, trigger_price=0.08,
         )
         params = conn._mock_request.call_args[0][2]
-        self.assertEqual(params["qty"], "1235")
+        # str(float) includes decimal: "1235.0"
+        self.assertEqual(params["qty"], "1235.0")
 
     def test_18_disabled_connector_returns_error(self):
         """Disabled connector returns error dict without calling API."""

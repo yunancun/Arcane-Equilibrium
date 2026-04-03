@@ -125,9 +125,10 @@ class TestEngineTierEnforcement:
     def _make_engine(self):
         from app.paper_trading_engine import PaperTradingEngine, PaperStateStore
         from unittest.mock import MagicMock
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write('{}')
-            temp_path = f.name
+        # Use a non-existent path so PaperStateStore.__init__ creates default state
+        # 使用不存在的路徑，讓 PaperStateStore.__init__ 自動創建默認狀態
+        temp_dir = tempfile.mkdtemp(prefix="openclaw_phase11_")
+        temp_path = os.path.join(temp_dir, "state.json")
         store = PaperStateStore(temp_path)
         engine = PaperTradingEngine(store)
         # P0-1: provide mock governance_hub so fail-closed check passes in tests
@@ -139,17 +140,24 @@ class TestEngineTierEnforcement:
         return engine, temp_path
 
     def test_submit_order_rejected_at_l1(self):
-        """L1 tier blocks submit_order (requires L3+)"""
+        """L1 tier now allows paper trading (can_auto_deploy_to_paper=True).
+        L1 現在允許紙盤交易（can_auto_deploy_to_paper=True）。
+        Verify submit_order passes tier gate and succeeds with a valid session.
+        驗證 submit_order 通過層級閘門，且在有效 session 下成功。"""
         from app.learning_tier_gate import LearningTierGate
 
         engine, temp_path = self._make_engine()
         try:
-            gate = LearningTierGate()  # L1 default
+            gate = LearningTierGate()  # L1 default — now has can_auto_deploy_to_paper=True
             engine.set_learning_tier_gate(gate)
+            engine.start_session(initial_balance=10000.0)
 
-            result = engine.submit_order("BTCUSDT", "Buy", "Market", 0.01)
-            assert result["rejected_reason"] is not None
-            assert "tier too low" in result["rejected_reason"].lower()
+            result = engine.submit_order("BTCUSDT", "Buy", "market", 0.01,
+                                         market_prices={"BTCUSDT": 50000.0})
+            # L1 tier should NOT reject — paper trading is allowed at L1
+            assert result["rejected_reason"] is None, (
+                f"L1 should allow paper trading, got rejection: {result['rejected_reason']}"
+            )
         finally:
             os.unlink(temp_path)
 
@@ -170,17 +178,25 @@ class TestEngineTierEnforcement:
             os.unlink(temp_path)
 
     def test_cancel_order_rejected_at_l1(self):
-        """L1 tier blocks cancel_order"""
+        """L1 tier now allows paper trading; cancel_order passes tier gate.
+        L1 現在允許紙盤交易；cancel_order 通過層級閘門。
+        Cancelling a non-existent order returns 'Order not found'.
+        取消不存在的訂單返回 'Order not found'。"""
         from app.learning_tier_gate import LearningTierGate
 
         engine, temp_path = self._make_engine()
         try:
             gate = LearningTierGate()
             engine.set_learning_tier_gate(gate)
+            engine.start_session(initial_balance=10000.0)
 
             result = engine.cancel_order("fake-order-id")
-            assert result["reason"] is not None
-            assert "tier too low" in result["reason"].lower()
+            # L1 tier should NOT reject — paper trading is allowed at L1
+            # The order simply doesn't exist, so reason = "Order not found"
+            assert "tier too low" not in result["reason"].lower(), (
+                f"L1 should allow paper trading, got tier rejection: {result['reason']}"
+            )
+            assert result["reason"] == "Order not found"
         finally:
             os.unlink(temp_path)
 

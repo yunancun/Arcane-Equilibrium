@@ -410,21 +410,23 @@ class TestAnalystL2AutoTrigger(unittest.TestCase):
 class TestL2CronTrigger(unittest.TestCase):
     """Test L2 Cron trigger in PipelineBridge."""
 
-    def test_cron_fires_on_sunday_utc_0(self):
-        """L2 Cron fires when it's Sunday UTC 0:00-0:59."""
+    def test_cron_fires_on_wednesday_utc_0(self):
+        """L2 Cron brief report fires when it's Wednesday UTC 0:00-0:59.
+        L2 Cron 簡報在周三 UTC 0:00-0:59 觸發。
+        (Sunday triggers L2 deep session, not analyze_patterns.)
+        （周日觸發 L2 深度 session，不是 analyze_patterns。）"""
         from app.pipeline_bridge import PipelineBridge
 
         # Create a minimal mock PipelineBridge
         bridge = MagicMock(spec=PipelineBridge)
         bridge._analyst_agent = MagicMock()
         bridge._analyst_agent.analyze_patterns.return_value = MagicMock()
-        bridge._last_l2_cron_week = None
+        bridge._last_l2_brief_week = None
 
-        # Call the actual method with a Sunday timestamp
-        # 2026-03-29 is a Sunday
-        sunday_utc_0 = datetime.datetime(2026, 3, 29, 0, 30,
-                                          tzinfo=datetime.timezone.utc).timestamp()
-        PipelineBridge._try_l2_cron_trigger(bridge, sunday_utc_0)
+        # 2026-03-25 is a Wednesday / 2026-03-25 是周三
+        wednesday_utc_0 = datetime.datetime(2026, 3, 25, 0, 30,
+                                             tzinfo=datetime.timezone.utc).timestamp()
+        PipelineBridge._try_l2_cron_trigger(bridge, wednesday_utc_0)
         bridge._analyst_agent.analyze_patterns.assert_called_once_with(force=True)
 
     def test_cron_does_not_fire_on_weekday(self):
@@ -442,21 +444,23 @@ class TestL2CronTrigger(unittest.TestCase):
         bridge._analyst_agent.analyze_patterns.assert_not_called()
 
     def test_cron_does_not_fire_twice_same_week(self):
-        """L2 Cron fires only once per week."""
+        """L2 Cron brief report fires only once per week.
+        L2 Cron 簡報每周只觸發一次。"""
         from app.pipeline_bridge import PipelineBridge
 
         bridge = MagicMock(spec=PipelineBridge)
         bridge._analyst_agent = MagicMock()
         bridge._analyst_agent.analyze_patterns.return_value = MagicMock()
-        bridge._last_l2_cron_week = None
+        bridge._last_l2_brief_week = None
 
-        sunday = datetime.datetime(2026, 3, 29, 0, 30,
-                                   tzinfo=datetime.timezone.utc).timestamp()
-        PipelineBridge._try_l2_cron_trigger(bridge, sunday)
+        # 2026-03-25 is a Wednesday / 2026-03-25 是周三
+        wednesday = datetime.datetime(2026, 3, 25, 0, 30,
+                                      tzinfo=datetime.timezone.utc).timestamp()
+        PipelineBridge._try_l2_cron_trigger(bridge, wednesday)
         self.assertEqual(bridge._analyst_agent.analyze_patterns.call_count, 1)
 
-        # Second call same week — should not fire
-        PipelineBridge._try_l2_cron_trigger(bridge, sunday + 3600)
+        # Second call same week — should not fire / 同一周第二次調用不應觸發
+        PipelineBridge._try_l2_cron_trigger(bridge, wednesday + 3600)
         self.assertEqual(bridge._analyst_agent.analyze_patterns.call_count, 1)
 
 

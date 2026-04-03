@@ -459,7 +459,8 @@ class TestRequestNetworkErrors:
              patch("app.bybit_demo_connector.urllib.request.urlopen", side_effect=http_err):
             result = connector._request("GET", "/v5/order/realtime")
 
-        assert result["retCode"] == 403
+        # Connector returns retCode=-1 for all HTTP errors (unified error code)
+        assert result["retCode"] == -1
 
     def test_request_handles_generic_exception_gracefully(self):
         """Generic exception (e.g. timeout) is caught and returned as retCode=-1."""
