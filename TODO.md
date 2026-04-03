@@ -91,6 +91,51 @@ SPEC 審查記錄：
 
 ---
 
+## ██ ML-1：ML/DL 驅動 Agent 自主學習架構 — 設計草稿 v0.4，待打磨 ██
+
+> **狀態：設計草稿 v0.4** — 已完成三方審查（QC 數學審查 + MIT DL/ML 教授評估 + FA 技術可行性），需進一步打磨後才可開始實施。
+> **文件位置：** `docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md`
+> **前置文件：** `docs/references/2026-04-03--agent_param_tuning_design_draft_v0.2.md`（v0.2 調參草稿，已整合入 v0.4）
+> **關聯項：** AGT-1（Agent 與策略模型脫節）
+
+### 待打磨項：
+- [ ] ML-1a：EV_net 修正公式中 funding_cost 的精確計算（avg_funding_rate 取多長窗口？按幣種差異化？）
+- [ ] ML-1b：PSI 閾值用歷史 6-12 月數據校準（需跑回測腳本產出經驗分佈）
+- [ ] ML-1c：CPCV + embargo 的具體實現設計（embargo period 取多長？與各策略持倉時間對齊）
+- [ ] ML-1d：Contextual Bandits (LinUCB) 與 Bayesian Optimizer 的整合接口設計
+- [ ] ML-1e：ONNX 導出 + Rust `ort` 推理的 PoC（驗證 LightGBM → ONNX → Rust 路徑可通）
+- [ ] ML-1f：DL-3 時序基礎模型（TimesFM/Chronos）的選型和本地部署可行性驗證
+- [ ] ML-1g：FeatureCollector 的精確欄位清單 + 與 IndicatorEngine cache 的對接方案
+- [ ] ML-1h：Thompson Sampling 在 Optuna TPE 上的具體整合方式（Optuna 原生不支持 TS）
+
+---
+
+## ██ DB-1：數據存儲架構 — 開發草稿，待打磨 ██
+
+> **狀態：開發草稿 v0.1** — 已完成代碼審計 + 方案設計，需進一步打磨後才可開始實施。
+> **文件位置：** `docs/references/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md`
+> **審計報告：** `docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md`（Phase 1 代碼審計完整結果）
+
+### 待打磨項：
+- [ ] DB-1a：Decision Context Snapshot schema 最終確認（~80 欄位，需與實際 indicator/regime 數據結構交叉驗證）
+- [ ] DB-1b：Orderbook L2 存儲策略最終確認（25 levels 全存 vs 衍生指標 only）
+- [ ] DB-1c：RL State Vector 120 維定義精確化（需與實際策略參數對齊）
+- [ ] DB-1d：四階段漸進放權的畢業條件數值校準（Paper 14d/Demo 21d 是否合理）
+- [ ] DB-1e：PG 8GB shared_buffers 在 LLM 並行場景下的壓力測試方案
+- [ ] DB-1f：40TB NAS Parquet 歸檔的目錄結構 + mount 點 + 備份策略
+- [ ] DB-1g：與現有 11 張 PG 表的向後兼容遷移腳本
+- [ ] DB-1h：Rust 優先原則下，哪些新組件應用 Rust+PyO3 寫（vs Python）
+
+### 核心設計決策（已確定）：
+- TimescaleDB + PG 做 hot/warm 層，Parquet + DuckDB 做 cold/ML 層
+- PG 活躍數據永遠 ~14 GB（retention policy + Parquet export）
+- PG shared_buffers = 8 GB（LLM 是記憶體大戶，不搶）
+- Decision Context Snapshot = 架構核心（每個決策點的完整世界狀態 + 事後回填）
+- 四階段漸進放權：Learning → Paper → Demo → Live（Live 需 Claude AI 報告 + Operator 批准）
+- 每日 ~5.6 GB raw，壓縮後 ~158 GB/year，5 年 ~790 GB（NAS 50 年夠用）
+
+---
+
 ## 全局路線圖概覽
 
 ```
