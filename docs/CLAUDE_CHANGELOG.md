@@ -5,6 +5,33 @@
 
 ---
 
+### 文檔治理 + 系統快照 + 根原則校準（2026-04-03 · commits 97e152c → edf4627）
+
+**文檔治理（6 commits）：**
+- README.md 全面更新：狀態日期→04-03、測試 3440→3704、業務完成度 45%→52%、Phase 路線圖重排
+- 修正 "6 Agent" → "5 Agent + Conductor"（CLAUDE.md / README.md / CC profile / governance_extracts）
+- 原則 #12 加 demo 階段說明（live 自動部署待 Phase 3 放權框架）
+- 新增實施準則：認知調製 ≠ 能力限制（衍生自原則 #11，否決代謝模型和內部經濟體）
+- 明確 Bybit 專攻決策：Binance 排除當前開發範圍，僅作超長期可能方向
+- 5 個 governance_extracts 標記 OUTDATED + 指向權威文件
+- SYSTEM_STATUS_REPORT.md 歸檔到 docs/references/
+- 跨平台部署說明加入 README（macOS 遷移路徑）
+
+**系統快照（1 commit）：**
+- 生成 SYSTEM_SNAPSHOT.md（8 章節：結構樹 / 15 模組簽名 / 啟動流程 / 數據流 / 線程架構 / 性能路徑 / 配置管理 / 外部依賴）
+- 供外部 Claude session 分析系統架構
+
+**跨平台兼容性審計（2 commits，by user）：**
+- CLAUDE.md §七新增跨平台強制規則（路徑不硬編碼 / LLM 抽象 / systemd→launchd / 依賴管理）
+- XP-1~4 P0 審計任務完成
+
+**其他（by user）：**
+- 中期路線圖 Phase 0-3 制定（7 週 · 4-Agent 分析）
+- Agent 認知自適應 SPEC V1.1+R1（見下方獨立條目）
+- 16 Agent workspace profiles 升級
+
+---
+
 ### Agent 認知自適應 SPEC V1.1+R1 五角色審查通過（2026-04-03）
 
 **內容**：V3 報告補充規範，三個 L0 新模組的完整設計（零 API 成本，純本地計算）
