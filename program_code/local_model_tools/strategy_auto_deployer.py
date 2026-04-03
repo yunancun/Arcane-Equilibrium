@@ -26,6 +26,11 @@ Safety invariant:
   - system_mode = read_only 不变 / system_mode unchanged
 """
 
+# DEPRECATED(R-07): Strategy dispatch migrated to Rust Orchestrator.
+#   Rust: openclaw_engine/src/orchestrator.rs (strategy dispatch, tick fan-out)
+#   Stays in Python: deployment decision logic, auto-deploy from evolution/learning, health monitoring, API integration
+#   DO NOT DELETE — 15+ importers depend on this module. Remove after R-07 grey-period.
+
 from __future__ import annotations
 
 import logging

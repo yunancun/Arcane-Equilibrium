@@ -38,12 +38,19 @@ impl StateWriter {
 
         match serde_json::to_string_pretty(state) {
             Ok(json) => {
-                if let Err(e) = std::fs::write(&self.path, &json) {
-                    error!(path = %self.path.display(), error = %e, "state write failed / 狀態寫入失敗");
+                // Atomic write: write to .tmp then rename to prevent readers seeing partial data.
+                // 原子寫入：先寫 .tmp 再 rename，防止讀取端看到半寫數據。
+                let tmp_path = self.path.with_extension("json.tmp");
+                if let Err(e) = std::fs::write(&tmp_path, &json) {
+                    error!(path = %tmp_path.display(), error = %e, "state write failed / 狀態寫入失敗");
+                    return false;
+                }
+                if let Err(e) = std::fs::rename(&tmp_path, &self.path) {
+                    error!(path = %self.path.display(), error = %e, "state rename failed / 狀態重命名失敗");
                     return false;
                 }
                 self.last_write = Some(now);
-                debug!(path = %self.path.display(), "state written / 狀態已寫入");
+                debug!(path = %self.path.display(), "state written (atomic) / 狀態已寫入（原子）");
                 true
             }
             Err(e) => {

@@ -496,7 +496,8 @@ class TestPaperTradingAPI:
         client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/session/status", headers=auth_headers())
         assert r.status_code == 200
-        assert r.json()["data"]["is_simulated"] is True
+        # is_simulated is in the envelope, not inside data
+        assert r.json()["is_simulated"] is True
 
     def test_order_submit_via_api(self):
         client = build_api_client()

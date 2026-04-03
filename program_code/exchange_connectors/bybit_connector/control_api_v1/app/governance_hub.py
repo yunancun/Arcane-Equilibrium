@@ -41,6 +41,11 @@ Safety invariant:
   - All cross-SM calls wrapped in exception handlers; fail-safe
 """
 
+# DEPRECATED(R-07): Deterministic cascade logic migrated to Rust GovernanceCore.
+#   Rust: openclaw_core/src/governance_core.rs (is_authorized, cascading all-or-nothing)
+#   Stays in Python: grant_paper_authorization, de_escalation, Telegram alerts, audit writes, 4 SM lifecycle
+#   DO NOT DELETE — 12+ importers depend on this module. Remove after R-07 grey-period.
+
 from __future__ import annotations
 
 import json

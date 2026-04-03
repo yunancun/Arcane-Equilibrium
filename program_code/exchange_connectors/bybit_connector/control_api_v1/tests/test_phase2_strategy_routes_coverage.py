@@ -290,14 +290,29 @@ class TestPipelineAndScannerRoutes:
     @patch(f"{_MOD}.PIPELINE_BRIDGE", None)
     def test_pipeline_stats_unavailable(self):
         from app.phase2_strategy_routes import get_pipeline_stats
-        result = _run(get_pipeline_stats(actor=_FakeActor()))
+        import app.ipc_state_reader as _ipc
+        _orig = _ipc._READER
+        # Force Rust reader unavailable so fallback to PIPELINE_BRIDGE=None → available=False
+        from app.ipc_state_reader import RustSnapshotReader
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _ipc._READER = RustSnapshotReader(data_dir=d)
+            result = _run(get_pipeline_stats(actor=_FakeActor()))
+            _ipc._READER = _orig
         assert result["data"]["available"] is False
 
     @patch(f"{_MOD}.PIPELINE_BRIDGE")
     def test_pipeline_stats_happy(self, mock_pb):
         from app.phase2_strategy_routes import get_pipeline_stats
-        mock_pb.get_stats.return_value = {"ticks": 100}
-        result = _run(get_pipeline_stats(actor=_FakeActor()))
+        import app.ipc_state_reader as _ipc
+        _orig = _ipc._READER
+        from app.ipc_state_reader import RustSnapshotReader
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            _ipc._READER = RustSnapshotReader(data_dir=d)
+            mock_pb.get_stats.return_value = {"ticks": 100}
+            result = _run(get_pipeline_stats(actor=_FakeActor()))
+            _ipc._READER = _orig
         assert result["data"]["ticks"] == 100
 
     @patch(f"{_MOD}.MARKET_SCANNER", None)

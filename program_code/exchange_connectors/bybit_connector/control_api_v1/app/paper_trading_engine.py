@@ -15,6 +15,11 @@ MODULE_NOTE (English):
   Paper state is fully isolated from the main control state file.
 """
 
+# DEPRECATED(R-07): Core matching/execution migrated to Rust openclaw_engine.
+#   Rust: openclaw_engine/src/paper_state.rs + intent_processor.rs (tick processing, order matching, fill execution)
+#   Stays in Python: PaperStateStore I/O, session lifecycle (start/stop/reset), 7-state machine, REST API integration
+#   DO NOT DELETE — 23+ importers depend on this module. Remove after R-07 grey-period.
+
 import copy
 import hashlib
 import json

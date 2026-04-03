@@ -46,7 +46,8 @@ print(f'balance=\${ps[\"balance\"]:.2f} | fills={r[\"stats\"][\"total_fills\"]} 
 **如果引擎掛了（engine_alive=false）：**
 1. 檢查 watchdog.log 找崩潰原因
 2. 重啟：`OPENCLAW_CANARY_MODE=1 OPENCLAW_DATA_DIR=/tmp/openclaw RUST_LOG=info nohup rust/target/release/openclaw-engine > /tmp/openclaw/engine_stdout.log 2>&1 &`
-3. 重啟 watchdog：`nohup python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 30 --poll-interval 10 > /tmp/openclaw/watchdog.log 2>&1 &`
+3. 重啟 watchdog：`python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 60 --poll-interval 10 &`
+   **注意**：threshold 必須 > 30s（snapshot 每 30s 寫一次），建議 60s。30s 會產生假告警。
 4. 記錄崩潰到 docs/KNOWN_ISSUES.md
 
 ---
