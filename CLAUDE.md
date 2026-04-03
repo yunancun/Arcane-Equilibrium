@@ -326,4 +326,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 Py tests + 302 Rust tests · 131+ routes · 5 Agent · demo_only · Phase R-02 完成 · openclaw_core 10 模組：klines + 13 indicators(Kahan) + 8 signals + h0_gate + risk + cost_gate + attention + cognitive + opportunity + dream · Golden Dataset 驗證 PASS · E2 PASS + E4 零回歸 · 下一步：R-03 core 下半（SM+執行+回測）→ 讀 TODO.md。
+> 截至 2026-04-03：3703 Py tests + 468 Rust tests · 131+ routes · 5 Agent · demo_only · Phase R-03 完成 · openclaw_core 24 模組：R-02 原 10 + sm/(auth+lease+risk_gov+oms) + governance_core + guardian + execution + order_match + portfolio + stop_manager + message_bus + attribution + backtest · GovernanceCore 級聯 all-or-nothing · Golden Dataset 極端組 PASS · E2 PASS + E4 零回歸 · 下一步：R-04 engine 完整交易路徑 → 讀 TODO.md。

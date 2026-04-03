@@ -5,6 +5,39 @@
 
 ---
 
+### Phase R-03 完成 — core 下半：SM + 執行 + 回測（2026-04-03）
+
+**Batch 1（4 SM 狀態機）：**
+- `sm/auth.rs`（601 行）：8 狀態 + 16 遷移 + 7 禁止 + 5 守衛 + 過期守護（15 tests）
+- `sm/lease.rs`（538 行）：9 狀態 + 18 遷移 + 12 禁止 + revoke_all_live（14 tests）
+- `sm/risk_gov.rs`（583 行）：6 級風控 + 23 遷移 + 自動升級 + 持有時間守衛 + 6 級約束（14 tests）
+- `sm/oms.rs`（548 行）：11 態訂單生命週期 + 16 遷移 + 12 禁止 + 對賬（11 tests）
+- `sm/mod.rs`（90 行）：TransitionRecord + SmError + now_ms
+
+**Batch 2（GovernanceCore 級聯）：**
+- `governance_core.rs`（490 行）：all-or-nothing risk→auth→lease 級聯 + evaluate_and_cascade + 紙盤授權（12 tests）
+
+**Batch 3（確定性檢查 + 執行）：**
+- `guardian.rs`（270 行）：4 項確定性風控檢查 + 裁決邏輯（7 tests）
+- `execution.rs`（262 行）：滑點分層 + 成交價 + 手續費 + 損益（16 tests）
+- `order_match.rs`（267 行）：限價單匹配 + 部分成交率（10 tests）
+
+**Batch 4（組合 + 止損 + 消息 + 歸因）：**
+- `portfolio.rs`（331 行）：Pearson 相關 + 3 層檢查 + 組合指標（7 tests）
+- `stop_manager.rs`（325 行）：hard/trailing/time 3 止損 + ATR 倉位計算（14 tests）
+- `message_bus.rs`（257 行）：6 角色消息路由 + 衝突解決（6 tests）
+- `attribution.rs`（235 行）：6 因子分解 + 聚合（9 tests）
+
+**Batch 5（回測引擎）：**
+- `backtest.rs`（438 行）：逐 K 線回放 + SignalGenerator trait + Sharpe/drawdown（9 tests）
+
+**Batch 6（極端組測試）：**
+- `tests/golden_extreme.rs`（287 行）：SM 級聯壓力 + 執行邊界 + 止損邊界 + 組合極端（19 tests）
+
+**測試基準線：** Rust 468 (376 core + 8 golden + 19 extreme + 29 engine + 36 types) · Python 3703/24/17 零回歸
+
+---
+
 ### Phase R-02 完成 — core 上半：感知 + 認知 + 風控（2026-04-03）
 
 **Batch 1（小型獨立模組）：**
