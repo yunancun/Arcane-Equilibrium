@@ -143,19 +143,20 @@ class Layer2CostTracker:
         self._adaptive.last_recalculated_ms = adp.get("last_recalculated_ms", 0)
 
     def _save(self) -> None:
-        """Persist state to file with restricted permissions / 以受限权限持久化状态到文件"""
+        """Atomic persist: tmp-file-then-replace / 原子持久化：tmp→replace 防止損壞"""
         with self._lock:
             self._file_path.parent.mkdir(parents=True, exist_ok=True)
             state = self._read_raw()
             state["config"] = self._config.to_dict()
             state["pricing"] = self._pricing.to_dict()
             state["adaptive"] = self._adaptive.to_dict()
-            with self._file_path.open("w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
+            tmp_path = self._file_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
             try:
-                os.chmod(self._file_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+                os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
             except OSError:
                 pass
+            tmp_path.replace(self._file_path)
 
     def _read_raw(self) -> dict[str, Any]:
         """Read raw state from file / 从文件读取原始状态"""
@@ -273,18 +274,19 @@ class Layer2CostTracker:
             self._write_raw(raw)
 
     def _write_raw(self, raw: dict[str, Any]) -> None:
-        """Write raw state + update in-memory config/pricing/adaptive / 写入原始状态并更新内存"""
+        """Atomic write: tmp-file-then-replace to prevent corruption / 原子寫入：tmp→replace 防止損壞"""
         with self._lock:
             raw["config"] = self._config.to_dict()
             raw["pricing"] = self._pricing.to_dict()
             raw["adaptive"] = self._adaptive.to_dict()
             self._file_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._file_path.open("w", encoding="utf-8") as f:
-                json.dump(raw, f, ensure_ascii=False, indent=2)
+            tmp_path = self._file_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
             try:
-                os.chmod(self._file_path, stat.S_IRUSR | stat.S_IWUSR)
+                os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
             except OSError:
                 pass
+            tmp_path.replace(self._file_path)
 
     # ── Session Management / Session 管理 ──
 
@@ -697,7 +699,8 @@ class APIBudgetManager:
     # Default cooldown per tier in seconds / 每 tier 默認冷卻秒數
     _DEFAULT_COOLDOWNS: dict[str, int] = {"l1_5": 1800, "l2": 3600}
 
-    def __init__(self, monthly_budget_usd: float = 50.0, state_dir: str | None = None):
+    def __init__(self, monthly_budget_usd: float = 50.0, state_dir: str | None = None,
+                 debug_mode: bool = False):
         """
         Initialize budget manager with monthly cap and per-tier cooldowns.
         以月度上限和分層冷卻初始化預算管理器。
@@ -706,7 +709,10 @@ class APIBudgetManager:
             monthly_budget_usd: Monthly spending limit in USD / 月度花費上限（美元）
             state_dir: Directory for state persistence; uses OPENCLAW_RUNTIME_DIR env var if None
                        狀態持久化目錄；為 None 時使用 OPENCLAW_RUNTIME_DIR 環境變量
+            debug_mode: If True, can_call always returns True and record_call logs without deducting budget
+                        若 True，can_call 始終返回 True，record_call 僅記錄不扣預算
         """
+        self._debug_mode = debug_mode
         self._monthly_budget_usd = monthly_budget_usd
         self._tier_cooldowns = dict(self._DEFAULT_COOLDOWNS)
         self._last_call_ts: dict[str, float] = {"l1_5": 0.0, "l2": 0.0}
@@ -757,6 +763,9 @@ class APIBudgetManager:
         """
         if tier not in self._VALID_TIERS:
             return False
+        # Debug mode: always allow / 除錯模式：始終允許
+        if self._debug_mode:
+            return True
 
         with self._lock:
             self._check_month_reset()
@@ -787,8 +796,12 @@ class APIBudgetManager:
 
         with self._lock:
             self._check_month_reset()
-            self._monthly_spend_usd = round(self._monthly_spend_usd + cost_usd, 6)
             self._last_call_ts[tier] = time.time()
+            if not self._debug_mode:
+                # Normal mode: deduct budget / 正常模式：扣除預算
+                self._monthly_spend_usd = round(self._monthly_spend_usd + cost_usd, 6)
+            else:
+                logger.debug("APIBudgetManager debug_mode: skipping budget deduction for %s ($%.4f)", tier, cost_usd)
             self._save()
 
     def get_remaining_budget(self) -> float:
@@ -799,6 +812,11 @@ class APIBudgetManager:
         with self._lock:
             self._check_month_reset()
             return round(max(0.0, self._monthly_budget_usd - self._monthly_spend_usd), 4)
+
+    def set_debug_mode(self, enabled: bool) -> None:
+        """Toggle debug mode at runtime / 運行時切換除錯模式"""
+        self._debug_mode = enabled
+        logger.info("APIBudgetManager debug_mode set to %s / 除錯模式已設為 %s", enabled, enabled)
 
     def get_status(self) -> dict[str, Any]:
         """
@@ -853,8 +871,8 @@ class APIBudgetManager:
 
     def _save(self) -> None:
         """
-        Persist current state to JSON file with restricted permissions.
-        以受限權限將當前狀態持久化到 JSON 文件。
+        Atomic persist: tmp-file-then-replace to prevent corruption.
+        原子持久化：tmp→replace 防止損壞。
         """
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -864,11 +882,12 @@ class APIBudgetManager:
                 "monthly_spend_usd": self._monthly_spend_usd,
                 "last_call_ts": dict(self._last_call_ts),
             }
-            with self._state_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            tmp_path = self._state_path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             try:
-                os.chmod(self._state_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+                os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
             except OSError:
                 pass
+            tmp_path.replace(self._state_path)
         except Exception:
             logger.warning("APIBudgetManager._save failed, non-fatal / 持久化失敗，非致命")

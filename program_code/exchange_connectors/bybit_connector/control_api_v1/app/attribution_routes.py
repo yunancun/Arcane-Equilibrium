@@ -20,7 +20,9 @@ import datetime
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from . import main_legacy as base
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,7 @@ def _error(message: str, status_code: int = 500) -> None:
 
 
 @attribution_router.get("/summary")
-async def get_attribution_summary():
+async def get_attribution_summary(_actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
     GET /api/v1/attribution/summary
     全策略聚合視圖 — 返回所有策略的歸因摘要。
@@ -96,7 +98,7 @@ async def get_attribution_summary():
 
 
 @attribution_router.get("/strategy/{name}")
-async def get_strategy_attribution(name: str):
+async def get_strategy_attribution(name: str, _actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
     GET /api/v1/attribution/strategy/{name}
     單策略歸因詳情 — 返回指定策略的 6 因子分解（全時間範圍）。
@@ -121,7 +123,7 @@ async def get_strategy_attribution(name: str):
 
     if result is None:
         _error(
-            f"No attribution data for strategy '{name}' / 策略 '{name}' 無歸因數據",
+            f"No attribution data for strategy '{name[:64]}' / 策略 '{name[:64]}' 無歸因數據",
             404,
         )
 
@@ -129,7 +131,7 @@ async def get_strategy_attribution(name: str):
 
 
 @attribution_router.get("/skill-ratio")
-async def get_skill_ratios():
+async def get_skill_ratios(_actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
     GET /api/v1/attribution/skill-ratio
     各策略 Skill vs Luck 比例 — 長期追蹤每個策略的技能佔比。
@@ -152,7 +154,7 @@ async def get_skill_ratios():
 
 
 @attribution_router.get("/trade/{trade_id}")
-async def get_trade_attribution(trade_id: str):
+async def get_trade_attribution(trade_id: str, _actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
     GET /api/v1/attribution/trade/{trade_id}
     單筆交易歸因 — 返回指定交易的完整 6 因子分解結果。
@@ -168,7 +170,7 @@ async def get_trade_attribution(trade_id: str):
     result = engine.get_trade_attribution(trade_id)
     if result is None:
         _error(
-            f"No attribution found for trade '{trade_id}' / 找不到交易 '{trade_id}' 的歸因數據",
+            f"No attribution found for trade '{trade_id[:64]}' / 找不到交易 '{trade_id[:64]}' 的歸因數據",
             404,
         )
 

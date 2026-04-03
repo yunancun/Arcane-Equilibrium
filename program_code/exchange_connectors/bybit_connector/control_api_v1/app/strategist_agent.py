@@ -761,14 +761,15 @@ class StrategistAgent:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            pattern = item.get("pattern", item.get("claim", ""))
+            pattern = item.get("pattern", item.get("claim", ""))[:200]  # Security: cap length / 安全：截斷長度
             if not pattern:
                 continue
             try:
                 conf = min(float(item.get("confidence", 0.5)), cap)
+                obs_count = max(1, min(10000, int(item.get("observation_count", 1))))  # Clamp 1-10000
                 self._truth_registry.register_claim(
                     pattern_text=pattern, evidence_source="ai",
-                    observation_count=int(item.get("observation_count", 1)),
+                    observation_count=obs_count,
                     confidence=conf, applies_to_regime=item.get("regime", "all"),
                     applies_to_strategy=item.get("strategy", "all"),
                 )
