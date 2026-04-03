@@ -4,10 +4,11 @@
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 from bybit_decision_lease_common import read_json_required as read_json, save_report
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 REPORT_PATH = BASE / "bybit_manual_approval_packet_latest.json"
 LATEST_PATH = BASE / "bybit_manual_approval_packet_contract_latest.json"
 

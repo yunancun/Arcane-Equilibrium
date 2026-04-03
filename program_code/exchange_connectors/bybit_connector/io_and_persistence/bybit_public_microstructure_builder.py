@@ -28,12 +28,12 @@ from typing import Any
 
 
 RUNTIME_STATE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/"
     "bybit_runtime_state_latest.json"
 )
 
 OUTPUT_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment"
 )
 LATEST_OUTPUT_PATH = OUTPUT_DIR / "bybit_public_microstructure_latest.json"
 

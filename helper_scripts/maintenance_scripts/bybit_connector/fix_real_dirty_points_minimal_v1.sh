@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) BACKUP ====="
 for f in \
@@ -147,7 +150,7 @@ python3 -m py_compile \
 echo
 echo "===== 4) FORCE REFRESH execution_history + observer truth ====="
 ./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 python3 scripts/bybit_private_execution_history_check.py || python3 scripts/bybit_private_execution_history_check.py.orig
 python3 scripts/bybit_full_readonly_observer_cycle.py
 '
@@ -164,10 +167,11 @@ echo
 echo "===== 6) FINAL TRUTH DIAG ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
-snap = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
+snap = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
 
 def read(p):
     p = Path(p)

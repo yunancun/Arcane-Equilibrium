@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import json
 from pathlib import Path
+import os
 
-CONFIG_PATH = Path("/home/ncyu/srv/settings/service_configs/bybit_connector_config.json")
-CONTRACT_DOC = Path("/home/ncyu/srv/settings/system_notes/bybit_private_readonly_contract_v1.md")
+CONFIG_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/settings/service_configs/bybit_connector_config.json")
+CONTRACT_DOC = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/settings/system_notes/bybit_private_readonly_contract_v1.md")
 
 def main() -> None:
     issues = []

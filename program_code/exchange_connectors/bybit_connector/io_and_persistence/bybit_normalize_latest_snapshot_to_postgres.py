@@ -22,10 +22,11 @@ Maintenance notes:
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
-SNAPSHOT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
+SNAPSHOT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
 POSTGRES_CONTAINER = "trading_postgres"
 SQL_SCHEMA = "trading_raw"
 

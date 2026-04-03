@@ -36,11 +36,12 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-CHECKPOINT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_checkpoint_latest.json")
-RUNTIME_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
+CHECKPOINT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_checkpoint_latest.json")
+RUNTIME_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/demo_gate")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/demo_gate")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_demo_gate_contract_latest.json"
 

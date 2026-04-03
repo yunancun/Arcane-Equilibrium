@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
-LJ_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
-TG_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+LJ_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/local_judgment"
+TG_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) DISCOVER PUBLIC_MICROSTRUCTURE BUILDER ====="
 mapfile -t PM_CANDIDATES < <(
@@ -56,9 +59,10 @@ echo
 echo "===== 2) DIAG PUBLIC_MICROSTRUCTURE AFTER DIRECT RERUN ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-p = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_public_microstructure_latest.json")
+p = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_public_microstructure_latest.json")
 if not p.exists():
     print("missing_public_microstructure_json=True")
     raise SystemExit(0)
@@ -180,10 +184,11 @@ echo
 echo "===== 9) FINAL TRUTH STATUS ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-lj = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment")
-tg = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+lj = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment")
+tg = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(p):
     p = Path(p)

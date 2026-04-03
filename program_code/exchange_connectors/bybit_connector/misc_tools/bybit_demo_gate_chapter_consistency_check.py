@@ -31,8 +31,9 @@ Not this:
 import json
 import time
 from pathlib import Path
+import os
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/demo_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/demo_gate")
 
 PATHS = {
     "contract": BASE / "bybit_demo_gate_contract_latest.json",
@@ -53,7 +54,7 @@ PATHS = {
     "handoff_contract": BASE / "bybit_demo_gate_handoff_contract_latest.json",
     "final_audit": BASE / "bybit_demo_gate_final_audit_latest.json",
     "final_audit_contract": BASE / "bybit_demo_gate_final_audit_contract_latest.json",
-    "runtime": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
+    "runtime": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
 }
 
 OUT_LATEST = BASE / "bybit_demo_gate_chapter_consistency_latest.json"

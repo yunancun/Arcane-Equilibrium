@@ -30,10 +30,10 @@ import os
 import sys
 from pathlib import Path
 
-BASE = Path("/home/ncyu/srv/helper_scripts/maintenance_scripts/bybit_connector")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/helper_scripts/maintenance_scripts/bybit_connector")
 WRAPPER = BASE / "_bybit_latest_wrapper.py"
 ORIG = BASE / "bybit_private_order_history_check.py.orig"
-LATEST = "/home/ncyu/srv/log_files/connector_logs/bybit_private_order_history_check_latest.json"
+LATEST = os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/log_files/connector_logs/bybit_private_order_history_check_latest.json"
 PREFIX = "bybit_private_order_history_check"
 
 os.execv(sys.executable, [sys.executable, str(WRAPPER), str(ORIG), LATEST, PREFIX])

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) BACKUP ====="
 for f in \
@@ -123,9 +126,10 @@ echo
 echo "===== 4) H5 RECHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 log = json.loads((base / "bybit_ai_cost_log_latest.json").read_text(encoding="utf-8"))
 audit = json.loads((base / "bybit_ai_governance_audit_latest.json").read_text(encoding="utf-8"))
@@ -152,9 +156,10 @@ echo
 echo "===== 5) H1 TRUTH DIAG ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 paths = {
     "thought_gate_input": base / "bybit_thought_gate_input_latest.json",
     "policy": base / "bybit_thought_gate_policy_latest.json",

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) BACKUP ====="
 for f in \
@@ -21,10 +24,11 @@ cat > scripts/bybit_h5_compat_helpers.py <<'PY'
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read_json_if_exists(path: Path) -> Dict[str, Any]:
     if not path.exists():
@@ -303,9 +307,10 @@ echo
 echo "===== 6) H5 RAW DIAG AFTER V7 ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 log = json.loads((base / "bybit_ai_cost_log_latest.json").read_text(encoding="utf-8"))
 audit = json.loads((base / "bybit_ai_governance_audit_latest.json").read_text(encoding="utf-8"))
 final_audit = json.loads((base / "bybit_ai_cost_governance_final_audit_latest.json").read_text(encoding="utf-8"))
@@ -322,9 +327,10 @@ echo
 echo "===== 7) H5 FINAL CLEAN STATUS AFTER V7 ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 log = json.loads((base / "bybit_ai_cost_log_latest.json").read_text(encoding="utf-8"))
 audit = json.loads((base / "bybit_ai_governance_audit_latest.json").read_text(encoding="utf-8"))

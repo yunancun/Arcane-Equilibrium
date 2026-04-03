@@ -20,10 +20,11 @@ Important / 重要约束
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 from bybit_decision_lease_common import read_json, save_report, as_list, merged_unique
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 I7_AGG_PATH = BASE / "bybit_execution_authority_aggregator_latest.json"
 I7_AUDIT_PATH = BASE / "bybit_execution_authority_aggregator_final_audit_latest.json"

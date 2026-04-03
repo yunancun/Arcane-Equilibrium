@@ -36,8 +36,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-SUMMARY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_summary_latest.json")
+SUMMARY_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_summary_latest.json")
 
 OUT_DIR = SUMMARY_PATH.parent
 OUT_LATEST = OUT_DIR / "bybit_transition_engine_summary_contract_latest.json"

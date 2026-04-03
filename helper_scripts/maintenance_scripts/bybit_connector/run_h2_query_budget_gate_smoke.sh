@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 ./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 python3 scripts/bybit_query_budget_gate.py
 python3 scripts/bybit_query_budget_gate_contract_check.py
 '
 
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-p = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_query_budget_gate_latest.json")
+p = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_query_budget_gate_latest.json")
 obj = json.loads(p.read_text(encoding="utf-8"))
 
 print("===== H2-B QUERY BUDGET GATE SMOKE =====")

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
 echo "===== LEGACY I10 NOTICE ====="
 echo "This runner is a legacy decision_lease-oriented observer."
@@ -8,13 +11,14 @@ echo "For current canonical H-chain status, use:"
 echo "  helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_h_chain_recheck.sh"
 echo ""
 
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 summary = json.loads((base / "bybit_decision_lease_chapter_summary_latest.json").read_text(encoding="utf-8"))
 handoff = json.loads((base / "bybit_decision_lease_chapter_handoff_latest.json").read_text(encoding="utf-8"))

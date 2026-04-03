@@ -16,11 +16,12 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any
 
 
 INPUT_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment/"
     "bybit_local_cost_model_latest.json"
 )
 OUTPUT_DIR = INPUT_PATH.parent

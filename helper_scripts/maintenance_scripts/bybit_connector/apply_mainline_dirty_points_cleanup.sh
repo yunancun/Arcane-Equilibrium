@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-ROOT="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector"
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
-ENV1="/home/ncyu/srv/settings/environment_files/trading_services.env"
-ENV2="/home/ncyu/srv/docker_projects/trading_services/.env"
+ROOT="$_SRV/program_code/exchange_connectors/bybit_connector"
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
+ENV1="$_SRV/settings/environment_files/trading_services.env"
+ENV2="$_SRV/docker_projects/trading_services/.env"
 
 backup_file() {
   local f="$1"
@@ -372,7 +375,7 @@ echo "===== 7) RERUN MAINLINE CLOSURE ====="
 ./scripts/run_i5_decision_lease_friction_closure.sh
 
 ./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 python3 scripts/bybit_decision_lease_approval_bridge.py
 python3 scripts/bybit_decision_lease_approval_bridge_contract_check.py
@@ -398,10 +401,10 @@ python3 scripts/bybit_decision_lease_chapter_final_audit.py
 echo
 echo "===== 8) FINAL DIRTY-POINT CHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
-import json
+import json, os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name

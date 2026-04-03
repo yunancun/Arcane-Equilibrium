@@ -31,10 +31,11 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+import os
 
-WS_SMOKE_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_ws_smoke_test_v2.py")
-WS_LOAD_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_load_ws_jsonl_to_postgres.py")
-PYTHON_VENV = Path("/home/ncyu/srv/venvs/trading_ws/bin/python")
+WS_SMOKE_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_ws_smoke_test_v2.py")
+WS_LOAD_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_load_ws_jsonl_to_postgres.py")
+PYTHON_VENV = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/venvs/trading_ws/bin/python")
 
 def run_cmd(cmd):
     proc = subprocess.run(cmd, text=True, capture_output=True)

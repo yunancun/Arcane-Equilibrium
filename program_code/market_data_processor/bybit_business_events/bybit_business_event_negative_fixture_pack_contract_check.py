@@ -32,8 +32,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-PACK_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/fixtures_negative/bybit_business_event_negative_fixture_pack_latest.json")
+PACK_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/fixtures_negative/bybit_business_event_negative_fixture_pack_latest.json")
 OUT_DIR = PACK_PATH.parent
 OUT_LATEST = OUT_DIR / "bybit_business_event_negative_fixture_pack_contract_latest.json"
 

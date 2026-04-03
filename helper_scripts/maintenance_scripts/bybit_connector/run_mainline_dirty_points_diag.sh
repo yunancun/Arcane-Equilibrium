@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-ROOT="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector"
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
-ENV1="/home/ncyu/srv/settings/environment_files/trading_services.env"
-ENV2="/home/ncyu/srv/docker_projects/trading_services/.env"
+ROOT="$_SRV/program_code/exchange_connectors/bybit_connector"
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
+ENV1="$_SRV/settings/environment_files/trading_services.env"
+ENV2="$_SRV/docker_projects/trading_services/.env"
 
 echo "===== A. WARNING STRING -> SCRIPT EMITTERS ====="
 for s in \
@@ -33,9 +36,10 @@ echo
 echo "===== D. LATEST JSON QUICK SNAPSHOT ====="
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 targets = [
     "bybit_ai_request_envelope_latest.json",

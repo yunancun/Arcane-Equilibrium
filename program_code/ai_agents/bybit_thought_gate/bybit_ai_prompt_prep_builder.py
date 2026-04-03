@@ -51,7 +51,7 @@ THOUGHT_GATE_DIR = Path(
     str(get_thought_gate_runtime_dir())
 )
 TRIGGER_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/trigger_model"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/trigger_model"
 )
 
 INPUT_PATH = THOUGHT_GATE_DIR / "bybit_thought_gate_input_latest.json"

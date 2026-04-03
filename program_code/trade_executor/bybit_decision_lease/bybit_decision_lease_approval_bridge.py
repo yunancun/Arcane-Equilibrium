@@ -20,10 +20,11 @@ This stage intentionally stays shadow-only and non-executable.
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 from bybit_decision_lease_common import read_json, save_report, as_list, merged_unique
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 GOVERNED_DECISION_PATH = BASE / "bybit_ai_governed_decision_latest.json"
 LEASE_SCHEMA_PATH = BASE / "bybit_decision_lease_schema_latest.json"

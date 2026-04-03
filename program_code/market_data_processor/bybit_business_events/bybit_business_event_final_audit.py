@@ -24,31 +24,32 @@ Purpose in system:
 import json
 import time
 from pathlib import Path
+import os
 
 ROOTS = {
-    "fixture_pack": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/fixtures/bybit_business_event_fixture_pack_latest.json"),
-    "replay": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/replay/bybit_business_event_replay_latest.json"),
-    "replay_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/replay/bybit_business_event_replay_contract_latest.json"),
-    "positive_state": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_state_latest.json"),
-    "positive_phase": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_phase_latest.json"),
-    "positive_input": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_input_latest.json"),
-    "positive_decision": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_decision_latest.json"),
-    "positive_outcome": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_outcome_latest.json"),
-    "positive_consistency": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_consistency_latest.json"),
-    "negative_fixture": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/fixtures_negative/bybit_business_event_negative_fixture_pack_latest.json"),
-    "negative_replay": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/replay_negative/bybit_business_event_negative_replay_latest.json"),
-    "negative_replay_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/replay_negative/bybit_business_event_negative_replay_contract_latest.json"),
-    "block_chain_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_block_test/bybit_event_replay_block_chain_contract_latest.json"),
-    "acceptance": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_suite_latest.json"),
-    "acceptance_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_contract_latest.json"),
-    "regression_summary": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_summary_latest.json"),
-    "regression_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_contract_latest.json"),
-    "handoff": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_latest.json"),
-    "handoff_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_contract_latest.json"),
-    "runtime": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
+    "fixture_pack": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/fixtures/bybit_business_event_fixture_pack_latest.json"),
+    "replay": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/replay/bybit_business_event_replay_latest.json"),
+    "replay_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/replay/bybit_business_event_replay_contract_latest.json"),
+    "positive_state": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_state_latest.json"),
+    "positive_phase": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_phase_latest.json"),
+    "positive_input": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_input_latest.json"),
+    "positive_decision": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_decision_latest.json"),
+    "positive_outcome": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_outcome_latest.json"),
+    "positive_consistency": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_test/bybit_event_replay_transition_consistency_latest.json"),
+    "negative_fixture": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/fixtures_negative/bybit_business_event_negative_fixture_pack_latest.json"),
+    "negative_replay": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/replay_negative/bybit_business_event_negative_replay_latest.json"),
+    "negative_replay_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/replay_negative/bybit_business_event_negative_replay_contract_latest.json"),
+    "block_chain_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_block_test/bybit_event_replay_block_chain_contract_latest.json"),
+    "acceptance": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_suite_latest.json"),
+    "acceptance_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_contract_latest.json"),
+    "regression_summary": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_summary_latest.json"),
+    "regression_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_contract_latest.json"),
+    "handoff": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_latest.json"),
+    "handoff_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_contract_latest.json"),
+    "runtime": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
 }
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_business_event_final_audit_latest.json"
 

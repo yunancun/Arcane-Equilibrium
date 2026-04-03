@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 echo "===== 0) TEMP RELAX H1/H2 GATES FOR CHAPTER-CLOSURE TEST ====="
 
@@ -51,9 +54,10 @@ echo
 echo "===== 2) H1 QUICK TRUTH ====="
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name
@@ -62,7 +66,7 @@ def read(name):
     return json.loads(p.read_text(encoding="utf-8"))
 
 pol = read("bybit_thought_gate_policy_latest.json")
-trg = json.loads(Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/trigger_model/bybit_local_trigger_model_latest.json").read_text(encoding="utf-8"))
+trg = json.loads(Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/trigger_model/bybit_local_trigger_model_latest.json").read_text(encoding="utf-8"))
 dec = read("bybit_thought_gate_decision_latest.json")
 env = read("bybit_ai_request_envelope_latest.json")
 inv = read("bybit_ai_invocation_attempt_latest.json")

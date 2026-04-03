@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) BACKUP CURRENT H5 RUNTIME JSON ====="
 for f in \
@@ -22,9 +25,10 @@ echo
 echo "===== 1) AUTHORITATIVE NORMALIZE ====="
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read_json(path: Path):
     if not path.exists():
@@ -225,9 +229,10 @@ echo
 echo "===== 2) H5 FINAL RECHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 log = json.loads((base / "bybit_ai_cost_log_latest.json").read_text(encoding="utf-8"))
 audit = json.loads((base / "bybit_ai_governance_audit_latest.json").read_text(encoding="utf-8"))

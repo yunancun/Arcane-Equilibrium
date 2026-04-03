@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-RUNTIME_ROOT = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+RUNTIME_ROOT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 THOUGHT_GATE_DIR = RUNTIME_ROOT / "thought_gate"
 TRIGGER_DIR = RUNTIME_ROOT / "trigger_model"
 

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  MODULE_NOTE (中文):
+    macOS launchd 配置模板 — OpenClaw Gateway 服务（Node.js）。
+    对应 systemd 的 openclaw-gateway.service，功能完全等价。
+    AI 供应商密钥必须通过环境变量传入，禁止硬编码。
+
+  MODULE_NOTE (English):
+    macOS launchd plist template — OpenClaw Gateway service (Node.js).
+    Equivalent to the systemd openclaw-gateway.service unit.
+    AI provider keys MUST be passed via environment variables; never hardcode.
+
+  安装步骤 / Installation:
+    1. cp com.openclaw.gateway.plist ~/Library/LaunchAgents/
+    2. sed -i '' "s|__HOME__|$HOME|g" ~/Library/LaunchAgents/com.openclaw.gateway.plist
+    3. 编辑 plist 填入 AI 密钥（或通过 launchctl setenv 设置）
+       Edit plist to add AI keys (or use launchctl setenv)
+    4. mkdir -p ~/Library/Logs/openclaw
+    5. launchctl load ~/Library/LaunchAgents/com.openclaw.gateway.plist
+
+  安全提醒 / Security Warning:
+    OPENAI_API_KEY 和 ANTHROPIC_API_KEY 的值需要手动填入。
+    不要将填好密钥的 plist 提交到 Git。
+    Do NOT commit the plist with actual API keys to Git.
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- 服务标识 / Service identifier -->
+  <key>Label</key>
+  <string>com.openclaw.gateway</string>
+
+  <!-- 启动命令 / Start command
+       对应 systemd ExecStart: /usr/bin/node ...openclaw/dist/entry.js gateway (port 18789)
+       macOS 上 node 路径可能不同，需根据实际安装调整
+       Node path may differ on macOS; adjust to actual installation -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>__HOME__/.npm-global/lib/node_modules/openclaw/dist/entry.js</string>
+    <string>gateway</string>
+    <string>--port</string>
+    <string>18789</string>
+  </array>
+
+  <!-- 自动重启 / Auto-restart on crash -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- 重启间隔 / Restart throttle -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- 停止超时 / Stop timeout -->
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+
+  <!-- 环境变量 / Environment variables
+       安全提醒：密钥值需手动填入，或通过外部工具注入
+       Security: key values must be manually filled or injected externally -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>__HOME__</string>
+
+    <key>TMPDIR</key>
+    <string>/tmp</string>
+
+    <key>PATH</key>
+    <string>__HOME__/.local/bin:__HOME__/.npm-global/bin:/usr/local/bin:/usr/bin:/bin</string>
+
+    <!-- AI 供应商密钥 — 必须手动填入 / Must be filled manually -->
+    <key>OPENAI_API_KEY</key>
+    <string>__FILL_YOUR_OPENAI_KEY__</string>
+
+    <key>ANTHROPIC_API_KEY</key>
+    <string>__FILL_YOUR_ANTHROPIC_KEY__</string>
+
+    <!-- Gateway 服务元数据 / Service metadata -->
+    <key>OPENCLAW_GATEWAY_PORT</key>
+    <string>18789</string>
+
+    <key>OPENCLAW_SERVICE_MARKER</key>
+    <string>openclaw</string>
+
+    <key>OPENCLAW_SERVICE_KIND</key>
+    <string>gateway</string>
+
+    <key>OPENCLAW_SERVICE_VERSION</key>
+    <string>2026.4.1</string>
+  </dict>
+
+  <!-- 日志文件 / Log files -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/openclaw/gateway-stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/openclaw/gateway-stderr.log</string>
+
+  <!-- 登录时自动运行 / Run at load -->
+  <key>RunAtLoad</key>
+  <true/>
+
+</dict>
+</plist>

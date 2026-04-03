@@ -36,8 +36,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-CHECK_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_state_graph_consistency_latest.json")
+CHECK_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_state_graph_consistency_latest.json")
 
 OUT_DIR = CHECK_PATH.parent
 OUT_DIR.mkdir(parents=True, exist_ok=True)

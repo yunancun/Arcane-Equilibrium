@@ -33,9 +33,10 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-LISTENER_STATUS_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws_persistent/bybit_private_ws_listener_status_latest.json")
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+LISTENER_STATUS_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/ws_persistent/bybit_private_ws_listener_status_latest.json")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 HEALTHY_EVENT_AGE_MS = 5 * 60 * 1000

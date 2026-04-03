@@ -7,14 +7,16 @@ import threading
 import argparse
 from pathlib import Path
 
+import os
 import websocket
 
 WS_URL = "wss://stream.bybit.com/v5/private"
 
-API_KEY_PATH = Path("/home/ncyu/srv/settings/secret_files/bybit/read_only/api_key")
-API_SECRET_PATH = Path("/home/ncyu/srv/settings/secret_files/bybit/read_only/api_secret")
+_SRV = os.environ.get("OPENCLAW_SRV_ROOT", ".")
+API_KEY_PATH = Path(_SRV + "/settings/secret_files/bybit/read_only/api_key")
+API_SECRET_PATH = Path(_SRV + "/settings/secret_files/bybit/read_only/api_secret")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws")
+OUT_DIR = Path(_SRV + "/docker_projects/trading_services/connector_logs/bybit/ws")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_TOPICS = ["wallet", "position", "order", "execution"]

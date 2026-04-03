@@ -4,12 +4,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import os
 
-OBSERVER_CYCLE_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_full_readonly_observer_cycle.py")
-DECISION_PACKET_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
-VERDICT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
+OBSERVER_CYCLE_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_full_readonly_observer_cycle.py")
+DECISION_PACKET_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
+VERDICT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def run_cmd(cmd):

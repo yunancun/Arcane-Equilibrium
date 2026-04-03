@@ -3,9 +3,10 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+import os
 
-BUILD_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_build_decision_packet.py")
-LOAD_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_decision_packet_to_postgres.py")
+BUILD_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_build_decision_packet.py")
+LOAD_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_decision_packet_to_postgres.py")
 
 def run_cmd(cmd):
     proc = subprocess.run(cmd, text=True, capture_output=True)

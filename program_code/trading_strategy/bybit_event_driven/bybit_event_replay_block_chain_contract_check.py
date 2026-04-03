@@ -32,8 +32,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/replay_block_test")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/replay_block_test")
 OUT_LATEST = BASE / "bybit_event_replay_block_chain_contract_latest.json"
 
 PATHS = {

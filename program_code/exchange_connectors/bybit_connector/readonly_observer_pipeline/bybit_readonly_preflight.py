@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import json
 from pathlib import Path
+import os
 
-CONFIG_PATH = Path("/home/ncyu/srv/settings/service_configs/bybit_connector_config.json")
+CONFIG_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/settings/service_configs/bybit_connector_config.json")
 
 def read_text_safe(path: Path) -> str:
     try:

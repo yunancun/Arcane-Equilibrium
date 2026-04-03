@@ -57,7 +57,7 @@ from typing import Any
 
 # Observer output directory (standard location)
 # Observer 输出目录（标准位置）
-TRADING_SERVICES_DIR = Path("/home/ncyu/srv/docker_projects/trading_services")
+TRADING_SERVICES_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services")
 
 DEFAULT_SYSTEM_SNAPSHOT_PATH = TRADING_SERVICES_DIR / "connector_logs/bybit/bybit_system_snapshot_latest.json"
 DEFAULT_WS_FACTS_PATH = TRADING_SERVICES_DIR / "runtime/bybit/bybit_ws_runtime_facts_latest.json"

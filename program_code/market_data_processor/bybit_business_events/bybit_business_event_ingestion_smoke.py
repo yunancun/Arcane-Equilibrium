@@ -25,12 +25,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import os
 
-SCRIPT_DIR = Path("/home/ncyu/srv/program_code/market_data_processor/bybit_business_events")
+SCRIPT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/market_data_processor/bybit_business_events")
 FIXTURE_SCRIPT = SCRIPT_DIR / "bybit_business_event_fixture_generator.py"
 NORMALIZER_SCRIPT = SCRIPT_DIR / "bybit_business_event_normalizer.py"
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUT_LATEST = OUT_DIR / "bybit_business_events_latest.json"

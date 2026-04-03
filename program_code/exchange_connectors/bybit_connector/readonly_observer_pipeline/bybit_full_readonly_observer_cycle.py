@@ -32,22 +32,22 @@ import time
 from pathlib import Path
 
 PRIVATE_REST_STEPS = [
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_account_check.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_positions_check.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_order_history_check.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_execution_history_check.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_account_check.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_positions_check.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_order_history_check.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_execution_history_check.py",
 ]
 
-GUARD_SCRIPT = "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_rest_preflight_guard.py"
+GUARD_SCRIPT = os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_rest_preflight_guard.py"
 
 POST_GUARD_STEPS = [
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_snapshot_to_postgres.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_normalize_latest_snapshot_to_postgres.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_ws_smoke_to_postgres.py",
-    "/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_observer_pipeline.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_snapshot_to_postgres.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_normalize_latest_snapshot_to_postgres.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_ws_smoke_to_postgres.py",
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_observer_pipeline.py",
 ]
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_PATH_LATEST = OUT_DIR / "bybit_observer_cycle_latest.json"
 

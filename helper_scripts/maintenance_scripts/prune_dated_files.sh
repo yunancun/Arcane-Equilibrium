@@ -3,7 +3,8 @@
 # 清理超过 N 天的 dated JSON 文件
 # Usage: bash prune_dated_files.sh [days=7]
 DAYS=${1:-7}
-BASE="/home/ncyu/BybitOpenClaw/srv"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+BASE="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 DIRS=(
     "docker_projects/trading_services/runtime/bybit/thought_gate"
     "docker_projects/trading_services/runtime/bybit/readonly_observer"

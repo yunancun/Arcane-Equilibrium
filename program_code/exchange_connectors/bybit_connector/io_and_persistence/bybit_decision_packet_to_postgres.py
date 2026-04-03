@@ -23,8 +23,9 @@ Maintenance notes:
 import json
 import subprocess
 from pathlib import Path
+import os
 
-PACKET_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
+PACKET_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
 POSTGRES_CONTAINER = "trading_postgres"
 SQL_SCHEMA = "trading_raw"
 SQL_TABLE = "decision_packets"

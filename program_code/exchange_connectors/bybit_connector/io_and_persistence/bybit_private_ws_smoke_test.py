@@ -5,15 +5,16 @@ import hmac
 import hashlib
 import threading
 from pathlib import Path
+import os
 
 import websocket
 
 WS_URL = "wss://stream.bybit.com/v5/private"
 
-API_KEY_PATH = Path("/home/ncyu/srv/settings/secret_files/bybit/read_only/api_key")
-API_SECRET_PATH = Path("/home/ncyu/srv/settings/secret_files/bybit/read_only/api_secret")
+API_KEY_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/settings/secret_files/bybit/read_only/api_key")
+API_SECRET_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/settings/secret_files/bybit/read_only/api_secret")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/ws")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 RUN_SECONDS = 25

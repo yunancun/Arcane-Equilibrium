@@ -2,11 +2,12 @@
 # cron_observer_cycle.sh — Run full observer cycle + auto-bridge to runtime snapshot
 # 运行完整观察者循环 + 自动桥接到运行时快照
 #
-# Add to crontab: */5 * * * * bash /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron_observer_cycle.sh >> /home/ncyu/BybitOpenClaw/srv/log_files/observer_cron.log 2>&1
+# Add to crontab: */5 * * * * bash $OPENCLAW_SRV_ROOT/helper_scripts/cron_observer_cycle.sh >> $OPENCLAW_SRV_ROOT/log_files/observer_cron.log 2>&1
 #
 set -euo pipefail
 
-REPO="/home/ncyu/BybitOpenClaw/srv"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+REPO="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 VENV="$REPO/program_code/exchange_connectors/bybit_connector/control_api_v1/.venv/bin/python3"
 OBSERVER="$REPO/program_code/exchange_connectors/bybit_connector/readonly_observer_pipeline/bybit_full_readonly_observer_cycle.py"
 BRIDGE="$REPO/program_code/exchange_connectors/bybit_connector/control_api_v1/app/auto_bridge_observer_to_runtime_snapshot.py"

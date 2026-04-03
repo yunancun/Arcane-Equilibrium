@@ -3,10 +3,11 @@ import hashlib
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 PREFLIGHT_PATH = BASE / "bybit_decision_lease_preflight_latest.json"
 SCHEMA_PATH = BASE / "bybit_decision_lease_schema_latest.json"
 GOV_PATH = BASE / "bybit_ai_governed_decision_latest.json"

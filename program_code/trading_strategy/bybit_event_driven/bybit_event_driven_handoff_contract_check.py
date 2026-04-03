@@ -26,10 +26,11 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-HANDOFF_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/bybit_event_driven_handoff_latest.json")
+HANDOFF_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/bybit_event_driven_handoff_latest.json")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_event_driven_handoff_contract_latest.json"
 OUT_DATED_PREFIX = OUT_DIR / "bybit_event_driven_handoff_contract_"

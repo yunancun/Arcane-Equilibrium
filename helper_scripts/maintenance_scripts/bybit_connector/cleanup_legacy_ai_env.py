@@ -18,11 +18,13 @@ MODULE_NOTE / 模块说明:
   3) Preserve file order for remaining lines.
 """
 
+import os
 from pathlib import Path
 
+_SRV = os.environ.get("OPENCLAW_SRV_ROOT", ".")
 TARGET_FILES = [
-    Path("/home/ncyu/srv/settings/environment_files/trading_services.env"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/.env"),
+    Path(_SRV + "/settings/environment_files/trading_services.env"),
+    Path(_SRV + "/docker_projects/trading_services/.env"),
 ]
 
 LEGACY_KEYS = {

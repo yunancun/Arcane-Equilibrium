@@ -2,13 +2,28 @@
 # 直接依賴清單（僅列出代碼中實際 import 的第三方套件，不含 stdlib 和傳遞依賴）
 # Transitive deps (e.g. starlette via fastapi) are NOT listed here.
 # 傳遞依賴（如 starlette 由 fastapi 帶入）不在此列。
+#
+# Platform compatibility / 平台兼容性：
+#   All packages below have wheels for Linux x86_64 and macOS ARM (Apple Silicon).
+#   以下所有套件均有 Linux x86_64 和 macOS ARM (Apple Silicon) 預編譯 wheel。
+#   psutil / psycopg2-binary have C extensions but provide pre-built wheels for both platforms.
+#   psutil / psycopg2-binary 含 C 擴展但均提供雙平台預編譯 wheel。
+#
+# External tools (not pip-managed) / 外部工具（不經 pip 管理）：
+#   - Ollama: Local AI inference (brew install ollama / apt install ollama)
+#   - PostgreSQL: Grafana metrics + demo sync (brew install postgresql / apt install postgresql)
+#   - curl + jq: Used by cron_daily_report.sh (pre-installed on most systems)
+#   All external tools are optional — code has fallback guards for missing services.
+#   所有外部工具均可選 — 代碼對缺失服務有降級守衛。
 
-# --- Core / 核心 ---
+# --- Core (required) / 核心（必須）---
 fastapi>=0.115.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.11.0
 
-# --- HTTP client / HTTP 客戶端 ---
+# --- HTTP client (optional, Layer 2 web search) / HTTP 客戶端（可選，L2 網頁搜索）---
+# Imported inside try/except — missing httpx degrades L2 search, not core function.
+# 在 try/except 內 import — 缺少 httpx 僅降級 L2 搜索，不影響核心功能。
 httpx>=0.28.0
 
 # --- Rate limiting / 速率限制 ---
@@ -17,10 +32,19 @@ slowapi>=0.1.9
 # --- WebSocket client (Bybit WS listener) / WebSocket 客戶端（Bybit WS 監聽）---
 websocket-client>=1.8.0
 
+# --- PostgreSQL client (optional, Grafana + demo sync) / PostgreSQL 客戶端（可選，Grafana + Demo 同步）---
+# Imported inside try/except — missing psycopg2 disables PG writes silently.
+# 在 try/except 內 import — 缺少 psycopg2 靜默禁用 PG 寫入。
+psycopg2-binary>=2.9.0
+
 # --- System monitoring (optional, H0 health worker) / 系統監控（可選，H0 健康採樣）---
+# Imported inside try/except — missing psutil skips CPU/memory probes.
+# 在 try/except 內 import — 缺少 psutil 跳過 CPU/記憶體探測。
 psutil>=5.9.0
 
 # --- HTML scraping (optional, Layer 2 web search fallback) / HTML 解析（可選，L2 網頁搜索降級）---
+# Imported inside try/except — missing bs4 disables web content parsing.
+# 在 try/except 內 import — 缺少 bs4 禁用網頁內容解析。
 beautifulsoup4>=4.12.0
 
 # --- Testing / 測試 ---

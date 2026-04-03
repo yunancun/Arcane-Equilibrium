@@ -16,9 +16,10 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any
 
-RUNTIME_ROOT = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+RUNTIME_ROOT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 THOUGHT_GATE_DIR = RUNTIME_ROOT / "thought_gate"
 
 REPORT_PATH = THOUGHT_GATE_DIR / "bybit_ai_route_selector_latest.json"

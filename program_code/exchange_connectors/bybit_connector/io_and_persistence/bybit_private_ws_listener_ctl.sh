@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="/home/ncyu/srv/venvs/trading_ws/bin/python"
-SCRIPT_PATH="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_ws_listener.py"
-LOG_DIR="/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws_persistent"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../../../.." && pwd)}"
+PYTHON_BIN="$_SRV/venvs/trading_ws/bin/python"
+SCRIPT_PATH="$_SRV/program_code/exchange_connectors/bybit_connector/scripts/bybit_private_ws_listener.py"
+LOG_DIR="$_SRV/docker_projects/trading_services/connector_logs/bybit/ws_persistent"
 PID_FILE="$LOG_DIR/bybit_private_ws_listener.pid"
 OUT_FILE="$LOG_DIR/bybit_private_ws_listener.out"
 STATUS_FILE="$LOG_DIR/bybit_private_ws_listener_status_latest.json"

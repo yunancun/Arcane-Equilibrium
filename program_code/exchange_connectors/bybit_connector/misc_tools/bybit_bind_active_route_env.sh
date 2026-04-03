@@ -21,10 +21,12 @@ set -euo pipefail
 #      this script only resolves the active route snapshot.
 #      父 shell 的覆盖优先级仍由上游负责；本脚本只负责把当前路由决议标准化。
 
-BASE="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector"
-ROUTE_JSON="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_route_selector_latest.json"
-PROJECT_ENV="/home/ncyu/srv/settings/environment_files/trading_services.env"
-RUNTIME_ENV="/home/ncyu/srv/docker_projects/trading_services/.env"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../../../.." && pwd)}"
+BASE="$_SRV/program_code/exchange_connectors/bybit_connector"
+ROUTE_JSON="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_route_selector_latest.json"
+PROJECT_ENV="$_SRV/settings/environment_files/trading_services.env"
+RUNTIME_ENV="$_SRV/docker_projects/trading_services/.env"
 
 emit_export() {
   local name="$1"
@@ -37,14 +39,16 @@ if [ ! -f "$ROUTE_JSON" ]; then
   exit 1
 fi
 
+export _SRV  # Make available to embedded Python / 传递给内嵌 Python
 python3 - <<'PY'
-import json
+import json, os
 from pathlib import Path
 
-route_json = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_route_selector_latest.json")
+_srv = Path(os.environ.get("_SRV", "."))
+route_json = _srv / "docker_projects/trading_services/runtime/bybit/thought_gate/bybit_ai_route_selector_latest.json"
 env_files = [
-    Path("/home/ncyu/srv/settings/environment_files/trading_services.env"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/.env"),
+    _srv / "settings/environment_files/trading_services.env",
+    _srv / "docker_projects/trading_services/.env",
 ]
 
 def load_env_files(paths):

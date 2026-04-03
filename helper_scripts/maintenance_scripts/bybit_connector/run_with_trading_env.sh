@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector"
-PROJECT_ENV="/home/ncyu/srv/settings/environment_files/trading_services.env"
-RUNTIME_ENV="/home/ncyu/srv/docker_projects/trading_services/.env"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+BASE="$_SRV/program_code/exchange_connectors/bybit_connector"
+PROJECT_ENV="$_SRV/settings/environment_files/trading_services.env"
+RUNTIME_ENV="$_SRV/docker_projects/trading_services/.env"
 
-AI_SECRET_DIR="/home/ncyu/srv/settings/secret_files/ai"
+AI_SECRET_DIR="$_SRV/settings/secret_files/ai"
 OPENAI_SECRET_FILE="${AI_SECRET_DIR}/openai_api_key"
 ANTHROPIC_SECRET_FILE="${AI_SECRET_DIR}/anthropic_api_key"
 
-VENV_DIR="/home/ncyu/srv/venvs/openclaw_bybit_ai"
+VENV_DIR="$_SRV/venvs/openclaw_bybit_ai"
 
 # 优先使用稳定的专用 venv
 if [ -x "${VENV_DIR}/bin/python" ]; then

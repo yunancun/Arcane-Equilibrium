@@ -3,10 +3,11 @@
 
 import time
 from pathlib import Path
+import os
 
 from bybit_h_stage_common import mkcheck, read_json_if_exists, write_report
 
-REPORT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_decision_lease_final_audit_latest.json")
+REPORT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_decision_lease_final_audit_latest.json")
 PREFIX = "bybit_decision_lease_contract"
 
 

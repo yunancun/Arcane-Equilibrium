@@ -21,7 +21,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENV="$PROJECT_DIR/.venv/bin"
-RUNTIME_DIR="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}"
+RUNTIME_DIR="$_SRV/docker_projects/trading_services/runtime/bybit"
 SNAPSHOT_PATH="$RUNTIME_DIR/runtime_snapshot_generated.json"
 
 echo "═══════════════════════════════════════════════════════════════"

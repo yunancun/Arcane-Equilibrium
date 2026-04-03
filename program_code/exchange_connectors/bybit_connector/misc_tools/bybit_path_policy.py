@@ -12,11 +12,14 @@ Design goal:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
-COMPAT_ROOT = Path("/home/ncyu/srv")
+# Resolve project root: env var OPENCLAW_SRV_ROOT > __file__ relative > legacy compat path
+# 项目根目录解析：优先环境变量 > 脚本相对路径推导 > 历史兼容路径
+_env_root = os.environ.get("OPENCLAW_SRV_ROOT")
+REPO_ROOT = Path(_env_root) if _env_root else Path(__file__).resolve().parents[4]
+COMPAT_ROOT = REPO_ROOT  # No longer hardcoded / 不再硬编码 /home/ncyu/srv
 
 DOCKER_PROJECTS_ROOT = REPO_ROOT / "docker_projects"
 PROGRAM_CODE_ROOT = REPO_ROOT / "program_code"

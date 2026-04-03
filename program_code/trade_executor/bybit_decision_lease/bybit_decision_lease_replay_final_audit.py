@@ -2,10 +2,11 @@
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any, Dict, List
 from bybit_decision_lease_common import read_json_required as read_json, save_report_stem, uniq
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 POLICY_PATH = BASE / "bybit_decision_lease_replay_policy_latest.json"
 GUARD_PATH = BASE / "bybit_decision_lease_replay_guard_latest.json"
 STEM = "bybit_decision_lease_replay_final_audit"

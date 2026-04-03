@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 echo "===== 0) BACKUP ====="
 targets=(
@@ -217,7 +220,10 @@ echo
 echo "===== 6) REBUILD MAINLINE H1 -> H5 ====="
 ./scripts/run_with_trading_env.sh bash -lc '
 set -euo pipefail
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 ./scripts/run_h1_thought_gate_full_closure.sh
 ./scripts/run_h2_query_budget_full_closure.sh
@@ -229,10 +235,10 @@ cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
 echo
 echo "===== 7) POST-REBUILD MAINLINE CHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
-import json
+import json, os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def load(name):
     return json.loads((base / name).read_text(encoding="utf-8"))

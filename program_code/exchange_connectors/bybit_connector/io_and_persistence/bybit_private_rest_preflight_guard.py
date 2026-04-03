@@ -32,13 +32,14 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-ACCOUNT_PATH = Path("/home/ncyu/srv/log_files/connector_logs/bybit_private_account_check_latest.json")
-POSITIONS_PATH = Path("/home/ncyu/srv/log_files/connector_logs/bybit_private_positions_check_latest.json")
-ORDER_HISTORY_PATH = Path("/home/ncyu/srv/log_files/connector_logs/bybit_private_order_history_check_latest.json")
-EXECUTION_HISTORY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json")
+ACCOUNT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/log_files/connector_logs/bybit_private_account_check_latest.json")
+POSITIONS_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/log_files/connector_logs/bybit_private_positions_check_latest.json")
+ORDER_HISTORY_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/log_files/connector_logs/bybit_private_order_history_check_latest.json")
+EXECUTION_HISTORY_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def load_json(path: Path):

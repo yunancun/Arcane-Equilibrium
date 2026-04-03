@@ -56,7 +56,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 LOCAL_JUDGMENT_DIR = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment"
 )
 THOUGHT_GATE_DIR = Path(
     str(get_thought_gate_runtime_dir())
@@ -65,16 +65,16 @@ THOUGHT_GATE_DIR = Path(
 HANDOFF_PATH = LOCAL_JUDGMENT_DIR / "bybit_local_trade_eligibility_handoff_latest.json"
 H0_FINAL_AUDIT_PATH = LOCAL_JUDGMENT_DIR / "bybit_local_judgment_final_audit_latest.json"
 RUNTIME_STATE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"
 )
 READONLY_AUDIT_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"
 )
 LATEST_CONSISTENCY_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"
 )
 DECISION_PACKET_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json"
 )
 COST_MODEL_PATH = LOCAL_JUDGMENT_DIR / "bybit_local_cost_model_latest.json"
 PUBLIC_MICROSTRUCTURE_PATH = LOCAL_JUDGMENT_DIR / "bybit_public_microstructure_latest.json"

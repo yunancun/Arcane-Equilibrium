@@ -19,9 +19,10 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-INPUT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_events_latest.json")
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events")
+INPUT_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_events_latest.json")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 LATEST_OUT = OUT_DIR / "bybit_business_event_contract_latest.json"

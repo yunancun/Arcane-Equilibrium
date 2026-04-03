@@ -21,8 +21,9 @@ Purpose in system:
 import json
 import time
 from pathlib import Path
+import os
 
-CHECK_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_suite_latest.json")
+CHECK_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_acceptance_suite_latest.json")
 
 OUT_DIR = CHECK_PATH.parent
 OUT_LATEST = OUT_DIR / "bybit_business_event_acceptance_contract_latest.json"

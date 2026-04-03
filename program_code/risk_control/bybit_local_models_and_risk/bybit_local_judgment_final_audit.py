@@ -30,10 +30,11 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import os
 from typing import Any
 
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment")
 MARKET_FRICTION_PATH = BASE / "bybit_local_market_friction_latest.json"
 MARKET_FRICTION_CONTRACT_PATH = BASE / "bybit_local_market_friction_contract_latest.json"
 RISK_ENVELOPE_PATH = BASE / "bybit_local_risk_envelope_latest.json"
@@ -44,13 +45,13 @@ HANDOFF_PATH = BASE / "bybit_local_trade_eligibility_handoff_latest.json"
 HANDOFF_CONTRACT_PATH = BASE / "bybit_local_trade_eligibility_handoff_contract_latest.json"
 
 RUNTIME_STATE_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"
 )
 READONLY_AUDIT_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"
 )
 LATEST_CONSISTENCY_PATH = Path(
-    "/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"
+    os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"
 )
 
 OUTPUT_DIR = BASE

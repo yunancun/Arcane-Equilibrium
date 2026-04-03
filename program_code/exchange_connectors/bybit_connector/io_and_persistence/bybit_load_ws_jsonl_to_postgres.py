@@ -2,8 +2,9 @@
 import json
 import subprocess
 from pathlib import Path
+import os
 
-WS_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws")
+WS_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/ws")
 LATEST_SUMMARY = WS_DIR / "bybit_private_ws_smoke_latest.json"
 POSTGRES_CONTAINER = "trading_postgres"
 SQL_SCHEMA = "trading_raw"

@@ -36,8 +36,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/demo_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/demo_gate")
 
 CONTRACT_PATH = BASE / "bybit_demo_gate_contract_latest.json"
 READINESS_PATH = BASE / "bybit_demo_gate_readiness_latest.json"
@@ -47,7 +48,7 @@ PROJECTION_PATH = BASE / "bybit_paper_position_balance_projection_skeleton_lates
 RISK_PATH = BASE / "bybit_pretrade_risk_integration_skeleton_latest.json"
 SUMMARY_PATH = BASE / "bybit_demo_gate_summary_latest.json"
 HANDOFF_PATH = BASE / "bybit_demo_gate_handoff_latest.json"
-RUNTIME_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
+RUNTIME_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
 
 OUT_DIR = BASE
 OUT_DIR.mkdir(parents=True, exist_ok=True)

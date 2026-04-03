@@ -2,8 +2,9 @@
 import json
 import subprocess
 from pathlib import Path
+import os
 
-PREFLIGHT_SCRIPT = Path("/home/ncyu/srv/program_code/exchange_connectors/bybit_connector/scripts/bybit_readonly_preflight.py")
+PREFLIGHT_SCRIPT = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/program_code/exchange_connectors/bybit_connector/scripts/bybit_readonly_preflight.py")
 
 def run_preflight() -> dict:
     result = subprocess.run(

@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import os
 from typing import Any, Dict, List, Optional
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 SOFT_WARN_FLAGS = {
     "recent_trade_last_price_missing",

@@ -33,25 +33,26 @@ Not this:
 import json
 import time
 from pathlib import Path
+import os
 
 PATHS = {
-    "runtime": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
-    "readonly_summary": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_final_summary_latest.json"),
-    "readonly_audit": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"),
-    "readonly_consistency": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"),
+    "runtime": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
+    "readonly_summary": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_final_summary_latest.json"),
+    "readonly_audit": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json"),
+    "readonly_consistency": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_latest_consistency_latest.json"),
 
-    "g_summary": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_summary_latest.json"),
-    "g_handoff": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_latest.json"),
-    "g_final_audit": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_final_audit_latest.json"),
+    "g_summary": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_regression_summary_latest.json"),
+    "g_handoff": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_validation_handoff_latest.json"),
+    "g_final_audit": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events/validation/bybit_business_event_final_audit_latest.json"),
 
-    "j_consistency": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_chapter_consistency_latest.json"),
-    "j_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_chapter_consistency_contract_latest.json"),
+    "j_consistency": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_chapter_consistency_latest.json"),
+    "j_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_chapter_consistency_contract_latest.json"),
 
-    "k_consistency": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/demo_gate/bybit_demo_gate_chapter_consistency_latest.json"),
-    "k_contract": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/demo_gate/bybit_demo_gate_chapter_consistency_contract_latest.json"),
+    "k_consistency": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/demo_gate/bybit_demo_gate_chapter_consistency_latest.json"),
+    "k_contract": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/demo_gate/bybit_demo_gate_chapter_consistency_contract_latest.json"),
 }
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/regression")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/regression")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_revision2_master_regression_latest.json"
 

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
-SNAP="/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
+SNAP="$_SRV/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"
 
 echo "===== 0) BACKUP ====="
 for f in \
@@ -152,7 +155,7 @@ python3 -m py_compile \
 echo
 echo "===== 3) FORCE REFRESH execution_history + observer truth ====="
 ./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 echo "--- execution_history_direct_run ---"
 python3 scripts/bybit_private_execution_history_check.py || python3 scripts/bybit_private_execution_history_check.py.orig
@@ -173,10 +176,11 @@ echo
 echo "===== 5) FINAL CLEAN STATUS AFTER H1/H5 TAIL FIX ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
-snap = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
+snap = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
 
 def read(path):
     p = Path(path)

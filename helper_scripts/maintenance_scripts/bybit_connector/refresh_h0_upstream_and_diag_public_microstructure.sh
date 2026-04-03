@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
-LJ_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment"
-TG_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+LJ_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/local_judgment"
+TG_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) DISCOVER H0 / LOCAL-JUDGMENT RUN SCRIPTS ====="
 find scripts -maxdepth 1 -type f \
@@ -85,13 +88,14 @@ echo
 echo "===== 2) DIAG PUBLIC_MICROSTRUCTURE + H0 FINAL AUDIT ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
 files = {
-    "public_microstructure": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_public_microstructure_latest.json"),
-    "local_judgment_final_audit": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_local_judgment_final_audit_latest.json"),
-    "trade_eligibility": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_local_trade_eligibility_latest.json"),
-    "thought_gate_input": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_thought_gate_input_latest.json"),
+    "public_microstructure": Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_public_microstructure_latest.json"),
+    "local_judgment_final_audit": Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_local_judgment_final_audit_latest.json"),
+    "trade_eligibility": Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment/bybit_local_trade_eligibility_latest.json"),
+    "thought_gate_input": Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_thought_gate_input_latest.json"),
 }
 
 def read(p):
@@ -169,10 +173,11 @@ echo
 echo "===== 4) FINAL STATUS ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-tg = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
-lj = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment")
+tg = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
+lj = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment")
 
 def read(p):
     p = Path(p)

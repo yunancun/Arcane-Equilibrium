@@ -13,8 +13,9 @@ Formal placement:
 import json
 import time
 from pathlib import Path
+import os
 
-CHECK_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/regression/bybit_revision2_master_regression_latest.json")
+CHECK_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/regression/bybit_revision2_master_regression_latest.json")
 OUT_DIR = CHECK_PATH.parent
 OUT_LATEST = OUT_DIR / "bybit_revision2_master_regression_contract_latest.json"
 

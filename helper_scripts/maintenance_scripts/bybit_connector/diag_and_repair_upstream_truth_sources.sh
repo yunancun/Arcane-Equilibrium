@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
-CANON_EXEC="/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json"
-SNAP="/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"
-TG_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+CANON_EXEC="$_SRV/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json"
+SNAP="$_SRV/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"
+TG_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) RUN execution_history DIRECTLY ====="
 set +e
@@ -21,12 +24,13 @@ echo
 echo "===== 1) FIND ALL execution_history CANDIDATE FILES ====="
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
 roots = [
-    Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit"),
-    Path("/home/ncyu/srv/log_files/connector_logs"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit"),
+    Path(os.environ.get("_SRV", ".") + "/log_files/connector_logs"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit"),
 ]
 
 patterns = [
@@ -78,14 +82,15 @@ echo
 echo "===== 2) REPAIR CANONICAL execution_history LATEST IF A FRESHER CANDIDATE EXISTS ====="
 python3 - <<'PY'
 import json
+import os
 import shutil
 from pathlib import Path
 
-canon = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json")
+canon = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_private_execution_history_latest.json")
 roots = [
-    Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit"),
-    Path("/home/ncyu/srv/log_files/connector_logs"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit"),
+    Path(os.environ.get("_SRV", ".") + "/log_files/connector_logs"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit"),
 ]
 
 patterns = [
@@ -150,7 +155,7 @@ PY
 echo
 echo "===== 3) REBUILD SNAPSHOT + H1 INPUT ONLY ====="
 ./scripts/run_with_trading_env.sh bash -lc '
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 python3 scripts/bybit_snapshot_to_postgres.py
 python3 scripts/bybit_full_readonly_observer_cycle.py
 python3 scripts/bybit_thought_gate_input_builder.py
@@ -161,13 +166,14 @@ echo
 echo "===== 4) SEARCH REAL LAST-TRADE FIELDS IN UPSTREAM JSON ====="
 python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
 files = [
-    Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json"),
-    Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_thought_gate_input_latest.json"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json"),
+    Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate/bybit_thought_gate_input_latest.json"),
 ]
 
 needles = [
@@ -217,10 +223,11 @@ echo
 echo "===== 5) FINAL DIAG ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-snap = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+snap = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(p):
     p = Path(p)

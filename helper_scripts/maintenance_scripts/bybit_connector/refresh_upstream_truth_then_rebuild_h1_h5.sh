@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) PRE-REFRESH H1/H2/H4/H5 SNAPSHOT ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name
@@ -45,7 +49,10 @@ echo
 echo "===== 1) REFRESH UPSTREAM READONLY OBSERVER TRUTH ====="
 ./scripts/run_with_trading_env.sh bash -lc '
 set -euo pipefail
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 python3 scripts/bybit_full_readonly_observer_cycle.py
 '
 
@@ -53,7 +60,10 @@ echo
 echo "===== 1.5) REBUILD H0 FRONT CHAIN ====="
 ./scripts/run_with_trading_env.sh bash -lc '
 set -euo pipefail
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 python3 scripts/bybit_public_microstructure_builder.py
 python3 scripts/bybit_public_microstructure_contract_check.py
@@ -73,7 +83,10 @@ echo
 echo "===== 2) REBUILD H1 FULL CLOSURE ====="
 ./scripts/run_with_trading_env.sh bash -lc '
 set -euo pipefail
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
+cd $_SRV/program_code/exchange_connectors/bybit_connector
 
 python3 scripts/bybit_thought_gate_input_builder.py
 python3 scripts/bybit_thought_gate_policy_builder.py
@@ -103,9 +116,10 @@ echo
 echo "===== 6) FINAL CLEAN STATUS AFTER UPSTREAM REFRESH ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name

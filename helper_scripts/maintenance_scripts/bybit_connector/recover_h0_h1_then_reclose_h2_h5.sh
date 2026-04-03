@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-TG_BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+TG_BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 run_py() {
   ./scripts/run_with_trading_env.sh python3 "$1"
@@ -116,10 +119,11 @@ echo
 echo "===== 4) CHECK FRESH PUBLIC MICROSTRUCTURE / H0 ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-lj = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/local_judgment")
-tg = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+lj = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/local_judgment")
+tg = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(p):
     if not p.exists():
@@ -145,10 +149,10 @@ run_sh "./scripts/run_h1_thought_gate_full_closure.sh"
 echo
 echo "===== 6) H1 TRUTH CHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
-import json, sys
+import json, os, sys
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name
@@ -197,9 +201,10 @@ echo
 echo "===== 8) FINAL STATUS ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
 import json
+import os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def read(name):
     p = base / name

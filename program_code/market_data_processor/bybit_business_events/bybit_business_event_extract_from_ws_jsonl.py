@@ -21,9 +21,10 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-WS_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/ws")
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events")
+WS_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/connector_logs/bybit/ws")
+OUT_DIR = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/business_events")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 BUSINESS_TOPICS = {"wallet", "position", "order", "execution"}

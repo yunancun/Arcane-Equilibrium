@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 # 这些名字是给 I10 “喂更干净的 canonical source”的稳定别名
 CANONICAL: Dict[str, str] = {

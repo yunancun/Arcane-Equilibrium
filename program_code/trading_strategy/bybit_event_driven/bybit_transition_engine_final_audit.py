@@ -36,8 +36,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-BASE = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine")
+BASE = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine")
 
 PATHS = {
     "matrix": BASE / "bybit_transition_engine_replay_matrix_latest.json",
@@ -50,7 +51,7 @@ PATHS = {
     "summary_contract": BASE / "bybit_transition_engine_summary_contract_latest.json",
     "handoff": BASE / "bybit_transition_engine_handoff_latest.json",
     "handoff_contract": BASE / "bybit_transition_engine_handoff_contract_latest.json",
-    "main_runtime": Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
+    "main_runtime": Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json"),
 }
 
 OUT_LATEST = BASE / "bybit_transition_engine_final_audit_latest.json"

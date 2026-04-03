@@ -29,19 +29,21 @@ Maintenance notes:
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
-SNAPSHOT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
-PACKET_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
-VERDICT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
-RUNTIME_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
-SUMMARY_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_final_summary_latest.json")
-HANDOFF_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_next_phase_handoff_latest.json")
-AUDIT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json")
-BUSINESS_EVENT_STATE_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_event_state_latest.json")
+_SRV = os.environ.get("OPENCLAW_SRV_ROOT", ".")
+SNAPSHOT_PATH = Path(_SRV + "/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
+PACKET_PATH = Path(_SRV + "/docker_projects/trading_services/decision_packets/bybit/bybit_decision_packet_latest.json")
+VERDICT_PATH = Path(_SRV + "/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
+RUNTIME_PATH = Path(_SRV + "/docker_projects/trading_services/runtime/bybit/bybit_runtime_state_latest.json")
+SUMMARY_PATH = Path(_SRV + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_final_summary_latest.json")
+HANDOFF_PATH = Path(_SRV + "/docker_projects/trading_services/runtime/bybit/bybit_next_phase_handoff_latest.json")
+AUDIT_PATH = Path(_SRV + "/docker_projects/trading_services/runtime/bybit/bybit_readonly_audit_latest.json")
+BUSINESS_EVENT_STATE_PATH = Path(_SRV + "/docker_projects/trading_services/runtime/bybit/business_events/bybit_business_event_state_latest.json")
 
-OUT_DIR = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit")
+OUT_DIR = Path(_SRV + "/docker_projects/trading_services/runtime/bybit")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_LATEST = OUT_DIR / "bybit_latest_consistency_latest.json"
 

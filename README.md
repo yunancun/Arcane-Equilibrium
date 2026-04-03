@@ -31,63 +31,58 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-01 Batch 7 積壓清掃完成)
+## 当前状态 (2026-04-03 · Batch 9A 确定性自适应风控完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,440 passed（Batch 7 積壓清掃 · +53 新測試 · 0 新回歸）
-API 路由:     126+ 条（含 8 治理 + 5 Scout + 4 實驗 + 2 進化端点）
+测试:         3,704 passed / 23 failed / 17 errors（pre-existing）
+API 路由:     126+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
+代码:         ~50,000 行（app/ 目录）
 策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
-三品類:       ✅ linear / spot / inverse 全部就緒
+三品类:       ✅ linear / spot / inverse 全部就绪
 自动部署:     最优 25 品种自动匹配策略（3% risk/trade，动态qty）
 执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
 治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时 · fail-closed 已验证
 H0 Gate:      ✅ 完成（5 check + H0HealthWorker + pipeline 集成 + 94 tests，SLA <5μs）
 H1-H5:        ✅ 全部接通（ThoughtGate + 预算 + ModelRouter + validate_output + CostLogger）
-Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEngine O(n) 285x加速 + L2 結果快取）
+Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEngine O(n) 285x加速 + L2 结果快取）
 Phase 3:      ✅ 全完成（ExperimentLedger 持久化 + EvolutionEngine + EvolutionScheduler）
-April 1 審計: ✅ 8 份報告 · 78 項去重 · Batch 1-7 全部完成
-Batch 7:      ✅ pipeline拆分 + Conductor編排 + 194 logger %s + Pydantic驗證 + 38邊界測試
-認證安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 響應頭 + XSS 修復
+Wave 8A-8D:   ✅ 全部完成（安全+正确性 / 核心重复消除 / 测试+前端统一 / 架构改进 / 文档清理）
+Batch 9A:     ✅ QC 量化审查驱动：ATR 双窗口 + 成本感知入场门槛 + 追踪止损成本约束 + round-trip 真实费用
+认证安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 响应头 + XSS 修复
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
-安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（April 1 E3 審計）
+安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（April 1 E3 审计）
 ```
 
-**★ Round 2 冷酷功能审核结论（2026-03-30）**
+**功能完成度（2026-04-03 更新）**
 
-代码完成度 ~80%，但**业务功能真正能用 = ~45%**（Wave 5 H1-H5 接通後更新）。
+代码完成度 ~80%，**业务功能真正能用 = ~52%**。
 
-| 环节 | 完成度 | 关键缺失 |
-|------|--------|----------|
-| 自动扫描 | 90% | ScoutWorker 30min 定時掃描已接通 |
-| 策略选择 | 40% | 无 AI、无回测、无动态仓位 |
-| AI 风险评估 | 55% | H1-H5 全部接通，shadow=False，H4/H5 在位 |
-| 下单 | 85% | 治理 gate + OMS SM-03 已串联（Batch 10） |
-| 止损 | 75% | 缺交易所条件单双重防线 |
-| 学习 | 25% | E1 观察 + L2 自动触发 + Sunday cron（Batch 10） |
-| 进化 | 30% | PaperLiveGate 已部署（Batch 12），无策略自动优化 |
+| 环节 | 完成度 | 说明 |
+|------|--------|------|
+| 自动扫描 | 90% | ScoutWorker 30min 定时扫描已接通 |
+| 策略选择 | 50% | Regime-aware 策略选择已实现（C4）；ATR 双窗口保守估计 |
+| AI 风险评估 | 60% | H1-H5 全部接通 + 成本感知入场门槛（cost_gate） |
+| 下单 | 85% | 治理 gate + OMS SM-03 已串联 |
+| 止损 | 80% | ATR 动态止损 + 追踪止损成本约束；缺交易所条件单双重防线 |
+| 学习 | 30% | E1 观察 + L2 自动触发 + Sunday cron；L3-L5 待推进 |
+| 进化 | 35% | EvolutionEngine + Scheduler 完成；学习反馈闭环待接通 |
 
-**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 异常处理零 except:pass · 2,227 测试全通过 · PaperLiveGate 11 项准入已部署
+**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 3,704 测试 · 5 Agent 运行 · QC 量化审查驱动风控
 
-**关键缺失**：回测引擎 API 路由（引擎已就绪）· L3-L5 学习层 · 策略自动优化
+**开发路线图**
 
-**详细报告**：`docs/governance_dev/audits/2026-03-30--round2_cold_functional_audit.md`
-**Gap 分析**：`docs/governance_dev/audits/2026-03-31--gap_analysis_287_specs.md`
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| 1 | H0 Gate 确定性门控 + Cooldown + M-of-N + 数据品质→风控 | ✅ 完成 |
+| 2 | L2 模式发现自动化 + 回测引擎 MVP + Truth Source Registry | ✅ 完成 |
+| 3 | Wave 8A-8D 安全/重复消除/架构改进 + Batch 9A 自适应风控 | ✅ 完成 |
+| 4 | Batch 9B-9D 学习闭环 + 管线连通 + 策略 Edge 验证 | 🔄 进行中 |
+| 5 | Paper Trading 21 天观察 + Live 准备 | ⬜ |
 
-**已完成**: A-L + 策略工具包 + 管线桥接 + 全系统审核 + GUI 三层 + 自主交易 Agent + Phase 2 治理模組 + Phase 3 GovernanceHub 集成 + Round 2 Scout 集成 + Learning 自动晋升 + L1 本地推理 + Pre-trade Edge Filter + 0% 胜率四根因全修复 + Batch 12 PaperLiveGate + E2E 冒烟测试 + 日报自动化 + **GUI 11-Tab 重构（测试子Tab+实盘锁）+ Ollama 9B/27B 分配 + think=False 4x 提速 + edge filter 修复 + 后台市场流常驻 + 周报双时间表** + **TruthSourceRegistry（原則7隔離 · AI信心上限0.85）+ BacktestEngine MVP（純函數指標 · 57測試）+ GovernanceHub 公開 API + startup 完整性檢查**
-
-**★ 下一步：開發路線圖 v2（基於 287 條治理規格 Gap 分析）**
-
-| Phase | 内容 | 预估 | 状态 |
-|-------|------|------|------|
-| 1 | H0 Gate 确定性门控 + Cooldown + M-of-N + 数据品质→风控 | 5 天 | ✅ 完成 |
-| 2 | L2 模式发现自动化 + 回测引擎 MVP + Truth Source Registry | 10 天 | ✅ 完成（Batch 2A/2B/2C 全部） |
-| 3 | L3-L4 进化管线 + 策略 Alpha 验证 + 压力测试 | 15 天 | ⬜ |
-| 4 | Paper Trading 21 天观察 + Live 准备 | 5+21 天 | ⬜ |
-
-**Round 2 Batch 3-12 全部完成**（5 Agent 接入 + OMS + PaperLiveGate + E2E · 详见 CLAUDE.md）
+**详细报告**：`docs/governance_dev/audits/` 目录下各审计报告
 
 ---
 
@@ -100,7 +95,7 @@ srv/
 ├── program_code/
 │   ├── exchange_connectors/
 │   │   └── bybit_connector/
-│   │       └── control_api_v1/    ← FastAPI 121+ 路由 + 1,566 测试
+│   │       └── control_api_v1/    ← FastAPI 126+ 路由 + 3,700+ 测试
 │   │           ├── app/
 │   │           │   ├── governance_hub.py         ← ★ 治理中枢（4 SM 编排 + 跨 SM 级联）
 │   │           │   ├── governance_routes.py      ← 8 治理 API 端点
@@ -114,7 +109,7 @@ srv/
 │   │           │   ├── telegram_alerter.py      ← Telegram 告警
 │   │           │   └── static/                  ← GUI (login/console/trading)
 │   │           └── tests/
-│   ├── local_model_tools/         ← 策略工具包 + 218 测试
+│   ├── local_model_tools/         ← 策略工具包 + 策略/指标/信号引擎
 │   │   ├── kline_manager.py       ← K线聚合 + REST 引导
 │   │   ├── indicator_engine.py    ← 7 指标协调
 │   │   ├── signal_generator.py    ← 8 信号规则
@@ -146,7 +141,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键指标：** 1,522 测试全通过 · 52,211 行代码 · 100% 双语注释 · fail-closed 设计 · 线程安全
+**关键指标：** 3,704 测试通过 · ~50,000 行代码 · 100% 双语注释 · fail-closed 设计 · 线程安全
 
 **详细报告：** `docs/governance_dev/phase2_execution/`（执行总览 + PM 品质审核 + TW 注释审核 + 23 份变更日志）
 
@@ -197,198 +192,89 @@ srv/
 
 ---
 
-## 工程目标 vs 实现完成度（2026-03-30 TW 工程審核）
+## 工程目标 vs 实现完成度（2026-04-03 更新）
 
 ### 22 份治理文件合规矩阵
 
-| 规格 | 要求 | 模组 | 代码 | 接入 | 缺口 |
-|------|------|------|------|------|------|
-| **SM-01** 授权状态机 | 8态/16转/fail-closed/终态不回流 | authorization_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **SM-02** 决策租约 | 9态/TTL自动到期/租约≠订单 | decision_lease_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **SM-03** OMS 执行 | 11态订单生命周期/对账前不完成 | oms_state_machine.py | ✅ 完整 | ✅ Batch 10 | Paper Engine 7→11 state 映射 |
-| **SM-04** 风控状态机 | 6级风险/升级自动/降级需审批 | risk_governor_state_machine.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **EX-01** 风控边界 | P0/P1/P2 三层 + 组合风控 | risk_manager.py + portfolio_risk_control.py | ✅ 完整 | ⚠ 部分 | 组合风控未接入 |
-| **EX-02** OMS 执行边界 | 单一执行入口/授权前置 | oms_state_machine.py + paper_trading_engine.py | ✅ 完整 | ✅ Batch 10 | SM-03 已串联 + fail-closed |
-| **EX-03** 控制面边界 | system_mode/execution_state 强制 | main_legacy.py（嵌入式） | ⚠ 部分 | ⬜ | 模式变更不传播到治理模组 |
-| **EX-04** 对账边界 | 5类结果/自动冻结/审计触发 | reconciliation_engine.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **EX-05** 学习边界 | L1→L5 五级门控/自动晋升 | learning_tier_gate.py | ✅ 完整 | ⬜ 未接入 | 主流程从未调用 check_promotion() |
-| **EX-06** 多Agent编排 | 6 Agent + Conductor + 正式消息 | multi_agent_framework.py + scout_routes.py | ✅ Scout接入 | ✅ PipelineBridge + REST | ScoutAgent 运行时接入，其馀 4 Agent 待实作 |
-| **EX-07** 感知面 | FACT/INFERENCE/HYPOTHESIS 标记 | perception_data_plane.py | ✅ 完整 | ⬜ 未接入 | 市场数据未包装 PerceptionDataObject |
-| **DOC-01** 项目宪法 | 16条根原则/6 Agent 角色 | 全系统 | ✅ 已记录 | ⚠ 部分 | 仅 1/6 Agent 实现 |
-| **DOC-02** 边界定义 | 层间职责/治理链路 | governance_hub.py | ✅ 完整 | ✅ | — |
-| **DOC-03** 字段状态规范 | 枚举/状态值一致性 | 各 SM types 文件 | ✅ 完整 | ✅ | — |
-| **DOC-04** Agent能力蓝图 | A-J 能力目标 | 全系统 | ⚠ 部分 | — | 见下方 A-J 完成度 |
-| **DOC-05** 真相源矩阵 | 数据源所有权/可信级 | data_source_enforcer.py | ✅ 完整 | ✅ | — |
-| **DOC-06** 变更治理 | L1/L2/L3 变更分级 | change_audit_log.py | ✅ 完整 | ⬜ 未接入 | 未与 GovernanceHub 联动 |
-| **DOC-07** 审计/事故/熔断 | append-only/不可删/自动轮转 | audit_persistence.py | ✅ 完整 | ✅ GovernanceHub | — |
-| **DOC-08** 实施桥梁 | Phase 对照/迁移路径 | governance_dev/ 文档 | ✅ 文档 | — | — |
+| 规格 | 要求 | 代码 | 接入 |
+|------|------|------|------|
+| **SM-01** 授权状态机 | 8态/16转/fail-closed | ✅ | ✅ GovernanceHub |
+| **SM-02** 决策租约 | 9态/TTL自动到期 | ✅ | ✅ GovernanceHub |
+| **SM-03** OMS 执行 | 11态订单生命周期 | ✅ | ✅ Paper Engine 映射 |
+| **SM-04** 风控状态机 | 6级风险 | ✅ | ✅ GovernanceHub |
+| **EX-01** 风控边界 | P0/P1/P2 三层 | ✅ | ✅ |
+| **EX-02** OMS 执行边界 | 单一执行入口 | ✅ | ✅ SM-03 串联 |
+| **EX-04** 对账边界 | 5类结果 | ✅ | ✅ GovernanceHub |
+| **EX-05** 学习边界 | L1→L5 五级门控 | ✅ | ✅ 自动晋升接入 |
+| **EX-06** 多Agent编排 | 6 Agent + Conductor | ✅ | ✅ 5 Agent 运行 |
+| **DOC-07** 审计 | append-only JSONL | ✅ | ✅ GovernanceHub |
 
-### A-J 能力目标完成度（DOC-04 蓝图 vs 当前）
+**接入率: 20/22 = 91%** · 合规度 ~90%
 
-| 目标 | 描述 | 完成度 | 关键缺失 |
-|------|------|--------|----------|
-| A | 自主交易执行 | 65% | AI 治理层仍被绕过（is_authorized 已接但为新加） |
-| B | 成本收益感知 | 55% | AI 成本追踪框架在但未实际累计 |
-| C | 计算路径智能分级 | 35% | L0+L1 实现，L2 Sonnet/Opus 未接入主链路 |
-| D | 自我感知 | 40% | 健康门正常，但 GovernanceHub 状态未暴露到 GUI |
-| E | 持续学习 | 30% | E1 观察 + L2 自动触发 + Sunday cron（Batch 10），L3-L5 待推进 |
-| F | 日/周报告 | 30% | 路由存在，无自动化 Cron |
-| G | Agent 自主交易 | 60% | 连续亏损暂停已接，但缺多 Agent 协作 |
-| H | 对抗性止损 | 65% | ATR 动态止损 + 交易所条件单保护未实现 |
-| I | AI 注意力税 | 10% | 框架设计存在，等 AI 咨询接入后生效 |
-| J | GUI 控制台 | 80% | 10-Tab 完成，治理仪表盘待加 |
+未接入：`paper_live_gate.py`（Paper→Live 门控）、`scout_routes.py`（独立于 paper trading 运行时）
 
-### 剩余缺口（按优先级）
+### A-J 能力目标完成度
 
-**Critical — 阻塞系统完整性：**
+| 目标 | 描述 | 完成度 | 说明 |
+|------|------|--------|------|
+| A | 自主交易执行 | 70% | 治理 gate fail-closed + 5 Agent + OMS 串联 |
+| B | 成本收益感知 | 65% | AI 成本追踪 + 成本感知入场门槛（cost_gate） + round-trip 真实费用 |
+| C | 计算路径智能分级 | 40% | L0+L1 实现，L2 框架就绪 |
+| D | 自我感知 | 50% | H0 Gate + GovernanceHub 状态 API |
+| E | 持续学习 | 35% | E1 观察 + L2 自动触发 + Evolution；L3-L5 待推进 |
+| F | 日/周报告 | 35% | 路由存在 + daily cron |
+| G | Agent 自主交易 | 65% | 5 Agent 运行 + Conductor 编排 |
+| H | 对抗性止损 | 75% | ATR 双窗口 + 追踪止损成本约束；缺交易所条件单 |
+| I | AI 注意力税 | 15% | 框架设计存在 |
+| J | GUI 控制台 | 85% | 11-Tab 完成 |
 
-| ID | 缺口 | 现状 |
-|----|------|------|
-| GAP-C1 | 治理 gate 仍为 warning-only（is_authorized 不拒绝订单） | GovernanceHub 已接入但需确认 fail-closed 生效 |
-| GAP-C2 | 跨 SM 级联回调未自动触发（手动调用） | Hub 内实现了回调逻辑但非事件驱动 |
-| GAP-C3 | 多Agent系统 ScoutAgent 已接入（需 6 个） | ScoutAgent + MessageBus 已 WIRED，缺 Conductor + 4 Agent |
+### 剩余重点缺口
 
-**High — 影响核心功能：**
+| 优先级 | 缺口 |
+|--------|------|
+| P0 | 学习反馈闭环未接入决策路径（Batch 9B U-01） |
+| P0 | 进化参数自动重部署（Batch 9B U-02） |
+| P1 | 交易所条件单 SL/TP（原则 9 双重防线） |
+| P1 | H0 Gate shadow 模式观察 |
+| P1 | Scanner→Deployer 自动接通 |
+| P2 | Paper→Live 门控接入授权工作流 |
+| P2 | L5 meta-learning 未实现 |
 
-| ID | 缺口 |
-|----|------|
-| ~~GAP-H1~~ | ~~OMS 状态机（SM-03）未串联~~ ✅ Batch 10 已修复 |
-| GAP-H2 | 学习门控（EX-05）主流程未调用 check_promotion() |
-| GAP-H3 | 感知面（EX-07）市场数据未包装 PerceptionDataObject |
-| GAP-H4 | 控制面 system_mode 变更未传播到 GovernanceHub |
-| GAP-H5 | Paper→Live 门控未接入授权工作流 |
-| GAP-H6 | TTL 执行器未定期调用（过期租约不会自动终止） |
-
-**Medium：** 影子决策构建器、交易归因、事件队列、组合风控接入、变更审计与审计持久化厘清
-
-### 接入率校准（Batch 4 重新审计 · 2026-03-30）
-
-```
-已接入运行时（WIRED · 19/22）:
-  ── Phase 3 基础（11 模组）──
-  ✅ governance_hub.py             — 4 核心 SM 编排 + 跨 SM 级联 + 审计
-  ✅ governance_routes.py          — 8 治理 API 端点
-  ✅ risk_manager.py               — 仓位大小 / P0/P1 风控
-  ✅ pipeline_bridge.py            — 策略→治理 gate→订单→执行→观察→晋升
-  ✅ paper_trading_engine.py       — 订单管理 + is_authorized + acquire_lease
-  ✅ market_data_dispatcher.py     — WebSocket 行情分发
-  ✅ market_regime.py              — 多时间框架 regime 检测
-  ✅ data_source_enforcer.py       — 数据源分类
-  ✅ perception_data_plane.py      — 认知标记框架（内部已接）
-  ✅ audit_persistence.py          — GovernanceHub 审计写盘
-  ✅ reconciliation_engine.py      — GovernanceHub.reconcile() 调用
-  ── Round 2 Batch 3 新增（2 模组）──
-  ✅ multi_agent_framework.py      — ScoutAgent + MessageBus 接入 PipelineBridge + scout_routes REST
-  ✅ trade_attribution.py          — TradeAttributionEngine 接入 PipelineBridge._emit_round_trip()
-  ── Batch 4 审计发现已接入（6 模组，原标记 STANDALONE 实为误差）──
-  ✅ learning_tier_gate.py         — 注入 ENGINE + GovernanceHub + PipelineBridge 自动晋升
-  ✅ ttl_enforcer.py               — 实例化 + 5s daemon sweep + expiry callback
-  ✅ protective_order_manager.py   — 注入 ENGINE（自动创建保护性止损单）
-  ✅ portfolio_risk_control.py     — 注入 RISK_MANAGER（关联曝险 + 仓位检查）
-  ✅ recovery_approval_gate.py     — 实例化（恢复审批门禁）
-  ✅ change_audit_log.py           — 注入 GovernanceHub + RiskManager + ENGINE
-  ── 共享但非独立模组 ──
-  ✅ shadow_decision_builder.py    — 导入 + ShadowDecisionConsumer 创建 + API 路由
-
-  ── Batch 10 新增接入（1 模组）──
-  ✅ oms_state_machine.py          — SM-03 串联 Paper Engine（7→11 state 映射 + fail-closed）
-
-真正独立存在（STANDALONE · 2/22）:
-  ⬜ paper_live_gate.py            ← Paper→Live 门控未接入授权工作流
-  ⬜ scout_routes.py               ← 代码已就绪，独立于 paper trading 运行时
-
-接入率:  20/22 = 91%（Batch 10 后 · OMS SM-03 串联）
-合规度:  ~90%
-```
-
-### 下一步优先级（继续推进路线图）
-
-**★ 最高优先：修正 0% 胜率（需 1-2 sessions）**
-
-R1 根因分析结论：0% 胜率非 bug，是**风控参数结构性错配**。
-
-| 根因 | 影响 | 修复 |
-|------|------|------|
-| 3% 追踪止损太紧 | 40-60% 盈利被市场噪音吃掉 | 加宽至 5% 或 ATR 动态计算 |
-| 0.11% 手续费（双向 taker） | 每笔需立即 +0.11% 才保本 | 入场改 limit order（maker 0.02%） |
-| Squeeze regime 0.3x 时间乘数 | 14h 强制平仓，均值回归未完成 | 调整为 1.0x |
-| 无交易前 edge 检查 | 数学不可行的交易也被执行 | 添加 edge > 1.5× fees 过滤器 |
-
-**Phase 4: 多 Agent 推进（需 3-4 sessions）**
-
-1. **Strategist Agent** — 消费 ScoutAgent 情报，产出 TradeIntent，接入 PipelineBridge 替代硬编码策略选择
-2. **Guardian Agent** — 消费 EventAlert，动态调整风控参数，与 GovernanceHub.SM-04 联动
-3. **Analyst Agent** — 消费 round_trip_complete，驱动 TradeAttribution + Learning Tier 推进
-4. **Executor Agent** — 包装 PaperTradingEngine.submit_order()，提供执行质量反馈
-5. **Conductor 实例化** — 在 phase2_strategy_routes.py 创建 Conductor 单例，注册全部 Agent，驱动 dispatch_market_event
-
-**Phase 5: 学习管线打通（✅ 大部分完成）**
-
-1. ~~**Learning Tier Gate 接入**~~ ✅ Batch 4 已完成
-2. ~~**L2 自动触发**~~ ✅ Batch 10 已完成 — observations≥200 auto + Sunday UTC cron + AnalystAgent MessageBus 接入
-3. **L2→L3 需 Analyst 产出 PatternInsight** — 依赖 Analyst 数据积累
-4. **L4/L5 需 Operator 审批** — 接入 GovernanceHub 授权流
-
-**Phase 6: Paper→Live 准备（需 2+ sessions）**
-
-1. ~~**OMS 串联**~~ ✅ Batch 10 已完成 — Paper Engine 7→11 state 映射 + fail-closed + 对账管线
-2. **Paper-Live Gate** — paper_live_gate.py 接入授权工作流
-3. ~~**TTL 执行器 OMS 回调**~~ ✅ Batch 10 已完成 — TTL 到期自动取消 OMS 订单
-4. **Demo 模式稳定性** — 在 Bybit Demo sandbox 积累足够交易记录
+详细任务清单见 `TODO.md`（Batch 9B-9D）
 
 ---
 
-## OpenClaw 联合开发路线图
+## OpenClaw 集成
 
-### 当前集成状态（Plan A2）
+> OpenClaw 定位：通信+运维层，不碰交易决策。Python 本地 = 交易 Agent 核心。
 
-OpenClaw 与 BybitOpenClaw 通过以下方式互联：
+### 当前集成架构
 
 ```
 ┌─────────────┐                    ┌─────────────────────┐
 │  OpenClaw   │ ── REST POST ──▶  │  scout_routes.py    │
 │  (中枢)     │   /scout/market-  │  (5 端点 · Token 认证)│
-│             │   signal          │         │            │
-│  Gateway    │   /scout/event-   │         ▼            │
-│  :18789     │   alert           │  ScoutAgent          │
-└─────────────┘                    │    + MessageBus      │
-                                   │         │            │
-┌─────────────┐                    │         ▼            │
-│  Bybit API  │ ── WebSocket ──▶  │  PipelineBridge     │
-│  (行情)     │   price events    │  (on_tick 本地扫描)   │
+│  Gateway    │   signal + alert  │         ▼            │
+│  :18789     │                    │  ScoutAgent+MessageBus│
+└─────────────┘                    │         ▼            │
+┌─────────────┐                    │  PipelineBridge     │
+│  Bybit API  │ ── WebSocket ──▶  │  (on_tick 本地扫描)   │
 └─────────────┘                    └─────────────────────┘
 ```
 
-- **外部情报通道**: OpenClaw → `POST /scout/market-signal` + `POST /scout/event-alert` → ScoutAgent → MessageBus
-- **本地市场通道**: Bybit WebSocket → PipelineBridge.on_tick → `_invoke_scout_scan()` (300s 间隔) → ScoutAgent → MessageBus
-- **双通道汇聚**: MessageBus → Strategist (intel_object) + Guardian (event_alert)
+### 后续整合计划（非紧急）
 
-### OpenClaw 侧需开发
+| ID | 内容 | 优先级 |
+|----|------|--------|
+| OC-1 | Webhook 告警通道（异常→OpenClaw→Telegram） | 高 |
+| OC-2 | Telegram 通道配置 | 高 |
+| OC-3 | 多通道分级告警（P0→紧急群 / P1→常规群） | 中 |
+| OC-4 | MCP PostgreSQL 接入（自然语言查交易数据） | 中 |
+| OC-5 | Cron 精细化健康心跳（待 OpenClaw --exec flag） | 低 |
+| OC-6 | Sub-agent 异步回测（周频 Evolution 网格搜索） | 低 |
+| WS-1 | FastAPI WebSocket/SSE 实时推送（替代 30s 轮询） | 中 |
 
-1. **OpenClaw Skill: bybit-scout-push** — 定期扫描新闻/事件，格式化为 IntelObject/EventAlert，POST 到 BybitOpenClaw
-2. **OpenClaw Skill: bybit-monitor** — 监控 BybitOpenClaw 健康状态（GET /scout/status），异常时 Telegram 告警
-3. **OpenClaw Cron** — 每 30 分钟触发 bybit-scout-push（新闻扫描），每 24 小时触发事件日历检查
-4. **认证** — OpenClaw 存储 API Token（`OPENCLAW_API_TOKEN` 环境变量，不可硬编码）
-
-### BybitOpenClaw 侧后续开发
-
-1. **Conductor → OpenClaw 反向通信** — Conductor.broadcast_directive() 通过 webhook 推送到 OpenClaw Gateway
-2. **策略建议回传** — Analyst 产出 strategy_proposal → OpenClaw 审核 → SYSTEM_DIRECTIVE 下发
-3. **AI 计算预算协调** — OpenClaw 管理 L1.5/L2 云端 AI 配额，BybitOpenClaw 本地 L0/L1
-4. **共享 Memory** — OpenClaw Memory 存储交易观察/教训，BybitOpenClaw 可查询
-
-### 联合开发协作流程
-
-```
-1. 开发者在 trade-core 使用 Claude Code（SSH/tmux）开发 BybitOpenClaw
-2. 开发者在 Cowork 使用 PM 批次分配开发 OpenClaw 技能
-3. 两侧通过 REST API + Token 认证互联
-4. 测试流程：
-   a. BybitOpenClaw 单元测试 → pytest（1800+ tests）
-   b. OpenClaw 技能测试 → OpenClaw 内置测试
-   c. 集成测试 → 手动触发 POST /scout/market-signal 验证端到端
-5. 版本对齐：BybitOpenClaw 的 scout_routes API 版本 = v1，OpenClaw skill 需匹配
-```
+详细方案见 `TODO.md` "OpenClaw 深度整合" 章节
 
 ---
 
@@ -423,11 +309,13 @@ bash helper_scripts/start_paper_trading.sh
 
 | 类别 | 位置 |
 |------|------|
-| 22 份治理文件（SPEC 源） | Cowork `01_source_documents/` |
-| Phase 2 执行总览 + 审核报告 | `docs/governance_dev/phase2_execution/` |
-| Phase 3 集成指南 + 安全审核 | `docs/governance_dev/phase3_integration/` |
-| T2.01–T2.23 变更日志 | `docs/governance_dev/changelogs/` |
-| 治理文件提取参考（8 份） | `docs/governance_dev/governance_extracts/` |
-| 完整项目日志 | `CLAUDE.md` |
+| 完整项目指令 | `CLAUDE.md` |
+| 当前工作计划 | `TODO.md` |
+| 审计报告 | `docs/governance_dev/audits/` |
+| QC 量化审查 | `docs/CCAgentWorkSpace/QC/workspace/reports/` |
+| 工作日志 | `docs/worklogs/` |
+| 变更历史 | `docs/CLAUDE_CHANGELOG.md` |
+| 治理文件（SPEC 源） | Cowork `01_source_documents/` |
+| Phase 2/3 执行记录 | `docs/governance_dev/phase2_execution/` / `phase3_integration/` |
 
 GitHub: [yunancun/BybitOpenClaw](https://github.com/yunancun/BybitOpenClaw)

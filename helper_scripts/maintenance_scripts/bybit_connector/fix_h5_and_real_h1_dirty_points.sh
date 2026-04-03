@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# XP-1: portable path / 可移植路径
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+export _SRV
 
-cd /home/ncyu/srv/program_code/exchange_connectors/bybit_connector
-BASE="/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate"
+cd $_SRV/program_code/exchange_connectors/bybit_connector
+BASE="$_SRV/docker_projects/trading_services/runtime/bybit/thought_gate"
 
 echo "===== 0) BACKUP ====="
 for f in \
@@ -439,10 +442,10 @@ echo "===== 5) REBUILD H1 -> H5 ====="
 echo
 echo "===== 6) FINAL RECHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
-import json
+import json, os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def load(name):
     p = base / name
@@ -481,10 +484,10 @@ PY
 echo
 echo "===== 7) H1 TRUTH RECHECK ====="
 ./scripts/run_with_trading_env.sh python3 - <<'PY'
-import json
+import json, os
 from pathlib import Path
 
-base = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/thought_gate")
+base = Path(os.environ.get("_SRV", ".") + "/docker_projects/trading_services/runtime/bybit/thought_gate")
 
 def load(name):
     p = base / name

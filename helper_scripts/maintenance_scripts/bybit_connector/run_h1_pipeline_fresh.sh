@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/ncyu/srv/program_code/exchange_connectors/bybit_connector"
+# XP-1: Use env var with auto-detection fallback / 环境变量优先，回退自动推导
+_SRV="${OPENCLAW_SRV_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+BASE="$_SRV/program_code/exchange_connectors/bybit_connector"
 RUN="$BASE/scripts/run_with_trading_env.sh"
 
 cd "$BASE"

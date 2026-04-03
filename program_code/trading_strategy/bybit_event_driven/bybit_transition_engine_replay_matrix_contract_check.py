@@ -36,8 +36,9 @@ Maintenance notes:
 import json
 import time
 from pathlib import Path
+import os
 
-MATRIX_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_replay_matrix_latest.json")
+MATRIX_PATH = Path(os.environ.get("OPENCLAW_SRV_ROOT", ".") + "/docker_projects/trading_services/runtime/bybit/event_driven/transition_engine/bybit_transition_engine_replay_matrix_latest.json")
 OUT_DIR = MATRIX_PATH.parent
 OUT_LATEST = OUT_DIR / "bybit_transition_engine_replay_matrix_contract_latest.json"
 
