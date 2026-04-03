@@ -35,7 +35,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 import hmac
 import html
@@ -109,7 +109,10 @@ def _get_h0_gate() -> Any:
         return None
 
 
-def _require_operator_auth(authorization: str | None = Header(default=None)) -> Any:
+def _require_operator_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Any:
     """FastAPI Depends: 驗證認證 + Operator 角色，返回已驗證的 actor。
     Validates authentication and Operator role; returns the authenticated actor.
 
@@ -126,27 +129,45 @@ def _require_operator_auth(authorization: str | None = Header(default=None)) -> 
         HTTPException(403) if authenticated but not Operator.
         HTTPException(503) if authentication system unavailable.
     """
-    actor = _get_auth_actor(authorization)
+    actor = _get_auth_actor(request, authorization)
     _require_operator_role(actor)
     return actor
 
 
-def _get_auth_actor(authorization: str | None = Header(default=None)) -> Any:
+def _get_auth_actor(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> Any:
     """
-    FastAPI dependency — validates bearer token and returns authenticated actor.
-    FastAPI 依赖 — 验证 bearer token 并返回已认证的 actor。
+    FastAPI dependency — validates auth via HttpOnly cookie (GUI) or Bearer token (API clients).
+    FastAPI 依赖 — 通过 HttpOnly cookie（GUI）或 Bearer token（API 客户端）验证认证。
+
+    Cookie takes priority; Authorization header is fallback for programmatic access.
+    Cookie 優先；Authorization header 作為編程接口的後備。
 
     Called by FastAPI at request time (use as Depends(_get_auth_actor) WITHOUT parentheses).
-    由 FastAPI 在请求时调用（使用 Depends(_get_auth_actor)，不加括号）。
+    由 FastAPI 在請求時調用（使用 Depends(_get_auth_actor)，不加括號）。
     """
     try:
         from . import main_legacy as base
     except ImportError:
         raise HTTPException(status_code=503, detail="Authentication system unavailable")
 
-    if authorization is None or not authorization.startswith("Bearer "):
+    token: str | None = None
+
+    # Priority 1: HttpOnly cookie (XSS-safe, set by /api/v1/auth/login)
+    # 優先級 1：HttpOnly cookie（防 XSS，由登入端點設置）
+    cookie_token = request.cookies.get("oc_auth_token")
+    if cookie_token:
+        token = cookie_token
+
+    # Priority 2: Authorization header (for programmatic API clients)
+    # 優先級 2：Authorization header（供編程 API 客戶端使用）
+    if token is None and authorization is not None and authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "", 1).strip()
+
+    if token is None:
         raise HTTPException(status_code=401, detail="Authentication required")
-    token = authorization.replace("Bearer ", "", 1).strip()
     if not hmac.compare_digest(token.encode("utf-8"), base.settings.api_token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Authentication required")
     return base.build_authenticated_actor()
