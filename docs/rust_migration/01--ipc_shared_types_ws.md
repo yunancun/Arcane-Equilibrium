@@ -99,15 +99,15 @@
 
 | 任務 | 狀態 | 完成日期 | commit |
 |------|------|---------|--------|
-| R01-1 ipc_server.rs | [ ] | | |
-| R01-2 main.rs | [ ] | | |
-| R01-3 ws_client.rs | [ ] | | |
-| R01-4 config.rs | [ ] | | |
-| R01-5 shared_types.py | [ ] | | |
-| R01-6 ipc_client.py | [ ] | | |
-| R01-7 ai_service.py | [ ] | | |
-| R01-8 conftest 改造 | [ ] | | |
-| R01-9 CI schema diff | [ ] | | |
+| R01-1 ipc_server.rs | [x] | 2026-04-03 | pending commit |
+| R01-2 main.rs | [x] | 2026-04-03 | pending commit |
+| R01-3 ws_client.rs | [x] | 2026-04-03 | pending commit |
+| R01-4 config.rs | [x] | 2026-04-03 | pending commit |
+| R01-5 shared_types.py | [x] | 2026-04-03 | pending commit |
+| R01-6 ipc_client.py | [x] | 2026-04-03 | pending commit |
+| R01-7 ai_service.py | [x] | 2026-04-03 | pending commit |
+| R01-8 conftest 改造 | [x] | 2026-04-03 | pending commit |
+| R01-9 CI schema diff | [x] | 2026-04-03 | pending commit |
 
 ---
 

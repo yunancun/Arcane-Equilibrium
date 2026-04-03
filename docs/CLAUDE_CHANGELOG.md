@@ -5,6 +5,39 @@
 
 ---
 
+### Phase R-01 完成 — IPC + shared_types + WS + Workspace 統一（2026-04-03）
+
+**Batch 0 — Rust workspace 合併：**
+- PA 評估後建立 `openclaw_pyo3` 獨立 crate（cdylib），隔離 PyO3 extension-module
+- 從 `srv/rust/` 遷移 ContextDistiller + HedgingEngine 到 workspace
+- 4 crates 統一：openclaw_types / openclaw_core / openclaw_engine / openclaw_pyo3
+- `maturin develop --release` 驗證 Python `import openclaw_core` 不變
+
+**R01-1~4 Rust Engine 模組：**
+- `config.rs`：ArcSwap<RuntimeConfig> 熱加載 + 冷/熱參數分類 + TOML 解析（7 tests）
+- `ipc_server.rs`：Unix domain socket JSON-RPC 2.0 server + 5 方法 handler（11 tests）
+- `ws_client.rs`：Bybit WS client + 指數退避重連 + PriceEvent 推送（9 tests）
+- `main.rs`：tokio multi-thread runtime + SIGHUP 配置重載 + 優雅關機（2 tests）
+
+**R01-5~7 Python IPC 層：**
+- `shared_types.py`：10 types（4 enum + 5 dataclass + PriceEvent），與 Rust 1:1 對齊
+- `ipc_client.py`：EngineIPCClient + 自動重連 + 3 次失敗降級 + per-method TTL
+- `ai_service.py`：AIService（5 agent handler stubs）+ AIServiceListener（Unix socket 服務端）
+
+**R01-8~9 測試基礎設施：**
+- conftest.py：shared_types 導入重定向 + SM 類標記 `TODO R-06`
+- Golden schema (`schemas/shared_types.json`) + `schema_diff.py` 驗證 + CI 集成
+
+**審查修復（E2 + E5）：**
+- CRITICAL：StopConfig Rust `time_stop_minutes` → `time_stop_hours` + `atr_multiplier` 三方對齊
+- HIGH：ai_service.py 從 length-prefix 統一為 newline-delimited 協議
+- MEDIUM：ipc_client.py `ping()` 修正匹配 Rust `"pong"` 回應
+- E5：ws_client.rs `extract_symbol_from_topic` 零分配 rsplit + ipc_client assert→explicit check
+
+**測試：** Rust 65 passed / Python 3703 passed / 24 failed / 17 errors（零回歸）
+
+---
+
 ### Phase 3 完成 — Claude API + 四階段放權 + HedgingEngine Rust（2026-04-03）
 
 **Sub-phase 3A（Claude API 閉環）：**

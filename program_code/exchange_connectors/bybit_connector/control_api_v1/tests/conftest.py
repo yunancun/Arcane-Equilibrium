@@ -159,7 +159,7 @@ def auth_state_machine():
     Create a fresh AuthorizationStateMachine instance.
     全新授权状态机实例。
     """
-    from app.authorization_state_machine import AuthorizationStateMachine
+    from app.authorization_state_machine import AuthorizationStateMachine  # TODO R-06: replace with IPC mock
     return AuthorizationStateMachine()
 
 
@@ -170,7 +170,7 @@ def auth_sm_with_audit():
     带审计回调的授权状态机。
     Returns: (machine, records_list)
     """
-    from app.authorization_state_machine import AuthorizationStateMachine
+    from app.authorization_state_machine import AuthorizationStateMachine  # TODO R-06: replace with IPC mock
 
     records = []
     machine = AuthorizationStateMachine(audit_callback=lambda r: records.append(r))
@@ -183,7 +183,7 @@ def oms_state_machine():
     Create a fresh OMSStateMachine instance.
     全新 OMS 状态机实例。
     """
-    from app.oms_state_machine import OMSStateMachine
+    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
     machine = OMSStateMachine()
     yield machine
     machine.close()
@@ -196,7 +196,7 @@ def oms_sm_with_audit():
     带审计回调的 OMS 状态机。
     Returns: (machine, records_list)
     """
-    from app.oms_state_machine import OMSStateMachine
+    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
 
     records = []
     machine = OMSStateMachine(audit_callback=lambda r: records.append(r))
@@ -210,7 +210,7 @@ def decision_lease_state_machine():
     Create a fresh DecisionLeaseStateMachine instance.
     全新决策租赁状态机实例。
     """
-    from app.decision_lease_state_machine import DecisionLeaseStateMachine
+    from app.decision_lease_state_machine import DecisionLeaseStateMachine  # TODO R-06: replace with IPC mock
     return DecisionLeaseStateMachine()
 
 
@@ -221,7 +221,7 @@ def decision_lease_sm_with_audit():
     带审计回调的决策租赁状态机。
     Returns: (machine, records_list)
     """
-    from app.decision_lease_state_machine import DecisionLeaseStateMachine
+    from app.decision_lease_state_machine import DecisionLeaseStateMachine  # TODO R-06: replace with IPC mock
 
     records = []
     machine = DecisionLeaseStateMachine(audit_callback=lambda r: records.append(r))
@@ -234,7 +234,7 @@ def risk_governor_state_machine():
     Create a fresh RiskGovernorStateMachine instance.
     全新风控治理状态机实例。
     """
-    from app.risk_governor_state_machine import RiskGovernorStateMachine
+    from app.risk_governor_state_machine import RiskGovernorStateMachine  # TODO R-06: replace with IPC mock
     return RiskGovernorStateMachine()
 
 
@@ -245,7 +245,7 @@ def risk_governor_sm_with_audit():
     带审计回调的风控治理状态机。
     Returns: (machine, records_list)
     """
-    from app.risk_governor_state_machine import RiskGovernorStateMachine
+    from app.risk_governor_state_machine import RiskGovernorStateMachine  # TODO R-06: replace with IPC mock
 
     records = []
     machine = RiskGovernorStateMachine(audit_callback=lambda r: records.append(r))
@@ -375,7 +375,7 @@ def sample_price_event():
     Create a sample PriceEvent for testing.
     用于测试的示例价格事件。
     """
-    from app.bybit_public_ws_listener import PriceEvent
+    from app.shared_types import PriceEvent
     return PriceEvent(
         symbol="BTCUSDT",
         last_price=87000.0,
@@ -410,7 +410,7 @@ def _create_draft_auth(sm, title: str = "Test Auth") -> Any:
     Helper: create a DRAFT authorization.
     辅助函数：创建 DRAFT 授权。
     """
-    from app.authorization_state_machine import AuthorizationStateMachine
+    from app.authorization_state_machine import AuthorizationStateMachine  # TODO R-06: replace with IPC mock
 
     if not isinstance(sm, AuthorizationStateMachine):
         raise TypeError("sm must be an AuthorizationStateMachine instance")
@@ -429,7 +429,7 @@ def _activate_auth(sm, draft_auth) -> Any:
     Helper: promote a DRAFT authorization to ACTIVE (draft → pending → active).
     辅助函数：将 DRAFT 授权提升为 ACTIVE。
     """
-    from app.authorization_state_machine import AuthorizationStateMachine
+    from app.authorization_state_machine import AuthorizationStateMachine  # TODO R-06: replace with IPC mock
 
     if not isinstance(sm, AuthorizationStateMachine):
         raise TypeError("sm must be an AuthorizationStateMachine instance")
@@ -447,7 +447,7 @@ def _make_active(sm) -> Any:
     Helper: create and activate an authorization in one call.
     辅助函数：一次调用创建并激活授权。
     """
-    from app.authorization_state_machine import AuthorizationStateMachine
+    from app.authorization_state_machine import AuthorizationStateMachine  # TODO R-06: replace with IPC mock
 
     if not isinstance(sm, AuthorizationStateMachine):
         raise TypeError("sm must be an AuthorizationStateMachine instance")
@@ -474,7 +474,8 @@ def _create_and_advance_oms_order(sm, target_state) -> str:
     Returns:
         order_id (str)
     """
-    from app.oms_state_machine import OrderState, OrderInitiator, OMSStateMachine
+    from app.shared_types import OrderState, OrderInitiator
+    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
 
     if not isinstance(sm, OMSStateMachine):
         raise TypeError("sm must be an OMSStateMachine instance")

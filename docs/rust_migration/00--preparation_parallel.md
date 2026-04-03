@@ -86,8 +86,8 @@
 - [x] Cargo workspace + 3 crate 骨架編譯通過（2026-04-03）
 - [x] CI pipeline 綠色（2026-04-03，.github/workflows/rust.yml）
 - [x] openclaw_types 全部類型定義 + serde 測試通過（30 tests, 2026-04-03）
-- [ ] L1 接口凍結 tag 已打（Phase 2 結束時）
-- [ ] L2 接口凍結 tag 已打（Phase 3 結束後）
+- [x] L1 接口凍結 tag 已打（2026-04-03）
+- [x] L2 接口凍結 tag 已打（2026-04-03）
 - [x] Python SMA fsum() 已替換（Phase 1 task 1-5 已完成）
 - [ ] Paper Trading 告警 bot 運行中（延後至 Phase 2 末尾）
 
@@ -111,8 +111,8 @@
 | R00-1 Cargo workspace | [x] | 2026-04-03 | pending |
 | R00-2 CI pipeline | [x] | 2026-04-03 | pending |
 | R00-3 types crate | [x] | 2026-04-03 | pending |
-| R00-4 L1 凍結 | [ ] | | Phase 2 結束時 |
-| R00-5 L2 凍結 | [ ] | | Phase 3 結束時 |
+| R00-4 L1 凍結 | [x] | 2026-04-03 | tag: l1-interface-freeze |
+| R00-5 L2 凍結 | [x] | 2026-04-03 | tag: l2-interface-freeze |
 | R00-6 fsum() | [x] | 2026-04-03 | Phase 1 task 1-5 已完成 |
 | R00-7 告警 bot | [ ] | | 延後至 Phase 2 末尾 |
 

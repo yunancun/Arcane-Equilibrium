@@ -1,0 +1,460 @@
+from __future__ import annotations
+
+"""
+Engine IPC Client — JSON-RPC 2.0 over Unix domain socket
+引擎 IPC 客戶端 — 通過 Unix 域套接字進行 JSON-RPC 2.0 通信
+
+MODULE_NOTE (中文):
+  本模組實現 Python 端與 Rust 引擎之間的 IPC 通信客戶端：
+  1. JSON-RPC 2.0 協議，換行分隔消息
+  2. 自動重連（指數退避：base=1s, max=30s, factor=2）
+  3. 連續 3 次重連失敗 → ai_available=false，退回純 Python 模式
+  4. 每方法類型可配超時（strategist=15s, analyst=30s, conductor=10s, default=5s）
+  5. asyncio.Lock 序列化並發調用，原子計數器生成請求 ID
+
+MODULE_NOTE (English):
+  IPC client for Python ↔ Rust engine communication:
+  1. JSON-RPC 2.0 protocol, newline-delimited messages
+  2. Auto-reconnect with exponential backoff (base=1s, max=30s, factor=2)
+  3. After 3 consecutive reconnect failures → ai_available=false, fallback to pure Python
+  4. Per-method timeout (strategist=15s, analyst=30s, conductor=10s, default=5s)
+  5. asyncio.Lock serializes concurrent calls, atomic counter for request IDs
+
+Safety guarantees / 安全保證:
+  - Read-only: never modifies trading state directly
+  - Fail-closed: disconnection → fallback mode, no silent failures
+  - No hardcoded paths: socket path via env var or parameter
+  - Cross-platform: graceful FileNotFoundError handling
+"""
+
+import asyncio
+import json
+import logging
+import os
+import time
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Constants / 常量
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_SOCKET_PATH = "/tmp/openclaw/engine.sock"
+SOCKET_ENV_VAR = "OPENCLAW_IPC_SOCKET"
+
+# Reconnection parameters / 重連參數
+RECONNECT_BASE_DELAY = 1.0        # seconds / 秒
+RECONNECT_MAX_DELAY = 30.0        # seconds / 秒
+RECONNECT_FACTOR = 2.0
+MAX_RECONNECT_ATTEMPTS = 3
+FALLBACK_RETRY_INTERVAL = 5.0     # seconds / 秒
+
+# Per-method timeouts / 每方法超時
+METHOD_TIMEOUTS: dict[str, float] = {
+    "strategist_evaluate": 15.0,
+    "analyst_evaluate": 30.0,
+    "conductor_evaluate": 10.0,
+}
+DEFAULT_TIMEOUT = 5.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Exceptions / 異常
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EngineDisconnectedError(Exception):
+    """Raised when IPC call attempted while disconnected / IPC 調用時引擎未連接"""
+    pass
+
+
+class EngineTimeoutError(Exception):
+    """Raised when IPC call times out / IPC 調用超時"""
+    pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EngineIPCClient / 引擎 IPC 客戶端
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EngineIPCClient:
+    """
+    JSON-RPC 2.0 client communicating with the Rust engine over Unix domain socket.
+    通過 Unix 域套接字與 Rust 引擎通信的 JSON-RPC 2.0 客戶端。
+
+    Features / 功能:
+      - Auto-reconnect with exponential backoff / 指數退避自動重連
+      - Fallback mode after 3 consecutive failures / 連續 3 次失敗後進入降級模式
+      - Per-method configurable timeouts / 按方法可配超時
+      - Serialized concurrent access via asyncio.Lock / Lock 序列化並發訪問
+    """
+
+    def __init__(self, socket_path: str | None = None) -> None:
+        """
+        Initialize IPC client. / 初始化 IPC 客戶端。
+
+        Args:
+            socket_path: Unix socket path. Falls back to OPENCLAW_IPC_SOCKET env
+                         var, then to default /tmp/openclaw/engine.sock.
+                         Unix 套接字路徑。優先使用參數，其次環境變量，最後默認路徑。
+        """
+        self._socket_path: str = (
+            socket_path
+            or os.environ.get(SOCKET_ENV_VAR)
+            or DEFAULT_SOCKET_PATH
+        )
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+        self._connected: bool = False
+        self._reconnect_attempts: int = 0
+        self._ai_available: bool = True
+        self._request_id: int = 0
+        self._lock: asyncio.Lock = asyncio.Lock()
+        self._reconnect_task: asyncio.Task | None = None
+
+        logger.info(
+            "EngineIPCClient initialized, socket_path=%s / "
+            "IPC 客戶端已初始化，套接字路徑=%s",
+            self._socket_path, self._socket_path,
+        )
+
+    # ─── Properties / 屬性 ───────────────────────────────────────────────────
+
+    @property
+    def is_connected(self) -> bool:
+        """Whether the socket connection is active. / 套接字連接是否活躍。"""
+        return self._connected
+
+    @property
+    def is_engine_available(self) -> bool:
+        """
+        True if connected OR if fallback mode hasn't been triggered.
+        連接中或尚未觸發降級模式時為 True。
+        """
+        return self._connected or self._ai_available
+
+    # ─── Connection management / 連接管理 ────────────────────────────────────
+
+    async def connect(self) -> bool:
+        """
+        Connect to the Rust engine Unix socket.
+        連接到 Rust 引擎的 Unix 域套接字。
+
+        Returns:
+            True on success, False on failure. / 成功返回 True，失敗返回 False。
+        """
+        return await self._try_connect()
+
+    async def disconnect(self) -> None:
+        """
+        Cleanly close the socket connection.
+        乾淨地關閉套接字連接。
+        """
+        # Cancel any running reconnect task / 取消運行中的重連任務
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            self._reconnect_task = None
+
+        await self._close_connection()
+        logger.info(
+            "EngineIPCClient disconnected / IPC 客戶端已斷開連接"
+        )
+
+    # ─── RPC calls / RPC 調用 ────────────────────────────────────────────────
+
+    async def call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Send a JSON-RPC 2.0 request and await the response.
+        發送 JSON-RPC 2.0 請求並等待響應。
+
+        Args:
+            method:  RPC method name / RPC 方法名
+            params:  Optional parameters dict / 可選參數字典
+            timeout: Override timeout in seconds; if None, uses per-method default.
+                     覆蓋超時（秒）；None 時使用方法默認超時。
+
+        Returns:
+            The 'result' field from the JSON-RPC response.
+            JSON-RPC 響應中的 'result' 字段。
+
+        Raises:
+            EngineDisconnectedError: If not connected / 未連接時拋出
+            EngineTimeoutError: If response not received within timeout / 超時時拋出
+        """
+        if not self._connected:
+            raise EngineDisconnectedError(
+                f"Not connected to engine at {self._socket_path} / "
+                f"未連接到引擎 {self._socket_path}"
+            )
+
+        effective_timeout = timeout or METHOD_TIMEOUTS.get(method, DEFAULT_TIMEOUT)
+
+        # Build JSON-RPC 2.0 request / 構建 JSON-RPC 2.0 請求
+        self._request_id += 1
+        request_id = self._request_id
+        request = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "id": request_id,
+        }
+        if params is not None:
+            request["params"] = params
+
+        payload = json.dumps(request, separators=(",", ":")) + "\n"
+
+        async with self._lock:
+            try:
+                return await asyncio.wait_for(
+                    self._send_and_receive(payload, request_id),
+                    timeout=effective_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "IPC call timed out: method=%s timeout=%.1fs id=%d / "
+                    "IPC 調用超時：method=%s timeout=%.1fs id=%d",
+                    method, effective_timeout, request_id,
+                    method, effective_timeout, request_id,
+                )
+                # Connection may be stale; trigger reconnect
+                # 連接可能已過時，觸發重連
+                await self._handle_disconnect()
+                raise EngineTimeoutError(
+                    f"IPC call '{method}' timed out after {effective_timeout}s / "
+                    f"IPC 調用 '{method}' 在 {effective_timeout}s 後超時"
+                )
+            except (ConnectionError, OSError, BrokenPipeError) as exc:
+                logger.error(
+                    "IPC send/recv error: %s / IPC 發送接收錯誤: %s", exc, exc,
+                )
+                await self._handle_disconnect()
+                raise EngineDisconnectedError(
+                    f"Connection lost during call '{method}' / "
+                    f"調用 '{method}' 時連接丟失"
+                ) from exc
+
+    async def ping(self) -> bool:
+        """
+        Quick health check against the engine.
+        對引擎進行快速健康檢查。
+
+        Returns:
+            True if engine responds, False otherwise.
+            引擎回應返回 True，否則 False。
+        """
+        try:
+            result = await self.call("ping", timeout=2.0)
+            # Rust IPC server returns "pong" as result value
+            # Rust IPC 服務端返回 "pong" 作為 result 值
+            return result == "pong" or (isinstance(result, dict) and result.get("status") == "ok")
+        except (EngineDisconnectedError, EngineTimeoutError):
+            return False
+
+    async def get_state(self) -> dict[str, Any]:
+        """
+        Get engine state summary. / 獲取引擎狀態摘要。
+        """
+        return await self.call("get_state")
+
+    async def reload_config(self) -> dict[str, Any]:
+        """
+        Trigger engine config reload. / 觸發引擎配置重載。
+        """
+        return await self.call("reload_config")
+
+    async def evaluate_strategy(self, context: dict[str, Any]) -> dict[str, Any]:
+        """
+        Forward strategy evaluation request to the engine (15s timeout).
+        將策略評估請求轉發到引擎（15s 超時）。
+        """
+        return await self.call("strategist_evaluate", params=context, timeout=15.0)
+
+    async def get_risk_check(
+        self, symbol: str, intent: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Request H0 risk check from the engine (5s timeout).
+        向引擎請求 H0 風控檢查（5s 超時）。
+        """
+        return await self.call(
+            "get_risk_check",
+            params={"symbol": symbol, "intent": intent},
+            timeout=5.0,
+        )
+
+    # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────
+
+    async def _try_connect(self) -> bool:
+        """
+        Attempt a single connection to the Unix socket.
+        嘗試單次連接到 Unix 套接字。
+
+        Returns:
+            True on success, False on failure. / 成功 True，失敗 False。
+        """
+        try:
+            self._reader, self._writer = await asyncio.open_unix_connection(
+                self._socket_path
+            )
+            self._connected = True
+            self._reconnect_attempts = 0
+            self._ai_available = True
+            logger.info(
+                "Connected to engine at %s / 已連接到引擎 %s",
+                self._socket_path, self._socket_path,
+            )
+            return True
+        except FileNotFoundError:
+            logger.warning(
+                "Socket not found: %s (engine may not be running) / "
+                "套接字未找到: %s（引擎可能未運行）",
+                self._socket_path, self._socket_path,
+            )
+            return False
+        except (ConnectionRefusedError, OSError) as exc:
+            logger.warning(
+                "Connection failed to %s: %s / 連接失敗 %s: %s",
+                self._socket_path, exc, self._socket_path, exc,
+            )
+            return False
+
+    async def _close_connection(self) -> None:
+        """
+        Close the underlying socket streams.
+        關閉底層套接字流。
+        """
+        self._connected = False
+        if self._writer:
+            try:
+                self._writer.close()
+                await self._writer.wait_closed()
+            except Exception:
+                pass  # Best-effort close / 盡力關閉
+        self._reader = None
+        self._writer = None
+
+    async def _send_and_receive(
+        self, payload: str, request_id: int
+    ) -> dict[str, Any]:
+        """
+        Write a JSON-RPC request and read the response line.
+        寫入 JSON-RPC 請求並讀取響應行。
+
+        Args:
+            payload: Newline-terminated JSON string / 換行結尾的 JSON 字符串
+            request_id: Expected response ID / 預期的響應 ID
+
+        Returns:
+            Parsed result from the JSON-RPC response / 解析後的 result 字段
+        """
+        if self._writer is None or self._reader is None:
+            raise EngineDisconnectedError(
+                "No active connection (writer/reader is None) / "
+                "無活躍連接（writer/reader 為 None）"
+            )
+
+        self._writer.write(payload.encode("utf-8"))
+        await self._writer.drain()
+
+        raw_line = await self._reader.readline()
+        if not raw_line:
+            raise ConnectionError(
+                "Empty response (connection closed) / 空響應（連接已關閉）"
+            )
+
+        response = json.loads(raw_line.decode("utf-8"))
+
+        # Validate JSON-RPC response / 驗證 JSON-RPC 響應
+        if response.get("id") != request_id:
+            logger.warning(
+                "Response ID mismatch: expected=%d got=%s / "
+                "響應 ID 不匹配：預期=%d 實際=%s",
+                request_id, response.get("id"),
+                request_id, response.get("id"),
+            )
+
+        if "error" in response:
+            error = response["error"]
+            raise RuntimeError(
+                f"Engine RPC error [{error.get('code')}]: {error.get('message')} / "
+                f"引擎 RPC 錯誤 [{error.get('code')}]: {error.get('message')}"
+            )
+
+        return response.get("result", {})
+
+    # ─── Internal: reconnection / 內部：重連 ─────────────────────────────────
+
+    async def _handle_disconnect(self) -> None:
+        """
+        Handle an unexpected disconnection: close and start reconnect loop.
+        處理意外斷連：關閉連接並啟動重連循環。
+        """
+        await self._close_connection()
+
+        # Only start one reconnect loop at a time / 同時只啟動一個重連循環
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """
+        Attempt reconnection with exponential backoff.
+        以指數退避策略嘗試重連。
+
+        After MAX_RECONNECT_ATTEMPTS consecutive failures, enters fallback mode
+        (ai_available=False) and retries every FALLBACK_RETRY_INTERVAL seconds.
+        連續 MAX_RECONNECT_ATTEMPTS 次失敗後進入降級模式（ai_available=False），
+        之後每 FALLBACK_RETRY_INTERVAL 秒重試一次。
+        """
+        self._reconnect_attempts = 0
+
+        # Phase 1: exponential backoff, up to MAX_RECONNECT_ATTEMPTS
+        # 階段 1：指數退避，最多 MAX_RECONNECT_ATTEMPTS 次
+        while self._reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+            delay = min(
+                RECONNECT_BASE_DELAY * (RECONNECT_FACTOR ** self._reconnect_attempts),
+                RECONNECT_MAX_DELAY,
+            )
+            logger.info(
+                "Reconnect attempt %d/%d in %.1fs / "
+                "重連嘗試 %d/%d，%.1fs 後重試",
+                self._reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, delay,
+                self._reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, delay,
+            )
+            await asyncio.sleep(delay)
+
+            if await self._try_connect():
+                logger.info(
+                    "Reconnected successfully / 重連成功"
+                )
+                return
+
+            self._reconnect_attempts += 1
+
+        # Phase 2: fallback mode — ai_available=False, retry every 5s
+        # 階段 2：降級模式 — ai_available=False，每 5 秒重試
+        self._ai_available = False
+        logger.warning(
+            "Engine IPC failed %d times, entering fallback mode "
+            "(ai_available=false, retry every %.0fs) / "
+            "引擎 IPC 失敗 %d 次，進入降級模式"
+            "（ai_available=false，每 %.0fs 重試）",
+            MAX_RECONNECT_ATTEMPTS, FALLBACK_RETRY_INTERVAL,
+            MAX_RECONNECT_ATTEMPTS, FALLBACK_RETRY_INTERVAL,
+        )
+
+        while True:
+            await asyncio.sleep(FALLBACK_RETRY_INTERVAL)
+            if await self._try_connect():
+                logger.info(
+                    "Reconnected from fallback mode / 從降級模式恢復連接"
+                )
+                return

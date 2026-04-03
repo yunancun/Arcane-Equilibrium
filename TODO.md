@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-03（Phase 2 完成 · 代碼 ~82% 業務 ~93% · 關鍵路徑 Phase 3 → R）
+# 最後更新：2026-04-03（Phase R-01 完成 · Rust 65 tests · Python 3703 passed · 關鍵路徑 R-02）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -192,8 +192,8 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 > **階段文件**：`docs/rust_migration/`（8 個文件，Agent 接手先讀 README.md）
 > **前置**：Phase 0-3 全部完成 + L1+L2 凍結 + Alpha PnL > 0
 
-### [~] R-00：提前並行（Phase 1-3 期間）— Cargo workspace ✅ + PyO3 ContextDistiller ✅ + types + CI + 告警 bot
-### [ ] R-01：IPC + shared_types + WS（W1-2）
+### [x] R-00：提前並行（Phase 1-3 期間）— Cargo workspace ✅ + PyO3 ✅ + types ✅ + CI ✅ + L1/L2凍結 ✅（告警 bot 延後）
+### [x] R-01：IPC + shared_types + WS（W1-2）— workspace 統一 + openclaw_pyo3 crate + 4 engine 模組 + 3 Python 模組 + schema diff CI
 ### [ ] R-02：core 上半——感知 + 認知 + 風控（W3-4）
 ### [ ] R-03：core 下半——SM + 執行 + 回測（W5-6）
 ### [ ] R-04：Engine 完整交易路徑（W7-8）

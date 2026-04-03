@@ -139,7 +139,7 @@ impl HedgingEngine {
     /// Compute total net delta across all positions in USD.
     /// 計算所有倉位的總淨 delta（USD 計價）。
     fn compute_net_delta(&self, positions: Vec<Position>) -> f64 {
-        positions.iter().map(|p| Self::position_delta(p)).sum()
+        positions.iter().map(Self::position_delta).sum()
     }
 
     /// Generate hedging recommendations for positions exceeding threshold.

@@ -326,4 +326,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 tests · 131+ routes · 5 Agent · demo_only · 代碼 ~90%（~65k/73k）· 業務 ~100% · Phase 0-3 全部完成 + L1/L2 凍結 · Phase 3：Claude API 四級路由 + TSR 閉環 + HedgingEngine Rust + DelegationFramework 四階段放權 + PnL Attribution API + OB Imbalance · Rust 模組：ContextDistiller + HedgingEngine · 下一步：Phase R — Rust 遷移 14 週 → 讀 TODO.md。
+> 截至 2026-04-03：3703 Py tests + 65 Rust tests · 131+ routes · 5 Agent · demo_only · Phase R-01 完成 · Rust workspace 統一（4 crates: types/core/engine/pyo3）· Engine 模組：IPC server + WS client + config + main · Python IPC 層：shared_types + ipc_client + ai_service · Schema diff CI · E2 PASS + E4 零回歸 + E5 PASS · 下一步：R-02 core 上半（感知+認知+風控）→ 讀 TODO.md。

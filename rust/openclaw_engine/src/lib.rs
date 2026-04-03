@@ -1,0 +1,16 @@
+//! OpenClaw Engine — trading engine main body (R01).
+//! OpenClaw 引擎 — 交易引擎主體。
+//!
+//! MODULE_NOTE (EN): Library crate re-exporting engine modules: config (ArcSwap hot-reload),
+//!   ipc_server (Unix socket JSON-RPC 2.0), ws_client (Bybit WS with auto-reconnect).
+//!   The binary entry point is in main.rs.
+//! MODULE_NOTE (中): 庫 crate 重新導出引擎模組：config（ArcSwap 熱加載）、
+//!   ipc_server（Unix 套接字 JSON-RPC 2.0）、ws_client（Bybit WS 自動重連）。
+//!   二進制入口在 main.rs。
+
+pub mod config;
+pub mod ipc_server;
+pub mod ws_client;
+
+pub use openclaw_core;
+pub use openclaw_types;

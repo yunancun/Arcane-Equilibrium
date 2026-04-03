@@ -1,0 +1,127 @@
+{
+  "_comment": "Golden schema for Python/Rust IPC shared types. Both sides validate against this.",
+  "_comment_zh": "Python/Rust IPC 共享類型的黃金基準。兩側均須驗證一致性。",
+  "version": 1,
+  "types": {
+    "RiskLevel": {
+      "kind": "int_enum",
+      "variants": {
+        "NORMAL": 0,
+        "CAUTIOUS": 1,
+        "REDUCED": 2,
+        "DEFENSIVE": 3,
+        "CIRCUIT_BREAKER": 4,
+        "MANUAL_REVIEW": 5
+      }
+    },
+    "RiskInitiator": {
+      "kind": "str_enum",
+      "variants": {
+        "RISK_GOVERNOR": "RiskGovernor",
+        "OPERATOR": "Operator",
+        "INCIDENT_POLICY": "IncidentPolicy",
+        "HEALTH_MONITOR": "HealthMonitor",
+        "EXPIRY_GUARDIAN": "ExpiryGuardian"
+      }
+    },
+    "OrderState": {
+      "kind": "str_enum",
+      "variants": {
+        "CREATED": "CREATED",
+        "PENDING": "PENDING",
+        "APPROVED": "APPROVED",
+        "SUBMITTED": "SUBMITTED",
+        "WORKING": "WORKING",
+        "PARTIALLY_FILLED": "PARTIALLY_FILLED",
+        "FILLED": "FILLED",
+        "RECONCILING": "RECONCILING",
+        "COMPLETED": "COMPLETED",
+        "CANCELED": "CANCELED",
+        "REJECTED": "REJECTED"
+      }
+    },
+    "OrderInitiator": {
+      "kind": "str_enum",
+      "variants": {
+        "OPERATOR": "Operator",
+        "AI_AGENT": "AIAgent",
+        "SYSTEM": "System",
+        "EXECUTION_VENUE": "ExecutionVenue",
+        "AUTHORIZATION_SM": "AuthorizationSM",
+        "RECONCILIATION_ENGINE": "ReconciliationEngine",
+        "RISK_GOVERNOR": "RiskGovernor"
+      }
+    },
+    "H0GateConfig": {
+      "kind": "struct",
+      "fields": {
+        "max_data_age_ms": {"type": "int", "default": 1000},
+        "max_cpu_pct": {"type": "float", "default": 90.0},
+        "min_memory_mb": {"type": "int", "default": 1024},
+        "max_db_latency_ms": {"type": "float", "default": 100.0},
+        "max_network_loss_pct": {"type": "float", "default": 5.0},
+        "allowed_categories": {"type": "list_string"},
+        "max_open_positions": {"type": "int", "default": 10},
+        "max_total_exposure_pct": {"type": "float", "default": 90.0},
+        "health_snapshot_max_age_ms": {"type": "int", "default": 30000},
+        "shadow_mode": {"type": "bool", "default": false}
+      }
+    },
+    "H0GateHealthSnapshot": {
+      "kind": "struct",
+      "fields": {
+        "cpu_pct": {"type": "float", "default": 0.0},
+        "memory_available_mb": {"type": "int", "default": 9999},
+        "db_latency_ms": {"type": "float", "default": 0.0},
+        "network_loss_pct": {"type": "float", "default": 0.0},
+        "snapshot_ts_ms": {"type": "int", "default": 0}
+      }
+    },
+    "H0GateRiskSnapshot": {
+      "kind": "struct",
+      "fields": {
+        "open_position_count": {"type": "int", "default": 0},
+        "total_exposure_pct": {"type": "float", "default": 0.0},
+        "cooldown_until_ts_ms": {"type": "int", "default": 0},
+        "kill_switch_active": {"type": "bool", "default": false},
+        "snapshot_ts_ms": {"type": "int", "default": 0}
+      }
+    },
+    "H0GateCheckResult": {
+      "kind": "struct",
+      "fields": {
+        "allowed": {"type": "bool"},
+        "reason": {"type": "string"},
+        "check_name": {"type": "string"},
+        "latency_us": {"type": "int", "default": 0}
+      }
+    },
+    "StopConfig": {
+      "kind": "struct",
+      "fields": {
+        "hard_stop_pct": {"type": "float", "default": 5.0},
+        "trailing_stop_pct": {"type": "optional_float"},
+        "time_stop_hours": {"type": "optional_float"},
+        "atr_multiplier": {"type": "optional_float"}
+      }
+    },
+    "PriceEvent": {
+      "kind": "struct",
+      "fields": {
+        "symbol": {"type": "string"},
+        "last_price": {"type": "float"},
+        "mark_price": {"type": "optional_float"},
+        "index_price": {"type": "optional_float"},
+        "best_bid": {"type": "optional_float"},
+        "best_ask": {"type": "optional_float"},
+        "volume_24h": {"type": "optional_float"},
+        "turnover_24h": {"type": "optional_float"},
+        "price_change_pct_24h": {"type": "optional_float"},
+        "high_24h": {"type": "optional_float"},
+        "low_24h": {"type": "optional_float"},
+        "ts_ms": {"type": "int", "default": 0},
+        "receive_ts_ms": {"type": "int", "default": 0}
+      }
+    }
+  }
+}
