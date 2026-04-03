@@ -3,6 +3,32 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### R-06 Python IPC Integration Complete（2026-04-03 · Session 11）
+
+**R06-D conftest IPC mock fixtures:**
+- 新增 5 個 pytest fixtures（rust_snapshot_dir, rust_reader_available/unavailable, patch 版本）
+- SAMPLE_PIPELINE_SNAPSHOT 共享測試數據
+- 12 處 SM import TODO 標記保留（SM 仍為 Python，R-07+ 處理）
+
+**R06-E IPC 集成測試 53 個：**
+- test_ipc_state_reader.py：14 個基礎讀取器測試（Session 10）
+- test_ipc_integration.py：39 個（reader supplement + route logic + source tag + edge cases + rollback simulation）
+
+**R06-F 回滾預演：**
+- TestRollbackSimulation 6 個測試：crash → fallback → recovery lifecycle
+- SLA 驗證：fallback < 100ms（要求 < 30s）
+
+**R-06 Go/No-Go 門控全部通過：**
+- 4/7 routes IPC 改造完成（3 個有意 defer）
+- 53 IPC 測試全 PASS
+- Python 3794 pass ≥ 3500 基準
+- 回滾 SLA < 100ms
+- conftest fixtures 已加入
+
+**測試基準線：** Python 3794 passed / 28 failed / 17 errors / 1 skipped + Rust 552 passed / 0 failed
+
+---
+
 ### R-05 Engine Integration + Bybit API Compatibility（2026-04-03）
 
 **Engine Live Wiring:**

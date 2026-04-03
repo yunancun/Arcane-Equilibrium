@@ -199,7 +199,7 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 ### [x] R-03：core 下半——SM + 執行 + 回測（W5-6）— 4 SM + GovernanceCore 級聯 + 9 模組 + 468 Rust tests + 極端組 PASS
 ### [x] R-04：Engine 完整交易路徑（W7-8）— tick_pipeline + 5 策略 + paper_state + persistence + 517 Rust tests
 ### [x] R-05：★ Conditional Go 簽核（2026-04-03）— 5/6 PASS + 3 風險待 soak test（見 KNOWN_ISSUES.md）
-### [~] R-06：Python IPC 改造（W9-10）— R06-A/B1/B2/E ✅，R06-C 延至 R-07，R06-D/E+/F 待做
+### [x] R-06：Python IPC 改造（W9-10）— 53 IPC tests PASS，回滾 SLA <100ms，R06-C 延至 R-07
 ### [ ] R-07：灰度驗證 + 穩定觀察（W11-14）
 
 > 每個 R-xx 的詳細子任務見 `docs/rust_migration/0x--*.md`

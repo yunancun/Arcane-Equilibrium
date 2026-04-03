@@ -524,6 +524,102 @@ def _create_and_advance_oms_order(sm, target_state) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# IPC STATE READER FIXTURES / IPC 狀態讀取器夾具 (R06-D)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Standard pipeline snapshot matching Rust PipelineSnapshot format
+# 標準管線快照，匹配 Rust PipelineSnapshot 格式
+SAMPLE_PIPELINE_SNAPSHOT = {
+    "paper_state": {
+        "balance": 9500.0,
+        "peak_balance": 10000.0,
+        "total_realized_pnl": -500.0,
+        "total_fees": 12.5,
+        "trade_count": 3,
+        "positions": [
+            {
+                "symbol": "BTCUSDT",
+                "is_long": True,
+                "qty": 0.01,
+                "entry_price": 65000.0,
+                "best_price": 66000.0,
+                "entry_fee": 3.25,
+                "entry_ts_ms": 1700000000000,
+                "unrealized_pnl": 10.0,
+            }
+        ],
+    },
+    "latest_prices": {"BTCUSDT": 66000.0, "ETHUSDT": 3200.0},
+    "stats": {
+        "total_ticks": 5000,
+        "total_intents": 15,
+        "total_fills": 3,
+        "total_stops": 1,
+        "last_tick_ms": 1700000050000,
+    },
+    "source": "rust_engine",
+}
+
+
+@pytest.fixture
+def rust_snapshot_dir():
+    """
+    Create a temp dir with a valid pipeline_snapshot.json.
+    創建帶有有效 pipeline_snapshot.json 的臨時目錄。
+    """
+    with tempfile.TemporaryDirectory(prefix="rust_snap_") as d:
+        path = os.path.join(d, "pipeline_snapshot.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(SAMPLE_PIPELINE_SNAPSHOT, f)
+        yield d
+
+
+@pytest.fixture
+def rust_reader_available(rust_snapshot_dir):
+    """
+    Provide a RustSnapshotReader pointing at a valid snapshot file.
+    提供指向有效快照文件的 RustSnapshotReader。
+    """
+    from app.ipc_state_reader import RustSnapshotReader
+    return RustSnapshotReader(data_dir=rust_snapshot_dir)
+
+
+@pytest.fixture
+def rust_reader_unavailable():
+    """
+    Provide a RustSnapshotReader with no snapshot (simulates Rust engine down).
+    提供無快照的 RustSnapshotReader（模擬 Rust 引擎停止）。
+    """
+    with tempfile.TemporaryDirectory(prefix="rust_empty_") as d:
+        from app.ipc_state_reader import RustSnapshotReader
+        yield RustSnapshotReader(data_dir=d)
+
+
+@pytest.fixture
+def patch_rust_reader_available(rust_reader_available, monkeypatch):
+    """
+    Monkeypatch the ipc_state_reader singleton to a reader with valid data.
+    Monkeypatch ipc_state_reader 單例為帶有效數據的讀取器。
+    Use this in route-level tests to simulate Rust engine running.
+    """
+    import app.ipc_state_reader as mod
+    monkeypatch.setattr(mod, "_READER", rust_reader_available)
+    return rust_reader_available
+
+
+@pytest.fixture
+def patch_rust_reader_unavailable(rust_reader_unavailable, monkeypatch):
+    """
+    Monkeypatch the ipc_state_reader singleton to a reader with no data.
+    Monkeypatch ipc_state_reader 單例為無數據的讀取器。
+    Use this in route-level tests to simulate Rust engine NOT running (fallback path).
+    """
+    import app.ipc_state_reader as mod
+    monkeypatch.setattr(mod, "_READER", rust_reader_unavailable)
+    return rust_reader_unavailable
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MODULE-LEVEL EXPORTS / 模块级导出
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -555,6 +651,12 @@ __all__ = [
     "category_risk_config",
     "bybit_ws_listener",
     "sample_price_event",
+    # IPC fixtures (R06-D)
+    "rust_snapshot_dir",
+    "rust_reader_available",
+    "rust_reader_unavailable",
+    "patch_rust_reader_available",
+    "patch_rust_reader_unavailable",
     # Helpers
     "_sample_audit_record",
     "_create_draft_auth",
