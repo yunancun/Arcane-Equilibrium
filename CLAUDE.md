@@ -54,7 +54,9 @@
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
 GUI：11-Tab 專業控制台
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
-代碼完成度：~82%　業務功能能用：~52%
+代碼完成度：~72%（現有 52,500 行 / 最終 ~73,000 行 Py+Rs）　業務功能能用：~52%
+總工時進度：~31%（已完成 ~45d / 總計 ~147d）· Python-only 58%（45/77d）
+關鍵路徑：Phase 0-3（32d）→ Phase R（70d）= 102d 壁鐘 ≈ 20 週
 ★ Batch 9A 確定性自適應風控（2026-04-02，QC 量化審查驅動）：
   ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用記錄
 ★★★ 認知自適應 SPEC V1.1+R1（2026-04-03，五角色交叉審查 + 兩輪審計通過）：
@@ -324,4 +326,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Phase 0-3+R 全路線圖定稿（Phase 0-3 功能 7 週 + Phase R Rust 遷移 14 週） · 認知自適應 SPEC V1.1+R1 通過 · Rust 遷移 V3-FINAL 通過（32,500 行 · 8 階段文件 · Week 8 決策點） · 下一步：Phase 0 Batch 9B → 讀 TODO.md。
+> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 72%（52.5k/73k）· 業務 52% · 工時 31%（45d/147d）· 全路線圖定稿 Phase 0-3+R（20 週 102d）· 認知 SPEC + Rust V3-FINAL 均已通過 · 下一步：Phase 0 Batch 9B → 讀 TODO.md。
