@@ -28,3 +28,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
+rand = { version = "0.8", features = ["std_rng"] }

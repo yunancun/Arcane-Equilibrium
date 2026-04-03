@@ -33,7 +33,7 @@ Rust 遷移（14 週主開發）
 |------|------|-----|------|------|
 | [00--preparation_parallel.md](00--preparation_parallel.md) | 提前並行 | Phase 1-3 期間 | 無 | [x] 完成（R00-7 告警 bot 延後） |
 | [01--ipc_shared_types_ws.md](01--ipc_shared_types_ws.md) | IPC + 基礎設施 | W1-2 | 00 + L1 凍結 | [x] 完成 |
-| [02--core_upper.md](02--core_upper.md) | 感知 + 認知 + 風控 | W3-4 | 01 Go | [ ] 待開始 |
+| [02--core_upper.md](02--core_upper.md) | 感知 + 認知 + 風控 | W3-4 | 01 Go | [x] 完成 |
 | [03--core_lower.md](03--core_lower.md) | SM + 執行 + 回測 | W5-6 | 02 Go | [ ] 待開始 |
 | [04--engine_full_path.md](04--engine_full_path.md) | 完整交易路徑 | W7-8 | 03 Go | [ ] 待開始 |
 | [05--week8_decision_gate.md](05--week8_decision_gate.md) | 硬決策點 | W8 末 | 04 完成 | [ ] 待決策 |

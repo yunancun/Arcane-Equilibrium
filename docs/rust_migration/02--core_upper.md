@@ -98,16 +98,16 @@
 
 | 任務 | 狀態 | 完成日期 | commit |
 |------|------|---------|--------|
-| R02-1 klines.rs | [ ] | | |
-| R02-2 indicators.rs | [ ] | | |
-| R02-3 signals.rs | [ ] | | |
-| R02-4 h0_gate.rs | [ ] | | |
-| R02-5 risk.rs | [ ] | | |
-| R02-6 attention.rs | [ ] | | |
-| R02-7 cognitive.rs | [ ] | | |
-| R02-8 opportunity.rs | [ ] | | |
-| R02-9 dream.rs | [ ] | | |
-| R02-10 Golden Dataset 對比 | [ ] | | |
+| R02-1 klines.rs | [x] | 2026-04-03 | pending |
+| R02-2 indicators.rs | [x] | 2026-04-03 | pending |
+| R02-3 signals.rs | [x] | 2026-04-03 | pending |
+| R02-4 h0_gate.rs | [x] | 2026-04-03 | pending |
+| R02-5 risk.rs | [x] | 2026-04-03 | pending |
+| R02-6 attention.rs | [x] | 2026-04-03 | pending |
+| R02-7 cognitive.rs | [x] | 2026-04-03 | pending |
+| R02-8 opportunity.rs | [x] | 2026-04-03 | pending |
+| R02-9 dream.rs | [x] | 2026-04-03 | pending |
+| R02-10 Golden Dataset 對比 | [x] | 2026-04-03 | pending |
 
 ---
 

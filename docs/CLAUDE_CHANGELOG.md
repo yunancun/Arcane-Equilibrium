@@ -5,6 +5,36 @@
 
 ---
 
+### Phase R-02 完成 — core 上半：感知 + 認知 + 風控（2026-04-03）
+
+**Batch 1（小型獨立模組）：**
+- `attention.rs`：5 級注意力（Dormant→Critical）+ 波動性跳動檢測 + 訂單接近度（11 tests）
+- `cognitive.rs`：CognitiveModulator EMA 平滑 + R1-5 連虧忽略 + dream blend（13 tests）
+- `opportunity.rs`：OpportunityTracker 虛擬 PnL + 2x fee + 遺憾方向判定（18 tests）
+- `dream.rs`：DreamEngine 蒙特卡洛 + binomial test + 重入鎖（20 tests）
+
+**Batch 2（中型模組）：**
+- `klines.rs`：KlineManager 多時間框架聚合 + Kahan 補償求和（18 tests）
+- `h0_gate.rs`：H0Gate 5 項門控 fail-fast + shadow mode + <1ms SLA（30 tests）
+
+**Batch 3（13 指標引擎）：**
+- `indicators/` 拆分 5 文件：trend(SMA/EMA/MACD/KAMA/Donchian) + momentum(RSI/Stoch/ADX) + volatility(BB/ATR/Hurst/EWMA) + volume(VolumeRatio)
+- Kahan 求和：SMA/KAMA/ADX/VolumeRatio/RSI [V3-QC-2]（33 tests）
+
+**Batch 4（信號 + 風控）：**
+- `signals/`：8 規則（RSI OB/OS, MA Cross, BB Reversion, MACD, exits, divergence, regime）+ QC 邊界豁免 + SignalEngine 共識（30 tests）
+- `cost_gate.rs`：5 級成本分層 + ATR vs 成本門檻（11 tests）
+- `risk/`：RiskConfig P0/P1/P2 + 動態止損(ATR+regime) + 8 優先級 tick 檢查 + PriceHistoryTracker（45 tests）
+
+**Batch 5（Golden Dataset）：**
+- `tests/golden_dataset.rs`：合成數據 13 指標交叉驗證 + Kahan 精度 + 確定性再現（8 tests）
+- `helper_scripts/golden_dataset_gen.py`：Python 對照生成器
+
+**審查：** E2 CONDITIONAL→PASS（移除 opportunity.rs 未用 next_id）· E4 PASS 零回歸
+**測試：** Rust 302 passed（+237 vs R-01）/ Python 3703 passed（不變）
+
+---
+
 ### Phase R-01 完成 — IPC + shared_types + WS + Workspace 統一（2026-04-03）
 
 **Batch 0 — Rust workspace 合併：**
