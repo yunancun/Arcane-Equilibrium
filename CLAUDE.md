@@ -47,32 +47,29 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,839 Py passed + 555 Rust passed（0 failed · 0 errors · 全綠）
+測試：3,839 Py + 555 Rust + 35 Canary = 4,429 tests 全綠
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
-治理：GovernanceHub 4 SM，fail-closed 已驗證 · Rust GovernanceCore 級聯 all-or-nothing
+治理：GovernanceHub 4 SM，fail-closed · Rust GovernanceCore 級聯 all-or-nothing
 品類：linear + spot + inverse（option 未來）
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
 GUI：11-Tab 專業控制台 + Kelly 資本配置卡片
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
 Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
-代碼完成度：~90%（~67,000 行 Py+Rs / 最終 ~73,000 行）　業務功能能用：~95%
-總工時進度：~45%（已完成 ~66d / 總計 ~147d）· Python 58%（45/77d）· Rust R-06 完成 R-07 進行中
-關鍵路徑：R-07 即時灰度 7 天 → Rust 遷移正式完成
-★★★★ Rust 遷移 — R-07 代碼全部完成，待即時灰度驗證：
-  R-00~R-06 全部完成 · R-07 全部工具已構建（回放/比較/看門狗/回滾）
-  加速方案：歷史回放取代即時灰度（22 天 → ~7 天）
-  Python shadow 已驗證：201,600 ticks（7d×5sym）300 秒完成
-  Rust canary mode：OPENCLAW_CANARY_MODE=1 · 555 Rust tests
-  下一步：啟動引擎即時灰度 7 天 → Go/No-Go → 正式完成
-  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 代碼 ✅ · 灰度待啟動）
-★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
-  Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
-  Phase 1（Week 2-3）：Agent 感知工具箱 + 認知三模組 + ★Rust R-00 提前並行
-  Phase 2（Week 3-5）：策略 V2 + Agent 整合 + ★L1 接口凍結
-  Phase 3（Week 5-7）：Claude API + 四階段放權 + ★L2 接口凍結
-  Phase R（Week 8-21）：Rust 遷移 14 週主開發 + 灰度 + 穩定觀察
-  ★ Alpha 基準測試從 Day 1 並行跑 Paper 2 週，Day 10 決策點
-  主計劃文件：docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md
+代碼完成度：~90%（~67,000 行 Py+Rs）· 業務功能：~95%
+總工時進度：~35%（已完成 ~66d / 新總計 ~189d，含融合方案 105d 新增）
+關鍵路徑：R-07 Go/No-Go 4/10 → 融合方案 Phase 0a 開始 4/11
+★★★★ Rust 遷移 — R-07 灰度驗證中（Go/No-Go 2026-04-10）：
+  R-00~R-06 全部完成 · R-07 引擎即時灰度運行中
+  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 灰度中）
+★★★★ 融合方案 v0.5（DB + ML/DL + 新聞 Agent · 20 週）：
+  兩輪審計 + DB 專題 + 四角色聯合驗證 = 67 項修正
+  存儲精簡 97%：5.6→0.17 GB/day · PG+TimescaleDB 確認 · 砍 PgBouncer
+  ML：LightGBM Scorer + Optuna TPE + Thompson Sampling + CPCV + 黑天鵝檢測
+  DL：Symbol Embedding + Regime LSTM + 時序基礎模型（3 場景）
+  語言：訓練 Python / 推理 Rust ONNX / 橋接 PyO3
+  設計文件：docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md
+  執行計劃：docs/references/2026-04-04--execution_plan_v1.md
+  ML 架構：docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md
   改善報告原文：docs/references/2026-04-03--openclaw_improvement_report_v3_final.md
 
 Runtime 硬狀態（不可改）：
@@ -289,37 +286,32 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **★★★ 當前焦點：Phase 0（Batch 9B+9C+9D）→ 讀 TODO.md 開始執行**
 
-**統一路線圖（5 Phase + Alpha 基準 + Rust 遷移）：**
-- **Phase 0**（本週）：Batch 9B 學習閉環 + 9C 管線連通 + 9D 策略 Edge → 業務 52%→72%
-- **Phase 1**（Week 2-3）：Agent 感知工具箱 + 認知三模組 + **★Rust R-00 提前並行**（Cargo workspace + types crate）
-- **Phase 2**（Week 3-5）：策略 V2 + Agent 整合 + 認知閉環 + **★L1 接口凍結**
-- **Phase 3**（Week 5-7）：Claude API L1.5 + 四階段放權 + **★L2 接口凍結**
-- **Phase R**（Week 8-21）：**Rust 遷移 14 週主開發**（R-01~R-07） · Week 8 硬決策點 · 灰度 · 穩定觀察
+**★★ 融合路線圖（DB + ML/DL + 新聞 Agent · 20 週 · 起算 4/11）：**
+- **Phase 0a**（W1）：PG 8-Schema DDL + Grafana VIEW 橋接
+- **Phase 0b**（W2-3）：TimescaleDB + 壓縮/retention + requirements-ml
+- **Phase 1**（W4-5）：市場數據止血 + FeatureCollector + PSI 漂移
+- **Phase 2**（W6-9）：交易鏈 + Decision Context + Scorer + ONNX [+buffer]
+- **Phase 3a**（W9-10）：update_params() = AGT-1
+- **Phase 3b**（W11-12）：Optuna TPE + Thompson Sampling + CPCV + 黑天鵝
+- **Phase 4**（W13-15）：Claude Teacher + LinUCB + 新聞 + DL-3
+- **Phase 5**（W16-18）：James-Stein + DL-1 + DL-2
+- **Phase 6**（W19-20）：漸進放權 + 驗收
 
-**Alpha 基準測試**：Phase 0 第一天開始並行跑 Paper 2 週（不寫代碼），Day 10 決策點：
-- PnL > 0 → 繼續 Phase 1-3
-- PnL ≈ 0 → 繼續但 Phase 2 策略升級提升優先級
-- PnL < -3% → 暫緩新模組，轉策略 Alpha 研究
+**前期路線圖（已完成）：** Phase 0-3 ✅ · Phase R R-00~R-06 ✅ · R-07 灰度中
 
 **關鍵文件：**
-- 主計劃：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md`
-- 改善報告：`docs/references/2026-04-03--openclaw_improvement_report_v3_final.md`
-- PA 映射：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-03--improvement_report_vs_existing_code_mapping.md`
-- QC 數學：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-03--improvement_report_math_validation.md`
-- FA 對比：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-03--improvement_report_gap_comparison.md`
-- 認知自適應：`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md`（V1.1+R1 五角色審查通過）
-- Rust 遷移源文件：`docs/references/2026-04-03--rust_migration_v3_final.md`（V3-FINAL）
-- Rust 階段執行：`docs/rust_migration/README.md`（8 個階段文件索引，Agent 接手入口）
-
-**每個 Phase 的 session 上下文設計已在主計劃文件中定義（§4.1/5/6 的 session 上下文段）。**
+- 融合方案 v0.5：`docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md`
+- 執行計劃 V1：`docs/references/2026-04-04--execution_plan_v1.md`
+- ML 架構 v0.4：`docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md`
+- DB 設計：`docs/references/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md`
+- Rust 遷移：`docs/rust_migration/README.md`
 
 **Live 前置條件（M/N 章前必須核驗）：**
 - Paper Trading 穩定運行至少 21 天
-- H0 Gate blocking 驗證（Phase 0 啟動 shadow 觀察）
-- 四階段放權框架完成（Phase 3）
-- 策略 Alpha 基準 > 0
+- 融合方案 Phase 6 完成（漸進放權 + 壓測通過）
+- Rust R-07 灰度通過
+- Alpha PnL > 0
 - provider pricing table 正式綁定
-- Rust 遷移完成（Phase R-07 灰度通過 + 穩定觀察 2 週）或 PyO3 降級方案穩定
 
 **章節樹導航：**
 A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous Live ⬜
@@ -331,4 +323,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3839 Py + 555 Rust + 35 Canary = 4429 tests 全綠 · 131+ routes · 5 Agent · demo_only · R-07 代碼全部完成（回放/比較/看門狗/回滾/CanaryRecord）· Python shadow 201,600 ticks 已驗證 · 歷史測試債務清零 · 下一步：啟動即時灰度 7 天 → 讀 TODO.md。
+> 截至 2026-04-04：4429 tests 全綠 · 131+ routes · 5 Agent · demo_only · R-07 灰度運行中（Go/No-Go 4/10）· 融合方案 v0.5 完成（DB+ML/DL+News，67 項審計修正，存儲砍 97%）· 執行計劃 V1（20 週 9 Phase ~120 任務）· 下一步：R-07 Go/No-Go → Phase 0a 開始 → 讀 TODO.md。

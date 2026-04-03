@@ -31,7 +31,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-03 · Phase R-04 完成，Week 8 决策点就绪)
+## 当前状态 (2026-04-04 · R-07 灰度中 · 融合方案 v0.5 + 执行计划 V1 完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
@@ -60,36 +60,42 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 |------|--------|------|------|
 | 代码量 | ~65,000 行（Py 50k + Rs 15k） | ~73,000 行 | 88% |
 | 业务功能 | — | — | 95% |
-| 工时 | ~62d | ~147d | 42% |
-| 测试 | 4,220（Py 3703 + Rs 517） | ~4,500 | 94% |
+| 工时 | ~66d | ~189d（含融合方案 105d） | 35% |
+| 测试 | 4,429（Py 3839 + Rs 555 + Canary 35） | ~4,629 | 96% |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
 | 自动扫描 | 90% | ScoutWorker 30min 定时扫描已接通 |
-| 策略选择 | 50% | Regime-aware 策略选择已实现（C4）；ATR 双窗口保守估计 |
-| AI 风险评估 | 60% | H1-H5 全部接通 + 成本感知入场门槛（cost_gate） |
+| 策略选择 | 50% | Regime-aware 已实现；V2 参数运行时可调待 Phase 3a |
+| AI 风险评估 | 60% | H1-H5 接通 + cost_gate；ML Scorer 待 Phase 2 |
 | 下单 | 85% | 治理 gate + OMS SM-03 已串联 |
-| 止损 | 80% | ATR 动态止损 + 追踪止损成本约束；缺交易所条件单双重防线 |
-| 学习 | 30% | E1 观察 + L2 自动触发 + Sunday cron；L3-L5 待推进 |
-| 进化 | 35% | EvolutionEngine + Scheduler 完成；学习反馈闭环待接通 |
+| 止损 | 80% | ATR 动态 + 追踪 + 交易所条件单 |
+| 学习 | 15% | 记账式学习 → ML 驱动学习闭环待融合方案执行 |
+| 进化 | 15% | EvolutionEngine 将被 Optuna TPE 取代（Phase 3b） |
+| DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
+| ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 4,220 测试 · 5 Agent 运行 · Rust 引擎 tick <100μs · 6 角色审计通过 · QC 量化审查驱动
+**亮点**：治理 fail-closed · P0/P1/P2 风控 · 4,429 测试全绿 · 5 Agent · Rust tick <100μs · 67 项审计修正
 
 **开发路线图**
 
 | Phase | 内容 | 状态 |
 |-------|------|------|
-| 0 | Batch 9B-9D 学习闭环 + 管线连通 + 策略 Edge 验证 | ✅ 完成 |
-| 1 | Agent 感知工具箱 + 认知三模组 + R-00 并行 | ✅ 完成 |
-| 2 | 策略 V2 + Agent 整合 + L1 接口冻结 | ✅ 完成 |
-| 3 | Claude API + 四阶段放权 + L2 接口冻结 | ✅ 完成 |
-| **R-00~R-04** | **Rust 引擎：types + IPC + core 24 模组 + engine 12 模组** | **✅ 完成** |
-| **R-05** | **★ Week 8 硬决策点（Go/No-Go）** | **🔄 待评估** |
-| R-06 | Python IPC 改造（W9-10） | ⬜ 待开始 |
-| R-07 | 灰度验证 + 稳定观察（W11-14） | ⬜ 待开始 |
-| Live | Paper Trading 21 天 + Live 准备 | ⬜ 待开始 |
+| 0-3 | 业务功能 52%→100% + L1/L2 冻结 | ✅ 完成 |
+| R-00~R-06 | Rust 引擎 24 core + 12 engine 模组 + IPC | ✅ 完成 |
+| **R-07** | **灰度验证（Go/No-Go 4/10）** | **🔄 运行中** |
+| **0a** | **PG 8-Schema DDL + Grafana VIEW 桥接** | ⬜ 4/11 起 |
+| 0b | TimescaleDB + 压缩/retention | ⬜ W2-3 |
+| 1 | 市场数据止血 + FeatureCollector + PSI | ⬜ W4-5 |
+| 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ⬜ W6-9 |
+| 3a | update_params() 改造（AGT-1） | ⬜ W9-10 |
+| 3b | Optuna TPE + Thompson Sampling + CPCV + 黑天鹅 | ⬜ W11-12 |
+| 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ⬜ W13-15 |
+| 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
+| 6 | 渐进放权 + 验收 + 压测 | ⬜ W19-20 |
+| Live | Paper 21 天 + Live 准备 | ⬜ 待 Phase 6 完成 |
 
-**详细报告**：`docs/governance_dev/audits/` 目录下各审计报告
+**详细文件**：`docs/references/2026-04-04--execution_plan_v1.md`（执行计划 V1）
 
 ---
 
