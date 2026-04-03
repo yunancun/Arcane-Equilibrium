@@ -82,8 +82,8 @@
     <div id="explain-intents"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Source</th><th>Status</th></tr></thead>
-        <tbody id="intents-tbody"><tr class="empty-row"><td colspan="7">Loading...</td></tr></tbody>
+        <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Conf</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody id="intents-tbody"><tr class="empty-row"><td colspan="8">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -94,6 +94,14 @@
   <summary>&#x1F527; 编排器详情 / Orchestrator Details</summary>
   <div class="oc-collapse-body">
     <div class="oc-metrics" id="orch-details"><div class="oc-loading">Loading...</div></div>
+  </div>
+</details>
+
+<!-- ═══ Indicator & Signal Engine ═══ -->
+<details class="oc-collapse">
+  <summary>&#x1F4CA; 指标 &amp; 信号引擎 / Indicator &amp; Signal Engine</summary>
+  <div class="oc-collapse-body">
+    <div id="engine-details"><div class="oc-loading">Loading...</div></div>
   </div>
 </details>
 
@@ -110,14 +118,58 @@ const STRAT_CN = {
   'Volume_Spike':     '量价突破',
 };
 function stratLabel(name) {
-  const cn = STRAT_CN[name];
+  // Strip symbol suffix (e.g. MA_Crossover_BTCUSDT → MA_Crossover)
+  // 去掉 symbol 后缀，只保留策略类型名
+  const base = Object.keys(STRAT_CN).find(k => name === k || name.startsWith(k + '_'));
+  const cn = base ? STRAT_CN[base] : null;
   return cn ? name + ' / ' + cn : name;
+}
+
+// ─── Strategy V2 params renderer ─────────────────────────────
+// 按策略类型渲染 V2 新参数，返回 HTML 片段
+// Render V2 parameters per strategy type, returns HTML fragment.
+function stratV2Params(s) {
+  const strat = s.strategy || s.name || '';
+  const base = Object.keys(STRAT_CN).find(k => strat === k || strat.startsWith(k + '_')) || strat;
+  const rows = [];
+
+  if (base === 'MA_Crossover') {
+    if (s.adx_threshold != null)   rows.push('ADX&gt;' + s.adx_threshold);
+    if (s.use_kama)                rows.push('KAMA ✓');
+    if (s.multi_tf_confirm)        rows.push('Multi-TF ✓');
+    if (s.min_confidence != null)  rows.push('MinConf=' + s.min_confidence);
+  } else if (base === 'BB_Reversion') {
+    if (s.rsi_threshold != null)       rows.push('RSI&lt;' + s.rsi_threshold);
+    if (s.rsi_short_threshold != null) rows.push('RSI&gt;' + s.rsi_short_threshold);
+    if (s.regime_aware)                rows.push('Regime ✓');
+    if (s.use_limit_orders != null)    rows.push(s.use_limit_orders ? 'Limit ✓' : 'Market');
+  } else if (base === 'FundingRate_Arb') {
+    if (s.funding_threshold != null) rows.push('FundThr=' + (s.funding_threshold * 10000).toFixed(1) + 'bps');
+    if (s.total_fee_bps != null)     rows.push('TotalFee=' + s.total_fee_bps + 'bps');
+    if (s.delta_neutral)             rows.push('ΔNeutral ✓');
+    if (s.cost_summary) {
+      const cs = s.cost_summary;
+      if (cs.net_funding_pnl != null) rows.push('NetPnL=' + cs.net_funding_pnl.toFixed(4));
+    }
+  } else if (base === 'Grid_Trading') {
+    if (s.upper_price != null) rows.push('U=' + s.upper_price);
+    if (s.lower_price != null) rows.push('L=' + s.lower_price);
+    if (s.grid_count != null)  rows.push('N=' + s.grid_count);
+    if (s.grid_step != null)   rows.push('Step=' + s.grid_step);
+  } else if (base === 'BB_Breakout') {
+    if (s.min_confidence != null)  rows.push('MinConf=' + s.min_confidence);
+    if (s.use_volume_filter != null && s.use_volume_filter) rows.push('VolFlt ✓');
+    if (s.use_donchian != null && s.use_donchian) rows.push('Donchian ✓');
+  }
+
+  if (!rows.length) return '';
+  return '<div style="font-size:10px;color:var(--text-dim);margin-top:3px">' + rows.join(' · ') + '</div>';
 }
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-strategy').innerHTML = ocExplain(
   '策略中心管理所有交易策略。AI Agent 自主决定启动哪些策略（上限 100 个），人类只通过手动开关进行硬关闭。每个策略会分析市场数据并生成交易信号。编排器根据市场状态协调所有策略的运行。',
-  '系统支持多种策略类型：MA Crossover（均线交叉趋势跟踪）、Bollinger Reversion（布林带均值回归）、Funding Rate Arb（资金费率套利）、Grid Trading（网格交易）、BB Breakout（布林带突破）等。策略由 AI Agent 根据市场扫描结果自动部署，上限 100 个实例。编排器通过 Regime Detection 识别市场状态，据此调整参数和信号权重。手动开关仅用于紧急硬关闭。'
+  '系统支持 5 种 V2 策略：MA Crossover V2（KAMA+ADX>20+多时间框架确认）、BB Reversion V2（RSI<30确认+Hurst市场状态感知）、BB Breakout V2（成交量比>1.5+Donchian确认+ATR追踪止损）、FundingRate Arb V2（PairedState+真实费用追踪）、Grid V2（OU动态间距 σ/√θ）。策略由 AI Agent 根据市场扫描结果自动部署，上限 100 个实例。'
 );
 
 $('explain-scanner').innerHTML = ocExplain(
@@ -127,7 +179,7 @@ $('explain-scanner').innerHTML = ocExplain(
 
 $('explain-intents').innerHTML = ocExplain(
   '交易意图是策略产生的下单指令。它们在被执行前会经过风控检查，确保不违反任何限制。',
-  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、price、strategy_source。intent 会经过 StopManager 风控检查和 Position Sizing 计算后，转换为实际订单提交给 Paper Trading Engine 或 Bybit Demo。'
+  'OrderIntent 是策略层到执行层的桥梁。每个 intent 包含：symbol、side、qty、confidence、strategy_source。intent 会经过 cost_gate（ATR% < cost/winrate×1.3 则拒绝）和 StopManager 风控检查后，转换为实际订单提交给 Paper Trading Engine 或 Bybit Demo。'
 );
 
 // ─── Create / Delete Strategy ─────────────────────────────────
@@ -210,8 +262,11 @@ async function loadStrategies() {
     if (s.symbol) html += 'Symbol: <strong>' + ocEsc(s.symbol) + '</strong>';
     if (s.qty_per_trade != null) html += ' | Qty/Trade: ' + s.qty_per_trade;
     if (s.trade_count != null) html += ' | Trades: ' + s.trade_count;
-    if (s.current_position) html += ' | Position: ' + ocEsc(s.current_position);
+    if (s.current_position) html += ' | Pos: ' + ocEsc(s.current_position);
+    if (s.cooldown_ms != null) html += ' | CD: ' + (s.cooldown_ms / 1000) + 's';
     html += '</div>';
+    // V2 strategy parameters row / V2 策略参数行
+    html += stratV2Params(s);
     html += '<div class="strat-actions" style="margin-top:6px">';
     html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
     html += '<button class="oc-btn" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
@@ -227,29 +282,119 @@ async function loadOrchestrator() {
   if (!d || !d.data) return;
   const orch = d.data;
 
-  // Regime badge
-  const regime = orch.market_regime || orch.regime || '--';
+  // Regime badge — comes from signal_engine signal history (Regime_Detector rule)
+  // 市场状态 badge — 来自信号引擎的 Regime_Detector 规则输出
+  const sigStats = (orch.signal_engine_status || {}).stats || {};
+  const sigBySrc = sigStats.signals_by_source || {};
+  const hasRegime = (sigBySrc['Regime_Detector'] || 0) > 0;
   const regimeBadge = $('orch-regime');
-  regimeBadge.textContent = regime;
-  if (regime.includes('trend')) regimeBadge.className = 'oc-chip oc-chip-good';
-  else if (regime.includes('rang') || regime.includes('sideways')) regimeBadge.className = 'oc-chip oc-chip-warn';
-  else if (regime.includes('volatile')) regimeBadge.className = 'oc-chip oc-chip-bad';
-  else regimeBadge.className = 'oc-chip oc-chip-info';
+  if (hasRegime) {
+    regimeBadge.textContent = 'Regime Active';
+    regimeBadge.className = 'oc-chip oc-chip-info';
+  } else {
+    regimeBadge.textContent = 'No Regime Data';
+    regimeBadge.className = 'oc-chip oc-chip-neutral';
+  }
 
-  // Details
+  // Update active/total from orchestrator (more authoritative than list filter)
+  // 从编排器状态更新 active/total（比 list 过滤更权威）
+  if (orch.active_count != null) ocSetText('orch-active', orch.active_count);
+  if (orch.total_registered != null) ocSetText('orch-total', orch.total_registered);
+
+  // Details — correct field paths from actual API response
+  // 详情 — 使用实际 API 响应的正确字段路径
+  const stats = orch.stats || {};
+  const klMgr = orch.kline_manager_status || {};
+  const klStats = klMgr.stats || {};
+  const sigEngine = orch.signal_engine_status || {};
+
   let html = '';
   const fields = [
-    ['Pipeline Active', orch.pipeline_active || orch.pipeline_running],
-    ['Tick Count', orch.tick_count],
-    ['Signal Count', orch.total_signals || orch.signal_count],
-    ['Intent Count', orch.total_intents || orch.intent_count],
-    ['Last Tick', ocTimeShort(orch.last_tick_ts)],
-    ['Regime Confidence', orch.regime_confidence != null ? (orch.regime_confidence * 100).toFixed(0) + '%' : null],
+    ['Pipeline Active',   orch.active_count > 0 ? 'Yes' : 'No'],
+    ['Active Strategies', orch.active_count],
+    ['Total Registered',  orch.total_registered],
+    ['Signals Dispatched',stats.signals_dispatched],
+    ['Intents Collected', stats.intents_collected],
+    ['Strategies Activated', stats.strategies_activated],
+    ['Ticks Processed',   klStats.total_ticks_processed],
+    ['Klines Closed',     klStats.total_klines_closed],
+    ['Symbols Tracked',   (klMgr.symbols || []).length || null],
+    ['Timeframes',        (klMgr.timeframes || []).join(', ') || null],
+    ['Last Tick',         klStats.last_tick_ts_ms ? ocTimeShort(klStats.last_tick_ts_ms) : null],
+    ['Signal Rules',      sigEngine.rule_count],
+    ['Signal History',    sigEngine.history_size],
   ];
   fields.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+    if (val == null) return;
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + val + '</div></div>';
   });
   ocSetHtml('orch-details', '<div class="oc-metrics">' + html + '</div>');
+
+  // Also render engine details panel
+  // 同时渲染指标/信号引擎详情面板
+  renderEngineDetails(orch);
+}
+
+// ─── Indicator & Signal Engine Panel ─────────────────────────
+// 渲染指标引擎和信号引擎的详情
+// Renders indicator engine and signal engine details.
+function renderEngineDetails(orch) {
+  const indEng = orch.indicator_engine_status || {};
+  const sigEng = orch.signal_engine_status || {};
+  const sigStats = sigEng.stats || {};
+  const sigBySrc = sigStats.signals_by_source || {};
+  const sigByDir = sigStats.signals_by_direction || {};
+
+  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+
+  // Indicator engine
+  html += '<div>';
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x1F9EE; 指标引擎 / Indicator Engine</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (indEng.indicator_count || 0) + ' 个指标 / ' + (indEng.indicator_count || 0) + ' indicators</div>';
+  const indStats = indEng.stats || {};
+  html += '<div style="font-size:11px;margin-bottom:6px">';
+  html += 'Computations: ' + (indStats.total_computations || 0) + ' · Errors: ' + (indStats.computation_errors || 0) + ' · Cache Hits: ' + (indStats.cache_hits || 0);
+  html += '</div>';
+  const indicators = indEng.indicators_registered || [];
+  if (indicators.length) {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    indicators.forEach(ind => {
+      html += '<span class="oc-chip oc-chip-neutral" style="font-size:10px">' + ocEsc(ind) + '</span>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Signal engine
+  html += '<div>';
+  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x26A1; 信号引擎 / Signal Engine</div>';
+  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (sigEng.rule_count || 0) + ' 条规则 · ' + (sigEng.history_size || 0) + ' 条历史</div>';
+  html += '<div style="font-size:11px;margin-bottom:4px">Evals: ' + (sigStats.total_evaluations || 0) + ' · Generated: ' + (sigStats.signals_generated || 0) + ' · Errors: ' + (sigStats.rule_errors || 0) + '</div>';
+
+  // Signal direction breakdown
+  if (Object.keys(sigByDir).length) {
+    html += '<div style="font-size:11px;margin-bottom:6px">';
+    ['long','short','close_long','close_short','neutral'].forEach(dir => {
+      if (sigByDir[dir] != null) {
+        const color = dir === 'long' ? 'good' : dir === 'short' ? 'bad' : dir.startsWith('close') ? 'warn' : 'neutral';
+        html += ocChip(dir + ':' + sigByDir[dir], color) + ' ';
+      }
+    });
+    html += '</div>';
+  }
+
+  // Signal source breakdown
+  if (Object.keys(sigBySrc).length) {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    Object.entries(sigBySrc).sort((a,b) => b[1]-a[1]).forEach(([src, cnt]) => {
+      html += '<span class="oc-chip oc-chip-info" style="font-size:10px">' + ocEsc(src) + ':' + cnt + '</span>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  ocSetHtml('engine-details', html);
 }
 
 async function loadScanner() {
@@ -303,7 +448,7 @@ async function loadIntents() {
   if (!d || !d.data) return;
   const intents = d.data.intents || d.data || [];
   if (!intents.length) {
-    ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="7">暂无交易意图 / No intents</td></tr>');
+    ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8">暂无交易意图 / No intents</td></tr>');
     return;
   }
   let html = '';
@@ -313,12 +458,14 @@ async function loadIntents() {
     if (status === 'submitted') statusChip = 'good';
     else if (status.startsWith('rejected') || status.startsWith('blocked')) statusChip = 'bad';
     else if (status === 'pending') statusChip = 'warn';
+    const conf = i.confidence != null ? (i.confidence * 100).toFixed(0) + '%' : '--';
     html += '<tr>';
     html += '<td>' + ocTimeShort(i.collected_ts_ms) + '</td>';
     html += '<td>' + ocEsc(i.symbol) + '</td>';
     html += '<td class="' + (i.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(i.side) + '</td>';
     html += '<td>' + ocEsc(i.order_type || 'market') + '</td>';
     html += '<td>' + ocNum(i.qty, 4) + '</td>';
+    html += '<td style="font-size:11px">' + conf + '</td>';
     html += '<td style="font-size:11px">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
     html += '<td>' + ocChip(status, statusChip) + '</td>';
     html += '</tr>';
