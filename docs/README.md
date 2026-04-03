@@ -352,7 +352,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-30--local_ai_expansion_analysis.md` | 本地 AI 擴展用途分析（Ollama/Qwen 3.5 應用場景，DOC-08 依據） |
 | `2026-04-03--openclaw_improvement_report_v3_final.md` | ★★★★ 外部全面改善建議報告 V3 Final：五輪三人審批 34 項修正 · Agent 自主化架構 + 雙層決策 + 四階段放權 + 10 新模組 + 5 策略 V2 + L0-L2 路徑 + Claude API 整合 |
 | `2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md` | V1.1+R1 · Agent 認知自適應規範：CognitiveModulator（L0 決策門檻調製）+ OpportunityTracker（遺憾追蹤）+ DreamEngine（閒置蒙特卡洛模擬）— 五角色審查通過，Phase 1 並行組 B |
-| `2026-04-03--rust_migration_master_plan_v2.md` | V2 草稿 · Rust 遷移總方案：Rust 交易引擎 + Python AI/GUI 雙進程架構 · 13,530 行 Rust · 10 週路線圖 · 灰度驗證框架 — 待審查 |
+| `2026-04-03--rust_migration_master_plan_v2.md` | V2 草稿（歸檔）· Rust 遷移總方案初版 |
+| `2026-04-03--rust_migration_v2.5_consolidated.md` | V2.5 整合版（歸檔）· 六路缺口修復後 |
+| `2026-04-03--rust_migration_v3_final.md` | ★★★★ V3-FINAL · Rust 遷移正式執行依據：五角色三輪審查 · 32,500 行 Rust · 14 週路線圖 · 分級浮點容差 · 四層測試 · 回滾計劃 · 21 項嚴格論證修正 |
 
 ### governance_dev/ — 治理开发文档
 
