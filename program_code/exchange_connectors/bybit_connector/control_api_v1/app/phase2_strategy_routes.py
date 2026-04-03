@@ -61,6 +61,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from . import main_legacy as base  # Auth helpers (current_actor, AuthenticatedActor)
+from .ipc_state_reader import get_rust_reader
 
 # ── sys.path 注入（統一由 _path_setup 模塊處理）──────────────────────────────────
 # sys.path injection — centralized in _path_setup.py (APR01-MEDIUM-11 dedup)
@@ -1655,6 +1656,18 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
 @phase2_router.get("/pipeline/stats")
 async def get_pipeline_stats(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get pipeline bridge statistics / 获取管线桥接器统计"""
+    # R06-B: try Rust engine tick stats first / 優先讀取 Rust 引擎 tick 統計
+    rust = get_rust_reader()
+    rust_stats = rust.get_tick_stats() if rust.is_available() else None
+    if rust_stats is not None:
+        return _envelope({
+            "source": "rust_engine",
+            "total_ticks": rust_stats.get("total_ticks", 0),
+            "total_fills": rust_stats.get("total_fills", 0),
+            "total_intents": rust_stats.get("total_intents", 0),
+            "total_stops": rust_stats.get("total_stops", 0),
+            "last_tick_ms": rust_stats.get("last_tick_ms", 0),
+        })
     if PIPELINE_BRIDGE is None:
         return _envelope({"available": False})
     try:

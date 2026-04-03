@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from .ipc_state_reader import get_rust_reader
 
 logger = logging.getLogger(__name__)
 
@@ -172,21 +173,31 @@ def get_risk_status(
     engine = _get_engine()
     status = rm.get_status()
 
-    # Add session drawdown info
-    try:
-        state = engine.get_state()
-        sess = state.get("session", {})
-        peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
-        current = sess.get("current_paper_balance_usdt", 0)
+    # R06-B: try Rust engine for drawdown data, fall back to Python ENGINE
+    # 優先從 Rust 引擎獲取回撤數據，降級到 Python ENGINE
+    rust_state = get_rust_reader().get_paper_state() if get_rust_reader().is_available() else None
+    if rust_state is not None:
+        peak = rust_state.get("peak_balance", 0)
+        current = rust_state.get("balance", 0)
         drawdown_pct = ((peak - current) / peak * 100) if peak > 0 else 0.0
-        status["session_halted"] = sess.get("session_halted", False)
-        status["session_halt_reason"] = sess.get("session_halt_reason")
         status["drawdown_pct"] = round(drawdown_pct, 2)
         status["peak_balance_usdt"] = peak
         status["current_balance_usdt"] = current
-    except Exception as e:
-        # Intentional: session state enrichment is optional; endpoint remains functional without it
-        logger.debug("Failed to add session drawdown info to risk status: %s", e)
+        status["source"] = "rust_engine"
+    else:
+        try:
+            state = engine.get_state()
+            sess = state.get("session", {})
+            peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
+            current = sess.get("current_paper_balance_usdt", 0)
+            drawdown_pct = ((peak - current) / peak * 100) if peak > 0 else 0.0
+            status["session_halted"] = sess.get("session_halted", False)
+            status["session_halt_reason"] = sess.get("session_halt_reason")
+            status["drawdown_pct"] = round(drawdown_pct, 2)
+            status["peak_balance_usdt"] = peak
+            status["current_balance_usdt"] = current
+        except Exception as e:
+            logger.debug("Failed to add session drawdown info to risk status: %s", e)
 
     return _risk_response(status)
 
