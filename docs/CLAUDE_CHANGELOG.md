@@ -5,6 +5,19 @@
 
 ---
 
+### Rust 遷移 V3-FINAL + 階段拆分 + 全路線圖定稿（2026-04-03）
+
+- **Rust 遷移 V3-FINAL** 五角色三輪審查通過（V2→V2.5→嚴格論證 21 FAIL→V3 全部納入）
+- 32,500 行 Rust · 14 週主開發 · Single-owner actor 零鎖 · QC 分級浮點容差
+- Week 8 硬決策點（Go/No-Go · 50% 復用降級路徑）
+- 8 個階段執行文件 `docs/rust_migration/R-00~R-07`，每個自包含上下文+進度追蹤
+- 全路線圖定稿：Phase 0-3（功能 7 週）→ Phase R（Rust 14 週）→ 灰度 → Live
+- Phase 1-3 新增里程碑：R-00 提前並行 · L1 接口凍結（Phase 2 結束）· L2 凍結（Phase 3 結束）
+- 16 Agent profiles 已升級 Rust/認知自適應技能
+- Live 前置條件新增：Rust 遷移完成或 PyO3 降級穩定
+
+---
+
 ### 文檔治理 + 系統快照 + 根原則校準（2026-04-03 · commits 97e152c → edf4627）
 
 **文檔治理（6 commits）：**

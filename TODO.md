@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-03（認知自適應 SPEC V1.1+R1 五角色審查通過 · Phase 1 新增 1.10/1.11/1.12）
+# 最後更新：2026-04-03（全路線圖定稿：Phase 0-3 功能 + Phase R Rust 遷移 · 8 階段文件）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -154,9 +154,11 @@ PM 排程計劃：
 
 ---
 
-## ██ Phase 1 — Agent 感知工具箱（Week 2-3，~5 天壁鐘）
+## ██ Phase 1 — Agent 感知工具箱 + ★Rust R-00 提前並行（Week 2-3，~5 天壁鐘）
 
 > 前置：Phase 0 完成。報告 §5 新模組 + §6.6 Indicator 擴展。
+> ★ Rust R-00 提前並行從 Phase 1 Day 1 開始（零依賴任務，不干擾 Python 開發）
+> 詳見：`docs/rust_migration/00--preparation_parallel.md`
 
 ### [ ] 1.1：PositionSizer — Kelly 四層倉位計算（報告 §5.1）
 - **新建模組**：Kelly(1/8→1/4 分級) + Vol-adjusted + Risk Parity + P1 硬上限
@@ -217,9 +219,11 @@ PM 排程計劃：
 
 ---
 
-## ██ Phase 2 — 策略 V2 升級 + Agent 整合（Week 3-5，~10 天壁鐘）
+## ██ Phase 2 — 策略 V2 升級 + Agent 整合（Week 3-5，~10 天壁鐘）· ★L1 接口凍結
 
 > 前置：Phase 1 完成 + Alpha 基準 2 週結果（PnL<-3% 則轉策略研究）。
+> ★ Phase 2 結束時執行 L1 接口凍結（indicator/signal/h0_gate/strategies）
+> 見：`docs/rust_migration/00--preparation_parallel.md` R00-4
 
 ### [ ] 2.1：MA_Crossover V2 — KAMA + ADX>20 + 多時間框架（報告 §6.1）
 ### [ ] 2.2：BB_Reversion V2 — RSI<30 + Regime 感知（報告 §6.2）
@@ -236,7 +240,7 @@ PM 排程計劃：
 
 ---
 
-## ██ Phase 3 — Claude API + 四階段框架（Week 5-7，~8 天壁鐘）
+## ██ Phase 3 — Claude API + 四階段框架（Week 5-7，~8 天壁鐘）· ★L2 接口凍結
 
 ### [ ] 3.1：Claude API 客戶端 + APIBudgetManager（報告 §4.4）
 ### [ ] 3.2：L1→L1.5→L2 路由邏輯（報告 §4.1）
@@ -245,6 +249,51 @@ PM 排程計劃：
 ### [ ] 3.5：PnLAttributor + API + GUI（報告 §5.6）
 ### [ ] 3.6：OB Imbalance + Orderbook WS（報告）
 ### [ ] 3.7：四階段放權框架 — GovernanceHub 持久化 + 自動降級（報告 §2）
+### [ ] 3.L2：★ L2 接口凍結簽核（Phase 3 結束里程碑）
+- governance_hub / 4 SM / authorization 接口凍結
+- git tag `l2-interface-freeze`
+- 見：`docs/rust_migration/00--preparation_parallel.md` R00-5
+
+---
+
+## ██ Phase R — Rust 遷移（Week 8-21，~14 週主開發）
+
+> **源文件**：`docs/references/2026-04-03--rust_migration_v3_final.md`（V3-FINAL，不可修改）
+> **階段文件**：`docs/rust_migration/`（8 個文件，逐階段執行）
+> **前置**：Phase 0-3 全部完成 + L1+L2 接口凍結 + Alpha PnL > 0
+> **Agent 接手**：先讀 `docs/rust_migration/README.md` 確認進度
+
+### [ ] R-00：提前並行準備（Phase 1-3 期間）
+- Cargo workspace + CI + openclaw_types crate + L1/L2 凍結 + fsum() + 告警 bot
+- 詳見：`docs/rust_migration/00--preparation_parallel.md`（7 個子任務）
+
+### [ ] R-01：IPC + shared_types + WebSocket（W1-2）
+- IPC 雙端 + shared_types.py + conftest 改造 + WS 連接
+- 詳見：`docs/rust_migration/01--ipc_shared_types_ws.md`（9 個子任務）
+
+### [ ] R-02：core 上半——感知 + 認知 + 風控（W3-4）
+- 13 指標 + 8 信號 + klines + h0_gate + risk + cognitive 三模組
+- 詳見：`docs/rust_migration/02--core_upper.md`（10 個子任務）
+
+### [ ] R-03：core 下半——SM + 執行 + 回測（W5-6）
+- 4 SM 級聯 + guardian + execution + portfolio + backtest
+- 詳見：`docs/rust_migration/03--core_lower.md`（15 個子任務）
+
+### [ ] R-04：Engine 完整交易路徑（W7-8）
+- tick_pipeline + strategies + governance + paper_state + fast_track
+- 詳見：`docs/rust_migration/04--engine_full_path.md`（10 個子任務）
+
+### [ ] R-05：★ Week 8 硬決策點
+- Go → 繼續完整遷移 / No-Go → 降級 PyO3（~50% 復用，~50% 沉沒）
+- 詳見：`docs/rust_migration/05--week8_decision_gate.md`
+
+### [ ] R-06：Python IPC 改造（W9-10）
+- 7 route 文件 + 3 Python 瘦身 + conftest 最終 + 60 IPC 測試 + 回滾預演
+- 詳見：`docs/rust_migration/06--python_ipc_integration.md`（13 個子任務）
+
+### [ ] R-07：灰度驗證 + 穩定觀察（W11-14）
+- 雙寫雙算 7 天 + 回滾演練 + 止損接管演練 + 穩定觀察 2 週 + 最終清理
+- 詳見：`docs/rust_migration/07--canary_validation.md`（10 個子任務）
 
 ---
 

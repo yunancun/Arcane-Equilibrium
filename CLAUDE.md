@@ -61,11 +61,19 @@ L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
   三個新 L0 模組：CognitiveModulator（決策門檻調製）+ OpportunityTracker（遺憾追蹤）+ DreamEngine（閒置蒙特卡洛）
   開發位置：Phase 1 並行組 B（1.10/1.11/1.12），總計 3.5d，不影響關鍵路徑
   SPEC 文件：docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md
+★★★★ Rust 遷移 V3-FINAL（2026-04-03，五角色三輪審查 + 21 項嚴格論證修正）：
+  Rust 交易引擎 + Python AI/GUI 雙進程架構 · 32,500 行 Rust · 14 週主開發
+  Single-owner actor 零鎖 · QC 分級浮點容差 · all-or-nothing 級聯事務
+  Week 8 硬決策點（Go 繼續 / No-Go 降級 PyO3，50% 復用）
+  源文件：docs/references/2026-04-03--rust_migration_v3_final.md
+  階段執行：docs/rust_migration/（8 個階段文件，Phase R-00 ~ R-07）
+  執行時機：Phase 0-3 完成後（R-00 提前並行可在 Phase 1 開始）
 ★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
   Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
-  Phase 1（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst/Indicator 擴展）
-  Phase 2（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller
-  Phase 3（Week 5-7）：Claude API + L1.5 層 + 四階段放權框架
+  Phase 1（Week 2-3）：Agent 感知工具箱 + 認知三模組 + ★Rust R-00 提前並行
+  Phase 2（Week 3-5）：策略 V2 + Agent 整合 + ★L1 接口凍結
+  Phase 3（Week 5-7）：Claude API + 四階段放權 + ★L2 接口凍結
+  Phase R（Week 8-21）：Rust 遷移 14 週主開發 + 灰度 + 穩定觀察
   ★ Alpha 基準測試從 Day 1 並行跑 Paper 2 週，Day 10 決策點
   主計劃文件：docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md
   改善報告原文：docs/references/2026-04-03--openclaw_improvement_report_v3_final.md
@@ -274,11 +282,12 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **★★★ 當前焦點：Phase 0（Batch 9B+9C+9D）→ 讀 TODO.md 開始執行**
 
-**統一路線圖（4 Phase + Alpha 基準測試並行）：**
+**統一路線圖（5 Phase + Alpha 基準 + Rust 遷移）：**
 - **Phase 0**（本週）：Batch 9B 學習閉環 + 9C 管線連通 + 9D 策略 Edge → 業務 52%→72%
-- **Phase 1**（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst）+ 認知自適應三模組（CognitiveModulator/OpportunityTracker/DreamEngine）
-- **Phase 2**（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller + 認知三模組閉環整合
-- **Phase 3**（Week 5-7）：Claude API L1.5 + 四階段放權框架
+- **Phase 1**（Week 2-3）：Agent 感知工具箱 + 認知三模組 + **★Rust R-00 提前並行**（Cargo workspace + types crate）
+- **Phase 2**（Week 3-5）：策略 V2 + Agent 整合 + 認知閉環 + **★L1 接口凍結**
+- **Phase 3**（Week 5-7）：Claude API L1.5 + 四階段放權 + **★L2 接口凍結**
+- **Phase R**（Week 8-21）：**Rust 遷移 14 週主開發**（R-01~R-07） · Week 8 硬決策點 · 灰度 · 穩定觀察
 
 **Alpha 基準測試**：Phase 0 第一天開始並行跑 Paper 2 週（不寫代碼），Day 10 決策點：
 - PnL > 0 → 繼續 Phase 1-3
@@ -292,6 +301,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 - QC 數學：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-03--improvement_report_math_validation.md`
 - FA 對比：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-03--improvement_report_gap_comparison.md`
 - 認知自適應：`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md`（V1.1+R1 五角色審查通過）
+- Rust 遷移源文件：`docs/references/2026-04-03--rust_migration_v3_final.md`（V3-FINAL）
+- Rust 階段執行：`docs/rust_migration/README.md`（8 個階段文件索引，Agent 接手入口）
 
 **每個 Phase 的 session 上下文設計已在主計劃文件中定義（§4.1/5/6 的 session 上下文段）。**
 
@@ -301,6 +312,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 - 四階段放權框架完成（Phase 3）
 - 策略 Alpha 基準 > 0
 - provider pricing table 正式綁定
+- Rust 遷移完成（Phase R-07 灰度通過 + 穩定觀察 2 週）或 PyO3 降級方案穩定
 
 **章節樹導航：**
 A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous Live ⬜
@@ -312,4 +324,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Batch 9A 完成 · 中期路線圖 Phase 0-3 已制定（7 週 · 4-Agent 分析） · 認知自適應 SPEC V1.1+R1 五角色審查通過（CognitiveModulator/OpportunityTracker/DreamEngine，Phase 1 組 B） · Alpha 基準測試並行中 · 下一步：Phase 0 Batch 9B 學習閉環 → 讀 TODO.md。
+> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Phase 0-3+R 全路線圖定稿（Phase 0-3 功能 7 週 + Phase R Rust 遷移 14 週） · 認知自適應 SPEC V1.1+R1 通過 · Rust 遷移 V3-FINAL 通過（32,500 行 · 8 階段文件 · Week 8 決策點） · 下一步：Phase 0 Batch 9B → 讀 TODO.md。
