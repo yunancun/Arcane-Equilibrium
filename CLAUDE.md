@@ -57,13 +57,14 @@ L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
 Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
 代碼完成度：~90%（~67,000 行 Py+Rs / 最終 ~73,000 行）　業務功能能用：~95%
 總工時進度：~45%（已完成 ~66d / 總計 ~147d）· Python 58%（45/77d）· Rust R-06 完成 R-07 進行中
-關鍵路徑：R-07 灰度驗證（W11-14）→ 穩定觀察 ≈ 4 週
-★★★★ Rust 遷移 — R-06 完成，R-07 灰度工具已構建：
-  R-00~R-06 全部完成 · R-05 Conditional Go 簽核 · R-06 IPC 53 tests + 回滾 SLA <100ms
-  R-07 灰度工具：CanaryRecord + Comparator（3 層容差）+ Engine Watchdog（3 振回滾）+ Rollback Drill
-  Rust canary mode：OPENCLAW_CANARY_MODE=1 啟用 JSONL 輸出
-  openclaw_engine：CanaryRecord struct + canary_mode flag + 555 tests
-  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 進行中）
+關鍵路徑：R-07 即時灰度 7 天 → Rust 遷移正式完成
+★★★★ Rust 遷移 — R-07 代碼全部完成，待即時灰度驗證：
+  R-00~R-06 全部完成 · R-07 全部工具已構建（回放/比較/看門狗/回滾）
+  加速方案：歷史回放取代即時灰度（22 天 → ~7 天）
+  Python shadow 已驗證：201,600 ticks（7d×5sym）300 秒完成
+  Rust canary mode：OPENCLAW_CANARY_MODE=1 · 555 Rust tests
+  下一步：啟動引擎即時灰度 7 天 → Go/No-Go → 正式完成
+  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 代碼 ✅ · 灰度待啟動）
 ★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
   Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
   Phase 1（Week 2-3）：Agent 感知工具箱 + 認知三模組 + ★Rust R-00 提前並行
@@ -320,4 +321,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3839 Py tests + 555 Rust tests（全綠 0 failed）· 131+ routes · 5 Agent · demo_only · R-06 IPC 完成 · R-07 灰度工具就緒（Comparator + Watchdog + Rollback Drill + Rust CanaryRecord）· 28+17 歷史測試問題全部修復 · 下一步：R-07 影子進程 + 7 天灰度運行 → 讀 TODO.md。
+> 截至 2026-04-03：3839 Py + 555 Rust + 35 Canary = 4429 tests 全綠 · 131+ routes · 5 Agent · demo_only · R-07 代碼全部完成（回放/比較/看門狗/回滾/CanaryRecord）· Python shadow 201,600 ticks 已驗證 · 歷史測試債務清零 · 下一步：啟動即時灰度 7 天 → 讀 TODO.md。

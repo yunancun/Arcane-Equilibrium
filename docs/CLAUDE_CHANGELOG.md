@@ -3,6 +3,19 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### R07-1 Replay Runner + Accelerated Canary Plan（2026-04-03 · Session 11）
+
+**replay_runner.py**：歷史回放取代即時灰度（22 天 → ~7 天）
+- Bybit REST API 分頁獲取歷史 1m K 線 → 4 tick/bar 合成
+- Python KlineManager + IndicatorEngine + SignalEngine 全管線回放
+- 已驗證：7 天 × 5 幣種 = 201,600 ticks，300 秒完成
+- 輸出 shadow_results.jsonl 匹配 canary schema V1.0.0
+
+**R-07 代碼全部完成**：replay_runner + CanaryRecord + Comparator + Watchdog + Rollback Drill
+**剩餘工作**：啟動 Rust 引擎即時灰度 7 天 → Go/No-Go → 正式完成
+
+---
+
 ### Test Debt Zero — All 28 Failures + 17 Errors Resolved（2026-04-03 · Session 11）
 
 **28 failed + 17 errors → 0 failed, 0 errors, 3839 passed（+45 淨增）**

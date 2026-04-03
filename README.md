@@ -42,9 +42,9 @@ API 路由:     131+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
 策略:         5 类 × 双实现（Python + Rust）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
-Rust 引擎:    ✅ R-00~R-06 完成 · R-07 灰度工具就绪
-              IPC: file-read (pipeline_snapshot.json) + 53 IPC 集成测试 + 回滚 SLA <100ms
-              灰度: CanaryRecord + Comparator (3 层容差) + Watchdog (3 振回滚) + Drill 脚本
+Rust 引擎:    ✅ R-00~R-07 代码全部完成 · 待 7 天即时灰度验证
+              IPC: file-read + 53 集成测试 + 回滚 SLA <100ms
+              灰度: replay_runner (201,600 ticks/5min) + Comparator + Watchdog + Rollback Drill
               tick 延迟: <100μs 可达（E5 评估 ~7-25μs 正常路径）
 Phase 0-3:    ✅ 全部完成 + L1/L2 接口冻结
 Rust R-00~04: ✅ 全部完成（R-05 Week 8 决策点待评估）

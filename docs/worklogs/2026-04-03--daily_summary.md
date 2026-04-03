@@ -112,10 +112,21 @@ efff09e feat(R06-A): wire IPC server to real pipeline state + fix unrealized PnL
 ca9dabd feat(R07-3/5/6): canary comparator + engine watchdog + rollback drill
 5c8039a feat(R07-2): add canary JSONL output to Rust engine
 8d3939c fix: resolve all 28 test failures + 17 errors → 0 failures
+800af3d docs: update all docs for R-06 complete + R-07 progress
+bbc0137 feat(R07-1): add canary replay runner — 7-day shadow in 5 minutes
 ```
+
+## 關鍵決策
+
+1. **R-05 Conditional Go**：5/6 PASS + 3 風險待 soak test
+2. **File-read IPC**：PM 勝出（讀 pipeline_snapshot.json，不用 Arc<RwLock>）
+3. **R06-C 延至 R-07**：3 個瘦身文件各有 12-23 處 import，不安全刪除
+4. **加速灰度方案**：歷史回放取代即時灰度（22 天 → ~7 天）
+5. **歷史測試債務清零**：FA 確認 + E1 並行修復 + E4 驗證
 
 ## 下一步
 
-1. **R07-1**：Python 影子進程（讀 WS → Python pipeline → shadow_results.jsonl）
-2. **R07-4**：啟動 7 天灰度運行
-3. E5 flag：Rust StateWriter atomic write（.tmp → rename）
+1. **啟動即時灰度**：`OPENCLAW_CANARY_MODE=1` 運行 Rust 引擎 7 天
+2. **每日比較**：`canary_comparator.py` 確認 0 CRITICAL
+3. **回滾演練**：`rollback_drill.sh` 確認 SLA < 10min
+4. **Day 7 Go/No-Go**：通過 → Rust 遷移正式完成

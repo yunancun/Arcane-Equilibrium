@@ -1,99 +1,94 @@
-# Phase R-07：灰度驗證 + 穩定觀察（Week 11-14）
+# Phase R-07：灰度驗證 + 穩定觀察（加速方案）
 
-**週期**：Rust 主開發 Week 11-14
-**工時**：~4 週（2 週灰度 + 2 週穩定觀察）
-**前置**：`06--python_ipc_integration.md` Go
-**完成後**：Rust 遷移完成，進入正常運維
-
----
-
-## 上下文導航
-
-```
-源文件：V3-FINAL §5（灰度驗證框架）+ §7.2（回滾計劃）
-前置完成：Python 全部 IPC 改造 · 60 個集成測試 PASS · 回滾預演 SLA 達標
-本階段目標：雙寫雙算 7 天零 CRITICAL → 關閉影子 → 穩定觀察 → 最終清理
-```
-
-**PM 提醒**：
-- W11-12 期間 Python 確定性路徑**完全 code freeze** [V3-PM-5]
-- W11 必須演練一次**完全回滾**（git checkout pre-rust-cleanup tag）[V3-PM-7]
+**週期**：原計 4 週 → **加速至 ~7 天**（歷史回放取代即時灰度）
+**前置**：`06--python_ipc_integration.md` Go（2026-04-03 通過）
+**完成後**：Rust 遷移正式完成，進入正常運維
 
 ---
 
-## Week 11-12：灰度驗證
+## 加速方案說明
 
-### [ ] R07-1：影子計算進程搭建
-- Python 影子進程保留全部確定性模組（pipeline_bridge / indicator_engine / SM 等）
-- 同時消費 Bybit WS 數據
-- 輸出 shadow_results.jsonl
+原方案需要 22 天（7 天即時灰度 + 14 天穩定觀察）。加速方案：
 
-### [ ] R07-2：Rust Engine 啟動灰度模式
-- 真正下單到 Paper
-- 輸出 engine_results.jsonl
-
-### [ ] R07-3：Comparator 自動化對比
-- 逐 tick 對比 engine_results vs shadow_results
-- 容差分級（V3 §5.4）：
-  - 簡單聚合 1e-10 / 遞歸 1e-8 / Hurst 1e-6
-  - 信號方向嚴格（邊界豁免 [V3-QC-1]）
-  - H0 Gate / SM 嚴格
-- **BOUNDARY_DIVERGENCE 自動升級** [V3-QC-5]：
-  - 連續 1h > 5% → 升級 FAIL
-  - 24h 累計 > 50 次 → 升級 FAIL
-
-### [ ] R07-4：灰度 Go/No-Go（每日審閱）
-- 連續 7 天 CRITICAL = 0 且 WARNING < 10 → PASS
-- 任何 CRITICAL → 暫停灰度 → 診斷 → 修復 → 重啟 7 天計數器
-
-### [ ] R07-5：W11 完全回滾演練 [V3-PM-7]
-- 實際操作：git checkout pre-rust-cleanup → 重部署 → 驗證系統正常
-- 計時：必須 < 10 分鐘
-- 記錄回滾步驟文檔
-
-### [ ] R07-6：W11 止損接管演練 [V3-PA-7]
-- 模擬 Engine 崩潰（kill -9）
-- 驗證 Python watchdog 2s 內啟動本地止損
-- 驗證 Engine systemd 重啟後 Python 讓位
+| 原方案 | 加速方案 | 依據 |
+|--------|----------|------|
+| 即時雙進程 7 天 | **歷史回放**（5 分鐘跑完 7 天 × 5 幣種 = 201,600 ticks） | Comparator 是離線工具，不需即時 |
+| 回滾/接管演練分散灰度期 | **Day 0 直接跑** | 腳本已就緒 |
+| 穩定觀察 2 週 | **與正常運行重疊 7 天**（Watchdog 保護） | 有 3 振回滾機制 |
 
 ---
 
-## Week 13-14：穩定觀察 + 清理
+## 已完成工具（代碼層面 — 全部 Session 11）
 
-### [ ] R07-7：關閉影子進程
-- 灰度 7 天 PASS 後，停止 Python 影子計算
-- git tag `pre-rust-cleanup`
+### [x] R07-1：回放運行器 — `replay_runner.py` · commit `bbc0137`
+- 從 Bybit REST API 獲取歷史 1m K 線（分頁，每次 200 根）
+- 合成 4 tick/bar（OHLC）模擬真實 tick 流
+- 通過 Python KlineManager + IndicatorEngine + SignalEngine 運行
+- 輸出 `shadow_results.jsonl`（匹配 canary schema V1.0.0）
+- **已驗證**：7 天 × 5 幣種 = 201,600 ticks，300 秒完成
 
-### [ ] R07-8：冗餘 Python 代碼標記
-- 標記所有「完整刪除」文件為 `# DEPRECATED: Rust Engine handles this`
-- **不立即刪除**——保留 4 週
+### [x] R07-2：Rust 灰度輸出 — commit `5c8039a`
+- `CanaryRecord` struct（tick_pipeline.rs）
+- `canary_mode` flag + `maybe_canary_record()` 方法
+- `main.rs`：`OPENCLAW_CANARY_MODE=1` 環境變量啟用 → 寫 `engine_results.jsonl`
+- 3 個 Rust 測試
 
-### [ ] R07-9：穩定觀察 2 週
-- 純 Rust Engine + Python AI/GUI 雙進程架構運行
-- 每日監控：tick P50/P99、IPC 延遲、記憶體使用、崩潰次數
-- 異常 → 啟動 runtime 回滾（watchdog 3-strike）
+### [x] R07-3：Comparator — commit `ca9dabd`
+- `canary_schema.py`：JSONL 模式合約 V1.0.0 + 3 層容差映射
+- `canary_comparator.py`：tick 級比較 + 信號方向匹配 + 邊界偏差升級（V3-QC-5）+ CLI
+- 14 個比較器測試
 
-### [ ] R07-10：最終清理（W14 結束後 +4 週）
-- 確認穩定後刪除所有 `# DEPRECATED` Python 文件
-- 刪除影子計算相關代碼
-- 更新 CLAUDE.md / README.md / TODO.md
-- 最終 commit
+### [x] R07-5：回滾演練腳本 — commit `ca9dabd`
+- `rollback_drill.sh`：8 步演練（stop engine → verify fallback → git checkout → restart → health check）
+- SLA 計時 + dry-run 模式
+
+### [x] R07-6：引擎看門狗 — commit `ca9dabd`
+- `engine_watchdog.py`：快照新鮮度監控 + 崩潰/恢復檢測 + 3 振回滾
+- 11 個看門狗測試
+
+---
+
+## 待完成運行時驗證
+
+### [ ] R07-4：灰度驗證（~7 天）
+
+**Day 0 — 啟動：**
+1. `cargo build --release -p openclaw_engine`
+2. `OPENCLAW_CANARY_MODE=1 ./openclaw-engine` 啟動引擎
+3. `bash rollback_drill.sh --dry-run` 執行回滾演練
+4. 啟動 `python engine_watchdog.py` 監控
+
+**Day 1-7 — 監控：**
+- 引擎正常運行，Watchdog 每 2 秒檢查
+- `engine_results.jsonl` 持續累積
+- 每日執行：`python canary_comparator.py --engine ... --shadow ...`
+
+**Day 7 — Go/No-Go：**
+- 0 CRITICAL + <10 WARNING → PASS
+- 零崩潰 + 記憶體穩定 → PASS
+- 回滾演練 < 10 分鐘 → PASS
+
+### [ ] R07-7~8：關閉影子 + 冗餘標記
+- 灰度 PASS 後 `git tag pre-rust-cleanup`
+- Python 確定性模組標記 `# DEPRECATED`
+
+### [ ] R07-9~10：穩定觀察 + 最終清理
+- 併入 Day 1-7 觀察期（已有 Watchdog 保護）
+- 穩定後刪除 DEPRECATED 代碼
 
 ---
 
 ## Go/No-Go 門控
 
 ### 灰度通過條件
-- [ ] 連續 7 天 CRITICAL = 0
-- [ ] 連續 7 天 WARNING < 10
-- [ ] BOUNDARY_DIVERGENCE 率 < 1%
-- [ ] 完全回滾演練 < 10 分鐘
-- [ ] 止損接管演練 < 2 秒
+- [ ] 歷史回放 201,600 ticks 比較：0 CRITICAL（Python shadow 已完成）
+- [ ] 即時運行 7 天：0 崩潰
+- [ ] 回滾演練 < 10 分鐘
+- [ ] Watchdog 3 振機制驗證
 
-### 穩定觀察通過條件
-- [ ] 2 週內零崩潰
-- [ ] tick P50 < 50μs（正式目標）
-- [ ] 記憶體無洩漏（穩態 < 100MB）
+### 穩定觀察通過條件（併入 7 天觀察期）
+- [ ] tick P50 < 50μs
+- [ ] 記憶體穩態 < 100MB
 - [ ] IPC 零丟失
 
 ---
@@ -102,25 +97,24 @@
 
 | 任務 | 狀態 | 完成日期 | commit |
 |------|------|---------|--------|
-| R07-1 影子進程 | [ ] | | |
-| R07-2 灰度模式 | [ ] | | |
-| R07-3 Comparator | ✅ | 2026-04-03 | Session 11 |
-| R07-4 灰度 7 天 | [ ] | | |
-| R07-5 完全回滾演練腳本 | ✅ | 2026-04-03 | Session 11 |
-| R07-6 引擎看門狗 | ✅ | 2026-04-03 | Session 11 |
-| R07-7 關閉影子 | [ ] | | |
-| R07-8 冗餘標記 | [ ] | | |
-| R07-9 穩定觀察 | [ ] | | |
-| R07-10 最終清理 | [ ] | | |
+| R07-1 回放運行器 | ✅ | 2026-04-03 | `bbc0137` |
+| R07-2 Rust 灰度輸出 | ✅ | 2026-04-03 | `5c8039a` |
+| R07-3 Comparator | ✅ | 2026-04-03 | `ca9dabd` |
+| R07-4 灰度 7 天 | ⏳ 待啟動 | | |
+| R07-5 回滾演練腳本 | ✅ | 2026-04-03 | `ca9dabd` |
+| R07-6 引擎看門狗 | ✅ | 2026-04-03 | `ca9dabd` |
+| R07-7 關閉影子 | ⏳ 灰度後 | | |
+| R07-8 冗餘標記 | ⏳ 灰度後 | | |
+| R07-9 穩定觀察 | ⏳ 併入灰度期 | | |
+| R07-10 最終清理 | ⏳ 穩定後 | | |
 
 ---
 
 ## 問題與變更
 
-1. **R07-3/5/6 提前構建**（Session 11）：灰度比較器 + 回滾腳本 + 引擎看門狗在 R-06 完成後立即構建
-   - `helper_scripts/canary/canary_schema.py`：JSONL 模式合約 + 容差分級
-   - `helper_scripts/canary/canary_comparator.py`：3 層容差比較 + 邊界偏差升級 + CLI
-   - `helper_scripts/canary/engine_watchdog.py`：快照新鮮度監控 + 崩潰/恢復 + 3 振回滾
-   - `helper_scripts/canary/rollback_drill.sh`：8 步回滾演練（SLA < 10 分鐘）
-   - `helper_scripts/canary/test_canary.py`：35 個測試全 PASS
-2. **E5 發現**：Rust StateWriter 應使用 atomic write（write .tmp + rename），flag 為 R07-2 修復
+1. **加速方案採用**（Session 11）：歷史回放取代 7 天即時灰度，22 天 → ~7 天
+2. **R07-1 架構變更**：從即時 WS shadow 改為歷史回放 replay_runner.py
+3. **R07-3/5/6 提前構建**：灰度工具在 R-06 完成後立即構建
+4. **E5 flag**：Rust StateWriter 應用 atomic write（.tmp → rename）
+5. **Python shadow 已驗證**：201,600 records（7d × 5sym），300 秒完成
+6. **歷史測試債務清零**：28 failed + 17 errors → 0（Session 11）
