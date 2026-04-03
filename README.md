@@ -31,41 +31,37 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-03 · 全路线图定稿 Phase 0-3+R)
+## 当前状态 (2026-04-03 · Phase R-04 完成，Week 8 决策点就绪)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,704 passed / 23 failed / 17 errors（pre-existing）
-API 路由:     126+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
-代码:         ~50,000 行（app/ 目录）
-策略:         5 类（Grid + MA + BB Reversion + BB Breakout + FundingRate Delta-Neutral）
+测试:         3,703 Py passed + 517 Rust passed / 24 Py failed / 17 errors（pre-existing）
+API 路由:     131+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
+代码:         ~65,000 行（Python ~50k + Rust ~15k）
+策略:         5 类 × 双实现（Python + Rust）
 三品类:       ✅ linear / spot / inverse 全部就绪
-自动部署:     最优 25 品种自动匹配策略（3% risk/trade，动态qty）
-执行模式:     双重执行（Paper Engine + Bybit Demo sandbox）
-治理:         GovernanceHub 已集成 · SM-01/SM-02/SM-04/EX-04 接入运行时 · fail-closed 已验证
-H0 Gate:      ✅ 完成（5 check + H0HealthWorker + pipeline 集成 + 94 tests，SLA <5μs）
-H1-H5:        ✅ 全部接通（ThoughtGate + 预算 + ModelRouter + validate_output + CostLogger）
-Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEngine O(n) 285x加速 + L2 结果快取）
-Phase 3:      ✅ 全完成（ExperimentLedger 持久化 + EvolutionEngine + EvolutionScheduler）
-Wave 8A-8D:   ✅ 全部完成（安全+正确性 / 核心重复消除 / 测试+前端统一 / 架构改进 / 文档清理）
-Batch 9A:     ✅ QC 量化审查驱动：ATR 双窗口 + 成本感知入场门槛 + 追踪止损成本约束 + round-trip 真实费用
-认知自适应:   ✅ SPEC V1.1+R1 通过（PM/PA/FA/E5/QC 五角色 + 两轮审计）→ Phase 1 组 B 实施
-Rust 迁移:    ✅ V3-FINAL 通过（五角色三轮审查 + 21 项修正）→ Phase R 共 14 周 · 8 阶段文件
-认证安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 响应头 + XSS 修复
+治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
+Rust 引擎:    ✅ R-00~R-04 完成 · 24 core 模组 + 12 engine 模组 · 6 角色审计通过
+              openclaw_core: 4 SM + 级联 + 13 指标 + 8 信号 + 风控 + 回测 + 止损 + 组合
+              openclaw_engine: tick_pipeline + 5 策略 + intent_processor + paper_state
+              tick 延迟: <100μs 可达（E5 评估 ~7-25μs 正常路径）
+Phase 0-3:    ✅ 全部完成 + L1/L2 接口冻结
+Rust R-00~04: ✅ 全部完成（R-05 Week 8 决策点待评估）
+认证安全:     ✅ HttpOnly cookie + 安全 HTTP 响应头 + XSS 修复
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
-安全评级:     0 CRITICAL / 0 HIGH / 2 MEDIUM / 3 LOW（April 1 E3 审计）
+安全评级:     0 CRITICAL / 0 HIGH（E3 Rust 审计 2026-04-03）
 ```
 
-**完成度（2026-04-03 校准）**
+**完成度（2026-04-03 · Phase R-04 后校准）**
 
 | 维度 | 已完成 | 总量 | 进度 |
 |------|--------|------|------|
-| 代码量 | 52,500 行 Py | ~73,000 行（Py 40k + Rs 33k） | 72% |
-| 业务功能 | — | — | 52% |
-| 工时 | ~45d | ~147d | 31% |
-| 测试 | 3,703 | ~3,993 | 93% |
+| 代码量 | ~65,000 行（Py 50k + Rs 15k） | ~73,000 行 | 88% |
+| 业务功能 | — | — | 95% |
+| 工时 | ~62d | ~147d | 42% |
+| 测试 | 4,220（Py 3703 + Rs 517） | ~4,500 | 94% |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
@@ -77,21 +73,21 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | 学习 | 30% | E1 观察 + L2 自动触发 + Sunday cron；L3-L5 待推进 |
 | 进化 | 35% | EvolutionEngine + Scheduler 完成；学习反馈闭环待接通 |
 
-**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 3,704 测试 · 5 Agent 运行 · QC 量化审查驱动风控
+**亮点**：治理 fail-closed 一流 · P0/P1/P2 风控真实拒绝 · 4,220 测试 · 5 Agent 运行 · Rust 引擎 tick <100μs · 6 角色审计通过 · QC 量化审查驱动
 
 **开发路线图**
 
 | Phase | 内容 | 状态 |
 |-------|------|------|
-| 1 | H0 Gate 确定性门控 + Cooldown + M-of-N + 数据品质→风控 | ✅ 完成 |
-| 2 | L2 模式发现自动化 + 回测引擎 MVP + Truth Source Registry | ✅ 完成 |
-| 3 | Wave 8A-8D 安全/重复消除/架构改进 + Batch 9A 自适应风控 | ✅ 完成 |
-| 4 | Batch 9B-9D 学习闭环 + 管线连通 + 策略 Edge 验证 | 🔄 进行中 |
-| 4.5 | Agent 认知自适应三模组（CognitiveModulator/OpportunityTracker/DreamEngine） | ⬜ Phase 1 组 B |
-| 5 | 策略 V2 + Claude API + 四阶段放权 + 接口冻结 | ⬜ Phase 2-3 |
-| **R** | **Rust 迁移：32,500 行 · 14 周 · 8 阶段 · Week 8 决策点** | ⬜ Phase 3 后 |
-| R+ | 灰度验证 + 稳定观察 + 最终清理 | ⬜ |
-| Live | Paper Trading 21 天 + Live 准备 | ⬜ |
+| 0 | Batch 9B-9D 学习闭环 + 管线连通 + 策略 Edge 验证 | ✅ 完成 |
+| 1 | Agent 感知工具箱 + 认知三模组 + R-00 并行 | ✅ 完成 |
+| 2 | 策略 V2 + Agent 整合 + L1 接口冻结 | ✅ 完成 |
+| 3 | Claude API + 四阶段放权 + L2 接口冻结 | ✅ 完成 |
+| **R-00~R-04** | **Rust 引擎：types + IPC + core 24 模组 + engine 12 模组** | **✅ 完成** |
+| **R-05** | **★ Week 8 硬决策点（Go/No-Go）** | **🔄 待评估** |
+| R-06 | Python IPC 改造（W9-10） | ⬜ 待开始 |
+| R-07 | 灰度验证 + 稳定观察（W11-14） | ⬜ 待开始 |
+| Live | Paper Trading 21 天 + Live 准备 | ⬜ 待开始 |
 
 **详细报告**：`docs/governance_dev/audits/` 目录下各审计报告
 
@@ -134,11 +130,21 @@ srv/
 ├── docker_projects/
 │   ├── monitoring_services/       ← Grafana + 5 仪表盘
 │   └── trading_services/          ← PostgreSQL
-└── helper_scripts/
-    ├── start_paper_trading.sh     ← 一键启动
-    ├── cron_observer_cycle.sh     ← Observer 自动化
-    ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
-    └── maintenance_scripts/       ← 清理 / 检查脚本
+├── rust/                          ← ★ Rust 交易引擎（R-00~R-04）
+│   ├── Cargo.toml                 ← Workspace: 4 crates
+│   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
+│   ├── openclaw_core/             ← 24 modules: SM/indicators/signals/risk/backtest (403 tests)
+│   ├── openclaw_engine/           ← 12 modules: tick pipeline/strategies/paper state (78 tests)
+│   ├── openclaw_pyo3/             ← PyO3 cdylib bridge
+│   └── schemas/                   ← Golden JSON schema (10 types)
+├── helper_scripts/
+│   ├── start_paper_trading.sh     ← 一键启动
+│   ├── cron_observer_cycle.sh     ← Observer 自动化
+│   ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
+│   └── maintenance_scripts/       ← 清理 / 检查脚本
+└── docs/
+    ├── rust_migration/            ← 8 阶段执行文件（R-00~R-07）
+    └── worklogs/                  ← Session 工作日志
 ```
 
 ---
@@ -152,7 +158,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键指标：** 3,704 测试通过 · ~50,000 行代码 · 100% 双语注释 · fail-closed 设计 · 线程安全
+**关键指标：** 4,220 测试通过（Py 3703 + Rs 517）· ~65,000 行代码（Py+Rs）· 100% 双语注释 · fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）
 
 **详细报告：** `docs/governance_dev/phase2_execution/`（执行总览 + PM 品质审核 + TW 注释审核 + 23 份变更日志）
 
