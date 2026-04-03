@@ -49,9 +49,17 @@
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
 GUI：11-Tab 專業控制台
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
-代碼完成度：~80%　業務功能能用：~52%
+代碼完成度：~82%　業務功能能用：~52%
 ★ Batch 9A 確定性自適應風控（2026-04-02，QC 量化審查驅動）：
   ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用記錄
+★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
+  Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
+  Phase 1（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst/Indicator 擴展）
+  Phase 2（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller
+  Phase 3（Week 5-7）：Claude API + L1.5 層 + 四階段放權框架
+  ★ Alpha 基準測試從 Day 1 並行跑 Paper 2 週，Day 10 決策點
+  主計劃文件：docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md
+  改善報告原文：docs/references/2026-04-03--openclaw_improvement_report_v3_final.md
 
 Runtime 硬狀態（不可改）：
   system_mode          = demo_only
@@ -232,17 +240,34 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（讀 TODO.md 獲取具體任務）：**
-- FA GAP 審核 7 項待修復 → `docs/governance_dev/audits/2026-04-01--fa_completion_gap_audit.md`
-- C3 L5 元學習（需 FA 規格 → PA 方案 → 實現）
-- 或 Phase 4 Paper Trading 21 天觀察期
+**★★★ 當前焦點：Phase 0（Batch 9B+9C+9D）→ 讀 TODO.md 開始執行**
+
+**統一路線圖（4 Phase + Alpha 基準測試並行）：**
+- **Phase 0**（本週）：Batch 9B 學習閉環 + 9C 管線連通 + 9D 策略 Edge → 業務 52%→72%
+- **Phase 1**（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst）
+- **Phase 2**（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller
+- **Phase 3**（Week 5-7）：Claude API L1.5 + 四階段放權框架
+
+**Alpha 基準測試**：Phase 0 第一天開始並行跑 Paper 2 週（不寫代碼），Day 10 決策點：
+- PnL > 0 → 繼續 Phase 1-3
+- PnL ≈ 0 → 繼續但 Phase 2 策略升級提升優先級
+- PnL < -3% → 暫緩新模組，轉策略 Alpha 研究
+
+**關鍵文件：**
+- 主計劃：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md`
+- 改善報告：`docs/references/2026-04-03--openclaw_improvement_report_v3_final.md`
+- PA 映射：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-03--improvement_report_vs_existing_code_mapping.md`
+- QC 數學：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-03--improvement_report_math_validation.md`
+- FA 對比：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-03--improvement_report_gap_comparison.md`
+
+**每個 Phase 的 session 上下文設計已在主計劃文件中定義（§4.1/5/6 的 session 上下文段）。**
 
 **Live 前置條件（M/N 章前必須核驗）：**
 - Paper Trading 穩定運行至少 21 天
-- H0 Gate 確定性門控已實施並驗證 ✅
-- 風控框架實測驗證 + 回測引擎驗證策略 alpha
+- H0 Gate blocking 驗證（Phase 0 啟動 shadow 觀察）
+- 四階段放權框架完成（Phase 3）
+- 策略 Alpha 基準 > 0
 - provider pricing table 正式綁定
-- authority grant contract + execution adapter contract
 
 **章節樹導航：**
 A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous Live ⬜
@@ -254,4 +279,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-02：3637+ tests · 126+ routes · 5 Agent · demo_only · 代碼 80% 業務 52% · 下一步讀 TODO.md。
+> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Batch 9A 完成 · 中期路線圖 Phase 0-3 已制定（7 週 · 4-Agent 分析） · Alpha 基準測試並行中 · 下一步：Phase 0 Batch 9B 學習閉環 → 讀 TODO.md。

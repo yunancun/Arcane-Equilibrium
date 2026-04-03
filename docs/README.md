@@ -350,6 +350,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-27--remote_access_guide.md` | 远程访问完整指南：Tailscale 安装配置 + Bybit Demo 访问地址 + secrets 权限加固 |
 | `2026-03-22--local_private_layout.md` | 本地私有布局说明：Git 仓库 vs 本地私有目录结构（secrets/srv 分离） |
 | `2026-03-30--local_ai_expansion_analysis.md` | 本地 AI 擴展用途分析（Ollama/Qwen 3.5 應用場景，DOC-08 依據） |
+| `2026-04-03--openclaw_improvement_report_v3_final.md` | ★★★★ 外部全面改善建議報告 V3 Final：五輪三人審批 34 項修正 · Agent 自主化架構 + 雙層決策 + 四階段放權 + 10 新模組 + 5 策略 V2 + L0-L2 路徑 + Claude API 整合 |
 
 ### governance_dev/ — 治理开发文档
 

@@ -72,69 +72,133 @@ PM 排程計劃：
 
 ---
 
-## ██ Batch 9B — 學習閉環接通（P0，~8h）
+## ★★★ 統一路線圖（改善報告 V3 + Batch 9 合併 · 4-Agent 分析 · 2026-04-03）
 
-> FA P0-GAP-1/2。業務完成度 52%→~65%。
+> 主計劃文件：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-03--unified_execution_roadmap.md`
+> 改善報告原文：`docs/references/2026-04-03--openclaw_improvement_report_v3_final.md`
+> Alpha 基準測試從 Phase 0 Day 1 並行啟動（2 週 Paper，不寫代碼）
+> Day 10 決策點：PnL>0 繼續 / PnL≈0 繼續但提升策略優先級 / PnL<-3% 暫緩轉策略研究
+
+---
+
+## ██ Phase 0 Sub-A — 學習閉環 + 管線連通（Day 1-3，~14h，5 E1 並行）
+
+> 業務完成度 52%→~72%。全部可並行。
 
 ### [ ] U-01：學習反饋閉環（FA P0-GAP-1）
 - **檔案**：`app/strategist_agent.py`
-- **修復**：`_apply_pattern_insight()` 接入決策路徑
-- **工時**：4h
-- **E1 指派**：E1-Alpha
+- **修復**：`_apply_pattern_insight()` 接入 `_evaluate_signal()` 決策路徑
+- **工時**：4h · **E1**：E1-Alpha
 
 ### [ ] U-02：進化參數自動重部署（FA P0-GAP-2）
 - **檔案**：`evolution_engine.py` + `strategy_auto_deployer.py`
-- **修復**：EvolutionEngine best_params → Deployer；paper/demo 免確認（Operator 決策 2026-04-02）
-- **工時**：4h
-- **E1 指派**：E1-Beta
+- **修復**：EvolutionEngine best_params → Deployer；paper/demo 免確認（Operator 決策）
+- **工時**：4h · **E1**：E1-Beta
 
----
-
-## ██ Batch 9C — 管線連通（P1，~6h）
-
-### [ ] U-06：H0 Gate shadow 模式觀察（FA P1-GAP-3）
-- **修復**：shadow 記錄 would-have-blocked 但不攔截，觀察 1 週後切 blocking（Operator 決策 2026-04-02）
-- **工時**：1h
+### [ ] U-06：H0 Gate shadow 觀察（FA P1-GAP-3）
+- **修復**：shadow 記錄 would-have-blocked 但不攔截，觀察 1 週後切 blocking
+- **工時**：1h · **E1**：E1-Gamma
 
 ### [ ] U-07：Scanner→Deployer 自動接通（FA P1-GAP-5）
-- **工時**：2h
+- **工時**：2h · **E1**：E1-Delta
 
 ### [ ] U-08：Backtest 生產環境啟用（FA P1-GAP-6）
-- **工時**：2h
+- **工時**：2h · **E1**：E1-Epsilon
 
 ### [ ] U-15：L2 觸發門檻降低 50→20（FA P2-GAP-7）
-- **工時**：1h
+- **工時**：1h · **E1**：E1-Gamma
 
 ---
 
-## ██ Batch 9D — 策略 Edge 驗證（P1，~15h）
+## ██ Phase 0 Sub-B — 策略 Edge 驗證（Day 3-5，~15h，3 E1 並行）
 
 ### [ ] U-10：FundingRateArb 完整成本模型精算（QC S3）
-- **修復**：QC 認定唯一有可論證 edge 的策略；精算手續費+滑點+funding rate+basis risk+持倉天數
-- **工時**：6h
+- **修復**：精算手續費+滑點+funding rate+basis risk+持倉天數
+- **工時**：6h · **E1**：E1-Alpha · **依賴**：U-08
 
 ### [ ] U-11：交易所條件單 SL/TP（FA P1-GAP-4）
 - **修復**：Bybit Demo 側掛 SL/TP 條件單（原則 9 雙重防線）
-- **工時**：6h
+- **工時**：6h · **E1**：E1-Beta · **需 E3 安全審查**
 
-### [ ] U-14：Kelly fraction 計算 + GUI 展示（QC S4）
-- **修復**：讓 Operator 直觀看到策略是否值得交易；Agent 根據 Kelly 自動分配資本（Operator 決策 2026-04-02 選項 C）
-- **工時**：3h
+### [ ] U-14：Kelly fraction + GUI + Agent 自動資本分配（QC S4）
+- **修復**：Kelly 在 tab-ai.html 顯示；Agent 根據 Kelly 分配資本（Operator 選項 C）
+- **工時**：3h · **E1**：E1-Gamma
 
 ---
 
-## ██ 延後項（P2-P3，數據積累後啟用）
+## ██ Phase 1 — Agent 感知工具箱（Week 2-3，~5 天壁鐘）
 
+> 前置：Phase 0 完成。報告 §5 新模組 + §6.6 Indicator 擴展。
+
+### [ ] 1.1：PositionSizer — Kelly 四層倉位計算（報告 §5.1）
+- **新建模組**：Kelly(1/8→1/4 分級) + Vol-adjusted + Risk Parity + P1 硬上限
+- **工時**：1d · **並行組 A**
+
+### [ ] 1.2：StrategyHealthMonitor — CUSUM 策略衰減檢測（報告 §5.2）
+- **新建模組**：rolling Sharpe + CUSUM + 15 連虧硬性兜底
+- **工時**：1d · **並行組 A**
+
+### [ ] 1.3：EWMAVolEstimator — 波動率估計（報告 §5.3）
+- **新建模組**：lambda 按時間框架調整 + vol regime 判斷
+- **工時**：0.5d · **並行組 A**
+
+### [ ] 1.4：Hurst Exponent — R/S 分析（報告 §5.4）
+- **新建模組**：趨勢/均回判斷，0.40/0.60 閾值 + Hysteresis 滯後保護
+- **工時**：0.5d · **並行組 A**
+
+### [ ] 1.5：Indicator Engine 擴展 — 6 新指標（報告 §6.6）
+- **擴展**：KAMA, ADX, Hurst, EWMA Vol, Volume Ratio, Donchian
+- **工時**：1.5d · **依賴**：1.3, 1.4 接口 · **並行組 B**
+
+### [ ] 1.8：LocalLLMClient 抽象 — Ollama + LM Studio 兼容（報告 §4.5）
+- **新建**：ABC 接口 + OllamaLLMClient 適配
+- **工時**：0.5d · **並行組 C**
+
+### [ ] 1.9：影子決策追踪 — 四階段退出條件數據基礎（報告 §2）
+- **新建**：shadow vs actual 差異記錄
+- **工時**：0.5d · **依賴**：1.2 · **並行組 C**
+
+---
+
+## ██ Phase 2 — 策略 V2 升級 + Agent 整合（Week 3-5，~10 天壁鐘）
+
+> 前置：Phase 1 完成 + Alpha 基準 2 週結果（PnL<-3% 則轉策略研究）。
+
+### [ ] 2.1：MA_Crossover V2 — KAMA + ADX>20 + 多時間框架（報告 §6.1）
+### [ ] 2.2：BB_Reversion V2 — RSI<30 + Regime 感知（報告 §6.2）
+### [ ] 2.3：BB_Breakout V2 — Volume ratio>1.5 + Donchian 確認（報告 §6.3）
+### [ ] 2.4：FundingRateArb V2 — Paired Execution + Basis（報告 §6.4）
+### [ ] 2.5：GridTrading V2 — OU 動態間距 + 成本修正（報告 §6.5）
+### [ ] 2.6：Regime Detection 升級 — Hurst + EWMA Vol 整合（報告 §3）
+### [ ] 2.7：Strategist 雙軌 + 優先級隊列 + emergency_mode（報告 §3.3）
+### [ ] 2.8：ContextDistiller — 壓縮系統狀態為 ~450 tokens（報告 §4.2）
+### [ ] 2.9：Strategist/Analyst Ollama prompt 模板 — JSON 結構化（報告）
+
+---
+
+## ██ Phase 3 — Claude API + 四階段框架（Week 5-7，~8 天壁鐘）
+
+### [ ] 3.1：Claude API 客戶端 + APIBudgetManager（報告 §4.4）
+### [ ] 3.2：L1→L1.5→L2 路由邏輯（報告 §4.1）
+### [ ] 3.3：Claude→TSR 閉環 — knowledge_update + TTL（報告 §4.3）
+### [ ] 3.4：HedgingEngine — delta 計算 + 對沖建議（報告 §5.5）
+### [ ] 3.5：PnLAttributor + API + GUI（報告 §5.6）
+### [ ] 3.6：OB Imbalance + Orderbook WS（報告）
+### [ ] 3.7：四階段放權框架 — GovernanceHub 持久化 + 自動降級（報告 §2）
+
+---
+
+## ██ Phase 4 — 條件性（不定期，有前置條件）
+
+### [ ] 4.1：PairsTrading（需 3 月協整驗證）
+### [ ] 4.2：Beta Hedging（需 HedgingEngine 穩定 1 月）
+### [ ] 4.3：Kalman Filter（KAMA 表現不理想時）
+### [ ] 4.4：JSON→PostgreSQL（數據量瓶頸時）
+### [ ] 4.5：Mac Studio 遷移 + 大模型（硬件到手）
 ### [ ] U-12：統計適應硬門檻（200+ trades/regime）
-### [ ] U-13：參數空間 step 字段
-### [ ] U-16：Walk-forward harness（BacktestEngine 擴展）
-### [ ] U-17：Deflated Sharpe Ratio 自動計算
+### [ ] U-16：Walk-forward harness
+### [ ] U-17：Deflated Sharpe Ratio
 ### [ ] U-18：Jump detection（K 線 body > 3σ → 加寬止損）
-
-PM 排程計劃：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-04-02--adaptive_params_execution_plan.md`
-FA 功能規格：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-02--adaptive_params_functional_spec.md`
-PA 技術方案：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-02--adaptive_params_technical_design.md`
-QC 量化審查：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-02--adaptive_params_architecture_review.md`
 
 ---
 
