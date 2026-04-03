@@ -295,8 +295,10 @@ live_execution_allowed = False            # 不可改（live 防护硬边界）
 
 ## 部署
 
+**跨平台**：项目必须随时可部署至 macOS（路径不硬编码 / LLM 抽象 / systemd→launchd 可迁移 / 无 Linux-only 依赖）。详见 CLAUDE.md §七。
+
 ```bash
-# API 服务器（systemd，开机自启）
+# API 服务器（Linux: systemd，开机自启；macOS: launchd 可迁移）
 systemctl --user status openclaw-trading-api    # 端口 8000
 systemctl --user status openclaw-gateway        # OpenClaw + Tailscale HTTPS
 
