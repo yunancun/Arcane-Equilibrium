@@ -3,6 +3,22 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### R-07 Canary Tooling — Comparator + Watchdog + Rollback（2026-04-03 · Session 11）
+
+**R07-3 Canary Comparator:**
+- `canary_schema.py`：JSONL schema contract (V1.0.0) + 3-tier tolerance mapping + validation
+- `canary_comparator.py`：tick-level comparison (indicators, signals, paper state, intents) + boundary divergence escalation (V3-QC-5) + CLI + daily reports
+
+**R07-6 Engine Watchdog:**
+- `engine_watchdog.py`：snapshot freshness monitor + crash/recovery detection + 3-strike rollback rule + CLI + status API helper
+
+**R07-5 Rollback Drill:**
+- `rollback_drill.sh`：8-step rehearsal script (stop engine → verify fallback → git checkout → restart → health check) + SLA timing + dry-run mode
+
+**35 tests all PASS** covering: schema (5) + comparator (14) + watchdog (11) + integration (5)
+
+---
+
 ### R-06 Python IPC Integration Complete（2026-04-03 · Session 11）
 
 **R06-D conftest IPC mock fixtures:**

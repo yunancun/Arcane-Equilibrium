@@ -104,10 +104,10 @@
 |------|------|---------|--------|
 | R07-1 影子進程 | [ ] | | |
 | R07-2 灰度模式 | [ ] | | |
-| R07-3 Comparator | [ ] | | |
+| R07-3 Comparator | ✅ | 2026-04-03 | Session 11 |
 | R07-4 灰度 7 天 | [ ] | | |
-| R07-5 完全回滾演練 | [ ] | | |
-| R07-6 止損接管演練 | [ ] | | |
+| R07-5 完全回滾演練腳本 | ✅ | 2026-04-03 | Session 11 |
+| R07-6 引擎看門狗 | ✅ | 2026-04-03 | Session 11 |
 | R07-7 關閉影子 | [ ] | | |
 | R07-8 冗餘標記 | [ ] | | |
 | R07-9 穩定觀察 | [ ] | | |
@@ -117,4 +117,10 @@
 
 ## 問題與變更
 
-（空）
+1. **R07-3/5/6 提前構建**（Session 11）：灰度比較器 + 回滾腳本 + 引擎看門狗在 R-06 完成後立即構建
+   - `helper_scripts/canary/canary_schema.py`：JSONL 模式合約 + 容差分級
+   - `helper_scripts/canary/canary_comparator.py`：3 層容差比較 + 邊界偏差升級 + CLI
+   - `helper_scripts/canary/engine_watchdog.py`：快照新鮮度監控 + 崩潰/恢復 + 3 振回滾
+   - `helper_scripts/canary/rollback_drill.sh`：8 步回滾演練（SLA < 10 分鐘）
+   - `helper_scripts/canary/test_canary.py`：35 個測試全 PASS
+2. **E5 發現**：Rust StateWriter 應使用 atomic write（write .tmp + rename），flag 為 R07-2 修復

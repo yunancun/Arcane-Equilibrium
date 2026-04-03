@@ -42,41 +42,15 @@ if _program_code_dir not in sys.path:
     sys.path.insert(0, _program_code_dir)
 
 from app.ipc_state_reader import RustSnapshotReader, _CACHE_TTL_SECONDS
+from conftest import SAMPLE_PIPELINE_SNAPSHOT
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Shared test data / 共享測試數據
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SNAPSHOT_FULL = {
-    "paper_state": {
-        "balance": 9500.0,
-        "peak_balance": 10000.0,
-        "total_realized_pnl": -500.0,
-        "total_fees": 12.5,
-        "trade_count": 3,
-        "positions": [
-            {
-                "symbol": "BTCUSDT",
-                "is_long": True,
-                "qty": 0.01,
-                "entry_price": 65000.0,
-                "best_price": 66000.0,
-                "entry_fee": 3.25,
-                "entry_ts_ms": 1700000000000,
-                "unrealized_pnl": 10.0,
-            }
-        ],
-    },
-    "latest_prices": {"BTCUSDT": 66000.0, "ETHUSDT": 3200.0},
-    "stats": {
-        "total_ticks": 5000,
-        "total_intents": 15,
-        "total_fills": 3,
-        "total_stops": 1,
-        "last_tick_ms": 1700000050000,
-    },
-    "source": "rust_engine",
-}
+# Reuse canonical snapshot from conftest — single source of truth
+# 複用 conftest 中的標準快照 — 單一數據來源
+SNAPSHOT_FULL = SAMPLE_PIPELINE_SNAPSHOT
 
 SNAPSHOT_EMPTY_POSITIONS = {
     "paper_state": {
