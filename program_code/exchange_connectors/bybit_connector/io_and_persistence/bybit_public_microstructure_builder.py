@@ -220,6 +220,167 @@ def compute_volatility_band_from_klines(kline_rows: list[list[str]]) -> tuple[fl
 
     return vol_bps, band
 
+def calculate_ob_imbalance(
+    bids: list[list[str]], asks: list[list[str]], top_n: int = 5
+) -> dict[str, Any]:
+    """
+    Calculate orderbook imbalance metrics from L2 orderbook levels.
+    從 L2 訂單簿深度計算訂單簿不平衡指標。
+
+    Metrics / 指標：
+    - bid_ask_imbalance: (bid_vol - ask_vol) / (bid_vol + ask_vol), range [-1, 1]
+      頂層買賣量不平衡
+    - weighted_imbalance: price-distance weighted imbalance (closer levels weigh more)
+      價格距離加權不平衡（越靠近中間價權重越大）
+    - spread_bps: bid-ask spread in basis points
+      買賣價差（基點）
+    - depth_ratio: bid_vol / ask_vol for top N levels
+      買賣深度比
+
+    Args:
+        bids: [[price_str, qty_str], ...] sorted best-first (Bybit "b" field)
+        asks: [[price_str, qty_str], ...] sorted best-first (Bybit "a" field)
+        top_n: number of top levels to consider (default 5)
+
+    Returns:
+        Dict with imbalance metrics; all values None if data insufficient.
+        指標字典；數據不足時所有值為 None。
+    """
+    empty_result: dict[str, Any] = {
+        "bid_ask_imbalance": None,
+        "weighted_imbalance": None,
+        "spread_bps": None,
+        "depth_ratio": None,
+        "bid_vol_top_n": None,
+        "ask_vol_top_n": None,
+        "top_n": top_n,
+    }
+
+    if not bids or not asks:
+        return empty_result
+
+    # Parse top N levels / 解析前 N 檔
+    def _parse_levels(levels: list[list[str]], n: int) -> list[tuple[float, float]]:
+        parsed: list[tuple[float, float]] = []
+        for lv in levels[:n]:
+            if len(lv) < 2:
+                continue
+            p = safe_float(lv[0])
+            q = safe_float(lv[1])
+            if p is not None and q is not None and p > 0 and q >= 0:
+                parsed.append((p, q))
+        return parsed
+
+    bid_levels = _parse_levels(bids, top_n)
+    ask_levels = _parse_levels(asks, top_n)
+
+    if not bid_levels or not ask_levels:
+        return empty_result
+
+    best_bid_price = bid_levels[0][0]
+    best_ask_price = ask_levels[0][0]
+    mid_price = (best_bid_price + best_ask_price) / 2.0
+
+    if mid_price <= 0:
+        return empty_result
+
+    # Simple volume imbalance / 簡單成交量不平衡
+    bid_vol = sum(q for _, q in bid_levels)
+    ask_vol = sum(q for _, q in ask_levels)
+    epsilon = 1e-12
+    bid_ask_imbalance = round((bid_vol - ask_vol) / (bid_vol + ask_vol + epsilon), 6)
+
+    # Weighted imbalance: qty * 1/(1 + distance_from_mid) / 加權不平衡
+    def _weighted_vol(levels: list[tuple[float, float]]) -> float:
+        total = 0.0
+        for price, qty in levels:
+            distance = abs(price - mid_price) / mid_price
+            weight = 1.0 / (1.0 + distance)
+            total += qty * weight
+        return total
+
+    w_bid = _weighted_vol(bid_levels)
+    w_ask = _weighted_vol(ask_levels)
+    weighted_imbalance = round((w_bid - w_ask) / (w_bid + w_ask + epsilon), 6)
+
+    # Spread in basis points / 價差（基點）
+    spread_bps_val = round((best_ask_price - best_bid_price) / mid_price * 10000.0, 6)
+
+    # Depth ratio / 深度比
+    depth_ratio = round(bid_vol / (ask_vol + epsilon), 6)
+
+    return {
+        "bid_ask_imbalance": bid_ask_imbalance,
+        "weighted_imbalance": weighted_imbalance,
+        "spread_bps": spread_bps_val,
+        "depth_ratio": depth_ratio,
+        "bid_vol_top_n": round(bid_vol, 6),
+        "ask_vol_top_n": round(ask_vol, 6),
+        "top_n": top_n,
+    }
+
+
+def get_ob_signal(
+    symbol: str,
+    bids: list[list[str]],
+    asks: list[list[str]],
+    top_n: int = 5,
+    imbalance_threshold: float = 0.3,
+    wide_spread_bps: float = 50.0,
+) -> dict[str, Any]:
+    """
+    Generate orderbook-based trading signal from L2 levels.
+    從 L2 訂單簿深度生成基於訂單簿的交易信號。
+
+    Signal logic / 信號邏輯：
+    - bid_ask_imbalance >  threshold → bullish_pressure（買方壓力）
+    - bid_ask_imbalance < -threshold → bearish_pressure（賣方壓力）
+    - spread_bps > wide_spread_bps → wide_spread_warning（低流動性警告）
+    - otherwise → neutral
+
+    Args:
+        symbol: trading pair / 交易對
+        bids: Bybit "b" field levels
+        asks: Bybit "a" field levels
+        top_n: levels to consider for imbalance
+        imbalance_threshold: absolute threshold to trigger directional signal
+        wide_spread_bps: spread threshold (bps) for low-liquidity warning
+
+    Returns:
+        Dict with signal, direction, and supporting metrics.
+        信號字典，含方向與支撐指標。
+    """
+    metrics = calculate_ob_imbalance(bids, asks, top_n=top_n)
+    imbalance = metrics.get("bid_ask_imbalance")
+    spread = metrics.get("spread_bps")
+
+    # Default: neutral with no warnings / 預設：中性無警告
+    signal = "neutral"
+    direction = "none"
+    warnings: list[str] = []
+
+    if imbalance is not None:
+        if imbalance > imbalance_threshold:
+            signal = "bullish_pressure"
+            direction = "long"
+        elif imbalance < -imbalance_threshold:
+            signal = "bearish_pressure"
+            direction = "short"
+
+    if spread is not None and spread > wide_spread_bps:
+        warnings.append("wide_spread_low_liquidity")
+
+    return {
+        "symbol": symbol,
+        "signal": signal,
+        "direction": direction,
+        "warnings": warnings,
+        "imbalance_threshold": imbalance_threshold,
+        "wide_spread_bps_threshold": wide_spread_bps,
+        "metrics": metrics,
+    }
+
+
 def build_report() -> dict[str, Any]:
     """Build a public microstructure snapshot for H0."""
     ts_ms = int(time.time() * 1000)
@@ -322,6 +483,10 @@ def build_report() -> dict[str, Any]:
     slippage_buy_bps = compute_market_slippage_bps(asks, test_notional=test_notional, is_buy=True)
     slippage_sell_bps = compute_market_slippage_bps(bids, test_notional=test_notional, is_buy=False)
 
+    # OB imbalance metrics / 訂單簿不平衡指標
+    ob_imbalance = calculate_ob_imbalance(bids, asks, top_n=5)
+    ob_signal = get_ob_signal(symbol, bids, asks, top_n=5)
+
     coverage = {
         "best_bid_ask_present": best_bid is not None and best_ask is not None,
         "orderbook_depth_present": len(bids) > 0 and len(asks) > 0,
@@ -385,6 +550,8 @@ def build_report() -> dict[str, Any]:
             "slippage_buy_bps_for_test_notional": slippage_buy_bps,
             "slippage_sell_bps_for_test_notional": slippage_sell_bps,
         },
+        "ob_imbalance": ob_imbalance,
+        "ob_signal": ob_signal,
         "coverage": coverage,
         "microstructure_state": microstructure_state,
         "allow_use_by_h0": allow_use_by_h0,

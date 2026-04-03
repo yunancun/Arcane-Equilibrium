@@ -150,6 +150,11 @@ class StrategistAgent:
         # 委託：H3 模型路由 — 模型層選擇 + L2 快取管理
         self._model_router = ModelRouter()
 
+        # Inject budget checker for L1.5/L2 routing / 注入預算檢查器用於 L1.5/L2 路由
+        # Budget checker is injected externally via set_budget_manager()
+        # 預算檢查器通過 set_budget_manager() 外部注入
+        self._budget_manager: Optional[Any] = None  # Set via set_budget_manager()
+
         # Truth Source Registry: injected externally for pattern-driven weight updates
         # 知識登記表：外部注入，用於模式洞察驅動的策略權重更新（Principle 7 隔離）
         self._truth_registry: Optional[Any] = None
@@ -182,6 +187,8 @@ class StrategistAgent:
             "h1_cooldown_skip": 0,
             # H4 output validation counter / H4 輸出驗證拒絕計數器
             "h4_validation_fail": 0,
+            # L1.5 evaluation counter / L1.5 評估計數器
+            "l1_5_evaluations": 0,
             # H5 Ollama cost tracking counter / H5 Ollama 調用計數
             "ollama_calls_tracked": 0,
             # L2 cache counters / L2 快取計數器
@@ -206,6 +213,10 @@ class StrategistAgent:
         # Injected externally; None = no cognitive modulation (bypass)
         # 外部注入；None = 不做認知調製（跳過）
         self._cognitive_modulator: Optional[Any] = None
+
+        # 3-3: Last knowledge_update extracted from AI response (thread-safe via _lock)
+        # 3-3：從 AI 回答中提取的最新 knowledge_update（通過 _lock 線程安全）
+        self._last_knowledge_update: Optional[Any] = None
 
     # ── Lifecycle / 生命週期 ──
 
@@ -339,7 +350,10 @@ class StrategistAgent:
                 # H3 ModelRouter: select model tier based on signal complexity
                 # H3 模型路由：根據信號複雜度選擇模型層（委託給 ModelRouter 模組）
                 complexity = self._h1_gate.complexity_score(intel)
-                model_tier = self._model_router.route(complexity)
+                # Build routing context for L1.5/L2 upgrade decisions
+                # 構建路由上下文用於 L1.5/L2 升級決策
+                route_context = self._build_route_context(intel)
+                model_tier = self._model_router.route(complexity, context=route_context)
                 if model_tier == "l2":
                     # L2 must run in background thread — cannot block synchronous on_tick callback
                     # L2 必須在後台線程執行，避免阻塞 MessageBus 的同步 on_tick 回調
@@ -353,8 +367,24 @@ class StrategistAgent:
                     evaluation = _heuristic_evaluate(intel, self.config)
                     with self._lock:
                         self._stats["heuristic_evaluations"] += 1
+                elif model_tier == "l1_5":
+                    # L1.5: Claude Sonnet — synchronous with timeout
+                    # L1.5：Claude Sonnet — 同步調用帶超時
+                    try:
+                        evaluation = self._evaluate_edge_l1_5(intel)
+                        with self._lock:
+                            self._stats["l1_5_evaluations"] = (
+                                self._stats.get("l1_5_evaluations", 0) + 1
+                            )
+                    except Exception as _l15_exc:
+                        logger.warning(
+                            "L1.5 evaluation failed, falling back to L1: %s / "
+                            "L1.5 評估失敗，回退到 L1: %s",
+                            type(_l15_exc).__name__, type(_l15_exc).__name__,
+                        )
+                        evaluation = self._evaluate_edge(intel)
                 else:
-                    # L1 runs synchronously with timeout — acceptable blocking window
+                    # L1 (l1_9b / l1_27b) runs synchronously with timeout
                     # L1 同步執行，有 timeout 保護，阻塞時間可接受
                     try:
                         evaluation = self._evaluate_edge(intel)
@@ -530,6 +560,22 @@ class StrategistAgent:
 
     # ── Truth Registry + Strategy Preference Weights ──
 
+    def set_budget_manager(self, budget_manager: Any) -> None:
+        """
+        Inject APIBudgetManager for L1.5/L2 budget checking.
+        注入 APIBudgetManager 用於 L1.5/L2 預算檢查。
+
+        Wires up a lambda budget_checker into ModelRouter so that route()
+        can gate L1.5/L2 upgrades based on remaining API budget.
+        將 lambda 預算檢查器接入 ModelRouter，使 route() 可根據剩餘
+        API 預算閘控 L1.5/L2 升級。
+        """
+        self._budget_manager = budget_manager
+        self._model_router.set_budget_checker(
+            lambda tier: budget_manager.can_call(tier)
+        )
+        logger.info("APIBudgetManager injected into StrategistAgent / API 預算管理器已注入")
+
     def set_truth_registry(self, registry: Any) -> None:
         """
         Inject TruthSourceRegistry for pattern-driven strategy weight updates.
@@ -657,6 +703,82 @@ class StrategistAgent:
         except Exception as e:
             logger.warning("_apply_l2_weight_update failed (fail-open): %s", e)
 
+    # ── Route Context + L1.5 Evaluation / 路由上下文 + L1.5 評估 ──
+
+    def _build_route_context(self, intel: Any) -> dict:
+        """
+        Build context dict for ModelRouter L1.5/L2 upgrade decisions.
+        構建上下文字典用於 ModelRouter L1.5/L2 升級判斷。
+
+        Extracts relevant fields from intel metadata so ModelRouter
+        can decide whether to upgrade from L1 to L1.5 or L2.
+        從 intel metadata 提取相關欄位，供 ModelRouter 判斷是否
+        從 L1 升級到 L1.5 或 L2。
+
+        Returns:
+            dict with keys matching ModelRouter.route() context spec
+        """
+        metadata = intel.metadata if isinstance(intel.metadata, dict) else {}
+        return {
+            "confidence": getattr(intel, "relevance_score", 0.5),
+            "amount_pct": metadata.get("position_pct", 0.0),
+            "cusum_triggered": metadata.get("cusum_triggered", False),
+            "daily_vol_pct": metadata.get("daily_vol_pct", 0.0),
+            "is_new_symbol": metadata.get("is_new_symbol", False),
+            "weekly_pnl_pct": metadata.get("weekly_pnl_pct", 0.0),
+            "param_sharpe_change_pct": metadata.get("param_sharpe_change_pct", 0.0),
+        }
+
+    def _evaluate_edge_l1_5(self, intel: Any) -> EdgeEvaluation:
+        """L1.5 eval with Claude→TSR closed loop (3-3). / L1.5 Claude→TSR 閉環（3-3）。"""
+        try:
+            with self._lock:
+                self._last_knowledge_update = None
+            evaluation = self._evaluate_edge(intel)
+            with self._lock:
+                ku = self._last_knowledge_update
+                self._last_knowledge_update = None
+            if ku and self._truth_registry:
+                self._process_knowledge_update(ku, source="cloud_api")
+            if self._budget_manager:
+                try:
+                    self._budget_manager.record_call("l1_5", 0.02)
+                except Exception:
+                    pass
+            return evaluation
+        except Exception as e:
+            logger.warning("L1.5 eval failed, fallback to L1: %s", e)
+            return self._evaluate_edge(intel)
+
+    def _process_knowledge_update(self, knowledge_update: Any, source: str = "cloud_api") -> None:
+        """Write knowledge_update to TSR (3-3). Principle 10: AI=INFERENCE, caps: cloud 0.90, ai 0.85.
+        將 knowledge_update 寫入 TSR（3-3）。原則 10：AI=推斷。上限：cloud 0.90, ai 0.85。"""
+        if not self._truth_registry:
+            return
+        items = knowledge_update if isinstance(knowledge_update, list) else [knowledge_update]
+        cap = 0.90 if source == "cloud_api" else 0.85
+        written = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            pattern = item.get("pattern", item.get("claim", ""))
+            if not pattern:
+                continue
+            try:
+                conf = min(float(item.get("confidence", 0.5)), cap)
+                self._truth_registry.register_claim(
+                    pattern_text=pattern, evidence_source="ai",
+                    observation_count=int(item.get("observation_count", 1)),
+                    confidence=conf, applies_to_regime=item.get("regime", "all"),
+                    applies_to_strategy=item.get("strategy", "all"),
+                )
+                written += 1
+                logger.info("TSR write: '%s' (conf=%.2f, src=%s)", pattern[:50], conf, source)
+            except Exception as exc:
+                logger.warning("TSR write failed: %s", exc)
+        if written:
+            self._audit("knowledge_update", {"count": written, "source": source})
+
     # ── Prompt Construction / Prompt 構建 ──
 
     def _build_prompt_context(self, intel: IntelObject) -> str:
@@ -710,6 +832,20 @@ class StrategistAgent:
                     }
             except Exception:
                 pass  # No dream data — skip silently / 無蒙特卡洛數據，靜默跳過
+
+        # 3-3: Include high-confidence TSR claims in prompt (closed loop)
+        # 3-3：在 prompt 中包含高信度 TSR 聲明（閉環）
+        if self._truth_registry:
+            try:
+                active = self._truth_registry.get_active_claims(min_confidence=0.5)
+                if active:
+                    context_dict["tsr_claims"] = [
+                        {"pattern": c.pattern_text, "confidence": c.confidence,
+                         "level": c.cognitive_level.value if hasattr(c.cognitive_level, "value") else str(c.cognitive_level)}
+                        for c in active[:5]
+                    ]
+            except Exception:
+                pass  # TSR query failure is non-critical / TSR 查詢失敗非關鍵
 
         # Format as structured text for LLM / 格式化為 LLM 的結構化文本
         try:
@@ -803,6 +939,13 @@ class StrategistAgent:
             confidence = float(result.get("confidence", 0.0))
             reason = str(result.get("reason", "AI evaluation"))
 
+            # 3-3: Stash knowledge_update for L1.5 TSR write-back
+            # 3-3：暫存 knowledge_update 供 L1.5 寫回 TSR
+            ku = result.get("knowledge_update")
+            if ku:
+                with self._lock:
+                    self._last_knowledge_update = ku
+
             # H5: Record Ollama call for cost/resource awareness (principle 13)
             # H5 成本感知：記錄 Ollama 調用（根原則 13）
             if self.cost_tracker is not None:
@@ -872,7 +1015,8 @@ class StrategistAgent:
     def _h3_route_model(self, intel: Any) -> str:
         """Backward-compatible delegator to ModelRouter / 向後兼容委託"""
         complexity = self._h1_gate.complexity_score(intel)
-        return self._model_router.route(complexity)
+        route_context = self._build_route_context(intel)
+        return self._model_router.route(complexity, context=route_context)
 
     # ── V2: Dual-track Fast Channel / 雙軌快速通道 ──
 

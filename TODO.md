@@ -18,7 +18,7 @@
 ## 測試基準線
 
 ```
-3704 passed / 23 failed / 17 errors（post E5 fixes · paired_state restore 修復 +1 pass）
+3703 passed / 24 failed / 17 errors（post Phase 3 · test_create_basic 為 pre-existing）
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
 
@@ -175,13 +175,13 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 
 ## ██ Phase 3 — Claude API + 四階段放權（Week 5-7，~8 天壁鐘）· ★L2 凍結
 
-### [ ] 3-1：Claude API 客戶端 + APIBudgetManager（報告 §4.4）
-### [ ] 3-2：L1→L1.5→L2 路由邏輯（報告 §4.1）
-### [ ] 3-3：Claude→TSR 閉環 — knowledge_update + TTL（報告 §4.3）
-### [ ] 3-4：HedgingEngine — delta 計算 + 對沖建議（報告 §5.5）
-### [ ] 3-5：PnLAttributor + API + GUI（報告 §5.6）
-### [ ] 3-6：OB Imbalance + Orderbook WS（報告）
-### [ ] 3-7：四階段放權框架 — GovernanceHub 持久化 + 自動降級（報告 §2）
+### [x] 3-1：Claude API 客戶端 + APIBudgetManager（報告 §4.4）
+### [x] 3-2：L1→L1.5→L2 路由邏輯（報告 §4.1）
+### [x] 3-3：Claude→TSR 閉環 — knowledge_update + TTL（報告 §4.3）
+### [x] 3-4：HedgingEngine — delta 計算 + 對沖建議（報告 §5.5）· **Rust+PyO3**
+### [x] 3-5：PnLAttributor + API + GUI（報告 §5.6）· Python 擴展現有 TradeAttributionEngine
+### [x] 3-6：OB Imbalance + Orderbook WS（報告）
+### [x] 3-7：四階段放權框架 — DelegationFramework 獨立模組 + 自動降級（報告 §2）
 ### [ ] 3-L2：★ L2 接口凍結簽核 → git tag `l2-interface-freeze`
 
 ---

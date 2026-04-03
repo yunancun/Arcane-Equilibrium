@@ -57,23 +57,103 @@ class ModelRouter:
         self._L2_CACHE_TTL_S: float = 3600.0
         self._L2_CACHE_MAX_SIZE: int = 200
 
-    def route(self, complexity: float, urgency: Optional[str] = None) -> str:
+        # Budget checker callback — injected externally to avoid circular imports.
+        # 預算檢查回調 — 外部注入以避免循環 import。
+        # Signature: (tier: str) -> bool, returns True if call is allowed.
+        self._budget_checker: Optional[Callable[[str], bool]] = None
+
+    def set_budget_checker(self, checker: Callable[[str], bool]) -> None:
         """
-        Route complexity score to model tier.
-        根據複雜度分數路由到模型層。
+        Inject a budget checker callback for L1.5/L2 tier gating.
+        注入預算檢查回調，用於 L1.5/L2 tier 閘控。
+
+        The checker receives a tier string ('l1_5' or 'l2') and returns
+        True if the call is budget-allowed, False otherwise.
+        回調接收 tier 字串（'l1_5' 或 'l2'），返回 True 表示預算允許。
 
         Args:
-            complexity: 0.0-1.0 complexity score from H1
-            urgency: optional urgency hint (reserved for future use)
-
-        Returns: 'l1_9b' | 'l1_27b' | 'l2'
+            checker: callable (tier: str) -> bool
         """
-        if complexity >= 0.8:
-            return "l2"
-        elif complexity >= 0.5:
-            return "l1_27b"
-        else:
+        self._budget_checker = checker
+
+    def route(
+        self,
+        complexity: float,
+        urgency: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Route complexity score to model tier (4-tier with L1.5/L2 upgrade logic).
+        根據複雜度分數路由到模型層（四級路由，含 L1.5/L2 升級邏輯）。
+
+        Backward compatible: when context is None, behaves as the original 3-tier router.
+        向後兼容：context 為 None 時，行為與原始三級路由完全一致。
+
+        Args:
+            complexity: 0.0-1.0 complexity score from H1 / H1 產生的複雜度分數
+            urgency: optional urgency hint (reserved for future use) / 可選緊急度提示
+            context: optional dict with upgrade decision fields / 可選升級判斷上下文
+                - confidence (float): signal confidence / 信號信心度
+                - amount_pct (float): position size as % of portfolio / 倉位佔組合百分比
+                - cusum_triggered (bool): CUSUM regime change detected / CUSUM 偵測到體制變化
+                - daily_vol_pct (float): daily volatility % / 日波動率百分比
+                - is_new_symbol (bool): first time trading this symbol / 首次交易此幣種
+                - weekly_pnl_pct (float): trailing weekly PnL % / 過去一週 PnL 百分比
+                - param_sharpe_change_pct (float): Sharpe ratio param drift % / Sharpe 比率參數漂移百分比
+
+        Returns: 'l1_9b' | 'l1_27b' | 'l1_5' | 'l2'
+        """
+        # Base routing: low and moderate complexity / 基礎路由：低與中複雜度
+        if complexity < 0.5:
             return "l1_9b"
+        if complexity < 0.8:
+            return "l1_27b"
+
+        # High complexity (>= 0.8): attempt upgrade to L1.5 or L2
+        # 高複雜度（>= 0.8）：嘗試升級到 L1.5 或 L2
+
+        # No context provided — backward compatible: return "l2" directly
+        # 未提供 context — 向後兼容：直接返回 "l2"
+        if context is None:
+            return "l2"
+
+        # ── Determine upgrade tier from context / 根據 context 判斷升級 tier ──
+        ctx = context
+
+        # L1.5 upgrade conditions (any one triggers) / L1.5 升級條件（任一觸發）
+        l1_5_triggered = (
+            (ctx.get("confidence", 1.0) < 0.5 and ctx.get("amount_pct", 0.0) > 5.0)
+            or ctx.get("cusum_triggered", False) is True
+            or ctx.get("daily_vol_pct", 0.0) > 8.0
+            or ctx.get("is_new_symbol", False) is True
+        )
+
+        if not l1_5_triggered:
+            # No upgrade condition met — stay at l1_27b
+            # 無升級條件滿足 — 留在 l1_27b
+            return "l1_27b"
+
+        # L2 escalation conditions (on top of L1.5) / L2 升級條件（在 L1.5 基礎上）
+        l2_triggered = (
+            ctx.get("weekly_pnl_pct", 0.0) < -5.0
+            or ctx.get("param_sharpe_change_pct", 0.0) > 20.0
+        )
+
+        target_tier = "l2" if l2_triggered else "l1_5"
+
+        # Budget gating / 預算閘控
+        if self._budget_checker is not None:
+            if not self._budget_checker(target_tier):
+                # Budget denied — fallback to l1_27b (fail-closed, principle 6)
+                # 預算拒絕 — 降級到 l1_27b（失敗時收縮，根原則 6）
+                logger.info(
+                    "ModelRouter: budget denied for tier '%s', fallback to l1_27b / "
+                    "預算拒絕 tier '%s'，降級到 l1_27b",
+                    target_tier, target_tier,
+                )
+                return "l1_27b"
+
+        return target_tier
 
     # ── L2 Background Evaluation / L2 後台評估 ──
 

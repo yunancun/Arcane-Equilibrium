@@ -169,6 +169,10 @@ app.include_router(experiment_router)
 from .evolution_routes import router as evolution_router  # noqa: E402
 app.include_router(evolution_router)
 
+# ── PnL Attribution Router / PnL 歸因分析路由注册 ──
+from .attribution_routes import attribution_router  # noqa: E402
+app.include_router(attribution_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be

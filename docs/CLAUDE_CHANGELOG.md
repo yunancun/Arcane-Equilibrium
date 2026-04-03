@@ -5,6 +5,24 @@
 
 ---
 
+### Phase 3 完成 — Claude API + 四階段放權 + HedgingEngine Rust（2026-04-03）
+
+**Sub-phase 3A（Claude API 閉環）：**
+- **3-1** APIBudgetManager：月度預算 $50 + per-tier 冷卻（l1_5=1800s, l2=3600s） + 持久化
+- **3-2** ModelRouter 四級路由：l1_9b / l1_27b / l1_5 / l2 + 升級/阻止條件 + budget_checker 回調
+- **3-3** Claude→TSR 閉環：knowledge_update 寫入 TruthSourceRegistry + confidence cap（0.90/0.85）+ prompt 查詢 TSR
+- **3-5** PnL Attribution API：4 個只讀端點（summary/strategy/skill-ratio/trade）
+
+**Sub-phase 3B（新模組 + 放權）：**
+- **3-4** HedgingEngine **Rust+PyO3**：組合 delta 計算 + 對沖建議（linear/spot/inverse）
+- **3-6** OB Imbalance：calculate_ob_imbalance + get_ob_signal 整合到 microstructure_builder
+- **3-7** DelegationFramework：四階段遞進放權（FULL_HUMAN→AI_SUGGEST→AI_ACT_VETO→FULL_AI）+ 自動降級
+
+**E5 修復（Phase 2 補跑）：** UTF-8 安全截斷 + paired_state 還原 + HurstHysteresis 提取 + L1 凍結
+**審查：** E2 全部 PASS · E4 零回歸 3703/24/17
+
+---
+
 ### E5 優化修復 + L1 凍結（2026-04-03）
 
 - **E5-1** context_distiller.rs UTF-8 安全截斷：`summary[..80]` → `summary.chars().take(80).collect()`，防止中文 panic
