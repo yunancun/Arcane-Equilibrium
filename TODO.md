@@ -18,7 +18,7 @@
 ## 測試基準線
 
 ```
-3703 passed / 24 failed / 17 errors（post Phase 2 · +1 fail 為 pre-existing async 環境問題）
+3704 passed / 23 failed / 17 errors（post E5 fixes · paired_state restore 修復 +1 pass）
 命令：python3 -m pytest --ignore=database_files -q --tb=no
 ```
 
@@ -169,7 +169,7 @@ Alpha 基準：Phase 0 Day 1 並行跑 Paper 2 週 · Day 10 決策點
 ### [x] 2-7：Strategist 雙軌 + CognitiveModulator 閉環（報告 §3.3 + 認知 SPEC §5.1.2）
 ### [x] 2-8：ContextDistiller — ~520 tokens · **Rust+PyO3**（報告 §4.2 + 認知 SPEC §5.1.1）
 ### [x] 2-9：Ollama prompt 模板 + cognitive/dream 欄位（認知 SPEC §6.2）
-### [ ] 2-L1：★ L1 接口凍結簽核 → git tag `l1-interface-freeze`
+### [x] 2-L1：★ L1 接口凍結簽核 → git tag `l1-interface-freeze`（2026-04-03 Operator 確認）
 
 ---
 

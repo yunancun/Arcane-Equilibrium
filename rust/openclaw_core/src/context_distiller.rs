@@ -33,8 +33,10 @@ impl NotableEvent {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        let summary = if summary.len() > 80 {
-            summary[..80].to_string()
+        // UTF-8 safe truncation: use char boundary, not byte slice
+        // UTF-8 安全截斷：按字符邊界截取，避免多字節字符（中文等）panic
+        let summary = if summary.chars().count() > 80 {
+            summary.chars().take(80).collect::<String>()
         } else {
             summary
         };

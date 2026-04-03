@@ -5,6 +5,16 @@
 
 ---
 
+### E5 優化修復 + L1 凍結（2026-04-03）
+
+- **E5-1** context_distiller.rs UTF-8 安全截斷：`summary[..80]` → `summary.chars().take(80).collect()`，防止中文 panic
+- **E5-2** funding_rate_arb.py `_paired_state` 重啟還原：`restore_persistent_state()` 補齊 PairedExecutionState 反序列化
+- **E5-3** HurstHysteresis 提取：從 market_regime.py（814→706 行）獨立為 hurst_hysteresis.py（129 行）
+- **2-L1** L1 接口凍結：`git tag l1-interface-freeze`，Operator 簽核確認
+- E2 審查：3/3 PASS · E4 回歸：3704 passed / 23 failed / 17 errors（+1 pass, -1 fail vs 基準）
+
+---
+
 ### Phase 2 完成 — 策略 V2 + Agent 整合 + Rust 基礎設施（2026-04-03）
 
 **策略 V2 升級（5 個策略全部完成）：**

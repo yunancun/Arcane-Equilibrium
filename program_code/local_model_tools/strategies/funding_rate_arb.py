@@ -610,6 +610,13 @@ class FundingRateArbStrategy(StrategyBase):
         self._last_basis_pct = saved.get("last_basis_pct", 0.0)
         self._max_basis_observed = saved.get("max_basis_observed", 0.0)
         self._actual_entry_fees = saved.get("actual_entry_fees", 0.0)
+        # Restore paired execution state / 還原配對執行狀態
+        paired_data = saved.get("paired_state")
+        if paired_data and isinstance(paired_data, dict):
+            ps = PairedExecutionState(paired_data.get("group_id", ""))
+            ps.legs = paired_data.get("legs", {})
+            ps.created_at_ms = paired_data.get("created_at_ms", 0)
+            self._paired_state = ps
 
     def on_intent_rejected(self, intent: OrderIntent) -> None:
         """Roll back _current_position on rejected intent / intent 被拒后回滚仓位状态"""
