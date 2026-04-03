@@ -47,30 +47,23 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,703 Py passed + 517 Rust passed（24 Py failed + 17 errors pre-existing）
+測試：3,839 Py passed + 555 Rust passed（0 failed · 0 errors · 全綠）
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
 治理：GovernanceHub 4 SM，fail-closed 已驗證 · Rust GovernanceCore 級聯 all-or-nothing
 品類：linear + spot + inverse（option 未來）
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
 GUI：11-Tab 專業控制台 + Kelly 資本配置卡片
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
-Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12 模組 + openclaw_types 10 types
-代碼完成度：~88%（~65,000 行 Py+Rs / 最終 ~73,000 行）　業務功能能用：~95%
-總工時進度：~42%（已完成 ~62d / 總計 ~147d）· Python 58%（45/77d）· Rust R-04/R-07 完成
-關鍵路徑：Phase R-05 決策點 → R-06 Python IPC → R-07 灰度 ≈ 8 週
-★ Batch 9A 確定性自適應風控（2026-04-02，QC 量化審查驅動）：
-  ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用記錄
-★★★ 認知自適應 SPEC V1.1+R1（2026-04-03，五角色交叉審查 + 兩輪審計通過）：
-  三個新 L0 模組：CognitiveModulator（決策門檻調製）+ OpportunityTracker（遺憾追蹤）+ DreamEngine（閒置蒙特卡洛）
-  開發位置：Phase 1 並行組 B（1.10/1.11/1.12），總計 3.5d，不影響關鍵路徑
-  SPEC 文件：docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md
-★★★★ Rust 遷移 — R-04 完成，Week 8 決策點就緒：
-  R-00~R-04 全部完成 · ~7,600 行 Rust 新增（session 8）· 517 tests 零失敗零警告
-  openclaw_core 24 模組：4 SM + GovernanceCore 級聯 + 13 指標 + 8 信號 + 風控 + 回測
-  openclaw_engine 12 模組：tick_pipeline + 5 策略 + intent_processor + paper_state
-  6 角色審計通過（PA/FA/E3/E5/QC/E2）· cascade all-or-nothing 驗證 · tick <100μs 可達
-  下一步：R-05 硬決策點（Go → R-06 Python IPC / No-Go → PyO3 降級）
-  階段執行：docs/rust_migration/（R-00~R-04 ✅ · R-05 決策 · R-06~R-07 待開始）
+Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
+代碼完成度：~90%（~67,000 行 Py+Rs / 最終 ~73,000 行）　業務功能能用：~95%
+總工時進度：~45%（已完成 ~66d / 總計 ~147d）· Python 58%（45/77d）· Rust R-06 完成 R-07 進行中
+關鍵路徑：R-07 灰度驗證（W11-14）→ 穩定觀察 ≈ 4 週
+★★★★ Rust 遷移 — R-06 完成，R-07 灰度工具已構建：
+  R-00~R-06 全部完成 · R-05 Conditional Go 簽核 · R-06 IPC 53 tests + 回滾 SLA <100ms
+  R-07 灰度工具：CanaryRecord + Comparator（3 層容差）+ Engine Watchdog（3 振回滾）+ Rollback Drill
+  Rust canary mode：OPENCLAW_CANARY_MODE=1 啟用 JSONL 輸出
+  openclaw_engine：CanaryRecord struct + canary_mode flag + 555 tests
+  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 進行中）
 ★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
   Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
   Phase 1（Week 2-3）：Agent 感知工具箱 + 認知三模組 + ★Rust R-00 提前並行
@@ -327,4 +320,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 Py tests + 517 Rust tests · 131+ routes · 5 Agent · demo_only · Phase R-04 完成 · openclaw_engine 8 新模組：tick_pipeline + orchestrator + 5 strategies(ma_crossover/bb_reversion/bb_breakout/grid_trading/funding_arb) + intent_processor + fast_track + paper_state + persistence · IndicatorSnapshot→IndicatorInput 適配器 · E2 PASS + E4 零回歸 · 下一步：R-05 Week 8 硬決策點 → 讀 TODO.md。
+> 截至 2026-04-03：3839 Py tests + 555 Rust tests（全綠 0 failed）· 131+ routes · 5 Agent · demo_only · R-06 IPC 完成 · R-07 灰度工具就緒（Comparator + Watchdog + Rollback Drill + Rust CanaryRecord）· 28+17 歷史測試問題全部修復 · 下一步：R-07 影子進程 + 7 天灰度運行 → 讀 TODO.md。

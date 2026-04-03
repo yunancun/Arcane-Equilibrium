@@ -71,8 +71,51 @@ a4ddfda Merge branch 'main' of github.com:yunancun/BybitOpenClaw
 d9b102f feat(risk): Batch 9A — deterministic adaptive risk controls (QC-driven)
 ```
 
+### Session 10：R-05 Go + R-06 IPC Integration
+- [x] R-05 Conditional Go 簽核（5/6 PASS + 3 風險待 soak test）
+- [x] KNOWN_ISSUES.md 建立（14 OPEN 問題）
+- [x] 3 個 Quick Fix（SEC-1 信息洩露, SEC-2 虛假告警, TRADE-3 Kelly PnL 偏差）
+- [x] R06-A：Rust IPC server 3 方法 + unrealized_pnl 修復 + snapshot_writer
+- [x] R06-B1：RustSnapshotReader + 4 paper routes + 2 legacy price reads
+- [x] R06-B2：risk drawdown + phase2 pipeline stats 從 Rust 引擎讀取
+
+### Session 11：R-06 完成 + R-07 灰度工具 + 測試全綠
+- [x] R06-D：conftest 5 個 IPC mock fixtures
+- [x] R06-E：39 個 IPC 集成測試（含 rollback simulation）
+- [x] R06-F：回滾預演 SLA < 100ms
+- [x] R-06 Go/No-Go 門控全部通過
+- [x] R07-2：Rust CanaryRecord struct + canary_mode + JSONL 輸出
+- [x] R07-3：Canary Comparator（3 層容差 + 邊界偏差升級）
+- [x] R07-5：Rollback Drill 腳本（8 步 + SLA 計時）
+- [x] R07-6：Engine Watchdog（崩潰/恢復 + 3 振回滾）
+- [x] 歷史測試債務清零：28 failed + 17 errors → 0 failed（3839 pass）
+
+## 測試基準線（最終）
+
+```
+Python: 3839 passed / 0 failed / 0 errors / 1 skipped
+Rust:   555 passed / 0 failed
+Canary: 35 passed
+Total:  4429 tests all green
+```
+
+## Session 10-11 Commits
+
+```
+a500d4e fix: resolve 3 known issues + R-05 Conditional Go
+efff09e feat(R06-A): wire IPC server to real pipeline state + fix unrealized PnL
+189840a feat(R06-B1): add RustSnapshotReader + wire 4 paper routes + 2 legacy price reads
+7a39022 feat(R06-B2): wire risk_routes drawdown + phase2 pipeline stats to Rust engine
+4587421 test(R06-E): add 14 IPC state reader tests
+2079640 docs: session 10 worklog
+21c780f feat(R06-D/E/F): complete R-06 — 53 IPC tests + conftest fixtures
+ca9dabd feat(R07-3/5/6): canary comparator + engine watchdog + rollback drill
+5c8039a feat(R07-2): add canary JSONL output to Rust engine
+8d3939c fix: resolve all 28 test failures + 17 errors → 0 failures
+```
+
 ## 下一步
 
-1. **Phase 0 Batch 9B**：學習反饋閉環（U-01）+ 進化參數自動重部署（U-02）→ 讀 TODO.md
-2. **Alpha 基準測試**：啟動 Paper 2 週觀察（不寫代碼）
-3. 養成每次 commit 同步 CHANGELOG 的習慣
+1. **R07-1**：Python 影子進程（讀 WS → Python pipeline → shadow_results.jsonl）
+2. **R07-4**：啟動 7 天灰度運行
+3. E5 flag：Rust StateWriter atomic write（.tmp → rename）

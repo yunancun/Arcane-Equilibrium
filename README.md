@@ -36,15 +36,15 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,703 Py passed + 517 Rust passed / 24 Py failed / 17 errors（pre-existing）
+测试:         3,839 Py passed + 555 Rust passed（全绿 0 failed · 0 errors）
 API 路由:     131+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
-代码:         ~65,000 行（Python ~50k + Rust ~15k）
+代码:         ~67,000 行（Python ~50k + Rust ~17k）
 策略:         5 类 × 双实现（Python + Rust）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
-Rust 引擎:    ✅ R-00~R-04 完成 · 24 core 模组 + 12 engine 模组 · 6 角色审计通过
-              openclaw_core: 4 SM + 级联 + 13 指标 + 8 信号 + 风控 + 回测 + 止损 + 组合
-              openclaw_engine: tick_pipeline + 5 策略 + intent_processor + paper_state
+Rust 引擎:    ✅ R-00~R-06 完成 · R-07 灰度工具就绪
+              IPC: file-read (pipeline_snapshot.json) + 53 IPC 集成测试 + 回滚 SLA <100ms
+              灰度: CanaryRecord + Comparator (3 层容差) + Watchdog (3 振回滚) + Drill 脚本
               tick 延迟: <100μs 可达（E5 评估 ~7-25μs 正常路径）
 Phase 0-3:    ✅ 全部完成 + L1/L2 接口冻结
 Rust R-00~04: ✅ 全部完成（R-05 Week 8 决策点待评估）
@@ -134,7 +134,7 @@ srv/
 │   ├── Cargo.toml                 ← Workspace: 4 crates
 │   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
 │   ├── openclaw_core/             ← 24 modules: SM/indicators/signals/risk/backtest (403 tests)
-│   ├── openclaw_engine/           ← 12 modules: tick pipeline/strategies/paper state (78 tests)
+│   ├── openclaw_engine/           ← 12+ modules: tick pipeline/strategies/paper state/canary (116 tests)
 │   ├── openclaw_pyo3/             ← PyO3 cdylib bridge
 │   └── schemas/                   ← Golden JSON schema (10 types)
 ├── helper_scripts/

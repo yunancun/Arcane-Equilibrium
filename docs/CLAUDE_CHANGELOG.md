@@ -3,6 +3,17 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### Test Debt Zero — All 28 Failures + 17 Errors Resolved（2026-04-03 · Session 11）
+
+**28 failed + 17 errors → 0 failed, 0 errors, 3839 passed（+45 淨增）**
+- 7 類過期測試斷言（E/F/H/I/K/M/N）：operator config 改變後測試未同步
+- 4 類測試隔離缺陷（B/C/D/G）：mock 不完整、config 未隔離、event loop 缺失
+- 2 類基礎設施（A: pytest-asyncio 安裝、L: importlib→標準 import）
+- 1 類實現追蹤（J: L2 dispatch 從 Thread 改為 model_router）
+- FA 確認 + E1 並行修復 + E4 全量回歸驗證
+
+---
+
 ### R-07 Canary Tooling — Comparator + Watchdog + Rollback（2026-04-03 · Session 11）
 
 **R07-3 Canary Comparator:**
