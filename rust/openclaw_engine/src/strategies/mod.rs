@@ -12,7 +12,8 @@ use crate::tick_pipeline::TickContext;
 
 /// Strategy trait — implement for each trading strategy.
 /// 策略 trait — 為每個交易策略實現。
-pub trait Strategy {
+/// Send required for tokio::spawn compatibility.
+pub trait Strategy: Send {
     /// Strategy name for logging and attribution.
     /// 策略名稱用於日誌和歸因。
     fn name(&self) -> &str;

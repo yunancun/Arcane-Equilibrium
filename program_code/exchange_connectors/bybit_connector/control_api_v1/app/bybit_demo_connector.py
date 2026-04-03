@@ -40,62 +40,67 @@ DEMO_BASE_URL = "https://api-demo.bybit.com"
 RECV_WINDOW = "5000"
 
 
-def round_qty_for_exchange(qty: float, category: str = "linear") -> float:
+def round_qty_for_exchange(
+    qty: float,
+    category: str = "linear",
+    qty_step: float | None = None,
+) -> float:
     """
     Round qty to Bybit exchange step precision.
     四捨五入到 Bybit 交易所步長精度。
 
-    Linear perps: BTC=0.001 step, cheap tokens often use integer step.
-    Inverse perps: BTCUSD step=1 (integer contracts, e.g. 100 BTCUSD).
-    Spot: same heuristic as linear (base asset qty).
+    When qty_step is provided (from SymbolCategoryRegistry), rounds to the
+    nearest multiple of qty_step using floor (to avoid exceeding balance).
+    當提供 qty_step 時（來自 SymbolCategoryRegistry），取 qty_step 的整數倍（向下）。
 
-    Linear perp：BTC=0.001 步長，便宜幣種通常整數步長。
-    Inverse perp：BTCUSD step=1（整數張數，如 100 BTCUSD）。
-    Spot：同 linear 啟發式（基礎資產數量）。
-
-    Heuristic: inverse or qty >= 1 → nearest integer; qty < 1 → 3dp.
-    Inverse 或 qty >= 1 → 取整；qty < 1 → 保留 3 位小數。
-
-    The ``category`` parameter defaults to "linear" for backwards compatibility.
-    All existing callers that omit it continue to work as before.
-    ``category`` 參數默認為 "linear"，確保向後兼容，現有調用者無需修改。
-
-    This function is shared between the demo connector and pipeline bridge
-    to ensure Paper and Demo use identical qty values.
-    此函數由 demo connector 和 pipeline bridge 共用，
-    確保 Paper 和 Demo 使用完全相同的 qty 值。
+    Fallback heuristic (qty_step=None): inverse or qty >= 1 → integer; qty < 1 → 3dp.
+    回退啟發式（qty_step=None）：inverse 或 qty >= 1 → 取整；qty < 1 → 3 位小數。
     """
-    # INV-3: Inverse contracts use integer contract size (e.g. BTCUSD = 1 contract unit).
-    # INV-3：Inverse 合約使用整數張數（如 BTCUSD 最小 1 張），強制取整。
+    import math
+
+    # Use actual qty_step from exchange when available / 有步長數據時使用精確取整
+    if qty_step and qty_step > 0:
+        floored = math.floor(qty / qty_step) * qty_step
+        # Derive decimal places from qty_step to avoid float artifacts
+        # 從 qty_step 推導小數位數避免浮點誤差
+        step_str = f"{qty_step:.10f}".rstrip("0")
+        decimals = len(step_str.split(".")[-1]) if "." in step_str else 0
+        return round(floored, decimals)
+
+    # Fallback heuristic / 回退啟發式
     if category == "inverse" or qty >= 1.0:
         return float(round(qty))
     return round(qty, 3)
 
 
-def round_price_for_exchange(price: float, tick_size: float | None = None) -> float:
+def round_price_for_exchange(
+    price: float,
+    tick_size: float | None = None,
+    direction: str = "floor",
+) -> float:
     """
-    Round price to exchange tick size precision.
-    按交易所 tickSize 精度取整價格。
+    Round price to exchange tick size precision with direction control.
+    按交易所 tickSize 精度取整價格，支持方向控制。
 
-    If tick_size is provided (from SymbolCategoryRegistry), round to tick_size grid.
-    Otherwise fall back to 8 decimal places (safe for all Bybit symbols).
-    如果提供了 tick_size（來自 SymbolCategoryRegistry），對齊到 tick_size 網格。
-    否則回退到 8 位小數（對所有 Bybit 品種安全）。
+    direction:
+      "floor" — round down (default, conservative for long stop-loss)
+      "ceil"  — round up (conservative for short stop-loss)
+      "nearest" — round to nearest tick (for limit orders)
 
-    CRITICAL: 之前硬編碼 round(..., 2) 導致低價幣（如 PIPPINUSDT $0.06）
-    止損觸發價被錯誤進位到市價附近，19 秒內觸發假止損。
-    CRITICAL: Previously hardcoded round(..., 2) caused low-price coins
-    (e.g. PIPPINUSDT $0.06) stop trigger price to round UP to near market price,
-    triggering false stop loss within 19 seconds.
+    direction:
+      "floor" — 向下取整（默認，保守用於多頭止損）
+      "ceil"  — 向上取整（保守用於空頭止損）
+      "nearest" — 取最近的 tick（用於限價單）
     """
     if tick_size and tick_size > 0:
-        # Round DOWN for long stop-loss, round UP for short stop-loss
-        # This function rounds to nearest tick — caller handles direction
-        # 取整到最近的 tick — 方向由調用者處理
         import math
-        return round(math.floor(price / tick_size) * tick_size, 10)
-    # Fallback: 8 decimal places covers all Bybit price precisions
-    # 回退：8 位小數覆蓋所有 Bybit 品種的價格精度
+        if direction == "ceil":
+            aligned = math.ceil(price / tick_size) * tick_size
+        elif direction == "nearest":
+            aligned = round(price / tick_size) * tick_size
+        else:  # "floor" or default
+            aligned = math.floor(price / tick_size) * tick_size
+        return round(aligned, 10)
     return round(price, 8)
 
 
@@ -131,6 +136,12 @@ class BybitDemoConnector:
             "orders_rejected": 0,
             "errors": 0,
         }
+        # Rate limit state / 限流狀態
+        self._rate_limit_remaining: int = 120
+        self._rate_limit_reset_ms: int = 0
+        # Account info (populated on first use) / 帳戶信息（首次使用時填充）
+        self._account_type: str = "UNIFIED"
+        self._position_mode: str = "one_way"  # "one_way" or "hedge"
 
         if self._enabled:
             logger.info("BybitDemoConnector enabled / Bybit Demo 连接器已启用")
@@ -174,14 +185,92 @@ class BybitDemoConnector:
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read().decode())
+                result = json.loads(resp.read().decode())
+                # Tag business errors from Bybit (HTTP 200 but retCode != 0)
+                # 標記 Bybit 業務錯誤（HTTP 200 但 retCode != 0）
+                if result.get("retCode", 0) != 0:
+                    result["errorType"] = "business"
+                # Read rate limit headers if present / 讀取限流頭部
+                self._update_rate_limit_from_headers(resp.headers)
+                return result
         except urllib.error.HTTPError as e:
             body = e.read().decode()
             logger.error("Bybit API HTTP %d: %s", e.code, body[:200])
-            return {"retCode": e.code, "retMsg": body[:200]}
+            # Try to parse Bybit JSON error body / 嘗試解析 Bybit JSON 錯誤體
+            try:
+                parsed = json.loads(body)
+                parsed["errorType"] = "business"
+                parsed["httpCode"] = e.code
+                return parsed
+            except (json.JSONDecodeError, ValueError):
+                return {"retCode": -1, "retMsg": body[:200], "httpCode": e.code, "errorType": "transport"}
         except Exception as e:
             logger.error("Bybit API request failed: %s", e)
-            return {"retCode": -1, "retMsg": str(e)}
+            return {"retCode": -1, "retMsg": str(e), "errorType": "network"}
+
+    def _request_with_retry(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        max_retries: int = 3,
+        base_delay: float = 0.5,
+    ) -> dict[str, Any]:
+        """
+        Request with exponential backoff retry for transient errors.
+        帶指數退避重試的請求（僅重試瞬態錯誤）。
+
+        Retries on: network errors, HTTP 429/502/503/504, retCode 10006 (rate limit).
+        Does NOT retry on business errors (param invalid, insufficient balance, etc.).
+        """
+        for attempt in range(max_retries + 1):
+            # Pre-request rate limit check / 請求前限流檢查
+            if self._rate_limit_remaining <= 2:
+                now_ms = int(time.time() * 1000)
+                wait_ms = max(0, self._rate_limit_reset_ms - now_ms)
+                if wait_ms > 0:
+                    sleep_s = min(wait_ms / 1000.0, 5.0)  # cap at 5s
+                    logger.info("Rate limit near — sleeping %.1fs / 接近限流，等待", sleep_s)
+                    time.sleep(sleep_s)
+
+            result = self._request(method, path, params)
+            error_type = result.get("errorType")
+            ret_code = result.get("retCode", 0)
+
+            # Success — return immediately / 成功 — 立即返回
+            if ret_code == 0:
+                return result
+
+            # Non-retryable business errors / 不可重試的業務錯誤
+            if error_type == "business" and ret_code not in (10006, 10016):
+                return result
+
+            # Last attempt — return whatever we got / 最後一次嘗試
+            if attempt >= max_retries:
+                return result
+
+            # Retryable — backoff and retry / 可重試 — 退避後重試
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "Retrying %s %s (attempt %d/%d, retCode=%s, delay=%.1fs) / 重試中",
+                method, path, attempt + 1, max_retries, ret_code, delay,
+            )
+            time.sleep(delay)
+
+        return result  # should not reach here
+
+    def _update_rate_limit_from_headers(self, headers) -> None:
+        """Read Bybit rate limit headers and update internal state.
+        讀取 Bybit 限流頭部並更新內部狀態。"""
+        try:
+            remaining = headers.get("X-Bapi-Limit-Status")
+            reset_ts = headers.get("X-Bapi-Limit-Reset-Timestamp")
+            if remaining is not None:
+                self._rate_limit_remaining = int(remaining)
+            if reset_ts is not None:
+                self._rate_limit_reset_ms = int(reset_ts)
+        except (ValueError, TypeError):
+            pass  # ignore malformed headers
 
     # ── Public Methods ──
 
@@ -189,9 +278,68 @@ class BybitDemoConnector:
         """Get recent executions. 获取最近成交记录。"""
         return self._request("GET", "/v5/execution/list", {"category": category, "limit": str(limit)})
 
+    def detect_account_info(self) -> None:
+        """
+        Query account info to detect account type and position mode.
+        查詢帳戶信息以檢測帳戶類型和持倉模式。
+        Call on startup when connector is enabled.
+        """
+        if not self._enabled:
+            return
+        try:
+            result = self._request("GET", "/v5/account/info", {})
+            if result.get("retCode") == 0:
+                info = result.get("result", {})
+                # Unified Margin Status: 1=regular, 3=unified, 4=UTA Pro
+                ums = info.get("unifiedMarginStatus")
+                if ums in (3, 4):
+                    self._account_type = "UNIFIED"
+                elif ums == 1:
+                    self._account_type = "CONTRACT"
+                # Position mode: 0=one-way, 3=hedge (BothSide)
+                margin_mode = info.get("marginMode", "")
+                # Bybit V5: position mode comes from separate endpoint for linear
+                logger.info(
+                    "Account info: type=%s marginMode=%s / 帳戶類型=%s",
+                    self._account_type, margin_mode, self._account_type,
+                )
+        except Exception as e:
+            logger.warning("Failed to detect account info: %s / 帳戶信息檢測失敗", e)
+
+    def query_position_mode(self, category: str = "linear") -> str:
+        """
+        Query current position mode (one-way or hedge).
+        查詢當前持倉模式（單向或對沖）。
+        Returns "one_way" or "hedge".
+        """
+        if not self._enabled:
+            return self._position_mode
+        try:
+            # Bybit V5: GET /v5/position/list returns positionIdx per position
+            # But position mode is set at account level
+            result = self._request("GET", "/v5/position/list",
+                                   {"category": category, "symbol": "BTCUSDT", "limit": "1"})
+            if result.get("retCode") == 0:
+                positions = result.get("result", {}).get("list", [])
+                if positions:
+                    pos_idx = positions[0].get("positionIdx", 0)
+                    if pos_idx != 0:
+                        self._position_mode = "hedge"
+                        logger.warning(
+                            "Hedge mode detected (positionIdx=%d) — orders will include positionIdx / "
+                            "檢測到對沖模式", pos_idx,
+                        )
+                    else:
+                        self._position_mode = "one_way"
+        except Exception as e:
+            logger.warning("Failed to query position mode: %s", e)
+        return self._position_mode
+
     def get_wallet_balance(self) -> dict[str, Any]:
-        """Get account balance."""
-        return self._request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+        """Get account balance. Uses detected account type.
+        獲取帳戶餘額。使用檢測到的帳戶類型。"""
+        return self._request("GET", "/v5/account/wallet-balance",
+                             {"accountType": self._account_type})
 
     # Bybit V5 linear covers BOTH USDT and USDC settled contracts.
     # Queries/cancels that use settleCoin must iterate both to avoid missing USDC pairs (e.g. BTCPERP).
@@ -322,22 +470,30 @@ class BybitDemoConnector:
         category: str = "linear",
         reduce_only: bool = False,
         time_in_force: str = "GTC",
+        qty_step: float | None = None,
+        symbol_registry: object | None = None,
     ) -> dict[str, Any]:
         """
         Submit an order to Bybit Demo.
         提交订单到 Bybit Demo。
+
+        qty_step: optional qtyStep for precise rounding.
+        symbol_registry: optional SymbolCategoryRegistry for pre-submission validation.
         """
         if not self._enabled:
             return {"retCode": -1, "retMsg": "Demo connector not enabled"}
 
-        # Round qty to exchange step precision to avoid "Qty invalid" rejections.
-        # Uses shared round_qty_for_exchange() for consistency with Paper engine.
-        # Pass category so inverse contracts are correctly rounded to integers.
-        # 四捨五入到交易所步長精度，使用共用函數確保與 Paper 一致。
-        # 傳入 category 確保 inverse 合約正確取整（整數張數）。
-        qty = round_qty_for_exchange(qty, category=category)
+        # Round qty using actual qtyStep when available / 使用實際步長取整
+        qty = round_qty_for_exchange(qty, category=category, qty_step=qty_step)
         if qty <= 0:
             return {"retCode": -1, "retMsg": "qty rounds to zero, order skipped"}
+
+        # Pre-submission validation against exchange limits / 提交前驗證交易所限制
+        if symbol_registry and hasattr(symbol_registry, "validate_order_params"):
+            valid, reason = symbol_registry.validate_order_params(symbol, qty, price or 0)
+            if not valid:
+                logger.warning("Order rejected locally: %s %s qty=%s reason=%s", symbol, side, qty, reason)
+                return {"retCode": -2, "retMsg": f"local_validation_failed: {reason}"}
 
         params: dict[str, Any] = {
             "category": category,
@@ -356,8 +512,15 @@ class BybitDemoConnector:
         # 現貨無持倉概念，不能帶 reduceOnly。
         if reduce_only and category != "spot":
             params["reduceOnly"] = True
+        # Include positionIdx for non-spot (required for hedge mode, safe for one-way)
+        # 非現貨品類包含 positionIdx（對沖模式必需，單向模式安全）
+        if category != "spot":
+            if self._position_mode == "hedge":
+                params["positionIdx"] = 1 if side.capitalize() == "Buy" else 2
+            else:
+                params["positionIdx"] = 0
 
-        result = self._request("POST", "/v5/order/create", params)
+        result = self._request_with_retry("POST", "/v5/order/create", params)
 
         with self._lock:
             if result.get("retCode") == 0:
@@ -442,14 +605,18 @@ class BybitDemoConnector:
             "triggerDirection": trigger_direction,
             "orderFilter": "StopOrder",
         }
-        # Bybit V5: Market conditional orders use IOC; only Limit needs timeInForce.
         if order_type.lower() != "market":
             params["timeInForce"] = "GTC"
-        # Bybit V5: reduceOnly not valid for spot.
         if reduce_only and category != "spot":
             params["reduceOnly"] = True
+        # positionIdx for non-spot / 非現貨持倉索引
+        if category != "spot":
+            if self._position_mode == "hedge":
+                params["positionIdx"] = 1 if side.capitalize() == "Buy" else 2
+            else:
+                params["positionIdx"] = 0
 
-        result = self._request("POST", "/v5/order/create", params)
+        result = self._request_with_retry("POST", "/v5/order/create", params)
 
         with self._lock:
             if result.get("retCode") == 0:

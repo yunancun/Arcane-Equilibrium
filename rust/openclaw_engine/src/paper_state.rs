@@ -134,22 +134,26 @@ impl PaperState {
         }
     }
 
-    /// Check stops on all positions.
-    /// 檢查所有持倉的止損。
-    pub fn check_stops(&mut self, price: f64, now_ms: u64) -> Vec<(String, StopTrigger)> {
+    /// Check stops on all positions using per-symbol latest prices.
+    /// 使用每個交易對的最新價格檢查所有持倉的止損。
+    pub fn check_stops(&mut self, _price: f64, now_ms: u64) -> Vec<(String, StopTrigger)> {
         let mut triggers = Vec::new();
+        let latest = self.latest_prices.clone();
         for (symbol, pos) in &mut self.positions {
-            // Update best price
+            let sym_price = match latest.get(symbol.as_str()) {
+                Some(&p) => p,
+                None => continue, // no price yet for this symbol
+            };
             let mut ps = PositionState {
                 entry_price: pos.entry_price,
                 best_price: pos.best_price,
                 is_long: pos.is_long,
                 entry_ts_ms: pos.entry_ts_ms,
             };
-            stop_manager::update_best_price(&mut ps, price);
+            stop_manager::update_best_price(&mut ps, sym_price);
             pos.best_price = ps.best_price;
 
-            if let Some(trigger) = stop_manager::check_stops(&self.stop_config, &ps, price, now_ms) {
+            if let Some(trigger) = stop_manager::check_stops(&self.stop_config, &ps, sym_price, now_ms) {
                 triggers.push((symbol.clone(), trigger));
             }
         }
@@ -226,6 +230,7 @@ mod tests {
     fn test_stop_check() {
         let mut s = PaperState::new(10000.0);
         s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.set_latest_price("BTC", 46000.0); // per-symbol price for stop check
         let triggers = s.check_stops(46000.0, 1000);
         assert_eq!(triggers.len(), 1); // hard stop at 5%
     }

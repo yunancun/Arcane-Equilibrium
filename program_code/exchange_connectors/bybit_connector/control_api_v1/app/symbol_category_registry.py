@@ -69,6 +69,47 @@ class SymbolCategoryRegistry:
             info = self._instrument_cache.get(symbol)
             return info["qty_step"] if info else None
 
+    def get_min_order_qty(self, symbol: str) -> Optional[float]:
+        """取得 symbol 的最小下單量。Get minimum order qty for a symbol."""
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+            return info.get("min_order_qty") if info else None
+
+    def get_max_order_qty(self, symbol: str) -> Optional[float]:
+        """取得 symbol 的最大下單量。Get maximum order qty for a symbol."""
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+            return info.get("max_order_qty") if info else None
+
+    def get_min_notional(self, symbol: str) -> Optional[float]:
+        """取得 symbol 的最小名義價值。Get minimum notional value for a symbol."""
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+            return info.get("min_notional") if info else None
+
+    def validate_order_params(self, symbol: str, qty: float, price: float = 0.0) -> tuple[bool, str]:
+        """
+        驗證下單參數是否滿足交易所限制。
+        Validate order params against exchange limits.
+        Returns (is_valid, reason).
+        """
+        with self._lock:
+            info = self._instrument_cache.get(symbol)
+        if not info:
+            return True, "no_instrument_info"  # fail-open / 無信息時放行
+
+        min_qty = info.get("min_order_qty", 0)
+        max_qty = info.get("max_order_qty", float("inf"))
+        min_notional = info.get("min_notional", 0)
+
+        if min_qty > 0 and qty < min_qty:
+            return False, f"qty {qty} < minOrderQty {min_qty}"
+        if max_qty > 0 and qty > max_qty:
+            return False, f"qty {qty} > maxOrderQty {max_qty}"
+        if min_notional > 0 and price > 0 and qty * price < min_notional:
+            return False, f"notional {qty * price:.2f} < minNotional {min_notional}"
+        return True, "ok"
+
     def known_count(self) -> int:
         """返回快取中已知 symbol 的數量。Returns number of known symbols in cache."""
         with self._lock:
@@ -100,7 +141,10 @@ class SymbolCategoryRegistry:
                 for item in items:
                     sym = item.get("symbol")
                     if sym:
-                        new_cache[sym] = category
+                        # Don't overwrite linear with spot — linear takes priority
+                        # 不用 spot 覆蓋 linear — linear 優先
+                        if sym not in new_cache or category == "linear":
+                            new_cache[sym] = category
                         # Extract tickSize + qtyStep from filters for price/qty rounding
                         # 從 priceFilter/lotSizeFilter 提取 tickSize/qtyStep 用於精度取整
                         price_filter = item.get("priceFilter", {})
@@ -108,11 +152,24 @@ class SymbolCategoryRegistry:
                         try:
                             tick_size = float(price_filter.get("tickSize", 0))
                             qty_step = float(lot_filter.get("qtyStep", 0))
-                            if tick_size > 0 or qty_step > 0:
-                                new_instruments[sym] = {
-                                    "tick_size": tick_size if tick_size > 0 else 0.01,
-                                    "qty_step": qty_step if qty_step > 0 else 1.0,
-                                }
+                            min_order_qty = float(lot_filter.get("minOrderQty", 0))
+                            max_order_qty = float(lot_filter.get("maxOrderQty", 0))
+                            # minNotionalValue location varies by category
+                            # minNotionalValue 在不同品類的位置不同
+                            min_notional = float(lot_filter.get("minNotionalValue", 0))
+                            if min_notional == 0:
+                                min_notional = float(item.get("minNotionalValue", 0))
+                            inst_info: dict[str, float] = {
+                                "tick_size": tick_size if tick_size > 0 else 0.01,
+                                "qty_step": qty_step if qty_step > 0 else 1.0,
+                                "min_order_qty": min_order_qty,
+                                "max_order_qty": max_order_qty,
+                                "min_notional": min_notional,
+                            }
+                            # Linear takes priority over spot for shared symbols
+                            # 共享符號中 linear 優先於 spot
+                            if sym not in new_instruments or category == "linear":
+                                new_instruments[sym] = inst_info
                         except (ValueError, TypeError):
                             pass  # skip invalid filter data
                 logger.debug(

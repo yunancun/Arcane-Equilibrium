@@ -78,7 +78,7 @@ impl WsClient {
             config,
             event_tx,
             cancel,
-            subscriptions: vec!["kline.1.BTCUSDT".into(), "publicTrade.BTCUSDT".into()],
+            subscriptions: Vec::new(),
         }
     }
 
@@ -282,7 +282,19 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
 
 /// Parse a Bybit kline item into PriceEvent (uses close price).
 /// 將 Bybit K 線項目解析為 PriceEvent（使用收盤價）。
+///
+/// Only returns Some for **confirmed** candles (confirm == true).
+/// Unconfirmed candles are dropped — real-time prices come via publicTrade.
+/// 只返回**已確認**的 K 線（confirm == true）。
+/// 未確認的 K 線被丟棄 — 實時價格通過 publicTrade 獲取。
 fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
+    // Drop unconfirmed candles to avoid false signals on incomplete data
+    // 丟棄未確認 K 線，避免不完整數據產生虛假信號
+    let confirmed = item.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !confirmed {
+        return None;
+    }
+
     let symbol = extract_symbol_from_topic(topic)?;
     let close = item
         .get("close")
@@ -378,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_kline_item() {
+    fn test_parse_kline_item_confirmed() {
         let item = serde_json::json!({
             "start": 1700000000000_u64,
             "end": 1700000060000_u64,
@@ -387,6 +399,7 @@ mod tests {
             "high": "65100.0",
             "low": "64400.0",
             "volume": "100.5",
+            "confirm": true,
         });
         let event = parse_kline_item(&item, "kline.1.BTCUSDT").unwrap();
         assert_eq!(event.symbol, "BTCUSDT");
@@ -395,8 +408,29 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_kline_item_unconfirmed_dropped() {
+        let item = serde_json::json!({
+            "start": 1700000000000_u64,
+            "close": "65000.0",
+            "volume": "100.5",
+            "confirm": false,
+        });
+        assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
+    }
+
+    #[test]
+    fn test_parse_kline_item_confirm_missing_treated_as_unconfirmed() {
+        let item = serde_json::json!({
+            "start": 1700000000000_u64,
+            "close": "65000.0",
+            "volume": "100.5",
+        });
+        assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
+    }
+
+    #[test]
     fn test_parse_kline_item_missing_close() {
-        let item = serde_json::json!({"start": 1700000000000_u64});
+        let item = serde_json::json!({"start": 1700000000000_u64, "confirm": true});
         assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
     }
 

@@ -3,6 +3,43 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-03
 
+### R-05 Engine Integration + Bybit API Compatibility（2026-04-03）
+
+**Engine Live Wiring:**
+- main.rs 接入 TickPipeline（替換 placeholder event consumer）
+- 5 幣種（BTC/ETH/SOL/XRP/DOGE）× 4 策略（MA/BB-Rev/BB-Break/Grid）
+- Paper auth 啟動自動授予 + 定期 status report + JSON/JSONL 持久化
+- 10 分鐘 Bybit Live WS 實測：38,389 ticks, 8 fills, 零崩潰
+- Fix: check_stops 跨幣種價格污染（BTC price 更新 ETH best_price）
+- Fix: Strategy trait 加 Send bound（tokio::spawn 兼容）
+- Fix: rustls ring crypto provider 安裝
+
+**29 壓力集成測試（stress_integration.rs）：**
+- Fast track 緊急通道（CloseAll/Reduce/Pause + 5%/90% 邊界）
+- 多幣種混合（5 幣 500 ticks + 快速交替 1000 ticks）
+- 策略邊界（whipsaw/oversold/false squeeze/breakout/grid traversal）
+- Guardian + Governance（drawdown/conflict/position limit/no auth）
+- 止損邊界 + 管線吞吐（10k ticks + 26.9μs release tick latency）
+- PnL 正確性 + 持久化驗證
+
+**QC 數學模型審查：45+ 公式 APPROVED（3 MINOR 非阻塞備註）**
+
+**9 項 Bybit API 兼容性修復：**
+1. [CRITICAL] qty_step 精確取整（替代硬編碼 3dp）
+2. [CRITICAL] minOrderQty/maxOrderQty/minNotional 驗證
+3. [CRITICAL] positionIdx 包含在所有非 spot 訂單中
+4. [HIGH] kline confirm 欄位檢查（只處理已確認 K 線）
+5. [HIGH] API rate limit 頭部讀取 + 預請求限流
+6. [HIGH] 止損價格方向感知取整（long floor / short ceil）
+7. [MEDIUM] HTTP vs Bybit retCode 區分（errorType 字段）
+8. [MEDIUM] 指數退避重試（瞬態錯誤自動重試）
+9. [MEDIUM] accountType 動態檢測（替代硬編碼 UNIFIED）
+- 額外：Registry linear 優先（spot 不再覆蓋 linear instrument info）
+
+**V2 Bybit Demo Live 驗證：BTC+ETH 端到端下單 PASS，帳戶模式檢測 PASS**
+
+**測試基準線：3,741 Py (+38 新) + 548 Rust (+31 新) = 4,289 total, 零回歸**
+
 ---
 
 ### Phase R-04 完成 — Engine 完整交易路徑（2026-04-03）

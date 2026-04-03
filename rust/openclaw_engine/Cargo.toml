@@ -19,6 +19,7 @@ tracing-subscriber = { workspace = true }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }
 thiserror = { workspace = true }
+rustls = { workspace = true }
 
 [[bin]]
 name = "openclaw-engine"
