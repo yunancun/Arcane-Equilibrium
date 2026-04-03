@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-02（Batch 9A 確定性自適應風控完成 · 3703 tests）
+# 最後更新：2026-04-03（認知自適應 SPEC V1.1+R1 五角色審查通過 · Phase 1 新增 1.10/1.11/1.12）
 # 注意：compact 後從此文件恢復工作狀態
 
 ---
@@ -184,7 +184,36 @@ PM 排程計劃：
 
 ### [ ] 1.9：影子決策追踪 — 四階段退出條件數據基礎（報告 §2）
 - **新建**：shadow vs actual 差異記錄
-- **工時**：0.5d · **依賴**：1.2 · **並行組 C**
+- **工時**：0.5d · **依賴**：1.2, 1.11 · **並行組 C**
+
+### [ ] 1.10：CognitiveModulator — L0 確定性決策門檻調製（認知自適應 SPEC §2）
+- **新建模組**：`local_model_tools/cognitive_modulator.py`（~120 行）
+- **功能**：根據歷史表現動態調整 confidence floor / qty ceiling / SL multiplier / scan interval
+- **數學修正**：[Q1] 多因子取 max + [Q6] EMA alpha=0.3 + [R1-5] 連虧時忽略負向調整
+- **注入點**：shadow_decision_builder 現有 confidence 門檻（[F2]）
+- **數據源**：strategy_auto_deployer._consecutive_losses（[F3]）
+- **降級運行**：regret_data={}, dream_data={} 傳空 dict（Phase 2 才接入完整數據）
+- **工時**：0.5d · **並行組 B** · **前置**：無 · **E1**：E1-Alpha
+- **SPEC**：`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md` V1.1+R1
+
+### [ ] 1.11：OpportunityTracker — 未執行機會虛擬 PnL 追蹤（認知自適應 SPEC §3）
+- **新建模組**：`local_model_tools/opportunity_tracker.py`（~250 行）
+- **功能**：Scout/Strategist/Guardian 篩掉的機會 → 虛擬 PnL 追蹤 → 遺憾摘要
+- **數學修正**：[Q2] 虛擬 PnL 扣 2x fee + [Q3] 歸一化遺憾方向 + [R1-8] 最少 5 樣本
+- **代碼修正**：[E2] bullets_dodged 命名 + [E3] _flush_closed + [E4] 緩存 + [R1-2] record 清緩存
+- **注入點**：Scout（scout_worker.py）、Guardian（guardian_agent.py）、Strategist（strategist_agent.py）
+- **工時**：1.0d · **並行組 B** · **前置**：無 · **E1**：E1-Beta
+- **SPEC**：同上
+
+### [ ] 1.12：DreamEngine — 閒置蒙特卡洛 what-if 模擬（認知自適應 SPEC §4）
+- **新建模組**：`local_model_tools/dream_engine.py`（~350 行）
+- **功能**：閒置時用真實 K 線 × 參數網格跑蒙特卡洛，輸出參數優化建議
+- **數學修正**：[Q4] 每參數 ≥30 輪 + [Q5] binomial test 置信度
+- **代碼修正**：[E5] threading.Lock + [E6] 隨機方向 + [R1-3] 防重入 + [R1-10] 可選 seed
+- **整合**：[R1-4] Conductor 用 asyncio.to_thread() 調度 + [F1] TODO 標記復用 EvolutionEngine
+- **暫不接入** CognitiveModulator（數據質量不足，Phase 2 啟用）
+- **工時**：2.0d · **並行組 B** · **前置**：KlineManager 可用 · **E1**：E1-Gamma
+- **SPEC**：同上
 
 ---
 
@@ -198,9 +227,12 @@ PM 排程計劃：
 ### [ ] 2.4：FundingRateArb V2 — Paired Execution + Basis（報告 §6.4）
 ### [ ] 2.5：GridTrading V2 — OU 動態間距 + 成本修正（報告 §6.5）
 ### [ ] 2.6：Regime Detection 升級 — Hurst + EWMA Vol 整合（報告 §3）
-### [ ] 2.7：Strategist 雙軌 + 優先級隊列 + emergency_mode（報告 §3.3）
-### [ ] 2.8：ContextDistiller — 壓縮系統狀態為 ~450 tokens（報告 §4.2）
-### [ ] 2.9：Strategist/Analyst Ollama prompt 模板 — JSON 結構化（報告）
+### [ ] 2.7：Strategist 雙軌 + 優先級隊列 + emergency_mode + CognitiveModulator 整合（報告 §3.3 + 認知 SPEC §5.1.2）
+- **新增**：正常通道整合 CognitiveModulator（+0.5d）· 快速通道不受調製影響
+### [ ] 2.8：ContextDistiller — 壓縮系統狀態為 ~520 tokens（報告 §4.2 + 認知 SPEC §5.1.1）
+- **新增**：pressure + dream 欄位（+70 tokens）· OpportunityTracker regret 摘要 + DreamEngine 建議
+### [ ] 2.9：Strategist/Analyst Ollama prompt 模板 — JSON 結構化 + cognitive/dream 欄位（報告 + 認知 SPEC §6.2）
+- **新增**：cognitive block + dream block（+0.25d）
 
 ---
 

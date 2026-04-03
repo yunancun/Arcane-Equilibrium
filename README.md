@@ -50,6 +50,7 @@ Phase 2:      ✅ 全完成（TruthSourceRegistry singleton 注入 + BacktestEng
 Phase 3:      ✅ 全完成（ExperimentLedger 持久化 + EvolutionEngine + EvolutionScheduler）
 Wave 8A-8D:   ✅ 全部完成（安全+正确性 / 核心重复消除 / 测试+前端统一 / 架构改进 / 文档清理）
 Batch 9A:     ✅ QC 量化审查驱动：ATR 双窗口 + 成本感知入场门槛 + 追踪止损成本约束 + round-trip 真实费用
+认知自适应:   ✅ SPEC V1.1+R1 通过（PM/PA/FA/E5/QC 五角色 + 两轮审计）→ Phase 1 组 B 实施
 认证安全:     ✅ HttpOnly cookie（取代 localStorage）+ 安全 HTTP 响应头 + XSS 修复
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
@@ -80,6 +81,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | 2 | L2 模式发现自动化 + 回测引擎 MVP + Truth Source Registry | ✅ 完成 |
 | 3 | Wave 8A-8D 安全/重复消除/架构改进 + Batch 9A 自适应风控 | ✅ 完成 |
 | 4 | Batch 9B-9D 学习闭环 + 管线连通 + 策略 Edge 验证 | 🔄 进行中 |
+| 4.5 | Agent 认知自适应三模组（CognitiveModulator/OpportunityTracker/DreamEngine） | ⬜ Phase 1 组 B |
 | 5 | Paper Trading 21 天观察 + Live 准备 | ⬜ |
 
 **详细报告**：`docs/governance_dev/audits/` 目录下各审计报告

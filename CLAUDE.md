@@ -29,10 +29,10 @@
 9. **交易所災難保護** — 本地止損 + 交易所條件單雙重防線
 10. **認知誠實** — 所有結論區分事實 / 推斷 / 假設
 11. **Agent 最大自主權** — P0/P1 硬邊界內，Agent 完全自主決定：幣種、策略、參數、時機
-12. **持續進化** — 系統必須從交易行為中自動學習
+12. **持續進化** — 系統必須從交易行為中自動學習（當前 demo 階段：Paper 驗證→參數進化，live 自動部署待 Phase 3 放權框架）
 13. **AI 資源成本感知** — 每次 AI 調用計費，cost_edge_ratio ≥ 0.8 → 建議關倉
 14. **零外部成本可運行** — 基礎運營僅需 L0+L1（Ollama + 免費搜索）
-15. **多 Agent 協作** — OpenClaw 指揮官 + 6 Agent，正式對象通信
+15. **多 Agent 協作** — 5 Agent（Scout/Strategist/Guardian/Analyst/Executor）+ Conductor 編排，正式對象通信
 16. **組合級風險意識** — 監控關聯曝險、策略重疊持倉、資金分配合理性
 
 **優先級序：** 帳戶生存 > 風控治理 > 系統健康 > 審計可追溯 > 人類終審 > 真實 Net PnL > 自主能力進化
@@ -52,6 +52,10 @@ L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
 代碼完成度：~82%　業務功能能用：~52%
 ★ Batch 9A 確定性自適應風控（2026-04-02，QC 量化審查驅動）：
   ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用記錄
+★★★ 認知自適應 SPEC V1.1+R1（2026-04-03，五角色交叉審查 + 兩輪審計通過）：
+  三個新 L0 模組：CognitiveModulator（決策門檻調製）+ OpportunityTracker（遺憾追蹤）+ DreamEngine（閒置蒙特卡洛）
+  開發位置：Phase 1 並行組 B（1.10/1.11/1.12），總計 3.5d，不影響關鍵路徑
+  SPEC 文件：docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md
 ★★ 中期路線圖（2026-04-03，外部改善報告 V3 Final + 4-Agent 分析）：
   Phase 0（本週）：Batch 9B+9C+9D → 業務 52%→72%
   Phase 1（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst/Indicator 擴展）
@@ -267,8 +271,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 **統一路線圖（4 Phase + Alpha 基準測試並行）：**
 - **Phase 0**（本週）：Batch 9B 學習閉環 + 9C 管線連通 + 9D 策略 Edge → 業務 52%→72%
-- **Phase 1**（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst）
-- **Phase 2**（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller
+- **Phase 1**（Week 2-3）：Agent 感知工具箱（PositionSizer/HealthMonitor/EWMA/Hurst）+ 認知自適應三模組（CognitiveModulator/OpportunityTracker/DreamEngine）
+- **Phase 2**（Week 3-5）：策略 V2 升級 + Strategist 雙軌 + ContextDistiller + 認知三模組閉環整合
 - **Phase 3**（Week 5-7）：Claude API L1.5 + 四階段放權框架
 
 **Alpha 基準測試**：Phase 0 第一天開始並行跑 Paper 2 週（不寫代碼），Day 10 決策點：
@@ -282,6 +286,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 - PA 映射：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-03--improvement_report_vs_existing_code_mapping.md`
 - QC 數學：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-04-03--improvement_report_math_validation.md`
 - FA 對比：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-04-03--improvement_report_gap_comparison.md`
+- 認知自適應：`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md`（V1.1+R1 五角色審查通過）
 
 **每個 Phase 的 session 上下文設計已在主計劃文件中定義（§4.1/5/6 的 session 上下文段）。**
 
@@ -302,4 +307,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Batch 9A 完成 · 中期路線圖 Phase 0-3 已制定（7 週 · 4-Agent 分析） · Alpha 基準測試並行中 · 下一步：Phase 0 Batch 9B 學習閉環 → 讀 TODO.md。
+> 截至 2026-04-03：3703 tests · 126+ routes · 5 Agent · demo_only · 代碼 82% 業務 52% · Batch 9A 完成 · 中期路線圖 Phase 0-3 已制定（7 週 · 4-Agent 分析） · 認知自適應 SPEC V1.1+R1 五角色審查通過（CognitiveModulator/OpportunityTracker/DreamEngine，Phase 1 組 B） · Alpha 基準測試並行中 · 下一步：Phase 0 Batch 9B 學習閉環 → 讀 TODO.md。

@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-02
+> 最後更新：2026-04-03
+
+---
+
+### Agent 認知自適應 SPEC V1.1+R1 五角色審查通過（2026-04-03）
+
+**內容**：V3 報告補充規範，三個 L0 新模組的完整設計（零 API 成本，純本地計算）
+
+- **CognitiveModulator**（0.5d）：根據歷史表現動態調整 confidence floor / qty ceiling / SL multiplier / scan interval
+- **OpportunityTracker**（1.0d）：追蹤被 Scout/Strategist/Guardian 篩掉的機會虛擬 PnL → 遺憾歸因
+- **DreamEngine**（2.0d）：閒置時用真實 K 線跑蒙特卡洛模擬 → 參數優化建議
+
+**五角色審查（PM/PA/FA/E5/QC）+ 兩輪審計**：
+- QC 數學修正 6 項：多因子取 max（防隱性停機）· 虛擬 PnL 扣 fee（防系統性高估）· 歸一化遺憾方向 · 每參數 ≥30 輪模擬 · binomial test 置信度 · EMA 平滑
+- E5 代碼修正 6 項：拆分 _compute_*() · bullets_dodged 重命名 · _flush_closed · 緩存 · threading.Lock · 隨機方向
+- Round 1 修正 10 項：scan 雙向 · 緩存失效 · 防重入 · asyncio.to_thread · 連虧忽略負向 · import 頂層 · 估時調整 · 最少 5 樣本 · fee 注釋 · 可選 seed
+- 最終判定：5/5 APPROVE
+- 開發位置：Phase 1 並行組 B（1.10/1.11/1.12），總計 3.5d，不影響關鍵路徑
+- SPEC 文件：`docs/references/2026-04-03--agent_cognitive_adaptation_spec_v1_draft.md`
 
 ---
 
