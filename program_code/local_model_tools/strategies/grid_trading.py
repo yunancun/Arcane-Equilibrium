@@ -94,7 +94,7 @@ class GridTradingStrategy(StrategyBase):
         upper_price: float = 50000.0,
         lower_price: float = 40000.0,
         grid_count: int = 10,
-        qty_per_grid: float = 1.0,  # Large default — intent_processor P1 sizing caps to risk budget
+        qty_per_grid: float = 1e9,  # Large default — intent_processor P1 sizing caps to risk budget
         geometric: bool = False,
         # V2 parameters / V2 参数
         ou_dynamic: bool = True,          # Enable OU dynamic spacing / 启用 OU 动态间距（V2 默认开启）

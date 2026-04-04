@@ -22,7 +22,7 @@ impl BbBreakout {
     pub fn new() -> Self {
         Self {
             active: true, position: None, was_in_squeeze: false,
-            last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1.0,
+            last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1e9,
         }
     }
 }

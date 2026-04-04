@@ -11,7 +11,7 @@ use crate::tick_pipeline::TickContext;
 const DEFAULT_GRID_COUNT: usize = 10;
 /// Large default qty — intent_processor P1 sizing will cap to actual risk budget.
 /// 大默認 qty — intent_processor P1 sizing 會裁剪到實際風險預算。
-const DEFAULT_QTY_PER_GRID: f64 = 1.0;
+const DEFAULT_QTY_PER_GRID: f64 = 1e9;
 const FEE_PCT: f64 = 0.00055; // one-way taker
 
 pub struct GridTrading {

@@ -18,7 +18,7 @@ impl MaCrossover {
     pub fn new() -> Self {
         Self {
             active: true, position: None, last_trade_ms: 0,
-            cooldown_ms: 300_000, adx_threshold: 20.0, default_qty: 1.0,
+            cooldown_ms: 300_000, adx_threshold: 20.0, default_qty: 1e9,
         }
     }
 

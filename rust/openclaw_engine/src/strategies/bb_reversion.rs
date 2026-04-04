@@ -15,7 +15,7 @@ pub struct BbReversion {
 
 impl BbReversion {
     pub fn new() -> Self {
-        Self { active: true, position: None, last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1.0 }
+        Self { active: true, position: None, last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1e9 }
     }
 
     fn make_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
