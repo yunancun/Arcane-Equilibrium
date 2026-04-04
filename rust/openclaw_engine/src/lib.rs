@@ -9,15 +9,22 @@
 //!   二進制入口在 main.rs。
 
 pub mod account_manager;
+pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod config;
+pub mod execution_listener;
 pub mod fast_track;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
+pub mod market_data_client;
+pub mod multi_interval_ws;
 pub mod orchestrator;
+pub mod order_manager;
 pub mod paper_state;
 pub mod persistence;
+pub mod platform_client;
+pub mod position_manager;
 pub mod strategies;
 pub mod tick_pipeline;
 pub mod ws_client;
