@@ -8,8 +8,11 @@
 //!   ipc_server（Unix 套接字 JSON-RPC 2.0）、ws_client（Bybit WS 自動重連）。
 //!   二進制入口在 main.rs。
 
+pub mod account_manager;
+pub mod bybit_rest_client;
 pub mod config;
 pub mod fast_track;
+pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
 pub mod orchestrator;
