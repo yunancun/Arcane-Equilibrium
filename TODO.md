@@ -291,12 +291,12 @@ Bybit V5 API (Demo/Testnet/Mainnet)
   - `python3 -c "from openclaw_core import BybitClient; print('OK')"` 通過
   - 增量編譯時間測量並記錄
 
-- [ ] PYO3-B07：E2 代碼審查 + E4 回歸測試
+- [x] PYO3-B07：E2 代碼審查 + E4 回歸測試（0 FAIL · 4609 tests 全綠 · commit 76cb0cb）
   - E2：跨語言接口審查 + 錯誤處理 + rate limit 安全
   - E4：Python 3345 + Rust 763+ 全綠
   - Bybit API 字典手冊同步更新
 
-- [ ] PYO3-B08：E5 優化審查
+- [x] PYO3-B08：E5 優化審查（0 OPTIMIZE · 2 DEFER: engine settle_coin + runtime threads）
   - 序列化效率（pythonize vs 手動 to_dict）
   - 不必要的 clone 消除
   - tokio Runtime 資源使用
