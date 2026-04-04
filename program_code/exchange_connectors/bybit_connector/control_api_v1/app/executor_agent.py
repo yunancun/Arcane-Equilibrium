@@ -34,6 +34,7 @@ MODULE_NOTE (English):
 
 from __future__ import annotations
 
+import collections
 import logging
 import threading
 import time
@@ -102,6 +103,9 @@ class ExecutorConfig:
     max_fill_time_ms: float = 5000.0
     # Maximum execution reports to keep / 最大保留的执行报告数
     max_reports: int = 1000
+    # ARCH-1: Intent dedup window (seconds) — reject duplicate intent_ids within this window
+    # ARCH-1：intent 去重窗口（秒）— 在此窗口內拒絕重複的 intent_id
+    dedup_window_seconds: float = 10.0
     # Callback for exchange conditional order creation (set externally)
     # 交易所条件单创建回调（外部设置）
 
@@ -157,9 +161,14 @@ class ExecutorAgent:
         # Market prices (injected periodically) / 市场价格
         self._market_prices: Dict[str, float] = {}
 
+        # ARCH-1: Intent dedup — prevent double execution if both bus + direct paths fire
+        # ARCH-1：intent 去重 — 防止 bus 路徑和直接路徑同時觸發時雙重執行
+        self._recent_intent_ids: collections.OrderedDict = collections.OrderedDict()
+
         # Stats / 统计
         self._stats = {
             "intents_received": 0,
+            "intents_deduped": 0,
             "executions_attempted": 0,
             "executions_success": 0,
             "executions_failed": 0,
@@ -191,6 +200,27 @@ class ExecutorAgent:
         with self._lock:
             self._market_prices.update(prices)
 
+    def _check_and_record_intent(self, intent_id: str) -> bool:
+        """Check if intent_id is new (returns True) or duplicate (returns False).
+        Also prunes stale entries beyond dedup window (ARCH-1).
+        检查 intent_id 是否为新（返回 True）或重复（返回 False），并清理过期条目。"""
+        now = time.time()
+        cutoff = now - self.config.dedup_window_seconds
+        with self._lock:
+            # Prune expired entries / 清理过期条目
+            while self._recent_intent_ids:
+                oldest_key, oldest_ts = next(iter(self._recent_intent_ids.items()))
+                if oldest_ts < cutoff:
+                    self._recent_intent_ids.pop(oldest_key)
+                else:
+                    break
+            # Check duplicate / 检查重复
+            if intent_id in self._recent_intent_ids:
+                return False
+            # Record new intent / 记录新 intent
+            self._recent_intent_ids[intent_id] = now
+            return True
+
     # ── Message Handler / 消息处理 ──
 
     def on_message(self, message: AgentMessage) -> None:
@@ -204,7 +234,8 @@ class ExecutorAgent:
             self._handle_directive(message)
 
     def _handle_approved_intent(self, message: AgentMessage) -> None:
-        """Execute a Guardian-approved intent / 执行 Guardian 批准的 intent"""
+        """Execute a Guardian-approved intent with dedup safety (ARCH-1).
+        执行 Guardian 批准的 intent，含去重安全檢查。"""
         with self._lock:
             self._stats["intents_received"] += 1
 
@@ -217,6 +248,18 @@ class ExecutorAgent:
         symbol = payload.get("symbol", "")
         direction = payload.get("direction", "")
         size = float(payload.get("size", 0.0))
+
+        # ARCH-1: Dedup check — reject if intent_id was already executed within window
+        # ARCH-1：去重檢查 — 若 intent_id 在窗口內已執行則拒絕
+        if intent_id != "unknown" and not self._check_and_record_intent(intent_id):
+            with self._lock:
+                self._stats["intents_deduped"] += 1
+            logger.warning(
+                "DEDUP: intent_id=%s already executed within window, skipping "
+                "/ 去重：intent_id=%s 在窗口內已執行，跳過",
+                intent_id, intent_id,
+            )
+            return
 
         if not symbol or not direction or size <= 0:
             logger.warning("Invalid approved intent: symbol=%s dir=%s size=%s", symbol, direction, size)

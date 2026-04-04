@@ -154,11 +154,16 @@ class _BridgeAgentsMixin:
                     self._mark_intent(intent, "blocked_h0")
                     return None  # skip this intent, do not submit
             except Exception as _h0_check_err:
-                logger.warning(
-                    "H0Gate check error (fail-open on exception, non-fatal): %s "
-                    "/ H0 門控檢查異常（異常時 fail-open，非致命）",
+                # ARCH-4 fix: fail-closed on H0 Gate exception (DOC-01 §5.6: survival > profit)
+                # ARCH-4 修復：H0 門控異常時 fail-closed（根原則 5：生存 > 利潤）
+                logger.error(
+                    "H0Gate check error — fail-closed, rejecting intent: %s "
+                    "/ H0 門控檢查異常 — fail-closed，拒絕 intent",
                     _h0_check_err,
                 )
+                _bump(_local_stats, "intents_h0_blocked")
+                self._mark_intent(intent, "blocked_h0_error")
+                return None
 
         # Governance Hub authorization check / 治理集線器授權檢查
         if self._governance_hub:
@@ -202,12 +207,16 @@ class _BridgeAgentsMixin:
                     self._mark_intent(intent, "rejected_cost_gate")
                     return None
             except Exception as _cost_err:
-                # Fail-open: cost gate error must not block trading
-                # Fail-open：成本門檻異常不能阻塞交易
-                logger.warning(
-                    "Cost gate error (fail-open): %s / 成本門檻異常（fail-open）",
+                # ARCH-4 fix: fail-closed on cost gate exception (DOC-01 §5.6: survival > profit)
+                # ARCH-4 修復：成本門檻異常時 fail-closed（根原則 5：生存 > 利潤）
+                logger.error(
+                    "Cost gate error — fail-closed, rejecting intent: %s "
+                    "/ 成本門檻異常 — fail-closed，拒絕 intent",
                     _cost_err,
                 )
+                _bump(_local_stats, "intents_cost_rejected")
+                self._mark_intent(intent, "rejected_cost_gate_error")
+                return None
 
         # ── Batch 8: Guardian Agent as PRIMARY gate (fail-closed) ──
         # Batch 8：Guardian Agent 作为主门控（fail-closed）

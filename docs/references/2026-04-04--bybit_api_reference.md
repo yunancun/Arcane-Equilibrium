@@ -963,6 +963,72 @@ Topic 生成函數（`multi_interval_ws.rs`）：
 
 ---
 
+### 2.3 Shadow Order Sync Channel — 影子訂單同步通道
+
+> Session 5 新增（2026-04-04）。Paper Trading 成交鏡像到 Demo API 用於校準驗證。
+
+**用途**: 將 Paper Trading 引擎的模擬成交一對一鏡像到 Bybit Demo API，用於：
+1. 驗證 Paper 模擬成交邏輯是否偏離真實 Demo 環境
+2. 對比 Paper PnL vs Demo PnL 用於系統校準
+3. 為 Live 上線前的數據收集（滑點、填充率、延遲）
+
+**架構**:
+```
+tick_pipeline.on_tick()
+  ├── Step 4: 策略 → intent → process → fill 成功
+  │   └── send(ShadowOrderRequest { is_close: false })
+  └── Step 6: 止損觸發 → close_position
+      └── send(ShadowOrderRequest { is_close: true })
+
+mpsc::UnboundedSender<ShadowOrderRequest> → channel → main.rs async consumer
+  └── OrderManager::place_order(CreateOrderRequest)
+      └── POST /v5/order/create (Demo API)
+```
+
+**ShadowOrderRequest 結構**（`tick_pipeline.rs:37-52`）:
+```rust
+pub struct ShadowOrderRequest {
+    pub symbol: String,       // 交易對
+    pub is_long: bool,        // true=Buy, false=Sell（開倉方向）
+    pub qty: f64,             // 成交數量
+    pub price: f64,           // Paper 成交價格
+    pub strategy: String,     // 觸發策略名或 "stop"
+    pub paper_fill_ts: u64,   // Paper 成交時間戳 (ms)
+    pub is_close: bool,       // true=平倉(reduce_only), false=開倉
+}
+```
+
+**觸發點**:
+| 位置 | 條件 | is_close |
+|------|------|----------|
+| `tick_pipeline.rs:343-351` | Paper fill 成功（開倉/加倉） | false |
+| `tick_pipeline.rs:385-393` | 止損觸發 + close_position | true |
+
+**Demo API 映射**:
+- 開倉（is_close=false）: `POST /v5/order/create` — category=linear, side=Buy/Sell, orderType=Market, qty
+- 平倉（is_close=true）: `POST /v5/order/create` — side=反向, reduceOnly=true, qty=實際倉位數量
+- `orderLinkId`: `"shadow_{paper_fill_ts}"` 用於 WS 回調對比
+
+**一致性保證**:
+- Paper qty/price 與 Demo order 一一對應
+- Demo API 拒絕（餘額不足、DCP 觸發等）只 warn 不阻塞 Paper Trading
+- Demo 成交結果 **不** 回寫 Paper State（單向鏡像）
+
+**配置**:
+- `shadow_orders: bool`（默認 false，opt-in 啟用）
+- 通道：`tokio::sync::mpsc::UnboundedSender`（非關鍵路徑，不限流）
+
+**已知陷阱**:
+1. Demo 帳戶餘額不足時 shadow 訂單會失敗，Paper Trading 不受影響
+2. DCP 啟用時，Demo 帳戶斷連會取消所有待成交 shadow 訂單
+3. Shadow 訂單為異步提交，實際成交價可能因延遲而與 Paper 成交價偏離
+4. `reduce_only=true` 確保平倉 shadow 不會意外開反向倉位
+5. Shadow 為 fire-and-forget 模式，Demo 成交結果不回饋到 Paper State
+
+**關聯程式**: `tick_pipeline.rs:37-52, 168, 343-351, 385-393` + `main.rs`（channel consumer）
+
+---
+
 ## 3. IPC Methods（Python → Rust）
 
 協議：JSON-RPC 2.0 over Unix domain socket（`/tmp/openclaw/engine.sock`）

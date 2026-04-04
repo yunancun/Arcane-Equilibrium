@@ -7,64 +7,78 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 11 / CONFIRMED 0 / RESOLVED 3
-# 最後更新：2026-04-03
+# 統計：OPEN 7 / CONFIRMED 0 / RESOLVED 7
+# 最後更新：2026-04-05
 
 ---
 
 # ━━━ Rust Engine（R-05 Soak Test 排查項）━━━
 
-## OPEN — RE-1：Rust Engine 長期記憶體洩漏風險
+## RESOLVED — RE-1：Rust Engine 長期記憶體洩漏風險
 
 **來源**：R-05 決策（2026-04-03），10 分鐘實測無法覆蓋
-**嚴重性**：HIGH
-**可能位置**：
-- `rust/openclaw_engine/src/paper_state.rs` — `fills: Vec<PaperFill>` 無上限，持續累積
-- `rust/openclaw_engine/src/paper_state.rs` — `positions` / `latest_prices` HashMap（需確認無殭屍 key）
-- `rust/openclaw_engine/src/persistence.rs` — JSONL audit 檔案持續增長（磁碟而非記憶體，但需監控）
-- 策略內部窗口（MA max 200、BB max 20 — 已有上限，低風險）
-**排查方式**：24h soak test 後檢查 RSS 記憶體趨勢，應持平而非線性增長
-**緩解方案**：fills Vec 加 ring buffer 或定期歸檔截斷
+**嚴重性**：LOW（降級：原始描述已過時）
+**修復**：2026-04-05 審計確認無洩漏風險
+**審計結果**：
+- `fills: Vec<PaperFill>` — **不存在**。原始描述基於舊版代碼。目前 fills 存於 tick_pipeline 的 `recent_fills: VecDeque`，已有 cap=50。
+- `positions` HashMap — 只在 `apply_fill()` 插入，`close_position()` 移除。自然有界（最多 25 symbols）。
+- `latest_prices` / `latest_turnovers` / `api_unrealized_pnl` — symbol-keyed HashMap，overwrite-on-insert，自然有界（≤ SYMBOLS.len() = 5）。
+- tick_pipeline 的 `recent_signals`(100), `recent_intents`(50), `recent_fills`(50), `adl_alerts`(50) — 全部 VecDeque 且有 pop_front 上限。
+- KlineBuffer — capacity=500, `append()` 時 evict oldest。
+- `persistence.rs` JSONL — 磁碟增長，非記憶體。保持監控。
+**結論**：Go/No-Go replay 確認 RSS 2.1MB（201K ticks），無增長趨勢。
 
 ---
 
-## OPEN — RE-2：WS 24h 強制斷線無自動重連
+## RESOLVED — RE-2：WS 24h 強制斷線無自動重連
 
 **來源**：R-05 決策（2026-04-03）
-**嚴重性**：HIGH
-**背景**：Bybit production WS 連線超過 24 小時後強制斷線
-**位置**：`rust/openclaw_engine/src/ws_client.rs` — `connect()` / event loop
-**現狀**：無自動重連邏輯，斷線後 event loop 結束，程序靜默停止
-**排查方式**：觀察 24h 後是否收到 WS Close/Error，程序是否 panic 或靜默退出
-**緩解方案**：event loop 外層加 reconnect-with-backoff 迴圈（建議在 R-06 或 soak test 後實作）
+**嚴重性**：原 HIGH → 已修復
+**修復**：2026-04-05
+**審計結果**：
+- ws_client.rs `run()` 已有 exponential backoff reconnect 循環（base_delay * 2^attempt, cap 60s）
+- bybit_private_ws.rs `run()` 同樣已有重連循環
+- 24h 斷線場景：server close frame → break inner loop → 自動重連。已正確處理。
+**修復內容（RE-2 fix）**：
+1. `ws_client.rs`：`process_message()` 返回 bool，event channel 關閉時回傳 false → `run()` 不再空轉
+2. `main.rs`：公共 WS + 私有 WS 均加入 supervisor 包裝 — task 意外退出時自動重建 + 退避重啟
+3. Supervisor 退避：5s * 2^attempt, cap 60s
 
 ---
 
 ## OPEN — RE-3：跨 UTC 日切邊界行為未驗證
 
 **來源**：R-05 決策（2026-04-03）
-**嚴重性**：MEDIUM
+**嚴重性**：LOW（降級：2026-04-05 審計）
 **背景**：Bybit kline 以 UTC 00:00 為日切界，日切瞬間可能出現：
 - 1D kline confirm=true 收盤 candle 觸發大量策略信號
 - funding rate settlement（每 8h，00:00 是其中之一）
 - 瞬間 spread 擴大 / 流動性下降
 **位置**：策略的 kline 消費邏輯（MA/BB 使用日線窗口時）
-**排查方式**：soak test 跨越 UTC 00:00，檢查是否有異常信號爆發或 PnL 突變
-**緩解**：策略已有 cooldown 機制，但日切集中信號是否超出 cooldown 設計未驗證
+**2026-04-05 審計補充**：
+- ws_client.rs 已有 confirmed-only kline 過濾（3 個 unit test 覆蓋）
+- 所有 6 策略均有 per-strategy cooldown（MA: 5min, FundingArb: 1h 等）
+- cooldown 為絕對毫秒差值，非日曆感知 — 理論上日切信號仍可能在 cooldown 窗口外重複觸發
+- 風險實際較低：使用 1D 策略的場景極少，且 cooldown 提供基本保護
+**排查方式**：Phase 1 soak test 跨越 UTC 00:00 觀察
+**建議**：Phase 3b 策略參數 DB 持久化時考慮加入 `min_hours_between_1d_entries` 可選參數
 
 ---
 
 # ━━━ 架構 / 管線問題 ━━━
 
-## OPEN — ARCH-1：MessageBus Guardian→Executor 路徑未打通
+## RESOLVED — ARCH-1：MessageBus Guardian→Executor 路徑未打通
 
 **來源**：PA 技術審查（2026-04-01）
-**嚴重性**：HIGH
-**問題**：Guardian 從未向 Executor 發送 APPROVED_INTENT。Conductor 有完整 `process_trade_intent()` 邏輯但生產環境從未被調用。5-Agent MessageBus 全路徑處於斷開狀態。
-**位置**：`app/guardian_agent.py`（發送端）、`app/multi_agent_framework.py`（Conductor 編排）
-**影響**：Agent 間的正式通信管線無法工作，所有交易意圖通過 PipelineBridge 直接處理而非經 MessageBus
-**排查方式**：檢查 Guardian approve 後是否有 bus.send() 調用
-**備註**：`guardian_agent.py:411` 有 TODO 標記待啟用 bus flow
+**嚴重性**：原 HIGH → 降級 LOW（架構已完整，待激活）
+**修復**：2026-04-05 審計 + intent_id dedup 安全網
+**審計結果**：
+- **MessageBus 路徑已完整實現**：Strategist._produce_intents() → bus.send(TRADE_INTENT) →
+  Guardian._handle_trade_intent() → review_intent() → bus.send(APPROVED_INTENT) →
+  Executor._handle_approved_intent() → execute_order() → bus.send(EXECUTION_REPORT)
+- 當前兩條路徑互斥：pipeline_bridge 直接調用 vs MessageBus 路由。未同時啟用。
+- **ARCH-1 fix**：ExecutorAgent 新增 intent_id 去重（OrderedDict + 10s 窗口），防止雙路徑同時激活時重複執行。
+- **激活決策**：延後至 Phase 3a+，需配合測試驗證。當前 pipeline_bridge 路徑運行穩定。
 
 ---
 
@@ -90,14 +104,17 @@
 
 ---
 
-## OPEN — ARCH-4：Dependency Injection Silent Fail-Open 模式
+## RESOLVED — ARCH-4：Dependency Injection Silent Fail-Open 模式
 
 **來源**：PA 審查（2026-03-31）
-**嚴重性**：MEDIUM
-**問題**：5 個核心安全組件使用 `if self._xxx:` 模式（Python None 初始化），依賴注入失敗時靜默 no-op 而非報錯
-**位置**：`pipeline_bridge.py`、`guardian_agent.py`、`strategist_agent.py` 等
-**影響**：如果依賴注入失敗，安全檢查靜默跳過而非 fail-closed
-**緩解**：當前 demo 場景風險有限，live 前需改為顯式 fail-closed
+**嚴重性**：原 MEDIUM → 已修復
+**修復**：2026-04-05
+**改動**：
+- bridge_agents.py H0 Gate：exception handler 從 fail-open 改為 fail-closed（return None + 計數 + 標記）
+- bridge_agents.py Cost Gate：exception handler 從 fail-open 改為 fail-closed（return None + 計數 + 標記）
+- bridge_core.py Governance Lease：已是 fail-closed（無需改動）
+- Guardian review_intent()：已是 fail-closed（any error → REJECTED）
+- 剩餘 `if self._xxx:` 模式為 advisory/optional 組件（telegram/audit/learning weight），fail-open 是正確行為
 
 ---
 

@@ -466,25 +466,67 @@ async fn async_main(config: Arc<ConfigManager>) {
     // Start WS client — subscribe to all symbols (with extended topics if configured)
     // 啟動 WebSocket 客戶端 — 訂閱所有交易對（含擴展 topic）
     // ------------------------------------------------------------------
-    let mut ws_client = WsClient::new(Arc::clone(&config), event_tx, cancel.clone());
-    if cfg_snapshot.enable_extended_ws {
-        // Item 9: Extended subscriptions — full + adl-notice + price-limit
-        // 項目 9：擴展訂閱 — 完整 + ADL 警報 + 價格限制
+    // Build subscription list first (RE-2: needed for supervisor restart)
+    // 先建立訂閱列表（RE-2：監管器重啟所需）
+    let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
+        let mut topics = Vec::new();
         for sym in SYMBOLS {
             for topic in openclaw_engine::multi_interval_ws::extended_subscription_list(sym) {
-                ws_client.subscribe(topic);
+                topics.push(topic);
             }
         }
         info!(topics_per_symbol = 10, "extended WS subscriptions / 擴展 WS 訂閱");
+        topics
     } else {
+        let mut topics = Vec::new();
         for sym in SYMBOLS {
-            ws_client.subscribe(format!("kline.1.{sym}"));
-            ws_client.subscribe(format!("publicTrade.{sym}"));
+            topics.push(format!("kline.1.{sym}"));
+            topics.push(format!("publicTrade.{sym}"));
         }
-    }
-    let ws_handle = tokio::spawn(async move {
-        ws_client.run().await;
-    });
+        topics
+    };
+
+    // RE-2: Supervisor wrapper — restarts WS on unexpected exit
+    // RE-2：監管器包裝 — WS 意外退出時自動重啟
+    let ws_handle = {
+        let ws_config = Arc::clone(&config);
+        let ws_cancel = cancel.clone();
+        let ws_topics = ws_subscriptions.clone();
+        tokio::spawn(async move {
+            let mut supervisor_attempt: u32 = 0;
+            loop {
+                if ws_cancel.is_cancelled() { break; }
+
+                let mut ws_client = WsClient::new(
+                    Arc::clone(&ws_config), event_tx.clone(), ws_cancel.clone(),
+                );
+                for topic in &ws_topics {
+                    ws_client.subscribe(topic.clone());
+                }
+                ws_client.run().await;
+
+                // If cancelled, exit cleanly / 如果已取消，正常退出
+                if ws_cancel.is_cancelled() { break; }
+
+                // Unexpected exit — supervisor restart with backoff
+                // 意外退出 — 監管器退避重啟
+                supervisor_attempt = supervisor_attempt.saturating_add(1);
+                let delay_ms = std::cmp::min(
+                    5000_u64.saturating_mul(2_u64.saturating_pow(supervisor_attempt.min(4))),
+                    60_000,
+                );
+                warn!(
+                    delay_ms = delay_ms,
+                    attempt = supervisor_attempt,
+                    "WS supervisor restarting / WS 監管器重啟"
+                );
+                tokio::select! {
+                    _ = ws_cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {},
+                }
+            }
+        })
+    };
 
     // ------------------------------------------------------------------
     // Item 5: Private WS + ExecutionListener (order/fill/position/wallet callbacks)
@@ -572,14 +614,46 @@ async fn async_main(config: Arc<ConfigManager>) {
             listener.run().await;
         });
 
-        // Spawn private WS connection / 啟動私有 WS 連接
+        // RE-2: Supervisor wrapper for private WS — restarts on unexpected exit
+        // RE-2：私有 WS 監管器包裝 — 意外退出時自動重啟
         let priv_cancel = cancel.clone();
-        let priv_ws = BybitPrivateWs::new(
-            api_key, api_secret, BybitEnvironment::Demo, priv_cancel, priv_tx,
-        );
-        let priv_ws_handle = tokio::spawn(async move {
-            priv_ws.run().await;
-        });
+        let priv_ws_handle = {
+            let api_key_owned = api_key.clone();
+            let api_secret_owned = api_secret.clone();
+            let sv_cancel = priv_cancel.clone();
+            tokio::spawn(async move {
+                let mut supervisor_attempt: u32 = 0;
+                loop {
+                    if sv_cancel.is_cancelled() { break; }
+
+                    let priv_ws = BybitPrivateWs::new(
+                        api_key_owned.clone(),
+                        api_secret_owned.clone(),
+                        BybitEnvironment::Demo,
+                        sv_cancel.clone(),
+                        priv_tx.clone(),
+                    );
+                    priv_ws.run().await;
+
+                    if sv_cancel.is_cancelled() { break; }
+
+                    supervisor_attempt = supervisor_attempt.saturating_add(1);
+                    let delay_ms = std::cmp::min(
+                        5000_u64.saturating_mul(2_u64.saturating_pow(supervisor_attempt.min(4))),
+                        60_000,
+                    );
+                    warn!(
+                        delay_ms = delay_ms,
+                        attempt = supervisor_attempt,
+                        "Private WS supervisor restarting / 私有 WS 監管器重啟"
+                    );
+                    tokio::select! {
+                        _ = sv_cancel.cancelled() => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {},
+                    }
+                }
+            })
+        };
 
         info!("Private WS + ExecutionListener started / 私有 WS + 執行監聯器已啟動");
         Some((priv_ws_handle, listener_handle, bybit_balance, api_pnl))

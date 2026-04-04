@@ -9,6 +9,14 @@ MODULE_NOTE (中文):
   ★ 路由通過 register_legacy_routes() 函數註冊到 app，
   在 main_legacy.py 中 app 創建後調用。
 
+  DEBT-1 NOTE (2026-04-05): File is ~1281 lines (81 over 1200 line limit).
+  Splitting deferred due to:
+  - register_legacy_routes() relies on _base.xxx indirect lookup at call time
+  - Split modules must maintain same pattern (no module-level captures of monkey-patched refs)
+  - Tests rely on importlib.reload(main_legacy) chain — split would require reload cascade
+  - Current overage (6.7%) is manageable; revisit if >1350 lines
+  DEBT-1 備注：文件約 1281 行（超出限制 81 行）。拆分延後。
+
 MODULE_NOTE (English):
   Legacy route handlers module. Contains all FastAPI route endpoint definitions:
   auth (login/logout/check), static pages, system queries, control operations,

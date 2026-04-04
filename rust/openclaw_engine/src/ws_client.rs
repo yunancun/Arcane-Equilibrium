@@ -166,7 +166,12 @@ impl WsClient {
                             msg = read.next() => {
                                 match msg {
                                     Some(Ok(Message::Text(text))) => {
-                                        self.process_message(&text).await;
+                                        if !self.process_message(&text).await {
+                                            // Event channel closed — engine shutting down (RE-2 fix)
+                                            // 事件通道已關閉 — 引擎正在關閉
+                                            log_state(WsState::Disconnected, 0);
+                                            return;
+                                        }
                                     }
                                     Some(Ok(Message::Ping(data))) => {
                                         let _ = write.send(Message::Pong(data)).await;
@@ -221,22 +226,24 @@ impl WsClient {
     }
 
     /// Process a single text message from Bybit WS.
+    /// Returns false if event channel is closed (caller should exit).
     /// 處理來自 Bybit WS 的單條文本消息。
-    async fn process_message(&self, text: &str) {
+    /// 返回 false 表示事件通道已關閉（調用方應退出）。
+    async fn process_message(&self, text: &str) -> bool {
         // Try to extract price data from various Bybit message formats.
         // 嘗試從各種 Bybit 消息格式中提取價格數據。
         let parsed: serde_json::Value = match serde_json::from_str(text) {
             Ok(v) => v,
             Err(e) => {
                 debug!(error = %e, "non-JSON WS message / 非 JSON WS 消息");
-                return;
+                return true;
             }
         };
 
         // Skip pong / subscription confirmations / 跳過 pong 和訂閱確認
         if parsed.get("op").is_some() || parsed.get("success").is_some() {
             debug!("control message: {}", text);
-            return;
+            return true;
         }
 
         // Bybit public data formats:
@@ -246,7 +253,7 @@ impl WsClient {
         let topic = parsed.get("topic").and_then(|t| t.as_str()).unwrap_or("");
         let raw_data = match parsed.get("data") {
             Some(d) => d,
-            None => return,
+            None => return true,
         };
 
         // Normalize to array: if data is a single object, wrap it / 統一為數組
@@ -257,7 +264,7 @@ impl WsClient {
             data_vec = vec![raw_data.clone()];
             &data_vec
         } else {
-            return;
+            return true;
         };
 
         // Route by topic prefix / 按主題前綴路由
@@ -277,15 +284,16 @@ impl WsClient {
             data.iter().filter_map(|item| parse_adl_notice_item(item)).collect()
         } else {
             debug!(topic = topic, "unhandled topic / 未處理的主題");
-            return;
+            return true;
         };
 
         for event in events {
             if self.event_tx.send(event).await.is_err() {
                 warn!("event channel closed / 事件通道已關閉");
-                return;
+                return false;
             }
         }
+        true
     }
 }
 

@@ -154,6 +154,7 @@ SPEC 審查記錄：
 - [x] IPC-03：8 條 API 路由改為 Rust-first + Python fallback（5 寫操作路由待 Rust 命令通道）
 - [x] IPC-04：PipelineBridge 降級為 IPC 中繼 + Agent 回調容器（docstring + DEPRECATED 標記）
 - [ ] IPC-05：分類 B Python 文件逐步降級（需 PYO3-BYBIT 寫操作路由遷移後）
+      — 2026-04-05 審計：PYO3-BYBIT 讀路由完成，寫操作路由待 Phase 2。範圍 15-25 files / ~800-1200 LOC。延後至 Phase 2 後執行。
 - [x] IPC-06：E2 + E4 — 4507 全綠
 
 ---

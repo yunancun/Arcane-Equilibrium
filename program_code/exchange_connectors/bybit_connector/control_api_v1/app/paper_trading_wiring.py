@@ -421,6 +421,13 @@ if TELEGRAM_ALERTER.is_enabled:
 else:
     logger.info("TelegramAlerter disabled (no token/chat_id configured)")
 
+# OC-1/OC-2: WebhookAlerter + AlertRouter (multi-channel alert fan-out)
+# OC-1/OC-2：WebhookAlerter + AlertRouter（多通道告警扇出）
+from .webhook_alerter import WebhookAlerter  # noqa: E402
+from .alert_router import AlertRouter  # noqa: E402
+WEBHOOK_ALERTER = WebhookAlerter()
+ALERT_ROUTER = AlertRouter(telegram=TELEGRAM_ALERTER, webhook=WEBHOOK_ALERTER)
+
 # T9A.01: Initialize and inject LearningTierGate for analyst agent evolution
 from .learning_tier_gate import LearningTierGate  # noqa: E402
 try:
@@ -481,6 +488,8 @@ __all__ = [
     "RECOVERY_GATE",
     "SCANNER_RATE_LIMITER",
     "TELEGRAM_ALERTER",
+    "WEBHOOK_ALERTER",
+    "ALERT_ROUTER",
     "LEARNING_TIER_GATE",
     "DISPATCHER",
     "SHADOW_CONSUMER",
