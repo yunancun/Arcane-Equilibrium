@@ -1,7 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-04
+> 最後更新：2026-04-05
+
+### PYO3-BYBIT 完成 — PyO3 Bybit API 橋接（2026-04-05 · commits e3c9afe~80f68e4）
+
+- **Route C 決策**：採用 PyO3 直接調用（非 IPC 透傳），增量編譯 3.7s 可接受
+- **openclaw_pyo3 擴展**：新增 `bybit_bridge/` 模組（4 文件 ~510 行），依賴 `openclaw_engine`
+- **BybitClient #[pyclass]**：39 個 Python 方法覆蓋 Account(8) + Order(6) + Position(4) + MarketData(8) + Instrument(6) + Util(7)
+- **async→sync 橋接**：每個 BybitClient 持有獨立 tokio::Runtime（2 worker threads），不干擾 Python asyncio
+- **序列化**：pythonize crate 自動 Serialize→PyObject，無雙重序列化
+- **settleCoin 處理**：查詢無 symbol 時自動添加 settleCoin=USDT（Bybit V5 要求）
+- **Python 整合**：strategy_ai_routes.py demo/* 4 端點 Rust-first + BybitDemoConnector fallback
+- **API venv 安裝**：openclaw_core 安裝到 FastAPI venv，服務重啟後 `source=rust_engine` 確認生效
+- **全盤驗證**：PM/CC 34/34 E2E PASS · FA 37/37 LIVE · PA 4/4 source=rust_engine · E2 0 FAIL · E4 4609 全綠 · E5 0 OPTIMIZE
+- **2 Flaky test 修復**：TestGetKlinesRoute 需 mock get_rust_reader（Rust-first 路徑返回真實數據）
+- **engine 修改**：order_manager.rs + position_manager.rs 各增 pub parse wrapper（供 PyO3 調用）
 
 ### RC-12 + Klines Snapshot + Rust-first 改造 + 全面審計（2026-04-04）
 

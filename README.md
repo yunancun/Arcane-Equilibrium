@@ -31,15 +31,16 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-04 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成 · TD-01~03 完成 · L3 审计归零)
+## 当前状态 (2026-04-05 · PYO3-BYBIT 完成 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,877 Py + 592 Rust + 38 Canary = 4,507 tests 全绿
-API 路由:     131+ 条（8 条已迁移 Rust-first + Python fallback）
-代码:         ~67,000 行（Python ~49k + Rust ~18k）
+测试:         3,839 Py + 770 Rust = 4,609 tests 全绿
+API 路由:     131+ 条（10 条 Rust-first + 4 条 PyO3 Demo + Python fallback）
+代码:         ~68,000 行（Python ~49k + Rust ~19k）
 策略:         5 类（Rust 唯一引擎，Python tick 处理已停用）
+PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
 Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
@@ -50,20 +51,21 @@ Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
 Bybit API:    ✅ BB+E5+PA 三轮审计通过 · 64 REST + 8 WS + 5 Private WS + 8 IPC
               字典手册: docs/references/2026-04-04--bybit_api_reference.md
+              PyO3 桥接: 39 Python 方法直调 Rust Bybit 模组（零 IPC 开销 · 3.7s 增量编译）
 L3 审计:      ✅ 9 角色全面审计归零（0 CRITICAL · 0 HIGH · 0 remaining）
 认证安全:     ✅ HttpOnly cookie + PG 127.0.0.1 only + IPC 600 perms
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 ```
 
-**完成度（2026-04-03 · Phase R-04 后校准）**
+**完成度（2026-04-05 · PYO3-BYBIT 后校准）**
 
 | 维度 | 已完成 | 总量 | 进度 |
 |------|--------|------|------|
-| 代码量 | ~65,000 行（Py 50k + Rs 15k） | ~73,000 行 | 88% |
+| 代码量 | ~68,000 行（Py 49k + Rs 19k） | ~73,000 行 | 93% |
 | 业务功能 | — | — | 95% |
-| 工时 | ~66d | ~189d（含融合方案 105d） | 35% |
-| 测试 | 4,429（Py 3839 + Rs 555 + Canary 35） | ~4,629 | 96% |
+| 工时 | ~68d | ~189d（含融合方案 105d） | 36% |
+| 测试 | 4,609（Py 3839 + Rs 770） | ~4,800 | 96% |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
@@ -77,7 +79,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
 | ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：治理 fail-closed · P0/P1/P2 风控 · 4,429 测试全绿 · 5 Agent · Rust tick <100μs · 67 项审计修正
+**亮点**：治理 fail-closed · P0/P1/P2 风控 · 4,609 测试全绿 · 5 Agent · Rust tick <100μs · PyO3 桥接 39 方法 · 67 项审计修正
 
 **开发路线图**
 

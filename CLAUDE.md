@@ -1,6 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-02
+# 最後更新：2026-04-05
 
 ---
 
@@ -47,15 +47,16 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,345 Py + 763 Rust + 38 Canary = 4,146 tests 全綠
+測試：3,839 Py + 770 Rust = 4,609 tests 全綠
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
 治理：GovernanceHub 4 SM，fail-closed · Rust GovernanceCore 級聯 all-or-nothing
 品類：linear + spot + inverse（option 未來）
 Agent：5/6 運行（Scout/Strategist/Guardian/Analyst/Executor，Conductor 編排待完善）
 GUI：11-Tab 專業控制台 + Kelly 資本配置卡片
 L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
-Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
-代碼完成度：~90%（~67,000 行 Py+Rs）· 業務功能：~95%
+Rust 引擎：openclaw_core 24 模組 + openclaw_engine 34 模組 + openclaw_types 10 types
+PyO3 橋接：openclaw_pyo3 暴露 39 個 Python 方法（BybitClient · 增量編譯 3.7s）
+代碼完成度：~90%（~68,000 行 Py+Rs）· 業務功能：~95%
 總工時進度：~35%（已完成 ~66d / 新總計 ~189d，含融合方案 105d 新增）
 關鍵路徑：Phase 0a/0b 已完成 → TD-01~03 文件拆分已完成 → Phase 1 開始 5/01
 ★★★★ Rust 遷移 — Go/No-Go 7/7 PASS + 全面清理完成（2026-04-04）：
@@ -64,6 +65,11 @@ Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_ty
   Rust 為唯一 tick 處理引擎 · 唯一 Bybit WS 連接 · 零重複系統
   10/13 策略讀路由 Rust-first（含 klines/indicators/signals/strategies）
   GovernanceHub 5 死方法標記 deprecated · 10 個 flaky test 修復
+★★★★ PYO3-BYBIT 完成（2026-04-05）：
+  PyO3 橋接 Bybit V5 API — Python 直接調用 Rust 模組（零 IPC 開銷）
+  39 方法：Account 8 + Order 6 + Position 4 + MarketData 8 + Instrument 6 + Util 7
+  GUI demo/* 4 端點 Rust-first（balance/positions/orders/fills · source=rust_engine）
+  E2 PASS（0 FAIL）· E4 4609 全綠 · E5 PASS（0 OPTIMIZE）· FA 37/37 LIVE
 ★★★★ 融合方案 v0.5（DB + ML/DL + 新聞 Agent · 20 週）：
   兩輪審計 + DB 專題 + 四角色聯合驗證 = 67 項修正
   存儲精簡 97%：5.6→0.17 GB/day · PG+TimescaleDB 確認 · 砍 PgBouncer
@@ -337,4 +343,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-04：4146 tests 全綠 · 131+ routes · 5 Agent · demo_only · **Go/No-Go 7/7 PASS** · Rust 為唯一 tick 引擎（唯一 Bybit WS） · RC-10/11/12 零重複系統 · 10/13 策略路由 Rust-first · Phase 0a/0b 完成 · 下一步：Phase 1 (5/01) → 讀 TODO.md。
+> 截至 2026-04-05：4609 tests 全綠 · 131+ routes · 5 Agent · demo_only · **Go/No-Go 7/7 PASS** · Rust 唯一 tick 引擎 · RC-10/11/12 零重複 · **PYO3-BYBIT 完成**（39 方法 · GUI demo/* Rust-first） · Phase 0a/0b 完成 · 下一步：Phase 1 (5/01) → 讀 TODO.md。
