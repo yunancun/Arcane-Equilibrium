@@ -137,6 +137,11 @@ impl IntentProcessor {
         // 簡化：只檢查往返成本是否合理
 
         // Gate 4: Execute fill (paper mode)
+        // NOTE: order_type and limit_price fields are currently IGNORED. All orders execute as
+        // immediate market fills. Limit order execution (hold until price reaches limit_price)
+        // will be implemented in Phase 2 when the Paper Engine gains an order book simulator.
+        // 注意：order_type 和 limit_price 欄位當前被忽略。所有訂單均以即時市價成交。
+        // 限價單執行（持有直到價格觸及 limit_price）將在 Phase 2 Paper Engine 獲得訂單簿模擬器後實現。
         let turnover = 100_000_000.0; // default assumption
         let fill = execution::execute_market_fill(
             paper_state.latest_price(&intent.symbol).unwrap_or(0.0),

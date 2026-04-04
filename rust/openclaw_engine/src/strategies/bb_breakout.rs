@@ -5,9 +5,12 @@ use super::Strategy;
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 
-const SQUEEZE_BW: f64 = 0.02;
-const EXPANSION_BW: f64 = 0.04;
-const VOLUME_THRESHOLD: f64 = 1.5;
+/// Default bandwidth threshold to detect squeeze (壓縮帶寬閾值默認)
+const DEFAULT_SQUEEZE_BW: f64 = 0.02;
+/// Default bandwidth threshold to detect expansion (擴張帶寬閾值默認)
+const DEFAULT_EXPANSION_BW: f64 = 0.04;
+/// Default volume ratio threshold for breakout confirmation (成交量確認閾值默認)
+const DEFAULT_VOLUME_THRESHOLD: f64 = 1.5;
 
 pub struct BbBreakout {
     active: bool,
@@ -20,6 +23,20 @@ pub struct BbBreakout {
     entry_price: Option<f64>,
     trailing_stop: Option<f64>,
     trailing_stop_atr_mult: f64,
+    // RC-03: Configurable thresholds for Agent adjustability
+    // RC-03：可配置閾值，供 Agent 動態調整
+    /// Bandwidth below this = squeeze detected / 帶寬低於此值 = 偵測到壓縮
+    pub squeeze_bw: f64,
+    /// Bandwidth above this = expansion confirmed / 帶寬高於此值 = 確認擴張
+    pub expansion_bw: f64,
+    /// Minimum volume ratio for breakout entry / 突破入場最低成交量倍率
+    pub volume_threshold: f64,
+    // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
+    prev_position: Option<bool>,
+    prev_was_in_squeeze: bool,
+    prev_entry_price: Option<f64>,
+    prev_trailing_stop: Option<f64>,
+    prev_last_trade_ms: u64,
 }
 
 impl BbBreakout {
@@ -28,6 +45,12 @@ impl BbBreakout {
             active: true, position: None, was_in_squeeze: false,
             last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1e9,
             entry_price: None, trailing_stop: None, trailing_stop_atr_mult: 2.0,
+            squeeze_bw: DEFAULT_SQUEEZE_BW,
+            expansion_bw: DEFAULT_EXPANSION_BW,
+            volume_threshold: DEFAULT_VOLUME_THRESHOLD,
+            prev_position: None, prev_was_in_squeeze: false,
+            prev_entry_price: None, prev_trailing_stop: None,
+            prev_last_trade_ms: 0,
         }
     }
 }
@@ -36,18 +59,36 @@ impl Strategy for BbBreakout {
     fn name(&self) -> &str { "bb_breakout" }
     fn is_active(&self) -> bool { self.active }
 
+    /// RC-04: Revert position, entry_price, trailing_stop, was_in_squeeze on rejection.
+    /// RC-04：拒絕時回滾 position、entry_price、trailing_stop、was_in_squeeze。
+    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
+        self.position = self.prev_position;
+        self.was_in_squeeze = self.prev_was_in_squeeze;
+        self.entry_price = self.prev_entry_price;
+        self.trailing_stop = self.prev_trailing_stop;
+        self.last_trade_ms = self.prev_last_trade_ms;
+    }
+
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
         let ind = match &ctx.indicators { Some(i) => i, None => return vec![] };
         let bb = match &ind.bollinger { Some(b) => b, None => return vec![] };
         let vol_ratio = ind.volume_ratio.unwrap_or(1.0);
 
-        if bb.bandwidth < SQUEEZE_BW { self.was_in_squeeze = true; }
+        // RC-04: Snapshot state before any mutation for rejection rollback.
+        // RC-04：在任何變更前快照狀態，供拒絕回滾使用。
+        self.prev_position = self.position;
+        self.prev_was_in_squeeze = self.was_in_squeeze;
+        self.prev_entry_price = self.entry_price;
+        self.prev_trailing_stop = self.trailing_stop;
+        self.prev_last_trade_ms = self.last_trade_ms;
+
+        if bb.bandwidth < self.squeeze_bw { self.was_in_squeeze = true; }
         if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms { return vec![]; }
 
         let mut intents = Vec::new();
         match self.position {
             None => {
-                if self.was_in_squeeze && bb.bandwidth > EXPANSION_BW && vol_ratio >= VOLUME_THRESHOLD {
+                if self.was_in_squeeze && bb.bandwidth > self.expansion_bw && vol_ratio >= self.volume_threshold {
                     let is_long = bb.percent_b > 1.0;
                     let is_short = bb.percent_b < 0.0;
 
@@ -132,7 +173,7 @@ impl Strategy for BbBreakout {
                 // Original exit: %B returns to mid-band or bandwidth squeezes again
                 // 原有出場：%B 回到中間帶或帶寬再次壓縮
                 if !should_exit {
-                    if (bb.percent_b >= 0.2 && bb.percent_b <= 0.8) || bb.bandwidth < SQUEEZE_BW {
+                    if (bb.percent_b >= 0.2 && bb.percent_b <= 0.8) || bb.bandwidth < self.squeeze_bw {
                         should_exit = true;
                         exit_confidence = 0.5;
                     }
@@ -285,5 +326,44 @@ mod tests {
         assert!(!i[0].is_long); // close long
         assert!((i[0].confidence - 0.6).abs() < 1e-9);
         assert!(s.position.is_none());
+    }
+
+    #[test]
+    fn test_configurable_volume_threshold() {
+        // RC-03: Custom volume threshold — higher threshold blocks low-volume breakouts
+        // RC-03：自訂成交量閾值 — 較高閾值阻擋低量突破
+        let mut s = BbBreakout::new();
+        s.volume_threshold = 3.0; // require 3x volume instead of default 1.5x
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
+        // vol=2.0 passes default (1.5) but fails custom (3.0)
+        // vol=2.0 通過默認閾值(1.5)但不通過自訂閾值(3.0)
+        let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
+        assert!(i.is_empty(), "volume 2.0 should not pass threshold 3.0");
+
+        // vol=3.5 passes custom threshold / vol=3.5 通過自訂閾值
+        let i = s.on_tick(&ctx(0.05, 1.1, 3.5, 700_000));
+        assert_eq!(i.len(), 1);
+        assert!(i[0].is_long);
+    }
+
+    #[test]
+    fn test_configurable_squeeze_expansion_bw() {
+        // RC-03: Custom squeeze/expansion bandwidth thresholds
+        // RC-03：自訂壓縮/擴張帶寬閾值
+        let mut s = BbBreakout::new();
+        s.squeeze_bw = 0.03;   // wider squeeze detection / 更寬的壓縮偵測
+        s.expansion_bw = 0.06; // require stronger expansion / 要求更強擴張
+
+        // bw=0.025 triggers squeeze with custom threshold (< 0.03)
+        s.on_tick(&ctx(0.025, 0.5, 1.0, 0));
+        assert!(s.was_in_squeeze);
+
+        // bw=0.05 is expansion for default (> 0.04) but NOT for custom (< 0.06)
+        let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
+        assert!(i.is_empty(), "bw 0.05 should not pass expansion_bw 0.06");
+
+        // bw=0.07 passes custom expansion threshold / 通過自訂擴張閾值
+        let i = s.on_tick(&ctx(0.07, 1.1, 2.0, 700_000));
+        assert_eq!(i.len(), 1);
     }
 }

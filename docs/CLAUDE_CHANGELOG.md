@@ -3,6 +3,21 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### R-CUT Phase 1 策略補齊 RC-01~RC-09（2026-04-04）
+
+- **RC-01** MA Crossover Hurst regime filter：mean_reverting/random_walk 市場阻止入場，cold-start 安全
+- **RC-02** MA Crossover multi-TF：EMA of sma_50 (alpha=0.01) 作為 4h 趨勢代理，方向不符阻止入場
+- **RC-03** BB Breakout 參數可配置化：squeeze_bw/expansion_bw/volume_threshold 從 const 改為 pub 欄位
+- **RC-04** 所有策略 on_rejection() 回滾：prev_* 快照 + 恢復，Strategy trait 新增 default no-op
+- **RC-05** 所有策略 on_fill() 回調：trait default no-op，tick_pipeline 接線完成
+- **RC-06** Grid Trading geometric spacing + health check + auto-rebalance：GridSpacingMode enum + GridHealth + 200-tick 健康檢查
+- **RC-07** BB Reversion limit order 真實實現：use_limit + limit_offset_bps，策略端 REAL（execution 層 Phase 2）
+- **RC-08** StrategyParams trait + ParamRange 定義：Phase 3a stub，param_ranges()/validate()
+- **RC-09** E2 APPROVE + E4 4507 全綠 + QA Audit CONDITIONAL PASS（0 FAKE features）
+- Orchestrator 新增 strategies_mut()，tick_pipeline 改為逐策略處理含 rejection/fill 回調
+- Canary watchdog test fix：grace_period=0 修復 test_missing_file_triggers_crash
+- 測試基準線：Python 3877 / Rust 592 / Canary 38 = **4507** (+62)
+
 ### Rust Cutover Decision + Comprehensive Indicator Alignment（2026-04-04 · commits 2a253d9, 69b03aa, 5ed077b）
 
 - **Operator 決策：放棄修 Python V2，全力 Rust** — QA 嚴格審計 Python V2 真實成熟度 62/100，6 項功能 FAKE/DEAD/UNREACHABLE

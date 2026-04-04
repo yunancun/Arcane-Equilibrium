@@ -49,6 +49,12 @@ impl Orchestrator {
             .map(|s| s.name())
             .collect()
     }
+
+    /// Mutable access to strategies for per-strategy rejection/fill callbacks (RC-04/RC-05).
+    /// 策略的可變訪問，供逐策略拒絕/成交回調使用。
+    pub fn strategies_mut(&mut self) -> &mut [Box<dyn Strategy>] {
+        &mut self.strategies
+    }
 }
 
 impl Default for Orchestrator {

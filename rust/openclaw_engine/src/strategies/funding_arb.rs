@@ -26,6 +26,9 @@ pub struct FundingArb {
     last_trade_ms: u64,
     cooldown_ms: u64,
     default_qty: f64,
+    // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
+    prev_position: Option<FundingPosition>,
+    prev_last_trade_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +44,7 @@ impl FundingArb {
         Self {
             active: true, position: None, last_trade_ms: 0,
             cooldown_ms: 3_600_000, default_qty: 1e9, // 1h cooldown
+            prev_position: None, prev_last_trade_ms: 0,
         }
     }
 
@@ -76,7 +80,18 @@ impl Strategy for FundingArb {
     fn name(&self) -> &str { "funding_arb" }
     fn is_active(&self) -> bool { self.active }
 
+    /// RC-04: Revert position and last_trade_ms on rejection.
+    /// RC-04：拒絕時回滾 position 和 last_trade_ms。
+    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
+        self.position = self.prev_position.take();
+        self.last_trade_ms = self.prev_last_trade_ms;
+    }
+
     fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
+        // TODO(R-06): When real funding rate logic is wired, add prev_* snapshot
+        // before mutation here (same pattern as other strategies).
+        // TODO(R-06)：接入真實資金費率邏輯時，在此處突變前添加 prev_* 快照。
+
         // Funding arb uses external funding rate data, not indicators
         // For now, check if any signal contains funding info
         // In production, funding rate comes via WS or REST polling

@@ -432,7 +432,9 @@ class TestWatchdogLoop(unittest.TestCase):
 
     def test_missing_file_triggers_crash(self):
         """No snapshot file → crash detected / 無快照文件 → 檢測到崩潰"""
-        state = run_watchdog(self._tmpdir.name, stale_threshold=5, poll_interval=0.01, max_iterations=3)
+        # grace_period=0: disable grace period so missing file is immediately detected as crash
+        # grace_period=0：禁用寬限期，使缺失文件立即被檢測為崩潰
+        state = run_watchdog(self._tmpdir.name, stale_threshold=5, poll_interval=0.01, max_iterations=3, grace_period=0)
         self.assertFalse(state.engine_alive)
         self.assertEqual(state.total_crashes, 1)
 

@@ -122,7 +122,8 @@ impl TickPipeline {
             vec![]
         };
 
-        // Step 4: Strategy dispatch
+        // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
+        // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
         let ctx = TickContext {
             symbol: event.symbol.clone(),
             price: event.last_price,
@@ -132,23 +133,34 @@ impl TickPipeline {
             h0_allowed: true, // simplified — full H0 gate check in intent_processor
         };
 
-        let intents = self.orchestrator.dispatch_tick(&ctx);
-
-        // Step 5: Process intents
-        if !intents.is_empty() && self.governance.is_authorized() {
-            for intent in &intents {
+        // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.
+        // If a strategy ever emits >1, partial rejection + partial fill could leave inconsistent state.
+        // All current strategies satisfy this constraint. Revisit if multi-intent strategies are added.
+        // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
+        let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
+        for strategy in self.orchestrator.strategies_mut() {
+            if !strategy.is_active() { continue; }
+            let strategy_intents = strategy.on_tick(&ctx);
+            for intent in &strategy_intents {
                 let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
                 if result.submitted {
                     self.stats.total_intents += 1;
-                    if let Some(fill) = result.fill {
+                    // RC-05: Notify strategy of fill / 通知策略成交
+                    if let Some(ref fill) = result.fill {
+                        strategy.on_fill(intent, fill);
                         self.paper_state.apply_fill(
                             &intent.symbol, intent.is_long, fill.fill_qty,
                             fill.fill_price, fill.fee, event.ts_ms,
                         );
                         self.stats.total_fills += 1;
                     }
+                } else if let Some(ref reason) = result.rejected_reason {
+                    // RC-04: Notify strategy of rejection for state rollback
+                    // RC-04：通知策略拒絕以回滾狀態
+                    strategy.on_rejection(intent, reason);
                 }
             }
+            intents.extend(strategy_intents);
         }
 
         // Step 6: Check stops
