@@ -12,7 +12,7 @@ use openclaw_core::{
 };
 use openclaw_types::PriceEvent;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -57,11 +57,11 @@ pub struct TickPipeline {
     /// Per-symbol latest indicators for IPC / 每交易對最新指標供 IPC 使用
     latest_indicators: HashMap<String, IndicatorSnapshot>,
     /// Recent signals ring buffer (max 100) / 最近信號環形緩衝（最大 100）
-    recent_signals: Vec<Signal>,
+    recent_signals: VecDeque<Signal>,
     /// Recent intents ring buffer (max 50) / 最近意圖環形緩衝（最大 50）
-    recent_intents: Vec<TimestampedIntent>,
+    recent_intents: VecDeque<TimestampedIntent>,
     /// Recent fills ring buffer (max 50) / 最近成交環形緩衝（最大 50）
-    recent_fills: Vec<TimestampedFill>,
+    recent_fills: VecDeque<TimestampedFill>,
     /// Enable canary mode — on_tick returns per-tick CanaryRecord (R07-2).
     /// 啟用灰度模式 — on_tick 返回每 tick 的 CanaryRecord。
     pub canary_mode: bool,
@@ -79,9 +79,9 @@ impl TickPipeline {
             stats: TickStats::default(),
             latest_prices: HashMap::new(),
             latest_indicators: HashMap::new(),
-            recent_signals: Vec::new(),
-            recent_intents: Vec::new(),
-            recent_fills: Vec::new(),
+            recent_signals: VecDeque::new(),
+            recent_intents: VecDeque::new(),
+            recent_fills: VecDeque::new(),
             canary_mode: false,
         }
     }
@@ -143,8 +143,8 @@ impl TickPipeline {
         // Store recent signals for IPC snapshot (ring buffer, max 100)
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
         for sig in &signals {
-            self.recent_signals.push(sig.clone());
-            if self.recent_signals.len() > 100 { self.recent_signals.remove(0); }
+            self.recent_signals.push_back(sig.clone());
+            if self.recent_signals.len() > 100 { self.recent_signals.pop_front(); }
         }
 
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
@@ -171,12 +171,12 @@ impl TickPipeline {
                 if result.submitted {
                     self.stats.total_intents += 1;
                     // Store submitted intent for IPC / 存儲已提交意圖供 IPC 使用
-                    self.recent_intents.push(TimestampedIntent {
+                    self.recent_intents.push_back(TimestampedIntent {
                         timestamp_ms: event.ts_ms,
                         intent: intent.clone(),
                         result: "submitted".into(),
                     });
-                    if self.recent_intents.len() > 50 { self.recent_intents.remove(0); }
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                     // RC-05: Notify strategy of fill / 通知策略成交
                     if let Some(ref fill) = result.fill {
                         strategy.on_fill(intent, fill);
@@ -186,7 +186,7 @@ impl TickPipeline {
                         );
                         self.stats.total_fills += 1;
                         // Store fill for IPC / 存儲成交記錄供 IPC 使用
-                        self.recent_fills.push(TimestampedFill {
+                        self.recent_fills.push_back(TimestampedFill {
                             timestamp_ms: event.ts_ms,
                             symbol: intent.symbol.clone(),
                             is_long: intent.is_long,
@@ -195,19 +195,19 @@ impl TickPipeline {
                             fee: fill.fee,
                             strategy: intent.strategy.clone(),
                         });
-                        if self.recent_fills.len() > 50 { self.recent_fills.remove(0); }
+                        if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
                     }
                 } else if let Some(ref reason) = result.rejected_reason {
                     // RC-04: Notify strategy of rejection for state rollback
                     // RC-04：通知策略拒絕以回滾狀態
                     strategy.on_rejection(intent, reason);
                     // Store rejected intent for IPC / 存儲被拒絕意圖供 IPC 使用
-                    self.recent_intents.push(TimestampedIntent {
+                    self.recent_intents.push_back(TimestampedIntent {
                         timestamp_ms: event.ts_ms,
                         intent: intent.clone(),
                         result: format!("rejected:{}", reason),
                     });
-                    if self.recent_intents.len() > 50 { self.recent_intents.remove(0); }
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                 }
             }
             intents.extend(strategy_intents);
@@ -290,10 +290,10 @@ impl TickPipeline {
             stats: self.stats.clone(),
             source: "rust_engine".into(),
             indicators: self.latest_indicators.clone(),
-            signals: self.recent_signals.clone(),
+            signals: self.recent_signals.iter().cloned().collect(),
             strategies,
-            recent_intents: self.recent_intents.clone(),
-            recent_fills: self.recent_fills.clone(),
+            recent_intents: self.recent_intents.iter().cloned().collect(),
+            recent_fills: self.recent_fills.iter().cloned().collect(),
         }
     }
 

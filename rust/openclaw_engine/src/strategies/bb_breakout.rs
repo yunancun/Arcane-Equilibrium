@@ -22,7 +22,9 @@ pub struct BbBreakout {
     // V2: ATR trailing stop fields / ATR 追蹤止損欄位
     entry_price: Option<f64>,
     trailing_stop: Option<f64>,
-    trailing_stop_atr_mult: f64,
+    /// ATR multiplier for trailing stop distance. Agent-adjustable (Phase 3a).
+    /// ATR 追蹤止損距離乘數。Agent 可調（Phase 3a）。
+    pub trailing_stop_atr_mult: f64,
     // RC-03: Configurable thresholds for Agent adjustability
     // RC-03：可配置閾值，供 Agent 動態調整
     /// Bandwidth below this = squeeze detected / 帶寬低於此值 = 偵測到壓縮

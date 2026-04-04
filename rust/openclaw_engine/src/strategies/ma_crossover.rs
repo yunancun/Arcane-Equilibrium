@@ -61,10 +61,12 @@ impl MaCrossover {
         }
     }
 
-    /// RC-02: Update higher-TF SMA and trend using EMA of sma_50 (alpha=0.01).
-    /// RC-02: 使用 sma_50 的 EMA（alpha=0.01）更新較高時間框架 SMA 及趨勢。
+    /// RC-02: Update higher-TF SMA and trend using EMA of sma_50.
+    /// Alpha=0.003 gives half-life ~231 min ≈ 4h on 1m ticks (ln2/0.003=231).
+    /// RC-02: 使用 sma_50 的 EMA 更新較高時間框架 SMA 及趨勢。
+    /// Alpha=0.003 在 1 分鐘 tick 上半衰期 ~231 分鐘 ≈ 4 小時。
     fn update_higher_tf(&mut self, sma_50: f64) {
-        const ALPHA: f64 = 0.01;
+        const ALPHA: f64 = 0.003; // half-life ≈ 231 min ≈ 4h at 1m ticks
         let new_val = match self.higher_tf_sma {
             // First data point — initialize directly, no trend yet.
             // 第一個數據點 — 直接初始化，尚無趨勢。
