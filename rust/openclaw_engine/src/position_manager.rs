@@ -296,6 +296,194 @@ impl PositionManager {
     }
 
     // -----------------------------------------------------------------------
+    // Switch margin mode / 切換保證金模式
+    // -----------------------------------------------------------------------
+
+    /// Switch between isolated and cross margin for a symbol.
+    /// 切換指定交易對的逐倉/全倉保證金模式。
+    ///
+    /// POST /v5/position/switch-isolated
+    ///
+    /// trade_mode: 0 = cross margin, 1 = isolated margin
+    /// trade_mode: 0 = 全倉, 1 = 逐倉
+    pub async fn switch_isolated(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        trade_mode: i32,
+        buy_leverage: f64,
+        sell_leverage: f64,
+    ) -> BybitResult<()> {
+        let body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "tradeMode": trade_mode,
+            "buyLeverage": format!("{}", buy_leverage),
+            "sellLeverage": format!("{}", sell_leverage),
+        });
+
+        info!(
+            symbol = symbol,
+            trade_mode = trade_mode,
+            "switching margin mode / 切換保證金模式"
+        );
+
+        self.client
+            .post_checked("/v5/position/switch-isolated", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Set TP/SL mode / 設置止盈止損模式
+    // -----------------------------------------------------------------------
+
+    /// Set TP/SL mode: full position or partial.
+    /// 設置止盈止損模式：全倉或部分。
+    ///
+    /// POST /v5/position/set-tpsl-mode
+    ///
+    /// tp_sl_mode: "Full" = full position, "Partial" = partial position
+    /// tp_sl_mode: "Full" = 全倉, "Partial" = 部分倉位
+    pub async fn set_tpsl_mode(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        tp_sl_mode: &str,
+    ) -> BybitResult<()> {
+        let body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "tpSlMode": tp_sl_mode,
+        });
+
+        info!(
+            symbol = symbol,
+            mode = tp_sl_mode,
+            "setting TP/SL mode / 設置止盈止損模式"
+        );
+
+        self.client
+            .post_checked("/v5/position/set-tpsl-mode", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Set risk limit / 設置風險限額
+    // -----------------------------------------------------------------------
+
+    /// Set risk limit tier for a symbol.
+    /// 設置交易對的風險限額層級。
+    ///
+    /// POST /v5/position/set-risk-limit
+    pub async fn set_risk_limit(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        risk_id: u32,
+        position_idx: Option<i32>,
+    ) -> BybitResult<()> {
+        let mut body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "riskId": risk_id,
+        });
+
+        if let Some(idx) = position_idx {
+            body["positionIdx"] = serde_json::Value::Number(serde_json::Number::from(idx));
+        }
+
+        info!(
+            symbol = symbol,
+            risk_id = risk_id,
+            "setting risk limit / 設置風險限額"
+        );
+
+        self.client
+            .post_checked("/v5/position/set-risk-limit", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Auto-add margin / 自動追加保證金
+    // -----------------------------------------------------------------------
+
+    /// Toggle auto-add margin for a position.
+    /// 切換持倉自動追加保證金。
+    ///
+    /// POST /v5/position/set-auto-add-margin
+    ///
+    /// auto_add_margin: 0 = off, 1 = on
+    /// auto_add_margin: 0 = 關閉, 1 = 開啟
+    pub async fn set_auto_add_margin(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        auto_add_margin: i32,
+        position_idx: Option<i32>,
+    ) -> BybitResult<()> {
+        let mut body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "autoAddMargin": auto_add_margin,
+        });
+
+        if let Some(idx) = position_idx {
+            body["positionIdx"] = serde_json::Value::Number(serde_json::Number::from(idx));
+        }
+
+        info!(
+            symbol = symbol,
+            auto_add = auto_add_margin,
+            "setting auto-add margin / 設置自動追加保證金"
+        );
+
+        self.client
+            .post_checked("/v5/position/set-auto-add-margin", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Add margin / 手動追加保證金
+    // -----------------------------------------------------------------------
+
+    /// Manually add margin to a position.
+    /// 手動追加保證金到持倉。
+    ///
+    /// POST /v5/position/add-margin
+    pub async fn add_margin(
+        &self,
+        category: OrderCategory,
+        symbol: &str,
+        margin: f64,
+        position_idx: Option<i32>,
+    ) -> BybitResult<()> {
+        let mut body = serde_json::json!({
+            "category": category.as_str(),
+            "symbol": symbol,
+            "margin": format!("{}", margin),
+        });
+
+        if let Some(idx) = position_idx {
+            body["positionIdx"] = serde_json::Value::Number(serde_json::Number::from(idx));
+        }
+
+        info!(
+            symbol = symbol,
+            margin = margin,
+            "adding margin / 追加保證金"
+        );
+
+        self.client
+            .post_checked("/v5/position/add-margin", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Closed PnL / 已平倉盈虧
     // -----------------------------------------------------------------------
 

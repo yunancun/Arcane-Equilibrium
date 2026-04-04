@@ -87,6 +87,48 @@ pub struct FeeRate {
 }
 
 // ---------------------------------------------------------------------------
+// AccountInfo — account configuration / 帳戶配置
+// ---------------------------------------------------------------------------
+
+/// Account configuration information.
+/// 帳戶配置信息。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountInfo {
+    /// Margin mode: "REGULAR_MARGIN", "PORTFOLIO_MARGIN"
+    /// 保證金模式
+    pub margin_mode: String,
+    /// Updated timestamp / 更新時間戳
+    pub updated_time: String,
+    /// Unified margin status: 1=Regular, 2=Unified(trade), 3=Unified(fund), 4=UTA Pro
+    /// 統一保證金狀態
+    pub unified_margin_status: i32,
+    /// Whether SMP (Self-Match Prevention) group is set / 是否設置了 SMP 群組
+    pub smp_group: i32,
+    /// Whether hedging mode is enabled / 是否啟用對沖模式
+    pub is_master_trader: bool,
+}
+
+// ---------------------------------------------------------------------------
+// BorrowRecord — margin borrow history / 保證金借幣歷史
+// ---------------------------------------------------------------------------
+
+/// Margin borrow history record.
+/// 保證金借幣歷史記錄。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BorrowRecord {
+    /// Currency / 幣種
+    pub currency: String,
+    /// Borrow amount / 借幣數量
+    pub borrow_amount: f64,
+    /// Cost (interest) amount / 利息金額
+    pub cost_amount: f64,
+    /// Borrow timestamp / 借幣時間戳
+    pub created_time: String,
+    /// Borrow type / 借幣類型
+    pub borrow_type: String,
+}
+
+// ---------------------------------------------------------------------------
 // Default fee rates (safe fallback) / 預設手續費率（安全回退）
 // ---------------------------------------------------------------------------
 
@@ -278,6 +320,104 @@ impl AccountManager {
             .get(symbol)
             .map_or(DEFAULT_MAKER_FEE, |r| r.maker_fee_rate)
     }
+
+    // -----------------------------------------------------------------------
+    // Account info / 帳戶信息
+    // -----------------------------------------------------------------------
+
+    /// Get account info (margin mode, etc.).
+    /// 獲取帳戶信息（保證金模式等）。
+    ///
+    /// GET /v5/account/info
+    pub async fn get_account_info(&self, client: &BybitRestClient) -> BybitResult<AccountInfo> {
+        let resp = client.get_checked("/v5/account/info", &[]).await?;
+        parse_account_info(&resp.result)
+    }
+
+    // -----------------------------------------------------------------------
+    // Hedge mode / 對沖模式
+    // -----------------------------------------------------------------------
+
+    /// Enable or disable hedge mode for the account.
+    /// 啟用或禁用帳戶的對沖模式。
+    ///
+    /// POST /v5/account/set-hedging-mode
+    ///
+    /// hedging: "ON" = enable, "OFF" = disable
+    /// hedging: "ON" = 啟用, "OFF" = 禁用
+    pub async fn set_hedging_mode(
+        &self,
+        client: &BybitRestClient,
+        hedging: &str,
+    ) -> BybitResult<()> {
+        let body = serde_json::json!({
+            "setHedgingMode": hedging,
+        });
+
+        info!(
+            hedging = hedging,
+            "setting hedging mode / 設置對沖模式"
+        );
+
+        client
+            .post_checked("/v5/account/set-hedging-mode", &body)
+            .await?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Borrow history / 借幣歷史
+    // -----------------------------------------------------------------------
+
+    /// Get margin borrow history.
+    /// 獲取保證金借幣歷史。
+    ///
+    /// GET /v5/account/borrow-history
+    pub async fn get_borrow_history(
+        &self,
+        client: &BybitRestClient,
+        currency: Option<&str>,
+        limit: Option<u32>,
+    ) -> BybitResult<Vec<BorrowRecord>> {
+        let limit_str = limit.unwrap_or(50).to_string();
+        let mut params: Vec<(&str, &str)> = vec![("limit", &limit_str)];
+        if let Some(c) = currency {
+            params.push(("currency", c));
+        }
+
+        let resp = client
+            .get_checked("/v5/account/borrow-history", &params)
+            .await?;
+        parse_borrow_history(&resp.result)
+    }
+
+    // -----------------------------------------------------------------------
+    // Quick repayment / 快速還款
+    // -----------------------------------------------------------------------
+
+    /// Quick repay margin borrow.
+    /// 快速還款保證金借幣。
+    ///
+    /// POST /v5/account/quick-repayment
+    pub async fn quick_repayment(
+        &self,
+        client: &BybitRestClient,
+        coin: &str,
+    ) -> BybitResult<()> {
+        let body = serde_json::json!({
+            "coin": coin,
+        });
+
+        info!(
+            coin = coin,
+            "quick repaying margin / 快速還款保證金"
+        );
+
+        client
+            .post_checked("/v5/account/quick-repayment", &body)
+            .await?;
+        Ok(())
+    }
 }
 
 impl Default for AccountManager {
@@ -387,6 +527,57 @@ fn parse_f64(obj: &serde_json::Value, field: &str) -> f64 {
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0)
+}
+
+/// Parse a string field from JSON / 從 JSON 解析字串欄位
+fn parse_str(obj: &serde_json::Value, field: &str) -> String {
+    obj.get(field)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Parse AccountInfo from Bybit response.
+/// 從 Bybit 回應中解析帳戶信息。
+fn parse_account_info(result: &serde_json::Value) -> BybitResult<AccountInfo> {
+    Ok(AccountInfo {
+        margin_mode: parse_str(result, "marginMode"),
+        updated_time: parse_str(result, "updatedTime"),
+        unified_margin_status: result
+            .get("unifiedMarginStatus")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32,
+        smp_group: result
+            .get("smpGroup")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32,
+        is_master_trader: result
+            .get("isMasterTrader")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    })
+}
+
+/// Parse borrow history from Bybit response.
+/// 從 Bybit 回應中解析借幣歷史。
+fn parse_borrow_history(result: &serde_json::Value) -> BybitResult<Vec<BorrowRecord>> {
+    let list = result
+        .get("list")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut records = Vec::with_capacity(list.len());
+    for item in &list {
+        records.push(BorrowRecord {
+            currency: parse_str(item, "currency"),
+            borrow_amount: parse_f64(item, "borrowAmount"),
+            cost_amount: parse_f64(item, "costAmount"),
+            created_time: parse_str(item, "createdTime"),
+            borrow_type: parse_str(item, "borrowType"),
+        });
+    }
+    Ok(records)
 }
 
 // ---------------------------------------------------------------------------
@@ -543,5 +734,101 @@ mod tests {
         assert!((parse_f64(&obj, "b") - 0.0).abs() < 1e-10); // unparseable
         assert!((parse_f64(&obj, "c") - 0.0).abs() < 1e-10); // not a string
         assert!((parse_f64(&obj, "missing") - 0.0).abs() < 1e-10);
+    }
+
+    // -- AccountInfo tests / 帳戶信息測試 --
+
+    #[test]
+    fn test_parse_account_info() {
+        let result = serde_json::json!({
+            "marginMode": "REGULAR_MARGIN",
+            "updatedTime": "1700000000000",
+            "unifiedMarginStatus": 3,
+            "smpGroup": 0,
+            "isMasterTrader": false
+        });
+        let info = parse_account_info(&result).unwrap();
+        assert_eq!(info.margin_mode, "REGULAR_MARGIN");
+        assert_eq!(info.updated_time, "1700000000000");
+        assert_eq!(info.unified_margin_status, 3);
+        assert_eq!(info.smp_group, 0);
+        assert!(!info.is_master_trader);
+    }
+
+    #[test]
+    fn test_parse_account_info_defaults() {
+        let result = serde_json::json!({});
+        let info = parse_account_info(&result).unwrap();
+        assert_eq!(info.margin_mode, "");
+        assert_eq!(info.unified_margin_status, 0);
+        assert!(!info.is_master_trader);
+    }
+
+    #[test]
+    fn test_account_info_serde() {
+        let info = AccountInfo {
+            margin_mode: "PORTFOLIO_MARGIN".to_string(),
+            updated_time: "1700000000000".to_string(),
+            unified_margin_status: 4,
+            smp_group: 1,
+            is_master_trader: true,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deser: AccountInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.margin_mode, "PORTFOLIO_MARGIN");
+        assert_eq!(deser.unified_margin_status, 4);
+        assert!(deser.is_master_trader);
+    }
+
+    // -- BorrowRecord tests / 借幣記錄測試 --
+
+    #[test]
+    fn test_parse_borrow_history() {
+        let result = serde_json::json!({
+            "list": [
+                {
+                    "currency": "USDT",
+                    "borrowAmount": "5000.50",
+                    "costAmount": "12.35",
+                    "createdTime": "1700000000000",
+                    "borrowType": "auto"
+                },
+                {
+                    "currency": "BTC",
+                    "borrowAmount": "0.5",
+                    "costAmount": "0.0001",
+                    "createdTime": "1700000001000",
+                    "borrowType": "manual"
+                }
+            ]
+        });
+        let records = parse_borrow_history(&result).unwrap();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].currency, "USDT");
+        assert!((records[0].borrow_amount - 5000.50).abs() < 1e-10);
+        assert!((records[0].cost_amount - 12.35).abs() < 1e-10);
+        assert_eq!(records[1].currency, "BTC");
+    }
+
+    #[test]
+    fn test_parse_borrow_history_empty() {
+        let result = serde_json::json!({"list": []});
+        let records = parse_borrow_history(&result).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn test_borrow_record_serde() {
+        let record = BorrowRecord {
+            currency: "USDT".to_string(),
+            borrow_amount: 5000.0,
+            cost_amount: 12.0,
+            created_time: "1700000000000".to_string(),
+            borrow_type: "auto".to_string(),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let deser: BorrowRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.currency, "USDT");
+        assert!((deser.borrow_amount - 5000.0).abs() < 1e-10);
     }
 }

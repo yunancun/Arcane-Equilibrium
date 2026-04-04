@@ -192,6 +192,18 @@ pub struct VolatilityRecord {
     pub time: String,
 }
 
+/// Futures delivery price record.
+/// 期貨交割價格記錄。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryPrice {
+    /// Symbol / 交易對
+    pub symbol: String,
+    /// Delivery price / 交割價格
+    pub delivery_price: f64,
+    /// Delivery timestamp / 交割時間戳
+    pub delivery_time: String,
+}
+
 /// Price limit (max buy / min sell) for a symbol.
 /// 交易對價格限制（最高買入 / 最低賣出）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -713,6 +725,90 @@ impl MarketDataClient {
     }
 
     // -----------------------------------------------------------------------
+    // Delivery price / 交割價格
+    // -----------------------------------------------------------------------
+
+    /// Get futures delivery prices — for settlement analysis.
+    /// 獲取期貨交割價格 — 用於結算分析。
+    ///
+    /// GET /v5/market/delivery-price
+    pub async fn get_delivery_price(
+        &self,
+        category: &str,
+        symbol: Option<&str>,
+        limit: Option<u32>,
+    ) -> BybitResult<Vec<DeliveryPrice>> {
+        debug!(category = category, "fetching delivery prices / 獲取交割價格");
+        let mut params: Vec<(&str, String)> = vec![("category", category.to_string())];
+        if let Some(s) = symbol {
+            params.push(("symbol", s.to_string()));
+        }
+        if let Some(l) = limit {
+            params.push(("limit", l.to_string()));
+        }
+        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let resp = self
+            .client
+            .get_checked("/v5/market/delivery-price", &param_refs)
+            .await?;
+        let list = resp
+            .result
+            .get("list")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut records = Vec::with_capacity(list.len());
+        for item in &list {
+            records.push(DeliveryPrice {
+                symbol: parse_str(item, "symbol"),
+                delivery_price: parse_str_f64(item, "deliveryPrice"),
+                delivery_time: parse_str(item, "deliveryTime"),
+            });
+        }
+        Ok(records)
+    }
+
+    // -----------------------------------------------------------------------
+    // Index price kline / 指數價格 K 線
+    // -----------------------------------------------------------------------
+
+    /// Get index price klines — index tracking for basis analysis.
+    /// 獲取指數價格 K 線 — 用於基差分析的指數追蹤。
+    ///
+    /// GET /v5/market/index-price-kline
+    pub async fn get_index_price_klines(
+        &self,
+        category: &str,
+        symbol: &str,
+        interval: &str,
+        start: Option<u64>,
+        end: Option<u64>,
+        limit: Option<u32>,
+    ) -> BybitResult<Vec<KlineBar>> {
+        debug!(symbol = symbol, interval = interval, "fetching index price klines / 獲取指數價格 K 線");
+        let mut params: Vec<(&str, String)> = vec![
+            ("category", category.to_string()),
+            ("symbol", symbol.to_string()),
+            ("interval", interval.to_string()),
+        ];
+        if let Some(s) = start {
+            params.push(("start", s.to_string()));
+        }
+        if let Some(e) = end {
+            params.push(("end", e.to_string()));
+        }
+        if let Some(l) = limit {
+            params.push(("limit", l.to_string()));
+        }
+        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let resp = self
+            .client
+            .get_checked("/v5/market/index-price-kline", &param_refs)
+            .await?;
+        parse_kline_list(&resp.result)
+    }
+
+    // -----------------------------------------------------------------------
     // Price limit / 價格限制
     // -----------------------------------------------------------------------
 
@@ -1202,5 +1298,55 @@ mod tests {
         // Missing fields default to 0.0 / 缺失欄位默認為 0.0
         assert!((tickers[0].bid1_price - 0.0).abs() < 1e-10);
         assert!((tickers[0].funding_rate - 0.0).abs() < 1e-10);
+    }
+
+    // -- DeliveryPrice tests / 交割價格測試 --
+
+    /// Test DeliveryPrice struct serde round-trip.
+    /// 測試 DeliveryPrice 結構體序列化往返。
+    #[test]
+    fn test_delivery_price_serde() {
+        let dp = DeliveryPrice {
+            symbol: "BTCUSDT-20261231".to_string(),
+            delivery_price: 70000.0,
+            delivery_time: "1735689600000".to_string(),
+        };
+        let json = serde_json::to_string(&dp).unwrap();
+        let deser: DeliveryPrice = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.symbol, "BTCUSDT-20261231");
+        assert!((deser.delivery_price - 70000.0).abs() < 1e-10);
+    }
+
+    /// Test parsing delivery price list.
+    /// 測試解析交割價格列表。
+    #[test]
+    fn test_parse_delivery_price_list() {
+        let result = serde_json::json!({
+            "list": [
+                {
+                    "symbol": "BTCUSDT-20261231",
+                    "deliveryPrice": "70000.50",
+                    "deliveryTime": "1735689600000"
+                },
+                {
+                    "symbol": "ETHUSDT-20261231",
+                    "deliveryPrice": "4500.25",
+                    "deliveryTime": "1735689600000"
+                }
+            ]
+        });
+        let list = result
+            .get("list")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(list.len(), 2);
+        let dp0 = DeliveryPrice {
+            symbol: parse_str(&list[0], "symbol"),
+            delivery_price: parse_str_f64(&list[0], "deliveryPrice"),
+            delivery_time: parse_str(&list[0], "deliveryTime"),
+        };
+        assert_eq!(dp0.symbol, "BTCUSDT-20261231");
+        assert!((dp0.delivery_price - 70000.50).abs() < 1e-10);
     }
 }
