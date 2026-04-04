@@ -11,7 +11,7 @@
 
 ```bash
 # 1. 引擎是否存活？
-python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 60 --status
+python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status
 
 # 2. canary 記錄數量
 wc -l /tmp/openclaw/engine_results.jsonl
@@ -192,12 +192,13 @@ SPEC 審查記錄：
 
 ## ██ 技術整合待辦
 
-### [ ] PYO3-1：ContextDistiller (PyO3) 接入 Python
+### [ ] PYO3-1：ContextDistiller (PyO3) 接入 Python — **推遲到 Phase 2**
 - `rust/openclaw_pyo3/src/context_distiller.rs` 已實現但從未被 Python import
 - 功能：AI 上下文壓縮（~520 tokens），用於 L1/L2 AI 推理前的數據精煉
 - 接入點：`strategist_agent.py` 在構建 AI prompt 時調用
 - 前置：確認 PyO3 wheel 能在當前環境 import（`import openclaw_pyo3`）
 - 優先級：低（非交易熱路徑，AI 推理前的優化）
+- **推遲原因（2026-04-04）：** Rust distill() 消費 cycle_data，但 StrategistAgent 處理 IntelObject，接口錯位。Phase 2 Decision Context 任務會打通 cycle_data 管道，屆時自然接入
 
 ## ██ 長期整合（非緊急）
 

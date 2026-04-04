@@ -193,6 +193,22 @@ async fn async_main(config: Arc<ConfigManager>) {
             None
         };
 
+        // ----------------------------------------------------------
+        // Initial snapshot: write once immediately so that the
+        // watchdog does not flag snapshot-age timeout during the
+        // startup window before the first tick arrives.
+        // 初始快照：啟動時立即寫入一次，避免 watchdog 在首個 tick
+        // 到達前因 snapshot age 超時而誤判引擎崩潰。
+        // ----------------------------------------------------------
+        {
+            let init_snap = pipeline.snapshot();
+            if snapshot_writer.force_write(&init_snap) {
+                info!("initial pipeline snapshot written / 初始管線快照已寫入");
+            } else {
+                warn!("failed to write initial pipeline snapshot / 初始管線快照寫入失敗");
+            }
+        }
+
         let mut last_status = Instant::now();
         let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
         let start_time = Instant::now();

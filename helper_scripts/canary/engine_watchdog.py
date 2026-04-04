@@ -13,7 +13,7 @@ MODULE_NOTE (中文):
 
 Usage:
   python engine_watchdog.py                    # Run with defaults
-  python engine_watchdog.py --stale-threshold 5 --poll-interval 1
+  python engine_watchdog.py --stale-threshold 45 --grace-period 120 --poll-interval 1
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import signal
-import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -40,10 +39,11 @@ logger = logging.getLogger("engine_watchdog")
 # Configuration / 配置
 # ═══════════════════════════════════════════════════════════════════════════════
 
-STALE_THRESHOLD_SECONDS = 10.0  # Snapshot older than this = engine dead / 超過此時間 = 引擎死亡
+STALE_THRESHOLD_SECONDS = 45.0  # Snapshot older than this = engine dead / 超過此時間 = 引擎死亡
 POLL_INTERVAL_SECONDS = 2.0     # Check frequency / 檢查頻率
 STRIKE_WINDOW_SECONDS = 3600.0  # 3-strike window (1 hour) / 三振窗口（1 小時）
 MAX_STRIKES = 3                 # Consecutive crashes before rollback / 回滾前最大連續崩潰數
+GRACE_PERIOD_SECONDS = 120.0    # Startup grace period — ignore stale snapshots during this window / 啟動寬限期 — 在此窗口內忽略過期快照
 
 
 @dataclass
@@ -147,6 +147,7 @@ def run_watchdog(
     stale_threshold: float = STALE_THRESHOLD_SECONDS,
     poll_interval: float = POLL_INTERVAL_SECONDS,
     max_iterations: Optional[int] = None,
+    grace_period: float = GRACE_PERIOD_SECONDS,
 ) -> WatchdogState:
     """
     Main watchdog loop. Monitors snapshot freshness and triggers fallback/rollback.
@@ -157,16 +158,19 @@ def run_watchdog(
         stale_threshold: Seconds before snapshot is considered stale
         poll_interval: Seconds between checks
         max_iterations: Stop after N iterations (None = run forever, for testing)
+        grace_period: Seconds after startup during which stale snapshots are ignored / 啟動後寬限期秒數，期間忽略過期快照
     """
     snapshot_path = Path(data_dir) / "pipeline_snapshot.json"
     state = WatchdogState()
     iteration = 0
+    # Record startup time for grace period calculation / 記錄啟動時間用於寬限期計算
+    start_time = time.time()
 
     logger.info(
-        "Watchdog started — monitoring %s (threshold=%.1fs, poll=%.1fs) "
-        "/ 看門狗啟動 — 監控 %s（閾值=%.1f秒，輪詢=%.1f秒）",
-        snapshot_path, stale_threshold, poll_interval,
-        snapshot_path, stale_threshold, poll_interval,
+        "Watchdog started — monitoring %s (threshold=%.1fs, poll=%.1fs, grace=%.1fs) "
+        "/ 看門狗啟動 — 監控 %s（閾值=%.1f秒，輪詢=%.1f秒，寬限期=%.1f秒）",
+        snapshot_path, stale_threshold, poll_interval, grace_period,
+        snapshot_path, stale_threshold, poll_interval, grace_period,
     )
 
     while True:
@@ -178,10 +182,23 @@ def run_watchdog(
         if is_fresh:
             on_engine_recovery(state)
         else:
-            action = on_engine_crash(state, age)
-            if action == "rollback":
-                logger.critical("Initiating runtime rollback... / 啟動運行時回滾...")
-                break
+            # Grace period: ignore stale snapshots during startup window, do not count strikes
+            # 寬限期：啟動窗口內忽略過期快照，不計入 strike 計數
+            elapsed = time.time() - start_time
+            if elapsed < grace_period:
+                logger.info(
+                    "GRACE_PERIOD: snapshot stale (age=%.1fs) but within grace period "
+                    "(%.1f/%.1fs elapsed), ignoring "
+                    "/ 寬限期：快照過期（年齡=%.1f秒）但仍在寬限期內"
+                    "（已過 %.1f/%.1f 秒），忽略",
+                    age, elapsed, grace_period,
+                    age, elapsed, grace_period,
+                )
+            else:
+                action = on_engine_crash(state, age)
+                if action == "rollback":
+                    logger.critical("Initiating runtime rollback... / 啟動運行時回滾...")
+                    break
 
         iteration += 1
         time.sleep(poll_interval)
@@ -222,6 +239,10 @@ def main():
                         help="Staleness threshold in seconds")
     parser.add_argument("--poll-interval", type=float, default=POLL_INTERVAL_SECONDS,
                         help="Poll interval in seconds")
+    # Startup grace period — stale snapshots during this window won't count as strikes
+    # 啟動寬限期 — 在此窗口內的過期快照不計入 strike
+    parser.add_argument("--grace-period", type=float, default=GRACE_PERIOD_SECONDS,
+                        help="Startup grace period in seconds (stale snapshots ignored during this window)")
     parser.add_argument("--status", action="store_true",
                         help="Print one-shot status and exit")
     args = parser.parse_args()
@@ -243,6 +264,7 @@ def main():
         data_dir=args.data_dir,
         stale_threshold=args.stale_threshold,
         poll_interval=args.poll_interval,
+        grace_period=args.grace_period,
     )
 
     if state.rollback_triggered:

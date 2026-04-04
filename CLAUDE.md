@@ -139,7 +139,7 @@ git status && git log --oneline -5
 Rust 引擎灰度驗證正在後台運行。**每次 session 啟動時先跑以下命令確認引擎健康：**
 ```bash
 # 引擎存活？+ canary 記錄數 + 崩潰數 + 最新狀態
-python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 60 --status
+python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --stale-threshold 45 --grace-period 120 --status
 wc -l /tmp/openclaw/engine_results.jsonl
 grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes"
 ```
