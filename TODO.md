@@ -190,6 +190,15 @@ SPEC 審查記錄：
 
 ---
 
+## ██ 技術整合待辦
+
+### [ ] PYO3-1：ContextDistiller (PyO3) 接入 Python
+- `rust/openclaw_pyo3/src/context_distiller.rs` 已實現但從未被 Python import
+- 功能：AI 上下文壓縮（~520 tokens），用於 L1/L2 AI 推理前的數據精煉
+- 接入點：`strategist_agent.py` 在構建 AI prompt 時調用
+- 前置：確認 PyO3 wheel 能在當前環境 import（`import openclaw_pyo3`）
+- 優先級：低（非交易熱路徑，AI 推理前的優化）
+
 ## ██ 長期整合（非緊急）
 
 - [ ] OC-1：OpenClaw Webhook 告警
