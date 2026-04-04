@@ -1,4 +1,11 @@
-"""Strategy AI & Demo Routes — Demo connector, AI consultation, Telegram (TD-02 split)."""
+"""Strategy AI & Demo Routes — Demo connector, AI consultation, Telegram (TD-02 split).
+策略 AI 和 Demo 路由 — Demo 連接器、AI 諮詢、Telegram。
+
+PYO3-BYBIT: demo/* endpoints now use Rust BybitClient (PyO3 bridge) as primary,
+with Python BybitDemoConnector as fallback if Rust bridge is unavailable.
+PYO3-BYBIT: demo/* 端點現在使用 Rust BybitClient（PyO3 橋接）作為主路徑，
+Python BybitDemoConnector 作為 Rust 橋接不可用時的降級回退。
+"""
 from __future__ import annotations
 
 import logging
@@ -16,6 +23,33 @@ from .strategy_wiring import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Rust PyO3 bridge (PYO3-BYBIT) — lazy singleton
+# Rust PyO3 橋接 — 懶加載單例
+# ---------------------------------------------------------------------------
+_RUST_BYBIT_CLIENT = None
+_RUST_BRIDGE_AVAILABLE = None  # None = not checked yet / None = 尚未檢查
+
+
+def _get_rust_client():
+    """Get or create the Rust BybitClient singleton. Returns None if unavailable.
+    獲取或創建 Rust BybitClient 單例。不可用時返回 None。"""
+    global _RUST_BYBIT_CLIENT, _RUST_BRIDGE_AVAILABLE
+    if _RUST_BRIDGE_AVAILABLE is False:
+        return None
+    if _RUST_BYBIT_CLIENT is not None:
+        return _RUST_BYBIT_CLIENT
+    try:
+        from openclaw_core import BybitClient
+        _RUST_BYBIT_CLIENT = BybitClient()
+        _RUST_BRIDGE_AVAILABLE = True
+        logger.info("Rust BybitClient initialized (PyO3 bridge active) / Rust BybitClient 已初始化")
+        return _RUST_BYBIT_CLIENT
+    except Exception as e:
+        _RUST_BRIDGE_AVAILABLE = False
+        logger.warning(f"Rust BybitClient unavailable, using Python fallback: {e}")
+        return None
 
 
 # ── Telegram Status Route / Telegram 状态路由 ──
@@ -66,6 +100,15 @@ async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_
 @phase2_router.get("/demo/balance")
 async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo account balance / 获取 Bybit Demo 账户余额"""
+    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    rc = _get_rust_client()
+    if rc is not None:
+        try:
+            wallet = rc.refresh_balance()
+            return _envelope({"source": "rust_engine", **wallet})
+        except Exception as e:
+            logger.warning(f"Rust balance failed, falling back to Python: {e}")
+    # Python fallback / Python 降級回退
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:
@@ -78,10 +121,18 @@ async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current
 @phase2_router.get("/demo/positions")
 async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo open positions / 获取 Bybit Demo 持仓"""
+    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    rc = _get_rust_client()
+    if rc is not None:
+        try:
+            positions = rc.get_positions("linear")
+            return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
+        except Exception as e:
+            logger.warning(f"Rust positions failed, falling back to Python: {e}")
+    # Python fallback / Python 降級回退
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:
-        # Bybit V5 requires symbol or settleCoin — use settleCoin=USDT for all linear positions
         params: dict[str, Any] = {"category": "linear", "settleCoin": "USDT"}
         result = DEMO_CONNECTOR._request("GET", "/v5/position/list", params)
         return _envelope(result)
@@ -95,6 +146,21 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
     Get Bybit Demo open orders (regular + conditional/stop).
     获取 Bybit Demo 活跃订单（普通订单 + 条件止损单合并返回）。
     """
+    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    rc = _get_rust_client()
+    if rc is not None:
+        try:
+            orders = rc.get_active_orders("linear")
+            return _envelope({
+                "source": "rust_engine",
+                "retCode": 0,
+                "result": {"list": orders},
+                "regular_count": len(orders),
+                "conditional_count": 0,
+            })
+        except Exception as e:
+            logger.warning(f"Rust orders failed, falling back to Python: {e}")
+    # Python fallback / Python 降級回退
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:
@@ -113,8 +179,6 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
         except Exception:
             logger.warning("Failed to fetch conditional orders / 获取条件单失败")
 
-        # 合并返回，条件单加 _orderFilter 标记便于前端区分
-        # Merge results; tag conditional orders for frontend differentiation
         for o in conditional_list:
             o["_orderFilter"] = "StopOrder"
         merged = regular_list + conditional_list
@@ -132,6 +196,15 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo recent executions / 获取 Bybit Demo 最近成交"""
+    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    rc = _get_rust_client()
+    if rc is not None:
+        try:
+            fills = rc.get_executions("linear", limit=50)
+            return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
+        except Exception as e:
+            logger.warning(f"Rust fills failed, falling back to Python: {e}")
+    # Python fallback / Python 降級回退
     if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
         return _envelope({"enabled": False})
     try:

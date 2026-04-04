@@ -220,7 +220,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
 
 #### 階段 1：Rust 基礎設施（PYO3-B01 ~ B02）
 
-- [ ] PYO3-B01：Crate 準備
+- [x] PYO3-B01：Crate 準備（commit e3c9afe）
   - `openclaw_pyo3/Cargo.toml` 增加 `openclaw_engine`、`tokio`、`pythonize` 依賴
   - 新建 `openclaw_pyo3/src/bybit_bridge/mod.rs`
   - 實現：`TokioRuntime` 單例 + `bybit_err_to_pyerr()` 錯誤轉換 + `rust_to_py()` 序列化輔助
@@ -228,7 +228,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
   - `maturin develop` 編譯通過
   - 文件清單：`Cargo.toml`(1) + `mod.rs`(1) + `lib.rs`(1) = 3 文件
 
-- [ ] PYO3-B02：BybitClient + AccountManager wrapper
+- [x] PYO3-B02：BybitClient + AccountManager wrapper（commit e3c9afe）
   - `#[pyclass] BybitClient`：`__init__(api_key, api_secret, env="demo")` → 內部創建 `Arc<BybitRestClient>` + `tokio::Runtime`
   - `refresh_balance()` → `PyResult<PyObject>`（WalletState dict）
   - `usdt_equity()` / `usdt_available()` / `usdt_wallet_balance()` → `f64`
@@ -240,7 +240,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
 
 #### 階段 2：Order + Position wrappers（PYO3-B03）
 
-- [ ] PYO3-B03：OrderManager + PositionManager wrapper
+- [x] PYO3-B03：OrderManager + PositionManager wrapper（commit e3c9afe）
   - `#[pymethods] impl BybitClient`（擴展同一 pyclass）：
   - **Orders**：
     - `place_order(symbol, side, order_type, qty, price?, category?, reduce_only?, tif?)` → dict
@@ -258,7 +258,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
 
 #### 階段 3：MarketData + InstrumentInfo wrappers（PYO3-B04）
 
-- [ ] PYO3-B04：MarketDataClient + InstrumentInfoCache wrapper
+- [x] PYO3-B04：MarketDataClient + InstrumentInfoCache wrapper（commit 68c4713）
   - **Market Data**（`#[pymethods] impl BybitClient` 繼續擴展）：
     - `get_klines(category, symbol, interval, limit?)` → list[dict]
     - `get_tickers(category, symbol?)` → list[dict]
@@ -277,7 +277,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
 
 #### 階段 4：Python 整合（PYO3-B05）
 
-- [ ] PYO3-B05：Python 端接入
+- [x] PYO3-B05：Python 端接入
   - `strategy_ai_routes.py`：demo/* 4 端點改用 `from openclaw_core import BybitClient`
   - 回退邏輯：`try: import openclaw_core; HAS_RUST_BRIDGE = True` → 不可用時降級 BybitDemoConnector
   - `bybit_demo_connector.py`：MODULE_NOTE 標記 DEPRECATED，保留作 fallback
