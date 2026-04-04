@@ -392,14 +392,14 @@ impl AccountManager {
     }
 
     // -----------------------------------------------------------------------
-    // Quick repayment / 快速還款
+    // Repayment / 還款
     // -----------------------------------------------------------------------
 
-    /// Quick repay margin borrow.
-    /// 快速還款保證金借幣。
+    /// Repay margin borrow.
+    /// 還款保證金借幣。
     ///
-    /// POST /v5/account/quick-repayment
-    pub async fn quick_repayment(
+    /// POST /v5/account/repay
+    pub async fn repay(
         &self,
         client: &BybitRestClient,
         coin: &str,
@@ -410,11 +410,11 @@ impl AccountManager {
 
         info!(
             coin = coin,
-            "quick repaying margin / 快速還款保證金"
+            "repaying margin / 還款保證金"
         );
 
         client
-            .post_checked("/v5/account/quick-repayment", &body)
+            .post_checked("/v5/account/repay", &body)
             .await?;
         Ok(())
     }

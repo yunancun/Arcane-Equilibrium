@@ -147,6 +147,18 @@ pub struct RiskLimitTier {
     pub maintenance_margin: f64,
 }
 
+/// Insurance pool record.
+/// 保險基金記錄。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InsuranceRecord {
+    /// Coin name / 幣種名稱
+    pub coin: String,
+    /// Insurance fund balance / 保險基金餘額
+    pub balance: f64,
+    /// Insurance fund value in USD / 保險基金 USD 價值
+    pub value: f64,
+}
+
 /// ADL (Auto-Deleveraging) alert for a position.
 /// 自動減倉警報。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -605,28 +617,86 @@ impl MarketDataClient {
     }
 
     // -----------------------------------------------------------------------
+    // Insurance pool / 保險基金
+    // -----------------------------------------------------------------------
+
+    /// Get insurance pool data — fund backing for auto-deleveraging.
+    /// 獲取保險基金數據 — 支撐自動減倉的資金池。
+    ///
+    /// GET /v5/market/insurance
+    pub async fn get_insurance(
+        &self,
+        coin: Option<&str>,
+    ) -> BybitResult<Vec<InsuranceRecord>> {
+        debug!("fetching insurance pool / 獲取保險基金");
+        let mut params: Vec<(&str, &str)> = vec![];
+        if let Some(c) = coin {
+            params.push(("coin", c));
+        }
+        let resp = self
+            .client
+            .get_checked("/v5/market/insurance", &params)
+            .await?;
+        let list = resp
+            .result
+            .get("list")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut records = Vec::with_capacity(list.len());
+        for item in &list {
+            records.push(InsuranceRecord {
+                coin: parse_str(item, "coin"),
+                balance: parse_str_f64(item, "balance"),
+                value: parse_str_f64(item, "value"),
+            });
+        }
+        Ok(records)
+    }
+
+    // -----------------------------------------------------------------------
     // ADL alert / 自動減倉警報
     // -----------------------------------------------------------------------
 
     /// Get ADL ranking alerts — early warning of auto-deleveraging risk.
     /// 獲取 ADL 排名警報 — 自動減倉風險預警。
     ///
-    /// GET /v5/market/delivery-price (adl-related; Bybit doesn't have a dedicated adl endpoint
-    /// for market category, so we use account-level position info as fallback)
-    /// Note: This endpoint may not exist on all environments. Returns empty on 404.
-    /// 注意：此端點可能不在所有環境上存在。404 時返回空。
+    /// GET /v5/market/adl-alert
+    ///
+    /// Returns symbols with high ADL risk. Critical for position survival (Principle #5).
+    /// 返回高 ADL 風險的交易對。對倉位生存至關重要（原則 #5）。
     pub async fn get_adl_alert(
         &self,
         category: &str,
+        symbol: Option<&str>,
     ) -> BybitResult<Vec<AdlAlert>> {
         debug!(category = category, "fetching ADL alerts / 獲取 ADL 警報");
-        // Bybit does not have a public /v5/market/adlAlert endpoint.
-        // ADL info comes from position data. Return empty for now; the caller
-        // should check position.adlRankIndicator from the private API.
-        // Bybit 沒有公開的 /v5/market/adlAlert 端點。
-        // ADL 信息來自持倉數據。目前返回空；調用方應從私有 API 檢查 position.adlRankIndicator。
-        let _ = category;
-        Ok(Vec::new())
+        let mut params: Vec<(&str, &str)> = vec![("category", category)];
+        if let Some(sym) = symbol {
+            params.push(("symbol", sym));
+        }
+        let resp = self
+            .client
+            .get_checked("/v5/market/adl-alert", &params)
+            .await?;
+        let list = resp
+            .result
+            .get("list")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut alerts = Vec::with_capacity(list.len());
+        for item in &list {
+            alerts.push(AdlAlert {
+                symbol: parse_str(item, "symbol"),
+                side: parse_str(item, "side"),
+                adl_rank_indicator: item
+                    .get("adlRankIndicator")
+                    .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                    .unwrap_or(0) as i32,
+            });
+        }
+        Ok(alerts)
     }
 
     // -----------------------------------------------------------------------

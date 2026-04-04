@@ -220,7 +220,7 @@ impl PositionManager {
     /// Set trading stop (TP/SL/trailing stop) on a position.
     /// 在持倉上設置交易止損（止盈/止損/追蹤止損）。
     ///
-    /// POST /v5/position/set-trading-stop
+    /// POST /v5/position/trading-stop
     pub async fn set_trading_stop(&self, req: TradingStopRequest) -> BybitResult<()> {
         let mut body = serde_json::json!({
             "category": req.category.as_str(),
@@ -255,7 +255,7 @@ impl PositionManager {
         );
 
         self.client
-            .post_checked("/v5/position/set-trading-stop", &body)
+            .post_checked("/v5/position/trading-stop", &body)
             .await?;
         Ok(())
     }
@@ -296,112 +296,35 @@ impl PositionManager {
     }
 
     // -----------------------------------------------------------------------
-    // Switch margin mode / 切換保證金模式
+    // Confirm pending MMR / 確認待定 MMR 變更
     // -----------------------------------------------------------------------
 
-    /// Switch between isolated and cross margin for a symbol.
-    /// 切換指定交易對的逐倉/全倉保證金模式。
+    /// Confirm pending MMR (Maintenance Margin Rate) change after risk limit adjustment.
+    /// 風險限額調整後確認待定的 MMR（維持保證金率）變更。
     ///
-    /// POST /v5/position/switch-isolated
+    /// POST /v5/position/confirm-mmr
     ///
-    /// trade_mode: 0 = cross margin, 1 = isolated margin
-    /// trade_mode: 0 = 全倉, 1 = 逐倉
-    pub async fn switch_isolated(
+    /// Note: Replaces the deprecated /v5/position/set-risk-limit endpoint.
+    /// Risk limits are now auto-adjusted; this endpoint confirms the new MMR.
+    /// 注意：替代已棄用的 /v5/position/set-risk-limit 端點。
+    /// 風險限額現在自動調整；此端點確認新的 MMR。
+    pub async fn confirm_pending_mmr(
         &self,
         category: OrderCategory,
         symbol: &str,
-        trade_mode: i32,
-        buy_leverage: f64,
-        sell_leverage: f64,
     ) -> BybitResult<()> {
         let body = serde_json::json!({
             "category": category.as_str(),
             "symbol": symbol,
-            "tradeMode": trade_mode,
-            "buyLeverage": format!("{}", buy_leverage),
-            "sellLeverage": format!("{}", sell_leverage),
         });
 
         info!(
             symbol = symbol,
-            trade_mode = trade_mode,
-            "switching margin mode / 切換保證金模式"
+            "confirming pending MMR / 確認待定 MMR 變更"
         );
 
         self.client
-            .post_checked("/v5/position/switch-isolated", &body)
-            .await?;
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------------
-    // Set TP/SL mode / 設置止盈止損模式
-    // -----------------------------------------------------------------------
-
-    /// Set TP/SL mode: full position or partial.
-    /// 設置止盈止損模式：全倉或部分。
-    ///
-    /// POST /v5/position/set-tpsl-mode
-    ///
-    /// tp_sl_mode: "Full" = full position, "Partial" = partial position
-    /// tp_sl_mode: "Full" = 全倉, "Partial" = 部分倉位
-    pub async fn set_tpsl_mode(
-        &self,
-        category: OrderCategory,
-        symbol: &str,
-        tp_sl_mode: &str,
-    ) -> BybitResult<()> {
-        let body = serde_json::json!({
-            "category": category.as_str(),
-            "symbol": symbol,
-            "tpSlMode": tp_sl_mode,
-        });
-
-        info!(
-            symbol = symbol,
-            mode = tp_sl_mode,
-            "setting TP/SL mode / 設置止盈止損模式"
-        );
-
-        self.client
-            .post_checked("/v5/position/set-tpsl-mode", &body)
-            .await?;
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------------
-    // Set risk limit / 設置風險限額
-    // -----------------------------------------------------------------------
-
-    /// Set risk limit tier for a symbol.
-    /// 設置交易對的風險限額層級。
-    ///
-    /// POST /v5/position/set-risk-limit
-    pub async fn set_risk_limit(
-        &self,
-        category: OrderCategory,
-        symbol: &str,
-        risk_id: u32,
-        position_idx: Option<i32>,
-    ) -> BybitResult<()> {
-        let mut body = serde_json::json!({
-            "category": category.as_str(),
-            "symbol": symbol,
-            "riskId": risk_id,
-        });
-
-        if let Some(idx) = position_idx {
-            body["positionIdx"] = serde_json::Value::Number(serde_json::Number::from(idx));
-        }
-
-        info!(
-            symbol = symbol,
-            risk_id = risk_id,
-            "setting risk limit / 設置風險限額"
-        );
-
-        self.client
-            .post_checked("/v5/position/set-risk-limit", &body)
+            .post_checked("/v5/position/confirm-mmr", &body)
             .await?;
         Ok(())
     }

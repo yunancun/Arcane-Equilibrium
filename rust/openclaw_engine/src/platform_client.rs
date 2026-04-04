@@ -112,6 +112,38 @@ pub struct AccountCoinBalance {
     pub transfer_balance: String,
 }
 
+/// Coin information record.
+/// 幣種信息記錄。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoinInfoRecord {
+    /// Coin name / 幣種名稱
+    pub coin: String,
+    /// Full coin name / 幣種全名
+    pub name: String,
+    /// Remaining amount available for withdrawal / 剩餘可提取金額
+    pub remain_amount: String,
+    /// Chain information / 鏈信息
+    pub chains: Vec<ChainInfo>,
+}
+
+/// Chain information for a coin.
+/// 幣種的鏈信息。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChainInfo {
+    /// Chain name, e.g. "ETH" / 鏈名稱
+    pub chain: String,
+    /// Chain type / 鏈類型
+    pub chain_type: String,
+    /// Required confirmations / 所需確認數
+    pub confirmation: String,
+    /// Minimum precision / 最小精度
+    pub min_accuracy: String,
+    /// Deposit status: "0"=off, "1"=on / 充值狀態
+    pub chain_deposit: String,
+    /// Withdraw status: "0"=off, "1"=on / 提現狀態
+    pub chain_withdraw: String,
+}
+
 /// Demo fund request item.
 /// Demo 資金申請項目。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -266,7 +298,7 @@ impl PlatformClient {
     /// Set collateral switch for a coin — enable/disable as collateral.
     /// 設置幣種抵押品開關 — 啟用/禁用作為抵押品。
     ///
-    /// POST /v5/account/set-collateral-switch
+    /// POST /v5/account/set-collateral
     pub async fn set_collateral_switch(&self, coin: &str, switch: bool) -> BybitResult<()> {
         debug!(coin = coin, switch = switch, "setting collateral switch / 設置抵押品開關");
         let body = serde_json::json!({
@@ -274,7 +306,7 @@ impl PlatformClient {
             "collateralSwitch": if switch { "ON" } else { "OFF" }
         });
         self.client
-            .post_checked("/v5/account/set-collateral-switch", &body)
+            .post_checked("/v5/account/set-collateral", &body)
             .await?;
         Ok(())
     }
@@ -299,12 +331,12 @@ impl PlatformClient {
     /// Query DCP info — current DCP configuration.
     /// 查詢 DCP 信息 — 當前 DCP 配置。
     ///
-    /// GET /v5/account/query-dcp-info
+    /// GET /v5/account/dcp-info
     pub async fn get_dcp_info(&self) -> BybitResult<DcpInfo> {
         debug!("fetching DCP info / 獲取 DCP 信息");
         let resp = self
             .client
-            .get_checked("/v5/account/query-dcp-info", &[])
+            .get_checked("/v5/account/dcp-info", &[])
             .await?;
         Ok(DcpInfo {
             dcp_status: parse_str(&resp.result, "dcpStatus"),
@@ -473,6 +505,60 @@ impl PlatformClient {
             });
         }
         Ok(balances)
+    }
+
+    // -----------------------------------------------------------------------
+    // Coin info / 幣種信息
+    // -----------------------------------------------------------------------
+
+    /// Get coin information — chain details, precision, deposit/withdrawal status.
+    /// 獲取幣種信息 — 鏈詳情、精度、充提狀態。
+    ///
+    /// GET /v5/asset/coin-info
+    pub async fn get_coin_info(
+        &self,
+        coin: Option<&str>,
+    ) -> BybitResult<Vec<CoinInfoRecord>> {
+        debug!("fetching coin info / 獲取幣種信息");
+        let mut params: Vec<(&str, &str)> = vec![];
+        if let Some(c) = coin {
+            params.push(("coin", c));
+        }
+        let resp = self
+            .client
+            .get_checked("/v5/asset/coin-info", &params)
+            .await?;
+        let rows = resp
+            .result
+            .get("rows")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut records = Vec::with_capacity(rows.len());
+        for item in &rows {
+            records.push(CoinInfoRecord {
+                coin: parse_str(item, "coin"),
+                name: parse_str(item, "name"),
+                remain_amount: parse_str(item, "remainAmount"),
+                chains: item
+                    .get("chains")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|c| ChainInfo {
+                                chain: parse_str(c, "chain"),
+                                chain_type: parse_str(c, "chainType"),
+                                confirmation: parse_str(c, "confirmation"),
+                                min_accuracy: parse_str(c, "minAccuracy"),
+                                chain_deposit: parse_str(c, "chainDeposit"),
+                                chain_withdraw: parse_str(c, "chainWithdraw"),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            });
+        }
+        Ok(records)
     }
 
     // -----------------------------------------------------------------------

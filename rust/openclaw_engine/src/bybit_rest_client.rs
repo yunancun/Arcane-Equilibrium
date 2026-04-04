@@ -146,14 +146,56 @@ impl BybitResponse {
 // Rate limit state / 限流狀態
 // ---------------------------------------------------------------------------
 
-/// Thread-safe rate limit tracker.
-/// 線程安全的限流追蹤器。
+/// Bybit V5 rate limit group — each group has independent limits.
+/// Bybit V5 限流分組 — 每組有獨立的限制。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RateLimitGroup {
+    /// Order creation/amendment/cancellation (10 req/s) / 訂單操作
+    Order,
+    /// Position queries and configuration (10 req/s) / 持倉操作
+    Position,
+    /// Account queries (10 req/s) / 帳戶查詢
+    Account,
+    /// Market data queries (10-120 req/s depending on endpoint) / 市場數據
+    Market,
+    /// Asset operations (5 req/s) / 資產操作
+    Asset,
+    /// Other / 其他
+    Other,
+}
+
+impl RateLimitGroup {
+    /// Determine the rate limit group for a given API path.
+    /// 根據 API 路徑判斷所屬限流分組。
+    pub fn from_path(path: &str) -> Self {
+        if path.starts_with("/v5/order/") || path.starts_with("/v5/execution/") {
+            Self::Order
+        } else if path.starts_with("/v5/position/") {
+            Self::Position
+        } else if path.starts_with("/v5/account/") {
+            Self::Account
+        } else if path.starts_with("/v5/market/") || path.starts_with("/v5/spot-lever-token/") {
+            Self::Market
+        } else if path.starts_with("/v5/asset/") || path.starts_with("/v5/spot-margin") {
+            Self::Asset
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// Thread-safe rate limit tracker with per-group tracking.
+/// 線程安全的限流追蹤器（含分組追蹤）。
 #[derive(Debug)]
 struct RateLimitState {
-    /// Remaining requests in current window / 當前窗口剩餘請求數
+    /// Global remaining requests (from last response header)
+    /// 全局剩餘請求數（來自最近的回應頭）
     remaining: AtomicI64,
     /// Reset timestamp (ms) / 重置時間戳（毫秒）
     reset_ms: AtomicU64,
+    /// Per-group remaining (Order, Position, Account, Market, Asset, Other)
+    /// 分組剩餘（索引按 enum 順序）
+    group_remaining: [AtomicI64; 6],
 }
 
 impl Default for RateLimitState {
@@ -161,7 +203,82 @@ impl Default for RateLimitState {
         Self {
             remaining: AtomicI64::new(120),
             reset_ms: AtomicU64::new(0),
+            group_remaining: [
+                AtomicI64::new(10),   // Order
+                AtomicI64::new(10),   // Position
+                AtomicI64::new(10),   // Account
+                AtomicI64::new(120),  // Market
+                AtomicI64::new(5),    // Asset
+                AtomicI64::new(10),   // Other
+            ],
         }
+    }
+}
+
+/// Well-known Bybit retCode values with semantic meaning.
+/// 有語義含義的 Bybit retCode 常用值。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BybitRetCode {
+    /// Success / 成功
+    Ok = 0,
+    /// Invalid parameter / 參數無效
+    InvalidParam = 10001,
+    /// Invalid request / 無效請求
+    InvalidRequest = 10002,
+    /// API key invalid / API key 無效
+    ApiKeyInvalid = 10003,
+    /// Sign error / 簽名錯誤
+    SignError = 10004,
+    /// Permission denied / 權限不足
+    PermissionDenied = 10005,
+    /// IP rate limit / IP 限流
+    IpRateLimit = 10006,
+    /// Unmatched IP / IP 不匹配
+    UnmatchedIp = 10010,
+    /// Order not found / 訂單不存在
+    OrderNotFound = 110001,
+    /// Insufficient balance / 餘額不足
+    InsufficientBalance = 110012,
+    /// Leverage not modified (already set) / 槓桿未修改
+    LeverageNotModified = 110043,
+    /// Position not found / 持倉不存在
+    PositionNotFound = 110009,
+    /// Exceed max order qty / 超過最大下單數量
+    ExceedMaxQty = 170210,
+}
+
+impl BybitRetCode {
+    /// Classify a raw retCode into a known variant, if recognized.
+    /// 將原始 retCode 分類為已知變體（如可識別）。
+    pub fn from_code(code: i64) -> Option<Self> {
+        match code {
+            0 => Some(Self::Ok),
+            10001 => Some(Self::InvalidParam),
+            10002 => Some(Self::InvalidRequest),
+            10003 => Some(Self::ApiKeyInvalid),
+            10004 => Some(Self::SignError),
+            10005 => Some(Self::PermissionDenied),
+            10006 => Some(Self::IpRateLimit),
+            10010 => Some(Self::UnmatchedIp),
+            110001 => Some(Self::OrderNotFound),
+            110012 => Some(Self::InsufficientBalance),
+            110043 => Some(Self::LeverageNotModified),
+            110009 => Some(Self::PositionNotFound),
+            170210 => Some(Self::ExceedMaxQty),
+            _ => None,
+        }
+    }
+
+    /// Whether this error is safe to retry (transient).
+    /// 此錯誤是否可安全重試（暫時性）。
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::IpRateLimit)
+    }
+
+    /// Whether this is a "no-op" error (operation already done).
+    /// 此錯誤是否為"無操作"錯誤（操作已完成）。
+    pub fn is_noop(&self) -> bool {
+        matches!(self, Self::LeverageNotModified | Self::OrderNotFound)
     }
 }
 
@@ -331,6 +448,7 @@ impl BybitRestClient {
             .await?;
 
         self.update_rate_limit(&resp);
+        self.update_group_rate_limit(path, &resp);
         let body = resp.text().await?;
         let parsed: BybitResponse = serde_json::from_str(&body)?;
         Ok(parsed)
@@ -371,6 +489,7 @@ impl BybitRestClient {
             .await?;
 
         self.update_rate_limit(&resp);
+        self.update_group_rate_limit(path, &resp);
         let body_text = resp.text().await?;
         let parsed: BybitResponse = serde_json::from_str(&body_text)?;
         Ok(parsed)
@@ -423,10 +542,32 @@ impl BybitRestClient {
         }
     }
 
-    /// Check if we're close to rate limit (remaining <= threshold).
-    /// 檢查是否接近限流閾值（remaining <= threshold）。
+    /// Check if we're close to the global rate limit (remaining <= threshold).
+    /// 檢查是否接近全局限流閾值（remaining <= threshold）。
     pub fn is_near_rate_limit(&self, threshold: i64) -> bool {
         self.rate_limit.remaining.load(Ordering::Relaxed) <= threshold
+    }
+
+    /// Check if a specific endpoint group is near its rate limit.
+    /// 檢查特定端點分組是否接近其限流閾值。
+    pub fn is_group_near_limit(&self, group: RateLimitGroup, threshold: i64) -> bool {
+        let idx = group as usize;
+        self.rate_limit.group_remaining[idx].load(Ordering::Relaxed) <= threshold
+    }
+
+    /// Update per-group rate limit from the last request.
+    /// 根據最近的請求更新分組限流。
+    fn update_group_rate_limit(&self, path: &str, resp: &reqwest::Response) {
+        if let Some(remaining) = resp
+            .headers()
+            .get("x-bapi-limit-status")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok())
+        {
+            let group = RateLimitGroup::from_path(path);
+            let idx = group as usize;
+            self.rate_limit.group_remaining[idx].store(remaining, Ordering::Relaxed);
+        }
     }
 }
 
@@ -665,6 +806,37 @@ mod tests {
             .collect::<Vec<_>>()
             .join("&");
         assert_eq!(qs, "category=linear&limit=50&symbol=BTCUSDT");
+    }
+
+    /// Test RateLimitGroup classification.
+    /// 測試限流分組分類。
+    #[test]
+    fn test_rate_limit_group_from_path() {
+        assert_eq!(RateLimitGroup::from_path("/v5/order/create"), RateLimitGroup::Order);
+        assert_eq!(RateLimitGroup::from_path("/v5/order/cancel"), RateLimitGroup::Order);
+        assert_eq!(RateLimitGroup::from_path("/v5/execution/list"), RateLimitGroup::Order);
+        assert_eq!(RateLimitGroup::from_path("/v5/position/list"), RateLimitGroup::Position);
+        assert_eq!(RateLimitGroup::from_path("/v5/account/wallet-balance"), RateLimitGroup::Account);
+        assert_eq!(RateLimitGroup::from_path("/v5/market/kline"), RateLimitGroup::Market);
+        assert_eq!(RateLimitGroup::from_path("/v5/asset/transfer/inter-transfer"), RateLimitGroup::Asset);
+        assert_eq!(RateLimitGroup::from_path("/v5/spot-margin-uta/status"), RateLimitGroup::Asset);
+        assert_eq!(RateLimitGroup::from_path("/v5/unknown"), RateLimitGroup::Other);
+    }
+
+    /// Test BybitRetCode classification.
+    /// 測試 retCode 分類。
+    #[test]
+    fn test_bybit_ret_code() {
+        assert_eq!(BybitRetCode::from_code(0), Some(BybitRetCode::Ok));
+        assert_eq!(BybitRetCode::from_code(110001), Some(BybitRetCode::OrderNotFound));
+        assert_eq!(BybitRetCode::from_code(110012), Some(BybitRetCode::InsufficientBalance));
+        assert_eq!(BybitRetCode::from_code(110043), Some(BybitRetCode::LeverageNotModified));
+        assert_eq!(BybitRetCode::from_code(99999), None);
+
+        assert!(BybitRetCode::IpRateLimit.is_retryable());
+        assert!(!BybitRetCode::InsufficientBalance.is_retryable());
+        assert!(BybitRetCode::LeverageNotModified.is_noop());
+        assert!(!BybitRetCode::InsufficientBalance.is_noop());
     }
 
     /// Test BybitApiError Display formatting.

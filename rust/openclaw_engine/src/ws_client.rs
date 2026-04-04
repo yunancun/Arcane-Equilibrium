@@ -224,34 +224,52 @@ impl WsClient {
             return;
         }
 
-        // Bybit public trade: {"topic":"publicTrade.BTCUSDT","data":[{...}]}
-        // Bybit kline: {"topic":"kline.1.BTCUSDT","data":[{...}]}
+        // Bybit public data formats:
+        //   Array: {"topic":"publicTrade.BTCUSDT","data":[{...}]}
+        //   Object: {"topic":"tickers.BTCUSDT","data":{...}}
+        //   Orderbook: {"topic":"orderbook.50.BTCUSDT","data":{"s":"...","b":[...],"a":[...]}}
         let topic = parsed.get("topic").and_then(|t| t.as_str()).unwrap_or("");
-        let data = match parsed.get("data").and_then(|d| d.as_array()) {
-            Some(arr) => arr,
+        let raw_data = match parsed.get("data") {
+            Some(d) => d,
             None => return,
         };
 
-        if topic.starts_with("publicTrade.") {
-            for item in data {
-                if let Some(event) = parse_trade_item(item, topic) {
-                    if self.event_tx.send(event).await.is_err() {
-                        warn!("event channel closed / 事件通道已關閉");
-                        return;
-                    }
-                }
-            }
+        // Normalize to array: if data is a single object, wrap it / 統一為數組
+        let data_vec: Vec<serde_json::Value>;
+        let data: &[serde_json::Value] = if let Some(arr) = raw_data.as_array() {
+            arr
+        } else if raw_data.is_object() {
+            data_vec = vec![raw_data.clone()];
+            &data_vec
+        } else {
+            return;
+        };
+
+        // Route by topic prefix / 按主題前綴路由
+        let events: Vec<PriceEvent> = if topic.starts_with("publicTrade.") {
+            data.iter().filter_map(|item| parse_trade_item(item, topic)).collect()
         } else if topic.starts_with("kline.") {
-            for item in data {
-                if let Some(event) = parse_kline_item(item, topic) {
-                    if self.event_tx.send(event).await.is_err() {
-                        warn!("event channel closed / 事件通道已關閉");
-                        return;
-                    }
-                }
-            }
+            data.iter().filter_map(|item| parse_kline_item(item, topic)).collect()
+        } else if topic.starts_with("orderbook.") {
+            parse_orderbook_snapshot(data, topic).into_iter().collect()
+        } else if topic.starts_with("tickers.") {
+            data.iter().filter_map(|item| parse_ticker_item(item, topic)).collect()
+        } else if topic.starts_with("liquidation.") {
+            data.iter().filter_map(|item| parse_liquidation_item(item, topic)).collect()
+        } else if topic.starts_with("price-limit.") {
+            data.iter().filter_map(|item| parse_price_limit_item(item)).collect()
+        } else if topic.starts_with("adl-notice.") {
+            data.iter().filter_map(|item| parse_adl_notice_item(item)).collect()
         } else {
             debug!(topic = topic, "unhandled topic / 未處理的主題");
+            return;
+        };
+
+        for event in events {
+            if self.event_tx.send(event).await.is_err() {
+                warn!("event channel closed / 事件通道已關閉");
+                return;
+            }
         }
     }
 }
@@ -309,6 +327,154 @@ fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
 
     let mut event = PriceEvent::new(symbol, close, ts);
     event.volume_24h = volume;
+    Some(event)
+}
+
+/// Parse orderbook snapshot — extract best bid/ask into a PriceEvent.
+/// 解析訂單簿快照 — 提取最優買賣價到 PriceEvent。
+///
+/// Bybit orderbook: {"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["price","qty"],...],"a":[...],"u":123,"seq":456}}
+fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<PriceEvent> {
+    let symbol = extract_symbol_from_topic(topic)?;
+    // Orderbook data is a single object, not an array of items.
+    // The "data" array in process_message may contain the object directly,
+    // or the snapshot object may be the first element.
+    // 訂單簿數據是單個對象。
+    let obj = data.first()?;
+
+    let bids = obj.get("b").and_then(|v| v.as_array())?;
+    let asks = obj.get("a").and_then(|v| v.as_array())?;
+
+    let best_bid = bids.first()
+        .and_then(|b| b.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    let best_ask = asks.first()
+        .and_then(|a| a.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    let mid_price = if best_bid > 0.0 && best_ask > 0.0 {
+        (best_bid + best_ask) / 2.0
+    } else {
+        best_bid.max(best_ask)
+    };
+
+    let ts = obj.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let mut event = PriceEvent::new(symbol, mid_price, ts);
+    event.bid_price = best_bid;
+    event.ask_price = best_ask;
+    event.metadata.insert("type".into(), "orderbook".into());
+    Some(event)
+}
+
+/// Parse ticker snapshot — last price, 24h volume, best bid/ask.
+/// 解析行情快照 — 最新價、24h 成交量、最優買賣價。
+///
+/// Bybit ticker: {"topic":"tickers.BTCUSDT","data":{"symbol":"BTCUSDT","lastPrice":"65000","volume24h":"12345",...}}
+fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
+    let symbol = extract_symbol_from_topic(topic)?;
+    let last_price = item.get("lastPrice")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())?;
+    let volume = item.get("volume24h")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let bid = item.get("bid1Price")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let ask = item.get("ask1Price")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let ts = item.get("ts")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
+        .unwrap_or(0);
+
+    let mut event = PriceEvent::new(symbol, last_price, ts);
+    event.volume_24h = volume;
+    event.bid_price = bid;
+    event.ask_price = ask;
+    event.metadata.insert("type".into(), "ticker".into());
+    Some(event)
+}
+
+/// Parse liquidation event — forced liquidation on the market.
+/// 解析清算事件 — 市場上的強制清算。
+///
+/// Bybit liquidation: {"topic":"liquidation.BTCUSDT","data":{"symbol":"BTCUSDT","side":"Buy","price":"65000","qty":"0.5","updatedTime":...}}
+fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
+    let symbol = extract_symbol_from_topic(topic)?;
+    let price = item.get("price")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())?;
+    let qty = item.get("qty")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0");
+    let side = item.get("side")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+    let ts = item.get("updatedTime")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut event = PriceEvent::new(symbol, price, ts);
+    event.metadata.insert("type".into(), "liquidation".into());
+    event.metadata.insert("side".into(), side.into());
+    event.metadata.insert("qty".into(), qty.into());
+    Some(event)
+}
+
+/// Parse price limit update — max buy / min sell boundaries.
+/// 解析價格限制更新 — 最高買入/最低賣出邊界。
+fn parse_price_limit_item(item: &serde_json::Value) -> Option<PriceEvent> {
+    let symbol = item.get("symbol").and_then(|v| v.as_str())?.to_string();
+    let max_price = item.get("maxPrice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0");
+    let min_price = item.get("minPrice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("0");
+    let ts = item.get("ts")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mid = max_price.parse::<f64>().unwrap_or(0.0);
+    let mut event = PriceEvent::new(symbol, mid, ts);
+    event.metadata.insert("type".into(), "price_limit".into());
+    event.metadata.insert("max_price".into(), max_price.into());
+    event.metadata.insert("min_price".into(), min_price.into());
+    Some(event)
+}
+
+/// Parse ADL (Auto-Deleveraging) notice — position at risk of forced reduction.
+/// 解析 ADL 通知 — 持倉面臨強制減倉風險。
+fn parse_adl_notice_item(item: &serde_json::Value) -> Option<PriceEvent> {
+    let symbol = item.get("symbol").and_then(|v| v.as_str())?.to_string();
+    let adl_rank = item.get("adlRankIndicator")
+        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0);
+    let side = item.get("side")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+    let ts = item.get("ts")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut event = PriceEvent::new(symbol, 0.0, ts);
+    event.metadata.insert("type".into(), "adl_notice".into());
+    event.metadata.insert("adl_rank".into(), adl_rank.to_string());
+    event.metadata.insert("side".into(), side.into());
     Some(event)
 }
 
@@ -432,6 +598,86 @@ mod tests {
     fn test_parse_kline_item_missing_close() {
         let item = serde_json::json!({"start": 1700000000000_u64, "confirm": true});
         assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
+    }
+
+    #[test]
+    fn test_parse_orderbook_snapshot() {
+        let data = vec![serde_json::json!({
+            "s": "BTCUSDT",
+            "b": [["65000.0", "1.5"], ["64999.0", "2.0"]],
+            "a": [["65001.0", "0.8"], ["65002.0", "1.2"]],
+            "ts": 1700000000000_u64
+        })];
+        let event = parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT").unwrap();
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert!((event.bid_price - 65000.0).abs() < f64::EPSILON);
+        assert!((event.ask_price - 65001.0).abs() < f64::EPSILON);
+        assert!((event.last_price - 65000.5).abs() < f64::EPSILON); // mid price
+        assert_eq!(event.metadata.get("type").unwrap(), "orderbook");
+    }
+
+    #[test]
+    fn test_parse_ticker_item() {
+        let item = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "lastPrice": "65500.50",
+            "volume24h": "12345.67",
+            "bid1Price": "65500.0",
+            "ask1Price": "65501.0",
+            "ts": "1700000000000"
+        });
+        let event = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert!((event.last_price - 65500.50).abs() < f64::EPSILON);
+        assert!((event.volume_24h - 12345.67).abs() < 0.01);
+        assert!((event.bid_price - 65500.0).abs() < f64::EPSILON);
+        assert_eq!(event.metadata.get("type").unwrap(), "ticker");
+    }
+
+    #[test]
+    fn test_parse_liquidation_item() {
+        let item = serde_json::json!({
+            "price": "64000.0",
+            "side": "Sell",
+            "qty": "2.5",
+            "updatedTime": 1700000000000_u64
+        });
+        let event = parse_liquidation_item(&item, "liquidation.BTCUSDT").unwrap();
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert!((event.last_price - 64000.0).abs() < f64::EPSILON);
+        assert_eq!(event.metadata.get("type").unwrap(), "liquidation");
+        assert_eq!(event.metadata.get("side").unwrap(), "Sell");
+        assert_eq!(event.metadata.get("qty").unwrap(), "2.5");
+    }
+
+    #[test]
+    fn test_parse_price_limit_item() {
+        let item = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "maxPrice": "70000.0",
+            "minPrice": "60000.0",
+            "ts": 1700000000000_u64
+        });
+        let event = parse_price_limit_item(&item).unwrap();
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert_eq!(event.metadata.get("type").unwrap(), "price_limit");
+        assert_eq!(event.metadata.get("max_price").unwrap(), "70000.0");
+        assert_eq!(event.metadata.get("min_price").unwrap(), "60000.0");
+    }
+
+    #[test]
+    fn test_parse_adl_notice_item() {
+        let item = serde_json::json!({
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "adlRankIndicator": 4,
+            "ts": 1700000000000_u64
+        });
+        let event = parse_adl_notice_item(&item).unwrap();
+        assert_eq!(event.symbol, "BTCUSDT");
+        assert_eq!(event.metadata.get("type").unwrap(), "adl_notice");
+        assert_eq!(event.metadata.get("adl_rank").unwrap(), "4");
+        assert_eq!(event.metadata.get("side").unwrap(), "Buy");
     }
 
     #[test]

@@ -67,6 +67,12 @@ pub enum TopicType {
     Orderbook50,
     /// Public trades / 公開交易
     PublicTrade,
+    /// Liquidation events / 清算事件
+    Liquidation,
+    /// Price limit updates / 價格限制更新
+    PriceLimit,
+    /// ADL alert notifications / ADL 通知
+    AdlNotice,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +114,30 @@ pub fn public_trade_topic(symbol: &str) -> String {
     format!("publicTrade.{}", symbol)
 }
 
+/// Build the liquidation topic for a symbol.
+/// 為一個交易對構建清算主題。
+///
+/// Example: `liquidation_topic("BTCUSDT")` → `"liquidation.BTCUSDT"`
+pub fn liquidation_topic(symbol: &str) -> String {
+    format!("liquidation.{}", symbol)
+}
+
+/// Build the price limit topic for a symbol.
+/// 為一個交易對構建價格限制主題。
+///
+/// Example: `price_limit_topic("BTCUSDT")` → `"price-limit.BTCUSDT"`
+pub fn price_limit_topic(symbol: &str) -> String {
+    format!("price-limit.{}", symbol)
+}
+
+/// Build the ADL notice topic for a symbol.
+/// 為一個交易對構建 ADL 通知主題。
+///
+/// Example: `adl_notice_topic("BTCUSDT")` → `"adl-notice.BTCUSDT"`
+pub fn adl_notice_topic(symbol: &str) -> String {
+    format!("adl-notice.{}", symbol)
+}
+
 /// Generate the full subscription list for a symbol with all topic types.
 /// 為一個交易對生成包含所有主題類型的完整訂閱列表。
 ///
@@ -127,6 +157,9 @@ pub fn full_subscription_list_with_intervals(
     topics.push(ticker_topic(symbol));
     topics.push(orderbook_topic(symbol));
     topics.push(public_trade_topic(symbol));
+    topics.push(liquidation_topic(symbol));
+    topics.push(price_limit_topic(symbol));
+    topics.push(adl_notice_topic(symbol));
     topics
 }
 
@@ -192,8 +225,8 @@ mod tests {
     #[test]
     fn test_full_subscription_list() {
         let topics = full_subscription_list("BTCUSDT");
-        // 4 klines + ticker + orderbook + publicTrade = 7
-        assert_eq!(topics.len(), 7);
+        // 4 klines + ticker + orderbook + publicTrade + liquidation + price-limit + adl-notice = 10
+        assert_eq!(topics.len(), 10);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.5.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.15.BTCUSDT".to_string()));
@@ -201,6 +234,9 @@ mod tests {
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
+        assert!(topics.contains(&"liquidation.BTCUSDT".to_string()));
+        assert!(topics.contains(&"price-limit.BTCUSDT".to_string()));
+        assert!(topics.contains(&"adl-notice.BTCUSDT".to_string()));
     }
 
     /// Test multi-symbol subscription list.
@@ -208,8 +244,8 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // 7 topics per symbol * 2 symbols = 14
-        assert_eq!(topics.len(), 14);
+        // 10 topics per symbol * 2 symbols = 20
+        assert_eq!(topics.len(), 20);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.1.ETHUSDT".to_string()));
         assert!(topics.contains(&"tickers.ETHUSDT".to_string()));
@@ -239,10 +275,11 @@ mod tests {
     #[test]
     fn test_empty_intervals() {
         let topics = full_subscription_list_with_intervals("BTCUSDT", &[]);
-        // 0 klines + ticker + orderbook + publicTrade = 3
-        assert_eq!(topics.len(), 3);
+        // 0 klines + ticker + orderbook + publicTrade + liquidation + price-limit + adl-notice = 6
+        assert_eq!(topics.len(), 6);
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
+        assert!(topics.contains(&"liquidation.BTCUSDT".to_string()));
     }
 }

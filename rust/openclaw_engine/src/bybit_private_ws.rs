@@ -37,7 +37,7 @@ const AUTH_EXPIRES_OFFSET_MS: u64 = 10_000;
 
 /// Private topics to subscribe after auth.
 /// 認證後要訂閱的私有主題。
-const PRIVATE_TOPICS: &[&str] = &["order", "execution", "position", "wallet"];
+const PRIVATE_TOPICS: &[&str] = &["order", "execution", "fast-execution", "position", "wallet", "dcp"];
 
 // ---------------------------------------------------------------------------
 // Event types / 事件類型
@@ -526,6 +526,21 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
                 }
             }
             None
+        }
+        "fast-execution" => {
+            // Same structure as execution but lower latency (~50ms vs ~300ms)
+            // 與 execution 結構相同但延遲更低
+            for item in data {
+                if let Ok(update) = serde_json::from_value::<ExecutionUpdate>(item.clone()) {
+                    return Some(PrivateWsEvent::Execution(update));
+                }
+            }
+            None
+        }
+        "dcp" => {
+            // DCP trigger notification / DCP 觸發通知
+            debug!("DCP event received / 收到 DCP 事件");
+            Some(PrivateWsEvent::Disconnected)
         }
         _ => {
             debug!(topic = topic, "Unhandled private topic / 未處理的私有主題");

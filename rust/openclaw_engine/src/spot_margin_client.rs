@@ -122,7 +122,7 @@ impl SpotMarginClient {
     /// Toggle spot margin trading mode on/off.
     /// 開啟/關閉現貨保證金交易模式。
     ///
-    /// POST /v5/spot-margin-trade/switch-mode
+    /// POST /v5/spot-margin-uta/switch-mode (UTA account)
     ///
     /// spot_margin_mode: "1" = on, "0" = off
     /// spot_margin_mode: "1" = 開啟, "0" = 關閉
@@ -138,7 +138,7 @@ impl SpotMarginClient {
         );
 
         self.client
-            .post_checked("/v5/spot-margin-trade/switch-mode", &body)
+            .post_checked("/v5/spot-margin-uta/switch-mode", &body)
             .await?;
         Ok(())
     }
@@ -150,7 +150,7 @@ impl SpotMarginClient {
     /// Set spot margin leverage.
     /// 設置現貨保證金槓桿。
     ///
-    /// POST /v5/spot-margin-trade/set-leverage
+    /// POST /v5/spot-margin-uta/set-leverage (UTA account)
     pub async fn set_leverage(&self, leverage: f64) -> BybitResult<()> {
         let body = serde_json::json!({
             "leverage": format!("{}", leverage),
@@ -162,7 +162,7 @@ impl SpotMarginClient {
         );
 
         self.client
-            .post_checked("/v5/spot-margin-trade/set-leverage", &body)
+            .post_checked("/v5/spot-margin-uta/set-leverage", &body)
             .await?;
         Ok(())
     }
@@ -174,12 +174,12 @@ impl SpotMarginClient {
     /// Query current spot margin state.
     /// 查詢當前現貨保證金狀態。
     ///
-    /// GET /v5/spot-margin-trade/state
+    /// GET /v5/spot-margin-uta/status (UTA account)
     pub async fn get_margin_state(&self) -> BybitResult<SpotMarginState> {
         debug!("fetching spot margin state / 獲取現貨保證金狀態");
         let resp = self
             .client
-            .get_checked("/v5/spot-margin-trade/state", &[])
+            .get_checked("/v5/spot-margin-uta/status", &[])
             .await?;
         parse_margin_state(&resp.result)
     }
@@ -188,10 +188,10 @@ impl SpotMarginClient {
     // Borrowable tokens / 可借幣種
     // -----------------------------------------------------------------------
 
-    /// Get list of borrowable tokens for cross margin.
-    /// 獲取全倉保證金可借幣種列表。
+    /// Get max borrowable amount for spot margin (UTA account).
+    /// 獲取現貨保證金最大可借金額（UTA 帳戶）。
     ///
-    /// GET /v5/spot-cross-margin-trade/borrow-token
+    /// GET /v5/spot-margin-uta/max-borrowable
     pub async fn get_borrowable_tokens(
         &self,
         token: Option<&str>,
@@ -203,19 +203,19 @@ impl SpotMarginClient {
         }
         let resp = self
             .client
-            .get_checked("/v5/spot-cross-margin-trade/borrow-token", &params)
+            .get_checked("/v5/spot-margin-uta/max-borrowable", &params)
             .await?;
         parse_borrowable_list(&resp.result)
     }
 
     // -----------------------------------------------------------------------
-    // Repayment history / 還款歷史
+    // Repayment available / 可還款金額
     // -----------------------------------------------------------------------
 
-    /// Get repayment history for cross margin.
-    /// 獲取全倉保證金還款歷史。
+    /// Get available amount to repay for spot margin (UTA account).
+    /// 獲取現貨保證金可還款金額（UTA 帳戶）。
     ///
-    /// GET /v5/spot-cross-margin-trade/repay-history
+    /// GET /v5/spot-margin-uta/repayment-available-amount
     pub async fn get_repay_history(
         &self,
         token: Option<&str>,
@@ -229,7 +229,7 @@ impl SpotMarginClient {
         }
         let resp = self
             .client
-            .get_checked("/v5/spot-cross-margin-trade/repay-history", &params)
+            .get_checked("/v5/spot-margin-uta/repayment-available-amount", &params)
             .await?;
         parse_repay_history(&resp.result)
     }
