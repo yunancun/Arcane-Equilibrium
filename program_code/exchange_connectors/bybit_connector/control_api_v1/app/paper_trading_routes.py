@@ -667,14 +667,38 @@ def get_session_status(
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
     if rust_state is not None:
+        # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
+        # Wrap flat Rust snapshot into nested structure expected by GUI
+        positions = rust_state.get("positions", [])
+        total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+        balance = rust_state.get("balance", 0)
+        peak = rust_state.get("peak_balance", 0)
+        realized = rust_state.get("total_realized_pnl", 0)
+        fees = rust_state.get("total_fees", 0)
         return _paper_response({
             "source": "rust_engine",
-            "balance": rust_state.get("balance", 0),
-            "peak_balance": rust_state.get("peak_balance", 0),
-            "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
-            "total_fees": rust_state.get("total_fees", 0),
-            "trade_count": rust_state.get("trade_count", 0),
-            "positions_count": len(rust_state.get("positions", [])),
+            "session": {
+                "session_state": "active",
+                "session_id": "rust_engine",
+                "initial_paper_balance_usdt": peak,  # 用峰值近似初始餘額 / Use peak as proxy for initial
+                "current_paper_balance_usdt": balance,
+                "peak_balance_usdt": peak,
+                "session_halted": False,
+                "session_halt_reason": None,
+            },
+            "pnl": {
+                "realized_pnl": realized,
+                "unrealized_pnl": total_unrealized,
+                "total_fees_paid": fees,
+                "total_ai_cost": 0,
+                "net_paper_pnl": realized + total_unrealized - fees,
+                "net_realized_pnl": realized - fees,
+                "closed_position_pnl": realized,
+            },
+            "order_count": 0,
+            "fill_count": rust_state.get("trade_count", 0),
+            "position_count": len(positions),
+            "state_revision": 0,
         })
     return _paper_response(ENGINE.get_session_status())
 
@@ -755,8 +779,17 @@ def get_positions(
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
     if rust_state is not None:
-        positions = rust_state.get("positions", [])
-        return _paper_response({"positions": positions, "count": len(positions), "source": "rust_engine"})
+        # 轉換 Rust 持倉欄位為 GUI 預期格式（is_long→side, entry_price→avg_entry_price）
+        # Transform Rust position fields to GUI-expected format
+        raw_positions = rust_state.get("positions", [])
+        transformed = []
+        for p in raw_positions:
+            transformed.append({
+                **p,
+                "side": "Buy" if p.get("is_long", True) else "Sell",
+                "avg_entry_price": p.get("entry_price", p.get("avg_entry_price", 0)),
+            })
+        return _paper_response({"positions": transformed, "count": len(transformed), "source": "rust_engine"})
     positions = ENGINE.get_positions()
     return _paper_response({"positions": positions, "count": len(positions)})
 
@@ -788,14 +821,21 @@ def get_pnl(
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
     if rust_state is not None:
+        # 將 Rust PnL 包裝為 GUI 預期的嵌套結構（與 /session/status 的 pnl 子對象一致）
+        # Wrap Rust PnL into nested structure matching GUI expectations
         positions = rust_state.get("positions", [])
         total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+        realized = rust_state.get("total_realized_pnl", 0)
+        fees = rust_state.get("total_fees", 0)
         return _paper_response({
             "source": "rust_engine",
-            "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
-            "total_unrealized_pnl": total_unrealized,
-            "total_fees": rust_state.get("total_fees", 0),
-            "net_pnl": rust_state.get("total_realized_pnl", 0) + total_unrealized - rust_state.get("total_fees", 0),
+            "realized_pnl": realized,
+            "unrealized_pnl": total_unrealized,
+            "total_fees_paid": fees,
+            "total_ai_cost": 0,
+            "net_paper_pnl": realized + total_unrealized - fees,
+            "net_realized_pnl": realized - fees,
+            "closed_position_pnl": realized,
             "trade_count": rust_state.get("trade_count", 0),
         })
     return _paper_response(ENGINE.get_pnl())
