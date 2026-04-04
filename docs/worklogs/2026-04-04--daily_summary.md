@@ -78,8 +78,37 @@ ccce81d docs: 2026-04-04 daily summary
 2f39690 fix(P0): eliminate all remaining V2 dead code — 9/9 fixes
 ```
 
-## 七、下一步
+### 交易鏈結構性修復（第三輪）
 
-1. 重啟服務使全部修復生效
-2. 觀察修復後策略表現（V2 全功能 + Kelly + Hurst regime + Donchian）
-3. Day 7（04-10）Go/No-Go
+- [x] Fix A: 策略 qty=1e9 → P1 sizing 全權決定（ETH: 0.097 = $200 = 2.0% ✅）
+- [x] Fix B: Grid inventory cap 移除（Gate 1.5 已正確處理）
+- [x] Fix D: intent_processor MIN_QTY 移除（P1 sizing 為唯一決定者）
+- [x] Fix C: 止損自然修復（持倉大小合理後止損有意義）
+- [x] 驗證：intent qty=1e9 → P1 sized to 0.097474 → $199.96 notional (2.0%)
+
+## 七、測試基準線（最終）
+
+```
+Python: 3839 passed / 0 failed
+Rust:   563 passed / 0 failed
+Total:  4402 tests 全綠
+```
+
+## 八、Commits
+
+```
+697a09e fix: apply_fill accumulates same-direction + reject duplicate intents
+6fa9c4f fix(P0): activate V2 strategy features + Kelly sizing + Grid OU
+ccce81d docs: 2026-04-04 daily summary
+2f39690 fix(P0): eliminate all remaining V2 dead code — 9/9 fixes
+df1fcbb docs: update daily summary
+5c8bb31 docs: add PYO3-1 ContextDistiller to TODO
+1aaef30 fix: trading chain — P1 sizing, remove inventory cap, remove MIN_QTY
+b38ea3b fix: strategy qty=1e9 — let P1 sizing fully determine position size
+```
+
+## 九、下一步
+
+1. 觀察修復後策略表現（V2 全功能 + P1 sizing 2% + 合理持倉）
+2. Day 7（04-10）Go/No-Go
+3. PYO3-1 ContextDistiller 接入（低優先級）
