@@ -208,7 +208,7 @@ class GrafanaDataWriter:
             win_rate = (win_count / total_trades * 100) if total_trades > 0 else None
 
             cur.execute("""
-                INSERT INTO paper_pnl_snapshots
+                INSERT INTO paper_pnl_snapshots_legacy
                     (ts, session_id, realized_pnl, unrealized_pnl, total_fees,
                      ai_cost, net_pnl, open_positions, total_trades, win_rate, sharpe_ratio)
                 VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -234,7 +234,7 @@ class GrafanaDataWriter:
             for symbol, price in prices.items():
                 try:
                     cur.execute("""
-                        INSERT INTO market_tickers
+                        INSERT INTO market_tickers_legacy
                             (ts, symbol, last_price, bid_price, ask_price,
                              volume_24h, funding_rate, open_interest,
                              index_price, mark_price)
@@ -266,7 +266,7 @@ class GrafanaDataWriter:
                     "symbols": km_stats.get("symbols", []),
                 })
                 cur.execute("""
-                    INSERT INTO system_health (ts, component, status, latency_ms, detail, metrics)
+                    INSERT INTO system_health_legacy (ts, component, status, latency_ms, detail, metrics)
                     VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s)
                 """, (
                     now_ms, "kline_manager", status, None,
@@ -287,7 +287,7 @@ class GrafanaDataWriter:
                     "stops_triggered": b_stats.get("stops_triggered", 0),
                 })
                 cur.execute("""
-                    INSERT INTO system_health (ts, component, status, latency_ms, detail, metrics)
+                    INSERT INTO system_health_legacy (ts, component, status, latency_ms, detail, metrics)
                     VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s)
                 """, (
                     now_ms, "pipeline_bridge", status, None,
@@ -318,7 +318,7 @@ class GrafanaDataWriter:
             for f in new_fills:
                 try:
                     cur.execute("""
-                        INSERT INTO trade_executions
+                        INSERT INTO trade_executions_legacy
                             (ts, exec_id, order_id, symbol, side, exec_type,
                              exec_qty, exec_price, fee, fee_currency, realized_pnl,
                              is_paper, strategy, metrics)

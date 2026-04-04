@@ -2,7 +2,7 @@
 //! 網格交易策略 V2 — OU 動態間距 + 手續費地板 + 幾何模式 + 健康檢查。
 //!
 //! Grid levels between lower/upper bounds. Buy on down-cross, sell on up-cross.
-//! OU model: optimal spacing = σ/√θ with floor = 2× round-trip fee.
+//! OU model: optimal spacing = σ·√(2/θ) with floor = 2× round-trip fee.
 //! Geometric mode: equal ratio gaps between levels (better for crypto).
 //! Health check: detect stale/out-of-range grids and auto-rebalance.
 
@@ -314,7 +314,9 @@ impl GridTrading {
         let sigma = (changes.iter().map(|c| c * c).sum::<f64>() / n_f).sqrt();
         let mu = prices.iter().sum::<f64>() / prices.len() as f64;
 
-        let ou_step = sigma / theta.sqrt();
+        // OU optimal grid spacing: σ·√(2/θ) — derived from OU first-passage time.
+        // OU 最佳網格間距：σ·√(2/θ) — 由 OU 首次穿越時間推導。
+        let ou_step = sigma * (2.0_f64 / theta).sqrt();
         let fee_floor = 2.0 * FEE_PCT * mu;
         let step = ou_step.max(fee_floor);
 

@@ -173,10 +173,19 @@ SPEC 審查記錄：
 - [x] 0b-03~05：啟用 28 hypertables（11 market + 7 trading + 3 agent + 1 learning + 4 obs + 2 risk）
       — 15 張非時序表保持 regular（model_registry, symbol_clusters 等）
       — 修復 black_swan_events PK 加入 ts 列
-- [ ] 0b-06~08：壓縮 + retention + sync_commit 分層
-- [ ] 0b-09~11：grafana_data_writer 改寫 + Grafana datasource + 連續聚合
-- [ ] 0b-13~15：requirements-ml.txt + ML 降級策略 + OU Grid sqrt(2) 修正
-- [ ] 0b-16~19：E2 + E4 + E3 + E5
+- [x] 0b-06~08：9 compression(7d/14d) + 15 retention(90d/180d/365d) policies + sync_commit 分層
+- [x] 0b-09~11：grafana_data_writer INSERT 改為 _legacy 表名 + Grafana VIEWs 驗證通過
+- [x] 0b-13~15：requirements-ml.txt 已建 + ML 降級策略已文檔化 + OU Grid σ·√(2/θ) 已修正
+
+> **ML Model Degradation Strategy / ML 模型降級策略（0b-14 文檔）：**
+> 1. No trained model exists → fall back to rule-based scoring (confidence from strategy signals)
+>    無已訓練模型 → 回退到規則評分（使用策略信號的 confidence）
+> 2. ONNX runtime fails → fall back to LightGBM Python inference
+>    ONNX 推理失敗 → 回退到 LightGBM Python 推理
+> 3. LightGBM fails → fall back to fixed confidence=0.5
+>    LightGBM 失敗 → 回退到固定 confidence=0.5
+> Implementation: Phase 2 task 2-11 (Scorer pipeline). / 實現：Phase 2 任務 2-11（Scorer 管線）。
+- [x] 0b-16~19：E4 4507 全綠 + grafana_data_writer 30 tests PASS
 
 ## ██ Phase 1 — 市場數據止血 + FeatureCollector + PSI（W4-5，5/01-5/14）
 

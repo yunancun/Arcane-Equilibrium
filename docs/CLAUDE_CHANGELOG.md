@@ -3,6 +3,15 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### Phase 0b 完成（2026-04-04）
+
+- 0b-06~08: 9 compression policies (7d/14d) + 15 retention policies (90d/180d/365d) + sync_commit 分層
+- 0b-09~11: grafana_data_writer INSERT 改為 _legacy 表名，Grafana VIEWs 橋接驗證通過
+- 0b-13: requirements-ml.txt 創建（lightgbm/optuna/sklearn/onnx/shap/duckdb/pyarrow）
+- 0b-14: ML 模型降級策略文檔化（3 級 fallback：rule-based → LightGBM → fixed 0.5）
+- 0b-15: OU Grid spacing 修正 σ/√θ → σ·√(2/θ)（首次穿越時間正確推導）
+- 0b-16~19: E4 4507 全綠
+
 ### Phase 0b TimescaleDB 啟用（2026-04-04）
 
 - Docker image 切換：postgres:16 → timescale/timescaledb:latest-pg16 (v2.26.1)

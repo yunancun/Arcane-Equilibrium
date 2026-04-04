@@ -1,0 +1,12 @@
+# ML/DL dependencies for OpenClaw Learning Pipeline (Phase 2+)
+# 機器學習/深度學習依賴（Phase 2+ 學習管線）
+# Install: pip install -r requirements-ml.txt
+
+lightgbm>=4.0.0          # Scorer model (LightGBM)
+optuna>=3.6.0            # Hyperparameter optimization (TPE)
+scikit-learn>=1.4.0      # Isotonic calibration, metrics, preprocessing
+onnx>=1.16.0             # Model export format
+onnxruntime>=1.18.0      # ONNX inference (Python side)
+shap>=0.45.0             # Feature importance / explainability
+duckdb>=1.0.0            # Parquet ETL (fast columnar queries)
+pyarrow>=16.0.0          # Parquet file I/O
