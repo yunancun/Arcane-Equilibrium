@@ -242,6 +242,15 @@ MODULE_NOTE 雙語 / 輸出 latest + dated / contract check / 更新 SCRIPT_INDE
 
 **E2 + E4 絕對不可跳過，任何情況均強制執行。**
 
+### ★ Bybit API 相關開發強制規則
+
+**所有涉及 Bybit API 的修改或新功能開發（含 REST、WebSocket、IPC），必須先查閱 Bybit API 字典手冊確認已有功能支持：**
+- **字典手冊**：`docs/references/2026-04-04--bybit_api_reference.md`
+- **審計報告**：`docs/audits/2026-04-04--bybit_api_infra_audit.md`
+- **開發前**：確認目標功能在手冊中是否已有對應端點。已有的直接調用，不重複實現。
+- **新增端點**：實現後必須同步更新字典手冊對應 Section，保持文檔與代碼一致。
+- **E2 必查**：Bybit 相關 PR 的 E2 審查必須驗證字典手冊已同步更新。
+
 ### 8.3 P0 緊急快速通道
 
 ```
@@ -301,6 +310,8 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 **前期路線圖（已完成）：** Phase 0-3 ✅ · Phase R R-00~R-06 ✅ · R-07 灰度中
 
 **關鍵文件：**
+- **★ Bybit API 字典手冊：`docs/references/2026-04-04--bybit_api_reference.md`**
+- **★ Bybit API 審計報告：`docs/audits/2026-04-04--bybit_api_infra_audit.md`**
 - 融合方案 v0.5：`docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md`
 - 執行計劃 V1：`docs/references/2026-04-04--execution_plan_v1.md`
 - ML 架構 v0.4：`docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md`

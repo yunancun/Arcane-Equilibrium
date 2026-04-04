@@ -48,6 +48,8 @@ Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
               9 compression + 15 retention policies · 11 Grafana VIEWs
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
+Bybit API:    ✅ BB+E5+PA 三轮审计通过 · 64 REST + 8 WS + 5 Private WS + 8 IPC
+              字典手册: docs/references/2026-04-04--bybit_api_reference.md
 L3 审计:      ✅ 9 角色全面审计归零（0 CRITICAL · 0 HIGH · 0 remaining）
 认证安全:     ✅ HttpOnly cookie + PG 127.0.0.1 only + IPC 600 perms
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
