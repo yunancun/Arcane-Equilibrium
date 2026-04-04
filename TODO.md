@@ -161,10 +161,10 @@ SPEC 審查記錄：
 > 存放：`sql/migrations/`
 > 決策：一步到位含 TimescaleDB hypertable，Grafana 接受完全中斷。
 
-- [ ] 0a-01~04：備份 + 執行 V001-V005 DDL + registry 文檔
-- [ ] 0a-05~09：舊表 _legacy + Grafana VIEW 橋接 + market/trading/agent 表
-- [ ] 0a-10~14：learning/features/observability/risk/news 表
-- [ ] 0a-15~16：索引 + scorer_training_features VIEW（防 leakage）
+- [x] 0a-01~04：備份(186K) + 執行 V001-V005 DDL（修復 window 保留字）
+- [x] 0a-05~09：舊表 _legacy 重命名(11/14) + Grafana VIEW 橋接(11)
+- [x] 0a-10~14：43 tables across 8 schemas + 87 indexes
+- [x] 0a-15~16：scorer_training_features VIEW + all indexes
 - [ ] 0a-17~19：E2 審查 + E4 回歸 + CC/E3 安全
 
 ## ██ Phase 0b — TimescaleDB 啟用（W2-3，4/18-4/30）

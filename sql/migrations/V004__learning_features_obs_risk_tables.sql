@@ -499,7 +499,7 @@ CREATE TABLE IF NOT EXISTS risk.correlation_pairs (
     symbol_b        TEXT        NOT NULL,
     correlation     REAL        NOT NULL,   -- Pearson 相關係數 / Pearson r
     method          TEXT        DEFAULT 'pearson',
-    window          TEXT,                   -- 計算窗口 / calculation window (e.g. '30d')
+    "window"        TEXT,                   -- 計算窗口 / calculation window (e.g. '30d') — quoted: SQL reserved word
     PRIMARY KEY (symbol_a, symbol_b, ts)
 );
 

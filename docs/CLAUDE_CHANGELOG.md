@@ -3,6 +3,13 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### Phase 0a DDL 執行（2026-04-04）
+
+- V001-V005 DDL 全部執行完成：8 schemas + 43 tables + 87 indexes + 11 Grafana VIEW bridges
+- 修復 V004 `window` SQL 保留字問題（加引號）
+- 14 張舊表中 11 張重命名為 `*_legacy`，VIEW 橋接確保 Grafana 不斷
+- 備份：`backups/trading_ai_pre_phase0a_20260404_180411.dump` (186K)
+
 ### R-IPC IPC-01~IPC-06（2026-04-04）
 
 - **IPC-01** Rust PipelineSnapshot 擴展：+indicators(per-symbol) +signals(100) +strategies +recent_intents(50) +recent_fills(50)
