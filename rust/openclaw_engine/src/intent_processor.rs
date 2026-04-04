@@ -39,11 +39,20 @@ pub struct IntentResult {
 /// 帶守護者檢查的意圖處理器。
 pub struct IntentProcessor {
     guardian: Guardian,
+    /// API-fetched taker fee rate (None = use hardcoded default).
+    /// API 動態 taker 費率（None = 使用硬編碼默認值）。
+    taker_fee_rate: Option<f64>,
 }
 
 impl IntentProcessor {
     pub fn new() -> Self {
-        Self { guardian: Guardian::default() }
+        Self { guardian: Guardian::default(), taker_fee_rate: None }
+    }
+
+    /// Create with an API-fetched taker fee rate.
+    /// 使用 API 動態費率創建。
+    pub fn with_fee_rate(rate: f64) -> Self {
+        Self { guardian: Guardian::default(), taker_fee_rate: Some(rate) }
     }
 
     /// Process a single intent through the full governance pipeline.
@@ -142,19 +151,35 @@ impl IntentProcessor {
         // will be implemented in Phase 2 when the Paper Engine gains an order book simulator.
         // 注意：order_type 和 limit_price 欄位當前被忽略。所有訂單均以即時市價成交。
         // 限價單執行（持有直到價格觸及 limit_price）將在 Phase 2 Paper Engine 獲得訂單簿模擬器後實現。
-        let turnover = 100_000_000.0; // default assumption
-        let fill = execution::execute_market_fill(
-            paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
-            final_qty,
-            intent.is_long,
-            turnover,
-        );
+        let turnover = paper_state.latest_turnover(&intent.symbol).unwrap_or(100_000_000.0);
+        let fill = if let Some(rate) = self.taker_fee_rate {
+            execution::execute_market_fill_with_rate(
+                paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
+                final_qty,
+                intent.is_long,
+                turnover,
+                rate,
+            )
+        } else {
+            execution::execute_market_fill(
+                paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
+                final_qty,
+                intent.is_long,
+                turnover,
+            )
+        };
 
         IntentResult {
             submitted: true,
             rejected_reason: None,
             fill: Some(fill),
         }
+    }
+
+    /// Set dynamic fee rate post-creation (for hot-reload).
+    /// 創建後設定動態費率（用於熱重載）。
+    pub fn set_fee_rate(&mut self, rate: f64) {
+        self.taker_fee_rate = Some(rate);
     }
 }
 

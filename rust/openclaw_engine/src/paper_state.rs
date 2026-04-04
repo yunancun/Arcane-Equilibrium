@@ -27,11 +27,20 @@ pub struct PaperState {
     peak_balance: f64,
     positions: HashMap<String, PaperPosition>,
     latest_prices: HashMap<String, f64>,
+    /// Per-symbol 24h turnover for dynamic slippage calculation.
+    /// 每交易對 24h 成交額，用於動態滑點計算。
+    latest_turnovers: HashMap<String, f64>,
     total_realized_pnl: f64,
     total_fees: f64,
     trade_count: u32,
     stop_config: StopConfig,
     forced_drawdown: f64,
+    /// Bybit Demo account real balance (Mode B: bybit_sync). None = custom mode.
+    /// Bybit Demo 帳戶真實餘額（模式 B：bybit_sync）。None = 自設金額模式。
+    bybit_sync_balance: Option<f64>,
+    /// API-reported unrealized PnL per symbol (from WS position updates).
+    /// API 報告的每交易對未實現損益（來自 WS 持倉更新）。
+    api_unrealized_pnl: HashMap<String, f64>,
 }
 
 impl PaperState {
@@ -42,11 +51,14 @@ impl PaperState {
             peak_balance: initial_balance,
             positions: HashMap::new(),
             latest_prices: HashMap::new(),
+            latest_turnovers: HashMap::new(),
             total_realized_pnl: 0.0,
             total_fees: 0.0,
             trade_count: 0,
             stop_config: StopConfig::default(),
             forced_drawdown: 0.0,
+            bybit_sync_balance: None,
+            api_unrealized_pnl: HashMap::new(),
         }
     }
 
@@ -76,6 +88,40 @@ impl PaperState {
 
     pub fn set_latest_price(&mut self, symbol: &str, price: f64) {
         self.latest_prices.insert(symbol.to_string(), price);
+    }
+
+    /// Get latest 24h turnover for a symbol (for dynamic slippage).
+    /// 獲取交易對最新 24h 成交額（用於動態滑點）。
+    pub fn latest_turnover(&self, symbol: &str) -> Option<f64> {
+        self.latest_turnovers.get(symbol).copied()
+    }
+
+    pub fn set_latest_turnover(&mut self, symbol: &str, turnover: f64) {
+        self.latest_turnovers.insert(symbol.to_string(), turnover);
+    }
+
+    /// Set Bybit Demo sync balance (Mode B). Call with None to disable sync mode.
+    /// 設定 Bybit Demo 同步餘額（模式 B）。傳 None 關閉同步模式。
+    pub fn set_bybit_sync_balance(&mut self, balance: Option<f64>) {
+        self.bybit_sync_balance = balance;
+    }
+
+    pub fn bybit_sync_balance(&self) -> Option<f64> { self.bybit_sync_balance }
+
+    /// Set API-reported unrealized PnL for a symbol (from WS position updates).
+    /// 設定 API 報告的未實現損益（來自 WS 持倉更新）。
+    pub fn set_api_unrealized_pnl(&mut self, symbol: &str, pnl: f64) {
+        self.api_unrealized_pnl.insert(symbol.to_string(), pnl);
+    }
+
+    pub fn api_unrealized_pnl(&self, symbol: &str) -> Option<f64> {
+        self.api_unrealized_pnl.get(symbol).copied()
+    }
+
+    /// Get hard stop percentage from config (for server-side stop calc).
+    /// 從配置獲取硬止損百分比（用於伺服器端止損計算）。
+    pub fn stop_config_pct(&self) -> f64 {
+        self.stop_config.hard_stop_pct
     }
 
     /// For testing: force a specific drawdown percentage.
@@ -208,7 +254,7 @@ impl PaperState {
     /// Export state for persistence (with real-time unrealized PnL).
     /// 導出狀態用於持久化（含即時未實現損益）。
     pub fn export_state(&self) -> PaperStateSnapshot {
-        let positions: Vec<PaperPosition> = self.positions.values().map(|pos| {
+        let positions: Vec<PositionSnapshot> = self.positions.values().map(|pos| {
             // Compute real unrealized PnL using latest price for this symbol (QC fix).
             // 使用該交易對最新價格計算真實未實現損益。
             let current_price = self.latest_prices.get(&pos.symbol).copied().unwrap_or(pos.entry_price);
@@ -217,9 +263,12 @@ impl PaperState {
             } else {
                 (pos.entry_price - current_price) * pos.qty
             };
-            PaperPosition {
-                unrealized_pnl,
-                ..pos.clone()
+            PositionSnapshot {
+                position: PaperPosition {
+                    unrealized_pnl,
+                    ..pos.clone()
+                },
+                api_pnl: self.api_unrealized_pnl.get(&pos.symbol).copied(),
             }
         }).collect();
         PaperStateSnapshot {
@@ -229,8 +278,21 @@ impl PaperState {
             total_fees: self.total_fees,
             trade_count: self.trade_count,
             positions,
+            bybit_sync_balance: self.bybit_sync_balance,
         }
     }
+}
+
+/// Per-position snapshot with optional API PnL for comparison (M5 fix).
+/// 每倉位快照，含可選 API PnL 對比（M5 修復）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionSnapshot {
+    #[serde(flatten)]
+    pub position: PaperPosition,
+    /// API-reported unrealized PnL (from Bybit WS position updates).
+    /// API 報告的未實現損益（來自 Bybit WS 持倉更新）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_pnl: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,7 +302,11 @@ pub struct PaperStateSnapshot {
     pub total_realized_pnl: f64,
     pub total_fees: f64,
     pub trade_count: u32,
-    pub positions: Vec<PaperPosition>,
+    pub positions: Vec<PositionSnapshot>,
+    /// Bybit Demo sync balance for comparison (None = custom mode).
+    /// Bybit Demo 同步餘額用於對比（None = 自設金額模式）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bybit_sync_balance: Option<f64>,
 }
 
 #[cfg(test)]

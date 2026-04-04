@@ -416,8 +416,14 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
         .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
         .unwrap_or(0);
 
+    let turnover = item.get("turnover24h")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
     let mut event = PriceEvent::new(symbol, last_price, ts);
     event.volume_24h = volume;
+    event.turnover_24h = turnover;
     event.bid_price = bid;
     event.ask_price = ask;
     event.metadata.insert("type".into(), "ticker".into());

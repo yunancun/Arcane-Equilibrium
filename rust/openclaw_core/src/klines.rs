@@ -596,6 +596,35 @@ impl KlineManager {
     pub fn timeframes(&self) -> &[String] {
         &self.timeframes
     }
+
+    /// Seed historical bars into the buffer (REST bootstrap, eliminates cold start).
+    /// 將歷史 K 線注入緩衝區（REST 引導，消除冷啟動）。
+    ///
+    /// Bars MUST be sorted oldest-first (ascending open_time_ms).
+    /// Only bars with `is_closed == true` are appended.
+    /// Returns the number of bars actually seeded.
+    ///
+    /// 傳入的 K 線必須按 open_time_ms 升序排列（最舊在前）。
+    /// 僅追加 `is_closed == true` 的 K 線。返回實際注入的數量。
+    pub fn seed_bars(&mut self, symbol: &str, timeframe: &str, bars: Vec<KlineBar>) -> usize {
+        let agg = match self
+            .aggregators
+            .get_mut(symbol)
+            .and_then(|m| m.get_mut(timeframe))
+        {
+            Some(a) => a,
+            None => return 0,
+        };
+
+        let mut count = 0usize;
+        for bar in bars {
+            if bar.is_closed {
+                agg.buffer_mut().append(bar);
+                count += 1;
+            }
+        }
+        count
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -973,5 +1002,76 @@ mod tests {
         let mut exp = expected;
         exp.sort();
         assert_eq!(actual, exp);
+    }
+
+    // ── 17. seed_bars — REST bootstrap ──
+
+    #[test]
+    fn test_seed_bars_basic() {
+        let mut mgr = KlineManager::new(&["BTCUSDT"], Some(&["1m"]), Some(500));
+
+        // Create 5 closed bars (oldest-first)
+        let bars: Vec<KlineBar> = (0..5u64)
+            .map(|i| KlineBar {
+                open_time_ms: BASE_TS + i * 60_000,
+                close_time_ms: BASE_TS + (i + 1) * 60_000,
+                open: 100.0 + i as f64,
+                high: 105.0 + i as f64,
+                low: 95.0 + i as f64,
+                close: 102.0 + i as f64,
+                volume: 10.0,
+                turnover: 1000.0,
+                tick_count: 1,
+                is_closed: true,
+            })
+            .collect();
+
+        let count = mgr.seed_bars("BTCUSDT", "1m", bars);
+        assert_eq!(count, 5);
+
+        let buf = mgr.get_buffer("BTCUSDT", "1m").unwrap();
+        assert_eq!(buf.len(), 5);
+        let closes = buf.close_array(5);
+        assert_eq!(closes, vec![102.0, 103.0, 104.0, 105.0, 106.0]);
+    }
+
+    #[test]
+    fn test_seed_bars_filters_unclosed() {
+        let mut mgr = KlineManager::new(&["ETHUSDT"], Some(&["1m"]), Some(500));
+
+        let bars = vec![
+            KlineBar {
+                open_time_ms: BASE_TS,
+                close_time_ms: BASE_TS + 60_000,
+                open: 100.0, high: 110.0, low: 90.0, close: 105.0,
+                volume: 10.0, turnover: 1000.0, tick_count: 1,
+                is_closed: true,
+            },
+            KlineBar {
+                open_time_ms: BASE_TS + 60_000,
+                close_time_ms: BASE_TS + 120_000,
+                open: 105.0, high: 115.0, low: 95.0, close: 110.0,
+                volume: 20.0, turnover: 2000.0, tick_count: 1,
+                is_closed: false, // unclosed — should be filtered
+            },
+        ];
+
+        let count = mgr.seed_bars("ETHUSDT", "1m", bars);
+        assert_eq!(count, 1);
+        assert_eq!(mgr.get_buffer("ETHUSDT", "1m").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_seed_bars_unknown_symbol_returns_zero() {
+        let mut mgr = KlineManager::new(&["BTCUSDT"], Some(&["1m"]), Some(500));
+        let count = mgr.seed_bars("UNKNOWN", "1m", vec![]);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_seed_bars_unknown_timeframe_returns_zero() {
+        let mut mgr = KlineManager::new(&["BTCUSDT"], Some(&["1m"]), Some(500));
+        let count = mgr.seed_bars("BTCUSDT", "15m", vec![]);
+        assert_eq!(count, 0);
     }
 }

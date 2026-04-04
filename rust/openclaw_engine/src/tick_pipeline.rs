@@ -13,12 +13,43 @@ use openclaw_core::{
 use openclaw_types::PriceEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info};
 
+use crate::instrument_info::InstrumentInfoCache;
 use crate::intent_processor::IntentProcessor;
 use crate::orchestrator::Orchestrator;
 use crate::paper_state::PaperState;
+
+/// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
+/// 從 tick_pipeline 派發到 Bybit API 的伺服器端止損請求（項目 1）。
+#[derive(Debug, Clone)]
+pub struct StopRequest {
+    pub symbol: String,
+    pub stop_loss: f64,
+    pub is_long: bool,
+}
+
+/// Shadow order request dispatched from tick_pipeline to Bybit Demo API.
+/// 從 tick_pipeline 派發到 Bybit Demo API 的影子訂單請求。
+#[derive(Debug, Clone)]
+pub struct ShadowOrderRequest {
+    /// Trading symbol / 交易對
+    pub symbol: String,
+    /// Long direction / 多方向
+    pub is_long: bool,
+    /// Fill quantity / 成交數量
+    pub qty: f64,
+    /// Fill price / 成交價格
+    pub price: f64,
+    /// Strategy name / 策略名稱
+    pub strategy: String,
+    /// Paper fill timestamp (ms) / 紙盤成交時間戳（毫秒）
+    pub paper_fill_ts: u64,
+    /// true = closing position, use reduce_only / true = 平倉，使用 reduce_only
+    pub is_close: bool,
+}
 
 /// Tick context passed to strategies.
 /// 傳遞給策略的 tick 上下文。
@@ -62,9 +93,21 @@ pub struct TickPipeline {
     recent_intents: VecDeque<TimestampedIntent>,
     /// Recent fills ring buffer (max 50) / 最近成交環形緩衝（最大 50）
     recent_fills: VecDeque<TimestampedFill>,
+    /// Channel to dispatch server-side stop requests (Item 1: dual-track stops).
+    /// 派發伺服器端止損請求的通道（項目 1：雙軌止損）。
+    stop_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StopRequest>>,
+    /// ADL alert ring buffer (ts_ms, symbol, rank). Item 9.
+    /// ADL 警報環形緩衝（時間戳, 交易對, 排名）。項目 9。
+    adl_alerts: VecDeque<(u64, String, u32)>,
     /// Enable canary mode — on_tick returns per-tick CanaryRecord (R07-2).
     /// 啟用灰度模式 — on_tick 返回每 tick 的 CanaryRecord。
     pub canary_mode: bool,
+    /// Instrument info cache for exchange precision rounding (R-05).
+    /// 合約信息緩存，用於交易所精度取整。
+    instrument_cache: Option<Arc<InstrumentInfoCache>>,
+    /// Channel to dispatch shadow orders to Bybit Demo API.
+    /// 派發影子訂單到 Bybit Demo API 的通道。
+    shadow_order_tx: Option<tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>>,
 }
 
 impl TickPipeline {
@@ -94,8 +137,36 @@ impl TickPipeline {
             recent_signals: VecDeque::new(),
             recent_intents: VecDeque::new(),
             recent_fills: VecDeque::new(),
+            stop_request_tx: None,
+            adl_alerts: VecDeque::new(),
             canary_mode: false,
+            instrument_cache: None,
+            shadow_order_tx: None,
         }
+    }
+
+    /// Set dynamic fee rate from API for more accurate paper trading cost.
+    /// 設定 API 動態費率，提高紙盤交易成本精確度。
+    pub fn set_fee_rate(&mut self, rate: f64) {
+        self.intent_processor.set_fee_rate(rate);
+    }
+
+    /// Set instrument info cache for exchange precision rounding (R-05).
+    /// 設定合約信息緩存，用於交易所精度取整。
+    pub fn set_instrument_cache(&mut self, cache: Arc<InstrumentInfoCache>) {
+        self.instrument_cache = Some(cache);
+    }
+
+    /// Set channel for dispatching server-side stop requests (Item 1: dual-track stops).
+    /// 設定伺服器端止損請求派發通道（項目 1：雙軌止損）。
+    pub fn set_stop_channel(&mut self, tx: tokio::sync::mpsc::UnboundedSender<StopRequest>) {
+        self.stop_request_tx = Some(tx);
+    }
+
+    /// Set channel for dispatching shadow orders to Bybit Demo API.
+    /// 設定影子訂單派發通道到 Bybit Demo API。
+    pub fn set_shadow_channel(&mut self, tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>) {
+        self.shadow_order_tx = Some(tx);
     }
 
     /// Process a single price event through the full pipeline.
@@ -110,6 +181,28 @@ impl TickPipeline {
         self.stats.last_tick_ms = event.ts_ms;
         self.latest_prices.insert(event.symbol.clone(), event.last_price);
         self.paper_state.set_latest_price(&event.symbol, event.last_price);
+        // Update per-symbol turnover for dynamic slippage (from ticker events)
+        // 更新每交易對成交額用於動態滑點（來自 ticker 事件）
+        if event.turnover_24h > 0.0 {
+            self.paper_state.set_latest_turnover(&event.symbol, event.turnover_24h);
+        }
+
+        // Item 9 (M3 fix): ADL alert monitoring
+        // 項目 9（M3 修復）：ADL 警報監控
+        if event.metadata.get("type").map(|t| t.as_str()) == Some("adl_notice") {
+            if let Some(rank_str) = event.metadata.get("adl_rank") {
+                if let Ok(rank) = rank_str.parse::<u32>() {
+                    self.adl_alerts.push_back((event.ts_ms, event.symbol.clone(), rank));
+                    if self.adl_alerts.len() > 50 { self.adl_alerts.pop_front(); }
+                    if rank >= 3 {
+                        info!(
+                            symbol = %event.symbol, rank = rank,
+                            "⚠ ADL rank HIGH — consider reducing position / ADL 排名高，考慮減倉"
+                        );
+                    }
+                }
+            }
+        }
 
         // Step 0: Fast track check — emergency actions before normal processing
         let ft_action = crate::fast_track::evaluate_fast_track(
@@ -196,8 +289,16 @@ impl TickPipeline {
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                     // RC-05: Notify strategy of fill / 通知策略成交
-                    if let Some(ref fill) = result.fill {
-                        strategy.on_fill(intent, fill);
+                    if let Some(mut fill) = result.fill {
+                        // Round to exchange precision if instrument cache available (R-05)
+                        // 若有合約信息緩存，取整至交易所精度
+                        if let Some(ref icache) = self.instrument_cache {
+                            if let Some(spec) = icache.get(&intent.symbol) {
+                                fill.fill_qty = spec.round_qty(fill.fill_qty);
+                                fill.fill_price = spec.round_price(fill.fill_price);
+                            }
+                        }
+                        strategy.on_fill(intent, &fill);
                         self.paper_state.apply_fill(
                             &intent.symbol, intent.is_long, fill.fill_qty,
                             fill.fill_price, fill.fee, event.ts_ms,
@@ -214,6 +315,41 @@ impl TickPipeline {
                             strategy: intent.strategy.clone(),
                         });
                         if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+
+                        // Item 1: Dispatch server-side stop for open positions (dual-track)
+                        // 項目 1：為持倉派發伺服器端止損（雙軌）
+                        // M1 fix: Only dispatch if position exists after fill (skip closes).
+                        // Use entry_price (weighted avg) for correct SL after accumulations.
+                        // H3 fix: Read stop_pct from StopConfig, not hardcoded.
+                        if let Some(ref tx) = self.stop_request_tx {
+                            if let Some(pos) = self.paper_state.get_position(&intent.symbol) {
+                                let stop_pct = self.paper_state.stop_config_pct();
+                                let sl_price = if pos.is_long {
+                                    pos.entry_price * (1.0 - stop_pct / 100.0)
+                                } else {
+                                    pos.entry_price * (1.0 + stop_pct / 100.0)
+                                };
+                                let _ = tx.send(StopRequest {
+                                    symbol: intent.symbol.clone(),
+                                    stop_loss: sl_price,
+                                    is_long: pos.is_long,
+                                });
+                            }
+                        }
+
+                        // Shadow order: mirror paper fill to Demo API for calibration
+                        // 影子訂單：將紙盤成交映射到 Demo API 進行校準
+                        if let Some(ref tx) = self.shadow_order_tx {
+                            let _ = tx.send(ShadowOrderRequest {
+                                symbol: intent.symbol.clone(),
+                                is_long: intent.is_long,
+                                qty: fill.fill_qty,
+                                price: fill.fill_price,
+                                strategy: intent.strategy.clone(),
+                                paper_fill_ts: event.ts_ms,
+                                is_close: false,
+                            });
+                        }
                     }
                 } else if let Some(ref reason) = result.rejected_reason {
                     // RC-04: Notify strategy of rejection for state rollback
@@ -234,9 +370,28 @@ impl TickPipeline {
         // Step 6: Check stops
         let triggers = self.paper_state.check_stops(event.last_price, event.ts_ms);
         for (symbol, trigger) in &triggers {
+            // Capture position direction before closing (needed for shadow close)
+            // 在平倉前擷取持倉方向（影子平倉需要）
+            // Capture position info before closing (E2 fix: need qty + direction for shadow)
+            // 平倉前擷取持倉信息（E2 修復：影子訂單需要數量和方向）
+            let pos_info = self.paper_state.get_position(symbol).map(|p| (p.is_long, p.qty));
             debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered");
             self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
             self.stats.total_stops += 1;
+
+            // Shadow close: mirror stop-triggered close to Demo API
+            // 影子平倉：將止損觸發的平倉映射到 Demo API
+            if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
+                let _ = tx.send(ShadowOrderRequest {
+                    symbol: symbol.clone(),
+                    is_long: !is_long, // opposite direction to close / 反方向平倉
+                    qty,               // actual position size / 實際倉位大小
+                    price: event.last_price,
+                    strategy: "stop".into(),
+                    paper_fill_ts: event.ts_ms,
+                    is_close: true,
+                });
+            }
         }
 
         if self.stats.total_ticks % 1000 == 0 {

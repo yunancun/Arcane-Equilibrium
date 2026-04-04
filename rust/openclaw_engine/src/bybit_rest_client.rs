@@ -356,6 +356,12 @@ impl BybitRestClient {
         !self.api_key.is_empty() && !self.api_secret.is_empty()
     }
 
+    /// Get credentials for BybitPrivateWs construction. Returns (api_key, api_secret).
+    /// 獲取憑證用於構建 BybitPrivateWs。返回 (api_key, api_secret)。
+    pub fn credentials(&self) -> (&str, &str) {
+        (&self.api_key, &self.api_secret)
+    }
+
     /// Get current rate limit remaining count.
     /// 取得當前限流剩餘計數。
     pub fn rate_limit_remaining(&self) -> i64 {

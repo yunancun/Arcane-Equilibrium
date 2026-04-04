@@ -11,6 +11,10 @@ pub struct PriceEvent {
     pub symbol: String,
     pub last_price: f64,
     pub volume_24h: f64,
+    /// 24h turnover in USD (from Bybit ticker). Used for dynamic slippage calculation.
+    /// 24h 成交額（美元，來自 Bybit ticker）。用於動態滑點計算。
+    #[serde(default)]
+    pub turnover_24h: f64,
     pub ts_ms: u64,
     #[serde(default)]
     pub bid_price: f64,
@@ -26,6 +30,7 @@ impl PriceEvent {
             symbol,
             last_price,
             volume_24h: 0.0,
+            turnover_24h: 0.0,
             ts_ms,
             bid_price: 0.0,
             ask_price: 0.0,

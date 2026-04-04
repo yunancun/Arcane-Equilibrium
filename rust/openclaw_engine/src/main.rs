@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Engine version from Cargo.toml / 引擎版本（來自 Cargo.toml）
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -359,26 +359,354 @@ async fn async_main(config: Arc<ConfigManager>) {
     });
 
     // ------------------------------------------------------------------
-    // Start WS client — subscribe to all symbols
-    // 啟動 WebSocket 客戶端 — 訂閱所有交易對
+    // Bybit API integration — DCP, auto-margin, fee rates (Items 2/7/8)
+    // Bybit API 整合 — 斷連保護、自動追加保證金、動態費率
+    // ------------------------------------------------------------------
+    let mut api_taker_fee: Option<f64> = None;
+    let mut api_credentials: Option<(String, String)> = None;
+    let mut shared_client: Option<Arc<BybitRestClient>> = None;
+    let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> = None;
+    let cfg_snapshot = config.get();
+    if let Ok(rest_client) = BybitRestClient::new(BybitEnvironment::Demo, None, None) {
+        if rest_client.has_credentials() {
+            let (key, secret) = rest_client.credentials();
+            api_credentials = Some((key.to_string(), secret.to_string()));
+            let client_arc = Arc::new(rest_client);
+            shared_client = Some(Arc::clone(&client_arc));
+
+            // R-05: Load instrument info cache (lot sizes, tick sizes, min notional)
+            // R-05：加載合約信息緩存（步長、tick 精度、最小名義值）
+            let instrument_cache = Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
+            match instrument_cache.refresh(&*client_arc, "linear").await {
+                Ok(count) => {
+                    shared_instruments = Some(Arc::clone(&instrument_cache));
+                    info!(symbols = count, "instrument info loaded / 品種規格已加載");
+                }
+                Err(e) => warn!(error = %e, "instrument info fetch failed / 品種規格加載失敗"),
+            }
+
+            // Item 8: DCP — Disconnected Cancel Protection
+            // 項目 8：DCP — 斷連取消保護
+            if cfg_snapshot.dcp_enabled {
+                use openclaw_engine::platform_client::PlatformClient;
+                let platform = PlatformClient::new(Arc::clone(&client_arc));
+                match platform.set_dcp(cfg_snapshot.dcp_time_window).await {
+                    Ok(()) => info!(window = cfg_snapshot.dcp_time_window, "DCP enabled / DCP 已啟用"),
+                    Err(e) => warn!(error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗（非致命）"),
+                }
+            }
+
+            // Item 7: Auto-add-margin for existing positions
+            // 項目 7：為現有倉位啟用自動追加保證金
+            if cfg_snapshot.auto_add_margin {
+                use openclaw_engine::order_manager::OrderCategory;
+                use openclaw_engine::position_manager::PositionManager;
+                let pos_mgr = PositionManager::new(Arc::clone(&client_arc));
+                match pos_mgr.get_positions(OrderCategory::Linear, None).await {
+                    Ok(positions) => {
+                        for pos in &positions {
+                            if pos.size > 0.0 {
+                                match pos_mgr.set_auto_add_margin(
+                                    OrderCategory::Linear, &pos.symbol, 1, None,
+                                ).await {
+                                    Ok(()) => info!(symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用"),
+                                    Err(e) => warn!(symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗"),
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "failed to query positions for auto-margin / 查詢倉位失敗"),
+                }
+            }
+
+            // Item 2: Fetch dynamic fee rates
+            // 項目 2：獲取動態費率
+            let acct = AccountManager::new();
+            match acct.refresh_fee_rates(&*client_arc, "linear").await {
+                Ok(count) => {
+                    let rate = acct.taker_fee("BTCUSDT");
+                    api_taker_fee = Some(rate);
+                    info!(symbols = count, taker_rate = format!("{:.5}", rate), "fee rates loaded / 費率已加載");
+                }
+                Err(e) => warn!(error = %e, "fee rate fetch failed, using defaults / 費率獲取失敗，使用默認值"),
+            }
+        } else {
+            info!("no Bybit credentials — skipping DCP/margin/fee setup / 無 API 憑證，跳過 API 設定");
+        }
+    } else {
+        info!("Bybit client init failed — skipping API setup / Bybit 客戶端初始化失敗，跳過 API 設定");
+    }
+
+    // ------------------------------------------------------------------
+    // R-05: Periodic instrument info refresh (every 4 hours)
+    // R-05：定期刷新合約信息（每 4 小時）
+    // ------------------------------------------------------------------
+    if let (Some(ref icache), Some(ref client)) = (&shared_instruments, &shared_client) {
+        let refresh_cache = Arc::clone(icache);
+        let refresh_client = Arc::clone(client);
+        let refresh_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(4 * 3600));
+            interval.tick().await; // skip immediate first tick
+            loop {
+                tokio::select! {
+                    _ = refresh_cancel.cancelled() => break,
+                    _ = interval.tick() => {
+                        match refresh_cache.refresh(&*refresh_client, "linear").await {
+                            Ok(n) => info!(symbols = n, "instrument info refreshed / 品種規格已刷新"),
+                            Err(e) => warn!(error = %e, "instrument refresh failed / 品種刷新失敗"),
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Start WS client — subscribe to all symbols (with extended topics if configured)
+    // 啟動 WebSocket 客戶端 — 訂閱所有交易對（含擴展 topic）
     // ------------------------------------------------------------------
     let mut ws_client = WsClient::new(Arc::clone(&config), event_tx, cancel.clone());
-    for sym in SYMBOLS {
-        ws_client.subscribe(format!("kline.1.{sym}"));
-        ws_client.subscribe(format!("publicTrade.{sym}"));
+    if cfg_snapshot.enable_extended_ws {
+        // Item 9: Extended subscriptions — full + adl-notice + price-limit
+        // 項目 9：擴展訂閱 — 完整 + ADL 警報 + 價格限制
+        for sym in SYMBOLS {
+            for topic in openclaw_engine::multi_interval_ws::extended_subscription_list(sym) {
+                ws_client.subscribe(topic);
+            }
+        }
+        info!(topics_per_symbol = 10, "extended WS subscriptions / 擴展 WS 訂閱");
+    } else {
+        for sym in SYMBOLS {
+            ws_client.subscribe(format!("kline.1.{sym}"));
+            ws_client.subscribe(format!("publicTrade.{sym}"));
+        }
     }
     let ws_handle = tokio::spawn(async move {
         ws_client.run().await;
     });
 
     // ------------------------------------------------------------------
+    // Item 5: Private WS + ExecutionListener (order/fill/position/wallet callbacks)
+    // 項目 5：私有 WS + 執行監聽器（訂單/成交/持倉/餘額回調）
+    // ------------------------------------------------------------------
+    let _private_ws_handle = if let Some((api_key, api_secret)) = api_credentials {
+        use openclaw_engine::bybit_private_ws::BybitPrivateWs;
+        use openclaw_engine::execution_listener::ExecutionListener;
+        use std::sync::RwLock;
+
+        let (priv_tx, priv_rx) = mpsc::channel(512);
+
+        // Shared state updated by callbacks / 回調更新的共享狀態
+        let bybit_balance: Arc<RwLock<Option<f64>>> = Arc::new(RwLock::new(None));
+        let api_pnl: Arc<RwLock<std::collections::HashMap<String, f64>>> =
+            Arc::new(RwLock::new(std::collections::HashMap::new()));
+
+        let mut listener = ExecutionListener::new(priv_rx);
+
+        // Item 3: on_balance_update → track Bybit sync balance
+        // 項目 3：餘額更新回調 → 追蹤 Bybit 同步餘額
+        let bal_ref = Arc::clone(&bybit_balance);
+        listener.set_on_balance_update(move |wallet| {
+            for coin_update in &wallet.coin {
+                if coin_update.coin.eq_ignore_ascii_case("USDT") {
+                    if let Ok(bal) = coin_update.wallet_balance.parse::<f64>() {
+                        if let Ok(mut guard) = bal_ref.write() {
+                            *guard = Some(bal);
+                        }
+                        info!(
+                            equity = %coin_update.equity,
+                            balance = %coin_update.wallet_balance,
+                            "WS wallet update (USDT) / WS 錢包更新"
+                        );
+                    }
+                    break;
+                }
+            }
+        });
+
+        // Item 4: on_position_update → track API unrealized PnL
+        // 項目 4：持倉更新回調 → 追蹤 API 未實現損益
+        let pnl_ref = Arc::clone(&api_pnl);
+        listener.set_on_position_update(move |pos| {
+            if let Ok(pnl) = pos.unrealised_pnl.parse::<f64>() {
+                if let Ok(mut guard) = pnl_ref.write() {
+                    guard.insert(pos.symbol.clone(), pnl);
+                }
+            }
+            debug!(
+                symbol = %pos.symbol,
+                side = %pos.side,
+                size = %pos.size,
+                pnl = %pos.unrealised_pnl,
+                "WS position update / WS 持倉更新"
+            );
+        });
+
+        // Item 5: on_fill → log execution
+        listener.set_on_fill(move |exec| {
+            info!(
+                exec_id = %exec.exec_id,
+                symbol = %exec.symbol,
+                side = %exec.side,
+                qty = %exec.exec_qty,
+                price = %exec.exec_price,
+                fee = %exec.exec_fee,
+                "WS fill / WS 成交"
+            );
+        });
+
+        // on_order_update → log status changes
+        listener.set_on_order_update(move |order| {
+            debug!(
+                order_id = %order.order_id,
+                symbol = %order.symbol,
+                status = %order.order_status,
+                "WS order update / WS 訂單更新"
+            );
+        });
+
+        // Spawn listener task / 啟動監聽器任務
+        let listener_handle = tokio::spawn(async move {
+            let mut listener = listener;
+            listener.run().await;
+        });
+
+        // Spawn private WS connection / 啟動私有 WS 連接
+        let priv_cancel = cancel.clone();
+        let priv_ws = BybitPrivateWs::new(
+            api_key, api_secret, BybitEnvironment::Demo, priv_cancel, priv_tx,
+        );
+        let priv_ws_handle = tokio::spawn(async move {
+            priv_ws.run().await;
+        });
+
+        info!("Private WS + ExecutionListener started / 私有 WS + 執行監聯器已啟動");
+        Some((priv_ws_handle, listener_handle, bybit_balance, api_pnl))
+    } else {
+        info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
+        None
+    };
+
+    // Extract shared state Arcs for event consumer (H1+H2 fix: bridge WS data → pipeline)
+    // 提取共享狀態 Arc 給事件消費者（H1+H2 修復：橋接 WS 數據 → 管線）
+    let shared_bybit_balance = _private_ws_handle.as_ref().map(|h| Arc::clone(&h.2));
+    let shared_api_pnl = _private_ws_handle.as_ref().map(|h| Arc::clone(&h.3));
+
+    // ------------------------------------------------------------------
     // Event consumer — feeds into TickPipeline for paper trading
     // 事件消費者 — 送入 TickPipeline 進行紙盤交易
     // ------------------------------------------------------------------
     let event_cancel = cancel.clone();
+    let bootstrap_client = shared_client.as_ref().map(Arc::clone);
     let event_handle = tokio::spawn(async move {
         // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
         let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
+
+        // Item 2: Set dynamic fee rate if available / 設定動態費率
+        if let Some(rate) = api_taker_fee {
+            pipeline.set_fee_rate(rate);
+            info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
+        }
+
+        // R-05: Wire instrument cache into pipeline for precision rounding
+        // R-05：將合約信息緩存接入管線，用於精度取整
+        if let Some(ref icache) = shared_instruments {
+            pipeline.set_instrument_cache(Arc::clone(icache));
+            info!("pipeline using instrument cache for precision rounding / 管線使用合約信息緩存進行精度取整");
+        }
+
+        // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
+        if cfg_snapshot.balance_mode == "bybit_sync" {
+            pipeline.paper_state.set_bybit_sync_balance(Some(initial_balance));
+            info!(balance = format!("{:.2}", initial_balance), "bybit_sync mode — tracking Bybit Demo balance / 同步模式已啟用");
+        }
+
+        // Item 1: Server-side stop channel (dual-track stops)
+        // 項目 1：伺服器端止損通道（雙軌止損）
+        if cfg_snapshot.server_side_stops {
+            let (stop_tx, mut stop_rx) = tokio::sync::mpsc::unbounded_channel::<
+                openclaw_engine::tick_pipeline::StopRequest,
+            >();
+            pipeline.set_stop_channel(stop_tx);
+
+            // Spawn async task to process stop requests via Bybit API
+            // 啟動異步任務通過 Bybit API 處理止損請求
+            tokio::spawn(async move {
+                while let Some(req) = stop_rx.recv().await {
+                    // In demo mode, log the request. In live, call set_trading_stop.
+                    // Demo 模式下記錄請求。Live 模式下調用 set_trading_stop。
+                    info!(
+                        symbol = %req.symbol,
+                        stop_loss = format!("{:.2}", req.stop_loss),
+                        side = if req.is_long { "long" } else { "short" },
+                        "server-side stop request dispatched / 伺服器端止損請求已派發"
+                    );
+                    // TODO: Live mode — call position_manager.set_trading_stop(req).await
+                }
+            });
+            info!("dual-track stop channel active / 雙軌止損通道已啟用");
+        }
+
+        // Shadow order mode: dispatch paper fills as real Demo API orders for calibration
+        // 影子訂單模式：將紙盤成交作為真實 Demo API 訂單派發，用於校準比較
+        if cfg_snapshot.shadow_orders {
+            if let Some(ref client) = shared_client {
+                if let Some(ref icache) = shared_instruments {
+                    use openclaw_engine::order_manager::{
+                        OrderManager, OrderCategory, OrderSide, OrderType, CreateOrderRequest,
+                    };
+                    let (shadow_tx, mut shadow_rx) = tokio::sync::mpsc::unbounded_channel::<
+                        openclaw_engine::tick_pipeline::ShadowOrderRequest,
+                    >();
+                    pipeline.set_shadow_channel(shadow_tx);
+
+                    let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
+                    tokio::spawn(async move {
+                        while let Some(req) = shadow_rx.recv().await {
+                            let side = if req.is_long { OrderSide::Buy } else { OrderSide::Sell };
+                            let create_req = CreateOrderRequest {
+                                category: OrderCategory::Linear,
+                                symbol: req.symbol.clone(),
+                                side,
+                                order_type: OrderType::Market,
+                                qty: req.qty,
+                                price: None,
+                                time_in_force: None,
+                                reduce_only: if req.is_close { Some(true) } else { None },
+                                close_on_trigger: None,
+                                order_link_id: Some(format!("shadow_{}", req.paper_fill_ts)),
+                                trigger_price: None,
+                                trigger_direction: None,
+                                take_profit: None,
+                                stop_loss: None,
+                                tp_trigger_by: None,
+                                sl_trigger_by: None,
+                            };
+                            match order_mgr.place_order(create_req).await {
+                                Ok(resp) => {
+                                    info!(
+                                        symbol = %req.symbol,
+                                        order_id = %resp.order_id,
+                                        shadow_type = if req.is_close { "close" } else { "open" },
+                                        paper_price = format!("{:.2}", req.price),
+                                        "shadow order placed / 影子訂單已下"
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(symbol = %req.symbol, error = %e, "shadow order failed / 影子訂單失敗");
+                                }
+                            }
+                        }
+                    });
+                    info!("shadow order mode active / 影子訂單模式已啟用");
+                } else {
+                    warn!("shadow_orders enabled but no instrument cache — skipping / 影子訂單已啟用但無品種規格快取，跳過");
+                }
+            } else {
+                warn!("shadow_orders enabled but no API credentials — skipping / 影子訂單已啟用但無 API 憑證，跳過");
+            }
+        }
 
         // Register strategies / 註冊策略
         pipeline.orchestrator.register(Box::new(MaCrossover::new()));
@@ -407,6 +735,52 @@ async fn async_main(config: Arc<ConfigManager>) {
             pipeline.orchestrator.strategy_count(),
             SYMBOLS.len(),
         );
+
+        // Kline bootstrap: fetch 200 1m bars per symbol via REST (eliminates 30min cold start)
+        // K 線引導：通過 REST 為每個幣種獲取 200 根 1 分鐘歷史 K 線（消除 30 分鐘冷啟動）
+        if cfg_snapshot.kline_bootstrap {
+            if let Some(ref client_arc) = bootstrap_client {
+                let mdc = openclaw_engine::market_data_client::MarketDataClient::new(Arc::clone(client_arc));
+                for &sym in SYMBOLS {
+                    match mdc.get_klines("linear", sym, "1", None, None, Some(200)).await {
+                        Ok(bars) => {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            // Convert market_data_client::KlineBar -> openclaw_core::klines::KlineBar
+                            // Filter out the current unclosed bar (start_time + 60s > now)
+                            // REST returns newest-first; sort oldest-first for buffer seeding
+                            let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
+                                .iter()
+                                .filter(|b| b.start_time + 60_000 <= now_ms)
+                                .map(|b| {
+                                    let mut kb = openclaw_core::klines::KlineBar {
+                                        open_time_ms: b.start_time,
+                                        close_time_ms: b.start_time + 60_000,
+                                        open: b.open,
+                                        high: b.high,
+                                        low: b.low,
+                                        close: b.close,
+                                        volume: b.volume,
+                                        turnover: b.turnover,
+                                        tick_count: 1,
+                                        is_closed: true,
+                                    };
+                                    kb
+                                })
+                                .collect();
+                            core_bars.sort_by_key(|b| b.open_time_ms);
+                            let count = pipeline.kline_manager.seed_bars(sym, "1m", core_bars);
+                            info!(symbol = sym, bars = count, "kline bootstrap / K 線引導完成");
+                        }
+                        Err(e) => warn!(symbol = sym, error = %e, "kline bootstrap failed / K 線引導失敗"),
+                    }
+                }
+            } else {
+                info!("kline bootstrap skipped — no REST client / K 線引導跳過（無 REST 客戶端）");
+            }
+        }
 
         // Persistence / 持久化
         let data_dir = std::env::var("OPENCLAW_DATA_DIR")
@@ -505,6 +879,23 @@ async fn async_main(config: Arc<ConfigManager>) {
                                 );
                             }
 
+                            // H1+H2 fix: Sync WS shared state → paper_state
+                            // H1+H2 修復：同步 WS 共享狀態 → 紙盤狀態
+                            if let Some(ref bal_arc) = shared_bybit_balance {
+                                if let Ok(guard) = bal_arc.read() {
+                                    if let Some(bal) = *guard {
+                                        pipeline.paper_state.set_bybit_sync_balance(Some(bal));
+                                    }
+                                }
+                            }
+                            if let Some(ref pnl_arc) = shared_api_pnl {
+                                if let Ok(guard) = pnl_arc.read() {
+                                    for (symbol, &pnl) in guard.iter() {
+                                        pipeline.paper_state.set_api_unrealized_pnl(symbol, pnl);
+                                    }
+                                }
+                            }
+
                             // Periodic status + persistence / 定期狀態報告 + 持久化
                             if last_status.elapsed() >= status_interval {
                                 let status = pipeline.status();
@@ -580,6 +971,12 @@ async fn async_main(config: Arc<ConfigManager>) {
         let _ = ws_handle.await;
         let _ = ipc_handle.await;
         let _ = event_handle.await;
+        // M4 fix: Await private WS handles if present
+        // M4 修復：等待私有 WS 任務完成
+        if let Some((priv_ws_h, listener_h, _, _)) = _private_ws_handle {
+            let _ = priv_ws_h.await;
+            let _ = listener_h.await;
+        }
     })
     .await;
 

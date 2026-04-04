@@ -111,6 +111,42 @@ pub struct RuntimeConfig {
     /// Critical attention interval (ms) / 關鍵注意力間隔
     #[serde(default = "default_attention_critical_ms")]
     pub attention_critical_ms: u64,
+
+    // -- Hot params — Bybit API integration / 熱參數 — Bybit API 整合 --
+    /// Enable DCP (Disconnected Cancel Protection) at startup / 啟動時啟用斷連取消保護
+    #[serde(default = "default_true")]
+    pub dcp_enabled: bool,
+
+    /// DCP time window in seconds / DCP 時間窗口（秒）
+    #[serde(default = "default_dcp_time_window")]
+    pub dcp_time_window: u32,
+
+    /// Enable auto-add-margin for existing positions at startup / 啟動時為現有倉位啟用自動追加保證金
+    #[serde(default = "default_true")]
+    pub auto_add_margin: bool,
+
+    /// Balance mode: "custom" (user-set) or "bybit_sync" (read from Bybit Demo)
+    /// 餘額模式："custom"（自設金額）或 "bybit_sync"（讀取 Bybit Demo）
+    #[serde(default = "default_balance_mode")]
+    pub balance_mode: String,
+
+    /// Enable server-side TP/SL via set_trading_stop / 啟用伺服器端止盈止損
+    #[serde(default = "default_true")]
+    pub server_side_stops: bool,
+
+    /// Enable extended WS subscriptions (adl-notice, price-limit) / 啟用擴展 WS 訂閱
+    #[serde(default = "default_true")]
+    pub enable_extended_ws: bool,
+
+    /// Enable shadow orders: mirror paper fills to Demo API for comparison (opt-in).
+    /// 啟用影子訂單：將紙盤成交映射到 Demo API 進行比較（需手動開啟）。
+    #[serde(default)]
+    pub shadow_orders: bool,
+
+    /// Enable kline bootstrap at startup (fetch 200 historical 1m bars per symbol via REST).
+    /// 啟動時啟用 K 線引導（通過 REST 為每個幣種獲取 200 根 1 分鐘歷史 K 線）。
+    #[serde(default = "default_true")]
+    pub kline_bootstrap: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +197,15 @@ fn default_attention_high_ms() -> u64 {
 fn default_attention_critical_ms() -> u64 {
     1000
 }
+fn default_true() -> bool {
+    true
+}
+fn default_dcp_time_window() -> u32 {
+    10
+}
+fn default_balance_mode() -> String {
+    "custom".into()
+}
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
@@ -179,6 +224,14 @@ impl Default for RuntimeConfig {
             attention_medium_ms: default_attention_medium_ms(),
             attention_high_ms: default_attention_high_ms(),
             attention_critical_ms: default_attention_critical_ms(),
+            dcp_enabled: default_true(),
+            dcp_time_window: default_dcp_time_window(),
+            auto_add_margin: default_true(),
+            balance_mode: default_balance_mode(),
+            server_side_stops: default_true(),
+            enable_extended_ws: default_true(),
+            shadow_orders: false,
+            kline_bootstrap: default_true(),
         }
     }
 }

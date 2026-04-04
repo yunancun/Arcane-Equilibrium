@@ -175,13 +175,13 @@ fn stress_multi_symbol_rapid_alternating_ticks() {
     assert_eq!(pipeline.stats.total_ticks, 1000);
     // Verify BTC stop checks don't use ETH prices (bug we fixed)
     let state = pipeline.paper_state.export_state();
-    for pos in &state.positions {
-        if pos.symbol == "ETHUSDT" {
-            assert!(pos.best_price < 3000.0, "ETH best_price contaminated by BTC: {}", pos.best_price);
+    for snap in &state.positions {
+        if snap.position.symbol == "ETHUSDT" {
+            assert!(snap.position.best_price < 3000.0, "ETH best_price contaminated by BTC: {}", snap.position.best_price);
         }
-        if pos.symbol == "BTCUSDT" {
-            assert!(pos.best_price > 50000.0 || pos.best_price == 0.0,
-                "BTC best_price contaminated by ETH: {}", pos.best_price);
+        if snap.position.symbol == "BTCUSDT" {
+            assert!(snap.position.best_price > 50000.0 || snap.position.best_price == 0.0,
+                "BTC best_price contaminated by ETH: {}", snap.position.best_price);
         }
     }
 }

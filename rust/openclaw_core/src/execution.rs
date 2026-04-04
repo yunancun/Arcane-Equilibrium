@@ -15,10 +15,16 @@ use serde::{Deserialize, Serialize};
 pub const TAKER_FEE_RATE: f64 = 0.000_55; // 0.055%
 pub const MAKER_FEE_RATE: f64 = 0.000_2;  // 0.02%
 
-/// Compute trading fee.
-/// 計算交易手續費。
+/// Compute trading fee using default rates.
+/// 使用默認費率計算交易手續費。
 pub fn compute_fee(qty: f64, price: f64, is_taker: bool) -> f64 {
     let rate = if is_taker { TAKER_FEE_RATE } else { MAKER_FEE_RATE };
+    qty * price * rate
+}
+
+/// Compute trading fee with an explicit rate (for API-fetched rates).
+/// 使用明確費率計算交易手續費（用於 API 動態費率）。
+pub fn compute_fee_with_rate(qty: f64, price: f64, rate: f64) -> f64 {
     qty * price * rate
 }
 
@@ -160,6 +166,28 @@ pub fn execute_limit_fill(limit_price: f64, qty: f64) -> FillResult {
     FillResult { fill_price: limit_price, fill_qty: qty, fee, slippage_bps: 0.0, is_taker: false }
 }
 
+/// Execute a market fill with API-fetched taker fee rate.
+/// 使用 API 動態 taker 費率執行市價單成交計算。
+pub fn execute_market_fill_with_rate(
+    market_price: f64,
+    qty: f64,
+    is_buy: bool,
+    turnover_24h: f64,
+    taker_rate: f64,
+) -> FillResult {
+    let fill_price = compute_market_fill_price(market_price, is_buy, turnover_24h);
+    let fee = compute_fee_with_rate(qty, fill_price, taker_rate);
+    let slip_bps = ((fill_price - market_price).abs() / market_price) * 10_000.0;
+    FillResult { fill_price, fill_qty: qty, fee, slippage_bps: slip_bps, is_taker: true }
+}
+
+/// Execute a limit fill with API-fetched maker fee rate.
+/// 使用 API 動態 maker 費率執行限價單成交計算。
+pub fn execute_limit_fill_with_rate(limit_price: f64, qty: f64, maker_rate: f64) -> FillResult {
+    let fee = compute_fee_with_rate(qty, limit_price, maker_rate);
+    FillResult { fill_price: limit_price, fill_qty: qty, fee, slippage_bps: 0.0, is_taker: false }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Tests / 測試
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -258,5 +286,33 @@ mod tests {
         assert_eq!(r.fill_price, 50000.0);
         assert!(!r.is_taker);
         assert_eq!(r.slippage_bps, 0.0);
+    }
+
+    #[test]
+    fn test_compute_fee_with_rate() {
+        // Custom VIP rate 0.03% vs default 0.055%
+        let fee_custom = compute_fee_with_rate(1.0, 50000.0, 0.000_3);
+        assert!((fee_custom - 15.0).abs() < 0.01); // 1.0 * 50000 * 0.0003 = 15.0
+        let fee_default = compute_fee(1.0, 50000.0, true);
+        assert!(fee_custom < fee_default); // VIP rate is lower
+    }
+
+    #[test]
+    fn test_execute_market_fill_with_rate() {
+        // VIP-3 taker rate: 0.035% (lower than default 0.055%)
+        let r = execute_market_fill_with_rate(50000.0, 1.0, true, 2_000_000_000.0, 0.000_35);
+        assert!((r.fill_price - 50005.0).abs() < 0.01); // same slippage (1 bps)
+        assert!(r.is_taker);
+        // Fee: 1.0 * 50005 * 0.00035 = 17.50175 (lower than default 27.5)
+        assert!((r.fee - 17.50175).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_execute_limit_fill_with_rate() {
+        let r = execute_limit_fill_with_rate(50000.0, 1.0, 0.000_1);
+        assert_eq!(r.fill_price, 50000.0);
+        assert!(!r.is_taker);
+        // Fee: 1.0 * 50000 * 0.0001 = 5.0 (vs default 10.0)
+        assert!((r.fee - 5.0).abs() < 0.01);
     }
 }
