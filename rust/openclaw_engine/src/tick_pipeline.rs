@@ -54,6 +54,14 @@ pub struct TickPipeline {
     pub paper_state: PaperState,
     pub stats: TickStats,
     latest_prices: HashMap<String, f64>,
+    /// Per-symbol latest indicators for IPC / 每交易對最新指標供 IPC 使用
+    latest_indicators: HashMap<String, IndicatorSnapshot>,
+    /// Recent signals ring buffer (max 100) / 最近信號環形緩衝（最大 100）
+    recent_signals: Vec<Signal>,
+    /// Recent intents ring buffer (max 50) / 最近意圖環形緩衝（最大 50）
+    recent_intents: Vec<TimestampedIntent>,
+    /// Recent fills ring buffer (max 50) / 最近成交環形緩衝（最大 50）
+    recent_fills: Vec<TimestampedFill>,
     /// Enable canary mode — on_tick returns per-tick CanaryRecord (R07-2).
     /// 啟用灰度模式 — on_tick 返回每 tick 的 CanaryRecord。
     pub canary_mode: bool,
@@ -70,6 +78,10 @@ impl TickPipeline {
             paper_state: PaperState::new(10_000.0),
             stats: TickStats::default(),
             latest_prices: HashMap::new(),
+            latest_indicators: HashMap::new(),
+            recent_signals: Vec::new(),
+            recent_intents: Vec::new(),
+            recent_fills: Vec::new(),
             canary_mode: false,
         }
     }
@@ -112,7 +124,13 @@ impl TickPipeline {
         );
 
         // Step 2: Compute indicators (need enough 1m bars)
+        // 步驟 2：計算指標（需要足夠的 1 分鐘 K 線）
         let indicators = self.compute_indicators(&event.symbol);
+
+        // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
+        if let Some(ref ind) = indicators {
+            self.latest_indicators.insert(event.symbol.clone(), ind.clone());
+        }
 
         // Step 3: Signal evaluation
         let signals = if let Some(ref ind) = indicators {
@@ -121,6 +139,13 @@ impl TickPipeline {
         } else {
             vec![]
         };
+
+        // Store recent signals for IPC snapshot (ring buffer, max 100)
+        // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
+        for sig in &signals {
+            self.recent_signals.push(sig.clone());
+            if self.recent_signals.len() > 100 { self.recent_signals.remove(0); }
+        }
 
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
         // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
@@ -145,6 +170,13 @@ impl TickPipeline {
                 let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
                 if result.submitted {
                     self.stats.total_intents += 1;
+                    // Store submitted intent for IPC / 存儲已提交意圖供 IPC 使用
+                    self.recent_intents.push(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: intent.clone(),
+                        result: "submitted".into(),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.remove(0); }
                     // RC-05: Notify strategy of fill / 通知策略成交
                     if let Some(ref fill) = result.fill {
                         strategy.on_fill(intent, fill);
@@ -153,11 +185,29 @@ impl TickPipeline {
                             fill.fill_price, fill.fee, event.ts_ms,
                         );
                         self.stats.total_fills += 1;
+                        // Store fill for IPC / 存儲成交記錄供 IPC 使用
+                        self.recent_fills.push(TimestampedFill {
+                            timestamp_ms: event.ts_ms,
+                            symbol: intent.symbol.clone(),
+                            is_long: intent.is_long,
+                            qty: fill.fill_qty,
+                            price: fill.fill_price,
+                            fee: fill.fee,
+                            strategy: intent.strategy.clone(),
+                        });
+                        if self.recent_fills.len() > 50 { self.recent_fills.remove(0); }
                     }
                 } else if let Some(ref reason) = result.rejected_reason {
                     // RC-04: Notify strategy of rejection for state rollback
                     // RC-04：通知策略拒絕以回滾狀態
                     strategy.on_rejection(intent, reason);
+                    // Store rejected intent for IPC / 存儲被拒絕意圖供 IPC 使用
+                    self.recent_intents.push(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: intent.clone(),
+                        result: format!("rejected:{}", reason),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.remove(0); }
                 }
             }
             intents.extend(strategy_intents);
@@ -232,11 +282,18 @@ impl TickPipeline {
     /// Create a full snapshot for IPC / persistence (R06-A).
     /// 創建完整快照供 IPC / 持久化使用。
     pub fn snapshot(&self) -> PipelineSnapshot {
+        // Collect strategy info from orchestrator / 從調度器收集策略信息
+        let strategies: Vec<StrategyInfo> = self.orchestrator.strategy_infos();
         PipelineSnapshot {
             paper_state: self.paper_state.export_state(),
             latest_prices: self.latest_prices.clone(),
             stats: self.stats.clone(),
             source: "rust_engine".into(),
+            indicators: self.latest_indicators.clone(),
+            signals: self.recent_signals.clone(),
+            strategies,
+            recent_intents: self.recent_intents.clone(),
+            recent_fills: self.recent_fills.clone(),
         }
     }
 
@@ -310,6 +367,48 @@ pub struct CanaryRecord {
     pub tick_duration_us: u64,
 }
 
+/// Strategy status info for IPC snapshot.
+/// 策略狀態信息供 IPC 快照使用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyInfo {
+    /// Strategy name / 策略名稱
+    pub name: String,
+    /// Whether the strategy is currently active / 策略是否當前活躍
+    pub active: bool,
+}
+
+/// A timestamped order intent for IPC ring buffer.
+/// 帶時間戳的交易意圖，供 IPC 環形緩衝使用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimestampedIntent {
+    /// Event timestamp in milliseconds / 事件時間戳（毫秒）
+    pub timestamp_ms: u64,
+    /// The original order intent / 原始交易意圖
+    pub intent: crate::intent_processor::OrderIntent,
+    /// Result: "submitted" or "rejected:<reason>" / 結果："submitted" 或 "rejected:<原因>"
+    pub result: String,
+}
+
+/// A timestamped fill record for IPC ring buffer.
+/// 帶時間戳的成交記錄，供 IPC 環形緩衝使用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimestampedFill {
+    /// Event timestamp in milliseconds / 事件時間戳（毫秒）
+    pub timestamp_ms: u64,
+    /// Trading symbol / 交易對
+    pub symbol: String,
+    /// Long or short direction / 多空方向
+    pub is_long: bool,
+    /// Fill quantity / 成交數量
+    pub qty: f64,
+    /// Fill price / 成交價格
+    pub price: f64,
+    /// Fee charged / 手續費
+    pub fee: f64,
+    /// Strategy that generated this fill / 產生此成交的策略
+    pub strategy: String,
+}
+
 /// Full pipeline snapshot for IPC consumers (R06-A).
 /// 完整管線快照供 IPC 消費者使用。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,6 +421,16 @@ pub struct PipelineSnapshot {
     pub stats: TickStats,
     /// Data source discriminator / 數據源標識
     pub source: String,
+    /// Per-symbol latest indicator values / 每交易對最新指標值
+    pub indicators: HashMap<String, IndicatorSnapshot>,
+    /// Recent signals (last 100) / 最近信號（最近 100 個）
+    pub signals: Vec<Signal>,
+    /// Strategy status list / 策略狀態列表
+    pub strategies: Vec<StrategyInfo>,
+    /// Recent order intents (last 50) / 最近交易意圖（最近 50 個）
+    pub recent_intents: Vec<TimestampedIntent>,
+    /// Recent fills (last 50) / 最近成交記錄（最近 50 個）
+    pub recent_fills: Vec<TimestampedFill>,
 }
 
 #[cfg(test)]

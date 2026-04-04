@@ -143,6 +143,54 @@ class RustSnapshotReader:
         snap = self.get_snapshot()
         return snap.get("source") if snap else None
 
+    # ── IPC-02: Expanded snapshot fields / 擴展快照欄位 ──────────────────────
+
+    def get_indicators(self, symbol: Optional[str] = None) -> dict:
+        """
+        Get indicator values from Rust engine.
+        If symbol specified, return that symbol's indicators only.
+        從 Rust 引擎獲取指標值。若指定 symbol，只返回該交易對的指標。
+        """
+        snap = self.get_snapshot()
+        if snap is None:
+            return {}
+        indicators = snap.get("indicators", {})
+        if symbol:
+            return indicators.get(symbol, {})
+        return indicators
+
+    def get_signals(self) -> list:
+        """
+        Get recent signals from Rust engine (up to 100).
+        從 Rust 引擎獲取最近信號（最多 100 條）。
+        """
+        snap = self.get_snapshot()
+        return (snap or {}).get("signals", [])
+
+    def get_strategies(self) -> list:
+        """
+        Get strategy status list from Rust engine.
+        從 Rust 引擎獲取策略狀態列表。
+        """
+        snap = self.get_snapshot()
+        return (snap or {}).get("strategies", [])
+
+    def get_recent_intents(self) -> list:
+        """
+        Get recent order intents from Rust engine (up to 50).
+        從 Rust 引擎獲取最近交易意圖（最多 50 條）。
+        """
+        snap = self.get_snapshot()
+        return (snap or {}).get("recent_intents", [])
+
+    def get_recent_fills(self) -> list:
+        """
+        Get recent fills from Rust engine (up to 50).
+        從 Rust 引擎獲取最近成交記錄（最多 50 條）。
+        """
+        snap = self.get_snapshot()
+        return (snap or {}).get("recent_fills", [])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Module-level singleton / 模組級單例

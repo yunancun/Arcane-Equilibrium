@@ -453,6 +453,11 @@ mod tests {
                 last_tick_ms: 1700000050000,
             },
             source: "rust_engine".into(),
+            indicators: HashMap::new(),
+            signals: vec![],
+            strategies: vec![],
+            recent_intents: vec![],
+            recent_fills: vec![],
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

@@ -767,6 +767,14 @@ def get_fills(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get fill history / 获取成交历史"""
+    # IPC-03: Rust-first for recent fills / 優先讀 Rust 最近成交記錄
+    reader = get_rust_reader()
+    if reader.is_available():
+        rust_fills = reader.get_recent_fills()
+        if rust_fills:
+            capped = rust_fills[:min(limit, 200)]
+            return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
+    # Fallback to Python PaperTradingEngine / 降級到 Python 紙盤引擎
     fills = ENGINE.get_fills(limit=min(limit, 200))
     return _paper_response({"fills": fills, "count": len(fills)})
 

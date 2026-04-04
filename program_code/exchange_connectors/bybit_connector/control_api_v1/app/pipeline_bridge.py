@@ -66,8 +66,18 @@ logger = logging.getLogger(__name__)
 
 class PipelineBridge:
     """
-    Bridges the strategy pipeline (KlineManager->Indicators->Signals->Strategies->Intents)
-    to the paper trading pipeline (PaperTradingEngine).
+    IPC relay + Agent callback container (RC-10/IPC-04 downgraded).
+    IPC 中繼 + Agent 回調容器（RC-10/IPC-04 降級）。
+
+    Previously: full tick processing bridge (KlineManager→Indicators→Signals→Strategies→Intents).
+    Now: Rust engine handles ALL tick processing. This class is retained only for:
+      1. Agent dependency injection (set_*() methods) — Scout/Strategist/Guardian etc.
+      2. API state queries (get_stats(), _latest_prices fallback)
+      3. Future Agent callback relay (on_tick_result from Rust IPC)
+    Tick processing (on_tick) is DISABLED — self._active is never set to True (RC-10).
+
+    之前：完整 tick 處理橋接。現在：Rust 引擎處理所有 tick。此類僅保留用於：
+      1. Agent 依賴注入 2. API 狀態查詢 3. 未來 Agent 回調中繼
     """
 
     # ── External dependencies injected via set_*() methods (E5 #25) ──
@@ -312,7 +322,9 @@ class PipelineBridge:
                      symbol, category, symbol, category)
 
     def activate(self) -> None:
-        """Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
+        """DEPRECATED (IPC-04): No longer called in production (RC-10).
+        已棄用（IPC-04）：生產環境不再調用（RC-10）。
+        Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
         self._active = True
         logger.info("PipelineBridge activated / 管线桥接器已激活")
 
@@ -392,15 +404,13 @@ class PipelineBridge:
 
     def on_tick(self, event: Any) -> None:
         """
-        Called by MarketDataDispatcher on every (non-throttled) price event.
-        由 MarketDataDispatcher 在每次（未被节流的）价格事件时调用。
+        DEPRECATED (IPC-04): Rust engine handles all tick processing.
+        已棄用（IPC-04）：Rust 引擎處理所有 tick。
 
-        Thin orchestrator that delegates to 4 sub-methods:
-        薄编排器，将工作委派给 4 个子方法：
-        1. _tick_update_market_data — price/kline/ATR/funding updates
-        2. _tick_run_strategies — strategy dispatch + intent collection
-        3. _tick_check_risk — stop checks, risk monitoring
-        4. _tick_update_stats — periodic scouts, analyst cron, risk adjustment
+        This method is never called in production (RC-10 removed all activate() calls).
+        Retained for backward compatibility with test mocks.
+        此方法在生產環境中永不被調用（RC-10 移除了所有 activate() 調用）。
+        保留��測試 mock 向後兼容。
         """
         if not self._active:
             return

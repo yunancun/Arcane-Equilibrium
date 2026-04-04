@@ -1190,6 +1190,20 @@ async def get_indicators(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail="Invalid timeframe / 无效时间框架")
     try:
+        # IPC-03: Rust-first for 1m timeframe / 1m 時間框架優先讀 Rust
+        if timeframe == "1m":
+            reader = get_rust_reader()
+            if reader.is_available():
+                rust_ind = reader.get_indicators(sym)
+                if rust_ind:
+                    return _envelope({
+                        "symbol": sym,
+                        "timeframe": timeframe,
+                        "indicators": rust_ind,
+                        "indicator_count": len(rust_ind),
+                        "source": "rust_engine",
+                    })
+        # Fallback to Python IndicatorEngine / 降級到 Python 指標引擎
         indicators = INDICATOR_ENGINE.get_indicators(sym, timeframe)
         return _envelope({
             "symbol": sym,
@@ -1220,6 +1234,22 @@ async def get_signals(
         if filter_sym is None:
             raise HTTPException(status_code=400, detail="Invalid symbol / 无效交易对")
     try:
+        # IPC-03: Rust-first for signals / 優先讀 Rust 信號
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_signals = reader.get_signals()
+            if rust_signals:
+                # Apply symbol filter if requested / 若指定了交易對則過濾
+                if filter_sym:
+                    rust_signals = [s for s in rust_signals if s.get("symbol") == filter_sym]
+                rust_signals = rust_signals[:n]
+                return _envelope({
+                    "signals": rust_signals,
+                    "count": len(rust_signals),
+                    "filter_symbol": filter_sym,
+                    "source": "rust_engine",
+                })
+        # Fallback to Python SignalEngine / 降級到 Python 信號引擎
         signals = SIGNAL_ENGINE.get_latest_signals(symbol=filter_sym, n=n)
         return _envelope({
             "signals": signals,
@@ -1244,6 +1274,31 @@ async def get_signal_summary(
     if sym is None:
         raise HTTPException(status_code=400, detail="Invalid symbol / 无效交易对")
     try:
+        # IPC-03: Rust-first — compute consensus from Rust signals / 優先用 Rust 信號計算共識
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_signals = reader.get_signals()
+            if rust_signals:
+                sym_signals = [s for s in rust_signals if s.get("symbol") == sym]
+                if sym_signals:
+                    # Compute simple consensus from Rust signals / 從 Rust 信號計算簡單共識
+                    buy_count = sum(1 for s in sym_signals if s.get("direction") == "buy")
+                    sell_count = sum(1 for s in sym_signals if s.get("direction") == "sell")
+                    total = len(sym_signals)
+                    consensus = "neutral"
+                    if buy_count > sell_count:
+                        consensus = "bullish"
+                    elif sell_count > buy_count:
+                        consensus = "bearish"
+                    return _envelope({
+                        "symbol": sym,
+                        "consensus": consensus,
+                        "buy_signals": buy_count,
+                        "sell_signals": sell_count,
+                        "total_signals": total,
+                        "source": "rust_engine",
+                    })
+        # Fallback to Python SignalEngine / 降級到 Python 信號引擎
         summary = SIGNAL_ENGINE.get_signal_summary(sym)
         return _envelope(summary)
     except Exception:
@@ -1262,6 +1317,17 @@ async def list_strategies(
     列出所有注册的策略及其状态。
     """
     try:
+        # IPC-03: Rust-first for strategy list / 優先讀 Rust 策略列表
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_strategies = reader.get_strategies()
+            if rust_strategies:
+                return _envelope({
+                    "strategies": rust_strategies,
+                    "count": len(rust_strategies),
+                    "source": "rust_engine",
+                })
+        # Fallback to Python Orchestrator / 降級到 Python 編排器
         statuses = ORCHESTRATOR.get_all_strategies_status()
         return _envelope({
             "strategies": statuses,
@@ -1317,6 +1383,15 @@ async def get_strategy_status(
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
     try:
+        # IPC-03: Rust-first — find strategy by name / 優先從 Rust 按名稱查找策略
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_strategies = reader.get_strategies()
+            if rust_strategies:
+                match = next((s for s in rust_strategies if s.get("name") == name), None)
+                if match:
+                    return _envelope({**match, "source": "rust_engine"})
+        # Fallback to Python Orchestrator / 降級到 Python 編排器
         status = ORCHESTRATOR.get_strategy_status(name)
         if status is None:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
@@ -1328,6 +1403,7 @@ async def get_strategy_status(
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
+# TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移
 @phase2_router.post("/{name}/activate")
 async def activate_strategy(
     name: str,
@@ -1355,6 +1431,7 @@ async def activate_strategy(
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
+# TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移
 @phase2_router.post("/{name}/pause")
 async def pause_strategy(
     name: str,
@@ -1382,6 +1459,7 @@ async def pause_strategy(
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
+# TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移
 @phase2_router.post("/{name}/stop")
 async def stop_strategy(
     name: str,
@@ -1411,6 +1489,7 @@ async def stop_strategy(
 
 # ── Strategy Create & Delete Routes / 策略创建与删除路由 ──
 
+# TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移
 @phase2_router.post("/create")
 async def create_strategy(
     request: dict[str, Any] = Body(...),
@@ -1482,6 +1561,7 @@ async def create_strategy(
         raise HTTPException(status_code=500, detail="Internal error / 内部错误")
 
 
+# TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移
 @phase2_router.delete("/{name}")
 async def delete_strategy(
     name: str,
@@ -1520,6 +1600,17 @@ async def get_intents(
     获取最近的 OrderIntent 历史。
     """
     try:
+        # IPC-03: Rust-first for recent intents / 優先讀 Rust 最近交易意圖
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_intents = reader.get_recent_intents()
+            if rust_intents:
+                return _envelope({
+                    "intents": rust_intents[:n],
+                    "count": min(len(rust_intents), n),
+                    "source": "rust_engine",
+                })
+        # Fallback to Python Orchestrator / 降級到 Python 編排器
         history = ORCHESTRATOR.get_intent_history(n=n)
         return _envelope({
             "intents": history,
@@ -1539,6 +1630,16 @@ async def get_orchestrator_status(
     获取编排器综合状态，包括所有子组件。
     """
     try:
+        # IPC-03: Rust-first for strategy portion of status / 優先讀 Rust 策略狀態
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_strategies = reader.get_strategies()
+            if rust_strategies:
+                # Merge Rust strategy data into orchestrator status / 將 Rust 策略數據合併到編排器狀態
+                py_status = ORCHESTRATOR.get_status()
+                py_status["strategies"] = rust_strategies
+                py_status["strategy_source"] = "rust_engine"
+                return _envelope(py_status)
         return _envelope(ORCHESTRATOR.get_status())
     except Exception:
         logger.exception("Error in get_orchestrator_status / get_orchestrator_status 异常")

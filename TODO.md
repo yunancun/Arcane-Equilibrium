@@ -130,12 +130,12 @@ SPEC 審查記錄：
 
 ## ██ R-IPC：Rust IPC 擴展 + Python API 切換（4/11-4/14，與 Phase 0a 並行）
 
-- [ ] IPC-01：Rust IPC 新增方法（get_klines, get_indicators, get_signals, get_strategies, get_fills）
-- [ ] IPC-02：Python ipc_state_reader.py 擴展對應讀取方法
-- [ ] IPC-03：Python 13+ API 路由改為 Rust 數據源
-- [ ] IPC-04：PipelineBridge 降級為 IPC 中繼（保留 Agent 回調）
-- [ ] IPC-05：分類 B Python 文件逐步降級（27 files / 10,508 行）
-- [ ] IPC-06：E2 + E4 + 回歸測試修復
+- [x] IPC-01：Rust PipelineSnapshot 擴展（+indicators/signals/strategies/recent_intents/recent_fills）
+- [x] IPC-02：Python ipc_state_reader.py 擴展 5 新方法
+- [x] IPC-03：8 條 API 路由改為 Rust-first + Python fallback（5 寫操作路由待 Rust 命令通道）
+- [x] IPC-04：PipelineBridge 降級為 IPC 中繼 + Agent 回調容器（docstring + DEPRECATED 標記）
+- [ ] IPC-05：分類 B Python 文件逐步降級（需 API 寫操作路由遷移後）
+- [x] IPC-06：E2 + E4 — 4507 全綠
 
 ---
 

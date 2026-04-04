@@ -3,6 +3,16 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### R-IPC IPC-01~IPC-06（2026-04-04）
+
+- **IPC-01** Rust PipelineSnapshot 擴展：+indicators(per-symbol) +signals(100) +strategies +recent_intents(50) +recent_fills(50)
+- **IPC-02** Python ipc_state_reader.py 5 新方法：get_indicators/get_signals/get_strategies/get_recent_intents/get_recent_fills
+- **IPC-03** 8 條 API 路由遷移為 Rust-first + Python fallback（indicators/signals/strategies/intents/fills + summary/list/status）
+- **IPC-04** PipelineBridge 降級為 IPC 中繼 + Agent 回調容器（docstring + activate/on_tick DEPRECATED）
+- **IPC-05** 分類 B 降級推遲（需 API 寫操作路由遷移到 Rust 命令通道後）
+- **IPC-06** 全量測試 4507 全綠
+- 測試基準線不變：Python 3877 / Rust 592 / Canary 38 = 4507
+
 ### R-CUT Phase 3 Go/No-Go RC-14~RC-15（2026-04-04）
 
 - **RC-14** Go/No-Go 7/7 PASS：新 binary 編譯+重啟，201K tick replay 壓測通過

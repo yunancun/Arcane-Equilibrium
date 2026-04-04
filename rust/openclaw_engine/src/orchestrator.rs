@@ -3,7 +3,7 @@
 
 use crate::intent_processor::OrderIntent;
 use crate::strategies::Strategy;
-use crate::tick_pipeline::TickContext;
+use crate::tick_pipeline::{StrategyInfo, TickContext};
 
 /// Strategy orchestrator — dispatches ticks to all active strategies.
 /// 策略調度器 — 分派 tick 到所有活躍策略。
@@ -48,6 +48,15 @@ impl Orchestrator {
             .filter(|s| s.is_active())
             .map(|s| s.name())
             .collect()
+    }
+
+    /// Get strategy status info for IPC snapshot.
+    /// 獲取策略狀態信息供 IPC 快照使用。
+    pub fn strategy_infos(&self) -> Vec<StrategyInfo> {
+        self.strategies.iter().map(|s| StrategyInfo {
+            name: s.name().to_string(),
+            active: s.is_active(),
+        }).collect()
     }
 
     /// Mutable access to strategies for per-strategy rejection/fill callbacks (RC-04/RC-05).
