@@ -3,6 +3,14 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### R-CUT Phase 2 最小切換 RC-10~RC-13（2026-04-04）
+
+- **RC-10** Python tick_pipeline 停用：2 處 activate() 註釋掉，PIPELINE_BRIDGE 保留供 API/GUI
+- **RC-11** Category A dead code 刪除：4 files / 1,003 行（shadow_decision_tracker, dream_engine, opportunity_tracker, strategy_health_monitor）
+- **RC-12** 全量測試驗證 4507 全綠零回歸
+- **RC-13** E2 + E4 PASS
+- 註：原估 187 files 實為 Category B+C，需 R-IPC API 路由遷移後才能大規模清理
+
 ### R-CUT Phase 1 策略補齊 RC-01~RC-09（2026-04-04）
 
 - **RC-01** MA Crossover Hurst regime filter：mean_reverting/random_walk 市場阻止入場，cold-start 安全

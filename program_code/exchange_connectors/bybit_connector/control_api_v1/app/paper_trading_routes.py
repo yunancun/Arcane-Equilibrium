@@ -870,15 +870,12 @@ def post_market_feed_start(
     )
     DISPATCHER.start()
 
-    # Register pipeline bridge as tick consumer / 注册管线桥接器为 tick 消费者
-    try:
-        from .phase2_strategy_routes import PIPELINE_BRIDGE
-        if PIPELINE_BRIDGE is not None:
-            DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
-            PIPELINE_BRIDGE.activate()
-            logger.info("Pipeline bridge registered and activated / 管线桥接器已注册并激活")
-    except ImportError:
-        logger.warning("Pipeline bridge not available / 管线桥接器不可用")
+    # RC-10: Python tick processing disabled — Rust engine handles all tick processing.
+    # PIPELINE_BRIDGE is NOT registered as tick consumer and NOT activated.
+    # RC-10：Python tick 處理已禁用 — Rust 引擎處理所有 tick。
+    # PIPELINE_BRIDGE 不再註冊為 tick 消費者，也不啟動。
+    logger.info("Market feed started, Python tick processing DISABLED (RC-10) / "
+                "行情流已启动，Python tick 处理已禁用（RC-10）")
 
     return _paper_response({
         "message": "Market feed started / 行情流已启动",

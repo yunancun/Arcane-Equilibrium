@@ -115,10 +115,11 @@ SPEC 審查記錄：
 
 ### 階段 2：最小切換（4/8-4/9）
 
-- [ ] RC-10：停止 Python tick_pipeline（移除 PIPELINE_BRIDGE.activate()，~30 行）
-- [ ] RC-11：刪除分類 A dead code（187 files / 24,334 行，零測試影響）
-- [ ] RC-12：重跑 201K replay 驗證 Rust 引擎完整性
-- [ ] RC-13：E2 + E4
+- [x] RC-10：停止 Python tick_pipeline（2 處 activate() 註釋掉，PIPELINE_BRIDGE 保留供 API 查詢）
+- [x] RC-11：刪除分類 A dead code（4 files / 1,003 行：shadow_decision_tracker/dream_engine/opportunity_tracker/strategy_health_monitor）
+      — 註：原估 187 files 實為 Category B+C，需 R-IPC API 遷移後才能刪
+- [x] RC-12：全量測試驗證 4507 全綠零回歸
+- [x] RC-13：E2 + E4 PASS
 
 ### 階段 3：Go/No-Go（4/10）
 

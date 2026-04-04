@@ -995,11 +995,15 @@ try:
             symbols=_auto_symbols,
         )
         _paper_ptr.DISPATCHER.start()
-        _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
-        PIPELINE_BRIDGE.activate()
+        # RC-10: Python tick processing disabled — Rust engine handles all tick processing.
+        # PIPELINE_BRIDGE remains instantiated for API/GUI state queries, but is NOT activated.
+        # RC-10：Python tick 處理已禁用 — Rust 引擎處理所有 tick。
+        # PIPELINE_BRIDGE 仍保留實例供 API/GUI 狀態查詢，但不啟動。
+        # _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
+        # PIPELINE_BRIDGE.activate()
         logger.info(
-            "Background market feed started (global_mode=%s) / "
-            "后台行情流已启动（global_mode=%s）",
+            "Background market feed started (global_mode=%s), Python tick processing DISABLED (RC-10) / "
+            "后台行情流已启动（global_mode=%s），Python tick 处理已禁用（RC-10）",
             _global_mode, _global_mode,
         )
     elif _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None:
