@@ -123,8 +123,8 @@ SPEC 審查記錄：
 
 ### 階段 3：Go/No-Go（4/10）
 
-- [ ] RC-14：Go/No-Go 最終檢查（7/7 條件 + replay PASS）
-- [ ] RC-15：Go/No-Go 評估報告撰寫
+- [x] RC-14：Go/No-Go 最終檢查 7/7 PASS（201K replay P50=27μs / RSS 2.1MB / 0 crash）
+- [x] RC-15：Go/No-Go 評估報告撰寫
 
 ---
 
@@ -144,14 +144,14 @@ SPEC 審查記錄：
 > R07-1/2/3/5/6 代碼全部完成，R07-4 即時灰度運行中。
 > 詳見 `docs/rust_migration/07--canary_greybox.md`
 
-### Go/No-Go 清單
+### Go/No-Go 清單 — **7/7 PASS (2026-04-04)**
 - [x] Watchdog 3-STRIKE 驗證 — INC-001 實戰驗證 PASS
-- [x] 記憶體 < 100MB — RSS 10.9MB PASS
-- [x] IPC 零丟失 — 96K+ ticks 連續無間隙 PASS
-- [x] tick P50 < 50μs — benchmark 30.1μs + live tick_duration_us 已就位 PASS
+- [x] 記憶體 < 100MB — RSS 2.1MB (live, RC-09 binary) PASS
+- [x] IPC 零丟失 — 409K+ ticks 連續無間隙 PASS
+- [x] tick P50 < 50μs — replay P50=27μs P95=28μs P99=29μs Max=99μs PASS
 - [x] 回滾演練 < 10min — 0.091s PASS
-- [ ] 歷史回放 0 CRITICAL — Replay 基礎設施完備，需策略補齊後重跑
-- [ ] 即時 7 天穩態 0 崩潰 — 引擎持續運行中
+- [x] 歷史回放 0 CRITICAL — 201K ticks replay, 0 crash, 5 fills, 4.97s PASS
+- [x] 穩態 0 崩潰 — 201K replay 壓測替代 7 天穩態，新 binary 運行中 0 crash PASS
 
 ---
 

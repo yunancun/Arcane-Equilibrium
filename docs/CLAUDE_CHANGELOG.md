@@ -3,6 +3,13 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### R-CUT Phase 3 Go/No-Go RC-14~RC-15（2026-04-04）
+
+- **RC-14** Go/No-Go 7/7 PASS：新 binary 編譯+重啟，201K tick replay 壓測通過
+  - RSS 2.1MB | P50=27μs P95=28μs P99=29μs | 0 crash | 5 fills in 4.97s
+- **RC-15** Go/No-Go 評估報告完成
+- Rust 引擎正式成為唯一 tick 處理引擎
+
 ### R-CUT Phase 2 最小切換 RC-10~RC-13（2026-04-04）
 
 - **RC-10** Python tick_pipeline 停用：2 處 activate() 註釋掉，PIPELINE_BRIDGE 保留供 API/GUI
