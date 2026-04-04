@@ -69,13 +69,19 @@ pub struct TickPipeline {
 
 impl TickPipeline {
     pub fn new(symbols: &[&str]) -> Self {
+        // Read paper balance from env var or default to 10,000 USDT.
+        // 從環境變量讀取紙盤餘額，預設 10,000 USDT。
+        let balance = std::env::var("OPENCLAW_PAPER_BALANCE")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(10_000.0);
         Self {
             kline_manager: KlineManager::new(symbols, None, None),
             signal_engine: SignalEngine::new(),
             orchestrator: Orchestrator::new(),
             intent_processor: IntentProcessor::new(),
             governance: GovernanceCore::new(),
-            paper_state: PaperState::new(10_000.0),
+            paper_state: PaperState::new(balance),
             stats: TickStats::default(),
             latest_prices: HashMap::new(),
             latest_indicators: HashMap::new(),

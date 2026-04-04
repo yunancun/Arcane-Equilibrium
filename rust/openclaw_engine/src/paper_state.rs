@@ -156,6 +156,29 @@ impl PaperState {
         }
     }
 
+    /// Close all open positions at their latest market price.
+    /// Returns the number of positions closed.
+    /// 以最新市場價平掉所有持倉，返回已平倉數量。
+    pub fn close_all_positions(&mut self) -> usize {
+        let symbols: Vec<String> = self.positions.keys().cloned().collect();
+        let mut closed = 0;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        for symbol in &symbols {
+            let price = self.latest_prices.get(symbol).copied()
+                .unwrap_or_else(|| {
+                    // Fallback to entry price if no market price available
+                    // 無市場價時回退到入場價
+                    self.positions.get(symbol).map(|p| p.entry_price).unwrap_or(0.0)
+                });
+            self.close_position(symbol, price, now);
+            closed += 1;
+        }
+        closed
+    }
+
     /// Check stops on all positions using per-symbol latest prices.
     /// 使用每個交易對的最新價格檢查所有持倉的止損。
     pub fn check_stops(&mut self, _price: f64, now_ms: u64) -> Vec<(String, StopTrigger)> {
@@ -323,6 +346,24 @@ mod tests {
         s.apply_fill("BTC", false, 0.1, 51000.0, 0.0, 1000); // close
         assert_eq!(s.position_count(), 0);
         assert!((s.total_realized_pnl - 100.0).abs() < 0.01); // (51000-50000)*0.1
+    }
+
+    #[test]
+    fn test_close_all_positions() {
+        // close_all_positions should close every open position at latest price.
+        // close_all_positions 應以最新價格平掉所有持倉。
+        let mut s = PaperState::new(10000.0);
+        s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
+        s.apply_fill("ETH", false, 1.0, 3000.0, 0.0, 0);
+        s.set_latest_price("BTC", 51000.0);
+        s.set_latest_price("ETH", 2900.0);
+        assert_eq!(s.position_count(), 2);
+
+        let closed = s.close_all_positions();
+        assert_eq!(closed, 2);
+        assert_eq!(s.position_count(), 0);
+        // BTC PnL: (51000-50000)*0.1 = 100, ETH PnL: (3000-2900)*1.0 = 100
+        assert!((s.balance() - 10200.0).abs() < 0.01);
     }
 
     #[test]

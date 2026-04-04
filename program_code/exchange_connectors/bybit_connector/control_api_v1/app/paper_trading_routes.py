@@ -533,9 +533,41 @@ def post_session_start(
     req: SessionStartRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Start a new paper trading session / 开始新的纸上交易 session"""
+    """Start a new paper trading session / 开始新的纸上交易 session
+
+    When no explicit initial_balance is provided (i.e. the default is used),
+    attempts to read the Bybit Demo account USDT balance first.
+    若未指定初始餘額（使用預設值），先嘗試讀取 Bybit Demo 帳戶 USDT 餘額。
+    """
     try:
-        state = ENGINE.start_session(initial_balance=req.initial_balance)
+        balance = req.initial_balance
+
+        # If the caller did not override the default, try fetching Bybit Demo balance.
+        # 若呼叫方未覆蓋預設值，嘗試從 Bybit Demo 帳戶獲取真實餘額。
+        if balance == DEFAULT_INITIAL_BALANCE_USDT and DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
+            try:
+                wallet_result = DEMO_CONNECTOR.get_wallet_balance()
+                if wallet_result.get("retCode") == 0:
+                    coins = wallet_result.get("result", {}).get("list", [{}])[0].get("coin", [])
+                    for c in coins:
+                        if c.get("coin") == "USDT":
+                            demo_bal = float(c.get("walletBalance", 0))
+                            if demo_bal > 0:
+                                balance = demo_bal
+                                logger.info(
+                                    "Using Bybit Demo USDT balance as initial: %.2f / "
+                                    "使用 Bybit Demo USDT 餘額作為初始資金: %.2f",
+                                    demo_bal, demo_bal,
+                                )
+                            break
+            except Exception as demo_err:
+                logger.warning(
+                    "Failed to fetch Bybit Demo balance, using default %.2f: %s / "
+                    "獲取 Demo 餘額失敗，使用預設值: %s",
+                    DEFAULT_INITIAL_BALANCE_USDT, demo_err, demo_err,
+                )
+
+        state = ENGINE.start_session(initial_balance=balance)
 
         # Auto-grant paper authorization on session start (zero real risk).
         # 会话启动时自动授予纸盘授权（无真实资金风险）。
@@ -643,8 +675,82 @@ def post_session_resume(
 def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop the session and finalize PnL / 停止 session 并结算 PnL"""
+    """Stop the session and finalize PnL / 停止 session 并结算 PnL
+
+    Before stopping, closes all open positions at market price and cancels
+    all pending orders. This ensures no phantom positions remain.
+    停止前先以市價平掉所有持倉並取消所有掛單，避免幽靈倉殘留。
+    """
     try:
+        # ── Phase 1: Close all open positions at market price ──
+        # 第一階段：以市價平掉所有持倉
+        positions = ENGINE.get_positions()
+        if positions:
+            # Fetch latest prices: Rust engine → Dispatcher → fallback empty
+            # 獲取最新價格：Rust 引擎 → 行情分發器 → 降級為空
+            live_prices: dict[str, float] = {}
+            try:
+                live_prices = get_rust_reader().get_latest_prices() or {}
+            except Exception:
+                pass
+            if not live_prices and DISPATCHER and DISPATCHER.is_running():
+                live_prices = DISPATCHER.get_status().get("latest_prices", {})
+
+            closed_count = 0
+            for symbol, pos in positions.items():
+                pos_side = pos.get("side", "Buy")
+                close_side = "Sell" if pos_side == "Buy" else "Buy"
+                qty = pos.get("qty", 0)
+                if qty <= 0:
+                    continue
+                try:
+                    ENGINE.submit_order(
+                        symbol=symbol,
+                        side=close_side,
+                        order_type="market",
+                        qty=qty,
+                        market_prices=live_prices,
+                        reduce_only=True,
+                    )
+                    closed_count += 1
+                except Exception as close_err:
+                    logger.warning(
+                        "Session stop — failed to close position %s: %s (non-fatal) / "
+                        "停止引擎平倉失敗（非致命）",
+                        symbol, close_err,
+                    )
+            if closed_count > 0:
+                logger.info(
+                    "Session stop — closed %d/%d positions at market / "
+                    "停止引擎 — 已市價平掉 %d/%d 個持倉",
+                    closed_count, len(positions), closed_count, len(positions),
+                )
+
+        # ── Phase 2: Cancel all pending orders ──
+        # 第二階段：取消所有掛單
+        try:
+            working_orders = ENGINE.get_orders(state_filter="working")
+            canceled_count = 0
+            for order in working_orders:
+                oid = order.get("order_id", "")
+                if oid:
+                    ENGINE.cancel_order(oid)
+                    canceled_count += 1
+            if canceled_count > 0:
+                logger.info(
+                    "Session stop — canceled %d pending orders / "
+                    "停止引擎 — 已取消 %d 個掛單",
+                    canceled_count, canceled_count,
+                )
+        except Exception as cancel_err:
+            logger.warning(
+                "Session stop — cancel orders error: %s (non-fatal) / "
+                "停止引擎取消掛單失敗（非致命）",
+                cancel_err,
+            )
+
+        # ── Phase 3: Stop session (also handles Demo close + reconciliation) ──
+        # 第三階段：停止 session（同時處理 Demo 平倉 + 對賬）
         state = ENGINE.stop_session()
         return _paper_response({
             "session": state["session"],

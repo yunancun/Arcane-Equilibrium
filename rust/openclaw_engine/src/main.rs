@@ -37,8 +37,15 @@ const STATUS_INTERVAL_SECS: u64 = 30;
 /// Symbols to track / 追蹤的交易對
 const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
 
-/// Initial paper balance / 初始紙盤餘額
-const PAPER_BALANCE: f64 = 10_000.0;
+/// Read paper balance from env var or use default.
+/// 從環境變量讀取紙盤餘額，若未設定則使用預設值。
+fn paper_balance() -> f64 {
+    let balance = std::env::var("OPENCLAW_PAPER_BALANCE")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(10_000.0);
+    balance
+}
 
 /// Parse replay CLI arguments from std::env::args().
 /// 從命令行參數解析 replay 模式選項。
@@ -339,7 +346,7 @@ async fn async_main(config: Arc<ConfigManager>) {
         info!(
             strategies = %strategies,
             symbols = ?SYMBOLS,
-            balance = PAPER_BALANCE,
+            balance = paper_balance(),
             "pipeline ready — {} strategies on {} symbols / 管線就緒",
             pipeline.orchestrator.strategy_count(),
             SYMBOLS.len(),
@@ -471,7 +478,17 @@ async fn async_main(config: Arc<ConfigManager>) {
             }
         }
 
-        // Shutdown: force-write final state / 關閉：強制寫入最終狀態
+        // Shutdown: close all open positions before final state write.
+        // 關閉：先平掉所有持倉，再寫入最終狀態。
+        let closed = pipeline.paper_state.close_all_positions();
+        if closed > 0 {
+            info!(
+                closed = closed,
+                "shutdown — closed all open positions at market / 關閉 — 已市價平掉所有持倉"
+            );
+        }
+
+        // Force-write final state / 強制寫入最終狀態
         let snap = pipeline.paper_state.export_state();
         state_writer.force_write(&snap);
         let full_snap = pipeline.snapshot();
