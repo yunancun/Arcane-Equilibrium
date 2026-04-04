@@ -286,7 +286,7 @@ class TestInferCategoryFallbackWarning:
         # BTCUSDT cannot be distinguished by name → warning emitted, returns "linear"
         from app.pipeline_bridge import PipelineBridge
 
-        with patch("app.pipeline_bridge.logger") as mock_logger:
+        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
             result = PipelineBridge._infer_category_from_symbol("BTCUSDT")
             assert result == "linear"  # 仍返回 linear | still returns linear
             mock_logger.warning.assert_called_once()
@@ -300,7 +300,7 @@ class TestInferCategoryFallbackWarning:
         # Inverse symbol must not trigger fallback warning (deterministic by name rule)
         from app.pipeline_bridge import PipelineBridge
 
-        with patch("app.pipeline_bridge.logger") as mock_logger:
+        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
             result = PipelineBridge._infer_category_from_symbol("BTCUSD")
             assert result == "inverse"
             mock_logger.warning.assert_not_called()
@@ -309,7 +309,7 @@ class TestInferCategoryFallbackWarning:
         # 確認 option symbol 不觸發 warning / Option symbol must not trigger fallback warning
         from app.pipeline_bridge import PipelineBridge
 
-        with patch("app.pipeline_bridge.logger") as mock_logger:
+        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
             result = PipelineBridge._infer_category_from_symbol("BTC-1JAN25-50000-C")
             assert result == "option"
             mock_logger.warning.assert_not_called()

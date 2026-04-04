@@ -57,7 +57,7 @@ L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
 Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
 代碼完成度：~90%（~67,000 行 Py+Rs）· 業務功能：~95%
 總工時進度：~35%（已完成 ~66d / 新總計 ~189d，含融合方案 105d 新增）
-關鍵路徑：Phase 0a/0b 已完成 → TD-01~03 文件拆分 → Phase 1 開始 5/01
+關鍵路徑：Phase 0a/0b 已完成 → TD-01~03 文件拆分已完成 → Phase 1 開始 5/01
 ★★★★ Rust 遷移 — Go/No-Go 7/7 PASS（2026-04-04）：
   R-CUT 全部完成（RC-01~RC-15）· R-IPC 完成（IPC-01~06）
   Rust 為唯一 tick 處理引擎 · Python tick pipeline 已停用

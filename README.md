@@ -31,7 +31,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-04 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成 · L3 审计归零)
+## 当前状态 (2026-04-04 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成 · TD-01~03 完成 · L3 审计归零)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）

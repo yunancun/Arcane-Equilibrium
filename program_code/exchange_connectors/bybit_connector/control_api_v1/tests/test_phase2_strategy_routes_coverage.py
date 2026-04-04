@@ -124,12 +124,17 @@ class TestEnvelope:
 # ═════════════════════════════════════════════════════════════════════════════
 
 # To avoid heavy module imports, we patch the module-level singletons.
+# TD-02: Routes were split into sub-modules; patches must target where the name is looked up.
+# TD-02：路由已拆分到子模組；patch 目標必須是名稱實際查找的模組。
 
-_MOD = "app.phase2_strategy_routes"
+_MOD = "app.phase2_strategy_routes"  # kept for backward compat reference
+_MOD_READ = "app.strategy_read_routes"
+_MOD_WRITE = "app.strategy_write_routes"
+_MOD_AI = "app.strategy_ai_routes"
 
 
 class TestGetKlinesRoute:
-    @patch(f"{_MOD}.KLINE_MANAGER")
+    @patch(f"{_MOD_READ}.KLINE_MANAGER")
     def test_happy_path(self, mock_km):
         from app.phase2_strategy_routes import get_klines
         mock_km.get_latest_klines.return_value = [{"o": 1, "h": 2}]
@@ -153,7 +158,7 @@ class TestGetKlinesRoute:
             _run(get_klines("BTCUSDT", "99z", n=10, actor=_FakeActor()))
         assert exc.value.status_code == 400
 
-    @patch(f"{_MOD}.KLINE_MANAGER")
+    @patch(f"{_MOD_READ}.KLINE_MANAGER")
     def test_exception_500(self, mock_km):
         from app.phase2_strategy_routes import get_klines
         from fastapi import HTTPException
@@ -164,7 +169,7 @@ class TestGetKlinesRoute:
 
 
 class TestGetIndicatorsRoute:
-    @patch(f"{_MOD}.INDICATOR_ENGINE")
+    @patch(f"{_MOD_READ}.INDICATOR_ENGINE")
     def test_happy_path(self, mock_ie):
         from app.phase2_strategy_routes import get_indicators
         mock_ie.get_indicators.return_value = {"rsi": 50}
@@ -180,7 +185,7 @@ class TestGetIndicatorsRoute:
 
 
 class TestGetSignalsRoute:
-    @patch(f"{_MOD}.SIGNAL_ENGINE")
+    @patch(f"{_MOD_READ}.SIGNAL_ENGINE")
     def test_happy_path(self, mock_se):
         from app.phase2_strategy_routes import get_signals
         mock_se.get_latest_signals.return_value = [{"sig": "buy"}]
@@ -196,14 +201,14 @@ class TestGetSignalsRoute:
 
 
 class TestStrategyLifecycleRoutes:
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_activate_happy(self, mock_orch):
         from app.phase2_strategy_routes import activate_strategy
         mock_orch.activate_strategy.return_value = True
         result = _run(activate_strategy("ma_crossover", actor=_FakeActor()))
         assert result["data"]["action"] == "activated"
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_activate_not_found(self, mock_orch):
         from app.phase2_strategy_routes import activate_strategy
         from fastapi import HTTPException
@@ -219,21 +224,21 @@ class TestStrategyLifecycleRoutes:
             _run(activate_strategy("bad name!!", actor=_FakeActor()))
         assert exc.value.status_code == 400
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_pause_happy(self, mock_orch):
         from app.phase2_strategy_routes import pause_strategy
         mock_orch.pause_strategy.return_value = True
         result = _run(pause_strategy("ma_crossover", actor=_FakeActor()))
         assert result["data"]["action"] == "paused"
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_stop_happy(self, mock_orch):
         from app.phase2_strategy_routes import stop_strategy
         mock_orch.stop_strategy.return_value = True
         result = _run(stop_strategy("ma_crossover", actor=_FakeActor()))
         assert result["data"]["action"] == "stopped"
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_stop_not_found(self, mock_orch):
         from app.phase2_strategy_routes import stop_strategy
         from fastapi import HTTPException
@@ -244,14 +249,14 @@ class TestStrategyLifecycleRoutes:
 
 
 class TestDeleteRoute:
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_delete_happy(self, mock_orch):
         from app.phase2_strategy_routes import delete_strategy
         mock_orch.remove_strategy.return_value = True
         result = _run(delete_strategy("ma_crossover", actor=_FakeActor()))
         assert result["data"]["action"] == "deleted"
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_WRITE}.ORCHESTRATOR")
     def test_delete_not_found(self, mock_orch):
         from app.phase2_strategy_routes import delete_strategy
         from fastapi import HTTPException
@@ -269,14 +274,14 @@ class TestDeleteRoute:
 
 
 class TestGetStrategyStatusRoute:
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_READ}.ORCHESTRATOR")
     def test_happy(self, mock_orch):
         from app.phase2_strategy_routes import get_strategy_status
         mock_orch.get_strategy_status.return_value = {"name": "x", "state": "active"}
         result = _run(get_strategy_status("ma_crossover", actor=_FakeActor()))
         assert result["data"]["state"] == "active"
 
-    @patch(f"{_MOD}.ORCHESTRATOR")
+    @patch(f"{_MOD_READ}.ORCHESTRATOR")
     def test_not_found(self, mock_orch):
         from app.phase2_strategy_routes import get_strategy_status
         from fastapi import HTTPException
@@ -287,7 +292,7 @@ class TestGetStrategyStatusRoute:
 
 
 class TestPipelineAndScannerRoutes:
-    @patch(f"{_MOD}.PIPELINE_BRIDGE", None)
+    @patch(f"{_MOD_READ}.PIPELINE_BRIDGE", None)
     def test_pipeline_stats_unavailable(self):
         from app.phase2_strategy_routes import get_pipeline_stats
         import app.ipc_state_reader as _ipc
@@ -301,7 +306,7 @@ class TestPipelineAndScannerRoutes:
             _ipc._READER = _orig
         assert result["data"]["available"] is False
 
-    @patch(f"{_MOD}.PIPELINE_BRIDGE")
+    @patch(f"{_MOD_READ}.PIPELINE_BRIDGE")
     def test_pipeline_stats_happy(self, mock_pb):
         from app.phase2_strategy_routes import get_pipeline_stats
         import app.ipc_state_reader as _ipc
@@ -315,7 +320,7 @@ class TestPipelineAndScannerRoutes:
             _ipc._READER = _orig
         assert result["data"]["ticks"] == 100
 
-    @patch(f"{_MOD}.MARKET_SCANNER", None)
+    @patch(f"{_MOD_READ}.MARKET_SCANNER", None)
     def test_scanner_unavailable(self):
         from app.phase2_strategy_routes import get_scanner_opportunities
         result = _run(get_scanner_opportunities(actor=_FakeActor()))
@@ -323,13 +328,13 @@ class TestPipelineAndScannerRoutes:
 
 
 class TestTelegramStatusRoute:
-    @patch(f"{_MOD}.TELEGRAM", None)
+    @patch(f"{_MOD_AI}.TELEGRAM", None)
     def test_telegram_not_loaded(self):
         from app.phase2_strategy_routes import get_telegram_status
         result = _run(get_telegram_status(actor=_FakeActor()))
         assert result["data"]["enabled"] is False
 
-    @patch(f"{_MOD}.TELEGRAM")
+    @patch(f"{_MOD_AI}.TELEGRAM")
     def test_telegram_available(self, mock_tg):
         from app.phase2_strategy_routes import get_telegram_status
         mock_tg.get_stats.return_value = {"enabled": True, "sent": 5}
@@ -338,13 +343,13 @@ class TestTelegramStatusRoute:
 
 
 class TestDynamicRiskRoutes:
-    @patch(f"{_MOD}.AUTO_DEPLOYER", None)
+    @patch(f"{_MOD_READ}.AUTO_DEPLOYER", None)
     def test_status_no_deployer(self):
         from app.phase2_strategy_routes import get_dynamic_risk_status
         result = _run(get_dynamic_risk_status(actor=_FakeActor()))
         assert result["data"]["available"] is False
 
-    @patch(f"{_MOD}.AUTO_DEPLOYER")
+    @patch(f"{_MOD_READ}.AUTO_DEPLOYER")
     def test_status_happy(self, mock_ad):
         from app.phase2_strategy_routes import get_dynamic_risk_status
         mock_ad.get_dynamic_risk_status.return_value = {"enabled": True}

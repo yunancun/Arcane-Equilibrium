@@ -568,7 +568,8 @@ class TestSymbolCategoryMap(unittest.TestCase):
             "Precondition: symbol must not be registered"
         )
 
-        with self.assertLogs("app.pipeline_bridge", level="WARNING") as log_ctx:
+        # TD-01: Logger moved to bridge_core.py after mixin split
+        with self.assertLogs("app.bridge_core", level="WARNING") as log_ctx:
             bridge._process_pending_intents()
 
         # At least one warning mentioning UNKNOWNSYM
@@ -641,15 +642,16 @@ class TestSymbolCategoryMap(unittest.TestCase):
         # Patch logger.warning to capture calls without requiring assertLogs
         # (assertLogs requires at least one log entry to be produced at the given level)
         # 用 patch 捕獲 warning 調用，避免 assertLogs 的「至少一條 log」要求
+        # TD-01: Logger moved to bridge_core.py after mixin split
         warning_calls = []
-        original_warning = __import__("app.pipeline_bridge", fromlist=["logger"]).logger.warning
+        original_warning = __import__("app.bridge_core", fromlist=["logger"]).logger.warning
 
         def capture_warning(msg, *args, **kwargs):
             warning_calls.append(msg % args if args else msg)
             return original_warning(msg, *args, **kwargs)
 
         with patch(
-            "app.pipeline_bridge.logger.warning",
+            "app.bridge_core.logger.warning",
             side_effect=capture_warning,
         ):
             bridge._process_pending_intents()
