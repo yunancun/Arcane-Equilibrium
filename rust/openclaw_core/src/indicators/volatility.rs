@@ -224,9 +224,16 @@ pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResul
     // 將結果鉗位到 [0.0, 1.0] — 有效赫斯特指數範圍。
     let h = ((n * sum_xy - sum_x * sum_y) / denom).clamp(0.0, 1.0);
 
-    let regime = if h > 0.60 {
+    // QC-2: Hurst threshold for trending regime (H > this → trending).
+    // QC-2: 赫斯特趨勢狀態門檻（H > 此值 → 趨勢）。
+    const HURST_TRENDING_THRESHOLD: f64 = 0.60;
+    // QC-2: Hurst threshold for mean-reverting regime (H < this → mean-reverting).
+    // QC-2: 赫斯特均值回歸狀態門檻（H < 此值 → 均值回歸）。
+    const HURST_MEAN_REVERTING_THRESHOLD: f64 = 0.40;
+
+    let regime = if h > HURST_TRENDING_THRESHOLD {
         "trending".to_string()
-    } else if h < 0.40 {
+    } else if h < HURST_MEAN_REVERTING_THRESHOLD {
         "mean_reverting".to_string()
     } else {
         "random_walk".to_string()

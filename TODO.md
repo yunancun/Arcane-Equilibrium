@@ -274,6 +274,14 @@ SPEC 審查記錄：
 
 ---
 
+## ██ 技術債務（Phase 1 前清理）
+
+- [ ] TD-01：pipeline_bridge.py 拆分（2587 行 > 1200 硬限）— 拆為 bridge_core + bridge_agents + bridge_stats
+- [ ] TD-02：phase2_strategy_routes.py 拆分（1838 行 > 1200 硬限）— 拆為 strategy_read_routes + strategy_write_routes + strategy_ai_routes
+- [ ] TD-03：paper_trading_routes.py 精簡（1104 行，接近 800 警告線）
+
+---
+
 ## ██ 長期整合（非緊急）
 
 - [ ] OC-1：OpenClaw Webhook 告警

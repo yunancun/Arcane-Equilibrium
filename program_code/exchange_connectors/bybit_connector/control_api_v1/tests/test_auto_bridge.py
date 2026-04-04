@@ -334,9 +334,12 @@ class TestFileIO:
 class TestRealObserverData:
     """Test with actual observer output files if they exist / 使用真实 observer 文件测试"""
 
-    SYSTEM_SNAPSHOT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/connector_logs/bybit/bybit_system_snapshot_latest.json")
-    WS_FACTS_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/runtime/bybit/bybit_ws_runtime_facts_latest.json")
-    VERDICT_PATH = Path("/home/ncyu/srv/docker_projects/trading_services/verdicts/bybit/bybit_observer_verdict_latest.json")
+    # Cross-platform: use OPENCLAW_BASE_DIR env var, fallback to ~/BybitOpenClaw/srv
+    # 跨平台：使用 OPENCLAW_BASE_DIR 環境變量，回退到 ~/BybitOpenClaw/srv
+    _BASE = Path(os.environ.get("OPENCLAW_BASE_DIR", Path.home() / "BybitOpenClaw" / "srv"))
+    SYSTEM_SNAPSHOT_PATH = _BASE / "docker_projects" / "trading_services" / "connector_logs" / "bybit" / "bybit_system_snapshot_latest.json"
+    WS_FACTS_PATH = _BASE / "docker_projects" / "trading_services" / "runtime" / "bybit" / "bybit_ws_runtime_facts_latest.json"
+    VERDICT_PATH = _BASE / "docker_projects" / "trading_services" / "verdicts" / "bybit" / "bybit_observer_verdict_latest.json"
 
     @pytest.fixture
     def real_data(self):

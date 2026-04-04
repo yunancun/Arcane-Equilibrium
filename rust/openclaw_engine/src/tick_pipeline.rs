@@ -166,6 +166,12 @@ impl TickPipeline {
         for strategy in self.orchestrator.strategies_mut() {
             if !strategy.is_active() { continue; }
             let strategy_intents = strategy.on_tick(&ctx);
+            // PA-2: Enforce single-intent-per-tick invariant in debug builds.
+            // Rejection rollback assumes each strategy emits at most 1 intent.
+            // PA-2: 在 debug 構建中強制單意圖/tick 不變量。拒絕回滾假設每策略最多 1 個意圖。
+            debug_assert!(strategy_intents.len() <= 1,
+                "Strategy {} emitted {} intents in one tick — rollback assumes max 1",
+                strategy.name(), strategy_intents.len());
             for intent in &strategy_intents {
                 let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
                 if result.submitted {

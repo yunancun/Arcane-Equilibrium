@@ -21,6 +21,11 @@ pub struct MaCrossover {
     /// RC-02: Slow EMA of sma_50 as proxy for 4h trend.
     /// RC-02: sma_50 的慢速 EMA，作為 4h 趨勢的替代指標。
     higher_tf_sma: Option<f64>,
+    /// Higher-TF EMA smoothing alpha. Default 0.003 = ~231min half-life ≈ 4h at 1m ticks.
+    /// Agent can tune this parameter. Will be replaced by real multi-TF klines in Phase 1.
+    /// 較高時間框架 EMA 平滑 alpha。默認 0.003 = ~231 分鐘半衰期 ≈ 1 分鐘 tick 下約 4 小時。
+    /// Agent 可調整此參數。Phase 1 將改用真實多時間框架 K 線替代。
+    pub higher_tf_alpha: f64,
     // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
     prev_position: Option<bool>,
     prev_last_trade_ms: u64,
@@ -34,6 +39,7 @@ impl MaCrossover {
             regime_filter_enabled: true,
             higher_tf_trend: None,
             higher_tf_sma: None,
+            higher_tf_alpha: 0.003,
             prev_position: None, prev_last_trade_ms: 0,
         }
     }
@@ -66,7 +72,7 @@ impl MaCrossover {
     /// RC-02: 使用 sma_50 的 EMA 更新較高時間框架 SMA 及趨勢。
     /// Alpha=0.003 在 1 分鐘 tick 上半衰期 ~231 分鐘 ≈ 4 小時。
     fn update_higher_tf(&mut self, sma_50: f64) {
-        const ALPHA: f64 = 0.003; // half-life ≈ 231 min ≈ 4h at 1m ticks
+        let alpha = self.higher_tf_alpha;
         let new_val = match self.higher_tf_sma {
             // First data point — initialize directly, no trend yet.
             // 第一個數據點 — 直接初始化，尚無趨勢。
@@ -75,7 +81,7 @@ impl MaCrossover {
                 self.higher_tf_trend = None; // Need at least one update to determine trend.
                 return;
             }
-            Some(prev) => ALPHA * sma_50 + (1.0 - ALPHA) * prev,
+            Some(prev) => alpha * sma_50 + (1.0 - alpha) * prev,
         };
         self.higher_tf_sma = Some(new_val);
         self.higher_tf_trend = Some(sma_50 > new_val);

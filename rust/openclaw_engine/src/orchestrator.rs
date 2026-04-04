@@ -23,7 +23,12 @@ impl Orchestrator {
     }
 
     /// Dispatch tick to all strategies and collect intents.
+    /// NOTE: Not called in production since RC-04 (per-strategy loop in tick_pipeline).
+    /// Retained for test helpers and potential future batch-processing use.
     /// 分派 tick 到所有策略並收集意圖。
+    /// 注意：自 RC-04 起生產環境不再調用（tick_pipeline 使用逐策略循環）。
+    /// 保留用於測試輔助和潛在的未來批處理。
+    #[allow(dead_code)]
     pub fn dispatch_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
         let mut all_intents = Vec::new();
         for strategy in &mut self.strategies {
