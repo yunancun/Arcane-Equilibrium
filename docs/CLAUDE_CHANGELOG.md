@@ -1,7 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-03
+> 最後更新：2026-04-04
+
+### Cold-Start Fix + Phase 0a DDL Draft（2026-04-04 · commit f6ab650）
+
+- **3-STRIKE 崩潰修復**：根因分析確認為 Cold Start Jitter（非代碼 bug），watchdog threshold 45s + grace-period 120s + Rust 引擎 force_write 初始快照
+- **Go/No-Go 文檔更新**：INC-001 事件記錄 + 判定條件細化（穩態 0 崩潰，啟動寬限期不計）
+- **Phase 0a DDL 草稿**：6 檔案 / 43 表 / 8 Schema / 29 hypertable（conditional）/ V001-V005 遷移框架
+- **PYO3-1 推遲**：接口錯位（Rust distill→cycle_data vs Python→IntelObject），推遲到 Phase 2 Decision Context
+- E2 審查 5 項修正（index_price NULL bug、scorer VIEW 注釋、unused import、table count、注釋一致性）+ E4 全綠 3839+36
+
+---
 
 ### Tech Debt Zero + Engine Launch（2026-04-03 · Session 11 final）
 

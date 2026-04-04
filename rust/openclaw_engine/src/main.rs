@@ -40,6 +40,44 @@ const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT
 /// Initial paper balance / 初始紙盤餘額
 const PAPER_BALANCE: f64 = 10_000.0;
 
+/// Parse replay CLI arguments from std::env::args().
+/// 從命令行參數解析 replay 模式選項。
+struct ReplayArgs {
+    enabled: bool,
+    input_path: Option<String>,
+    output_path: Option<String>,
+}
+
+fn parse_replay_args() -> ReplayArgs {
+    let args: Vec<String> = std::env::args().collect();
+    let mut replay = ReplayArgs {
+        enabled: false,
+        input_path: None,
+        output_path: None,
+    };
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--replay-mode" => replay.enabled = true,
+            "--replay-input" => {
+                i += 1;
+                if i < args.len() {
+                    replay.input_path = Some(args[i].clone());
+                }
+            }
+            "--replay-output" => {
+                i += 1;
+                if i < args.len() {
+                    replay.output_path = Some(args[i].clone());
+                }
+            }
+            _ => {} // ignore unknown args / 忽略未知參數
+        }
+        i += 1;
+    }
+    replay
+}
+
 fn main() {
     // ------------------------------------------------------------------
     // 0. Install rustls crypto provider / 安裝 rustls 加密提供者
@@ -63,6 +101,16 @@ fn main() {
     print_banner();
 
     // ------------------------------------------------------------------
+    // 1b. Check for replay mode / 檢查是否為回放模式
+    // ------------------------------------------------------------------
+    let replay_args = parse_replay_args();
+    if replay_args.enabled {
+        info!("replay mode activated / 回放模式已啟用");
+        run_replay_mode(replay_args);
+        return;
+    }
+
+    // ------------------------------------------------------------------
     // 2. Load config / 加載配置
     // ------------------------------------------------------------------
     let config = match ConfigManager::load(None) {
@@ -83,6 +131,144 @@ fn main() {
         .expect("failed to build tokio runtime / 構建 tokio 運行時失敗");
 
     runtime.block_on(async_main(config));
+}
+
+/// Run the engine in replay mode: read historical ticks from JSONL,
+/// process through TickPipeline, write CanaryRecords to output JSONL.
+/// No WS connection, no IPC, no paper auth needed.
+/// 回放模式：從 JSONL 讀取歷史 tick，通過 TickPipeline 處理，
+/// 將 CanaryRecord 寫入輸出 JSONL。無需 WS 連線、IPC 或紙盤授權。
+fn run_replay_mode(args: ReplayArgs) {
+    use std::io::{BufRead, BufWriter, Write};
+
+    let input_path = args.input_path.unwrap_or_else(|| {
+        error!("--replay-input is required / --replay-input 為必填參數");
+        std::process::exit(1);
+    });
+    let output_path = args.output_path.unwrap_or_else(|| {
+        error!("--replay-output is required / --replay-output 為必填參數");
+        std::process::exit(1);
+    });
+
+    info!(
+        input = %input_path,
+        output = %output_path,
+        "replay: reading ticks / 回放：讀取 tick 數據"
+    );
+
+    // ------------------------------------------------------------------
+    // 1. Build pipeline with same strategies as live mode
+    //    構建與即時模式相同策略的管線
+    // ------------------------------------------------------------------
+    let mut pipeline = TickPipeline::new(SYMBOLS);
+
+    // Register strategies (identical to live mode) / 註冊策略（與即時模式一致）
+    pipeline.orchestrator.register(Box::new(MaCrossover::new()));
+    pipeline.orchestrator.register(Box::new(BbReversion::new()));
+    pipeline.orchestrator.register(Box::new(BbBreakout::new()));
+    pipeline.orchestrator.register(Box::new(GridTrading::new_adaptive()));
+
+    // Grant paper authorization / 授予紙盤授權
+    match pipeline.grant_paper_auth() {
+        Ok(()) => info!("replay: paper authorization granted / 回放：紙盤授權已授予"),
+        Err(e) => {
+            error!(error = %e, "replay: failed to grant paper auth / 回放：紙盤授權失敗");
+            std::process::exit(1);
+        }
+    }
+
+    let strategies = pipeline.orchestrator.active_strategy_names().join(", ");
+    info!(
+        strategies = %strategies,
+        "replay: pipeline ready / 回放：管線就緒"
+    );
+
+    // ------------------------------------------------------------------
+    // 2. Read input JSONL and process each tick
+    //    讀取輸入 JSONL 並處理每個 tick
+    // ------------------------------------------------------------------
+    let in_file = match std::fs::File::open(&input_path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!(error = %e, path = %input_path, "replay: cannot open input / 回放：無法打開輸入文件");
+            std::process::exit(1);
+        }
+    };
+    let reader = std::io::BufReader::new(in_file);
+
+    let out_file = match std::fs::File::create(&output_path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!(error = %e, path = %output_path, "replay: cannot create output / 回放：無法創建輸出文件");
+            std::process::exit(1);
+        }
+    };
+    let mut writer = BufWriter::new(out_file);
+
+    let mut tick_count: u64 = 0;
+    let mut record_count: u64 = 0;
+    let start = std::time::Instant::now();
+
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                warn!(error = %e, "replay: skipping unreadable line / 回放：跳過無法讀取的行");
+                continue;
+            }
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Parse line as PriceEvent (format matches synthesize_ticks output)
+        // 將行解析為 PriceEvent（格式匹配 synthesize_ticks 輸出）
+        let event: PriceEvent = match serde_json::from_str(trimmed) {
+            Ok(ev) => ev,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    line_num = tick_count + 1,
+                    "replay: skipping unparseable tick / 回放：跳過無法解析的 tick"
+                );
+                continue;
+            }
+        };
+
+        tick_count += 1;
+
+        // Feed through pipeline / 送入管線處理
+        if let Some(record) = pipeline.feed_replay_tick(&event) {
+            if let Ok(json) = serde_json::to_string(&record) {
+                let _ = writeln!(writer, "{}", json);
+                record_count += 1;
+            }
+        }
+
+        // Progress log every 10000 ticks / 每 10000 個 tick 記錄進度
+        if tick_count % 10_000 == 0 {
+            info!(
+                ticks = tick_count,
+                records = record_count,
+                "replay: progress / 回放：進度"
+            );
+        }
+    }
+
+    // Flush output / 刷新輸出
+    let _ = writer.flush();
+
+    let elapsed = start.elapsed();
+    info!(
+        ticks = tick_count,
+        records = record_count,
+        elapsed_ms = elapsed.as_millis() as u64,
+        fills = pipeline.stats.total_fills,
+        intents = pipeline.stats.total_intents,
+        output = %output_path,
+        "replay complete / 回放完成"
+    );
 }
 
 /// Async entry point running inside the multi-thread runtime.

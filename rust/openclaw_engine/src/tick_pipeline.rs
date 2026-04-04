@@ -13,6 +13,7 @@ use openclaw_core::{
 use openclaw_types::PriceEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Instant;
 use tracing::{debug, info};
 
 use crate::intent_processor::IntentProcessor;
@@ -78,6 +79,9 @@ impl TickPipeline {
     /// 通過完整管線處理單個價格事件。
     /// 灰度模式啟用時返回 CanaryRecord。
     pub fn on_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
+        // Start timing the tick processing / 開始計時 tick 處理
+        let tick_start = Instant::now();
+
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
         self.latest_prices.insert(event.symbol.clone(), event.last_price);
@@ -96,7 +100,9 @@ impl TickPipeline {
                 self.paper_state.close_position(&sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
             }
-            return self.maybe_canary_record(event, None, vec![], vec![]);
+            // Measure elapsed time for fast-track exit / 計算快速通道退出的耗時
+            let tick_duration_us = tick_start.elapsed().as_micros() as u64;
+            return self.maybe_canary_record(event, None, vec![], vec![], tick_duration_us);
         }
 
         // Step 1: Kline aggregation
@@ -157,7 +163,9 @@ impl TickPipeline {
             info!(ticks = self.stats.total_ticks, fills = self.stats.total_fills, "tick stats");
         }
 
-        self.maybe_canary_record(event, indicators, signals, intents)
+        // Measure elapsed time for the full tick / 計算完整 tick 處理耗時
+        let tick_duration_us = tick_start.elapsed().as_micros() as u64;
+        self.maybe_canary_record(event, indicators, signals, intents, tick_duration_us)
     }
 
     /// Build a canary record if canary_mode is enabled (R07-2).
@@ -168,6 +176,7 @@ impl TickPipeline {
         indicators: Option<IndicatorSnapshot>,
         signals: Vec<Signal>,
         intents: Vec<crate::intent_processor::OrderIntent>,
+        tick_duration_us: u64,
     ) -> Option<CanaryRecord> {
         if !self.canary_mode {
             return None;
@@ -184,6 +193,7 @@ impl TickPipeline {
             order_intents: intents,
             paper_state: self.paper_state.export_state(),
             stats: self.stats.clone(),
+            tick_duration_us,
         })
     }
 
@@ -222,6 +232,21 @@ impl TickPipeline {
     /// 最新價格映射的唯讀訪問。
     pub fn latest_prices(&self) -> &HashMap<String, f64> {
         &self.latest_prices
+    }
+
+    /// Feed a single replay tick through the full pipeline (R07-replay).
+    /// Delegates to on_tick() with canary_mode forced on to guarantee a
+    /// CanaryRecord is returned for every tick.
+    /// 將單個回放 tick 送入完整管線（R07-replay）。
+    /// 強制啟用 canary_mode 以確保每個 tick 都返回 CanaryRecord。
+    pub fn feed_replay_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
+        // Ensure canary_mode is on so on_tick() produces a record.
+        // 確保 canary_mode 開啟，使 on_tick() 產生記錄。
+        let was_canary = self.canary_mode;
+        self.canary_mode = true;
+        let record = self.on_tick(event);
+        self.canary_mode = was_canary;
+        record
     }
 }
 
@@ -268,6 +293,9 @@ pub struct CanaryRecord {
     pub order_intents: Vec<crate::intent_processor::OrderIntent>,
     pub paper_state: crate::paper_state::PaperStateSnapshot,
     pub stats: TickStats,
+    /// Per-tick processing latency in microseconds (for Go/No-Go P50 < 50μs check).
+    /// 每 tick 處理延遲（微秒），用於 Go/No-Go P50 < 50μs 驗證。
+    pub tick_duration_us: u64,
 }
 
 /// Full pipeline snapshot for IPC consumers (R06-A).
