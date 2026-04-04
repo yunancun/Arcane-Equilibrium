@@ -3,6 +3,20 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### Rust Cutover Decision + Comprehensive Indicator Alignment（2026-04-04 · commits 2a253d9, 69b03aa, 5ed077b）
+
+- **Operator 決策：放棄修 Python V2，全力 Rust** — QA 嚴格審計 Python V2 真實成熟度 62/100，6 項功能 FAKE/DEAD/UNREACHABLE
+- **Replay Mode B**：tick_duration_us + feed_replay_tick() 100% 複用 on_tick，201K tick 完整回放驗證
+- **ADX Bug 修復**：Python ADX 返回 DX 而非 ADX — 補 Wilder 平滑第三步
+- **Comparator 大幅改進**：key 映射（66 keys）、bar-close filter、paper_state skip、容差放寬（1e-6/1e-2/5e-2）
+- **Rust 指標對齊**：Hurst 安全修復（P0）、KAMA SMA seed、IndicatorSnapshot +3（sma_50/ema_26/atr_5）、conservative_atr
+- **Rust 策略強化**：BB Breakout ATR trailing stop + regime exit（mean_reverting/random_walk）
+- **Python 指標修復**：KAMA per-step SC、Stochastic Fast→Slow、signal_generator 9x NoneType guard
+- **Rust 引擎完整度確認**：99.9% 獨立，零 Python 依賴，16 指標 / 8 信號 / 4 策略 / Guardian / Governance
+- TODO 全面重構：新增 R-CUT（Rust 切換）和 R-IPC（IPC 擴展）階段，Kelly/FundingArb 雙腿延後到 Phase 2/1
+
+---
+
 ### Cold-Start Fix + Phase 0a DDL Draft（2026-04-04 · commit f6ab650）
 
 - **3-STRIKE 崩潰修復**：根因分析確認為 Cold Start Jitter（非代碼 bug），watchdog threshold 45s + grace-period 120s + Rust 引擎 force_write 初始快照
