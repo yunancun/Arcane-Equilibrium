@@ -3,6 +3,13 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### RC-12 + Klines Snapshot + Rust-first 改造 + 全面審計（2026-04-04）
+
+- **RC-12**: 停用 Python MarketDataDispatcher 自動啟動（消除重複 Bybit WS 連接）
+- **Klines in snapshot**: Rust 引擎寫 1m K 線到 pipeline_snapshot.json（每 symbol 100 根）
+- **Rust-first 改造**: get_klines + get_indicators 所有 timeframe → 10/13 策略讀路由 Rust-first
+- **全面審計**: 無活躍重複處理，無重複進程，7 個 Python 交易組件全部休眠
+
 ### RC-11 + 既有 Bug 修復 + Governance 清理（2026-04-04）
 
 - **RC-11**: 消除 Python/Rust 止損雙重執行 — `MarketDataDispatcher._trigger_tick()` 移除 `engine.tick()` 調用

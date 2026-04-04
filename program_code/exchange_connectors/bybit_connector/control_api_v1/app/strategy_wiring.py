@@ -980,22 +980,23 @@ try:
     except Exception as _mode_read_e:
         logger.debug("Could not read global mode for feed auto-start: %s", _mode_read_e)
 
-    if _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None and _global_mode in _FEED_AUTO_MODES:
-        # Start background market feed when global mode is observe_only or above.
-        # Data (K-lines, indicators, observations) accumulates independently of paper/demo
-        # session state—opening/closing sessions does not interrupt data accumulation.
-        # 在全局模式为 observe_only 或以上时启动后台行情流。
-        # 数据（K线、指标、观察值）独立于 paper/demo 会话状态持续积累。
+    # RC-12: Python MarketDataDispatcher auto-start DISABLED — Rust engine has its own
+    # WebSocket connection to Bybit and is the sole tick processor. Starting a second
+    # Python WS wastes resources and creates duplicate connections.
+    # RC-11 already disabled engine.tick() in _trigger_tick(), so even if started,
+    # the dispatcher does nothing useful.
+    # Manual start/stop via POST /market-feed/start|stop remains available for debug.
+    # RC-12：Python MarketDataDispatcher 自動啟動已禁用 — Rust 引擎有自己的
+    # Bybit WebSocket 連接，是唯一 tick 處理器。啟動第二條 Python WS 浪費資源。
+    # RC-11 已停用 _trigger_tick() 中的 engine.tick()，即使啟動也不做任何有用的事。
+    # 手動啟動/停止仍可通過 POST /market-feed/start|stop 使用（調試用）。
+    if False and _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None and _global_mode in _FEED_AUTO_MODES:
         _auto_symbols = ["BTCUSDT", "ETHUSDT"]
         _paper_ptr.DISPATCHER = MarketDataDispatcher(
             engine=_paper_ptr.ENGINE,
             symbols=_auto_symbols,
         )
         _paper_ptr.DISPATCHER.start()
-        # RC-10: Python tick processing disabled — Rust engine handles all tick processing.
-        # PIPELINE_BRIDGE remains instantiated for API/GUI state queries, but is NOT activated.
-        # RC-10：Python tick 處理已禁用 — Rust 引擎處理所有 tick。
-        # PIPELINE_BRIDGE 仍保留實例供 API/GUI 狀態查詢，但不啟動。
         # _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
         # PIPELINE_BRIDGE.activate()
         logger.info(
