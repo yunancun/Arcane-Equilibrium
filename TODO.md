@@ -286,7 +286,7 @@ Bybit V5 API (Demo/Testnet/Mainnet)
 
 #### 階段 5：構建 + 質量保證（PYO3-B06 ~ B08）
 
-- [ ] PYO3-B06：maturin 構建驗證
+- [x] PYO3-B06：maturin 構建驗證（39 methods, 3.7s 增量編譯）
   - `maturin develop` 成功
   - `python3 -c "from openclaw_core import BybitClient; print('OK')"` 通過
   - 增量編譯時間測量並記錄
