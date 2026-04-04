@@ -221,8 +221,9 @@ localStorage.removeItem('oc_trading_token');
 // getToken() removed — auth handled by HttpOnly cookie (common.js ocGetToken() if needed)
 // getToken() 已移除 — 认证由 HttpOnly cookie 处理（如需可用 common.js 的 ocGetToken()）
 
-// Cache-bust timestamp — ensures iframe tabs reload on each console.html refresh
-const BUILD_TS = Date.now();
+// Cache-bust version — increment on each deploy to force iframe reload
+// 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
+const BUILD_TS = '20260404.3';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 const TABS = [
