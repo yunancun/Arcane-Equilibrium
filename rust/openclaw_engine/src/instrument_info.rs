@@ -135,7 +135,8 @@ impl SymbolSpec {
 /// 線程安全的合約信息緩存。
 pub struct InstrumentInfoCache {
     /// Map of symbol -> SymbolSpec / 交易對 -> 規格 映射
-    cache: RwLock<HashMap<String, SymbolSpec>>,
+    /// pub(crate) for test access from sibling modules / pub(crate) 供兄弟模組測試存取
+    pub(crate) cache: RwLock<HashMap<String, SymbolSpec>>,
 }
 
 impl InstrumentInfoCache {

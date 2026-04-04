@@ -8,6 +8,8 @@
 //!   SIGHUP 觸發配置熱加載。SIGTERM/SIGINT 觸發優雅關閉。
 //!   事件消費者將 PriceEvent 送入 TickPipeline 進行紙盤交易。
 
+use openclaw_engine::account_manager::AccountManager;
+use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::ConfigManager;
 use openclaw_engine::ipc_server::IpcServer;
 use openclaw_engine::persistence::{AuditWriter, StateWriter};
@@ -39,12 +41,60 @@ const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT
 
 /// Read paper balance from env var or use default.
 /// 從環境變量讀取紙盤餘額，若未設定則使用預設值。
-fn paper_balance() -> f64 {
-    let balance = std::env::var("OPENCLAW_PAPER_BALANCE")
+fn paper_balance_from_env() -> Option<f64> {
+    std::env::var("OPENCLAW_PAPER_BALANCE")
         .ok()
         .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(10_000.0);
-    balance
+        .filter(|&b| b > 0.0)
+}
+
+/// Fetch USDT balance from Bybit Demo account via REST API.
+/// 通過 REST API 從 Bybit Demo 帳戶讀取 USDT 餘額。
+///
+/// Falls back to env var OPENCLAW_PAPER_BALANCE, then $10,000 default.
+/// 回退順序：環境變量 → $10,000 預設值。
+async fn fetch_demo_balance() -> f64 {
+    // 1. Explicit env var override takes precedence
+    // 明確的環境變量覆蓋優先
+    if let Some(env_bal) = paper_balance_from_env() {
+        info!(balance = format!("{:.2}", env_bal), "using OPENCLAW_PAPER_BALANCE env override / 使用環境變量覆蓋餘額");
+        return env_bal;
+    }
+
+    // 2. Try reading from Bybit Demo API
+    // 嘗試從 Bybit Demo API 讀取
+    match BybitRestClient::new(BybitEnvironment::Demo, None, None) {
+        Ok(client) if client.has_credentials() => {
+            let acct = AccountManager::new();
+            match acct.refresh_balance(&client).await {
+                Ok(_) => {
+                    let bal = acct.usdt_wallet_balance();
+                    if bal > 0.0 {
+                        info!(
+                            balance = format!("{:.2}", bal),
+                            "fetched Bybit Demo USDT balance / 已從 Bybit Demo 讀取 USDT 餘額"
+                        );
+                        return bal;
+                    }
+                    warn!("Bybit Demo USDT balance is 0, using default / Demo USDT 餘額為 0，使用預設值");
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to fetch Bybit Demo balance, using default / 讀取 Demo 餘額失敗");
+                }
+            }
+        }
+        Ok(_) => {
+            info!("no Bybit API credentials — using default balance / 無 API 憑證，使用預設餘額");
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to create Bybit client / 創建 Bybit 客戶端失敗");
+        }
+    }
+
+    // 3. Fallback default
+    let default = 10_000.0;
+    info!(balance = format!("{:.2}", default), "using default paper balance / 使用預設紙盤餘額");
+    default
 }
 
 /// Parse replay CLI arguments from std::env::args().
@@ -284,6 +334,12 @@ async fn async_main(config: Arc<ConfigManager>) {
     let cancel = CancellationToken::new();
 
     // ------------------------------------------------------------------
+    // Fetch initial balance from Bybit Demo API (or env / default)
+    // 從 Bybit Demo API 讀取初始餘額（或環境變量 / 預設值）
+    // ------------------------------------------------------------------
+    let initial_balance = fetch_demo_balance().await;
+
+    // ------------------------------------------------------------------
     // Price event channel / 價格事件通道
     // ------------------------------------------------------------------
     let (event_tx, mut event_rx) = mpsc::channel::<PriceEvent>(EVENT_CHANNEL_SIZE);
@@ -321,8 +377,8 @@ async fn async_main(config: Arc<ConfigManager>) {
     // ------------------------------------------------------------------
     let event_cancel = cancel.clone();
     let event_handle = tokio::spawn(async move {
-        // Build pipeline / 構建管線
-        let mut pipeline = TickPipeline::new(SYMBOLS);
+        // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
+        let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
 
         // Register strategies / 註冊策略
         pipeline.orchestrator.register(Box::new(MaCrossover::new()));
@@ -346,7 +402,7 @@ async fn async_main(config: Arc<ConfigManager>) {
         info!(
             strategies = %strategies,
             symbols = ?SYMBOLS,
-            balance = paper_balance(),
+            balance = format!("{:.2}", initial_balance),
             "pipeline ready — {} strategies on {} symbols / 管線就緒",
             pipeline.orchestrator.strategy_count(),
             SYMBOLS.len(),

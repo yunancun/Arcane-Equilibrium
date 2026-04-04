@@ -446,7 +446,6 @@ fn format_price(price: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::*;
 
     #[test]
     fn test_parse_batch_response_success() {

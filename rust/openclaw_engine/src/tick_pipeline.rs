@@ -75,6 +75,12 @@ impl TickPipeline {
             .ok()
             .and_then(|s| s.parse::<f64>().ok())
             .unwrap_or(10_000.0);
+        Self::with_balance(symbols, balance)
+    }
+
+    /// Create a pipeline with an explicit initial balance.
+    /// 使用明確初始餘額創建管線。
+    pub fn with_balance(symbols: &[&str], balance: f64) -> Self {
         Self {
             kline_manager: KlineManager::new(symbols, None, None),
             signal_engine: SignalEngine::new(),
