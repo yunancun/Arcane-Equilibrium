@@ -65,6 +65,9 @@ pub struct WsClient {
 const MAX_RECONNECT_DELAY_MS: u64 = 60_000;
 /// Backoff multiplier / 退避倍數
 const BACKOFF_FACTOR: u64 = 2;
+/// Max topics per subscribe call (Bybit limit = 10)
+/// 每次 subscribe 調用最大主題數（Bybit 限制 = 10）
+const SUBSCRIBE_BATCH_SIZE: usize = 10;
 
 impl WsClient {
     /// Create a new WS client.
@@ -113,17 +116,29 @@ impl WsClient {
 
                     let (mut write, mut read) = ws_stream.split();
 
-                    // Send subscription message / 發送訂閱消息
-                    let sub_msg = serde_json::json!({
-                        "op": "subscribe",
-                        "args": self.subscriptions,
-                    });
-                    if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await {
-                        error!(error = %e, "failed to send subscribe / 發送訂閱失敗");
+                    // Send subscriptions in batches of 10 (Bybit limit per call)
+                    // 分批發送訂閱（Bybit 每次調用限制 10 個主題）
+                    let mut sub_ok = true;
+                    for chunk in self.subscriptions.chunks(SUBSCRIBE_BATCH_SIZE) {
+                        let sub_msg = serde_json::json!({
+                            "op": "subscribe",
+                            "args": chunk,
+                        });
+                        if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await {
+                            error!(error = %e, "failed to send subscribe / 發送訂閱失敗");
+                            sub_ok = false;
+                            break;
+                        }
+                    }
+                    if !sub_ok {
                         log_state(WsState::Reconnecting, attempt);
                         continue;
                     }
-                    info!(topics = ?self.subscriptions, "subscribed / 已訂閱");
+                    info!(
+                        topics = self.subscriptions.len(),
+                        batches = (self.subscriptions.len() + SUBSCRIBE_BATCH_SIZE - 1) / SUBSCRIBE_BATCH_SIZE,
+                        "subscribed / 已訂閱"
+                    );
 
                     // Heartbeat + message loop / 心跳 + 消息循環
                     let heartbeat_interval = Duration::from_millis(heartbeat_ms);
@@ -418,7 +433,7 @@ fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<Price
     let price = item.get("price")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
-    let qty = item.get("qty")
+    let qty = item.get("size")
         .and_then(|v| v.as_str())
         .unwrap_or("0");
     let side = item.get("side")
@@ -639,7 +654,7 @@ mod tests {
         let item = serde_json::json!({
             "price": "64000.0",
             "side": "Sell",
-            "qty": "2.5",
+            "size": "2.5",
             "updatedTime": 1700000000000_u64
         });
         let event = parse_liquidation_item(&item, "liquidation.BTCUSDT").unwrap();

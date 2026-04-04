@@ -37,7 +37,12 @@ const AUTH_EXPIRES_OFFSET_MS: u64 = 10_000;
 
 /// Private topics to subscribe after auth.
 /// 認證後要訂閱的私有主題。
-const PRIVATE_TOPICS: &[&str] = &["order", "execution", "fast-execution", "position", "wallet", "dcp"];
+///
+/// Note: `fast-execution` replaces `execution` with ~50ms latency (vs ~300ms).
+/// Subscribing to both would cause duplicate fill events. We use fast-execution only.
+/// 注意：`fast-execution` 替代 `execution`（~50ms vs ~300ms）。
+/// 同時訂閱兩者會導致重複成交事件。我們只使用 fast-execution。
+const PRIVATE_TOPICS: &[&str] = &["order", "fast-execution", "position", "wallet", "dcp"];
 
 // ---------------------------------------------------------------------------
 // Event types / 事件類型
@@ -55,6 +60,9 @@ pub enum PrivateWsEvent {
     Position(PositionUpdate),
     /// Wallet/balance update / 錢包餘額更新
     Wallet(WalletUpdate),
+    /// DCP triggered — Bybit auto-cancelled orders due to connection loss.
+    /// DCP 觸發 — Bybit 因連接斷開自動取消了訂單。
+    DcpTriggered,
     /// Authentication succeeded / 認證成功
     AuthSuccess,
     /// Authentication failed / 認證失敗
@@ -538,9 +546,11 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
             None
         }
         "dcp" => {
-            // DCP trigger notification / DCP 觸發通知
-            debug!("DCP event received / 收到 DCP 事件");
-            Some(PrivateWsEvent::Disconnected)
+            // DCP triggered: Bybit auto-cancelled orders due to prior disconnect.
+            // NOT a connection loss — the current WS is alive; orders were cancelled.
+            // DCP 觸發：Bybit 因之前的斷連自動取消了訂單。不是連接斷開。
+            info!("DCP triggered — orders may have been cancelled / DCP 觸發 — 訂單可能已被取消");
+            Some(PrivateWsEvent::DcpTriggered)
         }
         _ => {
             debug!(topic = topic, "Unhandled private topic / 未處理的私有主題");

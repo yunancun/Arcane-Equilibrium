@@ -158,6 +158,16 @@ pub fn full_subscription_list_with_intervals(
     topics.push(orderbook_topic(symbol));
     topics.push(public_trade_topic(symbol));
     topics.push(liquidation_topic(symbol));
+    // Note: price-limit and adl-notice are opt-in via `extended_subscription_list()`.
+    // They are less frequently used and add to the per-connection topic count.
+    // 注意：price-limit 和 adl-notice 通過 `extended_subscription_list()` 可選訂閱。
+    topics
+}
+
+/// Extended subscription list including price-limit and ADL notice (opt-in).
+/// 擴展訂閱列表，包含 price-limit 和 ADL notice（可選）。
+pub fn extended_subscription_list(symbol: &str) -> Vec<String> {
+    let mut topics = full_subscription_list(symbol);
     topics.push(price_limit_topic(symbol));
     topics.push(adl_notice_topic(symbol));
     topics
@@ -225,8 +235,8 @@ mod tests {
     #[test]
     fn test_full_subscription_list() {
         let topics = full_subscription_list("BTCUSDT");
-        // 4 klines + ticker + orderbook + publicTrade + liquidation + price-limit + adl-notice = 10
-        assert_eq!(topics.len(), 10);
+        // 4 klines + ticker + orderbook + publicTrade + liquidation = 8
+        assert_eq!(topics.len(), 8);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.5.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.15.BTCUSDT".to_string()));
@@ -235,6 +245,13 @@ mod tests {
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
         assert!(topics.contains(&"liquidation.BTCUSDT".to_string()));
+    }
+
+    #[test]
+    fn test_extended_subscription_list() {
+        let topics = extended_subscription_list("BTCUSDT");
+        // 8 base + price-limit + adl-notice = 10
+        assert_eq!(topics.len(), 10);
         assert!(topics.contains(&"price-limit.BTCUSDT".to_string()));
         assert!(topics.contains(&"adl-notice.BTCUSDT".to_string()));
     }
@@ -244,8 +261,8 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // 10 topics per symbol * 2 symbols = 20
-        assert_eq!(topics.len(), 20);
+        // 8 topics per symbol * 2 symbols = 16
+        assert_eq!(topics.len(), 16);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.1.ETHUSDT".to_string()));
         assert!(topics.contains(&"tickers.ETHUSDT".to_string()));
@@ -275,8 +292,8 @@ mod tests {
     #[test]
     fn test_empty_intervals() {
         let topics = full_subscription_list_with_intervals("BTCUSDT", &[]);
-        // 0 klines + ticker + orderbook + publicTrade + liquidation + price-limit + adl-notice = 6
-        assert_eq!(topics.len(), 6);
+        // 0 klines + ticker + orderbook + publicTrade + liquidation = 4
+        assert_eq!(topics.len(), 4);
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));

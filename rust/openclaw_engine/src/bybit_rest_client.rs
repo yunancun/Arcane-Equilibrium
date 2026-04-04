@@ -149,6 +149,7 @@ impl BybitResponse {
 /// Bybit V5 rate limit group — each group has independent limits.
 /// Bybit V5 限流分組 — 每組有獨立的限制。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(usize)]
 pub enum RateLimitGroup {
     /// Order creation/amendment/cancellation (10 req/s) / 訂單操作
     Order,

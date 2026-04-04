@@ -217,6 +217,12 @@ impl ExecutionListener {
                 PrivateWsEvent::AuthFailed(reason) => {
                     warn!(reason = %reason, "Auth failed event received / 收到認證失敗事件");
                 }
+                PrivateWsEvent::DcpTriggered => {
+                    // DCP fired: Bybit cancelled open orders due to prior disconnect.
+                    // Not a new disconnect — the WS is alive. Log for audit trail.
+                    // DCP 觸發：Bybit 因之前的斷連取消了訂單。非新斷連。
+                    warn!("DCP triggered — open orders may have been cancelled / DCP 觸發 — 掛單可能已被取消");
+                }
                 PrivateWsEvent::Disconnected => {
                     self.stats.total_disconnects.fetch_add(1, Ordering::Relaxed);
                     info!("Disconnect event received / 收到斷線事件");
