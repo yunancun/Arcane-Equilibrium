@@ -123,14 +123,13 @@ impl IntentProcessor {
         // Intent qty is treated as a maximum; sizing can only reduce it.
         // 意圖 qty 視為上限；計算只能減小它。
         const P1_RISK_PCT: f64 = 0.02;
-        const MIN_QTY: f64 = 0.001;
 
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { 0.0 };
-        // Fractional Kelly floor: clamp between MIN_QTY and intent.qty
-        // 分數 Kelly 地板：夾在 MIN_QTY 和 intent.qty 之間
-        let sized_qty = p1_max_qty.max(MIN_QTY).min(intent.qty);
+        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { intent.qty };
+        // P1 sizing caps intent qty — no artificial floor, let exchange reject if too small.
+        // P1 sizing 裁剪意圖 qty — 無人為下限，太小由交易所拒絕。
+        let sized_qty = p1_max_qty.min(intent.qty);
         let final_qty = guardian_result.modified_qty.unwrap_or(sized_qty);
 
         // Gate 3: Cost gate (fail-open if ATR missing)
@@ -219,9 +218,9 @@ mod tests {
     }
 
     #[test]
-    fn test_position_sizing_min_qty() {
-        // With tiny balance, P1 calc gives < MIN_QTY, so MIN_QTY (0.001) is used.
-        // 餘額極小時，P1 計算 < MIN_QTY，使用 MIN_QTY (0.001)。
+    fn test_position_sizing_tiny_balance() {
+        // With tiny balance, P1 calc gives very small qty — no artificial floor.
+        // 餘額極小時，P1 計算給出極小 qty — 無人為下限。
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
@@ -231,10 +230,10 @@ mod tests {
         let result = proc.process(&intent, &gov, &state);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
-        // P1 calc: 100 * 0.02 / 50000 = 0.00004 < 0.001, so MIN_QTY wins
+        // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
         assert!(
-            (fill.fill_qty - 0.001).abs() < 1e-9,
-            "Expected min qty 0.001, got {}",
+            (fill.fill_qty - 0.00004).abs() < 1e-9,
+            "Expected P1-sized qty 0.00004, got {}",
             fill.fill_qty
         );
     }

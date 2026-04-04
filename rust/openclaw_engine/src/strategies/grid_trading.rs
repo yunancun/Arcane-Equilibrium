@@ -9,7 +9,9 @@ use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 
 const DEFAULT_GRID_COUNT: usize = 10;
-const DEFAULT_QTY_PER_GRID: f64 = 0.001;
+/// Large default qty — intent_processor P1 sizing will cap to actual risk budget.
+/// 大默認 qty — intent_processor P1 sizing 會裁剪到實際風險預算。
+const DEFAULT_QTY_PER_GRID: f64 = 1.0;
 const FEE_PCT: f64 = 0.00055; // one-way taker
 
 pub struct GridTrading {
@@ -38,7 +40,7 @@ impl GridTrading {
             grid_levels: levels,
             last_cross_idx: None,
             net_inventory: 0.0,
-            max_inventory: 5.0 * DEFAULT_QTY_PER_GRID,
+            max_inventory: 5.0,
             last_trade_ms: 0,
             cooldown_ms: 60_000,
             qty_per_grid: DEFAULT_QTY_PER_GRID,
@@ -58,7 +60,7 @@ impl GridTrading {
             grid_levels: Vec::new(),  // Empty — initialized on first tick / 空 — 首次 tick 时初始化
             last_cross_idx: None,
             net_inventory: 0.0,
-            max_inventory: 5.0 * DEFAULT_QTY_PER_GRID,
+            max_inventory: 5.0,
             last_trade_ms: 0,
             cooldown_ms: 60_000,
             qty_per_grid: DEFAULT_QTY_PER_GRID,
@@ -165,8 +167,9 @@ impl Strategy for GridTrading {
 
         let mut intents = Vec::new();
 
-        if idx < prev_idx && self.net_inventory < self.max_inventory {
-            // Price crossed down → buy
+        if idx < prev_idx {
+            // Price crossed down → buy (intent_processor handles position/sizing)
+            // 價格下穿 → 買入（intent_processor 處理倉位/sizing）
             intents.push(OrderIntent {
                 symbol: ctx.symbol.clone(), is_long: true, qty: self.qty_per_grid,
                 confidence: 0.5, strategy: self.name().into(),
@@ -174,8 +177,9 @@ impl Strategy for GridTrading {
             });
             self.net_inventory += self.qty_per_grid;
             self.last_trade_ms = ctx.timestamp_ms;
-        } else if idx > prev_idx && self.net_inventory > -self.max_inventory {
-            // Price crossed up → sell
+        } else if idx > prev_idx {
+            // Price crossed up → sell (may close existing long — Gate 1.5 allows opposite)
+            // 價格上穿 → 賣出（可能平多倉 — Gate 1.5 允許反向）
             intents.push(OrderIntent {
                 symbol: ctx.symbol.clone(), is_long: false, qty: self.qty_per_grid,
                 confidence: 0.5, strategy: self.name().into(),
@@ -226,12 +230,14 @@ mod tests {
     }
 
     #[test]
-    fn test_inventory_cap() {
+    fn test_no_inventory_cap_blocking() {
+        // Inventory cap removed — intent_processor Gate 1.5 handles duplicates.
+        // 庫存上限已移除 — intent_processor Gate 1.5 處理重複。
         let mut g = GridTrading::new(49000.0, 51000.0);
         g.net_inventory = g.max_inventory;
         g.on_tick(&ctx(50500.0, 0));
         let i = g.on_tick(&ctx(49500.0, 100_000));
-        assert!(i.is_empty()); // can't buy more
+        assert!(!i.is_empty()); // Grid always emits; intent_processor decides
     }
 
     #[test]

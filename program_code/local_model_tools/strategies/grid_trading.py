@@ -94,7 +94,7 @@ class GridTradingStrategy(StrategyBase):
         upper_price: float = 50000.0,
         lower_price: float = 40000.0,
         grid_count: int = 10,
-        qty_per_grid: float = 0.001,
+        qty_per_grid: float = 1.0,  # Large default — intent_processor P1 sizing caps to risk budget
         geometric: bool = False,
         # V2 parameters / V2 参数
         ou_dynamic: bool = True,          # Enable OU dynamic spacing / 启用 OU 动态间距（V2 默认开启）
@@ -371,25 +371,12 @@ class GridTradingStrategy(StrategyBase):
                 self._last_price = price
                 return
 
-            # Inventory stop: if accumulated inventory exceeds max, stop taking new positions
-            # 库存止损：累计库存超过上限时，停止新建同方向仓位
-            if abs(self._net_inventory) >= self._max_inventory_qty:
-                if not self._inventory_stop_triggered:
-                    self._inventory_stop_triggered = True
-                    logger.warning(
-                        "Grid inventory limit reached: %.6f (max %.6f) / "
-                        "网格库存达到上限",
-                        self._net_inventory, self._max_inventory_qty,
-                    )
-
             # Grid crossing detected / 检测到网格穿越
+            # Inventory cap removed — intent_processor handles position/sizing.
+            # 库存上限已移除 — intent_processor 处理仓位/sizing。
             if current_index > self._last_grid_index:
-                # Price moved up → sell (one intent per grid crossed)
-                # 价格上移 → 卖出（每穿越一格一个意图）
-                if self._net_inventory <= -self._max_inventory_qty:
-                    self._last_grid_index = current_index
-                    self._last_price = price
-                    return  # Inventory limit reached / 库存限制
+                # Price moved up → sell (may close existing long)
+                # 价格上移 → 卖出（可能平多仓）
                 grids_crossed = current_index - self._last_grid_index
                 for i in range(grids_crossed):
                     grid_level = self._grid_levels[self._last_grid_index + i + 1]
@@ -413,11 +400,8 @@ class GridTradingStrategy(StrategyBase):
                 self._last_emit_ts_ms = ts_ms
 
             else:
-                # Price moved down → buy / 价格下移 → 买入
-                if self._net_inventory >= self._max_inventory_qty:
-                    self._last_grid_index = current_index
-                    self._last_price = price
-                    return  # Inventory limit reached / 库存限制
+                # Price moved down → buy (intent_processor handles sizing)
+                # 价格下移 → 买入（intent_processor 处理 sizing）
                 grids_crossed = self._last_grid_index - current_index
                 for i in range(grids_crossed):
                     grid_level = self._grid_levels[self._last_grid_index - i]
