@@ -31,7 +31,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-05 · PYO3-BYBIT 完成 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成)
+## 当前状态 (2026-04-05 · Session 6 清理完成 · OPEN 8 / RESOLVED 7 · Phase 1 ready)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
@@ -79,7 +79,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
 | ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：治理 fail-closed · P0/P1/P2 风控 · 4,609 测试全绿 · 5 Agent · Rust tick <100μs · PyO3 桥接 39 方法 · 67 项审计修正
+**亮点**：治理 fail-closed（ARCH-4 硬化） · P0/P1/P2 风控 · 4,609 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · 67 项审计修正
 
 **开发路线图**
 
@@ -87,10 +87,11 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 |-------|------|------|
 | 0-3 | 业务功能 52%→100% + L1/L2 冻结 | ✅ 完成 |
 | R-00~R-06 | Rust 引擎 24 core + 12 engine 模组 + IPC | ✅ 完成 |
-| **R-07** | **灰度验证（Go/No-Go 4/10）** | **🔄 运行中** |
-| **0a** | **PG 8-Schema DDL + Grafana VIEW 桥接** | ⬜ 4/11 起 |
-| 0b | TimescaleDB + 压缩/retention | ⬜ W2-3 |
-| 1 | 市场数据止血 + FeatureCollector + PSI | ⬜ W4-5 |
+| R-07 | 灰度验证（Go/No-Go 4/10） | ✅ 7/7 PASS |
+| 0a | PG 8-Schema DDL + Grafana VIEW 桥接 | ✅ 完成 |
+| 0b | TimescaleDB + 压缩/retention | ✅ 完成 |
+| Session 6 | KNOWN_ISSUES 清理 + OC-1/2 告警 + Shadow docs | ✅ OPEN 8 |
+| **1** | **市场数据止血 + FeatureCollector + PSI** | **⬜ 5/01 起** |
 | 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ⬜ W6-9 |
 | 3a | update_params() 改造（AGT-1） | ⬜ W9-10 |
 | 3b | Optuna TPE + Thompson Sampling + CPCV + 黑天鹅 | ⬜ W11-12 |

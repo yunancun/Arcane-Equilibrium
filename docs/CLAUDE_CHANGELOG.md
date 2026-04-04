@@ -3,6 +3,17 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-05
 
+### Session 6：基礎設施清理 + 告警系統（2026-04-05 · commit 0e2d6a4）
+
+- **KNOWN_ISSUES 修復 4 項**：RE-1(memory audit→RESOLVED), RE-2(WS supervisor+channel-close propagation), ARCH-1(intent dedup), ARCH-4(fail-closed hardening)
+- **OC-1 WebhookAlerter**：新建 webhook_alerter.py — HMAC-SHA256 簽名、多端點扇出、滑動窗口限流
+- **OC-2 AlertRouter**：新建 alert_router.py — Telegram+Webhook 雙通道統一告警分發，paper_trading_wiring.py 接入
+- **Bybit handbook**：§2.3 Shadow Order Sync Channel 完整文檔（架構圖+結構體+觸發點+已知陷阱）
+- **Batch D**：RE-3 降級 LOW + DEBT-1 deferral note + IPC-05 範圍記錄延後
+- **測試**：770 Rust + 3343 Python = 4113 全綠（1 known flaky excluded）
+- **OPEN 11→8 · RESOLVED 3→7**
+- 12 files changed, +759/-68 lines
+
 ### PYO3-BYBIT 完成 — PyO3 Bybit API 橋接（2026-04-05 · commits e3c9afe~80f68e4）
 
 - **Route C 決策**：採用 PyO3 直接調用（非 IPC 透傳），增量編譯 3.7s 可接受
