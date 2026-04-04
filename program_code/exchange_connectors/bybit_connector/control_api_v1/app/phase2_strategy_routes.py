@@ -442,6 +442,19 @@ try:
     except Exception as e:
         logger.warning("Could not inject StrategistAgent: %s", e)
 
+    # --- B4: CognitiveModulator instantiation + injection into StrategistAgent ---
+    # B4：实例化 CognitiveModulator 并注入 StrategistAgent（L0 决策门槛调制）
+    try:
+        from program_code.local_model_tools.cognitive_modulator import CognitiveModulator
+        _cognitive_modulator = CognitiveModulator()
+        STRATEGIST_AGENT.set_cognitive_modulator(_cognitive_modulator)
+        logger.info(
+            "CognitiveModulator instantiated and injected into StrategistAgent / "
+            "认知调制器已实例化并注入 StrategistAgent"
+        )
+    except Exception as e:
+        logger.warning("Could not inject CognitiveModulator: %s / 注入认���调制器失败: %s", e, e)
+
     # --- Batch 8: GuardianAgent injection into PipelineBridge ---
     # Batch 8：GuardianAgent 注入管线桥接器（主门控 fail-closed）
     try:

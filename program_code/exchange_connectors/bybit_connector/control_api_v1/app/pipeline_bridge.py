@@ -2549,10 +2549,20 @@ class PipelineBridge:
                 continue
 
             funding_rate, next_funding_ts = result
+
+            # B5: Pass spot/perp prices for basis risk calculation
+            # B5：传递现货/永续价格供基差风险计算
+            # Latest tick price serves as perp_price; spot is approximated as same
+            # (until dedicated spot price feed is available).
+            # 最新 tick 价格作为永续价格；现货近似为相同值
+            # （在有专用现货价格源之前）。
+            _latest_price = self._latest_prices.get(symbol)
             try:
                 strategy.evaluate_funding_opportunity(
                     funding_rate=funding_rate,
                     next_settle_ts_ms=next_funding_ts,
+                    spot_price=_latest_price,
+                    perp_price=_latest_price,
                 )
             except Exception:
                 logger.exception("Funding rate eval error for %s / funding rate 评估异常: %s", symbol, symbol)

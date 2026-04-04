@@ -142,6 +142,19 @@ class StrategyOrchestrator:
         self._current_regime: str = "unknown"
         self._current_regime_ts_ms: int = 0
 
+        # B2: Higher-timeframe direction cache — (symbol, timeframe) → direction
+        # B2：高时间框架方向缓存 — (symbol, timeframe) → direction
+        # Used to inject htf_direction into lower-timeframe signals.
+        # 用于向低时间框架信号注入 htf_direction。
+        self._htf_direction_cache: dict[tuple[str, str], str] = {}
+        # Map lower TF → list of higher TFs to look up / 低时间框架 → 高时间框架查询列表
+        self._htf_map: dict[str, list[str]] = {
+            "1m": ["5m", "15m", "1h"],
+            "3m": ["15m", "1h"],
+            "5m": ["15m", "1h", "4h"],
+            "15m": ["1h", "4h"],
+        }
+
         # AI consultation (optional Layer 2 engine reference)
         # AI 咨询（可选的 Layer 2 引擎引用）
         self._ai_engine: Any = None
@@ -271,6 +284,22 @@ class StrategyOrchestrator:
             # 但它是有效的 metadata 容器，需要注入 _regime。
             if hasattr(signal, "metadata") and signal.metadata is not None and self._current_regime != "unknown":
                 signal.metadata["_regime"] = self._current_regime
+
+            # B2: Cache signal direction per (symbol, timeframe) for htf_direction lookup
+            # B2：缓存每个 (symbol, timeframe) 的信号方向，供 htf_direction 查询
+            if hasattr(signal, "direction") and signal.direction not in ("neutral",):
+                self._htf_direction_cache[(signal.symbol, signal.timeframe)] = signal.direction
+
+            # B2: Inject htf_direction from higher-timeframe signals
+            # B2：从高时间框架信号注入 htf_direction
+            if hasattr(signal, "metadata") and signal.metadata is not None:
+                htf_candidates = self._htf_map.get(signal.timeframe, [])
+                for htf in htf_candidates:
+                    cached_dir = self._htf_direction_cache.get((signal.symbol, htf))
+                    if cached_dir is not None:
+                        signal.metadata["_htf_direction"] = cached_dir
+                        signal.metadata["_htf_timeframe"] = htf
+                        break  # Use the first (closest) higher TF / 使用第一个（最近的）高TF
 
             # Inject Hurst regime and full indicator snapshot into signal metadata
             # 将 Hurst regime 和完整指标快照注入信号 metadata

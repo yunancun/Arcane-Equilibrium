@@ -98,6 +98,27 @@ class BBBreakoutStrategy(StrategyBase):
         if getattr(signal, "symbol", "") != self._symbol:
             return
 
+        # B3: Check ATR trailing stop on every signal when position is open
+        # B3：有持仓时每次信号都检查 ATR 追踪止损
+        if self._current_position is not None:
+            metadata = getattr(signal, "metadata", {}) or {}
+            # Try to get ATR and close price from signal metadata or _indicators
+            # 尝试从信号 metadata 或 _indicators 获取 ATR 和收盘价
+            atr_val = metadata.get("atr")
+            sig_price = metadata.get("close", 0)
+            if atr_val is None or sig_price == 0:
+                ind_snapshot = metadata.get("_indicators", {})
+                if isinstance(ind_snapshot, dict):
+                    atr_data = ind_snapshot.get("ATR(14)")
+                    if isinstance(atr_data, dict) and "atr" in atr_data:
+                        atr_val = atr_data["atr"]
+                    if sig_price == 0:
+                        bb_data = ind_snapshot.get("BB(20,2.0)")
+                        if isinstance(bb_data, dict) and "middle" in bb_data:
+                            sig_price = bb_data["middle"]
+            if atr_val is not None and sig_price > 0:
+                self.check_trailing_stop(self._symbol, sig_price, atr_val)
+
         source = getattr(signal, "source", "")
 
         # Listen to BB signals for bandwidth data, and Regime signals

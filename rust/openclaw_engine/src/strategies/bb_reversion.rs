@@ -37,15 +37,22 @@ impl Strategy for BbReversion {
         let bb = match &ind.bollinger { Some(b) => b, None => return vec![] };
         let rsi = ind.rsi_14.unwrap_or(50.0);
 
+        // A4: Hurst regime boost — mean-reverting regime boosts reversion confidence
+        // A4：Hurst 市场状态 — 均值回归型市场提升回归信心
+        let hurst_boost: f64 = match &ind.hurst {
+            Some(h) if h.regime == "mean_reverting" => 0.1,
+            _ => 0.0,
+        };
+
         let mut intents = Vec::new();
         match self.position {
             None => {
                 if bb.percent_b < 0.0 && rsi < 30.0 {
-                    intents.push(self.make_intent(ctx, true, 0.6));
+                    intents.push(self.make_intent(ctx, true, (0.6_f64 + hurst_boost).min(1.0)));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if bb.percent_b > 1.0 && rsi > 70.0 {
-                    intents.push(self.make_intent(ctx, false, 0.6));
+                    intents.push(self.make_intent(ctx, false, (0.6_f64 + hurst_boost).min(1.0)));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
                 }

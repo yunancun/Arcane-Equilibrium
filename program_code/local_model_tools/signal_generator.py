@@ -378,14 +378,28 @@ class MACrossoverRule(SignalRule):
         adx_val = indicators.get("ADX(14)", {}).get("adx")
         volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
 
+        # A1: Donchian channel data for downstream confirmation
+        # A1：Donchian 通道数据供下游确认
+        donchian_data = indicators.get("Donchian(20)")
+        donchian_high = donchian_data.get("upper") if isinstance(donchian_data, dict) else None
+        donchian_low = donchian_data.get("lower") if isinstance(donchian_data, dict) else None
+
+        # A2: Close price — use fast MA value as proxy (closest to current close)
+        # A2：收盘价 — 用快线 MA 值作为代理（最接近当前收盘价）
+        close_price = fast_val
+
         if spread_pct > min_spread_pct:
             # Fast above slow → bullish / 快线在慢线上方 → 看多
             confidence = min(1.0, spread_pct / 1.0 * 0.5 + 0.2)
-            meta: dict[str, Any] = {}
+            meta: dict[str, Any] = {"close": close_price}
             if adx_val is not None:
                 meta["adx"] = adx_val
             if volume_ratio_val is not None:
                 meta["volume_ratio"] = volume_ratio_val
+            if donchian_high is not None:
+                meta["donchian_high"] = donchian_high
+            if donchian_low is not None:
+                meta["donchian_low"] = donchian_low
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_LONG,
@@ -403,11 +417,15 @@ class MACrossoverRule(SignalRule):
         if spread_pct < -min_spread_pct:
             # Fast below slow → bearish / 快线在慢线下方 → 看空
             confidence = min(1.0, abs(spread_pct) / 1.0 * 0.5 + 0.2)
-            meta = {}
+            meta = {"close": close_price}
             if adx_val is not None:
                 meta["adx"] = adx_val
             if volume_ratio_val is not None:
                 meta["volume_ratio"] = volume_ratio_val
+            if donchian_high is not None:
+                meta["donchian_high"] = donchian_high
+            if donchian_low is not None:
+                meta["donchian_low"] = donchian_low
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_SHORT,
@@ -420,6 +438,101 @@ class MACrossoverRule(SignalRule):
                     f"(spread={spread_pct:.3f}%, bearish/看空)"
                 ),
                 metadata=meta,
+            )
+
+        return None
+
+
+class KAMACrossoverRule(SignalRule):
+    """
+    KAMA (Kaufman Adaptive MA) crossover signal.
+    KAMA 自適應移動平均交叉信號。
+
+    B1: Fires when KAMA crosses above/below EMA — adaptive trend detection.
+    B1：當 KAMA 穿越 EMA 上方/下方時觸發 — 自適應趨勢偵測。
+
+    Logic:
+    - KAMA > EMA → long (adaptive trend up / 自適應上升趨勢)
+    - KAMA < EMA → short (adaptive trend down / 自適應下降趨勢)
+    - Uses efficiency_ratio to boost confidence when trend is clean.
+      利用效率比提升趨勢乾淨時的信心。
+
+    Safety invariant: signals only, no execution / 僅產生信號，不執行
+    """
+
+    def __init__(
+        self,
+        kama_name: str = "KAMA(10)",
+        ema_name: str = "EMA(12)",
+    ) -> None:
+        self._kama_name = kama_name
+        self._ema_name = ema_name
+
+    @property
+    def name(self) -> str:
+        return f"KAMA_Cross({self._kama_name}/{self._ema_name})"
+
+    def evaluate(self, symbol: str, timeframe: str, indicators: dict[str, Any]) -> Signal | None:
+        """
+        Evaluate KAMA vs EMA crossover.
+        評估 KAMA 對 EMA 的交叉。
+        """
+        kama_data = indicators.get(self._kama_name)
+        ema_data = indicators.get(self._ema_name)
+        if not kama_data or not ema_data:
+            return None
+
+        kama_val = kama_data.get("kama")
+        ema_val = ema_data.get("ema")
+        if kama_val is None or ema_val is None:
+            return None
+        if not math.isfinite(kama_val) or not math.isfinite(ema_val):
+            return None
+
+        # Calculate spread as percentage / 計算價差百分比
+        if abs(ema_val) < 1e-12:
+            return None
+        spread_pct = (kama_val - ema_val) / ema_val * 100
+
+        # Minimum spread to avoid noise / 最小價差避免噪音
+        min_spread_pct = 0.03  # KAMA is smoother, lower threshold / KAMA 更平滑，用較低閾值
+
+        # Efficiency ratio boosts confidence when trend is clean
+        # 效率比在趨勢乾淨時提升信心
+        er = kama_data.get("efficiency_ratio", 0.5)
+
+        if spread_pct > min_spread_pct:
+            # KAMA above EMA → adaptive bullish / KAMA 在 EMA 上方 → 自適應看多
+            confidence = min(1.0, spread_pct / 0.8 * 0.4 + 0.2 + er * 0.2)
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_LONG,
+                confidence=confidence,
+                edge_bps=max(5, spread_pct * 8),
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=(
+                    f"KAMA={kama_val:.2f} > EMA={ema_val:.2f} "
+                    f"(spread={spread_pct:.3f}%, ER={er:.2f}, bullish/看多)"
+                ),
+                metadata={"kama": kama_val, "ema": ema_val, "efficiency_ratio": er, "close": kama_val},
+            )
+
+        if spread_pct < -min_spread_pct:
+            # KAMA below EMA → adaptive bearish / KAMA 在 EMA 下方 → 自適應看空
+            confidence = min(1.0, abs(spread_pct) / 0.8 * 0.4 + 0.2 + er * 0.2)
+            return Signal(
+                symbol=symbol,
+                direction=DIRECTION_SHORT,
+                confidence=confidence,
+                edge_bps=max(5, abs(spread_pct) * 8),
+                source=self.name,
+                timeframe=timeframe,
+                reasoning=(
+                    f"KAMA={kama_val:.2f} < EMA={ema_val:.2f} "
+                    f"(spread={spread_pct:.3f}%, ER={er:.2f}, bearish/看空)"
+                ),
+                metadata={"kama": kama_val, "ema": ema_val, "efficiency_ratio": er, "close": kama_val},
             )
 
         return None
@@ -504,7 +617,11 @@ class BollingerBandReversionRule(SignalRule):
                     + " → mean reversion long/均值回归做多"
                 ),
                 # Attach V2 indicator data for strategies / 为策略附加 V2 指标数据
-                metadata={"percent_b": pct_b, "bandwidth": bandwidth, **({"rsi": rsi_val} if rsi_val is not None else {})},
+                # A1: Include Donchian high/low for BB_Breakout Donchian confirmation
+                # A1：含 Donchian 高/低值，供 BB_Breakout Donchian 确认
+                # A2: Include close price for downstream strategy use
+                # A2：含收盘价，供下游策略使用
+                metadata=self._build_bb_metadata(pct_b, bandwidth, rsi_val, indicators),
             )
 
         if pct_b > self._upper:
@@ -529,10 +646,52 @@ class BollingerBandReversionRule(SignalRule):
                     + " → mean reversion short/均值回归做空"
                 ),
                 # Attach V2 indicator data for strategies / 为策略附加 V2 指标数据
-                metadata={"percent_b": pct_b, "bandwidth": bandwidth, **({"rsi": rsi_val} if rsi_val is not None else {})},
+                metadata=self._build_bb_metadata(pct_b, bandwidth, rsi_val, indicators),
             )
 
         return None
+
+    def _build_bb_metadata(
+        self,
+        pct_b: float,
+        bandwidth: float,
+        rsi_val: float | None,
+        indicators: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Build enriched metadata dict for BB signals.
+        构建 BB 信号的丰富 metadata 字典。
+
+        A1: Donchian high/low from Donchian(20) indicator.
+        A1：从 Donchian(20) 指标获取 Donchian 高/低值。
+        A2: Close price from BB middle band as proxy.
+        A2：用 BB 中轨作为收盘价代理。
+        """
+        meta: dict[str, Any] = {"percent_b": pct_b, "bandwidth": bandwidth}
+        if rsi_val is not None:
+            meta["rsi"] = rsi_val
+
+        # A1: Donchian channel data for BB_Breakout confirmation
+        # A1：Donchian 通道数据供 BB_Breakout 确认
+        donchian_data = indicators.get("Donchian(20)")
+        if isinstance(donchian_data, dict):
+            if "upper" in donchian_data:
+                meta["donchian_high"] = donchian_data["upper"]
+            if "lower" in donchian_data:
+                meta["donchian_low"] = donchian_data["lower"]
+
+        # A2: Close price — use BB middle band as proxy (closest available)
+        # A2：收盘价 — 用 BB 中轨作为代理（最接近的可用值）
+        bb_data = indicators.get(self._bb_name)
+        if isinstance(bb_data, dict) and "middle" in bb_data:
+            meta["close"] = bb_data["middle"]
+
+        # Volume ratio for breakout filtering / 成交量比率供突破过滤
+        vol_data = indicators.get("VolumeRatio(20)")
+        if isinstance(vol_data, dict) and "volume_ratio" in vol_data:
+            meta["volume_ratio"] = vol_data["volume_ratio"]
+
+        return meta
 
 
 class MACDCrossoverRule(SignalRule):
@@ -998,6 +1157,7 @@ def create_default_signal_rules() -> list[SignalRule]:
         # Entry rules / 入场规则
         RSIOverboughtOversoldRule(),
         MACrossoverRule(),
+        KAMACrossoverRule(),        # B1: KAMA adaptive crossover / KAMA 自適應交叉
         BollingerBandReversionRule(),
         MACDCrossoverRule(),
         # Exit rules / 出场规则

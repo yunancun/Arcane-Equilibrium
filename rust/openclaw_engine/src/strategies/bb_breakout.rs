@@ -45,10 +45,24 @@ impl Strategy for BbBreakout {
                 if self.was_in_squeeze && bb.bandwidth > EXPANSION_BW && vol_ratio >= VOLUME_THRESHOLD {
                     let is_long = bb.percent_b > 1.0;
                     let is_short = bb.percent_b < 0.0;
+
+                    // A3: Donchian confirmation — price must also breach Donchian channel
+                    // A3：Donchian 确认 — 价格需同时突破 Donchian 通道
+                    if let Some(dc) = &ind.donchian {
+                        if is_long && ctx.price < dc.upper { return vec![]; }
+                        if is_short && ctx.price > dc.lower { return vec![]; }
+                    }
+
                     if is_long || is_short {
+                        // A4: Hurst regime boost — trending regime boosts breakout confidence
+                        // A4：Hurst 趋势状态 — 趋势型市场提升突破信心
+                        let hurst_boost: f64 = match &ind.hurst {
+                            Some(h) if h.regime == "trending" => 0.1,
+                            _ => 0.0,
+                        };
                         intents.push(OrderIntent {
                             symbol: ctx.symbol.clone(), is_long, qty: self.default_qty,
-                            confidence: 0.7, strategy: self.name().into(),
+                            confidence: (0.7_f64 + hurst_boost).min(1.0), strategy: self.name().into(),
                             order_type: "market".into(), limit_price: None,
                         });
                         self.position = Some(is_long);
