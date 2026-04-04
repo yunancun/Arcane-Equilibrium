@@ -31,27 +31,27 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-04 · R-07 灰度中 · 融合方案 v0.5 + 执行计划 V1 完成)
+## 当前状态 (2026-04-04 · Go/No-Go 7/7 PASS · Phase 0a/0b 完成 · L3 审计归零)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,839 Py passed + 555 Rust passed（全绿 0 failed · 0 errors）
-API 路由:     131+ 条（含 8 治理 + 5 Scout + 4 实验 + 2 进化端点）
-代码:         ~67,000 行（Python ~50k + Rust ~17k）
-策略:         5 类 × 双实现（Python + Rust）
+测试:         3,877 Py + 592 Rust + 38 Canary = 4,507 tests 全绿
+API 路由:     131+ 条（8 条已迁移 Rust-first + Python fallback）
+代码:         ~67,000 行（Python ~49k + Rust ~18k）
+策略:         5 类（Rust 唯一引擎，Python tick 处理已停用）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
-Rust 引擎:    ✅ R-00~R-07 代码全部完成 · 待 7 天即时灰度验证
-              IPC: file-read + 53 集成测试 + 回滚 SLA <100ms
-              灰度: replay_runner (201,600 ticks/5min) + Comparator + Watchdog + Rollback Drill
-              tick 延迟: <100μs 可达（E5 评估 ~7-25μs 正常路径）
-Phase 0-3:    ✅ 全部完成 + L1/L2 接口冻结
-Rust R-00~04: ✅ 全部完成（R-05 Week 8 决策点待评估）
-认证安全:     ✅ HttpOnly cookie + 安全 HTTP 响应头 + XSS 修复
+Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
+              P50=27μs · RSS 2.1MB · 201K replay 0 crash
+              IPC: expanded snapshot (indicators/signals/strategies/intents/fills)
+数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
+              9 compression + 15 retention policies · 11 Grafana VIEWs
+Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
+L3 审计:      ✅ 9 角色全面审计归零（0 CRITICAL · 0 HIGH · 0 remaining）
+认证安全:     ✅ HttpOnly cookie + PG 127.0.0.1 only + IPC 600 perms
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
-安全评级:     0 CRITICAL / 0 HIGH（E3 Rust 审计 2026-04-03）
 ```
 
 **完成度（2026-04-03 · Phase R-04 后校准）**

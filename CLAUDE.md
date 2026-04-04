@@ -47,7 +47,7 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,839 Py + 555 Rust + 35 Canary = 4,429 tests 全綠
+測試：3,877 Py + 592 Rust + 38 Canary = 4,507 tests 全綠
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
 治理：GovernanceHub 4 SM，fail-closed · Rust GovernanceCore 級聯 all-or-nothing
 品類：linear + spot + inverse（option 未來）
@@ -57,10 +57,11 @@ L1：Ollama Qwen 3.5 9B（~1.9s）/ 27B（~9.9s）
 Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_types 10 types
 代碼完成度：~90%（~67,000 行 Py+Rs）· 業務功能：~95%
 總工時進度：~35%（已完成 ~66d / 新總計 ~189d，含融合方案 105d 新增）
-關鍵路徑：R-07 Go/No-Go 4/10 → 融合方案 Phase 0a 開始 4/11
-★★★★ Rust 遷移 — R-07 灰度驗證中（Go/No-Go 2026-04-10）：
-  R-00~R-06 全部完成 · R-07 引擎即時灰度運行中
-  階段執行：docs/rust_migration/（R-00~R-06 ✅ · R-07 灰度中）
+關鍵路徑：Phase 0a/0b 已完成 → TD-01~03 文件拆分 → Phase 1 開始 5/01
+★★★★ Rust 遷移 — Go/No-Go 7/7 PASS（2026-04-04）：
+  R-CUT 全部完成（RC-01~RC-15）· R-IPC 完成（IPC-01~06）
+  Rust 為唯一 tick 處理引擎 · Python tick pipeline 已停用
+  8 API 路由遷移 Rust-first · PipelineBridge 降級為 IPC relay
 ★★★★ 融合方案 v0.5（DB + ML/DL + 新聞 Agent · 20 週）：
   兩輪審計 + DB 專題 + 四角色聯合驗證 = 67 項修正
   存儲精簡 97%：5.6→0.17 GB/day · PG+TimescaleDB 確認 · 砍 PgBouncer
@@ -284,7 +285,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**★★★ 當前焦點：Phase 0（Batch 9B+9C+9D）→ 讀 TODO.md 開始執行**
+**★★★ 當前焦點：TD-01~03 文件拆分 → Phase 1 (5/01) → 讀 TODO.md 開始執行**
 
 **★★ 融合路線圖（DB + ML/DL + 新聞 Agent · 20 週 · 起算 4/11）：**
 - **Phase 0a**（W1）：PG 8-Schema DDL + Grafana VIEW 橋接
@@ -323,4 +324,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-04：4429 tests 全綠 · 131+ routes · 5 Agent · demo_only · R-07 灰度運行中（Go/No-Go 4/10）· 融合方案 v0.5 完成（DB+ML/DL+News，67 項審計修正，存儲砍 97%）· 執行計劃 V1（20 週 9 Phase ~120 任務）· 下一步：R-07 Go/No-Go → Phase 0a 開始 → 讀 TODO.md。
+> 截至 2026-04-04：4507 tests 全綠 · 131+ routes · 5 Agent · demo_only · **Go/No-Go 7/7 PASS** · Rust 為唯一 tick 引擎 · R-IPC 8 路由 Rust-first · Phase 0a/0b 完成（43 tables · 28 hypertables · TimescaleDB 2.26.1）· L3 全面審計歸零（9 角色）· 下一步：TD-01~03 文件拆分 → Phase 1 (5/01) → 讀 TODO.md。

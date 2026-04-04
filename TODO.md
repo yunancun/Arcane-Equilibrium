@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-04（Rust 切換決策 · 策略對齊完成 · Go/No-Go 6/7 PASS）
+# 最後更新：2026-04-04（R-CUT 7/7 PASS · R-IPC 完成 · Phase 0a/0b 完成 · L3 全面審計歸零）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
-# ★ 工程日誌：docs/worklogs/2026-04-04--session_progress_1.md（QA 審計 + 決策記錄）
+# ★ 工程日誌：docs/worklogs/2026-04-04--daily_summary.md（整合日誌）
 
 ---
 
@@ -29,7 +29,7 @@ print(f'balance=\${ps[\"balance\"]:.2f} | fills={r[\"stats\"][\"total_fills\"]} 
 "
 ```
 
-Go/No-Go：**2026-04-10**。重啟指引見 `docs/rust_migration/07--canary_greybox.md`。
+Go/No-Go：**2026-04-04 已通過 7/7**。重啟指引見 `docs/rust_migration/07--canary_greybox.md`。
 
 ---
 
