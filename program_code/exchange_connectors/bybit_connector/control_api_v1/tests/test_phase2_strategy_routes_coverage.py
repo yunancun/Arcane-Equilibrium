@@ -134,8 +134,11 @@ _MOD_AI = "app.strategy_ai_routes"
 
 
 class TestGetKlinesRoute:
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.KLINE_MANAGER")
-    def test_happy_path(self, mock_km):
+    def test_happy_path(self, mock_km, mock_rust):
+        # Disable Rust-first path to test Python fallback / 禁用 Rust 優先路徑以測試 Python 回退
+        mock_rust.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_klines
         mock_km.get_latest_klines.return_value = [{"o": 1, "h": 2}]
         mock_km.get_current_bar.return_value = None
@@ -158,8 +161,11 @@ class TestGetKlinesRoute:
             _run(get_klines("BTCUSDT", "99z", n=10, actor=_FakeActor()))
         assert exc.value.status_code == 400
 
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.KLINE_MANAGER")
-    def test_exception_500(self, mock_km):
+    def test_exception_500(self, mock_km, mock_rust):
+        # Disable Rust-first to test Python error path / 禁用 Rust 以測試 Python 錯誤路徑
+        mock_rust.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_klines
         from fastapi import HTTPException
         mock_km.get_latest_klines.side_effect = RuntimeError("boom")
