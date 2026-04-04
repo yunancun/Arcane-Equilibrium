@@ -432,7 +432,7 @@ fn test_compute_all_snapshot() {
         snapshot.bollinger.is_some(),
         "snapshot.bollinger should be Some"
     );
-    assert!(snapshot.atr.is_some(), "snapshot.atr should be Some");
+    assert!(snapshot.atr_14.is_some(), "snapshot.atr_14 should be Some");
     assert!(
         snapshot.stochastic.is_some(),
         "snapshot.stochastic should be Some"
@@ -490,7 +490,7 @@ fn test_compute_all_insufficient_data() {
     assert!(snap.rsi_14.is_none(), "RSI(14) needs 15 bars");
     assert!(snap.macd.is_none(), "MACD(12,26,9) needs ~34 bars");
     assert!(snap.bollinger.is_none(), "Bollinger(20) needs 20 bars");
-    assert!(snap.atr.is_none(), "ATR(14) needs 15 bars");
+    assert!(snap.atr_14.is_none(), "ATR(14) needs 15 bars");
     assert!(snap.stochastic.is_none(), "Stochastic(14,3) needs 16 bars");
     assert!(snap.kama.is_none(), "KAMA(10,2,30) needs 11 bars");
     assert!(snap.adx.is_none(), "ADX(14) needs 29 bars");

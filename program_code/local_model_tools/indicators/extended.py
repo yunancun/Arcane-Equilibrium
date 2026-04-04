@@ -59,23 +59,31 @@ class KAMA(IndicatorBase):
         if len(close) < self.min_periods:
             return None
 
-        # Efficiency Ratio = |direction| / volatility
-        direction = abs(close[-1] - close[-self._period - 1])
-        volatility = math.fsum(abs(close[i] - close[i - 1]) for i in range(-self._period, 0))
-        if volatility == 0:
-            er = 0.0
-        else:
-            er = direction / volatility
+        period = self._period
+        fast_c = self._fast_c
+        slow_c = self._slow_c
 
-        # Smoothing constant / 平滑常數
-        sc = (er * (self._fast_c - self._slow_c) + self._slow_c) ** 2
+        # Initialize KAMA with SMA of first `period` values.
+        # 用前 period 個收盤價的 SMA 初始化 KAMA。
+        kama = math.fsum(close[:period]) / period
 
-        # KAMA = previous KAMA + SC × (Close - previous KAMA)
-        # Initialize with SMA / 用 SMA 初始化
-        kama = math.fsum(close[-self._period:]) / self._period
-        for i in range(-self._period + 1, 0):
+        # Iterate step-by-step: recalculate ER → SC at each bar.
+        # 逐步迭代：每根 K 線重新計算 ER → SC。
+        er = 0.0
+        for i in range(period, len(close)):
+            # Direction: |price change over period| / 方向：period 週期價格變動絕對值
+            direction = abs(close[i] - close[i - period])
+            # Volatility: sum of |bar-to-bar changes| over period / 波動率：period 內逐根變動之和
+            volatility = math.fsum(
+                abs(close[j] - close[j - 1]) for j in range(i - period + 1, i + 1)
+            )
+            er = direction / volatility if volatility > 0 else 0.0
+
+            # Smoothing constant recalculated per step / 每步重新計算平滑常數
+            sc = (er * (fast_c - slow_c) + slow_c) ** 2
+
+            # Update KAMA / 更新 KAMA
             kama = kama + sc * (close[i] - kama)
-        kama = kama + sc * (close[-1] - kama)
 
         return {"kama": round(kama, 8), "efficiency_ratio": round(er, 4)}
 

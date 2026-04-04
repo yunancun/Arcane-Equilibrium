@@ -109,7 +109,7 @@ def create_default_indicators() -> list[IndicatorBase]:
 
         # Momentum indicators / 动量指标
         RSI(period=14),     # RSI(14) — 14 周期相对强弱指数
-        Stochastic(),       # Stochastic(14,3) — 随机振荡指标
+        Stochastic(k_period=14, d_period=3, slow_k_period=3),  # Slow Stochastic(14,3,3) — 慢速随机振荡指标
 
         # Volatility indicators / 波动率指标
         BollingerBands(),   # BB(20,2) — 布林带

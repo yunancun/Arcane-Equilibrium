@@ -269,8 +269,8 @@ class RSIOverboughtOversoldRule(SignalRule):
             return None
 
         # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
-        adx_val = indicators.get("ADX(14)", {}).get("adx")
-        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+        adx_val = (indicators.get("ADX(14)") or {}).get("adx")
+        volume_ratio_val = (indicators.get("VolumeRatio(20)") or {}).get("volume_ratio")
 
         if rsi <= self._oversold:
             # Oversold → expect bounce → long / 超卖 → 预期反弹 → 做多
@@ -375,8 +375,8 @@ class MACrossoverRule(SignalRule):
         min_spread_pct = 0.05  # 0.05% minimum spread / 最小 0.05% 价差
 
         # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
-        adx_val = indicators.get("ADX(14)", {}).get("adx")
-        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+        adx_val = (indicators.get("ADX(14)") or {}).get("adx")
+        volume_ratio_val = (indicators.get("VolumeRatio(20)") or {}).get("volume_ratio")
 
         # A1: Donchian channel data for downstream confirmation
         # A1：Donchian 通道数据供下游确认
@@ -730,8 +730,8 @@ class MACDCrossoverRule(SignalRule):
             return None
 
         # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
-        adx_val = indicators.get("ADX(14)", {}).get("adx")
-        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+        adx_val = (indicators.get("ADX(14)") or {}).get("adx")
+        volume_ratio_val = (indicators.get("VolumeRatio(20)") or {}).get("volume_ratio")
 
         # Need both MACD and histogram to agree / 需要 MACD 和柱状图方向一致
         if macd_val > 0 and histogram > 0:
@@ -869,7 +869,7 @@ class RegimeDetectorRule(SignalRule):
             confidence = 0.5
 
         # Attach V2 metadata: ADX for trend strength / 附加 V2 元数据：ADX 趋势强度
-        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        adx_val = (indicators.get("ADX(14)") or {}).get("adx")
         regime_meta: dict[str, Any] = {
             "regime": regime,
             "trend_direction": trend_direction,
@@ -997,8 +997,8 @@ class MACDExhaustionRule(SignalRule):
             return None
 
         # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
-        adx_val = indicators.get("ADX(14)", {}).get("adx")
-        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+        adx_val = (indicators.get("ADX(14)") or {}).get("adx")
+        volume_ratio_val = (indicators.get("VolumeRatio(20)") or {}).get("volume_ratio")
 
         # Histogram was positive and shrinking → momentum fading → close_long
         if prev_hist > 0 and histogram > 0 and histogram < prev_hist * 0.6:

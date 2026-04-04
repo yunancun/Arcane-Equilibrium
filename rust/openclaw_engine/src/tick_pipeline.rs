@@ -262,7 +262,7 @@ fn snapshot_to_input(snap: &IndicatorSnapshot) -> IndicatorInput {
         macd_histogram: snap.macd.as_ref().map(|m| m.histogram),
         bb_percent_b: snap.bollinger.as_ref().map(|b| b.percent_b),
         bb_bandwidth: snap.bollinger.as_ref().map(|b| b.bandwidth),
-        atr_percent: snap.atr.as_ref().map(|a| a.atr_percent),
+        atr_percent: snap.atr_14.as_ref().map(|a| a.atr_percent),
         stoch_k: snap.stochastic.as_ref().map(|s| s.k),
         adx: snap.adx.as_ref().map(|a| a.adx),
         volume_ratio: snap.volume_ratio,
@@ -389,9 +389,11 @@ mod tests {
     fn test_snapshot_to_input() {
         let snap = IndicatorSnapshot {
             sma_20: Some(50000.0),
+            sma_50: None,
             ema_12: Some(50100.0),
+            ema_26: None,
             rsi_14: Some(55.0),
-            macd: None, bollinger: None, atr: None,
+            macd: None, bollinger: None, atr_14: None, atr_5: None,
             stochastic: None, kama: None, adx: None,
             hurst: None, ewma_vol: None, volume_ratio: Some(1.2),
             donchian: None,

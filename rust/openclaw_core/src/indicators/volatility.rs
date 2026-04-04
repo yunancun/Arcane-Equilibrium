@@ -124,15 +124,37 @@ pub struct HurstResult {
 /// Hurst Exponent via R/S analysis with log-log OLS regression.
 /// 通過 R/S 分析和對數-對數 OLS 回歸計算赫斯特指數。
 pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResult> {
-    if close.len() < max_lag + 1 || min_lag < 2 || min_lag >= max_lag {
+    if min_lag < 2 || min_lag >= max_lag {
         return None;
     }
 
-    // Log returns
+    // Pre-check: need at least min_lag+1 raw data points to even attempt.
+    // 前置檢查：至少需要 min_lag+1 個原始數據點。
+    if close.len() < min_lag + 1 {
+        return None;
+    }
+
+    // Filter out pairs where either price <= 0 to avoid NaN/Inf in log returns.
+    // 過濾掉任一價格 <= 0 的相鄰對，避免 log 計算產生 NaN/Inf。
     let returns: Vec<f64> = close
         .windows(2)
+        .filter(|w| w[0] > 0.0 && w[1] > 0.0)
         .map(|w| (w[1] / w[0]).ln())
         .collect();
+
+    let n_returns = returns.len();
+    if n_returns < min_lag {
+        // Prices filtered out caused insufficient valid returns — return neutral 0.5.
+        // 因價格過濾導致有效 return 不足 — 返回中性值 0.5。
+        return Some(HurstResult {
+            hurst: 0.5,
+            regime: "random_walk".to_string(),
+        });
+    }
+
+    // Dynamic max_lag clipping: prevent chunk count from being 0.
+    // 動態裁剪 max_lag：防止 chunk 數為 0。
+    let max_lag = max_lag.min(n_returns / 2).max(min_lag);
 
     let mut log_n = Vec::new();
     let mut log_rs = Vec::new();
@@ -183,18 +205,24 @@ pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResul
     }
 
     // OLS: y = a + b*x where b = Hurst exponent
+    // Use Kahan summation for all accumulators [V3-QC-2].
+    // 所有累加器使用 Kahan 求和 [V3-QC-2]。
     let n = log_n.len() as f64;
     let sum_x = kahan_sum(&log_n);
     let sum_y = kahan_sum(&log_rs);
-    let sum_xy: f64 = log_n.iter().zip(log_rs.iter()).map(|(x, y)| x * y).sum();
-    let sum_x2: f64 = log_n.iter().map(|x| x * x).sum();
+    let xy_products: Vec<f64> = log_n.iter().zip(log_rs.iter()).map(|(x, y)| x * y).collect();
+    let sum_xy = kahan_sum(&xy_products);
+    let x_squares: Vec<f64> = log_n.iter().map(|x| x * x).collect();
+    let sum_x2 = kahan_sum(&x_squares);
 
     let denom = n * sum_x2 - sum_x * sum_x;
     if denom.abs() < 1e-15 {
         return None;
     }
 
-    let h = (n * sum_xy - sum_x * sum_y) / denom;
+    // Clamp result to [0.0, 1.0] — valid Hurst range.
+    // 將結果鉗位到 [0.0, 1.0] — 有效赫斯特指數範圍。
+    let h = ((n * sum_xy - sum_x * sum_y) / denom).clamp(0.0, 1.0);
 
     let regime = if h > 0.60 {
         "trending".to_string()

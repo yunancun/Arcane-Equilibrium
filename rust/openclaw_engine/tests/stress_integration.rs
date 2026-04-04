@@ -39,7 +39,9 @@ fn make_ctx(symbol: &str, price: f64, ts: u64, ind: Option<IndicatorSnapshot>) -
 fn bb_snapshot(pct_b: f64, bw: f64, rsi: f64, sma: f64, kama: f64, adx: f64, vol_ratio: f64) -> IndicatorSnapshot {
     IndicatorSnapshot {
         sma_20: Some(sma),
+        sma_50: None,
         ema_12: Some(sma * 1.001),
+        ema_26: None,
         rsi_14: Some(rsi),
         bollinger: Some(BollingerResult {
             upper: sma * 1.02,
@@ -52,7 +54,8 @@ fn bb_snapshot(pct_b: f64, bw: f64, rsi: f64, sma: f64, kama: f64, adx: f64, vol
         adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
         volume_ratio: Some(vol_ratio),
         macd: Some(MacdResult { macd: 0.5, signal: 0.3, histogram: 0.2 }),
-        atr: Some(AtrResult { atr: sma * 0.02, atr_percent: 2.0 }),
+        atr_14: Some(AtrResult { atr: sma * 0.02, atr_percent: 2.0 }),
+        atr_5: None,
         stochastic: Some(StochResult { k: 50.0, d: 50.0 }),
         hurst: None,
         ewma_vol: None,

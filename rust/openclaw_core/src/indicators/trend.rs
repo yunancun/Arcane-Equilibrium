@@ -153,9 +153,10 @@ pub fn kama(close: &[f64], period: usize, fast_sc: usize, slow_sc: usize) -> Opt
     let sc = er * (fast_alpha - slow_alpha) + slow_alpha;
     let sc_sq = sc * sc;
 
-    // Build KAMA from first value in window
-    let mut kama_val = tail[0];
-    for &price in &tail[1..] {
+    // Seed KAMA with SMA of first `period` values (aligns with Python implementation).
+    // 以前 `period` 個值的 SMA 作為 KAMA 種子（與 Python 實現對齊）。
+    let mut kama_val = kahan_sum(&tail[..period]) / period as f64;
+    for &price in &tail[period..] {
         kama_val += sc_sq * (price - kama_val);
     }
 

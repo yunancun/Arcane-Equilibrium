@@ -38,6 +38,7 @@ from canary_comparator import (
     PASS,
     WARNING,
     CRITICAL,
+    MISSING,
     BOUNDARY_DIVERGENCE,
 )
 from engine_watchdog import (
@@ -124,12 +125,16 @@ class TestCompareNumeric(unittest.TestCase):
 
     def test_hurst_complex_tolerance(self):
         """Hurst within complex tolerance → pass / Hurst 在複雜容差內 → 通過"""
-        d = compare_numeric("hurst.hurst", 0.55, 0.55 + 5e-7, 1, 0, "BTC")
+        # Use canonical key; TOLERANCE_COMPLEX is 5e-2, so 1e-3 is within
+        # 使用規範鍵名；TOLERANCE_COMPLEX 為 5e-2，因此 1e-3 在容差內
+        d = compare_numeric("hurst", 0.55, 0.55 + 1e-3, 1, 0, "BTC")
         self.assertIsNone(d)
 
     def test_hurst_beyond_complex_tolerance(self):
         """Hurst beyond complex tolerance → divergence / Hurst 超出複雜容差 → 偏差"""
-        d = compare_numeric("hurst.hurst", 0.55, 0.55 + 5e-5, 1, 0, "BTC")
+        # TOLERANCE_COMPLEX is 5e-2, so 0.1 diff is beyond
+        # TOLERANCE_COMPLEX 為 5e-2，因此 0.1 的差異超出容差
+        d = compare_numeric("hurst", 0.55, 0.55 + 0.1, 1, 0, "BTC")
         self.assertIsNotNone(d)
 
     def test_one_none_value(self):
@@ -142,6 +147,20 @@ class TestCompareNumeric(unittest.TestCase):
         """Both None → no divergence / 兩者都是 None → 無偏差"""
         d = compare_numeric("sma_20", None, None, 1, 0, "BTC")
         self.assertIsNone(d)
+
+    def test_known_missing_indicator_returns_missing(self):
+        """Known-missing indicator (one side None) → MISSING severity, not WARNING
+        已知缺失指標（一側為 None）→ MISSING 嚴重度，非 WARNING"""
+        d = compare_numeric("sma_50", None, 64800.0, 1, 0, "BTC")
+        self.assertIsNotNone(d)
+        self.assertEqual(d.severity, MISSING)
+
+    def test_unknown_missing_indicator_returns_warning(self):
+        """Unknown indicator (one side None) → WARNING severity
+        未知缺失指標（一側為 None）→ WARNING 嚴重度"""
+        d = compare_numeric("sma_20", None, 64800.0, 1, 0, "BTC")
+        self.assertIsNotNone(d)
+        self.assertEqual(d.severity, WARNING)
 
 
 class TestCompareSignals(unittest.TestCase):

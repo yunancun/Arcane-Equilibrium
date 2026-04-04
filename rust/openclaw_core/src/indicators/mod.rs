@@ -1,18 +1,22 @@
-//! Technical indicator engine — 13 indicators with Kahan compensated summation.
-//! 技術指標引擎 — 13 個指標，使用 Kahan 補償求和。
+//! Technical indicator engine — 16 indicators with Kahan compensated summation.
+//! 技術指標引擎 — 16 個指標，使用 Kahan 補償求和。
 //!
 //! MODULE_NOTE (中文):
-//!   IndicatorEngine — 完整的技術指標計算引擎。包含 13 個指標：SMA、EMA、RSI、
-//!   MACD、布林帶、ATR、隨機指標、KAMA、ADX、赫斯特指數、EWMA 波動率、量比、
-//!   唐奇安通道。所有涉及累加的運算使用 Kahan 補償求和確保浮點精度 [V3-QC-2]。
+//!   IndicatorEngine — 完整的技術指標計算引擎。包含 16 個指標：SMA(20)、SMA(50)、
+//!   EMA(12)、EMA(26)、RSI、MACD、布林帶、ATR(14)、ATR(5)、隨機指標、KAMA、ADX、
+//!   赫斯特指數、EWMA 波動率、量比、唐奇安通道。所有涉及累加的運算使用 Kahan
+//!   補償求和確保浮點精度 [V3-QC-2]。
 //!   提供 `IndicatorSnapshot` 一次性計算全部指標的快照。
+//!   新增 `get_conservative_atr()` = max(atr_5, atr_14)，與 Python 端對齊。
 //!
 //! MODULE_NOTE (English):
 //!   IndicatorEngine — complete technical indicator calculation engine. Contains
-//!   13 indicators: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Stochastic, KAMA,
-//!   ADX, Hurst Exponent, EWMA Volatility, Volume Ratio, Donchian Channel.
+//!   16 indicators: SMA(20), SMA(50), EMA(12), EMA(26), RSI, MACD, Bollinger Bands,
+//!   ATR(14), ATR(5), Stochastic, KAMA, ADX, Hurst Exponent, EWMA Volatility,
+//!   Volume Ratio, Donchian Channel.
 //!   All summation operations use Kahan compensated summation for floating-point
 //!   accuracy [V3-QC-2]. Provides `IndicatorSnapshot` for one-shot computation.
+//!   Added `get_conservative_atr()` = max(atr_5, atr_14), aligned with Python side.
 //!
 //! Ported from: Python `IndicatorEngine` + `SignalEngine` indicator subset.
 //! 移植自：Python `IndicatorEngine` + `SignalEngine` 指標子集。
@@ -70,22 +74,34 @@ impl IndicatorEngine {
     /// 使用默認參數計算給定 OHLCV 數據的所有指標。
     ///
     /// Default params / 默認參數:
-    ///   SMA(20), EMA(12), RSI(14), MACD(12,26,9), Bollinger(20,2.0),
-    ///   ATR(14), Stochastic(14,3), KAMA(10,2,30), ADX(14),
-    ///   Hurst(10,50), EWMA_vol(0.97), VolumeRatio(20), Donchian(20)
+    ///   SMA(20), SMA(50), EMA(12), EMA(26), RSI(14), MACD(12,26,9),
+    ///   Bollinger(20,2.0), ATR(14), ATR(5), Stochastic(14,3), KAMA(10,2,30),
+    ///   ADX(14), Hurst(10,50), EWMA_vol(0.97), VolumeRatio(20), Donchian(20)
     pub fn compute_all(
         high: &[f64],
         low: &[f64],
         close: &[f64],
         volume: &[f64],
     ) -> IndicatorSnapshot {
+        // SMA / EMA with additional periods to match Python side.
+        // 額外週期的 SMA / EMA，與 Python 端對齊。
+        let sma_50_val = sma(close, 50);
+        let ema_26_val = ema(close, 26);
+
+        // ATR(5) — short-term volatility, used by conservative_atr.
+        // ATR(5) — 短期波動率，用於 conservative_atr。
+        let atr_5_val = atr(high, low, close, 5);
+
         IndicatorSnapshot {
             sma_20: sma(close, 20),
+            sma_50: sma_50_val,
             ema_12: ema(close, 12),
+            ema_26: ema_26_val,
             rsi_14: rsi(close, 14),
             macd: macd(close, 12, 26, 9),
             bollinger: bollinger(close, 20, 2.0),
-            atr: atr(high, low, close, 14),
+            atr_14: atr(high, low, close, 14),
+            atr_5: atr_5_val,
             stochastic: stochastic(high, low, close, 14, 3),
             kama: kama(close, 10, 2, 30),
             adx: adx(high, low, close, 14),
@@ -99,14 +115,28 @@ impl IndicatorEngine {
 
 /// Snapshot of all indicator values at a single point in time.
 /// 單一時間點的所有指標值快照。
+///
+/// Contains 16 indicators aligned with the Python IndicatorEngine.
+/// 包含 16 個指標，與 Python IndicatorEngine 對齊。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndicatorSnapshot {
     pub sma_20: Option<f64>,
+    /// SMA(50) — medium-term trend filter, aligned with Python side.
+    /// SMA(50) — 中期趨勢過濾器，與 Python 端對齊。
+    pub sma_50: Option<f64>,
     pub ema_12: Option<f64>,
+    /// EMA(26) — medium-term exponential trend, aligned with Python side.
+    /// EMA(26) — 中期指數趨勢，與 Python 端對齊。
+    pub ema_26: Option<f64>,
     pub rsi_14: Option<f64>,
     pub macd: Option<MacdResult>,
     pub bollinger: Option<BollingerResult>,
-    pub atr: Option<AtrResult>,
+    /// ATR(14) — standard period average true range.
+    /// ATR(14) — 標準週期平均真實波幅。
+    pub atr_14: Option<AtrResult>,
+    /// ATR(5) — short-term average true range, used by conservative_atr.
+    /// ATR(5) — 短期平均真實波幅，用於 conservative_atr。
+    pub atr_5: Option<AtrResult>,
     pub stochastic: Option<StochResult>,
     pub kama: Option<KamaResult>,
     pub adx: Option<AdxResult>,
@@ -114,6 +144,29 @@ pub struct IndicatorSnapshot {
     pub ewma_vol: Option<EwmaVolResult>,
     pub volume_ratio: Option<f64>,
     pub donchian: Option<DonchianResult>,
+}
+
+impl IndicatorSnapshot {
+    /// Get conservative ATR = max(atr_5, atr_14). Aligned with Python get_conservative_atr().
+    /// 取保守 ATR = max(atr_5, atr_14)。與 Python get_conservative_atr() 對齊。
+    ///
+    /// Returns the larger of the two ATR values (absolute), providing a more
+    /// conservative volatility estimate for position sizing and stop-loss.
+    /// 返回兩個 ATR 值（絕對值）中較大者，為倉位管理和止損提供更保守的波動率估計。
+    pub fn get_conservative_atr(&self) -> Option<AtrResult> {
+        match (&self.atr_5, &self.atr_14) {
+            (Some(a5), Some(a14)) => {
+                if a5.atr >= a14.atr {
+                    Some(a5.clone())
+                } else {
+                    Some(a14.clone())
+                }
+            }
+            (Some(a5), None) => Some(a5.clone()),
+            (None, Some(a14)) => Some(a14.clone()),
+            (None, None) => None,
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -140,6 +193,7 @@ mod tests {
     #[test]
     fn test_compute_all_sufficient_data() {
         // 100 bars of synthetic data — enough for all indicators
+        // 100 根合成 K 線 — 足夠計算所有指標
         let n = 100;
         let close: Vec<f64> = (0..n)
             .map(|i| 100.0 + (i as f64 * 0.1).sin() * 5.0)
@@ -151,11 +205,14 @@ mod tests {
         let snap = IndicatorEngine::compute_all(&high, &low, &close, &volume);
 
         assert!(snap.sma_20.is_some());
+        assert!(snap.sma_50.is_some());
         assert!(snap.ema_12.is_some());
+        assert!(snap.ema_26.is_some());
         assert!(snap.rsi_14.is_some());
         assert!(snap.macd.is_some());
         assert!(snap.bollinger.is_some());
-        assert!(snap.atr.is_some());
+        assert!(snap.atr_14.is_some());
+        assert!(snap.atr_5.is_some());
         assert!(snap.stochastic.is_some());
         assert!(snap.kama.is_some());
         assert!(snap.adx.is_some());
@@ -168,6 +225,7 @@ mod tests {
     #[test]
     fn test_compute_all_insufficient_data() {
         // 5 bars — most indicators should return None gracefully
+        // 5 根 K 線 — 大多數指標應優雅地返回 None
         let close = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let high = vec![1.5, 2.5, 3.5, 4.5, 5.5];
         let low = vec![0.5, 1.5, 2.5, 3.5, 4.5];
@@ -177,10 +235,54 @@ mod tests {
 
         // Most should be None with only 5 bars
         assert!(snap.sma_20.is_none());
+        assert!(snap.sma_50.is_none());
+        assert!(snap.ema_26.is_none());
         assert!(snap.rsi_14.is_none());
         assert!(snap.macd.is_none());
         assert!(snap.adx.is_none());
         assert!(snap.hurst.is_none());
         assert!(snap.donchian.is_none());
+        // ATR(5) needs period+1=6 bars, so should be None with 5 bars
+        // ATR(5) 需要 period+1=6 根 K 線，5 根時應為 None
+        assert!(snap.atr_5.is_none());
+    }
+
+    #[test]
+    fn test_conservative_atr() {
+        // Test get_conservative_atr() returns max(atr_5, atr_14).
+        // 測試 get_conservative_atr() 返回 max(atr_5, atr_14)。
+        let n = 100;
+        let close: Vec<f64> = (0..n)
+            .map(|i| 100.0 + (i as f64 * 0.1).sin() * 5.0)
+            .collect();
+        let high: Vec<f64> = close.iter().map(|c| c + 1.0).collect();
+        let low: Vec<f64> = close.iter().map(|c| c - 1.0).collect();
+        let volume: Vec<f64> = (0..n).map(|_| 1000.0).collect();
+
+        let snap = IndicatorEngine::compute_all(&high, &low, &close, &volume);
+        let conservative = snap.get_conservative_atr();
+        assert!(conservative.is_some());
+
+        let c = conservative.unwrap();
+        let a5 = snap.atr_5.unwrap();
+        let a14 = snap.atr_14.unwrap();
+        // Should be the max of the two
+        assert!((c.atr - a5.atr.max(a14.atr)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_conservative_atr_partial() {
+        // When only one ATR is available, conservative_atr should return it.
+        // 當只有一個 ATR 可用時，conservative_atr 應返回它。
+        let mut snap = IndicatorSnapshot::default();
+        assert!(snap.get_conservative_atr().is_none());
+
+        snap.atr_14 = Some(AtrResult { atr: 2.0, atr_percent: 1.0 });
+        let c = snap.get_conservative_atr().unwrap();
+        assert!((c.atr - 2.0).abs() < 1e-12);
+
+        snap.atr_5 = Some(AtrResult { atr: 3.0, atr_percent: 1.5 });
+        let c = snap.get_conservative_atr().unwrap();
+        assert!((c.atr - 3.0).abs() < 1e-12);
     }
 }

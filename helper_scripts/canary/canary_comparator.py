@@ -36,7 +36,9 @@ from canary_schema import (
     TOLERANCE_SIMPLE,
     TOLERANCE_RECURSIVE,
     TOLERANCE_COMPLEX,
+    TOLERANCE_BALANCE,
     BOUNDARY_THRESHOLD_PCT,
+    KNOWN_MISSING_INDICATORS,
     validate_record,
 )
 
@@ -47,6 +49,7 @@ from canary_schema import (
 PASS = "PASS"
 WARNING = "WARNING"
 CRITICAL = "CRITICAL"
+MISSING = "MISSING"                      # Indicator present on one side only (known) / 指標只在一側存在（已知）
 BOUNDARY_DIVERGENCE = "BOUNDARY_DIVERGENCE"
 SKIPPED = "SKIPPED"
 SKIPPED_NON_CLOSE = "SKIPPED_NON_CLOSE"  # Signal/intent skip: non bar-close tick / 非 bar-close tick 跳過信號比較
@@ -82,6 +85,7 @@ class ComparisonReport:
     critical_count: int = 0
     warning_count: int = 0
     boundary_divergence_count: int = 0
+    missing_count: int = 0         # Known-missing indicator occurrences / 已知缺失指標出現次數
     paper_state_skipped: int = 0   # Ticks where paper_state compare was skipped / 跳過 paper_state 比較的 tick 數
     signal_compared_ticks: int = 0   # Ticks where signals were actually compared / 實際比較了信號的 tick 數
     signal_skipped_ticks: int = 0    # Ticks skipped for signal compare (non bar-close) / 因非 bar-close 跳過信號比較的 tick 數
@@ -238,6 +242,21 @@ def compare_numeric(
     if rust_val is None and python_val is None:
         return None
     if rust_val is None or python_val is None:
+        # Check if this is a known-missing indicator — report as MISSING, not WARNING/CRITICAL
+        # 檢查是否為已知缺失指標 — 報告為 MISSING 而非 WARNING/CRITICAL
+        if field_name in KNOWN_MISSING_INDICATORS:
+            return Divergence(
+                tick_number=tick_number,
+                timestamp_ms=timestamp_ms,
+                symbol=symbol,
+                field=field_name,
+                rust_value=rust_val,
+                python_value=python_val,
+                tolerance=0,
+                actual_diff=0,
+                severity=MISSING,
+                reason=f"known missing indicator: {field_name} (rust={'present' if rust_val is not None else 'absent'}, python={'present' if python_val is not None else 'absent'})",
+            )
         # One has value, other doesn't — WARNING unless it's a critical field
         # 一個有值另一個沒有 — WARNING 除非是關鍵字段
         return Divergence(
@@ -566,10 +585,13 @@ def run_comparison(
     report.signal_skipped_ticks = sig_skip_count
 
     # Classify / 分類
+    # MISSING divergences are informational only — not counted toward WARNING/CRITICAL verdict
+    # MISSING 偏差僅供參考 — 不計入 WARNING/CRITICAL 判定
     report.total_divergences = len(all_divergences)
     report.critical_count = sum(1 for d in all_divergences if d.severity == CRITICAL)
     report.warning_count = sum(1 for d in all_divergences if d.severity == WARNING)
     report.boundary_divergence_count = sum(1 for d in all_divergences if d.severity == BOUNDARY_DIVERGENCE)
+    report.missing_count = sum(1 for d in all_divergences if d.severity == MISSING)
 
     # Check boundary escalation / 檢查邊界升級
     escalated, reason = check_boundary_escalation(all_divergences)
@@ -587,7 +609,7 @@ def run_comparison(
         report.verdict = PASS
 
     # Store top divergences (limit to 100 for readability) / 存儲前 100 個偏差
-    severity_order = {CRITICAL: 0, BOUNDARY_DIVERGENCE: 1, WARNING: 2}
+    severity_order = {CRITICAL: 0, BOUNDARY_DIVERGENCE: 1, WARNING: 2, MISSING: 3}
     sorted_divs = sorted(all_divergences, key=lambda d: (severity_order.get(d.severity, 3), -d.actual_diff))
     report.divergences = [asdict(d) for d in sorted_divs[:100]]
 
@@ -624,7 +646,7 @@ def main():
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"Verdict: {report.verdict}", file=sys.stderr)
     print(f"Matched ticks: {report.matched_ticks}", file=sys.stderr)
-    print(f"CRITICAL: {report.critical_count} | WARNING: {report.warning_count} | BOUNDARY: {report.boundary_divergence_count} | PAPER_STATE_SKIPPED: {report.paper_state_skipped}", file=sys.stderr)
+    print(f"CRITICAL: {report.critical_count} | WARNING: {report.warning_count} | BOUNDARY: {report.boundary_divergence_count} | MISSING: {report.missing_count} | PAPER_STATE_SKIPPED: {report.paper_state_skipped}", file=sys.stderr)
     print(f"Signal compared: {report.signal_compared_ticks} | Signal skipped (non bar-close): {report.signal_skipped_ticks}", file=sys.stderr)
     if report.boundary_escalation:
         print(f"⚠ Boundary escalation: {report.escalation_reason}", file=sys.stderr)

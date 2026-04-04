@@ -50,27 +50,40 @@ def compute_stochastic(
     close: list[float],
     k_period: int = 14,
     d_period: int = 3,
+    slow_k_period: int = 3,
 ) -> dict[str, float] | None:
     """
-    Compute Stochastic %K and %D.
-    计算随机振荡指标 %K 和 %D。
+    Compute Slow Stochastic %K and %D.
+    计算慢速随机振荡指标 %K 和 %D。
+
+    Standard Slow Stochastic:
+      1. Raw %K = (close - lowest_low) / (highest_high - lowest_low) × 100
+      2. Slow %K = SMA(Raw %K, slow_k_period)   ← smoothing step
+      3. %D = SMA(Slow %K, d_period)
+
+    标准慢速随机振荡：
+      1. 原始 %K = (收盘价 - 最低价) / (最高价 - 最低价) × 100
+      2. 慢速 %K = SMA(原始 %K, slow_k_period)   ← 平滑步骤
+      3. %D = SMA(慢速 %K, d_period)
 
     Args:
-      high     — high prices / 最高价
-      low      — low prices / 最低价
-      close    — close prices / 收盘价
-      k_period — %K lookback period (default 14) / %K 回看周期
-      d_period — %D smoothing period (default 3) / %D 平滑周期
+      high         — high prices / 最高价
+      low          — low prices / 最低价
+      close        — close prices / 收盘价
+      k_period     — raw %K lookback period (default 14) / 原始 %K 回看周期
+      d_period     — %D smoothing period (default 3) / %D 平滑周期
+      slow_k_period — slow %K smoothing period (default 3) / 慢速 %K 平滑周期
 
     Returns:
       {"k": float, "d": float} or None
     """
     n = min(len(high), len(low), len(close))
-    if n < k_period + d_period - 1 or k_period <= 0 or d_period <= 0:
+    min_required = k_period + slow_k_period + d_period - 2
+    if n < min_required or k_period <= 0 or d_period <= 0 or slow_k_period <= 0:
         return None
 
-    # Compute %K series / 计算 %K 序列
-    k_values = []
+    # Step 1: Compute raw %K series / 第一步：计算原始 %K 序列
+    raw_k_values: list[float] = []
     for i in range(k_period - 1, n):
         window_high = high[i - k_period + 1: i + 1]
         window_low = low[i - k_period + 1: i + 1]
@@ -81,51 +94,65 @@ def compute_stochastic(
             # No price range in the window → return neutral 50.0 (by design).
             # This means the asset is flat; %K at midpoint is the correct neutral value.
             # 窗口内无价格波动 → 返回中性值 50.0（设计决策：平盘时 %K 取中点是正确的中性值）
-            k_values.append(50.0)
+            raw_k_values.append(50.0)
         else:
             k_val = ((close[i] - lowest) / diff) * 100.0
-            k_values.append(k_val)
+            raw_k_values.append(k_val)
 
-    if len(k_values) < d_period:
+    if len(raw_k_values) < slow_k_period:
         return None
 
-    # %D = SMA of %K / %D = %K 的 SMA
-    d_val = compute_sma(k_values, d_period)
+    # Step 2: Slow %K = SMA(raw %K, slow_k_period) / 第二步：慢速 %K = SMA(原始 %K, slow_k_period)
+    slow_k_values: list[float] = []
+    for i in range(slow_k_period - 1, len(raw_k_values)):
+        window = raw_k_values[i - slow_k_period + 1: i + 1]
+        slow_k_values.append(sum(window) / slow_k_period)
+
+    if len(slow_k_values) < d_period:
+        return None
+
+    # Step 3: %D = SMA(slow %K, d_period) / 第三步：%D = SMA(慢速 %K, d_period)
+    d_val = compute_sma(slow_k_values, d_period)
     if d_val is None:
         return None
 
     return {
-        "k": k_values[-1],
+        "k": slow_k_values[-1],
         "d": d_val,
     }
 
 
 class Stochastic(IndicatorBase):
     """
-    Stochastic Oscillator indicator.
-    随机振荡指标。
+    Slow Stochastic Oscillator indicator.
+    慢速随机振荡指标（含 %K 平滑步骤）。
 
     Usage:
-      stoch = Stochastic(k_period=14, d_period=3)
+      stoch = Stochastic(k_period=14, d_period=3, slow_k_period=3)
       result = stoch.compute(high=[...], low=[...], close=[...])
       # → {"k": 25.3, "d": 30.1}
     """
 
-    def __init__(self, k_period: int = 14, d_period: int = 3) -> None:
+    def __init__(self, k_period: int = 14, d_period: int = 3, slow_k_period: int = 3) -> None:
         self._k_period = k_period
         self._d_period = d_period
+        self._slow_k_period = slow_k_period
         if k_period <= 0:
             raise ValueError(f"k_period must be > 0, got {k_period} / K 周期必须大于 0")
         if d_period <= 0:
             raise ValueError(f"d_period must be > 0, got {d_period} / D 周期必须大于 0")
+        if slow_k_period <= 0:
+            raise ValueError(f"slow_k_period must be > 0, got {slow_k_period} / 慢速 K 周期必须大于 0")
 
     @property
     def name(self) -> str:
-        return f"Stochastic({self._k_period},{self._d_period})"
+        return f"Stochastic({self._k_period},{self._d_period},{self._slow_k_period})"
 
     @property
     def min_periods(self) -> int:
-        return self._k_period + self._d_period - 1
+        # Need k_period for first raw %K + (slow_k_period - 1) for slow %K + (d_period - 1) for %D
+        # 需要 k_period 產生第一個原始 %K + (slow_k_period - 1) 做平滑 + (d_period - 1) 計算 %D
+        return self._k_period + self._slow_k_period + self._d_period - 2
 
     def compute(self, **kwargs: Any) -> dict[str, Any] | None:
         """
@@ -137,4 +164,6 @@ class Stochastic(IndicatorBase):
         high = kwargs.get("high", [])
         low = kwargs.get("low", [])
         close = kwargs.get("close", [])
-        return compute_stochastic(high, low, close, self._k_period, self._d_period)
+        return compute_stochastic(
+            high, low, close, self._k_period, self._d_period, self._slow_k_period
+        )

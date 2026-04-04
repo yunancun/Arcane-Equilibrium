@@ -423,11 +423,11 @@ class TestStochastic:
 
     def test_stochastic_class(self):
         """Stochastic class works / Stochastic 类有效"""
-        stoch = Stochastic(k_period=14, d_period=3)
+        stoch = Stochastic(k_period=14, d_period=3, slow_k_period=3)
         result = stoch.compute(high=BTC_HIGH, low=BTC_LOW, close=BTC_CLOSE)
         assert result is not None
-        assert stoch.name == "Stochastic(14,3)"
-        assert stoch.min_periods == 16  # 14 + 3 - 1
+        assert stoch.name == "Stochastic(14,3,3)"
+        assert stoch.min_periods == 18  # 14 + 3 + 3 - 2
 
 
 # =============================================================================
