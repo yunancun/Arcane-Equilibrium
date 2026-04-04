@@ -135,8 +135,9 @@ async fn async_main(config: Arc<ConfigManager>) {
         pipeline.orchestrator.register(Box::new(MaCrossover::new()));
         pipeline.orchestrator.register(Box::new(BbReversion::new()));
         pipeline.orchestrator.register(Box::new(BbBreakout::new()));
-        // Grid trading with ±2% range around initial BTC price estimate
-        pipeline.orchestrator.register(Box::new(GridTrading::new(60000.0, 120000.0)));
+        // Grid trading: adaptive mode — initializes ±10% around first price seen, then OU refines
+        // 网格交易：自适应模式 — 首次价格 ±10% 初始化，OU 模型后续自动调整
+        pipeline.orchestrator.register(Box::new(GridTrading::new_adaptive()));
         // funding_arb skipped — needs IPC (R-06)
 
         // Grant paper authorization / 授予紙盤授權

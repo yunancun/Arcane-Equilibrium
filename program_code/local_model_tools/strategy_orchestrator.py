@@ -272,6 +272,33 @@ class StrategyOrchestrator:
             if hasattr(signal, "metadata") and signal.metadata is not None and self._current_regime != "unknown":
                 signal.metadata["_regime"] = self._current_regime
 
+            # Inject Hurst regime and full indicator snapshot into signal metadata
+            # 将 Hurst regime 和完整指标快照注入信号 metadata
+            # This allows strategies to access any indicator data without coupling
+            # to IndicatorEngine directly. / 这使策略无需直接耦合 IndicatorEngine
+            # 即可访问任何指标数据。
+            if hasattr(signal, "metadata") and signal.metadata is not None:
+                try:
+                    indicators = self._ie.get_indicators(signal.symbol, signal.timeframe)
+                    if indicators:
+                        # Inject _hurst_regime from Hurst indicator result
+                        # 从 Hurst 指标结果注入 _hurst_regime
+                        hurst_data = indicators.get("Hurst")
+                        if isinstance(hurst_data, dict) and "regime" in hurst_data:
+                            signal.metadata["_hurst_regime"] = hurst_data["regime"]
+
+                        # Inject full indicator snapshot for strategy access
+                        # 注入完整指标快照供策略访问
+                        signal.metadata["_indicators"] = indicators
+                except Exception:
+                    # Fail-open: indicator injection is enrichment, not critical
+                    # 失败放行：指标注入是增强功能，非关键路径
+                    logger.debug(
+                        "Failed to inject indicators into signal metadata / "
+                        "向信号 metadata 注入指标失败: %s/%s",
+                        signal.symbol, signal.timeframe,
+                    )
+
         for strategy in active_strategies:
             try:
                 strategy.on_signal(signal)

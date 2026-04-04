@@ -520,21 +520,51 @@ class StrategyAutoDeployer:
 
     def _compute_qty(self, symbol: str, price: float, score: float) -> float:
         """
-        Compute position size based on balance, opportunity score, and risk.
-        根据余额、机会评分和风险计算仓位大小。
+        Compute position size — Kelly-preferred with fixed-risk fallback.
+        計算倉位大小 — 優先使用 Kelly，不足時回退固定風險公式。
 
-        Logic:
-        - Base: risk_per_trade_pct of account balance (= max acceptable loss per trade)
-        - With 5% hard stop, position_notional = risk_amount / stop_pct
-        - Score bonus: higher score → larger allocation (up to 2x)
-        - Clamped to min/max limits
-        - NOT divided by active symbol count (each trade sized independently)
+        Primary path (Kelly):
+          Uses PositionSizer.compute_recommendation() with trade stats + ATR.
+          Kelly provides risk-adjusted sizing that adapts to actual edge.
+          Kelly 提供根據實際 edge 自適應的風控倉位。
+
+        Fallback path (fixed risk%):
+          Base: risk_per_trade_pct of account balance / 5% hard stop.
+          Score bonus: higher score → larger allocation (up to 2x).
+          Used when Kelly data is insufficient or PositionSizer unavailable.
+          當 Kelly 數據不足或 PositionSizer 不可用時使用。
+
+        Invariant: NEVER returns 0 — minimum qty is always preserved.
+        不變量：永不返回 0 — 最小倉位始終保留。
         """
         balance = self._get_balance()
+        min_qty = self._min_qty_usdt / max(price, 1)
 
         if balance <= 0 or price <= 0:
-            return self._min_qty_usdt / max(price, 1)
+            return min_qty
 
+        # ── Kelly path: try PositionSizer first / 優先嘗試 Kelly 路徑 ──
+        kelly_qty = self._try_kelly_sizing(symbol, balance, price)
+        if kelly_qty is not None and kelly_qty > 0:
+            # Apply score multiplier on top of Kelly recommendation
+            # 在 Kelly 建議基礎上疊加評分乘數
+            score_mult = min(1.5, 0.75 + score / 400.0)  # gentler than fallback: 50→0.875x, 200→1.25x
+            qty = kelly_qty * score_mult
+
+            # Enforce floor and ceiling / 強制上下限
+            qty = max(min_qty, qty)
+            max_qty = balance * (self._max_qty_pct / 100.0) / price
+            qty = min(qty, max_qty)
+            qty = round(qty, 6)
+
+            logger.info(
+                "Position sizing [Kelly]: %s balance=$%.0f score=%.0f → %.6f units "
+                "(kelly_base=%.6f, score_mult=%.2f) / Kelly 倉位計算",
+                symbol, balance, score, qty, kelly_qty, score_mult,
+            )
+            return qty
+
+        # ── Fallback path: fixed risk% formula / 回退路徑：固定風險公式 ──
         # risk_per_trade_pct = max loss as % of balance if stop-loss hits
         # With 5% hard stop: notional = risk_amount / 0.05
         # E.g. 3% risk on $100k = $3k risk → $3k / 0.05 = $60k notional (capped by max_qty_pct)
@@ -556,10 +586,129 @@ class StrategyAutoDeployer:
         qty = round(qty, 6)
 
         logger.info(
-            "Position sizing: %s balance=$%.0f score=%.0f → $%.1f (%.6f units) / 仓位计算",
+            "Position sizing [fallback]: %s balance=$%.0f score=%.0f → $%.1f (%.6f units) / 固定風險倉位計算",
             symbol, balance, score, allocated_usdt, qty,
         )
-        return qty
+        return max(min_qty, qty)
+
+    def _try_kelly_sizing(
+        self, symbol: str, balance: float, price: float,
+    ) -> float | None:
+        """
+        Attempt Kelly-based sizing via PositionSizer. Returns qty or None on failure.
+        嘗試通過 PositionSizer 進行 Kelly 倉位計算。失敗返回 None。
+
+        Gathers trade stats from PaperTradingEngine and ATR from the orchestrator's
+        indicator engine. If insufficient data, returns None to trigger fallback.
+        從 PaperTradingEngine 收集交易統計，從策略編排器的指標引擎獲取 ATR。
+        數據不足時返回 None 以觸發回退。
+        """
+        try:
+            # Lazy-init PositionSizer (same pattern as get_kelly_recommendations)
+            # 惰性初始化 PositionSizer（與 get_kelly_recommendations 相同模式）
+            sizer = getattr(self, '_position_sizer', None)
+            if sizer is None:
+                from .position_sizer import PositionSizer
+                self._position_sizer = PositionSizer(
+                    p1_max_pct=2.0, risk_pct_default=self._risk_pct,
+                )
+                sizer = self._position_sizer
+
+            # Gather trade stats for this symbol from paper engine
+            # 從 paper engine 收集此幣種的交易統計
+            win_rate = 0.0
+            avg_win = 0.0
+            avg_loss = 0.0
+            trade_count = 0
+            unrealized_pnl = 0.0
+
+            if self._engine:
+                try:
+                    state = self._engine.get_state()
+                    trade_history = state.get("trade_history", [])
+
+                    # Filter trades for this symbol / 篩選此幣種的交易
+                    wins, losses = 0, 0
+                    win_pnls: list[float] = []
+                    loss_pnls: list[float] = []
+                    for trade in trade_history:
+                        if trade.get("symbol") != symbol:
+                            continue
+                        pnl = trade.get("pnl", 0.0)
+                        if pnl > 0:
+                            wins += 1
+                            win_pnls.append(pnl)
+                        else:
+                            losses += 1
+                            loss_pnls.append(abs(pnl))
+
+                    trade_count = wins + losses
+                    if trade_count > 0:
+                        win_rate = wins / trade_count
+                    if win_pnls:
+                        avg_win = sum(win_pnls) / len(win_pnls)
+                    if loss_pnls:
+                        avg_loss = sum(loss_pnls) / len(loss_pnls)
+
+                    # Get unrealized PnL for dampening / 獲取未實現盈虧用於抑制
+                    positions = state.get("positions", {})
+                    pos = positions.get(symbol, {})
+                    unrealized_pnl = pos.get("unrealized_pnl", 0.0)
+                except Exception:
+                    pass
+
+            # Get ATR from orchestrator's indicator engine (if available)
+            # 從策略編排器的指標引擎獲取 ATR（如有）
+            atr_value = 0.0
+            try:
+                if self._orch and hasattr(self._orch, 'get_indicators'):
+                    indicators = self._orch.get_indicators(symbol, "1h")
+                    # Look for ATR indicators in cache / 在緩存中查找 ATR 指標
+                    for key, val in indicators.items():
+                        if key.startswith("ATR(") and isinstance(val, dict):
+                            atr = val.get("atr")
+                            if atr is not None and atr > 0:
+                                # Use the largest ATR (conservative) / 使用最大 ATR（保守）
+                                atr_value = max(atr_value, atr)
+            except Exception:
+                pass
+
+            # Minimum trades required for Kelly to be meaningful.
+            # With < 10 trades, Kelly has no statistical basis — use fallback.
+            # 最少交易次數要求：少於 10 筆時 Kelly 無統計基礎，使用回退。
+            _KELLY_MIN_TRADES = 10
+            if trade_count < _KELLY_MIN_TRADES:
+                logger.debug(
+                    "Kelly skipped for %s: only %d trades (need %d) / Kelly 跳過：交易不足",
+                    symbol, trade_count, _KELLY_MIN_TRADES,
+                )
+                return None
+
+            rec = sizer.compute_recommendation(
+                balance=balance,
+                price=price,
+                win_rate=win_rate,
+                avg_win=avg_win,
+                avg_loss=avg_loss,
+                trade_count=trade_count,
+                atr=atr_value,
+                unrealized_pnl=unrealized_pnl,
+            )
+
+            if rec.recommended_qty > 0:
+                logger.debug(
+                    "Kelly sizing for %s: fraction=%.4f tier=%s qty=%.6f "
+                    "(trades=%d, wr=%.2f, atr=%.4f) / Kelly 倉位詳情",
+                    symbol, rec.kelly_fraction, rec.kelly_tier,
+                    rec.recommended_qty, trade_count, win_rate, atr_value,
+                )
+                return rec.recommended_qty
+
+            return None
+
+        except Exception as exc:
+            logger.debug("Kelly sizing unavailable for %s: %s / Kelly 不可用", symbol, exc)
+            return None
 
     # ── Dynamic Risk Adjustment (Sharpe-based) / 動態風控調整 ──
 

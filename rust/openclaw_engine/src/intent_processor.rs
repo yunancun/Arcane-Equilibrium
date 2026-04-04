@@ -118,7 +118,20 @@ impl IntentProcessor {
             Verdict::Approved => {}
         }
 
-        let final_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
+        // ─── Gate 2.5: Position sizing — P1 cap = 2% of balance / price ───
+        // 倉位計算 — P1 硬上限 = 餘額的 2% / 價格
+        // Intent qty is treated as a maximum; sizing can only reduce it.
+        // 意圖 qty 視為上限；計算只能減小它。
+        const P1_RISK_PCT: f64 = 0.02;
+        const MIN_QTY: f64 = 0.001;
+
+        let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
+        let balance = paper_state.balance();
+        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { 0.0 };
+        // Fractional Kelly floor: clamp between MIN_QTY and intent.qty
+        // 分數 Kelly 地板：夾在 MIN_QTY 和 intent.qty 之間
+        let sized_qty = p1_max_qty.max(MIN_QTY).min(intent.qty);
+        let final_qty = guardian_result.modified_qty.unwrap_or(sized_qty);
 
         // Gate 3: Cost gate (fail-open if ATR missing)
         // Simplified: just check if round-trip cost is reasonable
@@ -180,6 +193,71 @@ mod tests {
         let result = proc.process(&make_intent("BTC", true), &gov, &state);
         assert!(result.submitted);
         assert!(result.fill.is_some());
+    }
+
+    #[test]
+    fn test_position_sizing_caps_qty() {
+        // P1 cap: 2% of 10,000 / 50,000 = 0.004 BTC
+        // Intent qty 0.01 should be reduced to 0.004.
+        // P1 上限：10,000 * 2% / 50,000 = 0.004 BTC
+        // 意圖 qty 0.01 應被縮小為 0.004。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true); // qty=0.01
+        let result = proc.process(&intent, &gov, &state);
+        assert!(result.submitted);
+        let fill = result.fill.unwrap();
+        // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
+        assert!(
+            (fill.fill_qty - 0.004).abs() < 1e-9,
+            "Expected qty ~0.004 from P1 sizing, got {}",
+            fill.fill_qty
+        );
+    }
+
+    #[test]
+    fn test_position_sizing_min_qty() {
+        // With tiny balance, P1 calc gives < MIN_QTY, so MIN_QTY (0.001) is used.
+        // 餘額極小時，P1 計算 < MIN_QTY，使用 MIN_QTY (0.001)。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(100.0); // tiny balance
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true); // qty=0.01
+        let result = proc.process(&intent, &gov, &state);
+        assert!(result.submitted);
+        let fill = result.fill.unwrap();
+        // P1 calc: 100 * 0.02 / 50000 = 0.00004 < 0.001, so MIN_QTY wins
+        assert!(
+            (fill.fill_qty - 0.001).abs() < 1e-9,
+            "Expected min qty 0.001, got {}",
+            fill.fill_qty
+        );
+    }
+
+    #[test]
+    fn test_position_sizing_small_intent_unchanged() {
+        // If intent.qty < P1 cap, intent.qty is used (sizing never increases).
+        // 如果 intent.qty < P1 上限，使用 intent.qty（sizing 只會縮小）。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(1_000_000.0); // large balance
+        state.set_latest_price("ETH", 3_000.0);
+        // P1 cap: 1,000,000 * 0.02 / 3000 = 6.67; intent qty=0.01 is smaller
+        let intent = make_intent("ETH", true); // qty=0.01
+        let result = proc.process(&intent, &gov, &state);
+        assert!(result.submitted);
+        let fill = result.fill.unwrap();
+        assert!(
+            (fill.fill_qty - 0.01).abs() < 1e-9,
+            "Expected intent qty 0.01 (under P1 cap), got {}",
+            fill.fill_qty
+        );
     }
 
     #[test]

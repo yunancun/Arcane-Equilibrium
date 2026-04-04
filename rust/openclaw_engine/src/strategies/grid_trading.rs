@@ -47,6 +47,26 @@ impl GridTrading {
         }
     }
 
+    /// Create a grid that auto-adapts to the first price seen (±10% initial range).
+    /// OU model will refine spacing after enough ticks.
+    /// 创建自适应网格：首次价格 ±10% 为初始范围，OU 模型收集数据后自动调整。
+    pub fn new_adaptive() -> Self {
+        // Start with a placeholder range; the first tick will re-center the grid.
+        // 使用占位范围；第一个 tick 会重新居中网格。
+        Self {
+            active: true,
+            grid_levels: Vec::new(),  // Empty — initialized on first tick / 空 — 首次 tick 时初始化
+            last_cross_idx: None,
+            net_inventory: 0.0,
+            max_inventory: 5.0 * DEFAULT_QTY_PER_GRID,
+            last_trade_ms: 0,
+            cooldown_ms: 60_000,
+            qty_per_grid: DEFAULT_QTY_PER_GRID,
+            price_history: Vec::new(),
+            ou_lookback: 100,
+        }
+    }
+
     /// Find nearest grid level index for a price.
     /// 找到價格最近的網格等級索引。
     fn nearest_grid_idx(&self, price: f64) -> usize {
@@ -118,7 +138,19 @@ impl Strategy for GridTrading {
             self.price_history.drain(0..self.ou_lookback);
         }
 
-        // Periodically update grid spacing
+        // Auto-initialize grid from first price (±10% range) for adaptive mode
+        // 自适应模式：首次价格 ±10% 初始化网格
+        if self.grid_levels.is_empty() && ctx.price > 0.0 {
+            let lower = ctx.price * 0.9;
+            let upper = ctx.price * 1.1;
+            let step = (upper - lower) / (DEFAULT_GRID_COUNT as f64 - 1.0);
+            for i in 0..DEFAULT_GRID_COUNT {
+                self.grid_levels.push(lower + step * i as f64);
+            }
+        }
+
+        // Periodically update grid spacing via OU model
+        // 定期通过 OU 模型更新网格间距
         if self.price_history.len() % 50 == 0 {
             self.update_ou_spacing();
         }
@@ -200,6 +232,19 @@ mod tests {
         g.on_tick(&ctx(50500.0, 0));
         let i = g.on_tick(&ctx(49500.0, 100_000));
         assert!(i.is_empty()); // can't buy more
+    }
+
+    #[test]
+    fn test_adaptive_grid_init_on_first_tick() {
+        // Adaptive grid starts empty and auto-initializes on first tick
+        // 自适应网格初始为空，首次 tick 时自动初始化
+        let mut g = GridTrading::new_adaptive();
+        assert!(g.grid_levels.is_empty());
+        let intents = g.on_tick(&ctx(50000.0, 0));
+        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
+        // Range should be ±10% of 50000 → 45000..55000
+        assert!((g.grid_levels[0] - 45000.0).abs() < 1.0);
+        assert!(intents.is_empty()); // first tick = no trade
     }
 
     #[test]

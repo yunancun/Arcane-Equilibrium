@@ -268,10 +268,19 @@ class RSIOverboughtOversoldRule(SignalRule):
         if not isinstance(rsi, (int, float)) or not math.isfinite(rsi):
             return None
 
+        # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
+        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+
         if rsi <= self._oversold:
             # Oversold → expect bounce → long / 超卖 → 预期反弹 → 做多
             # Confidence scales with how extreme the RSI is / 置信度随 RSI 极端程度增加
             confidence = min(1.0, (self._oversold - rsi) / self._oversold + 0.3)
+            meta = {"rsi": rsi}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_LONG,
@@ -280,11 +289,17 @@ class RSIOverboughtOversoldRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"RSI={rsi:.1f} < {self._oversold} (oversold/超卖), expect bounce/预期反弹",
+                metadata=meta,
             )
 
         if rsi >= self._overbought:
             # Overbought → expect pullback → short / 超买 → 预期回落 → 做空
             confidence = min(1.0, (rsi - self._overbought) / (100 - self._overbought) + 0.3)
+            meta = {"rsi": rsi}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_SHORT,
@@ -293,6 +308,7 @@ class RSIOverboughtOversoldRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"RSI={rsi:.1f} > {self._overbought} (overbought/超买), expect pullback/预期回落",
+                metadata=meta,
             )
 
         return None
@@ -358,9 +374,18 @@ class MACrossoverRule(SignalRule):
         # 需要最小价差才生成信号（避免噪音）
         min_spread_pct = 0.05  # 0.05% minimum spread / 最小 0.05% 价差
 
+        # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
+        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+
         if spread_pct > min_spread_pct:
             # Fast above slow → bullish / 快线在慢线上方 → 看多
             confidence = min(1.0, spread_pct / 1.0 * 0.5 + 0.2)
+            meta: dict[str, Any] = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_LONG,
@@ -372,11 +397,17 @@ class MACrossoverRule(SignalRule):
                     f"{self._fast_name}={fast_val:.2f} > {self._slow_name}={slow_val:.2f} "
                     f"(spread={spread_pct:.3f}%, bullish/看多)"
                 ),
+                metadata=meta,
             )
 
         if spread_pct < -min_spread_pct:
             # Fast below slow → bearish / 快线在慢线下方 → 看空
             confidence = min(1.0, abs(spread_pct) / 1.0 * 0.5 + 0.2)
+            meta = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_SHORT,
@@ -388,6 +419,7 @@ class MACrossoverRule(SignalRule):
                     f"{self._fast_name}={fast_val:.2f} < {self._slow_name}={slow_val:.2f} "
                     f"(spread={spread_pct:.3f}%, bearish/看空)"
                 ),
+                metadata=meta,
             )
 
         return None
@@ -471,7 +503,8 @@ class BollingerBandReversionRule(SignalRule):
                     + (f", RSI={rsi_val:.1f}" if rsi_val else "")
                     + " → mean reversion long/均值回归做多"
                 ),
-                metadata={"percent_b": pct_b, "bandwidth": bandwidth},
+                # Attach V2 indicator data for strategies / 为策略附加 V2 指标数据
+                metadata={"percent_b": pct_b, "bandwidth": bandwidth, **({"rsi": rsi_val} if rsi_val is not None else {})},
             )
 
         if pct_b > self._upper:
@@ -495,7 +528,8 @@ class BollingerBandReversionRule(SignalRule):
                     + (f", RSI={rsi_val:.1f}" if rsi_val else "")
                     + " → mean reversion short/均值回归做空"
                 ),
-                metadata={"percent_b": pct_b, "bandwidth": bandwidth},
+                # Attach V2 indicator data for strategies / 为策略附加 V2 指标数据
+                metadata={"percent_b": pct_b, "bandwidth": bandwidth, **({"rsi": rsi_val} if rsi_val is not None else {})},
             )
 
         return None
@@ -536,9 +570,18 @@ class MACDCrossoverRule(SignalRule):
         if macd_val == 0 and histogram == 0:
             return None
 
+        # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
+        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+
         # Need both MACD and histogram to agree / 需要 MACD 和柱状图方向一致
         if macd_val > 0 and histogram > 0:
             confidence = min(1.0, abs(histogram) / (abs(macd_val) + abs(histogram) + 1e-10) * 0.5 + 0.2)
+            meta: dict[str, Any] = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_LONG,
@@ -550,10 +593,16 @@ class MACDCrossoverRule(SignalRule):
                     f"MACD={macd_val:.2f}>0, hist={histogram:.2f}>0 "
                     "(bullish trend+momentum / 看多趋势+动量)"
                 ),
+                metadata=meta,
             )
 
         if macd_val < 0 and histogram < 0:
             confidence = min(1.0, abs(histogram) / (abs(macd_val) + abs(histogram) + 1e-10) * 0.5 + 0.2)
+            meta = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_SHORT,
@@ -565,6 +614,7 @@ class MACDCrossoverRule(SignalRule):
                     f"MACD={macd_val:.2f}<0, hist={histogram:.2f}<0 "
                     "(bearish trend+momentum / 看空趋势+动量)"
                 ),
+                metadata=meta,
             )
 
         return None
@@ -659,6 +709,18 @@ class RegimeDetectorRule(SignalRule):
         else:
             confidence = 0.5
 
+        # Attach V2 metadata: ADX for trend strength / 附加 V2 元数据：ADX 趋势强度
+        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        regime_meta: dict[str, Any] = {
+            "regime": regime,
+            "trend_direction": trend_direction,
+            "ma_spread_pct": round(ma_spread_pct, 4),
+            "bandwidth": round(bandwidth, 6),
+            "atr_percent": round(atr_pct, 4),
+        }
+        if adx_val is not None:
+            regime_meta["adx"] = adx_val
+
         return Signal(
             symbol=symbol,
             direction=DIRECTION_NEUTRAL,
@@ -666,13 +728,7 @@ class RegimeDetectorRule(SignalRule):
             source=self.name,
             timeframe=timeframe,
             reasoning=f"Regime={regime}, MA_spread={ma_spread_pct:.2f}%, BW={bandwidth:.4f}, ATR%={atr_pct:.2f}%",
-            metadata={
-                "regime": regime,
-                "trend_direction": trend_direction,
-                "ma_spread_pct": round(ma_spread_pct, 4),
-                "bandwidth": round(bandwidth, 6),
-                "atr_percent": round(atr_pct, 4),
-            },
+            metadata=regime_meta,
         )
 
 
@@ -717,6 +773,8 @@ class RSIExitRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"RSI={rsi:.1f} dropped below {self._exit_ob} (exit overbought/退出超买)",
+                # V2 metadata: attach RSI for downstream strategy use / 附加 RSI 供下游策略使用
+                metadata={"rsi": rsi},
             )
 
         # RSI rising from oversold → close short
@@ -728,6 +786,8 @@ class RSIExitRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"RSI={rsi:.1f} rose above {self._exit_os} (exit oversold/退出超卖)",
+                # V2 metadata: attach RSI for downstream strategy use / 附加 RSI 供下游策略使用
+                metadata={"rsi": rsi},
             )
 
         return None
@@ -777,8 +837,17 @@ class MACDExhaustionRule(SignalRule):
         if prev_hist is None:
             return None
 
+        # Attach V2 metadata for downstream strategies / 为下游策略附加 V2 元数据
+        adx_val = indicators.get("ADX(14)", {}).get("adx")
+        volume_ratio_val = indicators.get("VolumeRatio(20)", {}).get("volume_ratio")
+
         # Histogram was positive and shrinking → momentum fading → close_long
         if prev_hist > 0 and histogram > 0 and histogram < prev_hist * 0.6:
+            meta: dict[str, Any] = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_CLOSE_LONG,
@@ -786,10 +855,16 @@ class MACDExhaustionRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"MACD hist fading: {prev_hist:.2f}→{histogram:.2f} (momentum exhaustion/动量衰竭)",
+                metadata=meta,
             )
 
         # Histogram was negative and shrinking (toward zero) → close_short
         if prev_hist < 0 and histogram < 0 and histogram > prev_hist * 0.6:
+            meta = {}
+            if adx_val is not None:
+                meta["adx"] = adx_val
+            if volume_ratio_val is not None:
+                meta["volume_ratio"] = volume_ratio_val
             return Signal(
                 symbol=symbol,
                 direction=DIRECTION_CLOSE_SHORT,
@@ -797,6 +872,7 @@ class MACDExhaustionRule(SignalRule):
                 source=self.name,
                 timeframe=timeframe,
                 reasoning=f"MACD hist recovering: {prev_hist:.2f}→{histogram:.2f} (momentum exhaustion/动量衰竭)",
+                metadata=meta,
             )
 
         return None
@@ -886,6 +962,8 @@ class RSIDivergenceRule(SignalRule):
                         f"Bearish divergence: price high={max_price_entry[0]:.2f} > prev={older[0]:.2f} "
                         f"but RSI={max_price_entry[1]:.1f} < prev_RSI={older[1]:.1f}"
                     ),
+                    # V2 metadata: attach RSI for downstream use / 附加 RSI 供下游使用
+                    metadata={"rsi": rsi},
                 )
 
         # Bullish divergence: recent price lower than older, but RSI higher
@@ -901,6 +979,8 @@ class RSIDivergenceRule(SignalRule):
                         f"Bullish divergence: price low={min_price_entry[0]:.2f} < prev={older[0]:.2f} "
                         f"but RSI={min_price_entry[1]:.1f} > prev_RSI={older[1]:.1f}"
                     ),
+                    # V2 metadata: attach RSI for downstream use / 附加 RSI 供下游使用
+                    metadata={"rsi": rsi},
                 )
 
         return None

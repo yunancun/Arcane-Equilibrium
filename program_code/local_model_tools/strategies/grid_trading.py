@@ -22,7 +22,7 @@ MODULE_NOTE (中文):
   - 使用 Ornstein-Uhlenbeck 模型估算价格均值回归速度和波动率
   - 动态计算最优网格间距：σ/√θ（OU 理论最优间距）
   - 成本地板：网格间距必须超过 2× 单程手续费（否则赔钱）
-  - 向后兼容：ou_dynamic 默认 False，行为与 V1 一致
+  - 默认启用 OU 动态间距（ou_dynamic 默认 True）
 
   运行方式：
   1. 初始化时在每个网格价位放置限价单
@@ -52,7 +52,7 @@ MODULE_NOTE (English):
   - Ornstein-Uhlenbeck model estimates mean reversion speed and volatility
   - Optimal grid step: σ/√θ (OU theoretical optimum)
   - Fee floor: grid step must exceed 2× one-way fee (otherwise unprofitable)
-  - Backward compatible: ou_dynamic defaults to False, V1 behavior preserved
+  - OU dynamic spacing enabled by default (ou_dynamic defaults to True)
 
 Safety invariant / 安全不变量:
   - 只产生 OrderIntent / Only generates OrderIntents
@@ -97,7 +97,7 @@ class GridTradingStrategy(StrategyBase):
         qty_per_grid: float = 0.001,
         geometric: bool = False,
         # V2 parameters / V2 参数
-        ou_dynamic: bool = False,         # Enable OU dynamic spacing / 启用 OU 动态间距
+        ou_dynamic: bool = True,          # Enable OU dynamic spacing / 启用 OU 动态间距（V2 默认开启）
         ou_mean_period: int = 100,        # OU mean estimation lookback / OU 均值估计回看期
         fee_pct: float = 0.055,           # One-way taker fee percentage / 单向 taker 费率
     ) -> None:
@@ -160,6 +160,12 @@ class GridTradingStrategy(StrategyBase):
         # 冷却：防止价格在网格线附近震荡时产生大量重复 intent。
         self._last_emit_ts_ms: int = 0
         self._emit_cooldown_ms: int = 60_000  # 60 seconds between grid emissions / 网格发射间隔 60 秒
+
+        # V2: OU tick counter + price history for periodic spacing update
+        # V2: OU tick 计数器 + 价格历史，用于定期更新间距
+        self._ou_tick_count: int = 0
+        self._ou_price_history: list[float] = []
+        self._ou_update_interval: int = 50  # Update OU spacing every N ticks / 每 N 个 tick 更新 OU 间距
 
     @property
     def name(self) -> str:
@@ -318,6 +324,19 @@ class GridTradingStrategy(StrategyBase):
             return
         if symbol != self._symbol:
             return
+
+        # V2: Collect price history and periodically update OU spacing
+        # V2: 收集价格历史，定期更新 OU 间距
+        if self._ou_dynamic:
+            self._ou_price_history.append(price)
+            # Cap history at 2× lookback to avoid unbounded growth
+            # 限制历史长度为 2× 回看期，避免无限增长
+            max_hist = self._ou_mean_period * 2
+            if len(self._ou_price_history) > max_hist:
+                self._ou_price_history = self._ou_price_history[-self._ou_mean_period:]
+            self._ou_tick_count += 1
+            if self._ou_tick_count % self._ou_update_interval == 0:
+                self.update_grid_spacing(self._ou_price_history)
 
         with self._intent_lock:  # Protect grid state read+write+emit atomically / 原子保护网格状态
             # Price out of grid range → reset grid index to boundary to avoid phantom orders on re-entry
