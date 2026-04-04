@@ -188,6 +188,11 @@ def synthesize_ticks(bars: list[dict], symbol: str) -> list[dict]:
                 "symbol": symbol,
                 "last_price": price,
                 "ts_ms": open_ts + i * step,
+                # "volume": per-tick volume for Python KlineManager (reads "volume" key)
+                # "volume_24h": kept for Rust PriceEvent compatibility
+                # "volume": 每 tick 成交量（Python KlineManager 讀取）
+                # "volume_24h": 保留供 Rust PriceEvent 使用
+                "volume": vol_per_tick,
                 "volume_24h": vol_per_tick,
             })
 
@@ -220,25 +225,37 @@ def run_python_shadow(
     from local_model_tools.kline_manager import KlineManager as PyKlineManager
     from local_model_tools.indicator_engine import IndicatorEngine as PyIndicatorEngine
     from local_model_tools.signal_generator import SignalEngine as PySignalEngine
+    from local_model_tools.strategy_orchestrator import StrategyOrchestrator as PyOrchestrator
+    from local_model_tools.strategies.ma_crossover import MACrossoverStrategy
+    from local_model_tools.strategies.bollinger_reversion import BollingerReversionStrategy
+    from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
 
     symbols = list({t["symbol"] for t in all_ticks})
     km = PyKlineManager(symbols=symbols)
     ie = PyIndicatorEngine(kline_manager=km)
     se = PySignalEngine()
 
-    # Wire indicator → signal callback / 連接指標 → 信號回調
+    # Wire indicator → signal → strategy pipeline (proper wiring via SignalEngine)
+    # 連接指標 → 信號 → 策略管線（通過 SignalEngine 正式接線）
+    ie.register_on_update(se.on_indicators_update)
+
+    # Create orchestrator with default strategies matching Rust engine (R07)
+    # 創建帶有默認策略的編排器，與 Rust 引擎匹配（R07）
+    orch = PyOrchestrator(kline_manager=km, indicator_engine=ie, signal_engine=se)
+    for sym in symbols:
+        for StrategyCls in (MACrossoverStrategy, BollingerReversionStrategy, BBBreakoutStrategy):
+            strat = StrategyCls(symbol=sym)
+            orch.register_strategy(strat, name=f"{strat.name}_{sym}")
+            orch.activate_strategy(f"{strat.name}_{sym}")
+
+    # Collect signals via callback for the canary record
+    # 通過回調收集信號用於灰度記錄
     collected_signals: list[dict] = []
 
-    def _on_indicators(symbol: str, timeframe: str, indicators: dict) -> None:
-        for rule in se._rules:
-            try:
-                sig = rule.evaluate(symbol, timeframe, indicators)
-                if sig is not None:
-                    collected_signals.append(_serialize_signal_obj(sig))
-            except Exception:
-                pass
+    def _on_signal(sig) -> None:
+        collected_signals.append(_serialize_signal_obj(sig))
 
-    ie.register_on_update(_on_indicators)
+    se.register_on_signal(_on_signal)
 
     record_count = 0
     tick_number = 0
@@ -253,15 +270,29 @@ def run_python_shadow(
             # Clear signal collector / 清空信號收集器
             collected_signals.clear()
 
-            # Feed kline manager (triggers indicator computation on bar close)
-            # 餵入 K 線管理器（K 線收盤時觸發指標計算）
+            # Feed kline manager (triggers indicator → signal → strategy pipeline)
+            # 餵入 K 線管理器（觸發指標 → 信號 → 策略管線）
             km.on_price_event(tick)
+
+            # Dispatch tick to tick-driven strategies (Grid Trading, etc.)
+            # 將 tick 分發給 tick 驅動策略（網格交易等）
+            orch.dispatch_tick(symbol, price, ts_ms)
+
+            # Collect order intents from strategies / 從策略收集訂單意圖
+            intents = orch.collect_pending_intents()
+            serialized_intents = [_serialize_intent(i) for i in intents]
 
             # Get current indicators (may be from last closed bar)
             # 獲取當前指標（可能來自上一根收盤 K 線）
             indicators = ie.get_indicators(symbol, "1m")
 
             # Build canary record / 構建灰度記錄
+            # NOTE: paper_state remains {} — full PaperTradingEngine integration
+            # requires 60+ lines of wiring (dependencies: RiskManager, ProtectiveOrderManager,
+            # PaperStateStore, GovernanceHub). Comparator skips paper_state when empty.
+            # 注意：paper_state 保持 {} — 完整 PaperTradingEngine 集成需要 60+ 行接線
+            # （依賴：RiskManager、ProtectiveOrderManager、PaperStateStore、GovernanceHub）。
+            # 比較器在 paper_state 為空時跳過比較。
             record = {
                 "schema_version": SCHEMA_VERSION,
                 "source": "python_shadow",
@@ -271,8 +302,8 @@ def run_python_shadow(
                 "price": price,
                 "indicators": _serialize_indicators(indicators),
                 "signals": list(collected_signals),
-                "order_intents": [],  # Shadow doesn't execute orders
-                "paper_state": {},    # Shadow doesn't track paper state
+                "order_intents": serialized_intents,
+                "paper_state": {},    # See NOTE above / 見上方注意事項
                 "stats": {"total_ticks": tick_number},
             }
 
@@ -315,6 +346,20 @@ def _serialize_signal_obj(s: Any) -> dict:
     if hasattr(s, "__dict__"):
         return {k: v for k, v in s.__dict__.items() if not k.startswith("_")}
     return {"value": str(s)}
+
+
+def _serialize_intent(intent: Any) -> dict:
+    """
+    Convert an OrderIntent to dict for JSONL canary record.
+    將 OrderIntent 轉換為字典供 JSONL 灰度記錄使用。
+    """
+    if isinstance(intent, dict):
+        return intent
+    if hasattr(intent, "to_dict"):
+        return intent.to_dict()
+    if hasattr(intent, "__dict__"):
+        return {k: v for k, v in intent.__dict__.items() if not k.startswith("_")}
+    return {"value": str(intent)}
 
 
 def _serialize_signals(signals: list) -> list[dict]:

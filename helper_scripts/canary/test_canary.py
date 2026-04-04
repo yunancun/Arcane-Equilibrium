@@ -199,22 +199,38 @@ class TestCompareTick(unittest.TestCase):
         """Identical ticks → 0 divergences / 相同 tick → 0 偏差"""
         r = self._make_tick("rust_engine")
         p = self._make_tick("python_shadow")
-        divs = compare_tick(r, p)
+        divs, _ps_skipped, _sig_skipped = compare_tick(r, p)
         self.assertEqual(len(divs), 0)
 
     def test_indicator_divergence(self):
         """SMA mismatch → divergence / SMA 不匹配 → 偏差"""
         r = self._make_tick("rust_engine")
         p = self._make_tick("python_shadow", indicators={"sma_20": 64800.1, "rsi_14": 55.0})
-        divs = compare_tick(r, p)
+        divs, _ps_skipped, _sig_skipped = compare_tick(r, p)
         self.assertTrue(any(d.field == "sma_20" for d in divs))
 
-    def test_intent_count_mismatch(self):
-        """Different intent counts → WARNING / 意圖數量不同 → WARNING"""
+    def test_intent_count_mismatch_on_bar_close(self):
+        """Different intent counts on bar-close tick → WARNING / bar-close tick 意圖數量不同 → WARNING"""
+        # Both sides have signals → bar-close tick, intent comparison happens
+        # 雙方都有信號 → bar-close tick，意圖比較會執行
         r = self._make_tick("rust_engine", order_intents=[{"symbol": "BTC"}])
         p = self._make_tick("python_shadow", order_intents=[])
-        divs = compare_tick(r, p)
+        divs, _ps_skipped, sig_skipped = compare_tick(r, p)
+        self.assertFalse(sig_skipped)
         self.assertTrue(any(d.field == "order_intents.count" for d in divs))
+
+    def test_signal_skipped_on_non_bar_close(self):
+        """Rust has signals but Python doesn't → skip signal compare (non bar-close)
+        Rust 有信號但 Python 沒有 → 跳過信號比較（非 bar-close tick）"""
+        r = self._make_tick("rust_engine",
+                            signals=[{"direction": "Long", "confidence": 0.7, "source": "rsi"}],
+                            order_intents=[{"symbol": "BTC"}])
+        p = self._make_tick("python_shadow", signals=[], order_intents=[])
+        divs, _ps_skipped, sig_skipped = compare_tick(r, p)
+        self.assertTrue(sig_skipped)
+        # No signal or intent divergences should be reported / 不應報告信號或意圖偏差
+        self.assertFalse(any(d.field.startswith("signal.") for d in divs))
+        self.assertFalse(any(d.field == "order_intents.count" for d in divs))
 
 
 class TestBoundaryEscalation(unittest.TestCase):

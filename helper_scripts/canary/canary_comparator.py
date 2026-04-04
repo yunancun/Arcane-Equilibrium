@@ -48,6 +48,8 @@ PASS = "PASS"
 WARNING = "WARNING"
 CRITICAL = "CRITICAL"
 BOUNDARY_DIVERGENCE = "BOUNDARY_DIVERGENCE"
+SKIPPED = "SKIPPED"
+SKIPPED_NON_CLOSE = "SKIPPED_NON_CLOSE"  # Signal/intent skip: non bar-close tick / 非 bar-close tick 跳過信號比較
 
 
 @dataclass
@@ -80,6 +82,9 @@ class ComparisonReport:
     critical_count: int = 0
     warning_count: int = 0
     boundary_divergence_count: int = 0
+    paper_state_skipped: int = 0   # Ticks where paper_state compare was skipped / 跳過 paper_state 比較的 tick 數
+    signal_compared_ticks: int = 0   # Ticks where signals were actually compared / 實際比較了信號的 tick 數
+    signal_skipped_ticks: int = 0    # Ticks skipped for signal compare (non bar-close) / 因非 bar-close 跳過信號比較的 tick 數
     verdict: str = PASS     # Overall verdict / 總體判定
     divergences: list[dict] = field(default_factory=list)
     boundary_escalation: bool = False
@@ -87,6 +92,100 @@ class ComparisonReport:
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, ensure_ascii=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Indicator Key Normalization / 指標鍵名正規化
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Mapping from Rust/Python indicator flat keys to canonical form.
+# Rust uses short names (sma_20, bollinger.upper); Python uses parameterized
+# names (SMA(20).sma, BB(20,2.0).upper). This map unifies both to a single
+# canonical key so comparisons don't produce false-positive divergences.
+# Rust 用短名 (sma_20, bollinger.upper)；Python 用參數化名
+# (SMA(20).sma, BB(20,2.0).upper)。此映射統一雙方到規範鍵，避免假陽性。
+_INDICATOR_KEY_MAP: dict[str, str] = {
+    # ── Rust flat key → canonical ──
+    "sma_20":               "sma_20",
+    "ema_12":               "ema_12",
+    "rsi_14":               "rsi_14",
+    "macd.macd":            "macd_macd",
+    "macd.signal":          "macd_signal",
+    "macd.histogram":       "macd_histogram",
+    "bollinger.upper":      "bb_upper",
+    "bollinger.middle":     "bb_middle",
+    "bollinger.lower":      "bb_lower",
+    "bollinger.bandwidth":  "bb_bandwidth",
+    "bollinger.percent_b":  "bb_percent_b",
+    "atr.atr":              "atr_14",
+    "atr.atr_percent":      "atr_14_pct",
+    "stochastic.k":         "stoch_k",
+    "stochastic.d":         "stoch_d",
+    "kama.kama":            "kama",
+    "kama.efficiency_ratio": "kama_er",
+    "adx.adx":              "adx",
+    "adx.plus_di":          "adx_plus_di",
+    "adx.minus_di":         "adx_minus_di",
+    "hurst.hurst":          "hurst",
+    "hurst.regime":         "hurst_regime",
+    "ewma_vol.ewma_vol":    "ewma_vol",
+    "ewma_vol.vol_regime":  "ewma_vol_regime",
+    "volume_ratio":         "volume_ratio",
+    "donchian.upper":       "dc_upper",
+    "donchian.lower":       "dc_lower",
+    "donchian.middle":      "dc_middle",
+    "donchian.width":       "dc_width",
+
+    # ── Python flat key → canonical ──
+    "SMA(20).sma":                  "sma_20",
+    "SMA(50).sma":                  "sma_50",
+    "EMA(12).ema":                  "ema_12",
+    "EMA(26).ema":                  "ema_26",
+    "RSI(14).rsi":                  "rsi_14",
+    "MACD(12,26,9).macd":           "macd_macd",
+    "MACD(12,26,9).signal":         "macd_signal",
+    "MACD(12,26,9).histogram":      "macd_histogram",
+    "BB(20,2.0).upper":             "bb_upper",
+    "BB(20,2.0).middle":            "bb_middle",
+    "BB(20,2.0).lower":             "bb_lower",
+    "BB(20,2.0).bandwidth":         "bb_bandwidth",
+    "BB(20,2.0).percent_b":         "bb_percent_b",
+    "ATR(14).atr":                  "atr_14",
+    "ATR(14).atr_percent":          "atr_14_pct",
+    "ATR(5).atr":                   "atr_5",
+    "ATR(5).atr_percent":           "atr_5_pct",
+    "Stochastic(14,3).k":           "stoch_k",
+    "Stochastic(14,3).d":           "stoch_d",
+    "KAMA(10).kama":                "kama",
+    "KAMA(10).efficiency_ratio":    "kama_er",
+    "ADX(14).adx":                  "adx",
+    "ADX(14).plus_di":              "adx_plus_di",
+    "ADX(14).minus_di":             "adx_minus_di",
+    "Hurst.hurst":                  "hurst",
+    "Hurst.regime":                 "hurst_regime",
+    "EWMA_Vol(1h).ewma_vol":        "ewma_vol",
+    "EWMA_Vol(1h).vol_regime":      "ewma_vol_regime",
+    "VolumeRatio(20).volume_ratio":  "volume_ratio",
+    "Donchian(20).donchian_upper":  "dc_upper",
+    "Donchian(20).donchian_lower":  "dc_lower",
+    "Donchian(20).donchian_middle": "dc_middle",
+    "Donchian(20).donchian_width":  "dc_width",
+}
+
+
+def normalize_indicator_keys(flat_indicators: dict[str, Any]) -> dict[str, Any]:
+    """
+    Map Rust or Python indicator flat keys to canonical form.
+    將 Rust 或 Python 的展平指標鍵映射到規範形式。
+
+    Unknown keys are kept as-is so new indicators don't silently vanish.
+    未知鍵保持原樣，避免新指標被靜默丟棄。
+    """
+    normalized: dict[str, Any] = {}
+    for key, value in flat_indicators.items():
+        canonical = _INDICATOR_KEY_MAP.get(key, key)
+        normalized[canonical] = value
+    return normalized
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -253,56 +352,111 @@ def compare_signal_direction(
     return divergences
 
 
-def compare_tick(rust: dict, python: dict) -> list[Divergence]:
+def _is_bar_close_tick(rust: dict, python: dict) -> bool:
+    """
+    Determine if this tick is a bar-close tick where Python shadow produces signals.
+    判斷此 tick 是否為 bar-close tick（Python shadow 會在此生成信號）。
+
+    Heuristic: replay_runner synthesize_ticks() generates 4 ticks per kline
+    (open, high, low, close). The 4th tick (close) is where Python produces
+    signals. If Python shadow has empty signals while Rust has signals, this
+    is a non-close tick — skip signal/intent comparison.
+    啟發式：replay_runner 每根 K 線生成 4 個 tick。第 4 個（close）是 Python
+    生成信號的位置。若 Python 無信號而 Rust 有，則為非 close tick，跳過比較。
+    """
+    r_sigs = rust.get("signals", [])
+    p_sigs = python.get("signals", [])
+    r_intents = rust.get("order_intents", [])
+    p_intents = python.get("order_intents", [])
+
+    # If Python has signals or intents, it's a bar-close tick — compare normally
+    # 若 Python 有信號或意圖，為 bar-close tick，正常比較
+    if p_sigs or p_intents:
+        return True
+
+    # If both sides are empty, nothing to compare — treat as close (no false positive)
+    # 雙方都為空則無需比較，視為 close（不會產生假陽性）
+    if not r_sigs and not r_intents:
+        return True
+
+    # Rust has signals/intents but Python doesn't — non-close tick, skip
+    # Rust 有信號/意圖但 Python 沒有 — 非 close tick，跳過
+    return False
+
+
+def compare_tick(rust: dict, python: dict) -> tuple[list[Divergence], bool, bool]:
     """
     Compare a single tick pair (Rust vs Python).
     比較單個 tick 對（Rust vs Python）。
+    Returns (divergences, paper_state_skipped, signal_skipped).
+    返回 (偏差列表, 是否跳過 paper_state 比較, 是否跳過信號比較)。
     """
     tick_number = rust.get("tick_number", 0)
     timestamp_ms = rust.get("timestamp_ms", 0)
     symbol = rust.get("symbol", "")
     divergences: list[Divergence] = []
 
-    # 1. Compare indicators / 比較指標
-    r_ind = _flatten_dict(rust.get("indicators", {}))
-    p_ind = _flatten_dict(python.get("indicators", {}))
+    # 1. Compare indicators (normalize keys first) — always compare, unaffected by bar-close
+    #    比較指標（先正規化鍵名）— 始終比較，不受 bar-close 影響
+    r_ind = normalize_indicator_keys(_flatten_dict(rust.get("indicators") or {}))
+    p_ind = normalize_indicator_keys(_flatten_dict(python.get("indicators") or {}))
     all_keys = set(r_ind.keys()) | set(p_ind.keys())
     for key in all_keys:
         d = compare_numeric(key, r_ind.get(key), p_ind.get(key), tick_number, timestamp_ms, symbol)
         if d:
             divergences.append(d)
 
-    # 2. Compare signals / 比較信號
-    r_sigs = rust.get("signals", [])
-    p_sigs = python.get("signals", [])
-    divergences.extend(compare_signal_direction(r_sigs, p_sigs, tick_number, timestamp_ms, symbol))
+    # 2. Compare signals — only on bar-close ticks (Option C: comparator-side filter)
+    #    比較信號 — 僅在 bar-close tick 比較（方案 C：comparator 側過濾）
+    #    Rust produces signals every tick; Python only on bar close. Comparing
+    #    non-close ticks would generate massive false positives.
+    #    Rust 每個 tick 都產生信號；Python 僅在 bar close 時。比較非 close tick
+    #    會產生大量假陽性。
+    bar_close = _is_bar_close_tick(rust, python)
+    sig_skipped = not bar_close
 
-    # 3. Compare paper state / 比較紙盤狀態
-    r_ps = rust.get("paper_state", {})
-    p_ps = python.get("paper_state", {})
-    for key in BALANCE_TOLERANCES:
-        d = compare_numeric(key, r_ps.get(key), p_ps.get(key), tick_number, timestamp_ms, symbol)
-        if d:
-            divergences.append(d)
+    if bar_close:
+        r_sigs = rust.get("signals", [])
+        p_sigs = python.get("signals", [])
+        divergences.extend(compare_signal_direction(r_sigs, p_sigs, tick_number, timestamp_ms, symbol))
 
-    # 4. Compare order intent counts / 比較訂單意圖數量
-    r_intents = rust.get("order_intents", [])
-    p_intents = python.get("order_intents", [])
-    if len(r_intents) != len(p_intents):
-        divergences.append(Divergence(
-            tick_number=tick_number,
-            timestamp_ms=timestamp_ms,
-            symbol=symbol,
-            field="order_intents.count",
-            rust_value=len(r_intents),
-            python_value=len(p_intents),
-            tolerance=0,
-            actual_diff=abs(len(r_intents) - len(p_intents)),
-            severity=WARNING,
-            reason=f"intent count mismatch: rust={len(r_intents)}, python={len(p_intents)}",
-        ))
+    # 3. Compare paper state — skip if either side is empty (known Python shadow
+    #    limitation: paper_state is always {}).
+    #    比較紙盤狀態 — 若任一方為空則跳過（已知 Python shadow 限制：
+    #    paper_state 永遠為 {}）。結果記為 SKIPPED 而非 WARNING。
+    r_ps = rust.get("paper_state") or {}
+    p_ps = python.get("paper_state") or {}
+    ps_skipped = False
+    if r_ps and p_ps:
+        for key in BALANCE_TOLERANCES:
+            d = compare_numeric(key, r_ps.get(key), p_ps.get(key), tick_number, timestamp_ms, symbol)
+            if d:
+                divergences.append(d)
+    else:
+        # SKIPPED — one or both paper_state empty, not a real divergence
+        # SKIPPED — 一方或雙方 paper_state 為空，非真實偏差
+        ps_skipped = True
 
-    return divergences
+    # 4. Compare order intent counts — only on bar-close ticks (same reason as signals)
+    #    比較訂單意圖數量 — 僅在 bar-close tick 比較（原因同信號）
+    if bar_close:
+        r_intents = rust.get("order_intents", [])
+        p_intents = python.get("order_intents", [])
+        if len(r_intents) != len(p_intents):
+            divergences.append(Divergence(
+                tick_number=tick_number,
+                timestamp_ms=timestamp_ms,
+                symbol=symbol,
+                field="order_intents.count",
+                rust_value=len(r_intents),
+                python_value=len(p_intents),
+                tolerance=0,
+                actual_diff=abs(len(r_intents) - len(p_intents)),
+                severity=WARNING,
+                reason=f"intent count mismatch: rust={len(r_intents)}, python={len(p_intents)}",
+            ))
+
+    return divergences, ps_skipped, sig_skipped
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -395,9 +549,21 @@ def run_comparison(
     report.unmatched_shadow = len(shadow_idx) - len(matched_keys)
 
     all_divergences: list[Divergence] = []
+    ps_skip_count = 0
+    sig_skip_count = 0
+    sig_compared_count = 0
     for key in sorted(matched_keys):
-        divs = compare_tick(engine_idx[key], shadow_idx[key])
+        divs, ps_skipped, sig_skipped = compare_tick(engine_idx[key], shadow_idx[key])
         all_divergences.extend(divs)
+        if ps_skipped:
+            ps_skip_count += 1
+        if sig_skipped:
+            sig_skip_count += 1
+        else:
+            sig_compared_count += 1
+    report.paper_state_skipped = ps_skip_count
+    report.signal_compared_ticks = sig_compared_count
+    report.signal_skipped_ticks = sig_skip_count
 
     # Classify / 分類
     report.total_divergences = len(all_divergences)
@@ -458,7 +624,8 @@ def main():
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"Verdict: {report.verdict}", file=sys.stderr)
     print(f"Matched ticks: {report.matched_ticks}", file=sys.stderr)
-    print(f"CRITICAL: {report.critical_count} | WARNING: {report.warning_count} | BOUNDARY: {report.boundary_divergence_count}", file=sys.stderr)
+    print(f"CRITICAL: {report.critical_count} | WARNING: {report.warning_count} | BOUNDARY: {report.boundary_divergence_count} | PAPER_STATE_SKIPPED: {report.paper_state_skipped}", file=sys.stderr)
+    print(f"Signal compared: {report.signal_compared_ticks} | Signal skipped (non bar-close): {report.signal_skipped_ticks}", file=sys.stderr)
     if report.boundary_escalation:
         print(f"⚠ Boundary escalation: {report.escalation_reason}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)

@@ -126,23 +126,38 @@ class ADX(IndicatorBase):
         if len(tr_list) < p * 2:
             return None
 
-        # Wilder smoothing / Wilder 平滑
+        # Step 1: Wilder smoothing for TR/+DM/-DM / 第一步：對 TR/+DM/-DM 做 Wilder 平滑
         atr = math.fsum(tr_list[:p]) / p
         pdm_s = math.fsum(pdm_list[:p]) / p
         ndm_s = math.fsum(ndm_list[:p]) / p
+
+        # Step 2: Collect DX series during smoothing / 第二步：在平滑過程中收集 DX 序列
+        dx_values: list[tuple[float, float, float]] = []  # (dx, +di, -di)
 
         for i in range(p, len(tr_list)):
             atr = (atr * (p - 1) + tr_list[i]) / p
             pdm_s = (pdm_s * (p - 1) + pdm_list[i]) / p
             ndm_s = (ndm_s * (p - 1) + ndm_list[i]) / p
 
-        pdi = 100 * pdm_s / atr if atr > 0 else 0.0
-        ndi = 100 * ndm_s / atr if atr > 0 else 0.0
+            pdi = 100 * pdm_s / atr if atr > 0 else 0.0
+            ndi = 100 * ndm_s / atr if atr > 0 else 0.0
+            di_sum = pdi + ndi
+            dx = 100 * abs(pdi - ndi) / di_sum if di_sum > 0 else 0.0
+            dx_values.append((dx, pdi, ndi))
 
-        dx = 100 * abs(pdi - ndi) / (pdi + ndi) if (pdi + ndi) > 0 else 0.0
+        if len(dx_values) < p:
+            return None
+
+        # Step 3: Wilder smoothing on DX to get ADX / 第三步：對 DX 做 Wilder 平滑得到 ADX
+        adx_val = math.fsum(dx for dx, _, _ in dx_values[:p]) / p
+        for dx, _, _ in dx_values[p:]:
+            adx_val = (adx_val * (p - 1) + dx) / p
+
+        # Use latest +DI/-DI / 使用最新的 +DI/-DI
+        _, pdi, ndi = dx_values[-1]
 
         return {
-            "adx": round(dx, 2),
+            "adx": round(adx_val, 2),
             "plus_di": round(pdi, 2),
             "minus_di": round(ndi, 2),
         }
