@@ -47,7 +47,7 @@
 ## 三、當前系統狀態摘要
 
 ```
-測試：3,877 Py + 592 Rust + 38 Canary = 4,507 tests 全綠
+測試：3,345 Py + 763 Rust + 38 Canary = 4,146 tests 全綠
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
 治理：GovernanceHub 4 SM，fail-closed · Rust GovernanceCore 級聯 all-or-nothing
 品類：linear + spot + inverse（option 未來）
@@ -58,10 +58,12 @@ Rust 引擎：openclaw_core 24 模組 + openclaw_engine 12+ 模組 + openclaw_ty
 代碼完成度：~90%（~67,000 行 Py+Rs）· 業務功能：~95%
 總工時進度：~35%（已完成 ~66d / 新總計 ~189d，含融合方案 105d 新增）
 關鍵路徑：Phase 0a/0b 已完成 → TD-01~03 文件拆分已完成 → Phase 1 開始 5/01
-★★★★ Rust 遷移 — Go/No-Go 7/7 PASS（2026-04-04）：
+★★★★ Rust 遷移 — Go/No-Go 7/7 PASS + 全面清理完成（2026-04-04）：
   R-CUT 全部完成（RC-01~RC-15）· R-IPC 完成（IPC-01~06）
-  Rust 為唯一 tick 處理引擎 · Python tick pipeline 已停用
-  8 API 路由遷移 Rust-first · PipelineBridge 降級為 IPC relay
+  RC-10 PipelineBridge 停用 · RC-11 engine.tick() 停用 · RC-12 重複 WS 停用
+  Rust 為唯一 tick 處理引擎 · 唯一 Bybit WS 連接 · 零重複系統
+  10/13 策略讀路由 Rust-first（含 klines/indicators/signals/strategies）
+  GovernanceHub 5 死方法標記 deprecated · 10 個 flaky test 修復
 ★★★★ 融合方案 v0.5（DB + ML/DL + 新聞 Agent · 20 週）：
   兩輪審計 + DB 專題 + 四角色聯合驗證 = 67 項修正
   存儲精簡 97%：5.6→0.17 GB/day · PG+TimescaleDB 確認 · 砍 PgBouncer
@@ -335,4 +337,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-04：4507 tests 全綠 · 131+ routes · 5 Agent · demo_only · **Go/No-Go 7/7 PASS** · Rust 為唯一 tick 引擎 · R-IPC 8 路由 Rust-first · Phase 0a/0b 完成（43 tables · 28 hypertables · TimescaleDB 2.26.1）· L3 全面審計歸零（9 角色）· 下一步：TD-01~03 文件拆分 → Phase 1 (5/01) → 讀 TODO.md。
+> 截至 2026-04-04：4146 tests 全綠 · 131+ routes · 5 Agent · demo_only · **Go/No-Go 7/7 PASS** · Rust 為唯一 tick 引擎（唯一 Bybit WS） · RC-10/11/12 零重複系統 · 10/13 策略路由 Rust-first · Phase 0a/0b 完成 · 下一步：Phase 1 (5/01) → 讀 TODO.md。

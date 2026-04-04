@@ -113,9 +113,47 @@ Total Rust:      ~28,800 行
 
 ---
 
-## 七、下一步
+## 七、Session 2+3：RC-11/RC-12 + 清理 + 全面審計
+
+### RC-11：消除 Python/Rust 止損雙重執行
+- `MarketDataDispatcher._trigger_tick()` 移除 `engine.tick()` 調用
+- Rust `tick_pipeline.rs:235` 為唯一止損檢查路徑
+
+### RC-12：停用重複 Bybit WebSocket
+- `strategy_wiring.py` 自動啟動 dispatcher 已禁用（`if False` guard）
+- Python WS: 0 連接 · Rust WS: 1 連接（唯一）
+
+### 10 個 Flaky Test 修復
+- 5 Rust-first 響應格式（indicator count / consensus key / strategy name）
+- 5 測試隔離（session 殘留 / module singleton 污染 / category config）
+- 基準線：3345 Py + 763 Rust = 4108 全綠
+
+### Governance 清理
+- governance_hub.py：5 死方法標記 DEPRECATED（RC-11）
+- bridge_core.py：activate() 精簡 + on_tick() deprecation 更新
+
+### Rust-first 路由改造
+- Klines 加入 Rust snapshot（`PipelineSnapshot.klines` + `KlineBuffer::latest_cloned()`）
+- `get_klines` + `get_indicators` 全 timeframe Rust-first
+- 最終：10/13 策略讀路由 Rust-first
+
+### 全面審計結論
+- 零重複系統（tick/WS/stops/governance 全部單一路徑）
+- 7 個 Python 交易組件全部休眠
+- 4 Python-only 路由（Scanner/Deployer）保留合理（獨立組件）
+
+### Commits（Session 2+3）
+```
+4dc835a fix(RC-11): eliminate Python/Rust duplicate stop checks + fix 10 flaky tests
+4f9836c fix(RC-11): extend get_indicators Rust-first to all timeframes
+5979170 feat: add klines to Rust pipeline snapshot + get_klines Rust-first
+f5d7192 fix(RC-12): disable duplicate Python WS + comprehensive audit
+```
+
+---
+
+## 八、下一步
 
 1. Phase 1（ML pipeline）：FeatureCollector + LightGBM Scorer + PSI drift
-2. TD-01~03：Python 大文件拆分
-3. 5 個 flaky test 修復（test isolation for Rust-first IPC）
-4. 引擎持續運行監控
+2. 引擎持續運行監控
+3. P2 Paper Engine 瘦身（讀路由 IPC 化 → 寫路由 IPC 化，待 Rust command channel）
