@@ -48,9 +48,38 @@ Total:  4402 tests 全綠
 6fa9c4f fix(P0): activate V2 strategy features + Kelly sizing + Grid OU
 ```
 
-## 五、下一步
+### P0 第二輪：消除剩餘 9 項死代碼
 
-1. 重啟 Python API 和 Rust 引擎使修復生效
-2. E2/E5/QC 審查結果回來後追加修復（如有）
-3. 觀察修復後策略表現（V2 功能啟用 + Kelly sizing 效果）
-4. Day 7（04-10）Go/No-Go
+- [x] A1: Donchian data 加入 Python signal metadata
+- [x] A2: close price 加入 signal metadata（BB middle band）
+- [x] A3: Rust BB_Breakout 使用 `ind.donchian` 確認突破
+- [x] A4: Rust BB_Reversion + BB_Breakout 使用 `ind.hurst` 體制過濾
+- [x] B1: 新增 `KAMACrossoverRule`（KAMA vs EMA 交叉）
+- [x] B2: `htf_direction` 注入 orchestrator（緩存每 symbol/tf 方向）
+- [x] B3: `check_trailing_stop()` 在 bb_breakout `on_signal()` 中調用
+- [x] B4: CognitiveModulator 實例化並接入 phase2_strategy_routes
+- [x] B5: FundingArb `evaluate_funding_opportunity()` 傳入 spot/perp prices
+
+## 五、測試基準線（最終）
+
+```
+Python: 3839 passed / 0 failed / 0 errors / 1 skipped
+Rust:   563 passed / 0 failed
+Total:  4402 tests 全綠
+V2 死代碼：0（全部消除）
+```
+
+## 六、Commits
+
+```
+697a09e fix: apply_fill accumulates same-direction + reject duplicate intents
+6fa9c4f fix(P0): activate V2 strategy features + Kelly sizing + Grid OU
+ccce81d docs: 2026-04-04 daily summary
+2f39690 fix(P0): eliminate all remaining V2 dead code — 9/9 fixes
+```
+
+## 七、下一步
+
+1. 重啟服務使全部修復生效
+2. 觀察修復後策略表現（V2 全功能 + Kelly + Hurst regime + Donchian）
+3. Day 7（04-10）Go/No-Go
