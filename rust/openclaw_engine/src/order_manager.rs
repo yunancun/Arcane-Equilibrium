@@ -670,6 +670,12 @@ fn parse_order_response_list(result: &serde_json::Value) -> BybitResult<Vec<Orde
     Ok(responses)
 }
 
+/// Public wrapper for parse_order_info_list (used by PyO3 bridge).
+/// parse_order_info_list 的公開包裝器（供 PyO3 橋接使用）。
+pub fn parse_order_info_list_pub(result: &serde_json::Value) -> BybitResult<Vec<OrderInfo>> {
+    parse_order_info_list(result)
+}
+
 /// Parse a list of OrderInfo from Bybit order query result.
 /// 從 Bybit 訂單查詢結果解析 OrderInfo 列表。
 fn parse_order_info_list(result: &serde_json::Value) -> BybitResult<Vec<OrderInfo>> {
@@ -704,6 +710,12 @@ fn parse_order_info_item(item: &serde_json::Value) -> OrderInfo {
         created_time: str_field(item, "createdTime"),
         updated_time: str_field(item, "updatedTime"),
     }
+}
+
+/// Public wrapper for parse_execution_list (used by PyO3 bridge).
+/// parse_execution_list 的公開包裝器（供 PyO3 橋接使用）。
+pub fn parse_execution_list_pub(result: &serde_json::Value) -> BybitResult<Vec<ExecutionInfo>> {
+    parse_execution_list(result)
 }
 
 /// Parse a list of ExecutionInfo from Bybit execution query result.

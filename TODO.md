@@ -153,8 +153,177 @@ SPEC 審查記錄：
 - [x] IPC-02：Python ipc_state_reader.py 擴展 5 新方法
 - [x] IPC-03：8 條 API 路由改為 Rust-first + Python fallback（5 寫操作路由待 Rust 命令通道）
 - [x] IPC-04：PipelineBridge 降級為 IPC 中繼 + Agent 回調容器（docstring + DEPRECATED 標記）
-- [ ] IPC-05：分類 B Python 文件逐步降級（需 API 寫操作路由遷移後）
+- [ ] IPC-05：分類 B Python 文件逐步降級（需 PYO3-BYBIT 寫操作路由遷移後）
 - [x] IPC-06：E2 + E4 — 4507 全綠
+
+---
+
+## ██ PYO3-BYBIT：PyO3 Bybit API 橋接（Route C · 取代 Python BybitDemoConnector）
+
+> **Operator 決策（2026-04-04）：** 採用 Route C（PyO3 直接調用），不走 IPC 透傳。
+> 編譯增量 5-12s 可接受，跨語言調試由 CC 處理無障礙。
+> 設計文件：本段即為 PM+PA+FA 聯合設計。
+
+### 架構設計（PA）
+
+```
+Python FastAPI route
+    ↓ import openclaw_core
+BybitClient (#[pyclass], 持有 Arc<BybitRestClient> + tokio::Runtime)
+    ├─ AccountManagerWrapper   → refresh_balance / wallet_snapshot / fee_rates
+    ├─ OrderManagerWrapper     → place_order / cancel / get_active / get_executions
+    ├─ PositionManagerWrapper  → get_positions / set_leverage / set_trading_stop / closed_pnl
+    ├─ MarketDataWrapper       → get_klines / get_tickers / get_orderbook / get_funding
+    └─ InstrumentInfoWrapper   → refresh / get / round_qty / round_price / validate
+    ↓ async→sync: tokio::Runtime::block_on()
+Rust Bybit modules (openclaw_engine::*)
+    ↓ HMAC-SHA256 signed HTTP
+Bybit V5 API (Demo/Testnet/Mainnet)
+```
+
+**關鍵設計決策：**
+
+1. **Crate 結構**：擴展現有 `openclaw_pyo3`，加 `openclaw_engine` 依賴（lib.rs 已 re-export 全部模組）
+2. **Async 處理**：每個 BybitClient 實例持有獨立 `tokio::Runtime`，PyO3 方法內 `rt.block_on(async_fn())`
+   - 不干擾 Python asyncio event loop（tokio Runtime 在獨立線程池）
+   - FastAPI 的 sync route handler 在 threadpool 跑，不會 deadlock
+3. **序列化**：所有 Rust struct 已實現 `Serialize` → `serde_json::to_value()` → `pythonize::pythonize()` 轉 PyObject
+   - 備選：手動 `to_dict()` → `HashMap<String, PyObject>`（現有 ContextDistiller 用此法）
+   - 建議：用 `pythonize` crate 自動轉換，省掉手寫 wrapper
+4. **錯誤映射**：`BybitApiError` → `PyErr`（PyRuntimeError），保留 retCode + retMsg
+5. **Python 模組名**：保持 `openclaw_core`，新增 `BybitClient` 等 class
+6. **向後兼容**：BybitDemoConnector 標記 DEPRECATED，保留作 fallback
+
+**FA 覆蓋範圍：**
+
+| 覆蓋（本批次） | 不覆蓋（保持 Python，原因） |
+|---------------|--------------------------|
+| demo/balance — AccountManager | governance 25 端點 — GovernanceHub 決策引擎，無 Bybit 等價 |
+| demo/positions — PositionManager | paper session start/stop — 本地狀態機，非 API 操作 |
+| demo/orders — OrderManager | risk config/override — 本地風控邏輯 |
+| demo/fills — OrderManager.get_executions | Layer 2 AI 11 端點 — Python Ollama 整合 |
+| market data（klines/tickers/OB/funding） | learning 15 端點 — 獨立子系統 |
+| instrument info（品種規格/精度） | scanner/deployer — Python 獨立組件 |
+| order submit/cancel（寫操作） | |
+| leverage/TP-SL 設定 | |
+
+**風險評估（FA）：**
+
+| 風險 | 等級 | 緩解 |
+|------|------|------|
+| tokio Runtime 與 Python asyncio 衝突 | 低 | 獨立 Runtime，不共享 event loop |
+| Bybit rate limit（10 req/s） | 中 | 與現有 Python connector 相同行為，不增加調用頻率 |
+| PyO3 .so 與 Python 版本綁定 | 低 | maturin develop 針對當前 Python 版本編譯 |
+| 編譯時間增加 | 已驗證 | 增量 5-12s，全量 ~15s |
+
+### 任務列表
+
+#### 階段 1：Rust 基礎設施（PYO3-B01 ~ B02）
+
+- [ ] PYO3-B01：Crate 準備
+  - `openclaw_pyo3/Cargo.toml` 增加 `openclaw_engine`、`tokio`、`pythonize` 依賴
+  - 新建 `openclaw_pyo3/src/bybit_bridge/mod.rs`
+  - 實現：`TokioRuntime` 單例 + `bybit_err_to_pyerr()` 錯誤轉換 + `rust_to_py()` 序列化輔助
+  - `lib.rs` 增加 `mod bybit_bridge;` + register classes
+  - `maturin develop` 編譯通過
+  - 文件清單：`Cargo.toml`(1) + `mod.rs`(1) + `lib.rs`(1) = 3 文件
+
+- [ ] PYO3-B02：BybitClient + AccountManager wrapper
+  - `#[pyclass] BybitClient`：`__init__(api_key, api_secret, env="demo")` → 內部創建 `Arc<BybitRestClient>` + `tokio::Runtime`
+  - `refresh_balance()` → `PyResult<PyObject>`（WalletState dict）
+  - `usdt_equity()` / `usdt_available()` / `usdt_wallet_balance()` → `f64`
+  - `wallet_snapshot()` → `PyResult<PyObject>`（完整快照 dict）
+  - `get_fee_rates(category)` → `PyResult<PyObject>`（list[dict]）
+  - `get_account_info()` → `PyResult<PyObject>`
+  - 單元測試：mock client + 序列化驗證
+  - 文件：`bybit_bridge/client.rs`(1) + `bybit_bridge/account.rs`(1) + tests
+
+#### 階段 2：Order + Position wrappers（PYO3-B03）
+
+- [ ] PYO3-B03：OrderManager + PositionManager wrapper
+  - `#[pymethods] impl BybitClient`（擴展同一 pyclass）：
+  - **Orders**：
+    - `place_order(symbol, side, order_type, qty, price?, category?, reduce_only?, tif?)` → dict
+    - `cancel_order(category, symbol, order_id)` → dict
+    - `cancel_all_orders(category)` → dict
+    - `get_active_orders(category, symbol?)` → list[dict]
+    - `get_order_history(category, symbol?, limit?)` → list[dict]
+    - `get_executions(category, symbol?, limit?)` → list[dict]
+  - **Positions**：
+    - `get_positions(category, symbol?)` → list[dict]
+    - `set_leverage(category, symbol, buy_lev, sell_lev)` → dict
+    - `set_trading_stop(category, symbol, tp?, sl?, trailing?)` → dict
+    - `get_closed_pnl(category, symbol?, limit?)` → list[dict]
+  - 文件：`bybit_bridge/orders.rs`(1) + `bybit_bridge/positions.rs`(1) + tests
+
+#### 階段 3：MarketData + InstrumentInfo wrappers（PYO3-B04）
+
+- [ ] PYO3-B04：MarketDataClient + InstrumentInfoCache wrapper
+  - **Market Data**（`#[pymethods] impl BybitClient` 繼續擴展）：
+    - `get_klines(category, symbol, interval, limit?)` → list[dict]
+    - `get_tickers(category, symbol?)` → list[dict]
+    - `get_orderbook(category, symbol, limit?)` → dict
+    - `get_funding_history(category, symbol, limit?)` → list[dict]
+    - `get_open_interest(category, symbol, interval, limit?)` → list[dict]
+    - `get_long_short_ratio(category, symbol, period, limit?)` → list[dict]
+    - `get_recent_trades(category, symbol, limit?)` → list[dict]
+  - **Instrument Info**：
+    - `refresh_instruments(category)` → int（載入數量）
+    - `get_instrument(symbol)` → dict?（SymbolSpec）
+    - `round_qty(symbol, qty)` → float?
+    - `round_price(symbol, price)` → float?
+    - `validate_order(symbol, qty, price)` → (bool, str)
+  - 文件：`bybit_bridge/market_data.rs`(1) + `bybit_bridge/instruments.rs`(1) + tests
+
+#### 階段 4：Python 整合（PYO3-B05）
+
+- [ ] PYO3-B05：Python 端接入
+  - `strategy_ai_routes.py`：demo/* 4 端點改用 `from openclaw_core import BybitClient`
+  - 回退邏輯：`try: import openclaw_core; HAS_RUST_BRIDGE = True` → 不可用時降級 BybitDemoConnector
+  - `bybit_demo_connector.py`：MODULE_NOTE 標記 DEPRECATED，保留作 fallback
+  - 驗證：GUI demo tab 數據正確顯示
+  - 文件：`strategy_ai_routes.py`(1) + `bybit_demo_connector.py`(1)
+
+#### 階段 5：構建 + 質量保證（PYO3-B06 ~ B08）
+
+- [ ] PYO3-B06：maturin 構建驗證
+  - `maturin develop` 成功
+  - `python3 -c "from openclaw_core import BybitClient; print('OK')"` 通過
+  - 增量編譯時間測量並記錄
+
+- [ ] PYO3-B07：E2 代碼審查 + E4 回歸測試
+  - E2：跨語言接口審查 + 錯誤處理 + rate limit 安全
+  - E4：Python 3345 + Rust 763+ 全綠
+  - Bybit API 字典手冊同步更新
+
+- [ ] PYO3-B08：E5 優化審查
+  - 序列化效率（pythonize vs 手動 to_dict）
+  - 不必要的 clone 消除
+  - tokio Runtime 資源使用
+
+### 依賴關係
+
+```
+PYO3-B01 → PYO3-B02 → PYO3-B03（可與 B04 並行）
+                     → PYO3-B04（可與 B03 並行）
+PYO3-B03 + B04 → PYO3-B05 → PYO3-B06 → PYO3-B07 → PYO3-B08
+```
+
+### 預估文件清單（新建 + 修改）
+
+| 文件 | 操作 | 預估行數 |
+|------|------|---------|
+| `openclaw_pyo3/Cargo.toml` | 修改 | +3 行 |
+| `openclaw_pyo3/src/lib.rs` | 修改 | +10 行 |
+| `openclaw_pyo3/src/bybit_bridge/mod.rs` | 新建 | ~80 行（Runtime + 錯誤 + 序列化） |
+| `openclaw_pyo3/src/bybit_bridge/client.rs` | 新建 | ~120 行（BybitClient 構造 + AccountManager） |
+| `openclaw_pyo3/src/bybit_bridge/orders.rs` | 新建 | ~180 行（OrderManager 方法） |
+| `openclaw_pyo3/src/bybit_bridge/positions.rs` | 新建 | ~130 行（PositionManager 方法） |
+| `openclaw_pyo3/src/bybit_bridge/market_data.rs` | 新建 | ~200 行（MarketDataClient 方法） |
+| `openclaw_pyo3/src/bybit_bridge/instruments.rs` | 新建 | ~100 行（InstrumentInfoCache 方法） |
+| `strategy_ai_routes.py` | 修改 | ~30 行改動 |
+| `bybit_demo_connector.py` | 修改 | +5 行 DEPRECATED 標記 |
+| **合計** | 6 新建 + 4 修改 | **~860 行新代碼** |
 
 ---
 
@@ -227,7 +396,7 @@ SPEC 審查記錄：
 - [ ] 2-24~25：Parquet ETL(DuckDB COPY) + 指標重算引擎
 - [ ] 2-26~28：E2(兩輪) + E4 + E5
 - [ ] 2-KS-1：Kelly Position Sizing in Rust（需 trading.fills + Scorer calibrated_prob）
-- [ ] 2-PYO3-1：ContextDistiller PyO3 接入（Decision Context 管道打通後）
+- [ ] 2-PYO3-1：ContextDistiller PyO3 接入（Decision Context 管道打通後，基礎設施由 PYO3-BYBIT 完成）
 
 ## ██ Phase 3a — update_params() 改造 = AGT-1（W9-10，6/05-6/18）
 

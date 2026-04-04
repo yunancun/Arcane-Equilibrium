@@ -17,8 +17,11 @@ name = "openclaw_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { workspace = true, features = ["extension-module"] }
+pyo3 = { workspace = true, features = ["extension-module", "multiple-pymethods"] }
 openclaw_types = { path = "../openclaw_types" }
 openclaw_core = { path = "../openclaw_core" }
+openclaw_engine = { path = "../openclaw_engine" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true }
+pythonize = "0.24"

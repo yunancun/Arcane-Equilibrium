@@ -441,6 +441,12 @@ impl PositionManager {
 // Parsing helpers / 解析輔助函數
 // ---------------------------------------------------------------------------
 
+/// Parse a list of PositionInfo from Bybit position query result (public for PyO3 bridge).
+/// 從 Bybit 持倉查詢結果解析 PositionInfo 列表（公開供 PyO3 橋接使用）。
+pub fn parse_position_list_pub(result: &serde_json::Value) -> BybitResult<Vec<PositionInfo>> {
+    parse_position_list(result)
+}
+
 /// Parse a list of PositionInfo from Bybit position query result.
 /// 從 Bybit 持倉查詢結果解析 PositionInfo 列表。
 fn parse_position_list(result: &serde_json::Value) -> BybitResult<Vec<PositionInfo>> {
