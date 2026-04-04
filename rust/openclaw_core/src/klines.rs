@@ -157,6 +157,14 @@ impl KlineBuffer {
         &slice[start..]
     }
 
+    /// Clone the latest `n` bars (immutable, no make_contiguous needed).
+    /// 克隆最新 `n` 根 K 線（不可變，無需 make_contiguous）。
+    pub fn latest_cloned(&self, n: usize) -> Vec<KlineBar> {
+        let len = self.bars.len();
+        let skip = len.saturating_sub(n);
+        self.bars.iter().skip(skip).cloned().collect()
+    }
+
     /// Extract close prices for the latest `n` bars.
     /// 提取最新 `n` 根 K 線的收盤價。
     pub fn close_array(&self, n: usize) -> Vec<f64> {

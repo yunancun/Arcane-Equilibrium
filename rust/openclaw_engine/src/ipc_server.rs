@@ -458,6 +458,7 @@ mod tests {
             strategies: vec![],
             recent_intents: vec![],
             recent_fills: vec![],
+            klines: HashMap::new(),
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

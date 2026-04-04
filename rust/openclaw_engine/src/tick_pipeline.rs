@@ -302,6 +302,19 @@ impl TickPipeline {
     pub fn snapshot(&self) -> PipelineSnapshot {
         // Collect strategy info from orchestrator / 從調度器收集策略信息
         let strategies: Vec<StrategyInfo> = self.orchestrator.strategy_infos();
+
+        // Collect latest klines per symbol (1m only, up to 100 bars)
+        // 收集每交易對最新 K 線（僅 1m，最多 100 根）
+        let mut klines: HashMap<String, Vec<openclaw_core::klines::KlineBar>> = HashMap::new();
+        for symbol in self.kline_manager.symbols() {
+            if let Some(buf) = self.kline_manager.get_buffer(symbol, "1m") {
+                let bars = buf.latest_cloned(100);
+                if !bars.is_empty() {
+                    klines.insert(symbol.clone(), bars);
+                }
+            }
+        }
+
         PipelineSnapshot {
             paper_state: self.paper_state.export_state(),
             latest_prices: self.latest_prices.clone(),
@@ -312,6 +325,7 @@ impl TickPipeline {
             strategies,
             recent_intents: self.recent_intents.iter().cloned().collect(),
             recent_fills: self.recent_fills.iter().cloned().collect(),
+            klines,
         }
     }
 
@@ -449,6 +463,10 @@ pub struct PipelineSnapshot {
     pub recent_intents: Vec<TimestampedIntent>,
     /// Recent fills (last 50) / 最近成交記錄（最近 50 個）
     pub recent_fills: Vec<TimestampedFill>,
+    /// Per-symbol latest completed klines (up to 100 bars, 1m only).
+    /// 每交易對最新已完成 K 線（最多 100 根，僅 1m）。
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub klines: HashMap<String, Vec<openclaw_core::klines::KlineBar>>,
 }
 
 #[cfg(test)]

@@ -45,11 +45,24 @@ async def get_klines(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架")
     try:
-        # TODO(RC-11): Python KLINE_MANAGER no longer receives ticks (Rust is sole tick processor).
-        # Returns empty/stale data. Needs Rust snapshot to include kline history,
-        # or Rust IPC command to fetch klines on demand.
-        # TODO(RC-11)：Python KLINE_MANAGER 不再接收 tick（Rust 為唯一 tick 處理器）。
-        # 返回空/過期數據。需要 Rust 快照包含 K 線歷史，或 Rust IPC 按需取 K 線。
+        # RC-11: Rust-first for klines — Rust is sole tick processor, Python KlineManager
+        # no longer receives ticks and returns empty data.
+        # RC-11：K 線優先讀 Rust — Rust 為唯一 tick 處理器，Python KlineManager
+        # 不再接收 tick，返回空數據。
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_klines = reader.get_klines(sym, n=n)
+            if rust_klines:
+                return _envelope({
+                    "symbol": sym,
+                    "timeframe": timeframe,
+                    "closed_klines": rust_klines,
+                    "current_bar": None,  # Rust snapshot only has closed bars
+                    "count": len(rust_klines),
+                    "source": "rust_engine",
+                })
+        # Fallback to Python KlineManager (stale data, for backward compat)
+        # 降級到 Python KlineManager（過期數據，向後兼容）
         klines = KLINE_MANAGER.get_latest_klines(sym, timeframe, n=n)
         current = KLINE_MANAGER.get_current_bar(sym, timeframe)
         return _envelope({

@@ -191,6 +191,18 @@ class RustSnapshotReader:
         snap = self.get_snapshot()
         return (snap or {}).get("recent_fills", [])
 
+    def get_klines(self, symbol: str, n: int = 50) -> list:
+        """
+        Get latest completed klines for a symbol from Rust engine (1m, up to 100).
+        從 Rust 引擎獲取指定交易對最新已完成 K 線（1m，最多 100 根）。
+        """
+        snap = self.get_snapshot()
+        if snap is None:
+            return []
+        klines = snap.get("klines", {})
+        bars = klines.get(symbol, [])
+        return bars[-n:] if len(bars) > n else bars
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Module-level singleton / 模組級單例
