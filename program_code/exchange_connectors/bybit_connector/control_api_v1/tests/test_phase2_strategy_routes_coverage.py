@@ -169,8 +169,12 @@ class TestGetKlinesRoute:
 
 
 class TestGetIndicatorsRoute:
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.INDICATOR_ENGINE")
-    def test_happy_path(self, mock_ie):
+    def test_happy_path(self, mock_ie, mock_rr):
+        # Mock Rust reader unavailable so Python fallback is tested
+        # Mock Rust reader 不可用，測試 Python 降級路徑
+        mock_rr.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_indicators
         mock_ie.get_indicators.return_value = {"rsi": 50}
         result = _run(get_indicators("ETHUSDT", "5m", actor=_FakeActor()))

@@ -45,6 +45,11 @@ async def get_klines(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架")
     try:
+        # TODO(RC-11): Python KLINE_MANAGER no longer receives ticks (Rust is sole tick processor).
+        # Returns empty/stale data. Needs Rust snapshot to include kline history,
+        # or Rust IPC command to fetch klines on demand.
+        # TODO(RC-11)：Python KLINE_MANAGER 不再接收 tick（Rust 為唯一 tick 處理器）。
+        # 返回空/過期數據。需要 Rust 快照包含 K 線歷史，或 Rust IPC 按需取 K 線。
         klines = KLINE_MANAGER.get_latest_klines(sym, timeframe, n=n)
         current = KLINE_MANAGER.get_current_bar(sym, timeframe)
         return _envelope({
@@ -77,20 +82,23 @@ async def get_indicators(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail="Invalid timeframe / 无效时间框架")
     try:
-        # IPC-03: Rust-first for 1m timeframe / 1m 時間框架優先讀 Rust
-        if timeframe == "1m":
-            reader = get_rust_reader()
-            if reader.is_available():
-                rust_ind = reader.get_indicators(sym)
-                if rust_ind:
-                    return _envelope({
-                        "symbol": sym,
-                        "timeframe": timeframe,
-                        "indicators": rust_ind,
-                        "indicator_count": len(rust_ind),
-                        "source": "rust_engine",
-                    })
-        # Fallback to Python IndicatorEngine / 降級到 Python 指標引擎
+        # RC-11: Rust-first for ALL timeframes — Rust is the sole tick processor,
+        # Python INDICATOR_ENGINE no longer receives ticks and returns stale/empty data.
+        # RC-11：所有時間框架都優先讀 Rust — Rust 是唯一 tick 處理器，
+        # Python INDICATOR_ENGINE 不再接收 tick，返回過期/空數據。
+        reader = get_rust_reader()
+        if reader.is_available():
+            rust_ind = reader.get_indicators(sym)
+            if rust_ind:
+                return _envelope({
+                    "symbol": sym,
+                    "timeframe": timeframe,
+                    "indicators": rust_ind,
+                    "indicator_count": len(rust_ind),
+                    "source": "rust_engine",
+                })
+        # Fallback to Python IndicatorEngine (stale data, for backward compat)
+        # 降級到 Python 指標引擎（過期數據，向後兼容）
         indicators = INDICATOR_ENGINE.get_indicators(sym, timeframe)
         return _envelope({
             "symbol": sym,
