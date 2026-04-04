@@ -249,58 +249,21 @@ class MarketDataDispatcher:
 
     def _trigger_tick(self, trigger_event: PriceEvent) -> None:
         """
-        Trigger a paper engine tick with all latest prices.
-        用所有最新价格触发纸上交易引擎 tick。
+        Record price snapshot and update tick timing.
+        记录价格快照并更新 tick 时间。
+
+        RC-11: Python engine.tick() DISABLED — Rust engine handles ALL tick processing
+        including order matching, stop checks, and PnL tracking.
+        Previously this method called self._engine.tick(market_prices) which duplicated
+        fill matching + stop-loss checks already performed by Rust tick_pipeline.
+        RC-11：Python engine.tick() 已禁用 — Rust 引擎处理所有 tick，
+        包括订单撮合、止损检查、PnL 追踪。此前此方法调用 engine.tick() 导致
+        与 Rust tick_pipeline 的成交撮合 + 止损检查重复。
         """
         now = time.monotonic()
-
-        # Collect all latest prices / 收集所有最新价格
-        market_prices = self._listener.get_all_latest_prices()
-
-        # Ensure the triggering event's price is included (freshest)
-        # 确保触发事件的价格被包含（最新的）
-        market_prices[trigger_event.symbol] = trigger_event.last_price
-
-        if not market_prices:
-            return
-
-        try:
-            result = self._engine.tick(market_prices)
-            self._last_tick_all = now
-            self._last_tick_time[trigger_event.symbol] = now
-            self._stats["ticks_triggered"] += 1
-
-            if result.get("orders_filled", 0) > 0:
-                logger.info(
-                    "Tick filled %d orders / Tick 成交 %d 笔订单 (trigger=%s@%.2f)",
-                    result["orders_filled"],
-                    result["orders_filled"],
-                    trigger_event.symbol,
-                    trigger_event.last_price,
-                )
-
-            # Fan-out to registered tick consumers / 分发到注册的 tick 消费者
-            for consumer in self._tick_consumers:
-                try:
-                    consumer.on_tick(trigger_event)
-                except Exception:
-                    logger.exception("Tick consumer error / tick 消费者异常: %s", type(consumer).__name__)
-
-            # Notify consumers of tick fills for E1/G1 hooks
-            # (covers positions closed via risk_auto_close, time stop, soft stop — paths
-            #  that bypass the submit_order() route and would otherwise miss observations)
-            # 通知消费者 tick 成交，覆盖 E1/G1 路径（risk_auto_close/时间止损/软止损）
-            if result.get("orders_filled", 0) > 0:
-                for consumer in self._tick_consumers:
-                    if hasattr(consumer, "on_tick_result"):
-                        try:
-                            consumer.on_tick_result(result)
-                        except Exception:
-                            logger.exception(
-                                "Tick consumer on_tick_result error: %s", type(consumer).__name__
-                            )
-        except Exception as e:
-            logger.error("Engine tick failed: %s", e)
+        self._last_tick_all = now
+        self._last_tick_time[trigger_event.symbol] = now
+        self._stats["ticks_triggered"] += 1
 
     # ── Attention Assessment / 注意力评估 ──
 

@@ -185,8 +185,12 @@ class TestGetIndicatorsRoute:
 
 
 class TestGetSignalsRoute:
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.SIGNAL_ENGINE")
-    def test_happy_path(self, mock_se):
+    def test_happy_path(self, mock_se, mock_rr):
+        # Mock Rust reader unavailable so Python fallback is tested
+        # Mock Rust reader 不可用，測試 Python 降級路徑
+        mock_rr.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_signals
         mock_se.get_latest_signals.return_value = [{"sig": "buy"}]
         result = _run(get_signals(symbol=None, n=10, actor=_FakeActor()))
@@ -274,15 +278,21 @@ class TestDeleteRoute:
 
 
 class TestGetStrategyStatusRoute:
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.ORCHESTRATOR")
-    def test_happy(self, mock_orch):
+    def test_happy(self, mock_orch, mock_rr):
+        # Mock Rust reader unavailable so Python fallback is tested
+        # Mock Rust reader 不可用，測試 Python 降級路徑
+        mock_rr.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_strategy_status
         mock_orch.get_strategy_status.return_value = {"name": "x", "state": "active"}
         result = _run(get_strategy_status("ma_crossover", actor=_FakeActor()))
         assert result["data"]["state"] == "active"
 
+    @patch(f"{_MOD_READ}.get_rust_reader")
     @patch(f"{_MOD_READ}.ORCHESTRATOR")
-    def test_not_found(self, mock_orch):
+    def test_not_found(self, mock_orch, mock_rr):
+        mock_rr.return_value.is_available.return_value = False
         from app.phase2_strategy_routes import get_strategy_status
         from fastapi import HTTPException
         mock_orch.get_strategy_status.return_value = None

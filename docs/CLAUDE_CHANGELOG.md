@@ -3,6 +3,13 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### RC-11 + 既有 Bug 修復 + Governance 清理（2026-04-04）
+
+- **RC-11**: 消除 Python/Rust 止損雙重執行 — `MarketDataDispatcher._trigger_tick()` 移除 `engine.tick()` 調用
+- **10 既有 Bug 修復**: 5 個 Rust-first 響應格式 + 5 個測試隔離汙染 → 3345 passed / 0 failed
+- **Governance 清理**: governance_hub.py 5 個死方法標記 DEPRECATED (RC-11)，bridge_core.py activate() 精簡
+- **分析**: governance_routes 遷移可行性（18/29 可 IPC relay），symbol/gate IPC 暴露風險評估
+
 ### Phase 0b 完成（2026-04-04）
 
 - 0b-06~08: 9 compression policies (7d/14d) + 15 retention policies (90d/180d/365d) + sync_commit 分層

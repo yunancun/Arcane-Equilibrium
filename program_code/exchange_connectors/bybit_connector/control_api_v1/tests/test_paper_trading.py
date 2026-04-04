@@ -579,6 +579,8 @@ class TestPaperTradingAPI:
 
     def test_session_lifecycle_via_api(self):
         client = build_api_client()
+        # Clean up any session left by prior tests / 清理前面測試留下的 session
+        client.post("/api/v1/paper/session/stop", headers=auth_headers())
         # Start
         r = client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         assert r.status_code == 200

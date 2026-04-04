@@ -455,8 +455,9 @@ class TestDispatcherIntegration:
 
         assert dispatcher._stats["ticks_triggered"] >= 1
 
-    def test_limit_order_filled_via_dispatch(self, active_engine):
-        """Limit order filled when price reaches limit via dispatcher / 分发器触发限价单成交"""
+    def test_rc11_dispatcher_does_not_match_orders(self, active_engine):
+        """RC-11: dispatcher no longer triggers engine.tick() — Rust handles order matching.
+        RC-11：分发器不再触发 engine.tick() — Rust 处理订单撮合。"""
         dispatcher = MarketDataDispatcher(engine=active_engine, symbols=["BTCUSDT"])
 
         # Submit buy limit at 86500
@@ -466,17 +467,18 @@ class TestDispatcherIntegration:
         )
         order_id = result["order"]["order_id"]
 
-        # Price drops well below limit (deep cross >0.5%) → guarantees full fill
-        # 价格深穿限价（>0.5%）→ 保证全部成交
-        deep_cross_price = 86500.0 * 0.994  # ~86000, >0.5% below limit
+        # Price drops well below limit — but dispatcher should NOT trigger fills
+        # 价格深穿限价 — 但分发器不应触发成交（RC-11）
+        deep_cross_price = 86500.0 * 0.994
         event = PriceEvent(symbol="BTCUSDT", last_price=deep_cross_price)
         dispatcher._on_price_event(event)
 
-        # Verify filled (deep cross ensures 100% fill)
+        # Order stays working — Rust engine owns tick matching, not Python dispatcher
+        # 订单保持 working — Rust 引擎负责 tick 撮合，非 Python 分发器
         orders = active_engine.get_orders()
-        filled = [o for o in orders if o["order_id"] == order_id]
-        assert len(filled) == 1
-        assert filled[0]["state"] == "paper_order_filled"
+        matched = [o for o in orders if o["order_id"] == order_id]
+        assert len(matched) == 1
+        assert matched[0]["state"] == "paper_order_working"
 
     def test_status_report(self, engine):
         """Dispatcher status includes all key fields / 状态报告包含所有关键字段"""
@@ -542,15 +544,23 @@ class TestMarketFeedAPIRoutes:
                 os.unlink(path)
 
     def test_market_feed_status_not_initialized(self, api_client):
-        """Status returns not-initialized when dispatcher is None / 未初始化时状态返回未初始化"""
-        client, token = api_client
-        resp = client.get(
-            "/api/v1/paper/market-feed/status",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["data"]["running"] is False
+        """Status returns valid response when dispatcher is None / 未初始化时状态返回有效响应"""
+        import app.paper_trading_routes as routes
+        # Force DISPATCHER to None after TestClient startup (which may re-init it)
+        # 在 TestClient 啟動後強制 DISPATCHER 為 None（啟動可能重新初始化）
+        saved = routes.DISPATCHER
+        routes.DISPATCHER = None
+        try:
+            client, token = api_client
+            resp = client.get(
+                "/api/v1/paper/market-feed/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["data"]["running"] is False
+        finally:
+            routes.DISPATCHER = saved
 
     def test_market_feed_stop_when_not_running(self, api_client):
         """Stop returns no_change when not running / 未运行时停止返回 no_change"""

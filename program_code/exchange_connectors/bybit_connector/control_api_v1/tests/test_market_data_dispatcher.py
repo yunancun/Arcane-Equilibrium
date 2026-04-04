@@ -135,7 +135,8 @@ class TestTickerDispatchCallbacks:
         assert consumer in dispatcher._tick_consumers
 
     def test_consumer_called_on_trigger(self):
-        """Fan-out: trigger_tick calls all registered consumers."""
+        """RC-11: trigger_tick no longer fans out to consumers (Rust handles ticks).
+        RC-11：trigger_tick 不再分發給消費者（Rust 處理 tick）。"""
         dispatcher, listener = _make_dispatcher()
         listener._latest_prices = {"BTCUSDT": 50000.0}
 
@@ -146,10 +147,13 @@ class TestTickerDispatchCallbacks:
         evt = _FakePriceEvent("BTCUSDT", 50000.0)
         dispatcher._trigger_tick(evt)
 
-        consumer.on_tick.assert_called_once_with(evt)
+        # RC-11: consumers no longer called — Rust engine owns tick processing
+        # RC-11：消費者不再被調用 — Rust 引擎負責 tick 處理
+        consumer.on_tick.assert_not_called()
 
     def test_consumer_exception_does_not_crash(self):
-        """If consumer.on_tick raises, dispatcher should not crash."""
+        """RC-11: trigger_tick is a no-op for consumers, no crash possible.
+        RC-11：trigger_tick 對消費者是空操作，不可能崩潰。"""
         dispatcher, listener = _make_dispatcher()
         listener._latest_prices = {"BTCUSDT": 50000.0}
 
@@ -158,11 +162,13 @@ class TestTickerDispatchCallbacks:
         dispatcher.register_tick_consumer(bad_consumer)
 
         evt = _FakePriceEvent("BTCUSDT", 50000.0)
-        # Should not raise
+        # Should not raise (and consumer is not called)
         dispatcher._trigger_tick(evt)
+        bad_consumer.on_tick.assert_not_called()
 
     def test_multiple_consumers(self):
-        """Multiple consumers all receive tick."""
+        """RC-11: Multiple consumers registered but not called (Rust handles ticks).
+        RC-11：多個消費者已註冊但不被調用（Rust 處理 tick）。"""
         dispatcher, listener = _make_dispatcher()
         listener._latest_prices = {"BTCUSDT": 50000.0}
 
@@ -174,8 +180,9 @@ class TestTickerDispatchCallbacks:
         evt = _FakePriceEvent("BTCUSDT", 50000.0)
         dispatcher._trigger_tick(evt)
 
+        # RC-11: consumers not called — tick fan-out disabled
         for c in consumers:
-            c.on_tick.assert_called_once()
+            c.on_tick.assert_not_called()
 
 
 # ═════════════════════════════════════════════════════════════════════════════

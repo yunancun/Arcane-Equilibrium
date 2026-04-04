@@ -41,10 +41,22 @@ Safety invariant:
   - All cross-SM calls wrapped in exception handlers; fail-safe
 """
 
-# DEPRECATED(R-07): Deterministic cascade logic migrated to Rust GovernanceCore.
+# PARTIALLY DEPRECATED (R-07 + RC-11):
+#   Deterministic cascade logic migrated to Rust GovernanceCore.
 #   Rust: openclaw_core/src/governance_core.rs (is_authorized, cascading all-or-nothing)
-#   Stays in Python: grant_paper_authorization, de_escalation, Telegram alerts, audit writes, 4 SM lifecycle
-#   DO NOT DELETE — 12+ importers depend on this module. Remove after R-07 grey-period.
+#
+#   STILL ACTIVE in Python (12+ importers):
+#     - grant_paper_authorization, de_escalation, reconcile
+#     - is_authorized (startup reauth), acquire/release_lease
+#     - get_status, get_governance_events, get_oms_orders
+#     - All set_*() dependency injection methods
+#
+#   DEPRECATED (RC-11, no callers):
+#     - check_learning_tier_capability, is_enabled, get_risk_level
+#     - check_risk_and_act, trigger_risk_upgrade
+#
+#   DO NOT DELETE — 12+ importers depend on this module.
+#   Future: 18/29 governance_routes endpoints can become IPC relay to Rust.
 
 from __future__ import annotations
 
@@ -277,6 +289,9 @@ class GovernanceHub:
 
     def check_learning_tier_capability(self, capability: str) -> bool:
         """
+        DEPRECATED (RC-11): No callers found. Rust GovernanceCore handles capability checks.
+        已棄用（RC-11）：無調用者。Rust GovernanceCore 處理能力檢查。
+
         T10.03: Check if the current learning tier permits a given capability.
         检查当前学习层级是否允许指定的能力。
 
@@ -330,8 +345,8 @@ class GovernanceHub:
 
     def is_enabled(self) -> bool:
         """
-        Check if governance hub is enabled (public API).
-        检查治理集线器是否启用（公共 API）。
+        DEPRECATED (RC-11): No external callers found. Use is_globally_enabled() instead.
+        已棄用（RC-11）：無外部調用者。請改用 is_globally_enabled()。
 
         Returns:
             True if governance is active; False if disabled
@@ -592,8 +607,10 @@ class GovernanceHub:
 
     def get_risk_level(self) -> Optional[int]:
         """
-        Current risk governor level (0=NORMAL ... 5=MANUAL_REVIEW).
-        当前风控等级（0=NORMAL ... 5=MANUAL_REVIEW）。
+        DEPRECATED (RC-11): No external callers. Rust GovernanceCore provides risk level
+        via IPC get_risk_check. Use get_status()["risk"] instead.
+        已棄用（RC-11）：無外部調用者。Rust GovernanceCore 通過 IPC get_risk_check 提供風控等級。
+        請改用 get_status()["risk"]。
 
         Returns:
             Risk level int or None if unavailable
@@ -613,8 +630,10 @@ class GovernanceHub:
 
     def check_risk_and_act(self, metrics: dict[str, Any]) -> Optional[int]:
         """
-        Feed risk metrics to governor, auto-escalate if thresholds met, restrict auth if needed.
-        向总督提供风险指标，如果超过阈值则自动升级，如果需要则限制授权。
+        DEPRECATED (RC-11): No callers found. Rust GovernanceCore handles risk cascade
+        via evaluate_and_cascade() on every tick. This Python method is dead code.
+        已棄用（RC-11）：無調用者。Rust GovernanceCore 在每個 tick 通過
+        evaluate_and_cascade() 處理風控級聯。此 Python 方法為死代碼。
 
         Args:
             metrics: Risk metrics dict (e.g., {'drawdown_pct': 5.2, 'daily_loss_pct': 3.1})
@@ -639,10 +658,10 @@ class GovernanceHub:
 
     def trigger_risk_upgrade(self, event_record: dict[str, Any]) -> None:
         """
-        Batch 8: Called by GuardianAgent when a high/critical event is detected.
-        Escalates the risk governor SM to the next level (SM-04 联动).
-        Batch 8：当 GuardianAgent 检测到高/严重事件时调用。
-        将风控状态机升级到下一级（SM-04 联动）。
+        DEPRECATED (RC-11): No callers found. Risk escalation is handled by Rust GovernanceCore
+        cascade (risk → auth restrict → auth freeze → lease revoke).
+        已棄用（RC-11）：無調用者。風控升級由 Rust GovernanceCore 級聯處理
+        （risk → auth restrict → auth freeze → lease revoke）。
 
         Args:
             event_record: Dict with event_type, risk_level, severity, affected_symbols etc.

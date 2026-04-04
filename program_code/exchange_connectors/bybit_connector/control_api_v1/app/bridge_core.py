@@ -264,24 +264,15 @@ class _BridgeCoreMixin:
                      symbol, category, symbol, category)
 
     def activate(self) -> None:
-        """DEPRECATED (IPC-04): No longer called in production (RC-10).
-        已棄用（IPC-04）：生產環境不再調用（RC-10）。
-        Activate the bridge and bootstrap historical data / 激活桥接器并引导历史数据"""
-        self._active = True
-        logger.info("PipelineBridge activated / 管线桥接器已激活")
+        """DEPRECATED (RC-10 + RC-11): No longer called in production.
+        已棄用（RC-10 + RC-11）：生產環境不再調用。
 
-        # Bootstrap in background thread to avoid blocking the async event loop.
-        # Previously this ran synchronously and blocked ALL API requests during startup
-        # (8-120+ HTTP calls to Bybit, each ~1-2s) — causing GUI freeze after restart.
-        # 在背景線程中引導，避免阻塞 async 事件循環。
-        # 之前同步執行會阻塞啟動時所有 API 請求（8-120+ 個 HTTP 調用）— 導致重啟後 GUI 卡死。
-        import threading
-        threading.Thread(
-            target=self._bootstrap_historical_data,
-            daemon=True,
-            name="bridge-bootstrap",
-        ).start()
-        logger.info("Kline+ATR bootstrap started in background / K線+ATR 引導已在背景啟動")
+        Rust engine handles kline bootstrap via its own WebSocket connection.
+        Rust 引擎通過自己的 WebSocket 連接處理 K 線引導。
+        """
+        self._active = True
+        logger.info("PipelineBridge activated (DEPRECATED — Rust engine handles ticks) / "
+                     "管线桥接器已激活（已棄用 — Rust 引擎處理 tick）")
 
     def _bootstrap_historical_data(self) -> None:
         """
@@ -346,13 +337,19 @@ class _BridgeCoreMixin:
 
     def on_tick(self, event: Any) -> None:
         """
-        DEPRECATED (IPC-04): Rust engine handles all tick processing.
-        已棄用（IPC-04）：Rust 引擎處理所有 tick。
+        DEPRECATED (RC-10 + RC-11): Never called in production — Rust engine handles ALL ticks.
+        已棄用（RC-10 + RC-11）：生產環境永不調用 — Rust 引擎處理所有 tick。
 
-        This method is never called in production (RC-10 removed all activate() calls).
-        Retained for backward compatibility with test mocks.
-        此方法在生產環境中永不被調用（RC-10 移除了所有 activate() 調用）。
-        保留為測試 mock 向後兼容。
+        RC-10: All activate() calls removed — self._active is always False in production.
+        RC-11: MarketDataDispatcher.engine.tick() also disabled — no Python tick path remains.
+        Rust tick_pipeline handles: kline aggregation, indicators, signals, strategies,
+        governance cascade, order matching, stop checks, PnL tracking.
+
+        RC-10：所有 activate() 調用已移除 — self._active 在生產中始終為 False。
+        RC-11：MarketDataDispatcher.engine.tick() 也已禁用 — 無 Python tick 路徑殘留。
+
+        Method body retained for test coverage (tests set _active=True explicitly).
+        方法體保留供測試覆蓋（測試顯式設置 _active=True）。
         """
         if not self._active:
             return
