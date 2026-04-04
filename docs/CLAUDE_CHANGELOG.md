@@ -3,6 +3,16 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-04
 
+### Phase 0b TimescaleDB 啟用（2026-04-04）
+
+- Docker image 切換：postgres:16 → timescale/timescaledb:latest-pg16 (v2.26.1)
+- shared_preload_libraries 配置 + CREATE EXTENSION timescaledb
+- 28 hypertables 啟用（11 market + 7 trading + 3 agent + 1 learning + 4 obs + 2 risk）
+- 修復 risk.black_swan_events PK (event_id) → (event_id, ts) 以支持 hypertable
+- 修復 V004 risk.correlation_pairs `window` SQL 保留字（加引號）
+- 15 張非時序表保持 regular（model_registry, symbol_clusters, bayesian_posteriors 等）
+- 舊 postgres:16 Docker image 已刪除
+
 ### Phase 0a DDL 執行（2026-04-04）
 
 - V001-V005 DDL 全部執行完成：8 schemas + 43 tables + 87 indexes + 11 Grafana VIEW bridges

@@ -165,12 +165,14 @@ SPEC 審查記錄：
 - [x] 0a-05~09：舊表 _legacy 重命名(11/14) + Grafana VIEW 橋接(11)
 - [x] 0a-10~14：43 tables across 8 schemas + 87 indexes
 - [x] 0a-15~16：scorer_training_features VIEW + all indexes
-- [ ] 0a-17~19：E2 審查 + E4 回歸 + CC/E3 安全
+- [x] 0a-17~19：E2 PASS + E4 4507 全綠 + CC/E3 PASS（8 schemas owned by trading_admin, 0 PUBLIC grants）
 
 ## ██ Phase 0b — TimescaleDB 啟用（W2-3，4/18-4/30）
 
-- [ ] 0b-01~02：Docker image 切換（postgres:16 → timescale/timescaledb:latest-pg16）
-- [ ] 0b-03~05：啟用 hypertable（market/trading/learning+obs+risk）
+- [x] 0b-01~02：Docker image 切換 postgres:16 → timescale/timescaledb:latest-pg16 (v2.26.1)，舊 image 已刪
+- [x] 0b-03~05：啟用 28 hypertables（11 market + 7 trading + 3 agent + 1 learning + 4 obs + 2 risk）
+      — 15 張非時序表保持 regular（model_registry, symbol_clusters 等）
+      — 修復 black_swan_events PK 加入 ts 列
 - [ ] 0b-06~08：壓縮 + retention + sync_commit 分層
 - [ ] 0b-09~11：grafana_data_writer 改寫 + Grafana datasource + 連續聚合
 - [ ] 0b-13~15：requirements-ml.txt + ML 降級策略 + OU Grid sqrt(2) 修正
