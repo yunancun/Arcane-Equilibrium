@@ -14,6 +14,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 mod client;
+mod market_data;
 mod orders;
 mod positions;
 
