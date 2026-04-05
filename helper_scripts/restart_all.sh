@@ -31,7 +31,16 @@ restart_api() {
     cd - > /dev/null
 }
 
+ensure_docker_network() {
+    # Ensure Grafana can reach PG (different Docker networks by default)
+    # 確保 Grafana 能訪問 PG（默認在不同 Docker 網絡）
+    if docker inspect trading_postgres >/dev/null 2>&1 && docker inspect trading_grafana >/dev/null 2>&1; then
+        docker network connect basic_system_services_default trading_postgres 2>/dev/null || true
+    fi
+}
+
 wait_and_verify() {
+    ensure_docker_network
     echo ">>> Waiting 10s for startup..."
     sleep 10
     echo "=== Engine ==="

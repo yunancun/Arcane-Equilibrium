@@ -805,10 +805,42 @@ async function loadAuditTrail() {
       const what = r.what || '--';
       const changeType = r.change_type || '--';
       const reason = r.reason || '--';
+      const whatCn = _translateWhat(what);
+      const guidance = _getApprovalGuidance(what);
+
       html += '<tr>';
       html += '<td style="font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</td>';
-      html += '<td>' + ocChip(ocEsc(who), 'neutral') + '</td>';
-      html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + ocEsc(what) + '">' + ocEsc(what) + '</td>';
+      html += '<td>' + ocChip(ocEsc(_translateWho(who)), 'neutral') + '</td>';
+
+      // What 列：翻译名 + 风险标签 + 可展开说明
+      // What column: translated name + risk badge + expandable explanation
+      html += '<td style="max-width:360px">';
+      html += '<div style="font-weight:600;font-size:12px">' + ocEsc(whatCn) + '</div>';
+      if (guidance) {
+        // 风险标签 / Risk badge
+        if (guidance.risk) {
+          let riskColor = 'var(--text-dim)';
+          if (guidance.risk === '高') riskColor = 'var(--red)';
+          else if (guidance.risk === '中' || guidance.risk === '中-高') riskColor = 'var(--yellow, #d29922)';
+          else if (guidance.risk === '低' || guidance.risk === '低-中') riskColor = 'var(--green)';
+          else if (guidance.risk === '无') riskColor = 'var(--text-dim)';
+          html += '<span style="display:inline-block;margin:2px 0;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;'
+            + 'background:' + riskColor + '22;color:' + riskColor + '">风险：' + ocEsc(guidance.risk) + '</span> ';
+        }
+        // 正式说明（始终可见）/ Formal detail (always visible)
+        if (guidance.detail) {
+          html += '<div style="font-size:10px;color:var(--text-dim);margin-top:2px;line-height:1.5">' + ocEsc(guidance.detail) + '</div>';
+        }
+        // 通俗解释（折叠）/ Plain-language explanation (collapsed)
+        if (guidance.explain) {
+          html += '<details style="margin-top:3px;font-size:10px"><summary style="cursor:pointer;color:var(--accent);user-select:none">'
+            + '详细说明</summary>'
+            + '<div style="margin-top:4px;padding:6px 8px;background:var(--card-bg);border:1px solid var(--border);border-radius:4px;color:var(--text);line-height:1.7;white-space:pre-line">'
+            + ocEsc(guidance.explain) + '</div></details>';
+        }
+      }
+      html += '</td>';
+
       html += '<td>' + ocChip(ocEsc(changeType), 'info') + '</td>';
       html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:11px" title="' + ocEsc(reason) + '">' + ocEsc(reason) + '</td>';
       html += '</tr>';
