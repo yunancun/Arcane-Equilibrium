@@ -167,7 +167,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                 let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
                 tokio::spawn(async move {
+                    let mut shadow_seq: u32 = 0;
                     while let Some(req) = shadow_rx.recv().await {
+                        // Skip zero-qty orders (instrument rounding reduced qty to 0)
+                        // 跳過零數量訂單（合約精度取整後數量為 0）
+                        if req.qty <= 0.0 {
+                            warn!(symbol = %req.symbol, "shadow order skipped: qty=0 / 影子訂單跳過：qty=0");
+                            continue;
+                        }
+                        shadow_seq = shadow_seq.wrapping_add(1);
                         let side = if req.is_long { OrderSide::Buy } else { OrderSide::Sell };
                         let create_req = CreateOrderRequest {
                             category: OrderCategory::Linear,
@@ -179,7 +187,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             time_in_force: None,
                             reduce_only: if req.is_close { Some(true) } else { None },
                             close_on_trigger: None,
-                            order_link_id: Some(format!("shadow_{}", req.paper_fill_ts)),
+                            order_link_id: Some(format!("sh_{}_{}", req.paper_fill_ts, shadow_seq)),
                             trigger_price: None,
                             trigger_direction: None,
                             take_profit: None,
@@ -357,6 +365,37 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         pipeline.paper_paused = false;
                         info!(balance = format!("{:.2}", new_balance), "IPC reset paper state / IPC 重置紙盤狀態");
                         snapshot_writer.force_write(&pipeline.snapshot());
+                    }
+                    // ── Phase 3b: Strategy parameter IPC commands / 策略參數 IPC 命令 ──
+                    Some(PaperSessionCommand::UpdateStrategyParams { strategy_name, params_json, response_tx }) => {
+                        let result = match pipeline.orchestrator.find_strategy_mut(&strategy_name) {
+                            Some(strategy) => {
+                                match strategy.update_params_json(&params_json) {
+                                    Ok(()) => {
+                                        info!(strategy = %strategy_name, "strategy params updated via IPC / 策略參數已通過 IPC 更新");
+                                        snapshot_writer.force_write(&pipeline.snapshot());
+                                        Ok(format!("params updated for {}", strategy_name))
+                                    }
+                                    Err(e) => Err(format!("validation failed: {e}"))
+                                }
+                            }
+                            None => Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    Some(PaperSessionCommand::GetStrategyParams { strategy_name, response_tx }) => {
+                        let result = match pipeline.orchestrator.find_strategy_mut(&strategy_name) {
+                            Some(strategy) => Ok(strategy.get_params_json()),
+                            None => Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    Some(PaperSessionCommand::GetParamRanges { strategy_name, response_tx }) => {
+                        let result = match pipeline.orchestrator.find_strategy_mut(&strategy_name) {
+                            Some(strategy) => Ok(strategy.param_ranges_json()),
+                            None => Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
                     }
                     None => {} // channel closed, ignore / 通道關閉，忽略
                 }
