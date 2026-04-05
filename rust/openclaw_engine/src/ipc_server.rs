@@ -107,6 +107,8 @@ impl JsonRpcResponse {
 // IPC Server / IPC 服務器
 // ---------------------------------------------------------------------------
 
+use crate::tick_pipeline::PaperSessionCommand;
+
 /// Unix domain socket IPC server.
 /// Unix 域套接字 IPC 服務器。
 pub struct IpcServer {
@@ -115,13 +117,21 @@ pub struct IpcServer {
     /// Data directory for reading pipeline snapshot files (R06-A).
     /// 數據目錄，用於讀取管線快照文件。
     data_dir: Arc<PathBuf>,
+    /// Paper session command sender — dispatches Pause/Resume/CloseAll/Reset to event consumer.
+    /// 紙盤 session 命令發送端 — 派發 Pause/Resume/CloseAll/Reset 到事件消費者。
+    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
 }
 
 impl IpcServer {
     /// Create a new IPC server instance.
     /// 創建新的 IPC 服務器實例。
-    pub fn new(config: Arc<ConfigManager>, cancel: CancellationToken, data_dir: impl Into<String>) -> Self {
-        Self { config, cancel, data_dir: Arc::new(PathBuf::from(data_dir.into())) }
+    pub fn new(
+        config: Arc<ConfigManager>,
+        cancel: CancellationToken,
+        data_dir: impl Into<String>,
+        paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    ) -> Self {
+        Self { config, cancel, data_dir: Arc::new(PathBuf::from(data_dir.into())), paper_cmd_tx }
     }
 
     /// Start listening. This function runs until cancellation.
@@ -166,8 +176,9 @@ impl IpcServer {
                             let config = Arc::clone(&self.config);
                             let cancel = self.cancel.clone();
                             let data_dir = Arc::clone(&self.data_dir);
+                            let cmd_tx = self.paper_cmd_tx.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx).await;
                             });
                         }
                         Err(e) => {
@@ -192,6 +203,7 @@ async fn handle_connection(
     config: Arc<ConfigManager>,
     cancel: CancellationToken,
     data_dir: Arc<PathBuf>,
+    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -208,7 +220,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir);
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx);
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -235,7 +247,12 @@ async fn handle_connection(
 
 /// Parse and dispatch a single JSON-RPC request line.
 /// 解析並分發單條 JSON-RPC 請求。
-fn dispatch_request(line: &str, config: &Arc<ConfigManager>, data_dir: &Arc<PathBuf>) -> JsonRpcResponse {
+fn dispatch_request(
+    line: &str,
+    config: &Arc<ConfigManager>,
+    data_dir: &Arc<PathBuf>,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
         Err(e) => {
@@ -270,6 +287,16 @@ fn dispatch_request(line: &str, config: &Arc<ConfigManager>, data_dir: &Arc<Path
         "get_paper_state" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.paper_state)),
         "get_latest_prices" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.latest_prices)),
         "get_tick_stats" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.stats)),
+        // ── Paper session control commands / 紙盤 session 控制命令 ──
+        "pause_paper" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Pause, "paused"),
+        "resume_paper" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Resume, "resumed"),
+        "close_all_positions" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::CloseAll, "close_all_sent"),
+        "reset_paper_state" => {
+            let balance = req.params.get("new_balance")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(10_000.0);
+            handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Reset { new_balance: balance }, "reset_sent")
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -281,6 +308,23 @@ fn dispatch_request(line: &str, config: &Arc<ConfigManager>, data_dir: &Arc<Path
 // ---------------------------------------------------------------------------
 // Method handlers / 方法處理器
 // ---------------------------------------------------------------------------
+
+/// Handle paper session command — send to event consumer via channel.
+/// 處理紙盤 session 命令 — 通過通道發送到事件消費者。
+fn handle_paper_cmd(
+    id: serde_json::Value,
+    tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    cmd: PaperSessionCommand,
+    result_key: &str,
+) -> JsonRpcResponse {
+    match tx {
+        Some(tx) => match tx.send(cmd) {
+            Ok(()) => JsonRpcResponse::success(id, serde_json::json!({ result_key: true })),
+            Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}")),
+        },
+        None => JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured"),
+    }
+}
 
 /// Handle ping → pong.
 /// 處理 ping → pong。
@@ -463,6 +507,7 @@ mod tests {
             recent_intents: vec![],
             recent_fills: vec![],
             klines: HashMap::new(),
+            paper_paused: false,
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();
@@ -474,7 +519,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none());
         assert_eq!(resp.result.unwrap(), serde_json::Value::String("pong".into()));
         assert_eq!(resp.id, serde_json::json!(1));
@@ -485,7 +530,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -497,7 +542,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -507,7 +552,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -517,7 +562,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -527,7 +572,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -537,7 +582,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "evaluate_strategy", "params": {"symbol": "BTCUSDT"}, "id": 6}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "stub");
@@ -549,7 +594,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_risk_check", "params": {"symbol": "ETHUSDT"}, "id": 7}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["passed"], true);
@@ -560,7 +605,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -599,7 +644,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_some(), "should error when snapshot file missing");
     }
 
@@ -608,7 +653,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -621,7 +666,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -633,7 +678,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd);
+        let resp = dispatch_request(req, &config, &dd, &None);
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);

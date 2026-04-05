@@ -14,7 +14,7 @@ use crate::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
 };
-use crate::tick_pipeline::TickPipeline;
+use crate::tick_pipeline::{PaperSessionCommand, TickPipeline};
 use openclaw_types::PriceEvent;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -45,6 +45,15 @@ pub struct EventConsumerDeps {
     pub shared_client: Option<Arc<BybitRestClient>>,
     pub bybit_balance: Option<Arc<std::sync::RwLock<Option<f64>>>>,
     pub api_pnl: Option<Arc<std::sync::RwLock<HashMap<String, f64>>>>,
+    /// Paper session command receiver — IPC sends Pause/Resume/CloseAll/Reset.
+    /// 紙盤 session 命令接收端 — IPC 發送 Pause/Resume/CloseAll/Reset。
+    pub paper_cmd_rx: Option<mpsc::UnboundedReceiver<PaperSessionCommand>>,
+    /// Phase 1: Channel to dispatch market data to async PG writer.
+    /// Phase 1：市場數據派發通道。
+    pub market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,
+    /// Phase 1: Channel to dispatch feature snapshots to async PG writer.
+    /// Phase 1：特徵快照派發通道。
+    pub feature_tx: Option<tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>>,
 }
 
 /// Run the event consumer loop: build pipeline, register strategies, process ticks.
@@ -61,7 +70,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         shared_client,
         bybit_balance: shared_bybit_balance,
         api_pnl: shared_api_pnl,
+        paper_cmd_rx,
+        market_data_tx,
+        feature_tx,
     } = deps;
+    let mut paper_cmd_rx = paper_cmd_rx;
 
     let cfg_snapshot = config.get();
 
@@ -79,6 +92,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     if let Some(ref icache) = shared_instruments {
         pipeline.set_instrument_cache(Arc::clone(icache));
         info!("pipeline using instrument cache for precision rounding / 管線使用合約信息緩存進行精度取整");
+    }
+
+    // Phase 1: Wire market data + feature channels into pipeline
+    // Phase 1：將市場數據 + 特徵通道接入管線
+    if let Some(tx) = market_data_tx {
+        pipeline.set_market_data_channel(tx);
+        info!("pipeline market_data channel wired / 管線市場數據通道已接入");
+    }
+    if let Some(tx) = feature_tx {
+        pipeline.set_feature_channel(tx);
+        info!("pipeline feature channel wired / 管線特徵通道已接入");
     }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
@@ -285,6 +309,39 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
+
+            // ── Paper session commands from IPC / 來自 IPC 的紙盤 session 命令 ──
+            cmd = async {
+                if let Some(ref mut rx) = paper_cmd_rx { rx.recv().await } else { std::future::pending().await }
+            } => {
+                match cmd {
+                    Some(PaperSessionCommand::Pause) => {
+                        pipeline.paper_paused = true;
+                        info!("paper trading PAUSED via IPC / 紙盤交易已通過 IPC 暫停");
+                        // Force snapshot so GUI sees paused state immediately
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
+                    Some(PaperSessionCommand::Resume) => {
+                        pipeline.paper_paused = false;
+                        info!("paper trading RESUMED via IPC / 紙盤交易已通過 IPC 恢復");
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
+                    Some(PaperSessionCommand::CloseAll) => {
+                        let closed = pipeline.paper_state.close_all_positions();
+                        info!(closed = closed, "IPC close_all_positions / IPC 全部平倉");
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
+                    Some(PaperSessionCommand::Reset { new_balance }) => {
+                        pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
+                        pipeline.stats = crate::tick_pipeline::TickStats::default();
+                        pipeline.paper_paused = false;
+                        info!(balance = format!("{:.2}", new_balance), "IPC reset paper state / IPC 重置紙盤狀態");
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
+                    None => {} // channel closed, ignore / 通道關閉，忽略
+                }
+            },
+
             event = event_rx.recv() => {
                 match event {
                     Some(ev) => {

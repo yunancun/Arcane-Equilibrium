@@ -147,6 +147,12 @@ pub struct RuntimeConfig {
     /// 啟動時啟用 K 線引導（通過 REST 為每個幣種獲取 200 根 1 分鐘歷史 K 線）。
     #[serde(default = "default_true")]
     pub kline_bootstrap: bool,
+
+    // -- Phase 1: Database configuration / 資料庫配置 --
+    /// Database configuration section (Phase 1).
+    /// 資料庫配置段。
+    #[serde(default)]
+    pub database: crate::database::DatabaseConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +238,7 @@ impl Default for RuntimeConfig {
             enable_extended_ws: default_true(),
             shadow_orders: false,
             kline_bootstrap: default_true(),
+            database: crate::database::DatabaseConfig::default(),
         }
     }
 }
