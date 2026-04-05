@@ -420,6 +420,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut pending_orders: HashMap<String, PendingOrder> = HashMap::new();
     // P0-1 fix: order_id → order_link_id mapping (populated from OrderUpdate, used in Fill matching)
     let mut order_id_to_link: HashMap<String, String> = HashMap::new();
+    // P0-2 fix: exec_id dedup set (prevent duplicate fill application on WS reconnect)
+    // P0-2 修復：exec_id 去重集合（防止 WS 重連時重複應用成交）
+    let mut seen_exec_ids: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    const MAX_SEEN_EXEC_IDS: usize = 500;
     let mut exchange_event_rx = _exchange_event_rx_field;
     let mut pending_reg_rx = pending_reg_rx_slot;
     let mut last_pending_check = Instant::now();
@@ -437,9 +441,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             } => {
                 match exchange_evt {
                     Some(ExchangeEvent::Fill(exec)) => {
-                        // Match fill against pending orders by order_link_id (via order_id match)
-                        // Bybit fast-execution topic includes order_id but not always order_link_id
-                        // We match using the order_link_id from the OrderUpdate path
+                        // P0-2: Dedup by exec_id (prevent duplicate fill on WS reconnect)
+                        if seen_exec_ids.iter().any(|id| id == &exec.exec_id) {
+                            warn!(exec_id = %exec.exec_id, "duplicate fill skipped / 重複成交已跳過");
+                            continue;
+                        }
+                        seen_exec_ids.push_back(exec.exec_id.clone());
+                        if seen_exec_ids.len() > MAX_SEEN_EXEC_IDS {
+                            seen_exec_ids.pop_front();
+                        }
+
                         let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
                         let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
                         let exec_fee: f64 = exec.exec_fee.parse().unwrap_or(0.0);
@@ -510,6 +521,19 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     "pending order status update / 待處理訂單狀態更新"
                                 );
                                 if status == "Cancelled" || status == "Rejected" || status == "Deactivated" {
+                                    // P0-4: If this was a close order, clear pending_close flag
+                                    // P0-4：如果是平倉訂單，清除待處理平倉標記
+                                    if let Some(po) = pending_orders.get(&order.order_link_id) {
+                                        if po.is_close {
+                                            pipeline.clear_pending_close(&po.symbol);
+                                            warn!(
+                                                order_link_id = %order.order_link_id,
+                                                symbol = %po.symbol,
+                                                "close order {} — clearing pending_close / 平倉訂單{} — 清除待處理平倉",
+                                                status, status,
+                                            );
+                                        }
+                                    }
                                     warn!(
                                         order_link_id = %order.order_link_id,
                                         status = %status,
@@ -522,7 +546,6 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     }
                     Some(ExchangeEvent::DcpTriggered) => {
                         // DCP: Exchange auto-cancelled all orders
-                        // Clear pending orders — they've been cancelled by the exchange
                         let count = pending_orders.len();
                         if count > 0 {
                             warn!(
@@ -532,7 +555,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             );
                             pending_orders.clear();
                         }
-                        warn!("DCP triggered — exchange may have cancelled active orders / DCP 觸發，交易所可能已取消活躍訂單");
+                        // Also clear pending_close flags since DCP cancelled close orders too
+                        pipeline.clear_all_pending_close();
+                        warn!("DCP triggered — exchange cancelled active orders, pending_close cleared");
                     }
                     Some(ExchangeEvent::Disconnected) => {
                         // Private WS disconnected — pending orders may be in unknown state
@@ -588,6 +613,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
                         pipeline.stats = crate::tick_pipeline::TickStats::default();
                         pipeline.paper_paused = false;
+                        // P2-4 fix: Clear pending_close_symbols on reset
+                        pipeline.clear_all_pending_close();
+                        pending_orders.clear();
                         info!(balance = format!("{:.2}", new_balance), "IPC reset paper state / IPC 重置紙盤狀態");
                         snapshot_writer.force_write(&pipeline.snapshot());
                     }
@@ -674,6 +702,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             if let Ok(guard) = bal_arc.read() {
                                 if let Some(bal) = *guard {
                                     pipeline.paper_state.set_bybit_sync_balance(Some(bal));
+                                    // P0-5: In exchange mode, reconcile local balance from exchange
+                                    // P0-5：交易所模式下，從交易所餘額對賬本地餘額
+                                    if is_exchange_mode {
+                                        if let Some(old_bal) = pipeline.paper_state.reconcile_balance_from_exchange(bal) {
+                                            warn!(
+                                                old = format!("{:.2}", old_bal),
+                                                new = format!("{:.2}", bal),
+                                                "balance reconciled from exchange / 餘額已從交易所對賬"
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -721,9 +760,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             }
                             // P1-1: Remove orders that exceeded hard timeout / 移除超過硬超時的訂單
                             pending_orders.retain(|_, po| now_ms.saturating_sub(po.sent_ts_ms) <= 60_000);
-                            // Clean up stale order_id mappings (keep max 100)
-                            if order_id_to_link.len() > 100 {
-                                order_id_to_link.clear();
+                            // Clean stale order_id mappings: only keep those with active pending orders
+                            // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
+                            if order_id_to_link.len() > 50 {
+                                let active_links: std::collections::HashSet<&String> =
+                                    pending_orders.keys().collect();
+                                order_id_to_link.retain(|_, link| active_links.contains(link));
                             }
                             last_pending_check = Instant::now();
                         }

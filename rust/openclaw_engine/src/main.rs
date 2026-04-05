@@ -615,6 +615,17 @@ async fn async_main(config: Arc<ConfigManager>) {
             let _ = order_tx.send(ExchangeEvent::OrderUpdate(order));
         });
 
+        // P0-3: Wire DCP/Disconnected events to event consumer
+        // P0-3：將 DCP/斷連事件接入事件消費者
+        let dcp_tx = exchange_event_tx.clone();
+        listener.set_on_dcp(move || {
+            let _ = dcp_tx.send(ExchangeEvent::DcpTriggered);
+        });
+        let disc_tx = exchange_event_tx;
+        listener.set_on_disconnect(move || {
+            let _ = disc_tx.send(ExchangeEvent::Disconnected);
+        });
+
         // Spawn listener task / 啟動監聽器任務
         let listener_handle = tokio::spawn(async move {
             let mut listener = listener;

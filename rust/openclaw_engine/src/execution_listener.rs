@@ -101,6 +101,10 @@ pub struct ExecutionListener {
     on_position_update: Option<Box<dyn Fn(PositionUpdate) + Send>>,
     /// Callback for balance/wallet updates / 餘額/錢包更新回調
     on_balance_update: Option<Box<dyn Fn(WalletUpdate) + Send>>,
+    /// EXT-1: Callback for DCP triggered / DCP 觸發回調
+    on_dcp: Option<Box<dyn Fn() + Send>>,
+    /// EXT-1: Callback for WS disconnect / WS 斷連回調
+    on_disconnect: Option<Box<dyn Fn() + Send>>,
     /// Aggregate stats (Arc for shared access) / 彙總統計（Arc 共享存取）
     stats: Arc<AtomicStats>,
 }
@@ -115,6 +119,8 @@ impl ExecutionListener {
             on_order_update: None,
             on_position_update: None,
             on_balance_update: None,
+            on_dcp: None,
+            on_disconnect: None,
             stats: Arc::new(AtomicStats::default()),
         }
     }
@@ -141,6 +147,18 @@ impl ExecutionListener {
     /// 註冊餘額/錢包更新的回調。
     pub fn set_on_balance_update(&mut self, f: impl Fn(WalletUpdate) + Send + 'static) {
         self.on_balance_update = Some(Box::new(f));
+    }
+
+    /// EXT-1: Register callback for DCP triggered events.
+    /// EXT-1：註冊 DCP 觸發事件的回調。
+    pub fn set_on_dcp(&mut self, f: impl Fn() + Send + 'static) {
+        self.on_dcp = Some(Box::new(f));
+    }
+
+    /// EXT-1: Register callback for WS disconnect events.
+    /// EXT-1：註冊 WS 斷連事件的回調。
+    pub fn set_on_disconnect(&mut self, f: impl Fn() + Send + 'static) {
+        self.on_disconnect = Some(Box::new(f));
     }
 
     /// Get a snapshot of current aggregate statistics.
@@ -218,14 +236,17 @@ impl ExecutionListener {
                     warn!(reason = %reason, "Auth failed event received / 收到認證失敗事件");
                 }
                 PrivateWsEvent::DcpTriggered => {
-                    // DCP fired: Bybit cancelled open orders due to prior disconnect.
-                    // Not a new disconnect — the WS is alive. Log for audit trail.
-                    // DCP 觸發：Bybit 因之前的斷連取消了訂單。非新斷連。
                     warn!("DCP triggered — open orders may have been cancelled / DCP 觸發 — 掛單可能已被取消");
+                    if let Some(ref cb) = self.on_dcp {
+                        cb();
+                    }
                 }
                 PrivateWsEvent::Disconnected => {
                     self.stats.total_disconnects.fetch_add(1, Ordering::Relaxed);
                     info!("Disconnect event received / 收到斷線事件");
+                    if let Some(ref cb) = self.on_disconnect {
+                        cb();
+                    }
                 }
             }
         }
