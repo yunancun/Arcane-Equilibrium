@@ -6,8 +6,10 @@
 
 use openclaw_core::{
     governance_core::GovernanceCore,
+    h0_gate::H0Gate,
     indicators::{IndicatorEngine, IndicatorSnapshot},
     klines::KlineManager,
+    risk::{check_position_on_tick, PriceHistoryTracker, RiskAction},
     signals::{IndicatorInput, Signal, SignalEngine},
 };
 use openclaw_types::PriceEvent;
@@ -72,6 +74,8 @@ pub enum PaperSessionCommand {
         max_same_direction_positions: Option<usize>,
         // IntentProcessor fields / 意圖處理器配置
         p1_risk_pct: Option<f64>,
+        // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
+        h0_shadow_mode: Option<bool>,
     },
 }
 
@@ -201,6 +205,18 @@ pub struct TickPipeline {
     /// EXT-1: Symbols with pending close orders (prevent duplicate stop-close in exchange mode).
     /// EXT-1：有待處理平倉訂單的交易對（防止交易所模式下重複止損平倉）。
     pending_close_symbols: std::collections::HashSet<String>,
+    /// RRC-1-A1: H0 Gate — pre-strategy health/risk/freshness gate (shadow mode by default).
+    /// RRC-1-A1：H0 門控 — 策略前的健康/風控/新鮮度檢查（默認影子模式）。
+    pub h0_gate: H0Gate,
+    /// RRC-1-C1: Price history tracker for ATR computation + spike detection.
+    /// RRC-1-C1：價格歷史追蹤器，用於 ATR 計算 + 尖峰偵測。
+    price_tracker: PriceHistoryTracker,
+    /// RRC-1-C3: Per-symbol consecutive loss counter (reset on win).
+    /// RRC-1-C3：每交易對連續虧損計數器（盈利時重置）。
+    consecutive_losses: HashMap<String, u32>,
+    /// RRC-1-C4: Session halted flag — set by HaltSession risk action, cleared by IPC Resume.
+    /// RRC-1-C4：會話暫停標誌 — 由 HaltSession 風控動作設置，由 IPC Resume 清除。
+    session_halted: bool,
 }
 
 impl TickPipeline {
@@ -246,6 +262,13 @@ impl TickPipeline {
             trading_mode: crate::config::TradingMode::PaperOnly,
             exchange_seq: 0,
             pending_close_symbols: std::collections::HashSet::new(),
+            h0_gate: H0Gate::new(Some(openclaw_types::H0GateConfig {
+                shadow_mode: true, // RRC-1-A3: observe-only until proven stable
+                ..Default::default()
+            })),
+            price_tracker: PriceHistoryTracker::new(),
+            consecutive_losses: HashMap::new(),
+            session_halted: false,
         }
     }
 
@@ -327,6 +350,14 @@ impl TickPipeline {
         self.stats.last_tick_ms = event.ts_ms;
         self.latest_prices.insert(event.symbol.clone(), event.last_price);
         self.paper_state.set_latest_price(&event.symbol, event.last_price);
+        // RRC-1-B2: Reset daily start balance at UTC midnight for daily loss tracking.
+        // RRC-1-B2：UTC 午夜重置每日起始餘額，用於日損追蹤。
+        self.intent_processor.maybe_reset_daily_balance(
+            self.paper_state.balance(), event.ts_ms,
+        );
+        // RRC-1-C1: Feed price to tracker for ATR computation + spike detection.
+        // RRC-1-C1：餵入價格到追蹤器，用於 ATR 計算 + 尖峰偵測。
+        self.price_tracker.record(&event.symbol, event.last_price, event.ts_ms);
         // Update per-symbol turnover for dynamic slippage (from ticker events)
         // 更新每交易對成交額用於動態滑點（來自 ticker 事件）
         if event.turnover_24h > 0.0 {
@@ -393,6 +424,26 @@ impl TickPipeline {
             return self.maybe_canary_record(event, None, vec![], vec![], tick_duration_us);
         }
 
+        // Step 0.5: H0 Gate pre-check (shadow mode: observe only) / H0 門控前置檢查
+        self.h0_gate.update_price_ts(&event.symbol, event.ts_ms);
+        let h0_result = self.h0_gate.check(&event.symbol, "linear", event.ts_ms);
+        let h0_allowed = h0_result.allowed;
+        if !h0_result.allowed {
+            // Hard block: stops only / 硬阻斷：僅處理止損
+            warn!(symbol = %event.symbol, reason = %h0_result.reason,
+                "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
+            for (sym, _) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
+                self.paper_state.close_position(sym, event.last_price, event.ts_ms);
+                self.stats.total_stops += 1;
+            }
+            let dur = tick_start.elapsed().as_micros() as u64;
+            return self.maybe_canary_record(event, None, vec![], vec![], dur);
+        }
+        if !h0_result.reason.is_empty() {
+            debug!(symbol = %event.symbol, reason = %h0_result.reason,
+                "H0 shadow would-block / H0 影子模式本應阻斷");
+        }
+
         // Step 1: Kline aggregation — collect closed bars for DB write.
         // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
         let closed_bars = self.kline_manager.on_tick(
@@ -442,27 +493,14 @@ impl TickPipeline {
         // ── Pause gate: skip signal evaluation + strategy dispatch when paused ──
         // 暫停門控：暫停時跳過信號評估+策略分派（價格/指標/止損繼續）
         if self.paper_paused {
-            // Still check stops for existing positions (protective)
-            // 仍然檢查現有持倉的止損（保護性）
-            let triggers = self.paper_state.check_stops(event.last_price, event.ts_ms);
-            for (symbol, trigger) in &triggers {
-                let pos_info = self.paper_state.get_position(symbol).map(|p| (p.is_long, p.qty));
-                debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered (paused)");
-                self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
+            // Protective stops while paused / 暫停時的保護性止損
+            for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
+                let pos_info = self.paper_state.get_position(sym).map(|p| (p.is_long, p.qty));
+                debug!(symbol = %sym, reason = %trigger.reason, "stop (paused)");
+                self.paper_state.close_position(sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
-                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
-                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let _ = tx.send(ShadowOrderRequest {
-                        symbol: symbol.clone(),
-                        is_long: !is_long,
-                        qty,
-                        price: event.last_price,
-                        strategy: "stop".into(),
-                        paper_fill_ts: event.ts_ms,
-                        is_close: true,
-                        order_link_id: format!("sh_paused_{}_{}", event.ts_ms, self.exchange_seq),
-                        is_primary: false,
-                    });
+                if let Some((is_long, qty)) = pos_info {
+                    self.dispatch_close_order(sym, is_long, qty, event, false);
                 }
             }
             let tick_duration_us = tick_start.elapsed().as_micros() as u64;
@@ -536,7 +574,7 @@ impl TickPipeline {
             timestamp_ms: event.ts_ms,
             indicators: indicators.clone(),
             signals: signals.clone(),
-            h0_allowed: true, // simplified — full H0 gate check in intent_processor
+            h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
         };
 
         // NOTE: Current rejection rollback assumes each strategy emits at most 1 intent per tick.
@@ -660,6 +698,21 @@ impl TickPipeline {
                                 if let Some(spec) = icache.get(&intent.symbol) {
                                     fill.fill_qty = spec.round_qty(fill.fill_qty);
                                     fill.fill_price = spec.round_price(fill.fill_price);
+                                    // Paper min-qty fallback: if rounding reduced to 0, use min_qty
+                                    // so high-priced assets (BTC/ETH) can still accumulate fill data.
+                                    // Guard: min_qty notional must not exceed 10% of balance.
+                                    // Paper 最小手數後備：取整為 0 時使用 min_qty，
+                                    // 讓高價資產（BTC/ETH）仍能積累成交數據。
+                                    // 防護：min_qty 名義值不得超過餘額的 10%。
+                                    if fill.fill_qty <= 0.0 && spec.min_qty > 0.0 {
+                                        let notional = spec.min_qty * fill.fill_price;
+                                        let balance = self.paper_state.balance();
+                                        if notional <= balance * 0.10 {
+                                            info!(symbol = %intent.symbol, min_qty = spec.min_qty,
+                                                  "paper fill: qty rounded to 0, using min_qty fallback / 數量取整為 0，使用最小手數");
+                                            fill.fill_qty = spec.min_qty;
+                                        }
+                                    }
                                 }
                             }
                             // Guard: skip zero-qty fills (instrument rounding can reduce to 0)
@@ -747,52 +800,87 @@ impl TickPipeline {
             intents.extend(strategy_intents);
         }
 
-        // Step 6: Check stops
-        // Exchange mode: send close order to exchange; paper_only: close locally + shadow
-        let triggers = self.paper_state.check_stops(event.last_price, event.ts_ms);
-        for (symbol, trigger) in &triggers {
-            let pos_info = self.paper_state.get_position(symbol).map(|p| (p.is_long, p.qty));
-            if is_exchange_mode {
-                // P0-3 fix: Skip if we already have a pending close for this symbol
-                // P0-3 修復：如果此交易對已有待處理平倉訂單則跳過
-                if self.pending_close_symbols.contains(symbol) {
-                    continue;
+        // Step 6: Position risk checks — 9-check (RRC-1-C2, replaces basic check_stops).
+        // 步驟 6：持倉風控 9 項檢查（RRC-1-C2，替代基本止損）。
+        self.paper_state.update_best_prices();
+        let session_drawdown = self.paper_state.drawdown_pct();
+        let daily_loss = self.intent_processor.daily_loss_pct_pub(self.paper_state.balance());
+        let risk_config = self.intent_processor.risk_config().clone();
+        let positions: Vec<(String, bool, f64, f64, f64, u64)> = self.paper_state.positions()
+            .iter()
+            .map(|p| {
+                let price = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
+                let pnl_pct = if p.is_long {
+                    (price - p.entry_price) / p.entry_price * 100.0
+                } else {
+                    (p.entry_price - price) / p.entry_price * 100.0
+                };
+                let peak_pnl_pct = if p.is_long {
+                    (p.best_price - p.entry_price) / p.entry_price * 100.0
+                } else {
+                    (p.entry_price - p.best_price) / p.entry_price * 100.0
+                };
+                (p.symbol.clone(), p.is_long, p.qty, pnl_pct, peak_pnl_pct, p.entry_ts_ms)
+            })
+            .collect();
+
+        for (symbol, is_long, qty, pnl_pct, peak_pnl_pct, entry_ts_ms) in &positions {
+            let holding_hours = (event.ts_ms.saturating_sub(*entry_ts_ms)) as f64 / 3_600_000.0;
+            let atr_pct = self.price_tracker.compute_atr_pct(symbol);
+            let consec = self.consecutive_losses.get(symbol).copied().unwrap_or(0);
+            let action = check_position_on_tick(
+                *pnl_pct, *peak_pnl_pct, holding_hours,
+                0.0,       // cost_ratio — placeholder, Phase D wiring
+                "ranging", // regime — placeholder, Phase D wiring
+                atr_pct, symbol, *entry_ts_ms, consec,
+                daily_loss, session_drawdown, &risk_config,
+            );
+            match action {
+                RiskAction::Hold => {} // no action / 無動作
+                RiskAction::ClosePosition(reason) => {
+                    if is_exchange_mode {
+                        if self.pending_close_symbols.contains(symbol) { continue; }
+                        warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
+                        self.dispatch_close_order(symbol, *is_long, *qty, event, true);
+                    } else {
+                        debug!(symbol = %symbol, reason = %reason, "risk close / 風控平倉");
+                        if *pnl_pct < 0.0 {
+                            *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
+                        } else {
+                            self.consecutive_losses.remove(symbol);
+                        }
+                        self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
+                        self.stats.total_stops += 1;
+                        self.dispatch_close_order(symbol, *is_long, *qty, event, false);
+                    }
                 }
-                // Exchange mode: send close order, don't close locally until confirmed
-                warn!(symbol = %symbol, reason = %trigger.reason,
-                    "stop triggered in exchange mode — sending close order");
-                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
-                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let _ = tx.send(ShadowOrderRequest {
-                        symbol: symbol.clone(),
-                        is_long: !is_long,
-                        qty,
-                        price: event.last_price,
-                        strategy: "stop".into(),
-                        paper_fill_ts: event.ts_ms,
-                        is_close: true,
-                        order_link_id: format!("oc_stop_{}_{}", event.ts_ms, self.exchange_seq),
-                        is_primary: true,
-                    });
-                    self.pending_close_symbols.insert(symbol.clone());
+                RiskAction::HaltSession(reason) => {
+                    // RRC-1-C4: Circuit breaker — halt + close all / 熔斷 — 暫停+全部平倉
+                    warn!(reason = %reason, "SESSION HALTED / 會話暫停");
+                    self.session_halted = true;
+                    self.paper_paused = true;
+                    let all_pos: Vec<(String, bool, f64)> = self.paper_state.positions().iter()
+                        .map(|p| (p.symbol.clone(), p.is_long, p.qty)).collect();
+                    for (sym, il, q) in &all_pos {
+                        let px = self.latest_prices.get(sym).copied().unwrap_or(event.last_price);
+                        self.paper_state.close_position(sym, px, event.ts_ms);
+                        self.stats.total_stops += 1;
+                        self.dispatch_close_order(sym, *il, *q, event, is_exchange_mode);
+                    }
+                    break;
                 }
-            } else {
-                // Paper_only mode: close locally + shadow
-                debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered");
-                self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
-                self.stats.total_stops += 1;
-                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
-                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                    let _ = tx.send(ShadowOrderRequest {
-                        symbol: symbol.clone(),
-                        is_long: !is_long,
-                        qty,
-                        price: event.last_price,
-                        strategy: "stop".into(),
-                        paper_fill_ts: event.ts_ms,
-                        is_close: true,
-                        order_link_id: format!("sh_{}_{}", event.ts_ms, self.exchange_seq),
-                        is_primary: false,
+                RiskAction::SetCooldown(ms) => {
+                    // RRC-1-C4: Set cooldown on H0Gate to suppress new orders.
+                    // RRC-1-C4：在 H0 門控設置冷卻期，抑制新訂單。
+                    let until_ms = event.ts_ms + ms;
+                    info!(cooldown_ms = ms, symbol = %symbol,
+                        "cooldown set by risk check / 風控設置冷卻期");
+                    self.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
+                        open_position_count: self.paper_state.positions().len() as u32,
+                        total_exposure_pct: 0.0, // recalculated next status interval
+                        cooldown_until_ts_ms: until_ms,
+                        kill_switch_active: false,
+                        snapshot_ts_ms: event.ts_ms,
                     });
                 }
             }
@@ -860,6 +948,32 @@ impl TickPipeline {
         );
     }
 
+    /// RRC-1-C2: Dispatch a close order via shadow/exchange channel.
+    /// RRC-1-C2：通過影子/交易所通道派發平倉訂單。
+    fn dispatch_close_order(
+        &mut self, symbol: &str, is_long: bool, qty: f64,
+        event: &PriceEvent, is_primary: bool,
+    ) {
+        if let Some(ref tx) = self.shadow_order_tx {
+            self.exchange_seq = self.exchange_seq.wrapping_add(1);
+            let prefix = if is_primary { "oc_risk" } else { "sh_risk" };
+            let _ = tx.send(ShadowOrderRequest {
+                symbol: symbol.to_string(),
+                is_long: !is_long,
+                qty,
+                price: event.last_price,
+                strategy: "risk_check".into(),
+                paper_fill_ts: event.ts_ms,
+                is_close: true,
+                order_link_id: format!("{}_{}_{}", prefix, event.ts_ms, self.exchange_seq),
+                is_primary,
+            });
+            if is_primary {
+                self.pending_close_symbols.insert(symbol.to_string());
+            }
+        }
+    }
+
     /// Build a canary record if canary_mode is enabled (R07-2).
     /// 灰度模式啟用時構建灰度記錄。
     fn maybe_canary_record(
@@ -909,21 +1023,14 @@ impl TickPipeline {
         }
     }
 
-    /// Create a full snapshot for IPC / persistence (R06-A).
-    /// 創建完整快照供 IPC / 持久化使用。
+    /// Create full IPC snapshot / 創建完整 IPC 快照（R06-A）
     pub fn snapshot(&self) -> PipelineSnapshot {
-        // Collect strategy info from orchestrator / 從調度器收集策略信息
         let strategies: Vec<StrategyInfo> = self.orchestrator.strategy_infos();
-
-        // Collect latest klines per symbol (1m only, up to 100 bars)
-        // 收集每交易對最新 K 線（僅 1m，最多 100 根）
         let mut klines: HashMap<String, Vec<openclaw_core::klines::KlineBar>> = HashMap::new();
-        for symbol in self.kline_manager.symbols() {
-            if let Some(buf) = self.kline_manager.get_buffer(symbol, "1m") {
+        for sym in self.kline_manager.symbols() {
+            if let Some(buf) = self.kline_manager.get_buffer(sym, "1m") {
                 let bars = buf.latest_cloned(100);
-                if !bars.is_empty() {
-                    klines.insert(symbol.clone(), bars);
-                }
+                if !bars.is_empty() { klines.insert(sym.clone(), bars); }
             }
         }
 
@@ -940,6 +1047,14 @@ impl TickPipeline {
             recent_intents: self.recent_intents.iter().cloned().collect(),
             recent_fills: self.recent_fills.iter().cloned().collect(),
             klines,
+            h0_gate_stats: Some(self.h0_gate.get_stats().clone()),
+            stop_config: Some(self.paper_state.stop_config().clone()),
+            guardian_config: Some(self.intent_processor.guardian_config().clone()),
+            risk_manager_config: Some(self.intent_processor.risk_config().clone()),
+            consecutive_losses: self.consecutive_losses.clone(),
+            session_halted: self.session_halted,
+            daily_loss_pct: self.intent_processor.daily_loss_pct_pub(self.paper_state.balance()),
+            session_drawdown_pct: self.paper_state.drawdown_pct(),
         }
     }
 
@@ -984,110 +1099,12 @@ fn snapshot_to_input(snap: &IndicatorSnapshot) -> IndicatorInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineStatus {
-    pub stats: TickStats,
-    pub governance: openclaw_core::governance_core::GovernanceStatus,
-    pub positions: usize,
-    pub balance: f64,
-    pub symbols_tracked: usize,
-}
-
-/// Per-tick canary record for Rust vs Python comparison (R07-2).
-/// 每 tick 灰度記錄，用於 Rust 與 Python 比較。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CanaryRecord {
-    pub schema_version: String,
-    pub source: String,
-    pub tick_number: u64,
-    pub timestamp_ms: u64,
-    pub symbol: String,
-    pub price: f64,
-    pub indicators: Option<IndicatorSnapshot>,
-    pub signals: Vec<Signal>,
-    pub order_intents: Vec<crate::intent_processor::OrderIntent>,
-    pub paper_state: crate::paper_state::PaperStateSnapshot,
-    pub stats: TickStats,
-    /// Per-tick processing latency in microseconds (for Go/No-Go P50 < 50μs check).
-    /// 每 tick 處理延遲（微秒），用於 Go/No-Go P50 < 50μs 驗證。
-    pub tick_duration_us: u64,
-}
-
-/// Strategy status info for IPC snapshot.
-/// 策略狀態信息供 IPC 快照使用。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StrategyInfo {
-    /// Strategy name / 策略名稱
-    pub name: String,
-    /// Whether the strategy is currently active / 策略是否當前活躍
-    pub active: bool,
-}
-
-/// A timestamped order intent for IPC ring buffer.
-/// 帶時間戳的交易意圖，供 IPC 環形緩衝使用。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimestampedIntent {
-    /// Event timestamp in milliseconds / 事件時間戳（毫秒）
-    pub timestamp_ms: u64,
-    /// The original order intent / 原始交易意圖
-    pub intent: crate::intent_processor::OrderIntent,
-    /// Result: "submitted" or "rejected:<reason>" / 結果："submitted" 或 "rejected:<原因>"
-    pub result: String,
-}
-
-/// A timestamped fill record for IPC ring buffer.
-/// 帶時間戳的成交記錄，供 IPC 環形緩衝使用。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimestampedFill {
-    /// Event timestamp in milliseconds / 事件時間戳（毫秒）
-    pub timestamp_ms: u64,
-    /// Trading symbol / 交易對
-    pub symbol: String,
-    /// Long or short direction / 多空方向
-    pub is_long: bool,
-    /// Fill quantity / 成交數量
-    pub qty: f64,
-    /// Fill price / 成交價格
-    pub price: f64,
-    /// Fee charged / 手續費
-    pub fee: f64,
-    /// Strategy that generated this fill / 產生此成交的策略
-    pub strategy: String,
-}
-
-/// Full pipeline snapshot for IPC consumers (R06-A).
-/// 完整管線快照供 IPC 消費者使用。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineSnapshot {
-    /// Paper trading state / 紙盤交易狀態
-    pub paper_state: crate::paper_state::PaperStateSnapshot,
-    /// Latest per-symbol prices / 每交易對最新價格
-    pub latest_prices: HashMap<String, f64>,
-    /// Tick statistics / Tick 統計
-    pub stats: TickStats,
-    /// Data source discriminator / 數據源標識
-    pub source: String,
-    /// Paper trading paused flag / 紙盤交易暫停標誌
-    #[serde(default)]
-    pub paper_paused: bool,
-    /// EXT-1: Current trading mode / 當前交易模式
-    #[serde(default)]
-    pub trading_mode: crate::config::TradingMode,
-    /// Per-symbol latest indicator values / 每交易對最新指標值
-    pub indicators: HashMap<String, IndicatorSnapshot>,
-    /// Recent signals (last 100) / 最近信號（最近 100 個）
-    pub signals: Vec<Signal>,
-    /// Strategy status list / 策略狀態列表
-    pub strategies: Vec<StrategyInfo>,
-    /// Recent order intents (last 50) / 最近交易意圖（最近 50 個）
-    pub recent_intents: Vec<TimestampedIntent>,
-    /// Recent fills (last 50) / 最近成交記錄（最近 50 個）
-    pub recent_fills: Vec<TimestampedFill>,
-    /// Per-symbol latest completed klines (up to 100 bars, 1m only).
-    /// 每交易對最新已完成 K 線（最多 100 根，僅 1m）。
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub klines: HashMap<String, Vec<openclaw_core::klines::KlineBar>>,
-}
+// Types extracted to pipeline_types.rs (RRC-1 E2 fix: 1200-line limit).
+// 類型已提取到 pipeline_types.rs（RRC-1 E2 修復：1200 行限制）。
+pub use crate::pipeline_types::{
+    PipelineStatus, CanaryRecord, StrategyInfo,
+    TimestampedIntent, TimestampedFill, PipelineSnapshot,
+};
 
 #[cfg(test)]
 mod tests {

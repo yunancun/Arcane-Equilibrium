@@ -76,6 +76,18 @@ class GlobalConfigUpdate(BaseModel):
     allowed_categories: list[str] | None = None
     preferred_margin_mode: str | None = None
     preferred_position_mode: str | None = None
+    # ── Phase 3b+ additions: IPC-forwarded to Rust engine ──
+    # 以下參數直接推送到 Rust 引擎 IPC
+    p1_risk_pct: float | None = Field(default=None, gt=0, le=20,
+        description="P1 per-trade risk cap as % of balance (e.g. 3 = 3%). / P1 單筆風險上限占餘額百分比")
+    trailing_stop_pct: float | None = Field(default=None, ge=0, le=50,
+        description="Trailing stop distance %. 0 or null = disabled. / 跟蹤止損百分比，0 或 null 禁用")
+    atr_multiplier: float | None = Field(default=None, ge=0, le=10,
+        description="ATR dynamic stop multiplier. 0 or null = disabled. / ATR 動態止損乘數，0 或 null 禁用")
+    max_same_direction_positions: int | None = Field(default=None, gt=0, le=25,
+        description="Guardian: max concurrent same-direction positions. / Guardian 同方向最大持倉數")
+    h0_shadow_mode: bool | None = Field(default=None,
+        description="H0 Gate shadow mode: true=observe only, false=active blocking. / H0 門控影子模式")
 
 
 class CategoryConfigUpdate(BaseModel):
@@ -116,9 +128,23 @@ class AgentAdjustRequest(BaseModel):
 def get_risk_config(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get full risk config (all 3 tiers) / 获取完整风控配置（三层）"""
+    """Get full risk config (all 3 tiers) / 获取完整风控配置（三层）
+    RRC-1-D4: Includes Rust engine's active risk configs as ground truth.
+    RRC-1-D4：包含 Rust 引擎的活躍風控配置作為真相源。
+    """
     rm = _get_risk_manager()
-    return _risk_response(rm.get_full_config())
+    config = rm.get_full_config()
+    # RRC-1-D4: Append Rust engine's active configs / 附加 Rust 引擎活躍配置
+    reader = get_rust_reader()
+    snap = reader.get_snapshot() if reader.is_available() else None
+    if snap is not None:
+        config["rust_active"] = {
+            "stop_config": snap.get("stop_config"),
+            "guardian_config": snap.get("guardian_config"),
+            "risk_manager_config": snap.get("risk_manager_config"),
+            "source": "rust_engine",
+        }
+    return _risk_response(config)
 
 
 @risk_router.post("/config/global")
@@ -135,7 +161,7 @@ def update_global_config(
 
     # Push ALL risk changes to Rust engine via IPC / 通過 IPC 推送所有風控變更到 Rust 引擎
     # Mapping: GUI field → IPC param
-    _U = object()  # sentinel for "not in updates"
+    # Note: p1_risk_pct is % in GUI/API, fraction in Rust IPC
     ipc_kwargs: dict = {}
     if "max_stop_loss_pct" in updates:
         ipc_kwargs["hard_stop_pct"] = updates["max_stop_loss_pct"]
@@ -147,6 +173,19 @@ def update_global_config(
         ipc_kwargs["max_drawdown_pct"] = updates["max_session_drawdown_pct"]
     if "max_holding_hours" in updates:
         ipc_kwargs["time_stop_hours"] = updates["max_holding_hours"]
+    # Phase 3b+ additions — direct IPC params
+    if "p1_risk_pct" in updates:
+        ipc_kwargs["p1_risk_pct"] = updates["p1_risk_pct"] / 100.0  # GUI sends %, Rust expects fraction
+    if "trailing_stop_pct" in updates:
+        val = updates["trailing_stop_pct"]
+        ipc_kwargs["trailing_stop_pct"] = val if val and val > 0 else None  # 0/null → disable
+    if "atr_multiplier" in updates:
+        val = updates["atr_multiplier"]
+        ipc_kwargs["atr_multiplier"] = val if val and val > 0 else None  # 0/null → disable
+    if "max_same_direction_positions" in updates:
+        ipc_kwargs["max_same_direction_positions"] = updates["max_same_direction_positions"]
+    if "h0_shadow_mode" in updates:
+        ipc_kwargs["h0_shadow_mode"] = updates["h0_shadow_mode"]
     if ipc_kwargs:
         import asyncio
         from app.ipc_client import EngineIPCClient
@@ -203,29 +242,31 @@ def update_category_config(
 def get_risk_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get current risk status / 获取当前风控状态"""
+    """Get current risk status / 获取当前风控状态
+    RRC-1-D2: Rust snapshot is the single source of truth for runtime risk state.
+    RRC-1-D2：Rust 快照為運行時風控狀態的單一真相源。
+    """
     rm = _get_risk_manager()
-    engine = _get_engine()
     status = rm.get_status()
 
-    # R06-B: try Rust engine for drawdown data, fall back to Python ENGINE
-    # 優先從 Rust 引擎獲取回撤數據，降級到 Python ENGINE
-    rust_state = get_rust_reader().get_paper_state() if get_rust_reader().is_available() else None
-    if rust_state is not None:
-        peak = rust_state.get("peak_balance", 0)
-        current = rust_state.get("balance", 0)
-        drawdown_pct = ((peak - current) / peak * 100) if peak > 0 else 0.0
-        status["drawdown_pct"] = round(drawdown_pct, 2)
+    # RRC-1-D2: Rust snapshot = primary source for runtime risk state
+    # RRC-1-D2：Rust 快照 = 運行時風控狀態的主要來源
+    reader = get_rust_reader()
+    snap = reader.get_snapshot() if reader.is_available() else None
+    if snap is not None:
+        ps = snap.get("paper_state", {})
+        peak = ps.get("peak_balance", 0)
+        current = ps.get("balance", 0)
+        status["drawdown_pct"] = round(snap.get("session_drawdown_pct", 0.0), 2)
+        status["daily_loss_pct"] = round(snap.get("daily_loss_pct", 0.0), 2)
         status["peak_balance_usdt"] = peak
         status["current_balance_usdt"] = current
+        status["session_halted"] = snap.get("session_halted", False)
+        status["consecutive_losses"] = snap.get("consecutive_losses", {})
+        status["h0_gate_stats"] = snap.get("h0_gate_stats")
         status["source"] = "rust_engine"
     else:
-        try:
-            # RC-10: Python ENGINE disabled — no fallback available
-            # RC-10：Python ENGINE 已禁用 — 無降級路徑
-            logger.debug("Rust engine unavailable, no drawdown data")
-        except Exception as e:
-            logger.debug("Failed to add session drawdown info to risk status: %s", e)
+        logger.debug("Rust engine unavailable, no runtime risk data / Rust 引擎不可用")
 
     return _risk_response(status)
 
@@ -236,15 +277,30 @@ def get_ai_risk_context(
 ):
     """
     Get risk context for AI decision-making / 获取 AI 决策用风控上下文
-    L2 AI engine should consult this before making trade recommendations.
+    RRC-1-D2: Uses Rust snapshot for runtime state (ENGINE=None safe).
     """
     rm = _get_risk_manager()
-    engine = _get_engine()
-    try:
-        state = engine.get_state()
-        ctx = rm.get_risk_context_for_ai(state)
-    except Exception:
-        ctx = {"risk_pressure": 0.0, "suggestion": "normal", "error": "state_read_failed"}
+    # RRC-1-D2: Build context from Rust snapshot (ENGINE=None safe).
+    # RRC-1-D2：從 Rust 快照構建上下文（ENGINE=None 安全）。
+    reader = get_rust_reader()
+    snap = reader.get_snapshot() if reader.is_available() else None
+    if snap is not None:
+        dd = snap.get("session_drawdown_pct", 0.0)
+        dl = snap.get("daily_loss_pct", 0.0)
+        halted = snap.get("session_halted", False)
+        pressure = min(1.0, max(dd, dl) / 10.0)  # 0-1 scale, 10%=max
+        suggestion = "halt" if halted else ("reduce" if pressure > 0.5 else "normal")
+        ctx = {
+            "risk_pressure": round(pressure, 3),
+            "suggestion": suggestion,
+            "session_drawdown_pct": round(dd, 2),
+            "daily_loss_pct": round(dl, 2),
+            "session_halted": halted,
+            "consecutive_losses": snap.get("consecutive_losses", {}),
+            "source": "rust_engine",
+        }
+    else:
+        ctx = {"risk_pressure": 0.0, "suggestion": "normal", "error": "rust_engine_unavailable"}
     return _risk_response(ctx)
 
 

@@ -28,6 +28,7 @@ pub mod multi_interval_ws;
 pub mod orchestrator;
 pub mod order_manager;
 pub mod paper_state;
+pub mod pipeline_types;
 pub mod persistence;
 pub mod platform_client;
 pub mod position_manager;

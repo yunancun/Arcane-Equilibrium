@@ -8,6 +8,7 @@ use openclaw_core::{
     execution::{self, FillResult},
     governance_core::GovernanceCore,
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
+    risk::{check_order_allowed, RiskManagerConfig},
 };
 use serde::{Deserialize, Serialize};
 
@@ -67,6 +68,15 @@ pub struct IntentProcessor {
     /// P1 risk cap percentage (configurable, default 2%).
     /// P1 風險上限百分比（可配置，默認 2%）。
     p1_risk_pct: f64,
+    /// RRC-1-B4: Risk manager config for check_order_allowed Gate 0.
+    /// RRC-1-B4：風控管理器配置，用於 Gate 0 訂單准入檢查。
+    risk_config: RiskManagerConfig,
+    /// RRC-1-B2: Daily start balance for daily loss tracking (reset at UTC midnight).
+    /// RRC-1-B2：每日起始餘額，用於日損追蹤（UTC 午夜重置）。
+    daily_start_balance: f64,
+    /// RRC-1-B2: UTC day number of last reset (days since epoch).
+    /// RRC-1-B2：上次重置的 UTC 天數（自 epoch 起的天數）。
+    daily_reset_day: u64,
 }
 
 impl IntentProcessor {
@@ -77,6 +87,9 @@ impl IntentProcessor {
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
+            risk_config: RiskManagerConfig::default(),
+            daily_start_balance: 0.0,
+            daily_reset_day: 0,
         }
     }
 
@@ -89,6 +102,9 @@ impl IntentProcessor {
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
+            risk_config: RiskManagerConfig::default(),
+            daily_start_balance: 0.0,
+            daily_reset_day: 0,
         }
     }
 
@@ -113,6 +129,56 @@ impl IntentProcessor {
     /// Phase 2b：設定 Kelly 倉位配置。
     pub fn set_kelly_config(&mut self, config: crate::ml::kelly_sizer::KellyConfig) {
         self.kelly_config = Some(config);
+    }
+
+    /// RRC-1-B4: Update risk manager config at runtime.
+    /// RRC-1-B4：運行時更新風控管理器配置。
+    pub fn update_risk_config(&mut self, config: RiskManagerConfig) {
+        self.risk_config = config;
+    }
+
+    /// RRC-1-B4: Read-only access to risk manager config.
+    /// RRC-1-B4：風控管理器配置的唯讀訪問。
+    pub fn risk_config(&self) -> &RiskManagerConfig {
+        &self.risk_config
+    }
+
+    /// RRC-1-B2: Update daily start balance (called on each tick, resets at UTC midnight).
+    /// RRC-1-B2：更新每日起始餘額（每 tick 調用，UTC 午夜重置）。
+    pub fn maybe_reset_daily_balance(&mut self, balance: f64, ts_ms: u64) {
+        let day = ts_ms / 86_400_000; // UTC day number / UTC 天數
+        if day != self.daily_reset_day {
+            self.daily_start_balance = balance;
+            self.daily_reset_day = day;
+        }
+    }
+
+    /// RRC-1-B2: Compute current daily loss percentage (internal).
+    /// RRC-1-B2：計算當前日損百分比（內部）。
+    fn daily_loss_pct(&self, current_balance: f64) -> f64 {
+        if self.daily_start_balance <= 0.0 {
+            return 0.0;
+        }
+        let loss = self.daily_start_balance - current_balance;
+        if loss <= 0.0 { 0.0 } else { loss / self.daily_start_balance * 100.0 }
+    }
+
+    /// RRC-1-C2: Public accessor for daily loss percentage (used by tick_pipeline Step 6).
+    /// RRC-1-C2：日損百分比公開訪問器（用於 tick_pipeline 步驟 6）。
+    pub fn daily_loss_pct_pub(&self, current_balance: f64) -> f64 {
+        self.daily_loss_pct(current_balance)
+    }
+
+    /// RRC-1-B3: Compute total exposure percentage from positions.
+    /// RRC-1-B3：從持倉計算總曝險百分比。
+    fn compute_exposure_pct(paper_state: &PaperState) -> f64 {
+        let balance = paper_state.balance();
+        if balance <= 0.0 { return 0.0; }
+        let total_notional: f64 = paper_state.positions().iter().map(|p| {
+            let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
+            p.qty * price
+        }).sum();
+        (total_notional / balance * 100.0).min(999.0)
     }
 
     /// Phase 2b: Record a closed trade for Kelly stats.
@@ -218,6 +284,34 @@ impl IntentProcessor {
         // P1 硬上限 = 餘額的 2% / 價格（不可超越的安全上限）
         let p1_max_qty = if price > 0.0 { balance * self.p1_risk_pct / price } else { kelly_qty };
         let final_qty = kelly_qty.min(p1_max_qty);
+
+        // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
+        // 訂單准入風控檢查：日損/槓桿/持倉大小/曝險/相關曝險
+        // Runs after P1 sizing so single-position-pct check uses final_qty.
+        // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
+        {
+            let is_reducing = paper_state.get_position(&intent.symbol)
+                .map(|p| p.is_long != intent.is_long)
+                .unwrap_or(false);
+            let exposure_pct = Self::compute_exposure_pct(paper_state);
+            let daily_loss = self.daily_loss_pct(balance);
+            let check_result = check_order_allowed(
+                final_qty, price, balance,
+                exposure_pct,
+                0.0, // correlated_exposure_pct — Phase C wiring
+                1.0, // leverage — paper = 1x
+                daily_loss,
+                is_reducing,
+                &self.risk_config,
+            );
+            if !check_result.allowed {
+                return IntentResult {
+                    submitted: false,
+                    rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
+                    fill: None,
+                };
+            }
+        }
 
         // Gate 3: Cost gate (fail-open if ATR missing)
         // Simplified: just check if round-trip cost is reasonable
@@ -343,6 +437,34 @@ impl IntentProcessor {
             kelly_qty
         };
         let final_qty = kelly_qty.min(p1_max_qty);
+
+        // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
+        // 訂單准入風控檢查：日損/槓桿/持倉大小/曝險/相關曝險
+        // Runs after P1 sizing so single-position-pct check uses final_qty.
+        // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
+        {
+            let is_reducing = paper_state.get_position(&intent.symbol)
+                .map(|p| p.is_long != intent.is_long)
+                .unwrap_or(false);
+            let exposure_pct = Self::compute_exposure_pct(paper_state);
+            let daily_loss = self.daily_loss_pct(balance);
+            let check_result = check_order_allowed(
+                final_qty, price, balance,
+                exposure_pct,
+                0.0, // correlated_exposure_pct — Phase C wiring
+                1.0, // leverage — paper = 1x
+                daily_loss,
+                is_reducing,
+                &self.risk_config,
+            );
+            if !check_result.allowed {
+                return ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
+                    approved_qty: 0.0,
+                };
+            }
+        }
 
         ExchangeGateResult {
             approved: true,

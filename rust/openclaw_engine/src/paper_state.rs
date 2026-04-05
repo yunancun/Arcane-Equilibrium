@@ -293,6 +293,24 @@ impl PaperState {
 
     /// Check stops on all positions using per-symbol latest prices.
     /// 使用每個交易對的最新價格檢查所有持倉的止損。
+    /// RRC-1-C1: Update best_price for all positions (trailing stop tracking).
+    /// RRC-1-C1：更新所有持倉的最佳價格（跟蹤止損追蹤）。
+    pub fn update_best_prices(&mut self) {
+        let latest = self.latest_prices.clone();
+        for (symbol, pos) in &mut self.positions {
+            if let Some(&sym_price) = latest.get(symbol.as_str()) {
+                let mut ps = PositionState {
+                    entry_price: pos.entry_price,
+                    best_price: pos.best_price,
+                    is_long: pos.is_long,
+                    entry_ts_ms: pos.entry_ts_ms,
+                };
+                stop_manager::update_best_price(&mut ps, sym_price);
+                pos.best_price = ps.best_price;
+            }
+        }
+    }
+
     pub fn check_stops(&mut self, _price: f64, now_ms: u64) -> Vec<(String, StopTrigger)> {
         let mut triggers = Vec::new();
         let latest = self.latest_prices.clone();

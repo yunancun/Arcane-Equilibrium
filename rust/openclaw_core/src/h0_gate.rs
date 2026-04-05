@@ -56,7 +56,7 @@ use openclaw_types::{H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRi
 
 /// Accumulated gate statistics for observability.
 /// 累計門控統計數據，供可觀測性使用。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct GateStats {
     pub total_checks: u64,
     pub total_allowed: u64,
