@@ -135,113 +135,62 @@ def _paper_response(
 # Session Routes / Session 路由
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# RC-10 DEPRECATED: Python paper engine write routes are DISABLED.
+# Rust openclaw_engine is the SOLE paper trading engine.
+# RC-10 廢棄：Python 紙盤引擎寫入路由已禁用。Rust 是唯一的紙上交易引擎。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_RC10_DISABLED_MSG = (
+    "Python paper engine disabled — Rust engine is the sole paper trading engine (RC-10). "
+    "Python 紙盤引擎已禁用 — Rust 引擎是唯一的紙上交易引擎（RC-10）。"
+)
+
+
 @paper_router.post("/session/start")
 def post_session_start(
     req: SessionStartRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Start a new paper trading session / 开始新的纸上交易 session
-
-    When no explicit initial_balance is provided (i.e. the default is used),
-    attempts to read the Bybit Demo account USDT balance first.
-    若未指定初始餘額（使用預設值），先嘗試讀取 Bybit Demo 帳戶 USDT 餘額。
-    """
-    try:
-        balance = req.initial_balance
-
-        # If the caller did not override the default, try fetching Bybit Demo balance.
-        # 若呼叫方未覆蓋預設值，嘗試從 Bybit Demo 帳戶獲取真實餘額。
-        if balance == DEFAULT_INITIAL_BALANCE_USDT and DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
-            try:
-                wallet_result = DEMO_CONNECTOR.get_wallet_balance()
-                if wallet_result.get("retCode") == 0:
-                    coins = wallet_result.get("result", {}).get("list", [{}])[0].get("coin", [])
-                    for c in coins:
-                        if c.get("coin") == "USDT":
-                            demo_bal = float(c.get("walletBalance", 0))
-                            if demo_bal > 0:
-                                balance = demo_bal
-                                logger.info(
-                                    "Using Bybit Demo USDT balance as initial: %.2f / "
-                                    "使用 Bybit Demo USDT 餘額作為初始資金: %.2f",
-                                    demo_bal, demo_bal,
-                                )
-                            break
-            except Exception as demo_err:
-                logger.warning(
-                    "Failed to fetch Bybit Demo balance, using default %.2f: %s / "
-                    "獲取 Demo 餘額失敗，使用預設值: %s",
-                    DEFAULT_INITIAL_BALANCE_USDT, demo_err, demo_err,
-                )
-
-        state = ENGINE.start_session(initial_balance=balance)
-
-        # Auto-grant paper authorization on session start (zero real risk).
-        # 会话启动时自动授予纸盘授权（无真实资金风险）。
-        # This unblocks is_authorized() so orders can flow through the governance gate.
-        # 这将解除 is_authorized() 的阻塞，让订单能通过治理门检。
-        try:
-            if GOV_HUB is not None:
-                granted = GOV_HUB.grant_paper_authorization()
-                if granted:
-                    logger.info("Paper trading authorization auto-granted on session start")
-                else:
-                    logger.warning(
-                        "grant_paper_authorization() returned False on session start "
-                        "— governance gate will remain closed / 纸盘授权返回 False — 治理门检仍关闭"
-                    )
-        except Exception as _auth_err:
-            # Non-fatal: session itself is started; warn and continue.
-            # 非致命错误：会话本身已启动；记录警告并继续。
-            logger.warning("Failed to auto-grant paper authorization: %s", _auth_err)
-
-        return _paper_response({"session": state["session"], "message": "Paper trading session started"})
-    except ValueError as e:
-        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
-        logger.warning("Session start conflict: %s", e)
-        raise HTTPException(status_code=409, detail="Session state conflict")
+    """DISABLED: Rust engine manages sessions / 已禁用：Rust 引擎管理 session"""
+    # Check if Rust engine is already active / 檢查 Rust 引擎是否已啟動
+    rust = get_rust_reader()
+    if rust.is_available():
+        rust_state = rust.get_paper_state()
+        if rust_state is not None:
+            return _paper_response({
+                "message": "Rust engine is already active — no Python session needed / "
+                           "Rust 引擎已在運行 — 不需要 Python session",
+                "source": "rust_engine",
+                "position_count": len(rust_state.get("positions", [])),
+                "balance": rust_state.get("balance", 0),
+            })
+    raise HTTPException(
+        status_code=410,
+        detail=_RC10_DISABLED_MSG,
+    )
 
 
 @paper_router.post("/session/reauth")
 def post_session_reauth(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Re-grant paper trading authorization without resetting the session.
-    重新授予纸盘交易授权，无需重置当前 session。
-
-    Use case: server was restarted with an existing active session; the authorization
-    was not re-granted on startup (because grant_paper_authorization() is normally
-    called on session start, not on state-file load).
-    使用场景：服务器重启后加载了已有 active session；由于 grant_paper_authorization()
-    只在 session start 时调用，重启后授权丢失。此端点补授权，不影响现有 session 状态。
-
-    Returns: {granted: bool, is_authorized: bool, auth_state: str}
-    """
+    """Re-grant paper trading authorization / 重新授予紙盤授權"""
+    if GOV_HUB is None:
+        raise HTTPException(status_code=503, detail="Governance hub not available")
     try:
-        if GOV_HUB is None:
-            raise HTTPException(status_code=503, detail="Governance hub not available")
-
         already_authorized = GOV_HUB.is_authorized()
         if already_authorized:
             return _paper_response({
-                "granted": False,
-                "is_authorized": True,
-                "message": "Authorization already active — no-op / 授权已有效，跳过",
+                "granted": False, "is_authorized": True,
+                "message": "Authorization already active / 授權已有效",
             })
-
         granted = GOV_HUB.grant_paper_authorization()
-        is_authorized_after = GOV_HUB.is_authorized()
-        logger.info(
-            "Paper session reauth: granted=%s, is_authorized_after=%s / "
-            "纸盘 session 补授权：granted=%s，授权后状态=%s",
-            granted, is_authorized_after, granted, is_authorized_after,
-        )
         return _paper_response({
             "granted": granted,
-            "is_authorized": is_authorized_after,
-            "message": "Paper authorization re-granted / 纸盘授权已补授" if granted
-                       else "grant_paper_authorization() returned False / 补授权返回 False",
+            "is_authorized": GOV_HUB.is_authorized(),
+            "message": "Paper authorization granted / 紙盤授權已授予" if granted
+                       else "grant_paper_authorization() returned False",
         })
     except HTTPException:
         raise
@@ -254,166 +203,82 @@ def post_session_reauth(
 def post_session_pause(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Pause the current session / 暂停当前 session"""
-    try:
-        state = ENGINE.pause_session()
-        return _paper_response({"session": state["session"]})
-    except ValueError as e:
-        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
-        logger.warning("Session pause conflict: %s", e)
-        raise HTTPException(status_code=409, detail="Session state conflict")
+    """DISABLED: Rust engine does not support pause via IPC / 已禁用：Rust 引擎不支持 IPC 暫停"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.post("/session/resume")
 def post_session_resume(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Resume a paused session / 恢复已暂停的 session"""
-    try:
-        state = ENGINE.resume_session()
-        return _paper_response({"session": state["session"]})
-    except ValueError as e:
-        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
-        logger.warning("Session resume conflict: %s", e)
-        raise HTTPException(status_code=409, detail="Session state conflict")
+    """DISABLED: Rust engine does not support resume via IPC / 已禁用：Rust 引擎不支持 IPC 恢復"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.post("/session/stop")
 def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop the session and finalize PnL / 停止 session 并结算 PnL
+    """DISABLED: Rust engine manages session lifecycle / 已禁用：Rust 引擎管理 session 生命週期
 
-    Before stopping, closes all open positions at market price and cancels
-    all pending orders. This ensures no phantom positions remain.
-    停止前先以市價平掉所有持倉並取消所有掛單，避免幽靈倉殘留。
+    To stop the Rust engine, use systemctl stop openclaw-engine or send SIGTERM.
+    要停止 Rust 引擎，使用 systemctl stop openclaw-engine 或發送 SIGTERM。
     """
-    try:
-        # ── Phase 1: Close all open positions at market price ──
-        # 第一階段：以市價平掉所有持倉
-        positions = ENGINE.get_positions()
-        if positions:
-            # Fetch latest prices: Rust engine → Dispatcher → fallback empty
-            # 獲取最新價格：Rust 引擎 → 行情分發器 → 降級為空
-            live_prices: dict[str, float] = {}
-            try:
-                live_prices = get_rust_reader().get_latest_prices() or {}
-            except Exception:
-                pass
-            if not live_prices and DISPATCHER and DISPATCHER.is_running():
-                live_prices = DISPATCHER.get_status().get("latest_prices", {})
-
-            closed_count = 0
-            for symbol, pos in positions.items():
-                pos_side = pos.get("side", "Buy")
-                close_side = "Sell" if pos_side == "Buy" else "Buy"
-                qty = pos.get("qty", 0)
-                if qty <= 0:
-                    continue
-                try:
-                    ENGINE.submit_order(
-                        symbol=symbol,
-                        side=close_side,
-                        order_type="market",
-                        qty=qty,
-                        market_prices=live_prices,
-                        reduce_only=True,
-                    )
-                    closed_count += 1
-                except Exception as close_err:
-                    logger.warning(
-                        "Session stop — failed to close position %s: %s (non-fatal) / "
-                        "停止引擎平倉失敗（非致命）",
-                        symbol, close_err,
-                    )
-            if closed_count > 0:
-                logger.info(
-                    "Session stop — closed %d/%d positions at market / "
-                    "停止引擎 — 已市價平掉 %d/%d 個持倉",
-                    closed_count, len(positions), closed_count, len(positions),
-                )
-
-        # ── Phase 2: Cancel all pending orders ──
-        # 第二階段：取消所有掛單
-        try:
-            working_orders = ENGINE.get_orders(state_filter="working")
-            canceled_count = 0
-            for order in working_orders:
-                oid = order.get("order_id", "")
-                if oid:
-                    ENGINE.cancel_order(oid)
-                    canceled_count += 1
-            if canceled_count > 0:
-                logger.info(
-                    "Session stop — canceled %d pending orders / "
-                    "停止引擎 — 已取消 %d 個掛單",
-                    canceled_count, canceled_count,
-                )
-        except Exception as cancel_err:
-            logger.warning(
-                "Session stop — cancel orders error: %s (non-fatal) / "
-                "停止引擎取消掛單失敗（非致命）",
-                cancel_err,
-            )
-
-        # ── Phase 3: Stop session (also handles Demo close + reconciliation) ──
-        # 第三階段：停止 session（同時處理 Demo 平倉 + 對賬）
-        state = ENGINE.stop_session()
-        return _paper_response({
-            "session": state["session"],
-            "pnl": state["pnl"],
-            "message": "Paper trading session stopped and PnL finalized",
-        })
-    except ValueError as e:
-        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
-        logger.warning("Session stop conflict: %s", e)
-        raise HTTPException(status_code=409, detail="Session state conflict")
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.get("/session/status")
 def get_session_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get current session status / 获取 session 状态"""
-    # R06-B: try Rust engine snapshot first, fall back to Python ENGINE
-    # 優先讀取 Rust 引擎快照，降級到 Python ENGINE
+    """Get current session status from Rust engine / 從 Rust 引擎獲取 session 狀態"""
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
-    if rust_state is not None:
-        # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
-        # Wrap flat Rust snapshot into nested structure expected by GUI
-        positions = rust_state.get("positions", [])
-        total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
-        balance = rust_state.get("balance", 0)
-        peak = rust_state.get("peak_balance", 0)
-        realized = rust_state.get("total_realized_pnl", 0)
-        fees = rust_state.get("total_fees", 0)
+    if rust_state is None:
         return _paper_response({
             "source": "rust_engine",
             "session": {
-                "session_state": "active",
+                "session_state": "offline",
                 "session_id": "rust_engine",
-                "initial_paper_balance_usdt": peak,  # 用峰值近似初始餘額 / Use peak as proxy for initial
-                "current_paper_balance_usdt": balance,
-                "peak_balance_usdt": peak,
                 "session_halted": False,
-                "session_halt_reason": None,
+                "session_halt_reason": "Rust engine not available / Rust 引擎不可用",
             },
-            "pnl": {
-                "realized_pnl": realized,
-                "unrealized_pnl": total_unrealized,
-                "total_fees_paid": fees,
-                "total_ai_cost": 0,
-                "net_paper_pnl": realized + total_unrealized - fees,
-                "net_realized_pnl": realized - fees,
-                "closed_position_pnl": realized,
-            },
-            "order_count": 0,
-            "fill_count": rust_state.get("trade_count", 0),
-            "position_count": len(positions),
-            "state_revision": 0,
+            "pnl": {},
+            "order_count": 0, "fill_count": 0, "position_count": 0,
         })
-    return _paper_response(ENGINE.get_session_status())
+    # Wrap flat Rust snapshot into nested structure expected by GUI
+    # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
+    positions = rust_state.get("positions", [])
+    total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+    balance = rust_state.get("balance", 0)
+    peak = rust_state.get("peak_balance", 0)
+    realized = rust_state.get("total_realized_pnl", 0)
+    fees = rust_state.get("total_fees", 0)
+    return _paper_response({
+        "source": "rust_engine",
+        "session": {
+            "session_state": "active",
+            "session_id": "rust_engine",
+            "initial_paper_balance_usdt": peak,
+            "current_paper_balance_usdt": balance,
+            "peak_balance_usdt": peak,
+            "session_halted": False,
+            "session_halt_reason": None,
+        },
+        "pnl": {
+            "realized_pnl": realized,
+            "unrealized_pnl": total_unrealized,
+            "total_fees_paid": fees,
+            "total_ai_cost": 0,
+            "net_paper_pnl": realized + total_unrealized - fees,
+            "net_realized_pnl": realized - fees,
+            "closed_position_pnl": realized,
+        },
+        "order_count": 0,
+        "fill_count": rust_state.get("trade_count", 0),
+        "position_count": len(positions),
+        "state_revision": 0,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -425,36 +290,8 @@ def post_order_submit(
     req: OrderSubmitRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Submit a paper order / 提交纸上订单"""
-    try:
-        # Use live market prices: Rust engine → Dispatcher → order price (R06-B)
-        # 優先使用實時價格：Rust 引擎 → 行情分發器 → 訂單價格
-        live_prices = get_rust_reader().get_latest_prices()
-        if not live_prices and DISPATCHER and DISPATCHER.is_running():
-            live_prices = DISPATCHER.get_status().get("latest_prices", {})
-        if not live_prices:
-            live_prices = {req.symbol: req.price} if req.price else None
-
-        result = ENGINE.submit_order(
-            symbol=req.symbol,
-            side=req.side,
-            order_type=req.order_type,
-            qty=req.qty,
-            price=req.price,
-            leverage=req.leverage,
-            market_prices=live_prices,
-        )
-        if result["rejected_reason"]:
-            return _paper_response(
-                result,
-                action_result="blocked",
-                reason_codes=[result["rejected_reason"]],
-            )
-        return _paper_response(result)
-    except ValueError as e:
-        # 不暴露內部異常細節到 HTTP 響應 / Do not leak internal exception details to HTTP response
-        logger.warning("Order submission validation error: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid order parameters")
+    """DISABLED: Rust engine manages order execution / 已禁用：Rust 引擎管理訂單執行"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.post("/order/cancel")
@@ -462,11 +299,8 @@ def post_order_cancel(
     req: OrderCancelRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Cancel a working paper order / 取消纸上订单"""
-    result = ENGINE.cancel_order(req.order_id)
-    if not result["success"]:
-        raise HTTPException(status_code=409, detail=result["reason"])
-    return _paper_response({"order_id": req.order_id, "canceled": True})
+    """DISABLED: Rust engine manages order lifecycle / 已禁用：Rust 引擎管理訂單生命週期"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.get("/orders")
@@ -474,9 +308,14 @@ def get_orders(
     state_filter: str | None = None,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """List paper orders / 获取纸上订单列表"""
-    orders = ENGINE.get_orders(state_filter=state_filter)
-    return _paper_response({"orders": orders, "count": len(orders)})
+    """Get orders from Rust engine / 從 Rust 引擎獲取訂單"""
+    # Rust engine manages orders internally; recent intents serve as order log
+    # Rust 引擎內部管理訂單；最近意圖列表作為訂單記錄
+    reader = get_rust_reader()
+    if reader.is_available():
+        intents = reader.get_recent_intents() or []
+        return _paper_response({"orders": intents, "count": len(intents), "source": "rust_engine"})
+    return _paper_response({"orders": [], "count": 0, "source": "rust_engine"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -487,24 +326,22 @@ def get_orders(
 def get_positions(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get current paper positions / 获取纸上持仓"""
-    # R06-B: try Rust engine snapshot first / 優先讀取 Rust 引擎快照
+    """Get current paper positions from Rust engine / 從 Rust 引擎獲取紙上持倉"""
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
-    if rust_state is not None:
-        # 轉換 Rust 持倉欄位為 GUI 預期格式（is_long→side, entry_price→avg_entry_price）
-        # Transform Rust position fields to GUI-expected format
-        raw_positions = rust_state.get("positions", [])
-        transformed = []
-        for p in raw_positions:
-            transformed.append({
-                **p,
-                "side": "Buy" if p.get("is_long", True) else "Sell",
-                "avg_entry_price": p.get("entry_price", p.get("avg_entry_price", 0)),
-            })
-        return _paper_response({"positions": transformed, "count": len(transformed), "source": "rust_engine"})
-    positions = ENGINE.get_positions()
-    return _paper_response({"positions": positions, "count": len(positions)})
+    if rust_state is None:
+        return _paper_response({"positions": [], "count": 0, "source": "rust_engine"})
+    # Transform Rust position fields to GUI-expected format
+    # 轉換 Rust 持倉欄位為 GUI 預期格式
+    raw_positions = rust_state.get("positions", [])
+    transformed = []
+    for p in raw_positions:
+        transformed.append({
+            **p,
+            "side": "Buy" if p.get("is_long", True) else "Sell",
+            "avg_entry_price": p.get("entry_price", p.get("avg_entry_price", 0)),
+        })
+    return _paper_response({"positions": transformed, "count": len(transformed), "source": "rust_engine"})
 
 
 @paper_router.get("/fills")
@@ -512,46 +349,39 @@ def get_fills(
     limit: int = 50,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get fill history / 获取成交历史"""
-    # IPC-03: Rust-first for recent fills / 優先讀 Rust 最近成交記錄
+    """Get fill history from Rust engine / 從 Rust 引擎獲取成���歷史"""
     reader = get_rust_reader()
     if reader.is_available():
-        rust_fills = reader.get_recent_fills()
-        if rust_fills:
-            capped = rust_fills[:min(limit, 200)]
-            return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
-    # Fallback to Python PaperTradingEngine / 降級到 Python 紙盤引擎
-    fills = ENGINE.get_fills(limit=min(limit, 200))
-    return _paper_response({"fills": fills, "count": len(fills)})
+        rust_fills = reader.get_recent_fills() or []
+        capped = rust_fills[:min(limit, 200)]
+        return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
+    return _paper_response({"fills": [], "count": 0, "source": "rust_engine"})
 
 
 @paper_router.get("/pnl")
 def get_pnl(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get paper PnL summary / 获取纸上 PnL 汇总"""
-    # R06-B: try Rust engine snapshot first / 優先讀取 Rust 引擎快照
+    """Get paper PnL summary from Rust engine / 從 Rust 引擎獲取紙上 PnL"""
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
-    if rust_state is not None:
-        # 將 Rust PnL 包裝為 GUI 預期的嵌套結構（與 /session/status 的 pnl 子對象一致）
-        # Wrap Rust PnL into nested structure matching GUI expectations
-        positions = rust_state.get("positions", [])
-        total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
-        realized = rust_state.get("total_realized_pnl", 0)
-        fees = rust_state.get("total_fees", 0)
-        return _paper_response({
-            "source": "rust_engine",
-            "realized_pnl": realized,
-            "unrealized_pnl": total_unrealized,
-            "total_fees_paid": fees,
-            "total_ai_cost": 0,
-            "net_paper_pnl": realized + total_unrealized - fees,
-            "net_realized_pnl": realized - fees,
-            "closed_position_pnl": realized,
-            "trade_count": rust_state.get("trade_count", 0),
-        })
-    return _paper_response(ENGINE.get_pnl())
+    if rust_state is None:
+        return _paper_response({"source": "rust_engine", "available": False})
+    positions = rust_state.get("positions", [])
+    total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+    realized = rust_state.get("total_realized_pnl", 0)
+    fees = rust_state.get("total_fees", 0)
+    return _paper_response({
+        "source": "rust_engine",
+        "realized_pnl": realized,
+        "unrealized_pnl": total_unrealized,
+        "total_fees_paid": fees,
+        "total_ai_cost": 0,
+        "net_paper_pnl": realized + total_unrealized - fees,
+        "net_realized_pnl": realized - fees,
+        "closed_position_pnl": realized,
+        "trade_count": rust_state.get("trade_count", 0),
+    })
 
 
 @paper_router.get("/audit-trail")
@@ -559,9 +389,15 @@ def get_audit_trail(
     limit: int = 100,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get audit trail / 获取审计记录"""
-    trail = ENGINE.get_audit_trail(limit=min(limit, 500))
-    return _paper_response({"audit_trail": trail, "count": len(trail)})
+    """Get audit trail from Rust engine / 從 Rust 引擎獲取審計記錄"""
+    # Rust recent intents + fills serve as audit trail / Rust 意圖+成交作為審計記錄
+    reader = get_rust_reader()
+    trail: list = []
+    if reader.is_available():
+        intents = reader.get_recent_intents() or []
+        fills = reader.get_recent_fills() or []
+        trail = intents + fills
+    return _paper_response({"audit_trail": trail[:min(limit, 500)], "count": len(trail), "source": "rust_engine"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -573,13 +409,8 @@ def post_tick(
     req: TickRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Manually trigger a fill simulation tick / 手动触发成交模拟 tick
-
-    Provide current market prices to check if any limit orders should fill.
-    """
-    result = ENGINE.tick(market_prices=req.market_prices)
-    return _paper_response(result)
+    """DISABLED: Rust engine processes ticks internally / 已禁用：Rust 引擎內部處理 tick"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -590,8 +421,12 @@ def post_tick(
 def get_export(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Export complete session data for analysis / 导出完整 session 数据"""
-    return _paper_response(ENGINE.export_session())
+    """Export session data from Rust engine snapshot / 從 Rust 引擎快照導出 session 數據"""
+    reader = get_rust_reader()
+    snapshot = reader.get_snapshot() if reader.is_available() else None
+    if snapshot is None:
+        return _paper_response({"available": False, "source": "rust_engine"})
+    return _paper_response({"source": "rust_engine", **snapshot})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -611,62 +446,24 @@ def post_market_feed_start(
     req: MarketFeedStartRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Start real-time market data feed (Bybit public WebSocket).
-    启动实时行情数据流（Bybit 公共 WebSocket）。
-
-    Connects to wss://stream.bybit.com/v5/public/linear and subscribes to ticker data.
-    The attention filter automatically triggers paper engine ticks based on trading context.
-    """
-    global DISPATCHER
-    if DISPATCHER and DISPATCHER.is_running():
-        return _paper_response(
-            {"message": "Market feed already running / 行情流已在运行", "status": DISPATCHER.get_status()},
-            action_result="no_change",
-        )
-
-    DISPATCHER = MarketDataDispatcher(
-        engine=ENGINE,
-        symbols=req.symbols,
-    )
-    DISPATCHER.start()
-
-    # RC-10: Python tick processing disabled — Rust engine handles all tick processing.
-    # PIPELINE_BRIDGE is NOT registered as tick consumer and NOT activated.
-    # RC-10：Python tick 處理已禁用 — Rust 引擎處理所有 tick。
-    # PIPELINE_BRIDGE 不再註冊為 tick 消費者，也不啟動。
-    logger.info("Market feed started, Python tick processing DISABLED (RC-10) / "
-                "行情流已启动，Python tick 处理已禁用（RC-10）")
-
+    """DISABLED: Rust engine has its own WebSocket feed / 已禁用：Rust 引擎有自己的 WebSocket 行情流"""
+    # RC-12: Rust engine is the sole WS connection — no Python WS needed
+    # RC-12：Rust 引擎是唯一的 WS 連接 — 不需要 Python WS
     return _paper_response({
-        "message": "Market feed started / 行情流已启动",
-        "symbols": req.symbols,
-        "status": DISPATCHER.get_status(),
-    })
+        "message": "Market feed managed by Rust engine (RC-12) / 行情流由 Rust 引擎管理（RC-12）",
+        "source": "rust_engine",
+    }, action_result="no_change")
 
 
 @paper_router.post("/market-feed/stop")
 def post_market_feed_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop the real-time market data feed / 停止实时行情数据流"""
-    global DISPATCHER
-    if not DISPATCHER or not DISPATCHER.is_running():
-        return _paper_response(
-            {"message": "Market feed not running / 行情流未运行"},
-            action_result="no_change",
-        )
-
-    # Deactivate pipeline bridge / 停用管线桥接器
-    try:
-        from .phase2_strategy_routes import PIPELINE_BRIDGE
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.deactivate()
-    except ImportError:
-        pass
-
-    DISPATCHER.stop()
-    return _paper_response({"message": "Market feed stopped / 行情流已停止"})
+    """DISABLED: Rust engine manages its own WebSocket / 已禁用：Rust 引擎管理自己的 WebSocket"""
+    return _paper_response({
+        "message": "Market feed managed by Rust engine (RC-12) / 行情流由 Rust 引擎管理（RC-12）",
+        "source": "rust_engine",
+    }, action_result="no_change")
 
 
 @paper_router.get("/market-feed/status")
@@ -688,15 +485,8 @@ def post_market_feed_add_symbol(
     req: MarketFeedSymbolRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Dynamically add a symbol to the market feed / 动态添加交易对到行情流"""
-    if not DISPATCHER or not DISPATCHER.is_running():
-        raise HTTPException(status_code=409, detail="Market feed not running / 行情流未运行")
-
-    DISPATCHER.add_symbol(req.symbol)
-    return _paper_response({
-        "message": f"Symbol {req.symbol} added / 已添加交易对 {req.symbol}",
-        "symbol": req.symbol,
-    })
+    """DISABLED: Rust engine manages symbols at startup / 已禁用：Rust 引擎在啟動時管理 symbols"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.post("/market-feed/remove-symbol")
@@ -704,15 +494,8 @@ def post_market_feed_remove_symbol(
     req: MarketFeedSymbolRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Dynamically remove a symbol from the market feed / 动态移除交易对"""
-    if not DISPATCHER or not DISPATCHER.is_running():
-        raise HTTPException(status_code=409, detail="Market feed not running / 行情流未运行")
-
-    DISPATCHER.remove_symbol(req.symbol)
-    return _paper_response({
-        "message": f"Symbol {req.symbol} removed / 已移除交易对 {req.symbol}",
-        "symbol": req.symbol,
-    })
+    """DISABLED: Rust engine manages symbols at startup / 已禁用：Rust 引擎在啟動時管理 symbols"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -729,20 +512,8 @@ def post_shadow_feed(
     req: ShadowFeedRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Manually feed a shadow decision tick.
-    手动触发一次影子决策馈送（用于测试或手动模式）。
-
-    Builds a shadow decision from current verdict/observation files and consumes it.
-    """
-    global SHADOW_CONSUMER
-    if SHADOW_CONSUMER is None:
-        SHADOW_CONSUMER = ShadowDecisionConsumer(ENGINE)
-
-    # Build a minimal decision (no H-chain files — manual mode)
-    decision = build_shadow_decision(symbol=req.symbol, market_prices=req.market_prices)
-    result = SHADOW_CONSUMER.consume(decision, req.market_prices)
-    return _paper_response(result)
+    """DISABLED: Shadow decisions handled by Rust engine / 已禁用：影子決策由 Rust 引擎處理"""
+    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
 
 
 @paper_router.get("/shadow/history")
@@ -762,10 +533,15 @@ def get_shadow_decisions(
     limit: int = 50,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get shadow decisions stored in paper state / 获取存储在纸上状态中的影子决策"""
-    state = ENGINE.get_state()
-    decisions = state.get("shadow_decisions", [])[-min(limit, 200):]
-    return _paper_response({"shadow_decisions": decisions, "count": len(decisions)})
+    """Get shadow decisions from Rust engine / 從 Rust 引擎獲取影子決策"""
+    # Shadow decisions are tracked via recent_intents in Rust snapshot
+    # 影子決策通過 Rust 快照��的 recent_intents 追蹤
+    reader = get_rust_reader()
+    if reader.is_available():
+        intents = reader.get_recent_intents() or []
+        capped = intents[-min(limit, 200):]
+        return _paper_response({"shadow_decisions": capped, "count": len(capped), "source": "rust_engine"})
+    return _paper_response({"shadow_decisions": [], "count": 0, "source": "rust_engine"})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -776,15 +552,26 @@ def get_shadow_decisions(
 def get_metrics(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Get comprehensive performance metrics for the paper trading session.
-    获取纸上交易 session 的综合性能指标。
-
-    Includes: win rate, drawdown, holding period, Sharpe ratio, shadow decision stats.
-    """
-    state = ENGINE.get_state()
-    metrics = compute_full_metrics(state)
-    return _paper_response(metrics)
+    """Get performance metrics from Rust engine / 從 Rust 引擎獲取性能指標"""
+    rust = get_rust_reader()
+    rust_state = rust.get_paper_state() if rust.is_available() else None
+    if rust_state is None:
+        return _paper_response({"available": False, "source": "rust_engine"})
+    # Basic metrics from Rust state / 從 Rust 狀態計算基礎指標
+    stats = rust.get_tick_stats() or {}
+    return _paper_response({
+        "source": "rust_engine",
+        "balance": rust_state.get("balance", 0),
+        "peak_balance": rust_state.get("peak_balance", 0),
+        "trade_count": rust_state.get("trade_count", 0),
+        "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
+        "total_fees": rust_state.get("total_fees", 0),
+        "position_count": len(rust_state.get("positions", [])),
+        "total_ticks": stats.get("total_ticks", 0),
+        "total_intents": stats.get("total_intents", 0),
+        "total_fills": stats.get("total_fills", 0),
+        "total_stops": stats.get("total_stops", 0),
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

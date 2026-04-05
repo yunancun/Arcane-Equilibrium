@@ -573,11 +573,12 @@ class TestMarketFeedAPIRoutes:
         assert resp.json()["action_result"] == "no_change"
 
     def test_add_symbol_when_not_running(self, api_client):
-        """Add symbol fails when feed not running / 行情流未运行时添加交易对失败"""
+        """RC-10: Add symbol returns 410 — Rust engine manages symbols / Rust 引擎管理 symbols"""
         client, token = api_client
         resp = client.post(
             "/api/v1/paper/market-feed/add-symbol",
             headers={"Authorization": f"Bearer {token}"},
             json={"symbol": "SOLUSDT"},
         )
-        assert resp.status_code == 409
+        # RC-10: Python market feed disabled, returns 410 Gone
+        assert resp.status_code == 410

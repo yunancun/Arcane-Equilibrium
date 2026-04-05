@@ -372,28 +372,31 @@ class TestPaperTradingAPI:
     """API route integration tests."""
 
     def test_session_start_via_api(self):
+        """RC-10: Session start returns Rust engine status or 410 / RC-10：session start 返回 Rust 引擎狀態或 410"""
         client = build_api_client()
         r = client.post(
             "/api/v1/paper/session/start",
             headers=auth_headers(),
             json={"initial_balance": 5000.0},
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["is_simulated"] is True
-        assert data["data"]["session"]["session_state"] == "active"
+        # RC-10: Returns 200 if Rust engine active, or 410 if not available
+        assert r.status_code in (200, 410)
+        if r.status_code == 200:
+            data = r.json()
+            assert data["is_simulated"] is True
+            assert data["data"]["source"] == "rust_engine"
 
     def test_session_status_via_api(self):
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/session/status", headers=auth_headers())
         assert r.status_code == 200
-        # is_simulated is in the envelope, not inside data
         assert r.json()["is_simulated"] is True
+        # RC-10: source should be rust_engine
+        assert r.json()["data"]["source"] == "rust_engine"
 
     def test_order_submit_via_api(self):
+        """RC-10: Order submit disabled — Rust manages orders / 訂單提交已禁用"""
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.post(
             "/api/v1/paper/order/submit",
             headers=auth_headers(),
@@ -405,36 +408,35 @@ class TestPaperTradingAPI:
                 "price": 50000.0,
             },
         )
-        assert r.status_code == 200
+        # RC-10: Returns 410 Gone
+        assert r.status_code == 410
 
     def test_get_orders_via_api(self):
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/orders", headers=auth_headers())
         assert r.status_code == 200
         assert "orders" in r.json()["data"]
 
     def test_get_positions_via_api(self):
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/positions", headers=auth_headers())
         assert r.status_code == 200
 
     def test_get_pnl_via_api(self):
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/pnl", headers=auth_headers())
         assert r.status_code == 200
 
     def test_tick_via_api(self):
+        """RC-10: Tick disabled — Rust processes ticks internally / tick 已禁用"""
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.post(
             "/api/v1/paper/tick",
             headers=auth_headers(),
             json={"market_prices": {"BTCUSDT": 60000.0}},
         )
-        assert r.status_code == 200
+        # RC-10: Returns 410 Gone
+        assert r.status_code == 410
 
     def test_e1_observation_fires_on_tick_close(self, active_engine):
         """E1 fix (Session 12): observations must be written for positions closed
@@ -566,11 +568,11 @@ class TestPaperTradingAPI:
         assert fills <= 10, f"Expected ≤10 fills, got {fills} (fragmentation bug still present)"
 
     def test_export_via_api(self):
+        """RC-10: Export returns Rust snapshot / 導出返回 Rust 快照"""
         client = build_api_client()
-        client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/export", headers=auth_headers())
         assert r.status_code == 200
-        assert r.json()["data"]["is_simulated"] is True
+        assert r.json()["data"]["source"] == "rust_engine"
 
     def test_auth_required(self):
         client = build_api_client()
@@ -578,19 +580,12 @@ class TestPaperTradingAPI:
         assert r.status_code in (401, 403, 422)
 
     def test_session_lifecycle_via_api(self):
+        """RC-10: Session lifecycle write routes return 410 — Rust manages lifecycle"""
         client = build_api_client()
-        # Clean up any session left by prior tests / 清理前面測試留下的 session
-        client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        # Start
-        r = client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
-        assert r.status_code == 200
-        # Pause
+        # All write operations should return 410 (RC-10: Rust manages lifecycle)
         r = client.post("/api/v1/paper/session/pause", headers=auth_headers())
-        assert r.status_code == 200
-        # Resume
+        assert r.status_code == 410
         r = client.post("/api/v1/paper/session/resume", headers=auth_headers())
-        assert r.status_code == 200
-        # Stop
+        assert r.status_code == 410
         r = client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        assert r.status_code == 200
-        assert r.json()["data"]["session"]["session_state"] == "completed"
+        assert r.status_code == 410

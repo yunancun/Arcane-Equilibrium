@@ -163,7 +163,9 @@ try {
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
   const balD = await ocApi('/api/v1/strategy/demo/balance');
-  if (balD && balD.data && balD.data.retCode === 0) {
+  // Accept both Rust-first (source=rust_engine, no retCode) and raw Bybit (retCode=0) responses
+  // 同時接受 Rust 優先路徑（無 retCode）和原始 Bybit（retCode=0）的回應格式
+  if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
     $('demo-badge').textContent = '已连接';
     $('demo-badge').className = 'oc-chip oc-chip-good';
     $('demo-api-info').textContent = 'demo-trading.bybit.com';

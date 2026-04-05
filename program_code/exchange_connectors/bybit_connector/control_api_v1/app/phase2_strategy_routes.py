@@ -18,9 +18,13 @@ from .strategy_wiring import *  # noqa: F401,F403
 
 # ── Import route modules to trigger route registration on phase2_router ──
 # 導入路由模組以觸發路由註冊到 phase2_router
+# IMPORTANT: _ai must be imported BEFORE _read so that static /demo/* routes
+# are registered before the /{name}/* wildcard routes in strategy_read_routes.
+# 重要：_ai 必須在 _read 之前導入，以確保 /demo/* 靜態路由
+# 在 strategy_read_routes 的 /{name}/* 通配符路由之前註冊。
+from . import strategy_ai_routes as _ai  # noqa: F401
 from . import strategy_read_routes as _read  # noqa: F401
 from . import strategy_write_routes as _write  # noqa: F401
-from . import strategy_ai_routes as _ai  # noqa: F401
 
 # ── Explicit re-exports for common direct imports ──
 # 顯式重新導出常見的直接導入

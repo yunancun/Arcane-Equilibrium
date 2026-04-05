@@ -186,16 +186,9 @@ def get_risk_status(
         status["source"] = "rust_engine"
     else:
         try:
-            state = engine.get_state()
-            sess = state.get("session", {})
-            peak = sess.get("peak_balance_usdt", sess.get("initial_paper_balance_usdt", 0))
-            current = sess.get("current_paper_balance_usdt", 0)
-            drawdown_pct = ((peak - current) / peak * 100) if peak > 0 else 0.0
-            status["session_halted"] = sess.get("session_halted", False)
-            status["session_halt_reason"] = sess.get("session_halt_reason")
-            status["drawdown_pct"] = round(drawdown_pct, 2)
-            status["peak_balance_usdt"] = peak
-            status["current_balance_usdt"] = current
+            # RC-10: Python ENGINE disabled — no fallback available
+            # RC-10：Python ENGINE 已禁用 — 無降級路徑
+            logger.debug("Rust engine unavailable, no drawdown data")
         except Exception as e:
             logger.debug("Failed to add session drawdown info to risk status: %s", e)
 
@@ -253,12 +246,14 @@ def unhalt_session(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Manually unhalt session after drawdown circuit breaker / 手动解除 session 熔断"""
-    engine = _get_engine()
+    # RC-10: Python ENGINE disabled — use PAPER_STORE directly
+    # RC-10：Python ENGINE 已禁用 — 直接使用 PAPER_STORE
+    from .paper_trading_routes import PAPER_STORE
 
     def mutator(state):
         state["session"]["session_halted"] = False
         state["session"]["session_halt_reason"] = None
         return state
 
-    engine.store.mutate(mutator)
+    PAPER_STORE.mutate(mutator)
     return _risk_response({"message": "session_unhalted"})

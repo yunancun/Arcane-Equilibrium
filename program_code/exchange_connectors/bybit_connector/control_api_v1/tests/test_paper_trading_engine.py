@@ -480,6 +480,9 @@ class TestPaperTradingAPI:
     """API route integration tests."""
 
     def test_session_start_via_api(self):
+        """RC-10: Python ENGINE=None. Rust engine is sole paper trading engine.
+        Accept 200 (Rust available, source=rust_engine) or 410 (Rust unavailable).
+        RC-10：Python 引擎已廢棄，Rust 為唯一紙上交易引擎。接受 200 或 410。"""
         client = build_api_client()
         # Clean up any session left by prior tests / 清理前面測試留下的 session
         client.post("/api/v1/paper/session/stop", headers=auth_headers())
@@ -488,10 +491,11 @@ class TestPaperTradingAPI:
             headers=auth_headers(),
             json={"initial_balance": 5000.0},
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["is_simulated"] is True
-        assert data["data"]["session"]["session_state"] == "active"
+        assert r.status_code in (200, 410), f"Expected 200 or 410, got {r.status_code}"
+        if r.status_code == 200:
+            data = r.json()
+            assert data.get("source") == "rust_engine" or \
+                data.get("data", {}).get("source") == "rust_engine"
 
     def test_session_status_via_api(self):
         client = build_api_client()
@@ -502,6 +506,8 @@ class TestPaperTradingAPI:
         assert r.json()["is_simulated"] is True
 
     def test_order_submit_via_api(self):
+        """RC-10: order/submit disabled (Python ENGINE=None). Expect 410.
+        RC-10：下單路由已停用（Python 引擎廢棄），預期 410。"""
         client = build_api_client()
         client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.post(
@@ -515,7 +521,7 @@ class TestPaperTradingAPI:
                 "price": 50000.0,
             },
         )
-        assert r.status_code == 200
+        assert r.status_code == 410, f"Expected 410 (disabled), got {r.status_code}"
 
     def test_get_orders_via_api(self):
         client = build_api_client()
@@ -537,6 +543,8 @@ class TestPaperTradingAPI:
         assert r.status_code == 200
 
     def test_tick_via_api(self):
+        """RC-10: tick route disabled (Python ENGINE=None). Expect 410.
+        RC-10：tick 路由已停用（Python 引擎廢棄），預期 410。"""
         client = build_api_client()
         client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.post(
@@ -544,7 +552,7 @@ class TestPaperTradingAPI:
             headers=auth_headers(),
             json={"market_prices": {"BTCUSDT": 60000.0}},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410, f"Expected 410 (disabled), got {r.status_code}"
 
     def test_e1_observation_fires_on_tick_close(self, active_engine):
         """E1 fix (Session 12): observations must be written for positions closed
@@ -676,11 +684,15 @@ class TestPaperTradingAPI:
         assert fills <= 10, f"Expected ≤10 fills, got {fills} (fragmentation bug still present)"
 
     def test_export_via_api(self):
+        """RC-10: export now returns source=rust_engine (Rust is sole engine).
+        RC-10：導出現在返回 source=rust_engine（Rust 為唯一引擎）。"""
         client = build_api_client()
         client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         r = client.get("/api/v1/paper/export", headers=auth_headers())
         assert r.status_code == 200
-        assert r.json()["data"]["is_simulated"] is True
+        data = r.json()
+        assert data.get("source") == "rust_engine" or \
+            data.get("data", {}).get("source") == "rust_engine"
 
     def test_auth_required(self):
         client = build_api_client()
@@ -688,22 +700,24 @@ class TestPaperTradingAPI:
         assert r.status_code in (401, 403, 422)
 
     def test_session_lifecycle_via_api(self):
+        """RC-10: pause/resume/stop disabled (Python ENGINE=None). Expect 410.
+        Start accepts 200 (Rust) or 410 (Rust unavailable).
+        RC-10：pause/resume/stop 已停用，預期 410。start 接受 200 或 410。"""
         client = build_api_client()
         # Clean up any session left by prior tests / 清理前面測試留下的 session
         client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        # Start
+        # Start — accept 200 (Rust available) or 410 (Rust unavailable)
         r = client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
-        assert r.status_code == 200
-        # Pause
+        assert r.status_code in (200, 410), f"Expected 200 or 410, got {r.status_code}"
+        # Pause — disabled
         r = client.post("/api/v1/paper/session/pause", headers=auth_headers())
-        assert r.status_code == 200
-        # Resume
+        assert r.status_code == 410, f"Expected 410 for pause, got {r.status_code}"
+        # Resume — disabled
         r = client.post("/api/v1/paper/session/resume", headers=auth_headers())
-        assert r.status_code == 200
-        # Stop
+        assert r.status_code == 410, f"Expected 410 for resume, got {r.status_code}"
+        # Stop — disabled
         r = client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        assert r.status_code == 200
-        assert r.json()["data"]["session"]["session_state"] == "completed"
+        assert r.status_code == 410, f"Expected 410 for stop, got {r.status_code}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

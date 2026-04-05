@@ -57,18 +57,22 @@ RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
 # 符号白名单已移除 — 掃描器 + Guardian + H0 Gate 提供了足夠的篩選機制。
 # T2.02: Initialize and inject PerceptionPlane / 初始化并注入感知平面
 PERCEPTION_PLANE = PerceptionPlane()
-ENGINE = PaperTradingEngine(PAPER_STORE, risk_manager=RISK_MANAGER)
-
-# Restore agent P2 risk params from paper state (session-scoped, e.g. trailing stops, cooldowns)
-# 從 paper state 恢復 Agent P2 風控參數（Session 範圍：trailing stops、cooldown 等運行狀態）
-try:
-    _paper_state = PAPER_STORE.read()
-    _risk_state = _paper_state.get("risk")
-    if _risk_state:
-        RISK_MANAGER.load_risk_state(_risk_state)
-        logger.info("Agent risk state restored from paper state / Agent 風控狀態已從 paper state 恢復")
-except Exception as _e:
-    logger.warning("Failed to restore agent risk state: %s (non-fatal)", _e)
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEPRECATED(RC-10): Python PaperTradingEngine is DISABLED.
+# RC-10 廢棄：Python PaperTradingEngine 已禁用。
+#
+# Rust openclaw_engine is the SOLE paper trading engine.
+# Rust openclaw_engine 是唯一的紙上交易引擎。
+# All paper state reads go through ipc_state_reader (Rust snapshot).
+# 所有 paper 狀態讀取通過 ipc_state_reader（Rust 快照）。
+# Python ENGINE is set to None to prevent dual-engine operation.
+# Python ENGINE 設為 None 以防止雙引擎同時運行。
+# ═══════════════════════════════════════════════════════════════════════════════
+ENGINE = None  # type: ignore[assignment]
+logger.info(
+    "Python PaperTradingEngine DISABLED — Rust engine is the sole paper trading engine (RC-10) / "
+    "Python PaperTradingEngine 已禁用 — Rust 引擎是唯一的紙上交易引擎（RC-10）"
+)
 
 # T7.01: Initialize BybitDemoConnector / 初始化 Bybit Demo 连接器
 from .bybit_demo_connector import BybitDemoConnector  # noqa: E402
@@ -136,15 +140,7 @@ def _protective_order_execute_callback(order, market_state):
         logger.error("Failed to submit protective order %s to Demo API: %s", order.order_id, e)
 
 PROTECTIVE_ORDER_MANAGER = ProtectiveOrderManager(on_execute_callback=_protective_order_execute_callback)
-ENGINE.set_protective_order_manager(PROTECTIVE_ORDER_MANAGER)
-
-# T7.01: Inject BybitDemoConnector into ENGINE / 向 ENGINE 注入 Demo 连接器
-if DEMO_CONNECTOR is not None:
-    ENGINE.set_demo_connector(DEMO_CONNECTOR)
-
-# T7.04: Inject BybitDemoSync into ENGINE / 向 ENGINE 注入 Demo 同步器
-if DEMO_SYNC is not None:
-    ENGINE.set_demo_sync(DEMO_SYNC)
+# RC-10: ENGINE is None — skip all injections / ENGINE 為 None — 跳過所有注入
 
 # Governance Hub (SM-01 + SM-04 + SM-02 + EX-04 integration)
 # 治理集線器（授權 + 風控 + 租約 + 對賬 集成）
@@ -391,7 +387,9 @@ except ImportError as _h0_import_err:
         _h0_import_err, _h0_import_err,
     )
 
-ENGINE.set_governance_hub(GOV_HUB)
+# RC-10: ENGINE is None — skip injection / ENGINE 為 None — 跳過注入
+if ENGINE is not None:
+    ENGINE.set_governance_hub(GOV_HUB)
 RISK_MANAGER.set_governance_hub(GOV_HUB)
 
 # T2.04: Initialize and inject ChangeAuditLog / 初始化并注入變更審計日誌
@@ -399,9 +397,8 @@ from .change_audit_log import ChangeAuditLog  # noqa: E402
 CHANGE_AUDIT_LOG = ChangeAuditLog()
 GOV_HUB.set_change_audit_log(CHANGE_AUDIT_LOG)
 
-# T3.06: Inject ChangeAuditLog into RiskManager and PaperTradingEngine
+# T3.06: Inject ChangeAuditLog into RiskManager
 RISK_MANAGER.set_change_audit_log(CHANGE_AUDIT_LOG)
-ENGINE.set_change_audit_log(CHANGE_AUDIT_LOG)
 
 # T2.05: Initialize and inject RecoveryApprovalGate / 初始化并注入恢復審批門禁
 from .recovery_approval_gate import RecoveryApprovalGate  # noqa: E402
@@ -448,9 +445,9 @@ try:
         return callback
 
     LEARNING_TIER_GATE = LearningTierGate(audit_callback=_make_learning_tier_audit_callback())
-    ENGINE.set_learning_tier_gate(LEARNING_TIER_GATE)
+    # RC-10: ENGINE is None — skip ENGINE injection
     GOV_HUB.set_learning_tier_gate(LEARNING_TIER_GATE)
-    logger.info("LearningTierGate injected into ENGINE and GovernanceHub")
+    logger.info("LearningTierGate injected into GovernanceHub (ENGINE disabled RC-10)")
 except Exception as e:
     logger.error("Failed to initialize LearningTierGate: %s", e)
     LEARNING_TIER_GATE = None

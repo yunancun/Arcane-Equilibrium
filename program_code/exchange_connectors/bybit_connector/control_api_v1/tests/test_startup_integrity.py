@@ -6,7 +6,7 @@ from __future__ import annotations
 驗證 main.py 的 _startup_integrity_check 事件處理器在：
   1. 所有硬性依賴均已注入時 — 正常啟動（不 raise）
   2. 缺少 governance_hub (GOV_HUB) 時 — RuntimeError 含 "governance_hub"
-  3. 缺少 paper_engine (ENGINE) 時 — RuntimeError 含 "paper_engine"
+  3. ENGINE = None 時 — 正常啟動（RC-10: Rust 為唯一引擎，Python ENGINE 已停用）
   4. 缺少 risk_manager (RISK_MANAGER) 時 — RuntimeError 含 "risk_manager"
   5. PIPELINE_BRIDGE = None 時 — 警告但正常啟動（降級模式允許）
   6. H0_GATE = None 時 — 警告但正常啟動（降級模式允許）
@@ -14,7 +14,7 @@ from __future__ import annotations
 Validates that main.py's _startup_integrity_check event handler:
   1. Passes when all hard-required deps are injected
   2. Raises RuntimeError mentioning "governance_hub" when GOV_HUB is None
-  3. Raises RuntimeError mentioning "paper_engine" when ENGINE is None
+  3. Starts normally when ENGINE is None (RC-10: Rust is sole engine, Python ENGINE disabled)
   4. Raises RuntimeError mentioning "risk_manager" when RISK_MANAGER is None
   5. Starts with only a warning when PIPELINE_BRIDGE is None (degraded mode)
   6. Starts with only a warning when H0_GATE is None (degraded mode)
@@ -106,19 +106,20 @@ class TestStartupIntegrityCheck:
             )
         assert "governance_hub" in str(exc_info.value)
 
-    def test_missing_paper_engine_raises_runtime_error(self):
-        """ENGINE = None → RuntimeError must mention 'paper_engine'.
-        ENGINE 為 None → RuntimeError 必須包含 'paper_engine'。
+    def test_engine_none_startup_passes(self):
+        """ENGINE = None → startup must NOT raise (RC-10: Rust is sole engine).
+        ENGINE 為 None → 啟動不應 raise（RC-10: Rust 為唯一引擎，Python ENGINE 已停用）。
         """
-        with pytest.raises(RuntimeError) as exc_info:
-            _run_startup(
-                gov_hub=_make_stub(),
-                engine=None,
-                risk_manager=_make_stub(),
-                pipeline_bridge=_make_stub(),
-                h0_gate=_make_stub(),
-            )
-        assert "paper_engine" in str(exc_info.value)
+        # Since RC-10, paper_engine is no longer hard-required;
+        # Rust is the sole tick-processing engine.
+        # RC-10 後 paper_engine 不再是硬性依賴；Rust 為唯一 tick 處理引擎。
+        _run_startup(
+            gov_hub=_make_stub(),
+            engine=None,
+            risk_manager=_make_stub(),
+            pipeline_bridge=_make_stub(),
+            h0_gate=_make_stub(),
+        )
 
     def test_missing_risk_manager_raises_runtime_error(self):
         """RISK_MANAGER = None → RuntimeError must mention 'risk_manager'.

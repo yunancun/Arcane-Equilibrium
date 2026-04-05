@@ -223,9 +223,10 @@ async def _startup_integrity_check() -> None:
 
     # Hard-required: these must never be None in any environment
     # 硬性要求：任何環境下均不得為 None
+    # RC-10: ENGINE removed — Python PaperTradingEngine disabled, Rust is sole engine
+    # RC-10：ENGINE 已移除 — Python PaperTradingEngine 已禁用，Rust 是唯一引擎
     _hard_required: dict[str, object] = {
         "governance_hub (GOV_HUB)": GOV_HUB,
-        "paper_engine (ENGINE)": ENGINE,
         "risk_manager (RISK_MANAGER)": RISK_MANAGER,
     }
     missing = [name for name, dep in _hard_required.items() if dep is None]
@@ -261,14 +262,14 @@ async def _startup_integrity_check() -> None:
     # 服務器重啟後，現有 session 從文件載入，不會重新觸發 start，導致授權缺失。
     # 修復：啟動時檢查 session 狀態，若需要則補授權（fail-open，不阻斷啟動）。
     try:
-        # get_session_status() is the correct method name (get_session_state does not exist)
-        # get_session_status() 是正確方法名（get_session_state 不存在）
-        _session_state = ENGINE.get_session_status() if hasattr(ENGINE, "get_session_status") else None
-        _is_active = False
-        if _session_state is not None:
-            # get_session_status returns {"session": {...}, "pnl": {...}, ...}
-            _sess = _session_state.get("session") or _session_state
-            _is_active = _sess.get("session_state") == "active"
+        # RC-10: Use Rust engine snapshot for session state, not Python ENGINE
+        # RC-10：使用 Rust 引擎快照獲取 session 狀態，不用 Python ENGINE
+        from .ipc_state_reader import get_rust_reader as _get_rust_reader
+        _rust_reader = _get_rust_reader()
+        _session_state = _rust_reader.get_paper_state() if _rust_reader.is_available() else None
+        # Rust snapshot is flat: {balance, positions, ...} — if it exists, engine is active
+        # Rust 快照是扁平結構 — 存在即表示引擎在運行
+        _is_active = _session_state is not None
 
         if _is_active and GOV_HUB is not None:
             if not GOV_HUB.is_authorized():

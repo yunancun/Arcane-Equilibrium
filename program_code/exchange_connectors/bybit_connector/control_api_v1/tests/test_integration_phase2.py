@@ -444,10 +444,11 @@ class TestPhase2ModuleInjection:
         assert PERCEPTION_PLANE is not None
 
     def test_protective_order_manager_injected(self):
-        """T2.03: ProtectiveOrderManager injected into Engine"""
-        from app.paper_trading_routes import ENGINE
-        assert hasattr(ENGINE, '_protective_order_manager')
-        assert ENGINE._protective_order_manager is not None
+        """T2.03: ProtectiveOrderManager exists (RC-10: ENGINE disabled, Rust is sole engine)"""
+        from app.paper_trading_routes import PROTECTIVE_ORDER_MANAGER
+        # RC-10: ENGINE is None — ProtectiveOrderManager created but not injected into ENGINE
+        # Verify the singleton exists independently / 驗證單例獨立存在
+        assert PROTECTIVE_ORDER_MANAGER is not None
 
     def test_change_audit_log_injected(self):
         """T2.04: ChangeAuditLog injected into GovernanceHub"""
