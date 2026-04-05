@@ -3,6 +3,24 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-05
 
+### EXT-1：Exchange-as-Truth 實現（2026-04-05 · Session 9）
+
+**核心改動：**
+- `config.rs`：TradingMode enum (PaperOnly/Exchange) + trading_mode 冷參數
+- `intent_processor.rs`：ExchangeGateResult struct + process_gates_only() 方法（門禁不模擬成交）
+- `tick_pipeline.rs`：on_tick 雙模式分叉 + apply_confirmed_fill() + pending_close_symbols 防止重複止損
+- `event_consumer.rs`：ExchangeEvent channel + PendingOrder 追蹤 + order_id→order_link_id 映射 + 5s/60s 超時
+- `main.rs`：ExchangeEvent channel 從 ExecutionListener 接入 event_consumer
+- `ipc_server.rs`：get_state + PipelineSnapshot 加 trading_mode
+- `paper_trading_routes.py`：session status 加 trading_mode
+
+**E2 審計修復：**
+- P0-1：Fill 匹配改用 order_id→order_link_id 映射（不再 symbol+side 模糊匹配）
+- P0-2：交易所模式 zero-qty 防護（精度取整後數量為零跳過派發）
+- P0-3：pending_close_symbols 防止交易所模式止損無限循環
+
+**測試基準線：** 852 Rust + 1075 Python = 1927 tests（0 failures · 1 pre-existing grafana test skip）
+
 ### Phase 1 Day 0 + G1 + G2：sqlx PG 層 + FeatureCollector + 10 市場表（2026-04-05 · commits 8e0cccd~pending）
 
 - **Day 0**：event_consumer.rs 提取（main 1123→783）+ database/ 模組 + sqlx 0.8 + Docker test PG

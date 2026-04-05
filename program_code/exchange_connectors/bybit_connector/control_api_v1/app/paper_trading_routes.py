@@ -400,6 +400,7 @@ def get_session_status(
     # Read paper_paused from full snapshot / 從完整快照讀取暫停狀態
     full_snapshot = rust.get_snapshot() if rust.is_available() else None
     is_paused = full_snapshot.get("paper_paused", False) if full_snapshot else False
+    trading_mode = full_snapshot.get("trading_mode", "paper_only") if full_snapshot else "paper_only"
     # Wrap flat Rust snapshot into nested structure expected by GUI
     # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
     positions = rust_state.get("positions", [])
@@ -418,6 +419,7 @@ def get_session_status(
             "peak_balance_usdt": peak,
             "session_halted": False,
             "session_halt_reason": None,
+            "trading_mode": trading_mode,
         },
         "pnl": {
             "realized_pnl": realized,

@@ -353,6 +353,7 @@ fn handle_get_state(id: serde_json::Value, config: &Arc<ConfigManager>) -> JsonR
     let state = serde_json::json!({
         "status": "running",
         "system_mode": "demo_only",
+        "trading_mode": cfg.trading_mode.to_string(),
         "max_open_positions": cfg.max_open_positions,
         "max_total_exposure_pct": cfg.max_total_exposure_pct,
         "ws_url": cfg.ws_url,
@@ -589,6 +590,7 @@ mod tests {
             recent_fills: vec![],
             klines: HashMap::new(),
             paper_paused: false,
+            trading_mode: crate::config::TradingMode::PaperOnly,
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

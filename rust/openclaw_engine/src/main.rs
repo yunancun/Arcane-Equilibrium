@@ -532,10 +532,14 @@ async fn async_main(config: Arc<ConfigManager>) {
     // ------------------------------------------------------------------
     let _private_ws_handle = if let Some((api_key, api_secret)) = api_credentials {
         use openclaw_engine::bybit_private_ws::BybitPrivateWs;
+        use openclaw_engine::event_consumer::ExchangeEvent;
         use openclaw_engine::execution_listener::ExecutionListener;
         use std::sync::RwLock;
 
         let (priv_tx, priv_rx) = mpsc::channel(512);
+        // EXT-1: Channel for forwarding exchange events to event consumer
+        let (exchange_event_tx, exchange_event_rx) =
+            mpsc::unbounded_channel::<ExchangeEvent>();
 
         // Shared state updated by callbacks / 回調更新的共享狀態
         let bybit_balance: Arc<RwLock<Option<f64>>> = Arc::new(RwLock::new(None));
@@ -583,7 +587,8 @@ async fn async_main(config: Arc<ConfigManager>) {
             );
         });
 
-        // Item 5: on_fill → log execution
+        // Item 5: on_fill → log execution + EXT-1: forward to event consumer
+        let fill_tx = exchange_event_tx.clone();
         listener.set_on_fill(move |exec| {
             info!(
                 exec_id = %exec.exec_id,
@@ -594,16 +599,20 @@ async fn async_main(config: Arc<ConfigManager>) {
                 fee = %exec.exec_fee,
                 "WS fill / WS 成交"
             );
+            let _ = fill_tx.send(ExchangeEvent::Fill(exec));
         });
 
-        // on_order_update → log status changes
+        // on_order_update → log status changes + EXT-1: forward to event consumer
+        let order_tx = exchange_event_tx.clone();
         listener.set_on_order_update(move |order| {
             debug!(
                 order_id = %order.order_id,
                 symbol = %order.symbol,
                 status = %order.order_status,
+                link_id = %order.order_link_id,
                 "WS order update / WS 訂單更新"
             );
+            let _ = order_tx.send(ExchangeEvent::OrderUpdate(order));
         });
 
         // Spawn listener task / 啟動監聽器任務
@@ -654,7 +663,7 @@ async fn async_main(config: Arc<ConfigManager>) {
         };
 
         info!("Private WS + ExecutionListener started / 私有 WS + 執行監聯器已啟動");
-        Some((priv_ws_handle, listener_handle, bybit_balance, api_pnl))
+        Some((priv_ws_handle, listener_handle, bybit_balance, api_pnl, exchange_event_rx))
     } else {
         info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
         None
@@ -662,8 +671,16 @@ async fn async_main(config: Arc<ConfigManager>) {
 
     // Extract shared state Arcs for event consumer (H1+H2 fix: bridge WS data → pipeline)
     // 提取共享狀態 Arc 給事件消費者（H1+H2 修復：橋接 WS 數據 → 管線）
-    let shared_bybit_balance = _private_ws_handle.as_ref().map(|h| Arc::clone(&h.2));
-    let shared_api_pnl = _private_ws_handle.as_ref().map(|h| Arc::clone(&h.3));
+    // Extract shared state + exchange_event_rx from private WS handle
+    // Keep WS/listener handles for shutdown, move exchange_event_rx out
+    let (shared_bybit_balance, shared_api_pnl, shared_exchange_event_rx, _priv_handles) = {
+        match _private_ws_handle {
+            Some((ws_h, listener_h, bal, pnl, exch_rx)) => {
+                (Some(Arc::clone(&bal)), Some(Arc::clone(&pnl)), Some(exch_rx), Some((ws_h, listener_h)))
+            }
+            None => (None, None, None, None),
+        }
+    };
 
     // ------------------------------------------------------------------
     // Event consumer — feeds into TickPipeline for paper trading
@@ -814,6 +831,7 @@ async fn async_main(config: Arc<ConfigManager>) {
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx,
             context_tx,
+            exchange_event_rx: shared_exchange_event_rx,
         };
         tokio::spawn(run_event_consumer(deps))
     };
@@ -841,7 +859,7 @@ async fn async_main(config: Arc<ConfigManager>) {
         let _ = event_handle.await;
         // M4 fix: Await private WS handles if present
         // M4 修復：等待私有 WS 任務完成
-        if let Some((priv_ws_h, listener_h, _, _)) = _private_ws_handle {
+        if let Some((priv_ws_h, listener_h)) = _priv_handles {
             let _ = priv_ws_h.await;
             let _ = listener_h.await;
         }
