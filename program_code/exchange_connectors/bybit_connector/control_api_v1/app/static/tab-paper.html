@@ -192,22 +192,15 @@ function togglePrice() {
 }
 
 async function submitOrder() {
-  const body = {
-    symbol: $('o-symbol').value.trim().toUpperCase(),
-    side: $('o-side').value,
-    order_type: $('o-type').value,
-    qty: parseFloat($('o-qty').value),
-  };
-  if ($('o-type').value === 'limit') body.price = parseFloat($('o-price').value);
-  const d = await ocPost('/api/v1/paper/order/submit', body);
-  if (d) { ocToast('订单已提交', 'success'); loadOrders(); loadPositions(); }
-  else ocToast('下单失败', 'error');
+  // RC-10: Manual order submission disabled — Rust engine manages orders via strategies
+  // RC-10：手動下單已禁用 — Rust 引擎通過策略管理訂單
+  ocToast('手动下单已禁用 — Rust 引擎自主管理交易', 'error');
 }
 
 async function cancelOrder(orderId) {
-  const d = await ocPost('/api/v1/paper/order/cancel', { order_id: orderId });
-  if (d) { ocToast('订单已取消', 'success'); loadOrders(); }
-  else ocToast('取消失败', 'error');
+  // RC-10: Manual order cancel disabled — Rust engine manages order lifecycle
+  // RC-10：手動取消訂單已禁用
+  ocToast('手动取消已禁用 — Rust 引擎自主管理订单', 'error');
 }
 
 // ─── Data Loading ─────────────────────────────────────────────
@@ -499,14 +492,8 @@ window.addEventListener('occurrencychange', loadAll);
     const gr = ov.data.global_runtime || {};
     const mode = (gr.derived && gr.derived.global_mode_state) || gr.global_mode_state || '';
     const autoModes = ['observe_only', 'shadow_only', 'demo_reserved'];
-    if (autoModes.includes(mode)) {
-      const fd = await ocApi('/api/v1/paper/market-feed/status');
-      const running = fd && fd.data && (fd.data.dispatcher_running || fd.data.running || fd.data.is_running);
-      if (!running) {
-        await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
-        loadFeed();
-      }
-    }
+    // RC-12: Market feed managed by Rust engine — no Python dispatcher needed
+    // RC-12：行情流由 Rust 引擎管理 — 不需要 Python 分發器
   } catch (e) {}
 })();
 </script>
