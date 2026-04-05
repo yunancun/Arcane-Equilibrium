@@ -237,6 +237,31 @@ impl TickPipeline {
         // 更新每交易對成交額用於動態滑點（來自 ticker 事件）
         if event.turnover_24h > 0.0 {
             self.paper_state.set_latest_turnover(&event.symbol, event.turnover_24h);
+
+            // Phase 1 (F-2 fix): Emit TickerSnapshot to market writer for ticker events.
+            // Phase 1（F-2 修復）：為 ticker 事件發送 TickerSnapshot 到市場寫入器。
+            if let Some(ref tx) = self.market_data_tx {
+                let spread = if event.ask_price > 0.0 && event.bid_price > 0.0 {
+                    (event.ask_price - event.bid_price) / event.last_price * 10_000.0
+                } else {
+                    0.0
+                };
+                let _ = tx.try_send(crate::database::MarketDataMsg::TickerSnapshot {
+                    ts_ms: event.ts_ms,
+                    symbol: event.symbol.clone(),
+                    last_price: event.last_price,
+                    mark_price: 0.0,   // not available in PriceEvent yet
+                    index_price: 0.0,  // not available in PriceEvent yet
+                    best_bid: event.bid_price,
+                    best_ask: event.ask_price,
+                    bid_size: 0.0,     // not available in PriceEvent yet
+                    ask_size: 0.0,     // not available in PriceEvent yet
+                    volume_24h: event.volume_24h,
+                    turnover_24h: event.turnover_24h,
+                    spread_bps: spread,
+                    open_interest: 0.0, // not available in PriceEvent yet
+                });
+            }
         }
 
         // Item 9 (M3 fix): ADL alert monitoring
@@ -274,11 +299,26 @@ impl TickPipeline {
             return self.maybe_canary_record(event, None, vec![], vec![], tick_duration_us);
         }
 
-        // Step 1: Kline aggregation
-        self.kline_manager.on_tick(
+        // Step 1: Kline aggregation — collect closed bars for DB write.
+        // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
+        let closed_bars = self.kline_manager.on_tick(
             &event.symbol, event.last_price, event.ts_ms,
             event.volume_24h, 0.0,
         );
+
+        // Phase 1: Emit KlineClose for each closed bar to market writer (F-2 audit fix).
+        // Phase 1：為每根已關閉 K 線發送 KlineClose 到市場寫入器（F-2 審計修復）。
+        if let Some(ref tx) = self.market_data_tx {
+            for (timeframe, bar) in &closed_bars {
+                if tx.try_send(crate::database::MarketDataMsg::KlineClose {
+                    symbol: event.symbol.clone(),
+                    timeframe: timeframe.clone(),
+                    bar: bar.clone(),
+                }).is_err() {
+                    self.market_tx_dropped += 1;
+                }
+            }
+        }
 
         // Step 2: Compute indicators (need enough 1m bars)
         // 步驟 2：計算指標（需要足夠的 1 分鐘 K 線）
