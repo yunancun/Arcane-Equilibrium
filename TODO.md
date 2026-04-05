@@ -1,8 +1,8 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-05（Session 9 · EXT-1 + L3 Audit + Risk Config · 1075 Py + 856 Rust = 1931）
+# 最後更新：2026-04-05（Session 9b · Ops Fixes + Risk GUI · 1075 Py + 856 Rust = 1931）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
-# ★ 工程日誌：docs/worklogs/2026-04-05--session9_ext1_risk_config.md
+# ★ 工程日誌：docs/worklogs/2026-04-05--session9_ops_fixes_risk_gui.md
 
 ---
 
@@ -433,27 +433,27 @@ Exchange 模式流程：
 > 所有算法已存在（2000+ 行），問題是純粹的接線。
 
 ### Phase A: H0Gate 接入 tick_pipeline
-- [ ] RRC-1-A1：tick_pipeline 加 H0Gate 實例 + on_tick Step 0.5 調用 h0.check()
-- [ ] RRC-1-A2：main.rs / event_consumer 定期 update_health / update_risk / update_price_ts
-- [ ] RRC-1-A3：H0Gate shadow mode 先觀察 1 週再啟用阻斷
+- [x] RRC-1-A1：tick_pipeline 加 H0Gate 實例 + on_tick Step 0.5 調用 h0.check()
+- [x] RRC-1-A2：main.rs / event_consumer 定期 update_health / update_risk / update_price_ts
+- [x] RRC-1-A3：H0Gate shadow mode 先觀察 1 週再啟用阻斷
 
 ### Phase B: check_order_allowed 接入 IntentProcessor
-- [ ] RRC-1-B1：IntentProcessor 新增 Gate 0（check_order_allowed 5 check）
-- [ ] RRC-1-B2：新增 daily_start_balance + daily_loss_pct 追蹤（event_consumer）
-- [ ] RRC-1-B3：exposure / correlated_exposure 計算（從 paper_state.positions + latest_prices）
-- [ ] RRC-1-B4：RiskManagerConfig 從 RuntimeConfig 初始化 + IPC 可更新
+- [x] RRC-1-B1：IntentProcessor 新增 Gate 2.7（check_order_allowed 5 check，P1 sizing 後）
+- [x] RRC-1-B2：新增 daily_start_balance + daily_loss_pct 追蹤（IntentProcessor，UTC midnight reset）
+- [x] RRC-1-B3：exposure 計算（compute_exposure_pct from paper_state.positions + latest_prices）
+- [x] RRC-1-B4：RiskManagerConfig 從 engine.toml 初始化 + IntentProcessor.update_risk_config()
 
 ### Phase C: check_position_on_tick 替換 check_stops
-- [ ] RRC-1-C1：tick_pipeline 加 PriceHistoryTracker（每 tick 記錄 → ATR + spike）
-- [ ] RRC-1-C2：Step 6 替換 check_stops → check_position_on_tick（9 check）
-- [ ] RRC-1-C3：新增 consecutive_losses / trailing_stops / spike_suppression 狀態
-- [ ] RRC-1-C4：RiskAction 處理（ClosePosition/HaltSession/SetCooldown）
+- [x] RRC-1-C1：tick_pipeline 加 PriceHistoryTracker（每 tick 記錄 → ATR + spike）
+- [x] RRC-1-C2：Step 6 替換 check_stops → check_position_on_tick（9 check）
+- [x] RRC-1-C3：新增 consecutive_losses 追蹤（盈利重置、虧損累計）
+- [x] RRC-1-C4：RiskAction 處理（ClosePosition/HaltSession/SetCooldown → H0Gate cooldown）
 
 ### Phase D: 風控單一真相源
-- [ ] RRC-1-D1：PipelineSnapshot 加入完整 stop_config + guardian_config + risk_state
-- [ ] RRC-1-D2：GUI 風控讀取改為 Rust 快照（不再從 Python RiskManager 讀）
-- [ ] RRC-1-D3：Python RiskManager 降級（config storage only，不參與執行）
-- [ ] RRC-1-D4：risk/status 端點改從 Rust 快照構建
+- [x] RRC-1-D1：PipelineSnapshot 加入 stop_config + guardian_config + risk_manager_config + consecutive_losses + session_halted + daily_loss_pct + session_drawdown_pct
+- [x] RRC-1-D2：GUI /status + /ai-context 改從 Rust 快照讀（ENGINE=None safe）
+- [x] RRC-1-D3：Python RiskManager 已為 config-only（無執行路徑方法被調用）
+- [x] RRC-1-D4：/config 端點附加 rust_active 區段（stop/guardian/risk configs from Rust）
 
 ### Phase E: P1/P2 清理
 - [ ] RRC-1-E1：修復 ai-context 端點（ENGINE=None 崩潰）

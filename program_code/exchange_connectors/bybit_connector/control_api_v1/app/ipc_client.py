@@ -358,6 +358,7 @@ class EngineIPCClient:
         max_leverage: float | None = None,
         max_drawdown_pct: float | None = None,
         max_same_direction_positions: int | None = None,
+        h0_shadow_mode: bool | None = None,
     ) -> dict[str, Any]:
         """
         Update risk config on Rust engine at runtime (GUI/Agent → IPC → Rust).
@@ -385,6 +386,8 @@ class EngineIPCClient:
             params["max_drawdown_pct"] = max_drawdown_pct
         if max_same_direction_positions is not None:
             params["max_same_direction_positions"] = max_same_direction_positions
+        if h0_shadow_mode is not None:
+            params["h0_shadow_mode"] = h0_shadow_mode
         return await self.call("update_risk_config", params=params)
 
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────

@@ -138,15 +138,19 @@
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-time-stop" type="number" step="1" min="1" max="720" style="width:80px" /><span style="font-size:12px">小时</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Session Drawdown / 最大回撤</div><div style="font-size:10px;color:var(--text-dim)">账户回撤超过此值则暂停交易</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:var(--blue)">ATR Multiplier / ATR 止损乘数</div><div style="font-size:10px;color:var(--text-dim)">基于 ATR 的动态止损距离。设为 0 则禁用 ATR 止损，使用固定百分比。值越大止损越远</div></div>
+          <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-atr-mult" type="number" step="0.5" min="0" max="10" style="width:80px" /><span style="font-size:12px">x</span></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:12px;font-weight:600">Max Session Drawdown / 最大回撤</div><div style="font-size:10px;color:var(--text-dim)">账户回撤超过此值则暂停交易。触发后需手动 Unhalt</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-drawdown" type="number" step="1" min="1" max="50" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Leverage / 最大杠杆</div><div style="font-size:10px;color:var(--text-dim)">单笔交易最大杠杆倍数</div></div>
+          <div><div style="font-size:12px;font-weight:600">Max Leverage / 最大杠杆</div><div style="font-size:10px;color:var(--text-dim)">单笔交易最大杠杆。超 2 倍则 Guardian 拒绝，1-2 倍则自动降低</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-leverage" type="number" step="1" min="1" max="100" style="width:80px" /><span style="font-size:12px">x</span></div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏损上限</div><div style="font-size:10px;color:var(--text-dim)">单日亏损超过此值后停止当日交易</div></div>
+          <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏损上限</div><div style="font-size:10px;color:var(--text-dim)">单日亏损超过此值后停止当日交易。UTC 零点重置</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-daily-loss" type="number" step="0.5" min="0.5" max="30" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
         <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:6px">&#x1F4BE; 保存设置 / Save Settings</button>
@@ -160,11 +164,127 @@
         <div class="oc-metric"><div class="oc-metric-label">Take Profit</div><div class="oc-metric-val green" id="s-tp" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Trailing Stop</div><div class="oc-metric-val yellow" id="s-trailing" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Time Stop</div><div class="oc-metric-val" id="s-time" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">ATR Multiplier</div><div class="oc-metric-val blue" id="s-atr" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="s-drawdown" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Max Leverage</div><div class="oc-metric-val" id="s-leverage" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Daily Loss</div><div class="oc-metric-val" id="s-daily" style="font-size:16px">--</div></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ═══ Position Sizing & Exposure / 仓位控制与曝险 ═══ -->
+<div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+  <h3>&#x1F4CA; 仓位控制与曝险 / Position Sizing & Exposure</h3>
+  <div id="explain-position-sizing"></div>
+  <div class="oc-grid-2" style="margin-top:10px">
+    <div style="display:grid;gap:10px">
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--yellow)">P1 Per-Trade Risk / 单笔风险上限</div>
+          <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例。越大允许单笔越重，越小则单笔更轻。</div>
+          <div style="font-size:10px;color:var(--text-dim)">关键影响：BTC/ETH 等高价资产需要至少 5-10% 才能产生最小手数</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-p1-risk" type="number" step="0.5" min="0.5" max="20" style="width:80px" /><span style="font-size:12px">%</span></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Max Single Position / 单笔最大持仓</div>
+          <div style="font-size:10px;color:var(--text-dim)">单个仓位占账户余额的最大比例。防止单一仓位过于集中</div>
+          <div style="font-size:10px;color:var(--text-dim)">过高 → 单笔亏损可能致命 | 过低 → 高价资产无法开仓</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-single-pos" type="number" step="5" min="5" max="100" style="width:80px" /><span style="font-size:12px">%</span></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Max Total Exposure / 总曝险上限</div>
+          <div style="font-size:10px;color:var(--text-dim)">所有持仓市值总和占账户余额的最大比例。超过则拒绝新开仓</div>
+          <div style="font-size:10px;color:var(--text-dim)">100% = 满仓上限 | 200% = 允许 2x 杠杆曝险</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-total-exp" type="number" step="10" min="10" max="500" style="width:80px" /><span style="font-size:12px">%</span></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Max Same-Direction / 同向最大持仓数</div>
+          <div style="font-size:10px;color:var(--text-dim)">同一方向（全做多/全做空）的最大持仓数量。Guardian 超限则拒绝</div>
+          <div style="font-size:10px;color:var(--text-dim)">过高 → 方向性集中风险 | 过低 → 限制策略多样性</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-same-dir" type="number" step="1" min="1" max="25" style="width:80px" /><span style="font-size:12px">个</span></div>
+      </div>
+
+    </div>
+
+    <div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
+        <div class="oc-metric"><div class="oc-metric-label">P1 Risk/Trade</div><div class="oc-metric-val yellow" id="s-p1-risk" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Single Pos</div><div class="oc-metric-val" id="s-single-pos" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Total Exposure</div><div class="oc-metric-val" id="s-total-exp" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val" id="s-same-dir" style="font-size:16px">--</div></div>
+      </div>
+      <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:8px">&#x1F4BE; 保存设置 / Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Session Protection / 连续亏损保护 ═══ -->
+<div class="oc-card">
+  <h3>&#x1F6A8; 连续亏损保护 / Loss Cooldown Settings</h3>
+  <div id="explain-cooldown"></div>
+  <div class="oc-grid-2" style="margin-top:10px">
+    <div style="display:grid;gap:10px">
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--red)">Cooldown Trigger / 冷却触发次数</div>
+          <div style="font-size:10px;color:var(--text-dim)">连续亏损达到此次数后进入冷却期，期间不允许新开仓</div>
+          <div style="font-size:10px;color:var(--text-dim)">过低 → 频繁冷却影响正常交易 | 过高 → 失去保护意义</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-count" type="number" step="1" min="1" max="20" style="width:80px" /><span style="font-size:12px">次</span></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--yellow)">Cooldown Duration / 冷却时长</div>
+          <div style="font-size:10px;color:var(--text-dim)">冷却期持续时间。到期后自动恢复交易，或可手动在 Danger Zone 重置</div>
+          <div style="font-size:10px;color:var(--text-dim)">过短 → 冷却效果不足 | 过长 → 可能错过行情</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-min" type="number" step="5" min="5" max="1440" style="width:80px" /><span style="font-size:12px">分钟</span></div>
+      </div>
+
+      <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:6px">&#x1F4BE; 保存设置 / Save Settings</button>
+    </div>
+
+    <div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">当前生效值 / Current Values</div>
+      <div class="oc-metrics" style="grid-template-columns:1fr 1fr">
+        <div class="oc-metric"><div class="oc-metric-label">Trigger Count</div><div class="oc-metric-val" id="s-cool-count" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Duration</div><div class="oc-metric-val" id="s-cool-min" style="font-size:16px">--</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ H0 Gate Control / H0 门控 ═══ -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.15)">
+  <h3>&#x1F6AA; H0 Gate / H0 入场门控</h3>
+  <div id="explain-h0"></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d;margin-top:10px">
+    <div>
+      <div style="font-size:13px;font-weight:600">Shadow Mode / 影子模式</div>
+      <div style="font-size:10px;color:var(--text-dim)">
+        <strong>开启 (Shadow)：</strong>H0 检查所有交易意图，记录哪些会被阻断，但<strong>不实际阻止</strong>任何交易。用于观察和调优门控规则<br>
+        <strong>关闭 (Active)：</strong>H0 正式生效，不通过检查的交易意图会被真正拒绝。适用于正式运行阶段
+      </div>
+      <div style="font-size:10px;margin-top:2px">
+        当前状态: <span id="h0-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
+      </div>
+    </div>
+    <label class="pf-toggle"><input type="checkbox" id="in-h0-shadow" onchange="saveH0ShadowMode()"><span class="slider"></span></label>
   </div>
 </div>
 
@@ -399,17 +519,33 @@ function toggleTPInputs() {
 
 async function saveRiskConfig() {
   const tpEnabled = $('in-tp-enabled').checked;
+  const trailingVal = parseFloat($('in-trailing').value);
   const body = {
     max_stop_loss_pct: parseFloat($('in-hard-stop').value) || 5,
     tp_enabled: tpEnabled,
     max_take_profit_pct: tpEnabled ? (parseFloat($('in-take-profit').value) || 20) : 20,
+    trailing_stop_pct: trailingVal > 0 ? trailingVal : null,
+    atr_multiplier: parseFloat($('in-atr-mult').value) || null,
     max_session_drawdown_pct: parseFloat($('in-drawdown').value) || 15,
     max_daily_loss_pct: parseFloat($('in-daily-loss').value) || 5,
     max_leverage: parseFloat($('in-leverage').value) || 20,
     max_holding_hours: parseFloat($('in-time-stop').value) || 72,
+    p1_risk_pct: parseFloat($('in-p1-risk').value) || 3,
+    max_single_position_pct: parseFloat($('in-single-pos').value) || 20,
+    max_total_exposure_pct: parseFloat($('in-total-exp').value) || 100,
+    max_same_direction_positions: parseInt($('in-same-dir').value) || 3,
+    consecutive_loss_cooldown_count: parseInt($('in-cooldown-count').value) || 3,
+    consecutive_loss_cooldown_minutes: parseFloat($('in-cooldown-min').value) || 30,
   };
   const d = await ocPost('/api/v1/paper/risk/config/global', body);
-  if (d) { ocToast('Risk settings saved', 'success'); loadAll(); }
+  if (d) { ocToast('Risk settings saved / 风控设置已保存', 'success'); loadAll(); }
+  else ocToast('Save failed / 保存失败', 'error');
+}
+
+async function saveH0ShadowMode() {
+  const enabled = $('in-h0-shadow').checked;
+  const d = await ocPost('/api/v1/paper/risk/config/global', { h0_shadow_mode: enabled });
+  if (d) { ocToast(enabled ? 'H0 Shadow Mode ON — 仅观察不阻断' : 'H0 Shadow Mode OFF — 正式门控', 'success'); }
   else ocToast('Save failed', 'error');
 }
 
@@ -603,10 +739,30 @@ async function loadRiskConfig() {
   ocSetText('s-tp', tpOn ? (gc.max_take_profit_pct + '% (ATR)') : '关闭 / OFF');
   $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
   ocSetText('s-trailing', p2.trailing_stop_pct != null ? p2.trailing_stop_pct + '%' : '--');
+  const atrMult = gc.atr_multiplier ?? p2.atr_multiplier ?? null;
+  ocSetText('s-atr', atrMult != null ? atrMult + 'x' : '关闭 / OFF');
   ocSetText('s-time', gc.max_holding_hours != null ? gc.max_holding_hours + 'h' : '--');
   ocSetText('s-drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : '--');
   ocSetText('s-leverage', gc.max_leverage != null ? gc.max_leverage + 'x' : '--');
   ocSetText('s-daily', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : '--');
+
+  // Position Sizing & Exposure display
+  const p1Risk = gc.p1_risk_pct ?? 2;
+  ocSetText('s-p1-risk', p1Risk + '%');
+  ocSetText('s-single-pos', (gc.max_single_position_pct || '--') + '%');
+  ocSetText('s-total-exp', (gc.max_total_exposure_pct || '--') + '%');
+  ocSetText('s-same-dir', gc.max_same_direction_positions || '--');
+
+  // Cooldown display
+  ocSetText('s-cool-count', gc.consecutive_loss_cooldown_count || '--');
+  ocSetText('s-cool-min', gc.consecutive_loss_cooldown_minutes != null ? gc.consecutive_loss_cooldown_minutes + ' min' : '--');
+
+  // H0 Shadow Mode
+  const h0Shadow = gc.h0_shadow_mode ?? true;
+  $('in-h0-shadow').checked = h0Shadow;
+  const h0El = $('h0-status');
+  h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
+  h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
   // Populate input fields (only if not already edited by user)
   if (!$('in-hard-stop').value) $('in-hard-stop').value = gc.max_stop_loss_pct || 5;
@@ -614,10 +770,17 @@ async function loadRiskConfig() {
   if (!$('in-take-profit').value) $('in-take-profit').value = gc.max_take_profit_pct || 20;
   toggleTPInputs();
   if (!$('in-trailing').value) $('in-trailing').value = p2.trailing_stop_pct || 3;
+  if (!$('in-atr-mult').value) $('in-atr-mult').value = atrMult || 2;
   if (!$('in-time-stop').value) $('in-time-stop').value = gc.max_holding_hours || 72;
   if (!$('in-drawdown').value) $('in-drawdown').value = gc.max_session_drawdown_pct || 15;
   if (!$('in-leverage').value) $('in-leverage').value = gc.max_leverage || 20;
   if (!$('in-daily-loss').value) $('in-daily-loss').value = gc.max_daily_loss_pct || 5;
+  if (!$('in-p1-risk').value) $('in-p1-risk').value = p1Risk;
+  if (!$('in-single-pos').value) $('in-single-pos').value = gc.max_single_position_pct || 20;
+  if (!$('in-total-exp').value) $('in-total-exp').value = gc.max_total_exposure_pct || 100;
+  if (!$('in-same-dir').value) $('in-same-dir').value = gc.max_same_direction_positions || 3;
+  if (!$('in-cooldown-count').value) $('in-cooldown-count').value = gc.consecutive_loss_cooldown_count || 3;
+  if (!$('in-cooldown-min').value) $('in-cooldown-min').value = gc.consecutive_loss_cooldown_minutes || 30;
 }
 
 async function loadAIContext() {
@@ -673,6 +836,21 @@ async function toggleDynamicRisk() {
     ocToast('设置失败', 'error');
   }
 }
+
+$('explain-position-sizing').innerHTML = ocExplain(
+  '控制每笔交易的仓位大小和总体曝险。P1 Risk 决定每笔交易最大投入比例，过低会导致高价资产（如 BTC）无法下单。',
+  'P1 Per-Trade Risk 是 Intent Processor 中的硬上限（p1_risk_pct），所有交易的仓位 = min(Kelly 计算量, 余额 × P1% / 价格)。BTC @$67K 时，P1=2% 对 $1000 余额只能下 0.0003 BTC（低于最小手数 0.001），需 7% 以上才能下单。Max Single Position 限制单仓占比。Total Exposure 限制所有仓位市值总和。Same-Direction 由 Guardian 检查，防止全做多或全做空的方向集中风险。'
+);
+
+$('explain-cooldown').innerHTML = ocExplain(
+  '连续亏损后自动进入冷却期，暂时禁止开新仓。防止情绪化追单造成更大亏损。冷却期到期自动恢复。',
+  '当连续亏损次数达到 Trigger Count 时，系统进入冷却状态，持续 Duration 分钟。冷却期间：不允许开新仓，但已有仓位的止损/止盈照常执行。冷却到期后自动恢复交易。也可在 Danger Zone 手动重置。建议保守设置：3 次 / 30 分钟。'
+);
+
+$('explain-h0').innerHTML = ocExplain(
+  'H0 是引擎的第一道交易准入检查，在任何 AI 治理层之前运行。检查数据新鲜度、系统健康、风险包络等。',
+  'H0 Gate 由 5 个子检查组成：(1) Freshness — tick 数据是否过期，(2) Health — CPU/内存/DB 延迟，(3) Eligibility — 币种/品类白名单，(4) Risk Envelope — 持仓数和曝险上限，(5) Cooldown — 冷却期。Shadow Mode 下，所有检查照常运行并记录日志，但不会真正阻止交易。适合初期调优阶段使用，确认规则合理后关闭 Shadow 进入正式门控。'
+);
 
 $('explain-auto-adjust').innerHTML = ocExplain(
   'Agent 根据交易表现自动调整参数。Sharpe 动态风控在累积足够数据后自动启用，表现好时增加风险，表现差时自动缩减。',

@@ -3,6 +3,25 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-05
 
+### Session 9b：Operational Fixes + Risk GUI Completion（2026-04-05）
+
+**3 生產 Bug 修復：**
+- `trading_writer.rs`：signals flush overflow → batch chunking (5000 rows/batch)
+- `tick_pipeline.rs`：BTC/ETH qty=0 → min_qty fallback (10% balance guard)
+- `ws_client.rs`：last_tick_ms=0 → unified `now_ms()` SystemTime fallback
+
+**風控 GUI 完善：**
+- Bug fix：trailing_stop 輸入框未接入 saveRiskConfig()
+- 新增 8 個控件：P1 Risk / ATR Multiplier / Max Single Pos / Total Exposure / Same-Direction / Cooldown Count+Duration / H0 Shadow Mode
+- 新增 3 個 GUI 區塊：仓位控制 + 亏损冷却 + H0 Gate
+- `risk_routes.py` GlobalConfigUpdate +5 fields + IPC push 映射
+- `ipc_client.py` +h0_shadow_mode 參數
+- E5+E2+PA+FA 四角色審計 0P0/1P1(fix)/2P2(fix)
+
+**QA 對沖分析：** 暫不啟用同幣種多倉（Bybit net-position 默認模式）
+
+---
+
 ### EXT-1：Exchange-as-Truth 實現（2026-04-05 · Session 9）
 
 **核心改動：**

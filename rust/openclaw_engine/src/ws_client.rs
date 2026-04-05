@@ -301,6 +301,15 @@ impl WsClient {
 // Message parsers / 消息解析器
 // ---------------------------------------------------------------------------
 
+/// Current time in milliseconds — fallback when Bybit omits timestamps (common on Demo).
+/// 當前時間毫秒 — Bybit 省略時間戳時的後備方案（Demo 常見）。
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Parse a Bybit public trade item into PriceEvent.
 /// 將 Bybit 公開交易項目解析為 PriceEvent。
 fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
@@ -308,8 +317,8 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
     let price = item.get("p").and_then(|v| v.as_str())?.parse::<f64>().ok()?;
     let ts = item
         .get("T")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or_else(now_ms);
     let volume = item
         .get("v")
         .and_then(|v| v.as_str())
@@ -341,7 +350,9 @@ fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
         .get("close")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
-    let ts = item.get("start").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ts = item.get("start")
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or_else(now_ms);
     let volume = item
         .get("volume")
         .and_then(|v| v.as_str())
@@ -388,7 +399,9 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
         best_bid.max(best_ask)
     };
 
-    let ts = obj.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ts = obj.get("ts")
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or_else(now_ms);
 
     let mut event = PriceEvent::new(symbol, mid_price, ts);
     event.bid_price = best_bid;
@@ -422,14 +435,7 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<u64>().ok())
         .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
-        .unwrap_or_else(|| {
-            // Fallback: use current time if Bybit ticker omits ts (common on Demo)
-            // 後備：如果 Bybit ticker 省略 ts（Demo 常見），使用當前時間
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
-        });
+        .unwrap_or_else(now_ms);
 
     let turnover = item.get("turnover24h")
         .and_then(|v| v.as_str())

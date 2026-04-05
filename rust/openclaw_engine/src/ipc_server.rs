@@ -514,13 +514,16 @@ async fn handle_update_risk_config(
     let max_drawdown_pct = params.get("max_drawdown_pct").and_then(|v| v.as_f64());
     let max_same_direction_positions = params.get("max_same_direction_positions")
         .and_then(|v| v.as_u64()).map(|v| v as usize);
+    // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
+    let h0_shadow_mode = params.get("h0_shadow_mode").and_then(|v| v.as_bool());
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some() || p1_risk_pct.is_some()
         || trailing_stop_pct.is_some() || time_stop_hours.is_some()
         || atr_multiplier.is_some() || take_profit_pct.is_some()
         || max_leverage.is_some() || max_drawdown_pct.is_some()
-        || max_same_direction_positions.is_some();
+        || max_same_direction_positions.is_some()
+        || h0_shadow_mode.is_some();
     if !has_any {
         return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "need at least one risk parameter".to_string());
     }
@@ -528,7 +531,7 @@ async fn handle_update_risk_config(
     let _ = tx.send(PaperSessionCommand::UpdateRiskConfig {
         hard_stop_pct, trailing_stop_pct, time_stop_hours, atr_multiplier,
         take_profit_pct, max_leverage, max_drawdown_pct,
-        max_same_direction_positions, p1_risk_pct,
+        max_same_direction_positions, p1_risk_pct, h0_shadow_mode,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
@@ -646,6 +649,14 @@ mod tests {
             klines: HashMap::new(),
             paper_paused: false,
             trading_mode: crate::config::TradingMode::PaperOnly,
+            h0_gate_stats: None,
+            stop_config: None,
+            guardian_config: None,
+            risk_manager_config: None,
+            consecutive_losses: HashMap::new(),
+            session_halted: false,
+            daily_loss_pct: 0.0,
+            session_drawdown_pct: 0.0,
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

@@ -157,12 +157,24 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         };
         pipeline.intent_processor.update_guardian_config(gc);
     }
+    // RRC-1-B4: Wire RiskManagerConfig from engine.toml → IntentProcessor Gate 0
+    // RRC-1-B4：從 engine.toml 接入風控管理器配置 → IntentProcessor Gate 0
+    {
+        let mut rc = openclaw_core::risk::RiskManagerConfig::default();
+        rc.max_stop_loss_pct = cfg_snapshot.max_stop_loss_pct;
+        rc.max_take_profit_pct = cfg_snapshot.max_take_profit_pct;
+        rc.max_leverage = cfg_snapshot.max_leverage;
+        rc.max_total_exposure_pct = cfg_snapshot.max_total_exposure_pct;
+        rc.max_session_drawdown_pct = cfg_snapshot.max_drawdown_pct;
+        pipeline.intent_processor.update_risk_config(rc);
+    }
     info!(
         hard_stop = format!("{:.1}%", cfg_snapshot.max_stop_loss_pct),
         take_profit = format!("{:.1}%", cfg_snapshot.max_take_profit_pct),
         max_leverage = cfg_snapshot.max_leverage,
         max_drawdown = format!("{:.1}%", cfg_snapshot.max_drawdown_pct),
         max_positions = cfg_snapshot.max_same_direction_positions,
+        max_exposure = format!("{:.1}%", cfg_snapshot.max_total_exposure_pct),
         "risk config wired from engine.toml / 風控配置已從 engine.toml 接入"
     );
 
@@ -680,7 +692,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         hard_stop_pct, trailing_stop_pct, time_stop_hours,
                         atr_multiplier, take_profit_pct,
                         max_leverage, max_drawdown_pct, max_same_direction_positions,
-                        p1_risk_pct,
+                        p1_risk_pct, h0_shadow_mode,
                     }) => {
                         // StopConfig fields / 止損配置
                         if let Some(v) = hard_stop_pct {
@@ -719,6 +731,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         if let Some(v) = p1_risk_pct {
                             pipeline.intent_processor.set_p1_risk_pct(v);
                             info!(p1_risk_pct = format!("{:.2}%", v * 100.0), "P1 risk cap updated / P1 上限已更新");
+                        }
+                        // RRC-1-A3: H0 Gate shadow mode toggle / H0 門控影子模式切換
+                        if let Some(v) = h0_shadow_mode {
+                            pipeline.h0_gate.set_shadow_mode(v);
+                            info!(shadow_mode = v, "H0 gate shadow mode updated / H0 門控影子模式已更新");
                         }
                         snapshot_writer.force_write(&pipeline.snapshot());
                     }
@@ -842,10 +859,36 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             last_pending_check = Instant::now();
                         }
 
-                        // Periodic status + persistence / 定期狀態報告 + 持久化
+                        // RRC-1-A2: Periodic H0Gate risk snapshot update (every status interval).
+                        // RRC-1-A2：定期更新 H0 門控風控快照（每狀態報告間隔）。
                         if last_status.elapsed() >= status_interval {
+                            let positions = pipeline.paper_state.positions();
+                            let position_count = positions.len() as u32;
+                            let balance = pipeline.paper_state.export_state().balance;
+                            let total_exposure_pct = if balance > 0.0 {
+                                let total_notional: f64 = positions.iter().map(|p| {
+                                    let price = pipeline.latest_prices().get(&p.symbol)
+                                        .copied().unwrap_or(p.entry_price);
+                                    p.qty * price
+                                }).sum();
+                                (total_notional / balance * 100.0).min(999.0)
+                            } else {
+                                0.0
+                            };
+                            pipeline.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
+                                open_position_count: position_count,
+                                total_exposure_pct,
+                                cooldown_until_ts_ms: 0,
+                                kill_switch_active: false,
+                                snapshot_ts_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64,
+                            });
+
                             let status = pipeline.status();
                             let uptime = start_time.elapsed().as_secs();
+                            let h0_stats = pipeline.h0_gate.get_stats();
                             info!(
                                 ticks = status.stats.total_ticks,
                                 fills = status.stats.total_fills,
@@ -855,6 +898,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 positions = status.positions,
                                 symbols = status.symbols_tracked,
                                 uptime_secs = uptime,
+                                h0_checks = h0_stats.total_checks,
+                                h0_blocked = h0_stats.total_blocked(),
+                                h0_shadow_would_block = h0_stats.shadow_would_block,
                                 "status report / 狀態報告"
                             );
                             let snap = pipeline.paper_state.export_state();
