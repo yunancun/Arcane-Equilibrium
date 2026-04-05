@@ -42,17 +42,48 @@ pub struct IntentProcessor {
     /// API-fetched taker fee rate (None = use hardcoded default).
     /// API 動態 taker 費率（None = 使用硬編碼默認值）。
     taker_fee_rate: Option<f64>,
+    /// Phase 2b: Kelly sizing config (None = disabled, passthrough).
+    /// Phase 2b：Kelly 倉位配置（None = 禁用，直通）。
+    kelly_config: Option<crate::ml::kelly_sizer::KellyConfig>,
+    /// Phase 2b: Per-symbol trade stats for Kelly calculation.
+    /// Phase 2b：每交易對的交易統計，用於 Kelly 計算。
+    trade_stats: std::collections::HashMap<String, crate::ml::kelly_sizer::TradeStats>,
 }
 
 impl IntentProcessor {
     pub fn new() -> Self {
-        Self { guardian: Guardian::default(), taker_fee_rate: None }
+        Self {
+            guardian: Guardian::default(),
+            taker_fee_rate: None,
+            kelly_config: None,
+            trade_stats: std::collections::HashMap::new(),
+        }
     }
 
     /// Create with an API-fetched taker fee rate.
     /// 使用 API 動態費率創建。
     pub fn with_fee_rate(rate: f64) -> Self {
-        Self { guardian: Guardian::default(), taker_fee_rate: Some(rate) }
+        Self {
+            guardian: Guardian::default(),
+            taker_fee_rate: Some(rate),
+            kelly_config: None,
+            trade_stats: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Phase 2b: Set Kelly sizing config.
+    /// Phase 2b：設定 Kelly 倉位配置。
+    pub fn set_kelly_config(&mut self, config: crate::ml::kelly_sizer::KellyConfig) {
+        self.kelly_config = Some(config);
+    }
+
+    /// Phase 2b: Record a closed trade for Kelly stats.
+    /// Phase 2b：記錄已平倉交易用於 Kelly 統計。
+    pub fn record_trade(&mut self, symbol: &str, pnl: f64) {
+        self.trade_stats
+            .entry(symbol.to_string())
+            .or_default()
+            .record(pnl);
     }
 
     /// Process a single intent through the full governance pipeline.
@@ -127,19 +158,29 @@ impl IntentProcessor {
             Verdict::Approved => {}
         }
 
-        // ─── Gate 2.5: Position sizing — P1 cap = 2% of balance / price ───
-        // 倉位計算 — P1 硬上限 = 餘額的 2% / 價格
-        // Intent qty is treated as a maximum; sizing can only reduce it.
-        // 意圖 qty 視為上限；計算只能減小它。
-        const P1_RISK_PCT: f64 = 0.02;
-
+        // ─── Gate 2.5: Kelly position sizing (Phase 2b) ─���─
+        // Kelly 倉位計算（Phase 2b）
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { intent.qty };
-        // P1 sizing caps intent qty — no artificial floor, let exchange reject if too small.
-        // P1 sizing 裁剪意圖 qty — 無人為下限，太小由交易所拒絕。
-        let sized_qty = p1_max_qty.min(intent.qty);
-        let final_qty = guardian_result.modified_qty.unwrap_or(sized_qty);
+        let guardian_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
+
+        let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
+            let stats = self.trade_stats.get(&intent.symbol).cloned().unwrap_or_default();
+            let atr_pct = paper_state.latest_turnover(&intent.symbol)
+                .map(|_| 0.02) // placeholder — real ATR% from indicators in Phase 3
+                .unwrap_or(0.02);
+            crate::ml::kelly_sizer::compute_kelly_qty(
+                kelly_cfg, &stats, balance, price, atr_pct, guardian_qty,
+            )
+        } else {
+            guardian_qty
+        };
+
+        // ─── Gate 2.6: P1 hard cap = 2% of balance / price ───
+        // P1 硬上限 = 餘額的 2% / 價格（不可超越的安全上限）
+        const P1_RISK_PCT: f64 = 0.02;
+        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { kelly_qty };
+        let final_qty = kelly_qty.min(p1_max_qty);
 
         // Gate 3: Cost gate (fail-open if ATR missing)
         // Simplified: just check if round-trip cost is reasonable
