@@ -1,4 +1,4 @@
-# 2026-04-05 Session 7 — Phase 1 Day 0 + G1 + G2
+# 2026-04-05 Session 7 — Phase 1 Complete (Day 0 ~ G4)
 
 ## Summary
 
@@ -49,6 +49,9 @@ Phase 1 正式啟動。Full Rust (Option A) 方案經 PM+PA+FA+QC+QA+MIT 六角�
 | `7aaec66` | fix(Phase1-G1): audit F-1 + F-2 — 34-dim docs + KlineClose/TickerSnapshot emission |
 | `bf0725a` | feat(Phase1-G2): market_writer 10 tables + fallback + REST poller + quality writer |
 | `adbe0a7` | fix(Phase1-G2): audit 6 FAIL — fallback wiring + REST spawn + quality monitor + types |
+| `4653267` | docs: CLAUDE + TODO + CHANGELOG + worklog for G2 audit |
+| `86ae00e` | feat(Phase1-G3): PSI + ADWIN drift detector + feature versioning + spawns |
+| `13ae4ee` | fix(Phase1-G4): E2 FAIL — feature_writer missing $5 bind (feature_version) |
 
 ---
 
@@ -123,8 +126,35 @@ G2 FAIL 修復明細：
 
 ---
 
+### G3: Drift Detection + Versioning
+
+| Task | 改動 |
+|------|------|
+| 1-13 | drift_detector.rs — PSI: `compute_psi()` + `histogram()` + `quantile_bin_edges()` + epsilon smoothing |
+| 1-14 | drift_detector.rs — ADWIN: `AdwinDetector` delta=0.05, min_width=100, 3-vote, Welch t-test |
+| 1-15 | feature_baselines infrastructure — `quantile_bin_edges()` + `write_drift_event()` |
+| 1-16 | Feature v1.0 auto-registered on startup (INSERT features.versions) |
+| 1-17 | Paper data hooks — last_tick_ms already wired (F-5) |
+
+### G4: Final Review
+
+| Review | 結果 |
+|--------|------|
+| E2 | 1 P0 FAIL: feature_writer.rs $5 bind missing → 已修復 |
+| E4 | 800 Rust + 3343 Python = 4143 全綠 |
+| E5 | PASS (1 WARN: drift window shrink allocation, rare path) |
+
+---
+
+## Phase 1 最終統計
+
+```
+新代碼：~3,500 lines Rust · 11 new files
+測試：800 Rust (+30 vs 770 baseline) · 0 failures
+審計：3 輪 · 9 FAIL 全修復 (G1: 2F + G2: 6F + G4: 1F)
+Commits：10 (4 feat + 3 fix + 3 docs)
+```
+
 ## 下一步
 
-- **G3 (Day 6-7)**：PSI drift detection + ADWIN + feature_baselines + feature versioning
-- **Day 8**：緩衝日（debugging, PG integration test）
-- **G4 (Day 9-10)**：E2 + E4 + E5 final review
+- **Phase 2**：交易鏈 + Decision Context + Scorer + ONNX

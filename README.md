@@ -31,7 +31,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-05 · Phase 1 G2 完成 · 4629 tests · sqlx PG 层 + 10 market tables)
+## 当前状态 (2026-04-05 · Phase 1 代码完成 · 4639 tests · 3 轮审计 9F→0)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
@@ -91,7 +91,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | 0a | PG 8-Schema DDL + Grafana VIEW 桥接 | ✅ 完成 |
 | 0b | TimescaleDB + 压缩/retention | ✅ 完成 |
 | Session 6 | KNOWN_ISSUES 清理 + OC-1/2 告警 + Shadow docs | ✅ OPEN 8 |
-| **1** | **市场数据止血 + FeatureCollector + PSI** | **🔄 G2 完成** |
+| **1** | **市场数据止血 + FeatureCollector + PSI** | **✅ 代码完成** |
 | 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ⬜ W6-9 |
 | 3a | update_params() 改造（AGT-1） | ⬜ W9-10 |
 | 3b | Optuna TPE + Thompson Sampling + CPCV + 黑天鹅 | ⬜ W11-12 |

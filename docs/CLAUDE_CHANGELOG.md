@@ -10,9 +10,11 @@
 - **G1 Audit**：6 角色審計 — 2 FAIL 修復（34-dim docs + dead channel）、3 WARN 記錄
 - **G2**：market_writer 全 10 表 + fallback.rs(JSONL) + rest_poller(funding/OI/LSR) + quality_writer
 - **架構決策**：Full Rust Option A · sqlx runtime queries · QueryBuilder::push_values · ADWIN delta=0.05
-- **G2 Audit**：6 FAIL 全修復（fallback wiring + REST spawn + quality type + liquidation NOT NULL）· 7 WARN 記錄
-- **測試**：790 Rust（+20 new）· 0 failures · 0 warnings
-- ~2,500 新代碼 + ~1,200 修改 · 11 new files · 8 commits
+- **G3**：drift_detector.rs 448 lines — PSI(epsilon smoothing) + ADWIN(delta=0.05, 3-vote, Welch t-test) + baselines + versioning
+- **G4 Final**：E2(1 P0 fix: feature_writer $5 bind) · E4(800 Rs + 3343 Py 全綠) · E5(PASS)
+- **3 輪審計**：9 FAIL 全修復（G1: 2F + G2: 6F + G4: 1F）· 10 WARN 記錄
+- **測試**：800 Rust（+30 new）· 0 failures · 0 warnings
+- ~3,500 新代碼 · 11 new files · 10 commits
 
 ### Session 6：基礎設施清理 + 告警系統（2026-04-05 · commit 0e2d6a4）
 
