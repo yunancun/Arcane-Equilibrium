@@ -21,6 +21,40 @@
 
 **測試基準線：** 852 Rust + 1075 Python = 1927 tests（0 failures · 1 pre-existing grafana test skip）
 
+### Session 9：L3 Audit + Zero-qty Fix + Risk Config（2026-04-05 · commits 5c1c935~d053a51）
+
+**L3 Audit Fixes（commit 5c1c935）：**
+- P0-1：paper_state.apply_fill partial close 修復（reduce qty 而非 remove）
+- P0-2：exec_id dedup — VecDeque ring buffer（max 500）
+- P0-3：DCP/Disconnected events 從 ExecutionListener 接入 event_consumer
+- P0-4：pending_close_symbols 在 close order rejection 時清除
+- P0-5：Exchange 模式 balance reconciliation（WS wallet，>0.1% drift 觸發）
+- SEC-1：Cold params 在 hot-reload (SIGHUP) 時保留
+- SEC-5：Mainnet 需 OPENCLAW_ALLOW_MAINNET=1 環境變量
+
+**Zero-qty Ghost Position Fix（commit 66ee29b）：**
+- 根因：P1 cap 對 BTC/ETH（$1000 餘額）取整後數量為 0
+- 修復：tick_pipeline 跳過 qty=0 + paper_state.apply_fill 拒絕 qty<=0
+
+**P1 Risk Cap Configurable（commit 8103c6f）：**
+- P1_RISK_PCT 從硬編碼 const 0.02 改為 engine.toml 可配置欄位
+
+**GUI→IPC→Rust Risk Config 全鏈路（commits f7c9086~d053a51）：**
+- PaperSessionCommand::UpdateRiskConfig IPC 命令（9 欄位）
+- StopConfig：+take_profit_pct + check_take_profit()
+- Guardian：expose config()/update_config() 供運行時更新
+- RuntimeConfig：+max_leverage, max_drawdown_pct, max_same_direction_positions
+- 全部 GUI 風控參數流向 Rust：Hard Stop / Take Profit / Trailing / Time / ATR / Max DD / Max Lev / Max Pos / P1 Risk
+- Agent auto-tuning 路徑：/api/risk/agent-adjust → IPC → Rust engine
+- Startup wiring：engine.toml → Guardian + StopConfig + IntentProcessor
+
+**關鍵決策：**
+- 所有風控參數必須 runtime-configurable（Agent 學習循環需求）
+- Mainnet 需 OPENCLAW_ALLOW_MAINNET=1（防止意外部署）
+- Cold params 在 SIGHUP 時保留（防止意外模式切換）
+
+**測試基準線：** 856 Rust + 1075 Python = 1931 tests（+4 new · 0 failures）
+
 ### Phase 1 Day 0 + G1 + G2：sqlx PG 層 + FeatureCollector + 10 市場表（2026-04-05 · commits 8e0cccd~pending）
 
 - **Day 0**：event_consumer.rs 提取（main 1123→783）+ database/ 模組 + sqlx 0.8 + Docker test PG

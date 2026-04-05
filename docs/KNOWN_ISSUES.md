@@ -7,8 +7,8 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 8
-# 最後更新：2026-04-05
+# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 9
+# 最後更新：2026-04-05（Session 9）
 
 ---
 
@@ -245,6 +245,44 @@
 **位置**：`app/legacy_routes.py`（1276 行）
 **阻塞**：拆分需改變 `register_legacy_routes(app)` 模式，中等風險
 **備註**：架構技術債，不影響功能
+
+---
+
+## RESOLVED — RISK-1：GUI 風控參數未傳遞到 Rust 引擎
+
+**來源**：Session 8 架構審查
+**嚴重性**：原 HIGH → 已修復
+**修復**：2026-04-05 Session 9（commits f7c9086~d053a51）
+**問題**：GUI 上調整的風控參數（Hard Stop、Take Profit、Trailing Stop 等）僅停留在 Python 層，不影響 Rust 引擎的實際風控行為。
+**修復內容**：
+- PaperSessionCommand::UpdateRiskConfig IPC 命令（9 欄位）
+- Python ipc_client.update_risk_config() + risk_routes.py 接入
+- Guardian expose config()/update_config() 供運行時更新
+- StopConfig +take_profit_pct + check_take_profit()
+- RuntimeConfig +max_leverage, max_drawdown_pct, max_same_direction_positions
+- engine.toml → Guardian + StopConfig + IntentProcessor 啟動接線
+- Agent auto-tuning：/api/risk/agent-adjust → IPC → Rust engine
+
+---
+
+## OPEN — RISK-2：Sharpe 動態倉位調整未實現
+
+**來源**：Session 9 審查
+**嚴重性**：LOW（設計如此，非缺陷）
+**問題**：kelly_sizer.rs 有 fractional Kelly 實現，但 Sharpe-based 動態 position sizing 尚為 placeholder。當前使用固定 fractional Kelly + ATR vol-adjust。
+**位置**：`rust/openclaw_engine/src/ml/kelly_sizer.rs`
+**緩解**：Phase 4 ML pipeline 訓練完成後可加入 Sharpe ratio 作為 sizing 輸入。不阻塞當前功能。
+
+---
+
+## OPEN — RISK-3：Daily Loss Limit 僅 Python 層執行
+
+**來源**：Session 9 架構審查
+**嚴重性**：MEDIUM
+**問題**：日虧損限額（daily loss limit）目前僅在 Python GovernanceHub SM-04 中執行。Rust Guardian 有 max_drawdown_pct（總帳戶回撤）但無獨立的日內虧損限額檢查。
+**位置**：`rust/openclaw_engine/src/guardian.rs` + Python `app/governance_hub.py`
+**影響**：Exchange 模式下（Rust-only 路徑），日虧損限額可能被繞過
+**緩解**：max_drawdown_pct 提供基本保護。Phase 4 需將 daily loss limit 加入 Guardian。
 
 ---
 

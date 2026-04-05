@@ -31,23 +31,25 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-05 · RC-10 + 双引擎架构 + EXT-1 设计完成 · 4124 tests)
+## 当前状态 (2026-04-05 · EXT-1 Exchange-as-Truth 实现 + 全风控 Runtime 配置 · 1931 tests)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,334 Py + 790 Rust = 4,124 tests 全绿
+测试:         1,075 Py + 856 Rust = 1,931 tests 全绿
 API 路由:     131+ 条（全部 Rust-first · Paper 写路由禁用或 IPC 控制）
 代码:         ~69,000 行（Python ~49k + Rust ~20k）
 双引擎:       Demo=执行引擎(Primary) · Paper=测试引擎(Testing) · Shadow orders default-on
+EXT-1:        ✅ Exchange-as-Truth 已实现（trading_mode=exchange · Demo=Live 统一路径）
 PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
-IPC 控制:     pause/resume/close_all/reset via command channel（Paper+Demo 同步）
+IPC 控制:     pause/resume/close_all/reset + UpdateRiskConfig(9 fields) via command channel
+风控配置:     ✅ 全部 GUI 风控参数 runtime 可调 → IPC → Rust engine
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
 Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
               P50=27μs · RSS 2.1MB · WS broken topics 已修复
               IPC: command channel + expanded snapshot
-下一步:       EXT-1「交易所即真相」执行模式（Demo=Live 统一路径）
+下一步:       Phase 4（Claude Teacher + LinUCB + News Agent + DL-3）
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
               9 compression + 15 retention policies · 11 Grafana VIEWs
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
@@ -64,10 +66,10 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 
 | 维度 | 已完成 | 总量 | 进度 |
 |------|--------|------|------|
-| 代码量 | ~68,000 行（Py 49k + Rs 19k） | ~73,000 行 | 93% |
+| 代码量 | ~69,000 行（Py 49k + Rs 20k） | ~73,000 行 | 95% |
 | 业务功能 | — | — | 95% |
-| 工时 | ~68d | ~189d（含融合方案 105d） | 36% |
-| 测试 | 4,609（Py 3839 + Rs 770） | ~4,800 | 96% |
+| 工时 | ~70d | ~189d（含融合方案 105d） | 37% |
+| 测试 | 1,931（Py 1075 + Rs 856） | ~2,100 | 92% |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
@@ -81,7 +83,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
 | ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：治理 fail-closed（ARCH-4 硬化） · P0/P1/P2 风控 · 4,609 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · 67 项审计修正
+**亮点**：EXT-1 Exchange-as-Truth 已实现 · 全风控参数 runtime 可调 · 治理 fail-closed · P0/P1/P2 风控 · 1,931 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · Mainnet env var 安全锁
 
 **开发路线图**
 
@@ -96,7 +98,8 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | 1 | 市场数据止血 + FeatureCollector + PSI | ✅ 完成 |
 | 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ✅ 完成 |
 | **3a** | **update_params() 改造（AGT-1）** | **✅ 完成** |
-| 3b | Optuna TPE + Thompson Sampling + CPCV + 黑天鹅 | ⬜ W11-12 |
+| **3b** | **Optuna TPE + Thompson Sampling + CPCV + 黑天鹅** | **✅ 完成** |
+| Session 9 | EXT-1 Exchange-as-Truth + L3 Audit + Risk Config | ✅ 完成 |
 | 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ⬜ W13-15 |
 | 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
 | 6 | 渐进放权 + 验收 + 压测 | ⬜ W19-20 |
