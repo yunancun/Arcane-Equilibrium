@@ -22,6 +22,24 @@ use crate::intent_processor::IntentProcessor;
 use crate::orchestrator::Orchestrator;
 use crate::paper_state::PaperState;
 
+/// Paper trading session command — IPC → event consumer → TickPipeline.
+/// 紙上交易 session 命令 — IPC → 事件消費者 → TickPipeline。
+#[derive(Debug, Clone)]
+pub enum PaperSessionCommand {
+    /// Pause strategy dispatch + shadow orders. Prices/indicators/stops continue.
+    /// 暫停策略分派+影子訂單。價格/指標/止損繼續。
+    Pause,
+    /// Resume strategy dispatch + shadow orders.
+    /// 恢復策略分派+影子訂單。
+    Resume,
+    /// Close all open positions at current market prices.
+    /// 以當前市場價格平掉所有持倉。
+    CloseAll,
+    /// Reset paper state — clear positions, reset balance.
+    /// 重置紙盤狀態 — 清倉、重置餘額。
+    Reset { new_balance: f64 },
+}
+
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
 /// 從 tick_pipeline 派發到 Bybit API 的伺服器端止損請求（項目 1）。
 #[derive(Debug, Clone)]
@@ -108,6 +126,22 @@ pub struct TickPipeline {
     /// Channel to dispatch shadow orders to Bybit Demo API.
     /// 派發影子訂單到 Bybit Demo API 的通道。
     shadow_order_tx: Option<tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>>,
+    /// Phase 1: Channel to dispatch market data to async PG writer.
+    /// Phase 1：派發市場數據到異步 PG 寫入器的通道。
+    market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,
+    /// Phase 1: Channel to dispatch feature snapshots to async PG writer.
+    /// Phase 1：派發特徵快照到異步 PG 寫入器的通道。
+    feature_tx: Option<tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>>,
+    /// Phase 1: Feature version string for FeatureSnapshot.
+    /// Phase 1：特徵版本字符串。
+    feature_version: String,
+    /// Phase 1: Counter for dropped channel sends (logged periodically).
+    /// Phase 1：通道發送丟棄計數器（定期記錄）。
+    market_tx_dropped: u64,
+    feature_tx_dropped: u64,
+    /// Paper trading paused — skip strategy dispatch + shadow orders, keep prices/indicators/stops.
+    /// 紙盤交易暫停 — 跳過策略分派+影子訂單，保留價格/指標/止損。
+    pub paper_paused: bool,
 }
 
 impl TickPipeline {
@@ -142,6 +176,12 @@ impl TickPipeline {
             canary_mode: false,
             instrument_cache: None,
             shadow_order_tx: None,
+            market_data_tx: None,
+            feature_tx: None,
+            feature_version: "v1.0".into(),
+            market_tx_dropped: 0,
+            feature_tx_dropped: 0,
+            paper_paused: false,
         }
     }
 
@@ -167,6 +207,18 @@ impl TickPipeline {
     /// 設定影子訂單派發通道到 Bybit Demo API。
     pub fn set_shadow_channel(&mut self, tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>) {
         self.shadow_order_tx = Some(tx);
+    }
+
+    /// Phase 1: Set channel for dispatching market data to async PG writer.
+    /// Phase 1：設定市場數據派發到異步 PG 寫入器的通道。
+    pub fn set_market_data_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>) {
+        self.market_data_tx = Some(tx);
+    }
+
+    /// Phase 1: Set channel for dispatching feature snapshots to async PG writer.
+    /// Phase 1：設定特徵快照派發到異步 PG 寫入器的通道。
+    pub fn set_feature_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>) {
+        self.feature_tx = Some(tx);
     }
 
     /// Process a single price event through the full pipeline.
@@ -235,6 +287,49 @@ impl TickPipeline {
         // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
         if let Some(ref ind) = indicators {
             self.latest_indicators.insert(event.symbol.clone(), ind.clone());
+        }
+
+        // Phase 1: Emit FeatureSnapshot to DB writer channel (non-blocking try_send).
+        // Phase 1：發送 FeatureSnapshot 到 DB 寫入器通道（非阻塞 try_send）。
+        if let (Some(ref tx), Some(ref ind)) = (&self.feature_tx, &indicators) {
+            let snap = crate::feature_collector::FeatureSnapshot::new(
+                event.symbol.clone(),
+                event.ts_ms,
+                event.last_price,
+                event.volume_24h,
+                ind.clone(),
+                self.feature_version.clone(),
+            );
+            if tx.try_send(snap).is_err() {
+                self.feature_tx_dropped += 1;
+            }
+        }
+
+        // ── Pause gate: skip signal evaluation + strategy dispatch when paused ──
+        // 暫停門控：暫停時跳過信號評估+策略分派（價格/指標/止損繼續）
+        if self.paper_paused {
+            // Still check stops for existing positions (protective)
+            // 仍然檢查現有持倉的止損（保護性）
+            let triggers = self.paper_state.check_stops(event.last_price, event.ts_ms);
+            for (symbol, trigger) in &triggers {
+                let pos_info = self.paper_state.get_position(symbol).map(|p| (p.is_long, p.qty));
+                debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered (paused)");
+                self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
+                self.stats.total_stops += 1;
+                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
+                    let _ = tx.send(ShadowOrderRequest {
+                        symbol: symbol.clone(),
+                        is_long: !is_long,
+                        qty,
+                        price: event.last_price,
+                        strategy: "stop".into(),
+                        paper_fill_ts: event.ts_ms,
+                        is_close: true,
+                    });
+                }
+            }
+            let tick_duration_us = tick_start.elapsed().as_micros() as u64;
+            return self.maybe_canary_record(event, indicators, vec![], vec![], tick_duration_us);
         }
 
         // Step 3: Signal evaluation
@@ -475,6 +570,7 @@ impl TickPipeline {
             latest_prices: self.latest_prices.clone(),
             stats: self.stats.clone(),
             source: "rust_engine".into(),
+            paper_paused: self.paper_paused,
             indicators: self.latest_indicators.clone(),
             signals: self.recent_signals.iter().cloned().collect(),
             strategies,
@@ -608,6 +704,9 @@ pub struct PipelineSnapshot {
     pub stats: TickStats,
     /// Data source discriminator / 數據源標識
     pub source: String,
+    /// Paper trading paused flag / 紙盤交易暫停標誌
+    #[serde(default)]
+    pub paper_paused: bool,
     /// Per-symbol latest indicator values / 每交易對最新指標值
     pub indicators: HashMap<String, IndicatorSnapshot>,
     /// Recent signals (last 100) / 最近信號（最近 100 個）

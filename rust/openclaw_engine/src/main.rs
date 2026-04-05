@@ -346,7 +346,10 @@ async fn async_main(config: Arc<ConfigManager>) {
     // IPC 服務器數據目錄，用於基於文件的狀態讀取
     let ipc_data_dir = std::env::var("OPENCLAW_DATA_DIR")
         .unwrap_or_else(|_| "/tmp/openclaw".into());
-    let ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir);
+    // Paper session command channel: IPC → event consumer
+    // 紙盤 session 命令通道：IPC → 事件消費者
+    let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    let ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir, Some(paper_cmd_tx));
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -667,6 +670,47 @@ async fn async_main(config: Arc<ConfigManager>) {
     // 事件消費者 — 送入 TickPipeline 進行紙盤交易
     // (Phase 1 Day 0-A: extracted to event_consumer.rs)
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Phase 1: Database pool + writer tasks
+    // Phase 1：資料��連接池 + 寫入器任務
+    // ------------------------------------------------------------------
+    let cfg_snap_db = config.get();
+    let db_pool = Arc::new(
+        openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await,
+    );
+    let (market_tx, market_rx) = if db_pool.is_available() {
+        let (tx, rx) = tokio::sync::mpsc::channel(4096);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+    let (feature_tx, feature_rx) = if db_pool.is_available() {
+        let (tx, rx) = tokio::sync::mpsc::channel(2048);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    // Spawn market writer task / 啟���市場數據寫入器任務
+    if let Some(mrx) = market_rx {
+        let mw_pool = Arc::clone(&db_pool);
+        let mw_config = Arc::clone(&config);
+        let mw_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::market_writer::run_market_writer(
+            mrx, mw_pool, mw_config, mw_cancel,
+        ));
+    }
+
+    // Spawn feature writer task / 啟動特徵寫入器任務
+    if let Some(frx) = feature_rx {
+        let fw_pool = Arc::clone(&db_pool);
+        let fw_config = Arc::clone(&config);
+        let fw_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::feature_writer::run_feature_writer(
+            frx, fw_pool, fw_config, fw_cancel,
+        ));
+    }
+
     let event_handle = {
         use openclaw_engine::event_consumer::{EventConsumerDeps, run_event_consumer};
         let deps = EventConsumerDeps {
@@ -680,6 +724,9 @@ async fn async_main(config: Arc<ConfigManager>) {
             shared_client: shared_client.clone(),
             bybit_balance: shared_bybit_balance,
             api_pnl: shared_api_pnl,
+            paper_cmd_rx: Some(paper_cmd_rx),
+            market_data_tx: market_tx,
+            feature_tx,
         };
         tokio::spawn(run_event_consumer(deps))
     };

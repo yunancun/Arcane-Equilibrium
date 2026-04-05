@@ -16,6 +16,7 @@ pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod config;
 pub mod execution_listener;
+pub mod feature_collector;
 pub mod fast_track;
 pub mod instrument_info;
 pub mod intent_processor;
