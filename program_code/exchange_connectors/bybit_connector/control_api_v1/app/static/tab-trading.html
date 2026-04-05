@@ -118,8 +118,8 @@
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-demo"  src="/static/tab-demo.html?v=20260405b"></iframe>
-  <iframe id="if-paper" style="display:none" data-src="/static/tab-paper.html?v=20260405b"></iframe>
+  <iframe id="if-demo"  src="/static/tab-demo.html?v=20260405c"></iframe>
+  <iframe id="if-paper" style="display:none" data-src="/static/tab-paper.html?v=20260405c"></iframe>
 </div>
 
 <!-- ── Start Confirmation Dialog ────────────────────────────────── -->
@@ -275,17 +275,17 @@ async function checkUnifiedStatus() {
     if (dd && dd.data && (dd.data.source === 'rust_engine' || dd.data.retCode === 0)) demoConnected = true;
   } catch (e) {}
 
-  const paperActive = (paperState === 'active' || paperState === 'paused');
+  const paperRunning = (paperState === 'active');
   const stateMap = {
-    'active': '运行中', 'paused': '已暂停', 'stopped': '已停止', 'idle': '未启动',
+    'active': '运行中', 'paused': '已暂停', 'stopped': '已停止', 'idle': '未启动', 'offline': '离线',
   };
 
   const paperLabel = stateMap[paperState] || paperState;
-  if (paperActive && demoConnected) {
+  if (paperRunning && demoConnected) {
     badge.textContent = '双引擎运行中';
     badge.className = 'oc-chip oc-chip-good';
   } else if (paperState === 'paused' || paperState === 'stopped') {
-    badge.textContent = paperState === 'paused' ? '已暂停' : '已停止';
+    badge.textContent = stateMap[paperState];
     badge.className = 'oc-chip oc-chip-warn';
   } else if (demoConnected) {
     badge.textContent = 'Demo 已连接';
@@ -296,8 +296,10 @@ async function checkUnifiedStatus() {
   }
 
   detail.textContent = '执行引擎(Demo): ' + (demoConnected ? '已连接' : '未连接') + ' | 测试引擎(Paper): ' + paperLabel;
-  btnStart.disabled = paperActive;
-  btnStop.disabled = (!paperActive && paperState !== 'paused');
+  // Start enabled when NOT running (paused/stopped/offline all allow start)
+  btnStart.disabled = paperRunning;
+  // Stop enabled when running or paused
+  btnStop.disabled = (paperState !== 'active' && paperState !== 'paused');
 }
 
 function refreshIframes() {
