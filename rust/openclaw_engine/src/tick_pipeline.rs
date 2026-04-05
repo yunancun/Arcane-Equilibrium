@@ -589,6 +589,11 @@ impl TickPipeline {
         // All current strategies satisfy this constraint. Revisit if multi-intent strategies are added.
         // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
         let is_exchange_mode = self.trading_mode == crate::config::TradingMode::Exchange;
+        // Extract ATR for cost gate (Gate 3) / 提取 ATR 用於成本門控
+        let atr_value = indicators.as_ref()
+            .and_then(|i| i.atr_14.as_ref())
+            .map(|a| a.atr)
+            .unwrap_or(0.0);
 
         let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
         for strategy in self.orchestrator.strategies_mut() {
@@ -673,7 +678,7 @@ impl TickPipeline {
                 } else {
                     // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
                     // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
-                    let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
+                    let result = self.intent_processor.process(intent, &self.governance, &self.paper_state, atr_value);
                     if result.submitted {
                         self.stats.total_intents += 1;
                         self.recent_intents.push_back(TimestampedIntent {
@@ -729,7 +734,7 @@ impl TickPipeline {
                                 continue;
                             }
                             strategy.on_fill(intent, &fill);
-                            self.paper_state.apply_fill(
+                            let realized_pnl = self.paper_state.apply_fill(
                                 &intent.symbol, intent.is_long, fill.fill_qty,
                                 fill.fill_price, fill.fee, event.ts_ms,
                             );
@@ -755,7 +760,7 @@ impl TickPipeline {
                                     qty: fill.fill_qty,
                                     price: fill.fill_price,
                                     fee: fill.fee,
-                                    realized_pnl: 0.0,
+                                    realized_pnl,
                                     strategy_name: intent.strategy.clone(),
                                     context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
                                 });
@@ -913,7 +918,7 @@ impl TickPipeline {
         strategy: &str,
         order_link_id: &str,
     ) {
-        self.paper_state.apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
+        let realized_pnl = self.paper_state.apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
         self.stats.total_fills += 1;
         // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
         self.pending_close_symbols.remove(symbol);
@@ -939,7 +944,7 @@ impl TickPipeline {
                 qty,
                 price: fill_price,
                 fee,
-                realized_pnl: 0.0,
+                realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id: format!("ctx-{}-{}", symbol, ts_ms),
             });

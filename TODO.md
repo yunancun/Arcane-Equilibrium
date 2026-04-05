@@ -1,8 +1,9 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-05（Session 9b · Ops Fixes + Risk GUI · 1075 Py + 856 Rust = 1931）
+# 最後更新：2026-04-05（Session 9c · Gate 3 Cost Gate + realized_pnl fix · 1075 Py + 859 Rust = 1934）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 工程日誌：docs/worklogs/2026-04-05--session9_ops_fixes_risk_gui.md
+# ★ 待辦：策略 confidence 需要動態化（當前固定 0.50，低波動市場全被 cost gate 攔截）
 
 ---
 
