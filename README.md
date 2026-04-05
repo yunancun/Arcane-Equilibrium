@@ -31,59 +31,61 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-05 · Gate 3 Cost Gate + realized_pnl fix + Risk GUI Complete · 1934 tests)
+## 当前状态 (2026-04-06 · RRC-1 风控接线完成 + L3 12路审计 · 1931 tests)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
 测试:         1,075 Py + 856 Rust = 1,931 tests 全绿
 API 路由:     131+ 条（全部 Rust-first · Paper 写路由禁用或 IPC 控制）
-代码:         ~69,000 行（Python ~49k + Rust ~20k）
+代码:         ~71,000 行（Python ~49k + Rust ~22k）
 双引擎:       Demo=执行引擎(Primary) · Paper=测试引擎(Testing) · Shadow orders default-on
 EXT-1:        ✅ Exchange-as-Truth 已实现（trading_mode=exchange · Demo=Live 统一路径）
 PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
-IPC 控制:     pause/resume/close_all/reset + UpdateRiskConfig(9 fields) via command channel
+IPC 控制:     pause/resume/close_all/reset + UpdateRiskConfig(9 fields) + set_strategy_active
 风控配置:     ✅ 全部 GUI 风控参数 runtime 可调 → IPC → Rust engine
+RRC-1:        ✅ H0Gate+9 position checks+Gate 2.7 全接入（2000+ 行风控代码接线完成）
+L3 审计:      ✅ 12路并行全系统审计（63 issues → 11 work packages → PA 整改计划）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
 Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
               P50=27μs · RSS 2.1MB · WS broken topics 已修复
               IPC: command channel + expanded snapshot
-下一步:       Phase 4（Claude Teacher + LinUCB + News Agent + DL-3）
+下一步:       PA 整改计划执行 → Phase 4（Claude Teacher + LinUCB + News Agent + DL-3）
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
               9 compression + 15 retention policies · 11 Grafana VIEWs
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
 Bybit API:    ✅ BB+E5+PA 三轮审计通过 · 64 REST + 8 WS + 5 Private WS + 8 IPC
               字典手册: docs/references/2026-04-04--bybit_api_reference.md
               PyO3 桥接: 39 Python 方法直调 Rust Bybit 模组（零 IPC 开销 · 3.7s 增量编译）
-L3 审计:      ✅ 9 角色全面审计归零（0 CRITICAL · 0 HIGH · 0 remaining）
+L3 审计:      ✅ 12 角色全系统审计完成（63 issues · 7P0/21P1 · PA 整改计划就绪）
 认证安全:     ✅ HttpOnly cookie + PG 127.0.0.1 only + IPC 600 perms
 L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 ```
 
-**完成度（2026-04-05 · PYO3-BYBIT 后校准）**
+**完成度（2026-04-06 · RRC-1 + L3 审计后校准）**
 
 | 维度 | 已完成 | 总量 | 进度 |
 |------|--------|------|------|
-| 代码量 | ~69,000 行（Py 49k + Rs 20k） | ~73,000 行 | 95% |
+| 代码量 | ~71,000 行（Py 49k + Rs 22k） | ~75,000 行 | 95% |
 | 业务功能 | — | — | 95% |
-| 工时 | ~70d | ~189d（含融合方案 105d） | 37% |
+| 工时 | ~72d | ~189d（含融合方案 105d） | 38% |
 | 测试 | 1,931（Py 1075 + Rs 856） | ~2,100 | 92% |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
 | 自动扫描 | 90% | ScoutWorker 30min 定时扫描已接通 |
 | 策略选择 | 50% | Regime-aware 已实现；V2 参数运行时可调待 Phase 3a |
-| AI 风险评估 | 60% | H1-H5 接通 + cost_gate；ML Scorer 待 Phase 2 |
+| AI 风险评估 | 75% | H0Gate+H1-H5+cost_gate+Gate 2.7 全接入；ML Scorer 待数据 |
 | 下单 | 85% | 治理 gate + OMS SM-03 已串联 |
-| 止损 | 80% | ATR 动态 + 追踪 + 交易所条件单 |
+| 止损 | 95% | RRC-1: 9 check 全接入（hard/dynamic/TP/trailing/time/cost/DD/consec/daily） |
 | 学习 | 15% | 记账式学习 → ML 驱动学习闭环待融合方案执行 |
 | 进化 | 15% | EvolutionEngine 将被 Optuna TPE 取代（Phase 3b） |
 | DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
 | ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：EXT-1 Exchange-as-Truth 已实现 · 全风控参数 runtime 可调 · 治理 fail-closed · P0/P1/P2 风控 · 1,931 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · Mainnet env var 安全锁
+**亮点**：RRC-1 风控全接线（H0Gate+9check+Gate2.7） · L3 12路审计 · EXT-1 Exchange-as-Truth · 全风控参数 runtime 可调 · 治理 fail-closed · 1,931 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · Mainnet env var 安全锁
 
 **开发路线图**
 
@@ -100,6 +102,8 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | **3a** | **update_params() 改造（AGT-1）** | **✅ 完成** |
 | **3b** | **Optuna TPE + Thompson Sampling + CPCV + 黑天鹅** | **✅ 完成** |
 | Session 9 | EXT-1 Exchange-as-Truth + L3 Audit + Risk Config | ✅ 完成 |
+| RRC-1 | 风控运行时接线（H0Gate+9 check+Gate 2.7） | ✅ 完成 |
+| L3 Audit | 12路全系统审计 + PA 整改计划 | ✅ 63 issues |
 | 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ⬜ W13-15 |
 | 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
 | 6 | 渐进放权 + 验收 + 压测 | ⬜ W19-20 |

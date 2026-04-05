@@ -1,7 +1,60 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-05
+> 最後更新：2026-04-06
+
+### L3 全系統審計 — 12 路並行 + PA 統一整改（2026-04-05 · commit b25e541）
+
+**12 個審計角色並行：**
+- **FA**（功能規格）：8通過/3警告/0失敗 · Exchange 缺 Cost Gate · 3 占位硬編碼 · ML 未接入
+- **AI-E**（AI 效果）：42/100 · 架構優秀但運行時 AI 缺失 · ONNX 占位符 · 5 Agent 斷連
+- **E5**（優化）：1 Rust + 5 Python 超 1200 行 · intent_processor 120 行重複 gate 邏輯
+- **E4**（測試）：4708 tests · 3 P0 編譯回歸 · event_consumer 零測試
+- **E3**（安全）：2P0(Exchange 缺 Cost Gate + IPC 無認證) / 5P1
+- **CC**（合規）：82.6% 合規 · 10 文件超限 · 雙軌止損未完全接入
+- **QC**（數學）：零數學錯誤 · 47 硬編碼值(5 高風險) · ATR 命名誤導
+- **MIT**（DB/ML）：52/100 · DDL 未執行(6 寫入器空轉) · ort crate 缺失
+- **BB**（Bybit API）：A 級 · 0 P0/P1 · 僅 2 P2 警告
+- **TW**（文件盤查）：14 組重複文件 · README 索引停更 · 26 命名違規
+- **R4**（索引驗證）：25 項遺漏 · SCRIPT_INDEX.md 不存在
+- **A3**（GUI）：11 P0/P1 · 風控輸入被自動覆蓋 · Delete 無確認
+
+**PA 統一整改：** 63 獨立問題（7P0/21P1/25P2/10P3）→ 11 工作包 → 4 波執行
+
+---
+
+### RRC-1：風控運行時接線 — 5 Phase 完成（2026-04-05 · commits aa4d008 + 666815a + afd4c87）
+
+**Phase A — H0Gate 接入 tick_pipeline：**
+- tick_pipeline.rs Step 0.5：H0Gate 5-check（freshness/health/eligibility/risk/cooldown）
+- event_consumer.rs：每 30s 更新 H0GateRiskSnapshot（position_count + exposure_pct）
+- Shadow mode 默認啟用（觀察不阻斷，1 週後切 blocking）
+
+**Phase B — check_order_allowed 接入 IntentProcessor：**
+- Gate 2.7：5 項訂單准入檢查（daily loss/leverage/single pos/total exp/correlated exp）
+- 放置在 P1 sizing 之後（避免拒絕會被安全縮小的訂單）
+- daily_start_balance + UTC midnight 重置
+
+**Phase C — check_position_on_tick 替換 check_stops：**
+- 9 項持倉風控（hard/dynamic/TP/trailing/time/cost edge/session DD/consec loss/daily loss）
+- PriceHistoryTracker 滾動 ATR + spike 檢測
+- RiskAction enum：Hold/ClosePosition/HaltSession/SetCooldown
+- entry_price=0 防護（→ -999% PnL 觸發硬止損，防 NaN fail-open）
+
+**Phase D — 風控單一真相源：**
+- PipelineSnapshot +8 風控欄位（stop/guardian/risk configs + session_halted + daily_loss + drawdown）
+- Python risk_routes.py 全部改從 Rust 快照讀取
+- /ai-context 從 Rust snapshot 重建（ENGINE=None safe）
+
+**Phase E — 清理 + IPC 擴展：**
+- Strategy trait +set_active() · IPC set_strategy_active 命令
+- /unhalt-session → IPC resume_paper → Rust 清除 session_halted
+- HaltSession Q1 fix：exchange 模式跳過已 pending close 的 symbol
+
+**3 輪審計：** F1 P0(entry_price=0 NaN) + F2 P1(session_halted 未清除) + F3 P1(consecutive_losses 未重置) + Q1(exchange double-close) 全修復
+**測試：** 856 Rust + 4 新 rrc1_audit_tests · 0 failures
+
+---
 
 ### Session 9c：realized_pnl Bug + Gate 3 Cost Gate（2026-04-05）
 
