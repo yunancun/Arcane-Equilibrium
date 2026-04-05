@@ -357,6 +357,18 @@ static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+# Disable browser caching for static files (HTML/JS/CSS) during development.
+# 開發階段禁止靜態文件瀏覽器緩存，確保每次加載最新版本。
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 def current_actor(
     request: Request,
     authorization: str | None = Header(default=None),

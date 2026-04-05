@@ -359,6 +359,19 @@ def reset_cooldown(
     """Manually reset consecutive loss cooldown / 手动重置连续亏损冷却"""
     rm = _get_risk_manager()
     rm.reset_cooldown()
+
+    # Also send IPC resume to Rust engine (clears any paused state from cooldown).
+    # 同時發送 IPC resume 到 Rust 引擎（清除冷卻導致的暫停狀態）。
+    try:
+        from .ipc_client import get_engine_ipc_client
+        import asyncio
+        client = get_engine_ipc_client()
+        if client is not None:
+            asyncio.get_event_loop().run_until_complete(client.resume_paper())
+            logger.info("cooldown reset: IPC resume sent to Rust / 冷卻重置：已發送 IPC resume 到 Rust")
+    except Exception as e:
+        logger.warning("cooldown reset: IPC resume failed (non-fatal): %s", e)
+
     return _risk_response({"message": "cooldown_reset", "status": rm.get_status()})
 
 

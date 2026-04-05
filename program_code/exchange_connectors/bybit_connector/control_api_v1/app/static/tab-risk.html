@@ -733,29 +733,48 @@ async function loadRiskConfig() {
   html2 += '</div>';
   ocSetHtml('p2-config', html2);
 
-  // Stop Manager — populate display and input fields
-  ocSetText('s-hard', gc.max_stop_loss_pct != null ? gc.max_stop_loss_pct + '%' : '--');
-  const tpOn = gc.tp_enabled === true;
-  ocSetText('s-tp', tpOn ? (gc.max_take_profit_pct + '% (ATR)') : '关闭 / OFF');
+  // ── Merge Rust engine active config as source of truth for engine-managed params ──
+  // Rust 引擎活躍配置為引擎管理參數的真相源
+  const ra = cfg.rust_active || {};
+  const rStop = ra.stop_config || {};
+  const rGuard = ra.guardian_config || {};
+  const rRisk = ra.risk_manager_config || {};
+  const ap = cfg.agent_params || {};
+
+  // Stop Manager — populate display (prefer Rust active → Python global → default)
+  const hardStop = rStop.hard_stop_pct ?? gc.max_stop_loss_pct ?? 5;
+  ocSetText('s-hard', hardStop + '%');
+  const tpOn = rStop.take_profit_pct != null || gc.tp_enabled === true;
+  const tpVal = rStop.take_profit_pct ?? gc.max_take_profit_pct ?? 20;
+  ocSetText('s-tp', tpOn ? (tpVal + '%') : '关闭 / OFF');
   $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
-  ocSetText('s-trailing', p2.trailing_stop_pct != null ? p2.trailing_stop_pct + '%' : '--');
-  const atrMult = gc.atr_multiplier ?? p2.atr_multiplier ?? null;
+  const trailingVal = rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
+  ocSetText('s-trailing', trailingVal != null ? trailingVal + '%' : '关闭 / OFF');
+  const atrMult = rStop.atr_multiplier ?? null;
   ocSetText('s-atr', atrMult != null ? atrMult + 'x' : '关闭 / OFF');
-  ocSetText('s-time', gc.max_holding_hours != null ? gc.max_holding_hours + 'h' : '--');
-  ocSetText('s-drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : '--');
-  ocSetText('s-leverage', gc.max_leverage != null ? gc.max_leverage + 'x' : '--');
+  const timeStop = rStop.time_stop_hours ?? gc.max_holding_hours ?? null;
+  ocSetText('s-time', timeStop != null ? timeStop + 'h' : '关闭 / OFF');
+  const maxDD = rGuard.max_drawdown_pct ?? gc.max_session_drawdown_pct ?? 15;
+  ocSetText('s-drawdown', maxDD + '%');
+  const maxLev = rGuard.max_leverage ?? gc.max_leverage ?? 20;
+  ocSetText('s-leverage', maxLev + 'x');
   ocSetText('s-daily', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : '--');
 
-  // Position Sizing & Exposure display
-  const p1Risk = gc.p1_risk_pct ?? 2;
-  ocSetText('s-p1-risk', p1Risk + '%');
-  ocSetText('s-single-pos', (gc.max_single_position_pct || '--') + '%');
-  ocSetText('s-total-exp', (gc.max_total_exposure_pct || '--') + '%');
-  ocSetText('s-same-dir', gc.max_same_direction_positions || '--');
+  // Position Sizing & Exposure display (Rust guardian is source of truth)
+  // P1 risk: Rust stores as fraction (0.03), display as % (3%)
+  const p1RiskFrac = rRisk.p1_risk_pct ?? null;  // Rust may not expose this in snapshot yet
+  const p1RiskPct = p1RiskFrac != null ? (p1RiskFrac < 1 ? p1RiskFrac * 100 : p1RiskFrac) : 2;
+  ocSetText('s-p1-risk', p1RiskPct.toFixed(1) + '%');
+  ocSetText('s-single-pos', (rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? '--') + '%');
+  ocSetText('s-total-exp', (rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? '--') + '%');
+  const sameDirVal = rGuard.max_same_direction_positions ?? gc.max_same_direction_positions ?? 3;
+  ocSetText('s-same-dir', sameDirVal);
 
   // Cooldown display
-  ocSetText('s-cool-count', gc.consecutive_loss_cooldown_count || '--');
-  ocSetText('s-cool-min', gc.consecutive_loss_cooldown_minutes != null ? gc.consecutive_loss_cooldown_minutes + ' min' : '--');
+  const coolCount = rRisk.consecutive_loss_cooldown_count ?? gc.consecutive_loss_cooldown_count ?? 3;
+  const coolMin = rRisk.consecutive_loss_cooldown_minutes ?? gc.consecutive_loss_cooldown_minutes ?? 30;
+  ocSetText('s-cool-count', coolCount);
+  ocSetText('s-cool-min', coolMin + ' min');
 
   // H0 Shadow Mode
   const h0Shadow = gc.h0_shadow_mode ?? true;
@@ -764,23 +783,24 @@ async function loadRiskConfig() {
   h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
   h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
-  // Populate input fields (only if not already edited by user)
-  if (!$('in-hard-stop').value) $('in-hard-stop').value = gc.max_stop_loss_pct || 5;
+  // Populate input fields — always refresh from server values (clear stale user edits)
+  // 從服務端值填充輸入框 — 每次刷新覆蓋
+  $('in-hard-stop').value = hardStop;
   $('in-tp-enabled').checked = tpOn;
-  if (!$('in-take-profit').value) $('in-take-profit').value = gc.max_take_profit_pct || 20;
+  $('in-take-profit').value = tpVal;
   toggleTPInputs();
-  if (!$('in-trailing').value) $('in-trailing').value = p2.trailing_stop_pct || 3;
-  if (!$('in-atr-mult').value) $('in-atr-mult').value = atrMult || 2;
-  if (!$('in-time-stop').value) $('in-time-stop').value = gc.max_holding_hours || 72;
-  if (!$('in-drawdown').value) $('in-drawdown').value = gc.max_session_drawdown_pct || 15;
-  if (!$('in-leverage').value) $('in-leverage').value = gc.max_leverage || 20;
-  if (!$('in-daily-loss').value) $('in-daily-loss').value = gc.max_daily_loss_pct || 5;
-  if (!$('in-p1-risk').value) $('in-p1-risk').value = p1Risk;
-  if (!$('in-single-pos').value) $('in-single-pos').value = gc.max_single_position_pct || 20;
-  if (!$('in-total-exp').value) $('in-total-exp').value = gc.max_total_exposure_pct || 100;
-  if (!$('in-same-dir').value) $('in-same-dir').value = gc.max_same_direction_positions || 3;
-  if (!$('in-cooldown-count').value) $('in-cooldown-count').value = gc.consecutive_loss_cooldown_count || 3;
-  if (!$('in-cooldown-min').value) $('in-cooldown-min').value = gc.consecutive_loss_cooldown_minutes || 30;
+  $('in-trailing').value = trailingVal ?? '';
+  $('in-atr-mult').value = atrMult ?? '';
+  $('in-time-stop').value = timeStop ?? 72;
+  $('in-drawdown').value = maxDD;
+  $('in-leverage').value = maxLev;
+  $('in-daily-loss').value = gc.max_daily_loss_pct || 5;
+  $('in-p1-risk').value = p1RiskPct.toFixed(1);
+  $('in-single-pos').value = rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? 20;
+  $('in-total-exp').value = rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? 100;
+  $('in-same-dir').value = sameDirVal;
+  $('in-cooldown-count').value = coolCount;
+  $('in-cooldown-min').value = coolMin;
 }
 
 async function loadAIContext() {
