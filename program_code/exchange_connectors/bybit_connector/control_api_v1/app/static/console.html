@@ -385,12 +385,12 @@ async function refreshSidebar() {
   if (liveEnabled) {
     try {
       const bd = await api('/api/v1/strategy/demo/balance');
-      if (bd && bd.data && bd.data.retCode === 0) {
+      if (bd && bd.data && (bd.data.source === 'rust_engine' || bd.data.retCode === 0)) {
         let b = bd.data;
         if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
-        const equity = parseFloat(b.totalEquity || 0);
-        const available = parseFloat(b.totalAvailableBalance || 0);
-        const unrealized = parseFloat(b.totalPerpUPL || 0);
+        const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
+        const available = parseFloat(b.totalAvailableBalance || b.total_available_balance || b.available_balance || 0);
+        const unrealized = parseFloat(b.totalPerpUPL || b.total_unrealised_pnl || b.unrealized_pnl || 0);
         const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
         const net = realized + unrealized;
 

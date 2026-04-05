@@ -635,7 +635,7 @@ async function loadQuickStatus() {
   // Demo
   try {
     const d = await ocApi('/api/v1/strategy/demo/balance');
-    _demoConnected = d && d.data && d.data.retCode === 0;
+    _demoConnected = d && d.data && (d.data.source === 'rust_engine' || d.data.retCode === 0);
     $('qa-demo-dot').className = 'qa-dot ' + (_demoConnected ? 'qa-dot-on' : 'qa-dot-off');
   } catch(e) {}
   // Scanner
