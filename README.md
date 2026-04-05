@@ -31,21 +31,23 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-05 · Phase 1+2 代码完成 · 4171+ tests · ONNX+Scorer+Kelly ready)
+## 当前状态 (2026-04-05 · RC-10 + 双引擎架构 + EXT-1 设计完成 · 4124 tests)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         3,839 Py + 770 Rust = 4,609 tests 全绿
-API 路由:     131+ 条（10 条 Rust-first + 4 条 PyO3 Demo + Python fallback）
-代码:         ~68,000 行（Python ~49k + Rust ~19k）
-策略:         5 类（Rust 唯一引擎，Python tick 处理已停用）
+测试:         3,334 Py + 790 Rust = 4,124 tests 全绿
+API 路由:     131+ 条（全部 Rust-first · Paper 写路由禁用或 IPC 控制）
+代码:         ~69,000 行（Python ~49k + Rust ~20k）
+双引擎:       Demo=执行引擎(Primary) · Paper=测试引擎(Testing) · Shadow orders default-on
 PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
+IPC 控制:     pause/resume/close_all/reset via command channel（Paper+Demo 同步）
 三品类:       ✅ linear / spot / inverse 全部就绪
 治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
 Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
-              P50=27μs · RSS 2.1MB · 201K replay 0 crash
-              IPC: expanded snapshot (indicators/signals/strategies/intents/fills)
+              P50=27μs · RSS 2.1MB · WS broken topics 已修复
+              IPC: command channel + expanded snapshot
+下一步:       EXT-1「交易所即真相」执行模式（Demo=Live 统一路径）
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
               9 compression + 15 retention policies · 11 Grafana VIEWs
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
