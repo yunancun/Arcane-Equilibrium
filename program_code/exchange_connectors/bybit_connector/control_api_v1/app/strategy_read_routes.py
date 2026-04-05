@@ -415,3 +415,143 @@ async def get_kelly_recommendations(actor: base.AuthenticatedActor = Depends(bas
         return _envelope(AUTO_DEPLOYER.get_kelly_recommendations())
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
+
+
+# ── PG-direct Data Routes (Phase 3b) / PG 直讀數據路由 ──
+
+
+def _get_pg_conn():
+    """Get a PostgreSQL connection for read queries. Returns None on failure.
+    獲取 PG 連接用於讀取查詢。失敗返回 None。"""
+    try:
+        import psycopg2
+        from .grafana_data_writer import PG_HOST, PG_PORT, PG_USER, PG_PASS, PG_DB
+        return psycopg2.connect(
+            host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASS, dbname=PG_DB,
+            connect_timeout=3,
+        )
+    except Exception as e:
+        logger.debug("PG connection failed for read route: %s", e)
+        return None
+
+
+@phase2_router.get("/data/fills/recent")
+async def get_recent_fills_from_pg(
+    symbol: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Get recent fills directly from PostgreSQL trading.fills table.
+    從 PostgreSQL trading.fills 表直接獲取最近成交記錄。
+
+    Source: Rust engine → trading_writer → PG (real-time).
+    數據源：Rust 引擎 → trading_writer → PG（即時）。
+    """
+    conn = _get_pg_conn()
+    if conn is None:
+        return _envelope({"fills": [], "source": "pg_unavailable"})
+    try:
+        cur = conn.cursor()
+        if symbol:
+            cur.execute(
+                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills WHERE symbol = %s ORDER BY ts DESC LIMIT %s",
+                (symbol, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT ts, fill_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+                "FROM trading.fills ORDER BY ts DESC LIMIT %s",
+                (limit,),
+            )
+        rows = cur.fetchall()
+        cols = ["ts", "fill_id", "symbol", "side", "qty", "price", "fee", "realized_pnl", "strategy"]
+        fills = [dict(zip(cols, row)) for row in rows]
+        # Convert timestamps to ISO strings / 轉換時間戳為 ISO 字符串
+        for f in fills:
+            if f["ts"]:
+                f["ts"] = f["ts"].isoformat()
+        return _envelope({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
+    except Exception as e:
+        logger.error("PG fills query failed: %s", e)
+        return _envelope({"fills": [], "source": "pg_error", "error": str(e)})
+    finally:
+        conn.close()
+
+
+@phase2_router.get("/data/signals/recent")
+async def get_recent_signals_from_pg(
+    symbol: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Get recent signals directly from PostgreSQL trading.signals table.
+    從 PostgreSQL trading.signals 表直接獲取最近信號。
+
+    Source: Rust engine → trading_writer → PG (real-time).
+    數據源：Rust 引擎 → trading_writer → PG（即時）。
+    """
+    conn = _get_pg_conn()
+    if conn is None:
+        return _envelope({"signals": [], "source": "pg_unavailable"})
+    try:
+        cur = conn.cursor()
+        if symbol:
+            cur.execute(
+                "SELECT ts, signal_id, symbol, strategy_name, signal_type, strength "
+                "FROM trading.signals WHERE symbol = %s ORDER BY ts DESC LIMIT %s",
+                (symbol, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT ts, signal_id, symbol, strategy_name, signal_type, strength "
+                "FROM trading.signals ORDER BY ts DESC LIMIT %s",
+                (limit,),
+            )
+        rows = cur.fetchall()
+        cols = ["ts", "signal_id", "symbol", "strategy_name", "signal_type", "strength"]
+        signals = [dict(zip(cols, row)) for row in rows]
+        for s in signals:
+            if s["ts"]:
+                s["ts"] = s["ts"].isoformat()
+        return _envelope({"signals": signals, "count": len(signals), "source": "pg_trading_signals"})
+    except Exception as e:
+        logger.error("PG signals query failed: %s", e)
+        return _envelope({"signals": [], "source": "pg_error", "error": str(e)})
+    finally:
+        conn.close()
+
+
+@phase2_router.get("/data/features/latest")
+async def get_latest_features_from_pg(
+    symbol: str | None = Query(None),
+):
+    """Get latest feature vectors from PostgreSQL features.online_latest table.
+    從 PostgreSQL features.online_latest 表獲取最新特徵向量。
+
+    Source: Rust engine → feature_writer → PG (real-time UPSERT).
+    數據源：Rust 引擎 → feature_writer → PG（即時 UPSERT）。
+    """
+    conn = _get_pg_conn()
+    if conn is None:
+        return _envelope({"features": [], "source": "pg_unavailable"})
+    try:
+        cur = conn.cursor()
+        if symbol:
+            cur.execute(
+                "SELECT symbol, timeframe, updated_ts_ms, feature_vector, feature_version "
+                "FROM features.online_latest WHERE symbol = %s",
+                (symbol,),
+            )
+        else:
+            cur.execute(
+                "SELECT symbol, timeframe, updated_ts_ms, feature_vector, feature_version "
+                "FROM features.online_latest ORDER BY symbol",
+            )
+        rows = cur.fetchall()
+        cols = ["symbol", "timeframe", "updated_ts_ms", "feature_vector", "feature_version"]
+        features = [dict(zip(cols, row)) for row in rows]
+        return _envelope({"features": features, "count": len(features), "source": "pg_features_online"})
+    except Exception as e:
+        logger.error("PG features query failed: %s", e)
+        return _envelope({"features": [], "source": "pg_error", "error": str(e)})
+    finally:
+        conn.close()
