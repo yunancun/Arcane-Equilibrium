@@ -136,9 +136,10 @@ def _paper_response(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RC-10 DEPRECATED: Python paper engine write routes are DISABLED.
-# Rust openclaw_engine is the SOLE paper trading engine.
-# RC-10 廢棄：Python 紙盤引擎寫入路由已禁用。Rust 是唯一的紙上交易引擎。
+# RC-10: Rust engine is the SOLE paper trading engine.
+# Session commands are sent via IPC to the running Rust engine (command channel).
+# RC-10：Rust 引擎是唯一的紙上交易引擎。
+# Session 命令通過 IPC 發送到運行中的 Rust 引擎（命令通道）。
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _RC10_DISABLED_MSG = (
@@ -147,28 +148,46 @@ _RC10_DISABLED_MSG = (
 )
 
 
+def _get_ipc_client():
+    """Get the IPC client for sending commands to Rust engine / 獲取 IPC 客戶端"""
+    from .ipc_client import EngineIPCClient
+    return EngineIPCClient()
+
+
+async def _ipc_command(method: str, params: dict | None = None) -> dict:
+    """Send a command to Rust engine via IPC and return result / 通過 IPC 向 Rust 引擎發送命令"""
+    client = _get_ipc_client()
+    try:
+        await client.connect()
+        result = await client.call(method, params=params, timeout=5.0)
+        return result
+    finally:
+        await client.disconnect()
+
+
 @paper_router.post("/session/start")
-def post_session_start(
+async def post_session_start(
     req: SessionStartRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """DISABLED: Rust engine manages sessions / 已禁用：Rust 引擎管理 session"""
-    # Check if Rust engine is already active / 檢查 Rust 引擎是否已啟動
+    """Resume paper trading on Rust engine / 在 Rust 引擎上恢復紙盤交易"""
     rust = get_rust_reader()
-    if rust.is_available():
-        rust_state = rust.get_paper_state()
-        if rust_state is not None:
-            return _paper_response({
-                "message": "Rust engine is already active — no Python session needed / "
-                           "Rust 引擎已在運行 — 不需要 Python session",
-                "source": "rust_engine",
-                "position_count": len(rust_state.get("positions", [])),
-                "balance": rust_state.get("balance", 0),
-            })
-    raise HTTPException(
-        status_code=410,
-        detail=_RC10_DISABLED_MSG,
-    )
+    if not rust.is_available():
+        raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
+    try:
+        result = await _ipc_command("resume_paper")
+        rust_state = rust.get_paper_state() or {}
+        return _paper_response({
+            "message": "Paper trading started (resumed) / 紙盤交易已啟動（恢復）",
+            "source": "rust_engine",
+            "ipc_result": result,
+            "position_count": len(rust_state.get("positions", [])),
+            "balance": rust_state.get("balance", 0),
+            "session": {"session_state": "active", "session_id": "rust_engine"},
+        })
+    except Exception as e:
+        logger.error("IPC resume_paper failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
 
 
 @paper_router.post("/session/reauth")
@@ -200,31 +219,61 @@ def post_session_reauth(
 
 
 @paper_router.post("/session/pause")
-def post_session_pause(
+async def post_session_pause(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """DISABLED: Rust engine does not support pause via IPC / 已禁用：Rust 引擎不支持 IPC 暫停"""
-    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
+    """Pause paper trading — stops strategy dispatch + Demo shadow orders / 暫停紙盤交易"""
+    try:
+        result = await _ipc_command("pause_paper")
+        return _paper_response({
+            "message": "Paper trading paused / 紙盤交易已暫停",
+            "source": "rust_engine",
+            "ipc_result": result,
+            "session": {"session_state": "paused", "session_id": "rust_engine"},
+        })
+    except Exception as e:
+        logger.error("IPC pause_paper failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
 
 
 @paper_router.post("/session/resume")
-def post_session_resume(
+async def post_session_resume(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """DISABLED: Rust engine does not support resume via IPC / 已禁用：Rust 引擎不支持 IPC 恢復"""
-    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
+    """Resume paper trading — restores strategy dispatch + Demo shadow orders / 恢復紙盤交易"""
+    try:
+        result = await _ipc_command("resume_paper")
+        return _paper_response({
+            "message": "Paper trading resumed / 紙盤交易已恢復",
+            "source": "rust_engine",
+            "ipc_result": result,
+            "session": {"session_state": "active", "session_id": "rust_engine"},
+        })
+    except Exception as e:
+        logger.error("IPC resume_paper failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
 
 
 @paper_router.post("/session/stop")
-def post_session_stop(
+async def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """DISABLED: Rust engine manages session lifecycle / 已禁用：Rust 引擎管理 session 生命週期
-
-    To stop the Rust engine, use systemctl stop openclaw-engine or send SIGTERM.
-    要停止 Rust 引擎，使用 systemctl stop openclaw-engine 或發送 SIGTERM。
-    """
-    raise HTTPException(status_code=410, detail=_RC10_DISABLED_MSG)
+    """Stop paper trading — close all positions + pause / 停止紙盤交易 — 全部平倉+暫停"""
+    try:
+        # Step 1: Close all positions / 全部平倉
+        close_result = await _ipc_command("close_all_positions")
+        # Step 2: Pause trading / 暫停交易
+        pause_result = await _ipc_command("pause_paper")
+        return _paper_response({
+            "message": "Paper trading stopped — all positions closed / 紙盤交易已停止 — 所有持倉已平倉",
+            "source": "rust_engine",
+            "close_result": close_result,
+            "pause_result": pause_result,
+            "session": {"session_state": "stopped", "session_id": "rust_engine"},
+        })
+    except Exception as e:
+        logger.error("IPC stop failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
 
 
 @paper_router.get("/session/status")
@@ -246,6 +295,9 @@ def get_session_status(
             "pnl": {},
             "order_count": 0, "fill_count": 0, "position_count": 0,
         })
+    # Read paper_paused from full snapshot / 從完整快照讀取暫停狀態
+    full_snapshot = rust.get_snapshot() if rust.is_available() else None
+    is_paused = full_snapshot.get("paper_paused", False) if full_snapshot else False
     # Wrap flat Rust snapshot into nested structure expected by GUI
     # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
     positions = rust_state.get("positions", [])
@@ -257,7 +309,7 @@ def get_session_status(
     return _paper_response({
         "source": "rust_engine",
         "session": {
-            "session_state": "active",
+            "session_state": "paused" if is_paused else "active",
             "session_id": "rust_engine",
             "initial_paper_balance_usdt": peak,
             "current_paper_balance_usdt": balance,
