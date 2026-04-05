@@ -13,11 +13,20 @@ pub struct StopConfig {
     pub trailing_stop_pct: Option<f64>,
     pub time_stop_hours: Option<f64>,
     pub atr_multiplier: Option<f64>,
+    /// Take profit percentage (None = disabled). 止盈百分比（None = 禁用）。
+    #[serde(default)]
+    pub take_profit_pct: Option<f64>,
 }
 
 impl Default for StopConfig {
     fn default() -> Self {
-        Self { hard_stop_pct: 5.0, trailing_stop_pct: None, time_stop_hours: None, atr_multiplier: Some(2.0) }
+        Self {
+            hard_stop_pct: 5.0,
+            trailing_stop_pct: None,
+            time_stop_hours: None,
+            atr_multiplier: Some(2.0),
+            take_profit_pct: None,
+        }
     }
 }
 
@@ -39,6 +48,8 @@ pub struct PositionState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StopType {
+    /// Take profit target reached / 止盈目標達到
+    TakeProfit,
     Hard,
     Trailing,
     Time,
@@ -59,6 +70,12 @@ pub fn check_stops(
     current_price: f64,
     now_ms: u64,
 ) -> Option<StopTrigger> {
+    // Priority 0: Take profit (highest priority — lock in gains)
+    // 優先級 0：止盈（最高優先級 — 鎖定收益）
+    if let Some(trigger) = check_take_profit(config, pos, current_price) {
+        return Some(trigger);
+    }
+
     // Priority 1: Hard stop
     if let Some(trigger) = check_hard_stop(config, pos, current_price) {
         return Some(trigger);
@@ -75,6 +92,25 @@ pub fn check_stops(
     }
 
     None
+}
+
+fn check_take_profit(config: &StopConfig, pos: &PositionState, price: f64) -> Option<StopTrigger> {
+    let tp_pct = config.take_profit_pct?;
+    let tp_price = if pos.is_long {
+        pos.entry_price * (1.0 + tp_pct / 100.0)
+    } else {
+        pos.entry_price * (1.0 - tp_pct / 100.0)
+    };
+    let triggered = if pos.is_long { price >= tp_price } else { price <= tp_price };
+    if triggered {
+        Some(StopTrigger {
+            stop_type: StopType::TakeProfit,
+            trigger_price: Some(tp_price),
+            reason: format!("take_profit: price {price:.2} crossed {tp_price:.2}"),
+        })
+    } else {
+        None
+    }
 }
 
 fn check_hard_stop(config: &StopConfig, pos: &PositionState, price: f64) -> Option<StopTrigger> {

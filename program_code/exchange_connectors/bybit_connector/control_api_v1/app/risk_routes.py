@@ -133,16 +133,28 @@ def update_global_config(
         return _risk_response({"message": "no_updates", "config": rm.config.to_dict()})
     rm.update_global_config(updates)
 
-    # Push risk changes to Rust engine via IPC / 通過 IPC 推送風控變更到 Rust 引擎
-    hard_stop = updates.get("max_stop_loss_pct")
-    if hard_stop is not None:
+    # Push ALL risk changes to Rust engine via IPC / 通過 IPC 推送所有風控變更到 Rust 引擎
+    # Mapping: GUI field → IPC param
+    _U = object()  # sentinel for "not in updates"
+    ipc_kwargs: dict = {}
+    if "max_stop_loss_pct" in updates:
+        ipc_kwargs["hard_stop_pct"] = updates["max_stop_loss_pct"]
+    if "max_take_profit_pct" in updates:
+        ipc_kwargs["take_profit_pct"] = updates["max_take_profit_pct"]
+    if "max_leverage" in updates:
+        ipc_kwargs["max_leverage"] = updates["max_leverage"]
+    if "max_session_drawdown_pct" in updates:
+        ipc_kwargs["max_drawdown_pct"] = updates["max_session_drawdown_pct"]
+    if "max_holding_hours" in updates:
+        ipc_kwargs["time_stop_hours"] = updates["max_holding_hours"]
+    if ipc_kwargs:
         import asyncio
         from app.ipc_client import EngineIPCClient
         async def _push_risk():
             client = EngineIPCClient()
             try:
                 await client.connect()
-                await client.update_risk_config(hard_stop_pct=hard_stop)
+                await client.update_risk_config(**ipc_kwargs)
                 await client.disconnect()
             except Exception:
                 pass  # best-effort — Rust may not be running
@@ -251,6 +263,36 @@ def agent_adjust(
     if not updates:
         return _risk_response({"message": "no_updates", "agent_params": rm.agent_params.to_dict()})
     params = rm.agent_adjust(updates)
+
+    # Push agent risk adjustments to Rust engine via IPC
+    # 通過 IPC 推送 Agent 風控調整到 Rust 引擎
+    ipc_kwargs: dict = {}
+    if "effective_stop_loss_pct" in updates and updates["effective_stop_loss_pct"] is not None:
+        ipc_kwargs["hard_stop_pct"] = updates["effective_stop_loss_pct"]
+    if "effective_take_profit_pct" in updates:
+        ipc_kwargs["take_profit_pct"] = updates.get("effective_take_profit_pct")  # None = disable
+    if "trailing_stop_distance_pct" in updates:
+        ipc_kwargs["trailing_stop_pct"] = updates.get("trailing_stop_distance_pct")
+    if ipc_kwargs:
+        import asyncio
+        from app.ipc_client import EngineIPCClient
+        async def _push_agent_risk():
+            client = EngineIPCClient()
+            try:
+                await client.connect()
+                await client.update_risk_config(**ipc_kwargs)
+                await client.disconnect()
+            except Exception:
+                pass
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_push_agent_risk())
+            else:
+                loop.run_until_complete(_push_agent_risk())
+        except Exception:
+            pass
+
     return _risk_response({"message": "adjusted", "agent_params": params.to_dict()})
 
 

@@ -46,6 +46,15 @@ fn default_trading_mode() -> TradingMode {
 fn default_p1_risk_pct() -> f64 {
     0.02 // 2% of balance per trade
 }
+fn default_max_leverage() -> f64 {
+    5.0
+}
+fn default_max_drawdown_pct() -> f64 {
+    15.0
+}
+fn default_max_same_direction_positions() -> u32 {
+    3
+}
 
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
@@ -129,6 +138,18 @@ pub struct RuntimeConfig {
     /// Max total portfolio exposure (%) / 最大總組合曝險百分比
     #[serde(default = "default_max_total_exposure_pct")]
     pub max_total_exposure_pct: f64,
+
+    /// Max leverage (Guardian check) / 最大槓桿（守護者檢查）
+    #[serde(default = "default_max_leverage")]
+    pub max_leverage: f64,
+
+    /// Max session drawdown before rejection (%) / 最大回撤百分比
+    #[serde(default = "default_max_drawdown_pct")]
+    pub max_drawdown_pct: f64,
+
+    /// Max same-direction positions (Guardian) / 最大同方向持倉數
+    #[serde(default = "default_max_same_direction_positions")]
+    pub max_same_direction_positions: u32,
 
     // -- Hot params — attention intervals (ms) / 熱參數 — 注意力間隔 --
     /// Dormant attention interval (ms) / 休眠注意力間隔
@@ -314,6 +335,9 @@ impl Default for RuntimeConfig {
             ipc_socket_path: default_ipc_socket_path(),
             state_push_interval_ms: default_state_push_interval_ms(),
             p1_risk_pct: default_p1_risk_pct(),
+            max_leverage: default_max_leverage(),
+            max_drawdown_pct: default_max_drawdown_pct(),
+            max_same_direction_positions: default_max_same_direction_positions(),
             max_stop_loss_pct: default_max_stop_loss_pct(),
             max_take_profit_pct: default_max_take_profit_pct(),
             max_open_positions: default_max_open_positions(),

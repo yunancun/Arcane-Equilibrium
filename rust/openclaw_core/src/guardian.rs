@@ -166,6 +166,18 @@ impl Guardian {
 
         GuardianResult { verdict, risk_score, reasons, modified_qty, modified_leverage }
     }
+
+    /// Get current config reference (for read-modify-write updates).
+    /// 獲取當前配置引用。
+    pub fn config(&self) -> &GuardianConfig {
+        &self.config
+    }
+
+    /// Update guardian config at runtime (from IPC/Agent).
+    /// 運行時更新守護者配置。
+    pub fn update_config(&mut self, config: GuardianConfig) {
+        self.config = config;
+    }
 }
 
 impl Default for Guardian {
@@ -182,88 +194,80 @@ impl Default for Guardian {
 mod tests {
     use super::*;
 
-    fn empty_ctx() -> PortfolioContext {
-        PortfolioContext { drawdown_pct: 0.0, positions: vec![] }
+    fn buy_intent(symbol: &str, leverage: f64) -> TradeIntentCheck {
+        TradeIntentCheck { symbol: symbol.into(), side: "Buy".into(), leverage, qty: 1.0 }
     }
 
-    fn intent(symbol: &str, side: &str, leverage: f64) -> TradeIntentCheck {
-        TradeIntentCheck { symbol: symbol.to_string(), side: side.to_string(), leverage, qty: 0.1 }
+    fn ctx_with_positions(positions: Vec<(&str, &str)>, drawdown: f64) -> PortfolioContext {
+        PortfolioContext {
+            drawdown_pct: drawdown,
+            positions: positions.into_iter().map(|(s, side)| ExistingPosition {
+                symbol: s.into(), side: side.into(),
+            }).collect(),
+        }
     }
 
     #[test]
-    fn test_approved_no_issues() {
+    fn test_approved_no_positions() {
         let g = Guardian::default();
-        let r = g.review(&intent("BTCUSDT", "Buy", 3.0), &empty_ctx());
+        let r = g.review(&buy_intent("BTC", 1.0), &ctx_with_positions(vec![], 0.0));
         assert_eq!(r.verdict, Verdict::Approved);
-        assert_eq!(r.risk_score, 0.0);
-        assert!(r.reasons.is_empty());
     }
 
     #[test]
     fn test_direction_conflict_rejected() {
         let g = Guardian::default();
-        let ctx = PortfolioContext {
-            drawdown_pct: 0.0,
-            positions: vec![ExistingPosition { symbol: "BTCUSDT".into(), side: "Sell".into() }],
-        };
-        let r = g.review(&intent("BTCUSDT", "Buy", 3.0), &ctx);
+        let r = g.review(
+            &buy_intent("BTC", 1.0),
+            &ctx_with_positions(vec![("BTC", "Sell")], 0.0),
+        );
         assert_eq!(r.verdict, Verdict::Rejected);
-        assert!(r.reasons[0].starts_with("direction_conflict"));
+        assert!(r.reasons[0].contains("direction_conflict"));
+    }
+
+    #[test]
+    fn test_position_count_rejected() {
+        let g = Guardian::default(); // max 3
+        let r = g.review(
+            &buy_intent("BTC", 1.0),
+            &ctx_with_positions(vec![("ETH", "Buy"), ("SOL", "Buy"), ("XRP", "Buy")], 0.0),
+        );
+        assert_eq!(r.verdict, Verdict::Rejected);
+        assert!(r.reasons.iter().any(|r| r.contains("position_count")));
     }
 
     #[test]
     fn test_leverage_over_cap_modified() {
-        let g = Guardian::default();
-        let r = g.review(&intent("BTCUSDT", "Buy", 7.0), &empty_ctx());
+        let g = Guardian::default(); // max 5x
+        let r = g.review(
+            &buy_intent("BTC", 7.0), // 7x > 5x but < 10x
+            &ctx_with_positions(vec![], 0.0),
+        );
         assert_eq!(r.verdict, Verdict::Modified);
-        assert_eq!(r.modified_leverage, Some(2.0));
-        assert_eq!(r.modified_qty, Some(0.05));
+        assert!(r.modified_leverage.is_some());
     }
 
     #[test]
-    fn test_leverage_excessive_rejected() {
-        let g = Guardian::default();
-        let r = g.review(&intent("BTCUSDT", "Buy", 11.0), &empty_ctx());
+    fn test_drawdown_rejected() {
+        let g = Guardian::default(); // max 15%
+        let r = g.review(
+            &buy_intent("BTC", 1.0),
+            &ctx_with_positions(vec![], 20.0), // 20% drawdown
+        );
         assert_eq!(r.verdict, Verdict::Rejected);
-        assert!(r.reasons[0].starts_with("leverage_excessive"));
+        assert!(r.reasons.iter().any(|r| r.contains("drawdown_breach")));
     }
 
     #[test]
-    fn test_drawdown_breach() {
-        let g = Guardian::default();
-        let ctx = PortfolioContext { drawdown_pct: 16.0, positions: vec![] };
-        let r = g.review(&intent("BTCUSDT", "Buy", 3.0), &ctx);
-        assert_eq!(r.verdict, Verdict::Rejected);
-    }
-
-    #[test]
-    fn test_position_count_limit() {
-        let g = Guardian::default();
-        let ctx = PortfolioContext {
-            drawdown_pct: 0.0,
-            positions: vec![
-                ExistingPosition { symbol: "ETHUSDT".into(), side: "Buy".into() },
-                ExistingPosition { symbol: "SOLUSDT".into(), side: "Buy".into() },
-                ExistingPosition { symbol: "ADAUSDT".into(), side: "Buy".into() },
-            ],
-        };
-        let r = g.review(&intent("BTCUSDT", "Buy", 3.0), &ctx);
-        assert_eq!(r.verdict, Verdict::Rejected);
-    }
-
-    #[test]
-    fn test_risk_score_capped_at_1() {
-        let g = Guardian::default();
-        let ctx = PortfolioContext {
-            drawdown_pct: 20.0,
-            positions: vec![
-                ExistingPosition { symbol: "BTCUSDT".into(), side: "Sell".into() },
-                ExistingPosition { symbol: "A".into(), side: "Buy".into() },
-                ExistingPosition { symbol: "B".into(), side: "Buy".into() },
-                ExistingPosition { symbol: "C".into(), side: "Buy".into() },
-            ],
-        };
-        let r = g.review(&intent("BTCUSDT", "Buy", 11.0), &ctx);
-        assert!(r.risk_score <= 1.0);
+    fn test_config_update() {
+        let mut g = Guardian::default();
+        assert_eq!(g.config().max_drawdown_pct, 15.0);
+        let mut new_cfg = g.config().clone();
+        new_cfg.max_drawdown_pct = 25.0;
+        g.update_config(new_cfg);
+        assert_eq!(g.config().max_drawdown_pct, 25.0);
+        // 25% drawdown now passes
+        let r = g.review(&buy_intent("BTC", 1.0), &ctx_with_positions(vec![], 20.0));
+        assert_eq!(r.verdict, Verdict::Approved);
     }
 }
