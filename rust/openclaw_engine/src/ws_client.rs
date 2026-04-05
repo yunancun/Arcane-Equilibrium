@@ -422,7 +422,14 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<u64>().ok())
         .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
-        .unwrap_or(0);
+        .unwrap_or_else(|| {
+            // Fallback: use current time if Bybit ticker omits ts (common on Demo)
+            // 後備：如果 Bybit ticker 省略 ts（Demo 常見），使用當前時間
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        });
 
     let turnover = item.get("turnover24h")
         .and_then(|v| v.as_str())
