@@ -96,3 +96,53 @@ Total:  1931 tests
 - Phase 4 (W13-15): Claude Teacher + LinUCB + News Agent + DL-3
 - EXT-2: REST reconciliation for exchange mode disconnect recovery
 - Read TODO.md for current task queue
+
+---
+
+## Session 9 追加：核心風控接線審計結果
+
+### 發現：openclaw_core 風控函數已寫但未接入引擎
+
+| 函數 | 位置 | 行數 | 檢查項 | 狀態 |
+|------|------|------|--------|------|
+| `check_order_allowed()` | risk/checks.rs:57 | 62 行 | 5 check (日虧損/槓桿/單倉/總曝險/關聯曝險) | ❌ 未調用 |
+| `check_position_on_tick()` | risk/checks.rs:154 | 111 行 | 9 check (硬止損/ATR動態/止盈/跟蹤/時間/成本稅/回撤熔斷/連虧冷卻/日虧損) | ❌ 未調用 |
+| `H0Gate::check()` | h0_gate.rs:240 | 1040 行 | 5 check (新鮮度/健康/資格/風險信封/冷卻) | ❌ 未調用 |
+| `check_portfolio_risk()` | portfolio.rs:92 | 66 行 | 3 check (儲備緩衝/行業集中/相關性) | ❌ 未調用 |
+| `PriceHistoryTracker` | risk/price_tracker.rs | 294 行 | ATR 計算 + 3σ 尖刺檢測 | ❌ 未調用 |
+| `compute_dynamic_stop_pct()` | risk/stops.rs:41 | 27 行 | ATR 自適應 + 反聚集偏移 | ❌ 未調用 |
+| `RiskManagerConfig` | risk/config.rs | 176 行 | 行情乘數(trending/volatile/ranging/squeeze) | ❌ 未使用 |
+
+### 引擎當前實際執行的風控
+- IntentProcessor: GovernanceCore auth + Guardian 4-check + Kelly + P1 cap
+- tick_pipeline: stop_manager::check_stops (硬止損/跟蹤/時間，最簡單版本)
+- 無 H0 Gate、無 ATR 動態、無反聚集、無尖刺檢測、無回撤熔斷、無連虧冷卻
+
+### 下一步行動計劃（RRC-1: Risk Runtime Connect）
+
+**Phase A: H0Gate 接入** (最簡單，自包含)
+- tick_pipeline 加 H0Gate 實例
+- on_tick Step 0.5: h0.check(symbol) → 如果被阻則跳過策略分派
+- main.rs: 定期 update_health / update_risk
+
+**Phase B: check_order_allowed 接入 IntentProcessor**
+- 新增 Gate 0（在 governance 之後、Guardian 之前）
+- 需要新增狀態：daily_start_balance, daily_loss_pct, exposure 計算
+- RiskManagerConfig 從 RuntimeConfig 讀取
+
+**Phase C: check_position_on_tick 替換 check_stops**
+- PriceHistoryTracker 實例加入 tick_pipeline
+- 每個 tick 記錄價格 → compute_atr_pct
+- 替換 Step 6 的 check_stops 為 check_position_on_tick
+- 新增狀態：consecutive_losses, trailing_stops per symbol, spike_suppression
+
+**Phase D: 風控單一真相源**
+- GUI 風控讀取改為 Rust 快照
+- PipelineSnapshot 加入 stop_config + guardian_config + risk_state
+- Python RiskManager 降級為歷史遺留
+
+**Phase E: 清理 P1/P2**
+- 修復 ai-context 端點
+- 策略啟停 IPC 接入
+- 治理狀態統一
+- Python 死代碼清理
