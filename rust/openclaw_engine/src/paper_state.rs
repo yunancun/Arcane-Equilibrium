@@ -154,6 +154,11 @@ impl PaperState {
         &mut self, symbol: &str, is_long: bool, qty: f64,
         fill_price: f64, fee: f64, ts_ms: u64,
     ) {
+        // Guard: reject zero-qty fills (prevents ghost positions)
+        // 防護：拒絕零數量成交（防止幽靈持倉）
+        if qty <= 0.0 || fill_price <= 0.0 {
+            return;
+        }
         self.balance -= fee;
         self.total_fees += fee;
         self.set_latest_price(symbol, fill_price);
