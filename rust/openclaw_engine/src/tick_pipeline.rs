@@ -864,6 +864,8 @@ impl TickPipeline {
                     let all_pos: Vec<(String, bool, f64)> = self.paper_state.positions().iter()
                         .map(|p| (p.symbol.clone(), p.is_long, p.qty)).collect();
                     for (sym, il, q) in &all_pos {
+                        // Q1 fix: skip already-dispatched closes / 跳過已派發的平倉
+                        if is_exchange_mode && self.pending_close_symbols.contains(sym) { continue; }
                         let px = self.latest_prices.get(sym).copied().unwrap_or(event.last_price);
                         self.paper_state.close_position(sym, px, event.ts_ms);
                         self.stats.total_stops += 1;
