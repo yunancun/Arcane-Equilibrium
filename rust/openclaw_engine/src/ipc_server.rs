@@ -310,6 +310,9 @@ async fn dispatch_request(
         "get_param_ranges" => {
             handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Ranges).await
         }
+        "update_risk_config" => {
+            handle_update_risk_config(id, paper_cmd_tx, &req.params).await
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -476,6 +479,32 @@ async fn handle_strategy_param_cmd(
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }
+}
+
+/// Update risk config at runtime (GUI → Python → IPC → Rust engine).
+/// 運行時更新風控配置。
+async fn handle_update_risk_config(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string()),
+    };
+    let hard_stop_pct = params.get("hard_stop_pct").and_then(|v| v.as_f64());
+    let p1_risk_pct = params.get("p1_risk_pct").and_then(|v| v.as_f64());
+
+    if hard_stop_pct.is_none() && p1_risk_pct.is_none() {
+        return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "need hard_stop_pct or p1_risk_pct".to_string());
+    }
+
+    let _ = tx.send(PaperSessionCommand::UpdateRiskConfig { hard_stop_pct, p1_risk_pct });
+    JsonRpcResponse::success(id, serde_json::json!({
+        "updated": true,
+        "hard_stop_pct": hard_stop_pct,
+        "p1_risk_pct": p1_risk_pct,
+    }))
 }
 
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).

@@ -57,6 +57,12 @@ pub enum PaperSessionCommand {
         strategy_name: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// Update risk config at runtime (from GUI/Python → IPC → Rust).
+    /// 運行時更新風控配置（從 GUI/Python → IPC → Rust）。
+    UpdateRiskConfig {
+        hard_stop_pct: Option<f64>,
+        p1_risk_pct: Option<f64>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
