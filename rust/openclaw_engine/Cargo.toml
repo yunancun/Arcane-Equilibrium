@@ -27,6 +27,7 @@ hex = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+ndarray = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -23,6 +23,7 @@ pub mod intent_processor;
 pub mod ipc_server;
 pub mod leverage_token_client;
 pub mod market_data_client;
+pub mod ml;
 pub mod multi_interval_ws;
 pub mod orchestrator;
 pub mod order_manager;
