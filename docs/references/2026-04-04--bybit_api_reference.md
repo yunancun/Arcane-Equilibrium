@@ -926,17 +926,21 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 | `publicTrade.{symbol}` | (無) | 逐筆成交 | last_price=price, volume_24h=volume |
 | `orderbook.50.{symbol}` | `orderbook` | 50 檔訂單簿 | bid_price, ask_price, last_price=mid |
 | `tickers.{symbol}` | `ticker` | 行情快照 | last_price, volume_24h, bid_price, ask_price |
-| `liquidation.{symbol}` | `liquidation` | 清算事件 | last_price=liq_price, metadata: side, qty(=size) |
-| `price-limit.{symbol}` | `price_limit` | 價格限制更新（opt-in） | metadata: max_price, min_price |
-| `adl-notice.{symbol}` | `adl_notice` | ADL 通知（opt-in） | metadata: adl_rank, side |
+| ~~`liquidation.{symbol}`~~ | ~~`liquidation`~~ | ~~清算事件~~ | **已移除(2026-04-05)**: Bybit 返回 "handler not found"，毒化整個 WS 連接 |
+| ~~`price-limit.{symbol}`~~ | ~~`price_limit`~~ | ~~價格限制更新~~ | **已移除(2026-04-05)**: 同上 |
+| ~~`adl-notice.{symbol}`~~ | ~~`adl_notice`~~ | ~~ADL 通知~~ | **已移除(2026-04-05)**: 同上 |
 
-**默認訂閱**（`full_subscription_list`）：kline×4 + ticker + orderbook + publicTrade + liquidation = **8/symbol**
-**擴展訂閱**（`extended_subscription_list`）：+price-limit + adl-notice = **10/symbol**
+**默認訂閱**（`full_subscription_list`）：kline×6 + ticker + orderbook + publicTrade = **9/symbol**
+**擴展訂閱**（`extended_subscription_list`）：= 默認（broken topics 已移除）= **9/symbol**
+
+> **2026-04-05 發現**: Bybit V5 公共 WS 對不存在的 topic 返回 `{"success":false,"ret_msg":"error:handler not found"}`。
+> 這會導致**同一連接上所有其他訂閱停止接收數據**（零 tick），但連接和心跳保持正常。極難排查。
+> 修復：commit `29fc1ef`，從訂閱列表移除 liquidation/price-limit/adl-notice。
 
 Topic 生成函數（`multi_interval_ws.rs`）：
 - `kline_topics(symbol, intervals)`, `ticker_topic(symbol)`, `orderbook_topic(symbol)`
-- `public_trade_topic(symbol)`, `liquidation_topic(symbol)`
-- `price_limit_topic(symbol)`, `adl_notice_topic(symbol)`
+- `public_trade_topic(symbol)`
+- ~~`liquidation_topic()`, `price_limit_topic()`, `adl_notice_topic()`~~ — 函數保留但不再使用
 - `configure_multi_interval(ws, symbols)` — 一鍵為多交易對配置全部訂閱
 
 ---
@@ -1091,7 +1095,8 @@ pub struct ShadowOrderRequest {
 3. **fast-execution 替代 execution** — 不要同時訂閱兩者，會產生重複 fill 事件。
 4. **110043 不是錯誤** — `set_leverage` 返回 110043 表示槓桿已設置，代碼視為成功。
 5. **confirm-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除。
-6. **subscribe 每次最多 10 topics** — WS 訂閱超過 10 個 topic 會被靜默拒絕，代碼已分批處理。
+6. **subscribe 批次大小** — Spot 每次最多 10 topics；Linear 無硬性限制（總字元上限 21,000）。代碼保守地分批 10 個。
+6b. **broken topic 毒化連接** — 訂閱不存在的 topic（如 liquidation/price-limit/adl-notice）返回 "handler not found"，會導致整個連接零數據。連接和心跳正常但無行情。已在 `29fc1ef` 移除。
 7. **DCP 必須配置** — 不配置 DCP 意味著斷連後掛單持續有效，風險極高。
 8. **recv_window = 5000ms** — 本地與 Bybit 時差超過 5 秒會被拒簽。
 9. **Instrument cache 需定期刷新** — Bybit 偶爾調整合約精度/限額，建議每 4 小時 refresh 一次。
