@@ -283,7 +283,7 @@ impl Default for RuntimeConfig {
             balance_mode: default_balance_mode(),
             server_side_stops: default_true(),
             enable_extended_ws: default_true(),
-            shadow_orders: false,
+            shadow_orders: true,
             kline_bootstrap: default_true(),
             database: crate::database::DatabaseConfig::default(),
             ml: MlConfig::default(),
