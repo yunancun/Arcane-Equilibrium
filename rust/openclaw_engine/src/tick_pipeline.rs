@@ -132,6 +132,12 @@ pub struct TickPipeline {
     /// Phase 1: Channel to dispatch feature snapshots to async PG writer.
     /// Phase 1：派發特徵快照到異步 PG 寫入器的通道。
     feature_tx: Option<tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>>,
+    /// Phase 2a: Channel to dispatch trading lifecycle events to PG writer.
+    /// Phase 2a：派發交易生命週期事件到 PG 寫入器的通道。
+    trading_tx: Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    /// Phase 2a: Channel to dispatch decision context snapshots to PG writer.
+    /// Phase 2a：派發決策上下文快照到 PG 寫入器的通道。
+    context_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>>,
     /// Phase 1: Feature version string for FeatureSnapshot.
     /// Phase 1：特徵版本字符串。
     feature_version: String,
@@ -178,6 +184,8 @@ impl TickPipeline {
             shadow_order_tx: None,
             market_data_tx: None,
             feature_tx: None,
+            trading_tx: None,
+            context_tx: None,
             feature_version: "v1.0".into(),
             market_tx_dropped: 0,
             feature_tx_dropped: 0,
@@ -219,6 +227,18 @@ impl TickPipeline {
     /// Phase 1：設定特徵快照派發到異步 PG 寫入器的通道。
     pub fn set_feature_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>) {
         self.feature_tx = Some(tx);
+    }
+
+    /// Phase 2a: Set channel for dispatching trading lifecycle events to PG writer.
+    /// Phase 2a：設定交易生命週期事件派發通道。
+    pub fn set_trading_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::TradingMsg>) {
+        self.trading_tx = Some(tx);
+    }
+
+    /// Phase 2a: Set channel for dispatching decision context snapshots.
+    /// Phase 2a：設定決策上下文快照派發通道。
+    pub fn set_context_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>) {
+        self.context_tx = Some(tx);
     }
 
     /// Process a single price event through the full pipeline.
@@ -385,6 +405,50 @@ impl TickPipeline {
         for sig in &signals {
             self.recent_signals.push_back(sig.clone());
             if self.recent_signals.len() > 100 { self.recent_signals.pop_front(); }
+
+            // Phase 2a: Emit signal to trading_writer for PG persistence
+            if let Some(ref tx) = self.trading_tx {
+                let _ = tx.try_send(crate::database::TradingMsg::Signal {
+                    signal_id: format!("sig-{}-{}", sig.source, sig.ts_ms),
+                    ts_ms: sig.ts_ms,
+                    symbol: sig.symbol.clone(),
+                    strategy_name: sig.source.clone(),
+                    timeframe: sig.timeframe.clone(),
+                    signal_type: format!("{:?}", sig.direction),
+                    strength: sig.confidence,
+                    context_id: format!("ctx-{}-{}", sig.symbol, sig.ts_ms),
+                });
+            }
+        }
+
+        // Phase 2a: Emit DecisionContextMsg on signal generation (one per tick with signals)
+        if !signals.is_empty() {
+            if let Some(ref tx) = self.context_tx {
+                let ind = indicators.as_ref();
+                let pos = self.paper_state.get_position(&event.symbol);
+                let _ = tx.try_send(crate::database::DecisionContextMsg {
+                    context_id: format!("ctx-{}-{}", event.symbol, event.ts_ms),
+                    ts_ms: event.ts_ms,
+                    decision_type: "signal_generated".into(),
+                    symbol: event.symbol.clone(),
+                    strategy_name: signals[0].source.clone(),
+                    last_price: event.last_price,
+                    spread_bps: if event.ask_price > 0.0 && event.bid_price > 0.0 {
+                        (event.ask_price - event.bid_price) / event.last_price * 10_000.0
+                    } else { 0.0 },
+                    regime_5m: ind.and_then(|i| i.hurst.as_ref()).map(|h| h.regime.clone()).unwrap_or_default(),
+                    ind_5m_adx: ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx).unwrap_or(0.0),
+                    ind_5m_rsi: ind.and_then(|i| i.rsi_14).unwrap_or(50.0),
+                    ind_5m_atr_14_pct: ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent).unwrap_or(0.0),
+                    position_side: pos.map(|p| if p.is_long { "Long" } else { "Short" }).unwrap_or("None").into(),
+                    position_qty: pos.map(|p| p.qty).unwrap_or(0.0),
+                    total_equity: self.paper_state.balance(),
+                    drawdown_pct: self.paper_state.drawdown_pct(),
+                    indicators_snapshot: ind.map(|i| serde_json::to_value(i).unwrap_or_default()).unwrap_or_default(),
+                    position_detail: pos.map(|p| serde_json::to_value(p).unwrap_or_default()).unwrap_or_default(),
+                    decision_payload: serde_json::to_value(&signals).unwrap_or_default(),
+                });
+            }
         }
 
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
@@ -450,6 +514,23 @@ impl TickPipeline {
                             strategy: intent.strategy.clone(),
                         });
                         if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+
+                        // Phase 2a: Emit fill to trading_writer for PG persistence
+                        if let Some(ref tx) = self.trading_tx {
+                            let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                                fill_id: format!("fill-{}-{}", intent.symbol, event.ts_ms),
+                                ts_ms: event.ts_ms,
+                                order_id: format!("order-{}-{}", intent.symbol, event.ts_ms),
+                                symbol: intent.symbol.clone(),
+                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                qty: fill.fill_qty,
+                                price: fill.fill_price,
+                                fee: fill.fee,
+                                realized_pnl: 0.0, // computed on close
+                                strategy_name: intent.strategy.clone(),
+                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                            });
+                        }
 
                         // Item 1: Dispatch server-side stop for open positions (dual-track)
                         // 項目 1：為持倉派發伺服器端止損（雙軌）

@@ -57,6 +57,12 @@ pub struct EventConsumerDeps {
     /// Phase 1 (F-5): Shared last_tick_ms for quality monitor staleness detection.
     /// Phase 1（F-5）：共享 last_tick_ms 用於質量監控器過期檢測。
     pub last_tick_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
+    /// Phase 2a: Channel for trading lifecycle events (signals/intents/fills).
+    /// Phase 2a：交易生命週期事件通道。
+    pub trading_tx: Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    /// Phase 2a: Channel for decision context snapshots.
+    /// Phase 2a：決策上下文快照通道。
+    pub context_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>>,
 }
 
 /// Run the event consumer loop: build pipeline, register strategies, process ticks.
@@ -77,6 +83,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         market_data_tx,
         feature_tx,
         last_tick_ms: shared_last_tick_ms,
+        trading_tx,
+        context_tx,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -107,6 +115,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     if let Some(tx) = feature_tx {
         pipeline.set_feature_channel(tx);
         info!("pipeline feature channel wired / 管線特徵通道已接入");
+    }
+    if let Some(tx) = trading_tx {
+        pipeline.set_trading_channel(tx);
+        info!("pipeline trading channel wired / 管線交易通道已接入");
+    }
+    if let Some(tx) = context_tx {
+        pipeline.set_context_channel(tx);
+        info!("pipeline context channel wired / 管線上下文通道已接入");
     }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額

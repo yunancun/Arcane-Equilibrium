@@ -711,6 +711,39 @@ async fn async_main(config: Arc<ConfigManager>) {
         ));
     }
 
+    // Phase 2a: Trading lifecycle channel + writer task
+    // Phase 2a：交易生命週期通道 + 寫入器任務
+    let (trading_tx, trading_rx) = if db_pool.is_available() {
+        let (tx, rx) = tokio::sync::mpsc::channel(4096);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+    if let Some(trx) = trading_rx {
+        let tw_pool = Arc::clone(&db_pool);
+        let tw_config = Arc::clone(&config);
+        let tw_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::trading_writer::run_trading_writer(
+            trx, tw_pool, tw_config, tw_cancel,
+        ));
+    }
+
+    // Phase 2a: Decision context channel + writer task
+    let (context_tx, context_rx) = if db_pool.is_available() {
+        let (tx, rx) = tokio::sync::mpsc::channel(1024);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+    if let Some(crx) = context_rx {
+        let cw_pool = Arc::clone(&db_pool);
+        let cw_config = Arc::clone(&config);
+        let cw_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::context_writer::run_context_writer(
+            crx, cw_pool, cw_config, cw_cancel,
+        ));
+    }
+
     // F-4 fix: Spawn REST pollers for funding/OI/LSR (requires API client + market channel)
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
     if let (Some(ref client), Some(ref mtx)) = (&shared_client, &market_tx) {
@@ -779,6 +812,8 @@ async fn async_main(config: Arc<ConfigManager>) {
             market_data_tx: market_tx,
             feature_tx,
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+            trading_tx,
+            context_tx,
         };
         tokio::spawn(run_event_consumer(deps))
     };
