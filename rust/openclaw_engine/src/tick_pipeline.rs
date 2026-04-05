@@ -646,6 +646,12 @@ impl TickPipeline {
                                     fill.fill_price = spec.round_price(fill.fill_price);
                                 }
                             }
+                            // Guard: skip zero-qty fills (instrument rounding can reduce to 0)
+                            // 防護：跳過零數量成交（合約精度取整可能降為 0）
+                            if fill.fill_qty <= 0.0 {
+                                warn!(symbol = %intent.symbol, "paper fill skipped: qty=0 after rounding");
+                                continue;
+                            }
                             strategy.on_fill(intent, &fill);
                             self.paper_state.apply_fill(
                                 &intent.symbol, intent.is_long, fill.fill_qty,
