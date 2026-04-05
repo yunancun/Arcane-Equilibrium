@@ -69,6 +69,13 @@ impl Orchestrator {
     pub fn strategies_mut(&mut self) -> &mut [Box<dyn Strategy>] {
         &mut self.strategies
     }
+
+    /// Find a strategy by name (case-insensitive) for IPC param updates (Phase 3b PF-1).
+    /// 按名稱查找策略（大小寫不敏感），用於 IPC 參數更新。
+    pub fn find_strategy_mut(&mut self, name: &str) -> Option<&mut Box<dyn Strategy>> {
+        let name_lower = name.to_lowercase();
+        self.strategies.iter_mut().find(|s| s.name().to_lowercase() == name_lower)
+    }
 }
 
 impl Default for Orchestrator {
@@ -140,5 +147,15 @@ mod tests {
         orch.register(Box::new(MockStrategy { active: false, intents: vec![] }));
         assert_eq!(orch.strategy_count(), 2);
         assert_eq!(orch.active_strategy_names().len(), 1);
+    }
+
+    #[test]
+    fn test_find_strategy_mut() {
+        let mut orch = Orchestrator::new();
+        orch.register(Box::new(MockStrategy { active: true, intents: vec![] }));
+        // MockStrategy.name() returns "mock"
+        assert!(orch.find_strategy_mut("mock").is_some());
+        assert!(orch.find_strategy_mut("MOCK").is_some()); // case-insensitive
+        assert!(orch.find_strategy_mut("nonexistent").is_none());
     }
 }

@@ -24,7 +24,7 @@ use crate::paper_state::PaperState;
 
 /// Paper trading session command — IPC → event consumer → TickPipeline.
 /// 紙上交易 session 命令 — IPC → 事件消費者 → TickPipeline。
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PaperSessionCommand {
     /// Pause strategy dispatch + shadow orders. Prices/indicators/stops continue.
     /// 暫停策略分派+影子訂單。價格/指標/止損繼續。
@@ -38,6 +38,25 @@ pub enum PaperSessionCommand {
     /// Reset paper state — clear positions, reset balance.
     /// 重置紙盤狀態 — 清倉、重置餘額。
     Reset { new_balance: f64 },
+    /// Phase 3b: Update strategy parameters via JSON (Optuna → Rust).
+    /// Phase 3b：通過 JSON 更新策略參數（Optuna → Rust）。
+    UpdateStrategyParams {
+        strategy_name: String,
+        params_json: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// Phase 3b: Get current strategy parameters as JSON.
+    /// Phase 3b：獲取當前策略參數 JSON。
+    GetStrategyParams {
+        strategy_name: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// Phase 3b: Get parameter ranges for a strategy (Optuna search space).
+    /// Phase 3b：獲取策略參數範圍（Optuna 搜索空間）。
+    GetParamRanges {
+        strategy_name: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
