@@ -153,6 +153,33 @@ SPEC 審查記錄：
 > PA 整改報告：`audit_PA_consolidated_remediation_plan.md`
 > P0 全清約 2 天，P0+P1 全清約 8 個工作日。
 
+### 虧損根因分析（2026-04-06 · 引擎運行數據）
+> **真實交易虧損 ~$3.17（0.32%），非 90%（$10k→$1k 是配置變更非虧損）**
+> 171 fills / 9 stops / ~15 次引擎重啟 / BTC 僅 1.2% 波動區間
+
+- [ ] PNL-1（P0）：qty=0 幽靈倉禁止開倉 — intent_processor final_qty==0 時 reject（BTC/ETH $1k 餘額取整為 0）
+- [ ] PNL-2（P0）：H0Gate 從未觸發（h0_checks=0）— 排查為何代碼路徑未執行
+- [ ] PNL-3（P1）：引擎重啟冷卻期 — 重啟後等 N tick 建立 ATR/indicator 再開倉（當前立即開 5 倉）
+- [ ] PNL-4（P1）：regime 動態化 — 當前硬編碼 "ranging"，需接入 Hurst/ADX 實際判斷
+- [ ] PNL-5（P1）：Cost Gate 小帳戶收緊 — k=1.5 對 $20 notional 幾乎不攔截
+- [ ] PNL-6（P2）：止損風險收益比失衡 — 止損虧 $0.26~$0.42 vs 正常平倉賺 $0.01~$0.06
+- [ ] PNL-7（P2）：dynamic_stop base=0.6 / cap=0.8 硬編碼 → 提取為可配置參數
+
+### 數據庫積累狀況（2026-04-06 · 運行 12hr）
+> **DB 19 GB · 10/57 表有數據 · 47 表空 · signals 15.2M 行爆炸增長**
+
+- [ ] DB-RUN-1（P0）：signals 寫入頻率治理 — 15.2M/12hr = 352行/秒，1天30M行/12GB，1週80GB+
+      方案：降為每 bar close 寫入（非每 tick）或 batch 聚合後寫入，預期降 95%+
+- [ ] DB-RUN-2（P0）：decision_context_snapshots 治理 — 5.3M/12hr = 13GB，1天26GB
+      方案：降為每 intent 時寫入（非每 tick），或定時快照（每 30s/1min）
+- [ ] DB-RUN-3（P1）：realized_pnl 全為 0 — RRC-1 修復 apply_fill ���回值，但 DB 數據仍為 0
+      排查：引擎是否已用新 binary？需重啟引擎使修復生效
+- [ ] DB-RUN-4（P1）：feature_writer 無歷史積累 — features.online_latest 僅 5 行，無歷史 feature vectors
+      排查：feature_writer 是否在運行？history 表是否被寫入？
+- [ ] DB-RUN-5（P2）：47/57 表空（agent/learning/observability/risk 全空）— 需確認各 writer 是否啟動
+- [ ] DB-RUN-6（P2）：5 條 decision_context ts=1970-01-01（epoch 0 遺留數據）— 清理
+- [ ] DB-RUN-7（P3）：signals hypertable 5.7GB 但 pg_stat 顯示 40KB — ANALYZE 或 compression 配置驗證
+
 ### Operator 決策（2026-04-04）
 > **放棄修復 Python V2 交易引擎，全力完善 Rust。Python 只保留 API/GUI/Agent 層。**
 > QA 審計：Python V2 真實成熟度 62/100，6 項功能 FAKE/DEAD/UNREACHABLE。
