@@ -7,7 +7,7 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 7 / CONFIRMED 0 / RESOLVED 7
+# 統計：OPEN 11 / CONFIRMED 0 / RESOLVED 7
 # 最後更新：2026-04-05
 
 ---
@@ -194,6 +194,48 @@
 ---
 
 # ━━━ 代碼質量 / 技術債 ━━━
+
+## OPEN — TEST-1：4 個 multi_interval_ws 測試失敗
+
+**來源**：2026-04-05 Session 7，外部 linter 變更引入
+**嚴重性**：MEDIUM
+**問題**：multi_interval_ws 模組的 4 個測試（test_empty_intervals, test_full_subscription_list, test_extended_subscription_list, test_multi_symbol_subscriptions）因 linter 對 subscription 邏輯的修改而失敗。非本 session 代碼變更。
+**位置**：`rust/openclaw_engine/src/multi_interval_ws.rs`
+**影響**：WS 訂閱功能可能受影響（生產環境未驗證）
+**排查方式**：`cargo test -p openclaw_engine --lib multi_interval_ws`
+**緩解**：需要檢查 linter 的具體修改並修復測試或代碼
+
+---
+
+## OPEN — DEBT-2：main.rs 超過 800 行警告線
+
+**來源**：2026-04-05 Phase 1+2 累積
+**嚴重性**：LOW
+**問題**：main.rs 因 DB pool + 6 個 writer task spawn + REST poller + quality monitor + drift detector + feature version init 累積至 ~920 行，超過 800 行警告線
+**位置**：`rust/openclaw_engine/src/main.rs`
+**緩解**：提取 DB 初始化邏輯到 `database/init.rs` helper 函數。不阻塞功能。
+
+---
+
+## OPEN — ML-1：ort crate 未啟用（ONNX 推理為 placeholder）
+
+**來源**：2026-04-05 Phase 2b-infra 設計決策
+**嚴重性**：LOW（設計如此，非缺陷）
+**問題**：model_manager.rs 的 predict() 返回 None（placeholder），因為 ort crate 未添加（避免 ~200MB 下載）。Scorer 正確降級到 Tier 2 rule-based。
+**位置**：`rust/openclaw_engine/src/ml/model_manager.rs:107`
+**緩解**：首個 ONNX 模型訓練完成後，添加 ort crate 並替換 placeholder。One-line change。
+
+---
+
+## OPEN — ML-2：ml_training 測試需要 numpy/ML 依賴
+
+**來源**：2026-04-05 Phase 2 Batch E
+**嚴重性**：LOW
+**問題**：label_generator 等測試需要 numpy/lightgbm/scikit-learn（requirements-ml.txt），基礎環境無這些包。leakage_check 測試可在基礎環境運行。
+**位置**：`program_code/ml_training/tests/test_label_generator.py`
+**緩解**：使用 `pip install -r requirements-ml.txt` 安裝 ML 依賴後運行。CI 需要獨立的 ML test stage。
+
+---
 
 ## OPEN — DEBT-1：legacy_routes.py 1276 行超出 1200 行硬上限
 

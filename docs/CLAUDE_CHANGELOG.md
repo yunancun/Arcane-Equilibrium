@@ -16,6 +16,16 @@
 - **測試**：800 Rust（+30 new）· 0 failures · 0 warnings
 - ~3,500 新代碼 · 11 new files · 10 commits
 
+### Phase 2 完成 — Trading + Scorer + Kelly + ML Training（2026-04-05 · commits 41e144d~fb45c95）
+
+- **2a**：trading_writer(4 tables) + context_writer(15 flat+JSONB) + ExperimentLedger PG(V007)
+- **2b-infra**：ml/model_manager(ArcSwap ONNX) + ml/scorer(3-tier) + ml/kelly_sizer(fractional Kelly)
+- **D+E**：Kelly Gate 2.5 intent_processor 接入 + Python ml_training/ 6 模組（label/trainer/calibration/onnx/leakage/etl）
+- **F+G**：Parquet ETL(DuckDB) + E2/E4 final PASS
+- 新增 KNOWN_ISSUES：TEST-1(ws tests) + DEBT-2(main.rs 920行) + ML-1(ort placeholder) + ML-2(numpy env)
+- **測試**：823 Rust(+53) + 3348 Python + 5 ml_training · 4 pre-existing ws failures
+- ~2,200 新 Rust + ~700 新 Python · 7 commits
+
 ### Session 6：基礎設施清理 + 告警系統（2026-04-05 · commit 0e2d6a4）
 
 - **KNOWN_ISSUES 修復 4 項**：RE-1(memory audit→RESOLVED), RE-2(WS supervisor+channel-close propagation), ARCH-1(intent dedup), ARCH-4(fail-closed hardening)
