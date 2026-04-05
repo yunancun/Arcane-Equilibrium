@@ -153,6 +153,53 @@ pub struct RuntimeConfig {
     /// 資料庫配置段。
     #[serde(default)]
     pub database: crate::database::DatabaseConfig,
+
+    // -- Phase 2b: ML configuration / ML 配置 --
+    /// ML inference + Kelly sizing configuration (Phase 2b).
+    /// ML 推理 + Kelly 倉位管理配置。
+    #[serde(default)]
+    pub ml: MlConfig,
+}
+
+/// ML inference + Kelly sizing configuration.
+/// ML 推理 + Kelly 倉位管理配置。
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct MlConfig {
+    /// Path to ONNX model file (empty = no model) / ONNX 模型路徑（空 = 無模型）
+    #[serde(default)]
+    pub onnx_model_path: String,
+    /// Enable scorer (master switch) / 啟用評分器
+    #[serde(default = "default_true")]
+    pub scorer_enabled: bool,
+    /// Enable Kelly sizing / 啟用 Kelly 倉位管理
+    #[serde(default = "default_true")]
+    pub kelly_enabled: bool,
+    /// Max Kelly fraction (never full Kelly) / 最大 Kelly 分數
+    #[serde(default = "default_kelly_max")]
+    pub kelly_max_fraction: f64,
+    /// Min trades before Kelly activates / Kelly 啟動最少交易數
+    #[serde(default = "default_kelly_min_trades")]
+    pub kelly_min_trades: u32,
+    /// Fallback risk pct when Kelly inactive / Kelly 未啟動時的回退風險百分比
+    #[serde(default = "default_kelly_risk")]
+    pub kelly_risk_pct: f64,
+}
+
+fn default_kelly_max() -> f64 { 0.25 }
+fn default_kelly_min_trades() -> u32 { 50 }
+fn default_kelly_risk() -> f64 { 0.03 }
+
+impl Default for MlConfig {
+    fn default() -> Self {
+        Self {
+            onnx_model_path: String::new(),
+            scorer_enabled: true,
+            kelly_enabled: true,
+            kelly_max_fraction: default_kelly_max(),
+            kelly_min_trades: default_kelly_min_trades(),
+            kelly_risk_pct: default_kelly_risk(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +286,7 @@ impl Default for RuntimeConfig {
             shadow_orders: false,
             kline_bootstrap: default_true(),
             database: crate::database::DatabaseConfig::default(),
+            ml: MlConfig::default(),
         }
     }
 }
