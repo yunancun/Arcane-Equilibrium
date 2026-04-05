@@ -138,9 +138,9 @@ pub struct RuntimeConfig {
     #[serde(default = "default_true")]
     pub enable_extended_ws: bool,
 
-    /// Enable shadow orders: mirror paper fills to Demo API for comparison (opt-in).
-    /// 啟用影子訂單：將紙盤成交映射到 Demo API 進行比較（需手動開啟）。
-    #[serde(default)]
+    /// Enable shadow orders: mirror paper fills to Demo API for comparison (default: on).
+    /// 啟用影子訂單：將紙盤成交映射到 Demo API 進行比較（預設：開啟）。
+    #[serde(default = "default_true")]
     pub shadow_orders: bool,
 
     /// Enable kline bootstrap at startup (fetch 200 historical 1m bars per symbol via REST).

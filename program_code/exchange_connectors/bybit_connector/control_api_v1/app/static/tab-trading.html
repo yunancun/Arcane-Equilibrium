@@ -108,25 +108,25 @@
 
 <!-- ── Sub-tab bar ──────────────────────────────────────────────── -->
 <div class="sub-tab-bar">
-  <div class="sub-tab active" id="st-paper" onclick="switchSub('paper')">
-    <span class="sub-icon">&#x1F4B0;</span>模拟引擎 / Paper
+  <div class="sub-tab active" id="st-demo" onclick="switchSub('demo')">
+    <span class="sub-icon">&#x1F3E6;</span>执行引擎 / Demo (Primary)
   </div>
-  <div class="sub-tab" id="st-demo" onclick="switchSub('demo')">
-    <span class="sub-icon">&#x1F3E6;</span>Bybit Demo
+  <div class="sub-tab" id="st-paper" onclick="switchSub('paper')">
+    <span class="sub-icon">&#x1F9EA;</span>测试引擎 / Paper (Testing)
   </div>
 </div>
 
 <!-- ── Inner iframe area ────────────────────────────────────────── -->
 <div class="inner-wrap">
-  <iframe id="if-paper" src="/static/tab-paper.html?v=20260401f"></iframe>
-  <iframe id="if-demo"  style="display:none" data-src="/static/tab-demo.html?v=20260401f"></iframe>
+  <iframe id="if-demo"  src="/static/tab-demo.html?v=20260405"></iframe>
+  <iframe id="if-paper" style="display:none" data-src="/static/tab-paper.html?v=20260405"></iframe>
 </div>
 
 <!-- ── Start Confirmation Dialog ────────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-start">
   <div class="oc-dialog">
     <h3>&#x25B6; 启动双引擎</h3>
-    <p>将启动新的 Paper 引擎会话，初始余额自动同步 Bybit Demo 账户余额。之前的会话数据将被重置。</p>
+    <p>启动 Rust 交易引擎：Paper 测试引擎 + Demo 执行引擎同步运行。初始余额自动从 Demo 账户同步。</p>
     <div class="note">&#x26A0; Bybit Demo 如需重置余额，请先到 <a href="https://demo-trading.bybit.com" target="_blank" style="color:var(--accent)">demo-trading.bybit.com</a> 手动操作后再启动。</div>
     <div id="dlg-start-balance" style="font-size:13px;margin-bottom:12px;color:var(--text)"></div>
     <div class="btn-row">
@@ -140,17 +140,16 @@
 <div class="oc-dialog-overlay" id="dlg-stop">
   <div class="oc-dialog">
     <h3>&#x23F9; 停止双引擎</h3>
-    <p>停止引擎前是否先清仓 Paper 持仓？<br>停止后系统将自动取消 Demo 所有挂单并平掉 Demo 所有仓位。</p>
+    <p>停止将同时：<br>1. 平掉所有 Paper 持仓<br>2. 取消 Demo 所有挂单 + 平掉 Demo 所有仓位<br>3. 暂停策略信号</p>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeDialog('dlg-stop')">取消</button>
-      <button class="oc-btn oc-btn-danger" onclick="doStop(false)">直接停止</button>
-      <button class="oc-btn oc-btn-danger" onclick="doStop(true)">清仓后停止</button>
+      <button class="oc-btn oc-btn-danger" onclick="doStop()">确认停止</button>
     </div>
   </div>
 </div>
 
 <script>
-let _loaded = { paper: true, demo: false };
+let _loaded = { demo: true, paper: false };
 
 function switchSub(which) {
   document.getElementById('st-paper').classList.toggle('active', which === 'paper');
@@ -238,17 +237,19 @@ function unifiedStop() {
   document.getElementById('dlg-stop').classList.add('show');
 }
 
-async function doStop(liquidate) {
+async function doStop() {
   closeDialog('dlg-stop');
-
-  // RC-10: Stop sends IPC commands to Rust engine (close_all + pause)
-  // Liquidate option: stop already does close_all via IPC, no separate order/submit needed
-  // RC-10：停止通過 IPC 命令發送到 Rust 引擎（全部平倉+暫停）
+  // P1: Stop closes Paper + Demo positions, cancels Demo orders, pauses strategies
   const d = await ocPost('/api/v1/paper/session/stop', {});
   if (d) {
-    ocToast('引擎已停止（持仓已平仓）', 'success');
+    const errors = d.data && d.data.errors;
+    if (errors && errors.length) {
+      ocToast('引擎已停止（部分错误: ' + errors.join('; ') + '）', 'warning');
+    } else {
+      ocToast('双引擎已停止 — Paper + Demo 持仓已平仓', 'success');
+    }
     refreshIframes();
-    setTimeout(checkUnifiedStatus, 2000);
+    setTimeout(checkUnifiedStatus, 3000);
   } else {
     ocToast('停止失败', 'error');
   }
@@ -279,23 +280,24 @@ async function checkUnifiedStatus() {
     'active': '运行中', 'paused': '已暂停', 'stopped': '已停止', 'idle': '未启动',
   };
 
+  const paperLabel = stateMap[paperState] || paperState;
   if (paperActive && demoConnected) {
     badge.textContent = '双引擎运行中';
     badge.className = 'oc-chip oc-chip-good';
-  } else if (paperActive) {
-    badge.textContent = 'Paper 运行中';
+  } else if (paperState === 'paused' || paperState === 'stopped') {
+    badge.textContent = paperState === 'paused' ? '已暂停' : '已停止';
     badge.className = 'oc-chip oc-chip-warn';
   } else if (demoConnected) {
-    badge.textContent = '仅 Demo 连接';
+    badge.textContent = 'Demo 已连接';
     badge.className = 'oc-chip oc-chip-warn';
   } else {
-    badge.textContent = '未启动';
+    badge.textContent = '离线';
     badge.className = 'oc-chip oc-chip-neutral';
   }
 
-  detail.textContent = 'Paper: ' + (stateMap[paperState] || paperState) + ' | Demo: ' + (demoConnected ? '已连接' : '未连接');
+  detail.textContent = '执行引擎(Demo): ' + (demoConnected ? '已连接' : '未连接') + ' | 测试引擎(Paper): ' + paperLabel;
   btnStart.disabled = paperActive;
-  btnStop.disabled = !paperActive;
+  btnStop.disabled = (!paperActive && paperState !== 'paused');
 }
 
 function refreshIframes() {

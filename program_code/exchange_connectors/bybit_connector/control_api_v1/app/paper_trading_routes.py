@@ -165,6 +165,90 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict:
         await client.disconnect()
 
 
+def _get_demo_summary() -> dict:
+    """Get Demo account summary (balance + position count) via PyO3 BybitClient.
+    通過 PyO3 BybitClient 獲取 Demo 帳戶摘要。
+    """
+    from .strategy_ai_routes import _get_rust_client
+    rc = _get_rust_client()
+    if rc is None:
+        return {"available": False}
+    try:
+        wallet = rc.refresh_balance()
+        positions = rc.get_positions("linear")
+        open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
+        return {
+            "available": True,
+            "source": "bybit_demo_api",
+            "equity": wallet.get("total_equity", 0),
+            "wallet_balance": wallet.get("total_wallet_balance", 0),
+            "available_balance": wallet.get("total_available_balance", 0),
+            "unrealised_pnl": wallet.get("total_unrealised_pnl", 0),
+            "position_count": len(open_positions),
+        }
+    except Exception as e:
+        logger.debug("Demo summary failed: %s", e)
+        return {"available": False, "error": str(e)}
+
+
+def _close_all_demo_positions() -> dict:
+    """Close all Demo API positions + cancel orders via PyO3 BybitClient.
+    通過 PyO3 BybitClient 平掉所有 Demo API 倉位 + 取消掛單。
+
+    Best-effort: failures are logged but don't block paper stop.
+    盡力而為：失敗只記錄不阻塞 paper 停止。
+    """
+    from .strategy_ai_routes import _get_rust_client
+    result = {"demo_closed": 0, "demo_canceled": False, "demo_errors": []}
+    rc = _get_rust_client()
+    if rc is None:
+        result["demo_errors"].append("PyO3 BybitClient not available")
+        return result
+
+    # Step 1: Cancel all Demo orders / 取消所有 Demo 掛單
+    try:
+        for sym in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"]:
+            try:
+                rc.cancel_all_orders(sym, "linear")
+            except Exception:
+                pass  # Some symbols may have no orders
+        result["demo_canceled"] = True
+        logger.info("Demo orders canceled / Demo 掛單已取消")
+    except Exception as e:
+        result["demo_errors"].append(f"cancel_all: {e}")
+        logger.warning("Demo cancel_all failed: %s", e)
+
+    # Step 2: Close all Demo positions / 平掉所有 Demo 倉位
+    try:
+        positions = rc.get_positions("linear")
+        for pos in positions:
+            qty = float(pos.get("size") or pos.get("qty") or 0)
+            if qty <= 0:
+                continue
+            side = pos.get("side", "Buy")
+            close_side = "Sell" if side == "Buy" else "Buy"
+            symbol = pos.get("symbol", "")
+            try:
+                rc.place_order(
+                    symbol=symbol,
+                    side=close_side,
+                    order_type="Market",
+                    qty=qty,
+                    category="linear",
+                    reduce_only=True,
+                )
+                result["demo_closed"] += 1
+                logger.info("Demo position closed: %s %s %.4f / Demo 倉位已平：%s", symbol, close_side, qty, symbol)
+            except Exception as e:
+                result["demo_errors"].append(f"close {symbol}: {e}")
+                logger.warning("Demo close %s failed: %s", symbol, e)
+    except Exception as e:
+        result["demo_errors"].append(f"get_positions: {e}")
+        logger.warning("Demo get_positions failed: %s", e)
+
+    return result
+
+
 @paper_router.post("/session/start")
 async def post_session_start(
     req: SessionStartRequest,
@@ -258,22 +342,40 @@ async def post_session_resume(
 async def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop paper trading — close all positions + pause / 停止紙盤交易 — 全部平倉+暫停"""
+    """Stop dual engines — close all Paper + Demo positions, pause strategies.
+    停止雙引擎 — 平掉所有 Paper + Demo 倉位，暫停策略。
+    """
+    errors: list[str] = []
+    # Step 1: Close all Paper positions via IPC / 通過 IPC 平掉所有 Paper 倉位
+    close_result = {}
     try:
-        # Step 1: Close all positions / 全部平倉
         close_result = await _ipc_command("close_all_positions")
-        # Step 2: Pause trading / 暫停交易
-        pause_result = await _ipc_command("pause_paper")
-        return _paper_response({
-            "message": "Paper trading stopped — all positions closed / 紙盤交易已停止 — 所有持倉已平倉",
-            "source": "rust_engine",
-            "close_result": close_result,
-            "pause_result": pause_result,
-            "session": {"session_state": "stopped", "session_id": "rust_engine"},
-        })
     except Exception as e:
-        logger.error("IPC stop failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {e}")
+        errors.append(f"paper_close: {e}")
+        logger.error("IPC close_all_positions failed: %s", e)
+
+    # Step 2: Close all Demo positions + cancel orders via PyO3 / 通過 PyO3 平掉 Demo 倉位
+    demo_result = _close_all_demo_positions()
+    if demo_result.get("demo_errors"):
+        errors.extend(demo_result["demo_errors"])
+
+    # Step 3: Pause Paper strategies via IPC / 通過 IPC 暫停 Paper 策略
+    pause_result = {}
+    try:
+        pause_result = await _ipc_command("pause_paper")
+    except Exception as e:
+        errors.append(f"paper_pause: {e}")
+        logger.error("IPC pause_paper failed: %s", e)
+
+    return _paper_response({
+        "message": "Dual engines stopped — Paper + Demo positions closed / 雙引擎已停止 — Paper + Demo 倉位已平倉",
+        "source": "rust_engine",
+        "paper_close": close_result,
+        "demo_close": demo_result,
+        "paper_pause": pause_result,
+        "errors": errors if errors else None,
+        "session": {"session_state": "stopped", "session_id": "rust_engine"},
+    })
 
 
 @paper_router.get("/session/status")
@@ -330,6 +432,8 @@ def get_session_status(
         "fill_count": rust_state.get("trade_count", 0),
         "position_count": len(positions),
         "state_revision": 0,
+        # P3: Demo data as primary reporting source / Demo 數據作為主要報告來源
+        "demo": _get_demo_summary(),
     })
 
 
