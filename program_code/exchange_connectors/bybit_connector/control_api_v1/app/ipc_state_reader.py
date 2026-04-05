@@ -50,6 +50,7 @@ class RustSnapshotReader:
         self._lock = threading.Lock()
         self._cache: Optional[dict[str, Any]] = None
         self._cache_ts: float = 0.0
+        self._cache_file_age: float = 999999.0  # seconds since last snapshot write
 
     @property
     def snapshot_path(self) -> Path:
@@ -67,12 +68,15 @@ class RustSnapshotReader:
 
         path = self.snapshot_path
         try:
+            mtime = path.stat().st_mtime
+            self._cache_file_age = time.time() - mtime
             raw = path.read_text(encoding="utf-8")
             data = json.loads(raw)
             self._cache = data
             self._cache_ts = now
             return data
         except FileNotFoundError:
+            self._cache_file_age = 999999.0
             logger.debug(
                 "RustSnapshotReader: snapshot not found at %s — engine may not be running "
                 "/ 快照文件未找到 — 引擎可能未運行",
@@ -80,6 +84,7 @@ class RustSnapshotReader:
             )
             return None
         except (json.JSONDecodeError, OSError) as exc:
+            self._cache_file_age = 999999.0
             logger.warning(
                 "RustSnapshotReader: failed to read snapshot: %s / 讀取快照失敗：%s",
                 exc, exc,
@@ -90,18 +95,16 @@ class RustSnapshotReader:
         """
         Check if Rust engine snapshot is available and fresh.
         檢查 Rust 引擎快照是否可用且未過期。
+        Uses file mtime cached alongside data to avoid extra stat() calls.
+        使用與數據一起緩存的 mtime，避免額外 stat() 調用。
         """
         with self._lock:
             data = self._refresh_cache()
         if data is None:
             return False
-        # Check file modification time for staleness / 檢查文件修改時間判斷是否過期
-        try:
-            mtime = self.snapshot_path.stat().st_mtime
-            age = time.time() - mtime
-            return age < _STALENESS_THRESHOLD_SECONDS
-        except OSError:
-            return False
+        # Use mtime captured during _refresh_cache, not an extra stat() call
+        # 使用 _refresh_cache 時捕獲的 mtime，不做額外 stat()
+        return self._cache_file_age < _STALENESS_THRESHOLD_SECONDS
 
     def get_snapshot(self) -> Optional[dict[str, Any]]:
         """

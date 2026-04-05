@@ -356,8 +356,9 @@ class EngineIPCClient:
             True on success, False on failure. / 成功 True，失敗 False。
         """
         try:
-            self._reader, self._writer = await asyncio.open_unix_connection(
-                self._socket_path
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_unix_connection(self._socket_path),
+                timeout=3.0,  # 3s hard timeout — prevents GUI freeze during engine restart
             )
             self._connected = True
             self._reconnect_attempts = 0

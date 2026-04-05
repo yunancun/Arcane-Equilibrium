@@ -432,8 +432,13 @@ def get_session_status(
         "fill_count": rust_state.get("trade_count", 0),
         "position_count": len(positions),
         "state_revision": 0,
-        # P3: Demo data as primary reporting source / Demo 數據作為主要報告來源
-        "demo": _get_demo_summary(),
+        # P3: Demo balance from Rust WS sync (no API call — avoids blocking)
+        # Demo 餘額從 Rust WS 同步讀取（不打 API — 避免阻塞）
+        "demo": {
+            "available": True,
+            "source": "rust_ws_sync",
+            "sync_balance": rust_state.get("bybit_sync_balance"),
+        },
     })
 
 
