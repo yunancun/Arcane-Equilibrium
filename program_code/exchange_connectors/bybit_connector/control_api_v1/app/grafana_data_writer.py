@@ -41,14 +41,19 @@ logger = logging.getLogger(__name__)
 
 def _read_pg_pass_from_secrets() -> str:
     """Read PG password from secrets file. 从 secrets 文件读取数据库密码。"""
-    try:
-        path = os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env")
-        with open(path) as f:
-            for line in f:
-                if line.startswith("POSTGRES_PASSWORD="):
-                    return line.split("=", 1)[1].strip()
-    except FileNotFoundError:
-        pass
+    # Try multiple known secret file locations / 嘗試多個已知密碼文件位置
+    candidates = [
+        os.path.expanduser("~/BybitOpenClaw/secrets/environment_files/basic_system_services.env"),
+        os.path.expanduser("~/BybitOpenClaw/secrets/compose_env/trading_services.env"),
+    ]
+    for path in candidates:
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.startswith("POSTGRES_PASSWORD="):
+                        return line.split("=", 1)[1].strip()
+        except FileNotFoundError:
+            continue
     return ""
 
 
