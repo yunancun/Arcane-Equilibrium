@@ -414,10 +414,8 @@ PYO3-B03 + B04 → PYO3-B05 → PYO3-B06 → PYO3-B07 → PYO3-B08
 
 ## ██ Phase 3a — update_params() 改造 = AGT-1（W9-10，6/05-6/18）
 
-- [ ] 3a-01~02：PA 設計接口（StrategyParams trait + Rust Strategy trait）
-- [ ] 3a-03~07：Rust 5 策略 update_params()（Python 策略已淘汰）
-- [ ] 3a-08~10：Rust tests + 交叉一致性
-- [ ] 3a-11~12：E2 + E4
+- [x] 3a-01~07：Strategy trait +3 JSON methods + 4 策略 StrategyParams impl + update/get/validate（commit a212a82）
+- [x] 3a-08~12：14 new tests + E2 + E4 (358 engine pass, 0 fail)
 
 ## ██ Phase 3b — Optuna + Thompson Sampling + CPCV + 黑天鵝（W11-12，6/19-7/02）
 

@@ -92,8 +92,8 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | 0b | TimescaleDB + 压缩/retention | ✅ 完成 |
 | Session 6 | KNOWN_ISSUES 清理 + OC-1/2 告警 + Shadow docs | ✅ OPEN 8 |
 | 1 | 市场数据止血 + FeatureCollector + PSI | ✅ 完成 |
-| **2** | **交易链 + Decision Context + LightGBM Scorer + ONNX** | **✅ 代码完成** |
-| 3a | update_params() 改造（AGT-1） | ⬜ W9-10 |
+| 2 | 交易链 + Decision Context + LightGBM Scorer + ONNX | ✅ 完成 |
+| **3a** | **update_params() 改造（AGT-1）** | **✅ 完成** |
 | 3b | Optuna TPE + Thompson Sampling + CPCV + 黑天鹅 | ⬜ W11-12 |
 | 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ⬜ W13-15 |
 | 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
