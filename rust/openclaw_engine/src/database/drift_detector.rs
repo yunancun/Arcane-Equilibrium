@@ -315,6 +315,213 @@ pub async fn write_drift_event(
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// PSI Baseline Rebuild / PSI 基線重建
+// ═══════════════════════════════════════════════════════════════════
+
+/// A single baseline window for PSI reference distribution.
+/// 單個 PSI 參考分佈的基線窗口。
+#[derive(Debug, Clone)]
+pub struct BaselineWindow {
+    /// Start of the window (epoch ms). / 窗口起點（毫秒時間戳）。
+    pub valid_from_ms: u64,
+    /// End of the window (epoch ms). / 窗口終點（毫秒時間戳）。
+    pub valid_until_ms: u64,
+    /// Quantile-based bin edges for this window. / 此窗口的分位數 bin 邊界。
+    pub bin_edges: Vec<f64>,
+    /// Histogram counts per bin. / 每 bin 的計數。
+    pub bin_counts: Vec<u32>,
+    /// Number of finite samples in this window. / 此窗口中的有限樣本數。
+    pub n_samples: usize,
+}
+
+/// Rebuild PSI baselines from historical feature data using overlapping sliding windows.
+/// 使用重疊滑動窗口從歷史特徵數據重建 PSI 基線。
+///
+/// Window: `window_days` days, step: `step_days` days (QA2-8 audit: 30/7 defaults).
+/// Empty or degenerate windows (< 2 finite samples) are skipped.
+/// 窗口：`window_days` 天，步長：`step_days` 天（QA2-8 審計：默認 30/7）。
+/// 空或退化窗口（< 2 有限樣本）會被跳過。
+pub fn compute_baseline_windows(
+    values: &[f64],
+    timestamps_ms: &[u64],
+    window_days: u32,
+    step_days: u32,
+    n_bins: usize,
+) -> Vec<BaselineWindow> {
+    if values.len() != timestamps_ms.len() || values.is_empty() || step_days == 0 || window_days == 0 || n_bins == 0 {
+        return vec![];
+    }
+
+    let window_ms: u64 = window_days as u64 * 86_400_000;
+    let step_ms: u64 = step_days as u64 * 86_400_000;
+
+    // Find the overall time range / 找到整體時間範圍
+    let t_min = *timestamps_ms.iter().min().unwrap_or(&0);
+    let t_max = *timestamps_ms.iter().max().unwrap_or(&0);
+
+    if t_max.saturating_sub(t_min) < window_ms {
+        // Not enough span for even one window / 時間跨度不足一個窗口
+        return vec![];
+    }
+
+    let mut windows = Vec::new();
+    let mut win_start = t_min;
+
+    while win_start + window_ms <= t_max + 1 {
+        let win_end = win_start + window_ms;
+
+        // Collect values within [win_start, win_end) / 收集窗口內的值
+        let win_values: Vec<f64> = values
+            .iter()
+            .zip(timestamps_ms.iter())
+            .filter(|(_, &ts)| ts >= win_start && ts < win_end)
+            .map(|(&v, _)| v)
+            .filter(|v| v.is_finite())
+            .collect();
+
+        // Skip degenerate windows / 跳過退化窗口
+        if win_values.len() >= 2 {
+            let edges = quantile_bin_edges(&win_values, n_bins);
+            if edges.len() >= 2 {
+                let counts = histogram(&win_values, &edges);
+                windows.push(BaselineWindow {
+                    valid_from_ms: win_start,
+                    valid_until_ms: win_end,
+                    bin_edges: edges,
+                    bin_counts: counts,
+                    n_samples: win_values.len(),
+                });
+            }
+        }
+
+        win_start += step_ms;
+    }
+
+    windows
+}
+
+/// Check if a baseline rebuild is needed (cooldown after last rebuild).
+/// 檢查是否需要重建基線（上次重建後的冷卻期）。
+///
+/// Returns true if `now_ms - last_rebuild_ms >= cooldown_days * 86_400_000`.
+/// Saturating subtraction prevents underflow when last_rebuild_ms > now_ms.
+/// 當 now_ms - last_rebuild_ms >= cooldown_days * 86_400_000 時返回 true。
+/// 飽和減法防止 last_rebuild_ms > now_ms 時下溢。
+pub fn should_rebuild_baseline(
+    last_rebuild_ms: u64,
+    now_ms: u64,
+    cooldown_days: u32,
+) -> bool {
+    let cooldown_ms = cooldown_days as u64 * 86_400_000;
+    now_ms.saturating_sub(last_rebuild_ms) >= cooldown_ms
+}
+
+/// Simple seeded LCG (linear congruential generator) for deterministic bootstrap.
+/// No external crate needed.
+/// 簡單種子 LCG（線性同餘生成器）用於確定性自助法，無需外部 crate。
+struct SimpleLcg {
+    state: u64,
+}
+
+impl SimpleLcg {
+    fn new(seed: u64) -> Self {
+        // Avoid zero state / 避免零狀態
+        Self { state: seed.wrapping_add(1) }
+    }
+
+    /// Return next pseudo-random u64. / 返回下一個偽隨機 u64。
+    fn next_u64(&mut self) -> u64 {
+        // LCG constants from Numerical Recipes
+        self.state = self.state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.state
+    }
+
+    /// Return a uniform index in [0, bound). / 返回 [0, bound) 中的均勻索引。
+    fn next_index(&mut self, bound: usize) -> usize {
+        if bound == 0 { return 0; }
+        (self.next_u64() % bound as u64) as usize
+    }
+}
+
+/// Perform block bootstrap to estimate confidence intervals for PSI.
+/// 執行塊自助法估計 PSI 置信區間。
+///
+/// Block size default = 4 (QA2-8 spec), n_bootstrap default = 100.
+/// Returns (psi_mean, psi_lower_5pct, psi_upper_95pct).
+/// 塊大小默認 = 4（QA2-8 規範），自助次數默認 = 100。
+/// 返回 (psi_mean, psi_lower_5pct, psi_upper_95pct)。
+///
+/// Edge cases: if current_values is empty or bin_edges < 2, returns (0.0, 0.0, 0.0).
+/// 邊界情況：若 current_values 為空或 bin_edges < 2，返回 (0.0, 0.0, 0.0)。
+pub fn block_bootstrap_psi(
+    reference_counts: &[u32],
+    current_values: &[f64],
+    bin_edges: &[f64],
+    block_size: usize,
+    n_bootstrap: usize,
+    seed: u64,
+) -> (f64, f64, f64) {
+    let zero = (0.0, 0.0, 0.0);
+
+    if current_values.is_empty() || bin_edges.len() < 2 || reference_counts.is_empty() || n_bootstrap == 0 {
+        return zero;
+    }
+
+    let block_sz = block_size.max(1);
+    let n = current_values.len();
+    let epsilon = 1e-6;
+
+    let mut rng = SimpleLcg::new(seed);
+    let mut psi_samples: Vec<f64> = Vec::with_capacity(n_bootstrap);
+
+    for _ in 0..n_bootstrap {
+        // Resample current_values in blocks / 以塊方式重採樣 current_values
+        let mut resampled: Vec<f64> = Vec::with_capacity(n);
+        while resampled.len() < n {
+            let start = rng.next_index(n);
+            for j in 0..block_sz {
+                if resampled.len() >= n {
+                    break;
+                }
+                // Wrap around if block exceeds bounds / 若塊超出邊界則環繞
+                let idx = (start + j) % n;
+                let v = current_values[idx];
+                if v.is_finite() {
+                    resampled.push(v);
+                }
+            }
+        }
+
+        // Compute histogram of resampled values / 計算重採樣值的直方圖
+        let resampled_counts = histogram(&resampled, bin_edges);
+
+        // Compute PSI vs reference / 計算 PSI 與參考的對比
+        let psi = compute_psi(reference_counts, &resampled_counts, epsilon);
+        if psi.is_finite() {
+            psi_samples.push(psi);
+        }
+    }
+
+    if psi_samples.is_empty() {
+        return zero;
+    }
+
+    // Sort for percentile computation / 排序以計算百分位
+    psi_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mean = psi_samples.iter().sum::<f64>() / psi_samples.len() as f64;
+
+    // 5th and 95th percentile indices / 第 5 和第 95 百分位索引
+    let lower_idx = ((psi_samples.len() as f64 * 0.05).floor() as usize).min(psi_samples.len() - 1);
+    let upper_idx = ((psi_samples.len() as f64 * 0.95).ceil() as usize).min(psi_samples.len() - 1);
+
+    let lower = psi_samples[lower_idx];
+    let upper = psi_samples[upper_idx];
+
+    (mean, lower, upper)
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Tests / 測試
 // ═══════════════════════════════════════════════════════════════════
 
@@ -427,6 +634,103 @@ mod tests {
         let large = vec![50, 5, 5, 5, 35];
         let psi_large = compute_psi(&base, &large, 1e-6);
         assert!(psi_large > 0.2, "large shift PSI should be > 0.2 (alert), got {psi_large}");
+    }
+
+    #[test]
+    fn test_baseline_windows_count() {
+        // 180 days of data, 30-day window, 7-day step
+        // Expected: (180 - 30) / 7 + 1 = 22 windows (approx, depending on alignment)
+        // 180 天數據，30 天窗口，7 天步長，預期約 22 個窗口
+        let n_points = 1800; // 10 points per day × 180 days
+        let day_ms: u64 = 86_400_000;
+        let base_ts: u64 = 1_700_000_000_000;
+
+        let mut values = Vec::with_capacity(n_points);
+        let mut timestamps = Vec::with_capacity(n_points);
+        for i in 0..n_points {
+            let day = i as u64 / 10; // 10 points per day
+            timestamps.push(base_ts + day * day_ms + (i as u64 % 10) * 1000);
+            values.push(50.0 + (i as f64 * 0.01)); // slowly increasing feature
+        }
+
+        let windows = compute_baseline_windows(&values, &timestamps, 30, 7, 10);
+
+        // Should have roughly (180-30)/7 + 1 = 22 windows
+        assert!(
+            windows.len() >= 20 && windows.len() <= 23,
+            "expected ~22 windows for 180d data with 30d/7d, got {}",
+            windows.len()
+        );
+
+        // Each window should have samples and valid bin structure
+        // 每個窗口應有樣本和有效 bin 結構
+        for w in &windows {
+            assert!(w.n_samples > 0, "window should have samples");
+            assert_eq!(w.bin_edges.len(), 11, "10 bins → 11 edges");
+            assert_eq!(w.bin_counts.len(), 10, "10 bins");
+            assert!(w.valid_until_ms > w.valid_from_ms, "valid_until > valid_from");
+        }
+    }
+
+    #[test]
+    fn test_baseline_windows_empty_input() {
+        // Edge case: empty data returns no windows / 邊界情況：空數據返回零窗口
+        let windows = compute_baseline_windows(&[], &[], 30, 7, 10);
+        assert!(windows.is_empty());
+
+        // Edge case: mismatched lengths / 長度不匹配
+        let windows = compute_baseline_windows(&[1.0, 2.0], &[100], 30, 7, 10);
+        assert!(windows.is_empty());
+    }
+
+    #[test]
+    fn test_should_rebuild_cooldown() {
+        let day_ms: u64 = 86_400_000;
+        let base: u64 = 1_700_000_000_000;
+
+        // Within 7 days → false / 7 天內 → false
+        assert!(!should_rebuild_baseline(base, base + 6 * day_ms, 7));
+
+        // Exactly 7 days → true / 恰好 7 天 → true
+        assert!(should_rebuild_baseline(base, base + 7 * day_ms, 7));
+
+        // After 7 days → true / 超過 7 天 → true
+        assert!(should_rebuild_baseline(base, base + 10 * day_ms, 7));
+
+        // now < last_rebuild (clock skew) → false (saturating sub) / 時鐘偏移 → false
+        assert!(!should_rebuild_baseline(base + 100 * day_ms, base, 7));
+    }
+
+    #[test]
+    fn test_block_bootstrap_psi_returns_valid() {
+        // Build a reference distribution and current values / 構建參考分佈和當前值
+        let reference = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let edges = quantile_bin_edges(&reference, 5);
+        let ref_counts = histogram(&reference, &edges);
+
+        // Current values slightly shifted / 當前值略有偏移
+        let current: Vec<f64> = (0..100).map(|i| 2.0 + (i as f64 * 0.1)).collect();
+
+        let (mean, lower, upper) = block_bootstrap_psi(&ref_counts, &current, &edges, 4, 100, 42);
+
+        // Mean should be positive (distributions differ) / 均值應為正（分佈不同）
+        assert!(mean >= 0.0, "mean PSI should be >= 0, got {mean}");
+
+        // lower <= mean <= upper / 下界 <= 均值 <= 上界
+        assert!(
+            lower <= mean + 1e-12 && mean <= upper + 1e-12,
+            "expected lower({lower}) <= mean({mean}) <= upper({upper})"
+        );
+
+        // Should be finite / 應為有限值
+        assert!(mean.is_finite() && lower.is_finite() && upper.is_finite());
+    }
+
+    #[test]
+    fn test_block_bootstrap_psi_empty_input() {
+        // Edge case: empty current_values / 邊界情況：空 current_values
+        let (m, l, u) = block_bootstrap_psi(&[10, 20, 30], &[], &[0.0, 1.0, 2.0, 3.0], 4, 100, 1);
+        assert_eq!((m, l, u), (0.0, 0.0, 0.0));
     }
 
     /// Deterministic pseudo-random small noise for tests.

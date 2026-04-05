@@ -10,6 +10,7 @@
 //!   QueryBuilder::push_values() 批量插入。PG 失敗時回退到 JSONL。
 //!   Pool 初始化可選 — 無 PG 時引擎正常運行（優雅降級）。
 
+pub mod black_swan_detector;
 pub mod context_writer;
 pub mod drift_detector;
 pub mod experiment_ledger_pg;
