@@ -533,6 +533,24 @@ impl TickPipeline {
                     );
                     if gate.approved {
                         self.stats.total_intents += 1;
+
+                        // Phase 3b fix: Emit Intent to trading_tx for PG persistence.
+                        // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
+                        if let Some(ref tx) = self.trading_tx {
+                            let _ = tx.try_send(crate::database::TradingMsg::Intent {
+                                intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                                ts_ms: event.ts_ms,
+                                signal_id: String::new(),
+                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                symbol: intent.symbol.clone(),
+                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                qty: gate.approved_qty,
+                                price: event.last_price,
+                                order_type: intent.order_type.clone(),
+                                strategy_name: intent.strategy.clone(),
+                            });
+                        }
+
                         self.exchange_seq = self.exchange_seq.wrapping_add(1);
                         let order_link_id = format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
 
@@ -591,6 +609,24 @@ impl TickPipeline {
                             result: "submitted".into(),
                         });
                         if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+
+                        // Phase 3b fix: Emit Intent to trading_tx for PG persistence.
+                        // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
+                        if let Some(ref tx) = self.trading_tx {
+                            let _ = tx.try_send(crate::database::TradingMsg::Intent {
+                                intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                                ts_ms: event.ts_ms,
+                                signal_id: String::new(),
+                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                symbol: intent.symbol.clone(),
+                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                qty: intent.qty,
+                                price: event.last_price,
+                                order_type: intent.order_type.clone(),
+                                strategy_name: intent.strategy.clone(),
+                            });
+                        }
+
                         if let Some(mut fill) = result.fill {
                             if let Some(ref icache) = self.instrument_cache {
                                 if let Some(spec) = icache.get(&intent.symbol) {
