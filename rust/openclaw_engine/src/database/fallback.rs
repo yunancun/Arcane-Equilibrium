@@ -17,7 +17,9 @@ use tracing::{info, warn};
 pub struct FallbackWriter {
     dir: PathBuf,
     current_file: Option<std::fs::File>,
-    lines_written: u64,
+    current_file_lines: u64,
+    /// Total lines written across all files / 所有文件的總寫入行數
+    total_written: u64,
     /// Max lines per file before rotation / 每文件最大行數
     max_lines_per_file: u64,
     file_index: u32,
@@ -33,7 +35,8 @@ impl FallbackWriter {
         Self {
             dir: dir.to_path_buf(),
             current_file: None,
-            lines_written: 0,
+            current_file_lines: 0,
+            total_written: 0,
             max_lines_per_file: 100_000,
             file_index: 0,
         }
@@ -43,7 +46,7 @@ impl FallbackWriter {
     /// 寫入一行 JSON 到回退文件。
     pub fn write_line(&mut self, json: &str) -> bool {
         // Rotate if needed / 需要時輪換文件
-        if self.lines_written >= self.max_lines_per_file {
+        if self.current_file_lines >= self.max_lines_per_file {
             self.rotate();
         }
 
@@ -62,7 +65,8 @@ impl FallbackWriter {
 
         match writeln!(file, "{}", json) {
             Ok(_) => {
-                self.lines_written += 1;
+                self.current_file_lines += 1;
+                self.total_written += 1;
                 true
             }
             Err(e) => {
@@ -74,14 +78,14 @@ impl FallbackWriter {
 
     /// Total lines written across all files / 所有文件的總寫入行數
     pub fn total_lines(&self) -> u64 {
-        self.lines_written
+        self.total_written
     }
 
     fn open_new_file(&mut self) -> Option<std::fs::File> {
         let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
         let path = self.dir.join(format!("market_fallback_{}_{}.jsonl", now, self.file_index));
         self.file_index += 1;
-        self.lines_written = 0;
+        self.current_file_lines = 0;
         match OpenOptions::new().create(true).append(true).open(&path) {
             Ok(f) => {
                 info!(path = %path.display(), "fallback file opened / 回退文件已打開");
@@ -96,7 +100,7 @@ impl FallbackWriter {
 
     fn rotate(&mut self) {
         self.current_file = None;
-        self.lines_written = 0;
+        self.current_file_lines = 0;
     }
 }
 
@@ -133,6 +137,8 @@ mod tests {
         for i in 0..7 {
             writer.write_line(&format!(r#"{{"i":{i}}}"#));
         }
+        // total_lines counts across all files (F-2 fix)
+        assert_eq!(writer.total_lines(), 7);
         let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))

@@ -711,6 +711,31 @@ async fn async_main(config: Arc<ConfigManager>) {
         ));
     }
 
+    // F-4 fix: Spawn REST pollers for funding/OI/LSR (requires API client + market channel)
+    // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
+    if let (Some(ref client), Some(ref mtx)) = (&shared_client, &market_tx) {
+        openclaw_engine::database::rest_poller::spawn_rest_pollers(
+            Arc::clone(client),
+            mtx.clone(),
+            openclaw_engine::event_consumer::SYMBOLS,
+            cancel.clone(),
+        );
+    }
+
+    // F-5 fix: Spawn data quality monitor (uses shared last_tick_ms counter)
+    // F-5 修復：啟動數據質量監控器
+    let shared_last_tick_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    if db_pool.is_available() {
+        let qm_pool = Arc::clone(&db_pool);
+        let qm_tick = Arc::clone(&shared_last_tick_ms);
+        let qm_symbols: Vec<String> = openclaw_engine::event_consumer::SYMBOLS
+            .iter().map(|s| s.to_string()).collect();
+        let qm_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::quality_writer::run_quality_monitor(
+            qm_pool, qm_tick, qm_symbols, qm_cancel,
+        ));
+    }
+
     let event_handle = {
         use openclaw_engine::event_consumer::{EventConsumerDeps, run_event_consumer};
         let deps = EventConsumerDeps {
@@ -727,6 +752,7 @@ async fn async_main(config: Arc<ConfigManager>) {
             paper_cmd_rx: Some(paper_cmd_rx),
             market_data_tx: market_tx,
             feature_tx,
+            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
         };
         tokio::spawn(run_event_consumer(deps))
     };

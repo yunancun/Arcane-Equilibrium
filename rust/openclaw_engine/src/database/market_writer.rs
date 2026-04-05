@@ -8,9 +8,11 @@
 //!   每 batch_flush_interval_ms 使用 QueryBuilder::push_values() 刷新。
 //!   連續 3 次 PG 失敗後切換到 JSONL 回退。不阻塞 tick 循環。
 
+use super::fallback::FallbackWriter;
 use super::pool::DbPool;
 use super::{sanitize_f64, sanitize_f64_or_zero, MarketDataMsg};
 use sqlx::QueryBuilder;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -28,6 +30,14 @@ pub async fn run_market_writer(
     let mut ticker_buf: Vec<MarketDataMsg> = Vec::with_capacity(64);
     let mut other_buf: Vec<MarketDataMsg> = Vec::with_capacity(64);
 
+    // F-6 fix: JSONL fallback writer for when PG fails 3+ times
+    // F-6 修復：PG 失敗 3+ 次時的 JSONL 回退寫入器
+    let fallback_dir = PathBuf::from(
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into())
+    ).join("fallback");
+    let mut fallback = FallbackWriter::new(&fallback_dir);
+    let mut in_fallback_mode = false;
+
     let flush_interval = {
         let cfg = config.get();
         std::time::Duration::from_millis(cfg.database.batch_flush_interval_ms)
@@ -41,8 +51,22 @@ pub async fn run_market_writer(
         tokio::select! {
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
-                if pool.is_available() {
+                if pool.is_available() && !in_fallback_mode {
                     flush_all(&pool, &mut kline_buf, &mut ticker_buf, &mut other_buf).await;
+                    // F-6: Switch to fallback after 3 consecutive PG failures
+                    if pool.failure_count() >= 3 {
+                        in_fallback_mode = true;
+                        warn!("switching to JSONL fallback / 切換到 JSONL 回退");
+                    }
+                } else {
+                    // Fallback mode: write to JSONL file
+                    write_to_fallback(&mut fallback, &mut kline_buf, &mut ticker_buf, &mut other_buf);
+                    // Try to recover on each cycle
+                    if pool.is_available() && pool.health_check().await {
+                        in_fallback_mode = false;
+                        pool.record_success();
+                        info!("PG recovered, exiting fallback / PG 已恢復");
+                    }
                 }
             }
             msg = rx.recv() => {
@@ -54,17 +78,39 @@ pub async fn run_market_writer(
                             _ => other_buf.push(m),
                         }
                     }
-                    None => break, // channel closed
+                    None => break,
                 }
             }
         }
     }
 
-    // Final flush on shutdown / 關閉時最後一次刷新
-    if pool.is_available() {
+    // Final flush
+    if pool.is_available() && !in_fallback_mode {
         flush_all(&pool, &mut kline_buf, &mut ticker_buf, &mut other_buf).await;
+    } else {
+        write_to_fallback(&mut fallback, &mut kline_buf, &mut ticker_buf, &mut other_buf);
+    }
+    if fallback.total_lines() > 0 {
+        info!(lines = fallback.total_lines(), "fallback lines written / 回退行已寫入");
     }
     info!("market_writer stopped / 市場數據寫入器已停止");
+}
+
+/// F-6: Write buffered messages to JSONL fallback file.
+/// F-6：將緩衝消息寫入 JSONL 回退文件。
+fn write_to_fallback(
+    fallback: &mut FallbackWriter,
+    kline_buf: &mut Vec<MarketDataMsg>,
+    ticker_buf: &mut Vec<MarketDataMsg>,
+    other_buf: &mut Vec<MarketDataMsg>,
+) {
+    for buf in [kline_buf as &mut Vec<_>, ticker_buf, other_buf] {
+        for msg in buf.drain(..) {
+            if let Ok(json) = serde_json::to_string(&msg) {
+                fallback.write_line(&json);
+            }
+        }
+    }
 }
 
 /// Flush all buffers to PG / 刷新所有緩衝區到 PG
@@ -296,8 +342,8 @@ async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataM
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(side.as_str());
-            b.push_bind(sanitize_f64(*qty).map(|v| v as f32));
-            b.push_bind(sanitize_f64(*price).map(|v| v as f32));
+            b.push_bind(sanitize_f64_or_zero(*qty) as f32);
+            b.push_bind(sanitize_f64_or_zero(*price) as f32);
         }
     });
     qb.push(" ON CONFLICT DO NOTHING");
