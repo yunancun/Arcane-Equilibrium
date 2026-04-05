@@ -1,34 +1,28 @@
 """
-Grafana Data Writer — Periodically writes trading data to PostgreSQL for Grafana dashboards.
-Grafana 数据写入器 — 定期将交易数据写入 PostgreSQL 供 Grafana 仪表盘使用。
+Grafana Data Writer — Periodically writes PnL + health data to PostgreSQL for Grafana.
+Grafana 数据写入器 — 定期将 PnL + 健康数据写入 PostgreSQL 供 Grafana 仪表盘使用。
 
 MODULE_NOTE (中文):
-  本模块是 Grafana 监控仪表盘的数据源。它定期从交易系统内部状态
-  读取数据，写入 PostgreSQL 表中。Grafana 的仪表盘查询这些表来展示数据。
-
-  写入频率：每 30 秒（可配置）
-  写入内容：
-  1. paper_pnl_snapshots — PnL 快照（已实现/未实现/手续费/净值/胜率/Sharpe）
-  2. market_tickers — 最新价格（last/bid/ask/volume/funding_rate/open_interest）
-  3. system_health — 系统健康状态（kline_manager / pipeline_bridge 等组件）
-  4. trade_executions — 新的成交记录（增量写入，避免重复）
-
-  表结构匹配 init_trading_schema.sql 中的定义，字段名与现有 schema 一致。
-  所有 paper trading 数据标记 is_paper=true。
+  本模块为 Grafana 监控仪表盘提供补充数据源。Rust 引擎已直接写入：
+  - market.market_tickers（行情）
+  - trading.signals / fills（信号/成交）
+  - features.online_latest（特征）
+  本模块只负责 Rust 不覆盖的数据：
+  1. paper_pnl_snapshots — PnL 快照（从 Rust IPC 快照读取）
+  2. system_health — 引擎健康状态（从 Rust IPC 快照读取）
 
 MODULE_NOTE (English):
-  Data source for Grafana monitoring dashboards. Periodically reads from
-  trading system internal state and writes to PostgreSQL tables.
+  Supplementary data source for Grafana. Rust engine now directly writes:
+  - market.market_tickers (tickers)
+  - trading.signals / fills (signals/fills)
+  - features.online_latest (features)
+  This module only handles data Rust does NOT cover:
+  1. paper_pnl_snapshots — PnL snapshots (read from Rust IPC snapshot)
+  2. system_health — engine health (read from Rust IPC snapshot)
 
-  Write interval: 30s (configurable)
-  Tables written:
-  1. paper_pnl_snapshots — PnL snapshots (realized/unrealized/fees/net/win_rate/sharpe)
-  2. market_tickers — latest prices (last/bid/ask/volume/funding_rate/open_interest)
-  3. system_health — component health (kline_manager / pipeline_bridge etc.)
-  4. trade_executions — new fill records (incremental, no duplicates)
-
-  Column names match the existing schema in init_trading_schema.sql.
-  All paper trading data marked is_paper=true.
+  DEPRECATED writes (now handled by Rust engine):
+  - market_tickers → Rust market_writer
+  - trade_executions → Rust trading_writer
 
 安全不变量 / Safety invariant:
   - 本模块只写入 PostgreSQL，不修改任何交易系统状态
@@ -85,15 +79,14 @@ def _get_pg_conn():
 
 
 class GrafanaDataWriter:
-    """Periodically writes trading data to PostgreSQL for Grafana.
-    定期将交易数据写入 PostgreSQL 供 Grafana 使用。
+    """Periodically writes PnL + health data to PostgreSQL for Grafana.
+    定期将 PnL + 健康数据写入 PostgreSQL 供 Grafana 使用。
 
-    Dependencies (all optional — writes what it can):
-      paper_engine   — PaperTradingEngine for PnL/fills/positions
-      kline_manager  — KlineManager for health stats
-      signal_engine  — SignalEngine (reserved for future signal metrics)
-      orchestrator   — StrategyOrchestrator (reserved for future strategy metrics)
-      pipeline_bridge — PipelineBridge for latest prices + bridge stats
+    Data source: Rust engine IPC snapshot (pipeline_snapshot.json).
+    数据源：Rust 引擎 IPC 快照。
+
+    Legacy deps (paper_engine, kline_manager, pipeline_bridge) retained for
+    backwards compatibility but no longer required — Rust IPC is primary source.
     """
 
     def __init__(
@@ -105,6 +98,7 @@ class GrafanaDataWriter:
         pipeline_bridge: Any = None,
         *,
         interval_sec: float = 30.0,
+        snapshot_path: str | None = None,
     ) -> None:
         self._engine = paper_engine
         self._km = kline_manager
@@ -116,6 +110,9 @@ class GrafanaDataWriter:
         self._thread: threading.Thread | None = None
         self._last_fill_count = 0
         self._stats = {"writes": 0, "errors": 0, "last_write_ts": None}
+        # Rust IPC snapshot path / Rust IPC 快照路径
+        data_dir = os.getenv("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+        self._snapshot_path = snapshot_path or os.path.join(data_dir, "pipeline_snapshot.json")
 
     def start(self) -> None:
         """Start the background writer thread. Idempotent."""
@@ -146,8 +143,20 @@ class GrafanaDataWriter:
                 self._stats["errors"] += 1
             time.sleep(self._interval)
 
+    def _read_rust_snapshot(self) -> dict | None:
+        """Read Rust engine pipeline_snapshot.json. Returns None on failure.
+        读取 Rust 引擎管线快照，失败返回 None。"""
+        import json
+        try:
+            with open(self._snapshot_path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.debug("Rust snapshot read failed: %s / Rust 快照读取失败", e)
+            return None
+
     def _write_snapshot(self) -> None:
-        """Write one round of data to PostgreSQL."""
+        """Write one round of data to PostgreSQL.
+        写入一轮数据到 PostgreSQL。"""
         conn = _get_pg_conn()
         if conn is None:
             return
@@ -155,11 +164,14 @@ class GrafanaDataWriter:
         try:
             cur = conn.cursor()
             now_ms = int(time.time() * 1000)
+            snap = self._read_rust_snapshot()
 
-            self._write_pnl(cur, now_ms)
-            self._write_market_tickers(cur, now_ms)
-            self._write_system_health(cur, now_ms)
-            self._write_trade_executions(cur, now_ms)
+            self._write_pnl_from_rust(cur, now_ms, snap)
+            # market_tickers: handled by Rust market_writer → SKIP
+            # 市場行情：由 Rust market_writer 處理 → 跳過
+            self._write_system_health_from_rust(cur, now_ms, snap)
+            # trade_executions: handled by Rust trading_writer → SKIP
+            # 成交記錄：由 Rust trading_writer 處理 → 跳過
 
             conn.commit()
             self._stats["writes"] += 1
@@ -171,40 +183,29 @@ class GrafanaDataWriter:
         finally:
             conn.close()
 
-    # ── 1. Paper PnL Snapshots ──
+    # ── 1. Paper PnL Snapshots (from Rust IPC snapshot) ──
 
-    def _write_pnl(self, cur, now_ms: int) -> None:
-        """Write PnL snapshot to paper_pnl_snapshots table.
-        Schema: ts, session_id, realized_pnl, unrealized_pnl, total_fees,
-                ai_cost, net_pnl, open_positions, total_trades, win_rate, sharpe_ratio"""
-        if not self._engine:
+    def _write_pnl_from_rust(self, cur, now_ms: int, snap: dict | None) -> None:
+        """Write PnL snapshot from Rust engine IPC snapshot.
+        从 Rust 引擎 IPC 快照写入 PnL 数据。"""
+        if snap is None:
             return
         try:
-            state = self._engine.get_state()
-            sess = state.get("session", {})
-            if sess.get("session_state") != "active":
-                return
-
-            balance = float(sess.get("current_paper_balance_usdt", 0))
-            initial = float(sess.get("initial_paper_balance_usdt", 10000))
-            session_id = sess.get("session_id", "")
-
-            fills = state.get("fills", [])
-            total_fees = sum(float(f.get("fee_usdt", 0)) for f in fills) if isinstance(fills, list) else 0
-            total_trades = len(fills) if isinstance(fills, list) else 0
-
-            positions = state.get("positions", {})
-            open_positions = len(positions) if isinstance(positions, dict) else 0
-
-            realized_pnl = balance - initial
+            ps = snap.get("paper_state", {})
+            balance = float(ps.get("balance", 0))
+            peak = float(ps.get("peak_balance", 0))
+            realized_pnl = float(ps.get("total_realized_pnl", 0))
+            total_fees = float(ps.get("total_fees", 0))
+            trade_count = int(ps.get("trade_count", 0))
+            positions = ps.get("positions", [])
+            open_positions = len(positions) if isinstance(positions, list) else 0
             net_pnl = realized_pnl - total_fees
 
-            # Win rate: count profitable fills vs total
-            win_count = 0
-            if isinstance(fills, list) and total_trades > 0:
-                win_count = sum(1 for f in fills if float(f.get("realized_pnl", 0)) > 0)
-
-            win_rate = (win_count / total_trades * 100) if total_trades > 0 else None
+            # Unrealized PnL from open positions / 未实现 PnL
+            unrealized_pnl = sum(
+                float(p.get("position", {}).get("unrealized_pnl", 0))
+                for p in positions
+            ) if isinstance(positions, list) else 0.0
 
             cur.execute("""
                 INSERT INTO paper_pnl_snapshots_legacy
@@ -212,139 +213,52 @@ class GrafanaDataWriter:
                      ai_cost, net_pnl, open_positions, total_trades, win_rate, sharpe_ratio)
                 VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                now_ms, session_id, realized_pnl, 0, total_fees,
-                0, net_pnl, open_positions, total_trades, win_rate, None,
+                now_ms, "rust_engine", realized_pnl, unrealized_pnl, total_fees,
+                0, net_pnl, open_positions, trade_count, None, None,
             ))
         except Exception as e:
-            logger.debug("PnL write failed: %s", e)
+            logger.debug("PnL write failed: %s / PnL 写入失败", e)
 
-    # ── 2. Market Tickers ──
+    # ── 2. System Health (from Rust IPC snapshot) ──
 
-    def _write_market_tickers(self, cur, now_ms: int) -> None:
-        """Write latest prices to market_tickers table.
-        Schema: ts, symbol, last_price, bid_price, ask_price, volume_24h,
-                funding_rate, open_interest, index_price, mark_price"""
-        if not self._bridge:
-            return
-        try:
-            prices = getattr(self._bridge, "_latest_prices", {})
-            if not prices:
-                return
-            for symbol, price in prices.items():
-                try:
-                    cur.execute("""
-                        INSERT INTO market_tickers_legacy
-                            (ts, symbol, last_price, bid_price, ask_price,
-                             volume_24h, funding_rate, open_interest,
-                             index_price, mark_price)
-                        VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s)
-                    """, (now_ms, symbol, price, None, None,
-                          None, None, None, None, None))
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.debug("Market ticker write failed: %s", e)
-
-    # ── 3. System Health ──
-
-    def _write_system_health(self, cur, now_ms: int) -> None:
-        """Write component health to system_health table.
-        Schema: ts, component, status, latency_ms, detail, metrics"""
+    def _write_system_health_from_rust(self, cur, now_ms: int, snap: dict | None) -> None:
+        """Write engine health from Rust IPC snapshot.
+        从 Rust IPC 快照写入引擎健康状态。"""
         import json
 
-        if self._km:
-            try:
-                km_stats = self._km.get_stats()
-                staleness = self._km.get_staleness()
-                is_stale = staleness.get("is_stale", False) if isinstance(staleness, dict) else False
-                status = "stale" if is_stale else "healthy"
-                metrics_json = json.dumps({
-                    "total_ticks": km_stats.get("total_ticks_processed", 0),
-                    "total_klines_closed": km_stats.get("total_klines_closed", 0),
-                    "symbols": km_stats.get("symbols", []),
-                })
-                cur.execute("""
-                    INSERT INTO system_health_legacy (ts, component, status, latency_ms, detail, metrics)
-                    VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s)
-                """, (
-                    now_ms, "kline_manager", status, None,
-                    f"ticks={km_stats.get('total_ticks_processed', 0)}, "
-                    f"klines={km_stats.get('total_klines_closed', 0)}",
-                    metrics_json,
-                ))
-            except Exception as e:
-                logger.debug("KlineManager health write failed: %s", e)
-
-        if self._bridge:
-            try:
-                b_stats = self._bridge.get_stats()
-                status = "active" if b_stats.get("active") else "inactive"
-                metrics_json = json.dumps({
-                    "ticks_received": b_stats.get("ticks_received", 0),
-                    "intents_submitted": b_stats.get("intents_submitted", 0),
-                    "stops_triggered": b_stats.get("stops_triggered", 0),
-                })
-                cur.execute("""
-                    INSERT INTO system_health_legacy (ts, component, status, latency_ms, detail, metrics)
-                    VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s)
-                """, (
-                    now_ms, "pipeline_bridge", status, None,
-                    f"ticks={b_stats.get('ticks_received', 0)}, "
-                    f"intents={b_stats.get('intents_submitted', 0)}, "
-                    f"stops={b_stats.get('stops_triggered', 0)}",
-                    metrics_json,
-                ))
-            except Exception as e:
-                logger.debug("PipelineBridge health write failed: %s", e)
-
-    # ── 4. Trade Executions (incremental) ──
-
-    def _write_trade_executions(self, cur, now_ms: int) -> None:
-        """Write new fills to trade_executions table (incremental).
-        Schema: ts, exec_id, order_id, symbol, side, exec_type, exec_qty,
-                exec_price, fee, fee_currency, realized_pnl, is_paper, strategy, metrics"""
-        if not self._engine:
+        if snap is None:
             return
         try:
-            import json
-            state = self._engine.get_state()
-            fills = state.get("fills", [])
-            if not isinstance(fills, list) or len(fills) <= self._last_fill_count:
-                return
+            stats = snap.get("stats", {})
+            total_ticks = stats.get("total_ticks", 0)
+            total_fills = stats.get("total_fills", 0)
+            last_tick_ms = stats.get("last_tick_ms", 0)
+            is_paused = snap.get("paper_paused", False)
 
-            new_fills = fills[self._last_fill_count:]
-            for f in new_fills:
-                try:
-                    cur.execute("""
-                        INSERT INTO trade_executions_legacy
-                            (ts, exec_id, order_id, symbol, side, exec_type,
-                             exec_qty, exec_price, fee, fee_currency, realized_pnl,
-                             is_paper, strategy, metrics)
-                        VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s,
-                                %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        f.get("fill_ts_ms", now_ms),
-                        f.get("fill_id", f.get("exec_id", "")),
-                        f.get("order_id", ""),
-                        f.get("symbol", ""),
-                        f.get("side", ""),
-                        f.get("order_type", "paper_fill"),
-                        f.get("qty", 0),
-                        f.get("fill_price", 0),
-                        f.get("fee_usdt", 0),
-                        "USDT",
-                        f.get("realized_pnl", 0),
-                        True,  # is_paper
-                        f.get("strategy", None),
-                        json.dumps(f),
-                    ))
-                except Exception as e:
-                    logger.debug("Fill write failed: %s", e)
+            # Staleness check: if last tick > 30s ago, mark stale
+            # 过期检查：最后 tick 超过 30 秒标记为过期
+            stale_threshold_ms = 30_000
+            is_stale = (now_ms - last_tick_ms) > stale_threshold_ms if last_tick_ms > 0 else True
+            status = "paused" if is_paused else ("stale" if is_stale else "healthy")
 
-            self._last_fill_count = len(fills)
+            metrics_json = json.dumps({
+                "total_ticks": total_ticks,
+                "total_fills": total_fills,
+                "last_tick_ms": last_tick_ms,
+                "source": "rust_engine",
+                "strategies": [s.get("name", "") for s in snap.get("strategies", [])],
+            })
+
+            cur.execute("""
+                INSERT INTO system_health_legacy (ts, component, status, latency_ms, detail, metrics)
+                VALUES (to_timestamp(%s / 1000.0), %s, %s, %s, %s, %s)
+            """, (
+                now_ms, "rust_engine", status, None,
+                f"ticks={total_ticks}, fills={total_fills}, paused={is_paused}",
+                metrics_json,
+            ))
         except Exception as e:
-            logger.debug("Trade execution write failed: %s", e)
+            logger.debug("Health write failed: %s / 健康写入失败", e)
 
     # ── Public API ──
 
