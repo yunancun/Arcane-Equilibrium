@@ -132,6 +132,29 @@ def update_global_config(
     if not updates:
         return _risk_response({"message": "no_updates", "config": rm.config.to_dict()})
     rm.update_global_config(updates)
+
+    # Push risk changes to Rust engine via IPC / 通過 IPC 推送風控變更到 Rust 引擎
+    hard_stop = updates.get("max_stop_loss_pct")
+    if hard_stop is not None:
+        import asyncio
+        from app.ipc_client import EngineIPCClient
+        async def _push_risk():
+            client = EngineIPCClient()
+            try:
+                await client.connect()
+                await client.update_risk_config(hard_stop_pct=hard_stop)
+                await client.disconnect()
+            except Exception:
+                pass  # best-effort — Rust may not be running
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_push_risk())
+            else:
+                loop.run_until_complete(_push_risk())
+        except Exception:
+            pass
+
     return _risk_response({"message": "updated", "config": rm.config.to_dict()})
 
 

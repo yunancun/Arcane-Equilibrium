@@ -64,6 +64,12 @@ impl PaperState {
 
     pub fn balance(&self) -> f64 { self.balance }
 
+    /// Set hard stop loss percentage from config.
+    /// 從配置設定硬止損百分比。
+    pub fn set_hard_stop_pct(&mut self, pct: f64) {
+        self.stop_config.hard_stop_pct = pct;
+    }
+
     pub fn position_count(&self) -> usize { self.positions.len() }
 
     pub fn positions(&self) -> Vec<&PaperPosition> {

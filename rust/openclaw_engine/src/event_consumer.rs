@@ -140,9 +140,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
     }
 
-    // Set P1 risk cap from config (hot-reloadable via SIGHUP) / 從配置設定 P1 風險上限
+    // Set P1 risk cap from config / 從配置設定 P1 風險上限
     pipeline.intent_processor.set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
     info!(p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0), "P1 risk cap set / P1 風險上限已設定");
+
+    // Wire risk config from engine.toml → paper_state stop config
+    // 從 engine.toml 接入風控配置 → paper_state 止損配置
+    pipeline.paper_state.set_hard_stop_pct(cfg_snapshot.max_stop_loss_pct);
+    info!(
+        hard_stop_pct = format!("{:.1}%", cfg_snapshot.max_stop_loss_pct),
+        "hard stop loss set from config / 硬止損已從配置設定"
+    );
 
     // R-05: Wire instrument cache into pipeline for precision rounding
     // R-05：將合約信息緩存接入管線，用於精度取整
@@ -653,6 +661,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             None => Err(format!("strategy not found: {strategy_name}"))
                         };
                         let _ = response_tx.send(result);
+                    }
+                    Some(PaperSessionCommand::UpdateRiskConfig { hard_stop_pct, p1_risk_pct }) => {
+                        if let Some(pct) = hard_stop_pct {
+                            pipeline.paper_state.set_hard_stop_pct(pct);
+                            info!(hard_stop_pct = format!("{:.1}%", pct), "hard stop updated via IPC / 硬止損已通過 IPC 更新");
+                        }
+                        if let Some(pct) = p1_risk_pct {
+                            pipeline.intent_processor.set_p1_risk_pct(pct);
+                            info!(p1_risk_pct = format!("{:.2}%", pct * 100.0), "P1 risk cap updated via IPC / P1 風險上限已通過 IPC 更新");
+                        }
+                        snapshot_writer.force_write(&pipeline.snapshot());
                     }
                     None => {} // channel closed, ignore / 通道關閉，忽略
                 }

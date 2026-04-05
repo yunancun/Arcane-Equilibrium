@@ -345,6 +345,22 @@ class EngineIPCClient:
         """
         return await self.call("reset_paper_state", params={"new_balance": new_balance})
 
+    async def update_risk_config(
+        self,
+        hard_stop_pct: float | None = None,
+        p1_risk_pct: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update risk config on Rust engine at runtime (GUI → IPC → Rust).
+        運行時更新 Rust 引擎風控配置。
+        """
+        params: dict[str, Any] = {}
+        if hard_stop_pct is not None:
+            params["hard_stop_pct"] = hard_stop_pct
+        if p1_risk_pct is not None:
+            params["p1_risk_pct"] = p1_risk_pct
+        return await self.call("update_risk_config", params=params)
+
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────
 
     async def _try_connect(self) -> bool:
