@@ -2393,7 +2393,8 @@ async function submitPaperOrder() {
   try {
     const body = { symbol, side, order_type: orderType, qty };
     if (price) body.price = price;
-    await apiPost("/api/v1/paper/order/submit", body);
+    // RC-10: Manual order submission disabled — Rust engine manages orders
+    console.warn("RC-10: paper/order/submit disabled — Rust engine manages orders");
     await refreshPaperTrading();
   } catch (e) {
     console.error("Paper order error:", e);
@@ -2457,17 +2458,18 @@ function renderPaperPnl(d) {
 
 function renderPaperPositions(d) {
   const el = document.getElementById("paperPositionsList");
-  const positions = d.positions || {};
-  const keys = Object.keys(positions);
-  if (keys.length === 0) { el.textContent = "无持仓 / No positions"; return; }
-  el.innerHTML = keys.map(sym => {
-    const p = positions[sym];
+  // RC-10: Rust returns positions as array, not dict
+  const raw = d.positions || {};
+  const positions = Array.isArray(raw) ? raw : Object.values(raw);
+  if (positions.length === 0) { el.textContent = "无持仓 / No positions"; return; }
+  el.innerHTML = positions.map(p => {
+    const sym = p.symbol || '??';
     const pnlColor = p.unrealized_pnl > 0 ? "paper-positive" : p.unrealized_pnl < 0 ? "paper-negative" : "";
     return `<div class="paper-position-row">
       <span class="paper-pos-symbol">${sym}</span>
       <span class="paper-pos-side">${p.side}</span>
       <span>${p.qty}</span>
-      <span>@ ${(p.avg_entry_price || 0).toFixed(2)}</span>
+      <span>@ ${(p.avg_entry_price || p.entry_price || 0).toFixed(2)}</span>
       <span class="${pnlColor}">${(p.unrealized_pnl || 0).toFixed(4)}</span>
     </div>`;
   }).join("");
@@ -2511,19 +2513,9 @@ function renderPaperFills(d) {
 let _marketFeedRefreshInterval = null;
 
 async function handleMarketFeedAction(action) {
-  try {
-    if (action === "start") {
-      const symbol = document.getElementById("paperSymbol").value.trim() || "BTCUSDT";
-      await apiPost("/api/v1/paper/market-feed/start", { symbols: [symbol, "ETHUSDT"] });
-      startMarketFeedRefresh();
-    } else if (action === "stop") {
-      await apiPost("/api/v1/paper/market-feed/stop", {});
-      stopMarketFeedRefresh();
-    }
-    await refreshMarketFeedStatus();
-  } catch (e) {
-    console.error("Market feed action error:", e);
-  }
+  // RC-12: Market feed managed by Rust engine — no Python dispatcher needed
+  // RC-12：行情流由 Rust 引擎管理 — 不需要 Python 分發器
+  console.info("RC-12: market feed managed by Rust engine");
 }
 
 function startMarketFeedRefresh() {

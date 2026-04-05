@@ -543,22 +543,25 @@ async function loadDynamicSymbols() {
         }
       });
     }
-    // Get symbols from paper positions
+    // Get symbols from paper positions (Rust returns array)
     const p = await api('/api/v1/paper/positions');
     if (p && p.data) {
-      const positions = p.data.positions || {};
-      Object.keys(positions).forEach(sym => {
-        if (!existing.has(sym)) {
+      const raw = p.data.positions || [];
+      const positions = Array.isArray(raw) ? raw : Object.values(raw);
+      positions.forEach(pos => {
+        const sym = pos.symbol || '';
+        if (sym && !existing.has(sym)) {
           sel.add(new Option(sym, sym));
           existing.add(sym);
         }
       });
     }
-    // Get symbols from demo positions
+    // Get symbols from demo positions (Rust returns {list: [...]})
     const dd = await api('/api/v1/strategy/demo/positions');
-    if (dd && dd.data && dd.data.result && dd.data.result.list) {
-      dd.data.result.list.forEach(pos => {
-        if (pos.symbol && parseFloat(pos.size || 0) > 0 && !existing.has(pos.symbol)) {
+    if (dd && dd.data) {
+      const demoList = (dd.data.result && dd.data.result.list) || dd.data.list || [];
+      demoList.forEach(pos => {
+        if (pos.symbol && parseFloat(pos.size || pos.qty || 0) > 0 && !existing.has(pos.symbol)) {
           sel.add(new Option(pos.symbol, pos.symbol));
           existing.add(pos.symbol);
         }

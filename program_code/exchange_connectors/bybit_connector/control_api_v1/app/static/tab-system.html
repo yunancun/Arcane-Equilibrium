@@ -395,14 +395,8 @@ async function executeConfirmed() {
     $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
     ocToast('Paper Trading ' + (_paperActive ? '已启动' : '已停止'), 'success');
   } else if (action === 'feed') {
-    if (_feedRunning) {
-      await ocPost('/api/v1/paper/market-feed/stop', {});
-    } else {
-      await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
-    }
-    _feedRunning = !_feedRunning;
-    $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
-    ocToast('行情流 ' + (_feedRunning ? '已启动' : '已停止'), 'success');
+    // RC-12: Market feed managed by Rust engine
+    ocToast('行情流由 Rust 引擎管理（自动运行）', 'info');
   } else if (action === 'demo') {
     ocToast('请前往 Bybit Demo 页面查看连接状态', 'info');
   } else if (action === 'scanner') {
@@ -455,10 +449,7 @@ async function executeModeChange() {
     if (result && result.action_result === 'success') {
       ocToast('✅ 全局模式已切换为 ' + (MODE_CONFIRM[mode] ? MODE_CONFIRM[mode].label : mode), 'success');
       // If switching to observe_only+, also start market feed if not running
-      if (['observe_only','shadow_only','demo_reserved'].includes(mode) && !_feedRunning) {
-        await ocPost('/api/v1/paper/market-feed/start', { symbols: ['BTCUSDT', 'ETHUSDT'] });
-        ocToast('行情流已自动启动', 'info');
-      }
+      // RC-12: Market feed auto-managed by Rust engine, no manual start needed
     } else {
       const codes = result && result.reason_codes ? result.reason_codes.join(', ') : '未知错误';
       ocToast('❌ 模式切换失败：' + codes, 'error');
