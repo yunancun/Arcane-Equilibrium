@@ -483,6 +483,16 @@ async fn handle_strategy_param_cmd(
 
 /// Update risk config at runtime (GUI → Python → IPC → Rust engine).
 /// 運行時更新風控配置。
+/// Parse Option<Option<f64>> from JSON: absent=None, null=Some(None), number=Some(Some(x)).
+/// 解析 JSON 中的 Option<Option<f64>>：不存在=None，null=Some(None)，數字=Some(Some(x))。
+fn parse_opt_opt_f64(params: &serde_json::Value, key: &str) -> Option<Option<f64>> {
+    match params.get(key) {
+        None => None,                          // key absent = no change
+        Some(v) if v.is_null() => Some(None),  // key: null = disable
+        Some(v) => v.as_f64().map(Some),       // key: 2.5 = enable with value
+    }
+}
+
 async fn handle_update_risk_config(
     id: serde_json::Value,
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
@@ -492,19 +502,35 @@ async fn handle_update_risk_config(
         Some(tx) => tx,
         None => return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string()),
     };
+
+    // Parse all risk params / 解析所有風控參數
     let hard_stop_pct = params.get("hard_stop_pct").and_then(|v| v.as_f64());
     let p1_risk_pct = params.get("p1_risk_pct").and_then(|v| v.as_f64());
+    let trailing_stop_pct = parse_opt_opt_f64(params, "trailing_stop_pct");
+    let time_stop_hours = parse_opt_opt_f64(params, "time_stop_hours");
+    let atr_multiplier = parse_opt_opt_f64(params, "atr_multiplier");
+    let take_profit_pct = parse_opt_opt_f64(params, "take_profit_pct");
+    let max_leverage = params.get("max_leverage").and_then(|v| v.as_f64());
+    let max_drawdown_pct = params.get("max_drawdown_pct").and_then(|v| v.as_f64());
+    let max_same_direction_positions = params.get("max_same_direction_positions")
+        .and_then(|v| v.as_u64()).map(|v| v as usize);
 
-    if hard_stop_pct.is_none() && p1_risk_pct.is_none() {
-        return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "need hard_stop_pct or p1_risk_pct".to_string());
+    // At least one param must be provided / 至少需要一個參數
+    let has_any = hard_stop_pct.is_some() || p1_risk_pct.is_some()
+        || trailing_stop_pct.is_some() || time_stop_hours.is_some()
+        || atr_multiplier.is_some() || take_profit_pct.is_some()
+        || max_leverage.is_some() || max_drawdown_pct.is_some()
+        || max_same_direction_positions.is_some();
+    if !has_any {
+        return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "need at least one risk parameter".to_string());
     }
 
-    let _ = tx.send(PaperSessionCommand::UpdateRiskConfig { hard_stop_pct, p1_risk_pct });
-    JsonRpcResponse::success(id, serde_json::json!({
-        "updated": true,
-        "hard_stop_pct": hard_stop_pct,
-        "p1_risk_pct": p1_risk_pct,
-    }))
+    let _ = tx.send(PaperSessionCommand::UpdateRiskConfig {
+        hard_stop_pct, trailing_stop_pct, time_stop_hours, atr_multiplier,
+        take_profit_pct, max_leverage, max_drawdown_pct,
+        max_same_direction_positions, p1_risk_pct,
+    });
+    JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
 
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).

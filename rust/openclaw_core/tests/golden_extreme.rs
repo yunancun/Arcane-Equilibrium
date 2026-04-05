@@ -144,6 +144,7 @@ fn test_trailing_and_time_stop_interaction() {
         trailing_stop_pct: Some(2.0),
         time_stop_hours: Some(1.0),
         atr_multiplier: Some(2.0),
+        take_profit_pct: None,
     };
     let pos = PositionState {
         entry_price: 100.0, best_price: 110.0, is_long: true, entry_ts_ms: 0,

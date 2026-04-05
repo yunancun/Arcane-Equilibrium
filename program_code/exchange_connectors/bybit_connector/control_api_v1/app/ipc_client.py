@@ -345,20 +345,46 @@ class EngineIPCClient:
         """
         return await self.call("reset_paper_state", params={"new_balance": new_balance})
 
+    _UNSET = object()  # sentinel for "not passed" vs "passed as None (=disable)"
+
     async def update_risk_config(
         self,
         hard_stop_pct: float | None = None,
         p1_risk_pct: float | None = None,
+        trailing_stop_pct: float | None = _UNSET,
+        time_stop_hours: float | None = _UNSET,
+        atr_multiplier: float | None = _UNSET,
+        take_profit_pct: float | None = _UNSET,
+        max_leverage: float | None = None,
+        max_drawdown_pct: float | None = None,
+        max_same_direction_positions: int | None = None,
     ) -> dict[str, Any]:
         """
-        Update risk config on Rust engine at runtime (GUI → IPC → Rust).
-        運行時更新 Rust 引擎風控配置。
+        Update risk config on Rust engine at runtime (GUI/Agent → IPC → Rust).
+        運行時更新 Rust 引擎風控配置。所有參數可選，僅傳遞需要改變的。
+        For Option<Option<f64>> fields (trailing/time/atr/tp): None=disable, float=set, _UNSET=no change.
         """
+        _U = EngineIPCClient._UNSET
         params: dict[str, Any] = {}
         if hard_stop_pct is not None:
             params["hard_stop_pct"] = hard_stop_pct
         if p1_risk_pct is not None:
             params["p1_risk_pct"] = p1_risk_pct
+        # Option<Option<f64>> fields: _UNSET=omit, None=null(disable), float=value
+        if trailing_stop_pct is not _U:
+            params["trailing_stop_pct"] = trailing_stop_pct  # None → JSON null → disable
+        if time_stop_hours is not _U:
+            params["time_stop_hours"] = time_stop_hours
+        if atr_multiplier is not _U:
+            params["atr_multiplier"] = atr_multiplier
+        if take_profit_pct is not _U:
+            params["take_profit_pct"] = take_profit_pct
+        if max_leverage is not None:
+            params["max_leverage"] = max_leverage
+        if max_drawdown_pct is not None:
+            params["max_drawdown_pct"] = max_drawdown_pct
+        if max_same_direction_positions is not None:
+            params["max_same_direction_positions"] = max_same_direction_positions
         return await self.call("update_risk_config", params=params)
 
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────

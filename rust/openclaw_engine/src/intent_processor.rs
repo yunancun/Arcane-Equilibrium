@@ -98,6 +98,17 @@ impl IntentProcessor {
         self.p1_risk_pct = pct.clamp(0.001, 0.20); // Min 0.1%, max 20%
     }
 
+    /// Get Guardian config for read-modify-write updates.
+    /// 獲取守護者配置用於讀取-修改-寫回更新。
+    pub fn guardian_config(&self) -> &openclaw_core::guardian::GuardianConfig {
+        self.guardian.config()
+    }
+
+    /// Update Guardian config at runtime. / 運行時更新守護者配置。
+    pub fn update_guardian_config(&mut self, config: openclaw_core::guardian::GuardianConfig) {
+        self.guardian.update_config(config);
+    }
+
     /// Phase 2b: Set Kelly sizing config.
     /// Phase 2b：設定 Kelly 倉位配置。
     pub fn set_kelly_config(&mut self, config: crate::ml::kelly_sizer::KellyConfig) {

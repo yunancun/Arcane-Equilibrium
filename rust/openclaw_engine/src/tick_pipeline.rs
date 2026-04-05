@@ -57,10 +57,20 @@ pub enum PaperSessionCommand {
         strategy_name: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
-    /// Update risk config at runtime (from GUI/Python → IPC → Rust).
-    /// 運行時更新風控配置（從 GUI/Python → IPC → Rust）。
+    /// Update risk config at runtime (from GUI/Python/Agent → IPC → Rust).
+    /// 運行時更新風控配置（從 GUI/Python/Agent → IPC → Rust）。
     UpdateRiskConfig {
+        // StopConfig fields / 止損配置
         hard_stop_pct: Option<f64>,
+        trailing_stop_pct: Option<Option<f64>>,  // Some(None)=disable, Some(Some(x))=set
+        time_stop_hours: Option<Option<f64>>,
+        atr_multiplier: Option<Option<f64>>,
+        take_profit_pct: Option<Option<f64>>,
+        // GuardianConfig fields / 守護者配置
+        max_leverage: Option<f64>,
+        max_drawdown_pct: Option<f64>,
+        max_same_direction_positions: Option<usize>,
+        // IntentProcessor fields / 意圖處理器配置
         p1_risk_pct: Option<f64>,
     },
 }

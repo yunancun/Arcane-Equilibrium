@@ -64,10 +64,34 @@ impl PaperState {
 
     pub fn balance(&self) -> f64 { self.balance }
 
-    /// Set hard stop loss percentage from config.
-    /// 從配置設定硬止損百分比。
+    /// Set hard stop loss percentage. / 設定硬止損百分比。
     pub fn set_hard_stop_pct(&mut self, pct: f64) {
         self.stop_config.hard_stop_pct = pct;
+    }
+
+    /// Set trailing stop percentage (None = disabled). / 設定跟蹤止損百分比。
+    pub fn set_trailing_stop_pct(&mut self, pct: Option<f64>) {
+        self.stop_config.trailing_stop_pct = pct;
+    }
+
+    /// Set time stop hours (None = disabled). / 設定超時止損小時數。
+    pub fn set_time_stop_hours(&mut self, hours: Option<f64>) {
+        self.stop_config.time_stop_hours = hours;
+    }
+
+    /// Set ATR multiplier (None = disabled). / 設定 ATR 乘數。
+    pub fn set_atr_multiplier(&mut self, mult: Option<f64>) {
+        self.stop_config.atr_multiplier = mult;
+    }
+
+    /// Set take profit percentage (None = disabled). / 設定止盈百分比。
+    pub fn set_take_profit_pct(&mut self, pct: Option<f64>) {
+        self.stop_config.take_profit_pct = pct;
+    }
+
+    /// Get current stop config reference. / 獲取當前止損配置引用。
+    pub fn stop_config(&self) -> &stop_manager::StopConfig {
+        &self.stop_config
     }
 
     pub fn position_count(&self) -> usize { self.positions.len() }

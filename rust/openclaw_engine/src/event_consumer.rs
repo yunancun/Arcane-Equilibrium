@@ -144,12 +144,26 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     pipeline.intent_processor.set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
     info!(p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0), "P1 risk cap set / P1 風險上限已設定");
 
-    // Wire risk config from engine.toml → paper_state stop config
-    // 從 engine.toml 接入風控配置 → paper_state 止損配置
+    // Wire ALL risk config from engine.toml → paper_state + guardian + intent_processor
+    // 從 engine.toml 接入所有風控配置
     pipeline.paper_state.set_hard_stop_pct(cfg_snapshot.max_stop_loss_pct);
+    pipeline.paper_state.set_take_profit_pct(Some(cfg_snapshot.max_take_profit_pct));
+    {
+        let gc = openclaw_core::guardian::GuardianConfig {
+            max_leverage: cfg_snapshot.max_leverage,
+            max_drawdown_pct: cfg_snapshot.max_drawdown_pct,
+            max_same_direction_positions: cfg_snapshot.max_same_direction_positions as usize,
+            ..openclaw_core::guardian::GuardianConfig::default()
+        };
+        pipeline.intent_processor.update_guardian_config(gc);
+    }
     info!(
-        hard_stop_pct = format!("{:.1}%", cfg_snapshot.max_stop_loss_pct),
-        "hard stop loss set from config / 硬止損已從配置設定"
+        hard_stop = format!("{:.1}%", cfg_snapshot.max_stop_loss_pct),
+        take_profit = format!("{:.1}%", cfg_snapshot.max_take_profit_pct),
+        max_leverage = cfg_snapshot.max_leverage,
+        max_drawdown = format!("{:.1}%", cfg_snapshot.max_drawdown_pct),
+        max_positions = cfg_snapshot.max_same_direction_positions,
+        "risk config wired from engine.toml / 風控配置已從 engine.toml 接入"
     );
 
     // R-05: Wire instrument cache into pipeline for precision rounding
@@ -662,14 +676,49 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         };
                         let _ = response_tx.send(result);
                     }
-                    Some(PaperSessionCommand::UpdateRiskConfig { hard_stop_pct, p1_risk_pct }) => {
-                        if let Some(pct) = hard_stop_pct {
-                            pipeline.paper_state.set_hard_stop_pct(pct);
-                            info!(hard_stop_pct = format!("{:.1}%", pct), "hard stop updated via IPC / 硬止損已通過 IPC 更新");
+                    Some(PaperSessionCommand::UpdateRiskConfig {
+                        hard_stop_pct, trailing_stop_pct, time_stop_hours,
+                        atr_multiplier, take_profit_pct,
+                        max_leverage, max_drawdown_pct, max_same_direction_positions,
+                        p1_risk_pct,
+                    }) => {
+                        // StopConfig fields / 止損配置
+                        if let Some(v) = hard_stop_pct {
+                            pipeline.paper_state.set_hard_stop_pct(v);
+                            info!(hard_stop_pct = format!("{:.1}%", v), "hard stop updated / 硬止損已更新");
                         }
-                        if let Some(pct) = p1_risk_pct {
-                            pipeline.intent_processor.set_p1_risk_pct(pct);
-                            info!(p1_risk_pct = format!("{:.2}%", pct * 100.0), "P1 risk cap updated via IPC / P1 風險上限已通過 IPC 更新");
+                        if let Some(v) = trailing_stop_pct {
+                            pipeline.paper_state.set_trailing_stop_pct(v);
+                            info!(trailing = ?v, "trailing stop updated / 跟蹤止損已更新");
+                        }
+                        if let Some(v) = time_stop_hours {
+                            pipeline.paper_state.set_time_stop_hours(v);
+                            info!(time_stop = ?v, "time stop updated / 超時止損已更新");
+                        }
+                        if let Some(v) = atr_multiplier {
+                            pipeline.paper_state.set_atr_multiplier(v);
+                            info!(atr_mult = ?v, "ATR multiplier updated / ATR 乘數已更新");
+                        }
+                        if let Some(v) = take_profit_pct {
+                            pipeline.paper_state.set_take_profit_pct(v);
+                            info!(take_profit = ?v, "take profit updated / 止盈已更新");
+                        }
+                        // GuardianConfig fields / 守護者配置
+                        let needs_guardian = max_leverage.is_some()
+                            || max_drawdown_pct.is_some()
+                            || max_same_direction_positions.is_some();
+                        if needs_guardian {
+                            let mut gc = pipeline.intent_processor.guardian_config().clone();
+                            if let Some(v) = max_leverage { gc.max_leverage = v; }
+                            if let Some(v) = max_drawdown_pct { gc.max_drawdown_pct = v; }
+                            if let Some(v) = max_same_direction_positions { gc.max_same_direction_positions = v; }
+                            pipeline.intent_processor.update_guardian_config(gc);
+                            info!("guardian config updated via IPC / 守護者配置已通過 IPC 更新");
+                        }
+                        // P1 risk cap / P1 風險上限
+                        if let Some(v) = p1_risk_pct {
+                            pipeline.intent_processor.set_p1_risk_pct(v);
+                            info!(p1_risk_pct = format!("{:.2}%", v * 100.0), "P1 risk cap updated / P1 上限已更新");
                         }
                         snapshot_writer.force_write(&pipeline.snapshot());
                     }
