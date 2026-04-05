@@ -140,6 +140,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
     }
 
+    // Set P1 risk cap from config (hot-reloadable via SIGHUP) / 從配置設定 P1 風險上限
+    pipeline.intent_processor.set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
+    info!(p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0), "P1 risk cap set / P1 風險上限已設定");
+
     // R-05: Wire instrument cache into pipeline for precision rounding
     // R-05：將合約信息緩存接入管線，用於精度取整
     if let Some(ref icache) = shared_instruments {
