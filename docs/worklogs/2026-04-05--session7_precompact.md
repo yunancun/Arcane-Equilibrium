@@ -90,18 +90,42 @@ app/alert_router.py                             93 lines
 - ndarray crate added, ort deferred until model exists
 - +15 tests, ~680 new lines
 
+## Part 5: Phase 2 Batch D+E — Kelly wiring + Python ML training
+- intent_processor.rs: Kelly Gate 2.5 (between Guardian and P1 cap)
+- KellyConfig + TradeStats + record_trade() in IntentProcessor
+- ml_training/__init__.py + 5 modules + 2 test files:
+  - label_generator.py: ATR-normalized labels, winsorization, MAD outlier detection
+  - scorer_trainer.py: LightGBM regression + CPCV placeholder + early stopping
+  - calibration.py: Isotonic regression + ECE < 0.05 target
+  - onnx_exporter.py: LightGBM → ONNX + f32 precision validation
+  - leakage_check.py: Feature whitelist (forbidden patterns + strict mode)
+- 5 leakage_check tests pass, label tests need numpy (ML env)
+
+## Part 6: Phase 2 Batch F+G — Parquet ETL + Final review
+- parquet_etl.py: DuckDB PG→Parquet (contexts + fills + features)
+- ort crate deferred (model_manager ready with placeholder)
+- E2+E4: 752 Rust + 3348 Python pass (4 pre-existing ws failures)
+
+## New KNOWN_ISSUES added (4)
+- TEST-1: 4 multi_interval_ws test failures (external linter change)
+- DEBT-2: main.rs ~920 lines (over 800 warning)
+- ML-1: ort crate placeholder (design decision, not defect)
+- ML-2: ml_training tests need numpy (separate ML env)
+
 ## Final Stats
 ```
-Commits: 14 this session
-New code: ~5,700 lines Rust + ~800 lines Python/infra/SQL
-New Rust files: 15 (database/ 10 + ml/ 4 + event_consumer 1)
-Tests: 823 Rust (+53) + 3343 Python = 4166 (4 pre-existing ws failures)
+Commits: 18 this session
+New code: ~7,000 lines Rust + ~1,500 lines Python
+New Rust files: 19 (database/ 12 + ml/ 4 + event_consumer 1 + feature_collector 1 + V007 DDL 1)
+New Python files: 8 (ml_training/ 6 modules + 2 test files)
+Tests: 823 Rust (+53) + 3348 Python + 5 ml_training = 4176 (4 pre-existing ws failures)
 Audits: Phase 1: 3 rounds, 9 FAIL → 0
+KNOWN_ISSUES: OPEN 8→11 (+4 new: TEST-1, DEBT-2, ML-1, ML-2)
 ```
 
 ## Pending / Next Steps
-- Phase 2b-ml: Python training pipeline (needs trading data accumulation)
 - Phase 3a: update_params() 改造 (AGT-1, pure Rust, can start immediately)
-- Gate 2.5 (Kelly) + Step 3.5 (Scorer) pipeline wiring into on_tick
-- Fix 4 multi_interval_ws test failures (from linter)
-- KNOWN_ISSUES OPEN: 8 items (none blocking)
+- 2-11 actual LightGBM training: needs engine running to collect trading.fills data
+- ort crate activation: when first ONNX model trained
+- Fix 4 multi_interval_ws test failures (TEST-1)
+- KNOWN_ISSUES OPEN: 11 items (none blocking Phase 3a)
