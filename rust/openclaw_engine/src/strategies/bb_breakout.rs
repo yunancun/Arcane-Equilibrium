@@ -1,9 +1,54 @@
 //! BB Breakout Strategy V2 — Squeeze→Expansion + Volume + Donchian + ATR trailing stop + Regime exit.
 //! BB 突破策略 V2 — 壓縮→擴張 + 成交量 + Donchian + ATR 追蹤止損 + Regime 出場。
 
-use super::Strategy;
+use super::{ParamRange, Strategy, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+/// Tunable parameters for BB Breakout (Phase 3a).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BbBreakoutParams {
+    pub cooldown_ms: u64,
+    pub default_qty: f64,
+    pub squeeze_bw: f64,
+    pub expansion_bw: f64,
+    pub volume_threshold: f64,
+    pub trailing_stop_atr_mult: f64,
+}
+
+impl Default for BbBreakoutParams {
+    fn default() -> Self {
+        Self {
+            cooldown_ms: 300_000,
+            default_qty: 1e9,
+            squeeze_bw: DEFAULT_SQUEEZE_BW,
+            expansion_bw: DEFAULT_EXPANSION_BW,
+            volume_threshold: DEFAULT_VOLUME_THRESHOLD,
+            trailing_stop_atr_mult: 2.0,
+        }
+    }
+}
+
+impl StrategyParams for BbBreakoutParams {
+    fn param_ranges() -> Vec<ParamRange> {
+        vec![
+            ParamRange { name: "cooldown_ms".into(), min: 60_000.0, max: 3_600_000.0, step: Some(60_000.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "squeeze_bw".into(), min: 0.005, max: 0.05, step: None, agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "expansion_bw".into(), min: 0.02, max: 0.1, step: None, agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "volume_threshold".into(), min: 1.0, max: 5.0, step: Some(0.1), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "trailing_stop_atr_mult".into(), min: 1.0, max: 5.0, step: Some(0.5), agent_adjustable: true, db_persisted: true },
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.squeeze_bw >= self.expansion_bw { return Err("squeeze_bw must be < expansion_bw".into()); }
+        if self.volume_threshold < 1.0 { return Err("volume_threshold must be >= 1.0".into()); }
+        if self.trailing_stop_atr_mult < 0.5 { return Err("trailing_stop_atr_mult must be >= 0.5".into()); }
+        Ok(())
+    }
+}
 
 /// Default bandwidth threshold to detect squeeze (壓縮帶寬閾值默認)
 const DEFAULT_SQUEEZE_BW: f64 = 0.02;
@@ -53,6 +98,29 @@ impl BbBreakout {
             prev_position: None, prev_was_in_squeeze: false,
             prev_entry_price: None, prev_trailing_stop: None,
             prev_last_trade_ms: 0,
+        }
+    }
+
+    pub fn update_params(&mut self, params: BbBreakoutParams) -> Result<(), String> {
+        params.validate()?;
+        self.cooldown_ms = params.cooldown_ms;
+        self.default_qty = params.default_qty;
+        self.squeeze_bw = params.squeeze_bw;
+        self.expansion_bw = params.expansion_bw;
+        self.volume_threshold = params.volume_threshold;
+        self.trailing_stop_atr_mult = params.trailing_stop_atr_mult;
+        info!(strategy = "bb_breakout", "params updated / 參數已更新");
+        Ok(())
+    }
+
+    pub fn get_params(&self) -> BbBreakoutParams {
+        BbBreakoutParams {
+            cooldown_ms: self.cooldown_ms,
+            default_qty: self.default_qty,
+            squeeze_bw: self.squeeze_bw,
+            expansion_bw: self.expansion_bw,
+            volume_threshold: self.volume_threshold,
+            trailing_stop_atr_mult: self.trailing_stop_atr_mult,
         }
     }
 }
@@ -197,6 +265,13 @@ impl Strategy for BbBreakout {
         }
         intents
     }
+
+    fn update_params_json(&mut self, json: &str) -> Result<(), String> {
+        let p: BbBreakoutParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        self.update_params(p)
+    }
+    fn get_params_json(&self) -> String { serde_json::to_string(&self.get_params()).unwrap_or_default() }
+    fn param_ranges_json(&self) -> String { serde_json::to_string(&BbBreakoutParams::param_ranges()).unwrap_or_default() }
 }
 
 #[cfg(test)]
@@ -367,5 +442,19 @@ mod tests {
         // bw=0.07 passes custom expansion threshold / 通過自訂擴張閾值
         let i = s.on_tick(&ctx(0.07, 1.1, 2.0, 700_000));
         assert_eq!(i.len(), 1);
+    }
+
+    #[test]
+    fn test_bb_brk_param_ranges() { assert!(!BbBreakoutParams::param_ranges().is_empty()); }
+    #[test]
+    fn test_bb_brk_validate() {
+        assert!(BbBreakoutParams::default().validate().is_ok());
+        assert!(BbBreakoutParams { squeeze_bw: 0.05, expansion_bw: 0.04, ..Default::default() }.validate().is_err());
+    }
+    #[test]
+    fn test_bb_brk_update() {
+        let mut s = BbBreakout::new();
+        assert!(s.update_params(BbBreakoutParams { trailing_stop_atr_mult: 3.0, ..Default::default() }).is_ok());
+        assert!((s.get_params().trailing_stop_atr_mult - 3.0).abs() < 0.01);
     }
 }

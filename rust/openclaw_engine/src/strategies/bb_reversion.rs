@@ -1,9 +1,44 @@
 //! BB Reversion Strategy V2 — Bollinger Band mean reversion + RSI filter.
 //! BB 回歸策略 V2 — 布林帶均值回歸 + RSI 過濾。
 
-use super::Strategy;
+use super::{ParamRange, Strategy, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+/// Tunable parameters for BB Reversion strategy (Phase 3a).
+/// BB 回歸策略的可調參數。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BbReversionParams {
+    pub cooldown_ms: u64,
+    pub default_qty: f64,
+    pub use_limit: bool,
+    pub limit_offset_bps: f64,
+}
+
+impl Default for BbReversionParams {
+    fn default() -> Self {
+        Self { cooldown_ms: 600_000, default_qty: 1e9, use_limit: false, limit_offset_bps: 10.0 }
+    }
+}
+
+impl StrategyParams for BbReversionParams {
+    fn param_ranges() -> Vec<ParamRange> {
+        vec![
+            ParamRange { name: "cooldown_ms".into(), min: 60_000.0, max: 3_600_000.0, step: Some(60_000.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "default_qty".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
+            ParamRange { name: "use_limit".into(), min: 0.0, max: 1.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "limit_offset_bps".into(), min: 1.0, max: 100.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.cooldown_ms < 60_000 { return Err("cooldown_ms must be >= 60s".into()); }
+        if self.limit_offset_bps < 0.0 || self.limit_offset_bps > 200.0 { return Err("limit_offset_bps must be in [0, 200]".into()); }
+        Ok(())
+    }
+}
 
 pub struct BbReversion {
     active: bool,
@@ -28,6 +63,27 @@ impl BbReversion {
             active: true, position: None, last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1e9,
             use_limit: false, limit_offset_bps: 10.0,
             prev_position: None, prev_last_trade_ms: 0,
+        }
+    }
+
+    /// Phase 3a: Update tunable parameters.
+    pub fn update_params(&mut self, params: BbReversionParams) -> Result<(), String> {
+        params.validate()?;
+        self.cooldown_ms = params.cooldown_ms;
+        self.default_qty = params.default_qty;
+        self.use_limit = params.use_limit;
+        self.limit_offset_bps = params.limit_offset_bps;
+        info!(strategy = "bb_reversion", "params updated / 參數已更新");
+        Ok(())
+    }
+
+    /// Phase 3a: Get current tunable parameters.
+    pub fn get_params(&self) -> BbReversionParams {
+        BbReversionParams {
+            cooldown_ms: self.cooldown_ms,
+            default_qty: self.default_qty,
+            use_limit: self.use_limit,
+            limit_offset_bps: self.limit_offset_bps,
         }
     }
 
@@ -124,6 +180,19 @@ impl Strategy for BbReversion {
             }
         }
         intents
+    }
+
+    fn update_params_json(&mut self, json: &str) -> Result<(), String> {
+        let params: BbReversionParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        self.update_params(params)
+    }
+
+    fn get_params_json(&self) -> String {
+        serde_json::to_string(&self.get_params()).unwrap_or_default()
+    }
+
+    fn param_ranges_json(&self) -> String {
+        serde_json::to_string(&BbReversionParams::param_ranges()).unwrap_or_default()
     }
 }
 
@@ -224,5 +293,25 @@ mod tests {
         assert_eq!(i.len(), 1);
         assert_eq!(i[0].order_type, "market", "exit must always be market");
         assert!(i[0].limit_price.is_none(), "exit must have no limit_price");
+    }
+
+    #[test]
+    fn test_bb_rev_param_ranges() {
+        assert!(!BbReversionParams::param_ranges().is_empty());
+    }
+
+    #[test]
+    fn test_bb_rev_validate() {
+        assert!(BbReversionParams::default().validate().is_ok());
+        assert!(BbReversionParams { cooldown_ms: 1000, ..Default::default() }.validate().is_err());
+    }
+
+    #[test]
+    fn test_bb_rev_update_roundtrip() {
+        let mut s = BbReversion::new();
+        let p = BbReversionParams { use_limit: true, limit_offset_bps: 20.0, ..Default::default() };
+        assert!(s.update_params(p).is_ok());
+        assert!(s.get_params().use_limit);
+        assert!((s.get_params().limit_offset_bps - 20.0).abs() < 0.01);
     }
 }

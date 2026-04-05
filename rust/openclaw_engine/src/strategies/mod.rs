@@ -38,10 +38,29 @@ pub trait Strategy: Send {
 
     /// Called when an order from this strategy was filled.
     /// 當此策略的訂單成交時調用。
-    /// Default: no-op. Phase 2 will use this for internal P&L tracking.
-    /// 默認：無操作。Phase 2 將用於內部盈虧追蹤。
     fn on_fill(&mut self, _intent: &OrderIntent, _fill: &FillResult) {
         // Default no-op / 默認無操作
+    }
+
+    // ── Phase 3a: Runtime parameter tuning API (AGT-1) ──
+    // Phase 3a：運行時參數調參 API
+
+    /// Update strategy parameters from JSON. Returns Err if invalid.
+    /// 從 JSON 更新策略參數。無效時返回 Err。
+    fn update_params_json(&mut self, _json: &str) -> Result<(), String> {
+        Err("update_params not implemented for this strategy".into())
+    }
+
+    /// Get current parameters as JSON string.
+    /// 獲取當前參數的 JSON 字符串。
+    fn get_params_json(&self) -> String {
+        "{}".into()
+    }
+
+    /// Get tunable parameter ranges as JSON string.
+    /// 獲取可調參數範圍的 JSON 字符串。
+    fn param_ranges_json(&self) -> String {
+        "[]".into()
     }
 }
 
