@@ -123,9 +123,26 @@ Audits: Phase 1: 3 rounds, 9 FAIL → 0
 KNOWN_ISSUES: OPEN 8→11 (+4 new: TEST-1, DEBT-2, ML-1, ML-2)
 ```
 
+## Part 7: Phase 3a — StrategyParams + TEST-1 fix
+- Strategy trait +3 JSON methods (update_params_json/get_params_json/param_ranges_json)
+- 4 strategies: MaCrossoverParams(5), BbReversionParams(4), BbBreakoutParams(6), GridTradingParams(6)
+- Each: StrategyParams impl, validate(), update_params(), get_params(), JSON round-trip
+- TEST-1 RESOLVED: multi_interval_ws tests aligned with linter changes
+- +14 tests, ~413 new lines
+
+## Final Stats (Updated)
+```
+Commits: 22 this session
+New code: ~8,100 lines Rust + ~1,500 lines Python
+New Rust files: 19 (database/ 12 + ml/ 4 + event_consumer 1 + feature_collector 1 + V007 1)
+Modified Rust files: 12+
+Tests: 837 Rust (+67) + 3348 Python + 5 ml_training = 4190
+Audits: Phase 1: 3 rounds 9F→0
+KNOWN_ISSUES: OPEN 10 (was 8, +4 new, -1 TEST-1 resolved, -1 AGT-1 resolved by 3a)
+```
+
 ## Pending / Next Steps
-- Phase 3a: update_params() 改造 (AGT-1, pure Rust, can start immediately)
+- Phase 3b: Optuna TPE + Thompson Sampling + CPCV + 黑天鵝 (W11-12)
 - 2-11 actual LightGBM training: needs engine running to collect trading.fills data
 - ort crate activation: when first ONNX model trained
-- Fix 4 multi_interval_ws test failures (TEST-1)
-- KNOWN_ISSUES OPEN: 11 items (none blocking Phase 3a)
+- KNOWN_ISSUES OPEN: 10 items (none blocking Phase 3b)
