@@ -178,16 +178,216 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     buf.clear();
 }
 
-/// Flush other market data types (funding, OI, LSR, regime, liquidation, etc.)
-/// G2 will expand this with per-type flush functions.
-/// 刷新其他市場數據類型。G2 將擴展為各類型的刷新函數。
+/// Flush other market data types — route by variant, batch per type.
+/// 刷新其他市場數據類型 — 按變體路由，每類型批量寫入。
 async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
-    // G2 placeholder: will be implemented in tasks 1-07, 1-08, 1-09
-    // G2 佔位：將在任務 1-07, 1-08, 1-09 中實現
-    if !buf.is_empty() {
-        debug!(count = buf.len(), "other market msgs deferred to G2 / 其他市場消息延後到 G2");
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => { buf.clear(); return; }
+    };
+
+    // Group by type for batch efficiency / 按類型分組以提高批量效率
+    let mut ob = Vec::new();
+    let mut trades = Vec::new();
+    let mut liq = Vec::new();
+    let mut funding = Vec::new();
+    let mut oi = Vec::new();
+    let mut lsr = Vec::new();
+    let mut regime_snap = Vec::new();
+    let mut regime_trans = Vec::new();
+
+    for msg in buf.drain(..) {
+        match msg {
+            m @ MarketDataMsg::ObSnapshot { .. } => ob.push(m),
+            m @ MarketDataMsg::TradeAgg1m { .. } => trades.push(m),
+            m @ MarketDataMsg::Liquidation { .. } => liq.push(m),
+            m @ MarketDataMsg::FundingRate { .. } => funding.push(m),
+            m @ MarketDataMsg::OpenInterest { .. } => oi.push(m),
+            m @ MarketDataMsg::LongShortRatio { .. } => lsr.push(m),
+            m @ MarketDataMsg::RegimeSnapshot { .. } => regime_snap.push(m),
+            m @ MarketDataMsg::RegimeTransition { .. } => regime_trans.push(m),
+            _ => {} // kline/ticker handled by dedicated flushers
+        }
     }
-    buf.clear();
+
+    if !ob.is_empty() { flush_ob_snapshots(pg, pool, &ob).await; }
+    if !trades.is_empty() { flush_trade_agg(pg, pool, &trades).await; }
+    if !liq.is_empty() { flush_liquidations(pg, pool, &liq).await; }
+    if !funding.is_empty() { flush_funding(pg, pool, &funding).await; }
+    if !oi.is_empty() { flush_oi(pg, pool, &oi).await; }
+    if !lsr.is_empty() { flush_lsr(pg, pool, &lsr).await; }
+    if !regime_snap.is_empty() { flush_regime_snapshots(pg, pool, &regime_snap).await; }
+    if !regime_trans.is_empty() { flush_regime_transitions(pg, pool, &regime_trans).await; }
+}
+
+/// Helper: execute a QueryBuilder and record success/failure.
+/// 輔助：執行 QueryBuilder 並記錄成功/失敗。
+async fn exec_batch(
+    qb: &mut QueryBuilder<'_, sqlx::Postgres>,
+    pg: &sqlx::PgPool,
+    pool: &DbPool,
+    table: &str,
+    count: usize,
+) {
+    match qb.build().execute(pg).await {
+        Ok(r) => {
+            pool.record_success();
+            debug!(table = table, rows = r.rows_affected(), count = count, "flushed / 已刷新");
+        }
+        Err(e) => {
+            let _ = pool.record_failure();
+            warn!(table = table, error = %e, "flush failed / 刷新失敗");
+        }
+    }
+}
+
+// ── 1-07: ob_snapshots + trade_agg_1m ──
+
+async fn flush_ob_snapshots(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.ob_snapshots (ts, symbol, imbalance_ratio, weighted_mid, spread_bps, bid_depth_5, ask_depth_5, depth_ratio) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::ObSnapshot { ts_ms, symbol, imbalance_ratio, weighted_mid, spread_bps, bid_depth_5, ask_depth_5, depth_ratio } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(sanitize_f64(*imbalance_ratio).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*weighted_mid).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*spread_bps).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*bid_depth_5).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*ask_depth_5).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*depth_ratio).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "ob_snapshots", buf.len()).await;
+}
+
+async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.trade_agg_1m (ts, symbol, buy_volume, sell_volume, buy_count, sell_count, large_buy_count, large_sell_count, vwap, max_single_qty) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::TradeAgg1m { ts_ms, symbol, buy_volume, sell_volume, buy_count, sell_count, large_buy_count, large_sell_count, vwap, max_single_qty } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(sanitize_f64(*buy_volume).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*sell_volume).map(|v| v as f32));
+            b.push_bind(*buy_count);
+            b.push_bind(*sell_count);
+            b.push_bind(*large_buy_count);
+            b.push_bind(*large_sell_count);
+            b.push_bind(sanitize_f64(*vwap).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*max_single_qty).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "trade_agg_1m", buf.len()).await;
+}
+
+// ── 1-08: funding + OI + LSR + liquidations ──
+
+async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.liquidations (ts, symbol, side, qty, price) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::Liquidation { ts_ms, symbol, side, qty, price } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(side.as_str());
+            b.push_bind(sanitize_f64(*qty).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*price).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "liquidations", buf.len()).await;
+}
+
+async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.funding_rates (ts, symbol, funding_rate, funding_rate_daily) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::FundingRate { ts_ms, symbol, funding_rate, funding_rate_daily } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(sanitize_f64_or_zero(*funding_rate) as f32);
+            b.push_bind(sanitize_f64(*funding_rate_daily).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "funding_rates", buf.len()).await;
+}
+
+async fn flush_oi(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.open_interest (ts, symbol, open_interest, oi_value) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::OpenInterest { ts_ms, symbol, open_interest, oi_value } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(sanitize_f64_or_zero(*open_interest) as f32);
+            b.push_bind(sanitize_f64(*oi_value).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "open_interest", buf.len()).await;
+}
+
+async fn flush_lsr(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.long_short_ratio (ts, symbol, buy_ratio, sell_ratio, ratio) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::LongShortRatio { ts_ms, symbol, buy_ratio, sell_ratio, ratio } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(sanitize_f64(*buy_ratio).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*sell_ratio).map(|v| v as f32));
+            b.push_bind(sanitize_f64(*ratio).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "long_short_ratio", buf.len()).await;
+}
+
+// ── 1-09: regime_snapshots + regime_transitions ──
+
+async fn flush_regime_snapshots(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.regime_snapshots (ts, symbol, timeframe, regime, confidence) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::RegimeSnapshot { ts_ms, symbol, timeframe, regime, confidence } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(timeframe.as_str());
+            b.push_bind(regime.as_str());
+            b.push_bind(sanitize_f64(*confidence).map(|v| v as f32));
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, timeframe, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "regime_snapshots", buf.len()).await;
+}
+
+async fn flush_regime_transitions(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+        "INSERT INTO market.regime_transitions (ts, symbol, timeframe, from_regime, to_regime, trigger_reason) "
+    );
+    qb.push_values(buf, |mut b, msg| {
+        if let MarketDataMsg::RegimeTransition { ts_ms, symbol, timeframe, from_regime, to_regime, trigger_reason } = msg {
+            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            b.push_bind(symbol.as_str());
+            b.push_bind(timeframe.as_str());
+            b.push_bind(from_regime.as_str());
+            b.push_bind(to_regime.as_str());
+            b.push_bind(trigger_reason.as_str());
+        }
+    });
+    qb.push(" ON CONFLICT (symbol, timeframe, ts) DO NOTHING");
+    exec_batch(&mut qb, pg, pool, "regime_transitions", buf.len()).await;
 }
 
 #[cfg(test)]

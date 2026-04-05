@@ -3,6 +3,16 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-05
 
+### Phase 1 Day 0 + G1 + G2：sqlx PG 層 + FeatureCollector + 10 市場表（2026-04-05 · commits 8e0cccd~pending）
+
+- **Day 0**：event_consumer.rs 提取（main 1123→783）+ database/ 模組 + sqlx 0.8 + Docker test PG
+- **G1**：feature_collector.rs 34-dim + market_writer(klines/tickers) + feature_writer(UPSERT) + pipeline channels
+- **G1 Audit**：6 角色審計 — 2 FAIL 修復（34-dim docs + dead channel）、3 WARN 記錄
+- **G2**：market_writer 全 10 表 + fallback.rs(JSONL) + rest_poller(funding/OI/LSR) + quality_writer
+- **架構決策**：Full Rust Option A · sqlx runtime queries · QueryBuilder::push_values · ADWIN delta=0.05
+- **測試**：790 Rust（+20 new）· 0 failures · 0 warnings
+- ~2,364 新代碼 + ~1,100 修改 · 11 new files
+
 ### Session 6：基礎設施清理 + 告警系統（2026-04-05 · commit 0e2d6a4）
 
 - **KNOWN_ISSUES 修復 4 項**：RE-1(memory audit→RESOLVED), RE-2(WS supervisor+channel-close propagation), ARCH-1(intent dedup), ARCH-4(fail-closed hardening)
