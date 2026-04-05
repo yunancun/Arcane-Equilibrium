@@ -49,6 +49,10 @@ pub struct ExchangeGateResult {
 
 /// Intent processor with guardian checks.
 /// 帶守護者檢查的意圖處理器。
+/// Default P1 risk cap (2% of balance per trade).
+/// 默認 P1 風險上限（每筆交易餘額的 2%）。
+const DEFAULT_P1_RISK_PCT: f64 = 0.02;
+
 pub struct IntentProcessor {
     guardian: Guardian,
     /// API-fetched taker fee rate (None = use hardcoded default).
@@ -60,6 +64,9 @@ pub struct IntentProcessor {
     /// Phase 2b: Per-symbol trade stats for Kelly calculation.
     /// Phase 2b：每交易對的交易統計，用於 Kelly 計算。
     trade_stats: std::collections::HashMap<String, crate::ml::kelly_sizer::TradeStats>,
+    /// P1 risk cap percentage (configurable, default 2%).
+    /// P1 風險上限百分比（可配置，默認 2%）。
+    p1_risk_pct: f64,
 }
 
 impl IntentProcessor {
@@ -69,6 +76,7 @@ impl IntentProcessor {
             taker_fee_rate: None,
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
+            p1_risk_pct: DEFAULT_P1_RISK_PCT,
         }
     }
 
@@ -80,7 +88,14 @@ impl IntentProcessor {
             taker_fee_rate: Some(rate),
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
+            p1_risk_pct: DEFAULT_P1_RISK_PCT,
         }
+    }
+
+    /// Set P1 risk cap percentage (e.g. 0.02 = 2%, 0.05 = 5%).
+    /// 設定 P1 風險上限百分比。
+    pub fn set_p1_risk_pct(&mut self, pct: f64) {
+        self.p1_risk_pct = pct.clamp(0.001, 0.20); // Min 0.1%, max 20%
     }
 
     /// Phase 2b: Set Kelly sizing config.
@@ -190,8 +205,7 @@ impl IntentProcessor {
 
         // ─── Gate 2.6: P1 hard cap = 2% of balance / price ───
         // P1 硬上限 = 餘額的 2% / 價格（不可超越的安全上限）
-        const P1_RISK_PCT: f64 = 0.02;
-        let p1_max_qty = if price > 0.0 { balance * P1_RISK_PCT / price } else { kelly_qty };
+        let p1_max_qty = if price > 0.0 { balance * self.p1_risk_pct / price } else { kelly_qty };
         let final_qty = kelly_qty.min(p1_max_qty);
 
         // Gate 3: Cost gate (fail-open if ATR missing)
@@ -312,9 +326,8 @@ impl IntentProcessor {
             guardian_qty
         };
         // Gate 2.6: P1 hard cap
-        const P1_RISK_PCT: f64 = 0.02;
         let p1_max_qty = if price > 0.0 {
-            balance * P1_RISK_PCT / price
+            balance * self.p1_risk_pct / price
         } else {
             kelly_qty
         };

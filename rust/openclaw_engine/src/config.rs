@@ -43,6 +43,10 @@ fn default_trading_mode() -> TradingMode {
     TradingMode::PaperOnly
 }
 
+fn default_p1_risk_pct() -> f64 {
+    0.02 // 2% of balance per trade
+}
+
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
 // ---------------------------------------------------------------------------
@@ -105,6 +109,11 @@ pub struct RuntimeConfig {
     pub state_push_interval_ms: u64,
 
     // -- Hot params — risk / 熱參數 — 風控 --
+    /// P1 risk cap per trade (fraction, e.g. 0.02 = 2% of balance). Hot-reloadable.
+    /// P1 每筆交易風險上限（小數，如 0.02 = 餘額的 2%）。可熱重載。
+    #[serde(default = "default_p1_risk_pct")]
+    pub p1_risk_pct: f64,
+
     /// Max stop-loss percentage per position / 每倉位最大止損百分比
     #[serde(default = "default_max_stop_loss_pct")]
     pub max_stop_loss_pct: f64,
@@ -304,6 +313,7 @@ impl Default for RuntimeConfig {
             heartbeat_interval_ms: default_heartbeat_interval_ms(),
             ipc_socket_path: default_ipc_socket_path(),
             state_push_interval_ms: default_state_push_interval_ms(),
+            p1_risk_pct: default_p1_risk_pct(),
             max_stop_loss_pct: default_max_stop_loss_pct(),
             max_take_profit_pct: default_max_take_profit_pct(),
             max_open_positions: default_max_open_positions(),
