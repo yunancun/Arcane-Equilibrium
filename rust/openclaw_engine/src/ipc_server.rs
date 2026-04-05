@@ -220,7 +220,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx);
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -247,7 +247,7 @@ async fn handle_connection(
 
 /// Parse and dispatch a single JSON-RPC request line.
 /// 解析並分發單條 JSON-RPC 請求。
-fn dispatch_request(
+async fn dispatch_request(
     line: &str,
     config: &Arc<ConfigManager>,
     data_dir: &Arc<PathBuf>,
@@ -297,6 +297,16 @@ fn dispatch_request(
                 .unwrap_or(10_000.0);
             handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Reset { new_balance: balance }, "reset_sent")
         }
+        // ── Phase 3b: Strategy parameter commands (Optuna → Rust) / 策略參數命令 ──
+        "update_strategy_params" => {
+            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Update).await
+        }
+        "get_strategy_params" => {
+            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Get).await
+        }
+        "get_param_ranges" => {
+            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Ranges).await
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -308,6 +318,7 @@ fn dispatch_request(
 // ---------------------------------------------------------------------------
 // Method handlers / 方法處理器
 // ---------------------------------------------------------------------------
+
 
 /// Handle paper session command — send to event consumer via channel.
 /// 處理紙盤 session 命令 — 通過通道發送到事件消費者。
@@ -394,6 +405,73 @@ fn handle_get_risk_check(id: serde_json::Value, params: &serde_json::Value) -> J
         "message": "risk check not yet implemented — default pass in demo mode",
     });
     JsonRpcResponse::success(id, response)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3b: Strategy parameter IPC handlers / 策略參數 IPC 處理器
+// ---------------------------------------------------------------------------
+
+/// Strategy parameter operation type / 策略參數操作類型
+enum StrategyParamOp {
+    Update,
+    Get,
+    Ranges,
+}
+
+/// Handle strategy parameter commands — sends oneshot request to event consumer.
+/// 處理策略參數命令 — 發送 oneshot 請求到事件消費者。
+async fn handle_strategy_param_cmd(
+    id: serde_json::Value,
+    tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+    op: StrategyParamOp,
+) -> JsonRpcResponse {
+    let tx = match tx {
+        Some(tx) => tx,
+        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured"),
+    };
+
+    let strategy_name = match params.get("strategy_name").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing strategy_name parameter"),
+    };
+
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+
+    let cmd = match op {
+        StrategyParamOp::Update => {
+            let params_json = match params.get("params_json").and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    // Also accept params_json as an object and serialize it
+                    // 也接受 params_json 作為對象並序列化
+                    match params.get("params_json") {
+                        Some(v) if v.is_object() => serde_json::to_string(v).unwrap_or_default(),
+                        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing params_json parameter"),
+                    }
+                }
+            };
+            PaperSessionCommand::UpdateStrategyParams { strategy_name, params_json, response_tx: resp_tx }
+        }
+        StrategyParamOp::Get => {
+            PaperSessionCommand::GetStrategyParams { strategy_name, response_tx: resp_tx }
+        }
+        StrategyParamOp::Ranges => {
+            PaperSessionCommand::GetParamRanges { strategy_name, response_tx: resp_tx }
+        }
+    };
+
+    if let Err(e) = tx.send(cmd) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+
+    // Await response with timeout (5s) / 等待回應（5 秒超時）
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(result))) => JsonRpcResponse::success(id, serde_json::json!({ "result": result })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
 }
 
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).
@@ -514,98 +592,98 @@ mod tests {
         (Arc::new(dir.path().to_path_buf()), dir)
     }
 
-    #[test]
-    fn test_dispatch_ping() {
+    #[tokio::test]
+    async fn test_dispatch_ping() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
         assert_eq!(resp.result.unwrap(), serde_json::Value::String("pong".into()));
         assert_eq!(resp.id, serde_json::json!(1));
     }
 
-    #[test]
-    fn test_dispatch_get_state() {
+    #[tokio::test]
+    async fn test_dispatch_get_state() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
         assert_eq!(result["system_mode"], "demo_only");
     }
 
-    #[test]
-    fn test_dispatch_method_not_found() {
+    #[tokio::test]
+    async fn test_dispatch_method_not_found() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
 
-    #[test]
-    fn test_dispatch_invalid_json() {
+    #[tokio::test]
+    async fn test_dispatch_invalid_json() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
 
-    #[test]
-    fn test_dispatch_missing_version() {
+    #[tokio::test]
+    async fn test_dispatch_missing_version() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
 
-    #[test]
-    fn test_dispatch_missing_method() {
+    #[tokio::test]
+    async fn test_dispatch_missing_method() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
 
-    #[test]
-    fn test_dispatch_evaluate_strategy_stub() {
+    #[tokio::test]
+    async fn test_dispatch_evaluate_strategy_stub() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "evaluate_strategy", "params": {"symbol": "BTCUSDT"}, "id": 6}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "stub");
         assert_eq!(result["symbol"], "BTCUSDT");
     }
 
-    #[test]
-    fn test_dispatch_get_risk_check_stub() {
+    #[tokio::test]
+    async fn test_dispatch_get_risk_check_stub() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_risk_check", "params": {"symbol": "ETHUSDT"}, "id": 7}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["passed"], true);
     }
 
-    #[test]
-    fn test_dispatch_reload_config() {
+    #[tokio::test]
+    async fn test_dispatch_reload_config() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -639,21 +717,21 @@ mod tests {
     // R06-A: Snapshot file-read IPC tests / 快照文件讀取 IPC 測試
     // ───────────────────────────────────────────────────────────────────────
 
-    #[test]
-    fn test_get_paper_state_no_file() {
+    #[tokio::test]
+    async fn test_get_paper_state_no_file() {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_some(), "should error when snapshot file missing");
     }
 
-    #[test]
-    fn test_get_paper_state_with_snapshot() {
+    #[tokio::test]
+    async fn test_get_paper_state_with_snapshot() {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -661,28 +739,130 @@ mod tests {
         assert_eq!(result["positions"][0]["symbol"], "BTCUSDT");
     }
 
-    #[test]
-    fn test_get_latest_prices_with_snapshot() {
+    #[tokio::test]
+    async fn test_get_latest_prices_with_snapshot() {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
         assert_eq!(result["ETHUSDT"], 3200.0);
     }
 
-    #[test]
-    fn test_get_tick_stats_with_snapshot() {
+    #[tokio::test]
+    async fn test_get_tick_stats_with_snapshot() {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None);
+        let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
         assert_eq!(result["total_fills"], 3);
         assert_eq!(result["total_stops"], 1);
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Phase 3b PF-1: Strategy parameter IPC tests / 策略參數 IPC 測試
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// Helper: create a paper_cmd channel with a consumer that handles param commands.
+    /// 輔助：創建帶有參數命令消費者的 paper_cmd 通道。
+    fn setup_strategy_param_channel() -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+        tokio::spawn(async move {
+            use crate::strategies::{Strategy, ma_crossover::MaCrossover};
+            let mut strategy: Box<dyn Strategy> = Box::new(MaCrossover::new());
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    PaperSessionCommand::UpdateStrategyParams { strategy_name, params_json, response_tx } => {
+                        let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
+                            strategy.update_params_json(&params_json).map(|()| format!("params updated for {}", strategy_name))
+                        } else {
+                            Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    PaperSessionCommand::GetStrategyParams { strategy_name, response_tx } => {
+                        let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
+                            Ok(strategy.get_params_json())
+                        } else {
+                            Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    PaperSessionCommand::GetParamRanges { strategy_name, response_tx } => {
+                        let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
+                            Ok(strategy.param_ranges_json())
+                        } else {
+                            Err(format!("strategy not found: {strategy_name}"))
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        tx
+    }
+
+    #[tokio::test]
+    async fn test_get_param_ranges_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_strategy_param_channel();
+        let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        let ranges_str = result["result"].as_str().unwrap();
+        let ranges: Vec<serde_json::Value> = serde_json::from_str(ranges_str).unwrap();
+        assert!(!ranges.is_empty(), "param_ranges should not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_get_strategy_params_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_strategy_param_channel();
+        let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        let params_str = result["result"].as_str().unwrap();
+        let params: serde_json::Value = serde_json::from_str(params_str).unwrap();
+        assert!(params.get("cooldown_ms").is_some(), "should contain cooldown_ms");
+    }
+
+    #[tokio::test]
+    async fn test_update_strategy_params_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_strategy_param_channel();
+        let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+    }
+
+    #[tokio::test]
+    async fn test_update_strategy_params_nonexistent() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_strategy_param_channel();
+        let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        assert!(resp.error.is_some(), "should error for nonexistent strategy");
+    }
+
+    #[tokio::test]
+    async fn test_update_strategy_params_missing_params() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_strategy_param_channel();
+        let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        assert!(resp.error.is_some(), "should error when params_json missing");
     }
 }
