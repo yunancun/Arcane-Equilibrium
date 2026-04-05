@@ -377,4 +377,17 @@ def unhalt_session(
         return state
 
     PAPER_STORE.mutate(mutator)
+
+    # RRC-1-E4: Send Resume to Rust engine (clears session_halted + paper_paused).
+    # RRC-1-E4：發送 Resume 到 Rust 引擎（清除 session_halted + paper_paused）。
+    try:
+        from .ipc_client import get_engine_ipc_client
+        import asyncio
+        client = get_engine_ipc_client()
+        if client is not None:
+            asyncio.get_event_loop().run_until_complete(client.resume_paper())
+            logger.info("unhalt: IPC resume sent to Rust / 已發送 IPC resume 到 Rust")
+    except Exception as e:
+        logger.warning("unhalt: IPC resume failed (non-fatal): %s", e)
+
     return _risk_response({"message": "session_unhalted"})

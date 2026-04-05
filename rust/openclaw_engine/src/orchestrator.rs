@@ -70,6 +70,19 @@ impl Orchestrator {
         &mut self.strategies
     }
 
+    /// RRC-1-E2: Set strategy active/paused by name. Returns Ok(was_active) or Err.
+    /// RRC-1-E2：按名稱設置策略活躍/暫停。返回 Ok(之前是否活躍) 或 Err。
+    pub fn set_strategy_active(&mut self, name: &str, active: bool) -> Result<bool, String> {
+        match self.find_strategy_mut(name) {
+            Some(s) => {
+                let was = s.is_active();
+                s.set_active(active);
+                Ok(was)
+            }
+            None => Err(format!("strategy not found: {name}")),
+        }
+    }
+
     /// Find a strategy by name (case-insensitive) for IPC param updates (Phase 3b PF-1).
     /// 按名稱查找策略（大小寫不敏感），用於 IPC 參數更新。
     pub fn find_strategy_mut(&mut self, name: &str) -> Option<&mut Box<dyn Strategy>> {
@@ -95,6 +108,7 @@ mod tests {
     impl Strategy for MockStrategy {
         fn name(&self) -> &str { "mock" }
         fn is_active(&self) -> bool { self.active }
+        fn set_active(&mut self, active: bool) { self.active = active; }
         fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
             self.intents.clone()
         }

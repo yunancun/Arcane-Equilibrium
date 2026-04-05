@@ -128,6 +128,7 @@ impl BbBreakout {
 impl Strategy for BbBreakout {
     fn name(&self) -> &str { "bb_breakout" }
     fn is_active(&self) -> bool { self.active }
+    fn set_active(&mut self, active: bool) { self.active = active; }
 
     /// RC-04: Revert position, entry_price, trailing_stop, was_in_squeeze on rejection.
     /// RC-04：拒絕時回滾 position、entry_price、trailing_stop、was_in_squeeze。

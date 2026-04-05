@@ -313,6 +313,10 @@ async fn dispatch_request(
         "update_risk_config" => {
             handle_update_risk_config(id, paper_cmd_tx, &req.params).await
         }
+        // RRC-1-E2: Strategy activate/pause / 策略啟停
+        "set_strategy_active" => {
+            handle_set_strategy_active(id, paper_cmd_tx, &req.params).await
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -534,6 +538,36 @@ async fn handle_update_risk_config(
         max_same_direction_positions, p1_risk_pct, h0_shadow_mode,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
+}
+
+/// RRC-1-E2: Set strategy active/paused via IPC / 通過 IPC 設置策略啟停。
+async fn handle_set_strategy_active(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string()),
+    };
+    let name = match params.get("strategy_name").and_then(|v| v.as_str()) {
+        Some(n) => n.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing strategy_name".to_string()),
+    };
+    let active = match params.get("active").and_then(|v| v.as_bool()) {
+        Some(a) => a,
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing active (bool)".to_string()),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    let _ = tx.send(PaperSessionCommand::SetStrategyActive {
+        strategy_name: name, active, response_tx: resp_tx,
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for engine".to_string()),
+    }
 }
 
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).

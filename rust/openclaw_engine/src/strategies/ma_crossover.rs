@@ -173,6 +173,7 @@ impl MaCrossover {
 impl Strategy for MaCrossover {
     fn name(&self) -> &str { "ma_crossover" }
     fn is_active(&self) -> bool { self.active }
+    fn set_active(&mut self, active: bool) { self.active = active; }
 
     /// RC-04: Revert position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 position 和 last_trade_ms。

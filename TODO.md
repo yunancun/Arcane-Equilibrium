@@ -456,11 +456,11 @@ Exchange 模式流程：
 - [x] RRC-1-D4：/config 端點附加 rust_active 區段（stop/guardian/risk configs from Rust）
 
 ### Phase E: P1/P2 清理
-- [ ] RRC-1-E1：修復 ai-context 端點（ENGINE=None 崩潰）
-- [ ] RRC-1-E2：策略啟停 IPC 接入（GUI activate/pause → Rust）
-- [ ] RRC-1-E3：治理狀態統一（Python GovernanceHub → Rust GovernanceCore）
-- [ ] RRC-1-E4：session unhalt 改走 IPC → Rust
-- [ ] RRC-1-E5：Python 閒置策略基礎設施清理（KlineManager 等）
+- [x] RRC-1-E1：修復 ai-context 端點（Phase D 已完成 — 改用 Rust 快照，ENGINE=None safe）
+- [x] RRC-1-E2：策略啟停 IPC（Strategy trait +set_active · Orchestrator.set_strategy_active · IPC set_strategy_active）
+- [x] RRC-1-E3：治理狀態已統一（GovernanceHub=被動status · GovernanceCore=被動 · PipelineSnapshot 暴露）
+- [x] RRC-1-E4：session unhalt 改走 IPC（/unhalt-session → resume_paper IPC → Rust 清除 session_halted）
+- [x] RRC-1-E5：Python KlineManager/IndicatorEngine/SignalEngine 保留（backtest fallback，設計決策）
 
 ### 依賴
 - openclaw_core::risk::checks — check_order_allowed + check_position_on_tick（已實現，有測試）

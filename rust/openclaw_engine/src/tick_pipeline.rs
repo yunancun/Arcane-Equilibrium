@@ -59,6 +59,13 @@ pub enum PaperSessionCommand {
         strategy_name: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// RRC-1-E2: Set strategy active/paused by name.
+    /// RRC-1-E2：按名稱設置策略活躍/暫停。
+    SetStrategyActive {
+        strategy_name: String,
+        active: bool,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
     /// Update risk config at runtime (from GUI/Python/Agent → IPC → Rust).
     /// 運行時更新風控配置（從 GUI/Python/Agent → IPC → Rust）。
     UpdateRiskConfig {
