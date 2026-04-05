@@ -10,9 +10,12 @@
 //!   QueryBuilder::push_values() 批量插入。PG 失敗時回退到 JSONL。
 //!   Pool 初始化可選 — 無 PG 時引擎正常運行（優雅降級）。
 
+pub mod fallback;
 pub mod feature_writer;
 pub mod market_writer;
 pub mod pool;
+pub mod quality_writer;
+pub mod rest_poller;
 
 use openclaw_core::klines::KlineBar;
 use serde::Deserialize;
