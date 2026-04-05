@@ -158,30 +158,30 @@ let _cachedPositions = []; // Cache for margin calculation
 let _cachedPnlAiCost = null; // Cache AI cost from session PnL for metrics
 
 async function sessionAction(action) {
+  // RC-10: Session actions control the Rust engine process (start/stop)
+  // RC-10：Session 操作控制 Rust 引擎進程（啟動/停止）
   let body = {};
   if (action === 'start') {
-    // Sync initial balance from Bybit Demo totalEquity
-    // 从 Bybit Demo 同步初始余额，与统一控制栏逻辑一致
+    // For start, pass initial_balance from Demo if available
+    // 啟動時傳遞 Demo 餘額（如果可用）
     let bal = 0;
     try {
       const balD = await ocApi('/api/v1/strategy/demo/balance');
-      if (balD && balD.data && balD.data.retCode === 0) {
+      if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
         let b = balD.data;
         if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
-        bal = parseFloat(b.totalEquity || 0);
+        bal = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
       }
     } catch (e) {}
-    if (bal <= 0) {
-      ocToast('无法读取 Demo 余额，请检查 Demo API 连接', 'error');
-      return;
-    }
-    body = { initial_balance: bal };
+    body = bal > 0 ? { initial_balance: bal } : {};
   }
   const d = await ocPost('/api/v1/paper/session/' + action, body);
   if (d) {
-    const labels = { start: '已启动', pause: '已暂停', resume: '已继续', stop: '已停止' };
-    ocToast('会话' + (labels[action] || action), 'success');
-    loadAll();
+    const labels = { start: '引擎已启动', stop: '引擎已停止' };
+    ocToast(labels[action] || ('操作: ' + action), 'success');
+    // Wait briefly for engine state to settle before reloading
+    // 等待引擎狀態穩定後再重新加載
+    setTimeout(loadAll, action === 'start' ? 3000 : 1000);
   } else {
     ocToast('操作失败', 'error');
   }
@@ -218,15 +218,17 @@ async function loadSession() {
   const state = s.session_state;
 
   const badge = $('session-badge');
-  const stateLabels = { active: '运行中', paused: '已暂停', stopped: '已停止', idle: '未启动' };
+  const stateLabels = { active: '运行中 (Rust)', starting: '启动中...', stopped: '已停止', offline: '离线', idle: '未启动' };
   badge.textContent = stateLabels[state] || state;
   if (state === 'active') badge.className = 'oc-chip oc-chip-good';
-  else if (state === 'paused') badge.className = 'oc-chip oc-chip-warn';
+  else if (state === 'starting') badge.className = 'oc-chip oc-chip-warn';
   else badge.className = 'oc-chip oc-chip-neutral';
 
-  $('btn-start').disabled = (state === 'active' || state === 'paused');
+  // Session controls: start/pause/resume/stop via IPC to Rust engine
+  // Session 控制：通過 IPC 向 Rust 引擎發送 start/pause/resume/stop
+  $('btn-start').disabled = (state === 'active');
   $('btn-pause').disabled = (state !== 'active');
-  $('btn-resume').disabled = (state !== 'paused');
+  $('btn-resume').disabled = (state !== 'paused' && state !== 'stopped');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
 
   const _initBal = s.initial_paper_balance_usdt || s.initial_balance || 100000;

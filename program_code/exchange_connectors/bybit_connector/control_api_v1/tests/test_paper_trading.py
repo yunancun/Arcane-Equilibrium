@@ -580,12 +580,12 @@ class TestPaperTradingAPI:
         assert r.status_code in (401, 403, 422)
 
     def test_session_lifecycle_via_api(self):
-        """RC-10: Session lifecycle write routes return 410 — Rust manages lifecycle"""
+        """Session lifecycle routes send IPC commands to Rust engine / 通過 IPC 控制 Rust"""
         client = build_api_client()
-        # All write operations should return 410 (RC-10: Rust manages lifecycle)
+        # Pause/resume/stop now send IPC commands; return 200 if engine reachable, 502 if not
         r = client.post("/api/v1/paper/session/pause", headers=auth_headers())
-        assert r.status_code == 410
+        assert r.status_code in (200, 502)
         r = client.post("/api/v1/paper/session/resume", headers=auth_headers())
-        assert r.status_code == 410
+        assert r.status_code in (200, 502)
         r = client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        assert r.status_code == 410
+        assert r.status_code in (200, 502)

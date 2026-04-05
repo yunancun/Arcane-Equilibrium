@@ -314,6 +314,37 @@ class EngineIPCClient:
         """
         return await self.call("get_tick_stats")
 
+    # ─── Paper session control commands / 紙盤 session 控制命令 ────────────────
+
+    async def pause_paper(self) -> dict[str, Any]:
+        """
+        Pause paper trading — stops strategy dispatch + shadow orders.
+        Prices, indicators, and stop checks continue.
+        暫停紙盤交易 — 停止策略分派+影子訂單。價格、指標、止損繼續。
+        """
+        return await self.call("pause_paper")
+
+    async def resume_paper(self) -> dict[str, Any]:
+        """
+        Resume paper trading — restores strategy dispatch + shadow orders.
+        恢復紙盤交易 — 恢復策略分派+影子訂單。
+        """
+        return await self.call("resume_paper")
+
+    async def close_all_positions(self) -> dict[str, Any]:
+        """
+        Close all open paper positions at current market prices.
+        以當前市場價格平掉所有紙盤持倉。
+        """
+        return await self.call("close_all_positions")
+
+    async def reset_paper_state(self, new_balance: float = 10_000.0) -> dict[str, Any]:
+        """
+        Reset paper state — clear positions, reset balance to new_balance.
+        重置紙盤狀態 — 清倉、重置餘額。
+        """
+        return await self.call("reset_paper_state", params={"new_balance": new_balance})
+
     # ─── Internal: connection helpers / 內部：連接輔助 ───────────────────────
 
     async def _try_connect(self) -> bool:

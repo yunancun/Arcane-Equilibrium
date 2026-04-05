@@ -709,15 +709,15 @@ class TestPaperTradingAPI:
         # Start — accept 200 (Rust available) or 410 (Rust unavailable)
         r = client.post("/api/v1/paper/session/start", headers=auth_headers(), json={})
         assert r.status_code in (200, 410), f"Expected 200 or 410, got {r.status_code}"
-        # Pause — disabled
+        # Pause — IPC command (200 if engine reachable, 502 if not)
         r = client.post("/api/v1/paper/session/pause", headers=auth_headers())
-        assert r.status_code == 410, f"Expected 410 for pause, got {r.status_code}"
-        # Resume — disabled
+        assert r.status_code in (200, 502), f"Expected 200/502, got {r.status_code}"
+        # Resume — IPC command
         r = client.post("/api/v1/paper/session/resume", headers=auth_headers())
-        assert r.status_code == 410, f"Expected 410 for resume, got {r.status_code}"
-        # Stop — disabled
+        assert r.status_code in (200, 502), f"Expected 200/502, got {r.status_code}"
+        # Stop — IPC command (close_all + pause)
         r = client.post("/api/v1/paper/session/stop", headers=auth_headers())
-        assert r.status_code == 410, f"Expected 410 for stop, got {r.status_code}"
+        assert r.status_code in (200, 502), f"Expected 200/502, got {r.status_code}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
