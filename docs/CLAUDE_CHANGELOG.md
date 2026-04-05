@@ -10,8 +10,9 @@
 - **G1 Audit**：6 角色審計 — 2 FAIL 修復（34-dim docs + dead channel）、3 WARN 記錄
 - **G2**：market_writer 全 10 表 + fallback.rs(JSONL) + rest_poller(funding/OI/LSR) + quality_writer
 - **架構決策**：Full Rust Option A · sqlx runtime queries · QueryBuilder::push_values · ADWIN delta=0.05
+- **G2 Audit**：6 FAIL 全修復（fallback wiring + REST spawn + quality type + liquidation NOT NULL）· 7 WARN 記錄
 - **測試**：790 Rust（+20 new）· 0 failures · 0 warnings
-- ~2,364 新代碼 + ~1,100 修改 · 11 new files
+- ~2,500 新代碼 + ~1,200 修改 · 11 new files · 8 commits
 
 ### Session 6：基礎設施清理 + 告警系統（2026-04-05 · commit 0e2d6a4）
 
