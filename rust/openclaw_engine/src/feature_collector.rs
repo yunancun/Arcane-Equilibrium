@@ -2,11 +2,11 @@
 //! 特徵收集器 — 將 IndicatorSnapshot 捕獲為扁平特徵向量，供 ML/DB 使用。
 //!
 //! MODULE_NOTE (EN): Provides FeatureSnapshot struct with to_feature_vector() that flattens
-//!   16 indicators into a 33-dimension f32 array (31 scalars + 2 regime enums as integers).
+//!   16 indicators into a 34-dimension f32 array (31 scalars + 2 regime enums + 1 price).
 //!   Ring buffer (VecDeque, cap 3000) for in-memory retention. try_send() pattern for
 //!   non-blocking channel dispatch from tick_pipeline.
 //! MODULE_NOTE (中): 提供 FeatureSnapshot 結構體及 to_feature_vector()，將 16 個指標
-//!   扁平化為 33 維 f32 陣列（31 個標量 + 2 個 regime 枚舉整數編碼）。
+//!   扁平化為 34 維 f32 陣列（31 個標量 + 2 個 regime 枚舉整數編碼 + 1 個價格）。
 //!   環形緩衝區（VecDeque，容量 3000）用於內存保留。
 //!   使用 try_send() 模式從 tick_pipeline 非阻塞發送到通道。
 
@@ -79,9 +79,9 @@ impl FeatureSnapshot {
     }
 
     /// Flatten indicators into a REAL[] for features.online_latest.
-    /// 31 f64 scalars + 2 regime enums (integer-encoded) = 33 dimensions.
+    /// 31 f64 scalars + 2 regime enums (integer-encoded) + 1 price = 34 dimensions.
     /// 將指標扁平化為 REAL[] 用於 features.online_latest。
-    /// 31 個 f64 標量 + 2 個 regime 枚舉（整數編碼）= 33 維。
+    /// 31 個 f64 標量 + 2 個 regime 枚舉（整數編碼）+ 1 個價格 = 34 維。
     pub fn to_feature_vector(&self) -> Vec<f32> {
         let ind = &self.indicators;
         let mut v = Vec::with_capacity(FEATURE_DIM);
