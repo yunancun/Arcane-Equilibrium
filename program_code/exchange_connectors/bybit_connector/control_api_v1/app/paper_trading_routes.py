@@ -633,14 +633,33 @@ def post_market_feed_stop(
 def get_market_feed_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get market data feed status / 获取行情数据流状态"""
-    if not DISPATCHER:
+    """Get market data feed status from Rust engine / 從 Rust 引擎獲取行情數據流狀態"""
+    # RC-12: Python DISPATCHER disabled — read from Rust engine snapshot instead.
+    # RC-12：Python DISPATCHER 已禁用 — 改從 Rust 引擎快照讀取。
+    reader = get_rust_reader()
+    snap = reader.get_snapshot() if reader.is_available() else None
+    if snap is not None:
+        stats = snap.get("stats", {})
+        last_tick_ms = stats.get("last_tick_ms", 0)
+        import time
+        age_sec = (time.time() * 1000 - last_tick_ms) / 1000 if last_tick_ms > 0 else 999
+        is_stale = age_sec > 30
         return _paper_response({
-            "running": False,
-            "attention_level": "dormant",
-            "message": "Market feed not initialized / 行情流未初始化",
+            "running": not is_stale,
+            "source": "rust_engine",
+            "total_ticks": stats.get("total_ticks", 0),
+            "total_fills": stats.get("total_fills", 0),
+            "last_tick_ms": last_tick_ms,
+            "last_tick_age_sec": round(age_sec, 1),
+            "attention_level": "high" if not is_stale else "dormant",
+            "symbols": list(snap.get("latest_prices", {}).keys()),
+            "message": "Rust engine WS feed active" if not is_stale else "Rust engine feed stale",
         })
-    return _paper_response(DISPATCHER.get_status())
+    return _paper_response({
+        "running": False,
+        "attention_level": "dormant",
+        "message": "Engine not available / 引擎不可用",
+    })
 
 
 @paper_router.post("/market-feed/add-symbol")
