@@ -736,6 +736,32 @@ async fn async_main(config: Arc<ConfigManager>) {
         ));
     }
 
+    // G3 1-13/14: Spawn drift detector (PSI + ADWIN)
+    // G3 1-13/14：啟動漂移檢測器（PSI + ADWIN）
+    if db_pool.is_available() {
+        let dd_pool = Arc::clone(&db_pool);
+        let dd_config = Arc::clone(&config);
+        let dd_cancel = cancel.clone();
+        tokio::spawn(openclaw_engine::database::drift_detector::run_drift_detector(
+            dd_pool, dd_config, dd_cancel,
+        ));
+    }
+
+    // G3 1-16: Feature version init — insert v1.0 row on startup if PG available
+    // G3 1-16：特徵版本初始化 — 啟動時插入 v1.0 行
+    if db_pool.is_available() {
+        if let Some(pg) = db_pool.get() {
+            let _ = sqlx::query(
+                "INSERT INTO features.versions (version, description, is_active) \
+                 VALUES ('v1.0', 'Phase 1 initial: 34-dim IndicatorSnapshot', true) \
+                 ON CONFLICT (version) DO NOTHING"
+            )
+            .execute(pg)
+            .await;
+            info!("feature version v1.0 registered / 特徵版本 v1.0 已註冊");
+        }
+    }
+
     let event_handle = {
         use openclaw_engine::event_consumer::{EventConsumerDeps, run_event_consumer};
         let deps = EventConsumerDeps {
