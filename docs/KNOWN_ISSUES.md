@@ -7,8 +7,8 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 9
-# 最後更新：2026-04-05（Session 9）
+# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 11
+# 最後更新：2026-04-05（Session 9c）
 
 ---
 
@@ -283,6 +283,27 @@
 **位置**：`rust/openclaw_engine/src/guardian.rs` + Python `app/governance_hub.py`
 **影響**：Exchange 模式下（Rust-only 路徑），日虧損限額可能被繞過
 **緩解**：max_drawdown_pct 提供基本保護。Phase 4 需將 daily loss limit 加入 Guardian。
+
+---
+
+## RESOLVED — DATA-1：trading.fills realized_pnl 永遠為 0
+
+**來源**：Session 9c 運營排查（2026-04-05）
+**嚴重性**：HIGH
+**修復**：`paper_state.rs` apply_fill() 改為返回 f64 PnL，tick_pipeline 兩條路徑（paper + exchange）使用返回值寫入 DB
+**根因**：TradingMsg::Fill 構造時硬編碼 `realized_pnl: 0.0`，apply_fill() 計算了 PnL 但無返回值
+**commit**：本次 commit
+
+---
+
+## RESOLVED — GATE-1：Gate 3 Cost Gate 未實現（只有註釋佔位）
+
+**來源**：Session 9c QC 分析（2026-04-05）
+**嚴重性**：HIGH（導致策略在低波動市場盲目下單，36 筆全虧手續費）
+**修復**：`intent_processor.rs` 實現 Gate 3 — QC 公式：ATR×confidence×qty < 1.5×round_trip_fee → 拒絕
+**常數**：min_confidence=0.15, k_paper=1.5, k_live=2.0, ATR 不可用時 fail-open
+**後續**：策略 confidence 需從固定 0.50 改為動態設置（當前全被攔截）
+**commit**：本次 commit
 
 ---
 

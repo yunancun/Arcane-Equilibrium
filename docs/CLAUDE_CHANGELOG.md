@@ -3,6 +3,23 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-05
 
+### Session 9c：realized_pnl Bug + Gate 3 Cost Gate（2026-04-05）
+
+**Bug 修復：**
+- `paper_state.rs`：`apply_fill()` 返回 `f64` realized_pnl（之前返回 `()` → DB 永遠記 0）
+- `tick_pipeline.rs`：paper + exchange 兩條路徑都使用 apply_fill 返回值寫入 TradingMsg::Fill
+
+**Gate 3 Cost Gate（QC 設計）：**
+- `intent_processor.rs`：新增 Gate 3 — EV vs round-trip fee 預檢查
+- 公式：`ATR × confidence × qty < k × 2 × fee_rate × notional → 拒絕`
+- 常數：min_confidence=0.15（硬地板）/ k=1.5（paper）/ k=2.0（live）/ ATR 不可用→fail-open
+- +3 新測試（低信心 / 低 EV / 高 EV 場景）· 379 Rust tests pass
+- 生產驗證：低波動市場中全部低 EV 交易被攔截，零無效手續費
+
+**後續待辦：** 策略 confidence 需從固定 0.50 改為動態設置
+
+---
+
 ### Session 9b：Operational Fixes + Risk GUI Completion（2026-04-05）
 
 **3 生產 Bug 修復：**

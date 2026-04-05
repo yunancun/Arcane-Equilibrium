@@ -180,14 +180,16 @@ impl PaperState {
 
     /// Apply a fill to paper state.
     /// 在紙盤狀態上應用成交。
+    /// Apply a fill and return the realized PnL (0.0 for opens/accumulates, non-zero for closes).
+    /// 應用成交並返回已實現損益（開倉/加倉返回 0.0，平倉返回非零值）。
     pub fn apply_fill(
         &mut self, symbol: &str, is_long: bool, qty: f64,
         fill_price: f64, fee: f64, ts_ms: u64,
-    ) {
+    ) -> f64 {
         // Guard: reject zero-qty fills (prevents ghost positions)
         // 防護：拒絕零數量成交（防止幽靈持倉）
         if qty <= 0.0 || fill_price <= 0.0 {
-            return;
+            return 0.0;
         }
         self.balance -= fee;
         self.total_fees += fee;
@@ -210,18 +212,14 @@ impl PaperState {
                 // P0-1 修復：僅在完全平倉時移除持倉；部分平倉時減少數量
                 let remaining = pos.qty - close_qty;
                 if remaining > 1e-12 {
-                    // Partial close — keep position with reduced qty
-                    // 部分平倉 — 保留持倉並減少數量
                     let mut updated = pos.clone();
                     updated.qty = remaining;
                     self.positions.insert(symbol.to_string(), updated);
                 } else {
-                    // Full close — remove position
-                    // 完全平倉 — 移除持倉
                     self.positions.remove(symbol);
                 }
                 self.peak_balance = self.peak_balance.max(self.balance);
-                return;
+                return pnl;
             } else {
                 // Same direction — accumulate (weighted average entry price)
                 // 同方向 — 累加（加權平均入場價）
@@ -234,7 +232,7 @@ impl PaperState {
                 updated.entry_price = avg_entry;
                 updated.entry_fee += fee;
                 self.positions.insert(symbol.to_string(), updated);
-                return;
+                return 0.0;
             }
         }
 
@@ -250,6 +248,7 @@ impl PaperState {
             entry_ts_ms: ts_ms,
             unrealized_pnl: 0.0,
         });
+        0.0  // Opening position — no realized PnL / 開倉無已實現損益
     }
 
     /// Close a position at market price.

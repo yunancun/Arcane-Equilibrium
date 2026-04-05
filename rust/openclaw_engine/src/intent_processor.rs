@@ -197,6 +197,7 @@ impl IntentProcessor {
         intent: &OrderIntent,
         governance: &GovernanceCore,
         paper_state: &PaperState,
+        atr: f64,
     ) -> IntentResult {
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {
@@ -313,9 +314,50 @@ impl IntentProcessor {
             }
         }
 
-        // Gate 3: Cost gate (fail-open if ATR missing)
-        // Simplified: just check if round-trip cost is reasonable
-        // 簡化：只檢查往返成本是否合理
+        // ─── Gate 3: Cost gate — reject if EV < k × round_trip_fee ───
+        // 成本門控：預期收益 < k × 往返手續費時拒絕
+        // QC formula: expected_profit = ATR × confidence × qty
+        //             round_trip_fee  = notional × 2 × fee_rate
+        //             reject if expected_profit < k × round_trip_fee
+        // QC 公式：k=1.5(paper), 2.0(live), min_confidence=0.15
+        {
+            const MIN_CONFIDENCE: f64 = 0.15;
+            const K_PAPER: f64 = 1.5;
+
+            // Hard confidence floor — below 15%, signal is noise
+            // 信心硬地板 — 低於 15% 視為噪聲
+            if intent.confidence < MIN_CONFIDENCE {
+                return IntentResult {
+                    submitted: false,
+                    rejected_reason: Some(format!(
+                        "cost_gate: confidence {:.2} < min {:.2}",
+                        intent.confidence, MIN_CONFIDENCE,
+                    )),
+                    fill: None,
+                };
+            }
+
+            // ATR-based EV check (fail-open if ATR unavailable)
+            // 基於 ATR 的預期值檢查（ATR 不可用時放行）
+            if atr > 0.0 {
+                let fee_rate = self.taker_fee_rate.unwrap_or(0.00055);
+                let expected_profit = atr * intent.confidence * final_qty;
+                let notional = final_qty * price;
+                let rt_fee = notional * 2.0 * fee_rate;
+                let k = K_PAPER; // TODO: use K_LIVE=2.0 in exchange mode
+
+                if expected_profit < k * rt_fee {
+                    return IntentResult {
+                        submitted: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
+                            expected_profit, k, rt_fee, atr, intent.confidence, notional,
+                        )),
+                        fill: None,
+                    };
+                }
+            }
+        }
 
         // Gate 4: Execute fill (paper mode)
         // NOTE: order_type and limit_price fields are currently IGNORED. All orders execute as
@@ -504,7 +546,7 @@ mod tests {
         let proc = IntentProcessor::new();
         let gov = GovernanceCore::new(); // no auth
         let state = PaperState::new(10_000.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
         assert!(!result.submitted);
         assert!(result.rejected_reason.unwrap().contains("governance"));
     }
@@ -516,7 +558,7 @@ mod tests {
         gov.grant_paper_authorization(None).unwrap();
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 50000.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
         assert!(result.submitted);
         assert!(result.fill.is_some());
     }
@@ -533,7 +575,7 @@ mod tests {
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state);
+        let result = proc.process(&intent, &gov, &state, 500.0);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
@@ -554,7 +596,7 @@ mod tests {
         let mut state = PaperState::new(100.0); // tiny balance
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state);
+        let result = proc.process(&intent, &gov, &state, 500.0);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
@@ -576,7 +618,7 @@ mod tests {
         state.set_latest_price("ETH", 3_000.0);
         // P1 cap: 1,000,000 * 0.02 / 3000 = 6.67; intent qty=0.01 is smaller
         let intent = make_intent("ETH", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state);
+        let result = proc.process(&intent, &gov, &state, 500.0);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         assert!(
@@ -595,7 +637,62 @@ mod tests {
         state.set_latest_price("BTC", 50000.0);
         // Simulate high drawdown
         state.force_drawdown(20.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
         assert!(!result.submitted);
+    }
+
+    #[test]
+    fn test_cost_gate_rejects_low_confidence() {
+        // Confidence below 0.15 → always rejected regardless of ATR
+        // 信心低於 0.15 → 無論 ATR 如何都拒絕
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("ETH", 2000.0);
+        let intent = OrderIntent {
+            symbol: "ETH".into(), is_long: true, qty: 0.01, confidence: 0.10,
+            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+        };
+        let result = proc.process(&intent, &gov, &state, 10.0);
+        assert!(!result.submitted);
+        assert!(result.rejected_reason.unwrap().contains("cost_gate: confidence"));
+    }
+
+    #[test]
+    fn test_cost_gate_rejects_low_ev() {
+        // Low ATR + moderate confidence → EV < fee threshold → rejected
+        // 低 ATR + 中等信心 → EV < 手續費門檻 → 拒絕
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 67000.0);
+        let intent = OrderIntent {
+            symbol: "BTC".into(), is_long: true, qty: 0.001, confidence: 0.30,
+            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+        };
+        // ATR=20 (very compressed for BTC), notional=$67 → rt_fee=$0.074 → EV=20×0.3×0.001=$0.006
+        let result = proc.process(&intent, &gov, &state, 20.0);
+        assert!(!result.submitted);
+        assert!(result.rejected_reason.unwrap().contains("cost_gate: EV"));
+    }
+
+    #[test]
+    fn test_cost_gate_accepts_good_ev() {
+        // High ATR + high confidence → EV >> fee → accepted
+        // 高 ATR + 高信心 → EV >> 手續費 → 接受
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("SOL", 80.0);
+        let intent = OrderIntent {
+            symbol: "SOL".into(), is_long: true, qty: 0.2, confidence: 0.7,
+            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+        };
+        // ATR=1.5, EV=1.5×0.7×0.2=$0.21, notional=$16 → rt_fee=$0.018 → 0.21 >> 0.027 ✓
+        let result = proc.process(&intent, &gov, &state, 1.5);
+        assert!(result.submitted);
     }
 }
