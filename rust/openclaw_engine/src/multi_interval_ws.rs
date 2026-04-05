@@ -157,9 +157,10 @@ pub fn full_subscription_list_with_intervals(
     topics.push(ticker_topic(symbol));
     topics.push(orderbook_topic(symbol));
     topics.push(public_trade_topic(symbol));
-    topics.push(liquidation_topic(symbol));
+    // REMOVED: liquidation topic — Bybit returns "handler not found" which poisons
+    // the entire WS connection (all other subscriptions stop receiving data).
+    // 已移除：liquidation topic — Bybit 返回 "handler not found"，會毒化整個 WS 連接。
     // Note: price-limit and adl-notice are opt-in via `extended_subscription_list()`.
-    // They are less frequently used and add to the per-connection topic count.
     // 注意：price-limit 和 adl-notice 通過 `extended_subscription_list()` 可選訂閱。
     topics
 }
@@ -167,10 +168,10 @@ pub fn full_subscription_list_with_intervals(
 /// Extended subscription list including price-limit and ADL notice (opt-in).
 /// 擴展訂閱列表，包含 price-limit 和 ADL notice（可選）。
 pub fn extended_subscription_list(symbol: &str) -> Vec<String> {
-    let mut topics = full_subscription_list(symbol);
-    topics.push(price_limit_topic(symbol));
-    topics.push(adl_notice_topic(symbol));
-    topics
+    // REMOVED: price-limit and adl-notice — Bybit returns "handler not found"
+    // which poisons the entire WS connection (all other subscriptions stop receiving data).
+    // 已移除：price-limit 和 adl-notice — Bybit 返回 "handler not found"，會毒化整個 WS 連接。
+    full_subscription_list(symbol)
 }
 
 /// Generate subscription lists for multiple symbols.
