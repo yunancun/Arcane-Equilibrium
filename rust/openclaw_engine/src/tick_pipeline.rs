@@ -213,10 +213,10 @@ pub struct TickPipeline {
     price_tracker: PriceHistoryTracker,
     /// RRC-1-C3: Per-symbol consecutive loss counter (reset on win).
     /// RRC-1-C3：每交易對連續虧損計數器（盈利時重置）。
-    consecutive_losses: HashMap<String, u32>,
-    /// RRC-1-C4: Session halted flag — set by HaltSession risk action, cleared by IPC Resume.
-    /// RRC-1-C4：會話暫停標誌 — 由 HaltSession 風控動作設置，由 IPC Resume 清除。
-    session_halted: bool,
+    pub consecutive_losses: HashMap<String, u32>,
+    /// RRC-1-C4: Session halted flag — set by HaltSession, cleared by Resume/Reset.
+    /// RRC-1-C4：會話暫停標誌 — 由 HaltSession 設置，由 Resume/Reset 清除。
+    pub session_halted: bool,
 }
 
 impl TickPipeline {
@@ -810,16 +810,11 @@ impl TickPipeline {
             .iter()
             .map(|p| {
                 let price = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
-                let pnl_pct = if p.is_long {
-                    (price - p.entry_price) / p.entry_price * 100.0
-                } else {
-                    (p.entry_price - price) / p.entry_price * 100.0
-                };
-                let peak_pnl_pct = if p.is_long {
-                    (p.best_price - p.entry_price) / p.entry_price * 100.0
-                } else {
-                    (p.entry_price - p.best_price) / p.entry_price * 100.0
-                };
+                // F1: entry_price=0 → -999% (fail-closed) / entry_price=0 → 強制硬止損
+                let pct = |a: f64, b: f64| if p.entry_price <= 0.0 { -999.0 }
+                    else if p.is_long { (a - b) / b * 100.0 } else { (b - a) / b * 100.0 };
+                let pnl_pct = pct(price, p.entry_price);
+                let peak_pnl_pct = pct(p.best_price, p.entry_price);
                 (p.symbol.clone(), p.is_long, p.qty, pnl_pct, peak_pnl_pct, p.entry_ts_ms)
             })
             .collect();

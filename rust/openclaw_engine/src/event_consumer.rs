@@ -639,6 +639,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     }
                     Some(PaperSessionCommand::Resume) => {
                         pipeline.paper_paused = false;
+                        // F2 fix: clear session_halted on Resume / 恢復時清除會話暫停標誌
+                        pipeline.session_halted = false;
                         info!("paper trading RESUMED via IPC / 紙盤交易已通過 IPC 恢復");
                         snapshot_writer.force_write(&pipeline.snapshot());
                     }
@@ -651,6 +653,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
                         pipeline.stats = crate::tick_pipeline::TickStats::default();
                         pipeline.paper_paused = false;
+                        // F2+F3 fix: clear halt + loss counters on reset / 重置時清除暫停+虧損計數
+                        pipeline.session_halted = false;
+                        pipeline.consecutive_losses.clear();
                         // P2-4 fix: Clear pending_close_symbols on reset
                         pipeline.clear_all_pending_close();
                         pending_orders.clear();
