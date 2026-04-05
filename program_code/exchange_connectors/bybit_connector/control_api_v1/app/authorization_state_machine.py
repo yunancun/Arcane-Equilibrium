@@ -507,13 +507,18 @@ class AuthorizationStateMachine:
             if self._change_audit_log:
                 try:
                     from .change_audit_log import ChangeType  # noqa: E402
+                    # Auto-approve audit record when transition is by system (e.g. paper auto-grant)
+                    # 系統發起的變更（如紙盤自動授權）自動批准審計記錄
+                    who_str = str(approved_by or initiator.value)
+                    is_auto = "auto" in who_str.lower() or "system" in who_str.lower()
                     self._change_audit_log.record_change(
                         change_type=ChangeType.STATE_CHANGE,
-                        who=str(approved_by or initiator.value),
+                        who=who_str,
                         what=f"Authorization: {from_state.value} → {to_state.value}",
                         reason=reason or "",
                         old_value=from_state.value,
                         new_value=to_state.value,
+                        auto_approve=is_auto,
                     )
                 except Exception as e:
                     logger.error("Failed to record change audit: %s", e)
