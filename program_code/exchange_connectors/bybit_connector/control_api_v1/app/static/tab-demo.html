@@ -305,8 +305,11 @@ async function loadPositions() {
   let positions = [];
   if (d.data.result && d.data.result.list) {
     positions = d.data.result.list;
+  } else if (d.data.list) {
+    positions = d.data.list;
   } else {
-    positions = d.data.positions || d.data || [];
+    const raw = d.data.positions || d.data || [];
+    positions = Array.isArray(raw) ? raw : Object.values(raw);
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
@@ -354,8 +357,11 @@ async function loadDemoOrders() {
   let orders = [];
   if (d.data.result && d.data.result.list) {
     orders = d.data.result.list;
+  } else if (d.data.list) {
+    orders = d.data.list;
   } else {
-    orders = d.data.orders || d.data || [];
+    const raw = d.data.orders || d.data || [];
+    orders = Array.isArray(raw) ? raw : [];
   }
   // Filter active orders only (New/PartiallyFilled for regular, Untriggered for conditional)
   orders = orders.filter(o => {
@@ -410,8 +416,11 @@ async function loadDemoFills() {
   let fills = [];
   if (d.data.result && d.data.result.list) {
     fills = d.data.result.list;
+  } else if (d.data.list) {
+    fills = d.data.list;
   } else {
-    fills = d.data.fills || d.data || [];
+    const raw = d.data.fills || d.data || [];
+    fills = Array.isArray(raw) ? raw : Object.values(raw);
   }
   _demoFillsCache = fills;
   if (!fills.length) {
@@ -485,7 +494,7 @@ async function loadComparison() {
 // Reconstruct round trips from fills: pair Buy opens with Sell closes (and vice versa)
 // 从成交记录重建完整交易：配对买入开仓与卖出平仓
 function _calcRoundTrips(fills) {
-  if (!fills || fills.length === 0) return [];
+  if (!fills || !Array.isArray(fills) || fills.length === 0) return [];
   // Group by symbol, then pair opens with closes
   const bySymbol = {};
   fills.forEach(f => {
@@ -538,11 +547,12 @@ function loadDemoMetrics(raw) {
   }
   if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>'); return; }
 
-  const equity = parseFloat(b.totalEquity || 0);
+  const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
   const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
   const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
-  const totalFills = _demoFillsCache.length;
-  const totalFees = _demoFillsCache.reduce((s, f) => s + Math.abs(parseFloat(f.execFee || f.fee || 0)), 0);
+  const fillsArr = Array.isArray(_demoFillsCache) ? _demoFillsCache : [];
+  const totalFills = fillsArr.length;
+  const totalFees = fillsArr.reduce((s, f) => s + Math.abs(parseFloat(f.execFee || f.fee || 0)), 0);
 
   // Compute round-trip metrics from fills
   const trips = _calcRoundTrips(_demoFillsCache);
