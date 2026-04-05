@@ -201,9 +201,11 @@ function renderBalance(raw) {
   }
 
   const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-  const available = parseFloat(b.totalAvailableBalance || b.availableBalance || b.available_balance || 0);
-  const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0);
-  const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealized_pnl || 0);
+  const available = parseFloat(b.totalAvailableBalance || b.total_available_balance || b.availableBalance || b.available_balance || 0);
+  const walletBal = parseFloat(b.totalWalletBalance || b.total_wallet_balance || b.walletBalance || b.wallet_balance || 0);
+  const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0)
+    || (walletBal > 0 && available > 0 ? walletBal - available : 0);
+  const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealised_pnl || b.total_unrealized_pnl || 0);
   const cumRealized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
 
   // Save baseline cumRealisedPnl on first load (Bybit's value is lifetime cumulative)
