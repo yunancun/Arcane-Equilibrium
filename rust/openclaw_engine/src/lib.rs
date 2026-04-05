@@ -10,6 +10,8 @@
 
 pub mod account_manager;
 pub mod batch_order_manager;
+pub mod database;
+pub mod event_consumer;
 pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod config;
