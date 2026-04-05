@@ -88,6 +88,7 @@ async fn flush_features(pool: &DbPool, latest: &mut HashMap<(String, String), Fe
         .bind(&timeframe)
         .bind(snap.ts_ms as i64)
         .bind(&fv)
+        .bind(&snap.feature_version)  // $5 — G4 E2 fix: was missing, would crash at runtime
         .execute(pg)
         .await;
 
