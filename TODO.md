@@ -2,7 +2,7 @@
 # 最後更新：2026-04-05（Phase 1 G2 完成 · 790 Rust tests · sqlx + 10 market tables + fallback + REST poller）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
-# ★ 工程日誌：docs/worklogs/2026-04-04--daily_summary.md（整合日誌）
+# ★ 工程日誌：docs/worklogs/2026-04-05--session7_phase1_day0_g1_g2.md
 
 ---
 
@@ -391,7 +391,8 @@ PYO3-B03 + B04 → PYO3-B05 → PYO3-B06 → PYO3-B07 → PYO3-B08
 
 - [x] Day 0：event_consumer.rs 提取 + database/ 模組 + sqlx 0.8 + Docker test PG（commit 8e0cccd）
 - [x] G1 1-01~06：FeatureCollector 34-dim + market_writer(klines/tickers) + feature_writer(UPSERT) + pipeline channels（commit ddbc7af + 7aaec66 audit fix）
-- [x] G2 1-07~12：market_writer 全 10 表 + fallback.rs + rest_poller(funding/OI/LSR) + quality_writer
+- [x] G2 1-07~12：market_writer 全 10 表 + fallback.rs + rest_poller(funding/OI/LSR) + quality_writer（commit bf0725a）
+      — G2 audit 6 FAIL 修復：fallback wiring + REST spawn + quality type + liquidation NOT NULL（commit adbe0a7）
 - [ ] G3 1-13~17：PSI drift + ADWIN + feature_baselines + feature versioning + Paper data hooks
 - [ ] 1-14~15：ExperimentLedger JSON→PG — **延後至 Phase 2**（F7 審計決策）
 - [ ] G4 1-18~20：E2 + E4 + E5 final review
