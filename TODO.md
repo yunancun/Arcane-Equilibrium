@@ -400,8 +400,10 @@ PYO3-B03 + B04 → PYO3-B05 → PYO3-B06 → PYO3-B07 → PYO3-B08
 
 ## ██ Phase 2 — 交易鏈 + Scorer + ONNX（W6-9，5/15-6/11，含 buffer）
 
-- [ ] 2-01~05：trading 表寫入（signals/intents/verdicts/orders/fills + agent.messages）
-- [ ] 2-06~10：Decision Context 混合方案 + repo 封裝 + outcome 回填（5 窗口）
+- [x] 2a-01~04：trading_writer (signals/intents/fills/positions → 4 trading.* 表)（commit 41e144d）
+- [x] 2a-05~07：context_writer (decision_context_snapshots 15 flat + 3 JSONB)（commit 41e144d）
+- [x] 2a-08~09：ExperimentLedger PG — V007 DDL + Rust CRUD（Phase 1 debt cleared）（commit 41e144d）
+- [x] 2b-infra：ml/model_manager(ArcSwap ONNX) + ml/scorer(3-tier) + ml/kelly_sizer(fractional Kelly) + MlConfig（commit e06c77c）
 - [ ] 2-11~15：LightGBM Scorer + ATR_FLOOR 動態 + isotonic + TabPFN + Echo Chamber 防護
 - [ ] 2-16~19：Leakage 防護 + Ensemble + SHAP + 回測 bootstrap
 - [ ] 2-20~23：ONNX PoC + Rust ml_scorer.rs(ArcSwap) + 集成測試
