@@ -263,6 +263,18 @@ impl TickPipeline {
         self.trading_mode = mode;
     }
 
+    /// EXT-1: Clear pending close flag for a symbol (called when close order is rejected/cancelled).
+    /// EXT-1：清除交易對的待處理平倉標記（平倉訂單被拒/取消時調用）。
+    pub fn clear_pending_close(&mut self, symbol: &str) {
+        self.pending_close_symbols.remove(symbol);
+    }
+
+    /// EXT-1: Clear all pending close flags (on reset or DCP).
+    /// EXT-1：清除所有待處理平倉標記（重置或 DCP 時）。
+    pub fn clear_all_pending_close(&mut self) {
+        self.pending_close_symbols.clear();
+    }
+
     /// Phase 1: Set channel for dispatching market data to async PG writer.
     /// Phase 1：設定市場數據派發到異步 PG 寫入器的通道。
     pub fn set_market_data_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>) {

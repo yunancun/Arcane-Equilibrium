@@ -390,7 +390,7 @@ impl ConfigManager {
     /// Hot-reload config from file. Only hot params take effect.
     /// 從文件熱加載配置。只有熱參數生效。
     pub fn reload(&self) -> Result<(), ConfigError> {
-        let new_config = load_from_file(&self.file_path)?;
+        let mut new_config = load_from_file(&self.file_path)?;
         new_config.validate()?;
 
         let old = self.inner.load_full();
@@ -411,12 +411,20 @@ impl ConfigManager {
         if old.state_push_interval_ms != new_config.state_push_interval_ms {
             warn!("state_push_interval_ms changed but is cold — requires restart");
         }
+        // SEC-1: Preserve cold params from running config (prevent accidental hot-switch)
+        // SEC-1：保留運行中配置的冷參數（防止意外熱切換）
         if old.trading_mode != new_config.trading_mode {
             warn!(
                 old = %old.trading_mode, new = %new_config.trading_mode,
-                "trading_mode changed but is cold — requires restart / trading_mode 為冷參數，需重啟"
+                "trading_mode changed but is cold — preserving old value, requires restart"
             );
+            new_config.trading_mode = old.trading_mode;
         }
+        if old.ws_url != new_config.ws_url { new_config.ws_url = old.ws_url.clone(); }
+        if old.reconnect_delay_ms != new_config.reconnect_delay_ms { new_config.reconnect_delay_ms = old.reconnect_delay_ms; }
+        if old.heartbeat_interval_ms != new_config.heartbeat_interval_ms { new_config.heartbeat_interval_ms = old.heartbeat_interval_ms; }
+        if old.ipc_socket_path != new_config.ipc_socket_path { new_config.ipc_socket_path = old.ipc_socket_path.clone(); }
+        if old.state_push_interval_ms != new_config.state_push_interval_ms { new_config.state_push_interval_ms = old.state_push_interval_ms; }
 
         self.inner.store(Arc::new(new_config));
         info!(path = %self.file_path.display(), "config reloaded (hot params) / 配置已重載（熱參數）");

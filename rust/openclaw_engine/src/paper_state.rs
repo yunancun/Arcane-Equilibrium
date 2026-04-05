@@ -108,6 +108,24 @@ impl PaperState {
 
     pub fn bybit_sync_balance(&self) -> Option<f64> { self.bybit_sync_balance }
 
+    /// EXT-1: In exchange mode, correct local balance from exchange wallet balance.
+    /// Only applies correction if drift exceeds threshold (avoids micro-corrections on every tick).
+    /// EXT-1：交易所模式下，從交易所錢包餘額修正本地餘額。
+    /// 僅在偏差超過閾值時修正（避免每個 tick 微修正）。
+    pub fn reconcile_balance_from_exchange(&mut self, exchange_balance: f64) -> Option<f64> {
+        let drift = (self.balance - exchange_balance).abs();
+        let drift_pct = if self.balance > 0.0 { drift / self.balance * 100.0 } else { 0.0 };
+        // Only correct if drift > 0.1% (avoids float noise)
+        if drift_pct > 0.1 {
+            let old = self.balance;
+            self.balance = exchange_balance;
+            self.peak_balance = self.peak_balance.max(exchange_balance);
+            Some(old)
+        } else {
+            None
+        }
+    }
+
     /// Set API-reported unrealized PnL for a symbol (from WS position updates).
     /// 設定 API 報告的未實現損益（來自 WS 持倉更新）。
     pub fn set_api_unrealized_pnl(&mut self, symbol: &str, pnl: f64) {
@@ -153,7 +171,20 @@ impl PaperState {
                 self.balance += pnl;
                 self.total_realized_pnl += pnl;
                 self.trade_count += 1;
-                self.positions.remove(symbol);
+                // P0-1 fix: Only remove position if fully closed; reduce qty on partial close
+                // P0-1 修復：僅在完全平倉時移除持倉；部分平倉時減少數量
+                let remaining = pos.qty - close_qty;
+                if remaining > 1e-12 {
+                    // Partial close — keep position with reduced qty
+                    // 部分平倉 — 保留持倉並減少數量
+                    let mut updated = pos.clone();
+                    updated.qty = remaining;
+                    self.positions.insert(symbol.to_string(), updated);
+                } else {
+                    // Full close — remove position
+                    // 完全平倉 — 移除持倉
+                    self.positions.remove(symbol);
+                }
                 self.peak_balance = self.peak_balance.max(self.balance);
                 return;
             } else {
