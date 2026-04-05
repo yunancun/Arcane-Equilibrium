@@ -24,6 +24,10 @@ pub trait Strategy: Send {
     /// 此策略當前是否活躍？
     fn is_active(&self) -> bool;
 
+    /// RRC-1-E2: Set strategy active/paused state via IPC.
+    /// RRC-1-E2：通過 IPC 設置策略活躍/暫停狀態。
+    fn set_active(&mut self, active: bool);
+
     /// Process a tick and return trade intents.
     /// 處理 tick 並返回交易意圖。
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent>;

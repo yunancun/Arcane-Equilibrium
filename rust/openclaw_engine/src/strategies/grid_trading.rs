@@ -423,6 +423,7 @@ impl GridTrading {
 impl Strategy for GridTrading {
     fn name(&self) -> &str { "grid_trading" }
     fn is_active(&self) -> bool { self.active }
+    fn set_active(&mut self, active: bool) { self.active = active; }
 
     /// RC-04: Revert net_inventory, last_cross_idx, last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 net_inventory、last_cross_idx、last_trade_ms。

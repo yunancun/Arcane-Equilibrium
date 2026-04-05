@@ -693,6 +693,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         };
                         let _ = response_tx.send(result);
                     }
+                    // RRC-1-E2: Strategy activate/pause / 策略啟停
+                    Some(PaperSessionCommand::SetStrategyActive { strategy_name, active, response_tx }) => {
+                        let result = pipeline.orchestrator.set_strategy_active(&strategy_name, active);
+                        if result.is_ok() {
+                            let state = if active { "ACTIVATED" } else { "PAUSED" };
+                            info!(strategy = %strategy_name, state, "strategy state changed via IPC / 策略狀態已通過 IPC 更改");
+                            snapshot_writer.force_write(&pipeline.snapshot());
+                        }
+                        let _ = response_tx.send(result.map(|was| format!("was_active={was}")));
+                    }
                     Some(PaperSessionCommand::UpdateRiskConfig {
                         hard_stop_pct, trailing_stop_pct, time_stop_hours,
                         atr_multiplier, take_profit_pct,
