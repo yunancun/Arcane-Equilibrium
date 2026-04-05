@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-05（RC-10 + IPC-CMD + P1-P4 + WS fix + GUI 遷移 · 3334 Py + 790 Rust）
+# 最後更新：2026-04-05（EXT-1 Exchange-as-Truth 完成 · 1075 Py + 852 Rust）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 工程日誌：docs/worklogs/2026-04-05--session7_phase1_day0_g1_g2.md
@@ -394,16 +394,16 @@ Exchange 模式流程：
 
 ### 任務列表
 
-- [ ] EXT-1-01：config.rs 加 `trading_mode: "paper_only"|"exchange"` + TradingMode enum
-- [ ] EXT-1-02：tick_pipeline on_tick 分叉：paper_only 走現行 apply_fill，exchange 走 order_tx 不 apply_fill
-- [ ] EXT-1-03：重命名 shadow_order_tx → order_tx（語義清理）
-- [ ] EXT-1-04：PendingOrder 追蹤：HashMap<order_link_id, (Intent, strategy_name)>
-- [ ] EXT-1-05：ExecutionListener on_order_update(OrderUpdate) → 匹配 pending → apply confirmed fill
-- [ ] EXT-1-06：ExecutionListener on_fill(ExecutionUpdate) → 部分成交累計追蹤
-- [ ] EXT-1-07：超時處理（5s 無回報 → log warning + 標記 timed_out）
-- [ ] EXT-1-08：DCP/斷連 reconciliation（重連後 REST 查詢 position/orders 對比 Paper）
-- [ ] EXT-1-09：E2 + E4 + QA Audit
-- [ ] EXT-1-10：GUI 更新（顯示 confirmed/pending 狀態）
+- [x] EXT-1-01：config.rs 加 `trading_mode: "paper_only"|"exchange"` + TradingMode enum ✅
+- [x] EXT-1-02：tick_pipeline on_tick 分叉：paper_only 走現行 apply_fill，exchange 走 order_tx 不 apply_fill ✅
+- [x] EXT-1-03：ShadowOrderRequest 加 is_primary + order_link_id 欄位（語義重命名延後清理 commit）✅
+- [x] EXT-1-04：PendingOrder 追蹤：HashMap<order_link_id, PendingOrder> + order_id→order_link_id 映射 ✅
+- [x] EXT-1-05：ExchangeEvent channel (Fill/OrderUpdate/DCP/Disconnected) → event_consumer select! 處理 ✅
+- [x] EXT-1-06：Fill 確認：order_id→order_link_id 匹配 → pipeline.apply_confirmed_fill() ✅
+- [x] EXT-1-07：超時處理（5s 軟警告 + 60s 硬超時移除）✅
+- [x] EXT-1-08：DCP/斷連：DcpTriggered 清除所有 pending，Disconnected 記錄警告（REST reconciliation 延後 EXT-2）✅
+- [x] EXT-1-09：E2 審計 3P0+2P1 修復 + E4 回歸 852 Rust + 1075 Py 全綠 ✅
+- [x] EXT-1-10：GUI session status 加 trading_mode + IPC get_state 加 trading_mode ✅
 
 ### 依賴
 - shadow_orders 已 default-on（P2 已完成）

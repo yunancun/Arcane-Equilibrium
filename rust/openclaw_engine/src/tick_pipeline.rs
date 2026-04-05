@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::instrument_info::InstrumentInfoCache;
 use crate::intent_processor::IntentProcessor;
@@ -68,24 +68,33 @@ pub struct StopRequest {
     pub is_long: bool,
 }
 
-/// Shadow order request dispatched from tick_pipeline to Bybit Demo API.
-/// 從 tick_pipeline 派發到 Bybit Demo API 的影子訂單請求。
+/// Order dispatch request from tick_pipeline to exchange API (EXT-1).
+/// 從 tick_pipeline 派發到交易所 API 的訂單派發請求。
+///
+/// Used in both modes:
+/// - `paper_only`: shadow order (fire-and-forget after local fill, is_primary=false)
+/// - `exchange`: primary order (tracked, fill confirmed via WS, is_primary=true)
 #[derive(Debug, Clone)]
 pub struct ShadowOrderRequest {
     /// Trading symbol / 交易對
     pub symbol: String,
     /// Long direction / 多方向
     pub is_long: bool,
-    /// Fill quantity / 成交數量
+    /// Order quantity / 訂單數量
     pub qty: f64,
-    /// Fill price / 成交價格
+    /// Reference price / 參考價格
     pub price: f64,
     /// Strategy name / 策略名稱
     pub strategy: String,
-    /// Paper fill timestamp (ms) / 紙盤成交時間戳（毫秒）
+    /// Timestamp (ms) when the intent was generated / 意圖生成時間戳（毫秒）
     pub paper_fill_ts: u64,
     /// true = closing position, use reduce_only / true = 平倉，使用 reduce_only
     pub is_close: bool,
+    /// EXT-1: Client-assigned order link ID for tracking / 客戶端訂單連結 ID
+    pub order_link_id: String,
+    /// EXT-1: true = exchange mode primary order (track pending, await confirmation)
+    /// false = paper_only mode shadow order (fire-and-forget)
+    pub is_primary: bool,
 }
 
 /// Tick context passed to strategies.
@@ -167,6 +176,15 @@ pub struct TickPipeline {
     /// Paper trading paused — skip strategy dispatch + shadow orders, keep prices/indicators/stops.
     /// 紙盤交易暫停 — 跳過策略分派+影子訂單，保留價格/指標/止損。
     pub paper_paused: bool,
+    /// EXT-1: Trading mode (paper_only or exchange).
+    /// EXT-1：交易模式（紙盤或交易所）。
+    trading_mode: crate::config::TradingMode,
+    /// EXT-1: Sequence counter for generating unique order_link_id.
+    /// EXT-1：序列計數器，用於生成唯一 order_link_id。
+    exchange_seq: u64,
+    /// EXT-1: Symbols with pending close orders (prevent duplicate stop-close in exchange mode).
+    /// EXT-1：有待處理平倉訂單的交易對（防止交易所模式下重複止損平倉）。
+    pending_close_symbols: std::collections::HashSet<String>,
 }
 
 impl TickPipeline {
@@ -209,6 +227,9 @@ impl TickPipeline {
             market_tx_dropped: 0,
             feature_tx_dropped: 0,
             paper_paused: false,
+            trading_mode: crate::config::TradingMode::PaperOnly,
+            exchange_seq: 0,
+            pending_close_symbols: std::collections::HashSet::new(),
         }
     }
 
@@ -230,10 +251,16 @@ impl TickPipeline {
         self.stop_request_tx = Some(tx);
     }
 
-    /// Set channel for dispatching shadow orders to Bybit Demo API.
-    /// 設定影子訂單派發通道到 Bybit Demo API。
+    /// Set channel for dispatching orders to exchange API.
+    /// 設定訂單派發通道到交易所 API。
     pub fn set_shadow_channel(&mut self, tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>) {
         self.shadow_order_tx = Some(tx);
+    }
+
+    /// EXT-1: Set trading mode (paper_only or exchange).
+    /// EXT-1：設定交易模式。
+    pub fn set_trading_mode(&mut self, mode: crate::config::TradingMode) {
+        self.trading_mode = mode;
     }
 
     /// Phase 1: Set channel for dispatching market data to async PG writer.
@@ -396,6 +423,7 @@ impl TickPipeline {
                 self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
                 if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
+                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
                     let _ = tx.send(ShadowOrderRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long,
@@ -404,6 +432,8 @@ impl TickPipeline {
                         strategy: "stop".into(),
                         paper_fill_ts: event.ts_ms,
                         is_close: true,
+                        order_link_id: format!("sh_paused_{}_{}", event.ts_ms, self.exchange_seq),
+                        is_primary: false,
                     });
                 }
             }
@@ -485,147 +515,216 @@ impl TickPipeline {
         // If a strategy ever emits >1, partial rejection + partial fill could leave inconsistent state.
         // All current strategies satisfy this constraint. Revisit if multi-intent strategies are added.
         // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
+        let is_exchange_mode = self.trading_mode == crate::config::TradingMode::Exchange;
+
         let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
         for strategy in self.orchestrator.strategies_mut() {
             if !strategy.is_active() { continue; }
             let strategy_intents = strategy.on_tick(&ctx);
-            // PA-2: Enforce single-intent-per-tick invariant in debug builds.
-            // Rejection rollback assumes each strategy emits at most 1 intent.
-            // PA-2: 在 debug 構建中強制單意圖/tick 不變量。拒絕回滾假設每策略最多 1 個意圖。
             debug_assert!(strategy_intents.len() <= 1,
                 "Strategy {} emitted {} intents in one tick — rollback assumes max 1",
                 strategy.name(), strategy_intents.len());
             for intent in &strategy_intents {
-                let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
-                if result.submitted {
-                    self.stats.total_intents += 1;
-                    // Store submitted intent for IPC / 存儲已提交意圖供 IPC 使用
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: intent.clone(),
-                        result: "submitted".into(),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
-                    // RC-05: Notify strategy of fill / 通知策略成交
-                    if let Some(mut fill) = result.fill {
-                        // Round to exchange precision if instrument cache available (R-05)
-                        // 若有合約信息緩存，取整至交易所精度
-                        if let Some(ref icache) = self.instrument_cache {
+                if is_exchange_mode {
+                    // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
+                    // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
+                    let gate = self.intent_processor.process_gates_only(
+                        intent, &self.governance, &self.paper_state,
+                    );
+                    if gate.approved {
+                        self.stats.total_intents += 1;
+                        self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                        let order_link_id = format!("oc_{}_{}", event.ts_ms, self.exchange_seq);
+
+                        // Round to exchange precision / 取整至交易所精度
+                        let final_qty = if let Some(ref icache) = self.instrument_cache {
                             if let Some(spec) = icache.get(&intent.symbol) {
-                                fill.fill_qty = spec.round_qty(fill.fill_qty);
-                                fill.fill_price = spec.round_price(fill.fill_price);
-                            }
+                                spec.round_qty(gate.approved_qty)
+                            } else { gate.approved_qty }
+                        } else { gate.approved_qty };
+
+                        // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
+                        if final_qty <= 0.0 {
+                            warn!(symbol = %intent.symbol, "exchange order skipped: qty=0 after rounding");
+                            continue;
                         }
-                        strategy.on_fill(intent, &fill);
-                        self.paper_state.apply_fill(
-                            &intent.symbol, intent.is_long, fill.fill_qty,
-                            fill.fill_price, fill.fee, event.ts_ms,
-                        );
-                        self.stats.total_fills += 1;
-                        // Store fill for IPC / 存儲成交記錄供 IPC 使用
-                        self.recent_fills.push_back(TimestampedFill {
+
+                        self.recent_intents.push_back(TimestampedIntent {
                             timestamp_ms: event.ts_ms,
-                            symbol: intent.symbol.clone(),
-                            is_long: intent.is_long,
-                            qty: fill.fill_qty,
-                            price: fill.fill_price,
-                            fee: fill.fee,
-                            strategy: intent.strategy.clone(),
+                            intent: intent.clone(),
+                            result: format!("pending_exchange:{}", order_link_id),
                         });
-                        if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
 
-                        // Phase 2a: Emit fill to trading_writer for PG persistence
-                        if let Some(ref tx) = self.trading_tx {
-                            let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                fill_id: format!("fill-{}-{}", intent.symbol, event.ts_ms),
-                                ts_ms: event.ts_ms,
-                                order_id: format!("order-{}-{}", intent.symbol, event.ts_ms),
-                                symbol: intent.symbol.clone(),
-                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
-                                qty: fill.fill_qty,
-                                price: fill.fill_price,
-                                fee: fill.fee,
-                                realized_pnl: 0.0, // computed on close
-                                strategy_name: intent.strategy.clone(),
-                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
-                            });
-                        }
-
-                        // Item 1: Dispatch server-side stop for open positions (dual-track)
-                        // 項目 1：為持倉派發伺服器端止損（雙軌）
-                        // M1 fix: Only dispatch if position exists after fill (skip closes).
-                        // Use entry_price (weighted avg) for correct SL after accumulations.
-                        // H3 fix: Read stop_pct from StopConfig, not hardcoded.
-                        if let Some(ref tx) = self.stop_request_tx {
-                            if let Some(pos) = self.paper_state.get_position(&intent.symbol) {
-                                let stop_pct = self.paper_state.stop_config_pct();
-                                let sl_price = if pos.is_long {
-                                    pos.entry_price * (1.0 - stop_pct / 100.0)
-                                } else {
-                                    pos.entry_price * (1.0 + stop_pct / 100.0)
-                                };
-                                let _ = tx.send(StopRequest {
-                                    symbol: intent.symbol.clone(),
-                                    stop_loss: sl_price,
-                                    is_long: pos.is_long,
-                                });
-                            }
-                        }
-
-                        // Shadow order: mirror paper fill to Demo API for calibration
-                        // 影子訂單：將紙盤成交映射到 Demo API 進行校準
+                        // Dispatch to exchange / 派發到交易所
                         if let Some(ref tx) = self.shadow_order_tx {
                             let _ = tx.send(ShadowOrderRequest {
                                 symbol: intent.symbol.clone(),
                                 is_long: intent.is_long,
-                                qty: fill.fill_qty,
-                                price: fill.fill_price,
+                                qty: final_qty,
+                                price: event.last_price,
                                 strategy: intent.strategy.clone(),
                                 paper_fill_ts: event.ts_ms,
                                 is_close: false,
+                                order_link_id,
+                                is_primary: true,
                             });
                         }
+                    } else if let Some(ref reason) = gate.rejected_reason {
+                        strategy.on_rejection(intent, reason);
+                        self.recent_intents.push_back(TimestampedIntent {
+                            timestamp_ms: event.ts_ms,
+                            intent: intent.clone(),
+                            result: format!("rejected:{}", reason),
+                        });
+                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                     }
-                } else if let Some(ref reason) = result.rejected_reason {
-                    // RC-04: Notify strategy of rejection for state rollback
-                    // RC-04：通知策略拒絕以回滾狀態
-                    strategy.on_rejection(intent, reason);
-                    // Store rejected intent for IPC / 存儲被拒絕意圖供 IPC 使用
-                    self.recent_intents.push_back(TimestampedIntent {
-                        timestamp_ms: event.ts_ms,
-                        intent: intent.clone(),
-                        result: format!("rejected:{}", reason),
-                    });
-                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                } else {
+                    // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
+                    // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
+                    let result = self.intent_processor.process(intent, &self.governance, &self.paper_state);
+                    if result.submitted {
+                        self.stats.total_intents += 1;
+                        self.recent_intents.push_back(TimestampedIntent {
+                            timestamp_ms: event.ts_ms,
+                            intent: intent.clone(),
+                            result: "submitted".into(),
+                        });
+                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                        if let Some(mut fill) = result.fill {
+                            if let Some(ref icache) = self.instrument_cache {
+                                if let Some(spec) = icache.get(&intent.symbol) {
+                                    fill.fill_qty = spec.round_qty(fill.fill_qty);
+                                    fill.fill_price = spec.round_price(fill.fill_price);
+                                }
+                            }
+                            strategy.on_fill(intent, &fill);
+                            self.paper_state.apply_fill(
+                                &intent.symbol, intent.is_long, fill.fill_qty,
+                                fill.fill_price, fill.fee, event.ts_ms,
+                            );
+                            self.stats.total_fills += 1;
+                            self.recent_fills.push_back(TimestampedFill {
+                                timestamp_ms: event.ts_ms,
+                                symbol: intent.symbol.clone(),
+                                is_long: intent.is_long,
+                                qty: fill.fill_qty,
+                                price: fill.fill_price,
+                                fee: fill.fee,
+                                strategy: intent.strategy.clone(),
+                            });
+                            if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+
+                            if let Some(ref tx) = self.trading_tx {
+                                let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                                    fill_id: format!("fill-{}-{}", intent.symbol, event.ts_ms),
+                                    ts_ms: event.ts_ms,
+                                    order_id: format!("order-{}-{}", intent.symbol, event.ts_ms),
+                                    symbol: intent.symbol.clone(),
+                                    side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                    qty: fill.fill_qty,
+                                    price: fill.fill_price,
+                                    fee: fill.fee,
+                                    realized_pnl: 0.0,
+                                    strategy_name: intent.strategy.clone(),
+                                    context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                });
+                            }
+
+                            if let Some(ref tx) = self.stop_request_tx {
+                                if let Some(pos) = self.paper_state.get_position(&intent.symbol) {
+                                    let stop_pct = self.paper_state.stop_config_pct();
+                                    let sl_price = if pos.is_long {
+                                        pos.entry_price * (1.0 - stop_pct / 100.0)
+                                    } else {
+                                        pos.entry_price * (1.0 + stop_pct / 100.0)
+                                    };
+                                    let _ = tx.send(StopRequest {
+                                        symbol: intent.symbol.clone(),
+                                        stop_loss: sl_price,
+                                        is_long: pos.is_long,
+                                    });
+                                }
+                            }
+
+                            // Shadow order: mirror paper fill to Demo API
+                            if let Some(ref tx) = self.shadow_order_tx {
+                                self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                                let _ = tx.send(ShadowOrderRequest {
+                                    symbol: intent.symbol.clone(),
+                                    is_long: intent.is_long,
+                                    qty: fill.fill_qty,
+                                    price: fill.fill_price,
+                                    strategy: intent.strategy.clone(),
+                                    paper_fill_ts: event.ts_ms,
+                                    is_close: false,
+                                    order_link_id: format!("sh_{}_{}", event.ts_ms, self.exchange_seq),
+                                    is_primary: false,
+                                });
+                            }
+                        }
+                    } else if let Some(ref reason) = result.rejected_reason {
+                        strategy.on_rejection(intent, reason);
+                        self.recent_intents.push_back(TimestampedIntent {
+                            timestamp_ms: event.ts_ms,
+                            intent: intent.clone(),
+                            result: format!("rejected:{}", reason),
+                        });
+                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    }
                 }
             }
             intents.extend(strategy_intents);
         }
 
         // Step 6: Check stops
+        // Exchange mode: send close order to exchange; paper_only: close locally + shadow
         let triggers = self.paper_state.check_stops(event.last_price, event.ts_ms);
         for (symbol, trigger) in &triggers {
-            // Capture position direction before closing (needed for shadow close)
-            // 在平倉前擷取持倉方向（影子平倉需要）
-            // Capture position info before closing (E2 fix: need qty + direction for shadow)
-            // 平倉前擷取持倉信息（E2 修復：影子訂單需要數量和方向）
             let pos_info = self.paper_state.get_position(symbol).map(|p| (p.is_long, p.qty));
-            debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered");
-            self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
-            self.stats.total_stops += 1;
-
-            // Shadow close: mirror stop-triggered close to Demo API
-            // 影子平倉：將止損觸發的平倉映射到 Demo API
-            if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
-                let _ = tx.send(ShadowOrderRequest {
-                    symbol: symbol.clone(),
-                    is_long: !is_long, // opposite direction to close / 反方向平倉
-                    qty,               // actual position size / 實際倉位大小
-                    price: event.last_price,
-                    strategy: "stop".into(),
-                    paper_fill_ts: event.ts_ms,
-                    is_close: true,
-                });
+            if is_exchange_mode {
+                // P0-3 fix: Skip if we already have a pending close for this symbol
+                // P0-3 修復：如果此交易對已有待處理平倉訂單則跳過
+                if self.pending_close_symbols.contains(symbol) {
+                    continue;
+                }
+                // Exchange mode: send close order, don't close locally until confirmed
+                warn!(symbol = %symbol, reason = %trigger.reason,
+                    "stop triggered in exchange mode — sending close order");
+                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
+                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                    let _ = tx.send(ShadowOrderRequest {
+                        symbol: symbol.clone(),
+                        is_long: !is_long,
+                        qty,
+                        price: event.last_price,
+                        strategy: "stop".into(),
+                        paper_fill_ts: event.ts_ms,
+                        is_close: true,
+                        order_link_id: format!("oc_stop_{}_{}", event.ts_ms, self.exchange_seq),
+                        is_primary: true,
+                    });
+                    self.pending_close_symbols.insert(symbol.clone());
+                }
+            } else {
+                // Paper_only mode: close locally + shadow
+                debug!(symbol = %symbol, reason = %trigger.reason, "stop triggered");
+                self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
+                self.stats.total_stops += 1;
+                if let (Some(ref tx), Some((is_long, qty))) = (&self.shadow_order_tx, pos_info) {
+                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                    let _ = tx.send(ShadowOrderRequest {
+                        symbol: symbol.clone(),
+                        is_long: !is_long,
+                        qty,
+                        price: event.last_price,
+                        strategy: "stop".into(),
+                        paper_fill_ts: event.ts_ms,
+                        is_close: true,
+                        order_link_id: format!("sh_{}_{}", event.ts_ms, self.exchange_seq),
+                        is_primary: false,
+                    });
+                }
             }
         }
 
@@ -636,6 +735,59 @@ impl TickPipeline {
         // Measure elapsed time for the full tick / 計算完整 tick 處理耗時
         let tick_duration_us = tick_start.elapsed().as_micros() as u64;
         self.maybe_canary_record(event, indicators, signals, intents, tick_duration_us)
+    }
+
+    /// EXT-1: Apply a confirmed fill from the exchange to paper_state.
+    /// Called by event_consumer when exchange confirms a fill for a pending order.
+    /// EXT-1：將交易所確認的成交應用到 paper_state。
+    pub fn apply_confirmed_fill(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        fill_price: f64,
+        fee: f64,
+        ts_ms: u64,
+        strategy: &str,
+        order_link_id: &str,
+    ) {
+        self.paper_state.apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
+        self.stats.total_fills += 1;
+        // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
+        self.pending_close_symbols.remove(symbol);
+
+        self.recent_fills.push_back(TimestampedFill {
+            timestamp_ms: ts_ms,
+            symbol: symbol.to_string(),
+            is_long,
+            qty,
+            price: fill_price,
+            fee,
+            strategy: strategy.to_string(),
+        });
+        if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+
+        if let Some(ref tx) = self.trading_tx {
+            let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                fill_id: format!("fill-{}-{}", symbol, ts_ms),
+                ts_ms,
+                order_id: order_link_id.to_string(),
+                symbol: symbol.to_string(),
+                side: if is_long { "Buy".into() } else { "Sell".into() },
+                qty,
+                price: fill_price,
+                fee,
+                realized_pnl: 0.0,
+                strategy_name: strategy.to_string(),
+                context_id: format!("ctx-{}-{}", symbol, ts_ms),
+            });
+        }
+
+        info!(
+            symbol = %symbol, qty = %qty, price = %fill_price,
+            order_link_id = %order_link_id,
+            "confirmed fill applied / 已應用交易所確認成交"
+        );
     }
 
     /// Build a canary record if canary_mode is enabled (R07-2).
@@ -711,6 +863,7 @@ impl TickPipeline {
             stats: self.stats.clone(),
             source: "rust_engine".into(),
             paper_paused: self.paper_paused,
+            trading_mode: self.trading_mode,
             indicators: self.latest_indicators.clone(),
             signals: self.recent_signals.iter().cloned().collect(),
             strategies,
@@ -847,6 +1000,9 @@ pub struct PipelineSnapshot {
     /// Paper trading paused flag / 紙盤交易暫停標誌
     #[serde(default)]
     pub paper_paused: bool,
+    /// EXT-1: Current trading mode / 當前交易模式
+    #[serde(default)]
+    pub trading_mode: crate::config::TradingMode,
     /// Per-symbol latest indicator values / 每交易對最新指標值
     pub indicators: HashMap<String, IndicatorSnapshot>,
     /// Recent signals (last 100) / 最近信號（最近 100 個）

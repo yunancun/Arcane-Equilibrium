@@ -25,9 +25,46 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::bybit_rest_client::BybitRestClient;
+use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 
 /// Symbols tracked by the engine / 引擎追蹤的交易對
 pub const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
+
+/// EXT-1: Exchange event forwarded from ExecutionListener to event consumer.
+/// EXT-1：從執行監聯器轉發到事件消費者的交易所事件。
+#[derive(Debug)]
+pub enum ExchangeEvent {
+    /// A fill/execution confirmed by the exchange / 交易所確認的成交
+    Fill(ExecutionUpdate),
+    /// An order status update from the exchange / 交易所的訂單狀態更新
+    OrderUpdate(OrderUpdate),
+    /// DCP triggered — exchange auto-cancelled orders / DCP 觸發 — 交易所自動取消訂單
+    DcpTriggered,
+    /// Private WS disconnected / 私有 WS 斷連
+    Disconnected,
+}
+
+/// EXT-1: Pending order tracked in exchange mode, waiting for exchange confirmation.
+/// EXT-1：交易所模式中追蹤的待處理訂單，等待交易所確認。
+#[derive(Debug, Clone)]
+pub struct PendingOrder {
+    /// Client-assigned order link ID / 客戶端分配的訂單連結 ID
+    pub order_link_id: String,
+    /// Trading symbol / 交易對
+    pub symbol: String,
+    /// Long direction / 多方向
+    pub is_long: bool,
+    /// Requested quantity / 請求數量
+    pub qty: f64,
+    /// Strategy name / 策略名稱
+    pub strategy: String,
+    /// Timestamp when sent / 發送時間戳
+    pub sent_ts_ms: u64,
+    /// Cumulative filled quantity / 累計成交數量
+    pub cum_filled_qty: f64,
+    /// Whether this is a close order / 是否為平倉訂單
+    pub is_close: bool,
+}
 
 /// Status report interval (seconds) / 狀態報告間隔（秒）
 const STATUS_INTERVAL_SECS: u64 = 30;
@@ -63,6 +100,9 @@ pub struct EventConsumerDeps {
     /// Phase 2a: Channel for decision context snapshots.
     /// Phase 2a：決策上下文快照通道。
     pub context_tx: Option<tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>>,
+    /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
+    /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
+    pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
 }
 
 /// Run the event consumer loop: build pipeline, register strategies, process ticks.
@@ -85,6 +125,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         last_tick_ms: shared_last_tick_ms,
         trading_tx,
         context_tx,
+        exchange_event_rx: _exchange_event_rx_field,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -152,13 +193,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         info!("dual-track stop channel active / 雙軌止損通道已啟用");
     }
 
-    // Shadow order mode: dispatch paper fills as real Demo API orders for calibration
-    // 影子訂單模式：將紙盤成交作為真實 Demo API 訂單派發，用於校準比較
-    if cfg_snapshot.shadow_orders {
+    // EXT-1: Set trading mode on pipeline / 設定管線交易模式
+    pipeline.set_trading_mode(cfg_snapshot.trading_mode);
+    let mut pending_reg_rx_slot: Option<mpsc::UnboundedReceiver<PendingOrder>> = None;
+    let is_exchange_mode = cfg_snapshot.trading_mode == crate::config::TradingMode::Exchange;
+    if is_exchange_mode {
+        info!("EXT-1: exchange mode active — orders sent to exchange, fills confirmed via WS / 交易所模式啟用");
+    }
+
+    // Order dispatch: shadow orders (paper_only) or primary orders (exchange mode)
+    // 訂單派發：影子訂單（紙盤模式）或主訂單（交易所模式）
+    if cfg_snapshot.shadow_orders || is_exchange_mode {
         if let Some(ref client) = shared_client {
             if let Some(ref icache) = shared_instruments {
                 use crate::order_manager::{
-                    OrderManager, OrderCategory, OrderSide, OrderType, CreateOrderRequest,
+                    CreateOrderRequest, OrderCategory, OrderManager, OrderSide, OrderType,
                 };
                 let (shadow_tx, mut shadow_rx) = tokio::sync::mpsc::unbounded_channel::<
                     crate::tick_pipeline::ShadowOrderRequest,
@@ -166,17 +215,38 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 pipeline.set_shadow_channel(shadow_tx);
 
                 let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
+                // EXT-1: Channel for pending order registration (dispatch task → event consumer)
+                let (pending_reg_tx, pending_reg_rx) = tokio::sync::mpsc::unbounded_channel::<PendingOrder>();
+                pending_reg_rx_slot = Some(pending_reg_rx);
+
                 tokio::spawn(async move {
-                    let mut shadow_seq: u32 = 0;
                     while let Some(req) = shadow_rx.recv().await {
-                        // Skip zero-qty orders (instrument rounding reduced qty to 0)
-                        // 跳過零數量訂單（合約精度取整後數量為 0）
                         if req.qty <= 0.0 {
-                            warn!(symbol = %req.symbol, "shadow order skipped: qty=0 / 影子訂單跳過：qty=0");
+                            warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
                             continue;
                         }
-                        shadow_seq = shadow_seq.wrapping_add(1);
-                        let side = if req.is_long { OrderSide::Buy } else { OrderSide::Sell };
+                        // EXT-1: Register pending order BEFORE placing (for exchange mode)
+                        if req.is_primary {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            let _ = pending_reg_tx.send(PendingOrder {
+                                order_link_id: req.order_link_id.clone(),
+                                symbol: req.symbol.clone(),
+                                is_long: req.is_long,
+                                qty: req.qty,
+                                strategy: req.strategy.clone(),
+                                sent_ts_ms: now_ms,
+                                cum_filled_qty: 0.0,
+                                is_close: req.is_close,
+                            });
+                        }
+                        let side = if req.is_long {
+                            OrderSide::Buy
+                        } else {
+                            OrderSide::Sell
+                        };
                         let create_req = CreateOrderRequest {
                             category: OrderCategory::Linear,
                             symbol: req.symbol.clone(),
@@ -187,7 +257,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             time_in_force: None,
                             reduce_only: if req.is_close { Some(true) } else { None },
                             close_on_trigger: None,
-                            order_link_id: Some(format!("sh_{}_{}", req.paper_fill_ts, shadow_seq)),
+                            order_link_id: Some(req.order_link_id.clone()),
                             trigger_price: None,
                             trigger_direction: None,
                             take_profit: None,
@@ -195,28 +265,40 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             tp_trigger_by: None,
                             sl_trigger_by: None,
                         };
+                        let dispatch_type = if req.is_primary {
+                            "primary"
+                        } else {
+                            "shadow"
+                        };
                         match order_mgr.place_order(create_req).await {
                             Ok(resp) => {
                                 info!(
                                     symbol = %req.symbol,
                                     order_id = %resp.order_id,
-                                    shadow_type = if req.is_close { "close" } else { "open" },
-                                    paper_price = format!("{:.2}", req.price),
-                                    "shadow order placed / 影子訂單已下"
+                                    order_link_id = %req.order_link_id,
+                                    dispatch_type = dispatch_type,
+                                    close = req.is_close,
+                                    "order dispatched / 訂單已派發"
                                 );
                             }
                             Err(e) => {
-                                warn!(symbol = %req.symbol, error = %e, "shadow order failed / 影子訂單失敗");
+                                warn!(
+                                    symbol = %req.symbol,
+                                    order_link_id = %req.order_link_id,
+                                    dispatch_type = dispatch_type,
+                                    error = %e,
+                                    "order dispatch failed / 訂單派發失敗"
+                                );
                             }
                         }
                     }
                 });
-                info!("shadow order mode active / 影子訂單模式已啟用");
+                info!("order dispatch mode active / 訂單派發模式已啟用");
             } else {
-                warn!("shadow_orders enabled but no instrument cache — skipping / 影子訂單已啟用但無品種規格快取，跳過");
+                warn!("order dispatch enabled but no instrument cache — skipping");
             }
         } else {
-            warn!("shadow_orders enabled but no API credentials — skipping / 影子訂單已啟用但無 API 憑證，跳過");
+            warn!("order dispatch enabled but no API credentials — skipping");
         }
     }
 
@@ -333,10 +415,153 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
+    // EXT-1: Pending order tracking for exchange mode
+    // EXT-1：交易所模式的待處理訂單追蹤
+    let mut pending_orders: HashMap<String, PendingOrder> = HashMap::new();
+    // P0-1 fix: order_id → order_link_id mapping (populated from OrderUpdate, used in Fill matching)
+    let mut order_id_to_link: HashMap<String, String> = HashMap::new();
+    let mut exchange_event_rx = _exchange_event_rx_field;
+    let mut pending_reg_rx = pending_reg_rx_slot;
+    let mut last_pending_check = Instant::now();
+    let pending_timeout = std::time::Duration::from_secs(5);
+
     // ── Main event loop / 主事件循環 ──
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
+
+            // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener ──
+            // ── EXT-1：來自執行監聽器的交易所事件（成交/訂單更新）──
+            exchange_evt = async {
+                if let Some(ref mut rx) = exchange_event_rx { rx.recv().await } else { std::future::pending().await }
+            } => {
+                match exchange_evt {
+                    Some(ExchangeEvent::Fill(exec)) => {
+                        // Match fill against pending orders by order_link_id (via order_id match)
+                        // Bybit fast-execution topic includes order_id but not always order_link_id
+                        // We match using the order_link_id from the OrderUpdate path
+                        let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
+                        let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
+                        let exec_fee: f64 = exec.exec_fee.parse().unwrap_or(0.0);
+                        let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
+
+                        info!(
+                            exec_id = %exec.exec_id,
+                            order_id = %exec.order_id,
+                            symbol = %exec.symbol,
+                            side = %exec.side,
+                            qty = exec_qty,
+                            price = exec_price,
+                            fee = exec_fee,
+                            "exchange fill received / 收到交易所成交"
+                        );
+
+                        // P0-1 fix: Match fill via order_id → order_link_id mapping
+                        // OrderUpdate populates the mapping, Fill uses it
+                        let matched_key = order_id_to_link.get(&exec.order_id).cloned()
+                            .or_else(|| {
+                                // Fallback: symbol+side match if no order_id mapping yet
+                                let is_buy = exec.side == "Buy";
+                                pending_orders.iter()
+                                    .find(|(_, po)| po.symbol == exec.symbol && po.is_long == is_buy && po.cum_filled_qty < po.qty)
+                                    .map(|(k, _)| k.clone())
+                            });
+
+                        if let Some(key) = matched_key {
+                            if let Some(po) = pending_orders.get_mut(&key) {
+                                po.cum_filled_qty += exec_qty;
+                                pipeline.apply_confirmed_fill(
+                                    &exec.symbol,
+                                    po.is_long,
+                                    exec_qty,
+                                    exec_price,
+                                    exec_fee,
+                                    exec_ts,
+                                    &po.strategy,
+                                    &po.order_link_id,
+                                );
+                                snapshot_writer.force_write(&pipeline.snapshot());
+
+                                if po.cum_filled_qty >= po.qty * 0.999 {
+                                    info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
+                                    pending_orders.remove(&key);
+                                }
+                            }
+                        } else {
+                            warn!(
+                                symbol = %exec.symbol, side = %exec.side,
+                                "exchange fill has no matching pending order / 交易所成交無匹配的待處理訂單"
+                            );
+                        }
+                    }
+                    Some(ExchangeEvent::OrderUpdate(order)) => {
+                        // P0-1: Build order_id → order_link_id mapping for fill matching
+                        if !order.order_link_id.is_empty() && !order.order_id.is_empty() {
+                            order_id_to_link.insert(order.order_id.clone(), order.order_link_id.clone());
+                        }
+                        // Match by order_link_id directly
+                        if !order.order_link_id.is_empty() {
+                            if let Some(po) = pending_orders.get_mut(&order.order_link_id) {
+                                let status = &order.order_status;
+                                info!(
+                                    order_link_id = %order.order_link_id,
+                                    status = %status,
+                                    symbol = %order.symbol,
+                                    "pending order status update / 待處理訂單狀態更新"
+                                );
+                                if status == "Cancelled" || status == "Rejected" || status == "Deactivated" {
+                                    warn!(
+                                        order_link_id = %order.order_link_id,
+                                        status = %status,
+                                        "pending order failed — removing / 待處理訂單失敗，移除"
+                                    );
+                                    pending_orders.remove(&order.order_link_id);
+                                }
+                            }
+                        }
+                    }
+                    Some(ExchangeEvent::DcpTriggered) => {
+                        // DCP: Exchange auto-cancelled all orders
+                        // Clear pending orders — they've been cancelled by the exchange
+                        let count = pending_orders.len();
+                        if count > 0 {
+                            warn!(
+                                count = count,
+                                "DCP triggered — clearing {} pending orders / DCP 觸發，清除 {} 個待處理訂單",
+                                count, count,
+                            );
+                            pending_orders.clear();
+                        }
+                        warn!("DCP triggered — exchange may have cancelled active orders / DCP 觸發，交易所可能已取消活躍訂單");
+                    }
+                    Some(ExchangeEvent::Disconnected) => {
+                        // Private WS disconnected — pending orders may be in unknown state
+                        if !pending_orders.is_empty() {
+                            warn!(
+                                pending = pending_orders.len(),
+                                "private WS disconnected with {} pending orders — reconcile on reconnect \
+                                / 私有 WS 斷連，{} 個待處理訂單 — 重連後對賬",
+                                pending_orders.len(), pending_orders.len(),
+                            );
+                        }
+                    }
+                    None => {} // channel closed
+                }
+            },
+
+            // ── EXT-1: Pending order registration from dispatch task ──
+            pending_reg = async {
+                if let Some(ref mut rx) = pending_reg_rx { rx.recv().await } else { std::future::pending().await }
+            } => {
+                if let Some(po) = pending_reg {
+                    info!(
+                        order_link_id = %po.order_link_id, symbol = %po.symbol,
+                        qty = %po.qty, strategy = %po.strategy,
+                        "pending order registered / 待處理訂單已註冊"
+                    );
+                    pending_orders.insert(po.order_link_id.clone(), po);
+                }
+            },
 
             // ── Paper session commands from IPC / 來自 IPC 的紙盤 session 命令 ──
             cmd = async {
@@ -458,6 +683,49 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     pipeline.paper_state.set_api_unrealized_pnl(symbol, pnl);
                                 }
                             }
+                        }
+
+                        // EXT-1: Check for timed-out pending orders (every 5s)
+                        if !pending_orders.is_empty() && last_pending_check.elapsed() >= pending_timeout {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            let stale_keys: Vec<String> = pending_orders
+                                .iter()
+                                .filter(|(_, po)| now_ms.saturating_sub(po.sent_ts_ms) > 5000)
+                                .map(|(k, _)| k.clone())
+                                .collect();
+                            for key in &stale_keys {
+                                if let Some(po) = pending_orders.get(key) {
+                                    let elapsed = now_ms.saturating_sub(po.sent_ts_ms);
+                                    if elapsed > 60_000 {
+                                        // P1-1 fix: Hard timeout — remove after 60s
+                                        error!(
+                                            order_link_id = %key,
+                                            symbol = %po.symbol,
+                                            elapsed_ms = elapsed,
+                                            "pending order hard timeout (>60s) — removing / 待處理訂單硬超時，移除"
+                                        );
+                                    } else {
+                                        warn!(
+                                            order_link_id = %key,
+                                            symbol = %po.symbol,
+                                            elapsed_ms = elapsed,
+                                            filled = %po.cum_filled_qty,
+                                            requested = %po.qty,
+                                            "pending order soft timeout (>5s) / 待處理訂單軟超時"
+                                        );
+                                    }
+                                }
+                            }
+                            // P1-1: Remove orders that exceeded hard timeout / 移除超過硬超時的訂單
+                            pending_orders.retain(|_, po| now_ms.saturating_sub(po.sent_ts_ms) <= 60_000);
+                            // Clean up stale order_id mappings (keep max 100)
+                            if order_id_to_link.len() > 100 {
+                                order_id_to_link.clear();
+                            }
+                            last_pending_check = Instant::now();
                         }
 
                         // Periodic status + persistence / 定期狀態報告 + 持久化

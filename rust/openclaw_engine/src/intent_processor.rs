@@ -35,6 +35,18 @@ pub struct IntentResult {
     pub fill: Option<FillResult>,
 }
 
+/// EXT-1: Result of gate-only processing for exchange mode.
+/// EXT-1：交易所模式下僅門禁處理的結果。
+#[derive(Debug, Clone)]
+pub struct ExchangeGateResult {
+    /// Whether the intent passed all gates / 意圖是否通過所有門禁
+    pub approved: bool,
+    /// Rejection reason if not approved / 未通過時的拒絕原因
+    pub rejected_reason: Option<String>,
+    /// Gate-approved quantity after Kelly sizing + P1 cap / 門禁批准的數量（Kelly + P1 上限後）
+    pub approved_qty: f64,
+}
+
 /// Intent processor with guardian checks.
 /// 帶守護者檢查的意圖處理器。
 pub struct IntentProcessor {
@@ -214,6 +226,104 @@ impl IntentProcessor {
             submitted: true,
             rejected_reason: None,
             fill: Some(fill),
+        }
+    }
+
+    /// EXT-1: Process intent through governance gates only (no simulated execution).
+    /// Returns ExchangeGateResult with approved_qty for exchange-mode order dispatch.
+    /// EXT-1：僅通過治理門禁處理意圖（不模擬執行）。
+    pub fn process_gates_only(
+        &self,
+        intent: &OrderIntent,
+        governance: &GovernanceCore,
+        paper_state: &PaperState,
+    ) -> ExchangeGateResult {
+        // Gate 1: Governance authorization
+        if !governance.is_authorized() {
+            return ExchangeGateResult {
+                approved: false,
+                rejected_reason: Some("governance_not_authorized".into()),
+                approved_qty: 0.0,
+            };
+        }
+        // Gate 1.5: Reject same-direction duplicate
+        if let Some(existing) = paper_state.get_position(&intent.symbol) {
+            if existing.is_long == intent.is_long {
+                return ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(format!(
+                        "duplicate_position: {} already {} {}",
+                        intent.symbol,
+                        if existing.is_long { "LONG" } else { "SHORT" },
+                        existing.qty,
+                    )),
+                    approved_qty: 0.0,
+                };
+            }
+        }
+        // Gate 2: Guardian 4-check
+        let positions: Vec<ExistingPosition> = paper_state
+            .positions()
+            .iter()
+            .map(|p| ExistingPosition {
+                symbol: p.symbol.clone(),
+                side: if p.is_long { "Buy".into() } else { "Sell".into() },
+            })
+            .collect();
+        let ctx = PortfolioContext {
+            drawdown_pct: paper_state.drawdown_pct(),
+            positions,
+        };
+        let check = TradeIntentCheck {
+            symbol: intent.symbol.clone(),
+            side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+            leverage: 1.0,
+            qty: intent.qty,
+        };
+        let guardian_result = self.guardian.review(&check, &ctx);
+        if let Verdict::Rejected = guardian_result.verdict {
+            return ExchangeGateResult {
+                approved: false,
+                rejected_reason: Some(format!(
+                    "guardian_rejected: {:?}",
+                    guardian_result.reasons
+                )),
+                approved_qty: 0.0,
+            };
+        }
+        // Gate 2.5: Kelly position sizing
+        let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
+        let balance = paper_state.balance();
+        let guardian_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
+        let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
+            let stats = self
+                .trade_stats
+                .get(&intent.symbol)
+                .cloned()
+                .unwrap_or_default();
+            let atr_pct = paper_state
+                .latest_turnover(&intent.symbol)
+                .map(|_| 0.02)
+                .unwrap_or(0.02);
+            crate::ml::kelly_sizer::compute_kelly_qty(
+                kelly_cfg, &stats, balance, price, atr_pct, guardian_qty,
+            )
+        } else {
+            guardian_qty
+        };
+        // Gate 2.6: P1 hard cap
+        const P1_RISK_PCT: f64 = 0.02;
+        let p1_max_qty = if price > 0.0 {
+            balance * P1_RISK_PCT / price
+        } else {
+            kelly_qty
+        };
+        let final_qty = kelly_qty.min(p1_max_qty);
+
+        ExchangeGateResult {
+            approved: true,
+            rejected_reason: None,
+            approved_qty: final_qty,
         }
     }
 

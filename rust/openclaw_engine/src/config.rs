@@ -7,11 +7,41 @@
 //!   冷參數需重啟；熱參數通過 SIGHUP 重載。
 
 use arc_swap::ArcSwap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, warn};
+
+// ---------------------------------------------------------------------------
+// TradingMode — EXT-1 Exchange-as-Truth / 交易所即真相模式
+// ---------------------------------------------------------------------------
+
+/// Trading execution mode (cold param — requires restart).
+/// 交易執行模式（冷參數 — 需重啟）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TradingMode {
+    /// Local paper simulation (default) / 本地紙盤模擬（預設）
+    #[default]
+    PaperOnly,
+    /// Exchange-as-Truth: orders placed on exchange, fills confirmed via WS
+    /// 交易所即真相：訂單送交交易所，成交經 WS 確認
+    Exchange,
+}
+
+impl std::fmt::Display for TradingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TradingMode::PaperOnly => write!(f, "paper_only"),
+            TradingMode::Exchange => write!(f, "exchange"),
+        }
+    }
+}
+
+fn default_trading_mode() -> TradingMode {
+    TradingMode::PaperOnly
+}
 
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
@@ -154,6 +184,12 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub database: crate::database::DatabaseConfig,
 
+    // -- EXT-1: Trading mode (cold param) / 交易模式（冷參數） --
+    /// Trading execution mode: paper_only (local sim) or exchange (exchange-as-truth).
+    /// 交易執行模式：paper_only（本地模擬）或 exchange（交易所即真相）。
+    #[serde(default = "default_trading_mode")]
+    pub trading_mode: TradingMode,
+
     // -- Phase 2b: ML configuration / ML 配置 --
     /// ML inference + Kelly sizing configuration (Phase 2b).
     /// ML 推理 + Kelly 倉位管理配置。
@@ -285,6 +321,7 @@ impl Default for RuntimeConfig {
             enable_extended_ws: default_true(),
             shadow_orders: true,
             kline_bootstrap: default_true(),
+            trading_mode: TradingMode::PaperOnly,
             database: crate::database::DatabaseConfig::default(),
             ml: MlConfig::default(),
         }
@@ -373,6 +410,12 @@ impl ConfigManager {
         }
         if old.state_push_interval_ms != new_config.state_push_interval_ms {
             warn!("state_push_interval_ms changed but is cold — requires restart");
+        }
+        if old.trading_mode != new_config.trading_mode {
+            warn!(
+                old = %old.trading_mode, new = %new_config.trading_mode,
+                "trading_mode changed but is cold — requires restart / trading_mode 為冷參數，需重啟"
+            );
         }
 
         self.inner.store(Arc::new(new_config));
