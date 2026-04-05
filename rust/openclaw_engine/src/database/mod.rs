@@ -129,7 +129,7 @@ impl Default for DatabaseConfig {
 
 /// Messages from tick pipeline to the market data writer task.
 /// 從 tick 管線到市場數據寫入任務的消息。
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub enum MarketDataMsg {
     /// Completed kline bar (on bar close) / 完成的 K 線（收盤時）
     KlineClose {

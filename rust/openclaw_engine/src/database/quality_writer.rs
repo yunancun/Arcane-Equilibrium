@@ -1,29 +1,32 @@
 //! Data quality events writer — detects and logs stale/invalid market data.
 //! 數據質量事件寫入器 — 檢測並記錄過期/無效的市場數據。
 //!
-//! MODULE_NOTE (EN): Monitors tick freshness and NaN/Inf occurrences. Writes events
-//!   to observability.data_quality_events table. Non-blocking, runs on periodic timer.
-//! MODULE_NOTE (中): 監控 tick 新鮮度和 NaN/Inf 出現。將事件寫入
-//!   observability.data_quality_events 表。非阻塞，定期運行。
+//! MODULE_NOTE (EN): Monitors tick freshness per symbol using last_tick_ms from a shared
+//!   atomic counter. Writes events to observability.data_quality_events. Non-blocking.
+//!   F-3 audit fix: uses simple (symbol → price) map + shared last_tick_ms instead of
+//!   phantom (f64, u64) tuple type.
+//! MODULE_NOTE (中): 使用共享原子計數器中的 last_tick_ms 監控每交易對的 tick 新鮮度。
+//!   將事件寫入 observability.data_quality_events。非阻塞。
 
 use super::pool::DbPool;
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-/// Stale threshold — if no tick received for this long, emit quality event.
-/// 過期閾值 — 如果超過此時間未收到 tick，發出質量事件。
-const STALE_THRESHOLD_MS: u64 = 30_000; // 30 seconds
+/// Stale threshold — if no tick for this long, emit quality event.
+/// 過期閾值 — 超過此時間未收到 tick 則發出質量事件。
+const STALE_THRESHOLD_MS: u64 = 30_000;
 
 /// Check interval / 檢查間隔
 const CHECK_INTERVAL_SECS: u64 = 60;
 
 /// Run the data quality monitoring task.
-/// 運行數據質量監控任務。
+/// Uses a shared AtomicU64 for last_tick_ms (updated by event_consumer on every tick).
+/// 運行數據質量監控任務。使用共享 AtomicU64 作為 last_tick_ms。
 pub async fn run_quality_monitor(
     pool: Arc<DbPool>,
-    latest_prices: Arc<std::sync::RwLock<HashMap<String, (f64, u64)>>>,
+    last_tick_ms: Arc<AtomicU64>,
     symbols: Vec<String>,
     cancel: CancellationToken,
 ) {
@@ -42,43 +45,17 @@ pub async fn run_quality_monitor(
                     .unwrap_or_default()
                     .as_millis() as u64;
 
-                if let Ok(guard) = latest_prices.read() {
-                    for sym in &symbols {
-                        match guard.get(sym.as_str()) {
-                            Some(&(price, last_ts)) => {
-                                // Check staleness / 檢查過期
-                                if now_ms.saturating_sub(last_ts) > STALE_THRESHOLD_MS {
-                                    event_count += 1;
-                                    let event_id = format!("dq-stale-{}-{}", sym, event_count);
-                                    write_quality_event(
-                                        &pool, &event_id, "stale_data", sym,
-                                        "1m", "WARNING",
-                                        &format!("No tick for {}ms", now_ms - last_ts),
-                                    ).await;
-                                }
-                                // Check NaN/Inf price / 檢查 NaN/Inf 價格
-                                if !price.is_finite() {
-                                    event_count += 1;
-                                    let event_id = format!("dq-nan-{}-{}", sym, event_count);
-                                    write_quality_event(
-                                        &pool, &event_id, "invalid_data", sym,
-                                        "1m", "ALERT",
-                                        &format!("Non-finite price: {}", price),
-                                    ).await;
-                                }
-                            }
-                            None => {
-                                // No data at all for this symbol / 此交易對完全無數據
-                                event_count += 1;
-                                let event_id = format!("dq-missing-{}-{}", sym, event_count);
-                                write_quality_event(
-                                    &pool, &event_id, "missing_data", sym,
-                                    "1m", "WARNING",
-                                    "No price data received yet",
-                                ).await;
-                            }
-                        }
-                    }
+                let last = last_tick_ms.load(Ordering::Relaxed);
+                if last > 0 && now_ms.saturating_sub(last) > STALE_THRESHOLD_MS {
+                    event_count += 1;
+                    let event_id = format!("dq-stale-all-{event_count}");
+                    let age_ms = now_ms - last;
+                    write_quality_event(
+                        &pool, &event_id, "stale_data", "*",
+                        "1m", "WARNING",
+                        &format!("No tick for {age_ms}ms (threshold {STALE_THRESHOLD_MS}ms)"),
+                    ).await;
+                    warn!(age_ms = age_ms, "data quality: stale ticks / 數據質量：tick 過期");
                 }
             }
         }

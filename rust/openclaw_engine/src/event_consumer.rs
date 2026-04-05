@@ -54,6 +54,9 @@ pub struct EventConsumerDeps {
     /// Phase 1: Channel to dispatch feature snapshots to async PG writer.
     /// Phase 1：特徵快照派發通道。
     pub feature_tx: Option<tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>>,
+    /// Phase 1 (F-5): Shared last_tick_ms for quality monitor staleness detection.
+    /// Phase 1（F-5）：共享 last_tick_ms 用於質量監控器過期檢測。
+    pub last_tick_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
 }
 
 /// Run the event consumer loop: build pipeline, register strategies, process ticks.
@@ -73,6 +76,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         paper_cmd_rx,
         market_data_tx,
         feature_tx,
+        last_tick_ms: shared_last_tick_ms,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -345,6 +349,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             event = event_rx.recv() => {
                 match event {
                     Some(ev) => {
+                        // F-5: Update shared last_tick_ms for quality monitor
+                        if let Some(ref tick_ms) = shared_last_tick_ms {
+                            tick_ms.store(ev.ts_ms, std::sync::atomic::Ordering::Relaxed);
+                        }
                         let prev_fills = pipeline.stats.total_fills;
                         let canary_record = pipeline.on_tick(&ev);
 
