@@ -3,10 +3,13 @@
 //!
 //! MODULE_NOTE (EN): Listens on a Unix socket, handles JSON-RPC 2.0 requests
 //!   with newline-delimited messages. Each connection spawns a tokio task.
-//!   Supports: ping, get_state, reload_config, evaluate_strategy, get_risk_check.
-//! MODULE_NOTE (中): 監聽 Unix 套接字，處理 JSON-RPC 2.0 請求（換行分隔消息）。
+//!   Supports: ping, get_state, reload_config, evaluate_strategy, get_risk_check,
+//!   paper session (pause/resume/close_all/reset), snapshot reads (paper_state/prices/stats),
+//!   strategy params (update_strategy_params/get_strategy_params/get_param_ranges).
+//! MODULE_NOTE (中): 監聯 Unix 套接字，處理 JSON-RPC 2.0 請求（換行分隔消息）。
 //!   每個連接生成一個 tokio 任務。支援：ping、get_state、reload_config、
-//!   evaluate_strategy、get_risk_check。
+//!   evaluate_strategy、get_risk_check、紙盤控制（pause/resume/close_all/reset）、
+//!   快照讀取（paper_state/prices/stats）、策略參數（update/get/ranges）。
 
 use crate::config::ConfigManager;
 use crate::tick_pipeline::PipelineSnapshot;

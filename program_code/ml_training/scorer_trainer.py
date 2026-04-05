@@ -36,13 +36,36 @@ class ScorerConfig:
     reg_alpha: float = 0.1
     reg_lambda: float = 1.0
 
-    # CPCV params / CPCV 參數
-    n_folds: int = 6
-    embargo_hours_trend: int = 48
-    embargo_hours_revert: int = 24
+    # CPCV params — 4-fold, strategy-specific embargo (Phase 3b audit: 24/4/8/72h)
+    # CPCV 參數 — 4 折，策略特定 embargo（Phase 3b 審計：24/4/8/72h）
+    n_folds: int = 4
+    embargo_hours_trend: int = 24
+    embargo_hours_revert: int = 4
+    embargo_hours_arb: int = 8
+    embargo_hours_grid: int = 72
+    power_threshold: float = 0.5
 
     # Output / 輸出
     output_dir: str = "/tmp/openclaw/models"
+
+
+def get_embargo_hours(config: ScorerConfig, strategy_type: str) -> int:
+    """Get embargo hours for a strategy type / 根據策略類型獲取 embargo 小時數。
+
+    Strategy types: trending, reversion, arb, grid.
+    策略類型：趨勢、回歸、套利、網格。
+    """
+    mapping = {
+        "trending": config.embargo_hours_trend,
+        "ma_crossover": config.embargo_hours_trend,
+        "reversion": config.embargo_hours_revert,
+        "bb_reversion": config.embargo_hours_revert,
+        "arb": config.embargo_hours_arb,
+        "funding_arb": config.embargo_hours_arb,
+        "grid": config.embargo_hours_grid,
+        "grid_trading": config.embargo_hours_grid,
+    }
+    return mapping.get(strategy_type, config.embargo_hours_trend)
 
 
 @dataclass
@@ -88,8 +111,8 @@ def train_scorer(
         return result
 
     try:
-        # Simple train/test split for Phase 2 PoC (CPCV in Phase 3b)
-        # Phase 2 PoC 使用簡單分割（CPCV 在 Phase 3b）
+        # Simple train/test split — placeholder for CPCV (see cpcv_validator.py)
+        # 簡單分割 — CPCV 佔位符（見 cpcv_validator.py）
         split_idx = int(len(labels) * 0.8)
         X_train, X_test = features[:split_idx], features[split_idx:]
         y_train, y_test = labels[:split_idx], labels[split_idx:]
