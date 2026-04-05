@@ -6,8 +6,51 @@
 //! Geometric mode: equal ratio gaps between levels (better for crypto).
 //! Health check: detect stale/out-of-range grids and auto-rebalance.
 
-use super::Strategy;
+use super::{ParamRange, Strategy, StrategyParams};
 use crate::intent_processor::OrderIntent;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+/// Tunable parameters for Grid Trading (Phase 3a).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridTradingParams {
+    pub cooldown_ms: u64,
+    pub qty_per_grid: f64,
+    pub max_inventory: f64,
+    pub ou_lookback: usize,
+    pub health_check_interval: usize,
+    pub max_out_of_range: usize,
+}
+
+impl Default for GridTradingParams {
+    fn default() -> Self {
+        Self {
+            cooldown_ms: 120_000,
+            qty_per_grid: DEFAULT_QTY_PER_GRID,
+            max_inventory: 5.0,
+            ou_lookback: 60,
+            health_check_interval: 100,
+            max_out_of_range: 5,
+        }
+    }
+}
+
+impl StrategyParams for GridTradingParams {
+    fn param_ranges() -> Vec<ParamRange> {
+        vec![
+            ParamRange { name: "cooldown_ms".into(), min: 30_000.0, max: 600_000.0, step: Some(30_000.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "qty_per_grid".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
+            ParamRange { name: "max_inventory".into(), min: 1.0, max: 20.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "ou_lookback".into(), min: 20.0, max: 200.0, step: Some(10.0), agent_adjustable: true, db_persisted: true },
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.max_inventory < 1.0 { return Err("max_inventory must be >= 1".into()); }
+        if self.ou_lookback < 10 { return Err("ou_lookback must be >= 10".into()); }
+        Ok(())
+    }
+}
 use crate::tick_pipeline::TickContext;
 
 const DEFAULT_GRID_COUNT: usize = 10;
@@ -352,6 +395,29 @@ impl GridTrading {
             }
         }
     }
+
+    pub fn update_params(&mut self, params: GridTradingParams) -> Result<(), String> {
+        params.validate()?;
+        self.cooldown_ms = params.cooldown_ms;
+        self.qty_per_grid = params.qty_per_grid;
+        self.max_inventory = params.max_inventory;
+        self.ou_lookback = params.ou_lookback;
+        self.health_check_interval = params.health_check_interval;
+        self.max_out_of_range = params.max_out_of_range;
+        info!(strategy = "grid_trading", "params updated / 參數已更新");
+        Ok(())
+    }
+
+    pub fn get_params(&self) -> GridTradingParams {
+        GridTradingParams {
+            cooldown_ms: self.cooldown_ms,
+            qty_per_grid: self.qty_per_grid,
+            max_inventory: self.max_inventory,
+            ou_lookback: self.ou_lookback,
+            health_check_interval: self.health_check_interval,
+            max_out_of_range: self.max_out_of_range,
+        }
+    }
 }
 
 impl Strategy for GridTrading {
@@ -451,6 +517,13 @@ impl Strategy for GridTrading {
 
         intents
     }
+
+    fn update_params_json(&mut self, json: &str) -> Result<(), String> {
+        let p: GridTradingParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        self.update_params(p)
+    }
+    fn get_params_json(&self) -> String { serde_json::to_string(&self.get_params()).unwrap_or_default() }
+    fn param_ranges_json(&self) -> String { serde_json::to_string(&GridTradingParams::param_ranges()).unwrap_or_default() }
 }
 
 #[cfg(test)]
@@ -714,5 +787,19 @@ mod tests {
         for &r in &ratios {
             assert!((r - first_ratio).abs() < 1e-10);
         }
+    }
+
+    #[test]
+    fn test_grid_param_ranges() { assert!(!GridTradingParams::param_ranges().is_empty()); }
+    #[test]
+    fn test_grid_validate() {
+        assert!(GridTradingParams::default().validate().is_ok());
+        assert!(GridTradingParams { max_inventory: 0.5, ..Default::default() }.validate().is_err());
+    }
+    #[test]
+    fn test_grid_update() {
+        let mut g = GridTrading::new(100.0, 110.0);
+        assert!(g.update_params(GridTradingParams { max_inventory: 10.0, ..Default::default() }).is_ok());
+        assert!((g.get_params().max_inventory - 10.0).abs() < 0.01);
     }
 }

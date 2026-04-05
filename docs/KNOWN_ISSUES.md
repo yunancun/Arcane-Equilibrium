@@ -7,7 +7,7 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 11 / CONFIRMED 0 / RESOLVED 7
+# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 8
 # 最後更新：2026-04-05
 
 ---
@@ -195,7 +195,7 @@
 
 # ━━━ 代碼質量 / 技術債 ━━━
 
-## OPEN — TEST-1：4 個 multi_interval_ws 測試失敗
+## RESOLVED — TEST-1：4 個 multi_interval_ws 測試失敗
 
 **來源**：2026-04-05 Session 7，外部 linter 變更引入
 **嚴重性**：MEDIUM

@@ -1,9 +1,53 @@
 //! MA Crossover Strategy V2 — KAMA + ADX filter + Hurst regime filter + multi-TF confirmation.
 //! MA 交叉策略 V2 — KAMA + ADX 過濾 + 赫斯特狀態過濾 + 多時間框架確認。
 
-use super::Strategy;
+use super::{ParamRange, Strategy, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+/// Tunable parameters for MA Crossover strategy (Phase 3a AGT-1).
+/// MA 交叉策略的可調參數。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaCrossoverParams {
+    pub cooldown_ms: u64,
+    pub adx_threshold: f64,
+    pub default_qty: f64,
+    pub regime_filter_enabled: bool,
+    pub higher_tf_alpha: f64,
+}
+
+impl Default for MaCrossoverParams {
+    fn default() -> Self {
+        Self {
+            cooldown_ms: 300_000,
+            adx_threshold: 20.0,
+            default_qty: 1e9,
+            regime_filter_enabled: true,
+            higher_tf_alpha: 0.003,
+        }
+    }
+}
+
+impl StrategyParams for MaCrossoverParams {
+    fn param_ranges() -> Vec<ParamRange> {
+        vec![
+            ParamRange { name: "cooldown_ms".into(), min: 60_000.0, max: 3_600_000.0, step: Some(60_000.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "adx_threshold".into(), min: 10.0, max: 50.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "default_qty".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
+            ParamRange { name: "regime_filter_enabled".into(), min: 0.0, max: 1.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+            ParamRange { name: "higher_tf_alpha".into(), min: 0.001, max: 0.05, step: None, agent_adjustable: true, db_persisted: true },
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.cooldown_ms < 60_000 { return Err("cooldown_ms must be >= 60s".into()); }
+        if self.adx_threshold < 5.0 || self.adx_threshold > 80.0 { return Err("adx_threshold must be in [5, 80]".into()); }
+        if self.higher_tf_alpha <= 0.0 || self.higher_tf_alpha > 0.1 { return Err("higher_tf_alpha must be in (0, 0.1]".into()); }
+        Ok(())
+    }
+}
 
 pub struct MaCrossover {
     active: bool,
@@ -41,6 +85,31 @@ impl MaCrossover {
             higher_tf_sma: None,
             higher_tf_alpha: 0.003,
             prev_position: None, prev_last_trade_ms: 0,
+        }
+    }
+
+    /// Phase 3a: Update tunable parameters (does not reset state).
+    /// Phase 3a：更新可調參數（不重置狀態）。
+    pub fn update_params(&mut self, params: MaCrossoverParams) -> Result<(), String> {
+        params.validate()?;
+        self.cooldown_ms = params.cooldown_ms;
+        self.adx_threshold = params.adx_threshold;
+        self.default_qty = params.default_qty;
+        self.regime_filter_enabled = params.regime_filter_enabled;
+        self.higher_tf_alpha = params.higher_tf_alpha;
+        info!(strategy = "ma_crossover", "params updated / 參數已更新");
+        Ok(())
+    }
+
+    /// Phase 3a: Get current tunable parameters.
+    /// Phase 3a：獲取當前可調參數。
+    pub fn get_params(&self) -> MaCrossoverParams {
+        MaCrossoverParams {
+            cooldown_ms: self.cooldown_ms,
+            adx_threshold: self.adx_threshold,
+            default_qty: self.default_qty,
+            regime_filter_enabled: self.regime_filter_enabled,
+            higher_tf_alpha: self.higher_tf_alpha,
         }
     }
 
@@ -173,6 +242,19 @@ impl Strategy for MaCrossover {
             }
         }
         intents
+    }
+
+    fn update_params_json(&mut self, json: &str) -> Result<(), String> {
+        let params: MaCrossoverParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        self.update_params(params)
+    }
+
+    fn get_params_json(&self) -> String {
+        serde_json::to_string(&self.get_params()).unwrap_or_default()
+    }
+
+    fn param_ranges_json(&self) -> String {
+        serde_json::to_string(&MaCrossoverParams::param_ranges()).unwrap_or_default()
     }
 }
 
@@ -398,5 +480,44 @@ mod tests {
         let ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
         let exit = s.on_tick(&ctx_exit);
         assert_eq!(exit.len(), 1, "Exit must work regardless of higher TF trend");
+    }
+
+    // ── Phase 3a: StrategyParams tests ──
+
+    #[test]
+    fn test_param_ranges_non_empty() {
+        let ranges = MaCrossoverParams::param_ranges();
+        assert!(!ranges.is_empty());
+        assert!(ranges.iter().any(|r| r.name == "adx_threshold"));
+    }
+
+    #[test]
+    fn test_validate_pass() {
+        let p = MaCrossoverParams::default();
+        assert!(p.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_fail() {
+        let p = MaCrossoverParams { cooldown_ms: 1000, ..Default::default() }; // too low
+        assert!(p.validate().is_err());
+    }
+
+    #[test]
+    fn test_update_and_get_roundtrip() {
+        let mut s = MaCrossover::new();
+        let new_params = MaCrossoverParams { adx_threshold: 35.0, ..Default::default() };
+        assert!(s.update_params(new_params).is_ok());
+        let got = s.get_params();
+        assert!((got.adx_threshold - 35.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_json_roundtrip() {
+        let mut s = MaCrossover::new();
+        let json = r#"{"cooldown_ms":600000,"adx_threshold":25.0,"default_qty":1000000000.0,"regime_filter_enabled":true,"higher_tf_alpha":0.005}"#;
+        assert!(s.update_params_json(json).is_ok());
+        let out = s.get_params_json();
+        assert!(out.contains("25.0") || out.contains("25"));
     }
 }
