@@ -11,7 +11,11 @@ restart_engine() {
     pkill -f "openclaw-engine" 2>/dev/null || true
     sleep 2
     echo ">>> Starting Rust engine..."
+    # Load PG password from secrets (cross-platform: no hardcoded credentials)
+    local pg_pass
+    pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
     OPENCLAW_DATA_DIR=/tmp/openclaw OPENCLAW_CANARY_MODE=1 \
+        OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
         nohup rust/target/release/openclaw-engine > /tmp/openclaw/engine.log 2>&1 &
     echo "    PID: $!"
 }
