@@ -309,6 +309,32 @@ impl TickPipeline {
         self.intent_processor.set_fee_rate(rate);
     }
 
+    /// PNL-4: Derive live regime label from indicator snapshot.
+    /// Priority: Hurst regime → ADX strength fallback → "ranging" default.
+    /// Maps to risk_manager regime_multipliers vocabulary
+    /// (trending / ranging / volatile / squeeze).
+    /// PNL-4：從指標快照推導實時 regime 標籤。優先級：Hurst → ADX → 默認 ranging。
+    fn derive_regime(snap: Option<&openclaw_core::indicators::IndicatorSnapshot>) -> String {
+        if let Some(ind) = snap {
+            // Hurst takes precedence — strongest signal of mean-reverting vs trending.
+            if let Some(ref h) = ind.hurst {
+                match h.regime.as_str() {
+                    "trending" => return "trending".into(),
+                    "mean_reverting" => return "ranging".into(),
+                    // random_walk → fall through to ADX
+                    _ => {}
+                }
+            }
+            // ADX fallback: classic >25 trending threshold.
+            if let Some(ref a) = ind.adx {
+                if a.adx >= 25.0 {
+                    return "trending".into();
+                }
+            }
+        }
+        "ranging".into()
+    }
+
     /// Set instrument info cache for exchange precision rounding (R-05).
     /// 設定合約信息緩存，用於交易所精度取整。
     pub fn set_instrument_cache(&mut self, cache: Arc<InstrumentInfoCache>) {
@@ -1080,12 +1106,15 @@ impl TickPipeline {
             let holding_hours = (event.ts_ms.saturating_sub(*entry_ts_ms)) as f64 / 3_600_000.0;
             let atr_pct = self.price_tracker.compute_atr_pct(symbol);
             let consec = self.consecutive_losses.get(symbol).copied().unwrap_or(0);
+            // PNL-4: Pull live regime from Hurst (preferred) or ADX fallback.
+            // PNL-4：從 Hurst（首選）或 ADX 退回讀取實時 regime，取代硬編碼 "ranging"。
+            let regime = Self::derive_regime(self.latest_indicators.get(symbol));
             let action = check_position_on_tick(
                 *pnl_pct,
                 *peak_pnl_pct,
                 holding_hours,
-                0.0,       // cost_ratio — placeholder, Phase D wiring
-                "ranging", // regime — placeholder, Phase D wiring
+                0.0,     // cost_ratio — placeholder, Phase D wiring
+                &regime, // PNL-4: live regime from Hurst/ADX
                 atr_pct,
                 symbol,
                 *entry_ts_ms,
@@ -1697,6 +1726,33 @@ mod tests {
         assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
         pipeline.on_tick(&make_event("BTCUSDT", 50_001.0, 1_010_000));
         assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_hurst_priority() {
+        use openclaw_core::indicators::{HurstResult, IndicatorSnapshot};
+        let mut ind = IndicatorSnapshot::default();
+        ind.hurst = Some(HurstResult { hurst: 0.7, regime: "trending".into() });
+        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "trending");
+        ind.hurst = Some(HurstResult { hurst: 0.3, regime: "mean_reverting".into() });
+        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "ranging");
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_adx_fallback() {
+        use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let mut ind = IndicatorSnapshot::default();
+        // Hurst random_walk → fall through to ADX
+        ind.hurst = Some(HurstResult { hurst: 0.5, regime: "random_walk".into() });
+        ind.adx = Some(AdxResult { adx: 30.0, plus_di: 25.0, minus_di: 10.0 });
+        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "trending");
+        ind.adx = Some(AdxResult { adx: 15.0, plus_di: 10.0, minus_di: 12.0 });
+        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "ranging");
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_none_default() {
+        assert_eq!(TickPipeline::derive_regime(None), "ranging");
     }
 
     #[test]
