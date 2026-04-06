@@ -24,7 +24,6 @@ from .paper_trading_engine import (
     PaperStateStore,
     PaperTradingEngine,
 )
-from .market_data_dispatcher import MarketDataDispatcher
 from .shadow_decision_builder import (
     ShadowDecisionConsumer,
     ShadowDecisionFileFeeder,
@@ -459,10 +458,6 @@ import sys as _sys_ref
 _current_module = _sys_ref.modules[__name__]
 _current_module._GOVERNANCE_HUB = GOV_HUB
 
-# Market data dispatcher (lazy-initialized on first start)
-# 行情分发器（首次启动时延迟初始化）
-DISPATCHER: MarketDataDispatcher | None = None
-
 # Shadow decision consumer (lazy-initialized with engine)
 # 影子决策消费器（与引擎延迟初始化）
 SHADOW_CONSUMER: ShadowDecisionConsumer | None = None
@@ -488,7 +483,6 @@ __all__ = [
     "WEBHOOK_ALERTER",
     "ALERT_ROUTER",
     "LEARNING_TIER_GATE",
-    "DISPATCHER",
     "SHADOW_CONSUMER",
     "_ttl_enforcement_failures",
 ]

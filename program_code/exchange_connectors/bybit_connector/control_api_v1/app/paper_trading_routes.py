@@ -37,7 +37,6 @@ from .paper_trading_engine import (
     PaperStateStore,
     PaperTradingEngine,
 )
-from .market_data_dispatcher import MarketDataDispatcher
 from .shadow_decision_builder import (
     ShadowDecisionConsumer,
     ShadowDecisionFileFeeder,
@@ -69,14 +68,9 @@ from .paper_trading_wiring import (  # noqa: F811 — explicit re-exports for ty
     SCANNER_RATE_LIMITER,
     TELEGRAM_ALERTER,
     LEARNING_TIER_GATE,
-    DISPATCHER,
     SHADOW_CONSUMER,
 )
 
-# Mutable globals — must be defined in THIS module (not in wiring) because
-# route handlers use `global DISPATCHER` to rebind them at runtime.
-# 可變全局變量 — 必須在本模組定義（而非 wiring），因為路由處理器使用 global 重綁定。
-DISPATCHER: MarketDataDispatcher | None = None
 SHADOW_CONSUMER: ShadowDecisionConsumer | None = None
 
 # ═══════════════════════════════════════════════════════════════════════════════
