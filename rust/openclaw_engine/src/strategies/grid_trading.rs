@@ -84,6 +84,28 @@ impl StrategyParams for GridTradingParams {
     }
 }
 use crate::tick_pipeline::TickContext;
+use openclaw_core::indicators::IndicatorSnapshot;
+
+/// Dynamic grid confidence: ranging regime + narrow BB → high; trending → low.
+/// 動態網格信心：ranging regime + 窄 BB → 高；trending → 低。
+fn compute_grid_confidence(snap: &Option<IndicatorSnapshot>) -> f64 {
+    let base = 0.5_f64;
+    let Some(ind) = snap.as_ref() else {
+        return base;
+    };
+    let regime_bonus = match ind.hurst.as_ref().map(|h| h.regime.as_str()) {
+        Some("mean_reverting") => 0.20,
+        Some("random_walk") => 0.05,
+        Some("trending") => -0.20,
+        _ => 0.0,
+    };
+    let bw_bonus = match ind.bollinger.as_ref() {
+        Some(b) if b.bandwidth < 0.02 => 0.10,
+        Some(b) if b.bandwidth > 0.05 => -0.10,
+        _ => 0.0,
+    };
+    (base + regime_bonus + bw_bonus).clamp(0.2, 0.85)
+}
 
 const DEFAULT_GRID_COUNT: usize = 10;
 /// Large default qty — intent_processor P1 sizing will cap to actual risk budget.
@@ -544,6 +566,10 @@ impl Strategy for GridTrading {
 
         let mut intents = Vec::new();
 
+        // Dynamic confidence: grid thrives in ranging + narrow BB, suffers in trending.
+        // 動態信心：grid 在 ranging + 窄 BB 中表現好，trending 中表現差。
+        let conf = compute_grid_confidence(&ctx.indicators);
+
         if idx < prev_idx {
             // Price crossed down → buy (intent_processor handles position/sizing)
             // 價格下穿 → 買入（intent_processor 處理倉位/sizing）
@@ -551,7 +577,7 @@ impl Strategy for GridTrading {
                 symbol: ctx.symbol.clone(),
                 is_long: true,
                 qty: self.qty_per_grid,
-                confidence: 0.5,
+                confidence: conf,
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,
@@ -560,12 +586,12 @@ impl Strategy for GridTrading {
             self.last_trade_ms = ctx.timestamp_ms;
         } else if idx > prev_idx {
             // Price crossed up → sell (may close existing long — Gate 1.5 allows opposite)
-            // 價格上穿 → 賣出（可能平多倉 — Gate 1.5 允許反向）
+            // 價格上穿 → 賣出（may close existing long — Gate 1.5 allows opposite）
             intents.push(OrderIntent {
                 symbol: ctx.symbol.clone(),
                 is_long: false,
                 qty: self.qty_per_grid,
-                confidence: 0.5,
+                confidence: conf,
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,

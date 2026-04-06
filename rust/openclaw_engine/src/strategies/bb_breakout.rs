@@ -324,11 +324,16 @@ impl Strategy for BbBreakout {
                 // Original exit: %B returns to mid-band or bandwidth squeezes again
                 // 原有出場：%B 回到中間帶或帶寬再次壓縮
                 if !should_exit {
-                    if (bb.percent_b >= 0.2 && bb.percent_b <= 0.8)
-                        || bb.bandwidth < self.squeeze_bw
-                    {
+                    if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
+                        // %B revert to mid: textbook breakout failure → moderate confidence
+                        // %B 回中軌：教科書突破失敗 → 中等信心
                         should_exit = true;
-                        exit_confidence = 0.5;
+                        exit_confidence = 0.55;
+                    } else if bb.bandwidth < self.squeeze_bw {
+                        // Bandwidth squeeze: weaker signal (vol collapse, not directional)
+                        // 帶寬壓縮：較弱信號（波動塌陷，非方向性）
+                        should_exit = true;
+                        exit_confidence = 0.45;
                     }
                 }
 

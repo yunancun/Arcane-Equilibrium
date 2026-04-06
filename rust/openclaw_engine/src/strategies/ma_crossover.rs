@@ -209,6 +209,29 @@ impl MaCrossover {
         self.higher_tf_trend = Some(sma_50 > new_val);
     }
 
+    /// Dynamic confidence: ADX excess + Hurst regime fit.
+    /// 動態信心：ADX 超額 + Hurst regime 契合度。
+    /// trending regime + 高 ADX → 高 conf；mean_reverting regime → 懲罰。
+    fn compute_entry_confidence(&self, adx: f64, regime: Option<&str>) -> f64 {
+        let base = 0.45;
+        // adx_threshold default 25 → bonus from 0 at threshold to +0.25 at adx=50
+        let adx_bonus = ((adx - self.adx_threshold).max(0.0) / 100.0).min(0.25);
+        let regime_bonus = match regime {
+            Some("trending") => 0.15,
+            Some("mean_reverting") => -0.15,
+            _ => 0.0,
+        };
+        (base + adx_bonus + regime_bonus).clamp(0.2, 0.9)
+    }
+
+    /// Exit confidence: cross-back is a real signal but weaker than fresh entry.
+    /// 出場信心：反向交叉是真信號但弱於新入場。
+    fn compute_exit_confidence(&self, adx: f64) -> f64 {
+        let base = 0.5;
+        let adx_bonus = ((adx - self.adx_threshold).max(0.0) / 100.0).min(0.2);
+        (base + adx_bonus).clamp(0.4, 0.8)
+    }
+
     /// RC-02: Check if higher-TF trend aligns with the proposed entry direction.
     /// RC-02: 檢查較高時間框架趨勢是否與擬入場方向一致。
     fn higher_tf_allows_entry(&self, is_long: bool) -> bool {
@@ -288,18 +311,20 @@ impl Strategy for MaCrossover {
                     return vec![];
                 }
 
+                let regime = ind.hurst.as_ref().map(|h| h.regime.as_str());
+                let entry_conf = self.compute_entry_confidence(adx, regime);
                 if fast > slow {
                     if !self.higher_tf_allows_entry(true) {
                         return vec![];
                     }
-                    intents.push(self.make_intent(ctx, true, 0.6));
+                    intents.push(self.make_intent(ctx, true, entry_conf));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if fast < slow {
                     if !self.higher_tf_allows_entry(false) {
                         return vec![];
                     }
-                    intents.push(self.make_intent(ctx, false, 0.6));
+                    intents.push(self.make_intent(ctx, false, entry_conf));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
@@ -307,12 +332,13 @@ impl Strategy for MaCrossover {
             Some(is_long) => {
                 // Exit path — RC-01/RC-02 filters do NOT apply to exits.
                 // 出場路徑 — RC-01/RC-02 過濾不適用於出場。
+                let exit_conf = self.compute_exit_confidence(adx);
                 if is_long && fast < slow {
-                    intents.push(self.make_intent(ctx, false, 0.5));
+                    intents.push(self.make_intent(ctx, false, exit_conf));
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if !is_long && fast > slow {
-                    intents.push(self.make_intent(ctx, true, 0.5));
+                    intents.push(self.make_intent(ctx, true, exit_conf));
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
