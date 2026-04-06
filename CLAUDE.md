@@ -46,7 +46,16 @@
 
 ## 三、當前系統狀態摘要
 
-### ★ Phase 4 準備就緒（2026-04-06）
+### ★★★★ Phase 4 CODE-COMPLETE（2026-04-07 · commit `435930f` · 4-21 audit CONDITIONAL APPROVE）
+**22 子任務 (4-00~4-21) 全部 committed**。6 角色審計：E2/E4/E5/QA/PM APPROVE · AI-E CONDITIONAL（等 4.1 Claude API loop）。
+測試：engine lib **441 → 589 (+148)** · phase4_integration 3/3 · phase4 routes 24 → 29 · 0 regression。
+V009/V010/V011/V012/V013 migrations 全 apply live（V011 在 4-11 子任務執行時 apply）。
+Live binary 確認 6 個 Phase 4 模組啟動：BudgetTracker / LinUcbRuntime v1_15 (feature_schema_hash=sha256:023787b8140331ee) / NewsContextSnapshot / governance+guardian shared halted atomic / TickPipeline 接通 LinUCB + news snapshot。
+**Live 前 3 個 blocker**：(1) E3 Security Audit R6 Teacher hard-boundary veto (1.5d) · (2) 4.1 Claude API Consumer Loop DirectiveApplier live invoker (2d) · (3) 7+ days paper trading 數據累積（DoD A/C/E 量測觀察期）。
+**P2 post-merge follow-up**：tick_pipeline.rs 2211 行超 §九 硬上限（1200），split LinUCB + decision context producer 到獨立模組（~1d）。
+審計報告：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`。
+
+### ★ Phase 4 準備就緒（2026-04-06 · 歷史紀錄）
 - **V009 已 apply**：`learning.linucb_state` 新建 + `decision_context_snapshots` 三個 Phase 4 連結欄位（claude_directive_id / linucb_arm_id / linucb_confidence_bound）。Phase 4 規格原列 8 表，7 表已存在於 V001-V007。
 - **22 子任務已拆解**：`docs/references/2026-04-06--phase4_execution_plan_v2.md`（4-00~4-21，43 person-days，5 路並行 wall-clock 15d）。TODO.md Phase 4 段已替換高階描述為可勾選清單。
 - **Q1 — AI Budget**：本地 $100/月（GUI 可調），平台硬上限 $150/月（手動 console 設）；per-agent Teacher $60 / Analyst $30 / Reserve $10；fail-closed 三段降級 $80→$95→$100；tracker 在 Rust 側（4-15）；GUI Risk-tab 新增區塊（4-16）；新表 ai_budget_config + ai_usage_log 走 V010。
@@ -481,4 +490,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-06：engine 531 + ml_training 35+ · **Session 14：WP backlog 稽核(223→103) + WP-G/BB/I/F 全清 + GUI no-cache + 風控輸入框回彈修正 + WP-ARCH-RC1 雙風控系統登記 + Phase 4 Wave 0+1 啟動 (4-00/4-01/4-04/4-07/4-11/4-15/4-17 7/22 子任務已交付)** · 下一步：Phase 4 W2 wiring（GovernanceHub veto / IPC handlers / main.rs Arc）或 WP-B SEC-05/08。
+> 截至 2026-04-07：engine lib **589** (+148 vs Phase 4 baseline 441) · phase4_integration 3/3 · phase4 routes 29 · ml_training +多模組 · **Phase 4 CODE-COMPLETE** (22/22 子任務 4-00~4-21 committed `435930f`) · 4-21 多角色 audit CONDITIONAL APPROVE · **Live 前 blocker 3 項**：E3 R6 audit / 4.1 Claude API consumer loop / 7d paper trading 數據觀察期 · 下一步：E3 R6 審計 + 4.1 實作 或 WP-ARCH-RC1 雙風控統一（5 項 live-prep 必修）。
