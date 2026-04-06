@@ -1,0 +1,47 @@
+<!--
+  Phase 4 shared dashboard card partial / Phase 4 共用儀表板 Card 模板
+  ------------------------------------------------------------------
+  This file is a shared HTML fragment (the static-GUI equivalent of a Jinja
+  include). Each Phase 4 sub-task (4-02, 4-07, 4-12, 4-17 ...) can copy this
+  block as the base for its own concrete card, swapping the title / metrics /
+  footer slots while keeping the phase4-card-* CSS contract uniform.
+
+  本檔為共用 HTML 片段（靜態 GUI 中的 Jinja include 等價物）。每個 Phase 4
+  子任務（4-02 / 4-07 / 4-12 / 4-17 ...）可將此區塊複製為自身具體 card 的
+  起點，替換 title / metrics / footer 插槽，同時保持 phase4-card-* CSS
+  契約一致。
+
+  Slots / 插槽：
+    - data-card-id      : unique DOM id (e.g. phase4-card-teacher)
+    - .phase4-card-title: bilingual title / 雙語標題
+    - .phase4-card-status .phase4-light-dot.{grey|green|yellow|red}
+                         : traffic-light pill / 紅黃綠燈膠囊
+    - .phase4-card-metrics: metrics grid (key/value tiles) / 指標格
+    - .phase4-card-footer : action buttons / 動作按鈕
+
+  Status vocabulary / 狀態詞彙：grey | green | yellow | red
+  CSS class prefix / CSS class 前綴：phase4-card-
+
+  CSS classes are defined in tab-phase4.html and are intentionally namespaced
+  with the `phase4-card-` prefix to avoid colliding with existing oc-card
+  styles in styles.css.
+  CSS class 定義於 tab-phase4.html，刻意以 `phase4-card-` 為前綴命名以避免
+  與 styles.css 中既有的 oc-card 樣式衝突。
+-->
+<div class="phase4-card" data-card-id="phase4-card-__MODULE__" data-module="__MODULE__">
+  <div class="phase4-card-header">
+    <h3 class="phase4-card-title">__TITLE_CN__ / __TITLE_EN__</h3>
+    <span class="phase4-card-status">
+      <span class="phase4-light-dot grey"></span>
+      <span class="phase4-card-status-text">not started / 未启动</span>
+    </span>
+  </div>
+
+  <div class="phase4-card-metrics">
+    <!-- Per-card metric tiles go here / 每張 card 的指標格 -->
+  </div>
+
+  <div class="phase4-card-footer">
+    <!-- Per-card action buttons go here / 每張 card 的動作按鈕 -->
+  </div>
+</div>

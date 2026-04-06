@@ -76,14 +76,20 @@
     <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')">
       <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span> 模拟交易 Paper
     </button>
-    <button class="qa-btn" id="qa-demo" onclick="confirmAction('demo')">
-      <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span> Bybit Demo
+    <!-- WP-F/D-03: Demo has no start/stop API (Rust engine manages Bybit WS); show status only
+         WP-F/AH-04: removed toggle-style dot to avoid visual deception — status indicator only -->
+    <button class="qa-btn" id="qa-demo" disabled title="Bybit Demo 连接状态由 Rust 引擎管理 — 无法从 GUI 直接开关 / Managed by Rust engine, no GUI toggle available" style="opacity:0.55;cursor:not-allowed">
+      <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span> Bybit Demo <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
     </button>
-    <button class="qa-btn" id="qa-feed" onclick="confirmAction('feed')">
-      <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span> 行情流 Feed
+    <!-- WP-F/D-02: Market feed start/stop API is disabled (RC-12); Rust engine is sole WS owner
+         WP-F/AH-04: removed toggle affordance — this button no longer implies toggle control -->
+    <button class="qa-btn" id="qa-feed" disabled title="行情流由 Rust 引擎自动管理（RC-12） — 无法从 GUI 开关 / Auto-managed by Rust engine (RC-12)" style="opacity:0.55;cursor:not-allowed">
+      <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span> 行情流 Feed <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
     </button>
-    <button class="qa-btn" id="qa-scanner" onclick="confirmAction('scanner')">
-      <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner
+    <!-- WP-F/D-04: Scanner has no start/stop API endpoint; redirect to Strategy tab for management
+         WP-F/AH-04: disabled to prevent no-op click confusion -->
+    <button class="qa-btn" id="qa-scanner" disabled title="扫描器在「策略中心」Tab 管理，此处仅显示运行状态 / Manage scanner in Strategy tab" style="opacity:0.55;cursor:not-allowed">
+      <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
     </button>
   </div>
 </div>

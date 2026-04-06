@@ -32,14 +32,19 @@
       <h1>OpenClaw / Bybit Control Center</h1>
       <p>RC2 control console · runtime-aware GUI / 已接入 runtime-aware bridge</p>
     </div>
-    <div class="token-panel">
+    <!-- WP-F/D-07: Legacy Bearer Token panel — hidden because auth now uses HttpOnly cookie
+         via /api/v1/auth/check (APR01-MEDIUM-13). tokenInput / connectButton are no-ops.
+         Only the Logout button is kept functional; moved out of the hidden div below. -->
+    <div class="token-panel" style="display:none" aria-hidden="true">
       <label for="tokenInput">Bearer Token</label>
       <div class="token-row">
         <input id="tokenInput" type="password" placeholder="Auto-filled from login" />
         <button id="connectButton">连接 / Connect</button>
-        <button onclick="fetch('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
       </div>
       <div id="connectionStatus" class="status-chip neutral">未连接 / Disconnected</div>
+    </div>
+    <div class="token-panel">
+      <button onclick="fetch('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
     </div>
   </header>
 
