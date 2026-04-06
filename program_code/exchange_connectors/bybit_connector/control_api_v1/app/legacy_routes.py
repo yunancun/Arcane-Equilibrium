@@ -426,21 +426,27 @@ def register_legacy_routes(app) -> None:
         return RedirectResponse(url="/console")
 
 
+    _NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/gui", include_in_schema=False)
     def gui_index() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
+        return FileResponse(static_dir / "index.html", headers=_NO_CACHE_HEADERS)
 
 
     @app.get("/console", include_in_schema=False)
     def console_index() -> FileResponse:
         """Unified console: Trading Dashboard + OpenClaw + AI Cost sidebar"""
-        return FileResponse(static_dir / "console.html")
+        return FileResponse(static_dir / "console.html", headers=_NO_CACHE_HEADERS)
 
 
     @app.get("/trading", include_in_schema=False)
     def trading_dashboard() -> FileResponse:
         """Trading chart dashboard: TradingView Lightweight Charts + signals + strategies"""
-        return FileResponse(static_dir / "trading.html")
+        return FileResponse(static_dir / "trading.html", headers=_NO_CACHE_HEADERS)
 
 
     @app.get(f"{settings.api_prefix}/system/overview", response_model=ResponseEnvelope[OverviewData])
