@@ -376,6 +376,40 @@ impl TickPipeline {
         self.context_throttled
     }
 
+    /// DB-RUN-3: Emit a TradingMsg::Fill row for a stop/risk-driven close so
+    /// trading.fills records the realized PnL. Strategy is "risk_close" since
+    /// these closes are not signal-driven. Counter on stats.total_fills.
+    /// DB-RUN-3：為止損/風控平倉發送 Fill 訊息，使 trading.fills 記錄已實現損益。
+    fn emit_close_fill(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        price: f64,
+        ts_ms: u64,
+        realized_pnl: f64,
+        reason: &str,
+    ) {
+        if let Some(ref tx) = self.trading_tx {
+            // Fill side reflects the closing direction (opposite of position side).
+            let close_side = if is_long { "Sell" } else { "Buy" };
+            let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                fill_id: format!("close-{}-{}", symbol, ts_ms),
+                ts_ms,
+                order_id: format!("risk_close_{}_{}", symbol, ts_ms),
+                symbol: symbol.to_string(),
+                side: close_side.into(),
+                qty,
+                price,
+                fee: 0.0, // close fees accrued by paper_state separately
+                realized_pnl,
+                strategy_name: format!("risk_close:{reason}"),
+                context_id: format!("ctx-{}-{}", symbol, ts_ms),
+            });
+        }
+        self.stats.total_fills += 1;
+    }
+
     /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
     /// Persist if (a) direction differs from last persisted for the same
     /// (symbol, strategy) key, OR (b) heartbeat interval has elapsed.
@@ -650,8 +684,18 @@ impl TickPipeline {
                 .map(|p| p.symbol.clone())
                 .collect();
             for sym in symbols {
-                self.paper_state
-                    .close_position(&sym, event.last_price, event.ts_ms);
+                let pos_info = self
+                    .paper_state
+                    .get_position(&sym)
+                    .map(|p| (p.is_long, p.qty));
+                if let Some(pnl) = self
+                    .paper_state
+                    .close_position(&sym, event.last_price, event.ts_ms)
+                {
+                    if let Some((il, q)) = pos_info {
+                        self.emit_close_fill(&sym, il, q, event.last_price, event.ts_ms, pnl, "fast_track");
+                    }
+                }
                 self.stats.total_stops += 1;
             }
             // Measure elapsed time for fast-track exit / 計算快速通道退出的耗時
@@ -667,9 +711,19 @@ impl TickPipeline {
             // Hard block: stops only / 硬阻斷：僅處理止損
             warn!(symbol = %event.symbol, reason = %h0_result.reason,
                 "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
-            for (sym, _) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
-                self.paper_state
-                    .close_position(sym, event.last_price, event.ts_ms);
+            for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
+                let pos_info = self
+                    .paper_state
+                    .get_position(sym)
+                    .map(|p| (p.is_long, p.qty));
+                if let Some(pnl) = self
+                    .paper_state
+                    .close_position(sym, event.last_price, event.ts_ms)
+                {
+                    if let Some((il, q)) = pos_info {
+                        self.emit_close_fill(sym, il, q, event.last_price, event.ts_ms, pnl, &trigger.reason);
+                    }
+                }
                 self.stats.total_stops += 1;
             }
             let dur = tick_start.elapsed().as_micros() as u64;
@@ -743,8 +797,14 @@ impl TickPipeline {
                     .get_position(sym)
                     .map(|p| (p.is_long, p.qty));
                 debug!(symbol = %sym, reason = %trigger.reason, "stop (paused)");
-                self.paper_state
-                    .close_position(sym, event.last_price, event.ts_ms);
+                if let Some(pnl) = self
+                    .paper_state
+                    .close_position(sym, event.last_price, event.ts_ms)
+                {
+                    if let Some((il, q)) = pos_info {
+                        self.emit_close_fill(sym, il, q, event.last_price, event.ts_ms, pnl, &trigger.reason);
+                    }
+                }
                 self.stats.total_stops += 1;
                 if let Some((is_long, qty)) = pos_info {
                     self.dispatch_close_order(sym, is_long, qty, event, false);
@@ -1247,8 +1307,12 @@ impl TickPipeline {
                         } else {
                             self.consecutive_losses.remove(symbol);
                         }
-                        self.paper_state
-                            .close_position(symbol, event.last_price, event.ts_ms);
+                        if let Some(pnl) = self
+                            .paper_state
+                            .close_position(symbol, event.last_price, event.ts_ms)
+                        {
+                            self.emit_close_fill(symbol, *is_long, *qty, event.last_price, event.ts_ms, pnl, &reason);
+                        }
                         self.stats.total_stops += 1;
                         self.dispatch_close_order(symbol, *is_long, *qty, event, false);
                     }
@@ -1274,7 +1338,11 @@ impl TickPipeline {
                             .get(sym)
                             .copied()
                             .unwrap_or(event.last_price);
-                        self.paper_state.close_position(sym, px, event.ts_ms);
+                        if let Some(pnl) =
+                            self.paper_state.close_position(sym, px, event.ts_ms)
+                        {
+                            self.emit_close_fill(sym, *il, *q, px, event.ts_ms, pnl, "halt_session");
+                        }
                         self.stats.total_stops += 1;
                         self.dispatch_close_order(sym, *il, *q, event, is_exchange_mode);
                     }
@@ -1888,6 +1956,26 @@ mod tests {
             assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, ts)));
         }
         assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun3_close_position_returns_pnl() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        // Open long at 50k, close at 51k → +0.1 * 1000 = +$100 realized
+        p.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+        let pnl = p.paper_state.close_position("BTCUSDT", 51_000.0, 1_000);
+        assert_eq!(pnl, Some(100.0));
+        // Subsequent close on same symbol → None
+        let none = p.paper_state.close_position("BTCUSDT", 52_000.0, 2_000);
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn test_dbrun3_emit_close_fill_increments_stats() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        let before = p.stats.total_fills;
+        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "test");
+        assert_eq!(p.stats.total_fills, before + 1);
     }
 
     #[test]
