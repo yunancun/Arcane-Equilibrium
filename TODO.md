@@ -133,6 +133,21 @@ P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 - [ ] WP-E4/T-Q3/Q4/Q7/Q8 覆蓋品質（error-path / 並發 / smoke / PyO3）
 - [ ] WP-E4/T-I1~I4 測試基礎設施（tarpaulin / CI 門禁 / 文檔）
 
+#### WP-ARCH-RC1 — 雙風控系統統一（P1，live 前必修）
+**現狀**：Python `RiskManager`（`risk_routes.py`）和 Rust engine 各自維護一份風控 config，
+IPC 推送是 fire-and-forget，失敗不報錯，兩者隨時可能不同步。
+Rust 是唯一實際執行引擎，Python RM 只是 GUI 的儲存層（技術債）。
+
+**目標方案**：Rust 成為唯一 config authority
+- [ ] RC1-1 Rust `update_risk_config` IPC 擴展：接受完整 GlobalConfig，更新後回寫 `operator_risk_config.json`（Rust 側，原子寫入）
+- [ ] RC1-2 GUI save 路由改為 async，直接 await IPC → Rust；Rust 確認後再回 200
+- [ ] RC1-3 GET `/risk/config` 改為從 Rust snapshot 讀（不再讀 Python RM file）
+- [ ] RC1-4 Python `RiskManager` 降級為啟動時單次讀取 + 只讀快取，GUI 不再寫入 Python RM
+- [ ] RC1-5 E2 + E4 + E3 審計（風控路徑修改強制安全審計）
+
+> 背景：2026-04-06 發現代理未授權修改 operator_risk_config.json 後，GUI 值跳回問題暴露
+> 此雙系統問題。修乾淨前維持現狀（Python RM 為輸入框真相源，`f3106d8`）。
+
 #### WP-B+CC — 安全/合規（12 項仍存在，原 20）
 - [ ] WP-B/SEC-05 GUI innerHTML XSS（架構性，136 處，live 前必修）
 - [ ] WP-B/SEC-08 IPC socket 無認證（P1）
