@@ -694,3 +694,24 @@ Source: `audit_MIT_database_ml_report.md`
 > Note: AI-E contributed 0 new items (already covered by I-19/I-20/I-23 in §3). Grand total 223 sub-items > original ~170 estimate because several clusters (R4 worklogs, TW duplicates, QC low-risk HCs) were expanded to full granularity rather than folded.
 
 *End of §10 sub-checklists. Generated 2026-04-06 by PA follow-up pass for full audit traceability.*
+
+---
+
+## §11 Idle Writer Investigation (2026-04-06)
+
+Follow-up to I-07 DDL verification: 6 writers exist in code but have 0 rows in prod.
+
+| # | Writer | Target | Root Cause | Fix |
+|---|---|---|---|---|
+| 1 | market_writer | `market.ob_snapshots` | Producer never constructs `OrderbookSnapshot` msg (consumer fully wired) | M — add constructor in ws_client orderbook path |
+| 2 | market_writer | `market.trade_agg_1m` | No TradeAggregator module; nobody builds `TradeAgg1m` | M — add aggregator keyed by (symbol, minute) flushing on rollover |
+| 3 | market_writer | `market.liquidations` | Upstream WS topic removed (`liquidation.SYMBOL` returns "handler not found", poisons connection) | S — use correct V5 topic `allLiquidation.SYMBOL` or add REST fallback |
+| 4 | trading_writer | `trading.position_snapshots` | No periodic "sample positions → send TradingMsg::PositionSnapshot" emitter | XS — add 1s timer in tick_pipeline iterating paper_state.positions |
+| 5 | drift_detector | `observability.drift_events` | `run_drift_detector` loop is stub with `TODO(G3-full)` — never reads features or calls `write_drift_event` | L — implement PSI/ADWIN pipeline against features.online_latest + baselines |
+| 6 | quality_writer | `observability.data_quality_events` | Single global stale-check gate (`last > 0 && now-last > 30s`) never fires in steady state; no per-symbol checks | S — per-symbol last_tick map + NaN/crossed-spread/gap inline checks |
+
+**Common theme:** Writers 1-4 share the pattern "consumer wired, producer unwritten". Writer 5 is an explicit stub. Writer 6 has an over-restrictive gate. None gated by feature flag — all ship enabled but starved.
+
+**Batch classification:** Fix #4 (XS) → R0 tail. Fix #3 #6 (S) → R1. Fix #1 #2 (M) → R2. Fix #5 (L) → R2/R3.
+
+**Files:** market_writer.rs, trading_writer.rs, drift_detector.rs (L247-278), quality_writer.rs (L49-59), multi_interval_ws.rs (L160-162 liquidation removed), main.rs (L786-876 writer spawn sites).
