@@ -18,6 +18,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
+use super::pricing::{self, PricingTable};
 use super::{config_io, usage_io};
 
 // ---------------------------------------------------------------------------
@@ -47,50 +48,18 @@ pub const KNOWN_SCOPES: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// Pricing placeholder / 定價占位
+// Pricing — loaded from settings/ai_pricing.yaml (4-17 / FA GAP-10).
+// 定價 — 從 settings/ai_pricing.yaml 載入。
 // ---------------------------------------------------------------------------
 //
-// 4-17 NOTE: this hardcoded const map will be replaced by a DB-backed
-// `learning.ai_provider_pricing` table loaded at boot + hot-reloaded.
-// Until then we ship a minimal set so 4-01 Teacher integration can plumb
-// real cost numbers without blocking on the pricing sub-task.
+// As of 4-17 the pricing table is YAML-loaded into a `PricingTable` and
+// injected into BudgetTracker. The previous hardcoded const map is removed.
+// Fail-closed: BudgetTracker::new returns Err if the YAML cannot be loaded.
+// Lookups for unknown OR inactive models still return Err to upstream callers.
 //
-// 4-17 提示：此硬編碼 const map 將由 4-17 任務替換為 DB 表
-// `learning.ai_provider_pricing`。在此之前提供最小集合，使 4-01 Teacher
-// 整合可在不被 pricing 任務阻塞的情況下接入真實成本數字。
-
-/// Returns (input_per_mtok_usd, output_per_mtok_usd) for a known model.
-/// 返回已知模型的（每百萬 input token 美元, 每百萬 output token 美元）。
-fn pricing_for(model: &str) -> Option<(f64, f64)> {
-    match model {
-        // Anthropic
-        "claude-sonnet-4-5" => Some((3.0, 15.0)),
-        "claude-opus-4" => Some((15.0, 75.0)),
-        "claude-haiku-4" => Some((0.80, 4.0)),
-        // OpenAI
-        "gpt-4o" => Some((2.5, 10.0)),
-        "gpt-4o-mini" => Some((0.15, 0.60)),
-        // Local (zero-cost — Principle #14)
-        "qwen-3.5-9b" => Some((0.0, 0.0)),
-        "qwen-3.5-27b" => Some((0.0, 0.0)),
-        _ => None,
-    }
-}
-
-/// Compute USD cost for a given model + token counts.
-/// 計算指定模型 + token 數的美元成本。
-///
-/// Returns Err if the model is unknown — fail-closed: an unknown model means
-/// we cannot prove the cost is within budget, so we refuse the call upstream.
-/// 模型未知時返回 Err — fail-closed：未知模型意味著無法證明成本在預算內，
-/// 上游必須拒絕該調用。
-pub fn compute_cost_usd(model: &str, tokens_in: u32, tokens_out: u32) -> Result<f64, String> {
-    let (in_rate, out_rate) =
-        pricing_for(model).ok_or_else(|| format!("unknown model pricing: {model}"))?;
-    let cost = (tokens_in as f64) * in_rate / 1_000_000.0
-        + (tokens_out as f64) * out_rate / 1_000_000.0;
-    Ok(cost)
-}
+// 4-17 起，定價表透過 YAML 載入為 `PricingTable` 並注入 BudgetTracker。
+// 之前的硬編碼 const map 已移除。fail-closed：YAML 載入失敗時 BudgetTracker::new
+// 返回 Err。未知或 inactive 模型對 caller 仍返回 Err。
 
 // ---------------------------------------------------------------------------
 // Budget config + degrade level / 預算配置 + 降級等級
@@ -201,6 +170,9 @@ pub struct BudgetTracker {
     /// Month-to-date usage snapshot.
     /// 月內已用快照。
     usage_cache: Arc<RwLock<UsageCache>>,
+    /// Pricing table loaded from settings/ai_pricing.yaml at boot (4-17).
+    /// 啟動時從 settings/ai_pricing.yaml 載入的定價表（4-17）。
+    pricing: Arc<PricingTable>,
     /// Last config refresh wall-clock millis (atomic for lock-free reads).
     /// 上次配置刷新的牆鐘毫秒（原子，便於無鎖讀取）。
     last_config_refresh_ms: AtomicU64,
@@ -212,6 +184,17 @@ impl BudgetTracker {
     /// 構建新 BudgetTracker；若 pool 可用則從 PG 載入 config + MTD 用量。
     /// PG 不可用時回退到內存預設（冷啟動安全）。
     pub async fn new(pool: Arc<DbPool>) -> Result<Self, String> {
+        // 4-17: load pricing table fail-closed.
+        // 4-17：載入定價表 fail-closed。
+        let pricing_table = pricing::load_default()
+            .map_err(|e| format!("BudgetTracker: pricing load failed (4-17 fail-closed): {e}"))?;
+        info!(
+            active_models = pricing_table.active_count(),
+            total_models = pricing_table.total_count(),
+            "BudgetTracker pricing table loaded / 預算追蹤器定價表已載入"
+        );
+        let pricing = Arc::new(pricing_table);
+
         let config = if pool.is_available() {
             match config_io::load_all(&pool).await {
                 Ok(cfg) => cfg,
@@ -258,20 +241,50 @@ impl BudgetTracker {
             pool,
             config_cache: Arc::new(RwLock::new(config)),
             usage_cache: Arc::new(RwLock::new(usage)),
+            pricing,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
         })
     }
 
     /// Test-only constructor with explicit config + zero usage cache.
+    /// Pricing table defaults to a synthetic 1-model table covering claude-sonnet-4-5
+    /// at the canonical $3/$15 rates so existing cost-calculation tests pass without
+    /// touching the filesystem.
     /// 測試專用構造器：顯式 config + 零用量快取。
+    /// 預設定價表為單一模型 claude-sonnet-4-5（$3/$15），讓現有 cost 測試無需動檔案系統。
     #[cfg(test)]
     pub fn new_for_test(pool: Arc<DbPool>, config: BudgetConfig) -> Self {
+        let mut map = HashMap::new();
+        map.insert(
+            "claude-sonnet-4-5".to_string(),
+            super::pricing::ModelPricing {
+                input_per_mtok: 3.0,
+                output_per_mtok: 15.0,
+                active: true,
+            },
+        );
+        let pricing = Arc::new(super::pricing::PricingTable::from_map_for_test(map));
         Self {
             pool,
             config_cache: Arc::new(RwLock::new(config)),
             usage_cache: Arc::new(RwLock::new(UsageCache::default())),
+            pricing,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
         }
+    }
+
+    /// Compute USD cost for a given model + token counts via the loaded pricing table.
+    /// fail-closed: unknown OR inactive model returns Err.
+    /// 透過已載入的定價表計算 USD 成本。fail-closed：未知或 inactive 模型返回 Err。
+    pub fn compute_cost_usd(
+        &self,
+        model: &str,
+        tokens_in: u32,
+        tokens_out: u32,
+    ) -> Result<f64, String> {
+        self.pricing
+            .compute_cost(model, tokens_in, tokens_out)
+            .ok_or_else(|| format!("unknown model pricing: {model}"))
     }
 
     /// Borrow a clone of the underlying DbPool handle (used by IPC handlers
@@ -328,9 +341,9 @@ impl BudgetTracker {
         purpose: &str,
         request_id: &str,
     ) -> Result<f64, String> {
-        // 1) Pricing — fail-closed on unknown model.
-        //    定價 — 未知模型 fail-closed。
-        let cost_usd = compute_cost_usd(model, tokens_in, tokens_out)?;
+        // 1) Pricing — fail-closed on unknown / inactive model (4-17 PricingTable).
+        //    定價 — 未知或 inactive 模型 fail-closed（4-17 PricingTable）。
+        let cost_usd = self.compute_cost_usd(model, tokens_in, tokens_out)?;
 
         // 2) DB write — fail-closed: any error propagates to caller.
         //    DB 寫入 — fail-closed：任何錯誤上拋給 caller。
@@ -495,10 +508,25 @@ mod tests {
         c
     }
 
+    /// Resolve the repo-root settings/ai_pricing.yaml from CARGO_MANIFEST_DIR for tests.
+    /// 從 CARGO_MANIFEST_DIR 解析 repo-root 的 settings/ai_pricing.yaml 給測試用。
+    fn set_test_pricing_path() {
+        // CARGO_MANIFEST_DIR = .../rust/openclaw_engine ; go up 2 to reach repo root.
+        // CARGO_MANIFEST_DIR = .../rust/openclaw_engine ；上溯 2 層到 repo root。
+        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let yaml = manifest
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("settings").join("ai_pricing.yaml"))
+            .expect("repo root resolution");
+        std::env::set_var("OPENCLAW_PRICING_PATH", yaml);
+    }
+
     // Test 1: defaults match V010 INSERT seeds.
     // 測試 1：預設值與 V010 INSERT 種子一致。
     #[tokio::test]
     async fn test_budget_config_load_default() {
+        set_test_pricing_path();
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new(pool).await.unwrap();
         let cfg = tracker.config_cache.read().await.clone();
@@ -554,17 +582,25 @@ mod tests {
     // Test 3: claude-sonnet-4-5 cost calc — 1000 in / 500 out.
     //         expected = 1000 * 3 / 1e6 + 500 * 15 / 1e6 = 0.003 + 0.0075 = 0.0105
     // 測試 3：claude-sonnet-4-5 成本計算。
-    #[test]
-    fn test_record_usage_calculates_cost() {
-        let cost = compute_cost_usd("claude-sonnet-4-5", 1_000, 500).unwrap();
+    #[tokio::test]
+    async fn test_record_usage_calculates_cost() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
+        let cost = tracker
+            .compute_cost_usd("claude-sonnet-4-5", 1_000, 500)
+            .unwrap();
         assert!((cost - 0.0105).abs() < 1e-9, "cost was {cost}");
     }
 
     // Test 3b: unknown model fails closed.
     // 測試 3b：未知模型 fail-closed。
-    #[test]
-    fn test_unknown_model_fails_closed() {
-        let err = compute_cost_usd("nonexistent-model-xyz", 100, 100).unwrap_err();
+    #[tokio::test]
+    async fn test_unknown_model_fails_closed() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults());
+        let err = tracker
+            .compute_cost_usd("nonexistent-model-xyz", 100, 100)
+            .unwrap_err();
         assert!(err.contains("unknown model pricing"));
     }
 
