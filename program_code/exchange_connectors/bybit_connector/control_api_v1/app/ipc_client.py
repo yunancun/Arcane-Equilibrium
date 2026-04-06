@@ -311,6 +311,52 @@ class EngineIPCClient:
         """
         return await self.call("get_phase4_status")
 
+    # ─── Phase 4 (4-15): AI budget tracker / AI 預算追蹤器 ──────────────────────
+
+    async def get_ai_budget_status(self) -> dict[str, Any]:
+        """
+        Get current AI budget status snapshot from the Rust BudgetTracker.
+        從 Rust BudgetTracker 取得當前 AI 預算狀態快照。
+
+        Returns the full status_json (limits, mtd usage, degrade level, refresh ts).
+        If the tracker is uninitialized (DB pool unavailable at boot), fail-soft
+        returns ``{"status": "uninitialized", "reason": ...}`` instead of raising.
+
+        返回完整 status_json（額度、本月用量、降級等級、刷新時戳）。
+        若 tracker 未初始化（啟動時 DB 池不可用），fail-soft 回傳
+        ``{"status": "uninitialized", "reason": ...}`` 而不拋出例外。
+        """
+        return await self.call("get_ai_budget_status")
+
+    async def update_ai_budget_config(
+        self,
+        scope: str,
+        monthly_usd: float,
+        updated_by: str = "operator",
+    ) -> dict[str, Any]:
+        """
+        Upsert one AI budget scope and trigger an in-memory refresh.
+        Upsert 單一 AI 預算 scope 並觸發記憶體刷新。
+
+        :param scope: budget scope name (e.g. ``teacher`` / ``analyst`` / ``reserve``
+            / ``local_total``). 預算 scope 名稱。
+        :param monthly_usd: monthly USD ceiling (>= 0). 月度美元上限（>= 0）。
+        :param updated_by: audit origin tag, defaults to ``"operator"``.
+            審計來源標籤，預設為 ``"operator"``。
+
+        Fail-closed: invalid params raise via the JSON-RPC error path; tracker
+        uninitialized or DB write failure raises an internal error. Successful
+        upsert refreshes the tracker so the new ceiling is enforced on the very
+        next LLM call.
+        fail-closed：參數無效會經由 JSON-RPC 錯誤路徑拋出；tracker 未初始化或
+        DB 寫入失敗也會拋出 internal error。寫入成功後 tracker 會刷新，新上限
+        在下一次 LLM 調用即生效。
+        """
+        return await self.call(
+            "update_ai_budget_config",
+            {"scope": scope, "monthly_usd": monthly_usd, "updated_by": updated_by},
+        )
+
     # ─── Paper session control commands / 紙盤 session 控制命令 ────────────────
 
     async def pause_paper(self) -> dict[str, Any]:

@@ -363,6 +363,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         ipc_data_dir,
         Some(paper_cmd_tx),
     );
+    // Phase 4 (4-15): Grab the BudgetTracker slot handle before moving the server into
+    // the spawn task; main will write the tracker into this slot once db_pool is ready.
+    // Phase 4 (4-15)：在把 server 移入 spawn task 前先拿到 BudgetTracker 槽位句柄；
+    // 主函數會在 db_pool 就緒後將 tracker 寫入此槽位。
+    let budget_tracker_slot = ipc_server.budget_tracker_slot();
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -841,6 +846,26 @@ async fn async_main(config: Arc<ConfigManager>) {
     let cfg_snap_db = config.get();
     let db_pool =
         Arc::new(openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await);
+
+    // Phase 4 (4-15): Initialize the AI BudgetTracker now that db_pool is ready and
+    // inject it into the IPC server slot. If init fails, the slot stays None and
+    // get_ai_budget_status fail-soft returns "uninitialized".
+    // Phase 4 (4-15)：db_pool 就緒後初始化 AI BudgetTracker，並注入 IPC server 槽位。
+    // 若初始化失敗，槽位保持 None，get_ai_budget_status fail-soft 回傳 "uninitialized"。
+    if db_pool.is_available() {
+        match openclaw_engine::ai_budget::BudgetTracker::new(Arc::clone(&db_pool)).await {
+            Ok(tracker) => {
+                budget_tracker_slot.write().await.replace(Arc::new(tracker));
+                info!("BudgetTracker initialized / AI 預算追蹤器已初始化");
+            }
+            Err(e) => {
+                warn!(error = %e, "BudgetTracker init failed, AI budget enforcement disabled / 預算追蹤器初始化失敗");
+            }
+        }
+    } else {
+        warn!("db_pool unavailable, BudgetTracker not started / db_pool 不可用，BudgetTracker 未啟動");
+    }
+
     let (market_tx, market_rx) = if db_pool.is_available() {
         let (tx, rx) = tokio::sync::mpsc::channel(4096);
         (Some(tx), Some(rx))
