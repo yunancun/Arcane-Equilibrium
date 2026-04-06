@@ -22,6 +22,7 @@
 //!   - degrade_level() 讀快取計數；若快取超過 TTL，caller 應先呼叫 refresh_usage()。
 
 pub mod config_io;
+pub mod pricing;
 pub mod tracker;
 pub mod usage_io;
 

@@ -1,0 +1,50 @@
+# AI Provider Pricing Table — USD per million tokens
+# AI Provider 定價表 — 每百萬 tokens 美元
+#
+# Last updated: 2026-04-06
+# 最後更新：2026-04-06
+#
+# Source: official pricing pages (anthropic.com, openai.com)
+# 來源：官方定價頁
+#
+# Format / 格式:
+#   <provider>:
+#     <model_name>:
+#       input_per_mtok: <usd>
+#       output_per_mtok: <usd>
+#       active: true|false        # if false, model is fail-closed (rejected by tracker)
+#                                 # 若 false，模型 fail-closed（tracker 拒絕）
+
+anthropic:
+  claude-sonnet-4-5:
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    active: true
+  claude-opus-4-6:
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    active: true
+  claude-haiku-4-5-20251001:
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+    active: true
+
+openai:
+  gpt-4o:
+    input_per_mtok: 2.50
+    output_per_mtok: 10.00
+    active: true
+  gpt-4o-mini:
+    input_per_mtok: 0.15
+    output_per_mtok: 0.60
+    active: true
+
+local:
+  qwen-3.5-9b:
+    input_per_mtok: 0.0
+    output_per_mtok: 0.0
+    active: true
+  qwen-3.5-27b:
+    input_per_mtok: 0.0
+    output_per_mtok: 0.0
+    active: true
