@@ -9,7 +9,9 @@
 
 #[cfg(test)]
 mod tests;
+mod dispatch;
 mod handlers;
+mod setup;
 mod types;
 
 use types::STATUS_INTERVAL_SECS;
@@ -57,94 +59,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
     let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
 
-    // PNL-2: log H0Gate wiring on boot so operators can confirm fresh binary.
-    // PNL-2：啟動時記錄 H0Gate 接線狀態，讓操作員確認 binary 已更新。
-    info!(
-        shadow_mode = pipeline.h0_gate.config().shadow_mode,
-        "H0Gate wired in tick_pipeline (PNL-2) / H0 門控已接入"
+    // I-22: Pipeline wire-up extracted to setup helper.
+    setup::wire_pipeline(
+        &mut pipeline,
+        &cfg_snapshot,
+        taker_fee_rate,
+        shared_instruments.as_ref(),
+        market_data_tx,
+        feature_tx,
+        trading_tx,
+        context_tx,
     );
-
-    // Item 2: Set dynamic fee rate if available / 設定動態費率
-    if let Some(rate) = taker_fee_rate {
-        pipeline.set_fee_rate(rate);
-        info!(
-            taker_rate = format!("{:.5}", rate),
-            "pipeline using API fee rate / 管線使用 API 費率"
-        );
-    }
-
-    // Set P1 risk cap from config / 從配置設定 P1 風險上限
-    pipeline
-        .intent_processor
-        .set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
-    info!(
-        p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0),
-        "P1 risk cap set / P1 風險上限已設定"
-    );
-
-    // Wire ALL risk config from engine.toml → paper_state + guardian + intent_processor
-    // 從 engine.toml 接入所有風控配置
-    pipeline
-        .paper_state
-        .set_hard_stop_pct(cfg_snapshot.max_stop_loss_pct);
-    pipeline
-        .paper_state
-        .set_take_profit_pct(Some(cfg_snapshot.max_take_profit_pct));
-    {
-        let gc = openclaw_core::guardian::GuardianConfig {
-            max_leverage: cfg_snapshot.max_leverage,
-            max_drawdown_pct: cfg_snapshot.max_drawdown_pct,
-            max_same_direction_positions: cfg_snapshot.max_same_direction_positions as usize,
-            ..openclaw_core::guardian::GuardianConfig::default()
-        };
-        pipeline.intent_processor.update_guardian_config(gc);
-    }
-    // RRC-1-B4: Wire RiskManagerConfig from engine.toml → IntentProcessor Gate 0
-    // RRC-1-B4：從 engine.toml 接入風控管理器配置 → IntentProcessor Gate 0
-    {
-        let mut rc = openclaw_core::risk::RiskManagerConfig::default();
-        rc.max_stop_loss_pct = cfg_snapshot.max_stop_loss_pct;
-        rc.max_take_profit_pct = cfg_snapshot.max_take_profit_pct;
-        rc.max_leverage = cfg_snapshot.max_leverage;
-        rc.max_total_exposure_pct = cfg_snapshot.max_total_exposure_pct;
-        rc.max_session_drawdown_pct = cfg_snapshot.max_drawdown_pct;
-        pipeline.intent_processor.update_risk_config(rc);
-    }
-    info!(
-        hard_stop = format!("{:.1}%", cfg_snapshot.max_stop_loss_pct),
-        take_profit = format!("{:.1}%", cfg_snapshot.max_take_profit_pct),
-        max_leverage = cfg_snapshot.max_leverage,
-        max_drawdown = format!("{:.1}%", cfg_snapshot.max_drawdown_pct),
-        max_positions = cfg_snapshot.max_same_direction_positions,
-        max_exposure = format!("{:.1}%", cfg_snapshot.max_total_exposure_pct),
-        "risk config wired from engine.toml / 風控配置已從 engine.toml 接入"
-    );
-
-    // R-05: Wire instrument cache into pipeline for precision rounding
-    // R-05：將合約信息緩存接入管線，用於精度取整
-    if let Some(ref icache) = shared_instruments {
-        pipeline.set_instrument_cache(Arc::clone(icache));
-        info!("pipeline using instrument cache for precision rounding / 管線使用合約信息緩存進行精度取整");
-    }
-
-    // Phase 1: Wire market data + feature channels into pipeline
-    // Phase 1：將市場數據 + 特徵通道接入管線
-    if let Some(tx) = market_data_tx {
-        pipeline.set_market_data_channel(tx);
-        info!("pipeline market_data channel wired / 管線市場數據通道已接入");
-    }
-    if let Some(tx) = feature_tx {
-        pipeline.set_feature_channel(tx);
-        info!("pipeline feature channel wired / 管線特徵通道已接入");
-    }
-    if let Some(tx) = trading_tx {
-        pipeline.set_trading_channel(tx);
-        info!("pipeline trading channel wired / 管線交易通道已接入");
-    }
-    if let Some(tx) = context_tx {
-        pipeline.set_context_channel(tx);
-        info!("pipeline context channel wired / 管線上下文通道已接入");
-    }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
     if cfg_snapshot.balance_mode == "bybit_sync" {
@@ -179,7 +104,6 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // EXT-1: Set trading mode on pipeline / 設定管線交易模式
     pipeline.set_trading_mode(cfg_snapshot.trading_mode);
-    let mut pending_reg_rx_slot: Option<mpsc::UnboundedReceiver<PendingOrder>> = None;
     let is_exchange_mode = cfg_snapshot.trading_mode == crate::config::TradingMode::Exchange;
     if is_exchange_mode {
         info!("EXT-1: exchange mode active — orders sent to exchange, fills confirmed via WS / 交易所模式啟用");
@@ -187,110 +111,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // Order dispatch: shadow orders (paper_only) or primary orders (exchange mode)
     // 訂單派發：影子訂單（紙盤模式）或主訂單（交易所模式）
-    if cfg_snapshot.shadow_orders || is_exchange_mode {
-        if let Some(ref client) = shared_client {
-            if let Some(ref icache) = shared_instruments {
-                use crate::order_manager::{
-                    CreateOrderRequest, OrderCategory, OrderManager, OrderSide, OrderType,
-                };
-                let (shadow_tx, mut shadow_rx) = tokio::sync::mpsc::unbounded_channel::<
-                    crate::tick_pipeline::ShadowOrderRequest,
-                >();
-                pipeline.set_shadow_channel(shadow_tx);
-
-                let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
-                // EXT-1: Channel for pending order registration (dispatch task → event consumer)
-                let (pending_reg_tx, pending_reg_rx) =
-                    tokio::sync::mpsc::unbounded_channel::<PendingOrder>();
-                pending_reg_rx_slot = Some(pending_reg_rx);
-
-                tokio::spawn(async move {
-                    while let Some(req) = shadow_rx.recv().await {
-                        if req.qty <= 0.0 {
-                            warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
-                            continue;
-                        }
-                        // EXT-1: Register pending order BEFORE placing (for exchange mode)
-                        if req.is_primary {
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
-                            let _ = pending_reg_tx.send(PendingOrder {
-                                order_link_id: req.order_link_id.clone(),
-                                symbol: req.symbol.clone(),
-                                is_long: req.is_long,
-                                qty: req.qty,
-                                strategy: req.strategy.clone(),
-                                sent_ts_ms: now_ms,
-                                cum_filled_qty: 0.0,
-                                is_close: req.is_close,
-                            });
-                        }
-                        let side = if req.is_long {
-                            OrderSide::Buy
-                        } else {
-                            OrderSide::Sell
-                        };
-                        let create_req = CreateOrderRequest {
-                            category: OrderCategory::Linear,
-                            symbol: req.symbol.clone(),
-                            side,
-                            order_type: OrderType::Market,
-                            qty: req.qty,
-                            price: None,
-                            time_in_force: None,
-                            reduce_only: if req.is_close { Some(true) } else { None },
-                            close_on_trigger: None,
-                            order_link_id: Some(req.order_link_id.clone()),
-                            trigger_price: None,
-                            trigger_direction: None,
-                            // I-08 雙軌止損：forward broker-side SL/TP only on primary (Exchange mode) opens
-                            take_profit: if req.is_primary && !req.is_close {
-                                req.take_profit
-                            } else {
-                                None
-                            },
-                            stop_loss: if req.is_primary && !req.is_close {
-                                req.stop_loss
-                            } else {
-                                None
-                            },
-                            tp_trigger_by: None,
-                            sl_trigger_by: None,
-                        };
-                        let dispatch_type = if req.is_primary { "primary" } else { "shadow" };
-                        match order_mgr.place_order(create_req).await {
-                            Ok(resp) => {
-                                info!(
-                                    symbol = %req.symbol,
-                                    order_id = %resp.order_id,
-                                    order_link_id = %req.order_link_id,
-                                    dispatch_type = dispatch_type,
-                                    close = req.is_close,
-                                    "order dispatched / 訂單已派發"
-                                );
-                            }
-                            Err(e) => {
-                                warn!(
-                                    symbol = %req.symbol,
-                                    order_link_id = %req.order_link_id,
-                                    dispatch_type = dispatch_type,
-                                    error = %e,
-                                    "order dispatch failed / 訂單派發失敗"
-                                );
-                            }
-                        }
-                    }
-                });
-                info!("order dispatch mode active / 訂單派發模式已啟用");
-            } else {
-                warn!("order dispatch enabled but no instrument cache — skipping");
-            }
-        } else {
-            warn!("order dispatch enabled but no API credentials — skipping");
-        }
-    }
+    let pending_reg_rx_slot = dispatch::spawn_order_dispatch(
+        &mut pipeline,
+        shared_client.as_ref(),
+        shared_instruments.as_ref(),
+        cfg_snapshot.shadow_orders || is_exchange_mode,
+    );
 
     // Register strategies / 註冊策略
     pipeline.orchestrator.register(Box::new(MaCrossover::new()));
