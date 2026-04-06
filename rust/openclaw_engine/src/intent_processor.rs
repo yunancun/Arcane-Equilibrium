@@ -322,6 +322,19 @@ impl IntentProcessor {
         };
         let final_qty = kelly_qty.min(p1_max_qty);
 
+        // ─── PNL-1: Reject qty=0 ghost positions ───
+        // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
+        if !(final_qty > 0.0) {
+            return IntentResult {
+                submitted: false,
+                rejected_reason: Some(format!(
+                    "qty_zero: final_qty={:.8} (kelly={:.8}, p1_cap={:.8}, balance=${:.2}, price=${:.2})",
+                    final_qty, kelly_qty, p1_max_qty, balance, price,
+                )),
+                fill: None,
+            };
+        }
+
         // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
         // 訂單准入風控檢查：日損/槓桿/持倉大小/曝險/相關曝險
         // Runs after P1 sizing so single-position-pct check uses final_qty.
@@ -531,6 +544,19 @@ impl IntentProcessor {
             kelly_qty
         };
         let final_qty = kelly_qty.min(p1_max_qty);
+
+        // ─── PNL-1: Reject qty=0 ghost positions ───
+        // 拒絕 qty=0 幽靈倉（小餘額被取整為 0 時必須阻止開倉）
+        if !(final_qty > 0.0) {
+            return ExchangeGateResult {
+                approved: false,
+                rejected_reason: Some(format!(
+                    "qty_zero: final_qty={:.8} (kelly={:.8}, p1_cap={:.8}, balance=${:.2}, price=${:.2})",
+                    final_qty, kelly_qty, p1_max_qty, balance, price,
+                )),
+                approved_qty: 0.0,
+            };
+        }
 
         // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
         // 訂單准入風控檢查：日損/槓桿/持倉大小/曝險/相關曝險
@@ -835,5 +861,37 @@ mod tests {
         // ATR=1.5, EV=1.5×0.7×0.2=$0.21, notional=$16 → rt_fee=$0.018 → 0.21 >> 0.027 ✓
         let result = proc.process(&intent, &gov, &state, 1.5);
         assert!(result.submitted);
+    }
+
+    #[test]
+    fn test_pnl1_rejects_qty_zero_process() {
+        // PNL-1: When P1 sizing produces final_qty=0 (e.g. balance=0), reject.
+        // PNL-1：P1 sizing 產生 final_qty=0 時拒絕（餘額=0 等情況）
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(0.0); // zero balance → p1_max_qty=0
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true);
+        let result = proc.process(&intent, &gov, &state, 500.0);
+        assert!(!result.submitted);
+        let reason = result.rejected_reason.unwrap();
+        assert!(reason.starts_with("qty_zero:"), "got: {}", reason);
+    }
+
+    #[test]
+    fn test_pnl1_rejects_qty_zero_gates_only() {
+        // PNL-1 (exchange path): same guard in process_gates_only.
+        // PNL-1（exchange 路徑）：process_gates_only 同一守衛
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(0.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true);
+        let result = proc.process_gates_only(&intent, &gov, &state, 500.0);
+        assert!(!result.approved);
+        assert_eq!(result.approved_qty, 0.0);
+        assert!(result.rejected_reason.unwrap().starts_with("qty_zero:"));
     }
 }
