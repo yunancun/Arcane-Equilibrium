@@ -74,6 +74,13 @@ pub struct KellyConfig {
     pub risk_pct: f64,
     /// Enable Kelly sizing / 啟用 Kelly 倉位管理
     pub enabled: bool,
+    /// ATR% normalization anchor for vol adjustment (typical 5m crypto perp = 2%)
+    /// ATR% 歸一化錨點，用於波動率調整（5m 加密永續典型值 2%）
+    pub reference_atr_pct: f64,
+    /// Minimum vol multiplier (floor for high-vol compression) / 最小波動乘數
+    pub vol_mult_floor: f64,
+    /// Maximum vol multiplier (ceil for low-vol expansion) / 最大波動乘數
+    pub vol_mult_ceil: f64,
 }
 
 impl Default for KellyConfig {
@@ -83,6 +90,9 @@ impl Default for KellyConfig {
             min_trades: 50,
             risk_pct: 0.03,
             enabled: true,
+            reference_atr_pct: 0.02,
+            vol_mult_floor: 0.5,
+            vol_mult_ceil: 1.5,
         }
     }
 }
@@ -153,15 +163,12 @@ pub fn compute_kelly_qty(
     let kelly_qty = capped * balance / price;
 
     // ATR volatility adjustment: reduce in high-vol regimes.
-    // REFERENCE_ATR_PCT is the normalization anchor (typical crypto perp 5m ATR%
-    // sits in 1–4% band; 2% chosen so the multiplier sits at 1.0 in steady state).
-    // Not a tuning knob — changing it would re-baseline every Kelly call inconsistently.
-    // ATR 波動調整：高波動市場縮量。REFERENCE_ATR_PCT 為歸一化錨點，非調參項。
-    const REFERENCE_ATR_PCT: f64 = 0.02;
-    const VOL_MULT_FLOOR: f64 = 0.5;
-    const VOL_MULT_CEIL: f64 = 1.5;
+    // reference_atr_pct is the normalization anchor (typical crypto perp 5m ATR%
+    // sits in 1–4% band; default 2% so the multiplier sits at 1.0 in steady state).
+    // ATR 波動調整：高波動市場縮量。reference_atr_pct 為歸一化錨點，可透過 KellyConfig 調整。
     let vol_adjusted = if atr_pct > 0.0 {
-        let vol_multiplier = (REFERENCE_ATR_PCT / atr_pct).clamp(VOL_MULT_FLOOR, VOL_MULT_CEIL);
+        let vol_multiplier = (config.reference_atr_pct / atr_pct)
+            .clamp(config.vol_mult_floor, config.vol_mult_ceil);
         kelly_qty * vol_multiplier
     } else {
         kelly_qty
