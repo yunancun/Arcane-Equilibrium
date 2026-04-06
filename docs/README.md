@@ -37,9 +37,12 @@ docs/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
 │
-├── audit/                             ← ★ 全系统审计报告（按月份分目录）
+├── architecture/                      ← 架構設計文件（系統層面設計決策）
+│
+├── audits/                            ← ★ 全系统审计报告（按月份 + 专项分子目录）
 │   ├── March31/                       ← 2026-03-31 七Agent全系统审计（8 份报告）
-│   └── April01/                       ← 2026-04-01 十Agent全系统审计（10 份报告）
+│   ├── April01/                       ← 2026-04-01 十Agent全系统审计（10 份报告）
+│   └── （专项审计报告）                ← 按日期命名的专项审计（如 Bybit API 审计）
 │
 ├── references/                        ← 长期参考文档（规范、合同、规格书）
 │   ├── state_dictionary/              ← 状态字典 / 数据字典
@@ -119,9 +122,9 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 ## 影响 (Consequences)
 ```
 
-### 4. audit/ — 全系统审计报告
+### 4. audits/ — 全系统审计报告
 
-**用途**：全系统审计报告归档。按月份分子目录（March31、April01 等），每次审计产出多角色报告。
+**用途**：全系统审计报告归档。按月份分子目录（March31、April01 等），每次审计产出多角色报告；专项审计报告（如 Bybit API 审计）直接以日期命名放根目录。
 
 ### 5. references/ — 长期参考文档
 
@@ -247,6 +250,21 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-01--completed_todo_archive.md` | ★★ TODO 已完成項目歸檔：Wave 0-7 / Phase 1-3 / Audit Batch 1-7 / main_legacy 重構全部完成記錄 |
 | `2026-04-01--wave8_pa_reality_check_and_parallel_fix.md` | ★★★★ Wave 8 工作日誌：PA 69 項實況檢查 + 6 軌道×2 批並行修復 38/39 項 + strategist 拆分 + on_tick/mutator 拆分 + now_ms 統一 + +148 測試 |
 | `2026-04-02--batch9a_deterministic_adaptive_risk.md` | ★★★ Batch 9A 確定性自適應風控：QC 量化審查驅動 · ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用 · 修復 ATR 止損死代碼 bug · +66 測試 · 3703 passed |
+| `2026-04-03--daily_summary.md` | ★★★★ 2026-04-03 日匯總（12 Sessions · 28 Commits）：文檔治理 + Phase 0-3 全覽 + Rust R-00~R-04 |
+| `2026-04-03--completed_todo_archive_batch9a_wave8_xp.md` | TODO 已完成歸檔：Batch 9A + Wave 8A-8D + XP-1~4（路線圖定稿清理） |
+| `2026-04-04--daily_summary.md` | ★★★★ 2026-04-04 日匯總：V2 策略功能全面啟用（P0 緊急修復）+ Bybit API 基礎設施 |
+| `2026-04-04--td01_td02_td03_file_split.md` | Session 3：TD-01/02/03 Python 大文件拆分（Phase 1 前置技術債清零） |
+| `2026-04-04--session4_bybit_api_audit.md` | ★★★ Session 4：BB+E5+PA 三角色聯合審計 Bybit V5 API 層 + 完整 API 字典手冊 |
+| `2026-04-04--session5_bybit_full_integration.md` | ★★★ Session 5：9 項 API 整合改進 + 3 新模組 + Demo→Live 對齊（PM+PA+FA+BB 四角色） |
+| `2026-04-04--completed_todo_archive_phase0123_rust.md` | TODO 已完成歸檔：Phase 0-3（26 項）+ Rust R-00~R-06（7 項）|
+| `2026-04-05--daily_summary.md` | ★★★★ 2026-04-05 日匯總（3 Sessions）：Phase 1 Full Rust 數據管線（G1-G4）+ Phase 2/3a/3b ML 基礎設施 + EXT-1 Exchange-as-Truth + RRC-1 設計 + 風控 GUI 補齊 + Demo 架構完成 |
+| `2026-04-06--session10_r0_r1_remediation.md` | ★★★ Session 10：L3 414 findings → 63 tracker + R0 Week 1（7 P0 修復）+ R1 Wave 1（WP-B Security + WP-MIT DB/ML + idle writer） |
+| `2026-04-06--session11_p1_6_drift_detector.md` | Session 11：WP-MIT P1-6 drift_detector PG 接線（fetch_active_baselines / DriftMonitorState / PSI 滑動窗口） |
+| `2026-04-06--session11_r2_batch.md` | ★★★ Session 11：R1 收尾 + R2 批次（多項 L3 整改繼續推進） |
+| `2026-04-06--session11_precompact.md` | Session 11 Pre-Compact 快照：453 engine + 411 core + 35 ml_training · 0 failures |
+| `2026-04-06--session12_precompact.md` | Session 12 Pre-Compact 快照：474 engine + 413 core + 35 ml_training · 0 failures |
+| `2026-04-06--session13_precompact.md` | ★★★★ Session 13：I-22 event_consumer 拆分 + FA-GAP-2/4 接線（cost_ratio/Kelly ATR%）+ per-symbol 真實費率 + SEC-11 fail-closed + FA-GAP-8/9 dead code 清除 |
+| `2026-04-06--completed_todo_archive_l3_phases.md` | TODO 已完成歸檔：L3 整改 + Phase 0/1/2/3 + Rust 遷移已驗收項（Session 11 後清理） |
 
 ### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
 
@@ -292,33 +310,47 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `HIST-01_...核心设计总纲_V1.docx` | 历史参考：核心设计总纲 |
 | `HIST-02_...治理设计交付包_V1.docx` | 历史参考：治理设计交付包 |
 
-### audit/March31/ — ★★★ 2026-03-31 七Agent全系统审计（7 份报告 + 1 份双语注释审计）
+### CCAgentWorkSpace（各 Agent workspace/reports）— ★★★ 2026-03-31 七Agent全系统审计
+
+| Agent | 文件（CCAgentWorkSpace/<Agent>/workspace/reports/） | 内容 |
+|-------|------|------|
+| E3 | `2026-03-31--e3_security_audit.md` | E3 安全审计：3 CRITICAL / 5 HIGH / 6 MEDIUM / 5 LOW |
+| CC | `2026-03-31--cc_compliance_check.md` | CC 合规检查：11/16 原则完全合规，B 级 |
+| E4 | `2026-03-31--e4_testing_report.md` | E4 测试评估：71 文件/2480 用例 |
+| E5 | `2026-03-31--e5_optimization_report.md` | E5 优化评估：49 项 |
+| A3 | `2026-03-31--a3_gui_usability_report.md` | A3 GUI 可用性：6.2/10 |
+| PM | `2026-03-31--pm_review.md` | ★ PM 整合审核：71 项去重，~110h 工时 |
+| PA | `2026-03-31--pa_review.md` | ★ PA 技术复验：4 CRITICAL 确认属实 |
+
+双语注释审计：`audits/2026-03-30--bilingual_comment_audit_report.md`
+
+### CCAgentWorkSpace（各 Agent workspace/reports）— ★★★ 2026-04-01 十Agent全系统审计
+
+| Agent | 文件（CCAgentWorkSpace/<Agent>/workspace/reports/） | 内容 |
+|-------|------|------|
+| AI-E | `2026-04-01--ai_effectiveness_audit.md` | AI-E AI 效果审计 |
+| CC | `2026-04-01--compliance_check.md` | CC 合规检查：16 条根原则逐一验证 |
+| E3 | `2026-04-01--security_audit.md` | E3 安全审计 |
+| E4 | `2026-04-01--testing_audit.md` | E4 测试评估 |
+| E5 | `2026-04-01--optimization_audit.md` | E5 优化评估 |
+| FA | `2026-04-01--functional_gap_audit.md` | FA 功能缺口审计 |
+| TW | `2026-04-01--documentation_quality_audit.md` | TW 文档品质审计 |
+| R4 | `2026-04-01--document_index_audit.md` | R4 文档索引审计 |
+| Operator | `2026-04-01--pa_review.md` | PA 技术复验 |
+| Operator | `2026-04-01--pm_execution_plan.md` | PM 执行计划 |
+
+### audits/（专项审计报告）
 
 | 文件 | 内容 |
 |------|------|
-| `E3_security_audit_2026-03-31.md` | E3 安全审计：3 CRITICAL / 5 HIGH / 6 MEDIUM / 5 LOW（gate 绕过 · 注入 · 密钥泄漏） |
-| `CC_compliance_check_2026-03-31.md` | CC 合规检查：11/16 原则完全合规，B 级，1 硬违规，9 缺口 |
-| `E4_testing_report_2026-03-31.md` | E4 测试评估：71 文件/2480 用例，pipeline_bridge 15%，governance_routes 10% |
-| `E5_optimization_report_2026-03-31.md` | E5 优化评估：49 项（3 Critical · 14 High · 22 Medium · 10 Low），含性能/重复/可读性 |
-| `A3_gui_usability_report_2026-03-31.md` | A3 GUI 可用性：6.2/10，工程师视角设计，术语友好化建议 |
-| `PM_review_2026-03-31.md` | ★ PM 整合审核：71 项去重，P0-P3 批次计划，~110h 工时，依赖图 |
-| `PA_review_2026-03-31.md` | ★ PA 技术复验：4 CRITICAL 确认属实，1 误报，6 架构层补充问题 |
-| `bilingual_comment_audit_report.md` | TW 双语注释审计报告（模块级双语覆盖评估） |
+| `2026-04-04--bybit_api_infra_audit.md` | ★ Bybit API 基础设施专项审计：REST/WS 端点覆盖度、SDK 对接质量、IPC 接口审核 |
+| `2026-04-06_consolidated_remediation_report.md` | ★ L3 全系统审计 63 问题整改追踪报告：11 工作包 · 4 波执行 · R0-R3 整改记录 |
 
-### audit/April01/ — ★★★ 2026-04-01 十Agent全系统审计（10 份报告）
+### architecture/ — 架構設計文件
 
 | 文件 | 内容 |
 |------|------|
-| `AI-E_ai_effectiveness_audit_2026-04-01.md` | AI-E AI 效果审计：AI 使用效率/成本分析/模型分配评估/Ollama 优化建议 |
-| `CC_compliance_check_2026-04-01.md` | CC 合规检查：16 条根原则逐一验证 + 硬边界合规状态 |
-| `E3_security_audit_2026-04-01.md` | E3 安全审计：认证授权/注入/密钥管理/OWASP 安全扫描 |
-| `E4_testing_report_2026-04-01.md` | E4 测试评估：测试覆盖/回归/边界用例/并发测试评估 |
-| `E5_optimization_report_2026-04-01.md` | E5 优化评估：代码精简/性能/可读性评估建议 |
-| `FA_functional_gap_audit_2026-04-01.md` | FA 功能缺口审计：功能规格验证/Gap 分析/业务逻辑审查 |
-| `TW_documentation_quality_2026-04-01.md` | TW 文档与注释品质审计：双语注释/MODULE_NOTE 规范评估 |
-| `R4_document_index_audit_2026-04-01.md` | R4 文档索引审计：文档目录完整性/交叉引用准确性 |
-| `PA_review_2026-04-01.md` | PA 技术复验：架构决策/可行性评估/副作用识别 |
-| `PM_execution_plan_2026-04-01.md` | PM 执行计划：优先级整合/批次计划/风险管理 |
+| `DATA_STORAGE_ARCHITECTURE_V1.md` | ★ 數據存儲架構 V1：PG + TimescaleDB 方案 · 8 Schema · 存儲精簡 97%（5.6→0.17 GB/day）· 冷存儲 NAS 策略 |
 
 ### references/ — 长期参考文档
 
@@ -355,6 +387,15 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-03--rust_migration_master_plan_v2.md` | V2 草稿（歸檔）· Rust 遷移總方案初版 |
 | `2026-04-03--rust_migration_v2.5_consolidated.md` | V2.5 整合版（歸檔）· 六路缺口修復後 |
 | `2026-04-03--rust_migration_v3_final.md` | ★★★★ V3-FINAL · Rust 遷移正式執行依據：五角色三輪審查 · 32,500 行 Rust · 14 週路線圖 · 分級浮點容差 · 四層測試 · 回滾計劃 · 21 項嚴格論證修正 |
+| `2026-04-02--system_status_report.md` | 系統狀態報告（2026-04-02）：引擎健康度、測試基準線、已知問題彙整 |
+| `2026-04-03--agent_param_tuning_design_draft_v0.2.md` | Agent 參數調整設計草稿 V0.2：策略參數 JSON 介面 · Agent 自主調參機制 · AGT-1 技術規格 |
+| `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | 數據存儲架構最優方案草稿 V0.1：PG + TimescaleDB · 分區策略 · 冷熱分層 |
+| `2026-04-03--llm_abstraction_audit.md` | LLM 抽象層審計：LocalLLMClient ABC 介面覆蓋度 · Ollama 耦合殘留 · 跨平台兼容性評估 |
+| `2026-04-03--ml_dl_learning_architecture_v0.4.md` | ★ ML/DL 學習架構 V0.4：Teacher-Student + LightGBM + Optuna + 3 DL 場景 · 三方審查完成 |
+| `2026-04-04--bybit_api_reference.md` | ★★ Bybit API 字典手冊：REST/WS 全端點速查 · V5 API 分類覆蓋 · 開發必讀 |
+| `2026-04-04--comprehensive_audit_template_v1.md` | 全面審查模板 V1：L1/L2/L3 三級審計流程 · 5 路並行 9 角色 + DL/DB 專項 |
+| `2026-04-04--execution_plan_v1.md` | ★ 融合方案執行計劃 V1：DB + ML/DL + 新聞 Agent 20 週路線圖 · Phase 0-6 詳細規格 |
+| `2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md` | 統一 DB + ML + 新聞 Agent 工作計劃草稿 V0.1：融合方案 v0.5 設計文件 · 67 項修正後版本 |
 
 ### governance_dev/ — 治理开发文档
 

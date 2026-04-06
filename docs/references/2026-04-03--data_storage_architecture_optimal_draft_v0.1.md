@@ -1,3 +1,5 @@
+> ⚠️ DEPRECATED — 此文件為早期草稿（v0.1），已由 `docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md` 取代。保留供歷史參考，請勿作為實施依據。
+
 # Plan: 最優數據存儲架構 — 從記帳到因果學習（完整版）
 
 ## Context

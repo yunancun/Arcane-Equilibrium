@@ -1,3 +1,5 @@
+> ⚠️ DEPRECATED — 此文件為 V2 草稿，已由 `docs/references/2026-04-03--rust_migration_v3_final.md`（V3-FINAL）取代。保留供歷史參考，請勿作為實施依據。
+
 # OpenClaw Bybit — Rust 遷移總方案
 
 **日期**: 2026-04-03
