@@ -1,0 +1,120 @@
+<!--
+  Phase 4 · Teacher Card — sub-task 4-03.
+  Phase 4 · Teacher 卡片 — 子任務 4-03。
+
+  Data source / 資料源: GET /api/v1/phase4/teacher
+  Renders: 7d directive count / exec rate / avg outcome 24h /
+           recent 5 directive list / status light (red/yellow/green/grey).
+  渲染內容：7d directive 數量 / 執行率 / 24h 平均 outcome /
+           最近 5 筆 directive / 狀態燈（紅/黃/綠/灰）。
+
+  Safety / 安全:
+    - Read-only — no buttons or POST.
+    - Fail-closed on ok=false → grey placeholder retained from default load.
+-->
+<div class="phase4-card" id="teacher-card" data-module="teacher">
+  <div class="phase4-card-header">
+    <h3 class="phase4-card-title">🧑‍🏫 Claude Teacher</h3>
+    <span class="phase4-card-status">
+      <span class="phase4-light-dot grey" id="teacher-status-dot"></span>
+      <span id="teacher-status-label">loading…</span>
+    </span>
+  </div>
+
+  <div class="phase4-card-metrics" id="teacher-metrics">
+    <div><strong>7d directives:</strong> <span id="teacher-total-7d">—</span></div>
+    <div><strong>Applied:</strong> <span id="teacher-applied-7d">—</span> (<span id="teacher-exec-rate">—</span>%)</div>
+    <div><strong>Avg outcome 24h:</strong> $<span id="teacher-avg-outcome">—</span></div>
+  </div>
+
+  <div style="margin-top:12px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Recent 5 directives / 最近 5 筆
+    </div>
+    <table id="teacher-recent" style="border-collapse:collapse;font-size:11px;width:100%;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border,#30363d);">
+          <th style="padding:2px 6px;">When</th>
+          <th style="padding:2px 6px;">Action</th>
+          <th style="padding:2px 6px;">Scope</th>
+          <th style="padding:2px 6px;">Status</th>
+          <th style="padding:2px 6px;text-align:right;">PnL 24h</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="phase4-card-footer" style="margin-top:8px;font-size:11px;color:var(--text-muted,#8b949e);">
+    Refreshes every 30s — 每 30 秒刷新
+  </div>
+</div>
+
+<script>
+(function() {
+  // Idempotent loader: registers a global async function that the
+  // tab-phase4 polling loop calls every 30s. Safe to load multiple times.
+  // 冪等載入器：註冊全域 async 函數，給 tab-phase4 30s 輪詢呼叫。多次載入安全。
+  window.loadTeacherCard = async function() {
+    let data;
+    try {
+      const r = await fetch('/api/v1/phase4/teacher', { credentials: 'include' });
+      data = await r.json();
+    } catch (e) {
+      data = { ok: false, status_light: 'grey', reason: 'fetch_failed' };
+    }
+    const dot = document.getElementById('teacher-status-dot');
+    const label = document.getElementById('teacher-status-label');
+    if (dot && label) {
+      const lightClass = ['grey','green','yellow','red'].includes(data.status_light) ? data.status_light : 'grey';
+      dot.className = 'phase4-light-dot ' + lightClass;
+      label.textContent = data.ok ? lightClass : ('degraded: ' + (data.reason || 'unknown'));
+    }
+    const total = document.getElementById('teacher-total-7d');
+    if (total) total.textContent = (data.total_7d ?? 0).toString();
+    const applied = document.getElementById('teacher-applied-7d');
+    if (applied) applied.textContent = (data.applied_7d ?? 0).toString();
+    const rate = document.getElementById('teacher-exec-rate');
+    if (rate) rate.textContent = ((data.exec_rate ?? 0) * 100).toFixed(1);
+    const avg = document.getElementById('teacher-avg-outcome');
+    if (avg) avg.textContent = data.avg_outcome_24h !== null && data.avg_outcome_24h !== undefined
+      ? Number(data.avg_outcome_24h).toFixed(2)
+      : '—';
+    const tbody = document.querySelector('#teacher-recent tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      const recent = Array.isArray(data.recent) ? data.recent : [];
+      for (const r of recent) {
+        const tr = document.createElement('tr');
+        const pnl = r.outcome_pnl_24h;
+        const pnlStr = pnl === null || pnl === undefined ? '—' : Number(pnl).toFixed(2);
+        const pnlColor = pnl === null || pnl === undefined ? '' : (pnl >= 0 ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);');
+        // Use textContent (no innerHTML) for XSS safety on user-supplied directive fields.
+        // 用 textContent（不用 innerHTML）防止 directive 欄位的 XSS。
+        const td = (text, extra='') => {
+          const el = document.createElement('td');
+          el.textContent = text;
+          if (extra) el.setAttribute('style', extra);
+          return el;
+        };
+        const ts = r.ts ? new Date(r.ts).toLocaleString() : '—';
+        tr.appendChild(td(ts, 'padding:2px 6px;'));
+        tr.appendChild(td(r.action_taken || '—', 'padding:2px 6px;'));
+        tr.appendChild(td(r.strategy_scope || '—', 'padding:2px 6px;'));
+        tr.appendChild(td(r.success ? 'OK' : 'FAIL', 'padding:2px 6px;' + (r.success ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);')));
+        tr.appendChild(td(pnlStr, 'padding:2px 6px;text-align:right;' + pnlColor));
+        tbody.appendChild(tr);
+      }
+      if (recent.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.textContent = '(no directives in window)';
+        td.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+    }
+  };
+})();
+</script>

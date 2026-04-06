@@ -141,6 +141,274 @@ async def get_phase4_status() -> dict[str, Any]:
     return await _query_engine_status()
 
 
+# ---------------------------------------------------------------------------
+# 4-06 · LinUCB Card backend route
+# 4-06 · LinUCB 卡片後端路由
+# ---------------------------------------------------------------------------
+
+_V1_15_STRATEGIES = (
+    "ma_crossover",
+    "bb_reversion",
+    "bb_breakout",
+    "grid_trading",
+    "donchian_breakout",
+)
+_V1_15_REGIMES = ("trending", "ranging", "volatile")
+
+
+def _default_linucb_payload(reason: str) -> dict[str, Any]:
+    """Fail-closed payload for the LinUCB card.
+    LinUCB 卡片的 fail-closed 預設 payload。
+    """
+    # Empty grey arms / 空灰 arm 列表
+    arms: list[dict[str, Any]] = []
+    for regime in _V1_15_REGIMES:
+        for strat in _V1_15_STRATEGIES:
+            arms.append({"arm_id": f"{regime}__{strat}", "n_pulls": 0, "converged": False})
+    return {
+        "ok": False,
+        "reason": reason,
+        "active_version": "v1_15",
+        "feature_schema_hash": None,
+        "total_pulls": 0,
+        "converged_arms": 0,
+        "min_samples_per_arm": 100,
+        "arms": arms,
+        "shadow": {"active": False},
+        "migrations": [],
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+def _fetch_linucb_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live DB path
+    """Read learning.linucb_state + recent linucb_migrations from PG.
+    從 PG 讀取 linucb_state 與最近的 linucb_migrations。
+
+    Fail-soft: any exception → grey placeholder via caller.
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        raise RuntimeError("no_dsn")
+
+    with psycopg2.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            # Active version = most recent migration's to_version, default v1_15
+            cur.execute(
+                "SELECT to_version FROM learning.linucb_migrations "
+                "ORDER BY migration_id DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            active_version = row[0] if row else "v1_15"
+
+            # Per-arm state for the active version
+            cur.execute(
+                "SELECT arm_id, n_pulls, feature_schema_hash "
+                "FROM learning.linucb_state WHERE arm_space_version = %s",
+                (active_version,),
+            )
+            arm_rows = cur.fetchall()
+
+            # Recent migrations (last 5)
+            cur.execute(
+                "SELECT migration_id, from_version, to_version, direction, gamma, "
+                "n_arms_before, n_arms_after, started_ts "
+                "FROM learning.linucb_migrations ORDER BY migration_id DESC LIMIT 5"
+            )
+            mig_rows = cur.fetchall()
+
+    min_samples = 100
+    arms_payload = [
+        {
+            "arm_id": r[0],
+            "n_pulls": int(r[1] or 0),
+            "converged": int(r[1] or 0) >= min_samples,
+        }
+        for r in arm_rows
+    ]
+    schema_hash = arm_rows[0][2] if arm_rows else None
+    total_pulls = sum(a["n_pulls"] for a in arms_payload)
+    converged_arms = sum(1 for a in arms_payload if a["converged"])
+    migrations_payload = [
+        {
+            "migration_id": m[0],
+            "from_version": m[1],
+            "to_version": m[2],
+            "direction": m[3],
+            "gamma": float(m[4]) if m[4] is not None else None,
+            "n_arms_before": m[5],
+            "n_arms_after": m[6],
+            "started_ts": m[7].isoformat() if m[7] is not None else None,
+        }
+        for m in mig_rows
+    ]
+    return {
+        "ok": True,
+        "active_version": active_version,
+        "feature_schema_hash": schema_hash,
+        "total_pulls": total_pulls,
+        "converged_arms": converged_arms,
+        "min_samples_per_arm": min_samples,
+        "arms": arms_payload,
+        "shadow": {"active": False},  # filled by shadow_compare job output when present
+        "migrations": migrations_payload,
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+@phase4_router.get("/linucb")
+async def get_phase4_linucb() -> dict[str, Any]:
+    """LinUCB card data: active version, per-arm pulls, recent migrations.
+    LinUCB 卡片資料：啟用版本 / per-arm pulls / 最近遷移。
+
+    Fail-closed: any error → ok=false grey placeholder (never raises).
+    """
+    try:
+        return _fetch_linucb_state_from_pg()
+    except Exception as exc:
+        logger.warning("phase4/linucb fail-soft: %s", exc)
+        return _default_linucb_payload(reason=f"{type(exc).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# 4-03 · Teacher Card backend route
+# 4-03 · Teacher 卡片後端路由
+# ---------------------------------------------------------------------------
+
+
+def _default_teacher_payload(reason: str) -> dict[str, Any]:
+    """Fail-closed payload for the Teacher card.
+    Teacher 卡片的 fail-closed 預設 payload。
+    """
+    return {
+        "ok": False,
+        "reason": reason,
+        "status_light": "grey",
+        "total_7d": 0,
+        "applied_7d": 0,
+        "exec_rate": 0.0,
+        "avg_outcome_24h": None,
+        "recent": [],
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+def _classify_teacher_status(
+    exec_rate: float, avg_outcome_24h: float | None
+) -> str:
+    """Map exec_rate + avg_outcome_24h into a red/yellow/green status light.
+    將 exec_rate + avg_outcome_24h 對映為 red/yellow/green 燈號。
+
+    Rules / 規則:
+        - exec_rate >= 0.8 AND avg_outcome >= 0  -> green
+        - exec_rate in [0.6, 0.8) OR avg_outcome < 0 (mild) -> yellow
+        - exec_rate < 0.6 OR avg_outcome very negative      -> red
+    """
+    outcome = avg_outcome_24h if avg_outcome_24h is not None else 0.0
+    if exec_rate >= 0.8 and outcome >= 0.0:
+        return "green"
+    if exec_rate < 0.6:
+        return "red"
+    if outcome < -10.0:  # USD threshold for "very negative"
+        return "red"
+    return "yellow"
+
+
+def _fetch_teacher_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live DB path
+    """Read 7d directive_executions stats + recent rows from PG.
+    從 PG 讀取 7d directive_executions 統計 + 最近 row。
+
+    Fail-soft: any exception → caller maps to grey placeholder.
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        raise RuntimeError("no_dsn")
+
+    with psycopg2.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            # 7d aggregate stats
+            # 7d 聚合統計
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)::int                                       AS total_7d,
+                    COUNT(*) FILTER (WHERE success IS TRUE)::int        AS applied_7d,
+                    AVG(outcome_pnl_24h)                                AS avg_outcome_24h
+                FROM learning.directive_executions
+                WHERE ts >= NOW() - INTERVAL '7 days'
+                """
+            )
+            row = cur.fetchone()
+            total_7d = int(row[0] or 0) if row else 0
+            applied_7d = int(row[1] or 0) if row else 0
+            avg_outcome_24h = float(row[2]) if row and row[2] is not None else None
+
+            # Recent 5 directive executions
+            # 最近 5 筆 directive 執行記錄
+            cur.execute(
+                """
+                SELECT execution_id, ts, action_taken, success,
+                       strategy_scope, outcome_pnl_24h
+                FROM learning.directive_executions
+                ORDER BY ts DESC
+                LIMIT 5
+                """
+            )
+            recent_rows = cur.fetchall()
+
+    exec_rate = (applied_7d / total_7d) if total_7d > 0 else 0.0
+    status_light = _classify_teacher_status(exec_rate, avg_outcome_24h)
+    recent = [
+        {
+            "execution_id": r[0],
+            "ts": r[1].isoformat() if r[1] is not None else None,
+            "action_taken": r[2],
+            "success": bool(r[3]),
+            "strategy_scope": r[4],
+            "outcome_pnl_24h": float(r[5]) if r[5] is not None else None,
+        }
+        for r in recent_rows
+    ]
+
+    return {
+        "ok": True,
+        "status_light": status_light,
+        "total_7d": total_7d,
+        "applied_7d": applied_7d,
+        "exec_rate": round(exec_rate, 4),
+        "avg_outcome_24h": avg_outcome_24h,
+        "recent": recent,
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+@phase4_router.get("/teacher")
+async def get_phase4_teacher() -> dict[str, Any]:
+    """Teacher card data: 7d directive stats + recent executions + status light.
+    Teacher 卡片資料：7d directive 統計 + 最近執行 + 狀態燈號。
+
+    Fail-closed: any error → ok=false grey placeholder (never raises).
+    """
+    try:
+        return _fetch_teacher_state_from_pg()
+    except Exception as exc:
+        logger.warning("phase4/teacher fail-soft: %s", exc)
+        return _default_teacher_payload(reason=f"{type(exc).__name__}")
+
+
 @phase4_router.get("", include_in_schema=False)
 async def phase4_tab_redirect() -> RedirectResponse:
     """

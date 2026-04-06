@@ -8,6 +8,7 @@
 use crate::database::pool::DbPool;
 use crate::news::dedup::DedupCache;
 use crate::news::provider::NewsProvider;
+use crate::news::router::NewsRouter;
 use crate::news::severity::{score_severity, SeverityConfig};
 use crate::news::types::RawNewsItem;
 use std::sync::Arc;
@@ -22,13 +23,18 @@ pub struct ProcessedNewsItem {
     pub severity: f64,
 }
 
-/// EN: News pipeline — fetch → dedup → score → persist.
-/// 中文: 新聞管線 — 拉取 → 去重 → 評分 → 寫入。
+/// EN: News pipeline — fetch → dedup → score → persist (+ optional 4-09 fan-out).
+/// 中文: 新聞管線 — 拉取 → 去重 → 評分 → 寫入（+ 可選 4-09 fan-out）。
 pub struct NewsPipeline {
     providers: Vec<Box<dyn NewsProvider>>,
     dedup: DedupCache,
     severity_cfg: SeverityConfig,
     pool: Arc<DbPool>,
+    /// EN: Optional triple-route consumer (4-09). When `Some`, every processed
+    ///     item is also dispatched to Guardian / Regime / Learning routes.
+    /// 中文: 可選的三路消費者（4-09）。為 `Some` 時，每條 processed item 也會
+    ///       被分發到 Guardian / Regime / Learning 路由。
+    router: Option<Arc<NewsRouter>>,
 }
 
 impl NewsPipeline {
@@ -41,6 +47,7 @@ impl NewsPipeline {
             dedup: DedupCache::new(),
             severity_cfg: SeverityConfig::defaults(),
             pool,
+            router: None,
         }
     }
 
@@ -48,6 +55,15 @@ impl NewsPipeline {
     /// 中文: 覆寫 severity 設定（測試 / 未來調參用）。
     pub fn with_severity_config(mut self, cfg: SeverityConfig) -> Self {
         self.severity_cfg = cfg;
+        self
+    }
+
+    /// EN: Attach a 4-09 NewsRouter for triple-route fan-out (Guardian / Regime / Learning).
+    ///     Without this, `run_once` only does fetch → dedup → score → persist.
+    /// 中文: 附加 4-09 NewsRouter 做三路 fan-out（Guardian / Regime / Learning）。
+    ///       不附加時，`run_once` 只做拉取 → 去重 → 評分 → 寫入。
+    pub fn with_router(mut self, router: Arc<NewsRouter>) -> Self {
+        self.router = Some(router);
         self
     }
 
@@ -86,6 +102,14 @@ impl NewsPipeline {
                 Err(e) => {
                     warn!(provider = provider.name(), error = %e.to_string(), "news provider fetch failed / 新聞 provider 拉取失敗");
                 }
+            }
+        }
+
+        // ── 4-09 fan-out: dispatch each surviving item to the three routes. ──
+        // 4-09 fan-out：把每條存活的 item 分發到三條路由。
+        if let Some(ref router) = self.router {
+            for item in &processed {
+                router.dispatch(item, now_ms).await;
             }
         }
 

@@ -1,0 +1,197 @@
+<!--
+  Phase 4 · LinUCB Card — sub-task 4-06.
+  Phase 4 · LinUCB 卡片 — 子任務 4-06。
+
+  Data source / 資料源: GET /api/v1/phase4/linucb
+  Renders: active version label / per-arm pulls heatmap / convergence bars /
+           shadow compare status bar / version dropdown (v2_25 / v3_375 greyed).
+  渲染內容：啟用版本標籤 / per-arm pulls 熱力圖 / 收斂進度條 /
+           shadow compare 狀態條 / 版本下拉（v2_25 / v3_375 灰示）。
+
+  Safety / 安全:
+    - Read-only; trigger/rollback buttons always confirm() first.
+    - Fail-closed on ok=false → grey placeholder.
+    - No chart libs — pure HTML/CSS progress bars.
+-->
+<div class="phase4-card" id="linucb-card" data-module="linucb">
+  <div class="phase4-card-header">
+    <h3 class="phase4-card-title">&#x1F3B0; LinUCB Bandit / 多臂老虎機</h3>
+    <span class="phase4-card-status">
+      <span class="phase4-light-dot grey" id="linucb-status-dot"></span>
+      <span id="linucb-active-version">loading…</span>
+    </span>
+  </div>
+
+  <div class="phase4-card-metrics" id="linucb-metrics">
+    <div><strong>Total pulls:</strong> <span id="linucb-total-pulls">—</span></div>
+    <div><strong>Converged arms:</strong> <span id="linucb-converged">—</span></div>
+    <div><strong>Schema hash:</strong> <span id="linucb-schema-hash">—</span></div>
+  </div>
+
+  <div style="margin:10px 0;">
+    <label for="linucb-version-select" style="font-size:12px;">
+      Arm space / 臂空間:
+    </label>
+    <select id="linucb-version-select" style="font-size:12px;">
+      <option value="v1_15">v1_15 (5×3)</option>
+      <option value="v2_25" disabled title="Migration not yet executed / 遷移未執行">v2_25 (5×5)</option>
+      <option value="v3_375" disabled title="Migration not yet executed / 遷移未執行">v3_375 (5×3×25)</option>
+    </select>
+  </div>
+
+  <div style="margin-top:10px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Per-arm heatmap (pulls) / 每臂熱力圖
+    </div>
+    <table id="linucb-heatmap" style="border-collapse:collapse;font-size:11px;">
+      <thead>
+        <tr><th style="padding:2px 6px;">regime \ strategy</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:10px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Convergence (n_pulls / min_samples) / 收斂進度
+    </div>
+    <div id="linucb-convergence"></div>
+  </div>
+
+  <div id="linucb-shadow" style="margin-top:10px;display:none;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);">
+      Shadow compare / 影子比較
+    </div>
+    <div id="linucb-shadow-bar"></div>
+  </div>
+
+  <div class="phase4-card-footer">
+    <button id="linucb-migrate-btn" style="font-size:12px;">
+      Trigger migration / 觸發遷移
+    </button>
+    <button id="linucb-rollback-btn" style="font-size:12px;">
+      Rollback / 回滾
+    </button>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Render helpers / 渲染輔助函數
+  var STRATEGIES = ['ma_crossover','bb_reversion','bb_breakout','grid_trading','donchian_breakout'];
+  var REGIMES    = ['trending','ranging','volatile'];
+
+  function colorFor(pulls, max) {
+    if (!pulls || pulls <= 0) return '#30363d';
+    var ratio = Math.min(1.0, pulls / Math.max(1, max));
+    var g = Math.round(80 + 120 * ratio);
+    return 'rgb(40,' + g + ',80)';
+  }
+
+  function renderHeatmap(arms) {
+    var tbody = document.querySelector('#linucb-heatmap tbody');
+    var thead = document.querySelector('#linucb-heatmap thead tr');
+    if (!tbody || !thead) return;
+    tbody.innerHTML = '';
+    // header / 表頭
+    thead.innerHTML = '<th style="padding:2px 6px;">regime \\ strategy</th>' +
+      STRATEGIES.map(function(s){
+        return '<th style="padding:2px 6px;font-weight:normal;">'+s+'</th>';
+      }).join('');
+
+    var byKey = {};
+    var maxP = 1;
+    arms.forEach(function(a) { byKey[a.arm_id] = a; if (a.n_pulls > maxP) maxP = a.n_pulls; });
+
+    REGIMES.forEach(function(reg) {
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td style="padding:2px 6px;">'+reg+'</td>' +
+        STRATEGIES.map(function(strat) {
+          var key = reg + '__' + strat;
+          var a = byKey[key] || {n_pulls: 0};
+          return '<td style="padding:2px 6px;text-align:right;background:' +
+                 colorFor(a.n_pulls, maxP) + ';">' + (a.n_pulls || 0) + '</td>';
+        }).join('');
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderConvergence(arms, minSamples) {
+    var host = document.getElementById('linucb-convergence');
+    if (!host) return;
+    host.innerHTML = '';
+    arms.slice().sort(function(a,b){return b.n_pulls - a.n_pulls;}).forEach(function(a) {
+      var pct = Math.min(100, Math.round(100 * a.n_pulls / Math.max(1, minSamples)));
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0;';
+      row.innerHTML =
+        '<span style="flex:0 0 160px;">'+ a.arm_id +'</span>' +
+        '<span style="flex:1 1 auto;background:#30363d;border-radius:3px;overflow:hidden;height:8px;">' +
+          '<span style="display:block;height:100%;width:'+ pct +'%;background:#2ea043;"></span>' +
+        '</span>' +
+        '<span style="flex:0 0 48px;text-align:right;">'+ a.n_pulls +'</span>';
+      host.appendChild(row);
+    });
+  }
+
+  function renderShadow(shadow) {
+    var host = document.getElementById('linucb-shadow');
+    var bar = document.getElementById('linucb-shadow-bar');
+    if (!host || !bar) return;
+    if (!shadow || !shadow.active) { host.style.display = 'none'; return; }
+    host.style.display = 'block';
+    var color = shadow.decision === 'PROMOTE' ? '#2ea043'
+              : (shadow.decision === 'KEEP_CHAMPION' ? '#d29922' : '#6e7681');
+    bar.innerHTML =
+      '<div style="font-size:11px;padding:4px;border:1px solid '+color+';border-radius:4px;color:'+color+';">' +
+      (shadow.champion || '—') + ' vs ' + (shadow.challenger || '—') +
+      ' · Δ=' + (shadow.delta || 0).toFixed(4) +
+      ' · z=' + ((shadow.delta && shadow.sigma) ? (shadow.delta/shadow.sigma).toFixed(2) : '—') +
+      ' · n=' + (shadow.n || 0) +
+      ' · ' + shadow.decision +
+      '</div>';
+  }
+
+  function showGrey(reason) {
+    document.getElementById('linucb-status-dot').className = 'phase4-light-dot grey';
+    document.getElementById('linucb-active-version').textContent = reason || 'unavailable';
+    document.getElementById('linucb-total-pulls').textContent = '—';
+    document.getElementById('linucb-converged').textContent = '—';
+    document.getElementById('linucb-schema-hash').textContent = '—';
+  }
+
+  async function refresh() {
+    try {
+      var fn = (typeof ocApi === 'function') ? ocApi : null;
+      var data = fn
+        ? await fn('/api/v1/phase4/linucb')
+        : await (await fetch('/api/v1/phase4/linucb', { credentials:'same-origin' })).json();
+      if (!data || data.ok === false) { showGrey('ipc degraded'); return; }
+      document.getElementById('linucb-status-dot').className = 'phase4-light-dot green';
+      document.getElementById('linucb-active-version').textContent = data.active_version || 'v1_15';
+      document.getElementById('linucb-total-pulls').textContent = data.total_pulls || 0;
+      document.getElementById('linucb-converged').textContent =
+        (data.converged_arms || 0) + ' / ' + (data.arms || []).length;
+      document.getElementById('linucb-schema-hash').textContent = data.feature_schema_hash || '—';
+      document.getElementById('linucb-version-select').value = data.active_version || 'v1_15';
+      renderHeatmap(data.arms || []);
+      renderConvergence(data.arms || [], data.min_samples_per_arm || 100);
+      renderShadow(data.shadow || null);
+    } catch (e) {
+      showGrey('error');
+    }
+  }
+
+  document.getElementById('linucb-migrate-btn').addEventListener('click', function() {
+    if (!confirm('Trigger LinUCB arm space migration?\n觸發 LinUCB 臂空間遷移？')) return;
+    alert('Migration must be triggered via CLI (safety). 為安全起見，遷移須從 CLI 觸發。');
+  });
+  document.getElementById('linucb-rollback-btn').addEventListener('click', function() {
+    if (!confirm('Rollback to previous arm space?\n回滾到上一版臂空間？')) return;
+    alert('Rollback must be triggered via CLI (safety). 為安全起見，回滾須從 CLI 觸發。');
+  });
+
+  refresh();
+  setInterval(refresh, 30000);
+})();
+</script>

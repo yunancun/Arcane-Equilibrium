@@ -162,29 +162,80 @@
   </div>
 </div>
 
-<!-- ═══ Card slot 1: Teacher / 教师 ═══ -->
-<div class="phase4-card" id="phase4-card-teacher" data-module="teacher">
-  <div class="phase4-card-header">
-    <h3 class="phase4-card-title">&#x1F4DA; Claude Teacher / 教师代理</h3>
-    <span class="phase4-card-status"><span class="phase4-light-dot grey"></span>not started / 未启动</span>
-  </div>
-  <div class="phase4-card-placeholder">
-    Card placeholder — populated by sub-task 4-02 ... 4-06
-    / Card 占位符 — 由子任务 4-02 ... 4-06 填入
-  </div>
+<!-- ═══ Card slot 1: Teacher / 教师 (4-03 已接通 / wired) ═══ -->
+<div id="phase4-card-teacher-slot" data-module="teacher">
+  <!-- Injected from /static/cards/teacher_card.html at load / 加載時注入 -->
+  <div class="phase4-card-placeholder">loading teacher card… / 正在加载 Teacher 卡片…</div>
 </div>
+<script>
+(function() {
+  // Load the Teacher card partial into the slot above (4-03).
+  // 將 Teacher 卡片部件載入上方插槽（4-03）。
+  fetch('/static/cards/teacher_card.html', { credentials: 'same-origin' })
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(html) {
+      var slot = document.getElementById('phase4-card-teacher-slot');
+      if (!slot || !html) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      // Move card markup into slot
+      // 將卡片標記移入插槽
+      var card = tmp.querySelector('.phase4-card');
+      if (card) {
+        slot.innerHTML = '';
+        slot.appendChild(card);
+      }
+      // Execute inline scripts (loadTeacherCard function definition)
+      // 執行內嵌 script（定義 loadTeacherCard 函數）
+      var scripts = tmp.querySelectorAll('script');
+      scripts.forEach(function(s) {
+        var ns = document.createElement('script');
+        ns.textContent = s.textContent;
+        document.body.appendChild(ns);
+      });
+      // Initial fetch
+      // 首次拉取
+      if (typeof window.loadTeacherCard === 'function') {
+        window.loadTeacherCard();
+      }
+    })
+    .catch(function() { /* fail-soft */ });
+})();
+</script>
 
-<!-- ═══ Card slot 2: LinUCB / 多臂老虎机 ═══ -->
-<div class="phase4-card" id="phase4-card-linucb" data-module="linucb">
-  <div class="phase4-card-header">
-    <h3 class="phase4-card-title">&#x1F3B0; LinUCB Bandit / 多臂老虎机</h3>
-    <span class="phase4-card-status"><span class="phase4-light-dot grey"></span>not started / 未启动</span>
-  </div>
-  <div class="phase4-card-placeholder">
-    Card placeholder — populated by sub-task 4-07 ... 4-11
-    / Card 占位符 — 由子任务 4-07 ... 4-11 填入
-  </div>
+<!-- ═══ Card slot 2: LinUCB / 多臂老虎机 (4-06 已接通) ═══ -->
+<div id="phase4-card-linucb-slot" data-module="linucb">
+  <!-- Injected from /static/cards/linucb_card.html at load / 加載時注入 -->
+  <div class="phase4-card-placeholder">loading linucb card… / 正在加载 LinUCB 卡片…</div>
 </div>
+<script>
+(function() {
+  // Load the LinUCB card partial into the slot above.
+  // 將 LinUCB 卡片部件載入上方插槽。
+  fetch('/static/cards/linucb_card.html', { credentials: 'same-origin' })
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(html) {
+      var slot = document.getElementById('phase4-card-linucb-slot');
+      if (!slot || !html) return;
+      // Extract only the <div class="phase4-card"> block; execute any inline <script>.
+      // 取出 phase4-card 區塊並執行內嵌 script。
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      slot.innerHTML = '';
+      Array.prototype.forEach.call(tmp.childNodes, function(n) {
+        slot.appendChild(n.cloneNode(true));
+      });
+      // Re-run inline scripts (browsers don't auto-run injected <script> nodes).
+      // 重新執行內嵌 script（瀏覽器不會自動執行注入的 script）。
+      Array.prototype.forEach.call(slot.querySelectorAll('script'), function(orig) {
+        var s = document.createElement('script');
+        if (orig.src) s.src = orig.src; else s.textContent = orig.textContent;
+        orig.parentNode.replaceChild(s, orig);
+      });
+    })
+    .catch(function() { /* fail-soft */ });
+})();
+</script>
 
 <!-- ═══ Card slot 3: News / 新闻 ═══ -->
 <div class="phase4-card" id="phase4-card-news" data-module="news">
@@ -253,6 +304,12 @@
       }
       MODULES.forEach(function(m) { applyLight(m, data[m]); });
       showDegraded(!!data.degraded);
+      // Refresh per-card content (4-03 Teacher card; other cards register
+      // their own loaders the same way).
+      // 刷新每張卡片內容（4-03 Teacher card；其他卡片以相同方式註冊各自的 loader）。
+      if (typeof window.loadTeacherCard === 'function') {
+        try { window.loadTeacherCard(); } catch (e) { /* fail-soft */ }
+      }
     } catch (e) {
       // Fail-closed: any error → all grey + degraded banner.
       // Fail-closed：任何错误 → 全 grey + 显示 degraded 横幅。

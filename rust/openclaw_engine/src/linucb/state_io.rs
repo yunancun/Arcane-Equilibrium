@@ -181,9 +181,44 @@ pub async fn upsert_arm(
     Ok(())
 }
 
+/// Read the current active arm_space_version from the most recent migration row.
+/// Defaults to "v1_15" if no migration has run yet. Read-only; never writes.
+/// 從 learning.linucb_migrations 最新一筆讀取當前啟用的 arm_space_version。
+/// 若無任何遷移記錄，預設 "v1_15"。純讀，不寫。
+///
+/// Used by 4-06 Card backend route to display the active version label.
+/// 4-04 inference remains hardcoded v1_15; this helper is for monitoring only.
+pub async fn current_active_version(pool: &DbPool) -> Result<String, LinUcbIoError> {
+    let pg = pool.get().ok_or(LinUcbIoError::NoPool)?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT to_version \
+         FROM learning.linucb_migrations \
+         ORDER BY migration_id DESC \
+         LIMIT 1",
+    )
+    .fetch_optional(pg)
+    .await
+    .map_err(|e| LinUcbIoError::Db(e.to_string()))?;
+    Ok(row.map(|(v,)| v).unwrap_or_else(default_active_version))
+}
+
+/// Pure helper: default arm_space_version when no migration has been logged.
+/// Extracted for unit testing without a PG pool.
+/// 純 helper：無遷移記錄時的預設版本。分離以便無 PG 單元測試。
+pub fn default_active_version() -> String {
+    "v1_15".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_current_active_version_defaults_to_v1_15_when_no_migration() {
+        // Contract: with no migration row, the active version is "v1_15".
+        // 契約：無遷移記錄時，預設版本為 "v1_15"。
+        assert_eq!(default_active_version(), "v1_15");
+    }
 
     #[test]
     fn test_load_arms_schema_mismatch_fail_closed() {
