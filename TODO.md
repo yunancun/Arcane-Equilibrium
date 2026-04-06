@@ -93,11 +93,75 @@ Session 12 PNL-1~7 + DB-RUN-1~7 + Session 13 R3 收尾共 22 個 commits 全部 
 - [ ] **WP-E4/T-P1-1 殘餘** event_consumer 完整事件循環整合測試（fixture harness，獨立 sprint）
 - [x] **I-22 殘留** event_consumer mod.rs 785 → 628（dispatch.rs + setup.rs 提取）
 
-### WP 子檢查清單回鏈（223 sub-items）
+### WP 真實 Open 清單（2026-04-06 審計後 · 103 項）
 
-詳見 `docs/audits/2026-04-06_consolidated_remediation_report.md` §10：
-- WP-F GUI 47 / WP-G hardcoded 43 / WP-E4 tests 34 / WP-I docs 42
-- WP-E5 opt 20 / WP-B sec 12 / WP-CC 8 / WP-FA 5 / WP-BB 3
+> ⚠️ 原始 backlog 223 項已在 Session 13 後實際核查。以下為真實仍存在的問題，
+> **不要重新審計全部 223 項**，直接從下方清單執行。
+> 詳細子項見 `docs/audits/2026-04-06_consolidated_remediation_report.md` §10。
+
+#### WP-F — GUI（~32 項仍存在，原 47）
+P0（4項，全未修）：
+- [ ] WP-F/D-05 Apply-AI 按鈕雙 `display:none` 永不可見
+- [ ] WP-F/UX-01 刪除策略無 confirm modal
+- [ ] WP-F/UX-02 Danger Zone（重置冷卻/Unhalt）無 confirm
+- [ ] WP-F/UX-03 三個 Save 按鈕共用 `saveRiskConfig` → 互相覆蓋
+
+P1（18 項）：
+- [ ] WP-F/D-01 applyAIAdvice() 只有 toast，無實際效果
+- [ ] WP-F/D-02/03/04 Feed/Demo/Scanner 三按鈕 no-op
+- [ ] WP-F/D-07 index.html Legacy Bearer Token 輸入面板仍在
+- [ ] WP-F/D-09 策略 Delete 按鈕無 confirm
+- [ ] WP-F/UX-04/05/06 Save/Submit 無 loading/disabled 狀態
+- [ ] WP-F/UX-07/08/09/10 術語混亂（Demo/Paper/Session 多義）
+- [ ] WP-F/AH-01 Danger Zone 埋在頁面最底部
+- [ ] WP-F/AH-04 Feed/Demo/Scanner 外觀像 toggle 但不是
+- [ ] WP-F/AH-05 Apply 標籤誤導
+- [ ] WP-F/AH-06 ⚠️ Risk-tab 每 15s 強制覆蓋用戶輸入
+- [ ] WP-F/AH-07 策略 Delete 與 Stop/Pause 緊鄰無確認
+
+P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
+
+#### WP-G — 硬編碼（4 項仍存在，原 43，**88% 已完成**）
+- [ ] WP-G/HC-K1 kelly_sizer.rs `REFERENCE_ATR_PCT = 0.02`
+- [ ] WP-G/HC-K2 kelly_sizer.rs `VOL_MULT_FLOOR/CEIL = 0.5/1.5`
+- [ ] WP-G/HC-T1 thompson_sampling.py `lam_0 = 3.0`
+- [ ] WP-G/HC-T2 thompson_sampling.py `alpha_0 = 3.0`
+
+#### WP-E4 — 測試覆蓋（13 項仍缺失，原 34）
+- [ ] WP-E4/T-P2-5 rest_poller.rs 零測試
+- [ ] WP-E4/T-P2-6 quality_writer.rs 零測試
+- [ ] WP-E4/T-P2-9 PyO3 bridge 測試目錄完全缺失
+- [ ] WP-E4/T-P2-10 Rust `#[should_panic]` panic-path 測試
+- [ ] WP-E4/T-P2-11 Arc/Mutex 並發安全測試
+- [ ] WP-E4/T-Q3/Q4/Q7/Q8 覆蓋品質（error-path / 並發 / smoke / PyO3）
+- [ ] WP-E4/T-I1~I4 測試基礎設施（tarpaulin / CI 門禁 / 文檔）
+
+#### WP-B+CC — 安全/合規（12 項仍存在，原 20）
+- [ ] WP-B/SEC-05 GUI innerHTML XSS（架構性，136 處，live 前必修）
+- [ ] WP-B/SEC-08 IPC socket 無認證（P1）
+- [ ] WP-B/SEC-17 OPENCLAW_ALLOW_MAINNET 2FA（架構決策待定）
+- [ ] WP-B/SEC-21 Cookie `secure=True`（HTTPS 上線後）
+- [ ] WP-B/SEC-04/06/13 需深度 E3 審查（4 項）
+- [ ] WP-CC/FS-1 / BI-1 / P9 / SM-1（4 項 CC 仍存在）
+
+#### WP-E5 — 代碼品質（4 項仍存在，原 20，**80% 已完成**）
+- [ ] tick_pipeline.rs 2116 行（超限 1200）
+- [ ] governance_hub.py 1927 行（超限）
+- [ ] WP-E5/D1~D4 dead code（funding_arb / grid / governance_hub DEPRECATED 方法）
+
+#### WP-BB — Bybit API（2 項，原 3）
+- [ ] WP-BB/W-2 公共 WS 硬編碼 Linear，缺 Spot/Inverse
+- [ ] WP-BB/S-1 無主動速率限制減速
+
+#### WP-FA — 功能規格（1 項，原 5，**80% 已完成**）
+- [ ] FA GAP-10 Provider pricing table（Phase 4）
+
+#### WP-I — 文檔衛生（35 項，原 42，低優先級批次處理）
+主要：SCRIPT_INDEX.md 不存在（P1）/ docs/audit 與 docs/audits 目錄衝突 /
+8 個 .DS_Store 已提交 / worklog 碎片未合併 / CLAUDE_REFERENCE.md 陳舊
+詳細子項見報告 §10.4。
+
+#### WP-MIT — DB/ML（✅ 0 項，全部完成）
 
 ---
 
