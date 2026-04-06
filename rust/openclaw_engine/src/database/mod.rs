@@ -210,14 +210,10 @@ pub enum MarketDataMsg {
         vwap: f64,
         max_single_qty: f64,
     },
-    /// Liquidation event (F3: was missing) / 清算事件
-    Liquidation {
-        ts_ms: u64,
-        symbol: String,
-        side: String,
-        qty: f64,
-        price: f64,
-    },
+    // GAP: Liquidation variant removed 2026-04-06 — Bybit V5 `liquidation.{symbol}`
+    // topic poisoned the entire WS connection (commit 29fc1ef) and no downstream
+    // consumer exists. The market.liquidations PG table is reserved for re-enable
+    // after the topic is verified safe and a real consumer materializes.
     /// Funding rate / 資金費率
     FundingRate {
         ts_ms: u64,

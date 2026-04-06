@@ -67,12 +67,9 @@ pub enum TopicType {
     Orderbook50,
     /// Public trades / 公開交易
     PublicTrade,
-    /// Liquidation events / 清算事件
-    Liquidation,
-    /// Price limit updates / 價格限制更新
-    PriceLimit,
-    /// ADL alert notifications / ADL 通知
-    AdlNotice,
+    // GAP: Liquidation / PriceLimit / AdlNotice variants removed 2026-04-06.
+    // Bybit V5 returned "handler not found" for these topics, poisoning the
+    // entire WS connection (commit 29fc1ef). No consumer exists.
 }
 
 // ---------------------------------------------------------------------------
@@ -114,30 +111,6 @@ pub fn public_trade_topic(symbol: &str) -> String {
     format!("publicTrade.{}", symbol)
 }
 
-/// Build the liquidation topic for a symbol.
-/// 為一個交易對構建清算主題。
-///
-/// Example: `liquidation_topic("BTCUSDT")` → `"liquidation.BTCUSDT"`
-pub fn liquidation_topic(symbol: &str) -> String {
-    format!("liquidation.{}", symbol)
-}
-
-/// Build the price limit topic for a symbol.
-/// 為一個交易對構建價格限制主題。
-///
-/// Example: `price_limit_topic("BTCUSDT")` → `"price-limit.BTCUSDT"`
-pub fn price_limit_topic(symbol: &str) -> String {
-    format!("price-limit.{}", symbol)
-}
-
-/// Build the ADL notice topic for a symbol.
-/// 為一個交易對構建 ADL 通知主題。
-///
-/// Example: `adl_notice_topic("BTCUSDT")` → `"adl-notice.BTCUSDT"`
-pub fn adl_notice_topic(symbol: &str) -> String {
-    format!("adl-notice.{}", symbol)
-}
-
 /// Generate the full subscription list for a symbol with all topic types.
 /// 為一個交易對生成包含所有主題類型的完整訂閱列表。
 ///
@@ -157,21 +130,11 @@ pub fn full_subscription_list_with_intervals(
     topics.push(ticker_topic(symbol));
     topics.push(orderbook_topic(symbol));
     topics.push(public_trade_topic(symbol));
-    // REMOVED: liquidation topic — Bybit returns "handler not found" which poisons
-    // the entire WS connection (all other subscriptions stop receiving data).
-    // 已移除：liquidation topic — Bybit 返回 "handler not found"，會毒化整個 WS 連接。
-    // Note: price-limit and adl-notice are opt-in via `extended_subscription_list()`.
-    // 注意：price-limit 和 adl-notice 通過 `extended_subscription_list()` 可選訂閱。
+    // GAP: liquidation/price-limit/adl-notice topics permanently removed
+    // (commit 29fc1ef) — Bybit returns "handler not found" which silently
+    // poisons the entire WS connection. Re-add only after confirming a
+    // working topic name on a stand-alone test connection.
     topics
-}
-
-/// Extended subscription list including price-limit and ADL notice (opt-in).
-/// 擴展訂閱列表，包含 price-limit 和 ADL notice（可選）。
-pub fn extended_subscription_list(symbol: &str) -> Vec<String> {
-    // REMOVED: price-limit and adl-notice — Bybit returns "handler not found"
-    // which poisons the entire WS connection (all other subscriptions stop receiving data).
-    // 已移除：price-limit 和 adl-notice — Bybit 返回 "handler not found"，會毒化整個 WS 連接。
-    full_subscription_list(symbol)
 }
 
 /// Generate subscription lists for multiple symbols.
@@ -248,13 +211,6 @@ mod tests {
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
-    }
-
-    #[test]
-    fn test_extended_subscription_list() {
-        let topics = extended_subscription_list("BTCUSDT");
-        // Extended now equals full (price-limit + adl-notice also removed: Bybit handler not found)
-        assert_eq!(topics.len(), 7);
     }
 
     /// Test multi-symbol subscription list.

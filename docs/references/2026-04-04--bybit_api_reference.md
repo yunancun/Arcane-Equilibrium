@@ -940,7 +940,7 @@ Client 創建：`LeverageTokenClient::new(client: Arc<BybitRestClient>)`
 Topic 生成函數（`multi_interval_ws.rs`）：
 - `kline_topics(symbol, intervals)`, `ticker_topic(symbol)`, `orderbook_topic(symbol)`
 - `public_trade_topic(symbol)`
-- ~~`liquidation_topic()`, `price_limit_topic()`, `adl_notice_topic()`~~ — 函數保留但不再使用
+- ~~`liquidation_topic()`, `price_limit_topic()`, `adl_notice_topic()`~~ — **已刪除（2026-04-06）**：dead code 連同 `MarketDataMsg::Liquidation` + `flush_liquidations` writer + `extended_subscription_list` 一起清除。`market.liquidations` 表保留為 reserved-for-future。
 - `configure_multi_interval(ws, symbols)` — 一鍵為多交易對配置全部訂閱
 
 ---
