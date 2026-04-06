@@ -965,36 +965,71 @@ impl TickPipeline {
                 let ind = indicators.as_ref();
                 let pos = self.paper_state.get_position(&event.symbol);
 
-                // W-3: LinUCB read-only arm selection (metadata only — does NOT
-                // affect any trading decision). Fail-soft: any error → None →
-                // SQL NULL at write.
-                // W-3：LinUCB 唯讀 arm 選擇（僅 metadata，不影響任何交易決策）。
-                // Fail-soft：任何錯誤 → None → 寫入 SQL NULL。
+                // W-3 + hotfix: LinUCB read-only arm selection (metadata only —
+                // does NOT affect any trading decision). Fail-soft: any error →
+                // None → SQL NULL at write.
+                //
+                // HOTFIX (2026-04-07): signal.source is a signal RULE name
+                // (rsi_exit / ma_crossover / bollinger_reversion / macd_crossover / ...),
+                // NOT a v1_15 strategy name. We map signal rule → strategy via a
+                // static whitelist; unmapped rules silently emit None (no warn spam).
+                // Mapping is conservative — only signals that clearly belong to one
+                // of the 5 registered strategies are mapped; everything else returns
+                // None and the arm column is NULL. This keeps the LinUCB metadata
+                // channel honest without blocking any trading decision.
+                //
+                // W-3 + hotfix：LinUCB 唯讀 arm 選擇（僅 metadata，不影響交易決策）。
+                // HOTFIX (2026-04-07)：signal.source 是 signal rule 名
+                // (rsi_exit / ma_crossover / bollinger_reversion / ...)，
+                // 不是 v1_15 strategy 名。用靜態白名單映射 signal rule → strategy；
+                // 未映射的 rule 靜默回 None（不噴 warn）。只對明確屬於已註冊 5 策略
+                // 之一的 signal 映射；其他一律 None 寫 SQL NULL。
                 let (linucb_arm_id, linucb_confidence_bound) = if let Some(ref rt) = self.linucb {
-                    let regime = ind
-                        .and_then(|i| i.hurst.as_ref())
-                        .map(|h| h.regime.clone())
-                        .unwrap_or_else(|| "random_walk".to_string());
-                    let strategy = signals[0].source.clone();
-                    let ctx = crate::linucb::LinUcbRuntime::build_context_features(
-                        ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent),
-                        ind.and_then(|i| i.rsi_14),
-                        ind.and_then(|i| i.bollinger.as_ref()).map(|b| b.bandwidth),
-                        ind.and_then(|i| i.hurst.as_ref()).map(|h| h.hurst),
-                        ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx),
-                        None, // vol_ratio not available in IndicatorSnapshot / 暫無 vol_ratio
-                        event.ts_ms as i64,
-                    );
-                    match rt.select_for_intent(&regime, &strategy, &ctx) {
-                        Some(sel) => (Some(sel.arm_id), Some(sel.ucb)),
-                        None => {
-                            tracing::warn!(
-                                regime = %regime,
-                                strategy = %strategy,
-                                "linucb arm not found, emitting NULL"
+                    let mapped_strategy: Option<&'static str> = match signals[0].source.as_str() {
+                        // ma_crossover strategy
+                        "ma_crossover" => Some("ma_crossover"),
+                        // bb_reversion strategy
+                        "bollinger_reversion" => Some("bb_reversion"),
+                        // bb_breakout strategy — no unique signal rule yet (uses
+                        // bollinger_reversion direction?), map conservatively None
+                        // grid_trading strategy — no signal rule (drives via ticks)
+                        // funding_arb strategy — no signal rule (drives via REST)
+                        // All other signal rules (rsi_exit / macd_crossover /
+                        // rsi_overbought_oversold / macd_exhaustion / …) do NOT
+                        // map to any v1_15 arm → None → SQL NULL.
+                        _ => None,
+                    };
+                    match mapped_strategy {
+                        Some(strategy) => {
+                            let regime = ind
+                                .and_then(|i| i.hurst.as_ref())
+                                .map(|h| h.regime.clone())
+                                .unwrap_or_else(|| "random_walk".to_string());
+                            let ctx = crate::linucb::LinUcbRuntime::build_context_features(
+                                ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent),
+                                ind.and_then(|i| i.rsi_14),
+                                ind.and_then(|i| i.bollinger.as_ref()).map(|b| b.bandwidth),
+                                ind.and_then(|i| i.hurst.as_ref()).map(|h| h.hurst),
+                                ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx),
+                                None, // vol_ratio not available in IndicatorSnapshot
+                                event.ts_ms as i64,
                             );
-                            (None, None)
+                            match rt.select_for_intent(&regime, strategy, &ctx) {
+                                Some(sel) => (Some(sel.arm_id), Some(sel.ucb)),
+                                None => {
+                                    // Unexpected: strategy is whitelisted but arm not
+                                    // found. Debug-level log (not warn) to avoid noise.
+                                    // 意外：策略已白名單但 arm 找不到，debug 級別降噪。
+                                    tracing::debug!(
+                                        regime = %regime,
+                                        strategy = %strategy,
+                                        "linucb arm not found despite whitelist, emitting NULL"
+                                    );
+                                    (None, None)
+                                }
+                            }
                         }
+                        None => (None, None),
                     }
                 } else {
                     (None, None)

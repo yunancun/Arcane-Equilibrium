@@ -203,48 +203,74 @@ W2 commit 已將 backend 3 個 endpoints 改為 HTTP 410 Gone stub + GUI card �
 
 ---
 
-## Phase 4 — Claude Teacher + LinUCB + News + DL-3（W13-15）
+## Phase 4 — Claude Teacher + LinUCB + News + DL-3（✅ CODE-COMPLETE 2026-04-07）
 
-> 22 子任務拆解見：`docs/references/2026-04-06--phase4_execution_plan_v2.md`
-> Q1/Q2/Q3/Q4 operator 已拍板 · Q3=hierarchical warm-start (sufficient-statistics 父→子攤分 + γ=0.5 + shadow compare + 自動 regret 回滾)
-> 原 CONF-D 已併入 4-15（IPC `update_strategy_params` 擴充承接 LinUCB confidence override）
+> ★★★★ **22/22 子任務全部 committed**（4-00 ~ 4-21） · commit range `945f4ad..435930f`
+> 4-21 多角色 audit **CONDITIONAL APPROVE** (E2/E4/E5/QA/PM approve · AI-E conditional pending 4.1)
+> 審計報告：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`
+> 執行計劃：`docs/references/2026-04-06--phase4_execution_plan_v2.md`
+> 測試：engine lib **441 → 589 (+148)** · phase4_integration 3/3 · phase4 routes 24→29 · 0 regression
 
 **Group 0 — Dashboard 骨架**
 - [x] **4-00** Phase 4 Dashboard tab + `_dashboard_card.html` + `get_phase4_status` IPC stub — `d36116f`
 
 **Group 1 — Claude Teacher**
-- [x] **4-01** Teacher directive Rust 接口 + ExperimentLedger 寫入 — `31fb227`
-  - LlmClient trait + AnthropicClient (fail-closed) + MockClient · Directive parser 4 types · BudgetTracker.record_usage fail-closed · 8 tests
-- [ ] **4-02** Directive 解析 + GovernanceHub 風控過濾（最高風險，E3 強制介入）(E1 · 2d)
-- [ ] **4-03** directive_executions 效果追蹤 + Teacher Card (E1+E1a · 2d)
+- [x] **4-01** Teacher directive Rust 接口 + ExperimentLedger — `31fb227`
+- [x] **4-02** Directive applier + GovernanceHub veto + P0/P1 denylist (15 tests，ARCH-RC1 sentinel) — `996a0cb`
+- [x] **4-03** directive_executions outcome tracker + V012 + backfill + Teacher Card — `b16335f`
 
 **Group 2 — LinUCB**
 - [x] **4-04** LinUCB Rust inference + arm space v1_15 + versioned state + feature_schema_hash fail-closed — `31fb227`
-- [ ] **4-05** LinUCB Python trainer + 收斂監控 (E1 · 2d)
-- [ ] **4-06** Model Performance rolling + LinUCB Card + arm dropdown + warm-start migration script + shadow compare + 自動 regret 回滾 (E1+E1a · 3d)
+- [x] **4-05** LinUCB Python trainer + 收斂監控 + BYTEA codec cross-language pin `sha256:07fe5f19cb66a0af` — `996a0cb`
+- [x] **4-06** LinUCB warm-start migration (hierarchical §1.3.3 公式) + shadow compare + auto regret rollback + Card — `b16335f`
 
 **Group 3 — News**
 - [x] **4-07** News provider abstract + CryptoPanic free + RSS + mock — `31fb227`
-- [ ] **4-08** Headline dedup (SHA1[:16] + 24h) + severity (keyword × source) (E1 · 2d)
-- [ ] **4-09** Triple-route 消費（Guardian halt ≥0.8 / Regime feature / Learning context）(E1 · 2d)
-- [ ] **4-10** News Card + provider quota 健康監控 (E1a · 1d)
+- [x] **4-08** Headline dedup (SHA1[:16]+24h) + severity (keyword × source) + pipeline — `996a0cb`
+- [x] **4-09** NewsRouter triple-route (Guardian/Regime/Learning) — `b16335f`
+- [x] **4-10** News Card + provider quota 健康監控 — `122239b`
 
 **Group 4 — DL-3 Foundation Models**
-- [x] **4-11** TimesFM/Chronos async wrapper + foundation_model_features 表 — `31fb227`
-- [ ] **4-12** DL-3 A/B 框架 vs Phase 3 Scorer baseline (E1 · 2d)
-- [ ] **4-13** DL-3 降級邏輯 + Go/No-Go 報告腳本（AI-E 簽核）(E1+AI-E · 1d)
-- [ ] **4-14** DL-3 Card + 決策展示 (E1a · 1d)
+- [x] **4-11** TimesFM/Chronos async wrapper + foundation_model_features 表 (V011) — `31fb227`
+- [x] **4-12** DL-3 A/B 框架 + decision matrix + fail-soft — `996a0cb`
+- [x] **4-13** DL-3 Go/No-Go report generator + CLI wrapper — `b16335f`
+- [x] **4-14** DL-3 Card + 決策展示 — `122239b`
 
 **Group 5 — Cross-cutting**
-- [x] **4-15** AI Budget tracker (Rust) + V010 + IPC `update_ai_budget_config` / `get_ai_budget_status` + 三段降級 — `b4cfade`
-- [ ] **4-16** Q1 GUI: Risk-tab AI Budget 區塊（綠/黃/紅進度條 + per-agent 配額 + reset month）(E1a · 2d)
-- [x] **4-17** Provider pricing table 綁定 (`settings/ai_pricing.yaml` · 原 FA GAP-10) — `31fb227`
-- [ ] **4-18** Decision_context 接線（claude_directive_id / linucb_arm_id / linucb_confidence_bound + news 欄位）(E1 · 1d)
-- [ ] **4-19** test_full_learning_loop 集成測試（3 個端到端 case）(E4 · 2d)
+- [x] **4-15** AI Budget tracker (Rust) + V010 + IPC + 三段降級 — `b4cfade`
+- [x] **4-16** AI Budget GUI Risk-tab 區塊 + ARCH-RC1 reference path — `996a0cb`
+- [x] **4-17** Provider pricing table 綁定 (`settings/ai_pricing.yaml`) — `31fb227`
+- [x] **4-18** DecisionContextMsg +5 Phase 4 columns + INSERT SQL extended — `122239b`
+- [x] **4-19** test_full_learning_loop 集成測試（3 e2e cases）— `4a5ef41`
 
 **Group 6 — 週報 + 簽收**
-- [ ] **4-20** 週報 plain-English generator + operator approval flow + weekly_review_log (E1+E1a · 2d)
-- [ ] **4-21** E2 + E4 + E5 + AI-E + QA + PM 最終簽收 (2d)
+- [x] **4-20** 週報 plain-English generator + V013 + operator approval flow — `435930f`
+- [x] **4-21** 多角色 final sign-off audit (E2/E4/E5/AI-E/QA/PM) — CONDITIONAL APPROVE · audit doc committed
+
+**W4 wiring sweep** — `435930f`
+- [x] **W-1** GovernanceCoreWrapper + PaperSessionCommandSink production impls
+- [x] **W-2** GuardianHaltCheckImpl + LearningContextSinkImpl + NewsContextSnapshot (shared halted atomic)
+- [x] **W-3** LinUcbRuntime + intent_processor + tick_pipeline decision_context producer wiring
+- [x] **W-4** DecisionContextMsg news_severity + hours_since_last_major_news populator
+- [x] **main.rs Arc 構造** + EventConsumerDeps +2 fields (linucb_runtime, news_snapshot) + live boot log 驗證
+
+### Phase 4 Live 前 3 個 blocker（P0）
+- [ ] **E3 Security Audit R6** — Teacher hard-boundary 100% veto 驗證 (1.5d)
+- [ ] **Phase 4.1 Claude API Consumer Loop** — DirectiveApplier live invoker（async task pulling Claude API + fetching pending directives from DB + feeding to applier）(2d)
+- [ ] **7+ days paper trading 數據累積** — DoD A/C/E metric 觀察期（並行可做）
+
+### Phase 4 P1/P2 follow-up（非 blocker）
+- [ ] **4-06 LinUCB live warm-start deployment** — script 已交付，等第一次真實 v1→v2 遷移時觸發
+- [ ] **tick_pipeline.rs refactor** — 2211 行超 §九 硬上限 1200，split LinUCB + decision context producer 到獨立模組（~1d，P2 post-merge）
+- [ ] **DirectiveApplier main.rs 構造** — wrapper 已就位但未 Arc 構造，等 4.1 loop 實作
+- [ ] **NewsPipeline periodic run_once task spawn** — provider 已交付但無 scheduler loop
+
+殘留延後（前 phase 帶過來，非阻塞）：
+- [ ] 2-11 actual training（需引擎運行收集 `trading.fills`）
+- [ ] 2-PYO3-1 ContextDistiller PyO3 接入
+- [ ] ort crate activation（首個 ONNX 模型訓練後一行啟用）
+- [ ] 3b-07 BH-FDR 多重比較校正
+- [ ] 3b-08 Grid 多目標 Pareto
 
 殘留延後（前 phase 帶過來，非阻塞）：
 - [ ] 2-11 actual training（需引擎運行收集 `trading.fills`）
