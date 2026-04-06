@@ -38,16 +38,48 @@ impl Default for GridTradingParams {
 impl StrategyParams for GridTradingParams {
     fn param_ranges() -> Vec<ParamRange> {
         vec![
-            ParamRange { name: "cooldown_ms".into(), min: 30_000.0, max: 600_000.0, step: Some(30_000.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "qty_per_grid".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
-            ParamRange { name: "max_inventory".into(), min: 1.0, max: 20.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "ou_lookback".into(), min: 20.0, max: 200.0, step: Some(10.0), agent_adjustable: true, db_persisted: true },
+            ParamRange {
+                name: "cooldown_ms".into(),
+                min: 30_000.0,
+                max: 600_000.0,
+                step: Some(30_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "qty_per_grid".into(),
+                min: 0.001,
+                max: 1e12,
+                step: None,
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "max_inventory".into(),
+                min: 1.0,
+                max: 20.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "ou_lookback".into(),
+                min: 20.0,
+                max: 200.0,
+                step: Some(10.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.max_inventory < 1.0 { return Err("max_inventory must be >= 1".into()); }
-        if self.ou_lookback < 10 { return Err("ou_lookback must be >= 10".into()); }
+        if self.max_inventory < 1.0 {
+            return Err("max_inventory must be >= 1".into());
+        }
+        if self.ou_lookback < 10 {
+            return Err("ou_lookback must be >= 10".into());
+        }
         Ok(())
     }
 }
@@ -182,7 +214,9 @@ impl GridTrading {
             ticks_since_health_check: 0,
             out_of_range_count: 0,
             max_out_of_range: 50,
-            prev_cross_idx: None, prev_inventory: 0.0, prev_last_trade_ms: 0,
+            prev_cross_idx: None,
+            prev_inventory: 0.0,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -209,7 +243,9 @@ impl GridTrading {
             ticks_since_health_check: 0,
             out_of_range_count: 0,
             max_out_of_range: 50,
-            prev_cross_idx: None, prev_inventory: 0.0, prev_last_trade_ms: 0,
+            prev_cross_idx: None,
+            prev_inventory: 0.0,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -249,7 +285,9 @@ impl GridTrading {
             ticks_since_health_check: 0,
             out_of_range_count: 0,
             max_out_of_range: 50,
-            prev_cross_idx: None, prev_inventory: 0.0, prev_last_trade_ms: 0,
+            prev_cross_idx: None,
+            prev_inventory: 0.0,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -308,10 +346,16 @@ impl GridTrading {
                 // 幾何模式需確保下界 > 0
                 (lo.max(price * 0.01), hi)
             } else {
-                (price * (1.0 - ADAPTIVE_RANGE_PCT), price * (1.0 + ADAPTIVE_RANGE_PCT))
+                (
+                    price * (1.0 - ADAPTIVE_RANGE_PCT),
+                    price * (1.0 + ADAPTIVE_RANGE_PCT),
+                )
             }
         } else {
-            (price * (1.0 - ADAPTIVE_RANGE_PCT), price * (1.0 + ADAPTIVE_RANGE_PCT))
+            (
+                price * (1.0 - ADAPTIVE_RANGE_PCT),
+                price * (1.0 + ADAPTIVE_RANGE_PCT),
+            )
         };
 
         self.grid_levels = build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode);
@@ -363,7 +407,11 @@ impl GridTrading {
         let fee_floor = 2.0 * FEE_PCT * mu;
         let step = ou_step.max(fee_floor);
 
-        if step > 0.0 && mu > 0.0 { Some(step) } else { None }
+        if step > 0.0 && mu > 0.0 {
+            Some(step)
+        } else {
+            None
+        }
     }
 
     /// Update grid spacing based on OU model (V2). Respects current spacing_mode.
@@ -382,7 +430,11 @@ impl GridTrading {
                     // Linear: center on mu with equal dollar steps.
                     // 線性：以 mu 為中心，等差步長。
                     let lower = mu - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
-                    self.grid_levels = build_linear_levels(lower, lower + step * (DEFAULT_GRID_COUNT as f64 - 1.0), DEFAULT_GRID_COUNT);
+                    self.grid_levels = build_linear_levels(
+                        lower,
+                        lower + step * (DEFAULT_GRID_COUNT as f64 - 1.0),
+                        DEFAULT_GRID_COUNT,
+                    );
                 }
                 GridSpacingMode::Geometric => {
                     // Geometric: center on mu, derive lower/upper from step size.
@@ -421,9 +473,15 @@ impl GridTrading {
 }
 
 impl Strategy for GridTrading {
-    fn name(&self) -> &str { "grid_trading" }
-    fn is_active(&self) -> bool { self.active }
-    fn set_active(&mut self, active: bool) { self.active = active; }
+    fn name(&self) -> &str {
+        "grid_trading"
+    }
+    fn is_active(&self) -> bool {
+        self.active
+    }
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
 
     /// RC-04: Revert net_inventory, last_cross_idx, last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 net_inventory、last_cross_idx、last_trade_ms。
@@ -523,8 +581,12 @@ impl Strategy for GridTrading {
         let p: GridTradingParams = serde_json::from_str(json).map_err(|e| e.to_string())?;
         self.update_params(p)
     }
-    fn get_params_json(&self) -> String { serde_json::to_string(&self.get_params()).unwrap_or_default() }
-    fn param_ranges_json(&self) -> String { serde_json::to_string(&GridTradingParams::param_ranges()).unwrap_or_default() }
+    fn get_params_json(&self) -> String {
+        serde_json::to_string(&self.get_params()).unwrap_or_default()
+    }
+    fn param_ranges_json(&self) -> String {
+        serde_json::to_string(&GridTradingParams::param_ranges()).unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -596,7 +658,8 @@ mod tests {
         let mut g = GridTrading::new(49000.0, 51000.0);
         // Fill price history
         for i in 0..60 {
-            g.price_history.push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
+            g.price_history
+                .push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
         }
         g.update_ou_spacing();
         assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
@@ -743,11 +806,7 @@ mod tests {
 
         // Verify geometric property: constant ratio between consecutive levels.
         // 驗證幾何特性：相鄰層級間比率恆定。
-        let ratios: Vec<f64> = g
-            .grid_levels
-            .windows(2)
-            .map(|w| w[1] / w[0])
-            .collect();
+        let ratios: Vec<f64> = g.grid_levels.windows(2).map(|w| w[1] / w[0]).collect();
         let first_ratio = ratios[0];
         for (i, &r) in ratios.iter().enumerate() {
             assert!(
@@ -779,11 +838,7 @@ mod tests {
 
         // Verify geometric property.
         // 驗證幾何特性。
-        let ratios: Vec<f64> = g
-            .grid_levels
-            .windows(2)
-            .map(|w| w[1] / w[0])
-            .collect();
+        let ratios: Vec<f64> = g.grid_levels.windows(2).map(|w| w[1] / w[0]).collect();
         let first_ratio = ratios[0];
         for &r in &ratios {
             assert!((r - first_ratio).abs() < 1e-10);
@@ -791,16 +846,28 @@ mod tests {
     }
 
     #[test]
-    fn test_grid_param_ranges() { assert!(!GridTradingParams::param_ranges().is_empty()); }
+    fn test_grid_param_ranges() {
+        assert!(!GridTradingParams::param_ranges().is_empty());
+    }
     #[test]
     fn test_grid_validate() {
         assert!(GridTradingParams::default().validate().is_ok());
-        assert!(GridTradingParams { max_inventory: 0.5, ..Default::default() }.validate().is_err());
+        assert!(GridTradingParams {
+            max_inventory: 0.5,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
     }
     #[test]
     fn test_grid_update() {
         let mut g = GridTrading::new(100.0, 110.0);
-        assert!(g.update_params(GridTradingParams { max_inventory: 10.0, ..Default::default() }).is_ok());
+        assert!(g
+            .update_params(GridTradingParams {
+                max_inventory: 10.0,
+                ..Default::default()
+            })
+            .is_ok());
         assert!((g.get_params().max_inventory - 10.0).abs() < 0.01);
     }
 }

@@ -92,23 +92,50 @@ pub struct DatabaseConfig {
 }
 
 fn default_database_url() -> String {
-    std::env::var("OPENCLAW_DATABASE_URL")
-        .unwrap_or_else(|_| String::new())
+    std::env::var("OPENCLAW_DATABASE_URL").unwrap_or_else(|_| String::new())
 }
-fn default_pool_max() -> u32 { 5 }
-fn default_pool_min() -> u32 { 2 }
-fn default_connect_timeout() -> u64 { 5000 }
-fn default_batch_flush() -> u64 { 2000 }
-fn default_feature_upsert() -> u64 { 1000 }
-fn default_drift_check() -> u64 { 300 }
-fn default_max_failures() -> u32 { 3 }
-fn default_true() -> bool { true }
-fn default_psi_warning() -> f64 { 0.1 }
-fn default_psi_alert() -> f64 { 0.2 }
-fn default_adwin_delta() -> f64 { 0.05 }
-fn default_adwin_min_width() -> u32 { 100 }
-fn default_adwin_consecutive() -> u32 { 3 }
-fn default_adwin_burnin() -> u32 { 30 }
+fn default_pool_max() -> u32 {
+    5
+}
+fn default_pool_min() -> u32 {
+    2
+}
+fn default_connect_timeout() -> u64 {
+    5000
+}
+fn default_batch_flush() -> u64 {
+    2000
+}
+fn default_feature_upsert() -> u64 {
+    1000
+}
+fn default_drift_check() -> u64 {
+    300
+}
+fn default_max_failures() -> u32 {
+    3
+}
+fn default_true() -> bool {
+    true
+}
+fn default_psi_warning() -> f64 {
+    0.1
+}
+fn default_psi_alert() -> f64 {
+    0.2
+}
+fn default_adwin_delta() -> f64 {
+    0.05
+}
+fn default_adwin_min_width() -> u32 {
+    100
+}
+fn default_adwin_consecutive() -> u32 {
+    3
+}
+fn default_adwin_burnin() -> u32 {
+    30
+}
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
@@ -319,14 +346,22 @@ pub struct DecisionContextMsg {
 /// 清理浮點數用於 PG 插入：替換 NaN/Inf 為 None。
 #[inline]
 pub fn sanitize_f64(v: f64) -> Option<f64> {
-    if v.is_finite() { Some(v) } else { None }
+    if v.is_finite() {
+        Some(v)
+    } else {
+        None
+    }
 }
 
 /// Sanitize a float, returning 0.0 for NaN/Inf (for non-nullable columns).
 /// 清理浮點數，NaN/Inf 返回 0.0（用於非空列）。
 #[inline]
 pub fn sanitize_f64_or_zero(v: f64) -> f64 {
-    if v.is_finite() { v } else { 0.0 }
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]

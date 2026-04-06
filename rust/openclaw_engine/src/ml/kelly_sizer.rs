@@ -39,19 +39,25 @@ impl TradeStats {
 
     /// Win rate (0.0-1.0) / 勝率
     pub fn win_rate(&self) -> f64 {
-        if self.total_trades == 0 { return 0.0; }
+        if self.total_trades == 0 {
+            return 0.0;
+        }
         self.wins as f64 / self.total_trades as f64
     }
 
     /// Average win amount / 平均獲利金額
     pub fn avg_win(&self) -> f64 {
-        if self.wins == 0 { return 0.0; }
+        if self.wins == 0 {
+            return 0.0;
+        }
         self.total_win_pnl / self.wins as f64
     }
 
     /// Average loss amount (positive) / 平均虧損金額（正數）
     pub fn avg_loss(&self) -> f64 {
-        if self.losses == 0 { return 0.0; }
+        if self.losses == 0 {
+            return 0.0;
+        }
         self.total_loss_pnl / self.losses as f64
     }
 }
@@ -101,7 +107,12 @@ pub fn compute_kelly_qty(
     // Not enough trades → use simple risk-based sizing
     if stats.total_trades < config.min_trades {
         let risk_qty = balance * config.risk_pct / price;
-        debug!(trades = stats.total_trades, min = config.min_trades, risk_qty = risk_qty, "Kelly inactive, using risk% / Kelly 未啟動");
+        debug!(
+            trades = stats.total_trades,
+            min = config.min_trades,
+            risk_qty = risk_qty,
+            "Kelly inactive, using risk% / Kelly 未啟動"
+        );
         return risk_qty.min(max_qty);
     }
 
@@ -119,7 +130,10 @@ pub fn compute_kelly_qty(
 
     if kelly_full <= 0.0 {
         // Negative Kelly → edge is negative, minimum sizing
-        debug!(kelly = kelly_full, "negative Kelly, minimum sizing / Kelly 為負");
+        debug!(
+            kelly = kelly_full,
+            "negative Kelly, minimum sizing / Kelly 為負"
+        );
         return (balance * 0.01 / price).min(max_qty); // 1% minimum
     }
 
@@ -183,7 +197,12 @@ mod tests {
         let qty_200 = compute_kelly_qty(&cfg, &stats_200, 10000.0, 50000.0, 0.02, 1.0);
 
         // 50 trades: 1/8 Kelly, 200 trades: 1/4 Kelly → qty_200 > qty_50
-        assert!(qty_200 > qty_50, "more trades = more Kelly confidence: {} vs {}", qty_200, qty_50);
+        assert!(
+            qty_200 > qty_50,
+            "more trades = more Kelly confidence: {} vs {}",
+            qty_200,
+            qty_50
+        );
     }
 
     #[test]
@@ -193,7 +212,11 @@ mod tests {
         let stats = make_stats(30, 70, 50.0, 100.0);
         let qty = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.02, 1.0);
         assert!(qty > 0.0, "negative Kelly still gives minimum position");
-        assert!(qty < 0.01, "negative Kelly gives very small position: {}", qty);
+        assert!(
+            qty < 0.01,
+            "negative Kelly gives very small position: {}",
+            qty
+        );
     }
 
     #[test]
@@ -204,7 +227,12 @@ mod tests {
         let qty_low_vol = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.01, 1.0);
         let qty_high_vol = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.04, 1.0);
 
-        assert!(qty_low_vol > qty_high_vol, "low vol = larger position: {} vs {}", qty_low_vol, qty_high_vol);
+        assert!(
+            qty_low_vol > qty_high_vol,
+            "low vol = larger position: {} vs {}",
+            qty_low_vol,
+            qty_high_vol
+        );
     }
 
     #[test]
@@ -217,7 +245,11 @@ mod tests {
 
     #[test]
     fn test_below_min_trades_uses_risk() {
-        let cfg = KellyConfig { min_trades: 50, risk_pct: 0.03, ..Default::default() };
+        let cfg = KellyConfig {
+            min_trades: 50,
+            risk_pct: 0.03,
+            ..Default::default()
+        };
         let stats = make_stats(10, 5, 100.0, 80.0); // only 15 trades
         let qty = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.02, 1.0);
         // Should use risk_pct: 10000 * 0.03 / 50000 = 0.006
@@ -226,7 +258,10 @@ mod tests {
 
     #[test]
     fn test_disabled_passthrough() {
-        let cfg = KellyConfig { enabled: false, ..Default::default() };
+        let cfg = KellyConfig {
+            enabled: false,
+            ..Default::default()
+        };
         let stats = make_stats(100, 50, 100.0, 80.0);
         let qty = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.02, 0.5);
         assert_eq!(qty, 0.5, "disabled = passthrough max_qty");

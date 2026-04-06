@@ -194,7 +194,9 @@ impl ExecutionListener {
                     }
                 }
                 PrivateWsEvent::Order(order) => {
-                    self.stats.total_order_updates.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .total_order_updates
+                        .fetch_add(1, Ordering::Relaxed);
                     debug!(
                         order_id = %order.order_id,
                         symbol = %order.symbol,
@@ -206,7 +208,9 @@ impl ExecutionListener {
                     }
                 }
                 PrivateWsEvent::Position(pos) => {
-                    self.stats.total_position_updates.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .total_position_updates
+                        .fetch_add(1, Ordering::Relaxed);
                     debug!(
                         symbol = %pos.symbol,
                         side = %pos.side,
@@ -218,7 +222,9 @@ impl ExecutionListener {
                     }
                 }
                 PrivateWsEvent::Wallet(wallet) => {
-                    self.stats.total_balance_updates.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .total_balance_updates
+                        .fetch_add(1, Ordering::Relaxed);
                     debug!(
                         account_type = %wallet.account_type,
                         coins = wallet.coin.len(),
@@ -229,7 +235,9 @@ impl ExecutionListener {
                     }
                 }
                 PrivateWsEvent::AuthSuccess => {
-                    self.stats.total_auth_successes.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .total_auth_successes
+                        .fetch_add(1, Ordering::Relaxed);
                     info!("Auth success event received / 收到認證成功事件");
                 }
                 PrivateWsEvent::AuthFailed(reason) => {

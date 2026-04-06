@@ -33,18 +33,59 @@ impl Default for MaCrossoverParams {
 impl StrategyParams for MaCrossoverParams {
     fn param_ranges() -> Vec<ParamRange> {
         vec![
-            ParamRange { name: "cooldown_ms".into(), min: 60_000.0, max: 3_600_000.0, step: Some(60_000.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "adx_threshold".into(), min: 10.0, max: 50.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "default_qty".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
-            ParamRange { name: "regime_filter_enabled".into(), min: 0.0, max: 1.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "higher_tf_alpha".into(), min: 0.001, max: 0.05, step: None, agent_adjustable: true, db_persisted: true },
+            ParamRange {
+                name: "cooldown_ms".into(),
+                min: 60_000.0,
+                max: 3_600_000.0,
+                step: Some(60_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "adx_threshold".into(),
+                min: 10.0,
+                max: 50.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "default_qty".into(),
+                min: 0.001,
+                max: 1e12,
+                step: None,
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "regime_filter_enabled".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "higher_tf_alpha".into(),
+                min: 0.001,
+                max: 0.05,
+                step: None,
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.cooldown_ms < 60_000 { return Err("cooldown_ms must be >= 60s".into()); }
-        if self.adx_threshold < 5.0 || self.adx_threshold > 80.0 { return Err("adx_threshold must be in [5, 80]".into()); }
-        if self.higher_tf_alpha <= 0.0 || self.higher_tf_alpha > 0.1 { return Err("higher_tf_alpha must be in (0, 0.1]".into()); }
+        if self.cooldown_ms < 60_000 {
+            return Err("cooldown_ms must be >= 60s".into());
+        }
+        if self.adx_threshold < 5.0 || self.adx_threshold > 80.0 {
+            return Err("adx_threshold must be in [5, 80]".into());
+        }
+        if self.higher_tf_alpha <= 0.0 || self.higher_tf_alpha > 0.1 {
+            return Err("higher_tf_alpha must be in (0, 0.1]".into());
+        }
         Ok(())
     }
 }
@@ -78,13 +119,18 @@ pub struct MaCrossover {
 impl MaCrossover {
     pub fn new() -> Self {
         Self {
-            active: true, position: None, last_trade_ms: 0,
-            cooldown_ms: 300_000, adx_threshold: 20.0, default_qty: 1e9,
+            active: true,
+            position: None,
+            last_trade_ms: 0,
+            cooldown_ms: 300_000,
+            adx_threshold: 20.0,
+            default_qty: 1e9,
             regime_filter_enabled: true,
             higher_tf_trend: None,
             higher_tf_sma: None,
             higher_tf_alpha: 0.003,
-            prev_position: None, prev_last_trade_ms: 0,
+            prev_position: None,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -115,9 +161,13 @@ impl MaCrossover {
 
     fn make_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
         OrderIntent {
-            symbol: ctx.symbol.clone(), is_long, qty: self.default_qty,
-            confidence: conf, strategy: self.name().into(),
-            order_type: "market".into(), limit_price: None,
+            symbol: ctx.symbol.clone(),
+            is_long,
+            qty: self.default_qty,
+            confidence: conf,
+            strategy: self.name().into(),
+            order_type: "market".into(),
+            limit_price: None,
         }
     }
 
@@ -127,7 +177,10 @@ impl MaCrossover {
         if !self.regime_filter_enabled {
             return true;
         }
-        let ind = match &ctx.indicators { Some(i) => i, None => return true };
+        let ind = match &ctx.indicators {
+            Some(i) => i,
+            None => return true,
+        };
         match &ind.hurst {
             // No Hurst data — don't block (cold-start safe).
             // 無赫斯特數據 — 不阻擋（冷啟動安全）。
@@ -171,9 +224,15 @@ impl MaCrossover {
 }
 
 impl Strategy for MaCrossover {
-    fn name(&self) -> &str { "ma_crossover" }
-    fn is_active(&self) -> bool { self.active }
-    fn set_active(&mut self, active: bool) { self.active = active; }
+    fn name(&self) -> &str {
+        "ma_crossover"
+    }
+    fn is_active(&self) -> bool {
+        self.active
+    }
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
 
     /// RC-04: Revert position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 position 和 last_trade_ms。
@@ -183,13 +242,20 @@ impl Strategy for MaCrossover {
     }
 
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
-        let ind = match &ctx.indicators { Some(i) => i, None => return vec![] };
-        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms { return vec![]; }
+        let ind = match &ctx.indicators {
+            Some(i) => i,
+            None => return vec![],
+        };
+        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms {
+            return vec![];
+        }
 
         // ADX trend-strength gate (existing).
         // ADX 趨勢強度門檻（原有）。
         let adx = ind.adx.as_ref().map(|a| a.adx).unwrap_or(0.0);
-        if adx < self.adx_threshold { return vec![]; }
+        if adx < self.adx_threshold {
+            return vec![];
+        }
 
         // RC-02: Update higher-TF proxy from sma_50 (do this every tick for EMA warmup).
         // RC-02: 從 sma_50 更新較高時間框架替代指標（每個 tick 更新以暖機 EMA）。
@@ -197,9 +263,15 @@ impl Strategy for MaCrossover {
             self.update_higher_tf(sma_50);
         }
 
-        let fast = ind.kama.as_ref().map(|k| k.kama).unwrap_or_else(|| ind.sma_20.unwrap_or(0.0));
+        let fast = ind
+            .kama
+            .as_ref()
+            .map(|k| k.kama)
+            .unwrap_or_else(|| ind.sma_20.unwrap_or(0.0));
         let slow = ind.sma_20.unwrap_or(0.0);
-        if fast == 0.0 || slow == 0.0 { return vec![]; }
+        if fast == 0.0 || slow == 0.0 {
+            return vec![];
+        }
 
         let mut intents = Vec::new();
 
@@ -217,12 +289,16 @@ impl Strategy for MaCrossover {
                 }
 
                 if fast > slow {
-                    if !self.higher_tf_allows_entry(true) { return vec![]; }
+                    if !self.higher_tf_allows_entry(true) {
+                        return vec![];
+                    }
                     intents.push(self.make_intent(ctx, true, 0.6));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if fast < slow {
-                    if !self.higher_tf_allows_entry(false) { return vec![]; }
+                    if !self.higher_tf_allows_entry(false) {
+                        return vec![];
+                    }
                     intents.push(self.make_intent(ctx, false, 0.6));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
@@ -268,28 +344,60 @@ mod tests {
     /// 輔助函數：用給定指標值構建 TickContext。
     fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext {
         TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: ts,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: ts,
             indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma), kama: Some(KamaResult { kama, efficiency_ratio: 0.5 }),
-                adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
+                sma_20: Some(sma),
+                kama: Some(KamaResult {
+                    kama,
+                    efficiency_ratio: 0.5,
+                }),
+                adx: Some(AdxResult {
+                    adx,
+                    plus_di: 25.0,
+                    minus_di: 15.0,
+                }),
                 ..Default::default()
             }),
-            signals: vec![], h0_allowed: true,
+            signals: vec![],
+            h0_allowed: true,
         }
     }
 
     /// Helper: build a TickContext with Hurst regime data.
     /// 輔助函數：用赫斯特狀態數據構建 TickContext。
-    fn ctx_with_hurst(sma: f64, kama: f64, adx: f64, ts: u64, regime: &str, hurst_val: f64) -> TickContext {
+    fn ctx_with_hurst(
+        sma: f64,
+        kama: f64,
+        adx: f64,
+        ts: u64,
+        regime: &str,
+        hurst_val: f64,
+    ) -> TickContext {
         TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: ts,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: ts,
             indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma), kama: Some(KamaResult { kama, efficiency_ratio: 0.5 }),
-                adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
-                hurst: Some(HurstResult { hurst: hurst_val, regime: regime.to_string() }),
+                sma_20: Some(sma),
+                kama: Some(KamaResult {
+                    kama,
+                    efficiency_ratio: 0.5,
+                }),
+                adx: Some(AdxResult {
+                    adx,
+                    plus_di: 25.0,
+                    minus_di: 15.0,
+                }),
+                hurst: Some(HurstResult {
+                    hurst: hurst_val,
+                    regime: regime.to_string(),
+                }),
                 ..Default::default()
             }),
-            signals: vec![], h0_allowed: true,
+            signals: vec![],
+            h0_allowed: true,
         }
     }
 
@@ -297,14 +405,25 @@ mod tests {
     /// 輔助函數：用 sma_50 構建 TickContext 以測試較高時間框架。
     fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext {
         TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: ts,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: ts,
             indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma_20), sma_50: Some(sma_50),
-                kama: Some(KamaResult { kama, efficiency_ratio: 0.5 }),
-                adx: Some(AdxResult { adx, plus_di: 25.0, minus_di: 15.0 }),
+                sma_20: Some(sma_20),
+                sma_50: Some(sma_50),
+                kama: Some(KamaResult {
+                    kama,
+                    efficiency_ratio: 0.5,
+                }),
+                adx: Some(AdxResult {
+                    adx,
+                    plus_di: 25.0,
+                    minus_di: 15.0,
+                }),
                 ..Default::default()
             }),
-            signals: vec![], h0_allowed: true,
+            signals: vec![],
+            h0_allowed: true,
         }
     }
 
@@ -348,7 +467,10 @@ mod tests {
         // 快線 > 慢線, ADX 足夠 → 正常情況會做多入場。
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
         let intents = s.on_tick(&ctx);
-        assert!(intents.is_empty(), "Entry must be blocked in mean_reverting regime");
+        assert!(
+            intents.is_empty(),
+            "Entry must be blocked in mean_reverting regime"
+        );
     }
 
     /// Entry allowed when Hurst regime is "trending" (H > 0.5).
@@ -377,7 +499,11 @@ mod tests {
         // 步驟 2：狀態轉為均值回歸，但交叉反轉 → 出場必須有效。
         let ctx_exit = ctx_with_hurst(101.0, 100.0, 25.0, 500_000, "mean_reverting", 0.35);
         let exit = s.on_tick(&ctx_exit);
-        assert_eq!(exit.len(), 1, "Exit must work even in mean_reverting regime");
+        assert_eq!(
+            exit.len(),
+            1,
+            "Exit must work even in mean_reverting regime"
+        );
         assert!(!exit[0].is_long);
     }
 
@@ -388,7 +514,10 @@ mod tests {
         let mut s = MaCrossover::new();
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.50);
         let intents = s.on_tick(&ctx);
-        assert!(intents.is_empty(), "Entry must be blocked in random_walk regime");
+        assert!(
+            intents.is_empty(),
+            "Entry must be blocked in random_walk regime"
+        );
     }
 
     /// Regime filter can be disabled via struct field.
@@ -399,7 +528,11 @@ mod tests {
         s.regime_filter_enabled = false;
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
         let intents = s.on_tick(&ctx);
-        assert_eq!(intents.len(), 1, "Entry allowed when regime filter is disabled");
+        assert_eq!(
+            intents.len(),
+            1,
+            "Entry allowed when regime filter is disabled"
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -420,7 +553,10 @@ mod tests {
         let intents = s.on_tick(&ctx);
         // fast(101) > slow(100) → would want to go long, but higher TF is bearish → blocked.
         // 快線 > 慢線 → 想做多，但較高 TF 看跌 → 阻擋。
-        assert!(intents.is_empty(), "Long entry must be blocked when higher TF is bearish");
+        assert!(
+            intents.is_empty(),
+            "Long entry must be blocked when higher TF is bearish"
+        );
     }
 
     /// Long entry allowed when higher-TF trend is bullish.
@@ -435,7 +571,11 @@ mod tests {
         // 一個 tick 後，higher_tf_sma ≈ 90.1，sma_50=100 > 90.1 → 看漲。
         let ctx = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
         let intents = s.on_tick(&ctx);
-        assert_eq!(intents.len(), 1, "Long entry must be allowed when higher TF is bullish");
+        assert_eq!(
+            intents.len(),
+            1,
+            "Long entry must be allowed when higher TF is bullish"
+        );
         assert!(intents[0].is_long);
     }
 
@@ -448,7 +588,10 @@ mod tests {
         // sma_50=100 > 90.1 → bullish → short blocked.
         let ctx = ctx_with_sma50(101.0, 100.0, 25.0, 0, 100.0);
         let intents = s.on_tick(&ctx);
-        assert!(intents.is_empty(), "Short entry must be blocked when higher TF is bullish");
+        assert!(
+            intents.is_empty(),
+            "Short entry must be blocked when higher TF is bullish"
+        );
     }
 
     /// Entry allowed when higher_tf_trend is None (cold start).
@@ -460,7 +603,11 @@ mod tests {
         // 上下文中無 sma_50 → higher_tf_trend 保持 None → 允許入場。
         let ctx = ctx_with(100.0, 101.0, 25.0, 0);
         let intents = s.on_tick(&ctx);
-        assert_eq!(intents.len(), 1, "Entry must be allowed during cold start (no higher TF data)");
+        assert_eq!(
+            intents.len(),
+            1,
+            "Entry must be allowed during cold start (no higher TF data)"
+        );
     }
 
     /// Exit works regardless of higher-TF trend direction.
@@ -480,7 +627,11 @@ mod tests {
         s.higher_tf_trend = Some(false);
         let ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
         let exit = s.on_tick(&ctx_exit);
-        assert_eq!(exit.len(), 1, "Exit must work regardless of higher TF trend");
+        assert_eq!(
+            exit.len(),
+            1,
+            "Exit must work regardless of higher TF trend"
+        );
     }
 
     // ── Phase 3a: StrategyParams tests ──
@@ -500,14 +651,20 @@ mod tests {
 
     #[test]
     fn test_validate_fail() {
-        let p = MaCrossoverParams { cooldown_ms: 1000, ..Default::default() }; // too low
+        let p = MaCrossoverParams {
+            cooldown_ms: 1000,
+            ..Default::default()
+        }; // too low
         assert!(p.validate().is_err());
     }
 
     #[test]
     fn test_update_and_get_roundtrip() {
         let mut s = MaCrossover::new();
-        let new_params = MaCrossoverParams { adx_threshold: 35.0, ..Default::default() };
+        let new_params = MaCrossoverParams {
+            adx_threshold: 35.0,
+            ..Default::default()
+        };
         assert!(s.update_params(new_params).is_ok());
         let got = s.get_params();
         assert!((got.adx_threshold - 35.0).abs() < 1e-10);

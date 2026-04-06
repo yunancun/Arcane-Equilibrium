@@ -111,10 +111,7 @@ impl DbPool {
     /// 健康檢查：執行 SELECT 1。
     pub async fn health_check(&self) -> bool {
         if let Some(ref pool) = self.pool {
-            sqlx::query("SELECT 1")
-                .execute(pool)
-                .await
-                .is_ok()
+            sqlx::query("SELECT 1").execute(pool).await.is_ok()
         } else {
             false
         }
@@ -165,7 +162,7 @@ mod tests {
         };
         assert!(!pool.record_failure()); // 1 < 3
         assert!(!pool.record_failure()); // 2 < 3
-        assert!(pool.record_failure());  // 3 >= 3 → trigger fallback
+        assert!(pool.record_failure()); // 3 >= 3 → trigger fallback
         assert_eq!(pool.failure_count(), 3);
 
         pool.record_success();

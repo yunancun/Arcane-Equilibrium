@@ -62,7 +62,9 @@ impl PaperState {
         }
     }
 
-    pub fn balance(&self) -> f64 { self.balance }
+    pub fn balance(&self) -> f64 {
+        self.balance
+    }
 
     /// Set hard stop loss percentage. / 設定硬止損百分比。
     pub fn set_hard_stop_pct(&mut self, pct: f64) {
@@ -94,7 +96,9 @@ impl PaperState {
         &self.stop_config
     }
 
-    pub fn position_count(&self) -> usize { self.positions.len() }
+    pub fn position_count(&self) -> usize {
+        self.positions.len()
+    }
 
     pub fn positions(&self) -> Vec<&PaperPosition> {
         self.positions.values().collect()
@@ -107,8 +111,12 @@ impl PaperState {
     }
 
     pub fn drawdown_pct(&self) -> f64 {
-        if self.forced_drawdown > 0.0 { return self.forced_drawdown; }
-        if self.peak_balance <= 0.0 { return 0.0; }
+        if self.forced_drawdown > 0.0 {
+            return self.forced_drawdown;
+        }
+        if self.peak_balance <= 0.0 {
+            return 0.0;
+        }
         (self.peak_balance - self.balance) / self.peak_balance * 100.0
     }
 
@@ -136,7 +144,9 @@ impl PaperState {
         self.bybit_sync_balance = balance;
     }
 
-    pub fn bybit_sync_balance(&self) -> Option<f64> { self.bybit_sync_balance }
+    pub fn bybit_sync_balance(&self) -> Option<f64> {
+        self.bybit_sync_balance
+    }
 
     /// EXT-1: In exchange mode, correct local balance from exchange wallet balance.
     /// Only applies correction if drift exceeds threshold (avoids micro-corrections on every tick).
@@ -144,7 +154,11 @@ impl PaperState {
     /// 僅在偏差超過閾值時修正（避免每個 tick 微修正）。
     pub fn reconcile_balance_from_exchange(&mut self, exchange_balance: f64) -> Option<f64> {
         let drift = (self.balance - exchange_balance).abs();
-        let drift_pct = if self.balance > 0.0 { drift / self.balance * 100.0 } else { 0.0 };
+        let drift_pct = if self.balance > 0.0 {
+            drift / self.balance * 100.0
+        } else {
+            0.0
+        };
         // Only correct if drift > 0.1% (avoids float noise)
         if drift_pct > 0.1 {
             let old = self.balance;
@@ -183,8 +197,13 @@ impl PaperState {
     /// Apply a fill and return the realized PnL (0.0 for opens/accumulates, non-zero for closes).
     /// 應用成交並返回已實現損益（開倉/加倉返回 0.0，平倉返回非零值）。
     pub fn apply_fill(
-        &mut self, symbol: &str, is_long: bool, qty: f64,
-        fill_price: f64, fee: f64, ts_ms: u64,
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        fill_price: f64,
+        fee: f64,
+        ts_ms: u64,
     ) -> f64 {
         // Guard: reject zero-qty fills (prevents ghost positions)
         // 防護：拒絕零數量成交（防止幽靈持倉）
@@ -238,17 +257,20 @@ impl PaperState {
 
         // Opening new position (no existing position for this symbol)
         // 開新倉（此交易對無現有持倉）
-        self.positions.insert(symbol.to_string(), PaperPosition {
-            symbol: symbol.to_string(),
-            is_long,
-            qty,
-            entry_price: fill_price,
-            best_price: fill_price,
-            entry_fee: fee,
-            entry_ts_ms: ts_ms,
-            unrealized_pnl: 0.0,
-        });
-        0.0  // Opening position — no realized PnL / 開倉無已實現損益
+        self.positions.insert(
+            symbol.to_string(),
+            PaperPosition {
+                symbol: symbol.to_string(),
+                is_long,
+                qty,
+                entry_price: fill_price,
+                best_price: fill_price,
+                entry_fee: fee,
+                entry_ts_ms: ts_ms,
+                unrealized_pnl: 0.0,
+            },
+        );
+        0.0 // Opening position — no realized PnL / 開倉無已實現損益
     }
 
     /// Close a position at market price.
@@ -278,12 +300,14 @@ impl PaperState {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         for symbol in &symbols {
-            let price = self.latest_prices.get(symbol).copied()
-                .unwrap_or_else(|| {
-                    // Fallback to entry price if no market price available
-                    // 無市場價時回退到入場價
-                    self.positions.get(symbol).map(|p| p.entry_price).unwrap_or(0.0)
-                });
+            let price = self.latest_prices.get(symbol).copied().unwrap_or_else(|| {
+                // Fallback to entry price if no market price available
+                // 無市場價時回退到入場價
+                self.positions
+                    .get(symbol)
+                    .map(|p| p.entry_price)
+                    .unwrap_or(0.0)
+            });
             self.close_position(symbol, price, now);
             closed += 1;
         }
@@ -327,7 +351,9 @@ impl PaperState {
             stop_manager::update_best_price(&mut ps, sym_price);
             pos.best_price = ps.best_price;
 
-            if let Some(trigger) = stop_manager::check_stops(&self.stop_config, &ps, sym_price, now_ms) {
+            if let Some(trigger) =
+                stop_manager::check_stops(&self.stop_config, &ps, sym_price, now_ms)
+            {
                 triggers.push((symbol.clone(), trigger));
             }
         }
@@ -337,23 +363,31 @@ impl PaperState {
     /// Export state for persistence (with real-time unrealized PnL).
     /// 導出狀態用於持久化（含即時未實現損益）。
     pub fn export_state(&self) -> PaperStateSnapshot {
-        let positions: Vec<PositionSnapshot> = self.positions.values().map(|pos| {
-            // Compute real unrealized PnL using latest price for this symbol (QC fix).
-            // 使用該交易對最新價格計算真實未實現損益。
-            let current_price = self.latest_prices.get(&pos.symbol).copied().unwrap_or(pos.entry_price);
-            let unrealized_pnl = if pos.is_long {
-                (current_price - pos.entry_price) * pos.qty
-            } else {
-                (pos.entry_price - current_price) * pos.qty
-            };
-            PositionSnapshot {
-                position: PaperPosition {
-                    unrealized_pnl,
-                    ..pos.clone()
-                },
-                api_pnl: self.api_unrealized_pnl.get(&pos.symbol).copied(),
-            }
-        }).collect();
+        let positions: Vec<PositionSnapshot> = self
+            .positions
+            .values()
+            .map(|pos| {
+                // Compute real unrealized PnL using latest price for this symbol (QC fix).
+                // 使用該交易對最新價格計算真實未實現損益。
+                let current_price = self
+                    .latest_prices
+                    .get(&pos.symbol)
+                    .copied()
+                    .unwrap_or(pos.entry_price);
+                let unrealized_pnl = if pos.is_long {
+                    (current_price - pos.entry_price) * pos.qty
+                } else {
+                    (pos.entry_price - current_price) * pos.qty
+                };
+                PositionSnapshot {
+                    position: PaperPosition {
+                        unrealized_pnl,
+                        ..pos.clone()
+                    },
+                    api_pnl: self.api_unrealized_pnl.get(&pos.symbol).copied(),
+                }
+            })
+            .collect();
         PaperStateSnapshot {
             balance: self.balance,
             peak_balance: self.peak_balance,
@@ -464,11 +498,11 @@ mod tests {
         // Same-direction fills should accumulate qty with weighted avg entry.
         // 同方向成交應累加 qty 並加權平均入場價。
         let mut s = PaperState::new(10000.0);
-        s.apply_fill("BTC", true, 0.1, 50000.0, 1.0, 0);  // buy 0.1 @ 50000
+        s.apply_fill("BTC", true, 0.1, 50000.0, 1.0, 0); // buy 0.1 @ 50000
         s.apply_fill("BTC", true, 0.1, 52000.0, 1.0, 1000); // buy 0.1 @ 52000
         assert_eq!(s.position_count(), 1);
         let pos = s.get_position("BTC").unwrap();
-        assert!((pos.qty - 0.2).abs() < 1e-10);  // 0.1 + 0.1
+        assert!((pos.qty - 0.2).abs() < 1e-10); // 0.1 + 0.1
         assert!((pos.entry_price - 51000.0).abs() < 0.01); // avg(50000, 52000)
     }
 

@@ -62,7 +62,10 @@ impl Default for Hypothesis {
 /// Insert a new hypothesis into learning.experiment_ledger.
 /// 插入新假設到 learning.experiment_ledger。
 pub async fn create_hypothesis(pool: &DbPool, h: &Hypothesis) -> bool {
-    let pg = match pool.get() { Some(p) => p, None => return false };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return false,
+    };
 
     let result = sqlx::query(
         "INSERT INTO learning.experiment_ledger \
@@ -71,7 +74,7 @@ pub async fn create_hypothesis(pool: &DbPool, h: &Hypothesis) -> bool {
           supporting_count, refuting_count, notes, \
           source_type, metadata, trigger_condition) \
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) \
-         ON CONFLICT (hypothesis_id) DO NOTHING"
+         ON CONFLICT (hypothesis_id) DO NOTHING",
     )
     .bind(&h.hypothesis_id)
     .bind(&h.description)
@@ -92,8 +95,14 @@ pub async fn create_hypothesis(pool: &DbPool, h: &Hypothesis) -> bool {
     .await;
 
     match result {
-        Ok(r) => { debug!(id = %h.hypothesis_id, "hypothesis created / 假設已創建"); r.rows_affected() > 0 }
-        Err(e) => { warn!(id = %h.hypothesis_id, error = %e, "hypothesis create failed"); false }
+        Ok(r) => {
+            debug!(id = %h.hypothesis_id, "hypothesis created / 假設已創建");
+            r.rows_affected() > 0
+        }
+        Err(e) => {
+            warn!(id = %h.hypothesis_id, error = %e, "hypothesis create failed");
+            false
+        }
     }
 }
 
@@ -107,13 +116,16 @@ pub async fn update_hypothesis(
     status: &str,
     concluded_at_ms: Option<u64>,
 ) -> bool {
-    let pg = match pool.get() { Some(p) => p, None => return false };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return false,
+    };
 
     let result = sqlx::query(
         "UPDATE learning.experiment_ledger \
          SET supporting_count = $2, refuting_count = $3, status = $4, \
              concluded_at_ms = $5, updated_at = NOW() \
-         WHERE hypothesis_id = $1"
+         WHERE hypothesis_id = $1",
     )
     .bind(hypothesis_id)
     .bind(supporting)
@@ -124,15 +136,24 @@ pub async fn update_hypothesis(
     .await;
 
     match result {
-        Ok(r) => { debug!(id = %hypothesis_id, status = status, "hypothesis updated"); r.rows_affected() > 0 }
-        Err(e) => { warn!(id = %hypothesis_id, error = %e, "hypothesis update failed"); false }
+        Ok(r) => {
+            debug!(id = %hypothesis_id, status = status, "hypothesis updated");
+            r.rows_affected() > 0
+        }
+        Err(e) => {
+            warn!(id = %hypothesis_id, error = %e, "hypothesis update failed");
+            false
+        }
     }
 }
 
 /// List hypotheses by status (or all if status is empty).
 /// 按狀態列出假設（狀態為空時列出全部）。
 pub async fn list_hypotheses(pool: &DbPool, status_filter: &str, limit: u32) -> Vec<Hypothesis> {
-    let pg = match pool.get() { Some(p) => p, None => return vec![] };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return vec![],
+    };
 
     let rows = if status_filter.is_empty() {
         sqlx::query_as::<_, HypothesisRow>(
@@ -140,7 +161,7 @@ pub async fn list_hypotheses(pool: &DbPool, status_filter: &str, limit: u32) -> 
              proposed_at_ms, expires_at_ms, status, min_observations, \
              supporting_count, refuting_count, concluded_at_ms, claim_id, notes, \
              source_type, metadata, trigger_condition \
-             FROM learning.experiment_ledger ORDER BY proposed_at_ms DESC LIMIT $1"
+             FROM learning.experiment_ledger ORDER BY proposed_at_ms DESC LIMIT $1",
         )
         .bind(limit as i32)
         .fetch_all(pg)
@@ -161,7 +182,10 @@ pub async fn list_hypotheses(pool: &DbPool, status_filter: &str, limit: u32) -> 
 
     match rows {
         Ok(rows) => rows.into_iter().map(|r| r.into()).collect(),
-        Err(e) => { warn!(error = %e, "list hypotheses failed"); vec![] }
+        Err(e) => {
+            warn!(error = %e, "list hypotheses failed");
+            vec![]
+        }
     }
 }
 

@@ -258,7 +258,11 @@ impl BybitPrivateWs {
             }
 
             let url = self.environment.private_ws_url();
-            info!(url = url, attempt = attempt, "Private WS connecting / 私有 WS 連接中");
+            info!(
+                url = url,
+                attempt = attempt,
+                "Private WS connecting / 私有 WS 連接中"
+            );
 
             match tokio_tungstenite::connect_async(url).await {
                 Ok((ws_stream, _response)) => {
@@ -340,7 +344,8 @@ impl BybitPrivateWs {
                             "op": "subscribe",
                             "args": PRIVATE_TOPICS,
                         });
-                        if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await {
+                        if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await
+                        {
                             error!(error = %e, "Failed to send subscribe / 發送訂閱失敗");
                             let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                             continue;
@@ -349,7 +354,8 @@ impl BybitPrivateWs {
 
                         // Step 4: Message loop with periodic ping
                         // 步驟 4：帶定期 ping 的消息循環
-                        let mut ping_timer = tokio::time::interval(Duration::from_millis(PING_INTERVAL_MS));
+                        let mut ping_timer =
+                            tokio::time::interval(Duration::from_millis(PING_INTERVAL_MS));
                         ping_timer.tick().await; // Skip first immediate tick / 跳過第一次立即觸發
 
                         loop {
@@ -415,7 +421,11 @@ impl BybitPrivateWs {
                 BASE_RECONNECT_DELAY_MS.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
                 MAX_RECONNECT_DELAY_MS,
             );
-            info!(delay_ms = delay_ms, attempt = attempt, "Private WS reconnecting / 私有 WS 重連中");
+            info!(
+                delay_ms = delay_ms,
+                attempt = attempt,
+                "Private WS reconnecting / 私有 WS 重連中"
+            );
 
             tokio::select! {
                 _ = self.cancel.cancelled() => {
@@ -475,7 +485,10 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
     // 認證回應
     if let Some(op) = parsed.get("op").and_then(|v| v.as_str()) {
         if op == "auth" {
-            let success = parsed.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+            let success = parsed
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if success {
                 return Some(PrivateWsEvent::AuthSuccess);
             } else {
@@ -566,8 +579,8 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
 /// Compute HMAC-SHA256 and return hex string.
 /// 計算 HMAC-SHA256 並返回十六進制字串。
 fn hmac_sha256_hex(secret: &str, payload: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(payload.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }

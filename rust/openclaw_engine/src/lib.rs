@@ -10,14 +10,14 @@
 
 pub mod account_manager;
 pub mod batch_order_manager;
-pub mod database;
-pub mod event_consumer;
 pub mod bybit_private_ws;
 pub mod bybit_rest_client;
 pub mod config;
+pub mod database;
+pub mod event_consumer;
 pub mod execution_listener;
-pub mod feature_collector;
 pub mod fast_track;
+pub mod feature_collector;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
@@ -28,8 +28,8 @@ pub mod multi_interval_ws;
 pub mod orchestrator;
 pub mod order_manager;
 pub mod paper_state;
-pub mod pipeline_types;
 pub mod persistence;
+pub mod pipeline_types;
 pub mod platform_client;
 pub mod position_manager;
 pub mod spot_margin_client;

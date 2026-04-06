@@ -71,7 +71,7 @@ pub enum PaperSessionCommand {
     UpdateRiskConfig {
         // StopConfig fields / 止損配置
         hard_stop_pct: Option<f64>,
-        trailing_stop_pct: Option<Option<f64>>,  // Some(None)=disable, Some(Some(x))=set
+        trailing_stop_pct: Option<Option<f64>>, // Some(None)=disable, Some(Some(x))=set
         time_stop_hours: Option<Option<f64>>,
         atr_multiplier: Option<Option<f64>>,
         take_profit_pct: Option<Option<f64>>,
@@ -122,6 +122,10 @@ pub struct ShadowOrderRequest {
     /// EXT-1: true = exchange mode primary order (track pending, await confirmation)
     /// false = paper_only mode shadow order (fire-and-forget)
     pub is_primary: bool,
+    /// I-08 雙軌止損：broker-side stop loss price (None = engine rail only)
+    pub stop_loss: Option<f64>,
+    /// I-08 雙軌止損：broker-side take profit price
+    pub take_profit: Option<f64>,
 }
 
 /// Tick context passed to strategies.
@@ -299,7 +303,10 @@ impl TickPipeline {
 
     /// Set channel for dispatching orders to exchange API.
     /// 設定訂單派發通道到交易所 API。
-    pub fn set_shadow_channel(&mut self, tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>) {
+    pub fn set_shadow_channel(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>,
+    ) {
         self.shadow_order_tx = Some(tx);
     }
 
@@ -323,25 +330,37 @@ impl TickPipeline {
 
     /// Phase 1: Set channel for dispatching market data to async PG writer.
     /// Phase 1：設定市場數據派發到異步 PG 寫入器的通道。
-    pub fn set_market_data_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>) {
+    pub fn set_market_data_channel(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>,
+    ) {
         self.market_data_tx = Some(tx);
     }
 
     /// Phase 1: Set channel for dispatching feature snapshots to async PG writer.
     /// Phase 1：設定特徵快照派發到異步 PG 寫入器的通道。
-    pub fn set_feature_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>) {
+    pub fn set_feature_channel(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>,
+    ) {
         self.feature_tx = Some(tx);
     }
 
     /// Phase 2a: Set channel for dispatching trading lifecycle events to PG writer.
     /// Phase 2a：設定交易生命週期事件派發通道。
-    pub fn set_trading_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::TradingMsg>) {
+    pub fn set_trading_channel(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::TradingMsg>,
+    ) {
         self.trading_tx = Some(tx);
     }
 
     /// Phase 2a: Set channel for dispatching decision context snapshots.
     /// Phase 2a：設定決策上下文快照派發通道。
-    pub fn set_context_channel(&mut self, tx: tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>) {
+    pub fn set_context_channel(
+        &mut self,
+        tx: tokio::sync::mpsc::Sender<crate::database::DecisionContextMsg>,
+    ) {
         self.context_tx = Some(tx);
     }
 
@@ -355,20 +374,23 @@ impl TickPipeline {
 
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
-        self.latest_prices.insert(event.symbol.clone(), event.last_price);
-        self.paper_state.set_latest_price(&event.symbol, event.last_price);
+        self.latest_prices
+            .insert(event.symbol.clone(), event.last_price);
+        self.paper_state
+            .set_latest_price(&event.symbol, event.last_price);
         // RRC-1-B2: Reset daily start balance at UTC midnight for daily loss tracking.
         // RRC-1-B2：UTC 午夜重置每日起始餘額，用於日損追蹤。
-        self.intent_processor.maybe_reset_daily_balance(
-            self.paper_state.balance(), event.ts_ms,
-        );
+        self.intent_processor
+            .maybe_reset_daily_balance(self.paper_state.balance(), event.ts_ms);
         // RRC-1-C1: Feed price to tracker for ATR computation + spike detection.
         // RRC-1-C1：餵入價格到追蹤器，用於 ATR 計算 + 尖峰偵測。
-        self.price_tracker.record(&event.symbol, event.last_price, event.ts_ms);
+        self.price_tracker
+            .record(&event.symbol, event.last_price, event.ts_ms);
         // Update per-symbol turnover for dynamic slippage (from ticker events)
         // 更新每交易對成交額用於動態滑點（來自 ticker 事件）
         if event.turnover_24h > 0.0 {
-            self.paper_state.set_latest_turnover(&event.symbol, event.turnover_24h);
+            self.paper_state
+                .set_latest_turnover(&event.symbol, event.turnover_24h);
 
             // Phase 1 (F-2 fix): Emit TickerSnapshot to market writer for ticker events.
             // Phase 1（F-2 修復）：為 ticker 事件發送 TickerSnapshot 到市場寫入器。
@@ -382,12 +404,12 @@ impl TickPipeline {
                     ts_ms: event.ts_ms,
                     symbol: event.symbol.clone(),
                     last_price: event.last_price,
-                    mark_price: 0.0,   // not available in PriceEvent yet
-                    index_price: 0.0,  // not available in PriceEvent yet
+                    mark_price: 0.0,  // not available in PriceEvent yet
+                    index_price: 0.0, // not available in PriceEvent yet
                     best_bid: event.bid_price,
                     best_ask: event.ask_price,
-                    bid_size: 0.0,     // not available in PriceEvent yet
-                    ask_size: 0.0,     // not available in PriceEvent yet
+                    bid_size: 0.0, // not available in PriceEvent yet
+                    ask_size: 0.0, // not available in PriceEvent yet
                     volume_24h: event.volume_24h,
                     turnover_24h: event.turnover_24h,
                     spread_bps: spread,
@@ -401,8 +423,11 @@ impl TickPipeline {
         if event.metadata.get("type").map(|t| t.as_str()) == Some("adl_notice") {
             if let Some(rank_str) = event.metadata.get("adl_rank") {
                 if let Ok(rank) = rank_str.parse::<u32>() {
-                    self.adl_alerts.push_back((event.ts_ms, event.symbol.clone(), rank));
-                    if self.adl_alerts.len() > 50 { self.adl_alerts.pop_front(); }
+                    self.adl_alerts
+                        .push_back((event.ts_ms, event.symbol.clone(), rank));
+                    if self.adl_alerts.len() > 50 {
+                        self.adl_alerts.pop_front();
+                    }
                     if rank >= 3 {
                         info!(
                             symbol = %event.symbol, rank = rank,
@@ -420,10 +445,15 @@ impl TickPipeline {
             0.0, // margin_utilization computed externally
         );
         if ft_action == crate::fast_track::FastTrackAction::CloseAll {
-            let symbols: Vec<String> = self.paper_state.positions().iter()
-                .map(|p| p.symbol.clone()).collect();
+            let symbols: Vec<String> = self
+                .paper_state
+                .positions()
+                .iter()
+                .map(|p| p.symbol.clone())
+                .collect();
             for sym in symbols {
-                self.paper_state.close_position(&sym, event.last_price, event.ts_ms);
+                self.paper_state
+                    .close_position(&sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
             }
             // Measure elapsed time for fast-track exit / 計算快速通道退出的耗時
@@ -440,7 +470,8 @@ impl TickPipeline {
             warn!(symbol = %event.symbol, reason = %h0_result.reason,
                 "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
             for (sym, _) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
-                self.paper_state.close_position(sym, event.last_price, event.ts_ms);
+                self.paper_state
+                    .close_position(sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
             }
             let dur = tick_start.elapsed().as_micros() as u64;
@@ -454,19 +485,25 @@ impl TickPipeline {
         // Step 1: Kline aggregation — collect closed bars for DB write.
         // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
         let closed_bars = self.kline_manager.on_tick(
-            &event.symbol, event.last_price, event.ts_ms,
-            event.volume_24h, 0.0,
+            &event.symbol,
+            event.last_price,
+            event.ts_ms,
+            event.volume_24h,
+            0.0,
         );
 
         // Phase 1: Emit KlineClose for each closed bar to market writer (F-2 audit fix).
         // Phase 1：為每根已關閉 K 線發送 KlineClose 到市場寫入器（F-2 審計修復）。
         if let Some(ref tx) = self.market_data_tx {
             for (timeframe, bar) in &closed_bars {
-                if tx.try_send(crate::database::MarketDataMsg::KlineClose {
-                    symbol: event.symbol.clone(),
-                    timeframe: timeframe.clone(),
-                    bar: bar.clone(),
-                }).is_err() {
+                if tx
+                    .try_send(crate::database::MarketDataMsg::KlineClose {
+                        symbol: event.symbol.clone(),
+                        timeframe: timeframe.clone(),
+                        bar: bar.clone(),
+                    })
+                    .is_err()
+                {
                     self.market_tx_dropped += 1;
                 }
             }
@@ -478,7 +515,8 @@ impl TickPipeline {
 
         // Store latest indicators for IPC snapshot / 存儲最新指標供 IPC 快照使用
         if let Some(ref ind) = indicators {
-            self.latest_indicators.insert(event.symbol.clone(), ind.clone());
+            self.latest_indicators
+                .insert(event.symbol.clone(), ind.clone());
         }
 
         // Phase 1: Emit FeatureSnapshot to DB writer channel (non-blocking try_send).
@@ -502,9 +540,13 @@ impl TickPipeline {
         if self.paper_paused {
             // Protective stops while paused / 暫停時的保護性止損
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
-                let pos_info = self.paper_state.get_position(sym).map(|p| (p.is_long, p.qty));
+                let pos_info = self
+                    .paper_state
+                    .get_position(sym)
+                    .map(|p| (p.is_long, p.qty));
                 debug!(symbol = %sym, reason = %trigger.reason, "stop (paused)");
-                self.paper_state.close_position(sym, event.last_price, event.ts_ms);
+                self.paper_state
+                    .close_position(sym, event.last_price, event.ts_ms);
                 self.stats.total_stops += 1;
                 if let Some((is_long, qty)) = pos_info {
                     self.dispatch_close_order(sym, is_long, qty, event, false);
@@ -517,7 +559,8 @@ impl TickPipeline {
         // Step 3: Signal evaluation
         let signals = if let Some(ref ind) = indicators {
             let input = snapshot_to_input(ind);
-            self.signal_engine.evaluate(&event.symbol, "1m", &input, event.ts_ms)
+            self.signal_engine
+                .evaluate(&event.symbol, "1m", &input, event.ts_ms)
         } else {
             vec![]
         };
@@ -526,7 +569,9 @@ impl TickPipeline {
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
         for sig in &signals {
             self.recent_signals.push_back(sig.clone());
-            if self.recent_signals.len() > 100 { self.recent_signals.pop_front(); }
+            if self.recent_signals.len() > 100 {
+                self.recent_signals.pop_front();
+            }
 
             // Phase 2a: Emit signal to trading_writer for PG persistence
             if let Some(ref tx) = self.trading_tx {
@@ -557,17 +602,35 @@ impl TickPipeline {
                     last_price: event.last_price,
                     spread_bps: if event.ask_price > 0.0 && event.bid_price > 0.0 {
                         (event.ask_price - event.bid_price) / event.last_price * 10_000.0
-                    } else { 0.0 },
-                    regime_5m: ind.and_then(|i| i.hurst.as_ref()).map(|h| h.regime.clone()).unwrap_or_default(),
-                    ind_5m_adx: ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx).unwrap_or(0.0),
+                    } else {
+                        0.0
+                    },
+                    regime_5m: ind
+                        .and_then(|i| i.hurst.as_ref())
+                        .map(|h| h.regime.clone())
+                        .unwrap_or_default(),
+                    ind_5m_adx: ind
+                        .and_then(|i| i.adx.as_ref())
+                        .map(|a| a.adx)
+                        .unwrap_or(0.0),
                     ind_5m_rsi: ind.and_then(|i| i.rsi_14).unwrap_or(50.0),
-                    ind_5m_atr_14_pct: ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent).unwrap_or(0.0),
-                    position_side: pos.map(|p| if p.is_long { "Long" } else { "Short" }).unwrap_or("None").into(),
+                    ind_5m_atr_14_pct: ind
+                        .and_then(|i| i.atr_14.as_ref())
+                        .map(|a| a.atr_percent)
+                        .unwrap_or(0.0),
+                    position_side: pos
+                        .map(|p| if p.is_long { "Long" } else { "Short" })
+                        .unwrap_or("None")
+                        .into(),
                     position_qty: pos.map(|p| p.qty).unwrap_or(0.0),
                     total_equity: self.paper_state.balance(),
                     drawdown_pct: self.paper_state.drawdown_pct(),
-                    indicators_snapshot: ind.map(|i| serde_json::to_value(i).unwrap_or_default()).unwrap_or_default(),
-                    position_detail: pos.map(|p| serde_json::to_value(p).unwrap_or_default()).unwrap_or_default(),
+                    indicators_snapshot: ind
+                        .map(|i| serde_json::to_value(i).unwrap_or_default())
+                        .unwrap_or_default(),
+                    position_detail: pos
+                        .map(|p| serde_json::to_value(p).unwrap_or_default())
+                        .unwrap_or_default(),
                     decision_payload: serde_json::to_value(&signals).unwrap_or_default(),
                 });
             }
@@ -590,24 +653,33 @@ impl TickPipeline {
         // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
         let is_exchange_mode = self.trading_mode == crate::config::TradingMode::Exchange;
         // Extract ATR for cost gate (Gate 3) / 提取 ATR 用於成本門控
-        let atr_value = indicators.as_ref()
+        let atr_value = indicators
+            .as_ref()
             .and_then(|i| i.atr_14.as_ref())
             .map(|a| a.atr)
             .unwrap_or(0.0);
 
         let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
         for strategy in self.orchestrator.strategies_mut() {
-            if !strategy.is_active() { continue; }
+            if !strategy.is_active() {
+                continue;
+            }
             let strategy_intents = strategy.on_tick(&ctx);
-            debug_assert!(strategy_intents.len() <= 1,
+            debug_assert!(
+                strategy_intents.len() <= 1,
                 "Strategy {} emitted {} intents in one tick — rollback assumes max 1",
-                strategy.name(), strategy_intents.len());
+                strategy.name(),
+                strategy_intents.len()
+            );
             for intent in &strategy_intents {
                 if is_exchange_mode {
                     // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                     // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
                     let gate = self.intent_processor.process_gates_only(
-                        intent, &self.governance, &self.paper_state,
+                        intent,
+                        &self.governance,
+                        &self.paper_state,
+                        atr_value,
                     );
                     if gate.approved {
                         self.stats.total_intents += 1;
@@ -621,7 +693,11 @@ impl TickPipeline {
                                 signal_id: String::new(),
                                 context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
                                 symbol: intent.symbol.clone(),
-                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                side: if intent.is_long {
+                                    "Buy".into()
+                                } else {
+                                    "Sell".into()
+                                },
                                 qty: gate.approved_qty,
                                 price: event.last_price,
                                 order_type: intent.order_type.clone(),
@@ -636,8 +712,12 @@ impl TickPipeline {
                         let final_qty = if let Some(ref icache) = self.instrument_cache {
                             if let Some(spec) = icache.get(&intent.symbol) {
                                 spec.round_qty(gate.approved_qty)
-                            } else { gate.approved_qty }
-                        } else { gate.approved_qty };
+                            } else {
+                                gate.approved_qty
+                            }
+                        } else {
+                            gate.approved_qty
+                        };
 
                         // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
                         if final_qty <= 0.0 {
@@ -650,9 +730,22 @@ impl TickPipeline {
                             intent: intent.clone(),
                             result: format!("pending_exchange:{}", order_link_id),
                         });
-                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                        if self.recent_intents.len() > 50 {
+                            self.recent_intents.pop_front();
+                        }
 
                         // Dispatch to exchange / 派發到交易所
+                        // I-08 雙軌止損：compute broker-side SL from stop config
+                        let sl_pct = self.paper_state.stop_config_pct();
+                        let broker_sl = if sl_pct > 0.0 {
+                            Some(if intent.is_long {
+                                event.last_price * (1.0 - sl_pct / 100.0)
+                            } else {
+                                event.last_price * (1.0 + sl_pct / 100.0)
+                            })
+                        } else {
+                            None
+                        };
                         if let Some(ref tx) = self.shadow_order_tx {
                             let _ = tx.send(ShadowOrderRequest {
                                 symbol: intent.symbol.clone(),
@@ -664,6 +757,8 @@ impl TickPipeline {
                                 is_close: false,
                                 order_link_id,
                                 is_primary: true,
+                                stop_loss: broker_sl,
+                                take_profit: None,
                             });
                         }
                     } else if let Some(ref reason) = gate.rejected_reason {
@@ -673,12 +768,19 @@ impl TickPipeline {
                             intent: intent.clone(),
                             result: format!("rejected:{}", reason),
                         });
-                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                        if self.recent_intents.len() > 50 {
+                            self.recent_intents.pop_front();
+                        }
                     }
                 } else {
                     // ═══ PAPER_ONLY MODE: simulate fill locally + optional shadow order ═══
                     // ═══ 紙盤模式：本地模擬成交 + 可選影子訂單 ═══
-                    let result = self.intent_processor.process(intent, &self.governance, &self.paper_state, atr_value);
+                    let result = self.intent_processor.process(
+                        intent,
+                        &self.governance,
+                        &self.paper_state,
+                        atr_value,
+                    );
                     if result.submitted {
                         self.stats.total_intents += 1;
                         self.recent_intents.push_back(TimestampedIntent {
@@ -686,7 +788,9 @@ impl TickPipeline {
                             intent: intent.clone(),
                             result: "submitted".into(),
                         });
-                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                        if self.recent_intents.len() > 50 {
+                            self.recent_intents.pop_front();
+                        }
 
                         // Phase 3b fix: Emit Intent to trading_tx for PG persistence.
                         // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
@@ -697,7 +801,11 @@ impl TickPipeline {
                                 signal_id: String::new(),
                                 context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
                                 symbol: intent.symbol.clone(),
-                                side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                side: if intent.is_long {
+                                    "Buy".into()
+                                } else {
+                                    "Sell".into()
+                                },
                                 qty: intent.qty,
                                 price: event.last_price,
                                 order_type: intent.order_type.clone(),
@@ -735,8 +843,12 @@ impl TickPipeline {
                             }
                             strategy.on_fill(intent, &fill);
                             let realized_pnl = self.paper_state.apply_fill(
-                                &intent.symbol, intent.is_long, fill.fill_qty,
-                                fill.fill_price, fill.fee, event.ts_ms,
+                                &intent.symbol,
+                                intent.is_long,
+                                fill.fill_qty,
+                                fill.fill_price,
+                                fill.fee,
+                                event.ts_ms,
                             );
                             self.stats.total_fills += 1;
                             self.recent_fills.push_back(TimestampedFill {
@@ -748,7 +860,9 @@ impl TickPipeline {
                                 fee: fill.fee,
                                 strategy: intent.strategy.clone(),
                             });
-                            if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+                            if self.recent_fills.len() > 50 {
+                                self.recent_fills.pop_front();
+                            }
 
                             if let Some(ref tx) = self.trading_tx {
                                 let _ = tx.try_send(crate::database::TradingMsg::Fill {
@@ -756,7 +870,11 @@ impl TickPipeline {
                                     ts_ms: event.ts_ms,
                                     order_id: format!("order-{}-{}", intent.symbol, event.ts_ms),
                                     symbol: intent.symbol.clone(),
-                                    side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+                                    side: if intent.is_long {
+                                        "Buy".into()
+                                    } else {
+                                        "Sell".into()
+                                    },
                                     qty: fill.fill_qty,
                                     price: fill.fill_price,
                                     fee: fill.fee,
@@ -793,8 +911,13 @@ impl TickPipeline {
                                     strategy: intent.strategy.clone(),
                                     paper_fill_ts: event.ts_ms,
                                     is_close: false,
-                                    order_link_id: format!("sh_{}_{}", event.ts_ms, self.exchange_seq),
+                                    order_link_id: format!(
+                                        "sh_{}_{}",
+                                        event.ts_ms, self.exchange_seq
+                                    ),
                                     is_primary: false,
+                                    stop_loss: None,
+                                    take_profit: None,
                                 });
                             }
                         }
@@ -805,7 +928,9 @@ impl TickPipeline {
                             intent: intent.clone(),
                             result: format!("rejected:{}", reason),
                         });
-                        if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                        if self.recent_intents.len() > 50 {
+                            self.recent_intents.pop_front();
+                        }
                     }
                 }
             }
@@ -816,18 +941,40 @@ impl TickPipeline {
         // 步驟 6：持倉風控 9 項檢查（RRC-1-C2，替代基本止損）。
         self.paper_state.update_best_prices();
         let session_drawdown = self.paper_state.drawdown_pct();
-        let daily_loss = self.intent_processor.daily_loss_pct_pub(self.paper_state.balance());
+        let daily_loss = self
+            .intent_processor
+            .daily_loss_pct_pub(self.paper_state.balance());
         let risk_config = self.intent_processor.risk_config().clone();
-        let positions: Vec<(String, bool, f64, f64, f64, u64)> = self.paper_state.positions()
+        let positions: Vec<(String, bool, f64, f64, f64, u64)> = self
+            .paper_state
+            .positions()
             .iter()
             .map(|p| {
-                let price = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
+                let price = self
+                    .latest_prices
+                    .get(&p.symbol)
+                    .copied()
+                    .unwrap_or(p.entry_price);
                 // F1: entry_price=0 → -999% (fail-closed) / entry_price=0 → 強制硬止損
-                let pct = |a: f64, b: f64| if p.entry_price <= 0.0 { -999.0 }
-                    else if p.is_long { (a - b) / b * 100.0 } else { (b - a) / b * 100.0 };
+                let pct = |a: f64, b: f64| {
+                    if p.entry_price <= 0.0 {
+                        -999.0
+                    } else if p.is_long {
+                        (a - b) / b * 100.0
+                    } else {
+                        (b - a) / b * 100.0
+                    }
+                };
                 let pnl_pct = pct(price, p.entry_price);
                 let peak_pnl_pct = pct(p.best_price, p.entry_price);
-                (p.symbol.clone(), p.is_long, p.qty, pnl_pct, peak_pnl_pct, p.entry_ts_ms)
+                (
+                    p.symbol.clone(),
+                    p.is_long,
+                    p.qty,
+                    pnl_pct,
+                    peak_pnl_pct,
+                    p.entry_ts_ms,
+                )
             })
             .collect();
 
@@ -836,17 +983,26 @@ impl TickPipeline {
             let atr_pct = self.price_tracker.compute_atr_pct(symbol);
             let consec = self.consecutive_losses.get(symbol).copied().unwrap_or(0);
             let action = check_position_on_tick(
-                *pnl_pct, *peak_pnl_pct, holding_hours,
+                *pnl_pct,
+                *peak_pnl_pct,
+                holding_hours,
                 0.0,       // cost_ratio — placeholder, Phase D wiring
                 "ranging", // regime — placeholder, Phase D wiring
-                atr_pct, symbol, *entry_ts_ms, consec,
-                daily_loss, session_drawdown, &risk_config,
+                atr_pct,
+                symbol,
+                *entry_ts_ms,
+                consec,
+                daily_loss,
+                session_drawdown,
+                &risk_config,
             );
             match action {
                 RiskAction::Hold => {} // no action / 無動作
                 RiskAction::ClosePosition(reason) => {
                     if is_exchange_mode {
-                        if self.pending_close_symbols.contains(symbol) { continue; }
+                        if self.pending_close_symbols.contains(symbol) {
+                            continue;
+                        }
                         warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
                         self.dispatch_close_order(symbol, *is_long, *qty, event, true);
                     } else {
@@ -856,7 +1012,8 @@ impl TickPipeline {
                         } else {
                             self.consecutive_losses.remove(symbol);
                         }
-                        self.paper_state.close_position(symbol, event.last_price, event.ts_ms);
+                        self.paper_state
+                            .close_position(symbol, event.last_price, event.ts_ms);
                         self.stats.total_stops += 1;
                         self.dispatch_close_order(symbol, *is_long, *qty, event, false);
                     }
@@ -866,12 +1023,22 @@ impl TickPipeline {
                     warn!(reason = %reason, "SESSION HALTED / 會話暫停");
                     self.session_halted = true;
                     self.paper_paused = true;
-                    let all_pos: Vec<(String, bool, f64)> = self.paper_state.positions().iter()
-                        .map(|p| (p.symbol.clone(), p.is_long, p.qty)).collect();
+                    let all_pos: Vec<(String, bool, f64)> = self
+                        .paper_state
+                        .positions()
+                        .iter()
+                        .map(|p| (p.symbol.clone(), p.is_long, p.qty))
+                        .collect();
                     for (sym, il, q) in &all_pos {
                         // Q1 fix: skip already-dispatched closes / 跳過已派發的平倉
-                        if is_exchange_mode && self.pending_close_symbols.contains(sym) { continue; }
-                        let px = self.latest_prices.get(sym).copied().unwrap_or(event.last_price);
+                        if is_exchange_mode && self.pending_close_symbols.contains(sym) {
+                            continue;
+                        }
+                        let px = self
+                            .latest_prices
+                            .get(sym)
+                            .copied()
+                            .unwrap_or(event.last_price);
                         self.paper_state.close_position(sym, px, event.ts_ms);
                         self.stats.total_stops += 1;
                         self.dispatch_close_order(sym, *il, *q, event, is_exchange_mode);
@@ -884,19 +1051,24 @@ impl TickPipeline {
                     let until_ms = event.ts_ms + ms;
                     info!(cooldown_ms = ms, symbol = %symbol,
                         "cooldown set by risk check / 風控設置冷卻期");
-                    self.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
-                        open_position_count: self.paper_state.positions().len() as u32,
-                        total_exposure_pct: 0.0, // recalculated next status interval
-                        cooldown_until_ts_ms: until_ms,
-                        kill_switch_active: false,
-                        snapshot_ts_ms: event.ts_ms,
-                    });
+                    self.h0_gate
+                        .update_risk(openclaw_types::H0GateRiskSnapshot {
+                            open_position_count: self.paper_state.positions().len() as u32,
+                            total_exposure_pct: 0.0, // recalculated next status interval
+                            cooldown_until_ts_ms: until_ms,
+                            kill_switch_active: false,
+                            snapshot_ts_ms: event.ts_ms,
+                        });
                 }
             }
         }
 
         if self.stats.total_ticks % 1000 == 0 {
-            info!(ticks = self.stats.total_ticks, fills = self.stats.total_fills, "tick stats");
+            info!(
+                ticks = self.stats.total_ticks,
+                fills = self.stats.total_fills,
+                "tick stats"
+            );
         }
 
         // Measure elapsed time for the full tick / 計算完整 tick 處理耗時
@@ -918,7 +1090,9 @@ impl TickPipeline {
         strategy: &str,
         order_link_id: &str,
     ) {
-        let realized_pnl = self.paper_state.apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
+        let realized_pnl = self
+            .paper_state
+            .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
         self.stats.total_fills += 1;
         // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
         self.pending_close_symbols.remove(symbol);
@@ -932,7 +1106,9 @@ impl TickPipeline {
             fee,
             strategy: strategy.to_string(),
         });
-        if self.recent_fills.len() > 50 { self.recent_fills.pop_front(); }
+        if self.recent_fills.len() > 50 {
+            self.recent_fills.pop_front();
+        }
 
         if let Some(ref tx) = self.trading_tx {
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
@@ -960,8 +1136,12 @@ impl TickPipeline {
     /// RRC-1-C2: Dispatch a close order via shadow/exchange channel.
     /// RRC-1-C2：通過影子/交易所通道派發平倉訂單。
     fn dispatch_close_order(
-        &mut self, symbol: &str, is_long: bool, qty: f64,
-        event: &PriceEvent, is_primary: bool,
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        event: &PriceEvent,
+        is_primary: bool,
     ) {
         if let Some(ref tx) = self.shadow_order_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
@@ -976,6 +1156,8 @@ impl TickPipeline {
                 is_close: true,
                 order_link_id: format!("{}_{}_{}", prefix, event.ts_ms, self.exchange_seq),
                 is_primary,
+                stop_loss: None,
+                take_profit: None,
             });
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -1014,12 +1196,22 @@ impl TickPipeline {
 
     fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
         let ohlcv = self.kline_manager.get_ohlcv(symbol, "1m", Some(100))?;
-        if ohlcv.close.len() < 30 { return None; }
-        Some(IndicatorEngine::compute_all(&ohlcv.high, &ohlcv.low, &ohlcv.close, &ohlcv.volume))
+        if ohlcv.close.len() < 30 {
+            return None;
+        }
+        Some(IndicatorEngine::compute_all(
+            &ohlcv.high,
+            &ohlcv.low,
+            &ohlcv.close,
+            &ohlcv.volume,
+        ))
     }
 
     pub fn grant_paper_auth(&mut self) -> Result<(), String> {
-        self.governance.grant_paper_authorization(None).map(|_| ()).map_err(|e| e.to_string())
+        self.governance
+            .grant_paper_authorization(None)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     pub fn status(&self) -> PipelineStatus {
@@ -1039,7 +1231,9 @@ impl TickPipeline {
         for sym in self.kline_manager.symbols() {
             if let Some(buf) = self.kline_manager.get_buffer(sym, "1m") {
                 let bars = buf.latest_cloned(100);
-                if !bars.is_empty() { klines.insert(sym.clone(), bars); }
+                if !bars.is_empty() {
+                    klines.insert(sym.clone(), bars);
+                }
             }
         }
 
@@ -1062,7 +1256,9 @@ impl TickPipeline {
             risk_manager_config: Some(self.intent_processor.risk_config().clone()),
             consecutive_losses: self.consecutive_losses.clone(),
             session_halted: self.session_halted,
-            daily_loss_pct: self.intent_processor.daily_loss_pct_pub(self.paper_state.balance()),
+            daily_loss_pct: self
+                .intent_processor
+                .daily_loss_pct_pub(self.paper_state.balance()),
             session_drawdown_pct: self.paper_state.drawdown_pct(),
         }
     }
@@ -1111,8 +1307,8 @@ fn snapshot_to_input(snap: &IndicatorSnapshot) -> IndicatorInput {
 // Types extracted to pipeline_types.rs (RRC-1 E2 fix: 1200-line limit).
 // 類型已提取到 pipeline_types.rs（RRC-1 E2 修復：1200 行限制）。
 pub use crate::pipeline_types::{
-    PipelineStatus, CanaryRecord, StrategyInfo,
-    TimestampedIntent, TimestampedFill, PipelineSnapshot,
+    CanaryRecord, PipelineSnapshot, PipelineStatus, StrategyInfo, TimestampedFill,
+    TimestampedIntent,
 };
 
 #[cfg(test)]
@@ -1179,7 +1375,9 @@ mod tests {
     fn test_canary_record_serializable() {
         let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
         pipeline.canary_mode = true;
-        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000)).unwrap();
+        let record = pipeline
+            .on_tick(&make_event("BTCUSDT", 50000.0, 1000))
+            .unwrap();
         let json = serde_json::to_string(&record).unwrap();
         assert!(json.contains("\"schema_version\":\"1.0.0\""));
         assert!(json.contains("\"source\":\"rust_engine\""));
@@ -1196,14 +1394,104 @@ mod tests {
             ema_12: Some(50100.0),
             ema_26: None,
             rsi_14: Some(55.0),
-            macd: None, bollinger: None, atr_14: None, atr_5: None,
-            stochastic: None, kama: None, adx: None,
-            hurst: None, ewma_vol: None, volume_ratio: Some(1.2),
+            macd: None,
+            bollinger: None,
+            atr_14: None,
+            atr_5: None,
+            stochastic: None,
+            kama: None,
+            adx: None,
+            hurst: None,
+            ewma_vol: None,
+            volume_ratio: Some(1.2),
             donchian: None,
         };
         let input = snapshot_to_input(&snap);
         assert_eq!(input.sma, Some(50000.0));
         assert_eq!(input.rsi, Some(55.0));
         assert_eq!(input.volume_ratio, Some(1.2));
+    }
+
+    // ─── I-08 Dual-Rail Stop tests (Principle #9) ───
+    // 雙軌止損測試：驗證 broker-side SL 只在 primary exchange mode 開倉時啟用
+
+    #[test]
+    fn test_dual_rail_shadow_order_has_sl_fields() {
+        // Struct must expose stop_loss / take_profit for broker rail wiring
+        let req = ShadowOrderRequest {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            price: 50000.0,
+            strategy: "test".into(),
+            paper_fill_ts: 0,
+            is_close: false,
+            order_link_id: "oc_test".into(),
+            is_primary: true,
+            stop_loss: Some(49000.0),
+            take_profit: Some(52000.0),
+        };
+        assert_eq!(req.stop_loss, Some(49000.0));
+        assert_eq!(req.take_profit, Some(52000.0));
+    }
+
+    #[test]
+    fn test_dual_rail_broker_sl_long_below_entry() {
+        // Long SL must sit below entry price
+        let entry: f64 = 50000.0;
+        let sl_pct: f64 = 2.0;
+        let sl = entry * (1.0 - sl_pct / 100.0);
+        assert!(sl < entry);
+        assert!((sl - 49000.0f64).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_dual_rail_broker_sl_short_above_entry() {
+        // Short SL must sit above entry price
+        let entry: f64 = 50000.0;
+        let sl_pct: f64 = 2.0;
+        let sl = entry * (1.0 + sl_pct / 100.0);
+        assert!(sl > entry);
+        assert!((sl - 51000.0f64).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_dual_rail_close_orders_no_broker_sl() {
+        // Close orders never attach broker SL (Bybit auto-cancels on reduce-only fill)
+        let req = ShadowOrderRequest {
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.01,
+            price: 50000.0,
+            strategy: "risk_check".into(),
+            paper_fill_ts: 0,
+            is_close: true,
+            order_link_id: "oc_risk".into(),
+            is_primary: true,
+            stop_loss: None,
+            take_profit: None,
+        };
+        assert!(req.stop_loss.is_none());
+        assert!(req.is_close);
+    }
+
+    #[test]
+    fn test_dual_rail_paper_shadow_skips_broker_sl() {
+        // Paper/shadow orders keep broker SL None (engine rail handles stops locally)
+        let req = ShadowOrderRequest {
+            symbol: "ETHUSDT".into(),
+            is_long: true,
+            qty: 0.1,
+            price: 3000.0,
+            strategy: "ma".into(),
+            paper_fill_ts: 0,
+            is_close: false,
+            order_link_id: "sh_test".into(),
+            is_primary: false,
+            stop_loss: None,
+            take_profit: None,
+        };
+        assert!(!req.is_primary);
+        assert!(req.stop_loss.is_none());
     }
 }

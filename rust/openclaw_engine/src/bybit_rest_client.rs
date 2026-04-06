@@ -205,12 +205,12 @@ impl Default for RateLimitState {
             remaining: AtomicI64::new(120),
             reset_ms: AtomicU64::new(0),
             group_remaining: [
-                AtomicI64::new(10),   // Order
-                AtomicI64::new(10),   // Position
-                AtomicI64::new(10),   // Account
-                AtomicI64::new(120),  // Market
-                AtomicI64::new(5),    // Asset
-                AtomicI64::new(10),   // Other
+                AtomicI64::new(10),  // Order
+                AtomicI64::new(10),  // Position
+                AtomicI64::new(10),  // Account
+                AtomicI64::new(120), // Market
+                AtomicI64::new(5),   // Asset
+                AtomicI64::new(10),  // Other
             ],
         }
     }
@@ -325,21 +325,32 @@ impl BybitRestClient {
             if std::env::var("OPENCLAW_ALLOW_MAINNET").unwrap_or_default() != "1" {
                 return Err(BybitApiError::Business {
                     ret_code: -1,
-                    ret_msg: "Mainnet blocked: set OPENCLAW_ALLOW_MAINNET=1 to enable / 主網被阻止".into(),
+                    ret_msg: "Mainnet blocked: set OPENCLAW_ALLOW_MAINNET=1 to enable / 主網被阻止"
+                        .into(),
                     response: serde_json::json!({"blocked": true}),
                 });
             }
-            tracing::warn!("⚠ MAINNET mode enabled — real money at risk / 主網模式已啟用 — 真金白銀");
+            tracing::warn!(
+                "⚠ MAINNET mode enabled — real money at risk / 主網模式已啟用 — 真金白銀"
+            );
         }
         let api_key = api_key
             .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("BYBIT_API_KEY").ok().filter(|s| !s.is_empty()))
+            .or_else(|| {
+                std::env::var("BYBIT_API_KEY")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+            })
             .or_else(|| read_secret_file("api_key"))
             .unwrap_or_default();
 
         let api_secret = api_secret
             .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("BYBIT_API_SECRET").ok().filter(|s| !s.is_empty()))
+            .or_else(|| {
+                std::env::var("BYBIT_API_SECRET")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+            })
             .or_else(|| read_secret_file("api_secret"))
             .unwrap_or_default();
 
@@ -396,7 +407,10 @@ impl BybitRestClient {
     /// sign_str = timestamp + api_key + recv_window + params
     /// signature = hex(hmac_sha256(api_secret, sign_str))
     fn sign(&self, timestamp: &str, params: &str) -> BybitResult<String> {
-        let sign_str = format!("{}{}{}{}", timestamp, self.api_key, self.recv_window, params);
+        let sign_str = format!(
+            "{}{}{}{}",
+            timestamp, self.api_key, self.recv_window, params
+        );
 
         let mut mac = Hmac::<Sha256>::new_from_slice(self.api_secret.as_bytes())
             .map_err(|e| BybitApiError::SigningError(e.to_string()))?;
@@ -425,11 +439,7 @@ impl BybitRestClient {
     /// Query parameters are serialized as key=value&key=value (sorted by key),
     /// then signed and appended to the URL.
     /// 查詢參數序列化為 key=value&key=value（按 key 排序），然後簽名並附加到 URL。
-    pub async fn get(
-        &self,
-        path: &str,
-        params: &[(&str, &str)],
-    ) -> BybitResult<BybitResponse> {
+    pub async fn get(&self, path: &str, params: &[(&str, &str)]) -> BybitResult<BybitResponse> {
         if !self.has_credentials() {
             return Err(BybitApiError::NoCredentials);
         }
@@ -453,7 +463,11 @@ impl BybitRestClient {
             format!("{}{}?{}", self.base_url, path, query_string)
         };
 
-        debug!(method = "GET", path = path, "Bybit API request / Bybit API 請求");
+        debug!(
+            method = "GET",
+            path = path,
+            "Bybit API request / Bybit API 請求"
+        );
 
         let resp = self
             .client
@@ -478,11 +492,7 @@ impl BybitRestClient {
     ///
     /// Body is serialized as JSON, then the JSON string is signed.
     /// Body 序列化為 JSON，然後對 JSON 字串簽名。
-    pub async fn post(
-        &self,
-        path: &str,
-        body: &serde_json::Value,
-    ) -> BybitResult<BybitResponse> {
+    pub async fn post(&self, path: &str, body: &serde_json::Value) -> BybitResult<BybitResponse> {
         if !self.has_credentials() {
             return Err(BybitApiError::NoCredentials);
         }
@@ -493,7 +503,11 @@ impl BybitRestClient {
 
         let url = format!("{}{}", self.base_url, path);
 
-        debug!(method = "POST", path = path, "Bybit API request / Bybit API 請求");
+        debug!(
+            method = "POST",
+            path = path,
+            "Bybit API request / Bybit API 請求"
+        );
 
         let resp = self
             .client
@@ -549,7 +563,9 @@ impl BybitRestClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<i64>().ok())
         {
-            self.rate_limit.remaining.store(remaining, Ordering::Relaxed);
+            self.rate_limit
+                .remaining
+                .store(remaining, Ordering::Relaxed);
         }
         if let Some(reset_ts) = resp
             .headers()
@@ -645,8 +661,7 @@ mod tests {
         );
 
         // Compute expected HMAC manually / 手動計算預期 HMAC
-        let mut mac =
-            Hmac::<Sha256>::new_from_slice(b"TESTSECRET456").unwrap();
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"TESTSECRET456").unwrap();
         mac.update(sign_str.as_bytes());
         let expected = hex::encode(mac.finalize().into_bytes());
 
@@ -831,15 +846,42 @@ mod tests {
     /// 測試限流分組分類。
     #[test]
     fn test_rate_limit_group_from_path() {
-        assert_eq!(RateLimitGroup::from_path("/v5/order/create"), RateLimitGroup::Order);
-        assert_eq!(RateLimitGroup::from_path("/v5/order/cancel"), RateLimitGroup::Order);
-        assert_eq!(RateLimitGroup::from_path("/v5/execution/list"), RateLimitGroup::Order);
-        assert_eq!(RateLimitGroup::from_path("/v5/position/list"), RateLimitGroup::Position);
-        assert_eq!(RateLimitGroup::from_path("/v5/account/wallet-balance"), RateLimitGroup::Account);
-        assert_eq!(RateLimitGroup::from_path("/v5/market/kline"), RateLimitGroup::Market);
-        assert_eq!(RateLimitGroup::from_path("/v5/asset/transfer/inter-transfer"), RateLimitGroup::Asset);
-        assert_eq!(RateLimitGroup::from_path("/v5/spot-margin-uta/status"), RateLimitGroup::Asset);
-        assert_eq!(RateLimitGroup::from_path("/v5/unknown"), RateLimitGroup::Other);
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/order/create"),
+            RateLimitGroup::Order
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/order/cancel"),
+            RateLimitGroup::Order
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/execution/list"),
+            RateLimitGroup::Order
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/position/list"),
+            RateLimitGroup::Position
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/account/wallet-balance"),
+            RateLimitGroup::Account
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/market/kline"),
+            RateLimitGroup::Market
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/asset/transfer/inter-transfer"),
+            RateLimitGroup::Asset
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/spot-margin-uta/status"),
+            RateLimitGroup::Asset
+        );
+        assert_eq!(
+            RateLimitGroup::from_path("/v5/unknown"),
+            RateLimitGroup::Other
+        );
     }
 
     /// Test BybitRetCode classification.
@@ -847,9 +889,18 @@ mod tests {
     #[test]
     fn test_bybit_ret_code() {
         assert_eq!(BybitRetCode::from_code(0), Some(BybitRetCode::Ok));
-        assert_eq!(BybitRetCode::from_code(110001), Some(BybitRetCode::OrderNotFound));
-        assert_eq!(BybitRetCode::from_code(110012), Some(BybitRetCode::InsufficientBalance));
-        assert_eq!(BybitRetCode::from_code(110043), Some(BybitRetCode::LeverageNotModified));
+        assert_eq!(
+            BybitRetCode::from_code(110001),
+            Some(BybitRetCode::OrderNotFound)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110012),
+            Some(BybitRetCode::InsufficientBalance)
+        );
+        assert_eq!(
+            BybitRetCode::from_code(110043),
+            Some(BybitRetCode::LeverageNotModified)
+        );
         assert_eq!(BybitRetCode::from_code(99999), None);
 
         assert!(BybitRetCode::IpRateLimit.is_retryable());

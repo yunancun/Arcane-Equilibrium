@@ -42,9 +42,13 @@ struct FundingPosition {
 impl FundingArb {
     pub fn new() -> Self {
         Self {
-            active: true, position: None, last_trade_ms: 0,
-            cooldown_ms: 3_600_000, default_qty: 1e9, // 1h cooldown
-            prev_position: None, prev_last_trade_ms: 0,
+            active: true,
+            position: None,
+            last_trade_ms: 0,
+            cooldown_ms: 3_600_000,
+            default_qty: 1e9, // 1h cooldown
+            prev_position: None,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -56,30 +60,49 @@ impl FundingArb {
 
     #[allow(dead_code)]
     fn should_exit(&self, funding_rate: f64, basis_pct: f64, now_ms: u64) -> bool {
-        let pos = match &self.position { Some(p) => p, None => return false };
+        let pos = match &self.position {
+            Some(p) => p,
+            None => return false,
+        };
 
         // Rate flipped sign
-        if pos.is_positive_funding && funding_rate < 0.0 { return true; }
-        if !pos.is_positive_funding && funding_rate > 0.0 { return true; }
+        if pos.is_positive_funding && funding_rate < 0.0 {
+            return true;
+        }
+        if !pos.is_positive_funding && funding_rate > 0.0 {
+            return true;
+        }
 
         // Rate too small
         let exit_threshold = TOTAL_COST_BPS / 10_000.0 / 2.0; // half of total cost
-        if funding_rate.abs() < exit_threshold { return true; }
+        if funding_rate.abs() < exit_threshold {
+            return true;
+        }
 
         // Basis risk
-        if basis_pct > MAX_BASIS_PCT { return true; }
+        if basis_pct > MAX_BASIS_PCT {
+            return true;
+        }
 
         // Max hold time
-        if now_ms - pos.entry_ms > MAX_HOLD_MS { return true; }
+        if now_ms - pos.entry_ms > MAX_HOLD_MS {
+            return true;
+        }
 
         false
     }
 }
 
 impl Strategy for FundingArb {
-    fn name(&self) -> &str { "funding_arb" }
-    fn is_active(&self) -> bool { self.active }
-    fn set_active(&mut self, active: bool) { self.active = active; }
+    fn name(&self) -> &str {
+        "funding_arb"
+    }
+    fn is_active(&self) -> bool {
+        self.active
+    }
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
 
     /// RC-04: Revert position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 position 和 last_trade_ms。
@@ -126,7 +149,9 @@ mod tests {
     fn test_should_exit_rate_flip() {
         let mut s = FundingArb::new();
         s.position = Some(FundingPosition {
-            is_positive_funding: true, entry_ms: 0, entry_funding_rate: 0.001,
+            is_positive_funding: true,
+            entry_ms: 0,
+            entry_funding_rate: 0.001,
         });
         assert!(s.should_exit(-0.001, 0.1, 1000));
     }
@@ -135,7 +160,9 @@ mod tests {
     fn test_should_exit_max_hold() {
         let mut s = FundingArb::new();
         s.position = Some(FundingPosition {
-            is_positive_funding: true, entry_ms: 0, entry_funding_rate: 0.001,
+            is_positive_funding: true,
+            entry_ms: 0,
+            entry_funding_rate: 0.001,
         });
         assert!(s.should_exit(0.001, 0.1, MAX_HOLD_MS + 1));
     }
@@ -144,7 +171,9 @@ mod tests {
     fn test_should_exit_basis_risk() {
         let mut s = FundingArb::new();
         s.position = Some(FundingPosition {
-            is_positive_funding: true, entry_ms: 0, entry_funding_rate: 0.001,
+            is_positive_funding: true,
+            entry_ms: 0,
+            entry_funding_rate: 0.001,
         });
         assert!(s.should_exit(0.001, 0.6, 1000)); // basis > 0.5%
     }
@@ -153,7 +182,9 @@ mod tests {
     fn test_no_exit_normal() {
         let mut s = FundingArb::new();
         s.position = Some(FundingPosition {
-            is_positive_funding: true, entry_ms: 0, entry_funding_rate: 0.005,
+            is_positive_funding: true,
+            entry_ms: 0,
+            entry_funding_rate: 0.005,
         });
         // Rate 0.005 (50 bps) > exit_threshold 0.0017 → no exit
         assert!(!s.should_exit(0.005, 0.1, 1000));
@@ -163,8 +194,12 @@ mod tests {
     fn test_on_tick_placeholder() {
         let mut s = FundingArb::new();
         let ctx = TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: 0,
-            indicators: None, signals: vec![], h0_allowed: true,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: 0,
+            indicators: None,
+            signals: vec![],
+            h0_allowed: true,
         };
         assert!(s.on_tick(&ctx).is_empty());
     }

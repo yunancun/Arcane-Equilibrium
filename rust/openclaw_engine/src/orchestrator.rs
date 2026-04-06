@@ -13,7 +13,9 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub fn new() -> Self {
-        Self { strategies: Vec::new() }
+        Self {
+            strategies: Vec::new(),
+        }
     }
 
     /// Register a strategy.
@@ -49,7 +51,8 @@ impl Orchestrator {
     /// Get names of active strategies.
     /// 獲取活躍策略名稱。
     pub fn active_strategy_names(&self) -> Vec<&str> {
-        self.strategies.iter()
+        self.strategies
+            .iter()
             .filter(|s| s.is_active())
             .map(|s| s.name())
             .collect()
@@ -58,10 +61,13 @@ impl Orchestrator {
     /// Get strategy status info for IPC snapshot.
     /// 獲取策略狀態信息供 IPC 快照使用。
     pub fn strategy_infos(&self) -> Vec<StrategyInfo> {
-        self.strategies.iter().map(|s| StrategyInfo {
-            name: s.name().to_string(),
-            active: s.is_active(),
-        }).collect()
+        self.strategies
+            .iter()
+            .map(|s| StrategyInfo {
+                name: s.name().to_string(),
+                active: s.is_active(),
+            })
+            .collect()
     }
 
     /// Mutable access to strategies for per-strategy rejection/fill callbacks (RC-04/RC-05).
@@ -87,12 +93,16 @@ impl Orchestrator {
     /// 按名稱查找策略（大小寫不敏感），用於 IPC 參數更新。
     pub fn find_strategy_mut(&mut self, name: &str) -> Option<&mut Box<dyn Strategy>> {
         let name_lower = name.to_lowercase();
-        self.strategies.iter_mut().find(|s| s.name().to_lowercase() == name_lower)
+        self.strategies
+            .iter_mut()
+            .find(|s| s.name().to_lowercase() == name_lower)
     }
 }
 
 impl Default for Orchestrator {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -106,9 +116,15 @@ mod tests {
     }
 
     impl Strategy for MockStrategy {
-        fn name(&self) -> &str { "mock" }
-        fn is_active(&self) -> bool { self.active }
-        fn set_active(&mut self, active: bool) { self.active = active; }
+        fn name(&self) -> &str {
+            "mock"
+        }
+        fn is_active(&self) -> bool {
+            self.active
+        }
+        fn set_active(&mut self, active: bool) {
+            self.active = active;
+        }
         fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
             self.intents.clone()
         }
@@ -118,8 +134,12 @@ mod tests {
     fn test_empty_orchestrator() {
         let mut orch = Orchestrator::new();
         let ctx = TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: 0,
-            indicators: None, signals: vec![], h0_allowed: true,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: 0,
+            indicators: None,
+            signals: vec![],
+            h0_allowed: true,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }
@@ -128,13 +148,25 @@ mod tests {
     fn test_dispatch_collects_intents() {
         let mut orch = Orchestrator::new();
         let intent = OrderIntent {
-            symbol: "BTC".into(), is_long: true, qty: 0.01, confidence: 0.8,
-            strategy: "mock".into(), order_type: "market".into(), limit_price: None,
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.8,
+            strategy: "mock".into(),
+            order_type: "market".into(),
+            limit_price: None,
         };
-        orch.register(Box::new(MockStrategy { active: true, intents: vec![intent.clone()] }));
+        orch.register(Box::new(MockStrategy {
+            active: true,
+            intents: vec![intent.clone()],
+        }));
         let ctx = TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: 0,
-            indicators: None, signals: vec![], h0_allowed: true,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: 0,
+            indicators: None,
+            signals: vec![],
+            h0_allowed: true,
         };
         assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
     }
@@ -143,13 +175,25 @@ mod tests {
     fn test_inactive_strategy_skipped() {
         let mut orch = Orchestrator::new();
         let intent = OrderIntent {
-            symbol: "BTC".into(), is_long: true, qty: 0.01, confidence: 0.8,
-            strategy: "mock".into(), order_type: "market".into(), limit_price: None,
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.8,
+            strategy: "mock".into(),
+            order_type: "market".into(),
+            limit_price: None,
         };
-        orch.register(Box::new(MockStrategy { active: false, intents: vec![intent] }));
+        orch.register(Box::new(MockStrategy {
+            active: false,
+            intents: vec![intent],
+        }));
         let ctx = TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: 0,
-            indicators: None, signals: vec![], h0_allowed: true,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: 0,
+            indicators: None,
+            signals: vec![],
+            h0_allowed: true,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
     }
@@ -157,8 +201,14 @@ mod tests {
     #[test]
     fn test_strategy_count() {
         let mut orch = Orchestrator::new();
-        orch.register(Box::new(MockStrategy { active: true, intents: vec![] }));
-        orch.register(Box::new(MockStrategy { active: false, intents: vec![] }));
+        orch.register(Box::new(MockStrategy {
+            active: true,
+            intents: vec![],
+        }));
+        orch.register(Box::new(MockStrategy {
+            active: false,
+            intents: vec![],
+        }));
         assert_eq!(orch.strategy_count(), 2);
         assert_eq!(orch.active_strategy_names().len(), 1);
     }
@@ -166,7 +216,10 @@ mod tests {
     #[test]
     fn test_find_strategy_mut() {
         let mut orch = Orchestrator::new();
-        orch.register(Box::new(MockStrategy { active: true, intents: vec![] }));
+        orch.register(Box::new(MockStrategy {
+            active: true,
+            intents: vec![],
+        }));
         // MockStrategy.name() returns "mock"
         assert!(orch.find_strategy_mut("mock").is_some());
         assert!(orch.find_strategy_mut("MOCK").is_some()); // case-insensitive

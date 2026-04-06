@@ -237,8 +237,12 @@ mod tests {
 
     fn make_snapshot(symbol: &str, ts: u64) -> FeatureSnapshot {
         FeatureSnapshot::new(
-            symbol.into(), ts, 50000.0, 1e9,
-            IndicatorSnapshot::default(), "v1.0".into(),
+            symbol.into(),
+            ts,
+            50000.0,
+            1e9,
+            IndicatorSnapshot::default(),
+            "v1.0".into(),
         )
     }
 
@@ -258,26 +262,60 @@ mod tests {
             ema_12: Some(50100.0),
             ema_26: Some(49800.0),
             rsi_14: Some(65.0),
-            macd: Some(MacdResult { macd: 300.0, signal: 250.0, histogram: 50.0 }),
-            bollinger: Some(BollingerResult { upper: 51000.0, middle: 50000.0, lower: 49000.0, bandwidth: 0.04, percent_b: 0.75 }),
-            atr_14: Some(AtrResult { atr: 500.0, atr_percent: 1.0 }),
-            atr_5: Some(AtrResult { atr: 600.0, atr_percent: 1.2 }),
+            macd: Some(MacdResult {
+                macd: 300.0,
+                signal: 250.0,
+                histogram: 50.0,
+            }),
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: 0.04,
+                percent_b: 0.75,
+            }),
+            atr_14: Some(AtrResult {
+                atr: 500.0,
+                atr_percent: 1.0,
+            }),
+            atr_5: Some(AtrResult {
+                atr: 600.0,
+                atr_percent: 1.2,
+            }),
             stochastic: Some(StochResult { k: 70.0, d: 65.0 }),
-            kama: Some(KamaResult { kama: 50050.0, efficiency_ratio: 0.8 }),
-            adx: Some(AdxResult { adx: 30.0, plus_di: 25.0, minus_di: 15.0 }),
-            hurst: Some(HurstResult { hurst: 0.65, regime: "trending".into() }),
-            ewma_vol: Some(EwmaVolResult { ewma_vol: 0.02, vol_regime: "medium".into() }),
+            kama: Some(KamaResult {
+                kama: 50050.0,
+                efficiency_ratio: 0.8,
+            }),
+            adx: Some(AdxResult {
+                adx: 30.0,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: 0.65,
+                regime: "trending".into(),
+            }),
+            ewma_vol: Some(EwmaVolResult {
+                ewma_vol: 0.02,
+                vol_regime: "medium".into(),
+            }),
             volume_ratio: Some(1.5),
-            donchian: Some(DonchianResult { upper: 51500.0, lower: 48500.0, middle: 50000.0, width: 3000.0 }),
+            donchian: Some(DonchianResult {
+                upper: 51500.0,
+                lower: 48500.0,
+                middle: 50000.0,
+                width: 3000.0,
+            }),
         };
         let snap = FeatureSnapshot::new("BTCUSDT".into(), 1000, 50000.0, 1e9, ind, "v1.0".into());
         let vec = snap.to_feature_vector();
         assert_eq!(vec.len(), FEATURE_DIM);
         // Check some specific values (0-indexed)
         assert!((vec[0] - 50000.0).abs() < 0.01); // sma_20
-        assert!((vec[4] - 65.0).abs() < 0.01);    // rsi_14
-        assert!((vec[24] - 0.65).abs() < 0.01);   // hurst (idx 24)
-        assert!((vec[25] - 1.0).abs() < 0.01);    // hurst regime = trending = 1.0 (idx 25)
+        assert!((vec[4] - 65.0).abs() < 0.01); // rsi_14
+        assert!((vec[24] - 0.65).abs() < 0.01); // hurst (idx 24)
+        assert!((vec[25] - 1.0).abs() < 0.01); // hurst regime = trending = 1.0 (idx 25)
         assert!((vec[FEATURE_DIM - 1] - 50000.0).abs() < 0.01); // last = price
     }
 

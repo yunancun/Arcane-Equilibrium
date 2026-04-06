@@ -11,9 +11,7 @@
 //!   所有方法為異步，使用 Arc<BybitRestClient> 線程安全共享。
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
-use crate::order_manager::{
-    AmendOrderRequest, CreateOrderRequest, OrderCategory, OrderType,
-};
+use crate::order_manager::{AmendOrderRequest, CreateOrderRequest, OrderCategory, OrderType};
 use std::sync::Arc;
 use tracing::info;
 
@@ -378,10 +376,7 @@ fn parse_batch_response(result: &serde_json::Value) -> BybitResult<BatchOrderRes
 
         // Get per-order error info from retExtInfo / 從 retExtInfo 取得每訂單錯誤信息
         let (ret_code, ret_msg) = if let Some(ext) = ext_list.get(i) {
-            let code = ext
-                .get("code")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            let code = ext.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
             let msg = ext
                 .get("msg")
                 .and_then(|v| v.as_str())

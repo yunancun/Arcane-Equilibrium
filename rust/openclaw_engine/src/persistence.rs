@@ -7,7 +7,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tracing::{error, debug};
+use tracing::{debug, error};
 
 /// Debounced JSON state writer — flushes at most once per interval.
 /// 去抖 JSON 狀態寫入器 — 最多每間隔刷新一次。
@@ -76,7 +76,9 @@ pub struct AuditWriter {
 
 impl AuditWriter {
     pub fn new(path: &Path) -> Self {
-        Self { path: path.to_path_buf() }
+        Self {
+            path: path.to_path_buf(),
+        }
     }
 
     /// Append a single audit record as JSONL.
@@ -86,7 +88,9 @@ impl AuditWriter {
             Ok(json) => {
                 use std::io::Write;
                 let mut file = match std::fs::OpenOptions::new()
-                    .create(true).append(true).open(&self.path)
+                    .create(true)
+                    .append(true)
+                    .open(&self.path)
                 {
                     Ok(f) => f,
                     Err(e) => {

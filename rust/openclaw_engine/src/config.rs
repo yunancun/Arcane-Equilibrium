@@ -251,9 +251,15 @@ pub struct MlConfig {
     pub kelly_risk_pct: f64,
 }
 
-fn default_kelly_max() -> f64 { 0.25 }
-fn default_kelly_min_trades() -> u32 { 50 }
-fn default_kelly_risk() -> f64 { 0.03 }
+fn default_kelly_max() -> f64 {
+    0.25
+}
+fn default_kelly_min_trades() -> u32 {
+    50
+}
+fn default_kelly_risk() -> f64 {
+    0.03
+}
 
 impl Default for MlConfig {
     fn default() -> Self {
@@ -283,8 +289,7 @@ fn default_heartbeat_interval_ms() -> u64 {
 }
 fn default_ipc_socket_path() -> String {
     // Cross-platform: use env or fallback / 跨平台：優先環境變量
-    std::env::var("OPENCLAW_IPC_SOCKET")
-        .unwrap_or_else(|_| "/tmp/openclaw/engine.sock".into())
+    std::env::var("OPENCLAW_IPC_SOCKET").unwrap_or_else(|_| "/tmp/openclaw/engine.sock".into())
 }
 fn default_state_push_interval_ms() -> u64 {
     1000
@@ -431,7 +436,9 @@ impl ConfigManager {
 
         // Warn if cold params changed (they won't take effect) / 冷參數變更警告
         if old.ws_url != new_config.ws_url {
-            warn!("ws_url changed but is cold — requires restart / ws_url 已變更但為冷參數，需重啟");
+            warn!(
+                "ws_url changed but is cold — requires restart / ws_url 已變更但為冷參數，需重啟"
+            );
         }
         if old.reconnect_delay_ms != new_config.reconnect_delay_ms {
             warn!("reconnect_delay_ms changed but is cold — requires restart");
@@ -454,11 +461,21 @@ impl ConfigManager {
             );
             new_config.trading_mode = old.trading_mode;
         }
-        if old.ws_url != new_config.ws_url { new_config.ws_url = old.ws_url.clone(); }
-        if old.reconnect_delay_ms != new_config.reconnect_delay_ms { new_config.reconnect_delay_ms = old.reconnect_delay_ms; }
-        if old.heartbeat_interval_ms != new_config.heartbeat_interval_ms { new_config.heartbeat_interval_ms = old.heartbeat_interval_ms; }
-        if old.ipc_socket_path != new_config.ipc_socket_path { new_config.ipc_socket_path = old.ipc_socket_path.clone(); }
-        if old.state_push_interval_ms != new_config.state_push_interval_ms { new_config.state_push_interval_ms = old.state_push_interval_ms; }
+        if old.ws_url != new_config.ws_url {
+            new_config.ws_url = old.ws_url.clone();
+        }
+        if old.reconnect_delay_ms != new_config.reconnect_delay_ms {
+            new_config.reconnect_delay_ms = old.reconnect_delay_ms;
+        }
+        if old.heartbeat_interval_ms != new_config.heartbeat_interval_ms {
+            new_config.heartbeat_interval_ms = old.heartbeat_interval_ms;
+        }
+        if old.ipc_socket_path != new_config.ipc_socket_path {
+            new_config.ipc_socket_path = old.ipc_socket_path.clone();
+        }
+        if old.state_push_interval_ms != new_config.state_push_interval_ms {
+            new_config.state_push_interval_ms = old.state_push_interval_ms;
+        }
 
         self.inner.store(Arc::new(new_config));
         info!(path = %self.file_path.display(), "config reloaded (hot params) / 配置已重載（熱參數）");
