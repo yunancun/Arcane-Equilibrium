@@ -81,7 +81,7 @@ def _get_kline_manager() -> Any:
     且 _fetch_ohlcv_from_bybit 提供獨立的後備數據源）。
     """
     try:
-        from .phase2_strategy_routes import KLINE_MANAGER  # noqa: PLC0415
+        from .strategy_wiring import KLINE_MANAGER  # noqa: PLC0415  — import from source, not facade, to avoid circular import
         return KLINE_MANAGER
     except Exception as e:
         logger.warning(
