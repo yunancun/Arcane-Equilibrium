@@ -189,34 +189,35 @@ Rust 是唯一實際執行引擎，Python RM 只是 GUI 的儲存層（技術債
 > 原 CONF-D 已併入 4-15（IPC `update_strategy_params` 擴充承接 LinUCB confidence override）
 
 **Group 0 — Dashboard 骨架**
-- [ ] **4-00** Phase 4 Dashboard tab + 共用 `_dashboard_card.html` + `get_phase4_status` IPC stub (E1a · 1d)
+- [x] **4-00** Phase 4 Dashboard tab + `_dashboard_card.html` + `get_phase4_status` IPC stub — `d36116f`
 
 **Group 1 — Claude Teacher**
-- [ ] **4-01** Teacher directive Rust 接口 + ExperimentLedger 寫入 (E1 · 3d)
+- [x] **4-01** Teacher directive Rust 接口 + ExperimentLedger 寫入 — `31fb227`
+  - LlmClient trait + AnthropicClient (fail-closed) + MockClient · Directive parser 4 types · BudgetTracker.record_usage fail-closed · 8 tests
 - [ ] **4-02** Directive 解析 + GovernanceHub 風控過濾（最高風險，E3 強制介入）(E1 · 2d)
 - [ ] **4-03** directive_executions 效果追蹤 + Teacher Card (E1+E1a · 2d)
 
 **Group 2 — LinUCB**
-- [ ] **4-04** LinUCB Rust inference + arm space v1_15 + versioned state + feature_schema_hash fail-closed (E1 · 3d)
+- [x] **4-04** LinUCB Rust inference + arm space v1_15 + versioned state + feature_schema_hash fail-closed — `31fb227`
 - [ ] **4-05** LinUCB Python trainer + 收斂監控 (E1 · 2d)
 - [ ] **4-06** Model Performance rolling + LinUCB Card + arm dropdown + warm-start migration script + shadow compare + 自動 regret 回滾 (E1+E1a · 3d)
 
 **Group 3 — News**
-- [ ] **4-07** News provider abstract + CryptoPanic free + CoinTelegraph RSS + Google News RSS + mock (E1 · 3d)
+- [x] **4-07** News provider abstract + CryptoPanic free + RSS + mock — `31fb227`
 - [ ] **4-08** Headline dedup (SHA1[:16] + 24h) + severity (keyword × source) (E1 · 2d)
 - [ ] **4-09** Triple-route 消費（Guardian halt ≥0.8 / Regime feature / Learning context）(E1 · 2d)
 - [ ] **4-10** News Card + provider quota 健康監控 (E1a · 1d)
 
 **Group 4 — DL-3 Foundation Models**
-- [ ] **4-11** TimesFM/Chronos async wrapper + foundation_model_features 表 (E1 · 3d)
+- [x] **4-11** TimesFM/Chronos async wrapper + foundation_model_features 表 — `31fb227`
 - [ ] **4-12** DL-3 A/B 框架 vs Phase 3 Scorer baseline (E1 · 2d)
 - [ ] **4-13** DL-3 降級邏輯 + Go/No-Go 報告腳本（AI-E 簽核）(E1+AI-E · 1d)
 - [ ] **4-14** DL-3 Card + 決策展示 (E1a · 1d)
 
 **Group 5 — Cross-cutting**
-- [ ] **4-15** AI Budget tracker (Rust) + V010 (ai_budget_config + ai_usage_log + linucb_state versioning alter + linucb_state_archive + linucb_migrations) + IPC `update_ai_budget_config` / `get_ai_budget_status` + 三段降級 ($80/$95/$100) + CONF-D `update_strategy_params` 擴充 (E1 · 3d)
+- [x] **4-15** AI Budget tracker (Rust) + V010 + IPC `update_ai_budget_config` / `get_ai_budget_status` + 三段降級 — `b4cfade`
 - [ ] **4-16** Q1 GUI: Risk-tab AI Budget 區塊（綠/黃/紅進度條 + per-agent 配額 + reset month）(E1a · 2d)
-- [ ] **4-17** Provider pricing table 綁定 (Anthropic/OpenAI/Local · 原 FA GAP-10) (E1 · 1d)
+- [x] **4-17** Provider pricing table 綁定 (`settings/ai_pricing.yaml` · 原 FA GAP-10) — `31fb227`
 - [ ] **4-18** Decision_context 接線（claude_directive_id / linucb_arm_id / linucb_confidence_bound + news 欄位）(E1 · 1d)
 - [ ] **4-19** test_full_learning_loop 集成測試（3 個端到端 case）(E4 · 2d)
 

@@ -3,6 +3,29 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-06
 
+### Session 14 — WP 整清 + GUI 修正 + Phase 4 Wave 1（2026-04-06 · commit 31fb227）
+
+**WP backlog 稽核：**
+- 5-path 並行 Explore 核查 223 項 → 94 已修 + 103 真實 open，TODO.md 替換
+- WP-G ✅ Kelly ATR vol-mult + Thompson NIG defaults 提取到 config（`4187da6`）
+- WP-BB ✅ 主動限速退讓 + 刪除死碼 WS listener ~2500 行（`44b0eee`）
+- WP-I ✅ P1 文檔衛生 7 項（`338b4f9`）
+- WP-F ✅ P0 全部 + P1 11/18 GUI bug 修正（`71e4770`）
+
+**GUI 修正：**
+- no-cache headers + BUILD_TS bump 解決硬刷新失效（`1846966`）
+- 風控輸入框用 Python RM (gc) 取代 Rust snapshot，修正存完即回彈（`f3106d8`）
+- WP-ARCH-RC1 雙風控系統 tech debt 正式登記，5 子任務（`b33824f`）
+
+**Phase 4 Wave 0+1（背景 agent，7/22 子任務）：**
+- 4-00 Dashboard 骨架 + phase4_routes.py（`d36116f`）
+- 4-15 BudgetTracker Rust + V010 DDL + IPC wiring（`b4cfade`）
+- W1 5 模組並行：4-01 Teacher / 4-04 LinUCB / 4-07 News / 4-11 DL-3 / 4-17 Pricing（`31fb227`）
+
+**測試：** engine 531 · Python 3279 pass
+
+---
+
 ### L3 全系統審計 — 12 路並行 + PA 統一整改（2026-04-05 · commit b25e541）
 
 **12 個審計角色並行：**
