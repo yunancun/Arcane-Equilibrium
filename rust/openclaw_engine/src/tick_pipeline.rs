@@ -266,6 +266,9 @@ pub struct TickPipeline {
     /// DB-RUN-1: Counter for dropped (throttled) signal writes — observability.
     /// DB-RUN-1：被節流跳過的 signal 寫入計數，供 status 報告觀察降頻效果。
     signals_throttled: u64,
+    /// DB-RUN-2: Counter for dropped (throttled) decision_context writes.
+    /// DB-RUN-2：被節流跳過的 decision_context 寫入計數。
+    context_throttled: u64,
 }
 
 impl TickPipeline {
@@ -331,6 +334,7 @@ impl TickPipeline {
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(60_000),
             signals_throttled: 0,
+            context_throttled: 0,
         }
     }
 
@@ -366,6 +370,10 @@ impl TickPipeline {
 
     pub fn signals_throttled(&self) -> u64 {
         self.signals_throttled
+    }
+
+    pub fn context_throttled(&self) -> u64 {
+        self.context_throttled
     }
 
     /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
@@ -773,6 +781,7 @@ impl TickPipeline {
 
         // Store recent signals for IPC snapshot (ring buffer, max 100)
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
+        let mut signals_persisted_this_tick = 0u32;
         for sig in &signals {
             self.recent_signals.push_back(sig.clone());
             if self.recent_signals.len() > 100 {
@@ -786,6 +795,7 @@ impl TickPipeline {
             if !self.should_persist_signal(sig) {
                 continue;
             }
+            signals_persisted_this_tick += 1;
 
             // Phase 2a: Emit signal to trading_writer for PG persistence
             if let Some(ref tx) = self.trading_tx {
@@ -802,8 +812,16 @@ impl TickPipeline {
             }
         }
 
-        // Phase 2a: Emit DecisionContextMsg on signal generation (one per tick with signals)
-        if !signals.is_empty() {
+        // DB-RUN-2: Decision context piggybacks on signal persistence — only emit
+        // when at least one signal was actually persisted this tick. Reduces
+        // 10.6M/day to ~36k/day (~99.6% drop) while preserving full fidelity at
+        // every state-change / heartbeat boundary.
+        // DB-RUN-2：decision_context 跟隨 signal 持久化 — 本 tick 至少 1 個 signal
+        // 被寫入時才發送 context。降幅 ~99.6%，狀態變更與心跳邊界仍保留完整快照。
+        if !signals.is_empty() && signals_persisted_this_tick == 0 {
+            self.context_throttled += 1;
+        }
+        if signals_persisted_this_tick > 0 {
             if let Some(ref tx) = self.context_tx {
                 let ind = indicators.as_ref();
                 let pos = self.paper_state.get_position(&event.symbol);
@@ -1869,6 +1887,13 @@ mod tests {
         for ts in [1, 2, 3, 4, 5] {
             assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, ts)));
         }
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun2_context_counter_starts_zero() {
+        let p = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(p.context_throttled(), 0);
         assert_eq!(p.signals_throttled(), 0);
     }
 
