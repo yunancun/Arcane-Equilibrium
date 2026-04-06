@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-06（RRC-1 完成 + L3 12路審計 · 1075 Py + 856 Rust = 1931）
+# 最後更新：2026-04-06（Session 10 · R0+R1 L3 整改完成 · 428 engine + 35 ml_training + 411 core）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 審計報告：srv/audit_PA_consolidated_remediation_plan.md（63 issues · 11 work packages）
@@ -12,12 +12,40 @@
 
 從 13 份審計報告整合驗證後的 OPEN P0 清單（詳見 `docs/audits/2026-04-06_consolidated_remediation_report.md`）：
 
-- [ ] **R0-1 / I-01** `intent_processor.rs::process_gates_only()` 補上 Gate 3 Cost Gate（exchange 模式必須）
-- [ ] **R0-2 / I-02 + I-09** IPC Unix socket 設 0o600 + 風控 setter 加 `.clamp()` 邊界
-- [ ] **R0-3 / I-06** `market_data_client.rs` (1422 LOC) 拆分至 1200 以下硬上限
-- [ ] **R0-4 / I-07** 執行 DDL V001-V007 到生產 PG，驗證 6 個 writer 開始入庫
-- [ ] **R0-5 / NEW-1** 重建 `tests/stress_integration.rs`（檔案已被整個刪除，29 個 stress 場景需重新移植到當前 4-arg 簽名）
-- [ ] **R0-6 / I-04 + I-05** 重跑 `test_grafana_data_writer.py` 與 `test_label_generator.py`，若仍紅則修復根因
+### R0 Week 1 — 已完成（Session 10 · 2026-04-06）
+
+- [x] **R0-1 / I-01** Gate 3 補到 `process_gates_only()`（commit `8e7685a`）
+- [x] **R0-2 / I-02 + I-09** IPC 0o600 + clamp() setters（commit `8e7685a`）
+- [x] **R0-3 / I-06** `market_data_client.rs` 拆分 1428→1081/216/157（commit `8e7685a`）
+- [x] **R0-4 / I-07** V007 DDL 套用 prod · 6 writers idle 根因見 §11 報告（commit `8e7685a` + `0d72309`）
+- [x] **R0-5 / NEW-1** `stress_integration.rs` 實際存在，只是 `atr` 參數編譯失敗已修復（commit `8e7685a`）
+- [x] **R0-X / I-08** 雙軌止損 Principle #9 wiring（commit `8e7685a`）
+- [x] **R0-X / I-22** event_consumer 拆分 PARTIAL（mod 912 / types 91 / tests 80）（commit `c9994c5`）
+
+### R1 Wave 1 — 已完成（Session 10 · 2026-04-06）
+
+- [x] **SEC-02** H0Gate shadow mode audit log（commit `5fcad61`）
+- [x] **SEC-06** Login token 從 JSON body 移除（commit `5fcad61`）
+- [x] **SEC-13** `latency_us` u32 saturating cast（commit `5fcad61`）
+- [x] **SEC-18** paper_state 5 setters clamp + NaN reject（commit `5fcad61`）
+- [x] **Idle writer #4** position_snapshots emitter +2 tests（commit `5fcad61`）
+- [x] **WP-MIT P1-4** scorer_trainer CPCV integration（commit `de6dd82`）
+- [x] **WP-MIT P1-5** Thompson Sampling PG persistence +3 tests（commit `de6dd82`）
+- [x] **WP-MIT P1-3** run_training_pipeline.py +3 tests（commit `de6dd82`）
+
+### R1 剩餘 / R2 延後
+
+- [ ] **SEC-01/04/08** 已降級（pre-Session-9c DONE，報告需更新）
+- [ ] **SEC-05** GUI innerHTML XSS（架構性，16 文件 133 處）
+- [ ] **SEC-09** `/startup-status` 認證（by-design，保持開放）
+- [ ] **SEC-11** Cost-Gate ATR=0 fail-open（產品/風控決策）
+- [ ] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 2FA（2FA 架構）
+- [ ] **SEC-21** Cookie secure=True（HTTPS 上線後）
+- [ ] **WP-MIT P1-6** drift_detector PG wiring（Rust，需 features+baselines query 設計）
+- [ ] **WP-E4 P1 tests 6 項**（需 fixture harness 設計，自己 sprint）
+- [ ] **FA GAP-2/4/8/9/10**（架構性，Phase 4 範圍）
+- [ ] **Idle writers #1/2/3/5/6** ob_snapshots/trade_agg/liquidations/drift/quality（§11 分批）
+- [ ] **I-22 完整拆分** event_consumer mod.rs 912 → <800（需 loop state 結構化，高風險）
 
 **Exchange mode go-live blockers**: R0-1, R0-2, R0-5, R1-A, R1-I, R1-J（見整合報告 §6 critical-path）。
 
