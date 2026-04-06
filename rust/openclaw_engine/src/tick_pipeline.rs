@@ -228,6 +228,12 @@ pub struct TickPipeline {
     /// RRC-1-C4: Session halted flag — set by HaltSession, cleared by Resume/Reset.
     /// RRC-1-C4：會話暫停標誌 — 由 HaltSession 設置，由 Resume/Reset 清除。
     pub session_halted: bool,
+    /// Session 11: 1-minute trade aggregator (idle writer #2 fix).
+    /// Session 11：1 分鐘成交聚合器（idle writer #2 修復）。
+    trade_aggregator: crate::database::aggregators::TradeAggregator,
+    /// Session 11: 1-minute orderbook aggregator (idle writer #1 fix).
+    /// Session 11：1 分鐘訂單簿聚合器（idle writer #1 修復）。
+    ob_aggregator: crate::database::aggregators::ObAggregator,
 }
 
 impl TickPipeline {
@@ -280,6 +286,8 @@ impl TickPipeline {
             price_tracker: PriceHistoryTracker::new(),
             consecutive_losses: HashMap::new(),
             session_halted: false,
+            trade_aggregator: crate::database::aggregators::TradeAggregator::new(),
+            ob_aggregator: crate::database::aggregators::ObAggregator::new(),
         }
     }
 
@@ -435,6 +443,63 @@ impl TickPipeline {
                         );
                     }
                 }
+            }
+        }
+
+        // Session 11: feed trade & orderbook events into 1-minute aggregators.
+        // Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
+        // Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。
+        if let Some(event_type) = event.metadata.get("type").map(|s| s.as_str()) {
+            match event_type {
+                "trade" => {
+                    let side = event
+                        .metadata
+                        .get("side")
+                        .and_then(|s| crate::database::aggregators::TradeSide::parse(s));
+                    let qty = event
+                        .metadata
+                        .get("qty")
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                    if let Some(side) = side {
+                        if let Some(msg) = self.trade_aggregator.record(
+                            &event.symbol,
+                            side,
+                            qty,
+                            event.last_price,
+                            event.ts_ms,
+                        ) {
+                            if let Some(ref tx) = self.market_data_tx {
+                                let _ = tx.try_send(msg);
+                            }
+                        }
+                    }
+                }
+                "orderbook" => {
+                    let bids: Vec<(f64, f64)> = event
+                        .metadata
+                        .get("bids5")
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or_default();
+                    let asks: Vec<(f64, f64)> = event
+                        .metadata
+                        .get("asks5")
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or_default();
+                    if !bids.is_empty() && !asks.is_empty() {
+                        if let Some(msg) = self.ob_aggregator.record(
+                            &event.symbol,
+                            &bids,
+                            &asks,
+                            event.ts_ms,
+                        ) {
+                            if let Some(ref tx) = self.market_data_tx {
+                                let _ = tx.try_send(msg);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
