@@ -14,6 +14,7 @@ pub mod dedup;
 pub mod mock;
 pub mod pipeline;
 pub mod provider;
+pub mod router;
 pub mod rss;
 pub mod severity;
 pub mod types;
@@ -23,6 +24,10 @@ pub use dedup::DedupCache;
 pub use mock::MockProvider;
 pub use pipeline::{NewsPipeline, ProcessedNewsItem};
 pub use provider::NewsProvider;
+pub use router::{
+    GuardianHaltCheck, LearningContextSink, NewsRouter, RegimeNewsBuffer,
+    GUARDIAN_HALT_THRESHOLD, REGIME_FRESH_AGE_HOURS,
+};
 pub use rss::RssProvider;
 pub use severity::{score_severity, SeverityConfig};
 pub use types::{ProviderError, RawNewsItem};

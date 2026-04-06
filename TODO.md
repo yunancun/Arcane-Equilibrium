@@ -168,6 +168,15 @@ Rust 是唯一實際執行引擎，Python RM 只是 GUI 的儲存層（技術債
 #### WP-FA — 功能規格（0 項，原 5，**100% 已規劃**）
 - ~~FA GAP-10 Provider pricing table~~ → 併入 Phase 4 子任務 **4-17**
 
+#### WP-CLEANUP-GRAFANA-TESTS — test_grafana_data_writer.py dead tests（P2）
+**現狀**：`b304809 feat: GUI data pipeline` 把 `GrafanaDataWriter` 重構為讀 Rust IPC，
+方法名加了 `_from_rust` 後綴（`_write_pnl_from_rust` / `_write_system_health_from_rust`），
+但 test 仍引用舊名 `_write_pnl` / `_write_system_health` → 20 個測試 AttributeError。
+與 W2 無關，純 pre-existing test debt。
+
+- [ ] 更新 `test_grafana_data_writer.py` 20 個測試對齊新方法名 + Rust IPC mock
+- [ ] 或刪除整個 test 檔（writer 已 demo-only，可考慮直接 remove）
+
 #### WP-CLEANUP-WHITELIST-UI — Symbol Whitelist GUI 殘留清理（P2）
 **現狀**：T5.04 (35ab853 + f4663d3, 2026-04-01) 已移除 `risk_manager.py` 的 symbol whitelist enforce，
 但 GUI 仍有 `tab-governance.html` whitelist card (~160 行) + `governance.js` 3 個 helper (~15 行)。

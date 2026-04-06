@@ -85,3 +85,82 @@ def test_phase4_redirect_to_static_tab(client: TestClient) -> None:
     resp = client.get("/api/v1/phase4", follow_redirects=False)
     assert resp.status_code in (302, 307)
     assert "/static/tab-phase4.html" in resp.headers.get("location", "")
+
+
+# ─── 4-03 Teacher card route tests / Teacher 卡片路由測試 ────────────────
+
+
+def test_phase4_teacher_route_returns_200_fail_soft(client: TestClient) -> None:
+    """GET /api/v1/phase4/teacher must respond 200 even without PG (fail-soft).
+    無 PG 時 /api/v1/phase4/teacher 仍須回 200（fail-soft）。
+    """
+    resp = client.get("/api/v1/phase4/teacher")
+    assert resp.status_code == 200
+
+
+def test_phase4_teacher_route_schema_complete(client: TestClient) -> None:
+    """Response must contain all required keys with valid types.
+    回應須包含所有必要 key 且型別正確。
+    """
+    body = client.get("/api/v1/phase4/teacher").json()
+    required_keys = {
+        "ok",
+        "status_light",
+        "total_7d",
+        "applied_7d",
+        "exec_rate",
+        "avg_outcome_24h",
+        "recent",
+        "last_update_ms",
+    }
+    assert required_keys.issubset(body.keys())
+    assert body["status_light"] in _VALID_LIGHTS
+    assert isinstance(body["total_7d"], int)
+    assert isinstance(body["applied_7d"], int)
+    assert isinstance(body["recent"], list)
+    assert isinstance(body["last_update_ms"], int)
+
+
+def test_phase4_teacher_route_grey_when_no_pg(client: TestClient) -> None:
+    """Without PG, the route should fail-soft to grey + ok=false.
+    無 PG 時應 fail-soft 為 grey + ok=false。
+    """
+    body = client.get("/api/v1/phase4/teacher").json()
+    assert body["ok"] is False
+    assert body["status_light"] == "grey"
+    assert body["total_7d"] == 0
+    assert body["applied_7d"] == 0
+    assert body["exec_rate"] == 0.0
+    assert body["recent"] == []
+
+
+def test_phase4_classify_teacher_status_green():
+    """High exec rate + non-negative outcome → green."""
+    from app.phase4_routes import _classify_teacher_status
+
+    assert _classify_teacher_status(0.85, 5.0) == "green"
+    assert _classify_teacher_status(0.85, 0.0) == "green"
+
+
+def test_phase4_classify_teacher_status_yellow():
+    """Mid exec rate or mildly negative outcome → yellow."""
+    from app.phase4_routes import _classify_teacher_status
+
+    assert _classify_teacher_status(0.7, 0.0) == "yellow"
+    assert _classify_teacher_status(0.85, -5.0) == "yellow"
+
+
+def test_phase4_classify_teacher_status_red():
+    """Low exec rate or very negative outcome → red."""
+    from app.phase4_routes import _classify_teacher_status
+
+    assert _classify_teacher_status(0.3, 0.0) == "red"  # exec rate too low
+    assert _classify_teacher_status(0.85, -50.0) == "red"  # very negative outcome
+
+
+def test_phase4_classify_teacher_status_none_outcome_treated_as_zero():
+    """avg_outcome_24h = None should be treated as 0 (no info)."""
+    from app.phase4_routes import _classify_teacher_status
+
+    assert _classify_teacher_status(0.85, None) == "green"
+    assert _classify_teacher_status(0.5, None) == "red"
