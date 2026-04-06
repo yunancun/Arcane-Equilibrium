@@ -142,6 +142,7 @@ pub(super) fn handle_paper_command(
             cost_gate_k_small,
             adx_trending_threshold,
             boot_cooldown_ms,
+            signals_heartbeat_ms,
         } => {
             // I-09: clamp all numeric setters to sane ranges before applying.
             // I-09：應用前將所有數值設定鉗制到合理範圍。
@@ -248,6 +249,11 @@ pub(super) fn handle_paper_command(
             if let Some(v) = boot_cooldown_ms {
                 let applied = pipeline.set_boot_cooldown_ms(v);
                 info!(boot_cooldown_ms = applied, "boot cooldown updated");
+            }
+            // DB-RUN-1: signals heartbeat
+            if let Some(v) = signals_heartbeat_ms {
+                let applied = pipeline.set_signals_heartbeat_ms(v);
+                info!(signals_heartbeat_ms = applied, "signals heartbeat updated");
             }
             snapshot_writer.force_write(&pipeline.snapshot());
         }

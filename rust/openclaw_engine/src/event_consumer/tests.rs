@@ -202,6 +202,7 @@ fn test_handle_update_risk_config_clamps_values() {
             cost_gate_k_small: None,
             adx_trending_threshold: None,
             boot_cooldown_ms: None,
+            signals_heartbeat_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -241,6 +242,7 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
             cost_gate_k_small: None,
             adx_trending_threshold: None,
             boot_cooldown_ms: None,
+            signals_heartbeat_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -280,6 +282,7 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
             cost_gate_k_small: Some(4.0),
             adx_trending_threshold: Some(30.0),
             boot_cooldown_ms: Some(120_000),
+            signals_heartbeat_ms: Some(30_000),
         },
         &mut pipeline,
         &mut writer,
@@ -292,6 +295,7 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
     assert!((rc.cost_gate_k_small - 4.0).abs() < 1e-9);
     assert!((rc.adx_trending_threshold - 30.0).abs() < 1e-9);
     assert_eq!(pipeline.boot_cooldown_ms(), 120_000);
+    assert_eq!(pipeline.signals_heartbeat_ms(), 30_000);
 }
 
 #[test]

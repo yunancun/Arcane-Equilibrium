@@ -95,6 +95,8 @@ pub enum PaperSessionCommand {
         cost_gate_k_small: Option<f64>,
         adx_trending_threshold: Option<f64>,
         boot_cooldown_ms: Option<u64>,
+        // DB-RUN-1: signals heartbeat (0 = disable throttling)
+        signals_heartbeat_ms: Option<u64>,
     },
 }
 
@@ -253,6 +255,17 @@ pub struct TickPipeline {
     /// Reads from OPENCLAW_BOOT_COOLDOWN_MS env var, default 60_000ms.
     /// PNL-3：啟動冷卻期，期間策略信號被抑制（止損/指標/快照繼續）。
     boot_cooldown_ms: u64,
+    /// DB-RUN-1: Last persisted signal per (symbol, strategy) — direction + ts_ms.
+    /// Used to dedupe by state-change and rate-limit by heartbeat.
+    /// DB-RUN-1：每 (symbol, strategy) 最近持久化的信號 — 用於狀態變更去重 + 心跳節流。
+    last_persisted_signal: HashMap<(String, String), (openclaw_core::signals::SignalDirection, u64)>,
+    /// DB-RUN-1: Heartbeat interval — re-emit unchanged signals at most this often.
+    /// Default 60_000ms (1/min). 0 disables (legacy per-tick behavior).
+    /// DB-RUN-1：心跳間隔，未變化信號最多每此間隔重發一次。0=關閉節流。
+    signals_heartbeat_ms: u64,
+    /// DB-RUN-1: Counter for dropped (throttled) signal writes — observability.
+    /// DB-RUN-1：被節流跳過的 signal 寫入計數，供 status 報告觀察降頻效果。
+    signals_throttled: u64,
 }
 
 impl TickPipeline {
@@ -312,6 +325,12 @@ impl TickPipeline {
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(60_000),
+            last_persisted_signal: HashMap::new(),
+            signals_heartbeat_ms: std::env::var("OPENCLAW_SIGNALS_HEARTBEAT_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60_000),
+            signals_throttled: 0,
         }
     }
 
@@ -332,6 +351,47 @@ impl TickPipeline {
 
     pub fn boot_cooldown_ms(&self) -> u64 {
         self.boot_cooldown_ms
+    }
+
+    /// DB-RUN-1: Set signals heartbeat interval at runtime. 0 disables throttling.
+    /// DB-RUN-1：運行時設定 signals 心跳間隔，0=關閉節流。
+    pub fn set_signals_heartbeat_ms(&mut self, ms: u64) -> u64 {
+        self.signals_heartbeat_ms = ms.min(3_600_000);
+        self.signals_heartbeat_ms
+    }
+
+    pub fn signals_heartbeat_ms(&self) -> u64 {
+        self.signals_heartbeat_ms
+    }
+
+    pub fn signals_throttled(&self) -> u64 {
+        self.signals_throttled
+    }
+
+    /// DB-RUN-1: Decide whether to persist a freshly emitted signal.
+    /// Persist if (a) direction differs from last persisted for the same
+    /// (symbol, strategy) key, OR (b) heartbeat interval has elapsed.
+    /// Returns true on persist (and updates the dedupe map).
+    /// DB-RUN-1：判斷新生成的 signal 是否應持久化（狀態變更或心跳到期）。
+    fn should_persist_signal(&mut self, sig: &openclaw_core::signals::Signal) -> bool {
+        if self.signals_heartbeat_ms == 0 {
+            return true;
+        }
+        let key = (sig.symbol.clone(), sig.source.clone());
+        let now = sig.ts_ms;
+        let persist = match self.last_persisted_signal.get(&key) {
+            None => true,
+            Some(&(prev_dir, prev_ts)) => {
+                prev_dir != sig.direction
+                    || now.saturating_sub(prev_ts) >= self.signals_heartbeat_ms
+            }
+        };
+        if persist {
+            self.last_persisted_signal.insert(key, (sig.direction, now));
+        } else {
+            self.signals_throttled += 1;
+        }
+        persist
     }
 
     /// PNL-4: Derive live regime label from indicator snapshot.
@@ -717,6 +777,14 @@ impl TickPipeline {
             self.recent_signals.push_back(sig.clone());
             if self.recent_signals.len() > 100 {
                 self.recent_signals.pop_front();
+            }
+
+            // DB-RUN-1: Throttle signal persistence — only write on state change
+            // or heartbeat interval. Reduces 352 rows/s to ~per-symbol-per-strat
+            // change rate, expected 95%+ reduction.
+            // DB-RUN-1：節流 signal 寫入 — 僅狀態變更或心跳到期時持久化。
+            if !self.should_persist_signal(sig) {
+                continue;
             }
 
             // Phase 2a: Emit signal to trading_writer for PG persistence
@@ -1736,6 +1804,83 @@ mod tests {
         };
         assert!(!req.is_primary);
         assert!(req.stop_loss.is_none());
+    }
+
+    fn make_signal(symbol: &str, dir: openclaw_core::signals::SignalDirection, ts_ms: u64) -> openclaw_core::signals::Signal {
+        openclaw_core::signals::Signal {
+            symbol: symbol.into(),
+            direction: dir,
+            confidence: 0.5,
+            edge_bps: 10.0,
+            source: "ma_crossover".into(),
+            timeframe: "1m".into(),
+            reasoning: "test".into(),
+            ts_ms,
+        }
+    }
+
+    #[test]
+    fn test_dbrun1_first_signal_persisted() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_unchanged_signal_throttled_within_heartbeat() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Same direction, +30s → throttled
+        assert!(!p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 31_000)));
+        assert_eq!(p.signals_throttled(), 1);
+    }
+
+    #[test]
+    fn test_dbrun1_direction_change_breaks_throttle() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Direction flips → persist immediately even within heartbeat
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Short, 5_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_heartbeat_elapsed_persists() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Same direction, 60s later → heartbeat fires
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 61_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_disable_throttle() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(0);
+        // Every call persists, no dedupe state consulted
+        for ts in [1, 2, 3, 4, 5] {
+            assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, ts)));
+        }
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_per_symbol_strategy_isolation() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Different symbol, same strategy → independent key, persists
+        assert!(p.should_persist_signal(&make_signal("ETHUSDT", SignalDirection::Long, 1_000)));
+        assert_eq!(p.signals_throttled(), 0);
     }
 
     #[test]

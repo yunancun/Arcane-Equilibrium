@@ -596,6 +596,7 @@ async fn handle_update_risk_config(
         .get("adx_trending_threshold")
         .and_then(|v| v.as_f64());
     let boot_cooldown_ms = params.get("boot_cooldown_ms").and_then(|v| v.as_u64());
+    let signals_heartbeat_ms = params.get("signals_heartbeat_ms").and_then(|v| v.as_u64());
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
@@ -616,7 +617,8 @@ async fn handle_update_risk_config(
         || cost_gate_k_medium.is_some()
         || cost_gate_k_small.is_some()
         || adx_trending_threshold.is_some()
-        || boot_cooldown_ms.is_some();
+        || boot_cooldown_ms.is_some()
+        || signals_heartbeat_ms.is_some();
     if !has_any {
         return JsonRpcResponse::error(
             id,
@@ -645,6 +647,7 @@ async fn handle_update_risk_config(
         cost_gate_k_small,
         adx_trending_threshold,
         boot_cooldown_ms,
+        signals_heartbeat_ms,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
