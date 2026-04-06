@@ -396,7 +396,9 @@ impl IntentProcessor {
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
-                let k = K_PAPER; // TODO: use K_LIVE=2.0 in exchange mode
+                // PNL-5: scale k by notional (small accounts → tighter cost gate)
+                // PNL-5：根據 notional 調整 k（小帳戶收緊成本門）
+                let k = Self::cost_gate_k(notional).max(K_PAPER);
 
                 if expected_profit < k * rt_fee {
                     return IntentResult {
@@ -611,7 +613,9 @@ impl IntentProcessor {
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
-                let k = K_PAPER;
+                // PNL-5: scale k by notional (small accounts → tighter cost gate)
+                // PNL-5：根據 notional 調整 k（小帳戶收緊成本門）
+                let k = Self::cost_gate_k(notional).max(K_PAPER);
 
                 if expected_profit < k * rt_fee {
                     return ExchangeGateResult {
@@ -637,6 +641,20 @@ impl IntentProcessor {
     /// 創建後設定動態費率（用於熱重載）。
     pub fn set_fee_rate(&mut self, rate: f64) {
         self.taker_fee_rate = Some(rate);
+    }
+
+    /// PNL-5: Cost-gate k multiplier scaled by notional size.
+    /// Small notionals incur proportionally larger fee drag, so require
+    /// a larger EV margin before admitting the order.
+    /// PNL-5：成本門 k 倍率隨 notional 規模調整，小單位需更大 EV 邊際。
+    fn cost_gate_k(notional: f64) -> f64 {
+        if notional < 50.0 {
+            3.0
+        } else if notional < 200.0 {
+            2.0
+        } else {
+            1.5
+        }
     }
 }
 
@@ -861,6 +879,45 @@ mod tests {
         // ATR=1.5, EV=1.5×0.7×0.2=$0.21, notional=$16 → rt_fee=$0.018 → 0.21 >> 0.027 ✓
         let result = proc.process(&intent, &gov, &state, 1.5);
         assert!(result.submitted);
+    }
+
+    #[test]
+    fn test_pnl5_cost_gate_k_tiers() {
+        // PNL-5: k=3.0 below $50, k=2.0 below $200, k=1.5 otherwise.
+        assert_eq!(IntentProcessor::cost_gate_k(20.0), 3.0);
+        assert_eq!(IntentProcessor::cost_gate_k(49.99), 3.0);
+        assert_eq!(IntentProcessor::cost_gate_k(50.0), 2.0);
+        assert_eq!(IntentProcessor::cost_gate_k(199.99), 2.0);
+        assert_eq!(IntentProcessor::cost_gate_k(200.0), 1.5);
+        assert_eq!(IntentProcessor::cost_gate_k(10_000.0), 1.5);
+    }
+
+    #[test]
+    fn test_pnl5_small_notional_tightens_cost_gate() {
+        // PNL-5: A trade that passed the old k=1.5 gate now fails under k=3.0
+        // because notional ~ $20 falls into the smallest tier.
+        // PNL-5：在 $20 notional 級別，原本通過 k=1.5 的單現在 k=3.0 應被攔截。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(1_000.0); // $1k balance
+        state.set_latest_price("SOL", 80.0);
+        // qty 0.005 → notional $0.40 → tier <$50 → k=3.0
+        // EV = atr(0.5) * conf(0.4) * 0.005 = 0.001
+        // fee = 0.4 * 2 * 0.00055 = 0.00044
+        // 1.5 * fee = 0.00066 (would pass), 3.0 * fee = 0.00132 (fails)
+        let intent = OrderIntent {
+            symbol: "SOL".into(),
+            is_long: true,
+            qty: 0.005,
+            confidence: 0.4,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        let result = proc.process(&intent, &gov, &state, 0.5);
+        assert!(!result.submitted, "PNL-5: expected reject under tightened k");
+        assert!(result.rejected_reason.unwrap().contains("3.0× fee"));
     }
 
     #[test]
