@@ -472,23 +472,39 @@ impl IntentProcessor {
                 };
             }
 
-            if atr > 0.0 {
-                let fee_rate = self.fee_rate(&intent.symbol);
-                let expected_profit = atr * intent.confidence * final_qty;
-                let notional = final_qty * price;
-                let rt_fee = notional * 2.0 * fee_rate;
-                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
+            // SEC-11: ATR=0 → fail-closed. EV cannot be evaluated without volatility,
+            // so any decision to admit the trade would bypass the cost gate. Cold-start
+            // is already handled by PNL-3 boot cooldown, so a legitimate runtime ATR=0
+            // is an indicator failure that warrants blocking, not waving through.
+            // SEC-11：ATR=0 改 fail-closed。冷啟動由 PNL-3 boot cooldown 保護。
+            if !(atr > 0.0) {
+                tracing::warn!(
+                    symbol = %intent.symbol,
+                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕"
+                );
+                return IntentResult {
+                    submitted: false,
+                    rejected_reason: Some(
+                        "cost_gate: ATR unavailable (fail-closed, SEC-11)".into(),
+                    ),
+                    fill: None,
+                };
+            }
+            let fee_rate = self.fee_rate(&intent.symbol);
+            let expected_profit = atr * intent.confidence * final_qty;
+            let notional = final_qty * price;
+            let rt_fee = notional * 2.0 * fee_rate;
+            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
 
-                if expected_profit < k * rt_fee {
-                    return IntentResult {
-                        submitted: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
-                            expected_profit, k, rt_fee, atr, intent.confidence, notional,
-                        )),
-                        fill: None,
-                    };
-                }
+            if expected_profit < k * rt_fee {
+                return IntentResult {
+                    submitted: false,
+                    rejected_reason: Some(format!(
+                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
+                        expected_profit, k, rt_fee, atr, intent.confidence, notional,
+                    )),
+                    fill: None,
+                };
             }
         }
 
@@ -678,23 +694,35 @@ impl IntentProcessor {
                 };
             }
 
-            if atr > 0.0 {
-                let fee_rate = self.fee_rate(&intent.symbol);
-                let expected_profit = atr * intent.confidence * final_qty;
-                let notional = final_qty * price;
-                let rt_fee = notional * 2.0 * fee_rate;
-                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
+            // SEC-11: ATR=0 → fail-closed (same reasoning as process()).
+            if !(atr > 0.0) {
+                tracing::warn!(
+                    symbol = %intent.symbol,
+                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕"
+                );
+                return ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(
+                        "cost_gate: ATR unavailable (fail-closed, SEC-11)".into(),
+                    ),
+                    approved_qty: 0.0,
+                };
+            }
+            let fee_rate = self.fee_rate(&intent.symbol);
+            let expected_profit = atr * intent.confidence * final_qty;
+            let notional = final_qty * price;
+            let rt_fee = notional * 2.0 * fee_rate;
+            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
 
-                if expected_profit < k * rt_fee {
-                    return ExchangeGateResult {
-                        approved: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
-                            expected_profit, k, rt_fee, atr, intent.confidence, notional,
-                        )),
-                        approved_qty: 0.0,
-                    };
-                }
+            if expected_profit < k * rt_fee {
+                return ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(format!(
+                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
+                        expected_profit, k, rt_fee, atr, intent.confidence, notional,
+                    )),
+                    approved_qty: 0.0,
+                };
             }
         }
 
@@ -920,6 +948,38 @@ mod tests {
         let result = proc.process(&intent, &gov, &state, 20.0);
         assert!(!result.submitted);
         assert!(result.rejected_reason.unwrap().contains("cost_gate: EV"));
+    }
+
+    #[test]
+    fn test_sec11_cost_gate_fail_closed_on_zero_atr() {
+        // SEC-11: ATR=0 must reject (fail-closed), not bypass the gate.
+        // SEC-11：ATR=0 必須拒絕（fail-closed），不可繞過。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 67000.0);
+        let intent = OrderIntent {
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.50,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        // ATR=0 (indicator unavailable) — would have been waved through pre-SEC-11
+        let result = proc.process(&intent, &gov, &state, 0.0);
+        assert!(!result.submitted, "ATR=0 must fail-closed");
+        assert!(result
+            .rejected_reason
+            .unwrap()
+            .contains("ATR unavailable"));
+
+        // Same on the exchange-mode path
+        let gate = proc.process_gates_only(&intent, &gov, &state, 0.0);
+        assert!(!gate.approved, "ATR=0 must fail-closed in gates_only too");
+        assert!(gate.rejected_reason.unwrap().contains("ATR unavailable"));
     }
 
     #[test]
