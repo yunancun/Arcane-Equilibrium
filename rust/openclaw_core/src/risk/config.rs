@@ -62,11 +62,34 @@ pub struct RiskManagerConfig {
     /// PNL-6：追蹤止損鎖定盈利下限（dyn_stop 的多少倍，默認 0.5）。
     #[serde(default = "default_trailing_min_rr_ratio")]
     pub trailing_min_rr_ratio: f64,
+
+    // -- Session 12 cleanup: cost-gate + regime tunables --
+    /// Cost-gate hard confidence floor (default 0.15).
+    #[serde(default = "default_cost_gate_min_confidence")]
+    pub cost_gate_min_confidence: f64,
+    /// Cost-gate base k multiplier (paper mode, default 1.5).
+    #[serde(default = "default_cost_gate_k_base")]
+    pub cost_gate_k_base: f64,
+    /// Cost-gate k for medium notional tier ($50–$200, default 2.0).
+    #[serde(default = "default_cost_gate_k_medium")]
+    pub cost_gate_k_medium: f64,
+    /// Cost-gate k for small notional tier (<$50, default 3.0).
+    #[serde(default = "default_cost_gate_k_small")]
+    pub cost_gate_k_small: f64,
+    /// ADX threshold above which regime is classified as trending (default 25.0).
+    /// ADX 大於此值時 regime 視為 trending（默認 25.0）。
+    #[serde(default = "default_adx_trending_threshold")]
+    pub adx_trending_threshold: f64,
 }
 
 fn default_dynamic_stop_base_ratio() -> f64 { 0.6 }
 fn default_dynamic_stop_cap_ratio() -> f64 { 0.8 }
 fn default_trailing_min_rr_ratio() -> f64 { 0.5 }
+fn default_cost_gate_min_confidence() -> f64 { 0.15 }
+fn default_cost_gate_k_base() -> f64 { 1.5 }
+fn default_cost_gate_k_medium() -> f64 { 2.0 }
+fn default_cost_gate_k_small() -> f64 { 3.0 }
+fn default_adx_trending_threshold() -> f64 { 25.0 }
 
 impl Default for RiskManagerConfig {
     fn default() -> Self {
@@ -91,6 +114,11 @@ impl Default for RiskManagerConfig {
             dynamic_stop_base_ratio: 0.6,
             dynamic_stop_cap_ratio: 0.8,
             trailing_min_rr_ratio: 0.5,
+            cost_gate_min_confidence: 0.15,
+            cost_gate_k_base: 1.5,
+            cost_gate_k_medium: 2.0,
+            cost_gate_k_small: 3.0,
+            adx_trending_threshold: 25.0,
         }
     }
 }

@@ -88,6 +88,13 @@ pub enum PaperSessionCommand {
         dynamic_stop_base_ratio: Option<f64>,
         dynamic_stop_cap_ratio: Option<f64>,
         trailing_min_rr_ratio: Option<f64>,
+        // Session 12: cost-gate + regime + boot cooldown tunables
+        cost_gate_min_confidence: Option<f64>,
+        cost_gate_k_base: Option<f64>,
+        cost_gate_k_medium: Option<f64>,
+        cost_gate_k_small: Option<f64>,
+        adx_trending_threshold: Option<f64>,
+        boot_cooldown_ms: Option<u64>,
     },
 }
 
@@ -314,25 +321,35 @@ impl TickPipeline {
         self.intent_processor.set_fee_rate(rate);
     }
 
+    /// PNL-3 / Session 12: Update boot cooldown at runtime via IPC.
+    /// Clamped to [0, 1h]. Returns the value actually applied.
+    /// PNL-3：運行時更新啟動冷卻期，鉗制到 [0, 1h]。
+    pub fn set_boot_cooldown_ms(&mut self, ms: u64) -> u64 {
+        let v = ms.min(3_600_000);
+        self.boot_cooldown_ms = v;
+        v
+    }
+
+    pub fn boot_cooldown_ms(&self) -> u64 {
+        self.boot_cooldown_ms
+    }
+
     /// PNL-4: Derive live regime label from indicator snapshot.
     /// Priority: Hurst regime → ADX strength fallback → "ranging" default.
-    /// Maps to risk_manager regime_multipliers vocabulary
-    /// (trending / ranging / volatile / squeeze).
-    /// PNL-4：從指標快照推導實時 regime 標籤。優先級：Hurst → ADX → 默認 ranging。
-    fn derive_regime(snap: Option<&openclaw_core::indicators::IndicatorSnapshot>) -> String {
+    /// ADX threshold reads from RiskManagerConfig (Session 12 cleanup).
+    /// PNL-4：從指標快照推導實時 regime 標籤。
+    fn derive_regime(&self, snap: Option<&openclaw_core::indicators::IndicatorSnapshot>) -> String {
         if let Some(ind) = snap {
-            // Hurst takes precedence — strongest signal of mean-reverting vs trending.
             if let Some(ref h) = ind.hurst {
                 match h.regime.as_str() {
                     "trending" => return "trending".into(),
                     "mean_reverting" => return "ranging".into(),
-                    // random_walk → fall through to ADX
                     _ => {}
                 }
             }
-            // ADX fallback: classic >25 trending threshold.
             if let Some(ref a) = ind.adx {
-                if a.adx >= 25.0 {
+                let threshold = self.intent_processor.risk_config().adx_trending_threshold;
+                if a.adx >= threshold {
                     return "trending".into();
                 }
             }
@@ -1113,7 +1130,7 @@ impl TickPipeline {
             let consec = self.consecutive_losses.get(symbol).copied().unwrap_or(0);
             // PNL-4: Pull live regime from Hurst (preferred) or ADX fallback.
             // PNL-4：從 Hurst（首選）或 ADX 退回讀取實時 regime，取代硬編碼 "ranging"。
-            let regime = Self::derive_regime(self.latest_indicators.get(symbol));
+            let regime = self.derive_regime(self.latest_indicators.get(symbol));
             let action = check_position_on_tick(
                 *pnl_pct,
                 *peak_pnl_pct,
@@ -1736,28 +1753,30 @@ mod tests {
     #[test]
     fn test_pnl4_derive_regime_hurst_priority() {
         use openclaw_core::indicators::{HurstResult, IndicatorSnapshot};
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
         let mut ind = IndicatorSnapshot::default();
         ind.hurst = Some(HurstResult { hurst: 0.7, regime: "trending".into() });
-        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "trending");
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "trending");
         ind.hurst = Some(HurstResult { hurst: 0.3, regime: "mean_reverting".into() });
-        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "ranging");
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "ranging");
     }
 
     #[test]
     fn test_pnl4_derive_regime_adx_fallback() {
         use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
         let mut ind = IndicatorSnapshot::default();
-        // Hurst random_walk → fall through to ADX
         ind.hurst = Some(HurstResult { hurst: 0.5, regime: "random_walk".into() });
         ind.adx = Some(AdxResult { adx: 30.0, plus_di: 25.0, minus_di: 10.0 });
-        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "trending");
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "trending");
         ind.adx = Some(AdxResult { adx: 15.0, plus_di: 10.0, minus_di: 12.0 });
-        assert_eq!(TickPipeline::derive_regime(Some(&ind)), "ranging");
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "ranging");
     }
 
     #[test]
     fn test_pnl4_derive_regime_none_default() {
-        assert_eq!(TickPipeline::derive_regime(None), "ranging");
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(pipeline.derive_regime(None), "ranging");
     }
 
     #[test]
