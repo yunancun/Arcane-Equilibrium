@@ -3,12 +3,12 @@
 //!
 //! MODULE_NOTE (EN): Listens on a Unix socket, handles JSON-RPC 2.0 requests
 //!   with newline-delimited messages. Each connection spawns a tokio task.
-//!   Supports: ping, get_state, reload_config, evaluate_strategy, get_risk_check,
+//!   Supports: ping, get_state, reload_config,
 //!   paper session (pause/resume/close_all/reset), snapshot reads (paper_state/prices/stats),
 //!   strategy params (update_strategy_params/get_strategy_params/get_param_ranges).
 //! MODULE_NOTE (中): 監聯 Unix 套接字，處理 JSON-RPC 2.0 請求（換行分隔消息）。
 //!   每個連接生成一個 tokio 任務。支援：ping、get_state、reload_config、
-//!   evaluate_strategy、get_risk_check、紙盤控制（pause/resume/close_all/reset）、
+//!   紙盤控制（pause/resume/close_all/reset）、
 //!   快照讀取（paper_state/prices/stats）、策略參數（update/get/ranges）。
 
 use crate::config::ConfigManager;
@@ -20,17 +20,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
-
-// ---------------------------------------------------------------------------
-// AI Request TTL constants (seconds) / AI 請求 TTL 常量（秒）
-// ---------------------------------------------------------------------------
-
-/// Strategist AI request timeout / 策略師 AI 請求超時
-pub const TTL_STRATEGIST_S: u64 = 15;
-/// Analyst AI request timeout / 分析師 AI 請求超時
-pub const TTL_ANALYST_S: u64 = 30;
-/// Conductor AI request timeout / 指揮者 AI 請求超時
-pub const TTL_CONDUCTOR_S: u64 = 10;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
@@ -304,8 +293,6 @@ async fn dispatch_request(
         "ping" => handle_ping(id),
         "get_state" => handle_get_state(id, config),
         "reload_config" => handle_reload_config(id, config),
-        "evaluate_strategy" => handle_evaluate_strategy(id, &req.params),
-        "get_risk_check" => handle_get_risk_check(id, &req.params),
         "get_paper_state" => {
             handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.paper_state))
         }
@@ -413,40 +400,6 @@ fn handle_reload_config(id: serde_json::Value, config: &Arc<ConfigManager>) -> J
         ),
         Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("reload failed: {e}")),
     }
-}
-
-/// Evaluate strategy placeholder (stub — returns TTL info).
-/// 策略評估佔位符（存根 — 返回 TTL 資訊）。
-fn handle_evaluate_strategy(id: serde_json::Value, params: &serde_json::Value) -> JsonRpcResponse {
-    let symbol = params
-        .get("symbol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let response = serde_json::json!({
-        "status": "stub",
-        "symbol": symbol,
-        "message": "strategy evaluation not yet implemented",
-        "ttl_strategist_s": TTL_STRATEGIST_S,
-        "ttl_analyst_s": TTL_ANALYST_S,
-        "ttl_conductor_s": TTL_CONDUCTOR_S,
-    });
-    JsonRpcResponse::success(id, response)
-}
-
-/// H0 risk gate check placeholder (stub).
-/// H0 風控門控檢查佔位符（存根）。
-fn handle_get_risk_check(id: serde_json::Value, params: &serde_json::Value) -> JsonRpcResponse {
-    let symbol = params
-        .get("symbol")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let response = serde_json::json!({
-        "status": "stub",
-        "symbol": symbol,
-        "passed": true,
-        "message": "risk check not yet implemented — default pass in demo mode",
-    });
-    JsonRpcResponse::success(id, response)
 }
 
 // ---------------------------------------------------------------------------
@@ -902,29 +855,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dispatch_evaluate_strategy_stub() {
-        let config = make_test_config();
-        let dd = make_test_data_dir();
-        let req = r#"{"jsonrpc": "2.0", "method": "evaluate_strategy", "params": {"symbol": "BTCUSDT"}, "id": 6}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
-        assert!(resp.error.is_none());
-        let result = resp.result.unwrap();
-        assert_eq!(result["status"], "stub");
-        assert_eq!(result["symbol"], "BTCUSDT");
-    }
-
-    #[tokio::test]
-    async fn test_dispatch_get_risk_check_stub() {
-        let config = make_test_config();
-        let dd = make_test_data_dir();
-        let req = r#"{"jsonrpc": "2.0", "method": "get_risk_check", "params": {"symbol": "ETHUSDT"}, "id": 7}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
-        assert!(resp.error.is_none());
-        let result = resp.result.unwrap();
-        assert_eq!(result["passed"], true);
-    }
-
-    #[tokio::test]
     async fn test_dispatch_reload_config() {
         let config = make_test_config();
         let dd = make_test_data_dir();
@@ -950,13 +880,6 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("-32601"));
         assert!(!json.contains("\"result\""));
-    }
-
-    #[test]
-    fn test_ttl_constants() {
-        assert_eq!(TTL_STRATEGIST_S, 15);
-        assert_eq!(TTL_ANALYST_S, 30);
-        assert_eq!(TTL_CONDUCTOR_S, 10);
     }
 
     // ───────────────────────────────────────────────────────────────────────

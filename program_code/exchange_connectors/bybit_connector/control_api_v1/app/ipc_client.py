@@ -271,26 +271,6 @@ class EngineIPCClient:
         """
         return await self.call("reload_config")
 
-    async def evaluate_strategy(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Forward strategy evaluation request to the engine (15s timeout).
-        將策略評估請求轉發到引擎（15s 超時）。
-        """
-        return await self.call("strategist_evaluate", params=context, timeout=15.0)
-
-    async def get_risk_check(
-        self, symbol: str, intent: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Request H0 risk check from the engine (5s timeout).
-        向引擎請求 H0 風控檢查（5s 超時）。
-        """
-        return await self.call(
-            "get_risk_check",
-            params={"symbol": symbol, "intent": intent},
-            timeout=5.0,
-        )
-
     # ─── R06-A: Pipeline state queries / 管線狀態查詢 ────────────────────────
 
     async def get_paper_state(self) -> dict[str, Any]:
