@@ -234,6 +234,13 @@ pub struct TickPipeline {
     /// Session 11: 1-minute orderbook aggregator (idle writer #1 fix).
     /// Session 11：1 分鐘訂單簿聚合器（idle writer #1 修復）。
     ob_aggregator: crate::database::aggregators::ObAggregator,
+    /// PNL-3: Boot timestamp (set on first tick) for cooldown gating.
+    /// PNL-3：啟動時間戳（首個 tick 設定），用於冷卻期門控。
+    boot_ts_ms: Option<u64>,
+    /// PNL-3: Cooldown duration after boot during which strategy signals are suppressed.
+    /// Reads from OPENCLAW_BOOT_COOLDOWN_MS env var, default 60_000ms.
+    /// PNL-3：啟動冷卻期，期間策略信號被抑制（止損/指標/快照繼續）。
+    boot_cooldown_ms: u64,
 }
 
 impl TickPipeline {
@@ -288,6 +295,11 @@ impl TickPipeline {
             session_halted: false,
             trade_aggregator: crate::database::aggregators::TradeAggregator::new(),
             ob_aggregator: crate::database::aggregators::ObAggregator::new(),
+            boot_ts_ms: None,
+            boot_cooldown_ms: std::env::var("OPENCLAW_BOOT_COOLDOWN_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60_000),
         }
     }
 
@@ -382,6 +394,11 @@ impl TickPipeline {
 
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
+        // PNL-3: Stamp boot timestamp on first tick (used for cooldown gate below).
+        // PNL-3：首個 tick 記錄啟動時間戳（用於下方冷卻期門控）。
+        if self.boot_ts_ms.is_none() {
+            self.boot_ts_ms = Some(event.ts_ms);
+        }
         self.latest_prices
             .insert(event.symbol.clone(), event.last_price);
         self.paper_state
@@ -621,8 +638,24 @@ impl TickPipeline {
             return self.maybe_canary_record(event, indicators, vec![], vec![], tick_duration_us);
         }
 
+        // PNL-3: Boot cooldown — suppress strategy signals for first N ms after boot.
+        // Stops/indicators/feature snapshots continue to run; only intent generation is gated.
+        // PNL-3：啟動冷卻期 — 啟動後 N 毫秒內抑制策略信號（止損/指標/快照繼續）。
+        let in_boot_cooldown = match self.boot_ts_ms {
+            Some(boot) => event.ts_ms.saturating_sub(boot) < self.boot_cooldown_ms,
+            None => false,
+        };
+
         // Step 3: Signal evaluation
-        let signals = if let Some(ref ind) = indicators {
+        let signals = if in_boot_cooldown {
+            debug!(
+                symbol = %event.symbol,
+                elapsed_ms = event.ts_ms.saturating_sub(self.boot_ts_ms.unwrap_or(event.ts_ms)),
+                cooldown_ms = self.boot_cooldown_ms,
+                "PNL-3 boot cooldown — signals suppressed / 啟動冷卻期 — 信號已抑制"
+            );
+            vec![]
+        } else if let Some(ref ind) = indicators {
             let input = snapshot_to_input(ind);
             self.signal_engine
                 .evaluate(&event.symbol, "1m", &input, event.ts_ms)
@@ -1652,5 +1685,33 @@ mod tests {
         };
         assert!(!req.is_primary);
         assert!(req.stop_loss.is_none());
+    }
+
+    #[test]
+    fn test_pnl3_boot_cooldown_stamps_first_tick() {
+        // PNL-3: First tick stamps boot_ts_ms; subsequent ticks reuse it.
+        // PNL-3：首個 tick 記錄 boot_ts_ms；後續 tick 沿用。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert!(pipeline.boot_ts_ms.is_none());
+        pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 1_000_000));
+        assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
+        pipeline.on_tick(&make_event("BTCUSDT", 50_001.0, 1_010_000));
+        assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_pnl3_boot_cooldown_default_60s() {
+        // PNL-3: default cooldown is 60_000ms when env var not set.
+        // PNL-3：未設環境變量時冷卻期默認 60_000ms。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        // Force-set boot_ts_ms then check elapsed math via direct field.
+        pipeline.boot_ts_ms = Some(0);
+        assert_eq!(pipeline.boot_cooldown_ms, 60_000);
+        // Tick at t=30s → still in cooldown
+        let in_cd_30s: bool = (30_000u64).saturating_sub(0) < pipeline.boot_cooldown_ms;
+        assert!(in_cd_30s);
+        // Tick at t=61s → out of cooldown
+        let in_cd_61s: bool = (61_000u64).saturating_sub(0) < pipeline.boot_cooldown_ms;
+        assert!(!in_cd_61s);
     }
 }
