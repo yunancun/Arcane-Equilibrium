@@ -358,3 +358,339 @@ TODO.md (718 lines) retains the historical Phase 0-3b records intact. R0 items a
 4. Bump R0-3 effort to 0.5 d.
 
 *— Committee review complete. Approve with above corrections.*
+
+---
+
+## 10. Sub-Checklists — Per-Finding Traceability
+
+This section expands every bucket-folded WP into individual sub-items so each of the ~170 findings from the 414-item raw audit gets its own checkbox. Each line format is:
+
+`- [ ] WP-X/TAG — {short title} ({source_report}:§{anchor}) — P{severity}`
+
+Source reports are the 13 files under `/home/ncyu/BybitOpenClaw/srv/audit_*_report.md`. Counts per WP are given at the end of each subsection. Items already tracked as top-level I-## in §3 remain authoritative; sub-items here provide finer-grained audit coverage and enable per-file remediation tracking.
+
+### 10.1 WP-F — GUI Usability (A3 report, 47 items)
+
+Source: `audit_A3_gui_usability_report.md`
+
+**D — Dead Buttons / Controls (11)**
+- [ ] WP-F/D-01 — `tab-risk.html` Apply-AI button toast-only, no effect (audit_A3_gui_usability_report:§1.1) — P1
+- [ ] WP-F/D-02 — `tab-system.html` Feed shortcut button is no-op (§1.1) — P1
+- [ ] WP-F/D-03 — `tab-system.html` Bybit Demo shortcut button is no-op (§1.1) — P1
+- [ ] WP-F/D-04 — `tab-system.html` Scanner shortcut button is no-op (§1.1) — P1
+- [ ] WP-F/D-05 — `tab-risk.html` Apply-AI double `display:none` (永不可見) (§1.1) — P0
+- [ ] WP-F/D-06 — Legacy `index.html` panel still routed at `/gui` (§1.2) — P2
+- [ ] WP-F/D-07 — Legacy Bearer Token input panel still present (§1.2) — P1
+- [ ] WP-F/D-08 — `trading.html` iframe lacks common.js helpers (§1.2) — P2
+- [ ] WP-F/D-09 — `tab-strategy.html` Delete button has no confirm (§1.3) — P1
+- [ ] WP-F/D-10 — `tab-ai.html` `saveProviderKey` silent-fail (provider_keys unhandled) (§1.3) — P1
+- [ ] WP-F/D-11 — `tab-ai.html` `runEvolution` wrong call shape (should `ocPost`) (§1.3) — P1
+
+**UX — Design Issues (13)**
+- [ ] WP-F/UX-01 — Delete strategy no confirm modal (audit_A3_gui_usability_report:§2.1) — P0
+- [ ] WP-F/UX-02 — Danger Zone (Reset Loss Cooldown / Unhalt Session) no confirm (§2.1) — P0
+- [ ] WP-F/UX-03 — Three "保存設定" buttons share single `saveRiskConfig` → cross-field overwrite (§2.1) — P0
+- [ ] WP-F/UX-04 — All Save buttons missing loading/disabled state (§2.2) — P1
+- [ ] WP-F/UX-05 — `createStrategy` submit not disabled; double-submit risk (§2.2) — P1
+- [ ] WP-F/UX-06 — `saveProviderKey` no loading state / no key format validation (§2.2) — P1
+- [ ] WP-F/UX-07 — Tab titles mix Chinese/English inconsistently (§2.3) — P1
+- [ ] WP-F/UX-08 — "Demo" vs "測試" vs "執行引擎" three names for same concept (§2.3) — P1
+- [ ] WP-F/UX-09 — "Paper" naming inconsistent across 5 surfaces (§2.3) — P1
+- [ ] WP-F/UX-10 — "Session" overloaded (Paper / AI / Auth) (§2.3) — P1
+- [ ] WP-F/UX-11 — `tab-risk.html` P0 Category Limits shows raw "--" (§2.4) — P2
+- [ ] WP-F/UX-12 — `tab-system.html` degraded mode does not list running services (§2.4) — P2
+- [ ] WP-F/UX-13 — `console.html` 15s refresh has no visual update cue (§2.4) — P2
+
+**O — Optimization (12)**
+- [ ] WP-F/O-01 — `tab-system.html` information overload (§3.1) — P2
+- [ ] WP-F/O-02 — `tab-ai.html` content too dense, needs sub-tabs (§3.1) — P2
+- [ ] WP-F/O-03 — `tab-risk.html` vertical over-length, Danger Zone buried (§3.1) — P3
+- [ ] WP-F/O-04 — PnL has no trend chart (§3.2) — P2
+- [ ] WP-F/O-05 — Risk Pressure missing colored progress bar (§3.2) — P3
+- [ ] WP-F/O-06 — AI Cost missing budget progress bar (§3.2) — P3
+- [ ] WP-F/O-07 — Engine start flow too long; needs one-click (§3.3) — P2
+- [ ] WP-F/O-08 — Risk config save has no diff confirmation (§3.3) — P2
+- [ ] WP-F/O-09 — New strategy not auto-scrolled into view (§3.3) — P3
+- [ ] WP-F/O-10 — `console.html` <860px hides sidebar; no scroll indicator (§3.4) — P2
+- [ ] WP-F/O-11 — `tab-risk.html` oc-grid-3 overflows on narrow (§3.4) — P2
+- [ ] WP-F/O-12 — `tab-ai.html` Provider cards cramped on mobile (§3.4) — P3
+
+**AH — Anti-Human Design (11)**
+- [ ] WP-F/AH-01 — Danger Zone buried at page bottom (§4.1) — P1
+- [ ] WP-F/AH-02 — Governance Status lacks full-page warning on FROZEN / Risk≥4 (§4.1) — P1
+- [ ] WP-F/AH-03 — `tab-learning.html` Auto-Scan buttons hidden in `<details>` (§4.1) — P1
+- [ ] WP-F/AH-04 — Feed/Demo/Scanner buttons look like toggles but aren't (§4.2) — P1
+- [ ] WP-F/AH-05 — "AI 止損建議 Apply" misleading label (§4.2) — P1
+- [ ] WP-F/AH-06 — Risk-tab inputs overwritten every 15 s while editing (§4.2) — P1
+- [ ] WP-F/AH-07 — Strategy Delete adjacent to Stop/Pause, no confirm (§4.3) — P1
+- [ ] WP-F/AH-08 — `tab-settings.html` Enable Demo visually indistinct (§4.3) — P1
+- [ ] WP-F/AH-09 — Sidebar Live panel opacity 0.5 implies broken state (§4.4) — P2
+- [ ] WP-F/AH-10 — 6 Provider cards equal-weight, configured ones not highlighted (§4.4) — P2
+- [ ] WP-F/AH-11 — `tab-live.html` has no interactive CTA, users land on dead page (§4.4) — P2
+
+**WP-F total: 47**
+
+### 10.2 WP-G — Hardcoded Values (QC report, 43 items)
+
+Source: `audit_QC_math_algorithm_report.md:§15`
+
+**High-Risk (5)**
+- [ ] WP-G/HC-S1 — `risk/checks.rs:183` dynamic stop base = hard_stop × 0.6 (§15) — P1
+- [ ] WP-G/HC-S2 — `risk/stops.rs:51` dynamic stop cap = hard_stop × 0.8 (§15) — P1
+- [ ] WP-G/HC-S3 — `risk/stops.rs:55` ATR multiplier 1.5 (§15) — P1
+- [ ] WP-G/HC-CG1 — `intent_processor.rs:325` Cost Gate K_PAPER = 1.5 (§15) — P1
+- [ ] WP-G/HC-CG2 — `intent_processor.rs:324` MIN_CONFIDENCE floor = 0.15 (§15) — P1
+
+**Medium-Risk (14)**
+- [ ] WP-G/HC-K1 — `kelly_sizer.rs:143` Kelly ATR% reference 0.02 (§15) — P2
+- [ ] WP-G/HC-K2 — `kelly_sizer.rs:143` Kelly vol clamp 0.5–1.5 (§15) — P2
+- [ ] WP-G/HC-K3 — `kelly_sizer.rs:123` negative-Kelly floor 0.01 (§15) — P2
+- [ ] WP-G/HC-G1 — `guardian.rs:107/119/129/139/149` risk_score weights 0.4/0.3/0.4/0.15/0.35 (§15) — P2
+- [ ] WP-G/HC-G2 — `guardian.rs:159` reject threshold 0.3 (§15) — P2
+- [ ] WP-G/HC-G3 — `guardian.rs:124` leverage double factor 2.0 (§15) — P2
+- [ ] WP-G/HC-S4 — `risk/stops.rs:21` anti-cluster ±0.15 (§15) — P2
+- [ ] WP-G/HC-S5 — `risk/stops.rs:66` min stop-percent floor 0.1 (§15) — P2
+- [ ] WP-G/HC-B1 — `black_swan_detector.rs:58` MAD threshold 6.0 (§15) — P2
+- [ ] WP-G/HC-B2 — `black_swan_detector.rs:60` correlation threshold 0.85 (§15) — P2
+- [ ] WP-G/HC-B3 — `black_swan_detector.rs:62` volume multiplier 5.0 (§15) — P2
+- [ ] WP-G/HC-B4 — `black_swan_detector.rs:64` velocity bars 15 (§15) — P2
+- [ ] WP-G/HC-P1 — `intent_processor.rs:114` P1 risk clamp 0.20 (§15) — P2
+- [ ] WP-G/HC-F1 — `feature_collector.rs:21` buffer capacity 3000 (§12/§15) — P2
+
+**Low-Risk (24)**
+- [ ] WP-G/HC-A1 — `price_tracker.rs:7` ATR window 300s (§15) — P3
+- [ ] WP-G/HC-A2 — `price_tracker.rs:10` ATR min samples 10 (§15) — P3
+- [ ] WP-G/HC-A3 — `price_tracker.rs:13` Spike σ threshold 3.0 (§15) — P3
+- [ ] WP-G/HC-B5 — `black_swan_detector.rs:107` return window 720 bars (§15) — P3
+- [ ] WP-G/HC-B6 — `black_swan_detector.rs:108` volume window 43200 bars (§15) — P3
+- [ ] WP-G/HC-B7 — `black_swan_detector.rs:169` MAD min samples 30 (§15) — P3
+- [ ] WP-G/HC-B8 — `black_swan_detector.rs:246` volume min samples 100 (§15) — P3
+- [ ] WP-G/HC-B9 — `black_swan_detector.rs:218` correlation window 30 (§15) — P3
+- [ ] WP-G/HC-T1 — `thompson_sampling.py:86` NIG lam_0 = 3.0 (§15) — P3
+- [ ] WP-G/HC-T2 — `thompson_sampling.py:87` NIG alpha_0 = 3.0 (§15) — P3
+- [ ] WP-G/HC-T3 — `thompson_sampling.py:255` exploitation floor 10 (§15) — P3
+- [ ] WP-G/HC-C1 — `cpcv_validator.py:51` n_folds = 4 (§15) — P3
+- [ ] WP-G/HC-C2 — `cpcv_validator.py:61` power threshold 0.5 (§15) — P3
+- [ ] WP-G/HC-C3 — `cpcv_validator.py:62` min samples/fold 30 (§15) — P3
+- [ ] WP-G/HC-C4 — `cpcv_validator.py:60` label window 4.0 h (§15) — P3
+- [ ] WP-G/HC-C5 — `cpcv_validator.py:196` effect size 0.3 (§15) — P3
+- [ ] WP-G/HC-D1 — `drift_detector.rs:116` ADWIN delta 0.05 (§15) — P3
+- [ ] WP-G/HC-D2 — `drift_detector.rs:116` ADWIN min_width 50 (§15) — P3
+- [ ] WP-G/HC-D3 — `drift_detector.rs:116` ADWIN consecutive 3 (§15) — P3
+- [ ] WP-G/HC-D4 — Bootstrap block_size 4 (§15) — P3
+- [ ] WP-G/HC-O1 — `optuna_optimizer.py:91` n_trials 30 (§15) — P3
+- [ ] WP-G/HC-O2 — `optuna_optimizer.py:92` min fills 80 (§15) — P3
+- [ ] WP-G/HC-O3 — `optuna_optimizer.py:234` fee_rate 0.0006 (§15) — P3
+- [ ] WP-G/HC-O4 — `optuna_optimizer.py:506` perturbation 0.001 (§15) — P3
+
+**WP-G total: 43**
+
+### 10.3 WP-E4 — Test Coverage Gaps (E4 report, 34 items)
+
+Source: `audit_E4_test_coverage_report.md`
+
+**P0 — Broken / Failing (4)**
+- [ ] WP-E4/T-P0-1 — `stress_integration.rs` compile failure (29 scenarios) (§二.P0-1) — P0
+- [ ] WP-E4/T-P0-2 — `test_grafana_data_writer.py` 20 failing (§二.P0-2) — P0
+- [ ] WP-E4/T-P0-3 — `test_label_generator.py` 2 failing (§二.P0-3) — P0
+- [ ] WP-E4/T-P0-4 — `test_market_data.py` 1 failing (§二.P0-4) — P0
+
+**P1 — High-Risk Zero-Coverage (6)**
+- [ ] WP-E4/T-P1-1 — `event_consumer.rs` 957 LOC zero tests (+15) (§五.P1) — P1
+- [ ] WP-E4/T-P1-2 — `layer2_engine.py` 730 LOC zero tests (+10) (§五.P1) — P1
+- [ ] WP-E4/T-P1-3 — `ai_service.py` 729 LOC zero tests (+8) (§五.P1) — P1
+- [ ] WP-E4/T-P1-4 — `ipc_client.py` 560 LOC zero tests (+10) (§五.P1) — P1
+- [ ] WP-E4/T-P1-5 — `strategies/mod.rs` 110 LOC zero tests (+5) (§五.P1) — P1
+- [ ] WP-E4/T-P1-6 — database writers missing failure-rollback tests (+8) (§五.P1) — P1
+
+**P2 — Improvement (12)**
+- [ ] WP-E4/T-P2-1 — `evolution_engine.py` zero tests (+8) (§五.P2) — P2
+- [ ] WP-E4/T-P2-2 — `indicator_engine.py` zero tests (+6) (§五.P2) — P2
+- [ ] WP-E4/T-P2-3 — `position_sizer.py` zero tests (+5) (§五.P2) — P2
+- [ ] WP-E4/T-P2-4 — `scorer_trainer.py` zero tests (+5) (§五.P2) — P2
+- [ ] WP-E4/T-P2-5 — `rest_poller.rs` zero tests (+5) (§五.P2) — P2
+- [ ] WP-E4/T-P2-6 — `quality_writer.rs` zero tests (+3) (§五.P2) — P2
+- [ ] WP-E4/T-P2-7 — `sm/mod.rs` zero tests (+4) (§五.P2) — P2
+- [ ] WP-E4/T-P2-8 — `pipeline_types.rs` zero tests (+3) (§五.P2) — P2
+- [ ] WP-E4/T-P2-9 — PyO3 bridge test infrastructure missing (+10) (§五.P2 / §4.8) — P2
+- [ ] WP-E4/T-P2-10 — Rust panic-path `#[should_panic]` gap (+8) (§五.P2) — P2
+- [ ] WP-E4/T-P2-11 — Arc/Mutex concurrency safety tests (+6) (§五.P2) — P2
+- [ ] WP-E4/T-P2-12 — WS reconnect integration tests (+5) (§五.P2) — P2
+
+**Quality Dimension Notes (8)**
+- [ ] WP-E4/T-Q1 — Happy-path coverage 4/5 — systematic audit missing (§4.1) — P3
+- [ ] WP-E4/T-Q2 — Boundary/edge-case coverage weak outside golden_extreme (§4.2) — P3
+- [ ] WP-E4/T-Q3 — Error-path Rust panic coverage 3/5 (§4.3) — P3
+- [ ] WP-E4/T-Q4 — Concurrency coverage 3/5 (§4.4) — P3
+- [ ] WP-E4/T-Q5 — Regression test markers incomplete (§4.5) — P3
+- [ ] WP-E4/T-Q6 — Assertion quality spot-check (§4.6) — P3
+- [ ] WP-E4/T-Q7 — Integration smoke insufficient for Phase splits (§4.7) — P3
+- [ ] WP-E4/T-Q8 — PyO3 bridge tests 1/5 — cannot link in CI (§4.8) — P2
+
+**Infrastructure (4)**
+- [ ] WP-E4/T-I1 — No `cargo-tarpaulin` / `pytest-cov` coverage tool (§六) — P2
+- [ ] WP-E4/T-I2 — No CI/CD test gate (manual only) (§六) — P2
+- [ ] WP-E4/T-I3 — Rust integration tests decoupled from lib tests (§六) — P2
+- [ ] WP-E4/T-I4 — No test infra docs for new contributors (§六) — P3
+
+**WP-E4 total: 34**
+
+### 10.4 WP-I — Documentation Hygiene (R4 + TW reports, 42 items)
+
+Source: `audit_R4_index_verification_report.md` (25) + `audit_TW_document_inventory_report.md` (17)
+
+**R4 — Index Verification (25)**
+- [ ] WP-I/R4-REF-1 — `2026-04-02--system_status_report.md` not in docs/README (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-2 — `2026-04-03--agent_param_tuning_design_draft_v0.2.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-3 — `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-4 — `2026-04-03--llm_abstraction_audit.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-5 — `2026-04-03--ml_dl_learning_architecture_v0.4.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-6 — `2026-04-04--bybit_api_reference.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-7 — `2026-04-04--comprehensive_audit_template_v1.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-8 — `2026-04-04--execution_plan_v1.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-REF-9 — `2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-WL-1..14 — 14 worklog root files (2026-04-03 ~ 2026-04-05) not indexed in docs/README (R4:§1.1) — P2
+- [ ] WP-I/R4-ARCH-1 — `docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md` not declared (R4:§1.1) — P2
+- [ ] WP-I/R4-AUD-1 — `docs/audits/2026-04-04--bybit_api_infra_audit.md` not indexed (R4:§1.1) — P2
+- [ ] WP-I/R4-NAME-1 — `bilingual_comment_audit_report.md` index name missing date prefix (R4:§1.3) — P3
+- [ ] WP-I/R4-REF-ST-1 — CLAUDE_REFERENCE.md last-update date stale (R4:§3.2) — P3
+- [ ] WP-I/R4-CHG-1 — CLAUDE_CHANGELOG missing RRC-1 full entry (R4:§4.2) — P2
+- [ ] WP-I/R4-SCR-1 — `helper_scripts/SCRIPT_INDEX.md` file does not exist (R4:§5.1) — P1
+- [ ] WP-I/R4-MEM-1 — MEMORY.md has file not indexed (R4:§7.2) — P3
+- [ ] WP-I/R4-DIR-1 — `docs/audit/` vs `docs/audits/` dir clash (R4:§8.1) — P2
+- [ ] WP-I/R4-DIR-2 — `docs/architecture/` not in README tree (R4:§8.2) — P2
+
+**TW — Document Inventory (17)**
+- [ ] WP-I/TW-DUP-1..14 — 14 duplicate file pairs audit/ vs CCAgentWorkSpace/ (TW:§3.1) — P2
+- [ ] WP-I/TW-DUP-15 — Rust migration plan multi-version drift (TW:§3.2) — P3
+- [ ] WP-I/TW-DUP-16 — Execution plan duplicated in 2 locations (TW:§3.3) — P3
+- [ ] WP-I/TW-DUP-17 — Data storage architecture duplicated (TW:§3.4) — P3
+- [ ] WP-I/TW-STALE-1 — Pre-Rust state docs not marked deprecated (TW:§5.1) — P3
+- [ ] WP-I/TW-STALE-2 — Superseded CCAgentWorkSpace reports (TW:§5.2) — P3
+- [ ] WP-I/TW-STALE-3 — `governance_dev/` entirely stale (TW:§5.3) — P3
+- [ ] WP-I/TW-NAME-1 — Files not following `YYYY-MM-DD--` pattern (TW:§6.1) — P2
+- [ ] WP-I/TW-DS-1 — 8 `.DS_Store` files committed (TW:§6.2) — P2
+- [ ] WP-I/TW-WL-1 — 2026-04-05 worklog fragments not merged to daily_summary (TW:§7.3) — P1
+
+**WP-I total: 42** (R4 19 unique items incl. 14 worklogs collapsed as 1 cluster→listed as 14 granular items = 19, TW 17)
+
+> Note: R4-WL sub-cluster expanded to 14 individual worklog files for traceability; effective R4 count = 25, TW count = 17, combined = 42.
+
+### 10.5 WP-E5 — Optimization / Code Quality (E5 report, 20 items)
+
+Source: `audit_E5_optimization_report.md`
+
+- [ ] WP-E5/F1 — `intent_processor.rs` process() vs process_gates_only() duplication (~120 LOC) (§三.F1) — P1
+- [ ] WP-E5/F2 — `tick_pipeline.rs` ring buffer push+trim repeated 7× (§三.F2) — P2
+- [ ] WP-E5/F3 — `tick_pipeline.rs` ID generation format scattered (§三.F3) — P2
+- [ ] WP-E5/F4 — `tick_pipeline.rs` `TradingMsg::Intent` construction repeated (§三.F4) — P2
+- [ ] WP-E5/F5 — `tick_pipeline.rs` exchange/paper Intent push duplication (§三.F5) — P3
+- [ ] WP-E5/P1 — `event_consumer.rs` exec_id dedup O(n) linear scan (§四.P1) — P1
+- [ ] WP-E5/P2 — `tick_pipeline.rs` `on_tick()` heavy String clones (§四.P2) — P2
+- [ ] WP-E5/P3 — `tick_pipeline.rs` `snapshot()` full-state clone (§四.P3) — P2
+- [ ] WP-E5/P4 — `tick_pipeline.rs` positions collect-then-iterate (§四.P4) — P3
+- [ ] WP-E5/S1 — `tick_pipeline.rs` `on_tick()` ~550 LOC (§五.S1) — P2
+- [ ] WP-E5/S2 — `event_consumer.rs` `run_event_consumer()` ~850 LOC (§五.S2) — P2
+- [ ] WP-E5/S3 — `intent_processor.rs` `new()` vs `with_fee_rate()` duplication (§五.S3) — P3
+- [ ] WP-E5/D1 — `strategies/funding_arb.rs` entire module `#[allow(dead_code)]` (§六.D1) — P2
+- [ ] WP-E5/D2 — `strategies/grid_trading.rs` 4× dead_code (§六.D2) — P2
+- [ ] WP-E5/D3 — Python `governance_hub.py` 5 DEPRECATED methods retained (§六.D3) — P2
+- [ ] WP-E5/D4 — Compiler unused-import/variable warnings (§六.D4) — P3
+- [ ] WP-E5/R1 — `TickPipeline` struct has 27 fields (§七.R1) — P2
+- [ ] WP-E5/R2 — `EventConsumerDeps` has 16 fields (§七.R2) — P2
+- [ ] WP-E5/PY1 — Python DEPRECATED modules retained (§八.PY1) — P2
+- [ ] WP-E5/PY2 — `paper_trading_routes.py` wildcard imports (§八.PY2) — P2
+
+**WP-E5 total: 20**
+
+### 10.6 WP-B — Security (E3 report, 12 items; 8 folded into top-level)
+
+Source: `audit_E3_security_report.md`
+
+- [ ] WP-B/SEC-01 — Exchange-mode Cost Gate missing in `process_gates_only` (§1.SEC-01) — P0
+- [ ] WP-B/SEC-02 — H0Gate shadow_mode remotely toggleable via unauth IPC (§1.SEC-02) — P1
+- [ ] WP-B/SEC-04 — SQL injection review (safe, tracked) (§2.SEC-04) — P2
+- [ ] WP-B/SEC-05 — GUI `innerHTML` potential XSS (§2.SEC-05) — P1
+- [ ] WP-B/SEC-06 — API token returned in JSON body plaintext (§3.SEC-06) — P2
+- [ ] WP-B/SEC-08 — IPC Unix socket no auth + no 0o600 (§4.SEC-08) — P0
+- [ ] WP-B/SEC-09 — `/api/v1/system/startup-status` unauthenticated (§4.SEC-09) — P2
+- [ ] WP-B/SEC-11 — Cost Gate ATR=0 fail-open (§5.SEC-11) — P1
+- [ ] WP-B/SEC-13 — `latency_us` u32 truncation (§6.SEC-13) — P2
+- [ ] WP-B/SEC-17 — `OPENCLAW_ALLOW_MAINNET` single-factor guard (§8.SEC-17) — P2
+- [ ] WP-B/SEC-18 — IPC risk-param setters lack `.clamp()` (§9.SEC-18) — P1
+- [ ] WP-B/SEC-21 — Cookie `secure=False` (legacy_routes.py L382) (§10.SEC-21) — P1
+
+**WP-B total: 12**
+
+### 10.7 WP-BB — Bybit API (BB report, 3 real findings)
+
+Source: `audit_BB_bybit_api_report.md`
+
+- [ ] WP-BB/W-1 — Python GET signature does not sort query string (§14.W-1) — P2
+- [ ] WP-BB/W-2 — Public WS configured for Linear only (§14.W-2) — P2
+- [ ] WP-BB/S-1 — No active rate-limit slowdown (§14.S-1) — P2
+
+**WP-BB total: 3** (47 endpoint passes correctly skipped per task instructions)
+
+### 10.8 WP-CC — Compliance (CC report, 8 partial/fail items)
+
+Source: `audit_CC_compliance_report.md`
+
+- [ ] WP-CC/P4 — Principle #4 (strategy cannot bypass risk) partial — Gate 3 missing exchange (§1.#4) — P0
+- [ ] WP-CC/P7 — Principle #7 (learning ≠ live) missing explicit approval gate (§1.#7) — P2
+- [ ] WP-CC/P9 — Principle #9 (exchange disaster protection) — dual-rail stops incomplete (§1.#9 / §10) — P1
+- [ ] WP-CC/P16 — Principle #16 (portfolio risk) — correlated_exposure hardcoded 0 (§1.#16) — P2
+- [ ] WP-CC/FS-1 — File-size hard-limit violations `market_data_client.rs`, `event_consumer.rs` (§4.2) — P1
+- [ ] WP-CC/BI-1 — Bilingual comment coverage gaps in new Rust modules (§4.1) — P3
+- [ ] WP-CC/SM-1 — Singleton registry missing newly added globals (§6.2) — P3
+- [ ] WP-CC/WF-1 — Workflow chain E2/E4 occasionally skipped on hotfixes (§5) — P2
+
+**WP-CC total: 8**
+
+### 10.9 WP-FA — Functional Spec Gaps (FA report, 5 partial items not in top-level)
+
+Source: `audit_FA_functional_spec_report.md`
+
+- [ ] WP-FA/GAP-2 — `cost_ratio` and `regime` placeholders in `check_position_on_tick` (§二.GAP-2) — P2
+- [ ] WP-FA/GAP-4 — Kelly ATR% placeholder 0.02 (§二.GAP-4) — P2
+- [ ] WP-FA/GAP-8 — IPC `evaluate_strategy` / `get_risk_check` still stubs (§二.GAP-8) — P3
+- [ ] WP-FA/GAP-9 — Limit-order simulation not implemented (§二.GAP-9) — P3
+- [ ] WP-FA/GAP-10 — Provider pricing table not implemented (§二.GAP-10) — P3
+
+**WP-FA total: 5**
+
+### 10.10 WP-MIT — Database / ML (MIT report, 6 sub-items)
+
+Source: `audit_MIT_database_ml_report.md`
+
+- [ ] WP-MIT/DB-1 — DDL V001-V007 draft only, not executed against PG (§1) — P0
+- [ ] WP-MIT/DB-2 — ETL ASOF JOIN BIGINT vs TIMESTAMPTZ type mismatch (§8) — P2
+- [ ] WP-MIT/DB-3 — Some Timescale hypertables lack compression policy (§9) — P2
+- [ ] WP-MIT/ML-1 — `ort` crate not integrated; ONNX `predict()` = None (§5/§6) — P1
+- [ ] WP-MIT/ML-2 — Thompson Sampling NIG no PG persistence (§13) — P2
+- [ ] WP-MIT/ML-3 — Drift detector does not read from PG (§10) — P2
+- [ ] WP-MIT/ML-4 — `scorer_trainer.py` uses 80/20 split, not CPCV (§4) — P2
+- [ ] WP-MIT/ML-5 — No end-to-end ML training driver script (§4) — P2
+- [ ] WP-MIT/ML-6 — `requirements-ml.txt` missing (§4) — P2
+
+**WP-MIT total: 9**
+
+### 10.11 Per-WP Sub-Item Totals
+
+| WP | Bucket | Sub-Items Added |
+|----|--------|----------------:|
+| WP-F | GUI Usability (A3) | 47 |
+| WP-G | Hardcoded Values (QC) | 43 |
+| WP-E4 | Test Coverage (E4) | 34 |
+| WP-I | Documentation (R4+TW) | 42 |
+| WP-E5 | Optimization (E5) | 20 |
+| WP-B | Security (E3) | 12 |
+| WP-BB | Bybit API (BB) | 3 |
+| WP-CC | Compliance (CC) | 8 |
+| WP-FA | Functional Spec (FA) | 5 |
+| WP-MIT | Database/ML (MIT) | 9 |
+| **Total** | | **223** |
+
+> Note: AI-E contributed 0 new items (already covered by I-19/I-20/I-23 in §3). Grand total 223 sub-items > original ~170 estimate because several clusters (R4 worklogs, TW duplicates, QC low-risk HCs) were expanded to full granularity rather than folded.
+
+*End of §10 sub-checklists. Generated 2026-04-06 by PA follow-up pass for full audit traceability.*

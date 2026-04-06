@@ -21,6 +21,18 @@
 
 **Exchange mode go-live blockers**: R0-1, R0-2, R0-5, R1-A, R1-I, R1-J（見整合報告 §6 critical-path）。
 
+### ██ 2026-04-06 WP 子檢查清單回鏈（見整合報告 §10，223 sub-items）██
+- WP-F GUI 47 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#101-wp-f--gui-usability-a3-report-47-items`
+- WP-G 硬編碼 43 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#102-wp-g--hardcoded-values-qc-report-43-items`
+- WP-E4 測試 34 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#103-wp-e4--test-coverage-gaps-e4-report-34-items`
+- WP-I 文檔 42 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#104-wp-i--documentation-hygiene-r4--tw-reports-42-items`
+- WP-E5 優化 20 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#105-wp-e5--optimization--code-quality-e5-report-20-items`
+- WP-B 安全 12 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#106-wp-b--security-e3-report-12-items-8-folded-into-top-level`
+- WP-BB Bybit 3 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#107-wp-bb--bybit-api-bb-report-3-real-findings`
+- WP-CC 合規 8 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#108-wp-cc--compliance-cc-report-8-partialfail-items`
+- WP-FA 規格 5 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#109-wp-fa--functional-spec-gaps-fa-report-5-partial-items-not-in-top-level`
+- WP-MIT DB/ML 9 項 → `docs/audits/2026-04-06_consolidated_remediation_report.md#1010-wp-mit--database--ml-mit-report-6-sub-items`
+
 ### 已驗證 DONE（從 PA 63 中歸檔）
 
 - [x] Session 9c `realized_pnl` 接線（`tick_pipeline.rs:737-763` + `trading_writer.rs:151-163`）
