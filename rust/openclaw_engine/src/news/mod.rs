@@ -10,13 +10,19 @@
 //       與三層消費路由（4-09）不在本任務範圍。
 
 pub mod cryptopanic;
+pub mod dedup;
 pub mod mock;
+pub mod pipeline;
 pub mod provider;
 pub mod rss;
+pub mod severity;
 pub mod types;
 
 pub use cryptopanic::CryptoPanicProvider;
+pub use dedup::DedupCache;
 pub use mock::MockProvider;
+pub use pipeline::{NewsPipeline, ProcessedNewsItem};
 pub use provider::NewsProvider;
 pub use rss::RssProvider;
+pub use severity::{score_severity, SeverityConfig};
 pub use types::{ProviderError, RawNewsItem};

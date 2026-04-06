@@ -19,13 +19,17 @@
 //!   沒有 `ANTHROPIC_API_KEY` 時絕不會發出真實網路呼叫；介面以 trait 注入，
 //!   後續 wiring/IPC 子任務可替換為真實實作。
 
+pub mod applier;
 pub mod client;
 pub mod parser;
 pub mod writer;
 
+pub use applier::{
+    ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink,
+};
 pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockClient};
 pub use parser::{parse_directive, Directive, DirectiveType, ParserError};
-pub use writer::{persist_directive, WriterError};
+pub use writer::{persist_directive, record_execution, WriterError};
 
 use crate::ai_budget::tracker::{BudgetTracker, SCOPE_AGENT_TEACHER};
 use crate::database::pool::DbPool;

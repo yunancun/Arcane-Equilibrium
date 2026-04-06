@@ -168,6 +168,18 @@ Rust 是唯一實際執行引擎，Python RM 只是 GUI 的儲存層（技術債
 #### WP-FA — 功能規格（0 項，原 5，**100% 已規劃**）
 - ~~FA GAP-10 Provider pricing table~~ → 併入 Phase 4 子任務 **4-17**
 
+#### WP-CLEANUP-WHITELIST-UI — Symbol Whitelist GUI 殘留清理（P2）
+**現狀**：T5.04 (35ab853 + f4663d3, 2026-04-01) 已移除 `risk_manager.py` 的 symbol whitelist enforce，
+但 GUI 仍有 `tab-governance.html` whitelist card (~160 行) + `governance.js` 3 個 helper (~15 行)。
+W2 commit 已將 backend 3 個 endpoints 改為 HTTP 410 Gone stub + GUI card 加 deprecation banner。
+完整 UI 移除留待 P2 cleanup sprint。
+
+- [ ] 移除 `tab-governance.html` whitelist card 全部 markup（line ~309-470，含 Add Form / 4 個 category divs / Remove Modal）
+- [ ] 移除 `tab-governance.html` JS：`toggleWhitelist` / `loadSymbolWhitelist` / `submitAddWhitelist` / `submitRemoveWhitelist` / `showRemoveWhitelistModal` / `hideRemoveWhitelistModal`
+- [ ] 移除 `governance.js` 3 個 helper：`govGetSymbolWhitelist` / `govAddSymbolWhitelist` / `govRemoveSymbolWhitelist`
+- [ ] 移除 `governance_routes.py` 3 個 410 stub + `SymbolWhitelistAddRequest` Pydantic class（W2 留作過渡期）
+- [ ] 跑全套 pytest + manual GUI smoke
+
 #### WP-I — 文檔衛生（✅ P1 核心已完成 — `338b4f9`，原 42）
 - [x] SCRIPT_INDEX.md 補建（6 腳本完整索引）
 - [x] docs/audit 與 docs/audits 衝突 → 統一為 docs/audits/

@@ -1264,239 +1264,59 @@ def dismiss_all_pending(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+# ---------------------------------------------------------------------------
+# DEPRECATED — Symbol Whitelist endpoints (T5.04, 35ab853 + f4663d3, 2026-04-01)
+# 已棄用 — Symbol 白名單端點（T5.04，2026-04-01）
+#
+# Symbol-level allowed_symbols enforcement was removed because Scanner +
+# Guardian + H0 Gate already provide multi-layer filtering. The endpoints
+# below are stubs that return HTTP 410 Gone with a clear deprecation message.
+# Full GUI cleanup (tab-governance.html whitelist card + governance.js
+# helpers) is tracked separately as WP-CLEANUP-WHITELIST-UI in TODO.md.
+#
+# Symbol 級別的 allowed_symbols 強制執行已被移除（Scanner + Guardian + H0
+# Gate 已提供多層篩選）。以下端點是回傳 HTTP 410 Gone 的占位 stub。完整
+# GUI 清理另外追蹤於 TODO.md WP-CLEANUP-WHITELIST-UI。
+# ---------------------------------------------------------------------------
+
+_WHITELIST_DEPRECATED_DETAIL = (
+    "symbol whitelist deprecated 2026-04-01 (T5.04): "
+    "Scanner + Guardian + H0 Gate provide sufficient filtering. "
+    "GUI cleanup pending (WP-CLEANUP-WHITELIST-UI)."
+)
+
+
 @governance_router.get("/symbols/whitelist")
-def get_symbol_whitelist(
+def get_symbol_whitelist_deprecated(
     actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
+    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
+    已棄用 — symbol 白名單已移除，回 410 Gone。
     """
-    Get current symbol whitelist across all categories.
-    获取所有品类的当前符号白名单。
-
-    Returns symbol whitelist grouped by category.
-    """
-    try:
-        # Lazy import to avoid circular dependencies
-        from .paper_trading_routes import RISK_MANAGER
-
-        if RISK_MANAGER is None:
-            return GovernanceResponse.error(
-                "Risk manager not available",
-                code="manager_unavailable",
-                status_code=503
-            )
-
-        whitelist_data = {}
-        categories = ["spot", "linear", "inverse", "option"]
-
-        for category in categories:
-            try:
-                cfg = RISK_MANAGER.get_category_config(category)
-                if cfg is not None and hasattr(cfg, "allowed_symbols"):
-                    whitelist_data[category] = cfg.allowed_symbols or []
-                else:
-                    whitelist_data[category] = []
-            except Exception as e:
-                logger.debug("Error getting whitelist for %s: %s", category, e)
-                whitelist_data[category] = []
-
-        return GovernanceResponse.success(data=whitelist_data, message="symbol_whitelist")
-    except Exception as e:
-        logger.error("Error getting symbol whitelist: %s", e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
 
 
 @governance_router.post("/symbols/whitelist")
-def add_symbol_to_whitelist(
+def add_symbol_to_whitelist_deprecated(
     body: SymbolWhitelistAddRequest,
     actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
+    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
+    已棄用 — symbol 白名單已移除，回 410 Gone。
     """
-    Add a symbol to the whitelist for a specific category.
-    将符号添加到特定品类的白名单。
-
-    Records change to ChangeAuditLog if available.
-    """
-    hub = _get_governance_hub()
-
-    try:
-        # SECURITY FIX #1: Require Operator role
-        _require_operator_role(actor)
-
-        # Lazy import to avoid circular dependencies
-        from .paper_trading_routes import RISK_MANAGER
-
-        if RISK_MANAGER is None:
-            return GovernanceResponse.error(
-                "Risk manager not available",
-                code="manager_unavailable",
-                status_code=503
-            )
-
-        # Sanitize inputs
-        sanitized_symbol = _sanitize_string(body.symbol.upper(), max_len=50)
-        sanitized_category = _sanitize_string(body.category.lower(), max_len=50)
-
-        # Get current config
-        cfg = RISK_MANAGER.get_category_config(sanitized_category)
-        old_whitelist = cfg.allowed_symbols if cfg and hasattr(cfg, "allowed_symbols") else []
-
-        # Add symbol if not already present
-        if sanitized_symbol not in old_whitelist:
-            new_whitelist = old_whitelist + [sanitized_symbol]
-            RISK_MANAGER.update_category_config(
-                sanitized_category,
-                {"allowed_symbols": new_whitelist}
-            )
-
-            # Record to change audit log if available
-            if hub and hub._change_audit_log:
-                try:
-                    from .change_audit_log import ChangeType
-                    hub._change_audit_log.record_change(
-                        change_type=ChangeType.CONFIG_CHANGE,
-                        who=actor.actor_id,
-                        what=f"Symbol added to {sanitized_category} whitelist: {sanitized_symbol}",
-                        reason="Operator whitelist management",
-                        old_value=old_whitelist,
-                        new_value=new_whitelist,
-                        affected_components=["risk_manager", sanitized_category],
-                        auto_approve=True,
-                    )
-                except Exception as e:
-                    logger.warning("Failed to record whitelist change: %s", e)
-
-            logger.info(
-                "Symbol %s added to %s whitelist by %s",
-                sanitized_symbol, sanitized_category, _sanitize_log(actor.actor_id),
-            )
-
-            return GovernanceResponse.success(
-                data={
-                    "symbol": sanitized_symbol,
-                    "category": sanitized_category,
-                    "status": "added",
-                    "new_whitelist": new_whitelist,
-                },
-                message="symbol_added"
-            )
-        else:
-            return GovernanceResponse.success(
-                data={
-                    "symbol": sanitized_symbol,
-                    "category": sanitized_category,
-                    "status": "already_exists",
-                    "whitelist": old_whitelist,
-                },
-                message="symbol_already_in_whitelist"
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error adding symbol to whitelist: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
 
 
 @governance_router.delete("/symbols/whitelist/{symbol}")
-def remove_symbol_from_whitelist(
+def remove_symbol_from_whitelist_deprecated(
     symbol: str,
-    category: str | None = None,
+    category: str,
     actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
+    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
+    已棄用 — symbol 白名單已移除，回 410 Gone。
     """
-    Remove a symbol from the whitelist.
-    从白名单中删除符号。
-
-    If category not specified, removes from all categories.
-    """
-    hub = _get_governance_hub()
-
-    try:
-        # SECURITY FIX #1: Require Operator role
-        _require_operator_role(actor)
-
-        # Lazy import to avoid circular dependencies
-        from .paper_trading_routes import RISK_MANAGER
-
-        if RISK_MANAGER is None:
-            return GovernanceResponse.error(
-                "Risk manager not available",
-                code="manager_unavailable",
-                status_code=503
-            )
-
-        # Sanitize inputs
-        sanitized_symbol = _sanitize_string(symbol.upper(), max_len=50)
-        categories_to_update = []
-
-        if category:
-            sanitized_category = _sanitize_string(category.lower(), max_len=50)
-            categories_to_update = [sanitized_category]
-        else:
-            categories_to_update = ["spot", "linear", "inverse", "option"]
-
-        changes_made = []
-
-        for cat in categories_to_update:
-            try:
-                cfg = RISK_MANAGER.get_category_config(cat)
-                old_whitelist = cfg.allowed_symbols if cfg and hasattr(cfg, "allowed_symbols") else []
-
-                if sanitized_symbol in old_whitelist:
-                    new_whitelist = [s for s in old_whitelist if s != sanitized_symbol]
-                    RISK_MANAGER.update_category_config(
-                        cat,
-                        {"allowed_symbols": new_whitelist}
-                    )
-
-                    changes_made.append(cat)
-
-                    # Record to change audit log if available
-                    if hub and hub._change_audit_log:
-                        try:
-                            from .change_audit_log import ChangeType
-                            hub._change_audit_log.record_change(
-                                change_type=ChangeType.CONFIG_CHANGE,
-                                who=actor.actor_id,
-                                what=f"Symbol removed from {cat} whitelist: {sanitized_symbol}",
-                                reason="Operator whitelist management",
-                                old_value=old_whitelist,
-                                new_value=new_whitelist,
-                                affected_components=["risk_manager", cat],
-                                auto_approve=True,
-                            )
-                        except Exception as e:
-                            logger.warning("Failed to record whitelist change: %s", e)
-            except Exception as e:
-                logger.warning("Error updating whitelist for %s: %s", cat, e)
-
-        if changes_made:
-            logger.info(
-                "Symbol %s removed from %s by %s",
-                sanitized_symbol, ','.join(changes_made), _sanitize_log(actor.actor_id),
-            )
-            return GovernanceResponse.success(
-                data={
-                    "symbol": sanitized_symbol,
-                    "categories_updated": changes_made,
-                    "status": "removed",
-                },
-                message="symbol_removed"
-            )
-        else:
-            return GovernanceResponse.success(
-                data={
-                    "symbol": sanitized_symbol,
-                    "status": "not_found",
-                },
-                message="symbol_not_in_whitelist"
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error removing symbol from whitelist: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
 
 
 @governance_router.get("/leases")
