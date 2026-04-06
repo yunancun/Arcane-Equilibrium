@@ -735,7 +735,7 @@ try:
         risk_per_trade_pct=3.0,    # Risk 3% of balance per trade (max loss per trade)
         min_qty_usdt=20.0,         # Minimum $20 per trade
         max_qty_pct=18.0,          # Max 18% of balance per single trade (90% of 20% risk limit, 10% headroom)
-        market_feed_add_fn=lambda sym: _ptr.DISPATCHER.add_symbol(sym) if _ptr.DISPATCHER else None,
+
         pinned_symbols=["BTCUSDT", "ETHUSDT"],  # Always monitor + attempt to trade (learning/evolution)
         reserved_slots={"spot": 5},  # 5 slots reserved for spot — linear can't squeeze them out
     )
@@ -961,57 +961,9 @@ except Exception as _e1_e:
 # design_only / disabled → do not start (operator must explicitly set mode first)
 # observe_only 及以上 → 启动后台行情流；design_only / disabled → 不启动（需 Operator 先切换模式）
 _FEED_AUTO_MODES = {"observe_only", "shadow_only", "demo_reserved", "live_reserved"}
-try:
-    from . import paper_trading_routes as _paper_ptr
-    from .paper_trading_routes import MarketDataDispatcher
-
-    # Read current global mode from state store.
-    # 从状态存储读取当前全局模式。
-    _global_mode = "design_only"
-    try:
-        from .main_legacy import get_latest_snapshot as _get_snap
-        _snap_data, _ = _get_snap()
-        _global_mode = (
-            _snap_data
-            .get("global_runtime", {})
-            .get("controls", {})
-            .get("global_execution_mode_switch", "design_only")
-        )
-    except Exception as _mode_read_e:
-        logger.debug("Could not read global mode for feed auto-start: %s", _mode_read_e)
-
-    # RC-12: Python MarketDataDispatcher auto-start DISABLED — Rust engine has its own
-    # WebSocket connection to Bybit and is the sole tick processor. Starting a second
-    # Python WS wastes resources and creates duplicate connections.
-    # RC-11 already disabled engine.tick() in _trigger_tick(), so even if started,
-    # the dispatcher does nothing useful.
-    # Manual start/stop via POST /market-feed/start|stop remains available for debug.
-    # RC-12：Python MarketDataDispatcher 自動啟動已禁用 — Rust 引擎有自己的
-    # Bybit WebSocket 連接，是唯一 tick 處理器。啟動第二條 Python WS 浪費資源。
-    # RC-11 已停用 _trigger_tick() 中的 engine.tick()，即使啟動也不做任何有用的事。
-    # 手動啟動/停止仍可通過 POST /market-feed/start|stop 使用（調試用）。
-    if False and _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None and _global_mode in _FEED_AUTO_MODES:
-        _auto_symbols = ["BTCUSDT", "ETHUSDT"]
-        _paper_ptr.DISPATCHER = MarketDataDispatcher(
-            engine=_paper_ptr.ENGINE,
-            symbols=_auto_symbols,
-        )
-        _paper_ptr.DISPATCHER.start()
-        # _paper_ptr.DISPATCHER.register_tick_consumer(PIPELINE_BRIDGE)
-        # PIPELINE_BRIDGE.activate()
-        logger.info(
-            "Background market feed started (global_mode=%s), Python tick processing DISABLED (RC-10) / "
-            "后台行情流已启动（global_mode=%s），Python tick 处理已禁用（RC-10）",
-            _global_mode, _global_mode,
-        )
-    elif _paper_ptr.DISPATCHER is None and PIPELINE_BRIDGE is not None:
-        logger.info(
-            "Background market feed NOT started: global_mode=%s not in observe_only+ / "
-            "后台行情流未启动：global_mode=%s 未达到 observe_only+",
-            _global_mode, _global_mode,
-        )
-except Exception as _auto_e:
-    logger.warning("Background market feed auto-start failed: %s / 后台行情流自动启动失败: %s", _auto_e, _auto_e)
+# RC-12 (2026-04-06): Python MarketDataDispatcher removed — Rust engine is the sole
+# WebSocket connection and tick processor. bybit_public_ws_listener.py and
+# market_data_dispatcher.py deleted along with their tests (~2 500 lines).
 
 # ─────────────────────────────────────────────────────────────────────
 # P1-16: Inject H0Gate into PipelineBridge + RiskManager

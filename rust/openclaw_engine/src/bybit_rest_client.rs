@@ -15,8 +15,9 @@ use hmac::{Hmac, Mac};
 use reqwest::Client;
 use sha2::Sha256;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+use tokio::time::sleep;
 use tracing::{debug, warn};
 
 // ---------------------------------------------------------------------------
@@ -463,6 +464,7 @@ impl BybitRestClient {
             format!("{}{}?{}", self.base_url, path, query_string)
         };
 
+        self.wait_if_rate_limited().await;
         debug!(
             method = "GET",
             path = path,
@@ -503,6 +505,7 @@ impl BybitRestClient {
 
         let url = format!("{}{}", self.base_url, path);
 
+        self.wait_if_rate_limited().await;
         debug!(
             method = "POST",
             path = path,
@@ -588,6 +591,47 @@ impl BybitRestClient {
     pub fn is_group_near_limit(&self, group: RateLimitGroup, threshold: i64) -> bool {
         let idx = group as usize;
         self.rate_limit.group_remaining[idx].load(Ordering::Relaxed) <= threshold
+    }
+
+    /// Proactively wait if global rate limit is nearly exhausted.
+    /// 若全局限流接近耗盡，主動等待至重置時間（上限 2 秒）。
+    ///
+    /// Called before every GET/POST to avoid sending into a 429.
+    /// Waits until `reset_ms` + 50ms buffer, capped at 2 000ms.
+    /// No-op when reset_ms is unknown (0) or already in the past.
+    /// 每次 GET/POST 前調用以避免觸發 429。
+    /// 等待至 reset_ms + 50ms 緩衝，最多 2 秒。reset_ms 未知（0）或已過期時跳過。
+    async fn wait_if_rate_limited(&self) {
+        const THRESHOLD: i64 = 10;
+        const MAX_WAIT_MS: u64 = 2_000;
+        const BUFFER_MS: u64 = 50;
+
+        if !self.is_near_rate_limit(THRESHOLD) {
+            return;
+        }
+
+        let reset_ms = self.rate_limit.reset_ms.load(Ordering::Relaxed);
+        if reset_ms == 0 {
+            return;
+        }
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        if reset_ms <= now_ms {
+            return; // already reset — no wait needed / 已重置，無需等待
+        }
+
+        let wait_ms = ((reset_ms - now_ms) + BUFFER_MS).min(MAX_WAIT_MS);
+        let remaining = self.rate_limit.remaining.load(Ordering::Relaxed);
+        warn!(
+            remaining = remaining,
+            wait_ms = wait_ms,
+            "Rate limit near threshold — backing off / 接近限流閾值，主動退讓"
+        );
+        sleep(Duration::from_millis(wait_ms)).await;
     }
 
     /// Update per-group rate limit from the last request.

@@ -294,6 +294,23 @@ class EngineIPCClient:
         """
         return await self.call("get_tick_stats")
 
+    # ─── Phase 4 (4-00): Dashboard skeleton status / 儀表板骨架狀態 ───────────
+
+    async def get_phase4_status(self) -> dict[str, Any]:
+        """
+        Get Phase 4 dashboard traffic-light aggregation.
+        獲取 Phase 4 儀表板紅黃綠燈聚合狀態。
+
+        Returns a dict with keys: teacher / linucb / news / dl3 / last_update_ms.
+        Each module status is one of: grey (not started) / green / yellow / red.
+        At skeleton stage (4-00) all modules return "grey".
+
+        返回字典欄位：teacher / linucb / news / dl3 / last_update_ms。
+        各模組狀態為：grey（未啟動）/ green / yellow / red。
+        骨架階段（4-00）所有模組均返回 "grey"。
+        """
+        return await self.call("get_phase4_status")
+
     # ─── Paper session control commands / 紙盤 session 控制命令 ────────────────
 
     async def pause_paper(self) -> dict[str, Any]:

@@ -339,6 +339,8 @@ async fn dispatch_request(
         "update_risk_config" => handle_update_risk_config(id, paper_cmd_tx, &req.params).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
+        // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
+        "get_phase4_status" => handle_get_phase4_status(id),
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -388,6 +390,40 @@ fn handle_get_state(id: serde_json::Value, config: &Arc<ConfigManager>) -> JsonR
         "config_path": config.file_path().display().to_string(),
     });
     JsonRpcResponse::success(id, state)
+}
+
+/// Phase 4 (4-00): Return dashboard skeleton status aggregation.
+/// Phase 4 (4-00): 返回儀表板骨架的狀態聚合。
+///
+/// Each Phase 4 module (Teacher / LinUCB / News / DL-3) reports a traffic-light
+/// state. At skeleton stage all modules report "grey" (not started). Subsequent
+/// sub-tasks (4-01 ... 4-21) will replace the stub with real status sources.
+///
+/// 各 Phase 4 模組（Teacher / LinUCB / News / DL-3）回報一個紅黃綠燈狀態。
+/// 骨架階段全部回報 "grey"（未啟動）。後續子任務（4-01 ... 4-21）會將 stub
+/// 替換為真實狀態源。
+///
+/// Schema:
+///   {
+///     "teacher": "grey" | "green" | "yellow" | "red",
+///     "linucb":  "grey" | ...,
+///     "news":    "grey" | ...,
+///     "dl3":     "grey" | ...,
+///     "last_update_ms": <unix-millis>
+///   }
+fn handle_get_phase4_status(id: serde_json::Value) -> JsonRpcResponse {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let payload = serde_json::json!({
+        "teacher": "grey",
+        "linucb":  "grey",
+        "news":    "grey",
+        "dl3":     "grey",
+        "last_update_ms": now_ms,
+    });
+    JsonRpcResponse::success(id, payload)
 }
 
 /// Reload engine config (hot params only).
@@ -1057,5 +1093,63 @@ mod tests {
             resp.error.is_some(),
             "should error when params_json missing"
         );
+    }
+
+    // ── Phase 4 (4-00) Dashboard skeleton tests / 儀表板骨架測試 ──────────
+
+    /// Initial Phase 4 status — all four modules should report "grey".
+    /// 初始 Phase 4 狀態 — 四個模組應全部回報 "grey"。
+    #[tokio::test]
+    async fn test_get_phase4_status_returns_grey_initial() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let req =
+            r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
+        let resp = dispatch_request(req, &config, &dd, &None).await;
+        assert!(resp.error.is_none(), "phase4 status must succeed");
+        let r = resp.result.unwrap();
+        assert_eq!(r["teacher"], "grey");
+        assert_eq!(r["linucb"], "grey");
+        assert_eq!(r["news"], "grey");
+        assert_eq!(r["dl3"], "grey");
+    }
+
+    /// Schema check — required fields present, last_update_ms is positive int.
+    /// Schema 檢查 — 必須欄位齊全，last_update_ms 為正整數。
+    #[tokio::test]
+    async fn test_get_phase4_status_response_schema() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let req =
+            r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
+        let resp = dispatch_request(req, &config, &dd, &None).await;
+        assert!(resp.error.is_none());
+        let r = resp.result.unwrap();
+        for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
+            assert!(r.get(key).is_some(), "missing key: {key}");
+        }
+        assert!(r["last_update_ms"].as_i64().unwrap_or(0) > 0);
+        // valid traffic-light vocabulary / 合法紅綠燈詞彙
+        for key in ["teacher", "linucb", "news", "dl3"] {
+            let v = r[key].as_str().unwrap_or("");
+            assert!(
+                matches!(v, "grey" | "green" | "yellow" | "red"),
+                "invalid status for {key}: {v}"
+            );
+        }
+    }
+
+    /// Dispatch table — get_phase4_status routes to handler (id echoed).
+    /// 派發表 — get_phase4_status 應正確路由到 handler（id 被回顯）。
+    #[tokio::test]
+    async fn test_dispatch_phase4_status() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let req =
+            r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
+        let resp = dispatch_request(req, &config, &dd, &None).await;
+        assert_eq!(resp.id, serde_json::json!(4002));
+        assert!(resp.error.is_none());
+        assert!(resp.result.is_some());
     }
 }
