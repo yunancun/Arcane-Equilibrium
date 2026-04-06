@@ -847,30 +847,34 @@ async function loadRiskConfig() {
   h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
   h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
-  // Populate input fields — skip any field that the user is currently editing (has focus)
-  // 填充輸入框 — 跳過用戶正在編輯的字段（防止 15s 刷新覆蓋未儲存的修改）
-  // AH-06: if (document.activeElement !== inputEl) guard
+  // Populate input fields — use Python RM (gc) as source of truth for editable inputs.
+  // Rust snapshot (rStop/rGuard/rRisk) is used only for the read-only display metrics above.
+  // Reason: IPC push to Rust is async/fire-and-forget; using Rust values here causes inputs
+  // to revert immediately after save because the snapshot hasn't updated yet.
+  // 輸入框用 Python RM (gc) 作為真相源；Rust 快照僅用於上方只讀狀態顯示。
+  // 原因：IPC 推送為非同步 fire-and-forget，存完立刻讀 Rust 快照仍是舊值 → 輸入框被蓋回。
   function _setInput(id, val) {
     const el = $(id);
     if (el && document.activeElement !== el) el.value = val;
   }
-  _setInput('in-hard-stop', hardStop);
+  _setInput('in-hard-stop', gc.max_stop_loss_pct ?? 5);
   // Checkboxes are not text-editable — safe to always update
-  $('in-tp-enabled').checked = tpOn;
-  _setInput('in-take-profit', tpVal);
+  $('in-tp-enabled').checked = gc.tp_enabled === true;
+  _setInput('in-take-profit', gc.max_take_profit_pct ?? 20);
   toggleTPInputs();
-  _setInput('in-trailing', trailingVal ?? '');
-  _setInput('in-atr-mult', atrMult ?? '');
-  _setInput('in-time-stop', timeStop ?? 72);
-  _setInput('in-drawdown', maxDD);
-  _setInput('in-leverage', maxLev);
-  _setInput('in-daily-loss', gc.max_daily_loss_pct || 5);
-  _setInput('in-p1-risk', p1RiskPct.toFixed(1));
-  _setInput('in-single-pos', rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? 20);
-  _setInput('in-total-exp', rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? 100);
-  _setInput('in-same-dir', sameDirVal);
-  _setInput('in-cooldown-count', coolCount);
-  _setInput('in-cooldown-min', coolMin);
+  _setInput('in-trailing', gc.trailing_stop_pct ?? '');
+  _setInput('in-atr-mult', gc.atr_multiplier ?? '');
+  _setInput('in-time-stop', gc.max_holding_hours ?? 72);
+  _setInput('in-drawdown', gc.max_session_drawdown_pct ?? 15);
+  _setInput('in-leverage', gc.max_leverage ?? 20);
+  _setInput('in-daily-loss', gc.max_daily_loss_pct ?? 5);
+  const gcP1Pct = gc.p1_risk_pct != null ? (gc.p1_risk_pct < 1 ? gc.p1_risk_pct * 100 : gc.p1_risk_pct) : p1RiskPct;
+  _setInput('in-p1-risk', parseFloat(gcP1Pct).toFixed(1));
+  _setInput('in-single-pos', gc.max_single_position_pct ?? 20);
+  _setInput('in-total-exp', gc.max_total_exposure_pct ?? 100);
+  _setInput('in-same-dir', gc.max_same_direction_positions ?? 3);
+  _setInput('in-cooldown-count', gc.consecutive_loss_cooldown_count ?? 3);
+  _setInput('in-cooldown-min', gc.consecutive_loss_cooldown_minutes ?? 30);
 }
 
 async function loadAIContext() {
