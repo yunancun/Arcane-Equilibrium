@@ -149,8 +149,8 @@ P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 - [ ] WP-BB/W-2 公共 WS 硬編碼 Linear，缺 Spot/Inverse
 - [ ] WP-BB/S-1 無主動速率限制減速
 
-#### WP-FA — 功能規格（1 項，原 5，**80% 已完成**）
-- [ ] FA GAP-10 Provider pricing table（Phase 4）
+#### WP-FA — 功能規格（0 項，原 5，**100% 已規劃**）
+- ~~FA GAP-10 Provider pricing table~~ → 併入 Phase 4 子任務 **4-17**
 
 #### WP-I — 文檔衛生（35 項，原 42，低優先級批次處理）
 主要：SCRIPT_INDEX.md 不存在（P1）/ docs/audit 與 docs/audits 目錄衝突 /
@@ -163,12 +163,45 @@ P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 
 ## Phase 4 — Claude Teacher + LinUCB + News + DL-3（W13-15）
 
-- [ ] **CONF-D** 暴露 strategy confidence scaling 給 agent via IPC `update_strategy_params`（A/B/C 已在 Session 13 接通動態化，CONF-D 是暴露調參 surface）
-- [ ] 4-01~03：Claude-as-Teacher → ExperimentLedger + 效果追蹤
-- [ ] 4-04~06：LinUCB + Model Performance 監控 + Adversarial Validation
-- [ ] 4-07~10：新聞 Agent 接口（mock，數據源暫緩）
-- [ ] 4-11~14：DL-3 TimesFM/Chronos（異步 A/B，AUC<0.01 棄用）
-- [ ] 4-15~20：集成測試 + E2 + E4 + CC/E3 + AI-E Go/No-Go + E5
+> 22 子任務拆解見：`docs/references/2026-04-06--phase4_execution_plan_v2.md`
+> Q1/Q2/Q3/Q4 operator 已拍板 · Q3=hierarchical warm-start (sufficient-statistics 父→子攤分 + γ=0.5 + shadow compare + 自動 regret 回滾)
+> 原 CONF-D 已併入 4-15（IPC `update_strategy_params` 擴充承接 LinUCB confidence override）
+
+**Group 0 — Dashboard 骨架**
+- [ ] **4-00** Phase 4 Dashboard tab + 共用 `_dashboard_card.html` + `get_phase4_status` IPC stub (E1a · 1d)
+
+**Group 1 — Claude Teacher**
+- [ ] **4-01** Teacher directive Rust 接口 + ExperimentLedger 寫入 (E1 · 3d)
+- [ ] **4-02** Directive 解析 + GovernanceHub 風控過濾（最高風險，E3 強制介入）(E1 · 2d)
+- [ ] **4-03** directive_executions 效果追蹤 + Teacher Card (E1+E1a · 2d)
+
+**Group 2 — LinUCB**
+- [ ] **4-04** LinUCB Rust inference + arm space v1_15 + versioned state + feature_schema_hash fail-closed (E1 · 3d)
+- [ ] **4-05** LinUCB Python trainer + 收斂監控 (E1 · 2d)
+- [ ] **4-06** Model Performance rolling + LinUCB Card + arm dropdown + warm-start migration script + shadow compare + 自動 regret 回滾 (E1+E1a · 3d)
+
+**Group 3 — News**
+- [ ] **4-07** News provider abstract + CryptoPanic free + CoinTelegraph RSS + Google News RSS + mock (E1 · 3d)
+- [ ] **4-08** Headline dedup (SHA1[:16] + 24h) + severity (keyword × source) (E1 · 2d)
+- [ ] **4-09** Triple-route 消費（Guardian halt ≥0.8 / Regime feature / Learning context）(E1 · 2d)
+- [ ] **4-10** News Card + provider quota 健康監控 (E1a · 1d)
+
+**Group 4 — DL-3 Foundation Models**
+- [ ] **4-11** TimesFM/Chronos async wrapper + foundation_model_features 表 (E1 · 3d)
+- [ ] **4-12** DL-3 A/B 框架 vs Phase 3 Scorer baseline (E1 · 2d)
+- [ ] **4-13** DL-3 降級邏輯 + Go/No-Go 報告腳本（AI-E 簽核）(E1+AI-E · 1d)
+- [ ] **4-14** DL-3 Card + 決策展示 (E1a · 1d)
+
+**Group 5 — Cross-cutting**
+- [ ] **4-15** AI Budget tracker (Rust) + V010 (ai_budget_config + ai_usage_log + linucb_state versioning alter + linucb_state_archive + linucb_migrations) + IPC `update_ai_budget_config` / `get_ai_budget_status` + 三段降級 ($80/$95/$100) + CONF-D `update_strategy_params` 擴充 (E1 · 3d)
+- [ ] **4-16** Q1 GUI: Risk-tab AI Budget 區塊（綠/黃/紅進度條 + per-agent 配額 + reset month）(E1a · 2d)
+- [ ] **4-17** Provider pricing table 綁定 (Anthropic/OpenAI/Local · 原 FA GAP-10) (E1 · 1d)
+- [ ] **4-18** Decision_context 接線（claude_directive_id / linucb_arm_id / linucb_confidence_bound + news 欄位）(E1 · 1d)
+- [ ] **4-19** test_full_learning_loop 集成測試（3 個端到端 case）(E4 · 2d)
+
+**Group 6 — 週報 + 簽收**
+- [ ] **4-20** 週報 plain-English generator + operator approval flow + weekly_review_log (E1+E1a · 2d)
+- [ ] **4-21** E2 + E4 + E5 + AI-E + QA + PM 最終簽收 (2d)
 
 殘留延後（前 phase 帶過來，非阻塞）：
 - [ ] 2-11 actual training（需引擎運行收集 `trading.fills`）

@@ -46,6 +46,15 @@
 
 ## 三、當前系統狀態摘要
 
+### ★ Phase 4 準備就緒（2026-04-06）
+- **V009 已 apply**：`learning.linucb_state` 新建 + `decision_context_snapshots` 三個 Phase 4 連結欄位（claude_directive_id / linucb_arm_id / linucb_confidence_bound）。Phase 4 規格原列 8 表，7 表已存在於 V001-V007。
+- **22 子任務已拆解**：`docs/references/2026-04-06--phase4_execution_plan_v2.md`（4-00~4-21，43 person-days，5 路並行 wall-clock 15d）。TODO.md Phase 4 段已替換高階描述為可勾選清單。
+- **Q1 — AI Budget**：本地 $100/月（GUI 可調），平台硬上限 $150/月（手動 console 設）；per-agent Teacher $60 / Analyst $30 / Reserve $10；fail-closed 三段降級 $80→$95→$100；tracker 在 Rust 側（4-15）；GUI Risk-tab 新增區塊（4-16）；新表 ai_budget_config + ai_usage_log 走 V010。
+- **Q2 — News**：CryptoPanic free + CoinTelegraph RSS + Google News RSS + mock；NewsAPI 排除（違反原則 #14 商用成本）；dedup SHA1[:16]+24h；severity = keyword × source（不接 LLM，留 Phase 5）；triple-route Guardian/Regime/Learning。
+- **Q3 — LinUCB arms**：起步 v1_15 (5 strat × 3 regime)，GUI dropdown 預留 v2_25 / v3_375；**採用 hierarchical warm-start** 無 reset 遷移：父→子 sufficient statistics 攤分 (`A_c = λI + (γ/K)(A_p−λI)`, `b_c = (γ/K)b_p`, γ≈0.5) + shadow compare 1-2 週 + 自動 regret 回滾 + `feature_schema_hash` fail-closed。V010 加 `arm_space_version`/`parent_arm_id`/`inheritance_gamma`/`feature_schema_hash` + `linucb_state_archive` + `linucb_migrations` 表。
+- **Q4 — DoD**：A Sharpe ≥ +0.15 / C Scorer Tier-1 AUC ≥ 0.55 / D operator approve 週報 / E Teacher 執行率 ≥ 80% 且 7d 效果非負。Dashboard 4-00 起骨架，每組交付自身 Card，4-20 整合週報 + approval flow。
+- **最高風險子任務**：4-02 Directive Parser + GovernanceHub veto（一旦漏網 Teacher 可繞過 P0/P1 硬邊界），E3 安全審計強制介入。
+
 ```
 測試：1,075 Py + 856 Rust = 1,931 tests（全綠 · 0 failures）
 路由：131+（含 8 治理 + 5 Scout + 1 Kelly 端點）
