@@ -65,12 +65,14 @@ pub async fn run_context_writer(
 async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionContextMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { pending.clear(); return; }
+        None => {
+            pending.clear();
+            return;
+        }
     };
 
     for (_, ctx) in pending.drain() {
-        let ts = chrono::DateTime::from_timestamp_millis(ctx.ts_ms as i64)
-            .unwrap_or_default();
+        let ts = chrono::DateTime::from_timestamp_millis(ctx.ts_ms as i64).unwrap_or_default();
 
         let result = sqlx::query(
             "INSERT INTO trading.decision_context_snapshots \
@@ -81,7 +83,7 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
               indicators_snapshot, position_detail, decision_payload, \
               outcome_backfilled) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) \
-             ON CONFLICT (context_id, ts) DO NOTHING"
+             ON CONFLICT (context_id, ts) DO NOTHING",
         )
         .bind(ts)
         .bind(ctx.ts_ms as i64)

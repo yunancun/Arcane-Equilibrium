@@ -11,8 +11,8 @@
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::ConfigManager;
-use openclaw_engine::ipc_server::IpcServer;
 use openclaw_engine::event_consumer::SYMBOLS;
+use openclaw_engine::ipc_server::IpcServer;
 use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
@@ -52,7 +52,10 @@ async fn fetch_demo_balance() -> f64 {
     // 1. Explicit env var override takes precedence
     // 明確的環境變量覆蓋優先
     if let Some(env_bal) = paper_balance_from_env() {
-        info!(balance = format!("{:.2}", env_bal), "using OPENCLAW_PAPER_BALANCE env override / 使用環境變量覆蓋餘額");
+        info!(
+            balance = format!("{:.2}", env_bal),
+            "using OPENCLAW_PAPER_BALANCE env override / 使用環境變量覆蓋餘額"
+        );
         return env_bal;
     }
 
@@ -88,7 +91,10 @@ async fn fetch_demo_balance() -> f64 {
 
     // 3. Fallback default
     let default = 10_000.0;
-    info!(balance = format!("{:.2}", default), "using default paper balance / 使用預設紙盤餘額");
+    info!(
+        balance = format!("{:.2}", default),
+        "using default paper balance / 使用預設紙盤餘額"
+    );
     default
 }
 
@@ -218,7 +224,9 @@ fn run_replay_mode(args: ReplayArgs) {
     pipeline.orchestrator.register(Box::new(MaCrossover::new()));
     pipeline.orchestrator.register(Box::new(BbReversion::new()));
     pipeline.orchestrator.register(Box::new(BbBreakout::new()));
-    pipeline.orchestrator.register(Box::new(GridTrading::new_adaptive()));
+    pipeline
+        .orchestrator
+        .register(Box::new(GridTrading::new_adaptive()));
 
     // Grant paper authorization / 授予紙盤授權
     match pipeline.grant_paper_auth() {
@@ -344,12 +352,17 @@ async fn async_main(config: Arc<ConfigManager>) {
     // ------------------------------------------------------------------
     // IPC server data_dir for file-based state reads (R06-A)
     // IPC 服務器數據目錄，用於基於文件的狀態讀取
-    let ipc_data_dir = std::env::var("OPENCLAW_DATA_DIR")
-        .unwrap_or_else(|_| "/tmp/openclaw".into());
+    let ipc_data_dir =
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
     // Paper session command channel: IPC → event consumer
     // 紙盤 session 命令通道：IPC → 事件消費者
     let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-    let ipc_server = IpcServer::new(Arc::clone(&config), cancel.clone(), ipc_data_dir, Some(paper_cmd_tx));
+    let ipc_server = IpcServer::new(
+        Arc::clone(&config),
+        cancel.clone(),
+        ipc_data_dir,
+        Some(paper_cmd_tx),
+    );
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -363,7 +376,8 @@ async fn async_main(config: Arc<ConfigManager>) {
     let mut api_taker_fee: Option<f64> = None;
     let mut api_credentials: Option<(String, String)> = None;
     let mut shared_client: Option<Arc<BybitRestClient>> = None;
-    let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> = None;
+    let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> =
+        None;
     let cfg_snapshot = config.get();
     if let Ok(rest_client) = BybitRestClient::new(BybitEnvironment::Demo, None, None) {
         if rest_client.has_credentials() {
@@ -374,7 +388,8 @@ async fn async_main(config: Arc<ConfigManager>) {
 
             // R-05: Load instrument info cache (lot sizes, tick sizes, min notional)
             // R-05：加載合約信息緩存（步長、tick 精度、最小名義值）
-            let instrument_cache = Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
+            let instrument_cache =
+                Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
             match instrument_cache.refresh(&*client_arc, "linear").await {
                 Ok(count) => {
                     shared_instruments = Some(Arc::clone(&instrument_cache));
@@ -389,8 +404,13 @@ async fn async_main(config: Arc<ConfigManager>) {
                 use openclaw_engine::platform_client::PlatformClient;
                 let platform = PlatformClient::new(Arc::clone(&client_arc));
                 match platform.set_dcp(cfg_snapshot.dcp_time_window).await {
-                    Ok(()) => info!(window = cfg_snapshot.dcp_time_window, "DCP enabled / DCP 已啟用"),
-                    Err(e) => warn!(error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗（非致命）"),
+                    Ok(()) => info!(
+                        window = cfg_snapshot.dcp_time_window,
+                        "DCP enabled / DCP 已啟用"
+                    ),
+                    Err(e) => {
+                        warn!(error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗（非致命）")
+                    }
                 }
             }
 
@@ -404,16 +424,28 @@ async fn async_main(config: Arc<ConfigManager>) {
                     Ok(positions) => {
                         for pos in &positions {
                             if pos.size > 0.0 {
-                                match pos_mgr.set_auto_add_margin(
-                                    OrderCategory::Linear, &pos.symbol, 1, None,
-                                ).await {
-                                    Ok(()) => info!(symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用"),
-                                    Err(e) => warn!(symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗"),
+                                match pos_mgr
+                                    .set_auto_add_margin(
+                                        OrderCategory::Linear,
+                                        &pos.symbol,
+                                        1,
+                                        None,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        info!(symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用")
+                                    }
+                                    Err(e) => {
+                                        warn!(symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗")
+                                    }
                                 }
                             }
                         }
                     }
-                    Err(e) => warn!(error = %e, "failed to query positions for auto-margin / 查詢倉位失敗"),
+                    Err(e) => {
+                        warn!(error = %e, "failed to query positions for auto-margin / 查詢倉位失敗")
+                    }
                 }
             }
 
@@ -424,15 +456,25 @@ async fn async_main(config: Arc<ConfigManager>) {
                 Ok(count) => {
                     let rate = acct.taker_fee("BTCUSDT");
                     api_taker_fee = Some(rate);
-                    info!(symbols = count, taker_rate = format!("{:.5}", rate), "fee rates loaded / 費率已加載");
+                    info!(
+                        symbols = count,
+                        taker_rate = format!("{:.5}", rate),
+                        "fee rates loaded / 費率已加載"
+                    );
                 }
-                Err(e) => warn!(error = %e, "fee rate fetch failed, using defaults / 費率獲取失敗，使用默認值"),
+                Err(e) => {
+                    warn!(error = %e, "fee rate fetch failed, using defaults / 費率獲取失敗，使用默認值")
+                }
             }
         } else {
-            info!("no Bybit credentials — skipping DCP/margin/fee setup / 無 API 憑證，跳過 API 設定");
+            info!(
+                "no Bybit credentials — skipping DCP/margin/fee setup / 無 API 憑證，跳過 API 設定"
+            );
         }
     } else {
-        info!("Bybit client init failed — skipping API setup / Bybit 客戶端初始化失敗，跳過 API 設定");
+        info!(
+            "Bybit client init failed — skipping API setup / Bybit 客戶端初始化失敗，跳過 API 設定"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -473,7 +515,10 @@ async fn async_main(config: Arc<ConfigManager>) {
                 topics.push(topic);
             }
         }
-        info!(topics_per_symbol = 10, "extended WS subscriptions / 擴展 WS 訂閱");
+        info!(
+            topics_per_symbol = 10,
+            "extended WS subscriptions / 擴展 WS 訂閱"
+        );
         topics
     } else {
         let mut topics = Vec::new();
@@ -493,18 +538,21 @@ async fn async_main(config: Arc<ConfigManager>) {
         tokio::spawn(async move {
             let mut supervisor_attempt: u32 = 0;
             loop {
-                if ws_cancel.is_cancelled() { break; }
+                if ws_cancel.is_cancelled() {
+                    break;
+                }
 
-                let mut ws_client = WsClient::new(
-                    Arc::clone(&ws_config), event_tx.clone(), ws_cancel.clone(),
-                );
+                let mut ws_client =
+                    WsClient::new(Arc::clone(&ws_config), event_tx.clone(), ws_cancel.clone());
                 for topic in &ws_topics {
                     ws_client.subscribe(topic.clone());
                 }
                 ws_client.run().await;
 
                 // If cancelled, exit cleanly / 如果已取消，正常退出
-                if ws_cancel.is_cancelled() { break; }
+                if ws_cancel.is_cancelled() {
+                    break;
+                }
 
                 // Unexpected exit — supervisor restart with backoff
                 // 意外退出 — 監管器退避重啟
@@ -538,8 +586,7 @@ async fn async_main(config: Arc<ConfigManager>) {
 
         let (priv_tx, priv_rx) = mpsc::channel(512);
         // EXT-1: Channel for forwarding exchange events to event consumer
-        let (exchange_event_tx, exchange_event_rx) =
-            mpsc::unbounded_channel::<ExchangeEvent>();
+        let (exchange_event_tx, exchange_event_rx) = mpsc::unbounded_channel::<ExchangeEvent>();
 
         // Shared state updated by callbacks / 回調更新的共享狀態
         let bybit_balance: Arc<RwLock<Option<f64>>> = Arc::new(RwLock::new(None));
@@ -642,7 +689,9 @@ async fn async_main(config: Arc<ConfigManager>) {
             tokio::spawn(async move {
                 let mut supervisor_attempt: u32 = 0;
                 loop {
-                    if sv_cancel.is_cancelled() { break; }
+                    if sv_cancel.is_cancelled() {
+                        break;
+                    }
 
                     let priv_ws = BybitPrivateWs::new(
                         api_key_owned.clone(),
@@ -653,7 +702,9 @@ async fn async_main(config: Arc<ConfigManager>) {
                     );
                     priv_ws.run().await;
 
-                    if sv_cancel.is_cancelled() { break; }
+                    if sv_cancel.is_cancelled() {
+                        break;
+                    }
 
                     supervisor_attempt = supervisor_attempt.saturating_add(1);
                     let delay_ms = std::cmp::min(
@@ -674,7 +725,13 @@ async fn async_main(config: Arc<ConfigManager>) {
         };
 
         info!("Private WS + ExecutionListener started / 私有 WS + 執行監聯器已啟動");
-        Some((priv_ws_handle, listener_handle, bybit_balance, api_pnl, exchange_event_rx))
+        Some((
+            priv_ws_handle,
+            listener_handle,
+            bybit_balance,
+            api_pnl,
+            exchange_event_rx,
+        ))
     } else {
         info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
         None
@@ -686,9 +743,12 @@ async fn async_main(config: Arc<ConfigManager>) {
     // Keep WS/listener handles for shutdown, move exchange_event_rx out
     let (shared_bybit_balance, shared_api_pnl, shared_exchange_event_rx, _priv_handles) = {
         match _private_ws_handle {
-            Some((ws_h, listener_h, bal, pnl, exch_rx)) => {
-                (Some(Arc::clone(&bal)), Some(Arc::clone(&pnl)), Some(exch_rx), Some((ws_h, listener_h)))
-            }
+            Some((ws_h, listener_h, bal, pnl, exch_rx)) => (
+                Some(Arc::clone(&bal)),
+                Some(Arc::clone(&pnl)),
+                Some(exch_rx),
+                Some((ws_h, listener_h)),
+            ),
             None => (None, None, None, None),
         }
     };
@@ -703,9 +763,8 @@ async fn async_main(config: Arc<ConfigManager>) {
     // Phase 1：資料��連接池 + 寫入器任務
     // ------------------------------------------------------------------
     let cfg_snap_db = config.get();
-    let db_pool = Arc::new(
-        openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await,
-    );
+    let db_pool =
+        Arc::new(openclaw_engine::database::pool::DbPool::connect(&cfg_snap_db.database).await);
     let (market_tx, market_rx) = if db_pool.is_available() {
         let (tx, rx) = tokio::sync::mpsc::channel(4096);
         (Some(tx), Some(rx))
@@ -734,9 +793,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         let fw_pool = Arc::clone(&db_pool);
         let fw_config = Arc::clone(&config);
         let fw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::feature_writer::run_feature_writer(
-            frx, fw_pool, fw_config, fw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::feature_writer::run_feature_writer(
+                frx, fw_pool, fw_config, fw_cancel,
+            ),
+        );
     }
 
     // Phase 2a: Trading lifecycle channel + writer task
@@ -751,9 +812,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         let tw_pool = Arc::clone(&db_pool);
         let tw_config = Arc::clone(&config);
         let tw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::trading_writer::run_trading_writer(
-            trx, tw_pool, tw_config, tw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::trading_writer::run_trading_writer(
+                trx, tw_pool, tw_config, tw_cancel,
+            ),
+        );
     }
 
     // Phase 2a: Decision context channel + writer task
@@ -767,9 +830,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         let cw_pool = Arc::clone(&db_pool);
         let cw_config = Arc::clone(&config);
         let cw_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::context_writer::run_context_writer(
-            crx, cw_pool, cw_config, cw_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::context_writer::run_context_writer(
+                crx, cw_pool, cw_config, cw_cancel,
+            ),
+        );
     }
 
     // F-4 fix: Spawn REST pollers for funding/OI/LSR (requires API client + market channel)
@@ -790,11 +855,15 @@ async fn async_main(config: Arc<ConfigManager>) {
         let qm_pool = Arc::clone(&db_pool);
         let qm_tick = Arc::clone(&shared_last_tick_ms);
         let qm_symbols: Vec<String> = openclaw_engine::event_consumer::SYMBOLS
-            .iter().map(|s| s.to_string()).collect();
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let qm_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::quality_writer::run_quality_monitor(
-            qm_pool, qm_tick, qm_symbols, qm_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::quality_writer::run_quality_monitor(
+                qm_pool, qm_tick, qm_symbols, qm_cancel,
+            ),
+        );
     }
 
     // G3 1-13/14: Spawn drift detector (PSI + ADWIN)
@@ -803,9 +872,11 @@ async fn async_main(config: Arc<ConfigManager>) {
         let dd_pool = Arc::clone(&db_pool);
         let dd_config = Arc::clone(&config);
         let dd_cancel = cancel.clone();
-        tokio::spawn(openclaw_engine::database::drift_detector::run_drift_detector(
-            dd_pool, dd_config, dd_cancel,
-        ));
+        tokio::spawn(
+            openclaw_engine::database::drift_detector::run_drift_detector(
+                dd_pool, dd_config, dd_cancel,
+            ),
+        );
     }
 
     // G3 1-16: Feature version init — insert v1.0 row on startup if PG available
@@ -815,7 +886,7 @@ async fn async_main(config: Arc<ConfigManager>) {
             let _ = sqlx::query(
                 "INSERT INTO features.versions (version, description, is_active) \
                  VALUES ('v1.0', 'Phase 1 initial: 34-dim IndicatorSnapshot', true) \
-                 ON CONFLICT (version) DO NOTHING"
+                 ON CONFLICT (version) DO NOTHING",
             )
             .execute(pg)
             .await;
@@ -824,7 +895,7 @@ async fn async_main(config: Arc<ConfigManager>) {
     }
 
     let event_handle = {
-        use openclaw_engine::event_consumer::{EventConsumerDeps, run_event_consumer};
+        use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
         let deps = EventConsumerDeps {
             event_rx,
             config: Arc::clone(&config),
@@ -881,7 +952,10 @@ async fn async_main(config: Arc<ConfigManager>) {
     let socket_path = &config.get().ipc_socket_path;
     if std::path::Path::new(socket_path).exists() {
         let _ = tokio::fs::remove_file(socket_path).await;
-        info!(path = socket_path, "socket file cleaned up / 套接字文件已清理");
+        info!(
+            path = socket_path,
+            "socket file cleaned up / 套接字文件已清理"
+        );
     }
 
     info!(version = VERSION, "engine stopped / 引擎已停止");

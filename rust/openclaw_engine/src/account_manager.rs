@@ -354,10 +354,7 @@ impl AccountManager {
             "setHedgingMode": hedging,
         });
 
-        info!(
-            hedging = hedging,
-            "setting hedging mode / 設置對沖模式"
-        );
+        info!(hedging = hedging, "setting hedging mode / 設置對沖模式");
 
         client
             .post_checked("/v5/account/set-hedging-mode", &body)
@@ -399,23 +396,14 @@ impl AccountManager {
     /// 還款保證金借幣。
     ///
     /// POST /v5/account/repay
-    pub async fn repay(
-        &self,
-        client: &BybitRestClient,
-        coin: &str,
-    ) -> BybitResult<()> {
+    pub async fn repay(&self, client: &BybitRestClient, coin: &str) -> BybitResult<()> {
         let body = serde_json::json!({
             "coin": coin,
         });
 
-        info!(
-            coin = coin,
-            "repaying margin / 還款保證金"
-        );
+        info!(coin = coin, "repaying margin / 還款保證金");
 
-        client
-            .post_checked("/v5/account/repay", &body)
-            .await?;
+        client.post_checked("/v5/account/repay", &body).await?;
         Ok(())
     }
 }
@@ -547,10 +535,7 @@ fn parse_account_info(result: &serde_json::Value) -> BybitResult<AccountInfo> {
             .get("unifiedMarginStatus")
             .and_then(|v| v.as_i64())
             .unwrap_or(0) as i32,
-        smp_group: result
-            .get("smpGroup")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32,
+        smp_group: result.get("smpGroup").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
         is_master_trader: result
             .get("isMasterTrader")
             .and_then(|v| v.as_bool())

@@ -33,8 +33,9 @@ pub async fn run_market_writer(
     // F-6 fix: JSONL fallback writer for when PG fails 3+ times
     // F-6 修復：PG 失敗 3+ 次時的 JSONL 回退寫入器
     let fallback_dir = PathBuf::from(
-        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into())
-    ).join("fallback");
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into()),
+    )
+    .join("fallback");
     let mut fallback = FallbackWriter::new(&fallback_dir);
     let mut in_fallback_mode = false;
 
@@ -88,10 +89,18 @@ pub async fn run_market_writer(
     if pool.is_available() && !in_fallback_mode {
         flush_all(&pool, &mut kline_buf, &mut ticker_buf, &mut other_buf).await;
     } else {
-        write_to_fallback(&mut fallback, &mut kline_buf, &mut ticker_buf, &mut other_buf);
+        write_to_fallback(
+            &mut fallback,
+            &mut kline_buf,
+            &mut ticker_buf,
+            &mut other_buf,
+        );
     }
     if fallback.total_lines() > 0 {
-        info!(lines = fallback.total_lines(), "fallback lines written / 回退行已寫入");
+        info!(
+            lines = fallback.total_lines(),
+            "fallback lines written / 回退行已寫入"
+        );
     }
     info!("market_writer stopped / 市場數據寫入器已停止");
 }
@@ -135,7 +144,10 @@ async fn flush_all(
 async fn flush_klines(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { buf.clear(); return; }
+        None => {
+            buf.clear();
+            return;
+        }
     };
 
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
@@ -143,7 +155,12 @@ async fn flush_klines(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     );
 
     qb.push_values(buf.iter(), |mut b, msg| {
-        if let MarketDataMsg::KlineClose { symbol, timeframe, bar } = msg {
+        if let MarketDataMsg::KlineClose {
+            symbol,
+            timeframe,
+            bar,
+        } = msg
+        {
             let ts = chrono::DateTime::from_timestamp_millis(bar.open_time_ms as i64)
                 .unwrap_or_default();
             b.push_bind(ts);
@@ -165,7 +182,11 @@ async fn flush_klines(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     match qb.build().execute(pg).await {
         Ok(r) => {
             pool.record_success();
-            debug!(rows = r.rows_affected(), klines = buf.len(), "klines flushed / K 線已刷新");
+            debug!(
+                rows = r.rows_affected(),
+                klines = buf.len(),
+                "klines flushed / K 線已刷新"
+            );
         }
         Err(e) => {
             let should_fallback = pool.record_failure();
@@ -179,7 +200,10 @@ async fn flush_klines(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
 async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { buf.clear(); return; }
+        None => {
+            buf.clear();
+            return;
+        }
     };
 
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
@@ -188,12 +212,22 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
 
     qb.push_values(buf.iter(), |mut b, msg| {
         if let MarketDataMsg::TickerSnapshot {
-            ts_ms, symbol, last_price, mark_price, index_price,
-            best_bid, best_ask, bid_size, ask_size,
-            volume_24h, turnover_24h, spread_bps, open_interest,
-        } = msg {
-            let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64)
-                .unwrap_or_default();
+            ts_ms,
+            symbol,
+            last_price,
+            mark_price,
+            index_price,
+            best_bid,
+            best_ask,
+            bid_size,
+            ask_size,
+            volume_24h,
+            turnover_24h,
+            spread_bps,
+            open_interest,
+        } = msg
+        {
+            let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default();
             b.push_bind(ts);
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64(*last_price).map(|v| v as f32));
@@ -214,7 +248,11 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     match qb.build().execute(pg).await {
         Ok(r) => {
             pool.record_success();
-            debug!(rows = r.rows_affected(), tickers = buf.len(), "tickers flushed / 行情已刷新");
+            debug!(
+                rows = r.rows_affected(),
+                tickers = buf.len(),
+                "tickers flushed / 行情已刷新"
+            );
         }
         Err(e) => {
             let should_fallback = pool.record_failure();
@@ -229,7 +267,10 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
 async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { buf.clear(); return; }
+        None => {
+            buf.clear();
+            return;
+        }
     };
 
     // Group by type for batch efficiency / 按類型分組以提高批量效率
@@ -256,14 +297,30 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
         }
     }
 
-    if !ob.is_empty() { flush_ob_snapshots(pg, pool, &ob).await; }
-    if !trades.is_empty() { flush_trade_agg(pg, pool, &trades).await; }
-    if !liq.is_empty() { flush_liquidations(pg, pool, &liq).await; }
-    if !funding.is_empty() { flush_funding(pg, pool, &funding).await; }
-    if !oi.is_empty() { flush_oi(pg, pool, &oi).await; }
-    if !lsr.is_empty() { flush_lsr(pg, pool, &lsr).await; }
-    if !regime_snap.is_empty() { flush_regime_snapshots(pg, pool, &regime_snap).await; }
-    if !regime_trans.is_empty() { flush_regime_transitions(pg, pool, &regime_trans).await; }
+    if !ob.is_empty() {
+        flush_ob_snapshots(pg, pool, &ob).await;
+    }
+    if !trades.is_empty() {
+        flush_trade_agg(pg, pool, &trades).await;
+    }
+    if !liq.is_empty() {
+        flush_liquidations(pg, pool, &liq).await;
+    }
+    if !funding.is_empty() {
+        flush_funding(pg, pool, &funding).await;
+    }
+    if !oi.is_empty() {
+        flush_oi(pg, pool, &oi).await;
+    }
+    if !lsr.is_empty() {
+        flush_lsr(pg, pool, &lsr).await;
+    }
+    if !regime_snap.is_empty() {
+        flush_regime_snapshots(pg, pool, &regime_snap).await;
+    }
+    if !regime_trans.is_empty() {
+        flush_regime_transitions(pg, pool, &regime_trans).await;
+    }
 }
 
 /// Helper: execute a QueryBuilder and record success/failure.
@@ -278,7 +335,12 @@ async fn exec_batch(
     match qb.build().execute(pg).await {
         Ok(r) => {
             pool.record_success();
-            debug!(table = table, rows = r.rows_affected(), count = count, "flushed / 已刷新");
+            debug!(
+                table = table,
+                rows = r.rows_affected(),
+                count = count,
+                "flushed / 已刷新"
+            );
         }
         Err(e) => {
             let _ = pool.record_failure();
@@ -294,7 +356,17 @@ async fn flush_ob_snapshots(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataM
         "INSERT INTO market.ob_snapshots (ts, symbol, imbalance_ratio, weighted_mid, spread_bps, bid_depth_5, ask_depth_5, depth_ratio) "
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::ObSnapshot { ts_ms, symbol, imbalance_ratio, weighted_mid, spread_bps, bid_depth_5, ask_depth_5, depth_ratio } = msg {
+        if let MarketDataMsg::ObSnapshot {
+            ts_ms,
+            symbol,
+            imbalance_ratio,
+            weighted_mid,
+            spread_bps,
+            bid_depth_5,
+            ask_depth_5,
+            depth_ratio,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64(*imbalance_ratio).map(|v| v as f32));
@@ -314,7 +386,19 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
         "INSERT INTO market.trade_agg_1m (ts, symbol, buy_volume, sell_volume, buy_count, sell_count, large_buy_count, large_sell_count, vwap, max_single_qty) "
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::TradeAgg1m { ts_ms, symbol, buy_volume, sell_volume, buy_count, sell_count, large_buy_count, large_sell_count, vwap, max_single_qty } = msg {
+        if let MarketDataMsg::TradeAgg1m {
+            ts_ms,
+            symbol,
+            buy_volume,
+            sell_volume,
+            buy_count,
+            sell_count,
+            large_buy_count,
+            large_sell_count,
+            vwap,
+            max_single_qty,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64(*buy_volume).map(|v| v as f32));
@@ -334,11 +418,17 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
 // ── 1-08: funding + OI + LSR + liquidations ──
 
 async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
-    let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "INSERT INTO market.liquidations (ts, symbol, side, qty, price) "
-    );
+    let mut qb: QueryBuilder<sqlx::Postgres> =
+        QueryBuilder::new("INSERT INTO market.liquidations (ts, symbol, side, qty, price) ");
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::Liquidation { ts_ms, symbol, side, qty, price } = msg {
+        if let MarketDataMsg::Liquidation {
+            ts_ms,
+            symbol,
+            side,
+            qty,
+            price,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(side.as_str());
@@ -352,10 +442,16 @@ async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataM
 
 async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "INSERT INTO market.funding_rates (ts, symbol, funding_rate, funding_rate_daily) "
+        "INSERT INTO market.funding_rates (ts, symbol, funding_rate, funding_rate_daily) ",
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::FundingRate { ts_ms, symbol, funding_rate, funding_rate_daily } = msg {
+        if let MarketDataMsg::FundingRate {
+            ts_ms,
+            symbol,
+            funding_rate,
+            funding_rate_daily,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64_or_zero(*funding_rate) as f32);
@@ -368,10 +464,16 @@ async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) 
 
 async fn flush_oi(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "INSERT INTO market.open_interest (ts, symbol, open_interest, oi_value) "
+        "INSERT INTO market.open_interest (ts, symbol, open_interest, oi_value) ",
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::OpenInterest { ts_ms, symbol, open_interest, oi_value } = msg {
+        if let MarketDataMsg::OpenInterest {
+            ts_ms,
+            symbol,
+            open_interest,
+            oi_value,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64_or_zero(*open_interest) as f32);
@@ -384,10 +486,17 @@ async fn flush_oi(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
 
 async fn flush_lsr(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "INSERT INTO market.long_short_ratio (ts, symbol, buy_ratio, sell_ratio, ratio) "
+        "INSERT INTO market.long_short_ratio (ts, symbol, buy_ratio, sell_ratio, ratio) ",
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::LongShortRatio { ts_ms, symbol, buy_ratio, sell_ratio, ratio } = msg {
+        if let MarketDataMsg::LongShortRatio {
+            ts_ms,
+            symbol,
+            buy_ratio,
+            sell_ratio,
+            ratio,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(sanitize_f64(*buy_ratio).map(|v| v as f32));
@@ -403,10 +512,17 @@ async fn flush_lsr(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
 
 async fn flush_regime_snapshots(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-        "INSERT INTO market.regime_snapshots (ts, symbol, timeframe, regime, confidence) "
+        "INSERT INTO market.regime_snapshots (ts, symbol, timeframe, regime, confidence) ",
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::RegimeSnapshot { ts_ms, symbol, timeframe, regime, confidence } = msg {
+        if let MarketDataMsg::RegimeSnapshot {
+            ts_ms,
+            symbol,
+            timeframe,
+            regime,
+            confidence,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(timeframe.as_str());
@@ -423,7 +539,15 @@ async fn flush_regime_transitions(pg: &sqlx::PgPool, pool: &DbPool, buf: &[Marke
         "INSERT INTO market.regime_transitions (ts, symbol, timeframe, from_regime, to_regime, trigger_reason) "
     );
     qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::RegimeTransition { ts_ms, symbol, timeframe, from_regime, to_regime, trigger_reason } = msg {
+        if let MarketDataMsg::RegimeTransition {
+            ts_ms,
+            symbol,
+            timeframe,
+            from_regime,
+            to_regime,
+            trigger_reason,
+        } = msg
+        {
             b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
             b.push_bind(symbol.as_str());
             b.push_bind(timeframe.as_str());
@@ -483,7 +607,10 @@ mod tests {
         let kline = make_kline_msg("BTCUSDT", "1m");
         let ticker = make_ticker_msg("BTCUSDT");
         let funding = MarketDataMsg::FundingRate {
-            ts_ms: 0, symbol: "BTC".into(), funding_rate: 0.01, funding_rate_daily: 0.03,
+            ts_ms: 0,
+            symbol: "BTC".into(),
+            funding_rate: 0.01,
+            funding_rate_daily: 0.03,
         };
         assert!(matches!(kline, MarketDataMsg::KlineClose { .. }));
         assert!(matches!(ticker, MarketDataMsg::TickerSnapshot { .. }));
@@ -501,7 +628,12 @@ mod tests {
             make_kline_msg("BTCUSDT", "1m"),
             make_ticker_msg("ETHUSDT"),
             make_kline_msg("SOLUSDT", "5m"),
-            MarketDataMsg::FundingRate { ts_ms: 0, symbol: "X".into(), funding_rate: 0.0, funding_rate_daily: 0.0 },
+            MarketDataMsg::FundingRate {
+                ts_ms: 0,
+                symbol: "X".into(),
+                funding_rate: 0.0,
+                funding_rate_daily: 0.0,
+            },
         ];
 
         for m in msgs {

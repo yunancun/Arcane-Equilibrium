@@ -17,9 +17,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info};
 
 /// Polling intervals (seconds) / 輪詢間隔（秒）
-const FUNDING_INTERVAL_SECS: u64 = 900;  // 15 min
-const OI_INTERVAL_SECS: u64 = 300;       // 5 min
-const LSR_INTERVAL_SECS: u64 = 900;      // 15 min
+const FUNDING_INTERVAL_SECS: u64 = 900; // 15 min
+const OI_INTERVAL_SECS: u64 = 300; // 5 min
+const LSR_INTERVAL_SECS: u64 = 900; // 15 min
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -45,7 +45,8 @@ pub fn spawn_rest_pollers(
         let syms = symbols_owned.clone();
         let c = cancel.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(FUNDING_INTERVAL_SECS));
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(FUNDING_INTERVAL_SECS));
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -80,7 +81,8 @@ pub fn spawn_rest_pollers(
         let syms = symbols_owned.clone();
         let c = cancel.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(OI_INTERVAL_SECS));
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(OI_INTERVAL_SECS));
             interval.tick().await;
             loop {
                 tokio::select! {
@@ -115,7 +117,8 @@ pub fn spawn_rest_pollers(
         let syms = symbols_owned;
         let c = cancel;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(LSR_INTERVAL_SECS));
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(LSR_INTERVAL_SECS));
             interval.tick().await;
             loop {
                 tokio::select! {

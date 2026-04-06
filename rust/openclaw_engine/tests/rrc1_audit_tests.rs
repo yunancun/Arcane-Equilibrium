@@ -38,24 +38,42 @@ fn test_snapshot_includes_risk_fields() {
 
     let snap = pipeline.snapshot();
     // stop_config should be Some with default values / 止損配置應為 Some
-    assert!(snap.stop_config.is_some(), "stop_config should be populated");
+    assert!(
+        snap.stop_config.is_some(),
+        "stop_config should be populated"
+    );
     let sc = snap.stop_config.unwrap();
     assert!(sc.hard_stop_pct > 0.0, "hard_stop_pct should be positive");
 
     // guardian_config should be Some / 守護者配置應為 Some
-    assert!(snap.guardian_config.is_some(), "guardian_config should be populated");
+    assert!(
+        snap.guardian_config.is_some(),
+        "guardian_config should be populated"
+    );
 
     // risk_manager_config should be Some / 風控管理器配置應為 Some
-    assert!(snap.risk_manager_config.is_some(), "risk_manager_config should be populated");
+    assert!(
+        snap.risk_manager_config.is_some(),
+        "risk_manager_config should be populated"
+    );
     let rc = snap.risk_manager_config.unwrap();
-    assert!(rc.max_stop_loss_pct > 0.0, "risk config should have real values");
+    assert!(
+        rc.max_stop_loss_pct > 0.0,
+        "risk config should have real values"
+    );
 
     // session state defaults / 會話狀態默認值
-    assert!(!snap.session_halted, "session should not be halted initially");
+    assert!(
+        !snap.session_halted,
+        "session should not be halted initially"
+    );
     assert_eq!(snap.session_drawdown_pct, 0.0, "no drawdown initially");
 
     // h0_gate_stats should be Some / H0 門控統計應為 Some
-    assert!(snap.h0_gate_stats.is_some(), "h0_gate_stats should be populated");
+    assert!(
+        snap.h0_gate_stats.is_some(),
+        "h0_gate_stats should be populated"
+    );
 }
 
 /// T3: session_halted is cleared by Resume (via direct field access).

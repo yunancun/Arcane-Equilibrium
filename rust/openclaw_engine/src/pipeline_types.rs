@@ -6,10 +6,10 @@
 //! MODULE_NOTE (中): IPC 消費者、灰度記錄和狀態報告使用的數據類型。
 //!   從 tick_pipeline.rs 分離以遵守 1200 行文件大小限制。
 
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 use openclaw_core::indicators::IndicatorSnapshot;
 use openclaw_core::signals::Signal;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::tick_pipeline::TickStats;
 

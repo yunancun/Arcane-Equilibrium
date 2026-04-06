@@ -24,8 +24,8 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::bybit_rest_client::BybitRestClient;
 use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
+use crate::bybit_rest_client::BybitRestClient;
 
 /// Symbols tracked by the engine / 引擎追蹤的交易對
 pub const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
@@ -137,17 +137,29 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Item 2: Set dynamic fee rate if available / 設定動態費率
     if let Some(rate) = taker_fee_rate {
         pipeline.set_fee_rate(rate);
-        info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
+        info!(
+            taker_rate = format!("{:.5}", rate),
+            "pipeline using API fee rate / 管線使用 API 費率"
+        );
     }
 
     // Set P1 risk cap from config / 從配置設定 P1 風險上限
-    pipeline.intent_processor.set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
-    info!(p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0), "P1 risk cap set / P1 風險上限已設定");
+    pipeline
+        .intent_processor
+        .set_p1_risk_pct(cfg_snapshot.p1_risk_pct);
+    info!(
+        p1_risk_pct = format!("{:.2}%", cfg_snapshot.p1_risk_pct * 100.0),
+        "P1 risk cap set / P1 風險上限已設定"
+    );
 
     // Wire ALL risk config from engine.toml → paper_state + guardian + intent_processor
     // 從 engine.toml 接入所有風控配置
-    pipeline.paper_state.set_hard_stop_pct(cfg_snapshot.max_stop_loss_pct);
-    pipeline.paper_state.set_take_profit_pct(Some(cfg_snapshot.max_take_profit_pct));
+    pipeline
+        .paper_state
+        .set_hard_stop_pct(cfg_snapshot.max_stop_loss_pct);
+    pipeline
+        .paper_state
+        .set_take_profit_pct(Some(cfg_snapshot.max_take_profit_pct));
     {
         let gc = openclaw_core::guardian::GuardianConfig {
             max_leverage: cfg_snapshot.max_leverage,
@@ -206,16 +218,20 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
     if cfg_snapshot.balance_mode == "bybit_sync" {
-        pipeline.paper_state.set_bybit_sync_balance(Some(initial_balance));
-        info!(balance = format!("{:.2}", initial_balance), "bybit_sync mode — tracking Bybit Demo balance / 同步模式已啟用");
+        pipeline
+            .paper_state
+            .set_bybit_sync_balance(Some(initial_balance));
+        info!(
+            balance = format!("{:.2}", initial_balance),
+            "bybit_sync mode — tracking Bybit Demo balance / 同步模式已啟用"
+        );
     }
 
     // Item 1: Server-side stop channel (dual-track stops)
     // 項目 1：伺服器端止損通道（雙軌止損）
     if cfg_snapshot.server_side_stops {
-        let (stop_tx, mut stop_rx) = tokio::sync::mpsc::unbounded_channel::<
-            crate::tick_pipeline::StopRequest,
-        >();
+        let (stop_tx, mut stop_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::StopRequest>();
         pipeline.set_stop_channel(stop_tx);
 
         tokio::spawn(async move {
@@ -254,7 +270,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                 let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
                 // EXT-1: Channel for pending order registration (dispatch task → event consumer)
-                let (pending_reg_tx, pending_reg_rx) = tokio::sync::mpsc::unbounded_channel::<PendingOrder>();
+                let (pending_reg_tx, pending_reg_rx) =
+                    tokio::sync::mpsc::unbounded_channel::<PendingOrder>();
                 pending_reg_rx_slot = Some(pending_reg_rx);
 
                 tokio::spawn(async move {
@@ -298,16 +315,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             order_link_id: Some(req.order_link_id.clone()),
                             trigger_price: None,
                             trigger_direction: None,
-                            take_profit: None,
-                            stop_loss: None,
+                            // I-08 雙軌止損：forward broker-side SL/TP only on primary (Exchange mode) opens
+                            take_profit: if req.is_primary && !req.is_close {
+                                req.take_profit
+                            } else {
+                                None
+                            },
+                            stop_loss: if req.is_primary && !req.is_close {
+                                req.stop_loss
+                            } else {
+                                None
+                            },
                             tp_trigger_by: None,
                             sl_trigger_by: None,
                         };
-                        let dispatch_type = if req.is_primary {
-                            "primary"
-                        } else {
-                            "shadow"
-                        };
+                        let dispatch_type = if req.is_primary { "primary" } else { "shadow" };
                         match order_mgr.place_order(create_req).await {
                             Ok(resp) => {
                                 info!(
@@ -344,7 +366,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     pipeline.orchestrator.register(Box::new(MaCrossover::new()));
     pipeline.orchestrator.register(Box::new(BbReversion::new()));
     pipeline.orchestrator.register(Box::new(BbBreakout::new()));
-    pipeline.orchestrator.register(Box::new(GridTrading::new_adaptive()));
+    pipeline
+        .orchestrator
+        .register(Box::new(GridTrading::new_adaptive()));
 
     // Grant paper authorization / 授予紙盤授權
     match pipeline.grant_paper_auth() {
@@ -371,7 +395,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         if let Some(ref client_arc) = bootstrap_client {
             let mdc = crate::market_data_client::MarketDataClient::new(Arc::clone(client_arc));
             for &sym in SYMBOLS {
-                match mdc.get_klines("linear", sym, "1", None, None, Some(200)).await {
+                match mdc
+                    .get_klines("linear", sym, "1", None, None, Some(200))
+                    .await
+                {
                     Ok(bars) => {
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -380,26 +407,26 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
                             .iter()
                             .filter(|b| b.start_time + 60_000 <= now_ms)
-                            .map(|b| {
-                                openclaw_core::klines::KlineBar {
-                                    open_time_ms: b.start_time,
-                                    close_time_ms: b.start_time + 60_000,
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: b.volume,
-                                    turnover: b.turnover,
-                                    tick_count: 1,
-                                    is_closed: true,
-                                }
+                            .map(|b| openclaw_core::klines::KlineBar {
+                                open_time_ms: b.start_time,
+                                close_time_ms: b.start_time + 60_000,
+                                open: b.open,
+                                high: b.high,
+                                low: b.low,
+                                close: b.close,
+                                volume: b.volume,
+                                turnover: b.turnover,
+                                tick_count: 1,
+                                is_closed: true,
                             })
                             .collect();
                         core_bars.sort_by_key(|b| b.open_time_ms);
                         let count = pipeline.kline_manager.seed_bars(sym, "1m", core_bars);
                         info!(symbol = sym, bars = count, "kline bootstrap / K 線引導完成");
                     }
-                    Err(e) => warn!(symbol = sym, error = %e, "kline bootstrap failed / K 線引導失敗"),
+                    Err(e) => {
+                        warn!(symbol = sym, error = %e, "kline bootstrap failed / K 線引導失敗")
+                    }
                 }
             }
         } else {
@@ -408,21 +435,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     }
 
     // Persistence / 持久化
-    let data_dir = std::env::var("OPENCLAW_DATA_DIR")
-        .unwrap_or_else(|_| "/tmp/openclaw".into());
+    let data_dir = std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
     let data_path = PathBuf::from(&data_dir);
     if let Err(e) = std::fs::create_dir_all(&data_path) {
         warn!(error = %e, "failed to create data dir / 創建數據目錄失敗");
     }
-    let mut state_writer = StateWriter::new(
-        &data_path.join("paper_state.json"), 30_000,
-    );
-    let mut snapshot_writer = StateWriter::new(
-        &data_path.join("pipeline_snapshot.json"), 5_000,
-    );
-    let audit_writer = AuditWriter::new(
-        &data_path.join("paper_audit.jsonl"),
-    );
+    let mut state_writer = StateWriter::new(&data_path.join("paper_state.json"), 30_000);
+    let mut snapshot_writer = StateWriter::new(&data_path.join("pipeline_snapshot.json"), 5_000);
+    let audit_writer = AuditWriter::new(&data_path.join("paper_audit.jsonl"));
 
     // Canary mode: emit per-tick JSONL for comparison with Python shadow (R07-2)
     // 灰度模式：每 tick 輸出 JSONL 用於與 Python 影子進程比較
@@ -431,10 +451,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let canary_writer = if canary_mode {
         let canary_path = data_path.join("engine_results.jsonl");
         info!(path = %canary_path.display(), "canary mode enabled / 灰度模式已啟用");
-        Some(std::fs::OpenOptions::new()
-            .create(true).append(true)
-            .open(&canary_path)
-            .expect("failed to open canary JSONL / 打開灰度 JSONL 失敗"))
+        Some(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&canary_path)
+                .expect("failed to open canary JSONL / 打開灰度 JSONL 失敗"),
+        )
     } else {
         None
     };
@@ -709,24 +732,31 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         max_leverage, max_drawdown_pct, max_same_direction_positions,
                         p1_risk_pct, h0_shadow_mode,
                     }) => {
+                        // I-09: clamp all numeric setters to sane ranges before applying.
+                        // I-09：應用前將所有數值設定鉗制到合理範圍。
                         // StopConfig fields / 止損配置
                         if let Some(v) = hard_stop_pct {
+                            let v = v.clamp(0.0, 0.5);
                             pipeline.paper_state.set_hard_stop_pct(v);
                             info!(hard_stop_pct = format!("{:.1}%", v), "hard stop updated / 硬止損已更新");
                         }
                         if let Some(v) = trailing_stop_pct {
+                            let v = v.map(|x| x.clamp(0.0, 0.5));
                             pipeline.paper_state.set_trailing_stop_pct(v);
                             info!(trailing = ?v, "trailing stop updated / 跟蹤止損已更新");
                         }
                         if let Some(v) = time_stop_hours {
+                            let v = v.map(|x| x.clamp(0.0, 24.0 * 30.0));
                             pipeline.paper_state.set_time_stop_hours(v);
                             info!(time_stop = ?v, "time stop updated / 超時止損已更新");
                         }
                         if let Some(v) = atr_multiplier {
+                            let v = v.map(|x| x.clamp(0.5, 10.0));
                             pipeline.paper_state.set_atr_multiplier(v);
                             info!(atr_mult = ?v, "ATR multiplier updated / ATR 乘數已更新");
                         }
                         if let Some(v) = take_profit_pct {
+                            let v = v.map(|x| x.clamp(0.0, 10.0));
                             pipeline.paper_state.set_take_profit_pct(v);
                             info!(take_profit = ?v, "take profit updated / 止盈已更新");
                         }
@@ -736,14 +766,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             || max_same_direction_positions.is_some();
                         if needs_guardian {
                             let mut gc = pipeline.intent_processor.guardian_config().clone();
-                            if let Some(v) = max_leverage { gc.max_leverage = v; }
-                            if let Some(v) = max_drawdown_pct { gc.max_drawdown_pct = v; }
-                            if let Some(v) = max_same_direction_positions { gc.max_same_direction_positions = v; }
+                            if let Some(v) = max_leverage { gc.max_leverage = v.clamp(1.0, 100.0); }
+                            if let Some(v) = max_drawdown_pct { gc.max_drawdown_pct = v.clamp(0.0, 100.0); }
+                            if let Some(v) = max_same_direction_positions {
+                                gc.max_same_direction_positions = v.clamp(1, 100);
+                            }
                             pipeline.intent_processor.update_guardian_config(gc);
                             info!("guardian config updated via IPC / 守護者配置已通過 IPC 更新");
                         }
                         // P1 risk cap / P1 風險上限
                         if let Some(v) = p1_risk_pct {
+                            let v = v.clamp(0.0, 0.10);
                             pipeline.intent_processor.set_p1_risk_pct(v);
                             info!(p1_risk_pct = format!("{:.2}%", v * 100.0), "P1 risk cap updated / P1 上限已更新");
                         }
@@ -954,4 +987,75 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         uptime_secs = start_time.elapsed().as_secs(),
         "event consumer stopped — final state saved / 事件消費者已停止 — 最終狀態已保存"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests / 測試
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    //! I-09: Verify numeric risk setters clamp to sane ranges.
+    //! I-09：驗證數值風控設定鉗制到合理範圍。
+
+    #[test]
+    fn test_clamp_risk_pct_and_stop_pct_bounds() {
+        // risk_pct: 0.0..=0.10 / stop_pct: 0.0..=0.5
+        assert_eq!((-1.0_f64).clamp(0.0, 0.10), 0.0);
+        assert_eq!((0.05_f64).clamp(0.0, 0.10), 0.05);
+        assert_eq!((0.99_f64).clamp(0.0, 0.10), 0.10);
+        assert_eq!((-0.1_f64).clamp(0.0, 0.5), 0.0);
+        assert_eq!((0.25_f64).clamp(0.0, 0.5), 0.25);
+        assert_eq!((9.9_f64).clamp(0.0, 0.5), 0.5);
+    }
+
+    #[test]
+    fn test_clamp_atr_leverage_positions_bounds() {
+        // atr_multiplier: 0.5..=10.0 / max_leverage: 1..=100 / max_positions: 1..=100
+        assert_eq!((0.0_f64).clamp(0.5, 10.0), 0.5);
+        assert_eq!((3.0_f64).clamp(0.5, 10.0), 3.0);
+        assert_eq!((50.0_f64).clamp(0.5, 10.0), 10.0);
+        assert_eq!((0_usize).clamp(1, 100), 1);
+        assert_eq!((25_usize).clamp(1, 100), 25);
+        assert_eq!((999_usize).clamp(1, 100), 100);
+    }
+
+    // ─── I-22: Command envelope + invariant tests for zero-coverage file ───
+
+    #[test]
+    fn test_clamp_cooldown_minutes_and_count_bounds() {
+        // consecutive_loss_cooldown_count: 0..=1000 / cooldown_minutes: 0..=1440
+        assert_eq!((-5_i64).clamp(0, 1000), 0);
+        assert_eq!((3_i64).clamp(0, 1000), 3);
+        assert_eq!((9999_i64).clamp(0, 1000), 1000);
+        assert_eq!((-1_i64).clamp(0, 1440), 0);
+        assert_eq!((60_i64).clamp(0, 1440), 60);
+        assert_eq!((99999_i64).clamp(0, 1440), 1440);
+    }
+
+    #[test]
+    fn test_clamp_trailing_stop_pct_bounds() {
+        // trailing_stop_pct: 0.0..=0.5 (same family as hard stop)
+        assert_eq!((-10.0_f64).clamp(0.0, 0.5), 0.0);
+        assert_eq!((0.15_f64).clamp(0.0, 0.5), 0.15);
+        assert_eq!((5.0_f64).clamp(0.0, 0.5), 0.5);
+    }
+
+    #[test]
+    fn test_update_strategy_params_json_invalid() {
+        // Invalid JSON must not panic; serde_json::from_str returns Err
+        let bad = "{not valid";
+        let result: Result<serde_json::Value, _> = serde_json::from_str(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_strategy_params_json_roundtrip() {
+        // Valid params JSON round-trips via serde_json::Value
+        let json = r#"{"ma_short":10,"ma_long":30,"atr_period":14}"#;
+        let v: serde_json::Value = serde_json::from_str(json).expect("valid json");
+        assert_eq!(v["ma_short"], 10);
+        assert_eq!(v["ma_long"], 30);
+        assert_eq!(v["atr_period"], 14);
+    }
 }

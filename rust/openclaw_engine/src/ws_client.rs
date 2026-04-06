@@ -124,7 +124,8 @@ impl WsClient {
                             "op": "subscribe",
                             "args": chunk,
                         });
-                        if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await {
+                        if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await
+                        {
                             error!(error = %e, "failed to send subscribe / 發送訂閱失敗");
                             sub_ok = false;
                             break;
@@ -136,7 +137,8 @@ impl WsClient {
                     }
                     info!(
                         topics = self.subscriptions.len(),
-                        batches = (self.subscriptions.len() + SUBSCRIBE_BATCH_SIZE - 1) / SUBSCRIBE_BATCH_SIZE,
+                        batches = (self.subscriptions.len() + SUBSCRIBE_BATCH_SIZE - 1)
+                            / SUBSCRIBE_BATCH_SIZE,
                         "subscribed / 已訂閱"
                     );
 
@@ -211,7 +213,11 @@ impl WsClient {
                 base_delay.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
                 MAX_RECONNECT_DELAY_MS,
             );
-            info!(delay_ms = delay_ms, attempt = attempt, "reconnecting after delay / 延遲後重連");
+            info!(
+                delay_ms = delay_ms,
+                attempt = attempt,
+                "reconnecting after delay / 延遲後重連"
+            );
 
             tokio::select! {
                 _ = self.cancel.cancelled() => {
@@ -269,19 +275,31 @@ impl WsClient {
 
         // Route by topic prefix / 按主題前綴路由
         let events: Vec<PriceEvent> = if topic.starts_with("publicTrade.") {
-            data.iter().filter_map(|item| parse_trade_item(item, topic)).collect()
+            data.iter()
+                .filter_map(|item| parse_trade_item(item, topic))
+                .collect()
         } else if topic.starts_with("kline.") {
-            data.iter().filter_map(|item| parse_kline_item(item, topic)).collect()
+            data.iter()
+                .filter_map(|item| parse_kline_item(item, topic))
+                .collect()
         } else if topic.starts_with("orderbook.") {
             parse_orderbook_snapshot(data, topic).into_iter().collect()
         } else if topic.starts_with("tickers.") {
-            data.iter().filter_map(|item| parse_ticker_item(item, topic)).collect()
+            data.iter()
+                .filter_map(|item| parse_ticker_item(item, topic))
+                .collect()
         } else if topic.starts_with("liquidation.") {
-            data.iter().filter_map(|item| parse_liquidation_item(item, topic)).collect()
+            data.iter()
+                .filter_map(|item| parse_liquidation_item(item, topic))
+                .collect()
         } else if topic.starts_with("price-limit.") {
-            data.iter().filter_map(|item| parse_price_limit_item(item)).collect()
+            data.iter()
+                .filter_map(|item| parse_price_limit_item(item))
+                .collect()
         } else if topic.starts_with("adl-notice.") {
-            data.iter().filter_map(|item| parse_adl_notice_item(item)).collect()
+            data.iter()
+                .filter_map(|item| parse_adl_notice_item(item))
+                .collect()
         } else {
             debug!(topic = topic, "unhandled topic / 未處理的主題");
             return true;
@@ -314,10 +332,17 @@ fn now_ms() -> u64 {
 /// 將 Bybit 公開交易項目解析為 PriceEvent。
 fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
     let symbol = extract_symbol_from_topic(topic)?;
-    let price = item.get("p").and_then(|v| v.as_str())?.parse::<f64>().ok()?;
+    let price = item
+        .get("p")
+        .and_then(|v| v.as_str())?
+        .parse::<f64>()
+        .ok()?;
     let ts = item
         .get("T")
-        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or_else(now_ms);
     let volume = item
         .get("v")
@@ -340,7 +365,10 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
 fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
     // Drop unconfirmed candles to avoid false signals on incomplete data
     // 丟棄未確認 K 線，避免不完整數據產生虛假信號
-    let confirmed = item.get("confirm").and_then(|v| v.as_bool()).unwrap_or(false);
+    let confirmed = item
+        .get("confirm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !confirmed {
         return None;
     }
@@ -350,8 +378,12 @@ fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
         .get("close")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
-    let ts = item.get("start")
-        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+    let ts = item
+        .get("start")
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or_else(now_ms);
     let volume = item
         .get("volume")
@@ -379,14 +411,16 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
     let bids = obj.get("b").and_then(|v| v.as_array())?;
     let asks = obj.get("a").and_then(|v| v.as_array())?;
 
-    let best_bid = bids.first()
+    let best_bid = bids
+        .first()
         .and_then(|b| b.as_array())
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
 
-    let best_ask = asks.first()
+    let best_ask = asks
+        .first()
         .and_then(|a| a.as_array())
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_str())
@@ -399,8 +433,12 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
         best_bid.max(best_ask)
     };
 
-    let ts = obj.get("ts")
-        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+    let ts = obj
+        .get("ts")
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or_else(now_ms);
 
     let mut event = PriceEvent::new(symbol, mid_price, ts);
@@ -416,28 +454,34 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
 /// Bybit ticker: {"topic":"tickers.BTCUSDT","data":{"symbol":"BTCUSDT","lastPrice":"65000","volume24h":"12345",...}}
 fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
     let symbol = extract_symbol_from_topic(topic)?;
-    let last_price = item.get("lastPrice")
+    let last_price = item
+        .get("lastPrice")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
-    let volume = item.get("volume24h")
+    let volume = item
+        .get("volume24h")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
-    let bid = item.get("bid1Price")
+    let bid = item
+        .get("bid1Price")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
-    let ask = item.get("ask1Price")
+    let ask = item
+        .get("ask1Price")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
-    let ts = item.get("ts")
+    let ts = item
+        .get("ts")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<u64>().ok())
         .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
         .unwrap_or_else(now_ms);
 
-    let turnover = item.get("turnover24h")
+    let turnover = item
+        .get("turnover24h")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
@@ -457,16 +501,17 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
 /// Bybit liquidation: {"topic":"liquidation.BTCUSDT","data":{"symbol":"BTCUSDT","side":"Buy","price":"65000","qty":"0.5","updatedTime":...}}
 fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
     let symbol = extract_symbol_from_topic(topic)?;
-    let price = item.get("price")
+    let price = item
+        .get("price")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
-    let qty = item.get("size")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0");
-    let side = item.get("side")
+    let qty = item.get("size").and_then(|v| v.as_str()).unwrap_or("0");
+    let side = item
+        .get("side")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
-    let ts = item.get("updatedTime")
+    let ts = item
+        .get("updatedTime")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
@@ -481,15 +526,9 @@ fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<Price
 /// 解析價格限制更新 — 最高買入/最低賣出邊界。
 fn parse_price_limit_item(item: &serde_json::Value) -> Option<PriceEvent> {
     let symbol = item.get("symbol").and_then(|v| v.as_str())?.to_string();
-    let max_price = item.get("maxPrice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0");
-    let min_price = item.get("minPrice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("0");
-    let ts = item.get("ts")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let max_price = item.get("maxPrice").and_then(|v| v.as_str()).unwrap_or("0");
+    let min_price = item.get("minPrice").and_then(|v| v.as_str()).unwrap_or("0");
+    let ts = item.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
 
     let mid = max_price.parse::<f64>().unwrap_or(0.0);
     let mut event = PriceEvent::new(symbol, mid, ts);
@@ -503,19 +542,24 @@ fn parse_price_limit_item(item: &serde_json::Value) -> Option<PriceEvent> {
 /// 解析 ADL 通知 — 持倉面臨強制減倉風險。
 fn parse_adl_notice_item(item: &serde_json::Value) -> Option<PriceEvent> {
     let symbol = item.get("symbol").and_then(|v| v.as_str())?.to_string();
-    let adl_rank = item.get("adlRankIndicator")
-        .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+    let adl_rank = item
+        .get("adlRankIndicator")
+        .and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        })
         .unwrap_or(0);
-    let side = item.get("side")
+    let side = item
+        .get("side")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
-    let ts = item.get("ts")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let ts = item.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
 
     let mut event = PriceEvent::new(symbol, 0.0, ts);
     event.metadata.insert("type".into(), "adl_notice".into());
-    event.metadata.insert("adl_rank".into(), adl_rank.to_string());
+    event
+        .metadata
+        .insert("adl_rank".into(), adl_rank.to_string());
     event.metadata.insert("side".into(), side.into());
     Some(event)
 }

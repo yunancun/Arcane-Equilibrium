@@ -6,227 +6,26 @@
 //!   long/short ratios, risk limit tiers, ADL alerts, recent trades, historical volatility,
 //!   price limits, and server time. All methods return strongly-typed structs parsed from
 //!   Bybit's string-encoded JSON responses. Thread-safe via Arc<BybitRestClient>.
+//!   Split into submodules: `types` (response structs) and `parsers` (JSON helpers).
 //! MODULE_NOTE (中): 全面的市場數據客戶端，涵蓋 K 線（標準/標記價格/溢價指數）、
 //!   行情快照、訂單簿、持倉量、資金費率歷史、多空比、風險限額、ADL 警報、
 //!   近期成交、歷史波動率、價格限制和服務器時間。所有方法返回強類型結構體，
 //!   從 Bybit 的字串編碼 JSON 回應中解析。通過 Arc<BybitRestClient> 線程安全。
+//!   拆分為子模組：`types`（回應結構體）和 `parsers`（JSON 輔助）。
+
+mod parsers;
+pub mod types;
+
+pub use types::{
+    AdlAlert, DeliveryPrice, FundingRecord, InsuranceRecord, KlineBar, LongShortRecord,
+    OpenInterestRecord, OrderbookSnapshot, PriceLimit, RecentTrade, RiskLimitTier, ServerTime,
+    TickerInfo, VolatilityRecord,
+};
 
 use crate::bybit_rest_client::{BybitRestClient, BybitResult};
+use parsers::{parse_kline_list, parse_orderbook, parse_str, parse_str_f64, parse_ticker_list};
 use std::sync::Arc;
 use tracing::debug;
-
-// ---------------------------------------------------------------------------
-// Response structs / 回應結構體
-// ---------------------------------------------------------------------------
-
-/// Server time from Bybit.
-/// Bybit 服務器時間。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ServerTime {
-    /// Unix timestamp in seconds / Unix 時間戳（秒）
-    pub time_second: u64,
-    /// Nanosecond-precision timestamp as string / 納秒精度時間戳字串
-    pub time_nano: String,
-}
-
-/// Single kline (candlestick) bar.
-/// 單根 K 線（蠟燭圖）。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct KlineBar {
-    /// Bar open time in milliseconds / K 線開始時間（毫秒）
-    pub start_time: u64,
-    /// Open price / 開盤價
-    pub open: f64,
-    /// High price / 最高價
-    pub high: f64,
-    /// Low price / 最低價
-    pub low: f64,
-    /// Close price / 收盤價
-    pub close: f64,
-    /// Volume / 成交量
-    pub volume: f64,
-    /// Turnover (quote currency volume) / 成交額（計價貨幣成交量）
-    pub turnover: f64,
-}
-
-/// 24-hour ticker info for a symbol.
-/// 交易對 24 小時行情。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TickerInfo {
-    /// Symbol name / 交易對名稱
-    pub symbol: String,
-    /// Last traded price / 最新成交價
-    pub last_price: f64,
-    /// Best bid price / 最佳買價
-    pub bid1_price: f64,
-    /// Best ask price / 最佳賣價
-    pub ask1_price: f64,
-    /// 24h trading volume / 24 小時成交量
-    pub volume_24h: f64,
-    /// 24h turnover / 24 小時成交額
-    pub turnover_24h: f64,
-    /// 24h high / 24 小時最高價
-    pub high_price_24h: f64,
-    /// 24h low / 24 小時最低價
-    pub low_price_24h: f64,
-    /// Previous 24h price / 前 24 小時價格
-    pub prev_price_24h: f64,
-    /// Current open interest / 當前持倉量
-    pub open_interest: f64,
-    /// Current funding rate / 當前資金費率
-    pub funding_rate: f64,
-    /// Next funding time / 下次資金費率時間
-    pub next_funding_time: String,
-}
-
-/// Level-2 orderbook snapshot.
-/// L2 訂單簿快照。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct OrderbookSnapshot {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Bid levels: [price, size] / 買盤：[價格, 數量]
-    pub bids: Vec<[f64; 2]>,
-    /// Ask levels: [price, size] / 賣盤：[價格, 數量]
-    pub asks: Vec<[f64; 2]>,
-    /// Timestamp (ms) / 時間戳（毫秒）
-    pub ts: u64,
-    /// Orderbook update sequence ID / 訂單簿更新序列 ID
-    pub update_id: u64,
-}
-
-/// Open interest data point.
-/// 持倉量數據點。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct OpenInterestRecord {
-    /// Open interest value / 持倉量
-    pub open_interest: f64,
-    /// Timestamp string / 時間戳字串
-    pub timestamp: String,
-}
-
-/// Historical funding rate record.
-/// 歷史資金費率記錄。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct FundingRecord {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Funding rate / 資金費率
-    pub funding_rate: f64,
-    /// Funding rate timestamp / 資金費率時間戳
-    pub funding_rate_timestamp: String,
-}
-
-/// Long/short account ratio record.
-/// 多空帳戶比例記錄。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LongShortRecord {
-    /// Buy (long) ratio / 多頭比例
-    pub buy_ratio: f64,
-    /// Sell (short) ratio / 空頭比例
-    pub sell_ratio: f64,
-    /// Timestamp / 時間戳
-    pub timestamp: String,
-}
-
-/// Risk limit tier for a symbol.
-/// 交易對風險限額層級。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RiskLimitTier {
-    /// Tier ID / 層級 ID
-    pub id: u32,
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Risk limit value (position notional cap) / 風險限額值（持倉名義上限）
-    pub risk_limit_value: f64,
-    /// Max leverage for this tier / 此層級最大槓桿
-    pub max_leverage: f64,
-    /// Initial margin rate / 初始保證金率
-    pub initial_margin: f64,
-    /// Maintenance margin rate / 維持保證金率
-    pub maintenance_margin: f64,
-}
-
-/// Insurance pool record.
-/// 保險基金記錄。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct InsuranceRecord {
-    /// Coin name / 幣種名稱
-    pub coin: String,
-    /// Insurance fund balance / 保險基金餘額
-    pub balance: f64,
-    /// Insurance fund value in USD / 保險基金 USD 價值
-    pub value: f64,
-}
-
-/// ADL (Auto-Deleveraging) alert for a position.
-/// 自動減倉警報。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AdlAlert {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Position side / 持倉方向
-    pub side: String,
-    /// ADL rank indicator (1-5, higher = more likely to be deleveraged)
-    /// ADL 排名指標（1-5，越高越可能被減倉）
-    pub adl_rank_indicator: i32,
-}
-
-/// Single recent trade.
-/// 單筆近期成交。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RecentTrade {
-    /// Execution ID / 成交 ID
-    pub exec_id: String,
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Trade price / 成交價
-    pub price: f64,
-    /// Trade size / 成交量
-    pub size: f64,
-    /// Trade side: "Buy" or "Sell" / 成交方向
-    pub side: String,
-    /// Timestamp string / 時間戳字串
-    pub time: String,
-    /// Whether this is a block trade / 是否為大宗交易
-    pub is_block_trade: bool,
-}
-
-/// Historical volatility record (options market).
-/// 歷史波動率記錄（期權市場）。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct VolatilityRecord {
-    /// Period in days / 週期（天）
-    pub period: u32,
-    /// Volatility value / 波動率值
-    pub value: String,
-    /// Timestamp / 時間戳
-    pub time: String,
-}
-
-/// Futures delivery price record.
-/// 期貨交割價格記錄。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct DeliveryPrice {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Delivery price / 交割價格
-    pub delivery_price: f64,
-    /// Delivery timestamp / 交割時間戳
-    pub delivery_time: String,
-}
-
-/// Price limit (max buy / min sell) for a symbol.
-/// 交易對價格限制（最高買入 / 最低賣出）。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PriceLimit {
-    /// Symbol / 交易對
-    pub symbol: String,
-    /// Maximum buy price allowed / 允許的最高買入價
-    pub buy_limit_price: f64,
-    /// Minimum sell price allowed / 允許的最低賣出價
-    pub sell_limit_price: f64,
-}
 
 // ---------------------------------------------------------------------------
 // MarketDataClient / 市場數據客戶端
@@ -294,7 +93,11 @@ impl MarketDataClient {
         end: Option<u64>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<KlineBar>> {
-        debug!(symbol = symbol, interval = interval, "fetching klines / 獲取 K 線");
+        debug!(
+            symbol = symbol,
+            interval = interval,
+            "fetching klines / 獲取 K 線"
+        );
         let mut params: Vec<(&str, String)> = vec![
             ("category", category.to_string()),
             ("symbol", symbol.to_string()),
@@ -310,7 +113,10 @@ impl MarketDataClient {
             params.push(("limit", l.to_string()));
         }
         let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let resp = self.client.get_checked("/v5/market/kline", &param_refs).await?;
+        let resp = self
+            .client
+            .get_checked("/v5/market/kline", &param_refs)
+            .await?;
         parse_kline_list(&resp.result)
     }
 
@@ -327,7 +133,10 @@ impl MarketDataClient {
         end: Option<u64>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<KlineBar>> {
-        debug!(symbol = symbol, "fetching mark price klines / 獲取標記價格 K 線");
+        debug!(
+            symbol = symbol,
+            "fetching mark price klines / 獲取標記價格 K 線"
+        );
         let mut params: Vec<(&str, String)> = vec![
             ("category", category.to_string()),
             ("symbol", symbol.to_string()),
@@ -361,7 +170,10 @@ impl MarketDataClient {
         interval: &str,
         limit: Option<u32>,
     ) -> BybitResult<Vec<KlineBar>> {
-        debug!(symbol = symbol, "fetching premium index klines / 獲取溢價指數 K 線");
+        debug!(
+            symbol = symbol,
+            "fetching premium index klines / 獲取溢價指數 K 線"
+        );
         let mut params: Vec<(&str, String)> = vec![
             ("category", category.to_string()),
             ("symbol", symbol.to_string()),
@@ -492,7 +304,10 @@ impl MarketDataClient {
         end: Option<u64>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<FundingRecord>> {
-        debug!(symbol = symbol, "fetching funding history / 獲取資金費率歷史");
+        debug!(
+            symbol = symbol,
+            "fetching funding history / 獲取資金費率歷史"
+        );
         let mut params: Vec<(&str, String)> = vec![
             ("category", category.to_string()),
             ("symbol", symbol.to_string()),
@@ -602,10 +417,7 @@ impl MarketDataClient {
         let mut tiers = Vec::with_capacity(list.len());
         for item in &list {
             tiers.push(RiskLimitTier {
-                id: item
-                    .get("id")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
+                id: item.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 symbol: parse_str(item, "symbol"),
                 risk_limit_value: parse_str_f64(item, "riskLimitValue"),
                 max_leverage: parse_str_f64(item, "maxLeverage"),
@@ -624,10 +436,7 @@ impl MarketDataClient {
     /// 獲取保險基金數據 — 支撐自動減倉的資金池。
     ///
     /// GET /v5/market/insurance
-    pub async fn get_insurance(
-        &self,
-        coin: Option<&str>,
-    ) -> BybitResult<Vec<InsuranceRecord>> {
+    pub async fn get_insurance(&self, coin: Option<&str>) -> BybitResult<Vec<InsuranceRecord>> {
         debug!("fetching insurance pool / 獲取保險基金");
         let mut params: Vec<(&str, &str)> = vec![];
         if let Some(c) = coin {
@@ -692,7 +501,10 @@ impl MarketDataClient {
                 side: parse_str(item, "side"),
                 adl_rank_indicator: item
                     .get("adlRankIndicator")
-                    .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+                    .and_then(|v| {
+                        v.as_i64()
+                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                    })
                     .unwrap_or(0) as i32,
             });
         }
@@ -763,7 +575,10 @@ impl MarketDataClient {
         category: &str,
         period: Option<u32>,
     ) -> BybitResult<Vec<VolatilityRecord>> {
-        debug!(category = category, "fetching historical volatility / 獲取歷史波動率");
+        debug!(
+            category = category,
+            "fetching historical volatility / 獲取歷史波動率"
+        );
         let mut params: Vec<(&str, String)> = vec![("category", category.to_string())];
         if let Some(p) = period {
             params.push(("period", p.to_string()));
@@ -775,18 +590,11 @@ impl MarketDataClient {
             .await?;
         // Response is a direct array in result, not nested in "list"
         // 回應是 result 中的直接數組，不嵌套在 "list" 中
-        let list = resp
-            .result
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let list = resp.result.as_array().cloned().unwrap_or_default();
         let mut records = Vec::with_capacity(list.len());
         for item in &list {
             records.push(VolatilityRecord {
-                period: item
-                    .get("period")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32,
+                period: item.get("period").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 value: parse_str(item, "value"),
                 time: parse_str(item, "time"),
             });
@@ -808,7 +616,10 @@ impl MarketDataClient {
         symbol: Option<&str>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<DeliveryPrice>> {
-        debug!(category = category, "fetching delivery prices / 獲取交割價格");
+        debug!(
+            category = category,
+            "fetching delivery prices / 獲取交割價格"
+        );
         let mut params: Vec<(&str, String)> = vec![("category", category.to_string())];
         if let Some(s) = symbol {
             params.push(("symbol", s.to_string()));
@@ -855,7 +666,11 @@ impl MarketDataClient {
         end: Option<u64>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<KlineBar>> {
-        debug!(symbol = symbol, interval = interval, "fetching index price klines / 獲取指數價格 K 線");
+        debug!(
+            symbol = symbol,
+            interval = interval,
+            "fetching index price klines / 獲取指數價格 K 線"
+        );
         let mut params: Vec<(&str, String)> = vec![
             ("category", category.to_string()),
             ("symbol", symbol.to_string()),
@@ -892,11 +707,7 @@ impl MarketDataClient {
     // We provide it here for convenience by querying instruments-info and extracting.
     // 此端點不作為獨立存在；信息在 instruments-info 中。
     // 我們通過查詢 instruments-info 並提取來提供便利方法。
-    pub async fn get_price_limit(
-        &self,
-        category: &str,
-        symbol: &str,
-    ) -> BybitResult<PriceLimit> {
+    pub async fn get_price_limit(&self, category: &str, symbol: &str) -> BybitResult<PriceLimit> {
         debug!(symbol = symbol, "fetching price limits / 獲取價格限制");
         let params: Vec<(&str, &str)> = vec![("category", category), ("symbol", symbol)];
         let resp = self
@@ -927,168 +738,16 @@ impl MarketDataClient {
 }
 
 // ---------------------------------------------------------------------------
-// Parsing helpers / 解析輔助函數
-// ---------------------------------------------------------------------------
-
-/// Parse a string field from a JSON value, returning empty string on failure.
-/// 從 JSON 值中解析字串欄位，失敗時返回空字串。
-fn parse_str(obj: &serde_json::Value, field: &str) -> String {
-    obj.get(field)
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-/// Parse a string-encoded f64 field, returning 0.0 on failure.
-/// 解析字串編碼的 f64 欄位，失敗時返回 0.0。
-fn parse_str_f64(obj: &serde_json::Value, field: &str) -> f64 {
-    obj.get(field)
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0)
-}
-
-/// Parse kline list from Bybit response result.
-/// 從 Bybit 回應結果中解析 K 線列表。
-///
-/// Bybit kline format: array of arrays:
-///   [["1700000000000","65000","66000","64000","65500","100","6500000"], ...]
-///   [startTime, open, high, low, close, volume, turnover]
-/// Bybit K 線格式：數組的數組。
-fn parse_kline_list(result: &serde_json::Value) -> BybitResult<Vec<KlineBar>> {
-    let list = result
-        .get("list")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut bars = Vec::with_capacity(list.len());
-    for item in &list {
-        if let Some(arr) = item.as_array() {
-            if arr.len() >= 7 {
-                bars.push(KlineBar {
-                    start_time: arr[0]
-                        .as_str()
-                        .and_then(|s| s.parse::<u64>().ok())
-                        .unwrap_or(0),
-                    open: arr[1]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                    high: arr[2]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                    low: arr[3]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                    close: arr[4]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                    volume: arr[5]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                    turnover: arr[6]
-                        .as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0),
-                });
-            }
-        }
-    }
-    Ok(bars)
-}
-
-/// Parse ticker list from Bybit response result.
-/// 從 Bybit 回應結果中解析行情列表。
-fn parse_ticker_list(result: &serde_json::Value) -> BybitResult<Vec<TickerInfo>> {
-    let list = result
-        .get("list")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut tickers = Vec::with_capacity(list.len());
-    for item in &list {
-        tickers.push(TickerInfo {
-            symbol: parse_str(item, "symbol"),
-            last_price: parse_str_f64(item, "lastPrice"),
-            bid1_price: parse_str_f64(item, "bid1Price"),
-            ask1_price: parse_str_f64(item, "ask1Price"),
-            volume_24h: parse_str_f64(item, "volume24h"),
-            turnover_24h: parse_str_f64(item, "turnover24h"),
-            high_price_24h: parse_str_f64(item, "highPrice24h"),
-            low_price_24h: parse_str_f64(item, "lowPrice24h"),
-            prev_price_24h: parse_str_f64(item, "prevPrice24h"),
-            open_interest: parse_str_f64(item, "openInterest"),
-            funding_rate: parse_str_f64(item, "fundingRate"),
-            next_funding_time: parse_str(item, "nextFundingTime"),
-        });
-    }
-    Ok(tickers)
-}
-
-/// Parse orderbook from Bybit response result.
-/// 從 Bybit 回應結果中解析訂單簿。
-///
-/// Bybit orderbook format:
-///   { "s": "BTCUSDT", "b": [["65000","1.5"], ...], "a": [["65001","0.8"], ...],
-///     "ts": 1700000000000, "u": 12345 }
-fn parse_orderbook(result: &serde_json::Value) -> BybitResult<OrderbookSnapshot> {
-    let symbol = parse_str(result, "s");
-    let ts = result
-        .get("ts")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let update_id = result
-        .get("u")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-
-    let bids = parse_price_levels(result, "b");
-    let asks = parse_price_levels(result, "a");
-
-    Ok(OrderbookSnapshot {
-        symbol,
-        bids,
-        asks,
-        ts,
-        update_id,
-    })
-}
-
-/// Parse price levels from orderbook side (bids or asks).
-/// 從訂單簿側（買盤或賣盤）解析價格層級。
-///
-/// Format: [["65000","1.5"], ["64999","2.0"], ...]
-fn parse_price_levels(obj: &serde_json::Value, field: &str) -> Vec<[f64; 2]> {
-    obj.get(field)
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|level| {
-                    let level_arr = level.as_array()?;
-                    if level_arr.len() >= 2 {
-                        let price = level_arr[0].as_str()?.parse::<f64>().ok()?;
-                        let size = level_arr[1].as_str()?.parse::<f64>().ok()?;
-                        Some([price, size])
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-// ---------------------------------------------------------------------------
 // Tests / 測試
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parsers::{
+        parse_kline_list, parse_orderbook, parse_price_levels, parse_str, parse_str_f64,
+        parse_ticker_list,
+    };
 
     /// Test parsing kline list from Bybit response format.
     /// 測試從 Bybit 回應格式解析 K 線列表。

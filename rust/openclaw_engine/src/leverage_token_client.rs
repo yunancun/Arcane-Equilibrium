@@ -174,11 +174,7 @@ impl LeverageTokenClient {
     /// 購買槓桿代幣。
     ///
     /// POST /v5/spot-lever-token/purchase
-    pub async fn purchase(
-        &self,
-        lt_coin: &str,
-        amount: f64,
-    ) -> BybitResult<LtPurchaseResult> {
+    pub async fn purchase(&self, lt_coin: &str, amount: f64) -> BybitResult<LtPurchaseResult> {
         let body = serde_json::json!({
             "ltCoin": lt_coin,
             "ltAmount": format!("{}", amount),
@@ -205,11 +201,7 @@ impl LeverageTokenClient {
     /// 贖回槓桿代幣。
     ///
     /// POST /v5/spot-lever-token/redeem
-    pub async fn redeem(
-        &self,
-        lt_coin: &str,
-        quantity: f64,
-    ) -> BybitResult<LtRedeemResult> {
+    pub async fn redeem(&self, lt_coin: &str, quantity: f64) -> BybitResult<LtRedeemResult> {
         let body = serde_json::json!({
             "ltCoin": lt_coin,
             "ltAmount": format!("{}", quantity),

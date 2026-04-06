@@ -24,13 +24,19 @@ impl Scorer {
     /// Create with an optional model manager.
     /// 使用可選的模型管理器創建。
     pub fn new(model_manager: Option<Arc<OnnxModelManager>>, enabled: bool) -> Self {
-        Self { model_manager, enabled }
+        Self {
+            model_manager,
+            enabled,
+        }
     }
 
     /// Create a disabled scorer (always returns rule-based).
     /// 創建禁用的評分器（總是返回規則評分）。
     pub fn disabled() -> Self {
-        Self { model_manager: None, enabled: false }
+        Self {
+            model_manager: None,
+            enabled: false,
+        }
     }
 
     /// Score a signal using the 3-tier degradation chain.

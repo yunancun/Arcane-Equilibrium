@@ -7,7 +7,7 @@
 //! MODULE_NOTE (中): 獲取 GET /v5/market/instruments-info 並緩存交易對規格。
 //!   提供 qty 和 price 取整輔助函數以符合交易所精度要求。緩存可定期刷新。
 
-use crate::bybit_rest_client::{BybitRestClient, BybitResult, BybitApiError};
+use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
 use std::collections::HashMap;
 use std::sync::RwLock;
 use tracing::info;
@@ -107,10 +107,16 @@ impl SymbolSpec {
         }
         if price > 0.0 {
             if price < self.min_price {
-                return (false, format!("price {price} < min_price {}", self.min_price));
+                return (
+                    false,
+                    format!("price {price} < min_price {}", self.min_price),
+                );
             }
             if self.max_price > 0.0 && price > self.max_price {
-                return (false, format!("price {price} > max_price {}", self.max_price));
+                return (
+                    false,
+                    format!("price {price} > max_price {}", self.max_price),
+                );
             }
             if self.min_notional > 0.0 && qty * price < self.min_notional {
                 return (
@@ -214,13 +220,21 @@ impl InstrumentInfoCache {
     /// Round qty for a symbol using cached spec.
     /// 使用緩存的規格為交易對取整 qty。
     pub fn round_qty(&self, symbol: &str, qty: f64) -> Option<f64> {
-        self.cache.read().unwrap().get(symbol).map(|s| s.round_qty(qty))
+        self.cache
+            .read()
+            .unwrap()
+            .get(symbol)
+            .map(|s| s.round_qty(qty))
     }
 
     /// Round price for a symbol using cached spec.
     /// 使用緩存的規格為交易對取整 price。
     pub fn round_price(&self, symbol: &str, price: f64) -> Option<f64> {
-        self.cache.read().unwrap().get(symbol).map(|s| s.round_price(price))
+        self.cache
+            .read()
+            .unwrap()
+            .get(symbol)
+            .map(|s| s.round_price(price))
     }
 
     /// Get all cached symbols.
@@ -317,9 +331,7 @@ fn parse_instrument_item(item: &serde_json::Value) -> Option<SymbolSpec> {
 /// Parse a string field as f64 from a JSON object.
 /// 從 JSON 對象中將字串欄位解析為 f64。
 fn parse_f64_field(obj: &serde_json::Value, field: &str) -> Option<f64> {
-    obj.get(field)?
-        .as_str()
-        .and_then(|s| s.parse::<f64>().ok())
+    obj.get(field)?.as_str().and_then(|s| s.parse::<f64>().ok())
 }
 
 /// Derive number of decimal places from a step value.

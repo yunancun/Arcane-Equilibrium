@@ -98,7 +98,8 @@ impl OnnxModelManager {
 
         if features.len() != model.feature_dim {
             warn!(
-                expected = model.feature_dim, got = features.len(),
+                expected = model.feature_dim,
+                got = features.len(),
                 "feature dimension mismatch / 特徵維度不匹配"
             );
             return None;
@@ -126,7 +127,10 @@ impl OnnxModelManager {
             version: format!("v{}", new_version),
         });
         self.state.store(Arc::new(new_model));
-        info!(version = new_version, "ONNX model reloaded / ONNX 模型已重載");
+        info!(
+            version = new_version,
+            "ONNX model reloaded / ONNX 模型已重載"
+        );
         true
     }
 }
@@ -154,6 +158,6 @@ mod tests {
         assert_eq!(mgr.version(), 1);
         // reload won't succeed (no file) but version logic is tested
         mgr.try_reload(); // returns false, version doesn't increment via the guard
-        // If file existed, version would be 2
+                          // If file existed, version would be 2
     }
 }

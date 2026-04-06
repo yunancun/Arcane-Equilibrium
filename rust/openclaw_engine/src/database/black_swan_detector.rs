@@ -112,13 +112,19 @@ impl BlackSwanDetector {
     /// Record a closed bar's return and volume. Call on every bar close.
     /// 記錄已關閉 K 線的回報和成交量。每次 K 線收盤時調用。
     pub fn record_bar(&mut self, symbol: &str, ret: f64, volume: f64) {
-        let returns = self.returns.entry(symbol.to_string()).or_insert_with(VecDeque::new);
+        let returns = self
+            .returns
+            .entry(symbol.to_string())
+            .or_insert_with(VecDeque::new);
         returns.push_back(ret);
         if returns.len() > self.max_return_window {
             returns.pop_front();
         }
 
-        let volumes = self.volumes.entry(symbol.to_string()).or_insert_with(VecDeque::new);
+        let volumes = self
+            .volumes
+            .entry(symbol.to_string())
+            .or_insert_with(VecDeque::new);
         volumes.push_back(volume);
         if volumes.len() > self.max_volume_window {
             volumes.pop_front();
@@ -197,11 +203,8 @@ impl BlackSwanDetector {
     /// 簡化版：檢查所有品種的近期回報是否高度相關。
     fn check_correlation_signal(&self) -> SignalVote {
         // Need at least 2 symbols with enough data
-        let symbol_returns: Vec<&VecDeque<f64>> = self
-            .returns
-            .values()
-            .filter(|r| r.len() >= 30)
-            .collect();
+        let symbol_returns: Vec<&VecDeque<f64>> =
+            self.returns.values().filter(|r| r.len() >= 30).collect();
 
         if symbol_returns.len() < 2 {
             return SignalVote {
@@ -218,8 +221,18 @@ impl BlackSwanDetector {
         let mut count = 0u32;
         for i in 0..symbol_returns.len() {
             for j in (i + 1)..symbol_returns.len() {
-                let a: Vec<f64> = symbol_returns[i].iter().rev().take(window).copied().collect();
-                let b: Vec<f64> = symbol_returns[j].iter().rev().take(window).copied().collect();
+                let a: Vec<f64> = symbol_returns[i]
+                    .iter()
+                    .rev()
+                    .take(window)
+                    .copied()
+                    .collect();
+                let b: Vec<f64> = symbol_returns[j]
+                    .iter()
+                    .rev()
+                    .take(window)
+                    .copied()
+                    .collect();
                 let corr = pearson_correlation(&a, &b);
                 if corr.is_finite() {
                     total_corr += corr.abs();
@@ -228,7 +241,11 @@ impl BlackSwanDetector {
             }
         }
 
-        let avg_corr = if count > 0 { total_corr / count as f64 } else { 0.0 };
+        let avg_corr = if count > 0 {
+            total_corr / count as f64
+        } else {
+            0.0
+        };
 
         SignalVote {
             signal_name: "CORRELATION",
@@ -451,10 +468,30 @@ mod tests {
         let none_result = BlackSwanResult {
             severity: BlackSwanSeverity::None,
             votes: [
-                SignalVote { signal_name: "MAD", triggered: false, metric_value: 0.0, threshold: 6.0 },
-                SignalVote { signal_name: "CORRELATION", triggered: false, metric_value: 0.0, threshold: 0.85 },
-                SignalVote { signal_name: "VOLUME", triggered: false, metric_value: 0.0, threshold: 5.0 },
-                SignalVote { signal_name: "VELOCITY", triggered: false, metric_value: 0.0, threshold: 1.0 },
+                SignalVote {
+                    signal_name: "MAD",
+                    triggered: false,
+                    metric_value: 0.0,
+                    threshold: 6.0,
+                },
+                SignalVote {
+                    signal_name: "CORRELATION",
+                    triggered: false,
+                    metric_value: 0.0,
+                    threshold: 0.85,
+                },
+                SignalVote {
+                    signal_name: "VOLUME",
+                    triggered: false,
+                    metric_value: 0.0,
+                    threshold: 5.0,
+                },
+                SignalVote {
+                    signal_name: "VELOCITY",
+                    triggered: false,
+                    metric_value: 0.0,
+                    threshold: 1.0,
+                },
             ],
             votes_for: 0,
             symbol: "BTC".into(),

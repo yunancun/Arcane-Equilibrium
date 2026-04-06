@@ -334,9 +334,8 @@ impl OrderManager {
             body["triggerPrice"] = serde_json::Value::String(format_price(tp));
         }
         if let Some(dir) = req.trigger_direction {
-            body["triggerDirection"] = serde_json::Value::Number(
-                serde_json::Number::from(dir as i32),
-            );
+            body["triggerDirection"] =
+                serde_json::Value::Number(serde_json::Number::from(dir as i32));
         }
 
         // TP/SL on order / 訂單附帶止盈止損
@@ -448,17 +447,11 @@ impl OrderManager {
         }
         if let Some(q) = req.qty {
             // Round qty if instrument info available / 有合約信息時取整
-            let rounded = self
-                .instruments
-                .round_qty(&req.symbol, q)
-                .unwrap_or(q);
+            let rounded = self.instruments.round_qty(&req.symbol, q).unwrap_or(q);
             body["qty"] = serde_json::Value::String(format_qty(rounded));
         }
         if let Some(p) = req.price {
-            let rounded = self
-                .instruments
-                .round_price(&req.symbol, p)
-                .unwrap_or(p);
+            let rounded = self.instruments.round_price(&req.symbol, p).unwrap_or(p);
             body["price"] = serde_json::Value::String(format_price(rounded));
         }
         if let Some(tp) = req.trigger_price {
@@ -517,10 +510,8 @@ impl OrderManager {
         limit: Option<u32>,
     ) -> BybitResult<Vec<OrderInfo>> {
         let limit_str = limit.unwrap_or(50).to_string();
-        let mut params: Vec<(&str, &str)> = vec![
-            ("category", category.as_str()),
-            ("limit", &limit_str),
-        ];
+        let mut params: Vec<(&str, &str)> =
+            vec![("category", category.as_str()), ("limit", &limit_str)];
         if let Some(sym) = symbol {
             params.push(("symbol", sym));
         }
@@ -543,10 +534,8 @@ impl OrderManager {
         limit: Option<u32>,
     ) -> BybitResult<Vec<ExecutionInfo>> {
         let limit_str = limit.unwrap_or(50).to_string();
-        let mut params: Vec<(&str, &str)> = vec![
-            ("category", category.as_str()),
-            ("limit", &limit_str),
-        ];
+        let mut params: Vec<(&str, &str)> =
+            vec![("category", category.as_str()), ("limit", &limit_str)];
         if let Some(sym) = symbol {
             params.push(("symbol", sym));
         }
@@ -567,10 +556,7 @@ impl OrderManager {
     ///
     /// Returns (rounded_qty, rounded_price_opt).
     /// 返回 (取整後的 qty, 取整後的 price 或 None)。
-    fn validate_and_round(
-        &self,
-        req: &CreateOrderRequest,
-    ) -> BybitResult<(f64, Option<f64>)> {
+    fn validate_and_round(&self, req: &CreateOrderRequest) -> BybitResult<(f64, Option<f64>)> {
         let spec = self.instruments.get(&req.symbol);
 
         let qty = if let Some(ref s) = spec {
@@ -1080,7 +1066,7 @@ mod tests {
             symbol: "BTCUSDT".to_string(),
             side: OrderSide::Buy,
             order_type: OrderType::Limit,
-            qty: 0.0156,       // should round to 0.015
+            qty: 0.0156,           // should round to 0.015
             price: Some(65000.55), // should round to 65000.6
             time_in_force: None,
             reduce_only: None,

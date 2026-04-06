@@ -19,23 +19,60 @@ pub struct BbReversionParams {
 
 impl Default for BbReversionParams {
     fn default() -> Self {
-        Self { cooldown_ms: 600_000, default_qty: 1e9, use_limit: false, limit_offset_bps: 10.0 }
+        Self {
+            cooldown_ms: 600_000,
+            default_qty: 1e9,
+            use_limit: false,
+            limit_offset_bps: 10.0,
+        }
     }
 }
 
 impl StrategyParams for BbReversionParams {
     fn param_ranges() -> Vec<ParamRange> {
         vec![
-            ParamRange { name: "cooldown_ms".into(), min: 60_000.0, max: 3_600_000.0, step: Some(60_000.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "default_qty".into(), min: 0.001, max: 1e12, step: None, agent_adjustable: false, db_persisted: true },
-            ParamRange { name: "use_limit".into(), min: 0.0, max: 1.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
-            ParamRange { name: "limit_offset_bps".into(), min: 1.0, max: 100.0, step: Some(1.0), agent_adjustable: true, db_persisted: true },
+            ParamRange {
+                name: "cooldown_ms".into(),
+                min: 60_000.0,
+                max: 3_600_000.0,
+                step: Some(60_000.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "default_qty".into(),
+                min: 0.001,
+                max: 1e12,
+                step: None,
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "use_limit".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "limit_offset_bps".into(),
+                min: 1.0,
+                max: 100.0,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.cooldown_ms < 60_000 { return Err("cooldown_ms must be >= 60s".into()); }
-        if self.limit_offset_bps < 0.0 || self.limit_offset_bps > 200.0 { return Err("limit_offset_bps must be in [0, 200]".into()); }
+        if self.cooldown_ms < 60_000 {
+            return Err("cooldown_ms must be >= 60s".into());
+        }
+        if self.limit_offset_bps < 0.0 || self.limit_offset_bps > 200.0 {
+            return Err("limit_offset_bps must be in [0, 200]".into());
+        }
         Ok(())
     }
 }
@@ -60,9 +97,15 @@ pub struct BbReversion {
 impl BbReversion {
     pub fn new() -> Self {
         Self {
-            active: true, position: None, last_trade_ms: 0, cooldown_ms: 600_000, default_qty: 1e9,
-            use_limit: false, limit_offset_bps: 10.0,
-            prev_position: None, prev_last_trade_ms: 0,
+            active: true,
+            position: None,
+            last_trade_ms: 0,
+            cooldown_ms: 600_000,
+            default_qty: 1e9,
+            use_limit: false,
+            limit_offset_bps: 10.0,
+            prev_position: None,
+            prev_last_trade_ms: 0,
         }
     }
 
@@ -89,8 +132,14 @@ impl BbReversion {
 
     /// Build an entry intent — may be limit or market depending on use_limit.
     /// 建構入場意圖 — 根據 use_limit 決定限價或市價單。
-    fn make_entry_intent(&self, ctx: &TickContext, is_long: bool, conf: f64,
-                         bb_lower: f64, bb_upper: f64) -> OrderIntent {
+    fn make_entry_intent(
+        &self,
+        ctx: &TickContext,
+        is_long: bool,
+        conf: f64,
+        bb_lower: f64,
+        bb_upper: f64,
+    ) -> OrderIntent {
         let (order_type, limit_price) = if self.use_limit {
             // RC-07: Place limit order slightly inside the Bollinger band
             // RC-07：在布林帶內側略偏位置掛限價單
@@ -106,8 +155,13 @@ impl BbReversion {
             ("market".to_string(), None)
         };
         OrderIntent {
-            symbol: ctx.symbol.clone(), is_long, qty: self.default_qty, confidence: conf,
-            strategy: self.name().into(), order_type, limit_price,
+            symbol: ctx.symbol.clone(),
+            is_long,
+            qty: self.default_qty,
+            confidence: conf,
+            strategy: self.name().into(),
+            order_type,
+            limit_price,
         }
     }
 
@@ -115,16 +169,27 @@ impl BbReversion {
     /// 建構出場意圖 — 永遠使用市價單以確保成交。
     fn make_exit_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
         OrderIntent {
-            symbol: ctx.symbol.clone(), is_long, qty: self.default_qty, confidence: conf,
-            strategy: self.name().into(), order_type: "market".into(), limit_price: None,
+            symbol: ctx.symbol.clone(),
+            is_long,
+            qty: self.default_qty,
+            confidence: conf,
+            strategy: self.name().into(),
+            order_type: "market".into(),
+            limit_price: None,
         }
     }
 }
 
 impl Strategy for BbReversion {
-    fn name(&self) -> &str { "bb_reversion" }
-    fn is_active(&self) -> bool { self.active }
-    fn set_active(&mut self, active: bool) { self.active = active; }
+    fn name(&self) -> &str {
+        "bb_reversion"
+    }
+    fn is_active(&self) -> bool {
+        self.active
+    }
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
 
     /// RC-04: Revert position and last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 position 和 last_trade_ms。
@@ -134,10 +199,18 @@ impl Strategy for BbReversion {
     }
 
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
-        let ind = match &ctx.indicators { Some(i) => i, None => return vec![] };
-        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms { return vec![]; }
+        let ind = match &ctx.indicators {
+            Some(i) => i,
+            None => return vec![],
+        };
+        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms {
+            return vec![];
+        }
 
-        let bb = match &ind.bollinger { Some(b) => b, None => return vec![] };
+        let bb = match &ind.bollinger {
+            Some(b) => b,
+            None => return vec![],
+        };
         let rsi = ind.rsi_14.unwrap_or(50.0);
 
         // A4: Hurst regime boost — mean-reverting regime boosts reversion confidence
@@ -158,14 +231,22 @@ impl Strategy for BbReversion {
                 // Entry: oversold long / 入場：超賣做多
                 if bb.percent_b < 0.0 && rsi < 30.0 {
                     intents.push(self.make_entry_intent(
-                        ctx, true, (0.6_f64 + hurst_boost).min(1.0), bb.lower, bb.upper,
+                        ctx,
+                        true,
+                        (0.6_f64 + hurst_boost).min(1.0),
+                        bb.lower,
+                        bb.upper,
                     ));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 // Entry: overbought short / 入場：超買做空
                 } else if bb.percent_b > 1.0 && rsi > 70.0 {
                     intents.push(self.make_entry_intent(
-                        ctx, false, (0.6_f64 + hurst_boost).min(1.0), bb.lower, bb.upper,
+                        ctx,
+                        false,
+                        (0.6_f64 + hurst_boost).min(1.0),
+                        bb.lower,
+                        bb.upper,
                     ));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
@@ -204,15 +285,22 @@ mod tests {
 
     fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext {
         TickContext {
-            symbol: "BTC".into(), price: 50000.0, timestamp_ms: ts,
+            symbol: "BTC".into(),
+            price: 50000.0,
+            timestamp_ms: ts,
             indicators: Some(IndicatorSnapshot {
                 bollinger: Some(BollingerResult {
-                    upper: 51000.0, middle: 50000.0, lower: 49000.0,
-                    bandwidth: 0.04, percent_b: pct_b,
+                    upper: 51000.0,
+                    middle: 50000.0,
+                    lower: 49000.0,
+                    bandwidth: 0.04,
+                    percent_b: pct_b,
                 }),
-                rsi_14: Some(rsi), ..Default::default()
+                rsi_14: Some(rsi),
+                ..Default::default()
             }),
-            signals: vec![], h0_allowed: true,
+            signals: vec![],
+            h0_allowed: true,
         }
     }
 
@@ -247,8 +335,12 @@ mod tests {
         assert_eq!(i[0].order_type, "limit");
         // limit_price = lower * (1 + 10/10000) = 49000 * 1.001 = 49049.0
         let expected = 49000.0 * (1.0 + 10.0 / 10_000.0);
-        assert!((i[0].limit_price.unwrap() - expected).abs() < 1e-6,
-            "expected limit_price={}, got={}", expected, i[0].limit_price.unwrap());
+        assert!(
+            (i[0].limit_price.unwrap() - expected).abs() < 1e-6,
+            "expected limit_price={}, got={}",
+            expected,
+            i[0].limit_price.unwrap()
+        );
     }
 
     #[test]
@@ -264,8 +356,12 @@ mod tests {
         assert_eq!(i[0].order_type, "limit");
         // limit_price = upper * (1 - 10/10000) = 51000 * 0.999 = 50949.0
         let expected = 51000.0 * (1.0 - 10.0 / 10_000.0);
-        assert!((i[0].limit_price.unwrap() - expected).abs() < 1e-6,
-            "expected limit_price={}, got={}", expected, i[0].limit_price.unwrap());
+        assert!(
+            (i[0].limit_price.unwrap() - expected).abs() < 1e-6,
+            "expected limit_price={}, got={}",
+            expected,
+            i[0].limit_price.unwrap()
+        );
     }
 
     #[test]
@@ -304,13 +400,22 @@ mod tests {
     #[test]
     fn test_bb_rev_validate() {
         assert!(BbReversionParams::default().validate().is_ok());
-        assert!(BbReversionParams { cooldown_ms: 1000, ..Default::default() }.validate().is_err());
+        assert!(BbReversionParams {
+            cooldown_ms: 1000,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
     fn test_bb_rev_update_roundtrip() {
         let mut s = BbReversion::new();
-        let p = BbReversionParams { use_limit: true, limit_offset_bps: 20.0, ..Default::default() };
+        let p = BbReversionParams {
+            use_limit: true,
+            limit_offset_bps: 20.0,
+            ..Default::default()
+        };
         assert!(s.update_params(p).is_ok());
         assert!(s.get_params().use_limit);
         assert!((s.get_params().limit_offset_bps - 20.0).abs() < 0.01);

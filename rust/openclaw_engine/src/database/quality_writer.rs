@@ -85,7 +85,7 @@ async fn write_quality_event(
         "INSERT INTO observability.data_quality_events \
          (ts, event_id, check_type, symbol, timeframe, severity, description) \
          VALUES ($1, $2, $3, $4, $5, $6, $7) \
-         ON CONFLICT (event_id, ts) DO NOTHING"
+         ON CONFLICT (event_id, ts) DO NOTHING",
     )
     .bind(ts)
     .bind(event_id)
@@ -98,7 +98,12 @@ async fn write_quality_event(
     .await;
 
     match result {
-        Ok(_) => debug!(event_id = event_id, "quality event written / 質量事件已寫入"),
-        Err(e) => warn!(event_id = event_id, error = %e, "quality event write failed / 質量事件寫入失敗"),
+        Ok(_) => debug!(
+            event_id = event_id,
+            "quality event written / 質量事件已寫入"
+        ),
+        Err(e) => {
+            warn!(event_id = event_id, error = %e, "quality event write failed / 質量事件寫入失敗")
+        }
     }
 }

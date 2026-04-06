@@ -134,7 +134,12 @@ impl IpcServer {
         data_dir: impl Into<String>,
         paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
     ) -> Self {
-        Self { config, cancel, data_dir: Arc::new(PathBuf::from(data_dir.into())), paper_cmd_tx }
+        Self {
+            config,
+            cancel,
+            data_dir: Arc::new(PathBuf::from(data_dir.into())),
+            paper_cmd_tx,
+        }
     }
 
     /// Start listening. This function runs until cancellation.
@@ -165,7 +170,21 @@ impl IpcServer {
         let listener = UnixListener::bind(socket_path)
             .map_err(|e| IpcError::Setup(format!("failed to bind socket '{socket_path}': {e}")))?;
 
-        info!(path = socket_path, "IPC server listening / IPC 服務器已啟動");
+        // I-02: restrict socket to owner (0o600) to prevent unauthorized IPC access.
+        // I-02：將套接字限制為所有者可讀寫（0o600），防止未授權 IPC 訪問。
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) =
+                std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))
+            {
+                warn!(path = socket_path, error = %e, "failed to set socket mode 0o600 / 設定套接字權限失敗");
+            }
+        }
+
+        info!(
+            path = socket_path,
+            "IPC server listening / IPC 服務器已啟動"
+        );
 
         loop {
             tokio::select! {
@@ -287,18 +306,38 @@ async fn dispatch_request(
         "reload_config" => handle_reload_config(id, config),
         "evaluate_strategy" => handle_evaluate_strategy(id, &req.params),
         "get_risk_check" => handle_get_risk_check(id, &req.params),
-        "get_paper_state" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.paper_state)),
-        "get_latest_prices" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.latest_prices)),
+        "get_paper_state" => {
+            handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.paper_state))
+        }
+        "get_latest_prices" => {
+            handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.latest_prices))
+        }
         "get_tick_stats" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.stats)),
         // ── Paper session control commands / 紙盤 session 控制命令 ──
         "pause_paper" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Pause, "paused"),
-        "resume_paper" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Resume, "resumed"),
-        "close_all_positions" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::CloseAll, "close_all_sent"),
+        "resume_paper" => {
+            handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Resume, "resumed")
+        }
+        "close_all_positions" => handle_paper_cmd(
+            id,
+            paper_cmd_tx,
+            PaperSessionCommand::CloseAll,
+            "close_all_sent",
+        ),
         "reset_paper_state" => {
-            let balance = req.params.get("new_balance")
+            let balance = req
+                .params
+                .get("new_balance")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(10_000.0);
-            handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Reset { new_balance: balance }, "reset_sent")
+            handle_paper_cmd(
+                id,
+                paper_cmd_tx,
+                PaperSessionCommand::Reset {
+                    new_balance: balance,
+                },
+                "reset_sent",
+            )
         }
         // ── Phase 3b: Strategy parameter commands (Optuna → Rust) / 策略參數命令 ──
         "update_strategy_params" => {
@@ -310,13 +349,9 @@ async fn dispatch_request(
         "get_param_ranges" => {
             handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Ranges).await
         }
-        "update_risk_config" => {
-            handle_update_risk_config(id, paper_cmd_tx, &req.params).await
-        }
+        "update_risk_config" => handle_update_risk_config(id, paper_cmd_tx, &req.params).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
-        "set_strategy_active" => {
-            handle_set_strategy_active(id, paper_cmd_tx, &req.params).await
-        }
+        "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -328,7 +363,6 @@ async fn dispatch_request(
 // ---------------------------------------------------------------------------
 // Method handlers / 方法處理器
 // ---------------------------------------------------------------------------
-
 
 /// Handle paper session command — send to event consumer via channel.
 /// 處理紙盤 session 命令 — 通過通道發送到事件消費者。
@@ -383,10 +417,7 @@ fn handle_reload_config(id: serde_json::Value, config: &Arc<ConfigManager>) -> J
 
 /// Evaluate strategy placeholder (stub — returns TTL info).
 /// 策略評估佔位符（存根 — 返回 TTL 資訊）。
-fn handle_evaluate_strategy(
-    id: serde_json::Value,
-    params: &serde_json::Value,
-) -> JsonRpcResponse {
+fn handle_evaluate_strategy(id: serde_json::Value, params: &serde_json::Value) -> JsonRpcResponse {
     let symbol = params
         .get("symbol")
         .and_then(|v| v.as_str())
@@ -439,12 +470,20 @@ async fn handle_strategy_param_cmd(
 ) -> JsonRpcResponse {
     let tx = match tx {
         Some(tx) => tx,
-        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured"),
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
     };
 
     let strategy_name = match params.get("strategy_name").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
-        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing strategy_name parameter"),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "missing strategy_name parameter",
+            )
+        }
     };
 
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
@@ -458,18 +497,30 @@ async fn handle_strategy_param_cmd(
                     // 也接受 params_json 作為對象並序列化
                     match params.get("params_json") {
                         Some(v) if v.is_object() => serde_json::to_string(v).unwrap_or_default(),
-                        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing params_json parameter"),
+                        _ => {
+                            return JsonRpcResponse::error(
+                                id,
+                                ERR_INVALID_REQUEST,
+                                "missing params_json parameter",
+                            )
+                        }
                     }
                 }
             };
-            PaperSessionCommand::UpdateStrategyParams { strategy_name, params_json, response_tx: resp_tx }
+            PaperSessionCommand::UpdateStrategyParams {
+                strategy_name,
+                params_json,
+                response_tx: resp_tx,
+            }
         }
-        StrategyParamOp::Get => {
-            PaperSessionCommand::GetStrategyParams { strategy_name, response_tx: resp_tx }
-        }
-        StrategyParamOp::Ranges => {
-            PaperSessionCommand::GetParamRanges { strategy_name, response_tx: resp_tx }
-        }
+        StrategyParamOp::Get => PaperSessionCommand::GetStrategyParams {
+            strategy_name,
+            response_tx: resp_tx,
+        },
+        StrategyParamOp::Ranges => PaperSessionCommand::GetParamRanges {
+            strategy_name,
+            response_tx: resp_tx,
+        },
     };
 
     if let Err(e) = tx.send(cmd) {
@@ -491,9 +542,9 @@ async fn handle_strategy_param_cmd(
 /// 解析 JSON 中的 Option<Option<f64>>：不存在=None，null=Some(None)，數字=Some(Some(x))。
 fn parse_opt_opt_f64(params: &serde_json::Value, key: &str) -> Option<Option<f64>> {
     match params.get(key) {
-        None => None,                          // key absent = no change
-        Some(v) if v.is_null() => Some(None),  // key: null = disable
-        Some(v) => v.as_f64().map(Some),       // key: 2.5 = enable with value
+        None => None,                         // key absent = no change
+        Some(v) if v.is_null() => Some(None), // key: null = disable
+        Some(v) => v.as_f64().map(Some),      // key: 2.5 = enable with value
     }
 }
 
@@ -504,7 +555,9 @@ async fn handle_update_risk_config(
 ) -> JsonRpcResponse {
     let tx = match paper_cmd_tx {
         Some(tx) => tx,
-        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string()),
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
+        }
     };
 
     // Parse all risk params / 解析所有風控參數
@@ -516,26 +569,43 @@ async fn handle_update_risk_config(
     let take_profit_pct = parse_opt_opt_f64(params, "take_profit_pct");
     let max_leverage = params.get("max_leverage").and_then(|v| v.as_f64());
     let max_drawdown_pct = params.get("max_drawdown_pct").and_then(|v| v.as_f64());
-    let max_same_direction_positions = params.get("max_same_direction_positions")
-        .and_then(|v| v.as_u64()).map(|v| v as usize);
+    let max_same_direction_positions = params
+        .get("max_same_direction_positions")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
     // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
     let h0_shadow_mode = params.get("h0_shadow_mode").and_then(|v| v.as_bool());
 
     // At least one param must be provided / 至少需要一個參數
-    let has_any = hard_stop_pct.is_some() || p1_risk_pct.is_some()
-        || trailing_stop_pct.is_some() || time_stop_hours.is_some()
-        || atr_multiplier.is_some() || take_profit_pct.is_some()
-        || max_leverage.is_some() || max_drawdown_pct.is_some()
+    let has_any = hard_stop_pct.is_some()
+        || p1_risk_pct.is_some()
+        || trailing_stop_pct.is_some()
+        || time_stop_hours.is_some()
+        || atr_multiplier.is_some()
+        || take_profit_pct.is_some()
+        || max_leverage.is_some()
+        || max_drawdown_pct.is_some()
         || max_same_direction_positions.is_some()
         || h0_shadow_mode.is_some();
     if !has_any {
-        return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "need at least one risk parameter".to_string());
+        return JsonRpcResponse::error(
+            id,
+            ERR_INVALID_REQUEST,
+            "need at least one risk parameter".to_string(),
+        );
     }
 
     let _ = tx.send(PaperSessionCommand::UpdateRiskConfig {
-        hard_stop_pct, trailing_stop_pct, time_stop_hours, atr_multiplier,
-        take_profit_pct, max_leverage, max_drawdown_pct,
-        max_same_direction_positions, p1_risk_pct, h0_shadow_mode,
+        hard_stop_pct,
+        trailing_stop_pct,
+        time_stop_hours,
+        atr_multiplier,
+        take_profit_pct,
+        max_leverage,
+        max_drawdown_pct,
+        max_same_direction_positions,
+        p1_risk_pct,
+        h0_shadow_mode,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
@@ -548,35 +618,51 @@ async fn handle_set_strategy_active(
 ) -> JsonRpcResponse {
     let tx = match paper_cmd_tx {
         Some(tx) => tx,
-        None => return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string()),
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
+        }
     };
     let name = match params.get("strategy_name").and_then(|v| v.as_str()) {
         Some(n) => n.to_string(),
-        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing strategy_name".to_string()),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "missing strategy_name".to_string(),
+            )
+        }
     };
     let active = match params.get("active").and_then(|v| v.as_bool()) {
         Some(a) => a,
-        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing active (bool)".to_string()),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "missing active (bool)".to_string(),
+            )
+        }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
     let _ = tx.send(PaperSessionCommand::SetStrategyActive {
-        strategy_name: name, active, response_tx: resp_tx,
+        strategy_name: name,
+        active,
+        response_tx: resp_tx,
     });
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
-        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Ok(msg))) => {
+            JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg }))
+        }
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
-        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for engine".to_string()),
+        Err(_) => {
+            JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for engine".to_string())
+        }
     }
 }
 
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).
 /// 讀取 pipeline_snapshot.json 並提取欄位（R06-A 輔助函數 — 三個 handler 共用）。
-fn handle_snapshot_field<F>(
-    id: serde_json::Value,
-    data_dir: &Path,
-    extract: F,
-) -> JsonRpcResponse
+fn handle_snapshot_field<F>(id: serde_json::Value, data_dir: &Path, extract: F) -> JsonRpcResponse
 where
     F: FnOnce(&PipelineSnapshot) -> Result<serde_json::Value, serde_json::Error>,
 {
@@ -663,10 +749,7 @@ mod tests {
                 }],
                 bybit_sync_balance: None,
             },
-            latest_prices: HashMap::from([
-                ("BTCUSDT".into(), 66000.0),
-                ("ETHUSDT".into(), 3200.0),
-            ]),
+            latest_prices: HashMap::from([("BTCUSDT".into(), 66000.0), ("ETHUSDT".into(), 3200.0)]),
             stats: crate::tick_pipeline::TickStats {
                 total_ticks: 5000,
                 total_intents: 15,
@@ -698,13 +781,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ipc_socket_permissions_0o600() {
+        // I-02: verify bound Unix socket gets restricted to 0o600.
+        // I-02：驗證綁定的 Unix 套接字權限被限制為 0o600。
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("ipc_perm_test.sock");
+        let _listener = UnixListener::bind(&sock_path).unwrap();
+        std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mode = std::fs::metadata(&sock_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "socket mode should be 0o600, got {:o}", mode);
+    }
+
+    #[tokio::test]
     async fn test_dispatch_ping() {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
         let resp = dispatch_request(req, &config, &dd, &None).await;
         assert!(resp.error.is_none());
-        assert_eq!(resp.result.unwrap(), serde_json::Value::String("pong".into()));
+        assert_eq!(
+            resp.result.unwrap(),
+            serde_json::Value::String("pong".into())
+        );
         assert_eq!(resp.id, serde_json::json!(1));
     }
 
@@ -828,7 +927,10 @@ mod tests {
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
         let resp = dispatch_request(req, &config, &dd, &None).await;
-        assert!(resp.error.is_some(), "should error when snapshot file missing");
+        assert!(
+            resp.error.is_some(),
+            "should error when snapshot file missing"
+        );
     }
 
     #[tokio::test]
@@ -878,19 +980,28 @@ mod tests {
     fn setup_strategy_param_channel() -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
         tokio::spawn(async move {
-            use crate::strategies::{Strategy, ma_crossover::MaCrossover};
+            use crate::strategies::{ma_crossover::MaCrossover, Strategy};
             let mut strategy: Box<dyn Strategy> = Box::new(MaCrossover::new());
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    PaperSessionCommand::UpdateStrategyParams { strategy_name, params_json, response_tx } => {
+                    PaperSessionCommand::UpdateStrategyParams {
+                        strategy_name,
+                        params_json,
+                        response_tx,
+                    } => {
                         let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
-                            strategy.update_params_json(&params_json).map(|()| format!("params updated for {}", strategy_name))
+                            strategy
+                                .update_params_json(&params_json)
+                                .map(|()| format!("params updated for {}", strategy_name))
                         } else {
                             Err(format!("strategy not found: {strategy_name}"))
                         };
                         let _ = response_tx.send(result);
                     }
-                    PaperSessionCommand::GetStrategyParams { strategy_name, response_tx } => {
+                    PaperSessionCommand::GetStrategyParams {
+                        strategy_name,
+                        response_tx,
+                    } => {
                         let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
                             Ok(strategy.get_params_json())
                         } else {
@@ -898,7 +1009,10 @@ mod tests {
                         };
                         let _ = response_tx.send(result);
                     }
-                    PaperSessionCommand::GetParamRanges { strategy_name, response_tx } => {
+                    PaperSessionCommand::GetParamRanges {
+                        strategy_name,
+                        response_tx,
+                    } => {
                         let result = if strategy.name().eq_ignore_ascii_case(&strategy_name) {
                             Ok(strategy.param_ranges_json())
                         } else {
@@ -938,7 +1052,10 @@ mod tests {
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
         let params: serde_json::Value = serde_json::from_str(params_str).unwrap();
-        assert!(params.get("cooldown_ms").is_some(), "should contain cooldown_ms");
+        assert!(
+            params.get("cooldown_ms").is_some(),
+            "should contain cooldown_ms"
+        );
     }
 
     #[tokio::test]
@@ -958,7 +1075,10 @@ mod tests {
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
         let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
-        assert!(resp.error.is_some(), "should error for nonexistent strategy");
+        assert!(
+            resp.error.is_some(),
+            "should error for nonexistent strategy"
+        );
     }
 
     #[tokio::test]
@@ -968,6 +1088,9 @@ mod tests {
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
         let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
-        assert!(resp.error.is_some(), "should error when params_json missing");
+        assert!(
+            resp.error.is_some(),
+            "should error when params_json missing"
+        );
     }
 }

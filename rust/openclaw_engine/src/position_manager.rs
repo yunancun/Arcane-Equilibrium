@@ -195,10 +195,7 @@ impl PositionManager {
             "setting leverage / 設置槓桿"
         );
 
-        let resp = self
-            .client
-            .post("/v5/position/set-leverage", &body)
-            .await?;
+        let resp = self.client.post("/v5/position/set-leverage", &body).await?;
 
         // 110043 = leverage not modified (already set) — treat as success
         // 110043 = 槓桿未修改（已設置）— 視為成功
@@ -421,10 +418,8 @@ impl PositionManager {
         limit: Option<u32>,
     ) -> BybitResult<Vec<ClosedPnlInfo>> {
         let limit_str = limit.unwrap_or(50).to_string();
-        let mut params: Vec<(&str, &str)> = vec![
-            ("category", category.as_str()),
-            ("limit", &limit_str),
-        ];
+        let mut params: Vec<(&str, &str)> =
+            vec![("category", category.as_str()), ("limit", &limit_str)];
         if let Some(sym) = symbol {
             params.push(("symbol", sym));
         }

@@ -99,10 +99,7 @@ impl SpotMarginClient {
     /// 獲取交易對的現貨保證金交易數據。
     ///
     /// GET /v5/spot-margin-trade/data
-    pub async fn get_margin_data(
-        &self,
-        symbol: Option<&str>,
-    ) -> BybitResult<Vec<SpotMarginData>> {
+    pub async fn get_margin_data(&self, symbol: Option<&str>) -> BybitResult<Vec<SpotMarginData>> {
         debug!("fetching spot margin data / 獲取現貨保證金數據");
         let mut params: Vec<(&str, &str)> = vec![];
         if let Some(sym) = symbol {

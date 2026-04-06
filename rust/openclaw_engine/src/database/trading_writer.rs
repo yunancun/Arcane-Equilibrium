@@ -60,7 +60,14 @@ pub async fn run_trading_writer(
     }
 
     if pool.is_available() {
-        flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf, &mut pos_buf).await;
+        flush_all(
+            &pool,
+            &mut signal_buf,
+            &mut intent_buf,
+            &mut fill_buf,
+            &mut pos_buf,
+        )
+        .await;
     }
     info!("trading_writer stopped / 交易寫入器已停止");
 }
@@ -72,22 +79,36 @@ async fn flush_all(
     fills: &mut Vec<TradingMsg>,
     positions: &mut Vec<TradingMsg>,
 ) {
-    if !signals.is_empty() { flush_signals(pool, signals).await; }
-    if !intents.is_empty() { flush_intents(pool, intents).await; }
-    if !fills.is_empty() { flush_fills(pool, fills).await; }
-    if !positions.is_empty() { flush_positions(pool, positions).await; }
+    if !signals.is_empty() {
+        flush_signals(pool, signals).await;
+    }
+    if !intents.is_empty() {
+        flush_intents(pool, intents).await;
+    }
+    if !fills.is_empty() {
+        flush_fills(pool, fills).await;
+    }
+    if !positions.is_empty() {
+        flush_positions(pool, positions).await;
+    }
 }
 
 /// Max rows per batch INSERT to stay under PostgreSQL's 65535 parameter limit.
 /// 每批 INSERT 的最大行數，避免超過 PostgreSQL 65535 參數上限。
 /// signals = 8 columns → 65535/8 = 8191, use 5000 as safe limit.
 const SIGNAL_BATCH_MAX: usize = 5000;
-const INTENT_BATCH_MAX: usize = 5000;  // 10 columns → 6553 max
-const FILL_BATCH_MAX: usize = 4000;    // 12 columns → 5461 max
+const INTENT_BATCH_MAX: usize = 5000; // 10 columns → 6553 max
+const FILL_BATCH_MAX: usize = 4000; // 12 columns → 5461 max
 const POSITION_BATCH_MAX: usize = 5000; // 8 columns → 8191 max
 
 async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
-    let pg = match pool.get() { Some(p) => p, None => { buf.clear(); return; } };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
     // Chunk to avoid exceeding PG parameter limit (65535 max)
     // 分塊避免超過 PG 參數上限
     for chunk in buf.chunks(SIGNAL_BATCH_MAX) {
@@ -95,8 +116,20 @@ async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
             "INSERT INTO trading.signals (ts, signal_id, symbol, strategy_name, timeframe, signal_type, strength, context_id) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
-            if let TradingMsg::Signal { signal_id, ts_ms, symbol, strategy_name, timeframe, signal_type, strength, context_id } = msg {
-                b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            if let TradingMsg::Signal {
+                signal_id,
+                ts_ms,
+                symbol,
+                strategy_name,
+                timeframe,
+                signal_type,
+                strength,
+                context_id,
+            } = msg
+            {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
                 b.push_bind(signal_id.as_str());
                 b.push_bind(symbol.as_str());
                 b.push_bind(strategy_name.as_str());
@@ -108,22 +141,52 @@ async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (signal_id, ts) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), chunk_size = chunk.len(), "signals flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "signals flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(
+                    rows = r.rows_affected(),
+                    chunk_size = chunk.len(),
+                    "signals flushed"
+                );
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "signals flush failed");
+            }
         }
     }
     buf.clear();
 }
 
 async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
-    let pg = match pool.get() { Some(p) => p, None => { buf.clear(); return; } };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
     for chunk in buf.chunks(INTENT_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
             "INSERT INTO trading.intents (ts, intent_id, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
-            if let TradingMsg::Intent { intent_id, ts_ms, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name } = msg {
-                b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            if let TradingMsg::Intent {
+                intent_id,
+                ts_ms,
+                signal_id,
+                context_id,
+                symbol,
+                side,
+                qty,
+                price,
+                order_type,
+                strategy_name,
+            } = msg
+            {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
                 b.push_bind(intent_id.as_str());
                 b.push_bind(signal_id.as_str());
                 b.push_bind(context_id.as_str());
@@ -137,22 +200,49 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (intent_id, ts) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "intents flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "intents flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "intents flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "intents flush failed");
+            }
         }
     }
     buf.clear();
 }
 
 async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
-    let pg = match pool.get() { Some(p) => p, None => { buf.clear(); return; } };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
     for chunk in buf.chunks(FILL_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
             "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, realized_pnl, is_paper, strategy_name, context_id) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
-            if let TradingMsg::Fill { fill_id, ts_ms, order_id, symbol, side, qty, price, fee, realized_pnl, strategy_name, context_id } = msg {
-                b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            if let TradingMsg::Fill {
+                fill_id,
+                ts_ms,
+                order_id,
+                symbol,
+                side,
+                qty,
+                price,
+                fee,
+                realized_pnl,
+                strategy_name,
+                context_id,
+            } = msg
+            {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
                 b.push_bind(fill_id.as_str());
                 b.push_bind(order_id.as_str());
                 b.push_bind(symbol.as_str());
@@ -168,22 +258,45 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "fills flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "fills flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "fills flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "fills flush failed");
+            }
         }
     }
     buf.clear();
 }
 
 async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
-    let pg = match pool.get() { Some(p) => p, None => { buf.clear(); return; } };
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
     for chunk in buf.chunks(POSITION_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
             "INSERT INTO trading.position_snapshots (ts, symbol, side, qty, entry_price, mark_price, unrealized_pnl, is_paper) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
-            if let TradingMsg::PositionSnapshot { ts_ms, symbol, side, qty, entry_price, mark_price, unrealized_pnl } = msg {
-                b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
+            if let TradingMsg::PositionSnapshot {
+                ts_ms,
+                symbol,
+                side,
+                qty,
+                entry_price,
+                mark_price,
+                unrealized_pnl,
+            } = msg
+            {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
                 b.push_bind(symbol.as_str());
                 b.push_bind(side.as_str());
                 b.push_bind(sanitize_f64(*qty).map(|v| v as f32));
@@ -195,8 +308,14 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         });
         qb.push(" ON CONFLICT (symbol, side, ts) DO NOTHING");
         match qb.build().execute(pg).await {
-            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "positions flushed"); }
-            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "positions flush failed"); }
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "positions flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "positions flush failed");
+            }
         }
     }
     buf.clear();
@@ -209,16 +328,29 @@ mod tests {
     #[test]
     fn test_trading_msg_routing() {
         let sig = TradingMsg::Signal {
-            signal_id: "s1".into(), ts_ms: 0, symbol: "BTC".into(),
-            strategy_name: "ma".into(), timeframe: "1m".into(),
-            signal_type: "LONG".into(), strength: 0.8, context_id: "c1".into(),
+            signal_id: "s1".into(),
+            ts_ms: 0,
+            symbol: "BTC".into(),
+            strategy_name: "ma".into(),
+            timeframe: "1m".into(),
+            signal_type: "LONG".into(),
+            strength: 0.8,
+            context_id: "c1".into(),
         };
         assert!(matches!(sig, TradingMsg::Signal { .. }));
 
         let fill = TradingMsg::Fill {
-            fill_id: "f1".into(), ts_ms: 0, order_id: "o1".into(),
-            symbol: "BTC".into(), side: "Buy".into(), qty: 0.1, price: 50000.0,
-            fee: 2.75, realized_pnl: 0.0, strategy_name: "ma".into(), context_id: "c1".into(),
+            fill_id: "f1".into(),
+            ts_ms: 0,
+            order_id: "o1".into(),
+            symbol: "BTC".into(),
+            side: "Buy".into(),
+            qty: 0.1,
+            price: 50000.0,
+            fee: 2.75,
+            realized_pnl: 0.0,
+            strategy_name: "ma".into(),
+            context_id: "c1".into(),
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
     }
@@ -227,10 +359,19 @@ mod tests {
     fn test_batch_limits_under_pg_param_max() {
         // Verify batch constants stay under PG 65535 param limit
         // 驗證批次常數不超過 PG 65535 參數上限
-        assert!(SIGNAL_BATCH_MAX * 8 <= 65535, "signals batch exceeds PG limit");
-        assert!(INTENT_BATCH_MAX * 10 <= 65535, "intents batch exceeds PG limit");
+        assert!(
+            SIGNAL_BATCH_MAX * 8 <= 65535,
+            "signals batch exceeds PG limit"
+        );
+        assert!(
+            INTENT_BATCH_MAX * 10 <= 65535,
+            "intents batch exceeds PG limit"
+        );
         assert!(FILL_BATCH_MAX * 12 <= 65535, "fills batch exceeds PG limit");
-        assert!(POSITION_BATCH_MAX * 8 <= 65535, "positions batch exceeds PG limit");
+        assert!(
+            POSITION_BATCH_MAX * 8 <= 65535,
+            "positions batch exceeds PG limit"
+        );
     }
 
     #[test]
@@ -241,10 +382,50 @@ mod tests {
         let mut positions = Vec::new();
 
         let msgs: Vec<TradingMsg> = vec![
-            TradingMsg::Signal { signal_id: "s1".into(), ts_ms: 0, symbol: "BTC".into(), strategy_name: "ma".into(), timeframe: "1m".into(), signal_type: "LONG".into(), strength: 0.8, context_id: "c1".into() },
-            TradingMsg::Intent { intent_id: "i1".into(), ts_ms: 0, signal_id: "s1".into(), context_id: "c1".into(), symbol: "BTC".into(), side: "Buy".into(), qty: 0.1, price: 50000.0, order_type: "market".into(), strategy_name: "ma".into() },
-            TradingMsg::Fill { fill_id: "f1".into(), ts_ms: 0, order_id: "o1".into(), symbol: "BTC".into(), side: "Buy".into(), qty: 0.1, price: 50000.0, fee: 2.75, realized_pnl: 0.0, strategy_name: "ma".into(), context_id: "c1".into() },
-            TradingMsg::PositionSnapshot { ts_ms: 0, symbol: "BTC".into(), side: "Long".into(), qty: 0.1, entry_price: 50000.0, mark_price: 50100.0, unrealized_pnl: 10.0 },
+            TradingMsg::Signal {
+                signal_id: "s1".into(),
+                ts_ms: 0,
+                symbol: "BTC".into(),
+                strategy_name: "ma".into(),
+                timeframe: "1m".into(),
+                signal_type: "LONG".into(),
+                strength: 0.8,
+                context_id: "c1".into(),
+            },
+            TradingMsg::Intent {
+                intent_id: "i1".into(),
+                ts_ms: 0,
+                signal_id: "s1".into(),
+                context_id: "c1".into(),
+                symbol: "BTC".into(),
+                side: "Buy".into(),
+                qty: 0.1,
+                price: 50000.0,
+                order_type: "market".into(),
+                strategy_name: "ma".into(),
+            },
+            TradingMsg::Fill {
+                fill_id: "f1".into(),
+                ts_ms: 0,
+                order_id: "o1".into(),
+                symbol: "BTC".into(),
+                side: "Buy".into(),
+                qty: 0.1,
+                price: 50000.0,
+                fee: 2.75,
+                realized_pnl: 0.0,
+                strategy_name: "ma".into(),
+                context_id: "c1".into(),
+            },
+            TradingMsg::PositionSnapshot {
+                ts_ms: 0,
+                symbol: "BTC".into(),
+                side: "Long".into(),
+                qty: 0.1,
+                entry_price: 50000.0,
+                mark_price: 50100.0,
+                unrealized_pnl: 10.0,
+            },
         ];
 
         for m in msgs {

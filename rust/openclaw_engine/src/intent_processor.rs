@@ -160,7 +160,11 @@ impl IntentProcessor {
             return 0.0;
         }
         let loss = self.daily_start_balance - current_balance;
-        if loss <= 0.0 { 0.0 } else { loss / self.daily_start_balance * 100.0 }
+        if loss <= 0.0 {
+            0.0
+        } else {
+            loss / self.daily_start_balance * 100.0
+        }
     }
 
     /// RRC-1-C2: Public accessor for daily loss percentage (used by tick_pipeline Step 6).
@@ -173,11 +177,17 @@ impl IntentProcessor {
     /// RRC-1-B3：從持倉計算總曝險百分比。
     fn compute_exposure_pct(paper_state: &PaperState) -> f64 {
         let balance = paper_state.balance();
-        if balance <= 0.0 { return 0.0; }
-        let total_notional: f64 = paper_state.positions().iter().map(|p| {
-            let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
-            p.qty * price
-        }).sum();
+        if balance <= 0.0 {
+            return 0.0;
+        }
+        let total_notional: f64 = paper_state
+            .positions()
+            .iter()
+            .map(|p| {
+                let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
+                p.qty * price
+            })
+            .sum();
         (total_notional / balance * 100.0).min(999.0)
     }
 
@@ -226,11 +236,16 @@ impl IntentProcessor {
         }
 
         // Gate 2: Guardian 4-check
-        let positions: Vec<ExistingPosition> = paper_state.positions()
+        let positions: Vec<ExistingPosition> = paper_state
+            .positions()
             .iter()
             .map(|p| ExistingPosition {
                 symbol: p.symbol.clone(),
-                side: if p.is_long { "Buy".into() } else { "Sell".into() },
+                side: if p.is_long {
+                    "Buy".into()
+                } else {
+                    "Sell".into()
+                },
             })
             .collect();
 
@@ -241,7 +256,11 @@ impl IntentProcessor {
 
         let check = TradeIntentCheck {
             symbol: intent.symbol.clone(),
-            side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+            side: if intent.is_long {
+                "Buy".into()
+            } else {
+                "Sell".into()
+            },
             leverage: 1.0, // paper = 1x
             qty: intent.qty,
         };
@@ -252,7 +271,10 @@ impl IntentProcessor {
             Verdict::Rejected => {
                 return IntentResult {
                     submitted: false,
-                    rejected_reason: Some(format!("guardian_rejected: {:?}", guardian_result.reasons)),
+                    rejected_reason: Some(format!(
+                        "guardian_rejected: {:?}",
+                        guardian_result.reasons
+                    )),
                     fill: None,
                 };
             }
@@ -270,12 +292,22 @@ impl IntentProcessor {
         let guardian_qty = guardian_result.modified_qty.unwrap_or(intent.qty);
 
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
-            let stats = self.trade_stats.get(&intent.symbol).cloned().unwrap_or_default();
-            let atr_pct = paper_state.latest_turnover(&intent.symbol)
+            let stats = self
+                .trade_stats
+                .get(&intent.symbol)
+                .cloned()
+                .unwrap_or_default();
+            let atr_pct = paper_state
+                .latest_turnover(&intent.symbol)
                 .map(|_| 0.02) // placeholder — real ATR% from indicators in Phase 3
                 .unwrap_or(0.02);
             crate::ml::kelly_sizer::compute_kelly_qty(
-                kelly_cfg, &stats, balance, price, atr_pct, guardian_qty,
+                kelly_cfg,
+                &stats,
+                balance,
+                price,
+                atr_pct,
+                guardian_qty,
             )
         } else {
             guardian_qty
@@ -283,7 +315,11 @@ impl IntentProcessor {
 
         // ─── Gate 2.6: P1 hard cap = 2% of balance / price ───
         // P1 硬上限 = 餘額的 2% / 價格（不可超越的安全上限）
-        let p1_max_qty = if price > 0.0 { balance * self.p1_risk_pct / price } else { kelly_qty };
+        let p1_max_qty = if price > 0.0 {
+            balance * self.p1_risk_pct / price
+        } else {
+            kelly_qty
+        };
         let final_qty = kelly_qty.min(p1_max_qty);
 
         // ─── Gate 2.7: Order admission risk check (RRC-1-B1) ───
@@ -291,13 +327,16 @@ impl IntentProcessor {
         // Runs after P1 sizing so single-position-pct check uses final_qty.
         // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
         {
-            let is_reducing = paper_state.get_position(&intent.symbol)
+            let is_reducing = paper_state
+                .get_position(&intent.symbol)
                 .map(|p| p.is_long != intent.is_long)
                 .unwrap_or(false);
             let exposure_pct = Self::compute_exposure_pct(paper_state);
             let daily_loss = self.daily_loss_pct(balance);
             let check_result = check_order_allowed(
-                final_qty, price, balance,
+                final_qty,
+                price,
+                balance,
                 exposure_pct,
                 0.0, // correlated_exposure_pct — Phase C wiring
                 1.0, // leverage — paper = 1x
@@ -365,7 +404,9 @@ impl IntentProcessor {
         // will be implemented in Phase 2 when the Paper Engine gains an order book simulator.
         // 注意：order_type 和 limit_price 欄位當前被忽略。所有訂單均以即時市價成交。
         // 限價單執行（持有直到價格觸及 limit_price）將在 Phase 2 Paper Engine 獲得訂單簿模擬器後實現。
-        let turnover = paper_state.latest_turnover(&intent.symbol).unwrap_or(100_000_000.0);
+        let turnover = paper_state
+            .latest_turnover(&intent.symbol)
+            .unwrap_or(100_000_000.0);
         let fill = if let Some(rate) = self.taker_fee_rate {
             execution::execute_market_fill_with_rate(
                 paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
@@ -398,6 +439,7 @@ impl IntentProcessor {
         intent: &OrderIntent,
         governance: &GovernanceCore,
         paper_state: &PaperState,
+        atr: f64,
     ) -> ExchangeGateResult {
         // Gate 1: Governance authorization
         if !governance.is_authorized() {
@@ -428,7 +470,11 @@ impl IntentProcessor {
             .iter()
             .map(|p| ExistingPosition {
                 symbol: p.symbol.clone(),
-                side: if p.is_long { "Buy".into() } else { "Sell".into() },
+                side: if p.is_long {
+                    "Buy".into()
+                } else {
+                    "Sell".into()
+                },
             })
             .collect();
         let ctx = PortfolioContext {
@@ -437,7 +483,11 @@ impl IntentProcessor {
         };
         let check = TradeIntentCheck {
             symbol: intent.symbol.clone(),
-            side: if intent.is_long { "Buy".into() } else { "Sell".into() },
+            side: if intent.is_long {
+                "Buy".into()
+            } else {
+                "Sell".into()
+            },
             leverage: 1.0,
             qty: intent.qty,
         };
@@ -445,10 +495,7 @@ impl IntentProcessor {
         if let Verdict::Rejected = guardian_result.verdict {
             return ExchangeGateResult {
                 approved: false,
-                rejected_reason: Some(format!(
-                    "guardian_rejected: {:?}",
-                    guardian_result.reasons
-                )),
+                rejected_reason: Some(format!("guardian_rejected: {:?}", guardian_result.reasons)),
                 approved_qty: 0.0,
             };
         }
@@ -467,7 +514,12 @@ impl IntentProcessor {
                 .map(|_| 0.02)
                 .unwrap_or(0.02);
             crate::ml::kelly_sizer::compute_kelly_qty(
-                kelly_cfg, &stats, balance, price, atr_pct, guardian_qty,
+                kelly_cfg,
+                &stats,
+                balance,
+                price,
+                atr_pct,
+                guardian_qty,
             )
         } else {
             guardian_qty
@@ -485,13 +537,16 @@ impl IntentProcessor {
         // Runs after P1 sizing so single-position-pct check uses final_qty.
         // 在 P1 調整後運行，以便單一持倉百分比檢查使用最終數量。
         {
-            let is_reducing = paper_state.get_position(&intent.symbol)
+            let is_reducing = paper_state
+                .get_position(&intent.symbol)
                 .map(|p| p.is_long != intent.is_long)
                 .unwrap_or(false);
             let exposure_pct = Self::compute_exposure_pct(paper_state);
             let daily_loss = self.daily_loss_pct(balance);
             let check_result = check_order_allowed(
-                final_qty, price, balance,
+                final_qty,
+                price,
+                balance,
                 exposure_pct,
                 0.0, // correlated_exposure_pct — Phase C wiring
                 1.0, // leverage — paper = 1x
@@ -505,6 +560,43 @@ impl IntentProcessor {
                     rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
                     approved_qty: 0.0,
                 };
+            }
+        }
+
+        // ─── Gate 3: Cost gate — reject if EV < k × round_trip_fee ───
+        // 成本門控：預期收益 < k × 往返手續費時拒絕
+        {
+            const MIN_CONFIDENCE: f64 = 0.15;
+            const K_PAPER: f64 = 1.5;
+
+            if intent.confidence < MIN_CONFIDENCE {
+                return ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(format!(
+                        "cost_gate: confidence {:.2} < min {:.2}",
+                        intent.confidence, MIN_CONFIDENCE,
+                    )),
+                    approved_qty: 0.0,
+                };
+            }
+
+            if atr > 0.0 {
+                let fee_rate = self.taker_fee_rate.unwrap_or(0.00055);
+                let expected_profit = atr * intent.confidence * final_qty;
+                let notional = final_qty * price;
+                let rt_fee = notional * 2.0 * fee_rate;
+                let k = K_PAPER;
+
+                if expected_profit < k * rt_fee {
+                    return ExchangeGateResult {
+                        approved: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
+                            expected_profit, k, rt_fee, atr, intent.confidence, notional,
+                        )),
+                        approved_qty: 0.0,
+                    };
+                }
             }
         }
 
@@ -523,7 +615,9 @@ impl IntentProcessor {
 }
 
 impl Default for IntentProcessor {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -536,8 +630,13 @@ mod tests {
 
     fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
         OrderIntent {
-            symbol: symbol.into(), is_long, qty: 0.01, confidence: 0.7,
-            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+            symbol: symbol.into(),
+            is_long,
+            qty: 0.01,
+            confidence: 0.7,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
         }
     }
 
@@ -651,12 +750,20 @@ mod tests {
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("ETH", 2000.0);
         let intent = OrderIntent {
-            symbol: "ETH".into(), is_long: true, qty: 0.01, confidence: 0.10,
-            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+            symbol: "ETH".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.10,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
         };
         let result = proc.process(&intent, &gov, &state, 10.0);
         assert!(!result.submitted);
-        assert!(result.rejected_reason.unwrap().contains("cost_gate: confidence"));
+        assert!(result
+            .rejected_reason
+            .unwrap()
+            .contains("cost_gate: confidence"));
     }
 
     #[test]
@@ -669,13 +776,42 @@ mod tests {
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 67000.0);
         let intent = OrderIntent {
-            symbol: "BTC".into(), is_long: true, qty: 0.001, confidence: 0.30,
-            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.30,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
         };
         // ATR=20 (very compressed for BTC), notional=$67 → rt_fee=$0.074 → EV=20×0.3×0.001=$0.006
         let result = proc.process(&intent, &gov, &state, 20.0);
         assert!(!result.submitted);
         assert!(result.rejected_reason.unwrap().contains("cost_gate: EV"));
+    }
+
+    #[test]
+    fn test_process_gates_only_cost_gate_rejects_low_ev() {
+        // I-01: process_gates_only must enforce Gate 3 cost gate like process().
+        // I-01：process_gates_only 必須像 process() 一樣執行 Gate 3 成本門控。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 67000.0);
+        let intent = OrderIntent {
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.30,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        // ATR=20 compressed → EV << fee → reject
+        let result = proc.process_gates_only(&intent, &gov, &state, 20.0);
+        assert!(!result.approved);
+        assert!(result.rejected_reason.unwrap().contains("cost_gate"));
     }
 
     #[test]
@@ -688,8 +824,13 @@ mod tests {
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("SOL", 80.0);
         let intent = OrderIntent {
-            symbol: "SOL".into(), is_long: true, qty: 0.2, confidence: 0.7,
-            strategy: "test".into(), order_type: "market".into(), limit_price: None,
+            symbol: "SOL".into(),
+            is_long: true,
+            qty: 0.2,
+            confidence: 0.7,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
         };
         // ATR=1.5, EV=1.5×0.7×0.2=$0.21, notional=$16 → rt_fee=$0.018 → 0.21 >> 0.027 ✓
         let result = proc.process(&intent, &gov, &state, 1.5);

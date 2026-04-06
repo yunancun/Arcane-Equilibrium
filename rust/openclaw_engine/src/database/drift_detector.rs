@@ -54,9 +54,9 @@ pub fn histogram(values: &[f64], bin_edges: &[f64]) -> Vec<u32> {
             continue;
         }
         // Binary search for bin index / 二分搜索 bin 索引
-        let idx = match bin_edges[1..].binary_search_by(|edge| {
-            edge.partial_cmp(&v).unwrap_or(std::cmp::Ordering::Equal)
-        }) {
+        let idx = match bin_edges[1..]
+            .binary_search_by(|edge| edge.partial_cmp(&v).unwrap_or(std::cmp::Ordering::Equal))
+        {
             Ok(i) => i.min(n_bins - 1),
             Err(i) => i.min(n_bins - 1),
         };
@@ -295,7 +295,7 @@ pub async fn write_drift_event(
         "INSERT INTO observability.drift_events \
          (ts, event_id, drift_type, severity, symbol, feature_name, metric_value, threshold) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
-         ON CONFLICT (event_id, ts) DO NOTHING"
+         ON CONFLICT (event_id, ts) DO NOTHING",
     )
     .bind(ts)
     .bind(event_id)
@@ -348,7 +348,12 @@ pub fn compute_baseline_windows(
     step_days: u32,
     n_bins: usize,
 ) -> Vec<BaselineWindow> {
-    if values.len() != timestamps_ms.len() || values.is_empty() || step_days == 0 || window_days == 0 || n_bins == 0 {
+    if values.len() != timestamps_ms.len()
+        || values.is_empty()
+        || step_days == 0
+        || window_days == 0
+        || n_bins == 0
+    {
         return vec![];
     }
 
@@ -407,11 +412,7 @@ pub fn compute_baseline_windows(
 /// Saturating subtraction prevents underflow when last_rebuild_ms > now_ms.
 /// 當 now_ms - last_rebuild_ms >= cooldown_days * 86_400_000 時返回 true。
 /// 飽和減法防止 last_rebuild_ms > now_ms 時下溢。
-pub fn should_rebuild_baseline(
-    last_rebuild_ms: u64,
-    now_ms: u64,
-    cooldown_days: u32,
-) -> bool {
+pub fn should_rebuild_baseline(last_rebuild_ms: u64, now_ms: u64, cooldown_days: u32) -> bool {
     let cooldown_ms = cooldown_days as u64 * 86_400_000;
     now_ms.saturating_sub(last_rebuild_ms) >= cooldown_ms
 }
@@ -426,19 +427,26 @@ struct SimpleLcg {
 impl SimpleLcg {
     fn new(seed: u64) -> Self {
         // Avoid zero state / 避免零狀態
-        Self { state: seed.wrapping_add(1) }
+        Self {
+            state: seed.wrapping_add(1),
+        }
     }
 
     /// Return next pseudo-random u64. / 返回下一個偽隨機 u64。
     fn next_u64(&mut self) -> u64 {
         // LCG constants from Numerical Recipes
-        self.state = self.state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.state = self
+            .state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         self.state
     }
 
     /// Return a uniform index in [0, bound). / 返回 [0, bound) 中的均勻索引。
     fn next_index(&mut self, bound: usize) -> usize {
-        if bound == 0 { return 0; }
+        if bound == 0 {
+            return 0;
+        }
         (self.next_u64() % bound as u64) as usize
     }
 }
@@ -463,7 +471,11 @@ pub fn block_bootstrap_psi(
 ) -> (f64, f64, f64) {
     let zero = (0.0, 0.0, 0.0);
 
-    if current_values.is_empty() || bin_edges.len() < 2 || reference_counts.is_empty() || n_bootstrap == 0 {
+    if current_values.is_empty()
+        || bin_edges.len() < 2
+        || reference_counts.is_empty()
+        || n_bootstrap == 0
+    {
         return zero;
     }
 
@@ -534,15 +546,21 @@ mod tests {
         let ref_counts = vec![10, 20, 30, 20, 10];
         let cur_counts = vec![10, 20, 30, 20, 10];
         let psi = compute_psi(&ref_counts, &cur_counts, 1e-6);
-        assert!(psi.abs() < 1e-10, "identical distributions should have PSI ≈ 0, got {psi}");
+        assert!(
+            psi.abs() < 1e-10,
+            "identical distributions should have PSI ≈ 0, got {psi}"
+        );
     }
 
     #[test]
     fn test_psi_shifted_distribution() {
         let ref_counts = vec![10, 20, 30, 20, 10]; // centered
-        let cur_counts = vec![30, 20, 10, 5, 5];   // shifted left
+        let cur_counts = vec![30, 20, 10, 5, 5]; // shifted left
         let psi = compute_psi(&ref_counts, &cur_counts, 1e-6);
-        assert!(psi > 0.1, "shifted distribution should have PSI > 0.1, got {psi}");
+        assert!(
+            psi > 0.1,
+            "shifted distribution should have PSI > 0.1, got {psi}"
+        );
     }
 
     #[test]
@@ -550,7 +568,10 @@ mod tests {
         let ref_counts = vec![0, 50, 50, 0];
         let cur_counts = vec![25, 25, 25, 25];
         let psi = compute_psi(&ref_counts, &cur_counts, 1e-6);
-        assert!(psi.is_finite(), "PSI with empty bins should be finite, got {psi}");
+        assert!(
+            psi.is_finite(),
+            "PSI with empty bins should be finite, got {psi}"
+        );
         assert!(psi > 0.0, "different distributions should have PSI > 0");
     }
 
@@ -633,7 +654,10 @@ mod tests {
         // Large shift → above alert
         let large = vec![50, 5, 5, 5, 35];
         let psi_large = compute_psi(&base, &large, 1e-6);
-        assert!(psi_large > 0.2, "large shift PSI should be > 0.2 (alert), got {psi_large}");
+        assert!(
+            psi_large > 0.2,
+            "large shift PSI should be > 0.2 (alert), got {psi_large}"
+        );
     }
 
     #[test]
@@ -668,7 +692,10 @@ mod tests {
             assert!(w.n_samples > 0, "window should have samples");
             assert_eq!(w.bin_edges.len(), 11, "10 bins → 11 edges");
             assert_eq!(w.bin_counts.len(), 10, "10 bins");
-            assert!(w.valid_until_ms > w.valid_from_ms, "valid_until > valid_from");
+            assert!(
+                w.valid_until_ms > w.valid_from_ms,
+                "valid_until > valid_from"
+            );
         }
     }
 

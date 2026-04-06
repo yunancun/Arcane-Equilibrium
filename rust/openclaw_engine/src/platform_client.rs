@@ -191,8 +191,7 @@ impl PlatformClient {
         limit: Option<u32>,
     ) -> BybitResult<Vec<TransactionRecord>> {
         debug!("fetching transaction log / 獲取交易日誌");
-        let mut params: Vec<(&str, String)> =
-            vec![("accountType", account_type.to_string())];
+        let mut params: Vec<(&str, String)> = vec![("accountType", account_type.to_string())];
         if let Some(c) = category {
             params.push(("category", c.to_string()));
         }
@@ -300,7 +299,11 @@ impl PlatformClient {
     ///
     /// POST /v5/account/set-collateral
     pub async fn set_collateral_switch(&self, coin: &str, switch: bool) -> BybitResult<()> {
-        debug!(coin = coin, switch = switch, "setting collateral switch / 設置抵押品開關");
+        debug!(
+            coin = coin,
+            switch = switch,
+            "setting collateral switch / 設置抵押品開關"
+        );
         let body = serde_json::json!({
             "coin": coin,
             "collateralSwitch": if switch { "ON" } else { "OFF" }
@@ -334,10 +337,7 @@ impl PlatformClient {
     /// GET /v5/account/dcp-info
     pub async fn get_dcp_info(&self) -> BybitResult<DcpInfo> {
         debug!("fetching DCP info / 獲取 DCP 信息");
-        let resp = self
-            .client
-            .get_checked("/v5/account/dcp-info", &[])
-            .await?;
+        let resp = self.client.get_checked("/v5/account/dcp-info", &[]).await?;
         Ok(DcpInfo {
             dcp_status: parse_str(&resp.result, "dcpStatus"),
             time_window: resp
@@ -366,10 +366,7 @@ impl PlatformClient {
         debug!("pre-checking order / 訂單預檢");
         // Attempt the endpoint; it may not exist on all environments
         // 嘗試調用端點；可能不存在於所有環境
-        let resp = self
-            .client
-            .post("/v5/order/create", &params)
-            .await?;
+        let resp = self.client.post("/v5/order/create", &params).await?;
         Ok(serde_json::to_value(&resp).unwrap_or_default())
     }
 
@@ -428,10 +425,7 @@ impl PlatformClient {
     /// 獲取轉帳列表 — 查詢帳戶間轉帳歷史。
     ///
     /// GET /v5/asset/transfer/query-inter-transfer-list
-    pub async fn get_transfer_list(
-        &self,
-        limit: Option<u32>,
-    ) -> BybitResult<Vec<TransferRecord>> {
+    pub async fn get_transfer_list(&self, limit: Option<u32>) -> BybitResult<Vec<TransferRecord>> {
         debug!("fetching transfer list / 獲取轉帳列表");
         let mut params: Vec<(&str, String)> = Vec::new();
         if let Some(l) = limit {
@@ -440,10 +434,7 @@ impl PlatformClient {
         let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let resp = self
             .client
-            .get_checked(
-                "/v5/asset/transfer/query-inter-transfer-list",
-                &param_refs,
-            )
+            .get_checked("/v5/asset/transfer/query-inter-transfer-list", &param_refs)
             .await?;
         let list = resp
             .result
@@ -485,10 +476,7 @@ impl PlatformClient {
         let params: Vec<(&str, &str)> = vec![("accountType", account_type)];
         let resp = self
             .client
-            .get_checked(
-                "/v5/asset/transfer/query-account-coins-balance",
-                &params,
-            )
+            .get_checked("/v5/asset/transfer/query-account-coins-balance", &params)
             .await?;
         let list = resp
             .result
@@ -515,10 +503,7 @@ impl PlatformClient {
     /// 獲取幣種信息 — 鏈詳情、精度、充提狀態。
     ///
     /// GET /v5/asset/coin-info
-    pub async fn get_coin_info(
-        &self,
-        coin: Option<&str>,
-    ) -> BybitResult<Vec<CoinInfoRecord>> {
+    pub async fn get_coin_info(&self, coin: Option<&str>) -> BybitResult<Vec<CoinInfoRecord>> {
         debug!("fetching coin info / 獲取幣種信息");
         let mut params: Vec<(&str, &str)> = vec![];
         if let Some(c) = coin {
@@ -569,10 +554,7 @@ impl PlatformClient {
     /// 申請 Demo/測試網資金 — 僅用於測試。
     ///
     /// POST /v5/account/demo-apply-money
-    pub async fn apply_demo_funds(
-        &self,
-        coins: Vec<DemoFundRequest>,
-    ) -> BybitResult<()> {
+    pub async fn apply_demo_funds(&self, coins: Vec<DemoFundRequest>) -> BybitResult<()> {
         debug!(count = coins.len(), "applying demo funds / 申請 Demo 資金");
         let utc_list: Vec<serde_json::Value> = coins
             .iter()

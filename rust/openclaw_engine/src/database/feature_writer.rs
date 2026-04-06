@@ -69,7 +69,10 @@ pub async fn run_feature_writer(
 async fn flush_features(pool: &DbPool, latest: &mut HashMap<(String, String), FeatureSnapshot>) {
     let pg = match pool.get() {
         Some(p) => p,
-        None => { latest.clear(); return; }
+        None => {
+            latest.clear();
+            return;
+        }
     };
 
     for ((symbol, timeframe), snap) in latest.drain() {
@@ -114,8 +117,22 @@ mod tests {
     #[test]
     fn test_dedup_keeps_latest() {
         let mut latest: HashMap<(String, String), FeatureSnapshot> = HashMap::new();
-        let snap1 = FeatureSnapshot::new("BTC".into(), 1000, 50000.0, 0.0, IndicatorSnapshot::default(), "v1".into());
-        let snap2 = FeatureSnapshot::new("BTC".into(), 2000, 51000.0, 0.0, IndicatorSnapshot::default(), "v1".into());
+        let snap1 = FeatureSnapshot::new(
+            "BTC".into(),
+            1000,
+            50000.0,
+            0.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
+        let snap2 = FeatureSnapshot::new(
+            "BTC".into(),
+            2000,
+            51000.0,
+            0.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
         latest.insert(("BTC".into(), "1m".into()), snap1);
         latest.insert(("BTC".into(), "1m".into()), snap2);
         assert_eq!(latest.len(), 1);
@@ -124,7 +141,14 @@ mod tests {
 
     #[test]
     fn test_feature_vector_dimension_correct() {
-        let snap = FeatureSnapshot::new("ETH".into(), 0, 3000.0, 0.0, IndicatorSnapshot::default(), "v1".into());
+        let snap = FeatureSnapshot::new(
+            "ETH".into(),
+            0,
+            3000.0,
+            0.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
         assert_eq!(snap.to_feature_vector().len(), FEATURE_DIM);
     }
 }

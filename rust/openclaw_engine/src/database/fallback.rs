@@ -52,15 +52,13 @@ impl FallbackWriter {
 
         let file = match &mut self.current_file {
             Some(f) => f,
-            None => {
-                match self.open_new_file() {
-                    Some(f) => {
-                        self.current_file = Some(f);
-                        self.current_file.as_mut().unwrap()
-                    }
-                    None => return false,
+            None => match self.open_new_file() {
+                Some(f) => {
+                    self.current_file = Some(f);
+                    self.current_file.as_mut().unwrap()
                 }
-            }
+                None => return false,
+            },
         };
 
         match writeln!(file, "{}", json) {
@@ -83,7 +81,9 @@ impl FallbackWriter {
 
     fn open_new_file(&mut self) -> Option<std::fs::File> {
         let now = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let path = self.dir.join(format!("market_fallback_{}_{}.jsonl", now, self.file_index));
+        let path = self
+            .dir
+            .join(format!("market_fallback_{}_{}.jsonl", now, self.file_index));
         self.file_index += 1;
         self.current_file_lines = 0;
         match OpenOptions::new().create(true).append(true).open(&path) {
@@ -117,7 +117,8 @@ mod tests {
         assert_eq!(writer.total_lines(), 2);
 
         // Read back / 回讀驗證
-        let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
+        let files: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
             .collect();
@@ -139,7 +140,8 @@ mod tests {
         }
         // total_lines counts across all files (F-2 fix)
         assert_eq!(writer.total_lines(), 7);
-        let files: Vec<_> = fs::read_dir(dir.path()).unwrap()
+        let files: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
             .collect();

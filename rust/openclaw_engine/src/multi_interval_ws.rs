@@ -177,7 +177,10 @@ pub fn extended_subscription_list(symbol: &str) -> Vec<String> {
 /// Generate subscription lists for multiple symbols.
 /// 為多個交易對生成訂閱列表。
 pub fn multi_symbol_subscriptions(symbols: &[&str]) -> Vec<String> {
-    symbols.iter().flat_map(|s| full_subscription_list(s)).collect()
+    symbols
+        .iter()
+        .flat_map(|s| full_subscription_list(s))
+        .collect()
 }
 
 /// Configure a WsClient with multi-interval subscriptions for the given symbols.
