@@ -173,6 +173,10 @@ app.include_router(evolution_router)
 from .attribution_routes import attribution_router  # noqa: E402
 app.include_router(attribution_router)
 
+# ── AI Budget Router (WP-ARCH-RC1 RC1-2 reference path) / AI 預算路由注册 ──
+from .ai_budget_routes import router as ai_budget_router  # noqa: E402
+app.include_router(ai_budget_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be

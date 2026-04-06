@@ -371,6 +371,47 @@
   </div>
 </details>
 
+<!-- ═══ AI Budget Card (Phase 4 · 4-16 · WP-ARCH-RC1 reference path) ═══ -->
+<!-- AI 預算卡片 — 獨立區塊，async fetch + await IPC，零本地狀態 -->
+<div class="oc-card" id="ai-budget-card">
+  <h3>💰 AI Budget / AI 預算</h3>
+  <div id="ai-budget-status" class="oc-loading">Loading... / 載入中...</div>
+  <div id="ai-budget-edit" style="display:none;margin-top:8px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
+      <label style="font-size:12px">Local Total / 本地總額 (USD)
+        <input id="ai-budget-local-total" type="number" min="0" step="1" style="width:100%">
+      </label>
+      <label style="font-size:12px">Platform Hard Cap / 平台硬上限 (USD)
+        <input id="ai-budget-platform-cap" type="number" min="0" step="1" style="width:100%">
+      </label>
+      <label style="font-size:12px">Agent Teacher (USD)
+        <input id="ai-budget-agent-teacher" type="number" min="0" step="1" style="width:100%">
+      </label>
+      <label style="font-size:12px">Agent Analyst (USD)
+        <input id="ai-budget-agent-analyst" type="number" min="0" step="1" style="width:100%">
+      </label>
+      <label style="font-size:12px">Agent Reserve (USD)
+        <input id="ai-budget-agent-reserve" type="number" min="0" step="1" style="width:100%">
+      </label>
+    </div>
+    <div style="margin-top:8px">
+      <button id="ai-budget-save-btn" type="button" onclick="saveAiBudget(this)">💾 Save AI Budget / 儲存</button>
+    </div>
+  </div>
+  <div id="ai-budget-progress" style="margin-top:10px">
+    <div id="ai-budget-degrade-light" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#888;vertical-align:middle"></div>
+    <span id="ai-budget-degrade-label" style="font-size:12px;margin-left:6px;vertical-align:middle">degrade: unknown</span>
+    <div id="ai-budget-bar" style="margin-top:6px;height:10px;background:rgba(255,255,255,0.08);border-radius:5px;overflow:hidden">
+      <div id="ai-budget-bar-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#2ea043,#d29922,#f85149);transition:width 0.3s"></div>
+    </div>
+    <div id="ai-budget-bar-text" style="font-size:11px;color:var(--text-dim);margin-top:4px">—</div>
+  </div>
+  <p style="font-size:11px;color:var(--text-dim);margin-top:8px">
+    平台硬上限請另外在 Anthropic Console 設定（GUI 只記錄）/
+    Platform hard cap must also be set on Anthropic console (GUI is record-only)
+  </p>
+</div>
+
 <!-- ═══ Danger Zone ═══ -->
 <div class="oc-danger-zone" id="danger-zone">
   <h3>&#x26A0; Danger Zone / 危险操作区</h3>
@@ -959,6 +1000,103 @@ loadAll();
 ocStartRefresh(loadAll, 15000);
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Budget — independent block (Phase 4 · 4-16 · WP-ARCH-RC1 reference)
+// AI 預算 — 獨立區塊，不共享 form / 不共享 saveRiskConfig 路徑
+// async fetch + await IPC, no local cache, no file write
+// ═══════════════════════════════════════════════════════════════════════════
+const _AI_BUDGET_SCOPES = [
+  ['local_total',       'ai-budget-local-total'],
+  ['platform_hard_cap', 'ai-budget-platform-cap'],
+  ['agent_teacher',     'ai-budget-agent-teacher'],
+  ['agent_analyst',     'ai-budget-agent-analyst'],
+  ['agent_reserve',     'ai-budget-agent-reserve'],
+];
+
+async function loadAiBudget() {
+  const statusEl = document.getElementById('ai-budget-status');
+  const editEl   = document.getElementById('ai-budget-edit');
+  if (!statusEl || !editEl) return;
+  try {
+    const r = await fetch('/api/v1/ai_budget/status', { credentials: 'include' });
+    const data = await r.json();
+    if (data && data.ok) {
+      // Populate inputs from data.config (scope → monthly_usd)
+      // 從 data.config 填入各 scope 輸入框
+      const cfg = data.config || {};
+      for (const [scope, elemId] of _AI_BUDGET_SCOPES) {
+        const el = document.getElementById(elemId);
+        if (el && Number.isFinite(cfg[scope])) el.value = cfg[scope];
+      }
+      // Progress bar — local_total usage % / 本地總額用量百分比
+      const usage = (data.usage_mtd || {}).local_total || 0;
+      const limit = (data.config || {}).local_total || 0;
+      const pct = limit > 0 ? Math.min(100, (usage / limit) * 100) : 0;
+      const fillEl = document.getElementById('ai-budget-bar-fill');
+      const textEl = document.getElementById('ai-budget-bar-text');
+      if (fillEl) fillEl.style.width = pct.toFixed(1) + '%';
+      if (textEl) textEl.textContent =
+        'MTD: $' + usage.toFixed(2) + ' / $' + limit.toFixed(2) + ' (' + pct.toFixed(1) + '%)';
+      // Degrade light: green/yellow/red/grey
+      // 降級紅黃綠燈
+      const lightEl = document.getElementById('ai-budget-degrade-light');
+      const labelEl = document.getElementById('ai-budget-degrade-label');
+      const lvl = data.degrade_level || 'none';
+      const colorMap = {
+        none: '#2ea043', soft_warn: '#d29922', hard_limit: '#f85149', killswitch: '#8b1a1a',
+      };
+      if (lightEl) lightEl.style.background = colorMap[lvl] || '#888';
+      if (labelEl) labelEl.textContent = 'degrade: ' + lvl;
+      statusEl.textContent = 'OK · refreshed ' + new Date().toLocaleTimeString();
+      statusEl.className = '';
+      editEl.style.display = 'block';
+    } else {
+      statusEl.textContent = 'Engine error: ' + ((data && data.error) || 'unknown');
+      statusEl.className = 'oc-chip oc-chip-warn';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Engine unreachable: ' + e.message;
+    statusEl.className = 'oc-chip oc-chip-warn';
+  }
+}
+
+async function saveAiBudget(btn) {
+  // Disable button + show "Saving..." / 禁用按鈕並顯示儲存中
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Saving...';
+  try {
+    // Save each scope sequentially via async IPC await
+    // 逐一 await IPC 寫入每個 scope
+    for (const [scope, elemId] of _AI_BUDGET_SCOPES) {
+      const el = document.getElementById(elemId);
+      if (!el) continue;
+      const val = parseFloat(el.value);
+      if (!Number.isFinite(val) || val < 0) continue;
+      const r = await fetch('/api/v1/ai_budget/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ scope: scope, monthly_usd: val, updated_by: 'gui_operator' }),
+      });
+      if (!r.ok) {
+        const errText = await r.text();
+        throw new Error(scope + ': HTTP ' + r.status + ' ' + errText);
+      }
+    }
+    btn.textContent = '✅ Saved';
+    await loadAiBudget();
+    setTimeout(() => { btn.textContent = oldText; btn.disabled = false; }, 1500);
+  } catch (e) {
+    btn.textContent = '❌ ' + (e.message || 'error');
+    setTimeout(() => { btn.textContent = oldText; btn.disabled = false; }, 3000);
+  }
+}
+
+// Initial load + 30s polling / 初次載入 + 30 秒輪詢
+loadAiBudget();
+setInterval(loadAiBudget, 30000);
 </script>
 </body>
 </html>

@@ -14,6 +14,7 @@
 //!   （冷啟動 / 單元測試）時回傳 `Ok(0)`，使上層管線在無 PG 情況下
 //!   仍可走完 happy path。
 
+use super::applier::ApplyOutcome;
 use super::parser::Directive;
 use crate::database::experiment_ledger_pg::{create_hypothesis, Hypothesis};
 use crate::database::pool::DbPool;
@@ -138,4 +139,111 @@ pub async fn persist_directive(
 
     debug!(directive_id, hypothesis_id = %hypothesis_id, "teacher directive persisted / directive 已持久化");
     Ok(directive_id)
+}
+
+/// Record a directive execution outcome into `learning.directive_executions`.
+/// 4-02 audit helper — every ApplyOutcome (Applied / Vetoed / Invalid /
+/// IpcError) is written here so the full decision trail is persisted for
+/// 4-03 outcome-tracker + operator review. Silent-skips when PG pool is
+/// unavailable (cold start / unit tests).
+///
+/// 將 directive 套用結果寫入 `learning.directive_executions`。
+/// 4-02 審計輔助 — 每一種 ApplyOutcome（Applied / Vetoed / Invalid /
+/// IpcError）都在此寫入，確保完整決策軌跡留存，供 4-03 outcome-tracker
+/// 與 operator 復核使用。PG pool 不可用時靜默跳過（冷啟動 / 單元測試）。
+pub async fn record_execution(
+    pool: &Arc<DbPool>,
+    directive_id: i64,
+    outcome: &ApplyOutcome,
+) -> Result<(), WriterError> {
+    if !pool.is_available() {
+        debug!(
+            directive_id,
+            "record_execution: pool unavailable — silent skip / pool 不可用，靜默跳過"
+        );
+        return Ok(());
+    }
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    let (action_taken, success, result_json) = match outcome {
+        ApplyOutcome::Applied {
+            action_summary, ..
+        } => (
+            "applied",
+            true,
+            serde_json::json!({
+                "outcome": "applied",
+                "action_summary": action_summary,
+            }),
+        ),
+        ApplyOutcome::VetoedByGovernance { reason, .. } => (
+            "vetoed_by_governance",
+            false,
+            serde_json::json!({
+                "outcome": "vetoed_by_governance",
+                "reason": reason,
+            }),
+        ),
+        ApplyOutcome::VetoedByHardBoundary {
+            boundary, reason, ..
+        } => (
+            "vetoed_by_hard_boundary",
+            false,
+            serde_json::json!({
+                "outcome": "vetoed_by_hard_boundary",
+                "boundary": boundary,
+                "reason": reason,
+            }),
+        ),
+        ApplyOutcome::InvalidDirective { error, .. } => (
+            "invalid_directive",
+            false,
+            serde_json::json!({
+                "outcome": "invalid_directive",
+                "error": error,
+            }),
+        ),
+        ApplyOutcome::IpcError { error, .. } => (
+            "ipc_error",
+            false,
+            serde_json::json!({
+                "outcome": "ipc_error",
+                "error": error,
+            }),
+        ),
+    };
+
+    let row: Result<(i32,), _> = sqlx::query_as(
+        "INSERT INTO learning.directive_executions \
+         (directive_id, action_taken, result, success) \
+         VALUES ($1, $2, $3, $4) \
+         RETURNING execution_id",
+    )
+    .bind(directive_id as i32)
+    .bind(action_taken)
+    .bind(&result_json)
+    .bind(success)
+    .fetch_one(pg)
+    .await;
+
+    match row {
+        Ok((_id,)) => {
+            debug!(
+                directive_id,
+                action_taken, "directive_execution audit row written / 審計行已寫入"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            warn!(
+                directive_id,
+                error = %e,
+                "directive_executions insert failed / 審計行插入失敗"
+            );
+            Err(WriterError::InsertFailed(e.to_string()))
+        }
+    }
 }

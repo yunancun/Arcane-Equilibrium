@@ -307,12 +307,23 @@
 </div>
 
 <!-- ═══ Symbol Whitelist Management / 符号白名单管理 ═══ -->
+<!-- DEPRECATED 2026-04-01 (T5.04, commits 35ab853 + f4663d3) -->
+<!-- Backend endpoints return HTTP 410 Gone. Scanner + Guardian + H0 Gate -->
+<!-- provide sufficient filtering. Full GUI removal tracked as -->
+<!-- WP-CLEANUP-WHITELIST-UI in TODO.md. -->
 <div class="oc-card" id="whitelist-card">
   <h3 style="cursor:pointer" onclick="toggleWhitelist()">
     &#x2705; Symbol Whitelist / 符号白名單
+    <span style="font-size:11px;color:var(--red);background:rgba(248,81,73,0.12);padding:2px 6px;border-radius:4px;margin-left:8px">⚠️ DEPRECATED</span>
     <span id="whitelist-toggle" style="float:right">▼</span>
   </h3>
   <div id="whitelist-body">
+    <div style="background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.4);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px;color:var(--text-dim)">
+      ⚠️ <strong>Deprecated 2026-04-01</strong> (T5.04) — 此功能已棄用 / This feature is deprecated.
+      Symbol-level enforcement was removed because Scanner + Guardian + H0 Gate provide sufficient filtering.
+      Backend endpoints now return HTTP 410 Gone. UI removal pending (WP-CLEANUP-WHITELIST-UI).
+      <br>Symbol 級別的強制執行已被移除，因為 Scanner + Guardian + H0 Gate 已提供充分過濾。
+    </div>
     <!-- Add Symbol Form -->
     <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:6px">
       <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Add Symbol / 添加符号</h4>
