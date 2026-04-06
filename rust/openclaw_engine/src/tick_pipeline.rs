@@ -269,6 +269,13 @@ pub struct TickPipeline {
     /// DB-RUN-2: Counter for dropped (throttled) decision_context writes.
     /// DB-RUN-2：被節流跳過的 decision_context 寫入計數。
     context_throttled: u64,
+    /// DB-RUN-5: Black-swan detector — fed on bar close, logs severity.
+    /// DB write path deferred until risk.black_swan_events schema lands.
+    /// DB-RUN-5：黑天鵝檢測器，K 線收盤時餵入；DB 寫入待 schema 上線後接通。
+    black_swan: crate::database::black_swan_detector::BlackSwanDetector,
+    /// DB-RUN-5: Last close price per symbol for return computation.
+    /// DB-RUN-5：每品種上一根 K 線收盤價（用於計算回報）。
+    last_close_price: HashMap<String, f64>,
 }
 
 impl TickPipeline {
@@ -335,6 +342,8 @@ impl TickPipeline {
                 .unwrap_or(60_000),
             signals_throttled: 0,
             context_throttled: 0,
+            black_swan: crate::database::black_swan_detector::BlackSwanDetector::new(),
+            last_close_price: HashMap::new(),
         }
     }
 
@@ -758,6 +767,33 @@ impl TickPipeline {
                 {
                     self.market_tx_dropped += 1;
                 }
+            }
+        }
+
+        // DB-RUN-5: Feed black-swan detector on 1m bar close.
+        // Compute log-return vs previous close, push into rolling window, run
+        // 4-signal vote. Severity >= Observe → warn log. DB write deferred.
+        // DB-RUN-5：1 分鐘 K 線收盤時餵入黑天鵝檢測器，4 信號投票，severity 達標時 warn。
+        for (timeframe, bar) in &closed_bars {
+            if timeframe != "1m" {
+                continue;
+            }
+            let prev = self.last_close_price.insert(event.symbol.clone(), bar.close);
+            let ret = match prev {
+                Some(prev_close) if prev_close > 0.0 => (bar.close - prev_close) / prev_close,
+                _ => 0.0,
+            };
+            self.black_swan.record_bar(&event.symbol, ret, bar.volume);
+            let result = self.black_swan.check(&event.symbol, ret, bar.volume, event.ts_ms);
+            use crate::database::black_swan_detector::BlackSwanSeverity;
+            if !matches!(result.severity, BlackSwanSeverity::None) {
+                warn!(
+                    symbol = %event.symbol,
+                    severity = ?result.severity,
+                    votes = result.votes_for,
+                    return_pct = format!("{:.4}%", ret * 100.0),
+                    "BLACK SWAN signal / 黑天鵝信號"
+                );
             }
         }
 
