@@ -11,6 +11,7 @@
 //!   紙盤控制（pause/resume/close_all/reset）、
 //!   快照讀取（paper_state/prices/stats）、策略參數（update/get/ranges）。
 
+use crate::ai_budget::BudgetTracker;
 use crate::config::ConfigManager;
 use crate::tick_pipeline::PipelineSnapshot;
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,25 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+/// Phase 4 (4-15): Shared, late-injected slot for the AI BudgetTracker.
+/// Phase 4 (4-15)：共享的、延後注入的 AI BudgetTracker 槽位。
+///
+/// MODULE_NOTE (EN): The IpcServer is constructed before the database pool exists, so
+///   the BudgetTracker (which needs the pool) is injected after construction via
+///   `IpcServer::budget_tracker_slot()`. The slot is wrapped in `Arc<RwLock<Option<...>>>`
+///   so the same handle can be cloned into per-connection tasks. None = uninitialized
+///   (e.g., DB unavailable) and IPC handlers fail-soft with a `{"status":"uninitialized"}`
+///   response on read, fail-closed (-32603) on write.
+/// MODULE_NOTE (中)：IpcServer 在資料庫池建立之前就構造，因此需要池的 BudgetTracker
+///   透過 `IpcServer::budget_tracker_slot()` 在構造後注入。槽位用
+///   `Arc<RwLock<Option<...>>>` 包裝，以便複製到每個連線任務。None = 未初始化
+///   （例如 DB 不可用），讀取 IPC 以 `{"status":"uninitialized"}` fail-soft，
+///   寫入則回傳 -32603 fail-closed。
+pub type BudgetTrackerSlot = Arc<RwLock<Option<Arc<BudgetTracker>>>>;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
@@ -112,6 +130,9 @@ pub struct IpcServer {
     /// Paper session command sender — dispatches Pause/Resume/CloseAll/Reset to event consumer.
     /// 紙盤 session 命令發送端 — 派發 Pause/Resume/CloseAll/Reset 到事件消費者。
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    /// Phase 4 (4-15): Late-injected AI BudgetTracker slot.
+    /// Phase 4 (4-15)：延後注入的 AI BudgetTracker 槽位。
+    budget_tracker: BudgetTrackerSlot,
 }
 
 impl IpcServer {
@@ -128,7 +149,19 @@ impl IpcServer {
             cancel,
             data_dir: Arc::new(PathBuf::from(data_dir.into())),
             paper_cmd_tx,
+            budget_tracker: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Phase 4 (4-15): Get a clone of the BudgetTracker slot for late injection.
+    /// Phase 4 (4-15)：取得 BudgetTracker 槽位的複製句柄供延後注入使用。
+    ///
+    /// Callers in main.rs construct the BudgetTracker after the DB pool is ready,
+    /// then write it into this slot via `slot.write().await.replace(tracker)`.
+    /// main.rs 在 DB pool 就緒後構造 BudgetTracker，再透過
+    /// `slot.write().await.replace(tracker)` 寫入此槽位。
+    pub fn budget_tracker_slot(&self) -> BudgetTrackerSlot {
+        Arc::clone(&self.budget_tracker)
     }
 
     /// Start listening. This function runs until cancellation.
@@ -188,8 +221,9 @@ impl IpcServer {
                             let cancel = self.cancel.clone();
                             let data_dir = Arc::clone(&self.data_dir);
                             let cmd_tx = self.paper_cmd_tx.clone();
+                            let budget_slot = Arc::clone(&self.budget_tracker);
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot).await;
                             });
                         }
                         Err(e) => {
@@ -215,6 +249,7 @@ async fn handle_connection(
     cancel: CancellationToken,
     data_dir: Arc<PathBuf>,
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    budget_slot: BudgetTrackerSlot,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -231,7 +266,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -263,6 +298,7 @@ async fn dispatch_request(
     config: &Arc<ConfigManager>,
     data_dir: &Arc<PathBuf>,
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    budget_slot: &BudgetTrackerSlot,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -341,6 +377,11 @@ async fn dispatch_request(
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
         "get_phase4_status" => handle_get_phase4_status(id),
+        // Phase 4 (4-15): AI budget status / config / AI 預算狀態與配置
+        "get_ai_budget_status" => handle_get_ai_budget_status(id, budget_slot).await,
+        "update_ai_budget_config" => {
+            handle_update_ai_budget_config(id, &req.params, budget_slot).await
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -424,6 +465,117 @@ fn handle_get_phase4_status(id: serde_json::Value) -> JsonRpcResponse {
         "last_update_ms": now_ms,
     });
     JsonRpcResponse::success(id, payload)
+}
+
+/// Phase 4 (4-15): Return current AI budget status snapshot.
+/// Phase 4 (4-15)：返回當前 AI 預算狀態快照。
+///
+/// EN: If the BudgetTracker slot is None (e.g., DB pool unavailable at boot), this
+///     fail-soft returns `{"status":"uninitialized"}` so dashboards can render a grey
+///     card without raising an IPC error. When the tracker is present, returns the
+///     full JSON produced by `BudgetTracker::status_json()` (limits, usage, degrade
+///     level, last refresh timestamp).
+/// 中：若 BudgetTracker 槽位為 None（例如 DB 池在啟動時不可用），fail-soft 回傳
+///     `{"status":"uninitialized"}`，儀表板可顯示灰燈而不報錯。當 tracker 存在時，
+///     回傳 `BudgetTracker::status_json()` 產生的完整 JSON（額度、用量、降級等級、
+///     最近刷新時戳）。
+async fn handle_get_ai_budget_status(
+    id: serde_json::Value,
+    slot: &BudgetTrackerSlot,
+) -> JsonRpcResponse {
+    let guard = slot.read().await;
+    match guard.as_ref() {
+        Some(tracker) => {
+            let payload = tracker.status_json().await;
+            JsonRpcResponse::success(id, payload)
+        }
+        None => JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "status": "uninitialized",
+                "reason": "BudgetTracker not yet injected (DB pool unavailable at boot?)",
+            }),
+        ),
+    }
+}
+
+/// Phase 4 (4-15): Upsert one AI budget scope and refresh the in-memory config.
+/// Phase 4 (4-15)：upsert 單一 AI 預算 scope 並刷新記憶體中的配置。
+///
+/// EN: Params schema: `{ "scope": <str>, "monthly_usd": <f64>, "updated_by": <str?> }`.
+///     Fail-closed: missing/invalid params → -32602; tracker not initialized → -32603;
+///     DB write or refresh failure → -32603 with error message; never panics. Successful
+///     write triggers `BudgetTracker::refresh_config()` so the new ceiling is enforced
+///     on the very next LLM call.
+/// 中：參數格式：`{ "scope": <str>, "monthly_usd": <f64>, "updated_by": <str?> }`。
+///     fail-closed：缺失/無效參數 → -32602；tracker 未初始化 → -32603；
+///     DB 寫入或刷新失敗 → -32603 並附錯誤訊息；絕不 panic。寫入成功後觸發
+///     `BudgetTracker::refresh_config()`，新上限在下一次 LLM 調用即生效。
+async fn handle_update_ai_budget_config(
+    id: serde_json::Value,
+    params: &serde_json::Value,
+    slot: &BudgetTrackerSlot,
+) -> JsonRpcResponse {
+    const ERR_INVALID_PARAMS: i64 = -32602;
+
+    let scope = match params.get("scope").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_PARAMS,
+                "missing or empty 'scope' (string)",
+            );
+        }
+    };
+    let monthly_usd = match params.get("monthly_usd").and_then(|v| v.as_f64()) {
+        Some(v) if v.is_finite() && v >= 0.0 => v,
+        _ => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_PARAMS,
+                "missing or invalid 'monthly_usd' (must be finite f64 >= 0)",
+            );
+        }
+    };
+    let updated_by = params
+        .get("updated_by")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ipc")
+        .to_string();
+
+    let guard = slot.read().await;
+    let tracker = match guard.as_ref() {
+        Some(t) => Arc::clone(t),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INTERNAL,
+                "budget tracker not initialized (DB pool unavailable?)",
+            );
+        }
+    };
+    drop(guard);
+
+    let pool = tracker.pool_handle();
+    if let Err(e) =
+        crate::ai_budget::config_io::upsert_scope(&pool, &scope, monthly_usd, &updated_by).await
+    {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("upsert failed: {e}"));
+    }
+    if let Err(e) = tracker.refresh_config().await {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("refresh_config failed: {e}"));
+    }
+
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "ok": true,
+            "scope": scope,
+            "monthly_usd": monthly_usd,
+            "updated_by": updated_by,
+        }),
+    )
 }
 
 /// Reload engine config (hot params only).
@@ -754,6 +906,12 @@ mod tests {
         Arc::new(PathBuf::from("/tmp/oc_ipc_test_nonexistent"))
     }
 
+    /// Empty BudgetTracker slot for tests that don't exercise 4-15 paths.
+    /// 給不演練 4-15 路徑的測試使用的空 BudgetTracker 槽位。
+    fn empty_budget_slot() -> BudgetTrackerSlot {
+        Arc::new(RwLock::new(None))
+    }
+
     /// Write a test snapshot file to a temp dir, return the dir path.
     /// 寫入測試快照文件到臨時目錄，返回目錄路徑。
     fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
@@ -829,7 +987,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none());
         assert_eq!(
             resp.result.unwrap(),
@@ -843,7 +1001,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -855,7 +1013,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -865,7 +1023,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -875,7 +1033,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -885,7 +1043,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -895,7 +1053,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -927,7 +1085,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error when snapshot file missing"
@@ -939,7 +1097,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -952,7 +1110,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -964,7 +1122,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
@@ -1034,7 +1192,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let ranges_str = result["result"].as_str().unwrap();
@@ -1048,7 +1206,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
@@ -1065,7 +1223,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
     }
 
@@ -1075,7 +1233,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error for nonexistent strategy"
@@ -1088,7 +1246,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx)).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error when params_json missing"
@@ -1105,7 +1263,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none(), "phase4 status must succeed");
         let r = resp.result.unwrap();
         assert_eq!(r["teacher"], "grey");
@@ -1122,7 +1280,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert!(resp.error.is_none());
         let r = resp.result.unwrap();
         for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -1147,9 +1305,63 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-        let resp = dispatch_request(req, &config, &dd, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
         assert_eq!(resp.id, serde_json::json!(4002));
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Phase 4 (4-15): AI budget IPC handler tests
+    // Phase 4 (4-15)：AI 預算 IPC handler 測試
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// Slot empty → get_ai_budget_status fail-soft returns "uninitialized".
+    /// 槽位為空 → get_ai_budget_status fail-soft 回傳 "uninitialized"。
+    #[tokio::test]
+    async fn test_handle_get_ai_budget_status_uninitialized() {
+        let slot = empty_budget_slot();
+        let resp = handle_get_ai_budget_status(serde_json::json!(4150), &slot).await;
+        assert!(resp.error.is_none(), "should fail-soft, not error");
+        let result = resp.result.expect("result should be present");
+        assert_eq!(result["status"], "uninitialized");
+        assert_eq!(resp.id, serde_json::json!(4150));
+    }
+
+    /// Slot empty → update_ai_budget_config -32603 (fail-closed for writes).
+    /// 槽位為空 → update_ai_budget_config 回 -32603（寫入路徑 fail-closed）。
+    #[tokio::test]
+    async fn test_handle_update_ai_budget_config_uninitialized() {
+        let slot = empty_budget_slot();
+        let params = serde_json::json!({
+            "scope": "teacher",
+            "monthly_usd": 60.0,
+            "updated_by": "operator"
+        });
+        let resp =
+            handle_update_ai_budget_config(serde_json::json!(4151), &params, &slot).await;
+        assert!(resp.error.is_some(), "must fail-closed when uninitialized");
+        assert_eq!(resp.error.unwrap().code, ERR_INTERNAL);
+    }
+
+    /// Missing 'scope' / invalid 'monthly_usd' → -32602 invalid params.
+    /// 缺 'scope' 或 'monthly_usd' 不合法 → 回 -32602。
+    #[tokio::test]
+    async fn test_handle_update_ai_budget_config_invalid_params() {
+        let slot = empty_budget_slot();
+        // Missing scope / 缺 scope
+        let p1 = serde_json::json!({ "monthly_usd": 60.0 });
+        let r1 = handle_update_ai_budget_config(serde_json::json!(1), &p1, &slot).await;
+        assert_eq!(r1.error.expect("err").code, -32602);
+
+        // Negative monthly_usd / monthly_usd 為負
+        let p2 = serde_json::json!({ "scope": "teacher", "monthly_usd": -1.0 });
+        let r2 = handle_update_ai_budget_config(serde_json::json!(2), &p2, &slot).await;
+        assert_eq!(r2.error.expect("err").code, -32602);
+
+        // Empty scope / scope 空字串
+        let p3 = serde_json::json!({ "scope": "", "monthly_usd": 10.0 });
+        let r3 = handle_update_ai_budget_config(serde_json::json!(3), &p3, &slot).await;
+        assert_eq!(r3.error.expect("err").code, -32602);
     }
 }
