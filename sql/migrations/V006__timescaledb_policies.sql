@@ -36,7 +36,13 @@ SELECT add_compression_policy('market.liquidations', INTERVAL '7 days', if_not_e
 
 -- Trading tables: compress after 14 days / 交易表：14 天後壓縮
 ALTER TABLE trading.signals SET (timescaledb.compress, timescaledb.compress_segmentby = 'symbol');
-SELECT add_compression_policy('trading.signals', INTERVAL '14 days', if_not_exists => TRUE);
+-- DB-RUN-7: shrink chunk to 1 day + compress after 2 days. Combined with the
+-- DB-RUN-1 signal write throttle this keeps signals hypertable from running
+-- away again. Original 7-day chunk + 14-day compress left 19 GB sitting
+-- uncompressed for ~3 weeks before the policy ever fired.
+-- DB-RUN-7：chunk 縮到 1 天 + 2 天後壓縮，配合 DB-RUN-1 寫入節流。
+SELECT set_chunk_time_interval('trading.signals', INTERVAL '1 day');
+SELECT add_compression_policy('trading.signals', INTERVAL '2 days', if_not_exists => TRUE);
 
 ALTER TABLE trading.intents SET (timescaledb.compress, timescaledb.compress_segmentby = 'symbol');
 SELECT add_compression_policy('trading.intents', INTERVAL '14 days', if_not_exists => TRUE);
