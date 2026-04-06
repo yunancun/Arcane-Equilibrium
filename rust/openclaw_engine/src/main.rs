@@ -585,7 +585,9 @@ async fn async_main(config: Arc<ConfigManager>) {
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
         let mut topics = Vec::new();
         for sym in SYMBOLS {
-            for topic in openclaw_engine::multi_interval_ws::extended_subscription_list(sym) {
+            // GAP: extended_subscription_list collapsed into full_subscription_list
+            // 2026-04-06 — broken topics permanently removed.
+            for topic in openclaw_engine::multi_interval_ws::full_subscription_list(sym) {
                 topics.push(topic);
             }
         }

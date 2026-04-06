@@ -276,7 +276,6 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     // Group by type for batch efficiency / 按類型分組以提高批量效率
     let mut ob = Vec::new();
     let mut trades = Vec::new();
-    let mut liq = Vec::new();
     let mut funding = Vec::new();
     let mut oi = Vec::new();
     let mut lsr = Vec::new();
@@ -287,7 +286,6 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
         match msg {
             m @ MarketDataMsg::ObSnapshot { .. } => ob.push(m),
             m @ MarketDataMsg::TradeAgg1m { .. } => trades.push(m),
-            m @ MarketDataMsg::Liquidation { .. } => liq.push(m),
             m @ MarketDataMsg::FundingRate { .. } => funding.push(m),
             m @ MarketDataMsg::OpenInterest { .. } => oi.push(m),
             m @ MarketDataMsg::LongShortRatio { .. } => lsr.push(m),
@@ -302,9 +300,6 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     }
     if !trades.is_empty() {
         flush_trade_agg(pg, pool, &trades).await;
-    }
-    if !liq.is_empty() {
-        flush_liquidations(pg, pool, &liq).await;
     }
     if !funding.is_empty() {
         flush_funding(pg, pool, &funding).await;
@@ -415,30 +410,8 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
     exec_batch(&mut qb, pg, pool, "trade_agg_1m", buf.len()).await;
 }
 
-// ── 1-08: funding + OI + LSR + liquidations ──
-
-async fn flush_liquidations(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
-    let mut qb: QueryBuilder<sqlx::Postgres> =
-        QueryBuilder::new("INSERT INTO market.liquidations (ts, symbol, side, qty, price) ");
-    qb.push_values(buf, |mut b, msg| {
-        if let MarketDataMsg::Liquidation {
-            ts_ms,
-            symbol,
-            side,
-            qty,
-            price,
-        } = msg
-        {
-            b.push_bind(chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default());
-            b.push_bind(symbol.as_str());
-            b.push_bind(side.as_str());
-            b.push_bind(sanitize_f64_or_zero(*qty) as f32);
-            b.push_bind(sanitize_f64_or_zero(*price) as f32);
-        }
-    });
-    qb.push(" ON CONFLICT DO NOTHING");
-    exec_batch(&mut qb, pg, pool, "liquidations", buf.len()).await;
-}
+// ── 1-08: funding + OI + LSR ──
+// (liquidations writer deleted 2026-04-06: no producer, no consumer, table reserved)
 
 async fn flush_funding(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
     let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
