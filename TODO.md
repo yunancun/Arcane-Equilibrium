@@ -3,7 +3,65 @@
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 審計報告：srv/audit_PA_consolidated_remediation_plan.md（63 issues · 11 work packages）
+# ★ 整合報告 2026-04-06：docs/audits/2026-04-06_consolidated_remediation_report.md（53 OPEN / 6 DONE / 4 PARTIAL · R0-R3 batches）
 # ★ 待辦：策略 confidence 需要動態化（當前固定 0.50，低波動市場全被 cost gate 攔截）
+
+---
+
+## ██ 2026-04-06 PA 整合審計 — R0 立即修復清單 ██
+
+從 13 份審計報告整合驗證後的 OPEN P0 清單（詳見 `docs/audits/2026-04-06_consolidated_remediation_report.md`）：
+
+- [ ] **R0-1 / I-01** `intent_processor.rs::process_gates_only()` 補上 Gate 3 Cost Gate（exchange 模式必須）
+- [ ] **R0-2 / I-02 + I-09** IPC Unix socket 設 0o600 + 風控 setter 加 `.clamp()` 邊界
+- [ ] **R0-3 / I-06** `market_data_client.rs` (1422 LOC) 拆分至 1200 以下硬上限
+- [ ] **R0-4 / I-07** 執行 DDL V001-V007 到生產 PG，驗證 6 個 writer 開始入庫
+- [ ] **R0-5 / NEW-1** 重建 `tests/stress_integration.rs`（檔案已被整個刪除，29 個 stress 場景需重新移植到當前 4-arg 簽名）
+- [ ] **R0-6 / I-04 + I-05** 重跑 `test_grafana_data_writer.py` 與 `test_label_generator.py`，若仍紅則修復根因
+
+**Exchange mode go-live blockers**: R0-1, R0-2, R0-5, R1-A, R1-I, R1-J（見整合報告 §6 critical-path）。
+
+### 已驗證 DONE（從 PA 63 中歸檔）
+
+- [x] Session 9c `realized_pnl` 接線（`tick_pipeline.rs:737-763` + `trading_writer.rs:151-163`）
+- [x] Gate 3 Cost Gate 在 `process()` 路徑完整（intent_processor.rs L317-355）
+- [x] H0Gate fail-closed 硬化 + RRC-1 風控接線（CLAUDE.md §三）
+- [x] PyO3 39 方法 + Bybit V5 全量端點（BB 審計確認 47/47 正確）
+- [x] 風控 GUI Session 9 補齊 + IPC h0_shadow_mode 全鏈路（CLAUDE.md §三）
+
+### R1 高優先級 P1（待 R0 完成後）
+
+- [ ] I-08 StopRequest channel 接入 `set_trading_stop`（雙軌止損生效）
+- [ ] I-10 Cookie `secure=True` env-driven
+- [ ] I-11 GUI `innerHTML` → `textContent`（防 XSS）
+- [ ] I-12 風控 tab input focused 時跳過 15 s 自動覆蓋
+- [ ] I-13 移除 AI advice Apply 按鈕父 div `display:none`
+- [ ] I-14 Delete strategy + Danger Zone 加確認彈窗
+- [ ] I-15 Feed/Demo/Scanner 快捷按鈕改為只讀指示器
+- [ ] I-16 `saveProviderKey` 後端對齊 + `runEvolution` 改 `ocPost`
+- [ ] I-17 5 個高風險硬編碼值移入 StopConfig（HC-S1/S2/S3/CG1/CG2）
+- [ ] I-18 12 個 regime 乘數提取為 RegimeConfig
+- [ ] I-19 Scorer 接入 `tick_pipeline`（信號後、intent 前 score()）
+- [ ] I-20 `record_trade()` 在成交回調中調用
+- [ ] I-21 `PositionSnapshot` 每 30s 發射到 trading_tx
+- [ ] I-22 `event_consumer.rs` 補 +15 unit tests
+- [ ] I-23 `ort` crate 整合 + `model_manager::predict()` 真實實現
+- [ ] I-24 `docs/README.md` 補 25 項遺漏
+- [ ] I-25 創建 `helper_scripts/SCRIPT_INDEX.md`
+- [ ] I-26 合併 04-05 worklog 6 碎片到 daily_summary
+- [ ] I-27 `cargo fix` W1-W4 + 手動處理 W5
+- [ ] I-28 Python >1200 LOC 文件清理時間線
+
+### R2 P2 主題批次（Phase 4 初期）
+
+DB 接線（I-32/33/36/53）· ML 訓練（I-34/35/37）· 代碼品質（I-38/39/40）· 風控完善（I-29/30/31/49）· Bybit 強化（I-50/51/52）· 文檔（I-41-45）· 數學（I-46/47）· 治理（I-48）
+
+### R3 Backlog（Phase 4+）
+
+I-54..I-63 — 詳見整合報告 §4.
+
+---
+
 
 ---
 
