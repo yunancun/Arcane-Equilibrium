@@ -301,6 +301,9 @@ pub enum TradingMsg {
         qty: f64,
         price: f64,
         fee: f64,
+        /// Effective taker fee rate at execution time (Bybit per-symbol).
+        /// 成交時的有效 taker 費率（Bybit per-symbol）。
+        fee_rate: f64,
         realized_pnl: f64,
         strategy_name: String,
         context_id: String,

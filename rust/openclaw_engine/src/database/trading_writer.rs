@@ -223,7 +223,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(FILL_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, realized_pnl, is_paper, strategy_name, context_id) "
+            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Fill {
@@ -235,6 +235,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 qty,
                 price,
                 fee,
+                fee_rate,
                 realized_pnl,
                 strategy_name,
                 context_id,
@@ -250,6 +251,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(sanitize_f64_or_zero(*qty) as f32);
                 b.push_bind(sanitize_f64_or_zero(*price) as f32);
                 b.push_bind(sanitize_f64_or_zero(*fee) as f32);
+                b.push_bind(sanitize_f64_or_zero(*fee_rate) as f32);
                 b.push_bind(sanitize_f64_or_zero(*realized_pnl) as f32);
                 b.push_bind(true); // is_paper = always true in demo mode
                 b.push_bind(strategy_name.as_str());
@@ -348,6 +350,7 @@ mod tests {
             qty: 0.1,
             price: 50000.0,
             fee: 2.75,
+            fee_rate: 0.00055,
             realized_pnl: 0.0,
             strategy_name: "ma".into(),
             context_id: "c1".into(),
@@ -413,6 +416,7 @@ mod tests {
                 qty: 0.1,
                 price: 50000.0,
                 fee: 2.75,
+                fee_rate: 0.00055,
                 realized_pnl: 0.0,
                 strategy_name: "ma".into(),
                 context_id: "c1".into(),

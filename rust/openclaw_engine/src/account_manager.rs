@@ -148,6 +148,10 @@ pub struct AccountManager {
     wallet: RwLock<WalletState>,
     /// Cached fee rates per symbol / 緩存的每交易對手續費率
     fee_rates: RwLock<HashMap<String, FeeRate>>,
+    /// Last successful fee_rate refresh timestamp (ms since epoch).
+    /// 0 = never refreshed; used by quality monitor for staleness alerts.
+    /// 上次成功刷新費率的時間戳（毫秒），0=從未刷新。
+    last_fee_refresh_ms: std::sync::atomic::AtomicU64,
 }
 
 impl AccountManager {
@@ -157,7 +161,15 @@ impl AccountManager {
         Self {
             wallet: RwLock::new(WalletState::default()),
             fee_rates: RwLock::new(HashMap::new()),
+            last_fee_refresh_ms: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// Last successful fee-rate refresh timestamp (ms since epoch). 0 = never.
+    /// 上次成功刷新費率的時間戳（毫秒），0=從未刷新。
+    pub fn last_fee_refresh_ms(&self) -> u64 {
+        self.last_fee_refresh_ms
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     // -----------------------------------------------------------------------
@@ -276,6 +288,14 @@ impl AccountManager {
                 count += 1;
             }
         }
+
+        // Stamp success timestamp for staleness monitoring.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.last_fee_refresh_ms
+            .store(now_ms, std::sync::atomic::Ordering::Relaxed);
 
         info!(
             category = category,

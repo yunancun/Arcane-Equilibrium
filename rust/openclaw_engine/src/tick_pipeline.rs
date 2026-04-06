@@ -411,6 +411,7 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
+            let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("close-{}-{}", symbol, ts_ms),
                 ts_ms,
@@ -420,6 +421,7 @@ impl TickPipeline {
                 qty,
                 price,
                 fee: 0.0, // close fees accrued by paper_state separately
+                fee_rate: fr,
                 realized_pnl,
                 strategy_name: format!("risk_close:{reason}"),
                 context_id: format!("ctx-{}-{}", symbol, ts_ms),
@@ -1215,6 +1217,7 @@ impl TickPipeline {
                                     qty: fill.fill_qty,
                                     price: fill.fill_price,
                                     fee: fill.fee,
+                                    fee_rate: self.intent_processor.fee_rate(&intent.symbol),
                                     realized_pnl,
                                     strategy_name: intent.strategy.clone(),
                                     context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
@@ -1502,6 +1505,7 @@ impl TickPipeline {
         }
 
         if let Some(ref tx) = self.trading_tx {
+            let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("fill-{}-{}", symbol, ts_ms),
                 ts_ms,
@@ -1511,6 +1515,7 @@ impl TickPipeline {
                 qty,
                 price: fill_price,
                 fee,
+                fee_rate: fr,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id: format!("ctx-{}-{}", symbol, ts_ms),
