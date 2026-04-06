@@ -1313,11 +1313,22 @@ impl TickPipeline {
             // PNL-4: Pull live regime from Hurst (preferred) or ADX fallback.
             // PNL-4：從 Hurst（首選）或 ADX 退回讀取實時 regime，取代硬編碼 "ranging"。
             let regime = self.derive_regime(self.latest_indicators.get(symbol));
+            // GAP-2: live cost_ratio = round-trip fees / unrealized profit.
+            //   For positive pnl_pct, cost_ratio ≈ 200 × fee_rate / pnl_pct
+            //   (price ≈ entry near the close threshold so the approximation
+            //   is exact at the boundary). Returns 0 when not in profit, which
+            //   short-circuits the cost-edge check (only fires when pnl > 0).
+            // GAP-2：實時 cost_ratio = 來回手續費 / 浮盈。
+            let cost_ratio = if *pnl_pct > 0.0 {
+                (2.0 * self.intent_processor.fee_rate() * 100.0) / *pnl_pct
+            } else {
+                0.0
+            };
             let action = check_position_on_tick(
                 *pnl_pct,
                 *peak_pnl_pct,
                 holding_hours,
-                0.0,     // cost_ratio — placeholder, Phase D wiring
+                cost_ratio,
                 &regime, // PNL-4: live regime from Hurst/ADX
                 atr_pct,
                 symbol,

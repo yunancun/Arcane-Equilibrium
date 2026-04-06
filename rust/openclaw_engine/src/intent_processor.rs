@@ -54,6 +54,10 @@ pub struct ExchangeGateResult {
 /// 默認 P1 風險上限（每筆交易餘額的 2%）。
 const DEFAULT_P1_RISK_PCT: f64 = 0.02;
 
+/// Bybit USDT perp default taker fee (0.055%) — fallback when API rate not available.
+/// Bybit USDT 永續合約默認 taker 費率，API 未提供時的回退值。
+const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
+
 pub struct IntentProcessor {
     guardian: Guardian,
     /// API-fetched taker fee rate (None = use hardcoded default).
@@ -374,10 +378,13 @@ impl IntentProcessor {
                 .get(&intent.symbol)
                 .cloned()
                 .unwrap_or_default();
-            let atr_pct = paper_state
-                .latest_turnover(&intent.symbol)
-                .map(|_| 0.02) // placeholder — real ATR% from indicators in Phase 3
-                .unwrap_or(0.02);
+            // GAP-4: real ATR% from on_tick atr param (raw price units → fraction).
+            // GAP-4：從 on_tick 傳入的真實 atr 計算 ATR% (價格單位轉小數)。
+            let atr_pct = if price > 0.0 && atr > 0.0 {
+                atr / price
+            } else {
+                0.0
+            };
             crate::ml::kelly_sizer::compute_kelly_qty(
                 kelly_cfg,
                 &stats,
@@ -460,7 +467,7 @@ impl IntentProcessor {
             }
 
             if atr > 0.0 {
-                let fee_rate = self.taker_fee_rate.unwrap_or(0.00055);
+                let fee_rate = self.fee_rate();
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
@@ -590,10 +597,12 @@ impl IntentProcessor {
                 .get(&intent.symbol)
                 .cloned()
                 .unwrap_or_default();
-            let atr_pct = paper_state
-                .latest_turnover(&intent.symbol)
-                .map(|_| 0.02)
-                .unwrap_or(0.02);
+            // GAP-4: real ATR% from on_tick atr param.
+            let atr_pct = if price > 0.0 && atr > 0.0 {
+                atr / price
+            } else {
+                0.0
+            };
             crate::ml::kelly_sizer::compute_kelly_qty(
                 kelly_cfg,
                 &stats,
@@ -672,7 +681,7 @@ impl IntentProcessor {
             }
 
             if atr > 0.0 {
-                let fee_rate = self.taker_fee_rate.unwrap_or(0.00055);
+                let fee_rate = self.fee_rate();
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
@@ -702,6 +711,12 @@ impl IntentProcessor {
     /// 創建後設定動態費率（用於熱重載）。
     pub fn set_fee_rate(&mut self, rate: f64) {
         self.taker_fee_rate = Some(rate);
+    }
+
+    /// Effective taker fee rate (API-fetched if available, else default).
+    /// 有效 taker 費率（API 動態值優先，否則默認）。
+    pub fn fee_rate(&self) -> f64 {
+        self.taker_fee_rate.unwrap_or(DEFAULT_TAKER_FEE_RATE)
     }
 
     /// PNL-5: Cost-gate k multiplier scaled by notional size, reading

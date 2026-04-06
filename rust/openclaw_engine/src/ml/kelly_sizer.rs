@@ -152,9 +152,16 @@ pub fn compute_kelly_qty(
     // Kelly qty = fraction * balance / price
     let kelly_qty = capped * balance / price;
 
-    // ATR volatility adjustment: reduce in high-vol regimes
+    // ATR volatility adjustment: reduce in high-vol regimes.
+    // REFERENCE_ATR_PCT is the normalization anchor (typical crypto perp 5m ATR%
+    // sits in 1–4% band; 2% chosen so the multiplier sits at 1.0 in steady state).
+    // Not a tuning knob — changing it would re-baseline every Kelly call inconsistently.
+    // ATR 波動調整：高波動市場縮量。REFERENCE_ATR_PCT 為歸一化錨點，非調參項。
+    const REFERENCE_ATR_PCT: f64 = 0.02;
+    const VOL_MULT_FLOOR: f64 = 0.5;
+    const VOL_MULT_CEIL: f64 = 1.5;
     let vol_adjusted = if atr_pct > 0.0 {
-        let vol_multiplier = (0.02 / atr_pct).clamp(0.5, 1.5); // reference ATR% = 2%
+        let vol_multiplier = (REFERENCE_ATR_PCT / atr_pct).clamp(VOL_MULT_FLOOR, VOL_MULT_CEIL);
         kelly_qty * vol_multiplier
     } else {
         kelly_qty
