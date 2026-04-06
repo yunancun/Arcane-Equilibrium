@@ -470,27 +470,71 @@ async fn async_main(config: Arc<ConfigManager>) {
             }
             shared_account_manager = Some(Arc::clone(&acct));
 
-            // Periodic refresh: re-fetch fee rates every hour to track VIP-tier changes.
-            // 每小時刷新費率，追蹤 VIP 等級變動。
+            // Periodic refresh: re-fetch fee rates every 6h to track VIP-tier changes.
+            // VIP tier moves are rare (≪daily) so 6h is plenty; cancel-aware so
+            // shutdown unwinds cleanly. Staleness monitor below will alarm if
+            // refresh task dies or API is unreachable for >12h.
+            // 每 6 小時刷新費率，追蹤 VIP 變動；接 cancel token 優雅退出。
             {
                 let acct_refresh = Arc::clone(&acct);
                 let client_refresh = Arc::clone(&client_arc);
+                let cancel_refresh = cancel.clone();
                 tokio::spawn(async move {
                     let mut tick =
-                        tokio::time::interval(std::time::Duration::from_secs(3600));
+                        tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
                     tick.tick().await; // skip first immediate tick
                     loop {
-                        tick.tick().await;
-                        match acct_refresh
-                            .refresh_fee_rates(&*client_refresh, "linear")
-                            .await
-                        {
-                            Ok(count) => info!(
-                                symbols = count,
-                                "fee rates refreshed (hourly) / 費率已刷新"
-                            ),
-                            Err(e) => {
-                                warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
+                        tokio::select! {
+                            _ = cancel_refresh.cancelled() => {
+                                info!("fee_rate refresh task stopping (cancel) / 費率刷新任務停止");
+                                break;
+                            }
+                            _ = tick.tick() => {
+                                match acct_refresh
+                                    .refresh_fee_rates(&*client_refresh, "linear")
+                                    .await
+                                {
+                                    Ok(count) => info!(
+                                        symbols = count,
+                                        "fee rates refreshed (6h) / 費率已刷新"
+                                    ),
+                                    Err(e) => {
+                                        warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Staleness monitor: alarm if fee rates haven't refreshed in >12h
+            // (refresh task dead or persistent API failure).
+            // 費率新鮮度監控：>12h 未刷新告警（refresh task 掛了或 API 持續失敗）。
+            {
+                let acct_mon = Arc::clone(&acct);
+                let cancel_mon = cancel.clone();
+                tokio::spawn(async move {
+                    let mut tick =
+                        tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+                    tick.tick().await;
+                    loop {
+                        tokio::select! {
+                            _ = cancel_mon.cancelled() => break,
+                            _ = tick.tick() => {
+                                let last = acct_mon.last_fee_refresh_ms();
+                                if last == 0 { continue; }
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as u64;
+                                let age_h = (now.saturating_sub(last)) as f64 / 3_600_000.0;
+                                if age_h > 12.0 {
+                                    warn!(
+                                        age_hours = format!("{:.1}", age_h),
+                                        "fee rates STALE >12h — refresh task may be dead / 費率過期"
+                                    );
+                                }
                             }
                         }
                     }
