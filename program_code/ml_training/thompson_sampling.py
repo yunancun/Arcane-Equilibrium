@@ -74,7 +74,7 @@ def empirical_bayes_init(returns: list[float]) -> NIGPosterior:
     # 空或全零回報 → 安全默認先驗
     if not returns or all(r == 0.0 for r in returns):
         logger.debug("empirical_bayes_init: empty/zero returns, using default prior")
-        return NIGPosterior(mu=0.0, lam=3.0, alpha=3.0, beta=1.0, n_trials=0)
+        return NIGPosterior()  # dataclass defaults: lam=3.0, alpha=3.0, beta=1.0
 
     n = len(returns)
     mu_0 = sum(returns) / n
@@ -83,8 +83,11 @@ def empirical_bayes_init(returns: list[float]) -> NIGPosterior:
     # 方差：使用 population variance（有偏）
     mean_sq = sum((r - mu_0) ** 2 for r in returns) / n
 
-    lam_0 = 3.0    # 3 trades sufficient to diverge from prior / 3 筆交易足以偏離先驗
-    alpha_0 = 3.0  # ensures both variance and mean exist / 確保方差和均值都存在
+    # Use NIGPosterior dataclass defaults as the canonical prior hyperparameters.
+    # NIG 先驗超參數統一由 NIGPosterior dataclass 默認值管理，不在此處硬編碼。
+    _default = NIGPosterior()
+    lam_0 = _default.lam      # default 3.0: 3 trades sufficient to diverge from prior
+    alpha_0 = _default.alpha  # default 3.0: ensures both variance and mean exist
 
     # beta_0 = var(returns) * (alpha_0 - 1)
     beta_0 = mean_sq * (alpha_0 - 1.0)  # = var * 2
