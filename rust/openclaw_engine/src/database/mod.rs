@@ -340,6 +340,27 @@ pub struct DecisionContextMsg {
     pub indicators_snapshot: serde_json::Value,
     pub position_detail: serde_json::Value,
     pub decision_payload: serde_json::Value,
+    // 4-18 / Phase 4 wiring columns (V009 ADD + V003 news columns).
+    // 4-18 / Phase 4 接線欄位（V009 新增 + V003 既有新聞欄位）。
+    // Producer wiring lives in W4 sweep; here we only expose the consumer-side
+    // capability. Default None → INSERT writes SQL NULL.
+    // Producer 接線由 W4 sweep 處理；本處僅暴露 consumer 側寫入能力，
+    // 預設 None → INSERT 寫 SQL NULL。
+    /// V009 ADD: FK-ish link to claude_directive emission (nullable).
+    /// V009 新增：關聯到 Claude 指令發射（可空）。
+    pub claude_directive_id: Option<i32>,
+    /// V009 ADD: LinUCB arm identifier chosen at decision time.
+    /// V009 新增：決策時刻選中的 LinUCB arm 標識。
+    pub linucb_arm_id: Option<String>,
+    /// V009 ADD: LinUCB upper confidence bound at selection (REAL → f64).
+    /// V009 新增：選擇時的 LinUCB 置信上界（REAL → f64）。
+    pub linucb_confidence_bound: Option<f64>,
+    /// V003 existing: news severity (0.0–1.0 scale).
+    /// V003 既有：新聞嚴重度（0.0–1.0 尺度）。
+    pub news_severity: Option<f32>,
+    /// V003 existing: hours since last major news event.
+    /// V003 既有：距上次重大新聞的小時數。
+    pub hours_since_last_major_news: Option<f64>,
 }
 
 /// Sanitize a float for PG insertion: replace NaN/Inf with None.

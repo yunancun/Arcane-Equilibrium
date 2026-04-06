@@ -164,3 +164,170 @@ def test_phase4_classify_teacher_status_none_outcome_treated_as_zero():
 
     assert _classify_teacher_status(0.85, None) == "green"
     assert _classify_teacher_status(0.5, None) == "red"
+
+
+# ─── 4-10 News card route tests / News 卡片路由測試 ──────────────────────
+
+
+def test_phase4_news_route_returns_200_fail_soft(client: TestClient) -> None:
+    """GET /api/v1/phase4/news must respond 200 even without PG (fail-soft).
+    無 PG 時 /api/v1/phase4/news 仍須回 200（fail-soft）。
+    """
+    resp = client.get("/api/v1/phase4/news")
+    assert resp.status_code == 200
+
+
+def test_phase4_news_route_schema_complete(client: TestClient) -> None:
+    """Response must contain all required keys with valid types.
+    回應須包含所有必要 key 且型別正確。
+    """
+    body = client.get("/api/v1/phase4/news").json()
+    required_keys = {
+        "ok",
+        "status_light",
+        "total_24h",
+        "halt_triggers_24h",
+        "max_severity_24h",
+        "recent",
+        "providers",
+        "last_update_ms",
+    }
+    assert required_keys.issubset(body.keys())
+    assert body["status_light"] in _VALID_LIGHTS
+    assert isinstance(body["total_24h"], int)
+    assert isinstance(body["halt_triggers_24h"], int)
+    assert isinstance(body["recent"], list)
+    assert isinstance(body["providers"], list)
+    assert isinstance(body["last_update_ms"], int)
+    # 4 known providers should always be present (stub until 4-W4 wiring).
+    # 4 個已知 provider 必須存在（4-W4 wiring 之前為 stub）。
+    assert len(body["providers"]) == 4
+    names = {p["name"] for p in body["providers"]}
+    assert names == {"cryptopanic", "cointelegraph_rss", "google_news_rss", "mock"}
+    for p in body["providers"]:
+        assert "status" in p
+        assert "quota_remaining" in p
+
+
+def test_phase4_news_route_grey_when_no_pg(client: TestClient) -> None:
+    """Without PG, the route should fail-soft to grey + ok=false.
+    無 PG 時應 fail-soft 為 grey + ok=false。
+    """
+    body = client.get("/api/v1/phase4/news").json()
+    assert body["ok"] is False
+    assert body["status_light"] == "grey"
+    assert body["total_24h"] == 0
+    assert body["halt_triggers_24h"] == 0
+    assert body["max_severity_24h"] is None
+    assert body["recent"] == []
+    # Provider stub still returned even on fail-closed path.
+    # Fail-closed 路徑也要回傳 provider stub。
+    assert len(body["providers"]) == 4
+
+
+def test_phase4_classify_news_status_green():
+    """Normal news flow + no extreme severity → green."""
+    from app.phase4_routes import _classify_news_status
+
+    assert _classify_news_status(12, 2, 0.85) == "green"
+    assert _classify_news_status(1, 0, None) == "green"
+
+
+def test_phase4_classify_news_status_yellow():
+    """Zero news in 24h → yellow (provider may be dead)."""
+    from app.phase4_routes import _classify_news_status
+
+    assert _classify_news_status(0, 0, None) == "yellow"
+
+
+def test_phase4_classify_news_status_red():
+    """max_severity >= 0.95 → red (extreme risk headline)."""
+    from app.phase4_routes import _classify_news_status
+
+    assert _classify_news_status(5, 3, 0.96) == "red"
+    assert _classify_news_status(20, 5, 1.0) == "red"
+
+
+# ─── 4-14 DL-3 card route tests / DL-3 卡片路由測試 ──────────────────────
+
+
+def test_phase4_dl3_route_returns_200_fail_soft(client: TestClient) -> None:
+    """GET /api/v1/phase4/dl3 must respond 200 even without PG (fail-soft).
+    無 PG 時 /api/v1/phase4/dl3 仍須回 200（fail-soft）。
+    """
+    resp = client.get("/api/v1/phase4/dl3")
+    assert resp.status_code == 200
+
+
+def test_phase4_dl3_route_schema_complete(client: TestClient) -> None:
+    """Response must contain all required keys with valid types.
+    回應須包含所有必要 key 且型別正確。
+    """
+    body = client.get("/api/v1/phase4/dl3").json()
+    required_keys = {
+        "ok",
+        "status_light",
+        "latest_decision",
+        "auc_delta",
+        "models",
+        "recent",
+        "last_update_ms",
+    }
+    assert required_keys.issubset(body.keys())
+    assert body["status_light"] in _VALID_LIGHTS
+    assert isinstance(body["models"], dict)
+    assert "chronos" in body["models"]
+    assert "timesfm" in body["models"]
+    assert isinstance(body["recent"], list)
+    assert isinstance(body["last_update_ms"], int)
+
+
+def test_phase4_dl3_route_grey_when_no_pg(client: TestClient) -> None:
+    """Without PG, the route should fail-soft to grey + ok=false.
+    無 PG 時應 fail-soft 為 grey + ok=false。
+    """
+    body = client.get("/api/v1/phase4/dl3").json()
+    assert body["ok"] is False
+    assert body["status_light"] == "grey"
+    assert body["latest_decision"] is None
+    assert body["auc_delta"] is None
+    assert body["recent"] == []
+    assert body["models"]["chronos"] is None
+    assert body["models"]["timesfm"] is None
+
+
+def test_phase4_classify_dl3_status_green():
+    """GO decision + full ok_rate → green."""
+    from app.phase4_routes import _classify_dl3_status
+
+    assert _classify_dl3_status("GO", 1.0) == "green"
+    assert _classify_dl3_status("GO", None) == "green"
+
+
+def test_phase4_classify_dl3_status_yellow():
+    """GO with degraded ok_rate OR PENDING_DATA → yellow."""
+    from app.phase4_routes import _classify_dl3_status
+
+    assert _classify_dl3_status("GO", 0.8) == "yellow"
+    assert _classify_dl3_status("PENDING_DATA", None) == "yellow"
+
+
+def test_phase4_classify_dl3_status_red_and_grey():
+    """NO_GO → red; unknown → grey."""
+    from app.phase4_routes import _classify_dl3_status
+
+    assert _classify_dl3_status("NO_GO", 1.0) == "red"
+    assert _classify_dl3_status(None, None) == "grey"
+    assert _classify_dl3_status("WEIRD", None) == "grey"
+
+
+def test_phase4_classify_dl3_model_availability():
+    """Substring match infers availability from observed model names.
+    子字串匹配由已觀察到的 model 名稱推斷可用性。
+    """
+    from app.phase4_routes import _classify_dl3_model_availability
+
+    seen = {"chronos-t5-tiny", "timesfm-1.0-200m"}
+    assert _classify_dl3_model_availability("chronos", seen) is True
+    assert _classify_dl3_model_availability("timesfm", seen) is True
+    assert _classify_dl3_model_availability("chronos", set()) is None

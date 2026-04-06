@@ -1,0 +1,193 @@
+<!--
+  Phase 4 · News Card — sub-task 4-10.
+  Phase 4 · News 卡片 — 子任務 4-10。
+
+  Data source / 資料源: GET /api/v1/phase4/news
+  Renders: 24h news count / halt triggers (severity >= 0.8) /
+           active providers / recent 10 headlines / 4 provider health rows /
+           status light (grey/green/yellow/red).
+  渲染內容：24h 新聞數量 / halt 觸發次數（severity >= 0.8）/
+           活躍 provider / 最近 10 條 headline / 4 個 provider 健康列 /
+           狀態燈（灰/綠/黃/紅）。
+
+  Safety / 安全:
+    - Read-only — no buttons or POST. / 純讀取，無按鈕或 POST。
+    - Fail-closed on ok=false → grey placeholder.
+      ok=false 時 fail-closed，保持 grey 預設值。
+    - XSS-safe: all headline / source / url fields rendered via textContent,
+      never innerHTML, to prevent script injection from upstream news feeds.
+      XSS 安全：所有 headline / source / url 欄位使用 textContent 渲染，
+      絕不使用 innerHTML，防止上游新聞源注入腳本。
+-->
+<div class="phase4-card" id="news-card" data-module="news">
+  <div class="phase4-card-header">
+    <h3 class="phase4-card-title">&#x1F4F0; News / 新聞信號</h3>
+    <span class="phase4-card-status">
+      <span class="phase4-light-dot grey" id="news-status-dot"></span>
+      <span id="news-status-label">loading…</span>
+    </span>
+  </div>
+
+  <div class="phase4-card-metrics" id="news-metrics">
+    <div><strong>24h news:</strong> <span id="news-total-24h">—</span></div>
+    <div><strong>Halt triggers:</strong> <span id="news-halt-24h">—</span></div>
+    <div><strong>Providers:</strong> <span id="news-providers-active">—</span></div>
+  </div>
+
+  <div style="margin-top:12px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Recent 10 headlines / 最近 10 條 headline
+    </div>
+    <table id="news-recent" style="border-collapse:collapse;font-size:11px;width:100%;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border,#30363d);">
+          <th style="padding:2px 6px;">When</th>
+          <th style="padding:2px 6px;">Source</th>
+          <th style="padding:2px 6px;text-align:right;">Sev</th>
+          <th style="padding:2px 6px;">Headline</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:12px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Provider health / Provider 健康狀態
+    </div>
+    <table id="news-providers" style="border-collapse:collapse;font-size:11px;width:100%;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border,#30363d);">
+          <th style="padding:2px 6px;">Provider</th>
+          <th style="padding:2px 6px;">Status</th>
+          <th style="padding:2px 6px;text-align:right;">Quota</th>
+          <th style="padding:2px 6px;">Last fetch</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="phase4-card-footer" style="margin-top:8px;font-size:11px;color:var(--text-muted,#8b949e);">
+    Refreshes every 30s — 每 30 秒刷新
+  </div>
+</div>
+
+<script>
+(function() {
+  // Idempotent loader: registers a global async function that the
+  // tab-phase4 polling loop calls every 30s. Safe to load multiple times.
+  // 冪等載入器：註冊全域 async 函數，給 tab-phase4 30s 輪詢呼叫。多次載入安全。
+
+  // Severity → color mapping / severity 對應顏色
+  // 0.95+ red, 0.8+ orange, 0.5+ yellow, else muted.
+  function severityColor(sev) {
+    if (sev === null || sev === undefined) return '';
+    var s = Number(sev);
+    if (isNaN(s)) return '';
+    if (s >= 0.95) return 'color:var(--red,#f85149);font-weight:600;';
+    if (s >= 0.8)  return 'color:#d2691e;font-weight:600;';
+    if (s >= 0.5)  return 'color:var(--yellow,#d29922);';
+    return 'color:var(--text-muted,#8b949e);';
+  }
+
+  // XSS-safe td builder / XSS 安全 td 建構器
+  function td(text, extra) {
+    var el = document.createElement('td');
+    el.textContent = text;
+    if (extra) el.setAttribute('style', extra);
+    return el;
+  }
+
+  window.loadNewsCard = async function() {
+    var data;
+    try {
+      var r = await fetch('/api/v1/phase4/news', { credentials: 'same-origin' });
+      data = await r.json();
+    } catch (e) {
+      data = { ok: false, status_light: 'grey', reason: 'fetch_failed' };
+    }
+
+    // Status light / 狀態燈
+    var dot = document.getElementById('news-status-dot');
+    var label = document.getElementById('news-status-label');
+    if (dot && label) {
+      var lightClass = ['grey','green','yellow','red'].includes(data.status_light)
+        ? data.status_light : 'grey';
+      dot.className = 'phase4-light-dot ' + lightClass;
+      label.textContent = data.ok ? lightClass : ('degraded: ' + (data.reason || 'unknown'));
+    }
+
+    // Metrics / 指標
+    var total = document.getElementById('news-total-24h');
+    if (total) total.textContent = (data.total_24h ?? 0).toString();
+    var halt = document.getElementById('news-halt-24h');
+    if (halt) halt.textContent = (data.halt_triggers_24h ?? 0).toString();
+    var provs = Array.isArray(data.providers) ? data.providers : [];
+    var activeCount = provs.filter(function(p) { return p && p.status === 'ok'; }).length;
+    var provActive = document.getElementById('news-providers-active');
+    if (provActive) provActive.textContent = activeCount + ' / ' + provs.length;
+
+    // Recent headlines / 最近 headline
+    var tbody = document.querySelector('#news-recent tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      var recent = Array.isArray(data.recent) ? data.recent : [];
+      for (var i = 0; i < recent.length; i++) {
+        var r2 = recent[i] || {};
+        var tr = document.createElement('tr');
+        var ts = r2.ts ? new Date(r2.ts).toLocaleString() : '—';
+        var sev = (r2.severity === null || r2.severity === undefined) ? '—' : Number(r2.severity).toFixed(2);
+        tr.appendChild(td(ts, 'padding:2px 6px;white-space:nowrap;'));
+        tr.appendChild(td(r2.source || '—', 'padding:2px 6px;'));
+        tr.appendChild(td(sev, 'padding:2px 6px;text-align:right;' + severityColor(r2.severity)));
+        // headline is the most dangerous field — always textContent.
+        // headline 是最危險的欄位 — 必須用 textContent。
+        tr.appendChild(td(r2.summary || '—', 'padding:2px 6px;'));
+        tbody.appendChild(tr);
+      }
+      if (recent.length === 0) {
+        var trEmpty = document.createElement('tr');
+        var tdEmpty = document.createElement('td');
+        tdEmpty.colSpan = 4;
+        tdEmpty.textContent = '(no news in window)';
+        tdEmpty.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        trEmpty.appendChild(tdEmpty);
+        tbody.appendChild(trEmpty);
+      }
+    }
+
+    // Provider health / Provider 健康
+    var pbody = document.querySelector('#news-providers tbody');
+    if (pbody) {
+      pbody.innerHTML = '';
+      for (var j = 0; j < provs.length; j++) {
+        var p = provs[j] || {};
+        var tr2 = document.createElement('tr');
+        var statusColor = p.status === 'ok'
+          ? 'color:var(--green,#3fb950);'
+          : (p.status === 'down'
+            ? 'color:var(--red,#f85149);'
+            : 'color:var(--text-muted,#8b949e);');
+        var quota = (p.quota_remaining === null || p.quota_remaining === undefined)
+          ? '—' : String(p.quota_remaining);
+        var lastFetch = p.last_fetch ? new Date(p.last_fetch).toLocaleString() : '—';
+        tr2.appendChild(td(p.name || '—', 'padding:2px 6px;'));
+        tr2.appendChild(td(p.status || 'unknown', 'padding:2px 6px;' + statusColor));
+        tr2.appendChild(td(quota, 'padding:2px 6px;text-align:right;'));
+        tr2.appendChild(td(lastFetch, 'padding:2px 6px;white-space:nowrap;'));
+        pbody.appendChild(tr2);
+      }
+      if (provs.length === 0) {
+        var trP = document.createElement('tr');
+        var tdP = document.createElement('td');
+        tdP.colSpan = 4;
+        tdP.textContent = '(no providers registered)';
+        tdP.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        trP.appendChild(tdP);
+        pbody.appendChild(trP);
+      }
+    }
+  };
+})();
+</script>
