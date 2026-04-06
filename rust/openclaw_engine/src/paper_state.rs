@@ -311,9 +311,13 @@ impl PaperState {
         0.0 // Opening position — no realized PnL / 開倉無已實現損益
     }
 
-    /// Close a position at market price.
-    /// 以市場價平倉。
-    pub fn close_position(&mut self, symbol: &str, price: f64, _ts_ms: u64) {
+    /// Close a position at market price. Returns realized PnL on close,
+    /// None if no position existed for the symbol. (DB-RUN-3: caller should
+    /// emit a TradingMsg::Fill with the returned PnL so trading.fills records
+    /// non-zero realized_pnl for risk/stop-driven closes.)
+    /// 以市場價平倉，返回已實現損益（None=無持倉）。DB-RUN-3：呼叫端應依此 PnL
+    /// 發送 TradingMsg::Fill，避免風控/止損平倉的 realized_pnl 落為 0。
+    pub fn close_position(&mut self, symbol: &str, price: f64, _ts_ms: u64) -> Option<f64> {
         if let Some(pos) = self.positions.remove(symbol) {
             let pnl = if pos.is_long {
                 (price - pos.entry_price) * pos.qty
@@ -324,6 +328,9 @@ impl PaperState {
             self.total_realized_pnl += pnl;
             self.trade_count += 1;
             self.peak_balance = self.peak_balance.max(self.balance);
+            Some(pnl)
+        } else {
+            None
         }
     }
 
