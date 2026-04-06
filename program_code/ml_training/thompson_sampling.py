@@ -350,3 +350,136 @@ def posteriors_from_dict(data: dict) -> dict[str, NIGPosterior]:
             n_trials=int(vals.get("n_trials", 0)),
         )
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P1-5: PostgreSQL persistence for learning.bayesian_posteriors table
+# P1-5：learning.bayesian_posteriors 表的 PostgreSQL 持久化
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_ARM_KEY_SEP = "|"
+
+
+def _parse_arm_key(arm_key: str) -> tuple[str, str, str]:
+    """Parse arm_key 'strategy|symbol|regime' into tuple. / 解析臂鍵。"""
+    parts = arm_key.split(_ARM_KEY_SEP)
+    if len(parts) != 3:
+        raise ValueError(
+            f"arm_key must be 'strategy|symbol|regime', got: {arm_key}"
+        )
+    return parts[0], parts[1], parts[2]
+
+
+def _make_arm_key(strategy: str, symbol: str, regime: str) -> str:
+    """Build arm_key from components. / 構建臂鍵。"""
+    return f"{strategy}{_ARM_KEY_SEP}{symbol}{_ARM_KEY_SEP}{regime}"
+
+
+def save_posteriors_to_pg(
+    posteriors: dict[str, NIGPosterior],
+    dsn: str,
+) -> int:
+    """UPSERT posteriors to learning.bayesian_posteriors.
+    將後驗 UPSERT 到 learning.bayesian_posteriors 表。
+
+    Args:
+        posteriors: mapping of 'strategy|symbol|regime' → NIGPosterior
+        dsn: PostgreSQL DSN (e.g., 'postgresql://user:pass@host:5432/db')
+
+    Returns:
+        Number of rows written / 寫入的行數。
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        logger.error("psycopg2 not installed — install via: pip install psycopg2-binary")
+        return 0
+
+    if not posteriors:
+        return 0
+
+    rows = []
+    for arm_key, post in posteriors.items():
+        try:
+            strategy, symbol, regime = _parse_arm_key(arm_key)
+        except ValueError as e:
+            logger.warning("skipping invalid arm_key: %s", e)
+            continue
+        rows.append((
+            strategy, symbol, regime,
+            post.mu, post.lam, post.alpha, post.beta, post.n_trials,
+        ))
+
+    if not rows:
+        return 0
+
+    sql = """
+        INSERT INTO learning.bayesian_posteriors
+            (strategy_name, symbol, regime, mu, lambda, alpha, beta, n_trials,
+             last_updated_ts)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (strategy_name, symbol, regime) DO UPDATE
+            SET mu = EXCLUDED.mu,
+                lambda = EXCLUDED.lambda,
+                alpha = EXCLUDED.alpha,
+                beta = EXCLUDED.beta,
+                n_trials = EXCLUDED.n_trials,
+                last_updated_ts = now()
+    """
+
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn, conn.cursor() as cur:
+            cur.executemany(sql, rows)
+        logger.info("save_posteriors_to_pg: upserted %d rows", len(rows))
+        return len(rows)
+    finally:
+        conn.close()
+
+
+def load_posteriors_from_pg(
+    dsn: str,
+    strategy: Optional[str] = None,
+) -> dict[str, NIGPosterior]:
+    """Load posteriors from learning.bayesian_posteriors.
+    從 learning.bayesian_posteriors 載入後驗。
+
+    Args:
+        dsn: PostgreSQL DSN
+        strategy: optional strategy filter / 可選策略過濾
+
+    Returns:
+        mapping of 'strategy|symbol|regime' → NIGPosterior
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        logger.error("psycopg2 not installed")
+        return {}
+
+    base_sql = """
+        SELECT strategy_name, symbol, regime, mu, lambda, alpha, beta, n_trials
+        FROM learning.bayesian_posteriors
+    """
+    params: tuple = ()
+    if strategy:
+        base_sql += " WHERE strategy_name = %s"
+        params = (strategy,)
+
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(base_sql, params)
+            result: dict[str, NIGPosterior] = {}
+            for row in cur.fetchall():
+                strat, sym, reg, mu, lam, alpha, beta, n_trials = row
+                key = _make_arm_key(strat, sym, reg)
+                result[key] = NIGPosterior(
+                    mu=float(mu), lam=float(lam),
+                    alpha=float(alpha), beta=float(beta),
+                    n_trials=int(n_trials),
+                )
+            logger.info("load_posteriors_from_pg: loaded %d posteriors", len(result))
+            return result
+    finally:
+        conn.close()

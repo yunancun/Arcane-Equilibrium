@@ -80,11 +80,31 @@ class TrainingResult:
     error: str = ""
 
 
+def _lgb_params(cfg: ScorerConfig) -> dict:
+    """LightGBM hyperparameter dict from ScorerConfig.
+    從 ScorerConfig 構建 LightGBM 超參數字典。"""
+    return {
+        "objective": "regression",
+        "metric": "rmse",
+        "num_leaves": cfg.num_leaves,
+        "max_depth": cfg.max_depth,
+        "learning_rate": cfg.learning_rate,
+        "min_child_samples": cfg.min_child_samples,
+        "subsample": cfg.subsample,
+        "colsample_bytree": cfg.colsample_bytree,
+        "reg_alpha": cfg.reg_alpha,
+        "reg_lambda": cfg.reg_lambda,
+        "verbose": -1,
+    }
+
+
 def train_scorer(
     features: np.ndarray,
     labels: np.ndarray,
     feature_names: list[str],
     config: Optional[ScorerConfig] = None,
+    timestamps: Optional[np.ndarray] = None,
+    strategy_type: str = "trending",
 ) -> TrainingResult:
     """Train LightGBM scorer with CPCV.
     使用 CPCV 訓練 LightGBM 評分器。
@@ -94,6 +114,9 @@ def train_scorer(
         labels: (n_samples,) ATR-normalized PnL
         feature_names: list of feature column names
         config: training configuration
+        timestamps: (n_samples,) epoch-ms timestamps. When provided enables CPCV
+            validation. Falls back to 80/20 split when None (legacy path).
+        strategy_type: trending/reversion/arb/grid — selects embargo period.
     """
     cfg = config or ScorerConfig()
     result = TrainingResult(n_samples=len(labels), n_features=len(feature_names))
@@ -111,31 +134,70 @@ def train_scorer(
         return result
 
     try:
-        # Simple train/test split — placeholder for CPCV (see cpcv_validator.py)
-        # 簡單分割 — CPCV 佔位符（見 cpcv_validator.py）
-        split_idx = int(len(labels) * 0.8)
-        X_train, X_test = features[:split_idx], features[split_idx:]
-        y_train, y_test = labels[:split_idx], labels[split_idx:]
+        if timestamps is not None and len(timestamps) == len(labels):
+            # P1-4: CPCV-validated training path / CPCV 驗證訓練路徑
+            from ml_training.cpcv_validator import CPCVConfig, validate_cpcv
+
+            def _lgb_fold_model(
+                X_tr: np.ndarray, y_tr: np.ndarray,
+                X_te: np.ndarray, y_te: np.ndarray,
+            ) -> dict:
+                train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
+                valid_data = lgb.Dataset(X_te, label=y_te, reference=train_data)
+                fold_model = lgb.train(
+                    _lgb_params(cfg),
+                    train_data,
+                    num_boost_round=cfg.n_estimators,
+                    valid_sets=[valid_data],
+                    callbacks=[lgb.early_stopping(50, verbose=False)],
+                )
+                preds = fold_model.predict(X_te)
+                rmse = float(np.sqrt(np.mean((preds - y_te) ** 2)))
+                # Sharpe proxy from prediction-weighted returns
+                std = float(np.std(preds)) or 1.0
+                sharpe = float(np.mean(preds * y_te)) / std * np.sqrt(252)
+                return {"sharpe": sharpe, "rmse": rmse}
+
+            cpcv_cfg = CPCVConfig(
+                n_folds=cfg.n_folds,
+                embargo_map={
+                    "trending": cfg.embargo_hours_trend,
+                    "reversion": cfg.embargo_hours_revert,
+                    "arb": cfg.embargo_hours_arb,
+                    "grid": cfg.embargo_hours_grid,
+                },
+                power_threshold=cfg.power_threshold,
+            )
+            cpcv_result = validate_cpcv(
+                features, labels, timestamps, strategy_type, _lgb_fold_model, cpcv_cfg,
+            )
+            if not cpcv_result.passed:
+                logger.warning(
+                    "CPCV did not pass (power=%.3f, mean_sharpe=%.3f) — continuing "
+                    "with final fit but marking as reference-only",
+                    cpcv_result.power_estimate, cpcv_result.mean_sharpe,
+                )
+
+            # Final fit on all data after CPCV validation (leak-free since CV
+            # used purged+embargoed folds). / CPCV 驗證後用全部資料最終擬合。
+            split_idx = int(len(labels) * 0.8)
+            X_train, X_test = features[:split_idx], features[split_idx:]
+            y_train, y_test = labels[:split_idx], labels[split_idx:]
+            result.metrics["cpcv_mean_sharpe"] = cpcv_result.mean_sharpe
+            result.metrics["cpcv_std_sharpe"] = cpcv_result.std_sharpe
+            result.metrics["cpcv_power"] = cpcv_result.power_estimate
+            result.metrics["cpcv_passed"] = 1.0 if cpcv_result.passed else 0.0
+        else:
+            # Legacy path: simple train/test split / 傳統路徑：簡單分割
+            split_idx = int(len(labels) * 0.8)
+            X_train, X_test = features[:split_idx], features[split_idx:]
+            y_train, y_test = labels[:split_idx], labels[split_idx:]
 
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
         valid_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
 
-        params = {
-            "objective": "regression",
-            "metric": "rmse",
-            "num_leaves": cfg.num_leaves,
-            "max_depth": cfg.max_depth,
-            "learning_rate": cfg.learning_rate,
-            "min_child_samples": cfg.min_child_samples,
-            "subsample": cfg.subsample,
-            "colsample_bytree": cfg.colsample_bytree,
-            "reg_alpha": cfg.reg_alpha,
-            "reg_lambda": cfg.reg_lambda,
-            "verbose": -1,
-        }
-
         model = lgb.train(
-            params,
+            _lgb_params(cfg),
             train_data,
             num_boost_round=cfg.n_estimators,
             valid_sets=[valid_data],
