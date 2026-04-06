@@ -143,6 +143,38 @@ impl IntentProcessor {
         &self.risk_config
     }
 
+    /// PNL-7: Patch the dynamic-stop / RR tunables in-place. Each Some(v) is
+    /// validated and applied; None leaves the field untouched. Returns the
+    /// number of fields actually changed (for IPC ack).
+    /// PNL-7：原地更新動態止損 / RR 三個可調參數，逐個驗證後生效。
+    pub fn patch_dynamic_stop_params(
+        &mut self,
+        base_ratio: Option<f64>,
+        cap_ratio: Option<f64>,
+        trailing_min_rr_ratio: Option<f64>,
+    ) -> u32 {
+        let mut changed = 0;
+        if let Some(v) = base_ratio {
+            if v.is_finite() && (0.05..=1.0).contains(&v) {
+                self.risk_config.dynamic_stop_base_ratio = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = cap_ratio {
+            if v.is_finite() && (0.1..=1.0).contains(&v) {
+                self.risk_config.dynamic_stop_cap_ratio = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = trailing_min_rr_ratio {
+            if v.is_finite() && (0.0..=2.0).contains(&v) {
+                self.risk_config.trailing_min_rr_ratio = v;
+                changed += 1;
+            }
+        }
+        changed
+    }
+
     /// RRC-1-B2: Update daily start balance (called on each tick, resets at UTC midnight).
     /// RRC-1-B2：更新每日起始餘額（每 tick 調用，UTC 午夜重置）。
     pub fn maybe_reset_daily_balance(&mut self, balance: f64, ts_ms: u64) {

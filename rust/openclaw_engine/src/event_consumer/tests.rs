@@ -193,6 +193,9 @@ fn test_handle_update_risk_config_clamps_values() {
             max_same_direction_positions: None,
             p1_risk_pct: Some(99.0),      // → 0.10
             h0_shadow_mode: Some(true),
+            dynamic_stop_base_ratio: None,
+            dynamic_stop_cap_ratio: None,
+            trailing_min_rr_ratio: None,
         },
         &mut pipeline,
         &mut writer,
@@ -201,6 +204,40 @@ fn test_handle_update_risk_config_clamps_values() {
     // Pipeline should not panic and clamped values should be applied.
     // 管線不應 panic 且鉗制後的值已套用。
     assert!(pipeline.intent_processor.guardian_config().max_leverage <= 100.0);
+}
+
+#[test]
+fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+
+    // Apply valid + invalid mix; valid ones land, invalid ones rejected by patch fn.
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::UpdateRiskConfig {
+            hard_stop_pct: None,
+            trailing_stop_pct: None,
+            time_stop_hours: None,
+            atr_multiplier: None,
+            take_profit_pct: None,
+            max_leverage: None,
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: None,
+            h0_shadow_mode: None,
+            dynamic_stop_base_ratio: Some(0.4),       // valid
+            dynamic_stop_cap_ratio: Some(5.0),        // invalid (> 1.0)
+            trailing_min_rr_ratio: Some(0.75),        // valid
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    let rc = pipeline.intent_processor.risk_config();
+    assert!((rc.dynamic_stop_base_ratio - 0.4).abs() < 1e-9);
+    assert!((rc.dynamic_stop_cap_ratio - 0.8).abs() < 1e-9, "invalid cap rejected, default kept");
+    assert!((rc.trailing_min_rr_ratio - 0.75).abs() < 1e-9);
 }
 
 #[test]

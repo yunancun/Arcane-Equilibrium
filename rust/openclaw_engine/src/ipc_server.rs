@@ -575,6 +575,16 @@ async fn handle_update_risk_config(
         .map(|v| v as usize);
     // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
     let h0_shadow_mode = params.get("h0_shadow_mode").and_then(|v| v.as_bool());
+    // PNL-7: agent-tunable dynamic-stop knobs / PNL-7：Agent 可調動態止損參數
+    let dynamic_stop_base_ratio = params
+        .get("dynamic_stop_base_ratio")
+        .and_then(|v| v.as_f64());
+    let dynamic_stop_cap_ratio = params
+        .get("dynamic_stop_cap_ratio")
+        .and_then(|v| v.as_f64());
+    let trailing_min_rr_ratio = params
+        .get("trailing_min_rr_ratio")
+        .and_then(|v| v.as_f64());
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
@@ -586,7 +596,10 @@ async fn handle_update_risk_config(
         || max_leverage.is_some()
         || max_drawdown_pct.is_some()
         || max_same_direction_positions.is_some()
-        || h0_shadow_mode.is_some();
+        || h0_shadow_mode.is_some()
+        || dynamic_stop_base_ratio.is_some()
+        || dynamic_stop_cap_ratio.is_some()
+        || trailing_min_rr_ratio.is_some();
     if !has_any {
         return JsonRpcResponse::error(
             id,
@@ -606,6 +619,9 @@ async fn handle_update_risk_config(
         max_same_direction_positions,
         p1_risk_pct,
         h0_shadow_mode,
+        dynamic_stop_base_ratio,
+        dynamic_stop_cap_ratio,
+        trailing_min_rr_ratio,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }
