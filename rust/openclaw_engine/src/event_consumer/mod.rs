@@ -57,6 +57,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
     let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
 
+    // PNL-2: log H0Gate wiring on boot so operators can confirm fresh binary.
+    // PNL-2：啟動時記錄 H0Gate 接線狀態，讓操作員確認 binary 已更新。
+    info!(
+        shadow_mode = pipeline.h0_gate.config().shadow_mode,
+        "H0Gate wired in tick_pipeline (PNL-2) / H0 門控已接入"
+    );
+
     // Item 2: Set dynamic fee rate if available / 設定動態費率
     if let Some(rate) = taker_fee_rate {
         pipeline.set_fee_rate(rate);
@@ -732,6 +739,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             let status = pipeline.status();
                             let uptime = start_time.elapsed().as_secs();
                             let h0_stats = pipeline.h0_gate.get_stats();
+                            // PNL-2: invariant — every tick must run H0Gate.check.
+                            // PNL-2：不變量 — 每個 tick 必須走過 H0Gate.check。
+                            // If ticks > 0 but checks == 0 → stale binary or wiring regression.
+                            // 若 ticks > 0 而 checks == 0 → stale binary 或接線退化。
+                            if status.stats.total_ticks > 0 && h0_stats.total_checks == 0 {
+                                warn!(
+                                    ticks = status.stats.total_ticks,
+                                    "PNL-2 invariant violated: ticks>0 but H0Gate checks==0 — stale binary? / H0 門控未執行"
+                                );
+                            }
                             info!(
                                 ticks = status.stats.total_ticks,
                                 fills = status.stats.total_fills,
