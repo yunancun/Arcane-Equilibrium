@@ -51,6 +51,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         trading_tx,
         context_tx,
         exchange_event_rx: _exchange_event_rx_field,
+        account_manager,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -70,6 +71,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         trading_tx,
         context_tx,
     );
+
+    // Wire AccountManager for live per-symbol fee lookups (cost gate / Kelly / cost_ratio).
+    if let Some(am) = account_manager {
+        pipeline.set_account_manager(Arc::clone(&am));
+        info!("pipeline using AccountManager for per-symbol fee rates / 接入動態費率");
+    }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
     if cfg_snapshot.balance_mode == "bybit_sync" {

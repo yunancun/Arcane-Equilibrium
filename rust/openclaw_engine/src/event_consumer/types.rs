@@ -62,6 +62,9 @@ pub struct EventConsumerDeps {
     pub cancel: CancellationToken,
     pub initial_balance: f64,
     pub taker_fee_rate: Option<f64>,
+    /// Live AccountManager for per-symbol fee lookups (Bybit `/v5/account/fee-rate`).
+    /// 用於 per-symbol 動態費率查詢的 AccountManager。
+    pub account_manager: Option<Arc<crate::account_manager::AccountManager>>,
     pub instruments: Option<Arc<InstrumentInfoCache>>,
     pub bootstrap_client: Option<Arc<BybitRestClient>>,
     pub shared_client: Option<Arc<BybitRestClient>>,

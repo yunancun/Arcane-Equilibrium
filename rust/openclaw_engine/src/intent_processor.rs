@@ -60,9 +60,13 @@ const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
 
 pub struct IntentProcessor {
     guardian: Guardian,
-    /// API-fetched taker fee rate (None = use hardcoded default).
-    /// API 動態 taker 費率（None = 使用硬編碼默認值）。
+    /// Legacy single-rate fallback (None = use hardcoded default).
+    /// Preferred path: read per-symbol from `account_manager` (live API source).
+    /// 舊版單費率回退（None = 用常量）。優先路徑：從 account_manager 讀取 per-symbol 真實費率。
     taker_fee_rate: Option<f64>,
+    /// Live per-symbol fee rates from Bybit `/v5/account/fee-rate`.
+    /// Bybit API 動態 per-symbol 費率（每小時刷新）。
+    account_manager: Option<std::sync::Arc<crate::account_manager::AccountManager>>,
     /// Phase 2b: Kelly sizing config (None = disabled, passthrough).
     /// Phase 2b：Kelly 倉位配置（None = 禁用，直通）。
     kelly_config: Option<crate::ml::kelly_sizer::KellyConfig>,
@@ -88,6 +92,7 @@ impl IntentProcessor {
         Self {
             guardian: Guardian::default(),
             taker_fee_rate: None,
+            account_manager: None,
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
@@ -103,6 +108,7 @@ impl IntentProcessor {
         Self {
             guardian: Guardian::default(),
             taker_fee_rate: Some(rate),
+            account_manager: None,
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
@@ -467,7 +473,7 @@ impl IntentProcessor {
             }
 
             if atr > 0.0 {
-                let fee_rate = self.fee_rate();
+                let fee_rate = self.fee_rate(&intent.symbol);
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
@@ -495,22 +501,14 @@ impl IntentProcessor {
         let turnover = paper_state
             .latest_turnover(&intent.symbol)
             .unwrap_or(100_000_000.0);
-        let fill = if let Some(rate) = self.taker_fee_rate {
-            execution::execute_market_fill_with_rate(
-                paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
-                final_qty,
-                intent.is_long,
-                turnover,
-                rate,
-            )
-        } else {
-            execution::execute_market_fill(
-                paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
-                final_qty,
-                intent.is_long,
-                turnover,
-            )
-        };
+        // Use live per-symbol fee rate (AccountManager → legacy → constant fallback).
+        let fill = execution::execute_market_fill_with_rate(
+            paper_state.latest_price(&intent.symbol).unwrap_or(0.0),
+            final_qty,
+            intent.is_long,
+            turnover,
+            self.fee_rate(&intent.symbol),
+        );
 
         IntentResult {
             submitted: true,
@@ -681,7 +679,7 @@ impl IntentProcessor {
             }
 
             if atr > 0.0 {
-                let fee_rate = self.fee_rate();
+                let fee_rate = self.fee_rate(&intent.symbol);
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
@@ -713,9 +711,24 @@ impl IntentProcessor {
         self.taker_fee_rate = Some(rate);
     }
 
-    /// Effective taker fee rate (API-fetched if available, else default).
-    /// 有效 taker 費率（API 動態值優先，否則默認）。
-    pub fn fee_rate(&self) -> f64 {
+    /// Set live AccountManager for per-symbol API-fetched fee rates.
+    /// 設置 AccountManager 用於 per-symbol 真實費率。
+    pub fn set_account_manager(
+        &mut self,
+        am: std::sync::Arc<crate::account_manager::AccountManager>,
+    ) {
+        self.account_manager = Some(am);
+    }
+
+    /// Effective taker fee rate for a symbol. Resolution order:
+    ///   1. Live `AccountManager.taker_fee(symbol)` (Bybit API, refreshed hourly)
+    ///   2. Legacy single-rate fallback (`taker_fee_rate`)
+    ///   3. `DEFAULT_TAKER_FEE_RATE` constant (cold-boot before API responds)
+    /// 有效 taker 費率（per-symbol）。優先序：API → legacy → 常量。
+    pub fn fee_rate(&self, symbol: &str) -> f64 {
+        if let Some(ref am) = self.account_manager {
+            return am.taker_fee(symbol);
+        }
         self.taker_fee_rate.unwrap_or(DEFAULT_TAKER_FEE_RATE)
     }
 

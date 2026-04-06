@@ -378,6 +378,7 @@ async fn async_main(config: Arc<ConfigManager>) {
     let mut shared_client: Option<Arc<BybitRestClient>> = None;
     let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> =
         None;
+    let mut shared_account_manager: Option<Arc<AccountManager>> = None;
     let cfg_snapshot = config.get();
     if let Ok(rest_client) = BybitRestClient::new(BybitEnvironment::Demo, None, None) {
         if rest_client.has_credentials() {
@@ -449,9 +450,10 @@ async fn async_main(config: Arc<ConfigManager>) {
                 }
             }
 
-            // Item 2: Fetch dynamic fee rates
-            // 項目 2：獲取動態費率
-            let acct = AccountManager::new();
+            // Item 2: Fetch dynamic per-symbol fee rates and keep AccountManager
+            // alive so the engine can do live per-symbol lookups + periodic refresh.
+            // 項目 2：拉取 per-symbol 動態費率，保活 AccountManager 用於後續查詢/刷新。
+            let acct = Arc::new(AccountManager::new());
             match acct.refresh_fee_rates(&*client_arc, "linear").await {
                 Ok(count) => {
                     let rate = acct.taker_fee("BTCUSDT");
@@ -465,6 +467,34 @@ async fn async_main(config: Arc<ConfigManager>) {
                 Err(e) => {
                     warn!(error = %e, "fee rate fetch failed, using defaults / 費率獲取失敗，使用默認值")
                 }
+            }
+            shared_account_manager = Some(Arc::clone(&acct));
+
+            // Periodic refresh: re-fetch fee rates every hour to track VIP-tier changes.
+            // 每小時刷新費率，追蹤 VIP 等級變動。
+            {
+                let acct_refresh = Arc::clone(&acct);
+                let client_refresh = Arc::clone(&client_arc);
+                tokio::spawn(async move {
+                    let mut tick =
+                        tokio::time::interval(std::time::Duration::from_secs(3600));
+                    tick.tick().await; // skip first immediate tick
+                    loop {
+                        tick.tick().await;
+                        match acct_refresh
+                            .refresh_fee_rates(&*client_refresh, "linear")
+                            .await
+                        {
+                            Ok(count) => info!(
+                                symbols = count,
+                                "fee rates refreshed (hourly) / 費率已刷新"
+                            ),
+                            Err(e) => {
+                                warn!(error = %e, "fee rate refresh failed / 費率刷新失敗")
+                            }
+                        }
+                    }
+                });
             }
         } else {
             info!(
@@ -914,6 +944,7 @@ async fn async_main(config: Arc<ConfigManager>) {
             trading_tx,
             context_tx,
             exchange_event_rx: shared_exchange_event_rx,
+            account_manager: shared_account_manager,
         };
         tokio::spawn(run_event_consumer(deps))
     };
