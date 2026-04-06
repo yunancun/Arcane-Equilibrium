@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-06（Session 10 · R0+R1 L3 整改完成 · 428 engine + 35 ml_training + 411 core）
+# 最後更新：2026-04-06（Session 11 · R1 WP-MIT P1-6 收尾 · 431 engine + 35 ml_training + 411 core）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 審計報告：srv/audit_PA_consolidated_remediation_plan.md（63 issues · 11 work packages）
@@ -32,6 +32,7 @@
 - [x] **WP-MIT P1-4** scorer_trainer CPCV integration（commit `de6dd82`）
 - [x] **WP-MIT P1-5** Thompson Sampling PG persistence +3 tests（commit `de6dd82`）
 - [x] **WP-MIT P1-3** run_training_pipeline.py +3 tests（commit `de6dd82`）
+- [x] **WP-MIT P1-6** drift_detector PG wiring（baselines + online_latest → PSI events，+3 tests，commit `8d5793b`）
 
 ### R1 剩餘 / R2 延後
 
@@ -41,7 +42,6 @@
 - [ ] **SEC-11** Cost-Gate ATR=0 fail-open（產品/風控決策）
 - [ ] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 2FA（2FA 架構）
 - [ ] **SEC-21** Cookie secure=True（HTTPS 上線後）
-- [ ] **WP-MIT P1-6** drift_detector PG wiring（Rust，需 features+baselines query 設計）
 - [ ] **WP-E4 P1 tests 6 項**（需 fixture harness 設計，自己 sprint）
 - [ ] **FA GAP-2/4/8/9/10**（架構性，Phase 4 範圍）
 - [ ] **Idle writers #1/2/3/5/6** ob_snapshots/trade_agg/liquidations/drift/quality（§11 分批）
