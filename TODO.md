@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-06（Session 12 · PNL-1~7 + magic-number cleanup + DB-RUN-1~7）
-測試基準線：**474 engine + 413 core + 35 ml_training + 11 control_api smoke** · 0 failures
+最後更新：2026-04-06（Session 13 · R3 backlog 清完 — FA-GAP/SEC-11/idle writer 3/I-22/per-symbol fees）
+測試基準線：**471 engine + 413 core + 35 ml_training + 11 control_api smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 
@@ -16,11 +16,12 @@
 
 ## 當前狀態
 
-L3 審計整改 R0+R1+R2 全部完成（Session 10/11，10 個 commits）。下一步候選：
-1. **PNL 根因修復**（虧損分析 7 項，引擎運行數據驅動）
-2. **DB 運行治理**（signals 寫入降頻 + decision_context 治理）
-3. **Phase 4 啟動**（Claude Teacher + LinUCB + News + DL-3）
-4. **R3 backlog 清掃**（SEC/FA/Idle writers/WP 子項）
+R3 backlog（排除 WP / SEC live-prep / Phase 4 範圍）**已全部清空**。
+Session 12 PNL-1~7 + DB-RUN-1~7 + Session 13 R3 收尾共 22 個 commits 全部 push。
+下一步候選：
+1. **Phase 4 啟動**（Claude Teacher + LinUCB + News + DL-3 · W13-15）
+2. **SEC live-prep**（SEC-05 XSS 大改 / SEC-17 2FA / SEC-21 HTTPS 配套 — 上 live 前必做）
+3. **WP backlog**（223 子項，分散小修，可以用作填空）
 
 ---
 
