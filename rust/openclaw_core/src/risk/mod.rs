@@ -21,15 +21,12 @@
 //!
 //!   GUI endpoints, persistence, and change audit log stay in Python.
 
+mod checks;
 mod config;
 mod price_tracker;
 mod stops;
-mod checks;
 
-pub use config::{RiskManagerConfig, RegimeMultipliers, regime_multipliers};
+pub use checks::{check_order_allowed, check_position_on_tick, PositionCheck, RiskAction};
+pub use config::{regime_multipliers, RegimeMultipliers, RiskManagerConfig};
 pub use price_tracker::{PriceHistoryTracker, SpikeInfo};
-pub use stops::{compute_dynamic_stop_pct, anti_cluster_offset};
-pub use checks::{
-    check_order_allowed, check_position_on_tick,
-    PositionCheck, RiskAction,
-};
+pub use stops::{anti_cluster_offset, compute_dynamic_stop_pct};

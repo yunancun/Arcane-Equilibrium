@@ -157,14 +157,21 @@ impl BacktestEngine {
                     entry_ts_ms: pos.entry_ts_ms,
                 };
                 let mut ps = ps;
-                stop_manager::update_best_price(&mut ps, if pos.is_long { bar.high } else { bar.low });
+                stop_manager::update_best_price(
+                    &mut ps,
+                    if pos.is_long { bar.high } else { bar.low },
+                );
                 pos.best_price = ps.best_price;
             }
 
             // 5. Record equity
-            let unrealized: f64 = self.positions.iter().map(|p| {
-                execution::compute_unrealized_pnl(p.entry_price, bar.close, p.qty, p.is_long)
-            }).sum();
+            let unrealized: f64 = self
+                .positions
+                .iter()
+                .map(|p| {
+                    execution::compute_unrealized_pnl(p.entry_price, bar.close, p.qty, p.is_long)
+                })
+                .sum();
             self.equity_curve.push(self.balance + unrealized);
         }
 
@@ -176,11 +183,16 @@ impl BacktestEngine {
         // Simple ATR estimate from bar range
         let atr_est = bar.high - bar.low;
         let qty = stop_manager::compute_atr_position_size(
-            self.balance, self.config.risk_per_trade_pct,
-            atr_est, atr_mult, 0.001, self.balance / bar.close,
+            self.balance,
+            self.config.risk_per_trade_pct,
+            atr_est,
+            atr_mult,
+            0.001,
+            self.balance / bar.close,
         );
 
-        let fill = execution::execute_market_fill(bar.close, qty, is_long, self.config.turnover_24h);
+        let fill =
+            execution::execute_market_fill(bar.close, qty, is_long, self.config.turnover_24h);
         self.balance -= fill.fee;
         self.total_fees += fill.fee;
 
@@ -196,7 +208,10 @@ impl BacktestEngine {
 
     fn close_position(&mut self, pos: &Position, exit_price: f64) {
         let fill = execution::execute_market_fill(
-            exit_price, pos.qty, !pos.is_long, self.config.turnover_24h,
+            exit_price,
+            pos.qty,
+            !pos.is_long,
+            self.config.turnover_24h,
         );
         // Gross PnL (no fees) — entry fee already deducted when opening
         let gross = if pos.is_long {
@@ -229,7 +244,14 @@ impl BacktestEngine {
                 entry_ts_ms: pos.entry_ts_ms,
             };
             let check_price = if pos.is_long { bar.low } else { bar.high };
-            if stop_manager::check_stops(&self.config.stop_config, &ps, check_price, bar.timestamp_ms).is_some() {
+            if stop_manager::check_stops(
+                &self.config.stop_config,
+                &ps,
+                check_price,
+                bar.timestamp_ms,
+            )
+            .is_some()
+            {
                 to_close.push(i);
             }
         }
@@ -246,8 +268,16 @@ impl BacktestEngine {
         let total_return_pct = (self.balance - initial) / initial * 100.0;
 
         // Sharpe ratio (annualized, assuming daily bars)
-        let returns: Vec<f64> = self.equity_curve.windows(2)
-            .map(|w| if w[0] > 0.0 { (w[1] - w[0]) / w[0] } else { 0.0 })
+        let returns: Vec<f64> = self
+            .equity_curve
+            .windows(2)
+            .map(|w| {
+                if w[0] > 0.0 {
+                    (w[1] - w[0]) / w[0]
+                } else {
+                    0.0
+                }
+            })
             .collect();
         let sharpe = compute_sharpe(&returns);
 
@@ -317,28 +347,46 @@ mod tests {
 
     struct AlwaysLong;
     impl SignalGenerator for AlwaysLong {
-        fn on_bar(&mut self, _bar: &Bar) -> Signal { Signal::Long }
+        fn on_bar(&mut self, _bar: &Bar) -> Signal {
+            Signal::Long
+        }
     }
 
-    struct AlternateSignal { count: usize }
+    struct AlternateSignal {
+        count: usize,
+    }
     impl SignalGenerator for AlternateSignal {
         fn on_bar(&mut self, _bar: &Bar) -> Signal {
             self.count += 1;
-            if self.count % 5 == 1 { Signal::Long }
-            else if self.count % 5 == 3 { Signal::Close }
-            else { Signal::None }
+            if self.count % 5 == 1 {
+                Signal::Long
+            } else if self.count % 5 == 3 {
+                Signal::Close
+            } else {
+                Signal::None
+            }
         }
     }
 
     fn make_bars(prices: &[f64]) -> Vec<Bar> {
-        prices.iter().enumerate().map(|(i, &p)| Bar {
-            timestamp_ms: i as u64 * 60_000,
-            open: p, high: p * 1.01, low: p * 0.99, close: p, volume: 1000.0,
-        }).collect()
+        prices
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| Bar {
+                timestamp_ms: i as u64 * 60_000,
+                open: p,
+                high: p * 1.01,
+                low: p * 0.99,
+                close: p,
+                volume: 1000.0,
+            })
+            .collect()
     }
 
     fn rising_bars() -> Vec<Bar> {
-        make_bars(&[100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0])
+        make_bars(&[
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0,
+        ])
     }
 
     fn falling_bars() -> Vec<Bar> {
@@ -395,7 +443,10 @@ mod tests {
     fn test_backtest_falling_market_stops() {
         let config = BacktestConfig {
             max_positions: 1,
-            stop_config: StopConfig { hard_stop_pct: 3.0, ..StopConfig::default() },
+            stop_config: StopConfig {
+                hard_stop_pct: 3.0,
+                ..StopConfig::default()
+            },
             ..BacktestConfig::default()
         };
         let mut engine = BacktestEngine::new(config);
@@ -410,7 +461,9 @@ mod tests {
     fn test_backtest_no_trades() {
         struct NoSignal;
         impl SignalGenerator for NoSignal {
-            fn on_bar(&mut self, _: &Bar) -> Signal { Signal::None }
+            fn on_bar(&mut self, _: &Bar) -> Signal {
+                Signal::None
+            }
         }
         let mut engine = BacktestEngine::new(BacktestConfig::default());
         let bars = rising_bars();
@@ -426,7 +479,9 @@ mod tests {
         let bars = make_bars(&[100.0, 101.0, 102.0]);
         struct NoSig;
         impl SignalGenerator for NoSig {
-            fn on_bar(&mut self, _: &Bar) -> Signal { Signal::None }
+            fn on_bar(&mut self, _: &Bar) -> Signal {
+                Signal::None
+            }
         }
         let result = engine.run(&bars, &mut NoSig);
         // initial + 3 bars = 4

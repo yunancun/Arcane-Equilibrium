@@ -37,7 +37,7 @@ impl AgentRole {
     /// 衝突解決優先級（越高 = 越有權威）。
     pub fn priority(self) -> u8 {
         match self {
-            Self::Guardian => 5,   // Always wins
+            Self::Guardian => 5, // Always wins
             Self::Conductor => 4,
             Self::Executor => 3,
             Self::Strategist => 2,
@@ -109,8 +109,13 @@ impl MessageBus {
 
     /// Send a message to a specific agent or broadcast.
     /// 發送消息到特定 Agent 或廣播。
-    pub fn send(&mut self, msg_type: MessageType, from: AgentRole, to: Option<AgentRole>,
-                payload: serde_json::Value) -> u64 {
+    pub fn send(
+        &mut self,
+        msg_type: MessageType,
+        from: AgentRole,
+        to: Option<AgentRole>,
+        payload: serde_json::Value,
+    ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -177,7 +182,9 @@ impl MessageBus {
 }
 
 impl Default for MessageBus {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -191,8 +198,12 @@ mod tests {
     #[test]
     fn test_send_targeted() {
         let mut bus = MessageBus::new();
-        bus.send(MessageType::TradeIntent, AgentRole::Strategist, Some(AgentRole::Guardian),
-            serde_json::json!({"symbol": "BTC"}));
+        bus.send(
+            MessageType::TradeIntent,
+            AgentRole::Strategist,
+            Some(AgentRole::Guardian),
+            serde_json::json!({"symbol": "BTC"}),
+        );
         assert_eq!(bus.queue_depth(AgentRole::Guardian), 1);
         assert_eq!(bus.queue_depth(AgentRole::Strategist), 0);
     }
@@ -200,8 +211,12 @@ mod tests {
     #[test]
     fn test_send_broadcast() {
         let mut bus = MessageBus::new();
-        bus.send(MessageType::MarketUpdate, AgentRole::Scout, None,
-            serde_json::json!({}));
+        bus.send(
+            MessageType::MarketUpdate,
+            AgentRole::Scout,
+            None,
+            serde_json::json!({}),
+        );
         // All except Scout should have 1 message
         assert_eq!(bus.queue_depth(AgentRole::Scout), 0);
         assert_eq!(bus.queue_depth(AgentRole::Strategist), 1);
@@ -211,8 +226,12 @@ mod tests {
     #[test]
     fn test_receive() {
         let mut bus = MessageBus::new();
-        bus.send(MessageType::RiskAlert, AgentRole::Guardian, Some(AgentRole::Conductor),
-            serde_json::json!({"level": "critical"}));
+        bus.send(
+            MessageType::RiskAlert,
+            AgentRole::Guardian,
+            Some(AgentRole::Conductor),
+            serde_json::json!({"level": "critical"}),
+        );
         let msg = bus.receive(AgentRole::Conductor).unwrap();
         assert_eq!(msg.msg_type, MessageType::RiskAlert);
         assert_eq!(msg.from, AgentRole::Guardian);
@@ -229,8 +248,12 @@ mod tests {
         let mut bus = MessageBus::new();
         bus.max_queue_size = 3;
         for i in 0..5 {
-            bus.send(MessageType::StatusQuery, AgentRole::Conductor, Some(AgentRole::Scout),
-                serde_json::json!({"i": i}));
+            bus.send(
+                MessageType::StatusQuery,
+                AgentRole::Conductor,
+                Some(AgentRole::Scout),
+                serde_json::json!({"i": i}),
+            );
         }
         assert_eq!(bus.queue_depth(AgentRole::Scout), 3);
     }
@@ -238,15 +261,31 @@ mod tests {
     #[test]
     fn test_conflict_resolution() {
         let guardian_msg = AgentMessage {
-            id: 1, msg_type: MessageType::GuardianVerdict, from: AgentRole::Guardian,
-            to: None, payload: serde_json::json!({}), timestamp_ms: 0, priority: 5,
+            id: 1,
+            msg_type: MessageType::GuardianVerdict,
+            from: AgentRole::Guardian,
+            to: None,
+            payload: serde_json::json!({}),
+            timestamp_ms: 0,
+            priority: 5,
         };
         let strategist_msg = AgentMessage {
-            id: 2, msg_type: MessageType::StrategySignal, from: AgentRole::Strategist,
-            to: None, payload: serde_json::json!({}), timestamp_ms: 0, priority: 2,
+            id: 2,
+            msg_type: MessageType::StrategySignal,
+            from: AgentRole::Strategist,
+            to: None,
+            payload: serde_json::json!({}),
+            timestamp_ms: 0,
+            priority: 2,
         };
-        assert_eq!(MessageBus::resolve_conflict(&guardian_msg, &strategist_msg), "a");
-        assert_eq!(MessageBus::resolve_conflict(&strategist_msg, &guardian_msg), "b");
+        assert_eq!(
+            MessageBus::resolve_conflict(&guardian_msg, &strategist_msg),
+            "a"
+        );
+        assert_eq!(
+            MessageBus::resolve_conflict(&strategist_msg, &guardian_msg),
+            "b"
+        );
     }
 
     #[test]

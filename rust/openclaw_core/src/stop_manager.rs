@@ -101,7 +101,11 @@ fn check_take_profit(config: &StopConfig, pos: &PositionState, price: f64) -> Op
     } else {
         pos.entry_price * (1.0 - tp_pct / 100.0)
     };
-    let triggered = if pos.is_long { price >= tp_price } else { price <= tp_price };
+    let triggered = if pos.is_long {
+        price >= tp_price
+    } else {
+        price <= tp_price
+    };
     if triggered {
         Some(StopTrigger {
             stop_type: StopType::TakeProfit,
@@ -137,7 +141,11 @@ fn check_hard_stop(config: &StopConfig, pos: &PositionState, price: f64) -> Opti
     }
 }
 
-fn check_trailing_stop(config: &StopConfig, pos: &PositionState, price: f64) -> Option<StopTrigger> {
+fn check_trailing_stop(
+    config: &StopConfig,
+    pos: &PositionState,
+    price: f64,
+) -> Option<StopTrigger> {
     let trail_pct = config.trailing_stop_pct?;
 
     // Only trail if position is profitable
@@ -167,7 +175,10 @@ fn check_trailing_stop(config: &StopConfig, pos: &PositionState, price: f64) -> 
         Some(StopTrigger {
             stop_type: StopType::Trailing,
             trigger_price: Some(trail_price),
-            reason: format!("trailing_stop: price {price:.2}, trail from best {:.2}", pos.best_price),
+            reason: format!(
+                "trailing_stop: price {price:.2}, trail from best {:.2}",
+                pos.best_price
+            ),
         })
     } else {
         None
@@ -183,7 +194,10 @@ fn check_time_stop(config: &StopConfig, pos: &PositionState, now_ms: u64) -> Opt
         Some(StopTrigger {
             stop_type: StopType::Time,
             trigger_price: None,
-            reason: format!("time_stop: held {:.1}h >= {hours:.1}h", held_ms as f64 / 3_600_000.0),
+            reason: format!(
+                "time_stop: held {:.1}h >= {hours:.1}h",
+                held_ms as f64 / 3_600_000.0
+            ),
         })
     } else {
         None
@@ -232,11 +246,21 @@ mod tests {
     use super::*;
 
     fn long_pos(entry: f64, best: f64) -> PositionState {
-        PositionState { entry_price: entry, best_price: best, is_long: true, entry_ts_ms: 0 }
+        PositionState {
+            entry_price: entry,
+            best_price: best,
+            is_long: true,
+            entry_ts_ms: 0,
+        }
     }
 
     fn short_pos(entry: f64, best: f64) -> PositionState {
-        PositionState { entry_price: entry, best_price: best, is_long: false, entry_ts_ms: 0 }
+        PositionState {
+            entry_price: entry,
+            best_price: best,
+            is_long: false,
+            entry_ts_ms: 0,
+        }
     }
 
     #[test]
@@ -266,9 +290,12 @@ mod tests {
 
     #[test]
     fn test_trailing_stop_long() {
-        let config = StopConfig { trailing_stop_pct: Some(2.0), ..StopConfig::default() };
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default()
+        };
         let pos = long_pos(50000.0, 55000.0); // profitable
-        // trail = 55000 * 0.98 = 53900
+                                              // trail = 55000 * 0.98 = 53900
         let r = check_stops(&config, &pos, 53800.0, 0);
         assert!(r.is_some());
         assert_eq!(r.unwrap().stop_type, StopType::Trailing);
@@ -276,16 +303,22 @@ mod tests {
 
     #[test]
     fn test_trailing_stop_not_profitable_skip() {
-        let config = StopConfig { trailing_stop_pct: Some(2.0), ..StopConfig::default() };
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default()
+        };
         let pos = long_pos(50000.0, 49000.0); // not profitable
         assert!(check_trailing_stop(&config, &pos, 48000.0).is_none());
     }
 
     #[test]
     fn test_trailing_stop_short() {
-        let config = StopConfig { trailing_stop_pct: Some(2.0), ..StopConfig::default() };
+        let config = StopConfig {
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default()
+        };
         let pos = short_pos(50000.0, 45000.0); // profitable short
-        // trail = 45000 * 1.02 = 45900
+                                               // trail = 45000 * 1.02 = 45900
         let r = check_stops(&config, &pos, 46000.0, 0);
         assert!(r.is_some());
         assert_eq!(r.unwrap().stop_type, StopType::Trailing);
@@ -293,9 +326,16 @@ mod tests {
 
     #[test]
     fn test_time_stop() {
-        let config = StopConfig { time_stop_hours: Some(24.0), ..StopConfig::default() };
-        let pos = PositionState { entry_price: 50000.0, best_price: 50000.0, is_long: true,
-            entry_ts_ms: 0 };
+        let config = StopConfig {
+            time_stop_hours: Some(24.0),
+            ..StopConfig::default()
+        };
+        let pos = PositionState {
+            entry_price: 50000.0,
+            best_price: 50000.0,
+            is_long: true,
+            entry_ts_ms: 0,
+        };
         let ms_25h = 25 * 3_600_000;
         let r = check_stops(&config, &pos, 50000.0, ms_25h);
         assert!(r.is_some());
@@ -304,9 +344,16 @@ mod tests {
 
     #[test]
     fn test_time_stop_not_triggered() {
-        let config = StopConfig { time_stop_hours: Some(24.0), ..StopConfig::default() };
-        let pos = PositionState { entry_price: 50000.0, best_price: 50000.0, is_long: true,
-            entry_ts_ms: 0 };
+        let config = StopConfig {
+            time_stop_hours: Some(24.0),
+            ..StopConfig::default()
+        };
+        let pos = PositionState {
+            entry_price: 50000.0,
+            best_price: 50000.0,
+            is_long: true,
+            entry_ts_ms: 0,
+        };
         assert!(check_stops(&config, &pos, 50000.0, 10_000_000).is_none()); // ~2.7h
     }
 
@@ -326,7 +373,10 @@ mod tests {
 
     #[test]
     fn test_atr_zero_returns_min() {
-        assert_eq!(compute_atr_position_size(10000.0, 3.0, 0.0, 2.0, 0.001, 10.0), 0.001);
+        assert_eq!(
+            compute_atr_position_size(10000.0, 3.0, 0.0, 2.0, 0.001, 10.0),
+            0.001
+        );
     }
 
     #[test]
@@ -351,7 +401,9 @@ mod tests {
     fn test_hard_stop_priority_over_trailing() {
         // Both hard and trailing triggered, hard should win (priority 1)
         let config = StopConfig {
-            hard_stop_pct: 5.0, trailing_stop_pct: Some(2.0), ..StopConfig::default()
+            hard_stop_pct: 5.0,
+            trailing_stop_pct: Some(2.0),
+            ..StopConfig::default()
         };
         let pos = long_pos(50000.0, 55000.0);
         // Hard stop at 47500, trailing at 53900. Price 47000 triggers both.

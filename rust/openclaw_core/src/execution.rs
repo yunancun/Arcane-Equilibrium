@@ -13,12 +13,16 @@ use serde::{Deserialize, Serialize};
 /// Fee rates for Bybit perpetual/spot.
 /// Bybit 永續/現貨手續費率。
 pub const TAKER_FEE_RATE: f64 = 0.000_55; // 0.055%
-pub const MAKER_FEE_RATE: f64 = 0.000_2;  // 0.02%
+pub const MAKER_FEE_RATE: f64 = 0.000_2; // 0.02%
 
 /// Compute trading fee using default rates.
 /// 使用默認費率計算交易手續費。
 pub fn compute_fee(qty: f64, price: f64, is_taker: bool) -> f64 {
-    let rate = if is_taker { TAKER_FEE_RATE } else { MAKER_FEE_RATE };
+    let rate = if is_taker {
+        TAKER_FEE_RATE
+    } else {
+        MAKER_FEE_RATE
+    };
     qty * price * rate
 }
 
@@ -156,14 +160,26 @@ pub fn execute_market_fill(
     let fill_price = compute_market_fill_price(market_price, is_buy, turnover_24h);
     let fee = compute_fee(qty, fill_price, true);
     let slip_bps = ((fill_price - market_price).abs() / market_price) * 10_000.0;
-    FillResult { fill_price, fill_qty: qty, fee, slippage_bps: slip_bps, is_taker: true }
+    FillResult {
+        fill_price,
+        fill_qty: qty,
+        fee,
+        slippage_bps: slip_bps,
+        is_taker: true,
+    }
 }
 
 /// Execute a fill computation for a limit order.
 /// 執行限價單的成交計算。
 pub fn execute_limit_fill(limit_price: f64, qty: f64) -> FillResult {
     let fee = compute_fee(qty, limit_price, false); // maker
-    FillResult { fill_price: limit_price, fill_qty: qty, fee, slippage_bps: 0.0, is_taker: false }
+    FillResult {
+        fill_price: limit_price,
+        fill_qty: qty,
+        fee,
+        slippage_bps: 0.0,
+        is_taker: false,
+    }
 }
 
 /// Execute a market fill with API-fetched taker fee rate.
@@ -178,14 +194,26 @@ pub fn execute_market_fill_with_rate(
     let fill_price = compute_market_fill_price(market_price, is_buy, turnover_24h);
     let fee = compute_fee_with_rate(qty, fill_price, taker_rate);
     let slip_bps = ((fill_price - market_price).abs() / market_price) * 10_000.0;
-    FillResult { fill_price, fill_qty: qty, fee, slippage_bps: slip_bps, is_taker: true }
+    FillResult {
+        fill_price,
+        fill_qty: qty,
+        fee,
+        slippage_bps: slip_bps,
+        is_taker: true,
+    }
 }
 
 /// Execute a limit fill with API-fetched maker fee rate.
 /// 使用 API 動態 maker 費率執行限價單成交計算。
 pub fn execute_limit_fill_with_rate(limit_price: f64, qty: f64, maker_rate: f64) -> FillResult {
     let fee = compute_fee_with_rate(qty, limit_price, maker_rate);
-    FillResult { fill_price: limit_price, fill_qty: qty, fee, slippage_bps: 0.0, is_taker: false }
+    FillResult {
+        fill_price: limit_price,
+        fill_qty: qty,
+        fee,
+        slippage_bps: 0.0,
+        is_taker: false,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

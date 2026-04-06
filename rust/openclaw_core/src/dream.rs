@@ -759,10 +759,7 @@ mod tests {
     fn test_binomial_confidence_all_losses() {
         let pnls: Vec<f64> = vec![-1.0; 30];
         let conf = binomial_confidence(&pnls);
-        assert!(
-            conf.abs() < 1e-10,
-            "All losses should give zero confidence"
-        );
+        assert!(conf.abs() < 1e-10, "All losses should give zero confidence");
     }
 
     #[test]

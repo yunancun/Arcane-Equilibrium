@@ -191,8 +191,7 @@ fn test_all_indicators_compute_on_synthetic_data() {
     );
 
     // ─── KAMA(10, 2, 30) ───
-    let kama_result =
-        kama(&close, 10, 2, 30).expect("KAMA(10,2,30) should compute with 200 bars");
+    let kama_result = kama(&close, 10, 2, 30).expect("KAMA(10,2,30) should compute with 200 bars");
     assert!(
         kama_result.kama > 0.0,
         "KAMA must be positive, got {}",
@@ -224,16 +223,14 @@ fn test_all_indicators_compute_on_synthetic_data() {
 
     // ─── Hurst(10, 50) ───
     // QC tolerance: ±0.05 (R/S inherent variance) / QC 容差: ±0.05（R/S 固有方差）
-    let hurst_result =
-        hurst(&close, 10, 50).expect("Hurst(10,50) should compute with 200 bars");
+    let hurst_result = hurst(&close, 10, 50).expect("Hurst(10,50) should compute with 200 bars");
     assert!(
         hurst_result.hurst > 0.0 && hurst_result.hurst < 1.5,
         "Hurst exponent should be in (0, 1.5), got {}",
         hurst_result.hurst
     );
     assert!(
-        ["trending", "mean_reverting", "random_walk"]
-            .contains(&hurst_result.regime.as_str()),
+        ["trending", "mean_reverting", "random_walk"].contains(&hurst_result.regime.as_str()),
         "Hurst regime must be one of trending/mean_reverting/random_walk, got '{}'",
         hurst_result.regime
     );
@@ -253,10 +250,7 @@ fn test_all_indicators_compute_on_synthetic_data() {
 
     // ─── Volume Ratio(20) ───
     let vr = volume_ratio(&volume, 20).expect("VolumeRatio(20) should compute with 200 bars");
-    assert!(
-        vr > 0.0,
-        "Volume ratio must be positive, got {vr}"
-    );
+    assert!(vr > 0.0, "Volume ratio must be positive, got {vr}");
 
     // ─── Donchian Channel(20) ───
     // Algebraic identity: middle = (upper + lower) / 2 (QC tolerance: ±1e-10)
@@ -519,7 +513,10 @@ fn test_deterministic_reproducibility() {
 
     // Data arrays must be bit-identical
     // 數據陣列必須位元級相同
-    assert_eq!(close1, close2, "Same seed must produce identical close data");
+    assert_eq!(
+        close1, close2,
+        "Same seed must produce identical close data"
+    );
     assert_eq!(high1, high2, "Same seed must produce identical high data");
     assert_eq!(low1, low2, "Same seed must produce identical low data");
     assert_eq!(vol1, vol2, "Same seed must produce identical volume data");

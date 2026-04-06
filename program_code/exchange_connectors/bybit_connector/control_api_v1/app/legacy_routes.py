@@ -369,11 +369,12 @@ def register_legacy_routes(app) -> None:
             _login_fail_counts.pop(client_ip, None)
 
         # Set HttpOnly cookie so GUI never needs to touch the token in JS.
-        # Also return token in JSON body for backward compatibility with programmatic clients.
+        # SEC-06: do NOT echo the token in the JSON body — it defeats HttpOnly
+        # by exposing the secret to any browser extension or debug tool.
         # 设置 HttpOnly cookie，GUI 不再需要在 JS 中操作 token。
-        # 同时在 JSON body 中返回 token，保持编程客户端的向后兼容。
+        # SEC-06：不在 JSON body 中回傳 token，避免被瀏覽器擴展/調試工具讀取。
         from starlette.responses import JSONResponse
-        resp = JSONResponse({"token": settings.api_token, "username": req.username})
+        resp = JSONResponse({"status": "ok", "username": req.username})
         resp.set_cookie(
             key="oc_auth_token",
             value=settings.api_token,

@@ -467,7 +467,8 @@ pub fn regime_detector(
         edge_bps: 0.0,
         source: "regime_detector".to_string(),
         timeframe: timeframe.to_string(),
-        reasoning: format!("Regime={regime} (ADX={}, BW={}, ATR%={})",
+        reasoning: format!(
+            "Regime={regime} (ADX={}, BW={}, ATR%={})",
             adx.map_or("N/A".to_string(), |v| format!("{v:.1}")),
             bandwidth.map_or("N/A".to_string(), |v| format!("{v:.4}")),
             atr_pct.map_or("N/A".to_string(), |v| format!("{v:.2}%")),

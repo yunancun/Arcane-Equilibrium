@@ -36,7 +36,9 @@ mod volume;
 // 重新導出所有指標函數和結果類型。
 pub use momentum::{adx, rsi, stochastic, AdxResult, StochResult};
 pub use trend::{donchian, ema, kama, macd, sma, DonchianResult, KamaResult, MacdResult};
-pub use volatility::{atr, bollinger, ewma_vol, hurst, AtrResult, BollingerResult, EwmaVolResult, HurstResult};
+pub use volatility::{
+    atr, bollinger, ewma_vol, hurst, AtrResult, BollingerResult, EwmaVolResult, HurstResult,
+};
 pub use volume::volume_ratio;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -200,7 +202,9 @@ mod tests {
             .collect();
         let high: Vec<f64> = close.iter().map(|c| c + 1.0).collect();
         let low: Vec<f64> = close.iter().map(|c| c - 1.0).collect();
-        let volume: Vec<f64> = (0..n).map(|i| 1000.0 + (i as f64 * 0.3).cos() * 200.0).collect();
+        let volume: Vec<f64> = (0..n)
+            .map(|i| 1000.0 + (i as f64 * 0.3).cos() * 200.0)
+            .collect();
 
         let snap = IndicatorEngine::compute_all(&high, &low, &close, &volume);
 
@@ -277,11 +281,17 @@ mod tests {
         let mut snap = IndicatorSnapshot::default();
         assert!(snap.get_conservative_atr().is_none());
 
-        snap.atr_14 = Some(AtrResult { atr: 2.0, atr_percent: 1.0 });
+        snap.atr_14 = Some(AtrResult {
+            atr: 2.0,
+            atr_percent: 1.0,
+        });
         let c = snap.get_conservative_atr().unwrap();
         assert!((c.atr - 2.0).abs() < 1e-12);
 
-        snap.atr_5 = Some(AtrResult { atr: 3.0, atr_percent: 1.5 });
+        snap.atr_5 = Some(AtrResult {
+            atr: 3.0,
+            atr_percent: 1.5,
+        });
         let c = snap.get_conservative_atr().unwrap();
         assert!((c.atr - 3.0).abs() < 1e-12);
     }

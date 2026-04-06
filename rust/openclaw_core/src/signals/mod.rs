@@ -345,7 +345,9 @@ mod tests {
         // With oversold RSI=20, multiple rules should fire
         assert!(!signals.is_empty(), "expected at least one signal");
         // RSI oversold should definitely fire
-        assert!(signals.iter().any(|s| s.source == "rsi_overbought_oversold"));
+        assert!(signals
+            .iter()
+            .any(|s| s.source == "rsi_overbought_oversold"));
     }
 
     #[test]

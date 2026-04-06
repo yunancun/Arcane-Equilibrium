@@ -106,7 +106,15 @@ pub fn attribute_trade(trade: &TradeRecord) -> AttributionResult {
     let luck = net_pnl - explained;
 
     AttributionResult {
-        gross_pnl, net_pnl, total_fees, alpha, timing, sizing, execution, cost, luck,
+        gross_pnl,
+        net_pnl,
+        total_fees,
+        alpha,
+        timing,
+        sizing,
+        execution,
+        cost,
+        luck,
     }
 }
 
@@ -114,9 +122,15 @@ pub fn attribute_trade(trade: &TradeRecord) -> AttributionResult {
 /// 聚合多筆交易的歸因。
 pub fn aggregate_attributions(results: &[AttributionResult]) -> AttributionResult {
     let mut agg = AttributionResult {
-        gross_pnl: 0.0, net_pnl: 0.0, total_fees: 0.0,
-        alpha: 0.0, timing: 0.0, sizing: 0.0,
-        execution: 0.0, cost: 0.0, luck: 0.0,
+        gross_pnl: 0.0,
+        net_pnl: 0.0,
+        total_fees: 0.0,
+        alpha: 0.0,
+        timing: 0.0,
+        sizing: 0.0,
+        execution: 0.0,
+        cost: 0.0,
+        luck: 0.0,
     };
     for r in results {
         agg.gross_pnl += r.gross_pnl;
@@ -142,21 +156,37 @@ mod tests {
 
     fn sample_long_trade() -> TradeRecord {
         TradeRecord {
-            symbol: "BTCUSDT".into(), side: "Buy".into(),
-            entry_price: 50000.0, exit_price: 51000.0, qty: 1.0,
-            entry_fee: 27.5, exit_fee: 28.05, slippage_bps: 1.0,
-            hold_duration_ms: 3_600_000, strategy: "momentum".into(),
-            best_price: 51500.0, worst_price: 49500.0, benchmark_return: 0.005,
+            symbol: "BTCUSDT".into(),
+            side: "Buy".into(),
+            entry_price: 50000.0,
+            exit_price: 51000.0,
+            qty: 1.0,
+            entry_fee: 27.5,
+            exit_fee: 28.05,
+            slippage_bps: 1.0,
+            hold_duration_ms: 3_600_000,
+            strategy: "momentum".into(),
+            best_price: 51500.0,
+            worst_price: 49500.0,
+            benchmark_return: 0.005,
         }
     }
 
     fn sample_short_trade() -> TradeRecord {
         TradeRecord {
-            symbol: "ETHUSDT".into(), side: "Sell".into(),
-            entry_price: 3000.0, exit_price: 2900.0, qty: 10.0,
-            entry_fee: 1.65, exit_fee: 1.595, slippage_bps: 2.0,
-            hold_duration_ms: 7_200_000, strategy: "reversion".into(),
-            best_price: 3050.0, worst_price: 2850.0, benchmark_return: -0.02,
+            symbol: "ETHUSDT".into(),
+            side: "Sell".into(),
+            entry_price: 3000.0,
+            exit_price: 2900.0,
+            qty: 10.0,
+            entry_fee: 1.65,
+            exit_fee: 1.595,
+            slippage_bps: 2.0,
+            hold_duration_ms: 7_200_000,
+            strategy: "reversion".into(),
+            best_price: 3050.0,
+            worst_price: 2850.0,
+            benchmark_return: -0.02,
         }
     }
 
@@ -226,7 +256,9 @@ mod tests {
     #[test]
     fn test_zero_entry_price() {
         let trade = TradeRecord {
-            entry_price: 0.0, exit_price: 100.0, qty: 1.0,
+            entry_price: 0.0,
+            exit_price: 100.0,
+            qty: 1.0,
             ..sample_long_trade()
         };
         let r = attribute_trade(&trade);

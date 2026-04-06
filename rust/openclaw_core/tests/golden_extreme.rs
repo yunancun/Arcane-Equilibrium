@@ -26,9 +26,7 @@ fn test_cascade_rapid_escalation_to_circuit_breaker() {
     assert!(core.is_authorized());
 
     // Simulate rapid market crash: drawdown 20%
-    let result = core.evaluate_and_cascade(
-        0.95, 20.0, 6.0, 12, true, true,
-    );
+    let result = core.evaluate_and_cascade(0.95, 20.0, 6.0, 12, true, true);
     let r = result.unwrap();
     assert!(r.success);
     assert_eq!(r.risk_level, RiskLevel::CircuitBreaker);
@@ -43,7 +41,9 @@ fn test_cascade_with_multiple_leases_and_orders() {
 
     // Create 10 leases
     for _ in 0..10 {
-        let idx = core.lease.create_draft(serde_json::json!({"s": "BTC"}), "s", None);
+        let idx = core
+            .lease
+            .create_draft(serde_json::json!({"s": "BTC"}), "s", None);
         core.lease.register(idx).unwrap();
         core.lease.activate(idx).unwrap();
     }
@@ -51,7 +51,14 @@ fn test_cascade_with_multiple_leases_and_orders() {
 
     // Create 5 OMS orders
     for i in 0..5 {
-        core.oms.create_order(&format!("SYM{i}"), "Buy", 0.1, "limit", Some(50000.0), "agent");
+        core.oms.create_order(
+            &format!("SYM{i}"),
+            "Buy",
+            0.1,
+            "limit",
+            Some(50000.0),
+            "agent",
+        );
     }
 
     // Circuit break
@@ -117,9 +124,15 @@ fn test_avg_fill_price_many_partials() {
 
 #[test]
 fn test_flash_crash_hard_stop() {
-    let config = StopConfig { hard_stop_pct: 5.0, ..StopConfig::default() };
+    let config = StopConfig {
+        hard_stop_pct: 5.0,
+        ..StopConfig::default()
+    };
     let pos = PositionState {
-        entry_price: 50000.0, best_price: 55000.0, is_long: true, entry_ts_ms: 0,
+        entry_price: 50000.0,
+        best_price: 55000.0,
+        is_long: true,
+        entry_ts_ms: 0,
     };
     // Flash crash to 30000 — well below hard stop
     let trigger = stop_manager::check_stops(&config, &pos, 30000.0, 1000);
@@ -128,9 +141,15 @@ fn test_flash_crash_hard_stop() {
 
 #[test]
 fn test_price_exactly_at_stop() {
-    let config = StopConfig { hard_stop_pct: 5.0, ..StopConfig::default() };
+    let config = StopConfig {
+        hard_stop_pct: 5.0,
+        ..StopConfig::default()
+    };
     let pos = PositionState {
-        entry_price: 100.0, best_price: 100.0, is_long: true, entry_ts_ms: 0,
+        entry_price: 100.0,
+        best_price: 100.0,
+        is_long: true,
+        entry_ts_ms: 0,
     };
     // Stop at 95.0, price exactly 95.0
     let trigger = stop_manager::check_stops(&config, &pos, 95.0, 0);
@@ -147,7 +166,10 @@ fn test_trailing_and_time_stop_interaction() {
         take_profit_pct: None,
     };
     let pos = PositionState {
-        entry_price: 100.0, best_price: 110.0, is_long: true, entry_ts_ms: 0,
+        entry_price: 100.0,
+        best_price: 110.0,
+        is_long: true,
+        entry_ts_ms: 0,
     };
     // Time stop at 1h = 3_600_000ms, price is fine
     let trigger = stop_manager::check_stops(&config, &pos, 108.0, 4_000_000);
@@ -172,9 +194,7 @@ fn test_atr_position_sizing_extreme_atr() {
 #[test]
 fn test_portfolio_zero_balance() {
     let config = portfolio::PortfolioConfig::default();
-    let result = portfolio::check_portfolio_risk(
-        &config, 0.0, &[], 1000.0, "crypto", "Buy", &[],
-    );
+    let result = portfolio::check_portfolio_risk(&config, 0.0, &[], 1000.0, "crypto", "Buy", &[]);
     assert!(!result.allowed); // zero balance → reserve check fails
 }
 
@@ -205,8 +225,11 @@ fn test_portfolio_anti_correlated_passes() {
     let returns_a = vec![0.01, -0.01, 0.02, -0.02, 0.01];
     let returns_b = vec![-0.01, 0.01, -0.02, 0.02, -0.01]; // anti-correlated
     let holdings = vec![portfolio::Holding {
-        symbol: "BTC".into(), sector: "crypto".into(), side: "Buy".into(),
-        notional: 1000.0, returns: returns_a,
+        symbol: "BTC".into(),
+        sector: "crypto".into(),
+        side: "Buy".into(),
+        notional: 1000.0,
+        returns: returns_a,
     }];
     let result = portfolio::check_portfolio_risk(
         &config, 100_000.0, &holdings, 1000.0, "crypto", "Buy", &returns_b,
@@ -226,14 +249,29 @@ fn test_guardian_all_checks_fail() {
     let ctx = PortfolioContext {
         drawdown_pct: 20.0,
         positions: vec![
-            ExistingPosition { symbol: "BTCUSDT".into(), side: "Sell".into() },
-            ExistingPosition { symbol: "A".into(), side: "Buy".into() },
-            ExistingPosition { symbol: "B".into(), side: "Buy".into() },
-            ExistingPosition { symbol: "C".into(), side: "Buy".into() },
+            ExistingPosition {
+                symbol: "BTCUSDT".into(),
+                side: "Sell".into(),
+            },
+            ExistingPosition {
+                symbol: "A".into(),
+                side: "Buy".into(),
+            },
+            ExistingPosition {
+                symbol: "B".into(),
+                side: "Buy".into(),
+            },
+            ExistingPosition {
+                symbol: "C".into(),
+                side: "Buy".into(),
+            },
         ],
     };
     let intent = TradeIntentCheck {
-        symbol: "BTCUSDT".into(), side: "Buy".into(), leverage: 15.0, qty: 1.0,
+        symbol: "BTCUSDT".into(),
+        side: "Buy".into(),
+        leverage: 15.0,
+        qty: 1.0,
     };
     let r = g.review(&intent, &ctx);
     assert_eq!(r.verdict, Verdict::Rejected);
@@ -249,7 +287,9 @@ fn test_guardian_all_checks_fail() {
 fn test_backtest_empty_bars() {
     struct NoSig;
     impl SignalGenerator for NoSig {
-        fn on_bar(&mut self, _: &Bar) -> Signal { Signal::None }
+        fn on_bar(&mut self, _: &Bar) -> Signal {
+            Signal::None
+        }
     }
     let mut engine = backtest::BacktestEngine::new(backtest::BacktestConfig::default());
     let result = engine.run(&[], &mut NoSig);
@@ -259,14 +299,28 @@ fn test_backtest_empty_bars() {
 
 #[test]
 fn test_backtest_single_bar() {
-    struct LongOnce { fired: bool }
+    struct LongOnce {
+        fired: bool,
+    }
     impl SignalGenerator for LongOnce {
         fn on_bar(&mut self, _: &Bar) -> Signal {
-            if !self.fired { self.fired = true; Signal::Long } else { Signal::None }
+            if !self.fired {
+                self.fired = true;
+                Signal::Long
+            } else {
+                Signal::None
+            }
         }
     }
     let mut engine = backtest::BacktestEngine::new(backtest::BacktestConfig::default());
-    let bars = vec![Bar { timestamp_ms: 0, open: 100.0, high: 101.0, low: 99.0, close: 100.0, volume: 1000.0 }];
+    let bars = vec![Bar {
+        timestamp_ms: 0,
+        open: 100.0,
+        high: 101.0,
+        low: 99.0,
+        close: 100.0,
+        volume: 1000.0,
+    }];
     let result = engine.run(&bars, &mut LongOnce { fired: false });
     // Opens but never closes — equity includes unrealized
     assert!(result.equity_curve.len() == 2);

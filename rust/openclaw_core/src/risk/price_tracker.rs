@@ -65,10 +65,7 @@ impl PriceHistoryTracker {
     /// Record a price observation, pruning stale entries beyond the window.
     /// 記錄一個價格觀測值，修剪超出窗口的過期條目。
     pub fn record(&mut self, symbol: &str, price: f64, ts_ms: u64) {
-        let deque = self
-            .history
-            .entry(symbol.to_string())
-            .or_default();
+        let deque = self.history.entry(symbol.to_string()).or_default();
         deque.push_back((ts_ms, price));
 
         // Prune entries older than window / 修剪超出窗口的條目
@@ -127,12 +124,7 @@ impl PriceHistoryTracker {
     ///
     /// Returns `Some(SpikeInfo)` if current price is an outlier, `None` otherwise.
     /// 若當前價格為離群值回傳 `Some(SpikeInfo)`，否則 `None`。
-    pub fn detect_spike(
-        &self,
-        symbol: &str,
-        current_price: f64,
-        _ts_ms: u64,
-    ) -> Option<SpikeInfo> {
+    pub fn detect_spike(&self, symbol: &str, current_price: f64, _ts_ms: u64) -> Option<SpikeInfo> {
         let deque = self.history.get(symbol)?;
         if deque.len() < self.min_samples {
             return None;

@@ -182,12 +182,7 @@ pub struct DonchianResult {
 
 /// Donchian Channel over the last `period` bars.
 /// 最近 `period` 根 K 線的唐奇安通道。
-pub fn donchian(
-    high: &[f64],
-    low: &[f64],
-    close: &[f64],
-    period: usize,
-) -> Option<DonchianResult> {
+pub fn donchian(high: &[f64], low: &[f64], close: &[f64], period: usize) -> Option<DonchianResult> {
     let n = high.len().min(low.len()).min(close.len());
     if period == 0 || n < period {
         return None;
@@ -221,8 +216,8 @@ mod tests {
     use super::*;
 
     const CLOSE_20: [f64; 20] = [
-        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75,
-        44.00, 44.50, 44.75, 45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
+        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75, 44.00, 44.50, 44.75,
+        45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
     ];
 
     // --- SMA ---

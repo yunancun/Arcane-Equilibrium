@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskManagerConfig {
     // -- P1 global limits / P1 全局限制 --
-
     /// Maximum stop-loss percentage (hard ceiling) / 最大止損百分比（硬上限）
     pub max_stop_loss_pct: f64,
     /// Maximum take-profit percentage / 最大止盈百分比
@@ -40,7 +39,6 @@ pub struct RiskManagerConfig {
     pub max_cost_edge_ratio: f64,
 
     // -- P2 agent parameters / P2 Agent 參數 --
-
     /// Whether trailing stop is enabled / 是否啟用追蹤止損
     pub trailing_stop_enabled: bool,
     /// Trailing stop activation threshold % / 追蹤止損啟動門檻百分比
@@ -147,7 +145,10 @@ mod tests {
         let json = serde_json::to_string(&cfg).unwrap();
         let de: RiskManagerConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(de.max_stop_loss_pct, cfg.max_stop_loss_pct);
-        assert_eq!(de.trailing_stop_distance_pct, cfg.trailing_stop_distance_pct);
+        assert_eq!(
+            de.trailing_stop_distance_pct,
+            cfg.trailing_stop_distance_pct
+        );
     }
 
     #[test]

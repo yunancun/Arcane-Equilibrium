@@ -26,7 +26,10 @@ pub enum LeaseState {
 
 impl LeaseState {
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Revoked | Self::Expired | Self::Rejected | Self::Consumed)
+        matches!(
+            self,
+            Self::Revoked | Self::Expired | Self::Rejected | Self::Consumed
+        )
     }
 
     pub fn is_live(self) -> bool {
@@ -162,28 +165,82 @@ fn lookup_rule(from: LeaseState, to: LeaseState) -> Option<TransitionRule> {
 
     match (from, to) {
         // §7.1 Draft acceptance
-        (Draft, Registered) => Some(TransitionRule { requires_approval: false, allowed: I_OP }),
-        (Draft, Rejected) => Some(TransitionRule { requires_approval: false, allowed: I_OP }),
+        (Draft, Registered) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: I_OP,
+        }),
+        (Draft, Rejected) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: I_OP,
+        }),
         // §7.2 Registration to activation
-        (Registered, Active) => Some(TransitionRule { requires_approval: false, allowed: I_OP }),
-        (Registered, Frozen) => Some(TransitionRule { requires_approval: false, allowed: FREEZE }),
-        (Registered, Revoked) => Some(TransitionRule { requires_approval: true, allowed: REVOKE }),
-        (Registered, Expired) => Some(TransitionRule { requires_approval: false, allowed: EXPIRY }),
-        (Registered, Rejected) => Some(TransitionRule { requires_approval: false, allowed: GOV }),
+        (Registered, Active) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: I_OP,
+        }),
+        (Registered, Frozen) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: FREEZE,
+        }),
+        (Registered, Revoked) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: REVOKE,
+        }),
+        (Registered, Expired) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: EXPIRY,
+        }),
+        (Registered, Rejected) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: GOV,
+        }),
         // §7.3 Active to downstream
-        (Active, Bridged) => Some(TransitionRule { requires_approval: false, allowed: RISK_GOV }),
-        (Active, Frozen) => Some(TransitionRule { requires_approval: false, allowed: FREEZE }),
-        (Active, Revoked) => Some(TransitionRule { requires_approval: true, allowed: REVOKE }),
-        (Active, Expired) => Some(TransitionRule { requires_approval: false, allowed: EXPIRY }),
-        (Active, Rejected) => Some(TransitionRule { requires_approval: false, allowed: GOV }),
+        (Active, Bridged) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: RISK_GOV,
+        }),
+        (Active, Frozen) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: FREEZE,
+        }),
+        (Active, Revoked) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: REVOKE,
+        }),
+        (Active, Expired) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: EXPIRY,
+        }),
+        (Active, Rejected) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: GOV,
+        }),
         // §7.4 Frozen recovery
-        (Frozen, Registered) => Some(TransitionRule { requires_approval: true, allowed: RECOVERY }),
-        (Frozen, Active) => Some(TransitionRule { requires_approval: true, allowed: RECOVERY }),
-        (Frozen, Revoked) => Some(TransitionRule { requires_approval: true, allowed: REVOKE }),
-        (Frozen, Expired) => Some(TransitionRule { requires_approval: false, allowed: EXPIRY }),
+        (Frozen, Registered) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: RECOVERY,
+        }),
+        (Frozen, Active) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: RECOVERY,
+        }),
+        (Frozen, Revoked) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: REVOKE,
+        }),
+        (Frozen, Expired) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: EXPIRY,
+        }),
         // §7.5 Bridged closure
-        (Bridged, Consumed) => Some(TransitionRule { requires_approval: false, allowed: EXECUTION }),
-        (Bridged, Revoked) => Some(TransitionRule { requires_approval: true, allowed: REVOKE }),
+        (Bridged, Consumed) => Some(TransitionRule {
+            requires_approval: false,
+            allowed: EXECUTION,
+        }),
+        (Bridged, Revoked) => Some(TransitionRule {
+            requires_approval: true,
+            allowed: REVOKE,
+        }),
         _ => None,
     }
 }
@@ -249,15 +306,27 @@ pub struct DecisionLeaseSm {
 
 impl DecisionLeaseSm {
     pub fn new() -> Self {
-        Self { objects: Vec::new() }
+        Self {
+            objects: Vec::new(),
+        }
     }
 
-    pub fn create_draft(&mut self, intent: serde_json::Value, created_by: &str, expires_at_ms: Option<u64>) -> usize {
+    pub fn create_draft(
+        &mut self,
+        intent: serde_json::Value,
+        created_by: &str,
+        expires_at_ms: Option<u64>,
+    ) -> usize {
         let mut obj = LeaseObject::new(intent, created_by, expires_at_ms);
         let record = TransitionRecord::new(
-            "NONE", obj.state.as_str(), LeaseEvent::DraftCreated.as_str(),
-            LeaseInitiator::ControlPlane.as_str(), vec!["initial_draft".into()],
-            false, None, 0,
+            "NONE",
+            obj.state.as_str(),
+            LeaseEvent::DraftCreated.as_str(),
+            LeaseInitiator::ControlPlane.as_str(),
+            vec!["initial_draft".into()],
+            false,
+            None,
+            0,
         );
         obj.transitions.push(record);
         self.objects.push(obj);
@@ -265,11 +334,18 @@ impl DecisionLeaseSm {
     }
 
     pub fn transition(
-        &mut self, idx: usize, to_state: LeaseState, event: LeaseEvent,
-        initiator: LeaseInitiator, reason_codes: Vec<String>,
-        approved_by: Option<&str>, reason: &str,
+        &mut self,
+        idx: usize,
+        to_state: LeaseState,
+        event: LeaseEvent,
+        initiator: LeaseInitiator,
+        reason_codes: Vec<String>,
+        approved_by: Option<&str>,
+        reason: &str,
     ) -> Result<(), SmError> {
-        let obj = self.objects.get_mut(idx)
+        let obj = self
+            .objects
+            .get_mut(idx)
             .ok_or_else(|| SmError::NotFound(format!("lease index {idx}")))?;
         let from = obj.state;
 
@@ -277,24 +353,38 @@ impl DecisionLeaseSm {
             return Err(SmError::TerminalState(from.to_string()));
         }
         if is_forbidden(from, to_state) {
-            return Err(SmError::Forbidden { from: from.to_string(), to: to_state.to_string() });
+            return Err(SmError::Forbidden {
+                from: from.to_string(),
+                to: to_state.to_string(),
+            });
         }
-        let rule = lookup_rule(from, to_state)
-            .ok_or_else(|| SmError::InvalidTransition { from: from.to_string(), to: to_state.to_string() })?;
+        let rule = lookup_rule(from, to_state).ok_or_else(|| SmError::InvalidTransition {
+            from: from.to_string(),
+            to: to_state.to_string(),
+        })?;
         if !rule.allowed.contains(&initiator) {
             return Err(SmError::InitiatorNotAllowed {
                 initiator: initiator.as_str().to_string(),
-                from: from.to_string(), to: to_state.to_string(),
+                from: from.to_string(),
+                to: to_state.to_string(),
             });
         }
         if rule.requires_approval && approved_by.is_none() {
-            return Err(SmError::ApprovalRequired { from: from.to_string(), to: to_state.to_string() });
+            return Err(SmError::ApprovalRequired {
+                from: from.to_string(),
+                to: to_state.to_string(),
+            });
         }
 
         let record = TransitionRecord::new(
-            from.as_str(), to_state.as_str(), event.as_str(),
-            initiator.as_str(), reason_codes, rule.requires_approval,
-            approved_by.map(|s| s.to_string()), obj.version,
+            from.as_str(),
+            to_state.as_str(),
+            event.as_str(),
+            initiator.as_str(),
+            reason_codes,
+            rule.requires_approval,
+            approved_by.map(|s| s.to_string()),
+            obj.version,
         );
         obj.state = to_state;
         obj.version += 1;
@@ -313,48 +403,107 @@ impl DecisionLeaseSm {
     // ── Convenience / 便捷 ──
 
     pub fn register(&mut self, idx: usize) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Registered, LeaseEvent::RegistrationAccepted,
-            LeaseInitiator::ControlPlane, vec!["registered".into()], None, "")
+        self.transition(
+            idx,
+            LeaseState::Registered,
+            LeaseEvent::RegistrationAccepted,
+            LeaseInitiator::ControlPlane,
+            vec!["registered".into()],
+            None,
+            "",
+        )
     }
 
     pub fn activate(&mut self, idx: usize) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Active, LeaseEvent::ActivationWindowOpen,
-            LeaseInitiator::ControlPlane, vec!["activated".into()], None, "")
+        self.transition(
+            idx,
+            LeaseState::Active,
+            LeaseEvent::ActivationWindowOpen,
+            LeaseInitiator::ControlPlane,
+            vec!["activated".into()],
+            None,
+            "",
+        )
     }
 
     pub fn bridge(&mut self, idx: usize) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Bridged, LeaseEvent::BridgeApproved,
-            LeaseInitiator::RiskGovernor, vec!["bridge_approved".into()], None, "")
+        self.transition(
+            idx,
+            LeaseState::Bridged,
+            LeaseEvent::BridgeApproved,
+            LeaseInitiator::RiskGovernor,
+            vec!["bridge_approved".into()],
+            None,
+            "",
+        )
     }
 
     pub fn consume(&mut self, idx: usize) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Consumed, LeaseEvent::ConsumedByExecution,
-            LeaseInitiator::ExecutionClosure, vec!["execution_closure".into()], None, "")
+        self.transition(
+            idx,
+            LeaseState::Consumed,
+            LeaseEvent::ConsumedByExecution,
+            LeaseInitiator::ExecutionClosure,
+            vec!["execution_closure".into()],
+            None,
+            "",
+        )
     }
 
     pub fn freeze(&mut self, idx: usize, reason: &str) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Frozen, LeaseEvent::FreezeRequested,
-            LeaseInitiator::IncidentPolicy, vec!["frozen".into()], None, reason)
+        self.transition(
+            idx,
+            LeaseState::Frozen,
+            LeaseEvent::FreezeRequested,
+            LeaseInitiator::IncidentPolicy,
+            vec!["frozen".into()],
+            None,
+            reason,
+        )
     }
 
     pub fn revoke(&mut self, idx: usize, approved_by: &str, reason: &str) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Revoked, LeaseEvent::RevokeRequested,
-            LeaseInitiator::Operator, vec!["revoked".into()], Some(approved_by), reason)
+        self.transition(
+            idx,
+            LeaseState::Revoked,
+            LeaseEvent::RevokeRequested,
+            LeaseInitiator::Operator,
+            vec!["revoked".into()],
+            Some(approved_by),
+            reason,
+        )
     }
 
     pub fn reject(&mut self, idx: usize, reason: &str) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Rejected, LeaseEvent::RegistrationRejected,
-            LeaseInitiator::ControlPlane, vec!["rejected".into()], None, reason)
+        self.transition(
+            idx,
+            LeaseState::Rejected,
+            LeaseEvent::RegistrationRejected,
+            LeaseInitiator::ControlPlane,
+            vec!["rejected".into()],
+            None,
+            reason,
+        )
     }
 
     pub fn expire(&mut self, idx: usize) -> Result<(), SmError> {
-        self.transition(idx, LeaseState::Expired, LeaseEvent::ExpiredByTime,
-            LeaseInitiator::ExpiryGuardian, vec!["time_expiry".into()], None, "")
+        self.transition(
+            idx,
+            LeaseState::Expired,
+            LeaseEvent::ExpiredByTime,
+            LeaseInitiator::ExpiryGuardian,
+            vec!["time_expiry".into()],
+            None,
+            "",
+        )
     }
 
     pub fn check_expiry(&mut self) -> Vec<usize> {
         let now = super::now_ms();
-        let candidates: Vec<usize> = self.objects.iter().enumerate()
+        let candidates: Vec<usize> = self
+            .objects
+            .iter()
+            .enumerate()
             .filter(|(_, o)| !o.state.is_terminal() && o.is_expired_by_time(now))
             .map(|(i, _)| i)
             .collect();
@@ -374,22 +523,36 @@ impl DecisionLeaseSm {
     }
 
     pub fn get_live(&self) -> Vec<usize> {
-        self.objects.iter().enumerate()
+        self.objects
+            .iter()
+            .enumerate()
             .filter(|(_, o)| o.state.is_live())
-            .map(|(i, _)| i).collect()
+            .map(|(i, _)| i)
+            .collect()
     }
 
     pub fn get_bridgeable(&self) -> Vec<usize> {
-        self.objects.iter().enumerate()
+        self.objects
+            .iter()
+            .enumerate()
             .filter(|(_, o)| o.state.is_bridgeable())
-            .map(|(i, _)| i).collect()
+            .map(|(i, _)| i)
+            .collect()
     }
 
-    pub fn len(&self) -> usize { self.objects.len() }
-    pub fn is_empty(&self) -> bool { self.objects.is_empty() }
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
 
     pub fn snapshot_states(&self) -> Vec<(usize, LeaseState)> {
-        self.objects.iter().enumerate().map(|(i, o)| (i, o.state)).collect()
+        self.objects
+            .iter()
+            .enumerate()
+            .map(|(i, o)| (i, o.state))
+            .collect()
     }
 
     /// Revoke all live leases — called when auth is frozen [cross-SM cascade].
@@ -407,7 +570,9 @@ impl DecisionLeaseSm {
 }
 
 impl Default for DecisionLeaseSm {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -448,8 +613,17 @@ mod tests {
     fn test_forbidden_skip_registration() {
         let mut sm = DecisionLeaseSm::new();
         let idx = sm.create_draft(serde_json::json!({}), "test", None);
-        let err = sm.transition(idx, LeaseState::Active, LeaseEvent::ActivationWindowOpen,
-            LeaseInitiator::ControlPlane, vec![], None, "").unwrap_err();
+        let err = sm
+            .transition(
+                idx,
+                LeaseState::Active,
+                LeaseEvent::ActivationWindowOpen,
+                LeaseInitiator::ControlPlane,
+                vec![],
+                None,
+                "",
+            )
+            .unwrap_err();
         assert!(matches!(err, SmError::Forbidden { .. }));
     }
 
@@ -458,8 +632,17 @@ mod tests {
         let mut sm = DecisionLeaseSm::new();
         let idx = sm.create_draft(serde_json::json!({}), "test", None);
         sm.register(idx).unwrap();
-        let err = sm.transition(idx, LeaseState::Bridged, LeaseEvent::BridgeApproved,
-            LeaseInitiator::RiskGovernor, vec![], None, "").unwrap_err();
+        let err = sm
+            .transition(
+                idx,
+                LeaseState::Bridged,
+                LeaseEvent::BridgeApproved,
+                LeaseInitiator::RiskGovernor,
+                vec![],
+                None,
+                "",
+            )
+            .unwrap_err();
         assert!(matches!(err, SmError::Forbidden { .. }));
     }
 
@@ -469,8 +652,16 @@ mod tests {
         sm.freeze(idx, "incident").unwrap();
         assert_eq!(sm.get(idx).unwrap().state, LeaseState::Frozen);
 
-        sm.transition(idx, LeaseState::Active, LeaseEvent::RecoveryApproved,
-            LeaseInitiator::Operator, vec![], Some("admin"), "resolved").unwrap();
+        sm.transition(
+            idx,
+            LeaseState::Active,
+            LeaseEvent::RecoveryApproved,
+            LeaseInitiator::Operator,
+            vec![],
+            Some("admin"),
+            "resolved",
+        )
+        .unwrap();
         assert_eq!(sm.get(idx).unwrap().state, LeaseState::Active);
     }
 
@@ -501,13 +692,24 @@ mod tests {
     fn test_all_18_valid_transitions() {
         use LeaseState::*;
         let valid = [
-            (Draft, Registered), (Draft, Rejected),
-            (Registered, Active), (Registered, Frozen), (Registered, Revoked),
-            (Registered, Expired), (Registered, Rejected),
-            (Active, Bridged), (Active, Frozen), (Active, Revoked),
-            (Active, Expired), (Active, Rejected),
-            (Frozen, Registered), (Frozen, Active), (Frozen, Revoked), (Frozen, Expired),
-            (Bridged, Consumed), (Bridged, Revoked),
+            (Draft, Registered),
+            (Draft, Rejected),
+            (Registered, Active),
+            (Registered, Frozen),
+            (Registered, Revoked),
+            (Registered, Expired),
+            (Registered, Rejected),
+            (Active, Bridged),
+            (Active, Frozen),
+            (Active, Revoked),
+            (Active, Expired),
+            (Active, Rejected),
+            (Frozen, Registered),
+            (Frozen, Active),
+            (Frozen, Revoked),
+            (Frozen, Expired),
+            (Bridged, Consumed),
+            (Bridged, Revoked),
         ];
         for (from, to) in valid {
             assert!(lookup_rule(from, to).is_some(), "Missing: {from} → {to}");
@@ -518,11 +720,17 @@ mod tests {
     fn test_all_12_forbidden_transitions() {
         use LeaseState::*;
         let forbidden = [
-            (Revoked, Active), (Revoked, Bridged),
-            (Expired, Active), (Expired, Bridged),
-            (Rejected, Registered), (Rejected, Active),
-            (Consumed, Active), (Consumed, Bridged),
-            (Draft, Active), (Draft, Bridged), (Draft, Consumed),
+            (Revoked, Active),
+            (Revoked, Bridged),
+            (Expired, Active),
+            (Expired, Bridged),
+            (Rejected, Registered),
+            (Rejected, Active),
+            (Consumed, Active),
+            (Consumed, Bridged),
+            (Draft, Active),
+            (Draft, Bridged),
+            (Draft, Consumed),
             (Registered, Bridged),
         ];
         for (from, to) in forbidden {
