@@ -253,7 +253,11 @@ impl Strategy for BbReversion {
             Some(is_long) => {
                 // Exit: always market for guaranteed fills / 出場：永遠市價確保成交
                 if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
-                    intents.push(self.make_exit_intent(ctx, !is_long, 0.5));
+                    // Exit confidence: mid-band revert is the textbook reversion target,
+                    // boost when Hurst still confirms mean-reverting regime.
+                    // 出場信心：%B 回到中軌是教科書回歸目標，Hurst 仍確認 mean_reverting 時加成。
+                    let exit_conf = (0.55_f64 + hurst_boost).clamp(0.4, 0.8);
+                    intents.push(self.make_exit_intent(ctx, !is_long, exit_conf));
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 }

@@ -58,9 +58,12 @@ Session 12 PNL-1~7 + DB-RUN-1~7 + Session 13 R3 收尾共 22 個 commits 全部 
 - [x] **DB-RUN-6**（P2）epoch 0 防護 + 5 條歷史清理 — `78291ff`（context_writer guard + 已執行 DELETE）
 - [x] **DB-RUN-7**（P3）signals hypertable chunk 7d→1d / compress 14d→2d + ANALYZE — `6608ab7`
 
-### 待辦：策略 confidence 動態化
+### 策略 confidence 動態化（Session 13 完成）
 
-- [ ] 當前固定 0.50，低波動市場全被 cost gate 攔截。需根據 ATR/regime 動態化
+- [x] **CONF-A** ma_crossover regime-aware（ADX 超額 + Hurst regime fit，entry/exit helper）
+- [x] **CONF-B** grid_trading 動態（ranging+窄 BB→0.85 / trending→0.30，`compute_grid_confidence`）
+- [x] **CONF-C** bb_reversion exit + bb_breakout %B vs bandwidth 分檔（殺 0.5 placeholder）
+- [ ] **CONF-D** 暴露 conf scaling 給 agent via IPC `update_strategy_params` → 移至 Phase 4
 
 ---
 
@@ -100,6 +103,7 @@ Session 12 PNL-1~7 + DB-RUN-1~7 + Session 13 R3 收尾共 22 個 commits 全部 
 
 ## Phase 4 — Claude Teacher + LinUCB + News + DL-3（W13-15）
 
+- [ ] **CONF-D** 暴露 strategy confidence scaling 給 agent via IPC `update_strategy_params`（A/B/C 已在 Session 13 接通動態化，CONF-D 是暴露調參 surface）
 - [ ] 4-01~03：Claude-as-Teacher → ExperimentLedger + 效果追蹤
 - [ ] 4-04~06：LinUCB + Model Performance 監控 + Adversarial Validation
 - [ ] 4-07~10：新聞 Agent 接口（mock，數據源暫緩）
