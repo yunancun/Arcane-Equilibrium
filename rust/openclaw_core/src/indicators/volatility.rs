@@ -210,7 +210,11 @@ pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResul
     let n = log_n.len() as f64;
     let sum_x = kahan_sum(&log_n);
     let sum_y = kahan_sum(&log_rs);
-    let xy_products: Vec<f64> = log_n.iter().zip(log_rs.iter()).map(|(x, y)| x * y).collect();
+    let xy_products: Vec<f64> = log_n
+        .iter()
+        .zip(log_rs.iter())
+        .map(|(x, y)| x * y)
+        .collect();
     let sum_xy = kahan_sum(&xy_products);
     let x_squares: Vec<f64> = log_n.iter().map(|x| x * x).collect();
     let sum_x2 = kahan_sum(&x_squares);
@@ -303,8 +307,8 @@ mod tests {
     use super::*;
 
     const CLOSE_20: [f64; 20] = [
-        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75,
-        44.00, 44.50, 44.75, 45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
+        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75, 44.00, 44.50, 44.75,
+        45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
     ];
 
     // --- Bollinger ---
@@ -370,9 +374,7 @@ mod tests {
     fn test_ewma_vol_basic() {
         let r = ewma_vol(&CLOSE_20, 0.97).unwrap();
         assert!(r.ewma_vol >= 0.0);
-        assert!(
-            r.vol_regime == "low" || r.vol_regime == "normal" || r.vol_regime == "high"
-        );
+        assert!(r.vol_regime == "low" || r.vol_regime == "normal" || r.vol_regime == "high");
     }
 
     #[test]

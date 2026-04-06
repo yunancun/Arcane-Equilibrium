@@ -1069,6 +1069,38 @@ impl TickPipeline {
                 fills = self.stats.total_fills,
                 "tick stats"
             );
+
+            // GAP-7 / idle-writer-fix #4: emit PositionSnapshot for every open
+            // paper position every 1000 ticks so trading.position_snapshots
+            // stays populated for ML training.
+            // GAP-7：每 1000 ticks 發射持倉快照以填充 position_snapshots 表。
+            if let Some(ref tx) = self.trading_tx {
+                for pos in self.paper_state.positions() {
+                    let mark_price = *self
+                        .latest_prices
+                        .get(&pos.symbol)
+                        .unwrap_or(&pos.entry_price);
+                    let unrealized_pnl = if pos.is_long {
+                        (mark_price - pos.entry_price) * pos.qty
+                    } else {
+                        (pos.entry_price - mark_price) * pos.qty
+                    };
+                    let msg = crate::database::TradingMsg::PositionSnapshot {
+                        ts_ms: event.ts_ms,
+                        symbol: pos.symbol.clone(),
+                        side: if pos.is_long {
+                            "long".to_string()
+                        } else {
+                            "short".to_string()
+                        },
+                        qty: pos.qty,
+                        entry_price: pos.entry_price,
+                        mark_price,
+                        unrealized_pnl,
+                    };
+                    let _ = tx.try_send(msg);
+                }
+            }
         }
 
         // Measure elapsed time for the full tick / 計算完整 tick 處理耗時
@@ -1339,6 +1371,68 @@ mod tests {
             pipeline.on_tick(&make_event("BTCUSDT", 50000.0 + i as f64, i * 60_000));
         }
         assert_eq!(pipeline.stats.total_ticks, 50);
+    }
+
+    #[test]
+    fn test_position_snapshot_emitted_every_1000_ticks() {
+        // GAP-7 regression: PositionSnapshot must be emitted every 1000 ticks
+        // for every open paper position when trading_tx is wired.
+        // GAP-7 回歸：掛接 trading_tx 時每 1000 ticks 為每個持倉發射快照。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8192);
+        pipeline.set_trading_channel(tx);
+        // Open a paper long position directly.
+        // 直接建立紙盤多單持倉。
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+        // Pump exactly 1000 ticks. total_ticks becomes 1000 -> snapshot.
+        // 打 1000 tick，total_ticks 達到 1000 觸發快照。
+        for i in 0..1000 {
+            pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, (i + 1) * 60_000));
+        }
+        // Drain channel; expect at least one PositionSnapshot for BTCUSDT.
+        // 抽取通道；至少應有一條 BTCUSDT 的 PositionSnapshot。
+        let mut found = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let crate::database::TradingMsg::PositionSnapshot {
+                symbol,
+                side,
+                qty,
+                mark_price,
+                unrealized_pnl,
+                ..
+            } = msg
+            {
+                if symbol == "BTCUSDT" {
+                    assert_eq!(side, "long");
+                    assert!((qty - 0.1).abs() < 1e-9);
+                    assert!((mark_price - 50_000.0).abs() < 1e-9);
+                    assert!(unrealized_pnl.abs() < 1e-6);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found,
+            "expected a PositionSnapshot for BTCUSDT; positions={}",
+            pipeline.paper_state.position_count()
+        );
+    }
+
+    #[test]
+    fn test_position_snapshot_noop_without_channel() {
+        // Without trading_tx wired, snapshot loop must be a no-op and never panic.
+        // 未掛接 trading_tx 時快照循環必須無動作且不 panic。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", false, 0.2, 50_000.0, 0.0, 0);
+        for i in 0..1000 {
+            pipeline.on_tick(&make_event("BTCUSDT", 49_000.0, (i + 1) * 60_000));
+        }
+        assert_eq!(pipeline.stats.total_ticks, 1000);
     }
 
     #[test]

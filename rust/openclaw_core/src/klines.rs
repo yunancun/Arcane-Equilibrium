@@ -231,9 +231,7 @@ impl KlineBuffer {
     fn extract_field(&self, n: usize, f: impl Fn(&KlineBar) -> f64) -> Vec<f64> {
         let count = n.min(self.bars.len());
         let start = self.bars.len().saturating_sub(count);
-        (start..self.bars.len())
-            .map(|i| f(&self.bars[i]))
-            .collect()
+        (start..self.bars.len()).map(|i| f(&self.bars[i])).collect()
     }
 }
 
@@ -330,8 +328,7 @@ impl KlineAggregator {
                 // Detect gaps (skipped periods) / 檢測間隙（跳過的週期）
                 let expected_next = closed.close_time_ms;
                 if period_start > expected_next + self.duration_ms {
-                    self.gap_periods_detected +=
-                        (period_start - expected_next) / self.duration_ms;
+                    self.gap_periods_detected += (period_start - expected_next) / self.duration_ms;
                 }
 
                 self.buffer.append(closed.clone());
@@ -561,7 +558,10 @@ impl KlineManager {
         self.aggregators
             .get(symbol)
             .and_then(|m| m.get(timeframe))
-            .map(|a| a.buffer().ohlcv_arrays(n.unwrap_or(DEFAULT_BUFFER_CAPACITY)))
+            .map(|a| {
+                a.buffer()
+                    .ohlcv_arrays(n.unwrap_or(DEFAULT_BUFFER_CAPACITY))
+            })
     }
 
     /// Aggregate statistics across all symbols and timeframes.
@@ -848,7 +848,7 @@ mod tests {
 
         let bar = agg.get_current_bar().unwrap();
         let expected = small * n as f64; // 1000.0
-        // Kahan should keep the error extremely small (< 1e-10)
+                                         // Kahan should keep the error extremely small (< 1e-10)
         let error = (bar.volume - expected).abs();
         assert!(
             error < 1e-10,
@@ -908,8 +908,7 @@ mod tests {
 
     #[test]
     fn test_manager_stats() {
-        let mut mgr =
-            KlineManager::new(&["BTCUSDT", "ETHUSDT"], Some(&["1m", "5m"]), Some(100));
+        let mut mgr = KlineManager::new(&["BTCUSDT", "ETHUSDT"], Some(&["1m", "5m"]), Some(100));
 
         // Feed 3 minutes of data for both symbols
         for min in 0..4u64 {
@@ -1043,15 +1042,25 @@ mod tests {
             KlineBar {
                 open_time_ms: BASE_TS,
                 close_time_ms: BASE_TS + 60_000,
-                open: 100.0, high: 110.0, low: 90.0, close: 105.0,
-                volume: 10.0, turnover: 1000.0, tick_count: 1,
+                open: 100.0,
+                high: 110.0,
+                low: 90.0,
+                close: 105.0,
+                volume: 10.0,
+                turnover: 1000.0,
+                tick_count: 1,
                 is_closed: true,
             },
             KlineBar {
                 open_time_ms: BASE_TS + 60_000,
                 close_time_ms: BASE_TS + 120_000,
-                open: 105.0, high: 115.0, low: 95.0, close: 110.0,
-                volume: 20.0, turnover: 2000.0, tick_count: 1,
+                open: 105.0,
+                high: 115.0,
+                low: 95.0,
+                close: 110.0,
+                volume: 20.0,
+                turnover: 2000.0,
+                tick_count: 1,
                 is_closed: false, // unclosed — should be filtered
             },
         ];

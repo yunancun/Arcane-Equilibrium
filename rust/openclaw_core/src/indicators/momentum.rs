@@ -83,10 +83,7 @@ pub fn stochastic(
             .iter()
             .cloned()
             .fold(f64::NEG_INFINITY, f64::max);
-        let l_min = low[start..=i]
-            .iter()
-            .cloned()
-            .fold(f64::INFINITY, f64::min);
+        let l_min = low[start..=i].iter().cloned().fold(f64::INFINITY, f64::min);
         let range = h_max - l_min;
         let k_val = if range > 1e-15 {
             (close[i] - l_min) / range * 100.0
@@ -220,8 +217,8 @@ mod tests {
     use super::*;
 
     const CLOSE_20: [f64; 20] = [
-        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75,
-        44.00, 44.50, 44.75, 45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
+        44.0, 44.25, 44.50, 43.75, 44.50, 44.25, 44.00, 43.50, 43.25, 43.75, 44.00, 44.50, 44.75,
+        45.00, 45.50, 45.75, 46.00, 45.50, 45.25, 45.00,
     ];
 
     // --- RSI ---

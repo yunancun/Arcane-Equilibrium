@@ -70,7 +70,6 @@ impl AttentionLevel {
 /// 維護每個交易對的滑動窗口價格歷史，用於波動率檢測。
 pub struct AttentionAssessor {
     // ── Config thresholds / 配置閾值 ──
-
     /// High attention trigger: order within this % of current price.
     /// 高關注觸發：訂單在當前價此百分比以內。
     proximity_threshold_pct: f64,
@@ -92,7 +91,6 @@ pub struct AttentionAssessor {
     min_baseline_candles: usize,
 
     // ── State / 狀態 ──
-
     /// Per-symbol price history: (timestamp_ms, price).
     /// 每個交易對的價格歷史：（時間戳毫秒, 價格）。
     price_history: HashMap<String, VecDeque<(u64, f64)>>,
@@ -206,10 +204,7 @@ impl AttentionAssessor {
     /// Record a price for volatility detection and prune old entries.
     /// 記錄價格用於波動性檢測，並裁剪過期條目。
     fn record_price(&mut self, symbol: &str, ts_ms: u64, price: f64) {
-        let history = self
-            .price_history
-            .entry(symbol.to_owned())
-            .or_default();
+        let history = self.price_history.entry(symbol.to_owned()).or_default();
         history.push_back((ts_ms, price));
 
         // Prune entries older than window / 裁剪窗口外的舊數據

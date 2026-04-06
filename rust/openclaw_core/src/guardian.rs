@@ -40,7 +40,7 @@ impl Default for GuardianConfig {
 #[derive(Debug, Clone)]
 pub struct TradeIntentCheck {
     pub symbol: String,
-    pub side: String,   // "Buy" | "Sell"
+    pub side: String, // "Buy" | "Sell"
     pub leverage: f64,
     pub qty: f64,
 }
@@ -99,16 +99,19 @@ impl Guardian {
         let mut modified_leverage = None;
 
         // Check 1: Direction conflict — same symbol opposite side
-        let has_conflict = ctx.positions.iter().any(|p| {
-            p.symbol == intent.symbol && p.side != intent.side
-        });
+        let has_conflict = ctx
+            .positions
+            .iter()
+            .any(|p| p.symbol == intent.symbol && p.side != intent.side);
         if has_conflict {
             reasons.push("direction_conflict: opposite position exists".to_string());
             risk_score += 0.4;
         }
 
         // Check 2: Same-direction position count
-        let same_dir_count = ctx.positions.iter()
+        let same_dir_count = ctx
+            .positions
+            .iter()
             .filter(|p| p.side == intent.side)
             .count();
         if same_dir_count >= self.config.max_same_direction_positions {
@@ -156,7 +159,8 @@ impl Guardian {
                 || r.starts_with("leverage_excessive")
                 || r.starts_with("drawdown_breach")
                 || r.starts_with("position_count")
-        }) && risk_score >= 0.3 {
+        }) && risk_score >= 0.3
+        {
             Verdict::Rejected
         } else if modified_qty.is_some() || modified_leverage.is_some() {
             Verdict::Modified
@@ -164,7 +168,13 @@ impl Guardian {
             Verdict::Approved
         };
 
-        GuardianResult { verdict, risk_score, reasons, modified_qty, modified_leverage }
+        GuardianResult {
+            verdict,
+            risk_score,
+            reasons,
+            modified_qty,
+            modified_leverage,
+        }
     }
 
     /// Get current config reference (for read-modify-write updates).
@@ -195,15 +205,24 @@ mod tests {
     use super::*;
 
     fn buy_intent(symbol: &str, leverage: f64) -> TradeIntentCheck {
-        TradeIntentCheck { symbol: symbol.into(), side: "Buy".into(), leverage, qty: 1.0 }
+        TradeIntentCheck {
+            symbol: symbol.into(),
+            side: "Buy".into(),
+            leverage,
+            qty: 1.0,
+        }
     }
 
     fn ctx_with_positions(positions: Vec<(&str, &str)>, drawdown: f64) -> PortfolioContext {
         PortfolioContext {
             drawdown_pct: drawdown,
-            positions: positions.into_iter().map(|(s, side)| ExistingPosition {
-                symbol: s.into(), side: side.into(),
-            }).collect(),
+            positions: positions
+                .into_iter()
+                .map(|(s, side)| ExistingPosition {
+                    symbol: s.into(),
+                    side: side.into(),
+                })
+                .collect(),
         }
     }
 

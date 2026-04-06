@@ -117,11 +117,17 @@ pub fn check_portfolio_risk(
     }
 
     // Check 2: Sector concentration
-    let sector_exposure: f64 = holdings.iter()
+    let sector_exposure: f64 = holdings
+        .iter()
         .filter(|h| h.sector == new_sector)
         .map(|h| h.notional)
-        .sum::<f64>() + new_notional;
-    let sector_pct = if balance > 0.0 { sector_exposure / balance * 100.0 } else { 100.0 };
+        .sum::<f64>()
+        + new_notional;
+    let sector_pct = if balance > 0.0 {
+        sector_exposure / balance * 100.0
+    } else {
+        100.0
+    };
 
     if sector_pct > config.max_sector_exposure_pct {
         reasons.push(format!(
@@ -133,7 +139,9 @@ pub fn check_portfolio_risk(
     // Check 3: Correlation gate
     let mut max_corr = 0.0_f64;
     for h in holdings {
-        if h.side != new_side { continue; }
+        if h.side != new_side {
+            continue;
+        }
         if h.returns.len() < config.min_data_points || new_returns.len() < config.min_data_points {
             continue;
         }
@@ -159,10 +167,7 @@ pub fn check_portfolio_risk(
 
 /// Compute portfolio-wide metrics.
 /// 計算組合級指標。
-pub fn compute_portfolio_metrics(
-    balance: f64,
-    holdings: &[Holding],
-) -> PortfolioMetrics {
+pub fn compute_portfolio_metrics(balance: f64, holdings: &[Holding]) -> PortfolioMetrics {
     let total_exposure: f64 = holdings.iter().map(|h| h.notional).sum();
     let reserve_pct = if balance > 0.0 {
         (balance - total_exposure) / balance * 100.0
@@ -183,7 +188,11 @@ pub fn compute_portfolio_metrics(
             }
         }
     }
-    let avg_corr = if corr_count > 0 { corr_sum / corr_count as f64 } else { 0.0 };
+    let avg_corr = if corr_count > 0 {
+        corr_sum / corr_count as f64
+    } else {
+        0.0
+    };
     // N_eff = N / (1 + (N-1) * avg_corr) — standard formula for effective independent bets
     let n = holdings.len() as f64;
     let effective_diversification = if avg_corr > 0.01 && n > 1.0 {
@@ -250,9 +259,7 @@ mod tests {
     #[test]
     fn test_reserve_buffer_check_pass() {
         let config = PortfolioConfig::default();
-        let result = check_portfolio_risk(
-            &config, 10000.0, &[], 3000.0, "crypto", "Buy", &[],
-        );
+        let result = check_portfolio_risk(&config, 10000.0, &[], 3000.0, "crypto", "Buy", &[]);
         assert!(result.allowed);
         assert!((result.reserve_buffer_pct - 70.0).abs() < 0.1);
     }
@@ -261,12 +268,14 @@ mod tests {
     fn test_reserve_buffer_check_fail() {
         let config = PortfolioConfig::default();
         let holdings = vec![Holding {
-            symbol: "BTC".into(), sector: "crypto".into(), side: "Buy".into(),
-            notional: 6000.0, returns: vec![],
+            symbol: "BTC".into(),
+            sector: "crypto".into(),
+            side: "Buy".into(),
+            notional: 6000.0,
+            returns: vec![],
         }];
-        let result = check_portfolio_risk(
-            &config, 10000.0, &holdings, 2000.0, "crypto", "Buy", &[],
-        );
+        let result =
+            check_portfolio_risk(&config, 10000.0, &holdings, 2000.0, "crypto", "Buy", &[]);
         assert!(!result.allowed);
         assert!(result.rejection_reasons[0].starts_with("reserve_buffer"));
     }
@@ -275,14 +284,18 @@ mod tests {
     fn test_sector_concentration_fail() {
         let config = PortfolioConfig::default();
         let holdings = vec![Holding {
-            symbol: "BTC".into(), sector: "defi".into(), side: "Buy".into(),
-            notional: 3500.0, returns: vec![],
+            symbol: "BTC".into(),
+            sector: "defi".into(),
+            side: "Buy".into(),
+            notional: 3500.0,
+            returns: vec![],
         }];
-        let result = check_portfolio_risk(
-            &config, 10000.0, &holdings, 1000.0, "defi", "Buy", &[],
-        );
+        let result = check_portfolio_risk(&config, 10000.0, &holdings, 1000.0, "defi", "Buy", &[]);
         assert!(!result.allowed);
-        assert!(result.rejection_reasons.iter().any(|r| r.starts_with("sector_concentration")));
+        assert!(result
+            .rejection_reasons
+            .iter()
+            .any(|r| r.starts_with("sector_concentration")));
     }
 
     #[test]
@@ -291,8 +304,11 @@ mod tests {
         let returns_a = vec![0.01, 0.02, 0.03, 0.04, 0.05];
         let returns_b = vec![0.01, 0.02, 0.03, 0.04, 0.05]; // perfect correlation
         let holdings = vec![Holding {
-            symbol: "BTC".into(), sector: "crypto".into(), side: "Buy".into(),
-            notional: 1000.0, returns: returns_a,
+            symbol: "BTC".into(),
+            sector: "crypto".into(),
+            side: "Buy".into(),
+            notional: 1000.0,
+            returns: returns_a,
         }];
         let result = check_portfolio_risk(
             &config, 10000.0, &holdings, 1000.0, "crypto", "Buy", &returns_b,
@@ -306,8 +322,11 @@ mod tests {
         let config = PortfolioConfig::default();
         let returns = vec![0.01, 0.02, 0.03, 0.04, 0.05];
         let holdings = vec![Holding {
-            symbol: "BTC".into(), sector: "crypto".into(), side: "Sell".into(),
-            notional: 1000.0, returns: returns.clone(),
+            symbol: "BTC".into(),
+            sector: "crypto".into(),
+            side: "Sell".into(),
+            notional: 1000.0,
+            returns: returns.clone(),
         }];
         let result = check_portfolio_risk(
             &config, 10000.0, &holdings, 1000.0, "crypto", "Buy", &returns,
@@ -319,10 +338,20 @@ mod tests {
     #[test]
     fn test_portfolio_metrics() {
         let holdings = vec![
-            Holding { symbol: "BTC".into(), sector: "crypto".into(), side: "Buy".into(),
-                notional: 2000.0, returns: vec![0.01, 0.02, 0.03, 0.04, 0.05] },
-            Holding { symbol: "ETH".into(), sector: "crypto".into(), side: "Buy".into(),
-                notional: 1000.0, returns: vec![0.01, 0.02, 0.03, 0.04, 0.05] },
+            Holding {
+                symbol: "BTC".into(),
+                sector: "crypto".into(),
+                side: "Buy".into(),
+                notional: 2000.0,
+                returns: vec![0.01, 0.02, 0.03, 0.04, 0.05],
+            },
+            Holding {
+                symbol: "ETH".into(),
+                sector: "crypto".into(),
+                side: "Buy".into(),
+                notional: 1000.0,
+                returns: vec![0.01, 0.02, 0.03, 0.04, 0.05],
+            },
         ];
         let m = compute_portfolio_metrics(10000.0, &holdings);
         assert!((m.total_exposure - 3000.0).abs() < 0.01);

@@ -138,34 +138,52 @@ pub struct LevelConstraints {
 pub fn constraints_for(level: RiskLevel) -> LevelConstraints {
     match level {
         RiskLevel::Normal => LevelConstraints {
-            new_entries_allowed: true, position_size_multiplier: 1.0,
-            reduce_only: false, active_de_risking: false,
-            emergency_stops: false, requires_operator: false,
+            new_entries_allowed: true,
+            position_size_multiplier: 1.0,
+            reduce_only: false,
+            active_de_risking: false,
+            emergency_stops: false,
+            requires_operator: false,
         },
         RiskLevel::Cautious => LevelConstraints {
-            new_entries_allowed: true, position_size_multiplier: 0.7,
-            reduce_only: false, active_de_risking: false,
-            emergency_stops: false, requires_operator: false,
+            new_entries_allowed: true,
+            position_size_multiplier: 0.7,
+            reduce_only: false,
+            active_de_risking: false,
+            emergency_stops: false,
+            requires_operator: false,
         },
         RiskLevel::Reduced => LevelConstraints {
-            new_entries_allowed: false, position_size_multiplier: 0.5,
-            reduce_only: true, active_de_risking: false,
-            emergency_stops: false, requires_operator: false,
+            new_entries_allowed: false,
+            position_size_multiplier: 0.5,
+            reduce_only: true,
+            active_de_risking: false,
+            emergency_stops: false,
+            requires_operator: false,
         },
         RiskLevel::Defensive => LevelConstraints {
-            new_entries_allowed: false, position_size_multiplier: 0.0,
-            reduce_only: true, active_de_risking: true,
-            emergency_stops: false, requires_operator: false,
+            new_entries_allowed: false,
+            position_size_multiplier: 0.0,
+            reduce_only: true,
+            active_de_risking: true,
+            emergency_stops: false,
+            requires_operator: false,
         },
         RiskLevel::CircuitBreaker => LevelConstraints {
-            new_entries_allowed: false, position_size_multiplier: 0.0,
-            reduce_only: true, active_de_risking: true,
-            emergency_stops: true, requires_operator: true,
+            new_entries_allowed: false,
+            position_size_multiplier: 0.0,
+            reduce_only: true,
+            active_de_risking: true,
+            emergency_stops: true,
+            requires_operator: true,
         },
         RiskLevel::ManualReview => LevelConstraints {
-            new_entries_allowed: false, position_size_multiplier: 0.0,
-            reduce_only: true, active_de_risking: false,
-            emergency_stops: true, requires_operator: true,
+            new_entries_allowed: false,
+            position_size_multiplier: 0.0,
+            reduce_only: true,
+            active_de_risking: false,
+            emergency_stops: true,
+            requires_operator: true,
         },
     }
 }
@@ -196,14 +214,20 @@ pub struct EscalationThresholds {
 impl Default for EscalationThresholds {
     fn default() -> Self {
         Self {
-            drawdown_cautious_pct: 5.0, drawdown_reduced_pct: 8.0,
-            drawdown_defensive_pct: 12.0, drawdown_circuit_breaker_pct: 15.0,
-            daily_loss_cautious_pct: 2.0, daily_loss_reduced_pct: 3.5,
+            drawdown_cautious_pct: 5.0,
+            drawdown_reduced_pct: 8.0,
+            drawdown_defensive_pct: 12.0,
+            drawdown_circuit_breaker_pct: 15.0,
+            daily_loss_cautious_pct: 2.0,
+            daily_loss_reduced_pct: 3.5,
             daily_loss_circuit_breaker_pct: 5.0,
-            consecutive_loss_cautious: 3, consecutive_loss_reduced: 5,
+            consecutive_loss_cautious: 3,
+            consecutive_loss_reduced: 5,
             consecutive_loss_circuit_breaker: 10,
-            pressure_cautious: 0.3, pressure_reduced: 0.5,
-            pressure_defensive: 0.7, pressure_circuit_breaker: 0.9,
+            pressure_cautious: 0.3,
+            pressure_reduced: 0.5,
+            pressure_defensive: 0.7,
+            pressure_circuit_breaker: 0.9,
             min_hold_time_ms: 300_000, // 5 min
         }
     }
@@ -214,7 +238,11 @@ impl Default for EscalationThresholds {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Direction { Escalation, DeEscalation, Lateral }
+pub enum Direction {
+    Escalation,
+    DeEscalation,
+    Lateral,
+}
 
 struct TransitionRule {
     direction: Direction,
@@ -232,35 +260,95 @@ fn lookup_rule(from: RiskLevel, to: RiskLevel) -> Option<TransitionRule> {
 
     match (from, to) {
         // Escalation (auto, no approval)
-        (Normal, Cautious) | (Normal, Reduced) | (Normal, Defensive) | (Normal, CircuitBreaker)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: AUTO }),
-        (Normal, ManualReview)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: OP_GOV }),
-        (Cautious, Reduced) | (Cautious, Defensive) | (Cautious, CircuitBreaker)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: AUTO }),
-        (Cautious, ManualReview)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: OP_GOV }),
-        (Reduced, Defensive) | (Reduced, CircuitBreaker)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: AUTO }),
-        (Reduced, ManualReview)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: OP_GOV }),
-        (Defensive, CircuitBreaker)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: AUTO }),
-        (Defensive, ManualReview)
-            => Some(TransitionRule { direction: Direction::Escalation, requires_approval: false, allowed: OP_GOV }),
-        (CircuitBreaker, ManualReview)
-            => Some(TransitionRule { direction: Direction::Lateral, requires_approval: false, allowed: OP_GOV }),
+        (Normal, Cautious) | (Normal, Reduced) | (Normal, Defensive) | (Normal, CircuitBreaker) => {
+            Some(TransitionRule {
+                direction: Direction::Escalation,
+                requires_approval: false,
+                allowed: AUTO,
+            })
+        }
+        (Normal, ManualReview) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: OP_GOV,
+        }),
+        (Cautious, Reduced) | (Cautious, Defensive) | (Cautious, CircuitBreaker) => {
+            Some(TransitionRule {
+                direction: Direction::Escalation,
+                requires_approval: false,
+                allowed: AUTO,
+            })
+        }
+        (Cautious, ManualReview) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: OP_GOV,
+        }),
+        (Reduced, Defensive) | (Reduced, CircuitBreaker) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: AUTO,
+        }),
+        (Reduced, ManualReview) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: OP_GOV,
+        }),
+        (Defensive, CircuitBreaker) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: AUTO,
+        }),
+        (Defensive, ManualReview) => Some(TransitionRule {
+            direction: Direction::Escalation,
+            requires_approval: false,
+            allowed: OP_GOV,
+        }),
+        (CircuitBreaker, ManualReview) => Some(TransitionRule {
+            direction: Direction::Lateral,
+            requires_approval: false,
+            allowed: OP_GOV,
+        }),
 
         // De-escalation (requires approval + hold time)
-        (Cautious, Normal) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_GOV }),
-        (Reduced, Cautious) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_GOV }),
-        (Reduced, Normal) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_ONLY }),
-        (Defensive, Reduced) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_GOV }),
-        (Defensive, Cautious) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_ONLY }),
-        (CircuitBreaker, Defensive) => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_ONLY }),
-        (ManualReview, Defensive) | (ManualReview, Reduced) |
-        (ManualReview, Cautious) | (ManualReview, Normal)
-            => Some(TransitionRule { direction: Direction::DeEscalation, requires_approval: true, allowed: OP_ONLY }),
+        (Cautious, Normal) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_GOV,
+        }),
+        (Reduced, Cautious) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_GOV,
+        }),
+        (Reduced, Normal) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_ONLY,
+        }),
+        (Defensive, Reduced) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_GOV,
+        }),
+        (Defensive, Cautious) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_ONLY,
+        }),
+        (CircuitBreaker, Defensive) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_ONLY,
+        }),
+        (ManualReview, Defensive)
+        | (ManualReview, Reduced)
+        | (ManualReview, Cautious)
+        | (ManualReview, Normal) => Some(TransitionRule {
+            direction: Direction::DeEscalation,
+            requires_approval: true,
+            allowed: OP_ONLY,
+        }),
 
         _ => None,
     }
@@ -292,7 +380,10 @@ impl RiskGovernorSm {
     }
 
     pub fn with_thresholds(thresholds: EscalationThresholds) -> Self {
-        Self { thresholds, ..Self::new() }
+        Self {
+            thresholds,
+            ..Self::new()
+        }
     }
 
     pub fn constraints(&self) -> LevelConstraints {
@@ -300,24 +391,37 @@ impl RiskGovernorSm {
     }
 
     pub fn transition(
-        &mut self, to_level: RiskLevel, event: RiskEvent, initiator: RiskInitiator,
-        reason_codes: Vec<String>, approved_by: Option<&str>, _reason: &str,
+        &mut self,
+        to_level: RiskLevel,
+        event: RiskEvent,
+        initiator: RiskInitiator,
+        reason_codes: Vec<String>,
+        approved_by: Option<&str>,
+        _reason: &str,
     ) -> Result<(), SmError> {
         let from = self.level;
-        if from == to_level { return Ok(()); } // no-op
+        if from == to_level {
+            return Ok(());
+        } // no-op
 
-        let rule = lookup_rule(from, to_level)
-            .ok_or_else(|| SmError::InvalidTransition { from: from.to_string(), to: to_level.to_string() })?;
+        let rule = lookup_rule(from, to_level).ok_or_else(|| SmError::InvalidTransition {
+            from: from.to_string(),
+            to: to_level.to_string(),
+        })?;
 
         if !rule.allowed.contains(&initiator) {
             return Err(SmError::InitiatorNotAllowed {
                 initiator: initiator.as_str().to_string(),
-                from: from.to_string(), to: to_level.to_string(),
+                from: from.to_string(),
+                to: to_level.to_string(),
             });
         }
 
         if rule.requires_approval && approved_by.is_none() {
-            return Err(SmError::ApprovalRequired { from: from.to_string(), to: to_level.to_string() });
+            return Err(SmError::ApprovalRequired {
+                from: from.to_string(),
+                to: to_level.to_string(),
+            });
         }
 
         // Hold time check for de-escalation
@@ -332,9 +436,14 @@ impl RiskGovernorSm {
         }
 
         let record = TransitionRecord::new(
-            from.as_str(), to_level.as_str(), event.as_str(),
-            initiator.as_str(), reason_codes, rule.requires_approval,
-            approved_by.map(|s| s.to_string()), self.version,
+            from.as_str(),
+            to_level.as_str(),
+            event.as_str(),
+            initiator.as_str(),
+            reason_codes,
+            rule.requires_approval,
+            approved_by.map(|s| s.to_string()),
+            self.version,
         );
         self.level = to_level;
         self.level_entered_at_ms = super::now_ms();
@@ -351,60 +460,118 @@ impl RiskGovernorSm {
 
     // ── Convenience / 便捷 ──
 
-    pub fn escalate_to(&mut self, level: RiskLevel, reason: &str, event: RiskEvent) -> Result<(), SmError> {
-        self.transition(level, event, RiskInitiator::RiskGovernor,
-            vec!["escalation".into()], None, reason)
+    pub fn escalate_to(
+        &mut self,
+        level: RiskLevel,
+        reason: &str,
+        event: RiskEvent,
+    ) -> Result<(), SmError> {
+        self.transition(
+            level,
+            event,
+            RiskInitiator::RiskGovernor,
+            vec!["escalation".into()],
+            None,
+            reason,
+        )
     }
 
-    pub fn de_escalate_to(&mut self, level: RiskLevel, approved_by: &str, reason: &str) -> Result<(), SmError> {
-        self.transition(level, RiskEvent::RecoveryApproved, RiskInitiator::Operator,
-            vec!["de_escalation_approved".into()], Some(approved_by), reason)
+    pub fn de_escalate_to(
+        &mut self,
+        level: RiskLevel,
+        approved_by: &str,
+        reason: &str,
+    ) -> Result<(), SmError> {
+        self.transition(
+            level,
+            RiskEvent::RecoveryApproved,
+            RiskInitiator::Operator,
+            vec!["de_escalation_approved".into()],
+            Some(approved_by),
+            reason,
+        )
     }
 
     pub fn circuit_break(&mut self, reason: &str) -> Result<(), SmError> {
-        self.escalate_to(RiskLevel::CircuitBreaker, reason, RiskEvent::IncidentTriggered)
+        self.escalate_to(
+            RiskLevel::CircuitBreaker,
+            reason,
+            RiskEvent::IncidentTriggered,
+        )
     }
 
     /// Auto-evaluate risk metrics and escalate if needed.
     /// 自動評估風控指標，超閾值則升級。
     pub fn evaluate_risk_context(
-        &mut self, pressure: f64, drawdown_pct: f64, daily_loss_pct: f64,
-        consecutive_losses: u32, session_halted: bool, cooldown_active: bool,
+        &mut self,
+        pressure: f64,
+        drawdown_pct: f64,
+        daily_loss_pct: f64,
+        consecutive_losses: u32,
+        session_halted: bool,
+        cooldown_active: bool,
     ) -> Option<RiskLevel> {
         let t = &self.thresholds;
         let mut target = RiskLevel::Normal;
 
         // Pressure
-        if pressure >= t.pressure_circuit_breaker { target = target.max(RiskLevel::CircuitBreaker); }
-        else if pressure >= t.pressure_defensive { target = target.max(RiskLevel::Defensive); }
-        else if pressure >= t.pressure_reduced { target = target.max(RiskLevel::Reduced); }
-        else if pressure >= t.pressure_cautious { target = target.max(RiskLevel::Cautious); }
+        if pressure >= t.pressure_circuit_breaker {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if pressure >= t.pressure_defensive {
+            target = target.max(RiskLevel::Defensive);
+        } else if pressure >= t.pressure_reduced {
+            target = target.max(RiskLevel::Reduced);
+        } else if pressure >= t.pressure_cautious {
+            target = target.max(RiskLevel::Cautious);
+        }
 
         // Drawdown
-        if drawdown_pct >= t.drawdown_circuit_breaker_pct { target = target.max(RiskLevel::CircuitBreaker); }
-        else if drawdown_pct >= t.drawdown_defensive_pct { target = target.max(RiskLevel::Defensive); }
-        else if drawdown_pct >= t.drawdown_reduced_pct { target = target.max(RiskLevel::Reduced); }
-        else if drawdown_pct >= t.drawdown_cautious_pct { target = target.max(RiskLevel::Cautious); }
+        if drawdown_pct >= t.drawdown_circuit_breaker_pct {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if drawdown_pct >= t.drawdown_defensive_pct {
+            target = target.max(RiskLevel::Defensive);
+        } else if drawdown_pct >= t.drawdown_reduced_pct {
+            target = target.max(RiskLevel::Reduced);
+        } else if drawdown_pct >= t.drawdown_cautious_pct {
+            target = target.max(RiskLevel::Cautious);
+        }
 
         // Daily loss
-        if daily_loss_pct >= t.daily_loss_circuit_breaker_pct { target = target.max(RiskLevel::CircuitBreaker); }
-        else if daily_loss_pct >= t.daily_loss_reduced_pct { target = target.max(RiskLevel::Reduced); }
-        else if daily_loss_pct >= t.daily_loss_cautious_pct { target = target.max(RiskLevel::Cautious); }
+        if daily_loss_pct >= t.daily_loss_circuit_breaker_pct {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if daily_loss_pct >= t.daily_loss_reduced_pct {
+            target = target.max(RiskLevel::Reduced);
+        } else if daily_loss_pct >= t.daily_loss_cautious_pct {
+            target = target.max(RiskLevel::Cautious);
+        }
 
         // Consecutive losses
-        if consecutive_losses >= t.consecutive_loss_circuit_breaker { target = target.max(RiskLevel::CircuitBreaker); }
-        else if consecutive_losses >= t.consecutive_loss_reduced { target = target.max(RiskLevel::Reduced); }
-        else if consecutive_losses >= t.consecutive_loss_cautious { target = target.max(RiskLevel::Cautious); }
+        if consecutive_losses >= t.consecutive_loss_circuit_breaker {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if consecutive_losses >= t.consecutive_loss_reduced {
+            target = target.max(RiskLevel::Reduced);
+        } else if consecutive_losses >= t.consecutive_loss_cautious {
+            target = target.max(RiskLevel::Cautious);
+        }
 
-        if session_halted { target = target.max(RiskLevel::CircuitBreaker); }
-        if cooldown_active { target = target.max(RiskLevel::Reduced); }
+        if session_halted {
+            target = target.max(RiskLevel::CircuitBreaker);
+        }
+        if cooldown_active {
+            target = target.max(RiskLevel::Reduced);
+        }
 
         // Only escalate, never auto-de-escalate
         if target > self.level {
-            let event = if drawdown_pct >= t.drawdown_defensive_pct { RiskEvent::DrawdownCritical }
-                else if daily_loss_pct >= t.daily_loss_reduced_pct { RiskEvent::DailyLossBreach }
-                else if consecutive_losses >= t.consecutive_loss_reduced { RiskEvent::ConsecutiveLosses }
-                else { RiskEvent::DrawdownWarning };
+            let event = if drawdown_pct >= t.drawdown_defensive_pct {
+                RiskEvent::DrawdownCritical
+            } else if daily_loss_pct >= t.daily_loss_reduced_pct {
+                RiskEvent::DailyLossBreach
+            } else if consecutive_losses >= t.consecutive_loss_reduced {
+                RiskEvent::ConsecutiveLosses
+            } else {
+                RiskEvent::DrawdownWarning
+            };
             if self.escalate_to(target, "auto_eval", event).is_ok() {
                 return Some(target);
             }
@@ -412,11 +579,15 @@ impl RiskGovernorSm {
         None
     }
 
-    pub fn snapshot_level(&self) -> RiskLevel { self.level }
+    pub fn snapshot_level(&self) -> RiskLevel {
+        self.level
+    }
 }
 
 impl Default for RiskGovernorSm {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -430,7 +601,8 @@ mod tests {
     #[test]
     fn test_escalation_auto() {
         let mut sm = RiskGovernorSm::new();
-        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning).unwrap();
+        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning)
+            .unwrap();
         assert_eq!(sm.level, RiskLevel::Cautious);
         assert_eq!(sm.consecutive_escalations, 1);
     }
@@ -438,7 +610,12 @@ mod tests {
     #[test]
     fn test_skip_escalation() {
         let mut sm = RiskGovernorSm::new();
-        sm.escalate_to(RiskLevel::CircuitBreaker, "severe", RiskEvent::IncidentTriggered).unwrap();
+        sm.escalate_to(
+            RiskLevel::CircuitBreaker,
+            "severe",
+            RiskEvent::IncidentTriggered,
+        )
+        .unwrap();
         assert_eq!(sm.level, RiskLevel::CircuitBreaker);
         assert_eq!(sm.consecutive_escalations, 1);
     }
@@ -447,18 +624,30 @@ mod tests {
     fn test_de_escalation_requires_approval() {
         let mut sm = RiskGovernorSm::new();
         sm.thresholds.min_hold_time_ms = 0; // disable for test
-        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning).unwrap();
-        let err = sm.transition(RiskLevel::Normal, RiskEvent::RecoveryApproved,
-            RiskInitiator::Operator, vec![], None, "").unwrap_err();
+        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning)
+            .unwrap();
+        let err = sm
+            .transition(
+                RiskLevel::Normal,
+                RiskEvent::RecoveryApproved,
+                RiskInitiator::Operator,
+                vec![],
+                None,
+                "",
+            )
+            .unwrap_err();
         assert!(matches!(err, SmError::ApprovalRequired { .. }));
     }
 
     #[test]
     fn test_de_escalation_hold_time() {
         let mut sm = RiskGovernorSm::new();
-        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning).unwrap();
+        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning)
+            .unwrap();
         // min_hold_time_ms = 300_000, so immediate de-escalation fails
-        let err = sm.de_escalate_to(RiskLevel::Normal, "admin", "resolved").unwrap_err();
+        let err = sm
+            .de_escalate_to(RiskLevel::Normal, "admin", "resolved")
+            .unwrap_err();
         assert!(matches!(err, SmError::HoldTimeNotMet { .. }));
     }
 
@@ -466,8 +655,10 @@ mod tests {
     fn test_de_escalation_after_hold() {
         let mut sm = RiskGovernorSm::new();
         sm.thresholds.min_hold_time_ms = 0;
-        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning).unwrap();
-        sm.de_escalate_to(RiskLevel::Normal, "admin", "resolved").unwrap();
+        sm.escalate_to(RiskLevel::Cautious, "test", RiskEvent::DrawdownWarning)
+            .unwrap();
+        sm.de_escalate_to(RiskLevel::Normal, "admin", "resolved")
+            .unwrap();
         assert_eq!(sm.level, RiskLevel::Normal);
         assert_eq!(sm.consecutive_escalations, 0);
     }
@@ -475,8 +666,15 @@ mod tests {
     #[test]
     fn test_same_level_noop() {
         let mut sm = RiskGovernorSm::new();
-        sm.transition(RiskLevel::Normal, RiskEvent::ConditionsImproved,
-            RiskInitiator::Operator, vec![], None, "").unwrap();
+        sm.transition(
+            RiskLevel::Normal,
+            RiskEvent::ConditionsImproved,
+            RiskInitiator::Operator,
+            vec![],
+            None,
+            "",
+        )
+        .unwrap();
         assert_eq!(sm.transitions.len(), 0);
     }
 
@@ -525,16 +723,27 @@ mod tests {
     fn test_all_escalation_paths() {
         use RiskLevel::*;
         let escalations = [
-            (Normal, Cautious), (Normal, Reduced), (Normal, Defensive),
-            (Normal, CircuitBreaker), (Normal, ManualReview),
-            (Cautious, Reduced), (Cautious, Defensive), (Cautious, CircuitBreaker),
+            (Normal, Cautious),
+            (Normal, Reduced),
+            (Normal, Defensive),
+            (Normal, CircuitBreaker),
+            (Normal, ManualReview),
+            (Cautious, Reduced),
+            (Cautious, Defensive),
+            (Cautious, CircuitBreaker),
             (Cautious, ManualReview),
-            (Reduced, Defensive), (Reduced, CircuitBreaker), (Reduced, ManualReview),
-            (Defensive, CircuitBreaker), (Defensive, ManualReview),
+            (Reduced, Defensive),
+            (Reduced, CircuitBreaker),
+            (Reduced, ManualReview),
+            (Defensive, CircuitBreaker),
+            (Defensive, ManualReview),
             (CircuitBreaker, ManualReview),
         ];
         for (from, to) in escalations {
-            assert!(lookup_rule(from, to).is_some(), "Missing escalation: {from} → {to}");
+            assert!(
+                lookup_rule(from, to).is_some(),
+                "Missing escalation: {from} → {to}"
+            );
         }
     }
 
@@ -543,16 +752,23 @@ mod tests {
         use RiskLevel::*;
         let de_escalations = [
             (Cautious, Normal),
-            (Reduced, Cautious), (Reduced, Normal),
-            (Defensive, Reduced), (Defensive, Cautious),
+            (Reduced, Cautious),
+            (Reduced, Normal),
+            (Defensive, Reduced),
+            (Defensive, Cautious),
             (CircuitBreaker, Defensive),
-            (ManualReview, Defensive), (ManualReview, Reduced),
-            (ManualReview, Cautious), (ManualReview, Normal),
+            (ManualReview, Defensive),
+            (ManualReview, Reduced),
+            (ManualReview, Cautious),
+            (ManualReview, Normal),
         ];
         for (from, to) in de_escalations {
             let rule = lookup_rule(from, to);
             assert!(rule.is_some(), "Missing de-escalation: {from} → {to}");
-            assert!(rule.unwrap().requires_approval, "De-escalation {from} → {to} should require approval");
+            assert!(
+                rule.unwrap().requires_approval,
+                "De-escalation {from} → {to} should require approval"
+            );
         }
     }
 
@@ -560,10 +776,19 @@ mod tests {
     fn test_invalid_transition() {
         let mut sm = RiskGovernorSm::new();
         // Normal → ManualReview is valid, but Normal → Reduced → Normal without hold fails
-        sm.escalate_to(RiskLevel::Reduced, "test", RiskEvent::DrawdownWarning).unwrap();
+        sm.escalate_to(RiskLevel::Reduced, "test", RiskEvent::DrawdownWarning)
+            .unwrap();
         // Skip de-escalation to Normal needs Operator only
-        let err = sm.transition(RiskLevel::Normal, RiskEvent::RecoveryApproved,
-            RiskInitiator::HealthMonitor, vec![], Some("admin"), "").unwrap_err();
+        let err = sm
+            .transition(
+                RiskLevel::Normal,
+                RiskEvent::RecoveryApproved,
+                RiskInitiator::HealthMonitor,
+                vec![],
+                Some("admin"),
+                "",
+            )
+            .unwrap_err();
         assert!(matches!(err, SmError::InitiatorNotAllowed { .. }));
     }
 
@@ -573,11 +798,20 @@ mod tests {
         sm.thresholds.min_hold_time_ms = 0;
         sm.circuit_break("test").unwrap();
         // RiskGovernor cannot de-escalate from CircuitBreaker
-        let err = sm.transition(RiskLevel::Defensive, RiskEvent::RecoveryApproved,
-            RiskInitiator::RiskGovernor, vec![], Some("admin"), "").unwrap_err();
+        let err = sm
+            .transition(
+                RiskLevel::Defensive,
+                RiskEvent::RecoveryApproved,
+                RiskInitiator::RiskGovernor,
+                vec![],
+                Some("admin"),
+                "",
+            )
+            .unwrap_err();
         assert!(matches!(err, SmError::InitiatorNotAllowed { .. }));
         // But Operator can
-        sm.de_escalate_to(RiskLevel::Defensive, "admin", "resolved").unwrap();
+        sm.de_escalate_to(RiskLevel::Defensive, "admin", "resolved")
+            .unwrap();
         assert_eq!(sm.level, RiskLevel::Defensive);
     }
 }

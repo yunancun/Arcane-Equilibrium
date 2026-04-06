@@ -402,9 +402,7 @@ impl OpportunityTracker {
             && would_profit.len() >= MIN_SAMPLES_PER_DIRECTION
         {
             "undertrading"
-        } else if avg_dodged > avg_regret * 1.3
-            && would_loss.len() >= MIN_SAMPLES_PER_DIRECTION
-        {
+        } else if avg_dodged > avg_regret * 1.3 && would_loss.len() >= MIN_SAMPLES_PER_DIRECTION {
             "overtrading"
         } else {
             "balanced"
@@ -499,7 +497,14 @@ mod tests {
     fn test_record_skipped_returns_uuid() {
         let mut t = OpportunityTracker::new();
         let id = t.record_skipped(
-            "BTCUSDT", "long", 65000.0, 0.7, "low_confidence", "guardian", "ma_cross", BASE_TS,
+            "BTCUSDT",
+            "long",
+            65000.0,
+            0.7,
+            "low_confidence",
+            "guardian",
+            "ma_cross",
+            BASE_TS,
         );
         assert!(!id.is_empty());
         // UUID v4 format: 8-4-4-4-12
@@ -536,7 +541,9 @@ mod tests {
     #[test]
     fn test_update_pnl_short_profit() {
         let mut t = OpportunityTracker::new();
-        t.record_skipped("ETHUSDT", "short", 100.0, 0.8, "test", "h0", "strat", BASE_TS);
+        t.record_skipped(
+            "ETHUSDT", "short", 100.0, 0.8, "test", "h0", "strat", BASE_TS,
+        );
 
         let mut prices = HashMap::new();
         prices.insert("ETHUSDT".to_string(), 90.0);
@@ -602,20 +609,32 @@ mod tests {
         // Create 6 profitable (will be settled via TP) + 2 losing (settled via SL)
         for i in 0..6 {
             t.record_skipped(
-                "BTCUSDT", "long", 100.0, 0.8, "test", "guardian", "strat",
+                "BTCUSDT",
+                "long",
+                100.0,
+                0.8,
+                "test",
+                "guardian",
+                "strat",
                 BASE_TS + i * 1000,
             );
         }
         for i in 0..2 {
             t.record_skipped(
-                "ETHUSDT", "long", 100.0, 0.5, "test", "guardian", "strat",
+                "ETHUSDT",
+                "long",
+                100.0,
+                0.5,
+                "test",
+                "guardian",
+                "strat",
                 BASE_TS + (6 + i) * 1000,
             );
         }
 
         let mut prices = HashMap::new();
         prices.insert("BTCUSDT".to_string(), 112.0); // TP trigger
-        prices.insert("ETHUSDT".to_string(), 93.0);  // SL trigger
+        prices.insert("ETHUSDT".to_string(), 93.0); // SL trigger
         t.update_virtual_pnl(&prices, BASE_TS + 10_000);
 
         let summary = t.get_regret_summary(7).clone();
@@ -639,7 +658,13 @@ mod tests {
         // 6 losing (SL hit)
         for i in 0..6 {
             t.record_skipped(
-                &format!("COIN{}USDT", i), "long", 100.0, 0.5, "test", "guardian", "strat",
+                &format!("COIN{}USDT", i),
+                "long",
+                100.0,
+                0.5,
+                "test",
+                "guardian",
+                "strat",
                 BASE_TS + (1 + i as u64) * 1000,
             );
         }
@@ -668,7 +693,13 @@ mod tests {
         // Only 3 profitable (< MIN_SAMPLES_PER_DIRECTION = 5)
         for i in 0..3 {
             t.record_skipped(
-                "BTCUSDT", "long", 100.0, 0.8, "test", "guardian", "strat",
+                "BTCUSDT",
+                "long",
+                100.0,
+                0.8,
+                "test",
+                "guardian",
+                "strat",
                 BASE_TS + i * 1000,
             );
         }
@@ -692,7 +723,16 @@ mod tests {
         assert!(t.cached_summary.is_some());
 
         // Record new → cache invalidated
-        t.record_skipped("XRPUSDT", "short", 0.5, 0.6, "test", "h0", "rsi", BASE_TS + 10_000);
+        t.record_skipped(
+            "XRPUSDT",
+            "short",
+            0.5,
+            0.6,
+            "test",
+            "h0",
+            "rsi",
+            BASE_TS + 10_000,
+        );
         assert!(t.cached_summary.is_none());
     }
 
@@ -751,7 +791,14 @@ mod tests {
         let mut t = OpportunityTracker::new();
         let long_reason = "a".repeat(200);
         t.record_skipped(
-            "BTCUSDT", "long", 65000.0, 0.7, &long_reason, "guardian", "strat", BASE_TS,
+            "BTCUSDT",
+            "long",
+            65000.0,
+            0.7,
+            &long_reason,
+            "guardian",
+            "strat",
+            BASE_TS,
         );
         assert!(t.active[0].skip_reason.len() <= 80);
     }
@@ -764,7 +811,13 @@ mod tests {
         let symbols = ["AAUSDT", "BBUSDT", "CCUSDT"];
         for (i, sym) in symbols.iter().enumerate() {
             t.record_skipped(
-                sym, "long", 100.0, 0.7, "test", "guardian", "strat",
+                sym,
+                "long",
+                100.0,
+                0.7,
+                "test",
+                "guardian",
+                "strat",
                 BASE_TS + i as u64 * 1000,
             );
         }

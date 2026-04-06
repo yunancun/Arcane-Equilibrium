@@ -200,14 +200,25 @@ impl H0Gate {
     /// Override eligibility for a specific symbol.
     /// 覆蓋特定符號的准入狀態。
     pub fn set_symbol_eligibility(&mut self, symbol: &str, eligible: bool) {
-        self.symbol_eligibility
-            .insert(symbol.to_string(), eligible);
+        self.symbol_eligibility.insert(symbol.to_string(), eligible);
     }
 
     /// Toggle shadow observation mode at runtime.
     /// 運行時切換影子觀察模式。
+    /// SEC-02: emit an audit log on transition so remote toggles are traceable.
+    /// SEC-02：切換時寫入審計日誌，使遠程切換可追溯。
     pub fn set_shadow_mode(&mut self, enabled: bool) {
+        let prev = self.config.shadow_mode;
         self.config.shadow_mode = enabled;
+        if prev != enabled {
+            tracing::warn!(
+                target: "security_audit",
+                event = "h0_gate.shadow_mode_toggle",
+                previous = prev,
+                new = enabled,
+                "SEC-02: H0Gate shadow_mode toggled / H0Gate 影子模式切換"
+            );
+        }
     }
 
     /// Read-only access to accumulated statistics.
@@ -478,7 +489,9 @@ impl H0Gate {
         check_name: &str,
         start: Instant,
     ) -> H0CheckResult {
-        let latency_us = start.elapsed().as_micros() as u32;
+        // SEC-13: saturating cast to avoid u32 truncation at >~4.29s stalls.
+        // SEC-13：使用飽和轉換避免 >~4.29s 停頓時 u32 截斷。
+        let latency_us = start.elapsed().as_micros().min(u32::MAX as u128) as u32;
         self.stats.total_latency_us += latency_us as u64;
         if (latency_us as u64) > self.stats.max_latency_us {
             self.stats.max_latency_us = latency_us as u64;
@@ -499,7 +512,9 @@ impl H0Gate {
         check_name: &str,
         start: Instant,
     ) -> H0CheckResult {
-        let latency_us = start.elapsed().as_micros() as u32;
+        // SEC-13: saturating cast to avoid u32 truncation at >~4.29s stalls.
+        // SEC-13：使用飽和轉換避免 >~4.29s 停頓時 u32 截斷。
+        let latency_us = start.elapsed().as_micros().min(u32::MAX as u128) as u32;
         self.stats.total_latency_us += latency_us as u64;
         if (latency_us as u64) > self.stats.max_latency_us {
             self.stats.max_latency_us = latency_us as u64;

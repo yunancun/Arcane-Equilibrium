@@ -60,11 +60,7 @@ impl PaperOrderStatus {
 
 /// Check if a limit order should fill at the given market price.
 /// 檢查限價單在給定市場價格下是否應該成交。
-pub fn should_fill_limit_order(
-    side: &str,
-    limit_price: f64,
-    market_price: f64,
-) -> bool {
+pub fn should_fill_limit_order(side: &str, limit_price: f64, market_price: f64) -> bool {
     match side {
         "Buy" => market_price <= limit_price,
         "Sell" => market_price >= limit_price,
@@ -105,23 +101,42 @@ pub struct MatchResult {
 pub fn try_match(order: &PaperOrder, market_price: f64, turnover_24h: f64) -> MatchResult {
     let remaining = order.qty - order.filled_qty;
     if remaining <= 0.0 || order.status.is_terminal() {
-        return MatchResult { filled: false, fill_result: None, remaining_qty: 0.0 };
+        return MatchResult {
+            filled: false,
+            fill_result: None,
+            remaining_qty: 0.0,
+        };
     }
 
     match order.order_type.as_str() {
         "market" => {
             let is_buy = order.side == "Buy";
-            let fill = execution::execute_market_fill(market_price, remaining, is_buy, turnover_24h);
-            MatchResult { filled: true, fill_result: Some(fill), remaining_qty: 0.0 }
+            let fill =
+                execution::execute_market_fill(market_price, remaining, is_buy, turnover_24h);
+            MatchResult {
+                filled: true,
+                fill_result: Some(fill),
+                remaining_qty: 0.0,
+            }
         }
         "limit" => {
             let limit_price = match order.limit_price {
                 Some(p) => p,
-                None => return MatchResult { filled: false, fill_result: None, remaining_qty: remaining },
+                None => {
+                    return MatchResult {
+                        filled: false,
+                        fill_result: None,
+                        remaining_qty: remaining,
+                    }
+                }
             };
 
             if !should_fill_limit_order(&order.side, limit_price, market_price) {
-                return MatchResult { filled: false, fill_result: None, remaining_qty: remaining };
+                return MatchResult {
+                    filled: false,
+                    fill_result: None,
+                    remaining_qty: remaining,
+                };
             }
 
             let fill_pct = compute_partial_fill_pct(limit_price, market_price);
@@ -136,9 +151,17 @@ pub fn try_match(order: &PaperOrder, market_price: f64, turnover_24h: f64) -> Ma
 
             let fill = execution::execute_limit_fill(limit_price, actual_fill_qty);
             let new_remaining = remaining - actual_fill_qty;
-            MatchResult { filled: true, fill_result: Some(fill), remaining_qty: new_remaining.max(0.0) }
+            MatchResult {
+                filled: true,
+                fill_result: Some(fill),
+                remaining_qty: new_remaining.max(0.0),
+            }
         }
-        _ => MatchResult { filled: false, fill_result: None, remaining_qty: remaining },
+        _ => MatchResult {
+            filled: false,
+            fill_result: None,
+            remaining_qty: remaining,
+        },
     }
 }
 
@@ -152,27 +175,45 @@ mod tests {
 
     fn buy_limit(qty: f64, limit: f64) -> PaperOrder {
         PaperOrder {
-            order_id: "test".into(), symbol: "BTCUSDT".into(), side: "Buy".into(),
-            order_type: "limit".into(), qty, limit_price: Some(limit),
-            filled_qty: 0.0, avg_fill_price: 0.0, status: PaperOrderStatus::Working,
+            order_id: "test".into(),
+            symbol: "BTCUSDT".into(),
+            side: "Buy".into(),
+            order_type: "limit".into(),
+            qty,
+            limit_price: Some(limit),
+            filled_qty: 0.0,
+            avg_fill_price: 0.0,
+            status: PaperOrderStatus::Working,
             created_at_ms: 0,
         }
     }
 
     fn sell_limit(qty: f64, limit: f64) -> PaperOrder {
         PaperOrder {
-            order_id: "test".into(), symbol: "BTCUSDT".into(), side: "Sell".into(),
-            order_type: "limit".into(), qty, limit_price: Some(limit),
-            filled_qty: 0.0, avg_fill_price: 0.0, status: PaperOrderStatus::Working,
+            order_id: "test".into(),
+            symbol: "BTCUSDT".into(),
+            side: "Sell".into(),
+            order_type: "limit".into(),
+            qty,
+            limit_price: Some(limit),
+            filled_qty: 0.0,
+            avg_fill_price: 0.0,
+            status: PaperOrderStatus::Working,
             created_at_ms: 0,
         }
     }
 
     fn market_buy(qty: f64) -> PaperOrder {
         PaperOrder {
-            order_id: "test".into(), symbol: "BTCUSDT".into(), side: "Buy".into(),
-            order_type: "market".into(), qty, limit_price: None,
-            filled_qty: 0.0, avg_fill_price: 0.0, status: PaperOrderStatus::Working,
+            order_id: "test".into(),
+            symbol: "BTCUSDT".into(),
+            side: "Buy".into(),
+            order_type: "market".into(),
+            qty,
+            limit_price: None,
+            filled_qty: 0.0,
+            avg_fill_price: 0.0,
+            status: PaperOrderStatus::Working,
             created_at_ms: 0,
         }
     }
@@ -260,8 +301,8 @@ mod tests {
         // But if remaining after fill is < 1% of original (0.01), fill all
         let order = buy_limit(0.02, 50000.0); // tiny order
         let result = try_match(&order, 49990.0, 1e9); // shallow cross → 50%
-        // 50% of 0.02 = 0.01, remaining = 0.01, which is exactly 50% of 0.02
-        // remaining (0.01) >= 0.02 * 0.01 (0.0002) → partial, not full
+                                                      // 50% of 0.02 = 0.01, remaining = 0.01, which is exactly 50% of 0.02
+                                                      // remaining (0.01) >= 0.02 * 0.01 (0.0002) → partial, not full
         assert!(result.filled);
     }
 }

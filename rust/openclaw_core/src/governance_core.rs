@@ -195,32 +195,59 @@ impl GovernanceCore {
         let t = &self.risk.thresholds;
         let mut target = RiskLevel::Normal;
 
-        if pressure >= t.pressure_circuit_breaker { target = target.max(RiskLevel::CircuitBreaker); }
-        else if pressure >= t.pressure_defensive { target = target.max(RiskLevel::Defensive); }
-        else if pressure >= t.pressure_reduced { target = target.max(RiskLevel::Reduced); }
-        else if pressure >= t.pressure_cautious { target = target.max(RiskLevel::Cautious); }
+        if pressure >= t.pressure_circuit_breaker {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if pressure >= t.pressure_defensive {
+            target = target.max(RiskLevel::Defensive);
+        } else if pressure >= t.pressure_reduced {
+            target = target.max(RiskLevel::Reduced);
+        } else if pressure >= t.pressure_cautious {
+            target = target.max(RiskLevel::Cautious);
+        }
 
-        if drawdown_pct >= t.drawdown_circuit_breaker_pct { target = target.max(RiskLevel::CircuitBreaker); }
-        else if drawdown_pct >= t.drawdown_defensive_pct { target = target.max(RiskLevel::Defensive); }
-        else if drawdown_pct >= t.drawdown_reduced_pct { target = target.max(RiskLevel::Reduced); }
-        else if drawdown_pct >= t.drawdown_cautious_pct { target = target.max(RiskLevel::Cautious); }
+        if drawdown_pct >= t.drawdown_circuit_breaker_pct {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if drawdown_pct >= t.drawdown_defensive_pct {
+            target = target.max(RiskLevel::Defensive);
+        } else if drawdown_pct >= t.drawdown_reduced_pct {
+            target = target.max(RiskLevel::Reduced);
+        } else if drawdown_pct >= t.drawdown_cautious_pct {
+            target = target.max(RiskLevel::Cautious);
+        }
 
-        if daily_loss_pct >= t.daily_loss_circuit_breaker_pct { target = target.max(RiskLevel::CircuitBreaker); }
-        else if daily_loss_pct >= t.daily_loss_reduced_pct { target = target.max(RiskLevel::Reduced); }
-        else if daily_loss_pct >= t.daily_loss_cautious_pct { target = target.max(RiskLevel::Cautious); }
+        if daily_loss_pct >= t.daily_loss_circuit_breaker_pct {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if daily_loss_pct >= t.daily_loss_reduced_pct {
+            target = target.max(RiskLevel::Reduced);
+        } else if daily_loss_pct >= t.daily_loss_cautious_pct {
+            target = target.max(RiskLevel::Cautious);
+        }
 
-        if consecutive_losses >= t.consecutive_loss_circuit_breaker { target = target.max(RiskLevel::CircuitBreaker); }
-        else if consecutive_losses >= t.consecutive_loss_reduced { target = target.max(RiskLevel::Reduced); }
-        else if consecutive_losses >= t.consecutive_loss_cautious { target = target.max(RiskLevel::Cautious); }
+        if consecutive_losses >= t.consecutive_loss_circuit_breaker {
+            target = target.max(RiskLevel::CircuitBreaker);
+        } else if consecutive_losses >= t.consecutive_loss_reduced {
+            target = target.max(RiskLevel::Reduced);
+        } else if consecutive_losses >= t.consecutive_loss_cautious {
+            target = target.max(RiskLevel::Cautious);
+        }
 
-        if session_halted { target = target.max(RiskLevel::CircuitBreaker); }
-        if cooldown_active { target = target.max(RiskLevel::Reduced); }
+        if session_halted {
+            target = target.max(RiskLevel::CircuitBreaker);
+        }
+        if cooldown_active {
+            target = target.max(RiskLevel::Reduced);
+        }
 
         if target > current {
-            let event = if drawdown_pct >= t.drawdown_defensive_pct { RiskEvent::DrawdownCritical }
-                else if daily_loss_pct >= t.daily_loss_reduced_pct { RiskEvent::DailyLossBreach }
-                else if consecutive_losses >= t.consecutive_loss_reduced { RiskEvent::ConsecutiveLosses }
-                else { RiskEvent::DrawdownWarning };
+            let event = if drawdown_pct >= t.drawdown_defensive_pct {
+                RiskEvent::DrawdownCritical
+            } else if daily_loss_pct >= t.daily_loss_reduced_pct {
+                RiskEvent::DailyLossBreach
+            } else if consecutive_losses >= t.consecutive_loss_reduced {
+                RiskEvent::ConsecutiveLosses
+            } else {
+                RiskEvent::DrawdownWarning
+            };
             Some(self.execute_risk_cascade(target, event, "auto_eval_cascade"))
         } else {
             None
@@ -237,7 +264,8 @@ impl GovernanceCore {
             ttl_ms,
         );
         self.auth.submit_for_approval(idx)?;
-        self.auth.approve(idx, "system_paper_auto", "paper mode auto-approved")?;
+        self.auth
+            .approve(idx, "system_paper_auto", "paper mode auto-approved")?;
         self.update_mode();
         Ok(idx)
     }
@@ -287,7 +315,6 @@ impl GovernanceCore {
         // Direct state restore — bypasses transition rules for rollback
         self.risk.level = level;
     }
-
 }
 
 impl Default for GovernanceCore {
@@ -341,7 +368,9 @@ mod tests {
     fn test_risk_cascade_reduced_restricts_auth() {
         let mut core = make_authorized_core();
         let result = core.execute_risk_cascade(
-            RiskLevel::Reduced, RiskEvent::DrawdownWarning, "high drawdown",
+            RiskLevel::Reduced,
+            RiskEvent::DrawdownWarning,
+            "high drawdown",
         );
         assert!(result.success);
         assert!(result.auth_restricted);
@@ -363,7 +392,9 @@ mod tests {
         core.lease.activate(lease_idx).unwrap();
 
         let result = core.execute_risk_cascade(
-            RiskLevel::CircuitBreaker, RiskEvent::IncidentTriggered, "severe",
+            RiskLevel::CircuitBreaker,
+            RiskEvent::IncidentTriggered,
+            "severe",
         );
         assert!(result.success);
         assert!(result.auth_frozen);
@@ -405,7 +436,9 @@ mod tests {
     fn test_check_expiry() {
         let mut core = GovernanceCore::new();
         // Create auth with expired time
-        let idx = core.auth.create_draft("test", serde_json::json!({}), "op", Some(1));
+        let idx = core
+            .auth
+            .create_draft("test", serde_json::json!({}), "op", Some(1));
         core.auth.submit_for_approval(idx).unwrap();
         core.auth.approve(idx, "admin", "ok").unwrap();
 
@@ -434,7 +467,11 @@ mod tests {
         core.execute_risk_cascade(RiskLevel::Reduced, RiskEvent::DrawdownWarning, "test");
         assert_eq!(core.mode(), GovernanceMode::Restricted);
 
-        core.execute_risk_cascade(RiskLevel::CircuitBreaker, RiskEvent::IncidentTriggered, "test");
+        core.execute_risk_cascade(
+            RiskLevel::CircuitBreaker,
+            RiskEvent::IncidentTriggered,
+            "test",
+        );
         assert_eq!(core.mode(), GovernanceMode::Frozen);
     }
 
@@ -450,7 +487,9 @@ mod tests {
         assert_eq!(core.lease.get_live().len(), 3);
 
         let result = core.execute_risk_cascade(
-            RiskLevel::CircuitBreaker, RiskEvent::IncidentTriggered, "severe",
+            RiskLevel::CircuitBreaker,
+            RiskEvent::IncidentTriggered,
+            "severe",
         );
         assert!(result.success);
         assert_eq!(result.leases_revoked, 3);
@@ -463,7 +502,8 @@ mod tests {
         core.execute_risk_cascade(RiskLevel::Reduced, RiskEvent::DrawdownWarning, "test");
 
         // Second cascade at same level should be no-op (risk transition returns Ok for same level)
-        let result = core.execute_risk_cascade(RiskLevel::Reduced, RiskEvent::DrawdownWarning, "test");
+        let result =
+            core.execute_risk_cascade(RiskLevel::Reduced, RiskEvent::DrawdownWarning, "test");
         // Risk escalate_to at same level → no-op, but we escalate, so this should fail gracefully
         // Actually the risk SM returns Ok(()) for same level, so escalate_to won't fail
         // but the cascade logic checks to_level... let me verify

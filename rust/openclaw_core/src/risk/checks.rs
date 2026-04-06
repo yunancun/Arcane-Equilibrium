@@ -281,7 +281,11 @@ mod tests {
     fn test_order_reducing_always_passes() {
         let cfg = default_config();
         let res = check_order_allowed(100.0, 50.0, 1000.0, 95.0, 70.0, 50.0, 10.0, true, &cfg);
-        assert!(res.allowed, "reducing order must always pass: {}", res.reason);
+        assert!(
+            res.allowed,
+            "reducing order must always pass: {}",
+            res.reason
+        );
     }
 
     #[test]
@@ -346,7 +350,18 @@ mod tests {
     fn test_tick_hard_stop() {
         let cfg = default_config();
         let action = check_position_on_tick(
-            -5.0, 0.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            -5.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
     }
@@ -356,7 +371,18 @@ mod tests {
         let cfg = default_config();
         // pnl = -4.0% should trigger dynamic stop (base = 5.0*0.6=3.0, with ATR and offset)
         let action = check_position_on_tick(
-            -4.0, 0.0, 1.0, 0.0, "trending", Some(2.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            -4.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(2.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
@@ -369,7 +395,18 @@ mod tests {
     fn test_tick_take_profit_disabled() {
         let cfg = default_config(); // tp_enabled = false
         let action = check_position_on_tick(
-            25.0, 25.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            25.0,
+            25.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
@@ -384,7 +421,18 @@ mod tests {
         cfg.max_take_profit_pct = 10.0;
         // trending TP mult = 1.5 -> target = 15%
         let action = check_position_on_tick(
-            16.0, 16.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            16.0,
+            16.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")));
     }
@@ -392,9 +440,20 @@ mod tests {
     #[test]
     fn test_tick_trailing_stop() {
         let cfg = default_config(); // trailing enabled, activation=1.0%, distance=0.8%
-        // peak=3.0%, current=2.0% -> drawdown=1.0% > distance=0.8%
+                                    // peak=3.0%, current=2.0% -> drawdown=1.0% > distance=0.8%
         let action = check_position_on_tick(
-            2.0, 3.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            2.0,
+            3.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING")));
     }
@@ -402,9 +461,20 @@ mod tests {
     #[test]
     fn test_tick_trailing_stop_not_activated() {
         let cfg = default_config(); // activation=1.0%
-        // peak=0.5% < activation threshold -> trailing stop should NOT trigger
+                                    // peak=0.5% < activation threshold -> trailing stop should NOT trigger
         let action = check_position_on_tick(
-            0.1, 0.5, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            0.1,
+            0.5,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING")),
@@ -415,9 +485,20 @@ mod tests {
     #[test]
     fn test_tick_time_stop() {
         let cfg = default_config(); // max_holding_hours=72.0
-        // trending time mult = 1.5 -> limit = 108h
+                                    // trending time mult = 1.5 -> limit = 108h
         let action = check_position_on_tick(
-            1.0, 1.0, 110.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            1.0,
+            1.0,
+            110.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TIME STOP")));
     }
@@ -426,7 +507,18 @@ mod tests {
     fn test_tick_cost_edge_ratio() {
         let cfg = default_config(); // max_cost_edge_ratio=0.8
         let action = check_position_on_tick(
-            0.5, 0.5, 1.0, 0.85, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            0.5,
+            0.5,
+            1.0,
+            0.85,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")));
     }
@@ -436,7 +528,18 @@ mod tests {
         let cfg = default_config();
         // cost_ratio high BUT pnl negative -> should NOT trigger cost edge
         let action = check_position_on_tick(
-            -0.5, 0.0, 1.0, 0.9, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            -0.5,
+            0.0,
+            1.0,
+            0.9,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(
             !matches!(action, RiskAction::ClosePosition(ref r) if r.contains("COST EDGE")),
@@ -448,7 +551,18 @@ mod tests {
     fn test_tick_session_drawdown() {
         let cfg = default_config(); // max_session_drawdown=15.0%
         let action = check_position_on_tick(
-            0.0, 0.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 15.0, &cfg,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            15.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::HaltSession(_)));
     }
@@ -457,7 +571,18 @@ mod tests {
     fn test_tick_consecutive_losses_cooldown() {
         let cfg = default_config(); // cooldown_count=3, cooldown_minutes=30
         let action = check_position_on_tick(
-            0.0, 0.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 3, 0.0, 0.0, &cfg,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            3,
+            0.0,
+            0.0,
+            &cfg,
         );
         match action {
             RiskAction::SetCooldown(ms) => {
@@ -471,7 +596,18 @@ mod tests {
     fn test_tick_daily_loss_halt() {
         let cfg = default_config(); // max_daily_loss=5.0%
         let action = check_position_on_tick(
-            0.0, 0.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 5.0, 0.0, &cfg,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            5.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::HaltSession(ref r) if r.contains("DAILY LOSS")));
     }
@@ -480,7 +616,18 @@ mod tests {
     fn test_tick_hold_all_ok() {
         let cfg = default_config();
         let action = check_position_on_tick(
-            0.5, 0.8, 2.0, 0.3, "trending", Some(1.0), "BTCUSDT", 1000, 0, 1.0, 5.0, &cfg,
+            0.5,
+            0.8,
+            2.0,
+            0.3,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            1.0,
+            5.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::Hold));
     }
@@ -492,7 +639,18 @@ mod tests {
         // pnl = -5.0 triggers BOTH hard stop and trailing (peak=3, current=-5, drawdown=8)
         // Hard stop should win (higher priority)
         let action = check_position_on_tick(
-            -5.0, 3.0, 1.0, 0.0, "trending", Some(1.0), "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+            -5.0,
+            3.0,
+            1.0,
+            0.0,
+            "trending",
+            Some(1.0),
+            "BTCUSDT",
+            1000,
+            0,
+            0.0,
+            0.0,
+            &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
     }

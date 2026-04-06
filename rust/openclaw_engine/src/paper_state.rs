@@ -66,29 +66,67 @@ impl PaperState {
         self.balance
     }
 
+    // SEC-18: Clamp risk-parameter setters so a hostile/buggy IPC caller cannot
+    // disable stops, zero-out timeouts, or invert signs. Values outside the sane
+    // operating envelope are silently coerced to the nearest bound.
+    // SEC-18：對風控參數 setter 加上邊界，避免 IPC 惡意/錯誤調用關閉止損或倒轉符號。
+    // 超出安全運行區間的值會被靜默夾到最近的邊界。
+
     /// Set hard stop loss percentage. / 設定硬止損百分比。
     pub fn set_hard_stop_pct(&mut self, pct: f64) {
-        self.stop_config.hard_stop_pct = pct;
+        // Allow between 0.5% (very tight) and 50% (very loose). Reject NaN.
+        let v = if pct.is_finite() {
+            pct.clamp(0.5, 50.0)
+        } else {
+            2.0
+        };
+        self.stop_config.hard_stop_pct = v;
     }
 
     /// Set trailing stop percentage (None = disabled). / 設定跟蹤止損百分比。
     pub fn set_trailing_stop_pct(&mut self, pct: Option<f64>) {
-        self.stop_config.trailing_stop_pct = pct;
+        self.stop_config.trailing_stop_pct = pct.and_then(|v| {
+            if v.is_finite() {
+                Some(v.clamp(0.1, 50.0))
+            } else {
+                None
+            }
+        });
     }
 
     /// Set time stop hours (None = disabled). / 設定超時止損小時數。
     pub fn set_time_stop_hours(&mut self, hours: Option<f64>) {
-        self.stop_config.time_stop_hours = hours;
+        self.stop_config.time_stop_hours = hours.and_then(|v| {
+            if v.is_finite() {
+                // Minimum 0.25h (15min) to avoid "instant timeout" weaponisation.
+                Some(v.clamp(0.25, 720.0))
+            } else {
+                None
+            }
+        });
     }
 
     /// Set ATR multiplier (None = disabled). / 設定 ATR 乘數。
     pub fn set_atr_multiplier(&mut self, mult: Option<f64>) {
-        self.stop_config.atr_multiplier = mult;
+        self.stop_config.atr_multiplier = mult.and_then(|v| {
+            if v.is_finite() {
+                Some(v.clamp(0.1, 20.0))
+            } else {
+                None
+            }
+        });
     }
 
     /// Set take profit percentage (None = disabled). / 設定止盈百分比。
     pub fn set_take_profit_pct(&mut self, pct: Option<f64>) {
-        self.stop_config.take_profit_pct = pct;
+        self.stop_config.take_profit_pct = pct.and_then(|v| {
+            if v.is_finite() {
+                // Minimum 0.1% so "instant take profit" cannot be triggered.
+                Some(v.clamp(0.1, 1000.0))
+            } else {
+                None
+            }
+        });
     }
 
     /// Get current stop config reference. / 獲取當前止損配置引用。

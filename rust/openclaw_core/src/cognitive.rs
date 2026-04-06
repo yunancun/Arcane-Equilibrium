@@ -209,11 +209,7 @@ impl CognitiveModulator {
     /// 計算原始信心下限目標值。
     ///
     /// \[Q1\] max single-factor, \[R1-5\] ignore negative adjustments during loss streak.
-    fn compute_confidence_floor(
-        consec_losses: u32,
-        weekly_pnl: f64,
-        rd: &RegretInput,
-    ) -> f64 {
+    fn compute_confidence_floor(consec_losses: u32, weekly_pnl: f64, rd: &RegretInput) -> f64 {
         let mut pos: Vec<f64> = Vec::new();
         let mut neg: Vec<f64> = Vec::new();
 
@@ -403,7 +399,10 @@ mod tests {
         // With 4 losses: pos factor = 0.02 * min(4-2,5) = 0.04
         // neg factor = 0 (R1-5 ignores), target = 0.64
         // EMA: 0.3*0.64 + 0.7*0.60 = 0.612
-        assert!(out.confidence_floor > 0.6, "R1-5: confidence must rise on streak");
+        assert!(
+            out.confidence_floor > 0.6,
+            "R1-5: confidence must rise on streak"
+        );
     }
 
     #[test]
@@ -418,7 +417,10 @@ mod tests {
         let dd = DreamInput::default();
         let out = m.update(0, 0.0, &rd, &dd);
         // target = 0.60 - 0.03 = 0.57, EMA: 0.3*0.57 + 0.7*0.60 = 0.591
-        assert!(out.confidence_floor < 0.6, "undertrading should lower floor");
+        assert!(
+            out.confidence_floor < 0.6,
+            "undertrading should lower floor"
+        );
     }
 
     #[test]
