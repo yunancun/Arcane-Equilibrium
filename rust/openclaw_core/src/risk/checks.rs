@@ -178,13 +178,16 @@ pub fn check_position_on_tick(
 
     // 2. Dynamic stop — ATR-adaptive with anti-cluster offset
     //    動態止損 — ATR 自適應 + 反聚集偏移
+    // PNL-7: dynamic_stop_base_ratio + dynamic_stop_cap_ratio now configurable.
+    // PNL-7：base/cap 比例已從寫死的 0.6/0.8 提取為配置。
     let dyn_stop = compute_dynamic_stop_pct(
-        config.max_stop_loss_pct * 0.6, // base = 60% of hard stop / 基礎 = 硬止損的 60%
+        config.max_stop_loss_pct * config.dynamic_stop_base_ratio,
         atr_pct,
         symbol,
         entry_ts_ms,
         regime,
         config.max_stop_loss_pct,
+        config.dynamic_stop_cap_ratio,
     );
     if pnl_pct <= -dyn_stop {
         return RiskAction::ClosePosition(format!(
@@ -213,7 +216,8 @@ pub fn check_position_on_tick(
     // PNL-6：強制 RR 下限 — 鎖定盈利必須 ≥ dynamic stop 的一半，避免贏 0.2%/輸 3% 倒掛。
     if config.trailing_stop_enabled && peak_pnl_pct >= config.trailing_stop_activation_pct {
         let drawdown_from_peak = peak_pnl_pct - pnl_pct;
-        let min_locked_profit = dyn_stop * 0.5;
+        // PNL-7: trailing_min_rr_ratio configurable (was hardcoded 0.5)
+        let min_locked_profit = dyn_stop * config.trailing_min_rr_ratio;
         if drawdown_from_peak >= config.trailing_stop_distance_pct
             && pnl_pct >= min_locked_profit
         {

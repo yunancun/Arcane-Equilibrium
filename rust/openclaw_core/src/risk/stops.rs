@@ -45,10 +45,12 @@ pub fn compute_dynamic_stop_pct(
     entry_ts_ms: u64,
     regime: &str,
     hard_stop_pct: f64,
+    cap_ratio: f64,
 ) -> f64 {
     let rm = regime_multipliers(regime);
     let base = base_stop_pct * rm.stop;
-    let cap = hard_stop_pct * 0.8; // 80% of hard stop — leave headroom / 硬止損的 80%
+    // PNL-7: cap ratio configurable (was hardcoded 0.8) / PNL-7：上限比例可配置
+    let cap = hard_stop_pct * cap_ratio;
 
     let effective = match atr_pct {
         Some(atr) => {
@@ -101,7 +103,7 @@ mod tests {
     #[test]
     fn test_dynamic_stop_no_atr() {
         // No ATR → use base × regime / 無 ATR → 使用基礎 × regime
-        let stop = compute_dynamic_stop_pct(2.0, None, "BTCUSDT", 1000, "trending", 5.0);
+        let stop = compute_dynamic_stop_pct(2.0, None, "BTCUSDT", 1000, "trending", 5.0, 0.8);
         // trending stop mult = 1.0, base = 2.0
         // With anti-cluster offset, result should be near 2.0
         assert!(stop > 1.5 && stop < 2.5, "stop={stop}, expected ~2.0");
@@ -112,7 +114,7 @@ mod tests {
         // ATR = 3.0%, base = 1.5%, cap = 5.0 * 0.8 = 4.0
         // atr_stop = 3.0 * 1.5 = 4.5, capped to 4.0
         // effective = max(1.5, 4.0) = 4.0
-        let stop = compute_dynamic_stop_pct(1.5, Some(3.0), "BTCUSDT", 1000, "trending", 5.0);
+        let stop = compute_dynamic_stop_pct(1.5, Some(3.0), "BTCUSDT", 1000, "trending", 5.0, 0.8);
         // With anti-cluster offset, result should be near 4.0
         assert!(stop > 3.0 && stop < 5.0, "stop={stop}, expected ~4.0");
     }
@@ -120,14 +122,14 @@ mod tests {
     #[test]
     fn test_dynamic_stop_volatile_regime() {
         // volatile stop mult = 1.5, base = 2.0 → 3.0
-        let stop = compute_dynamic_stop_pct(2.0, None, "BTCUSDT", 1000, "volatile", 5.0);
+        let stop = compute_dynamic_stop_pct(2.0, None, "BTCUSDT", 1000, "volatile", 5.0, 0.8);
         assert!(stop > 2.0 && stop < 4.0, "stop={stop}, expected ~3.0");
     }
 
     #[test]
     fn test_dynamic_stop_floor() {
         // Very small base + squeeze regime (0.6×) should still be >= 0.1
-        let stop = compute_dynamic_stop_pct(0.05, None, "BTCUSDT", 1000, "squeeze", 5.0);
+        let stop = compute_dynamic_stop_pct(0.05, None, "BTCUSDT", 1000, "squeeze", 5.0, 0.8);
         assert!(stop >= 0.1, "stop={stop} must be >= 0.1");
     }
 
@@ -135,7 +137,7 @@ mod tests {
     fn test_dynamic_stop_atr_below_base() {
         // ATR very low → atr_stop < base → use base
         // base=3.0, atr=0.5 → atr_stop=0.75, effective=max(3.0, 0.75)=3.0
-        let stop = compute_dynamic_stop_pct(3.0, Some(0.5), "BTCUSDT", 1000, "trending", 5.0);
+        let stop = compute_dynamic_stop_pct(3.0, Some(0.5), "BTCUSDT", 1000, "trending", 5.0, 0.8);
         assert!(stop > 2.0 && stop < 4.0, "stop={stop}, expected ~3.0");
     }
 }
