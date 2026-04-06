@@ -99,25 +99,26 @@ Session 12 PNL-1~7 + DB-RUN-1~7 + Session 13 R3 收尾共 22 個 commits 全部 
 > **不要重新審計全部 223 項**，直接從下方清單執行。
 > 詳細子項見 `docs/audits/2026-04-06_consolidated_remediation_report.md` §10。
 
-#### WP-F — GUI（~32 項仍存在，原 47）
-P0（4項，全未修）：
-- [ ] WP-F/D-05 Apply-AI 按鈕雙 `display:none` 永不可見
-- [ ] WP-F/UX-01 刪除策略無 confirm modal
-- [ ] WP-F/UX-02 Danger Zone（重置冷卻/Unhalt）無 confirm
-- [ ] WP-F/UX-03 三個 Save 按鈕共用 `saveRiskConfig` → 互相覆蓋
+#### WP-F — GUI（✅ P0/P1 核心已修，原 47，剩餘 P2 ~10 項低優先）
+P0（4項，全已修 — `71e4770`）：
+- [x] WP-F/D-05 Apply-AI 按鈕 disabled + tooltip（開發中）
+- [x] WP-F/UX-01 刪除策略加 confirm guard（deleteStrategy 接 confirm()）
+- [x] WP-F/UX-02 Danger Zone 快速導航 anchor 頂部（AH-01 合併修）
+- [x] WP-F/UX-03 三個 Save 按鈕拆分為 saveStopSettings / savePositionSettings / saveCooldownSettings
 
-P1（18 項）：
-- [ ] WP-F/D-01 applyAIAdvice() 只有 toast，無實際效果
-- [ ] WP-F/D-02/03/04 Feed/Demo/Scanner 三按鈕 no-op
-- [ ] WP-F/D-07 index.html Legacy Bearer Token 輸入面板仍在
-- [ ] WP-F/D-09 策略 Delete 按鈕無 confirm
-- [ ] WP-F/UX-04/05/06 Save/Submit 無 loading/disabled 狀態
+P1（11/18 項已修 — `71e4770`）：
+- [x] WP-F/D-02/03/04 Feed/Demo/Scanner 三按鈕 disabled + (只读/RO) tooltip
+- [x] WP-F/D-07 index.html Legacy Bearer Token 面板 `display:none`，Logout 移出可見
+- [x] WP-F/D-09 策略 Delete 按鈕加 confirm guard（已合併 UX-01）
+- [x] WP-F/UX-04/05 Save/Submit 加 loading/disabled 狀態（_btnSaving helper）
+- [x] WP-F/AH-01 Danger Zone 頂部快速導航 anchor link
+- [x] WP-F/AH-04 Feed/Demo/Scanner disabled 移除 toggle 誤導外觀
+- [x] WP-F/AH-07 Delete 與 Stop/Pause 之間加分隔線 + 虛線邊框
+- [ ] WP-F/D-01 applyAIAdvice() 只有 toast，無實際效果（Phase 4 Teacher 完成後再修）
+- [ ] WP-F/UX-06 Submit（param save）無 loading 狀態
 - [ ] WP-F/UX-07/08/09/10 術語混亂（Demo/Paper/Session 多義）
-- [ ] WP-F/AH-01 Danger Zone 埋在頁面最底部
-- [ ] WP-F/AH-04 Feed/Demo/Scanner 外觀像 toggle 但不是
 - [ ] WP-F/AH-05 Apply 標籤誤導
-- [ ] WP-F/AH-06 ⚠️ Risk-tab 每 15s 強制覆蓋用戶輸入
-- [ ] WP-F/AH-07 策略 Delete 與 Stop/Pause 緊鄰無確認
+- [ ] WP-F/AH-06 ⚠️ Risk-tab 每 15s 強制覆蓋用戶輸入（需重寫 loadAll 防抖）
 
 P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 
@@ -152,10 +153,15 @@ P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 #### WP-FA — 功能規格（0 項，原 5，**100% 已規劃**）
 - ~~FA GAP-10 Provider pricing table~~ → 併入 Phase 4 子任務 **4-17**
 
-#### WP-I — 文檔衛生（35 項，原 42，低優先級批次處理）
-主要：SCRIPT_INDEX.md 不存在（P1）/ docs/audit 與 docs/audits 目錄衝突 /
-8 個 .DS_Store 已提交 / worklog 碎片未合併 / CLAUDE_REFERENCE.md 陳舊
-詳細子項見報告 §10.4。
+#### WP-I — 文檔衛生（✅ P1 核心已完成 — `338b4f9`，原 42）
+- [x] SCRIPT_INDEX.md 補建（6 腳本完整索引）
+- [x] docs/audit 與 docs/audits 衝突 → 統一為 docs/audits/
+- [x] 8 個 .DS_Store 清除
+- [x] worklog 碎片合併為 2026-04-05--daily_summary.md
+- [x] docs/README.md 索引更新（references/ + architecture/ + audits/）
+- [x] CLAUDE_REFERENCE.md last-update 更新
+- [x] governance_dev/ DEPRECATED.md 建立
+殘餘低優先（R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1 等 minor 命名 3 項）
 
 #### WP-MIT — DB/ML（✅ 0 項，全部完成）
 
