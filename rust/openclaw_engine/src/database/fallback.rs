@@ -130,6 +130,53 @@ mod tests {
         assert!(lines[1].contains("ticker"));
     }
 
+    // ── T-P1-6: failure-rollback / degraded-mode coverage ──
+
+    #[test]
+    fn test_open_new_file_failure_returns_false_no_panic() {
+        // Pointing the dir at a path that cannot be created (under a regular file)
+        // forces open_new_file to return None and write_line should fail gracefully.
+        // 將目錄指向一個無法被當作目錄的路徑，open_new_file 返回 None，write_line 應安全失敗。
+        let tmp = tempfile::tempdir().unwrap();
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, b"not a dir").unwrap();
+        let bad_dir = blocker.join("nested"); // cannot create — parent is a file
+        let mut writer = FallbackWriter::new(&bad_dir);
+        let ok = writer.write_line("{}");
+        assert!(!ok, "write should fail when fallback dir is unusable");
+        assert_eq!(writer.total_lines(), 0);
+    }
+
+    #[test]
+    fn test_total_lines_unchanged_on_open_failure() {
+        // Successive failed writes must not increment counters.
+        // 連續失敗的寫入不應遞增計數器。
+        let tmp = tempfile::tempdir().unwrap();
+        let blocker = tmp.path().join("blocker2");
+        std::fs::write(&blocker, b"x").unwrap();
+        let bad_dir = blocker.join("inside");
+        let mut writer = FallbackWriter::new(&bad_dir);
+        for _ in 0..5 {
+            assert!(!writer.write_line("{}"));
+        }
+        assert_eq!(writer.total_lines(), 0);
+    }
+
+    #[test]
+    fn test_rotate_resets_per_file_counter() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = FallbackWriter::new(dir.path());
+        writer.max_lines_per_file = 2;
+        writer.write_line("{\"i\":1}");
+        writer.write_line("{\"i\":2}");
+        // Third write should rotate; per-file counter resets to 1 after the first
+        // line of the new file. Total counter keeps growing.
+        // 第三次寫入會輪換；新文件的第一行寫入後 per-file 為 1，total 持續增長。
+        writer.write_line("{\"i\":3}");
+        assert_eq!(writer.current_file_lines, 1);
+        assert_eq!(writer.total_lines(), 3);
+    }
+
     #[test]
     fn test_file_rotation() {
         let dir = tempfile::tempdir().unwrap();

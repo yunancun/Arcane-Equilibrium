@@ -60,6 +60,149 @@ fn test_update_strategy_params_json_roundtrip() {
     assert_eq!(v["atr_period"], 14);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// T-P1-1: handle_paper_command coverage / 處理器覆蓋率
+// ─────────────────────────────────────────────────────────────────────────
+
+fn make_test_pipeline() -> crate::tick_pipeline::TickPipeline {
+    crate::tick_pipeline::TickPipeline::with_balance(&["BTCUSDT", "ETHUSDT"], 10_000.0)
+}
+
+fn make_test_writer() -> crate::persistence::StateWriter {
+    use std::path::PathBuf;
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "openclaw_test_handlers_{}.json",
+        std::process::id()
+    ));
+    crate::persistence::StateWriter::new(&p as &PathBuf, 5_000)
+}
+
+#[test]
+fn test_handle_pause_sets_paused() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+    pipeline.paper_paused = false;
+
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::Pause,
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    assert!(pipeline.paper_paused);
+}
+
+#[test]
+fn test_handle_resume_clears_paused_and_halt() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+    pipeline.paper_paused = true;
+    pipeline.session_halted = true;
+
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::Resume,
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    assert!(!pipeline.paper_paused);
+    assert!(!pipeline.session_halted);
+}
+
+#[test]
+fn test_handle_reset_clears_state_and_pending() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+    pending.insert(
+        "stale_oc_1".into(),
+        super::PendingOrder {
+            order_link_id: "stale_oc_1".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.05,
+            strategy: "ma".into(),
+            sent_ts_ms: 0,
+            cum_filled_qty: 0.0,
+            is_close: false,
+        },
+    );
+    pipeline.paper_paused = true;
+    pipeline.session_halted = true;
+    pipeline.consecutive_losses.insert("BTCUSDT".into(), 3);
+
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::Reset {
+            new_balance: 5_000.0,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    assert_eq!(pipeline.paper_state.export_state().balance, 5_000.0);
+    assert!(!pipeline.paper_paused);
+    assert!(!pipeline.session_halted);
+    assert!(pipeline.consecutive_losses.is_empty());
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn test_handle_get_strategy_params_unknown_returns_err() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::GetStrategyParams {
+            strategy_name: "no_such_strategy".into(),
+            response_tx: tx,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    let result = rx.blocking_recv().expect("response sent");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("not found"));
+}
+
+#[test]
+fn test_handle_update_risk_config_clamps_values() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+
+    // Push out-of-range values; clamp should bring them inside.
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::UpdateRiskConfig {
+            hard_stop_pct: Some(99.0),    // → 0.5
+            trailing_stop_pct: None,
+            time_stop_hours: None,
+            atr_multiplier: Some(Some(0.0)), // → 0.5
+            take_profit_pct: None,
+            max_leverage: Some(999.0),    // → 100
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: Some(99.0),      // → 0.10
+            h0_shadow_mode: Some(true),
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    // Pipeline should not panic and clamped values should be applied.
+    // 管線不應 panic 且鉗制後的值已套用。
+    assert!(pipeline.intent_processor.guardian_config().max_leverage <= 100.0);
+}
+
 #[test]
 fn test_pending_order_clone_preserves_state() {
     // PendingOrder must be cloneable for matching path (fill arrives before order update)

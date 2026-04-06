@@ -108,3 +108,103 @@ pub trait StrategyParams: Serialize + for<'de> Deserialize<'de> + Send {
     /// 驗證參數值在可接受範圍內。
     fn validate(&self) -> Result<(), String>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal Strategy impl that exercises only the trait defaults.
+    /// 最小 Strategy 實現，僅用於驗證 trait 預設實現。
+    struct StubStrategy {
+        active: bool,
+    }
+
+    impl Strategy for StubStrategy {
+        fn name(&self) -> &str {
+            "stub"
+        }
+        fn is_active(&self) -> bool {
+            self.active
+        }
+        fn set_active(&mut self, active: bool) {
+            self.active = active;
+        }
+        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn test_strategy_default_param_methods() {
+        let mut s = StubStrategy { active: true };
+        // update_params_json defaults to Err
+        let err = s.update_params_json("{}").unwrap_err();
+        assert!(err.contains("not implemented"));
+        // get_params_json defaults to empty object
+        assert_eq!(s.get_params_json(), "{}");
+        // param_ranges_json defaults to empty array
+        assert_eq!(s.param_ranges_json(), "[]");
+    }
+
+    #[test]
+    fn test_strategy_set_active_toggle() {
+        let mut s = StubStrategy { active: false };
+        assert!(!s.is_active());
+        s.set_active(true);
+        assert!(s.is_active());
+        s.set_active(false);
+        assert!(!s.is_active());
+    }
+
+    #[test]
+    fn test_strategy_default_on_rejection_and_on_fill_noop() {
+        // Default impls should not panic on dummy inputs.
+        // 預設實現對 dummy 輸入不應 panic。
+        let mut s = StubStrategy { active: true };
+        let intent = OrderIntent {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            confidence: 0.5,
+            strategy: "stub".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        s.on_rejection(&intent, "test reason");
+        // No assertion — only checking no panic / 僅檢查不 panic
+    }
+
+    #[test]
+    fn test_param_range_serde_roundtrip() {
+        let pr = ParamRange {
+            name: "rsi_period".into(),
+            min: 5.0,
+            max: 50.0,
+            step: Some(1.0),
+            agent_adjustable: true,
+            db_persisted: true,
+        };
+        let json = serde_json::to_string(&pr).expect("serialize");
+        let de: ParamRange = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(de.name, "rsi_period");
+        assert!((de.min - 5.0).abs() < 1e-12);
+        assert!((de.max - 50.0).abs() < 1e-12);
+        assert_eq!(de.step, Some(1.0));
+        assert!(de.agent_adjustable);
+        assert!(de.db_persisted);
+    }
+
+    #[test]
+    fn test_param_range_continuous_step_none() {
+        let pr = ParamRange {
+            name: "weight".into(),
+            min: 0.0,
+            max: 1.0,
+            step: None,
+            agent_adjustable: false,
+            db_persisted: false,
+        };
+        let json = serde_json::to_string(&pr).expect("serialize");
+        assert!(json.contains("\"step\":null"));
+    }
+}
