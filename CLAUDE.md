@@ -481,4 +481,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-06：engine 471 + core 413 + ml_training 35 + control_api smoke 11 · **Session 13 完整收尾：FA-GAP-2/4/8/9 + SEC-11 + idle writer #3 + I-22 + per-symbol live fees + fills.fee_rate (V008)** · R3 backlog 排除 WP/SEC defer/Phase 4 後全部清空 · 下一步：Phase 4 啟動 (Claude Teacher / LinUCB / News / DL-3) 或 SEC live-prep。
+> 截至 2026-04-06：engine 531 + ml_training 35+ · **Session 14：WP backlog 稽核(223→103) + WP-G/BB/I/F 全清 + GUI no-cache + 風控輸入框回彈修正 + WP-ARCH-RC1 雙風控系統登記 + Phase 4 Wave 0+1 啟動 (4-00/4-01/4-04/4-07/4-11/4-15/4-17 7/22 子任務已交付)** · 下一步：Phase 4 W2 wiring（GovernanceHub veto / IPC handlers / main.rs Arc）或 WP-B SEC-05/08。
