@@ -1,7 +1,7 @@
 # CLAUDE_REFERENCE.md — 參考資料（按需讀取）
 
 > 從 CLAUDE.md 遷出的參考性資料。新 session 不需要自動讀取，僅在涉及對應領域時查閱。
-> 最後更新：2026-04-02
+> 最後更新：2026-04-06
 
 ---
 
@@ -38,21 +38,21 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_le
 
 ## 參考文檔指針（原 §十二）
 
-### 全系統審計報告（audit/March31/）
+### 全系統審計報告（CCAgentWorkSpace — 2026-03-31）
 
 | 文件 | 內容 |
 |------|------|
-| `docs/audit/March31/E3_security_audit_2026-03-31.md` | 安全審計 |
-| `docs/audit/March31/CC_compliance_check_2026-03-31.md` | 合規檢查：B 級 |
-| `docs/audit/March31/E4_testing_report_2026-03-31.md` | 測試評估 |
-| `docs/audit/March31/E5_optimization_report_2026-03-31.md` | 優化評估 |
-| `docs/audit/March31/A3_gui_usability_report_2026-03-31.md` | GUI 可用性 |
-| `docs/audit/March31/PM_review_2026-03-31.md` | PM 整合審核 |
-| `docs/audit/March31/PA_review_2026-03-31.md` | PA 技術復驗 |
+| `docs/CCAgentWorkSpace/E3/workspace/reports/2026-03-31--e3_security_audit.md` | 安全審計 |
+| `docs/CCAgentWorkSpace/CC/workspace/reports/2026-03-31--cc_compliance_check.md` | 合規檢查：B 級 |
+| `docs/CCAgentWorkSpace/E4/workspace/reports/2026-03-31--e4_testing_report.md` | 測試評估 |
+| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-03-31--e5_optimization_report.md` | 優化評估 |
+| `docs/CCAgentWorkSpace/A3/workspace/reports/2026-03-31--a3_gui_usability_report.md` | GUI 可用性 |
+| `docs/CCAgentWorkSpace/PM/workspace/reports/2026-03-31--pm_review.md` | PM 整合審核 |
+| `docs/CCAgentWorkSpace/PA/workspace/reports/2026-03-31--pa_review.md` | PA 技術復驗 |
 
-### April 1 審計（audit/April01/）
+### April 1 審計（CCAgentWorkSpace — 2026-04-01）
 
-10 份審計報告 + PA/PM 整合報告
+10 份審計報告 + PA/PM 整合報告，位於各 Agent 的 `workspace/reports/2026-04-01--*.md`
 
 ### 參考文檔（references/）
 
