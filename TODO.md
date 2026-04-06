@@ -1,5 +1,5 @@
 # OpenClaw TODO — 工作計劃清單
-# 最後更新：2026-04-06（Session 11 · R1 WP-MIT P1-6 收尾 · 431 engine + 35 ml_training + 411 core）
+# 最後更新：2026-04-06（Session 11 · R2 批次完成 · 453 engine + 35 ml_training + 411 core + 11 control_api smoke）
 # 注意：compact 後從此文件恢復工作狀態
 # ★ 排查參考：docs/KNOWN_ISSUES.md（已識別但未驗證的風險，遇到異常時先查）
 # ★ 審計報告：srv/audit_PA_consolidated_remediation_plan.md（63 issues · 11 work packages）
@@ -34,6 +34,13 @@
 - [x] **WP-MIT P1-3** run_training_pipeline.py +3 tests（commit `de6dd82`）
 - [x] **WP-MIT P1-6** drift_detector PG wiring（baselines + online_latest → PSI events，+3 tests，commit `8d5793b`）
 
+### R2 批次 — 已完成（Session 11 · 2026-04-06）
+
+- [x] **PF-1 IPC strategy params**（已存在於 Phase 3b pre-fixes，5 IPC tests · 計劃文件 stale）
+- [x] **Idle writers #1/#2** ob_snapshots + trade_agg_1m producer aggregators（+9 tests，commit `2cf7ebf`）
+- [x] **I-22 完整拆分** event_consumer mod.rs 912 → 785（< 800 警告線，handlers.rs 提取，commit `0519265`）
+- [x] **WP-E4 P1 tests** strategies/mod + handlers + fallback + layer2/ai_service/ipc_client（+13 Rust + 11 Py，commit `957d174`）
+
 ### R1 剩餘 / R2 延後
 
 - [ ] **SEC-01/04/08** 已降級（pre-Session-9c DONE，報告需更新）
@@ -44,8 +51,8 @@
 - [ ] **SEC-21** Cookie secure=True（HTTPS 上線後）
 - [ ] **WP-E4 P1 tests 6 項**（需 fixture harness 設計，自己 sprint）
 - [ ] **FA GAP-2/4/8/9/10**（架構性，Phase 4 範圍）
-- [ ] **Idle writers #1/2/3/5/6** ob_snapshots/trade_agg/liquidations/drift/quality（§11 分批）
-- [ ] **I-22 完整拆分** event_consumer mod.rs 912 → <800（需 loop state 結構化，高風險）
+- [ ] **Idle writers #3/5/6** liquidations（WS topic 毒連線，需手動驗證 V5 `allLiquidation`）/ drift / quality
+- [ ] **WP-E4/T-P1-1 殘餘** event_consumer 完整事件循環整合測試（fixture harness，獨立 sprint）
 
 **Exchange mode go-live blockers**: R0-1, R0-2, R0-5, R1-A, R1-I, R1-J（見整合報告 §6 critical-path）。
 
