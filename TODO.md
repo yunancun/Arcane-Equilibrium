@@ -121,11 +121,7 @@ P1（18 項）：
 
 P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 
-#### WP-G — 硬編碼（4 項仍存在，原 43，**88% 已完成**）
-- [ ] WP-G/HC-K1 kelly_sizer.rs `REFERENCE_ATR_PCT = 0.02`
-- [ ] WP-G/HC-K2 kelly_sizer.rs `VOL_MULT_FLOOR/CEIL = 0.5/1.5`
-- [ ] WP-G/HC-T1 thompson_sampling.py `lam_0 = 3.0`
-- [ ] WP-G/HC-T2 thompson_sampling.py `alpha_0 = 3.0`
+#### WP-G — 硬編碼（✅ 0 項，全部 43/43 完成 — `4187da6`）
 
 #### WP-E4 — 測試覆蓋（13 項仍缺失，原 34）
 - [ ] WP-E4/T-P2-5 rest_poller.rs 零測試
