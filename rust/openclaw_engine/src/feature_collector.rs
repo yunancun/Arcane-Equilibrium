@@ -17,6 +17,28 @@ use std::collections::VecDeque;
 /// 特徵向量維度數。
 pub const FEATURE_DIM: usize = 34;
 
+/// Feature names indexed by position in the flat feature vector emitted by
+/// `FeatureSnapshot::to_feature_vector`. Used by the drift detector to map
+/// `observability.feature_baselines.feature_name` rows back to vector indices.
+/// 特徵名稱（與 to_feature_vector 順序對齊），漂移檢測器用於將基線 feature_name 映射回向量索引。
+pub const FEATURE_NAMES: [&str; FEATURE_DIM] = [
+    "sma_20", "sma_50",
+    "ema_12", "ema_26",
+    "rsi_14",
+    "macd", "macd_signal", "macd_histogram",
+    "bb_upper", "bb_middle", "bb_lower", "bb_bandwidth", "bb_percent_b",
+    "atr_14", "atr_14_percent",
+    "atr_5", "atr_5_percent",
+    "stoch_k", "stoch_d",
+    "kama", "kama_efficiency",
+    "adx", "plus_di", "minus_di",
+    "hurst", "regime_id",
+    "ewma_vol", "vol_regime_id",
+    "volume_ratio",
+    "donchian_upper", "donchian_lower", "donchian_middle", "donchian_width",
+    "price",
+];
+
 /// Default ring buffer capacity (~5 minutes at 10 ticks/sec).
 /// 預設環形緩衝區容量（約 5 分鐘 × 10 ticks/sec）。
 pub const DEFAULT_BUFFER_CAPACITY: usize = 3000;

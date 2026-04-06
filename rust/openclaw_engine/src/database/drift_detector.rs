@@ -10,6 +10,7 @@
 
 use super::pool::DbPool;
 use crate::database::DatabaseConfig;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -219,6 +220,131 @@ impl AdwinDetector {
 // Drift Monitor Task / 漂移監控任務
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+// PG-wired drift monitor / PG 接線的漂移監控
+// ═══════════════════════════════════════════════════════════════════
+
+/// Composite key identifying a baseline: (symbol, feature_name).
+/// 基線的複合鍵：(symbol, feature_name)。
+pub type BaselineKey = (String, String);
+
+/// One active baseline row from `observability.feature_baselines`.
+/// `observability.feature_baselines` 的一條當前生效基線。
+#[derive(Debug, Clone)]
+pub struct BaselineEntry {
+    pub bin_edges: Vec<f64>,
+    pub bin_counts: Vec<u32>,
+}
+
+/// Resolve a feature name to its index in the flat feature vector.
+/// 將特徵名稱解析為扁平特徵向量的索引。
+pub fn feature_index(name: &str) -> Option<usize> {
+    crate::feature_collector::FEATURE_NAMES
+        .iter()
+        .position(|n| *n == name)
+}
+
+/// Fetch all currently-active baselines (`valid_until IS NULL`).
+/// 拉取所有當前生效的基線。
+pub async fn fetch_active_baselines(pool: &DbPool) -> HashMap<BaselineKey, BaselineEntry> {
+    let mut out: HashMap<BaselineKey, BaselineEntry> = HashMap::new();
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return out,
+    };
+    let rows = sqlx::query_as::<_, (String, String, Vec<f32>, Vec<i32>)>(
+        "SELECT symbol, feature_name, bin_edges, bin_counts \
+         FROM observability.feature_baselines \
+         WHERE valid_until IS NULL",
+    )
+    .fetch_all(pg)
+    .await;
+    let rows = match rows {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(error = %e, "fetch_active_baselines failed / 基線讀取失敗");
+            return out;
+        }
+    };
+    for (symbol, feature_name, edges, counts) in rows {
+        if edges.len() < 2 || counts.len() + 1 != edges.len() {
+            continue;
+        }
+        out.insert(
+            (symbol, feature_name),
+            BaselineEntry {
+                bin_edges: edges.into_iter().map(|e| e as f64).collect(),
+                bin_counts: counts.into_iter().map(|c| c.max(0) as u32).collect(),
+            },
+        );
+    }
+    out
+}
+
+/// Fetch latest feature vectors per symbol from `features.online_latest`.
+/// Returns rows of (symbol, feature_vector). Timeframe is collapsed — the
+/// drift monitor uses the most-recent row per symbol regardless of timeframe.
+/// 按 symbol 拉取最新特徵向量。
+pub async fn fetch_latest_features(pool: &DbPool) -> Vec<(String, Vec<f32>)> {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => return vec![],
+    };
+    match sqlx::query_as::<_, (String, Vec<f32>)>(
+        "SELECT DISTINCT ON (symbol) symbol, feature_vector \
+         FROM features.online_latest \
+         WHERE feature_vector IS NOT NULL \
+         ORDER BY symbol, updated_ts_ms DESC",
+    )
+    .fetch_all(pg)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "fetch_latest_features failed / 最新特徵讀取失敗");
+            vec![]
+        }
+    }
+}
+
+/// In-memory sliding observation buffer per (symbol, feature_name).
+/// 每個 (symbol, feature_name) 的記憶體滑動觀測緩衝。
+#[derive(Default)]
+pub struct DriftMonitorState {
+    buffers: HashMap<BaselineKey, VecDeque<f64>>,
+    max_buffer: usize,
+}
+
+impl DriftMonitorState {
+    pub fn new(max_buffer: usize) -> Self {
+        Self {
+            buffers: HashMap::new(),
+            max_buffer: max_buffer.max(1),
+        }
+    }
+
+    /// Append a new observation. Drops oldest when buffer exceeds capacity.
+    /// 追加觀測，超出容量時丟棄最舊。
+    pub fn observe(&mut self, key: BaselineKey, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+        let buf = self.buffers.entry(key).or_default();
+        if buf.len() >= self.max_buffer {
+            buf.pop_front();
+        }
+        buf.push_back(value);
+    }
+
+    pub fn get(&self, key: &BaselineKey) -> Option<&VecDeque<f64>> {
+        self.buffers.get(key)
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffers.len()
+    }
+}
+
 /// Run the periodic drift detection task.
 /// 運行定期漂移檢測任務。
 pub async fn run_drift_detector(
@@ -232,15 +358,19 @@ pub async fn run_drift_detector(
     let psi_warn = db_cfg.psi_warning_threshold;
     let psi_alert = db_cfg.psi_alert_threshold;
     let burnin_days = db_cfg.adwin_burnin_days;
+    let min_window = db_cfg.adwin_min_width as usize;
+    let max_buffer = (min_window * 4).max(min_window + 1);
 
     let mut interval = tokio::time::interval(check_interval);
     interval.tick().await; // skip first
     let start_time = std::time::Instant::now();
+    let mut state = DriftMonitorState::new(max_buffer);
 
     info!(
         interval_secs = db_cfg.drift_check_interval_secs,
         psi_warn = psi_warn,
         psi_alert = psi_alert,
+        min_window = min_window,
         "drift detector started / 漂移檢測器已啟動"
     );
 
@@ -256,15 +386,85 @@ pub async fn run_drift_detector(
                 let uptime_days = start_time.elapsed().as_secs() / 86400;
                 let in_burnin = uptime_days < burnin_days as u64;
 
-                // TODO(G3-full): Read baselines from observability.feature_baselines,
-                // read current features from features.online_latest,
-                // compute PSI per feature, run ADWIN on feature streams.
-                // For now, the infrastructure is in place; actual PG queries
-                // will be wired when baselines are populated.
+                let baselines = fetch_active_baselines(&pool).await;
+                if baselines.is_empty() {
+                    debug!(
+                        in_burnin = in_burnin,
+                        "drift check: no active baselines / 漂移檢查：無生效基線"
+                    );
+                    continue;
+                }
+
+                let latest = fetch_latest_features(&pool).await;
+                let mut events_emitted = 0u32;
+                for (symbol, vector) in latest {
+                    for ((bsym, fname), baseline) in baselines.iter() {
+                        if bsym != &symbol {
+                            continue;
+                        }
+                        let Some(idx) = feature_index(fname) else { continue };
+                        if idx >= vector.len() {
+                            continue;
+                        }
+                        let key = (symbol.clone(), fname.clone());
+                        state.observe(key.clone(), vector[idx] as f64);
+
+                        let buf = match state.get(&key) {
+                            Some(b) if b.len() >= min_window => b,
+                            _ => continue,
+                        };
+                        let values: Vec<f64> = buf.iter().copied().collect();
+                        let cur_counts = histogram(&values, &baseline.bin_edges);
+                        let psi = compute_psi(&baseline.bin_counts, &cur_counts, 1e-6);
+
+                        let (severity, threshold) = if psi >= psi_alert {
+                            ("ALERT", psi_alert)
+                        } else if psi >= psi_warn {
+                            ("WARNING", psi_warn)
+                        } else {
+                            debug!(
+                                symbol = %symbol, feature = %fname, psi = psi,
+                                "drift ok / 漂移正常"
+                            );
+                            continue;
+                        };
+
+                        if in_burnin {
+                            debug!(
+                                symbol = %symbol, feature = %fname, psi = psi,
+                                severity = severity,
+                                "drift detected (burn-in, log-only) / 漂移檢測（預熱期，僅記錄）"
+                            );
+                            continue;
+                        }
+
+                        let event_id = format!(
+                            "psi-{}-{}-{}",
+                            symbol,
+                            fname,
+                            chrono::Utc::now().timestamp_millis()
+                        );
+                        write_drift_event(
+                            &pool,
+                            &event_id,
+                            "PSI",
+                            severity,
+                            &symbol,
+                            fname,
+                            psi,
+                            threshold,
+                        )
+                        .await;
+                        events_emitted += 1;
+                    }
+                }
+
                 debug!(
+                    baselines = baselines.len(),
+                    monitored = state.len(),
+                    events = events_emitted,
                     in_burnin = in_burnin,
-                    uptime_days = uptime_days,
-                    "drift check cycle (awaiting baseline data) / 漂移檢查週期（等待基線數據）"
+                    "drift check cycle complete / 漂移檢查週期完成"
                 );
             }
         }
@@ -758,6 +958,38 @@ mod tests {
         // Edge case: empty current_values / 邊界情況：空 current_values
         let (m, l, u) = block_bootstrap_psi(&[10, 20, 30], &[], &[0.0, 1.0, 2.0, 3.0], 4, 100, 1);
         assert_eq!((m, l, u), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_feature_index_known_names() {
+        assert_eq!(feature_index("rsi_14"), Some(4));
+        assert_eq!(feature_index("price"), Some(33));
+        assert_eq!(feature_index("sma_20"), Some(0));
+        assert!(feature_index("not_a_feature").is_none());
+    }
+
+    #[test]
+    fn test_drift_monitor_state_sliding() {
+        let mut s = DriftMonitorState::new(3);
+        let key = ("BTCUSDT".to_string(), "rsi_14".to_string());
+        s.observe(key.clone(), 1.0);
+        s.observe(key.clone(), 2.0);
+        s.observe(key.clone(), 3.0);
+        s.observe(key.clone(), 4.0); // should evict oldest
+        let buf = s.get(&key).expect("buffer present");
+        assert_eq!(buf.len(), 3);
+        assert_eq!(buf.front().copied(), Some(2.0));
+        assert_eq!(buf.back().copied(), Some(4.0));
+    }
+
+    #[test]
+    fn test_drift_monitor_state_rejects_nonfinite() {
+        let mut s = DriftMonitorState::new(10);
+        let key = ("ETHUSDT".to_string(), "price".to_string());
+        s.observe(key.clone(), f64::NAN);
+        s.observe(key.clone(), f64::INFINITY);
+        s.observe(key.clone(), 100.0);
+        assert_eq!(s.get(&key).map(|b| b.len()), Some(1));
     }
 
     /// Deterministic pseudo-random small noise for tests.
