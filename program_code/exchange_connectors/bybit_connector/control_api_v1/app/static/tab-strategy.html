@@ -188,23 +188,38 @@ function toggleCreateForm() {
   form.style.display = form.style.display === 'none' ? '' : 'none';
 }
 
+// isSubmitting flag prevents double-submit on rapid clicks
+// isSubmitting 标志防止快速点击造成重复提交
+let _createSubmitting = false;
+
 async function createStrategy() {
-  const body = {
-    strategy_type: $('new-type').value,
-    symbol: $('new-symbol').value.trim().toUpperCase(),
-    qty_per_trade: parseFloat($('new-qty').value) || 0.001,
-  };
-  const d = await ocPost('/api/v1/strategy/create', body);
-  if (d) {
-    ocToast('Strategy created: ' + (d.data ? d.data.strategy : ''), 'success');
-    toggleCreateForm();
-    loadStrategies();
-  } else {
-    ocToast('Create failed', 'error');
+  if (_createSubmitting) return;
+  _createSubmitting = true;
+  const btn = document.querySelector('#create-form button.oc-btn-success');
+  const origText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = '创建中...'; }
+  try {
+    const body = {
+      strategy_type: $('new-type').value,
+      symbol: $('new-symbol').value.trim().toUpperCase(),
+      qty_per_trade: parseFloat($('new-qty').value) || 0.001,
+    };
+    const d = await ocPost('/api/v1/strategy/create', body);
+    if (d) {
+      ocToast('Strategy created: ' + (d.data ? d.data.strategy : ''), 'success');
+      toggleCreateForm();
+      loadStrategies();
+    } else {
+      ocToast('Create failed', 'error');
+    }
+  } finally {
+    _createSubmitting = false;
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
   }
 }
 
 async function deleteStrategy(name) {
+  if (!confirm('確認刪除策略「' + name + '」？此操作無法撤銷。\nConfirm delete strategy "' + name + '"? This cannot be undone.')) return;
   const d = await ocApi('/api/v1/strategy/' + encodeURIComponent(name), { method: 'DELETE' });
   if (d) {
     ocToast(name + ' deleted', 'success');
@@ -267,10 +282,14 @@ async function loadStrategies() {
     html += '</div>';
     // V2 strategy parameters row / V2 策略参数行
     html += stratV2Params(s);
-    html += '<div class="strat-actions" style="margin-top:6px">';
+    html += '<div class="strat-actions" style="margin-top:6px;display:flex;align-items:center;gap:4px">';
     html += '<button class="oc-btn oc-btn-danger" title="手动硬关闭 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
     html += '<button class="oc-btn" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
-    html += '<button class="oc-btn oc-btn-danger" title="删除策略 / Delete permanently" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
+    // WP-F/AH-07: Delete separated by visible divider + dashed border to distinguish it from
+    // reversible Stop/Pause actions; confirmDeleteStrategy() provides required confirm() guard.
+    // 删除按钮与 Stop/Pause 之间加分隔线 + 虚线边框以区别可逆/不可逆操作；二次确认弹窗已接好
+    html += '<span style="width:1px;height:20px;background:rgba(255,255,255,0.1);margin:0 6px;flex-shrink:0"></span>';
+    html += '<button class="oc-btn oc-btn-danger" title="永久删除策略（不可撤销） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px;border-style:dashed" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
     html += '</div>';
     html += '</div>';
   });

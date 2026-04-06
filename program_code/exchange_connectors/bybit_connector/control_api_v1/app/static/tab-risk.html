@@ -10,6 +10,14 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
+<!-- ═══ Quick-nav: Danger Zone shortcut (AH-01) ═══ -->
+<!-- 危险操作区快捷入口 — 点击直接跳转到页面底部 Danger Zone -->
+<div style="display:flex;justify-content:flex-end;padding:4px 0 2px">
+  <a href="#danger-zone" style="font-size:12px;color:var(--red);text-decoration:none;display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid rgba(248,81,73,0.4);border-radius:6px;background:rgba(248,81,73,0.08)" title="跳转到危险操作区 / Jump to Danger Zone">
+    ⚠️ 危险操作 / Danger Zone ↓
+  </a>
+</div>
+
 <!-- ═══ Risk Status Hero ═══ -->
 <div class="oc-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -153,7 +161,7 @@
           <div><div style="font-size:12px;font-weight:600">Max Daily Loss / 日亏损上限</div><div style="font-size:10px;color:var(--text-dim)">单日亏损超过此值后停止当日交易。UTC 零点重置</div></div>
           <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-daily-loss" type="number" step="0.5" min="0.5" max="30" style="width:80px" /><span style="font-size:12px">%</span></div>
         </div>
-        <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:6px">&#x1F4BE; 保存设置 / Save Settings</button>
+        <button class="oc-btn oc-btn-primary" onclick="saveStopSettings(this)" style="margin-top:6px">&#x1F4BE; 保存止损设置 / Save Stop Settings</button>
       </div>
     </div>
 
@@ -226,7 +234,7 @@
         <div class="oc-metric"><div class="oc-metric-label">Total Exposure</div><div class="oc-metric-val" id="s-total-exp" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val" id="s-same-dir" style="font-size:16px">--</div></div>
       </div>
-      <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:8px">&#x1F4BE; 保存设置 / Save Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="savePositionSettings(this)" style="margin-top:8px">&#x1F4BE; 保存仓位设置 / Save Position Settings</button>
     </div>
   </div>
 </div>
@@ -256,7 +264,7 @@
         <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-cooldown-min" type="number" step="5" min="5" max="1440" style="width:80px" /><span style="font-size:12px">分钟</span></div>
       </div>
 
-      <button class="oc-btn oc-btn-primary" onclick="saveRiskConfig()" style="margin-top:6px">&#x1F4BE; 保存设置 / Save Settings</button>
+      <button class="oc-btn oc-btn-primary" onclick="saveCooldownSettings(this)" style="margin-top:6px">&#x1F4BE; 保存冷却设置 / Save Cooldown Settings</button>
     </div>
 
     <div>
@@ -347,8 +355,8 @@
       <div id="ai-advice-body" class="oc-pre" style="min-height:120px;font-size:12px;white-space:pre-wrap">
         点击左侧按钮向 AI 询问。AI 会根据当前持仓、市场状态、历史表现给出具体的止损建议。
       </div>
-      <div style="margin-top:6px;display:flex;gap:6px" id="ai-advice-actions" style="display:none">
-        <button class="oc-btn oc-btn-success" onclick="applyAIAdvice()" style="display:none" id="btn-apply-ai">&#x2714; 采纳建议 / Apply</button>
+      <div style="margin-top:6px;display:flex;gap:6px" id="ai-advice-actions">
+        <button class="oc-btn oc-btn-success" onclick="applyAIAdvice()" id="btn-apply-ai" style="display:none" disabled title="功能开发中 — AI 建议可供参考，请根据建议手动调整左侧数值后保存 / Feature under development — please apply AI advice manually">&#x2714; 采纳建议 / Apply（开发中）</button>
       </div>
     </div>
   </div>
@@ -364,7 +372,7 @@
 </details>
 
 <!-- ═══ Danger Zone ═══ -->
-<div class="oc-danger-zone">
+<div class="oc-danger-zone" id="danger-zone">
   <h3>&#x26A0; Danger Zone / 危险操作区</h3>
   <div id="explain-danger"></div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
@@ -517,29 +525,83 @@ function toggleTPInputs() {
   else $('in-take-profit').style.opacity = '1';
 }
 
-async function saveRiskConfig() {
-  const tpEnabled = $('in-tp-enabled').checked;
-  const trailingVal = parseFloat($('in-trailing').value);
-  const body = {
-    max_stop_loss_pct: parseFloat($('in-hard-stop').value) || 5,
-    tp_enabled: tpEnabled,
-    max_take_profit_pct: tpEnabled ? (parseFloat($('in-take-profit').value) || 20) : 20,
-    trailing_stop_pct: trailingVal > 0 ? trailingVal : null,
-    atr_multiplier: parseFloat($('in-atr-mult').value) || null,
-    max_session_drawdown_pct: parseFloat($('in-drawdown').value) || 15,
-    max_daily_loss_pct: parseFloat($('in-daily-loss').value) || 5,
-    max_leverage: parseFloat($('in-leverage').value) || 20,
-    max_holding_hours: parseFloat($('in-time-stop').value) || 72,
-    p1_risk_pct: parseFloat($('in-p1-risk').value) || 3,
-    max_single_position_pct: parseFloat($('in-single-pos').value) || 20,
-    max_total_exposure_pct: parseFloat($('in-total-exp').value) || 100,
-    max_same_direction_positions: parseInt($('in-same-dir').value) || 3,
-    consecutive_loss_cooldown_count: parseInt($('in-cooldown-count').value) || 3,
-    consecutive_loss_cooldown_minutes: parseFloat($('in-cooldown-min').value) || 30,
-  };
-  const d = await ocPost('/api/v1/paper/risk/config/global', body);
-  if (d) { ocToast('Risk settings saved / 风控设置已保存', 'success'); loadAll(); }
-  else ocToast('Save failed / 保存失败', 'error');
+// _btnSaving — helper: disable btn and show loading text during async save
+// _btnSaving — 辅助函数：保存期间禁用按钮并显示"储存中..."
+function _btnSaving(btn, saving) {
+  if (!btn) return;
+  if (saving) {
+    // Capture original label before overwriting
+    // 在覆蓋之前儲存原始文字
+    btn.dataset.origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '儲存中... / Saving...';
+  } else {
+    btn.disabled = false;
+    btn.textContent = btn.dataset.origText || btn.textContent;
+  }
+}
+
+// saveStopSettings — 止损管理器专用（Stop Manager 区块）
+// Only patches stop-manager fields, does not touch position sizing or cooldown.
+async function saveStopSettings(btn) {
+  _btnSaving(btn, true);
+  try {
+    const tpEnabled = $('in-tp-enabled').checked;
+    const trailingVal = parseFloat($('in-trailing').value);
+    const atrVal = parseFloat($('in-atr-mult').value);
+    const body = {
+      max_stop_loss_pct: parseFloat($('in-hard-stop').value) || 5,
+      tp_enabled: tpEnabled,
+      max_take_profit_pct: tpEnabled ? (parseFloat($('in-take-profit').value) || 20) : 20,
+      trailing_stop_pct: trailingVal > 0 ? trailingVal : null,
+      atr_multiplier: atrVal > 0 ? atrVal : null,
+      max_session_drawdown_pct: parseFloat($('in-drawdown').value) || 15,
+      max_daily_loss_pct: parseFloat($('in-daily-loss').value) || 5,
+      max_leverage: parseFloat($('in-leverage').value) || 20,
+      max_holding_hours: parseFloat($('in-time-stop').value) || 72,
+    };
+    const d = await ocPost('/api/v1/paper/risk/config/global', body);
+    if (d) { ocToast('止损设置已保存 / Stop settings saved', 'success'); loadAll(); }
+    else ocToast('Save failed / 保存失败', 'error');
+  } finally {
+    _btnSaving(btn, false);
+  }
+}
+
+// savePositionSettings — 仓位控制专用（Position Sizing & Exposure 区块）
+// Only patches position-sizing fields, does not touch stop settings or cooldown.
+async function savePositionSettings(btn) {
+  _btnSaving(btn, true);
+  try {
+    const body = {
+      p1_risk_pct: parseFloat($('in-p1-risk').value) || 3,
+      max_single_position_pct: parseFloat($('in-single-pos').value) || 20,
+      max_total_exposure_pct: parseFloat($('in-total-exp').value) || 100,
+      max_same_direction_positions: parseInt($('in-same-dir').value) || 3,
+    };
+    const d = await ocPost('/api/v1/paper/risk/config/global', body);
+    if (d) { ocToast('仓位设置已保存 / Position settings saved', 'success'); loadAll(); }
+    else ocToast('Save failed / 保存失败', 'error');
+  } finally {
+    _btnSaving(btn, false);
+  }
+}
+
+// saveCooldownSettings — 冷却保护专用（Loss Cooldown 区块）
+// Only patches cooldown fields, does not touch stop settings or position sizing.
+async function saveCooldownSettings(btn) {
+  _btnSaving(btn, true);
+  try {
+    const body = {
+      consecutive_loss_cooldown_count: parseInt($('in-cooldown-count').value) || 3,
+      consecutive_loss_cooldown_minutes: parseFloat($('in-cooldown-min').value) || 30,
+    };
+    const d = await ocPost('/api/v1/paper/risk/config/global', body);
+    if (d) { ocToast('冷却设置已保存 / Cooldown settings saved', 'success'); loadAll(); }
+    else ocToast('Save failed / 保存失败', 'error');
+  } finally {
+    _btnSaving(btn, false);
+  }
 }
 
 async function saveH0ShadowMode() {
@@ -623,12 +685,14 @@ function applyAIAdvice() {
 
 // ─── Actions ──────────────────────────────────────────────────
 async function resetCooldown() {
+  if (!confirm('確認重置連續虧損冷卻期？\n這將立即恢復開倉權限，請確認目前市況適合繼續交易。\nConfirm reset loss cooldown? This will immediately re-enable new orders.')) return;
   const d = await ocPost('/api/v1/paper/risk/reset-cooldown');
   if (d) { ocToast('Cooldown reset OK', 'success'); loadAll(); }
   else ocToast('Reset failed', 'error');
 }
 
 async function unhaltSession() {
+  if (!confirm('確認解除熔斷保護（Unhalt Session）？\n這將恢復被暫停的交易會話，請確認回撤已受控。\nConfirm unhalt session? This will resume all trading after circuit-breaker halt.')) return;
   const d = await ocPost('/api/v1/paper/risk/unhalt-session');
   if (d) { ocToast('Session unhalted', 'success'); loadAll(); }
   else ocToast('Unhalt failed', 'error');
@@ -783,24 +847,30 @@ async function loadRiskConfig() {
   h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
   h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
-  // Populate input fields — always refresh from server values (clear stale user edits)
-  // 從服務端值填充輸入框 — 每次刷新覆蓋
-  $('in-hard-stop').value = hardStop;
+  // Populate input fields — skip any field that the user is currently editing (has focus)
+  // 填充輸入框 — 跳過用戶正在編輯的字段（防止 15s 刷新覆蓋未儲存的修改）
+  // AH-06: if (document.activeElement !== inputEl) guard
+  function _setInput(id, val) {
+    const el = $(id);
+    if (el && document.activeElement !== el) el.value = val;
+  }
+  _setInput('in-hard-stop', hardStop);
+  // Checkboxes are not text-editable — safe to always update
   $('in-tp-enabled').checked = tpOn;
-  $('in-take-profit').value = tpVal;
+  _setInput('in-take-profit', tpVal);
   toggleTPInputs();
-  $('in-trailing').value = trailingVal ?? '';
-  $('in-atr-mult').value = atrMult ?? '';
-  $('in-time-stop').value = timeStop ?? 72;
-  $('in-drawdown').value = maxDD;
-  $('in-leverage').value = maxLev;
-  $('in-daily-loss').value = gc.max_daily_loss_pct || 5;
-  $('in-p1-risk').value = p1RiskPct.toFixed(1);
-  $('in-single-pos').value = rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? 20;
-  $('in-total-exp').value = rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? 100;
-  $('in-same-dir').value = sameDirVal;
-  $('in-cooldown-count').value = coolCount;
-  $('in-cooldown-min').value = coolMin;
+  _setInput('in-trailing', trailingVal ?? '');
+  _setInput('in-atr-mult', atrMult ?? '');
+  _setInput('in-time-stop', timeStop ?? 72);
+  _setInput('in-drawdown', maxDD);
+  _setInput('in-leverage', maxLev);
+  _setInput('in-daily-loss', gc.max_daily_loss_pct || 5);
+  _setInput('in-p1-risk', p1RiskPct.toFixed(1));
+  _setInput('in-single-pos', rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? 20);
+  _setInput('in-total-exp', rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? 100);
+  _setInput('in-same-dir', sameDirVal);
+  _setInput('in-cooldown-count', coolCount);
+  _setInput('in-cooldown-min', coolMin);
 }
 
 async function loadAIContext() {
