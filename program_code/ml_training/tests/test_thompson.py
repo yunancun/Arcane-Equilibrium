@@ -218,3 +218,43 @@ def test_posteriors_roundtrip():
         assert rest.alpha == pytest.approx(orig.alpha)
         assert rest.beta == pytest.approx(orig.beta)
         assert rest.n_trials == orig.n_trials
+
+
+# ─── P1-5 PG persistence helper tests ───
+
+def test_arm_key_roundtrip():
+    from program_code.ml_training.thompson_sampling import _make_arm_key, _parse_arm_key
+    key = _make_arm_key("ma_crossover", "BTCUSDT", "trending")
+    assert key == "ma_crossover|BTCUSDT|trending"
+    s, sym, reg = _parse_arm_key(key)
+    assert (s, sym, reg) == ("ma_crossover", "BTCUSDT", "trending")
+
+
+def test_arm_key_rejects_malformed():
+    import pytest
+    from program_code.ml_training.thompson_sampling import _parse_arm_key
+    with pytest.raises(ValueError):
+        _parse_arm_key("only_one")
+    with pytest.raises(ValueError):
+        _parse_arm_key("two|parts")
+    with pytest.raises(ValueError):
+        _parse_arm_key("too|many|parts|here")
+
+
+def test_save_posteriors_no_psycopg2_returns_zero(monkeypatch):
+    """save_posteriors_to_pg must degrade gracefully when psycopg2 is missing."""
+    import sys, builtins
+    from program_code.ml_training.thompson_sampling import save_posteriors_to_pg, NIGPosterior
+    real_import = builtins.__import__
+
+    def block_psycopg2(name, *a, **kw):
+        if name == "psycopg2":
+            raise ImportError("blocked for test")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", block_psycopg2)
+    n = save_posteriors_to_pg(
+        {"s|BTCUSDT|trending": NIGPosterior(mu=0.01, lam=3.0, alpha=3.0, beta=0.01, n_trials=1)},
+        "postgresql://fake",
+    )
+    assert n == 0
