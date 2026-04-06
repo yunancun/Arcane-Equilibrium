@@ -86,6 +86,14 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
         }
         let ts = chrono::DateTime::from_timestamp_millis(ctx.ts_ms as i64).unwrap_or_default();
 
+        // 4-18: INSERT now covers V009 Phase 4 columns (claude_directive_id /
+        // linucb_arm_id / linucb_confidence_bound) and V003 news columns
+        // (news_severity / hours_since_last_major_news). Producers that do not
+        // yet wire these values pass None → SQL NULL (fail-closed safe).
+        // 4-18：INSERT 現涵蓋 V009 Phase 4 欄位（claude_directive_id /
+        // linucb_arm_id / linucb_confidence_bound）與 V003 新聞欄位
+        // （news_severity / hours_since_last_major_news）。尚未接線的 producer
+        // 傳 None → 寫入 SQL NULL（fail-closed 安全）。
         let result = sqlx::query(
             "INSERT INTO trading.decision_context_snapshots \
              (ts, ts_ms, context_id, decision_type, symbol, strategy_name, \
@@ -93,8 +101,11 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
               ind_5m_adx, ind_5m_rsi, ind_5m_atr_14_pct, \
               position_side, position_qty, total_equity, drawdown_pct, \
               indicators_snapshot, position_detail, decision_payload, \
-              outcome_backfilled) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) \
+              outcome_backfilled, \
+              claude_directive_id, linucb_arm_id, linucb_confidence_bound, \
+              news_severity, hours_since_last_major_news) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,\
+                     $21,$22,$23,$24,$25) \
              ON CONFLICT (context_id, ts) DO NOTHING",
         )
         .bind(ts)
@@ -117,6 +128,19 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
         .bind(&ctx.position_detail)
         .bind(&ctx.decision_payload)
         .bind(false) // outcome_backfilled = false initially
+        // Phase 4 / V009 + V003 news columns (None → SQL NULL).
+        // Phase 4 / V009 + V003 新聞欄位（None → SQL NULL）。
+        .bind(ctx.claude_directive_id)
+        .bind(ctx.linucb_arm_id.as_deref())
+        .bind(ctx.linucb_confidence_bound.and_then(super::sanitize_f64))
+        .bind(
+            ctx.news_severity
+                .and_then(|v| if v.is_finite() { Some(v) } else { None }),
+        )
+        .bind(
+            ctx.hours_since_last_major_news
+                .and_then(super::sanitize_f64),
+        )
         .execute(pg)
         .await;
 
@@ -157,6 +181,13 @@ mod tests {
             indicators_snapshot: serde_json::json!({}),
             position_detail: serde_json::json!({}),
             decision_payload: serde_json::json!({"signal": "long"}),
+            // 4-18: Phase 4 columns default to None (producer wiring = W4 sweep).
+            // 4-18：Phase 4 欄位預設 None（producer 接線由 W4 sweep 處理）。
+            claude_directive_id: None,
+            linucb_arm_id: None,
+            linucb_confidence_bound: None,
+            news_severity: None,
+            hours_since_last_major_news: None,
         }
     }
 
@@ -194,16 +225,87 @@ mod tests {
         assert!((ctx.ind_5m_adx - 30.0).abs() < 0.01);
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // 4-18: Phase 4 column wiring tests (consumer-side only).
+    // 4-18：Phase 4 欄位接線測試（僅 consumer 側）。
+    // ═══════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_decision_context_row_phase4_columns_default_to_none() {
+        // Default-constructed ctx must leave Phase 4 columns as None so that
+        // un-wired producers write SQL NULL (fail-closed).
+        // 預設構造的 ctx 必須讓 Phase 4 欄位保持 None，未接線 producer 寫入 SQL NULL（fail-closed）。
+        let ctx = make_ctx("ctx-p4-default");
+        assert!(ctx.claude_directive_id.is_none());
+        assert!(ctx.linucb_arm_id.is_none());
+        assert!(ctx.linucb_confidence_bound.is_none());
+        assert!(ctx.news_severity.is_none());
+        assert!(ctx.hours_since_last_major_news.is_none());
+    }
+
+    #[test]
+    fn test_decision_context_row_phase4_columns_can_be_set() {
+        // Producers (once wired in W4) can populate Phase 4 fields and the
+        // struct round-trips them without mutation.
+        // Producer（W4 接線後）可填充 Phase 4 欄位，結構體原樣保留。
+        let mut ctx = make_ctx("ctx-p4-set");
+        ctx.claude_directive_id = Some(42);
+        ctx.linucb_arm_id = Some("v1_15:ma_crossover:trending".into());
+        ctx.linucb_confidence_bound = Some(1.234_5);
+        ctx.news_severity = Some(0.75);
+        ctx.hours_since_last_major_news = Some(3.25);
+
+        assert_eq!(ctx.claude_directive_id, Some(42));
+        assert_eq!(
+            ctx.linucb_arm_id.as_deref(),
+            Some("v1_15:ma_crossover:trending")
+        );
+        assert!((ctx.linucb_confidence_bound.unwrap() - 1.234_5).abs() < 1e-9);
+        assert!((ctx.news_severity.unwrap() - 0.75).abs() < 1e-6);
+        assert!((ctx.hours_since_last_major_news.unwrap() - 3.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_context_writer_insert_sql_includes_phase4_columns() {
+        // Lock the INSERT column list to the 5 Phase 4 / V009+V003 additions
+        // so future refactors can't silently drop them.
+        // 鎖定 INSERT 欄位列表包含 5 個 Phase 4 / V009+V003 欄位，防止未來重構靜默移除。
+        let src = include_str!("context_writer.rs");
+        assert!(
+            src.contains("claude_directive_id"),
+            "INSERT SQL must include claude_directive_id"
+        );
+        assert!(
+            src.contains("linucb_arm_id"),
+            "INSERT SQL must include linucb_arm_id"
+        );
+        assert!(
+            src.contains("linucb_confidence_bound"),
+            "INSERT SQL must include linucb_confidence_bound"
+        );
+        assert!(
+            src.contains("news_severity"),
+            "INSERT SQL must include news_severity"
+        );
+        assert!(
+            src.contains("hours_since_last_major_news"),
+            "INSERT SQL must include hours_since_last_major_news"
+        );
+        // Bind count jumped 20 → 25 (5 new columns).
+        // Bind 數量由 20 → 25（新增 5 欄位）。
+        assert!(
+            src.contains("$25"),
+            "INSERT must bind $25 after Phase 4 expansion"
+        );
+    }
+
     #[test]
     fn test_sql_column_count() {
-        // Verify we bind exactly 20 values matching 20 columns in INSERT
-        // $1=ts, $2=ts_ms, $3=context_id, $4=decision_type, $5=symbol,
-        // $6=strategy_name, $7=last_price, $8=spread_bps, $9=regime_5m,
-        // $10=ind_5m_adx, $11=ind_5m_rsi, $12=ind_5m_atr_14_pct,
-        // $13=position_side, $14=position_qty, $15=total_equity, $16=drawdown_pct,
-        // $17=indicators_snapshot, $18=position_detail, $19=decision_payload,
-        // $20=outcome_backfilled
-        // Count: 20 columns = 20 bind calls ✓
-        assert_eq!(20, 20); // compile-time documentation test
+        // Verify we bind exactly 25 values matching 25 columns in INSERT.
+        // Original 20 + 5 Phase 4 / V009+V003 additions ($21..$25):
+        //   $21=claude_directive_id, $22=linucb_arm_id, $23=linucb_confidence_bound,
+        //   $24=news_severity,       $25=hours_since_last_major_news
+        // 驗證綁定 25 個值對應 INSERT 25 個欄位（原 20 + Phase 4 新增 5）。
+        assert_eq!(25, 25); // compile-time documentation test
     }
 }

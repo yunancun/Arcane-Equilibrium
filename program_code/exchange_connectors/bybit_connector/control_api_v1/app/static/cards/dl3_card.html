@@ -1,0 +1,132 @@
+<!--
+  Phase 4 · DL-3 Foundation Card — sub-task 4-14.
+  Phase 4 · DL-3 基礎模型卡片 — 子任務 4-14。
+
+  Data source / 資料源: GET /api/v1/phase4/dl3
+  Renders: Go/No-Go latest decision / AUC delta / per-model availability
+           (chronos / timesfm) / recent 5 inference rows / status light.
+  渲染內容：最新 Go/No-Go 決策 / AUC delta / 兩個 model（chronos / timesfm）
+           可用性 / 最近 5 筆 inference / 狀態燈。
+
+  Safety / 安全:
+    - Read-only — no buttons or POST.
+    - Fail-closed on ok=false → grey placeholder retained from default load.
+    - textContent only (XSS-safe) — model names come from foundation_model_features.
+-->
+<div class="phase4-card" id="dl3-card" data-module="dl3">
+  <div class="phase4-card-header">
+    <h3 class="phase4-card-title">&#x1F9E0; DL-3 Foundation / 時序基礎模型</h3>
+    <span class="phase4-card-status">
+      <span class="phase4-light-dot grey" id="dl3-status-dot"></span>
+      <span id="dl3-status-label">loading…</span>
+    </span>
+  </div>
+
+  <div class="phase4-card-metrics" id="dl3-metrics">
+    <div><strong>Decision:</strong> <span id="dl3-latest-decision">—</span></div>
+    <div><strong>AUC delta:</strong> <span id="dl3-auc-delta">—</span></div>
+    <div><strong>Chronos:</strong> <span id="dl3-model-chronos">—</span></div>
+    <div><strong>TimesFM:</strong> <span id="dl3-model-timesfm">—</span></div>
+  </div>
+
+  <div style="margin-top:12px;">
+    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+      Recent 5 inferences / 最近 5 筆推理
+    </div>
+    <table id="dl3-recent" style="border-collapse:collapse;font-size:11px;width:100%;">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border,#30363d);">
+          <th style="padding:2px 6px;">When</th>
+          <th style="padding:2px 6px;">Model</th>
+          <th style="padding:2px 6px;">Symbol</th>
+          <th style="padding:2px 6px;text-align:right;">Latency(ms)</th>
+          <th style="padding:2px 6px;">OK</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="phase4-card-footer" style="margin-top:8px;font-size:11px;color:var(--text-muted,#8b949e);">
+    <a id="dl3-report-link" href="/static/reports/dl3_go_no_go.md" target="_blank"
+       style="color:var(--text-muted,#8b949e);text-decoration:underline;">
+      View latest report / 查看最新報告
+    </a>
+    &nbsp;·&nbsp; Refreshes every 30s / 每 30 秒刷新
+  </div>
+</div>
+
+<script>
+(function() {
+  // Idempotent loader: registers a global async function that the
+  // tab-phase4 polling loop calls every 30s. Safe to load multiple times.
+  // 冪等載入器：註冊全域 async 函數，給 tab-phase4 30s 輪詢呼叫。多次載入安全。
+  window.loadDl3Card = async function() {
+    let data;
+    try {
+      const r = await fetch('/api/v1/phase4/dl3', { credentials: 'include' });
+      data = await r.json();
+    } catch (e) {
+      data = { ok: false, status_light: 'grey', reason: 'fetch_failed' };
+    }
+    const dot = document.getElementById('dl3-status-dot');
+    const label = document.getElementById('dl3-status-label');
+    if (dot && label) {
+      const lightClass = ['grey','green','yellow','red'].includes(data.status_light) ? data.status_light : 'grey';
+      dot.className = 'phase4-light-dot ' + lightClass;
+      label.textContent = data.ok ? lightClass : ('degraded: ' + (data.reason || 'unknown'));
+    }
+
+    const dec = document.getElementById('dl3-latest-decision');
+    if (dec) dec.textContent = data.latest_decision || '—';
+
+    const auc = document.getElementById('dl3-auc-delta');
+    if (auc) {
+      const v = data.auc_delta;
+      auc.textContent = (v === null || v === undefined) ? '—' : Number(v).toFixed(4);
+    }
+
+    const models = (data && typeof data.models === 'object' && data.models) ? data.models : {};
+    const chronosEl = document.getElementById('dl3-model-chronos');
+    if (chronosEl) chronosEl.textContent = models.chronos === true ? 'available' : (models.chronos === false ? 'down' : 'unknown');
+    const timesfmEl = document.getElementById('dl3-model-timesfm');
+    if (timesfmEl) timesfmEl.textContent = models.timesfm === true ? 'available' : (models.timesfm === false ? 'down' : 'unknown');
+
+    const tbody = document.querySelector('#dl3-recent tbody');
+    if (tbody) {
+      tbody.innerHTML = '';
+      const recent = Array.isArray(data.recent) ? data.recent : [];
+      // Use textContent (no innerHTML) for XSS safety on user-supplied model/symbol fields.
+      // 用 textContent（不用 innerHTML）防止 model/symbol 欄位的 XSS。
+      const td = (text, extra='') => {
+        const el = document.createElement('td');
+        el.textContent = text;
+        if (extra) el.setAttribute('style', extra);
+        return el;
+      };
+      for (const r of recent) {
+        const tr = document.createElement('tr');
+        const ts = r.time ? new Date(r.time).toLocaleString() : '—';
+        const lat = (r.latency_ms === null || r.latency_ms === undefined) ? '—' : String(r.latency_ms);
+        const okTxt = r.ok ? 'OK' : 'FAIL';
+        const okColor = r.ok ? 'color:var(--green,#3fb950);' : 'color:var(--red,#f85149);';
+        tr.appendChild(td(ts, 'padding:2px 6px;'));
+        tr.appendChild(td(r.model || '—', 'padding:2px 6px;'));
+        tr.appendChild(td(r.symbol || '—', 'padding:2px 6px;'));
+        tr.appendChild(td(lat, 'padding:2px 6px;text-align:right;'));
+        tr.appendChild(td(okTxt, 'padding:2px 6px;' + okColor));
+        tbody.appendChild(tr);
+      }
+      if (recent.length === 0) {
+        const tr = document.createElement('tr');
+        const emptyTd = document.createElement('td');
+        emptyTd.colSpan = 5;
+        emptyTd.textContent = '(no inferences in window)';
+        emptyTd.style.cssText = 'padding:6px;text-align:center;color:var(--text-muted,#8b949e);';
+        tr.appendChild(emptyTd);
+        tbody.appendChild(tr);
+      }
+    }
+  };
+})();
+</script>

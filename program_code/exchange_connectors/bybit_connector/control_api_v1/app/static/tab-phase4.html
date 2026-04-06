@@ -237,29 +237,80 @@
 })();
 </script>
 
-<!-- ═══ Card slot 3: News / 新闻 ═══ -->
-<div class="phase4-card" id="phase4-card-news" data-module="news">
-  <div class="phase4-card-header">
-    <h3 class="phase4-card-title">&#x1F4F0; News Signals / 新闻信号</h3>
-    <span class="phase4-card-status"><span class="phase4-light-dot grey"></span>not started / 未启动</span>
-  </div>
-  <div class="phase4-card-placeholder">
-    Card placeholder — populated by sub-task 4-12 ... 4-16
-    / Card 占位符 — 由子任务 4-12 ... 4-16 填入
-  </div>
+<!-- ═══ Card slot 3: News / 新闻 (4-10 已接通 / wired) ═══ -->
+<div id="phase4-card-news-slot" data-module="news">
+  <!-- Injected from /static/cards/news_card.html at load / 加載時注入 -->
+  <div class="phase4-card-placeholder">loading news card… / 正在加载 News 卡片…</div>
 </div>
+<script>
+(function() {
+  // Load the News card partial into the slot above (4-10).
+  // 將 News 卡片部件載入上方插槽（4-10）。
+  fetch('/static/cards/news_card.html', { credentials: 'same-origin' })
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(html) {
+      var slot = document.getElementById('phase4-card-news-slot');
+      if (!slot || !html) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var card = tmp.querySelector('.phase4-card');
+      if (card) {
+        slot.innerHTML = '';
+        slot.appendChild(card);
+      }
+      // Execute inline scripts (loadNewsCard function definition).
+      // 執行內嵌 script（定義 loadNewsCard 函數）。
+      var scripts = tmp.querySelectorAll('script');
+      scripts.forEach(function(s) {
+        var ns = document.createElement('script');
+        ns.textContent = s.textContent;
+        document.body.appendChild(ns);
+      });
+      // Initial fetch / 首次拉取
+      if (typeof window.loadNewsCard === 'function') {
+        window.loadNewsCard();
+      }
+    })
+    .catch(function() { /* fail-soft */ });
+})();
+</script>
 
-<!-- ═══ Card slot 4: DL-3 / 时序基础模型 ═══ -->
-<div class="phase4-card" id="phase4-card-dl3" data-module="dl3">
-  <div class="phase4-card-header">
-    <h3 class="phase4-card-title">&#x1F9E0; DL-3 Time-series Foundation / 时序基础模型</h3>
-    <span class="phase4-card-status"><span class="phase4-light-dot grey"></span>not started / 未启动</span>
-  </div>
-  <div class="phase4-card-placeholder">
-    Card placeholder — populated by sub-task 4-17 ... 4-21
-    / Card 占位符 — 由子任务 4-17 ... 4-21 填入
-  </div>
+<!-- ═══ Card slot 4: DL-3 / 时序基础模型 (4-14 已接通 / wired) ═══ -->
+<div id="phase4-card-dl3-slot" data-module="dl3">
+  <!-- Injected from /static/cards/dl3_card.html at load / 加載時注入 -->
+  <div class="phase4-card-placeholder">loading dl3 card… / 正在加载 DL-3 卡片…</div>
 </div>
+<script>
+(function() {
+  // Load the DL-3 card partial into the slot above (4-14).
+  // 將 DL-3 卡片部件載入上方插槽（4-14）。
+  fetch('/static/cards/dl3_card.html', { credentials: 'same-origin' })
+    .then(function(r) { return r.ok ? r.text() : ''; })
+    .then(function(html) {
+      var slot = document.getElementById('phase4-card-dl3-slot');
+      if (!slot || !html) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      var card = tmp.querySelector('.phase4-card');
+      if (card) {
+        slot.innerHTML = '';
+        slot.appendChild(card);
+      }
+      // Execute inline scripts (loadDl3Card function definition).
+      // 執行內嵌 script（定義 loadDl3Card 函數）。
+      var scripts = tmp.querySelectorAll('script');
+      scripts.forEach(function(s) {
+        var ns = document.createElement('script');
+        ns.textContent = s.textContent;
+        document.body.appendChild(ns);
+      });
+      if (typeof window.loadDl3Card === 'function') {
+        window.loadDl3Card();
+      }
+    })
+    .catch(function() { /* fail-soft */ });
+})();
+</script>
 
 <script>
 // ── Phase 4 status polling / Phase 4 状态轮询 ──────────────────────────
@@ -309,6 +360,12 @@
       // 刷新每張卡片內容（4-03 Teacher card；其他卡片以相同方式註冊各自的 loader）。
       if (typeof window.loadTeacherCard === 'function') {
         try { window.loadTeacherCard(); } catch (e) { /* fail-soft */ }
+      }
+      if (typeof window.loadDl3Card === 'function') {
+        try { window.loadDl3Card(); } catch (e) { /* fail-soft */ }
+      }
+      if (typeof window.loadNewsCard === 'function') {
+        try { window.loadNewsCard(); } catch (e) { /* fail-soft */ }
       }
     } catch (e) {
       // Fail-closed: any error → all grey + degraded banner.

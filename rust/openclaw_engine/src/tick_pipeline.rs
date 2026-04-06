@@ -971,6 +971,15 @@ impl TickPipeline {
                         .map(|p| serde_json::to_value(p).unwrap_or_default())
                         .unwrap_or_default(),
                     decision_payload: serde_json::to_value(&signals).unwrap_or_default(),
+                    // 4-18: Phase 4 / V009+V003 columns — producer wiring is
+                    // deferred to W4 sweep; emit NULL (None) at this site.
+                    // 4-18：Phase 4 / V009+V003 欄位 — producer 接線由 W4 sweep 處理，
+                    // 本發射點暫寫 NULL（None）。
+                    claude_directive_id: None,
+                    linucb_arm_id: None,
+                    linucb_confidence_bound: None,
+                    news_severity: None,
+                    hours_since_last_major_news: None,
                 });
             }
         }

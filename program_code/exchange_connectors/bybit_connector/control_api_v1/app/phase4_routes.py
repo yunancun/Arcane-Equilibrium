@@ -409,6 +409,367 @@ async def get_phase4_teacher() -> dict[str, Any]:
         return _default_teacher_payload(reason=f"{type(exc).__name__}")
 
 
+# ---------------------------------------------------------------------------
+# 4-10 · News Card backend route
+# 4-10 · News 卡片後端路由
+# ---------------------------------------------------------------------------
+
+# Known news provider names — kept in sync with rust/openclaw_engine/src/news/*.
+# 已知的 news provider 名稱 — 與 rust/openclaw_engine/src/news/* 保持同步。
+_NEWS_PROVIDER_NAMES = (
+    "cryptopanic",
+    "cointelegraph_rss",
+    "google_news_rss",
+    "mock",
+)
+
+
+def _default_news_providers_stub() -> list[dict[str, Any]]:
+    """Build the 4-provider unknown-status stub.
+    建立 4 個 provider 的 unknown 狀態 stub。
+
+    Provider quota lives in Rust (not PG), so until 4-W4 wiring sweep we
+    return status=unknown for all four. This keeps the GUI from lying about
+    provider health. / provider quota 在 Rust 側（不在 PG），W4 wiring 完成前
+    全部回報 unknown，避免 GUI 虛報健康。
+    """
+    return [
+        {"name": name, "status": "unknown", "quota_remaining": None, "last_fetch": None}
+        for name in _NEWS_PROVIDER_NAMES
+    ]
+
+
+def _default_news_payload(reason: str) -> dict[str, Any]:
+    """Fail-closed payload for the News card.
+    News 卡片的 fail-closed 預設 payload。
+    """
+    return {
+        "ok": False,
+        "reason": reason,
+        "status_light": "grey",
+        "total_24h": 0,
+        "halt_triggers_24h": 0,
+        "max_severity_24h": None,
+        "recent": [],
+        "providers": _default_news_providers_stub(),
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+def _classify_news_status(
+    total_24h: int, halt_triggers_24h: int, max_severity_24h: float | None
+) -> str:
+    """Map news stats into a red/yellow/green status light.
+    將新聞統計對映為 red/yellow/green 燈號。
+
+    Rules / 規則:
+        - max_severity_24h >= 0.95                 -> red   (極高風險新聞)
+        - total_24h == 0                           -> yellow (無新聞，可能 provider 死)
+        - otherwise (正常拉取中)                    -> green
+    Note: halt_triggers_24h is surfaced via metrics but does not itself
+    downgrade the light — halts are expected behavior when news is severe.
+    註：halt_triggers_24h 只作為顯示指標，不會單獨降級燈號 — halt 是嚴重新聞
+    下的預期行為。
+    """
+    if max_severity_24h is not None and max_severity_24h >= 0.95:
+        return "red"
+    if total_24h == 0:
+        return "yellow"
+    return "green"
+
+
+def _fetch_news_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live DB path
+    """Read 24h market.news_signals stats + recent 10 rows from PG.
+    從 PG 讀取 24h market.news_signals 統計 + 最近 10 條。
+
+    Fail-soft: any exception → caller maps to grey placeholder.
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        raise RuntimeError("no_dsn")
+
+    with psycopg2.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            # 24h aggregate stats / 24h 聚合統計
+            # Column names confirmed against sql/migrations/V002__market_tables.sql:
+            #   ts TIMESTAMPTZ / severity REAL (0..1) / source TEXT / summary TEXT / source_url TEXT
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)::int                                    AS total_24h,
+                    COUNT(*) FILTER (WHERE severity >= 0.8)::int     AS halt_triggers_24h,
+                    MAX(severity)                                    AS max_severity_24h
+                FROM market.news_signals
+                WHERE ts >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            row = cur.fetchone()
+            total_24h = int(row[0] or 0) if row else 0
+            halt_triggers_24h = int(row[1] or 0) if row else 0
+            max_severity_24h = float(row[2]) if row and row[2] is not None else None
+
+            # Recent 10 headlines / 最近 10 條
+            cur.execute(
+                """
+                SELECT ts, source, severity, summary, source_url
+                FROM market.news_signals
+                ORDER BY ts DESC
+                LIMIT 10
+                """
+            )
+            recent_rows = cur.fetchall()
+
+    status_light = _classify_news_status(total_24h, halt_triggers_24h, max_severity_24h)
+    recent = [
+        {
+            "ts": r[0].isoformat() if r[0] is not None else None,
+            "source": r[1],
+            "severity": float(r[2]) if r[2] is not None else None,
+            "summary": r[3],
+            "source_url": r[4],
+        }
+        for r in recent_rows
+    ]
+
+    return {
+        "ok": True,
+        "status_light": status_light,
+        "total_24h": total_24h,
+        "halt_triggers_24h": halt_triggers_24h,
+        "max_severity_24h": max_severity_24h,
+        "recent": recent,
+        # Provider health stub — real quota lives in Rust, wired in 4-W4.
+        # Provider 健康 stub — 真實 quota 在 Rust，4-W4 wiring 階段接通。
+        "providers": _default_news_providers_stub(),
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+@phase4_router.get("/news")
+async def get_phase4_news() -> dict[str, Any]:
+    """News card data: 24h news stats + recent 10 headlines + provider health.
+    News 卡片資料：24h 新聞統計 + 最近 10 條 headline + provider 健康。
+
+    Fail-closed: any error → ok=false grey placeholder (never raises).
+    """
+    try:
+        return _fetch_news_state_from_pg()
+    except Exception as exc:
+        logger.warning("phase4/news fail-soft: %s", exc)
+        return _default_news_payload(reason=f"{type(exc).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# 4-14 · DL-3 Foundation Card backend route
+# 4-14 · DL-3 基礎模型卡片後端路由
+# ---------------------------------------------------------------------------
+
+_KNOWN_DL3_MODEL_KEYS = ("chronos", "timesfm")
+
+
+def _default_dl3_payload(reason: str) -> dict[str, Any]:
+    """Fail-closed payload for the DL-3 card.
+    DL-3 卡片的 fail-closed 預設 payload。
+    """
+    return {
+        "ok": False,
+        "reason": reason,
+        "status_light": "grey",
+        "latest_decision": None,
+        "auc_delta": None,
+        "models": {"chronos": None, "timesfm": None},
+        "recent": [],
+        "inference_24h": {"count": 0, "avg_latency_ms": None, "ok_rate": None},
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+def _classify_dl3_status(
+    latest_decision: str | None,
+    ok_rate: float | None,
+) -> str:
+    """Map Go/No-Go decision + 24h ok_rate into a red/yellow/green status light.
+    將 Go/No-Go 決策 + 24h ok_rate 對映為紅/黃/綠燈號。
+
+    Rules / 規則:
+        - latest_decision == "NO_GO"                            -> red
+        - latest_decision == "GO" AND (ok_rate None OR >= 1.0)  -> green
+        - latest_decision == "GO" AND ok_rate < 1.0             -> yellow (degraded)
+        - latest_decision == "PENDING_DATA"                     -> yellow
+        - None / unknown                                        -> grey
+    """
+    if latest_decision == "NO_GO":
+        return "red"
+    if latest_decision == "GO":
+        if ok_rate is None or ok_rate >= 1.0:
+            return "green"
+        return "yellow"
+    if latest_decision == "PENDING_DATA":
+        return "yellow"
+    return "grey"
+
+
+def _classify_dl3_model_availability(
+    model_key: str, seen_models: set[str]
+) -> bool | None:
+    """Infer per-model availability from recently observed model names.
+    由最近觀察到的 model 名稱推斷每個 model 的可用性。
+
+    Substring match, case-insensitive: 'chronos-t5-tiny' matches key 'chronos'.
+    Returns True if ever seen in window, None if never seen (unknown).
+    子字串匹配（不分大小寫）；在窗口內看過回 True，沒看過回 None（unknown）。
+    """
+    key = model_key.lower()
+    for m in seen_models:
+        if m and key in m.lower():
+            return True
+    return None
+
+
+def _fetch_dl3_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live DB path
+    """Read DL-3 inference state + latest Go/No-Go decision from PG.
+    從 PG 讀取 DL-3 inference 狀態與最新 Go/No-Go 決策。
+
+    Fail-soft: any exception → caller maps to grey placeholder.
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        raise RuntimeError("no_dsn")
+
+    latest_decision: str | None = "PENDING_DATA"
+    auc_delta: float | None = None
+
+    with psycopg2.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            # Recent 5 inferences / 最近 5 筆推理（V011 schema）
+            cur.execute(
+                """
+                SELECT time, symbol, model, horizon_min, latency_ms, ok, error_msg
+                FROM learning.foundation_model_features
+                ORDER BY time DESC
+                LIMIT 5
+                """
+            )
+            recent_rows = cur.fetchall()
+
+            # 24h aggregate: count / avg_latency / ok_rate
+            # 24h 聚合：筆數 / 平均延遲 / 成功率
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)::int                                      AS n,
+                    AVG(latency_ms)                                    AS avg_latency,
+                    AVG(CASE WHEN ok THEN 1.0 ELSE 0.0 END)            AS ok_rate
+                FROM learning.foundation_model_features
+                WHERE time >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            agg_row = cur.fetchone()
+            count_24h = int(agg_row[0] or 0) if agg_row else 0
+            avg_latency_24h = (
+                float(agg_row[1]) if agg_row and agg_row[1] is not None else None
+            )
+            ok_rate_24h = (
+                float(agg_row[2]) if agg_row and agg_row[2] is not None else None
+            )
+
+            # Distinct models observed in last 24h (for availability inference)
+            # 最近 24h 觀察到的不重複 models（用於可用性推斷）
+            cur.execute(
+                """
+                SELECT DISTINCT model
+                FROM learning.foundation_model_features
+                WHERE time >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            seen_models = {row[0] for row in cur.fetchall() if row and row[0]}
+
+            # Latest Go/No-Go decision — table may not exist yet (fail-soft).
+            # 最新 Go/No-Go 決策 — 表可能尚未存在（fail-soft）。
+            try:
+                cur.execute(
+                    """
+                    SELECT decision, auc_delta
+                    FROM learning.dl3_ab_decisions
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                )
+                dec_row = cur.fetchone()
+                if dec_row:
+                    latest_decision = dec_row[0]
+                    auc_delta = (
+                        float(dec_row[1]) if dec_row[1] is not None else None
+                    )
+            except Exception:
+                # Table missing / schema drift — stub as PENDING_DATA.
+                # 表不存在 / schema 漂移 — 退回 PENDING_DATA。
+                conn.rollback()
+
+    recent = [
+        {
+            "time": r[0].isoformat() if r[0] is not None else None,
+            "symbol": r[1],
+            "model": r[2],
+            "horizon_min": int(r[3]) if r[3] is not None else None,
+            "latency_ms": int(r[4]) if r[4] is not None else None,
+            "ok": bool(r[5]),
+            "error_msg": r[6],
+        }
+        for r in recent_rows
+    ]
+
+    models_avail = {
+        key: _classify_dl3_model_availability(key, seen_models)
+        for key in _KNOWN_DL3_MODEL_KEYS
+    }
+
+    status_light = _classify_dl3_status(latest_decision, ok_rate_24h)
+
+    return {
+        "ok": True,
+        "status_light": status_light,
+        "latest_decision": latest_decision,
+        "auc_delta": auc_delta,
+        "models": models_avail,
+        "recent": recent,
+        "inference_24h": {
+            "count": count_24h,
+            "avg_latency_ms": avg_latency_24h,
+            "ok_rate": ok_rate_24h,
+        },
+        "last_update_ms": int(time.time() * 1000),
+    }
+
+
+@phase4_router.get("/dl3")
+async def get_phase4_dl3() -> dict[str, Any]:
+    """DL-3 card data: Go/No-Go decision + per-model availability + recent inferences.
+    DL-3 卡片資料：Go/No-Go 決策 + 兩個 model 可用性 + 最近推理列表。
+
+    Fail-closed: any error → ok=false grey placeholder (never raises).
+    """
+    try:
+        return _fetch_dl3_state_from_pg()
+    except Exception as exc:
+        logger.warning("phase4/dl3 fail-soft: %s", exc)
+        return _default_dl3_payload(reason=f"{type(exc).__name__}")
+
+
 @phase4_router.get("", include_in_schema=False)
 async def phase4_tab_redirect() -> RedirectResponse:
     """
