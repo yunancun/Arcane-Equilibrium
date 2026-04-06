@@ -47,22 +47,11 @@ impl StrategyParams for BbReversionParams {
                 agent_adjustable: false,
                 db_persisted: true,
             },
-            ParamRange {
-                name: "use_limit".into(),
-                min: 0.0,
-                max: 1.0,
-                step: Some(1.0),
-                agent_adjustable: true,
-                db_persisted: true,
-            },
-            ParamRange {
-                name: "limit_offset_bps".into(),
-                min: 1.0,
-                max: 100.0,
-                step: Some(1.0),
-                agent_adjustable: true,
-                db_persisted: true,
-            },
+            // GAP-9: use_limit / limit_offset_bps removed from agent-tunable
+            // ranges. Paper engine has no order-book sim and silently degrades
+            // limit→market, so enabling these would corrupt PnL accounting.
+            // Re-add when paper engine grows a real limit-order matcher.
+            // GAP-9：use_limit/limit_offset_bps 從可調列表移除（paper 無撮合）。
         ]
     }
 
@@ -114,7 +103,16 @@ impl BbReversion {
         params.validate()?;
         self.cooldown_ms = params.cooldown_ms;
         self.default_qty = params.default_qty;
-        self.use_limit = params.use_limit;
+        // GAP-9: paper engine cannot honor limit orders (no order-book sim).
+        // Force market mode regardless of incoming param to keep PnL faithful.
+        // GAP-9：paper 模式無法支援限價單，強制 market。
+        if params.use_limit {
+            tracing::warn!(
+                strategy = "bb_reversion",
+                "use_limit=true ignored: paper engine has no limit-order sim (GAP-9)"
+            );
+        }
+        self.use_limit = false;
         self.limit_offset_bps = params.limit_offset_bps;
         info!(strategy = "bb_reversion", "params updated / 參數已更新");
         Ok(())
@@ -412,12 +410,15 @@ mod tests {
     fn test_bb_rev_update_roundtrip() {
         let mut s = BbReversion::new();
         let p = BbReversionParams {
-            use_limit: true,
+            use_limit: true, // GAP-9: should be coerced to false
             limit_offset_bps: 20.0,
             ..Default::default()
         };
         assert!(s.update_params(p).is_ok());
-        assert!(s.get_params().use_limit);
+        assert!(
+            !s.get_params().use_limit,
+            "GAP-9: use_limit must be coerced to false (paper has no limit sim)"
+        );
         assert!((s.get_params().limit_offset_bps - 20.0).abs() < 0.01);
     }
 }
