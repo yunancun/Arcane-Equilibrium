@@ -7,6 +7,21 @@
 //! MODULE_NOTE (中): 從有界通道接收 FeatureSnapshot 的異步消費者。
 //!   每 feature_upsert_interval_ms 通過 UPSERT 刷新。
 //!   特徵向量從 IndicatorSnapshot 扁平化（34 維）。
+//!
+//! DB-RUN-4 (Session 12 investigation): There is intentionally NO `features.history`
+//! table. `features.online_latest` is a hot cache for inference and PSI drift
+//! detection (overwritten in place). The historical training pipeline reads from
+//! `trading.decision_context_snapshots.indicators_snapshot` JSONB instead — see
+//! `learning.scorer_training_features` VIEW in V005, which JOINs decision context
+//! with `trading.decision_outcomes` for label backfill. Do NOT add a separate
+//! features history table without first updating that VIEW and the training
+//! pipeline; the dual path would fragment feature provenance.
+//!
+//! DB-RUN-4（Session 12 調查）：刻意 **不** 設 `features.history` 表。online_latest
+//! 是推論+PSI 漂移檢測的熱快取（in-place overwrite）；訓練歷史走
+//! `trading.decision_context_snapshots.indicators_snapshot` JSONB（V005 的
+//! `learning.scorer_training_features` VIEW 會 JOIN 進來）。新增 history 表前必須
+//! 先同步更新該 VIEW + 訓練管線，避免特徵來源分裂。
 
 use super::pool::DbPool;
 use crate::feature_collector::FeatureSnapshot;
