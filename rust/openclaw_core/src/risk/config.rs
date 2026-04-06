@@ -47,7 +47,26 @@ pub struct RiskManagerConfig {
     pub trailing_stop_distance_pct: f64,
     /// Position size multiplier (1.0 = full) / 持倉大小倍率（1.0 = 滿倉）
     pub position_size_multiplier: f64,
+
+    // -- PNL-7: dynamic stop tunables (extracted from hardcoded 0.6/0.8) --
+    // PNL-7：動態止損可調參數（從寫死的 0.6/0.8 提取）
+    /// Dynamic-stop base as fraction of hard stop (default 0.6).
+    /// 動態止損基礎比例（硬止損的多少倍，默認 0.6）。
+    #[serde(default = "default_dynamic_stop_base_ratio")]
+    pub dynamic_stop_base_ratio: f64,
+    /// Dynamic-stop cap as fraction of hard stop (default 0.8).
+    /// 動態止損上限比例（硬止損的多少倍，默認 0.8）。
+    #[serde(default = "default_dynamic_stop_cap_ratio")]
+    pub dynamic_stop_cap_ratio: f64,
+    /// PNL-6: trailing stop minimum locked-profit floor as fraction of dyn_stop (default 0.5).
+    /// PNL-6：追蹤止損鎖定盈利下限（dyn_stop 的多少倍，默認 0.5）。
+    #[serde(default = "default_trailing_min_rr_ratio")]
+    pub trailing_min_rr_ratio: f64,
 }
+
+fn default_dynamic_stop_base_ratio() -> f64 { 0.6 }
+fn default_dynamic_stop_cap_ratio() -> f64 { 0.8 }
+fn default_trailing_min_rr_ratio() -> f64 { 0.5 }
 
 impl Default for RiskManagerConfig {
     fn default() -> Self {
@@ -69,6 +88,9 @@ impl Default for RiskManagerConfig {
             trailing_stop_activation_pct: 1.0,
             trailing_stop_distance_pct: 0.8,
             position_size_multiplier: 1.0,
+            dynamic_stop_base_ratio: 0.6,
+            dynamic_stop_cap_ratio: 0.8,
+            trailing_min_rr_ratio: 0.5,
         }
     }
 }
