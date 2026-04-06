@@ -349,9 +349,22 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0);
+    // Side is "Buy" or "Sell" — preserved in metadata so the trade aggregator
+    // can compute buy/sell volume splits and large-trade flags.
+    // 方向（Buy/Sell）— 保留在 metadata 中，供 trade aggregator 計算多空成交量。
+    let side = item
+        .get("S")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let mut event = PriceEvent::new(symbol, price, ts);
     event.volume_24h = volume;
+    event.metadata.insert("type".into(), "trade".into());
+    if !side.is_empty() {
+        event.metadata.insert("side".into(), side);
+    }
+    event.metadata.insert("qty".into(), volume.to_string());
     Some(event)
 }
 
@@ -441,10 +454,32 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
         })
         .unwrap_or_else(now_ms);
 
+    // Extract top-5 levels for the orderbook aggregator (idle writer #1).
+    // 提取前 5 檔深度供 OB 聚合器使用（idle writer #1 修復）。
+    let parse_levels = |arr: &[serde_json::Value]| -> Vec<(f64, f64)> {
+        arr.iter()
+            .take(5)
+            .filter_map(|lvl| {
+                let lvl = lvl.as_array()?;
+                let price = lvl.first()?.as_str()?.parse::<f64>().ok()?;
+                let qty = lvl.get(1)?.as_str()?.parse::<f64>().ok()?;
+                Some((price, qty))
+            })
+            .collect()
+    };
+    let bid_levels = parse_levels(bids);
+    let ask_levels = parse_levels(asks);
+
     let mut event = PriceEvent::new(symbol, mid_price, ts);
     event.bid_price = best_bid;
     event.ask_price = best_ask;
     event.metadata.insert("type".into(), "orderbook".into());
+    if let Ok(s) = serde_json::to_string(&bid_levels) {
+        event.metadata.insert("bids5".into(), s);
+    }
+    if let Ok(s) = serde_json::to_string(&ask_levels) {
+        event.metadata.insert("asks5".into(), s);
+    }
     Some(event)
 }
 
