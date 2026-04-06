@@ -353,6 +353,15 @@ impl TickPipeline {
         self.intent_processor.set_fee_rate(rate);
     }
 
+    /// Wire AccountManager for live per-symbol fee lookups.
+    /// 接入 AccountManager 用於 per-symbol 真實費率查詢。
+    pub fn set_account_manager(
+        &mut self,
+        am: std::sync::Arc<crate::account_manager::AccountManager>,
+    ) {
+        self.intent_processor.set_account_manager(am);
+    }
+
     /// PNL-3 / Session 12: Update boot cooldown at runtime via IPC.
     /// Clamped to [0, 1h]. Returns the value actually applied.
     /// PNL-3：運行時更新啟動冷卻期，鉗制到 [0, 1h]。
@@ -1320,7 +1329,7 @@ impl TickPipeline {
             //   short-circuits the cost-edge check (only fires when pnl > 0).
             // GAP-2：實時 cost_ratio = 來回手續費 / 浮盈。
             let cost_ratio = if *pnl_pct > 0.0 {
-                (2.0 * self.intent_processor.fee_rate() * 100.0) / *pnl_pct
+                (2.0 * self.intent_processor.fee_rate(symbol) * 100.0) / *pnl_pct
             } else {
                 0.0
             };
