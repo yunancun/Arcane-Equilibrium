@@ -276,6 +276,18 @@ pub struct TickPipeline {
     /// DB-RUN-5: Last close price per symbol for return computation.
     /// DB-RUN-5：每品種上一根 K 線收盤價（用於計算回報）。
     last_close_price: HashMap<String, f64>,
+    /// W-3: LinUCB runtime for read-only arm selection on each decision tick.
+    /// None = disabled (no arm selection, decision context emits NULL).
+    /// W-3：LinUCB 運行時，每個決策 tick 做唯讀 arm 選擇。None = 關閉
+    /// （不選 arm，decision context 寫 NULL）。
+    linucb: Option<std::sync::Arc<crate::linucb::LinUcbRuntime>>,
+    /// W-4 (Phase 4 wiring sweep): shared news context snapshot, read at the
+    /// DecisionContextMsg producer site to populate `news_severity` +
+    /// `hours_since_last_major_news`. None = no news wired.
+    /// W-4 (Phase 4 wiring sweep)：共享新聞 context 快照，在 DecisionContextMsg
+    /// producer 站點讀取以填 news_severity + hours_since_last_major_news。
+    /// None = 未接新聞。
+    news_snapshot: Option<std::sync::Arc<crate::news::NewsContextSnapshot>>,
 }
 
 impl TickPipeline {
@@ -344,7 +356,27 @@ impl TickPipeline {
             context_throttled: 0,
             black_swan: crate::database::black_swan_detector::BlackSwanDetector::new(),
             last_close_price: HashMap::new(),
+            linucb: None,
+            news_snapshot: None,
         }
+    }
+
+    /// W-3: Plug in a LinUCB runtime (read-only on the live path; metadata only).
+    /// W-3：注入 LinUCB 運行時（live 路徑唯讀；僅 metadata）。
+    pub fn set_linucb_runtime(
+        &mut self,
+        rt: std::sync::Arc<crate::linucb::LinUcbRuntime>,
+    ) {
+        self.linucb = Some(rt);
+    }
+
+    /// W-4: Plug in a shared NewsContextSnapshot (read-only on the live path).
+    /// W-4：注入共享 NewsContextSnapshot（live 路徑唯讀）。
+    pub fn set_news_snapshot(
+        &mut self,
+        snap: std::sync::Arc<crate::news::NewsContextSnapshot>,
+    ) {
+        self.news_snapshot = Some(snap);
     }
 
     /// Set dynamic fee rate from API for more accurate paper trading cost.
@@ -932,6 +964,56 @@ impl TickPipeline {
             if let Some(ref tx) = self.context_tx {
                 let ind = indicators.as_ref();
                 let pos = self.paper_state.get_position(&event.symbol);
+
+                // W-3: LinUCB read-only arm selection (metadata only — does NOT
+                // affect any trading decision). Fail-soft: any error → None →
+                // SQL NULL at write.
+                // W-3：LinUCB 唯讀 arm 選擇（僅 metadata，不影響任何交易決策）。
+                // Fail-soft：任何錯誤 → None → 寫入 SQL NULL。
+                let (linucb_arm_id, linucb_confidence_bound) = if let Some(ref rt) = self.linucb {
+                    let regime = ind
+                        .and_then(|i| i.hurst.as_ref())
+                        .map(|h| h.regime.clone())
+                        .unwrap_or_else(|| "random_walk".to_string());
+                    let strategy = signals[0].source.clone();
+                    let ctx = crate::linucb::LinUcbRuntime::build_context_features(
+                        ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent),
+                        ind.and_then(|i| i.rsi_14),
+                        ind.and_then(|i| i.bollinger.as_ref()).map(|b| b.bandwidth),
+                        ind.and_then(|i| i.hurst.as_ref()).map(|h| h.hurst),
+                        ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx),
+                        None, // vol_ratio not available in IndicatorSnapshot / 暫無 vol_ratio
+                        event.ts_ms as i64,
+                    );
+                    match rt.select_for_intent(&regime, &strategy, &ctx) {
+                        Some(sel) => (Some(sel.arm_id), Some(sel.ucb)),
+                        None => {
+                            tracing::warn!(
+                                regime = %regime,
+                                strategy = %strategy,
+                                "linucb arm not found, emitting NULL"
+                            );
+                            (None, None)
+                        }
+                    }
+                } else {
+                    (None, None)
+                };
+
+                // W-4: Read news context snapshot (read-only; sink side updates
+                // it asynchronously when news arrives). Fail-soft: None → NULL.
+                // W-4：讀取新聞 context 快照（唯讀；sink 側新聞到達時非同步更新）。
+                // Fail-soft：None → NULL。
+                let (news_severity, hours_since_last_major_news) =
+                    if let Some(ref snap) = self.news_snapshot {
+                        let sev = snap.latest_severity();
+                        let sev_opt = if sev > 0.0 { Some(sev) } else { None };
+                        let hours = snap.hours_since_last_major(event.ts_ms as i64);
+                        (sev_opt, hours)
+                    } else {
+                        (None, None)
+                    };
+
                 let _ = tx.try_send(crate::database::DecisionContextMsg {
                     context_id: format!("ctx-{}-{}", event.symbol, event.ts_ms),
                     ts_ms: event.ts_ms,
@@ -971,15 +1053,19 @@ impl TickPipeline {
                         .map(|p| serde_json::to_value(p).unwrap_or_default())
                         .unwrap_or_default(),
                     decision_payload: serde_json::to_value(&signals).unwrap_or_default(),
-                    // 4-18: Phase 4 / V009+V003 columns — producer wiring is
-                    // deferred to W4 sweep; emit NULL (None) at this site.
-                    // 4-18：Phase 4 / V009+V003 欄位 — producer 接線由 W4 sweep 處理，
-                    // 本發射點暫寫 NULL（None）。
+                    // 4-18: Phase 4 / V009+V003 columns. W-3 wires LinUCB arm_id +
+                    // UCB; W-4 wires news_severity + hours_since_last_major_news
+                    // from the NewsContextSnapshot. claude_directive_id stays NULL
+                    // until a future directive→tick association path is built.
+                    // 4-18：Phase 4 / V009+V003 欄位。W-3 接 LinUCB arm_id + UCB；
+                    // W-4 接 news_severity + hours_since_last_major_news（來自
+                    // NewsContextSnapshot）。claude_directive_id 待未來
+                    // directive→tick 關聯路徑建立後接通。
                     claude_directive_id: None,
-                    linucb_arm_id: None,
-                    linucb_confidence_bound: None,
-                    news_severity: None,
-                    hours_since_last_major_news: None,
+                    linucb_arm_id,
+                    linucb_confidence_bound,
+                    news_severity,
+                    hours_since_last_major_news,
                 });
             }
         }

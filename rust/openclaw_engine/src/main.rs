@@ -866,6 +866,66 @@ async fn async_main(config: Arc<ConfigManager>) {
         warn!("db_pool unavailable, BudgetTracker not started / db_pool 不可用，BudgetTracker 未啟動");
     }
 
+    // ------------------------------------------------------------------
+    // Phase 4 W-3/W-4: Construct LinUCB runtime + news context snapshot.
+    // These are shared resources plumbed to TickPipeline via EventConsumerDeps,
+    // and to the future News producer loop via the snapshot handle.
+    // Phase 4 W-3/W-4：構造 LinUCB runtime + 新聞 context 快照。
+    // 這些共享資源透過 EventConsumerDeps 接入 TickPipeline，並透過快照句柄
+    // 供未來的 News producer loop 使用。
+    // ------------------------------------------------------------------
+    let shared_linucb_runtime = Arc::new(
+        openclaw_engine::linucb::LinUcbRuntime::cold_start_v1_15(),
+    );
+    info!(
+        active_version = shared_linucb_runtime.arm_space_version(),
+        feature_schema_hash = shared_linucb_runtime.feature_schema_hash(),
+        "LinUcbRuntime cold-started / LinUCB runtime 冷啟動"
+    );
+
+    let shared_news_snapshot = Arc::new(
+        openclaw_engine::news::NewsContextSnapshot::new(),
+    );
+    info!(
+        "NewsContextSnapshot constructed (default severity 0.0) / 新聞 context 快照已建立"
+    );
+
+    // ------------------------------------------------------------------
+    // Phase 4 W-1/W-2: Shared governance halted handle + guardian impl.
+    // GovernanceCoreWrapper and GuardianHaltCheckImpl share the same
+    // Arc<AtomicBool> so news-triggered halts are immediately visible to
+    // the Teacher DirectiveApplier (single source of truth, no double-write).
+    // The DirectiveApplier itself is not constructed here yet — it has no
+    // live invoker (Claude API pull loop is a follow-up task); the wrappers
+    // exist ready for that task to plug in.
+    // Phase 4 W-1/W-2：共享 governance halted 句柄 + guardian impl。
+    // GovernanceCoreWrapper 與 GuardianHaltCheckImpl 共享同一個
+    // Arc<AtomicBool>，使新聞觸發的 halt 對 Teacher DirectiveApplier 立即可見
+    // （單一真相源，無雙寫）。DirectiveApplier 本身尚未在此構造 —— 還沒有
+    // live invoker（Claude API 拉取 loop 是後續任務）；wrapper 已就位供該
+    // 任務直接插入。
+    let governance_wrapper = Arc::new(
+        openclaw_engine::claude_teacher::GovernanceCoreWrapper::with_defaults(vec![
+            "ma_crossover".to_string(),
+            "bb_reversion".to_string(),
+            "bb_breakout".to_string(),
+            "grid_trading".to_string(),
+            "funding_arb".to_string(),
+        ]),
+    );
+    let shared_halted_handle = governance_wrapper.halted_handle();
+    let guardian_impl = Arc::new(
+        openclaw_engine::news::GuardianHaltCheckImpl::new(Arc::clone(&shared_halted_handle)),
+    );
+    info!(
+        "Phase 4 governance+guardian wrappers constructed (sharing halted atomic) / W-1/W-2 wrappers 已構造"
+    );
+    // Hold the wrappers alive so they can be used by a future Claude API
+    // pull loop. Suppressed unused-variable warnings via underscore prefix.
+    // 保持 wrapper 存活供未來的 Claude API 拉取 loop 使用。
+    let _phase4_governance_wrapper = governance_wrapper;
+    let _phase4_guardian_impl = guardian_impl;
+
     let (market_tx, market_rx) = if db_pool.is_available() {
         let (tx, rx) = tokio::sync::mpsc::channel(4096);
         (Some(tx), Some(rx))
@@ -1016,6 +1076,9 @@ async fn async_main(config: Arc<ConfigManager>) {
             context_tx,
             exchange_event_rx: shared_exchange_event_rx,
             account_manager: shared_account_manager,
+            // Phase 4 W-3/W-4 live plumbing / Phase 4 W-3/W-4 實時接線
+            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
         };
         tokio::spawn(run_event_consumer(deps))
     };

@@ -331,3 +331,63 @@ def test_phase4_classify_dl3_model_availability():
     assert _classify_dl3_model_availability("chronos", seen) is True
     assert _classify_dl3_model_availability("timesfm", seen) is True
     assert _classify_dl3_model_availability("chronos", set()) is None
+
+
+# ─── 4-20 weekly review approval routes ─────────────────────────────────
+
+
+def test_phase4_weekly_review_approve_validates_payload(client: TestClient) -> None:
+    """Missing required fields → 422 Pydantic validation error.
+    缺必要欄位 → 422 Pydantic 驗證錯誤。
+    """
+    resp = client.post("/api/v1/phase4/weekly_review/approve", json={})
+    assert resp.status_code == 422
+
+
+def test_phase4_weekly_review_approve_route_returns_200_fail_soft(client: TestClient) -> None:
+    """Valid payload but no PG → 200 with ok=false (fail-soft, no 5xx).
+    合法 payload 但無 PG → 200 + ok=false（fail-soft，無 5xx）。
+    """
+    resp = client.post(
+        "/api/v1/phase4/weekly_review/approve",
+        json={"week_iso": "2026-W15", "approved_by": "test_op"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert "error" in body
+
+
+def test_phase4_weekly_review_reject_route_returns_200_fail_soft(client: TestClient) -> None:
+    """Reject endpoint also fail-soft on no-PG.
+    Reject 端點在無 PG 時也 fail-soft。
+    """
+    resp = client.post(
+        "/api/v1/phase4/weekly_review/reject",
+        json={"week_iso": "2026-W15", "approved_by": "test_op", "decision_notes": "x"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+
+
+def test_phase4_weekly_review_latest_route_fail_soft(client: TestClient) -> None:
+    """GET latest endpoint should fail-soft to ok=false + review=null.
+    GET latest 端點應 fail-soft 為 ok=false + review=null。
+    """
+    resp = client.get("/api/v1/phase4/weekly_review/latest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["review"] is None
+
+
+def test_phase4_weekly_review_approve_negative_week_iso_validates(client: TestClient) -> None:
+    """Empty week_iso → Pydantic min_length=1 violation → 422.
+    空 week_iso → Pydantic min_length=1 違反 → 422。
+    """
+    resp = client.post(
+        "/api/v1/phase4/weekly_review/approve",
+        json={"week_iso": "", "approved_by": "test_op"},
+    )
+    assert resp.status_code == 422

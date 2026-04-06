@@ -34,8 +34,9 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -768,6 +769,149 @@ async def get_phase4_dl3() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("phase4/dl3 fail-soft: %s", exc)
         return _default_dl3_payload(reason=f"{type(exc).__name__}")
+
+
+# ---------------------------------------------------------------------------
+# 4-20 · Weekly review approval routes
+# 4-20 · 週度審查批准路由
+# ---------------------------------------------------------------------------
+
+
+class WeeklyReviewApproveRequest(BaseModel):
+    """Operator approve/reject payload for a Phase 4 weekly review row.
+    Phase 4 週度審查 row 的 operator 批准/拒絕 payload。
+    """
+
+    week_iso: str = Field(..., min_length=1, max_length=16)
+    approved_by: str = Field(..., min_length=1, max_length=128)
+    decision_notes: str | None = Field(default=None, max_length=2000)
+
+
+def _update_weekly_review(week_iso: str, approved: bool, approved_by: str, decision_notes: str | None) -> dict:
+    """UPDATE learning.weekly_review_log row by week_iso. Fail-soft.
+    依 week_iso 更新 learning.weekly_review_log row。fail-soft。
+
+    Returns dict ok/error suitable for direct JSON response.
+    返回適合直接 JSON 回應的 ok/error dict。
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        return {"ok": False, "error": f"psycopg2 unavailable: {exc}"}
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        return {"ok": False, "error": "no_dsn"}
+
+    try:
+        conn = psycopg2.connect(dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE learning.weekly_review_log
+                    SET approved = %s,
+                        approved_at = NOW(),
+                        approved_by = %s,
+                        decision_notes = %s
+                    WHERE week_iso = %s AND approved IS NULL
+                    RETURNING review_id
+                    """,
+                    (approved, approved_by, decision_notes, week_iso),
+                )
+                row = cur.fetchone()
+                conn.commit()
+                if row:
+                    return {
+                        "ok": True,
+                        "review_id": int(row[0]),
+                        "week_iso": week_iso,
+                        "approved": approved,
+                    }
+                return {"ok": False, "error": "no_pending_review_for_week"}
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("phase4/weekly_review update fail-soft: %s", exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+@phase4_router.post("/weekly_review/approve")
+async def approve_weekly_review(payload: WeeklyReviewApproveRequest) -> dict[str, Any]:
+    """Operator approves a pending weekly review row.
+    Operator 批准 pending 的週度審查 row。
+    """
+    return _update_weekly_review(
+        payload.week_iso, True, payload.approved_by, payload.decision_notes
+    )
+
+
+@phase4_router.post("/weekly_review/reject")
+async def reject_weekly_review(payload: WeeklyReviewApproveRequest) -> dict[str, Any]:
+    """Operator rejects a pending weekly review row.
+    Operator 拒絕 pending 的週度審查 row。
+    """
+    return _update_weekly_review(
+        payload.week_iso, False, payload.approved_by, payload.decision_notes
+    )
+
+
+@phase4_router.get("/weekly_review/latest")
+async def get_latest_weekly_review() -> dict[str, Any]:
+    """GET the most recent weekly review row regardless of approval state.
+    取最近一筆週度審查 row，不分批准狀態。
+
+    Fail-soft: any PG error → ok=false (never raises 5xx).
+    """
+    import os
+
+    try:
+        import psycopg2  # type: ignore
+    except Exception as exc:
+        return {"ok": False, "error": f"psycopg2 unavailable: {exc}", "review": None}
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    if not dsn:
+        return {"ok": False, "error": "no_dsn", "review": None}
+
+    try:
+        conn = psycopg2.connect(dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT review_id, week_iso, generated_at, approved,
+                           approved_at, approved_by, decision_notes,
+                           metrics_json, report_md_path
+                    FROM learning.weekly_review_log
+                    ORDER BY generated_at DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": True, "review": None}
+                return {
+                    "ok": True,
+                    "review": {
+                        "review_id": int(row[0]),
+                        "week_iso": row[1],
+                        "generated_at": row[2].isoformat() if row[2] else None,
+                        "approved": row[3],
+                        "approved_at": row[4].isoformat() if row[4] else None,
+                        "approved_by": row[5],
+                        "decision_notes": row[6],
+                        "metrics_json": row[7],
+                        "report_md_path": row[8],
+                    },
+                }
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("phase4/weekly_review/latest fail-soft: %s", exc)
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "review": None}
 
 
 @phase4_router.get("", include_in_schema=False)

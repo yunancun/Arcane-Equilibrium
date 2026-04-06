@@ -52,6 +52,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         context_tx,
         exchange_event_rx: _exchange_event_rx_field,
         account_manager,
+        linucb_runtime,
+        news_snapshot,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -76,6 +78,20 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     if let Some(am) = account_manager {
         pipeline.set_account_manager(Arc::clone(&am));
         info!("pipeline using AccountManager for per-symbol fee rates / 接入動態費率");
+    }
+
+    // Phase 4 W-3: Wire LinUCB runtime (read-only arm selection, metadata only).
+    // Phase 4 W-3：接入 LinUCB 運行時（唯讀 arm 選擇，僅 metadata）。
+    if let Some(rt) = linucb_runtime {
+        pipeline.set_linucb_runtime(rt);
+        info!("pipeline using LinUcbRuntime for arm metadata / 接入 LinUCB runtime");
+    }
+
+    // Phase 4 W-4: Wire shared NewsContextSnapshot (news_severity + hours_since_last_major_news).
+    // Phase 4 W-4：接入共享 NewsContextSnapshot（news_severity + hours_since_last_major_news）。
+    if let Some(snap) = news_snapshot {
+        pipeline.set_news_snapshot(snap);
+        info!("pipeline using NewsContextSnapshot for news context / 接入新聞快照");
     }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額

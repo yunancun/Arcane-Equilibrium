@@ -15,10 +15,12 @@
 
 pub mod arms_v1_15;
 pub mod inference;
+pub mod runtime;
 pub mod schema_hash;
 pub mod state_io;
 
 pub use arms_v1_15::v1_15_arm_ids;
 pub use inference::{compute_theta, compute_ucb, select_arm, update, ArmState, LinUcbConfig};
+pub use runtime::{ArmSelection, LinUcbRuntime, CONTEXT_DIM_V1, FEATURE_NAMES_V1};
 pub use schema_hash::compute_feature_schema_hash;
 pub use state_io::{load_arms, upsert_arm, LinUcbIoError};
