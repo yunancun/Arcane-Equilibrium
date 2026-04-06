@@ -196,6 +196,12 @@ fn test_handle_update_risk_config_clamps_values() {
             dynamic_stop_base_ratio: None,
             dynamic_stop_cap_ratio: None,
             trailing_min_rr_ratio: None,
+            cost_gate_min_confidence: None,
+            cost_gate_k_base: None,
+            cost_gate_k_medium: None,
+            cost_gate_k_small: None,
+            adx_trending_threshold: None,
+            boot_cooldown_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -229,6 +235,12 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
             dynamic_stop_base_ratio: Some(0.4),       // valid
             dynamic_stop_cap_ratio: Some(5.0),        // invalid (> 1.0)
             trailing_min_rr_ratio: Some(0.75),        // valid
+            cost_gate_min_confidence: None,
+            cost_gate_k_base: None,
+            cost_gate_k_medium: None,
+            cost_gate_k_small: None,
+            adx_trending_threshold: None,
+            boot_cooldown_ms: None,
         },
         &mut pipeline,
         &mut writer,
@@ -238,6 +250,48 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
     assert!((rc.dynamic_stop_base_ratio - 0.4).abs() < 1e-9);
     assert!((rc.dynamic_stop_cap_ratio - 0.8).abs() < 1e-9, "invalid cap rejected, default kept");
     assert!((rc.trailing_min_rr_ratio - 0.75).abs() < 1e-9);
+}
+
+#[test]
+fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
+    use crate::tick_pipeline::PaperSessionCommand;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+
+    super::handlers::handle_paper_command(
+        PaperSessionCommand::UpdateRiskConfig {
+            hard_stop_pct: None,
+            trailing_stop_pct: None,
+            time_stop_hours: None,
+            atr_multiplier: None,
+            take_profit_pct: None,
+            max_leverage: None,
+            max_drawdown_pct: None,
+            max_same_direction_positions: None,
+            p1_risk_pct: None,
+            h0_shadow_mode: None,
+            dynamic_stop_base_ratio: None,
+            dynamic_stop_cap_ratio: None,
+            trailing_min_rr_ratio: None,
+            cost_gate_min_confidence: Some(0.25),
+            cost_gate_k_base: Some(1.8),
+            cost_gate_k_medium: Some(2.5),
+            cost_gate_k_small: Some(4.0),
+            adx_trending_threshold: Some(30.0),
+            boot_cooldown_ms: Some(120_000),
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+    );
+    let rc = pipeline.intent_processor.risk_config();
+    assert!((rc.cost_gate_min_confidence - 0.25).abs() < 1e-9);
+    assert!((rc.cost_gate_k_base - 1.8).abs() < 1e-9);
+    assert!((rc.cost_gate_k_medium - 2.5).abs() < 1e-9);
+    assert!((rc.cost_gate_k_small - 4.0).abs() < 1e-9);
+    assert!((rc.adx_trending_threshold - 30.0).abs() < 1e-9);
+    assert_eq!(pipeline.boot_cooldown_ms(), 120_000);
 }
 
 #[test]

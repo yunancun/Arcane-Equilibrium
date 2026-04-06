@@ -585,6 +585,17 @@ async fn handle_update_risk_config(
     let trailing_min_rr_ratio = params
         .get("trailing_min_rr_ratio")
         .and_then(|v| v.as_f64());
+    // Session 12: cost-gate + regime + boot cooldown
+    let cost_gate_min_confidence = params
+        .get("cost_gate_min_confidence")
+        .and_then(|v| v.as_f64());
+    let cost_gate_k_base = params.get("cost_gate_k_base").and_then(|v| v.as_f64());
+    let cost_gate_k_medium = params.get("cost_gate_k_medium").and_then(|v| v.as_f64());
+    let cost_gate_k_small = params.get("cost_gate_k_small").and_then(|v| v.as_f64());
+    let adx_trending_threshold = params
+        .get("adx_trending_threshold")
+        .and_then(|v| v.as_f64());
+    let boot_cooldown_ms = params.get("boot_cooldown_ms").and_then(|v| v.as_u64());
 
     // At least one param must be provided / 至少需要一個參數
     let has_any = hard_stop_pct.is_some()
@@ -599,7 +610,13 @@ async fn handle_update_risk_config(
         || h0_shadow_mode.is_some()
         || dynamic_stop_base_ratio.is_some()
         || dynamic_stop_cap_ratio.is_some()
-        || trailing_min_rr_ratio.is_some();
+        || trailing_min_rr_ratio.is_some()
+        || cost_gate_min_confidence.is_some()
+        || cost_gate_k_base.is_some()
+        || cost_gate_k_medium.is_some()
+        || cost_gate_k_small.is_some()
+        || adx_trending_threshold.is_some()
+        || boot_cooldown_ms.is_some();
     if !has_any {
         return JsonRpcResponse::error(
             id,
@@ -622,6 +639,12 @@ async fn handle_update_risk_config(
         dynamic_stop_base_ratio,
         dynamic_stop_cap_ratio,
         trailing_min_rr_ratio,
+        cost_gate_min_confidence,
+        cost_gate_k_base,
+        cost_gate_k_medium,
+        cost_gate_k_small,
+        adx_trending_threshold,
+        boot_cooldown_ms,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
 }

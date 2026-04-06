@@ -175,6 +175,51 @@ impl IntentProcessor {
         changed
     }
 
+    /// Session 12: Patch cost-gate + regime tunables in-place with validation.
+    /// Each Some(v) is range-checked; invalid values silently dropped.
+    /// Session 12：原地更新成本門 + regime 三類參數，逐個範圍校驗。
+    pub fn patch_cost_gate_params(
+        &mut self,
+        min_confidence: Option<f64>,
+        k_base: Option<f64>,
+        k_medium: Option<f64>,
+        k_small: Option<f64>,
+        adx_trending_threshold: Option<f64>,
+    ) -> u32 {
+        let mut changed = 0;
+        if let Some(v) = min_confidence {
+            if v.is_finite() && (0.0..=1.0).contains(&v) {
+                self.risk_config.cost_gate_min_confidence = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = k_base {
+            if v.is_finite() && (0.5..=10.0).contains(&v) {
+                self.risk_config.cost_gate_k_base = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = k_medium {
+            if v.is_finite() && (0.5..=20.0).contains(&v) {
+                self.risk_config.cost_gate_k_medium = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = k_small {
+            if v.is_finite() && (0.5..=50.0).contains(&v) {
+                self.risk_config.cost_gate_k_small = v;
+                changed += 1;
+            }
+        }
+        if let Some(v) = adx_trending_threshold {
+            if v.is_finite() && (0.0..=100.0).contains(&v) {
+                self.risk_config.adx_trending_threshold = v;
+                changed += 1;
+            }
+        }
+        changed
+    }
+
     /// RRC-1-B2: Update daily start balance (called on each tick, resets at UTC midnight).
     /// RRC-1-B2：更新每日起始餘額（每 tick 調用，UTC 午夜重置）。
     pub fn maybe_reset_daily_balance(&mut self, balance: f64, ts_ms: u64) {
@@ -400,37 +445,26 @@ impl IntentProcessor {
 
         // ─── Gate 3: Cost gate — reject if EV < k × round_trip_fee ───
         // 成本門控：預期收益 < k × 往返手續費時拒絕
-        // QC formula: expected_profit = ATR × confidence × qty
-        //             round_trip_fee  = notional × 2 × fee_rate
-        //             reject if expected_profit < k × round_trip_fee
-        // QC 公式：k=1.5(paper), 2.0(live), min_confidence=0.15
+        // Session 12: thresholds read from RiskManagerConfig (was hardcoded 0.15 / 1.5).
         {
-            const MIN_CONFIDENCE: f64 = 0.15;
-            const K_PAPER: f64 = 1.5;
-
-            // Hard confidence floor — below 15%, signal is noise
-            // 信心硬地板 — 低於 15% 視為噪聲
-            if intent.confidence < MIN_CONFIDENCE {
+            let min_confidence = self.risk_config.cost_gate_min_confidence;
+            if intent.confidence < min_confidence {
                 return IntentResult {
                     submitted: false,
                     rejected_reason: Some(format!(
                         "cost_gate: confidence {:.2} < min {:.2}",
-                        intent.confidence, MIN_CONFIDENCE,
+                        intent.confidence, min_confidence,
                     )),
                     fill: None,
                 };
             }
 
-            // ATR-based EV check (fail-open if ATR unavailable)
-            // 基於 ATR 的預期值檢查（ATR 不可用時放行）
             if atr > 0.0 {
                 let fee_rate = self.taker_fee_rate.unwrap_or(0.00055);
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
-                // PNL-5: scale k by notional (small accounts → tighter cost gate)
-                // PNL-5：根據 notional 調整 k（小帳戶收緊成本門）
-                let k = Self::cost_gate_k(notional).max(K_PAPER);
+                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
 
                 if expected_profit < k * rt_fee {
                     return IntentResult {
@@ -623,18 +657,15 @@ impl IntentProcessor {
             }
         }
 
-        // ─── Gate 3: Cost gate — reject if EV < k × round_trip_fee ───
-        // 成本門控：預期收益 < k × 往返手續費時拒絕
+        // ─── Gate 3: Cost gate (config-driven, Session 12) ───
         {
-            const MIN_CONFIDENCE: f64 = 0.15;
-            const K_PAPER: f64 = 1.5;
-
-            if intent.confidence < MIN_CONFIDENCE {
+            let min_confidence = self.risk_config.cost_gate_min_confidence;
+            if intent.confidence < min_confidence {
                 return ExchangeGateResult {
                     approved: false,
                     rejected_reason: Some(format!(
                         "cost_gate: confidence {:.2} < min {:.2}",
-                        intent.confidence, MIN_CONFIDENCE,
+                        intent.confidence, min_confidence,
                     )),
                     approved_qty: 0.0,
                 };
@@ -645,9 +676,7 @@ impl IntentProcessor {
                 let expected_profit = atr * intent.confidence * final_qty;
                 let notional = final_qty * price;
                 let rt_fee = notional * 2.0 * fee_rate;
-                // PNL-5: scale k by notional (small accounts → tighter cost gate)
-                // PNL-5：根據 notional 調整 k（小帳戶收緊成本門）
-                let k = Self::cost_gate_k(notional).max(K_PAPER);
+                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
 
                 if expected_profit < k * rt_fee {
                     return ExchangeGateResult {
@@ -675,17 +704,16 @@ impl IntentProcessor {
         self.taker_fee_rate = Some(rate);
     }
 
-    /// PNL-5: Cost-gate k multiplier scaled by notional size.
-    /// Small notionals incur proportionally larger fee drag, so require
-    /// a larger EV margin before admitting the order.
-    /// PNL-5：成本門 k 倍率隨 notional 規模調整，小單位需更大 EV 邊際。
-    fn cost_gate_k(notional: f64) -> f64 {
+    /// PNL-5: Cost-gate k multiplier scaled by notional size, reading
+    /// k_small / k_medium / k_base from RiskManagerConfig (Session 12 cleanup).
+    /// PNL-5：成本門 k 倍率隨 notional 規模調整，三檔 k 從 config 讀取。
+    fn cost_gate_k(&self, notional: f64) -> f64 {
         if notional < 50.0 {
-            3.0
+            self.risk_config.cost_gate_k_small
         } else if notional < 200.0 {
-            2.0
+            self.risk_config.cost_gate_k_medium
         } else {
-            1.5
+            self.risk_config.cost_gate_k_base
         }
     }
 }
@@ -915,13 +943,14 @@ mod tests {
 
     #[test]
     fn test_pnl5_cost_gate_k_tiers() {
-        // PNL-5: k=3.0 below $50, k=2.0 below $200, k=1.5 otherwise.
-        assert_eq!(IntentProcessor::cost_gate_k(20.0), 3.0);
-        assert_eq!(IntentProcessor::cost_gate_k(49.99), 3.0);
-        assert_eq!(IntentProcessor::cost_gate_k(50.0), 2.0);
-        assert_eq!(IntentProcessor::cost_gate_k(199.99), 2.0);
-        assert_eq!(IntentProcessor::cost_gate_k(200.0), 1.5);
-        assert_eq!(IntentProcessor::cost_gate_k(10_000.0), 1.5);
+        // PNL-5: k=3.0 below $50, k=2.0 below $200, k=1.5 otherwise (defaults).
+        let proc = IntentProcessor::new();
+        assert_eq!(proc.cost_gate_k(20.0), 3.0);
+        assert_eq!(proc.cost_gate_k(49.99), 3.0);
+        assert_eq!(proc.cost_gate_k(50.0), 2.0);
+        assert_eq!(proc.cost_gate_k(199.99), 2.0);
+        assert_eq!(proc.cost_gate_k(200.0), 1.5);
+        assert_eq!(proc.cost_gate_k(10_000.0), 1.5);
     }
 
     #[test]

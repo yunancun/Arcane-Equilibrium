@@ -136,6 +136,12 @@ pub(super) fn handle_paper_command(
             dynamic_stop_base_ratio,
             dynamic_stop_cap_ratio,
             trailing_min_rr_ratio,
+            cost_gate_min_confidence,
+            cost_gate_k_base,
+            cost_gate_k_medium,
+            cost_gate_k_small,
+            adx_trending_threshold,
+            boot_cooldown_ms,
         } => {
             // I-09: clamp all numeric setters to sane ranges before applying.
             // I-09：應用前將所有數值設定鉗制到合理範圍。
@@ -218,6 +224,30 @@ pub(super) fn handle_paper_command(
                     trailing_min_rr_ratio = ?trailing_min_rr_ratio,
                     "dynamic-stop knobs updated / 動態止損參數已更新"
                 );
+            }
+            // Session 12: cost-gate + regime tunables
+            let cg_changed = pipeline.intent_processor.patch_cost_gate_params(
+                cost_gate_min_confidence,
+                cost_gate_k_base,
+                cost_gate_k_medium,
+                cost_gate_k_small,
+                adx_trending_threshold,
+            );
+            if cg_changed > 0 {
+                info!(
+                    cg_changed,
+                    min_conf = ?cost_gate_min_confidence,
+                    k_base = ?cost_gate_k_base,
+                    k_medium = ?cost_gate_k_medium,
+                    k_small = ?cost_gate_k_small,
+                    adx = ?adx_trending_threshold,
+                    "cost-gate / regime params updated"
+                );
+            }
+            // Session 12: PNL-3 boot cooldown via IPC
+            if let Some(v) = boot_cooldown_ms {
+                let applied = pipeline.set_boot_cooldown_ms(v);
+                info!(boot_cooldown_ms = applied, "boot cooldown updated");
             }
             snapshot_writer.force_write(&pipeline.snapshot());
         }
