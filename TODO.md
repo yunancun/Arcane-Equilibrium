@@ -140,14 +140,14 @@ P2（~10 項）：詳見報告 §10.1（O-xx / AH-08~11）
 - [ ] WP-B/SEC-04/06/13 需深度 E3 審查（4 項）
 - [ ] WP-CC/FS-1 / BI-1 / P9 / SM-1（4 項 CC 仍存在）
 
-#### WP-E5 — 代碼品質（4 項仍存在，原 20，**80% 已完成**）
-- [ ] tick_pipeline.rs 2116 行（超限 1200）
-- [ ] governance_hub.py 1927 行（超限）
-- [ ] WP-E5/D1~D4 dead code（funding_arb / grid / governance_hub DEPRECATED 方法）
+#### WP-E5 — 代碼品質（3 項，原 20，**80% 已完成**；大文件拆分延後）
+- [ ] tick_pipeline.rs 2116 行（超限 1200）— 核心熱路徑，拆分需獨立 sprint + E2+E4
+- [ ] governance_hub.py 1927 行（超限）— 同上，延後
+- [ ] WP-E5/D1~D4 dead code（funding_arb/grid 保留 reserved，governance DEPRECATED by-design）
 
-#### WP-BB — Bybit API（2 項，原 3）
-- [ ] WP-BB/W-2 公共 WS 硬編碼 Linear，缺 Spot/Inverse
-- [ ] WP-BB/S-1 無主動速率限制減速
+#### WP-BB — Bybit API（✅ 0 項，全部完成 — `44b0eee`）
+- W-2：bybit_public_ws_listener.py + market_data_dispatcher.py 已刪除（RC-12，Rust WS 替代）
+- S-1：bybit_rest_client.rs 新增 wait_if_rate_limited()，GET/POST 前主動退讓
 
 #### WP-FA — 功能規格（0 項，原 5，**100% 已規劃**）
 - ~~FA GAP-10 Provider pricing table~~ → 併入 Phase 4 子任務 **4-17**
