@@ -133,6 +133,9 @@ pub(super) fn handle_paper_command(
             max_same_direction_positions,
             p1_risk_pct,
             h0_shadow_mode,
+            dynamic_stop_base_ratio,
+            dynamic_stop_cap_ratio,
+            trailing_min_rr_ratio,
         } => {
             // I-09: clamp all numeric setters to sane ranges before applying.
             // I-09：應用前將所有數值設定鉗制到合理範圍。
@@ -198,6 +201,22 @@ pub(super) fn handle_paper_command(
                 info!(
                     shadow_mode = v,
                     "H0 gate shadow mode updated / H0 門控影子模式已更新"
+                );
+            }
+            // PNL-7: agent-tunable dynamic-stop knobs (validated in patch fn)
+            // PNL-7：Agent 可調的動態止損參數
+            let changed = pipeline.intent_processor.patch_dynamic_stop_params(
+                dynamic_stop_base_ratio,
+                dynamic_stop_cap_ratio,
+                trailing_min_rr_ratio,
+            );
+            if changed > 0 {
+                info!(
+                    changed,
+                    base_ratio = ?dynamic_stop_base_ratio,
+                    cap_ratio = ?dynamic_stop_cap_ratio,
+                    trailing_min_rr_ratio = ?trailing_min_rr_ratio,
+                    "dynamic-stop knobs updated / 動態止損參數已更新"
                 );
             }
             snapshot_writer.force_write(&pipeline.snapshot());

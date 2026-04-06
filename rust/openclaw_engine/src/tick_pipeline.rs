@@ -83,6 +83,11 @@ pub enum PaperSessionCommand {
         p1_risk_pct: Option<f64>,
         // RRC-1-A3: H0Gate shadow mode toggle / H0 門控影子模式切換
         h0_shadow_mode: Option<bool>,
+        // PNL-7: agent-tunable dynamic-stop knobs
+        // PNL-7：Agent 可調的動態止損參數
+        dynamic_stop_base_ratio: Option<f64>,
+        dynamic_stop_cap_ratio: Option<f64>,
+        trailing_min_rr_ratio: Option<f64>,
     },
 }
 
