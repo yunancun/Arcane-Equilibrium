@@ -207,12 +207,20 @@ pub fn check_position_on_tick(
 
     // 4. Trailing stop — only if enabled and activation threshold met
     //    追蹤止損 — 僅在啟用且達到啟動門檻時
+    // PNL-6: enforce a minimum RR floor — locked-in pnl must be at least
+    // half of the dynamic stop distance, so winners cannot be cut at
+    // near-breakeven while losers run to the full stop. Guarantees ~1:2 RR.
+    // PNL-6：強制 RR 下限 — 鎖定盈利必須 ≥ dynamic stop 的一半，避免贏 0.2%/輸 3% 倒掛。
     if config.trailing_stop_enabled && peak_pnl_pct >= config.trailing_stop_activation_pct {
         let drawdown_from_peak = peak_pnl_pct - pnl_pct;
-        if drawdown_from_peak >= config.trailing_stop_distance_pct {
+        let min_locked_profit = dyn_stop * 0.5;
+        if drawdown_from_peak >= config.trailing_stop_distance_pct
+            && pnl_pct >= min_locked_profit
+        {
             return RiskAction::ClosePosition(format!(
-                "TRAILING STOP: peak {:.2}% - current {:.2}% = {:.2}% >= distance {:.2}%",
-                peak_pnl_pct, pnl_pct, drawdown_from_peak, config.trailing_stop_distance_pct
+                "TRAILING STOP: peak {:.2}% - current {:.2}% = {:.2}% >= distance {:.2}% (locked {:.2}% >= floor {:.2}%)",
+                peak_pnl_pct, pnl_pct, drawdown_from_peak,
+                config.trailing_stop_distance_pct, pnl_pct, min_locked_profit
             ));
         }
     }
@@ -653,5 +661,40 @@ mod tests {
             &cfg,
         );
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
+    }
+
+    #[test]
+    fn test_pnl6_trailing_blocked_below_rr_floor() {
+        // PNL-6: peak 1.1%, pulled back to 0.2% — drawdown 0.9% > distance 0.8%,
+        // but locked profit 0.2% < dyn_stop_floor (3% × 0.5 = 1.5%) → no trailing stop.
+        // PNL-6：鎖定盈利 < dyn_stop × 0.5 → 不允許追蹤止損平倉。
+        let mut cfg = RiskManagerConfig::default();
+        cfg.trailing_stop_enabled = true;
+        cfg.trailing_stop_activation_pct = 1.0;
+        cfg.trailing_stop_distance_pct = 0.8;
+        cfg.max_stop_loss_pct = 5.0; // dyn base = 3.0
+        let action = check_position_on_tick(
+            0.2, 1.1, 0.5, 0.0, "trending", Some(0.5),
+            "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+        );
+        assert!(matches!(action, RiskAction::Hold), "expected Hold, got {:?}", action);
+    }
+
+    #[test]
+    fn test_pnl6_trailing_fires_above_rr_floor() {
+        // Locked 2% > dyn_stop × 0.5 = 1.5% → trailing stop fires normally.
+        let mut cfg = RiskManagerConfig::default();
+        cfg.trailing_stop_enabled = true;
+        cfg.trailing_stop_activation_pct = 1.0;
+        cfg.trailing_stop_distance_pct = 0.8;
+        cfg.max_stop_loss_pct = 5.0;
+        let action = check_position_on_tick(
+            2.0, 3.0, 0.5, 0.0, "trending", Some(0.5),
+            "BTCUSDT", 1000, 0, 0.0, 0.0, &cfg,
+        );
+        assert!(
+            matches!(action, RiskAction::ClosePosition(ref r) if r.contains("TRAILING STOP")),
+            "expected trailing close, got {:?}", action
+        );
     }
 }
