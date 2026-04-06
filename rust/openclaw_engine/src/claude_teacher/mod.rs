@@ -21,15 +21,19 @@
 
 pub mod applier;
 pub mod client;
+pub mod governance_impl;
 pub mod outcome_tracker;
 pub mod parser;
+pub mod strategy_ipc_impl;
 pub mod writer;
 
 pub use applier::{
     ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink,
 };
 pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockClient};
+pub use governance_impl::GovernanceCoreWrapper;
 pub use outcome_tracker::{sharpe_from_returns, OutcomeTracker, OutcomeWindow, PendingExecution};
+pub use strategy_ipc_impl::PaperSessionCommandSink;
 pub use parser::{parse_directive, Directive, DirectiveType, ParserError};
 pub use writer::{persist_directive, record_execution, WriterError};
 

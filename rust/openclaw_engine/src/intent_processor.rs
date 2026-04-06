@@ -85,6 +85,17 @@ pub struct IntentProcessor {
     /// RRC-1-B2: UTC day number of last reset (days since epoch).
     /// RRC-1-B2：上次重置的 UTC 天數（自 epoch 起的天數）。
     daily_reset_day: u64,
+    /// W-3: Optional LinUCB runtime — read-only, never affects gates / sizing /
+    /// fills. Phase 5 will hook reward feedback through this same handle.
+    /// W-3：可選的 LinUCB 運行時 — 唯讀，不影響任何 gate / sizing / fill。
+    /// Phase 5 將通過此 handle 接 reward feedback。
+    linucb: Option<std::sync::Arc<crate::linucb::LinUcbRuntime>>,
+    /// W-3: Last LinUCB selection (set after gates pass; consumed by downstream
+    /// DecisionContextMsg producer if it reads from intent_processor instead of
+    /// computing inline).
+    /// W-3：最近一次 LinUCB 選擇（gate 通過後設定；下游 DecisionContextMsg
+    /// producer 若選擇從 intent_processor 讀則使用此欄位）。
+    last_arm_selection: Option<crate::linucb::ArmSelection>,
 }
 
 impl IntentProcessor {
@@ -99,6 +110,8 @@ impl IntentProcessor {
             risk_config: RiskManagerConfig::default(),
             daily_start_balance: 0.0,
             daily_reset_day: 0,
+            linucb: None,
+            last_arm_selection: None,
         }
     }
 
@@ -115,7 +128,51 @@ impl IntentProcessor {
             risk_config: RiskManagerConfig::default(),
             daily_start_balance: 0.0,
             daily_reset_day: 0,
+            linucb: None,
+            last_arm_selection: None,
         }
+    }
+
+    /// W-3: Plug in a LinUCB runtime (read-only). When set, callers may invoke
+    /// `select_arm_after_gates` after gate approval to record the arm picked
+    /// for the current intent without changing any decision logic.
+    /// W-3：注入 LinUCB 運行時（唯讀）。設定後 caller 可在 gate 通過後呼叫
+    /// `select_arm_after_gates` 記錄當前 intent 對應的 arm，不改變任何決策邏輯。
+    pub fn set_linucb_runtime(
+        &mut self,
+        rt: std::sync::Arc<crate::linucb::LinUcbRuntime>,
+    ) {
+        self.linucb = Some(rt);
+    }
+
+    /// W-3: After gates pass, record the LinUCB arm selection for the given
+    /// regime + strategy + context. Fail-soft (logs warn, returns None on miss).
+    /// W-3：gate 通過後記錄當前 regime+strategy+context 對應的 LinUCB arm。
+    /// Fail-soft（miss 時 log warn 並返回 None）。
+    pub fn select_arm_after_gates(
+        &mut self,
+        regime: &str,
+        strategy: &str,
+        context: &[f64],
+    ) -> Option<crate::linucb::ArmSelection> {
+        let rt = self.linucb.as_ref()?;
+        let sel = rt.select_for_intent(regime, strategy, context);
+        if sel.is_none() {
+            tracing::warn!(
+                regime = %regime,
+                strategy = %strategy,
+                "linucb arm not found in intent_processor select"
+            );
+        }
+        self.last_arm_selection = sel.clone();
+        sel
+    }
+
+    /// W-3: Read the most recent LinUCB selection (consumed by downstream
+    /// DecisionContextMsg producers if they choose to pull from here).
+    /// W-3：讀最近一次 LinUCB 選擇（下游 DecisionContextMsg producer 可選用）。
+    pub fn last_arm_selection(&self) -> Option<&crate::linucb::ArmSelection> {
+        self.last_arm_selection.as_ref()
     }
 
     /// Set P1 risk cap percentage (e.g. 0.02 = 2%, 0.05 = 5%).
@@ -787,6 +844,36 @@ impl Default for IntentProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_intent_processor_linucb_optional_no_panic_when_unset() {
+        // EN: Default constructor leaves linucb=None; select_arm_after_gates
+        //     must return None without panicking.
+        // 中文：預設未設 linucb 時，select_arm_after_gates 不可 panic，回 None。
+        let mut ip = IntentProcessor::new();
+        let ctx = vec![0.5; crate::linucb::CONTEXT_DIM_V1];
+        assert!(ip
+            .select_arm_after_gates("trending", "ma_crossover", &ctx)
+            .is_none());
+        assert!(ip.last_arm_selection().is_none());
+    }
+
+    #[test]
+    fn test_intent_processor_linucb_select_called_after_gates_pass() {
+        // EN: With a real LinUcbRuntime injected, select_arm_after_gates returns
+        //     a valid selection and stores it as last_arm_selection.
+        // 中文：注入真實 LinUcbRuntime 後，select_arm_after_gates 返回合法
+        //     selection 並存入 last_arm_selection。
+        let mut ip = IntentProcessor::new();
+        ip.set_linucb_runtime(crate::linucb::LinUcbRuntime::cold_start_v1_15());
+        let ctx = vec![0.5; crate::linucb::CONTEXT_DIM_V1];
+        let sel = ip
+            .select_arm_after_gates("trending", "ma_crossover", &ctx)
+            .expect("arm exists");
+        assert_eq!(sel.arm_id, "trending__ma_crossover");
+        assert_eq!(ip.last_arm_selection().map(|s| s.arm_id.clone()),
+                   Some("trending__ma_crossover".to_string()));
+    }
 
     fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
         OrderIntent {

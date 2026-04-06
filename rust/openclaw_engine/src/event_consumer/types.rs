@@ -91,4 +91,14 @@ pub struct EventConsumerDeps {
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
+    /// Phase 4 W-3: Optional LinUCB runtime for read-only arm selection at the
+    /// DecisionContextMsg producer site.
+    /// Phase 4 W-3：可選的 LinUCB 運行時，用於 DecisionContextMsg producer
+    /// 站點唯讀 arm 選擇。
+    pub linucb_runtime: Option<Arc<crate::linucb::LinUcbRuntime>>,
+    /// Phase 4 W-4: Optional shared news context snapshot read by the
+    /// DecisionContextMsg producer site (news_severity + hours_since_last_major_news).
+    /// Phase 4 W-4：可選的共享新聞 context 快照，由 DecisionContextMsg producer
+    /// 站點讀取（news_severity + hours_since_last_major_news）。
+    pub news_snapshot: Option<Arc<crate::news::NewsContextSnapshot>>,
 }

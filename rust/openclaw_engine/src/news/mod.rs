@@ -11,6 +11,8 @@
 
 pub mod cryptopanic;
 pub mod dedup;
+pub mod guardian_impl;
+pub mod learning_context_impl;
 pub mod mock;
 pub mod pipeline;
 pub mod provider;
@@ -21,6 +23,8 @@ pub mod types;
 
 pub use cryptopanic::CryptoPanicProvider;
 pub use dedup::DedupCache;
+pub use guardian_impl::GuardianHaltCheckImpl;
+pub use learning_context_impl::{LearningContextSinkImpl, NewsContextSnapshot};
 pub use mock::MockProvider;
 pub use pipeline::{NewsPipeline, ProcessedNewsItem};
 pub use provider::NewsProvider;
