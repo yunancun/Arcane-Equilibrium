@@ -46,7 +46,26 @@
 
 ## 三、當前系統狀態摘要
 
-### ★★★★ Phase 4.1 SHIPPED + E3 R6 CONDITIONAL GO + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
+### ★★★★ ARCH-RC1 Session 1A+1B SHIPPED（2026-04-07 · commits `7f59e9b` `0523f17`）
+**Session 1A — 死代碼大屠殺**（`7f59e9b`，-270 行 / 0 行為改變）：
+盤點 rust/ tree 發現 **7 套重疊風控/配置系統**（Python RiskManager / openclaw_core::RiskManagerConfig / openclaw_engine::RuntimeConfig / openclaw_types::EngineConfig / openclaw_types::risk / GuardianConfig / H0GateConfig）。先砍 3 個確認純死的：
+- `openclaw_engine::config::MlConfig`（從未接通；真實 ML 用 `ml::kelly_sizer::KellyConfig` + 構造參數）
+- `openclaw_engine::config::attention_*_ms` 5 欄位（cognitive 系統用 scan_interval_s 不是這個）
+- `openclaw_types::config::EngineConfig + ParamTemperature`（V3-PA-5 規劃，6 欄位全有替代實作）
+
+**Session 1B — ARCH-RC1 統一 Config 骨架**（`0523f17`，+2632 行 / +58 tests / 0 行為改變）：
+- `config/store.rs`：泛型 `ConfigStore<T>` = `Arc<ArcSwap<T>>` + mutex 序列化 + all-or-nothing patch + PatchSource (Operator/Agent/Migration/Startup)
+- `config/risk_config.rs`：**RiskConfig 13 sub-struct**（meta/limits P1/overrides P0/per_strategy/agent P2 含 partial_tp/cascade 6 級/regime 5×3 從 hardcode 提升/cost_gate/dynamic_stop/market_gate 收編 9 欄位/anti_cluster/correlation/runtime/experimental），跨 sub-struct invariant：partial_tp ≤ take_profit_max_pct
+- `config/learning_config.rs`：**LearningConfig** + Phase 4.1 default-off 收編 (`switches.teacher_loop_enabled = false`)
+- `config/budget_config.rs`：**BudgetConfig** 含 AttentionTax 整塊（含 enabled / 4 burn_rate / 4 grade / cost_edge_max_ratio）
+- `config.rs` → `config/mod.rs` 透過 git mv，零內容變動
+
+**ARCH-RC1 契約（永久）**：所有交易/風控/學習/預算/市場參數由 Rust 權威持有，分 3 個獨立熱重載 Config + 既有 StrategyParams = 4 個 IPC 寫入面。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
+測試：engine lib **624 → 682** (+58, 0 fail) · core/types 全綠 · 0 regression。
+
+**1C 待做（明天接手）**：~50 個 Rust 風控 call site 遷移 + RuntimeConfig→EngineBootstrap 改名 + 6 個 IPC 端點接通 + operator_risk_config.json→risk_config.toml 一次性遷移 + Python RiskManager 1633→150 行 RiskViewClient + 32 Python 檔案 import 遷移 + observability.engine_events 表 + 熱重載驗收測試 + Position Reconciler + NewsPipeline spawn + E2/E4/QA。
+
+### Phase 4.1 SHIPPED + E3 R6 CONDITIONAL GO + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
 **Phase 4.1 Claude API Consumer Loop**：`claude_teacher/consumer_loop.rs` (+480 行 · 10 tests) · `mod.rs::fetch_parse_persist` 拆出 · `main.rs` Arc 接線 · IPC `set_teacher_loop_enabled` / `get_teacher_loop_status`（fail-soft uninitialized · 5 tests）· **Default-OFF**，operator IPC 翻開才生效。
 **E3 R6 Security Audit**（Explore agent read-only）→ **CONDITIONAL GO**：3 P1 minor 全部關閉（5 test cases + 2 doc comments）。P0 bypass surface 全 SAFE：case-insensitive denylist、one-level JSON traversal、ARCH-RC1 Python isolation、kill-switch 通配大小寫不敏感。
 **P2 tick_pipeline.rs 拆分（partial）**：抽出 `decision_context_producer` (294 行 / 6 tests) + `position_risk_evaluator` (247 行 / 9 tests)。tick_pipeline.rs **2211 → 2117**（-94），仍超 §九 1200 行硬上限 917 行（剩餘 on_tick 區塊重度 `&mut self`，留專屬 session）。
@@ -497,4 +516,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-07：engine lib **624** (+183 vs Phase 4 baseline 441) · phase4_integration 3/3 · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off + IPC flip 端點 · E3 R6 P1 已關閉於 `8762d1d`) · **P2 partial**：tick_pipeline.rs 2211 → 2117（-94 · `e7ca473`/`aecea27` 抽 decision_context_producer + position_risk_evaluator）· Live 前唯一 blocker：**7d paper trading 數據觀察期**（calendar-time）· 下一步：WP-ARCH-RC1 雙風控統一 / 完成 P2 tick_pipeline 餘下 917 行拆分（專屬 session）/ 7d 後 operator IPC flip teacher loop 上線。
+> 截至 2026-04-07：engine lib **682** (+241 vs Phase 4 baseline 441) · phase4_integration 3/3 · **ARCH-RC1 Session 1A+1B SHIPPED** (`7f59e9b` 砍 270 行死代碼 + `0523f17` +2632 行 3-Config 骨架 / store/risk_config/learning_config/budget_config / 13+5+5+1=24 sub-struct / +58 tests / 0 行為改變) · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off · E3 R6 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**ARCH-RC1 Session 1C**（~50 call site 遷移 + RuntimeConfig→EngineBootstrap + IPC 接通 + Python 1633→150 行空殼化 + Position Reconciler + NewsPipeline spawn + 熱重載驗收 + E2/E4/QA）。
