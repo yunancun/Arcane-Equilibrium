@@ -47,31 +47,28 @@ pub(super) fn wire_pipeline(
     pipeline
         .paper_state
         .set_take_profit_pct(Some(cfg.max_take_profit_pct));
+    // ARCH-RC1 1C-1: Guardian + IntentProcessor seeded from RiskConfig::default().
+    // Session 1C-2 will inject a live ConfigStore<RiskConfig> handle loaded from
+    // settings/risk_control_rules/risk_config.toml (with operator overrides).
+    // ARCH-RC1 1C-1：暫用 RiskConfig::default() 預填；1C-2 將接入 ConfigStore。
+    let default_risk = crate::config::RiskConfig::default();
     let gc = openclaw_core::guardian::GuardianConfig {
-        max_leverage: cfg.max_leverage,
-        max_drawdown_pct: cfg.max_drawdown_pct,
-        max_same_direction_positions: cfg.max_same_direction_positions as usize,
+        max_leverage: default_risk.limits.leverage_max,
+        max_drawdown_pct: default_risk.limits.session_drawdown_max_pct,
+        max_same_direction_positions: default_risk.anti_cluster.max_same_direction as usize,
         ..openclaw_core::guardian::GuardianConfig::default()
     };
     pipeline.intent_processor.update_guardian_config(gc);
-
-    // RRC-1-B4: Wire RiskManagerConfig from engine.toml → IntentProcessor Gate 0
-    let mut rc = openclaw_core::risk::RiskManagerConfig::default();
-    rc.max_stop_loss_pct = cfg.max_stop_loss_pct;
-    rc.max_take_profit_pct = cfg.max_take_profit_pct;
-    rc.max_leverage = cfg.max_leverage;
-    rc.max_total_exposure_pct = cfg.max_total_exposure_pct;
-    rc.max_session_drawdown_pct = cfg.max_drawdown_pct;
-    pipeline.intent_processor.update_risk_config(rc);
+    pipeline.intent_processor.update_risk_config(default_risk.clone());
 
     info!(
-        hard_stop = format!("{:.1}%", cfg.max_stop_loss_pct),
-        take_profit = format!("{:.1}%", cfg.max_take_profit_pct),
-        max_leverage = cfg.max_leverage,
-        max_drawdown = format!("{:.1}%", cfg.max_drawdown_pct),
-        max_positions = cfg.max_same_direction_positions,
-        max_exposure = format!("{:.1}%", cfg.max_total_exposure_pct),
-        "risk config wired from engine.toml / 風控配置已從 engine.toml 接入"
+        hard_stop = format!("{:.1}%", default_risk.limits.stop_loss_max_pct),
+        take_profit = format!("{:.1}%", default_risk.limits.take_profit_max_pct),
+        max_leverage = default_risk.limits.leverage_max,
+        max_drawdown = format!("{:.1}%", default_risk.limits.session_drawdown_max_pct),
+        max_positions = default_risk.anti_cluster.max_same_direction,
+        max_exposure = format!("{:.1}%", default_risk.limits.total_exposure_max_pct),
+        "risk config seeded from RiskConfig::default() [ARCH-RC1 1C-1; 1C-2 will wire ConfigStore]"
     );
 
     // R-05: instrument cache for precision rounding

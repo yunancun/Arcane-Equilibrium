@@ -952,16 +952,26 @@ pub struct AntiCluster {
     /// 按倉位 seed 套用到基礎 stop 距離的 ±offset_fraction 隨機偏移。
     #[serde(default = "default_offset_fraction")]
     pub offset_fraction: f64,
+    /// Maximum concurrent positions in the same direction (long/short) across all symbols.
+    /// 跨所有標的的同方向（多/空）最大並行倉位數。
+    /// Guardian 熱路徑拒單 + Agent 可調 + GUI 後端路由已通。
+    #[serde(default = "default_max_same_direction")]
+    pub max_same_direction: u32,
 }
 
 fn default_offset_fraction() -> f64 {
     0.15
 }
 
+fn default_max_same_direction() -> u32 {
+    3
+}
+
 impl Default for AntiCluster {
     fn default() -> Self {
         Self {
             offset_fraction: default_offset_fraction(),
+            max_same_direction: default_max_same_direction(),
         }
     }
 }
@@ -970,6 +980,9 @@ impl AntiCluster {
     fn validate(&self) -> Result<(), String> {
         if !(0.0..=0.5).contains(&self.offset_fraction) {
             return Err("risk.anti_cluster.offset_fraction must be in [0, 0.5]".into());
+        }
+        if !(1..=100).contains(&self.max_same_direction) {
+            return Err("risk.anti_cluster.max_same_direction must be in [1, 100]".into());
         }
         Ok(())
     }
@@ -1220,6 +1233,26 @@ mod tests {
     fn test_anti_cluster_offset_too_large_rejected() {
         let mut cfg = RiskConfig::default();
         cfg.anti_cluster.offset_fraction = 0.6;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_anti_cluster_max_same_direction_default() {
+        let cfg = RiskConfig::default();
+        assert_eq!(cfg.anti_cluster.max_same_direction, 3);
+    }
+
+    #[test]
+    fn test_anti_cluster_max_same_direction_zero_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.anti_cluster.max_same_direction = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_anti_cluster_max_same_direction_over_limit_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.anti_cluster.max_same_direction = 101;
         assert!(cfg.validate().is_err());
     }
 

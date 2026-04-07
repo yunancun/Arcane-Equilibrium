@@ -36,6 +36,7 @@ pub mod order_manager;
 pub mod paper_state;
 pub mod persistence;
 pub mod pipeline_types;
+pub mod risk_checks;
 pub mod platform_client;
 pub mod position_manager;
 pub mod spot_margin_client;

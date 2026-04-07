@@ -249,9 +249,9 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
         &mut pending,
     );
     let rc = pipeline.intent_processor.risk_config();
-    assert!((rc.dynamic_stop_base_ratio - 0.4).abs() < 1e-9);
-    assert!((rc.dynamic_stop_cap_ratio - 0.8).abs() < 1e-9, "invalid cap rejected, default kept");
-    assert!((rc.trailing_min_rr_ratio - 0.75).abs() < 1e-9);
+    assert!((rc.dynamic_stop.base_ratio - 0.4).abs() < 1e-9);
+    assert!((rc.dynamic_stop.cap_ratio - 0.8).abs() < 1e-9, "invalid cap rejected, default kept");
+    assert!((rc.dynamic_stop.trailing_min_rr - 0.75).abs() < 1e-9);
 }
 
 #[test]
@@ -289,11 +289,11 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
         &mut pending,
     );
     let rc = pipeline.intent_processor.risk_config();
-    assert!((rc.cost_gate_min_confidence - 0.25).abs() < 1e-9);
-    assert!((rc.cost_gate_k_base - 1.8).abs() < 1e-9);
-    assert!((rc.cost_gate_k_medium - 2.5).abs() < 1e-9);
-    assert!((rc.cost_gate_k_small - 4.0).abs() < 1e-9);
-    assert!((rc.adx_trending_threshold - 30.0).abs() < 1e-9);
+    assert!((rc.cost_gate.min_confidence - 0.25).abs() < 1e-9);
+    assert!((rc.cost_gate.k_base - 1.8).abs() < 1e-9);
+    assert!((rc.cost_gate.k_medium - 2.5).abs() < 1e-9);
+    assert!((rc.cost_gate.k_small - 4.0).abs() < 1e-9);
+    assert!((rc.cost_gate.adx_trending - 30.0).abs() < 1e-9);
     assert_eq!(pipeline.boot_cooldown_ms(), 120_000);
     assert_eq!(pipeline.signals_heartbeat_ms(), 30_000);
 }

@@ -8,8 +8,9 @@ use openclaw_core::{
     execution::{self, FillResult},
     governance_core::GovernanceCore,
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
-    risk::{check_order_allowed, RiskManagerConfig},
 };
+use crate::config::RiskConfig;
+use crate::risk_checks::check_order_allowed;
 use serde::{Deserialize, Serialize};
 
 use crate::paper_state::PaperState;
@@ -76,9 +77,9 @@ pub struct IntentProcessor {
     /// P1 risk cap percentage (configurable, default 2%).
     /// P1 風險上限百分比（可配置，默認 2%）。
     p1_risk_pct: f64,
-    /// RRC-1-B4: Risk manager config for check_order_allowed Gate 0.
-    /// RRC-1-B4：風控管理器配置，用於 Gate 0 訂單准入檢查。
-    risk_config: RiskManagerConfig,
+    /// RRC-1-B4: Risk config for check_order_allowed Gate 0 (ARCH-RC1 unified).
+    /// RRC-1-B4：風控配置，用於 Gate 0 訂單准入檢查。
+    risk_config: RiskConfig,
     /// RRC-1-B2: Daily start balance for daily loss tracking (reset at UTC midnight).
     /// RRC-1-B2：每日起始餘額，用於日損追蹤（UTC 午夜重置）。
     daily_start_balance: f64,
@@ -107,7 +108,7 @@ impl IntentProcessor {
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
-            risk_config: RiskManagerConfig::default(),
+            risk_config: RiskConfig::default(),
             daily_start_balance: 0.0,
             daily_reset_day: 0,
             linucb: None,
@@ -125,7 +126,7 @@ impl IntentProcessor {
             kelly_config: None,
             trade_stats: std::collections::HashMap::new(),
             p1_risk_pct: DEFAULT_P1_RISK_PCT,
-            risk_config: RiskManagerConfig::default(),
+            risk_config: RiskConfig::default(),
             daily_start_balance: 0.0,
             daily_reset_day: 0,
             linucb: None,
@@ -198,15 +199,15 @@ impl IntentProcessor {
         self.kelly_config = Some(config);
     }
 
-    /// RRC-1-B4: Update risk manager config at runtime.
-    /// RRC-1-B4：運行時更新風控管理器配置。
-    pub fn update_risk_config(&mut self, config: RiskManagerConfig) {
+    /// RRC-1-B4: Update risk config at runtime (ARCH-RC1).
+    /// RRC-1-B4：運行時更新風控配置。
+    pub fn update_risk_config(&mut self, config: RiskConfig) {
         self.risk_config = config;
     }
 
-    /// RRC-1-B4: Read-only access to risk manager config.
-    /// RRC-1-B4：風控管理器配置的唯讀訪問。
-    pub fn risk_config(&self) -> &RiskManagerConfig {
+    /// RRC-1-B4: Read-only access to risk config.
+    /// RRC-1-B4：風控配置的唯讀訪問。
+    pub fn risk_config(&self) -> &RiskConfig {
         &self.risk_config
     }
 
@@ -223,19 +224,19 @@ impl IntentProcessor {
         let mut changed = 0;
         if let Some(v) = base_ratio {
             if v.is_finite() && (0.05..=1.0).contains(&v) {
-                self.risk_config.dynamic_stop_base_ratio = v;
+                self.risk_config.dynamic_stop.base_ratio = v;
                 changed += 1;
             }
         }
         if let Some(v) = cap_ratio {
             if v.is_finite() && (0.1..=1.0).contains(&v) {
-                self.risk_config.dynamic_stop_cap_ratio = v;
+                self.risk_config.dynamic_stop.cap_ratio = v;
                 changed += 1;
             }
         }
         if let Some(v) = trailing_min_rr_ratio {
             if v.is_finite() && (0.0..=2.0).contains(&v) {
-                self.risk_config.trailing_min_rr_ratio = v;
+                self.risk_config.dynamic_stop.trailing_min_rr = v;
                 changed += 1;
             }
         }
@@ -256,31 +257,31 @@ impl IntentProcessor {
         let mut changed = 0;
         if let Some(v) = min_confidence {
             if v.is_finite() && (0.0..=1.0).contains(&v) {
-                self.risk_config.cost_gate_min_confidence = v;
+                self.risk_config.cost_gate.min_confidence = v;
                 changed += 1;
             }
         }
         if let Some(v) = k_base {
             if v.is_finite() && (0.5..=10.0).contains(&v) {
-                self.risk_config.cost_gate_k_base = v;
+                self.risk_config.cost_gate.k_base = v;
                 changed += 1;
             }
         }
         if let Some(v) = k_medium {
             if v.is_finite() && (0.5..=20.0).contains(&v) {
-                self.risk_config.cost_gate_k_medium = v;
+                self.risk_config.cost_gate.k_medium = v;
                 changed += 1;
             }
         }
         if let Some(v) = k_small {
             if v.is_finite() && (0.5..=50.0).contains(&v) {
-                self.risk_config.cost_gate_k_small = v;
+                self.risk_config.cost_gate.k_small = v;
                 changed += 1;
             }
         }
         if let Some(v) = adx_trending_threshold {
             if v.is_finite() && (0.0..=100.0).contains(&v) {
-                self.risk_config.adx_trending_threshold = v;
+                self.risk_config.cost_gate.adx_trending = v;
                 changed += 1;
             }
         }
@@ -517,7 +518,7 @@ impl IntentProcessor {
         // 成本門控：預期收益 < k × 往返手續費時拒絕
         // Session 12: thresholds read from RiskManagerConfig (was hardcoded 0.15 / 1.5).
         {
-            let min_confidence = self.risk_config.cost_gate_min_confidence;
+            let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
                 return IntentResult {
                     submitted: false,
@@ -551,7 +552,7 @@ impl IntentProcessor {
             let expected_profit = atr * intent.confidence * final_qty;
             let notional = final_qty * price;
             let rt_fee = notional * 2.0 * fee_rate;
-            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
+            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
 
             if expected_profit < k * rt_fee {
                 return IntentResult {
@@ -739,7 +740,7 @@ impl IntentProcessor {
 
         // ─── Gate 3: Cost gate (config-driven, Session 12) ───
         {
-            let min_confidence = self.risk_config.cost_gate_min_confidence;
+            let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
                 return ExchangeGateResult {
                     approved: false,
@@ -769,7 +770,7 @@ impl IntentProcessor {
             let expected_profit = atr * intent.confidence * final_qty;
             let notional = final_qty * price;
             let rt_fee = notional * 2.0 * fee_rate;
-            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate_k_base);
+            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
 
             if expected_profit < k * rt_fee {
                 return ExchangeGateResult {
@@ -822,11 +823,11 @@ impl IntentProcessor {
     /// PNL-5：成本門 k 倍率隨 notional 規模調整，三檔 k 從 config 讀取。
     fn cost_gate_k(&self, notional: f64) -> f64 {
         if notional < 50.0 {
-            self.risk_config.cost_gate_k_small
+            self.risk_config.cost_gate.k_small
         } else if notional < 200.0 {
-            self.risk_config.cost_gate_k_medium
+            self.risk_config.cost_gate.k_medium
         } else {
-            self.risk_config.cost_gate_k_base
+            self.risk_config.cost_gate.k_base
         }
     }
 }

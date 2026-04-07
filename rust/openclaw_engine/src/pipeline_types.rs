@@ -129,9 +129,9 @@ pub struct PipelineSnapshot {
     /// Guardian configuration / 守護者配置
     #[serde(default)]
     pub guardian_config: Option<openclaw_core::guardian::GuardianConfig>,
-    /// Risk manager configuration (P1 limits + P2 agent params) / 風控管理器配置
+    /// Risk configuration (ARCH-RC1 unified RiskConfig) / 風控配置
     #[serde(default)]
-    pub risk_manager_config: Option<openclaw_core::risk::RiskManagerConfig>,
+    pub risk_manager_config: Option<crate::config::RiskConfig>,
     /// Per-symbol consecutive loss count / 每交易對連續虧損計數
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub consecutive_losses: HashMap<String, u32>,
