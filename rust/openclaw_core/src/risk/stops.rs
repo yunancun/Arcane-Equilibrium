@@ -1,7 +1,7 @@
 //! Dynamic stop-loss calculations with ATR adaptation and anti-cluster offset.
 //! 動態止損計算：ATR 自適應 + 反聚集偏移。
 
-use super::config::regime_multipliers;
+use super::regime::regime_multipliers;
 
 /// Compute a deterministic anti-cluster offset in [-0.15, +0.15].
 /// 計算確定性反聚集偏移量，範圍 [-0.15, +0.15]。

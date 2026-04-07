@@ -9,9 +9,10 @@ use openclaw_core::{
     h0_gate::H0Gate,
     indicators::{IndicatorEngine, IndicatorSnapshot},
     klines::KlineManager,
-    risk::{check_position_on_tick, PriceHistoryTracker, RiskAction},
+    risk::PriceHistoryTracker,
     signals::{IndicatorInput, Signal, SignalEngine},
 };
+use crate::risk_checks::RiskAction;
 use openclaw_types::PriceEvent;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -502,7 +503,7 @@ impl TickPipeline {
                 }
             }
             if let Some(ref a) = ind.adx {
-                let threshold = self.intent_processor.risk_config().adx_trending_threshold;
+                let threshold = self.intent_processor.risk_config().cost_gate.adx_trending;
                 if a.adx >= threshold {
                     return "trending".into();
                 }
@@ -1337,11 +1338,17 @@ impl TickPipeline {
                 }
             })
             .collect();
+        // ARCH-RC1: cost_edge_max_ratio is cross-Config from BudgetConfig.attention_tax;
+        // not yet wired to a live BudgetConfig store in this session — use the default 0.8
+        // (matches previous RiskManagerConfig.max_cost_edge_ratio behavior). Session 1C-2
+        // will wire the real BudgetConfig handle here.
+        let cost_edge_max_ratio = 0.8;
         let decisions = crate::position_risk_evaluator::evaluate_positions(
             &position_rows,
             daily_loss,
             session_drawdown,
             event.ts_ms,
+            cost_edge_max_ratio,
             &risk_config,
         );
 

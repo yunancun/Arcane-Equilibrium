@@ -17,7 +17,8 @@
 //!   兩階段的讀取再動作語義完全相同。tick_pipeline.rs 的派發迴圈遇 HaltSession
 //!   仍 `break`，本批次後續 decision 與之前一樣被靜默丟棄。
 
-use openclaw_core::risk::{check_position_on_tick, RiskAction, RiskManagerConfig};
+use crate::config::RiskConfig;
+use crate::risk_checks::{check_position_on_tick, RiskAction};
 
 /// Per-position immutable input row, built upstream from `PaperState` +
 /// `IndicatorSnapshot` + `PriceHistoryTracker` + `consecutive_losses`.
@@ -88,7 +89,8 @@ pub(crate) fn evaluate_position(
     daily_loss: f64,
     session_drawdown: f64,
     now_ts_ms: u64,
-    config: &RiskManagerConfig,
+    cost_edge_max_ratio: f64,
+    config: &RiskConfig,
 ) -> PositionDecision {
     let pnl = pnl_pct(row.current_price, row.entry_price, row.is_long);
     let peak_pnl = pnl_pct(row.peak_price, row.entry_price, row.is_long);
@@ -106,6 +108,7 @@ pub(crate) fn evaluate_position(
         row.consecutive_losses,
         daily_loss,
         session_drawdown,
+        cost_edge_max_ratio,
         config,
     );
     PositionDecision {
@@ -125,10 +128,11 @@ pub(crate) fn evaluate_positions(
     daily_loss: f64,
     session_drawdown: f64,
     now_ts_ms: u64,
-    config: &RiskManagerConfig,
+    cost_edge_max_ratio: f64,
+    config: &RiskConfig,
 ) -> Vec<PositionDecision> {
     rows.iter()
-        .map(|r| evaluate_position(r, daily_loss, session_drawdown, now_ts_ms, config))
+        .map(|r| evaluate_position(r, daily_loss, session_drawdown, now_ts_ms, cost_edge_max_ratio, config))
         .collect()
 }
 
@@ -201,8 +205,8 @@ mod tests {
     #[test]
     fn test_evaluate_position_smoke() {
         let row = mk_row("BTCUSDT", 105.0, 100.0);
-        let cfg = RiskManagerConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, &cfg);
+        let cfg = RiskConfig::default();
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, &cfg);
         assert_eq!(decision.symbol, "BTCUSDT");
         assert_eq!(decision.is_long, true);
         assert!((decision.pnl_pct - 5.0).abs() < 1e-9);
@@ -214,8 +218,8 @@ mod tests {
     #[test]
     fn test_evaluate_position_hard_stop_close() {
         let row = mk_row("BTCUSDT", 50.0, 100.0); // -50% pnl
-        let cfg = RiskManagerConfig::default();
-        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, &cfg);
+        let cfg = RiskConfig::default();
+        let decision = evaluate_position(&row, 0.0, 0.0, 1_000_000, 0.8, &cfg);
         assert!(matches!(decision.action, RiskAction::ClosePosition(_)));
     }
 
@@ -223,8 +227,8 @@ mod tests {
     /// 空輸入 → 空輸出，不 panic。
     #[test]
     fn test_evaluate_positions_empty() {
-        let cfg = RiskManagerConfig::default();
-        let out = evaluate_positions(&[], 0.0, 0.0, 0, &cfg);
+        let cfg = RiskConfig::default();
+        let out = evaluate_positions(&[], 0.0, 0.0, 0, 0.8, &cfg);
         assert!(out.is_empty());
     }
 
@@ -237,8 +241,8 @@ mod tests {
             mk_row("BBB", 95.0, 100.0),
             mk_row("CCC", 100.0, 100.0),
         ];
-        let cfg = RiskManagerConfig::default();
-        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, &cfg);
+        let cfg = RiskConfig::default();
+        let out = evaluate_positions(&rows, 0.0, 0.0, 1_000_000, 0.8, &cfg);
         assert_eq!(out.len(), 3);
         assert_eq!(out[0].symbol, "AAA");
         assert_eq!(out[1].symbol, "BBB");

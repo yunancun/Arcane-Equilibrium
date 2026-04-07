@@ -1,32 +1,24 @@
-//! RiskManager — Core hot-path risk calculations
-//! RiskManager — 核心熱路徑風控計算
+//! RiskManager — Core hot-path risk math helpers.
+//! RiskManager — 核心熱路徑風控數學輔助函數。
 //!
 //! MODULE_NOTE (中文):
-//!   從 Python RiskManager（1633 行）移植核心風控計算邏輯。
-//!   只包含在交易熱路徑上運行的計算：
-//!   - 動態止損（ATR 自適應 + 反聚集偏移 + regime 乘數）
-//!   - Tick 級持倉風控檢查（8 項優先級排序）
-//!   - 訂單准入檢查（持倉/曝險/槓桿/日損限制）
+//!   ARCH-RC1 後核心只保留與配置無關的純計算：
+//!   - 動態止損（ATR 自適應 + 反聚集偏移 + 硬編碼 regime 乘數 fallback）
 //!   - 價格歷史追蹤器（ATR 計算 + 尖峰偵測）
-//!
-//!   GUI 端點、持久化、變更審計日誌保留在 Python 端。
+//!   權威可調風控配置見 `openclaw_engine::config::risk_config::RiskConfig`。
+//!   訂單准入與 tick 級檢查（需讀取配置）已遷移至 `openclaw_engine::risk_checks`。
 //!
 //! MODULE_NOTE (English):
-//!   Port of core risk calculations from Python RiskManager (1633 lines).
-//!   Only includes computations on the trading hot path:
-//!   - Dynamic stop-loss (ATR-adaptive + anti-cluster offset + regime multipliers)
-//!   - Tick-level position risk checks (8 items, priority-ordered)
-//!   - Order admission check (position/exposure/leverage/daily-loss limits)
-//!   - Price history tracker (ATR computation + spike detection)
-//!
-//!   GUI endpoints, persistence, and change audit log stay in Python.
+//!   Post ARCH-RC1, core retains only config-free pure computation:
+//!   - Dynamic stop-loss (ATR-adaptive + anti-cluster offset + hardcoded regime fallback)
+//!   - Price history tracker (ATR + spike detection)
+//!   Authoritative tunable risk config lives in `openclaw_engine::config::risk_config::RiskConfig`.
+//!   Order admission + tick-level checks (which read config) moved to `openclaw_engine::risk_checks`.
 
-mod checks;
-mod config;
 mod price_tracker;
+mod regime;
 mod stops;
 
-pub use checks::{check_order_allowed, check_position_on_tick, PositionCheck, RiskAction};
-pub use config::{regime_multipliers, RegimeMultipliers, RiskManagerConfig};
 pub use price_tracker::{PriceHistoryTracker, SpikeInfo};
+pub use regime::{regime_multipliers, RegimeMultipliers};
 pub use stops::{anti_cluster_offset, compute_dynamic_stop_pct};
