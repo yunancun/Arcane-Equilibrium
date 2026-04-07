@@ -371,6 +371,9 @@ async fn async_main(config: Arc<ConfigManager>) {
     // Phase 4 (4-15)：在把 server 移入 spawn task 前先拿到 BudgetTracker 槽位句柄；
     // 主函數會在 db_pool 就緒後將 tracker 寫入此槽位。
     let budget_tracker_slot = ipc_server.budget_tracker_slot();
+    // Phase 4.1: same pattern for the Teacher consumer loop handles.
+    // Phase 4.1：同樣模式拿 Teacher consumer loop 句柄槽位。
+    let teacher_loop_slot = ipc_server.teacher_loop_slot();
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -976,9 +979,20 @@ async fn async_main(config: Arc<ConfigManager>) {
                 ConsumerLoopConfig::production_defaults(),
                 Arc::clone(&enabled),
             ));
+            // Inject handles into IPC slot BEFORE spawn so the handlers see
+            // them as soon as the loop is alive.
+            // 在 spawn 前先把句柄注入 IPC 槽位，loop 一啟動 handler 就看得見。
+            {
+                use openclaw_engine::ipc_server::TeacherLoopHandles;
+                let handles = TeacherLoopHandles {
+                    enabled: consumer_loop.enabled_handle(),
+                    status: consumer_loop.status(),
+                };
+                teacher_loop_slot.write().await.replace(handles);
+            }
             let _consumer_handle = Arc::clone(&consumer_loop).spawn();
             info!(
-                "Phase 4.1 TeacherConsumerLoop spawned (DEFAULT-OFF; flip via IPC after E3 R6 PASS) / consumer loop 已啟動（預設關閉，待 E3 R6 通過後 IPC 翻開）"
+                "Phase 4.1 TeacherConsumerLoop spawned + IPC handles injected (DEFAULT-OFF; flip via set_teacher_loop_enabled after E3 R6 PASS) / consumer loop 已啟動，IPC 句柄已注入（預設關閉）"
             );
         } else {
             warn!("Phase 4.1 consumer loop skipped: BudgetTracker not initialized / 預算追蹤器未初始化，consumer loop 跳過");

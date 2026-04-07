@@ -362,6 +362,20 @@ impl DirectiveApplier {
 
         // Gate 3: GovernanceCore veto — if session halted, do not tune params.
         // 閘 3：GovernanceCore veto — session halted 時禁止調參。
+        //
+        // E3 R6 P1-E3-2 (2026-04-07): governance state is read here as a single
+        // synchronous snapshot via Arc<AtomicBool>. There is no re-check between
+        // this gate and the IPC dispatch below; if the session halts during the
+        // ~5 ms window the directive can still flush. This is acceptable: the
+        // halted flag is checked again on the next tick by tick_pipeline, and
+        // any IPC handler that needs strict ordering must do its own halt check.
+        // Do NOT add a second halt check here without also reasoning about the
+        // double-read race that would create.
+        // E3 R6 P1-E3-2：governance 狀態在此處透過 Arc<AtomicBool> 同步快照
+        // 讀取一次。本閘到下方 IPC 派發之間不再重檢；若 ~5ms 窗口中 session
+        // 進入 halt，directive 仍可能下發。可接受：halted 旗標會在下一個
+        // tick 被 tick_pipeline 重檢，需要嚴格順序的 IPC handler 必須自行
+        // 重檢。請勿在此處加第二次檢查（會引入 double-read race）。
         if self.governance.session_halted() {
             return ApplyOutcome::VetoedByGovernance {
                 directive_id,
@@ -409,7 +423,19 @@ impl DirectiveApplier {
     ) -> ApplyOutcome {
         // Structural hard boundary: "pause all strategies" is a kill-switch.
         // LLM must not be able to one-shot disable the whole engine.
+        //
+        // E3 R6 P1-E3-3 (2026-04-07): the wildcard match is case-INSENSITIVE
+        // because we lowercase `directive.scope` before the `matches!` arm.
+        // Variants like "ALL", "All_Strategies", "*", " everything " (after
+        // parser whitespace strip) all collapse to the four canonical tokens
+        // below. Adding new wildcard tokens? Add the LOWERCASE form here AND
+        // a regression test in the E3 R6 closure block.
         // 結構硬邊界：「暫停所有策略」= 關機。LLM 絕不可一鍵關掉整個引擎。
+        // E3 R6 P1-E3-3：通配匹配是 **大小寫不敏感** 的，因為我們先把
+        // `directive.scope` lowercase 再進 `matches!`。"ALL"、"All_Strategies"、
+        // "*"、" everything "（parser 已 strip 空白）等變形都會收斂到下方
+        // 四個 canonical token。新增通配 token 時：在這裡加 **lowercase** 形式
+        // 並在 E3 R6 closure block 加對應 regression test。
         let scope_lc = directive.scope.to_lowercase();
         if matches!(scope_lc.as_str(), "*" | "all" | "all_strategies" | "everything") {
             return ApplyOutcome::VetoedByHardBoundary {
@@ -1083,5 +1109,150 @@ mod tests {
         assert!(any_json.is_empty(), "no json writes allowed by applier");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ===================================================================
+    // E3 R6 P1 closure tests / E3 R6 P1 補充測試
+    // Added 2026-04-07 to close the 5 test gaps identified in
+    // docs/audits/2026-04-07_e3_r6_directive_applier_security_audit.md.
+    // 2026-04-07 新增，關閉 E3 R6 audit 報告中列出的 5 個測試缺口。
+    // ===================================================================
+
+    /// E3 R6 P1-E3-1a: case-mangled P0 fields are still rejected.
+    /// E3 R6 P1-E3-1a：大小寫變形的 P0 欄位仍被拒絕。
+    #[tokio::test]
+    async fn test_e3r6_case_mangled_p0_field_rejected() {
+        let (applier, _, _) = make_applier(MockGov::default_healthy(), None).await;
+        for variant in [
+            "Hard_Loss_Pct",
+            "HARD_LOSS_PCT",
+            "hard_LOSS_pct",
+            "Max_Position_Size_USD",
+        ] {
+            let d = directive(
+                DirectiveType::AdjustParam,
+                "ma_crossover",
+                json!({ variant: 0.5 }),
+            );
+            let outcome = applier.apply(d, 9001).await;
+            assert!(
+                matches!(outcome, ApplyOutcome::VetoedByHardBoundary { .. }),
+                "case-mangled P0 field {variant} must be rejected, got {outcome:?}"
+            );
+        }
+    }
+
+    /// E3 R6 P1-E3-1b: unknown strategy + empty params returns InvalidDirective
+    /// (vacuous-truth bypass guard — denylist iteration over empty object must
+    /// not short-circuit gate-2 strategy validation).
+    /// E3 R6 P1-E3-1b：未知策略 + 空 params 回傳 InvalidDirective
+    /// （vacuous-truth bypass 防護 — 對空物件 iterate denylist 不能繞過 gate-2 策略驗證）。
+    #[tokio::test]
+    async fn test_e3r6_unknown_strategy_empty_params_invalid() {
+        let (applier, _, _) = make_applier(MockGov::default_healthy(), None).await;
+        let d = directive(DirectiveType::AdjustParam, "no_such_strategy", json!({}));
+        let outcome = applier.apply(d, 9002).await;
+        match outcome {
+            ApplyOutcome::InvalidDirective { error, .. } => {
+                assert!(error.contains("unknown strategy scope"));
+            }
+            other => panic!("expected InvalidDirective, got {other:?}"),
+        }
+    }
+
+    /// E3 R6 P1-E3-1c: boost_arm safety surface.
+    ///
+    /// Two distinct defenses, both verified here:
+    ///   1) Real invalid values (`0.0`, negative) hit `!is_finite() || <= 0.0`
+    ///      and are rejected as `InvalidDirective`.
+    ///   2) `NaN` / `Infinity` are coerced to JSON `null` by serde_json (RFC
+    ///      8259 forbids these tokens), which `as_f64()` reads as `None`,
+    ///      which `unwrap_or(1.0)` collapses to the safe default 1.0 → Applied.
+    /// Both paths are safe — no value > MAX_BOOST_FACTOR can ever reach IPC.
+    ///
+    /// E3 R6 P1-E3-1c：boost_arm 安全面。兩道獨立防線，本測試都驗證：
+    ///   1) 真正非法值（0、負數）走 `!is_finite() || <= 0.0` 拒絕為
+    ///      `InvalidDirective`。
+    ///   2) `NaN` / `Infinity` 被 serde_json 序列化為 JSON `null`（RFC 8259
+    ///      不允許這些 token），`as_f64()` 讀為 `None`，`unwrap_or(1.0)`
+    ///      落到安全預設 1.0 → Applied。兩條路徑都安全 — 任何 > MAX_BOOST_FACTOR
+    ///      的值都不可能抵達 IPC。
+    #[tokio::test]
+    async fn test_e3r6_boost_arm_invalid_factor_rejected() {
+        let (applier, _, _) = make_applier(MockGov::default_healthy(), None).await;
+        // Branch 1: 0.0 and negative are explicitly InvalidDirective.
+        // 分支 1：0 與負數明確 InvalidDirective。
+        for (label, val) in [("zero", 0.0_f64), ("neg", -1.0_f64)] {
+            let d = directive(
+                DirectiveType::BoostArm,
+                "arm_ma_trending",
+                json!({ "boost": val }),
+            );
+            let outcome = applier.apply(d, 9003).await;
+            assert!(
+                matches!(outcome, ApplyOutcome::InvalidDirective { .. }),
+                "boost={label}({val}) must be InvalidDirective, got {outcome:?}"
+            );
+        }
+        // Branch 2: NaN / Infinity → serde_json null → default 1.0 → Applied.
+        // The IMPORTANT property is "no value > MAX_BOOST_FACTOR reaches IPC",
+        // which is preserved here.
+        // 分支 2：NaN / Infinity → serde_json null → 預設 1.0 → Applied。
+        // 重要不變式是「任何 > MAX_BOOST_FACTOR 的值都到不了 IPC」，此處保持。
+        for (label, val) in [("nan", f64::NAN), ("inf", f64::INFINITY)] {
+            let d = directive(
+                DirectiveType::BoostArm,
+                "arm_ma_trending",
+                json!({ "boost": val }),
+            );
+            let outcome = applier.apply(d, 9003).await;
+            assert!(
+                matches!(outcome, ApplyOutcome::Applied { .. }),
+                "boost={label}({val}) coerces to default 1.0 → Applied, got {outcome:?}"
+            );
+        }
+    }
+
+    /// E3 R6 P1-E3-1d: unpause vetoed when both halted AND high daily loss.
+    /// Either condition is sufficient — we just assert governance veto wins.
+    /// E3 R6 P1-E3-1d：halted 與 daily loss 同時超標時 unpause 被治理 veto。
+    /// 任一條件足以拒絕 — 此處只斷言治理 veto 勝出。
+    #[tokio::test]
+    async fn test_e3r6_unpause_halted_and_high_loss_vetoed() {
+        let gov = MockGov {
+            daily_loss: 0.08, // > 0.05 threshold
+            threshold: 0.05,
+            halted: true,
+            ..MockGov::default_healthy()
+        };
+        let (applier, _, _) = make_applier(gov, None).await;
+        let d = directive(DirectiveType::Unpause, "ma_crossover", json!({}));
+        let outcome = applier.apply(d, 9004).await;
+        assert!(
+            matches!(outcome, ApplyOutcome::VetoedByGovernance { .. }),
+            "must be VetoedByGovernance, got {outcome:?}"
+        );
+    }
+
+    /// E3 R6 P1-E3-1e: explicit P0 field in non-empty params object is caught.
+    /// Documents that the denylist iterator handles the trivial happy path —
+    /// covered by older tests but called out for completeness per audit ask.
+    /// E3 R6 P1-E3-1e：非空 params 中的明確 P0 欄位被攔截。
+    /// 老測試已涵蓋，按 audit 要求顯式重申完整性。
+    #[tokio::test]
+    async fn test_e3r6_explicit_p0_field_in_params_rejected() {
+        let (applier, _, _) = make_applier(MockGov::default_healthy(), None).await;
+        let d = directive(
+            DirectiveType::AdjustParam,
+            "ma_crossover",
+            json!({"max_position_size_usd": 999999.0, "fast_period": 12}),
+        );
+        let outcome = applier.apply(d, 9005).await;
+        match outcome {
+            ApplyOutcome::VetoedByHardBoundary { boundary, .. } => {
+                assert_eq!(boundary, "max_position_size_usd");
+            }
+            other => panic!("expected VetoedByHardBoundary, got {other:?}"),
+        }
     }
 }
