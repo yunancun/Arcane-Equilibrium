@@ -45,6 +45,27 @@
   - NewsPipeline run_once 60s spawn（順手）
   - E2 + E4 + QA Audit + 文檔同步 + commit + push
 
+### 風控執行引擎收編（Phase 2 / 非強制）
+
+**背景**：1C-1 + 1C-2 完成後，**Config 層**從 7 套收到 1 套（RiskConfig 權威），但**執行引擎層**還有 4-5 個並行。Operator 問題：「是否把引擎盡量合併一下更合理？」答：**部分合併合理，不必追求全部合併到 1 個**。下面是建議的拆分：
+
+| 引擎 | 位置 | 獨特性 | 建議 |
+|---|---|---|---|
+| `risk_checks::check_order_allowed` | `openclaw_engine::risk_checks` | Gate 0 訂單准入 | **保留為主引擎** |
+| `risk_checks::check_position_on_tick` | 同上 | tick 持倉 9 項檢查 | **保留** |
+| `guardian::Guardian` | `openclaw_core::guardian` | direction_conflict + leverage **modify** verdict（不只是 reject，會 downsize qty/leverage）+ modification_size_factor | **保留**，1C-2-B 已改成從 RiskConfig hot-reload |
+| `h0_gate::H0Gate` | `openclaw_core::h0_gate` | 健康檢查（cpu/memory/db_latency/network）+ eligibility | **保留**，但建議把 `max_open_positions` / `max_total_exposure_pct` / `allowed_categories` 三個重複欄位改成 read-through `RiskConfig.limits` |
+| `stop_manager::StopManager` | `openclaw_core::stop_manager` | hard/trailing/time stop 邏輯 | **⚠️ 和 risk_checks::check_position_on_tick 功能重疊** — 其中一個應該死。建議：StopManager 廢掉，邏輯全收進 check_position_on_tick（已有對應 check） |
+| `risk_governor_sm::RiskGovernorSm` | `openclaw_core::risk_governor_sm` | 6 級級聯狀態機 + hysteresis | **保留**，這是不同架構概念（狀態機 vs 單次檢查），無法合併 |
+| Python `risk_manager.py` | program_code/ | 1633 行 GUI 路由 | **1C-3 空殼化**（已列入） |
+
+**具體收編 TODO（不阻塞 1C-2/1C-3，可 Phase 2 做）：**
+- [ ] **E-Merge-1**: StopManager 廢棄 — 驗證 risk_checks::check_position_on_tick 已覆蓋 hard/trailing/time stop 全部邏輯，搬出獨特功能（若有），刪除 openclaw_core::stop_manager
+- [ ] **E-Merge-2**: H0Gate 欄位去重 — `H0GateConfig` 的 max_open_positions / max_total_exposure_pct / allowed_categories 改成從 RiskConfig.limits read-through（每 check 快照讀），H0GateConfig 只保留健康檢查欄位（cpu/memory/db_latency/network/health_snapshot_max_age）
+- [ ] **E-Merge-3**: RiskGovernorSm 確認是否真的讀 RiskConfig.cascade（1B 規劃）還是有自己的 config（grep 驗證）；若否則接進 RiskConfig.cascade
+- [ ] **E-Merge-4 (可選)**: Guardian 進一步去 config struct 化 — GuardianConfig 退化為 `RiskConfig.limits + anti_cluster + guardian_modify` sub-view；保留 Guardian 引擎但不再持有 owned struct。收益有限，只有在 Phase 2 清理代碼味時順手做
+- **終局**：4-5 套 → **3 套執行引擎**（risk_checks 主引擎 / Guardian P0 modify 引擎 / H0Gate 健康檢查 / RiskGovernorSm 級聯狀態機），全部讀同一個 RiskConfig 真相源
+
 ---
 
 **參考索引**
