@@ -1291,78 +1291,67 @@ impl TickPipeline {
 
         // Step 6: Position risk checks — 9-check (RRC-1-C2, replaces basic check_stops).
         // 步驟 6：持倉風控 9 項檢查（RRC-1-C2，替代基本止損）。
+        //
+        // P2 refactor (2026-04-07): per-position math (pnl_pct / peak_pnl_pct /
+        // holding_hours / cost_ratio + check_position_on_tick) extracted to
+        // `position_risk_evaluator::evaluate_positions`. Decision-vs-mechanism
+        // split: that module computes WHAT to do (pure), the dispatch loop
+        // below executes the side-effects (close / halt / cooldown). Behavior
+        // preserved because the original code already snapshotted positions
+        // into a Vec before dispatching, so reading-then-acting in two phases
+        // is identical to the inline form.
+        // P2 重構（2026-04-07）：逐倉計算抽出至 position_risk_evaluator；
+        // 派發迴圈仍負責所有副作用，行為與原始碼一致。
         self.paper_state.update_best_prices();
         let session_drawdown = self.paper_state.drawdown_pct();
         let daily_loss = self
             .intent_processor
             .daily_loss_pct_pub(self.paper_state.balance());
         let risk_config = self.intent_processor.risk_config().clone();
-        let positions: Vec<(String, bool, f64, f64, f64, u64)> = self
+        let position_rows: Vec<crate::position_risk_evaluator::PositionRow> = self
             .paper_state
             .positions()
             .iter()
             .map(|p| {
-                let price = self
+                let current_price = self
                     .latest_prices
                     .get(&p.symbol)
                     .copied()
                     .unwrap_or(p.entry_price);
-                // F1: entry_price=0 → -999% (fail-closed) / entry_price=0 → 強制硬止損
-                let pct = |a: f64, b: f64| {
-                    if p.entry_price <= 0.0 {
-                        -999.0
-                    } else if p.is_long {
-                        (a - b) / b * 100.0
-                    } else {
-                        (b - a) / b * 100.0
-                    }
-                };
-                let pnl_pct = pct(price, p.entry_price);
-                let peak_pnl_pct = pct(p.best_price, p.entry_price);
-                (
-                    p.symbol.clone(),
-                    p.is_long,
-                    p.qty,
-                    pnl_pct,
-                    peak_pnl_pct,
-                    p.entry_ts_ms,
-                )
+                crate::position_risk_evaluator::PositionRow {
+                    symbol: p.symbol.clone(),
+                    is_long: p.is_long,
+                    qty: p.qty,
+                    entry_price: p.entry_price,
+                    entry_ts_ms: p.entry_ts_ms,
+                    peak_price: p.best_price,
+                    current_price,
+                    atr_pct: self.price_tracker.compute_atr_pct(&p.symbol),
+                    fee_rate: self.intent_processor.fee_rate(&p.symbol),
+                    regime: self.derive_regime(self.latest_indicators.get(&p.symbol)),
+                    consecutive_losses: self
+                        .consecutive_losses
+                        .get(&p.symbol)
+                        .copied()
+                        .unwrap_or(0),
+                }
             })
             .collect();
+        let decisions = crate::position_risk_evaluator::evaluate_positions(
+            &position_rows,
+            daily_loss,
+            session_drawdown,
+            event.ts_ms,
+            &risk_config,
+        );
 
-        for (symbol, is_long, qty, pnl_pct, peak_pnl_pct, entry_ts_ms) in &positions {
-            let holding_hours = (event.ts_ms.saturating_sub(*entry_ts_ms)) as f64 / 3_600_000.0;
-            let atr_pct = self.price_tracker.compute_atr_pct(symbol);
-            let consec = self.consecutive_losses.get(symbol).copied().unwrap_or(0);
-            // PNL-4: Pull live regime from Hurst (preferred) or ADX fallback.
-            // PNL-4：從 Hurst（首選）或 ADX 退回讀取實時 regime，取代硬編碼 "ranging"。
-            let regime = self.derive_regime(self.latest_indicators.get(symbol));
-            // GAP-2: live cost_ratio = round-trip fees / unrealized profit.
-            //   For positive pnl_pct, cost_ratio ≈ 200 × fee_rate / pnl_pct
-            //   (price ≈ entry near the close threshold so the approximation
-            //   is exact at the boundary). Returns 0 when not in profit, which
-            //   short-circuits the cost-edge check (only fires when pnl > 0).
-            // GAP-2：實時 cost_ratio = 來回手續費 / 浮盈。
-            let cost_ratio = if *pnl_pct > 0.0 {
-                (2.0 * self.intent_processor.fee_rate(symbol) * 100.0) / *pnl_pct
-            } else {
-                0.0
-            };
-            let action = check_position_on_tick(
-                *pnl_pct,
-                *peak_pnl_pct,
-                holding_hours,
-                cost_ratio,
-                &regime, // PNL-4: live regime from Hurst/ADX
-                atr_pct,
-                symbol,
-                *entry_ts_ms,
-                consec,
-                daily_loss,
-                session_drawdown,
-                &risk_config,
-            );
-            match action {
+        for decision in &decisions {
+            let symbol = &decision.symbol;
+            let is_long = &decision.is_long;
+            let qty = &decision.qty;
+            let pnl_pct = &decision.pnl_pct;
+            let entry_ts_ms = &decision.entry_ts_ms;
+            match decision.action.clone() {
                 RiskAction::Hold => {} // no action / 無動作
                 RiskAction::ClosePosition(reason) => {
                     if is_exchange_mode {
