@@ -66,19 +66,6 @@ fn default_trading_mode() -> TradingMode {
     TradingMode::PaperOnly
 }
 
-fn default_p1_risk_pct() -> f64 {
-    0.02 // 2% of balance per trade
-}
-fn default_max_leverage() -> f64 {
-    5.0
-}
-fn default_max_drawdown_pct() -> f64 {
-    15.0
-}
-fn default_max_same_direction_positions() -> u32 {
-    3
-}
-
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
 // ---------------------------------------------------------------------------
@@ -107,18 +94,21 @@ pub enum ConfigError {
 // Config struct / 配置結構
 // ---------------------------------------------------------------------------
 
-/// Complete engine runtime configuration.
-/// 完整引擎運行時配置。
+/// Engine bootstrap configuration (renamed from `RuntimeConfig` in 1C-1 Batch 5).
+/// 引擎啟動配置（1C-1 Batch 5 從 `RuntimeConfig` 改名）。
 ///
-/// Cold params (require restart): ws_url, reconnect_delay_ms, heartbeat_interval_ms,
-///   ipc_socket_path, state_push_interval_ms.
-/// Hot params (SIGHUP reload): risk limits, attention intervals, cognitive params.
+/// Holds ONLY connection / bootstrap / integration parameters from engine.toml.
+/// All risk, leverage, drawdown, sizing, and ML parameters are owned by the
+/// ARCH-RC1 unified Configs (`RiskConfig`, `LearningConfig`, `BudgetConfig`).
 ///
-/// 冷參數（需重啟）：ws_url, reconnect_delay_ms, heartbeat_interval_ms,
-///   ipc_socket_path, state_push_interval_ms。
-/// 熱參數（SIGHUP 重載）：風控限制、注意力間隔、認知參數。
+/// 只持有連線/啟動/整合參數。所有風控、槓桿、回撤、sizing、ML 參數由
+/// ARCH-RC1 統一 Config (`RiskConfig` / `LearningConfig` / `BudgetConfig`) 擁有。
+///
+/// Cold params (require restart): ws_url, reconnect_delay_ms,
+/// heartbeat_interval_ms, ipc_socket_path, state_push_interval_ms, trading_mode.
+/// 冷參數（需重啟）：ws_url / reconnect / heartbeat / ipc_socket / state_push / trading_mode。
 #[derive(Debug, Clone, Deserialize)]
-pub struct RuntimeConfig {
+pub struct EngineBootstrap {
     // -- Cold params / 冷參數 --
     /// Bybit WebSocket URL / Bybit WebSocket 地址
     #[serde(default = "default_ws_url")]
@@ -139,40 +129,6 @@ pub struct RuntimeConfig {
     /// State push interval to Python side (ms) / 狀態推送間隔（毫秒）
     #[serde(default = "default_state_push_interval_ms")]
     pub state_push_interval_ms: u64,
-
-    // -- Hot params — risk / 熱參數 — 風控 --
-    /// P1 risk cap per trade (fraction, e.g. 0.02 = 2% of balance). Hot-reloadable.
-    /// P1 每筆交易風險上限（小數，如 0.02 = 餘額的 2%）。可熱重載。
-    #[serde(default = "default_p1_risk_pct")]
-    pub p1_risk_pct: f64,
-
-    /// Max stop-loss percentage per position / 每倉位最大止損百分比
-    #[serde(default = "default_max_stop_loss_pct")]
-    pub max_stop_loss_pct: f64,
-
-    /// Max take-profit percentage per position / 每倉位最大止盈百分比
-    #[serde(default = "default_max_take_profit_pct")]
-    pub max_take_profit_pct: f64,
-
-    /// Max number of open positions / 最大持倉數
-    #[serde(default = "default_max_open_positions")]
-    pub max_open_positions: u32,
-
-    /// Max total portfolio exposure (%) / 最大總組合曝險百分比
-    #[serde(default = "default_max_total_exposure_pct")]
-    pub max_total_exposure_pct: f64,
-
-    /// Max leverage (Guardian check) / 最大槓桿（守護者檢查）
-    #[serde(default = "default_max_leverage")]
-    pub max_leverage: f64,
-
-    /// Max session drawdown before rejection (%) / 最大回撤百分比
-    #[serde(default = "default_max_drawdown_pct")]
-    pub max_drawdown_pct: f64,
-
-    /// Max same-direction positions (Guardian) / 最大同方向持倉數
-    #[serde(default = "default_max_same_direction_positions")]
-    pub max_same_direction_positions: u32,
 
     // -- Hot params — Bybit API integration / 熱參數 — Bybit API 整合 --
     /// Enable DCP (Disconnected Cancel Protection) at startup / 啟動時啟用斷連取消保護
@@ -244,18 +200,6 @@ fn default_ipc_socket_path() -> String {
 fn default_state_push_interval_ms() -> u64 {
     1000
 }
-fn default_max_stop_loss_pct() -> f64 {
-    5.0
-}
-fn default_max_take_profit_pct() -> f64 {
-    8.0
-}
-fn default_max_open_positions() -> u32 {
-    25
-}
-fn default_max_total_exposure_pct() -> f64 {
-    100.0
-}
 fn default_true() -> bool {
     true
 }
@@ -266,7 +210,7 @@ fn default_balance_mode() -> String {
     "custom".into()
 }
 
-impl Default for RuntimeConfig {
+impl Default for EngineBootstrap {
     fn default() -> Self {
         Self {
             ws_url: default_ws_url(),
@@ -274,14 +218,6 @@ impl Default for RuntimeConfig {
             heartbeat_interval_ms: default_heartbeat_interval_ms(),
             ipc_socket_path: default_ipc_socket_path(),
             state_push_interval_ms: default_state_push_interval_ms(),
-            p1_risk_pct: default_p1_risk_pct(),
-            max_leverage: default_max_leverage(),
-            max_drawdown_pct: default_max_drawdown_pct(),
-            max_same_direction_positions: default_max_same_direction_positions(),
-            max_stop_loss_pct: default_max_stop_loss_pct(),
-            max_take_profit_pct: default_max_take_profit_pct(),
-            max_open_positions: default_max_open_positions(),
-            max_total_exposure_pct: default_max_total_exposure_pct(),
             dcp_enabled: default_true(),
             dcp_time_window: default_dcp_time_window(),
             auto_add_margin: default_true(),
@@ -296,33 +232,35 @@ impl Default for RuntimeConfig {
     }
 }
 
-impl RuntimeConfig {
-    /// Validate configuration values.
-    /// 驗證配置值。
+impl EngineBootstrap {
+    /// Validate bootstrap values (risk-related validation lives in RiskConfig).
+    /// 驗證啟動參數（風控相關驗證已遷移到 RiskConfig）。
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.max_open_positions == 0 {
+        if self.reconnect_delay_ms == 0 {
             return Err(ConfigError::Validation(
-                "max_open_positions must be > 0".into(),
+                "reconnect_delay_ms must be > 0".into(),
             ));
         }
-        if self.max_stop_loss_pct <= 0.0 || self.max_stop_loss_pct > 100.0 {
+        if self.heartbeat_interval_ms == 0 {
             return Err(ConfigError::Validation(
-                "max_stop_loss_pct must be in (0, 100]".into(),
+                "heartbeat_interval_ms must be > 0".into(),
             ));
         }
-        if self.max_take_profit_pct <= 0.0 {
+        if self.ipc_socket_path.is_empty() {
             return Err(ConfigError::Validation(
-                "max_take_profit_pct must be > 0".into(),
-            ));
-        }
-        if self.max_total_exposure_pct <= 0.0 {
-            return Err(ConfigError::Validation(
-                "max_total_exposure_pct must be > 0".into(),
+                "ipc_socket_path must not be empty".into(),
             ));
         }
         Ok(())
     }
 }
+
+/// Backwards-compat alias during the 1C-1 → 1C-2 transition so that external
+/// callers importing `config::RuntimeConfig` keep compiling. Remove in 1C-2
+/// once all imports are updated.
+/// 1C-1 → 1C-2 過渡期的向後相容別名；1C-2 所有 import 更新後移除。
+#[deprecated(note = "Renamed to EngineBootstrap in ARCH-RC1 1C-1 Batch 5; update imports.")]
+pub type RuntimeConfig = EngineBootstrap;
 
 // ---------------------------------------------------------------------------
 // ConfigManager — ArcSwap-based hot reload / 基於 ArcSwap 的熱加載管理器
@@ -331,7 +269,7 @@ impl RuntimeConfig {
 /// Atomic config manager using ArcSwap for zero-lock reads.
 /// 使用 ArcSwap 的原子配置管理器，實現零鎖讀取。
 pub struct ConfigManager {
-    inner: ArcSwap<RuntimeConfig>,
+    inner: ArcSwap<EngineBootstrap>,
     file_path: PathBuf,
 }
 
@@ -351,7 +289,7 @@ impl ConfigManager {
 
     /// Get current config snapshot (zero-lock, ~5ns).
     /// 獲取當前配置快照（零鎖，~5ns）。
-    pub fn get(&self) -> Arc<RuntimeConfig> {
+    pub fn get(&self) -> Arc<EngineBootstrap> {
         self.inner.load_full()
     }
 
@@ -436,19 +374,19 @@ fn resolve_config_path(explicit: Option<&str>) -> PathBuf {
 
 /// Load and parse TOML from file. Returns default config if file doesn't exist.
 /// 從文件加載並解析 TOML。文件不存在時返回預設配置。
-fn load_from_file(path: &Path) -> Result<RuntimeConfig, ConfigError> {
+fn load_from_file(path: &Path) -> Result<EngineBootstrap, ConfigError> {
     if !path.exists() {
         info!(
             path = %path.display(),
             "config file not found, using defaults / 配置文件未找到，使用預設值"
         );
-        return Ok(RuntimeConfig::default());
+        return Ok(EngineBootstrap::default());
     }
     let content = std::fs::read_to_string(path).map_err(|e| ConfigError::ReadFile {
         path: path.display().to_string(),
         source: e,
     })?;
-    let config: RuntimeConfig = toml::from_str(&content)?;
+    let config: EngineBootstrap = toml::from_str(&content)?;
     Ok(config)
 }
 
@@ -462,31 +400,24 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_default_config_valid() {
-        let cfg = RuntimeConfig::default();
+    fn test_default_bootstrap_valid() {
+        let cfg = EngineBootstrap::default();
         assert!(cfg.validate().is_ok());
-        assert_eq!(cfg.max_open_positions, 25);
         assert_eq!(cfg.ws_url, "wss://stream.bybit.com/v5/public/linear");
+        assert_eq!(cfg.trading_mode, TradingMode::PaperOnly);
     }
 
     #[test]
-    fn test_invalid_positions_zero() {
-        let mut cfg = RuntimeConfig::default();
-        cfg.max_open_positions = 0;
+    fn test_invalid_reconnect_delay_zero() {
+        let mut cfg = EngineBootstrap::default();
+        cfg.reconnect_delay_ms = 0;
         assert!(cfg.validate().is_err());
     }
 
     #[test]
-    fn test_invalid_stop_loss_negative() {
-        let mut cfg = RuntimeConfig::default();
-        cfg.max_stop_loss_pct = -1.0;
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn test_invalid_stop_loss_over_100() {
-        let mut cfg = RuntimeConfig::default();
-        cfg.max_stop_loss_pct = 101.0;
+    fn test_invalid_ipc_socket_empty() {
+        let mut cfg = EngineBootstrap::default();
+        cfg.ipc_socket_path = String::new();
         assert!(cfg.validate().is_err());
     }
 
@@ -498,27 +429,22 @@ reconnect_delay_ms = 5000
 heartbeat_interval_ms = 15000
 ipc_socket_path = "/tmp/test.sock"
 state_push_interval_ms = 2000
-max_stop_loss_pct = 3.0
-max_take_profit_pct = 10.0
-max_open_positions = 15
-max_total_exposure_pct = 80.0
 "#;
-        let cfg: RuntimeConfig = toml::from_str(toml_str).unwrap();
+        let cfg: EngineBootstrap = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.ws_url, "wss://example.com/ws");
         assert_eq!(cfg.reconnect_delay_ms, 5000);
-        assert_eq!(cfg.max_open_positions, 15);
+        assert_eq!(cfg.heartbeat_interval_ms, 15000);
         assert!(cfg.validate().is_ok());
     }
 
     #[test]
     fn test_toml_parse_partial_uses_defaults() {
         let toml_str = r#"
-max_open_positions = 10
+heartbeat_interval_ms = 30000
 "#;
-        let cfg: RuntimeConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(cfg.max_open_positions, 10);
+        let cfg: EngineBootstrap = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.heartbeat_interval_ms, 30000);
         assert_eq!(cfg.ws_url, "wss://stream.bybit.com/v5/public/linear");
-        assert_eq!(cfg.heartbeat_interval_ms, 20000);
         assert!(cfg.validate().is_ok());
     }
 
@@ -527,7 +453,7 @@ max_open_positions = 10
         // Should fall back to defaults / 應回退到預設值
         let mgr = ConfigManager::load(Some("/tmp/nonexistent_openclaw_test.toml")).unwrap();
         let cfg = mgr.get();
-        assert_eq!(cfg.max_open_positions, 25);
+        assert_eq!(cfg.ws_url, "wss://stream.bybit.com/v5/public/linear");
     }
 
     #[test]
@@ -539,23 +465,21 @@ max_open_positions = 10
         // Write initial config / 寫入初始配置
         {
             let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "max_open_positions = 10").unwrap();
-            writeln!(f, "max_stop_loss_pct = 3.0").unwrap();
+            writeln!(f, "heartbeat_interval_ms = 10000").unwrap();
         }
 
         let mgr = ConfigManager::load(Some(path.to_str().unwrap())).unwrap();
-        assert_eq!(mgr.get().max_open_positions, 10);
+        assert_eq!(mgr.get().heartbeat_interval_ms, 10000);
 
         // Update config file / 更新配置文件
         {
             let mut f = std::fs::File::create(&path).unwrap();
-            writeln!(f, "max_open_positions = 20").unwrap();
-            writeln!(f, "max_stop_loss_pct = 4.0").unwrap();
+            writeln!(f, "heartbeat_interval_ms = 25000").unwrap();
         }
 
         mgr.reload().unwrap();
-        assert_eq!(mgr.get().max_open_positions, 20);
-        assert!((mgr.get().max_stop_loss_pct - 4.0).abs() < f64::EPSILON);
+        // heartbeat_interval_ms is cold → preserved from original load
+        assert_eq!(mgr.get().heartbeat_interval_ms, 10000);
 
         // Cleanup / 清理
         let _ = std::fs::remove_file(&path);

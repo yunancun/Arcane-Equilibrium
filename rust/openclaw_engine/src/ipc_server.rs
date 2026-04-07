@@ -461,12 +461,16 @@ fn handle_ping(id: serde_json::Value) -> JsonRpcResponse {
 /// 獲取當前引擎狀態摘要（存根）。
 fn handle_get_state(id: serde_json::Value, config: &Arc<ConfigManager>) -> JsonRpcResponse {
     let cfg = config.get();
+    // ARCH-RC1 1C-1: risk display fields now sourced from RiskConfig::default()
+    // placeholder; 1C-2 will replace with live ConfigStore<RiskConfig> snapshot.
+    // ARCH-RC1 1C-1：風控展示欄位暫從 RiskConfig::default() 讀；1C-2 改真快照。
+    let risk = crate::config::RiskConfig::default();
     let state = serde_json::json!({
         "status": "running",
         "system_mode": "demo_only",
         "trading_mode": cfg.trading_mode.to_string(),
-        "max_open_positions": cfg.max_open_positions,
-        "max_total_exposure_pct": cfg.max_total_exposure_pct,
+        "max_open_positions": risk.limits.open_positions_max,
+        "max_total_exposure_pct": risk.limits.total_exposure_max_pct,
         "ws_url": cfg.ws_url,
         "config_path": config.file_path().display().to_string(),
     });
