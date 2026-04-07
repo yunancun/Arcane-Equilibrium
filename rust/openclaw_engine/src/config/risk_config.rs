@@ -1,0 +1,1293 @@
+//! RiskConfig — Authoritative risk control configuration (ARCH-RC1).
+//! RiskConfig — 風控權威配置。
+//!
+//! MODULE_NOTE (EN): One of the three hot-reload Configs in ARCH-RC1, and the
+//!   single source of truth for ALL risk decisions: P0 category overrides,
+//!   P1 operator hard ceilings, P2 agent self-tunable params, 6-level RiskGovernor
+//!   cascade thresholds, regime multipliers, cost gate, dynamic stop, market
+//!   gate (microstructure), anti-cluster, correlation, and runtime knobs.
+//!   `partial_tp_*` lives in agent (P2) here, NOT in LearningConfig — coupled
+//!   to take_profit_max_pct so they share the same Config validate path.
+//!   Tick path reads via `Arc<ArcSwap<RiskConfig>>` for ~5ns lock-free snapshot.
+//! MODULE_NOTE (中): ARCH-RC1 三個熱重載 Config 之一，所有風控決策的單一真相來源：
+//!   P0 品類覆蓋、P1 操作員硬上限、P2 Agent 自我調整、6 級 RiskGovernor cascade
+//!   閾值、regime 乘數、cost gate、動態 stop、market gate（微結構）、anti-cluster、
+//!   correlation、runtime knobs。`partial_tp_*` 在這裡的 agent (P2)，不在
+//!   LearningConfig —— 與 take_profit_max_pct 耦合所以同 Config validate。
+//!   Tick 路徑透過 `Arc<ArcSwap<RiskConfig>>` 無鎖快照（~5ns）。
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+// ---------------------------------------------------------------------------
+// Top-level / 頂層
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Meta {
+    #[serde(default = "default_meta_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub saved_ts_ms: u64,
+}
+
+fn default_meta_version() -> u32 {
+    1
+}
+
+impl Default for Meta {
+    fn default() -> Self {
+        Self {
+            version: default_meta_version(),
+            saved_ts_ms: 0,
+        }
+    }
+}
+
+/// Complete risk configuration (ARCH-RC1).
+/// 完整風控配置。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RiskConfig {
+    #[serde(default)]
+    pub meta: Meta,
+    #[serde(default)]
+    pub limits: GlobalLimits,
+    #[serde(default)]
+    pub overrides: CategoryOverrides,
+    #[serde(default)]
+    pub per_strategy: HashMap<String, StrategyOverride>,
+    #[serde(default)]
+    pub agent: AgentParams,
+    #[serde(default)]
+    pub cascade: CascadeThresholds,
+    #[serde(default)]
+    pub regime: RegimeMultipliers,
+    #[serde(default)]
+    pub cost_gate: CostGate,
+    #[serde(default)]
+    pub dynamic_stop: DynamicStop,
+    #[serde(default)]
+    pub market_gate: MarketGate,
+    #[serde(default)]
+    pub anti_cluster: AntiCluster,
+    #[serde(default)]
+    pub correlation: Correlation,
+    #[serde(default)]
+    pub runtime: RuntimeKnobs,
+    #[serde(default)]
+    pub experimental: Experimental,
+}
+
+impl RiskConfig {
+    /// Validate cross-field invariants. Cross-Config dependencies are checked
+    /// elsewhere (DirectiveApplier etc.).
+    /// 驗證跨欄位不變量。跨 Config 依賴在別處檢查（DirectiveApplier 等）。
+    pub fn validate(&self) -> Result<(), String> {
+        self.limits.validate()?;
+        self.agent.validate()?;
+        self.cascade.validate()?;
+        self.regime.validate()?;
+        self.cost_gate.validate()?;
+        self.dynamic_stop.validate()?;
+        self.market_gate.validate()?;
+        self.anti_cluster.validate()?;
+        self.correlation.validate()?;
+        self.runtime.validate()?;
+
+        // Cross-sub-struct invariant: partial_tp levels must not exceed take_profit_max_pct.
+        // 跨 sub-struct 不變量：partial_tp 各層不得超過 take_profit_max_pct。
+        if self.agent.partial_tp_enabled {
+            for (i, (pct, frac)) in self.agent.partial_tp_levels.iter().enumerate() {
+                if *pct > self.limits.take_profit_max_pct {
+                    return Err(format!(
+                        "risk.agent.partial_tp_levels[{}] pct {} exceeds risk.limits.take_profit_max_pct {}",
+                        i, pct, self.limits.take_profit_max_pct
+                    ));
+                }
+                if !(0.0..=1.0).contains(frac) {
+                    return Err(format!(
+                        "risk.agent.partial_tp_levels[{}] fraction {} must be in [0, 1]",
+                        i, frac
+                    ));
+                }
+            }
+        }
+
+        // Cross-sub-struct: min_order_notional must allow at least one position.
+        // 跨 sub-struct：min_order_notional 必須允許至少一個倉位存在。
+        if self.limits.min_order_notional_usdt > self.limits.max_order_notional_usdt
+            && self.limits.max_order_notional_usdt > 0.0
+        {
+            return Err(
+                "risk.limits.min_order_notional_usdt must not exceed max_order_notional_usdt"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GlobalLimits (P1) / 全局上限
+// ---------------------------------------------------------------------------
+
+/// Operator-set hard ceilings (P1). All percentages are in absolute points (5.0 = 5%).
+/// 操作員設定的硬上限（P1）。所有百分比為絕對值（5.0 = 5%）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalLimits {
+    #[serde(default = "default_stop_loss_max_pct")]
+    pub stop_loss_max_pct: f64,
+    #[serde(default = "default_take_profit_max_pct")]
+    pub take_profit_max_pct: f64,
+    /// Whether take-profit is forced at limits.take_profit_max_pct (vs trailing only).
+    /// 是否在 take_profit_max_pct 處強制止盈（vs 僅追蹤）。
+    #[serde(default)]
+    pub take_profit_enforced: bool,
+    #[serde(default = "default_position_size_max_pct")]
+    pub position_size_max_pct: f64,
+    #[serde(default = "default_total_exposure_max_pct")]
+    pub total_exposure_max_pct: f64,
+    #[serde(default = "default_correlated_exposure_max_pct")]
+    pub correlated_exposure_max_pct: f64,
+    #[serde(default = "default_leverage_max")]
+    pub leverage_max: f64,
+    #[serde(default = "default_session_drawdown_max_pct")]
+    pub session_drawdown_max_pct: f64,
+    #[serde(default = "default_daily_loss_max_pct")]
+    pub daily_loss_max_pct: f64,
+    #[serde(default = "default_consec_loss_cooldown_count")]
+    pub consec_loss_cooldown_count: u32,
+    #[serde(default = "default_consec_loss_cooldown_min")]
+    pub consec_loss_cooldown_min: u32,
+    #[serde(default = "default_holding_hours_max")]
+    pub holding_hours_max: f64,
+    #[serde(default = "default_open_positions_max")]
+    pub open_positions_max: u32,
+    /// Smallest notional a single order may have (USDT). 0 = no floor.
+    /// 單筆訂單最小名目（USDT）。0 = 無下限。
+    #[serde(default)]
+    pub min_order_notional_usdt: f64,
+    /// Largest notional a single order may have (USDT). 0 = no ceiling.
+    /// 單筆訂單最大名目（USDT）。0 = 無上限。
+    #[serde(default)]
+    pub max_order_notional_usdt: f64,
+    /// Account balance below which all new entries are blocked.
+    /// 賬戶餘額低於此值時阻擋所有新進場。
+    #[serde(default)]
+    pub min_balance_usdt: f64,
+    #[serde(default = "default_allowed_categories")]
+    pub allowed_categories: Vec<String>,
+    #[serde(default = "default_margin_mode")]
+    pub margin_mode: String,
+    #[serde(default = "default_position_mode")]
+    pub position_mode: String,
+}
+
+fn default_stop_loss_max_pct() -> f64 {
+    5.0
+}
+fn default_take_profit_max_pct() -> f64 {
+    20.0
+}
+fn default_position_size_max_pct() -> f64 {
+    20.0
+}
+fn default_total_exposure_max_pct() -> f64 {
+    100.0
+}
+fn default_correlated_exposure_max_pct() -> f64 {
+    60.0
+}
+fn default_leverage_max() -> f64 {
+    20.0
+}
+fn default_session_drawdown_max_pct() -> f64 {
+    15.0
+}
+fn default_daily_loss_max_pct() -> f64 {
+    5.0
+}
+fn default_consec_loss_cooldown_count() -> u32 {
+    3
+}
+fn default_consec_loss_cooldown_min() -> u32 {
+    30
+}
+fn default_holding_hours_max() -> f64 {
+    72.0
+}
+fn default_open_positions_max() -> u32 {
+    25
+}
+fn default_allowed_categories() -> Vec<String> {
+    vec!["spot".into(), "linear".into(), "inverse".into()]
+}
+fn default_margin_mode() -> String {
+    "isolated".into()
+}
+fn default_position_mode() -> String {
+    "one_way".into()
+}
+
+impl Default for GlobalLimits {
+    fn default() -> Self {
+        Self {
+            stop_loss_max_pct: default_stop_loss_max_pct(),
+            take_profit_max_pct: default_take_profit_max_pct(),
+            take_profit_enforced: false,
+            position_size_max_pct: default_position_size_max_pct(),
+            total_exposure_max_pct: default_total_exposure_max_pct(),
+            correlated_exposure_max_pct: default_correlated_exposure_max_pct(),
+            leverage_max: default_leverage_max(),
+            session_drawdown_max_pct: default_session_drawdown_max_pct(),
+            daily_loss_max_pct: default_daily_loss_max_pct(),
+            consec_loss_cooldown_count: default_consec_loss_cooldown_count(),
+            consec_loss_cooldown_min: default_consec_loss_cooldown_min(),
+            holding_hours_max: default_holding_hours_max(),
+            open_positions_max: default_open_positions_max(),
+            min_order_notional_usdt: 0.0,
+            max_order_notional_usdt: 0.0,
+            min_balance_usdt: 0.0,
+            allowed_categories: default_allowed_categories(),
+            margin_mode: default_margin_mode(),
+            position_mode: default_position_mode(),
+        }
+    }
+}
+
+impl GlobalLimits {
+    fn validate(&self) -> Result<(), String> {
+        if self.stop_loss_max_pct <= 0.0 || self.stop_loss_max_pct > 100.0 {
+            return Err("risk.limits.stop_loss_max_pct must be in (0, 100]".into());
+        }
+        if self.take_profit_max_pct <= 0.0 {
+            return Err("risk.limits.take_profit_max_pct must be > 0".into());
+        }
+        if self.position_size_max_pct <= 0.0 || self.position_size_max_pct > 100.0 {
+            return Err("risk.limits.position_size_max_pct must be in (0, 100]".into());
+        }
+        if self.total_exposure_max_pct <= 0.0 {
+            return Err("risk.limits.total_exposure_max_pct must be > 0".into());
+        }
+        if self.leverage_max < 1.0 {
+            return Err("risk.limits.leverage_max must be >= 1".into());
+        }
+        if self.open_positions_max == 0 {
+            return Err("risk.limits.open_positions_max must be >= 1".into());
+        }
+        if self.holding_hours_max <= 0.0 {
+            return Err("risk.limits.holding_hours_max must be > 0".into());
+        }
+        if self.min_order_notional_usdt < 0.0 || self.max_order_notional_usdt < 0.0 {
+            return Err("risk.limits.*_order_notional_usdt must be >= 0".into());
+        }
+        if self.allowed_categories.is_empty() {
+            return Err("risk.limits.allowed_categories must not be empty".into());
+        }
+        match self.margin_mode.as_str() {
+            "isolated" | "cross" => {}
+            other => return Err(format!("risk.limits.margin_mode invalid: '{}'", other)),
+        }
+        match self.position_mode.as_str() {
+            "one_way" | "hedge" => {}
+            other => return Err(format!("risk.limits.position_mode invalid: '{}'", other)),
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CategoryOverrides (P0)
+// ---------------------------------------------------------------------------
+
+/// Per-category P0 overrides (spot / linear / inverse / option).
+/// 按品類的 P0 覆蓋。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CategoryOverrides {
+    #[serde(default)]
+    pub spot: Option<CategoryOverride>,
+    #[serde(default)]
+    pub linear: Option<CategoryOverride>,
+    #[serde(default)]
+    pub inverse: Option<CategoryOverride>,
+    #[serde(default)]
+    pub option: Option<CategoryOverride>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CategoryOverride {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub leverage_max: Option<f64>,
+    #[serde(default)]
+    pub position_size_max_pct: Option<f64>,
+    #[serde(default)]
+    pub total_exposure_max_pct: Option<f64>,
+    #[serde(default)]
+    pub stop_loss_max_pct: Option<f64>,
+    #[serde(default)]
+    pub holding_hours_max: Option<f64>,
+    #[serde(default)]
+    pub allowed_symbols: Option<Vec<String>>,
+    #[serde(default)]
+    pub spot_margin_allowed: Option<bool>,
+}
+
+// ---------------------------------------------------------------------------
+// StrategyOverride (per-strategy)
+// ---------------------------------------------------------------------------
+
+/// Per-strategy risk override. Indexed by strategy name in `RiskConfig.per_strategy`.
+/// 按策略名稱索引的策略級風控覆蓋。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyOverride {
+    /// One-click pause/resume.
+    /// 一鍵暫停/恢復。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub position_size_max_pct: Option<f64>,
+    #[serde(default)]
+    pub max_concurrent_positions: Option<u32>,
+    #[serde(default)]
+    pub consec_loss_cooldown_count: Option<u32>,
+    #[serde(default)]
+    pub allowed_symbols: Option<Vec<String>>,
+    #[serde(default)]
+    pub blocked_symbols: Option<Vec<String>>,
+}
+
+impl Default for StrategyOverride {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position_size_max_pct: None,
+            max_concurrent_positions: None,
+            consec_loss_cooldown_count: None,
+            allowed_symbols: None,
+            blocked_symbols: None,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+// ---------------------------------------------------------------------------
+// AgentParams (P2)
+// ---------------------------------------------------------------------------
+
+/// Agent self-tunable risk-side parameters (P2).
+/// Agent 自我調整的風控側參數（P2）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentParams {
+    /// Effective stop-loss %. None = dynamic ATR.
+    /// 有效止損百分比。None = 動態 ATR。
+    #[serde(default)]
+    pub stop_loss_pct: Option<f64>,
+    /// Effective take-profit %. None = dynamic ATR.
+    /// 有效止盈百分比。None = 動態 ATR。
+    #[serde(default)]
+    pub take_profit_pct: Option<f64>,
+    #[serde(default = "default_true")]
+    pub trailing_enabled: bool,
+    #[serde(default = "default_trailing_activation_pct")]
+    pub trailing_activation_pct: f64,
+    #[serde(default = "default_trailing_distance_pct")]
+    pub trailing_distance_pct: f64,
+    /// Position size scaling (0.1 - 1.0).
+    /// 倉位規模縮放（0.1 - 1.0）。
+    #[serde(default = "default_size_multiplier")]
+    pub size_multiplier: f64,
+    /// Per-category preference weights (sum should be > 0).
+    /// 按品類偏好權重（總和應 > 0）。
+    #[serde(default)]
+    pub category_weights: HashMap<String, f64>,
+    /// Order placement preferences.
+    /// 訂單放置偏好。
+    #[serde(default = "default_true")]
+    pub prefer_limit: bool,
+    #[serde(default = "default_true")]
+    pub reduce_only_close: bool,
+    #[serde(default)]
+    pub post_only_limit: bool,
+    /// Partial take-profit toggle. Coupled to limits.take_profit_max_pct.
+    /// 分批止盈開關。與 limits.take_profit_max_pct 耦合。
+    #[serde(default)]
+    pub partial_tp_enabled: bool,
+    /// Partial TP levels: list of (pct_profit, fraction_to_close).
+    /// 分批止盈各層：(百分比利潤, 平倉比例) 列表。
+    #[serde(default)]
+    pub partial_tp_levels: Vec<(f64, f64)>,
+}
+
+fn default_trailing_activation_pct() -> f64 {
+    1.0
+}
+fn default_trailing_distance_pct() -> f64 {
+    0.8
+}
+fn default_size_multiplier() -> f64 {
+    1.0
+}
+
+impl Default for AgentParams {
+    fn default() -> Self {
+        Self {
+            stop_loss_pct: None,
+            take_profit_pct: None,
+            trailing_enabled: default_true(),
+            trailing_activation_pct: default_trailing_activation_pct(),
+            trailing_distance_pct: default_trailing_distance_pct(),
+            size_multiplier: default_size_multiplier(),
+            category_weights: HashMap::new(),
+            prefer_limit: default_true(),
+            reduce_only_close: default_true(),
+            post_only_limit: false,
+            partial_tp_enabled: false,
+            partial_tp_levels: Vec::new(),
+        }
+    }
+}
+
+impl AgentParams {
+    fn validate(&self) -> Result<(), String> {
+        if !(0.1..=1.0).contains(&self.size_multiplier) {
+            return Err("risk.agent.size_multiplier must be in [0.1, 1.0]".into());
+        }
+        if self.trailing_activation_pct <= 0.0 {
+            return Err("risk.agent.trailing_activation_pct must be > 0".into());
+        }
+        if self.trailing_distance_pct <= 0.0 {
+            return Err("risk.agent.trailing_distance_pct must be > 0".into());
+        }
+        if let Some(sl) = self.stop_loss_pct {
+            if sl <= 0.0 {
+                return Err("risk.agent.stop_loss_pct must be > 0 when set".into());
+            }
+        }
+        if let Some(tp) = self.take_profit_pct {
+            if tp <= 0.0 {
+                return Err("risk.agent.take_profit_pct must be > 0 when set".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CascadeThresholds — RiskGovernor 6-level
+// ---------------------------------------------------------------------------
+
+/// Six-level RiskGovernor cascade thresholds (Normal / Cautious / Reduced / Defensive / CircuitBreaker / ManualReview).
+/// 六級 RiskGovernor cascade 閾值。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CascadeThresholds {
+    #[serde(default = "default_drawdown_cautious_pct")]
+    pub drawdown_cautious_pct: f64,
+    #[serde(default = "default_drawdown_reduced_pct")]
+    pub drawdown_reduced_pct: f64,
+    #[serde(default = "default_drawdown_defensive_pct")]
+    pub drawdown_defensive_pct: f64,
+    #[serde(default = "default_drawdown_circuit_pct")]
+    pub drawdown_circuit_pct: f64,
+    #[serde(default = "default_daily_loss_cautious_pct")]
+    pub daily_loss_cautious_pct: f64,
+    #[serde(default = "default_daily_loss_reduced_pct")]
+    pub daily_loss_reduced_pct: f64,
+    #[serde(default = "default_daily_loss_circuit_pct")]
+    pub daily_loss_circuit_pct: f64,
+    #[serde(default = "default_consec_loss_cautious")]
+    pub consec_loss_cautious: u32,
+    #[serde(default = "default_consec_loss_reduced")]
+    pub consec_loss_reduced: u32,
+    #[serde(default = "default_consec_loss_circuit")]
+    pub consec_loss_circuit: u32,
+    #[serde(default = "default_pressure_cautious")]
+    pub pressure_cautious: f64,
+    #[serde(default = "default_pressure_reduced")]
+    pub pressure_reduced: f64,
+    #[serde(default = "default_pressure_defensive")]
+    pub pressure_defensive: f64,
+    #[serde(default = "default_pressure_circuit")]
+    pub pressure_circuit: f64,
+    #[serde(default = "default_min_hold_ms")]
+    pub min_hold_ms: u64,
+}
+
+fn default_drawdown_cautious_pct() -> f64 {
+    5.0
+}
+fn default_drawdown_reduced_pct() -> f64 {
+    8.0
+}
+fn default_drawdown_defensive_pct() -> f64 {
+    12.0
+}
+fn default_drawdown_circuit_pct() -> f64 {
+    15.0
+}
+fn default_daily_loss_cautious_pct() -> f64 {
+    2.0
+}
+fn default_daily_loss_reduced_pct() -> f64 {
+    3.5
+}
+fn default_daily_loss_circuit_pct() -> f64 {
+    5.0
+}
+fn default_consec_loss_cautious() -> u32 {
+    3
+}
+fn default_consec_loss_reduced() -> u32 {
+    5
+}
+fn default_consec_loss_circuit() -> u32 {
+    10
+}
+fn default_pressure_cautious() -> f64 {
+    0.3
+}
+fn default_pressure_reduced() -> f64 {
+    0.5
+}
+fn default_pressure_defensive() -> f64 {
+    0.7
+}
+fn default_pressure_circuit() -> f64 {
+    0.9
+}
+fn default_min_hold_ms() -> u64 {
+    300_000
+}
+
+impl Default for CascadeThresholds {
+    fn default() -> Self {
+        Self {
+            drawdown_cautious_pct: default_drawdown_cautious_pct(),
+            drawdown_reduced_pct: default_drawdown_reduced_pct(),
+            drawdown_defensive_pct: default_drawdown_defensive_pct(),
+            drawdown_circuit_pct: default_drawdown_circuit_pct(),
+            daily_loss_cautious_pct: default_daily_loss_cautious_pct(),
+            daily_loss_reduced_pct: default_daily_loss_reduced_pct(),
+            daily_loss_circuit_pct: default_daily_loss_circuit_pct(),
+            consec_loss_cautious: default_consec_loss_cautious(),
+            consec_loss_reduced: default_consec_loss_reduced(),
+            consec_loss_circuit: default_consec_loss_circuit(),
+            pressure_cautious: default_pressure_cautious(),
+            pressure_reduced: default_pressure_reduced(),
+            pressure_defensive: default_pressure_defensive(),
+            pressure_circuit: default_pressure_circuit(),
+            min_hold_ms: default_min_hold_ms(),
+        }
+    }
+}
+
+impl CascadeThresholds {
+    fn validate(&self) -> Result<(), String> {
+        // Drawdown tiers strictly increasing / Drawdown 階層嚴格遞增
+        if !(self.drawdown_cautious_pct < self.drawdown_reduced_pct
+            && self.drawdown_reduced_pct < self.drawdown_defensive_pct
+            && self.drawdown_defensive_pct < self.drawdown_circuit_pct)
+        {
+            return Err(
+                "risk.cascade drawdown tiers must be strictly increasing (cautious < reduced < defensive < circuit)".into()
+            );
+        }
+        if !(self.daily_loss_cautious_pct < self.daily_loss_reduced_pct
+            && self.daily_loss_reduced_pct < self.daily_loss_circuit_pct)
+        {
+            return Err(
+                "risk.cascade daily_loss tiers must be strictly increasing (cautious < reduced < circuit)".into()
+            );
+        }
+        if !(self.consec_loss_cautious < self.consec_loss_reduced
+            && self.consec_loss_reduced < self.consec_loss_circuit)
+        {
+            return Err(
+                "risk.cascade consec_loss tiers must be strictly increasing (cautious < reduced < circuit)".into()
+            );
+        }
+        if !(self.pressure_cautious < self.pressure_reduced
+            && self.pressure_reduced < self.pressure_defensive
+            && self.pressure_defensive < self.pressure_circuit)
+        {
+            return Err(
+                "risk.cascade pressure tiers must be strictly increasing".into(),
+            );
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RegimeMultipliers
+// ---------------------------------------------------------------------------
+
+/// Regime-conditional multipliers applied to stop / tp / time limits.
+/// 按 regime 套用到 stop / tp / time 上的乘數。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegimeMultipliers {
+    #[serde(default = "default_trending")]
+    pub trending: RegimeBundle,
+    #[serde(default = "default_volatile")]
+    pub volatile: RegimeBundle,
+    #[serde(default = "default_ranging")]
+    pub ranging: RegimeBundle,
+    #[serde(default = "default_squeeze")]
+    pub squeeze: RegimeBundle,
+    #[serde(default = "default_unknown")]
+    pub unknown: RegimeBundle,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RegimeBundle {
+    pub stop: f64,
+    pub tp: f64,
+    pub time: f64,
+}
+
+fn default_trending() -> RegimeBundle {
+    RegimeBundle {
+        stop: 1.0,
+        tp: 1.5,
+        time: 1.5,
+    }
+}
+fn default_volatile() -> RegimeBundle {
+    RegimeBundle {
+        stop: 1.5,
+        tp: 0.8,
+        time: 0.8,
+    }
+}
+fn default_ranging() -> RegimeBundle {
+    RegimeBundle {
+        stop: 0.7,
+        tp: 0.7,
+        time: 0.8,
+    }
+}
+fn default_squeeze() -> RegimeBundle {
+    RegimeBundle {
+        stop: 0.6,
+        tp: 0.5,
+        time: 1.0,
+    }
+}
+fn default_unknown() -> RegimeBundle {
+    RegimeBundle {
+        stop: 1.0,
+        tp: 1.0,
+        time: 1.0,
+    }
+}
+
+impl Default for RegimeMultipliers {
+    fn default() -> Self {
+        Self {
+            trending: default_trending(),
+            volatile: default_volatile(),
+            ranging: default_ranging(),
+            squeeze: default_squeeze(),
+            unknown: default_unknown(),
+        }
+    }
+}
+
+impl RegimeMultipliers {
+    /// Look up bundle by regime name. Unknown names fall back to `unknown`.
+    /// 按 regime 名稱查找 bundle。未知名稱回退到 `unknown`。
+    pub fn get(&self, regime: &str) -> RegimeBundle {
+        match regime {
+            "trending" => self.trending,
+            "volatile" => self.volatile,
+            "ranging" => self.ranging,
+            "squeeze" => self.squeeze,
+            _ => self.unknown,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        for (name, b) in [
+            ("trending", &self.trending),
+            ("volatile", &self.volatile),
+            ("ranging", &self.ranging),
+            ("squeeze", &self.squeeze),
+            ("unknown", &self.unknown),
+        ] {
+            if b.stop <= 0.0 || b.tp <= 0.0 || b.time <= 0.0 {
+                return Err(format!(
+                    "risk.regime.{} multipliers must all be > 0",
+                    name
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CostGate
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CostGate {
+    #[serde(default = "default_min_confidence")]
+    pub min_confidence: f64,
+    #[serde(default = "default_k_base")]
+    pub k_base: f64,
+    #[serde(default = "default_k_medium")]
+    pub k_medium: f64,
+    #[serde(default = "default_k_small")]
+    pub k_small: f64,
+    #[serde(default = "default_adx_trending")]
+    pub adx_trending: f64,
+}
+
+fn default_min_confidence() -> f64 {
+    0.15
+}
+fn default_k_base() -> f64 {
+    1.5
+}
+fn default_k_medium() -> f64 {
+    2.0
+}
+fn default_k_small() -> f64 {
+    3.0
+}
+fn default_adx_trending() -> f64 {
+    25.0
+}
+
+impl Default for CostGate {
+    fn default() -> Self {
+        Self {
+            min_confidence: default_min_confidence(),
+            k_base: default_k_base(),
+            k_medium: default_k_medium(),
+            k_small: default_k_small(),
+            adx_trending: default_adx_trending(),
+        }
+    }
+}
+
+impl CostGate {
+    fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.min_confidence) {
+            return Err("risk.cost_gate.min_confidence must be in [0, 1]".into());
+        }
+        if self.k_base <= 0.0 || self.k_medium <= 0.0 || self.k_small <= 0.0 {
+            return Err("risk.cost_gate k coefficients must all be > 0".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DynamicStop
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicStop {
+    #[serde(default = "default_base_ratio")]
+    pub base_ratio: f64,
+    #[serde(default = "default_cap_ratio")]
+    pub cap_ratio: f64,
+    #[serde(default = "default_trailing_min_rr")]
+    pub trailing_min_rr: f64,
+    #[serde(default = "default_atr_stop_mult")]
+    pub atr_stop_mult: f64,
+    #[serde(default = "default_atr_tp_mult")]
+    pub atr_tp_mult: f64,
+}
+
+fn default_base_ratio() -> f64 {
+    0.6
+}
+fn default_cap_ratio() -> f64 {
+    0.8
+}
+fn default_trailing_min_rr() -> f64 {
+    0.5
+}
+fn default_atr_stop_mult() -> f64 {
+    2.0
+}
+fn default_atr_tp_mult() -> f64 {
+    3.0
+}
+
+impl Default for DynamicStop {
+    fn default() -> Self {
+        Self {
+            base_ratio: default_base_ratio(),
+            cap_ratio: default_cap_ratio(),
+            trailing_min_rr: default_trailing_min_rr(),
+            atr_stop_mult: default_atr_stop_mult(),
+            atr_tp_mult: default_atr_tp_mult(),
+        }
+    }
+}
+
+impl DynamicStop {
+    fn validate(&self) -> Result<(), String> {
+        if self.base_ratio <= 0.0 || self.cap_ratio <= 0.0 {
+            return Err("risk.dynamic_stop ratios must be > 0".into());
+        }
+        if self.base_ratio > self.cap_ratio {
+            return Err("risk.dynamic_stop.base_ratio must be <= cap_ratio".into());
+        }
+        if self.atr_stop_mult <= 0.0 || self.atr_tp_mult <= 0.0 {
+            return Err("risk.dynamic_stop.atr_*_mult must be > 0".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MarketGate (microstructure, merged from former MarketConfig)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketGate {
+    #[serde(default = "default_min_ob_depth_usdt")]
+    pub min_ob_depth_usdt: f64,
+    #[serde(default = "default_max_ob_imbalance")]
+    pub max_ob_imbalance: f64,
+    #[serde(default = "default_min_volume_24h_usdt")]
+    pub min_volume_24h_usdt: f64,
+    #[serde(default = "default_max_taker_fee_bps")]
+    pub max_taker_fee_bps: f64,
+    #[serde(default = "default_spread_max_bps")]
+    pub spread_max_bps: f64,
+    #[serde(default = "default_slippage_max_bps")]
+    pub slippage_max_bps: f64,
+    #[serde(default = "default_funding_rate_max_abs")]
+    pub funding_rate_max_abs: f64,
+    #[serde(default = "default_liquidation_buffer_pct")]
+    pub liquidation_buffer_pct: f64,
+    #[serde(default = "default_max_orders_per_minute")]
+    pub max_orders_per_minute: u32,
+}
+
+fn default_min_ob_depth_usdt() -> f64 {
+    50_000.0
+}
+fn default_max_ob_imbalance() -> f64 {
+    0.7
+}
+fn default_min_volume_24h_usdt() -> f64 {
+    1_000_000.0
+}
+fn default_max_taker_fee_bps() -> f64 {
+    8.0
+}
+fn default_spread_max_bps() -> f64 {
+    20.0
+}
+fn default_slippage_max_bps() -> f64 {
+    15.0
+}
+fn default_funding_rate_max_abs() -> f64 {
+    0.03
+}
+fn default_liquidation_buffer_pct() -> f64 {
+    20.0
+}
+fn default_max_orders_per_minute() -> u32 {
+    60
+}
+
+impl Default for MarketGate {
+    fn default() -> Self {
+        Self {
+            min_ob_depth_usdt: default_min_ob_depth_usdt(),
+            max_ob_imbalance: default_max_ob_imbalance(),
+            min_volume_24h_usdt: default_min_volume_24h_usdt(),
+            max_taker_fee_bps: default_max_taker_fee_bps(),
+            spread_max_bps: default_spread_max_bps(),
+            slippage_max_bps: default_slippage_max_bps(),
+            funding_rate_max_abs: default_funding_rate_max_abs(),
+            liquidation_buffer_pct: default_liquidation_buffer_pct(),
+            max_orders_per_minute: default_max_orders_per_minute(),
+        }
+    }
+}
+
+impl MarketGate {
+    fn validate(&self) -> Result<(), String> {
+        if self.min_ob_depth_usdt < 0.0 || self.min_volume_24h_usdt < 0.0 {
+            return Err("risk.market_gate min_* values must be >= 0".into());
+        }
+        if !(0.0..=1.0).contains(&self.max_ob_imbalance) {
+            return Err("risk.market_gate.max_ob_imbalance must be in [0, 1]".into());
+        }
+        if self.spread_max_bps < 0.0 || self.slippage_max_bps < 0.0 {
+            return Err("risk.market_gate spread/slippage bps must be >= 0".into());
+        }
+        if self.funding_rate_max_abs < 0.0 {
+            return Err("risk.market_gate.funding_rate_max_abs must be >= 0".into());
+        }
+        if self.liquidation_buffer_pct < 0.0 {
+            return Err("risk.market_gate.liquidation_buffer_pct must be >= 0".into());
+        }
+        if self.max_orders_per_minute == 0 {
+            return Err("risk.market_gate.max_orders_per_minute must be >= 1".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AntiCluster
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntiCluster {
+    /// Random ±offset_fraction applied to base stop distance per position seed.
+    /// 按倉位 seed 套用到基礎 stop 距離的 ±offset_fraction 隨機偏移。
+    #[serde(default = "default_offset_fraction")]
+    pub offset_fraction: f64,
+}
+
+fn default_offset_fraction() -> f64 {
+    0.15
+}
+
+impl Default for AntiCluster {
+    fn default() -> Self {
+        Self {
+            offset_fraction: default_offset_fraction(),
+        }
+    }
+}
+
+impl AntiCluster {
+    fn validate(&self) -> Result<(), String> {
+        if !(0.0..=0.5).contains(&self.offset_fraction) {
+            return Err("risk.anti_cluster.offset_fraction must be in [0, 0.5]".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Correlation
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Correlation {
+    #[serde(default = "default_max_pairwise_r")]
+    pub max_pairwise_r: f64,
+    #[serde(default = "default_correlation_window_minutes")]
+    pub window_minutes: u32,
+}
+
+fn default_max_pairwise_r() -> f64 {
+    0.7
+}
+fn default_correlation_window_minutes() -> u32 {
+    60
+}
+
+impl Default for Correlation {
+    fn default() -> Self {
+        Self {
+            max_pairwise_r: default_max_pairwise_r(),
+            window_minutes: default_correlation_window_minutes(),
+        }
+    }
+}
+
+impl Correlation {
+    fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.max_pairwise_r) {
+            return Err("risk.correlation.max_pairwise_r must be in [0, 1]".into());
+        }
+        if self.window_minutes == 0 {
+            return Err("risk.correlation.window_minutes must be >= 1".into());
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RuntimeKnobs
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeKnobs {
+    #[serde(default = "default_boot_cooldown_ms")]
+    pub boot_cooldown_ms: u64,
+    #[serde(default = "default_signals_heartbeat_ms")]
+    pub signals_heartbeat_ms: u64,
+    /// H0 Gate shadow mode: log decisions but do not block.
+    /// H0 Gate 影子模式：記錄決策但不阻擋。
+    #[serde(default = "default_true")]
+    pub h0_shadow_mode: bool,
+}
+
+fn default_boot_cooldown_ms() -> u64 {
+    60_000
+}
+fn default_signals_heartbeat_ms() -> u64 {
+    60_000
+}
+
+impl Default for RuntimeKnobs {
+    fn default() -> Self {
+        Self {
+            boot_cooldown_ms: default_boot_cooldown_ms(),
+            signals_heartbeat_ms: default_signals_heartbeat_ms(),
+            h0_shadow_mode: default_true(),
+        }
+    }
+}
+
+impl RuntimeKnobs {
+    fn validate(&self) -> Result<(), String> {
+        // No further constraints — all values are non-negative by type.
+        // 無額外約束 —— 所有值由型別保證非負。
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Experimental
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Experimental {
+    #[serde(default)]
+    pub flags: HashMap<String, serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_validates() {
+        let cfg = RiskConfig::default();
+        assert!(cfg.validate().is_ok(), "{:?}", cfg.validate());
+    }
+
+    #[test]
+    fn test_default_limits_match_python_legacy() {
+        // Sanity-check that default values still match Python operator_risk_config.json
+        // intent (so legacy migration round-trips).
+        // 健全性檢查：預設值仍與 Python operator_risk_config.json 對齊。
+        let l = GlobalLimits::default();
+        assert_eq!(l.stop_loss_max_pct, 5.0);
+        assert_eq!(l.take_profit_max_pct, 20.0);
+        assert_eq!(l.position_size_max_pct, 20.0);
+        assert_eq!(l.leverage_max, 20.0);
+        assert_eq!(l.session_drawdown_max_pct, 15.0);
+        assert_eq!(l.daily_loss_max_pct, 5.0);
+        assert_eq!(l.holding_hours_max, 72.0);
+    }
+
+    #[test]
+    fn test_invalid_stop_loss_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.stop_loss_max_pct = 150.0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_leverage_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.leverage_max = 0.5;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_zero_open_positions_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.open_positions_max = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_margin_mode_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.margin_mode = "iceberg".into();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_partial_tp_exceeds_max_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.agent.partial_tp_enabled = true;
+        cfg.agent.partial_tp_levels = vec![(2.0, 0.3), (50.0, 0.4)]; // 50 > max 20
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_partial_tp_under_max_accepted() {
+        let mut cfg = RiskConfig::default();
+        cfg.agent.partial_tp_enabled = true;
+        cfg.agent.partial_tp_levels = vec![(2.0, 0.3), (5.0, 0.4), (10.0, 0.3)];
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_partial_tp_invalid_fraction_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.agent.partial_tp_enabled = true;
+        cfg.agent.partial_tp_levels = vec![(2.0, 1.5)];
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_partial_tp_disabled_skips_validation() {
+        let mut cfg = RiskConfig::default();
+        cfg.agent.partial_tp_enabled = false;
+        cfg.agent.partial_tp_levels = vec![(999.0, 999.0)]; // garbage but disabled
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_min_order_notional_exceeds_max_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.min_order_notional_usdt = 500.0;
+        cfg.limits.max_order_notional_usdt = 100.0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_size_multiplier_out_of_range_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.agent.size_multiplier = 1.5;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_cascade_drawdown_non_increasing_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.cascade.drawdown_reduced_pct = 3.0; // < cautious 5.0
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_cascade_consec_loss_non_increasing_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.cascade.consec_loss_reduced = 2; // < cautious 3
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_regime_default_lookups() {
+        let r = RegimeMultipliers::default();
+        assert_eq!(r.get("trending").stop, 1.0);
+        assert_eq!(r.get("trending").tp, 1.5);
+        assert_eq!(r.get("volatile").stop, 1.5);
+        assert_eq!(r.get("squeeze").stop, 0.6);
+        assert_eq!(r.get("nonexistent").stop, 1.0); // fall back to unknown
+    }
+
+    #[test]
+    fn test_regime_negative_multiplier_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.regime.trending.stop = -1.0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_dynamic_stop_base_exceeds_cap_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.dynamic_stop.base_ratio = 0.9;
+        cfg.dynamic_stop.cap_ratio = 0.5;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_market_gate_invalid_imbalance_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.market_gate.max_ob_imbalance = 1.5;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_anti_cluster_offset_too_large_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.anti_cluster.offset_fraction = 0.6;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_correlation_invalid_r_rejected() {
+        let mut cfg = RiskConfig::default();
+        cfg.correlation.max_pairwise_r = 1.5;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_strategy_override_default_enabled() {
+        let so = StrategyOverride::default();
+        assert!(so.enabled);
+    }
+
+    #[test]
+    fn test_per_strategy_pause_via_override() {
+        let mut cfg = RiskConfig::default();
+        cfg.per_strategy.insert(
+            "ma_crossover".into(),
+            StrategyOverride {
+                enabled: false,
+                ..Default::default()
+            },
+        );
+        assert!(cfg.validate().is_ok());
+        assert!(!cfg.per_strategy["ma_crossover"].enabled);
+    }
+
+    #[test]
+    fn test_toml_round_trip_default() {
+        let cfg = RiskConfig::default();
+        let toml_str = toml::to_string(&cfg).unwrap();
+        let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+        assert!(de.validate().is_ok());
+        assert_eq!(de.limits.stop_loss_max_pct, 5.0);
+    }
+
+    #[test]
+    fn test_json_round_trip_with_overrides() {
+        let mut cfg = RiskConfig::default();
+        cfg.limits.stop_loss_max_pct = 3.5;
+        cfg.agent.size_multiplier = 0.5;
+        cfg.regime.trending.tp = 2.0;
+        let json = serde_json::to_string(&cfg).unwrap();
+        let de: RiskConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(de.limits.stop_loss_max_pct, 3.5);
+        assert_eq!(de.agent.size_multiplier, 0.5);
+        assert_eq!(de.regime.trending.tp, 2.0);
+        assert!(de.validate().is_ok());
+    }
+
+    #[test]
+    fn test_partial_toml_uses_defaults() {
+        let toml_str = r#"
+[limits]
+stop_loss_max_pct = 3.0
+
+[agent]
+size_multiplier = 0.7
+"#;
+        let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.limits.stop_loss_max_pct, 3.0);
+        assert_eq!(cfg.agent.size_multiplier, 0.7);
+        // Defaults preserved / 預設值保留
+        assert_eq!(cfg.limits.take_profit_max_pct, 20.0);
+        assert_eq!(cfg.regime.trending.tp, 1.5);
+        assert!(cfg.validate().is_ok());
+    }
+}

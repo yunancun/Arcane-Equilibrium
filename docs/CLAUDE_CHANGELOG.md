@@ -3,6 +3,61 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-07
 
+### Session 1B — ARCH-RC1 統一 Config 骨架（2026-04-07）
+
+ARCH-RC1 第二步：純加法建立新 Config 架構骨架，零行為改變，舊系統繼續運行（雙軌並存）。call site 遷移留 1C。
+
+**新增檔案 4 個（~1900 行 + 58 tests）**：
+
+- `rust/openclaw_engine/src/config/store.rs` — 泛型 `ConfigStore<T>` 包裹 `Arc<ArcSwap<T>>`：
+  - `load()` 無鎖快照讀（~5ns，tick 熱路徑安全）
+  - `apply_patch(source, mutate, validate)` 序列化 mutex + all-or-nothing：驗證通過才 swap
+  - `replace(value, source)` 全量替換（用於 startup / migration）
+  - `PatchSource` enum：Operator / Agent / Migration / Startup
+  - 7 unit tests 含並發 race 測試（10 thread × increment → 必為 +10）
+
+- `rust/openclaw_engine/src/config/risk_config.rs` — RiskConfig 主體：
+  - 13 sub-struct：Meta / GlobalLimits (P1) / CategoryOverrides (P0) / StrategyOverride (per-strategy)
+    / AgentParams (P2 含 partial_tp) / CascadeThresholds (RiskGovernor 6 級) / RegimeMultipliers (5 regime × 3 mult，從 hardcode 提升)
+    / CostGate / DynamicStop / MarketGate (microstructure 收編，9 欄位 funding/liquidation/spread/slippage/ob/volume/fee/rate_limit)
+    / AntiCluster / Correlation / RuntimeKnobs / Experimental
+  - GlobalLimits ~26 欄位含新搬入的 min_order_notional / max_order_notional / min_balance
+  - 跨 sub-struct invariant：partial_tp_levels 各層 ≤ take_profit_max_pct，min_order_notional ≤ max_order_notional
+  - validate() 對所有 sub-struct 套用嚴格約束 + 跨欄位檢查
+  - 24 unit tests 涵蓋預設值對齊 Python legacy / 各種驗證失敗 / per-strategy 暫停 / TOML JSON round-trip / partial TOML 預設保留
+
+- `rust/openclaw_engine/src/config/learning_config.rs` — LearningConfig 主體：
+  - 5 sub-struct：Meta / MlSwitches / LinUcbParams / ThompsonParams / AgentBehavior / Experimental
+  - **Phase 4.1 default-off 契約收編**：`switches.teacher_loop_enabled = false` 預設，IPC slot 翻開才生效（既有 set_teacher_loop_enabled IPC 端點 1C 改讀此欄位）
+  - AgentBehavior 含 entry_confidence_min / kelly_fraction / regime_whitelist / order_type_preference / breakeven_trigger / max_positions_per_*（partial_tp 不在這裡，搬到 RiskConfig.agent）
+  - 13 unit tests 含 Phase 4.1 default-off 契約測試
+
+- `rust/openclaw_engine/src/config/budget_config.rs` — BudgetConfig 主體：
+  - 5 sub-struct：Meta / BudgetCaps / ModelCosts / **AttentionTax (整塊含 enabled)** / Experimental
+  - AttentionTax 從 RiskConfig 完全遷出（避免跨 Config 校準失同步）：burn_rate × 4 + grade_a/b/c/d_threshold + cost_edge_max_ratio + enabled
+  - validate() 強制 burn_rate 非遞減 + grade 嚴格遞增
+  - 12 unit tests 含 enable/disable / 跨欄位驗證失敗 / TOML+JSON round-trip / partial TOML 預設保留
+
+**檔案結構變更**：
+- `rust/openclaw_engine/src/config.rs` → `config/mod.rs`（git mv，內容不變）
+- 新 `config/{store,risk_config,learning_config,budget_config}.rs`
+- mod.rs 加 4 個 `pub mod` 宣告 + 4 個 re-export
+
+**驗證**：
+- `cargo build -p openclaw_engine` 8.41s 通過，0 新 warning
+- `cargo test -p openclaw_engine` lib **682 passed (+58 vs 1A baseline 624) / 0 fail / integration 36**
+- `cargo test -p openclaw_core` **386 + 8 + 19 / 0 fail**
+- `cargo test -p openclaw_types` **30 / 0 fail**
+- 零行為改變（純加法 commit，舊 RuntimeConfig 風控欄位仍在跑）
+
+**下一步（Session 1C）**：
+1. 廢棄 `openclaw_core::risk::config::RiskManagerConfig`，所有 call site 遷移到新 RiskConfig
+2. RuntimeConfig 風控欄位（max_stop_loss_pct / max_leverage / max_drawdown_pct / p1_risk_pct 等）刪除，call site 改讀 RiskConfig
+3. RuntimeConfig 改名 EngineBootstrap
+4. operator_risk_config.json → risk_config.toml 一次性遷移
+5. IPC update_risk_config / get_risk_config 等 6 端點接通新 ConfigStore
+6. Python RiskManager 1633 → ~150 行 RiskViewClient（純 IPC 讀）
+
 ### Session 1A — ARCH-RC1 死代碼清理（2026-04-07）
 
 ARCH-RC1 統一 Config 工作的純減法首步：盤點 rust/ tree 後確認 7 套重疊的風控/配置系統，先砍 3 個已驗證為純死代碼的目標，為後續 1B（新建 3-Config 骨架）+ 1C（遷移 call site + Python 空殼化）鋪路。
