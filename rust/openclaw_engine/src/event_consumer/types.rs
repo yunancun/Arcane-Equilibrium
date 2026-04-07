@@ -101,4 +101,15 @@ pub struct EventConsumerDeps {
     /// Phase 4 W-4：可選的共享新聞 context 快照，由 DecisionContextMsg producer
     /// 站點讀取（news_severity + hours_since_last_major_news）。
     pub news_snapshot: Option<Arc<crate::news::NewsContextSnapshot>>,
+    /// ARCH-RC1 1C-2-B: live RiskConfig store handle (hot-reloadable).
+    /// When Some, TickPipeline syncs intent_processor.risk_config on each tick
+    /// if the store version bumps (IPC patch applied).
+    /// ARCH-RC1 1C-2-B：live RiskConfig store 控制代碼（可熱重載）。
+    pub risk_store:
+        Option<Arc<crate::config::ConfigStore<crate::config::RiskConfig>>>,
+    /// ARCH-RC1 1C-2-B: live BudgetConfig store handle — hot-path reads
+    /// attention_tax.cost_edge_max_ratio per tick for the cost-edge check.
+    /// ARCH-RC1 1C-2-B：live BudgetConfig store 控制代碼。
+    pub budget_store:
+        Option<Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
 }

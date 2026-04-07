@@ -289,6 +289,21 @@ pub struct TickPipeline {
     /// producer 站點讀取以填 news_severity + hours_since_last_major_news。
     /// None = 未接新聞。
     news_snapshot: Option<std::sync::Arc<crate::news::NewsContextSnapshot>>,
+    /// ARCH-RC1 1C-2-B: live RiskConfig store (ArcSwap snapshot read each tick).
+    /// None = 1C-1 legacy mode (intent_processor owns RiskConfig::default()).
+    /// ARCH-RC1 1C-2-B：live RiskConfig store（每 tick ArcSwap 快照讀）。
+    /// None = 1C-1 舊模式（intent_processor 持有 RiskConfig::default()）。
+    risk_store: Option<std::sync::Arc<crate::config::ConfigStore<crate::config::RiskConfig>>>,
+    /// ARCH-RC1 1C-2-B: live BudgetConfig store — hot path reads
+    /// `attention_tax.cost_edge_max_ratio` per tick for the cost-edge check.
+    /// ARCH-RC1 1C-2-B：live BudgetConfig store — 熱路徑每 tick 讀
+    /// attention_tax.cost_edge_max_ratio 用於 cost-edge 檢查。
+    budget_store: Option<std::sync::Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
+    /// ARCH-RC1 1C-2-B: last seen RiskConfig version number — used to detect
+    /// store updates and sync the intent_processor snapshot only on change.
+    /// ARCH-RC1 1C-2-B：上一次見到的 RiskConfig 版本號 — 用於檢測 store 更新並
+    /// 僅在變化時同步 intent_processor 快照。
+    risk_config_version_seen: u64,
 }
 
 impl TickPipeline {
@@ -359,6 +374,9 @@ impl TickPipeline {
             last_close_price: HashMap::new(),
             linucb: None,
             news_snapshot: None,
+            risk_store: None,
+            budget_store: None,
+            risk_config_version_seen: 0,
         }
     }
 
@@ -378,6 +396,69 @@ impl TickPipeline {
         snap: std::sync::Arc<crate::news::NewsContextSnapshot>,
     ) {
         self.news_snapshot = Some(snap);
+    }
+
+    /// ARCH-RC1 1C-2-B: Inject the live RiskConfig ConfigStore handle. After
+    /// wiring, the pipeline checks the store version at the top of each tick
+    /// and refreshes the intent_processor's owned snapshot if the version has
+    /// bumped (IPC patch applied). Also seeds the first snapshot immediately.
+    /// ARCH-RC1 1C-2-B：注入 live RiskConfig ConfigStore。接線後每 tick 檢查
+    /// 版本號，若上升（IPC patch 已套用）則刷新 intent_processor 快照。
+    pub fn set_risk_store(
+        &mut self,
+        store: std::sync::Arc<crate::config::ConfigStore<crate::config::RiskConfig>>,
+    ) {
+        // Immediate sync so the first tick already sees the live config.
+        let snap = store.load();
+        self.intent_processor.update_risk_config((*snap).clone());
+        self.risk_config_version_seen = store.version();
+        self.risk_store = Some(store);
+    }
+
+    /// ARCH-RC1 1C-2-B: Inject the live BudgetConfig ConfigStore handle for
+    /// the cost-edge hot-path read (`attention_tax.cost_edge_max_ratio`).
+    /// ARCH-RC1 1C-2-B：注入 live BudgetConfig ConfigStore，供熱路徑讀
+    /// attention_tax.cost_edge_max_ratio。
+    pub fn set_budget_store(
+        &mut self,
+        store: std::sync::Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>,
+    ) {
+        self.budget_store = Some(store);
+    }
+
+    /// ARCH-RC1 1C-2-B: Hot-reload hook called at the top of on_tick. If the
+    /// risk store's version has bumped since last check, pull the latest
+    /// snapshot into the intent_processor (which still owns a plain copy for
+    /// its fine-grained patch_* methods). Cheap: one atomic load + equality.
+    /// ARCH-RC1 1C-2-B：on_tick 頂部呼叫的熱重載檢查。store 版本號若有變化，
+    /// 拉最新快照餵給 intent_processor。極低成本（一次原子 load + 相等比較）。
+    #[inline]
+    fn sync_risk_config_if_changed(&mut self) {
+        if let Some(ref store) = self.risk_store {
+            let v = store.version();
+            if v != self.risk_config_version_seen {
+                let snap = store.load();
+                self.intent_processor.update_risk_config((*snap).clone());
+                self.risk_config_version_seen = v;
+                tracing::info!(
+                    new_version = v,
+                    "ARCH-RC1 risk config hot-reloaded into tick pipeline"
+                );
+            }
+        }
+    }
+
+    /// ARCH-RC1 1C-2-B: Read the live `cost_edge_max_ratio` for the tick-level
+    /// cost-edge check. Falls back to 0.8 when BudgetConfig store is not
+    /// wired (1C-1 / unit-test paths).
+    /// ARCH-RC1 1C-2-B：熱路徑讀取 live cost_edge_max_ratio；store 未接線時
+    /// 回退 0.8（1C-1 / 單測路徑）。
+    #[inline]
+    fn current_cost_edge_max_ratio(&self) -> f64 {
+        match self.budget_store.as_ref() {
+            Some(store) => store.load().attention_tax.cost_edge_max_ratio,
+            None => 0.8,
+        }
     }
 
     /// Set dynamic fee rate from API for more accurate paper trading cost.
@@ -594,6 +675,11 @@ impl TickPipeline {
     pub fn on_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
         // Start timing the tick processing / 開始計時 tick 處理
         let tick_start = Instant::now();
+
+        // ARCH-RC1 1C-2-B: hot-reload check — if RiskConfig store version has
+        // bumped (IPC patch applied), refresh the intent_processor snapshot.
+        // ARCH-RC1 1C-2-B：熱重載檢查 — RiskConfig store 版本有變即同步。
+        self.sync_risk_config_if_changed();
 
         self.stats.total_ticks += 1;
         self.stats.last_tick_ms = event.ts_ms;
@@ -1338,11 +1424,10 @@ impl TickPipeline {
                 }
             })
             .collect();
-        // ARCH-RC1: cost_edge_max_ratio is cross-Config from BudgetConfig.attention_tax;
-        // not yet wired to a live BudgetConfig store in this session — use the default 0.8
-        // (matches previous RiskManagerConfig.max_cost_edge_ratio behavior). Session 1C-2
-        // will wire the real BudgetConfig handle here.
-        let cost_edge_max_ratio = 0.8;
+        // ARCH-RC1 1C-2-B: live read from BudgetConfig store (falls back to
+        // 0.8 in tests where store is not wired).
+        // ARCH-RC1 1C-2-B：從 BudgetConfig store 即時讀取；未接線時回退 0.8。
+        let cost_edge_max_ratio = self.current_cost_edge_max_ratio();
         let decisions = crate::position_risk_evaluator::evaluate_positions(
             &position_rows,
             daily_loss,

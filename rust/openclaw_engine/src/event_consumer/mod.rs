@@ -54,6 +54,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         account_manager,
         linucb_runtime,
         news_snapshot,
+        risk_store,
+        budget_store,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -92,6 +94,20 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     if let Some(snap) = news_snapshot {
         pipeline.set_news_snapshot(snap);
         info!("pipeline using NewsContextSnapshot for news context / 接入新聞快照");
+    }
+
+    // ARCH-RC1 1C-2-B: Wire live RiskConfig + BudgetConfig stores.
+    // First tick after this point reads the real operator-authored config
+    // and hot-reloads automatically on every IPC patch that bumps the version.
+    // ARCH-RC1 1C-2-B：接入 live RiskConfig + BudgetConfig store，
+    // 此後每次 tick 即讀真實 operator 配置；IPC patch 令版本上升時自動熱重載。
+    if let Some(store) = risk_store {
+        pipeline.set_risk_store(store);
+        info!("pipeline wired to live RiskConfig ConfigStore / 接入 RiskConfig 熱重載");
+    }
+    if let Some(store) = budget_store {
+        pipeline.set_budget_store(store);
+        info!("pipeline wired to live BudgetConfig ConfigStore / 接入 BudgetConfig 熱重載");
     }
 
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額

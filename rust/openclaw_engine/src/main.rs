@@ -188,17 +188,18 @@ fn main() {
     //     ARCH-RC1 1C-2：載入 3 個統一 Config 並包入 ConfigStore。
     //     TOML 路徑可用環境變數覆蓋，否則使用 settings/。
     // ------------------------------------------------------------------
-    let risk_store: Arc<ConfigStore<RiskConfig>> = match load_unified_configs() {
-        Ok(s) => s.0,
+    let (risk_store, learning_store, budget_store) = match load_unified_configs() {
+        Ok(s) => s,
         Err(e) => {
             error!(error = %e, "failed to load unified configs / 統一配置加載失敗");
             std::process::exit(1);
         }
     };
-    // NOTE: learning_store + budget_store constructed alongside risk_store but
-    // threading through to consumers lands in 1C-2-B (follow-on commit).
-    // 注意：learning + budget store 與 risk 同時構造，但穿透到消費者在 1C-2-B 完成。
-    let _ = &risk_store; // suppress unused warning until 1C-2-B wires it
+    // learning_store currently has no consumer (LearningConfig IPC endpoints
+    // land in 1C-2-C). Keep the binding alive so the store doesn't drop.
+    // learning_store 目前沒有消費者（LearningConfig IPC 端點在 1C-2-C），
+    // 保留綁定以免 store 被釋放。
+    let _learning_store_held = Arc::clone(&learning_store);
 
     // ------------------------------------------------------------------
     // 3. Build multi-thread runtime / 構建多線程運行時
@@ -209,7 +210,12 @@ fn main() {
         .build()
         .expect("failed to build tokio runtime / 構建 tokio 運行時失敗");
 
-    runtime.block_on(async_main(config));
+    runtime.block_on(async_main(
+        config,
+        risk_store,
+        learning_store,
+        budget_store,
+    ));
 }
 
 /// ARCH-RC1 1C-2-A: Load RiskConfig / LearningConfig / BudgetConfig from
@@ -413,7 +419,12 @@ fn run_replay_mode(args: ReplayArgs) {
 
 /// Async entry point running inside the multi-thread runtime.
 /// 在多線程運行時內執行的異步入口。
-async fn async_main(config: Arc<ConfigManager>) {
+async fn async_main(
+    config: Arc<ConfigManager>,
+    risk_store: Arc<ConfigStore<RiskConfig>>,
+    _learning_store: Arc<ConfigStore<LearningConfig>>,
+    budget_store: Arc<ConfigStore<BudgetConfig>>,
+) {
     let cancel = CancellationToken::new();
 
     // ------------------------------------------------------------------
@@ -1239,6 +1250,10 @@ async fn async_main(config: Arc<ConfigManager>) {
             // Phase 4 W-3/W-4 live plumbing / Phase 4 W-3/W-4 實時接線
             linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
             news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+            // ARCH-RC1 1C-2-B: live ConfigStore handles for hot-reload.
+            // ARCH-RC1 1C-2-B：熱重載 ConfigStore 控制代碼。
+            risk_store: Some(Arc::clone(&risk_store)),
+            budget_store: Some(Arc::clone(&budget_store)),
         };
         tokio::spawn(run_event_consumer(deps))
     };
