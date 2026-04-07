@@ -35,8 +35,9 @@
     <div class="oc-metric"><div class="oc-metric-label">Current Drawdown</div><div class="oc-metric-val" id="r-drawdown">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val" id="r-peak">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Session Halted</div><div class="oc-metric-val" id="r-halted">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Loss Cooldown</div><div class="oc-metric-val" id="r-cooldown">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Consecutive Losses</div><div class="oc-metric-val" id="r-losses">--</div></div>
+    <!-- 1C-3-C: replaced "Loss Cooldown" with Rust-native "Governor Tier" / 取代為 Rust 原生 governor_tier -->
+    <div class="oc-metric"><div class="oc-metric-label">Governor Tier</div><div class="oc-metric-val" id="r-cooldown">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Max Symbol Losses</div><div class="oc-metric-val" id="r-losses">--</div></div>
   </div>
 </div>
 
@@ -681,7 +682,7 @@ Current Account Status:
 - Open Positions: ${session.position_count || 0}
 - Total Orders: ${session.order_count || 0}
 - Drawdown: ${(riskStatus.drawdown_pct || 0).toFixed(2)}%
-- Consecutive Losses: ${riskStatus.consecutive_losses || 0}
+- Governor Tier: ${riskStatus.governor_tier || 'NORMAL'}
 - Session Halted: ${riskStatus.session_halted || false}
 - Market Regime: ${orchestrator.market_regime || 'unknown'}
 
@@ -763,12 +764,25 @@ async function loadRiskStatus() {
   elH.textContent = halted ? 'YES' : 'No';
   elH.className = 'oc-metric-val ' + (halted ? 'red' : 'green');
 
-  const cooldown = s.loss_cooldown_active || s.cooldown_active || s.in_cooldown || false;
+  // 1C-3-C: Rust-native shape — governor_tier replaces the deprecated cooldown_active flag.
+  // 1C-3-C：Rust 原生 shape — 用 governor_tier 取代舊的 cooldown_active 旗標。
+  const tier = s.governor_tier || 'NORMAL';
   const elC = $('r-cooldown');
-  elC.textContent = cooldown ? 'Active' : 'Inactive';
-  elC.className = 'oc-metric-val ' + (cooldown ? 'yellow' : 'green');
+  elC.textContent = tier;
+  const tierBad = (tier === 'CIRCUIT_BREAKER' || tier === 'MANUAL_REVIEW' || tier === 'DEFENSIVE');
+  const tierWarn = (tier === 'REDUCED' || tier === 'CAUTIOUS');
+  elC.className = 'oc-metric-val ' + (tierBad ? 'red' : tierWarn ? 'yellow' : 'green');
 
-  ocSetText('r-losses', s.consecutive_losses || 0);
+  // consecutive_losses is now a per-symbol map. Display the worst-symbol count.
+  // consecutive_losses 現為 per-symbol map，顯示最差 symbol 的次數。
+  let maxLosses = 0;
+  const lossMap = s.consecutive_losses_by_symbol || s.consecutive_losses;
+  if (lossMap && typeof lossMap === 'object') {
+    for (const k in lossMap) { if (lossMap[k] > maxLosses) maxLosses = lossMap[k]; }
+  } else if (typeof lossMap === 'number') {
+    maxLosses = lossMap;  // legacy fallback
+  }
+  ocSetText('r-losses', maxLosses);
 
   // Badge
   const badge = $('risk-badge');
