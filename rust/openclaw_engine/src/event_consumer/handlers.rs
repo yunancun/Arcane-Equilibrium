@@ -103,6 +103,25 @@ pub(super) fn handle_paper_command(
             };
             let _ = response_tx.send(result);
         }
+        // ── ARCH-RC1 1C-3-B: Risk runtime status + safe counter clear ──
+        PaperSessionCommand::GetRiskRuntimeStatus { response_tx } => {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let snapshot = pipeline.risk_runtime_status_json(now_ms);
+            let _ = response_tx.send(Ok(snapshot.to_string()));
+        }
+        PaperSessionCommand::ClearConsecutiveLosses { response_tx } => {
+            let cleared = pipeline.consecutive_losses.len();
+            pipeline.consecutive_losses.clear();
+            info!(
+                cleared_symbols = cleared,
+                "consecutive losses cleared via IPC / 連虧計數器已通過 IPC 清除"
+            );
+            snapshot_writer.force_write(&pipeline.snapshot());
+            let _ = response_tx.send(Ok(format!("cleared {cleared} symbol(s)")));
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         PaperSessionCommand::SetStrategyActive {
             strategy_name,

@@ -463,6 +463,9 @@ async fn dispatch_request(
             handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Ranges).await
         }
         "update_risk_config" => handle_update_risk_config(id, paper_cmd_tx, &req.params).await,
+        // ARCH-RC1 1C-3-B: Rust-native risk runtime status + safe counter clear
+        "get_risk_runtime_status" => handle_risk_runtime_status(id, paper_cmd_tx).await,
+        "clear_consecutive_losses" => handle_clear_consecutive_losses(id, paper_cmd_tx).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
@@ -996,6 +999,62 @@ async fn handle_update_risk_config(
         signals_heartbeat_ms,
     });
     JsonRpcResponse::success(id, serde_json::json!({ "updated": true }))
+}
+
+/// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
+/// Routes the call through the paper command channel so the response is
+/// built from live `TickPipeline` state owned by the event consumer task.
+/// ARCH-RC1 1C-3-B：獲取 Rust 原生風控運行時狀態快照。
+async fn handle_risk_runtime_status(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PaperSessionCommand::GetRiskRuntimeStatus { response_tx: resp_tx }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => {
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(v) => JsonRpcResponse::success(id, v),
+                Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse status: {e}")),
+            }
+        }
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// ARCH-RC1 1C-3-B: Clear per-symbol consecutive-loss counters (safe reset,
+/// does NOT touch RiskGovernor tier — for governor override see 1C-3-B-2).
+/// ARCH-RC1 1C-3-B：清除 per-symbol 連虧計數器（安全重置，不影響 governor tier）。
+async fn handle_clear_consecutive_losses(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PaperSessionCommand::ClearConsecutiveLosses { response_tx: resp_tx }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "result": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
 }
 
 /// RRC-1-E2: Set strategy active/paused via IPC / 通過 IPC 設置策略啟停。
@@ -1591,6 +1650,73 @@ mod tests {
             }
         });
         tx
+    }
+
+    /// ARCH-RC1 1C-3-B helper: spawn a fake event-consumer that answers
+    /// `GetRiskRuntimeStatus` with a synthetic JSON snapshot and
+    /// `ClearConsecutiveLosses` with a count message.
+    /// ARCH-RC1 1C-3-B 輔助：模擬事件消費者，回傳合成的風控狀態快照與清除計數。
+    fn setup_risk_runtime_channel(
+        cleared_count: usize,
+    ) -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    PaperSessionCommand::GetRiskRuntimeStatus { response_tx } => {
+                        let snap = serde_json::json!({
+                            "governor_tier": "Normal",
+                            "consecutive_losses_by_symbol": {"BTCUSDT": 2u32},
+                            "boot_cooldown_remaining_ms": 0u64,
+                            "boot_cooldown_total_ms": 60_000u64,
+                            "paper_paused": false,
+                            "session_halted": false,
+                        });
+                        let _ = response_tx.send(Ok(snap.to_string()));
+                    }
+                    PaperSessionCommand::ClearConsecutiveLosses { response_tx } => {
+                        let _ = response_tx.send(Ok(format!("cleared {cleared_count} symbol(s)")));
+                    }
+                    _ => {}
+                }
+            }
+        });
+        tx
+    }
+
+    #[tokio::test]
+    async fn test_rc1_get_risk_runtime_status_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_risk_runtime_channel(0);
+        let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":40}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        assert_eq!(result["governor_tier"].as_str().unwrap(), "Normal");
+        assert_eq!(result["consecutive_losses_by_symbol"]["BTCUSDT"], 2);
+        assert_eq!(result["paper_paused"], false);
+    }
+
+    #[tokio::test]
+    async fn test_rc1_clear_consecutive_losses_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_risk_runtime_channel(3);
+        let req = r#"{"jsonrpc":"2.0","method":"clear_consecutive_losses","params":{},"id":41}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        assert_eq!(result["result"].as_str().unwrap(), "cleared 3 symbol(s)");
+    }
+
+    #[tokio::test]
+    async fn test_rc1_get_risk_runtime_status_no_channel() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":42}"#;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_some());
     }
 
     #[tokio::test]

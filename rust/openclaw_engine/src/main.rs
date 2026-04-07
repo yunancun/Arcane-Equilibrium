@@ -257,8 +257,8 @@ fn load_unified_configs() -> Result<
 
     // ARCH-RC1 1C-2-D: one-shot legacy operator_risk_config.json → TOML migration.
     // ARCH-RC1 1C-2-D：舊 operator_risk_config.json → TOML 一次性遷移。
-    match crate::config::legacy_migration::migrate_legacy_risk_json_if_needed(&base) {
-        Ok(crate::config::legacy_migration::MigrationOutcome::Migrated(p)) => {
+    match openclaw_engine::config::legacy_migration::migrate_legacy_risk_json_if_needed(&base) {
+        Ok(openclaw_engine::config::legacy_migration::MigrationOutcome::Migrated(p)) => {
             info!(path = %p.display(), "legacy risk JSON migrated to TOML / 舊風控 JSON 已遷移");
         }
         Ok(_) => {}
