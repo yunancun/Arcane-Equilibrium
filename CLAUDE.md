@@ -63,6 +63,28 @@
 **ARCH-RC1 契約（永久）**：所有交易/風控/學習/預算/市場參數由 Rust 權威持有，分 3 個獨立熱重載 Config + 既有 StrategyParams = 4 個 IPC 寫入面。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
 測試：engine lib **624 → 682** (+58, 0 fail) · core/types 全綠 · 0 regression。
 
+### ★★★★ ARCH-RC1 Session 1C-2-A/B/F SHIPPED — 熱重載真正 LIVE（2026-04-07 · commits `581e1e2`..`91b5db8`）
+**1C-2-A** (`581e1e2`): 新 `config/io.rs` 泛型 TOML loader + 6 tests；main.rs `load_unified_configs()` 從 `settings/risk_control_rules/*.toml` 載入 3 個 Config 並包入 `Arc<ConfigStore<T>>`；missing-file fail-soft 回退到 Default + validate。
+**1C-2-B** (`e3014ef`): ConfigStore handles 穿透 EventConsumerDeps → event_consumer → wire_pipeline → TickPipeline；新 fields `risk_store` / `budget_store` / `risk_config_version_seen` + setters；`sync_risk_config_if_changed()` 在 `on_tick()` 頂部 compare-and-pull（single atomic load，熱路徑零鎖）；`current_cost_edge_max_ratio()` 取代 1C-1 的硬編碼 0.8。
+**1C-2 Option B** (`8240a25`): 抽出 `apply_risk_snapshot()` 作為**單一傳播入口**；Guardian 進入熱重載迴圈（max_leverage / session_drawdown / max_same_direction 從 RiskConfig 推導，`modification_*` 欄位 RMW 保留）。
+**1C-2-F Engine 收編**（3 個 commit，3 個執行引擎進入熱重載）：
+- **F1** (`1a7fc8b`) E-Merge-3：RiskGovernorSm 的 `EscalationThresholds` 從 `RiskConfig.cascade` 同步（15 欄位 1-to-1 映射，處理 `circuit_breaker` vs `circuit` / `consecutive_loss` vs `consec_loss` / `min_hold_time_ms` vs `min_hold_ms` 等命名差異）。之前這 15 個欄位永遠是硬編碼 default，零外部覆蓋路徑。
+- **F3** (`e7f00d4`) E-Merge-2：H0Gate 的 3 個風控欄位（`max_open_positions` / `max_total_exposure_pct` / `allowed_categories`）從 `RiskConfig.limits` RMW 同步；健康欄位（cpu/memory/db_latency/network/shadow_mode）在 RMW 中保留。openclaw_core 加 `H0Gate::update_config()` setter。
+- **F2 降級** (`91b5db8`) E-Merge-1：research agent 發現 StopManager 不是死代碼 — tick_pipeline:910/1017 是**故意的 H0/pause 保護 fallback**，main engine 在 early-return 分支下根本不跑，刪掉會讓持倉在 gate block / pause 時完全沒有止損保護。真正問題是 `paper_state.stop_config` 啟動後永不同步。修法：extend `apply_risk_snapshot()` 加第 4 步，同步 `hard_stop_pct` + `take_profit_pct`（受 `take_profit_enforced` 控制）。原計劃的「刪 StopManager + port 6-7 小時測試」降級為 ~25 行 config 同步。
+
+**熱重載終局**：`apply_risk_snapshot()` **單一傳播入口**，每次 RiskConfig store 版本變化同步 **5 個下游執行引擎**：
+1. `intent_processor.risk_config`（Gate 0 + tick check 主引擎）
+2. `intent_processor.guardian`（P0 trade intent modify verdict）
+3. `paper_state.stop_config`（H0/pause 保護 fallback）
+4. `h0_gate.config`（健康 + 風控欄位）
+5. `governance.risk.thresholds`（6-tier 級聯狀態機）
+
+**風控系統收編軌跡**：7 套並行（1A 前）→ 1 個 Config 權威 + **5 個引擎全部共飲同一桶水**（1C-2-F 後）。Config-layer hot-reload 閉環完成。Phase 2 可選收編：E-Merge-4（Guardian owned struct 退化為 view）— 純代碼味清理，低優先級。
+
+測試：engine **682 → 714** (+32 淨 / +6 config/io tests) · core 386 → 387 · types 30 → 27 · integration 全綠 · 0 regression。
+
+**1C-2 剩餘**：1C-2-C（6 個 IPC update/get 寫端點 + bulk patch all-or-nothing + mutex + source 審計）· 1C-2-D（`operator_risk_config.json` → TOML 一次性遷移）· 1C-2-E（V014 `engine_events` audit 表）。1C-3 Python 空殼化 · 1C-4 Reconciler + News + e2e + E2/E4/QA。
+
 ### ★★★★ ARCH-RC1 Session 1C-1 SHIPPED（2026-04-07 · commits `2007b67` `6768381` `ef30bf1`）
 **1C-1 Batches 0-6 全部完成**（3 commits · +747 / −1293 淨 −546 行 · 0 regression）。ARCH-RC1 風控系統收編從 **7 套並行 → 2 套**（新 RiskConfig 權威 + 待 1C-3 空殼化的 Python RiskManager）。
 - **B0** `2007b67`: AntiCluster.max_same_direction 欄位校齊（guardian/IPC/GUI 已用，不可刪）
@@ -525,4 +547,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-07：engine lib **708** (+267 vs Phase 4 baseline 441) · types 27 / core 387 / integration all green · **ARCH-RC1 Session 1C-1 SHIPPED**（Batches 0-6 · 3 commits `2007b67` `6768381` `ef30bf1` · +747/−1293 淨 −546 行 · 風控並行系統 7→2 套 · 0 regression）· 1A/1B 亦 SHIPPED · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off · E3 R6 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**ARCH-RC1 Session 1C-2**（ConfigStore 構造 + 4 個 update/get IPC 端點 + operator_risk_config.json→TOML 一次性遷移 + main.rs 啟動序列注入）→ 1C-3 Python 空殼化 → 1C-4 Reconciler+News+熱重載 e2e+E2/E4/QA。
+> 截至 2026-04-07：engine lib **714** (+273 vs Phase 4 baseline 441) · core 387 / types 27 / integration all green · **ARCH-RC1 Session 1C-1 + 1C-2-A/B/Opt-B/F SHIPPED**（11 commits · `2007b67` `6768381` `ef30bf1` `581e1e2` `e3014ef` `8240a25` `1a7fc8b` `e7f00d4` `91b5db8` + 2 docs · 0 regression）· **熱重載真正 LIVE**：`apply_risk_snapshot()` 單一傳播入口 → 5 個下游執行引擎（intent_processor + guardian + paper_state + h0_gate + risk_governor）全部共飲 RiskConfig 同一桶水 · 風控並行系統 7 套 → **1 Config 權威 + 5 engines 同步熱重載** · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off · E3 R6 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**ARCH-RC1 1C-2-C**（6 個 update/get IPC 寫端點 + bulk patch + audit）→ 1C-2-D/E（TOML 遷移 + V014 engine_events）→ 1C-3 Python 空殼化 → 1C-4 Reconciler+News+e2e+E2/E4/QA。

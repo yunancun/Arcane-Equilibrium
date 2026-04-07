@@ -41,10 +41,11 @@
   - 抽出 apply_risk_snapshot() 共用路徑
   - Guardian 的 max_leverage / session_drawdown / max_same_direction 從 RiskConfig 推導
   - modification_* 欄位透過 RMW 保留
-- [ ] **Session 1C-2-F ★ NEW: 執行引擎收編**（在 1C-2-C 之前做，讓 IPC 寫端點落地時所有引擎已在熱重載迴圈）
-  - F1: E-Merge-3 grep 驗證 RiskGovernorSm 是否已讀 RiskConfig.cascade，若否則接入
-  - F2: E-Merge-1 StopManager 廢棄 — 驗證 check_position_on_tick 覆蓋 hard/trailing/time stop 全部邏輯後，刪 openclaw_core::stop_manager
-  - F3: E-Merge-2 H0Gate 欄位 dedup — max_open_positions / max_total_exposure_pct / allowed_categories 從 RiskConfig.limits 讀，apply_risk_snapshot 加 H0Gate update
+- [x] **Session 1C-2-F 執行引擎收編** — `1a7fc8b` `e7f00d4` `91b5db8`
+  - **F1 E-Merge-3 done** (`1a7fc8b`)：RiskGovernorSm.thresholds 從 RiskConfig.cascade 同步（15 欄位 1-to-1 映射 + 命名差異）。之前是漏網 — cascade 零消費者，SM 一直用硬編碼 default
+  - **F3 E-Merge-2 done** (`e7f00d4`)：H0GateConfig 的 3 個風控欄位 RMW 從 RiskConfig.limits 同步；新加 `H0Gate::update_config()` setter
+  - **F2 降級 done** (`91b5db8`)：Research agent 發現 StopManager 不是死代碼（H0/pause 保護 fallback 是故意設計）；原計劃「殺 StopManager」降為「paper_state.stop_config 同步」，25 行 config 同步取代 6-7 小時刪檔 + port 測試
+  - **apply_risk_snapshot() 成為單一傳播入口**：intent_processor.risk_config + guardian + paper_state.stop_config + h0_gate.config + governance.risk.thresholds = **5 個執行引擎全部熱重載**
 - [ ] **Session 1C-2-C 6 個 IPC 端點 + bulk patch**
   - update_risk_config / update_learning_config / update_budget_config + 對應 get_*
   - bulk patch all-or-nothing + mutex 序列化 + version + source 審計
@@ -78,9 +79,9 @@
 | Python `risk_manager.py` | program_code/ | 1633 行 GUI 路由 | **1C-3 空殼化**（已列入） |
 
 **具體收編 TODO：**
-- [ ] **E-Merge-1**（移入 1C-2-F）: StopManager 廢棄 — 驗證 risk_checks::check_position_on_tick 已覆蓋 hard/trailing/time stop 全部邏輯，搬出獨特功能（若有），刪除 openclaw_core::stop_manager
-- [ ] **E-Merge-2**（移入 1C-2-F）: H0Gate 欄位去重 — `H0GateConfig` 的 max_open_positions / max_total_exposure_pct / allowed_categories 改成從 RiskConfig.limits read-through（每 check 快照讀），H0GateConfig 只保留健康檢查欄位（cpu/memory/db_latency/network/health_snapshot_max_age）
-- [ ] **E-Merge-3**（移入 1C-2-F）: RiskGovernorSm 確認是否真的讀 RiskConfig.cascade（1B 規劃）還是有自己的 config（grep 驗證）；若否則接進 RiskConfig.cascade
+- [x] **E-Merge-1**（1C-2-F F2 降級 done）: StopManager 保留作為 H0/pause 保護 fallback + backtest sizing utility；paper_state.stop_config 進入熱重載迴圈 — `91b5db8`
+- [x] **E-Merge-2**（1C-2-F F3 done）: H0GateConfig 的 3 個風控欄位 RMW 從 RiskConfig.limits 同步 — `e7f00d4`
+- [x] **E-Merge-3**（1C-2-F F1 done）: RiskGovernorSm.thresholds 從 RiskConfig.cascade 同步（15 欄位映射） — `1a7fc8b`
 - [ ] **E-Merge-4 (Phase 2 / 可選)**: Guardian 進一步去 config struct 化 — GuardianConfig 退化為 `RiskConfig.limits + anti_cluster + guardian_modify` sub-view；保留 Guardian 引擎但不再持有 owned struct。收益有限，只有在 Phase 2 清理代碼味時順手做
 - **終局**：4-5 套 → **3 套執行引擎**（risk_checks 主引擎 / Guardian P0 modify 引擎 / H0Gate 健康檢查 / RiskGovernorSm 級聯狀態機），全部讀同一個 RiskConfig 真相源
 
