@@ -99,6 +99,23 @@ pub enum PaperSessionCommand {
         // DB-RUN-1: signals heartbeat (0 = disable throttling)
         signals_heartbeat_ms: Option<u64>,
     },
+    /// ARCH-RC1 1C-3-B: Get Rust-native risk runtime status snapshot.
+    /// Returns JSON: `{governor_tier, consecutive_losses_by_symbol, boot_cooldown_remaining_ms,
+    /// paper_paused, session_halted}`. Shape intentionally differs from the
+    /// deprecated Python `RiskManager.get_status()` — this exposes the real
+    /// Rust state machine (risk_governor cascade) rather than synthesising
+    /// Python's obsolete counter+cooldown fields.
+    /// ARCH-RC1 1C-3-B：獲取 Rust 原生風控運行時狀態快照。
+    GetRiskRuntimeStatus {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// ARCH-RC1 1C-3-B: Clear per-symbol consecutive-loss counters.
+    /// Safe reset — the counters are pure statistics; no governor tier
+    /// change. For governor override (de-escalation) see 1C-3-B-2.
+    /// ARCH-RC1 1C-3-B：清除 per-symbol 連虧計數器（純統計重置，不影響 governor tier）。
+    ClearConsecutiveLosses {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -569,6 +586,40 @@ impl TickPipeline {
         am: std::sync::Arc<crate::account_manager::AccountManager>,
     ) {
         self.intent_processor.set_account_manager(am);
+    }
+
+    /// ARCH-RC1 1C-3-B: Build Rust-native risk runtime status snapshot.
+    ///
+    /// Intentionally exposes the real state machine rather than synthesising
+    /// the deprecated Python `RiskManager.get_status()` shape. Callers (new
+    /// GUI Risk tab, `RiskViewClient`) must bind to these fields directly.
+    ///
+    /// Fields:
+    /// - `governor_tier`: current RiskGovernorSm level (Normal/Cautious/Reduced/
+    ///   Defensive/CircuitBreaker/ManualReview)
+    /// - `consecutive_losses_by_symbol`: per-symbol loss streak map
+    /// - `boot_cooldown_remaining_ms`: remaining ms of post-boot signal
+    ///   suppression window (0 if boot_ts_ms unset or window expired)
+    /// - `paper_paused`: IPC pause flag
+    /// - `session_halted`: news/guardian hard-halt flag
+    ///
+    /// ARCH-RC1 1C-3-B：組裝 Rust 原生風控運行時狀態快照（新 GUI 直接綁定這些欄位）。
+    pub fn risk_runtime_status_json(&self, now_ms: u64) -> serde_json::Value {
+        let boot_remaining_ms = match self.boot_ts_ms {
+            Some(boot_ts) => {
+                let elapsed = now_ms.saturating_sub(boot_ts);
+                self.boot_cooldown_ms.saturating_sub(elapsed)
+            }
+            None => 0,
+        };
+        serde_json::json!({
+            "governor_tier": self.governance.risk.snapshot_level().to_string(),
+            "consecutive_losses_by_symbol": self.consecutive_losses,
+            "boot_cooldown_remaining_ms": boot_remaining_ms,
+            "boot_cooldown_total_ms": self.boot_cooldown_ms,
+            "paper_paused": self.paper_paused,
+            "session_halted": self.session_halted,
+        })
     }
 
     /// PNL-3 / Session 12: Update boot cooldown at runtime via IPC.
@@ -2284,6 +2335,47 @@ mod tests {
     fn test_pnl4_derive_regime_none_default() {
         let pipeline = TickPipeline::new(&["BTCUSDT"]);
         assert_eq!(pipeline.derive_regime(None), "ranging");
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_no_boot_ts() {
+        // 1C-3-B: before first tick, boot_ts_ms is None → remaining = 0
+        // 1C-3-B：第一個 tick 之前 boot_ts_ms 為 None → 剩餘 0
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let snap = pipeline.risk_runtime_status_json(1_000_000);
+        assert_eq!(snap["boot_cooldown_remaining_ms"], 0);
+        assert_eq!(snap["paper_paused"], false);
+        assert_eq!(snap["session_halted"], false);
+        assert!(snap["governor_tier"].is_string());
+        assert!(snap["consecutive_losses_by_symbol"].is_object());
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_boot_cooldown_math() {
+        // 1C-3-B: boot at t=1000, cooldown=60s, now=t=11000 → remaining 50s
+        // 1C-3-B：boot 時間 1000、冷卻 60s、現在 11000 → 剩 50s
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.boot_ts_ms = Some(1_000);
+        pipeline.boot_cooldown_ms = 60_000;
+        let snap = pipeline.risk_runtime_status_json(11_000);
+        assert_eq!(snap["boot_cooldown_remaining_ms"], 50_000);
+        assert_eq!(snap["boot_cooldown_total_ms"], 60_000);
+        // Past expiry → saturating to 0
+        // 過期 → 飽和到 0
+        let snap2 = pipeline.risk_runtime_status_json(999_999_999);
+        assert_eq!(snap2["boot_cooldown_remaining_ms"], 0);
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_consecutive_losses_map() {
+        // 1C-3-B: per-symbol map round-trips into JSON object
+        // 1C-3-B：per-symbol map 序列化為 JSON object
+        let mut pipeline = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
+        pipeline.consecutive_losses.insert("BTCUSDT".into(), 3);
+        pipeline.consecutive_losses.insert("ETHUSDT".into(), 1);
+        let snap = pipeline.risk_runtime_status_json(0);
+        assert_eq!(snap["consecutive_losses_by_symbol"]["BTCUSDT"], 3);
+        assert_eq!(snap["consecutive_losses_by_symbol"]["ETHUSDT"], 1);
     }
 
     #[test]
