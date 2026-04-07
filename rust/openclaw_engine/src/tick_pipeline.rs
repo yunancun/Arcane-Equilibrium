@@ -410,9 +410,37 @@ impl TickPipeline {
     ) {
         // Immediate sync so the first tick already sees the live config.
         let snap = store.load();
-        self.intent_processor.update_risk_config((*snap).clone());
+        self.apply_risk_snapshot(&snap);
         self.risk_config_version_seen = store.version();
         self.risk_store = Some(store);
+    }
+
+    /// ARCH-RC1 1C-2-B (Option B): Push a RiskConfig snapshot into every
+    /// downstream consumer that owns a derived copy: intent_processor's own
+    /// RiskConfig (for Gate 0 check_order_allowed + tick position check) AND
+    /// the Guardian (for P0 trade intent veto — direction conflict / leverage
+    /// modify / drawdown / same-direction count). Guardian's modification_*
+    /// fields are not in RiskConfig, so they are preserved via
+    /// read-modify-write of the existing GuardianConfig.
+    /// ARCH-RC1 1C-2-B (Option B)：把一份 RiskConfig 快照推到所有下游持有派生
+    /// copy 的消費者：intent_processor 自身的 RiskConfig + Guardian。
+    /// Guardian 的 modification_* 欄位不在 RiskConfig 中，透過 read-modify-write
+    /// 保留既有值。
+    fn apply_risk_snapshot(&mut self, snap: &crate::config::RiskConfig) {
+        // 1. Update intent_processor's owned RiskConfig (used for cost_gate k_*,
+        //    dynamic_stop tunables, and check_order_allowed via risk_config()).
+        self.intent_processor.update_risk_config(snap.clone());
+
+        // 2. Derive Guardian fields from RiskConfig and hot-reload Guardian.
+        //    Single source of truth: whenever operator or Agent patches
+        //    limits.leverage_max / limits.session_drawdown_max_pct /
+        //    anti_cluster.max_same_direction via RiskConfig, Guardian picks it
+        //    up on the next tick automatically.
+        let mut gc = self.intent_processor.guardian_config().clone();
+        gc.max_leverage = snap.limits.leverage_max;
+        gc.max_drawdown_pct = snap.limits.session_drawdown_max_pct;
+        gc.max_same_direction_positions = snap.anti_cluster.max_same_direction as usize;
+        self.intent_processor.update_guardian_config(gc);
     }
 
     /// ARCH-RC1 1C-2-B: Inject the live BudgetConfig ConfigStore handle for
@@ -438,11 +466,11 @@ impl TickPipeline {
             let v = store.version();
             if v != self.risk_config_version_seen {
                 let snap = store.load();
-                self.intent_processor.update_risk_config((*snap).clone());
+                self.apply_risk_snapshot(&snap);
                 self.risk_config_version_seen = v;
                 tracing::info!(
                     new_version = v,
-                    "ARCH-RC1 risk config hot-reloaded into tick pipeline"
+                    "ARCH-RC1 risk config hot-reloaded (pipeline + guardian)"
                 );
             }
         }
