@@ -1,7 +1,30 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-07
+> 最後更新：2026-04-07 PM
+
+### Session ARCH-RC1 1C-2-C/D/E SHIPPED + 1C-3 Scoped + 文檔大清理（2026-04-07 PM · commits `5f87bca` `de75191` `950f547` `b0fa2c6`）
+
+**1C-2-C** (`5f87bca`): 6 unified Config IPC endpoints (`get/patch_{risk,learning,budget}_config`). Generic JSON deep-merge → deserialize → validate → `store.replace()` path through `handle_get_config<T>` / `handle_patch_config<T,V>`. All-or-nothing rollback semantics. Source audit (`operator|agent|migration`) parsed from `params.source`. Legacy field-based `update_risk_config` (channel-based) kept untouched for backwards compat — bypasses ConfigStore so does NOT trigger hot-reload, will phase out in 1C-3.
++6 tests · engine 714 → 720.
+
+**1C-2-E schema** (`de75191`): V014 `observability.engine_events` audit table + 3 indexes (`ts DESC`, `(type,ts DESC)`, partial `(config_name,new_version DESC)`). event_type ∈ {startup, shutdown, config_patch, config_reject, reconcile, crash}. Applied to live PG.
+
+**1C-2-D** (`950f547`): New `config/legacy_migration.rs` runs once at startup from `load_unified_configs`. Skip cases: TOML exists, JSON missing. Otherwise: parse JSON, map ~15 known `global_config.*` fields onto `RiskConfig::default()`, validate, save_toml, rename `.legacy`. Cross-Config `max_cost_edge_ratio` → log WARN (belongs to BudgetConfig). Failures non-fatal: WARN log + boot with defaults. +5 tests · engine 720 → 725.
+
+**1C-2-E audit wiring** (`b0fa2c6`): IpcServer gains late-injected `audit_pool: AuditPoolSlot`. main.rs writes `pg.clone()` into the slot after db_pool ready. `handle_patch_config` success branch fire-and-forget `tokio::spawn` INSERT into V014 with payload `{fields_changed: [top-level keys]}`. Fail-soft: db unavailable → audit skipped, patch still succeeds.
+
+**1C-2 終局**: 4 IPC 寫入面 (3 patch + StrategyParams) → ConfigStore.replace() → version++ → tick-level hot-reload 同步 5 engines (intent_processor / guardian / paper_state / h0_gate / risk_governor) + V014 audit row. Config-layer 閉環完成，風控並行系統 7 套 → 1 Config 權威 + 5 engines 同步熱重載 + 完整審計。
+
+**1C-3 Scoping** (`docs/references/2026-04-07--arch_rc1_1c3_scope.md`): Python RiskManager 1633 → ~200 lines RiskViewClient. 8 live methods + 3 setters identified. 5 sub-batch breakdown (A gap analysis / B build / C migrate routes / D migrate importers / E cleanup), 17-20h ≈ 3 sessions.
+
+**文檔大清理**:
+- CLAUDE.md 40K → ~25K bytes — §三 Phase 0/1/2/3/4 detail blocks (~180 lines) 歸檔到 `docs/archive/2026-04-07--claude_md_section3_history_phase0_4.md`，新增 1C-2-C/D/E SHIPPED 條目，§十一 one-liner 更新
+- MEMORY.md 索引精簡 + 6 個過時 project_* 檔案 (`batch9_decisions`, `rust_cutover_decision`, `rust_migration_status`, `openclaw_deep_analysis`, `local_strategy_plan`, `gui_upgrade_plan`) 移到 `memory/archive/`
+- TODO.md 1C-2-C/D/E 標記完成，1C-3 拆成 A-E 5 個子任務
+
+測試：engine lib **714 → 725** (+11 / 0 regression) · core/types 不變 · all green。
+
 
 ### Session 1C-2-A/B/Opt-B/F — ARCH-RC1 熱重載 LIVE + 引擎收編（2026-04-07 · commits `581e1e2`..`91b5db8`）
 
