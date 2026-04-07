@@ -422,7 +422,7 @@ fn run_replay_mode(args: ReplayArgs) {
 async fn async_main(
     config: Arc<ConfigManager>,
     risk_store: Arc<ConfigStore<RiskConfig>>,
-    _learning_store: Arc<ConfigStore<LearningConfig>>,
+    learning_store: Arc<ConfigStore<LearningConfig>>,
     budget_store: Arc<ConfigStore<BudgetConfig>>,
 ) {
     let cancel = CancellationToken::new();
@@ -451,11 +451,18 @@ async fn async_main(
     // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
     // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
     let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
-    let ipc_server = IpcServer::new(
+    let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
         ipc_data_dir,
         Some(paper_cmd_tx),
+    );
+    // ARCH-RC1 1C-2-C: wire unified Config stores into IPC for direct hot-reload writes.
+    // ARCH-RC1 1C-2-C：將統一 Config stores 接入 IPC，供直接熱更新。
+    ipc_server.set_config_stores(
+        Arc::clone(&risk_store),
+        Arc::clone(&learning_store),
+        Arc::clone(&budget_store),
     );
     // Phase 4 (4-15): Grab the BudgetTracker slot handle before moving the server into
     // the spawn task; main will write the tracker into this slot once db_pool is ready.
