@@ -12,8 +12,10 @@
 //!   快照讀取（paper_state/prices/stats）、策略參數（update/get/ranges）。
 
 use crate::ai_budget::BudgetTracker;
+use crate::claude_teacher::ConsumerLoopStatus;
 use crate::config::ConfigManager;
 use crate::tick_pipeline::PipelineSnapshot;
+use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +40,26 @@ use tracing::{debug, error, info, warn};
 ///   （例如 DB 不可用），讀取 IPC 以 `{"status":"uninitialized"}` fail-soft，
 ///   寫入則回傳 -32603 fail-closed。
 pub type BudgetTrackerSlot = Arc<RwLock<Option<Arc<BudgetTracker>>>>;
+
+/// Phase 4.1: Late-injected handles for the Teacher consumer loop.
+/// Phase 4.1：延後注入的 Teacher consumer loop 句柄。
+///
+/// MODULE_NOTE (EN): main.rs constructs the consumer loop AFTER the IPC server
+///   is spawned (because BudgetTracker must be ready first). The loop's
+///   enabled flag and status counters are then written into this slot so the
+///   IPC handlers `set_teacher_loop_enabled` / `get_teacher_loop_status` can
+///   reach them. None = loop not yet wired (IPC fail-soft response).
+/// MODULE_NOTE (中)：main.rs 在 IPC server spawn 之後才構造 consumer loop
+///   （因為 BudgetTracker 必須先就緒）。Loop 的 enabled 旗標與 status 計數器
+///   會寫入此槽位，供 IPC handler `set_teacher_loop_enabled` /
+///   `get_teacher_loop_status` 取用。None = loop 尚未接線（IPC fail-soft）。
+#[derive(Clone)]
+pub struct TeacherLoopHandles {
+    pub enabled: Arc<AtomicBool>,
+    pub status: Arc<ConsumerLoopStatus>,
+}
+
+pub type TeacherLoopSlot = Arc<RwLock<Option<TeacherLoopHandles>>>;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
@@ -133,6 +155,9 @@ pub struct IpcServer {
     /// Phase 4 (4-15): Late-injected AI BudgetTracker slot.
     /// Phase 4 (4-15)：延後注入的 AI BudgetTracker 槽位。
     budget_tracker: BudgetTrackerSlot,
+    /// Phase 4.1: Late-injected Teacher consumer loop handles.
+    /// Phase 4.1：延後注入的 Teacher consumer loop 句柄。
+    teacher_loop: TeacherLoopSlot,
 }
 
 impl IpcServer {
@@ -150,7 +175,14 @@ impl IpcServer {
             data_dir: Arc::new(PathBuf::from(data_dir.into())),
             paper_cmd_tx,
             budget_tracker: Arc::new(RwLock::new(None)),
+            teacher_loop: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Phase 4.1: Get a clone of the Teacher loop slot for late injection.
+    /// Phase 4.1：取得 Teacher loop 槽位的複製句柄供延後注入。
+    pub fn teacher_loop_slot(&self) -> TeacherLoopSlot {
+        Arc::clone(&self.teacher_loop)
     }
 
     /// Phase 4 (4-15): Get a clone of the BudgetTracker slot for late injection.
@@ -222,8 +254,9 @@ impl IpcServer {
                             let data_dir = Arc::clone(&self.data_dir);
                             let cmd_tx = self.paper_cmd_tx.clone();
                             let budget_slot = Arc::clone(&self.budget_tracker);
+                            let teacher_slot = Arc::clone(&self.teacher_loop);
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot).await;
                             });
                         }
                         Err(e) => {
@@ -250,6 +283,7 @@ async fn handle_connection(
     data_dir: Arc<PathBuf>,
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
     budget_slot: BudgetTrackerSlot,
+    teacher_slot: TeacherLoopSlot,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -266,7 +300,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -299,6 +333,7 @@ async fn dispatch_request(
     data_dir: &Arc<PathBuf>,
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
     budget_slot: &BudgetTrackerSlot,
+    teacher_slot: &TeacherLoopSlot,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -382,6 +417,11 @@ async fn dispatch_request(
         "update_ai_budget_config" => {
             handle_update_ai_budget_config(id, &req.params, budget_slot).await
         }
+        // Phase 4.1: Teacher consumer loop control / Teacher consumer loop 控制
+        "set_teacher_loop_enabled" => {
+            handle_set_teacher_loop_enabled(id, &req.params, teacher_slot).await
+        }
+        "get_teacher_loop_status" => handle_get_teacher_loop_status(id, teacher_slot).await,
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -574,6 +614,83 @@ async fn handle_update_ai_budget_config(
             "scope": scope,
             "monthly_usd": monthly_usd,
             "updated_by": updated_by,
+        }),
+    )
+}
+
+/// Phase 4.1: flip the Teacher consumer loop enabled flag (operator gate).
+/// Phase 4.1：翻轉 Teacher consumer loop enabled 旗標（operator 閘）。
+///
+/// Params: { "enabled": bool }. Returns the new state. fail-soft if the loop
+/// has not been wired (None slot) — returns `{"status":"uninitialized"}`.
+/// 參數：{ "enabled": bool }。回傳新狀態。Loop 尚未接線（slot None）時
+/// fail-soft 回傳 `{"status":"uninitialized"}`。
+async fn handle_set_teacher_loop_enabled(
+    id: serde_json::Value,
+    params: &serde_json::Value,
+    slot: &TeacherLoopSlot,
+) -> JsonRpcResponse {
+    let enabled = match params.get("enabled").and_then(|v| v.as_bool()) {
+        Some(b) => b,
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "missing or non-boolean 'enabled' field",
+            );
+        }
+    };
+    let guard = slot.read().await;
+    let handles = match guard.as_ref() {
+        Some(h) => h,
+        None => {
+            return JsonRpcResponse::success(
+                id,
+                serde_json::json!({"status": "uninitialized"}),
+            );
+        }
+    };
+    handles.enabled.store(enabled, Ordering::Relaxed);
+    info!(enabled, "teacher consumer loop enabled flag set via IPC / 透過 IPC 設定 enabled 旗標");
+    JsonRpcResponse::success(id, serde_json::json!({"ok": true, "enabled": enabled}))
+}
+
+/// Phase 4.1: snapshot the Teacher consumer loop status counters.
+/// Phase 4.1：快照 Teacher consumer loop 狀態計數。
+///
+/// Returns cycles_attempted / directives_applied / directives_vetoed /
+/// cycles_errored / last_cycle_ms / enabled. fail-soft if not wired.
+/// 回傳上述欄位。未接線時 fail-soft。
+async fn handle_get_teacher_loop_status(
+    id: serde_json::Value,
+    slot: &TeacherLoopSlot,
+) -> JsonRpcResponse {
+    let guard = slot.read().await;
+    let handles = match guard.as_ref() {
+        Some(h) => h,
+        None => {
+            return JsonRpcResponse::success(
+                id,
+                serde_json::json!({"status": "uninitialized"}),
+            );
+        }
+    };
+    let (attempted, applied, vetoed, errored) = handles.status.snapshot();
+    let last_cycle_ms = handles
+        .status
+        .last_cycle_ms
+        .load(Ordering::Relaxed);
+    let enabled = handles.enabled.load(Ordering::Relaxed);
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "status": "ok",
+            "enabled": enabled,
+            "cycles_attempted": attempted,
+            "directives_applied": applied,
+            "directives_vetoed": vetoed,
+            "cycles_errored": errored,
+            "last_cycle_ms": last_cycle_ms,
         }),
     )
 }
@@ -912,6 +1029,10 @@ mod tests {
         Arc::new(RwLock::new(None))
     }
 
+    fn empty_teacher_slot() -> TeacherLoopSlot {
+        Arc::new(RwLock::new(None))
+    }
+
     /// Write a test snapshot file to a temp dir, return the dir path.
     /// 寫入測試快照文件到臨時目錄，返回目錄路徑。
     fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
@@ -987,7 +1108,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none());
         assert_eq!(
             resp.result.unwrap(),
@@ -1001,7 +1122,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -1013,7 +1134,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -1023,7 +1144,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1033,7 +1154,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1043,7 +1164,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1053,7 +1174,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -1085,7 +1206,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error when snapshot file missing"
@@ -1097,7 +1218,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -1110,7 +1231,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -1122,7 +1243,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
@@ -1192,7 +1313,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let ranges_str = result["result"].as_str().unwrap();
@@ -1206,7 +1327,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
@@ -1223,7 +1344,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
     }
 
@@ -1233,7 +1354,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error for nonexistent strategy"
@@ -1246,7 +1367,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(
             resp.error.is_some(),
             "should error when params_json missing"
@@ -1263,7 +1384,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none(), "phase4 status must succeed");
         let r = resp.result.unwrap();
         assert_eq!(r["teacher"], "grey");
@@ -1280,7 +1401,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert!(resp.error.is_none());
         let r = resp.result.unwrap();
         for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -1305,7 +1426,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot()).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot()).await;
         assert_eq!(resp.id, serde_json::json!(4002));
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
@@ -1363,5 +1484,94 @@ mod tests {
         let p3 = serde_json::json!({ "scope": "", "monthly_usd": 10.0 });
         let r3 = handle_update_ai_budget_config(serde_json::json!(3), &p3, &slot).await;
         assert_eq!(r3.error.expect("err").code, -32602);
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 4.1: Teacher consumer loop IPC tests
+    // Phase 4.1：Teacher consumer loop IPC 測試
+    // ---------------------------------------------------------------------
+
+    fn populated_teacher_slot(initial_enabled: bool) -> (TeacherLoopSlot, Arc<AtomicBool>, Arc<ConsumerLoopStatus>) {
+        let enabled = Arc::new(AtomicBool::new(initial_enabled));
+        let status = Arc::new(ConsumerLoopStatus::default());
+        let slot: TeacherLoopSlot = Arc::new(RwLock::new(Some(TeacherLoopHandles {
+            enabled: Arc::clone(&enabled),
+            status: Arc::clone(&status),
+        })));
+        (slot, enabled, status)
+    }
+
+    /// uninitialized slot → fail-soft "uninitialized" payload, NOT an error.
+    /// 未注入槽位 → fail-soft 回傳 "uninitialized"，不是 error。
+    #[tokio::test]
+    async fn test_teacher_loop_status_uninitialized_fail_soft() {
+        let slot = empty_teacher_slot();
+        let resp = handle_get_teacher_loop_status(serde_json::json!(1), &slot).await;
+        assert!(resp.error.is_none());
+        let result = resp.result.expect("result");
+        assert_eq!(result["status"], "uninitialized");
+    }
+
+    /// set_enabled with valid bool flips the atomic and returns ok.
+    /// set_enabled 帶合法 bool 翻轉 atomic 並回傳 ok。
+    #[tokio::test]
+    async fn test_teacher_loop_set_enabled_flips_atomic() {
+        let (slot, enabled, _status) = populated_teacher_slot(false);
+        let params = serde_json::json!({"enabled": true});
+        let resp =
+            handle_set_teacher_loop_enabled(serde_json::json!(2), &params, &slot).await;
+        assert!(resp.error.is_none());
+        assert_eq!(resp.result.expect("ok")["enabled"], true);
+        assert!(enabled.load(Ordering::Relaxed));
+
+        // Flip back / 翻回
+        let params = serde_json::json!({"enabled": false});
+        let _ = handle_set_teacher_loop_enabled(serde_json::json!(3), &params, &slot).await;
+        assert!(!enabled.load(Ordering::Relaxed));
+    }
+
+    /// set_enabled missing/non-bool param → -32600 invalid request.
+    /// set_enabled 缺欄位或非 bool → -32600。
+    #[tokio::test]
+    async fn test_teacher_loop_set_enabled_invalid_params() {
+        let (slot, _, _) = populated_teacher_slot(false);
+        let params = serde_json::json!({"enabled": "yes"});
+        let resp =
+            handle_set_teacher_loop_enabled(serde_json::json!(4), &params, &slot).await;
+        assert_eq!(resp.error.expect("err").code, ERR_INVALID_REQUEST);
+    }
+
+    /// get_status returns full counter snapshot when slot populated.
+    /// 槽位有值時 get_status 回傳完整計數快照。
+    #[tokio::test]
+    async fn test_teacher_loop_get_status_populated() {
+        let (slot, _, status) = populated_teacher_slot(true);
+        status.cycles_attempted.store(7, Ordering::Relaxed);
+        status.directives_applied.store(3, Ordering::Relaxed);
+        status.directives_vetoed.store(2, Ordering::Relaxed);
+        status.cycles_errored.store(1, Ordering::Relaxed);
+        status.last_cycle_ms.store(123_456_789, Ordering::Relaxed);
+
+        let resp = handle_get_teacher_loop_status(serde_json::json!(5), &slot).await;
+        let r = resp.result.expect("ok");
+        assert_eq!(r["status"], "ok");
+        assert_eq!(r["enabled"], true);
+        assert_eq!(r["cycles_attempted"], 7);
+        assert_eq!(r["directives_applied"], 3);
+        assert_eq!(r["directives_vetoed"], 2);
+        assert_eq!(r["cycles_errored"], 1);
+        assert_eq!(r["last_cycle_ms"], 123_456_789);
+    }
+
+    /// set_teacher_loop_enabled on uninitialized slot is fail-soft (no error).
+    /// 未注入槽位的 set_enabled 也是 fail-soft（不報 error）。
+    #[tokio::test]
+    async fn test_teacher_loop_set_enabled_uninitialized_fail_soft() {
+        let slot = empty_teacher_slot();
+        let params = serde_json::json!({"enabled": true});
+        let resp =
+            handle_set_teacher_loop_enabled(serde_json::json!(6), &params, &slot).await;
+        assert!(resp.error.is_none());
+        assert_eq!(resp.result.expect("ok")["status"], "uninitialized");
     }
 }

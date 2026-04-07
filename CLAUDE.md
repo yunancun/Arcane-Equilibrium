@@ -46,12 +46,17 @@
 
 ## 三、當前系統狀態摘要
 
-### ★★★★ Phase 4 CODE-COMPLETE（2026-04-07 · commit `435930f` · 4-21 audit CONDITIONAL APPROVE）
-**22 子任務 (4-00~4-21) 全部 committed**。6 角色審計：E2/E4/E5/QA/PM APPROVE · AI-E CONDITIONAL（等 4.1 Claude API loop）。
+### ★★★★ Phase 4.1 SHIPPED + E3 R6 audit CONDITIONAL GO（2026-04-07 · commit `ee6fd00`/後續）
+**Phase 4.1 Claude API Consumer Loop** 完成：`claude_teacher/consumer_loop.rs` (+480 行 · 10 tests) · `mod.rs` 拆 `fetch_parse_persist` · `main.rs` Arc 接線 · IPC 兩端點 `set_teacher_loop_enabled` / `get_teacher_loop_status`（fail-soft uninitialized）· **Default-OFF**，operator IPC 翻開才生效。
+**E3 R6 Security Audit**（Explore agent read-only）→ **CONDITIONAL GO**：3 P1 minor 全部關閉（5 test cases + 2 doc comments commit）。P0 bypass surface 全 SAFE：case-insensitive denylist、one-level JSON traversal、ARCH-RC1 Python isolation、kill-switch case-insensitive 通配。
+測試：engine lib **441 → 609 (+168)** · phase4_integration 3/3 · 0 regression。
+
+### Phase 4 CODE-COMPLETE（2026-04-07 · commit `435930f` · 4-21 audit CONDITIONAL APPROVE）
+**22 子任務 (4-00~4-21) 全部 committed**。6 角色審計：E2/E4/E5/QA/PM APPROVE · AI-E CONDITIONAL（等 4.1 Claude API loop · **已於 ee6fd00 滿足**）。
 測試：engine lib **441 → 589 (+148)** · phase4_integration 3/3 · phase4 routes 24 → 29 · 0 regression。
 V009/V010/V011/V012/V013 migrations 全 apply live（V011 在 4-11 子任務執行時 apply）。
 Live binary 確認 6 個 Phase 4 模組啟動：BudgetTracker / LinUcbRuntime v1_15 (feature_schema_hash=sha256:023787b8140331ee) / NewsContextSnapshot / governance+guardian shared halted atomic / TickPipeline 接通 LinUCB + news snapshot。
-**Live 前 3 個 blocker**：(1) E3 Security Audit R6 Teacher hard-boundary veto (1.5d) · (2) 4.1 Claude API Consumer Loop DirectiveApplier live invoker (2d) · (3) 7+ days paper trading 數據累積（DoD A/C/E 量測觀察期）。
+**Live 前 blocker**：✅ E3 Security Audit R6（CONDITIONAL GO，3 P1 已關閉）· ✅ 4.1 Claude API Consumer Loop（SHIPPED default-off，operator IPC flip 即可上線）· ⏳ 7+ days paper trading 數據累積（DoD A/C/E 量測觀察期，calendar-time 不可壓縮）。
 **P2 post-merge follow-up**：tick_pipeline.rs 2211 行超 §九 硬上限（1200），split LinUCB + decision context producer 到獨立模組（~1d）。
 審計報告：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`。
 
@@ -490,4 +495,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-07：engine lib **589** (+148 vs Phase 4 baseline 441) · phase4_integration 3/3 · phase4 routes 29 · ml_training +多模組 · **Phase 4 CODE-COMPLETE** (22/22 子任務 4-00~4-21 committed `435930f`) · 4-21 多角色 audit CONDITIONAL APPROVE · **Live 前 blocker 3 項**：E3 R6 audit / 4.1 Claude API consumer loop / 7d paper trading 數據觀察期 · 下一步：E3 R6 審計 + 4.1 實作 或 WP-ARCH-RC1 雙風控統一（5 項 live-prep 必修）。
+> 截至 2026-04-07：engine lib **609** (+168 vs Phase 4 baseline 441) · phase4_integration 3/3 · **Phase 4.1 SHIPPED** (commit `ee6fd00` Claude API Consumer Loop default-off + IPC `set_teacher_loop_enabled` / `get_teacher_loop_status`) · **E3 R6 Security Audit CONDITIONAL GO** (3 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期**（calendar-time）· 下一步：P2 tick_pipeline.rs 拆分 / WP-ARCH-RC1 雙風控統一 / 7d 後 operator IPC flip teacher loop 上線。
