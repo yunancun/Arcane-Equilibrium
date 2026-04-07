@@ -18,6 +18,7 @@ pub mod config;
 pub mod database;
 pub mod decision_context_producer;
 pub mod event_consumer;
+pub mod position_risk_evaluator;
 pub mod execution_listener;
 pub mod fast_track;
 pub mod feature_collector;
