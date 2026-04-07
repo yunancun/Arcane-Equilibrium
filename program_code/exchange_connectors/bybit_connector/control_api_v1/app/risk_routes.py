@@ -1,26 +1,40 @@
 from __future__ import annotations
 
 """
-Paper Trading Risk Control Routes / 纸上交易风控路由
-8 条路由：全局配置 / 品类配置 / Agent 调参 / 状态查询 / 冷却重置 / 熔断解除
+Paper Trading Risk Control Routes / 紙上交易風控路由
+ARCH-RC1 1C-3-C: All routes now use `RiskViewClient` (thin IPC view of Rust
+authoritative RiskConfig). Python `RiskManager` is no longer touched here —
+its remaining importers are migrated in 1C-3-D.
+
+8 routes under /api/v1/paper/risk:
+  GET  /config                    — full RiskConfig snapshot
+  POST /config/global             — patch_risk_config (operator source)
+  GET  /config/category/{c}       — derived per-category view
+  POST /config/category/{c}       — patch_risk_config nested override
+  GET  /status                    — Rust-native runtime status (governor_tier etc.)
+  GET  /ai-context                — Rust snapshot (no risk_manager touch)
+  POST /agent-adjust              — patch_risk_config (agent source)
+  POST /reset-cooldown            — clear_consecutive_losses IPC
+  POST /unhalt-session            — resume_paper IPC
 
 MODULE_NOTE (中文):
-  本模块提供风控管理的 REST API 接口。
-  支持三层优先级风控的查看和配置。
-
-MODULE_NOTE (English):
-  REST API routes for the risk control layer.
-  Supports viewing and configuring the 3-tier priority risk framework.
+  ARCH-RC1 1C-3-C：所有 route 改用 RiskViewClient（Rust 權威 RiskConfig 的薄 IPC 視圖）。
+  Python RiskManager 在本檔內不再被引用，剩餘 importer 由 1C-3-D 處理。
+  寫入路徑：route → RiskViewClient → patch_risk_config IPC → Rust ConfigStore.replace()
+  → 5 engines hot-reload + V014 audit row。
+  Strict failure mode：IPC unreachable → HTTP 500（不再 best-effort）。
 """
 
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
+from .ipc_client import EngineIPCClient
 from .ipc_state_reader import get_rust_reader
+from .risk_view_client import RiskViewClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +44,31 @@ logger = logging.getLogger(__name__)
 
 risk_router = APIRouter(
     prefix="/api/v1/paper/risk",
-    tags=["Paper Risk Control / 纸上风险控制"],
+    tags=["Paper Risk Control / 紙上風險控制"],
 )
 
 
-def _get_risk_manager():
-    """Lazy import to avoid circular dependency."""
-    from .paper_trading_routes import RISK_MANAGER
-    return RISK_MANAGER
+# ─── Module-level RiskViewClient singleton (lazy-initialised) ─────────────────
+# 模組級 RiskViewClient 單例（懶初始化）
+_RISK_VIEW_CLIENT: RiskViewClient | None = None
+_IPC_CLIENT: EngineIPCClient | None = None
 
 
-def _get_engine():
-    """Lazy import."""
-    from .paper_trading_routes import ENGINE
-    return ENGINE
+async def _get_risk_view_client() -> RiskViewClient:
+    """
+    Lazy-init RiskViewClient + underlying EngineIPCClient on first call.
+    The IPC client is reused across requests (it has its own lock + reconnect).
+    第一次呼叫時建立 RiskViewClient + EngineIPCClient；後續 request 重用同一 instance。
+    """
+    global _RISK_VIEW_CLIENT, _IPC_CLIENT
+    if _RISK_VIEW_CLIENT is None:
+        _IPC_CLIENT = EngineIPCClient()
+        try:
+            await _IPC_CLIENT.connect()
+        except Exception as e:
+            logger.warning("RiskViewClient IPC connect failed: %s", e)
+        _RISK_VIEW_CLIENT = RiskViewClient(_IPC_CLIENT)
+    return _RISK_VIEW_CLIENT
 
 
 def _risk_response(data: Any) -> dict[str, Any]:
@@ -55,8 +80,13 @@ def _risk_response(data: Any) -> dict[str, Any]:
     }
 
 
+def _ipc_failure(detail: str) -> HTTPException:
+    """Strict failure: IPC unreachable → HTTP 500. No more best-effort silent skip."""
+    return HTTPException(status_code=500, detail=f"rust_engine_unavailable: {detail}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# Request Models / 请求模型
+# Request Models / 請求模型 (unchanged from pre-1C-3-C)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class GlobalConfigUpdate(BaseModel):
@@ -76,18 +106,11 @@ class GlobalConfigUpdate(BaseModel):
     allowed_categories: list[str] | None = None
     preferred_margin_mode: str | None = None
     preferred_position_mode: str | None = None
-    # ── Phase 3b+ additions: IPC-forwarded to Rust engine ──
-    # 以下參數直接推送到 Rust 引擎 IPC
-    p1_risk_pct: float | None = Field(default=None, gt=0, le=20,
-        description="P1 per-trade risk cap as % of balance (e.g. 3 = 3%). / P1 單筆風險上限占餘額百分比")
-    trailing_stop_pct: float | None = Field(default=None, ge=0, le=50,
-        description="Trailing stop distance %. 0 or null = disabled. / 跟蹤止損百分比，0 或 null 禁用")
-    atr_multiplier: float | None = Field(default=None, ge=0, le=10,
-        description="ATR dynamic stop multiplier. 0 or null = disabled. / ATR 動態止損乘數，0 或 null 禁用")
-    max_same_direction_positions: int | None = Field(default=None, gt=0, le=25,
-        description="Guardian: max concurrent same-direction positions. / Guardian 同方向最大持倉數")
-    h0_shadow_mode: bool | None = Field(default=None,
-        description="H0 Gate shadow mode: true=observe only, false=active blocking. / H0 門控影子模式")
+    p1_risk_pct: float | None = Field(default=None, gt=0, le=20)
+    trailing_stop_pct: float | None = Field(default=None, ge=0, le=50)
+    atr_multiplier: float | None = Field(default=None, ge=0, le=10)
+    max_same_direction_positions: int | None = Field(default=None, gt=0, le=25)
+    h0_shadow_mode: bool | None = None
 
 
 class CategoryConfigUpdate(BaseModel):
@@ -106,8 +129,6 @@ class CategoryConfigUpdate(BaseModel):
 
 
 class AgentAdjustRequest(BaseModel):
-    # None = dynamic ATR-based mode; float = fixed override (gt=0 only when float)
-    # None = 動態 ATR 模式；浮點數 = 固定覆蓋值
     effective_stop_loss_pct: float | None = None
     effective_take_profit_pct: float | None = None
     trailing_stop_enabled: bool | None = None
@@ -125,170 +146,132 @@ class AgentAdjustRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @risk_router.get("/config")
-def get_risk_config(
+async def get_risk_config(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get full risk config (all 3 tiers) / 获取完整风控配置（三层）
-    RRC-1-D4: Includes Rust engine's active risk configs as ground truth.
-    RRC-1-D4：包含 Rust 引擎的活躍風控配置作為真相源。
-    """
-    rm = _get_risk_manager()
-    config = rm.get_full_config()
-    # RRC-1-D4: Append Rust engine's active configs / 附加 Rust 引擎活躍配置
+    """Get full RiskConfig snapshot from Rust authority. / 從 Rust 權威獲取完整 RiskConfig 快照。"""
+    client = await _get_risk_view_client()
+    config = await client.refresh_config()
+    # Optional: append Rust state-reader snapshot for legacy GUI fields
+    # 可選：附加 Rust state-reader 快照供舊 GUI 欄位使用
     reader = get_rust_reader()
     snap = reader.get_snapshot() if reader.is_available() else None
     if snap is not None:
+        config = dict(config)  # don't mutate cache
         config["rust_active"] = {
             "stop_config": snap.get("stop_config"),
             "guardian_config": snap.get("guardian_config"),
             "risk_manager_config": snap.get("risk_manager_config"),
             "source": "rust_engine",
         }
-    return _risk_response(config)
+    return _risk_response({"config": config, "version": client.config_version})
 
 
 @risk_router.post("/config/global")
-def update_global_config(
+async def update_global_config(
     body: GlobalConfigUpdate,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Update P1 global risk config / 更新 P1 全局风控配置"""
-    rm = _get_risk_manager()
+    """
+    Patch P1 global RiskConfig via Rust ConfigStore (operator source).
+    Hot-reloads to 5 downstream engines + writes V014 audit row.
+    透過 Rust ConfigStore 修改 P1 全局風控（operator 來源）。
+    成功後熱更新 5 個下游引擎並寫入 V014 audit。
+    """
+    client = await _get_risk_view_client()
     updates = body.model_dump(exclude_none=True)
     if not updates:
-        return _risk_response({"message": "no_updates", "config": rm.config.to_dict()})
-    rm.update_global_config(updates)
-
-    # Push ALL risk changes to Rust engine via IPC / 通過 IPC 推送所有風控變更到 Rust 引擎
-    # Mapping: GUI field → IPC param
-    # Note: p1_risk_pct is % in GUI/API, fraction in Rust IPC
-    ipc_kwargs: dict = {}
-    if "max_stop_loss_pct" in updates:
-        ipc_kwargs["hard_stop_pct"] = updates["max_stop_loss_pct"]
-    if "max_take_profit_pct" in updates:
-        ipc_kwargs["take_profit_pct"] = updates["max_take_profit_pct"]
-    if "max_leverage" in updates:
-        ipc_kwargs["max_leverage"] = updates["max_leverage"]
-    if "max_session_drawdown_pct" in updates:
-        ipc_kwargs["max_drawdown_pct"] = updates["max_session_drawdown_pct"]
-    if "max_holding_hours" in updates:
-        ipc_kwargs["time_stop_hours"] = updates["max_holding_hours"]
-    # Phase 3b+ additions — direct IPC params
-    if "p1_risk_pct" in updates:
-        ipc_kwargs["p1_risk_pct"] = updates["p1_risk_pct"] / 100.0  # GUI sends %, Rust expects fraction
-    if "trailing_stop_pct" in updates:
-        val = updates["trailing_stop_pct"]
-        ipc_kwargs["trailing_stop_pct"] = val if val and val > 0 else None  # 0/null → disable
-    if "atr_multiplier" in updates:
-        val = updates["atr_multiplier"]
-        ipc_kwargs["atr_multiplier"] = val if val and val > 0 else None  # 0/null → disable
-    if "max_same_direction_positions" in updates:
-        ipc_kwargs["max_same_direction_positions"] = updates["max_same_direction_positions"]
-    if "h0_shadow_mode" in updates:
-        ipc_kwargs["h0_shadow_mode"] = updates["h0_shadow_mode"]
-    if ipc_kwargs:
-        import asyncio
-        from app.ipc_client import EngineIPCClient
-        async def _push_risk():
-            client = EngineIPCClient()
-            try:
-                await client.connect()
-                await client.update_risk_config(**ipc_kwargs)
-                await client.disconnect()
-            except Exception:
-                pass  # best-effort — Rust may not be running
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_push_risk())
-            else:
-                loop.run_until_complete(_push_risk())
-        except Exception:
-            pass
-
-    return _risk_response({"message": "updated", "config": rm.config.to_dict()})
+        await client.refresh_config()
+        return _risk_response({"message": "no_updates", "config": client.config})
+    try:
+        await client.update_global_config(updates)
+    except Exception as e:
+        raise _ipc_failure(f"patch_risk_config: {e}") from e
+    return _risk_response({"message": "updated", "config": client.config, "version": client.config_version})
 
 
 @risk_router.get("/config/category/{category}")
-def get_category_config(
+async def get_category_config(
     category: str,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get P0 category risk config / 获取 P0 品类风控配置"""
-    rm = _get_risk_manager()
-    cfg = rm.get_category_config(category)
-    if cfg is None:
+    """Get P0 category-override config from cached Rust snapshot."""
+    client = await _get_risk_view_client()
+    await client.refresh_config()
+    cfg = client.get_category_config(category)
+    if not cfg:
         return _risk_response({"category": category, "config": None, "message": "using_global_defaults"})
-    return _risk_response({"category": category, "config": cfg.to_dict()})
+    return _risk_response({"category": category, "config": cfg})
 
 
 @risk_router.post("/config/category/{category}")
-def update_category_config(
+async def update_category_config(
     category: str,
     body: CategoryConfigUpdate,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Update P0 category risk config / 更新 P0 品类风控配置"""
-    rm = _get_risk_manager()
+    """Patch P0 category override via Rust ConfigStore (operator source, nested patch)."""
+    client = await _get_risk_view_client()
     updates = body.model_dump(exclude_none=True)
     if not updates:
-        cfg = rm.get_category_config(category)
-        return _risk_response({"message": "no_updates", "config": cfg.to_dict() if cfg else None})
-    cfg = rm.update_category_config(category, updates)
-    return _risk_response({"message": "updated", "category": category, "config": cfg.to_dict()})
+        await client.refresh_config()
+        return _risk_response({
+            "message": "no_updates",
+            "config": client.get_category_config(category),
+        })
+    try:
+        await client.update_category_config(category, updates)
+    except Exception as e:
+        raise _ipc_failure(f"patch_risk_config category: {e}") from e
+    return _risk_response({
+        "message": "updated",
+        "category": category,
+        "config": client.get_category_config(category),
+    })
 
 
 @risk_router.get("/status")
-def get_risk_status(
+async def get_risk_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get current risk status / 获取当前风控状态
-    RRC-1-D2: Rust snapshot is the single source of truth for runtime risk state.
-    RRC-1-D2：Rust 快照為運行時風控狀態的單一真相源。
     """
-    rm = _get_risk_manager()
-    status = rm.get_status()
+    Rust-native runtime status (governor_tier / consecutive_losses_by_symbol /
+    boot_cooldown_remaining_ms / paper_paused / session_halted).
 
-    # RRC-1-D2: Rust snapshot = primary source for runtime risk state
-    # RRC-1-D2：Rust 快照 = 運行時風控狀態的主要來源
+    ★ Schema deliberately differs from the Python-era `rm.get_status()`. GUI
+    Risk tab is rebound in tab-risk.html within the same commit.
+    ★ Schema 與 Python 時代 rm.get_status() 刻意不同。GUI Risk tab 同 commit 改綁定。
+    """
+    client = await _get_risk_view_client()
+    runtime = await client.refresh_runtime_status()
+    # Append optional state-reader fields for richer dashboard
+    # 附加 state-reader 欄位給 dashboard 用
     reader = get_rust_reader()
     snap = reader.get_snapshot() if reader.is_available() else None
     if snap is not None:
-        ps = snap.get("paper_state", {})
-        peak = ps.get("peak_balance", 0)
-        current = ps.get("balance", 0)
-        status["drawdown_pct"] = round(snap.get("session_drawdown_pct", 0.0), 2)
-        status["daily_loss_pct"] = round(snap.get("daily_loss_pct", 0.0), 2)
-        status["peak_balance_usdt"] = peak
-        status["current_balance_usdt"] = current
-        status["session_halted"] = snap.get("session_halted", False)
-        status["consecutive_losses"] = snap.get("consecutive_losses", {})
-        status["h0_gate_stats"] = snap.get("h0_gate_stats")
-        status["source"] = "rust_engine"
-    else:
-        logger.debug("Rust engine unavailable, no runtime risk data / Rust 引擎不可用")
-
-    return _risk_response(status)
+        ps = snap.get("paper_state", {}) or {}
+        runtime = dict(runtime)
+        runtime["session_drawdown_pct"] = round(snap.get("session_drawdown_pct", 0.0), 2)
+        runtime["daily_loss_pct"] = round(snap.get("daily_loss_pct", 0.0), 2)
+        runtime["peak_balance_usdt"] = ps.get("peak_balance", 0)
+        runtime["current_balance_usdt"] = ps.get("balance", 0)
+        runtime["h0_gate_stats"] = snap.get("h0_gate_stats")
+        runtime["source"] = "rust_engine"
+    return _risk_response(runtime)
 
 
 @risk_router.get("/ai-context")
-def get_ai_risk_context(
+async def get_ai_risk_context(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """
-    Get risk context for AI decision-making / 获取 AI 决策用风控上下文
-    RRC-1-D2: Uses Rust snapshot for runtime state (ENGINE=None safe).
-    """
-    rm = _get_risk_manager()
-    # RRC-1-D2: Build context from Rust snapshot (ENGINE=None safe).
-    # RRC-1-D2：從 Rust 快照構建上下文（ENGINE=None 安全）。
+    """Risk context for AI decision-making — Rust snapshot only, no RiskViewClient touch."""
     reader = get_rust_reader()
     snap = reader.get_snapshot() if reader.is_available() else None
     if snap is not None:
         dd = snap.get("session_drawdown_pct", 0.0)
         dl = snap.get("daily_loss_pct", 0.0)
         halted = snap.get("session_halted", False)
-        pressure = min(1.0, max(dd, dl) / 10.0)  # 0-1 scale, 10%=max
+        pressure = min(1.0, max(dd, dl) / 10.0)
         suggestion = "halt" if halted else ("reduce" if pressure > 0.5 else "normal")
         ctx = {
             "risk_pressure": round(pressure, 3),
@@ -305,102 +288,77 @@ def get_ai_risk_context(
 
 
 @risk_router.post("/agent-adjust")
-def agent_adjust(
+async def agent_adjust(
     body: AgentAdjustRequest,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Agent adjusts P2 params within caps / Agent 在上限内调整 P2 参数"""
-    rm = _get_risk_manager()
-    # Only include explicitly-set fields (model_fields_set tracks what the caller sent).
-    # This allows sending null for SL/TP to enter dynamic mode.
-    # 只包含顯式傳入的字段（model_fields_set 追蹤調用者發送了什麼）。
-    # 這允許發送 null 讓 SL/TP 進入動態模式。
+    """Agent self-tuning — patch_risk_config with source=agent for V014 audit."""
+    client = await _get_risk_view_client()
     updates = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
     if not updates:
-        return _risk_response({"message": "no_updates", "agent_params": rm.agent_params.to_dict()})
-    params = rm.agent_adjust(updates)
-
-    # Push agent risk adjustments to Rust engine via IPC
-    # 通過 IPC 推送 Agent 風控調整到 Rust 引擎
-    ipc_kwargs: dict = {}
-    if "effective_stop_loss_pct" in updates and updates["effective_stop_loss_pct"] is not None:
-        ipc_kwargs["hard_stop_pct"] = updates["effective_stop_loss_pct"]
-    if "effective_take_profit_pct" in updates:
-        ipc_kwargs["take_profit_pct"] = updates.get("effective_take_profit_pct")  # None = disable
-    if "trailing_stop_distance_pct" in updates:
-        ipc_kwargs["trailing_stop_pct"] = updates.get("trailing_stop_distance_pct")
-    if ipc_kwargs:
-        import asyncio
-        from app.ipc_client import EngineIPCClient
-        async def _push_agent_risk():
-            client = EngineIPCClient()
-            try:
-                await client.connect()
-                await client.update_risk_config(**ipc_kwargs)
-                await client.disconnect()
-            except Exception:
-                pass
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_push_agent_risk())
-            else:
-                loop.run_until_complete(_push_agent_risk())
-        except Exception:
-            pass
-
-    return _risk_response({"message": "adjusted", "agent_params": params.to_dict()})
+        await client.refresh_config()
+        return _risk_response({"message": "no_updates", "agent_params": client.get_agent_params()})
+    try:
+        await client.agent_adjust(updates)
+    except Exception as e:
+        raise _ipc_failure(f"patch_risk_config agent: {e}") from e
+    return _risk_response({
+        "message": "adjusted",
+        "agent_params": client.get_agent_params(),
+        "version": client.config_version,
+    })
 
 
 @risk_router.post("/reset-cooldown")
-def reset_cooldown(
+async def reset_cooldown(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Manually reset consecutive loss cooldown / 手动重置连续亏损冷却"""
-    rm = _get_risk_manager()
-    rm.reset_cooldown()
-
-    # Also send IPC resume to Rust engine (clears any paused state from cooldown).
-    # 同時發送 IPC resume 到 Rust 引擎（清除冷卻導致的暫停狀態）。
+    """
+    Clear per-symbol consecutive-loss counters via Rust IPC.
+    Note: post-RRC-1 there is NO Python cooldown counter — this only clears
+    the Rust per-symbol map (governor tier untouched, see 1C-3-B-2).
+    透過 Rust IPC 清除 per-symbol 連虧計數器（governor tier 不變）。
+    """
+    client = await _get_risk_view_client()
     try:
-        from .ipc_client import get_engine_ipc_client
-        import asyncio
-        client = get_engine_ipc_client()
-        if client is not None:
-            asyncio.get_event_loop().run_until_complete(client.resume_paper())
-            logger.info("cooldown reset: IPC resume sent to Rust / 冷卻重置：已發送 IPC resume 到 Rust")
+        result = await client.clear_consecutive_losses()
     except Exception as e:
-        logger.warning("cooldown reset: IPC resume failed (non-fatal): %s", e)
-
-    return _risk_response({"message": "cooldown_reset", "status": rm.get_status()})
+        raise _ipc_failure(f"clear_consecutive_losses: {e}") from e
+    return _risk_response({"message": "cooldown_reset", "result": result, "status": client.get_status()})
 
 
 @risk_router.post("/unhalt-session")
-def unhalt_session(
+async def unhalt_session(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Manually unhalt session after drawdown circuit breaker / 手动解除 session 熔断"""
-    # RC-10: Python ENGINE disabled — use PAPER_STORE directly
-    # RC-10：Python ENGINE 已禁用 — 直接使用 PAPER_STORE
-    from .paper_trading_routes import PAPER_STORE
+    """
+    Manually clear Rust session_halted + paper_paused via resume_paper IPC.
 
-    def mutator(state):
-        state["session"]["session_halted"] = False
-        state["session"]["session_halt_reason"] = None
-        return state
-
-    PAPER_STORE.mutate(mutator)
-
-    # RRC-1-E4: Send Resume to Rust engine (clears session_halted + paper_paused).
-    # RRC-1-E4：發送 Resume 到 Rust 引擎（清除 session_halted + paper_paused）。
+    DEPRECATED PAPER_STORE write below: 1C-3-D will remove the Python-side
+    PAPER_STORE.session_halted parallel write once all readers have migrated
+    to derive from the Rust snapshot.
+    DEPRECATED PAPER_STORE 寫入：1C-3-D 移除 Python 側並行寫入。
+    """
+    client = await _get_risk_view_client()
     try:
-        from .ipc_client import get_engine_ipc_client
-        import asyncio
-        client = get_engine_ipc_client()
-        if client is not None:
-            asyncio.get_event_loop().run_until_complete(client.resume_paper())
-            logger.info("unhalt: IPC resume sent to Rust / 已發送 IPC resume 到 Rust")
+        await client.unhalt_session()
     except Exception as e:
-        logger.warning("unhalt: IPC resume failed (non-fatal): %s", e)
+        raise _ipc_failure(f"resume_paper: {e}") from e
+
+    # 1C-3-C transitional: keep PAPER_STORE.mutate so other readers (paper_state
+    # GUI tile, snapshot writer) don't see stale halted=True until 1C-3-D wires
+    # them to the Rust snapshot. Marked DEPRECATED, removal in 1C-3-D.
+    # 1C-3-C 過渡：保留 PAPER_STORE.mutate 直到 1C-3-D 把其他 reader 接到 Rust snapshot。
+    try:
+        from .paper_trading_routes import PAPER_STORE  # type: ignore
+
+        def _mutator(state: dict) -> dict:
+            state["session"]["session_halted"] = False
+            state["session"]["session_halt_reason"] = None
+            return state
+
+        PAPER_STORE.mutate(_mutator)
+    except Exception as e:
+        logger.warning("PAPER_STORE.mutate (deprecated) failed: %s", e)
 
     return _risk_response({"message": "session_unhalted"})

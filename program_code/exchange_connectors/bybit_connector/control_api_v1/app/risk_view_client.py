@@ -179,6 +179,22 @@ class RiskViewClient:
         await self.refresh_config()
         return resp if isinstance(resp, dict) else {}
 
+    async def unhalt_session(self) -> dict[str, Any]:
+        """
+        Clear Rust-side session_halted + paper_paused via `resume_paper` IPC.
+        Replaces the Python-era PAPER_STORE.mutate() path. After 1C-3-D the
+        Python PAPER_STORE.session_halted should derive from Rust snapshot,
+        not be a parallel write.
+        透過 IPC `resume_paper` 清除 Rust 端 session_halted + paper_paused，
+        取代 Python 時代的 PAPER_STORE.mutate()。
+        """
+        if self._ipc is None:
+            logger.warning("unhalt_session skipped — no IPC client")
+            return {}
+        resp = await self._ipc.call("resume_paper")
+        await self.refresh_runtime_status()
+        return resp if isinstance(resp, dict) else {}
+
     async def clear_consecutive_losses(self) -> dict[str, Any]:
         """
         Safe reset: clear per-symbol loss counters. Does NOT affect RiskGovernor

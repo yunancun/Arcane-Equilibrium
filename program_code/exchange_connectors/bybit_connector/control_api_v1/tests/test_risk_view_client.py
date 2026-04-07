@@ -142,6 +142,22 @@ def test_agent_adjust_uses_agent_source(client, fake_ipc):
     assert patch_call[1]["source"] == "agent"
 
 
+def test_unhalt_session_calls_resume_paper(client, fake_ipc):
+    fake_ipc.responses["resume_paper"] = {"message": "resumed"}
+    out = _run(client.unhalt_session())
+    assert out == {"message": "resumed"}
+    methods = [c[0] for c in fake_ipc.calls]
+    assert "resume_paper" in methods
+    # post-unhalt refresh runtime status
+    # 解除 halt 後刷新 runtime status
+    assert "get_risk_runtime_status" in methods
+
+
+def test_unhalt_session_no_ipc():
+    c = RiskViewClient(None)
+    assert _run(c.unhalt_session()) == {}
+
+
 def test_clear_consecutive_losses_calls_ipc(client, fake_ipc):
     fake_ipc.responses["clear_consecutive_losses"] = {"result": "cleared 2 symbol(s)"}
     out = _run(client.clear_consecutive_losses())
