@@ -116,6 +116,35 @@ pub enum PaperSessionCommand {
     ClearConsecutiveLosses {
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// ARCH-RC1 1C-3-B-2: Force RiskGovernor toward more restrictive tier
+    /// (operator escalation). No 24h cooldown — operator can always be more
+    /// careful. Hard rules:
+    /// - Target must be exactly one level higher than current (no jumps)
+    /// - target ∈ {Cautious, Reduced, Defensive, CircuitBreaker, ManualReview}
+    /// 強制 RiskGovernor 往更嚴方向（operator 升級）。無 24h 冷卻——operator
+    /// 隨時可以變保守。只能逐級且不能反向。
+    ForceGovernorTighter {
+        target_tier: String,
+        reason: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// ARCH-RC1 1C-3-B-2: Force RiskGovernor toward less restrictive tier
+    /// (operator de-escalation). Hard guards layered on top of the SM's
+    /// built-in min_hold_time_ms + lookup_rule:
+    /// - Target must be exactly one level lower (no jumps)
+    /// - reason_code ∈ {"false_positive", "root_cause_fixed", "accept_risk"}
+    /// - 24h IPC-layer cooldown since last successful de-escalation (in-memory)
+    /// - CircuitBreaker / ManualReview cannot be unlocked here (the SM's
+    ///   lookup_rule already enforces this — operator must edit TOML + restart)
+    /// - Writes V014 audit row with from/to tier + reason_code + drawdown snap
+    /// 強制 RiskGovernor 往更鬆方向（operator 降級）。在 SM 內建保護之上加：
+    /// 逐級限制 / reason_code 白名單 / 24h IPC 冷卻 / CB/MR 不可解 / V014 audit。
+    ForceGovernorLooser {
+        target_tier: String,
+        reason_code: String,
+        notes: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -273,6 +302,13 @@ pub struct TickPipeline {
     /// Reads from OPENCLAW_BOOT_COOLDOWN_MS env var, default 60_000ms.
     /// PNL-3：啟動冷卻期，期間策略信號被抑制（止損/指標/快照繼續）。
     boot_cooldown_ms: u64,
+    /// ARCH-RC1 1C-3-B-2: timestamp of the last successful operator-driven
+    /// governor de-escalation (in-memory only — resets on engine restart, which
+    /// is intentional for the demo phase). Used to enforce a 24h cooldown
+    /// between manual de-escalations.
+    /// ARCH-RC1 1C-3-B-2：上次成功 operator 降級的時間戳（in-memory，重啟即重置）。
+    /// 用於強制 24h 解鎖冷卻期，避免 operator 在虧損下反覆解鎖的賭徒循環。
+    last_governor_de_escalation_ms: Option<u64>,
     /// DB-RUN-1: Last persisted signal per (symbol, strategy) — direction + ts_ms.
     /// Used to dedupe by state-change and rate-limit by heartbeat.
     /// DB-RUN-1：每 (symbol, strategy) 最近持久化的信號 — 用於狀態變更去重 + 心跳節流。
@@ -380,6 +416,7 @@ impl TickPipeline {
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(60_000),
+            last_governor_de_escalation_ms: None,
             last_persisted_signal: HashMap::new(),
             signals_heartbeat_ms: std::env::var("OPENCLAW_SIGNALS_HEARTBEAT_MS")
                 .ok()
@@ -620,6 +657,45 @@ impl TickPipeline {
             "paper_paused": self.paper_paused,
             "session_halted": self.session_halted,
         })
+    }
+
+    /// ARCH-RC1 1C-3-B-2: minimum interval (ms) between two operator-driven
+    /// governor de-escalations. Default 24h. Demo phase only — for live this
+    /// should be persisted to PG so a restart doesn't reset the cooldown.
+    /// ARCH-RC1 1C-3-B-2：兩次 operator 降級之間的最短間隔（24h）。
+    pub const GOVERNOR_DE_ESCALATION_COOLDOWN_MS: u64 = 24 * 60 * 60 * 1000;
+
+    /// Whitelist of valid reason codes for `force_governor_tier_looser`.
+    /// `force_governor_tier_looser` 的合法 reason code 白名單。
+    pub const VALID_DE_ESCALATION_REASONS: &'static [&'static str] =
+        &["false_positive", "root_cause_fixed", "accept_risk"];
+
+    /// Parse a tier name (case-insensitive) into a `RiskLevel`.
+    /// Accepts both display form ("CIRCUIT_BREAKER") and friendly aliases.
+    /// 將 tier 名稱（大小寫不敏感）解析為 `RiskLevel`。
+    pub fn parse_risk_level(s: &str) -> Result<openclaw_core::sm::risk_gov::RiskLevel, String> {
+        use openclaw_core::sm::risk_gov::RiskLevel;
+        match s.to_ascii_uppercase().as_str() {
+            "NORMAL" => Ok(RiskLevel::Normal),
+            "CAUTIOUS" => Ok(RiskLevel::Cautious),
+            "REDUCED" => Ok(RiskLevel::Reduced),
+            "DEFENSIVE" => Ok(RiskLevel::Defensive),
+            "CIRCUIT_BREAKER" | "CIRCUITBREAKER" => Ok(RiskLevel::CircuitBreaker),
+            "MANUAL_REVIEW" | "MANUALREVIEW" => Ok(RiskLevel::ManualReview),
+            other => Err(format!("unknown risk tier: {other}")),
+        }
+    }
+
+    /// ARCH-RC1 1C-3-B-2: in-memory cooldown getter (testable).
+    /// ARCH-RC1 1C-3-B-2：in-memory 冷卻時間 getter（可測）。
+    pub fn last_governor_de_escalation_ms(&self) -> Option<u64> {
+        self.last_governor_de_escalation_ms
+    }
+
+    /// ARCH-RC1 1C-3-B-2: helper for tests to seed cooldown state.
+    /// ARCH-RC1 1C-3-B-2：測試輔助設定冷卻時間戳。
+    pub fn set_last_governor_de_escalation_ms(&mut self, ts: Option<u64>) {
+        self.last_governor_de_escalation_ms = ts;
     }
 
     /// PNL-3 / Session 12: Update boot cooldown at runtime via IPC.
@@ -2364,6 +2440,69 @@ mod tests {
         // 過期 → 飽和到 0
         let snap2 = pipeline.risk_runtime_status_json(999_999_999);
         assert_eq!(snap2["boot_cooldown_remaining_ms"], 0);
+    }
+
+    #[test]
+    fn test_rc1b2_parse_risk_level_aliases() {
+        use openclaw_core::sm::risk_gov::RiskLevel;
+        assert_eq!(TickPipeline::parse_risk_level("normal").unwrap(), RiskLevel::Normal);
+        assert_eq!(TickPipeline::parse_risk_level("CAUTIOUS").unwrap(), RiskLevel::Cautious);
+        assert_eq!(TickPipeline::parse_risk_level("circuit_breaker").unwrap(), RiskLevel::CircuitBreaker);
+        assert_eq!(TickPipeline::parse_risk_level("CircuitBreaker").unwrap(), RiskLevel::CircuitBreaker);
+        assert_eq!(TickPipeline::parse_risk_level("manual_review").unwrap(), RiskLevel::ManualReview);
+        assert!(TickPipeline::parse_risk_level("foo").is_err());
+    }
+
+    #[test]
+    fn test_rc1b2_governor_cooldown_const_24h() {
+        // 1C-3-B-2: 24h = 86_400_000 ms
+        // 1C-3-B-2：24h = 86_400_000 ms
+        assert_eq!(TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS, 86_400_000);
+    }
+
+    #[test]
+    fn test_rc1b2_de_escalation_reason_whitelist() {
+        let valid = TickPipeline::VALID_DE_ESCALATION_REASONS;
+        assert!(valid.contains(&"false_positive"));
+        assert!(valid.contains(&"root_cause_fixed"));
+        assert!(valid.contains(&"accept_risk"));
+        assert!(!valid.contains(&"because_i_said_so"));
+        assert_eq!(valid.len(), 3);
+    }
+
+    #[test]
+    fn test_rc1b2_cooldown_state_setter_and_getter() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), None);
+        pipeline.set_last_governor_de_escalation_ms(Some(12345));
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), Some(12345));
+        pipeline.set_last_governor_de_escalation_ms(None);
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), None);
+    }
+
+    #[test]
+    fn test_rc1b2_sm_escalate_then_de_escalate_round_trip() {
+        // End-to-end through pipeline.governance.risk: simulate operator
+        // first making things tighter then relaxing them. Bypass min_hold_time
+        // to keep the test fast.
+        // 模擬 operator 先收緊再放鬆。繞過 min_hold_time 加速測試。
+        use openclaw_core::sm::risk_gov::{RiskEvent, RiskLevel};
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.governance.risk.thresholds.min_hold_time_ms = 0;
+        // Tighter: Normal → Cautious
+        pipeline
+            .governance
+            .risk
+            .escalate_to(RiskLevel::Cautious, "operator_ipc: testing", RiskEvent::OperatorEscalation)
+            .unwrap();
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+        // Looser: Cautious → Normal
+        pipeline
+            .governance
+            .risk
+            .de_escalate_to(RiskLevel::Normal, "operator_ipc", "operator_ipc:false_positive")
+            .unwrap();
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Normal);
     }
 
     #[test]

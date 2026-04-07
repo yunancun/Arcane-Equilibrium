@@ -184,11 +184,39 @@ def test_deprecated_stubs_safe_returns(client):
     client.reset_cooldown()
 
 
-def test_governor_override_stubs_return_not_implemented(client):
-    out_t = _run(client.force_governor_tier_tighter("Cautious", "test"))
-    out_l = _run(client.force_governor_tier_looser("Normal", "false_positive"))
-    assert "not_implemented" in out_t["error"]
-    assert "not_implemented" in out_l["error"]
+def test_force_governor_tier_tighter_calls_ipc(client, fake_ipc):
+    fake_ipc.responses["force_governor_tier_tighter"] = {
+        "from": "NORMAL", "to": "CAUTIOUS", "reason": "manual probe"
+    }
+    out = _run(client.force_governor_tier_tighter("CAUTIOUS", "manual probe"))
+    assert out["to"] == "CAUTIOUS"
+    methods = [c[0] for c in fake_ipc.calls]
+    assert "force_governor_tier_tighter" in methods
+    # post-call refresh
+    assert "get_risk_runtime_status" in methods
+    # Check params payload
+    call = next(c for c in fake_ipc.calls if c[0] == "force_governor_tier_tighter")
+    assert call[1] == {"target_tier": "CAUTIOUS", "reason": "manual probe"}
+
+
+def test_force_governor_tier_looser_calls_ipc(client, fake_ipc):
+    fake_ipc.responses["force_governor_tier_looser"] = {
+        "from": "CAUTIOUS", "to": "NORMAL", "reason_code": "false_positive"
+    }
+    out = _run(client.force_governor_tier_looser("NORMAL", "false_positive", "tested locally"))
+    assert out["reason_code"] == "false_positive"
+    call = next(c for c in fake_ipc.calls if c[0] == "force_governor_tier_looser")
+    assert call[1] == {
+        "target_tier": "NORMAL",
+        "reason_code": "false_positive",
+        "notes": "tested locally",
+    }
+
+
+def test_force_governor_overrides_no_ipc():
+    c = RiskViewClient(None)
+    assert _run(c.force_governor_tier_tighter("CAUTIOUS", "x")) == {}
+    assert _run(c.force_governor_tier_looser("NORMAL", "false_positive")) == {}
 
 
 def test_no_ipc_client_safe():

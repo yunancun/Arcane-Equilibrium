@@ -213,17 +213,49 @@ class RiskViewClient:
     # Governor 手動 override（1C-3-B-2 實作，此處先佔位）
     # ═══════════════════════════════════════════════════════════════════════
 
-    async def force_governor_tier_tighter(self, target_tier: str, reason: str) -> dict[str, Any]:
-        """★ STUB — implemented in 1C-3-B-2. Escalate governor toward more restrictive tier."""
-        _warn_deprecated_once("force_governor_tier_tighter")
-        return {"error": "not_implemented_until_1C-3-B-2"}
+    async def force_governor_tier_tighter(
+        self, target_tier: str, reason: str
+    ) -> dict[str, Any]:
+        """
+        Escalate RiskGovernor one level toward more restrictive (operator action).
+        Allowed steps: Normal→Cautious→Reduced→Defensive→CircuitBreaker→ManualReview.
+        No 24h cooldown — operator can always be more careful. Writes V014 audit.
+        升級 RiskGovernor 一級（operator 行為，無冷卻）。寫入 V014 audit。
+        """
+        if self._ipc is None:
+            logger.warning("force_governor_tier_tighter skipped — no IPC client")
+            return {}
+        resp = await self._ipc.call(
+            "force_governor_tier_tighter",
+            params={"target_tier": target_tier, "reason": reason},
+        )
+        await self.refresh_runtime_status()
+        return resp if isinstance(resp, dict) else {}
 
     async def force_governor_tier_looser(
         self, target_tier: str, reason_code: str, notes: str = ""
     ) -> dict[str, Any]:
-        """★ STUB — implemented in 1C-3-B-2. Operator de-escalation with 24h cooldown + audit."""
-        _warn_deprecated_once("force_governor_tier_looser")
-        return {"error": "not_implemented_until_1C-3-B-2"}
+        """
+        De-escalate RiskGovernor one level toward less restrictive (operator action).
+        Hard guards: reason_code in {false_positive, root_cause_fixed, accept_risk},
+        24h IPC cooldown, single-step only, CB / ManualReview cannot be unlocked
+        from IPC. Writes V014 audit row with full payload.
+        降級 RiskGovernor 一級（operator 行為）。reason_code 白名單 / 24h 冷卻 /
+        CB/MR 不可解 / 寫入 V014 audit。
+        """
+        if self._ipc is None:
+            logger.warning("force_governor_tier_looser skipped — no IPC client")
+            return {}
+        resp = await self._ipc.call(
+            "force_governor_tier_looser",
+            params={
+                "target_tier": target_tier,
+                "reason_code": reason_code,
+                "notes": notes,
+            },
+        )
+        await self.refresh_runtime_status()
+        return resp if isinstance(resp, dict) else {}
 
     # ═══════════════════════════════════════════════════════════════════════
     # Deprecated no-op stubs (Python-era behaviour methods)
