@@ -1,7 +1,53 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-06
+> 最後更新：2026-04-07
+
+### Session 16 — Phase 4.1 SHIPPED + E3 R6 closed + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
+
+**Phase 4.1 Claude API Consumer Loop（`ee6fd00`）：**
+- 新 `claude_teacher/consumer_loop.rs`（~480 行 / 10 tests）：`TeacherConsumerLoop` round-robin 5 strategy scope，
+  `ConsumerLoopConfig` (300s poll, max 1/cycle), `ConsumerLoopStatus` 4 計數器, `Arc<AtomicBool> enabled` default-off。
+- `mod.rs::fetch_parse_persist` 拆出回傳 `(Directive, i64)`，loop 直接餵 applier 不用 PG 重讀。
+- `main.rs` Arc 接線：AnthropicClient → ClaudeTeacher → DirectiveApplier (with PaperSessionCommandSink + GovernanceCoreWrapper) → OutcomeTracker → TeacherConsumerLoop。default-off 依賴 BudgetTracker + db_pool 就緒。
+
+**E3 R6 Security Audit（Explore agent read-only · `docs/audits/2026-04-07_e3_r6_directive_applier_security_audit.md`）：**
+- VERDICT: **CONDITIONAL GO**（3 P1 minor，無 P0/blocker）。
+- P0 bypass surface 全 SAFE：case-insensitive denylist、one-level JSON traversal、ARCH-RC1 Python 隔離、kill-switch 通配大小寫不敏感。
+- P1 minor 全部關閉於 `8762d1d`：5 個 test cases（case-mangled P0 / unknown strategy + empty params / NaN/0/Infinity boost / halted+high-loss / explicit P0 in non-empty params）+ 2 個 doc comments（governance 重檢 race 合約 + kill-switch 大小寫文檔）。
+- 副作用發現：`f64::NAN`/`Infinity` 經 serde_json → null → `as_f64()` None → 安全預設 1.0 → Applied（不變式仍保持「>MAX_BOOST_FACTOR 永不到 IPC」）。
+
+**IPC teacher_loop control（`8762d1d`）：**
+- `TeacherLoopHandles { enabled, status }` + `TeacherLoopSlot` 鏡像 BudgetTracker 延後注入模式。
+- `set_teacher_loop_enabled(enabled: bool)`：fail-soft uninitialized、-32600 missing/non-bool、atomic flip。
+- `get_teacher_loop_status`：回傳 enabled + 4 計數器 + last_cycle_ms。
+- 5 新 tests + 19 個 dispatch_request callers 同步更新。
+
+**P2 tick_pipeline.rs 拆分（partial · `e7ca473`/`aecea27`）：**
+- `decision_context_producer.rs` (294 行 / 6 tests)：`emit_decision_context()` 純函數，含 `select_linucb_arm` + `read_news_context` 助手。tick_pipeline DB-RUN-2 piggyback 點 ~140 行 → 12 行 call。
+- `position_risk_evaluator.rs` (247 行 / 9 tests)：`PositionRow` / `PositionDecision` + `evaluate_position` / `evaluate_positions`。policy-vs-mechanism 拆分：純函數計算 RiskAction，dispatch loop 留 tick_pipeline 內聯處理 close/halt/cooldown 副作用。
+- tick_pipeline.rs **2211 → 2117**（-94 lines net），仍超 §九 1200 行硬上限 917 行。剩餘 on_tick 區塊（Step 0/0.5/1/4+5/dispatch loop/exchange-confirmed-fill）重度 `&mut self`，留專屬 session 處理。
+
+**Doc sync（`8762d1d` 含部分，本批補完）：**
+- CLAUDE.md §三：Phase 4.1 + E3 R6 + P2 partial 區塊
+- CLAUDE.md §十一：one-line status 升至 624 tests
+- TODO.md：E3 R6 + 4.1 marked [x]，P2 標 partial 含剩餘行數
+- CLAUDE_CHANGELOG.md：本條目
+
+**測試變化：**
+- engine lib **589 → 624（+35 new this session, +183 vs Phase 4 baseline 441）**
+- phase4_integration 3/3（不變）
+- 0 regression
+- 新 tests 分布：claude_teacher::consumer_loop 10 + claude_teacher::applier (E3 R6) 5 + ipc_server (teacher_loop) 5 + decision_context_producer 6 + position_risk_evaluator 9
+
+**Live blocker 縮減：**
+- 前：(1) E3 R6 audit / (2) 4.1 Claude API loop / (3) 7d paper data
+- 後：✅ E3 R6 closed · ✅ 4.1 shipped · ⏳ 僅剩 7d paper data（calendar-time）
+- 7d 後 operator 一個 IPC call `set_teacher_loop_enabled {"enabled": true}` 即可上線
+
+**Session commits：** `ee6fd00` `8762d1d` `e7ca473` `aecea27`（4 個 + 1 worklog `23e2619`）
+
+---
 
 ### Session 14 — WP 整清 + GUI 修正 + Phase 4 Wave 1（2026-04-06 · commit 31fb227）
 

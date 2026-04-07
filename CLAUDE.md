@@ -46,10 +46,12 @@
 
 ## 三、當前系統狀態摘要
 
-### ★★★★ Phase 4.1 SHIPPED + E3 R6 audit CONDITIONAL GO（2026-04-07 · commit `ee6fd00`/後續）
-**Phase 4.1 Claude API Consumer Loop** 完成：`claude_teacher/consumer_loop.rs` (+480 行 · 10 tests) · `mod.rs` 拆 `fetch_parse_persist` · `main.rs` Arc 接線 · IPC 兩端點 `set_teacher_loop_enabled` / `get_teacher_loop_status`（fail-soft uninitialized）· **Default-OFF**，operator IPC 翻開才生效。
-**E3 R6 Security Audit**（Explore agent read-only）→ **CONDITIONAL GO**：3 P1 minor 全部關閉（5 test cases + 2 doc comments commit）。P0 bypass surface 全 SAFE：case-insensitive denylist、one-level JSON traversal、ARCH-RC1 Python isolation、kill-switch case-insensitive 通配。
-測試：engine lib **441 → 609 (+168)** · phase4_integration 3/3 · 0 regression。
+### ★★★★ Phase 4.1 SHIPPED + E3 R6 CONDITIONAL GO + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
+**Phase 4.1 Claude API Consumer Loop**：`claude_teacher/consumer_loop.rs` (+480 行 · 10 tests) · `mod.rs::fetch_parse_persist` 拆出 · `main.rs` Arc 接線 · IPC `set_teacher_loop_enabled` / `get_teacher_loop_status`（fail-soft uninitialized · 5 tests）· **Default-OFF**，operator IPC 翻開才生效。
+**E3 R6 Security Audit**（Explore agent read-only）→ **CONDITIONAL GO**：3 P1 minor 全部關閉（5 test cases + 2 doc comments）。P0 bypass surface 全 SAFE：case-insensitive denylist、one-level JSON traversal、ARCH-RC1 Python isolation、kill-switch 通配大小寫不敏感。
+**P2 tick_pipeline.rs 拆分（partial）**：抽出 `decision_context_producer` (294 行 / 6 tests) + `position_risk_evaluator` (247 行 / 9 tests)。tick_pipeline.rs **2211 → 2117**（-94），仍超 §九 1200 行硬上限 917 行（剩餘 on_tick 區塊重度 `&mut self`，留專屬 session）。
+測試：engine lib **441 → 624 (+183)** · phase4_integration 3/3 · 0 regression。
+**Live 路徑唯一剩餘 blocker**：7 天 paper trading 數據觀察期（calendar-time，不可壓縮）。7 天後 operator 一個 IPC call `set_teacher_loop_enabled {"enabled": true}` 即可上線。
 
 ### Phase 4 CODE-COMPLETE（2026-04-07 · commit `435930f` · 4-21 audit CONDITIONAL APPROVE）
 **22 子任務 (4-00~4-21) 全部 committed**。6 角色審計：E2/E4/E5/QA/PM APPROVE · AI-E CONDITIONAL（等 4.1 Claude API loop · **已於 ee6fd00 滿足**）。
@@ -495,4 +497,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-07：engine lib **609** (+168 vs Phase 4 baseline 441) · phase4_integration 3/3 · **Phase 4.1 SHIPPED** (commit `ee6fd00` Claude API Consumer Loop default-off + IPC `set_teacher_loop_enabled` / `get_teacher_loop_status`) · **E3 R6 Security Audit CONDITIONAL GO** (3 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期**（calendar-time）· 下一步：P2 tick_pipeline.rs 拆分 / WP-ARCH-RC1 雙風控統一 / 7d 後 operator IPC flip teacher loop 上線。
+> 截至 2026-04-07：engine lib **624** (+183 vs Phase 4 baseline 441) · phase4_integration 3/3 · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off + IPC flip 端點 · E3 R6 P1 已關閉於 `8762d1d`) · **P2 partial**：tick_pipeline.rs 2211 → 2117（-94 · `e7ca473`/`aecea27` 抽 decision_context_producer + position_risk_evaluator）· Live 前唯一 blocker：**7d paper trading 數據觀察期**（calendar-time）· 下一步：WP-ARCH-RC1 雙風控統一 / 完成 P2 tick_pipeline 餘下 917 行拆分（專屬 session）/ 7d 後 operator IPC flip teacher loop 上線。
