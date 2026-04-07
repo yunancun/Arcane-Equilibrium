@@ -441,6 +441,35 @@ impl TickPipeline {
         gc.max_drawdown_pct = snap.limits.session_drawdown_max_pct;
         gc.max_same_direction_positions = snap.anti_cluster.max_same_direction as usize;
         self.intent_processor.update_guardian_config(gc);
+
+        // 3. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
+        //    from RiskConfig.cascade. Previously the 6-tier cascade state
+        //    machine carried its own hardcoded EscalationThresholds::default()
+        //    with NO path to operator override. Field names differ slightly
+        //    (circuit_breaker_pct vs circuit_pct, consecutive_loss_ vs
+        //    consec_loss_, min_hold_time_ms vs min_hold_ms) but semantics are
+        //    identical — map 1-to-1 and push.
+        //    ARCH-RC1 1C-2-F E-Merge-3：把 RiskGovernorSm 的閾值從
+        //    RiskConfig.cascade 熱重載進來；原本它只讀自己的硬編碼 default。
+        let c = &snap.cascade;
+        self.governance.risk.thresholds =
+            openclaw_core::sm::risk_gov::EscalationThresholds {
+                drawdown_cautious_pct: c.drawdown_cautious_pct,
+                drawdown_reduced_pct: c.drawdown_reduced_pct,
+                drawdown_defensive_pct: c.drawdown_defensive_pct,
+                drawdown_circuit_breaker_pct: c.drawdown_circuit_pct,
+                daily_loss_cautious_pct: c.daily_loss_cautious_pct,
+                daily_loss_reduced_pct: c.daily_loss_reduced_pct,
+                daily_loss_circuit_breaker_pct: c.daily_loss_circuit_pct,
+                consecutive_loss_cautious: c.consec_loss_cautious,
+                consecutive_loss_reduced: c.consec_loss_reduced,
+                consecutive_loss_circuit_breaker: c.consec_loss_circuit,
+                pressure_cautious: c.pressure_cautious,
+                pressure_reduced: c.pressure_reduced,
+                pressure_defensive: c.pressure_defensive,
+                pressure_circuit_breaker: c.pressure_circuit,
+                min_hold_time_ms: c.min_hold_ms,
+            };
     }
 
     /// ARCH-RC1 1C-2-B: Inject the live BudgetConfig ConfigStore handle for

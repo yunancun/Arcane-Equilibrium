@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-07（ARCH-RC1 Session 1A+1B+1C-1 完成 · 1C-2 下一步）
+最後更新：2026-04-07（ARCH-RC1 1C-1 + 1C-2-A/B/Opt-B 完成 · 1C-2-F engine 收編進行中）
 測試基準線：**682 engine lib (+58 1B) + 386 core + 30 types + 35 ml_training + 11 control_api smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -29,11 +29,29 @@
   - B6: openclaw_types::risk 刪除死代碼（GuardianConfig/StopConfig/composite RiskConfig 全 0 consumer）
   - 測試：engine 682→708 / core 386→387 / types 30→27 · 0 regression
   - 風控並行系統 7→2 套（剩 RiskConfig 權威 + Python RiskManager 待 1C-3 空殼化）
-- [ ] **Session 1C-2 IPC 接通 + JSON 遷移**（純加法 · 讓新 Config 真正 live）
-  - 6 個 IPC 端點：update_risk_config / update_learning_config / update_budget_config + 對應 get_*
+- [x] **Session 1C-2-A TOML loader + ConfigStore 構造** — `581e1e2`
+  - config/io.rs: load_toml_or_default + save_toml + 6 tests
+  - main.rs load_unified_configs(): 構造 3 個 Arc<ConfigStore<T>> 於啟動序列
+- [x] **Session 1C-2-B ConfigStore 穿透 pipeline + 熱重載 live** — `e3014ef`
+  - TickPipeline: risk_store / budget_store fields + set_*_store setters
+  - sync_risk_config_if_changed() hook on_tick 頂部 (version 變化即同步)
+  - current_cost_edge_max_ratio() 取代硬編碼 0.8
+  - EventConsumerDeps 加 2 欄位，main.rs 透過構造注入
+- [x] **Session 1C-2 Option B Guardian 接入熱重載** — `8240a25`
+  - 抽出 apply_risk_snapshot() 共用路徑
+  - Guardian 的 max_leverage / session_drawdown / max_same_direction 從 RiskConfig 推導
+  - modification_* 欄位透過 RMW 保留
+- [ ] **Session 1C-2-F ★ NEW: 執行引擎收編**（在 1C-2-C 之前做，讓 IPC 寫端點落地時所有引擎已在熱重載迴圈）
+  - F1: E-Merge-3 grep 驗證 RiskGovernorSm 是否已讀 RiskConfig.cascade，若否則接入
+  - F2: E-Merge-1 StopManager 廢棄 — 驗證 check_position_on_tick 覆蓋 hard/trailing/time stop 全部邏輯後，刪 openclaw_core::stop_manager
+  - F3: E-Merge-2 H0Gate 欄位 dedup — max_open_positions / max_total_exposure_pct / allowed_categories 從 RiskConfig.limits 讀，apply_risk_snapshot 加 H0Gate update
+- [ ] **Session 1C-2-C 6 個 IPC 端點 + bulk patch**
+  - update_risk_config / update_learning_config / update_budget_config + 對應 get_*
   - bulk patch all-or-nothing + mutex 序列化 + version + source 審計
-  - operator_risk_config.json → risk_config.toml 一次性遷移（讀 → v2 schema → 寫 → 改名 .legacy）
-  - sql/migrations/V014__engine_events.sql（startup/shutdown/config_patch/reconcile/crash 統一審計）
+- [ ] **Session 1C-2-D operator_risk_config.json → TOML 遷移**
+  - 啟動時檢測舊 JSON → v2 schema → 寫 TOML → 改名 .legacy
+- [ ] **Session 1C-2-E V014 engine_events audit 表**
+  - sql/migrations/V014__engine_events.sql + ConfigStore audit hook
 - [ ] **Session 1C-3 Python 空殼化**
   - risk_view_client.py 新建（~150 行純 IPC 讀）
   - risk_manager.py 1633 → 30 行 deprecation shim
@@ -45,9 +63,9 @@
   - NewsPipeline run_once 60s spawn（順手）
   - E2 + E4 + QA Audit + 文檔同步 + commit + push
 
-### 風控執行引擎收編（Phase 2 / 非強制）
+### 風控執行引擎收編（1C-2-F 已納入 · E-Merge-4 選做留 Phase 2）
 
-**背景**：1C-1 + 1C-2 完成後，**Config 層**從 7 套收到 1 套（RiskConfig 權威），但**執行引擎層**還有 4-5 個並行。Operator 問題：「是否把引擎盡量合併一下更合理？」答：**部分合併合理，不必追求全部合併到 1 個**。下面是建議的拆分：
+**背景**：1C-1 + 1C-2 完成後，**Config 層**從 7 套收到 1 套（RiskConfig 權威），但**執行引擎層**還有 4-5 個並行。Operator 已決定把 E-Merge-1/2/3 併入 ARCH-RC1 plan 作為 1C-2-F 子批次（在 1C-2-C IPC 寫端點之前做），不再 defer 到 Phase 2。只剩 E-Merge-4（可選的 Guardian config struct 消除）保留 Phase 2。下面是建議的拆分：
 
 | 引擎 | 位置 | 獨特性 | 建議 |
 |---|---|---|---|
@@ -59,11 +77,11 @@
 | `risk_governor_sm::RiskGovernorSm` | `openclaw_core::risk_governor_sm` | 6 級級聯狀態機 + hysteresis | **保留**，這是不同架構概念（狀態機 vs 單次檢查），無法合併 |
 | Python `risk_manager.py` | program_code/ | 1633 行 GUI 路由 | **1C-3 空殼化**（已列入） |
 
-**具體收編 TODO（不阻塞 1C-2/1C-3，可 Phase 2 做）：**
-- [ ] **E-Merge-1**: StopManager 廢棄 — 驗證 risk_checks::check_position_on_tick 已覆蓋 hard/trailing/time stop 全部邏輯，搬出獨特功能（若有），刪除 openclaw_core::stop_manager
-- [ ] **E-Merge-2**: H0Gate 欄位去重 — `H0GateConfig` 的 max_open_positions / max_total_exposure_pct / allowed_categories 改成從 RiskConfig.limits read-through（每 check 快照讀），H0GateConfig 只保留健康檢查欄位（cpu/memory/db_latency/network/health_snapshot_max_age）
-- [ ] **E-Merge-3**: RiskGovernorSm 確認是否真的讀 RiskConfig.cascade（1B 規劃）還是有自己的 config（grep 驗證）；若否則接進 RiskConfig.cascade
-- [ ] **E-Merge-4 (可選)**: Guardian 進一步去 config struct 化 — GuardianConfig 退化為 `RiskConfig.limits + anti_cluster + guardian_modify` sub-view；保留 Guardian 引擎但不再持有 owned struct。收益有限，只有在 Phase 2 清理代碼味時順手做
+**具體收編 TODO：**
+- [ ] **E-Merge-1**（移入 1C-2-F）: StopManager 廢棄 — 驗證 risk_checks::check_position_on_tick 已覆蓋 hard/trailing/time stop 全部邏輯，搬出獨特功能（若有），刪除 openclaw_core::stop_manager
+- [ ] **E-Merge-2**（移入 1C-2-F）: H0Gate 欄位去重 — `H0GateConfig` 的 max_open_positions / max_total_exposure_pct / allowed_categories 改成從 RiskConfig.limits read-through（每 check 快照讀），H0GateConfig 只保留健康檢查欄位（cpu/memory/db_latency/network/health_snapshot_max_age）
+- [ ] **E-Merge-3**（移入 1C-2-F）: RiskGovernorSm 確認是否真的讀 RiskConfig.cascade（1B 規劃）還是有自己的 config（grep 驗證）；若否則接進 RiskConfig.cascade
+- [ ] **E-Merge-4 (Phase 2 / 可選)**: Guardian 進一步去 config struct 化 — GuardianConfig 退化為 `RiskConfig.limits + anti_cluster + guardian_modify` sub-view；保留 Guardian 引擎但不再持有 owned struct。收益有限，只有在 Phase 2 清理代碼味時順手做
 - **終局**：4-5 套 → **3 套執行引擎**（risk_checks 主引擎 / Guardian P0 modify 引擎 / H0Gate 健康檢查 / RiskGovernorSm 級聯狀態機），全部讀同一個 RiskConfig 真相源
 
 ---
