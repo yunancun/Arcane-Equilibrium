@@ -3,6 +3,96 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-07
 
+### Session 1C-2-A/B/Opt-B/F — ARCH-RC1 熱重載 LIVE + 引擎收編（2026-04-07 · commits `581e1e2`..`91b5db8`）
+
+ARCH-RC1 第四步（在 1C-1 call site 遷移之後）：把 ConfigStore 真正接進運行時，所有下游執行引擎都進入熱重載迴圈。這個 session 從骨架到「真正 live + engine consolidation」一氣呵成，共 6 個生產 commit + 2 個 docs commit。
+
+**風控並行系統軌跡**：1A 前 7 套 → 1C-1 後 2 套（Config + Python）→ **1C-2-F 後 1 套 Config 權威 + 5 個引擎全部喝同一桶水**（Python 仍待 1C-3 空殼化）。
+
+---
+
+**1C-2-A — TOML Loader + ConfigStore 構造**（`581e1e2`，+254 / -2）：
+- 新 `openclaw_engine/src/config/io.rs`（+6 tests）：
+  - `load_toml_or_default<T, F>(path, validate)` — 讀 TOML，檔案缺失時回退到 `T::default()`，兩條分支都跑 caller validator（捕捉「預設值無效」這類啟動期退化）
+  - `save_toml<T>(path, value)` — 序列化 + atomic rename，自動建立父目錄
+  - Tests 覆蓋：missing file → default / parse existing / invalid TOML errors / validator runs / save→load round trip / nested mkdir
+- `main.rs::load_unified_configs()` helper：解析 `settings/risk_control_rules/{risk,learning,budget}_config.toml`（env 可覆蓋 `OPENCLAW_RISK_CONFIG_DIR` 或各自 `OPENCLAW_{RISK,LEARNING,BUDGET}_CONFIG`），跑 `validate()`，各自包入 `Arc<ConfigStore<T>>`
+- 在 EngineBootstrap `ConfigManager` 載入後立即呼叫
+- 三個 store 構造但此時尚未穿透到消費者 → 1C-2-B
+
+**1C-2-B — Pipeline Wiring + 熱重載 LIVE**（`e3014ef`，+140 / -13）：
+- `TickPipeline` 新 fields：`risk_store` / `budget_store` / `risk_config_version_seen`
+- 新 setters：`set_risk_store` / `set_budget_store`；`set_risk_store` 立即呼叫 `apply_risk_snapshot` seed 第一次快照並記錄版本號
+- `sync_risk_config_if_changed()` 在 `on_tick()` 頂部：compare store version vs last-seen，變化即 pull 最新快照推到下游（single atomic load + equality，熱路徑零鎖）
+- `current_cost_edge_max_ratio()` 取代 1C-1 placeholder 的硬編碼 0.8；從 `BudgetConfig.attention_tax.cost_edge_max_ratio` 每 tick 快照讀
+- `evaluate_positions` call site 傳入 live cost_edge 值
+- `EventConsumerDeps` 加 2 optional fields；`run_event_consumer` 接線後立即呼叫 pipeline setters
+- `async_main()` signature 擴展接 3 個 ConfigStore；`load_unified_configs()` 現在回傳完整 tuple
+
+**1C-2 Option B — Guardian 進入熱重載迴圈**（`8240a25`，+52 / -3）：
+- 抽出 `apply_risk_snapshot(&RiskConfig)` 作為**單一傳播入口** — 所有下游同步都經過這裡
+- Guardian 從 RiskConfig 拉取 `max_leverage` / `max_drawdown_pct` / `max_same_direction_positions`
+- `modification_size_factor` / `modification_leverage_cap` 透過 RMW 保留（不在 RiskConfig schema 中）
+- 重要觀察：Guardian **不是** risk_checks 的冗餘 — 它有獨特的 `Modified` verdict 路徑（downsize qty/leverage 而非 reject），以及 `direction_conflict` 檢查
+
+---
+
+**1C-2-F Engine 收編**（3 個 commit，3 個額外執行引擎加入熱重載迴圈）：
+
+**F1 — RiskGovernorSm 讀 RiskConfig.cascade**（`1a7fc8b`，+59 / -12，E-Merge-3）：
+- 1B 規劃的漏洞：`RiskConfig.cascade` 創建時**零消費者**，RiskGovernorSm 繼續用自己的 `EscalationThresholds::default()` 硬編碼（15 欄位與 cascade 平行但從未同步）
+- grep 發現 RiskGovernorSm 在 `GovernanceCore::new()` 內部（tick_pipeline.governance.risk），且 `thresholds` field 是 `pub`，直接可寫
+- 15 欄位 1-to-1 映射（命名差異：`circuit_breaker_pct` ↔ `circuit_pct`, `consecutive_loss_` ↔ `consec_loss_`, `min_hold_time_ms` ↔ `min_hold_ms`）
+- 在 `apply_risk_snapshot()` 加第 3 步（後續改為第 5 步）
+- 行為影響：只有熱重載路徑 — 初始 boot state 不變（RiskConfig.cascade 預設值 = 硬編碼 default）
+
+**F3 — H0Gate 欄位從 RiskConfig.limits RMW 同步**（`e7f00d4`，+27 / -1，E-Merge-2）：
+- H0GateConfig 的 3 個風控欄位（`max_open_positions` / `max_total_exposure_pct` / `allowed_categories`）複製 `RiskConfig.limits`
+- 新 `openclaw_core::h0_gate::H0Gate::update_config()` 方法（原本 config field 是 private，無 setter）
+- 在 `apply_risk_snapshot()` 加第 4 步 — RMW clone 當前 H0GateConfig，覆寫 3 個風控欄位，其他健康欄位（cpu/memory/db_latency/network/shadow_mode/health_snapshot_max_age_ms）保留
+- 行為影響：熱重載路徑 only — operator 提高 `limits.open_positions_max` 時 H0 門控自動跟上，不再卡舊值
+
+**F2 降級 — paper_state.stop_config 同步**（`91b5db8`，+26 / -1，E-Merge-1 downgraded）：
+- Research agent（後台派發 ~5 分鐘分析）回報**重大發現**：StopManager 不是死代碼
+  - tick_pipeline:910 + :1017 是**故意的保護 fallback**（H0 阻擋 / paper_paused 的 early-return 分支），main engine `evaluate_positions` 在這些分支下根本不跑
+  - 刪掉這兩個 call sites 會讓持倉在 gate block / pause 時**完全沒有止損保護**
+  - backtest.rs 仍需 `compute_atr_position_size`（那是 sizing helper 不是 stop check）
+  - Research 回報的 trailing stop RR floor 差異確認是新引擎的**安全增強**，不是 bug
+- **真正問題**是 `paper_state.stop_config` 啟動後**永不同步** — operator 改 RiskConfig 後 main engine 用新值但保護 fallback 用舊 boot defaults，形成靜默漂移
+- 修法：`apply_risk_snapshot()` 加第 4 步（F3 後重新編號），同步 `set_hard_stop_pct` + 受 `take_profit_enforced` 控制的 `set_take_profit_pct`（trailing / time 不設，因為主引擎在非 fallback 路徑負責）
+- **原計劃降級**：從「殺 StopManager + port 6-7 小時測試」降為 ~25 行 config 同步。StopManager 保留作為 H0/pause 保護 fallback 引擎 + backtest sizing utility
+
+---
+
+**最終熱重載終局**：`apply_risk_snapshot(&RiskConfig)` 單一傳播入口，每次 store version bump 同步 **5 個下游執行引擎**：
+```
+RiskConfig store.version++
+      ↓
+apply_risk_snapshot(&snap)
+  ├─1→ intent_processor.risk_config         (Gate 0 + tick 主引擎)
+  ├─2→ intent_processor.guardian            (P0 trade intent modify verdict)
+  ├─3→ paper_state.stop_config              (H0/pause 保護 fallback)
+  ├─4→ h0_gate.config                       (健康 + 風控欄位)
+  └─5→ governance.risk.thresholds           (6-tier 級聯狀態機)
+```
+
+**測試**：
+- engine lib 708 → **714**（+6 config/io tests，其他 config-sync 改動不需新測試因為行為只在熱重載路徑）
+- core 386 → 387（regime.rs split 留下）
+- types 30 → 27（1C-1 B6 刪 3 個死型別）
+- integration phase4 3/3 · rrc1_audit 4/4 · stress 29/29 全綠
+- 0 regression
+
+**未做（1C-2 剩餘）**：
+- 1C-2-C：6 個 IPC write endpoints（update_risk_config / update_learning_config / update_budget_config + 3 個 get_*）+ bulk patch all-or-nothing + mutex 序列化 + version + source 審計 + dispatch wiring
+- 1C-2-D：`operator_risk_config.json` → `risk_config.toml` 一次性遷移（讀 → v2 schema → 寫 → 改名 .legacy）
+- 1C-2-E：V014 `engine_events` audit 表 + ConfigStore audit hook
+- 1C-3 Python 空殼化：`risk_manager.py` 1633 → 150 行 `RiskViewClient`
+- 1C-4：Position Reconciler + NewsPipeline spawn + 熱重載 e2e 驗收 + E2 / E4 / QA audit
+- E-Merge-4（選做，Phase 2）：Guardian owned `GuardianConfig` struct 退化為 RiskConfig view，純代碼味清理
+
+---
+
 ### Session 1C-1 — ARCH-RC1 風控 call site 遷移（2026-04-07 · commits `2007b67` `6768381` `ef30bf1`）
 
 ARCH-RC1 第三步：把 1B 建好的新 Config 真正接進所有 call site，物理刪除重複並行的舊風控類型。Batches 0-6 一個 session 跑完，共 3 個 commit，+747 / −1293（淨 −546 行），0 regression。
