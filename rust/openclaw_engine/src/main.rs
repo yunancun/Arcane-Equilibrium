@@ -357,6 +357,9 @@ async fn async_main(config: Arc<ConfigManager>) {
     // Paper session command channel: IPC → event consumer
     // 紙盤 session 命令通道：IPC → 事件消費者
     let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
+    // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
+    let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
     let ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
@@ -920,11 +923,74 @@ async fn async_main(config: Arc<ConfigManager>) {
     info!(
         "Phase 4 governance+guardian wrappers constructed (sharing halted atomic) / W-1/W-2 wrappers 已構造"
     );
-    // Hold the wrappers alive so they can be used by a future Claude API
-    // pull loop. Suppressed unused-variable warnings via underscore prefix.
-    // 保持 wrapper 存活供未來的 Claude API 拉取 loop 使用。
-    let _phase4_governance_wrapper = governance_wrapper;
+    // Keep guardian impl alive for future news pipeline wiring.
+    // 保持 guardian impl 存活供未來新聞 pipeline 接線使用。
     let _phase4_guardian_impl = guardian_impl;
+
+    // ------------------------------------------------------------------
+    // Phase 4.1: Construct + spawn TeacherConsumerLoop (DEFAULT-OFF).
+    // The loop ticks at the configured interval but skips all work until
+    // operator flips the enabled flag via IPC AFTER E3 R6 audit PASSes.
+    // Loop skipped entirely if BudgetTracker / db_pool is unavailable.
+    //
+    // Phase 4.1：構造並 spawn TeacherConsumerLoop（**預設關閉**）。
+    // Loop 按設定間隔 tick，但在 operator 透過 IPC 翻開 enabled 旗標
+    // （E3 R6 審計通過後）之前跳過所有工作。BudgetTracker 或 db_pool
+    // 不可用時整個 loop 跳過構造。
+    // ------------------------------------------------------------------
+    if db_pool.is_available() {
+        let budget_opt = budget_tracker_slot.read().await.clone();
+        if let Some(budget) = budget_opt {
+            use openclaw_engine::claude_teacher::{
+                AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier,
+                GovernanceCheck, LlmClient, OutcomeTracker, PaperSessionCommandSink,
+                StrategyIpcSink, TeacherConsumerLoop,
+            };
+            use std::sync::atomic::AtomicBool;
+            let model = "claude-sonnet-4-5";
+            let llm_client: Arc<dyn LlmClient + Send + Sync> =
+                Arc::new(AnthropicClient::new(model));
+            let teacher = Arc::new(ClaudeTeacher::new(
+                llm_client,
+                Some(Arc::clone(&budget)),
+                Arc::clone(&db_pool),
+                model,
+            ));
+            let governance_for_applier: Arc<dyn GovernanceCheck> =
+                Arc::clone(&governance_wrapper) as Arc<dyn GovernanceCheck>;
+            let ipc_sink: Arc<dyn StrategyIpcSink> =
+                Arc::new(PaperSessionCommandSink::new(phase4_consumer_cmd_tx));
+            let applier = Arc::new(DirectiveApplier::new(
+                governance_for_applier,
+                Some(ipc_sink),
+                Arc::clone(&db_pool),
+            ));
+            let outcome_tracker = Arc::new(OutcomeTracker::new(Arc::clone(&db_pool)));
+            // Default-off until E3 R6 PASS. Operator flips via IPC.
+            // E3 R6 通過前預設關閉。Operator 透過 IPC 翻開。
+            let enabled = Arc::new(AtomicBool::new(false));
+            let consumer_loop = Arc::new(TeacherConsumerLoop::new(
+                teacher,
+                applier,
+                Some(outcome_tracker),
+                ConsumerLoopConfig::production_defaults(),
+                Arc::clone(&enabled),
+            ));
+            let _consumer_handle = Arc::clone(&consumer_loop).spawn();
+            info!(
+                "Phase 4.1 TeacherConsumerLoop spawned (DEFAULT-OFF; flip via IPC after E3 R6 PASS) / consumer loop 已啟動（預設關閉，待 E3 R6 通過後 IPC 翻開）"
+            );
+        } else {
+            warn!("Phase 4.1 consumer loop skipped: BudgetTracker not initialized / 預算追蹤器未初始化，consumer loop 跳過");
+        }
+    } else {
+        warn!("Phase 4.1 consumer loop skipped: db_pool unavailable / db_pool 不可用，consumer loop 跳過");
+    }
+    // Hold the governance wrapper alive (cloned into the applier above when
+    // db_pool is available; this binding ensures it lives for the rest of main).
+    // 保持 governance wrapper 存活（db_pool 可用時已被 clone 進 applier，
+    // 此 binding 確保它在 main 餘下時間都存活）。
+    let _phase4_governance_wrapper = governance_wrapper;
 
     let (market_tx, market_rx) = if db_pool.is_available() {
         let (tx, rx) = tokio::sync::mpsc::channel(4096);

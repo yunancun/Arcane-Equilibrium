@@ -21,6 +21,7 @@
 
 pub mod applier;
 pub mod client;
+pub mod consumer_loop;
 pub mod governance_impl;
 pub mod outcome_tracker;
 pub mod parser;
@@ -31,6 +32,7 @@ pub use applier::{
     ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink,
 };
 pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockClient};
+pub use consumer_loop::{ConsumerLoopConfig, ConsumerLoopStatus, TeacherConsumerLoop};
 pub use governance_impl::GovernanceCoreWrapper;
 pub use outcome_tracker::{sharpe_from_returns, OutcomeTracker, OutcomeWindow, PendingExecution};
 pub use strategy_ipc_impl::PaperSessionCommandSink;
@@ -125,6 +127,24 @@ impl ClaudeTeacher {
     /// 3. parser.parse_directive
     /// 4. writer.persist_directive (PG + ExperimentLedger audit row)
     pub async fn fetch_and_persist_directive(&self, scope: &str) -> Result<i64, TeacherError> {
+        let (_directive, directive_id) = self.fetch_parse_persist(scope).await?;
+        Ok(directive_id)
+    }
+
+    /// Phase 4.1 entry — fetch + budget + parse + persist, returning BOTH the
+    /// parsed `Directive` and the freshly inserted `directive_id`. The
+    /// `TeacherConsumerLoop` calls this method then immediately feeds the
+    /// returned directive to `DirectiveApplier::apply` (which records the
+    /// `directive_executions` audit row).
+    ///
+    /// Phase 4.1 入口 — 拉取 + 預算 + 解析 + 持久化，**同時** 回傳
+    /// 已解析的 `Directive` 和剛 insert 的 `directive_id`。
+    /// `TeacherConsumerLoop` 呼叫本方法後立即把回傳的 directive 餵給
+    /// `DirectiveApplier::apply`（後者寫 `directive_executions` 審計行）。
+    pub async fn fetch_parse_persist(
+        &self,
+        scope: &str,
+    ) -> Result<(Directive, i64), TeacherError> {
         // 1) LLM call / LLM 呼叫
         let resp = self
             .client
@@ -182,7 +202,7 @@ impl ClaudeTeacher {
         .await
         .map_err(TeacherError::Writer)?;
 
-        Ok(directive_id)
+        Ok((directive, directive_id))
     }
 }
 
