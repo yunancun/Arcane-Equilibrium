@@ -1,7 +1,7 @@
 //! Pipeline wire-up helpers — extracted from event_consumer/mod.rs (I-22).
 //! 管線接線輔助 — 從 event_consumer/mod.rs 提取（I-22）。
 
-use crate::config::RuntimeConfig;
+use crate::config::EngineBootstrap;
 use crate::database::{DecisionContextMsg, MarketDataMsg, TradingMsg};
 use crate::feature_collector::FeatureSnapshot;
 use crate::instrument_info::InstrumentInfoCache;
@@ -15,7 +15,7 @@ use tracing::info;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn wire_pipeline(
     pipeline: &mut TickPipeline,
-    cfg: &RuntimeConfig,
+    _cfg: &EngineBootstrap,
     taker_fee_rate: Option<f64>,
     shared_instruments: Option<&Arc<InstrumentInfoCache>>,
     market_data_tx: Option<mpsc::Sender<MarketDataMsg>>,
@@ -35,23 +35,24 @@ pub(super) fn wire_pipeline(
         info!(taker_rate = format!("{:.5}", rate), "pipeline using API fee rate / 管線使用 API 費率");
     }
 
-    // P1 risk cap / P1 風險上限
-    pipeline.intent_processor.set_p1_risk_pct(cfg.p1_risk_pct);
-    info!(
-        p1_risk_pct = format!("{:.2}%", cfg.p1_risk_pct * 100.0),
-        "P1 risk cap set / P1 風險上限已設定"
-    );
-
-    // Wire ALL risk config from engine.toml → paper_state + guardian + intent_processor
-    pipeline.paper_state.set_hard_stop_pct(cfg.max_stop_loss_pct);
-    pipeline
-        .paper_state
-        .set_take_profit_pct(Some(cfg.max_take_profit_pct));
-    // ARCH-RC1 1C-1: Guardian + IntentProcessor seeded from RiskConfig::default().
+    // ARCH-RC1 1C-1: All risk seed values come from RiskConfig::default().
+    // RuntimeConfig no longer carries risk fields (deleted in Batch 5).
     // Session 1C-2 will inject a live ConfigStore<RiskConfig> handle loaded from
     // settings/risk_control_rules/risk_config.toml (with operator overrides).
-    // ARCH-RC1 1C-1：暫用 RiskConfig::default() 預填；1C-2 將接入 ConfigStore。
+    // ARCH-RC1 1C-1：所有風控種子值改從 RiskConfig::default() 讀取；
+    // RuntimeConfig 已不持有風控欄位（Batch 5 刪除）。
     let default_risk = crate::config::RiskConfig::default();
+
+    // P1 risk cap (IntentProcessor internal knob; will migrate to RiskConfig in 1C-2)
+    // IntentProcessor uses its built-in DEFAULT_P1_RISK_PCT (2%) when unset.
+    // P1 每筆交易風險上限（IntentProcessor 內部旋鈕，1C-2 遷入 RiskConfig）
+
+    pipeline
+        .paper_state
+        .set_hard_stop_pct(default_risk.limits.stop_loss_max_pct);
+    pipeline
+        .paper_state
+        .set_take_profit_pct(Some(default_risk.limits.take_profit_max_pct));
     let gc = openclaw_core::guardian::GuardianConfig {
         max_leverage: default_risk.limits.leverage_max,
         max_drawdown_pct: default_risk.limits.session_drawdown_max_pct,

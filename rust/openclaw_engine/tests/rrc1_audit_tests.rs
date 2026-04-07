@@ -58,7 +58,7 @@ fn test_snapshot_includes_risk_fields() {
     );
     let rc = snap.risk_manager_config.unwrap();
     assert!(
-        rc.max_stop_loss_pct > 0.0,
+        rc.limits.stop_loss_max_pct > 0.0,
         "risk config should have real values"
     );
 
