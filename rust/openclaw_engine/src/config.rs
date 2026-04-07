@@ -151,27 +151,6 @@ pub struct RuntimeConfig {
     #[serde(default = "default_max_same_direction_positions")]
     pub max_same_direction_positions: u32,
 
-    // -- Hot params — attention intervals (ms) / 熱參數 — 注意力間隔 --
-    /// Dormant attention interval (ms) / 休眠注意力間隔
-    #[serde(default = "default_attention_dormant_ms")]
-    pub attention_dormant_ms: u64,
-
-    /// Low attention interval (ms) / 低注意力間隔
-    #[serde(default = "default_attention_low_ms")]
-    pub attention_low_ms: u64,
-
-    /// Medium attention interval (ms) / 中等注意力間隔
-    #[serde(default = "default_attention_medium_ms")]
-    pub attention_medium_ms: u64,
-
-    /// High attention interval (ms) / 高注意力間隔
-    #[serde(default = "default_attention_high_ms")]
-    pub attention_high_ms: u64,
-
-    /// Critical attention interval (ms) / 關鍵注意力間隔
-    #[serde(default = "default_attention_critical_ms")]
-    pub attention_critical_ms: u64,
-
     // -- Hot params — Bybit API integration / 熱參數 — Bybit API 整合 --
     /// Enable DCP (Disconnected Cancel Protection) at startup / 啟動時啟用斷連取消保護
     #[serde(default = "default_true")]
@@ -220,58 +199,6 @@ pub struct RuntimeConfig {
     #[serde(default = "default_trading_mode")]
     pub trading_mode: TradingMode,
 
-    // -- Phase 2b: ML configuration / ML 配置 --
-    /// ML inference + Kelly sizing configuration (Phase 2b).
-    /// ML 推理 + Kelly 倉位管理配置。
-    #[serde(default)]
-    pub ml: MlConfig,
-}
-
-/// ML inference + Kelly sizing configuration.
-/// ML 推理 + Kelly 倉位管理配置。
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct MlConfig {
-    /// Path to ONNX model file (empty = no model) / ONNX 模型路徑（空 = 無模型）
-    #[serde(default)]
-    pub onnx_model_path: String,
-    /// Enable scorer (master switch) / 啟用評分器
-    #[serde(default = "default_true")]
-    pub scorer_enabled: bool,
-    /// Enable Kelly sizing / 啟用 Kelly 倉位管理
-    #[serde(default = "default_true")]
-    pub kelly_enabled: bool,
-    /// Max Kelly fraction (never full Kelly) / 最大 Kelly 分數
-    #[serde(default = "default_kelly_max")]
-    pub kelly_max_fraction: f64,
-    /// Min trades before Kelly activates / Kelly 啟動最少交易數
-    #[serde(default = "default_kelly_min_trades")]
-    pub kelly_min_trades: u32,
-    /// Fallback risk pct when Kelly inactive / Kelly 未啟動時的回退風險百分比
-    #[serde(default = "default_kelly_risk")]
-    pub kelly_risk_pct: f64,
-}
-
-fn default_kelly_max() -> f64 {
-    0.25
-}
-fn default_kelly_min_trades() -> u32 {
-    50
-}
-fn default_kelly_risk() -> f64 {
-    0.03
-}
-
-impl Default for MlConfig {
-    fn default() -> Self {
-        Self {
-            onnx_model_path: String::new(),
-            scorer_enabled: true,
-            kelly_enabled: true,
-            kelly_max_fraction: default_kelly_max(),
-            kelly_min_trades: default_kelly_min_trades(),
-            kelly_risk_pct: default_kelly_risk(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -306,21 +233,6 @@ fn default_max_open_positions() -> u32 {
 fn default_max_total_exposure_pct() -> f64 {
     100.0
 }
-fn default_attention_dormant_ms() -> u64 {
-    60_000
-}
-fn default_attention_low_ms() -> u64 {
-    30_000
-}
-fn default_attention_medium_ms() -> u64 {
-    10_000
-}
-fn default_attention_high_ms() -> u64 {
-    5000
-}
-fn default_attention_critical_ms() -> u64 {
-    1000
-}
 fn default_true() -> bool {
     true
 }
@@ -347,11 +259,6 @@ impl Default for RuntimeConfig {
             max_take_profit_pct: default_max_take_profit_pct(),
             max_open_positions: default_max_open_positions(),
             max_total_exposure_pct: default_max_total_exposure_pct(),
-            attention_dormant_ms: default_attention_dormant_ms(),
-            attention_low_ms: default_attention_low_ms(),
-            attention_medium_ms: default_attention_medium_ms(),
-            attention_high_ms: default_attention_high_ms(),
-            attention_critical_ms: default_attention_critical_ms(),
             dcp_enabled: default_true(),
             dcp_time_window: default_dcp_time_window(),
             auto_add_margin: default_true(),
@@ -362,7 +269,6 @@ impl Default for RuntimeConfig {
             kline_bootstrap: default_true(),
             trading_mode: TradingMode::PaperOnly,
             database: crate::database::DatabaseConfig::default(),
-            ml: MlConfig::default(),
         }
     }
 }
@@ -573,17 +479,11 @@ max_stop_loss_pct = 3.0
 max_take_profit_pct = 10.0
 max_open_positions = 15
 max_total_exposure_pct = 80.0
-attention_dormant_ms = 120000
-attention_low_ms = 60000
-attention_medium_ms = 20000
-attention_high_ms = 3000
-attention_critical_ms = 500
 "#;
         let cfg: RuntimeConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(cfg.ws_url, "wss://example.com/ws");
         assert_eq!(cfg.reconnect_delay_ms, 5000);
         assert_eq!(cfg.max_open_positions, 15);
-        assert_eq!(cfg.attention_critical_ms, 500);
         assert!(cfg.validate().is_ok());
     }
 
