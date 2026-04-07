@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-07（ARCH-RC1 1C-1 + 1C-2-A/B/Opt-B 完成 · 1C-2-F engine 收編進行中）
-測試基準線：**682 engine lib (+58 1B) + 386 core + 30 types + 35 ml_training + 11 control_api smoke** · 0 failures
+最後更新：2026-04-07 PM（ARCH-RC1 1C-2 完整收尾 · 下一步 1C-3-A）
+測試基準線：**725 engine lib + 387 core + 27 types + 35 ml_training + 11 control_api smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 
@@ -46,23 +46,28 @@
   - **F3 E-Merge-2 done** (`e7f00d4`)：H0GateConfig 的 3 個風控欄位 RMW 從 RiskConfig.limits 同步；新加 `H0Gate::update_config()` setter
   - **F2 降級 done** (`91b5db8`)：Research agent 發現 StopManager 不是死代碼（H0/pause 保護 fallback 是故意設計）；原計劃「殺 StopManager」降為「paper_state.stop_config 同步」，25 行 config 同步取代 6-7 小時刪檔 + port 測試
   - **apply_risk_snapshot() 成為單一傳播入口**：intent_processor.risk_config + guardian + paper_state.stop_config + h0_gate.config + governance.risk.thresholds = **5 個執行引擎全部熱重載**
-- [ ] **Session 1C-2-C 6 個 IPC 端點 + bulk patch**
-  - update_risk_config / update_learning_config / update_budget_config + 對應 get_*
-  - bulk patch all-or-nothing + mutex 序列化 + version + source 審計
-- [ ] **Session 1C-2-D operator_risk_config.json → TOML 遷移**
-  - 啟動時檢測舊 JSON → v2 schema → 寫 TOML → 改名 .legacy
-- [ ] **Session 1C-2-E V014 engine_events audit 表**
-  - sql/migrations/V014__engine_events.sql + ConfigStore audit hook
-- [ ] **Session 1C-3 Python 空殼化**
-  - risk_view_client.py 新建（~150 行純 IPC 讀）
-  - risk_manager.py 1633 → 30 行 deprecation shim
-  - 32 個 Python 檔案 import 遷移（13 業務 + 19 測試）
-  - risk_routes.py GUI 寫操作改 IPC 轉發
-- [ ] **Session 1C-4 收尾**
-  - 熱重載驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
-  - Position Reconciler（trading.open_positions 表 + Bybit 對帳 + cooldown 重建）
-  - NewsPipeline run_once 60s spawn（順手）
-  - E2 + E4 + QA Audit + 文檔同步 + commit + push
+- [x] **1C-2-C 6 個 IPC 端點** — `5f87bca` (+6 tests / engine 714→720)
+  - get/patch_{risk,learning,budget}_config · JSON deep-merge + validate + store.replace + audit log
+  - generic helpers `json_merge` / `handle_get_config<T>` / `handle_patch_config<T,V>`
+- [x] **1C-2-E V014 audit 表** — `de75191` schema + `b0fa2c6` audit wiring
+  - V014 engine_events + 3 indexes applied to live PG
+  - IpcServer audit_pool_slot 延後注入；handle_patch_config 成功時 fire-and-forget INSERT
+- [x] **1C-2-D operator_risk_config.json → TOML 遷移** — `950f547` (+5 tests / engine 720→725)
+  - config/legacy_migration.rs · main.rs::load_unified_configs 啟動時調用
+  - 映射 ~15 個 global_config.* 已知欄位 → save_toml → rename .legacy
+  - max_cost_edge_ratio 跨 Config（屬 BudgetConfig）log WARN，operator 自行 patch
+- [ ] **1C-3 Python RiskManager 空殼化** — 規格 `docs/references/2026-04-07--arch_rc1_1c3_scope.md`
+  - **1C-3-A** gap analysis + IPC surface design (~3h, no code)
+  - **1C-3-B** 新建 `risk_view_client.py` (~200 行) + 抽出 `atr_tracker.py` + 8-12 tests
+  - **1C-3-C** 遷移 `risk_routes.py` 到 RiskViewClient
+  - **1C-3-D** 遷移 14 個 importer + 刪除 dead code + Python 全測通過
+  - **1C-3-E** 移除 RiskManager re-export shim + 文檔同步
+  - 估計 17-20h ≈ 3 sessions
+- [ ] **1C-4 收尾**
+  - Position Reconciler（trading.open_positions + Bybit 對帳 + cooldown 重建）
+  - NewsPipeline run_once 60s spawn
+  - 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
+  - E2 + E4 + QA Audit + 文檔同步
 
 ### 風控執行引擎收編（1C-2-F 已納入 · E-Merge-4 選做留 Phase 2）
 
