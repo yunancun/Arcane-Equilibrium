@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-07（ARCH-RC1 Session 1A+1B 完成 · 1C 待做）
+最後更新：2026-04-07（ARCH-RC1 Session 1A+1B+1C-1 完成 · 1C-2 下一步）
 測試基準線：**682 engine lib (+58 1B) + 386 core + 30 types + 35 ml_training + 11 control_api smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -20,13 +20,16 @@
   - config/learning_config.rs LearningConfig（Phase 4.1 default-off 收編）
   - config/budget_config.rs BudgetConfig（AttentionTax 整塊）
   - engine 624 → 682 / 0 regression
-- [ ] **Session 1C-1 Rust call site 遷移**（最危險，先做）
-  - RiskManagerConfig 廢棄 + 9 個檔案改讀新 RiskConfig
-  - RuntimeConfig 風控欄位刪除（max_stop_loss_pct / p1_risk_pct 等 8 個）
-  - RuntimeConfig → EngineBootstrap 改名 + 12 檔案 import 更新
-  - GuardianConfig / H0GateConfig 改讀新 RiskConfig.cascade
-  - 預估 ~50 call site 改動
-- [ ] **Session 1C-2 IPC 接通 + JSON 遷移**（純加法）
+- [x] **Session 1C-1 Rust call site 遷移** — `2007b67` `6768381` `ef30bf1` (3 commits · +747/−1293 淨 −546 行)
+  - B0: AntiCluster.max_same_direction 欄位校齊（guardian/IPC/GUI 活體，不可刪）
+  - B1: openclaw_core/src/risk 瘦身 — 刪 RiskManagerConfig + checks.rs，拆出 regime.rs
+  - B1b: 新建 openclaw_engine/src/risk_checks.rs（502 行 / 16 tests），check_order_allowed + check_position_on_tick 改讀 &RiskConfig + cost_edge 跨 Config 讀
+  - B2-4: 5 檔案 call site 遷移 — tick_pipeline / intent_processor / position_risk_evaluator / event_consumer/setup / pipeline_types + tests；所有舊平欄位路徑改 sub-struct
+  - B5: RuntimeConfig 刪 8 風控欄位 + 改名 EngineBootstrap + 過渡 deprecated type alias + 驗證邏輯重寫
+  - B6: openclaw_types::risk 刪除死代碼（GuardianConfig/StopConfig/composite RiskConfig 全 0 consumer）
+  - 測試：engine 682→708 / core 386→387 / types 30→27 · 0 regression
+  - 風控並行系統 7→2 套（剩 RiskConfig 權威 + Python RiskManager 待 1C-3 空殼化）
+- [ ] **Session 1C-2 IPC 接通 + JSON 遷移**（純加法 · 讓新 Config 真正 live）
   - 6 個 IPC 端點：update_risk_config / update_learning_config / update_budget_config + 對應 get_*
   - bulk patch all-or-nothing + mutex 序列化 + version + source 審計
   - operator_risk_config.json → risk_config.toml 一次性遷移（讀 → v2 schema → 寫 → 改名 .legacy）

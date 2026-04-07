@@ -63,7 +63,16 @@
 **ARCH-RC1 契約（永久）**：所有交易/風控/學習/預算/市場參數由 Rust 權威持有，分 3 個獨立熱重載 Config + 既有 StrategyParams = 4 個 IPC 寫入面。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
 測試：engine lib **624 → 682** (+58, 0 fail) · core/types 全綠 · 0 regression。
 
-**1C 待做（明天接手）**：~50 個 Rust 風控 call site 遷移 + RuntimeConfig→EngineBootstrap 改名 + 6 個 IPC 端點接通 + operator_risk_config.json→risk_config.toml 一次性遷移 + Python RiskManager 1633→150 行 RiskViewClient + 32 Python 檔案 import 遷移 + observability.engine_events 表 + 熱重載驗收測試 + Position Reconciler + NewsPipeline spawn + E2/E4/QA。
+### ★★★★ ARCH-RC1 Session 1C-1 SHIPPED（2026-04-07 · commits `2007b67` `6768381` `ef30bf1`）
+**1C-1 Batches 0-6 全部完成**（3 commits · +747 / −1293 淨 −546 行 · 0 regression）。ARCH-RC1 風控系統收編從 **7 套並行 → 2 套**（新 RiskConfig 權威 + 待 1C-3 空殼化的 Python RiskManager）。
+- **B0** `2007b67`: AntiCluster.max_same_direction 欄位校齊（guardian/IPC/GUI 已用，不可刪）
+- **B1** `2007b67`: `openclaw_core/src/risk/` 瘦身：刪 RiskManagerConfig + checks.rs，拆出 regime.rs（保留無狀態 regime fallback 供 stops.rs 使用）
+- **B1b** `2007b67`: 新建 `openclaw_engine/src/risk_checks.rs`（502 行 / 16 tests），check_order_allowed + check_position_on_tick 改讀 &RiskConfig，cost_edge_max_ratio 跨 Config 讀 BudgetConfig（契約允許 runtime 跨讀，只禁校準耦合）
+- **B2-4** `2007b67`: call site migration — tick_pipeline / intent_processor / position_risk_evaluator / event_consumer/setup / pipeline_types / tests；所有舊平欄位 (dynamic_stop_base_ratio / cost_gate_k_base / adx_trending_threshold 等) 改讀新 sub-struct 路徑
+- **B5** `6768381`: RuntimeConfig 刪除 8 個風控欄位（p1_risk_pct / max_stop_loss_pct / max_take_profit_pct / max_open_positions / max_total_exposure_pct / max_leverage / max_drawdown_pct / max_same_direction_positions）+ 改名 `EngineBootstrap`；保留 deprecated type alias 過渡 1C-2；驗證邏輯重寫（只檢 bootstrap 欄位：reconnect_delay / heartbeat / ipc_socket）
+- **B6** `ef30bf1`: `openclaw_types::risk` 刪除死代碼 — GuardianConfig / StopConfig / composite RiskConfig 全 0 consumer（live 版本在 openclaw_core::guardian + openclaw_core::stop_manager），只保留 H0 gate 共享 runtime 類型
+測試：engine lib 682 → 708 · core 386 → 387 · types 30 → 27 · integration all green · 0 regression。
+**1C-1 未做**：Python 側（1C-3）· ConfigStore IPC wiring（1C-2）· TOML loader（1C-2）· Position Reconciler（1C-4）· 熱重載 e2e（1C-4）。
 
 ### Phase 4.1 SHIPPED + E3 R6 CONDITIONAL GO + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
 **Phase 4.1 Claude API Consumer Loop**：`claude_teacher/consumer_loop.rs` (+480 行 · 10 tests) · `mod.rs::fetch_parse_persist` 拆出 · `main.rs` Arc 接線 · IPC `set_teacher_loop_enabled` / `get_teacher_loop_status`（fail-soft uninitialized · 5 tests）· **Default-OFF**，operator IPC 翻開才生效。
@@ -516,4 +525,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-07：engine lib **682** (+241 vs Phase 4 baseline 441) · phase4_integration 3/3 · **ARCH-RC1 Session 1A+1B SHIPPED** (`7f59e9b` 砍 270 行死代碼 + `0523f17` +2632 行 3-Config 骨架 / store/risk_config/learning_config/budget_config / 13+5+5+1=24 sub-struct / +58 tests / 0 行為改變) · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off · E3 R6 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**ARCH-RC1 Session 1C**（~50 call site 遷移 + RuntimeConfig→EngineBootstrap + IPC 接通 + Python 1633→150 行空殼化 + Position Reconciler + NewsPipeline spawn + 熱重載驗收 + E2/E4/QA）。
+> 截至 2026-04-07：engine lib **708** (+267 vs Phase 4 baseline 441) · types 27 / core 387 / integration all green · **ARCH-RC1 Session 1C-1 SHIPPED**（Batches 0-6 · 3 commits `2007b67` `6768381` `ef30bf1` · +747/−1293 淨 −546 行 · 風控並行系統 7→2 套 · 0 regression）· 1A/1B 亦 SHIPPED · **Phase 4.1 SHIPPED** (`ee6fd00` Claude API Consumer Loop default-off · E3 R6 P1 已關閉) · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**ARCH-RC1 Session 1C-2**（ConfigStore 構造 + 4 個 update/get IPC 端點 + operator_risk_config.json→TOML 一次性遷移 + main.rs 啟動序列注入）→ 1C-3 Python 空殼化 → 1C-4 Reconciler+News+熱重載 e2e+E2/E4/QA。
