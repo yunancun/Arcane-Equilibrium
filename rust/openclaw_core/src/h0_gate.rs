@@ -203,6 +203,18 @@ impl H0Gate {
         self.symbol_eligibility.insert(symbol.to_string(), eligible);
     }
 
+    /// ARCH-RC1 1C-2-F (E-Merge-2): Replace the full H0GateConfig at runtime.
+    /// Used by TickPipeline::apply_risk_snapshot to hot-reload the risk-level
+    /// fields (max_open_positions / max_total_exposure_pct / allowed_categories)
+    /// from RiskConfig.limits while the caller preserves health fields +
+    /// shadow_mode via read-modify-write.
+    /// ARCH-RC1 1C-2-F (E-Merge-2)：運行時整體替換 H0GateConfig。
+    /// 供 TickPipeline::apply_risk_snapshot 熱重載風控層欄位，呼叫端透過
+    /// read-modify-write 保留健康欄位與 shadow_mode。
+    pub fn update_config(&mut self, config: H0GateConfig) {
+        self.config = config;
+    }
+
     /// Toggle shadow observation mode at runtime.
     /// 運行時切換影子觀察模式。
     /// SEC-02: emit an audit log on transition so remote toggles are traceable.

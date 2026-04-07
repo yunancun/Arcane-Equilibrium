@@ -442,7 +442,21 @@ impl TickPipeline {
         gc.max_same_direction_positions = snap.anti_cluster.max_same_direction as usize;
         self.intent_processor.update_guardian_config(gc);
 
-        // 3. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
+        // 3. ARCH-RC1 1C-2-F E-Merge-2: hot-reload H0Gate risk-level fields
+        //    from RiskConfig.limits (RMW preserves health + shadow_mode fields
+        //    that don't live in RiskConfig). Previously the H0GateConfig was
+        //    only seeded at tick_pipeline construction from defaults and never
+        //    updated — so an operator raising open_positions_max in RiskConfig
+        //    would still hit the old cap at the H0 gate.
+        //    ARCH-RC1 1C-2-F E-Merge-2：H0Gate 的風控層欄位從 RiskConfig.limits
+        //    熱重載（RMW 保留健康欄位與 shadow_mode）。
+        let mut h0 = self.h0_gate.config().clone();
+        h0.max_open_positions = snap.limits.open_positions_max;
+        h0.max_total_exposure_pct = snap.limits.total_exposure_max_pct;
+        h0.allowed_categories = snap.limits.allowed_categories.clone();
+        self.h0_gate.update_config(h0);
+
+        // 4. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
         //    from RiskConfig.cascade. Previously the 6-tier cascade state
         //    machine carried its own hardcoded EscalationThresholds::default()
         //    with NO path to operator override. Field names differ slightly
