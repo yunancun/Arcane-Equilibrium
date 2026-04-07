@@ -255,6 +255,18 @@ fn load_unified_configs() -> Result<
         "loading ARCH-RC1 unified configs / 載入 ARCH-RC1 統一配置"
     );
 
+    // ARCH-RC1 1C-2-D: one-shot legacy operator_risk_config.json → TOML migration.
+    // ARCH-RC1 1C-2-D：舊 operator_risk_config.json → TOML 一次性遷移。
+    match crate::config::legacy_migration::migrate_legacy_risk_json_if_needed(&base) {
+        Ok(crate::config::legacy_migration::MigrationOutcome::Migrated(p)) => {
+            info!(path = %p.display(), "legacy risk JSON migrated to TOML / 舊風控 JSON 已遷移");
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(error = %e, "legacy risk JSON migration failed (continuing with defaults) / 舊 JSON 遷移失敗（用 default 繼續）");
+        }
+    }
+
     let risk: RiskConfig = load_toml_or_default(&risk_path, |c: &RiskConfig| c.validate())
         .map_err(|e| format!("risk config: {}", e))?;
     let learning: LearningConfig =

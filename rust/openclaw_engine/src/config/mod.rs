@@ -22,6 +22,7 @@
 pub mod budget_config;
 pub mod io;
 pub mod learning_config;
+pub mod legacy_migration;
 pub mod risk_config;
 pub mod store;
 
