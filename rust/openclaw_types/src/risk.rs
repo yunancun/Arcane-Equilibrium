@@ -1,8 +1,17 @@
-//! Risk control configurations, H0 Gate types, Guardian config.
-//! 風控配置、H0 門控類型、Guardian 配置。
+//! H0 Gate types shared across crates (runtime health / risk snapshots + gate result).
+//! H0 門控跨 crate 共享類型（運行時健康/風控快照 + 檢查結果）。
+//!
+//! ARCH-RC1 1C-1 Batch 6: Dead duplicates removed —
+//! `GuardianConfig` now lives exclusively in `openclaw_core::guardian`;
+//! `StopConfig` in `openclaw_core::stop_manager`;
+//! composite `RiskConfig` deleted (superseded by
+//! `openclaw_engine::config::RiskConfig` as the single source of truth).
+//! 1C-1 Batch 6：刪除死代碼重複定義 —
+//! `GuardianConfig` 只存在 `openclaw_core::guardian`；
+//! `StopConfig` 只存在 `openclaw_core::stop_manager`；
+//! 組合 `RiskConfig` 已刪除（由 `openclaw_engine::config::RiskConfig` 作為單一真相源取代）。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// H0 Gate deterministic checks configuration.
 /// H0 確定性門控參數配置。
@@ -113,70 +122,6 @@ impl H0CheckResult {
     }
 }
 
-/// Guardian agent risk configuration.
-/// 守衛 Agent 風控配置。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GuardianConfig {
-    pub max_position_size: f64,
-    pub max_daily_drawdown_pct: f64,
-    pub min_confidence: f64,
-    pub max_leverage: f64,
-    pub allowed_timeframes: Vec<String>,
-}
-
-impl Default for GuardianConfig {
-    fn default() -> Self {
-        Self {
-            max_position_size: 1000.0,
-            max_daily_drawdown_pct: 10.0,
-            min_confidence: 0.5,
-            max_leverage: 5.0,
-            allowed_timeframes: vec![
-                "1m".into(),
-                "5m".into(),
-                "15m".into(),
-                "1h".into(),
-                "4h".into(),
-            ],
-        }
-    }
-}
-
-/// Stop-loss configuration (V3 §3.2 shared_types — StopConfig).
-/// 止損配置。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StopConfig {
-    pub hard_stop_pct: f64,
-    pub trailing_stop_pct: Option<f64>,
-    pub time_stop_hours: Option<f64>,
-    pub atr_multiplier: Option<f64>,
-}
-
-impl Default for StopConfig {
-    fn default() -> Self {
-        Self {
-            hard_stop_pct: 5.0,
-            trailing_stop_pct: None,
-            time_stop_hours: None,
-            atr_multiplier: None,
-        }
-    }
-}
-
-/// Composite risk configuration.
-/// 組合風控配置。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RiskConfig {
-    #[serde(default)]
-    pub h0_gate: H0GateConfig,
-    #[serde(default)]
-    pub guardian: GuardianConfig,
-    #[serde(default)]
-    pub stop: StopConfig,
-    #[serde(default)]
-    pub constraints: HashMap<String, serde_json::Value>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,26 +143,5 @@ mod tests {
         let fail = H0CheckResult::blocked("stale data".into(), "freshness".into());
         assert!(!fail.allowed);
         assert_eq!(fail.check_name, "freshness");
-    }
-
-    #[test]
-    fn test_risk_config_default_serde() {
-        let cfg = RiskConfig::default();
-        let json = serde_json::to_string(&cfg).unwrap();
-        let de: RiskConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(de.stop.hard_stop_pct, 5.0);
-    }
-
-    #[test]
-    fn test_stop_config_serde() {
-        let sc = StopConfig {
-            hard_stop_pct: 3.0,
-            trailing_stop_pct: Some(2.0),
-            time_stop_hours: Some(1.0),
-            atr_multiplier: Some(1.5),
-        };
-        let json = serde_json::to_string(&sc).unwrap();
-        let de: StopConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(de.trailing_stop_pct, Some(2.0));
     }
 }

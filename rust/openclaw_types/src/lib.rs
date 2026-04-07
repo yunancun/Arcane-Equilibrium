@@ -16,10 +16,7 @@ pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, OHLCV};
-pub use risk::{
-    GuardianConfig, H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot,
-    RiskConfig, StopConfig,
-};
+pub use risk::{H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot};
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
 
 // ---------------------------------------------------------------------------
@@ -149,36 +146,12 @@ mod schema_golden_tests {
         }
     }
 
-    #[test]
-    fn test_stop_config_matches_golden() {
-        let golden = load_golden();
-        let gtype = &golden["types"]["StopConfig"];
-        assert_eq!(gtype["kind"], "struct");
-
-        // Use a fully-populated instance so Optional fields show up
-        // 使用完整填充的實例，讓 Option 欄位出現
-        let sc = risk::StopConfig {
-            hard_stop_pct: 5.0,
-            trailing_stop_pct: Some(2.0),
-            time_stop_hours: Some(1.0),
-            atr_multiplier: Some(1.5),
-        };
-        let sc_json = serde_json::to_value(&sc).unwrap();
-        let rust_fields = struct_fields(&sc_json);
-        let golden_fields = gtype["fields"].as_object().unwrap();
-
-        // Golden defines Python-side field names; Rust may have different names
-        // that map via serde — check the intersection is non-empty
-        // 黃金基準定義 Python 側欄位名；Rust 側可能有不同名稱
-        assert!(
-            golden_fields.contains_key("hard_stop_pct"),
-            "Golden must have hard_stop_pct"
-        );
-        assert!(
-            rust_fields.contains_key("hard_stop_pct"),
-            "Rust StopConfig must have hard_stop_pct"
-        );
-    }
+    // ARCH-RC1 1C-1 Batch 6: StopConfig golden test removed; the type now lives
+    // only in `openclaw_core::stop_manager::StopConfig`. The Python-side golden
+    // schema still carries a StopConfig entry for cross-language contract purposes,
+    // but the Rust-side validation no longer applies (core-crate type is not
+    // reachable from openclaw_types tests due to crate dependency direction).
+    // 1C-1 Batch 6：StopConfig 黃金測試移除；該型別只存在 openclaw_core::stop_manager。
 
     #[test]
     fn test_golden_schema_version() {
