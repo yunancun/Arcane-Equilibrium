@@ -1,10 +1,33 @@
-//! Engine runtime configuration with ArcSwap hot-reload (R01-4).
-//! 引擎運行時配置，使用 ArcSwap 實現熱加載。
+//! Engine runtime configuration + ARCH-RC1 unified Config system.
+//! 引擎運行時配置 + ARCH-RC1 統一 Config 系統。
 //!
-//! MODULE_NOTE (EN): Reads engine.toml, provides atomic zero-lock config reads (~5ns).
-//!   Cold params require restart; hot params reload via SIGHUP.
-//! MODULE_NOTE (中): 讀取 engine.toml，提供原子無鎖配置讀取（~5ns）。
-//!   冷參數需重啟；熱參數通過 SIGHUP 重載。
+//! MODULE_NOTE (EN): Module root containing both the legacy `RuntimeConfig`
+//!   (engine bootstrap params loaded from engine.toml — ws_url, db, ipc_socket,
+//!   trading_mode, etc.) AND the new ARCH-RC1 unified Config types added in 1B:
+//!   `RiskConfig` (1 source of truth for ALL risk decisions),
+//!   `LearningConfig` (ML/RL/Agent behaviour switches),
+//!   `BudgetConfig` (AI cost limits + attention tax). The new Configs are
+//!   wrapped by the generic `ConfigStore<T>` (lock-free reads via ArcSwap, all-or-nothing
+//!   patches via mutex). RuntimeConfig still owns the engine bootstrap fields;
+//!   risk/leverage/drawdown duplication will be removed in Session 1C when call
+//!   sites migrate to the new Configs.
+//! MODULE_NOTE (中): 模組根，包含既有 `RuntimeConfig`（從 engine.toml 載入的
+//!   引擎啟動參數 —— ws_url、db、ipc_socket、trading_mode 等）以及 1B 新增的
+//!   ARCH-RC1 統一 Config 型別：`RiskConfig`（所有風控決策的單一真相來源）、
+//!   `LearningConfig`（ML/RL/Agent 行為開關）、`BudgetConfig`（AI 成本上限 +
+//!   注意力稅）。新 Config 透過泛型 `ConfigStore<T>` 包裹（ArcSwap 無鎖讀、
+//!   mutex 序列化的 all-or-nothing patch）。RuntimeConfig 仍持有引擎啟動欄位；
+//!   風控/槓桿/回撤的重複欄位將在 Session 1C 由 call site 遷移後移除。
+
+pub mod budget_config;
+pub mod learning_config;
+pub mod risk_config;
+pub mod store;
+
+pub use budget_config::BudgetConfig;
+pub use learning_config::LearningConfig;
+pub use risk_config::RiskConfig;
+pub use store::{ConfigStore, PatchOutcome, PatchSource};
 
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
