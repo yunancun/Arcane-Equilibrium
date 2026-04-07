@@ -466,6 +466,13 @@ async fn dispatch_request(
         // ARCH-RC1 1C-3-B: Rust-native risk runtime status + safe counter clear
         "get_risk_runtime_status" => handle_risk_runtime_status(id, paper_cmd_tx).await,
         "clear_consecutive_losses" => handle_clear_consecutive_losses(id, paper_cmd_tx).await,
+        // ARCH-RC1 1C-3-B-2: governor manual override (operator escalation/de-escalation)
+        "force_governor_tier_tighter" => {
+            handle_force_governor_tighter(id, paper_cmd_tx, &req.params, audit_pool).await
+        }
+        "force_governor_tier_looser" => {
+            handle_force_governor_looser(id, paper_cmd_tx, &req.params, audit_pool).await
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
@@ -1055,6 +1062,164 @@ async fn handle_clear_consecutive_losses(
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }
+}
+
+/// ARCH-RC1 1C-3-B-2: Force governor toward more restrictive tier (operator
+/// escalation). No 24h cooldown — operator can always be more careful.
+/// Writes V014 audit row on success.
+/// ARCH-RC1 1C-3-B-2：強制 governor 往更嚴方向（無冷卻 + V014 audit）。
+async fn handle_force_governor_tighter(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+    audit_pool: &Option<sqlx::PgPool>,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let target_tier = match params.get("target_tier").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing target_tier"),
+    };
+    let reason = match params.get("reason").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing reason"),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PaperSessionCommand::ForceGovernorTighter {
+        target_tier: target_tier.clone(),
+        reason: reason.clone(),
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => {
+            spawn_governor_audit_row(
+                audit_pool,
+                "governor_escalate",
+                &target_tier,
+                &reason,
+                "operator_escalation",
+                &json_str,
+            );
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(v) => JsonRpcResponse::success(id, v),
+                Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse: {e}")),
+            }
+        }
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// ARCH-RC1 1C-3-B-2: Force governor toward less restrictive tier (operator
+/// de-escalation). Wraps the dangerous de-escalation path with reason enum +
+/// 24h cooldown + V014 audit + per-batch lock-down rules. CB / MR cannot be
+/// unlocked here — operator must edit TOML and restart.
+/// ARCH-RC1 1C-3-B-2：強制 governor 降級（reason enum + 24h cooldown + audit）。
+async fn handle_force_governor_looser(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+    audit_pool: &Option<sqlx::PgPool>,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let target_tier = match params.get("target_tier").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing target_tier"),
+    };
+    let reason_code = match params.get("reason_code").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing reason_code"),
+    };
+    let notes = params
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PaperSessionCommand::ForceGovernorLooser {
+        target_tier: target_tier.clone(),
+        reason_code: reason_code.clone(),
+        notes: notes.clone(),
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => {
+            spawn_governor_audit_row(
+                audit_pool,
+                "governor_de_escalate",
+                &target_tier,
+                &notes,
+                &reason_code,
+                &json_str,
+            );
+            match serde_json::from_str::<serde_json::Value>(&json_str) {
+                Ok(v) => JsonRpcResponse::success(id, v),
+                Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse: {e}")),
+            }
+        }
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// Fire-and-forget V014 audit insert for governor override events.
+/// Mirrors the pattern in handle_patch_config — failure logs WARN but never
+/// blocks the IPC response, since the override has already been applied.
+/// V014 audit row 寫入（fire-and-forget）—失敗只 WARN，不影響 IPC 回應。
+fn spawn_governor_audit_row(
+    audit_pool: &Option<sqlx::PgPool>,
+    event_type: &str,
+    target_tier: &str,
+    notes: &str,
+    reason_code: &str,
+    payload_json_str: &str,
+) {
+    let Some(pool) = audit_pool.clone() else {
+        return;
+    };
+    let event_type = event_type.to_string();
+    let payload_obj = serde_json::json!({
+        "target_tier": target_tier,
+        "reason_code": reason_code,
+        "notes": notes,
+        "result": serde_json::from_str::<serde_json::Value>(payload_json_str).unwrap_or_else(|_| serde_json::Value::Null),
+    });
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    tokio::spawn(async move {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO observability.engine_events
+             (ts_ms, event_type, source, config_name, old_version, new_version, payload)
+             VALUES ($1, $2, $3, $4, NULL, NULL, $5)"
+        )
+        .bind(ts_ms)
+        .bind(&event_type)
+        .bind("operator")
+        .bind("risk_governor")
+        .bind(&payload_obj)
+        .execute(&pool)
+        .await
+        {
+            tracing::warn!(error = %e, "V014 governor audit row insert failed (non-fatal)");
+        }
+    });
 }
 
 /// RRC-1-E2: Set strategy active/paused via IPC / 通過 IPC 設置策略啟停。
@@ -1708,6 +1873,95 @@ mod tests {
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["result"].as_str().unwrap(), "cleared 3 symbol(s)");
+    }
+
+    /// 1C-3-B-2 helper: fake event consumer that processes governor override
+    /// commands by returning canned success/error JSON.
+    /// 1C-3-B-2 輔助：模擬事件消費者處理 governor override 命令。
+    fn setup_governor_override_channel(
+        accept_tighter: bool,
+        accept_looser: bool,
+    ) -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+        tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    PaperSessionCommand::ForceGovernorTighter {
+                        target_tier, reason, response_tx,
+                    } => {
+                        let result = if accept_tighter {
+                            Ok(format!(
+                                "{{\"from\":\"NORMAL\",\"to\":\"{target_tier}\",\"reason\":\"{reason}\"}}"
+                            ))
+                        } else {
+                            Err("simulated SM rejection".to_string())
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    PaperSessionCommand::ForceGovernorLooser {
+                        target_tier, reason_code, response_tx, ..
+                    } => {
+                        let result = if accept_looser {
+                            Ok(format!(
+                                "{{\"from\":\"CAUTIOUS\",\"to\":\"{target_tier}\",\"reason_code\":\"{reason_code}\"}}"
+                            ))
+                        } else {
+                            Err("24h cooldown active".to_string())
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    _ => {}
+                }
+            }
+        });
+        tx
+    }
+
+    #[tokio::test]
+    async fn test_rc1b2_force_governor_tighter_via_ipc() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_governor_override_channel(true, false);
+        let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS","reason":"manual probe"},"id":50}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        assert_eq!(result["to"].as_str().unwrap(), "CAUTIOUS");
+    }
+
+    #[tokio::test]
+    async fn test_rc1b2_force_governor_tighter_missing_reason() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_governor_override_channel(true, false);
+        let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS"},"id":51}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_rc1b2_force_governor_looser_cooldown_rejection() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_governor_override_channel(false, false);
+        let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":"test"},"id":52}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_some());
+        let err_msg = resp.error.unwrap().message;
+        assert!(err_msg.contains("cooldown"), "expected cooldown error, got: {}", err_msg);
+    }
+
+    #[tokio::test]
+    async fn test_rc1b2_force_governor_looser_success() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let tx = setup_governor_override_channel(false, true);
+        let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":""},"id":53}"#;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        assert!(resp.error.is_none(), "error: {:?}", resp.error);
+        let result = resp.result.unwrap();
+        assert_eq!(result["reason_code"].as_str().unwrap(), "false_positive");
+        assert_eq!(result["to"].as_str().unwrap(), "NORMAL");
     }
 
     #[tokio::test]

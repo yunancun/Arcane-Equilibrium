@@ -122,6 +122,119 @@ pub(super) fn handle_paper_command(
             snapshot_writer.force_write(&pipeline.snapshot());
             let _ = response_tx.send(Ok(format!("cleared {cleared} symbol(s)")));
         }
+        // ── ARCH-RC1 1C-3-B-2: Governor manual override (operator escalation) ──
+        PaperSessionCommand::ForceGovernorTighter {
+            target_tier,
+            reason,
+            response_tx,
+        } => {
+            let result = (|| -> Result<String, String> {
+                let target = TickPipeline::parse_risk_level(&target_tier)?;
+                let current = pipeline.governance.risk.snapshot_level();
+                // Only one step at a time; only toward more restrictive
+                // 一次只能往更嚴方向跳一級
+                if (target.value() as i32) - (current.value() as i32) != 1 {
+                    return Err(format!(
+                        "tighter must be exactly one tier above current (current={}, target={})",
+                        current, target
+                    ));
+                }
+                pipeline
+                    .governance
+                    .risk
+                    .escalate_to(
+                        target,
+                        &format!("operator_ipc: {reason}"),
+                        openclaw_core::sm::risk_gov::RiskEvent::OperatorEscalation,
+                    )
+                    .map_err(|e| format!("escalate_to failed: {e}"))?;
+                info!(from = %current, to = %target, reason = %reason,
+                    "operator-driven governor escalation via IPC");
+                snapshot_writer.force_write(&pipeline.snapshot());
+                Ok(format!(
+                    "{{\"from\":\"{current}\",\"to\":\"{target}\",\"reason\":\"{reason}\"}}"
+                ))
+            })();
+            let _ = response_tx.send(result);
+        }
+        // ── ARCH-RC1 1C-3-B-2: Governor manual override (operator de-escalation) ──
+        PaperSessionCommand::ForceGovernorLooser {
+            target_tier,
+            reason_code,
+            notes,
+            response_tx,
+        } => {
+            let result = (|| -> Result<String, String> {
+                use openclaw_core::sm::risk_gov::RiskLevel;
+                // 1. Reason code whitelist (IPC layer enforcement)
+                if !TickPipeline::VALID_DE_ESCALATION_REASONS.contains(&reason_code.as_str()) {
+                    return Err(format!(
+                        "invalid reason_code; must be one of {:?}",
+                        TickPipeline::VALID_DE_ESCALATION_REASONS
+                    ));
+                }
+                let target = TickPipeline::parse_risk_level(&target_tier)?;
+                let current = pipeline.governance.risk.snapshot_level();
+
+                // 2. Hard lock: cannot unlock CircuitBreaker / ManualReview from IPC.
+                //    Operator must edit TOML + restart (deliberate friction).
+                // 2. 硬鎖：CB / MR 不能透過 IPC 解開。Operator 必須改 TOML 後重啟。
+                if current >= RiskLevel::CircuitBreaker {
+                    return Err(format!(
+                        "{current} cannot be unlocked via IPC; edit TOML + restart"
+                    ));
+                }
+
+                // 3. Exactly one step lower (no jumps)
+                // 3. 一次只能降一級
+                if (current.value() as i32) - (target.value() as i32) != 1 {
+                    return Err(format!(
+                        "looser must be exactly one tier below current (current={}, target={})",
+                        current, target
+                    ));
+                }
+
+                // 4. 24h IPC-layer cooldown
+                // 4. IPC 層 24h 冷卻
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                if let Some(last) = pipeline.last_governor_de_escalation_ms() {
+                    let elapsed = now_ms.saturating_sub(last);
+                    if elapsed < TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS {
+                        let remaining_ms =
+                            TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS - elapsed;
+                        return Err(format!(
+                            "24h cooldown active; {remaining_ms}ms remaining before next manual de-escalation"
+                        ));
+                    }
+                }
+
+                // 5. Delegate to SM (will also enforce its own min_hold_time
+                //    + lookup_rule allow-list as defence in depth).
+                // 5. 委派給 SM（會同時觸發 SM 內建的 hold_time + lookup_rule 防線）。
+                let combined_reason = if notes.is_empty() {
+                    format!("operator_ipc:{reason_code}")
+                } else {
+                    format!("operator_ipc:{reason_code}: {notes}")
+                };
+                pipeline
+                    .governance
+                    .risk
+                    .de_escalate_to(target, "operator_ipc", &combined_reason)
+                    .map_err(|e| format!("de_escalate_to failed: {e}"))?;
+
+                pipeline.set_last_governor_de_escalation_ms(Some(now_ms));
+                info!(from = %current, to = %target, reason_code = %reason_code,
+                    "operator-driven governor de-escalation via IPC");
+                snapshot_writer.force_write(&pipeline.snapshot());
+                Ok(format!(
+                    "{{\"from\":\"{current}\",\"to\":\"{target}\",\"reason_code\":\"{reason_code}\"}}"
+                ))
+            })();
+            let _ = response_tx.send(result);
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         PaperSessionCommand::SetStrategyActive {
             strategy_name,
