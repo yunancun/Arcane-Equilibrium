@@ -484,6 +484,9 @@ async fn async_main(
     // Phase 4.1: same pattern for the Teacher consumer loop handles.
     // Phase 4.1：同樣模式拿 Teacher consumer loop 句柄槽位。
     let teacher_loop_slot = ipc_server.teacher_loop_slot();
+    // ARCH-RC1 1C-2-E: grab audit pool slot for late injection after db_pool is up.
+    // ARCH-RC1 1C-2-E：取得審計 pool 槽位，待 db_pool 就緒後注入。
+    let audit_pool_slot = ipc_server.audit_pool_slot();
     let ipc_handle = tokio::spawn(async move {
         if let Err(e) = ipc_server.run().await {
             error!(error = %e, "IPC server error / IPC 服務器錯誤");
@@ -968,6 +971,15 @@ async fn async_main(
     // get_ai_budget_status fail-soft returns "uninitialized".
     // Phase 4 (4-15)：db_pool 就緒後初始化 AI BudgetTracker，並注入 IPC server 槽位。
     // 若初始化失敗，槽位保持 None，get_ai_budget_status fail-soft 回傳 "uninitialized"。
+    // ARCH-RC1 1C-2-E: inject audit pool into IPC server slot so patch_*_config
+    // can write V014 engine_events rows. PgPool is internally Arc so cheap to clone.
+    // ARCH-RC1 1C-2-E：注入審計 pool 到 IPC server 槽位，讓 patch_*_config
+    // 可寫 V014 engine_events。PgPool 內部即 Arc，clone 成本低。
+    if let Some(pg) = db_pool.get() {
+        audit_pool_slot.write().await.replace(pg.clone());
+        info!("ARCH-RC1 audit pool wired to IPC / 審計 pool 已接入 IPC");
+    }
+
     if db_pool.is_available() {
         match openclaw_engine::ai_budget::BudgetTracker::new(Arc::clone(&db_pool)).await {
             Ok(tracker) => {

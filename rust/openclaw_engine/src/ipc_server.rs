@@ -63,6 +63,13 @@ pub struct TeacherLoopHandles {
 
 pub type TeacherLoopSlot = Arc<RwLock<Option<TeacherLoopHandles>>>;
 
+/// ARCH-RC1 1C-2-E: late-injected slot for the audit DB pool used by V014
+/// engine_events writes. None = audit disabled (DB unavailable at boot or
+/// pool not yet initialized).
+/// ARCH-RC1 1C-2-E：V014 engine_events 寫入用的審計 DB pool 延後注入槽位。
+/// None = 審計停用（啟動時 DB 不可用或 pool 尚未初始化）。
+pub type AuditPoolSlot = Arc<RwLock<Option<sqlx::PgPool>>>;
+
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
 // ---------------------------------------------------------------------------
@@ -165,6 +172,9 @@ pub struct IpcServer {
     risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
     learning_store: Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
+    /// ARCH-RC1 1C-2-E: late-injected slot for the V014 audit pool.
+    /// ARCH-RC1 1C-2-E：V014 審計 pool 延後注入槽位。
+    audit_pool: AuditPoolSlot,
 }
 
 impl IpcServer {
@@ -186,7 +196,15 @@ impl IpcServer {
             risk_store: None,
             learning_store: None,
             budget_store: None,
+            audit_pool: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// ARCH-RC1 1C-2-E: get a clone of the audit pool slot for late injection
+    /// from main.rs once the DB pool is ready.
+    /// ARCH-RC1 1C-2-E：取得審計 pool 槽位句柄供 main.rs 在 DB pool 就緒後注入。
+    pub fn audit_pool_slot(&self) -> AuditPoolSlot {
+        Arc::clone(&self.audit_pool)
     }
 
     /// ARCH-RC1 1C-2-C: wire unified Config stores for direct IPC hot-reload.
@@ -281,8 +299,9 @@ impl IpcServer {
                             let risk_store = self.risk_store.clone();
                             let learning_store = self.learning_store.clone();
                             let budget_store = self.budget_store.clone();
+                            let audit_pool = self.audit_pool.read().await.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_store, learning_store, budget_store).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_store, learning_store, budget_store, audit_pool).await;
                             });
                         }
                         Err(e) => {
@@ -314,6 +333,7 @@ async fn handle_connection(
     risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
     learning_store: Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
+    audit_pool: Option<sqlx::PgPool>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -330,7 +350,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_store, &learning_store, &budget_store).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_store, &learning_store, &budget_store, &audit_pool).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -368,6 +388,7 @@ async fn dispatch_request(
     risk_store: &Option<Arc<ConfigStore<RiskConfig>>>,
     learning_store: &Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: &Option<Arc<ConfigStore<BudgetConfig>>>,
+    audit_pool: &Option<sqlx::PgPool>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -461,15 +482,21 @@ async fn dispatch_request(
         "get_risk_config" => handle_get_config(id, risk_store, "risk"),
         "get_learning_config" => handle_get_config(id, learning_store, "learning"),
         "get_budget_config" => handle_get_config(id, budget_store, "budget"),
-        "patch_risk_config" => {
-            handle_patch_config(id, risk_store, &req.params, RiskConfig::validate, "risk")
-        }
+        "patch_risk_config" => handle_patch_config(
+            id,
+            risk_store,
+            &req.params,
+            RiskConfig::validate,
+            "risk",
+            audit_pool,
+        ),
         "patch_learning_config" => handle_patch_config(
             id,
             learning_store,
             &req.params,
             LearningConfig::validate,
             "learning",
+            audit_pool,
         ),
         "patch_budget_config" => handle_patch_config(
             id,
@@ -477,6 +504,7 @@ async fn dispatch_request(
             &req.params,
             BudgetConfig::validate,
             "budget",
+            audit_pool,
         ),
         _ => JsonRpcResponse::error(
             id,
@@ -1122,12 +1150,14 @@ where
 /// 通用 PATCH handler — JSON 深合併進當前 → 驗證 → ConfigStore 原子替換
 /// （遞增版本，觸發 tick-level 熱重載）。All-or-nothing：任何反序列化/驗證
 /// 失敗 store 完全不變。
+#[allow(clippy::too_many_arguments)]
 fn handle_patch_config<T, V>(
     id: serde_json::Value,
     store: &Option<Arc<ConfigStore<T>>>,
     params: &serde_json::Value,
     validate: V,
     config_name: &str,
+    audit_pool: &Option<sqlx::PgPool>,
 ) -> JsonRpcResponse
 where
     T: serde::Serialize + serde::de::DeserializeOwned + Clone + Send + Sync + 'static,
@@ -1162,6 +1192,7 @@ where
         Err(e) => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
     };
 
+    let old_version = store.version();
     let current = store.load();
     let mut merged = match serde_json::to_value(&*current) {
         Ok(v) => v,
@@ -1199,6 +1230,41 @@ where
                 source = outcome.source.as_str(),
                 "ARCH-RC1 config patched via IPC / 配置經 IPC 熱更新"
             );
+            // ARCH-RC1 1C-2-E: fire-and-forget audit row to V014 engine_events.
+            // ARCH-RC1 1C-2-E：fire-and-forget 寫一行 V014 engine_events 審計。
+            if let Some(pool) = audit_pool.clone() {
+                let cfg_name = config_name.to_string();
+                let src = outcome.source.as_str().to_string();
+                let new_v = outcome.version as i64;
+                let old_v = old_version as i64;
+                let payload = serde_json::json!({
+                    "fields_changed": patch.as_object()
+                        .map(|m| m.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                });
+                tokio::spawn(async move {
+                    let ts_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    let res = sqlx::query(
+                        "INSERT INTO observability.engine_events \
+                         (ts_ms, event_type, source, config_name, old_version, new_version, payload) \
+                         VALUES ($1, 'config_patch', $2, $3, $4, $5, $6)",
+                    )
+                    .bind(ts_ms)
+                    .bind(&src)
+                    .bind(&cfg_name)
+                    .bind(old_v)
+                    .bind(new_v)
+                    .bind(&payload)
+                    .execute(&pool)
+                    .await;
+                    if let Err(e) = res {
+                        warn!(error = %e, config = %cfg_name, "V014 audit insert failed / V014 審計寫入失敗");
+                    }
+                });
+            }
             JsonRpcResponse::success(
                 id,
                 serde_json::json!({
@@ -1328,7 +1394,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         assert_eq!(
             resp.result.unwrap(),
@@ -1342,7 +1408,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -1354,7 +1420,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -1364,7 +1430,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1374,7 +1440,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1384,7 +1450,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1394,7 +1460,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -1426,7 +1492,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when snapshot file missing"
@@ -1438,7 +1504,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -1451,7 +1517,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -1463,7 +1529,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
@@ -1533,7 +1599,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let ranges_str = result["result"].as_str().unwrap();
@@ -1547,7 +1613,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
@@ -1564,7 +1630,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
     }
 
@@ -1574,7 +1640,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error for nonexistent strategy"
@@ -1587,7 +1653,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when params_json missing"
@@ -1604,7 +1670,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "phase4 status must succeed");
         let r = resp.result.unwrap();
         assert_eq!(r["teacher"], "grey");
@@ -1621,7 +1687,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let r = resp.result.unwrap();
         for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -1646,7 +1712,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
         assert_eq!(resp.id, serde_json::json!(4002));
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
@@ -1685,6 +1751,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -1710,6 +1777,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -1740,6 +1808,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_some(), "expected validation error");
@@ -1765,6 +1834,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_some());
@@ -1788,6 +1858,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "patch_learning_config: {resp:?}");
@@ -1803,6 +1874,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_none());
@@ -1820,6 +1892,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "patch_budget_config: {resp:?}");
@@ -1838,6 +1911,7 @@ mod tests {
             &None,
             &empty_budget_slot(),
             &empty_teacher_slot(),
+            &None,
             &None,
             &None,
             &None,
