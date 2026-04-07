@@ -962,146 +962,28 @@ impl TickPipeline {
         }
         if signals_persisted_this_tick > 0 {
             if let Some(ref tx) = self.context_tx {
-                let ind = indicators.as_ref();
-                let pos = self.paper_state.get_position(&event.symbol);
-
-                // W-3 + hotfix: LinUCB read-only arm selection (metadata only —
-                // does NOT affect any trading decision). Fail-soft: any error →
-                // None → SQL NULL at write.
-                //
-                // HOTFIX (2026-04-07): signal.source is a signal RULE name
-                // (rsi_exit / ma_crossover / bollinger_reversion / macd_crossover / ...),
-                // NOT a v1_15 strategy name. We map signal rule → strategy via a
-                // static whitelist; unmapped rules silently emit None (no warn spam).
-                // Mapping is conservative — only signals that clearly belong to one
-                // of the 5 registered strategies are mapped; everything else returns
-                // None and the arm column is NULL. This keeps the LinUCB metadata
-                // channel honest without blocking any trading decision.
-                //
-                // W-3 + hotfix：LinUCB 唯讀 arm 選擇（僅 metadata，不影響交易決策）。
-                // HOTFIX (2026-04-07)：signal.source 是 signal rule 名
-                // (rsi_exit / ma_crossover / bollinger_reversion / ...)，
-                // 不是 v1_15 strategy 名。用靜態白名單映射 signal rule → strategy；
-                // 未映射的 rule 靜默回 None（不噴 warn）。只對明確屬於已註冊 5 策略
-                // 之一的 signal 映射；其他一律 None 寫 SQL NULL。
-                let (linucb_arm_id, linucb_confidence_bound) = if let Some(ref rt) = self.linucb {
-                    let mapped_strategy: Option<&'static str> = match signals[0].source.as_str() {
-                        // ma_crossover strategy
-                        "ma_crossover" => Some("ma_crossover"),
-                        // bb_reversion strategy
-                        "bollinger_reversion" => Some("bb_reversion"),
-                        // bb_breakout strategy — no unique signal rule yet (uses
-                        // bollinger_reversion direction?), map conservatively None
-                        // grid_trading strategy — no signal rule (drives via ticks)
-                        // funding_arb strategy — no signal rule (drives via REST)
-                        // All other signal rules (rsi_exit / macd_crossover /
-                        // rsi_overbought_oversold / macd_exhaustion / …) do NOT
-                        // map to any v1_15 arm → None → SQL NULL.
-                        _ => None,
-                    };
-                    match mapped_strategy {
-                        Some(strategy) => {
-                            let regime = ind
-                                .and_then(|i| i.hurst.as_ref())
-                                .map(|h| h.regime.clone())
-                                .unwrap_or_else(|| "random_walk".to_string());
-                            let ctx = crate::linucb::LinUcbRuntime::build_context_features(
-                                ind.and_then(|i| i.atr_14.as_ref()).map(|a| a.atr_percent),
-                                ind.and_then(|i| i.rsi_14),
-                                ind.and_then(|i| i.bollinger.as_ref()).map(|b| b.bandwidth),
-                                ind.and_then(|i| i.hurst.as_ref()).map(|h| h.hurst),
-                                ind.and_then(|i| i.adx.as_ref()).map(|a| a.adx),
-                                None, // vol_ratio not available in IndicatorSnapshot
-                                event.ts_ms as i64,
-                            );
-                            match rt.select_for_intent(&regime, strategy, &ctx) {
-                                Some(sel) => (Some(sel.arm_id), Some(sel.ucb)),
-                                None => {
-                                    // Unexpected: strategy is whitelisted but arm not
-                                    // found. Debug-level log (not warn) to avoid noise.
-                                    // 意外：策略已白名單但 arm 找不到，debug 級別降噪。
-                                    tracing::debug!(
-                                        regime = %regime,
-                                        strategy = %strategy,
-                                        "linucb arm not found despite whitelist, emitting NULL"
-                                    );
-                                    (None, None)
-                                }
-                            }
-                        }
-                        None => (None, None),
-                    }
-                } else {
-                    (None, None)
-                };
-
-                // W-4: Read news context snapshot (read-only; sink side updates
-                // it asynchronously when news arrives). Fail-soft: None → NULL.
-                // W-4：讀取新聞 context 快照（唯讀；sink 側新聞到達時非同步更新）。
-                // Fail-soft：None → NULL。
-                let (news_severity, hours_since_last_major_news) =
-                    if let Some(ref snap) = self.news_snapshot {
-                        let sev = snap.latest_severity();
-                        let sev_opt = if sev > 0.0 { Some(sev) } else { None };
-                        let hours = snap.hours_since_last_major(event.ts_ms as i64);
-                        (sev_opt, hours)
-                    } else {
-                        (None, None)
-                    };
-
-                let _ = tx.try_send(crate::database::DecisionContextMsg {
-                    context_id: format!("ctx-{}-{}", event.symbol, event.ts_ms),
-                    ts_ms: event.ts_ms,
-                    decision_type: "signal_generated".into(),
-                    symbol: event.symbol.clone(),
-                    strategy_name: signals[0].source.clone(),
-                    last_price: event.last_price,
-                    spread_bps: if event.ask_price > 0.0 && event.bid_price > 0.0 {
-                        (event.ask_price - event.bid_price) / event.last_price * 10_000.0
-                    } else {
-                        0.0
-                    },
-                    regime_5m: ind
-                        .and_then(|i| i.hurst.as_ref())
-                        .map(|h| h.regime.clone())
-                        .unwrap_or_default(),
-                    ind_5m_adx: ind
-                        .and_then(|i| i.adx.as_ref())
-                        .map(|a| a.adx)
-                        .unwrap_or(0.0),
-                    ind_5m_rsi: ind.and_then(|i| i.rsi_14).unwrap_or(50.0),
-                    ind_5m_atr_14_pct: ind
-                        .and_then(|i| i.atr_14.as_ref())
-                        .map(|a| a.atr_percent)
-                        .unwrap_or(0.0),
-                    position_side: pos
-                        .map(|p| if p.is_long { "Long" } else { "Short" })
-                        .unwrap_or("None")
-                        .into(),
-                    position_qty: pos.map(|p| p.qty).unwrap_or(0.0),
-                    total_equity: self.paper_state.balance(),
-                    drawdown_pct: self.paper_state.drawdown_pct(),
-                    indicators_snapshot: ind
-                        .map(|i| serde_json::to_value(i).unwrap_or_default())
-                        .unwrap_or_default(),
-                    position_detail: pos
-                        .map(|p| serde_json::to_value(p).unwrap_or_default())
-                        .unwrap_or_default(),
-                    decision_payload: serde_json::to_value(&signals).unwrap_or_default(),
-                    // 4-18: Phase 4 / V009+V003 columns. W-3 wires LinUCB arm_id +
-                    // UCB; W-4 wires news_severity + hours_since_last_major_news
-                    // from the NewsContextSnapshot. claude_directive_id stays NULL
-                    // until a future directive→tick association path is built.
-                    // 4-18：Phase 4 / V009+V003 欄位。W-3 接 LinUCB arm_id + UCB；
-                    // W-4 接 news_severity + hours_since_last_major_news（來自
-                    // NewsContextSnapshot）。claude_directive_id 待未來
-                    // directive→tick 關聯路徑建立後接通。
-                    claude_directive_id: None,
-                    linucb_arm_id,
-                    linucb_confidence_bound,
-                    news_severity,
-                    hours_since_last_major_news,
-                });
+                // P2 refactor (2026-04-07): the LinUCB arm selection + news
+                // snapshot read + DecisionContextMsg construction (~140 lines)
+                // were extracted to `decision_context_producer.rs` to keep
+                // tick_pipeline.rs under the §九 1200-line hard limit. The
+                // logic is unchanged — see that module's MODULE_NOTE for the
+                // full whitelist + fail-soft contract.
+                // P2 重構（2026-04-07）：LinUCB arm 選擇 + 新聞快照讀取 +
+                // DecisionContextMsg 構造（~140 行）已抽出至
+                // `decision_context_producer.rs`，讓 tick_pipeline.rs 保持
+                // 在 §九 1200 行硬上限以下。邏輯未變動 — 完整白名單與
+                // fail-soft 合約見該模組 MODULE_NOTE。
+                crate::decision_context_producer::emit_decision_context(
+                    tx,
+                    event,
+                    &signals,
+                    indicators.as_ref(),
+                    self.paper_state.get_position(&event.symbol),
+                    self.paper_state.balance(),
+                    self.paper_state.drawdown_pct(),
+                    self.linucb.as_ref(),
+                    self.news_snapshot.as_ref(),
+                );
             }
         }
 

@@ -16,6 +16,7 @@ pub mod bybit_rest_client;
 pub mod claude_teacher;
 pub mod config;
 pub mod database;
+pub mod decision_context_producer;
 pub mod event_consumer;
 pub mod execution_listener;
 pub mod fast_track;
