@@ -20,11 +20,13 @@
 //!   風控/槓桿/回撤的重複欄位將在 Session 1C 由 call site 遷移後移除。
 
 pub mod budget_config;
+pub mod io;
 pub mod learning_config;
 pub mod risk_config;
 pub mod store;
 
 pub use budget_config::BudgetConfig;
+pub use io::{load_toml_or_default, save_toml};
 pub use learning_config::LearningConfig;
 pub use risk_config::RiskConfig;
 pub use store::{ConfigStore, PatchOutcome, PatchSource};

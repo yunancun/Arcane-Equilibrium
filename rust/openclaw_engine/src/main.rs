@@ -10,7 +10,9 @@
 
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
-use openclaw_engine::config::ConfigManager;
+use openclaw_engine::config::{
+    load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
+};
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::IpcServer;
 use openclaw_engine::strategies::{
@@ -169,7 +171,8 @@ fn main() {
     }
 
     // ------------------------------------------------------------------
-    // 2. Load config / 加載配置
+    // 2. Load engine bootstrap config (EngineBootstrap from engine.toml)
+    //    加載引擎啟動配置
     // ------------------------------------------------------------------
     let config = match ConfigManager::load(None) {
         Ok(c) => Arc::new(c),
@@ -178,6 +181,24 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // ------------------------------------------------------------------
+    // 2b. ARCH-RC1 1C-2: Load 3 unified Configs and wrap in ConfigStores.
+    //     TOML paths configurable via env overrides; fall back to settings/.
+    //     ARCH-RC1 1C-2：載入 3 個統一 Config 並包入 ConfigStore。
+    //     TOML 路徑可用環境變數覆蓋，否則使用 settings/。
+    // ------------------------------------------------------------------
+    let risk_store: Arc<ConfigStore<RiskConfig>> = match load_unified_configs() {
+        Ok(s) => s.0,
+        Err(e) => {
+            error!(error = %e, "failed to load unified configs / 統一配置加載失敗");
+            std::process::exit(1);
+        }
+    };
+    // NOTE: learning_store + budget_store constructed alongside risk_store but
+    // threading through to consumers lands in 1C-2-B (follow-on commit).
+    // 注意：learning + budget store 與 risk 同時構造，但穿透到消費者在 1C-2-B 完成。
+    let _ = &risk_store; // suppress unused warning until 1C-2-B wires it
 
     // ------------------------------------------------------------------
     // 3. Build multi-thread runtime / 構建多線程運行時
@@ -189,6 +210,65 @@ fn main() {
         .expect("failed to build tokio runtime / 構建 tokio 運行時失敗");
 
     runtime.block_on(async_main(config));
+}
+
+/// ARCH-RC1 1C-2-A: Load RiskConfig / LearningConfig / BudgetConfig from
+/// their TOML files, wrapping each in an `Arc<ConfigStore<T>>`. Paths resolve
+/// to `settings/risk_control_rules/{risk,learning,budget}_config.toml` by
+/// default; individual env vars override each path.
+/// ARCH-RC1 1C-2-A：從 TOML 載入 3 個統一 Config，各自包入 Arc<ConfigStore>。
+/// 預設路徑為 settings/risk_control_rules/；可用環境變數覆蓋個別路徑。
+#[allow(clippy::type_complexity)]
+fn load_unified_configs() -> Result<
+    (
+        Arc<ConfigStore<RiskConfig>>,
+        Arc<ConfigStore<LearningConfig>>,
+        Arc<ConfigStore<BudgetConfig>>,
+    ),
+    String,
+> {
+    use std::path::PathBuf;
+
+    let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("settings/risk_control_rules"));
+    let risk_path = std::env::var("OPENCLAW_RISK_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| base.join("risk_config.toml"));
+    let learning_path = std::env::var("OPENCLAW_LEARNING_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| base.join("learning_config.toml"));
+    let budget_path = std::env::var("OPENCLAW_BUDGET_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| base.join("budget_config.toml"));
+
+    info!(
+        risk = %risk_path.display(),
+        learning = %learning_path.display(),
+        budget = %budget_path.display(),
+        "loading ARCH-RC1 unified configs / 載入 ARCH-RC1 統一配置"
+    );
+
+    let risk: RiskConfig = load_toml_or_default(&risk_path, |c: &RiskConfig| c.validate())
+        .map_err(|e| format!("risk config: {}", e))?;
+    let learning: LearningConfig =
+        load_toml_or_default(&learning_path, |c: &LearningConfig| c.validate())
+            .map_err(|e| format!("learning config: {}", e))?;
+    let budget: BudgetConfig = load_toml_or_default(&budget_path, |c: &BudgetConfig| c.validate())
+        .map_err(|e| format!("budget config: {}", e))?;
+
+    info!(
+        risk_version = risk.meta.version,
+        learning_version = learning.meta.version,
+        budget_version = budget.meta.version,
+        "ARCH-RC1 unified configs loaded / 統一配置已載入"
+    );
+
+    Ok((
+        Arc::new(ConfigStore::new(risk)),
+        Arc::new(ConfigStore::new(learning)),
+        Arc::new(ConfigStore::new(budget)),
+    ))
 }
 
 /// Run the engine in replay mode: read historical ticks from JSONL,
