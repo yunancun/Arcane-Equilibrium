@@ -1,9 +1,48 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-06（Session 13 · R3 backlog 清完 — FA-GAP/SEC-11/idle writer 3/I-22/per-symbol fees）
-測試基準線：**471 engine + 413 core + 35 ml_training + 11 control_api smoke** · 0 failures
+最後更新：2026-04-07（ARCH-RC1 Session 1A+1B 完成 · 1C 待做）
+測試基準線：**682 engine lib (+58 1B) + 386 core + 30 types + 35 ml_training + 11 control_api smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
+
+---
+
+## 🎯 ARCH-RC1 統一 Config（2026-04-07 啟動，多 session 工程）
+
+**目標**：將 7 套重疊風控/配置系統統一為 3 個熱重載 Config（Risk/Learning/Budget）+ 既有 StrategyParams。Python RiskManager 1633 → ~150 行 RiskViewClient（純 IPC 讀）。永久契約見 memory/project_arch_rc1_unified_config.md。
+
+- [x] **Session 1A 死代碼清理** — `7f59e9b` (-270 行)
+  - 砍 MlConfig + attention_*_ms (5) + EngineConfig + ParamTemperature
+  - 0 行為改變 / engine 624 + types 30 全綠
+- [x] **Session 1B 統一 Config 骨架** — `0523f17` (+2632 行 / +58 tests)
+  - config/store.rs 泛型 ConfigStore<T> + ArcSwap + all-or-nothing patch
+  - config/risk_config.rs RiskConfig 13 sub-struct（含跨欄位 invariant）
+  - config/learning_config.rs LearningConfig（Phase 4.1 default-off 收編）
+  - config/budget_config.rs BudgetConfig（AttentionTax 整塊）
+  - engine 624 → 682 / 0 regression
+- [ ] **Session 1C-1 Rust call site 遷移**（最危險，先做）
+  - RiskManagerConfig 廢棄 + 9 個檔案改讀新 RiskConfig
+  - RuntimeConfig 風控欄位刪除（max_stop_loss_pct / p1_risk_pct 等 8 個）
+  - RuntimeConfig → EngineBootstrap 改名 + 12 檔案 import 更新
+  - GuardianConfig / H0GateConfig 改讀新 RiskConfig.cascade
+  - 預估 ~50 call site 改動
+- [ ] **Session 1C-2 IPC 接通 + JSON 遷移**（純加法）
+  - 6 個 IPC 端點：update_risk_config / update_learning_config / update_budget_config + 對應 get_*
+  - bulk patch all-or-nothing + mutex 序列化 + version + source 審計
+  - operator_risk_config.json → risk_config.toml 一次性遷移（讀 → v2 schema → 寫 → 改名 .legacy）
+  - sql/migrations/V014__engine_events.sql（startup/shutdown/config_patch/reconcile/crash 統一審計）
+- [ ] **Session 1C-3 Python 空殼化**
+  - risk_view_client.py 新建（~150 行純 IPC 讀）
+  - risk_manager.py 1633 → 30 行 deprecation shim
+  - 32 個 Python 檔案 import 遷移（13 業務 + 19 測試）
+  - risk_routes.py GUI 寫操作改 IPC 轉發
+- [ ] **Session 1C-4 收尾**
+  - 熱重載驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
+  - Position Reconciler（trading.open_positions 表 + Bybit 對帳 + cooldown 重建）
+  - NewsPipeline run_once 60s spawn（順手）
+  - E2 + E4 + QA Audit + 文檔同步 + commit + push
+
+---
 
 **參考索引**
 - 已完成歸檔（截至 Session 11）：`docs/worklogs/2026-04-06--completed_todo_archive_l3_phases.md`
