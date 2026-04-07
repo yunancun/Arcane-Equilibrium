@@ -3,6 +3,31 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-07
 
+### Session 1A — ARCH-RC1 死代碼清理（2026-04-07）
+
+ARCH-RC1 統一 Config 工作的純減法首步：盤點 rust/ tree 後確認 7 套重疊的風控/配置系統，先砍 3 個已驗證為純死代碼的目標，為後續 1B（新建 3-Config 骨架）+ 1C（遷移 call site + Python 空殼化）鋪路。
+
+**砍掉的死代碼**：
+- `openclaw_engine::config::MlConfig`（struct + Default + 3 default fns，~50 行）
+  - 真實 ML 用 `ml::kelly_sizer::KellyConfig` + Scorer/OnnxModelManager constructor 直傳，從未讀 RuntimeConfig.ml
+  - grep `kelly_max_fraction|kelly_min_trades|kelly_risk_pct|onnx_model_path|scorer_enabled|kelly_enabled` → 0 業務 call site
+- `openclaw_engine::config::attention_*_ms` 5 欄位 + 5 default fns + Default impl/test 引用（~30 行）
+  - cognitive 系統用 `CognitiveParams::scan_interval_s` 不是 attention intervals
+  - grep 整個 srv/（含 Python） → 0 業務 call site
+- `openclaw_types::config::EngineConfig` + `ParamTemperature`（整檔 187 行 + lib.rs re-export）
+  - V3-PA-5 規劃的 cold/warm 元資料系統，但實作改用 `ConfigManager::reload()` 內寫死的欄位級 warn+preserve（型別安全更高）
+  - 6 個業務欄位全部已有替代（RuntimeConfig / H0GateConfig / GovernanceMode / CognitiveParams）
+  - grep `EngineConfig|ParamTemperature` → 0 代碼引用，僅 2 處設計文檔提及
+
+**淨刪除**：~270 行死代碼。零行為改變（純減法 commit）。
+
+**驗證**：
+- `cargo build -p openclaw_types -p openclaw_engine` 9.87s 通過，0 新 warning
+- `cargo test -p openclaw_engine` lib **624 / integration 36 / 0 failed**
+- `cargo test -p openclaw_types` **30 / 0 failed**
+
+**ARCH-RC1 全貌**：將 7 套重疊配置（Python RiskManager / openclaw_core::RiskManagerConfig / openclaw_engine::RuntimeConfig / openclaw_types::EngineConfig 死 / openclaw_types::risk 活 / GuardianConfig / H0GateConfig）統一為 3 個熱重載 Config（Risk/Learning/Budget）+ StrategyParams，TOML on-disk + JSON IPC + ArcSwap 熱重載，禁止 restart-to-apply。Session 1A 是純清理，1B 建骨架，1C 遷移 call site + Python 空殼化。
+
 ### Session 16 — Phase 4.1 SHIPPED + E3 R6 closed + P2 partial（2026-04-07 · commits `ee6fd00`..`aecea27`）
 
 **Phase 4.1 Claude API Consumer Loop（`ee6fd00`）：**

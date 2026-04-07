@@ -7,7 +7,6 @@
 
 pub mod agent;
 pub mod cognitive;
-pub mod config;
 pub mod intent;
 pub mod price;
 pub mod risk;
@@ -15,7 +14,6 @@ pub mod state;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
-pub use config::{EngineConfig, ParamTemperature};
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, OHLCV};
 pub use risk::{
