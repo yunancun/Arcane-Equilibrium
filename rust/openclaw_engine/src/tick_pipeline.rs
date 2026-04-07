@@ -456,7 +456,31 @@ impl TickPipeline {
         h0.allowed_categories = snap.limits.allowed_categories.clone();
         self.h0_gate.update_config(h0);
 
-        // 4. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
+        // 4. ARCH-RC1 1C-2-F E-Merge-1 (downgraded): hot-reload the legacy
+        //    paper_state.stop_config so the H0-blocked / paused protective
+        //    fallback stops at tick_pipeline.rs:910 + :1017 use the operator-
+        //    current RiskConfig values, not stale boot defaults. The research
+        //    agent confirmed those two call sites are intentional protective
+        //    fallbacks (main engine evaluate_positions never runs in their
+        //    early-return branches), so stop_manager is KEPT but its owned
+        //    StopConfig must now track RiskConfig.
+        //    Trailing / time stops stay None on paper_state because the
+        //    main engine owns them; the fallback only needs hard + TP to
+        //    prevent unbounded losses during gate block / pause.
+        //    ARCH-RC1 1C-2-F E-Merge-1 (降級版)：熱重載 paper_state.stop_config，
+        //    讓 H0 阻擋 / 暫停時的 fallback 止損使用 operator 最新的 RiskConfig
+        //    值，而非啟動時的 defaults。Research agent 確認 910/1017 是故意的
+        //    保護 fallback，因此 stop_manager 保留，只把它的 owned 配置拉齊。
+        self.paper_state
+            .set_hard_stop_pct(snap.limits.stop_loss_max_pct);
+        if snap.limits.take_profit_enforced {
+            self.paper_state
+                .set_take_profit_pct(Some(snap.limits.take_profit_max_pct));
+        } else {
+            self.paper_state.set_take_profit_pct(None);
+        }
+
+        // 5. ARCH-RC1 1C-2-F E-Merge-3: hot-reload RiskGovernorSm.thresholds
         //    from RiskConfig.cascade. Previously the 6-tier cascade state
         //    machine carried its own hardcoded EscalationThresholds::default()
         //    with NO path to operator override. Field names differ slightly
