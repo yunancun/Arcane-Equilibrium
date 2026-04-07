@@ -3,6 +3,64 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-07
 
+### Session 1C-1 — ARCH-RC1 風控 call site 遷移（2026-04-07 · commits `2007b67` `6768381` `ef30bf1`）
+
+ARCH-RC1 第三步：把 1B 建好的新 Config 真正接進所有 call site，物理刪除重複並行的舊風控類型。Batches 0-6 一個 session 跑完，共 3 個 commit，+747 / −1293（淨 −546 行），0 regression。
+
+**風控並行系統軌跡**：1A 開始 7 套 → 1A 結束 6 套 → 1C-1 B0-4 結束 4 套 → B5 結束 3 套 → **B6 結束 2 套**（RiskConfig 權威 + Python RiskManager 待 1C-3 空殼化）。
+
+**Batch 0 — AntiCluster.max_same_direction 校齊**（`2007b67`）：
+- 新 `RiskConfig.anti_cluster` 原本只有 `offset_fraction`，grep 活體掃描發現 `max_same_direction` 在 guardian.rs/ipc_server.rs/claude_teacher applier/GUI API route 全活用，不可刪
+- 加欄位 + 範圍驗證 `[1, 100]` + 3 tests（default/zero_rejected/over_limit_rejected）
+
+**Batch 1 — openclaw_core/src/risk 瘦身**（`2007b67`）：
+- 刪 `RiskManagerConfig` 整個 struct（229 行 + 4 tests）
+- 刪 `checks.rs`（17 tests · check_order_allowed + check_position_on_tick 原址）
+- 新建 `regime.rs`（36 行 + 3 tests）— 保留無狀態 regime multiplier fallback 供 `stops.rs` 使用（core 不能依賴 engine）
+- mod.rs 重寫 exports
+
+**Batch 1b — 新建 openclaw_engine/src/risk_checks.rs**（`2007b67`，502 行 / 16 tests）：
+- `check_order_allowed(&RiskConfig)` — 讀 `limits.*`
+- `check_position_on_tick(cost_edge_max_ratio, &RiskConfig)` — cost_edge 變成 primitive 參數（契約明確 BudgetConfig 為權威，caller 從 `BudgetConfig.attention_tax.cost_edge_max_ratio` 取出傳入）
+- 所有 15+ 欄位映射到新 sub-struct 路徑（`limits.stop_loss_max_pct` / `agent.trailing_enabled` / `dynamic_stop.base_ratio` / `cost_gate.k_base` 等）
+
+**Batch 2+3+4 — 5 檔案 call site 遷移**（`2007b67` · 單一編譯單元）：
+- `pipeline_types.rs`: 快照欄位型別 `Option<RiskConfig>`
+- `tick_pipeline.rs`: import swap + ADX 閾值改讀 `cost_gate.adx_trending` + `evaluate_positions` 加 `cost_edge_max_ratio=0.8` 參數（1C-2 改接真 BudgetConfig）
+- `intent_processor.rs`: struct 欄位 + 9 個 patch_* 路徑 + 所有 cost_gate k_* 讀取
+- `position_risk_evaluator.rs`: 簽名 + 5 處測試重映射
+- `event_consumer/setup.rs`: Guardian + IntentProcessor 改用 `RiskConfig::default()` 種子（1C-2 改接 ConfigStore）
+- `event_consumer/tests.rs`: 8 個 field-path assertion 重寫
+
+**Batch 5 — RuntimeConfig 改名 EngineBootstrap + 刪風控欄位**（`6768381` · 4 檔案 / +78/−149）：
+- 刪 8 個風控欄位：`p1_risk_pct` / `max_stop_loss_pct` / `max_take_profit_pct` / `max_open_positions` / `max_total_exposure_pct` / `max_leverage` / `max_drawdown_pct` / `max_same_direction_positions`（消費者全改讀 RiskConfig.limits 或 anti_cluster）
+- `RuntimeConfig` → `EngineBootstrap` 正式改名；保留 `#[deprecated] pub type RuntimeConfig = EngineBootstrap` 過渡 1C-2（外部 crate 繼續編譯）
+- 驗證邏輯重寫 — 只檢啟動欄位：reconnect_delay > 0 / heartbeat > 0 / ipc_socket 非空
+- 測試重寫：刪 3 風控 validate tests + 加 2 bootstrap validate tests
+- ipc_server `handle_get_state` 風控顯示欄位改讀 `RiskConfig::default()` placeholder
+- integration test `rrc1_audit_tests.rs` 斷言改 `rc.limits.stop_loss_max_pct`
+
+**Batch 6 — openclaw_types::risk 死代碼清理**（`ef30bf1` · 2 檔案 / +19/−122）：
+- 刪 `GuardianConfig`（types 版本，0 consumers · live 版本在 `openclaw_core::guardian`）
+- 刪 `StopConfig`（types 版本，0 consumers · live 版本在 `openclaw_core::stop_manager`）
+- 刪 composite `RiskConfig`（0 consumers · 由 `openclaw_engine::config::RiskConfig` 取代）
+- 刪 `test_stop_config_matches_golden` 黃金 schema 測試（core 側型別從 types 測試不可達，只能刪）
+- 刪 `test_risk_config_default_serde` / `test_stop_config_serde`
+- 保留 H0 gate 跨 crate 共享 runtime 類型：`H0GateConfig` / `H0GateHealthSnapshot` / `H0GateRiskSnapshot` / `H0CheckResult`
+- lib.rs re-exports 對應精簡
+
+**測試與驗證**：
+- engine lib 682 → 708 (+26)
+- core 386 → 387 (+1 · regime.rs 拆出)
+- types 30 → 27 (−3 · 刪 3 個死類型 tests)
+- phase4_integration 3/3 · rrc1_audit 4/4 · stress_integration 29/29 全綠
+- 0 regression
+
+**1C-1 未做（留後續 session）**：
+- 1C-2: ConfigStore 構造 + main.rs 啟動序列注入 + 4 個 update/get IPC 端點 + bulk patch audit + operator_risk_config.json→TOML 一次性遷移 + V014 engine_events 表
+- 1C-3: Python `risk_manager.py` 1633 → 150 行 `RiskViewClient` + 32 檔案 import 遷移 + risk_routes.py GUI 寫端點轉發 IPC
+- 1C-4: Position Reconciler + NewsPipeline spawn + 熱重載 e2e 驗收 + E2/E4/QA audit
+
 ### Session 1B — ARCH-RC1 統一 Config 骨架（2026-04-07）
 
 ARCH-RC1 第二步：純加法建立新 Config 架構骨架，零行為改變，舊系統繼續運行（雙軌並存）。call site 遷移留 1C。
