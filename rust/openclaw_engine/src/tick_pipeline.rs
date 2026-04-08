@@ -451,6 +451,12 @@ impl TickPipeline {
         }
     }
 
+    /// PH5-WIRE-1: Inject JS shrunk edge estimates into the intent processor.
+    /// PH5-WIRE-1：將 JS 收縮邊際估計注入意圖處理器。
+    pub fn set_edge_estimates(&mut self, estimates: crate::edge_estimates::EdgeEstimates) {
+        self.intent_processor.set_edge_estimates(estimates);
+    }
+
     /// W-3: Plug in a LinUCB runtime (read-only on the live path; metadata only).
     /// W-3：注入 LinUCB 運行時（live 路徑唯讀；僅 metadata）。
     pub fn set_linucb_runtime(

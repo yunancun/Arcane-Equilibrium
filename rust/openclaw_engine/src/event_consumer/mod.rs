@@ -153,6 +153,34 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         info!("pipeline wired to live BudgetConfig ConfigStore / 接入 BudgetConfig 熱重載");
     }
 
+    // PH5-WIRE-1: Load JS shrunk edge estimates from settings/edge_estimates.json.
+    // Cold-start (file absent) → empty estimates → ATR×0.2 fallback remains active.
+    // PH5-WIRE-1：從 settings/edge_estimates.json 加載 JS 收縮邊際估計。
+    // 冷啟動（文件缺失）→ 空估計 → ATR×0.2 回退保持激活。
+    {
+        let base = std::env::var("OPENCLAW_BASE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                // Resolve relative to the binary's directory (works for both dev and deployment).
+                // 相對於二進制文件目錄解析（適用於開發和部署環境）。
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|d| d.join("../../..")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+            });
+        let estimates = crate::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
+        if estimates.is_populated() {
+            info!(
+                n_cells = estimates.n_cells(),
+                grand_mean_bps = estimates.grand_mean_bps(),
+                "PH5-WIRE-1: JS edge estimates loaded / JS 邊際估計已加載"
+            );
+        } else {
+            info!("PH5-WIRE-1: no edge snapshot — cold-start ATR×0.2 fallback / 無快照，ATR 回退");
+        }
+        pipeline.set_edge_estimates(estimates);
+    }
+
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
     if cfg_snapshot.balance_mode == "bybit_sync" {
         pipeline
