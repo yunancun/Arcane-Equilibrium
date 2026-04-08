@@ -193,6 +193,24 @@ async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_
         raise HTTPException(status_code=500, detail="Internal error")
 
 
+def _normalize_execution(f: dict) -> dict:
+    """Remap Rust ExecutionInfo snake_case fields to Bybit camelCase so the GUI
+    fallback chain (execQty || qty, execPrice || price, execFee || fee) finds them.
+    Rust 序列化為 snake_case（exec_qty/exec_price/exec_fee），GUI 期望 camelCase，
+    此函數將 Rust 格式轉換為 Bybit API 格式避免 qty/price 顯示 0。
+    """
+    if not isinstance(f, dict):
+        return f
+    return {
+        **f,
+        "execQty":   f.get("execQty")   or f.get("exec_qty"),
+        "execPrice": f.get("execPrice") or f.get("exec_price"),
+        "execFee":   f.get("execFee")   or f.get("exec_fee"),
+        "execTime":  f.get("execTime")  or f.get("exec_time"),
+        "side":      f.get("side")      or ("Buy" if f.get("is_long") else "Sell"),
+    }
+
+
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo recent executions / 获取 Bybit Demo 最近成交"""
@@ -200,7 +218,7 @@ async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_a
     rc = _get_rust_client()
     if rc is not None:
         try:
-            fills = rc.get_executions("linear", limit=50)
+            fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
             return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
         except Exception as e:
             logger.warning(f"Rust fills failed, falling back to Python: {e}")
