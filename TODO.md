@@ -118,10 +118,11 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 - [ ] **6-RC-2 V014 event_type 隔離** — 寫入 V014 用 `event_type="reconciler_auto_contract"`（與 `governor_de_escalate` 區隔），讓 B1 `load_governor_cooldown_from_audit` 的 SQL filter 永不會把 reconciler 行誤計入 24h operator cooldown。同步補 SQL filter 的安全網（顯式 `AND payload->>'reason_code' IN (operator_whitelist)`）。
 - [ ] **6-RC-3 動作策略** — Major/Orphan/Ghost → step one tier looser；連續 N 個 cycle (≥3) 持續漂移 → 直跳 Defensive；任何 cycle 觀察到 ≥5 個獨立 (symbol,side) 漂移 → 直跳 CircuitBreaker（系統性事件）。
 - [ ] **6-RC-4 自身冷卻** — reconciler 自動動作獨立 cooldown：同 (symbol,side) 30 分鐘內不重複 trigger；全局每 5 分鐘最多 1 次自動收縮，避免 REST 抖動或時鐘錯誤造成連續降級。
-- [ ] **6-RC-5 絕對 dust floor** — `MIN_DUST_QTY_ABS` 常數（建議 0.0001 或對應交易對 minQty 的 1.5 倍）。低於該值的漂移降級為 MinorDrift 不論百分比，避免 sub-cent residual 觸發風暴。
-- [ ] **6-RC-6 多通道告警** — 自動動作前必先發告警（OC-3 多通道告警依賴），讓 operator 有機會在動作生效前介入；告警延遲 15s 後若 operator 未 ACK 才執行動作。
+- [ ] **6-RC-5 絕對 dust floor (per-symbol minQty)** — 從 instrument_info 讀取每個 symbol 的 `lotSizeFilter.minOrderQty`，閾值固定為 `1.5 × minQty`。**禁止**用全局魔法數（0.0001 對 BTC 與 PEPE 的意義截然不同）。低於該值的漂移降級為 MinorDrift 不論百分比，避免 sub-cent residual 觸發風暴。
+- [ ] **6-RC-6 多通道告警** — 自動動作前必先發告警（OC-3 多通道告警依賴），讓 operator 有機會在動作生效前介入；告警延遲 15s 後若 operator 未 ACK 才執行動作。**⚠️ 阻塞依賴**：必須先完成 OC-3「長期整合」段的多通道告警基礎設施，否則本項無法落地。Phase 6 排程時 6-RC-6 必須晚於 OC-3。
 - [ ] **6-RC-7 整合測試** — 必須有 e2e 測試斷言觸發路徑真的進到 `apply_de_escalation`（非 `_rejected`），覆蓋：單筆 Major 觸發 step looser / 5 筆漂移觸發 CircuitBreaker / 30 分鐘冷卻拒絕重複 / 告警未 ACK 後才動作。
 - [ ] **6-RC-8 Live blocker 解除** — 完成上述後，從 Live blocker 清單移除「Bybit REST `/v5/position/list` 必須可達」的隱含依賴項（屆時 reconciler 失敗只代表 audit 缺失，不影響風控）。
+- [ ] **6-RC-9 Baseline staleness 政策** — `PositionView` / 對帳器狀態加 `last_fetch_ms` 欄位。若 `now - last_fetch_ms > N 分鐘`（建議 N=10）則下一次成功 REST 走 warmup-reseed 路徑（靜默播種、不分類），避免長時間 REST outage 後 baseline 全面陳舊導致 cycle 1 把所有期間合法變化誤判為一波 drift。**6-RC-1 落地前必須先完成此項**，否則自動動作層會在 REST 恢復時的第一個 cycle 產生大量誤觸發。
 
 **設計原則對齊：**
 - 根原則 #5 #6（生存優先 + 失敗默認收縮）：自動收縮恢復後系統真正具備「不確定時自動降風險」能力

@@ -33,6 +33,12 @@
 //!
 //!   首輪 warmup：任務啟動後第一次成功 REST 抓取只做基線播種，不進行分類，
 //!   避免「冷啟動 orphan 風暴」（既有 Bybit 倉位被空基線全部誤判為 Orphan）。
+//!   注意：warmup 完成到第一次 cycle tick 之間仍有 ~30s race window，期間新開的
+//!   倉位會在 cycle 1 被歸類為單筆 Orphan（非風暴，可接受 — Phase 6 自動動作層
+//!   會以 6-RC-4 自身冷卻 + 6-RC-9 baseline staleness 政策另外處理）。
+//!   Spawn 僅 gate 在 `shared_client.is_some()`，**不**依 system_mode — demo_only
+//!   下亦會輪詢 mainnet REST，因為 reconciler 的本職就是感知外部世界觀變化，
+//!   demo 期間更需要練習此感知能力（operator 確認，2026-04-08）。
 //!
 //!   1C-4 wrap 降級：原設計每次 Major/Orphan/Ghost 都觸發 governor 降級，QA+E2
 //!   審查發現該路徑（a）因 operator manual override 白名單拒絕 reconciler 的
