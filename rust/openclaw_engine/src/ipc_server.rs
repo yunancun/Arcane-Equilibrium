@@ -473,6 +473,8 @@ async fn dispatch_request(
         "force_governor_tier_looser" => {
             handle_force_governor_looser(id, paper_cmd_tx, &req.params, audit_pool).await
         }
+        // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
+        "submit_paper_order" => handle_submit_paper_order(id, paper_cmd_tx, &req.params).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
@@ -1059,6 +1061,74 @@ async fn handle_clear_consecutive_losses(
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
         Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "result": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
+    }
+}
+
+/// ARCH-RC1 1C-3-F: External paper-side order submission. Drives the same
+/// IntentProcessor pipeline strategies use (Guardian / Kelly / P1 cap / risk
+/// gate / cost gate). On success returns the JSON envelope produced by
+/// `TickPipeline::submit_external_order`.
+/// ARCH-RC1 1C-3-F：外部紙盤訂單入口 — 與策略走同一條 IntentProcessor 管線。
+async fn handle_submit_paper_order(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
+        }
+    };
+    let symbol = match params.get("symbol").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing symbol"),
+    };
+    let side = match params.get("side").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing side"),
+    };
+    let qty = match params.get("qty").and_then(|v| v.as_f64()) {
+        Some(q) if q > 0.0 => q,
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/invalid qty"),
+    };
+    let order_type = params
+        .get("order_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("market")
+        .to_string();
+    let limit_price = params.get("limit_price").and_then(|v| v.as_f64());
+    let confidence = params
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let strategy = params
+        .get("strategy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("external")
+        .to_string();
+
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PaperSessionCommand::SubmitOrder {
+        symbol,
+        side,
+        qty,
+        order_type,
+        limit_price,
+        confidence,
+        strategy,
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse envelope: {e}")),
+        },
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }

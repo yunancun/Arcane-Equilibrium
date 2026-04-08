@@ -145,6 +145,23 @@ pub enum PaperSessionCommand {
         notes: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// ARCH-RC1 1C-3-F: Submit an external paper-side order through the same
+    /// IntentProcessor pipeline strategies use (Guardian / Kelly / P1 cap /
+    /// risk gates / cost gate / paper fill). Used by `shadow_decision_builder`
+    /// after Layer 2 retires `paper_trading_engine.py`. Returns a JSON envelope
+    /// `{"order_id","fill_qty","fill_price","fee"}` on success.
+    /// ARCH-RC1 1C-3-F：通過策略所走的同一條 IntentProcessor 管線提交外部紙盤訂單。
+    /// shadow_decision_builder 在 paper_trading_engine.py 退場後改走此 RPC。
+    SubmitOrder {
+        symbol: String,
+        side: String,   // "Buy" / "Sell"
+        qty: f64,
+        order_type: String, // "market" or "limit"
+        limit_price: Option<f64>,
+        confidence: f64,
+        strategy: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -641,6 +658,172 @@ impl TickPipeline {
     /// - `session_halted`: news/guardian hard-halt flag
     ///
     /// ARCH-RC1 1C-3-B：組裝 Rust 原生風控運行時狀態快照（新 GUI 直接綁定這些欄位）。
+    /// Test-only helper: seed `latest_indicators` so cost-gate ATR lookups
+    /// in `submit_external_order` succeed without driving a full on_tick.
+    /// 測試專用：種入 latest_indicators 以便 submit_external_order 走通成本門。
+    #[cfg(test)]
+    pub fn set_latest_indicators_for_test(&mut self, symbol: &str, snap: IndicatorSnapshot) {
+        self.latest_indicators.insert(symbol.to_string(), snap);
+    }
+
+    /// ARCH-RC1 1C-3-F: External (non-strategy) paper-side order submission.
+    /// Drives the same IntentProcessor pipeline strategies use, so all gates
+    /// (Guardian / Kelly / P1 cap / risk gate / cost gate) apply uniformly.
+    /// Returns a JSON envelope on success: `{order_id, fill_qty, fill_price, fee}`.
+    /// Reject reasons (paused / halted / unknown symbol / no price / no atr /
+    /// gate rejection) bubble up as Err(String).
+    /// ARCH-RC1 1C-3-F：外部紙盤訂單入口（非策略），與策略走同一條 IntentProcessor 管線。
+    pub fn submit_external_order(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        order_type: &str,
+        limit_price: Option<f64>,
+        confidence: f64,
+        strategy: &str,
+    ) -> Result<String, String> {
+        if self.paper_paused {
+            return Err("paper_paused".into());
+        }
+        if self.session_halted {
+            return Err("session_halted".into());
+        }
+        if !(qty > 0.0) {
+            return Err(format!("invalid qty: {qty}"));
+        }
+        let price = self.paper_state.latest_price(symbol).unwrap_or(0.0);
+        if !(price > 0.0) {
+            return Err(format!("no latest price for {symbol}"));
+        }
+        // ATR drives the cost gate; absent ATR is fail-closed (matches on_tick path).
+        // ATR 由 latest_indicators 取得；缺失即 fail-closed（與 on_tick 行為一致）。
+        let atr_value = self
+            .latest_indicators
+            .get(symbol)
+            .and_then(|i| i.atr_14.as_ref())
+            .map(|a| a.atr)
+            .unwrap_or(0.0);
+
+        let intent = crate::intent_processor::OrderIntent {
+            symbol: symbol.to_string(),
+            is_long,
+            qty,
+            confidence,
+            strategy: strategy.to_string(),
+            order_type: order_type.to_string(),
+            limit_price,
+        };
+
+        let result = self
+            .intent_processor
+            .process(&intent, &self.governance, &self.paper_state, atr_value);
+        if !result.submitted {
+            return Err(result
+                .rejected_reason
+                .unwrap_or_else(|| "rejected_unknown".into()));
+        }
+        let mut fill = result.fill.ok_or_else(|| "submitted_but_no_fill".to_string())?;
+
+        // Instrument-aware rounding (mirrors on_tick paper path).
+        // 合約精度取整（與 on_tick 紙盤分支一致）。
+        if let Some(ref icache) = self.instrument_cache {
+            if let Some(spec) = icache.get(symbol) {
+                fill.fill_qty = spec.round_qty(fill.fill_qty);
+                fill.fill_price = spec.round_price(fill.fill_price);
+                if fill.fill_qty <= 0.0 && spec.min_qty > 0.0 {
+                    let notional = spec.min_qty * fill.fill_price;
+                    if notional <= self.paper_state.balance() * 0.10 {
+                        fill.fill_qty = spec.min_qty;
+                    }
+                }
+            }
+        }
+        if !(fill.fill_qty > 0.0) {
+            return Err("fill_qty rounded to 0".into());
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let realized_pnl = self.paper_state.apply_fill(
+            symbol,
+            is_long,
+            fill.fill_qty,
+            fill.fill_price,
+            fill.fee,
+            now_ms,
+        );
+
+        self.stats.total_intents += 1;
+        self.stats.total_fills += 1;
+
+        self.recent_intents.push_back(TimestampedIntent {
+            timestamp_ms: now_ms,
+            intent: intent.clone(),
+            result: "submitted".into(),
+        });
+        if self.recent_intents.len() > 50 {
+            self.recent_intents.pop_front();
+        }
+        self.recent_fills.push_back(TimestampedFill {
+            timestamp_ms: now_ms,
+            symbol: symbol.to_string(),
+            is_long,
+            qty: fill.fill_qty,
+            price: fill.fill_price,
+            fee: fill.fee,
+            strategy: strategy.to_string(),
+        });
+        if self.recent_fills.len() > 50 {
+            self.recent_fills.pop_front();
+        }
+
+        let order_id = format!("ext-{symbol}-{now_ms}");
+
+        // Persistence parity: emit Intent + Fill to PG writer when wired.
+        // 持久化對等：trading_tx 已接時，發 Intent + Fill 到 PG writer。
+        if let Some(ref tx) = self.trading_tx {
+            let context_id = format!("ctx-{symbol}-{now_ms}");
+            let _ = tx.try_send(crate::database::TradingMsg::Intent {
+                intent_id: format!("intent-{symbol}-{now_ms}"),
+                ts_ms: now_ms,
+                signal_id: String::new(),
+                context_id: context_id.clone(),
+                symbol: symbol.to_string(),
+                side: if is_long { "Buy".into() } else { "Sell".into() },
+                qty,
+                price,
+                order_type: order_type.to_string(),
+                strategy_name: strategy.to_string(),
+            });
+            let _ = tx.try_send(crate::database::TradingMsg::Fill {
+                fill_id: format!("fill-{symbol}-{now_ms}"),
+                ts_ms: now_ms,
+                order_id: order_id.clone(),
+                symbol: symbol.to_string(),
+                side: if is_long { "Buy".into() } else { "Sell".into() },
+                qty: fill.fill_qty,
+                price: fill.fill_price,
+                fee: fill.fee,
+                fee_rate: self.intent_processor.fee_rate(symbol),
+                realized_pnl,
+                strategy_name: strategy.to_string(),
+                context_id,
+            });
+        }
+
+        Ok(serde_json::json!({
+            "order_id": order_id,
+            "fill_qty": fill.fill_qty,
+            "fill_price": fill.fill_price,
+            "fee": fill.fee,
+            "realized_pnl": realized_pnl,
+        })
+        .to_string())
+    }
+
     pub fn risk_runtime_status_json(&self, now_ms: u64) -> serde_json::Value {
         let boot_remaining_ms = match self.boot_ts_ms {
             Some(boot_ts) => {
