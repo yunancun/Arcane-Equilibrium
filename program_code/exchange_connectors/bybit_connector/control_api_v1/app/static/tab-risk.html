@@ -860,38 +860,43 @@ async function loadRiskConfig() {
   const rRisk = ra.risk_manager_config || {};
   const ap = cfg.agent_params || {};
 
-  // Stop Manager — populate display (prefer Rust active → Python global → default)
-  const hardStop = rStop.hard_stop_pct ?? gc.max_stop_loss_pct ?? 5;
+  // Stop Manager — populate display (prefer fresh ConfigStore `gc` → state-reader snapshot fallback)
+  // ARCH-RC1 fake-success fix: `gc` is built from `client.refresh_config()` (fresh ConfigStore IPC).
+  // `rStop/rGuard/rRisk` come from `reader.get_snapshot()` which is the tick-pushed state-reader
+  // snapshot — lags one tick behind a config patch, so reading it first caused "Save success but
+  // display shows old value" (user-visible fake success). Always prefer fresh config.
+  // 顯示優先順序：fresh ConfigStore (gc) → state-reader snapshot (滯後一拍) → 預設值。
+  const hardStop = gc.max_stop_loss_pct ?? rStop.hard_stop_pct ?? 5;
   ocSetText('s-hard', hardStop + '%');
-  const tpOn = rStop.take_profit_pct != null || gc.tp_enabled === true;
-  const tpVal = rStop.take_profit_pct ?? gc.max_take_profit_pct ?? 20;
+  const tpOn = gc.tp_enabled === true || (gc.tp_enabled == null && rStop.take_profit_pct != null);
+  const tpVal = gc.max_take_profit_pct ?? rStop.take_profit_pct ?? 20;
   ocSetText('s-tp', tpOn ? (tpVal + '%') : '关闭 / OFF');
   $('s-tp').style.color = tpOn ? 'var(--green)' : 'var(--text-dim)';
-  const trailingVal = rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
-  ocSetText('s-trailing', trailingVal != null ? trailingVal + '%' : '关闭 / OFF');
-  const atrMult = rStop.atr_multiplier ?? null;
-  ocSetText('s-atr', atrMult != null ? atrMult + 'x' : '关闭 / OFF');
-  const timeStop = rStop.time_stop_hours ?? gc.max_holding_hours ?? null;
+  const trailingVal = gc.trailing_stop_pct ?? rStop.trailing_stop_pct ?? ap.trailing_stop_distance_pct ?? null;
+  ocSetText('s-trailing', trailingVal != null && trailingVal !== '' ? trailingVal + '%' : '关闭 / OFF');
+  const atrMult = gc.atr_multiplier ?? rStop.atr_multiplier ?? null;
+  ocSetText('s-atr', atrMult != null && atrMult !== '' ? atrMult + 'x' : '关闭 / OFF');
+  const timeStop = gc.max_holding_hours ?? rStop.time_stop_hours ?? null;
   ocSetText('s-time', timeStop != null ? timeStop + 'h' : '关闭 / OFF');
-  const maxDD = rGuard.max_drawdown_pct ?? gc.max_session_drawdown_pct ?? 15;
+  const maxDD = gc.max_session_drawdown_pct ?? rGuard.max_drawdown_pct ?? 15;
   ocSetText('s-drawdown', maxDD + '%');
-  const maxLev = rGuard.max_leverage ?? gc.max_leverage ?? 20;
+  const maxLev = gc.max_leverage ?? rGuard.max_leverage ?? 20;
   ocSetText('s-leverage', maxLev + 'x');
   ocSetText('s-daily', gc.max_daily_loss_pct != null ? gc.max_daily_loss_pct + '%' : '--');
 
-  // Position Sizing & Exposure display (Rust guardian is source of truth)
+  // Position Sizing & Exposure display — fresh ConfigStore first, snapshot fallback
   // P1 risk: Rust stores as fraction (0.03), display as % (3%)
   const p1RiskFrac = rRisk.p1_risk_pct ?? null;  // Rust may not expose this in snapshot yet
   const p1RiskPct = p1RiskFrac != null ? (p1RiskFrac < 1 ? p1RiskFrac * 100 : p1RiskFrac) : 2;
   ocSetText('s-p1-risk', p1RiskPct.toFixed(1) + '%');
-  ocSetText('s-single-pos', (rRisk.max_single_position_pct ?? gc.max_single_position_pct ?? '--') + '%');
-  ocSetText('s-total-exp', (rRisk.max_total_exposure_pct ?? gc.max_total_exposure_pct ?? '--') + '%');
-  const sameDirVal = rGuard.max_same_direction_positions ?? gc.max_same_direction_positions ?? 3;
+  ocSetText('s-single-pos', (gc.max_single_position_pct ?? rRisk.max_single_position_pct ?? '--') + '%');
+  ocSetText('s-total-exp', (gc.max_total_exposure_pct ?? rRisk.max_total_exposure_pct ?? '--') + '%');
+  const sameDirVal = gc.max_same_direction_positions ?? rGuard.max_same_direction_positions ?? 3;
   ocSetText('s-same-dir', sameDirVal);
 
-  // Cooldown display
-  const coolCount = rRisk.consecutive_loss_cooldown_count ?? gc.consecutive_loss_cooldown_count ?? 3;
-  const coolMin = rRisk.consecutive_loss_cooldown_minutes ?? gc.consecutive_loss_cooldown_minutes ?? 30;
+  // Cooldown display — fresh ConfigStore first, snapshot fallback
+  const coolCount = gc.consecutive_loss_cooldown_count ?? rRisk.consecutive_loss_cooldown_count ?? 3;
+  const coolMin = gc.consecutive_loss_cooldown_minutes ?? rRisk.consecutive_loss_cooldown_minutes ?? 30;
   ocSetText('s-cool-count', coolCount);
   ocSetText('s-cool-min', coolMin + ' min');
 
@@ -902,12 +907,12 @@ async function loadRiskConfig() {
   h0El.textContent = h0Shadow ? 'Shadow (观察)' : 'Active (门控)';
   h0El.className = 'oc-chip ' + (h0Shadow ? 'oc-chip-warn' : 'oc-chip-good');
 
-  // Populate input fields — use Python RM (gc) as source of truth for editable inputs.
-  // Rust snapshot (rStop/rGuard/rRisk) is used only for the read-only display metrics above.
-  // Reason: IPC push to Rust is async/fire-and-forget; using Rust values here causes inputs
-  // to revert immediately after save because the snapshot hasn't updated yet.
-  // 輸入框用 Python RM (gc) 作為真相源；Rust 快照僅用於上方只讀狀態顯示。
-  // 原因：IPC 推送為非同步 fire-and-forget，存完立刻讀 Rust 快照仍是舊值 → 輸入框被蓋回。
+  // Populate input fields — `gc` is the fresh Rust ConfigStore snapshot (post 1C-3 single source
+  // of truth). After save, risk_view_client._patch() awaits the IPC and refreshes cache, so the
+  // next GET returns the patched value. Don't read rStop/rGuard for input defaults — those are
+  // tick-pushed and lag one tick behind a config patch.
+  // 輸入框用 fresh Rust ConfigStore (gc) 作真相源。post 1C-3 只有一個真相源，IPC patch
+  // 後 cache 已刷新，下一次 GET 返回新值。rStop/rGuard 滯後一拍，不用作輸入預設。
   function _setInput(id, val) {
     const el = $(id);
     if (el && document.activeElement !== el) el.value = val;

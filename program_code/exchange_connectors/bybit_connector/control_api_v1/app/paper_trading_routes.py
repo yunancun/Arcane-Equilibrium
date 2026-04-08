@@ -69,6 +69,20 @@ from .paper_trading_wiring import (  # noqa: F811 — explicit re-exports for ty
 
 SHADOW_CONSUMER: ShadowDecisionConsumer | None = None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sticky "user-initiated stop" flag / 用戶主動「停止」粘性標誌
+# Rust engine only knows pause/resume — there is no native "stopped" state.
+# /session/stop closes positions then issues pause_paper, so a follow-up
+# /session/status would otherwise report "paused" and the GUI badge would
+# show "已暫停" instead of "已停止". This flag distinguishes a user-initiated
+# Stop from a plain Pause so the status response stays honest.
+# Cleared by /session/start (user explicitly restarts the engine).
+# Rust 引擎只有 pause/resume，沒有原生 "stopped" 狀態。/session/stop 平倉後
+# 發 pause_paper，導致之後 status 一直顯示 "paused"，GUI 看到「已暫停」而非
+# 「已停止」。這個標誌區分用戶主動 Stop 與普通 Pause，讓 status 誠實反映。
+# 由 /session/start 清除（用戶顯式重啟引擎）。
+_USER_STOPPED: bool = False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Router / 路由器
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -250,6 +264,9 @@ async def post_session_start(
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
     try:
         result = await _ipc_command("resume_paper")
+        # Clear sticky stop flag — user explicitly restarted / 用戶顯式重啟，清除停止標誌
+        global _USER_STOPPED
+        _USER_STOPPED = False
         rust_state = rust.get_paper_state() or {}
         return _paper_response({
             "message": "Paper trading started (resumed) / 紙盤交易已啟動（恢復）",
@@ -317,6 +334,9 @@ async def post_session_resume(
     """Resume paper trading — restores strategy dispatch + Demo shadow orders / 恢復紙盤交易"""
     try:
         result = await _ipc_command("resume_paper")
+        # Resume also clears any prior sticky stop / 恢復同樣清除停止標誌
+        global _USER_STOPPED
+        _USER_STOPPED = False
         return _paper_response({
             "message": "Paper trading resumed / 紙盤交易已恢復",
             "source": "rust_engine",
@@ -336,6 +356,10 @@ async def post_session_stop(
     停止雙引擎 — 平掉所有 Paper + Demo 倉位，暫停策略。
     """
     errors: list[str] = []
+    # Mark user-initiated stop so /session/status reports "stopped" instead of "paused"
+    # 標記為用戶主動停止，讓 status 顯示「stopped」而非「paused」
+    global _USER_STOPPED
+    _USER_STOPPED = True
     # Step 1: Close all Paper positions via IPC / 通過 IPC 平掉所有 Paper 倉位
     close_result = {}
     try:
@@ -399,10 +423,16 @@ def get_session_status(
     peak = rust_state.get("peak_balance", 0)
     realized = rust_state.get("total_realized_pnl", 0)
     fees = rust_state.get("total_fees", 0)
+    # Translate Rust paused → "stopped" if the pause came from a user-initiated Stop
+    # 若暫停源自用戶主動 Stop，將 Rust paused 翻譯成 "stopped"
+    if is_paused:
+        session_state = "stopped" if _USER_STOPPED else "paused"
+    else:
+        session_state = "active"
     return _paper_response({
         "source": "rust_engine",
         "session": {
-            "session_state": "paused" if is_paused else "active",
+            "session_state": session_state,
             "session_id": "rust_engine",
             "initial_paper_balance_usdt": peak,
             "current_paper_balance_usdt": balance,
