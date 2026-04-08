@@ -74,57 +74,10 @@ def tmp_cost_file():
         os.unlink(path)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PAPER TRADING ENGINE FIXTURES / 纸上交易引擎夹具
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture
-def paper_state_store(tmp_state_file):
-    """
-    Create a PaperStateStore instance.
-    纸上交易状态存储实例。
-    """
-    from app.paper_trading_engine import PaperStateStore
-    return PaperStateStore(tmp_state_file)
-
-
-@pytest.fixture
-def paper_engine(paper_state_store):
-    """
-    Create a basic PaperTradingEngine (without risk manager).
-    基础纸上交易引擎实例（不含风控管理器）。
-    """
-    from app.paper_trading_engine import PaperTradingEngine
-    from unittest.mock import MagicMock
-    engine = PaperTradingEngine(paper_state_store)
-    # P0-1: provide mock governance_hub so fail-closed check passes in tests
-    mock_hub = MagicMock()
-    mock_hub.is_authorized.return_value = True
-    mock_hub.acquire_lease.return_value = "test-lease"
-    mock_hub.release_lease.return_value = None
-    engine.set_governance_hub(mock_hub)
-    return engine
-
-
-@pytest.fixture
-def active_paper_engine(paper_engine):
-    """
-    Create a PaperTradingEngine with an active session.
-    已启动 session 的纸上交易引擎。
-    """
-    paper_engine.start_session(initial_balance=10000.0)
-    return paper_engine
-
-
-@pytest.fixture
-def dispatcher_with_engine(active_paper_engine):
-    """
-    Create a MarketDataDispatcher with an active paper trading engine.
-    带有活跃引擎的行情分发器。
-    """
-    from app.market_data_dispatcher import MarketDataDispatcher
-    return MarketDataDispatcher(active_paper_engine)
-
+# ARCH-RC1 1C-3-F: PAPER TRADING ENGINE FIXTURES retired together with
+# paper_trading_engine.py. Rust engine owns paper-side execution; the few tests
+# that needed these fixtures were deleted in the same patch.
+# ARCH-RC1 1C-3-F：紙盤引擎 fixtures 隨 paper_trading_engine.py 一同退場。
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STATE MACHINE FIXTURES / 状态机夹具

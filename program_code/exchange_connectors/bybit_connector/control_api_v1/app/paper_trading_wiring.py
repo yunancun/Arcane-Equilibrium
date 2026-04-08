@@ -19,16 +19,12 @@ from pydantic import BaseModel, Field
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
-from .paper_trading_engine import (
-    DEFAULT_INITIAL_BALANCE_USDT,
-    PaperStateStore,
-    PaperTradingEngine,
-)
-from .shadow_decision_builder import (
-    ShadowDecisionConsumer,
-    ShadowDecisionFileFeeder,
-    build_shadow_decision,
-)
+# ARCH-RC1 1C-3-F: paper_trading_engine.py retired. Rust engine is now the
+# sole paper-side engine; PAPER_STORE/ENGINE remain as None stubs purely so
+# legacy import sites (main.py / governance_routes.py / strategy_wiring.py)
+# don't crash — every consumer already gates on `if ENGINE is not None`.
+# ARCH-RC1 1C-3-F：paper_trading_engine.py 退場，PAPER_STORE/ENGINE 留 None stub。
+from .shadow_decision_builder import ShadowDecisionConsumer
 from .paper_trading_metrics import compute_full_metrics
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41,7 +37,7 @@ _paper_state_path = os.getenv(
         os.path.join(os.path.dirname(__file__), "..", "runtime", "paper_trading_state.json")
     ),
 )
-PAPER_STORE = PaperStateStore(_paper_state_path)
+PAPER_STORE = None  # ARCH-RC1 1C-3-F: PaperStateStore retired; Rust owns paper state. / 紙盤狀態權威移至 Rust。
 
 # Risk manager (3-tier priority: P0 category > P1 global > P2 agent)
 # 风控管理器（三层优先级：P0 品类专属 > P1 全局 > P2 Agent 自适应）
