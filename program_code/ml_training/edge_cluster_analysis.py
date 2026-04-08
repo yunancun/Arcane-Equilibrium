@@ -370,7 +370,7 @@ def run_cluster_analysis(
 
 def _default_output_path() -> str:
     return os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "settings", "edge_clusters.json"
+        os.path.dirname(__file__), "..", "..", "settings", "edge_clusters.json"
     )
 
 
@@ -378,7 +378,7 @@ def _default_snapshot_path() -> str:
     return os.environ.get(
         "OPENCLAW_EDGE_SNAPSHOT",
         os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "settings", "edge_estimates.json"
+            os.path.dirname(__file__), "..", "..", "settings", "edge_estimates.json"
         ),
     )
 

@@ -161,12 +161,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         let base = std::env::var("OPENCLAW_BASE_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                // Resolve relative to the binary's directory (works for both dev and deployment).
-                // 相對於二進制文件目錄解析（適用於開發和部署環境）。
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|d| d.join("../../..")))
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+                // Engine is launched from srv/ (restart_all.sh cd's there before exec).
+                // current_dir() == srv/ → srv/settings/edge_estimates.json is correct.
+                // 引擎從 srv/ 目錄啟動（restart_all.sh 在 exec 前 cd 到該目錄）。
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
             });
         let estimates = crate::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
         if estimates.is_populated() {
