@@ -31,12 +31,13 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-06 · Session 13 R3 backlog 收尾完成 · engine 471 + core 413)
+## 当前状态 (2026-04-08 · ARCH-RC1 1C-3 SHIPPED · Python 风控核心徹底退场)
 
 ```
 系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
 执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         1,075 Py + 856 Rust = 1,931 tests 全绿
+测试:         engine lib 748 + core 387 + types 27 + ml_training 35 (Rust)
+              control_api 2944 passed (Python · 22 pre-existing fail · 0 regression)
 API 路由:     131+ 条（全部 Rust-first · Paper 写路由禁用或 IPC 控制）
 代码:         ~71,000 行（Python ~49k + Rust ~22k）
 双引擎:       Demo=执行引擎(Primary) · Paper=测试引擎(Testing) · Shadow orders default-on
@@ -51,8 +52,11 @@ L3 审计:      ✅ 12路并行全系统审计（63 issues → 11 work packages 
 Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
               P50=27μs · RSS 2.1MB · WS broken topics 已修复
               IPC: command channel + expanded snapshot
-下一步:       Phase 4 启动（Claude Teacher + LinUCB + News Agent + DL-3 · W13-15）
-              R3 backlog 排除 SEC live-prep / WP / Phase 4 后已全部清空（Session 13）
+ARCH-RC1:     ✅ 1A→1C-3 SHIPPED · 1 Rust ConfigStore 权威 + 5 engines 共飲一桶水熱重載
+              · 4 IPC 寫入面 (3 Config patch + StrategyParams) · V014 audit
+              · risk_manager.py 1633→53 行 RiskViewClient shim · Python 风控核心徹底退场
+下一步:       1C-3-F (~5h fresh context) — Python paper engine 徹底退场
+              → 1C-4 Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
               9 compression + 15 retention policies · 11 Grafana VIEWs
 Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
@@ -65,14 +69,14 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 ```
 
-**完成度（2026-04-06 · RRC-1 + L3 审计后校准）**
+**完成度（2026-04-08 · ARCH-RC1 1C-3 后校准）**
 
-| 维度 | 已完成 | 总量 | 进度 |
-|------|--------|------|------|
-| 代码量 | ~71,000 行（Py 49k + Rs 22k） | ~75,000 行 | 95% |
-| 业务功能 | — | — | 95% |
-| 工时 | ~72d | ~189d（含融合方案 105d） | 38% |
-| 测试 | 1,931（Py 1075 + Rs 856） | ~2,100 | 92% |
+| 维度 | 已完成 | 说明 |
+|------|--------|------|
+| Rust 测试 | engine lib 748 + core 387 + types 27 + ml_training 35 | +307 vs Phase 4 baseline 441 |
+| Python 测试 | control_api 2944 passed | 22 pre-existing fail · 0 regression |
+| 风控架构 | 1A 前 7 套并行 → 1 Rust ConfigStore 权威 + 5 engines 同步热重载 | ARCH-RC1 Session 1 完成 |
+| Phase 4 | CODE-COMPLETE（22/22 子任务 + 4.1） | 等 7d paper trading 观察期 |
 
 | 环节 | 完成度 | 说明 |
 |------|--------|------|
@@ -86,7 +90,7 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
 | ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
 
-**亮点**：RRC-1 风控全接线（H0Gate+9check+Gate2.7） · L3 12路审计 · EXT-1 Exchange-as-Truth · 全风控参数 runtime 可调 · 治理 fail-closed · 1,931 测试全绿 · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警 · Mainnet env var 安全锁
+**亮点**：ARCH-RC1 统一 Config 热重载（Risk/Learning/Budget 3 个 Config + StrategyParams = 4 IPC 写入面）· Python 风控核心徹底退场（risk_manager.py 1633→53 行 shim）· 5 engines 共飲一桶水 · V014 audit · RRC-1 风控全接线 · L3 12路审计 · EXT-1 Exchange-as-Truth · 治理 fail-closed · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警
 
 **开发路线图**
 
@@ -105,10 +109,11 @@ L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，Analy
 | Session 9 | EXT-1 Exchange-as-Truth + L3 Audit + Risk Config | ✅ 完成 |
 | RRC-1 | 风控运行时接线（H0Gate+9 check+Gate 2.7） | ✅ 完成 |
 | L3 Audit | 12路全系统审计 + PA 整改计划 | ✅ 63 issues |
-| 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ⬜ W13-15 |
+| 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ✅ CODE-COMPLETE（4-00~4-21 + 4.1） |
+| ARCH-RC1 | 统一 Config + Python 风控核心退场 | ✅ 1A→1C-3 SHIPPED（1C-3-F + 1C-4 留尾） |
 | 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
 | 6 | 渐进放权 + 验收 + 压测 | ⬜ W19-20 |
-| Live | Paper 21 天 + Live 准备 | ⬜ 待 Phase 6 完成 |
+| Live | Paper 21 天 + Live 准备 | ⬜ 等 7d paper trading 观察期 |
 
 **详细文件**：`docs/references/2026-04-04--execution_plan_v1.md`（执行计划 V1）
 
