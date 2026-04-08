@@ -1,7 +1,41 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜（1C-4 B2）
+> 最後更新：2026-04-08 深夜（1C-4 B2 audit-only 降級 + 熱重載 e2e）
+
+### ARCH-RC1 1C-4 — Hot-reload e2e + B2 audit-only 降級（2026-04-08 深夜）
+
+**熱重載 e2e (`4780b04`)** — `tick_pipeline.rs` +120 行測試
+- `test_arch_rc1_hot_reload_e2e_propagates_to_all_5_consumers`：建一個 RiskConfig ConfigStore → set_risk_store → replace() 模擬 IPC patch_risk_config → 跑一個 on_tick → 斷言 5 個下游消費者全部刷新
+  1. `intent_processor.risk_config`（Gate 0 / cost-edge / dynamic_stop）
+  2. `intent_processor.guardian_config`（P0 trade veto）
+  3. `h0_gate.config`（risk-level RMW）
+  4. `paper_state.stop_config`（H0-blocked fallback）
+  5. `governance.risk.thresholds`（6-tier cascade SM）
+- 驗證 `risk_config_version_seen` 同步推進，下次 tick 為 no-op
+- 1C-4 wrap 的硬證據：tick-level hot-reload 端到端可工作，無 restart-to-apply
+- engine lib 766 → 767 (+1)
+
+**B2 audit-only 降級（commit 待加）** — `position_reconciler.rs` 重構 + `main.rs` 解線
+- **降級背景**：QA + E2 審查發現原 B2 的自動 governor trigger 雙重失效：
+  1. **功能性死亡**：`reason_code="reconcile_mismatch"` + `target_tier="auto_step_looser"` 都不在 `tick_pipeline.rs` 的 operator manual override 白名單內，每次觸發都被拒絕進 `governor_de_escalate_rejected` audit 分支
+  2. **語義污染風險**：若擴大白名單修復 (1)，B1 `load_governor_cooldown_from_audit` 的 SQL filter 會把 reconciler 自動事件誤計入 24h operator cooldown，違反 B1「cooldown 只約束 operator 動作」的設計
+- **降級內容**：
+  - 刪除 `trigger_governor_de_escalate` fn + `should_trigger_governor` method + `governor_triggered` cycle flag
+  - `reconcile_once` 簽名移除 `paper_cmd_tx` 參數
+  - `run_position_reconciler` 簽名移除 `paper_cmd_tx`
+  - `main.rs` 移除 `reconciler_cmd_tx` clone 與傳參
+  - 新方法 `DriftVerdict::is_drift()` 取代 `should_trigger_governor`
+- **新增 first-cycle warmup**（修 QA CV-1 cold-start orphan storm）：
+  - `run_position_reconciler` 啟動序列：跳過第一次 interval tick → 一次性 `fetch_current_view` 靜默播種 baseline → 進入主循環
+  - warmup 階段也支援 `cancel.cancelled()`
+  - warmup REST 失敗時 baseline 留空，下一輪首次成功 fetch 會把既有持倉以 Orphan 各記一次（記錄啟動時 REST 不健康，可接受）
+- **保留**：5 級漂移分類（純函數）/ V014 audit 寫入 / 30s 輪詢 / fail-open / single-trigger-per-cycle 不再需要因為已無 trigger
+- **MODULE_NOTE 更新**：明示 audit-only / 與 1C-4 wrap 降級理由 / 自動收縮挪至 Phase 6
+- **Phase 6 自動收縮目標規格**寫入 TODO.md（6-RC-1~8）：動作通道隔離 / V014 event_type 隔離 / 動作策略 / 自身冷卻 / 絕對 dust floor / 多通道告警 / 整合測試 / Live blocker 解除
+- **Live blocker 新增**「多通道告警上線」項，B2 降級後 drift 只進 audit 必須有 operator 通知通道
+- 測試調整：`major_drift_at_threshold` → `major_drift_above_threshold`（清掉混亂註釋），`verdict_governor_trigger_classification` → `is_drift_classification`
+- engine lib 767 維持 0 regression
 
 ### ARCH-RC1 1C-4 B2 SHIPPED — Position Reconciler（2026-04-08 · commit `36335d7`）
 

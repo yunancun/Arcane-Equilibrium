@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-08 深夜（1C-4 B2 SHIPPED）
-測試基準線：**engine lib 766 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
+最後更新：2026-04-08 深夜（1C-4 B2 降級為 audit-only · 熱重載 e2e SHIPPED）
+測試基準線：**engine lib 767 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
@@ -24,7 +24,8 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 
 - [x] **A1** 註釋級殘留清理 — RC-10 disabled → 1C-3-F retired (`03fee49`)
 - [x] **B1** Governor cooldown PG 持久化 — V014 replay on startup, +5 tests, engine lib 752→757 (`e840003`)
-- [x] **B2** Position Reconciler — 30s Bybit poll, 5-tier drift classify, V014 audit + governor trigger, +9 tests, engine lib 757→766, 零 migration (`36335d7`)
+- [x] **B2** Position Reconciler — 30s Bybit poll, 5-tier drift classify, V014 audit (audit-only after 1C-4 wrap downgrade), warmup baseline, engine lib 757→767, 零 migration (`36335d7` + 降級 commit 待加)
+  - 原設計含自動 governor 收縮，QA+E2 審查發現 reason_code/target_tier 與 operator manual override 白名單衝突 + 會污染 B1 cooldown 語義 → 降級為純 audit。自動收縮挪至 Phase 6（見下方「Phase 6 自動收縮」段）。
 - [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：需先決定 4-09 router 是否 attach + provider wire-up，比預期大 ~120-200 行）
 - [ ] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
 - [ ] E-Merge-4（可選）Guardian owned config struct 退化為 RiskConfig sub-view
@@ -36,8 +37,9 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 
 完成記錄：`docs/audits/2026-04-07_phase4_final_signoff_audit.md`（4-00 ~ 4-21 + 4.1 全部 SHIPPED · CONDITIONAL APPROVE）
 
-### Live 前唯一 blocker
+### Live 前 blocker
 - [ ] **7+ days paper trading 數據累積** — calendar-time 觀察期 / DoD A/C/E metrics
+- [ ] **多通道告警上線** — 1C-4 B2 降級後，position drift 只進 V014，需要 operator 通知通道（OC-3 多通道告警）才能保證偏差被即時看見。Phase 6 自動收縮上線後此項可解除（屆時自動動作 + 告警雙保險）。
 
 ### P1/P2 follow-up（非 blocker）
 - [ ] 4-06 LinUCB live warm-start deployment（script 已交付，等首次 v1→v2 遷移）
@@ -105,6 +107,26 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 - [ ] 6-04~06 全管線回放 + 壓測 + sync_commit Live 驗證
 - [ ] 6-07~08 EvolutionEngine deprecated + 文檔
 - [ ] 6-09~13 E2 + E4 + QA 端到端 + E5 + PM
+
+### Phase 6 自動收縮（Position Reconciler 自動 governor 動作層）
+
+> **背景**：1C-4 B2 Position Reconciler 已部署 30s Bybit 真相輪詢 + 5 級漂移分類 + V014 audit，但**自動 governor 收縮被降級移除**（QA+E2 審查發現原設計與 B1 operator cooldown 語義衝突）。漂移目前只進審計，等 operator 看 V014 後人工處理。Phase 6 補上這一層自動動作。
+
+**目標規格（必須達成才能視為完成）：**
+
+- [ ] **6-RC-1 動作通道隔離** — 新增 `PaperSessionCommand::ReconcilerAutoContract { from_tier, to_tier, drift_kind, symbol, side, baseline_qty, current_qty, notes }`，handler 直接呼叫 `governance.risk.de_escalate_to`，**完全繞過** operator manual override 白名單與 step-rule guard（reconciler 不是 operator 動作）。
+- [ ] **6-RC-2 V014 event_type 隔離** — 寫入 V014 用 `event_type="reconciler_auto_contract"`（與 `governor_de_escalate` 區隔），讓 B1 `load_governor_cooldown_from_audit` 的 SQL filter 永不會把 reconciler 行誤計入 24h operator cooldown。同步補 SQL filter 的安全網（顯式 `AND payload->>'reason_code' IN (operator_whitelist)`）。
+- [ ] **6-RC-3 動作策略** — Major/Orphan/Ghost → step one tier looser；連續 N 個 cycle (≥3) 持續漂移 → 直跳 Defensive；任何 cycle 觀察到 ≥5 個獨立 (symbol,side) 漂移 → 直跳 CircuitBreaker（系統性事件）。
+- [ ] **6-RC-4 自身冷卻** — reconciler 自動動作獨立 cooldown：同 (symbol,side) 30 分鐘內不重複 trigger；全局每 5 分鐘最多 1 次自動收縮，避免 REST 抖動或時鐘錯誤造成連續降級。
+- [ ] **6-RC-5 絕對 dust floor** — `MIN_DUST_QTY_ABS` 常數（建議 0.0001 或對應交易對 minQty 的 1.5 倍）。低於該值的漂移降級為 MinorDrift 不論百分比，避免 sub-cent residual 觸發風暴。
+- [ ] **6-RC-6 多通道告警** — 自動動作前必先發告警（OC-3 多通道告警依賴），讓 operator 有機會在動作生效前介入；告警延遲 15s 後若 operator 未 ACK 才執行動作。
+- [ ] **6-RC-7 整合測試** — 必須有 e2e 測試斷言觸發路徑真的進到 `apply_de_escalation`（非 `_rejected`），覆蓋：單筆 Major 觸發 step looser / 5 筆漂移觸發 CircuitBreaker / 30 分鐘冷卻拒絕重複 / 告警未 ACK 後才動作。
+- [ ] **6-RC-8 Live blocker 解除** — 完成上述後，從 Live blocker 清單移除「Bybit REST `/v5/position/list` 必須可達」的隱含依賴項（屆時 reconciler 失敗只代表 audit 缺失，不影響風控）。
+
+**設計原則對齊：**
+- 根原則 #5 #6（生存優先 + 失敗默認收縮）：自動收縮恢復後系統真正具備「不確定時自動降風險」能力
+- 根原則 #11（Agent 自主權）：reconciler 是系統級觀察員而非 Agent，動作通道與 operator/Agent 路徑完全分離
+- 不違反 1C-3 ConfigStore 權威模型：reconciler 不修改任何 config，只觸發 governance state machine 轉換
 
 ## Phase 4-Conditional（觸發後）
 
