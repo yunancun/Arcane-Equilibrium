@@ -55,20 +55,22 @@ PORTFOLIO_RISK_CONTROL = PortfolioRiskControl(config=PortfolioRiskConfig())
 # T2.02: Initialize and inject PerceptionPlane / 初始化并注入感知平面
 PERCEPTION_PLANE = PerceptionPlane()
 # ═══════════════════════════════════════════════════════════════════════════════
-# DEPRECATED(RC-10): Python PaperTradingEngine is DISABLED.
-# RC-10 廢棄：Python PaperTradingEngine 已禁用。
+# ARCH-RC1 1C-3-F: PaperTradingEngine retired (deleted in de1ec69).
+# ARCH-RC1 1C-3-F：PaperTradingEngine 已退場（de1ec69 物理刪除）。
 #
-# Rust openclaw_engine is the SOLE paper trading engine.
+# Rust openclaw_engine is the sole paper trading engine.
 # Rust openclaw_engine 是唯一的紙上交易引擎。
 # All paper state reads go through ipc_state_reader (Rust snapshot).
 # 所有 paper 狀態讀取通過 ipc_state_reader（Rust 快照）。
-# Python ENGINE is set to None to prevent dual-engine operation.
-# Python ENGINE 設為 None 以防止雙引擎同時運行。
+# ENGINE remains as a None stub purely so legacy import sites
+# (main.py / governance_routes.py / strategy_wiring.py) don't crash —
+# every consumer already gates on `if ENGINE is not None`.
+# ENGINE 保留為 None stub 僅為避免 legacy import site 崩潰，所有消費者均已 None 短路。
 # ═══════════════════════════════════════════════════════════════════════════════
 ENGINE = None  # type: ignore[assignment]
 logger.info(
-    "Python PaperTradingEngine DISABLED — Rust engine is the sole paper trading engine (RC-10) / "
-    "Python PaperTradingEngine 已禁用 — Rust 引擎是唯一的紙上交易引擎（RC-10）"
+    "PaperTradingEngine retired (ARCH-RC1 1C-3-F) — openclaw_engine is sole paper engine / "
+    "PaperTradingEngine 已退場（ARCH-RC1 1C-3-F）— openclaw_engine 現為唯一紙盤引擎"
 )
 
 # T7.01: Initialize BybitDemoConnector / 初始化 Bybit Demo 连接器
