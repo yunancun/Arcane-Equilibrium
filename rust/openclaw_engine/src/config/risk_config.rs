@@ -195,6 +195,13 @@ pub struct GlobalLimits {
     pub guardian_modification_size_factor: f64,
     #[serde(default = "default_guardian_modification_leverage_cap")]
     pub guardian_modification_leverage_cap: f64,
+    /// Per-trade risk cap as a fraction of equity (0.02 = 2%). Used by
+    /// IntentProcessor Gate 2.6 to size positions: max_qty = balance × pct / price.
+    /// Hot-reloaded via patch_risk_config; previously hard-coded as DEFAULT_P1_RISK_PCT.
+    /// 單筆風險上限（佔餘額比例，0.02 = 2%）。IntentProcessor Gate 2.6 用此計算
+    /// 上限：max_qty = balance × pct / price。經 patch_risk_config 熱重載；先前寫死。
+    #[serde(default = "default_per_trade_risk_pct")]
+    pub per_trade_risk_pct: f64,
 }
 
 fn default_stop_loss_max_pct() -> f64 {
@@ -248,6 +255,9 @@ fn default_guardian_modification_size_factor() -> f64 {
 fn default_guardian_modification_leverage_cap() -> f64 {
     2.0
 }
+fn default_per_trade_risk_pct() -> f64 {
+    0.02
+}
 
 impl Default for GlobalLimits {
     fn default() -> Self {
@@ -273,6 +283,7 @@ impl Default for GlobalLimits {
             position_mode: default_position_mode(),
             guardian_modification_size_factor: default_guardian_modification_size_factor(),
             guardian_modification_leverage_cap: default_guardian_modification_leverage_cap(),
+            per_trade_risk_pct: default_per_trade_risk_pct(),
         }
     }
 }
@@ -323,6 +334,11 @@ impl GlobalLimits {
         if self.guardian_modification_leverage_cap < 1.0 {
             return Err(
                 "risk.limits.guardian_modification_leverage_cap must be >= 1".into(),
+            );
+        }
+        if !(0.0001..=0.20).contains(&self.per_trade_risk_pct) {
+            return Err(
+                "risk.limits.per_trade_risk_pct must be in [0.0001, 0.20] (0.01–20%)".into(),
             );
         }
         Ok(())

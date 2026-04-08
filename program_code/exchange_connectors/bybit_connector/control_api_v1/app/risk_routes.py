@@ -100,7 +100,7 @@ class GlobalConfigUpdate(BaseModel):
     max_session_drawdown_pct: float | None = Field(default=None, gt=0, le=100)
     max_daily_loss_pct: float | None = Field(default=None, gt=0, le=100)
     consecutive_loss_cooldown_count: int | None = Field(default=None, gt=0, le=100)
-    consecutive_loss_cooldown_minutes: float | None = Field(default=None, gt=0, le=1440)
+    consecutive_loss_cooldown_minutes: int | None = Field(default=None, gt=0, le=1440)
     max_holding_hours: float | None = Field(default=None, gt=0, le=8760)
     max_cost_edge_ratio: float | None = Field(default=None, gt=0, le=10)
     allowed_categories: list[str] | None = None
@@ -176,6 +176,13 @@ async def get_risk_config(
         "consecutive_loss_cooldown_count":   limits.get("consec_loss_cooldown_count"),
         "consecutive_loss_cooldown_minutes": limits.get("consec_loss_cooldown_min"),
         "max_holding_hours":            limits.get("holding_hours_max"),
+        # Rust stores per_trade_risk_pct as fraction (0.03); expose as percent (3.0).
+        # Rust 用小數存（0.03），GUI 顯示百分比（3.0）。
+        "p1_risk_pct": (
+            limits.get("per_trade_risk_pct") * 100.0
+            if isinstance(limits.get("per_trade_risk_pct"), (int, float))
+            else None
+        ),
         "allowed_categories":           limits.get("allowed_categories"),
         "preferred_margin_mode":        limits.get("margin_mode"),
         "preferred_position_mode":      limits.get("position_mode"),

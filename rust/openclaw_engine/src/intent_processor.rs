@@ -200,9 +200,15 @@ impl IntentProcessor {
     }
 
     /// RRC-1-B4: Update risk config at runtime (ARCH-RC1).
-    /// RRC-1-B4：運行時更新風控配置。
+    /// Also pulls the per-trade risk cap out of `limits.per_trade_risk_pct`
+    /// and pushes it through the existing clamped setter so Gate 2.6 sees the
+    /// patched value on the next tick (single source of truth = ConfigStore).
+    /// RRC-1-B4：運行時更新風控配置；同時把 limits.per_trade_risk_pct 透過既有
+    /// 帶 clamp 的 setter 灌進去，讓 Gate 2.6 在下一個 tick 看到新值。
     pub fn update_risk_config(&mut self, config: RiskConfig) {
+        let new_p1 = config.limits.per_trade_risk_pct;
         self.risk_config = config;
+        self.set_p1_risk_pct(new_p1);
     }
 
     /// RRC-1-B4: Read-only access to risk config.

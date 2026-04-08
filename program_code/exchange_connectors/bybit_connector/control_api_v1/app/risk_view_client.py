@@ -57,6 +57,7 @@ _GLOBAL_TO_RUST: dict[str, tuple[str, str]] = {
     "consecutive_loss_cooldown_count":   ("limits", "consec_loss_cooldown_count"),
     "consecutive_loss_cooldown_minutes": ("limits", "consec_loss_cooldown_min"),
     "max_holding_hours":            ("limits", "holding_hours_max"),
+    "p1_risk_pct":                  ("limits", "per_trade_risk_pct"),
     "allowed_categories":           ("limits", "allowed_categories"),
     "preferred_margin_mode":        ("limits", "margin_mode"),
     "preferred_position_mode":      ("limits", "position_mode"),
@@ -108,6 +109,11 @@ def _remap_global_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
     for key, value in flat.items():
         if key in _GLOBAL_TO_RUST:
             section, rust_key = _GLOBAL_TO_RUST[key]
+            # GUI sends p1_risk_pct as percent (e.g. 3.0 = 3%); Rust stores it
+            # as fraction (0.03). Normalise here so the GUI can stay percent-native.
+            # GUI 用百分比（3.0 = 3%），Rust 內部用小數（0.03），此處統一換算。
+            if rust_key == "per_trade_risk_pct" and isinstance(value, (int, float)) and value > 1:
+                value = value / 100.0
             nested.setdefault(section, {})[rust_key] = value
         else:
             logger.debug("_remap_global_to_rust: unknown field %r dropped", key)
