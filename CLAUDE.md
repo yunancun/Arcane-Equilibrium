@@ -48,9 +48,11 @@
 
 **ARCH-RC1 1C-4 WRAP COMPLETE** ✅ — Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload → 5 engines；Rust `openclaw_engine` 為 paper/demo/live 唯一引擎；Python 風控/紙盤雙退場；Guardian = RiskConfig 純派生視圖。**禁止 restart-to-apply**。
 
-**Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期（calendar-time）+ 多通道告警上線。
+**Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅（ATR×0.2 dampening）· PH5-DL-2+JS-1 ✅（realized_edge_stats + james_stein_estimator，8 cells 全負）· PH5-WIRE-1 ⬜（JS 估計仍負，等 paper 改善）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。
 
-**留尾**（非阻塞）：A2 News scheduler · W1 event_consumer 拆分 · DEAD-PY-1 Python app/ 死代碼清理。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
+**Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期 + 多通道告警上線。
+
+**留尾**（非阻塞）：A2 News scheduler · W1 event_consumer 拆分 · DEAD-PY-1 完成度 P1+P2+P3+P4（唯一殘留：test_risk_view_client 1 pre-existing fail）。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
 - 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
@@ -227,4 +229,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：tests engine lib 767 / core 387 / Python control_api 2694 passed · ARCH-RC1 1C-4 WRAP COMPLETE · **Phase 5 提前到 P0**（Edge 危機：realized 2 bps vs fee 11 bps，cost_gate ATR-based EV 公式高估 ~13×）· Live blocker 仍在：7d paper observation + 多通道告警。
+> 截至 2026-04-08（深夜 session 2）：tests engine lib 769 / core 387 / Python control_api 2678 passed **1 pre-existing fail** · ARCH-RC1 1C-4 WRAP COMPLETE · Phase 5 P0 ACTIVE（PH5-WIRE-0 ✅ / PH5-DL-2+JS-1 ✅ / WIRE-1 VERIFY-1 ⬜）· DEAD-PY-1 全完成（P1+P2+P3+P4）· CFG-PERSIST-3 GUI ✅ · 測試基線 21→1 fail · Live blocker 仍在。
