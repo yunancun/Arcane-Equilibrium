@@ -32,7 +32,13 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 - [x] **PH5-WIRE-1** mode-aware cost_gate: paper/demo negative estimate → exploration mode（允許積累數據打破循環依賴）；positive → JS bps vs fee 比較；cold-start → ATR×0.2 fallback。live 模式 fail-closed（無正估計即拒絕）。commit `5e760be`
 - [ ] **PH5-VERIFY-1** 跑 7d paper observation 看 fills / realized pnl 分布是否改善（同時也是 Live blocker 觀察期）
 
-**參考文件**：`docs/references/2026-04-04--*.md` 系列 ML/Phase 5 設計（James-Stein / Teacher-Student），需要在 PH5-PROMOTE-1 階段彙整重讀。
+**⚠️ 數據策略（2026-04-08 決定）**：歷史 fills 含 ARCH-RC1 前開發噪音，**不清空**（審計記錄保留）。改用滾動窗口：
+- **2026-04-11**：`PG_PASSWORD=... python3 -m program_code.ml_training.james_stein_estimator --days 3` 取 ARCH-RC1 後的乾淨 3 天數據
+- 之後每週重跑，窗口逐步拉長（7d → 14d → 30d）直到估計穩定
+- 若某 cell 轉正 → 下次引擎重啟後 WIRE-1 gate 自動對該 pair 生效
+- `settings/edge_estimates.json` 更新後需重啟引擎才生效（無 hot-reload）
+
+**參考文件**：`docs/references/2026-04-04--*.md` 系列 ML/Phase 5 設計（James-Stein / Teacher-Student）。
 
 **Edge 概念釐清備忘**：edge = 扣成本前的單筆期望淨收益（bps）。當前實證 realized edge ≈ 2 bps，fee = 11 bps → Net EV ≈ −9 bps。修 cost_gate 公式 ≠ 修策略；要修策略只能靠 backtest 找出真有 edge 的 (strategy, symbol) 子集。
 
