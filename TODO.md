@@ -29,7 +29,7 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 - [x] **PH5-DL-2** Per (strategy × symbol) realized edge distribution 統計 — `realized_edge_stats.py` 交付（全部負 edge：-4 to -33 bps）
 - [x] **PH5-JS-1** James-Stein shrinkage estimator — `james_stein_estimator.py` 交付，寫入 `learning.james_stein_estimates`（8 rows）+ `settings/edge_estimates.json`
 - [x] **PH5-WIRE-0** cost_gate cold-start 阻尼 0.2 已上線（`intent_processor.rs`），Rust 769 pass, Python 2694 pass，0 regression
-- [ ] **PH5-WIRE-1** `intent_processor` cost_gate 改用 shrunk realized edge 取代 `atr × conf`，cold-start 仍 fallback ATR×conf×0.2（全部 JS 估計為負，先觀察 paper 改善後再接線）
+- [x] **PH5-WIRE-1** mode-aware cost_gate: paper/demo negative estimate → exploration mode（允許積累數據打破循環依賴）；positive → JS bps vs fee 比較；cold-start → ATR×0.2 fallback。live 模式 fail-closed（無正估計即拒絕）。commit `5e760be`
 - [ ] **PH5-VERIFY-1** 跑 7d paper observation 看 fills / realized pnl 分布是否改善（同時也是 Live blocker 觀察期）
 
 **參考文件**：`docs/references/2026-04-04--*.md` 系列 ML/Phase 5 設計（James-Stein / Teacher-Student），需要在 PH5-PROMOTE-1 階段彙整重讀。
@@ -179,7 +179,7 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 
 ## 📈 Phase 5 — James-Stein + DL-1 + DL-2（W16-18）
 
-- [ ] 5-01~03 James-Stein per-parameter shrinkage + k-means
+- [x] 5-01~03 James-Stein per-parameter shrinkage (win_rate/avg_win/avg_loss) + k-means cluster analysis → `edge_cluster_analysis.py` + `settings/edge_clusters.json`. commit `5e760be`
 - [ ] 5-04~07 DL-1 Symbol Embedding + DL-2 Regime LSTM Shadow
 - [ ] 5-08~09 JS+Scorer 整合 + correlation_pairs
 - [ ] 5-10~13 E2 + E4 + QC + E5
