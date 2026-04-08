@@ -81,6 +81,8 @@ pub struct BbReversion {
     // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
     prev_position: Option<bool>,
     prev_last_trade_ms: u64,
+    /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
+    conf_scale: f64,
 }
 
 impl BbReversion {
@@ -95,6 +97,7 @@ impl BbReversion {
             limit_offset_bps: 10.0,
             prev_position: None,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -152,11 +155,13 @@ impl BbReversion {
         } else {
             ("market".to_string(), None)
         };
+        // CONF-D: scale entry confidence
+        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
         OrderIntent {
             symbol: ctx.symbol.clone(),
             is_long,
             qty: self.default_qty,
-            confidence: conf,
+            confidence: scaled,
             strategy: self.name().into(),
             order_type,
             limit_price,
@@ -166,11 +171,13 @@ impl BbReversion {
     /// Build an exit intent — always market for guaranteed fills.
     /// 建構出場意圖 — 永遠使用市價單以確保成交。
     fn make_exit_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
+        // CONF-D: scale exit confidence
+        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
         OrderIntent {
             symbol: ctx.symbol.clone(),
             is_long,
             qty: self.default_qty,
-            confidence: conf,
+            confidence: scaled,
             strategy: self.name().into(),
             order_type: "market".into(),
             limit_price: None,
@@ -277,6 +284,13 @@ impl Strategy for BbReversion {
 
     fn param_ranges_json(&self) -> String {
         serde_json::to_string(&BbReversionParams::param_ranges()).unwrap_or_default()
+    }
+
+    fn conf_scale(&self) -> f64 {
+        self.conf_scale
+    }
+    fn set_conf_scale(&mut self, scale: f64) {
+        self.conf_scale = scale.clamp(0.0, 2.0);
     }
 }
 

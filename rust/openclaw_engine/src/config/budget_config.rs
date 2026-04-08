@@ -332,12 +332,16 @@ impl AttentionTax {
                 "budget.attention_tax grade thresholds must be strictly increasing (A < B < C < D)".into()
             );
         }
-        // CFG-COST-EDGE-1: range relaxed from [0, 1] → [0, 5] so operators can
-        // disable the gate (effectively) for low-vol regimes.
-        // CFG-COST-EDGE-1：範圍從 [0, 1] 放寬到 [0, 5]，讓 operator 在低波動區能
-        // 實質關閉此 gate。
-        if !(0.0..=5.0).contains(&self.cost_edge_max_ratio) {
-            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 5]".into());
+        // PH5-EXPLORE: range relaxed from [0, 5] → [0, 100] so operators can
+        // fully disable the gate during exploration / data-collection phases.
+        // Rationale: in Phase 5 exploration mode, cost_ratio is observed at 9–18
+        // (tiny profits from grid/bb entries), so [0, 5] was insufficient.
+        // Set to 100.0 to bypass check during exploration; revisit after Phase 5.
+        // PH5-EXPLORE：範圍從 [0, 5] 放寬到 [0, 100]，讓 operator 在探索期
+        // 完全關閉此 gate。探索期 cost_ratio 觀察值為 9–18（grid/bb 微小盈利），
+        // [0, 5] 不足。設為 100.0 跳過檢查；Phase 5 觀察期後重評。
+        if !(0.0..=100.0).contains(&self.cost_edge_max_ratio) {
+            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 100]".into());
         }
         Ok(())
     }
@@ -418,8 +422,17 @@ mod tests {
     #[test]
     fn test_cost_edge_max_ratio_out_of_range_rejected() {
         let mut cfg = BudgetConfig::default();
-        cfg.attention_tax.cost_edge_max_ratio = 6.0;
+        cfg.attention_tax.cost_edge_max_ratio = 101.0;
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_cost_edge_max_ratio_100_accepted() {
+        // PH5-EXPLORE: 100.0 is valid (exploration mode bypass).
+        // PH5-EXPLORE：100.0 合法（探索期繞過 gate）。
+        let mut cfg = BudgetConfig::default();
+        cfg.attention_tax.cost_edge_max_ratio = 100.0;
+        assert!(cfg.validate().is_ok());
     }
 
     #[test]
