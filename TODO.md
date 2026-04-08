@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-08 AM（1C-3-A/B/B-2/C SHIPPED · 下一步 E2/E4 三 commit review + 1C-3-D）
-測試基準線：**740 engine lib + 387 core + 27 types + 35 ml_training + 17 control_api risk + 11 smoke** · 0 failures
+最後更新：2026-04-08 PM（1C-3-D SHIPPED · risk_manager.py 1633→53 行 shim · 風控收編完成）
+測試基準線：**748 engine lib + 387 core + 27 types + 35 ml_training + Python 2944 passed (22 pre-existing fail · 0 regression caused)** · 0 new failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 
@@ -64,19 +64,26 @@
   - SM: lookup_rule transition table + min_hold_time 5 min
   - Audit: V014 engine_events (from/to/reason_code/notes)
   - Rust 731→740 (+9) · Python 15→17 (+2) · 0 regression
-- [ ] **E2 + E4 三 commit review**（4/8 插入，昨天 session 建議）
-  - E2 review `8447fbf` `c6fcd13` `9f46b06` 三個未 review commit
-  - E4 full regression (Rust workspace + Python test suite)
-  - 根據發現 fix 後才開 1C-3-D
-- [ ] **1C-3-D** 遷移剩餘 importer + 刪除 dead code + Python 全測通過（~5-6h）
-  - 生產側：`paper_trading_wiring.py` (RISK_MANAGER 實例 + setters) / `paper_trading_engine.py` (5 個 dead 呼叫) / `bridge_stats.py` / `bridge_core.py`
-  - 測試側：12 檔 ~8000 行中
-    - **刪除**：`test_risk_manager.py` (1494) + `test_risk_manager_edge.py` (174) — 純測 Python 時代業務邏輯，Rust 側 740 tests 已覆蓋
-    - **重寫**：6 個 skipped `TestRiskRoutes`（1C-3-C 留的尾）
-    - **最小改動**：`test_h0_gate.py` / `test_paper_trading_engine(+inverse).py` / `test_integration_phase5/8` / `test_trailing_stop_cost_constraint` / `test_winrate_param_fixes` / `conftest.py` / `test_session9_fixes.py`
+- [x] **E2 三 commit review** — `docs/audits/2026-04-08--e2_review_1c3_bbc.md`
+  - 1C-3-B APPROVED_WITH_NITS · 1C-3-C APPROVED_WITH_NITS · 1C-3-B-2 CHANGES_REQUIRED
+  - M-1 (test gap) + M-2 (audit hole) + N-5 (payload shape) 已 fix
+- [x] **1C-3-D M-1 test gap fix** — `f8772c0` 8 個 real guard tests using `handle_paper_command` (engine 740→748)
+- [x] **1C-3-D M-2 + N-5 audit fix** — `a1cf772` rejected governor overrides 也寫 V014 + payload 統一 serde_json::Value
+- [x] **1C-3-D 主體** — `144f46f`（approach A: aggressive cull）
+  - `risk_manager.py` 1633 → 53 行（-97%）— 純 RiskViewClient 子類 shim，REGIME_TIME_MULTIPLIERS 常量 + RiskManager(RiskViewClient) 子類
+  - `paper_trading_wiring.py` 移除 set_portfolio_risk_control / set_governance_hub / set_change_audit_log 三個注入點
+  - 刪除 9 檔 ~6900 行 Python 測試（純測 Python 時代業務邏輯，Rust 748 tests 已覆蓋）：
+    `test_risk_manager{,_edge}.py` / `test_h0_gate{,_cooldown_integration}.py` / `test_paper_trading_engine{,_inverse}.py` / `test_trailing_stop_cost_constraint.py` / `test_integration_phase{5,8}.py`
+  - `conftest.py` 移除 4 個 fixtures (paper_engine_with_risk / risk_manager / global_risk_config / category_risk_config)
+  - `test_integration_phase2::test_portfolio_risk_control_injected` 重寫為驗證 wiring singleton 仍存在
+  - **+46 / -7882** 淨 -7836
+  - Python 2944 passed / 22 pre-existing failures (與 baseline byte-for-byte 一致 · 0 regression caused)
+- [ ] **1C-3-E 留尾收尾**（下一個 session 起點）
+  - `paper_trading_engine.py` ~15 個 `engine.risk_manager.X` 死路徑（ENGINE = None since RC-10）— disabled engine 自身的清理
+  - `bridge_core.py:294` `self._engine.risk_manager._price_tracker` 死引用（同上）
+  - 6 個 1C-3-C skipped `TestRiskRoutes` 測試重寫
   - **拆 `PAPER_STORE.mutate`**：session_halted 不再 Python 並行寫，改從 Rust snapshot 派生
-  - `risk_manager.py` 1633 → ~5 行 `RiskManager = RiskViewClient` re-export shim
-- [ ] **1C-3-E** 移除 RiskManager re-export shim + 文檔同步（~2h）
+  - 評估是否進一步刪 `RiskManager` 子類符號（直接讓 paper_trading_wiring import RiskViewClient）
 - [ ] **1C-4 收尾**
   - Position Reconciler（trading.open_positions + Bybit 對帳 + cooldown 重建）
   - **Governor tier override cooldown PG 持久化**（1C-3-B-2 known limitation：目前 in-memory，重啟重置；live 前必做）

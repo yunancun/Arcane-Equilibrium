@@ -1,7 +1,62 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-07 PM
+> 最後更新：2026-04-08 PM
+
+### Session ARCH-RC1 1C-3 全部 SHIPPED — Python RiskManager 收編完成（2026-04-08 · commits `f8772c0` `a1cf772` `144f46f`）
+
+接續 4/7 斷網 session（已撈回 worklog `docs/worklogs/2026-04-08--session_resume_notes.md`）。本 session 完成 E2 review fix + 1C-3-D 主體 + 文檔同步。
+
+**E2 review** (`docs/audits/2026-04-08--e2_review_1c3_bbc.md`):
+- 1C-3-B (`8447fbf`) APPROVED_WITH_NITS · 1C-3-C (`c6fcd13`) APPROVED_WITH_NITS · 1C-3-B-2 (`9f46b06`) CHANGES_REQUIRED
+- M-1 (test gap) · M-2 (audit hole) · N-5 (payload shape) 三項 fix 必做
+
+**1C-3-D M-1** (`f8772c0`, +220 行 / engine 740 → 748):
+- `event_consumer/tests.rs` 加 8 個 real guard tests using `handle_paper_command` + `tokio::sync::oneshot::channel()` + `rx.blocking_recv()`
+- 覆蓋: reason_code 白名單 reject / 單步 reject / 24h cooldown reject / CB+MR lockout / valid path
+- 之前 governor manual override 守衛只有 path-level coverage，現在端到端 8 條測試
+
+**1C-3-D M-2 + N-5** (`a1cf772`):
+- `spawn_governor_audit_row` 簽名重構：5-positional `(from_tier, to_tier, reason_code, notes, source)` → `(audit_pool, event_type, payload: serde_json::Value)`，調用點直接構造 payload，型別更乾淨
+- `Ok(Ok(Err(e)))` rejection branch 也寫 V014：新 event types `governor_escalate_rejected` / `governor_de_escalate_rejected`，payload 含 `result: "applied"|"rejected"` + `error` 欄位
+- 之前 audit 只記錄成功的 override，rejected 的（白名單 / 單步 / cooldown / lockout 拒絕）完全沒記錄 → 操作員無從看出 governor 守衛被觸發過
+
+**1C-3-D 主體** (`144f46f`, +46 / -7882 = 淨 -7836 / 14 files):
+- approach A: aggressive cull
+- `risk_manager.py` **1633 → 53 行** (-97%)：
+  - 只剩 `REGIME_TIME_MULTIPLIERS` 常量（bridge_stats / test_winrate_param_fixes 仍消費）
+  - `RiskManager(RiskViewClient)` 薄子類 — 建構不需 ipc_client，所有 deprecated 行為走 RiskViewClient 內建 `_warn_deprecated_once` no-op stub
+- `paper_trading_wiring.py` 移除三個 RiskManager 注入點 (`set_portfolio_risk_control` / `set_governance_hub` / `set_change_audit_log`) — 都是 RiskViewClient no-op，移除後更乾淨
+- 刪除 9 檔 ~6900 行純 Python 風控/H0/Engine 測試（邏輯已 100% 在 Rust 748 tests 覆蓋）：
+  - `test_risk_manager.py` (1494) + `test_risk_manager_edge.py` (174)
+  - `test_h0_gate.py` (1276) + `test_h0_gate_cooldown_integration.py` (268)
+  - `test_paper_trading_engine.py` (989) + `test_paper_trading_engine_inverse.py` (678)
+  - `test_trailing_stop_cost_constraint.py` (301)
+  - `test_integration_phase5.py` (648) + `test_integration_phase8.py` (378)
+- `conftest.py` 移除 4 個 fixtures: `paper_engine_with_risk` / `risk_manager` / `global_risk_config` / `category_risk_config`
+- `test_integration_phase2.py::test_portfolio_risk_control_injected` 重寫為 `test_portfolio_risk_control_present`（驗證 wiring singleton 仍存在，不再驗證 RiskManager 注入）
+
+**Regression**: Python 2944 passed / 22 failed / 1 skipped — 22 failures **與 baseline byte-for-byte 一致**（已 git stash 對照驗證），**0 regression caused by 1C-3-D**。22 個 pre-existing failures: 19× test_grafana_data_writer (mock spec issue) + test_paper_trading::test_session_start_via_api (401 auth) + test_symbol_category_registry::test_is_stale_initially (stale check)。Rust 748 持續綠燈（本 session 沒動 Rust workspace 檔案，僅在 M-1/M-2 commits 修改 ipc_server.rs + event_consumer/tests.rs）。
+
+**風控收編軌跡終局**:
+```
+1A 前：     Python RiskManager (1633) + 6 套並行 = 7 套
+1A 後：     Python RiskManager (1633) + 4 套
+1C-1 後：   Python RiskManager (1633) + 1 套權威（RiskConfig 13 sub-struct）
+1C-2-F 後： 1 Config 權威 + 5 engines 同步熱重載
+1C-3-D：    Python RiskManager → 53 行 RiskViewClient shim（Python 風控核心徹底退場）
+```
+
+**下一個 session 起點**: 1C-3-E 留尾
+- `paper_trading_engine.py` ~15 個 dead `engine.risk_manager.X` 路徑（ENGINE = None since RC-10 的 disabled engine 自身清理，不影響 live）
+- `bridge_core.py:294` `self._engine.risk_manager._price_tracker` 死引用
+- 6 個 1C-3-C 留下的 skipped `TestRiskRoutes` 重寫
+- `PAPER_STORE.mutate` 拆分：session_halted 不再 Python 並行寫，從 Rust snapshot 派生
+- 評估是否進一步刪 `RiskManager` 子類符號，讓 paper_trading_wiring 直接 import RiskViewClient
+
+**1C-4 待做**: Position Reconciler · Governor tier override cooldown PG 持久化（live 前必做，1C-3-B-2 known limitation）· NewsPipeline run_once 60s spawn · 熱重載 e2e 驗收測試 · E2 + E4 + QA Audit。
+
+
 
 ### Session ARCH-RC1 1C-2-C/D/E SHIPPED + 1C-3 Scoped + 文檔大清理（2026-04-07 PM · commits `5f87bca` `de75191` `950f547` `b0fa2c6`）
 
