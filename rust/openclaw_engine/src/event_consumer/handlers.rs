@@ -235,6 +235,39 @@ pub(super) fn handle_paper_command(
             })();
             let _ = response_tx.send(result);
         }
+        // ── ARCH-RC1 1C-3-F: External paper-side order submission ──
+        PaperSessionCommand::SubmitOrder {
+            symbol,
+            side,
+            qty,
+            order_type,
+            limit_price,
+            confidence,
+            strategy,
+            response_tx,
+        } => {
+            let result = (|| -> Result<String, String> {
+                let is_long = match side.as_str() {
+                    "Buy" | "buy" | "long" | "LONG" => true,
+                    "Sell" | "sell" | "short" | "SHORT" => false,
+                    other => return Err(format!("invalid side: {other}")),
+                };
+                let conf = if confidence > 0.0 { confidence } else { 1.0 };
+                pipeline.submit_external_order(
+                    &symbol,
+                    is_long,
+                    qty,
+                    &order_type,
+                    limit_price,
+                    conf,
+                    &strategy,
+                )
+            })();
+            if result.is_ok() {
+                snapshot_writer.force_write(&pipeline.snapshot());
+            }
+            let _ = response_tx.send(result);
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         PaperSessionCommand::SetStrategyActive {
             strategy_name,
