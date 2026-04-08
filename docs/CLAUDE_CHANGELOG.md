@@ -1,7 +1,31 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜 session 2
+> 最後更新：2026-04-08 session 3
+
+### PH5-WIRE-1 + 5-01~03: mode-aware cost_gate + k-means cluster analysis（2026-04-08 · commit `5e760be`）
+
+1 commit · `+846/-72` 行 · engine lib 769 / Python 2692 passed · 1 pre-existing fail（無 regression）
+
+**核心問題（上個 session 遺漏）**：WIRE-1 被標記為「等 paper 改善再接」但存在循環依賴——JS 估計全負 → 若接線攔截所有 trades → 無新數據 → 估計永遠負 → paper 無法自己改善。本 session 修正了這個設計缺陷。
+
+**WIRE-1 Rust 實作：**
+- NEW `edge_estimates.rs`：`EdgeEstimates` struct，從 `settings/edge_estimates.json` 加載 JS 快照；O(1) (strategy::symbol) 查詢；文件缺失時靜默返回 empty（cold-start 回退）
+- `intent_processor.rs`：重構 cost_gate 為兩個 helper：
+  - `cost_gate_paper()`：正 JS 估計 → EV vs fee 比較；**負估計 → exploration 模式（允許+記錄，打破循環依賴）**；None → ATR×0.2 cold-start fallback
+  - `cost_gate_live()`：無正估計 → fail-closed（根原則 #5 生存 > 利潤）
+  - 加 `edge_estimates: EdgeEstimates` field + `set_edge_estimates()` method
+- `tick_pipeline.rs`：`set_edge_estimates()` wrapper
+- `event_consumer/mod.rs`：啟動時從 `OPENCLAW_EDGE_SNAPSHOT` 或默認路徑加載估計
+
+**5-01 Python 擴展：**
+- `realized_edge_stats.py`：`EdgeStats` 新增 `win_rate`, `avg_win_bps`, `avg_loss_bps`；`compute_edge_stats()` 補算
+- `james_stein_estimator.py`：新增 `_shrink_and_attach()` helper；對 win_rate/avg_win/avg_loss 分別執行 JS 收縮；計算 `combined_ev_bps = shrunk_wr × shrunk_avg_win + (1-shrunk_wr) × shrunk_avg_loss`；JSON snapshot + PG upsert 各新增 3 個 param_name 行
+
+**5-02~03 Python 新文件：**
+- NEW `edge_cluster_analysis.py`：純 stdlib k-means（k=auto，n<6 用 2，否則 3）；歸一化特徵 [shrunk_bps, win_rate, combined_ev_bps]；cluster label candidate/middle/underperformer（按均值 shrunk_bps 命名）；全局排名；輸出 `settings/edge_clusters.json`；支援 `--from-pg` 模式從 PG 直接加載
+
+**E2 flag**：`intent_processor.rs` 現 1295 行（原 1214 已超限，helper 重構有價值但淨 +81 行；tick_pipeline.rs 大重構延後）
 
 ### Phase 5 P0 + DEAD-PY-1 完成 + 測試基線清理（2026-04-08 · commits `75d8f36`–`caf2bcc`）
 
