@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜（1C-4 A1+B1）
+> 最後更新：2026-04-08 深夜（1C-4 B2）
+
+### ARCH-RC1 1C-4 B2 SHIPPED — Position Reconciler（2026-04-08 · commit `36335d7`）
+
+**B2 — Bybit 持倉對帳器**（+484 行 / 9 unit tests / 零 migration）
+- 新模組 `rust/openclaw_engine/src/position_reconciler.rs`
+- 30s 輪詢 Bybit `/v5/position/list` (Linear)，與 reconciler 自持的 in-memory baseline diff
+- 漂移分 5 級純函數分類（`classify()`）：
+  - `Match` / `MinorDrift` (qty 變化 < 5%) → V014 audit only
+  - `MajorDrift` (≥ 5%) / `Orphan` (Bybit 有/baseline 無) / `Ghost` (baseline 有/Bybit 無) → V014 + governor de-escalate
+- Side 翻轉（多空互換）直接判 MajorDrift，永不視為噪音
+- Governor 觸發走既有 `PaperSessionCommand::ForceGovernorLooser` 通道，`reason_code=reconcile_mismatch` + `target_tier=auto_step_looser`，自動接 B1 的 24h cooldown 路徑
+- **每輪只觸發 1 次** governor，避免同源漂移（單次斷線 / 手動操作）轟炸 cooldown
+- Fail-open：REST 失敗 → warn + 跳本輪，baseline 保留
+- V014 audit pool 可選，缺失時降級為純日誌
+- main.rs spawn gated on `Some(shared_client)`；paper-only / no-REST 模式整體跳過
+- **零 migration** — V014 `engine_events` 已能裝 `reconcile_{minor_drift,major_drift,orphan,ghost}` 4 種 event_type
+- 9 unit tests：`classify()` 7 種路徑 + `build_view_map()` 過濾空倉 + `should_trigger_governor()` 分級
+- 測試基準：engine lib 757 → **766** (+9)
 
 ### ARCH-RC1 1C-4 A1+B1 SHIPPED — Governor cooldown PG 持久化 + 註釋話術同步（2026-04-08 · commits `03fee49` `e840003`）
 

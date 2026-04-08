@@ -73,9 +73,9 @@
 - F-b `shadow_decision_builder.py` rewire 走 `EngineIPCClient`（async consume + Layer 2 routes lazy-build consumer）
 - F-c/d 刪 `paper_trading_engine.py` 2248 行 + 13 依賴測試檔 + conftest fixtures 整塊；`paper_trading_routes.py` 內聯 `DEFAULT_INITIAL_BALANCE_USDT`；`paper_trading_wiring.py` PAPER_STORE/ENGINE 留 None stub（main.py / governance_routes / strategy_wiring 全部已 `is not None` 短路）
 
-**1C-4 進度**：A1 註釋話術同步 ✅ (`03fee49`) · B1 Governor cooldown PG 持久化 ✅ (`e840003`，V014 replay on startup，無需新 migration) · 留尾：B2 Position Reconciler / A2 NewsPipeline scheduler（延後待 4-09 router 決策）/ 熱重載 e2e / E-Merge-4 / E2+E4+QA。
+**1C-4 進度**：A1 ✅ (`03fee49`) · B1 Governor cooldown PG 持久化 ✅ (`e840003`，V014 replay) · **B2 Position Reconciler ✅** (`36335d7`，30s Bybit 輪詢 + 5 級漂移分類 + V014 + 自動 governor trigger，零 migration) · 留尾：A2 NewsPipeline scheduler（延後待 4-09 router）/ 熱重載 e2e / E-Merge-4 / E2+E4+QA。
 
-**測試基準線**：engine lib **757** (+5 vs B1 前 · +9 vs F-a 前) · core 387 · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
+**測試基準線**：engine lib **766** (+9 vs B1 後) · core 387 · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
 
 ### 歷史完成里程碑（完整細節見歸檔）
 
@@ -358,4 +358,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：engine lib **757** · core 387 · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED + 1C-4 A1/B1 SHIPPED** — Python 風控/紙盤雙退場 · Governor cooldown 透過 V014 replay PG 持久化 (`e840003`，無需新 migration，5 unit tests) · 註釋話術同步 (`03fee49`) · Rust openclaw_engine 為 paper/demo/live 唯一引擎 · 1 ConfigStore 權威 + 5 engines 熱重載 + 4 IPC 寫入面 + V014 audit · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步 **1C-4 B2** Position Reconciler · A2 News scheduler 延後待 4-09 router 決策。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
+> 截至 2026-04-08：engine lib **766** · core 387 · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED + 1C-4 A1/B1/B2 SHIPPED** — Python 風控/紙盤雙退場 · Governor cooldown V014 replay (`e840003`) · **Position Reconciler 30s Bybit 輪詢 + 5 級漂移分類 + 自動 governor trigger** (`36335d7`，零 migration，9 unit tests) · Rust openclaw_engine 為 paper/demo/live 唯一引擎 · 1 ConfigStore 權威 + 5 engines 熱重載 + 4 IPC 寫入面 + V014 audit · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步 1C-4 留尾：熱重載 e2e / E-Merge-4 / A2 News scheduler（延後）/ E2+E4+QA。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
