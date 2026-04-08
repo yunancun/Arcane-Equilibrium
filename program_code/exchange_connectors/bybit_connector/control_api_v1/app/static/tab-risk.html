@@ -217,6 +217,24 @@
 
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
+          <div style="font-size:12px;font-weight:600">Max Correlated Exposure / 关联曝险上限</div>
+          <div style="font-size:10px;color:var(--text-dim)">高度相关持仓的总曝险上限（空 = 不限制）。用于控制关联品种集中风险</div>
+          <div style="font-size:10px;color:var(--text-dim)">过低 → 限制对冲策略 | 过高 → 关联风险失控</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-corr-exp" type="number" step="5" min="0" max="200" style="width:80px" placeholder="--" /><span style="font-size:12px">%</span></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:12px;font-weight:600">Allowed Categories / 允许品类</div>
+          <div style="font-size:10px;color:var(--text-dim)">允许交易的品类，逗号分隔（例：linear,spot）。Rust 引擎直接过滤</div>
+          <div style="font-size:10px;color:var(--text-dim)">留空 = 不过滤 | linear = 仅永续合约</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-allowed-cats" type="text" style="width:130px" placeholder="linear,spot" /></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
           <div style="font-size:12px;font-weight:600">Max Same-Direction / 同向最大持仓数</div>
           <div style="font-size:10px;color:var(--text-dim)">同一方向（全做多/全做空）的最大持仓数量。Guardian 超限则拒绝</div>
           <div style="font-size:10px;color:var(--text-dim)">过高 → 方向性集中风险 | 过低 → 限制策略多样性</div>
@@ -232,7 +250,9 @@
         <div class="oc-metric"><div class="oc-metric-label">P1 Risk/Trade</div><div class="oc-metric-val yellow" id="s-p1-risk" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Max Single Pos</div><div class="oc-metric-val" id="s-single-pos" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Total Exposure</div><div class="oc-metric-val" id="s-total-exp" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Correlated Exp</div><div class="oc-metric-val" id="s-corr-exp" style="font-size:16px">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val" id="s-same-dir" style="font-size:16px">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Allowed Cats</div><div class="oc-metric-val" id="s-allowed-cats" style="font-size:13px">--</div></div>
       </div>
       <button class="oc-btn oc-btn-primary" onclick="savePositionSettings(this)" style="margin-top:8px">&#x1F4BE; 保存仓位设置 / Save Position Settings</button>
     </div>
@@ -617,11 +637,19 @@ async function savePositionSettings(btn) {
     // p1_risk_pct now wired to Rust (RiskConfig.limits.per_trade_risk_pct) — sent
     // as percent, Rust stores as fraction. Hot-reloaded into IntentProcessor Gate 2.6.
     // p1_risk_pct 已接 Rust，發送百分比，Rust 存小數，熱重載到 Gate 2.6。
+    const corrExpVal = parseFloat($('in-corr-exp').value);
+    const catsRaw = ($('in-allowed-cats').value || '').trim();
     const body = {
       p1_risk_pct: parseFloat($('in-p1-risk').value) || 3,
       max_single_position_pct: parseFloat($('in-single-pos').value) || 20,
       max_total_exposure_pct: parseFloat($('in-total-exp').value) || 100,
       max_same_direction_positions: parseInt($('in-same-dir').value) || 3,
+      // null = remove limit; only send if user entered a positive value
+      // null = 不限制；只在用戶輸入正值時發送
+      max_correlated_exposure_pct: (corrExpVal > 0) ? corrExpVal : null,
+      // Parse comma-separated string to array; null if empty (keep current Rust value)
+      // 逗號分隔字串轉陣列；空白則傳 null（保持 Rust 現值）
+      allowed_categories: catsRaw ? catsRaw.split(',').map(s => s.trim()).filter(Boolean) : null,
     };
     const d = await ocPost('/api/v1/paper/risk/config/global', body);
     if (d) { ocToast('仓位设置已保存 / Position settings saved', 'success'); loadAll(); }
@@ -909,6 +937,10 @@ async function loadRiskConfig() {
   ocSetText('s-p1-risk', p1RiskPct.toFixed(1) + '%');
   ocSetText('s-single-pos', (gc.max_single_position_pct ?? rRisk.max_single_position_pct ?? '--') + '%');
   ocSetText('s-total-exp', (gc.max_total_exposure_pct ?? rRisk.max_total_exposure_pct ?? '--') + '%');
+  const corrExpDisplay = gc.max_correlated_exposure_pct;
+  ocSetText('s-corr-exp', corrExpDisplay != null ? corrExpDisplay + '%' : '--');
+  const allowedCatsDisplay = gc.allowed_categories;
+  ocSetText('s-allowed-cats', Array.isArray(allowedCatsDisplay) && allowedCatsDisplay.length ? allowedCatsDisplay.join(', ') : '--');
   const sameDirVal = gc.max_same_direction_positions ?? rGuard.max_same_direction_positions ?? 3;
   ocSetText('s-same-dir', sameDirVal);
 
@@ -953,6 +985,8 @@ async function loadRiskConfig() {
   _setInput('in-p1-risk', parseFloat(gcP1Pct).toFixed(1));
   _setInput('in-single-pos', gc.max_single_position_pct ?? 20);
   _setInput('in-total-exp', gc.max_total_exposure_pct ?? 100);
+  _setInput('in-corr-exp', gc.max_correlated_exposure_pct ?? '');
+  $('in-allowed-cats').value = (gc.allowed_categories || []).join(', ');
   _setInput('in-same-dir', gc.max_same_direction_positions ?? 3);
   _setInput('in-cooldown-count', gc.consecutive_loss_cooldown_count ?? 3);
   _setInput('in-cooldown-min', gc.consecutive_loss_cooldown_minutes ?? 30);
