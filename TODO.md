@@ -43,7 +43,7 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 完成 commits：CFG-PERSIST-1 `5d7d673` · CFG-COST-EDGE-1（含 Task #8）`0e848fa` · cost_edge revert + diag log `638afa3`。
 - [x] CFG-PERSIST-1 atomic TOML write-back
 - [x] CFG-PERSIST-3 max_cost_edge_ratio dead-write 修復（routed to BudgetConfig via patch_budget_config）
-- [ ] CFG-PERSIST-3 殘留：`max_correlated_exposure_pct` / `allowed_categories` / `preferred_margin_mode` / `preferred_position_mode` GUI 入口（決定補入口或從 Pydantic 移除）— 非阻塞，留 Task #6/#7
+- [x] CFG-PERSIST-3 殘留：`max_correlated_exposure_pct` + `allowed_categories` GUI 入口已補入 tab-risk.html Position Limits 卡（數字輸入 + 逗號分隔文字輸入，連 loadAll / savePositionSettings / Current Values 全接線）；`preferred_margin_mode` / `preferred_position_mode` 延後（Rust 僅存儲，未執行，移入 WP-F 後端 backlog）
 
 ---
 
