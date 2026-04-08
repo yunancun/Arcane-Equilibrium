@@ -615,6 +615,9 @@ async function saveStopSettings(btn) {
 async function savePositionSettings(btn) {
   _btnSaving(btn, true);
   try {
+    // p1_risk_pct now wired to Rust (RiskConfig.limits.per_trade_risk_pct) — sent
+    // as percent, Rust stores as fraction. Hot-reloaded into IntentProcessor Gate 2.6.
+    // p1_risk_pct 已接 Rust，發送百分比，Rust 存小數，熱重載到 Gate 2.6。
     const body = {
       p1_risk_pct: parseFloat($('in-p1-risk').value) || 3,
       max_single_position_pct: parseFloat($('in-single-pos').value) || 20,
@@ -795,9 +798,17 @@ async function loadRiskStatus() {
 async function loadRiskConfig() {
   const d = await ocApi('/api/v1/paper/risk/config');
   if (!d || !d.data) return;
-  const cfg = d.data;
+  // Route returns _risk_response({"config": {...}, "version": N}) so envelope is
+  // d.data = {config: {global_config, limits, ...}, version: N}. Earlier code read
+  // cfg.global_config directly which was always undefined → all reads fell through
+  // to JS defaults → values appeared to "revert" after every save.
+  // 路由實際回傳 {data: {config: {...}, version: N}}，必須再下一層讀 config。
+  const cfg = (d.data && d.data.config) || d.data || {};
 
   // P0 - Category config: field is "category_overrides" or "category" or from allowed_categories
+  // NOTE: don't read cfg.overrides here — Rust returns {linear: null, spot: null, ...}
+  // and typeof null === 'object' would crash Object.entries(null) below.
+  // 不要讀 cfg.overrides — Rust 回 null 值會讓下方 Object.entries(null) 拋錯。
   const p0 = cfg.category_overrides || cfg.category || cfg.p0 || {};
   const gc = cfg.global_config || cfg.global || cfg.p1 || {};
   let html0 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
@@ -886,8 +897,16 @@ async function loadRiskConfig() {
 
   // Position Sizing & Exposure display — fresh ConfigStore first, snapshot fallback
   // P1 risk: Rust stores as fraction (0.03), display as % (3%)
-  const p1RiskFrac = rRisk.p1_risk_pct ?? null;  // Rust may not expose this in snapshot yet
-  const p1RiskPct = p1RiskFrac != null ? (p1RiskFrac < 1 ? p1RiskFrac * 100 : p1RiskFrac) : 2;
+  // Prefer fresh ConfigStore (gc.p1_risk_pct, already in percent from route).
+  // Fallback to snapshot rRisk.p1_risk_pct (fraction) only if gc missing.
+  let p1RiskPct;
+  if (gc.p1_risk_pct != null) {
+    p1RiskPct = parseFloat(gc.p1_risk_pct);
+  } else if (rRisk.p1_risk_pct != null) {
+    p1RiskPct = rRisk.p1_risk_pct < 1 ? rRisk.p1_risk_pct * 100 : rRisk.p1_risk_pct;
+  } else {
+    p1RiskPct = 2;
+  }
   ocSetText('s-p1-risk', p1RiskPct.toFixed(1) + '%');
   ocSetText('s-single-pos', (gc.max_single_position_pct ?? rRisk.max_single_position_pct ?? '--') + '%');
   ocSetText('s-total-exp', (gc.max_total_exposure_pct ?? rRisk.max_total_exposure_pct ?? '--') + '%');
@@ -928,7 +947,10 @@ async function loadRiskConfig() {
   _setInput('in-drawdown', gc.max_session_drawdown_pct ?? 15);
   _setInput('in-leverage', gc.max_leverage ?? 20);
   _setInput('in-daily-loss', gc.max_daily_loss_pct ?? 5);
-  const gcP1Pct = gc.p1_risk_pct != null ? (gc.p1_risk_pct < 1 ? gc.p1_risk_pct * 100 : gc.p1_risk_pct) : p1RiskPct;
+  // p1_risk_pct now sourced from Rust ConfigStore (limits.per_trade_risk_pct).
+  // Route exposes it as percent already, so no /100 vs *100 ambiguity here.
+  // p1_risk_pct 從 Rust ConfigStore 取得，路由已換算為百分比。
+  const gcP1Pct = gc.p1_risk_pct != null ? gc.p1_risk_pct : p1RiskPct;
   _setInput('in-p1-risk', parseFloat(gcP1Pct).toFixed(1));
   _setInput('in-single-pos', gc.max_single_position_pct ?? 20);
   _setInput('in-total-exp', gc.max_total_exposure_pct ?? 100);
