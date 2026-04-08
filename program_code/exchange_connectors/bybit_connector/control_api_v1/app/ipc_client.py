@@ -388,6 +388,39 @@ class EngineIPCClient:
         """
         return await self.call("reset_paper_state", params={"new_balance": new_balance})
 
+    # ─── ARCH-RC1 1C-3-F: External paper-side order submission ──────────────
+    async def submit_paper_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        order_type: str = "market",
+        limit_price: float | None = None,
+        confidence: float = 1.0,
+        strategy: str = "external",
+    ) -> dict[str, Any]:
+        """
+        Submit an external paper-side order through the same IntentProcessor
+        pipeline strategies use (Guardian / Kelly / P1 cap / risk gate / cost
+        gate). Returns the success envelope from the Rust engine:
+        ``{order_id, fill_qty, fill_price, fee, realized_pnl}``.
+        Rejection (paused / halted / no price / gate failure) raises via the
+        JSON-RPC error path.
+        ARCH-RC1 1C-3-F：通過策略所走的同一條 IntentProcessor 管線提交外部紙盤訂單。
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "order_type": order_type,
+            "confidence": confidence,
+            "strategy": strategy,
+        }
+        if limit_price is not None:
+            params["limit_price"] = limit_price
+        return await self.call("submit_paper_order", params=params)
+
     _UNSET = object()  # sentinel for "not passed" vs "passed as None (=disable)"
 
     async def update_risk_config(

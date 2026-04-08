@@ -664,9 +664,9 @@ class Layer2Engine:
             symbol=rec.symbol,
         )
 
-        # Consume decision
+        # Consume decision — ShadowDecisionConsumer.consume is async (1C-3-F).
         try:
-            consumption = self._shadow_consumer.consume(decision, market_prices)
+            consumption = await self._shadow_consumer.consume(decision, market_prices)
             session.shadow_decision_id = decision["decision_id"]
             session.paper_order_id = consumption.get("order_id")
             logger.info(
