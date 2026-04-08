@@ -73,9 +73,11 @@
 - F-b `shadow_decision_builder.py` rewire 走 `EngineIPCClient`（async consume + Layer 2 routes lazy-build consumer）
 - F-c/d 刪 `paper_trading_engine.py` 2248 行 + 13 依賴測試檔 + conftest fixtures 整塊；`paper_trading_routes.py` 內聯 `DEFAULT_INITIAL_BALANCE_USDT`；`paper_trading_wiring.py` PAPER_STORE/ENGINE 留 None stub（main.py / governance_routes / strategy_wiring 全部已 `is not None` 短路）
 
-**1C-4 進度**：A1 ✅ (`03fee49`) · B1 Governor cooldown PG 持久化 ✅ (`e840003`，V014 replay) · **B2 Position Reconciler ✅** (`36335d7` + 降級 commit) — 30s Bybit 輪詢 + 5 級漂移分類 + warmup baseline + V014 audit。**audit-only**：QA+E2 審查發現原設計的自動 governor trigger 與 operator manual override 白名單 + B1 cooldown 語義雙重衝突，已降級為純 audit。自動收縮挪至 **Phase 6 自動收縮** 段（TODO.md 6-RC-1~8 目標規格已寫死）。**熱重載 e2e ✅** (`4780b04`，5 consumers 一次驗證)。留尾：A2 NewsPipeline scheduler（延後）/ E-Merge-4 / E2+E4+QA wrap。
+**ARCH-RC1 1C-4 WRAP COMPLETE ✅**（2026-04-08 深夜）：A1 (`03fee49`) · B1 Governor cooldown PG 持久化 (`e840003`，V014 replay) · B2 Position Reconciler **audit-only** (`36335d7` 初版 → `ab1e0d8` 降級 → `9811bf3` QA polish) — 30s Bybit 輪詢 + 5 級漂移分類 + first-cycle warmup + V014 audit。原設計自動 governor trigger 經 QA+E2 雙審查發現與 operator manual override 白名單 + B1 cooldown 語義雙重衝突，已降級為純 audit；自動收縮挪至 **Phase 6 自動收縮 6-RC-1~9**（TODO.md 規格寫死）· **熱重載 e2e** (`4780b04`) 一次驗證 5 consumers · **E-Merge-4** (`06742b3`) Guardian 退化為 RiskConfig 純派生視圖（modification_size_factor + modification_leverage_cap 升級至 RiskConfig.limits，dead 欄位 max_correlation 刪除，apply_risk_snapshot 改 fresh 構造無 RMW）。
 
-**測試基準線**：engine lib **767** (+1 hot-reload e2e) · core 387 · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
+**1C-4 留尾項**（非阻塞）：A2 NewsPipeline scheduler（延後待 4-09 router）/ W1 event_consumer/mod.rs 826 行下次觸碰時拆分 / Phase 6 自動收縮 6-RC-1~9 規格已寫死。
+
+**測試基準線**：engine lib **767** · core **387** · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
 
 ### 歷史完成里程碑（完整細節見歸檔）
 
@@ -358,4 +360,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：engine lib **767** · core 387 · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED + 1C-4 A1/B1/B2 SHIPPED + hot-reload e2e SHIPPED** — Python 風控/紙盤雙退場 · Governor cooldown V014 replay (`e840003`) · **Position Reconciler audit-only**：30s Bybit 輪詢 + 5 級漂移分類 + warmup baseline + V014 audit (`36335d7` + 降級 commit)，原設計自動 governor 收縮經 QA+E2 審查降級移除，挪至 **Phase 6 自動收縮**（TODO.md 6-RC-1~8 規格已寫死）· **熱重載 e2e** (`4780b04`) 一次驗證 5 consumers · Rust openclaw_engine 為 paper/demo/live 唯一引擎 · 1 ConfigStore 權威 + 5 engines 熱重載 + 4 IPC 寫入面 + V014 audit · Live 前 blocker：**7d paper trading 數據觀察期** + **多通道告警上線**（B2 降級後 drift 只進 audit，需 operator 通知通道）· 下一步 1C-4 留尾：E-Merge-4 / A2 News scheduler（延後）/ E2+E4+QA wrap。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
+> 截至 2026-04-08：engine lib **767** · core **387** · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-4 WRAP COMPLETE** — Python 風控/紙盤雙退場 + 4 IPC 寫入面 + 1 ConfigStore 權威 + 5 engines 熱重載（端到端 e2e 證據 `4780b04`）+ V014 audit · Governor cooldown V014 replay (`e840003`) + operator manual override 24h cooldown · Position Reconciler **audit-only** (`36335d7`→`ab1e0d8`→`9811bf3`)：30s Bybit 輪詢 + 5 級漂移分類 + warmup baseline，自動收縮挪至 **Phase 6 自動收縮 6-RC-1~9**（規格已寫死）· **E-Merge-4** (`06742b3`) Guardian = RiskConfig 純派生視圖，唯一真相源 patch_risk_config · Rust openclaw_engine 為 paper/demo/live 唯一引擎 · Live 前 blocker：**7d paper trading 數據觀察期** + **多通道告警上線**（B2 降級後需 operator 通知通道）· 1C-4 留尾（非阻塞）：A2 News scheduler / W1 event_consumer 拆分。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。

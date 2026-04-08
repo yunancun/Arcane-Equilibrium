@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-08 深夜（1C-4 B2 降級為 audit-only · 熱重載 e2e SHIPPED）
+最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
 測試基準線：**engine lib 767 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -9,6 +9,12 @@
 ---
 
 ## 🎯 下一步起點
+
+### 1C-4 WRAP COMPLETE ✅（2026-04-08 深夜）
+
+A1 `03fee49` · B1 `e840003` · B2 `36335d7`→`ab1e0d8`(降級)→`9811bf3`(QA polish) · 熱重載 e2e `4780b04` · E-Merge-4 `06742b3`。
+留尾（非阻塞）：A2 News scheduler / W1 event_consumer 拆分。
+**下一步**：見「📅 Phase 4 follow-up」段或進入 Phase 5 (W16-18 James-Stein + DL-1 + DL-2)。
 
 ### 1C-3-F SHIPPED ✅（2026-04-08 深夜 · `accf625` `8ff93e0` `de1ec69`）
 

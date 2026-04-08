@@ -1,7 +1,45 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜（1C-4 B2 audit-only 降級 + 熱重載 e2e）
+> 最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
+
+### ARCH-RC1 1C-4 E-Merge-4 — Guardian = RiskConfig pure derived view（2026-04-08 · commit `06742b3`）
+
+`+90/-27` 行 · core 387 + engine 767 全綠 · 0 regression
+
+**動機**：1C-2-F E-Merge-1/2/3 已把 paper_state.stop_config / h0_gate.config / governance.risk.thresholds 拉成 RiskConfig 派生視圖，但 Guardian 仍持有「3 個 RiskConfig 鏡像欄位 + 2 個 operator-invisible 私有欄位 + 1 個 dead 欄位」的混合結構，apply_risk_snapshot 必須走 RMW 保留私有欄位。E-Merge-4 收尾這個歷史尾巴，讓 Guardian 完全變成 RiskConfig 的純派生視圖。
+
+**改動**：
+- `openclaw_core/src/guardian.rs`：
+  - 刪除 dead 欄位 `max_correlation`（grep 全 workspace 確認 review() 從未讀取）
+  - `GuardianConfig::default()` 的 `max_leverage` 5→20，對齊 `RiskConfig::default().limits.leverage_max`
+  - docstring 重寫，明示「pure derived view」契約
+  - `test_leverage_over_cap_modified` 改用顯式 cap=5 不再耦合 Default 值
+- `openclaw_engine/src/config/risk_config.rs`：
+  - `GlobalLimits` 新增 `guardian_modification_size_factor`（default 0.5）+ `guardian_modification_leverage_cap`（default 2.0），把 Guardian「Modified」裁決參數從 operator-invisible 升級為一級 IPC-patchable RiskConfig 欄位
+  - `validate()` 新增：`size_factor ∈ [0,1]`、`leverage_cap >= 1`
+- `openclaw_engine/src/tick_pipeline.rs apply_risk_snapshot`：
+  - **刪除 RMW 模式**（clone 既有 GuardianConfig → 覆蓋 3 欄位 → 推回）
+  - 改為從 snap 直接構造全新 GuardianConfig，5 個欄位全部 1:1 來自 RiskConfig，無 Default fallback
+  - docstring 重寫記錄 E-Merge-4 契約變更
+- `openclaw_engine/src/event_consumer/setup.rs` 初始 Guardian seed：
+  - 同步移除 Default fallback，modification_* 欄位也走 default_risk.limits
+
+**契約變更**：Guardian 任何旋鈕的唯一真相源 = `patch_risk_config`。`update_strategy_params` 既有 IPC 路徑仍可 RMW 同樣 3 個欄位（不受影響）。
+
+**測試**：core 360+8+19+0 = **387 passed** / engine **767 passed** / 0 regression。
+
+---
+
+### ARCH-RC1 1C-4 wrap QA polish（2026-04-08 · commit `9811bf3`）
+
+post-degradation E2 + QA 雙審查雙 APPROVE 後，落 4 項 minor follow-up（item #2 demo_only spawn gating 經 operator 確認維持現狀）：
+- `position_reconciler.rs` MODULE_NOTE 加 warmup→cycle1 ~30s race window caveat + spawn gating 設計決策說明
+- TODO.md 6-RC-5 收緊：強制 per-symbol minQty (1.5 × `lotSizeFilter.minOrderQty`)，禁止全局魔法數
+- TODO.md 6-RC-6 標記阻塞依賴 OC-3 多通道告警基礎設施
+- TODO.md 新增 6-RC-9：baseline staleness 政策 + `last_fetch_ms` 欄位，6-RC-1 落地前必須完成
+
+---
 
 ### ARCH-RC1 1C-4 — Hot-reload e2e + B2 audit-only 降級（2026-04-08 深夜）
 
