@@ -257,7 +257,11 @@ fn default_grade_d_threshold() -> f64 {
     0.8
 }
 fn default_cost_edge_max_ratio() -> f64 {
-    0.8
+    // CFG-COST-EDGE-1: raised from 0.8 → 2.0 so small initial profits aren't
+    // immediately closed by the cost-edge gate before take-profit can trigger.
+    // CFG-COST-EDGE-1：從 0.8 提升至 2.0，避免小幅初始盈利在 take-profit 觸發
+    // 前就被 cost-edge gate 立即平倉。
+    2.0
 }
 
 impl Default for AttentionTax {
@@ -321,8 +325,12 @@ impl AttentionTax {
                 "budget.attention_tax grade thresholds must be strictly increasing (A < B < C < D)".into()
             );
         }
-        if !(0.0..=1.0).contains(&self.cost_edge_max_ratio) {
-            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 1]".into());
+        // CFG-COST-EDGE-1: range relaxed from [0, 1] → [0, 5] so operators can
+        // disable the gate (effectively) for low-vol regimes.
+        // CFG-COST-EDGE-1：範圍從 [0, 1] 放寬到 [0, 5]，讓 operator 在低波動區能
+        // 實質關閉此 gate。
+        if !(0.0..=5.0).contains(&self.cost_edge_max_ratio) {
+            return Err("budget.attention_tax.cost_edge_max_ratio must be in [0, 5]".into());
         }
         Ok(())
     }
@@ -403,7 +411,7 @@ mod tests {
     #[test]
     fn test_cost_edge_max_ratio_out_of_range_rejected() {
         let mut cfg = BudgetConfig::default();
-        cfg.attention_tax.cost_edge_max_ratio = 1.5;
+        cfg.attention_tax.cost_edge_max_ratio = 6.0;
         assert!(cfg.validate().is_err());
     }
 
@@ -428,7 +436,7 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let de: BudgetConfig = toml::from_str(&toml_str).unwrap();
         assert!(de.validate().is_ok());
-        assert_eq!(de.attention_tax.cost_edge_max_ratio, 0.8);
+        assert_eq!(de.attention_tax.cost_edge_max_ratio, 2.0);
     }
 
     #[test]
@@ -456,7 +464,7 @@ daily_usd_max = 50.0
         assert_eq!(cfg.caps.daily_usd_max, 50.0);
         // attention_tax defaults preserved / attention_tax 預設值保留
         assert!(cfg.attention_tax.enabled);
-        assert_eq!(cfg.attention_tax.cost_edge_max_ratio, 0.8);
+        assert_eq!(cfg.attention_tax.cost_edge_max_ratio, 2.0);
         assert!(cfg.validate().is_ok());
     }
 }
