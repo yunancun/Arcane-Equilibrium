@@ -181,6 +181,20 @@ pub struct GlobalLimits {
     pub margin_mode: String,
     #[serde(default = "default_position_mode")]
     pub position_mode: String,
+    /// ARCH-RC1 1C-4 E-Merge-4: Guardian "Modified" verdict knobs.
+    /// When a trade intent's leverage exceeds `leverage_max` but is < 2x over,
+    /// Guardian rewrites the order with `qty *= modification_size_factor` and
+    /// `leverage = modification_leverage_cap`. Previously these lived only in
+    /// GuardianConfig (operator-invisible); they are now first-class RiskConfig
+    /// fields so the operator GUI can tune them via patch_risk_config.
+    /// ARCH-RC1 1C-4 E-Merge-4：Guardian「Modified」裁決參數。
+    /// 槓桿超出 leverage_max 但 < 2x 時，Guardian 將 qty *= modification_size_factor
+    /// 並把 leverage 改寫為 modification_leverage_cap。原先只存在 GuardianConfig 內
+    /// 對 operator 不可見，現在升級為 RiskConfig 一級欄位，可經 patch_risk_config 調整。
+    #[serde(default = "default_guardian_modification_size_factor")]
+    pub guardian_modification_size_factor: f64,
+    #[serde(default = "default_guardian_modification_leverage_cap")]
+    pub guardian_modification_leverage_cap: f64,
 }
 
 fn default_stop_loss_max_pct() -> f64 {
@@ -228,6 +242,12 @@ fn default_margin_mode() -> String {
 fn default_position_mode() -> String {
     "one_way".into()
 }
+fn default_guardian_modification_size_factor() -> f64 {
+    0.5
+}
+fn default_guardian_modification_leverage_cap() -> f64 {
+    2.0
+}
 
 impl Default for GlobalLimits {
     fn default() -> Self {
@@ -251,6 +271,8 @@ impl Default for GlobalLimits {
             allowed_categories: default_allowed_categories(),
             margin_mode: default_margin_mode(),
             position_mode: default_position_mode(),
+            guardian_modification_size_factor: default_guardian_modification_size_factor(),
+            guardian_modification_leverage_cap: default_guardian_modification_leverage_cap(),
         }
     }
 }
@@ -291,6 +313,17 @@ impl GlobalLimits {
         match self.position_mode.as_str() {
             "one_way" | "hedge" => {}
             other => return Err(format!("risk.limits.position_mode invalid: '{}'", other)),
+        }
+        // E-Merge-4 Guardian modification knobs / E-Merge-4 Guardian 修正參數
+        if !(0.0..=1.0).contains(&self.guardian_modification_size_factor) {
+            return Err(
+                "risk.limits.guardian_modification_size_factor must be in [0, 1]".into(),
+            );
+        }
+        if self.guardian_modification_leverage_cap < 1.0 {
+            return Err(
+                "risk.limits.guardian_modification_leverage_cap must be >= 1".into(),
+            );
         }
         Ok(())
     }

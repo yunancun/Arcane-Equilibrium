@@ -486,31 +486,34 @@ impl TickPipeline {
         self.risk_store = Some(store);
     }
 
-    /// ARCH-RC1 1C-2-B (Option B): Push a RiskConfig snapshot into every
-    /// downstream consumer that owns a derived copy: intent_processor's own
-    /// RiskConfig (for Gate 0 check_order_allowed + tick position check) AND
-    /// the Guardian (for P0 trade intent veto — direction conflict / leverage
-    /// modify / drawdown / same-direction count). Guardian's modification_*
-    /// fields are not in RiskConfig, so they are preserved via
-    /// read-modify-write of the existing GuardianConfig.
-    /// ARCH-RC1 1C-2-B (Option B)：把一份 RiskConfig 快照推到所有下游持有派生
-    /// copy 的消費者：intent_processor 自身的 RiskConfig + Guardian。
-    /// Guardian 的 modification_* 欄位不在 RiskConfig 中，透過 read-modify-write
-    /// 保留既有值。
+    /// ARCH-RC1 1C-2-B (Option B) + 1C-4 E-Merge-4: Push a RiskConfig snapshot
+    /// into every downstream consumer that owns a derived copy. After E-Merge-4
+    /// the Guardian is a **pure derived view** of RiskConfig — no RMW, every
+    /// field is sourced from RiskConfig (modification_size_factor and
+    /// modification_leverage_cap were promoted to RiskConfig.limits, and the
+    /// dead `max_correlation` field on GuardianConfig was deleted). This means
+    /// the operator GUI's `patch_risk_config` is now the SINGLE source of
+    /// truth for every Guardian knob.
+    /// ARCH-RC1 1C-2-B + 1C-4 E-Merge-4：把 RiskConfig 快照推到所有持派生 copy
+    /// 的下游。E-Merge-4 後 Guardian 為 RiskConfig 的純派生視圖 — 無 RMW，
+    /// 每個欄位皆從 RiskConfig 取值。modification_* 欄位升級至 RiskConfig.limits，
+    /// 死欄位 max_correlation 已刪除。operator GUI 的 patch_risk_config 從此
+    /// 是 Guardian 任何旋鈕的唯一真相源。
     fn apply_risk_snapshot(&mut self, snap: &crate::config::RiskConfig) {
         // 1. Update intent_processor's owned RiskConfig (used for cost_gate k_*,
         //    dynamic_stop tunables, and check_order_allowed via risk_config()).
         self.intent_processor.update_risk_config(snap.clone());
 
-        // 2. Derive Guardian fields from RiskConfig and hot-reload Guardian.
-        //    Single source of truth: whenever operator or Agent patches
-        //    limits.leverage_max / limits.session_drawdown_max_pct /
-        //    anti_cluster.max_same_direction via RiskConfig, Guardian picks it
-        //    up on the next tick automatically.
-        let mut gc = self.intent_processor.guardian_config().clone();
-        gc.max_leverage = snap.limits.leverage_max;
-        gc.max_drawdown_pct = snap.limits.session_drawdown_max_pct;
-        gc.max_same_direction_positions = snap.anti_cluster.max_same_direction as usize;
+        // 2. Construct a fresh GuardianConfig fully derived from RiskConfig
+        //    (no RMW). Every field below has a 1:1 source in `snap`.
+        //    完整重建 GuardianConfig，無 RMW，每個欄位都對應 snap 內的單一來源。
+        let gc = openclaw_core::guardian::GuardianConfig {
+            max_leverage: snap.limits.leverage_max,
+            max_drawdown_pct: snap.limits.session_drawdown_max_pct,
+            max_same_direction_positions: snap.anti_cluster.max_same_direction as usize,
+            modification_size_factor: snap.limits.guardian_modification_size_factor,
+            modification_leverage_cap: snap.limits.guardian_modification_leverage_cap,
+        };
         self.intent_processor.update_guardian_config(gc);
 
         // 3. ARCH-RC1 1C-2-F E-Merge-2: hot-reload H0Gate risk-level fields
