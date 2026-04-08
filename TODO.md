@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
-測試基準線：**engine lib 769 · core 387 · types 27 · ml_training 35 · Python control_api 2678 passed (21 pre-existing fail · 0 regression)**
+測試基準線：**engine lib 769 · core 387 · types 27 · ml_training 35 · Python control_api 2678 passed (1 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
@@ -165,7 +165,7 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 - [ ] governance_hub.py 1927 行 — 拆分需獨立 sprint + E2+E4
 
 ### WP-CLEANUP-GRAFANA-TESTS（P2，20 個 AttributeError）
-- [ ] 更新 `test_grafana_data_writer.py` 對齊 `_from_rust` 後綴新方法名 + Rust IPC mock；或整檔刪除
+- [x] 刪除 20 個調用不存在方法的測試（`_write_pnl` / `_write_market_tickers` / `_write_system_health` / `_write_trade_executions` — 已於 Rust 遷移中移除或重命名為 `_from_rust` 後綴）；保留 10 個仍通過的測試。測試基準線：21 fail → 1 fail
 
 ### WP-CLEANUP-WHITELIST-UI（P2）
 - [ ] 移除 tab-governance.html whitelist card markup (~309-470)
