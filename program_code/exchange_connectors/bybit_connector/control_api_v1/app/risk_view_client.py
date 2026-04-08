@@ -39,6 +39,109 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# ─── GUI → Rust field mapping ───────────────────────────────────────────────
+# GUI 送來的平坦欄位名稱 → Rust RiskConfig 嵌套路徑 (section, rust_key)
+# GUI flat field names → Rust RiskConfig nested path (section, rust_key)
+_GLOBAL_TO_RUST: dict[str, tuple[str, str]] = {
+    # limits section
+    "max_stop_loss_pct":            ("limits", "stop_loss_max_pct"),
+    "max_take_profit_pct":          ("limits", "take_profit_max_pct"),
+    "tp_enabled":                   ("limits", "take_profit_enforced"),
+    "max_single_position_pct":      ("limits", "position_size_max_pct"),
+    "max_total_exposure_pct":       ("limits", "total_exposure_max_pct"),
+    "max_correlated_exposure_pct":  ("limits", "correlated_exposure_max_pct"),
+    "max_leverage":                 ("limits", "leverage_max"),
+    "max_session_drawdown_pct":     ("limits", "session_drawdown_max_pct"),
+    "max_daily_loss_pct":           ("limits", "daily_loss_max_pct"),
+    "consecutive_loss_cooldown_count":   ("limits", "consec_loss_cooldown_count"),
+    "consecutive_loss_cooldown_minutes": ("limits", "consec_loss_cooldown_min"),
+    "max_holding_hours":            ("limits", "holding_hours_max"),
+    "allowed_categories":           ("limits", "allowed_categories"),
+    "preferred_margin_mode":        ("limits", "margin_mode"),
+    "preferred_position_mode":      ("limits", "position_mode"),
+    # anti_cluster section
+    "max_same_direction_positions": ("anti_cluster", "max_same_direction"),
+    # agent section
+    "trailing_stop_pct":            ("agent", "trailing_distance_pct"),
+    # dynamic_stop section
+    "atr_multiplier":               ("dynamic_stop", "atr_stop_mult"),
+    # runtime section
+    "h0_shadow_mode":               ("runtime", "h0_shadow_mode"),
+}
+
+# Agent self-adjust fields → Rust agent section
+# Agent 自調整欄位 → Rust agent 區段
+_AGENT_TO_RUST: dict[str, str] = {
+    "effective_stop_loss_pct":     "stop_loss_pct",
+    "effective_take_profit_pct":   "take_profit_pct",
+    "trailing_stop_enabled":       "trailing_enabled",
+    "trailing_stop_activation_pct": "trailing_activation_pct",
+    "trailing_stop_distance_pct":  "trailing_distance_pct",
+    "position_size_multiplier":    "size_multiplier",
+    "prefer_limit_over_market":    "prefer_limit",
+    "use_reduce_only_for_close":   "reduce_only_close",
+    "use_post_only_for_limit":     "post_only_limit",
+    "category_preference_weights": "category_weights",
+}
+
+# Category override fields → Rust CategoryOverride fields
+# 分類覆蓋欄位 → Rust CategoryOverride 欄位
+_CATEGORY_TO_RUST: dict[str, str] = {
+    "enabled":                 "enabled",
+    "max_leverage":            "leverage_max",
+    "max_single_position_pct": "position_size_max_pct",
+    "max_total_exposure_pct":  "total_exposure_max_pct",
+    "max_stop_loss_pct":       "stop_loss_max_pct",
+    "max_holding_hours":       "holding_hours_max",
+    "allowed_symbols":         "allowed_symbols",
+    "spot_allow_margin":       "spot_margin_allowed",
+}
+
+
+def _remap_global_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
+    """Convert flat GUI field names to Rust nested config patch format.
+    Unknown fields are dropped (not forwarded) to avoid silent top-level injection.
+    / 把 GUI 平坦欄位轉為 Rust 嵌套 patch。未知欄位直接捨棄。
+    """
+    nested: dict[str, Any] = {}
+    for key, value in flat.items():
+        if key in _GLOBAL_TO_RUST:
+            section, rust_key = _GLOBAL_TO_RUST[key]
+            nested.setdefault(section, {})[rust_key] = value
+        else:
+            logger.debug("_remap_global_to_rust: unknown field %r dropped", key)
+    return nested
+
+
+def _remap_agent_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
+    """Map agent-adjust field names to Rust agent section.
+    / 把 agent-adjust 欄位映射到 Rust agent 區段。
+    """
+    agent: dict[str, Any] = {}
+    for key, value in flat.items():
+        rust_key = _AGENT_TO_RUST.get(key)
+        if rust_key:
+            agent[rust_key] = value
+        else:
+            logger.debug("_remap_agent_to_rust: unknown field %r dropped", key)
+    return {"agent": agent} if agent else {}
+
+
+def _remap_category_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
+    """Map category override field names to Rust CategoryOverride fields.
+    / 把分類覆蓋欄位映射到 Rust CategoryOverride 欄位。
+    """
+    mapped: dict[str, Any] = {}
+    for key, value in flat.items():
+        rust_key = _CATEGORY_TO_RUST.get(key)
+        if rust_key:
+            mapped[rust_key] = value
+        else:
+            logger.debug("_remap_category_to_rust: unknown field %r dropped", key)
+    return mapped
+
+
 class RiskViewClient:
     """Thin IPC view of the Rust-authoritative RiskConfig + runtime state."""
 
@@ -136,19 +239,34 @@ class RiskViewClient:
     # ═══════════════════════════════════════════════════════════════════════
 
     async def update_global_config(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """Operator-initiated global config patch."""
-        return await self._patch("operator", updates)
+        """Operator-initiated global config patch.
+        Maps flat GUI field names to Rust nested config format before patching.
+        / 將 GUI 平坦欄位名稱映射到 Rust 嵌套 config 格式後再 patch。
+        """
+        nested = _remap_global_to_rust(updates)
+        return await self._patch("operator", nested)
 
     async def update_category_config(
         self, category: str, updates: dict[str, Any]
     ) -> dict[str, Any]:
-        """Operator-initiated per-category override patch."""
-        patch = {"overrides": {category: updates}}
+        """Operator-initiated per-category override patch.
+        Remaps flat GUI field names to Rust CategoryOverride field names.
+        / 把 GUI 平坦欄位映射到 Rust CategoryOverride 欄位後再 patch。
+        """
+        mapped = _remap_category_to_rust(updates)
+        patch = {"overrides": {category: mapped}}
         return await self._patch("operator", patch)
 
     async def agent_adjust(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """Agent self-tuning patch (always stamped with source=agent for audit)."""
-        return await self._patch("agent", updates)
+        """Agent self-tuning patch (always stamped with source=agent for audit).
+        Remaps agent-adjust field names to Rust agent section fields.
+        / 把 agent-adjust 欄位映射到 Rust agent 區段後再 patch。
+        """
+        nested = _remap_agent_to_rust(updates)
+        if not nested:
+            logger.warning("agent_adjust: no mappable fields in %r", list(updates))
+            return {}
+        return await self._patch("agent", nested)
 
     async def _patch(self, source: str, patch: dict[str, Any]) -> dict[str, Any]:
         if self._ipc is None:
