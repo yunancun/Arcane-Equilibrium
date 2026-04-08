@@ -288,21 +288,11 @@ class _BridgeCoreMixin:
         except Exception:
             logger.exception("Kline bootstrap failed (non-fatal) / K线引导失败（非致命）")
 
-        # 2. Bootstrap ATR price history from klines
-        try:
-            if self._engine and hasattr(self._engine, "risk_manager") and self._engine.risk_manager:
-                tracker = self._engine.risk_manager._price_tracker
-                bootstrapped_total = 0
-                for symbol in (self._km.get_tracked_symbols() if hasattr(self._km, "get_tracked_symbols") else []):
-                    buf = self._km.get_buffer(symbol, "5m")
-                    if buf and len(buf) > 0:
-                        klines_data = buf.latest(60)
-                        count = tracker.bootstrap_from_klines(symbol, klines_data)
-                        bootstrapped_total += count
-                if bootstrapped_total > 0:
-                    logger.info("ATR bootstrap seeded %d price points / ATR 引导注入 %d 个价格点", bootstrapped_total, bootstrapped_total)
-        except Exception:
-            logger.exception("ATR bootstrap failed (non-fatal) / ATR 引导失败（非致命）")
+        # ARCH-RC1 1C-3-E: ATR bootstrap from Python RiskManager removed.
+        # Rust engine owns ATR price tracking; Python RiskManager is now a 53-line
+        # RiskViewClient shim with no _price_tracker attribute.
+        # ARCH-RC1 1C-3-E: 已移除從 Python RiskManager bootstrap ATR 的死路徑，
+        # ATR 由 Rust 引擎權威持有。
 
         logger.info("Background bootstrap complete / 背景引導完成")
 
