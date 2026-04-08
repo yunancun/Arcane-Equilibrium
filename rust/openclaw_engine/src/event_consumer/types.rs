@@ -112,4 +112,14 @@ pub struct EventConsumerDeps {
     /// ARCH-RC1 1C-2-B：live BudgetConfig store 控制代碼。
     pub budget_store:
         Option<Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
+    /// ARCH-RC1 1C-4 B1: V014 audit pool — used at startup to restore the
+    /// governor de-escalation cooldown timestamp (24h window) so a restart
+    /// during an active cooldown does not silently reset the guard.
+    /// Fail-soft: when None or query fails, cooldown starts fresh and a
+    /// warning is logged. Other multi-layer guards (reason_code whitelist,
+    /// step rule, 5-min hold, CB/MR lockout) remain in force.
+    /// ARCH-RC1 1C-4 B1：V014 審計 pool — 啟動時用來還原 governor 降級
+    /// 24h 冷卻時間戳，避免重啟期間冷卻被靜默重置。fail-soft：None 或
+    /// 查詢失敗時冷卻從零開始並記 warn，其他多層守衛繼續生效。
+    pub audit_pool: Option<sqlx::PgPool>,
 }

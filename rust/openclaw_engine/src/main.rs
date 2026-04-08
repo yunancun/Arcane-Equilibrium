@@ -1285,6 +1285,10 @@ async fn async_main(
             // ARCH-RC1 1C-2-B：熱重載 ConfigStore 控制代碼。
             risk_store: Some(Arc::clone(&risk_store)),
             budget_store: Some(Arc::clone(&budget_store)),
+            // ARCH-RC1 1C-4 B1: clone the V014 PG handle so the event consumer
+            // can restore the governor de-escalation cooldown on startup.
+            // ARCH-RC1 1C-4 B1：clone V014 PG handle，讓 event consumer 啟動時還原 cooldown。
+            audit_pool: db_pool.get().cloned(),
         };
         tokio::spawn(run_event_consumer(deps))
     };
