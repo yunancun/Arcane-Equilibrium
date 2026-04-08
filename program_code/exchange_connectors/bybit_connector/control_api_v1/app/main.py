@@ -227,8 +227,8 @@ async def _startup_integrity_check() -> None:
 
     # Hard-required: these must never be None in any environment
     # 硬性要求：任何環境下均不得為 None
-    # RC-10: ENGINE removed — Python PaperTradingEngine disabled, Rust is sole engine
-    # RC-10：ENGINE 已移除 — Python PaperTradingEngine 已禁用，Rust 是唯一引擎
+    # ARCH-RC1 1C-3-F: PaperTradingEngine retired (deleted), openclaw_engine is sole engine
+    # ARCH-RC1 1C-3-F：PaperTradingEngine 已退場，openclaw_engine 現為唯一引擎
     _hard_required: dict[str, object] = {
         "governance_hub (GOV_HUB)": GOV_HUB,
         "risk_manager (RISK_MANAGER)": RISK_MANAGER,
