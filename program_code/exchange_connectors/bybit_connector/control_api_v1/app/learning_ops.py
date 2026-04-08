@@ -32,7 +32,6 @@ from .learning_records import (  # noqa: F401
 
 # ── learning_auto_pipeline: 自動管線 + 審核決策 / Auto pipeline + review decisions ──
 from .learning_auto_pipeline import (  # noqa: F401
-    apply_ai_consultation,
     apply_auto_generate,
     apply_review_decision,
     generate_auto_hypotheses,

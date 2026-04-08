@@ -62,7 +62,6 @@ from .control_ops import (
     perform_validate,
 )
 from .learning_ops import (
-    apply_ai_consultation,
     apply_auto_generate,
     apply_experiment_approval,
     apply_experiment_completion,
@@ -83,7 +82,6 @@ from .pnl_ops import (
     build_net_pnl_dashboard,
 )
 from .state_models import (
-    AIConsultationResultData,
     AutoGenerationResultData,
     BusinessSummaryData,
     ConfigChangeAcceptedData,
@@ -1151,31 +1149,5 @@ def register_legacy_routes(app) -> None:
             snapshot=result["snapshot"], request_id=envelope.request_id, action_result=action_result,
             data=ReviewDecisionData(**result["data"]), audit_ref=result["audit_ref"],
             reason_codes=["replayed_request"] if action_result == "replayed" else [],
-        )
-
-
-    @app.post(
-        f"{settings.api_prefix}/learning/review/{{packet_id}}/ai-consult",
-        response_model=ResponseEnvelope[AIConsultationResultData],
-    )
-    def post_review_ai_consult(
-        packet_id: str, envelope: RequestEnvelope, actor=Depends(_base.current_actor)
-    ) -> ResponseEnvelope[AIConsultationResultData]:
-        """
-        [DEPRECATED] 对审核包执行 AI 咨询（Learning Cockpit stub，已廢棄）。
-        [DEPRECATED] AI consultation on review packet (Learning Cockpit stub, deprecated).
-
-        此端點是 Learning Cockpit 審核隊列的占位符，非現有 AI 管線。
-        This endpoint is a stub for the Learning Cockpit Review Queue, not the active AI pipeline.
-        請改用 /phase2/strategist/intel-log 查看策略師 AI 決策記錄。
-        Use /phase2/strategist/intel-log for Strategist AI pipeline decisions instead.
-
-        回傳值中包含 deprecation_notice 字段提示遷移。
-        Response includes a deprecation_notice field to guide migration.
-        """
-        result, action_result = apply_ai_consultation(envelope, actor, packet_id)
-        return _base.envelope_response(
-            snapshot=result["snapshot"], request_id=None, action_result=action_result,
-            data=AIConsultationResultData(**result["data"]),
         )
 

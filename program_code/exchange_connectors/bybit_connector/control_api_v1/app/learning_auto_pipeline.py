@@ -25,7 +25,6 @@ MODULE_NOTE (English):
 
 import hashlib
 import logging
-import warnings
 from typing import Any
 
 from fastapi import HTTPException
@@ -825,69 +824,4 @@ def apply_review_decision(
             "created_record_id": created_record_id,
         },
         "snapshot": final_state,
-    }, "success"
-
-
-def apply_ai_consultation(
-    envelope: RequestEnvelope, actor: AuthenticatedActor, packet_id: str
-) -> tuple[dict[str, Any], str]:
-    """
-    执行 AI 咨询（当前为 stub，已废弃）/ Execute AI consultation (stub, deprecated).
-
-    [DEPRECATED] 此函數是 Learning Cockpit 審核隊列的占位符，非現有 AI 管線。
-    [DEPRECATED] This function is a stub for the Learning Cockpit Review Queue,
-    not the active AI pipeline. Use /phase2/strategist/intel-log for Strategist decisions.
-
-    若需查看策略師 AI 決策記錄，請使用 /phase2/strategist/intel-log 端點。
-    For Strategist AI decisions via the active pipeline, use /phase2/strategist/intel-log.
-
-    兼容性：函數簽名不變，返回值包含 deprecation_notice 字段。
-    Compatibility: function signature unchanged; return value includes deprecation_notice.
-    """
-    # Emit DeprecationWarning so callers (e.g. tests) can detect the deprecation.
-    # 發出 DeprecationWarning，讓調用方（如測試）可以感知廢棄狀態。
-    warnings.warn(
-        "apply_ai_consultation() is deprecated. "
-        "Use /phase2/strategist/intel-log for AI pipeline decisions.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    snapshot, _ = _base.get_latest_snapshot()
-    require_scope_and_identity(actor, "learning:manage", envelope)
-
-    queue = snapshot.get("learning_state", {}).get("records", {}).get("review_queue", [])
-    target_pkt = None
-    for pkt in queue:
-        if pkt.get("packet_id") == packet_id:
-            target_pkt = pkt
-            break
-    if target_pkt is None:
-        raise HTTPException(status_code=404, detail={"reason_codes": ["review_packet_not_found"]})
-
-    ai_info = target_pkt.get("ai_consultation", {})
-    question = ai_info.get("pre_built_question", "无预生成问题")
-    tier = ai_info.get("recommended_tier", "light")
-
-    return {
-        "audit_ref": None,
-        "data": {
-            "packet_id": packet_id,
-            "ai_tier": tier,
-            "question_sent": question,
-            "ai_response": (
-                "[AI 咨询功能待接入 H 链 / AI consultation pending H-chain integration] "
-                "当前为占位回复。系统已准备好通过 H1(thought_gate) → H2(query_budget) → "
-                "H3(model_router) → H4(compute_governor) → H5(cost_log) 的完整治理链调用 AI。"
-                "接入后将在此显示 AI 的真实回复。"
-            ),
-            "cost_usd": 0.0,
-            "consultation_status": "stub_pending_h_chain_integration",
-            # DEPRECATED: indicate callers to migrate to the active Strategist pipeline.
-            "deprecation_notice": (
-                "This endpoint is deprecated. "
-                "Use /phase2/strategist/intel-log for Strategist AI pipeline decisions. "
-                "此端點已廢棄，請改用 /phase2/strategist/intel-log。"
-            ),
-        },
-        "snapshot": snapshot,
     }, "success"
