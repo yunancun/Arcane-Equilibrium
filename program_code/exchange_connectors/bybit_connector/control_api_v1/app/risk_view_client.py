@@ -271,7 +271,8 @@ class RiskViewClient:
     async def _patch(self, source: str, patch: dict[str, Any]) -> dict[str, Any]:
         if self._ipc is None:
             logger.warning("patch_risk_config skipped — no IPC client configured")
-            return {}
+            raise RuntimeError("patch_risk_config: no IPC client configured")
+        prev_version = self._cached_version
         resp = await self._ipc.call(
             "patch_risk_config",
             params={"patch": patch, "source": source},
@@ -279,6 +280,21 @@ class RiskViewClient:
         # On success refresh our local cache so the next sync read sees new values
         # 成功後刷新本地快取，下一次 sync read 能看到新值
         await self.refresh_config()
+        # ARCH-RC1 fake-success guard: if Rust accepted the patch, ConfigStore version
+        # MUST advance. If it didn't, Rust silently dropped the patch — surface as error
+        # rather than letting the GUI show "Saved!" while displaying stale values.
+        # 寫後驗證：patch 成功後 ConfigStore version 必須前進；否則 Rust 靜默丟棄了
+        # patch，回報錯誤而非讓 GUI 顯示「已保存」但實際是舊值。
+        if self._cached_version <= prev_version:
+            logger.error(
+                "patch_risk_config returned but version did not advance "
+                "(prev=%d cur=%d source=%s patch_keys=%s) — treating as silent failure",
+                prev_version, self._cached_version, source, list(patch.keys()),
+            )
+            raise RuntimeError(
+                f"patch_risk_config: ConfigStore version did not advance "
+                f"(prev={prev_version} cur={self._cached_version}) — silent IPC drop"
+            )
         return resp if isinstance(resp, dict) else {}
 
     async def unhalt_session(self) -> dict[str, Any]:

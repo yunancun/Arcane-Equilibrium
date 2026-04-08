@@ -116,13 +116,18 @@ def test_get_category_config_derives_from_overrides(client, fake_ipc):
 
 
 def test_update_global_config_calls_patch_with_operator(client, fake_ipc):
+    """1C-3-C: GUI sends FLAT field names; client remaps to nested Rust paths."""
     fake_ipc.responses["patch_risk_config"] = {"version": 2}
-    _run(client.update_global_config({"limits": {"max_leverage": 4.0}}))
+    fake_ipc.responses["get_risk_config"] = {
+        "config": {"limits": {"leverage_max": 4.0}}, "version": 2,
+    }
+    _run(client.update_global_config({"max_leverage": 4.0}))
     methods = [c[0] for c in fake_ipc.calls]
     assert "patch_risk_config" in methods
     patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
+    # GUI flat key max_leverage → Rust nested limits.leverage_max
     assert patch_call[1] == {
-        "patch": {"limits": {"max_leverage": 4.0}},
+        "patch": {"limits": {"leverage_max": 4.0}},
         "source": "operator",
     }
     # post-write refresh
@@ -130,16 +135,33 @@ def test_update_global_config_calls_patch_with_operator(client, fake_ipc):
 
 
 def test_update_category_config_wraps_patch(client, fake_ipc):
+    """1C-3-C: category overrides also remap flat → Rust CategoryOverride field names."""
+    fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 1}
     _run(client.update_category_config("linear", {"max_leverage": 2.5}))
     patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
-    assert patch_call[1]["patch"] == {"overrides": {"linear": {"max_leverage": 2.5}}}
+    # max_leverage remaps to leverage_max under overrides.linear
+    assert patch_call[1]["patch"] == {"overrides": {"linear": {"leverage_max": 2.5}}}
     assert patch_call[1]["source"] == "operator"
 
 
 def test_agent_adjust_uses_agent_source(client, fake_ipc):
-    _run(client.agent_adjust({"agent_p2": {"position_size_multiplier": 0.5}}))
+    """1C-3-C: agent fields remap to Rust agent section keys."""
+    fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 1}
+    _run(client.agent_adjust({"position_size_multiplier": 0.5}))
     patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
+    # position_size_multiplier → agent.size_multiplier
+    assert patch_call[1]["patch"] == {"agent": {"size_multiplier": 0.5}}
     assert patch_call[1]["source"] == "agent"
+
+
+def test_patch_raises_when_version_not_advanced(client, fake_ipc):
+    """Silent-drop guard: if Rust returns success but ConfigStore version did
+    not advance, _patch() must raise so the GUI doesn't show fake "Saved!".
+    寫後驗證守衛：Rust 回成功但 version 未前進時必須丟錯，避免 GUI fake-success。"""
+    fake_ipc.responses["patch_risk_config"] = {"ok": True}
+    fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 0}
+    with pytest.raises(RuntimeError, match="version did not advance"):
+        _run(client.update_global_config({"limits": {"max_leverage": 4.0}}))
 
 
 def test_unhalt_session_calls_resume_paper(client, fake_ipc):
@@ -203,11 +225,15 @@ def test_force_governor_overrides_no_ipc():
 
 
 def test_no_ipc_client_safe():
-    """RiskViewClient(None) should not crash on any read or write call."""
+    """RiskViewClient(None) — reads degrade silently, writes raise loudly.
+    讀取退化為空（不丟錯）；寫入丟 RuntimeError（不能 fake-success）。"""
     c = RiskViewClient(None)
     _run(c.refresh_config())
     _run(c.refresh_runtime_status())
-    out = _run(c.update_global_config({"limits": {"max_leverage": 4.0}}))
-    assert out == {}
+    # Writes must raise so the GUI can't see "Saved!" without an IPC client.
+    # 寫入必須丟錯，避免 GUI 看到「已保存」但實際沒 IPC client。
+    with pytest.raises(RuntimeError, match="no IPC client"):
+        _run(c.update_global_config({"max_leverage": 4.0}))
+    # Reads/clears that don't go through _patch still degrade gracefully.
     out2 = _run(c.clear_consecutive_losses())
     assert out2 == {}
