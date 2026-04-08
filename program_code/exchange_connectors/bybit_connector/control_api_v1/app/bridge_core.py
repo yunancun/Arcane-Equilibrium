@@ -306,20 +306,9 @@ class _BridgeCoreMixin:
         except Exception:
             logger.exception("Strategy state restore failed (non-fatal) / 策略状态恢复失败")
 
-    def deactivate(self) -> None:
-        """Deactivate the bridge / 停用桥接器"""
-        # Save strategy state before deactivation / 停用前保存策略状态
-        try:
-            saved = self._orch.save_all_strategy_state()
-            os.makedirs(os.path.dirname(self._strategy_state_path), exist_ok=True)
-            with open(self._strategy_state_path, "w") as f:
-                _json_mod.dump(saved, f, indent=2)
-            logger.info("Strategy state saved to %s / 策略状态已保存", self._strategy_state_path)
-        except Exception:
-            logger.exception("Strategy state save failed / 策略状态保存失败")
-
-        self._active = False
-        logger.info("PipelineBridge deactivated / 管线桥接器已停用")
+    # DEAD-PY-1: deactivate() removed — no callers in production (RC-10 retired).
+    # Strategy state persistence now handled by Rust engine.
+    # deactivate() 已移除（RC-10 後無生產調用者），策略狀態持久化移至 Rust 引擎。
 
     @property
     def is_active(self) -> bool:

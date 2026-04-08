@@ -441,17 +441,16 @@ def get_detailed_governance_status(
             logger.debug("Error getting OMS status: %s", e)
             detailed["oms"] = None
 
-        # Demo connector status if available
+        # Demo connector status: ENGINE is always None (PaperTradingEngine retired, ARCH-RC1 1C-3-F).
+        # DEAD-PY-1: ENGINE dead branch removed. Demo connector status now comes from DEMO_CONNECTOR directly.
+        # Demo 連接器狀態：ENGINE 已退場，改從 DEMO_CONNECTOR 直接讀取。
         try:
-            from .paper_trading_routes import ENGINE
-            if ENGINE is not None and hasattr(ENGINE, "_demo_connector"):
-                demo_enabled = ENGINE._demo_connector is not None
-                detailed["demo_connector"] = {
-                    "enabled": demo_enabled,
-                    "connector_type": type(ENGINE._demo_connector).__name__ if demo_enabled else None,
-                }
-            else:
-                detailed["demo_connector"] = None
+            from .paper_trading_routes import DEMO_CONNECTOR
+            demo_enabled = DEMO_CONNECTOR is not None and getattr(DEMO_CONNECTOR, "is_enabled", False)
+            detailed["demo_connector"] = {
+                "enabled": demo_enabled,
+                "connector_type": type(DEMO_CONNECTOR).__name__ if demo_enabled else None,
+            }
         except Exception as e:
             logger.debug("Error getting demo connector status: %s", e)
             detailed["demo_connector"] = None
@@ -1264,59 +1263,10 @@ def dismiss_all_pending(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# ---------------------------------------------------------------------------
-# DEPRECATED — Symbol Whitelist endpoints (T5.04, 35ab853 + f4663d3, 2026-04-01)
-# 已棄用 — Symbol 白名單端點（T5.04，2026-04-01）
-#
-# Symbol-level allowed_symbols enforcement was removed because Scanner +
-# Guardian + H0 Gate already provide multi-layer filtering. The endpoints
-# below are stubs that return HTTP 410 Gone with a clear deprecation message.
-# Full GUI cleanup (tab-governance.html whitelist card + governance.js
-# helpers) is tracked separately as WP-CLEANUP-WHITELIST-UI in TODO.md.
-#
-# Symbol 級別的 allowed_symbols 強制執行已被移除（Scanner + Guardian + H0
-# Gate 已提供多層篩選）。以下端點是回傳 HTTP 410 Gone 的占位 stub。完整
-# GUI 清理另外追蹤於 TODO.md WP-CLEANUP-WHITELIST-UI。
-# ---------------------------------------------------------------------------
-
-_WHITELIST_DEPRECATED_DETAIL = (
-    "symbol whitelist deprecated 2026-04-01 (T5.04): "
-    "Scanner + Guardian + H0 Gate provide sufficient filtering. "
-    "GUI cleanup pending (WP-CLEANUP-WHITELIST-UI)."
-)
-
-
-@governance_router.get("/symbols/whitelist")
-def get_symbol_whitelist_deprecated(
-    actor: Any = Depends(_get_auth_actor),
-) -> dict[str, Any]:
-    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
-    已棄用 — symbol 白名單已移除，回 410 Gone。
-    """
-    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
-
-
-@governance_router.post("/symbols/whitelist")
-def add_symbol_to_whitelist_deprecated(
-    body: SymbolWhitelistAddRequest,
-    actor: Any = Depends(_get_auth_actor),
-) -> dict[str, Any]:
-    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
-    已棄用 — symbol 白名單已移除，回 410 Gone。
-    """
-    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
-
-
-@governance_router.delete("/symbols/whitelist/{symbol}")
-def remove_symbol_from_whitelist_deprecated(
-    symbol: str,
-    category: str,
-    actor: Any = Depends(_get_auth_actor),
-) -> dict[str, Any]:
-    """DEPRECATED — symbol whitelist removed. Returns 410 Gone.
-    已棄用 — symbol 白名單已移除，回 410 Gone。
-    """
-    raise HTTPException(status_code=410, detail=_WHITELIST_DEPRECATED_DETAIL)
+# DEAD-PY-1: Symbol Whitelist endpoints removed (T5.04, ARCH-RC1 1C-3-F, 2026-04-08).
+# Scanner + Guardian + H0 Gate provide sufficient filtering — whitelist was redundant.
+# GUI cleanup tracked in WP-CLEANUP-WHITELIST-UI (tab-governance.html + governance.js).
+# Symbol 白名單端點已移除（T5.04）；GUI 清理見 WP-CLEANUP-WHITELIST-UI。
 
 
 @governance_router.get("/leases")

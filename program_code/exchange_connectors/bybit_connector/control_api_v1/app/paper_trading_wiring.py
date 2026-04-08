@@ -37,7 +37,7 @@ _paper_state_path = os.getenv(
         os.path.join(os.path.dirname(__file__), "..", "runtime", "paper_trading_state.json")
     ),
 )
-PAPER_STORE = None  # ARCH-RC1 1C-3-F: PaperStateStore retired; Rust owns paper state. / 紙盤狀態權威移至 Rust。
+# ARCH-RC1 1C-3-F: PAPER_STORE removed — PaperStateStore retired; Rust owns paper state. / PAPER_STORE 已移除，紙盤狀態權威移至 Rust。
 
 # Risk manager (3-tier priority: P0 category > P1 global > P2 agent)
 # 风控管理器（三层优先级：P0 品类专属 > P1 全局 > P2 Agent 自适应）
@@ -394,10 +394,8 @@ except ImportError as _h0_import_err:
         _h0_import_err, _h0_import_err,
     )
 
-# RC-10: ENGINE is None — skip injection / ENGINE 為 None — 跳過注入
-if ENGINE is not None:
-    ENGINE.set_governance_hub(GOV_HUB)
 # ARCH-RC1 1C-3-D: governance_hub injection no longer flows through RISK_MANAGER.
+# RC-10: ENGINE is always None (PaperTradingEngine retired) — governance_hub set via Rust IPC only.
 
 # T2.04: Initialize and inject ChangeAuditLog / 初始化并注入變更審計日誌
 from .change_audit_log import ChangeAuditLog  # noqa: E402
@@ -471,7 +469,6 @@ _current_module._GOVERNANCE_HUB = GOV_HUB
 SHADOW_CONSUMER: ShadowDecisionConsumer | None = None
 
 __all__ = [
-    "PAPER_STORE",
     "RISK_MANAGER",
     "PORTFOLIO_RISK_CONTROL",
     "PERCEPTION_PLANE",

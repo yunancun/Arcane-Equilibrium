@@ -46,7 +46,6 @@ from .paper_trading_metrics import compute_full_metrics
 # ═══════════════════════════════════════════════════════════════════════════════
 from .paper_trading_wiring import *  # noqa: F401,F403
 from .paper_trading_wiring import (  # noqa: F811 — explicit re-exports for type checkers
-    PAPER_STORE,
     RISK_MANAGER,
     PORTFOLIO_RISK_CONTROL,
     PERCEPTION_PLANE,
@@ -140,15 +139,15 @@ def _paper_response(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RC-10: Rust engine is the SOLE paper trading engine.
+# Rust engine is the SOLE paper trading engine.
 # Session commands are sent via IPC to the running Rust engine (command channel).
-# RC-10：Rust 引擎是唯一的紙上交易引擎。
+# Rust 引擎是唯一的紙上交易引擎。
 # Session 命令通過 IPC 發送到運行中的 Rust 引擎（命令通道）。
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _RC10_DISABLED_MSG = (
-    "Python paper engine disabled — Rust engine is the sole paper trading engine (RC-10). "
-    "Python 紙盤引擎已禁用 — Rust 引擎是唯一的紙上交易引擎（RC-10）。"
+    "Python paper engine disabled — Rust engine is the sole paper trading engine. "
+    "Python 紙盤引擎已禁用 — Rust 引擎是唯一的紙上交易引擎。"
 )
 
 
@@ -630,10 +629,10 @@ def post_market_feed_start(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """DISABLED: Rust engine has its own WebSocket feed / 已禁用：Rust 引擎有自己的 WebSocket 行情流"""
-    # RC-12: Rust engine is the sole WS connection — no Python WS needed
-    # RC-12：Rust 引擎是唯一的 WS 連接 — 不需要 Python WS
+    # Rust engine is the sole WS connection — no Python WS needed
+    # Rust 引擎是唯一的 WS 連接 — 不需要 Python WS
     return _paper_response({
-        "message": "Market feed managed by Rust engine (RC-12) / 行情流由 Rust 引擎管理（RC-12）",
+        "message": "Market feed managed by Rust engine / 行情流由 Rust 引擎管理",
         "source": "rust_engine",
     }, action_result="no_change")
 
@@ -644,7 +643,7 @@ def post_market_feed_stop(
 ):
     """DISABLED: Rust engine manages its own WebSocket / 已禁用：Rust 引擎管理自己的 WebSocket"""
     return _paper_response({
-        "message": "Market feed managed by Rust engine (RC-12) / 行情流由 Rust 引擎管理（RC-12）",
+        "message": "Market feed managed by Rust engine / 行情流由 Rust 引擎管理",
         "source": "rust_engine",
     }, action_result="no_change")
 
@@ -654,8 +653,8 @@ def get_market_feed_status(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get market data feed status from Rust engine / 從 Rust 引擎獲取行情數據流狀態"""
-    # RC-12: Python DISPATCHER disabled — read from Rust engine snapshot instead.
-    # RC-12：Python DISPATCHER 已禁用 — 改從 Rust 引擎快照讀取。
+    # Python DISPATCHER removed — read from Rust engine snapshot instead.
+    # Python DISPATCHER 已移除 — 改從 Rust 引擎快照讀取。
     reader = get_rust_reader()
     snap = reader.get_snapshot() if reader.is_available() else None
     if snap is not None:

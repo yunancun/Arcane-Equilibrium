@@ -227,8 +227,6 @@ async def _startup_integrity_check() -> None:
 
     # Hard-required: these must never be None in any environment
     # 硬性要求：任何環境下均不得為 None
-    # ARCH-RC1 1C-3-F: PaperTradingEngine retired (deleted), openclaw_engine is sole engine
-    # ARCH-RC1 1C-3-F：PaperTradingEngine 已退場，openclaw_engine 現為唯一引擎
     _hard_required: dict[str, object] = {
         "governance_hub (GOV_HUB)": GOV_HUB,
         "risk_manager (RISK_MANAGER)": RISK_MANAGER,
@@ -266,8 +264,6 @@ async def _startup_integrity_check() -> None:
     # 服務器重啟後，現有 session 從文件載入，不會重新觸發 start，導致授權缺失。
     # 修復：啟動時檢查 session 狀態，若需要則補授權（fail-open，不阻斷啟動）。
     try:
-        # RC-10: Use Rust engine snapshot for session state, not Python ENGINE
-        # RC-10：使用 Rust 引擎快照獲取 session 狀態，不用 Python ENGINE
         from .ipc_state_reader import get_rust_reader as _get_rust_reader
         _rust_reader = _get_rust_reader()
         _session_state = _rust_reader.get_paper_state() if _rust_reader.is_available() else None
