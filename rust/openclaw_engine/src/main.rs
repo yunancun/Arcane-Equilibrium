@@ -463,6 +463,9 @@ async fn async_main(
     // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
     // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
     let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
+    // ARCH-RC1 1C-4 B2: clone for the position reconciler task spawned below.
+    // ARCH-RC1 1C-4 B2：為下方持倉對帳器任務預先複製 command sender。
+    let reconciler_cmd_tx = paper_cmd_tx.clone();
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
@@ -1255,6 +1258,29 @@ async fn async_main(
             .await;
             info!("feature version v1.0 registered / 特徵版本 v1.0 已註冊");
         }
+    }
+
+    // ------------------------------------------------------------------
+    // ARCH-RC1 1C-4 B2: spawn position reconciler (Bybit truth vs in-memory baseline).
+    // Gated on Some(shared_client) — paper-only / no-REST runs skip the loop entirely.
+    // Audit pool is optional; missing pool degrades to log-only audits.
+    // ARCH-RC1 1C-4 B2：spawn 持倉對帳器（Bybit 真相 vs 內存基線）。
+    // 需要 shared_client；無 REST 模式整體跳過。audit pool 可選，缺失時降級為純日誌。
+    if let Some(client) = shared_client.as_ref() {
+        use openclaw_engine::position_manager::PositionManager;
+        use openclaw_engine::position_reconciler::run_position_reconciler;
+        let pos_mgr = Arc::new(PositionManager::new(Arc::clone(client)));
+        let reconciler_audit_pool = db_pool.get().cloned();
+        let reconciler_cancel = cancel.clone();
+        tokio::spawn(run_position_reconciler(
+            pos_mgr,
+            reconciler_audit_pool,
+            reconciler_cmd_tx,
+            reconciler_cancel,
+        ));
+        info!("position_reconciler task spawned / 持倉對帳器任務已啟動");
+    } else {
+        info!("position_reconciler skipped (no REST client) / 持倉對帳器跳過（無 REST 客戶端）");
     }
 
     let event_handle = {
