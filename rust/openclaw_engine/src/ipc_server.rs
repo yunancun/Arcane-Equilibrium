@@ -1098,20 +1098,44 @@ async fn handle_force_governor_tighter(
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
         Ok(Ok(Ok(json_str))) => {
+            // M-2 (ARCH-RC1 1C-3-D): success audit — payload carries the
+            // operator's free-form reason directly (N-5 fix: no positional
+            // argument confusion — caller owns the payload shape).
+            // M-2：成功 audit；caller 自組 payload 避免位置參數錯位（N-5 修正）。
             spawn_governor_audit_row(
                 audit_pool,
                 "governor_escalate",
-                &target_tier,
-                &reason,
-                "operator_escalation",
-                &json_str,
+                serde_json::json!({
+                    "result": "applied",
+                    "target_tier": target_tier,
+                    "reason": reason,
+                    "engine_result": serde_json::from_str::<serde_json::Value>(&json_str)
+                        .unwrap_or(serde_json::Value::Null),
+                }),
             );
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(v) => JsonRpcResponse::success(id, v),
                 Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse: {e}")),
             }
         }
-        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
+        Ok(Ok(Err(e))) => {
+            // M-2: guard-rejected attempts MUST be audited — an operator
+            // probing the step/direction guards without leaving a V014 row
+            // would violate principle #8 (every risk-touching action
+            // explainable + auditable).
+            // M-2：被守衛拒絕也必須 audit，避免靜默探測。
+            spawn_governor_audit_row(
+                audit_pool,
+                "governor_escalate_rejected",
+                serde_json::json!({
+                    "result": "rejected",
+                    "target_tier": target_tier,
+                    "reason": reason,
+                    "error": e,
+                }),
+            );
+            JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e)
+        }
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }
@@ -1161,17 +1185,37 @@ async fn handle_force_governor_looser(
             spawn_governor_audit_row(
                 audit_pool,
                 "governor_de_escalate",
-                &target_tier,
-                &notes,
-                &reason_code,
-                &json_str,
+                serde_json::json!({
+                    "result": "applied",
+                    "target_tier": target_tier,
+                    "reason_code": reason_code,
+                    "notes": notes,
+                    "engine_result": serde_json::from_str::<serde_json::Value>(&json_str)
+                        .unwrap_or(serde_json::Value::Null),
+                }),
             );
             match serde_json::from_str::<serde_json::Value>(&json_str) {
                 Ok(v) => JsonRpcResponse::success(id, v),
                 Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse: {e}")),
             }
         }
-        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
+        Ok(Ok(Err(e))) => {
+            // M-2: Rejection audit — cooldown / whitelist / step / CB+MR
+            // lockout all land here. Every probe attempt gets a V014 row.
+            // M-2：4 個守衛拒絕路徑全部落到這裡，每次嘗試都有 audit 行。
+            spawn_governor_audit_row(
+                audit_pool,
+                "governor_de_escalate_rejected",
+                serde_json::json!({
+                    "result": "rejected",
+                    "target_tier": target_tier,
+                    "reason_code": reason_code,
+                    "notes": notes,
+                    "error": e,
+                }),
+            );
+            JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e)
+        }
         Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
         Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for event consumer"),
     }
@@ -1179,26 +1223,22 @@ async fn handle_force_governor_looser(
 
 /// Fire-and-forget V014 audit insert for governor override events.
 /// Mirrors the pattern in handle_patch_config — failure logs WARN but never
-/// blocks the IPC response, since the override has already been applied.
-/// V014 audit row 寫入（fire-and-forget）—失敗只 WARN，不影響 IPC 回應。
+/// blocks the IPC response. Caller owns the payload shape (N-5 fix: previously
+/// this helper packed 5 positional string args into a fixed dict, causing the
+/// escalate branch to record a literal "operator_escalation" in reason_code
+/// and the operator's free-form text in notes — semantically wrong).
+/// Caller-built `payload` must include `result` ("applied"|"rejected") and
+/// any error string for rejection rows.
+/// V014 audit row 寫入；caller 自組 payload shape（N-5 修正，避免位置錯位）。
 fn spawn_governor_audit_row(
     audit_pool: &Option<sqlx::PgPool>,
     event_type: &str,
-    target_tier: &str,
-    notes: &str,
-    reason_code: &str,
-    payload_json_str: &str,
+    payload: serde_json::Value,
 ) {
     let Some(pool) = audit_pool.clone() else {
         return;
     };
     let event_type = event_type.to_string();
-    let payload_obj = serde_json::json!({
-        "target_tier": target_tier,
-        "reason_code": reason_code,
-        "notes": notes,
-        "result": serde_json::from_str::<serde_json::Value>(payload_json_str).unwrap_or_else(|_| serde_json::Value::Null),
-    });
     let ts_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -1213,7 +1253,7 @@ fn spawn_governor_audit_row(
         .bind(&event_type)
         .bind("operator")
         .bind("risk_governor")
-        .bind(&payload_obj)
+        .bind(&payload)
         .execute(&pool)
         .await
         {
