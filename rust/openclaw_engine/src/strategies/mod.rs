@@ -66,6 +66,26 @@ pub trait Strategy: Send {
     fn param_ranges_json(&self) -> String {
         "[]".into()
     }
+
+    // ── CONF-D: per-strategy confidence scaling exposed via update_strategy_params ──
+    // CONF-D：通過 update_strategy_params 暴露的逐策略 confidence 縮放因子
+
+    /// CONF-D: Read the current confidence scale (default 1.0).
+    /// Strategies multiply every emitted intent.confidence by this value
+    /// before pushing to the intent stream. Range [0.0, 2.0]; >1.0 amplifies,
+    /// <1.0 dampens, 0.0 effectively mutes the strategy without disabling it.
+    /// CONF-D：讀取當前 confidence 縮放因子（默認 1.0）。
+    /// 策略在發出 intent 前將其 confidence 乘以此值。範圍 [0, 2]。
+    fn conf_scale(&self) -> f64 {
+        1.0
+    }
+
+    /// CONF-D: Set confidence scale. Out-of-range values are clamped to [0.0, 2.0].
+    /// Default no-op for strategies that opt out (their conf_scale stays 1.0).
+    /// CONF-D：設定 confidence 縮放因子，越界自動 clamp 到 [0, 2]。
+    fn set_conf_scale(&mut self, _scale: f64) {
+        // Default no-op / 預設無操作
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

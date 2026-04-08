@@ -26,9 +26,12 @@ optuna = pytest.importorskip("optuna")
 
 from program_code.ml_training.optuna_optimizer import (
     OptunaConfig,
+    apply_bh_fdr,
     build_search_space,
     compute_ev_net,
+    compute_multi_objective_metrics,
     create_study,
+    run_multi_objective_optimization,
     run_optimization,
 )
 from optuna.distributions import FloatDistribution, IntDistribution
@@ -252,3 +255,176 @@ class TestRunOptimization:
         assert result["best_value"] == 0.0
         assert "5" in result["error"]
         assert "80" in result["error"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3b-07: Benjamini-Hochberg FDR tests / BH-FDR 測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBHFDR:
+    """Tests for apply_bh_fdr() — multiple comparison correction.
+    apply_bh_fdr() 多重比較校正測試。"""
+
+    def test_all_significant_pass(self):
+        """All very small p-values → all rejected."""
+        p = [0.001, 0.002, 0.003, 0.004]
+        rejected, adj = apply_bh_fdr(p, alpha=0.05)
+        assert all(rejected)
+        assert len(adj) == 4
+        assert all(0.0 <= a <= 1.0 for a in adj)
+
+    def test_all_null_no_reject(self):
+        """All large p-values → none rejected."""
+        p = [0.6, 0.7, 0.8, 0.9]
+        rejected, _ = apply_bh_fdr(p, alpha=0.05)
+        assert not any(rejected)
+
+    def test_known_textbook_example(self):
+        """Known BH worked example: m=4, alpha=0.05.
+        p = [0.005, 0.01, 0.04, 0.5]
+        thresholds (k/m)*alpha = 0.0125, 0.025, 0.0375, 0.05
+        Compare sorted: 0.005<=0.0125 ✓, 0.01<=0.025 ✓, 0.04<=0.0375 ✗
+        Largest k satisfying: 2 → reject ranks 1 and 2.
+        """
+        p = [0.5, 0.005, 0.04, 0.01]
+        rejected, _ = apply_bh_fdr(p, alpha=0.05)
+        # Original positions: 0.005 (idx1) and 0.01 (idx3) should be rejected
+        assert rejected[1] is True
+        assert rejected[3] is True
+        assert rejected[0] is False
+        assert rejected[2] is False
+
+    def test_adjusted_p_monotone_in_order(self):
+        """Adjusted p-values when sorted should be monotone non-decreasing."""
+        p = [0.001, 0.005, 0.02, 0.04, 0.5, 0.9]
+        _, adj = apply_bh_fdr(p, alpha=0.05)
+        sorted_adj = sorted(adj)
+        for i in range(len(sorted_adj) - 1):
+            assert sorted_adj[i] <= sorted_adj[i + 1] + 1e-12
+
+    def test_nan_treated_as_one(self):
+        """NaN/None p-values → conservative 1.0, not rejected."""
+        p = [0.001, float("nan"), None, 0.002]
+        rejected, adj = apply_bh_fdr(p, alpha=0.05)
+        assert rejected[0]
+        assert rejected[3]
+        assert not rejected[1]
+        assert not rejected[2]
+        assert adj[1] >= 0.99
+        assert adj[2] >= 0.99
+
+    def test_empty_raises(self):
+        with pytest.raises(ValueError):
+            apply_bh_fdr([])
+
+    def test_alpha_out_of_range(self):
+        with pytest.raises(ValueError):
+            apply_bh_fdr([0.01, 0.02], alpha=0.0)
+        with pytest.raises(ValueError):
+            apply_bh_fdr([0.01, 0.02], alpha=1.0)
+
+    def test_order_preserved(self):
+        """Output ordering matches input ordering, not sorted."""
+        p = [0.9, 0.001, 0.5]
+        rejected, adj = apply_bh_fdr(p, alpha=0.05)
+        assert len(rejected) == 3
+        assert rejected[1] is True  # 0.001 in middle position
+        assert adj[1] < adj[0]
+        assert adj[1] < adj[2]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3b-08: Multi-objective Pareto tests / 多目標 Pareto 測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestMultiObjective:
+    """Tests for run_multi_objective_optimization() and metric helper."""
+
+    def test_compute_metrics_empty(self):
+        s, mdd, t = compute_multi_objective_metrics([], {}, {})
+        assert s == 0.0
+        assert mdd == 0.0
+        assert t == 0.0
+
+    def test_compute_metrics_basic_pnls(self):
+        # 3 wins, 2 losses → positive sharpe, finite drawdown
+        fills = [
+            {"pnl": 2.0, "qty": 1.0},
+            {"pnl": -1.0, "qty": 1.0},
+            {"pnl": 3.0, "qty": 1.0},
+            {"pnl": -2.0, "qty": 1.0},
+            {"pnl": 4.0, "qty": 1.0},
+        ]
+        s, mdd, t = compute_multi_objective_metrics(fills, {}, {})
+        assert s > 0
+        assert mdd >= 0
+        assert t == 5.0  # 5 fills × qty 1.0
+
+    def test_compute_metrics_with_notional(self):
+        fills = [
+            {"pnl": 1.0, "notional": 100.0},
+            {"pnl": -0.5, "notional": 200.0},
+        ]
+        _, _, t = compute_multi_objective_metrics(fills, {}, {})
+        assert t == 300.0
+
+    def test_run_multi_objective_insufficient_data(self):
+        result = run_multi_objective_optimization(
+            "ma_crossover",
+            "BTCUSDT",
+            "trending",
+            fills=[{"pnl": 1.0}] * 5,
+            param_ranges_json="[]",
+            config=OptunaConfig(n_trials=5, min_fills_required=80),
+        )
+        assert result["status"] == "insufficient_data"
+        assert result["pareto_front"] == []
+
+    def test_run_multi_objective_no_adjustable_params(self):
+        ranges = json.dumps([
+            {"name": "fixed", "min": 1.0, "max": 2.0,
+             "step": None, "agent_adjustable": False, "db_persisted": True},
+        ])
+        result = run_multi_objective_optimization(
+            "ma_crossover",
+            "BTCUSDT",
+            "trending",
+            fills=[{"pnl": 1.0}] * 100,
+            param_ranges_json=ranges,
+            config=OptunaConfig(n_trials=5, min_fills_required=10),
+        )
+        assert result["status"] == "no_adjustable_params"
+
+    def test_run_multi_objective_returns_pareto_front(self, tmp_path):
+        ranges = json.dumps([
+            {"name": "adx_threshold", "min": 10.0, "max": 50.0,
+             "step": 1.0, "agent_adjustable": True, "db_persisted": True},
+            {"name": "cooldown_ms", "min": 60000.0, "max": 600000.0,
+             "step": 60000.0, "agent_adjustable": True, "db_persisted": True},
+        ])
+        # Mixed pnls so all three objectives have variance
+        fills = [{"pnl": (i % 5) - 2, "qty": 1.0} for i in range(120)]
+        cfg = OptunaConfig(
+            sqlite_path=str(tmp_path / "mo_studies.log"),
+            n_trials=12,
+            min_fills_required=50,
+        )
+        result = run_multi_objective_optimization(
+            "ma_crossover",
+            "BTCUSDT",
+            "trending",
+            fills=fills,
+            param_ranges_json=ranges,
+            config=cfg,
+        )
+        assert result["status"] == "success"
+        assert result["n_trials"] >= 1
+        assert len(result["pareto_front"]) >= 1
+        # Each pareto entry has the three objectives
+        first = result["pareto_front"][0]
+        assert "sharpe" in first
+        assert "max_drawdown" in first
+        assert "turnover" in first
+        assert "params" in first

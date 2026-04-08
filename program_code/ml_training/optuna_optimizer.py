@@ -532,3 +532,336 @@ def run_optimization(
         "n_trials": len(study.trials),
         "study_name": study.study_name,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3b-07: Benjamini-Hochberg FDR multiple-comparison correction
+# 3b-07：Benjamini-Hochberg FDR 多重比較校正
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def apply_bh_fdr(
+    p_values: list[float],
+    alpha: float = 0.05,
+) -> tuple[list[bool], list[float]]:
+    """Apply Benjamini-Hochberg FDR correction to a list of p-values.
+    對 p 值列表應用 Benjamini-Hochberg FDR 校正。
+
+    Use case / 用途:
+        When optimizing N (strategy × symbol × regime) cells we get N "best"
+        p-values from comparing each candidate against a null hypothesis.
+        Naive alpha=0.05 yields ~5% false discoveries. BH controls the
+        expected fraction of false discoveries among the rejected hypotheses
+        at level alpha.
+        當優化 N 個 (策略×幣種×regime) 格時會得到 N 個 p 值。
+        樸素 alpha=0.05 會產生約 5% 假陽性。BH 控制被拒絕假設中
+        假發現的期望比例為 alpha。
+
+    Algorithm / 算法:
+        1. Sort p-values ascending: p_(1) <= p_(2) <= ... <= p_(m)
+        2. Find largest k such that p_(k) <= (k/m) * alpha
+        3. Reject H_0 for all hypotheses with rank <= k
+        4. Adjusted p-value: p_adj_(i) = min_(j>=i) (p_(j) * m / j)
+           (monotone non-decreasing from the end)
+
+    Args:
+        p_values: Raw p-values, one per hypothesis. NaN/None entries treated as 1.0.
+                  原始 p 值列表，每個假設一個。NaN/None 視為 1.0。
+        alpha: Target FDR level (default 0.05) / 目標 FDR 水平
+
+    Returns:
+        (rejected, adjusted_p) where each list has the same length and order
+        as the input. `rejected[i] = True` means H_0 is rejected for hypothesis i
+        under BH at level alpha. `adjusted_p[i]` is the BH-adjusted p-value.
+        (拒絕標記, 校正 p 值)，順序與輸入一致。
+
+    Raises:
+        ValueError: alpha not in (0, 1) or empty input.
+
+    References:
+        Benjamini, Y. & Hochberg, Y. (1995). Controlling the false discovery rate.
+    """
+    if not p_values:
+        raise ValueError("p_values must not be empty / p_values 不可為空")
+    if not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+
+    m = len(p_values)
+    # Sanitize: NaN/None → 1.0 (most conservative)
+    # 清理：NaN/None → 1.0（最保守）
+    sanitized: list[float] = []
+    for p in p_values:
+        if p is None:
+            sanitized.append(1.0)
+            continue
+        try:
+            pf = float(p)
+        except (TypeError, ValueError):
+            sanitized.append(1.0)
+            continue
+        if pf != pf:  # NaN check
+            sanitized.append(1.0)
+        else:
+            sanitized.append(max(0.0, min(1.0, pf)))
+
+    # Sort by p-value, keep original index for un-sort
+    # 按 p 值排序，保留原索引以便還原
+    indexed = sorted(enumerate(sanitized), key=lambda x: x[1])
+
+    # Compute adjusted p-values using monotone reverse cummin
+    # 使用單調反向 cummin 計算校正 p 值
+    sorted_adj: list[float] = [0.0] * m
+    running_min = 1.0
+    for rank in range(m, 0, -1):  # rank = m, m-1, ..., 1
+        i = rank - 1  # 0-based index in sorted list
+        raw = indexed[i][1] * m / rank
+        running_min = min(running_min, raw)
+        sorted_adj[i] = running_min
+
+    # Determine rejection: largest k with p_(k) <= (k/m) * alpha
+    # 確定拒絕：滿足 p_(k) <= (k/m) * alpha 的最大 k
+    k_star = 0
+    for rank in range(1, m + 1):
+        i = rank - 1
+        if indexed[i][1] <= (rank / m) * alpha:
+            k_star = rank
+
+    # Build output in original order
+    # 按原始順序構建輸出
+    rejected = [False] * m
+    adjusted_p = [1.0] * m
+    for sorted_idx, (orig_idx, _) in enumerate(indexed):
+        rank = sorted_idx + 1
+        adjusted_p[orig_idx] = sorted_adj[sorted_idx]
+        if rank <= k_star:
+            rejected[orig_idx] = True
+
+    logger.info(
+        "BH-FDR applied: m=%d alpha=%.3f rejected=%d / "
+        "BH-FDR 已套用: m=%d alpha=%.3f 拒絕=%d",
+        m, alpha, sum(rejected), m, alpha, sum(rejected),
+    )
+    return rejected, adjusted_p
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3b-08: Multi-objective Pareto optimization (NSGA-II)
+# 3b-08：多目標 Pareto 優化（NSGA-II）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def run_multi_objective_optimization(
+    strategy_name: str,
+    symbol: str,
+    regime: str,
+    fills: list[dict],
+    param_ranges_json: str,
+    objective_fn: Optional[Any] = None,
+    config: Optional[OptunaConfig] = None,
+) -> dict[str, Any]:
+    """Run NSGA-II multi-objective optimization.
+    運行 NSGA-II 多目標優化。
+
+    Returns the Pareto front of trials trading off three objectives:
+        1. Sharpe ratio (maximize)
+        2. Max drawdown (minimize)
+        3. Turnover (minimize)
+    返回三目標的 Pareto front：Sharpe（最大）、最大回撤（最小）、換手率（最小）。
+
+    Use case / 用途:
+        Phase 6 progressive promotion needs to compare candidates not on
+        a single scalar but on the trade-off surface. A high-Sharpe high-drawdown
+        candidate may be inferior to a moderate-Sharpe low-drawdown one for
+        an operator who is risk-averse.
+        Phase 6 漸進放權需要在 trade-off 面而非單一標量上比較候選。
+        高 Sharpe 高回撤的候選對風險厭惡的 operator 可能不如中 Sharpe 低回撤的。
+
+    Args:
+        strategy_name / symbol / regime: Identification triple.
+        fills: Historical fills with "pnl" (and optionally "qty"/"notional").
+        param_ranges_json: JSON from get_param_ranges IPC call.
+        objective_fn: Optional override of the objective. Signature:
+                      `(trial, fills, suggested_params) -> tuple[float, float, float]`
+                      Default uses the built-in compute_multi_objective_metrics.
+        config: Optimization config.
+
+    Returns:
+        Dict with: status, pareto_front (list of dicts with params + objectives),
+        n_trials, study_name.
+        含 status / pareto_front / n_trials / study_name 的字典。
+    """
+    if not OPTUNA_AVAILABLE:
+        return {
+            "status": "error",
+            "error": "optuna not installed / optuna 未安裝",
+            "pareto_front": [],
+            "n_trials": 0,
+            "study_name": "",
+        }
+
+    cfg = config or OptunaConfig()
+
+    if len(fills) < cfg.min_fills_required:
+        return {
+            "status": "insufficient_data",
+            "error": (
+                f"fills={len(fills)} < min_fills_required={cfg.min_fills_required}"
+            ),
+            "pareto_front": [],
+            "n_trials": 0,
+            "study_name": f"{strategy_name}_{symbol}_{regime}_mo",
+        }
+
+    search_space = build_search_space(param_ranges_json)
+    if not search_space:
+        return {
+            "status": "no_adjustable_params",
+            "error": "no agent_adjustable parameters found",
+            "pareto_front": [],
+            "n_trials": 0,
+            "study_name": f"{strategy_name}_{symbol}_{regime}_mo",
+        }
+
+    study_name = f"{strategy_name}_{symbol}_{regime}_mo"
+    journal_path = Path(cfg.sqlite_path)
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    storage = JournalStorage(_JournalBackend(str(journal_path)))
+
+    # NSGA-II for 3-objective Pareto front
+    # 使用 NSGA-II 進行三目標 Pareto front
+    sampler = optuna.samplers.NSGAIISampler(seed=42)
+    study = optuna.create_study(
+        study_name=study_name,
+        storage=storage,
+        sampler=sampler,
+        directions=["maximize", "minimize", "minimize"],  # Sharpe, MDD, turnover
+        load_if_exists=True,
+    )
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    def default_objective(trial: "optuna.Trial") -> tuple[float, float, float]:
+        suggested: dict[str, Any] = {}
+        for name, dist in search_space.items():
+            if isinstance(dist, IntDistribution):
+                suggested[name] = trial.suggest_int(
+                    name, dist.low, dist.high, step=dist.step,
+                )
+            elif dist.step is not None:
+                suggested[name] = trial.suggest_float(
+                    name, dist.low, dist.high, step=dist.step,
+                )
+            else:
+                suggested[name] = trial.suggest_float(
+                    name, dist.low, dist.high,
+                )
+            trial.set_user_attr(f"param_{name}", suggested[name])
+        return compute_multi_objective_metrics(fills, suggested, search_space)
+
+    obj = objective_fn or default_objective
+    study.optimize(obj, n_trials=cfg.n_trials, show_progress_bar=False)
+
+    # Extract Pareto front (best_trials in multi-objective study)
+    # 提取 Pareto front（多目標 study 的 best_trials）
+    pareto: list[dict[str, Any]] = []
+    for t in study.best_trials:
+        sharpe, mdd, turnover = t.values
+        pareto.append({
+            "trial_number": t.number,
+            "params": dict(t.params),
+            "sharpe": sharpe,
+            "max_drawdown": mdd,
+            "turnover": turnover,
+        })
+
+    logger.info(
+        "Multi-objective optimization complete: study=%s pareto_size=%d n_trials=%d / "
+        "多目標優化完成: study=%s Pareto 大小=%d n_trials=%d",
+        study_name, len(pareto), cfg.n_trials,
+        study_name, len(pareto), cfg.n_trials,
+    )
+
+    return {
+        "status": "success",
+        "pareto_front": pareto,
+        "n_trials": len(study.trials),
+        "study_name": study_name,
+    }
+
+
+def compute_multi_objective_metrics(
+    fills: list[dict],
+    suggested_params: dict[str, Any],
+    search_space: dict[str, Any],
+) -> tuple[float, float, float]:
+    """Compute (sharpe, max_drawdown, turnover) for a candidate parameter set.
+    計算候選參數集的 (sharpe, 最大回撤, 換手率)。
+
+    Phase 3b offline mode: applies a parameter-distance perturbation to
+    differentiate trials on the same fill set. Live mode would re-collect
+    fills per trial via IPC.
+    Phase 3b 離線模式：在同一筆數據集上以參數距離擾動區分試驗。
+
+    Args:
+        fills: Historical fills (pnl / qty / notional optional)
+        suggested_params: Trial-suggested parameter values
+        search_space: Optuna distributions (used for normalization)
+
+    Returns:
+        (sharpe, max_drawdown, turnover) tuple
+    """
+    if not fills:
+        return 0.0, 0.0, 0.0
+
+    pnls = [float(f.get("pnl", 0.0)) for f in fills]
+    n = len(pnls)
+
+    # Sharpe: mean / std (no annualization, fill-level)
+    # Sharpe：均值/標準差（不年化，成交層級）
+    mean = sum(pnls) / n
+    if n > 1:
+        var = sum((p - mean) ** 2 for p in pnls) / (n - 1)
+        std = var ** 0.5
+    else:
+        std = 0.0
+    sharpe = mean / std if std > 1e-12 else 0.0
+
+    # Max drawdown on cumulative PnL
+    # 累積 PnL 的最大回撤
+    cum = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for p in pnls:
+        cum += p
+        peak = max(peak, cum)
+        dd = peak - cum
+        max_dd = max(max_dd, dd)
+
+    # Turnover: sum of |notional| (fall back to qty * 1.0, then count)
+    # 換手率：|notional| 之和（退化為 qty 或計數）
+    turnover = 0.0
+    for f in fills:
+        if "notional" in f:
+            turnover += abs(float(f["notional"]))
+        elif "qty" in f:
+            turnover += abs(float(f["qty"]))
+        else:
+            turnover += 1.0
+
+    # Offline-mode perturbation: small parameter-distance bonus to ensure
+    # NSGA-II sees gradient between trials evaluated on the same fill set.
+    # 離線模式擾動：小的參數距離獎勵，確保 NSGA-II 在同一數據集上看到梯度。
+    if suggested_params:
+        norm_sum = 0.0
+        for name, val in suggested_params.items():
+            dist = search_space.get(name)
+            if dist is None:
+                continue
+            param_range = dist.high - dist.low
+            if param_range > 0:
+                norm_sum += (val - dist.low) / param_range
+        avg_norm = norm_sum / len(suggested_params)
+        sharpe += 0.001 * avg_norm
+        turnover += 0.001 * (1.0 - avg_norm)
+
+    return sharpe, max_dd, turnover

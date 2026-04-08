@@ -114,6 +114,9 @@ pub struct MaCrossover {
     // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
     prev_position: Option<bool>,
     prev_last_trade_ms: u64,
+    /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
+    /// CONF-D：發出 intent.confidence 的乘數（默認 1.0，範圍 [0,2]）。
+    conf_scale: f64,
 }
 
 impl MaCrossover {
@@ -131,6 +134,7 @@ impl MaCrossover {
             higher_tf_alpha: 0.003,
             prev_position: None,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -160,11 +164,14 @@ impl MaCrossover {
     }
 
     fn make_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
+        // CONF-D: scale and clamp the emitted confidence into [0, 1].
+        // CONF-D：套用 conf_scale 後 clamp 到 [0, 1]。
+        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
         OrderIntent {
             symbol: ctx.symbol.clone(),
             is_long,
             qty: self.default_qty,
-            confidence: conf,
+            confidence: scaled,
             strategy: self.name().into(),
             order_type: "market".into(),
             limit_price: None,
@@ -358,6 +365,14 @@ impl Strategy for MaCrossover {
 
     fn param_ranges_json(&self) -> String {
         serde_json::to_string(&MaCrossoverParams::param_ranges()).unwrap_or_default()
+    }
+
+    fn conf_scale(&self) -> f64 {
+        self.conf_scale
+    }
+
+    fn set_conf_scale(&mut self, scale: f64) {
+        self.conf_scale = scale.clamp(0.0, 2.0);
     }
 }
 
@@ -703,5 +718,39 @@ mod tests {
         assert!(s.update_params_json(json).is_ok());
         let out = s.get_params_json();
         assert!(out.contains("25.0") || out.contains("25"));
+    }
+
+    #[test]
+    fn test_conf_scale_clamps_to_range() {
+        // CONF-D: set_conf_scale must clamp to [0, 2].
+        let mut s = MaCrossover::new();
+        s.set_conf_scale(3.0);
+        assert!((s.conf_scale() - 2.0).abs() < 1e-10);
+        s.set_conf_scale(-1.0);
+        assert!((s.conf_scale() - 0.0).abs() < 1e-10);
+        s.set_conf_scale(1.5);
+        assert!((s.conf_scale() - 1.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_conf_scale_applied_to_emit() {
+        // CONF-D: emitted confidence == raw * conf_scale, clamped to [0, 1].
+        use crate::tick_pipeline::TickContext;
+        let ctx = TickContext {
+            symbol: "BTCUSDT".into(),
+            price: 50000.0,
+            timestamp_ms: 0,
+            indicators: None,
+            signals: vec![],
+            h0_allowed: true,
+        };
+        let mut s = MaCrossover::new();
+        s.set_conf_scale(0.5);
+        let intent = s.make_intent(&ctx, true, 0.8);
+        assert!((intent.confidence - 0.4).abs() < 1e-10);
+
+        s.set_conf_scale(2.0);
+        let intent = s.make_intent(&ctx, true, 0.9);
+        assert!((intent.confidence - 1.0).abs() < 1e-10); // clamped
     }
 }

@@ -173,6 +173,8 @@ pub struct GridTrading {
     prev_cross_idx: Option<usize>,
     prev_inventory: f64,
     prev_last_trade_ms: u64,
+    /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
+    conf_scale: f64,
 }
 
 /// Build grid levels with linear (arithmetic) spacing.
@@ -239,6 +241,7 @@ impl GridTrading {
             prev_cross_idx: None,
             prev_inventory: 0.0,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -268,6 +271,7 @@ impl GridTrading {
             prev_cross_idx: None,
             prev_inventory: 0.0,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -310,6 +314,7 @@ impl GridTrading {
             prev_cross_idx: None,
             prev_inventory: 0.0,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -568,7 +573,8 @@ impl Strategy for GridTrading {
 
         // Dynamic confidence: grid thrives in ranging + narrow BB, suffers in trending.
         // 動態信心：grid 在 ranging + 窄 BB 中表現好，trending 中表現差。
-        let conf = compute_grid_confidence(&ctx.indicators);
+        // CONF-D: apply per-strategy scale.
+        let conf = (compute_grid_confidence(&ctx.indicators) * self.conf_scale).clamp(0.0, 1.0);
 
         if idx < prev_idx {
             // Price crossed down → buy (intent_processor handles position/sizing)
@@ -612,6 +618,12 @@ impl Strategy for GridTrading {
     }
     fn param_ranges_json(&self) -> String {
         serde_json::to_string(&GridTradingParams::param_ranges()).unwrap_or_default()
+    }
+    fn conf_scale(&self) -> f64 {
+        self.conf_scale
+    }
+    fn set_conf_scale(&mut self, scale: f64) {
+        self.conf_scale = scale.clamp(0.0, 2.0);
     }
 }
 

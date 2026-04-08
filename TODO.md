@@ -137,11 +137,10 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 Phase 5 
 ## 📦 殘留延後（前 phase，非阻塞）
 
 - [ ] 2-11 actual training（需引擎運行收集 trading.fills）
-- [ ] 2-PYO3-1 ContextDistiller PyO3 接入
 - [ ] ort crate activation（首個 ONNX 模型訓練後）
-- [ ] 3b-07 BH-FDR 多重比較校正
-- [ ] 3b-08 Grid 多目標 Pareto
-- [ ] CONF-D conf scaling 暴露給 agent via IPC `update_strategy_params`
+- [x] 3b-07 BH-FDR 多重比較校正
+- [x] 3b-08 Grid 多目標 Pareto
+- [x] CONF-D conf scaling 暴露給 agent via IPC `update_strategy_params`
 - [ ] 4-06 LinUCB live warm-start deployment（script 已交付，等首次 v1→v2 遷移）
 
 ## Phase 4-Conditional（觸發後）

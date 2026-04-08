@@ -125,6 +125,8 @@ pub struct BbBreakout {
     prev_entry_price: Option<f64>,
     prev_trailing_stop: Option<f64>,
     prev_last_trade_ms: u64,
+    /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
+    conf_scale: f64,
 }
 
 impl BbBreakout {
@@ -147,6 +149,7 @@ impl BbBreakout {
             prev_entry_price: None,
             prev_trailing_stop: None,
             prev_last_trade_ms: 0,
+            conf_scale: 1.0,
         }
     }
 
@@ -249,11 +252,13 @@ impl Strategy for BbBreakout {
                             Some(h) if h.regime == "trending" => 0.1,
                             _ => 0.0,
                         };
+                        // CONF-D: scale entry confidence
+                        let raw_conf = (0.7_f64 + hurst_boost).min(1.0);
                         intents.push(OrderIntent {
                             symbol: ctx.symbol.clone(),
                             is_long,
                             qty: self.default_qty,
-                            confidence: (0.7_f64 + hurst_boost).min(1.0),
+                            confidence: (raw_conf * self.conf_scale).clamp(0.0, 1.0),
                             strategy: self.name().into(),
                             order_type: "market".into(),
                             limit_price: None,
@@ -342,7 +347,7 @@ impl Strategy for BbBreakout {
                         symbol: ctx.symbol.clone(),
                         is_long: !is_long,
                         qty: self.default_qty,
-                        confidence: exit_confidence,
+                        confidence: (exit_confidence * self.conf_scale).clamp(0.0, 1.0),
                         strategy: self.name().into(),
                         order_type: "market".into(),
                         limit_price: None,
@@ -367,6 +372,12 @@ impl Strategy for BbBreakout {
     }
     fn param_ranges_json(&self) -> String {
         serde_json::to_string(&BbBreakoutParams::param_ranges()).unwrap_or_default()
+    }
+    fn conf_scale(&self) -> f64 {
+        self.conf_scale
+    }
+    fn set_conf_scale(&mut self, scale: f64) {
+        self.conf_scale = scale.clamp(0.0, 2.0);
     }
 }
 
