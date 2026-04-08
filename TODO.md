@@ -35,7 +35,50 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 - [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：需先決定 4-09 router 是否 attach + provider wire-up，比預期大 ~120-200 行）
 - [x] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）— `4780b04`
 - [x] **E-Merge-4** Guardian owned config struct 退化為 RiskConfig sub-view — modification_size_factor + modification_leverage_cap 升級至 RiskConfig.limits，dead 欄位 max_correlation 刪除，apply_risk_snapshot 改為 fresh 構造（無 RMW）。Guardian 任何旋鈕現在唯一真相源 = patch_risk_config。core 360 + engine 767。
+- [x] **1C-3-D 留尾** — RiskViewClient 9 個 deprecated stub 方法 + helper + test 刪除，strategy_wiring `_RISK_MGR_REF.set_h0_gate` 注入區塊刪除，17 個 .smbdelete ghost 檔清除 (`8554779`)
 - [ ] E2 + E4 + QA Audit + 文檔同步
+
+### 1C-4 留尾 · Python app/ 死代碼大掃除（DEAD-PY-1，~7h，非阻塞）
+
+掃描範圍：`program_code/exchange_connectors/bybit_connector/control_api_v1/app/*.py`，1C-3 → 1C-4 wave 後遺留 ~42 個候選項，分 4 階段：
+
+**Phase 1 — SAFE-DELETE（0 callers，~2h，零風險）：**
+- [ ] `paper_trading_wiring.py:40` `PAPER_STORE = None` 連同 2 個 import 點
+- [ ] `paper_trading_wiring.py:70` `ENGINE = None` 連同 3 個 `if ENGINE is not None` dead branch（含 line 398-406 注入區塊）
+- [ ] `legacy_routes.py:150,576` `if PAPER_ENGINE is None` dead branch（永遠 taken，改直接 error）
+- [ ] `strategy_wiring.py:491` 整個 `if PAPER_ENGINE is not None` 區塊（unreachable）
+- [ ] `governance_routes.py:447` `if ENGINE is not None and hasattr(...)` dead branch
+- [ ] `bridge_core.py:267-345` `activate()` / `deactivate()` / `on_tick()` 三個 RC-10/RC-11 deprecated 方法（self._active 永遠 False）
+- [ ] `governance_routes.py:1268-1319` 3 個 whitelist 410-Gone stub 端點 + `_WHITELIST_DEPRECATED_DETAIL` 常量（T5.04 deprecated）
+- [ ] `strategist_agent.py:982-995` `collect_pending_intents()`（TD-2 deprecated，永遠 returns []）
+- [ ] `bridge_stats.py:560+` `on_tick_result()`（依賴 deprecated bridge.on_tick）
+
+**Phase 2 — CHECK-ROUTES（先看 access log，~1h）：**
+- [ ] `learning_auto_pipeline.py:831-855` `apply_ai_consultation()` + `legacy_routes.py:1280-1291` 路由註冊：先 1Q access log 確認 <5 calls/week 再砍
+- [ ] `governance_hub.py:290-727` 5 個 RC-11 deprecated 方法（`check_learning_tier_capability` / `is_enabled` / `get_risk_level` / `check_risk_and_act` / `trigger_risk_upgrade`）— 確認無 GUI/Strategist 殘留呼叫
+- [ ] `layer2_cost_tracker.py:557-576` `record_ollama_call()` deprecated 包裝
+
+**Phase 3 — STALE-COMMENT 整合（~3h，doc-only）：**
+- [ ] `paper_trading_routes.py` 15+ 行 RC-10/RC-12 markers → 整合到單一 module-level note
+- [ ] `bridge_core.py` 10+ 行 RC-10/RC-11 deprecation 注釋 → 同上
+- [ ] `strategy_wiring.py:964,991,993` RC-12 + 1C-3-D 注釋去重
+- [ ] state_*.py / pnl_ops.py "Wave A/B/C" 標籤（生產 3+ 月）→ 移到 git history
+- [ ] `main.py:176` "WP-ARCH-RC1 RC1-2" 舊命名
+
+**Phase 4 — GUI HTML/JS 清理（~1h）：**
+- [ ] `static/tab-governance.html:310-322` whitelist UI 區塊（T5.04 deprecated）
+- [ ] `static/tab-risk.html:38` 1C-3-C "Loss Cooldown" 注釋
+- [ ] `static/tab-system.html:84,404,458` RC-12 market feed 注釋
+- [ ] `static/tab-paper.html:161-202` RC-10 session control disabled 注釋
+- [ ] `static/app.js:2396-2518` RC-10 manual orders disabled 注釋
+
+**KEEP（不要動）：**
+- `risk_view_client.py:196-197` `force_governor_tier_*` stub — 1C-3-B-2 已實現，是真實方法
+- `apply_ai_consultation` 在 access log 確認前不可動
+
+**驗收**：每個 phase 完成後 control_api 測試套必須 0 regression（baseline 2694 passed）。
+報告來源：sub-agent dead-code audit 2026-04-08（4 phase plan，risk LOW）。
+
 
 ---
 
