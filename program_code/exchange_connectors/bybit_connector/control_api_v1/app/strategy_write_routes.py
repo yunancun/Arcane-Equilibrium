@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import Body, Depends, HTTPException, Request
 
 from . import main_legacy as base
+from .ipc_client import EngineIPCClient
 from .strategy_wiring import (
     phase2_router,
     ORCHESTRATOR,
@@ -17,6 +18,41 @@ from .strategy_wiring import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Module-level IPC client for strategy active/inactive sync to Rust.
+# 模組級 IPC client，用於同步策略啟停狀態到 Rust 引擎。
+_STRATEGY_IPC: EngineIPCClient | None = None
+
+
+async def _get_strategy_ipc() -> EngineIPCClient:
+    """Lazy-init IPC client for strategy activation sync.
+    / 懶初始化用於策略啟停同步的 IPC client。
+    """
+    global _STRATEGY_IPC
+    if _STRATEGY_IPC is None:
+        _STRATEGY_IPC = EngineIPCClient()
+        try:
+            await _STRATEGY_IPC.connect()
+        except Exception as e:
+            logger.warning("strategy IPC connect failed: %s", e)
+    return _STRATEGY_IPC
+
+
+async def _sync_strategy_active(name: str, active: bool) -> None:
+    """Fire-and-forget sync of strategy enable/disable to Rust engine via IPC.
+    Failure is logged as warning — Python ORCHESTRATOR remains the fallback.
+    / 透過 IPC 把策略啟停狀態同步到 Rust 引擎。失敗只記錄警告，Python 仍為備援。
+    """
+    try:
+        client = await _get_strategy_ipc()
+        resp = await client.call(
+            "set_strategy_active",
+            params={"strategy_name": name, "active": active},
+        )
+        if isinstance(resp, dict) and not resp.get("ok"):
+            logger.warning("set_strategy_active IPC non-ok response: %s", resp)
+    except Exception as e:
+        logger.warning("set_strategy_active IPC error for %r active=%s: %s", name, active, e)
 
 
 @phase2_router.post("/dynamic-risk/toggle")
@@ -54,6 +90,7 @@ async def activate_strategy(
         success = ORCHESTRATOR.activate_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        await _sync_strategy_active(name, active=True)
         return _envelope({
             "strategy": name,
             "action": "activated",
@@ -82,6 +119,7 @@ async def pause_strategy(
         success = ORCHESTRATOR.pause_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        await _sync_strategy_active(name, active=False)
         return _envelope({
             "strategy": name,
             "action": "paused",
@@ -110,6 +148,7 @@ async def stop_strategy(
         success = ORCHESTRATOR.stop_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
+        await _sync_strategy_active(name, active=False)
         return _envelope({
             "strategy": name,
             "action": "stopped",
