@@ -11,7 +11,8 @@ MODULE_NOTE (中文):
   - reads 走 `get_risk_config` / `get_risk_runtime_status` IPC，結果快取
   - writes 走 `patch_risk_config` IPC（成功後 Rust ConfigStore 會熱重載給 5 個引擎）
   - 舊 Python 風控邏輯 (check_order_allowed / check_positions_on_tick / record_fill_result /
-    clear_trailing_stop / record_market_prices_for_portfolio_risk) 全部變 no-op 兼容 stub —
+    clear_trailing_stop / record_market_prices_for_portfolio_risk / set_h0_gate / 等)
+    在 1C-3-D 清理中已連同呼叫點一起刪除 —
     真正的執行路徑在 Rust intent_processor + position_risk_evaluator 內
   - `get_status()` 回傳的 shape 已從 Python 時代的 {consecutive_losses, cooldown_active, ...}
     換成 Rust 原生 shape {governor_tier, consecutive_losses_by_symbol, ...}。GUI 需同步改
@@ -37,23 +38,6 @@ if TYPE_CHECKING:
     from .ipc_client import EngineIPCClient
 
 logger = logging.getLogger(__name__)
-
-# Tracks which deprecated stub methods we've already WARN-logged, so tests and
-# production don't spam a line per call. Set entries are method names.
-# 已經 WARN-log 過的 deprecated stub 方法（避免每次呼叫都刷 log）。
-_WARNED_DEPRECATED: set[str] = set()
-
-
-def _warn_deprecated_once(method: str) -> None:
-    if method not in _WARNED_DEPRECATED:
-        _WARNED_DEPRECATED.add(method)
-        logger.warning(
-            "RiskViewClient.%s is a no-op stub post-RRC-1; the real enforcement "
-            "lives in Rust intent_processor / position_risk_evaluator. Remove the "
-            "caller in 1C-3-D. / 此方法為 no-op，真正執行在 Rust 側，1C-3-D 移除呼叫點。",
-            method,
-        )
-
 
 class RiskViewClient:
     """Thin IPC view of the Rust-authoritative RiskConfig + runtime state."""
@@ -257,43 +241,3 @@ class RiskViewClient:
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # Deprecated no-op stubs (Python-era behaviour methods)
-    # 舊 Python 行為方法 — 全部變 no-op，真實執行在 Rust
-    # ═══════════════════════════════════════════════════════════════════════
-
-    def check_order_allowed(self, *args: Any, **kwargs: Any) -> tuple[bool, str]:
-        _warn_deprecated_once("check_order_allowed")
-        return (True, "")
-
-    def check_positions_on_tick(self, *args: Any, **kwargs: Any) -> list[Any]:
-        _warn_deprecated_once("check_positions_on_tick")
-        return []
-
-    def record_fill_result(self, *args: Any, **kwargs: Any) -> None:
-        _warn_deprecated_once("record_fill_result")
-
-    def clear_trailing_stop(self, *args: Any, **kwargs: Any) -> None:
-        _warn_deprecated_once("clear_trailing_stop")
-
-    def record_market_prices_for_portfolio_risk(self, *args: Any, **kwargs: Any) -> None:
-        _warn_deprecated_once("record_market_prices_for_portfolio_risk")
-
-    def reset_cooldown(self) -> None:
-        """Python-era API. Post-RRC-1 = alias for async clear_consecutive_losses +
-        governor de-escalation, which caller should invoke explicitly."""
-        _warn_deprecated_once("reset_cooldown")
-
-    # Setters used in paper_trading_wiring.py boot path
-    # paper_trading_wiring.py 啟動路徑用的 setter
-    def set_governance_hub(self, *args: Any) -> None:
-        _warn_deprecated_once("set_governance_hub")
-
-    def set_change_audit_log(self, *args: Any) -> None:
-        _warn_deprecated_once("set_change_audit_log")
-
-    def set_portfolio_risk_control(self, *args: Any) -> None:
-        _warn_deprecated_once("set_portfolio_risk_control")
-
-    def set_h0_gate(self, *args: Any) -> None:
-        _warn_deprecated_once("set_h0_gate")

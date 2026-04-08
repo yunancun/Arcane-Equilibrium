@@ -167,23 +167,6 @@ def test_clear_consecutive_losses_calls_ipc(client, fake_ipc):
     assert any(c[0] == "get_risk_runtime_status" for c in fake_ipc.calls)
 
 
-# ── deprecated stubs ─────────────────────────────────────────────────────────
-
-
-def test_deprecated_stubs_safe_returns(client):
-    # All these used to be real risk logic in Python; post-RRC-1 = no-op stubs
-    # 這些方法過去是 Python 風控核心，post-RRC-1 全部變 no-op
-    assert client.check_order_allowed("BTCUSDT", "buy", 0.1) == (True, "")
-    assert client.check_positions_on_tick({}, {}) == []
-    assert client.record_fill_result(-50.0) is None
-    assert client.clear_trailing_stop("BTCUSDT") is None
-    assert client.record_market_prices_for_portfolio_risk({}) is None
-    client.set_governance_hub(object())
-    client.set_change_audit_log(object())
-    client.set_portfolio_risk_control(object())
-    client.reset_cooldown()
-
-
 def test_force_governor_tier_tighter_calls_ipc(client, fake_ipc):
     fake_ipc.responses["force_governor_tier_tighter"] = {
         "from": "NORMAL", "to": "CAUTIOUS", "reason": "manual probe"
