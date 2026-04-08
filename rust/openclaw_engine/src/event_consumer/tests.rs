@@ -600,7 +600,9 @@ fn test_f_submit_order_happy_path() {
     let mut p = make_test_pipeline();
     let mut w = make_test_writer();
     p.paper_state.set_latest_price("BTCUSDT", 50_000.0);
-    seed_indicators_with_atr(&mut p, "BTCUSDT", 250.0);
+    // PH5-WIRE-0: ATR=2000 to clear cost_gate with 0.2 cold-start dampening.
+    // qty=0.001, notional=$50, k=2.0, fee=$0.055, need EV=2000×conf×0.001×0.2=$0.4×conf > $0.11 ✓
+    seed_indicators_with_atr(&mut p, "BTCUSDT", 2000.0);
     // Authorise governance — process() requires it.
     // 授權治理層 — process() 第一道 gate 即檢查。
     authorize(&mut p);

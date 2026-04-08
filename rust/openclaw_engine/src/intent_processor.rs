@@ -555,7 +555,18 @@ impl IntentProcessor {
                 };
             }
             let fee_rate = self.fee_rate(&intent.symbol);
-            let expected_profit = atr * intent.confidence * final_qty;
+            // PH5-WIRE-0 (2026-04-08): ATR is a volatility range, not directional edge.
+            // Paper data (3 days, 5 symbols) shows realized edge ≈ 2 bps vs fee ≈ 11 bps.
+            // The raw formula `atr × conf` over-estimates EV ~13× (DOGE: 0.052% predict vs
+            // 0.004% realized). Apply cold-start dampening factor 0.2 until Phase 5 JS
+            // shrunk_estimate replaces this (PH5-WIRE-1). This reduces over-estimation to ~2.6×,
+            // making cost_gate reject most sub-breakeven trades.
+            // PH5-WIRE-0（2026-04-08）：ATR 是波動幅度而非方向性 edge。
+            // Paper 數據顯示實現 edge ≈ 2 bps，手續費 ≈ 11 bps，原公式高估 ~13×。
+            // 應用冷啟動阻尼因子 0.2，直到 PH5-WIRE-1 用 JS shrunk_estimate 替換本公式。
+            // TODO(PH5-WIRE-1): replace with shrunk_realized_edge_bps from LearningConfig
+            const COLD_START_DAMPENING: f64 = 0.2;
+            let expected_profit = atr * intent.confidence * final_qty * COLD_START_DAMPENING;
             let notional = final_qty * price;
             let rt_fee = notional * 2.0 * fee_rate;
             let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
@@ -564,8 +575,8 @@ impl IntentProcessor {
                 return IntentResult {
                     submitted: false,
                     rejected_reason: Some(format!(
-                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
-                        expected_profit, k, rt_fee, atr, intent.confidence, notional,
+                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2}, dampening={:.1})",
+                        expected_profit, k, rt_fee, atr, intent.confidence, notional, COLD_START_DAMPENING,
                     )),
                     fill: None,
                 };
@@ -911,7 +922,9 @@ mod tests {
         gov.grant_paper_authorization(None).unwrap();
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 50000.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
+        // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=1.5×$0.22=$0.33
+        // (ATR raised from 500 to clear the 0.2 cold-start dampening factor)
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0);
         assert!(result.submitted);
         assert!(result.fill.is_some());
     }
@@ -920,15 +933,15 @@ mod tests {
     fn test_position_sizing_caps_qty() {
         // P1 cap: 2% of 10,000 / 50,000 = 0.004 BTC
         // Intent qty 0.01 should be reduced to 0.004.
-        // P1 上限：10,000 * 2% / 50,000 = 0.004 BTC
-        // 意圖 qty 0.01 應被縮小為 0.004。
+        // P1 上限：10,000 * 2% / 50,000 = 0.004 BTC；意圖 qty 0.01 縮小為 0.004。
+        // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=$0.33
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state, 500.0);
+        let result = proc.process(&intent, &gov, &state, 2000.0);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
@@ -943,13 +956,15 @@ mod tests {
     fn test_position_sizing_tiny_balance() {
         // With tiny balance, P1 calc gives very small qty — no artificial floor.
         // 餘額極小時，P1 計算給出極小 qty — 無人為下限。
+        // PH5-WIRE-0: need ATR=2000 to clear cost_gate with dampening 0.2 at tiny notional.
+        // final_qty=0.00004, notional=$2 → k=3.0, fee=$0.0022, need EV=2000×0.7×0.00004×0.2=$0.0112>$0.0066
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
         let mut state = PaperState::new(100.0); // tiny balance
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state, 500.0);
+        let result = proc.process(&intent, &gov, &state, 2000.0);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
@@ -1102,8 +1117,11 @@ mod tests {
 
     #[test]
     fn test_cost_gate_accepts_good_ev() {
-        // High ATR + high confidence → EV >> fee → accepted
-        // 高 ATR + 高信心 → EV >> 手續費 → 接受
+        // High ATR + high confidence → EV >> fee → accepted.
+        // 高 ATR + 高信心 → EV >> 手續費 → 接受。
+        // PH5-WIRE-0 (cold-start 0.2 dampening):
+        //   ATR=5.0, EV=5.0×0.7×0.2×0.2=$0.14, notional=$16 → k=3.0, rt_fee=$0.018 → k×fee=$0.053
+        //   EV=$0.14 >> $0.053 ✓  (ATR raised from 1.5 to clear the 0.2 dampening at k=3.0)
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
@@ -1118,8 +1136,7 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        // ATR=1.5, EV=1.5×0.7×0.2=$0.21, notional=$16 → rt_fee=$0.018 → 0.21 >> 0.027 ✓
-        let result = proc.process(&intent, &gov, &state, 1.5);
+        let result = proc.process(&intent, &gov, &state, 5.0);
         assert!(result.submitted);
     }
 
