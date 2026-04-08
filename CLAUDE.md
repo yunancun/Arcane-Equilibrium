@@ -48,7 +48,7 @@
 
 **ARCH-RC1 1C-4 WRAP COMPLETE** ✅ — Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload → 5 engines；Rust `openclaw_engine` 為 paper/demo/live 唯一引擎；Python 風控/紙盤雙退場；Guardian = RiskConfig 純派生視圖。**禁止 restart-to-apply**。
 
-**Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅（ATR×0.2 dampening）· PH5-DL-2+JS-1 ✅（realized_edge_stats + james_stein_estimator，8 cells 全負）· PH5-WIRE-1 ✅（mode-aware cost_gate：paper/demo = exploration 模式打破循環依賴，live = fail-closed）· 5-01~03 ✅（per-param JS + k-means cluster analysis）· PH5-VERIFY-1 ⬜（7d 觀察期）。
+**Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅ · PH5-DL-2+JS-1 ✅ · PH5-WIRE-1 ✅（mode-aware cost_gate 已上線，引擎已加載 8 cells，exploration mode 激活）· 5-01~03 ✅（per-param JS + k-means）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。**數據策略**：ARCH-RC1 前的歷史 fills 數據存在開發噪音，不清空（審計保留）；改用滾動窗口：2026-04-11 用 `--days 3` 重跑 JS-1，只看 ARCH-RC1 穩定後的乾淨數據。
 
 **Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期 + 多通道告警上線。
 
@@ -229,4 +229,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08（session 3）：tests engine lib 769 / Python control_api 2692 passed **1 pre-existing fail** · Phase 5 WIRE-1 ✅（mode-aware cost_gate，exploration mode 打破循環依賴）· 5-01~03 ✅（per-param JS + k-means cluster analysis）· PH5-VERIFY-1 ⬜（7d 觀察期）· Live blocker 仍在。
+> 截至 2026-04-08（session 3 完）：tests engine lib 769 / Python 2692 passed **1 pre-existing fail** · WIRE-1 ✅ 上線（引擎已加載 8 cells，exploration mode 激活，log 確認）· 5-01~03 ✅ · 路徑 bug 修復 ✅ · Release build 重建 ✅ · 數據策略：2026-04-11 用 `--days 3` 重跑 JS-1 取乾淨窗口 · Live blocker 仍在。

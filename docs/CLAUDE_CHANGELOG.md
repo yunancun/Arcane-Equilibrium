@@ -3,6 +3,23 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-08 session 3
 
+### PH5-WIRE-1 path fix + release build + 引擎確認上線（2026-04-08 · commit `cf77bec`）
+
+1 commit · `+7/-9` 行 · 引擎 log 確認 WIRE-1 激活
+
+**問題**：JS snapshot 和 cluster JSON 被寫入 `/home/ncyu/BybitOpenClaw/settings/`（srv/ 外層），而非正確的 `srv/settings/`。Python 路徑多一層 `../`（3 層應為 2 層）。Rust `event_consumer` 用 `current_exe()+../../..` 計算 base dir 也指向錯誤位置（引擎從 `srv/` 目錄啟動，應用 `current_dir()`）。
+
+**修復**：
+- `james_stein_estimator.py` + `edge_cluster_analysis.py`：`"..","..","..","settings"` → `"..","..","settings"`
+- `event_consumer/mod.rs`：`current_exe().parent().join("../../..")` → `current_dir()`
+- 錯誤位置文件已手動移至 `srv/settings/`
+- Release binary 重建（`cargo build --release`，舊 binary 停留在 22:18，WIRE-1 前）
+- 引擎重啟後 log 確認：`PH5-WIRE-1: edge estimates loaded n_cells=8`，`cost_gate(JS): negative estimate — exploration mode` 實際觸發
+
+**數據策略決定（session 3 末）**：歷史 fills 含開發期噪音，不清空。改用滾動窗口：2026-04-11 用 `--days 3` 重跑 JS-1，取 ARCH-RC1 穩定後的乾淨數據。
+
+---
+
 ### PH5-WIRE-1 + 5-01~03: mode-aware cost_gate + k-means cluster analysis（2026-04-08 · commit `5e760be`）
 
 1 commit · `+846/-72` 行 · engine lib 769 / Python 2692 passed · 1 pre-existing fail（無 regression）
