@@ -85,6 +85,11 @@ class EdgeStats:
     # Raw per-observation values (for JS shrinkage input)
     # 原始觀測值（供 JS 收縮輸入）
     raw_bps_list: list[float] = field(default_factory=list)
+    # 5-01: Per-parameter metrics for multi-dimensional JS shrinkage + k-means.
+    # 5-01：多維 JS 收縮 + k-means 的逐參數指標。
+    win_rate: float = 0.0          # fraction of round-trips with positive net PnL / 盈利往返佔比
+    avg_win_bps: float = 0.0       # mean net_pnl_bps for winning trades / 盈利交易均值 bps
+    avg_loss_bps: float = 0.0      # mean net_pnl_bps for losing trades / 虧損交易均值 bps
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +271,14 @@ def compute_edge_stats(
         else:
             std_net = 0.0
 
+        # 5-01: Win rate + avg win/loss for multi-dimensional shrinkage.
+        # 5-01：勝率 + 平均盈虧，用於多維收縮。
+        wins = [x for x in net_bps if x > 0]
+        losses = [x for x in net_bps if x <= 0]
+        win_rate = len(wins) / n if n > 0 else 0.0
+        avg_win = sum(wins) / len(wins) if wins else 0.0
+        avg_loss = sum(losses) / len(losses) if losses else 0.0
+
         stats[(strategy, symbol)] = EdgeStats(
             strategy_name=strategy,
             symbol=symbol,
@@ -275,10 +288,13 @@ def compute_edge_stats(
             mean_gross_bps=mean_gross,
             mean_fee_bps=mean_fee,
             raw_bps_list=net_bps,
+            win_rate=win_rate,
+            avg_win_bps=avg_win,
+            avg_loss_bps=avg_loss,
         )
         logger.info(
-            "  (%s, %s): n=%d mean_net=%.2f bps std=%.2f bps fee=%.2f bps",
-            strategy, symbol, n, mean_net, std_net, mean_fee,
+            "  (%s, %s): n=%d mean_net=%.2f bps std=%.2f bps fee=%.2f bps win_rate=%.2f",
+            strategy, symbol, n, mean_net, std_net, mean_fee, win_rate,
         )
 
     return stats

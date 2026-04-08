@@ -107,6 +107,30 @@ def _js_shrinkage(
 # Main estimation logic / 主估計邏輯
 # ---------------------------------------------------------------------------
 
+def _shrink_and_attach(
+    results: dict,
+    stats: dict,
+    keys: list,
+    param_name: str,
+    value_fn,
+    var_fn,
+) -> None:
+    """
+    Run JS shrinkage on one parameter across all cells; attach shrunk values to results.
+    對所有格子的單個參數執行 JS 收縮，並將收縮值附加到結果中。
+
+    Skips gracefully when p < 3 (JS undefined). Attaches `{param_name}_shrunk` key.
+    p < 3 時優雅跳過（JS 未定義）。附加 `{param_name}_shrunk` 鍵。
+    """
+    raw = [value_fn(stats[k]) for k in keys]
+    within_vars = [var_fn(stats[k]) for k in keys]
+    grand = sum(raw) / len(raw) if raw else 0.0
+    shrunk = _js_shrinkage(raw, within_vars, grand)
+    for i, k in enumerate(keys):
+        results[k][f"{param_name}_shrunk"] = round(shrunk[i], 6)
+    logger.debug("JS per-param shrinkage '%s': grand=%.4f", param_name, grand)
+
+
 def run_james_stein(
     days_back: int = 30,
     min_samples: int = 3,
@@ -158,6 +182,7 @@ def run_james_stein(
     results: dict[tuple[str, str], dict] = {}
     for i, k in enumerate(keys):
         (strategy, symbol) = k
+        es = stats[k]
         results[k] = {
             "strategy_name": strategy,
             "symbol": symbol,
@@ -165,7 +190,12 @@ def run_james_stein(
             "shrunk_bps": shrunk_values[i],
             "grand_mean_bps": grand_mean,
             "shrinkage_factor_B": B_global,
-            "n_observations": stats[k].n,
+            "n_observations": es.n,
+            # 5-01: raw per-parameter values for multi-dimensional shrinkage.
+            # 5-01：用於多維收縮的逐參數原始值。
+            "win_rate": es.win_rate,
+            "avg_win_bps": es.avg_win_bps,
+            "avg_loss_bps": es.avg_loss_bps,
         }
 
     logger.info(
@@ -174,8 +204,29 @@ def run_james_stein(
     )
     for k, r in results.items():
         logger.info(
-            "  (%s, %s): raw=%.2f bps → shrunk=%.2f bps (n=%d)",
-            k[0], k[1], r["raw_bps"], r["shrunk_bps"], r["n_observations"],
+            "  (%s, %s): raw=%.2f bps → shrunk=%.2f bps (n=%d, win_rate=%.2f)",
+            k[0], k[1], r["raw_bps"], r["shrunk_bps"], r["n_observations"], r["win_rate"],
+        )
+
+    # 5-01: Run JS shrinkage on win_rate, avg_win_bps, avg_loss_bps independently.
+    # 5-01：對勝率、平均盈利、平均虧損分別進行 JS 收縮。
+    _shrink_and_attach(results, stats, keys, "win_rate",
+                       lambda es: es.win_rate, lambda es: es.win_rate * (1 - es.win_rate) / max(es.n, 1))
+    _shrink_and_attach(results, stats, keys, "avg_win_bps",
+                       lambda es: es.avg_win_bps, lambda es: (es.std_net_bps ** 2) / max(es.n, 1))
+    _shrink_and_attach(results, stats, keys, "avg_loss_bps",
+                       lambda es: es.avg_loss_bps, lambda es: (es.std_net_bps ** 2) / max(es.n, 1))
+
+    # Compute combined EV from shrunk components (win_rate * avg_win + (1-win_rate) * avg_loss).
+    # 從收縮分量計算合成 EV（勝率 * 均盈 + (1-勝率) * 均虧）。
+    for k in results:
+        wr = results[k].get("win_rate_shrunk", results[k]["win_rate"])
+        aw = results[k].get("avg_win_bps_shrunk", results[k]["avg_win_bps"])
+        al = results[k].get("avg_loss_bps_shrunk", results[k]["avg_loss_bps"])
+        results[k]["combined_ev_bps"] = round(wr * aw + (1.0 - wr) * al, 4)
+        logger.info(
+            "  (%s, %s): combined_ev=%.2f bps (wr=%.2f avg_win=%.2f avg_loss=%.2f)",
+            k[0], k[1], results[k]["combined_ev_bps"], wr, aw, al,
         )
 
     # ── Write to Postgres ──
@@ -235,6 +286,7 @@ def _write_to_postgres(results: dict[tuple[str, str], dict]) -> None:
     now = datetime.now(tz=timezone.utc)
     rows = []
     for (strategy, symbol), r in results.items():
+        # Primary: realized edge bps (shrunk) / 主要：實現邊際 bps（收縮）
         rows.append({
             "strategy_name": strategy,
             "symbol": symbol,
@@ -246,6 +298,23 @@ def _write_to_postgres(results: dict[tuple[str, str], dict]) -> None:
             "n_observations": r["n_observations"],
             "last_updated_ts": now,
         })
+        # 5-01: Per-parameter rows / 5-01：逐參數行
+        for param_key, raw_key, shrunk_key in [
+            ("win_rate", "win_rate", "win_rate_shrunk"),
+            ("avg_win_bps", "avg_win_bps", "avg_win_bps_shrunk"),
+            ("avg_loss_bps", "avg_loss_bps", "avg_loss_bps_shrunk"),
+        ]:
+            rows.append({
+                "strategy_name": strategy,
+                "symbol": symbol,
+                "param_name": param_key,
+                "raw_estimate": r.get(raw_key, 0.0),
+                "shrunk_estimate": r.get(shrunk_key, r.get(raw_key, 0.0)),
+                "shrinkage_factor": r["shrinkage_factor_B"],
+                "grand_mean": r.get(raw_key, 0.0),  # grand mean per param
+                "n_observations": r["n_observations"],
+                "last_updated_ts": now,
+            })
 
     conn = _get_db_conn()
     try:
@@ -285,10 +354,19 @@ def _write_json_snapshot(
     for (strategy, symbol), r in results.items():
         key = f"{strategy}::{symbol}"
         snapshot[key] = {
+            # Primary signal for Rust cost_gate (WIRE-1): shrunk realized edge bps.
+            # Rust cost_gate 主信號（WIRE-1）：收縮實現邊際 bps。
             "shrunk_bps": round(r["shrunk_bps"], 4),
             "raw_bps": round(r["raw_bps"], 4),
             "n": r["n_observations"],
             "B": round(r["shrinkage_factor_B"], 4),
+            # 5-01: Per-parameter shrunk values for k-means clustering.
+            # 5-01：用於 k-means 聚類的逐參數收縮值。
+            "win_rate": round(r.get("win_rate", 0.0), 4),
+            "win_rate_shrunk": round(r.get("win_rate_shrunk", r.get("win_rate", 0.0)), 4),
+            "avg_win_bps_shrunk": round(r.get("avg_win_bps_shrunk", r.get("avg_win_bps", 0.0)), 4),
+            "avg_loss_bps_shrunk": round(r.get("avg_loss_bps_shrunk", r.get("avg_loss_bps", 0.0)), 4),
+            "combined_ev_bps": round(r.get("combined_ev_bps", r["shrunk_bps"]), 4),
         }
 
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)

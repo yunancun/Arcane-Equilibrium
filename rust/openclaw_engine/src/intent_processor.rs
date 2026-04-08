@@ -97,6 +97,10 @@ pub struct IntentProcessor {
     /// W-3：最近一次 LinUCB 選擇（gate 通過後設定；下游 DecisionContextMsg
     /// producer 若選擇從 intent_processor 讀則使用此欄位）。
     last_arm_selection: Option<crate::linucb::ArmSelection>,
+    /// PH5-WIRE-1: Shrunk JS realized-edge estimates per (strategy, symbol).
+    /// Loaded at startup from settings/edge_estimates.json; refreshed via set_edge_estimates().
+    /// PH5-WIRE-1：每 (策略, 幣種) JS 收縮實現邊際估計。啟動時加載，可通過 set_edge_estimates() 刷新。
+    edge_estimates: crate::edge_estimates::EdgeEstimates,
 }
 
 impl IntentProcessor {
@@ -113,6 +117,7 @@ impl IntentProcessor {
             daily_reset_day: 0,
             linucb: None,
             last_arm_selection: None,
+            edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
         }
     }
 
@@ -131,7 +136,19 @@ impl IntentProcessor {
             daily_reset_day: 0,
             linucb: None,
             last_arm_selection: None,
+            edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
         }
+    }
+
+    /// PH5-WIRE-1: Inject / refresh JS shrunk edge estimates.
+    /// Called at startup and optionally via IPC reload trigger.
+    /// PH5-WIRE-1：注入/刷新 JS 收縮邊際估計。啟動時調用，可通過 IPC 觸發刷新。
+    pub fn set_edge_estimates(&mut self, estimates: crate::edge_estimates::EdgeEstimates) {
+        let n = estimates.n_cells();
+        let gm = estimates.grand_mean_bps();
+        self.edge_estimates = estimates;
+        tracing::info!(n_cells = n, grand_mean_bps = gm,
+            "PH5-WIRE-1: edge estimates injected / 邊際估計已注入");
     }
 
     /// W-3: Plug in a LinUCB runtime (read-only). When set, callers may invoke
@@ -520,9 +537,8 @@ impl IntentProcessor {
             }
         }
 
-        // ─── Gate 3: Cost gate — reject if EV < k × round_trip_fee ───
-        // 成本門控：預期收益 < k × 往返手續費時拒絕
-        // Session 12: thresholds read from RiskManagerConfig (was hardcoded 0.15 / 1.5).
+        // ─── Gate 3: Cost gate — PH5-WIRE-1 mode-aware (paper/demo = exploration) ───
+        // 成本門控：PH5-WIRE-1 模式感知（paper/demo = 探索模式）
         {
             let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
@@ -535,51 +551,20 @@ impl IntentProcessor {
                     fill: None,
                 };
             }
-
-            // SEC-11: ATR=0 → fail-closed. EV cannot be evaluated without volatility,
-            // so any decision to admit the trade would bypass the cost gate. Cold-start
-            // is already handled by PNL-3 boot cooldown, so a legitimate runtime ATR=0
-            // is an indicator failure that warrants blocking, not waving through.
-            // SEC-11：ATR=0 改 fail-closed。冷啟動由 PNL-3 boot cooldown 保護。
+            // SEC-11: ATR=0 → fail-closed (cold-start by PNL-3 boot cooldown; runtime ATR=0 = indicator failure).
+            // SEC-11：ATR=0 失敗關閉（冷啟動由 PNL-3 保護；運行時 ATR=0 = 指標故障）。
             if !(atr > 0.0) {
-                tracing::warn!(
-                    symbol = %intent.symbol,
-                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕"
-                );
+                tracing::warn!(symbol = %intent.symbol,
+                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
                 return IntentResult {
                     submitted: false,
-                    rejected_reason: Some(
-                        "cost_gate: ATR unavailable (fail-closed, SEC-11)".into(),
-                    ),
+                    rejected_reason: Some("cost_gate: ATR unavailable (fail-closed, SEC-11)".into()),
                     fill: None,
                 };
             }
-            let fee_rate = self.fee_rate(&intent.symbol);
-            // PH5-WIRE-0 (2026-04-08): ATR is a volatility range, not directional edge.
-            // Paper data (3 days, 5 symbols) shows realized edge ≈ 2 bps vs fee ≈ 11 bps.
-            // The raw formula `atr × conf` over-estimates EV ~13× (DOGE: 0.052% predict vs
-            // 0.004% realized). Apply cold-start dampening factor 0.2 until Phase 5 JS
-            // shrunk_estimate replaces this (PH5-WIRE-1). This reduces over-estimation to ~2.6×,
-            // making cost_gate reject most sub-breakeven trades.
-            // PH5-WIRE-0（2026-04-08）：ATR 是波動幅度而非方向性 edge。
-            // Paper 數據顯示實現 edge ≈ 2 bps，手續費 ≈ 11 bps，原公式高估 ~13×。
-            // 應用冷啟動阻尼因子 0.2，直到 PH5-WIRE-1 用 JS shrunk_estimate 替換本公式。
-            // TODO(PH5-WIRE-1): replace with shrunk_realized_edge_bps from LearningConfig
-            const COLD_START_DAMPENING: f64 = 0.2;
-            let expected_profit = atr * intent.confidence * final_qty * COLD_START_DAMPENING;
-            let notional = final_qty * price;
-            let rt_fee = notional * 2.0 * fee_rate;
-            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
-
-            if expected_profit < k * rt_fee {
-                return IntentResult {
-                    submitted: false,
-                    rejected_reason: Some(format!(
-                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2}, dampening={:.1})",
-                        expected_profit, k, rt_fee, atr, intent.confidence, notional, COLD_START_DAMPENING,
-                    )),
-                    fill: None,
-                };
+            if let Some(r) = self.cost_gate_paper(&intent.strategy, &intent.symbol,
+                                                   atr, intent.confidence, final_qty, price) {
+                return r;
             }
         }
 
@@ -755,7 +740,8 @@ impl IntentProcessor {
             }
         }
 
-        // ─── Gate 3: Cost gate (config-driven, Session 12) ───
+        // ─── Gate 3: Cost gate — PH5-WIRE-1 live mode (fail-closed without positive estimate) ───
+        // 成本門控：PH5-WIRE-1 live 模式（無正估計則失敗關閉，原則 #5 生存 > 利潤）
         {
             let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
@@ -768,36 +754,19 @@ impl IntentProcessor {
                     approved_qty: 0.0,
                 };
             }
-
-            // SEC-11: ATR=0 → fail-closed (same reasoning as process()).
+            // SEC-11: ATR=0 → fail-closed.
             if !(atr > 0.0) {
-                tracing::warn!(
-                    symbol = %intent.symbol,
-                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕"
-                );
+                tracing::warn!(symbol = %intent.symbol,
+                    "cost_gate fail-closed: ATR unavailable (SEC-11) / 成本門禁因 ATR 不可用拒絕");
                 return ExchangeGateResult {
                     approved: false,
-                    rejected_reason: Some(
-                        "cost_gate: ATR unavailable (fail-closed, SEC-11)".into(),
-                    ),
+                    rejected_reason: Some("cost_gate: ATR unavailable (fail-closed, SEC-11)".into()),
                     approved_qty: 0.0,
                 };
             }
             let fee_rate = self.fee_rate(&intent.symbol);
-            let expected_profit = atr * intent.confidence * final_qty;
-            let notional = final_qty * price;
-            let rt_fee = notional * 2.0 * fee_rate;
-            let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
-
-            if expected_profit < k * rt_fee {
-                return ExchangeGateResult {
-                    approved: false,
-                    rejected_reason: Some(format!(
-                        "cost_gate: EV ${:.4} < {:.1}× fee ${:.4} (atr={:.6}, conf={:.2}, notional=${:.2})",
-                        expected_profit, k, rt_fee, atr, intent.confidence, notional,
-                    )),
-                    approved_qty: 0.0,
-                };
+            if let Some(r) = self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate) {
+                return r;
             }
         }
 
@@ -833,6 +802,117 @@ impl IntentProcessor {
             return am.taker_fee(symbol);
         }
         self.taker_fee_rate.unwrap_or(DEFAULT_TAKER_FEE_RATE)
+    }
+
+    /// PH5-WIRE-1: Paper/demo mode cost gate helper.
+    /// Positive JS estimate → check EV vs fee (block if below).
+    /// Negative JS estimate → exploration mode (allow + log; need data to improve estimates).
+    /// No estimate (cold-start) → ATR×conf×0.2 fallback.
+    /// Returns Some(rejected) on block, None on pass.
+    /// PH5-WIRE-1：Paper/demo 模式成本門。
+    /// 正估計 → EV 與 fee 比較；負估計 → 探索模式（允許+記錄）；無估計 → ATR×0.2 回退。
+    fn cost_gate_paper(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        atr: f64,
+        conf: f64,
+        qty: f64,
+        price: f64,
+    ) -> Option<IntentResult> {
+        let fee_rate = self.fee_rate(symbol);
+        let fee_bps = 2.0 * fee_rate * 10_000.0; // round-trip fee in bps
+        match self.edge_estimates.get(strategy, symbol) {
+            Some(bps) if bps > 0.0 => {
+                // Positive JS estimate: use it as EV signal
+                // 正 JS 估計：作為 EV 信號
+                if bps < fee_bps {
+                    return Some(IntentResult {
+                        submitted: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate(JS): shrunk_edge={:.2}bps < fee={:.2}bps",
+                            bps, fee_bps,
+                        )),
+                        fill: None,
+                    });
+                }
+                tracing::debug!(strategy, symbol, shrunk_edge_bps = bps,
+                    "cost_gate(JS): positive edge — allowed / 正 edge 允許通過");
+                None
+            }
+            Some(bps) => {
+                // Negative JS estimate: exploration mode — allow to accumulate data.
+                // Circular dependency: blocking here = no new data = estimates never improve.
+                // 負 JS 估計：探索模式——允許以積累數據。
+                // 循環依賴：攔截 = 無新數據 = 估計永遠不改善。
+                tracing::info!(strategy, symbol, estimated_edge_bps = bps,
+                    "cost_gate(JS): negative estimate — exploration mode / 負估計探索模式");
+                None
+            }
+            None => {
+                // Cold start: no JS estimate — ATR×conf×0.2 fallback (PH5-WIRE-0).
+                // 冷啟動：無 JS 估計 — ATR×conf×0.2 回退（PH5-WIRE-0）。
+                const DAMP: f64 = 0.2;
+                let ev = atr * conf * qty * DAMP;
+                let notional = qty * price;
+                let rt_fee = notional * 2.0 * fee_rate;
+                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
+                if ev < k * rt_fee {
+                    return Some(IntentResult {
+                        submitted: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate(ATR cold-start): EV ${ev:.4} < {k:.1}× fee ${rt_fee:.4} \
+                             (atr={atr:.6}, conf={conf:.2}, damp={DAMP})",
+                        )),
+                        fill: None,
+                    });
+                }
+                None
+            }
+        }
+    }
+
+    /// PH5-WIRE-1: Live mode cost gate — strictly requires positive JS estimate.
+    /// Negative or missing estimate → fail-closed (root principle #5: survival > profit).
+    /// Returns Some(rejected) on block, None on pass.
+    /// PH5-WIRE-1：Live 模式成本門——嚴格要求正 JS 估計。
+    /// 負/無估計 → 失敗關閉（根原則 #5：生存 > 利潤）。
+    fn cost_gate_live(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        fee_rate: f64,
+    ) -> Option<ExchangeGateResult> {
+        let fee_bps = 2.0 * fee_rate * 10_000.0;
+        match self.edge_estimates.get(strategy, symbol) {
+            Some(bps) if bps > 0.0 => {
+                if bps < fee_bps {
+                    return Some(ExchangeGateResult {
+                        approved: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate(JS-live): shrunk={:.2}bps < fee={:.2}bps", bps, fee_bps,
+                        )),
+                        approved_qty: 0.0,
+                    });
+                }
+                None // pass
+            }
+            Some(bps) => Some(ExchangeGateResult {
+                approved: false,
+                rejected_reason: Some(format!(
+                    "cost_gate(JS-live): estimated={:.2}bps < 0 — fail-closed / 負估計失敗關閉",
+                    bps,
+                )),
+                approved_qty: 0.0,
+            }),
+            None => Some(ExchangeGateResult {
+                approved: false,
+                rejected_reason: Some(
+                    "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉".into(),
+                ),
+                approved_qty: 0.0,
+            }),
+        }
     }
 
     /// PNL-5: Cost-gate k multiplier scaled by notional size, reading
@@ -1054,9 +1134,10 @@ mod tests {
             limit_price: None,
         };
         // ATR=20 (very compressed for BTC), notional=$67 → rt_fee=$0.074 → EV=20×0.3×0.001=$0.006
+        // PH5-WIRE-1: no JS estimate (cold-start) → ATR fallback → "cost_gate(ATR cold-start): EV"
         let result = proc.process(&intent, &gov, &state, 20.0);
         assert!(!result.submitted);
-        assert!(result.rejected_reason.unwrap().contains("cost_gate: EV"));
+        assert!(result.rejected_reason.unwrap().contains("cost_gate(ATR cold-start)"));
     }
 
     #[test]
