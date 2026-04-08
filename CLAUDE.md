@@ -212,9 +212,9 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點**：(1) 7d paper trading 觀察期 (Live blocker) · (2) DEAD-PY-1 死代碼清理 · (3) A2 News scheduler · (4) Phase 5 (James-Stein + DL-1/2) · (5) 多通道告警 (OC-3，Phase 6 6-RC-6 依賴)。
+**當前焦點（2026-04-08 重排序 — Edge 危機）**：**(1) Phase 5 提前啟動 — DL-1/2 backtest infra + James-Stein shrinkage 整合到 cost_gate**。實證 paper realized edge ≈ 2 bps，fee 11 bps → Net EV ≈ −9 bps；cost_gate 公式 `EV = atr × conf × qty`（`intent_processor.rs:558`）把 ATR range 當 directional edge，高估 ~13×（DOGE 案例 0.052% predict vs 0.004% realized），qty 與 fee 兩邊約掉 → gate 與 size 無關。Hand-roll C+D（in-house realized-edge tracker）已被否決：跟 Phase 5 重疊 ~70%。次焦點：(2) 7d paper trading 觀察期（可與 Phase 5 並行）· (3) DEAD-PY-1 · (4) A2 News scheduler · (5) 多通道告警 (OC-3)。
 
-**路線圖**：Phase 0-4 + ARCH-RC1 1A→1C-4 ✅ · **Phase 5 (W16-18) ⬜** · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
+**路線圖**：Phase 0-4 + ARCH-RC1 1A→1C-4 ✅ · **Phase 5 ⬜（從 W16-18 提前到立即）** · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
 
 **Live 前置**：Paper trading ≥21d · Phase 6 完成 · Rust R-07 灰度通過 · Alpha PnL>0 · provider pricing 綁定。M/N 章未完成，執行權限未授予。
 
@@ -227,4 +227,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：tests engine lib 767 / core 387 / Python control_api 2694 passed · ARCH-RC1 1C-4 WRAP COMPLETE · Live blocker：7d paper trading 觀察期 + 多通道告警上線。詳見 §三 + 歸檔指針。
+> 截至 2026-04-08：tests engine lib 767 / core 387 / Python control_api 2694 passed · ARCH-RC1 1C-4 WRAP COMPLETE · **Phase 5 提前到 P0**（Edge 危機：realized 2 bps vs fee 11 bps，cost_gate ATR-based EV 公式高估 ~13×）· Live blocker 仍在：7d paper observation + 多通道告警。
