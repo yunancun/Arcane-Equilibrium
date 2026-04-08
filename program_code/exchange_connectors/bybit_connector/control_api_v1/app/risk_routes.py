@@ -150,14 +150,48 @@ async def get_risk_config(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get full RiskConfig snapshot from Rust authority. / 從 Rust 權威獲取完整 RiskConfig 快照。"""
+    from .risk_view_client import _GLOBAL_TO_RUST
     client = await _get_risk_view_client()
-    config = await client.refresh_config()
+    raw = await client.refresh_config()
+    config = dict(raw)  # don't mutate cache
+
+    # Build GUI-compatible flat global_config from Rust nested structure.
+    # GUI reads cfg.global_config (or cfg.p1) expecting flat field names.
+    # / 從 Rust 嵌套結構建立 GUI 兼容的平坦 global_config。
+    limits   = raw.get("limits", {})
+    agent    = raw.get("agent", {})
+    dstop    = raw.get("dynamic_stop", {})
+    aclust   = raw.get("anti_cluster", {})
+    runtime  = raw.get("runtime", {})
+    global_config: dict[str, Any] = {
+        "max_stop_loss_pct":            limits.get("stop_loss_max_pct"),
+        "max_take_profit_pct":          limits.get("take_profit_max_pct"),
+        "tp_enabled":                   limits.get("take_profit_enforced"),
+        "max_single_position_pct":      limits.get("position_size_max_pct"),
+        "max_total_exposure_pct":       limits.get("total_exposure_max_pct"),
+        "max_correlated_exposure_pct":  limits.get("correlated_exposure_max_pct"),
+        "max_leverage":                 limits.get("leverage_max"),
+        "max_session_drawdown_pct":     limits.get("session_drawdown_max_pct"),
+        "max_daily_loss_pct":           limits.get("daily_loss_max_pct"),
+        "consecutive_loss_cooldown_count":   limits.get("consec_loss_cooldown_count"),
+        "consecutive_loss_cooldown_minutes": limits.get("consec_loss_cooldown_min"),
+        "max_holding_hours":            limits.get("holding_hours_max"),
+        "allowed_categories":           limits.get("allowed_categories"),
+        "preferred_margin_mode":        limits.get("margin_mode"),
+        "preferred_position_mode":      limits.get("position_mode"),
+        "max_same_direction_positions": aclust.get("max_same_direction"),
+        "trailing_stop_pct":            agent.get("trailing_distance_pct"),
+        "atr_multiplier":               dstop.get("atr_stop_mult"),
+        "h0_shadow_mode":               runtime.get("h0_shadow_mode"),
+    }
+    config["global_config"] = global_config
+    config["p1"] = global_config  # alias used by some GUI paths
+
     # Optional: append Rust state-reader snapshot for legacy GUI fields
     # 可選：附加 Rust state-reader 快照供舊 GUI 欄位使用
     reader = get_rust_reader()
     snap = reader.get_snapshot() if reader.is_available() else None
     if snap is not None:
-        config = dict(config)  # don't mutate cache
         config["rust_active"] = {
             "stop_config": snap.get("stop_config"),
             "guardian_config": snap.get("guardian_config"),
