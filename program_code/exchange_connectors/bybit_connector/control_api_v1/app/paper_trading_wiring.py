@@ -48,10 +48,12 @@ PAPER_STORE = PaperStateStore(_paper_state_path)
 from .risk_manager import RiskManager  # noqa: E402
 from .portfolio_risk_control import PortfolioRiskControl, PortfolioRiskConfig  # noqa: E402
 from .perception_data_plane import PerceptionPlane  # noqa: E402
-RISK_MANAGER = RiskManager()  # Loads operator config from file automatically
-# T2.01: Initialize and inject PortfolioRiskControl / 初始化并注入组合风控
+# ARCH-RC1 1C-3-D: RiskManager is now a thin RiskViewClient subclass; the
+# real risk authority lives in Rust ConfigStore + intent_processor. The old
+# set_portfolio_risk_control / set_governance_hub / set_change_audit_log
+# injection points are removed — those dependencies are owned by Rust now.
+RISK_MANAGER = RiskManager()
 PORTFOLIO_RISK_CONTROL = PortfolioRiskControl(config=PortfolioRiskConfig())
-RISK_MANAGER.set_portfolio_risk_control(PORTFOLIO_RISK_CONTROL)
 # T5.04: Symbol whitelist removed — Scanner + Guardian + H0 Gate provide sufficient filtering.
 # 符号白名单已移除 — 掃描器 + Guardian + H0 Gate 提供了足夠的篩選機制。
 # T2.02: Initialize and inject PerceptionPlane / 初始化并注入感知平面
@@ -389,15 +391,15 @@ except ImportError as _h0_import_err:
 # RC-10: ENGINE is None — skip injection / ENGINE 為 None — 跳過注入
 if ENGINE is not None:
     ENGINE.set_governance_hub(GOV_HUB)
-RISK_MANAGER.set_governance_hub(GOV_HUB)
+# ARCH-RC1 1C-3-D: governance_hub injection no longer flows through RISK_MANAGER.
 
 # T2.04: Initialize and inject ChangeAuditLog / 初始化并注入變更審計日誌
 from .change_audit_log import ChangeAuditLog  # noqa: E402
 CHANGE_AUDIT_LOG = ChangeAuditLog()
 GOV_HUB.set_change_audit_log(CHANGE_AUDIT_LOG)
 
-# T3.06: Inject ChangeAuditLog into RiskManager
-RISK_MANAGER.set_change_audit_log(CHANGE_AUDIT_LOG)
+# ARCH-RC1 1C-3-D: ChangeAuditLog injection into RISK_MANAGER removed —
+# audit now flows via V014 engine_events written by the Rust IPC layer.
 
 # T2.05: Initialize and inject RecoveryApprovalGate / 初始化并注入恢復審批門禁
 from .recovery_approval_gate import RecoveryApprovalGate  # noqa: E402

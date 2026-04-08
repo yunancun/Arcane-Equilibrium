@@ -432,11 +432,13 @@ class TestScannerRateLimit:
 class TestPhase2ModuleInjection:
     """Verify all Phase 2 modules are injected at startup"""
 
-    def test_portfolio_risk_control_injected(self):
-        """T2.01: PortfolioRiskControl injected into RiskManager"""
-        from app.paper_trading_routes import RISK_MANAGER
-        assert hasattr(RISK_MANAGER, '_portfolio_risk_control')
-        assert RISK_MANAGER._portfolio_risk_control is not None
+    def test_portfolio_risk_control_present(self):
+        """ARCH-RC1 1C-3-D: PortfolioRiskControl no longer injected into the
+        Python RiskManager (which is now a thin RiskViewClient shim). The
+        module-level singleton must still exist for downstream consumers.
+        """
+        from app.paper_trading_wiring import PORTFOLIO_RISK_CONTROL
+        assert PORTFOLIO_RISK_CONTROL is not None
 
     def test_perception_plane_created(self):
         """T2.02: PerceptionPlane created"""

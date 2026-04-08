@@ -117,29 +117,6 @@ def active_paper_engine(paper_engine):
 
 
 @pytest.fixture
-def paper_engine_with_risk(tmp_state_file):
-    """
-    Create a PaperTradingEngine with RiskManager and active session.
-    包含风控管理器和活跃 session 的引擎。
-    """
-    from app.paper_trading_engine import PaperStateStore, PaperTradingEngine
-    from app.risk_manager import RiskManager
-
-    from unittest.mock import MagicMock
-    store = PaperStateStore(tmp_state_file)
-    rm = RiskManager()
-    eng = PaperTradingEngine(store, risk_manager=rm)
-    # P0-1: provide mock governance_hub so fail-closed check passes in tests
-    mock_hub = MagicMock()
-    mock_hub.is_authorized.return_value = True
-    mock_hub.acquire_lease.return_value = "test-lease"
-    mock_hub.release_lease.return_value = None
-    eng.set_governance_hub(mock_hub)
-    eng.start_session(initial_balance=10000.0)
-    return eng, rm
-
-
-@pytest.fixture
 def dispatcher_with_engine(active_paper_engine):
     """
     Create a MarketDataDispatcher with an active paper trading engine.
@@ -321,39 +298,9 @@ def audit_pipeline(tmp_audit_dir):
     p.close()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# RISK MANAGER FIXTURES / 风控管理器夹具
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@pytest.fixture
-def risk_manager():
-    """
-    Create a fresh RiskManager instance.
-    全新风控管理器实例。
-    """
-    from app.risk_manager import RiskManager
-    return RiskManager()
-
-
-@pytest.fixture
-def global_risk_config():
-    """
-    Create a GlobalRiskConfig instance with defaults.
-    带默认值的全局风控配置。
-    """
-    from app.risk_manager import GlobalRiskConfig
-    return GlobalRiskConfig()
-
-
-@pytest.fixture
-def category_risk_config():
-    """
-    Create a CategoryRiskConfig instance for 'linear' category.
-    'linear' 分类的分类风控配置。
-    """
-    from app.risk_manager import CategoryRiskConfig
-    return CategoryRiskConfig(category="linear")
-
+# ARCH-RC1 1C-3-D: risk_manager / global_risk_config / category_risk_config
+# fixtures removed — Python RiskManager now a thin shim over RiskViewClient,
+# all risk logic owned by Rust ConfigStore + intent_processor.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MARKET DATA FIXTURES / 行情数据夹具
