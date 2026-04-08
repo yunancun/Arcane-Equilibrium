@@ -27,8 +27,8 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 - [x] **B2** Position Reconciler — 30s Bybit poll, 5-tier drift classify, V014 audit (audit-only after 1C-4 wrap downgrade), warmup baseline, engine lib 757→767, 零 migration (`36335d7` + 降級 commit 待加)
   - 原設計含自動 governor 收縮，QA+E2 審查發現 reason_code/target_tier 與 operator manual override 白名單衝突 + 會污染 B1 cooldown 語義 → 降級為純 audit。自動收縮挪至 Phase 6（見下方「Phase 6 自動收縮」段）。
 - [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：需先決定 4-09 router 是否 attach + provider wire-up，比預期大 ~120-200 行）
-- [ ] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
-- [ ] E-Merge-4（可選）Guardian owned config struct 退化為 RiskConfig sub-view
+- [x] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）— `4780b04`
+- [x] **E-Merge-4** Guardian owned config struct 退化為 RiskConfig sub-view — modification_size_factor + modification_leverage_cap 升級至 RiskConfig.limits，dead 欄位 max_correlation 刪除，apply_risk_snapshot 改為 fresh 構造（無 RMW）。Guardian 任何旋鈕現在唯一真相源 = patch_risk_config。core 360 + engine 767。
 - [ ] E2 + E4 + QA Audit + 文檔同步
 
 ---

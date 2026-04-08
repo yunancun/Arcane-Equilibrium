@@ -53,11 +53,16 @@ pub(super) fn wire_pipeline(
     pipeline
         .paper_state
         .set_take_profit_pct(Some(default_risk.limits.take_profit_max_pct));
+    // ARCH-RC1 1C-4 E-Merge-4: GuardianConfig is fully derived from RiskConfig
+    // — no read-modify-write, no Default fallback for any field.
+    // ARCH-RC1 1C-4 E-Merge-4：GuardianConfig 完全派生自 RiskConfig，無 RMW，
+    // 任何欄位都不走 Default 回退。
     let gc = openclaw_core::guardian::GuardianConfig {
         max_leverage: default_risk.limits.leverage_max,
         max_drawdown_pct: default_risk.limits.session_drawdown_max_pct,
         max_same_direction_positions: default_risk.anti_cluster.max_same_direction as usize,
-        ..openclaw_core::guardian::GuardianConfig::default()
+        modification_size_factor: default_risk.limits.guardian_modification_size_factor,
+        modification_leverage_cap: default_risk.limits.guardian_modification_leverage_cap,
     };
     pipeline.intent_processor.update_guardian_config(gc);
     pipeline.intent_processor.update_risk_config(default_risk.clone());

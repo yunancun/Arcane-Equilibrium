@@ -10,23 +10,38 @@ use serde::{Deserialize, Serialize};
 // Config / 配置
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Guardian P0 trade-intent veto config.
+///
+/// ARCH-RC1 1C-4 E-Merge-4: every field below is now sourced from
+/// `RiskConfig.limits` / `RiskConfig.anti_cluster` via
+/// `tick_pipeline::apply_risk_snapshot`. GuardianConfig has no independent
+/// state — it is a pure derived view that gets fully overwritten on every
+/// hot-reload tick (no read-modify-write). The dead `max_correlation` field
+/// (never read by `Guardian::review`) was deleted as part of this merge.
+///
+/// ARCH-RC1 1C-4 E-Merge-4：以下每個欄位都從 RiskConfig 派生，
+/// apply_risk_snapshot 每個 hot-reload tick 完整覆蓋（無 RMW）。
+/// 死欄位 `max_correlation`（review 從未讀取）已隨此 merge 刪除。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianConfig {
     pub max_leverage: f64,
     pub max_drawdown_pct: f64,
     pub max_same_direction_positions: usize,
-    pub max_correlation: f64,
     pub modification_size_factor: f64,
     pub modification_leverage_cap: f64,
 }
 
 impl Default for GuardianConfig {
+    /// Defaults match `RiskConfig::default()` so a Guardian constructed without
+    /// a hot-reload wire-up still behaves sensibly (used by unit tests only;
+    /// production paths always run apply_risk_snapshot before the first tick).
+    /// 預設值對齊 RiskConfig::default()，未接 hot-reload 的 Guardian 也合理運作
+    /// （僅單測使用；生產路徑首個 tick 前必跑 apply_risk_snapshot）。
     fn default() -> Self {
         Self {
-            max_leverage: 5.0,
+            max_leverage: 20.0,
             max_drawdown_pct: 15.0,
             max_same_direction_positions: 3,
-            max_correlation: 0.85,
             modification_size_factor: 0.5,
             modification_leverage_cap: 2.0,
         }
@@ -257,7 +272,14 @@ mod tests {
 
     #[test]
     fn test_leverage_over_cap_modified() {
-        let g = Guardian::default(); // max 5x
+        // Use an explicit cap of 5x so the test is self-contained and not
+        // coupled to GuardianConfig::default()'s value (which now mirrors
+        // RiskConfig::default().limits.leverage_max post E-Merge-4).
+        // 顯式設 5x 讓測試自洽，不耦合 Default 值（E-Merge-4 後對齊 RiskConfig）。
+        let g = Guardian::new(GuardianConfig {
+            max_leverage: 5.0,
+            ..GuardianConfig::default()
+        });
         let r = g.review(
             &buy_intent("BTC", 7.0), // 7x > 5x but < 10x
             &ctx_with_positions(vec![], 0.0),
