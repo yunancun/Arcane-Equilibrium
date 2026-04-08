@@ -10,8 +10,8 @@ MODULE_NOTE (中文):
   1. `REGIME_TIME_MULTIPLIERS` — bridge_stats / test_winrate_param_fixes 仍消費
      的 regime → time multiplier 常量（純資料，無行為）。
   2. `RiskManager` — RiskViewClient 的薄子類，讓 paper_trading_wiring 等
-     歷史 import 點維持向後相容；建構不接受 ipc_client（無 IPC 連接時所有
-     deprecated 方法走 RiskViewClient 內建的 _warn_deprecated_once no-op）。
+     歷史 import 點維持向後相容；建構不接受 ipc_client。所有舊行為方法
+     已於 1C-3-D 連同呼叫點刪除。
 
   禁止再加任何邏輯到本檔。新功能請改 RiskViewClient 或直接走 IPC。
 

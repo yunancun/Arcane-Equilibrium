@@ -988,21 +988,9 @@ except (ImportError, AttributeError) as _h0_inj_err:
         _h0_inj_err, _h0_inj_err,
     )
 
-try:
-    from .paper_trading_routes import H0_GATE as _H0_GATE_FOR_RM
-    from .paper_trading_routes import RISK_MANAGER as _RISK_MGR_REF
-    if _H0_GATE_FOR_RM is not None and _RISK_MGR_REF is not None:
-        _RISK_MGR_REF.set_h0_gate(_H0_GATE_FOR_RM)
-        logger.info(
-            "H0Gate injected into RiskManager for cooldown sync (P1-16) "
-            "/ H0 門控已注入風控管理器以同步冷卻期"
-        )
-except (ImportError, AttributeError) as _h0_rm_err:
-    logger.warning(
-        "Could not inject H0Gate into RiskManager: %s "
-        "/ 無法注入 H0 門控到風控管理器：%s",
-        _h0_rm_err, _h0_rm_err,
-    )
+# P1-16 RiskManager H0Gate injection removed in 1C-3-D cleanup: RiskViewClient
+# is a no-op shim, the real H0 enforcement lives in Rust intent_processor.
+# 1C-3-D 清理：RiskViewClient 為 no-op shim，H0 真實執行在 Rust intent_processor。
 
 # ─────────────────────────────────────────────────────────────────────
 # APR01-P0-1: Inject TruthSourceRegistry into StrategistAgent + AnalystAgent
