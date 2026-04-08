@@ -31,37 +31,43 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-08 · ARCH-RC1 1C-4 WRAP COMPLETE · 单一 Rust 引擎)
+## 当前状态 (2026-04-09 · ARCH-RC1 1C-4 WRAP + Phase 5 功能交付完毕 · 进入观察期)
 
 ```
 系统模式:     demo_only（仅限 Bybit Demo · live_execution_allowed = False）
 执行权限:     disabled / not_granted（live 前必须保持）
-测试:         Rust  engine lib 767 + core 387 + types 27 + ml_training 35
-              Python control_api 2694 passed (21 pre-existing fail · 0 regression)
+测试:         Rust  engine lib 769 + core 387 + types 27 + ml_training 35
+              Python control_api 2694 passed (1 pre-existing fail · 0 regression)
 API 路由:     183 条（全部 Rust-first）
-代码:         ~62,000 行（Python ~40k + Rust ~22k，1C-3 收编后）
-单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎（1C-3-F 后）
+代码:         ~62,000 行（Python ~40k + Rust ~22k）
+单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎
               tick pipeline + IntentProcessor + paper_state + governance + stop_manager
 ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
               4 IPC 写入面（patch_{risk,learning,budget}_config + update_strategy_params）
-              5 engines 共飲一桶水熱重載 · V014 fail-soft audit
-              risk_manager.py 1633→53 行 shim · paper_trading_engine.py 2248 行徹底退场
-              Guardian = RiskConfig 純派生視圖（E-Merge-4 後無 RMW）
-治理:         GovernanceHub 4 SM (Python) + GovernanceCore (Rust) · fail-closed 已验证
-              Operator manual governor override（白名單 / 24h cooldown / V014 audit）
-              Position Reconciler 30s Bybit 真相轮询 audit-only（自动收缩留 Phase 6）
+              5 engines 热重载 · V014 fail-soft audit · ConfigStore 落盘 ✅
+              Guardian = RiskConfig 纯派生视图
+Phase 5:      ✅ 功能交付完毕（cost_gate 重写）
+              DL-1/DL-2 realized edge 统计 + James-Stein shrinkage estimator
+              mode-aware cost_gate（paper exploration / live fail-closed / cold-start ATR×0.2）
+              empirical 根因：realized edge ≈ 2 bps vs fee 11 bps（Net EV −9 bps）
+              下一步：7d 观察期 + 2026-04-11 滚动 JS 重跑
+治理:         GovernanceHub 4 SM (Python) + GovernanceCore (Rust) · fail-closed
+              Operator manual governor override（白名单 / 24h cooldown / V014 audit）
+              Position Reconciler 30s 真相轮询 audit-only（自动收缩 Phase 6-RC-1~9）
 PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
 Phase 4:      ✅ CODE-COMPLETE（4-00~4-21 + 4.1）· Claude Teacher consumer loop 已 wire
 新闻引擎:     ✅ NewsPipeline + Guardian halt check 接好 / ⚠️ 60s scheduler spawn 待 A2
-学习引擎:     ✅ LearningConfig + Claude Teacher 接好 / ⚠️ LearningConfig 消费者待补
 Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
 5 Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 11 Grafana VIEWs
-Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC · 字典手册见 docs/references/
-下一步:       1) 7d paper trading 观察期（唯一 Live blocker）
-              2) DEAD-PY-1 4-phase 死代码清理（~7h，非阻塞，TODO.md）
-              3) A2 News scheduler / 多通道告警（OC-3）
-              4) Phase 5（W16-18 James-Stein + DL-1 + DL-2）
+Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
+
+下一步（按顺序）:
+  1) 7d paper 观察期 + 2026-04-11 滚动 JS-1 重跑（无开发动作，纯维运）
+  2) 1C-4 收尾：A2 News scheduler + 最终 E2/E4/QA 验收
+  3) Live 前必做：SEC-04~21 + OC-3 多通道告警（Phase 6-RC-6 阻塞依赖）
+  4) Phase 6：6-RC-1~9 reconciler 自动收缩 + 渐进放权 + 验收
+  5) Live Gate：21 天 paper + LG-1~5
 ```
 
 **亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PyO3 39 方法 · Telegram+Webhook 双通道告警
@@ -86,10 +92,10 @@ Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC · 字典手册见 docs/refe
 | RRC-1 | 风控运行时接线（H0Gate+9 check+Gate 2.7） | ✅ 完成 |
 | L3 Audit | 12路全系统审计 + PA 整改计划 | ✅ 63 issues |
 | 4 | Claude Teacher + LinUCB + 新闻 Agent + DL-3 | ✅ CODE-COMPLETE（4-00~4-21 + 4.1） |
-| ARCH-RC1 | 统一 Config + Python 风控核心退场 | ✅ 1A→1C-3 SHIPPED（1C-3-F + 1C-4 留尾） |
-| 5 | James-Stein 跨币 + DL-1/DL-2 | ⬜ W16-18 |
-| 6 | 渐进放权 + 验收 + 压测 | ⬜ W19-20 |
-| Live | Paper 21 天 + Live 准备 | ⬜ 等 7d paper trading 观察期 |
+| ARCH-RC1 | 统一 Config + Python 风控核心退场 | ✅ 1A→1C-4 WRAP COMPLETE（A2 News scheduler 留尾） |
+| **5** | **cost_gate 重写：DL-1/2 + James-Stein + mode-aware gate** | **✅ 功能交付（W16-18 提前到 2026-04-08，等 7d 观察期验证）** |
+| 6 | Reconciler 自动收缩（6-RC-1~9）+ 渐进放权 + 验收 | ⬜ 阻塞于 OC-3 多通道告警 |
+| Live | 21 天 paper + SEC + Live Gate | ⬜ 观察期进行中 |
 
 **详细文件**：`docs/references/2026-04-04--execution_plan_v1.md`（执行计划 V1）
 
