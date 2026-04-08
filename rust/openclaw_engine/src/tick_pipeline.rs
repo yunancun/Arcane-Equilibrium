@@ -1861,7 +1861,7 @@ impl TickPipeline {
                         warn!(symbol = %symbol, reason = %reason, "risk close → exchange / 風控平倉 → 交易所");
                         self.dispatch_close_order(symbol, *is_long, *qty, event, true);
                     } else {
-                        debug!(symbol = %symbol, reason = %reason, "risk close / 風控平倉");
+                        warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
                             *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
                         } else {

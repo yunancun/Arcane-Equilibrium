@@ -257,11 +257,18 @@ fn default_grade_d_threshold() -> f64 {
     0.8
 }
 fn default_cost_edge_max_ratio() -> f64 {
-    // CFG-COST-EDGE-1: raised from 0.8 → 2.0 so small initial profits aren't
-    // immediately closed by the cost-edge gate before take-profit can trigger.
-    // CFG-COST-EDGE-1：從 0.8 提升至 2.0，避免小幅初始盈利在 take-profit 觸發
-    // 前就被 cost-edge gate 立即平倉。
-    2.0
+    // CFG-COST-EDGE-1 reverted: empirical observation (engine.log diag) showed
+    // gate fires correctly — closes happen with cost_ratio 2.5–20+, meaning the
+    // strategy's edge truly is below break-even after fees. Raising default to
+    // 2.0 didn't save trades (cost_ratio still > 2 in all observed cases) and
+    // masked the real issue (low strategy edge / low confidence entries).
+    // Default 0.8 stays — fix the strategies, not the gate.
+    // CFG-COST-EDGE-1 回退：實證（engine.log 診斷）顯示 gate 觸發是正確的 ——
+    // 平倉時 cost_ratio 為 2.5–20+，意味策略邊緣本就低於 fees 損益平衡。
+    // 抬到 2.0 救不到任何單（觀察到的 cost_ratio 全部仍 > 2），反而掩蓋
+    // 真正問題（策略 edge 不足 / 入場 confidence 偏低）。Default 維持 0.8。
+    // 修策略，不修 gate。Range 仍維持 [0, 5] 以利後續實驗。
+    0.8
 }
 
 impl Default for AttentionTax {
@@ -436,7 +443,7 @@ mod tests {
         let toml_str = toml::to_string(&cfg).unwrap();
         let de: BudgetConfig = toml::from_str(&toml_str).unwrap();
         assert!(de.validate().is_ok());
-        assert_eq!(de.attention_tax.cost_edge_max_ratio, 2.0);
+        assert_eq!(de.attention_tax.cost_edge_max_ratio, 0.8);
     }
 
     #[test]
@@ -464,7 +471,7 @@ daily_usd_max = 50.0
         assert_eq!(cfg.caps.daily_usd_max, 50.0);
         // attention_tax defaults preserved / attention_tax 預設值保留
         assert!(cfg.attention_tax.enabled);
-        assert_eq!(cfg.attention_tax.cost_edge_max_ratio, 2.0);
+        assert_eq!(cfg.attention_tax.cost_edge_max_ratio, 0.8);
         assert!(cfg.validate().is_ok());
     }
 }
