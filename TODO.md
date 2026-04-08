@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-07 PM（ARCH-RC1 1C-2 完整收尾 · 下一步 1C-3-A）
-測試基準線：**725 engine lib + 387 core + 27 types + 35 ml_training + 11 control_api smoke** · 0 failures
+最後更新：2026-04-08 AM（1C-3-A/B/B-2/C SHIPPED · 下一步 E2/E4 三 commit review + 1C-3-D）
+測試基準線：**740 engine lib + 387 core + 27 types + 35 ml_training + 17 control_api risk + 11 smoke** · 0 failures
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 
@@ -56,15 +56,30 @@
   - config/legacy_migration.rs · main.rs::load_unified_configs 啟動時調用
   - 映射 ~15 個 global_config.* 已知欄位 → save_toml → rename .legacy
   - max_cost_edge_ratio 跨 Config（屬 BudgetConfig）log WARN，operator 自行 patch
-- [ ] **1C-3 Python RiskManager 空殼化** — 規格 `docs/references/2026-04-07--arch_rc1_1c3_scope.md`
-  - **1C-3-A** gap analysis + IPC surface design (~3h, no code)
-  - **1C-3-B** 新建 `risk_view_client.py` (~200 行) + 抽出 `atr_tracker.py` + 8-12 tests
-  - **1C-3-C** 遷移 `risk_routes.py` 到 RiskViewClient
-  - **1C-3-D** 遷移 14 個 importer + 刪除 dead code + Python 全測通過
-  - **1C-3-E** 移除 RiskManager re-export shim + 文檔同步
-  - 估計 17-20h ≈ 3 sessions
+- [x] **1C-3-A** gap analysis + IPC surface design (done 4/7)
+- [x] **1C-3-B** `risk_view_client.py` (299) + `atr_tracker.py` (153) + 15 tests — `8447fbf`
+- [x] **1C-3-C** `risk_routes.py` migrated to RiskViewClient — `c6fcd13`（6 TestRiskRoutes skipped，留給 1C-3-D 重寫）
+- [x] **1C-3-B-2** operator manual governor override w/ guards — `9f46b06`
+  - IPC: reason_code 白名單 / 單步 / 24h cooldown / CB&MR 鎖死
+  - SM: lookup_rule transition table + min_hold_time 5 min
+  - Audit: V014 engine_events (from/to/reason_code/notes)
+  - Rust 731→740 (+9) · Python 15→17 (+2) · 0 regression
+- [ ] **E2 + E4 三 commit review**（4/8 插入，昨天 session 建議）
+  - E2 review `8447fbf` `c6fcd13` `9f46b06` 三個未 review commit
+  - E4 full regression (Rust workspace + Python test suite)
+  - 根據發現 fix 後才開 1C-3-D
+- [ ] **1C-3-D** 遷移剩餘 importer + 刪除 dead code + Python 全測通過（~5-6h）
+  - 生產側：`paper_trading_wiring.py` (RISK_MANAGER 實例 + setters) / `paper_trading_engine.py` (5 個 dead 呼叫) / `bridge_stats.py` / `bridge_core.py`
+  - 測試側：12 檔 ~8000 行中
+    - **刪除**：`test_risk_manager.py` (1494) + `test_risk_manager_edge.py` (174) — 純測 Python 時代業務邏輯，Rust 側 740 tests 已覆蓋
+    - **重寫**：6 個 skipped `TestRiskRoutes`（1C-3-C 留的尾）
+    - **最小改動**：`test_h0_gate.py` / `test_paper_trading_engine(+inverse).py` / `test_integration_phase5/8` / `test_trailing_stop_cost_constraint` / `test_winrate_param_fixes` / `conftest.py` / `test_session9_fixes.py`
+  - **拆 `PAPER_STORE.mutate`**：session_halted 不再 Python 並行寫，改從 Rust snapshot 派生
+  - `risk_manager.py` 1633 → ~5 行 `RiskManager = RiskViewClient` re-export shim
+- [ ] **1C-3-E** 移除 RiskManager re-export shim + 文檔同步（~2h）
 - [ ] **1C-4 收尾**
   - Position Reconciler（trading.open_positions + Bybit 對帳 + cooldown 重建）
+  - **Governor tier override cooldown PG 持久化**（1C-3-B-2 known limitation：目前 in-memory，重啟重置；live 前必做）
   - NewsPipeline run_once 60s spawn
   - 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
   - E2 + E4 + QA Audit + 文檔同步
