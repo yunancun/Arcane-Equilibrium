@@ -45,10 +45,8 @@ async def get_klines(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe, valid: {sorted(_VALID_TIMEFRAMES)} / 无效时间框架")
     try:
-        # RC-11: Rust-first for klines — Rust is sole tick processor, Python KlineManager
-        # no longer receives ticks and returns empty data.
-        # RC-11：K 線優先讀 Rust — Rust 為唯一 tick 處理器，Python KlineManager
-        # 不再接收 tick，返回空數據。
+        # Rust-first for klines — Python KlineManager is stale fallback only.
+        # Rust 優先讀 K 線 — Python KlineManager 僅作降級備援。
         reader = get_rust_reader()
         if reader.is_available():
             rust_klines = reader.get_klines(sym, n=n)
@@ -95,10 +93,8 @@ async def get_indicators(
     if timeframe not in _VALID_TIMEFRAMES:
         raise HTTPException(status_code=400, detail="Invalid timeframe / 无效时间框架")
     try:
-        # RC-11: Rust-first for ALL timeframes — Rust is the sole tick processor,
-        # Python INDICATOR_ENGINE no longer receives ticks and returns stale/empty data.
-        # RC-11：所有時間框架都優先讀 Rust — Rust 是唯一 tick 處理器，
-        # Python INDICATOR_ENGINE 不再接收 tick，返回過期/空數據。
+        # Rust-first for ALL timeframes — Python INDICATOR_ENGINE is stale fallback only.
+        # Rust 優先讀所有時間框架 — Python INDICATOR_ENGINE 僅作降級備援。
         reader = get_rust_reader()
         if reader.is_available():
             rust_ind = reader.get_indicators(sym)

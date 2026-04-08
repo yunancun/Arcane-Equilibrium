@@ -158,8 +158,8 @@ let _cachedPositions = []; // Cache for margin calculation
 let _cachedPnlAiCost = null; // Cache AI cost from session PnL for metrics
 
 async function sessionAction(action) {
-  // RC-10: Session actions control the Rust engine process (start/stop)
-  // RC-10：Session 操作控制 Rust 引擎進程（啟動/停止）
+  // Session actions control the Rust engine process (start/stop)
+  // Session 操作控制 Rust 引擎進程（啟動/停止）
   let body = {};
   if (action === 'start') {
     // For start, pass initial_balance from Demo if available
@@ -192,14 +192,14 @@ function togglePrice() {
 }
 
 async function submitOrder() {
-  // RC-10: Manual order submission disabled — Rust engine manages orders via strategies
-  // RC-10：手動下單已禁用 — Rust 引擎通過策略管理訂單
+  // Manual order submission disabled — Rust engine manages orders via strategies
+  // 手動下單已禁用 — Rust 引擎通過策略管理訂單
   ocToast('手动下单已禁用 — Rust 引擎自主管理交易', 'error');
 }
 
 async function cancelOrder(orderId) {
-  // RC-10: Manual order cancel disabled — Rust engine manages order lifecycle
-  // RC-10：手動取消訂單已禁用
+  // Manual order cancel disabled — Rust engine manages order lifecycle
+  // 手動取消訂單已禁用
   ocToast('手动取消已禁用 — Rust 引擎自主管理订单', 'error');
 }
 

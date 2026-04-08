@@ -483,14 +483,12 @@ try:
     except (ImportError, Exception) as e:
         logger.warning("Could not inject LearningTierGate into PipelineBridge: %s", e)
 
-    # --- Batch 10: OMS SM-03 injection into PaperTradingEngine ---
-    # Batch 10：OMS 状态机注入纸上交易引擎，以启用 11 态生命周期
+    # --- Batch 10: OMS SM-03 injection into GovernanceHub ---
+    # Batch 10：OMS 状态机注入治理集線器（PaperTradingEngine 已退場，跳過 ENGINE 注入）
+    # DEAD-PY-1: PAPER_ENGINE is always None (retired) — ENGINE injection block removed.
     try:
         from .oms_state_machine import OMSStateMachine
         OMS_STATE_MACHINE = OMSStateMachine()
-        if PAPER_ENGINE is not None:
-            PAPER_ENGINE.set_oms_sm(OMS_STATE_MACHINE)
-            logger.info("OMS SM-03 injected into PaperTradingEngine / OMS 状态机已注入纸上交易引擎")
         # Also inject into GovernanceHub for reconciliation
         from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
         if _GOV_HUB_REF is not None:
@@ -961,10 +959,6 @@ except Exception as _e1_e:
 # design_only / disabled → do not start (operator must explicitly set mode first)
 # observe_only 及以上 → 启动后台行情流；design_only / disabled → 不启动（需 Operator 先切换模式）
 _FEED_AUTO_MODES = {"observe_only", "shadow_only", "demo_reserved", "live_reserved"}
-# RC-12 (2026-04-06): Python MarketDataDispatcher removed — Rust engine is the sole
-# WebSocket connection and tick processor. bybit_public_ws_listener.py and
-# market_data_dispatcher.py deleted along with their tests (~2 500 lines).
-
 # ─────────────────────────────────────────────────────────────────────
 # P1-16: Inject H0Gate into PipelineBridge + RiskManager
 # P1-16：注入 H0 確定性門控到管線橋接器與風控管理器
@@ -987,10 +981,6 @@ except (ImportError, AttributeError) as _h0_inj_err:
         "/ 無法導入 H0_GATE 用於管線橋接器注入：%s",
         _h0_inj_err, _h0_inj_err,
     )
-
-# P1-16 RiskManager H0Gate injection removed in 1C-3-D cleanup: RiskViewClient
-# is a no-op shim, the real H0 enforcement lives in Rust intent_processor.
-# 1C-3-D 清理：RiskViewClient 為 no-op shim，H0 真實執行在 Rust intent_processor。
 
 # ─────────────────────────────────────────────────────────────────────
 # APR01-P0-1: Inject TruthSourceRegistry into StrategistAgent + AnalystAgent

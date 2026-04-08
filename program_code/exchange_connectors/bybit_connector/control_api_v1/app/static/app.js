@@ -2393,8 +2393,8 @@ async function submitPaperOrder() {
   try {
     const body = { symbol, side, order_type: orderType, qty };
     if (price) body.price = price;
-    // RC-10: Manual order submission disabled — Rust engine manages orders
-    console.warn("RC-10: paper/order/submit disabled — Rust engine manages orders");
+    // Manual order submission disabled — Rust engine manages orders via strategies
+    console.warn("paper/order/submit disabled — Rust engine manages orders");
     await refreshPaperTrading();
   } catch (e) {
     console.error("Paper order error:", e);
@@ -2458,7 +2458,7 @@ function renderPaperPnl(d) {
 
 function renderPaperPositions(d) {
   const el = document.getElementById("paperPositionsList");
-  // RC-10: Rust returns positions as array, not dict
+  // Rust returns positions as array, not dict
   const raw = d.positions || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   if (positions.length === 0) { el.textContent = "无持仓 / No positions"; return; }
@@ -2513,9 +2513,8 @@ function renderPaperFills(d) {
 let _marketFeedRefreshInterval = null;
 
 async function handleMarketFeedAction(action) {
-  // RC-12: Market feed managed by Rust engine — no Python dispatcher needed
-  // RC-12：行情流由 Rust 引擎管理 — 不需要 Python 分發器
-  console.info("RC-12: market feed managed by Rust engine");
+  // Market feed managed by Rust engine — no Python dispatcher needed
+  // 行情流由 Rust 引擎管理 — 不需要 Python 分發器
 }
 
 function startMarketFeedRefresh() {

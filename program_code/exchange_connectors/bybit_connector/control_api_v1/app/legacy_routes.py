@@ -140,68 +140,9 @@ def _close_profitable_paper_positions() -> dict[str, Any]:
 
     Returns dict with closed/skipped lists.
     """
-    TAKER_FEE_RATE = 0.00055  # Bybit taker fee / Bybit taker 手续费
-
-    try:
-        from .phase2_strategy_routes import PAPER_ENGINE, PIPELINE_BRIDGE
-    except ImportError:
-        return {"closed": [], "skipped": [], "error": "paper engine not available"}
-
-    if PAPER_ENGINE is None:
-        return {"closed": [], "skipped": [], "error": "paper engine not initialized"}
-
-    try:
-        state = PAPER_ENGINE.get_state()
-    except Exception as exc:
-        return {"closed": [], "skipped": [], "error": str(exc)}
-
-    positions = state.get("positions", {})
-    # R06-B: Rust engine prices → PipelineBridge fallback / Rust 引擎價格 → PipelineBridge 降級
-    latest_prices: dict[str, float] = get_rust_reader().get_latest_prices() or {}
-    if not latest_prices and PIPELINE_BRIDGE is not None:
-        try:
-            latest_prices = dict(PIPELINE_BRIDGE._latest_prices)
-        except Exception:
-            pass
-
-    closed: list[dict] = []
-    skipped: list[dict] = []
-
-    for symbol, pos in positions.items():
-        qty = pos.get("qty", 0)
-        side = pos.get("side", "long")
-        entry_price = pos.get("entry_price", 0)
-        current_price = latest_prices.get(symbol, 0)
-
-        if qty <= 0 or entry_price <= 0 or current_price <= 0:
-            skipped.append({"symbol": symbol, "reason": "missing_price_data"})
-            continue
-
-        notional = current_price * qty
-        fee_cost = notional * TAKER_FEE_RATE * 2  # open + close taker fees
-        raw_pnl = (current_price - entry_price) * qty if side == "long" else (entry_price - current_price) * qty
-        net_pnl = raw_pnl - fee_cost
-
-        if net_pnl <= 0:
-            skipped.append({"symbol": symbol, "reason": f"would_lose_usd_{-net_pnl:.4f}", "net_pnl": round(net_pnl, 4)})
-            continue
-
-        # Close position / 平仓
-        close_side = "Sell" if side == "long" else "Buy"
-        try:
-            PAPER_ENGINE.submit_order(
-                symbol=symbol,
-                side=close_side,
-                order_type="market",
-                qty=qty,
-                market_prices=latest_prices,
-            )
-            closed.append({"symbol": symbol, "side": side, "qty": qty,
-                           "net_pnl": round(net_pnl, 4), "close_price": current_price})
-        except Exception as exc:
-            skipped.append({"symbol": symbol, "reason": f"submit_error: {exc}"})
-
-    return {"closed": closed, "skipped": skipped, "error": None}
+    # DEAD-PY-1: Python PaperTradingEngine retired (ARCH-RC1 1C-3-F). Rust engine owns paper state.
+    # Python PaperTradingEngine 已退場（1C-3-F），Rust 引擎持有紙盤狀態。
+    return {"closed": [], "skipped": [], "error": "paper engine not initialized (retired, use Rust engine)"}
 
 
 def _run_restart_in_background(delay_seconds: int) -> None:
@@ -564,67 +505,11 @@ def register_legacy_routes(app) -> None:
         Close paper positions where net PnL (after fees) > 0.
         关闭净盈利（扣除手续费后）的纸盘仓位。
 
-        Returns dict with closed/skipped lists.
+        DEAD-PY-1: Python PaperTradingEngine retired (ARCH-RC1 1C-3-F). Rust engine owns paper state.
+        Python PaperTradingEngine 已退場，Rust 引擎持有紙盤狀態。
         """
-        TAKER_FEE_RATE = 0.00055  # Bybit taker fee / Bybit taker 手续费
-
-        try:
-            from .phase2_strategy_routes import PAPER_ENGINE, PIPELINE_BRIDGE
-        except ImportError:
-            return {"closed": [], "skipped": [], "error": "paper engine not available"}
-
-        if PAPER_ENGINE is None:
-            return {"closed": [], "skipped": [], "error": "paper engine not initialized"}
-
-        try:
-            state = PAPER_ENGINE.get_state()
-        except Exception as exc:
-            return {"closed": [], "skipped": [], "error": str(exc)}
-
-        positions = state.get("positions", {})
-        latest_prices: dict[str, float] = {}
-        if PIPELINE_BRIDGE is not None:
-            try:
-                latest_prices = dict(PIPELINE_BRIDGE._latest_prices)
-            except Exception:
-                pass
-
-        closed: list[dict] = []
-        skipped: list[dict] = []
-
-        for symbol, pos in positions.items():
-            qty = pos.get("qty", 0)
-            side = pos.get("side", "long")
-            entry_price = pos.get("entry_price", 0)
-            current_price = latest_prices.get(symbol, 0)
-
-            if qty <= 0 or entry_price <= 0 or current_price <= 0:
-                skipped.append({"symbol": symbol, "reason": "missing_price_data"})
-                continue
-
-            notional = current_price * qty
-            fee_cost = notional * TAKER_FEE_RATE * 2  # open + close taker fees
-            raw_pnl = (current_price - entry_price) * qty if side == "long" else (entry_price - current_price) * qty
-            net_pnl = raw_pnl - fee_cost
-
-            if net_pnl <= 0:
-                skipped.append({"symbol": symbol, "reason": f"would_lose_usd_{-net_pnl:.4f}", "net_pnl": round(net_pnl, 4)})
-                continue
-
-            # Close position / 平仓
-            close_side = "Sell" if side == "long" else "Buy"
-            try:
-                PAPER_ENGINE.submit_order(
-                    symbol=symbol,
-                    side=close_side,
-                    order_type="market",
-                    qty=qty,
-                    market_prices=latest_prices,
-                )
-                closed.append({"symbol": symbol, "side": side, "qty": qty,
-                               "net_pnl": round(net_pnl, 4), "close_price": current_price})
-            except Exception as exc:
-                skipped.append({"symbol": symbol, "reason": f"submit_error: {exc}"})
+        # DEAD-PY-1: always returns error since Python paper engine is retired.
+        return {"closed": [], "skipped": [], "error": "paper engine not initialized (retired, use Rust engine)"}
 
         return {"closed": closed, "skipped": skipped, "error": None}
 

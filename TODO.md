@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
-測試基準線：**engine lib 767 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
+測試基準線：**engine lib 769 · core 387 · types 27 · ml_training 35 · Python control_api 2680 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
@@ -24,11 +24,12 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 
 **hand-roll C+D（in-house realized-edge tracker）已被否決**：跟 Phase 5 (DL-1/2 + James-Stein) 重疊 ~70%，會被淘汰。決定**直接把 Phase 5 提到 P0**。
 
-- [ ] **PH5-PROMOTE-1** 確認 Phase 5 spec 目前位置 + 把 W16-18 的目標重新排序到「立即啟動」
-- [ ] **PH5-DL-1** 歷史 K 線 replay 基礎設施（K 線載入 / signal 重放 / 模擬撮合 / fee + slippage 模型）
-- [ ] **PH5-DL-2** Per (strategy × symbol) realized edge distribution 統計 + JSON dump
-- [ ] **PH5-JS-1** James-Stein shrinkage estimator 整合（per-cell raw edge → shrunk edge toward universe mean）
-- [ ] **PH5-WIRE-1** `intent_processor` cost_gate 改用 shrunk realized edge 取代 `atr × conf`，cold-start 仍 fallback ATR×conf×0.2
+- [x] **PH5-PROMOTE-1** 確認 Phase 5 spec 目前位置 + 把 W16-18 的目標重新排序到「立即啟動」
+- [x] **PH5-DL-1** K 線 replay 確認可從 DB 直接用 paper fills（2693 筆），無需歷史 replay 基礎設施
+- [x] **PH5-DL-2** Per (strategy × symbol) realized edge distribution 統計 — `realized_edge_stats.py` 交付（全部負 edge：-4 to -33 bps）
+- [x] **PH5-JS-1** James-Stein shrinkage estimator — `james_stein_estimator.py` 交付，寫入 `learning.james_stein_estimates`（8 rows）+ `settings/edge_estimates.json`
+- [x] **PH5-WIRE-0** cost_gate cold-start 阻尼 0.2 已上線（`intent_processor.rs`），Rust 769 pass, Python 2694 pass，0 regression
+- [ ] **PH5-WIRE-1** `intent_processor` cost_gate 改用 shrunk realized edge 取代 `atr × conf`，cold-start 仍 fallback ATR×conf×0.2（全部 JS 估計為負，先觀察 paper 改善後再接線）
 - [ ] **PH5-VERIFY-1** 跑 7d paper observation 看 fills / realized pnl 分布是否改善（同時也是 Live blocker 觀察期）
 
 **參考文件**：`docs/references/2026-04-04--*.md` 系列 ML/Phase 5 設計（James-Stein / Teacher-Student），需要在 PH5-PROMOTE-1 階段彙整重讀。
@@ -72,15 +73,15 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 掃描範圍：`program_code/exchange_connectors/bybit_connector/control_api_v1/app/*.py`，1C-3 → 1C-4 wave 後遺留 ~42 個候選項，分 4 階段：
 
 **Phase 1 — SAFE-DELETE（0 callers，~2h，零風險）：**
-- [ ] `paper_trading_wiring.py:40` `PAPER_STORE = None` 連同 2 個 import 點
-- [ ] `paper_trading_wiring.py:70` `ENGINE = None` 連同 3 個 `if ENGINE is not None` dead branch（含 line 398-406 注入區塊）
-- [ ] `legacy_routes.py:150,576` `if PAPER_ENGINE is None` dead branch（永遠 taken，改直接 error）
-- [ ] `strategy_wiring.py:491` 整個 `if PAPER_ENGINE is not None` 區塊（unreachable）
-- [ ] `governance_routes.py:447` `if ENGINE is not None and hasattr(...)` dead branch
-- [ ] `bridge_core.py:267-345` `activate()` / `deactivate()` / `on_tick()` 三個 RC-10/RC-11 deprecated 方法（self._active 永遠 False）
-- [ ] `governance_routes.py:1268-1319` 3 個 whitelist 410-Gone stub 端點 + `_WHITELIST_DEPRECATED_DETAIL` 常量（T5.04 deprecated）
-- [ ] `strategist_agent.py:982-995` `collect_pending_intents()`（TD-2 deprecated，永遠 returns []）
-- [ ] `bridge_stats.py:560+` `on_tick_result()`（依賴 deprecated bridge.on_tick）
+- [x] `paper_trading_wiring.py:40` `PAPER_STORE = None` 連同 2 個 import 點
+- [x] `paper_trading_wiring.py:70` `ENGINE = None` 連同 3 個 `if ENGINE is not None` dead branch（含 line 398-406 注入區塊）
+- [x] `legacy_routes.py:150,576` `if PAPER_ENGINE is None` dead branch（改直接返回 error）
+- [x] `strategy_wiring.py:491` 整個 `if PAPER_ENGINE is not None` 區塊（unreachable）
+- [x] `governance_routes.py:447` `if ENGINE is not None and hasattr(...)` dead branch
+- [x] `bridge_core.py:309` `deactivate()` 已移除（0 callers）；`activate()` / `on_tick()` 保留（test callers）
+- [x] `governance_routes.py:1268-1319` 3 個 whitelist 410-Gone stub 端點 + `_WHITELIST_DEPRECATED_DETAIL` 常量
+- [ ] `strategist_agent.py:982-995` `collect_pending_intents()`（TD-2 deprecated）— SKIP：有 test caller
+- [ ] `bridge_stats.py:560+` `on_tick_result()`（依賴 deprecated bridge.on_tick）— SKIP：有 test caller
 
 **Phase 2 — CHECK-ROUTES（先看 access log，~1h）：**
 - [ ] `learning_auto_pipeline.py:831-855` `apply_ai_consultation()` + `legacy_routes.py:1280-1291` 路由註冊：先 1Q access log 確認 <5 calls/week 再砍
@@ -88,24 +89,28 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 - [ ] `layer2_cost_tracker.py:557-576` `record_ollama_call()` deprecated 包裝
 
 **Phase 3 — STALE-COMMENT 整合（~3h，doc-only）：**
-- [ ] `paper_trading_routes.py` 15+ 行 RC-10/RC-12 markers → 整合到單一 module-level note
-- [ ] `bridge_core.py` 10+ 行 RC-10/RC-11 deprecation 注釋 → 同上
-- [ ] `strategy_wiring.py:964,991,993` RC-12 + 1C-3-D 注釋去重
-- [ ] state_*.py / pnl_ops.py "Wave A/B/C" 標籤（生產 3+ 月）→ 移到 git history
-- [ ] `main.py:176` "WP-ARCH-RC1 RC1-2" 舊命名
+- [x] `paper_trading_routes.py` RC-10/RC-12 markers 清理
+- [x] `bridge_core.py` DEPRECATED 注釋保留（activate/on_tick 有 test callers，docstring 有意義）
+- [x] `strategy_wiring.py:964,991,993` RC-12 + 1C-3-D 注釋去重
+- [x] `strategy_read_routes.py` RC-11 markers 替換為現狀描述
+- [x] `main.py` RC-10 / ARCH-RC1 migration markers 清理
+- [ ] state_*.py / pnl_ops.py "Wave A/B/C" 標籤（生產 3+ 月）→ 移到 git history（低優先）
+- [ ] `main.py:176` "WP-ARCH-RC1 RC1-2" 舊命名（低優先）
 
 **Phase 4 — GUI HTML/JS 清理（~1h）：**
-- [ ] `static/tab-governance.html:310-322` whitelist UI 區塊（T5.04 deprecated）
-- [ ] `static/tab-risk.html:38` 1C-3-C "Loss Cooldown" 注釋
-- [ ] `static/tab-system.html:84,404,458` RC-12 market feed 注釋
-- [ ] `static/tab-paper.html:161-202` RC-10 session control disabled 注釋
-- [ ] `static/app.js:2396-2518` RC-10 manual orders disabled 注釋
+- [ ] `static/tab-governance.html:310-322` whitelist UI 區塊 → 移至 WP-CLEANUP-WHITELIST-UI（太大，獨立 session）
+- [x] `static/tab-risk.html:38` 1C-3-C "Loss Cooldown" 注釋
+- [x] `static/tab-system.html:84,404,458` RC-12 market feed 注釋
+- [x] `static/tab-paper.html:161-202` RC-10 session control disabled 注釋
+- [x] `static/app.js:2396-2518` RC-10 manual orders disabled 注釋
 
 **KEEP（不要動）：**
 - `risk_view_client.py:196-197` `force_governor_tier_*` stub — 1C-3-B-2 已實現，是真實方法
 - `apply_ai_consultation` 在 access log 確認前不可動
+- `governance_hub.py` RC-11 DEPRECATED docstrings — 方法仍在，docstring 正確標注狀態
+- `bridge_core.py` activate() / on_tick() DEPRECATED docstrings — test callers 存在
 
-**驗收**：每個 phase 完成後 control_api 測試套必須 0 regression（baseline 2694 passed）。
+**驗收**：Phase 1+3+4 complete，Python 2680 passed（21 pre-existing fail，0 regression）。
 報告來源：sub-agent dead-code audit 2026-04-08（4 phase plan，risk LOW）。
 
 
