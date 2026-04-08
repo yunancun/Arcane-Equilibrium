@@ -282,10 +282,14 @@ fn load_unified_configs() -> Result<
         "ARCH-RC1 unified configs loaded / 統一配置已載入"
     );
 
+    // CFG-PERSIST-1: wire each store to atomic TOML write-back so operator
+    // patches survive engine restart. Without this, in-memory ConfigStore
+    // patches are lost on every reload (violates CLAUDE.md §三 "禁止 restart-to-apply").
+    // CFG-PERSIST-1：為每個 store 接上原子 TOML 回寫，operator 補丁可跨重啟。
     Ok((
-        Arc::new(ConfigStore::new(risk)),
-        Arc::new(ConfigStore::new(learning)),
-        Arc::new(ConfigStore::new(budget)),
+        Arc::new(ConfigStore::new(risk).with_toml_persist(risk_path)),
+        Arc::new(ConfigStore::new(learning).with_toml_persist(learning_path)),
+        Arc::new(ConfigStore::new(budget).with_toml_persist(budget_path)),
     ))
 }
 
