@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
-測試基準線：**engine lib 769 · core 387 · types 27 · ml_training 35 · Python control_api 2680 passed (21 pre-existing fail · 0 regression)**
+測試基準線：**engine lib 769 · core 387 · types 27 · ml_training 35 · Python control_api 2678 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
@@ -84,9 +84,9 @@ EV/fee = atr_pct × conf / (2 × fee_rate)
 - [ ] `bridge_stats.py:560+` `on_tick_result()`（依賴 deprecated bridge.on_tick）— SKIP：有 test caller
 
 **Phase 2 — CHECK-ROUTES（先看 access log，~1h）：**
-- [ ] `learning_auto_pipeline.py:831-855` `apply_ai_consultation()` + `legacy_routes.py:1280-1291` 路由註冊：先 1Q access log 確認 <5 calls/week 再砍
-- [ ] `governance_hub.py:290-727` 5 個 RC-11 deprecated 方法（`check_learning_tier_capability` / `is_enabled` / `get_risk_level` / `check_risk_and_act` / `trigger_risk_upgrade`）— 確認無 GUI/Strategist 殘留呼叫
-- [ ] `layer2_cost_tracker.py:557-576` `record_ollama_call()` deprecated 包裝
+- [x] `learning_auto_pipeline.py` `apply_ai_consultation()` + route 已刪除（0 API hits 確認，2 tests 同刪）
+- [ ] `governance_hub.py` 5 個 RC-11 deprecated 方法 — SKIP：`trigger_risk_upgrade` guardian_agent.py 生產呼叫；`check_learning_tier_capability` 內部呼叫 line 948；其餘 3 個有 test callers，churn 不值得
+- [ ] `layer2_cost_tracker.py:557-576` `record_ollama_call()` deprecated 包裝 — SKIP：test callers 存在，churn 不值得
 
 **Phase 3 — STALE-COMMENT 整合（~3h，doc-only）：**
 - [x] `paper_trading_routes.py` RC-10/RC-12 markers 清理
