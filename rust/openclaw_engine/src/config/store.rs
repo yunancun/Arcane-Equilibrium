@@ -14,8 +14,11 @@
 //!   Store 本身不負責落盤，那是 1C 載入器的工作。
 
 use arc_swap::ArcSwap;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tracing::warn;
 
 /// Source label for an audit-traceable config patch.
 /// 配置補丁的審計來源標籤。
@@ -74,6 +77,14 @@ pub struct ConfigStore<T: Clone + Send + Sync + 'static> {
     /// Reads remain lock-free via ArcSwap.
     /// 序列化寫入（不影響讀取），避免並行補丁交錯。讀取仍透過 ArcSwap 無鎖。
     write_lock: Mutex<()>,
+    /// ARCH-RC1 1C-4-fix (CFG-PERSIST-1): optional disk write-back path.
+    /// When set together with `persist_writer`, every successful patch /
+    /// replace triggers an atomic TOML write so operator changes survive
+    /// engine restart. Wired via `with_toml_persist()`.
+    /// 可選的磁碟回寫路徑。設定後，每次成功補丁/替換會原子寫回 TOML，
+    /// 讓 operator 設定能跨重啟保留。透過 `with_toml_persist()` 啟用。
+    persist_path: Option<PathBuf>,
+    persist_writer: Option<Box<dyn Fn(&T, &Path) -> Result<(), String> + Send + Sync>>,
 }
 
 impl<T: Clone + Send + Sync + 'static> ConfigStore<T> {
@@ -84,6 +95,27 @@ impl<T: Clone + Send + Sync + 'static> ConfigStore<T> {
             inner: ArcSwap::from_pointee(initial),
             version: AtomicU64::new(0),
             write_lock: Mutex::new(()),
+            persist_path: None,
+            persist_writer: None,
+        }
+    }
+
+    /// Internal: invoked under the write lock after a successful swap.
+    /// If a persist writer is wired, write the snapshot to disk atomically.
+    /// Failures are logged but never propagated — the in-memory swap already
+    /// succeeded and tick consumers must not be blocked by disk issues.
+    /// 內部：成功 swap 後在寫鎖內呼叫。若有 persist writer，原子寫回磁碟。
+    /// 失敗只記 log 不向外傳遞 —— 內存 swap 已成功，不能因磁碟問題阻塞 tick。
+    fn maybe_persist(&self) {
+        if let (Some(path), Some(writer)) = (&self.persist_path, &self.persist_writer) {
+            let snap = self.inner.load_full();
+            if let Err(e) = writer(&*snap, path) {
+                warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "ConfigStore TOML persist failed (in-memory swap still applied) / 配置磁碟回寫失敗（內存仍生效）"
+                );
+            }
         }
     }
 
@@ -136,6 +168,13 @@ impl<T: Clone + Send + Sync + 'static> ConfigStore<T> {
         self.inner.store(Arc::new(next));
         let new_version = self.version.fetch_add(1, Ordering::AcqRel) + 1;
 
+        // CFG-PERSIST-1: write-back to disk after every successful patch
+        // (skipped for Startup/Migration sources to avoid load→write churn).
+        // CFG-PERSIST-1：每次成功補丁後回寫磁碟（Startup/Migration 跳過避免來回寫）。
+        if !matches!(source, PatchSource::Startup | PatchSource::Migration) {
+            self.maybe_persist();
+        }
+
         Ok(PatchOutcome {
             version: new_version,
             source,
@@ -151,11 +190,58 @@ impl<T: Clone + Send + Sync + 'static> ConfigStore<T> {
             .map_err(|_| "ConfigStore write lock poisoned".to_string())?;
         self.inner.store(Arc::new(value));
         let new_version = self.version.fetch_add(1, Ordering::AcqRel) + 1;
+
+        // CFG-PERSIST-1: same write-back as apply_patch.
+        // CFG-PERSIST-1：與 apply_patch 一致的回寫。
+        if !matches!(source, PatchSource::Startup | PatchSource::Migration) {
+            self.maybe_persist();
+        }
+
         Ok(PatchOutcome {
             version: new_version,
             source,
         })
     }
+}
+
+// ---------------------------------------------------------------------------
+// CFG-PERSIST-1: typed extension wiring TOML write-back.
+// CFG-PERSIST-1：附帶 TOML 寫回的型別擴展。
+// ---------------------------------------------------------------------------
+
+impl<T> ConfigStore<T>
+where
+    T: Clone + Send + Sync + Serialize + 'static,
+{
+    /// Enable atomic TOML write-back to `path` on every successful Operator/Agent
+    /// patch. The write is fail-soft: serialise → write tmp → rename. Errors are
+    /// logged but never block the in-memory swap. Existing file (if any) is
+    /// overwritten on first successful patch.
+    /// 為每次 Operator/Agent 成功補丁啟用原子 TOML 回寫。寫入流程：序列化 → 寫
+    /// 臨時檔 → rename。失敗只記 log，不阻塞內存 swap。
+    pub fn with_toml_persist(mut self, path: PathBuf) -> Self {
+        self.persist_path = Some(path);
+        self.persist_writer = Some(Box::new(write_toml_atomic::<T>));
+        self
+    }
+}
+
+/// Free helper: serialise `cfg` to TOML and atomic-rename into `path`.
+/// 自由函式：把 `cfg` 序列化為 TOML 並原子 rename 到 `path`。
+fn write_toml_atomic<T: Serialize>(cfg: &T, path: &Path) -> Result<(), String> {
+    let toml_str =
+        toml::to_string(cfg).map_err(|e| format!("toml serialize failed: {e}"))?;
+    let tmp = path.with_extension("toml.tmp");
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir parent failed: {e}"))?;
+        }
+    }
+    std::fs::write(&tmp, toml_str.as_bytes())
+        .map_err(|e| format!("write tmp failed: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename failed: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -299,6 +385,100 @@ mod tests {
         }
         assert_eq!(store.load().threshold, 10);
         assert_eq!(store.version(), 10);
+    }
+
+    // ─── CFG-PERSIST-1 / 磁碟回寫 ────────────────────────────────────────
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct PersistableToy {
+        threshold: i32,
+        name: String,
+    }
+
+    fn no_validation_p(_c: &PersistableToy) -> Result<(), String> {
+        Ok(())
+    }
+
+    #[test]
+    fn test_with_toml_persist_writes_on_operator_patch() {
+        let dir = std::env::temp_dir().join(format!(
+            "oc_cfgstore_persist_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("toy.toml");
+        let _ = std::fs::remove_file(&path);
+
+        let store = ConfigStore::new(PersistableToy {
+            threshold: 1,
+            name: "init".into(),
+        })
+        .with_toml_persist(path.clone());
+
+        // Operator patch → file should be written.
+        store
+            .apply_patch(
+                PatchSource::Operator,
+                |c| {
+                    c.threshold = 42;
+                    c.name = "patched".into();
+                },
+                no_validation_p,
+            )
+            .unwrap();
+
+        let body = std::fs::read_to_string(&path).expect("toml file written");
+        assert!(body.contains("threshold = 42"));
+        assert!(body.contains("name = \"patched\""));
+
+        // Simulate restart: parse the file back into a fresh value.
+        let restored: PersistableToy = toml::from_str(&body).expect("re-parse");
+        assert_eq!(restored.threshold, 42);
+        assert_eq!(restored.name, "patched");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_with_toml_persist_skips_startup_and_migration() {
+        let dir = std::env::temp_dir().join(format!(
+            "oc_cfgstore_persist_skip_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("toy_skip.toml");
+        let _ = std::fs::remove_file(&path);
+
+        let store = ConfigStore::new(PersistableToy {
+            threshold: 1,
+            name: "x".into(),
+        })
+        .with_toml_persist(path.clone());
+
+        // Migration replace must NOT touch disk (avoids load→write churn).
+        store
+            .replace(
+                PersistableToy {
+                    threshold: 7,
+                    name: "y".into(),
+                },
+                PatchSource::Migration,
+            )
+            .unwrap();
+        assert!(!path.exists(), "migration must not write back");
+
+        // Operator replace DOES write.
+        store
+            .replace(
+                PersistableToy {
+                    threshold: 9,
+                    name: "z".into(),
+                },
+                PatchSource::Operator,
+            )
+            .unwrap();
+        assert!(path.exists(), "operator must write back");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

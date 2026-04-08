@@ -46,52 +46,17 @@
 
 ## 三、當前系統狀態摘要
 
-> 完整 ARCH-RC1 1A → 1C-4 SHIPPED 敘事（commits / 行數 / 設計決策）已歸檔到：
-> - `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`（1C-3 / 1C-4 + 移除的 README 過期 block）
-> - `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`（1A → 1C-3-E 完整逐 commit 歷史）
-> - `docs/CLAUDE_CHANGELOG.md`（逐 commit 行數變化）
+**ARCH-RC1 1C-4 WRAP COMPLETE** ✅ — Rust ConfigStore 為所有交易/風控/學習/預算參數權威，4 IPC 寫入面 → tick-level hot-reload → 5 engines；Rust `openclaw_engine` 為 paper/demo/live 唯一引擎；Python 風控/紙盤雙退場；Guardian = RiskConfig 純派生視圖。**禁止 restart-to-apply**。
 
-### ARCH-RC1 1C-4 WRAP COMPLETE ✅（2026-04-08 深夜）
+**Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期（calendar-time）+ 多通道告警上線。
 
-**契約終局**：所有交易/風控/學習/預算參數由 Rust ConfigStore 權威持有 = **4 個 IPC 寫入面**（3 patch_*_config + StrategyParams）→ tick-level hot-reload → 5 engines 共飲一桶水（intent_processor.risk_config / .guardian / paper_state.stop_config / h0_gate.config / governance.risk.thresholds）→ V014 fail-soft audit。**禁止 restart-to-apply**。
+**留尾**（非阻塞）：A2 News scheduler · W1 event_consumer 拆分 · DEAD-PY-1 Python app/ 死代碼清理。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
-**單一引擎契約**：1C-3-F 後 Rust `openclaw_engine` 為 paper/demo/live **三模式唯一引擎**。Python `risk_manager.py` 1633 → 53 行 shim（-97%），`paper_trading_engine.py` 2248 行徹底退場。Guardian = `RiskConfig` 純派生視圖（E-Merge-4 後無 RMW，唯一真相源 = `patch_risk_config`）。
-
-**1C-4 wrap commit chain**：A1 `03fee49` · B1 `e840003` (cooldown PG) · B2 `36335d7`→`ab1e0d8`(降級)→`9811bf3` (audit-only) · 熱重載 e2e `4780b04` · E-Merge-4 `06742b3` · 1C-3-D 留尾清理 `8554779` · doc sync `f882473`。
-
-**B2 降級決策**：Position Reconciler 原含自動 governor 收縮，QA+E2 審查發現與 operator override 白名單 + B1 cooldown 語義衝突 → 降級為純 audit。**自動收縮重新設計後挪至 Phase 6 6-RC-1~9**（TODO.md 規格已寫死）。
-
-**留尾項**（非阻塞）：A2 NewsPipeline 60s scheduler / W1 event_consumer/mod.rs 826 行拆分 / DEAD-PY-1 Python app/ 死代碼 4-phase 清理（規格寫死於 TODO.md）。
-
-**測試基準線**：engine lib **767** · core **387** · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
-
-### 歷史完成里程碑（完整細節見歸檔）
-
-**ARCH-RC1 Session 1A → 1C-3-E F-mini**（2026-04-07~08）：詳見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
-- 1A 死代碼大屠殺 `7f59e9b` -270 行 · 1B Config 骨架 `0523f17` +2632/+58 tests · 1C-1 Rust call site 遷移 `2007b67` `6768381` `ef30bf1` -546 行 · 1C-2-A/B/F 熱重載 LIVE `581e1e2`..`91b5db8` 5 engines · 1C-2-C/D/E IPC+legacy migration+V014 audit `5f87bca` `de75191` `950f547` `b0fa2c6` · 1C-3-A/B/C/B-2/D/E F-mini Python 收編 `8447fbf` `c6fcd13` `9f46b06` `f8772c0` `a1cf772` `144f46f` `d8fb7f2` `cf3ff48`
-
-**早期 Phase**：
-- **Phase 0/0a/0b**: PG 8-schema + TimescaleDB + Grafana ✅
-- **Phase 1**: FeatureCollector 34-dim + market_writer + drift detector ✅
-- **Phase 2 (a/b/DE/FG)**: trading/context writers + ML model_manager + Scorer + Kelly Sizer + Parquet ETL ✅
-- **Phase 3a**: 4 strategy StrategyParams + IPC update_params ✅
-- **Phase 3b**: Optuna TPE + CPCV + Thompson Sampling + Black Swan detector ✅
-- **Phase 4 + 4.1**: AI Budget + LinUCB + News + DL-3 + Claude API consumer loop ✅
-- **Rust migration (R-CUT/R-IPC)**: Rust 唯一 tick/WS/account 引擎 · Python paper engine 全停 · PyO3 39 方法 ✅
-- **EXT-1 Exchange-as-Truth** + **RRC-1 風控接線**（H0Gate/Cost Gate/PriceHistoryTracker 全進 Rust）✅
-- **L3 12 路審計** 414 findings → R0/R1/R2/R3 全清完 ✅
-- **Sessions 9-13**: PNL-1~7 + DB-RUN-1~7 + magic-number cleanup + Session 13 R3 收尾 ✅
-
-詳細逐 Sprint/Wave 條目歸檔於 `docs/archive/2026-04-07--claude_md_section3_history_phase0_4.md`，逐 commit 條目見 `docs/CLAUDE_CHANGELOG.md`。
-
-### Runtime 硬狀態（不可改）
-```
-system_mode             = demo_only
-execution_state         = disabled
-execution_authority     = not_granted
-live_execution_allowed  = false
-```
-**Live 前唯一 blocker**：7d paper trading 數據觀察期（calendar-time）。
+**歷史細節**（不要重複載入）：
+- 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
+- Phase 0-4 Sprint/Wave → `docs/archive/2026-04-07--claude_md_section3_history_phase0_4.md`
+- 逐 commit 行數 → `docs/CLAUDE_CHANGELOG.md`
+- 1C-3/1C-4 narrative → `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
 
 ---
 
@@ -193,83 +158,24 @@ grep -c "ENGINE_CRASH" /tmp/openclaw/watchdog.log 2>/dev/null || echo "0 crashes
 ### 雙語注釋（強制）
 每個新建/修改的函數、類、模塊必須中英對照注釋（MODULE_NOTE / docstring / inline / fail-closed 路徑 / 安全代碼）。E2 必查。
 
-### Sprint/Wave 完成後強制同步
-1. 更新 `CLAUDE.md` §三摘要 + §十一一句話狀態
-2. 新 Wave 詳細記錄追加到 `docs/CLAUDE_CHANGELOG.md`
-3. 更新 GitHub `README.md`
-4. 生產代碼 + TODO.md + CLAUDE.md + README.md 放同一個 commit
-
-### Commit 時自動追加 CHANGELOG（強制）
-每次 commit 已完成的工作時，同步將完成摘要追加到 `docs/CLAUDE_CHANGELOG.md` 頂部（最新在前）。
-格式：`### 標題（YYYY-MM-DD · commit XXXXXXX）` + 要點列表。與生產代碼同一個 commit。
-
-### Context 接近上限時自動存檔（強制）
-當檢測到會話即將觸發 compact（接近 90% context 使用量）時，**立即**將本次會話的工作進展寫入工作日誌：
-- 存至 `docs/worklogs/YYYY-MM-DD--session_progress_N.md`（N 為當日序號）
-- 內容：已完成項 + 進行中項 + 未完成項 + 關鍵決策 + 下一步指引
-- 目的：確保後續 session（無論是 compact 後的延續還是新 session）能無縫接手
-
-### 每日工作日誌整合（強制）
-每日最後一次 commit 前，或次日第一次接手時，將當天散落的工作日誌合併為一份整合日誌：
-- 合併對象：`docs/worklogs/YYYY-MM-DD--session_progress_*.md`（同一天的所有碎片）
-- 輸出：`docs/worklogs/YYYY-MM-DD--daily_summary.md`（結構化：完成項 / 關鍵決策 / 測試變化 / 遺留問題）
-- 合併後刪除碎片文件，保持目錄整潔
-- 如當天只有一份日誌，直接重命名為 daily_summary 即可
-
-### 新腳本規範
-MODULE_NOTE 雙語 / 輸出 latest + dated / contract check / 更新 SCRIPT_INDEX.md
-
-### docs/ 規範
-放對應分類目錄 / 命名 `YYYY-MM-DD--描述.md` / 每次更新 `docs/README.md` 索引
+### 強制同步規則
+- **Sprint/Wave 完成**：更新 §三 + §十一 + `docs/CLAUDE_CHANGELOG.md` + README，與生產代碼同 commit
+- **Commit 時**：摘要追加到 `docs/CLAUDE_CHANGELOG.md` 頂部，格式 `### 標題（YYYY-MM-DD · commit XXXXXXX）`
+- **Context ≥90%**：立即寫 `docs/worklogs/YYYY-MM-DD--session_progress_N.md`（已完成/進行中/未完成/決策/下一步）
+- **每日整合**：當天 worklog 碎片合併為 `YYYY-MM-DD--daily_summary.md`，刪碎片
+- **新腳本**：MODULE_NOTE 雙語 + latest+dated 輸出 + contract check + 更新 SCRIPT_INDEX.md
+- **docs/**：分類目錄 + `YYYY-MM-DD--描述.md` + 更新 `docs/README.md` 索引
 
 ---
 
 ## 八、16 Agent 角色體系與強制工作鏈
 
-> **強制規則：所有任務必須按角色分工派發，禁止 Claude 主會話身兼多職。**
+**強制**：所有任務按角色派發，主會話 = PM+Conductor。完整角色定義/激活矩陣見 `docs/CLAUDE_REFERENCE.md`。
 
-### 8.1 角色定義
+**標準鏈**：PM+FA → PA 派發 → E1/E1a 並行 → **E2 代碼審查 → E4 測試回歸**（兩者絕不可跳）→ E5 優化（每 Phase/Wave/≥3 E1 任務強制）→ QA → PM 確認。E3/CC/A3/R4/TW 按需。
+**P0 快速通道**：PA → E1 並行（≤5）→ E2 → E4 → PM。
 
-| 層次 | 角色 |
-|------|------|
-| 管理層 | **PM** 項目經理 · **FA** 功能審計師 · **PA** 項目架構師 |
-| 質量保證層 | **CC** 合規檢查 · **E2** 代碼審查 · **E3** 安全審計 · **E4** 測試工程師 · **E5** 優化工程師 |
-| 執行層 | **E1** 後端開發 · **E1a** 前端開發 |
-| 專項審查層 | **A3** UX 審計 · **R4** 文檔審計 · **TW** 技術寫作 |
-| 分析層 | **AI-E** AI 效果評估 · **QA** 最終驗收 |
-| 顧問層 | **QC** 量化顧問（策略數學基礎、風控模型、回測方法論，不寫代碼） |
-
-### 8.2 標準工作鏈
-
-```
-規劃：PM（優先級）+ FA（規格）並行 → PA（技術方案 + 派發）
-執行：E1/E1a 最大並行
-審查：E2 代碼審查（強制）→ E4 測試回歸（強制）→ E5 優化審查（大板塊強制）
-      E3/CC/A3/R4/TW 按需並行
-★ E5 規則：每完成一個 Phase / Wave / 大板塊（≥3 個 E1 任務），必須跑 E5 優化審查。
-  E5 範圍：新增/修改的文件，檢查代碼精簡/性能/可讀性/重複消除。
-  E5 發現的問題在同一 commit 中修復，不單獨開 Phase。
-驗收：QA 端到端 → PM 最終確認
-```
-
-**E2 + E4 絕對不可跳過，任何情況均強制執行。**
-
-### ★ Bybit API 相關開發強制規則
-
-**所有涉及 Bybit API 的修改或新功能開發（含 REST、WebSocket、IPC），必須先查閱 Bybit API 字典手冊確認已有功能支持：**
-- **字典手冊**：`docs/references/2026-04-04--bybit_api_reference.md`
-- **審計報告**：`docs/audits/2026-04-04--bybit_api_infra_audit.md`
-- **開發前**：確認目標功能在手冊中是否已有對應端點。已有的直接調用，不重複實現。
-- **新增端點**：實現後必須同步更新字典手冊對應 Section，保持文檔與代碼一致。
-- **E2 必查**：Bybit 相關 PR 的 E2 審查必須驗證字典手冊已同步更新。
-
-### 8.3 P0 緊急快速通道
-
-```
-PA 派發 → E1 並行修復（最多 5 個）→ E2 review → E4 回歸 → PM 確認
-```
-
-> 角色激活矩陣、Workspace 規則等詳見：`docs/CLAUDE_REFERENCE.md`
+**Bybit API 強制**：所有 Bybit 相關開發（REST/WS/IPC）先查字典手冊 `docs/references/2026-04-04--bybit_api_reference.md`，新增端點同步更新手冊，E2 必查。審計：`docs/audits/2026-04-04--bybit_api_infra_audit.md`。
 
 ---
 
@@ -306,43 +212,19 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**★★★ 當前焦點（2026-04-08 後）：**
-1. **7d paper trading 數據觀察期**（calendar-time，唯一 Live blocker）
-2. **DEAD-PY-1 Python app/ 死代碼 4-phase 清理**（~7h，非阻塞，規格寫於 TODO.md）
-3. **A2 NewsPipeline 60s scheduler spawn**（待 4-09 router 決策）
-4. **Phase 5 啟動準備**（James-Stein + DL-1 + DL-2，W16-18）
-5. **多通道告警上線**（OC-3，B2 audit-only 後的 operator 通知通道，是 Phase 6 自動收縮 6-RC-6 阻塞依賴）
+**當前焦點**：(1) 7d paper trading 觀察期 (Live blocker) · (2) DEAD-PY-1 死代碼清理 · (3) A2 News scheduler · (4) Phase 5 (James-Stein + DL-1/2) · (5) 多通道告警 (OC-3，Phase 6 6-RC-6 依賴)。
 
-**融合路線圖（已大半完成）：**
-- Phase 0/0a/0b ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3a/3b ✅ · Phase 4 + 4.1 ✅
-- ARCH-RC1 1A → 1C-4 ✅（1C-2 Config 熱重載 / 1C-3 Python 風控+紙盤雙退場 / 1C-4 wrap）
-- **Phase 5（W16-18）⬜** James-Stein per-parameter shrinkage + DL-1 Symbol Embedding + DL-2 Regime LSTM Shadow
-- **Phase 6（W19-20）⬜** 漸進放權 + 自動收縮 6-RC-1~9 + 驗收 + 壓測
+**路線圖**：Phase 0-4 + ARCH-RC1 1A→1C-4 ✅ · **Phase 5 (W16-18) ⬜** · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
 
-**關鍵文件：**
-- **★ Bybit API 字典手冊：`docs/references/2026-04-04--bybit_api_reference.md`**
-- **★ Bybit API 審計報告：`docs/audits/2026-04-04--bybit_api_infra_audit.md`**
-- 融合方案 v0.5：`docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md`
-- 執行計劃 V1：`docs/references/2026-04-04--execution_plan_v1.md`
-- ML 架構 v0.4：`docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md`
-- DB 設計：`docs/references/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md`
-- Rust 遷移：`docs/rust_migration/README.md`
+**Live 前置**：Paper trading ≥21d · Phase 6 完成 · Rust R-07 灰度通過 · Alpha PnL>0 · provider pricing 綁定。M/N 章未完成，執行權限未授予。
 
-**Live 前置條件（M/N 章前必須核驗）：**
-- Paper Trading 穩定運行至少 21 天
-- 融合方案 Phase 6 完成（漸進放權 + 壓測通過）
-- Rust R-07 灰度通過
-- Alpha PnL > 0
-- provider pricing table 正式綁定
-
-**章節樹導航：**
-A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous Live ⬜
-⚠️ 任何章節「完成」都不等於 live 放權。執行權限仍未授予。
-
-> 參考資料（技術記錄、文檔指針、審計報告索引）見：`docs/CLAUDE_REFERENCE.md`
+**關鍵文件指針**（按需 Read，不要全載入）：
+- Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
+- 融合方案/執行計劃/ML/DB/Rust：`docs/references/2026-04-04--*` · `docs/references/2026-04-03--*` · `docs/rust_migration/README.md`
+- 完整參考索引：`docs/CLAUDE_REFERENCE.md`
 
 ---
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：engine lib **767** · core **387** · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-4 WRAP COMPLETE** — Python 風控/紙盤雙退場 + 4 IPC 寫入面 + 1 ConfigStore 權威 + 5 engines 熱重載（端到端 e2e 證據 `4780b04`）+ V014 audit · Governor cooldown V014 replay (`e840003`) + operator manual override 24h cooldown · Position Reconciler **audit-only** (`36335d7`→`ab1e0d8`→`9811bf3`)：30s Bybit 輪詢 + 5 級漂移分類 + warmup baseline，自動收縮挪至 **Phase 6 自動收縮 6-RC-1~9**（規格已寫死）· **E-Merge-4** (`06742b3`) Guardian = RiskConfig 純派生視圖，唯一真相源 patch_risk_config · Rust openclaw_engine 為 paper/demo/live 唯一引擎 · Live 前 blocker：**7d paper trading 數據觀察期** + **多通道告警上線**（B2 降級後需 operator 通知通道）· 1C-4 留尾（非阻塞）：A2 News scheduler / W1 event_consumer 拆分。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
+> 截至 2026-04-08：tests engine lib 767 / core 387 / Python control_api 2694 passed · ARCH-RC1 1C-4 WRAP COMPLETE · Live blocker：7d paper trading 觀察期 + 多通道告警上線。詳見 §三 + 歸檔指針。

@@ -10,6 +10,18 @@
 
 ## 🎯 下一步起點
 
+### 🔥 P0 — ConfigStore disk persistence（2026-04-08 發現）
+
+`rust/openclaw_engine/src/config/store.rs:9` 註釋寫「不負責落盤，是 1C 載入器的工作」，但 1C loader 從來只實作載入，**從來沒實作回寫**。後果：所有 GUI patch（risk/learning/budget）只在 in-memory ConfigStore 生效，引擎重啟後 TOML reload → 全部 reset。違反 CLAUDE.md §三「Rust ConfigStore 為權威 + 禁止 restart-to-apply」。
+
+- [ ] **CFG-PERSIST-1** `ConfigStore::replace`/`apply_patch` 成功後 spawn debounced task（仿 `persistence.rs` 5s 模式），把 `toml::to_string(&new)` 原子寫回（temp file + rename），覆蓋 risk / learning / budget 三個 store
+- [ ] **CFG-PERSIST-2** 加 test：patch → 模擬重啟 → reload TOML → 值還在
+- [ ] **CFG-PERSIST-3** GUI 寫入面字段死洞清理（2026-04-08 全欄位審計順手發現）：
+  - `max_correlated_exposure_pct`：後端完備但 GUI 無入口
+  - `allowed_categories` / `preferred_margin_mode` / `preferred_position_mode`：後端完備但 GUI 無入口
+  - `max_cost_edge_ratio`：Pydantic 接受但 `_GLOBAL_TO_RUST` 沒對應，靜默 drop
+  - 決定：補 GUI 入口 OR 從 Pydantic/mapping 移除
+
 ### ARCH-RC1 1C-3 + 1C-4 WRAP COMPLETE ✅（2026-04-08）
 
 完整 narrative：`docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
