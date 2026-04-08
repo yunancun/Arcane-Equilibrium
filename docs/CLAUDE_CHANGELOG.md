@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜（**ARCH-RC1 1C-4 WRAP COMPLETE**）
+> 最後更新：2026-04-08 深夜 session 2
+
+### Phase 5 P0 + DEAD-PY-1 完成 + 測試基線清理（2026-04-08 · commits `75d8f36`–`caf2bcc`）
+
+6 commits · `+769/-952` 行（淨 -183）· engine lib 769 / Python 2678 passed · 21→1 pre-existing fail
+
+**動機（Edge 危機）**：paper realized edge ≈ 2 bps，fee = 11 bps，Net EV ≈ −9 bps。`cost_gate` 公式 `EV = atr × conf × qty` 把 ATR（range）誤用為 directional edge，高估 ~13×。Phase 5 從 W16-18 提前到 P0 立即啟動。
+
+**PH5-WIRE-0** `75d8f36`：`intent_processor.rs` cost_gate 加入 `COLD_START_DAMPENING = 0.2`，ATR-based EV 降至 ~2.6×；5 個 Rust 測試 ATR 值調整（500→2000 BTC, 1.5→5.0 SOL）；769 pass。
+
+**PH5-DL-2+JS-1** `1e5a288`：新建 `program_code/ml_training/realized_edge_stats.py`（FIFO pair, per-(strategy,symbol) mean_net_bps）+ `james_stein_estimator.py`（正部 JS 收縮，UPSERT `learning.james_stein_estimates`，原子 JSON 快照 `settings/edge_estimates.json`）。首跑 8 cells 全負（-6.9 to -25 shrunk bps，grand_mean -10.4 bps）→ PH5-WIRE-1 延後。
+
+**DEAD-PY-1 P1+P3+4** `f418e2d`：13 檔案 285 行刪除 — PAPER_STORE/ENGINE dead branches、whitelist 410 stubs、RC-10/11/12 migration markers 全清。
+
+**DEAD-PY-1 P2** `601e035`：刪除 `apply_ai_consultation()` + 路由（0 API hits 確認）+ 2 個對應 test；165 行刪。
+
+**CFG-PERSIST-3 GUI** `6763b38`：`tab-risk.html` Position Limits 卡補入 `max_correlated_exposure_pct`（數字輸入）+ `allowed_categories`（逗號分隔文字），loadAll/savePositionSettings/Current Values 全接線；`preferred_margin_mode`/`preferred_position_mode` 延後（Rust 僅存儲，未執行邏輯）。
+
+**WP-CLEANUP-GRAFANA-TESTS** `caf2bcc`：刪除 20 個調用不存在方法的 test（`_write_pnl`/`_write_market_tickers`/`_write_system_health`/`_write_trade_executions` 已於 ARCH-RC1 移除或重命名）；保留 10 個通過的 lifecycle/pg/loop tests；基線 21→1 pre-existing fail。
+
+**後續**：PH5-WIRE-1 等 paper realized edge 轉正 · PH5-VERIFY-1 7d 觀察期進行中 · test_risk_view_client 1 fail 留待獨立 session · A2 NewsPipeline 等 provider 決策。
+
+---
 
 ### ARCH-RC1 1C-4 E-Merge-4 — Guardian = RiskConfig pure derived view（2026-04-08 · commit `06742b3`）
 
