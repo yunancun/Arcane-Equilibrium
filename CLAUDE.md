@@ -46,96 +46,40 @@
 
 ## 三、當前系統狀態摘要
 
-### ★★★★ ARCH-RC1 Session 1A+1B SHIPPED（2026-04-07 · commits `7f59e9b` `0523f17`）
-**Session 1A — 死代碼大屠殺**（`7f59e9b`，-270 行 / 0 行為改變）：
-盤點 rust/ tree 發現 **7 套重疊風控/配置系統**（Python RiskManager / openclaw_core::RiskManagerConfig / openclaw_engine::RuntimeConfig / openclaw_types::EngineConfig / openclaw_types::risk / GuardianConfig / H0GateConfig）。先砍 3 個確認純死的：
-- `openclaw_engine::config::MlConfig`（從未接通；真實 ML 用 `ml::kelly_sizer::KellyConfig` + 構造參數）
-- `openclaw_engine::config::attention_*_ms` 5 欄位（cognitive 系統用 scan_interval_s 不是這個）
-- `openclaw_types::config::EngineConfig + ParamTemperature`（V3-PA-5 規劃，6 欄位全有替代實作）
+> ARCH-RC1 Session 1A → 1C-3-E F-mini 詳細歷史（commits / 行數 / sub-batch）已歸檔到
+> `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。本節只記錄當前狀態。
 
-**Session 1B — ARCH-RC1 統一 Config 骨架**（`0523f17`，+2632 行 / +58 tests / 0 行為改變）：
-- `config/store.rs`：泛型 `ConfigStore<T>` = `Arc<ArcSwap<T>>` + mutex 序列化 + all-or-nothing patch + PatchSource (Operator/Agent/Migration/Startup)
-- `config/risk_config.rs`：**RiskConfig 13 sub-struct**（meta/limits P1/overrides P0/per_strategy/agent P2 含 partial_tp/cascade 6 級/regime 5×3 從 hardcode 提升/cost_gate/dynamic_stop/market_gate 收編 9 欄位/anti_cluster/correlation/runtime/experimental），跨 sub-struct invariant：partial_tp ≤ take_profit_max_pct
-- `config/learning_config.rs`：**LearningConfig** + Phase 4.1 default-off 收編 (`switches.teacher_loop_enabled = false`)
-- `config/budget_config.rs`：**BudgetConfig** 含 AttentionTax 整塊（含 enabled / 4 burn_rate / 4 grade / cost_edge_max_ratio）
-- `config.rs` → `config/mod.rs` 透過 git mv，零內容變動
+### ★★★★ ARCH-RC1 1C-3 SHIPPED — Python 風控核心徹底退場（2026-04-08）
 
-**ARCH-RC1 契約（永久）**：所有交易/風控/學習/預算/市場參數由 Rust 權威持有，分 3 個獨立熱重載 Config + 既有 StrategyParams = 4 個 IPC 寫入面。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
-測試：engine lib **624 → 682** (+58, 0 fail) · core/types 全綠 · 0 regression。
+**契約終局**：所有交易/風控/學習/預算參數由 Rust 權威持有 = 3 個獨立熱重載 Config (Risk/Learning/Budget) + 既有 StrategyParams = **4 個 IPC 寫入面**。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
 
-### ★★★★ ARCH-RC1 Session 1C-2-A/B/F SHIPPED — 熱重載真正 LIVE（2026-04-07 · commits `581e1e2`..`91b5db8`）
-**1C-2-A** (`581e1e2`): 新 `config/io.rs` 泛型 TOML loader + 6 tests；main.rs `load_unified_configs()` 從 `settings/risk_control_rules/*.toml` 載入 3 個 Config 並包入 `Arc<ConfigStore<T>>`；missing-file fail-soft 回退到 Default + validate。
-**1C-2-B** (`e3014ef`): ConfigStore handles 穿透 EventConsumerDeps → event_consumer → wire_pipeline → TickPipeline；新 fields `risk_store` / `budget_store` / `risk_config_version_seen` + setters；`sync_risk_config_if_changed()` 在 `on_tick()` 頂部 compare-and-pull（single atomic load，熱路徑零鎖）；`current_cost_edge_max_ratio()` 取代 1C-1 的硬編碼 0.8。
-**1C-2 Option B** (`8240a25`): 抽出 `apply_risk_snapshot()` 作為**單一傳播入口**；Guardian 進入熱重載迴圈（max_leverage / session_drawdown / max_same_direction 從 RiskConfig 推導，`modification_*` 欄位 RMW 保留）。
-**1C-2-F Engine 收編**（3 個 commit，3 個執行引擎進入熱重載）：
-- **F1** (`1a7fc8b`) E-Merge-3：RiskGovernorSm 的 `EscalationThresholds` 從 `RiskConfig.cascade` 同步（15 欄位 1-to-1 映射，處理 `circuit_breaker` vs `circuit` / `consecutive_loss` vs `consec_loss` / `min_hold_time_ms` vs `min_hold_ms` 等命名差異）。之前這 15 個欄位永遠是硬編碼 default，零外部覆蓋路徑。
-- **F3** (`e7f00d4`) E-Merge-2：H0Gate 的 3 個風控欄位（`max_open_positions` / `max_total_exposure_pct` / `allowed_categories`）從 `RiskConfig.limits` RMW 同步；健康欄位（cpu/memory/db_latency/network/shadow_mode）在 RMW 中保留。openclaw_core 加 `H0Gate::update_config()` setter。
-- **F2 降級** (`91b5db8`) E-Merge-1：research agent 發現 StopManager 不是死代碼 — tick_pipeline:910/1017 是**故意的 H0/pause 保護 fallback**，main engine 在 early-return 分支下根本不跑，刪掉會讓持倉在 gate block / pause 時完全沒有止損保護。真正問題是 `paper_state.stop_config` 啟動後永不同步。修法：extend `apply_risk_snapshot()` 加第 4 步，同步 `hard_stop_pct` + `take_profit_pct`（受 `take_profit_enforced` 控制）。原計劃的「刪 StopManager + port 6-7 小時測試」降級為 ~25 行 config 同步。
+**風控收編軌跡**：1A 前 7 套並行 → 1C-1 後 2 套 → 1C-2-F 後 1 Config 權威 + 5 engines 同步熱重載 → **1C-3-D 後 1 Rust ConfigStore 權威 + 53 行 Python RiskViewClient shim**。`risk_manager.py` 1633 → 53 行 (-97%)，刪 9 個純 Python 風控/H0/Engine 測試檔 ~6900 行（邏輯已 100% 在 Rust 748 tests 覆蓋）。
 
-**熱重載終局**：`apply_risk_snapshot()` **單一傳播入口**，每次 RiskConfig store 版本變化同步 **5 個下游執行引擎**：
+**5 engines 共飲一桶水**：`apply_risk_snapshot()` 單一傳播入口，每次 RiskConfig store 版本變化同步：
 1. `intent_processor.risk_config`（Gate 0 + tick check 主引擎）
 2. `intent_processor.guardian`（P0 trade intent modify verdict）
 3. `paper_state.stop_config`（H0/pause 保護 fallback）
 4. `h0_gate.config`（健康 + 風控欄位）
 5. `governance.risk.thresholds`（6-tier 級聯狀態機）
 
-**風控系統收編軌跡**：7 套並行（1A 前）→ 1 個 Config 權威 + **5 個引擎全部共飲同一桶水**（1C-2-F 後）。Config-layer hot-reload 閉環完成。Phase 2 可選收編：E-Merge-4（Guardian owned struct 退化為 view）— 純代碼味清理，低優先級。
+**4 IPC 寫入面**：3 patch endpoints (`patch_{risk,learning,budget}_config`) 走 ConfigStore.replace() → version++ → tick-level hot-reload，成功時 V014 `engine_events` audit row（fail-soft）；StrategyParams 既有路徑不變。
 
-測試：engine **682 → 714** (+32 淨 / +6 config/io tests) · core 386 → 387 · types 30 → 27 · integration 全綠 · 0 regression。
+**Operator manual governor override**（1C-3-B-2）：reason_code 白名單 / 單步 / 24h cooldown / CB&MR 鎖死 / 5min hold / V014 from-to 審計（含 rejected 分支）。Cooldown PG 持久化是 1C-4 留尾。
 
-### ★★★★ ARCH-RC1 1C-3 全部 SHIPPED — Python RiskManager 收編完成（2026-04-08 · commits `8447fbf` `c6fcd13` `9f46b06` `f8772c0` `a1cf772` `144f46f`）
+**1C-3-E F-mini SHIPPED**（2026-04-08 PM · `d8fb7f2` `cf3ff48`）：bridge_core.py 死引用清除 / paper_trading_routes 砍 4 dead imports / risk_routes::unhalt_session 砍 deprecated PAPER_STORE.mutate / `_h0_db_probe` 改 os.stat。
 
-**1C-3-A/B/C/B-2** (4/7-4/8 AM): RiskViewClient (299 行) + atr_tracker.py (153 行) lift-and-shift；risk_routes.py 切換到 RiskViewClient（6 個 TestRiskRoutes 暫 skip 留尾）；operator manual governor override 三層防護（IPC 白名單+單步+24h cooldown / SM transition table+5min hold / V014 audit）。
+**1C-3-F 留尾**（下個 session · ~5h fresh context · 接手指引：`docs/worklogs/2026-04-08--1c3e_fmini_handoff.md`）：Rust 補 paper-side `submit_order` IPC RPC + shadow_decision_builder rewire + 刪 `paper_trading_engine.py` 2248 行 + 14 個依賴測試檔 → Rust 引擎成為 paper / demo / live 三模式唯一引擎。
 
-**1C-3-D E2 fixes** (4/8 PM):
-- **M-1** (`f8772c0`): event_consumer/tests.rs 加 8 個 real guard tests via `handle_paper_command` + oneshot — 之前 governor override 的 IPC 守衛只有 path-level coverage，現在 reason_code 白名單 / 單步 / cooldown / CB&MR lockout 都有 end-to-end test。engine 740 → 748。
-- **M-2 + N-5** (`a1cf772`): `spawn_governor_audit_row` 簽名重構 5-positional → `(pool, event_type, payload: serde_json::Value)`；rejected governor overrides 在 `Ok(Ok(Err(e)))` branch 也寫 V014（new event types `governor_escalate_rejected` / `governor_de_escalate_rejected`，payload 含 `result: applied|rejected` + `error`）。
+**1C-4 留尾**：Position Reconciler / Governor cooldown PG 持久化 / NewsPipeline run_once spawn / 熱重載 e2e 驗收 / E-Merge-4 (Guardian view) / E2+E4+QA。
 
-**1C-3-D 主體** (`144f46f`): approach A aggressive cull
-- `risk_manager.py` **1633 → 53 行** (-97%)：只剩 `REGIME_TIME_MULTIPLIERS` 常量 + `RiskManager(RiskViewClient)` 薄子類（建構不需 ipc_client）
-- `paper_trading_wiring.py` 移除 `set_portfolio_risk_control` / `set_governance_hub` / `set_change_audit_log` 三個 RiskManager 注入點（皆為 RiskViewClient no-op stub）
-- 刪除 9 檔 ~6900 行純 Python 風控/H0/Engine 測試（邏輯已 100% 在 Rust 748 tests 覆蓋）：`test_risk_manager{,_edge}` / `test_h0_gate{,_cooldown_integration}` / `test_paper_trading_engine{,_inverse}` / `test_trailing_stop_cost_constraint` / `test_integration_phase{5,8}`
-- conftest 移除 4 個 risk fixtures · `test_integration_phase2::test_portfolio_risk_control_injected` 重寫為驗證 wiring singleton
-- **+46 / -7882 淨 -7836** · Python 2944 passed · **0 regression** (22 pre-existing failures byte-for-byte 與 baseline 一致)
+**測試基準線**：engine lib **748** (+307 vs Phase 4 baseline 441) · core 387 · types 27 · ml_training 35 · Python control_api **2944 passed** (22 pre-existing fail · 0 regression)。
 
-**風控收編軌跡終局**：1A 前 7 套並行 → 1C-1 後 2 套 → 1C-2-F 後 1 Config 權威 + 5 engines 同步熱重載 → **1C-3-D 後 1 Rust ConfigStore 權威 + 53 行 Python shim**。Python 風控核心徹底退場，僅剩 IPC 視圖層。
+### 歷史完成里程碑（完整細節見歸檔）
 
-**1C-3-E F-mini SHIPPED**（2026-04-08 PM · `d8fb7f2` + 待 commit · 0 regression）：
-- **step 1** (`d8fb7f2`): `bridge_core.py:294` `_engine.risk_manager._price_tracker` 死引用清除（ATR 由 Rust 權威）
-- **step 2** auto-resolved: `test_risk_manager.py::TestRiskRoutes` 6 個 skipped 隨 1C-3-D aggressive cull 整檔刪除
-- **F-mini 三小修**: `paper_trading_routes.py` 移除 4 個 dead imports (PaperStateStore/PaperTradingEngine/ShadowDecisionFileFeeder/build_shadow_decision) · `risk_routes.py::unhalt_session` 移除 deprecated `PAPER_STORE.mutate` Python 並行寫 · `_h0_db_probe` 從 `PAPER_STORE.read()`（full JSON decode）改為 `os.stat(_paper_state_path)`（同樣偵測磁盤 hang，成本一個量級降低 + 解耦待退場的 PaperStateStore）
-- Python 2944 passed / 22 pre-existing fail（與 baseline byte-for-byte 一致）
+**ARCH-RC1 Session 1A → 1C-3-E F-mini**（2026-04-07~08）：詳見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
+- 1A 死代碼大屠殺 `7f59e9b` -270 行 · 1B Config 骨架 `0523f17` +2632/+58 tests · 1C-1 Rust call site 遷移 `2007b67` `6768381` `ef30bf1` -546 行 · 1C-2-A/B/F 熱重載 LIVE `581e1e2`..`91b5db8` 5 engines · 1C-2-C/D/E IPC+legacy migration+V014 audit `5f87bca` `de75191` `950f547` `b0fa2c6` · 1C-3-A/B/C/B-2/D/E F-mini Python 收編 `8447fbf` `c6fcd13` `9f46b06` `f8772c0` `a1cf772` `144f46f` `d8fb7f2` `cf3ff48`
 
-**1C-3-F 留尾**（下一個 session · ~5h，需 fresh context）：徹底退場 Python paper engine
-- (a) Rust IPC 補 paper-side `submit_order` RPC handler + tests（layer2 重接前置）
-- (b) `shadow_decision_builder.py` 改走 EngineIPCClient 取代 `PaperTradingEngine` 依賴（保留 Layer 2 wire-ready 路徑）
-- (c) 刪 `paper_trading_engine.py` (2248 行) + 14 個依賴測試檔（`test_shadow_decision*` / `test_paper_trading*` / `test_winrate_param_fixes` / `test_batch10_learning_oms` / `test_batch12_e2e_smoke` / `test_integration_phase{2,7,9,11,governance}` / `test_session9_fixes` 等）
-- (d) `paper_trading_wiring.py` 清理 PAPER_STORE/ENGINE/SHADOW_CONSUMER 模組級 stale 宣告
-- (e) E4 全綠 + 文檔同步 + commit
-
-### ★★★★ ARCH-RC1 1C-2-C/D/E SHIPPED — 1C-2 完整收尾（2026-04-07 PM · commits `5f87bca` `de75191` `950f547` `b0fa2c6`）
-- **1C-2-C** (`5f87bca`): 6 個 unified Config IPC 端點 (`get/patch_{risk,learning,budget}_config`) — JSON 深合併 → 反序列化 → validate → `store.replace()` → tick-level hot reload。Generic helpers `json_merge` / `handle_get_config<T>` / `handle_patch_config<T,V>` 三個 Config 共用。Source audit `operator|agent|migration` 從 params.source 解析。+6 tests。
-- **1C-2-E schema** (`de75191`): V014 `observability.engine_events` audit 表 + 3 indexes，applied to live PG。event_type ∈ {startup,shutdown,config_patch,config_reject,reconcile,crash}。
-- **1C-2-D** (`950f547`): 新 `config/legacy_migration.rs` — 啟動時若 `risk_config.toml` 不存在且 `operator_risk_config.json` 存在，從 `RiskConfig::default()` 起手映射 ~15 個 `global_config.*` 已知欄位 → save_toml → rename `.legacy`。跨 Config field `max_cost_edge_ratio` log WARN（屬 BudgetConfig，operator 自行 patch）。Fail-soft：失敗 log WARN，引擎用 default 啟動。+5 tests。
-- **1C-2-E audit wiring** (`b0fa2c6`): IpcServer 加 `audit_pool: AuditPoolSlot` 延後注入，main.rs 在 db_pool 就緒後 `replace(pg.clone())`。`handle_patch_config` 成功時 `tokio::spawn` INSERT V014 row（`{fields_changed: [keys]}` payload）。Fail-soft：DB 不可用 → audit 跳過，patch 仍成功。
-
-**1C-2 終局**：4 IPC 寫入面 (3 patch + StrategyParams) → ConfigStore.replace() → version++ → tick-level hot-reload 同步 5 engines (intent_processor / guardian / paper_state / h0_gate / risk_governor) + V014 audit row。**Config-layer 閉環完成**。
-測試：engine lib **714 → 725** (+11 / 0 regression) · core/types 不變 · 0 failures。
-**1C-3 接手規格**：`docs/references/2026-04-07--arch_rc1_1c3_scope.md`（5 sub-batch · 17-20h · ~3 sessions）。
-**1C-2 剩餘**：無。下一步 → 1C-3-A gap analysis → 1C-3-B/C/D/E → 1C-4 Reconciler+News+e2e+E2/E4/QA。
-
-### ★★★★ ARCH-RC1 Session 1C-1 SHIPPED（2026-04-07 · commits `2007b67` `6768381` `ef30bf1`）
-**1C-1 Batches 0-6 全部完成**（3 commits · +747 / −1293 淨 −546 行 · 0 regression）。ARCH-RC1 風控系統收編從 **7 套並行 → 2 套**（新 RiskConfig 權威 + 待 1C-3 空殼化的 Python RiskManager）。
-- **B0** `2007b67`: AntiCluster.max_same_direction 欄位校齊（guardian/IPC/GUI 已用，不可刪）
-- **B1** `2007b67`: `openclaw_core/src/risk/` 瘦身：刪 RiskManagerConfig + checks.rs，拆出 regime.rs（保留無狀態 regime fallback 供 stops.rs 使用）
-- **B1b** `2007b67`: 新建 `openclaw_engine/src/risk_checks.rs`（502 行 / 16 tests），check_order_allowed + check_position_on_tick 改讀 &RiskConfig，cost_edge_max_ratio 跨 Config 讀 BudgetConfig（契約允許 runtime 跨讀，只禁校準耦合）
-- **B2-4** `2007b67`: call site migration — tick_pipeline / intent_processor / position_risk_evaluator / event_consumer/setup / pipeline_types / tests；所有舊平欄位 (dynamic_stop_base_ratio / cost_gate_k_base / adx_trending_threshold 等) 改讀新 sub-struct 路徑
-- **B5** `6768381`: RuntimeConfig 刪除 8 個風控欄位（p1_risk_pct / max_stop_loss_pct / max_take_profit_pct / max_open_positions / max_total_exposure_pct / max_leverage / max_drawdown_pct / max_same_direction_positions）+ 改名 `EngineBootstrap`；保留 deprecated type alias 過渡 1C-2；驗證邏輯重寫（只檢 bootstrap 欄位：reconnect_delay / heartbeat / ipc_socket）
-- **B6** `ef30bf1`: `openclaw_types::risk` 刪除死代碼 — GuardianConfig / StopConfig / composite RiskConfig 全 0 consumer（live 版本在 openclaw_core::guardian + openclaw_core::stop_manager），只保留 H0 gate 共享 runtime 類型
-測試：engine lib 682 → 708 · core 386 → 387 · types 30 → 27 · integration all green · 0 regression。
-**1C-1 未做**：Python 側（1C-3）· ConfigStore IPC wiring（1C-2）· TOML loader（1C-2）· Position Reconciler（1C-4）· 熱重載 e2e（1C-4）。
-
-### 歷史完成里程碑（精簡列表，完整細節見歸檔）
+**早期 Phase**：
 - **Phase 0/0a/0b**: PG 8-schema + TimescaleDB + Grafana ✅
 - **Phase 1**: FeatureCollector 34-dim + market_writer + drift detector ✅
 - **Phase 2 (a/b/DE/FG)**: trading/context writers + ML model_manager + Scorer + Kelly Sizer + Parquet ETL ✅
@@ -411,4 +355,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08 晚：engine lib **748** · core 387 · types 27 · Python control_api **2944 passed** (22 pre-existing failures · 0 regression) · **ARCH-RC1 1C-3-E F-mini SHIPPED**（`d8fb7f2` + 待 commit · bridge_core ATR 死引用清除 + paper_trading_routes 4 個 dead imports 移除 + risk_routes deprecated PAPER_STORE.mutate 移除 + H0 probe 改 os.stat）· 1C-3 主體已於 4/8 PM 落地（Python 風控核心徹底退場：`risk_manager.py` 1633 → 53 行 shim）· Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**1C-3-F**（~5h，需 fresh context · Rust 補 paper-side submit_order RPC + shadow_decision_builder 改 IPC + 刪 paper_trading_engine.py 2248 行 + 14 個依賴測試）→ **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA。
+> 截至 2026-04-08：engine lib **748** · core 387 · types 27 · Python control_api **2944 passed** (22 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED** — Python 風控核心徹底退場（`risk_manager.py` 1633 → 53 行 RiskViewClient shim）· 1 Rust ConfigStore 權威 + 5 engines 共飲一桶水熱重載 + 4 IPC 寫入面 + V014 audit · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步 **1C-3-F**（下個 session · ~5h fresh context · Rust 補 paper-side submit_order IPC RPC + shadow_decision_builder 改 IPC + 刪 paper_trading_engine.py 2248 行 + 14 個依賴測試 → Rust 引擎成為 paper/demo/live 三模式唯一引擎）→ **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
