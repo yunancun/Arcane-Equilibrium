@@ -78,11 +78,17 @@
   - `test_integration_phase2::test_portfolio_risk_control_injected` 重寫為驗證 wiring singleton 仍存在
   - **+46 / -7882** 淨 -7836
   - Python 2944 passed / 22 pre-existing failures (與 baseline byte-for-byte 一致 · 0 regression caused)
-- [ ] **1C-3-E 留尾收尾**（下一個 session 起點）
-  - `paper_trading_engine.py` ~15 個 `engine.risk_manager.X` 死路徑（ENGINE = None since RC-10）— disabled engine 自身的清理
-  - `bridge_core.py:294` `self._engine.risk_manager._price_tracker` 死引用（同上）
-  - 6 個 1C-3-C skipped `TestRiskRoutes` 測試重寫
-  - **拆 `PAPER_STORE.mutate`**：session_halted 不再 Python 並行寫，改從 Rust snapshot 派生
+- [x] **1C-3-E F-mini SHIPPED** (`d8fb7f2` step 1 + 待 commit F-mini)
+  - step 1 (`d8fb7f2`): `bridge_core.py:294` `_engine.risk_manager._price_tracker` 死引用清除（ATR 由 Rust 權威）
+  - step 2 auto-resolved: 6 個 skipped `TestRiskRoutes` 隨 1C-3-D `test_risk_manager.py` 整檔 cull 一起消失
+  - F-mini 三小修：`paper_trading_routes.py` 砍 4 個 dead imports / `risk_routes.py::unhalt_session` 砍 deprecated PAPER_STORE.mutate / `_h0_db_probe` 改 `os.stat()`
+  - Python 2944 passed / 22 pre-existing fail / 0 regression
+- [ ] **1C-3-F 留尾**（下一個 session · ~5h，需 fresh context）— Python paper engine 徹底退場
+  - **(a)** Rust IPC 補 paper-side `submit_order` RPC handler + tests（layer2 重接前置）
+  - **(b)** `shadow_decision_builder.py` 改走 EngineIPCClient 取代 `PaperTradingEngine` 依賴（Layer 2 wire-ready 路徑保留）
+  - **(c)** 刪 `paper_trading_engine.py` (2248 行) + 14 個依賴測試檔（`test_shadow_decision*` / `test_paper_trading*` / `test_winrate_param_fixes` / `test_batch10_learning_oms` / `test_batch12_e2e_smoke` / `test_integration_phase{2,7,9,11,governance}` / `test_session9_fixes` 等）
+  - **(d)** `paper_trading_wiring.py` 清理 PAPER_STORE/ENGINE/SHADOW_CONSUMER 模組級 stale 宣告
+  - **(e)** E4 全綠 + 文檔同步 + commit
   - 評估是否進一步刪 `RiskManager` 子類符號（直接讓 paper_trading_wiring import RiskViewClient）
 - [ ] **1C-4 收尾**
   - Position Reconciler（trading.open_positions + Bybit 對帳 + cooldown 重建）
