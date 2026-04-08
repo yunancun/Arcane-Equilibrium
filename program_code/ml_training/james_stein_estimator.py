@@ -238,7 +238,7 @@ def run_james_stein(
             "OPENCLAW_EDGE_SNAPSHOT",
             os.path.join(
                 os.path.dirname(__file__),
-                "..", "..", "..", "settings", "edge_estimates.json",
+                "..", "..", "settings", "edge_estimates.json",
             ),
         )
         # Resolves to srv/settings/edge_estimates.json
