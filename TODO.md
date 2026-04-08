@@ -1,29 +1,24 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-08 PM
-測試基準線：**engine lib 748 · core 387 · types 27 · ml_training 35 · Python control_api 2944 passed (22 pre-existing fail · 0 regression)**
+最後更新：2026-04-08 深夜
+測試基準線：**engine lib 752 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
-> ARCH-RC1 1A→1C-3-E F-mini 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
+> ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
 
 ---
 
 ## 🎯 下一步起點
 
-### 1C-3-F — Python paper engine 徹底退場（下個 session · ~5h · 需 fresh context）
+### 1C-3-F SHIPPED ✅（2026-04-08 深夜 · `accf625` `8ff93e0` `de1ec69`）
 
-完整接手指引：`docs/worklogs/2026-04-08--1c3e_fmini_handoff.md`
+Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 paper/demo/live 三模式唯一引擎。-8915/+16 行。詳見 CLAUDE_CHANGELOG.md。
 
-- [ ] **F-a** Rust 補 paper-side `submit_order` IPC RPC
-  - tick_pipeline.rs `PaperSessionCommand::SubmitOrder` variant + oneshot response
-  - event_consumer/handlers.rs handler arm (走現有 process_intent 路徑)
-  - ipc_server.rs `submit_paper_order` dispatch entry (template: `handle_risk_runtime_status`)
-  - event_consumer/tests.rs +2-3 e2e tests via `handle_paper_command`
-- [ ] **F-b** `shadow_decision_builder.py` 改走 EngineIPCClient，移除 PaperTradingEngine 依賴（Layer 2 wire-ready 路徑保留）
-- [ ] **F-c** 刪 `paper_trading_engine.py` (2248 行) + 14 個依賴測試檔
-  - test_shadow_decision* / test_paper_trading* / test_winrate_param_fixes / test_batch10_learning_oms / test_batch12_e2e_smoke / test_integration_phase{2,7,9,11,governance} / test_session9_fixes
-- [ ] **F-d** `paper_trading_wiring.py` 清理 PAPER_STORE / ENGINE / SHADOW_CONSUMER 模組級 stale 宣告
-- [ ] **F-e** E4 全綠 + 文檔同步 + commit (建議拆 F-a / F-bcd / F-e 三個 commit)
+- [x] **F-a** Rust submit_paper_order IPC RPC + 4 e2e tests（engine lib 748→752）
+- [x] **F-b** shadow_decision_builder rewire async via EngineIPCClient
+- [x] **F-c** 刪 paper_trading_engine.py 2248 行 + 13 依賴測試檔 + conftest fixtures
+- [x] **F-d** paper_trading_wiring.py PAPER_STORE/ENGINE → None stub
+- [x] **F-e** pytest 回歸 0 regression + 文檔同步 + commit
 
 ### 1C-4 收尾（F 完成後）
 

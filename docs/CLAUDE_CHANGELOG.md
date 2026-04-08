@@ -1,7 +1,36 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 晚
+> 最後更新：2026-04-08 深夜
+
+### ARCH-RC1 1C-3-F SHIPPED — Python paper_trading_engine.py 徹底退場（2026-04-08 深夜 · commits `accf625` `8ff93e0` `de1ec69`）
+
+1C-3 收尾終局。Rust openclaw_engine 成為 paper / demo / live 三模式唯一引擎。
+
+**F-a Rust submit_paper_order IPC RPC**（`accf625`，engine lib 748→752）
+- `tick_pipeline.rs` 新增 `PaperSessionCommand::SubmitOrder` variant + `submit_external_order()` 方法（~150 行）：檢查 paused/halted、查 latest_price + ATR、構建 OrderIntent 走 IntentProcessor 全 gate（governance/Guardian/Kelly/P1/cost gate）、instrument-aware 取整、apply_fill、stats 累計、推 recent_intents/recent_fills、發 trading_tx Intent+Fill。Order ID `ext-{symbol}-{ts_ms}`
+- `event_consumer/handlers.rs` 加 SubmitOrder 分支（解析 side 字串、confidence 默認 1.0、snapshot.force_write）
+- `ipc_server.rs` 加 `submit_paper_order` JSON-RPC dispatch + 5s timeout
+- 4 個 e2e 測試：happy path / paused rejected / no price rejected / invalid side rejected
+
+**F-b shadow_decision_builder.py rewire 走 IPC**（`8ff93e0`）
+- `ipc_client.py` 加 `submit_paper_order` async wrapper
+- `shadow_decision_builder.py` 砍 `from .paper_trading_engine import (...)`，常量內聯，`ShadowDecisionConsumer.__init__` 改吃 `EngineIPCClient`，`consume()` 改 async（await get_paper_state + await submit_paper_order），刪 `_engine.store.mutate(...)` 影子審計 append
+- `layer2_engine.py` line 669 改 `await self._shadow_consumer.consume(...)`
+- `layer2_routes.py` 移除 `from .paper_trading_routes import ENGINE as PAPER_ENGINE, SHADOW_CONSUMER`，加 `_build_shadow_consumer()` helper（lazy resolve EngineIPCClient.get_singleton）
+
+**F-c/d/e Python 紙盤引擎刪除 + wiring 清理 + 回歸**（`de1ec69`，-8915/+16）
+- 刪 `app/paper_trading_engine.py` 2248 行
+- `paper_trading_routes.py` 內聯 `DEFAULT_INITIAL_BALANCE_USDT = 10_000.0`
+- `paper_trading_wiring.py` 刪 `PaperStateStore`/`PaperTradingEngine` import；`PAPER_STORE = None` stub；`ENGINE = None` 維持原狀（main.py / governance_routes.py / strategy_wiring.py 三個 ENGINE 消費者全部已 `is not None` 短路）
+- 刪 13 個 paper-engine-specific test：test_paper_trading / test_paper_trading_engine_edge / test_shadow_decision{,_builder} / test_batch10_learning_oms / test_batch12_e2e_smoke / test_winrate_param_fixes / test_integration_phase{7,9,11} / test_integration_governance / local_model_tools/tests/test_session9_fixes
+- conftest.py PAPER TRADING ENGINE FIXTURES 整塊刪除（4 fixtures）
+- 7 個之前疑似有依賴的 test（test_batch11_executor_exchange / test_edge_filter_integration / test_u05 / test_executor_agent_unit / test_grafana_data_writer / test_evolution_engine / test_pipeline_bridge*）審計後確認只有 mock 註釋無真實 import，無需動
+- pytest 回歸：2944→2694 passed / 22→21 fail / **0 regression**（-250 = 13 個被刪測試檔；-1 = 其中一個原本在 22 個 baseline fail 內）
+
+**留尾移交 1C-4**：Position Reconciler / Governor cooldown PG 持久化 / NewsPipeline run_once / 熱重載 e2e 驗收 / E-Merge-4 / 註釋級殘留 sed 清理（main.py / tab-governance.html "RC-10 ENGINE removed" 等舊話術已不再準確）/ E2+E4+QA。
+
+---
 
 ### Session ARCH-RC1 1C-3-E F-mini SHIPPED — paper engine 死代碼前置清理（2026-04-08 晚 · commits `d8fb7f2` + 待 commit）
 

@@ -68,11 +68,14 @@
 
 **1C-3-E F-mini SHIPPED**（2026-04-08 PM · `d8fb7f2` `cf3ff48`）：bridge_core.py 死引用清除 / paper_trading_routes 砍 4 dead imports / risk_routes::unhalt_session 砍 deprecated PAPER_STORE.mutate / `_h0_db_probe` 改 os.stat。
 
-**1C-3-F 留尾**（下個 session · ~5h fresh context · 接手指引：`docs/worklogs/2026-04-08--1c3e_fmini_handoff.md`）：Rust 補 paper-side `submit_order` IPC RPC + shadow_decision_builder rewire + 刪 `paper_trading_engine.py` 2248 行 + 14 個依賴測試檔 → Rust 引擎成為 paper / demo / live 三模式唯一引擎。
+**1C-3-F SHIPPED**（2026-04-08 · `accf625` `8ff93e0` `de1ec69`）：Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 paper/demo/live 三模式唯一引擎。
+- F-a Rust 補 paper-side `submit_paper_order` IPC RPC（`PaperSessionCommand::SubmitOrder` + `submit_external_order` 走 IntentProcessor 全 gate；4 個 e2e 測試）
+- F-b `shadow_decision_builder.py` rewire 走 `EngineIPCClient`（async consume + Layer 2 routes lazy-build consumer）
+- F-c/d 刪 `paper_trading_engine.py` 2248 行 + 13 依賴測試檔 + conftest fixtures 整塊；`paper_trading_routes.py` 內聯 `DEFAULT_INITIAL_BALANCE_USDT`；`paper_trading_wiring.py` PAPER_STORE/ENGINE 留 None stub（main.py / governance_routes / strategy_wiring 全部已 `is not None` 短路）
 
-**1C-4 留尾**：Position Reconciler / Governor cooldown PG 持久化 / NewsPipeline run_once spawn / 熱重載 e2e 驗收 / E-Merge-4 (Guardian view) / E2+E4+QA。
+**1C-4 留尾**：Position Reconciler / Governor cooldown PG 持久化 / NewsPipeline run_once spawn / 熱重載 e2e 驗收 / E-Merge-4 (Guardian view) / E2+E4+QA / 註釋級殘留 sed 清理（main.py / tab-governance.html "RC-10 ENGINE removed" 等舊話術）。
 
-**測試基準線**：engine lib **748** (+307 vs Phase 4 baseline 441) · core 387 · types 27 · ml_training 35 · Python control_api **2944 passed** (22 pre-existing fail · 0 regression)。
+**測試基準線**：engine lib **752** (+4 vs F-a 前) · core 387 · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression · -250/-1 vs 1C-3-E 全部來自被刪 test 文件)。
 
 ### 歷史完成里程碑（完整細節見歸檔）
 
@@ -355,4 +358,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08：engine lib **748** · core 387 · types 27 · Python control_api **2944 passed** (22 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED** — Python 風控核心徹底退場（`risk_manager.py` 1633 → 53 行 RiskViewClient shim）· 1 Rust ConfigStore 權威 + 5 engines 共飲一桶水熱重載 + 4 IPC 寫入面 + V014 audit · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步 **1C-3-F**（下個 session · ~5h fresh context · Rust 補 paper-side submit_order IPC RPC + shadow_decision_builder 改 IPC + 刪 paper_trading_engine.py 2248 行 + 14 個依賴測試 → Rust 引擎成為 paper/demo/live 三模式唯一引擎）→ **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
+> 截至 2026-04-08：engine lib **752** · core 387 · types 27 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED 含 1C-3-F** — Python 風控核心 + Python 紙盤引擎雙雙徹底退場（`risk_manager.py` 1633 → 53 行 shim · `paper_trading_engine.py` 2248 行 → 0 · -8915/+16 in `de1ec69`）· Rust openclaw_engine 成為 paper/demo/live 三模式唯一引擎 · 1 Rust ConfigStore 權威 + 5 engines 共飲一桶水熱重載 + 4 IPC 寫入面 + V014 audit · Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步 **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+註釋 sed+E2/E4/QA。詳細歷史見 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。
