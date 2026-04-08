@@ -2715,4 +2715,124 @@ mod tests {
         let in_cd_61s: bool = (61_000u64).saturating_sub(0) < pipeline.boot_cooldown_ms;
         assert!(!in_cd_61s);
     }
+
+    // ─── ARCH-RC1 1C-4 hot-reload e2e ───────────────────────────────────
+    // 驗證 IPC patch_risk_config 後的下一個 tick：5 個下游消費者全部
+    // 同步看到新值（intent_processor / guardian / paper_state / h0_gate /
+    // governance.risk.thresholds）。這份硬證據是 1C-4 wrap 的關鍵。
+    // E2E proof: after a ConfigStore.replace() that simulates an IPC
+    // patch_risk_config, driving a single on_tick must propagate the new
+    // RiskConfig snapshot into ALL 5 owned-copy consumers via
+    // sync_risk_config_if_changed → apply_risk_snapshot.
+    #[test]
+    fn test_arch_rc1_hot_reload_e2e_propagates_to_all_5_consumers() {
+        use crate::config::{ConfigStore, PatchSource, RiskConfig};
+        use std::sync::Arc;
+
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+
+        // Build a baseline RiskConfig (defaults) and wire it as the live store.
+        // 建立預設 RiskConfig 並以 live store 接線。
+        let initial = RiskConfig::default();
+        let store = Arc::new(ConfigStore::new(initial.clone()));
+        pipeline.set_risk_store(Arc::clone(&store));
+
+        // Sanity: initial seed must already be visible across all 5 consumers.
+        // 初始 seed 應已同步至 5 個下游。
+        assert_eq!(
+            pipeline.intent_processor.risk_config().limits.leverage_max,
+            initial.limits.leverage_max
+        );
+        assert_eq!(
+            pipeline.intent_processor.guardian_config().max_leverage,
+            initial.limits.leverage_max
+        );
+        assert_eq!(
+            pipeline.h0_gate.config().max_open_positions,
+            initial.limits.open_positions_max
+        );
+        assert_eq!(
+            pipeline.paper_state.stop_config().hard_stop_pct,
+            initial.limits.stop_loss_max_pct
+        );
+        assert_eq!(
+            pipeline.governance.risk.thresholds.drawdown_cautious_pct,
+            initial.cascade.drawdown_cautious_pct
+        );
+        let v0 = store.version();
+
+        // Build a mutated config that differs in fields touched by all 5
+        // downstream paths inside apply_risk_snapshot, then atomically
+        // replace() — this is exactly what handle_patch_config does after
+        // a successful patch_risk_config IPC call.
+        // 修改一份新 config（覆蓋 5 條下游路徑各自讀的欄位），用 replace()
+        // 原子寫入 — 這正是 IPC patch_risk_config 成功後的行為。
+        let mut next = initial.clone();
+        next.limits.leverage_max = initial.limits.leverage_max + 1.0;
+        next.limits.open_positions_max = initial.limits.open_positions_max + 1;
+        next.limits.stop_loss_max_pct = initial.limits.stop_loss_max_pct + 0.5;
+        next.anti_cluster.max_same_direction =
+            initial.anti_cluster.max_same_direction + 1;
+        next.cascade.drawdown_cautious_pct =
+            initial.cascade.drawdown_cautious_pct + 0.001;
+        // Validate the mutated config to make sure we don't accidentally
+        // craft an invalid one (defaults + tiny bumps should always pass).
+        next.validate().expect("mutated test config must be valid");
+
+        store
+            .replace(next.clone(), PatchSource::Operator)
+            .expect("replace must succeed");
+        assert_eq!(store.version(), v0 + 1);
+
+        // Drive a single tick — sync_risk_config_if_changed runs at the top
+        // of on_tick and must apply_risk_snapshot to all 5 consumers.
+        // 打一個 tick — sync_risk_config_if_changed 會在 on_tick 頂部執行
+        // 並把新快照推到 5 個下游。
+        pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 1_000));
+
+        // 1) intent_processor's owned RiskConfig (Gate 0 / cost-edge / dynamic_stop)
+        assert_eq!(
+            pipeline.intent_processor.risk_config().limits.leverage_max,
+            next.limits.leverage_max,
+            "consumer #1: intent_processor.risk_config NOT hot-reloaded"
+        );
+        // 2) Guardian (P0 trade intent veto path)
+        let g = pipeline.intent_processor.guardian_config();
+        assert_eq!(
+            g.max_leverage, next.limits.leverage_max,
+            "consumer #2: guardian.max_leverage NOT hot-reloaded"
+        );
+        assert_eq!(
+            g.max_same_direction_positions,
+            next.anti_cluster.max_same_direction as usize,
+            "consumer #2: guardian.max_same_direction_positions NOT hot-reloaded"
+        );
+        // 3) H0Gate (risk-level fields RMW)
+        assert_eq!(
+            pipeline.h0_gate.config().max_open_positions,
+            next.limits.open_positions_max,
+            "consumer #3: h0_gate.max_open_positions NOT hot-reloaded"
+        );
+        // 4) paper_state.stop_config (H0-blocked / paused fallback stops)
+        assert!(
+            (pipeline.paper_state.stop_config().hard_stop_pct
+                - next.limits.stop_loss_max_pct)
+                .abs()
+                < 1e-9,
+            "consumer #4: paper_state.stop_config.hard_stop_pct NOT hot-reloaded"
+        );
+        // 5) GovernanceCore.risk.thresholds (6-tier cascade SM)
+        assert!(
+            (pipeline.governance.risk.thresholds.drawdown_cautious_pct
+                - next.cascade.drawdown_cautious_pct)
+                .abs()
+                < 1e-9,
+            "consumer #5: governance.risk.thresholds NOT hot-reloaded"
+        );
+
+        // The pipeline must remember the new version so the NEXT tick is a
+        // no-op (cheap atomic load + equality, no re-apply).
+        // 紀錄版本號避免下個 tick 重複套用。
+        assert_eq!(pipeline.risk_config_version_seen, store.version());
+    }
 }
