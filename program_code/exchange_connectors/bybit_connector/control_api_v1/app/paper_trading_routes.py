@@ -535,6 +535,11 @@ def get_fills(
     reader = get_rust_reader()
     if reader.is_available():
         rust_fills = reader.get_recent_fills() or []
+        # Inject `side` field: Rust TimestampedFill has is_long bool, GUI expects side='Buy'/'Sell'
+        # 注入 side 欄位：Rust 用 is_long，GUI 期望 side='Buy'/'Sell'
+        for f in rust_fills:
+            if isinstance(f, dict) and "side" not in f:
+                f["side"] = "Buy" if f.get("is_long") else "Sell"
         capped = rust_fills[:min(limit, 200)]
         return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
     return _paper_response({"fills": [], "count": 0, "source": "rust_engine"})
