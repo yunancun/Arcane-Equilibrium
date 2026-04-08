@@ -10,33 +10,14 @@
 
 ## 🎯 下一步起點
 
-### 1C-4 WRAP COMPLETE ✅（2026-04-08 深夜）
+### ARCH-RC1 1C-3 + 1C-4 WRAP COMPLETE ✅（2026-04-08）
 
-A1 `03fee49` · B1 `e840003` · B2 `36335d7`→`ab1e0d8`(降級)→`9811bf3`(QA polish) · 熱重載 e2e `4780b04` · E-Merge-4 `06742b3`。
-留尾（非阻塞）：A2 News scheduler / W1 event_consumer 拆分。
-**下一步**：見「📅 Phase 4 follow-up」段或進入 Phase 5 (W16-18 James-Stein + DL-1 + DL-2)。
+完整 narrative：`docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
+1C-4 wrap commit chain：A1 `03fee49` · B1 `e840003` · B2 `36335d7`→`ab1e0d8`→`9811bf3` · 熱重載 e2e `4780b04` · E-Merge-4 `06742b3` · 1C-3-D 留尾 `8554779` · doc sync `f882473`。
 
-### 1C-3-F SHIPPED ✅（2026-04-08 深夜 · `accf625` `8ff93e0` `de1ec69`）
-
-Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 paper/demo/live 三模式唯一引擎。-8915/+16 行。詳見 CLAUDE_CHANGELOG.md。
-
-- [x] **F-a** Rust submit_paper_order IPC RPC + 4 e2e tests（engine lib 748→752）
-- [x] **F-b** shadow_decision_builder rewire async via EngineIPCClient
-- [x] **F-c** 刪 paper_trading_engine.py 2248 行 + 13 依賴測試檔 + conftest fixtures
-- [x] **F-d** paper_trading_wiring.py PAPER_STORE/ENGINE → None stub
-- [x] **F-e** pytest 回歸 0 regression + 文檔同步 + commit
-
-### 1C-4 收尾（F 完成後）
-
-- [x] **A1** 註釋級殘留清理 — RC-10 disabled → 1C-3-F retired (`03fee49`)
-- [x] **B1** Governor cooldown PG 持久化 — V014 replay on startup, +5 tests, engine lib 752→757 (`e840003`)
-- [x] **B2** Position Reconciler — 30s Bybit poll, 5-tier drift classify, V014 audit (audit-only after 1C-4 wrap downgrade), warmup baseline, engine lib 757→767, 零 migration (`36335d7` + 降級 commit 待加)
-  - 原設計含自動 governor 收縮，QA+E2 審查發現 reason_code/target_tier 與 operator manual override 白名單衝突 + 會污染 B1 cooldown 語義 → 降級為純 audit。自動收縮挪至 Phase 6（見下方「Phase 6 自動收縮」段）。
-- [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：需先決定 4-09 router 是否 attach + provider wire-up，比預期大 ~120-200 行）
-- [x] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）— `4780b04`
-- [x] **E-Merge-4** Guardian owned config struct 退化為 RiskConfig sub-view — modification_size_factor + modification_leverage_cap 升級至 RiskConfig.limits，dead 欄位 max_correlation 刪除，apply_risk_snapshot 改為 fresh 構造（無 RMW）。Guardian 任何旋鈕現在唯一真相源 = patch_risk_config。core 360 + engine 767。
-- [x] **1C-3-D 留尾** — RiskViewClient 9 個 deprecated stub 方法 + helper + test 刪除，strategy_wiring `_RISK_MGR_REF.set_h0_gate` 注入區塊刪除，17 個 .smbdelete ghost 檔清除 (`8554779`)
-- [ ] E2 + E4 + QA Audit + 文檔同步
+**1C-4 真正剩餘**：
+- [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：等 4-09 router decision + provider wire-up，~120-200 行）
+- [ ] E2 + E4 + QA Audit + 文檔同步（doc sync wrap 之後的最終驗收）
 
 ### 1C-4 留尾 · Python app/ 死代碼大掃除（DEAD-PY-1，~7h，非阻塞）
 

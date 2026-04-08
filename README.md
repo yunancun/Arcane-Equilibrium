@@ -31,66 +31,42 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-08 · ARCH-RC1 1C-3 SHIPPED · Python 风控核心徹底退场)
+## 当前状态 (2026-04-08 · ARCH-RC1 1C-4 WRAP COMPLETE · 单一 Rust 引擎)
 
 ```
-系统模式:     demo_only（Operator 授权 2026-03-31 · 仅限 Paper + Bybit Demo）
-执行权限:     disabled / not_granted（live 前必须保持）· live_execution_allowed = False
-测试:         engine lib 748 + core 387 + types 27 + ml_training 35 (Rust)
-              control_api 2944 passed (Python · 22 pre-existing fail · 0 regression)
-API 路由:     131+ 条（全部 Rust-first · Paper 写路由禁用或 IPC 控制）
-代码:         ~71,000 行（Python ~49k + Rust ~22k）
-双引擎:       Demo=执行引擎(Primary) · Paper=测试引擎(Testing) · Shadow orders default-on
-EXT-1:        ✅ Exchange-as-Truth 已实现（trading_mode=exchange · Demo=Live 统一路径）
+系统模式:     demo_only（仅限 Bybit Demo · live_execution_allowed = False）
+执行权限:     disabled / not_granted（live 前必须保持）
+测试:         Rust  engine lib 767 + core 387 + types 27 + ml_training 35
+              Python control_api 2694 passed (21 pre-existing fail · 0 regression)
+API 路由:     183 条（全部 Rust-first）
+代码:         ~62,000 行（Python ~40k + Rust ~22k，1C-3 收编后）
+单一引擎:     Rust openclaw_engine = paper / demo / live 三模式唯一引擎（1C-3-F 后）
+              tick pipeline + IntentProcessor + paper_state + governance + stop_manager
+ARCH-RC1:     ✅ 1A → 1C-4 WRAP COMPLETE
+              4 IPC 写入面（patch_{risk,learning,budget}_config + update_strategy_params）
+              5 engines 共飲一桶水熱重載 · V014 fail-soft audit
+              risk_manager.py 1633→53 行 shim · paper_trading_engine.py 2248 行徹底退场
+              Guardian = RiskConfig 純派生視圖（E-Merge-4 後無 RMW）
+治理:         GovernanceHub 4 SM (Python) + GovernanceCore (Rust) · fail-closed 已验证
+              Operator manual governor override（白名單 / 24h cooldown / V014 audit）
+              Position Reconciler 30s Bybit 真相轮询 audit-only（自动收缩留 Phase 6）
 PyO3 桥接:    BybitClient 39 方法（Account/Order/Position/Market/Instrument）
-IPC 控制:     pause/resume/close_all/reset + UpdateRiskConfig(9 fields) + set_strategy_active
-风控配置:     ✅ 全部 GUI 风控参数 runtime 可调 → IPC → Rust engine
-RRC-1:        ✅ H0Gate+9 position checks+Gate 2.7 全接入（2000+ 行风控代码接线完成）
-L3 审计:      ✅ 12路并行全系统审计（63 issues → 11 work packages → PA 整改计划）
-三品类:       ✅ linear / spot / inverse 全部就绪
-治理:         GovernanceHub (Python) + GovernanceCore (Rust) · fail-closed 已验证
-Rust 引擎:    ✅ Go/No-Go 7/7 PASS · 唯一 tick 处理引擎
-              P50=27μs · RSS 2.1MB · WS broken topics 已修复
-              IPC: command channel + expanded snapshot
-ARCH-RC1:     ✅ 1A→1C-3 SHIPPED · 1 Rust ConfigStore 权威 + 5 engines 共飲一桶水熱重載
-              · 4 IPC 寫入面 (3 Config patch + StrategyParams) · V014 audit
-              · risk_manager.py 1633→53 行 RiskViewClient shim · Python 风控核心徹底退场
-下一步:       1C-3-F (~5h fresh context) — Python paper engine 徹底退场
-              → 1C-4 Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA
-数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 87 indexes
-              9 compression + 15 retention policies · 11 Grafana VIEWs
-Phase 0a/0b:  ✅ 全部完成（8 schemas · DDL V001-V006 · sync_commit tiering）
-Bybit API:    ✅ BB+E5+PA 三轮审计通过 · 64 REST + 8 WS + 5 Private WS + 8 IPC
-              字典手册: docs/references/2026-04-04--bybit_api_reference.md
-              PyO3 桥接: 39 Python 方法直调 Rust Bybit 模组（零 IPC 开销 · 3.7s 增量编译）
-L3 审计:      ✅ 12 角色全系统审计完成（63 issues · 7P0/21P1 · PA 整改计划就绪）
-认证安全:     ✅ HttpOnly cookie + PG 127.0.0.1 only + IPC 600 perms
-L1 本地推理:  Ollama 9B（think=False，~1.9s）/ 27B（复杂任务，AnalystAgent）
-5-Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
+Phase 4:      ✅ CODE-COMPLETE（4-00~4-21 + 4.1）· Claude Teacher consumer loop 已 wire
+新闻引擎:     ✅ NewsPipeline + Guardian halt check 接好 / ⚠️ 60s scheduler spawn 待 A2
+学习引擎:     ✅ LearningConfig + Claude Teacher 接好 / ⚠️ LearningConfig 消费者待补
+Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
+5 Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
+数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 11 Grafana VIEWs
+Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC · 字典手册见 docs/references/
+下一步:       1) 7d paper trading 观察期（唯一 Live blocker）
+              2) DEAD-PY-1 4-phase 死代码清理（~7h，非阻塞，TODO.md）
+              3) A2 News scheduler / 多通道告警（OC-3）
+              4) Phase 5（W16-18 James-Stein + DL-1 + DL-2）
 ```
 
-**完成度（2026-04-08 · ARCH-RC1 1C-3 后校准）**
+**亮点**：ARCH-RC1 统一 Config 4 IPC 写入面 + 5 engines 热重载（端到端 e2e `4780b04`）· Python 风控/纸盘双退场 · Guardian = RiskConfig 纯派生视图 · 单一 Rust 引擎 · V014 audit · L3 12 路审计完成 · EXT-1 Exchange-as-Truth · 5 Agent · Rust tick <100μs · PyO3 39 方法 · Telegram+Webhook 双通道告警
 
-| 维度 | 已完成 | 说明 |
-|------|--------|------|
-| Rust 测试 | engine lib 748 + core 387 + types 27 + ml_training 35 | +307 vs Phase 4 baseline 441 |
-| Python 测试 | control_api 2944 passed | 22 pre-existing fail · 0 regression |
-| 风控架构 | 1A 前 7 套并行 → 1 Rust ConfigStore 权威 + 5 engines 同步热重载 | ARCH-RC1 Session 1 完成 |
-| Phase 4 | CODE-COMPLETE（22/22 子任务 + 4.1） | 等 7d paper trading 观察期 |
-
-| 环节 | 完成度 | 说明 |
-|------|--------|------|
-| 自动扫描 | 90% | ScoutWorker 30min 定时扫描已接通 |
-| 策略选择 | 50% | Regime-aware 已实现；V2 参数运行时可调待 Phase 3a |
-| AI 风险评估 | 75% | H0Gate+H1-H5+cost_gate+Gate 2.7 全接入；ML Scorer 待数据 |
-| 下单 | 85% | 治理 gate + OMS SM-03 已串联 |
-| 止损 | 95% | RRC-1: 9 check 全接入（hard/dynamic/TP/trailing/time/cost/DD/consec/daily） |
-| 学习 | 15% | 记账式学习 → ML 驱动学习闭环待融合方案执行 |
-| 进化 | 15% | EvolutionEngine 将被 Optuna TPE 取代（Phase 3b） |
-| DB | 10% | 11 张 flat 表 → 8-schema TimescaleDB 待 Phase 0 |
-| ML/DL | 0% | 融合方案 v0.5 设计完成，待 Phase 1+ 实施 |
-
-**亮点**：ARCH-RC1 统一 Config 热重载（Risk/Learning/Budget 3 个 Config + StrategyParams = 4 IPC 写入面）· Python 风控核心徹底退场（risk_manager.py 1633→53 行 shim）· 5 engines 共飲一桶水 · V014 audit · RRC-1 风控全接线 · L3 12路审计 · EXT-1 Exchange-as-Truth · 治理 fail-closed · 5 Agent · Rust tick <100μs · WS supervisor 自动重启 · PyO3 桥接 39 方法 · Telegram+Webhook 双通道告警
+**详细完成度视角**：见 `docs/audits/2026-04-07_phase4_final_signoff_audit.md`（Phase 4 sign-off）+ `TODO.md`（forward plan）。早期 A-J 能力目标 + Batch 9B 缺口表已过期归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`。
 
 **开发路线图**
 
@@ -237,55 +213,12 @@ srv/
 
 ---
 
-## 工程目标 vs 实现完成度（2026-04-03 更新）
+## 治理合规矩阵
 
-### 22 份治理文件合规矩阵
+22 份治理 SPEC 接入率 **20/22 = 91%**（SM-01 / SM-02 / SM-03 / SM-04 / EX-01 / EX-02 / EX-04 / EX-05 / EX-06 / DOC-07 全部 ✅）。
+未接入：`scout_routes.py`（独立运行时）。`paper_live_gate.py` 在 1C-3-F 后随 Python paper engine 一同退场。
 
-| 规格 | 要求 | 代码 | 接入 |
-|------|------|------|------|
-| **SM-01** 授权状态机 | 8态/16转/fail-closed | ✅ | ✅ GovernanceHub |
-| **SM-02** 决策租约 | 9态/TTL自动到期 | ✅ | ✅ GovernanceHub |
-| **SM-03** OMS 执行 | 11态订单生命周期 | ✅ | ✅ Paper Engine 映射 |
-| **SM-04** 风控状态机 | 6级风险 | ✅ | ✅ GovernanceHub |
-| **EX-01** 风控边界 | P0/P1/P2 三层 | ✅ | ✅ |
-| **EX-02** OMS 执行边界 | 单一执行入口 | ✅ | ✅ SM-03 串联 |
-| **EX-04** 对账边界 | 5类结果 | ✅ | ✅ GovernanceHub |
-| **EX-05** 学习边界 | L1→L5 五级门控 | ✅ | ✅ 自动晋升接入 |
-| **EX-06** 多Agent编排 | 5 Agent + Conductor | ✅ | ✅ 5 Agent 运行 |
-| **DOC-07** 审计 | append-only JSONL | ✅ | ✅ GovernanceHub |
-
-**接入率: 20/22 = 91%** · 合规度 ~90%
-
-未接入：`paper_live_gate.py`（Paper→Live 门控）、`scout_routes.py`（独立于 paper trading 运行时）
-
-### A-J 能力目标完成度
-
-| 目标 | 描述 | 完成度 | 说明 |
-|------|------|--------|------|
-| A | 自主交易执行 | 70% | 治理 gate fail-closed + 5 Agent + OMS 串联 |
-| B | 成本收益感知 | 65% | AI 成本追踪 + 成本感知入场门槛（cost_gate） + round-trip 真实费用 |
-| C | 计算路径智能分级 | 40% | L0+L1 实现，L2 框架就绪 |
-| D | 自我感知 | 50% | H0 Gate + GovernanceHub 状态 API |
-| E | 持续学习 | 35% | E1 观察 + L2 自动触发 + Evolution；L3-L5 待推进 |
-| F | 日/周报告 | 35% | 路由存在 + daily cron |
-| G | Agent 自主交易 | 65% | 5 Agent 运行 + Conductor 编排 |
-| H | 对抗性止损 | 75% | ATR 双窗口 + 追踪止损成本约束；缺交易所条件单 |
-| I | AI 注意力税 | 15% | 框架设计存在 |
-| J | GUI 控制台 | 85% | 11-Tab 完成 |
-
-### 剩余重点缺口
-
-| 优先级 | 缺口 |
-|--------|------|
-| P0 | 学习反馈闭环未接入决策路径（Batch 9B U-01） |
-| P0 | 进化参数自动重部署（Batch 9B U-02） |
-| P1 | 交易所条件单 SL/TP（原则 9 双重防线） |
-| P1 | H0 Gate shadow 模式观察 |
-| P1 | Scanner→Deployer 自动接通 |
-| P2 | Paper→Live 门控接入授权工作流 |
-| P2 | L5 meta-learning 未实现 |
-
-详细任务清单见 `TODO.md`（Batch 9B-9D）
+> 详细完成度 / 工程目标 vs 实现矩阵已归档至 `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`（含早期 A-J 表 + Batch 9B 缺口列表，因 ARCH-RC1 后大幅过期）。当前 forward 计划见 `TODO.md`。
 
 ---
 

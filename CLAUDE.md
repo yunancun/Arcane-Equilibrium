@@ -46,36 +46,22 @@
 
 ## 三、當前系統狀態摘要
 
-> ARCH-RC1 Session 1A → 1C-3-E F-mini 詳細歷史（commits / 行數 / sub-batch）已歸檔到
-> `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`。本節只記錄當前狀態。
+> 完整 ARCH-RC1 1A → 1C-4 SHIPPED 敘事（commits / 行數 / 設計決策）已歸檔到：
+> - `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`（1C-3 / 1C-4 + 移除的 README 過期 block）
+> - `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`（1A → 1C-3-E 完整逐 commit 歷史）
+> - `docs/CLAUDE_CHANGELOG.md`（逐 commit 行數變化）
 
-### ★★★★ ARCH-RC1 1C-3 SHIPPED — Python 風控核心徹底退場（2026-04-08）
+### ARCH-RC1 1C-4 WRAP COMPLETE ✅（2026-04-08 深夜）
 
-**契約終局**：所有交易/風控/學習/預算參數由 Rust 權威持有 = 3 個獨立熱重載 Config (Risk/Learning/Budget) + 既有 StrategyParams = **4 個 IPC 寫入面**。Python 完全廢掉風控核心，只剩 IPC 讀取 adapter。**禁止 restart-to-apply**。記憶：`project_arch_rc1_unified_config.md`。
+**契約終局**：所有交易/風控/學習/預算參數由 Rust ConfigStore 權威持有 = **4 個 IPC 寫入面**（3 patch_*_config + StrategyParams）→ tick-level hot-reload → 5 engines 共飲一桶水（intent_processor.risk_config / .guardian / paper_state.stop_config / h0_gate.config / governance.risk.thresholds）→ V014 fail-soft audit。**禁止 restart-to-apply**。
 
-**風控收編軌跡**：1A 前 7 套並行 → 1C-1 後 2 套 → 1C-2-F 後 1 Config 權威 + 5 engines 同步熱重載 → **1C-3-D 後 1 Rust ConfigStore 權威 + 53 行 Python RiskViewClient shim**。`risk_manager.py` 1633 → 53 行 (-97%)，刪 9 個純 Python 風控/H0/Engine 測試檔 ~6900 行（邏輯已 100% 在 Rust 748 tests 覆蓋）。
+**單一引擎契約**：1C-3-F 後 Rust `openclaw_engine` 為 paper/demo/live **三模式唯一引擎**。Python `risk_manager.py` 1633 → 53 行 shim（-97%），`paper_trading_engine.py` 2248 行徹底退場。Guardian = `RiskConfig` 純派生視圖（E-Merge-4 後無 RMW，唯一真相源 = `patch_risk_config`）。
 
-**5 engines 共飲一桶水**：`apply_risk_snapshot()` 單一傳播入口，每次 RiskConfig store 版本變化同步：
-1. `intent_processor.risk_config`（Gate 0 + tick check 主引擎）
-2. `intent_processor.guardian`（P0 trade intent modify verdict）
-3. `paper_state.stop_config`（H0/pause 保護 fallback）
-4. `h0_gate.config`（健康 + 風控欄位）
-5. `governance.risk.thresholds`（6-tier 級聯狀態機）
+**1C-4 wrap commit chain**：A1 `03fee49` · B1 `e840003` (cooldown PG) · B2 `36335d7`→`ab1e0d8`(降級)→`9811bf3` (audit-only) · 熱重載 e2e `4780b04` · E-Merge-4 `06742b3` · 1C-3-D 留尾清理 `8554779` · doc sync `f882473`。
 
-**4 IPC 寫入面**：3 patch endpoints (`patch_{risk,learning,budget}_config`) 走 ConfigStore.replace() → version++ → tick-level hot-reload，成功時 V014 `engine_events` audit row（fail-soft）；StrategyParams 既有路徑不變。
+**B2 降級決策**：Position Reconciler 原含自動 governor 收縮，QA+E2 審查發現與 operator override 白名單 + B1 cooldown 語義衝突 → 降級為純 audit。**自動收縮重新設計後挪至 Phase 6 6-RC-1~9**（TODO.md 規格已寫死）。
 
-**Operator manual governor override**（1C-3-B-2）：reason_code 白名單 / 單步 / 24h cooldown / CB&MR 鎖死 / 5min hold / V014 from-to 審計（含 rejected 分支）。Cooldown PG 持久化是 1C-4 留尾。
-
-**1C-3-E F-mini SHIPPED**（2026-04-08 PM · `d8fb7f2` `cf3ff48`）：bridge_core.py 死引用清除 / paper_trading_routes 砍 4 dead imports / risk_routes::unhalt_session 砍 deprecated PAPER_STORE.mutate / `_h0_db_probe` 改 os.stat。
-
-**1C-3-F SHIPPED**（2026-04-08 · `accf625` `8ff93e0` `de1ec69`）：Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 paper/demo/live 三模式唯一引擎。
-- F-a Rust 補 paper-side `submit_paper_order` IPC RPC（`PaperSessionCommand::SubmitOrder` + `submit_external_order` 走 IntentProcessor 全 gate；4 個 e2e 測試）
-- F-b `shadow_decision_builder.py` rewire 走 `EngineIPCClient`（async consume + Layer 2 routes lazy-build consumer）
-- F-c/d 刪 `paper_trading_engine.py` 2248 行 + 13 依賴測試檔 + conftest fixtures 整塊；`paper_trading_routes.py` 內聯 `DEFAULT_INITIAL_BALANCE_USDT`；`paper_trading_wiring.py` PAPER_STORE/ENGINE 留 None stub（main.py / governance_routes / strategy_wiring 全部已 `is not None` 短路）
-
-**ARCH-RC1 1C-4 WRAP COMPLETE ✅**（2026-04-08 深夜）：A1 (`03fee49`) · B1 Governor cooldown PG 持久化 (`e840003`，V014 replay) · B2 Position Reconciler **audit-only** (`36335d7` 初版 → `ab1e0d8` 降級 → `9811bf3` QA polish) — 30s Bybit 輪詢 + 5 級漂移分類 + first-cycle warmup + V014 audit。原設計自動 governor trigger 經 QA+E2 雙審查發現與 operator manual override 白名單 + B1 cooldown 語義雙重衝突，已降級為純 audit；自動收縮挪至 **Phase 6 自動收縮 6-RC-1~9**（TODO.md 規格寫死）· **熱重載 e2e** (`4780b04`) 一次驗證 5 consumers · **E-Merge-4** (`06742b3`) Guardian 退化為 RiskConfig 純派生視圖（modification_size_factor + modification_leverage_cap 升級至 RiskConfig.limits，dead 欄位 max_correlation 刪除，apply_risk_snapshot 改 fresh 構造無 RMW）。
-
-**1C-4 留尾項**（非阻塞）：A2 NewsPipeline scheduler（延後待 4-09 router）/ W1 event_consumer/mod.rs 826 行下次觸碰時拆分 / Phase 6 自動收縮 6-RC-1~9 規格已寫死。
+**留尾項**（非阻塞）：A2 NewsPipeline 60s scheduler / W1 event_consumer/mod.rs 826 行拆分 / DEAD-PY-1 Python app/ 死代碼 4-phase 清理（規格寫死於 TODO.md）。
 
 **測試基準線**：engine lib **767** · core **387** · types 27 · ml_training 35 · Python control_api **2694 passed** (21 pre-existing fail · 0 regression)。
 
@@ -136,9 +122,10 @@ max_retries             = 0
 [GovernanceHub]          SM-01 授權 + SM-04 風控 + SM-02 租約 + EX-04 對賬
 [H1-H5 AI 治理層]       thought_gate / budget / model_router / governor / cost_logging
 [I Decision Lease]       GovernanceHub.acquire_lease() / release_lease()
-[Control API v1]         FastAPI 126+ 路由
+[Control API v1]         FastAPI 183 路由
 [GUI + Learning]         11-Tab 控制台 + Learning Cockpit + Paper Trading Dashboard
-[Paper Trading Engine]   7 狀態生命週期 / 成交模擬 / PnL / 治理 gate 接入
+[Rust openclaw_engine]   paper / demo / live 三模式唯一引擎（1C-3-F 後）
+                         tick pipeline + IntentProcessor + paper_state + governance + stop_manager
 [Layer 2 AI 推理]        L0 確定性 → L1 Ollama → L2 Claude
 [風控框架]               P0/P1/P2 三層 + 對抗性止損 + AI 注意力稅
 [策略工具包]             KlineManager → IndicatorEngine → SignalEngine → 5 策略 → Orchestrator
@@ -319,20 +306,18 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**★★★ 當前焦點：L3 審計整改（63 issues · 11 WP · PA 報告）→ Phase 4 (7/03) → 讀 TODO.md 開始執行**
+**★★★ 當前焦點（2026-04-08 後）：**
+1. **7d paper trading 數據觀察期**（calendar-time，唯一 Live blocker）
+2. **DEAD-PY-1 Python app/ 死代碼 4-phase 清理**（~7h，非阻塞，規格寫於 TODO.md）
+3. **A2 NewsPipeline 60s scheduler spawn**（待 4-09 router 決策）
+4. **Phase 5 啟動準備**（James-Stein + DL-1 + DL-2，W16-18）
+5. **多通道告警上線**（OC-3，B2 audit-only 後的 operator 通知通道，是 Phase 6 自動收縮 6-RC-6 阻塞依賴）
 
-**★★ 融合路線圖（DB + ML/DL + 新聞 Agent · 20 週 · 起算 4/11）：**
-- **Phase 0a**（W1）：PG 8-Schema DDL + Grafana VIEW 橋接
-- **Phase 0b**（W2-3）：TimescaleDB + 壓縮/retention + requirements-ml
-- **Phase 1**（W4-5）：市場數據止血 + FeatureCollector + PSI 漂移
-- **Phase 2**（W6-9）：交易鏈 + Decision Context + Scorer + ONNX [+buffer]
-- **Phase 3a**（W9-10）：update_params() = AGT-1
-- **Phase 3b**（W11-12）：Optuna TPE + Thompson Sampling + CPCV + 黑天鵝
-- **Phase 4**（W13-15）：Claude Teacher + LinUCB + 新聞 + DL-3
-- **Phase 5**（W16-18）：James-Stein + DL-1 + DL-2
-- **Phase 6**（W19-20）：漸進放權 + 驗收
-
-**前期路線圖（已完成）：** Phase 0-3 ✅ · Phase R R-00~R-06 ✅ · R-07 灰度中
+**融合路線圖（已大半完成）：**
+- Phase 0/0a/0b ✅ · Phase 1 ✅ · Phase 2 ✅ · Phase 3a/3b ✅ · Phase 4 + 4.1 ✅
+- ARCH-RC1 1A → 1C-4 ✅（1C-2 Config 熱重載 / 1C-3 Python 風控+紙盤雙退場 / 1C-4 wrap）
+- **Phase 5（W16-18）⬜** James-Stein per-parameter shrinkage + DL-1 Symbol Embedding + DL-2 Regime LSTM Shadow
+- **Phase 6（W19-20）⬜** 漸進放權 + 自動收縮 6-RC-1~9 + 驗收 + 壓測
 
 **關鍵文件：**
 - **★ Bybit API 字典手冊：`docs/references/2026-04-04--bybit_api_reference.md`**
