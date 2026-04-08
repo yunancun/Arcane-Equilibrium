@@ -437,7 +437,10 @@ async function loadDemoFills() {
   let html = '';
   fills.slice(0, 50).forEach(f => {
     const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
-    const ts = f.execTime || f.updatedTime || f.createdTime || f.ts_ms || '';
+    // Rust ExecutionInfo serializes time field as `exec_time` (snake_case) — was missing
+    // from the fallback chain so the column rendered as '--'.
+    // / Rust ExecutionInfo 序列化欄位名為 exec_time，之前不在 fallback 鏈中導致該欄顯示 '--'。
+    const ts = f.exec_time || f.execTime || f.updatedTime || f.createdTime || f.ts_ms || '';
     const price = parseFloat(f.execPrice || f.price || 0);
     const qty = parseFloat(f.execQty || f.qty || 0);
     const fee = parseFloat(f.execFee || f.fee || 0);

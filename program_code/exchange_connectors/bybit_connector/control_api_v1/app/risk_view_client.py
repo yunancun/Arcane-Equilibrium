@@ -247,10 +247,32 @@ class RiskViewClient:
     async def update_global_config(self, updates: dict[str, Any]) -> dict[str, Any]:
         """Operator-initiated global config patch.
         Maps flat GUI field names to Rust nested config format before patching.
-        / 將 GUI 平坦欄位名稱映射到 Rust 嵌套 config 格式後再 patch。
+        Cross-Config field `max_cost_edge_ratio` is split off and routed to
+        BudgetConfig.attention_tax.cost_edge_max_ratio via patch_budget_config
+        (closes Task #8 — was a silent dead-write before).
+        / 將 GUI 平坦欄位映射為 Rust 嵌套 config 格式。跨 Config 欄位
+        `max_cost_edge_ratio` 拆出來經 patch_budget_config 路由到
+        BudgetConfig.attention_tax.cost_edge_max_ratio（閉合 Task #8）。
         """
+        # CFG-COST-EDGE-1: route max_cost_edge_ratio to BudgetConfig
+        cost_edge = updates.pop("max_cost_edge_ratio", None) if isinstance(updates, dict) else None
         nested = _remap_global_to_rust(updates)
-        return await self._patch("operator", nested)
+        result: dict[str, Any] = {}
+        if nested:
+            result = await self._patch("operator", nested)
+        if cost_edge is not None and self._ipc is not None:
+            try:
+                await self._ipc.call(
+                    "patch_budget_config",
+                    params={
+                        "patch": {"attention_tax": {"cost_edge_max_ratio": float(cost_edge)}},
+                        "source": "operator",
+                    },
+                )
+            except Exception as e:
+                logger.error("patch_budget_config(cost_edge_max_ratio) failed: %s", e)
+                raise
+        return result
 
     async def update_category_config(
         self, category: str, updates: dict[str, Any]
