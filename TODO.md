@@ -10,7 +10,43 @@
 
 ## 🎯 下一步起點
 
-### 🔥 P0 — ConfigStore disk persistence（2026-04-08 發現）
+### 🔥🔥 P0 — Phase 5 提前啟動（2026-04-08 Edge 危機）
+
+**根因實證**：tab-paper / tab-demo 4 筆 round-trip 全部 realized pnl 0.01–0.04%（SOLUSDT/DOGEUSDT），但 fee=0.055% 雙邊 break-even=0.11% → 結構性負期望值。Diag log（`tick_pipeline.rs:1864` warn 已永久化）證實 paper 平倉 100% 為 `COST EDGE: ratio 2.5–20+, pnl 0.01–0.04%`。
+
+**Cost_gate 為何沒攔住**（`intent_processor.rs:558`）：
+```
+EV = atr × confidence × qty
+(qty 與 fee 兩邊約掉 → gate 與 size 無關)
+EV/fee = atr_pct × conf / (2 × fee_rate)
+```
+公式錯誤地把 ATR（range，非 directional edge）當期望盈利，而且 `confidence` 是策略自評未對照歷史 → 高估 ~13×（DOGE 案例：predict 0.052% vs realized 0.004%）。
+
+**hand-roll C+D（in-house realized-edge tracker）已被否決**：跟 Phase 5 (DL-1/2 + James-Stein) 重疊 ~70%，會被淘汰。決定**直接把 Phase 5 提到 P0**。
+
+- [ ] **PH5-PROMOTE-1** 確認 Phase 5 spec 目前位置 + 把 W16-18 的目標重新排序到「立即啟動」
+- [ ] **PH5-DL-1** 歷史 K 線 replay 基礎設施（K 線載入 / signal 重放 / 模擬撮合 / fee + slippage 模型）
+- [ ] **PH5-DL-2** Per (strategy × symbol) realized edge distribution 統計 + JSON dump
+- [ ] **PH5-JS-1** James-Stein shrinkage estimator 整合（per-cell raw edge → shrunk edge toward universe mean）
+- [ ] **PH5-WIRE-1** `intent_processor` cost_gate 改用 shrunk realized edge 取代 `atr × conf`，cold-start 仍 fallback ATR×conf×0.2
+- [ ] **PH5-VERIFY-1** 跑 7d paper observation 看 fills / realized pnl 分布是否改善（同時也是 Live blocker 觀察期）
+
+**參考文件**：`docs/references/2026-04-04--*.md` 系列 ML/Phase 5 設計（James-Stein / Teacher-Student），需要在 PH5-PROMOTE-1 階段彙整重讀。
+
+**Edge 概念釐清備忘**：edge = 扣成本前的單筆期望淨收益（bps）。當前實證 realized edge ≈ 2 bps，fee = 11 bps → Net EV ≈ −9 bps。修 cost_gate 公式 ≠ 修策略；要修策略只能靠 backtest 找出真有 edge 的 (strategy, symbol) 子集。
+
+---
+
+### ✅ P0 — ConfigStore disk persistence（2026-04-08 完成）
+
+完成 commits：CFG-PERSIST-1 `5d7d673` · CFG-COST-EDGE-1（含 Task #8）`0e848fa` · cost_edge revert + diag log `638afa3`。
+- [x] CFG-PERSIST-1 atomic TOML write-back
+- [x] CFG-PERSIST-3 max_cost_edge_ratio dead-write 修復（routed to BudgetConfig via patch_budget_config）
+- [ ] CFG-PERSIST-3 殘留：`max_correlated_exposure_pct` / `allowed_categories` / `preferred_margin_mode` / `preferred_position_mode` GUI 入口（決定補入口或從 Pydantic 移除）— 非阻塞，留 Task #6/#7
+
+---
+
+### 🔥 P0 — ConfigStore disk persistence（已完成保留 narrative，下面為原條目）
 
 `rust/openclaw_engine/src/config/store.rs:9` 註釋寫「不負責落盤，是 1C 載入器的工作」，但 1C loader 從來只實作載入，**從來沒實作回寫**。後果：所有 GUI patch（risk/learning/budget）只在 in-memory ConfigStore 生效，引擎重啟後 TOML reload → 全部 reset。違反 CLAUDE.md §三「Rust ConfigStore 為權威 + 禁止 restart-to-apply」。
 
