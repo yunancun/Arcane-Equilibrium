@@ -49,13 +49,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .paper_trading_engine import (
-    ORDER_TYPE_MARKET,
-    SIDE_BUY,
-    SIDE_SELL,
-    PaperTradingEngine,
-    SESSION_ACTIVE,
-)
+from .ipc_client import EngineIPCClient
+
+# ARCH-RC1 1C-3-F: paper_trading_engine.py is being retired. The handful of
+# constants we still need are inlined here so this module no longer pins the
+# dead Python paper engine.
+# ARCH-RC1 1C-3-F：paper_trading_engine.py 退場後，原本從它取的常量改為內聯。
+ORDER_TYPE_MARKET = "market"
+SIDE_BUY = "Buy"
+SIDE_SELL = "Sell"
+SESSION_ACTIVE = "active"
 
 logger = logging.getLogger(__name__)
 
@@ -183,33 +186,36 @@ def build_shadow_decision(
 
 class ShadowDecisionConsumer:
     """
-    Consumes shadow decisions and creates paper orders when appropriate.
-    消费影子决策，在满足条件时创建纸上订单。
+    Consumes shadow decisions and submits paper orders to the Rust engine via
+    IPC. The consumer is intentionally async — Layer 2 is the only production
+    caller and it already runs inside an asyncio event loop.
+    消费影子决策并通过 IPC 向 Rust 引擎提交纸上订单。consume() 為 async，因為
+    唯一的生產調用方 Layer 2 本身就在 asyncio loop 內運行。
     """
 
     def __init__(
         self,
-        engine: PaperTradingEngine,
+        client: EngineIPCClient,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         edge_threshold_bps: float = DEFAULT_EDGE_THRESHOLD_BPS,
         position_size_fraction: float = DEFAULT_POSITION_SIZE_FRACTION,
     ) -> None:
-        self._engine = engine
+        self._client = client
         self._confidence_threshold = confidence_threshold
         self._edge_threshold_bps = edge_threshold_bps
         self._position_size_fraction = position_size_fraction
         self._decision_history: list[dict[str, Any]] = []
 
-    def consume(
+    async def consume(
         self,
         decision: dict[str, Any],
         market_prices: dict[str, float],
     ) -> dict[str, Any]:
         """
-        Process a shadow decision — create paper order if signal is strong enough.
-        处理影子决策 — 如果信号足够强则创建纸上订单。
-
-        Returns consumption result with decision_id → order_id mapping.
+        Process a shadow decision — submit paper order via IPC if the signal
+        is strong enough. Returns the consumption result with decision_id →
+        order_id mapping.
+        处理影子决策 — 信号足够强时通过 IPC 向 Rust 引擎提交纸上订单。
         """
         result: dict[str, Any] = {
             "decision_id": decision["decision_id"],
@@ -219,20 +225,16 @@ class ShadowDecisionConsumer:
             "reason": "",
         }
 
-        # Check session is active / 检查 session 活跃
+        # Pull paper state via IPC for balance + pause/halt awareness.
+        # 通過 IPC 取紙盤狀態（餘額 + 暫停/halt 感知）。
         try:
-            state = self._engine.get_state()
-        except Exception:
-            result["reason"] = "engine_read_failed"
+            state = await self._client.get_paper_state()
+        except Exception as exc:
+            result["reason"] = f"engine_read_failed: {exc}"
             self._record(decision, result)
             return result
 
-        if state.get("session", {}).get("session_state") != SESSION_ACTIVE:
-            result["reason"] = "session_not_active"
-            self._record(decision, result)
-            return result
-
-        # Check if decision says to trade / 检查决策是否建议交易
+        # Decision veto check / 決策否決檢查
         if not decision.get("should_trade"):
             result["reason"] = "; ".join(decision.get("blocking_reasons", ["no_signal"]))
             self._record(decision, result)
@@ -241,71 +243,71 @@ class ShadowDecisionConsumer:
         symbol = decision["symbol"]
         side = decision["trade_side"]
         price = market_prices.get(symbol)
-
         if not price or price <= 0:
             result["reason"] = f"no_market_price_for_{symbol}"
             self._record(decision, result)
             return result
 
-        # Calculate position size / 计算仓位大小
-        # Apply risk manager's position_size_multiplier if available
-        # 如果有风控管理器，应用仓位大小乘数
-        balance = state["session"].get("current_paper_balance_usdt", 0)
+        # Position sizing — fraction of paper balance, optionally trimmed by an
+        # agent multiplier. The Rust engine still applies Kelly + P1 cap on top.
+        # 倉位計算 — 紙盤餘額的固定比例（agent multiplier 可調），最終 Kelly + P1 由 Rust 收斂。
+        balance = float(state.get("balance", 0.0) or state.get("current_balance", 0.0))
         effective_fraction = self._position_size_fraction
-        risk_state = state.get("risk", {})
-        agent_params = risk_state.get("agent_params", {})
+        agent_params = state.get("agent_params", {}) if isinstance(state, dict) else {}
         multiplier = agent_params.get("position_size_multiplier", 1.0)
         effective_fraction *= max(0.1, min(multiplier, 1.0))
         notional = balance * effective_fraction
-        qty = notional / price
+        qty = notional / price if price > 0 else 0.0
         if qty <= 0:
             result["reason"] = "insufficient_balance"
             self._record(decision, result)
             return result
 
-        # Round qty to reasonable precision / 合理精度
-        if price > 10000:
-            qty = round(qty, 5)   # BTC-like
+        # Reasonable client-side rounding so the IPC payload is clean; the
+        # Rust engine still does the authoritative instrument-precision round.
+        # 客戶端粗略取整保持 IPC 入參乾淨；Rust 端再做合約精度權威取整。
+        if price > 10_000:
+            qty = round(qty, 5)
         elif price > 100:
-            qty = round(qty, 3)   # ETH-like
+            qty = round(qty, 3)
         else:
             qty = round(qty, 1)
-
         if qty <= 0:
             result["reason"] = "qty_rounds_to_zero"
             self._record(decision, result)
             return result
 
-        # Submit paper order / 提交纸上订单
+        # Submit via IPC. Rust enforces all gates uniformly with strategy intents.
+        # 通過 IPC 提交。Rust 端對外部訂單與策略 intent 一視同仁地做所有 gate。
         try:
-            order_result = self._engine.submit_order(
+            envelope = await self._client.submit_paper_order(
                 symbol=symbol,
                 side=side,
-                order_type=ORDER_TYPE_MARKET,
                 qty=qty,
-                market_prices=market_prices,
+                order_type=ORDER_TYPE_MARKET,
+                confidence=float(decision.get("confidence") or 1.0),
+                strategy=f"layer2:{decision['decision_id']}",
             )
-
-            if order_result.get("rejected_reason"):
-                result["action_taken"] = "rejected"
-                result["reason"] = order_result["rejected_reason"]
-            else:
-                result["action_taken"] = "order_submitted"
-                result["order_id"] = order_result["order"]["order_id"]
-                result["reason"] = f"confidence={decision['confidence']:.2f} edge={decision['edge_assessment_bps']:.1f}bps"
-
-                # Record shadow decision in paper state
-                self._engine.store.mutate(lambda s: _append_shadow_decision(s, decision, result))
-
-                logger.info(
-                    "Shadow decision → paper order: %s %s %s qty=%.6f @ %.2f",
-                    decision["decision_id"], side, symbol, qty, price,
-                )
-
-        except Exception as e:
-            result["action_taken"] = "error"
-            result["reason"] = str(e)
-            logger.error("Shadow decision consume error: %s", e)
+            result["action_taken"] = "order_submitted"
+            result["order_id"] = envelope.get("order_id")
+            result["fill_qty"] = envelope.get("fill_qty")
+            result["fill_price"] = envelope.get("fill_price")
+            result["reason"] = (
+                f"confidence={decision['confidence']:.2f} "
+                f"edge={decision['edge_assessment_bps']:.1f}bps"
+            )
+            logger.info(
+                "Shadow decision → paper order via IPC: %s %s %s qty=%.6f @ %.2f → %s",
+                decision["decision_id"], side, symbol, qty, price,
+                envelope.get("order_id"),
+            )
+        except Exception as exc:
+            # Rust engine rejection (paper_paused / risk_gate / cost_gate / …)
+            # surfaces here as the JSON-RPC error message.
+            # Rust 端拒絕（暫停 / 風控門 / 成本門 …）以 JSON-RPC error 出現於此。
+            result["action_taken"] = "rejected"
+            result["reason"] = str(exc)
+            logger.warning("Shadow decision rejected by engine: %s", exc)
 
         self._record(decision, result)
         return result
@@ -322,28 +324,6 @@ class ShadowDecisionConsumer:
         # Cap history
         if len(self._decision_history) > 200:
             self._decision_history = self._decision_history[-200:]
-
-
-def _append_shadow_decision(state: dict, decision: dict, result: dict) -> dict:
-    """Append shadow decision record to paper state / 将影子决策记录附加到纸上状态"""
-    if "shadow_decisions" not in state:
-        state["shadow_decisions"] = []
-    state["shadow_decisions"].append({
-        "decision_id": decision["decision_id"],
-        "order_id": result.get("order_id"),
-        "symbol": decision["symbol"],
-        "side": decision.get("trade_side"),
-        "confidence": decision["confidence"],
-        "edge_bps": decision["edge_assessment_bps"],
-        "market_regime": decision["market_regime"],
-        "action_taken": result["action_taken"],
-        "ts_ms": result["consumed_ts_ms"],
-        "is_simulated": True,
-    })
-    # Cap at 200 entries
-    if len(state["shadow_decisions"]) > 200:
-        state["shadow_decisions"] = state["shadow_decisions"][-200:]
-    return state
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -372,7 +352,7 @@ class ShadowDecisionFileFeeder:
         self._default_symbol = default_symbol
         self._last_processed_verdict_ts: int = 0
 
-    def check_and_feed(self, market_prices: dict[str, float]) -> dict[str, Any] | None:
+    async def check_and_feed(self, market_prices: dict[str, float]) -> dict[str, Any] | None:
         """
         Check for new H-chain outputs and feed if available.
         检查是否有新的 H 链输出，如果有则馈送。
@@ -402,8 +382,8 @@ class ShadowDecisionFileFeeder:
             symbol=self._default_symbol,
         )
 
-        # Consume / 消费
-        return self._consumer.consume(decision, market_prices)
+        # Consume / 消费 — consumer.consume is async (ARCH-RC1 1C-3-F).
+        return await self._consumer.consume(decision, market_prices)
 
     @staticmethod
     def _load_json(path: Path | None) -> dict[str, Any] | None:

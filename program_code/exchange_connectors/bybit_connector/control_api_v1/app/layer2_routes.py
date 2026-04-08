@@ -41,7 +41,12 @@ from pydantic import BaseModel, Field
 from . import main_legacy as base
 from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_engine import Layer2Engine
-from .paper_trading_routes import ENGINE as PAPER_ENGINE, SHADOW_CONSUMER
+# ARCH-RC1 1C-3-F: Layer 2's paper-side path now goes through the Rust engine
+# via IPC. PAPER_ENGINE / SHADOW_CONSUMER from paper_trading_routes were both
+# `None` in production after RC-10; the consumer is now built on-demand below
+# from the EngineIPCClient singleton.
+# ARCH-RC1 1C-3-F：Layer 2 紙盤路徑改走 IPC，consumer 在此模組內按需建構。
+from .shadow_decision_builder import ShadowDecisionConsumer
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +71,32 @@ def _get_cost_tracker() -> Layer2CostTracker:
     return _cost_tracker
 
 
+def _build_shadow_consumer() -> ShadowDecisionConsumer | None:
+    """Build a ShadowDecisionConsumer backed by the EngineIPCClient singleton.
+    Returns None when the IPC client cannot be resolved (test env / boot race);
+    Layer 2 falls back to "no paper submission" in that case.
+    建構由 EngineIPCClient singleton 支撐的 ShadowDecisionConsumer。
+    IPC 不可用時返回 None；Layer 2 會跳過紙盤提交。
+    """
+    try:
+        from .ipc_client import EngineIPCClient  # noqa: PLC0415
+        factory = getattr(EngineIPCClient, "get_singleton", None)
+        if factory is None:
+            return None
+        client = factory()
+        return ShadowDecisionConsumer(client=client)
+    except Exception as exc:
+        logger.warning("ShadowDecisionConsumer wiring skipped: %s", exc)
+        return None
+
+
 def _get_engine() -> Layer2Engine:
     global _engine
     if _engine is None:
         _engine = Layer2Engine(
             cost_tracker=_get_cost_tracker(),
-            paper_engine=PAPER_ENGINE,
-            shadow_consumer=SHADOW_CONSUMER,
+            paper_engine=None,  # ARCH-RC1 1C-3-F: Python paper engine retired
+            shadow_consumer=_build_shadow_consumer(),
         )
     return _engine
 
