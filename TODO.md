@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-08 深夜
-測試基準線：**engine lib 752 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
+最後更新：2026-04-08 深夜（1C-4 A1+B1 SHIPPED）
+測試基準線：**engine lib 757 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (21 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > ARCH-RC1 1A→1C-3-F 詳細歷史已歸檔到 `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/CLAUDE_CHANGELOG.md`。
@@ -22,9 +22,10 @@ Python `paper_trading_engine.py` 徹底退場，Rust openclaw_engine 成為 pape
 
 ### 1C-4 收尾（F 完成後）
 
-- [ ] Position Reconciler（trading.open_positions + Bybit 對帳 + cooldown 重建）
-- [ ] **Governor tier override cooldown PG 持久化**（1C-3-B-2 known limitation：目前 in-memory，重啟重置；live 前必做）
-- [ ] NewsPipeline `run_once` 60s scheduler spawn
+- [x] **A1** 註釋級殘留清理 — RC-10 disabled → 1C-3-F retired (`03fee49`)
+- [x] **B1** Governor cooldown PG 持久化 — V014 replay on startup, +5 tests, engine lib 752→757 (`e840003`)
+- [ ] **B2** Position Reconciler（trading.position_snapshots + Bybit `/v5/position/list` 對帳 + cooldown 重建）
+- [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（延後：需先決定 4-09 router 是否 attach + provider wire-up，比預期大 ~120-200 行）
 - [ ] 熱重載 e2e 驗收測試（tick 跑著改參數 → 下個 tick 生效，無 restart）
 - [ ] E-Merge-4（可選）Guardian owned config struct 退化為 RiskConfig sub-view
 - [ ] E2 + E4 + QA Audit + 文檔同步

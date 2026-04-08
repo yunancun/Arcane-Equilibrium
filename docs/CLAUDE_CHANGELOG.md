@@ -1,7 +1,28 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 深夜
+> 最後更新：2026-04-08 深夜（1C-4 A1+B1）
+
+### ARCH-RC1 1C-4 A1+B1 SHIPPED — Governor cooldown PG 持久化 + 註釋話術同步（2026-04-08 · commits `03fee49` `e840003`）
+
+**A1 — 註釋話術同步**（`03fee49`，11+/9-）
+- 1C-3-F 物理刪除 `paper_trading_engine.py` 後，main.py + paper_trading_wiring.py 仍有 6 行「RC-10 ENGINE removed — Python PaperTradingEngine disabled」舊話術，現在不準確（不是 disabled，是 deleted）
+- 統一改為 "ARCH-RC1 1C-3-F: PaperTradingEngine retired (deleted), openclaw_engine is sole engine"
+- 純文字 commit，無代碼變更
+
+**B1 — Governor cooldown PG 持久化**（`e840003`，+173 行）
+- 1C-3-B-2 known limitation：operator de-escalation 24h cooldown 原本 in-memory，重啟靜默重置
+- **關鍵簡化發現**：每次成功降級已經寫 V014 row（`event_type='governor_de_escalate'`, `payload.result='applied'`），V014 已是 source of truth，**無需新 migration / 新 INSERT 路徑**
+- 啟動時 query 最近一筆 applied row，若在 24h 窗口內 reseed `TickPipeline.last_governor_de_escalation_ms`
+- `EventConsumerDeps` 新增 `audit_pool: Option<sqlx::PgPool>`，`main.rs` deps 構建處 `db_pool.get().cloned()`
+- `event_consumer/mod.rs`：`load_governor_cooldown_from_audit()` async helper + `cooldown_ts_if_active()` 純決策函數（5 unit tests：fresh / expired / boundary / clock-skew / negative-ts）
+- **fail-soft on PG unavailable / SQL error**：warn + cold-start cooldown。其他守衛（whitelist / step / 5-min hold / CB+MR lockout）持續生效，這只是 defence-in-depth
+- 測試：engine lib **752 → 757** (+5) · core 387 · types 27 · 0 regression
+- 原 scope agent 估 ~125 行（建議新 V015 migration），實際發現 V014 已可用，最終 173 行含完整中英雙語註釋與測試
+
+**1C-4 進度**：A1 ✅ · B1 ✅ · A2 NewsPipeline scheduler 延後（grep 發現生產代碼從未實例化 NewsPipeline，需先決 4-09 router 接入策略，scope 從 ~50 膨脹到 ~120-200 行）· **B2 Position Reconciler 為下一步**（trading.position_snapshots + Bybit `/v5/position/list` 對帳，scope agent 已 audit 完，可直接開工）
+
+
 
 ### ARCH-RC1 1C-3-F SHIPPED — Python paper_trading_engine.py 徹底退場（2026-04-08 深夜 · commits `accf625` `8ff93e0` `de1ec69`）
 
