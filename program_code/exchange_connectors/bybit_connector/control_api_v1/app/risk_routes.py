@@ -334,31 +334,15 @@ async def unhalt_session(
     """
     Manually clear Rust session_halted + paper_paused via resume_paper IPC.
 
-    DEPRECATED PAPER_STORE write below: 1C-3-D will remove the Python-side
-    PAPER_STORE.session_halted parallel write once all readers have migrated
-    to derive from the Rust snapshot.
-    DEPRECATED PAPER_STORE 寫入：1C-3-D 移除 Python 側並行寫入。
+    ARCH-RC1 1C-3-E F-mini: dropped the deprecated PAPER_STORE.mutate parallel
+    write. Rust ConfigStore + paper_state are now the sole authority for
+    session_halted; downstream readers consume the Rust snapshot.
+    1C-3-E F-mini：移除已棄用的 Python 並行寫入路徑，session_halted 由 Rust 權威。
     """
     client = await _get_risk_view_client()
     try:
         await client.unhalt_session()
     except Exception as e:
         raise _ipc_failure(f"resume_paper: {e}") from e
-
-    # 1C-3-C transitional: keep PAPER_STORE.mutate so other readers (paper_state
-    # GUI tile, snapshot writer) don't see stale halted=True until 1C-3-D wires
-    # them to the Rust snapshot. Marked DEPRECATED, removal in 1C-3-D.
-    # 1C-3-C 過渡：保留 PAPER_STORE.mutate 直到 1C-3-D 把其他 reader 接到 Rust snapshot。
-    try:
-        from .paper_trading_routes import PAPER_STORE  # type: ignore
-
-        def _mutator(state: dict) -> dict:
-            state["session"]["session_halted"] = False
-            state["session"]["session_halt_reason"] = None
-            return state
-
-        PAPER_STORE.mutate(_mutator)
-    except Exception as e:
-        logger.warning("PAPER_STORE.mutate (deprecated) failed: %s", e)
 
     return _risk_response({"message": "session_unhalted"})

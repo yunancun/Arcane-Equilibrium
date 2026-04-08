@@ -1,7 +1,47 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 PM
+> 最後更新：2026-04-08 晚
+
+### Session ARCH-RC1 1C-3-E F-mini SHIPPED — paper engine 死代碼前置清理（2026-04-08 晚 · commits `d8fb7f2` + 待 commit）
+
+緊接 4/8 PM 1C-3-D session 之後的同日延續 session。目標：開 1C-3-E，盡量收掉 paper_trading_engine.py 死代碼。
+
+**完成項**
+- **step 1** (`d8fb7f2`): `bridge_core.py:294` 移除 `self._engine.risk_manager._price_tracker` 死引用 — 1C-3-D 之後 Python RiskManager 是 53 行 RiskViewClient shim 沒有 `_price_tracker`，ATR 由 Rust 引擎權威；此分支因 ENGINE = None since RC-10 已不可達，原本若被觸發會 AttributeError
+- **step 2 自動完成**: 6 個 1C-3-C skipped `TestRiskRoutes` 測試在 `test_risk_manager.py` 內，1C-3-D aggressive cull 已整檔刪除
+- **F-mini 三小修**（待 commit）：
+  - `paper_trading_routes.py` 移除 4 個 dead imports：`PaperStateStore` / `PaperTradingEngine` / `ShadowDecisionFileFeeder` / `build_shadow_decision`（檔內從未使用，僅 `DEFAULT_INITIAL_BALANCE_USDT` 與 `ShadowDecisionConsumer` type-hint 仍消費）
+  - `risk_routes.py::unhalt_session` 移除 deprecated `PAPER_STORE.mutate` 並行寫 (1C-3-C 留下的過渡)：Rust ConfigStore + paper_state 現在是 session_halted 唯一權威
+  - `paper_trading_wiring.py::_h0_db_probe` 從 `PAPER_STORE.read()`（loads + JSON-decodes 整個 snapshot）改為 `os.stat(_paper_state_path)` — 同樣偵測磁盤 hang，成本一個量級降低 + 解耦待退場的 PaperStateStore
+
+**Rust engine readiness audit**（B-full 前置調研）
+為決定是否能徹底刪 `paper_trading_engine.py`，跑了一個 Explore agent 對 Rust 引擎做 13 capabilities 完整性審計：
+- ✅ Session lifecycle (7-state) / Order mgmt / PnL / Tick pipeline / Stop manager (hard/trailing/time) / Risk gates (Gate 0 + on-tick) / Demo sync / Persistence / OMS 11-state / Reconcile / Governance lease — **全部 covered**
+- ⚠️ State exposure: `get_paper_state` + `get_latest_prices` IPC RPC **已存在** (ipc_server.rs:422-428 via `handle_snapshot_field`)，走 5s debounced snapshot file
+- ⚠️ Shadow decision feed: `shadow_decision_builder.py::ShadowDecisionConsumer.consume()` 仍依賴 `PaperTradingEngine.submit_order()`，layer2_engine.py:639,661,669 wire 著但 Layer 2 整體待儀表板就緒才啟動
+- **結論**：Rust 引擎已足夠 paper / demo / live 三模式，但 Layer 2 重接 + Rust 補 paper-side `submit_order` RPC 是 1C-3-F 必須的前置工作
+
+**1C-3-F 範圍重估**（從 audit 的 3.5h 修正為 ~5h）
+原因：layer2_engine 經 `shadow_decision_builder` 走 paper engine，雖然 Layer 2 還沒啟動，但代碼路徑 wire-ready，刪 paper_trading_engine.py 會破壞它。F-full 必須先 (a) Rust 補 IPC，再 (b) shadow_decision_builder 改走 IPC，最後 (c) 才能刪 2248 行主檔 + 14 個依賴測試。決定拆 session：今天 F-mini 收掉 0 風險的 dead code，F-full 留下個 fresh context window 做。
+
+**測試**
+Python control_api: **2944 passed / 22 failed / 1 skipped** — 與 baseline byte-for-byte 一致 / 0 regression caused
+Rust 未動 / engine lib 748 持續綠燈
+
+**下個 session 接手指引**
+1. 讀 CLAUDE.md §三 1C-3-E F-mini SHIPPED 條目 + 1C-3-F 留尾 5 步
+2. 第一步：盤點 Rust 是否已有 paper-side submit_order IPC RPC（grep `submit_order` in `event_consumer/handlers.rs` + `tick_pipeline.rs` PaperSessionCommand enum）
+3. 沒有的話 → F-a: 在 `tick_pipeline.rs` 加 `PaperSessionCommand::SubmitOrder { ..., response_tx }` + handlers.rs handler + ipc_server.rs dispatch + tests（template: `GetRiskRuntimeStatus` lines 107-114 / ipc_server 1015-1040）
+4. F-b: `shadow_decision_builder.py` 改 EngineIPCClient（layer2_engine.py 注入點不變，只換 consumer 內部實現）
+5. F-c-d-e: 刪 paper_trading_engine.py + 14 測試 + wiring 清理 + 文檔
+6. 14 個目標測試檔清單見 TODO.md 1C-3-F (c) 條目
+
+**Commits**
+- `d8fb7f2` chore(python): 1C-3-E step 1 — drop bridge_core ATR bootstrap dead ref
+- 待 commit: F-mini 三小修
+
+---
 
 ### Session ARCH-RC1 1C-3 全部 SHIPPED — Python RiskManager 收編完成（2026-04-08 · commits `f8772c0` `a1cf772` `144f46f`）
 

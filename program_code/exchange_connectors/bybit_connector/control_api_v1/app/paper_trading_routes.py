@@ -32,16 +32,12 @@ from pydantic import BaseModel, Field
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
-from .paper_trading_engine import (
-    DEFAULT_INITIAL_BALANCE_USDT,
-    PaperStateStore,
-    PaperTradingEngine,
-)
-from .shadow_decision_builder import (
-    ShadowDecisionConsumer,
-    ShadowDecisionFileFeeder,
-    build_shadow_decision,
-)
+# ARCH-RC1 1C-3-E F-mini: dropped dead imports `PaperStateStore` /
+# `PaperTradingEngine` / `ShadowDecisionFileFeeder` / `build_shadow_decision`
+# (never referenced in this module). DEFAULT_INITIAL_BALANCE_USDT and
+# ShadowDecisionConsumer (type hint only) are still consumed below.
+from .paper_trading_engine import DEFAULT_INITIAL_BALANCE_USDT
+from .shadow_decision_builder import ShadowDecisionConsumer
 from .paper_trading_metrics import compute_full_metrics
 
 # ═══════════════════════════════════════════════════════════════════════════════

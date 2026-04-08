@@ -355,10 +355,18 @@ try:
     from .h0_gate import H0Gate, H0HealthWorker, H0GateConfig
 
     def _h0_db_probe() -> None:
-        """Lightweight I/O probe via PAPER_STORE read.
-        透過 paper state 文件讀取測量輕量 I/O 延遲（偵測磁盤 hang）。
+        """Lightweight I/O probe via paper-state file stat().
+
+        ARCH-RC1 1C-3-E F-mini: switched from PAPER_STORE.read() (which loads
+        and JSON-decodes the full snapshot) to a cheap os.stat() — same purpose
+        (detect disk hang) at a fraction of the cost, and decoupled from the
+        soon-to-be-retired Python PaperStateStore.
+        透過 paper state 文件 stat() 測量輕量 I/O 延遲（偵測磁盤 hang）。
         """
-        PAPER_STORE.read()
+        try:
+            os.stat(_paper_state_path)
+        except FileNotFoundError:
+            pass
 
     H0_GATE = H0Gate(config=H0GateConfig())
     _h0_health_worker = H0HealthWorker(

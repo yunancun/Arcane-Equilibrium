@@ -100,7 +100,18 @@
 
 **風控收編軌跡終局**：1A 前 7 套並行 → 1C-1 後 2 套 → 1C-2-F 後 1 Config 權威 + 5 engines 同步熱重載 → **1C-3-D 後 1 Rust ConfigStore 權威 + 53 行 Python shim**。Python 風控核心徹底退場，僅剩 IPC 視圖層。
 
-**1C-3-E 留尾**（下一個 session 起點）：`paper_trading_engine.py` ~15 個 dead `engine.risk_manager.X` 路徑 + `bridge_core.py:294` 死引用（皆 ENGINE=None since RC-10 的 disabled engine 自身清理）· 6 個 skipped `TestRiskRoutes` 重寫 · `PAPER_STORE.mutate` 拆分（session_halted 從 Rust snapshot 派生）。
+**1C-3-E F-mini SHIPPED**（2026-04-08 PM · `d8fb7f2` + 待 commit · 0 regression）：
+- **step 1** (`d8fb7f2`): `bridge_core.py:294` `_engine.risk_manager._price_tracker` 死引用清除（ATR 由 Rust 權威）
+- **step 2** auto-resolved: `test_risk_manager.py::TestRiskRoutes` 6 個 skipped 隨 1C-3-D aggressive cull 整檔刪除
+- **F-mini 三小修**: `paper_trading_routes.py` 移除 4 個 dead imports (PaperStateStore/PaperTradingEngine/ShadowDecisionFileFeeder/build_shadow_decision) · `risk_routes.py::unhalt_session` 移除 deprecated `PAPER_STORE.mutate` Python 並行寫 · `_h0_db_probe` 從 `PAPER_STORE.read()`（full JSON decode）改為 `os.stat(_paper_state_path)`（同樣偵測磁盤 hang，成本一個量級降低 + 解耦待退場的 PaperStateStore）
+- Python 2944 passed / 22 pre-existing fail（與 baseline byte-for-byte 一致）
+
+**1C-3-F 留尾**（下一個 session · ~5h，需 fresh context）：徹底退場 Python paper engine
+- (a) Rust IPC 補 paper-side `submit_order` RPC handler + tests（layer2 重接前置）
+- (b) `shadow_decision_builder.py` 改走 EngineIPCClient 取代 `PaperTradingEngine` 依賴（保留 Layer 2 wire-ready 路徑）
+- (c) 刪 `paper_trading_engine.py` (2248 行) + 14 個依賴測試檔（`test_shadow_decision*` / `test_paper_trading*` / `test_winrate_param_fixes` / `test_batch10_learning_oms` / `test_batch12_e2e_smoke` / `test_integration_phase{2,7,9,11,governance}` / `test_session9_fixes` 等）
+- (d) `paper_trading_wiring.py` 清理 PAPER_STORE/ENGINE/SHADOW_CONSUMER 模組級 stale 宣告
+- (e) E4 全綠 + 文檔同步 + commit
 
 ### ★★★★ ARCH-RC1 1C-2-C/D/E SHIPPED — 1C-2 完整收尾（2026-04-07 PM · commits `5f87bca` `de75191` `950f547` `b0fa2c6`）
 - **1C-2-C** (`5f87bca`): 6 個 unified Config IPC 端點 (`get/patch_{risk,learning,budget}_config`) — JSON 深合併 → 反序列化 → validate → `store.replace()` → tick-level hot reload。Generic helpers `json_merge` / `handle_get_config<T>` / `handle_patch_config<T,V>` 三個 Config 共用。Source audit `operator|agent|migration` 從 params.source 解析。+6 tests。
@@ -400,4 +411,4 @@ A-L ✅ 全部完成 · M Supervised Live Gate ⬜ · N Constrained Autonomous L
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-08 PM：engine lib **748** (+307 vs Phase 4 baseline 441) · core 387 / types 27 / Python control_api **2944 passed** (22 pre-existing failures · 0 regression) · **ARCH-RC1 1C-3 全部 SHIPPED**（6 commits · 1C-3-A/B/C/B-2 + E2 fixes M-1/M-2/N-5 + 1C-3-D 主體 · 0 regression）· **Python 風控核心徹底退場**：`risk_manager.py` 1633 → 53 行 RiskViewClient 薄子類 shim · 風控並行系統 1A 前 7 套 → **1 Rust ConfigStore 權威 + 53 行 Python shim** · `144f46f` 淨刪 -7836 行（9 檔 ~6900 行 Python 測試已被 Rust 748 tests 覆蓋）· Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**1C-3-E 留尾**（paper_trading_engine 死路徑清理 / bridge_core 死引用 / 6 個 TestRiskRoutes 重寫 / PAPER_STORE.mutate 拆分）→ **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA。
+> 截至 2026-04-08 晚：engine lib **748** · core 387 · types 27 · Python control_api **2944 passed** (22 pre-existing failures · 0 regression) · **ARCH-RC1 1C-3-E F-mini SHIPPED**（`d8fb7f2` + 待 commit · bridge_core ATR 死引用清除 + paper_trading_routes 4 個 dead imports 移除 + risk_routes deprecated PAPER_STORE.mutate 移除 + H0 probe 改 os.stat）· 1C-3 主體已於 4/8 PM 落地（Python 風控核心徹底退場：`risk_manager.py` 1633 → 53 行 shim）· Live 前唯一 blocker：**7d paper trading 數據觀察期** · 下一步：**1C-3-F**（~5h，需 fresh context · Rust 補 paper-side submit_order RPC + shadow_decision_builder 改 IPC + 刪 paper_trading_engine.py 2248 行 + 14 個依賴測試）→ **1C-4** Reconciler+News+e2e+Governor cooldown PG 持久化+E2/E4/QA。
