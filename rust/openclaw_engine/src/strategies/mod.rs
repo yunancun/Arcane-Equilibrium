@@ -74,6 +74,20 @@ pub trait Strategy: Send {
         // Default no-op / 默認無操作
     }
 
+    /// Called after the pipeline confirms a strategy-emitted Close was executed successfully.
+    /// Strategies that defer state changes until close is confirmed should override.
+    /// 管線確認策略發出的 Close 已成功執行後調用。延遲狀態變更直到確認平倉的策略應覆蓋。
+    fn on_close_confirmed(&mut self, _symbol: &str) {
+        // Default no-op / 默認無操作
+    }
+
+    /// Called when a strategy-emitted Close was skipped (no position found in paper_state).
+    /// Strategies that eagerly mutated state should override to roll back.
+    /// 策略發出的 Close 被跳過（paper_state 中未找到倉位）時調用。提前變更狀態的策略應覆蓋以回滾。
+    fn on_close_skipped(&mut self, _symbol: &str) {
+        // Default no-op / 默認無操作
+    }
+
     // ── Phase 3a: Runtime parameter tuning API (AGT-1) ──
     // Phase 3a：運行時參數調參 API
 

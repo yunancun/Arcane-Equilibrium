@@ -1,7 +1,31 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-08 session 3
+> 最後更新：2026-04-09
+
+### Rust 市場掃描器 Phase C+D — ScannerRunner 完整接線（2026-04-09 · commit `70ce1ed`）
+
+8 files · +647/-21 行 · 830 lib tests pass
+
+**Phase C（ws_client + runner）**：
+- `WsTopicChange` enum（Subscribe/Unsubscribe）加入 ws_client.rs
+- `WsClient.with_topic_change_channel()` 返回 sender，`run(mut self)` 內部處理 Subscribe/Unsubscribe；subscription list 同步更新供重連重播
+- `ScannerRunner`（runner.rs）：warmup → 掃描循環 → score → correlation filter → registry → WsTopicChange → sleep
+  - 使用 `ConfigStore<ScannerConfig>.load()`；RwLockReadGuard 在塊內丟棄（非 Send，不可跨 await）
+  - `query_open_positions()`: 2s 超時，fail-soft 返回空集合
+
+**Phase D（main.rs 接線）**：
+- C3：`TickPipeline::add_symbol / remove_symbol`（委託 KlineManager，清除 per-symbol 緩存）
+- D1：`EventConsumerDeps` 新增 `symbol_registry + scanner_store`
+- D4 main.rs：
+  - 從 `settings/risk_control_rules/scanner_config.toml` 加載 ScannerConfig
+  - 用固定交易對（BTC/ETH）初始化 SymbolRegistry
+  - 為掃描器評分器加載 EdgeEstimates（與 intent_processor 副本分離）
+  - 中繼通道：persistent channel → relay task → current WsClient inner_tx（Arc<Mutex<Option<Sender>>>）
+  - 在有 REST client 時 spawn ScannerRunner
+  - WS supervisor 每次重啟從 registry.snapshot() 重建訂閱 + 更新中繼通道
+  - 質量監控器使用 registry.snapshot() 代替 SYMBOLS
+- `scanner_config.toml`：創建默認配置文件
 
 ### PH5-WIRE-1 path fix + release build + 引擎確認上線（2026-04-08 · commit `cf77bec`）
 

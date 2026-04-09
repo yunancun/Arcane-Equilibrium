@@ -111,6 +111,12 @@ impl Strategy for FundingArb {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
+    /// Reset internal position on external close (risk-stop/halt).
+    /// 外部平倉時重置內部倉位（風控止損/暫停）。
+    fn on_external_close(&mut self, _symbol: &str) {
+        self.position = None;
+    }
+
     fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
         // TODO(R-06): When real funding rate logic is wired, add prev_* snapshot
         // before mutation here (same pattern as other strategies).
