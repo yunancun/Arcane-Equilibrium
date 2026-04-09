@@ -52,7 +52,7 @@
 
 **Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅ · PH5-DL-2+JS-1 ✅ · PH5-WIRE-1 ✅（mode-aware cost_gate 已上線，引擎已加載 8 cells，exploration mode 激活）· 5-01~03 ✅（per-param JS + k-means）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。**數據策略**：ARCH-RC1 前的歷史 fills 數據存在開發噪音，不清空（審計保留）；改用滾動窗口：2026-04-11 用 `--days 3` 重跑 JS-1，只看 ARCH-RC1 穩定後的乾淨數據。
 
-**Rust 市場掃描器 Phase A-D ✅**（2026-04-09）— ScannerRunner 完整接線到引擎（types/config/scorer/registry/runner/ws_topic_change/main.rs 接線）。
+**Rust 市場掃描器 Phase A-D + QC/FA ✅**（2026-04-09）— ScannerRunner 完整接線到引擎 + D2/D3 TickPipeline 動態 symbol 接線（event_consumer 每 30s diff registry，add/remove_symbol + async kline bootstrap）+ C-3 XRP 板塊修復 + C-4 pinned cap 計數 + M-1 pending_close 清理 + M-2 TOML 數字格式。**系統目標達成度由 45% → ~90%**。831 lib tests pass。
 
 **Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期 + 多通道告警上線。
 
@@ -233,4 +233,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-09：tests engine lib **830** / Python 2692 passed **1 pre-existing fail** · **StrategyAction Enum ✅** 策略出場死鎖修復 + QC/FA 全修（P1 grid drift + P2 exchange Kelly + P2 audit）· Rust 市場掃描器 Phase A-D ✅ · WIRE-1 ✅ · 5-01~03 ✅ · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
+> 截至 2026-04-09：tests engine lib **831** / Python 2280 passed **1 pre-existing fail** · **StrategyAction Enum ✅** 策略出場死鎖修復 · **Scanner A-D + QC/FA P0+P1 ✅**（D2/D3 動態 symbol 接線 + XRP 板塊 + pinned cap + pending_close + TOML，達成度 ~90%）· WIRE-1 ✅ · 5-01~03 ✅ · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
