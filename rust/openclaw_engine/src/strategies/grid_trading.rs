@@ -520,6 +520,28 @@ impl Strategy for GridTrading {
         }
     }
 
+    /// Pipeline confirmed a strategy-emitted Close was executed — adjust inventory.
+    /// 管線確認策略平倉已執行 — 調整庫存。
+    fn on_close_confirmed(&mut self, _symbol: &str) {
+        // Determine direction from prev snapshot: if prev_inventory was negative, this was a buy (close short).
+        // 從先前快照判斷方向：prev_inventory < 0 → 此為買入（平空）。
+        if self.prev_inventory < 0.0 {
+            self.net_inventory += self.qty_per_grid;
+        } else if self.prev_inventory > 0.0 {
+            self.net_inventory -= self.qty_per_grid;
+        }
+        info!(strategy = "grid_trading", new_inventory = %self.net_inventory,
+              "close confirmed: inventory adjusted / 平倉確認：庫存已調整");
+    }
+
+    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back cross state.
+    /// 管線跳過策略平倉（未找到倉位）— 回滾交叉狀態。
+    fn on_close_skipped(&mut self, _symbol: &str) {
+        self.last_cross_idx = self.prev_cross_idx;
+        self.last_trade_ms = self.prev_last_trade_ms;
+        info!(strategy = "grid_trading", "close skipped: cross state rolled back / 平倉跳過：交叉狀態已回滾");
+    }
+
     /// RC-04: Revert net_inventory, last_cross_idx, last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 net_inventory、last_cross_idx、last_trade_ms。
     fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
@@ -605,10 +627,12 @@ impl Strategy for GridTrading {
                     confidence: conf,
                     reason: "grid_close_short".into(),
                 });
+                // Inventory adjustment deferred to on_close_confirmed to avoid drift if close is a no-op.
+                // 庫存調整延遲到 on_close_confirmed，避免平倉無效時漂移。
             } else {
                 intents.push(StrategyAction::Open(intent));
+                self.net_inventory += self.qty_per_grid;
             }
-            self.net_inventory += self.qty_per_grid;
             self.last_trade_ms = ctx.timestamp_ms;
         } else if idx > prev_idx {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
@@ -629,10 +653,12 @@ impl Strategy for GridTrading {
                     confidence: conf,
                     reason: "grid_close_long".into(),
                 });
+                // Inventory adjustment deferred to on_close_confirmed to avoid drift if close is a no-op.
+                // 庫存調整延遲到 on_close_confirmed，避免平倉無效時漂移。
             } else {
                 intents.push(StrategyAction::Open(intent));
+                self.net_inventory -= self.qty_per_grid;
             }
-            self.net_inventory -= self.qty_per_grid;
             self.last_trade_ms = ctx.timestamp_ms;
         }
 
@@ -741,6 +767,44 @@ mod tests {
             StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
             other => panic!("expected Close for inventory reduction, got {:?}", other),
         }
+        // Inventory NOT yet adjusted (deferred until on_close_confirmed)
+        // 庫存尚未調整（延遲到 on_close_confirmed）
+        assert!(g.net_inventory > 0.0, "inventory deferred: still positive before confirm");
+
+        // Pipeline confirms close → inventory adjusted
+        // 管線確認平倉 → 庫存已調整
+        g.on_close_confirmed("BTC");
+        assert!(
+            (g.net_inventory).abs() < 1e-9,
+            "inventory should be 0 after close confirmed, got {}",
+            g.net_inventory
+        );
+    }
+
+    #[test]
+    fn test_grid_close_skipped_rolls_back() {
+        // When pipeline skips a Close (no position), on_close_skipped rolls back cross state.
+        // 管線跳過 Close（無倉位）時，on_close_skipped 回滾交叉狀態。
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        // Build positive inventory via Open
+        g.on_tick(&ctx(50500.0, 0));
+        g.on_tick(&ctx(49500.0, 100_000));
+        let prev_cross = g.last_cross_idx;
+        let prev_inventory = g.net_inventory;
+
+        // Emit Close (sell with positive inventory)
+        let i = g.on_tick(&ctx(50500.0, 200_000));
+        assert!(!i.is_empty());
+        match &i[0] {
+            StrategyAction::Close { .. } => {}
+            other => panic!("expected Close, got {:?}", other),
+        }
+
+        // Pipeline says no position found → skip → roll back
+        g.on_close_skipped("BTC");
+        assert_eq!(g.last_cross_idx, prev_cross, "cross state should be rolled back");
+        // Inventory unchanged since Close doesn't adjust eagerly
+        assert!((g.net_inventory - prev_inventory).abs() < 1e-9);
     }
 
     #[test]
