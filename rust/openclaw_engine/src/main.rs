@@ -507,11 +507,11 @@ async fn async_main(
                 let guard = relay_arc.lock().await;
                 if let Some(tx) = guard.as_ref() {
                     let _ = tx.send(change);
+                } else {
+                    // m-1 fix: log when WsClient not ready; next scan cycle resubscribes via snapshot.
+                    // m-1 修復：WsClient 未就緒時記錄日誌；下次掃描週期通過 snapshot 重新訂閱。
+                    tracing::debug!("[scanner relay] WsClient not ready — topic change dropped, will retry on next scan");
                 }
-                // If None: WsClient not yet up or restarting — drop silently.
-                // Next scan cycle will resubscribe via registry.snapshot().
-                // None 時：WsClient 尚未啟動或正在重啟 — 靜默丟棄。
-                // 下次掃描週期將通過 registry.snapshot() 重新訂閱。
             }
         });
     }
@@ -556,6 +556,9 @@ async fn async_main(
         Arc::clone(&learning_store),
         Arc::clone(&budget_store),
     );
+    // IPC-SCAN-1: wire SymbolRegistry for scanner observability endpoints.
+    // IPC-SCAN-1：接入 SymbolRegistry 供掃描器可觀測性端點使用。
+    ipc_server.set_scanner_registry(Arc::clone(&symbol_registry));
     // Phase 4 (4-15): Grab the BudgetTracker slot handle before moving the server into
     // the spawn task; main will write the tracker into this slot once db_pool is ready.
     // Phase 4 (4-15)：在把 server 移入 spawn task 前先拿到 BudgetTracker 槽位句柄；
@@ -1338,17 +1341,14 @@ async fn async_main(
 
     // F-4 fix: Spawn REST pollers for funding/OI/LSR (requires API client + market channel)
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
-    // Scanner D4: use registry snapshot so pollers cover all active symbols (not just SYMBOLS).
-    // 掃描器 D4：使用注冊表快照，使輪詢器覆蓋所有活躍交易對（不僅 SYMBOLS）。
+    // Scanner D4 / m-3 fix: pass registry snapshot so pollers cover all active symbols.
+    // 掃描器 D4 / m-3 修復：傳注冊表快照，使輪詢器覆蓋所有活躍交易對。
     if let (Some(ref client), Some(ref mtx)) = (&shared_client, &market_tx) {
-        // Convert Vec<String> to Vec<&'static str> is not feasible; pass as slice of owned.
-        // rest_poller::spawn_rest_pollers expects &[&str], so we keep SYMBOLS for now and
-        // note this as a future cleanup once spawn_rest_pollers accepts Vec<String>.
-        // rest_poller::spawn_rest_pollers 期望 &[&str]，暫保留 SYMBOLS，待接口改為 Vec<String> 後再改。
+        let poll_symbols = symbol_registry.snapshot();
         openclaw_engine::database::rest_poller::spawn_rest_pollers(
             Arc::clone(client),
             mtx.clone(),
-            openclaw_engine::event_consumer::SYMBOLS,
+            poll_symbols,
             cancel.clone(),
         );
     }

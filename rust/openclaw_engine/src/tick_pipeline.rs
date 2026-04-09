@@ -481,6 +481,9 @@ impl TickPipeline {
         // inherit a stale close-pending flag from the previous tenure.
         // M-1 修復：清除待處理平倉鎖，防止同名交易對重新加入時繼承過期標記。
         self.pending_close_symbols.remove(symbol);
+        // M-1 fix: purge stale ADL alerts for removed symbol (ring-buffer cap=50, minor but clean).
+        // M-1 修復：清除已移除交易對的過期 ADL 警報（環形緩衝上限 50，次要但乾淨）。
+        self.adl_alerts.retain(|(_, sym, _)| sym != symbol);
     }
 
     /// PH5-WIRE-1: Inject JS shrunk edge estimates into the intent processor.
