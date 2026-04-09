@@ -19,6 +19,24 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 // ---------------------------------------------------------------------------
+// Runtime topic change channel / 運行時主題變更通道
+// ---------------------------------------------------------------------------
+
+/// Runtime WebSocket subscription change command.
+/// Used by ScannerRunner to add/remove symbol topics without restarting.
+/// 運行時 WebSocket 訂閱變更命令。
+/// 由 ScannerRunner 使用，無需重啟即可添加/移除交易對主題。
+#[derive(Debug)]
+pub enum WsTopicChange {
+    /// Subscribe to additional topics. Also recorded for reconnect replay.
+    /// 訂閱額外主題。同時記錄以供重連時重播。
+    Subscribe(Vec<String>),
+    /// Unsubscribe from topics. Also removed from reconnect replay list.
+    /// 取消訂閱主題。同時從重連重播列表中移除。
+    Unsubscribe(Vec<String>),
+}
+
+// ---------------------------------------------------------------------------
 // Connection state / 連接狀態
 // ---------------------------------------------------------------------------
 
@@ -57,8 +75,10 @@ pub struct WsClient {
     config: Arc<ConfigManager>,
     event_tx: mpsc::Sender<PriceEvent>,
     cancel: CancellationToken,
-    /// Default subscriptions / 預設訂閱
+    /// Startup subscriptions (also serves as reconnect replay list) / 啟動訂閱（同時用作重連重播列表）
     subscriptions: Vec<String>,
+    /// Optional channel for runtime topic additions/removals (from ScannerRunner) / 運行時主題增減的可選通道
+    topic_change_rx: Option<mpsc::UnboundedReceiver<WsTopicChange>>,
 }
 
 /// Maximum reconnect delay (ms) / 最大重連延遲
@@ -82,19 +102,34 @@ impl WsClient {
             event_tx,
             cancel,
             subscriptions: Vec::new(),
+            topic_change_rx: None,
         }
     }
 
-    /// Add a subscription topic.
-    /// 添加訂閱主題。
+    /// Add a startup subscription topic (called before run()).
+    /// 添加啟動訂閱主題（在 run() 前調用）。
     pub fn subscribe(&mut self, topic: impl Into<String>) {
         self.subscriptions.push(topic.into());
     }
 
+    /// Attach a runtime topic-change channel. Returns the sender half for callers.
+    /// Must be called before run(). ScannerRunner uses the returned sender.
+    /// 附加運行時主題變更通道。返回調用方使用的發送半端。
+    /// 必須在 run() 前調用。ScannerRunner 使用返回的發送端。
+    pub fn with_topic_change_channel(&mut self) -> mpsc::UnboundedSender<WsTopicChange> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.topic_change_rx = Some(rx);
+        tx
+    }
+
     /// Run the WebSocket client loop with auto-reconnect.
+    /// Consumes self so that the run loop can mutate subscriptions for reconnect replay.
     /// 運行 WebSocket 客戶端循環，支持自動重連。
-    pub async fn run(&self) {
+    /// 消耗 self 以便 run loop 可以修改訂閱列表用於重連重播。
+    pub async fn run(mut self) {
         let mut attempt: u32 = 0;
+        // Extract runtime topic-change receiver (if wired up by caller) / 提取運行時主題變更接收端
+        let mut topic_change_rx = self.topic_change_rx.take();
 
         loop {
             if self.cancel.is_cancelled() {
@@ -103,13 +138,13 @@ impl WsClient {
             }
 
             let cfg = self.config.get();
-            let url = &cfg.ws_url;
+            let url = cfg.ws_url.clone();
             let base_delay = cfg.reconnect_delay_ms;
             let heartbeat_ms = cfg.heartbeat_interval_ms;
 
             log_state(WsState::Connecting, attempt);
 
-            match tokio_tungstenite::connect_async(url).await {
+            match tokio_tungstenite::connect_async(&url).await {
                 Ok((ws_stream, _response)) => {
                     attempt = 0;
                     log_state(WsState::Connected, 0);
@@ -164,6 +199,49 @@ impl WsClient {
                                     break;
                                 }
                                 debug!("heartbeat ping sent / 心跳 ping 已發送");
+                            }
+                            // Runtime topic change from ScannerRunner / 來自 ScannerRunner 的運行時主題變更
+                            change = async {
+                                if let Some(ref mut rx) = topic_change_rx { rx.recv().await }
+                                else { std::future::pending().await }
+                            } => {
+                                if let Some(change) = change {
+                                    match change {
+                                        WsTopicChange::Subscribe(topics) => {
+                                            // 1. Record for reconnect replay / 記錄以供重連重播
+                                            for t in &topics {
+                                                if !self.subscriptions.contains(t) {
+                                                    self.subscriptions.push(t.clone());
+                                                }
+                                            }
+                                            // 2. Send to Bybit in batches / 分批發送給 Bybit
+                                            for chunk in topics.chunks(SUBSCRIBE_BATCH_SIZE) {
+                                                let msg = serde_json::json!({"op":"subscribe","args":chunk});
+                                                if let Err(e) = write.send(Message::Text(msg.to_string().into())).await {
+                                                    warn!(error = %e, "[scanner] subscribe send failed");
+                                                    break;
+                                                }
+                                                // 500ms inter-batch gap (Bybit rate limit)
+                                                // 500ms 批次間隔（Bybit 速率限制）
+                                                tokio::time::sleep(Duration::from_millis(500)).await;
+                                            }
+                                            info!(count = topics.len(), "[scanner] runtime subscribe sent");
+                                        }
+                                        WsTopicChange::Unsubscribe(topics) => {
+                                            // 1. Remove from replay list / 從重播列表移除
+                                            self.subscriptions.retain(|t| !topics.contains(t));
+                                            // 2. Send unsubscribe to Bybit / 發送取消訂閱給 Bybit
+                                            for chunk in topics.chunks(SUBSCRIBE_BATCH_SIZE) {
+                                                let msg = serde_json::json!({"op":"unsubscribe","args":chunk});
+                                                if let Err(e) = write.send(Message::Text(msg.to_string().into())).await {
+                                                    warn!(error = %e, "[scanner] unsubscribe send failed");
+                                                    break;
+                                                }
+                                            }
+                                            info!(count = topics.len(), "[scanner] runtime unsubscribe sent");
+                                        }
+                                    }
+                                }
                             }
                             msg = read.next() => {
                                 match msg {

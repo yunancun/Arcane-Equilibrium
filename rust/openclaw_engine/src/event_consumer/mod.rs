@@ -57,6 +57,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         risk_store,
         budget_store,
         audit_pool,
+        symbol_registry: _symbol_registry,
+        scanner_store: _scanner_store,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 

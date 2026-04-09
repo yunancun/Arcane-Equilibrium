@@ -1,0 +1,32 @@
+# Scanner Config — dynamic symbol universe management
+# 掃描器配置 — 動態交易對品類管理
+# ARCH-RC1 ScannerConfig defaults (see scanner/config.rs for validate() rules)
+
+[meta]
+version = 1
+saved_ts_ms = 0
+
+[scheduling]
+scan_interval_secs = 1800   # 30 minutes / 30 分鐘
+warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
+
+[universe]
+max_symbols = 25
+pinned_symbols = ["BTCUSDT", "ETHUSDT"]
+
+[hard_filters]
+min_turnover_24h_usdt = 50_000_000.0   # 50M USDT minimum 24h volume
+max_spread_bps = 8.0
+min_price_usdt = 0.001
+btc_min_move_pct = 0.3   # BTC must move ≥0.3% for beta_proxy to be valid
+
+[anti_churn]
+min_hold_cycles = 2           # minimum scan cycles before removal
+challenger_threshold = 15.0   # new symbol must beat worst by ≥15 pts
+removal_cooldown_minutes = 90
+
+[correlation]
+max_high_beta_symbols = 8   # max symbols with BTC beta > threshold
+max_per_strategy = 8
+max_per_sector = 4
+high_beta_threshold = 0.8

@@ -12,11 +12,10 @@
 
 pub mod config;
 pub mod registry;
+pub mod runner;
 pub mod scorer;
 pub mod sectors;
 pub mod types;
-// runner added in Phase C
-// runner 在 Phase C 中添加
 
 pub use config::ScannerConfig;
 pub use types::{ChurnState, ScanResult, ScoredSymbol, StrategyCategory};
