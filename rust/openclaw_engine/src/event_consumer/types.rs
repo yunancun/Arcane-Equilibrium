@@ -112,6 +112,15 @@ pub struct EventConsumerDeps {
     /// ARCH-RC1 1C-2-B：live BudgetConfig store 控制代碼。
     pub budget_store:
         Option<Arc<crate::config::ConfigStore<crate::config::BudgetConfig>>>,
+    /// Scanner D1: Active symbol registry — read-only ref so event consumer can
+    /// call pipeline.add_symbol/remove_symbol when scanner updates the universe.
+    /// 掃描器 D1：活躍交易對注冊表 — 唯讀引用，供 event consumer 在掃描器更新
+    /// 品類時調用 pipeline.add_symbol/remove_symbol。
+    pub symbol_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+    /// Scanner D1: ScannerConfig store for reading scheduling params at startup.
+    /// 掃描器 D1：ScannerConfig store，供啟動時讀取調度參數。
+    pub scanner_store:
+        Option<Arc<crate::config::ConfigStore<crate::scanner::ScannerConfig>>>,
     /// ARCH-RC1 1C-4 B1: V014 audit pool — used at startup to restore the
     /// governor de-escalation cooldown timestamp (24h window) so a restart
     /// during an active cooldown does not silently reset the guard.

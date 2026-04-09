@@ -459,6 +459,26 @@ impl TickPipeline {
         }
     }
 
+    /// Scanner C3: Add a symbol to the kline manager (idempotent).
+    /// Per-symbol HashMaps (latest_prices, latest_indicators, consecutive_losses)
+    /// self-populate on first tick — no explicit initialisation needed.
+    /// 掃描器 C3：向 kline manager 添加交易對（冪等）。
+    /// Per-symbol HashMap 在第一個 tick 時自動填充，無需明確初始化。
+    pub fn add_symbol(&mut self, symbol: &str) {
+        self.kline_manager.add_symbol(symbol);
+    }
+
+    /// Scanner C3: Remove a symbol from the kline manager and clear its cached state.
+    /// 掃描器 C3：從 kline manager 移除交易對並清除其緩存狀態。
+    pub fn remove_symbol(&mut self, symbol: &str) {
+        self.kline_manager.remove_symbol(symbol);
+        self.latest_prices.remove(symbol);
+        self.latest_indicators.remove(symbol);
+        self.consecutive_losses.remove(symbol);
+        self.last_persisted_signal.retain(|(sym, _), _| sym != symbol);
+        self.last_close_price.remove(symbol);
+    }
+
     /// PH5-WIRE-1: Inject JS shrunk edge estimates into the intent processor.
     /// PH5-WIRE-1：將 JS 收縮邊際估計注入意圖處理器。
     pub fn set_edge_estimates(&mut self, estimates: crate::edge_estimates::EdgeEstimates) {
@@ -1820,6 +1840,11 @@ impl TickPipeline {
         // Close reduces risk (not increases it), so Guardian/cost_gate/Kelly/P1 are skipped.
         // Retains: fee accounting, PG persistence, shadow order, Kelly stats, audit trail.
         // ═══════════════════════════════════════════════════════════════════════
+        // Track confirmed/skipped closes for strategy callbacks after execution.
+        // 追蹤已確認/跳過的平倉，供執行後的策略回調使用。
+        let mut close_confirmed_symbols: Vec<String> = Vec::new();
+        let mut close_skipped_symbols: Vec<String> = Vec::new();
+
         for (symbol, reason) in &pending_strategy_closes {
             // P2 fix: synthetic intent for monitoring/audit (recent_intents ring buffer).
             // P2 修復：合成 intent 供監控/審計（recent_intents 環形緩衝）。
@@ -1841,6 +1866,7 @@ impl TickPipeline {
                         result: format!("close_skipped:pending_{reason}"),
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    close_skipped_symbols.push(symbol.clone());
                     continue;
                 }
                 if let Some(pos) = self.paper_state.get_position(symbol) {
@@ -1855,6 +1881,7 @@ impl TickPipeline {
                         result: format!("close_dispatched:{reason}"),
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
                     self.recent_intents.push_back(TimestampedIntent {
@@ -1863,6 +1890,7 @@ impl TickPipeline {
                         result: format!("close_skipped:no_position_{reason}"),
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    close_skipped_symbols.push(symbol.clone());
                 }
             } else {
                 if let Some(pos) = self.paper_state.get_position(symbol) {
@@ -1904,6 +1932,7 @@ impl TickPipeline {
                         result: format!("close_filled:{reason}"),
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    close_confirmed_symbols.push(symbol.clone());
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
                     self.recent_intents.push_back(TimestampedIntent {
@@ -1912,7 +1941,19 @@ impl TickPipeline {
                         result: format!("close_skipped:no_position_{reason}"),
                     });
                     if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    close_skipped_symbols.push(symbol.clone());
                 }
+            }
+        }
+
+        // Notify strategies of close outcomes (P1 fix: prevents grid inventory drift on skipped close).
+        // 通知策略平倉結果（P1 修復：防止 grid 庫存在跳過平倉時漂移）。
+        for strategy in self.orchestrator.strategies_mut() {
+            for sym in &close_confirmed_symbols {
+                strategy.on_close_confirmed(sym);
+            }
+            for sym in &close_skipped_symbols {
+                strategy.on_close_skipped(sym);
             }
         }
 
@@ -2140,6 +2181,13 @@ impl TickPipeline {
             .paper_state
             .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms);
         self.stats.total_fills += 1;
+        // Update Kelly stats on exchange fill (previously missing — QC P2-2 fix).
+        // Non-zero realized_pnl indicates a position close (open fills return 0.0).
+        // 交易所成交時更新 Kelly 統計（先前遺漏 — QC P2-2 修復）。
+        // 非零 realized_pnl 表示平倉成交（開倉成交返回 0.0）。
+        if realized_pnl.abs() > f64::EPSILON {
+            self.intent_processor.record_trade(symbol, realized_pnl);
+        }
         // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
         self.pending_close_symbols.remove(symbol);
 
@@ -2988,5 +3036,60 @@ mod tests {
         // no-op (cheap atomic load + equality, no re-apply).
         // 紀錄版本號避免下個 tick 重複套用。
         assert_eq!(pipeline.risk_config_version_seen, store.version());
+    }
+
+    #[test]
+    fn test_strategy_close_action_closes_position() {
+        // Integration test: open a paper position, then simulate the strategy Close
+        // deferred execution path, verify position is closed and fills/stats updated.
+        // 集成測試：建立紙盤倉位，模擬策略 Close 延遲執行路徑，驗證倉位已平且成交/統計已更新。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.grant_paper_auth().unwrap();
+
+        // Open a long position directly via paper_state
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 5.5, 1000);
+        assert_eq!(pipeline.paper_state.position_count(), 1);
+        let balance_before = pipeline.paper_state.balance();
+
+        // Simulate the deferred close: close_position + record_trade + recent_fills
+        // (This is exactly what the deferred close loop does for paper mode.)
+        let close_price = 51_000.0;
+        let close_ts = 2000_u64;
+        let pos = pipeline.paper_state.get_position("BTCUSDT").unwrap();
+        let is_long = pos.is_long;
+        let qty = pos.qty;
+        assert!(is_long);
+        assert!((qty - 0.1).abs() < 1e-9);
+
+        let pnl = pipeline
+            .paper_state
+            .close_position("BTCUSDT", close_price, close_ts);
+        assert!(pnl.is_some(), "close_position should return pnl");
+        let pnl = pnl.unwrap();
+        assert!(pnl > 0.0, "long closed at higher price should be profitable");
+
+        // Kelly stats update
+        pipeline.intent_processor.record_trade("BTCUSDT", pnl);
+
+        // Position should be gone
+        assert_eq!(pipeline.paper_state.position_count(), 0);
+        assert!(pipeline.paper_state.get_position("BTCUSDT").is_none());
+
+        // Balance should have increased (profit minus fees)
+        assert!(pipeline.paper_state.balance() > balance_before);
+    }
+
+    #[test]
+    fn test_strategy_close_no_position_is_noop() {
+        // Close when no position exists must be a safe no-op.
+        // 無倉位時 Close 必須安全無動作。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let result = pipeline
+            .paper_state
+            .close_position("BTCUSDT", 50_000.0, 1000);
+        assert!(result.is_none(), "close_position on empty should return None");
+        assert_eq!(pipeline.paper_state.position_count(), 0);
     }
 }

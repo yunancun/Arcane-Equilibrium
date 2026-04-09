@@ -15,6 +15,10 @@ use openclaw_engine::config::{
 };
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::IpcServer;
+use openclaw_engine::market_data_client::MarketDataClient;
+use openclaw_engine::scanner::ScannerConfig;
+use openclaw_engine::scanner::registry::SymbolRegistry;
+use openclaw_engine::scanner::runner::ScannerRunner;
 use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
@@ -444,6 +448,75 @@ async fn async_main(
     let cancel = CancellationToken::new();
 
     // ------------------------------------------------------------------
+    // Scanner D4: Load ScannerConfig + build SymbolRegistry
+    // 掃描器 D4：加載 ScannerConfig + 構建 SymbolRegistry
+    // ------------------------------------------------------------------
+    let scanner_config_path = {
+        let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("settings/risk_control_rules"));
+        std::env::var("OPENCLAW_SCANNER_CONFIG")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| base.join("scanner_config.toml"))
+    };
+    let scanner_cfg: ScannerConfig =
+        load_toml_or_default(&scanner_config_path, |c: &ScannerConfig| c.validate())
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "scanner config load failed, using defaults / 掃描器配置加載失敗，使用默認值");
+                ScannerConfig::default()
+            });
+    info!(
+        max_symbols = scanner_cfg.universe.max_symbols,
+        pinned = ?scanner_cfg.universe.pinned_symbols,
+        interval_secs = scanner_cfg.scheduling.scan_interval_secs,
+        "scanner config loaded / 掃描器配置已加載"
+    );
+    let scanner_store: Arc<ConfigStore<ScannerConfig>> =
+        Arc::new(ConfigStore::new(scanner_cfg).with_toml_persist(scanner_config_path));
+    let pinned_syms = scanner_store.load().universe.pinned_symbols.clone();
+    let symbol_registry = Arc::new(SymbolRegistry::new(
+        pinned_syms.clone(), // initial_symbols = pinned (pre-scanner state)
+        pinned_syms,         // pinned (never removed by anti-churn)
+    ));
+
+    // Scanner D4: Load EdgeEstimates for scanner scorer (separate from intent_processor copy).
+    // 掃描器 D4：為掃描器評分器加載邊際估計（與 intent_processor 副本分離）。
+    let scanner_edge_estimates = {
+        let base = std::env::var("OPENCLAW_BASE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let estimates = openclaw_engine::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
+        Arc::new(std::sync::RwLock::new(estimates))
+    };
+
+    // Scanner D4: Relay channel — ScannerRunner sends to a persistent channel;
+    // a relay task forwards to the current WsClient's sender (refreshed on each restart).
+    // 掃描器 D4：中繼通道 — ScannerRunner 發送到持久通道；
+    // 中繼任務將消息轉發到當前 WsClient 的發送端（每次重啟時刷新）。
+    let (scanner_ws_tx, mut scanner_ws_rx) =
+        tokio::sync::mpsc::unbounded_channel::<openclaw_engine::ws_client::WsTopicChange>();
+    let current_ws_client_tx: Arc<
+        tokio::sync::Mutex<
+            Option<tokio::sync::mpsc::UnboundedSender<openclaw_engine::ws_client::WsTopicChange>>,
+        >,
+    > = Arc::new(tokio::sync::Mutex::new(None));
+    {
+        let relay_arc = Arc::clone(&current_ws_client_tx);
+        tokio::spawn(async move {
+            while let Some(change) = scanner_ws_rx.recv().await {
+                let guard = relay_arc.lock().await;
+                if let Some(tx) = guard.as_ref() {
+                    let _ = tx.send(change);
+                }
+                // If None: WsClient not yet up or restarting — drop silently.
+                // Next scan cycle will resubscribe via registry.snapshot().
+                // None 時：WsClient 尚未啟動或正在重啟 — 靜默丟棄。
+                // 下次掃描週期將通過 registry.snapshot() 重新訂閱。
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------
     // Fetch initial balance from Bybit Demo API (or env / default)
     // 從 Bybit Demo API 讀取初始餘額（或環境變量 / 預設值）
     // ------------------------------------------------------------------
@@ -467,6 +540,9 @@ async fn async_main(
     // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
     // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
     let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
+    // Scanner D4: clone paper_cmd_tx for ScannerRunner (queries GetOpenPositionSymbols).
+    // 掃描器 D4：為 ScannerRunner 複製 paper_cmd_tx（查詢 GetOpenPositionSymbols）。
+    let scanner_paper_cmd_tx = paper_cmd_tx.clone();
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
@@ -705,17 +781,39 @@ async fn async_main(
     }
 
     // ------------------------------------------------------------------
+    // Scanner D4: Spawn ScannerRunner (requires market REST client)
+    // 掃描器 D4：啟動 ScannerRunner（需要市場 REST 客戶端）
+    // ------------------------------------------------------------------
+    if let Some(ref client) = shared_client {
+        let market_client = Arc::new(MarketDataClient::new(Arc::clone(client)));
+        let runner = ScannerRunner::new(
+            Arc::clone(&symbol_registry),
+            market_client,
+            Arc::clone(&scanner_edge_estimates),
+            Arc::clone(&scanner_store),
+            scanner_ws_tx,
+            scanner_paper_cmd_tx,
+            cancel.clone(),
+        );
+        tokio::spawn(runner.run());
+        info!("ScannerRunner spawned / 掃描器已啟動");
+    } else {
+        warn!("ScannerRunner skipped: no REST client (pinned symbols only) / 掃描器跳過：無 REST 客戶端（僅固定交易對）");
+    }
+
+    // ------------------------------------------------------------------
     // Start WS client — subscribe to all symbols (with extended topics if configured)
     // 啟動 WebSocket 客戶端 — 訂閱所有交易對（含擴展 topic）
     // ------------------------------------------------------------------
-    // Build subscription list first (RE-2: needed for supervisor restart)
-    // 先建立訂閱列表（RE-2：監管器重啟所需）
+    // Build subscription list from registry snapshot (initially pinned symbols only;
+    // scanner will add more via WsTopicChange::Subscribe as it runs).
+    // 從注冊表快照構建訂閱列表（初始僅固定交易對；掃描器運行後通過 WsTopicChange::Subscribe 添加更多）。
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
         let mut topics = Vec::new();
-        for sym in SYMBOLS {
+        for sym in symbol_registry.snapshot() {
             // GAP: extended_subscription_list collapsed into full_subscription_list
             // 2026-04-06 — broken topics permanently removed.
-            for topic in openclaw_engine::multi_interval_ws::full_subscription_list(sym) {
+            for topic in openclaw_engine::multi_interval_ws::full_subscription_list(&sym) {
                 topics.push(topic);
             }
         }
@@ -726,19 +824,27 @@ async fn async_main(
         topics
     } else {
         let mut topics = Vec::new();
-        for sym in SYMBOLS {
+        for sym in symbol_registry.snapshot() {
             topics.push(format!("kline.1.{sym}"));
             topics.push(format!("publicTrade.{sym}"));
         }
         topics
     };
 
-    // RE-2: Supervisor wrapper — restarts WS on unexpected exit
-    // RE-2：監管器包裝 — WS 意外退出時自動重啟
+    // RE-2: Supervisor wrapper — restarts WS on unexpected exit.
+    // Scanner D4: On each restart, rebuild topic list from registry snapshot so
+    // scanner-added symbols survive WsClient restarts. Also refresh the relay channel
+    // so ScannerRunner's WsTopicChange messages reach the new WsClient.
+    // RE-2：監管器包裝 — WS 意外退出時自動重啟。
+    // 掃描器 D4：每次重啟時從注冊表快照重建主題列表，掃描器添加的交易對可跨重啟存活。
+    // 同時刷新中繼通道，確保 ScannerRunner 的 WsTopicChange 消息到達新的 WsClient。
     let ws_handle = {
         let ws_config = Arc::clone(&config);
         let ws_cancel = cancel.clone();
-        let ws_topics = ws_subscriptions.clone();
+        let initial_topics = ws_subscriptions.clone();
+        let registry_for_supervisor = Arc::clone(&symbol_registry);
+        let relay_for_supervisor = Arc::clone(&current_ws_client_tx);
+        let extended_ws = cfg_snapshot.enable_extended_ws;
         tokio::spawn(async move {
             let mut supervisor_attempt: u32 = 0;
             loop {
@@ -746,12 +852,38 @@ async fn async_main(
                     break;
                 }
 
+                // On restart (attempt > 0), rebuild topics from current registry snapshot
+                // so scanner-added symbols are re-subscribed. First attempt uses the
+                // pre-built list (which was already from registry.snapshot()).
+                // 重啟時（attempt > 0），從注冊表快照重建主題列表。首次使用預建列表。
+                let topics: Vec<String> = if supervisor_attempt == 0 {
+                    initial_topics.clone()
+                } else if extended_ws {
+                    registry_for_supervisor.snapshot().into_iter().flat_map(|sym| {
+                        openclaw_engine::multi_interval_ws::full_subscription_list(&sym)
+                    }).collect()
+                } else {
+                    registry_for_supervisor.snapshot().into_iter().flat_map(|sym| {
+                        vec![format!("kline.1.{sym}"), format!("publicTrade.{sym}")]
+                    }).collect()
+                };
+
                 let mut ws_client =
                     WsClient::new(Arc::clone(&ws_config), event_tx.clone(), ws_cancel.clone());
-                for topic in &ws_topics {
+                for topic in &topics {
                     ws_client.subscribe(topic.clone());
                 }
+                // Wire scanner relay: create fresh channel, update shared Arc so relay task
+                // forwards to this new WsClient.
+                // 接線掃描器中繼：創建新通道，更新共享 Arc 使中繼任務轉發到新 WsClient。
+                let inner_tx = ws_client.with_topic_change_channel();
+                *relay_for_supervisor.lock().await = Some(inner_tx);
+
                 ws_client.run().await;
+
+                // Channel is now dead — clear it so relay drops messages cleanly.
+                // 通道已失效 — 清除它，使中繼任務乾淨地丟棄消息。
+                *relay_for_supervisor.lock().await = None;
 
                 // If cancelled, exit cleanly / 如果已取消，正常退出
                 if ws_cancel.is_cancelled() {
@@ -1206,7 +1338,13 @@ async fn async_main(
 
     // F-4 fix: Spawn REST pollers for funding/OI/LSR (requires API client + market channel)
     // F-4 修復：啟動 funding/OI/LSR REST 輪詢器
+    // Scanner D4: use registry snapshot so pollers cover all active symbols (not just SYMBOLS).
+    // 掃描器 D4：使用注冊表快照，使輪詢器覆蓋所有活躍交易對（不僅 SYMBOLS）。
     if let (Some(ref client), Some(ref mtx)) = (&shared_client, &market_tx) {
+        // Convert Vec<String> to Vec<&'static str> is not feasible; pass as slice of owned.
+        // rest_poller::spawn_rest_pollers expects &[&str], so we keep SYMBOLS for now and
+        // note this as a future cleanup once spawn_rest_pollers accepts Vec<String>.
+        // rest_poller::spawn_rest_pollers 期望 &[&str]，暫保留 SYMBOLS，待接口改為 Vec<String> 後再改。
         openclaw_engine::database::rest_poller::spawn_rest_pollers(
             Arc::clone(client),
             mtx.clone(),
@@ -1221,10 +1359,9 @@ async fn async_main(
     if db_pool.is_available() {
         let qm_pool = Arc::clone(&db_pool);
         let qm_tick = Arc::clone(&shared_last_tick_ms);
-        let qm_symbols: Vec<String> = openclaw_engine::event_consumer::SYMBOLS
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        // Scanner D4: use registry snapshot for quality monitor symbols.
+        // 掃描器 D4：使用注冊表快照作為質量監控器的交易對列表。
+        let qm_symbols: Vec<String> = symbol_registry.snapshot();
         let qm_cancel = cancel.clone();
         tokio::spawn(
             openclaw_engine::database::quality_writer::run_quality_monitor(
@@ -1317,6 +1454,10 @@ async fn async_main(
             // can restore the governor de-escalation cooldown on startup.
             // ARCH-RC1 1C-4 B1：clone V014 PG handle，讓 event consumer 啟動時還原 cooldown。
             audit_pool: db_pool.get().cloned(),
+            // Scanner D1: registry + scanner store for future kline bootstrap wiring.
+            // 掃描器 D1：注冊表 + 掃描器 store，供未來 kline bootstrap 接線。
+            symbol_registry: Some(Arc::clone(&symbol_registry)),
+            scanner_store: Some(Arc::clone(&scanner_store)),
         };
         tokio::spawn(run_event_consumer(deps))
     };
