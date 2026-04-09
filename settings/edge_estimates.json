@@ -1,0 +1,95 @@
+{
+  "_meta": {
+    "updated_at": "2026-04-08T21:41:23.895585+00:00",
+    "n_cells": 8,
+    "grand_mean_bps": -11.810440187364478
+  },
+  "bb_reversion::DOGEUSDT": {
+    "shrunk_bps": -24.738,
+    "raw_bps": -32.8205,
+    "n": 52,
+    "B": 0.3847,
+    "win_rate": 0.2308,
+    "win_rate_shrunk": 0.2209,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -37.368,
+    "combined_ev_bps": -28.4937
+  },
+  "ma_crossover::DOGEUSDT": {
+    "shrunk_bps": -9.6331,
+    "raw_bps": -8.2718,
+    "n": 34,
+    "B": 0.3847,
+    "win_rate": 0.1471,
+    "win_rate_shrunk": 0.1466,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -11.1339,
+    "combined_ev_bps": -9.0894
+  },
+  "grid_trading::DOGEUSDT": {
+    "shrunk_bps": -10.5483,
+    "raw_bps": -9.7592,
+    "n": 1240,
+    "B": 0.3847,
+    "win_rate": 0.3202,
+    "win_rate_shrunk": 0.3002,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -15.7575,
+    "combined_ev_bps": -10.1847
+  },
+  "ma_crossover::SOLUSDT": {
+    "shrunk_bps": -12.502,
+    "raw_bps": -12.9344,
+    "n": 40,
+    "B": 0.3847,
+    "win_rate": 0.05,
+    "win_rate_shrunk": 0.0606,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -14.0163,
+    "combined_ev_bps": -12.9975
+  },
+  "bb_reversion::SOLUSDT": {
+    "shrunk_bps": -8.4375,
+    "raw_bps": -6.3288,
+    "n": 36,
+    "B": 0.3847,
+    "win_rate": 0.1389,
+    "win_rate_shrunk": 0.1394,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -9.4809,
+    "combined_ev_bps": -7.7679
+  },
+  "grid_trading::SOLUSDT": {
+    "shrunk_bps": -8.2364,
+    "raw_bps": -6.0018,
+    "n": 685,
+    "B": 0.3847,
+    "win_rate": 0.2117,
+    "win_rate_shrunk": 0.204,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -9.7181,
+    "combined_ev_bps": -7.1634
+  },
+  "grid_trading::XRPUSDT": {
+    "shrunk_bps": -9.2008,
+    "raw_bps": -7.5693,
+    "n": 145,
+    "B": 0.3847,
+    "win_rate": 0.0483,
+    "win_rate_shrunk": 0.059,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -9.5394,
+    "combined_ev_bps": -8.8106
+  },
+  "ma_crossover::XRPUSDT": {
+    "shrunk_bps": -11.1874,
+    "raw_bps": -10.7978,
+    "n": 3,
+    "B": 0.3847,
+    "win_rate": 0.0,
+    "win_rate_shrunk": 0.0162,
+    "avg_win_bps_shrunk": 2.8079,
+    "avg_loss_bps_shrunk": -11.6487,
+    "combined_ev_bps": -11.4143
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "_meta": {
+    "updated_at": "2026-04-08T21:41:29.207043+00:00",
+    "n_cells": 8,
+    "k_clusters": 3,
+    "note": "Ranked by shrunk_bps (rank 1 = least negative = best candidate). cluster_label: candidate | middle | underperformer. All estimates currently negative \u2014 exploration mode active in paper/demo."
+  },
+  "ranked": [
+    {
+      "rank": 1,
+      "key": "grid_trading::SOLUSDT",
+      "strategy": "grid_trading",
+      "symbol": "SOLUSDT",
+      "cluster_label": "candidate",
+      "cluster_id": 2,
+      "shrunk_bps": -8.2364,
+      "combined_ev_bps": -7.1634,
+      "win_rate": 0.204,
+      "n": 685
+    },
+    {
+      "rank": 2,
+      "key": "bb_reversion::SOLUSDT",
+      "strategy": "bb_reversion",
+      "symbol": "SOLUSDT",
+      "cluster_label": "candidate",
+      "cluster_id": 2,
+      "shrunk_bps": -8.4375,
+      "combined_ev_bps": -7.7679,
+      "win_rate": 0.1394,
+      "n": 36
+    },
+    {
+      "rank": 3,
+      "key": "grid_trading::XRPUSDT",
+      "strategy": "grid_trading",
+      "symbol": "XRPUSDT",
+      "cluster_label": "candidate",
+      "cluster_id": 2,
+      "shrunk_bps": -9.2008,
+      "combined_ev_bps": -8.8106,
+      "win_rate": 0.059,
+      "n": 145
+    },
+    {
+      "rank": 4,
+      "key": "ma_crossover::DOGEUSDT",
+      "strategy": "ma_crossover",
+      "symbol": "DOGEUSDT",
+      "cluster_label": "candidate",
+      "cluster_id": 2,
+      "shrunk_bps": -9.6331,
+      "combined_ev_bps": -9.0894,
+      "win_rate": 0.1466,
+      "n": 34
+    },
+    {
+      "rank": 5,
+      "key": "grid_trading::DOGEUSDT",
+      "strategy": "grid_trading",
+      "symbol": "DOGEUSDT",
+      "cluster_label": "candidate",
+      "cluster_id": 2,
+      "shrunk_bps": -10.5483,
+      "combined_ev_bps": -10.1847,
+      "win_rate": 0.3002,
+      "n": 1240
+    },
+    {
+      "rank": 6,
+      "key": "ma_crossover::XRPUSDT",
+      "strategy": "ma_crossover",
+      "symbol": "XRPUSDT",
+      "cluster_label": "middle",
+      "cluster_id": 1,
+      "shrunk_bps": -11.1874,
+      "combined_ev_bps": -11.4143,
+      "win_rate": 0.0162,
+      "n": 3
+    },
+    {
+      "rank": 7,
+      "key": "ma_crossover::SOLUSDT",
+      "strategy": "ma_crossover",
+      "symbol": "SOLUSDT",
+      "cluster_label": "middle",
+      "cluster_id": 1,
+      "shrunk_bps": -12.502,
+      "combined_ev_bps": -12.9975,
+      "win_rate": 0.0606,
+      "n": 40
+    },
+    {
+      "rank": 8,
+      "key": "bb_reversion::DOGEUSDT",
+      "strategy": "bb_reversion",
+      "symbol": "DOGEUSDT",
+      "cluster_label": "underperformer",
+      "cluster_id": 0,
+      "shrunk_bps": -24.738,
+      "combined_ev_bps": -28.4937,
+      "win_rate": 0.2209,
+      "n": 52
+    }
+  ]
+}

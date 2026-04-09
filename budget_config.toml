@@ -1,0 +1,35 @@
+[meta]
+version = 1
+saved_ts_ms = 0
+
+[attention_tax]
+enabled = true
+cost_edge_max_ratio = 100.0
+# Phase 5 exploration mode: set to 100.0 (effective disable) to prevent premature position closes.
+# Original 0.8 caused immediate close; observed cost_ratio for grid/bb entries is 9–18,
+# so even 5.0 was insufficient. 100.0 bypasses the check (fires only at pnl < 0.0012%).
+# After Phase 5 observation + positive JS estimates, lower this back toward 0.8.
+# Phase 5 探索期：設為 100.0（有效禁用）防止過早平倉。
+# 原始 0.8 立即關倉；觀察到 grid/bb 入場的 cost_ratio 為 9–18，5.0 仍不足。
+# 100.0 實際跳過此檢查（僅在盈利 < 0.0012% 才觸發）。
+# Phase 5 觀察期後且 JS 估計轉正後，逐步降回 0.8。
+burn_rate_dormant = 0.0
+burn_rate_low = 0.003
+burn_rate_medium = 0.01
+burn_rate_high = 0.05
+grade_a_threshold = 0.2
+grade_b_threshold = 0.4
+grade_c_threshold = 0.6
+grade_d_threshold = 0.8
+
+[caps]
+alert_threshold_pct = 0.8
+daily_usd_max = 100.0
+monthly_usd_max = 150.0
+exhaustion_cooldown_minutes = 60
+
+[caps.per_scope_caps]
+
+[model_costs.models]
+
+[experimental.flags]
