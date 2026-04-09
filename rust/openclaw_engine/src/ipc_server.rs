@@ -175,6 +175,9 @@ pub struct IpcServer {
     /// ARCH-RC1 1C-2-E: late-injected slot for the V014 audit pool.
     /// ARCH-RC1 1C-2-E：V014 審計 pool 延後注入槽位。
     audit_pool: AuditPoolSlot,
+    /// Scanner IPC: SymbolRegistry for get_active_symbols / get_scanner_status.
+    /// 掃描器 IPC：SymbolRegistry 供 get_active_symbols / get_scanner_status 使用。
+    scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
 }
 
 impl IpcServer {
@@ -197,7 +200,19 @@ impl IpcServer {
             learning_store: None,
             budget_store: None,
             audit_pool: Arc::new(RwLock::new(None)),
+            scanner_registry: None,
         }
+    }
+
+    /// Scanner IPC: wire the SymbolRegistry so get_active_symbols / get_scanner_status work.
+    /// Must be called before run(). symbol_registry is available in main.rs before IPC spawn.
+    /// 掃描器 IPC：接入 SymbolRegistry，使 get_active_symbols / get_scanner_status 生效。
+    /// 必須在 run() 前調用。symbol_registry 在 main.rs 中在 IPC spawn 前已可用。
+    pub fn set_scanner_registry(
+        &mut self,
+        registry: Arc<crate::scanner::registry::SymbolRegistry>,
+    ) {
+        self.scanner_registry = Some(registry);
     }
 
     /// ARCH-RC1 1C-2-E: get a clone of the audit pool slot for late injection
@@ -300,8 +315,9 @@ impl IpcServer {
                             let learning_store = self.learning_store.clone();
                             let budget_store = self.budget_store.clone();
                             let audit_pool = self.audit_pool.read().await.clone();
+                            let scanner_reg = self.scanner_registry.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_store, learning_store, budget_store, audit_pool).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_store, learning_store, budget_store, audit_pool, scanner_reg).await;
                             });
                         }
                         Err(e) => {
@@ -334,6 +350,7 @@ async fn handle_connection(
     learning_store: Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: Option<sqlx::PgPool>,
+    scanner_registry: Option<Arc<crate::scanner::registry::SymbolRegistry>>,
 ) {
     let peer = format!("{:?}", stream.peer_addr());
     info!(peer = %peer, "client connected / 客戶端已連接");
@@ -350,7 +367,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_store, &learning_store, &budget_store, &audit_pool).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_store, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -389,6 +406,7 @@ async fn dispatch_request(
     learning_store: &Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: &Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: &Option<sqlx::PgPool>,
+    scanner_registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
 ) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
@@ -518,6 +536,9 @@ async fn dispatch_request(
             "budget",
             audit_pool,
         ),
+        // ── Scanner observability (IPC-SCAN-1) ──
+        "get_active_symbols" => handle_get_active_symbols(id, scanner_registry),
+        "get_scanner_status" => handle_get_scanner_status(id, scanner_registry),
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -1627,6 +1648,100 @@ pub enum IpcError {
 }
 
 // ---------------------------------------------------------------------------
+// Scanner observability handlers (IPC-SCAN-1) / 掃描器可觀測性處理器
+// ---------------------------------------------------------------------------
+
+/// IPC-SCAN-1a: Return the current active symbol universe.
+/// Fail-soft: returns {"status":"uninitialized"} if scanner not wired.
+/// IPC-SCAN-1a：返回當前活躍交易對 universe。
+/// Fail-soft：掃描器未接線時返回 {"status":"uninitialized"}。
+fn handle_get_active_symbols(
+    id: serde_json::Value,
+    registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+) -> JsonRpcResponse {
+    let Some(reg) = registry else {
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({"status": "uninitialized", "symbols": [], "count": 0}),
+        );
+    };
+    let symbols = reg.snapshot();
+    let pinned: Vec<&String> = symbols.iter().filter(|s| reg.is_pinned(s)).collect();
+    let dynamic: Vec<&String> = symbols.iter().filter(|s| !reg.is_pinned(s)).collect();
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "status": "ok",
+            "symbols": symbols,
+            "count": symbols.len(),
+            "pinned": pinned,
+            "dynamic": dynamic,
+        }),
+    )
+}
+
+/// IPC-SCAN-1b: Return full scanner status — active universe + last scan summary.
+/// Fail-soft: returns {"status":"uninitialized"} if scanner not wired.
+/// IPC-SCAN-1b：返回完整掃描器狀態 — 活躍 universe + 最後掃描摘要。
+/// Fail-soft：掃描器未接線時返回 {"status":"uninitialized"}。
+fn handle_get_scanner_status(
+    id: serde_json::Value,
+    registry: &Option<Arc<crate::scanner::registry::SymbolRegistry>>,
+) -> JsonRpcResponse {
+    let Some(reg) = registry else {
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({"status": "uninitialized"}),
+        );
+    };
+    let symbols = reg.snapshot();
+    let pinned: Vec<&String> = symbols.iter().filter(|s| reg.is_pinned(s)).collect();
+    let dynamic: Vec<&String> = symbols.iter().filter(|s| !reg.is_pinned(s)).collect();
+
+    let last_scan_json = match reg.last_scan() {
+        None => serde_json::json!(null),
+        Some(scan) => {
+            // Top 10 candidates with key fields for GUI display / 前 10 候選供 GUI 顯示
+            let top_candidates: Vec<serde_json::Value> = scan
+                .candidates
+                .iter()
+                .take(10)
+                .map(|c| {
+                    serde_json::json!({
+                        "symbol": c.symbol,
+                        "final_score": (c.final_score * 10.0).round() / 10.0,
+                        "best_strategy": format!("{:?}", c.best_strategy),
+                        "sector": c.sector,
+                        "edge_bonus": c.edge_bonus,
+                        "edge_n": c.edge_n,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "scan_ts_ms": scan.scan_ts_ms,
+                "duration_ms": scan.scan_duration_ms,
+                "added": scan.added,
+                "removed": scan.removed,
+                "rejected_count": scan.rejected_count,
+                "top_candidates": top_candidates,
+            })
+        }
+    };
+
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "status": "ok",
+            "active_symbols": symbols,
+            "active_count": symbols.len(),
+            "pinned": pinned,
+            "dynamic": dynamic,
+            "last_scan": last_scan_json,
+        }),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Tests / 測試
 // ---------------------------------------------------------------------------
 
@@ -1728,7 +1843,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         assert_eq!(
             resp.result.unwrap(),
@@ -1742,7 +1857,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -1754,7 +1869,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -1764,7 +1879,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1774,7 +1889,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1784,7 +1899,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -1794,7 +1909,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -1826,7 +1941,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when snapshot file missing"
@@ -1838,7 +1953,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -1851,7 +1966,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -1863,7 +1978,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
@@ -1965,7 +2080,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_risk_runtime_channel(0);
         let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":40}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["governor_tier"].as_str().unwrap(), "Normal");
@@ -1979,7 +2094,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_risk_runtime_channel(3);
         let req = r#"{"jsonrpc":"2.0","method":"clear_consecutive_losses","params":{},"id":41}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["result"].as_str().unwrap(), "cleared 3 symbol(s)");
@@ -2033,7 +2148,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(true, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS","reason":"manual probe"},"id":50}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["to"].as_str().unwrap(), "CAUTIOUS");
@@ -2045,7 +2160,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(true, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS"},"id":51}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
     }
 
@@ -2055,7 +2170,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(false, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":"test"},"id":52}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         let err_msg = resp.error.unwrap().message;
         assert!(err_msg.contains("cooldown"), "expected cooldown error, got: {}", err_msg);
@@ -2067,7 +2182,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(false, true);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":""},"id":53}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["reason_code"].as_str().unwrap(), "false_positive");
@@ -2079,7 +2194,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":42}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
     }
 
@@ -2089,7 +2204,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let ranges_str = result["result"].as_str().unwrap();
@@ -2103,7 +2218,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
@@ -2120,7 +2235,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
     }
 
@@ -2130,7 +2245,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error for nonexistent strategy"
@@ -2143,7 +2258,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when params_json missing"
@@ -2160,7 +2275,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "phase4 status must succeed");
         let r = resp.result.unwrap();
         assert_eq!(r["teacher"], "grey");
@@ -2177,7 +2292,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let r = resp.result.unwrap();
         for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -2202,7 +2317,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert_eq!(resp.id, serde_json::json!(4002));
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
@@ -2242,6 +2357,7 @@ mod tests {
             &ls,
             &bs,
             &None,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "expected success: {resp:?}");
@@ -2267,6 +2383,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
             &None,
         )
         .await;
@@ -2299,6 +2416,7 @@ mod tests {
             &ls,
             &bs,
             &None,
+            &None,
         )
         .await;
         assert!(resp.error.is_some(), "expected validation error");
@@ -2325,6 +2443,7 @@ mod tests {
             &ls,
             &bs,
             &None,
+            &None,
         )
         .await;
         assert!(resp.error.is_some());
@@ -2349,6 +2468,7 @@ mod tests {
             &ls,
             &bs,
             &None,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "patch_learning_config: {resp:?}");
@@ -2364,6 +2484,7 @@ mod tests {
             &rs,
             &ls,
             &bs,
+            &None,
             &None,
         )
         .await;
@@ -2383,6 +2504,7 @@ mod tests {
             &ls,
             &bs,
             &None,
+            &None,
         )
         .await;
         assert!(resp.error.is_none(), "patch_budget_config: {resp:?}");
@@ -2401,6 +2523,7 @@ mod tests {
             &None,
             &empty_budget_slot(),
             &empty_teacher_slot(),
+            &None,
             &None,
             &None,
             &None,
@@ -2552,5 +2675,66 @@ mod tests {
             handle_set_teacher_loop_enabled(serde_json::json!(6), &params, &slot).await;
         assert!(resp.error.is_none());
         assert_eq!(resp.result.expect("ok")["status"], "uninitialized");
+    }
+
+    // ── Scanner IPC tests (IPC-SCAN-1) ──────────────────────────────────────────
+
+    fn make_scanner_registry() -> Arc<crate::scanner::registry::SymbolRegistry> {
+        let pinned = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+        Arc::new(crate::scanner::registry::SymbolRegistry::new(
+            vec!["BTCUSDT".to_string(), "ETHUSDT".to_string(), "SOLUSDT".to_string()],
+            pinned,
+        ))
+    }
+
+    /// get_active_symbols — uninitialized (None registry) returns fail-soft.
+    /// get_active_symbols — 未初始化時 fail-soft。
+    #[test]
+    fn test_get_active_symbols_uninitialized() {
+        let resp = handle_get_active_symbols(serde_json::json!(1), &None);
+        assert!(resp.error.is_none());
+        let r = resp.result.expect("result");
+        assert_eq!(r["status"], "uninitialized");
+        assert_eq!(r["count"], 0);
+    }
+
+    /// get_active_symbols — registry wired: returns all symbols, correctly splits pinned/dynamic.
+    /// get_active_symbols — registry 已接線：返回所有交易對，正確區分固定/動態。
+    #[test]
+    fn test_get_active_symbols_wired() {
+        let reg = make_scanner_registry();
+        let resp = handle_get_active_symbols(serde_json::json!(2), &Some(reg));
+        assert!(resp.error.is_none());
+        let r = resp.result.expect("result");
+        assert_eq!(r["status"], "ok");
+        assert_eq!(r["count"], 3);
+        let pinned = r["pinned"].as_array().expect("pinned");
+        assert_eq!(pinned.len(), 2);
+        let dynamic = r["dynamic"].as_array().expect("dynamic");
+        assert_eq!(dynamic.len(), 1);
+        assert_eq!(dynamic[0], "SOLUSDT");
+    }
+
+    /// get_scanner_status — uninitialized (None registry) returns fail-soft.
+    /// get_scanner_status — 未初始化時 fail-soft。
+    #[test]
+    fn test_get_scanner_status_uninitialized() {
+        let resp = handle_get_scanner_status(serde_json::json!(3), &None);
+        assert!(resp.error.is_none());
+        let r = resp.result.expect("result");
+        assert_eq!(r["status"], "uninitialized");
+    }
+
+    /// get_scanner_status — registry wired, no scan yet: last_scan is null.
+    /// get_scanner_status — registry 已接線，尚無掃描：last_scan 為 null。
+    #[test]
+    fn test_get_scanner_status_no_scan_yet() {
+        let reg = make_scanner_registry();
+        let resp = handle_get_scanner_status(serde_json::json!(4), &Some(reg));
+        assert!(resp.error.is_none());
+        let r = resp.result.expect("result");
+        assert_eq!(r["status"], "ok");
+        assert_eq!(r["active_count"], 3);
+        assert!(r["last_scan"].is_null());
     }
 }

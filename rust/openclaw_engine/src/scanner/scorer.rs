@@ -108,12 +108,14 @@ pub fn compute_market_conditions(ticker: &TickerInfo) -> MarketConditions {
 
 /// F_ma: MA crossover fitness score [0, 100].
 /// Rewards directional efficiency and magnitude. Penalizes crowded funding rates.
-/// Zero if dir_pct < 1.5% (no meaningful trend).
+/// Zero if dir_pct < 0.5% (no meaningful trend). Threshold lowered from 1.5% (M-3 fix):
+/// BTC in sideways periods typically moves 0.5–1.2% over 24h; 1.5% gate excluded it entirely.
 /// F_ma：MA 交叉適配分 [0, 100]。
 /// 獎勵方向效率和幅度。懲罰擁擠的資金費率。
-/// 若 dir_pct < 1.5%（無有意義趨勢）則為零。
+/// 若 dir_pct < 0.5%（無有意義趨勢）則為零。閾值從 1.5% 降低（M-3 修復）：
+/// BTC 橫盤期 24h 移動通常在 0.5–1.2%，1.5% 門檻會完全過濾掉它。
 pub fn f_ma(mc: &MarketConditions) -> f64 {
-    if mc.dir_pct < 1.5 {
+    if mc.dir_pct < 0.5 {
         return 0.0;
     }
     let base = 100.0 * mc.de * (mc.dir_pct / 10.0).clamp(0.0, 1.0);
@@ -235,10 +237,12 @@ pub fn compute_fitness(mc: &MarketConditions) -> FitnessScores {
 /// Apply edge bonus from JS shrinkage estimates.
 /// Returns (bonus, edge_n).
 /// - If estimate exists: bonus = clamp(shrunk_bps * 0.5, -30, 10), n = 1 (present)
-/// - If not yet explored: bonus = +5.0 exploration credit, n = 0
+/// - If not yet explored: bonus = +2.0 exploration credit, n = 0. Lowered from +5 (M-5 fix):
+///   +5 could push low-quality new listings above established symbols with real edge data.
 /// 從 JS 收縮估計施加邊際獎勵。返回 (bonus, edge_n)。
 /// - 若估計存在：bonus = clamp(shrunk_bps * 0.5, -30, 10)，n = 1（存在）
-/// - 若尚未探索：bonus = +5.0 探索加分，n = 0
+/// - 若尚未探索：bonus = +2.0 探索加分，n = 0。從 +5 降低（M-5 修復）：
+///   +5 可能把低質量新幣分數推超有真實 edge 數據的成熟幣。
 pub fn apply_edge_bonus(
     raw: f64,
     best_strategy: StrategyCategory,
@@ -254,8 +258,8 @@ pub fn apply_edge_bonus(
         }
         None => {
             // Unexplored symbol — give exploration credit / 未探索交易對 — 給予探索加分
-            let final_score = (raw + 5.0).clamp(0.0, 100.0);
-            (final_score, 5.0, 0)
+            let final_score = (raw + 2.0).clamp(0.0, 100.0);
+            (final_score, 2.0, 0)
         }
     }
 }
@@ -503,15 +507,18 @@ mod tests {
 
     #[test]
     fn test_fitness_ma_zero_if_low_dir_pct() {
-        // dir_pct < 1.5% → F_ma = 0
+        // dir_pct < 0.5% → F_ma = 0 (M-3 fix: threshold lowered from 1.5% to 0.5%)
         let mc = MarketConditions {
-            dir_pct: 1.0,
+            dir_pct: 0.3,
             range_pct: 5.0,
             de: 0.2,
             fr_bps: 5.0,
             turnover_24h: 60_000_000.0,
         };
         assert_eq!(f_ma(&mc), 0.0);
+        // dir_pct at 1.0% (previously filtered by 1.5% gate) should now be non-zero
+        let mc2 = MarketConditions { dir_pct: 1.0, ..mc };
+        assert!(f_ma(&mc2) > 0.0, "1.0% should pass new 0.5% gate");
     }
 
     #[test]
@@ -656,6 +663,9 @@ mod tests {
 
     #[test]
     fn test_edge_bonus_exploration_no_data() {
+        // M-5 fix: exploration credit lowered from +5 to +2 to prevent new listings
+        // from crowding out symbols with real edge data.
+        // M-5 修復：探索加分從 +5 降至 +2，防止新幣擠排有真實 edge 數據的交易對。
         let estimates = EdgeEstimates::default();
         let (final_score, bonus, n) = apply_edge_bonus(
             50.0,
@@ -664,8 +674,8 @@ mod tests {
             &estimates,
         );
         assert_eq!(n, 0);
-        assert!((bonus - 5.0).abs() < 1e-10);
-        assert!((final_score - 55.0).abs() < 1e-10);
+        assert!((bonus - 2.0).abs() < 1e-10);
+        assert!((final_score - 52.0).abs() < 1e-10);
     }
 
     // ── beta_proxy tests ───────────────────────────────────────────────────────

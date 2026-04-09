@@ -29,14 +29,16 @@ fn now_ms() -> u64 {
 }
 
 /// Spawn REST polling tasks for funding, OI, LSR.
+/// m-3 fix: accepts Vec<String> so callers can pass SymbolRegistry::snapshot() directly.
 /// 啟動資金費率、OI、LSR 的 REST 輪詢任務。
+/// m-3 修復：接受 Vec<String>，使調用方可直接傳 SymbolRegistry::snapshot()。
 pub fn spawn_rest_pollers(
     client: Arc<BybitRestClient>,
     market_tx: mpsc::Sender<MarketDataMsg>,
-    symbols: &[&str],
+    symbols: Vec<String>,
     cancel: CancellationToken,
 ) {
-    let symbols_owned: Vec<String> = symbols.iter().map(|s| s.to_string()).collect();
+    let symbols_owned = symbols;
 
     // Funding rate poller / 資金費率輪詢
     {
