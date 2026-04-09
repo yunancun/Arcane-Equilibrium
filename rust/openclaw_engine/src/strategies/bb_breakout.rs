@@ -1,7 +1,7 @@
 //! BB Breakout Strategy V2 — Squeeze→Expansion + Volume + Donchian + ATR trailing stop + Regime exit.
 //! BB 突破策略 V2 — 壓縮→擴張 + 成交量 + Donchian + ATR 追蹤止損 + Regime 出場。
 
-use super::{ParamRange, Strategy, StrategyParams};
+use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 use serde::{Deserialize, Serialize};
@@ -189,6 +189,12 @@ impl Strategy for BbBreakout {
     }
 
     /// RC-04: Revert position, entry_price, trailing_stop, was_in_squeeze on rejection.
+    fn on_external_close(&mut self, _symbol: &str) {
+        self.position = None;
+        self.entry_price = None;
+        self.trailing_stop = None;
+    }
+
     /// RC-04：拒絕時回滾 position、entry_price、trailing_stop、was_in_squeeze。
     fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
         self.position = self.prev_position;
@@ -198,7 +204,7 @@ impl Strategy for BbBreakout {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
+    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
         let ind = match &ctx.indicators {
             Some(i) => i,
             None => return vec![],
@@ -254,7 +260,7 @@ impl Strategy for BbBreakout {
                         };
                         // CONF-D: scale entry confidence
                         let raw_conf = (0.7_f64 + hurst_boost).min(1.0);
-                        intents.push(OrderIntent {
+                        intents.push(StrategyAction::Open(OrderIntent {
                             symbol: ctx.symbol.clone(),
                             is_long,
                             qty: self.default_qty,
@@ -262,7 +268,7 @@ impl Strategy for BbBreakout {
                             strategy: self.name().into(),
                             order_type: "market".into(),
                             limit_price: None,
-                        });
+                        }));
                         self.position = Some(is_long);
                         self.was_in_squeeze = false;
                         self.last_trade_ms = ctx.timestamp_ms;
@@ -283,74 +289,63 @@ impl Strategy for BbBreakout {
                 }
             }
             Some(is_long) => {
-                let mut should_exit = false;
+                let mut exit_reason: Option<&str> = None;
                 let mut exit_confidence = 0.5_f64;
 
-                // V2: ATR trailing stop — dynamic trailing stop to ride trends
-                // V2：ATR 追蹤止損 — 動態追蹤止損以乘勢而行
+                // V2: ATR trailing stop — Chandelier exit, 2×ATR from peak.
+                // V2：ATR 追蹤止損 — Chandelier 出場，峰值 2×ATR。
                 if let Some(atr_res) = &ind.atr_14 {
                     let stop_distance = atr_res.atr * self.trailing_stop_atr_mult;
                     if is_long {
-                        // Long: trailing stop ratchets up as price rises
-                        // 做多：追蹤止損隨價格上漲而上移
                         let new_stop = ctx.price - stop_distance;
                         if self.trailing_stop.is_none() || new_stop > self.trailing_stop.unwrap() {
                             self.trailing_stop = Some(new_stop);
                         }
                         if ctx.price <= self.trailing_stop.unwrap() {
-                            should_exit = true;
+                            exit_reason = Some("trailing_stop");
                             exit_confidence = 0.7;
                         }
                     } else {
-                        // Short: trailing stop ratchets down as price falls
-                        // 做空：追蹤止損隨價格下跌而下移
                         let new_stop = ctx.price + stop_distance;
                         if self.trailing_stop.is_none() || new_stop < self.trailing_stop.unwrap() {
                             self.trailing_stop = Some(new_stop);
                         }
                         if ctx.price >= self.trailing_stop.unwrap() {
-                            should_exit = true;
+                            exit_reason = Some("trailing_stop");
                             exit_confidence = 0.7;
                         }
                     }
                 }
 
-                // V2: Regime exit — exit when regime shifts from trending to ranging/squeeze
-                // V2：Regime 出場 — 當趨勢狀態轉為震盪/壓縮時出場
-                if !should_exit {
+                // V2: Regime exit — Hurst drops from trending to mean_reverting/random_walk.
+                // V2：Regime 出場 — Hurst 從趨勢轉為均值回歸/隨機漫步。
+                if exit_reason.is_none() {
                     if let Some(h) = &ind.hurst {
                         if h.regime == "mean_reverting" || h.regime == "random_walk" {
-                            should_exit = true;
+                            exit_reason = Some("regime_shift");
                             exit_confidence = 0.6;
                         }
                     }
                 }
 
-                // Original exit: %B returns to mid-band or bandwidth squeezes again
-                // 原有出場：%B 回到中間帶或帶寬再次壓縮
-                if !should_exit {
+                // %B revert to mid: failed breakout — price returned to BB middle.
+                // %B 回中軌：突破失敗 — 價格回到 BB 中間。
+                if exit_reason.is_none() {
                     if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
-                        // %B revert to mid: textbook breakout failure → moderate confidence
-                        // %B 回中軌：教科書突破失敗 → 中等信心
-                        should_exit = true;
+                        exit_reason = Some("pctb_revert");
                         exit_confidence = 0.55;
                     } else if bb.bandwidth < self.squeeze_bw {
-                        // Bandwidth squeeze: weaker signal (vol collapse, not directional)
-                        // 帶寬壓縮：較弱信號（波動塌陷，非方向性）
-                        should_exit = true;
+                        // BW squeeze: volatility collapsed / 帶寬壓縮：波動塌陷
+                        exit_reason = Some("bw_squeeze");
                         exit_confidence = 0.45;
                     }
                 }
 
-                if should_exit {
-                    intents.push(OrderIntent {
+                if let Some(reason) = exit_reason {
+                    intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.clone(),
-                        is_long: !is_long,
-                        qty: self.default_qty,
                         confidence: (exit_confidence * self.conf_scale).clamp(0.0, 1.0),
-                        strategy: self.name().into(),
-                        order_type: "market".into(),
-                        limit_price: None,
+                        reason: reason.into(),
                     });
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
@@ -429,7 +424,10 @@ mod tests {
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
         let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long);
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -477,8 +475,13 @@ mod tests {
         // 價格跌至追蹤止損 -> 出場
         let i = s.on_tick(&ctx_ext(0.05, 0.9, 2.0, 2_100_000, 51000.0, atr(), None));
         assert_eq!(i.len(), 1);
-        assert!(!i[0].is_long); // close long = sell
-        assert!((i[0].confidence - 0.7).abs() < 1e-9);
+        match &i[0] {
+            StrategyAction::Close { reason, confidence, .. } => {
+                assert_eq!(reason, "trailing_stop");
+                assert!((*confidence - 0.7).abs() < 1e-9);
+            }
+            other => panic!("expected Close, got {:?}", other),
+        }
         assert!(s.position.is_none());
         assert!(s.entry_price.is_none());
         assert!(s.trailing_stop.is_none());
@@ -511,7 +514,10 @@ mod tests {
         // Price rises to trailing stop -> exit
         let i = s.on_tick(&ctx_ext(0.05, 0.1, 2.0, 2_100_000, 49000.0, atr(), None));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long); // close short = buy
+        match &i[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "trailing_stop"),
+            other => panic!("expected Close, got {:?}", other),
+        }
     }
 
     #[test]
@@ -535,7 +541,12 @@ mod tests {
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         let i = s.on_tick(&ctx_ext(0.05, 1.1, 2.0, 700_000, 50000.0, None, trending()));
         assert_eq!(i.len(), 1);
-        assert!((i[0].confidence - 0.8).abs() < 1e-9); // 0.7 + 0.1 hurst boost
+        match &i[0] {
+            StrategyAction::Open(intent) => {
+                assert!((intent.confidence - 0.8).abs() < 1e-9); // 0.7 + 0.1 hurst boost
+            }
+            other => panic!("expected Open, got {:?}", other),
+        }
         assert!(s.position == Some(true));
 
         // Regime shifts to mean_reverting -> exit
@@ -549,8 +560,13 @@ mod tests {
             ranging(),
         ));
         assert_eq!(i.len(), 1);
-        assert!(!i[0].is_long); // close long
-        assert!((i[0].confidence - 0.6).abs() < 1e-9);
+        match &i[0] {
+            StrategyAction::Close { reason, confidence, .. } => {
+                assert_eq!(reason, "regime_shift");
+                assert!((*confidence - 0.6).abs() < 1e-9);
+            }
+            other => panic!("expected Close, got {:?}", other),
+        }
         assert!(s.position.is_none());
     }
 
@@ -569,7 +585,10 @@ mod tests {
         // vol=3.5 passes custom threshold / vol=3.5 通過自訂閾值
         let i = s.on_tick(&ctx(0.05, 1.1, 3.5, 700_000));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long);
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -618,5 +637,54 @@ mod tests {
             })
             .is_ok());
         assert!((s.get_params().trailing_stop_atr_mult - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_pctb_revert_exit() {
+        // Failed breakout: %B returns to mid-band [0.2, 0.8] → exit with pctb_revert
+        // 突破失敗：%B 回到中間帶 [0.2, 0.8] → 以 pctb_revert 出場
+        let mut s = BbBreakout::new();
+        // Enter long (no ATR, no Hurst — only pctb/bw exits active)
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
+        s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
+        assert_eq!(s.position, Some(true));
+
+        // %B reverts to 0.5 (mid-band) → should trigger pctb_revert exit
+        let i = s.on_tick(&ctx(0.05, 0.5, 2.0, 1_400_000));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Close { reason, confidence, .. } => {
+                assert_eq!(reason, "pctb_revert");
+                // 0.55 * conf_scale(1.0) = 0.55
+                assert!((*confidence - 0.55).abs() < 1e-9);
+            }
+            other => panic!("expected Close(pctb_revert), got {:?}", other),
+        }
+        assert!(s.position.is_none());
+    }
+
+    #[test]
+    fn test_bw_squeeze_exit() {
+        // Volatility collapse: bandwidth drops below squeeze_bw while %B still extreme → bw_squeeze
+        // 波動塌陷：帶寬低於壓縮閾值且 %B 仍在極端 → bw_squeeze
+        let mut s = BbBreakout::new();
+        // Enter long
+        s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
+        s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
+        assert_eq!(s.position, Some(true));
+
+        // %B still extreme (1.1, outside [0.2,0.8]) but bandwidth collapsed below squeeze_bw (0.02)
+        // → pctb_revert doesn't trigger, but bw_squeeze does
+        let i = s.on_tick(&ctx(0.015, 1.1, 2.0, 1_400_000));
+        assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Close { reason, confidence, .. } => {
+                assert_eq!(reason, "bw_squeeze");
+                // 0.45 * conf_scale(1.0) = 0.45
+                assert!((*confidence - 0.45).abs() < 1e-9);
+            }
+            other => panic!("expected Close(bw_squeeze), got {:?}", other),
+        }
+        assert!(s.position.is_none());
     }
 }

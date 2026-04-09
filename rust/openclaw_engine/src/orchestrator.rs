@@ -1,8 +1,7 @@
 //! Strategy Orchestrator — dispatch ticks to strategies, collect intents (R04-4).
 //! 策略調度器 — 分派 tick 到策略，收集意圖。
 
-use crate::intent_processor::OrderIntent;
-use crate::strategies::Strategy;
+use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::{StrategyInfo, TickContext};
 
 /// Strategy orchestrator — dispatches ticks to all active strategies.
@@ -31,7 +30,7 @@ impl Orchestrator {
     /// 注意：自 RC-04 起生產環境不再調用（tick_pipeline 使用逐策略循環）。
     /// 保留用於測試輔助和潛在的未來批處理。
     #[allow(dead_code)]
-    pub fn dispatch_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
+    pub fn dispatch_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
         let mut all_intents = Vec::new();
         for strategy in &mut self.strategies {
             if strategy.is_active() {
@@ -108,11 +107,12 @@ impl Default for Orchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intent_processor::OrderIntent;
     use crate::strategies::Strategy;
 
     struct MockStrategy {
         active: bool,
-        intents: Vec<OrderIntent>,
+        actions: Vec<StrategyAction>,
     }
 
     impl Strategy for MockStrategy {
@@ -125,8 +125,8 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.active = active;
         }
-        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
-            self.intents.clone()
+        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
+            self.actions.clone()
         }
     }
 
@@ -158,7 +158,7 @@ mod tests {
         };
         orch.register(Box::new(MockStrategy {
             active: true,
-            intents: vec![intent.clone()],
+            actions: vec![StrategyAction::Open(intent.clone())],
         }));
         let ctx = TickContext {
             symbol: "BTC".into(),
@@ -185,7 +185,7 @@ mod tests {
         };
         orch.register(Box::new(MockStrategy {
             active: false,
-            intents: vec![intent],
+            actions: vec![StrategyAction::Open(intent)],
         }));
         let ctx = TickContext {
             symbol: "BTC".into(),
@@ -203,11 +203,11 @@ mod tests {
         let mut orch = Orchestrator::new();
         orch.register(Box::new(MockStrategy {
             active: true,
-            intents: vec![],
+            actions: vec![],
         }));
         orch.register(Box::new(MockStrategy {
             active: false,
-            intents: vec![],
+            actions: vec![],
         }));
         assert_eq!(orch.strategy_count(), 2);
         assert_eq!(orch.active_strategy_names().len(), 1);
@@ -218,7 +218,7 @@ mod tests {
         let mut orch = Orchestrator::new();
         orch.register(Box::new(MockStrategy {
             active: true,
-            intents: vec![],
+            actions: vec![],
         }));
         // MockStrategy.name() returns "mock"
         assert!(orch.find_strategy_mut("mock").is_some());

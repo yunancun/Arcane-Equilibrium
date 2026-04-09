@@ -6,7 +6,7 @@
 //! Geometric mode: equal ratio gaps between levels (better for crypto).
 //! Health check: detect stale/out-of-range grids and auto-rebalance.
 
-use super::{ParamRange, Strategy, StrategyParams};
+use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -510,6 +510,16 @@ impl Strategy for GridTrading {
         self.active = active;
     }
 
+    /// Reset net_inventory on external close (risk-stop) to prevent desync.
+    /// 外部平倉（風控止損）時重設 net_inventory，防止與 paper_state 脫鉤。
+    fn on_external_close(&mut self, _symbol: &str) {
+        if self.net_inventory != 0.0 {
+            info!(strategy = "grid_trading", prev_inventory = %self.net_inventory,
+                  "external close: resetting net_inventory / 外部平倉：重設淨庫存");
+            self.net_inventory = 0.0;
+        }
+    }
+
     /// RC-04: Revert net_inventory, last_cross_idx, last_trade_ms on rejection.
     /// RC-04：拒絕時回滾 net_inventory、last_cross_idx、last_trade_ms。
     fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
@@ -518,7 +528,7 @@ impl Strategy for GridTrading {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
+    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
         self.price_history.push(ctx.price);
         if self.price_history.len() > self.ou_lookback * 2 {
             self.price_history.drain(0..self.ou_lookback);
@@ -577,9 +587,10 @@ impl Strategy for GridTrading {
         let conf = (compute_grid_confidence(&ctx.indicators) * self.conf_scale).clamp(0.0, 1.0);
 
         if idx < prev_idx {
-            // Price crossed down → buy (intent_processor handles position/sizing)
-            // 價格下穿 → 買入（intent_processor 處理倉位/sizing）
-            intents.push(OrderIntent {
+            // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
+            // Otherwise it's a new long → Open.
+            // 價格下穿 → 買入。若 net_inventory < 0（空倉），為平空 → Close；否則新多 → Open。
+            let intent = OrderIntent {
                 symbol: ctx.symbol.clone(),
                 is_long: true,
                 qty: self.qty_per_grid,
@@ -587,13 +598,23 @@ impl Strategy for GridTrading {
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,
-            });
+            };
+            if self.net_inventory < 0.0 {
+                intents.push(StrategyAction::Close {
+                    symbol: ctx.symbol.clone(),
+                    confidence: conf,
+                    reason: "grid_close_short".into(),
+                });
+            } else {
+                intents.push(StrategyAction::Open(intent));
+            }
             self.net_inventory += self.qty_per_grid;
             self.last_trade_ms = ctx.timestamp_ms;
         } else if idx > prev_idx {
-            // Price crossed up → sell (may close existing long — Gate 1.5 allows opposite)
-            // 價格上穿 → 賣出（may close existing long — Gate 1.5 allows opposite）
-            intents.push(OrderIntent {
+            // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
+            // Otherwise it's a new short → Open.
+            // 價格上穿 → 賣出。若 net_inventory > 0（多倉），為平多 → Close；否則新空 → Open。
+            let intent = OrderIntent {
                 symbol: ctx.symbol.clone(),
                 is_long: false,
                 qty: self.qty_per_grid,
@@ -601,7 +622,16 @@ impl Strategy for GridTrading {
                 strategy: self.name().into(),
                 order_type: "market".into(),
                 limit_price: None,
-            });
+            };
+            if self.net_inventory > 0.0 {
+                intents.push(StrategyAction::Close {
+                    symbol: ctx.symbol.clone(),
+                    confidence: conf,
+                    reason: "grid_close_long".into(),
+                });
+            } else {
+                intents.push(StrategyAction::Open(intent));
+            }
             self.net_inventory -= self.qty_per_grid;
             self.last_trade_ms = ctx.timestamp_ms;
         }
@@ -655,7 +685,11 @@ mod tests {
         g.on_tick(&ctx(50500.0, 0)); // initial
         let i = g.on_tick(&ctx(49500.0, 100_000)); // cross down
         assert!(!i.is_empty());
-        assert!(i[0].is_long);
+        // net_inventory was 0 before buy → Open (new long)
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -664,7 +698,11 @@ mod tests {
         g.on_tick(&ctx(49500.0, 0));
         let i = g.on_tick(&ctx(50500.0, 100_000));
         assert!(!i.is_empty());
-        assert!(!i[0].is_long);
+        // net_inventory was 0 before sell → Open (new short)
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(!intent.is_long),
+            other => panic!("expected Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -676,6 +714,33 @@ mod tests {
         g.on_tick(&ctx(50500.0, 0));
         let i = g.on_tick(&ctx(49500.0, 100_000));
         assert!(!i.is_empty()); // Grid always emits; intent_processor decides
+    }
+
+    #[test]
+    fn test_grid_close_on_inventory_reduction() {
+        // When net_inventory > 0 and price crosses up (sell), it's a Close (closing long).
+        // When net_inventory < 0 and price crosses down (buy), it's a Close (closing short).
+        // 當 net_inventory > 0 且價格上穿（賣出），為 Close（平多）。
+        // 當 net_inventory < 0 且價格下穿（買入），為 Close（平空）。
+        let mut g = GridTrading::new(49000.0, 51000.0);
+
+        // Step 1: Buy to build positive inventory / 步驟 1：買入建立正庫存
+        g.on_tick(&ctx(50500.0, 0));
+        let i = g.on_tick(&ctx(49500.0, 100_000));
+        assert!(!i.is_empty());
+        assert!(g.net_inventory > 0.0);
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected Open for initial buy, got {:?}", other),
+        }
+
+        // Step 2: Sell with positive inventory → Close / 步驟 2：正庫存賣出 → Close
+        let i = g.on_tick(&ctx(50500.0, 200_000));
+        assert!(!i.is_empty());
+        match &i[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "grid_close_long"),
+            other => panic!("expected Close for inventory reduction, got {:?}", other),
+        }
     }
 
     #[test]

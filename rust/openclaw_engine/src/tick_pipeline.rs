@@ -1898,8 +1898,20 @@ impl TickPipeline {
                     }
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
                     self.dispatch_close_order(symbol, is_long, qty, event, false);
+                    self.recent_intents.push_back(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: close_intent,
+                        result: format!("close_filled:{reason}"),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
+                    self.recent_intents.push_back(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: close_intent,
+                        result: format!("close_skipped:no_position_{reason}"),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
                 }
             }
         }
