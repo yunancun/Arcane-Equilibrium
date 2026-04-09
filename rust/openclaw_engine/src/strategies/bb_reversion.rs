@@ -1,7 +1,7 @@
 //! BB Reversion Strategy V2 — Bollinger Band mean reversion + RSI filter.
 //! BB 回歸策略 V2 — 布林帶均值回歸 + RSI 過濾。
 
-use super::{ParamRange, Strategy, StrategyParams};
+use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 use serde::{Deserialize, Serialize};
@@ -203,7 +203,11 @@ impl Strategy for BbReversion {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
+    fn on_external_close(&mut self, _symbol: &str) {
+        self.position = None;
+    }
+
+    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
         let ind = match &ctx.indicators {
             Some(i) => i,
             None => return vec![],
@@ -235,36 +239,39 @@ impl Strategy for BbReversion {
             None => {
                 // Entry: oversold long / 入場：超賣做多
                 if bb.percent_b < 0.0 && rsi < 30.0 {
-                    intents.push(self.make_entry_intent(
+                    intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         true,
                         (0.6_f64 + hurst_boost).min(1.0),
                         bb.lower,
                         bb.upper,
-                    ));
+                    )));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 // Entry: overbought short / 入場：超買做空
                 } else if bb.percent_b > 1.0 && rsi > 70.0 {
-                    intents.push(self.make_entry_intent(
+                    intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         false,
                         (0.6_f64 + hurst_boost).min(1.0),
                         bb.lower,
                         bb.upper,
-                    ));
+                    )));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
             }
-            Some(is_long) => {
-                // Exit: always market for guaranteed fills / 出場：永遠市價確保成交
+            Some(_is_long) => {
+                // Exit: %B returns to [0.2, 0.8] = textbook mean-reversion target reached.
+                // Wider than exact 0.5 to handle crypto mean-overshoot.
+                // 出場：%B 回到 [0.2, 0.8] = 教科書均值回歸目標。比精確 0.5 更寬以應對加密貨幣超調。
                 if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
-                    // Exit confidence: mid-band revert is the textbook reversion target,
-                    // boost when Hurst still confirms mean-reverting regime.
-                    // 出場信心：%B 回到中軌是教科書回歸目標，Hurst 仍確認 mean_reverting 時加成。
                     let exit_conf = (0.55_f64 + hurst_boost).clamp(0.4, 0.8);
-                    intents.push(self.make_exit_intent(ctx, !is_long, exit_conf));
+                    intents.push(StrategyAction::Close {
+                        symbol: ctx.symbol.clone(),
+                        confidence: exit_conf,
+                        reason: "bb_mean_revert".into(),
+                    });
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
@@ -325,7 +332,10 @@ mod tests {
         let mut s = BbReversion::new();
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long);
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -334,6 +344,10 @@ mod tests {
         s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
         assert_eq!(i.len(), 1);
+        match &i[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "bb_mean_revert"),
+            other => panic!("expected StrategyAction::Close, got {:?}", other),
+        }
     }
 
     // ── RC-07: Limit order tests / RC-07 限價單測試 ──
@@ -347,15 +361,19 @@ mod tests {
         s.limit_offset_bps = 10.0; // 10 bps = 0.1%
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long);
-        assert_eq!(i[0].order_type, "limit");
+        let intent = match &i[0] {
+            StrategyAction::Open(intent) => intent,
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        };
+        assert!(intent.is_long);
+        assert_eq!(intent.order_type, "limit");
         // limit_price = lower * (1 + 10/10000) = 49000 * 1.001 = 49049.0
         let expected = 49000.0 * (1.0 + 10.0 / 10_000.0);
         assert!(
-            (i[0].limit_price.unwrap() - expected).abs() < 1e-6,
+            (intent.limit_price.unwrap() - expected).abs() < 1e-6,
             "expected limit_price={}, got={}",
             expected,
-            i[0].limit_price.unwrap()
+            intent.limit_price.unwrap()
         );
     }
 
@@ -368,15 +386,19 @@ mod tests {
         s.limit_offset_bps = 10.0;
         let i = s.on_tick(&ctx_bb(1.1, 75.0, 0));
         assert_eq!(i.len(), 1);
-        assert!(!i[0].is_long);
-        assert_eq!(i[0].order_type, "limit");
+        let intent = match &i[0] {
+            StrategyAction::Open(intent) => intent,
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        };
+        assert!(!intent.is_long);
+        assert_eq!(intent.order_type, "limit");
         // limit_price = upper * (1 - 10/10000) = 51000 * 0.999 = 50949.0
         let expected = 51000.0 * (1.0 - 10.0 / 10_000.0);
         assert!(
-            (i[0].limit_price.unwrap() - expected).abs() < 1e-6,
+            (intent.limit_price.unwrap() - expected).abs() < 1e-6,
             "expected limit_price={}, got={}",
             expected,
-            i[0].limit_price.unwrap()
+            intent.limit_price.unwrap()
         );
     }
 
@@ -388,24 +410,39 @@ mod tests {
         assert!(!s.use_limit); // verify default is false / 確認默認為 false
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
-        assert_eq!(i[0].order_type, "market");
-        assert!(i[0].limit_price.is_none());
+        let intent = match &i[0] {
+            StrategyAction::Open(intent) => intent,
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        };
+        assert_eq!(intent.order_type, "market");
+        assert!(intent.limit_price.is_none());
     }
 
     #[test]
     fn test_exit_always_market() {
         // RC-07: Even with use_limit=true, exit orders are always market
         // RC-07：即使 use_limit=true，出場單永遠是市價單
+        // With StrategyAction::Close, exit is no longer an OrderIntent —
+        // it's a Close action that the pipeline handles directly.
+        // 使用 StrategyAction::Close 後，出場不再是 OrderIntent。
         let mut s = BbReversion::new();
         s.use_limit = true;
         // Enter long with limit order / 限價入場做多
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
-        assert_eq!(i[0].order_type, "limit");
+        let entry_intent = match &i[0] {
+            StrategyAction::Open(intent) => intent,
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        };
+        assert_eq!(entry_intent.order_type, "limit");
         // Exit at mean reversion / 均值回歸出場
         let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
         assert_eq!(i.len(), 1);
-        assert_eq!(i[0].order_type, "market", "exit must always be market");
-        assert!(i[0].limit_price.is_none(), "exit must have no limit_price");
+        match &i[0] {
+            StrategyAction::Close { reason, .. } => {
+                assert_eq!(reason, "bb_mean_revert", "exit must be a Close action");
+            }
+            other => panic!("expected StrategyAction::Close, got {:?}", other),
+        }
     }
 
     #[test]

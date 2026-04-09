@@ -4,7 +4,7 @@
 //! Entry: |funding_rate| > threshold + edge > 0 after cost amortization.
 //! Exit: rate flipped | rate < exit_threshold | basis > 0.5% | max hold 72h.
 
-use super::Strategy;
+use super::{Strategy, StrategyAction};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 
@@ -111,7 +111,7 @@ impl Strategy for FundingArb {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
-    fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
+    fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
         // TODO(R-06): When real funding rate logic is wired, add prev_* snapshot
         // before mutation here (same pattern as other strategies).
         // TODO(R-06)：接入真實資金費率邏輯時，在此處突變前添加 prev_* 快照。

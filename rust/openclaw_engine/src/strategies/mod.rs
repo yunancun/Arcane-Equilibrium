@@ -12,6 +12,27 @@ use crate::tick_pipeline::TickContext;
 use openclaw_core::execution::FillResult;
 use serde::{Deserialize, Serialize};
 
+/// First-class strategy action: Open (new position, full governance) or Close (exit, lightweight path).
+/// 策略一等公民動作：Open（新倉，完整治理管線）或 Close（平倉，輕量路徑）。
+///
+/// Close bypasses governance gates (Guardian, cost_gate, Kelly sizing, P1 cap) since closing
+/// reduces risk rather than increasing it. Pipeline looks up actual is_long/qty from paper_state.
+/// Close 繞過治理門禁（Guardian、cost_gate、Kelly sizing、P1 cap），因為平倉是降低風險而非增加風險。
+/// 管線從 paper_state 查找實際的 is_long/qty。
+#[derive(Debug, Clone)]
+pub enum StrategyAction {
+    /// New position — goes through full governance pipeline.
+    /// 新倉 — 經過完整治理管線。
+    Open(OrderIntent),
+    /// Close existing position — lightweight path, bypasses governance gates.
+    /// 平倉 — 輕量路徑，繞過治理門禁。
+    Close {
+        symbol: String,
+        confidence: f64,
+        reason: String,
+    },
+}
+
 /// Strategy trait — implement for each trading strategy.
 /// 策略 trait — 為每個交易策略實現。
 /// Send required for tokio::spawn compatibility.
@@ -28,9 +49,9 @@ pub trait Strategy: Send {
     /// RRC-1-E2：通過 IPC 設置策略活躍/暫停狀態。
     fn set_active(&mut self, active: bool);
 
-    /// Process a tick and return trade intents.
-    /// 處理 tick 並返回交易意圖。
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent>;
+    /// Process a tick and return strategy actions (Open or Close).
+    /// 處理 tick 並返回策略動作（Open 或 Close）。
+    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction>;
 
     /// Called when an intent from this strategy was rejected by the governance pipeline.
     /// 當此策略的意圖被治理管線拒絕時調用。
@@ -43,6 +64,13 @@ pub trait Strategy: Send {
     /// Called when an order from this strategy was filled.
     /// 當此策略的訂單成交時調用。
     fn on_fill(&mut self, _intent: &OrderIntent, _fill: &FillResult) {
+        // Default no-op / 默認無操作
+    }
+
+    /// Called when a position was closed externally (risk-close/stop) rather than by this strategy.
+    /// Strategies that track internal position state should override to stay in sync.
+    /// 當倉位被外部（風控止損）而非本策略關閉時調用。跟蹤內部倉位狀態的策略應覆蓋以保持同步。
+    fn on_external_close(&mut self, _symbol: &str) {
         // Default no-op / 默認無操作
     }
 
@@ -149,7 +177,7 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.active = active;
         }
-        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<OrderIntent> {
+        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
             Vec::new()
         }
     }

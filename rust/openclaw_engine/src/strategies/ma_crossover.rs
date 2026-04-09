@@ -1,7 +1,7 @@
 //! MA Crossover Strategy V2 — KAMA + ADX filter + Hurst regime filter + multi-TF confirmation.
 //! MA 交叉策略 V2 — KAMA + ADX 過濾 + 赫斯特狀態過濾 + 多時間框架確認。
 
-use super::{ParamRange, Strategy, StrategyParams};
+use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
 use serde::{Deserialize, Serialize};
@@ -271,7 +271,13 @@ impl Strategy for MaCrossover {
         self.last_trade_ms = self.prev_last_trade_ms;
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<OrderIntent> {
+    /// Reset internal position on external close (risk-stop).
+    /// 外部平倉（風控止損）時重設內部倉位狀態。
+    fn on_external_close(&mut self, _symbol: &str) {
+        self.position = None;
+    }
+
+    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
         let ind = match &ctx.indicators {
             Some(i) => i,
             None => return vec![],
@@ -324,28 +330,38 @@ impl Strategy for MaCrossover {
                     if !self.higher_tf_allows_entry(true) {
                         return vec![];
                     }
-                    intents.push(self.make_intent(ctx, true, entry_conf));
+                    intents.push(StrategyAction::Open(self.make_intent(ctx, true, entry_conf)));
                     self.position = Some(true);
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if fast < slow {
                     if !self.higher_tf_allows_entry(false) {
                         return vec![];
                     }
-                    intents.push(self.make_intent(ctx, false, entry_conf));
+                    intents.push(StrategyAction::Open(self.make_intent(ctx, false, entry_conf)));
                     self.position = Some(false);
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
             }
             Some(is_long) => {
                 // Exit path — RC-01/RC-02 filters do NOT apply to exits.
-                // 出場路徑 — RC-01/RC-02 過濾不適用於出場。
+                // KAMA crosses back through SMA20 = trend reversal (Kaufman).
+                // Exit urgency > entry selectivity: no ADX/regime/higher-TF filter on exit.
+                // 出場路徑 — KAMA 回穿 SMA20 = 趨勢反轉。出場不套用入場過濾器。
                 let exit_conf = self.compute_exit_confidence(adx);
                 if is_long && fast < slow {
-                    intents.push(self.make_intent(ctx, false, exit_conf));
+                    intents.push(StrategyAction::Close {
+                        symbol: ctx.symbol.clone(),
+                        confidence: exit_conf,
+                        reason: "ma_reverse_cross".into(),
+                    });
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 } else if !is_long && fast > slow {
-                    intents.push(self.make_intent(ctx, true, exit_conf));
+                    intents.push(StrategyAction::Close {
+                        symbol: ctx.symbol.clone(),
+                        confidence: exit_conf,
+                        reason: "ma_reverse_cross".into(),
+                    });
                     self.position = None;
                     self.last_trade_ms = ctx.timestamp_ms;
                 }
@@ -483,7 +499,10 @@ mod tests {
         let mut s = MaCrossover::new();
         let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         assert_eq!(i.len(), 1);
-        assert!(i[0].is_long);
+        match &i[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
     }
 
     #[test]
@@ -492,7 +511,13 @@ mod tests {
         s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000));
         assert_eq!(i.len(), 1);
-        assert!(!i[0].is_long);
+        match &i[0] {
+            StrategyAction::Close { symbol, reason, .. } => {
+                assert_eq!(symbol, "BTC");
+                assert_eq!(reason, "ma_reverse_cross");
+            }
+            other => panic!("expected StrategyAction::Close, got {:?}", other),
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -522,7 +547,10 @@ mod tests {
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
         let intents = s.on_tick(&ctx);
         assert_eq!(intents.len(), 1, "Entry must be allowed in trending regime");
-        assert!(intents[0].is_long);
+        match &intents[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
     }
 
     /// Exit still works even in mean_reverting regime (position already open).
@@ -545,7 +573,10 @@ mod tests {
             1,
             "Exit must work even in mean_reverting regime"
         );
-        assert!(!exit[0].is_long);
+        match &exit[0] {
+            StrategyAction::Close { reason, .. } => assert_eq!(reason, "ma_reverse_cross"),
+            other => panic!("expected StrategyAction::Close, got {:?}", other),
+        }
     }
 
     /// Entry blocked when Hurst regime is "random_walk".
@@ -617,7 +648,10 @@ mod tests {
             1,
             "Long entry must be allowed when higher TF is bullish"
         );
-        assert!(intents[0].is_long);
+        match &intents[0] {
+            StrategyAction::Open(intent) => assert!(intent.is_long),
+            other => panic!("expected StrategyAction::Open, got {:?}", other),
+        }
     }
 
     /// Short entry blocked when higher-TF trend is bullish.
