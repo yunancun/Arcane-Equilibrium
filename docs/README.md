@@ -266,6 +266,17 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-06--session13_precompact.md` | ★★★★ Session 13：I-22 event_consumer 拆分 + FA-GAP-2/4 接線（cost_ratio/Kelly ATR%）+ per-symbol 真實費率 + SEC-11 fail-closed + FA-GAP-8/9 dead code 清除 |
 | `2026-04-06--completed_todo_archive_l3_phases.md` | TODO 已完成歸檔：L3 整改 + Phase 0/1/2/3 + Rust 遷移已驗收項（Session 11 後清理） |
 
+### worklogs/ — 頂層工作日志（2026-04-08+）
+
+| 文件 | 内容 |
+|------|------|
+| `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 + 4 findings 全修（P1 grid drift, P2 exchange Kelly, P2 funding_arb, P2 集成測試）· 830 tests |
+| `2026-04-08--session_gui_fake_success_wave1.md` | GUI fake-success 盤點 Wave 1 |
+| `2026-04-08--session_gui_fake_success_wave2_p1_wiring.md` | GUI fake-success Wave 2 + P1 wiring |
+| `2026-04-08--session_progress_1c3f.md` | 1C-3-F session 進度 |
+| `2026-04-08--session_progress_post_1c4_wrap.md` | 1C-4 wrap 後 session 進度 |
+| `2026-04-08--session_resume_notes.md` | Session 恢復筆記 |
+
 ### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
 
 | 文件 | 内容 |

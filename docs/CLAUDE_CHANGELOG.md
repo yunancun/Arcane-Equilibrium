@@ -3,6 +3,25 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-09
 
+### StrategyAction Enum — QC/FA follow-up 全修（2026-04-09 · commits `fc51439`→`70ce1ed`→`83f9d2e`）
+
+8 files · +572/-110 行 · 830 lib tests pass（基準 769→830）
+
+**核心實現（`fc51439`）**：
+- `StrategyAction` enum（`Open(OrderIntent)` / `Close { symbol, confidence, reason }`）替代 `Vec<OrderIntent>` 返回型別
+- 5 策略全部改造：MaCrossover（ma_reverse_cross）、BbReversion（bb_mean_revert）、BbBreakout（trailing_stop/regime_shift/pctb_revert/bw_squeeze 4 路出場）、GridTrading（net_inventory 符號判定 Open/Close）、FundingArb（型別變更，仍空 vec）
+- `tick_pipeline.rs`：延遲平倉執行（borrow checker 要求收集後在策略循環外執行）
+- `on_external_close` trait 回調：風控/止損平倉時通知策略重置內部狀態
+- P1 修復：risk-close 路徑漏 `record_trade`（Kelly 統計缺失）
+
+**QC/FA 並行審查修復**：
+- **P1**：Grid `net_inventory` 漂移 — Close 不再在 `on_tick` 中即時調整庫存，新增 `on_close_confirmed` / `on_close_skipped` trait 回調，管線確認/跳過後才調整/回滾
+- **P2**：Exchange-mode `apply_exchange_fill` 漏 `record_trade` — 非零 realized_pnl 時更新 Kelly
+- **P2**：`funding_arb` 缺 `on_external_close` — 新增 `position = None` 重置
+- **P2**：管線集成測試 — `test_strategy_close_action_closes_position` + `test_strategy_close_no_position_is_noop`
+- **P2**：`recent_intents` 審計日誌覆蓋所有平倉路徑（paper + exchange，成功/跳過/待處理）
+- **bonus**：Scanner `remove_symbol` 編譯錯誤（`last_persisted_signal` 複合鍵 `retain`）
+
 ### Rust 市場掃描器 Phase C+D — ScannerRunner 完整接線（2026-04-09 · commit `70ce1ed`）
 
 8 files · +647/-21 行 · 830 lib tests pass
