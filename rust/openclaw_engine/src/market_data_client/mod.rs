@@ -820,7 +820,8 @@ mod tests {
                 "prevPrice24h": "64500",
                 "openInterest": "120000",
                 "fundingRate": "0.0001",
-                "nextFundingTime": "1700006400000"
+                "nextFundingTime": "1700006400000",
+                "price24hPcnt": "0.0077"
             }]
         });
         let tickers = parse_ticker_list(&result).unwrap();
@@ -832,6 +833,7 @@ mod tests {
         assert!((tickers[0].volume_24h - 50000.5).abs() < 1e-10);
         assert!((tickers[0].funding_rate - 0.0001).abs() < 1e-10);
         assert_eq!(tickers[0].next_funding_time, "1700006400000");
+        assert!((tickers[0].price_change_24h_pct - 0.0077).abs() < 1e-10);
     }
 
     /// Test parsing orderbook snapshot.

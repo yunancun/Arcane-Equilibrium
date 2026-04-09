@@ -24,6 +24,7 @@ use crate::instrument_info::InstrumentInfoCache;
 use crate::intent_processor::IntentProcessor;
 use crate::orchestrator::Orchestrator;
 use crate::paper_state::PaperState;
+use crate::strategies::StrategyAction;
 
 /// Paper trading session command — IPC → event consumer → TickPipeline.
 /// 紙上交易 session 命令 — IPC → 事件消費者 → TickPipeline。
@@ -161,6 +162,13 @@ pub enum PaperSessionCommand {
         confidence: f64,
         strategy: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// Scanner: query the set of symbols with open paper positions.
+    /// Used by ScannerRunner to defer removal of symbols with active trades.
+    /// 掃描器：查詢有開放紙盤持倉的交易對集合。
+    /// 由 ScannerRunner 使用，以延遲移除有活躍交易的交易對。
+    GetOpenPositionSymbols {
+        response_tx: tokio::sync::oneshot::Sender<std::collections::HashSet<String>>,
     },
 }
 
@@ -1512,18 +1520,25 @@ impl TickPipeline {
             .unwrap_or(0.0);
 
         let mut intents: Vec<crate::intent_processor::OrderIntent> = Vec::new();
+        let mut pending_strategy_closes: Vec<(String, String)> = Vec::new();
         for strategy in self.orchestrator.strategies_mut() {
             if !strategy.is_active() {
                 continue;
             }
-            let strategy_intents = strategy.on_tick(&ctx);
+            let strategy_actions = strategy.on_tick(&ctx);
             debug_assert!(
-                strategy_intents.len() <= 1,
-                "Strategy {} emitted {} intents in one tick — rollback assumes max 1",
+                strategy_actions.len() <= 1,
+                "Strategy {} emitted {} actions in one tick — rollback assumes max 1",
                 strategy.name(),
-                strategy_intents.len()
+                strategy_actions.len()
             );
-            for intent in &strategy_intents {
+            for action in &strategy_actions {
+                match action {
+                // ═══════════════════════════════════════════════════════════════
+                // StrategyAction::Open — full governance pipeline (unchanged)
+                // StrategyAction::Open — 完整治理管線（不變）
+                // ═══════════════════════════════════════════════════════════════
+                StrategyAction::Open(intent) => {
                 if is_exchange_mode {
                     // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                     // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══
@@ -1786,8 +1801,107 @@ impl TickPipeline {
                         }
                     }
                 }
+                intents.push(intent.clone());
+                } // end StrategyAction::Open
+
+                // StrategyAction::Close — collected for deferred execution after strategy loop
+                // (borrow checker: strategies_mut() borrows self, can't call self methods inline)
+                // StrategyAction::Close — 收集後在策略循環結束後延遲執行
+                StrategyAction::Close { symbol, confidence: _, reason } => {
+                    pending_strategy_closes.push((symbol.clone(), reason.clone()));
+                }
+                } // end match
             }
-            intents.extend(strategy_intents);
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Deferred strategy close execution — outside strategies_mut() borrow scope.
+        // 延遲執行策略平倉 — 在 strategies_mut() 借用範圍之外。
+        // Close reduces risk (not increases it), so Guardian/cost_gate/Kelly/P1 are skipped.
+        // Retains: fee accounting, PG persistence, shadow order, Kelly stats, audit trail.
+        // ═══════════════════════════════════════════════════════════════════════
+        for (symbol, reason) in &pending_strategy_closes {
+            // P2 fix: synthetic intent for monitoring/audit (recent_intents ring buffer).
+            // P2 修復：合成 intent 供監控/審計（recent_intents 環形緩衝）。
+            let close_intent = crate::intent_processor::OrderIntent {
+                symbol: symbol.clone(),
+                is_long: false, // direction filled in below if position found
+                qty: 0.0,
+                confidence: 0.0,
+                strategy: format!("strategy_close:{reason}"),
+                order_type: "market".into(),
+                limit_price: None,
+            };
+            if is_exchange_mode {
+                if self.pending_close_symbols.contains(symbol) {
+                    warn!(symbol = %symbol, reason = %reason, "strategy close skipped: pending close exists / 策略平倉跳過：已有待處理平倉");
+                    self.recent_intents.push_back(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: close_intent,
+                        result: format!("close_skipped:pending_{reason}"),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                    continue;
+                }
+                if let Some(pos) = self.paper_state.get_position(symbol) {
+                    let is_long = pos.is_long;
+                    let qty = pos.qty;
+                    info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
+                          "strategy close → exchange / 策略平倉 → 交易所");
+                    self.dispatch_close_order(symbol, is_long, qty, event, true);
+                    self.recent_intents.push_back(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: close_intent,
+                        result: format!("close_dispatched:{reason}"),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                } else {
+                    warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
+                    self.recent_intents.push_back(TimestampedIntent {
+                        timestamp_ms: event.ts_ms,
+                        intent: close_intent,
+                        result: format!("close_skipped:no_position_{reason}"),
+                    });
+                    if self.recent_intents.len() > 50 { self.recent_intents.pop_front(); }
+                }
+            } else {
+                if let Some(pos) = self.paper_state.get_position(symbol) {
+                    let is_long = pos.is_long;
+                    let qty = pos.qty;
+                    info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
+                          "strategy close (paper) / 策略平倉（紙盤）");
+                    if let Some(pnl) = self.paper_state.close_position(symbol, event.last_price, event.ts_ms) {
+                        self.emit_close_fill(symbol, is_long, qty, event.last_price, event.ts_ms, pnl, reason);
+                        // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
+                        self.intent_processor.record_trade(symbol, pnl);
+                        // Push to recent_fills ring buffer / 推入最近成交環形緩衝
+                        let fr = self.intent_processor.fee_rate(symbol);
+                        self.recent_fills.push_back(TimestampedFill {
+                            timestamp_ms: event.ts_ms,
+                            symbol: symbol.clone(),
+                            is_long,
+                            qty,
+                            price: event.last_price,
+                            fee: qty * event.last_price * fr,
+                            strategy: format!("strategy_close:{reason}"),
+                        });
+                        if self.recent_fills.len() > 50 {
+                            self.recent_fills.pop_front();
+                        }
+                        // Track consecutive losses for risk evaluator
+                        // 追蹤連續虧損供風控評估器使用
+                        if pnl < 0.0 {
+                            *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
+                        } else {
+                            self.consecutive_losses.remove(symbol);
+                        }
+                    }
+                    // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
+                    self.dispatch_close_order(symbol, is_long, qty, event, false);
+                } else {
+                    warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
+                }
+            }
         }
 
         // Step 6: Position risk checks — 9-check (RRC-1-C2, replaces basic check_stops).
@@ -1851,15 +1965,17 @@ impl TickPipeline {
             &risk_config,
         );
 
+        let mut risk_closed_symbols: Vec<String> = Vec::new();
         for decision in &decisions {
             let symbol = &decision.symbol;
             let is_long = &decision.is_long;
             let qty = &decision.qty;
             let pnl_pct = &decision.pnl_pct;
-            let entry_ts_ms = &decision.entry_ts_ms;
+            let _entry_ts_ms = &decision.entry_ts_ms;
             match decision.action.clone() {
                 RiskAction::Hold => {} // no action / 無動作
                 RiskAction::ClosePosition(reason) => {
+                    risk_closed_symbols.push(symbol.clone());
                     if is_exchange_mode {
                         if self.pending_close_symbols.contains(symbol) {
                             continue;
@@ -1878,6 +1994,9 @@ impl TickPipeline {
                             .close_position(symbol, event.last_price, event.ts_ms)
                         {
                             self.emit_close_fill(symbol, *is_long, *qty, event.last_price, event.ts_ms, pnl, &reason);
+                            // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
+                            // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
+                            self.intent_processor.record_trade(symbol, pnl);
                         }
                         self.stats.total_stops += 1;
                         self.dispatch_close_order(symbol, *is_long, *qty, event, false);
@@ -1894,6 +2013,9 @@ impl TickPipeline {
                         .iter()
                         .map(|p| (p.symbol.clone(), p.is_long, p.qty))
                         .collect();
+                    for (sym, _, _) in &all_pos {
+                        risk_closed_symbols.push(sym.clone());
+                    }
                     for (sym, il, q) in &all_pos {
                         // Q1 fix: skip already-dispatched closes / 跳過已派發的平倉
                         if is_exchange_mode && self.pending_close_symbols.contains(sym) {
@@ -1928,6 +2050,17 @@ impl TickPipeline {
                             kill_switch_active: false,
                             snapshot_ts_ms: event.ts_ms,
                         });
+                }
+            }
+        }
+
+        // Notify strategies of externally-closed positions (risk-stop/halt)
+        // so they can reset internal state (e.g., grid net_inventory, position flag).
+        // 通知策略外部平倉的倉位（風控止損/熔斷），讓策略重設內部狀態。
+        if !risk_closed_symbols.is_empty() {
+            for strategy in self.orchestrator.strategies_mut() {
+                for sym in &risk_closed_symbols {
+                    strategy.on_external_close(sym);
                 }
             }
         }
