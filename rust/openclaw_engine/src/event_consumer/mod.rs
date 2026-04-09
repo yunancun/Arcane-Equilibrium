@@ -27,7 +27,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 /// Run the event consumer loop: build pipeline, register strategies, process ticks.
@@ -57,7 +56,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         risk_store,
         budget_store,
         audit_pool,
-        symbol_registry: _symbol_registry,
+        symbol_registry,
         scanner_store: _scanner_store,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
@@ -66,6 +65,19 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
     let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
+
+    // D2/D3: Track known symbols so we can diff against registry and call
+    // pipeline.add_symbol / remove_symbol when the scanner changes the universe.
+    // Seeded from the static SYMBOLS list; diverges as scanner runs.
+    // D2/D3：追蹤已知交易對，以便在掃描器更新品類時差分並調用
+    // pipeline.add_symbol / remove_symbol。從靜態 SYMBOLS 初始化。
+    let mut known_symbols: std::collections::HashSet<String> =
+        SYMBOLS.iter().map(|s| s.to_string()).collect();
+
+    // D3: Channel for async kline bootstrap results (spawned task → main loop).
+    // D3：異步 K 線引導結果通道（生成任務 → 主循環）。
+    let (kline_seed_tx, mut kline_seed_rx) =
+        tokio::sync::mpsc::channel::<(String, Vec<openclaw_core::klines::KlineBar>)>(8);
 
     // ── ARCH-RC1 1C-4 B1: restore governor de-escalation cooldown from V014 ──
     // Every successful operator de-escalation already writes a V014 row
@@ -360,6 +372,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
+
+            // ── D3: Receive async kline bootstrap results and seed pipeline ──
+            // ── D3：接收異步 K 線引導結果並植入管線 ──
+            seed = kline_seed_rx.recv() => {
+                if let Some((sym, bars)) = seed {
+                    let count = pipeline.kline_manager.seed_bars(&sym, "1m", bars);
+                    info!(symbol = %sym, bars = count,
+                          "dynamic kline bootstrap complete / 動態 K 線引導完成");
+                }
+            },
 
             // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener ──
             // ── EXT-1：來自執行監聽器的交易所事件（成交/訂單更新）──
@@ -703,6 +725,114 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             state_writer.maybe_write(&snap);
                             let full_snap = pipeline.snapshot();
                             snapshot_writer.maybe_write(&full_snap);
+
+                            // D2: Diff registry vs known_symbols → add/remove from pipeline.
+                            // Runs every status interval (30s); scanner cycle is 30 min,
+                            // so changes are reflected within one interval.
+                            // D2：差分注冊表與 known_symbols → 從管線增減交易對。
+                            // 每狀態報告間隔（30s）執行；掃描器週期 30 分鐘，
+                            // 變更在一個間隔內反映。
+                            if let Some(ref reg) = symbol_registry {
+                                let current: std::collections::HashSet<String> =
+                                    reg.snapshot().into_iter().collect();
+                                let to_add: Vec<String> = current
+                                    .difference(&known_symbols)
+                                    .cloned()
+                                    .collect();
+                                let to_remove: Vec<String> = known_symbols
+                                    .difference(&current)
+                                    .cloned()
+                                    .collect();
+
+                                for sym in &to_remove {
+                                    pipeline.remove_symbol(sym);
+                                    known_symbols.remove(sym);
+                                    info!(symbol = %sym,
+                                          "D2: scanner removed symbol from pipeline \
+                                           / 掃描器從管線移除交易對");
+                                }
+
+                                for sym in &to_add {
+                                    pipeline.add_symbol(sym);
+                                    known_symbols.insert(sym.clone());
+                                    info!(symbol = %sym,
+                                          "D2: scanner added symbol to pipeline \
+                                           / 掃描器向管線添加交易對");
+
+                                    // D3: Spawn async kline bootstrap for new symbol.
+                                    // D3：為新交易對生成異步 K 線引導。
+                                    if cfg_snapshot.kline_bootstrap {
+                                        if let Some(ref client_arc) = bootstrap_client {
+                                            let sym_owned = sym.clone();
+                                            let client_clone =
+                                                std::sync::Arc::clone(client_arc);
+                                            let seed_tx = kline_seed_tx.clone();
+                                            tokio::spawn(async move {
+                                                let mdc = crate::market_data_client::MarketDataClient::new(client_clone);
+                                                match mdc
+                                                    .get_klines(
+                                                        "linear",
+                                                        &sym_owned,
+                                                        "1",
+                                                        None,
+                                                        None,
+                                                        Some(200),
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(bars) => {
+                                                        let now_ms =
+                                                            std::time::SystemTime::now()
+                                                                .duration_since(
+                                                                    std::time::UNIX_EPOCH,
+                                                                )
+                                                                .unwrap_or_default()
+                                                                .as_millis()
+                                                                as u64;
+                                                        let mut core_bars: Vec<
+                                                            openclaw_core::klines::KlineBar,
+                                                        > = bars
+                                                            .iter()
+                                                            .filter(|b| {
+                                                                b.start_time + 60_000
+                                                                    <= now_ms
+                                                            })
+                                                            .map(|b| {
+                                                                openclaw_core::klines::KlineBar {
+                                                                    open_time_ms: b.start_time,
+                                                                    close_time_ms: b.start_time + 60_000,
+                                                                    open: b.open,
+                                                                    high: b.high,
+                                                                    low: b.low,
+                                                                    close: b.close,
+                                                                    volume: b.volume,
+                                                                    turnover: b.turnover,
+                                                                    tick_count: 1,
+                                                                    is_closed: true,
+                                                                }
+                                                            })
+                                                            .collect();
+                                                        core_bars
+                                                            .sort_by_key(|b| b.open_time_ms);
+                                                        let _ = seed_tx
+                                                            .send((sym_owned, core_bars))
+                                                            .await;
+                                                    }
+                                                    Err(e) => {
+                                                        warn!(
+                                                            symbol = %sym_owned,
+                                                            error = %e,
+                                                            "D3: dynamic kline bootstrap failed \
+                                                             / 動態 K 線引導失敗"
+                                                        );
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+
                             last_status = Instant::now();
                         }
                     }

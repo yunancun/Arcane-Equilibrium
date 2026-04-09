@@ -296,6 +296,24 @@ pub fn apply_correlation_filter(
     let mut strategy_counts: HashMap<String, usize> = HashMap::new();
     let mut sector_counts: HashMap<String, usize> = HashMap::new();
 
+    // C-4 fix: Pre-occupy cap counters with pinned symbol data so the greedy
+    // loop sees the true remaining capacity.  BTC+ETH are both high-beta
+    // l1_infra, so without this they don't count against max_high_beta or
+    // max_per_sector — allowing the pool to select beyond the intended limits.
+    // C-4 修復：用固定交易對數據預佔上限計數器，使貪心循環看到真實剩餘容量。
+    for p in pinned {
+        if let Some(pinned_sym) = candidates.iter().find(|c| &c.symbol == p) {
+            if let Some(bp) = pinned_sym.beta_proxy {
+                if bp > config.high_beta_threshold {
+                    high_beta_count += 1;
+                }
+            }
+            let strategy_key = pinned_sym.best_strategy.as_estimate_key().to_string();
+            *strategy_counts.entry(strategy_key).or_insert(0) += 1;
+            *sector_counts.entry(pinned_sym.sector.clone()).or_insert(0) += 1;
+        }
+    }
+
     for candidate in candidates {
         if selected.len() >= max_dynamic_slots {
             break;

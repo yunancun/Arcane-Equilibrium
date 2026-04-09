@@ -15,7 +15,7 @@ max_symbols = 25
 pinned_symbols = ["BTCUSDT", "ETHUSDT"]
 
 [hard_filters]
-min_turnover_24h_usdt = 50_000_000.0   # 50M USDT minimum 24h volume
+min_turnover_24h_usdt = 50000000.0   # 50M USDT minimum 24h volume
 max_spread_bps = 8.0
 min_price_usdt = 0.001
 btc_min_move_pct = 0.3   # BTC must move ≥0.3% for beta_proxy to be valid
