@@ -3,6 +3,20 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-09
 
+### Scanner QC/FA Audit P0+P1 全修（2026-04-09 · commit `72f6617`）
+
+5 files · +163/-4 行 · 831 lib tests pass（基準 830→831）
+
+**P0 — 掃描器核心 gap（功能性 bug）**：
+- **D2 fix**：`event_consumer/mod.rs` 不再 ignore `_symbol_registry`；主循環每 30s（status interval）diff registry 與 known_symbols，調用 `pipeline.add_symbol` / `pipeline.remove_symbol`
+- **D3 fix**：新增交易對觸發異步 kline bootstrap（`tokio::spawn` 獲取 200 × 1m 歷史 K 線，通過新 mpsc channel 回傳主循環植入 `kline_manager.seed_bars`）；架構：spawned task → `kline_seed_tx` → 主 select arm `kline_seed_rx.recv()`
+- **C-3 fix**：`sectors.rs:29` 移除 XRP 重複（已在 l1_infra，導致 payments_l1 arm 不可達）；XRP 現在正確路由到 payments_l1；補 regression test `test_sector_xrp_is_payments_l1`
+
+**P1 — 可靠性改善**：
+- **C-4 fix**：`apply_correlation_filter` 在貪心循環前預佔固定交易對（BTC/ETH）的 high_beta / strategy / sector 計數；原來不計入導致實際選出 10 high_beta（超出 8 上限）+ 6 l1_infra（超出 4 上限）
+- **M-1 fix**：`remove_symbol` 補 `pending_close_symbols.remove(symbol)`；防止同名交易對重新加入時繼承過期平倉鎖
+- **M-2 fix**：`scanner_config.toml` `50_000_000.0` → `50000000.0`（toml crate v0.8 不支持下劃線數字字面量；原來靜默 fallback 到 Default 恰好等值）
+
 ### StrategyAction Enum — QC/FA follow-up 全修（2026-04-09 · commits `fc51439`→`70ce1ed`→`83f9d2e`）
 
 8 files · +572/-110 行 · 830 lib tests pass（基準 769→830）
