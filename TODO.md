@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-09（Phase 5 功能交付完畢，進入觀察期；3b-07 / 3b-08 / CONF-D ✅ commit 69ec8aa）
-測試基準線：**Rust engine lib 771 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (1 pre-existing fail · 0 regression)**
+最後更新：2026-04-09（StrategyAction Enum ✅ `fc51439`→`83f9d2e` + Scanner A-D ✅ + QC/FA 全修）
+測試基準線：**Rust engine lib 830 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (1 pre-existing fail · 0 regression)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
