@@ -26,7 +26,7 @@ pub fn symbol_sector(base: &str) -> &'static str {
         // Layer 1 infrastructure / L1 基礎設施
         "BTC" | "ETH" | "SOL" | "ADA" | "AVAX" | "DOT" | "ATOM" | "NEAR" | "APT" | "SUI"
         | "SEI" | "INJ" | "TIA" | "ALGO" | "EGLD" | "FTM" | "ONE" | "CELO" | "KAVA"
-        | "FLOW" | "HBAR" | "ICP" | "THETA" | "VET" | "XLM" | "XRP" => "l1_infra",
+        | "FLOW" | "HBAR" | "ICP" | "THETA" | "VET" | "XLM" => "l1_infra",
 
         // Meme coins / 迷因幣
         "DOGE" | "SHIB" | "PEPE" | "FLOKI" | "BONK" | "WIF" | "MEME" | "NEIRO" | "MOG"
@@ -107,6 +107,13 @@ mod tests {
     #[test]
     fn test_sector_unknown_is_other() {
         assert_eq!(symbol_sector("UNKNWNCOIN"), "other");
+    }
+
+    /// C-3 fix: XRP must route to payments_l1, not l1_infra (was unreachable due to duplicate).
+    /// C-3 修復：XRP 應路由到 payments_l1，而非 l1_infra（重複導致不可達）。
+    #[test]
+    fn test_sector_xrp_is_payments_l1() {
+        assert_eq!(symbol_sector("XRP"), "payments_l1");
     }
 
     #[test]

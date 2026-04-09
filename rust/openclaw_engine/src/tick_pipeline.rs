@@ -477,6 +477,10 @@ impl TickPipeline {
         self.consecutive_losses.remove(symbol);
         self.last_persisted_signal.retain(|(sym, _), _| sym != symbol);
         self.last_close_price.remove(symbol);
+        // M-1 fix: clear pending_close lock so re-entry of same symbol doesn't
+        // inherit a stale close-pending flag from the previous tenure.
+        // M-1 修復：清除待處理平倉鎖，防止同名交易對重新加入時繼承過期標記。
+        self.pending_close_symbols.remove(symbol);
     }
 
     /// PH5-WIRE-1: Inject JS shrunk edge estimates into the intent processor.
