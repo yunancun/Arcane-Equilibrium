@@ -64,6 +64,9 @@ pub struct TickerInfo {
     pub funding_rate: f64,
     /// Next funding time / 下次資金費率時間
     pub next_funding_time: String,
+    /// 24h price change percentage (from Bybit price24hPcnt, e.g. 0.0077 = +0.77%)
+    /// 24 小時價格漲跌幅（來自 Bybit price24hPcnt，例如 0.0077 = +0.77%）
+    pub price_change_24h_pct: f64,
 }
 
 /// Level-2 orderbook snapshot.

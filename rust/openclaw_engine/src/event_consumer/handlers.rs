@@ -457,5 +457,16 @@ pub(super) fn handle_paper_command(
             }
             snapshot_writer.force_write(&pipeline.snapshot());
         }
+        PaperSessionCommand::GetOpenPositionSymbols { response_tx } => {
+            // Collect symbols with an active open position for scanner removal deferral.
+            // 收集有活躍持倉的交易對，供掃描器移除延遲使用。
+            let open_symbols: std::collections::HashSet<String> = pipeline
+                .paper_state
+                .positions()
+                .into_iter()
+                .map(|pos| pos.symbol.clone())
+                .collect();
+            let _ = response_tx.send(open_symbols);
+        }
     }
 }

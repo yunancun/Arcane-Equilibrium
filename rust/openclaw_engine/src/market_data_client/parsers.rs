@@ -104,6 +104,7 @@ pub(super) fn parse_ticker_list(result: &serde_json::Value) -> BybitResult<Vec<T
             open_interest: parse_str_f64(item, "openInterest"),
             funding_rate: parse_str_f64(item, "fundingRate"),
             next_funding_time: parse_str(item, "nextFundingTime"),
+            price_change_24h_pct: parse_str_f64(item, "price24hPcnt"),
         });
     }
     Ok(tickers)
