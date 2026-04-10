@@ -53,13 +53,12 @@ use tracing::{info, warn};
 /// - PaperOnly: local simulation, no exchange connection required
 /// - Demo: Exchange-as-Truth against Bybit Demo environment (api-demo.bybit.com)
 /// - Live: Exchange-as-Truth against Bybit Mainnet (api.bybit.com) — requires
-///         OPENCLAW_ALLOW_MAINNET=1 env var AND execution_authority=granted
+///         valid live API key in secret slot + live_reserved global mode
 ///
 /// 三種模式：
 /// - PaperOnly：本地模擬，不需要交易所連線
 /// - Demo：對接 Bybit Demo 環境（api-demo.bybit.com）
-/// - Live：對接 Bybit 主網（api.bybit.com）— 需要 OPENCLAW_ALLOW_MAINNET=1 環境變量
-///         且 execution_authority=granted（雙重硬鎖）
+/// - Live：對接 Bybit 主網（api.bybit.com）— 需要 live slot 有效 API key + live_reserved global mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TradingMode {
@@ -74,8 +73,8 @@ pub enum TradingMode {
     Demo,
     /// Live Exchange-as-Truth: orders on Bybit Mainnet — REAL MONEY
     /// 實盤交易所即真相：訂單送 Bybit 主網 — 真實資金
-    /// Requires: OPENCLAW_ALLOW_MAINNET=1 env var + execution_authority=granted
-    /// 要求：OPENCLAW_ALLOW_MAINNET=1 環境變量 + execution_authority=granted（雙重硬鎖）
+    /// Requires: live API key in secrets/bybit/live/ + live_reserved global mode
+    /// 要求：secrets/bybit/live/ 有效 API key + live_reserved global mode
     Live,
 }
 

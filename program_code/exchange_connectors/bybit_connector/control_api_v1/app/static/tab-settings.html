@@ -239,6 +239,27 @@
 }
 .restart-time-opt input { display: none; }
 
+/* ── API Key Dialog Overlay ───────────────────────────────────── */
+.oc-dialog-overlay {
+  display: none; position: fixed; inset: 0; z-index: 1000;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(2px);
+}
+.oc-dialog-overlay.show { display: flex; }
+.oc-dialog {
+  position: relative; z-index: 1;
+  background: #161b22; border: 1px solid #30363d;
+  border-radius: 12px; padding: 20px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  max-height: 90vh; overflow-y: auto;
+}
+.oc-dialog .note {
+  font-size: 11px; color: var(--yellow, #f0c040);
+  background: rgba(240,192,64,0.08); border: 1px solid rgba(240,192,64,0.2);
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
+}
+.oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* ── Product Family Toggle Switch ─────────────────────────────── */
 .pf-card { background:var(--bg); border:1px solid #21262d; border-radius:8px; padding:14px; }
 .pf-card-title { font-weight:600; font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
@@ -263,18 +284,22 @@
     每個引擎槽位獨立配置 Bybit API key。寫入前自動通過 Bybit REST 驗證。GUI 僅顯示遮罩 hint，永不暴露明文。<br>
     Each engine slot has its own Bybit API key. Auto-validated via Bybit REST before saving. GUI shows masked hint only — plaintext never exposed.
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px" id="apikey-slots-grid">
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px" id="apikey-slots-grid">
     <!-- Dynamically rendered by loadApiKeyStatus() / 由 loadApiKeyStatus() 動態渲染 -->
     <div class="oc-loading">Loading...</div>
   </div>
 </div>
 
-<!-- ── API Key Replace Dialog ─────────────────────────────────────── -->
+<!-- ── API Key Replace Dialog (modal) ──────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-apikey">
   <div class="oc-dialog" style="max-width:480px">
-    <h3>&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0">&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
+      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;padding:0 4px;line-height:1" onclick="closeApikeyDialog()">&times;</button>
+    </div>
     <p style="margin-bottom:6px">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
     <div class="note">&#x26A0; secret 僅在此次輸入時可見。保存後將永久遮罩，請妥善備份原始 key。</div>
+    <div id="dlg-apikey-warn-box" style="display:none;font-size:11px;color:#f87171;margin-bottom:8px"></div>
     <div style="display:grid;gap:10px;margin-bottom:14px">
       <div>
         <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Key</label>
@@ -686,8 +711,9 @@ async function loadAll() {
 
 // ─── API Key Management ───────────────────────────────────────
 const APIKEY_SLOTS = [
-  { id: 'demo', label: 'Demo 引擎', icon: '🏦', desc: 'Bybit Demo Trading 帳號（api-demo.bybit.com）' },
-  { id: 'live', label: 'Live 引擎', icon: '🔴', desc: 'Bybit 實盤帳號（api.bybit.com）', warn: true },
+  { id: 'demo',      label: 'Demo 引擎',      icon: '🎮', desc: 'Bybit Demo 帳號（api-demo.bybit.com）' },
+  { id: 'live_demo', label: 'Live-Demo 引擎',  icon: '🧪', desc: '用 Demo key 運行 Live 引擎（demo 驗證，寫入 live 路徑）', liveDemoNote: true },
+  { id: 'live',      label: 'Live 引擎',       icon: '🔴', desc: 'Bybit 實盤帳號（api.bybit.com）', warn: true },
 ];
 
 let _currentApikeySlot = '';
@@ -707,7 +733,7 @@ async function loadApiKeyStatus() {
     const hasKey = d && d.has_key;
     const hint = (d && d.key_hint) ? d.key_hint : '（未設置）';
     const lastMod = (d && d.last_modified) ? d.last_modified : '';
-    const borderColor = slot.warn ? 'rgba(239,68,68,0.3)' : 'rgba(56,139,253,0.2)';
+    const borderColor = slot.warn ? 'rgba(239,68,68,0.3)' : slot.liveDemoNote ? 'rgba(240,192,64,0.3)' : 'rgba(56,139,253,0.2)';
     const chipCls = hasKey ? 'oc-chip-good' : 'oc-chip-warn';
     const chipTxt = hasKey ? '已配置' : '未配置';
 
@@ -718,14 +744,22 @@ async function loadApiKeyStatus() {
     html += '<span class="oc-chip ' + chipCls + '" style="margin-left:auto">' + chipTxt + '</span>';
     html += '</div>';
     html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">' + ocEsc(slot.desc) + '</div>';
-    html += '<div style="font-family:monospace;font-size:12px;color:var(--text);margin-bottom:6px">Key: <strong>' + ocEsc(hint) + '</strong></div>';
+    html += '<div style="font-family:monospace;font-size:12px;color:var(--text);margin-bottom:6px">Key: <strong id="apikey-hint-' + slot.id + '">' + ocEsc(hint) + '</strong></div>';
     if (lastMod) {
       html += '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">最後更新: ' + ocEsc(lastMod) + '</div>';
     }
     if (slot.warn) {
       html += '<div style="font-size:11px;color:#f87171;margin-bottom:8px">⚠ 實盤 key 修改後立即生效，請謹慎操作。</div>';
     }
+    if (slot.liveDemoNote) {
+      html += '<div style="font-size:11px;color:var(--yellow,#f0c040);margin-bottom:8px">💡 此槽位與 Live 引擎共享同一 key 存儲。寫入後 Live 引擎也會使用該 key。</div>';
+    }
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
     html += '<button class="oc-btn oc-btn-primary" style="font-size:12px" onclick="openApikeyDialog(\'' + slot.id + '\')">✏ 替換 Key</button>';
+    if (hasKey) {
+      html += '<button class="oc-btn" style="font-size:12px" onclick="peekApiKey(\'' + slot.id + '\')">👁 查看 Key</button>';
+    }
+    html += '</div>';
     html += '</div>';
   });
   grid.innerHTML = html || '<div style="color:var(--text-dim);font-size:12px">無法載入 key 狀態</div>';
@@ -739,8 +773,38 @@ function openApikeyDialog(slot) {
   document.getElementById('dlg-apikey-secret').value = '';
   document.getElementById('dlg-apikey-status').textContent = '';
   document.getElementById('dlg-apikey-save-btn').disabled = false;
+  // Show contextual warning for live slots / 對 live 槽位顯示上下文警告
+  const warnBox = document.getElementById('dlg-apikey-warn-box');
+  if (slot === 'live') {
+    warnBox.style.display = '';
+    warnBox.style.color = '#f87171';
+    warnBox.textContent = '⚠ 實盤 key 修改後立即生效，系統將連接 api.bybit.com 驗證。';
+  } else if (slot === 'live_demo') {
+    warnBox.style.display = '';
+    warnBox.style.color = 'var(--yellow, #f0c040)';
+    warnBox.textContent = '💡 此 key 通過 api-demo.bybit.com 驗證，但寫入 Live 引擎路徑。請確認輸入的是 Demo 帳號的 key。';
+  } else {
+    warnBox.style.display = 'none';
+  }
   document.getElementById('dlg-apikey').classList.add('show');
   setTimeout(() => document.getElementById('dlg-apikey-key').focus(), 50);
+}
+
+async function peekApiKey(slotId) {
+  // Peek: show the masked hint (last chars) from existing data / 查看當前 key 後幾位
+  const d = await ocApi('/api/v1/settings/api-key/' + slotId);
+  const data = (d && d.data) ? d.data : d;
+  const el = document.getElementById('apikey-hint-' + slotId);
+  if (data && data.key_hint) {
+    if (el) {
+      el.textContent = data.key_hint;
+      el.style.color = 'var(--green)';
+      setTimeout(() => { el.textContent = '****'; el.style.color = ''; }, 5000);
+    }
+    ocToast(slotId + ' Key: ' + data.key_hint, 'info');
+  } else {
+    ocToast(slotId + ' 無已配置的 key', 'warn');
+  }
 }
 
 function closeApikeyDialog() {

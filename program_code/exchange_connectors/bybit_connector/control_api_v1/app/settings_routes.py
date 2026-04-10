@@ -63,13 +63,24 @@ settings_router = APIRouter(
 
 # Allowed slot names — whitelist prevents path traversal
 # 允許的槽位名稱白名單，防止路徑穿越攻擊
-ALLOWED_SLOTS: frozenset[str] = frozenset({"demo", "live"})
+# "live_demo" is a virtual slot: validates via demo server, persists to live path.
+# 「live_demo」為虛擬槽位：通過 demo 伺服器驗證，寫入 live 路徑。
+ALLOWED_SLOTS: frozenset[str] = frozenset({"demo", "live_demo", "live"})
 
 # Base URL per slot — demo uses Bybit demo trading environment
 # 每個槽位對應的 Bybit REST 基礎 URL
 _BYBIT_BASE_URL: dict[str, str] = {
     "demo": "https://api-demo.bybit.com",
+    "live_demo": "https://api-demo.bybit.com",
     "live": "https://api.bybit.com",
+}
+
+# Storage path mapping — live_demo writes to the live directory
+# 存儲路徑映射 — live_demo 寫入 live 目錄
+_SLOT_STORAGE_PATH: dict[str, str] = {
+    "demo": "demo",
+    "live_demo": "live",
+    "live": "live",
 }
 
 # Validation endpoint — low-permission read-only query, sufficient to verify auth
@@ -93,10 +104,13 @@ def _secrets_slot_dir(slot: str) -> Path:
     Otherwise falls back to ~/BybitOpenClaw/secrets/secret_files/bybit/{slot}.
     優先使用環境變量（跨平台），否則 fallback 到 ~/BybitOpenClaw/secrets/。
     """
+    # Resolve virtual slots (e.g. live_demo → live) to physical storage path
+    # 虛擬槽位（如 live_demo）映射到物理存儲路徑（live）
+    storage_slot = _SLOT_STORAGE_PATH.get(slot, slot)
     base_env = os.environ.get("OPENCLAW_SECRETS_DIR")
     if base_env:
-        return Path(base_env) / slot
-    return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit" / slot
+        return Path(base_env) / storage_slot
+    return Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit" / storage_slot
 
 
 def _mask_key(key: str) -> str:

@@ -797,26 +797,30 @@ def get_shadow_decisions(
 def get_metrics(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get performance metrics from Rust engine / 從 Rust 引擎獲取性能指標"""
+    """
+    Get performance metrics from Rust engine / 從 Rust 引擎獲取性能指標
+
+    Returns full nested metrics (trade_metrics, drawdown_metrics, holding_period_metrics,
+    sharpe_ratio) via compute_full_metrics, plus basic tick stats from the engine.
+    返回完整嵌套指標（交易、回撤、持倉時間、夏普比率）+ 引擎 tick 統計。
+    """
     rust = get_rust_reader()
     rust_state = rust.get_paper_state() if rust.is_available() else None
     if rust_state is None:
         return _paper_response({"available": False, "source": "rust_engine"})
-    # Basic metrics from Rust state / 從 Rust 狀態計算基礎指標
+    # Full metrics via compute_full_metrics (trade_metrics, drawdown, sharpe, etc.)
+    # 完整指標通過 compute_full_metrics 計算
+    full = compute_full_metrics(rust_state)
+    # Merge tick stats from engine / 合併引擎 tick 統計
     stats = rust.get_tick_stats() or {}
-    return _paper_response({
-        "source": "rust_engine",
-        "balance": rust_state.get("balance", 0),
-        "peak_balance": rust_state.get("peak_balance", 0),
-        "trade_count": rust_state.get("trade_count", 0),
-        "total_realized_pnl": rust_state.get("total_realized_pnl", 0),
-        "total_fees": rust_state.get("total_fees", 0),
-        "position_count": len(rust_state.get("positions", [])),
-        "total_ticks": stats.get("total_ticks", 0),
-        "total_intents": stats.get("total_intents", 0),
-        "total_fills": stats.get("total_fills", 0),
-        "total_stops": stats.get("total_stops", 0),
-    })
+    full["source"] = "rust_engine"
+    full["total_ticks"] = stats.get("total_ticks", 0)
+    full["total_intents"] = stats.get("total_intents", 0)
+    # Ensure total_fills is available at top level for backward compatibility
+    # 確保 total_fills 在頂層可用（向後兼容）
+    full["total_fills"] = stats.get("total_fills", 0)
+    full["total_stops"] = stats.get("total_stops", 0)
+    return _paper_response(full)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
