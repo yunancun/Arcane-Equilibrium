@@ -3,6 +3,20 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### DB Fresh-Start Reset（2026-04-10 · commit 3acb9cc）
+
+**背景**：開發過程中積累了大量噪音數據（52.9M signals、18.3M decision_context_snapshots、3.6K fills 等），PH5-VERIFY-1 觀察期需要乾淨數據基準。
+
+**執行**：`helper_scripts/db/fresh_start_reset.py --execute` — 71,298,138 行開發噪音清除，耗時 <2s（TimescaleDB chunk drop）。
+
+**保留**：所有 `market.*` 表（klines 44K / market_tickers 1.4M / ob_snapshots / funding_rates 等）完整保留。
+
+**影響**：
+- PH5-VERIFY-1 觀察期從 2026-04-10 重新起算（原計劃 2026-04-11 `--days 3` → 改為 `--days 2`）
+- JS-1 滾動重跑排程：2026-04-11 `--days 2` → 04-12 `--days 3` → 04-17 `--days 7` → 每週滾動
+
+---
+
 ### Python OMS 刪除 + Rust DB 訂單/裁決寫入（2026-04-10 · commit 4cab87c）
 
 **Track A — Rust DB writers**: `TradingMsg::Order` + `OrderStateChange` + `RiskVerdict` 三 variant 加入 `database/mod.rs`；`trading_writer.rs` 新增 `flush_orders` / `flush_order_state_changes` / `flush_verdicts`（INSERT 至 `trading.orders` + `order_state_changes` + `risk_verdicts`）；`event_consumer/mod.rs` 在 pending_reg / Fill / Cancelled / Rejected 四點 emit DB 寫入；`tick_pipeline.rs` 三點 emit RiskVerdict。
@@ -347,7 +361,7 @@ Cold audit of all ML_TODO completed items found 3 real issues + 4 pre-existing t
 - Release binary 重建（`cargo build --release`，舊 binary 停留在 22:18，WIRE-1 前）
 - 引擎重啟後 log 確認：`PH5-WIRE-1: edge estimates loaded n_cells=8`，`cost_gate(JS): negative estimate — exploration mode` 實際觸發
 
-**數據策略決定（session 3 末）**：歷史 fills 含開發期噪音，不清空。改用滾動窗口：2026-04-11 用 `--days 3` 重跑 JS-1，取 ARCH-RC1 穩定後的乾淨數據。
+**數據策略決定（session 3 末，已更新）**：歷史 fills 含開發期噪音。原計劃不清空改用滾動窗口，**2026-04-10 已執行 DB fresh-start reset**（見上方 changelog 條目），71.3M 開發噪音行清除，乾淨數據從 2026-04-10 重新起算。JS-1 滾動重跑排程已更新（見 TODO.md）。
 
 ---
 
