@@ -223,7 +223,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260410.live-ready';
+const BUILD_TS = '20260410.live-ui-v2';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -364,7 +364,8 @@ async function refreshSidebar() {
       const modeEl = document.getElementById('s-live-mode');
       const isLiveActive = tradingMode === 'live' && execAuth === 'granted';
       modeEl.textContent = tradingMode.toUpperCase();
-      modeEl.className = 'mc-val' + (isLiveActive ? ' red' : '');
+      modeEl.className = 'mc-val';
+      modeEl.style.color = isLiveActive ? '#a855f7' : '';
       document.getElementById('s-live-mode-detail').textContent = 'auth: ' + execAuth;
     }
   } catch(e) {

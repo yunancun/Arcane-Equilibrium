@@ -173,6 +173,29 @@ def _get_execution_authority() -> str:
         return "not_granted"  # fail-closed / 失敗時默認拒絕
 
 
+def _get_global_mode_state() -> str:
+    """
+    Read current global_mode_state from STORE snapshot.
+    從 STORE 快照讀取當前 global_mode_state。
+
+    Returns: "live_reserved" | "demo_reserved" | "shadow_only" | "observe_only" | "design_only" | "unknown"
+    """
+    try:
+        snapshot = base.STORE.read()
+        gr = snapshot.get("global_runtime", {})
+        # Try derived path first (compiled state)
+        mode = gr.get("derived", {}).get("global_mode_state", "")
+        if mode:
+            return mode
+        # Fallback: controls switch
+        controls = gr.get("controls", {})
+        sw = controls.get("global_execution_mode_switch", "")
+        return sw if sw else "unknown"
+    except Exception as exc:
+        logger.warning("Failed to read global_mode_state: %s", exc)
+        return "unknown"
+
+
 def _get_trading_mode_from_engine() -> str:
     """
     Read current trading_mode from Rust engine snapshot.
@@ -252,8 +275,22 @@ async def post_live_session_start(
     保護：Operator 角色認證是唯一門控，不設獨立 execution_authority 二次確認。
     trading_mode 僅用於日誌/上下文，引擎配置控制實際訂單路由。
     """
-    # Require Operator role — only gate / 要求 Operator 角色 — 唯一門控
+    # Require Operator role — primary gate / 要求 Operator 角色 — 主門控
     _require_operator(actor)
+
+    # Gate: global_mode_state must include 'live' (i.e. live_reserved or live_enabled)
+    # 門控：global_mode_state 必須含 'live'（即 live_reserved 或 live_enabled）
+    global_mode = _get_global_mode_state()
+    if "live" not in global_mode:
+        logger.warning(
+            "Live session start BLOCKED: global_mode=%s (not live_reserved) — actor=%s",
+            global_mode, getattr(actor, "actor_id", "?"),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Live session blocked: global_mode={global_mode!r}. "
+                   "Switch Global Mode to live_reserved in the System Overview tab first.",
+        )
 
     trading_mode = _get_trading_mode_from_engine()
     authority = _get_execution_authority()
@@ -565,3 +602,30 @@ async def get_live_orders(
         "conditional_count": len(pending),
         "source": "engine_state",
     })
+
+
+@live_router.get("/fills")
+async def get_live_fills(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    GET /api/v1/live/fills
+    Recent fills (executions) from Bybit account via PyO3 client.
+    最近成交記錄，通過 PyO3 client 從 Bybit 帳戶讀取。
+    """
+    rc = _get_rust_client_safe()
+    if rc is not None:
+        try:
+            fills = rc.get_executions("linear", limit=50)
+            return _live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
+        except Exception as e:
+            logger.warning("Rust fills fetch failed for live endpoint: %s", e)
+    # Fallback: engine recent fills / 降級：引擎最近成交
+    rust = get_rust_reader()
+    if rust.is_available():
+        try:
+            recent = rust.get_recent_fills()
+            return _live_response({"source": "engine_state", "list": recent or [], "count": len(recent or [])})
+        except Exception:
+            pass
+    return _live_response({"list": [], "count": 0, "available": False})

@@ -511,6 +511,7 @@ function ocInjectBaseCSS() {
     .oc-chip-bad { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.25); color: var(--red); }
     .oc-chip-neutral { background: rgba(139,148,158,0.1); border-color: rgba(139,148,158,0.2); color: var(--text-dim); }
     .oc-chip-info { background: rgba(56,139,253,0.12); border-color: rgba(56,139,253,0.25); color: var(--blue); }
+    .oc-chip-live { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.3); color: #a855f7; }
 
     /* Colors */
     .green { color: var(--green); } .red { color: var(--red); }

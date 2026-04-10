@@ -10,8 +10,8 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
-/* ── Live page theme — red-border emphasis for real-money risk ── */
-/* 實盤頁主題 — 紅色邊框強調真實資金風險 */
+/* ── Live page theme — purple accent (real money, distinct from red errors) ── */
+/* 實盤頁主題 — 紫色強調（真實資金，與紅色錯誤指示區分） */
 html, body {
   height: 100%;
   margin: 0;
@@ -25,7 +25,7 @@ html, body {
 
 .live-warn-bar {
   display: flex; align-items: center; gap: 10px;
-  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.35);
+  background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.35);
   border-radius: 8px; padding: 10px 16px;
   font-size: 13px; margin-bottom: 14px;
 }
@@ -34,39 +34,53 @@ html, body {
 .live-control-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   background: var(--card-bg);
-  border: 1px solid rgba(239,68,68,0.4);
+  border: 1px solid rgba(168,85,247,0.4);
   border-radius: 10px; padding: 12px 16px;
   margin-bottom: 14px;
 }
 .live-control-bar .bar-title { font-weight: 700; font-size: 14px; }
 
+/* Card groups / 指標卡片組 */
+.live-card-group {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.live-card-group-title {
+  font-size: 11px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+}
+.live-card-group.live-accent { border-color: rgba(168,85,247,0.3); }
+
 /* Metrics grid / 指標網格 */
 .live-metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 .live-metric {
-  background: var(--card-bg);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px; padding: 12px 14px;
+  border-radius: 8px; padding: 10px 12px;
 }
-.live-metric.pnl-card {
-  border-color: rgba(239,68,68,0.4);
-  grid-column: span 2;
-}
+.live-metric.span2 { grid-column: span 2; }
 .live-metric-label {
   font-size: 11px; color: var(--text-dim);
   margin-bottom: 4px; font-weight: 500;
 }
 .live-metric-val {
-  font-size: 22px; font-weight: 700;
+  font-size: 20px; font-weight: 700;
 }
+.live-metric-val.large { font-size: 24px; }
 .live-metric-val.pos { color: var(--green); }
 .live-metric-val.neg { color: #f87171; }
 .live-metric-val.neutral { color: var(--text); }
+.live-metric-val.purple { color: #a855f7; }
+.live-metric-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
-/* Positions table / 倉位表格 */
+/* Positions / orders table / 倉位掛單表格 */
 .live-section-title {
   font-size: 13px; font-weight: 600;
   margin: 14px 0 8px;
@@ -88,7 +102,20 @@ html, body {
 }
 .live-table tr:last-child td { border-bottom: none; }
 
-/* Emergency stop button / 緊急停止按鈕 */
+/* Fills collapsible / 成交記錄折疊區 */
+.live-fills-toggle {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 14px; font-size: 12px; color: var(--text-dim);
+  cursor: pointer; display: flex; align-items: center; gap: 6px;
+  width: 100%; text-align: left; margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.live-fills-toggle:hover { border-color: rgba(168,85,247,0.4); color: var(--text); }
+.live-fills-toggle .arrow { transition: transform 0.2s; }
+.live-fills-toggle.open .arrow { transform: rotate(90deg); }
+
+/* Emergency stop button / 緊急停止按鈕 — stays red, it's a danger action */
+/* 緊急停止保持紅色，這是一個危險操作按鈕 */
 .btn-emergency {
   background: rgba(239,68,68,0.12);
   border: 2px solid rgba(239,68,68,0.7);
@@ -138,18 +165,18 @@ html, body {
 <div id="live-dashboard-view" class="live-dashboard">
 <div class="live-wrap">
 
-  <!-- Red warning banner / 紅色警示橫幅 -->
+  <!-- Purple warning banner / 紫色警示橫幅 -->
   <div class="live-warn-bar">
-    <span class="warn-icon">&#x1F534;</span>
+    <span class="warn-icon">&#x1F7E3;</span>
     <div>
-      <strong>實盤模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
+      <strong style="color:#a855f7">實盤模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
       <span style="font-size:12px;color:var(--text-dim)">此頁面操作直接影響 Bybit 實盤帳戶。請確保風控參數正確配置，謹慎操作。</span>
     </div>
   </div>
 
   <!-- Control bar / 控制欄 -->
   <div class="live-control-bar">
-    <span class="bar-title">&#x1F534; Live Engine</span>
+    <span class="bar-title">&#x1F7E3; Live Engine</span>
     <span id="live-engine-status" class="oc-chip oc-chip-neutral">--</span>
     <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
     <span style="flex:1"></span>
@@ -158,31 +185,56 @@ html, body {
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
   </div>
 
-  <!-- PnL + metrics / 收益指標 -->
-  <div class="live-metrics" id="live-metrics-grid">
-    <div class="live-metric pnl-card">
-      <div class="live-metric-label">未實現 PnL / Unrealized PnL</div>
-      <div class="live-metric-val neutral" id="live-unrealized-pnl">--</div>
+  <!-- Account Balance card group / 帳戶餘額卡片組 -->
+  <div class="live-card-group live-accent">
+    <div class="live-card-group-title">&#x1F4B0; 帳戶餘額 / Account Balance</div>
+    <div class="live-metrics">
+      <div class="live-metric">
+        <div class="live-metric-label">總淨值 / Total Equity</div>
+        <div class="live-metric-val neutral" id="live-equity">--</div>
+        <div class="live-metric-sub" id="live-equity-sub"></div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">可用餘額 / Available</div>
+        <div class="live-metric-val neutral" id="live-available">--</div>
+        <div class="live-metric-sub" id="live-available-sub"></div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">錢包餘額 / Wallet Balance</div>
+        <div class="live-metric-val neutral" id="live-wallet-balance">--</div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">已用保證金 / Margin Used</div>
+        <div class="live-metric-val neutral" id="live-margin-used">--</div>
+      </div>
     </div>
-    <div class="live-metric">
-      <div class="live-metric-label">今日已實現 / Today Realized</div>
-      <div class="live-metric-val neutral" id="live-realized-pnl">--</div>
-    </div>
-    <div class="live-metric">
-      <div class="live-metric-label">賬戶淨值 / Equity</div>
-      <div class="live-metric-val neutral" id="live-equity">--</div>
-    </div>
-    <div class="live-metric">
-      <div class="live-metric-label">可用餘額 / Available</div>
-      <div class="live-metric-val neutral" id="live-available">--</div>
-    </div>
-    <div class="live-metric">
-      <div class="live-metric-label">持倉數 / Positions</div>
-      <div class="live-metric-val neutral" id="live-position-count">--</div>
-    </div>
-    <div class="live-metric">
-      <div class="live-metric-label">掛單數 / Open Orders</div>
-      <div class="live-metric-val neutral" id="live-order-count">--</div>
+  </div>
+
+  <!-- PnL overview card group / 盈虧概覽卡片組 -->
+  <div class="live-card-group live-accent">
+    <div class="live-card-group-title">&#x1F4C8; 盈虧概覽 / PnL Overview</div>
+    <div class="live-metrics">
+      <div class="live-metric span2">
+        <div class="live-metric-label">未實現 PnL / Unrealized PnL</div>
+        <div class="live-metric-val large neutral" id="live-unrealized-pnl">--</div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">今日已實現 / Realized (Today)</div>
+        <div class="live-metric-val neutral" id="live-realized-pnl">--</div>
+        <div class="live-metric-sub" id="live-realized-sub"></div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">今日淨 PnL / Net Today</div>
+        <div class="live-metric-val neutral" id="live-net-pnl">--</div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">持倉數 / Positions</div>
+        <div class="live-metric-val neutral" id="live-position-count">--</div>
+      </div>
+      <div class="live-metric">
+        <div class="live-metric-label">掛單數 / Open Orders</div>
+        <div class="live-metric-val neutral" id="live-order-count">--</div>
+      </div>
     </div>
   </div>
 
@@ -192,10 +244,10 @@ html, body {
     <table class="live-table" id="live-positions-table">
       <thead><tr>
         <th>Symbol</th><th>Side</th><th>Size</th>
-        <th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th>
+        <th>Leverage</th><th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th>
       </tr></thead>
       <tbody id="live-positions-body">
-        <tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+        <tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -210,6 +262,24 @@ html, body {
       </tr></thead>
       <tbody id="live-orders-body">
         <tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Fill history / 成交記錄（可折疊）-->
+  <button class="live-fills-toggle" id="fills-toggle-btn" onclick="toggleFills()">
+    <span class="arrow">&#x25B6;</span>
+    &#x1F4DD; 成交記錄 / Fill History
+    <span id="fills-count-badge" style="margin-left:auto;font-size:11px;color:var(--text-dim)"></span>
+  </button>
+  <div id="fills-section" style="display:none;overflow-x:auto">
+    <table class="live-table" id="live-fills-table">
+      <thead><tr>
+        <th>時間 / Time</th><th>Symbol</th><th>Side</th>
+        <th>Qty</th><th>Price</th><th>Fee</th><th>Order ID</th>
+      </tr></thead>
+      <tbody id="live-fills-body">
+        <tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">展開以加載 / Expand to load</td></tr>
       </tbody>
     </table>
   </div>
@@ -280,6 +350,7 @@ async function loadDashboardData() {
     ocApi('/api/v1/live/positions'),
     ocApi('/api/v1/live/orders'),
   ]);
+  // Fills are loaded lazily (only when section is expanded) — see loadFills()
 
   // Balance — from /api/v1/live/balance (PyO3 Rust client → real exchange data)
   // 餘額 — 來自實盤端點（PyO3 Rust client → 真實交易所帳戶資料）
@@ -298,12 +369,25 @@ async function loadDashboardData() {
       const upnl = parseFloat(
         balData.total_unrealised_pnl || balData.totalPerpUPL || balData.unrealized_pnl || 0
       );
+      const wallet = parseFloat(
+        balData.wallet_balance || balData.walletBalance || balData.total_wallet_balance || equity || 0
+      );
+      const marginUsed = equity > 0 && avail > 0 ? equity - avail : 0;
+
       document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
       document.getElementById('live-available').textContent = avail > 0 ? '₮' + avail.toFixed(2) : '--';
+      document.getElementById('live-wallet-balance').textContent = wallet > 0 ? '₮' + wallet.toFixed(2) : '--';
+      document.getElementById('live-margin-used').textContent = marginUsed > 0 ? '₮' + marginUsed.toFixed(2) : '--';
+
+      if (avail > 0 && equity > 0) {
+        const pct = ((avail / equity) * 100).toFixed(1);
+        document.getElementById('live-available-sub').textContent = pct + '% of equity free';
+      }
+
       const pnlEl = document.getElementById('live-unrealized-pnl');
       if (pnlEl) {
         pnlEl.textContent = upnl !== 0 ? (upnl >= 0 ? '+' : '') + upnl.toFixed(4) : '--';
-        pnlEl.className = 'live-metric-val' + (upnl > 0 ? ' pos' : upnl < 0 ? ' neg' : '');
+        pnlEl.className = 'live-metric-val large' + (upnl > 0 ? ' pos' : upnl < 0 ? ' neg' : ' neutral');
       }
     }
   } catch (_) {}
@@ -315,8 +399,15 @@ async function loadDashboardData() {
     const posData = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
     const arr = (posData && Array.isArray(posData.positions)) ? posData.positions : [];
     document.getElementById('live-position-count').textContent = arr.length;
+    // Also update net PnL if we have realized data from fills
+    // 若有成交記錄的已實現 PnL，更新淨 PnL 顯示
+    const realizedEl = document.getElementById('live-realized-pnl');
+    const netEl = document.getElementById('live-net-pnl');
+    const upnlEl = document.getElementById('live-unrealized-pnl');
+    let realizedPnl = 0;
+    // Try to compute realized from positions cumRealisedPnl sum
     if (arr.length === 0) {
-      posBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
       posBody.innerHTML = arr.map(p => {
         // Bybit flat format (camelCase) + snake_case fallback
@@ -327,19 +418,34 @@ async function loadDashboardData() {
         const entry = p.avgPrice || p.avg_price || p.entry_price || '--';
         const mark = p.markPrice || p.mark_price || '--';
         const liq = p.liqPrice || p.liq_price || '--';
+        const leverage = p.leverage || p.lev || '--';
+        const cumPnl = parseFloat(p.cumRealisedPnl || p.cum_realised_pnl || 0);
+        realizedPnl += cumPnl;
         return `<tr>
           <td><strong>${ocEsc(p.symbol || '--')}</strong></td>
           <td>${ocEsc(p.side || '--')}</td>
           <td>${ocEsc(String(size))}</td>
+          <td>${ocEsc(String(leverage))}x</td>
           <td>${ocEsc(String(entry))}</td>
           <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
         </tr>`;
       }).join('');
+      // Update realized and net PnL display
+      if (realizedEl) {
+        realizedEl.textContent = realizedPnl !== 0 ? (realizedPnl >= 0 ? '+' : '') + realizedPnl.toFixed(4) : '--';
+        realizedEl.className = 'live-metric-val' + (realizedPnl > 0 ? ' pos' : realizedPnl < 0 ? ' neg' : ' neutral');
+      }
+      const upnlVal = parseFloat(upnlEl && upnlEl.textContent !== '--' ? upnlEl.textContent.replace('+', '') : '0') || 0;
+      const netPnl = upnlVal + realizedPnl;
+      if (netEl) {
+        netEl.textContent = (netPnl !== 0) ? (netPnl >= 0 ? '+' : '') + netPnl.toFixed(4) : '--';
+        netEl.className = 'live-metric-val' + (netPnl > 0 ? ' pos' : netPnl < 0 ? ' neg' : ' neutral');
+      }
     }
   } catch (_) {
-    posBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+    posBody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
   }
 
   // Orders — from /api/v1/live/orders (pending-close + stop orders from engine state)
@@ -400,8 +506,8 @@ async function checkLiveEngineStatus() {
   const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
 
   if (isActive) {
-    badge.textContent = '實盤運行中 🔴';
-    badge.className = 'oc-chip oc-chip-bad';
+    badge.textContent = '實盤運行中 🟣';
+    badge.className = 'oc-chip oc-chip-live';
   } else if (isPausedOrStopped) {
     badge.textContent = stateLabels[sessionState] || sessionState;
     badge.className = 'oc-chip oc-chip-warn';
@@ -452,6 +558,63 @@ async function doEmergencyStop() {
     await refreshPage();
   } else {
     ocToast('緊急停止命令失敗，請手動操作', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Fill history — lazy load on expand
+// 成交記錄 — 展開時懶加載
+// ═══════════════════════════════════════════════════════════════
+let _fillsLoaded = false;
+
+function toggleFills() {
+  const section = document.getElementById('fills-section');
+  const btn = document.getElementById('fills-toggle-btn');
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : '';
+  btn.classList.toggle('open', !isOpen);
+  if (!isOpen && !_fillsLoaded) {
+    loadFills();
+  }
+}
+
+async function loadFills() {
+  const body = document.getElementById('live-fills-body');
+  const badge = document.getElementById('fills-count-badge');
+  body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  try {
+    const d = await ocApi('/api/v1/live/fills');
+    const arr = (d && d.data && Array.isArray(d.data.list)) ? d.data.list : [];
+    _fillsLoaded = true;
+    if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
+    if (arr.length === 0) {
+      body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      return;
+    }
+    body.innerHTML = arr.map(f => {
+      // Bybit execution fields: execTime, symbol, side, execQty, execPrice, execFee, orderId
+      // Bybit 成交字段：execTime, symbol, side, execQty, execPrice, execFee, orderId
+      const ts = f.execTime || f.exec_time || f.time || '--';
+      const timeStr = ts !== '--' ? new Date(Number(ts)).toLocaleTimeString() : '--';
+      const qty = f.execQty || f.exec_qty || f.qty || '--';
+      const price = f.execPrice || f.exec_price || f.price || '--';
+      const fee = f.execFee || f.exec_fee || '--';
+      const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
+      const oid = f.orderId || f.order_id || '--';
+      const side = f.side || '--';
+      const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
+      return `<tr>
+        <td style="white-space:nowrap">${ocEsc(timeStr)}</td>
+        <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
+        <td style="${sideCls}">${ocEsc(side)}</td>
+        <td>${ocEsc(String(qty))}</td>
+        <td>${ocEsc(String(price))}</td>
+        <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
+        <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
   }
 }
 
