@@ -70,6 +70,10 @@
 
 **Live GUI Phase 6 完成 ✅**（2026-04-10）— Live-Demo 虛擬 API key 槽（`settings_routes.py`：validate via demo server → 寫入 live path，operator 可用 Demo 帳號完整測試 live 路徑，換 key 時零代碼改動）；`tab-settings.html` 3 槽位卡片（Demo / Live-Demo / Live）+ peek 按鈕 + 上下文警示；`GET /api/v1/live/metrics` 新端點；paper_trading_routes `/metrics` 修復（`compute_full_metrics()` 返回完整 trade_metrics / drawdown_metrics / holding_period / sharpe，修復所有欄位顯示 "--"）；`tab-live.html` 新增 Performance Metrics 區塊（10 個指標卡，30s 自動刷新）。**DB_TODO.md** 新增 Signal Diamond 多引擎數據隔離規劃（共享市場數據 + per-mode intents/fills/positions，5 階段實施）。（commit 25b5d73）
 
+**Live/Demo GUI 平倉按鈕 + Sidebar 修復 ✅**（2026-04-10）— (1) sidebar `refreshSidebar()` 改用 `/api/v1/live/session/status` 修復 "mode unknown auth: Not_Granted" 顯示；(2) live/demo 持倉表各行加單獨「平倉」按鈕（`POST /api/v1/live/positions/{symbol}/close` via IPC `close_position`；`POST /api/v1/strategy/demo/positions/{symbol}/close` via PyO3 `place_order reduce_only`）；(3) Positions 段落 header 加「全部平倉」按鈕，同時移除 control bar 重複按鈕；(4) paper tab 同步加「全部平倉」按鈕；(5) `_normalize_execution()` Rust→Bybit camelCase 映射。（commits c370cd1 / bfc3cea / 81a0acb）
+
+**SM-1 治理授權統一 ✅**（2026-04-10）— (1) `max_position_usd` 不再硬編碼：`grant_paper_authorization()` 新增 `max_position_usd` 參數，`post_session_reauth` 改 async 從 Rust `RiskConfig.limits.max_order_notional_usdt` 讀取（commit 4815386）；(2) live SM-1 授權完整生命週期：session start / `grant_execution_authority` → SM-1 DRAFT→PENDING→ACTIVE（mode: live），session stop / `revoke_execution_authority` → SM-1 REVOKED；`governance_hub.get_status()` 多授權並存時優先顯示 mode=live；`_revoke_live_governance_auth()` 新增helper。（commit 435e613）2676 Python tests pass。
+
 **留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
@@ -254,4 +258,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live GUI P0~P6 ✅**（API key 3 槽位 + Live-Demo virtual slot + live/paper metrics 端點 + DB Signal Diamond 規劃）· **Live 縮倉監控 ✅**（5% warn + 15% halt）· **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅** · **Gov-P1 ✅** · **Live GUI Phase 5 ✅** · **Live_Ready ✅** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入。
+> 截至 2026-04-10：tests engine lib **840** / Python **2676** passed **1 pre-existing fail** · **Live/Demo 平倉按鈕 ✅**（單行 + 全部，真實 BybitAPI）· **SM-1 live 授權統一 ✅**（live start→ACTIVE / stop→REVOKED，governance 顯示 mode:live）· **max_position_usd 可調 ✅**（讀 Rust RiskConfig）· **Live GUI P0~P6 ✅** · **Live 縮倉監控 ✅** · **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅** · **Gov-P1 ✅** · **Live_Ready ✅** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入。
