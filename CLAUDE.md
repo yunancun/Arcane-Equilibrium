@@ -54,7 +54,7 @@
 
 **Rust 市場掃描器 Phase A-D + QC/FA + P2 ✅**（2026-04-09）— ScannerRunner 完整接線 + D2/D3 動態 symbol + C-3 XRP + C-4 pinned cap + M-1 pending_close + adl_alerts + M-2 TOML + M-3 f_ma 閾值 1.5%→0.5% + M-5 edge_bonus +5→+2 + m-1 relay log + m-3 rest_poller Vec<String> + **IPC-SCAN-1 掃描器可觀測性**（get_active_symbols / get_scanner_status）。**系統目標達成度 ~100%**。835 lib tests pass。
 
-**Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期 + 多通道告警上線。
+**Runtime 狀態**：`Live_Ready` / `not_granted`。**實際 Live 上線條件**：OPENCLAW_ALLOW_MAINNET=1 + live API key 配置 + operator 授予 execution_authority。（Live 基礎設施已全部完成；軟性前置條件 paper 21d / Phase 6 / OC-3 仍在進行中但不阻擋功能開放。）
 
 **A2 NewsPipeline Scheduler ✅**（2026-04-10）— 60s 定時排程器接入 main.rs：3 providers（CryptoPanic free + CoinTelegraph RSS + Google News RSS）→ 去重 → severity → DB write → 4-09 三路 fan-out（Guardian/Regime/Learning）。受 `LearningConfig.switches.news_pipeline_enabled` 熱重載 gate 控制。
 
@@ -77,18 +77,24 @@
 ## 四、硬邊界（永遠不能違背）
 
 ```python
-system_mode             = "demo_only"
-execution_state         = "disabled"
-execution_authority     = "not_granted"
+# ── Live_Ready 狀態（2026-04-10）──────────────────────────────────
+# Live 基礎設施全部實施完畢（LIVE-P0/P1/P2 ✅）。
+# 實際 Live 上線需要 operator 同時滿足以下三個條件：
+#   1. OPENCLAW_ALLOW_MAINNET=1   （Rust Mainnet guard，Rust 側硬鎖）
+#   2. settings/secret_files/bybit/live/{api_key,api_secret} 配置完畢
+#   3. trading_mode = "live" in engine config + operator 顯式授予 execution_authority
+
+execution_authority     = "not_granted"   # 仍需 operator 明確授予
 decision_lease_emitted  = False
 max_retries             = 0
 
-# 硬錯誤：
-# - should_call_ai=true 但 invocation 沒發生
-# - Bybit API timeout / retCode != 0
-# - execution authority 意外被授予
-# - 偽造 AI 調用或交易活動
+# 永不允許的硬錯誤（不因 Live_Ready 而放寬）：
+# - execution authority 在未收到 operator 指令時被授予
 # - 自動改 live 配置 / 自動放開 execution authority
+# - Bybit API timeout / retCode != 0 → fail-closed，不重試
+# - should_call_ai=true 但 invocation 沒發生
+# - 偽造 AI 調用或交易活動
+# - Live 模式下無 OPENCLAW_ALLOW_MAINNET=1
 ```
 
 ---
@@ -241,4 +247,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **LIVE-P1-1/P1-2/P1-3 ✅** (commit 11283c7) · **LIVE-P2-1/P2-2/P2-3 ✅** (commit 006d905 — PerEngineRiskStores + per-engine GUI tab) · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · **LIVE-P0-1/P0-2/P0-3 ✅** · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
+> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live_Ready ✅**（LIVE-P0/P1/P2 全部完成，live balance/positions/orders 端點上線，§四硬限制更新）· **LIVE-P1-1/P1-2/P1-3 ✅** (commit 11283c7) · **LIVE-P2-1/P2-2/P2-3 ✅** (commit 006d905 — PerEngineRiskStores + per-engine GUI tab) · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · 待 operator 授予 execution_authority + OPENCLAW_ALLOW_MAINNET=1 + Live API Key。

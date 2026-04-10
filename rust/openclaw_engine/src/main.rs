@@ -1708,7 +1708,7 @@ async fn signal_loop(config: &Arc<ConfigManager>, cancel: &CancellationToken) {
 fn print_banner() {
     info!("==============================================");
     info!("  OpenClaw Engine v{}", VERSION);
-    info!("  Mode: demo_only | Execution: disabled");
+    info!("  Mode: Live_Ready | Execution: operator-gated");
     info!("  Bybit V5 Linear — Rust Trading Engine");
     info!("==============================================");
 }

@@ -408,3 +408,94 @@ async def post_live_session_resume(
     except Exception as exc:
         logger.error("IPC resume_paper failed (live resume): %s", exc)
         raise HTTPException(status_code=502, detail=f"IPC command failed: {exc}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Live account data — balance / positions / orders
+# 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
+#
+# These endpoints read from the Rust engine's internal state via IPC get_paper_state.
+# In Live mode the engine tracks real-money positions through the same pipeline.
+# Full Bybit exchange data (exact balances from REST) requires OPENCLAW_ALLOW_MAINNET=1
+# + live API keys in settings/secret_files/bybit/live/.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@live_router.get("/balance")
+async def get_live_balance(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/balance
+    Return live engine account balance from internal engine state.
+    Returns bybit_sync_balance when available (synced from exchange REST).
+
+    返回實盤引擎帳戶餘額（從引擎內部狀態讀取）。
+    若有 bybit_sync_balance 則優先返回（從交易所 REST 同步的真實餘額）。
+    """
+    try:
+        state = await _ipc_command("get_paper_state")
+    except HTTPException:
+        return _live_response({"available": False, "source": "engine_unavailable"})
+    sync_bal = state.get("bybit_sync_balance")
+    return _live_response({
+        "balance": sync_bal if sync_bal is not None else state.get("balance"),
+        "peak_balance": state.get("peak_balance"),
+        "bybit_sync_balance": sync_bal,
+        "engine_balance": state.get("balance"),
+        "source": "bybit_sync" if sync_bal is not None else "engine_internal",
+    })
+
+
+@live_router.get("/positions")
+async def get_live_positions(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/positions
+    Return open positions tracked by the live engine (internal state).
+    In Live mode these are real-money positions opened via execute_order.
+
+    返回實盤引擎追蹤的持倉（內部狀態）。
+    Live 模式下為通過 execute_order 開的真實倉位。
+    """
+    try:
+        state = await _ipc_command("get_paper_state")
+    except HTTPException:
+        return _live_response({"positions": [], "count": 0, "available": False})
+    positions: list = state.get("positions", [])
+    return _live_response({
+        "positions": positions,
+        "count": len(positions),
+        "source": "engine_state",
+    })
+
+
+@live_router.get("/orders")
+async def get_live_orders(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/live/orders
+    Return active orders tracked by the live engine.
+    Derives pending-close orders from position state; full exchange-level order list
+    requires active live Bybit API connection.
+
+    返回實盤引擎追蹤的掛單。
+    從倉位狀態派生 pending_close 訂單；完整的交易所掛單列表需要實盤 Bybit API 連接。
+    """
+    try:
+        state = await _ipc_command("get_paper_state")
+    except HTTPException:
+        return _live_response({"list": [], "count": 0, "available": False})
+    positions: list = state.get("positions", [])
+    # Derive pending-close orders from positions; open orders tracked in exchange via stop manager
+    # 從倉位派生 pending_close 訂單；止損管理器在交易所側追蹤掛單
+    pending = [p for p in positions if p.get("pending_close") or p.get("stop_order_id")]
+    return _live_response({
+        "list": pending,
+        "count": len(pending),
+        "regular_count": 0,
+        "conditional_count": len(pending),
+        "source": "engine_state",
+    })
