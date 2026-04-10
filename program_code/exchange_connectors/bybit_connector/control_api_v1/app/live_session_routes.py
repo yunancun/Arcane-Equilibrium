@@ -1032,22 +1032,39 @@ async def post_live_close_position(
 ) -> dict:
     """
     POST /api/v1/live/positions/{symbol}/close
-    通過 IPC close_position 平掉指定 symbol 的實盤倉位。
-    Close a single live position by symbol via IPC close_position command.
+    通過 PyO3 BybitClient 市價平掉指定 symbol 的實盤倉位（reduce_only）。
+    IPC close_position 只操作 paper_state，不發 Bybit 訂單，故改用 PyO3 直接呼叫。
+
+    Close a single live position by symbol via PyO3 BybitClient market order (reduce_only).
+    IPC close_position only clears paper_state without sending Bybit orders — use PyO3 directly.
     """
     _require_operator(actor)
-    rust = get_rust_reader()
-    if not rust.is_available():
-        raise HTTPException(status_code=503, detail="Rust engine not available")
+    rc = _get_rust_client_safe()
+    if rc is None:
+        raise HTTPException(status_code=503, detail="PyO3 BybitClient not available")
+    sym = symbol.upper()
+    qty: float = 0.0
     try:
-        result = await _ipc_command("close_position", {"symbol": symbol.upper()})
+        positions = rc.get_positions("linear")
+        pos = next((p for p in positions if p.get("symbol") == sym), None)
+        if pos is None or float(pos.get("size") or pos.get("qty") or 0) <= 0:
+            raise HTTPException(status_code=404, detail=f"No open position for {sym}")
+        qty = float(pos.get("size") or pos.get("qty"))
+        side = pos.get("side", "Buy")
+        close_side = "Sell" if side == "Buy" else "Buy"
+        rc.place_order(
+            symbol=sym, side=close_side, order_type="Market",
+            qty=qty, category="linear", reduce_only=True,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error("IPC close_position failed for %s: %s", symbol, exc)
-        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+        logger.error("Live close_position failed for %s: %s", sym, exc)
+        raise HTTPException(status_code=500, detail=f"close failed: {exc}")
     logger.warning(
-        "⚠ LIVE close_position %s — actor=%s", symbol.upper(), getattr(actor, "actor_id", "?"),
+        "⚠ LIVE close_position %s qty=%.4f — actor=%s", sym, qty, getattr(actor, "actor_id", "?"),
     )
-    return _live_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
+    return _live_response({"symbol": sym, "closed": True, "qty": qty, "source": "bybit_client"})
 
 
 @live_router.post("/close-all-positions")
@@ -1056,29 +1073,38 @@ async def post_live_close_all_positions(
 ) -> dict:
     """
     POST /api/v1/live/close-all-positions
-    立即平掉所有實盤倉位（不停止 session，引擎繼續運行）。
-    需要 Operator 角色 + 引擎在線。
+    通過 PyO3 BybitClient 立即平掉所有實盤倉位（不停止 session，引擎繼續運行）。
+    IPC close_all_positions 只操作 paper_state，不發 Bybit 訂單，故改用 PyO3 直接呼叫。
+    需要 Operator 角色。
 
-    Close all live positions immediately without stopping the session.
-    Requires Operator role and engine online. Engine pipeline continues running.
+    Close all live positions immediately without stopping the session via PyO3 BybitClient.
+    IPC close_all_positions only clears paper_state — use PyO3 to actually send Bybit orders.
+    Requires Operator role.
     """
     _require_operator(actor)
-    rust_online = get_rust_reader().is_available()
-    if not rust_online:
-        raise HTTPException(status_code=503, detail="Rust engine offline — cannot close positions")
-    try:
-        result = await _ipc_command("close_all_positions")
-    except Exception as exc:
-        logger.error("IPC close_all_positions failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"close_all_positions IPC failed: {exc}")
+    rc = _get_rust_client_safe()
+    if rc is None:
+        raise HTTPException(status_code=503, detail="PyO3 BybitClient not available")
+    # Reuse the same close logic as demo close-all — both use PyO3 BybitClient.
+    # 複用 demo 全部平倉邏輯 — 兩者都使用 PyO3 BybitClient。
+    from .paper_trading_routes import _close_all_demo_positions
+    result = _close_all_demo_positions()
+    closed = result.get("demo_closed", 0)
+    errors = result.get("demo_errors", [])
+    msg = (
+        f"All live positions closed: {closed}"
+        + (f" (errors: {', '.join(errors)})" if errors else "")
+    )
     logger.warning(
-        "⚠ LIVE close-all-positions (manual, session continues) — actor=%s",
-        getattr(actor, "actor_id", "?"),
+        "⚠ LIVE close-all-positions (manual, session continues) — closed=%d errors=%s actor=%s",
+        closed, errors or None, getattr(actor, "actor_id", "?"),
     )
     return _live_response({
-        "message": "All live positions closed — session continues / 已平掉所有實盤倉位，session 繼續運行",
-        "source": "rust_engine",
-        "close_result": result,
+        "message": msg,
+        "source": "bybit_client",
+        "closed": closed,
+        "canceled": result.get("demo_canceled", False),
+        "errors": errors if errors else None,
     })
 
 
