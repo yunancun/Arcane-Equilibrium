@@ -15,7 +15,7 @@ use openclaw_engine::config::{
     TradingMode,
 };
 use openclaw_engine::event_consumer::SYMBOLS;
-use openclaw_engine::ipc_server::IpcServer;
+use openclaw_engine::ipc_server::{IpcServer, PerEngineRiskStores};
 use openclaw_engine::market_data_client::MarketDataClient;
 use openclaw_engine::scanner::ScannerConfig;
 use openclaw_engine::scanner::registry::SymbolRegistry;
@@ -193,7 +193,7 @@ fn main() {
     //     ARCH-RC1 1C-2：載入 3 個統一 Config 並包入 ConfigStore。
     //     TOML 路徑可用環境變數覆蓋，否則使用 settings/。
     // ------------------------------------------------------------------
-    let (risk_store, learning_store, budget_store) = match load_unified_configs() {
+    let (risk_stores, learning_store, budget_store) = match load_unified_configs() {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "failed to load unified configs / 統一配置加載失敗");
@@ -215,22 +215,27 @@ fn main() {
 
     runtime.block_on(async_main(
         config,
-        risk_store,
+        risk_stores,
         learning_store,
         budget_store,
     ));
 }
 
-/// ARCH-RC1 1C-2-A: Load RiskConfig / LearningConfig / BudgetConfig from
-/// their TOML files, wrapping each in an `Arc<ConfigStore<T>>`. Paths resolve
-/// to `settings/risk_control_rules/{risk,learning,budget}_config.toml` by
-/// default; individual env vars override each path.
-/// ARCH-RC1 1C-2-A：從 TOML 載入 3 個統一 Config，各自包入 Arc<ConfigStore>。
-/// 預設路徑為 settings/risk_control_rules/；可用環境變數覆蓋個別路徑。
+/// ARCH-RC1 1C-2-A / LIVE-P2-1: Load per-engine RiskConfig (paper/demo/live) +
+/// LearningConfig + BudgetConfig from their TOML files, wrapping each in an
+/// `Arc<ConfigStore<T>>`. Per-engine risk paths resolve to:
+///   `settings/risk_control_rules/risk_config_{paper|demo|live}.toml`
+/// Individual env vars override each path:
+///   OPENCLAW_RISK_CONFIG_PAPER / _DEMO / _LIVE
+///   OPENCLAW_LEARNING_CONFIG / OPENCLAW_BUDGET_CONFIG
+///
+/// ARCH-RC1 1C-2-A / LIVE-P2-1：從 TOML 載入三個引擎 RiskConfig（paper/demo/live）
+/// 及 LearningConfig + BudgetConfig，各自包入 Arc<ConfigStore>。
+/// 每個引擎的風控路徑可用對應環境變數覆蓋。
 #[allow(clippy::type_complexity)]
 fn load_unified_configs() -> Result<
     (
-        Arc<ConfigStore<RiskConfig>>,
+        PerEngineRiskStores,
         Arc<ConfigStore<LearningConfig>>,
         Arc<ConfigStore<BudgetConfig>>,
     ),
@@ -241,9 +246,24 @@ fn load_unified_configs() -> Result<
     let base = std::env::var("OPENCLAW_RISK_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("settings/risk_control_rules"));
-    let risk_path = std::env::var("OPENCLAW_RISK_CONFIG")
+
+    // LIVE-P2-1: Per-engine risk config paths with env var overrides.
+    // LIVE-P2-1：每引擎風控配置路徑，可通過環境變量覆蓋。
+    let risk_path_paper = std::env::var("OPENCLAW_RISK_CONFIG_PAPER")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| base.join("risk_config.toml"));
+        .unwrap_or_else(|_| {
+            // Legacy fallback: if risk_config_paper.toml absent, use risk_config.toml.
+            // 舊版回退：若 risk_config_paper.toml 不存在，使用 risk_config.toml。
+            let paper = base.join("risk_config_paper.toml");
+            if paper.exists() { paper } else { base.join("risk_config.toml") }
+        });
+    let risk_path_demo = std::env::var("OPENCLAW_RISK_CONFIG_DEMO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| base.join("risk_config_demo.toml"));
+    let risk_path_live = std::env::var("OPENCLAW_RISK_CONFIG_LIVE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| base.join("risk_config_live.toml"));
+
     let learning_path = std::env::var("OPENCLAW_LEARNING_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|_| base.join("learning_config.toml"));
@@ -252,14 +272,17 @@ fn load_unified_configs() -> Result<
         .unwrap_or_else(|_| base.join("budget_config.toml"));
 
     info!(
-        risk = %risk_path.display(),
+        risk_paper = %risk_path_paper.display(),
+        risk_demo = %risk_path_demo.display(),
+        risk_live = %risk_path_live.display(),
         learning = %learning_path.display(),
         budget = %budget_path.display(),
-        "loading ARCH-RC1 unified configs / 載入 ARCH-RC1 統一配置"
+        "loading ARCH-RC1 / LIVE-P2-1 per-engine configs / 載入每引擎 Config"
     );
 
-    // ARCH-RC1 1C-2-D: one-shot legacy operator_risk_config.json → TOML migration.
-    // ARCH-RC1 1C-2-D：舊 operator_risk_config.json → TOML 一次性遷移。
+    // ARCH-RC1 1C-2-D: one-shot legacy operator_risk_config.json → TOML migration
+    // (targets paper config path as the canonical migration destination).
+    // ARCH-RC1 1C-2-D：舊 JSON → TOML 一次性遷移（遷移目標為 paper 路徑）。
     match openclaw_engine::config::legacy_migration::migrate_legacy_risk_json_if_needed(&base) {
         Ok(openclaw_engine::config::legacy_migration::MigrationOutcome::Migrated(p)) => {
             info!(path = %p.display(), "legacy risk JSON migrated to TOML / 舊風控 JSON 已遷移");
@@ -270,27 +293,41 @@ fn load_unified_configs() -> Result<
         }
     }
 
-    let risk: RiskConfig = load_toml_or_default(&risk_path, |c: &RiskConfig| c.validate())
-        .map_err(|e| format!("risk config: {}", e))?;
+    let risk_paper: RiskConfig =
+        load_toml_or_default(&risk_path_paper, |c: &RiskConfig| c.validate())
+            .map_err(|e| format!("risk_paper config: {}", e))?;
+    let risk_demo: RiskConfig =
+        load_toml_or_default(&risk_path_demo, |c: &RiskConfig| c.validate())
+            .map_err(|e| format!("risk_demo config: {}", e))?;
+    let risk_live: RiskConfig =
+        load_toml_or_default(&risk_path_live, |c: &RiskConfig| c.validate())
+            .map_err(|e| format!("risk_live config: {}", e))?;
     let learning: LearningConfig =
         load_toml_or_default(&learning_path, |c: &LearningConfig| c.validate())
             .map_err(|e| format!("learning config: {}", e))?;
-    let budget: BudgetConfig = load_toml_or_default(&budget_path, |c: &BudgetConfig| c.validate())
-        .map_err(|e| format!("budget config: {}", e))?;
+    let budget: BudgetConfig =
+        load_toml_or_default(&budget_path, |c: &BudgetConfig| c.validate())
+            .map_err(|e| format!("budget config: {}", e))?;
 
     info!(
-        risk_version = risk.meta.version,
+        paper_version = risk_paper.meta.version,
+        demo_version = risk_demo.meta.version,
+        live_version = risk_live.meta.version,
         learning_version = learning.meta.version,
         budget_version = budget.meta.version,
-        "ARCH-RC1 unified configs loaded / 統一配置已載入"
+        "LIVE-P2-1 per-engine risk configs loaded / 每引擎風控配置已載入"
     );
 
     // CFG-PERSIST-1: wire each store to atomic TOML write-back so operator
-    // patches survive engine restart. Without this, in-memory ConfigStore
-    // patches are lost on every reload (violates CLAUDE.md §三 "禁止 restart-to-apply").
-    // CFG-PERSIST-1：為每個 store 接上原子 TOML 回寫，operator 補丁可跨重啟。
+    // patches survive engine restart.
+    // CFG-PERSIST-1：每個 store 接上原子 TOML 回寫，operator 補丁可跨重啟。
+    let risk_stores = PerEngineRiskStores {
+        paper: Arc::new(ConfigStore::new(risk_paper).with_toml_persist(risk_path_paper)),
+        demo: Arc::new(ConfigStore::new(risk_demo).with_toml_persist(risk_path_demo)),
+        live: Arc::new(ConfigStore::new(risk_live).with_toml_persist(risk_path_live)),
+    };
     Ok((
-        Arc::new(ConfigStore::new(risk).with_toml_persist(risk_path)),
+        risk_stores,
         Arc::new(ConfigStore::new(learning).with_toml_persist(learning_path)),
         Arc::new(ConfigStore::new(budget).with_toml_persist(budget_path)),
     ))
@@ -440,7 +477,7 @@ fn run_replay_mode(args: ReplayArgs) {
 /// 在多線程運行時內執行的異步入口。
 async fn async_main(
     config: Arc<ConfigManager>,
-    risk_store: Arc<ConfigStore<RiskConfig>>,
+    risk_stores: PerEngineRiskStores,
     learning_store: Arc<ConfigStore<LearningConfig>>,
     budget_store: Arc<ConfigStore<BudgetConfig>>,
 ) {
@@ -548,10 +585,10 @@ async fn async_main(
         ipc_data_dir,
         Some(paper_cmd_tx),
     );
-    // ARCH-RC1 1C-2-C: wire unified Config stores into IPC for direct hot-reload writes.
-    // ARCH-RC1 1C-2-C：將統一 Config stores 接入 IPC，供直接熱更新。
+    // ARCH-RC1 1C-2-C / LIVE-P2-1: wire per-engine risk stores + unified Config stores into IPC.
+    // ARCH-RC1 1C-2-C / LIVE-P2-1：將每引擎 risk stores + 統一 Config stores 接入 IPC。
     ipc_server.set_config_stores(
-        Arc::clone(&risk_store),
+        risk_stores.clone(),
         Arc::clone(&learning_store),
         Arc::clone(&budget_store),
     );
@@ -1550,9 +1587,18 @@ async fn async_main(
             // Phase 4 W-3/W-4 live plumbing / Phase 4 W-3/W-4 實時接線
             linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
             news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-            // ARCH-RC1 1C-2-B: live ConfigStore handles for hot-reload.
-            // ARCH-RC1 1C-2-B：熱重載 ConfigStore 控制代碼。
-            risk_store: Some(Arc::clone(&risk_store)),
+            // ARCH-RC1 1C-2-B / LIVE-P2-1: select per-engine risk store for hot-reload.
+            // Route: PaperOnly→paper, Demo→demo, Live→live.
+            // ARCH-RC1 1C-2-B / LIVE-P2-1：按 trading_mode 選擇對應 risk store。
+            risk_store: {
+                let mode = config.get().trading_mode;
+                let store = match mode {
+                    TradingMode::Live => Arc::clone(&risk_stores.live),
+                    TradingMode::Demo => Arc::clone(&risk_stores.demo),
+                    TradingMode::PaperOnly => Arc::clone(&risk_stores.paper),
+                };
+                Some(store)
+            },
             budget_store: Some(Arc::clone(&budget_store)),
             // ARCH-RC1 1C-4 B1: clone the V014 PG handle so the event consumer
             // can restore the governor de-escalation cooldown on startup.

@@ -124,6 +124,56 @@
   </div>
 </div>
 
+<!-- ═══ LIVE-P2-2: Per-Engine Risk Config Selector ═══ -->
+<!-- 每引擎風控配置選擇器 — Paper / Demo / Live 分 tab 各自編輯 -->
+<div class="oc-card" id="engine-risk-selector-card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h3 style="margin:0">&#x2699;&#xFE0F; 引擎風控配置 / Per-Engine Risk Config</h3>
+      <div class="subtitle">每個引擎獨立的 RiskConfig — Paper / Demo / Live 分別編輯，互不影響</div>
+    </div>
+    <div id="engine-risk-loaded-badge" class="oc-chip oc-chip-neutral" style="font-size:11px">--</div>
+  </div>
+  <!-- Engine selector tabs / 引擎選擇 tab -->
+  <div style="display:flex;gap:4px;margin:10px 0 4px;flex-wrap:wrap" id="engine-tab-row">
+    <button class="oc-btn" id="etab-paper" onclick="selectRiskEngine('paper')"
+      style="background:rgba(56,139,253,0.15);border-color:rgba(56,139,253,0.4);color:var(--blue)">
+      &#x1F4C4; Paper
+    </button>
+    <button class="oc-btn" id="etab-demo" onclick="selectRiskEngine('demo')"
+      style="opacity:0.55">
+      &#x1F3E6; Demo
+    </button>
+    <button class="oc-btn" id="etab-live" onclick="selectRiskEngine('live')"
+      style="opacity:0.55">
+      &#x1F534; Live (Real Money)
+    </button>
+  </div>
+  <div id="engine-risk-live-warn" style="display:none;padding:8px 12px;border-radius:6px;background:rgba(248,81,73,0.12);border:1px solid rgba(248,81,73,0.4);color:var(--red);font-size:12px;margin-bottom:8px">
+    &#x26A0;&#xFE0F; <strong>LIVE ENGINE</strong> — 此配置影響真實資金。每次保存將觸發確認對話框。
+    / Changes here affect REAL MONEY. A confirmation dialog will appear before every save.
+  </div>
+</div>
+
+<!-- Live engine save confirmation dialog / 實盤保存確認對話框 -->
+<div class="oc-modal" id="dlg-engine-live-confirm" style="display:none;position:fixed;inset:0;z-index:1000;align-items:center;justify-content:center;background:rgba(0,0,0,0.6)">
+  <div class="oc-modal-content" style="border:2px solid var(--red)">
+    <h3 style="color:var(--red)">&#x1F534; 確認修改 Live 引擎風控 / Confirm Live Risk Config Change</h3>
+    <div style="margin:12px 0;font-size:13px">
+      <p>您即將修改 <strong>Live 引擎</strong>的風控參數。此配置直接影響 <strong>真實資金</strong> 交易行為。</p>
+      <p>You are about to modify the <strong>Live engine</strong> risk config. This directly affects <strong>real-money</strong> trading behavior.</p>
+      <p id="dlg-engine-live-confirm-detail" style="margin-top:10px;padding:8px;background:var(--bg-card);border-radius:4px;font-size:11px;color:var(--text-dim)"></p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="oc-btn" onclick="document.getElementById('dlg-engine-live-confirm').style.display='none';_liveRiskSavePendingCallback=null">取消 / Cancel</button>
+      <button class="oc-btn" style="background:var(--red);color:#fff;border-color:var(--red)"
+        id="dlg-engine-live-confirm-btn" onclick="confirmLiveEngineRiskSave()">
+        確認修改 / Confirm Change
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Stop Manager (Editable) ═══ -->
 <div class="oc-card">
   <h3>&#x1F6D1; 止损设置 / Stop Manager Settings</h3>
@@ -594,6 +644,89 @@ function toggleTPInputs() {
   else $('in-take-profit').style.opacity = '1';
 }
 
+// ─── LIVE-P2-2: Per-engine risk selector (paper|demo|live) ────────────────────
+let _selectedRiskEngine = 'paper';
+let _liveRiskSavePendingCallback = null;
+
+function selectRiskEngine(engine) {
+  _selectedRiskEngine = engine;
+  ['paper', 'demo', 'live'].forEach(e => {
+    const b = $('etab-' + e);
+    if (!b) return;
+    const active = e === engine;
+    b.style.opacity = active ? '1' : '0.55';
+    b.style.background = active ? (e === 'live' ? 'rgba(248,81,73,0.15)' : 'rgba(56,139,253,0.15)') : '';
+    b.style.borderColor = active ? (e === 'live' ? 'rgba(248,81,73,0.5)' : 'rgba(56,139,253,0.4)') : '';
+    b.style.color = active ? (e === 'live' ? 'var(--red)' : 'var(--blue)') : '';
+  });
+  const w = $('engine-risk-live-warn');
+  if (w) w.style.display = engine === 'live' ? '' : 'none';
+  _riskFormDirty = false;
+  loadRiskConfigForEngine(engine);
+}
+
+async function loadRiskConfigForEngine(engine) {
+  const badge = $('engine-risk-loaded-badge');
+  if (badge) { badge.textContent = '加載中...'; badge.className = 'oc-chip oc-chip-neutral'; }
+  try {
+    const url = engine === 'paper' ? '/api/v1/paper/risk/config' : '/api/v1/paper/risk/config/engine/' + engine;
+    const d = await ocApi(url);
+    const cfg = (d && d.data) ? (d.data.config || d.data) : {};
+    _populateRiskFormFromConfig(cfg);
+    if (badge) {
+      badge.textContent = engine.toUpperCase() + ' v' + (cfg.meta ? cfg.meta.version : '?');
+      badge.className = engine === 'live' ? 'oc-chip oc-chip-bad' : 'oc-chip oc-chip-good';
+    }
+  } catch (e) {
+    if (badge) { badge.textContent = '加載失敗'; badge.className = 'oc-chip oc-chip-warn'; }
+  }
+}
+
+// Populate editable form from RiskConfig snapshot / 從快照填充表單
+function _populateRiskFormFromConfig(c) {
+  if (!c || _riskFormDirty) return;
+  const g = c.global_config || c.p1 || {}, l = c.limits || {};
+  const sv = (id, v) => { const e = $(id); if (e && v != null) e.value = v; };
+  const sc = (id, v) => { const e = $(id); if (e && v != null) e.checked = !!v; };
+  sv('in-hard-stop', g.max_stop_loss_pct ?? l.stop_loss_max_pct);
+  sv('in-take-profit', g.max_take_profit_pct ?? l.take_profit_max_pct);
+  sc('in-tp-enabled', g.tp_enabled ?? l.take_profit_enforced); toggleTPInputs();
+  sv('in-trailing', g.trailing_stop_pct); sv('in-atr-mult', g.atr_multiplier);
+  sv('in-time-stop', g.max_holding_hours ?? l.holding_hours_max);
+  sv('in-drawdown', g.max_session_drawdown_pct ?? l.session_drawdown_max_pct);
+  sv('in-leverage', g.max_leverage ?? l.leverage_max);
+  sv('in-daily-loss', g.max_daily_loss_pct ?? l.daily_loss_max_pct);
+  sv('in-p1-risk', g.p1_risk_pct);
+  sv('in-single-pos', g.max_single_position_pct ?? l.position_size_max_pct);
+  sv('in-total-exp', g.max_total_exposure_pct ?? l.total_exposure_max_pct);
+  sv('in-corr-exp', g.max_correlated_exposure_pct ?? l.correlated_exposure_max_pct);
+  sv('in-same-dir', g.max_same_direction_positions);
+  sv('in-cooldown-count', g.consecutive_loss_cooldown_count ?? l.consec_loss_cooldown_count);
+  sv('in-cooldown-min', g.consecutive_loss_cooldown_minutes ?? l.consec_loss_cooldown_min);
+  if (Array.isArray(g.allowed_categories)) sv('in-allowed-cats', g.allowed_categories.join(', '));
+}
+
+// Return save URL for current engine / 返回當前引擎的保存 URL
+function _engineSaveUrl() {
+  return _selectedRiskEngine === 'paper'
+    ? '/api/v1/paper/risk/config/global'
+    : '/api/v1/paper/risk/config/engine/' + _selectedRiskEngine + '/global';
+}
+
+// Wrap save with live confirmation dialog / 為 live 引擎包裝確認對話框
+function _wrapLiveSave(cb, desc) {
+  if (_selectedRiskEngine !== 'live') { cb(); return; }
+  const d = $('dlg-engine-live-confirm-detail');
+  if (d) d.textContent = '操作：' + desc + ' (engine=live)';
+  _liveRiskSavePendingCallback = cb;
+  const dlg = document.getElementById('dlg-engine-live-confirm');
+  if (dlg) dlg.style.display = 'flex';
+}
+function confirmLiveEngineRiskSave() {
+  document.getElementById('dlg-engine-live-confirm').style.display = 'none';
+  if (_liveRiskSavePendingCallback) { _liveRiskSavePendingCallback(); _liveRiskSavePendingCallback = null; }
+}
+
 // ─── Dirty-tracking: skip input population during 15s refresh while user has unsaved edits ──
 // 髒標記：用戶有未保存的編輯時，15s 刷新跳過輸入框填充
 // WP-F/AH-06 fix: prevents loadAll from overwriting user edits in-flight.
@@ -626,8 +759,12 @@ function _btnSaving(btn, saving) {
 }
 
 // saveStopSettings — 止损管理器专用（Stop Manager 区块）
-// Only patches stop-manager fields, does not touch position sizing or cooldown.
+// Routes to the currently selected engine (paper/demo/live). Live engine triggers confirm dialog.
+// 路由到當前選擇的引擎（paper/demo/live）。Live 引擎觸發確認對話框。
 async function saveStopSettings(btn) {
+  _wrapLiveSave(() => _doSaveStopSettings(btn), '止損設置 / Stop Settings');
+}
+async function _doSaveStopSettings(btn) {
   _btnSaving(btn, true);
   try {
     const tpEnabled = $('in-tp-enabled').checked;
@@ -644,17 +781,24 @@ async function saveStopSettings(btn) {
       max_leverage: parseFloat($('in-leverage').value) || 20,
       max_holding_hours: parseFloat($('in-time-stop').value) || 72,
     };
-    const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('止损设置已保存 / Stop settings saved', 'success'); _riskFormDirty = false; loadAll(); }
-    else ocToast('Save failed / 保存失败', 'error');
+    const d = await ocPost(_engineSaveUrl(), body);
+    if (d) {
+      const engLabel = _selectedRiskEngine.toUpperCase();
+      ocToast('[' + engLabel + '] 止损设置已保存 / Stop settings saved', 'success');
+      _riskFormDirty = false; loadAll();
+    } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
   }
 }
 
 // savePositionSettings — 仓位控制专用（Position Sizing & Exposure 区块）
-// Only patches position-sizing fields, does not touch stop settings or cooldown.
+// Routes to the currently selected engine. Live engine triggers confirm dialog.
+// 路由到當前選擇的引擎。Live 引擎觸發確認對話框。
 async function savePositionSettings(btn) {
+  _wrapLiveSave(() => _doSavePositionSettings(btn), '倉位控制 / Position Settings');
+}
+async function _doSavePositionSettings(btn) {
   _btnSaving(btn, true);
   try {
     // p1_risk_pct now wired to Rust (RiskConfig.limits.per_trade_risk_pct) — sent
@@ -674,26 +818,36 @@ async function savePositionSettings(btn) {
       // 逗號分隔字串轉陣列；空白則傳 null（保持 Rust 現值）
       allowed_categories: catsRaw ? catsRaw.split(',').map(s => s.trim()).filter(Boolean) : null,
     };
-    const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('仓位设置已保存 / Position settings saved', 'success'); _riskFormDirty = false; loadAll(); }
-    else ocToast('Save failed / 保存失败', 'error');
+    const d = await ocPost(_engineSaveUrl(), body);
+    if (d) {
+      const engLabel = _selectedRiskEngine.toUpperCase();
+      ocToast('[' + engLabel + '] 仓位设置已保存 / Position settings saved', 'success');
+      _riskFormDirty = false; loadAll();
+    } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
   }
 }
 
 // saveCooldownSettings — 冷却保护专用（Loss Cooldown 区块）
-// Only patches cooldown fields, does not touch stop settings or position sizing.
+// Routes to the currently selected engine. Live engine triggers confirm dialog.
+// 路由到當前選擇的引擎。Live 引擎觸發確認對話框。
 async function saveCooldownSettings(btn) {
+  _wrapLiveSave(() => _doSaveCooldownSettings(btn), '冷卻設置 / Cooldown Settings');
+}
+async function _doSaveCooldownSettings(btn) {
   _btnSaving(btn, true);
   try {
     const body = {
       consecutive_loss_cooldown_count: parseInt($('in-cooldown-count').value) || 3,
       consecutive_loss_cooldown_minutes: parseFloat($('in-cooldown-min').value) || 30,
     };
-    const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('冷却设置已保存 / Cooldown settings saved', 'success'); _riskFormDirty = false; loadAll(); }
-    else ocToast('Save failed / 保存失败', 'error');
+    const d = await ocPost(_engineSaveUrl(), body);
+    if (d) {
+      const engLabel = _selectedRiskEngine.toUpperCase();
+      ocToast('[' + engLabel + '] 冷却设置已保存 / Cooldown settings saved', 'success');
+      _riskFormDirty = false; loadAll();
+    } else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
   }
@@ -701,9 +855,13 @@ async function saveCooldownSettings(btn) {
 
 async function saveH0ShadowMode() {
   const enabled = $('in-h0-shadow').checked;
-  const d = await ocPost('/api/v1/paper/risk/config/global', { h0_shadow_mode: enabled });
-  if (d) { ocToast(enabled ? 'H0 Shadow Mode ON — 仅观察不阻断' : 'H0 Shadow Mode OFF — 正式门控', 'success'); }
-  else ocToast('Save failed', 'error');
+  const doSave = async () => {
+    const d = await ocPost(_engineSaveUrl(), { h0_shadow_mode: enabled });
+    const engLabel = _selectedRiskEngine.toUpperCase();
+    if (d) { ocToast('[' + engLabel + '] ' + (enabled ? 'H0 Shadow Mode ON — 仅观察不阻断' : 'H0 Shadow Mode OFF — 正式门控'), 'success'); }
+    else ocToast('Save failed', 'error');
+  };
+  _wrapLiveSave(doSave, 'H0 Shadow Mode');
 }
 
 // ─── AI Stop-Loss Consultation ────────────────────────────────

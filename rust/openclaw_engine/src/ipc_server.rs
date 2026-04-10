@@ -71,6 +71,44 @@ pub type TeacherLoopSlot = Arc<RwLock<Option<TeacherLoopHandles>>>;
 pub type AuditPoolSlot = Arc<RwLock<Option<sqlx::PgPool>>>;
 
 // ---------------------------------------------------------------------------
+// LIVE-P2-1: Per-engine RiskConfig stores
+// LIVE-P2-1：每個引擎模式的 RiskConfig stores
+// ---------------------------------------------------------------------------
+
+/// Bundles three RiskConfig stores — one per TradingMode — so IPC routing and
+/// TickPipeline wiring can select the correct store without scattering
+/// individual Option<Arc<...>> fields across every function signature.
+///
+/// 將三個 RiskConfig stores 捆綁為一個結構體（每個 TradingMode 一個），
+/// 使 IPC 路由與 TickPipeline 接線可以選擇正確 store，
+/// 而不需在每個函數簽名中分散獨立的 Option<Arc<...>> 字段。
+#[derive(Clone)]
+pub struct PerEngineRiskStores {
+    /// Paper-only mode (no exchange connection) — liberal limits for strategy validation.
+    /// 純 paper 模式（無交易所連接）— 寬鬆限制，用於策略驗證。
+    pub paper: Arc<ConfigStore<RiskConfig>>,
+    /// Demo mode (Bybit Demo exchange, simulated margin) — same as paper by default.
+    /// Demo 模式（Bybit Demo 交易所，模擬保證金）— 默認與 paper 相同。
+    pub demo: Arc<ConfigStore<RiskConfig>>,
+    /// Live mode (real money, Mainnet) — tighter defaults, operator must relax before go-live.
+    /// 實盤模式（真實資金，主網）— 更保守的默認值，Operator 需主動放寬才能上線。
+    pub live: Arc<ConfigStore<RiskConfig>>,
+}
+
+impl PerEngineRiskStores {
+    /// Select the store matching the given engine name string.
+    /// Unknown names fall through to `paper` (fail-safe default).
+    /// 按引擎名稱字符串選擇 store。未知名稱回退到 `paper`（安全默認）。
+    pub fn select(&self, engine: &str) -> &Arc<ConfigStore<RiskConfig>> {
+        match engine {
+            "demo" => &self.demo,
+            "live" => &self.live,
+            _ => &self.paper, // "paper" or unknown → paper (fail-safe)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
 // ---------------------------------------------------------------------------
 
@@ -167,9 +205,9 @@ pub struct IpcServer {
     /// Phase 4.1: Late-injected Teacher consumer loop handles.
     /// Phase 4.1：延後注入的 Teacher consumer loop 句柄。
     teacher_loop: TeacherLoopSlot,
-    /// ARCH-RC1 1C-2-C: unified Config stores for direct hot-reload IPC writes.
-    /// ARCH-RC1 1C-2-C：統一 Config stores 供 IPC 直接熱更新。
-    risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
+    /// ARCH-RC1 1C-2-C / LIVE-P2-1: per-engine RiskConfig stores + unified Config stores.
+    /// ARCH-RC1 1C-2-C / LIVE-P2-1：每引擎 RiskConfig stores + 統一 Config stores。
+    risk_stores: Option<PerEngineRiskStores>,
     learning_store: Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
     /// ARCH-RC1 1C-2-E: late-injected slot for the V014 audit pool.
@@ -196,7 +234,7 @@ impl IpcServer {
             paper_cmd_tx,
             budget_tracker: Arc::new(RwLock::new(None)),
             teacher_loop: Arc::new(RwLock::new(None)),
-            risk_store: None,
+            risk_stores: None,
             learning_store: None,
             budget_store: None,
             audit_pool: Arc::new(RwLock::new(None)),
@@ -222,15 +260,19 @@ impl IpcServer {
         Arc::clone(&self.audit_pool)
     }
 
-    /// ARCH-RC1 1C-2-C: wire unified Config stores for direct IPC hot-reload.
-    /// ARCH-RC1 1C-2-C：接入統一 Config stores 供 IPC 直接熱更新。
+    /// ARCH-RC1 1C-2-C / LIVE-P2-1: wire per-engine RiskConfig stores + unified Config stores.
+    /// ARCH-RC1 1C-2-C / LIVE-P2-1：接入每引擎 RiskConfig stores + 統一 Config stores。
+    ///
+    /// `risk` bundles paper/demo/live stores; IPC routes to the correct one via the
+    /// `engine` param in `get_risk_config` / `patch_risk_config` (default: "paper").
+    /// `risk` 捆綁三個 stores；IPC 通過請求的 `engine` 字段路由（默認 "paper"）。
     pub fn set_config_stores(
         &mut self,
-        risk: Arc<ConfigStore<RiskConfig>>,
+        risk: PerEngineRiskStores,
         learning: Arc<ConfigStore<LearningConfig>>,
         budget: Arc<ConfigStore<BudgetConfig>>,
     ) {
-        self.risk_store = Some(risk);
+        self.risk_stores = Some(risk);
         self.learning_store = Some(learning);
         self.budget_store = Some(budget);
     }
@@ -311,13 +353,13 @@ impl IpcServer {
                             let cmd_tx = self.paper_cmd_tx.clone();
                             let budget_slot = Arc::clone(&self.budget_tracker);
                             let teacher_slot = Arc::clone(&self.teacher_loop);
-                            let risk_store = self.risk_store.clone();
+                            let risk_stores = self.risk_stores.clone();
                             let learning_store = self.learning_store.clone();
                             let budget_store = self.budget_store.clone();
                             let audit_pool = self.audit_pool.read().await.clone();
                             let scanner_reg = self.scanner_registry.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_store, learning_store, budget_store, audit_pool, scanner_reg).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg).await;
                             });
                         }
                         Err(e) => {
@@ -346,7 +388,7 @@ async fn handle_connection(
     paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
     budget_slot: BudgetTrackerSlot,
     teacher_slot: TeacherLoopSlot,
-    risk_store: Option<Arc<ConfigStore<RiskConfig>>>,
+    risk_stores: Option<PerEngineRiskStores>,
     learning_store: Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: Option<sqlx::PgPool>,
@@ -367,7 +409,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_store, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -402,7 +444,7 @@ async fn dispatch_request(
     paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
     budget_slot: &BudgetTrackerSlot,
     teacher_slot: &TeacherLoopSlot,
-    risk_store: &Option<Arc<ConfigStore<RiskConfig>>>,
+    risk_stores: &Option<PerEngineRiskStores>,
     learning_store: &Option<Arc<ConfigStore<LearningConfig>>>,
     budget_store: &Option<Arc<ConfigStore<BudgetConfig>>>,
     audit_pool: &Option<sqlx::PgPool>,
@@ -524,19 +566,34 @@ async fn dispatch_request(
             handle_set_teacher_loop_enabled(id, &req.params, teacher_slot).await
         }
         "get_teacher_loop_status" => handle_get_teacher_loop_status(id, teacher_slot).await,
-        // ── ARCH-RC1 1C-2-C: unified Config IPC endpoints (direct ConfigStore hot-reload) ──
-        // ── ARCH-RC1 1C-2-C：統一 Config IPC 端點（直接 ConfigStore 熱更新） ──
-        "get_risk_config" => handle_get_config(id, risk_store, "risk"),
+        // ── ARCH-RC1 1C-2-C / LIVE-P2-1: unified Config IPC endpoints ──
+        // ── ARCH-RC1 1C-2-C / LIVE-P2-1：統一 Config IPC 端點 ──
+        //
+        // get_risk_config / patch_risk_config accept optional `engine` param:
+        //   "paper" (default) | "demo" | "live"
+        // Route to the corresponding PerEngineRiskStores slot.
+        // get_risk_config / patch_risk_config 接受可選的 `engine` 參數路由到對應 store。
+        "get_risk_config" => {
+            let engine = req.params.get("engine").and_then(|v| v.as_str()).unwrap_or("paper");
+            let store: Option<Arc<ConfigStore<RiskConfig>>> =
+                risk_stores.as_ref().map(|s| Arc::clone(s.select(engine)));
+            handle_get_config(id, &store, &format!("risk/{engine}"))
+        }
         "get_learning_config" => handle_get_config(id, learning_store, "learning"),
         "get_budget_config" => handle_get_config(id, budget_store, "budget"),
-        "patch_risk_config" => handle_patch_config(
-            id,
-            risk_store,
-            &req.params,
-            RiskConfig::validate,
-            "risk",
-            audit_pool,
-        ),
+        "patch_risk_config" => {
+            let engine = req.params.get("engine").and_then(|v| v.as_str()).unwrap_or("paper");
+            let store: Option<Arc<ConfigStore<RiskConfig>>> =
+                risk_stores.as_ref().map(|s| Arc::clone(s.select(engine)));
+            handle_patch_config(
+                id,
+                &store,
+                &req.params,
+                RiskConfig::validate,
+                &format!("risk/{engine}"),
+                audit_pool,
+            )
+        }
         "patch_learning_config" => handle_patch_config(
             id,
             learning_store,
@@ -2341,17 +2398,24 @@ mod tests {
     }
 
     // ───────────────────────────────────────────────────────────────────────
-    // ARCH-RC1 1C-2-C: unified Config IPC endpoint tests
-    // ARCH-RC1 1C-2-C：統一 Config IPC 端點測試
+    // ARCH-RC1 1C-2-C / LIVE-P2-1: unified Config IPC endpoint tests
+    // ARCH-RC1 1C-2-C / LIVE-P2-1：統一 Config IPC 端點測試
     // ───────────────────────────────────────────────────────────────────────
 
+    /// Build test stores: all three risk engines + learning + budget.
+    /// 構建測試 stores：三個風控引擎 + learning + budget。
     fn rc1_stores() -> (
-        Option<Arc<ConfigStore<RiskConfig>>>,
+        Option<PerEngineRiskStores>,
         Option<Arc<ConfigStore<LearningConfig>>>,
         Option<Arc<ConfigStore<BudgetConfig>>>,
     ) {
+        let rs = PerEngineRiskStores {
+            paper: Arc::new(ConfigStore::new(RiskConfig::default())),
+            demo: Arc::new(ConfigStore::new(RiskConfig::default())),
+            live: Arc::new(ConfigStore::new(RiskConfig::default())),
+        };
         (
-            Some(Arc::new(ConfigStore::new(RiskConfig::default()))),
+            Some(rs),
             Some(Arc::new(ConfigStore::new(LearningConfig::default()))),
             Some(Arc::new(ConfigStore::new(BudgetConfig::default()))),
         )
@@ -2409,8 +2473,9 @@ mod tests {
         assert_eq!(r["ok"], true);
         assert_eq!(r["version"], 1);
         assert_eq!(r["source"], "operator");
-        // Verify store mutated.
-        let snap = rs.as_ref().unwrap().load();
+        // Verify paper store mutated (no engine param → default paper).
+        // 確認 paper store 已更新（無 engine 參數 → 默認 paper）。
+        let snap = rs.as_ref().unwrap().paper.load();
         assert!((snap.limits.leverage_max - 7.0).abs() < f64::EPSILON);
     }
 
@@ -2419,7 +2484,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let (rs, ls, bs) = rc1_stores();
-        let original_lev = rs.as_ref().unwrap().load().limits.leverage_max;
+        let original_lev = rs.as_ref().unwrap().paper.load().limits.leverage_max;
         // Negative leverage is invalid.
         let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"patch":{"limits":{"leverage_max":-1.0}}},"id":9003}"#;
         let resp = dispatch_request(
@@ -2437,9 +2502,10 @@ mod tests {
         )
         .await;
         assert!(resp.error.is_some(), "expected validation error");
-        // Store untouched.
-        assert_eq!(rs.as_ref().unwrap().version(), 0);
-        let snap = rs.as_ref().unwrap().load();
+        // Paper store untouched (rollback).
+        // paper store 未改動（回滾）。
+        assert_eq!(rs.as_ref().unwrap().paper.version(), 0);
+        let snap = rs.as_ref().unwrap().paper.load();
         assert!((snap.limits.leverage_max - original_lev).abs() < f64::EPSILON);
     }
 
@@ -2464,7 +2530,7 @@ mod tests {
         )
         .await;
         assert!(resp.error.is_some());
-        assert_eq!(rs.as_ref().unwrap().version(), 0);
+        assert_eq!(rs.as_ref().unwrap().paper.version(), 0);
     }
 
     #[tokio::test]
@@ -2549,6 +2615,58 @@ mod tests {
         .await;
         assert!(resp.error.is_some());
         assert!(resp.error.unwrap().message.contains("not configured"));
+    }
+
+    /// LIVE-P2-1: patch_risk_config with engine="live" routes to live store,
+    /// not to paper store. paper store must remain at version 0.
+    /// LIVE-P2-1：engine="live" 的 patch_risk_config 應路由到 live store，
+    /// paper store 版本應維持 0。
+    #[tokio::test]
+    async fn test_p2_patch_risk_config_engine_routing() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let (rs, ls, bs) = rc1_stores();
+        // Patch live engine only.
+        let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"live","source":"operator","patch":{"limits":{"leverage_max":5.0}}},"id":9020}"#;
+        let resp = dispatch_request(
+            req, &config, &dd, &None,
+            &empty_budget_slot(), &empty_teacher_slot(),
+            &rs, &ls, &bs, &None, &None,
+        ).await;
+        assert!(resp.error.is_none(), "expected success: {resp:?}");
+        let r = resp.result.unwrap();
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["version"], 1);
+        // live store mutated.
+        let live_snap = rs.as_ref().unwrap().live.load();
+        assert!((live_snap.limits.leverage_max - 5.0).abs() < f64::EPSILON, "live store not updated");
+        // paper store untouched.
+        assert_eq!(rs.as_ref().unwrap().paper.version(), 0, "paper store should be untouched");
+        // demo store untouched.
+        assert_eq!(rs.as_ref().unwrap().demo.version(), 0, "demo store should be untouched");
+    }
+
+    /// LIVE-P2-1: get_risk_config with engine="demo" returns demo store snapshot.
+    /// LIVE-P2-1：engine="demo" 的 get_risk_config 返回 demo store 快照。
+    #[tokio::test]
+    async fn test_p2_get_risk_config_engine_selection() {
+        let config = make_test_config();
+        let dd = make_test_data_dir();
+        let (rs, ls, bs) = rc1_stores();
+        // Pre-patch demo store so it has a distinct version.
+        let patch_req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","patch":{"limits":{"open_positions_max":7}}},"id":9021}"#;
+        dispatch_request(patch_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        // Now GET demo config — should show version=1.
+        let get_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{"engine":"demo"},"id":9022}"#;
+        let resp = dispatch_request(get_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        assert!(resp.error.is_none(), "expected success: {resp:?}");
+        let r = resp.result.unwrap();
+        assert_eq!(r["version"], 1, "demo store should be at version 1");
+        // Paper store should still be at version 0.
+        let paper_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{},"id":9023}"#;
+        let resp2 = dispatch_request(paper_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        let r2 = resp2.result.unwrap();
+        assert_eq!(r2["version"], 0, "paper store should be at version 0");
     }
 
     // ───────────────────────────────────────────────────────────────────────
