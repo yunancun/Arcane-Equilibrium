@@ -391,13 +391,15 @@ async def post_session_stop(
         pause_result = {"skipped": True, "reason": "engine_offline"}
 
     return _paper_response({
-        "message": "Dual engines stopped — Paper + Demo positions closed / 雙引擎已停止 — Paper + Demo 倉位已平倉",
+        # Rust engine stays running in observation mode — scanner + price feed unaffected.
+        # Rust 引擎繼續以觀察模式運行 — scanner + 行情流不受影響。
+        "message": "Positions closed — Rust engine in observation mode / 倉位已平 — Rust 引擎進入觀察模式",
         "source": "rust_engine",
         "paper_close": close_result,
         "demo_close": demo_result,
         "paper_pause": pause_result,
         "errors": errors if errors else None,
-        "session": {"session_state": "stopped", "session_id": "rust_engine"},
+        "session": {"session_state": "observing", "session_id": "rust_engine"},
     })
 
 
@@ -411,6 +413,7 @@ def get_session_status(
     if rust_state is None:
         return _paper_response({
             "source": "rust_engine",
+            "engine_available": False,
             "session": {
                 "session_state": "offline",
                 "session_id": "rust_engine",
@@ -432,14 +435,21 @@ def get_session_status(
     peak = rust_state.get("peak_balance", 0)
     realized = rust_state.get("total_realized_pnl", 0)
     fees = rust_state.get("total_fees", 0)
-    # Translate Rust paused → "stopped" if the pause came from a user-initiated Stop
-    # 若暫停源自用戶主動 Stop，將 Rust paused 翻譯成 "stopped"
+    # Translate Rust paused state: user-initiated Stop → "observing" (engine still running,
+    # scanner still running, no new trades). Plain pause → "paused".
+    # Rust paused 狀態翻譯：用戶主動 Stop → "observing"（引擎繼續運行、scanner 繼續、
+    # 不開新倉）；普通 pause → "paused"。
     if is_paused:
-        session_state = "stopped" if _USER_STOPPED else "paused"
+        session_state = "observing" if _USER_STOPPED else "paused"
     else:
         session_state = "active"
     return _paper_response({
         "source": "rust_engine",
+        # engine_available = True means Rust process is alive and writing snapshots.
+        # Distinct from session_state (which tracks paper trading phase).
+        # engine_available = True 表示 Rust 進程存活並持續寫快照；
+        # 與 session_state（paper 交易階段）分開。
+        "engine_available": True,
         "session": {
             "session_state": session_state,
             "session_id": "rust_engine",

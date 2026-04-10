@@ -263,42 +263,56 @@ async function checkUnifiedStatus() {
   const btnStop = document.getElementById('btn-unified-stop');
 
   let paperState = 'idle';
-  let demoConnected = false;
+  let engineAvailable = false;
 
   try {
     const pd = await ocApi('/api/v1/paper/session/status');
-    if (pd && pd.data && pd.data.session) paperState = pd.data.session.session_state || 'idle';
-  } catch (e) {}
-
-  try {
-    const dd = await ocApi('/api/v1/strategy/demo/balance');
-    if (dd && dd.data && (dd.data.source === 'rust_engine' || dd.data.retCode === 0)) demoConnected = true;
+    if (pd && pd.data) {
+      paperState = (pd.data.session && pd.data.session.session_state) || 'idle';
+      // engine_available = Rust process alive + snapshot fresh (independent of trading state)
+      // engine_available = Rust 進程存活且快照新鮮（獨立於交易狀態）
+      engineAvailable = pd.data.engine_available === true;
+    }
   } catch (e) {}
 
   const paperRunning = (paperState === 'active');
+  const paperObserving = (paperState === 'observing');
   const stateMap = {
-    'active': '运行中', 'paused': '已暂停', 'stopped': '已停止', 'idle': '未启动', 'offline': '离线',
+    'active':     '运行中',
+    'observing':  '观察中',   // engine running, scanner running, no new trades
+    'paused':     '已暂停',
+    'stopped':    '已停止',
+    'idle':       '未启动',
+    'offline':    '离线',
   };
 
   const paperLabel = stateMap[paperState] || paperState;
-  if (paperRunning && demoConnected) {
+  if (paperRunning) {
     badge.textContent = '双引擎运行中';
     badge.className = 'oc-chip oc-chip-good';
-  } else if (paperState === 'paused' || paperState === 'stopped') {
-    badge.textContent = stateMap[paperState];
+  } else if (paperObserving) {
+    // Observation mode: engine alive, scanner running, paper trades suspended
+    // 观察模式：引擎存活、scanner 运行、paper 交易已暂停
+    badge.textContent = '观察模式';
+    badge.className = 'oc-chip oc-chip-good';
+  } else if (paperState === 'paused') {
+    badge.textContent = stateMap['paused'];
     badge.className = 'oc-chip oc-chip-warn';
-  } else if (demoConnected) {
-    badge.textContent = 'Demo 已连接';
+  } else if (engineAvailable) {
+    badge.textContent = '引擎就绪';
     badge.className = 'oc-chip oc-chip-warn';
   } else {
     badge.textContent = '离线';
     badge.className = 'oc-chip oc-chip-neutral';
   }
 
-  detail.textContent = '执行引擎(Demo): ' + (demoConnected ? '已连接' : '未连接') + ' | 测试引擎(Paper): ' + paperLabel;
-  // Start enabled when NOT running (paused/stopped/offline all allow start)
+  // Show Rust engine health separately from trading session state.
+  // Rust 引擎健康狀態與交易 session 狀態分開顯示。
+  const engineLabel = engineAvailable ? '✓ 运行中' : '✗ 未连接';
+  detail.textContent = 'Rust 引擎: ' + engineLabel + ' | Paper: ' + paperLabel;
+  // Start enabled when NOT running (observing/paused/stopped/offline all allow start)
   btnStart.disabled = paperRunning;
-  // Stop enabled when running or paused
+  // Stop enabled when running or paused (not when already observing/stopped/offline)
   btnStop.disabled = (paperState !== 'active' && paperState !== 'paused');
 }
 
