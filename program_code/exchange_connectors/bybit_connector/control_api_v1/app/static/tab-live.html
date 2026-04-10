@@ -503,6 +503,7 @@ async function refreshPage() {
   if (isUnlocked) {
     dash.classList.add('active');
     loadDashboardData();
+    checkLiveEngineStatus();
   } else {
     dash.classList.remove('active');
   }
@@ -578,33 +579,75 @@ async function checkLiveEngineStatus() {
   const detail = document.getElementById('live-engine-detail');
   const btnStart = document.getElementById('btn-live-start');
   const btnStop = document.getElementById('btn-live-stop');
+  const btnEmg = document.getElementById('btn-emergency-stop');
   if (!badge) return;
 
-  // Placeholder: live session endpoint is LIVE-P1-3 (not yet implemented)
-  // 佔位：live session 端點為 LIVE-P1-3，尚未實施
-  badge.textContent = '待接線';
-  badge.className = 'oc-chip oc-chip-neutral';
-  detail.textContent = 'Live session routes pending (LIVE-P1-3)';
-  if (btnStart) btnStart.disabled = false;
-  if (btnStop) btnStop.disabled = true;
+  const d = await ocApi('/api/v1/live/session/status');
+  const data = (d && d.data) ? d.data : {};
+  const sessionState = (data.session && data.session.session_state) || 'offline';
+  const authority = data.execution_authority || 'not_granted';
+  const tradingMode = data.trading_mode || 'unknown';
+
+  const stateLabels = {
+    active: '實盤運行中', paused: '已暫停', stopped: '已停止',
+    offline: '引擎離線', unknown: '--',
+  };
+  const isActive = sessionState === 'active';
+  const isPausedOrStopped = sessionState === 'paused' || sessionState === 'stopped';
+
+  if (isActive) {
+    badge.textContent = '實盤運行中 🔴';
+    badge.className = 'oc-chip oc-chip-bad';
+  } else if (isPausedOrStopped) {
+    badge.textContent = stateLabels[sessionState] || sessionState;
+    badge.className = 'oc-chip oc-chip-warn';
+  } else {
+    badge.textContent = stateLabels[sessionState] || sessionState;
+    badge.className = 'oc-chip oc-chip-neutral';
+  }
+
+  detail.textContent = `mode: ${tradingMode} | authority: ${authority}`;
+  if (btnStart) btnStart.disabled = isActive || authority !== 'granted';
+  if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
+  if (btnEmg) btnEmg.disabled = !data.engine_available;
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Live actions (stubs — wired in LIVE-P1-3)
-// Live 操作（佔位 — LIVE-P1-3 接線後啟用）
+// Live actions
 // ═══════════════════════════════════════════════════════════════
 async function liveStart() {
-  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+  const d = await ocPost('/api/v1/live/session/start', {});
+  if (d) {
+    const msg = (d.data && d.data.message) || d.message || '已啟動';
+    ocToast('⚠ ' + msg, 'warn');  // always warn — real money / 始終警示 — 真實資金
+    await refreshPage();
+  }
 }
 
 async function doLiveStop() {
   closeDialog('dlg-live-stop');
-  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+  const d = await ocPost('/api/v1/live/session/stop', {});
+  if (d) {
+    const errors = (d.data && d.data.errors) || d.errors;
+    if (errors && errors.length) {
+      ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
+    } else {
+      ocToast('實盤 session 已停止，倉位已平', 'success');
+    }
+    await refreshPage();
+  }
 }
 
 async function doEmergencyStop() {
   closeDialog('dlg-live-emergency');
-  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+  // Emergency = stop with highest priority / 緊急 = 最高優先級停止
+  const d = await ocPost('/api/v1/live/session/stop', {});
+  if (d) {
+    ocToast('🚨 緊急停止已執行', 'error');
+    await refreshPage();
+  } else {
+    ocToast('緊急停止命令失敗，請手動操作', 'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

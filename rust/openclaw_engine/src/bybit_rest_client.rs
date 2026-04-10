@@ -95,6 +95,20 @@ impl BybitEnvironment {
             Self::Mainnet => "wss://stream.bybit.com/v5/private",
         }
     }
+
+    /// Map environment to its corresponding secret file slot name.
+    /// 將環境映射到對應的 secret 文件槽位名稱。
+    ///
+    /// Demo and Testnet share the "demo" slot (development credentials).
+    /// Mainnet uses the "live" slot (production credentials — must never be mixed up).
+    /// Demo 和 Testnet 共用 "demo" 槽位（開發憑證）。
+    /// Mainnet 使用 "live" 槽位（生產憑證 — 絕對不能混淆）。
+    pub fn secret_slot(&self) -> &'static str {
+        match self {
+            Self::Demo | Self::Testnet => "demo",
+            Self::Mainnet => "live",
+        }
+    }
 }
 
 impl Default for BybitEnvironment {
@@ -306,15 +320,17 @@ impl BybitRestClient {
     /// Create a new REST client.
     /// 創建新的 REST 客戶端。
     ///
-    /// Reads API credentials from:
+    /// Reads API credentials from (in priority order):
     ///   1. Explicit parameters (if non-empty)
     ///   2. Environment variables: BYBIT_API_KEY, BYBIT_API_SECRET
-    ///   3. Secret files: ~/BybitOpenClaw/secrets/secret_files/bybit/demo/api_key
+    ///   3. Secret files: `{OPENCLAW_SECRETS_DIR}/{slot}/api_key`
+    ///      or `~/BybitOpenClaw/secrets/secret_files/bybit/{slot}/api_key`
+    ///      where slot = "demo" for Demo/Testnet, "live" for Mainnet (LIVE-P1-1)
     ///
-    /// 讀取 API 憑證順序：
+    /// 讀取 API 憑證優先級：
     ///   1. 顯式參數（非空時）
     ///   2. 環境變量：BYBIT_API_KEY, BYBIT_API_SECRET
-    ///   3. 秘密文件：~/BybitOpenClaw/secrets/secret_files/bybit/demo/api_key
+    ///   3. Secret 文件：slot 由環境自動派生（Demo/Testnet→"demo"，Mainnet→"live"）
     pub fn new(
         env: BybitEnvironment,
         api_key: Option<String>,
@@ -335,6 +351,10 @@ impl BybitRestClient {
                 "⚠ MAINNET mode enabled — real money at risk / 主網模式已啟用 — 真金白銀"
             );
         }
+        // Derive secret slot from environment: Demo/Testnet → "demo", Mainnet → "live"
+        // 從環境派生 secret 槽位：Demo/Testnet → "demo"，Mainnet → "live"
+        let slot = env.secret_slot();
+
         let api_key = api_key
             .filter(|s| !s.is_empty())
             .or_else(|| {
@@ -342,7 +362,7 @@ impl BybitRestClient {
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .or_else(|| read_secret_file("api_key"))
+            .or_else(|| read_secret_file(slot, "api_key"))
             .unwrap_or_default();
 
         let api_secret = api_secret
@@ -352,7 +372,7 @@ impl BybitRestClient {
                     .ok()
                     .filter(|s| !s.is_empty())
             })
-            .or_else(|| read_secret_file("api_secret"))
+            .or_else(|| read_secret_file(slot, "api_secret"))
             .unwrap_or_default();
 
         if api_key.is_empty() || api_secret.is_empty() {
@@ -654,18 +674,35 @@ impl BybitRestClient {
 // Helpers / 輔助函數
 // ---------------------------------------------------------------------------
 
-/// Read a secret value from the standard secret file location.
-/// 從標準秘密文件位置讀取秘密值。
+/// Read a secret value from the standard secret file location for the given slot.
+/// 從指定槽位的標準秘密文件位置讀取秘密值。
 ///
-/// Cross-platform: uses HOME env var, never hardcodes paths.
-/// 跨平台：使用 HOME 環境變量，不硬編碼路徑。
-fn read_secret_file(name: &str) -> Option<String> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .ok()?;
-    let path = std::path::PathBuf::from(home)
-        .join("BybitOpenClaw/secrets/secret_files/bybit/demo")
-        .join(name);
+/// Slot is derived from `BybitEnvironment::secret_slot()`: "demo" or "live".
+/// Path: `OPENCLAW_SECRETS_DIR/{slot}/{name}` (env var) or
+///       `~/BybitOpenClaw/secrets/secret_files/bybit/{slot}/{name}` (fallback).
+///
+/// 槽位由 BybitEnvironment::secret_slot() 派生："demo" 或 "live"。
+/// 路徑：環境變量 OPENCLAW_SECRETS_DIR/{slot}/{name} 或
+///       ~/BybitOpenClaw/secrets/secret_files/bybit/{slot}/{name}（fallback）。
+///
+/// Cross-platform: uses HOME / USERPROFILE env var, never hardcodes paths.
+/// 跨平台：使用 HOME / USERPROFILE 環境變量，不硬編碼路徑。
+fn read_secret_file(slot: &str, name: &str) -> Option<String> {
+    // Path: OPENCLAW_SECRETS_DIR/{slot}/{name} if env var set, else HOME fallback
+    // 路徑：環境變量優先，否則 HOME fallback
+    let base = if let Ok(dir) = std::env::var("OPENCLAW_SECRETS_DIR") {
+        std::path::PathBuf::from(dir)
+    } else {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .ok()?;
+        std::path::PathBuf::from(home)
+            .join("BybitOpenClaw")
+            .join("secrets")
+            .join("secret_files")
+            .join("bybit")
+    };
+    let path = base.join(slot).join(name);
     std::fs::read_to_string(&path)
         .ok()
         .map(|s| s.trim().to_string())

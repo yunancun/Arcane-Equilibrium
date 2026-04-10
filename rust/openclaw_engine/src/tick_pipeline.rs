@@ -1541,7 +1541,12 @@ impl TickPipeline {
         // If a strategy ever emits >1, partial rejection + partial fill could leave inconsistent state.
         // All current strategies satisfy this constraint. Revisit if multi-intent strategies are added.
         // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
-        let is_exchange_mode = self.trading_mode == crate::config::TradingMode::Exchange;
+        // Exchange mode = any mode that routes real orders to an exchange (Demo or Live)
+        // 交易所模式 = 向交易所發送真實訂單的任何模式（Demo 或 Live）
+        let is_exchange_mode = matches!(
+            self.trading_mode,
+            crate::config::TradingMode::Demo | crate::config::TradingMode::Live
+        );
         // Extract ATR for cost gate (Gate 3) / 提取 ATR 用於成本門控
         let atr_value = indicators
             .as_ref()
