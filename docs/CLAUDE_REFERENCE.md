@@ -68,7 +68,7 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_le
 | 本地交易邏輯審查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
 | 遠程訪問指南 | `docs/references/2026-03-27--remote_access_guide.md` |
 
-### 工作日誌（worklogs/control_api_gui/）
+### 工作日誌（worklogs/control_api_gui/ — 2026-03-25~04-02）
 
 | 內容 | 文件位置 |
 |------|---------|
@@ -78,6 +78,29 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_le
 | Session 6 勝率0%根因 | `docs/worklogs/control_api_gui/2026-03-28--session6_halfday_data_analysis_and_fixes.md` |
 | Session 7 系統審核 | `docs/worklogs/control_api_gui/2026-03-28--session7_system_audit_and_fixes.md` |
 | Session 8 功能審核 | `docs/worklogs/control_api_gui/2026-03-28--session8_functional_audit_report.md` |
+
+### 工作日誌（worklogs/phase5_arch_rc1/ — 2026-04-03~04-07）
+
+| 內容 | 文件位置 |
+|------|---------|
+| 2026-04-03 日匯總（Phase 5 啟動 + Rust 遷移開始） | `docs/worklogs/phase5_arch_rc1/2026-04-03--daily_summary.md` |
+| 2026-04-04 日匯總（Bybit API 整合）| `docs/worklogs/phase5_arch_rc1/2026-04-04--daily_summary.md` |
+| 2026-04-05 日匯總（Rust 數據管線 + ML 基礎設施）| `docs/worklogs/phase5_arch_rc1/2026-04-05--daily_summary.md` |
+| L3 R0-R2 整改（Session 10-13）| `docs/worklogs/phase5_arch_rc1/2026-04-06--session1*.md` |
+| ARCH-RC1 1A/1B/1C-1/1C-2 實現 | `docs/worklogs/phase5_arch_rc1/2026-04-07--session_arch_rc1_*.md` |
+
+### L3 全系統綜合審計（audits/2026-04-05_l3_comprehensive/）
+
+12 份角色專項審計報告（2026-04-05 L3 審計輪次產出）。
+
+| 角色 | 文件 |
+|------|------|
+| A3 GUI | `docs/audits/2026-04-05_l3_comprehensive/audit_A3_gui_usability_report.md` |
+| E3 安全 | `docs/audits/2026-04-05_l3_comprehensive/audit_E3_security_report.md` |
+| E4 測試 | `docs/audits/2026-04-05_l3_comprehensive/audit_E4_test_coverage_report.md` |
+| R4 文檔索引 | `docs/audits/2026-04-05_l3_comprehensive/audit_R4_index_verification_report.md` |
+| TW 文檔盤點 | `docs/audits/2026-04-05_l3_comprehensive/audit_TW_document_inventory_report.md` |
+| （其餘 7 份） | `docs/audits/2026-04-05_l3_comprehensive/audit_{CC,AIE,BB,E5,FA,MIT,QC}_*.md` |
 
 ### 治理開發（governance_dev/）
 
