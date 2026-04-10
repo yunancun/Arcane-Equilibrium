@@ -360,12 +360,19 @@ async def post_session_stop(
     global _USER_STOPPED
     _USER_STOPPED = True
     # Step 1: Close all Paper positions via IPC / 通過 IPC 平掉所有 Paper 倉位
+    # If the engine is already offline, treat paper as already stopped (no error).
+    # 引擎已離線時跳過 IPC（視同已停止，不算錯誤）。
     close_result = {}
-    try:
-        close_result = await _ipc_command("close_all_positions")
-    except Exception as e:
-        errors.append(f"paper_close: {e}")
-        logger.error("IPC close_all_positions failed: %s", e)
+    rust_online = get_rust_reader().is_available()
+    if rust_online:
+        try:
+            close_result = await _ipc_command("close_all_positions")
+        except Exception as e:
+            errors.append(f"paper_close: {e}")
+            logger.error("IPC close_all_positions failed: %s", e)
+    else:
+        close_result = {"skipped": True, "reason": "engine_offline"}
+        logger.info("Rust engine offline — skipping IPC close_all_positions (already stopped)")
 
     # Step 2: Close all Demo positions + cancel orders via PyO3 / 通過 PyO3 平掉 Demo 倉位
     demo_result = _close_all_demo_positions()
@@ -374,11 +381,14 @@ async def post_session_stop(
 
     # Step 3: Pause Paper strategies via IPC / 通過 IPC 暫停 Paper 策略
     pause_result = {}
-    try:
-        pause_result = await _ipc_command("pause_paper")
-    except Exception as e:
-        errors.append(f"paper_pause: {e}")
-        logger.error("IPC pause_paper failed: %s", e)
+    if rust_online:
+        try:
+            pause_result = await _ipc_command("pause_paper")
+        except Exception as e:
+            errors.append(f"paper_pause: {e}")
+            logger.error("IPC pause_paper failed: %s", e)
+    else:
+        pause_result = {"skipped": True, "reason": "engine_offline"}
 
     return _paper_response({
         "message": "Dual engines stopped — Paper + Demo positions closed / 雙引擎已停止 — Paper + Demo 倉位已平倉",
@@ -524,6 +534,25 @@ def get_positions(
             "avg_entry_price": p.get("entry_price", p.get("avg_entry_price", 0)),
         })
     return _paper_response({"positions": transformed, "count": len(transformed), "source": "rust_engine"})
+
+
+@paper_router.post("/positions/{symbol}/close")
+async def post_close_position(
+    symbol: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Close a single paper position by symbol via IPC close_position command.
+    通過 IPC close_position 指令平掉指定 symbol 的紙上持倉。
+    """
+    rust = get_rust_reader()
+    if not rust.is_available():
+        raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
+    try:
+        result = await _ipc_command("close_position", {"symbol": symbol.upper()})
+        return _paper_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
+    except Exception as e:
+        logger.error("IPC close_position failed for %s: %s", symbol, e)
+        raise HTTPException(status_code=502, detail=f"IPC error: {e}")
 
 
 @paper_router.get("/fills")

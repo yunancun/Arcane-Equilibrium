@@ -455,6 +455,23 @@ async fn dispatch_request(
             PaperSessionCommand::CloseAll,
             "close_all_sent",
         ),
+        "close_position" => {
+            let symbol = req
+                .params
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if symbol.is_empty() {
+                return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing required param: symbol");
+            }
+            handle_paper_cmd(
+                id,
+                paper_cmd_tx,
+                PaperSessionCommand::CloseSymbol { symbol },
+                "close_position_sent",
+            )
+        }
         "reset_paper_state" => {
             let balance = req
                 .params

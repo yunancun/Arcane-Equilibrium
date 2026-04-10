@@ -334,6 +334,24 @@ impl PaperState {
         }
     }
 
+    /// Close a single position at current market price (falls back to entry price if no live
+    /// price available). Returns realized PnL or None if no position exists for the symbol.
+    /// 以當前市場價平掉單一持倉（無市場價時回退入場價），返回已實現損益或 None。
+    pub fn close_position_at_market(&mut self, symbol: &str) -> Option<f64> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let price = self.latest_prices.get(symbol).copied().unwrap_or_else(|| {
+            // Fallback to entry price if no live market price / 無市場價時回退到入場價
+            self.positions
+                .get(symbol)
+                .map(|p| p.entry_price)
+                .unwrap_or(0.0)
+        });
+        self.close_position(symbol, price, now)
+    }
+
     /// Close all open positions at their latest market price.
     /// Returns the number of positions closed.
     /// 以最新市場價平掉所有持倉，返回已平倉數量。
