@@ -320,6 +320,22 @@ pub enum TradingMsg {
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
     },
+    /// Guardian risk verdict for a trade intent (DB-RW: missing wiring fix).
+    /// Guardian 對交易意圖的風控裁定（DB-RW：補充缺失的接線）。
+    RiskVerdict {
+        verdict_id: String,
+        ts_ms: u64,
+        intent_id: String,
+        context_id: String,
+        symbol: String,
+        /// "Approved", "Modified", or "Rejected" / 批准、修改或拒絕
+        verdict: String,
+        risk_score: f64,
+        reasons: Vec<String>,
+        modified_qty: Option<f64>,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
+    },
 }
 
 /// Decision context snapshot → context_writer task (Phase 2a).

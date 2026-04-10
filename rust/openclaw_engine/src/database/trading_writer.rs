@@ -1,11 +1,11 @@
-//! Trading lifecycle writer — batch INSERT signals/intents/fills/positions to PG.
-//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/持倉到 PG。
+//! Trading lifecycle writer — batch INSERT signals/intents/fills/positions/verdicts to PG.
+//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/持倉/風控裁定到 PG。
 //!
 //! MODULE_NOTE (EN): Async consumer for TradingMsg channel. Routes by variant type
-//!   and batch-inserts to 4 trading.* tables (signals, intents, fills, position_snapshots).
-//!   Same pattern as market_writer: QueryBuilder::push_values + NaN sanitization.
+//!   and batch-inserts to 5 trading.* tables (signals, intents, fills, position_snapshots,
+//!   risk_verdicts). Same pattern as market_writer: QueryBuilder::push_values + NaN sanitization.
 //! MODULE_NOTE (中): TradingMsg 通道的異步消費者。按變體類型路由，
-//!   批量插入到 4 個 trading.* 表。與 market_writer 相同模式。
+//!   批量插入到 5 個 trading.* 表（含 risk_verdicts）。與 market_writer 相同模式。
 
 use super::pool::DbPool;
 use super::{sanitize_f64, sanitize_f64_or_zero, TradingMsg};
@@ -27,6 +27,7 @@ pub async fn run_trading_writer(
     let mut intent_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut fill_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut pos_buf: Vec<TradingMsg> = Vec::with_capacity(16);
+    let mut verdict_buf: Vec<TradingMsg> = Vec::with_capacity(16);
 
     let flush_interval = {
         let cfg = config.get();
@@ -42,7 +43,7 @@ pub async fn run_trading_writer(
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
                 if pool.is_available() {
-                    flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf, &mut pos_buf).await;
+                    flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf, &mut pos_buf, &mut verdict_buf).await;
                 }
             }
             msg = rx.recv() => {
@@ -52,6 +53,7 @@ pub async fn run_trading_writer(
                         TradingMsg::Intent { .. } => intent_buf.push(m),
                         TradingMsg::Fill { .. } => fill_buf.push(m),
                         TradingMsg::PositionSnapshot { .. } => pos_buf.push(m),
+                        TradingMsg::RiskVerdict { .. } => verdict_buf.push(m),
                     },
                     None => break,
                 }
@@ -66,6 +68,7 @@ pub async fn run_trading_writer(
             &mut intent_buf,
             &mut fill_buf,
             &mut pos_buf,
+            &mut verdict_buf,
         )
         .await;
     }
@@ -78,6 +81,7 @@ async fn flush_all(
     intents: &mut Vec<TradingMsg>,
     fills: &mut Vec<TradingMsg>,
     positions: &mut Vec<TradingMsg>,
+    verdicts: &mut Vec<TradingMsg>,
 ) {
     if !signals.is_empty() {
         flush_signals(pool, signals).await;
@@ -91,6 +95,9 @@ async fn flush_all(
     if !positions.is_empty() {
         flush_positions(pool, positions).await;
     }
+    if !verdicts.is_empty() {
+        flush_verdicts(pool, verdicts).await;
+    }
 }
 
 /// Max rows per batch INSERT to stay under PostgreSQL's 65535 parameter limit.
@@ -100,6 +107,7 @@ const SIGNAL_BATCH_MAX: usize = 5000;
 const INTENT_BATCH_MAX: usize = 5000; // 11 columns → 5957 max
 const FILL_BATCH_MAX: usize = 4000; // 14 columns → 4681 max
 const POSITION_BATCH_MAX: usize = 5000; // 9 columns → 7281 max
+const VERDICT_BATCH_MAX: usize = 4000; // 8 columns → 8191 max, use 4000 as safe limit
 
 async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
@@ -333,6 +341,68 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     buf.clear();
 }
 
+/// Flush Guardian risk verdicts to trading.risk_verdicts.
+/// 將 Guardian 風控裁定批量寫入 trading.risk_verdicts。
+async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => {
+            buf.clear();
+            return;
+        }
+    };
+    for chunk in buf.chunks(VERDICT_BATCH_MAX) {
+        let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+            "INSERT INTO trading.risk_verdicts \
+             (ts, verdict_id, intent_id, context_id, symbol, verdict, reason, details, engine_mode) "
+        );
+        qb.push_values(chunk.iter(), |mut b, msg| {
+            if let TradingMsg::RiskVerdict {
+                verdict_id,
+                ts_ms,
+                intent_id,
+                context_id,
+                symbol,
+                verdict,
+                risk_score,
+                reasons,
+                modified_qty,
+                engine_mode,
+            } = msg
+            {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
+                b.push_bind(verdict_id.as_str());
+                b.push_bind(intent_id.as_str());
+                b.push_bind(context_id.as_str());
+                b.push_bind(symbol.as_str());
+                b.push_bind(verdict.as_str());
+                // Flatten reasons into a single reason string / 將 reasons 合併為單一字串
+                b.push_bind(reasons.join("; "));
+                // Store risk_score + modified_qty as JSONB details / 詳細資訊存為 JSONB
+                b.push_bind(serde_json::json!({
+                    "risk_score": sanitize_f64(*risk_score),
+                    "modified_qty": modified_qty,
+                }));
+                b.push_bind(engine_mode.as_str());
+            }
+        });
+        qb.push(" ON CONFLICT (verdict_id, ts) DO NOTHING");
+        match qb.build().execute(pg).await {
+            Ok(r) => {
+                pool.record_success();
+                debug!(rows = r.rows_affected(), "risk_verdicts flushed");
+            }
+            Err(e) => {
+                let _ = pool.record_failure();
+                warn!(error = %e, "risk_verdicts flush failed");
+            }
+        }
+    }
+    buf.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,12 +519,14 @@ mod tests {
             },
         ];
 
+        let mut verdicts = Vec::new();
         for m in msgs {
             match &m {
                 TradingMsg::Signal { .. } => sigs.push(m),
                 TradingMsg::Intent { .. } => intents.push(m),
                 TradingMsg::Fill { .. } => fills.push(m),
                 TradingMsg::PositionSnapshot { .. } => positions.push(m),
+                TradingMsg::RiskVerdict { .. } => verdicts.push(m),
             }
         }
 
@@ -462,5 +534,6 @@ mod tests {
         assert_eq!(intents.len(), 1);
         assert_eq!(fills.len(), 1);
         assert_eq!(positions.len(), 1);
+        assert_eq!(verdicts.len(), 0);
     }
 }

@@ -806,6 +806,27 @@ impl TickPipeline {
         let result = self
             .intent_processor
             .process(&intent, &self.governance, &self.paper_state, atr_value);
+
+        // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
+        if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
+            let now_ms_v = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
+                verdict_id: format!("vrd-{symbol}-{now_ms_v}"),
+                ts_ms: now_ms_v,
+                intent_id: format!("intent-{symbol}-{now_ms_v}"),
+                context_id: format!("ctx-{symbol}-{now_ms_v}"),
+                symbol: symbol.to_string(),
+                verdict: vi.verdict.clone(),
+                risk_score: vi.risk_score,
+                reasons: vi.reasons.clone(),
+                modified_qty: vi.modified_qty,
+                engine_mode: self.trading_mode.db_mode().to_string(),
+            });
+        }
+
         if !result.submitted {
             return Err(result
                 .rejected_reason
@@ -1765,6 +1786,23 @@ impl TickPipeline {
                         &self.paper_state,
                         atr_value,
                     );
+
+                    // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
+                    if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &gate.verdict_info) {
+                        let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
+                            verdict_id: format!("vrd-{}-{}", intent.symbol, event.ts_ms),
+                            ts_ms: event.ts_ms,
+                            intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                            context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                            symbol: intent.symbol.clone(),
+                            verdict: vi.verdict.clone(),
+                            risk_score: vi.risk_score,
+                            reasons: vi.reasons.clone(),
+                            modified_qty: vi.modified_qty,
+                            engine_mode: self.trading_mode.db_mode().to_string(),
+                        });
+                    }
+
                     if gate.approved {
                         self.stats.total_intents += 1;
 
@@ -1866,6 +1904,23 @@ impl TickPipeline {
                         &self.paper_state,
                         atr_value,
                     );
+
+                    // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
+                    if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
+                        let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
+                            verdict_id: format!("vrd-{}-{}", intent.symbol, event.ts_ms),
+                            ts_ms: event.ts_ms,
+                            intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                            context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                            symbol: intent.symbol.clone(),
+                            verdict: vi.verdict.clone(),
+                            risk_score: vi.risk_score,
+                            reasons: vi.reasons.clone(),
+                            modified_qty: vi.modified_qty,
+                            engine_mode: self.trading_mode.db_mode().to_string(),
+                        });
+                    }
+
                     if result.submitted {
                         self.stats.total_intents += 1;
                         self.recent_intents.push_back(TimestampedIntent {
