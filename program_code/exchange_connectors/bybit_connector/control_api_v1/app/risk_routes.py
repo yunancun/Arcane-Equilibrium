@@ -94,8 +94,8 @@ class GlobalConfigUpdate(BaseModel):
     max_take_profit_pct: float | None = Field(default=None, gt=0, le=100)
     tp_enabled: bool | None = None
     max_single_position_pct: float | None = Field(default=None, gt=0, le=100)
-    max_total_exposure_pct: float | None = Field(default=None, gt=0, le=100)
-    max_correlated_exposure_pct: float | None = Field(default=None, gt=0, le=100)
+    max_total_exposure_pct: float | None = Field(default=None, gt=0, le=500)
+    max_correlated_exposure_pct: float | None = Field(default=None, gt=0, le=200)
     max_leverage: float | None = Field(default=None, gt=0, le=200)
     max_session_drawdown_pct: float | None = Field(default=None, gt=0, le=100)
     max_daily_loss_pct: float | None = Field(default=None, gt=0, le=100)
@@ -106,7 +106,7 @@ class GlobalConfigUpdate(BaseModel):
     allowed_categories: list[str] | None = None
     preferred_margin_mode: str | None = None
     preferred_position_mode: str | None = None
-    p1_risk_pct: float | None = Field(default=None, gt=0, le=20)
+    p1_risk_pct: float | None = Field(default=None, gt=0, le=100)
     trailing_stop_pct: float | None = Field(default=None, ge=0, le=50)
     atr_multiplier: float | None = Field(default=None, ge=0, le=10)
     max_same_direction_positions: int | None = Field(default=None, gt=0, le=25)
@@ -117,7 +117,7 @@ class CategoryConfigUpdate(BaseModel):
     enabled: bool | None = None
     max_leverage: float | None = Field(default=None, gt=0, le=200)
     max_single_position_pct: float | None = Field(default=None, gt=0, le=100)
-    max_total_exposure_pct: float | None = Field(default=None, gt=0, le=100)
+    max_total_exposure_pct: float | None = Field(default=None, gt=0, le=500)
     max_stop_loss_pct: float | None = Field(default=None, gt=0, le=100)
     max_holding_hours: float | None = Field(default=None, gt=0, le=8760)
     allowed_symbols: list[str] | None = None
