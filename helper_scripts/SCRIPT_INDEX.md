@@ -12,3 +12,7 @@
 - `start_paper_trading.sh` — API server 就緒後自動啟動 Paper Trading（可由 systemd ExecStartPost 或 cron @reboot 呼叫）
 - `schema_diff.py` — CI 類型一致性檢查：比對 Python shared_types 與 Rust golden JSON schema，防止 Python/Rust 類型漂移
 - `golden_dataset_gen.py` — 生成 Rust↔Python 指標交叉驗證黃金數據集（確定性合成 OHLCV + 13 個指標 Python 參考值，輸出 JSON）
+
+### db/ — 數據庫維護 (Database Maintenance)
+
+- `db/fresh_start_reset.py` — 開發噪音清理：保留客觀市場數據（klines/funding_rates/ob_snapshots/news），清除所有系統經驗數據（fills/orders/intents/signals/learning 狀態）。LinUCB 狀態清除前自動歸檔。需 psycopg2 venv + POSTGRES_* env 或 DSN。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"` 三種模式。
