@@ -56,6 +56,15 @@ fn paper_balance_from_env() -> Option<f64> {
 /// Falls back to env var OPENCLAW_PAPER_BALANCE, then $10,000 default.
 /// 回退順序：環境變量 → $10,000 預設值。
 async fn fetch_demo_balance() -> f64 {
+    fetch_exchange_balance(BybitEnvironment::Demo).await
+}
+
+/// Fetch initial account balance using the given BybitEnvironment.
+/// Reads the correct secret slot based on the environment (live slot for Live/LiveDemo,
+/// demo slot for Demo).
+/// 使用指定的 BybitEnvironment 讀取初始帳戶餘額。
+/// 根據環境讀取對應的 secret 槽位（Live/LiveDemo → live 槽；Demo → demo 槽）。
+async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
     // 1. Explicit env var override takes precedence
     // 明確的環境變量覆蓋優先
     if let Some(env_bal) = paper_balance_from_env() {
@@ -66,9 +75,9 @@ async fn fetch_demo_balance() -> f64 {
         return env_bal;
     }
 
-    // 2. Try reading from Bybit Demo API
-    // 嘗試從 Bybit Demo API 讀取
-    match BybitRestClient::new(BybitEnvironment::Demo, None, None) {
+    // 2. Try reading from Bybit API using the correct environment/slot
+    // 使用正確的環境和槽位從 Bybit API 讀取
+    match BybitRestClient::new(env, None, None) {
         Ok(client) if client.has_credentials() => {
             let acct = AccountManager::new();
             match acct.refresh_balance(&client).await {
@@ -552,11 +561,8 @@ async fn async_main(
         });
     }
 
-    // ------------------------------------------------------------------
-    // Fetch initial balance from Bybit Demo API (or env / default)
-    // 從 Bybit Demo API 讀取初始餘額（或環境變量 / 預設值）
-    // ------------------------------------------------------------------
-    let initial_balance = fetch_demo_balance().await;
+    // NOTE: initial_balance is fetched after bybit_env is determined below (line ~653).
+    // 注意：initial_balance 在下方 bybit_env 計算後讀取，確保使用正確的帳戶。
 
     // ------------------------------------------------------------------
     // Price event channel / 價格事件通道
@@ -645,6 +651,13 @@ async fn async_main(
         TradingMode::Live => live_bybit_environment(),
         TradingMode::Demo | TradingMode::PaperOnly => BybitEnvironment::Demo,
     };
+
+    // Fetch initial balance using the correct environment (live slot for Live/LiveDemo,
+    // demo slot for Demo/PaperOnly). Must be after bybit_env is determined.
+    // 使用正確的環境讀取初始餘額（Live/LiveDemo → live 槽；Demo/PaperOnly → demo 槽）。
+    // 必須在 bybit_env 確定後執行。
+    let initial_balance = fetch_exchange_balance(bybit_env).await;
+
     if let Ok(rest_client) = BybitRestClient::new(bybit_env, None, None) {
         if rest_client.has_credentials() {
             let (key, secret) = rest_client.credentials();
