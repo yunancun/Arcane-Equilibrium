@@ -103,6 +103,42 @@ Phase 1+2+3+4 全部完成。
 
 **KEEP（不要動）**：`risk_view_client.py:196-197` force_governor_tier_* / `apply_ai_consultation` / `governance_hub.py` RC-11 docstrings / `bridge_core.py` activate/on_tick docstrings — 全有 test callers 或生產呼叫。
 
+### 4. ⬜ DEAD-PY-2 大型死代碼清理（Option 2，~3000 行）
+
+> 前置：DEAD-PY-2 需在 DEAD-PY-1 完全穩定後執行（當前進行中的 Option A 清理完畢後才可開始）。
+> 每個子項需獨立 E2 + E4 + 回歸測試。
+
+**A. 完全刪除 Python Bridge 核心（PipelineBridge 已確認死透）**
+- [ ] 刪除 `app/bridge_core.py` — `PipelineBridge._active` 永不為 True（RC-10 退場），所有 `activate()` / `on_tick()` 死路徑
+- [ ] 刪除 `app/bridge_agents.py` — 依賴 PipelineBridge，已完全死透
+- [ ] 刪除 `app/bridge_stats.py` — 依賴 PipelineBridge，已完全死透
+- [ ] 刪除 `app/pipeline_bridge.py` — PipelineBridge 主體，RC-10 後未被激活
+- [ ] 清理所有 `from .bridge_core import` / `from .pipeline_bridge import` 等引用（`paper_trading_wiring.py`, `strategy_wiring.py` 等）
+
+**B. 刪除 Python 策略類（Rust 引擎接管）**
+- [ ] 刪除 `local_model_tools/strategies/ma_crossover.py`
+- [ ] 刪除 `local_model_tools/strategies/bollinger_reversion.py`
+- [ ] 刪除 `local_model_tools/strategies/funding_rate_arb.py`
+- [ ] 刪除 `local_model_tools/strategies/grid_trading.py`
+- [ ] 刪除 `local_model_tools/strategies/bb_breakout.py`
+- [ ] 更新 `strategy_wiring.py`：移除 Python 策略 import + `PIPELINE_BRIDGE` 設置 + `DEMO_CONNECTOR` wiring
+
+**C. 刪除 ProtectiveOrderManager（Rust ShadowOrder 接管）**
+- [ ] 刪除 `app/protective_order_manager.py`
+- [ ] 清理 `paper_trading_wiring.py` 中 `PROTECTIVE_ORDER_MANAGER` singleton
+- [ ] 確認無生產路由調用 PROTECTIVE_ORDER_MANAGER（先 grep 確認）
+
+**D. 清理 BybitDemoConnector（只保留工具函數）**
+- [ ] `bybit_demo_connector.py`：刪除 `submit_order()` / `cancel_order()` / `_request()` / `cancel_all_orders()` / `place_order()` 等交易方法
+- [ ] 保留：`round_price_for_exchange()` / `round_qty_for_exchange()` 兩個純工具函數（有多處調用）
+- [ ] 更新 class docstring 說明剩餘用途
+
+**E. 清理 `paper_trading_wiring.py` 殘留**
+- [ ] 移除 `DEMO_CONNECTOR` / `PROTECTIVE_ORDER_MANAGER` singleton 初始化（對應 C/D 完成後）
+- [ ] 移除 `ENGINE` Python paper engine singleton（已 None，ARCH-RC1 1C-3-F 退場）
+
+> **估算**：~3000 行刪除，0 新增。完成後 Python 層完全無交易邏輯，僅剩 API 橋接 + GUI 路由 + 輔助工具。
+
 ---
 
 ## 🛡️ Live 前必做（SEC 安全 + 告警基礎設施）

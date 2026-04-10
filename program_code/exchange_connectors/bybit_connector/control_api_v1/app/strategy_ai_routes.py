@@ -1,10 +1,13 @@
-"""Strategy AI & Demo Routes — Demo connector, AI consultation, Telegram (TD-02 split).
-策略 AI 和 Demo 路由 — Demo 連接器、AI 諮詢、Telegram。
+"""Strategy AI & Demo Routes — AI consultation, Telegram, Demo data read (TD-02 split).
+策略 AI 和 Demo 路由 — AI 諮詢、Telegram、Demo 數據讀取。
 
-PYO3-BYBIT: demo/* endpoints now use Rust BybitClient (PyO3 bridge) as primary,
-with Python BybitDemoConnector as fallback if Rust bridge is unavailable.
-PYO3-BYBIT: demo/* 端點現在使用 Rust BybitClient（PyO3 橋接）作為主路徑，
-Python BybitDemoConnector 作為 Rust 橋接不可用時的降級回退。
+All demo data reads use Rust PyO3 BybitClient exclusively.
+All trading operations (close) go through Rust IPC.
+Python BybitDemoConnector fallbacks removed — Rust is the sole exchange interface.
+
+所有 Demo 數據讀取使用 Rust PyO3 BybitClient。
+所有交易操作（平倉）通過 Rust IPC。
+Python BybitDemoConnector 降級路徑已移除 — Rust 是唯一交易所接口。
 """
 from __future__ import annotations
 
@@ -16,7 +19,6 @@ from fastapi import Depends, HTTPException
 from . import main_legacy as base
 from .strategy_wiring import (
     phase2_router,
-    DEMO_CONNECTOR,
     ORCHESTRATOR,
     TELEGRAM,
     _envelope,
@@ -87,110 +89,64 @@ async def get_ai_consultation_status(
 
 @phase2_router.get("/demo/status")
 async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo connector status / 获取 Bybit Demo 连接器状态"""
-    if DEMO_CONNECTOR is None:
-        return _envelope({"enabled": False})
-    try:
-        status = DEMO_CONNECTOR.get_status()
-        return _envelope(status)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+    """Get Bybit Demo connector status via PyO3 BybitClient / 通過 PyO3 獲取 Demo 狀態"""
+    rc = _get_rust_client()
+    if rc is None:
+        return _envelope({"enabled": False, "source": "rust_engine"})
+    return _envelope({
+        "enabled": True,
+        "source": "rust_engine",
+        "has_credentials": rc.has_credentials(),
+        "base_url": rc.base_url(),
+    })
 
 
 @phase2_router.get("/demo/balance")
 async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo account balance / 获取 Bybit Demo 账户余额"""
-    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    """Get Bybit Demo account balance via PyO3 BybitClient / 通過 PyO3 獲取 Demo 餘額"""
     rc = _get_rust_client()
-    if rc is not None:
-        try:
-            wallet = rc.refresh_balance()
-            return _envelope({"source": "rust_engine", **wallet})
-        except Exception as e:
-            logger.warning(f"Rust balance failed, falling back to Python: {e}")
-    # Python fallback / Python 降級回退
-    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
-        return _envelope({"enabled": False})
+    if rc is None:
+        return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        result = DEMO_CONNECTOR.get_wallet_balance()
-        return _envelope(result)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+        wallet = rc.refresh_balance()
+        return _envelope({"source": "rust_engine", **wallet})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Bybit balance fetch failed: {exc}")
 
 
 @phase2_router.get("/demo/positions")
 async def get_demo_positions(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo open positions / 获取 Bybit Demo 持仓"""
-    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    """Get Bybit Demo open positions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 持倉"""
     rc = _get_rust_client()
-    if rc is not None:
-        try:
-            positions = rc.get_positions("linear")
-            return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
-        except Exception as e:
-            logger.warning(f"Rust positions failed, falling back to Python: {e}")
-    # Python fallback / Python 降級回退
-    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
-        return _envelope({"enabled": False})
+    if rc is None:
+        return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        params: dict[str, Any] = {"category": "linear", "settleCoin": "USDT"}
-        result = DEMO_CONNECTOR._request("GET", "/v5/position/list", params)
-        return _envelope(result)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+        positions = rc.get_positions("linear")
+        return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Bybit positions fetch failed: {exc}")
 
 
 @phase2_router.get("/demo/orders")
 async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """
-    Get Bybit Demo open orders (regular + conditional/stop).
-    获取 Bybit Demo 活跃订单（普通订单 + 条件止损单合并返回）。
+    Get Bybit Demo open orders via PyO3 BybitClient.
+    通過 PyO3 BybitClient 獲取 Demo 活躍訂單。
     """
-    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
     rc = _get_rust_client()
-    if rc is not None:
-        try:
-            orders = rc.get_active_orders("linear")
-            return _envelope({
-                "source": "rust_engine",
-                "retCode": 0,
-                "result": {"list": orders},
-                "regular_count": len(orders),
-                "conditional_count": 0,
-            })
-        except Exception as e:
-            logger.warning(f"Rust orders failed, falling back to Python: {e}")
-    # Python fallback / Python 降級回退
-    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
-        return _envelope({"enabled": False})
+    if rc is None:
+        return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        regular = DEMO_CONNECTOR.get_open_orders(category="linear")
-        regular_list = []
-        if regular.get("retCode") == 0:
-            regular_list = (regular.get("result") or {}).get("list") or []
-
-        # 条件单（止损单）通过 orderFilter=StopOrder 单独查询
-        # Conditional orders (stop-loss) are queried separately via orderFilter=StopOrder
-        conditional_list = []
-        try:
-            cond = DEMO_CONNECTOR.get_conditional_orders(category="linear")
-            if cond.get("retCode") == 0:
-                conditional_list = (cond.get("result") or {}).get("list") or []
-        except Exception:
-            logger.warning("Failed to fetch conditional orders / 获取条件单失败")
-
-        for o in conditional_list:
-            o["_orderFilter"] = "StopOrder"
-        merged = regular_list + conditional_list
-
+        orders = rc.get_active_orders("linear")
         return _envelope({
+            "source": "rust_engine",
             "retCode": 0,
-            "result": {"list": merged},
-            "regular_count": len(regular_list),
-            "conditional_count": len(conditional_list),
+            "result": {"list": orders},
+            "regular_count": len(orders),
+            "conditional_count": 0,
         })
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Bybit orders fetch failed: {exc}")
 
 
 def _normalize_execution(f: dict) -> dict:
@@ -272,20 +228,12 @@ async def post_demo_close_all_positions(
 
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo recent executions / 获取 Bybit Demo 最近成交"""
-    # Rust-first path (PYO3-BYBIT) / Rust 優先路徑
+    """Get Bybit Demo recent executions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 成交"""
     rc = _get_rust_client()
-    if rc is not None:
-        try:
-            fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
-            return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
-        except Exception as e:
-            logger.warning(f"Rust fills failed, falling back to Python: {e}")
-    # Python fallback / Python 降級回退
-    if DEMO_CONNECTOR is None or not DEMO_CONNECTOR.is_enabled:
-        return _envelope({"enabled": False})
+    if rc is None:
+        return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        result = DEMO_CONNECTOR.get_executions(category="linear", limit=50)
-        return _envelope(result)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+        fills = [_normalize_execution(f) for f in rc.get_executions("linear", limit=50)]
+        return _envelope({"source": "rust_engine", "list": fills, "count": len(fills)})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Bybit fills fetch failed: {exc}")
