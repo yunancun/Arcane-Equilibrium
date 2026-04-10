@@ -369,3 +369,141 @@ class TestSerialization:
         entry = gate2.get_entry("test_strat")
         assert entry.current_stage == PromotionStage.PAPER_SHADOW
         assert entry.paper_trades == 100
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6-05: Stress / Concurrency Tests / 壓測 + 並發測試
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestStressConcurrency:
+    """6-05: Thread-safety and performance under concurrent load.
+    6-05：線程安全與並發負載下的性能測試。"""
+
+    def test_concurrent_register_10_threads(self):
+        """10 threads registering different strategies simultaneously.
+        10 線程同時註冊不同策略。"""
+        import threading
+        gate = PromotionGate()
+        errors = []
+
+        def register_worker(idx):
+            try:
+                entry = gate.register_strategy(f"strat_{idx}")
+                assert entry.strategy_name == f"strat_{idx}"
+                assert entry.current_stage == PromotionStage.LEARNING
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=register_worker, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Concurrent register errors: {errors}"
+        # All 10 strategies should exist
+        rows = gate.to_db_rows()
+        assert len(rows) == 10
+
+    def test_concurrent_promote_same_strategy(self):
+        """10 threads trying to promote the same strategy — only one should succeed per stage.
+        10 線程嘗試晉升同一策略 — 每階段只有一個成功。"""
+        import threading
+        gate = PromotionGate()
+        gate.register_strategy("contested")
+        results = []
+
+        def promote_worker():
+            ok, msg = gate.promote("contested", PromotionStage.PAPER_SHADOW)
+            results.append((ok, msg))
+
+        threads = [threading.Thread(target=promote_worker) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        successes = [r for r in results if r[0]]
+        # Exactly 1 must succeed (first to acquire lock); rest get "already at or past stage"
+        # P1 E2 fix: == 1 (not >= 1) to catch broken lock
+        assert len(successes) == 1, f"Exactly 1 promote should succeed, got {len(successes)}"
+        assert gate.get_stage("contested") == PromotionStage.PAPER_SHADOW
+
+    def test_concurrent_register_idempotent(self):
+        """10 threads registering the SAME strategy — all should get valid entry.
+        10 線程註冊同一策略 — 全部應獲得有效 entry。"""
+        import threading
+        gate = PromotionGate()
+        entries = []
+
+        def register_worker():
+            entry = gate.register_strategy("shared_strat")
+            entries.append(entry)
+
+        threads = [threading.Thread(target=register_worker) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # All 10 entries should be valid
+        assert len(entries) == 10
+        for e in entries:
+            assert e.strategy_name == "shared_strat"
+            assert e.current_stage == PromotionStage.LEARNING
+        # Only 1 entry in internal state
+        rows = gate.to_db_rows()
+        assert len(rows) == 1
+
+    def test_rapid_full_pipeline_100_strategies(self):
+        """Register and promote 100 strategies through LEARNING→PAPER_SHADOW — performance check.
+        註冊並晉升 100 個策略 LEARNING→PAPER_SHADOW — 性能檢查。"""
+        gate = PromotionGate()
+        start = time.time()
+
+        for i in range(100):
+            gate.register_strategy(f"perf_strat_{i}")
+            gate.promote(f"perf_strat_{i}", PromotionStage.PAPER_SHADOW)
+
+        elapsed = time.time() - start
+        assert elapsed < 1.0, f"100 register+promote took {elapsed:.3f}s (limit: 1s)"
+
+        rows = gate.to_db_rows()
+        assert len(rows) == 100
+        for row in rows:
+            assert row["current_stage"] == "PAPER_SHADOW"
+
+    def test_concurrent_metrics_update(self):
+        """10 threads updating metrics on the same strategy simultaneously.
+        10 線程同時更新同一策略的指標。"""
+        import threading
+        gate = PromotionGate()
+        gate.register_strategy("metrics_test")
+        gate.promote("metrics_test", PromotionStage.PAPER_SHADOW)
+        errors = []
+
+        def update_worker(idx):
+            try:
+                gate.update_paper_metrics(
+                    "metrics_test",
+                    trades=100 + idx,
+                    win_rate=0.5 + idx * 0.01,
+                    net_pnl_pct=2.0 + idx,
+                    max_drawdown_pct=5.0,
+                    sharpe=0.8 + idx * 0.05,
+                )
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=update_worker, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Concurrent update errors: {errors}"
+        entry = gate.get_entry("metrics_test")
+        assert entry is not None
+        # Metrics should reflect one of the updates (last writer wins, but no corruption)
+        assert entry.paper_trades >= 100
+        assert entry.paper_sharpe >= 0.8

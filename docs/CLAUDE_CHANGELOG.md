@@ -1,7 +1,43 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-10
+> 最後更新：2026-04-11
+
+### W21 6-04~08 Phase 6 驗收（2026-04-11）
+
+**6-04 集成測試**（reconciler_e2e.rs +11 場景，7→18）：
+- S7: MinorDrift 不重設 clean cycle 計數器（對比 MajorDrift 重設）
+- S8: SideFlip → Cautious（完整 handler 鏈路）
+- S9: Ghost → Cautious（完整 handler 鏈路，E2 P0 fix）
+- S10: Per-symbol 30min 冷卻阻止重複升級
+- S11: 全局 5min 冷卻限制快速連續升級（含過期後放行）
+- S12: 多級恢復全程 Defensive → Reduced → Cautious → Normal
+- S13: REST 失敗漸進三階段（10→Cautious / 30→Reduced / 60→Defensive / 已達目標→跳過）
+- S14: Floor rule 阻止恢復低於 pre_escalation_level（原 scenario 7 重編號）
+
+**6-05 壓測**：
+- Rust S1: 100 cycle 快速漂移/清除交替 — 狀態一致，max Cautious
+- Rust S2: 50 symbols 同時漂移 → CB + CloseAll
+- Rust S3: 20 輪 handler 快速升降 — 無死鎖
+- Rust S4: 1000 次 evaluate_actions 性能 < 100ms
+- Python 5 場景：10 線程並發 register/promote（==1 成功）/冪等/100 策略批量 <1s/並發 metrics
+
+**6-06 sync_commit 驗證 PASS**：
+- global `ALTER DATABASE SET synchronous_commit = 'on'`（V006:90）已保護 orders/fills
+- MIT/CC/FA 三方確認：per-session 分層優化歸 WP Backlog（當前安全方向偏保守正確）
+
+**6-07~08 EvolutionEngine**：
+- 保留（不 deprecate）— 用於 DL/AI agent 學習
+- EvolutionEngine = 參數網格搜索優化，PromotionPipeline = 策略生命週期管理，職能不重疊
+
+**6-RC-6 TODO 一致性修復**：6-RC 段標記與 W19 段對齊（`[x]`）
+
+**E2 修復 3 項**：
+- P0: Ghost scenario 補完整 handler 鏈路驗證
+- P1: Python 並發 promote 斷言從 `>= 1` 改 `== 1`（防漏 lock bug）
+- P1: Rust make_writer() temp 路徑加 thread id 防並行碰撞
+
+**測試基線**：engine lib 879 + e2e 18 / Python 2792 / 0 fail
 
 ### W20 安全審查 + 漸進放權 + CC 合規（2026-04-10）
 

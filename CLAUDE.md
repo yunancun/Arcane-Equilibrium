@@ -1,6 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-10
+# 最後更新：2026-04-11
 
 ---
 
@@ -81,6 +81,8 @@
 **Phase 6 Reconciler 自動降級 ✅**（2026-04-10）— 6-RC-1~5,7,8,9,10 完成。Reconciler 從 AUDIT-ONLY 升級為自動動作層：漂移→escalation（收緊風控）→漂移消失→hybrid 恢復（clean cycles + wall-clock）。觸發：MinorDrift 不動作 / MajorDrift·Orphan·Ghost·SideFlip→Cautious / persistent≥3→Defensive / burst≥5→CB+CloseAll / REST fail≥10→Cautious。恢復：逐級，CB/MR operator only。`ReconcilerState` + `evaluate_actions()` + `ReconcilerEscalate/DeEscalate` IPC + `Arc<AtomicU8>` shared risk level。+27 tests。872 engine lib + 365 core pass。6-RC-7 e2e 集成測試 7 場景 pass。6-RC-8 live blocker 解除。排除：6-RC-6（OC-3 阻塞）。
 
 **W20 完成 ✅**（2026-04-10）— SEC-04/06/13 E3 深度審查 PASS · G-9 HMAC 確認（NOT dead，L171 auth token 驗證）· WP-CC/P9 雙軌止損接線（StopRequest→PositionManager.set_trading_stop()）· FS-1 market_data_client tests 提取（1083→742 行）· BI-1 MODULE_NOTE 12 files · SM-1 Singleton 合規 · 6-01~03 漸進放權管線（promotion_pipeline.py + 3 API endpoints + 27 tests）。E2 修復 3 P1（mutable ref / html.escape key / singleton TOCTOU）。879 engine lib + 2787 Python passed。
+
+**W21 6-04~08 Phase 6 驗收 ✅**（2026-04-11）— 6-04 集成測試：reconciler_e2e.rs 新增 7 場景（MinorDrift 不重設/SideFlip/Ghost/冷卻/全局冷卻/多級恢復 Defensive→Normal/REST 漸進三階段）+ 6-05 壓測 Rust 4 場景（100 cycle 快速翻轉/50 symbols 爆發/handler 快速升降/性能 1000 calls <100ms）+ Python 5 場景（10 線程並發 register/promote/metrics/冪等/100 策略批量）+ 6-06 sync_commit 驗證 PASS（global `synchronous_commit=on` V006:90 已保護 orders/fills）+ 6-07~08 EvolutionEngine 保留決策（用於 DL/AI agent 學習，與 PromotionPipeline 分工文檔化）。E2 修復 3 項（Ghost handler 完整鏈路/promote 並發斷言 ==1/temp 文件碰撞）。879 engine lib + 18 e2e + 2792 Python passed。
 
 **留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1907 行超 1200 硬上限（pre-existing，需 refactor 拆分）。
 
@@ -254,14 +256,14 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 **當前焦點（2026-04-10 審計後更新）**：10 個架構 gap 全部入計劃（TODO.md Gap 索引）。
 - **W19（04-14~18）**：G-3 IPC 認證 + G-5 Rate Limiting + OC-3 多通道告警 + 6-RC-6 ✅
 - **W20（04-21~25）**：SEC-04/06/13 E3 審查 + G-9 HMAC 確認 + WP-CC(FS-1/BI-1/P9/SM-1) + 6-01~03 漸進放權 ✅
-- **W21（04-28~05-02）**：6-04~13 Phase 6 完整驗收；LG-1 21d paper 到期（05-01）
+- **W21（04-28~05-02）**：6-04~08 ✅ · 6-09~13 Phase 6 PM 驗收；LG-1 21d paper 到期（05-01）
 - **W22（05-05~09）**：G-1 R-02 AI Agent（Strategist/Guardian）+ G-2/OC-5 FundingArb + LG-2/3
 - **W23（05-12~16）**：G-1 R-06 全 5 agent + G-7 ClaudeTeacher + G-10 Calibration + LG-4/5 Live
 
 **關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
 
-**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) 🟡** 自動降級 ✅ · 告警 ✅ · 漸進放權 ✅ · 壓測+驗收 ⬜ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
+**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) 🟡** 自動降級 ✅ · 告警 ✅ · 漸進放權 ✅ · 壓測+驗收 ✅ · PM 端到端 ⬜ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
 
 **Live 前置**：Paper trading ≥21d · ~~G-3 IPC 認證~~ ✅ · ~~G-5 Rate Limiting~~ ✅ · Phase 6 驗收完成 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
 
@@ -274,4 +276,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10 W20：tests engine lib **879** / Python **2787** passed **0 fail** · **W20 ✅**（SEC-04/06/13 E3 PASS + G-9 HMAC 確認 + WP-CC FS-1/BI-1/P9/SM-1 + 6-01~03 漸進放權管線） · **W19 ✅** · **Phase 6 Reconciler 自動降級 ✅** · **Live GUI P0~P6 ✅** · **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步 W21**：6-04~13 Phase 6 完整驗收 + LG-1 21d 倒計時。
+> 截至 2026-04-11 W21：tests engine lib **879** + e2e **18** / Python **2792** passed **0 fail** · **W21 6-04~08 ✅**（集成 7 場景 + 壓測 9 場景 + sync_commit PASS + EvolutionEngine 保留） · **W20 ✅** · **W19 ✅** · **Phase 6 Reconciler 自動降級 ✅** · **Live GUI P0~P6 ✅** · **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：6-09~13 PM 端到端驗收 + LG-1 21d 倒計時（05-01）。

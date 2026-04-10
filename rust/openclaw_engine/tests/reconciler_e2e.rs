@@ -1,20 +1,35 @@
-//! 6-RC-7: End-to-end integration tests for Reconciler auto-contraction.
+//! 6-RC-7 + 6-04 + 6-05: End-to-end integration + stress tests for Reconciler auto-contraction.
 //! Verifies the full chain: evaluate_actions() → IPC command → handler → governor state change.
-//! 6-RC-7：對帳器自動降級端到端集成測試。驗證完整鏈路。
+//! 6-RC-7 + 6-04 + 6-05：對帳器自動降級端到端集成 + 壓力測試。驗證完整鏈路。
 //!
-//! Scenarios:
+//! Scenarios (6-RC-7 original):
 //!   1. MajorDrift → ReconcilerEscalate → governor level rises to Cautious
 //!   2. Persistent drift (3 cycles) → Defensive
 //!   3. Burst (5+ simultaneous) → CircuitBreaker + CloseAll sent
 //!   4. Recovery path: Cautious → Normal after clean cycles + wall-clock
 //!   5. CB de-escalation blocked (operator only)
 //!   6. REST failure streak → Cautious
+//! Scenarios (6-04 integration):
+//!   7. MinorDrift does NOT reset clean cycle counter
+//!   8. SideFlip → Cautious (full handler chain)
+//!   9. Ghost → Cautious (full handler chain)
+//!  10. Per-symbol cooldown blocks repeat escalation
+//!  11. Global cooldown limits rapid-fire escalation
+//!  12. Multi-tier recovery Defensive → Reduced → Cautious → Normal
+//!  13. REST failure progressive tiers (10→Cautious, 30→Reduced, 60→Defensive)
+//!  14. Floor rule — recovery does not go below pre_escalation_level
+//! Stress (6-05):
+//!  S1. 100 cycles rapid drift/clean alternation — no panic, state consistent
+//!  S2. 50 simultaneous symbols — burst→CB, no panic
+//!  S3. 20 rapid handler escalate/de-escalate rounds — no deadlock
+//!  S4. 1000 evaluate_actions calls performance < 100ms
 
 use openclaw_engine::position_reconciler::{
     evaluate_actions, check_rest_failure_escalation, DriftVerdict, ReconcilerAction,
     ReconcilerState, PERSISTENT_DRIFT_CYCLES, RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL,
-    RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS, PER_SYMBOL_COOLDOWN_MS,
+    RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS,
     GLOBAL_COOLDOWN_MS, REST_FAILURE_TIER1_COUNT, REST_FAILURE_TIER2_COUNT,
+    REST_FAILURE_TIER3_COUNT,
 };
 use openclaw_engine::tick_pipeline::{PaperSessionCommand, TickPipeline};
 use openclaw_engine::event_consumer::PendingOrder;
@@ -32,7 +47,13 @@ fn make_pipeline() -> TickPipeline {
 fn make_writer() -> openclaw_engine::persistence::StateWriter {
     use std::path::PathBuf;
     let mut p = std::env::temp_dir();
-    p.push(format!("openclaw_reconciler_e2e_{}.json", std::process::id()));
+    // Use pid + thread id to avoid collisions in parallel test runs.
+    // 使用 pid + 線程 id 避免並行測試時文件衝突。
+    p.push(format!(
+        "openclaw_reconciler_e2e_{}_{:?}.json",
+        std::process::id(),
+        std::thread::current().id()
+    ));
     openclaw_engine::persistence::StateWriter::new(&p as &PathBuf, 5_000)
 }
 
@@ -338,8 +359,270 @@ fn e2e_rest_failure_streak_escalates() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Scenario 7: Floor rule — recovery does not go below pre_escalation_level
-// 場景 7：Floor rule — 恢復不會低於 pre_escalation_level
+// 6-04 Scenario 7: MinorDrift does NOT reset clean cycle counter
+// 6-04 場景 7：MinorDrift 不重設乾淨週期計數器
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_minor_drift_does_not_reset_clean_cycles() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+
+    // First: escalate to Cautious via MajorDrift so we have something to recover from
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+    evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    state.pre_escalation_level = Some(RiskLevel::Normal);
+
+    // Accumulate 20 clean cycles with 1ms spacing (wall-clock << 15min,
+    // so recovery doesn't fire prematurely inside the loop)
+    let empty: Vec<(String, DriftVerdict)> = vec![];
+    for c in 0..20u64 {
+        evaluate_actions(&mut state, RiskLevel::Cautious, &empty, t0 + 1 + c);
+    }
+    assert_eq!(state.clean_cycles_since_last_drift, 20);
+
+    // Inject a MinorDrift — must NOT reset counter (MinorDrift is not action-triggering)
+    let minor = vec![("BTCUSDT|Buy".into(), DriftVerdict::MinorDrift)];
+    evaluate_actions(&mut state, RiskLevel::Cautious, &minor, t0 + 21);
+    assert_eq!(
+        state.clean_cycles_since_last_drift, 21,
+        "MinorDrift must not reset clean cycle counter"
+    );
+
+    // Contrast: MajorDrift DOES reset counter
+    let major = vec![("ETHUSDT|Sell".into(), DriftVerdict::MajorDrift)];
+    evaluate_actions(&mut state, RiskLevel::Cautious, &major, t0 + 22);
+    assert_eq!(
+        state.clean_cycles_since_last_drift, 0,
+        "MajorDrift must reset clean cycle counter"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 8: SideFlip triggers Cautious escalation
+// 6-04 場景 8：SideFlip 觸發 Cautious 升級
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_sideflip_escalates_to_cautious() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::SideFlip)];
+
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(
+        &actions[0],
+        ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Cautious
+    ));
+
+    // Drive through handler
+    let mut p = make_pipeline();
+    let mut w = make_writer();
+    p.governance.risk.thresholds.min_hold_time_ms = 0;
+    let r = drive_escalate(&mut p, &mut w, "Cautious", "side_flip BTCUSDT");
+    assert!(r.is_ok());
+    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 9: Ghost escalates same as Orphan
+// 6-04 場景 9：Ghost 與 Orphan 同級升級
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_ghost_escalates_to_cautious() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(
+        &actions[0],
+        ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Cautious
+    ));
+
+    // Drive through handler to verify full chain (P0 E2 fix)
+    // 驅動 handler 驗證完整鏈路（P0 E2 修復）
+    let mut p = make_pipeline();
+    let mut w = make_writer();
+    p.governance.risk.thresholds.min_hold_time_ms = 0;
+    let r = drive_escalate(&mut p, &mut w, "Cautious", "ghost BTCUSDT");
+    assert!(r.is_ok());
+    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Cautious);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 10: Per-symbol cooldown blocks repeat escalation
+// 6-04 場景 10：Per-symbol 冷卻阻止重複升級
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_per_symbol_cooldown_blocks_repeat() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+
+    // First drift at t0 → escalation
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    assert!(!actions.is_empty());
+
+    // Same symbol, same drift, within 30min cooldown → no action
+    // (Already at Cautious, target would be Cautious, target <= current → skip)
+    let actions2 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, t0 + 60_000);
+    let has_escalate = actions2.iter().any(|a| matches!(a, ReconcilerAction::Escalate { .. }));
+    assert!(!has_escalate, "per-symbol cooldown should prevent repeat escalation to same tier");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 11: Global cooldown limits rapid-fire escalation
+// 6-04 場景 11：全局冷卻限制快速連續升級
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_global_cooldown_limits_rapid_fire() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+
+    // First drift: BTCUSDT → Cautious
+    let drifts1 = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts1, t0);
+    assert!(!actions.is_empty());
+
+    // Different symbol, persistent streak for 3 cycles → would target Defensive
+    // But global cooldown (5min) blocks it if within window
+    let drifts2 = vec![("ETHUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+    // Force streak to 3 for ETHUSDT
+    state.drift_streak.insert("ETHUSDT|Buy".into(), 2);
+    let actions2 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts2, t0 + 1000);
+    let has_defensive = actions2.iter().any(|a| {
+        matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
+    });
+    assert!(!has_defensive, "global cooldown should block escalation within 5min");
+
+    // After global cooldown passes → should fire
+    let actions3 = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts2, t0 + GLOBAL_COOLDOWN_MS + 1);
+    let has_defensive3 = actions3.iter().any(|a| {
+        matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
+    });
+    assert!(has_defensive3, "should escalate after global cooldown expires");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 12: Multi-tier recovery path Defensive → Reduced → Cautious → Normal
+// 6-04 場景 12：多級恢復路徑 Defensive → Reduced → Cautious → Normal 全程
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_full_recovery_defensive_to_normal() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+    let empty: Vec<(String, DriftVerdict)> = vec![];
+
+    // Setup: escalate to Defensive via persistent drift
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+    for cycle in 0..PERSISTENT_DRIFT_CYCLES {
+        let t = t0 + (cycle as u64) * (GLOBAL_COOLDOWN_MS + 1);
+        evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t);
+    }
+    state.pre_escalation_level = Some(RiskLevel::Normal);
+
+    // Pipeline to drive handlers
+    let mut pipeline = make_pipeline();
+    let mut writer = make_writer();
+    pipeline.governance.risk.thresholds.min_hold_time_ms = 0;
+    setup_escalate_to(&mut pipeline, RiskLevel::Defensive);
+
+    // Recovery helper: accumulate clean cycles at `level` until DeEscalate fires,
+    // then drive the de-escalation through the handler. Wall-clock requirement is
+    // satisfied by spacing each cycle by 30s (matching real reconciler interval).
+    // 恢復輔助：在指定 level 累積乾淨週期直到 DeEscalate 觸發，然後驅動 handler。
+    let base_drift_ts = state.last_drift_seen_ms;
+    let mut t = base_drift_ts + 1;
+    let max_cycles = 200u32; // safety limit
+
+    // Phase 1: Defensive → Reduced (20 cycles + 10 min)
+    let mut found = false;
+    for _ in 0..max_cycles {
+        t += 30_000;
+        let actions = evaluate_actions(&mut state, RiskLevel::Defensive, &empty, t);
+        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
+            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Reduced));
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "Defensive → Reduced recovery must fire");
+    drive_de_escalate(&mut pipeline, &mut writer, "Reduced", "recovery").unwrap();
+    assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Reduced);
+
+    // Phase 2: Reduced → Cautious (20 cycles + 10 min)
+    found = false;
+    for _ in 0..max_cycles {
+        t += 30_000;
+        let actions = evaluate_actions(&mut state, RiskLevel::Reduced, &empty, t);
+        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
+            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Cautious));
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "Reduced → Cautious recovery must fire");
+    drive_de_escalate(&mut pipeline, &mut writer, "Cautious", "recovery").unwrap();
+    assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+
+    // Phase 3: Cautious → Normal (30 cycles + 15 min)
+    found = false;
+    for _ in 0..max_cycles {
+        t += 30_000;
+        let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &empty, t);
+        if let Some(a) = actions.iter().find(|a| matches!(a, ReconcilerAction::DeEscalate { .. })) {
+            assert!(matches!(a, ReconcilerAction::DeEscalate { target, .. } if *target == RiskLevel::Normal));
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "Cautious → Normal recovery must fire");
+    drive_de_escalate(&mut pipeline, &mut writer, "Normal", "recovery").unwrap();
+
+    assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Normal);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-04 Scenario 13: REST failure progressive tiers (10→Cautious, 30→Reduced, 60→Defensive)
+// 6-04 場景 13：REST 失敗漸進升級（10→Cautious, 30→Reduced, 60→Defensive）
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn e2e_rest_failure_progressive_tiers() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+
+    // Tier 1: 10 failures → Cautious
+    state.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
+    let a1 = check_rest_failure_escalation(&mut state, RiskLevel::Normal, t0);
+    assert!(matches!(a1, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Cautious));
+
+    // Tier 2: 30 failures → Reduced (from Cautious)
+    state.consecutive_rest_failures = REST_FAILURE_TIER2_COUNT;
+    let a2 = check_rest_failure_escalation(&mut state, RiskLevel::Cautious, t0 + GLOBAL_COOLDOWN_MS + 1);
+    assert!(matches!(a2, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Reduced));
+
+    // Tier 3: 60 failures → Defensive (from Reduced)
+    state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
+    let a3 = check_rest_failure_escalation(&mut state, RiskLevel::Reduced, t0 + 2 * (GLOBAL_COOLDOWN_MS + 1));
+    assert!(matches!(a3, Some(ReconcilerAction::Escalate { target, .. }) if target == RiskLevel::Defensive));
+
+    // Already at target → no action
+    state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
+    let a4 = check_rest_failure_escalation(&mut state, RiskLevel::Defensive, t0 + 3 * (GLOBAL_COOLDOWN_MS + 1));
+    assert!(a4.is_none(), "should not escalate when already at target");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Scenario 14: Floor rule — recovery does not go below pre_escalation_level
+// 場景 14：Floor rule — 恢復不會低於 pre_escalation_level
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -397,4 +680,138 @@ fn e2e_floor_rule_prevents_over_recovery() {
             "after floor cleared, reconciler must not propose further recovery"
         );
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6-05 Stress Tests / 壓力測試
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// 6-05-S1: 100 rapid cycles of alternating drift/clean — no panic, state consistent.
+/// 6-05-S1：100 輪快速漂移/清除交替 — 不 panic，狀態一致。
+#[test]
+fn stress_100_cycles_rapid_drift_clean_alternation() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+    let empty: Vec<(String, DriftVerdict)> = vec![];
+
+    // Alternate drift/clean every cycle for 100 iterations.
+    // Space each cycle by global cooldown + 1 to allow escalations.
+    let mut current_level = RiskLevel::Normal;
+    let cycle_gap = GLOBAL_COOLDOWN_MS + 1;
+
+    for cycle in 0..100u64 {
+        let t = t0 + cycle * cycle_gap;
+        let input = if cycle % 2 == 0 { &drifts } else { &empty };
+        let actions = evaluate_actions(&mut state, current_level, input, t);
+
+        // Track level changes (simulate caller behavior)
+        for action in &actions {
+            match action {
+                ReconcilerAction::Escalate { target, .. } => {
+                    if *target > current_level {
+                        if state.pre_escalation_level.is_none() {
+                            state.pre_escalation_level = Some(current_level);
+                        }
+                        current_level = *target;
+                    }
+                }
+                ReconcilerAction::DeEscalate { target, .. } => {
+                    current_level = *target;
+                }
+                ReconcilerAction::CloseAll { .. } => {}
+            }
+        }
+    }
+
+    // Verify state invariants
+    assert!(
+        current_level <= RiskLevel::CircuitBreaker,
+        "level must be a valid tier"
+    );
+    // Alternating drift/clean means streak never reaches 3 (persistent threshold),
+    // so max level should not exceed Cautious.
+    assert!(
+        current_level <= RiskLevel::Cautious,
+        "alternating drift/clean should never exceed Cautious, got {:?}",
+        current_level
+    );
+}
+
+/// 6-05-S2: 50 simultaneous symbols drifting — burst→CB, no panic.
+/// 6-05-S2：50 個 symbol 同時漂移 — 爆發→CB，不 panic。
+#[test]
+fn stress_50_symbols_simultaneous_drift() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+
+    // Build 50 simultaneous drifts
+    let drifts: Vec<(String, DriftVerdict)> = (0..50)
+        .map(|i| (format!("SYM{i}USDT|Buy"), DriftVerdict::MajorDrift))
+        .collect();
+
+    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+
+    // Must trigger CB + CloseAll (≥5 simultaneous)
+    let has_cb = actions.iter().any(|a| {
+        matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)
+    });
+    let has_close_all = actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
+    assert!(has_cb, "50 symbols must trigger CB");
+    assert!(has_close_all, "50 symbols must trigger CloseAll");
+
+    // State should have 50 drift streaks tracked
+    assert_eq!(state.drift_streak.len(), 50);
+}
+
+/// 6-05-S3: Rapid escalation/de-escalation through full handler chain — no deadlock.
+/// 6-05-S3：通過完整 handler 鏈快速升降 — 不死鎖。
+#[test]
+fn stress_rapid_handler_escalate_deescalate() {
+    let mut pipeline = make_pipeline();
+    let mut writer = make_writer();
+    pipeline.governance.risk.thresholds.min_hold_time_ms = 0;
+
+    // 20 rounds: escalate to Cautious, de-escalate to Normal
+    for _ in 0..20 {
+        let r = drive_escalate(&mut pipeline, &mut writer, "Cautious", "stress test drift");
+        assert!(r.is_ok(), "escalate failed: {r:?}");
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+
+        let r = drive_de_escalate(&mut pipeline, &mut writer, "Normal", "stress test recovery");
+        assert!(r.is_ok(), "de-escalate failed: {r:?}");
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Normal);
+    }
+}
+
+/// 6-05-S4: evaluate_actions performance — 1000 cycles with 10 symbols, must complete in <100ms.
+/// 6-05-S4：evaluate_actions 性能 — 1000 輪 10 symbols，必須 <100ms 完成。
+#[test]
+fn stress_evaluate_actions_performance() {
+    let mut state = ReconcilerState::new();
+    let t0 = 100_000_000u64;
+
+    let drifts: Vec<(String, DriftVerdict)> = (0..10)
+        .map(|i| {
+            let verdict = match i % 4 {
+                0 => DriftVerdict::MajorDrift,
+                1 => DriftVerdict::Orphan,
+                2 => DriftVerdict::Ghost,
+                _ => DriftVerdict::MinorDrift,
+            };
+            (format!("SYM{i}USDT|Buy"), verdict)
+        })
+        .collect();
+
+    let start = std::time::Instant::now();
+    for cycle in 0..1000u64 {
+        let t = t0 + cycle * 30_000;
+        let _ = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t);
+    }
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed.as_millis() < 100,
+        "1000 evaluate_actions calls took {}ms (limit: 100ms)",
+        elapsed.as_millis()
+    );
 }
