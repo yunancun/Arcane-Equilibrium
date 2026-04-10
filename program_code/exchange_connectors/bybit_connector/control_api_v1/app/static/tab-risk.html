@@ -741,6 +741,10 @@ _RISK_INPUT_IDS.forEach(id => {
   const el = $(id);
   if (el) el.addEventListener('input', () => { _riskFormDirty = true; });
 });
+// in-tp-enabled uses 'change' (checkbox), not 'input' — must be tracked separately.
+// in-tp-enabled 是 checkbox，用 change 事件，需單獨追蹤。
+const _tpEl = $('in-tp-enabled');
+if (_tpEl) _tpEl.addEventListener('change', () => { _riskFormDirty = true; });
 
 // _btnSaving — helper: disable btn and show loading text during async save
 // _btnSaving — 辅助函数：保存期间禁用按钮并显示"储存中..."

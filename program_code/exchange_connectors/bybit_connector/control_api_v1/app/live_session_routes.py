@@ -67,16 +67,23 @@ _LIVE_USER_STOPPED: bool = False
 async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any]:
     """
     Send IPC command to Rust engine; raise HTTPException on failure.
+    Mirrors paper_trading_routes._ipc_command: connect → call → disconnect (finally).
     向 Rust 引擎發送 IPC 命令；失敗時拋出 HTTPException。
+    模仿 paper_trading_routes 模式：connect → call → finally disconnect。
     """
+    from .ipc_client import EngineIPCClient
+    client = EngineIPCClient()
     try:
-        from .ipc_client import get_ipc_client
-    except ImportError:
-        raise HTTPException(status_code=503, detail="IPC client not available")
-
-    client = get_ipc_client()
-    result = await client.call(method, params or {})
-    return result if isinstance(result, dict) else {"result": result}
+        await client.connect()
+        result = await client.call(method, params=params or {}, timeout=5.0)
+        return result if isinstance(result, dict) else {"result": result}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"IPC command '{method}' failed: {exc}",
+        ) from exc
+    finally:
+        await client.disconnect()
 
 
 def _live_response(data: dict[str, Any]) -> dict[str, Any]:
