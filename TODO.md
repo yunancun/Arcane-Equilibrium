@@ -226,8 +226,8 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 Phase 5 
 - **Phase 4 (4-00 ~ 4-21 + 4.1)**：`docs/audits/2026-04-07_phase4_final_signoff_audit.md` + `docs/references/2026-04-06--phase4_execution_plan_v2.md`
 - **Session 12 PNL/DB-RUN/CONF**：commits `ed01bf5`..`6608ab7`（詳見 CLAUDE_CHANGELOG.md）
 - **Session 13 R3 backlog 收尾**：`docs/audits/2026-04-06_consolidated_remediation_report.md`
-- **Session 11 之前**：`docs/worklogs/2026-04-06--completed_todo_archive_l3_phases.md`
-- **Phase 0/1/2/3 + Rust migration**：`docs/worklogs/2026-04-04--completed_todo_archive_phase0123_rust.md`
+- **Session 11 之前**：`docs/worklogs/phase5_arch_rc1/2026-04-06--completed_todo_archive_l3_phases.md`
+- **Phase 0/1/2/3 + Rust migration**：`docs/worklogs/phase5_arch_rc1/2026-04-04--completed_todo_archive_phase0123_rust.md`
 - **L3 整合審計**：`docs/audits/2026-04-06_consolidated_remediation_report.md`
 - **CFG-PERSIST 三件套（已完成）**：CFG-PERSIST-1 `5d7d673` · CFG-COST-EDGE-1 `0e848fa` · diag log `638afa3`
 - **DEAD-PY-1 全部完成**：Wave labels `b7f644b` + whitelist UI + A2 scheduler `7602656`

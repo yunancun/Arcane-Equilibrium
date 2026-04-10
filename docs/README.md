@@ -29,8 +29,10 @@ docs/
 │   ├── chapters_a-g/                  ← A-G 章节：基础层 / 观察者 / 事件层
 │   ├── chapters_h-i/                  ← H-I 章节：本地判断内核 / AI 治理 / Decision Lease
 │   ├── chapters_j-k/                  ← J-K 章节：Transition Engine / Paper Gate / GitHub 迁移
-│   ├── control_api_gui/               ← Control API + GUI Operator Console 开发
-│   └── learning/                      ← L 章节：自动学习管线 / 安全加固
+│   ├── control_api_gui/               ← Control API + GUI Operator Console 开发（2026-03-25~04-02）
+│   ├── phase5_arch_rc1/               ← Phase 5 / L3 整改 / ARCH-RC1 开发（2026-04-03~04-07）
+│   ├── learning/                      ← L 章节：自动学习管线 / 安全加固
+│   └── （顶层文件）                   ← 2026-04-08+ 最新工作日志（直接放根目录）
 │
 ├── handoffs/                          ← 阶段交接文档（按日期+主题分文件夹）
 │   └── YYYY-MM-DD_主题名/
@@ -39,10 +41,10 @@ docs/
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
-├── audits/                            ← ★ 全系统审计报告（按月份 + 专项分子目录）
-│   ├── March31/                       ← 2026-03-31 七Agent全系统审计（8 份报告）
-│   ├── April01/                       ← 2026-04-01 十Agent全系统审计（10 份报告）
+├── audits/                            ← ★ 全系统审计报告（专项 + 综合审计子目录）
+│   ├── 2026-04-05_l3_comprehensive/   ← L3 全系统综合审计（12 角色专项报告，2026-04-05）
 │   └── （专项审计报告）                ← 按日期命名的专项审计（如 Bybit API 审计）
+│                                      ← 注：03-31/04-01 全系统审计报告在 CCAgentWorkSpace/ 对应 Agent 下
 │
 ├── references/                        ← 长期参考文档（规范、合同、规格书）
 │   ├── state_dictionary/              ← 状态字典 / 数据字典
@@ -196,7 +198,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-03-24--work_report_current_dialogue.md` | 当前对话工作报告（md） |
 | `2026-03-24--work_report_current_dialogue.pdf` | 当前对话工作报告（pdf） |
 
-### worklogs/control_api_gui/ — Control API + GUI 开发日志（2026-03-25 ~ 2026-03-26）
+### worklogs/control_api_gui/ — Control API + GUI 开发日志（2026-03-25 ~ 2026-04-02）
 
 | 文件 | 内容 |
 |------|------|
@@ -250,6 +252,11 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-01--completed_todo_archive.md` | ★★ TODO 已完成項目歸檔：Wave 0-7 / Phase 1-3 / Audit Batch 1-7 / main_legacy 重構全部完成記錄 |
 | `2026-04-01--wave8_pa_reality_check_and_parallel_fix.md` | ★★★★ Wave 8 工作日誌：PA 69 項實況檢查 + 6 軌道×2 批並行修復 38/39 項 + strategist 拆分 + on_tick/mutator 拆分 + now_ms 統一 + +148 測試 |
 | `2026-04-02--batch9a_deterministic_adaptive_risk.md` | ★★★ Batch 9A 確定性自適應風控：QC 量化審查驅動 · ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用 · 修復 ATR 止損死代碼 bug · +66 測試 · 3703 passed |
+
+### worklogs/phase5_arch_rc1/ — Phase 5 / L3 整改 / ARCH-RC1 開發日誌（2026-04-03 ~ 2026-04-07）
+
+| 文件 | 内容 |
+|------|------|
 | `2026-04-03--daily_summary.md` | ★★★★ 2026-04-03 日匯總（12 Sessions · 28 Commits）：文檔治理 + Phase 0-3 全覽 + Rust R-00~R-04 |
 | `2026-04-03--completed_todo_archive_batch9a_wave8_xp.md` | TODO 已完成歸檔：Batch 9A + Wave 8A-8D + XP-1~4（路線圖定稿清理） |
 | `2026-04-04--daily_summary.md` | ★★★★ 2026-04-04 日匯總：V2 策略功能全面啟用（P0 緊急修復）+ Bybit API 基礎設施 |
@@ -265,13 +272,25 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-06--session12_precompact.md` | Session 12 Pre-Compact 快照：474 engine + 413 core + 35 ml_training · 0 failures |
 | `2026-04-06--session13_precompact.md` | ★★★★ Session 13：I-22 event_consumer 拆分 + FA-GAP-2/4 接線（cost_ratio/Kelly ATR%）+ per-symbol 真實費率 + SEC-11 fail-closed + FA-GAP-8/9 dead code 清除 |
 | `2026-04-06--completed_todo_archive_l3_phases.md` | TODO 已完成歸檔：L3 整改 + Phase 0/1/2/3 + Rust 遷移已驗收項（Session 11 後清理） |
+| `2026-04-06--session_progress_2.md` | Session 進度快照（Session 2）|
+| `2026-04-07--session_arch_rc1_1a_1b.md` | ARCH-RC1 1A + 1B：ConfigStore 單一寫入口 + StrategyParams JSON 接線 |
+| `2026-04-07--session_arch_rc1_1c1_1c2.md` | ARCH-RC1 1C-1 + 1C-2：IPC patch 接線 + hot-reload ArcSwap |
+| `2026-04-07--session_arch_rc1_1c2_complete.md` | ARCH-RC1 1C-2 完成：IPC 全鏈路驗收 |
+| `2026-04-07--session_phase4_1_complete.md` | Phase 4-1 完成日誌 |
+| `2026-04-07--session_phase4_complete.md` | Phase 4 全量完成日誌 |
 
 ### worklogs/ — 頂層工作日志（2026-04-08+）
 
 | 文件 | 内容 |
 |------|------|
 | `2026-04-10--signal_diamond_phase1_4_fix_round.md` | ★★★ Signal Diamond Phase 1-4 + Fix Round 完整工程記錄：V015 Migration + Rust DB Writers + ModeState + IPC mode-aware + state swap + AddMode/SwitchMode IPC · 850 tests |
+| `2026-04-10--ml_pipeline_remediation_complete.md` | ML Pipeline 整改完成日誌：Rust 學習寫入路徑 + per-mode 數據隔離驗收 |
+| `2026-04-09--rust_market_scanner_phase_a_d_complete.md` | ★★★ Rust 市場掃描器 Phase A-D 完整工程日誌：ScannerRunner 全接線 + D2/D3 動態 symbol + QC/FA + IPC-SCAN-1 |
 | `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 + 4 findings 全修（P1 grid drift, P2 exchange Kelly, P2 funding_arb, P2 集成測試）· 830 tests |
+| `2026-04-08--daily_summary.md` | ★★★★ 2026-04-08 日匯總：1C-3 / 1C-3-F / 1C-4 全量完成 |
+| `2026-04-08--arch_rc1_1c_history_archive.md` | ★ ARCH-RC1 1A→1C-4 commit 敘事歸檔（1C-3 分 E/F 兩期完整記錄） |
+| `2026-04-08--1c3d_main_body.md` | ARCH-RC1 1C-3-D 主體實現日誌 |
+| `2026-04-08--1c3e_fmini_handoff.md` | ARCH-RC1 1C-3-E → 1C-3-F 交接快照 |
 | `2026-04-08--session_gui_fake_success_wave1.md` | GUI fake-success 盤點 Wave 1 |
 | `2026-04-08--session_gui_fake_success_wave2_p1_wiring.md` | GUI fake-success Wave 2 + P1 wiring |
 | `2026-04-08--session_progress_1c3f.md` | 1C-3-F session 進度 |
@@ -351,12 +370,36 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | Operator | `2026-04-01--pa_review.md` | PA 技术复验 |
 | Operator | `2026-04-01--pm_execution_plan.md` | PM 执行计划 |
 
+### audits/2026-04-05_l3_comprehensive/ — L3 全系统综合审计（2026-04-05，12 角色专项报告）
+
+注：这批审计文件是 2026-04-05 L3 审计轮次产出，因当时未遵守命名规范（无日期前缀），现统一归入此子目录。
+
+| 文件 | 内容 |
+|------|------|
+| `audit_A3_gui_usability_report.md` | A3 GUI 可用性审计报告 |
+| `audit_AIE_effectiveness_report.md` | AI-E AI 效果评估报告 |
+| `audit_BB_bybit_api_report.md` | BB Bybit API 专项审计报告 |
+| `audit_CC_compliance_report.md` | CC 合规审计报告 |
+| `audit_E3_security_report.md` | E3 安全审计报告 |
+| `audit_E4_test_coverage_report.md` | E4 测试覆盖报告 |
+| `audit_E5_optimization_report.md` | E5 优化评估报告 |
+| `audit_FA_functional_spec_report.md` | FA 功能规格审计报告 |
+| `audit_MIT_database_ml_report.md` | MIT 数据库 + ML 专项报告 |
+| `audit_QC_math_algorithm_report.md` | QC 数学算法审计报告 |
+| `audit_R4_index_verification_report.md` | R4 文档索引完整性审计报告 |
+| `audit_TW_document_inventory_report.md` | TW 文档盘点审计报告 |
+
 ### audits/（专项审计报告）
 
 | 文件 | 内容 |
 |------|------|
+| `2026-03-30--bilingual_comment_audit_report.md` | 双语注释全量审计报告（评级 9.5/10，100% 覆盖） |
 | `2026-04-04--bybit_api_infra_audit.md` | ★ Bybit API 基础设施专项审计：REST/WS 端点覆盖度、SDK 对接质量、IPC 接口审核 |
 | `2026-04-06_consolidated_remediation_report.md` | ★ L3 全系统审计 63 问题整改追踪报告：11 工作包 · 4 波执行 · R0-R3 整改记录 |
+| `2026-04-07_e3_r6_directive_applier_security_audit.md` | E3 R6 Directive Applier 安全审计（Phase 4 前置） |
+| `2026-04-07_phase4_final_signoff_audit.md` | Phase 4 最终验收审计报告 |
+| `2026-04-08--e2_review_1c3_bbc.md` | E2 代码审查：ARCH-RC1 1C-3 BBC（Build-Before-Commit 验收） |
+| `2026-04-09--db_rw_ml_pipeline_full_audit.md` | DB 读写 + ML 管线全量审计（Signal Diamond Phase 1 前置）|
 
 ### architecture/ — 架構設計文件
 
