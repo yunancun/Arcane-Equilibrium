@@ -281,7 +281,7 @@ async def post_session_start(
 
 
 @paper_router.post("/session/reauth")
-def post_session_reauth(
+async def post_session_reauth(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Re-grant paper trading authorization / 重新授予紙盤授權"""
@@ -294,7 +294,17 @@ def post_session_reauth(
                 "granted": False, "is_authorized": True,
                 "message": "Authorization already active / 授權已有效",
             })
-        granted = GOV_HUB.grant_paper_authorization()
+        # Read max_order_notional_usdt from Rust RiskConfig to avoid hardcoding.
+        # 從 Rust RiskConfig 讀取 max_order_notional_usdt，避免硬編碼。
+        max_pos_usd = 10_000.0
+        try:
+            rc = await _ipc_command("get_risk_config")
+            val = (rc.get("config") or {}).get("limits", {}).get("max_order_notional_usdt", 0.0)
+            if isinstance(val, (int, float)) and val > 0:
+                max_pos_usd = float(val)
+        except Exception:
+            pass  # fall back to default / 回退到預設值
+        granted = GOV_HUB.grant_paper_authorization(max_position_usd=max_pos_usd)
         return _paper_response({
             "granted": granted,
             "is_authorized": GOV_HUB.is_authorized(),

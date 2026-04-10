@@ -726,7 +726,11 @@ class GovernanceHub:
         except Exception as e:
             logger.error("trigger_risk_upgrade error: %s / 触发风控升级错误: %s", e, e)
 
-    def grant_paper_authorization(self, ttl_hours: int = 24) -> bool:
+    def grant_paper_authorization(
+        self,
+        ttl_hours: int = 24,
+        max_position_usd: float = 10_000.0,
+    ) -> bool:
         """
         Auto-grant paper trading authorization (DRAFT → PENDING_APPROVAL → ACTIVE).
         自动批准纸盘交易授权（DRAFT → PENDING_APPROVAL → ACTIVE）。
@@ -740,6 +744,13 @@ class GovernanceHub:
 
         Args:
             ttl_hours: Authorization TTL in hours (default 24h) / 授权有效期（小时，默认 24h）
+            max_position_usd: Per-position USD ceiling for this authorization scope.
+                Callers should pass RiskConfig.limits.max_order_notional_usdt (from Rust) when
+                available; falls back to 10 000 USD. Only informational — real enforcement is
+                in the Rust engine.
+                單筆倉位 USD 上限（授权 scope 展示用）。呼叫方應傳入 Rust
+                RiskConfig.limits.max_order_notional_usdt；不可用時回退為 10 000。
+                僅供展示，真實執行由 Rust 引擎強制。
 
         Returns:
             True if authorization is ACTIVE after call; False on any failure (never raises)
@@ -768,7 +779,7 @@ class GovernanceHub:
                 paper_scope = {
                     "mode": "paper_only",
                     "execution": ["paper_submit"],
-                    "max_position_usd": 10000,
+                    "max_position_usd": max_position_usd,
                     "auto_approved": True,
                 }
                 # expires_at_ms: current time + ttl_hours in milliseconds
