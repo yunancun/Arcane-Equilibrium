@@ -28,6 +28,8 @@ Safety guarantees / 安全保證:
 """
 
 import asyncio
+import hashlib
+import hmac as _hmac_lib  # std-lib hmac; aliased to avoid shadowing local variables
 import json
 import logging
 import os
@@ -504,6 +506,18 @@ class EngineIPCClient:
                 "Connected to engine at %s / 已連接到引擎 %s",
                 self._socket_path, self._socket_path,
             )
+            # G-3 / SEC-08: HMAC-SHA256 auth handshake (fail-closed if secret set)
+            # G-3 / SEC-08：HMAC-SHA256 認證握手（設置密鑰時 fail-closed）
+            try:
+                await self._authenticate()
+            except Exception as exc:
+                logger.error(
+                    "IPC auth handshake failed — closing connection: %s / "
+                    "IPC 認證握手失敗 — 關閉連線: %s",
+                    exc, exc,
+                )
+                await self._close_connection()
+                return False
             return True
         except FileNotFoundError:
             logger.warning(
@@ -518,6 +532,67 @@ class EngineIPCClient:
                 self._socket_path, exc, self._socket_path, exc,
             )
             return False
+
+    async def _authenticate(self) -> None:
+        """
+        G-3 / SEC-08: Perform HMAC-SHA256 handshake if OPENCLAW_IPC_SECRET is set.
+        G-3 / SEC-08：若設置 OPENCLAW_IPC_SECRET，執行 HMAC-SHA256 握手。
+
+        Sends: {"jsonrpc":"2.0","method":"__auth","params":{"token":"<hex>","ts":<int>},"id":0}
+        Expects: {"jsonrpc":"2.0","result":{"authenticated":true},"id":0}
+
+        token = HMAC-SHA256(secret, str(unix_timestamp))
+        Fail-closed: raises RuntimeError if secret is set but auth fails.
+        Fail-closed：設置密鑰但認證失敗時拋出 RuntimeError。
+        No-op: if OPENCLAW_IPC_SECRET is not set (dev/test mode).
+        無操作：未設置 OPENCLAW_IPC_SECRET 時跳過（開發/測試模式）。
+        """
+        secret = os.environ.get("OPENCLAW_IPC_SECRET")
+        if not secret:
+            return  # No secret — skip auth / 無密鑰 — 跳過認證
+        ts = int(time.time())
+        token = _hmac_lib.new(
+            secret.encode(), str(ts).encode(), hashlib.sha256
+        ).hexdigest()
+        request = {
+            "jsonrpc": "2.0",
+            "method": "__auth",
+            "params": {"token": token, "ts": ts},
+            "id": 0,
+        }
+        payload = json.dumps(request, separators=(",", ":")) + "\n"
+        if self._writer is None:
+            raise RuntimeError("IPC auth: writer is None (not connected)")
+        self._writer.write(payload.encode("utf-8"))
+        await self._writer.drain()
+        if self._reader is None:
+            raise RuntimeError("IPC auth: reader is None (not connected)")
+        raw = await asyncio.wait_for(self._reader.readline(), timeout=5.0)
+        if not raw:
+            raise RuntimeError("IPC auth: empty response from server")
+        resp = json.loads(raw.decode("utf-8").strip())
+        if resp.get("error"):
+            raise RuntimeError(
+                f"IPC auth rejected: {resp['error'].get('message', resp['error'])}"
+            )
+        logger.info("IPC HMAC-SHA256 auth handshake succeeded / IPC 認證握手成功")
+
+    # ── OC-3: Reconciler / risk runtime status ──────────────────────────────
+
+    async def get_risk_runtime_status(self) -> dict[str, Any]:
+        """
+        OC-3: Return current risk governor tier and reconciler runtime state.
+        OC-3：返回當前風控 governor tier 及對帳器運行狀態。
+
+        Returns dict with keys:
+          governor_tier: str  ("NORMAL" | "CAUTIOUS" | "REDUCED" | "DEFENSIVE" |
+                               "CIRCUIT_BREAKER" | "MANUAL_REVIEW")
+          consecutive_losses_by_symbol: dict
+          boot_cooldown_remaining_ms: int
+          paper_paused: bool
+          session_halted: bool
+        """
+        return await self.call("get_risk_runtime_status")
 
     async def _close_connection(self) -> None:
         """

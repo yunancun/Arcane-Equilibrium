@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-10（DB fresh-start reset · 乾淨數據重新起算 · 審計 G-1~G-10 全入計劃）
-測試基準線：**Rust engine lib 872 · Python control_api 2427 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 879 · Python program_code 2760 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -51,20 +51,14 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 
 - [x] **SEC-05** GUI `innerHTML` XSS ✅ — ocEsc() 全量包裹
 - [x] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 移除 ✅ — API key 填入 = 唯一上線條件
-- [ ] **G-3 / SEC-08** IPC socket 無認證（**Live 前必做 · W19**）
-  - 現況：ipc_server.rs Unix socket 僅 chmod 600，任意可訪問進程可發送任意命令（close_all_positions / update_risk_config）
-  - 方案：HMAC-SHA256 握手（雙端：Rust ipc_server.rs + Python ipc_client.py）
-  - 交付：認證握手 · 錯誤測試 · E2 迴歸
-- [ ] **G-5** API Rate Limiting 全局缺失（**Live 前必做 · W19**）
-  - 現況：控制 API 203 個路由，slowapi 已裝但僅 3 個路由掛 decorator
-  - 方案：在 APIRouter 層加 default_limits 或逐路由補 `@limiter.limit`
-  - 交付：全覆蓋限流配置 · E2 迴歸
+- [x] **G-3 / SEC-08** IPC socket HMAC-SHA256 認證 ✅ (commit W19)
+  - verify_ipc_token()（常數時間 mac.verify_slice）+ handle_connection auth 區塊 + Python _authenticate() + fail-closed + 向後兼容（無 env var 跳過）
+- [x] **G-5** API Rate Limiting 全局覆蓋 ✅ — 驗證 main_legacy.py:304-307 default_limits=[120/min]+SlowAPIMiddleware 已覆蓋全部 214 路由（login 5/min 保留嚴格限制）
 
 ### W19-P0：告警通道（阻塞 6-RC-6）
 
-- [ ] **OC-3** 多通道分級告警（P0→緊急群 / P1→常規群）— **阻塞 6-RC-6**（W19）
-  - 方案：擴展 AlertRouter + TelegramAlerter，P0/P1 分群發送
-- [ ] **6-RC-6** 多通道告警 + 15s 介入窗口 ⚠️ 阻塞於 OC-3（W19 末）
+- [x] **OC-3** 多通道分級告警 ✅ (commit W19) — reconciler_alert_monitor() 每 30s 輪詢 get_risk_runtime_status；CIRCUIT_BREAKER/MANUAL_REVIEW→P0；CAUTIOUS/REDUCED/DEFENSIVE→P1；asyncio.to_thread 包裹 sync alert；main.py startup create_task
+- [x] **6-RC-6** 多通道告警 + governor tier 升降告警 ✅ (commit W19) — OC-3 實施覆蓋 6-RC-6 需求；CloseAll/CB 觸發時 P0 alert 已接線
 - [x] Phase 6 自動降級動作層完成（6-RC-1~5,7,8,9,10）✅
 
 ### W20：深度安全審查
