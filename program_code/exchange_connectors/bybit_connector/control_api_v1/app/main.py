@@ -187,20 +187,16 @@ app.include_router(live_router)
 
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
-# module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
-# None in degraded / test environments; the three hub/engine/risk dependencies
-# must always be present — if they are None the server must not start.
+# module initialisation time.  H0_GATE is allowed to be None in degraded /
+# test environments; the hub/risk dependencies must always be present —
+# if they are None the server must not start.
+# DEAD-PY-2: PIPELINE_BRIDGE removed (always None, intentional).
 # 驗證非可選關鍵依賴在模塊初始化時已成功注入。
-# PIPELINE_BRIDGE 和 H0_GATE 允許為 None（降級/測試環境）；
-# 其餘三個依賴必須存在 — 若為 None 則服務拒絕啟動。
+# H0_GATE 允許為 None（降級/測試環境）；
+# 其餘依賴必須存在 — 若為 None 則服務拒絕啟動。
 
-# SymbolCategoryRegistry soft import — 可選，失敗不阻斷 import
-# SymbolCategoryRegistry soft import — optional; import failure does not block module load
-try:
-    from .symbol_category_registry import SymbolCategoryRegistry as _SymbolCategoryRegistry
-    _SYMBOL_REGISTRY_AVAILABLE = True
-except ImportError:
-    _SYMBOL_REGISTRY_AVAILABLE = False
+# DEAD-PY-2: SymbolCategoryRegistry soft import removed (no longer seeded from startup).
+# SymbolCategoryRegistry is still used at runtime via symbol_category_registry.py directly.
 
 # ── Startup Readiness State（模塊頂層，GIL 保護，dict key-level 替換是原子操作）──
 # Tracks background init progress. GUI polls /api/v1/system/startup-status to detect readiness.
@@ -231,8 +227,6 @@ async def _startup_integrity_check() -> None:
     import time as _time
     _t0 = _time.monotonic()
     from .paper_trading_routes import GOV_HUB, ENGINE, RISK_MANAGER, H0_GATE  # noqa: PLC0415
-    from .phase2_strategy_routes import PIPELINE_BRIDGE  # noqa: PLC0415
-
     # Hard-required: these must never be None in any environment
     # 硬性要求：任何環境下均不得為 None
     _hard_required: dict[str, object] = {
@@ -248,8 +242,8 @@ async def _startup_integrity_check() -> None:
 
     # Soft-required: None is allowed (degraded mode), but log a warning
     # 軟性依賴：允許為 None（降級模式），但記錄警告
+    # DEAD-PY-2: PIPELINE_BRIDGE removed from soft deps (always None, intentional).
     _soft_required: dict[str, object] = {
-        "pipeline_bridge (PIPELINE_BRIDGE)": PIPELINE_BRIDGE,
         "h0_gate (H0_GATE)": H0_GATE,
     }
     degraded = [name for name, dep in _soft_required.items() if dep is None]
@@ -305,59 +299,11 @@ async def _startup_integrity_check() -> None:
             _reauth_exc, _reauth_exc,
         )
 
-    # ── Phase 4: SymbolCategoryRegistry 背景初始化（daemon thread，不阻斷 startup）──
-    # 原先使用 await asyncio.to_thread() 會阻擋 startup handler return（uvicorn 須等 handler 完成才接受連線）。
-    # 改為 daemon thread：handler 立刻 return，HTTP 服務立即就緒，registry 在背景填充。
-    # Previously used await asyncio.to_thread() which blocked the startup handler return.
-    # Changed to daemon thread: handler returns immediately, HTTP service is ready at once.
-    # Pattern: identical to ccbed0d pipeline_bridge K-line bootstrap fix.
-    if _SYMBOL_REGISTRY_AVAILABLE and PIPELINE_BRIDGE is not None:
-        import threading as _threading
-        import os as _os
-
-        _captured_bridge = PIPELINE_BRIDGE  # capture before thread start to avoid closure issues
-
-        def _registry_init_bg() -> None:
-            """Background daemon: refresh SymbolCategoryRegistry and seed PipelineBridge.
-            背景 daemon：刷新 SymbolCategoryRegistry 並注入 PipelineBridge。
-            """
-            try:
-                _bybit_host = _os.environ.get("BYBIT_API_HOST", "https://api-testnet.bybit.com")
-                _registry = _SymbolCategoryRegistry(bybit_host=_bybit_host)
-                _refreshed = _registry.refresh()
-                if _refreshed:
-                    _count = _registry.seed_pipeline_bridge(_captured_bridge)
-                    # Inject registry for tick_size/qty_step lookup (stop price rounding).
-                    # 注入 registry 供止損價精度取整使用。
-                    if hasattr(_captured_bridge, "set_symbol_registry"):
-                        _captured_bridge.set_symbol_registry(_registry)
-                    base.logger.info(
-                        "SymbolCategoryRegistry seeded %d symbol→category entries (bg thread) "
-                        "/ SymbolCategoryRegistry 背景注入 %d 條 symbol→category 映射",
-                        _count, _count,
-                    )
-                    _STARTUP_STATE["symbol_registry"] = {"status": "ready", "count": _count}
-                else:
-                    base.logger.warning(
-                        "SymbolCategoryRegistry.refresh() failed (bg thread); "
-                        "PipelineBridge will rely on Plan B runtime registration "
-                        "/ 背景 refresh() 失敗，PipelineBridge 將依賴方案 B 的運行時登記"
-                    )
-                    _STARTUP_STATE["symbol_registry"] = {"status": "failed"}
-            except Exception as _exc:
-                base.logger.warning(
-                    "SymbolCategoryRegistry bg init failed (non-fatal): %s "
-                    "/ SymbolCategoryRegistry 背景初始化失敗（不阻斷）：%s",
-                    _exc, _exc,
-                )
-                _STARTUP_STATE["symbol_registry"] = {"status": "error"}
-
-        _STARTUP_STATE["symbol_registry"] = {"status": "initializing"}
-        _threading.Thread(target=_registry_init_bg, daemon=True, name="registry-init").start()
-        base.logger.info(
-            "SymbolCategoryRegistry background init started (non-blocking) "
-            "/ SymbolCategoryRegistry 背景初始化已啟動（非阻塞）"
-        )
+    # DEAD-PY-2: SymbolCategoryRegistry→PipelineBridge seeding block removed.
+    # PipelineBridge is gone; SymbolCategoryRegistry seeding into the Rust engine
+    # is handled by the Rust side directly.
+    # DEAD-PY-2：SymbolCategoryRegistry→PipelineBridge 注入塊已刪除。
+    # PipelineBridge 已移除；Rust 引擎端直接管理 registry。
 
     # ── Phase 3: ExperimentLedger startup auto-seed from TruthSourceRegistry snapshot ──
     # 啟動時從 TruthSourceRegistry 快照自動填充初始假設（fail-open，不阻斷啟動）

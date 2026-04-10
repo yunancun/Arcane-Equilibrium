@@ -68,11 +68,8 @@ from local_model_tools.kline_manager import KlineManager
 from local_model_tools.indicator_engine import IndicatorEngine
 from local_model_tools.signal_generator import SignalEngine
 from local_model_tools.strategy_orchestrator import StrategyOrchestrator
-from local_model_tools.strategies.ma_crossover import MACrossoverStrategy
-from local_model_tools.strategies.bollinger_reversion import BollingerReversionStrategy
-from local_model_tools.strategies.funding_rate_arb import FundingRateArbStrategy
-from local_model_tools.strategies.grid_trading import GridTradingStrategy
-from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
+# DEAD-PY-2: Python strategy classes deleted — Rust openclaw_engine is sole strategy executor.
+# Python 策略類已刪除 — Rust openclaw_engine 為唯一策略執行器。
 
 # Trade Attribution Engine / 交易归因引擎
 from .trade_attribution import TradeAttributionEngine
@@ -271,393 +268,138 @@ logger.info(
     _LTG_FOR_ANALYST is not None, _LTG_FOR_ANALYST is not None,
 )
 
-# ── Bybit Demo Connector (created early to read balance for position sizing) ──
-# 提前创建 Demo 连接器，用于读取账户余额计算仓位大小
-try:
-    from .bybit_demo_connector import BybitDemoConnector
-    DEMO_CONNECTOR: Any = BybitDemoConnector()
-    if DEMO_CONNECTOR.is_enabled:
-        _bal_result = DEMO_CONNECTOR.get_wallet_balance()
-        _equity_str = (
-            _bal_result.get("result", {}).get("list", [{}])[0].get("totalEquity", "")
-        )
-        _ACCOUNT_BALANCE_USDT = float(_equity_str) if _equity_str else 10000.0
-        logger.info(
-            "Demo balance read for sizing: $%.0f / 已读取 Demo 余额用于仓位计算",
-            _ACCOUNT_BALANCE_USDT,
-        )
-    else:
-        _ACCOUNT_BALANCE_USDT = 10000.0
-        logger.info("Demo connector disabled, using paper balance $%.0f for sizing", _ACCOUNT_BALANCE_USDT)
-except Exception as _e:
-    DEMO_CONNECTOR = None
-    _ACCOUNT_BALANCE_USDT = 10000.0
-    logger.info("Demo connector unavailable (%s), using default balance for sizing", _e)
-
-# ── Compute initial qty for pre-registered strategies based on account balance ──
-# 根据账户余额计算预注册策略的初始仓位大小
-# Note: This is an initial hint only — actual qty is recalculated dynamically
-# at order submission time by the auto_deployer.compute_dynamic_qty() method.
-# 注意：此為初始參考值 — 實際倉位大小在下單時由 compute_dynamic_qty() 動態重算。
-_BTC_PRICE_HINT = float(os.getenv("OPENCLAW_BTC_PRICE_HINT", "67000"))
-# 3% risk / 5% stop = 60% max notional, capped at 15%
-# Position sizing formula (risk-based):
-#   risk_usdt       = balance * 3%       → max USD loss per trade (Principle 5: survival > profit)
-#   notional_usdt   = risk / stop_pct    → implied position notional (stop_pct = 5% default)
-#   cap at 18% of balance               → sizing cap (90% of RiskManager max_single_position_pct=20%, avoids boundary collision)
-#   floor at $20                         → minimum viable order size for Bybit
-#   BTC qty floor 0.001                  → Bybit BTCUSDT minimum order qty
-_risk_usdt = _ACCOUNT_BALANCE_USDT * 3.0 / 100.0       # 3% of balance = max acceptable loss per trade
-_notional_usdt = min(
-    _risk_usdt / 0.05,                                  # 0.05 = 5% hard stop distance → implied notional
-    _ACCOUNT_BALANCE_USDT * 0.18,                        # 18% = sizing cap (90% of 20% risk limit, 10% headroom avoids boundary rejection)
-)
-_notional_usdt = max(20.0, _notional_usdt)               # $20 = Bybit minimum viable order notional
-_DEFAULT_BTC_QTY = max(0.001, round(_notional_usdt / _BTC_PRICE_HINT, 3))  # 0.001 = Bybit BTCUSDT min qty
-logger.info(
-    "Default strategy qty (initial hint): $%.0f/trade → %.6f BTC (balance=$%.0f) / 默认策略仓位（初始參考值）",
-    _notional_usdt, _DEFAULT_BTC_QTY, _ACCOUNT_BALANCE_USDT,
-)
-
-# Pre-register default strategies (idle by default, user activates via API)
-# 预注册默认策略（默认 idle，用户通过 API 激活）
-ORCHESTRATOR.register_strategy(MACrossoverStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY, min_confidence=0.5))
-ORCHESTRATOR.register_strategy(BollingerReversionStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
-ORCHESTRATOR.register_strategy(FundingRateArbStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
-_grid_upper = float(os.getenv("OPENCLAW_GRID_UPPER", "68000"))
-_grid_lower = float(os.getenv("OPENCLAW_GRID_LOWER", "63000"))
-_grid_count = int(os.getenv("OPENCLAW_GRID_COUNT", "25"))
-
-ORCHESTRATOR.register_strategy(GridTradingStrategy(
-    symbol="BTCUSDT", upper_price=_grid_upper, lower_price=_grid_lower,
-    grid_count=_grid_count, qty_per_grid=_DEFAULT_BTC_QTY,
-))
-ORCHESTRATOR.register_strategy(BBBreakoutStrategy(symbol="BTCUSDT", qty_per_trade=_DEFAULT_BTC_QTY))
+# DEAD-PY-2: DEMO_CONNECTOR removed — BybitDemoConnector trading methods deleted.
+# Demo account data is read via Rust PyO3 BybitClient (read-only).
+# DEMO_CONNECTOR 已移除 — BybitDemoConnector 交易方法已刪除。Demo 帳戶數據改用 Rust PyO3 BybitClient 讀取（只讀）。
+DEMO_CONNECTOR = None
 
 logger.info(
-    "Phase 2 strategy pipeline initialized / Phase 2 策略管线初始化完成: "
-    "symbols=%s, timeframes=%s, strategies=%s",
-    DEFAULT_SYMBOLS, DEFAULT_TIMEFRAMES, ORCHESTRATOR.list_available_strategies(),
+    "Phase 2 strategy pipeline initialized (Rust strategies only) / Phase 2 策略管線初始化完成（僅 Rust 策略）: "
+    "symbols=%s, timeframes=%s",
+    DEFAULT_SYMBOLS, DEFAULT_TIMEFRAMES,
 )
 
-# ── Pipeline Bridge (connects strategy pipeline to paper trading engine) ──
-# 管线桥接器（连接策略管线与纸上交易引擎）
-# Lazy initialization: bridge is created here but activated when paper session starts
-# 延迟激活：桥接器在此创建，但在纸上交易 session 启动时激活
+# ── Pipeline Bridge retired (DEAD-PY-2, RC-10) ──────────────────────────────
+# PipelineBridge 已退場（DEAD-PY-2，RC-10）— Rust openclaw_engine 為唯一引擎。
+# PIPELINE_BRIDGE = None signals soft-degraded mode to startup integrity check.
+PIPELINE_BRIDGE = None
+STOP_MANAGER = None
 
-from .pipeline_bridge import PipelineBridge
-
-# Import paper trading singletons (these are created in paper_trading_routes.py)
-# 导入纸上交易单例（在 paper_trading_routes.py 中创建）
-# Note: circular import is avoided because both files are imported at module level by main.py
-# 注意：避免循环导入，因为两个文件都由 main.py 在模块级导入
+# PAPER_ENGINE is always None since ARCH-RC1 1C-3-F (retired).
+# Kept as None for compatibility with components that accept paper_engine= kwarg.
+# PAPER_ENGINE 自 ARCH-RC1 1C-3-F 後始終為 None（已退場）。
+PAPER_ENGINE = None
 try:
-    from .paper_trading_routes import ENGINE as PAPER_ENGINE
-    # StopManager with default 5% hard stop + 5% trailing + 48h time stop
-    # 止损管理器：5% 硬止损 + 5% 追踪止损 + 48h 时间止损
-    # B6: trailing_stop_pct widened from 3.0→5.0 to avoid noise-triggered stops in crypto
-    # B6：追踪止损从 3.0% 加宽至 5.0%，避免加密货币正常波动触发止损
-    # program_code/ already on sys.path via _path_setup (APR01-MEDIUM-11)
-    # program_code/ 已由 _path_setup 注入 sys.path
-    from local_model_tools.stop_manager import StopManager, StopConfig
-    STOP_MANAGER = StopManager(StopConfig(hard_stop_pct=5.0, trailing_stop_pct=5.0, time_stop_hours=48.0))
-
-    PIPELINE_BRIDGE = PipelineBridge(
-        kline_manager=KLINE_MANAGER,
-        indicator_engine=INDICATOR_ENGINE,
-        signal_engine=SIGNAL_ENGINE,
-        orchestrator=ORCHESTRATOR,
-        paper_engine=PAPER_ENGINE,
-        stop_manager=STOP_MANAGER,
-    )
-    logger.info("Pipeline bridge created with StopManager (inactive until paper session starts) / 管线桥接器+止损管理器已创建")
-
-    # --- Governance Hub injection (T1.01) ---
-    # 治理集线器注入到管线桥接器 (T1.01)
-    try:
-        from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
-        if _GOV_HUB_REF is not None:
-            PIPELINE_BRIDGE.set_governance_hub(_GOV_HUB_REF)
-            logger.info("GovernanceHub injected into PipelineBridge / 治理集线器已注入管线桥接器")
-        else:
-            logger.warning("GOV_HUB is None — PipelineBridge running without governance / GOV_HUB 为 None — 管线桥接器运行不包含治理")
-    except ImportError as e:
-        logger.warning("Could not import GOV_HUB for PipelineBridge: %s / 无法为管线桥接器导入 GOV_HUB: %s", e, e)
-
-    # --- T2.02: PerceptionPlane injection (Cognitive Honesty) ---
-    # T2.02：感知平面注入（认知诚实检查）
-    try:
-        from .paper_trading_routes import PERCEPTION_PLANE as _PERCEPTION_PLANE_REF
-        if _PERCEPTION_PLANE_REF is not None:
-            PIPELINE_BRIDGE.set_perception_plane(_PERCEPTION_PLANE_REF)
-            logger.info("PerceptionPlane injected into PipelineBridge / 感知平面已注入管线桥接器")
-        else:
-            logger.warning("PERCEPTION_PLANE is None — skipping cognitive honesty checks / 感知平面为 None — 跳过认知诚实检查")
-    except ImportError as e:
-        logger.warning("Could not import PERCEPTION_PLANE for PipelineBridge: %s", e)
-
-    # --- T3.05: ScannerRateLimiter injection ---
-    try:
-        from .paper_trading_routes import SCANNER_RATE_LIMITER as _SCANNER_RATE_LIMITER_REF
-        if PIPELINE_BRIDGE is not None and _SCANNER_RATE_LIMITER_REF is not None:
-            PIPELINE_BRIDGE.set_scanner_rate_limiter(_SCANNER_RATE_LIMITER_REF)
-            logger.info("ScannerRateLimiter injected into PipelineBridge / 掃描限速器已注入管線橋接器")
-    except ImportError as e:
-        logger.warning("Could not import SCANNER_RATE_LIMITER: %s", e)
-
-    # --- L1.01: TradeAttributionEngine injection ---
-    # L1.01：交易归因引擎注入到管线桥接器
-    # This enables attribution of completed trades into skill vs luck factors (ALPHA/TIMING/SIZING/EXECUTION/COST/LUCK)
-    # 使已完成的交易能够分解为技能vs运气因子
-    try:
-        if PIPELINE_BRIDGE is not None and TRADE_ATTRIBUTION is not None:
-            PIPELINE_BRIDGE.set_trade_attribution(TRADE_ATTRIBUTION)
-            logger.info("TradeAttributionEngine injected into PipelineBridge / 交易归因引擎已注入管线桥接器")
-        else:
-            logger.warning("TRADE_ATTRIBUTION or PIPELINE_BRIDGE is None — skipping attribution / 归因引擎或管线桥接器为 None — 跳过交易归因")
-    except Exception as e:
-        logger.warning("Could not inject TradeAttributionEngine: %s", e)
-
-    # --- T2.07: ScoutAgent + MessageBus injection (Plan A2) ---
-    # T2.07：Scout 代理 + 消息总线注入管線桥接器（方案 A2）
-    try:
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_scout_agent(SCOUT_AGENT)
-            PIPELINE_BRIDGE.set_message_bus(MESSAGE_BUS)
-            logger.info("ScoutAgent + MessageBus injected into PipelineBridge / Scout 代理 + 消息总线已注入管线桥接器")
-    except Exception as e:
-        logger.warning("Could not inject ScoutAgent/MessageBus: %s", e)
-
-    # --- Batch 7: StrategistAgent + OllamaClient injection into PipelineBridge ---
-    # Batch 7：StrategistAgent + OllamaClient 注入管线桥接器
-    try:
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_strategist_agent(STRATEGIST_AGENT)
-            logger.info("StrategistAgent injected into PipelineBridge / StrategistAgent 已注入管线桥接器")
-            PIPELINE_BRIDGE.set_ollama_client(OLLAMA_CLIENT)
-            logger.info("OllamaClient injected into PipelineBridge L1 edge filter / OllamaClient 已注入管线桥接器 L1 edge 过滤器")
-    except Exception as e:
-        logger.warning("Could not inject StrategistAgent: %s", e)
-
-    # --- B4: CognitiveModulator instantiation + injection into StrategistAgent ---
-    # B4：实例化 CognitiveModulator 并注入 StrategistAgent（L0 决策门槛调制）
-    try:
-        from program_code.local_model_tools.cognitive_modulator import CognitiveModulator
-        _cognitive_modulator = CognitiveModulator()
-        STRATEGIST_AGENT.set_cognitive_modulator(_cognitive_modulator)
-        logger.info(
-            "CognitiveModulator instantiated and injected into StrategistAgent / "
-            "认知调制器已实例化并注入 StrategistAgent"
-        )
-    except Exception as e:
-        logger.warning("Could not inject CognitiveModulator: %s / 注入认知调制器失败: %s", e, e)
-
-    # --- Batch 8: GuardianAgent injection into PipelineBridge ---
-    # Batch 8：GuardianAgent 注入管线桥接器（主门控 fail-closed）
-    try:
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_guardian_agent(GUARDIAN_AGENT)
-            logger.info("GuardianAgent injected into PipelineBridge (primary gate) / GuardianAgent 已注入管线桥接器（主门控）")
-    except Exception as e:
-        logger.warning("Could not inject GuardianAgent: %s", e)
-
-    # --- Batch 9: AnalystAgent injection into PipelineBridge ---
-    # Batch 9：AnalystAgent 注入管线桥接器（交易结果分析 + 指标更新）
-    try:
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_analyst_agent(ANALYST_AGENT)
-            logger.info("AnalystAgent injected into PipelineBridge / AnalystAgent 已注入管线桥接器")
-    except Exception as e:
-        logger.warning("Could not inject AnalystAgent: %s", e)
-
-    # --- EX-05: LearningTierGate injection into PipelineBridge ---
-    # EX-05：学习等级门控注入管线桥接器，以支持 L1→L2→L3... 自动晋升
-    try:
-        from .paper_trading_routes import LEARNING_TIER_GATE as _LTG_REF
-        if PIPELINE_BRIDGE is not None and _LTG_REF is not None:
-            PIPELINE_BRIDGE.set_learning_tier_gate(_LTG_REF)
-            logger.info("LearningTierGate injected into PipelineBridge / 学习等级门控已注入管線桥接器")
-        else:
-            if _LTG_REF is None:
-                logger.warning("LEARNING_TIER_GATE is None — auto-promotion disabled / 学习等级门控为 None — 自动晋升已禁用")
-    except (ImportError, Exception) as e:
-        logger.warning("Could not inject LearningTierGate into PipelineBridge: %s", e)
-
-    # --- Batch 10: OMS SM-03 injection into GovernanceHub ---
-    # Batch 10：OMS 状态机注入治理集線器（PaperTradingEngine 已退場，跳過 ENGINE 注入）
-    # DEAD-PY-1: PAPER_ENGINE is always None (retired) — ENGINE injection block removed.
-    try:
-        from .oms_state_machine import OMSStateMachine
-        OMS_STATE_MACHINE = OMSStateMachine()
-        # Also inject into GovernanceHub for reconciliation
-        from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
-        if _GOV_HUB_REF is not None:
-            _GOV_HUB_REF.set_oms_sm(OMS_STATE_MACHINE)
-            logger.info("OMS SM-03 injected into GovernanceHub / OMS 状态机已注入治理集線器")
-    except (ImportError, Exception) as e:
-        OMS_STATE_MACHINE = None
-        logger.warning("Could not inject OMS SM-03: %s", e)
-
-    # --- Batch 10: AnalystAgent injection into PipelineBridge ---
-    # Batch 10：分析师代理注入管线桥接器，以启用 L2 Cron 触发
-    try:
-        from .analyst_agent import AnalystAgent, AnalystConfig
-        from .ollama_client import get_ollama_client_27b
-        ANALYST_AGENT = AnalystAgent(
-            config=AnalystConfig(),
-            message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
-            ollama_client=get_ollama_client_27b(),  # 27B: complex weekly pattern analysis
-            learning_tier_gate=_LTG_REF if '_LTG_REF' in dir() else None,
-        )
-        ANALYST_AGENT.start()
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_analyst_agent(ANALYST_AGENT)
-            logger.info("AnalystAgent injected into PipelineBridge / 分析师代理已注入管线桥接器")
-        # Subscribe to ROUND_TRIP_COMPLETE on MessageBus
-        if MESSAGE_BUS is not None:
-            from .multi_agent_framework import MessageType as _MT, AgentRole as _AR
-            # FIX: subscribe() 只接受 2 參數 (role, callback)，MessageType 過濾由 Agent.on_message() 內部處理
-            # FIX: subscribe() takes 2 args (role, callback); MessageType filtering is handled inside Agent.on_message()
-            MESSAGE_BUS.subscribe(_AR.ANALYST, ANALYST_AGENT.on_message)
-            logger.info("AnalystAgent subscribed to MessageBus / 分析师代理已订阅消息总线")
-    except (ImportError, Exception) as e:
-        ANALYST_AGENT = None
-        logger.warning("Could not inject AnalystAgent: %s", e)
-
-    # ── Batch 11: ExecutorAgent — order execution wrapper + quality feedback ──
-    # Batch 11：ExecutorAgent — 订单执行包装 + 执行质量反馈
-    # DOC-01 §5.9: dual defense (local stop + exchange conditional)
-    try:
-        from .executor_agent import ExecutorAgent, ExecutorConfig
-        from .multi_agent_framework import MessageType as _MT11, AgentRole as _AR11
-
-        # Import GovernanceHub for Decision Lease acquisition (principle 3)
-        # 導入 GovernanceHub 用於 Decision Lease 申請（根原則 3）
-        _GOV_HUB_FOR_EXECUTOR: Any = None
-        try:
-            from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_EXECUTOR
-        except ImportError:
-            pass
-
-        EXECUTOR_AGENT = ExecutorAgent(
-            config=ExecutorConfig(),
-            message_bus=MESSAGE_BUS,
-            paper_engine=PAPER_ENGINE,
-            governance_hub=_GOV_HUB_FOR_EXECUTOR,
-        )
-        EXECUTOR_AGENT.start()
-
-        # Register Executor with Conductor / 向 Conductor 注册 Executor
-        CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")
-        CONDUCTOR.set_agent_state(_AR11.EXECUTOR, _AgentState.RUNNING)
-
-        # Subscribe Executor to MessageBus — receives APPROVED_INTENT from Guardian
-        # 订阅 Executor 到消息总线 — 接收 Guardian 批准的 APPROVED_INTENT
-        MESSAGE_BUS.subscribe(_AR11.EXECUTOR, EXECUTOR_AGENT.on_message)
-
-        # Wire conditional order callback (Batch 11 + 0B-2: exchange SL/TP dual defense)
-        # 接入条件单回调（Batch 11 + 0B-2：交易所 SL/TP 雙重防線，原則 9）
-        if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled:
-            def _exchange_stop_callback(symbol: str, side: str, price: float, qty: float) -> None:
-                """
-                0B-2: Create exchange conditional SL + TP after order fill.
-                成交後同時掛交易所 SL + TP 條件單（原則 9：雙重防線）。
-
-                SL: 5% hard stop (fail-safe, exchange-side protection).
-                TP: 8% take-profit (lock in gains, prevent round-trip erosion).
-                """
-                close_side = "Sell" if side.capitalize() == "Buy" else "Buy"
-                sl_pct = 5.0   # Stop-loss / 止損
-                tp_pct = 8.0   # Take-profit / 止盈
-
-                if side.capitalize() == "Buy":
-                    # Long position: SL below entry, TP above entry
-                    sl_trigger = round(price * (1 - sl_pct / 100), 2)
-                    tp_trigger = round(price * (1 + tp_pct / 100), 2)
-                    tp_direction = 1  # Sell TP triggers when price rises above
-                else:
-                    # Short position: SL above entry, TP below entry
-                    sl_trigger = round(price * (1 + sl_pct / 100), 2)
-                    tp_trigger = round(price * (1 - tp_pct / 100), 2)
-                    tp_direction = 2  # Buy TP triggers when price falls below
-
-                # Place SL order / 掛止損單
-                DEMO_CONNECTOR.place_conditional_order(
-                    symbol=symbol, side=close_side, qty=qty, trigger_price=sl_trigger,
-                )
-                # 0B-2: Place TP order / 掛止盈單
-                try:
-                    DEMO_CONNECTOR.place_conditional_order(
-                        symbol=symbol, side=close_side, qty=qty,
-                        trigger_price=tp_trigger, trigger_direction=tp_direction,
-                    )
-                    logger.info(
-                        "0B-2: TP order placed: %s %s trigger=%.2f / 止盈單已掛",
-                        symbol, close_side, tp_trigger,
-                    )
-                except Exception as _tp_err:
-                    # SL placed successfully, TP failure is non-fatal
-                    # SL 已成功掛出，TP 失敗為非致命
-                    logger.warning(
-                        "0B-2: TP order failed (SL still active): %s / 止盈單失敗（止損仍有效）",
-                        _tp_err,
-                    )
-
-            EXECUTOR_AGENT.set_conditional_order_callback(_exchange_stop_callback)
-            logger.info(
-                "0B-2: ExecutorAgent SL/TP callback wired to DemoConnector (Principle 9 dual defense) / "
-                "Executor SL/TP 回調已接入 Demo 連接器（原則 9 雙重防線）"
-            )
-
-        # Inject ExecutorAgent into PipelineBridge for status tracking
-        # 将 ExecutorAgent 注入管线桥接器用于状态追踪
-        if PIPELINE_BRIDGE is not None:
-            PIPELINE_BRIDGE.set_executor_agent(EXECUTOR_AGENT)
-
-        logger.info(
-            "Batch 11: ExecutorAgent initialized (bus=%s, engine=%s, demo=%s) / "
-            "Batch 11：ExecutorAgent 已初始化",
-            MESSAGE_BUS is not None, PAPER_ENGINE is not None,
-            DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled,
-        )
-    except (ImportError, Exception) as e:
-        EXECUTOR_AGENT = None
-        logger.warning("Could not initialize ExecutorAgent: %s / 无法初始化 ExecutorAgent: %s", e, e)
-
-    # ── Batch 12: PaperLiveGate instantiation (Paper→Live gate conditions) ──
-    # Batch 12：PaperLiveGate 实例化（纸盘→实盘闸门条件）
-    try:
-        from .paper_live_gate import PaperLiveGate, PaperLiveGateConfig
-
-        def _paper_live_gate_audit_cb(event_type: str, event_data: dict) -> None:
-            """Audit callback for PaperLiveGate → ChangeAuditLog"""
-            try:
-                from .paper_trading_routes import GOV_HUB as _hub
-                if _hub is not None and _hub._change_audit_log is not None:
-                    from .change_audit_log import ChangeType
-                    _hub._change_audit_log.record_change(
-                        change_type=ChangeType.STATE_CHANGE,
-                        who="PaperLiveGate",
-                        what=f"Gate event: {event_type}",
-                        reason=str(event_data.get('reason', 'gate_evaluation')),
-                        old_value=event_data.get('old_value'),
-                        new_value=event_data.get('new_value'),
-                    )
-            except Exception as e:
-                logger.warning("PaperLiveGate audit callback failed (non-fatal): %s", e)
-
-        PAPER_LIVE_GATE = PaperLiveGate(
-            config=PaperLiveGateConfig(),
-            audit_callback=_paper_live_gate_audit_cb,
-        )
-        logger.info("Batch 12: PaperLiveGate instantiated / PaperLiveGate 已实例化")
-    except (ImportError, Exception) as e:
-        PAPER_LIVE_GATE = None
-        logger.warning("Could not instantiate PaperLiveGate: %s", e)
-
+    from .paper_trading_routes import ENGINE as PAPER_ENGINE  # type: ignore[assignment]
 except ImportError:
-    PIPELINE_BRIDGE = None
-    logger.warning("Could not import paper trading engine — pipeline bridge disabled / 无法导入纸上交易引擎 — 管线桥接器已禁用")
+    pass  # PAPER_ENGINE stays None
+
+# --- B4: CognitiveModulator instantiation + injection into StrategistAgent ---
+# B4：实例化 CognitiveModulator 并注入 StrategistAgent（L0 决策门槛调制）
+try:
+    from program_code.local_model_tools.cognitive_modulator import CognitiveModulator
+    _cognitive_modulator = CognitiveModulator()
+    STRATEGIST_AGENT.set_cognitive_modulator(_cognitive_modulator)
+    logger.info(
+        "CognitiveModulator instantiated and injected into StrategistAgent / "
+        "认知调制器已实例化并注入 StrategistAgent"
+    )
+except Exception as e:
+    logger.warning("Could not inject CognitiveModulator: %s / 注入认知调制器失败: %s", e, e)
+
+# --- Batch 10: OMS SM-03 injection into GovernanceHub ---
+# Batch 10：OMS 状态机注入治理集線器
+try:
+    from .oms_state_machine import OMSStateMachine
+    OMS_STATE_MACHINE = OMSStateMachine()
+    from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
+    if _GOV_HUB_REF is not None:
+        _GOV_HUB_REF.set_oms_sm(OMS_STATE_MACHINE)
+        logger.info("OMS SM-03 injected into GovernanceHub / OMS 状态机已注入治理集線器")
+except (ImportError, Exception) as e:
+    OMS_STATE_MACHINE = None
+    logger.warning("Could not inject OMS SM-03: %s", e)
+
+# --- Batch 10: AnalystAgent initialization ---
+# Batch 10：AnalystAgent 初始化（交易結果分析 + L2 Cron 觸發）
+try:
+    from .analyst_agent import AnalystAgent, AnalystConfig
+    from .ollama_client import get_ollama_client_27b
+    ANALYST_AGENT = AnalystAgent(
+        config=AnalystConfig(),
+        message_bus=MESSAGE_BUS if 'MESSAGE_BUS' in dir() else None,
+        ollama_client=get_ollama_client_27b(),  # 27B: complex weekly pattern analysis
+    )
+    ANALYST_AGENT.start()
+    if MESSAGE_BUS is not None:
+        from .multi_agent_framework import AgentRole as _AR
+        MESSAGE_BUS.subscribe(_AR.ANALYST, ANALYST_AGENT.on_message)
+        logger.info("AnalystAgent subscribed to MessageBus / 分析师代理已订阅消息总线")
+except (ImportError, Exception) as e:
+    ANALYST_AGENT = None
+    logger.warning("Could not initialize AnalystAgent: %s", e)
+
+# ── Batch 11: ExecutorAgent — order execution wrapper + quality feedback ──
+# Batch 11：ExecutorAgent — 订单执行包装 + 执行质量反馈
+try:
+    from .executor_agent import ExecutorAgent, ExecutorConfig
+    from .multi_agent_framework import AgentRole as _AR11
+
+    _GOV_HUB_FOR_EXECUTOR: Any = None
+    try:
+        from .paper_trading_routes import GOV_HUB as _GOV_HUB_FOR_EXECUTOR
+    except ImportError:
+        pass
+
+    EXECUTOR_AGENT = ExecutorAgent(
+        config=ExecutorConfig(),
+        message_bus=MESSAGE_BUS,
+        paper_engine=PAPER_ENGINE,
+        governance_hub=_GOV_HUB_FOR_EXECUTOR,
+    )
+    EXECUTOR_AGENT.start()
+    CONDUCTOR.register_agent(_AR11.EXECUTOR, resource_mode="local")
+    CONDUCTOR.set_agent_state(_AR11.EXECUTOR, _AgentState.RUNNING)
+    MESSAGE_BUS.subscribe(_AR11.EXECUTOR, EXECUTOR_AGENT.on_message)
+
+    logger.info(
+        "Batch 11: ExecutorAgent initialized (bus=%s, engine=%s) / Batch 11：ExecutorAgent 已初始化",
+        MESSAGE_BUS is not None, PAPER_ENGINE is not None,
+    )
+except (ImportError, Exception) as e:
+    EXECUTOR_AGENT = None
+    logger.warning("Could not initialize ExecutorAgent: %s / 无法初始化 ExecutorAgent: %s", e, e)
+
+# ── Batch 12: PaperLiveGate instantiation (Paper→Live gate conditions) ──
+# Batch 12：PaperLiveGate 实例化（纸盘→实盘闸门条件）
+try:
+    from .paper_live_gate import PaperLiveGate, PaperLiveGateConfig
+
+    def _paper_live_gate_audit_cb(event_type: str, event_data: dict) -> None:
+        """Audit callback for PaperLiveGate → ChangeAuditLog"""
+        try:
+            from .paper_trading_routes import GOV_HUB as _hub
+            if _hub is not None and _hub._change_audit_log is not None:
+                from .change_audit_log import ChangeType
+                _hub._change_audit_log.record_change(
+                    change_type=ChangeType.STATE_CHANGE,
+                    who="PaperLiveGate",
+                    what=f"Gate event: {event_type}",
+                    reason=str(event_data.get('reason', 'gate_evaluation')),
+                    old_value=event_data.get('old_value'),
+                    new_value=event_data.get('new_value'),
+                )
+        except Exception as e:
+            logger.warning("PaperLiveGate audit callback failed (non-fatal): %s", e)
+
+    PAPER_LIVE_GATE = PaperLiveGate(
+        config=PaperLiveGateConfig(),
+        audit_callback=_paper_live_gate_audit_cb,
+    )
+    logger.info("Batch 12: PaperLiveGate instantiated / PaperLiveGate 已实例化")
+except (ImportError, Exception) as e:
+    PAPER_LIVE_GATE = None
+    logger.warning("Could not instantiate PaperLiveGate: %s", e)
 
 
 # ── AI Consultation (connects Layer 2 engine to strategy orchestrator) ──
@@ -673,9 +415,8 @@ except (ImportError, Exception) as e:
 try:
     from .telegram_alerter import TelegramAlerter
     TELEGRAM = TelegramAlerter()
-    if TELEGRAM.is_enabled and PIPELINE_BRIDGE is not None:
-        PIPELINE_BRIDGE.set_telegram(TELEGRAM)
-        logger.info("Telegram alerts wired to pipeline bridge / Telegram 告警已接入管线")
+    if TELEGRAM.is_enabled:
+        logger.info("Telegram alerter enabled / Telegram 告警已啟用")
 except ImportError:
     TELEGRAM = None
 
@@ -688,7 +429,7 @@ try:
         kline_manager=KLINE_MANAGER,
         signal_engine=SIGNAL_ENGINE,
         orchestrator=ORCHESTRATOR,
-        pipeline_bridge=PIPELINE_BRIDGE,
+        pipeline_bridge=None,
     )
     GRAFANA_WRITER.start()
     logger.info("Grafana data writer started / Grafana 数据写入器已启动")
@@ -696,22 +437,9 @@ except Exception as e:
     GRAFANA_WRITER = None
     logger.info("Grafana data writer not available: %s / Grafana 写入器不可用: %s", e, e)
 
-# ── Wire Demo Connector to Pipeline Bridge (DEMO_CONNECTOR created earlier) ──
-# 将已提前创建的 Demo 连接器接入管线桥接器
-if DEMO_CONNECTOR is not None and DEMO_CONNECTOR.is_enabled and PIPELINE_BRIDGE is not None:
-    PIPELINE_BRIDGE.set_demo_connector(DEMO_CONNECTOR)
-    logger.info("Bybit Demo connector wired to pipeline bridge / Bybit Demo 已接入管线")
-
-# ── Bybit Demo Data Sync (pulls Demo data into PostgreSQL) ──
-# Bybit Demo 数据同步器（从 Demo API 拉取数据写入 PostgreSQL）
-try:
-    from .bybit_demo_sync import BybitDemoSync
-    DEMO_SYNC = BybitDemoSync(demo_connector=DEMO_CONNECTOR)
-    DEMO_SYNC.start()
-    logger.info("Bybit Demo sync started / Demo 数据同步器已启动")
-except Exception as e:
-    DEMO_SYNC = None
-    logger.info("Demo sync not available: %s", e)
+# DEAD-PY-2: Demo connector wiring removed. DEMO_CONNECTOR = None.
+# Demo 連接器接線已移除。Demo 帳戶數據讀取改用 Rust PyO3 BybitClient。
+DEMO_SYNC = None
 
 # ── Market Scanner + Strategy Auto-Deployer (autonomous opportunity discovery) ──
 # 市场扫描器 + 策略自动部署器（自主发现交易机会）
@@ -740,20 +468,8 @@ try:
     MARKET_SCANNER.register_on_scan(AUTO_DEPLOYER.on_scan_results)
     MARKET_SCANNER.start()
 
-    # G1: wire auto-deployer into pipeline bridge for consecutive-loss auto-exit
-    # G1：将自动部署器接入管线桥接器，实现连续亏损自动退出
-    if PIPELINE_BRIDGE is not None:
-        PIPELINE_BRIDGE.set_auto_deployer(AUTO_DEPLOYER)
-        logger.info("Auto-deployer wired to pipeline bridge for loss tracking / 自动部署器已接入管线桥接器")
-        # 反向注入：让 AutoDeployer 持有 PipelineBridge 引用，部署策略时登记 symbol→category 映射。
-        # 若缺少此注入，_symbol_category_map 永远不会被填充，spot/inverse 品类的 kline/funding
-        # 查询将无法取得正确的 category，导致 _symbol_category_map 机制完全失效。
-        # Reverse injection: give AutoDeployer a PipelineBridge reference so it can call
-        # register_symbol_category() on deployment. Without this, _symbol_category_map in
-        # PipelineBridge is never populated, breaking category-aware kline/funding lookups
-        # for spot and inverse symbols that share names with linear contracts (e.g. BTCUSDT).
-        AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)
-        logger.info("PipelineBridge wired to auto-deployer for symbol-category mapping / 管线桥接器已注入自动部署器以支持品类映射")
+    # DEAD-PY-2: PipelineBridge removed — auto-deployer runs without bridge reference.
+    # DEAD-PY-2：PipelineBridge 已移除 — 自動部署器不再持有橋接器引用。
 
     # 0A-5: Inject BacktestEngine into auto-deployer for pre-deployment validation.
     # 0A-5：注入 BacktestEngine 到自動部署器，供部署前回測驗證使用。
@@ -946,41 +662,15 @@ try:
         except Exception:
             pass  # non-fatal, best-effort
 
-    if PIPELINE_BRIDGE is not None:
-        PIPELINE_BRIDGE.set_observation_writer(_write_auto_observation)
-        logger.info("Auto-observation writer wired to pipeline bridge / 自动观察写入器已接入管线桥接器")
+    # DEAD-PY-2: observation writer no longer injected into PipelineBridge (PIPELINE_BRIDGE = None).
+    pass
 except Exception as _e1_e:
     logger.info("Auto-observation writer not wired: %s", _e1_e)
 
 
 # ── Auto-start market feed based on global mode ──
 # 根据全局模式决定是否自动启动行情数据流（服务重启场景下的自动恢复）
-# observe_only / shadow_only / demo_reserved / live_reserved → start background feed
-# design_only / disabled → do not start (operator must explicitly set mode first)
-# observe_only 及以上 → 启动后台行情流；design_only / disabled → 不启动（需 Operator 先切换模式）
 _FEED_AUTO_MODES = {"observe_only", "shadow_only", "demo_reserved", "live_reserved"}
-# ─────────────────────────────────────────────────────────────────────
-# P1-16: Inject H0Gate into PipelineBridge + RiskManager
-# P1-16：注入 H0 確定性門控到管線橋接器與風控管理器
-# ─────────────────────────────────────────────────────────────────────
-try:
-    from .paper_trading_routes import H0_GATE as _H0_GATE_REF
-    if PIPELINE_BRIDGE is not None and _H0_GATE_REF is not None:
-        PIPELINE_BRIDGE.set_h0_gate(_H0_GATE_REF)
-        logger.info(
-            "H0Gate injected into PipelineBridge (P1-16) / H0 門控已注入管線橋接器"
-        )
-    else:
-        logger.warning(
-            "H0_GATE or PIPELINE_BRIDGE is None — skipping H0Gate injection "
-            "/ H0 門控或管線橋接器為 None，跳過注入"
-        )
-except (ImportError, AttributeError) as _h0_inj_err:
-    logger.warning(
-        "Could not import H0_GATE for PipelineBridge injection: %s "
-        "/ 無法導入 H0_GATE 用於管線橋接器注入：%s",
-        _h0_inj_err, _h0_inj_err,
-    )
 
 # ─────────────────────────────────────────────────────────────────────
 # APR01-P0-1: Inject TruthSourceRegistry into StrategistAgent + AnalystAgent
@@ -1088,10 +778,7 @@ __all__ = [
     "STRATEGIST_AGENT",
     "GUARDIAN_AGENT",
     "ANALYST_AGENT",
-    # Demo / 模拟
-    "DEMO_CONNECTOR",
-    # Pipeline / 管线
-    "PIPELINE_BRIDGE",
+    # Pipeline / 管线 (DEMO_CONNECTOR/PIPELINE_BRIDGE removed in DEAD-PY-2)
     "PAPER_ENGINE",
     "PAPER_LIVE_GATE",
     # Alerting / 告警

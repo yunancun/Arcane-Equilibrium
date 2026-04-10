@@ -60,6 +60,8 @@
 
 **DEAD-PY-1 全部完成 ✅**（2026-04-10）— Wave A/B/C 標籤 + WP-ARCH-RC1 舊命名 + whitelist UI 全量移除（tab-governance.html 220 行 + governance.js 19 行）。唯一殘留：test_risk_view_client 1 pre-existing fail。
 
+**DEAD-PY-2 全部完成 ✅**（2026-04-10）— ~4500 行 Python 死代碼清除。Phase A：4 bridge 文件全刪（bridge_core/agents/stats/pipeline_bridge）。Phase B：5 Python 策略類全刪（ma_crossover/bollinger_reversion/funding_rate_arb/grid_trading/bb_breakout）。Phase C：ProtectiveOrderManager 全刪。Phase D：BybitDemoConnector 交易方法全刪（保留 2 個純工具函數）。Phase E：11 死 test 文件刪除 + 10+ 文件外科手術刪 dead class + strategy_wiring.py 瘦身。Python 層**完全無交易邏輯**，僅剩 API 橋接 + GUI 路由 + 輔助工具。872 Rust lib + 2427 Python passed (1 pre-existing fail)。
+
 **LIVE-P0/P1/P2 全部完成 ✅**（2026-04-10）— P0: API key 管理 + tab-live 前置條件動態化 + 儀表板框架（commit c680ffd）。P1: `read_secret_file(slot)` 槽位感知 + `TradingMode::Live` variant + Python live session routes（commit 11283c7）。P2: `PerEngineRiskStores` 3 獨立 ConfigStore + IPC engine 路由 + GUI per-engine tab + Live 二次確認彈窗（commit 006d905）。840 lib tests pass。
 
 **Live GUI Phase 4 完成 ✅**（2026-04-10）— `_EXECUTION_AUTHORITY_OVERRIDE` 記憶體覆蓋（in-memory gate，重啟清空 fail-closed）+ grant/revoke endpoints + `_ipc_command()` 3 bug 修復 + 實盤端點接入 PyO3 BybitClient（真實交易所數據）+ demo 模式 live session start + tab-live.html Grant/Revoke 按鈕 + 儀表板解析 PyO3 snake_case/Bybit camelCase 雙格式。（commit af392c2）
@@ -76,7 +78,9 @@
 
 **Signal Diamond Fix Round ✅**（2026-04-10）— Phase 3+4 審計發現 9 gaps → 全部修復：P0 `set_trading_mode()` 雙向 swap 保存/恢復各模式狀態；P2 `AddMode`/`SwitchMode` IPC command 全鏈路接線；P3 Python IPC 層 mode-aware 參數化 + alias fallback；Phase 3 已知限制記錄（同時多模式需 per-mode Orchestrator，Phase 5+ 工作）。+5 Rust tests。E2 PASS + E4: 850/3/2692 全基線達標。
 
-**留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
+**Phase 6 Reconciler 自動降級 ✅**（2026-04-10）— 6-RC-1~5,9,10 完成。Reconciler 從 AUDIT-ONLY 升級為自動動作層：漂移→escalation（收緊風控）→漂移消失→hybrid 恢復（clean cycles + wall-clock）。觸發：MinorDrift 不動作 / MajorDrift·Orphan·Ghost·SideFlip→Cautious / persistent≥3→Defensive / burst≥5→CB+CloseAll / REST fail≥10→Cautious。恢復：逐級，CB/MR operator only。`ReconcilerState` + `evaluate_actions()` + `ReconcilerEscalate/DeEscalate` IPC + `Arc<AtomicU8>` shared risk level。+27 tests。872 engine lib + 365 core pass。排除：6-RC-6（OC-3 阻塞）、6-RC-7（e2e）、6-RC-8。
+
+**留尾**（非阻塞）：W1 event_consumer 拆分。6-RC-6 多通道告警阻塞於 OC-3。
 
 **歷史細節**（不要重複載入）：
 - 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
@@ -245,9 +249,9 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（7d paper 數據累積，2026-04-11 滾動重跑 JS-1 `--days 3`）。Phase 5 功能全交付，cost_gate 改造完成，等數據。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 — 漸進放權 + Reconciler 自動收縮**（6-RC-1~9，需先完成 OC-3 多通道告警）。
+**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（7d paper 數據累積，2026-04-11 滾動重跑 JS-1 `--days 3`）。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 剩餘**：6-RC-6 多通道告警（阻塞 OC-3）+ 6-RC-7 e2e 測試 + 6-RC-8 live blocker + 6-01~08 漸進放權。
 
-**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
+**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-20) 🟡** 自動降級 ✅ · 漸進放權+告警+壓測 ⬜。
 
 **Live 前置**：Paper trading ≥21d · Phase 6 完成 · Alpha PnL>0 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
 
@@ -260,4 +264,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **850** / Python **2692** passed **1 pre-existing fail** · **Signal Diamond Phase 1-4 ✅ + Fix Round ✅**（DB schema + Rust writers + ModeState + IPC mode-aware + state swap + IPC commands） · **Live/Demo 平倉按鈕 ✅** · **SM-1 live 授權統一 ✅** · **Live GUI P0~P6 ✅** · **Live 縮倉監控 ✅** · **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅** · **Gov-P1 ✅** · **Live_Ready ✅** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入。
+> 截至 2026-04-10：tests engine lib **872** / Python **2427** passed **1 pre-existing fail** · **DEAD-PY-2 ✅**（~4500 行 Python 死代碼清除：bridge/策略/POM/DemoConnector 全刪，Python 層無交易邏輯）· **Signal Diamond Phase 1-4 ✅ + Fix Round ✅** · **Live/Demo 平倉按鈕 ✅** · **SM-1 live 授權統一 ✅** · **Live GUI P0~P6 ✅** · **Live 縮倉監控 ✅** · **Live_Ready ✅** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入。

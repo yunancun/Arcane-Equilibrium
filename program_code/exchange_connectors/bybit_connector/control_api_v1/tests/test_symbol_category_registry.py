@@ -202,54 +202,7 @@ class TestSymbolCategoryRegistryStale:
         assert reg.is_stale() is False
 
 
-class TestSymbolCategoryRegistrySeedPipelineBridge:
-    """T-A11 ~ T-A13: seed_pipeline_bridge() 注入行為 / Injection behavior"""
-
-    def _make_loaded_registry(self):
-        reg = SymbolCategoryRegistry(bybit_host="https://mock.bybit.com")
-        responses = {
-            "linear": ["BTCUSDT", "ETHUSDT"],
-            "spot": [],
-            "inverse": ["BTCUSD"],
-        }
-        with patch("urllib.request.urlopen", side_effect=_make_mock_urlopen(responses)):
-            reg.refresh()
-        return reg
-
-    def test_seed_calls_register_correct_times(self):
-        # T-A11: 注入次數與 known_count 一致 / Injection count equals known_count
-        reg = self._make_loaded_registry()
-        mock_bridge = MagicMock()
-        count = reg.seed_pipeline_bridge(mock_bridge)
-        assert count == reg.known_count()
-        assert mock_bridge.register_symbol_category.call_count == count
-
-    def test_seed_bridge_without_method_returns_zero(self):
-        # T-A12: bridge 無 register_symbol_category 方法，不拋出，返回 0
-        # bridge without register_symbol_category → no raise, returns 0
-        reg = self._make_loaded_registry()
-        bridge_no_method = object()
-        count = reg.seed_pipeline_bridge(bridge_no_method)
-        assert count == 0
-
-    def test_seed_continues_on_single_failure(self):
-        # T-A13: 單條注入失敗不傳播，繼續其他 symbol / Single failure does not propagate
-        reg = self._make_loaded_registry()
-        call_count = 0
-
-        def flaky_register(symbol, category):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("simulated failure")
-
-        mock_bridge = MagicMock()
-        mock_bridge.register_symbol_category.side_effect = flaky_register
-        # 不應拋出；其他 symbol 繼續注入 / Must not raise; other symbols continue
-        count = reg.seed_pipeline_bridge(mock_bridge)
-        # count 應等於成功注入數（total - 1 失敗）/ count = total - 1 failure
-        assert count == reg.known_count() - 1
-
+# TestSymbolCategoryRegistrySeedPipelineBridge deleted (DEAD-PY-2)
 
 class TestSymbolCategoryRegistryThreadSafety:
     """T-A14: 並發 refresh 不拋出 / Concurrent refresh does not raise"""
@@ -278,38 +231,4 @@ class TestSymbolCategoryRegistryThreadSafety:
         assert errors == [], f"Concurrent refresh raised: {errors}"
 
 
-class TestInferCategoryFallbackWarning:
-    """T-A15: _infer_category_from_symbol fallback 發出 warning / fallback emits warning"""
-
-    def test_fallback_emits_warning(self):
-        # T-A15: BTCUSDT 無法從名稱區分 linear/spot，應發出 warning 且返回 "linear"
-        # BTCUSDT cannot be distinguished by name → warning emitted, returns "linear"
-        from app.pipeline_bridge import PipelineBridge
-
-        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
-            result = PipelineBridge._infer_category_from_symbol("BTCUSDT")
-            assert result == "linear"  # 仍返回 linear | still returns linear
-            mock_logger.warning.assert_called_once()
-            # 確認 warning message 包含 symbol 名稱 / Confirm warning contains symbol name
-            call_args = mock_logger.warning.call_args
-            # 第一個 positional arg 是 format string，後面跟 args
-            assert "BTCUSDT" in str(call_args)
-
-    def test_inverse_symbol_no_warning(self):
-        # 確認 inverse symbol 不觸發 warning（因命名規則可確定）
-        # Inverse symbol must not trigger fallback warning (deterministic by name rule)
-        from app.pipeline_bridge import PipelineBridge
-
-        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
-            result = PipelineBridge._infer_category_from_symbol("BTCUSD")
-            assert result == "inverse"
-            mock_logger.warning.assert_not_called()
-
-    def test_option_symbol_no_warning(self):
-        # 確認 option symbol 不觸發 warning / Option symbol must not trigger fallback warning
-        from app.pipeline_bridge import PipelineBridge
-
-        with patch("app.bridge_stats.logger") as mock_logger:  # TD-01: logger moved to bridge_stats
-            result = PipelineBridge._infer_category_from_symbol("BTC-1JAN25-50000-C")
-            assert result == "option"
-            mock_logger.warning.assert_not_called()
+# TestInferCategoryFallbackWarning deleted (DEAD-PY-2 — uses deleted PipelineBridge._infer_category_from_symbol)

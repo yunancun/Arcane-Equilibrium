@@ -967,146 +967,20 @@ class StrategyAutoDeployer:
         return round(leverage, 1)
 
     def _deploy_strategy(self, symbol: str, category: str, opp: Any) -> None:
-        """Create and register a strategy instance with intelligent sizing."""
-        from .strategies.ma_crossover import MACrossoverStrategy
-        from .strategies.bollinger_reversion import BollingerReversionStrategy
-        from .strategies.funding_rate_arb import FundingRateArbStrategy
-        from .strategies.grid_trading import GridTradingStrategy
-        from .strategies.bb_breakout import BBBreakoutStrategy
-
-        key = f"{category}_{symbol}"
-        strategy = None
-
-        # Compute intelligent position size
-        qty = self._compute_qty(opp.symbol, opp.price, opp.score)
-
-        if category == "funding_arb":
-            strategy = FundingRateArbStrategy(symbol=symbol, qty_per_trade=qty)
-
-        elif category == "grid":
-            # Calculate grid range from current price (+-5%)
-            price = opp.price
-            upper = price * 1.05
-            lower = price * 0.95
-            strategy = GridTradingStrategy(
-                symbol=symbol, upper_price=upper, lower_price=lower,
-                grid_count=20, qty_per_grid=qty,
-            )
-
-        elif category == "trend":
-            # 过滤 pump/dump 币：24小时涨跌幅超过 40% 的币不适合 MA Crossover
-            # 这类币往往是暴拉暴跌，MA 信号会被反复震仓
-            # Filter pump/dump coins: abs daily change > 40% is too noisy for MA Crossover
-            if abs(getattr(opp, "price_change_pct_24h", 0.0)) > 40.0:
-                logger.info(
-                    "Skipping trend deploy for %s: extreme daily change=%.1f%% (pump/dump risk) / 跳过：日涨跌幅过大",
-                    symbol, opp.price_change_pct_24h,
-                )
-                return
-            # 提高置信度阈值：auto-deploy 使用 0.55，避免追噪声信号
-            # Raise confidence threshold for auto-deployed strategies to reduce noise trading
-            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=qty, min_confidence=0.55)
-
-        elif category == "reversion":
-            strategy = BollingerReversionStrategy(symbol=symbol, qty_per_trade=qty)
-
-        elif category == "breakout":
-            strategy = BBBreakoutStrategy(symbol=symbol, qty_per_trade=qty)
-
-        if strategy is None:
-            return
-
-        # 0A-5: Pre-deployment backtest validation (fail-open).
-        # 0A-5：部署前回測驗證（fail-open，回測失敗不阻擋部署）。
-        if self._backtest_engine is not None:
-            if not self._validate_strategy_backtest(symbol, strategy.name, category):
-                return  # Backtest Sharpe too low — skip deployment / 回測 Sharpe 過低 — 跳過部署
-
-        # Inject api_category + leverage into strategy default metadata so all intents carry them.
-        # Pipeline bridge reads intent.metadata["category"] and intent.metadata["leverage"].
-        # 注入 api_category 和 leverage 到策略預設元數據，所有 intent 自動攜帶。
-        api_category = getattr(opp, "api_category", "linear")
-        if api_category != "linear":
-            strategy._default_metadata["category"] = api_category
-
-        # Compute and inject leverage based on category + volatility / 根據品類+波動率計算槓桿
-        leverage = self._compute_leverage(opp)
-        strategy._default_metadata["leverage"] = leverage
-
-        # Wave 7a 方案 B：通知 PipelineBridge 登記此 symbol 的 category。
-        # Wave 7a Plan B: notify PipelineBridge to register this symbol's category for
-        # accurate downstream kline/funding queries. Always register (even linear) so the
-        # bridge knows this symbol was explicitly deployed and won't emit a "no category" warning.
-        if self._pipeline_bridge is not None:
-            try:
-                self._pipeline_bridge.register_symbol_category(symbol, api_category)
-            except Exception as _reg_err:
-                # 登記失敗不阻斷部署流程，記錄 warning 即可
-                # Registration failure must not block strategy deployment (non-critical)
-                logger.warning(
-                    "Failed to register symbol category %s→%s with PipelineBridge: %s "
-                    "/ 登記 symbol category 失敗（非致命）：%s→%s",
-                    symbol, api_category, _reg_err, symbol, api_category,
-                )
-
-        # Unique registration key includes symbol to prevent name collision
-        # 唯一注册键包含 symbol 以防止名称冲突（R1 fix）
-        unique_name = f"{strategy.name}_{symbol}"
-
-        # Add symbol to kline manager if not tracked (use public API)
-        # 使用公开 API 检查是否已追踪
-        new_symbol = symbol not in self._km.get_tracked_symbols()
-        if new_symbol:
-            self._km.add_symbol(symbol)
-            # Bootstrap historical klines for new symbol
-            try:
-                self._km.bootstrap_from_rest(limit=200)
-            except Exception:
-                pass
-            # Subscribe market feed so live prices flow in for this symbol
-            # 订阅行情流，让该品种的实时价格数据流入
-            if self._market_feed_add_fn is not None:
-                try:
-                    self._market_feed_add_fn(symbol)
-                    logger.info("Market feed subscribed to %s / 行情流已订阅 %s", symbol, symbol)
-                except Exception:
-                    logger.debug("Market feed add skipped for %s (feed may not be running yet)", symbol)
-
-        # Register with unique name and activate
-        self._orch.register_strategy(strategy, name=unique_name)
-        self._orch.activate_strategy(unique_name)
-
-        # R2 fix: trigger initial indicator computation for newly added symbols
-        # so strategies don't have to wait for the next kline close.
-        # 为新添加的 symbol 触发初始指标计算，策略无需等待下一根 K线闭合。
-        if new_symbol:
-            for tf in self._km.get_timeframes():
-                try:
-                    self._orch.compute_indicators(symbol, tf)
-                except Exception:
-                    logger.debug(
-                        "Initial indicator computation skipped for %s:%s / 初始指标计算跳过",
-                        symbol, tf,
-                    )
-
-        _reason = getattr(opp, "reason", "") or ""
-        _api_cat = getattr(opp, "api_category", "linear")
-        self._deployed[key] = {
-            "symbol": symbol,
-            "category": category,
-            "api_category": _api_cat,
-            "strategy_name": unique_name,
-            "score": opp.score,
-            "leverage": leverage,
-            "deployed_ts_ms": int(time.time() * 1000),
-            "reason": _reason,
-        }
-        self._stats["strategies_deployed"] += 1
-
-        logger.info(
-            "Auto-deployed %s for %s (score=%.0f, leverage=%.1fx): %s / 自动部署策略",
-            category, symbol, opp.score, leverage, _reason,
+        """
+        DEAD-PY-2: Python strategy classes deleted — Rust openclaw_engine handles execution.
+        This method is retained as a stub for deployment tracking only.
+        DEAD-PY-2：Python 策略類已刪除 — Rust openclaw_engine 負責策略執行。
+        此方法保留為 stub 僅用於部署追蹤。
+        """
+        # TODO(R-07): Replace with Rust-side strategy deployment signal once R-07 phase complete.
+        # 待 R-07 完成後替換為 Rust 端策略部署信號。
+        logger.debug(
+            "DEAD-PY-2 stub: _deploy_strategy called for %s/%s (no-op, Rust handles execution) / "
+            "DEAD-PY-2 stub：_deploy_strategy 被調用（無操作，Rust 負責執行）",
+            symbol, category,
         )
+        return
 
     def notify_fill(self, strategy_name: str, fill: dict, is_open: bool) -> None:
         """

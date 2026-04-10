@@ -40,6 +40,43 @@ from fastapi.testclient import TestClient
 from app.phase2_strategy_routes import (
     phase2_router, KLINE_MANAGER, INDICATOR_ENGINE, SIGNAL_ENGINE, ORCHESTRATOR,
 )
+from local_model_tools.strategies.base import StrategyBase
+
+
+# DEAD-PY-2: Python strategy classes deleted. Register stub StrategyBase objects
+# so the HTTP route layer (activate/pause/stop) can still be tested.
+# DEAD-PY-2：Python 策略類已刪除。注冊 stub 對象以便繼續測試 HTTP 路由層。
+class _StubStrategy(StrategyBase):
+    """Minimal stub strategy for route testing after DEAD-PY-2.
+    DEAD-PY-2 後用於路由測試的最小 stub 策略。"""
+    def __init__(self, strategy_name: str) -> None:
+        super().__init__()
+        self._name = strategy_name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return f"Stub strategy for testing: {self._name}"
+
+    def on_signal(self, signal: dict) -> None:  # type: ignore[override]
+        pass
+
+    def on_tick(self, symbol: str, price: float, **kwargs) -> None:  # type: ignore[override]
+        pass
+
+    def get_status(self) -> dict:  # type: ignore[override]
+        return {"strategy": self._name, "state": self._state}
+
+
+def _ensure_stub_strategies_registered() -> None:
+    """Register stub strategies if not already present.
+    若尚未注冊，則注冊 stub 策略。"""
+    for _sname in ("BB_Reversion", "FundingRate_Arb", "MA_Crossover", "Grid_Trading"):
+        if _sname not in ORCHESTRATOR._strategies:
+            ORCHESTRATOR.register_strategy(_StubStrategy(_sname), name=_sname)
 
 
 # =============================================================================
@@ -206,6 +243,7 @@ class TestStrategyRoutes:
 
     def test_activate_strategy(self):
         """POST activate changes state to active / 激活策略"""
+        _ensure_stub_strategies_registered()
         resp = client.post("/api/v1/strategy/BB_Reversion/activate", headers=AUTH)
         assert resp.status_code == 200
         data = resp.json()["data"]
@@ -214,6 +252,7 @@ class TestStrategyRoutes:
 
     def test_pause_strategy(self):
         """POST pause changes state to paused / 暂停策略"""
+        _ensure_stub_strategies_registered()
         client.post("/api/v1/strategy/BB_Reversion/activate", headers=AUTH)
         resp = client.post("/api/v1/strategy/BB_Reversion/pause", headers=AUTH)
         assert resp.status_code == 200
@@ -222,6 +261,7 @@ class TestStrategyRoutes:
 
     def test_stop_strategy(self):
         """POST stop changes state to stopped / 停止策略"""
+        _ensure_stub_strategies_registered()
         client.post("/api/v1/strategy/FundingRate_Arb/activate", headers=AUTH)
         resp = client.post("/api/v1/strategy/FundingRate_Arb/stop", headers=AUTH)
         assert resp.status_code == 200
@@ -285,131 +325,4 @@ class TestIntentAndStatusRoutes:
             assert resp.json()["is_simulated"] is True, f"Not simulated: {route}"
 
 
-# =============================================================================
-# PipelineBridge Governance Hub Injection Tests (T1.01)
-# =============================================================================
-
-class TestPipelineBridgeGovernanceInjection:
-    """Test GovernanceHub injection into PipelineBridge / 治理集线器注入到管线桥接器的测试"""
-
-    def test_pipeline_bridge_has_governance_hub(self):
-        """PIPELINE_BRIDGE._governance_hub should not be None / 管线桥接器应已注入治理集线器"""
-        from app.phase2_strategy_routes import PIPELINE_BRIDGE
-
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
-        assert hasattr(PIPELINE_BRIDGE, '_governance_hub'), "PIPELINE_BRIDGE missing _governance_hub attribute"
-        assert PIPELINE_BRIDGE._governance_hub is not None, "PIPELINE_BRIDGE._governance_hub is None after injection"
-
-    def test_pipeline_bridge_has_set_governance_hub_method(self):
-        """PIPELINE_BRIDGE should have set_governance_hub() method / 管线桥接器应有 set_governance_hub() 方法"""
-        from app.phase2_strategy_routes import PIPELINE_BRIDGE
-
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
-        assert hasattr(PIPELINE_BRIDGE, 'set_governance_hub'), "PIPELINE_BRIDGE missing set_governance_hub method"
-        assert callable(getattr(PIPELINE_BRIDGE, 'set_governance_hub')), "set_governance_hub should be callable"
-
-    def test_governance_hub_from_paper_trading_routes(self):
-        """GOV_HUB from paper_trading_routes should be available and injected / 来自 paper_trading_routes 的 GOV_HUB 应已注入"""
-        from app.phase2_strategy_routes import PIPELINE_BRIDGE
-
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE is None"
-        # Check that governance hub is injected (not None).
-        # Note: identity check (is) relaxed because module reloads in other
-        # tests can create new GOV_HUB instances while PIPELINE_BRIDGE keeps
-        # the original reference — both are valid GovernanceHub objects.
-        assert PIPELINE_BRIDGE._governance_hub is not None, (
-            "PIPELINE_BRIDGE._governance_hub should be set after startup injection"
-        )
-
-    def test_is_authorized_check_works(self):
-        """PipelineBridge.is_authorized() should use GovernanceHub / 管线桥接器应能调用治理检查"""
-        from app.phase2_strategy_routes import PIPELINE_BRIDGE
-
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
-        # PipelineBridge should have a method that checks authorization via governance_hub
-        # This is a basic smoke test to ensure governance integration doesn't crash
-        assert PIPELINE_BRIDGE._governance_hub is not None, "Governance hub not properly injected"
-
-
-# =============================================================================
-# AutoDeployer ↔ PipelineBridge Bidirectional Wiring Tests (BLOCKING-1 fix)
-# AutoDeployer 与 PipelineBridge 双向注入测试（修复 BLOCKING-1）
-# =============================================================================
-
-class TestAutoDeployerPipelineBridgeWiring:
-    """
-    Verify bidirectional wiring between StrategyAutoDeployer and PipelineBridge.
-    验证 StrategyAutoDeployer 与 PipelineBridge 的双向注入已在模块启动时完成。
-
-    Background / 背景：
-      PIPELINE_BRIDGE.set_auto_deployer(AUTO_DEPLOYER)  # PipelineBridge 持有 AutoDeployer
-      AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE) # 反向注入：AutoDeployer 持有 PipelineBridge
-    Without the reverse injection, _symbol_category_map is never populated and
-    spot/inverse category-aware kline/funding lookups silently use wrong defaults.
-    若缺少反向注入，_symbol_category_map 永远为空，spot/inverse 品类的 kline/funding
-    查询将静默使用错误的默认 category。
-    """
-
-    def test_auto_deployer_has_pipeline_bridge_after_startup(self):
-        """
-        AUTO_DEPLOYER._pipeline_bridge must not be None after module startup.
-        模块启动后 AUTO_DEPLOYER._pipeline_bridge 不得为 None。
-
-        This is the key regression guard for BLOCKING-1: if the reverse injection
-        (AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)) is ever removed from
-        the startup block in phase2_strategy_routes.py, this test will catch it.
-        这是 BLOCKING-1 的关键回归守卫：若 phase2_strategy_routes.py 的启动块中
-        删除了反向注入调用，本测试将立即失败。
-        """
-        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
-
-        assert AUTO_DEPLOYER is not None, (
-            "AUTO_DEPLOYER not initialized — cannot verify pipeline bridge wiring"
-        )
-        assert PIPELINE_BRIDGE is not None, (
-            "PIPELINE_BRIDGE not initialized — cannot verify pipeline bridge wiring"
-        )
-        assert AUTO_DEPLOYER._pipeline_bridge is not None, (
-            "AUTO_DEPLOYER._pipeline_bridge is None — reverse injection "
-            "(AUTO_DEPLOYER.set_pipeline_bridge(PIPELINE_BRIDGE)) is missing from startup block. "
-            "Without this, _symbol_category_map is never populated for spot/inverse symbols."
-        )
-
-    def test_auto_deployer_pipeline_bridge_is_same_instance(self):
-        """
-        AUTO_DEPLOYER._pipeline_bridge must be the exact same object as PIPELINE_BRIDGE.
-        AUTO_DEPLOYER._pipeline_bridge 必须与模块级 PIPELINE_BRIDGE 是同一实例。
-
-        Ensures the startup wiring uses the correct module-level singleton and not
-        a stale or freshly constructed instance.
-        确保启动注入使用正确的模块级单例，而非过期或新建的实例。
-        """
-        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
-
-        assert AUTO_DEPLOYER is not None, "AUTO_DEPLOYER not initialized"
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
-        assert AUTO_DEPLOYER._pipeline_bridge is PIPELINE_BRIDGE, (
-            "AUTO_DEPLOYER._pipeline_bridge is not the same instance as PIPELINE_BRIDGE. "
-            "Symbol-category mappings will target the wrong bridge object."
-        )
-
-    def test_pipeline_bridge_has_auto_deployer_reference(self):
-        """
-        PIPELINE_BRIDGE must also hold a reference to AUTO_DEPLOYER (forward direction).
-        PIPELINE_BRIDGE 同样必须持有 AUTO_DEPLOYER 的引用（正向注入验证）。
-
-        Validates the existing forward injection is intact alongside the reverse injection.
-        验证正向注入（现有逻辑）与反向注入同时存在。
-        """
-        from app.phase2_strategy_routes import AUTO_DEPLOYER, PIPELINE_BRIDGE
-
-        assert AUTO_DEPLOYER is not None, "AUTO_DEPLOYER not initialized"
-        assert PIPELINE_BRIDGE is not None, "PIPELINE_BRIDGE not initialized"
-        # PipelineBridge stores auto_deployer in _auto_deployer attribute
-        # PipelineBridge 在 _auto_deployer 属性中存储 auto_deployer 引用
-        assert hasattr(PIPELINE_BRIDGE, "_auto_deployer"), (
-            "PIPELINE_BRIDGE missing _auto_deployer attribute — forward injection may have changed"
-        )
-        assert PIPELINE_BRIDGE._auto_deployer is not None, (
-            "PIPELINE_BRIDGE._auto_deployer is None — set_auto_deployer() call missing or failed"
-        )
+# TestPipelineBridgeGovernanceInjection + TestAutoDeployerPipelineBridgeWiring deleted (DEAD-PY-2)

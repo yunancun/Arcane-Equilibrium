@@ -30,7 +30,6 @@ from . import strategy_write_routes as _write  # noqa: F401
 # 顯式重新導出常見的直接導入
 from .strategy_wiring import (  # noqa: F811
     phase2_router,
-    PIPELINE_BRIDGE,
     PAPER_ENGINE,
     KLINE_MANAGER,
     INDICATOR_ENGINE,
@@ -44,10 +43,12 @@ from .strategy_wiring import (  # noqa: F811
     STRATEGIST_AGENT,
     GUARDIAN_AGENT,
     ANALYST_AGENT,
-    DEMO_CONNECTOR,
     TELEGRAM,
     PAPER_LIVE_GATE,
 )
+# DEAD-PY-2: PIPELINE_BRIDGE = None, DEMO_CONNECTOR = None (both removed)
+PIPELINE_BRIDGE = None
+DEMO_CONNECTOR = None
 
 # Re-export route functions for test imports
 # 重新導出路由函數供測試導入

@@ -135,20 +135,20 @@ class TestStartupIntegrityCheck:
             )
         assert "risk_manager" in str(exc_info.value)
 
-    def test_pipeline_bridge_none_startup_passes_with_warning(self, caplog):
-        """PIPELINE_BRIDGE = None → degraded mode; startup passes, warning logged.
-        PIPELINE_BRIDGE 為 None → 降級模式；啟動成功，記錄警告。
+    def test_pipeline_bridge_none_startup_passes_with_warning(self):
+        """PIPELINE_BRIDGE = None → DEAD-PY-2: removed from startup check; startup always passes.
+        PIPELINE_BRIDGE = None → DEAD-PY-2：已從啟動檢查移除；啟動直接通過。
         """
-        import logging
-        with caplog.at_level(logging.WARNING):
-            _run_startup(
-                gov_hub=_make_stub(),
-                engine=_make_stub(),
-                risk_manager=_make_stub(),
-                pipeline_bridge=None,
-                h0_gate=_make_stub(),
-            )
-        assert any("pipeline_bridge" in r.message.lower() or "PIPELINE_BRIDGE" in r.message for r in caplog.records)
+        # DEAD-PY-2: PIPELINE_BRIDGE is permanently None and no longer checked at startup.
+        # This test verifies startup passes regardless of the pipeline_bridge value.
+        _run_startup(
+            gov_hub=_make_stub(),
+            engine=_make_stub(),
+            risk_manager=_make_stub(),
+            pipeline_bridge=None,
+            h0_gate=_make_stub(),
+        )
+        # If we reach here without RuntimeError, the test passes.
 
     def test_h0_gate_none_startup_passes_with_warning(self, caplog):
         """H0_GATE = None → degraded mode; startup passes, warning logged.

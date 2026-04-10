@@ -138,85 +138,8 @@ class TestCognitiveHonestyBlock:
 # IT-P2-04: Position open auto-creates hard stop-loss
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestProtectiveOrderAutoCreate:
-    """IT-P2-04: ProtectiveOrderManager creates hard stop on new position"""
-
-    def test_create_hard_stop(self):
-        from app.protective_order_manager import (
-            ProtectiveOrderManager, ProtectiveOrderType, ProtectiveOrderSide,
-            ProtectiveOrderStatus,
-        )
-
-        pom = ProtectiveOrderManager()
-        order = pom.create_protective_order(
-            symbol="BTCUSDT",
-            side=ProtectiveOrderSide.LONG_POSITION,
-            order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-            entry_price=40000.0,
-            trigger_price_pct=5.0,
-            quantity=0.1,
-        )
-        assert order is not None
-        assert order.order_type == ProtectiveOrderType.HARD_STOP_LOSS
-        assert order.symbol == "BTCUSDT"
-        assert order.status in (ProtectiveOrderStatus.CREATED, ProtectiveOrderStatus.ARMED)
-        assert order.can_be_disabled is False, "HARD_STOP_LOSS must not be disableable"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# IT-P2-05: Hard stop trigger fires close action
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestHardStopTrigger:
-    """IT-P2-05: Price hitting hard stop triggers protective action"""
-
-    def test_trigger_on_price_drop(self):
-        from app.protective_order_manager import (
-            ProtectiveOrderManager, ProtectiveOrderType, ProtectiveOrderSide,
-        )
-
-        pom = ProtectiveOrderManager()
-        order = pom.create_protective_order(
-            symbol="BTCUSDT",
-            side=ProtectiveOrderSide.LONG_POSITION,
-            order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-            entry_price=40000.0,
-            trigger_price_pct=5.0,  # trigger at ~38000
-            quantity=0.1,
-        )
-
-        # Price drops below stop level
-        market_state = {"BTCUSDT": {"price": 37000.0}}
-        result = pom.check_triggers(market_state)
-        assert result is not None
-        assert len(result.triggered_orders) >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# IT-P2-06: Hard stop cannot be cancelled
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestHardStopCannotCancel:
-    """IT-P2-06: HARD_STOP_LOSS with can_be_disabled=False cannot be cancelled"""
-
-    def test_cancel_rejected(self):
-        from app.protective_order_manager import (
-            ProtectiveOrderManager, ProtectiveOrderType, ProtectiveOrderSide,
-        )
-
-        pom = ProtectiveOrderManager()
-        order = pom.create_protective_order(
-            symbol="BTCUSDT",
-            side=ProtectiveOrderSide.LONG_POSITION,
-            order_type=ProtectiveOrderType.HARD_STOP_LOSS,
-            entry_price=40000.0,
-            trigger_price_pct=5.0,
-            quantity=0.1,
-        )
-
-        cancelled = pom.cancel_order(order.order_id, reason="user wants to remove")
-        assert cancelled is False, "HARD_STOP_LOSS must not be cancellable"
-
+# IT-P2-04~06: ProtectiveOrderManager tests deleted (DEAD-PY-2 — POM removed).
+# IT-P2-04~06：ProtectiveOrderManager 測試已刪除（DEAD-PY-2 — POM 已移除）。
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IT-P2-07: Change record contains WHO/WHEN
@@ -445,12 +368,10 @@ class TestPhase2ModuleInjection:
         from app.paper_trading_routes import PERCEPTION_PLANE
         assert PERCEPTION_PLANE is not None
 
-    def test_protective_order_manager_injected(self):
-        """T2.03: ProtectiveOrderManager exists (RC-10: ENGINE disabled, Rust is sole engine)"""
+    def test_protective_order_manager_removed(self):
+        """DEAD-PY-2: PROTECTIVE_ORDER_MANAGER is always None (POM removed)."""
         from app.paper_trading_routes import PROTECTIVE_ORDER_MANAGER
-        # RC-10: ENGINE is None — ProtectiveOrderManager created but not injected into ENGINE
-        # Verify the singleton exists independently / 驗證單例獨立存在
-        assert PROTECTIVE_ORDER_MANAGER is not None
+        assert PROTECTIVE_ORDER_MANAGER is None, "DEAD-PY-2: POM should be None after cleanup"
 
     def test_change_audit_log_injected(self):
         """T2.04: ChangeAuditLog injected into GovernanceHub"""
