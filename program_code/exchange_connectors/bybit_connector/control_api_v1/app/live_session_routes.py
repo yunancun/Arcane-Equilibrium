@@ -601,6 +601,7 @@ def get_live_session_status(
         "engine_available": engine_available,
         "execution_authority": execution_authority,
         "trading_mode": trading_mode,
+        "system_mode": _get_global_mode_state(),
         "session": {
             "session_state": session_state,
             "session_id": "rust_engine_live",

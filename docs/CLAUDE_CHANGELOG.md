@@ -3,6 +3,44 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-11
 
+### system_mode GUI→Rust 同步 + 3E-ARCH 計劃 + GridTrading multi-symbol（2026-04-11）
+
+**system_mode 同步**（6 文件實現）：
+- `tick_pipeline.rs`：新增 `SystemMode` 枚舉（live_reserved/demo_reserved/shadow_only/observe_only/design_only），`system_mode` 字段，on_tick gate，`set_system_mode()` 方法（自動平倉 + 暫停 paper）
+- `pipeline_types.rs`：`PipelineSnapshot` 新增 `system_mode: String`
+- `event_consumer/handlers.rs`：`SetSystemMode` handler arm
+- `ipc_server.rs`：`set_system_mode` IPC 命令，`get_state` 改從快照讀 system_mode（移除硬編碼 "demo_only"）
+- `ipc_client.py`：`sync_ipc_call()` 同步 IPC 輔助函數
+- `control_ops.py`：`apply_config_change` 後 push system_mode 到 Rust（盡力而為）
+- `live_session_routes.py`：session status 新增 `system_mode` 字段
+
+**GridTrading multi-symbol 修復**（pre-existing 未修復項）：
+- 新增 `template_bounds: Option<(f64, f64)>` 字段，3 個構造函數補齊
+- 2 個測試適配 HashMap 索引（lines 1053-1055, 1071）
+
+**3E-ARCH 計劃文件**：
+- `docs/references/2026-04-11--three_engine_parallel_arch_plan.md`（PM+PA+FA 三角色分析）
+- TODO.md 更新：3E-ARCH 段落 + W22 排期 + 關鍵路徑
+
+**測試基線**：engine lib 879 + e2e 18 + Python 2792 / 0 fail
+
+### Multi-Symbol Position Tracking Refactor（2026-04-11）
+
+**問題**：4 策略各持單一全局 `position: Option<bool>`，理論併發上限僅 4 倉，遠低於風控 `open_positions_max=25`。
+
+**修復**：
+- MaCrossover / BbReversion / BbBreakout / GridTrading 全部改為 `HashMap<String, bool>` per-symbol 追蹤
+- GridTrading `new()` / `new_geometric()` 移除硬編碼 `"BTC"` key + 預填 grid，改為 `template_bounds` 延遲初始化
+- `on_tick` 首次收到 symbol 時：有 template_bounds 用模板邊界，否則 ±10% adaptive
+- 生產路徑 `new_adaptive()` 行為不變
+- 7 個測試適配延遲初始化
+
+**容量**：理論上限 4 → 100（4 策略 × 25 symbols），實際受風控 `open_positions_max` / `max_same_direction` 約束。
+
+**測試基線**：engine lib 879 + e2e 18 / 0 fail
+
+---
+
 ### W21 6-04~08 Phase 6 驗收（2026-04-11）
 
 **6-04 集成測試**（reconciler_e2e.rs +11 場景，7→18）：

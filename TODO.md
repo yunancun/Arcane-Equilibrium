@@ -1,10 +1,30 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（DB fresh-start reset · 乾淨數據重新起算 · 審計 G-1~G-10 全入計劃）
+最後更新：2026-04-11（3E-ARCH 三引擎並行架構計劃 + trading_mode 清除計劃錄入）
 測試基準線：**Rust engine lib 879 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
+
+---
+
+## 🏗️ 3E-ARCH — 三引擎並行架構 + trading_mode 清除（P0 · W22 首要）
+
+**背景**：當前系統是「單一 TickPipeline + 模式切換」（Signal Diamond Phase 3 中間態）。用戶目標是 Paper / Demo / Live 三管線**同時並行**，各自接入對應 API，各自寫 DB，由 `system_mode` 統一治理。`trading_mode` 全局配置是單引擎遺物，三引擎世界中無意義，需徹底移除。
+
+**計劃文件**：`docs/references/2026-04-11--three_engine_parallel_arch_plan.md`
+
+- [ ] **3E-6** Sidebar 顯示修正：`system_mode` 替換 `trading_mode`，GUI 完全不出現 trading_mode（無後端依賴，可立即做）
+- [ ] **3E-1** `PipelineKind` 枚舉替換 `TradingMode`：TickPipeline 固定身份，移除 mode_states/active_modes/set_trading_mode（tick_pipeline.rs ~-200+30 行）
+- [ ] **3E-2** 三管線並行啟動：main.rs spawn 3 個 run_event_consumer()，公共 WS fan-out，per-pipeline private WS + REST client + paper_cmd_tx channel
+- [ ] **3E-3** IPC Server 三管線路由：`EngineCommandChannels` struct，engine 參數路由，三個獨立快照文件
+- [ ] **3E-4** `TradingMode` + `EngineConfig` Rust 完整清除：移除 enum、config 字段、TOML 條目、cold-reload 警告
+- [ ] **3E-5** Python 側清除：移除 `_get_trading_mode_from_engine()`，session status 改返回 `active_engines`，ipc_state_reader 改用 per-engine 快照文件
+- [ ] **3E-E2** E2 代碼審查（3E-1~5 完成後）
+- [ ] **3E-E4** E4 測試回歸（基線：879 lib + 18 e2e + 2792 Python，全部必須 pass）
+
+**排期**：W22（2026-05-05~09）—— Phase 6 驗收（W21）後、AI Agent 接線（W23）前  
+**執行順序**：3E-6（立即）→ 3E-1+3E-3 並行 → 3E-2 → 3E-4 → 3E-5 → E2+E4
 
 ---
 
@@ -15,11 +35,11 @@
 | W19 | 04-14~18 | **G-3** IPC 認證 · **G-5** Rate Limit · **OC-3** / **6-RC-6** 告警分級 |
 | W20 | 04-21~25 | SEC-04/06/13 E3 審查 · **6-01~03** 漸進放權 |
 | W21 | 04-28~05-02 | **6-04~13** Phase 6 完整驗收 · LG-1 倒計時 |
-| W22 | 05-05~09 | **G-1 R-02** AI Agent Strategist/Guardian · **G-2/OC-5** FundingArb · LG-2/3 |
+| W22 | 05-05~09 | **3E-ARCH** 三引擎並行 + trading_mode 清除 · **G-1 R-02** AI Agent · LG-2/3 |
 | W23 | 05-12~16 | **G-1 R-06** Agent 完整 · **G-7** Teacher 啟用 · **G-10** Calibration · LG-4/5 |
 | W24+ | 05-19+ | Phase 5 補強 · Backlog |
 
-**關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(21d到05-01) → LG-2 → LG-4 → Live`
+**關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(21d到05-01) → 3E-ARCH(W22) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
 
 ---
