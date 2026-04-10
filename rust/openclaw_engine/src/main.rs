@@ -12,6 +12,7 @@ use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
     load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
+    TradingMode,
 };
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::IpcServer;
@@ -199,10 +200,8 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // learning_store currently has no consumer (LearningConfig IPC endpoints
-    // land in 1C-2-C). Keep the binding alive so the store doesn't drop.
-    // learning_store 目前沒有消費者（LearningConfig IPC 端點在 1C-2-C），
-    // 保留綁定以免 store 被釋放。
+    // learning_store is consumed by the A2 news pipeline scheduler (hot-reload gate).
+    // learning_store 由 A2 新聞管線排程器使用（熱重載 gate）。
     let _learning_store_held = Arc::clone(&learning_store);
 
     // ------------------------------------------------------------------
@@ -587,7 +586,15 @@ async fn async_main(
         None;
     let mut shared_account_manager: Option<Arc<AccountManager>> = None;
     let cfg_snapshot = config.get();
-    if let Ok(rest_client) = BybitRestClient::new(BybitEnvironment::Demo, None, None) {
+    // Derive Bybit environment from trading_mode (LIVE-P1-2):
+    // PaperOnly/Demo → api-demo.bybit.com; Live → api.bybit.com (requires OPENCLAW_ALLOW_MAINNET=1)
+    // 根據 trading_mode 派生 Bybit 環境（LIVE-P1-2）：
+    // PaperOnly/Demo → Demo 環境；Live → 主網（需 OPENCLAW_ALLOW_MAINNET=1）
+    let bybit_env = match cfg_snapshot.trading_mode {
+        TradingMode::Live => BybitEnvironment::Mainnet,
+        TradingMode::Demo | TradingMode::PaperOnly => BybitEnvironment::Demo,
+    };
+    if let Ok(rest_client) = BybitRestClient::new(bybit_env, None, None) {
         if rest_client.has_credentials() {
             let (key, secret) = rest_client.credentials();
             api_credentials = Some((key.to_string(), secret.to_string()));
@@ -1032,10 +1039,12 @@ async fn async_main(
                         break;
                     }
 
+                    // Use bybit_env derived from trading_mode — Demo or Mainnet (LIVE-P1-2)
+                    // 使用從 trading_mode 派生的 bybit_env — Demo 或 Mainnet（LIVE-P1-2）
                     let priv_ws = BybitPrivateWs::new(
                         api_key_owned.clone(),
                         api_secret_owned.clone(),
-                        BybitEnvironment::Demo,
+                        bybit_env,
                         sv_cancel.clone(),
                         priv_tx.clone(),
                     );
@@ -1187,9 +1196,9 @@ async fn async_main(
     info!(
         "Phase 4 governance+guardian wrappers constructed (sharing halted atomic) / W-1/W-2 wrappers 已構造"
     );
-    // Keep guardian impl alive for future news pipeline wiring.
-    // 保持 guardian impl 存活供未來新聞 pipeline 接線使用。
-    let _phase4_guardian_impl = guardian_impl;
+    // Guardian impl is consumed by the A2 news pipeline scheduler below.
+    // Guardian impl 由下方 A2 新聞 pipeline 排程器使用。
+    let phase4_guardian_impl = guardian_impl;
 
     // ------------------------------------------------------------------
     // Phase 4.1: Construct + spawn TeacherConsumerLoop (DEFAULT-OFF).
@@ -1266,6 +1275,101 @@ async fn async_main(
     // 保持 governance wrapper 存活（db_pool 可用時已被 clone 進 applier，
     // 此 binding 確保它在 main 餘下時間都存活）。
     let _phase4_governance_wrapper = governance_wrapper;
+
+    // ------------------------------------------------------------------
+    // A2: NewsPipeline 60s scheduler — periodic news fetch → dedup → score → persist.
+    // Gated by LearningConfig.switches.news_pipeline_enabled (hot-reloadable).
+    // Providers: CryptoPanic (free tier, 28min self-throttle) + 2 RSS feeds.
+    // Router: Guardian halt check + regime buffer + learning context sink.
+    //
+    // A2：新聞管線 60s 排程器 — 定期拉取新聞 → 去重 → 評分 → 寫入。
+    // 受 LearningConfig.switches.news_pipeline_enabled 控制（可熱重載）。
+    // Providers：CryptoPanic（免費版，28min 自限流）+ 2 個 RSS feed。
+    // Router：Guardian halt check + regime buffer + learning context sink。
+    // ------------------------------------------------------------------
+    {
+        use openclaw_engine::news::{
+            CryptoPanicProvider, GuardianHaltCheck, LearningContextSink,
+            LearningContextSinkImpl, NewsPipeline, NewsRouter, RssProvider,
+        };
+        use tokio::sync::RwLock;
+
+        // Build providers: CryptoPanic (key from env, None = AuthMissing on fetch) + 2 RSS.
+        // 建構 providers：CryptoPanic（env 取 key，None = fetch 時回 AuthMissing）+ 2 RSS。
+        let cryptopanic_key = std::env::var("CRYPTOPANIC_API_KEY").ok();
+        let providers: Vec<Box<dyn openclaw_engine::news::NewsProvider>> = vec![
+            Box::new(CryptoPanicProvider::new(cryptopanic_key)),
+            Box::new(RssProvider::cointelegraph()),
+            Box::new(RssProvider::google_news_crypto()),
+        ];
+
+        // Build 4-09 triple-route NewsRouter (Guardian + Regime + Learning).
+        // 建構 4-09 三路 NewsRouter（Guardian + Regime + Learning）。
+        let learning_sink = Arc::new(LearningContextSinkImpl::new(
+            Arc::clone(&shared_news_snapshot),
+        ));
+        let regime_buffer = Arc::new(RwLock::new(
+            openclaw_engine::news::RegimeNewsBuffer::default(),
+        ));
+        let router = Arc::new(NewsRouter::new(
+            Some(phase4_guardian_impl as Arc<dyn GuardianHaltCheck>),
+            regime_buffer,
+            Some(learning_sink as Arc<dyn LearningContextSink>),
+        ));
+
+        // Build pipeline with router attached.
+        // 建構帶 router 的 pipeline。
+        let pipeline = Arc::new(
+            NewsPipeline::new(providers, Arc::clone(&db_pool)).with_router(router),
+        );
+
+        let news_learning_store = Arc::clone(&learning_store);
+        let news_cancel = cancel.clone();
+        tokio::spawn(async move {
+            // 60s interval; skip first immediate tick (providers may not be ready).
+            // 60 秒間隔；跳過首次立即 tick（providers 可能尚未就緒）。
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            interval.tick().await; // skip first immediate tick
+            loop {
+                tokio::select! {
+                    _ = news_cancel.cancelled() => {
+                        info!("A2 news pipeline scheduler stopping (cancel) / 新聞管線排程器停止");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        // Hot-reload gate: check LearningConfig each tick.
+                        // 熱重載 gate：每 tick 檢查 LearningConfig。
+                        let cfg = news_learning_store.load();
+                        if !cfg.switches.news_pipeline_enabled {
+                            debug!("news pipeline disabled by config, skipping / 新聞管線已被配置禁用，跳過");
+                            continue;
+                        }
+
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64;
+                        match pipeline.run_once(now_ms).await {
+                            Ok(items) => {
+                                if !items.is_empty() {
+                                    info!(
+                                        count = items.len(),
+                                        "A2 news pipeline: new items processed / 新聞管線：新項目已處理"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "A2 news pipeline run_once failed / 新聞管線 run_once 失敗");
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        info!(
+            "A2 news pipeline scheduler spawned (60s interval, gated by news_pipeline_enabled) / A2 新聞管線排程器已啟動"
+        );
+    }
 
     let (market_tx, market_rx) = if db_pool.is_available() {
         let (tx, rx) = tokio::sync::mpsc::channel(4096);
