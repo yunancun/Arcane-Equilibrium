@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（SEC-05 + WP-F/AH-06 完畢）
-測試基準線：**Rust engine lib 838 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-10（LIVE-P0/P1/P2 + SEC-05 + WP-F/AH-06 全部完畢）
+測試基準線：**Rust engine lib 840 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。

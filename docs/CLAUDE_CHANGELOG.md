@@ -26,10 +26,11 @@
 
 ---
 
-### SEC-05 innerHTML XSS + WP-F/AH-06 risk-tab dirty-tracking（2026-04-10）
+### SEC-05 innerHTML XSS + WP-F/AH-06 risk-tab dirty-tracking（2026-04-10 · commits 19b40dc + b7b7651）
 
 **SEC-05 innerHTML XSS remediation** across GUI:
 - `app.js`: `safeText()` now delegates to `ocEsc()` (covers ~20+ call sites at once); 15+ individual `ocEsc()` wraps for paper positions/orders/fills, market feed, learning feed, cost breakdown, risk envelope
+- `app.js` supplement (b7b7651): 4 badge/label function fallbacks escaped — `confidenceBadge`, `statusBadge`, `reviewStatusBadge`, `reviewTypeLabel`
 - `cards/linucb_card.html`: `ocEsc()` on regime names, arm_id, shadow champion/challenger/decision
 - `tab-ai.html`: `ocEsc()` on Kelly strategy keys and tier labels
 - Remaining files (tab-governance, tab-settings, tab-system, tab-live, console) audited — already properly escaped or use hardcoded data only
