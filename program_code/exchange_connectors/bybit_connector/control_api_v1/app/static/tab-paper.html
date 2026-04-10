@@ -68,11 +68,14 @@
 
 <!-- Positions / 持仓 -->
 <div class="oc-card">
-  <h3>&#x1F4CA; 持仓 / Positions</h3>
+  <h3 style="display:flex;align-items:center;gap:10px">
+    &#x1F4CA; 持仓 / Positions
+    <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平仓</button>
+  </h3>
   <div class="oc-table-wrap">
     <table class="oc-table">
-      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th></tr></thead>
-      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="9">暂无持仓</td></tr></tbody>
+      <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>操作</th></tr></thead>
+      <tbody id="positions-tbody"><tr class="empty-row"><td colspan="10">暂无持仓</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -282,7 +285,7 @@ async function loadPositions() {
   ocSetText('p-bal-margin', totalMargin > 0 ? ocBalance(totalMargin, 2) : '$0.00');
 
   if (!positions.length) {
-    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="9">暂无持仓</td></tr>');
+    ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="10">暂无持仓</td></tr>');
     return;
   }
   let html = '';
@@ -310,9 +313,36 @@ async function loadPositions() {
     html += '<td>' + (markPrice > 0 ? ocNum(markPrice, decimals) : '--') + '</td>';
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
+    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="closePosition(\'' + ocEsc(p.symbol) + '\')">平仓</button></td>';
     html += '</tr>';
   });
   ocSetHtml('positions-tbody', html);
+}
+
+async function closePosition(symbol) {
+  // Close a single paper position via IPC close_position command.
+  // 通過 IPC close_position 指令平掉單一持倉。
+  if (!confirm('确认平仓 ' + symbol + '？/ Confirm close ' + symbol + '?')) return;
+  const d = await ocPost('/api/v1/paper/positions/' + encodeURIComponent(symbol) + '/close', {});
+  if (d) {
+    ocToast(symbol + ' 平仓指令已发送 / close sent', 'success');
+    setTimeout(loadPositions, 1000);
+  } else {
+    ocToast(symbol + ' 平仓失败 / close failed', 'error');
+  }
+}
+
+async function closeAllPositions() {
+  // Close all paper positions via IPC close_all_positions.
+  // 通過 IPC close_all_positions 平掉所有持倉。
+  if (!confirm('确认平掉所有持仓？/ Confirm close ALL positions?')) return;
+  const d = await ocPost('/api/v1/paper/session/stop', {});
+  if (d) {
+    ocToast('全部平仓指令已发送 / close all sent', 'success');
+    setTimeout(loadAll, 1500);
+  } else {
+    ocToast('平仓失败 / close failed', 'error');
+  }
 }
 
 async function loadOrders() {

@@ -39,6 +39,9 @@ pub enum PaperSessionCommand {
     /// Close all open positions at current market prices.
     /// 以當前市場價格平掉所有持倉。
     CloseAll,
+    /// Close a single position by symbol at current market price.
+    /// 以當前市場價格平掉指定 symbol 的持倉。
+    CloseSymbol { symbol: String },
     /// Reset paper state — clear positions, reset balance.
     /// 重置紙盤狀態 — 清倉、重置餘額。
     Reset { new_balance: f64 },

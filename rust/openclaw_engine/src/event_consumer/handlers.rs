@@ -45,6 +45,11 @@ pub(super) fn handle_paper_command(
             info!(closed = closed, "IPC close_all_positions / IPC 全部平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
+        PaperSessionCommand::CloseSymbol { symbol } => {
+            let pnl = pipeline.paper_state.close_position_at_market(&symbol);
+            info!(symbol = symbol.as_str(), pnl = ?pnl, "IPC close_position / IPC 單倉平倉");
+            snapshot_writer.force_write(&pipeline.snapshot());
+        }
         PaperSessionCommand::Reset { new_balance } => {
             pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
             pipeline.stats = crate::tick_pipeline::TickStats::default();
