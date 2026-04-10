@@ -20,65 +20,8 @@ html, body {
   color: var(--text);
 }
 
-/* ── Lock overlay / 鎖定頁 ─────────────────────────────────── */
-.live-lock-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 70vh;
-  text-align: center;
-  padding: 40px 24px;
-}
-.lock-icon { font-size: 56px; margin-bottom: 16px; }
-.lock-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-.lock-sub {
-  font-size: 13px; color: var(--text-dim); margin-bottom: 24px;
-  max-width: 500px; line-height: 1.6;
-}
-
-/* ── Prereq grid / 前置條件列表 ────────────────────────────── */
-.prereq-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
-  width: 100%; max-width: 880px;
-  margin-bottom: 28px;
-  text-align: left;
-}
-.prereq-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-.prereq-card.done  { border-color: rgba(63,185,80,0.35); }
-.prereq-card.warn  { border-color: rgba(210,153,34,0.35); }
-.prereq-card.todo  { border-color: var(--border); }
-.pc-header {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
-}
-.pc-title { font-size: 12px; font-weight: 600; }
-.pc-desc  { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
-.dot-done { width:8px; height:8px; border-radius:50%; background:#3fb950; flex-shrink:0; }
-.dot-todo { width:8px; height:8px; border-radius:50%; background:#484f58; border:1px solid #6e7681; flex-shrink:0; }
-.dot-warn { width:8px; height:8px; border-radius:50%; background:#d29922; flex-shrink:0; }
-
-.phase-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3);
-  color: #d29922; border-radius: 20px; padding: 4px 14px;
-  font-size: 12px; font-weight: 600; margin-bottom: 18px;
-}
-.state-row {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  justify-content: center; margin-bottom: 20px;
-}
-
-/* ── Dashboard (shown when execution_authority=granted) ───── */
-/* 儀表板（execution_authority=granted 時顯示）*/
-.live-dashboard { display: none; }
-.live-dashboard.active { display: block; }
+/* ── Dashboard / 實盤儀表板 ─────────────────────────────────── */
+.live-dashboard { display: block; }
 
 .live-warn-bar {
   display: flex; align-items: center; gap: 10px;
@@ -189,49 +132,8 @@ html, body {
 </style>
 
 <!-- ══════════════════════════════════════════════════════════════
-     LOCK VIEW — shown when execution_authority ≠ granted
-     鎖定視圖 — execution_authority ≠ granted 時顯示
-═══════════════════════════════════════════════════════════════ -->
-<div id="live-lock-view">
-<div class="live-lock-wrap">
-
-  <div class="lock-icon">&#x1F512;</div>
-  <div class="lock-title">实盘交易 — 待授权 / Live Trading — Awaiting Authorization</div>
-  <div class="lock-sub">
-    实盘基础设施已就绪（Live_Ready）。Operator 授予 execution_authority 后即可进入实盘仪表板。<br>
-    Demo 环境测试：使用 Demo API Key 可完整测试 live session 流程，不涉及真实资金。
-  </div>
-
-  <!-- Phase badge (dynamic) / 動態 Phase badge -->
-  <div class="phase-badge" id="lock-phase-badge">&#x23F3; 載入中...</div>
-
-  <!-- Runtime state chips / 運行時狀態 chip -->
-  <div class="state-row" id="lock-state-row">
-    <span class="oc-chip oc-chip-neutral">loading...</span>
-  </div>
-
-  <!-- Prerequisite cards (dynamically rendered) / 動態渲染前置條件卡片 -->
-  <div class="prereq-grid" id="lock-prereq-grid">
-    <div class="oc-loading">Loading prerequisites...</div>
-  </div>
-
-  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px">
-    <button class="oc-btn oc-btn-danger" style="font-weight:700;padding:10px 24px" onclick="grantLiveAuthority()">
-      &#x1F513; 授予 Execution Authority / Grant Authority
-    </button>
-  </div>
-
-  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6;text-align:center;margin-top:16px">
-    &#x26A0;&#xFE0F; 授予后进入实盘仪表板。Demo 模式下使用 demo API key，无真实资金风险。<br>
-    Mainnet 真实资金交易须另配置 OPENCLAW_ALLOW_MAINNET=1 + live API key。
-  </div>
-
-</div>
-</div>
-
-<!-- ══════════════════════════════════════════════════════════════
-     DASHBOARD VIEW — shown when execution_authority = granted
-     儀表板視圖 — execution_authority = granted 時顯示
+     LIVE DASHBOARD — Live_Ready, always shown
+     實盤儀表板 — Live_Ready 狀態，直接顯示
 ═══════════════════════════════════════════════════════════════ -->
 <div id="live-dashboard-view" class="live-dashboard">
 <div class="live-wrap">
@@ -254,7 +156,6 @@ html, body {
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
     <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
-    <button class="oc-btn" style="font-size:11px;padding:6px 12px;opacity:0.7" onclick="revokeLiveAuthority()" title="撤銷 Execution Authority / Revoke Authority">&#x1F512; 撤銷授權</button>
   </div>
 
   <!-- PnL + metrics / 收益指標 -->
@@ -360,160 +261,12 @@ function openStopDialog() { document.getElementById('dlg-live-stop').classList.a
 function openEmergencyDialog() { document.getElementById('dlg-live-emergency').classList.add('show'); }
 
 // ═══════════════════════════════════════════════════════════════
-// Prerequisite data / 前置條件數據
-// ═══════════════════════════════════════════════════════════════
-const PREREQS = [
-  {
-    id: 'h0_gate',
-    title: 'H0 Gate — 確定性門控',
-    desc: 'DOC-02 規定 <1ms 本地判斷內核，Live 前必須實施並壓測驗證。',
-    // Dynamic check via engine status
-    // 動態查詢引擎狀態
-    check: (s) => s.h0_gate_active ? 'done' : 'warn',
-  },
-  {
-    id: 'paper_21d',
-    title: 'Paper Trading 穩定運行 21 天',
-    desc: '模擬引擎需連續穩定運行滿 21 天，積累足夠歷史成交數據。',
-    check: (s) => s.paper_running_days >= 21 ? 'done' : 'todo',
-    detail: (s) => s.paper_running_days > 0 ? `（目前 ${s.paper_running_days} 天）` : '',
-  },
-  {
-    id: 'backtest_alpha',
-    title: '回測引擎驗證策略 Alpha',
-    desc: '所有部署策略須通過回測引擎驗證，證明存在可重複的統計 alpha。',
-    check: (s) => s.backtest_alpha_verified ? 'done' : 'todo',
-  },
-  {
-    id: 'phase6_done',
-    title: 'Phase 6 漸進放權完成',
-    desc: 'Phase 6 漸進放權框架 + Reconciler 自動收縮 + 壓測通過。',
-    check: (s) => s.phase6_done ? 'done' : 'todo',
-  },
-  {
-    id: 'governance_failclosed',
-    title: '治理 fail-closed 驗證',
-    desc: 'GovernanceHub 4 SM 已接入，is_authorized / acquire_lease fail-closed 已驗證通過。',
-    check: (s) => 'done',  // verified in code / 已在代碼中驗證
-  },
-  {
-    id: 'risk_framework',
-    title: 'P0/P1/P2 風控實測',
-    desc: '三層風控框架已實測：check_order_allowed 返回 False 實際阻止訂單執行。',
-    check: (s) => 'done',
-  },
-  {
-    id: 'live_key_configured',
-    title: 'Live API Key 已配置',
-    desc: 'settings/api-key/live 槽位需填入有效 Bybit API key。',
-    check: (s) => s.live_key_configured ? 'done' : 'warn',
-  },
-  {
-    id: 'supervised_gate',
-    title: 'Supervised Live Gate (M 章)',
-    desc: 'M 章受監督實盤門控完整實施，包括 authority grant contract 和 execution adapter contract。',
-    check: (s) => s.supervised_gate_done ? 'done' : 'todo',
-  },
-  {
-    id: 'alert_infra',
-    title: '多通道告警基礎設施 (OC-3)',
-    desc: '緊急群 P0 告警 + 常規群 P1 告警 + 15s 介入窗口 (Phase 6-RC-6 依賴)。',
-    check: (s) => s.alert_infra_ready ? 'done' : 'todo',
-  },
-  {
-    id: 'remote_security',
-    title: '遠程訪問安全加固',
-    desc: 'Tailscale + HTTPS + CSP 已配置，GUI 登錄認證已啟用。',
-    check: (s) => 'done',
-  },
-];
-
-// ═══════════════════════════════════════════════════════════════
-// Load prerequisite status / 加載前置條件狀態
-// ═══════════════════════════════════════════════════════════════
-async function loadPrereqStatus() {
-  // Fetch all data in parallel / 並行獲取所有數據
-  const [govRes, paperRes, apiKeyRes] = await Promise.allSettled([
-    ocApi('/api/v1/governance/status'),
-    ocApi('/api/v1/paper/session/status'),
-    ocApi('/api/v1/settings/api-key/live'),
-  ]);
-
-  const gov = (govRes.status === 'fulfilled' && govRes.value && govRes.value.data) ? govRes.value.data : {};
-  const paper = (paperRes.status === 'fulfilled' && paperRes.value && paperRes.value.data) ? paperRes.value.data : {};
-  const liveKey = (apiKeyRes.status === 'fulfilled' && apiKeyRes.value) ? (apiKeyRes.value.data || apiKeyRes.value) : {};
-
-  // Build aggregated state for prereq checks / 聚合狀態供前置條件判斷
-  const state = {
-    system_mode: gov.system_mode || 'unknown',
-    execution_state: gov.execution_state || 'disabled',
-    execution_authority: gov.execution_authority || 'not_granted',
-    engine_available: !!(paper && paper.engine_available),
-    paper_state: (paper.session && paper.session.session_state) || 'idle',
-    paper_running_days: 0,  // placeholder — no endpoint yet / 暫無端點，預留
-    h0_gate_active: false,  // placeholder — wired after H0 Gate impl / H0 Gate 實施後接線
-    backtest_alpha_verified: false,
-    phase6_done: false,
-    live_key_configured: !!(liveKey && liveKey.has_key),
-    supervised_gate_done: false,
-    alert_infra_ready: false,
-  };
-
-  // Update lock view state chips / 更新鎖定頁狀態 chip
-  const stateRow = document.getElementById('lock-state-row');
-  if (stateRow) {
-    const chips = [
-      ['system_mode',         state.system_mode,         state.system_mode === 'live' ? 'good' : 'warn'],
-      ['execution_state',     state.execution_state,     state.execution_state === 'enabled' ? 'good' : 'bad'],
-      ['execution_authority', state.execution_authority, state.execution_authority === 'granted' ? 'good' : 'bad'],
-    ];
-    stateRow.innerHTML = chips.map(([label, val, cls]) =>
-      `<span class="oc-chip oc-chip-${cls}" title="${label}">${label}: ${ocEsc(String(val))}</span>`
-    ).join('');
-  }
-
-  // Update phase badge / 更新 phase badge
-  const phaseBadge = document.getElementById('lock-phase-badge');
-  if (phaseBadge) {
-    phaseBadge.textContent = '✅ Live_Ready — 待 operator 授予 execution_authority + OPENCLAW_ALLOW_MAINNET=1 + Live API Key';
-  }
-
-  // Render prereq cards / 渲染前置條件卡片
-  const grid = document.getElementById('lock-prereq-grid');
-  if (grid) {
-    let html = '';
-    PREREQS.forEach(p => {
-      const status = p.check(state);
-      const detail = p.detail ? p.detail(state) : '';
-      const dotCls = status === 'done' ? 'dot-done' : status === 'warn' ? 'dot-warn' : 'dot-todo';
-      const cardCls = status;
-      html += `<div class="prereq-card ${cardCls}">
-        <div class="pc-header"><span class="${dotCls}"></span><span class="pc-title">${ocEsc(p.title)}</span></div>
-        <div class="pc-desc">${ocEsc(p.desc)}${detail ? ' ' + ocEsc(detail) : ''}</div>
-      </div>`;
-    });
-    grid.innerHTML = html;
-  }
-
-  return state;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// View routing — show lock or dashboard / 視圖路由
+// Refresh page — reload dashboard + engine status
+// 刷新頁面 — 重新加載儀表板 + 引擎狀態
 // ═══════════════════════════════════════════════════════════════
 async function refreshPage() {
-  const state = await loadPrereqStatus();
-
-  const isUnlocked = (state.execution_authority === 'granted');
-  document.getElementById('live-lock-view').style.display = isUnlocked ? 'none' : '';
-  const dash = document.getElementById('live-dashboard-view');
-  if (isUnlocked) {
-    dash.classList.add('active');
-    loadDashboardData();
-    checkLiveEngineStatus();
-  } else {
-    dash.classList.remove('active');
-  }
+  loadDashboardData();
+  checkLiveEngineStatus();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -658,30 +411,11 @@ async function checkLiveEngineStatus() {
   }
 
   detail.textContent = `mode: ${tradingMode} | authority: ${authority}`;
-  if (btnStart) btnStart.disabled = isActive || authority !== 'granted';
+  if (btnStart) btnStart.disabled = isActive;
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Execution authority grant / revoke / 授予/撤銷 execution authority
-// ═══════════════════════════════════════════════════════════════
-async function grantLiveAuthority() {
-  if (!confirm('確認授予 Execution Authority？\n\nDemo 模式：使用 Demo API key 測試 live 流程，無真實資金風險。\nMainnet：需另配置 OPENCLAW_ALLOW_MAINNET=1 + live API key。')) return;
-  const d = await ocPost('/api/v1/live/execution-authority/grant', {});
-  if (d) {
-    ocShowToast && ocShowToast('Execution Authority 已授予 / Granted', 'success');
-    refreshPage();
-  }
-}
-async function revokeLiveAuthority() {
-  if (!confirm('撤銷 Execution Authority？Live session 將返回鎖定頁。')) return;
-  const d = await ocPost('/api/v1/live/execution-authority/revoke', {});
-  if (d) {
-    ocShowToast && ocShowToast('已撤銷 / Revoked', 'warn');
-    refreshPage();
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════
 // Live actions

@@ -113,7 +113,7 @@
 
     <!-- Switchable Live / Paper panel — click anywhere to toggle -->
     <div id="side-panel-live" class="side-panel active" onclick="toggleSidePanel('live')">
-      <h2 style="margin:0 0 5px">&#x1F512; Live / 实盘</h2>
+      <h2 style="margin:0 0 5px">&#x1F534; Live / 实盘</h2>
       <div class="mc" id="live-section" style="opacity:0.5">
         <div class="mc-label">Mode</div>
         <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
@@ -233,7 +233,7 @@ const TABS = [
   // ── 儀表板 ──────────────────────────────────────────────────────
   { id: 'system',     label: '系统总览',  labelEn: 'Overview',  icon: '&#x1F4CA;', src: `/static/tab-system.html?v=${_v}` },
   // ── 交易核心 ─────────────────────────────────────────────────────
-  { id: 'live',       label: '实盘交易',  labelEn: 'Live 🔒',   icon: '&#x1F512;', src: `/static/tab-live.html?v=${_v}` },
+  { id: 'live',       label: '实盘交易',  labelEn: 'Live',      icon: '&#x1F534;', src: `/static/tab-live.html?v=${_v}` },
   { id: 'trading',    label: '测试交易',  labelEn: 'Test',      icon: '&#x1F9EA;', src: `/static/tab-trading.html?v=${_v}` },
   // ── 市場與策略 ───────────────────────────────────────────────────
   { id: 'charts',     label: 'K线图表',   labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading' },
@@ -348,73 +348,56 @@ const OC = window.location.origin + '/openclaw';
 
 // ─── Sidebar Refresh ─────────────────────────────────────────
 async function refreshSidebar() {
-  // ── Live Section ──
-  // Read governance status to determine if live mode is active
-  // 读取治理状态判断是否进入实盘模式
-  let liveEnabled = false;
+  // ── Live Section — always shown, reads real Bybit account via /api/v1/live/balance
+  // 實盤板塊 — 始終顯示，從 /api/v1/live/balance 讀取真實帳戶
+  document.getElementById('live-section').style.opacity = '1';
+  document.getElementById('live-balance-section').style.opacity = '1';
+  document.getElementById('live-pnl-section').style.opacity = '1';
+
+  // Show trading mode from engine / 從引擎顯示交易模式
   try {
     const gov = await api('/api/v1/governance/status');
     if (gov && gov.data) {
       const gs = gov.data;
-      const execAuth = gs.execution_authority || gs.auth_state || 'not_granted';
-      const execState = gs.execution_state || 'disabled';
-      liveEnabled = (execAuth === 'granted' && execState === 'enabled');
-
+      const tradingMode = gs.trading_mode || gs.system_mode || 'unknown';
+      const execAuth = gs.execution_authority || 'not_granted';
       const modeEl = document.getElementById('s-live-mode');
-      if (liveEnabled) {
-        modeEl.textContent = 'LIVE';
-        modeEl.className = 'mc-val red';
-        document.getElementById('s-live-mode-detail').textContent = 'execution: ' + execState;
-      } else {
-        modeEl.textContent = 'LOCKED';
-        modeEl.className = 'mc-val';
-        document.getElementById('s-live-mode-detail').textContent =
-          'auth: ' + execAuth + ' | exec: ' + execState;
-      }
+      const isLiveActive = tradingMode === 'live' && execAuth === 'granted';
+      modeEl.textContent = tradingMode.toUpperCase();
+      modeEl.className = 'mc-val' + (isLiveActive ? ' red' : '');
+      document.getElementById('s-live-mode-detail').textContent = 'auth: ' + execAuth;
     }
   } catch(e) {
-    document.getElementById('s-live-mode').textContent = 'LOCKED';
-    document.getElementById('s-live-mode').className = 'mc-val';
-    document.getElementById('s-live-mode-detail').textContent = 'governance unavailable';
+    document.getElementById('s-live-mode').textContent = 'Live_Ready';
+    document.getElementById('s-live-mode-detail').textContent = '';
   }
 
-  // Live balance + PnL from Bybit account (pre-wired, shows N/A when locked)
-  // 实盘余额和盈亏从 Bybit 账户读取（预接入，锁定时显示 N/A）
-  const liveOpacity = liveEnabled ? '1' : '0.5';
-  document.getElementById('live-section').style.opacity = liveEnabled ? '1' : '0.5';
-  document.getElementById('live-balance-section').style.opacity = liveOpacity;
-  document.getElementById('live-pnl-section').style.opacity = liveOpacity;
+  // Live balance from /api/v1/live/balance (PyO3 BybitClient — real exchange data)
+  // 實盤餘額來自 /api/v1/live/balance（PyO3 BybitClient — 真實交易所數據）
+  try {
+    const bd = await api('/api/v1/live/balance');
+    if (bd && bd.data && bd.data.available !== false) {
+      const b = bd.data;
+      const equity = parseFloat(b.total_equity || b.totalEquity || b.equity || 0);
+      const available = parseFloat(b.total_available_balance || b.totalAvailableBalance || b.available_balance || 0);
+      const unrealized = parseFloat(b.total_unrealised_pnl || b.totalPerpUPL || b.unrealized_pnl || 0);
 
-  if (liveEnabled) {
-    try {
-      const bd = await api('/api/v1/strategy/demo/balance');
-      if (bd && bd.data && (bd.data.source === 'rust_engine' || bd.data.retCode === 0)) {
-        let b = bd.data;
-        if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
-        const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-        const available = parseFloat(b.totalAvailableBalance || b.total_available_balance || b.available_balance || 0);
-        const unrealized = parseFloat(b.totalPerpUPL || b.total_unrealised_pnl || b.unrealized_pnl || 0);
-        const realized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
-        const net = realized + unrealized;
+      document.getElementById('s-live-balance').textContent = equity > 0 ? ocBalance(equity, 2) : '--';
+      document.getElementById('s-live-balance-detail').textContent =
+        available > 0 ? 'Available: ' + ocBalance(available, 2) : (b.source || 'connecting...');
 
-        document.getElementById('s-live-balance').textContent = ocBalance(equity, 2);
-        document.getElementById('s-live-balance-detail').textContent =
-          'Available: ' + ocBalance(available, 2);
-
-        const pnlEl = document.getElementById('s-live-pnl');
-        pnlEl.textContent = ocMoney(net);
-        pnlEl.className = 'mc-val ' + (net >= 0 ? 'green' : 'red');
-        document.getElementById('s-live-pnl-detail').textContent =
-          'Realized: ' + realized.toFixed(2) + ' | UPL: ' + unrealized.toFixed(2);
-      }
-    } catch(e) {}
-  } else {
-    document.getElementById('s-live-balance').textContent = 'N/A';
-    document.getElementById('s-live-balance').className = 'mc-val';
-    document.getElementById('s-live-balance-detail').textContent = 'live mode not active';
-    document.getElementById('s-live-pnl').textContent = 'N/A';
-    document.getElementById('s-live-pnl').className = 'mc-val';
-    document.getElementById('s-live-pnl-detail').textContent = 'requires execution_authority';
+      const pnlEl = document.getElementById('s-live-pnl');
+      pnlEl.textContent = unrealized !== 0 ? ocMoney(unrealized) : '--';
+      pnlEl.className = 'mc-val' + (unrealized > 0 ? ' green' : unrealized < 0 ? ' red' : '');
+      document.getElementById('s-live-pnl-detail').textContent =
+        unrealized !== 0 ? 'UPL: ' + unrealized.toFixed(2) : 'UPL: --';
+    } else {
+      document.getElementById('s-live-balance').textContent = '--';
+      document.getElementById('s-live-balance-detail').textContent = 'connecting...';
+    }
+  } catch(e) {
+    document.getElementById('s-live-balance').textContent = '--';
+    document.getElementById('s-live-balance-detail').textContent = 'error';
   }
 
   // ── Paper Trading Balance + PnL ──
