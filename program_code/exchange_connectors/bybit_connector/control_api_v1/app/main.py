@@ -348,6 +348,26 @@ async def _startup_integrity_check() -> None:
             _sched_exc, _sched_exc,
         )
 
+    # ── OC-3 / 6-RC-6: Reconciler governor-tier alert monitor ────────────────
+    # 啟動對帳器 governor tier 告警監控（fail-open，不阻斷啟動）
+    # asyncio.create_task is non-blocking: schedules coroutine for the event loop.
+    # asyncio.create_task 非阻塞：將協程排入事件循環，不影響 < 100ms 要求。
+    try:
+        import asyncio as _asyncio_startup  # noqa: PLC0415
+        from .paper_trading_wiring import reconciler_alert_monitor as _recon_monitor  # noqa: PLC0415
+        _asyncio_startup.create_task(
+            _recon_monitor(),
+            name="reconciler-alert-monitor",
+        )
+        base.logger.info(
+            "OC-3 reconciler_alert_monitor scheduled / OC-3 對帳器告警監控已排程"
+        )
+    except Exception as _oc3_exc:
+        base.logger.warning(
+            "OC-3 monitor startup failed (fail-open): %s / OC-3 監控啟動失敗（不阻斷）：%s",
+            _oc3_exc, _oc3_exc,
+        )
+
     _elapsed_ms = (_time.monotonic() - _t0) * 1000
     base.logger.info(
         "Startup handler completed in %.1f ms (target < 100 ms) "

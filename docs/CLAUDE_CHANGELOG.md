@@ -3,6 +3,30 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### W19 安全補強：G-3 IPC 認證 + OC-3/6-RC-6 告警（2026-04-10 · commit W19）
+
+**G-3 / SEC-08 — IPC HMAC-SHA256 認證**
+- Rust `ipc_server.rs`：新增 `verify_ipc_token()`（常數時間 `mac.verify_slice`）+ `handle_connection()` auth 區塊：`OPENCLAW_IPC_SECRET` 存在時第一條消息必須是 `__auth` JSON-RPC；時間戳 ±30s 防重放；所有失敗路徑立即斷開
+- Python `ipc_client.py`：新增 `_authenticate()` 方法；`import hmac as _hmac_lib` + `hashlib`；`_try_connect()` 在 `_connected=True` 後調用；auth 失敗 fail-closed（關閉連接 + return False）；無 env var 時跳過（向後兼容）
+- Python `ipc_client.py`：新增 `get_risk_runtime_status()` 方法（OC-3 輪詢基礎）
+
+**G-5 — API Rate Limiting 全局覆蓋驗證**
+- 確認 `main_legacy.py:304-307` `default_limits=[120/min]` + `SlowAPIMiddleware` 已覆蓋全部 214 路由
+- Gap 審計誤判（PA 以為只有 3 個路由有 decorator，實際 default_limits 已全局生效）
+- Login 端點保留更嚴格的 5/min decorator
+
+**OC-3 + 6-RC-6 — Reconciler governor tier 分級告警**
+- `paper_trading_wiring.py`：新增 `reconciler_alert_monitor()` 協程 + 加入 `__all__`
+  - 每 30s 輪詢 `get_risk_runtime_status` IPC
+  - CIRCUIT_BREAKER / MANUAL_REVIEW → 🛑 P0 alert
+  - CAUTIOUS / REDUCED / DEFENSIVE → ⚠️ P1 alert
+  - NORMAL 恢復 → ✅ INFO
+  - 使用 `asyncio.to_thread` 包裹同步 `ALERT_ROUTER.alert_system`（避免阻塞事件循環）
+  - `prev_tier=None` 初始化跳過啟動虛假告警
+- `main.py`：startup handler 以 `asyncio.create_task()` 啟動監控（fail-open，不阻斷啟動）
+
+**測試結果**：Rust 879 passed · Python 2760 passed (0 fail · 5 skipped)
+
 ### 全系統審計 + Gap 計劃（2026-04-10 · PM/PA/FA/CC）
 
 **背景**：PM/PA/FA/CC 四角色對 Rust engine + Python 控制層 + ML pipeline 進行嚴格完成度審計，發現文檔宣稱「~100%」但實際完成度 72-75%。

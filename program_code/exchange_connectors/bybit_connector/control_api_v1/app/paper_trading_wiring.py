@@ -411,4 +411,119 @@ __all__ = [
     "LEARNING_TIER_GATE",
     "SHADOW_CONSUMER",
     "_ttl_enforcement_failures",
+    "reconciler_alert_monitor",
 ]
+
+
+# ── OC-3 / 6-RC-6: Reconciler governor-tier alert monitor ────────────────────
+# OC-3 / 6-RC-6：對帳器 governor tier 告警監控器
+# Polls Rust engine every 30s; fires P0/P1 alerts via ALERT_ROUTER on tier change.
+# 每 30s 輪詢 Rust 引擎；governor tier 變化時通過 ALERT_ROUTER 發送 P0/P1 告警。
+import asyncio as _asyncio
+
+
+async def reconciler_alert_monitor() -> None:
+    """
+    OC-3 / 6-RC-6: Background coroutine — poll risk governor tier every 30s.
+    OC-3 / 6-RC-6：後台協程 — 每 30s 輪詢風控 governor tier。
+
+    Tier change mapping:
+      NORMAL            → send INFO recovery message (P1 channel)
+      CAUTIOUS/REDUCED  → send ⚠️  P1 alert
+      DEFENSIVE         → send 🚨  P1 alert (severe)
+      CIRCUIT_BREAKER   → send 🛑  P0 alert (emergency, 6-RC-6)
+      MANUAL_REVIEW     → send 🔒  P0 alert (operator action required)
+
+    Fail-open: any IPC error is logged and polling continues.
+    Fail-open：任何 IPC 錯誤均記錄並繼續輪詢。
+    Starts at module load via asyncio.create_task() in main.py _startup_integrity_check.
+    由 main.py _startup_integrity_check 在啟動時以 asyncio.create_task() 啟動。
+    """
+    from .ipc_client import EngineIPCClient  # local import to avoid circular dep
+
+    POLL_INTERVAL_S = 30
+    # Ordered by severity for level comparison / 按嚴重程度排序用於比較
+    SEVERITY_ORDER = [
+        "NORMAL",
+        "CAUTIOUS",
+        "REDUCED",
+        "DEFENSIVE",
+        "CIRCUIT_BREAKER",
+        "MANUAL_REVIEW",
+    ]
+    P0_TIERS = {"CIRCUIT_BREAKER", "MANUAL_REVIEW"}
+
+    ipc = EngineIPCClient()
+    prev_tier: str | None = None
+    logger.info("OC-3: reconciler_alert_monitor started / 對帳器告警監控已啟動")
+
+    while True:
+        try:
+            await _asyncio.sleep(POLL_INTERVAL_S)
+        except _asyncio.CancelledError:
+            logger.info("OC-3: reconciler_alert_monitor cancelled / 告警監控已取消")
+            return
+
+        # Ensure IPC is connected / 確保 IPC 已連線
+        if not ipc.is_connected:
+            try:
+                await ipc.connect()
+            except Exception as exc:
+                logger.debug("OC-3: IPC connect failed (will retry): %s", exc)
+                continue
+
+        try:
+            status = await ipc.get_risk_runtime_status()
+        except Exception as exc:
+            logger.debug("OC-3: get_risk_runtime_status failed: %s", exc)
+            continue
+
+        tier = str(status.get("governor_tier", "NORMAL")).upper()
+
+        if tier == prev_tier:
+            continue  # No change — nothing to send / 無變化 — 不發告警
+
+        if prev_tier is not None:
+            # Determine direction / 判斷方向
+            prev_idx = SEVERITY_ORDER.index(prev_tier) if prev_tier in SEVERITY_ORDER else 0
+            curr_idx = SEVERITY_ORDER.index(tier) if tier in SEVERITY_ORDER else 0
+            escalating = curr_idx > prev_idx
+
+            if tier == "NORMAL":
+                # Recovery / 恢復
+                msg = (
+                    f"✅ [OpenClaw] Reconciler RECOVERY\n"
+                    f"Risk tier restored to NORMAL (was {prev_tier})"
+                )
+            elif tier in P0_TIERS:
+                # P0 emergency / P0 緊急
+                paused = status.get("paper_paused", False)
+                halted = status.get("session_halted", False)
+                msg = (
+                    f"🛑 [OpenClaw] CRITICAL: Risk tier → {tier}\n"
+                    f"Previous: {prev_tier} | paused={paused} | halted={halted}\n"
+                    f"Immediate operator action required / 需要立即介入"
+                )
+            elif escalating:
+                # P1 escalation / P1 升級
+                msg = (
+                    f"⚠️ [OpenClaw] Risk escalation: {prev_tier} → {tier}\n"
+                    f"Reconciler detected drift — risk constraints tightened / "
+                    f"對帳器偵測到漂移，風控約束已收緊"
+                )
+            else:
+                # P1 de-escalation / P1 降級（非 NORMAL，屬於部分恢復）
+                msg = (
+                    f"🔄 [OpenClaw] Risk de-escalation: {prev_tier} → {tier}\n"
+                    f"Partial recovery / 部分恢復"
+                )
+
+            # Send alert via AlertRouter — wrap in to_thread since send() is sync blocking I/O
+            # 通過 AlertRouter 發告警 — send() 是同步阻塞 I/O，用 to_thread 包裹
+            event_tag = f"RISK:{tier}"
+            try:
+                await _asyncio.to_thread(ALERT_ROUTER.alert_system, event_tag, msg)
+            except Exception as exc:
+                logger.error("OC-3: ALERT_ROUTER.alert_system failed: %s", exc)
+
+        prev_tier = tier
