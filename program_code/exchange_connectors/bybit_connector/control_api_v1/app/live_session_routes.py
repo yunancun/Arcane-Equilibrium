@@ -304,7 +304,9 @@ async def _live_contraction_monitor() -> None:
             continue
 
         try:
-            state = await _ipc_command("get_paper_state")
+            # Phase 4: query live mode state for contraction monitor.
+            # Phase 4：縮倉監控查詢 live 模式狀態。
+            state = await _ipc_command("get_paper_state", {"engine": "live"})
         except Exception as exc:
             logger.warning("Contraction monitor: IPC get_paper_state failed: %s", exc)
             continue
@@ -393,12 +395,14 @@ async def _live_contraction_monitor() -> None:
 
 def _submit_live_governance_request(actor_id: str) -> None:
     """
-    Submit a live-mode authorization request to GovernanceHub (non-blocking).
-    Creates a PENDING record visible in the Governance tab for operator awareness.
+    Create and auto-approve a live-mode SM-1 authorization in GovernanceHub (non-blocking).
+    The Operator role + live_reserved global mode gate IS the approval gate — no separate
+    manual SM-1 approval step is required for live.
     Failure is logged as warning but never blocks live session start.
 
-    向 GovernanceHub 提交實盤授權申請（非阻塞）。
-    在治理頁創建 PENDING 記錄供 Operator 確認；失敗僅警告，不阻塞 session 啟動。
+    在 GovernanceHub 創建並自動批准 live 模式 SM-1 授權（非阻塞）。
+    Operator 角色 + live_reserved 全局模式門控已是批准門控，無需額外手動批准步驟。
+    失敗僅警告，不阻塞 session 啟動。
     """
     try:
         from .governance_hub import GovernanceHub
@@ -414,30 +418,107 @@ def _submit_live_governance_request(actor_id: str) -> None:
         live_scope = {
             "mode": "live",
             "execution": ["live_submit", "paper_submit"],
-            "auto_approved": False,
+            "approved_by": actor_id,
         }
-        expires_at_ms = int((_time.time() + 24 * 3600) * 1000)  # 24h TTL
+        expires_at_ms = int((_time.time() + 24 * 3600) * 1000)  # 24h TTL / 24小時有效期
         auth_obj = auth_sm.create_draft(
             title=f"Live Session Authorization — {actor_id}",
             scope=live_scope,
             created_by=actor_id,
             description=(
-                f"Live session started by operator '{actor_id}'. "
-                "Requires daily operator acknowledgement. / "
-                f"實盤 session 由 Operator '{actor_id}' 啟動，需每日確認。"
+                f"Live session authorized by operator '{actor_id}' "
+                "(Operator role + live_reserved mode gate). / "
+                f"實盤 session 由 Operator '{actor_id}' 授權"
+                "（Operator 角色 + live_reserved 模式雙重門控）。"
             ),
             expires_at_ms=expires_at_ms,
         )
-        auth_sm.submit_for_approval(auth_obj.authorization_id)
-        logger.info(
-            "Live governance request submitted (id=%s) — pending operator approval / "
-            "實盤治理申請已提交（id=%s）— 待 Operator 批准",
-            auth_obj.authorization_id, auth_obj.authorization_id,
+        auth_id = auth_obj.authorization_id
+        # DRAFT → PENDING_APPROVAL → ACTIVE: Operator role gate IS the approval.
+        # DRAFT → PENDING_APPROVAL → ACTIVE：Operator 角色門控即為批准。
+        auth_sm.submit_for_approval(auth_id)
+        auth_sm.approve(
+            auth_id,
+            approved_by=actor_id,
+            reason=(
+                "Auto-approved: operator explicitly started live session with "
+                "Operator role + live_reserved mode. / "
+                "自動批准：Operator 角色 + live_reserved 模式雙重驗證後顯式啟動實盤。"
+            ),
+        )
+        # Invalidate GovernanceHub auth cache so is_authorized() picks up the new ACTIVE auth.
+        # 使 GovernanceHub 授權快取失效，讓 is_authorized() 立即感知新 ACTIVE 授權。
+        _invalidate_fn = getattr(hub, "_invalidate_auth_cache", None)
+        if _invalidate_fn is not None:
+            _invalidate_fn()
+        logger.warning(
+            "⚠ Live SM-1 authorization ACTIVE (id=%s actor=%s) — "
+            "real funds at risk / 實盤 SM-1 授權已激活（id=%s actor=%s）— 真實資金",
+            auth_id, actor_id, auth_id, actor_id,
         )
     except Exception as exc:
         logger.warning(
             "Failed to submit live governance request (non-fatal): %s / "
             "提交實盤治理申請失敗（非致命）: %s", exc, exc,
+        )
+
+
+def _revoke_live_governance_auth(reason: str = "live_session_stopped", actor_id: str = "system") -> None:
+    """
+    Revoke all live-scoped GovernanceHub SM-1 authorizations (non-blocking).
+    Called on session stop, execution authority revoke, or emergency halt.
+
+    撤銷所有 live 模式 GovernanceHub SM-1 授權（非阻塞）。
+    在 session 停止、execution_authority 撤銷或緊急停止時調用。
+    """
+    try:
+        from .governance_hub import GovernanceHub
+        hub = GovernanceHub.get_instance()
+        if hub is None:
+            return
+        auth_sm = getattr(hub, "_authorization_sm", None)
+        if auth_sm is None:
+            return
+        # Find all effective live-scoped authorizations and revoke them.
+        # 找到所有有效的 live 模式授權並撤銷。
+        try:
+            all_auths = auth_sm.list_all()
+        except Exception:
+            all_auths = auth_sm.get_effective()
+        revoked = 0
+        for auth in all_auths:
+            scope = getattr(auth, "scope", {}) or {}
+            state = getattr(auth, "state", None)
+            state_val = state.value if state is not None else ""
+            if (
+                isinstance(scope, dict)
+                and scope.get("mode") == "live"
+                and state_val in ("ACTIVE", "RESTRICTED", "PENDING_APPROVAL", "DRAFT")
+            ):
+                try:
+                    auth_sm.revoke(
+                        auth.authorization_id,
+                        approved_by=actor_id,
+                        reason=reason,
+                    )
+                    revoked += 1
+                except Exception as inner:
+                    logger.debug("Could not revoke live auth %s: %s", auth.authorization_id, inner)
+        # Invalidate cache after revoking.
+        # 撤銷後使快取失效。
+        _invalidate_fn = getattr(hub, "_invalidate_auth_cache", None)
+        if _invalidate_fn is not None:
+            _invalidate_fn()
+        if revoked:
+            logger.warning(
+                "Live SM-1 authorization(s) REVOKED (count=%d reason=%s actor=%s) / "
+                "實盤 SM-1 授權已撤銷（數量=%d reason=%s actor=%s）",
+                revoked, reason, actor_id, revoked, reason, actor_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "Failed to revoke live governance auth (non-fatal): %s / "
+            "撤銷實盤治理授權失敗（非致命）: %s", exc, exc,
         )
 
 
@@ -460,10 +541,13 @@ def get_live_session_status(
     """
     rust = get_rust_reader()
     engine_available = rust.is_available()
-    rust_state = rust.get_paper_state() if engine_available else None
+    # Phase 4: query live or demo mode state depending on trading_mode.
+    # Phase 4：根據 trading_mode 查詢 live 或 demo 模式狀態。
+    trading_mode = _get_trading_mode_from_engine()
+    _mode_key = "live" if trading_mode == "live" else "demo" if trading_mode == "demo" else "paper"
+    rust_state = rust.get_paper_state(mode=_mode_key) if engine_available else None
 
     execution_authority = _get_execution_authority()
-    trading_mode = _get_trading_mode_from_engine()
 
     if rust_state is None:
         session_state = "offline"
@@ -615,6 +699,12 @@ async def post_live_session_stop(
     # stop 後重置 execution_authority — 下次明確 start 前保持 fail-closed
     _EXECUTION_AUTHORITY_OVERRIDE = None
     _live_contraction_state = "normal"
+    # Revoke live SM-1 authorization so governance center reflects stopped state.
+    # 撤銷 live SM-1 授權，讓治理中心反映已停止狀態。
+    _revoke_live_governance_auth(
+        reason="live_session_stopped",
+        actor_id=getattr(actor, "actor_id", "system"),
+    )
 
     # Cancel contraction monitor task if running
     # 如果縮倉監控 task 在運行，取消它
@@ -747,14 +837,18 @@ async def grant_execution_authority(
     _require_operator(actor)
     global _EXECUTION_AUTHORITY_OVERRIDE
     _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+    actor_id = getattr(actor, "actor_id", "?")
+    # Also create + approve live SM-1 authorization so governance center shows mode=live.
+    # 同步創建並批准 live SM-1 授權，讓治理中心顯示 mode=live。
+    _submit_live_governance_request(actor_id)
     logger.warning(
         "⚠ execution_authority GRANTED by actor=%s — live session now unlocked",
-        getattr(actor, "actor_id", "?"),
+        actor_id,
     )
     return _live_response({
         "execution_authority": "granted",
         "message": "execution_authority granted — live session unlocked",
-        "actor": getattr(actor, "actor_id", "?"),
+        "actor": actor_id,
     })
 
 
@@ -770,9 +864,13 @@ async def revoke_execution_authority(
     _require_operator(actor)
     global _EXECUTION_AUTHORITY_OVERRIDE
     _EXECUTION_AUTHORITY_OVERRIDE = "not_granted"
+    actor_id = getattr(actor, "actor_id", "?")
+    # Revoke live SM-1 authorization so governance center reflects revoked state.
+    # 撤銷 live SM-1 授權，讓治理中心反映已撤銷狀態。
+    _revoke_live_governance_auth(reason="execution_authority_revoked", actor_id=actor_id)
     logger.info(
         "execution_authority REVOKED by actor=%s",
-        getattr(actor, "actor_id", "?"),
+        actor_id,
     )
     return _live_response({
         "execution_authority": "not_granted",
@@ -813,7 +911,7 @@ async def get_live_balance(
             logger.warning("Rust balance fetch failed for live endpoint: %s", e)
     # Fallback: engine internal state / 降級：引擎內部狀態
     try:
-        state = await _ipc_command("get_paper_state")
+        state = await _ipc_command("get_paper_state", {"engine": "live"})
     except HTTPException:
         return _live_response({"available": False, "source": "engine_unavailable"})
     sync_bal = state.get("bybit_sync_balance")
@@ -852,7 +950,7 @@ async def get_live_positions(
             logger.warning("Rust positions fetch failed for live endpoint: %s", e)
     # Fallback: engine internal state / 降級：引擎內部狀態
     try:
-        state = await _ipc_command("get_paper_state")
+        state = await _ipc_command("get_paper_state", {"engine": "live"})
     except HTTPException:
         return _live_response({"positions": [], "count": 0, "available": False})
     positions = state.get("positions", [])
@@ -886,7 +984,7 @@ async def get_live_orders(
             logger.warning("Rust orders fetch failed for live endpoint: %s", e)
     # Fallback: engine internal state / 降級：引擎內部狀態
     try:
-        state = await _ipc_command("get_paper_state")
+        state = await _ipc_command("get_paper_state", {"engine": "live"})
     except HTTPException:
         return _live_response({"list": [], "count": 0, "available": False})
     positions: list = state.get("positions", [])
@@ -1000,7 +1098,10 @@ def get_live_metrics(
     from .paper_trading_metrics import compute_full_metrics
 
     rust = get_rust_reader()
-    rust_state = rust.get_paper_state() if rust.is_available() else None
+    # Phase 4: query mode-specific state for live metrics.
+    # Phase 4：查詢模式特定狀態用於 live 指標。
+    _mode_key = "live" if _get_trading_mode_from_engine() == "live" else "demo"
+    rust_state = rust.get_paper_state(mode=_mode_key) if rust.is_available() else None
     if rust_state is None:
         return _live_response({"available": False, "source": "engine_unavailable"})
     full = compute_full_metrics(rust_state)
