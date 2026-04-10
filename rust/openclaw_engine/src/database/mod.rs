@@ -286,8 +286,10 @@ pub enum TradingMsg {
         price: f64,
         order_type: String,
         strategy_name: String,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
     },
-    /// Paper fill result / 紙盤成交結果
+    /// Fill result (paper/demo/live) / 成交結果（紙盤/演示/實盤）
     Fill {
         fill_id: String,
         ts_ms: u64,
@@ -303,6 +305,8 @@ pub enum TradingMsg {
         realized_pnl: f64,
         strategy_name: String,
         context_id: String,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
     },
     /// Position snapshot after fill / 成交後持倉快照
     PositionSnapshot {
@@ -313,6 +317,8 @@ pub enum TradingMsg {
         entry_price: f64,
         mark_price: f64,
         unrealized_pnl: f64,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
     },
 }
 
@@ -325,6 +331,8 @@ pub struct DecisionContextMsg {
     pub decision_type: String,
     pub symbol: String,
     pub strategy_name: String,
+    /// Engine mode: "paper", "demo", or "live" / 引擎模式
+    pub engine_mode: String,
     // Flat columns / 扁平列
     pub last_price: f64,
     pub spread_bps: f64,

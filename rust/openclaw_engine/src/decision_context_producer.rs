@@ -128,6 +128,7 @@ pub(crate) fn emit_decision_context(
     drawdown_pct: f64,
     linucb: Option<&Arc<LinUcbRuntime>>,
     news_snapshot: Option<&Arc<NewsContextSnapshot>>,
+    engine_mode: &str,
 ) {
     let (linucb_arm_id, linucb_confidence_bound) = match linucb {
         Some(rt) => select_linucb_arm(rt, &signals[0].source, indicators, event.ts_ms as i64),
@@ -184,6 +185,7 @@ pub(crate) fn emit_decision_context(
         linucb_confidence_bound,
         news_severity,
         hours_since_last_major_news,
+        engine_mode: engine_mode.to_string(),
     });
 }
 
@@ -268,12 +270,13 @@ mod tests {
         let event = mk_event("BTCUSDT", 5_000);
         let signals = vec![mk_signal("BTCUSDT", "ma_crossover", 5_000)];
         emit_decision_context(
-            &tx, &event, &signals, None, None, 10_000.0, 0.0, None, None,
+            &tx, &event, &signals, None, None, 10_000.0, 0.0, None, None, "paper",
         );
         let msg = rx.try_recv().expect("msg should land");
         assert_eq!(msg.symbol, "BTCUSDT");
         assert_eq!(msg.strategy_name, "ma_crossover");
         assert_eq!(msg.total_equity, 10_000.0);
+        assert_eq!(msg.engine_mode, "paper");
         assert!(msg.linucb_arm_id.is_none(), "no linucb runtime → NULL");
         assert!(msg.news_severity.is_none(), "no news snapshot → NULL");
     }
@@ -288,7 +291,7 @@ mod tests {
         let signals = vec![mk_signal("ETHUSDT", "ma_crossover", 6_000)];
         // Should not panic, just silently drop.
         emit_decision_context(
-            &tx, &event, &signals, None, None, 10_000.0, 0.0, None, None,
+            &tx, &event, &signals, None, None, 10_000.0, 0.0, None, None, "paper",
         );
     }
 }

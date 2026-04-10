@@ -355,6 +355,7 @@ async fn test_full_loop_happy_path_low_severity_directive_applied() {
         linucb_confidence_bound: Some(0.42),
         news_severity: Some(0.3_f32),
         hours_since_last_major_news: Some(24.0),
+        engine_mode: "paper".into(),
     };
     assert_eq!(msg.claude_directive_id, Some(1));
     assert!(msg.linucb_arm_id.is_some());

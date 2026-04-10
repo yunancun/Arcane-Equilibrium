@@ -30,6 +30,7 @@ pub mod leverage_token_client;
 pub mod linucb;
 pub mod market_data_client;
 pub mod ml;
+pub mod mode_state;
 pub mod multi_interval_ws;
 pub mod news;
 pub mod orchestrator;

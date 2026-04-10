@@ -270,6 +270,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
+| `2026-04-10--signal_diamond_phase1_4_fix_round.md` | ★★★ Signal Diamond Phase 1-4 + Fix Round 完整工程記錄：V015 Migration + Rust DB Writers + ModeState + IPC mode-aware + state swap + AddMode/SwitchMode IPC · 850 tests |
 | `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 + 4 findings 全修（P1 grid drift, P2 exchange Kelly, P2 funding_arb, P2 集成測試）· 830 tests |
 | `2026-04-08--session_gui_fake_success_wave1.md` | GUI fake-success 盤點 Wave 1 |
 | `2026-04-08--session_gui_fake_success_wave2_p1_wiring.md` | GUI fake-success Wave 2 + P1 wiring |
@@ -403,6 +404,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | 數據存儲架構最優方案草稿 V0.1：PG + TimescaleDB · 分區策略 · 冷熱分層 |
 | `2026-04-03--llm_abstraction_audit.md` | LLM 抽象層審計：LocalLLMClient ABC 介面覆蓋度 · Ollama 耦合殘留 · 跨平台兼容性評估 |
 | `2026-04-03--ml_dl_learning_architecture_v0.4.md` | ★ ML/DL 學習架構 V0.4：Teacher-Student + LightGBM + Optuna + 3 DL 場景 · 三方審查完成 |
+| `2026-04-10--signal_diamond_db_todo.md` | ★★ Signal Diamond DB TODO 歸檔：多引擎數據分離 5 Phase 規劃 · Phase 1-4 ✅ + 審計備註 · Phase 5 待實施 |
 | `2026-04-04--bybit_api_reference.md` | ★★ Bybit API 字典手冊：REST/WS 全端點速查 · V5 API 分類覆蓋 · 開發必讀 |
 | `2026-04-04--comprehensive_audit_template_v1.md` | 全面審查模板 V1：L1/L2/L3 三級審計流程 · 5 路並行 9 角色 + DL/DB 專項 |
 | `2026-04-04--execution_plan_v1.md` | ★ 融合方案執行計劃 V1：DB + ML/DL + 新聞 Agent 20 週路線圖 · Phase 0-6 詳細規格 |

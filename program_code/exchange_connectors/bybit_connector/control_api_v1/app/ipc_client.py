@@ -273,12 +273,28 @@ class EngineIPCClient:
 
     # ─── R06-A: Pipeline state queries / 管線狀態查詢 ────────────────────────
 
-    async def get_paper_state(self) -> dict[str, Any]:
+    async def get_paper_state(self, mode: str = "paper") -> dict[str, Any]:
         """
         Get paper trading state snapshot (balance, positions, PnL, fees).
+        Phase 4: accepts `mode` param to query a specific engine mode.
         獲取紙盤交易狀態快照（餘額、持倉、損益、手續費）。
+        Phase 4：接受 `mode` 參數查詢特定引擎模式。
         """
-        return await self.call("get_paper_state")
+        return await self.call("get_paper_state", params={"engine": mode})
+
+    async def get_mode_snapshot(self, mode: str = "paper") -> dict[str, Any]:
+        """
+        Get full ModeStateSnapshot for a specific engine mode (Phase 4).
+        獲取特定引擎模式的完整 ModeStateSnapshot（Phase 4）。
+        """
+        return await self.call("get_mode_snapshot", params={"engine": mode})
+
+    async def get_active_modes(self) -> list[str]:
+        """
+        List all active engine modes (Phase 4).
+        列出所有活躍引擎模式（Phase 4）。
+        """
+        return await self.call("get_active_modes")
 
     async def get_latest_prices(self) -> dict[str, float]:
         """

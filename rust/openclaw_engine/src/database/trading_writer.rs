@@ -97,9 +97,9 @@ async fn flush_all(
 /// 每批 INSERT 的最大行數，避免超過 PostgreSQL 65535 參數上限。
 /// signals = 8 columns → 65535/8 = 8191, use 5000 as safe limit.
 const SIGNAL_BATCH_MAX: usize = 5000;
-const INTENT_BATCH_MAX: usize = 5000; // 10 columns → 6553 max
-const FILL_BATCH_MAX: usize = 4000; // 12 columns → 5461 max
-const POSITION_BATCH_MAX: usize = 5000; // 8 columns → 8191 max
+const INTENT_BATCH_MAX: usize = 5000; // 11 columns → 5957 max
+const FILL_BATCH_MAX: usize = 4000; // 14 columns → 4681 max
+const POSITION_BATCH_MAX: usize = 5000; // 9 columns → 7281 max
 
 async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
@@ -168,7 +168,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(INTENT_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.intents (ts, intent_id, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name) "
+            "INSERT INTO trading.intents (ts, intent_id, signal_id, context_id, symbol, side, qty, price, order_type, strategy_name, engine_mode) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Intent {
@@ -182,6 +182,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 price,
                 order_type,
                 strategy_name,
+                engine_mode,
             } = msg
             {
                 b.push_bind(
@@ -196,6 +197,7 @@ async fn flush_intents(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(sanitize_f64(*price).map(|v| v as f32));
                 b.push_bind(order_type.as_str());
                 b.push_bind(strategy_name.as_str());
+                b.push_bind(engine_mode.as_str());
             }
         });
         qb.push(" ON CONFLICT (intent_id, ts) DO NOTHING");
@@ -223,7 +225,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(FILL_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id) "
+            "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, realized_pnl, is_paper, strategy_name, context_id, engine_mode) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::Fill {
@@ -239,6 +241,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 realized_pnl,
                 strategy_name,
                 context_id,
+                engine_mode,
             } = msg
             {
                 b.push_bind(
@@ -253,9 +256,12 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(sanitize_f64_or_zero(*fee) as f32);
                 b.push_bind(sanitize_f64_or_zero(*fee_rate) as f32);
                 b.push_bind(sanitize_f64_or_zero(*realized_pnl) as f32);
-                b.push_bind(true); // is_paper = always true in demo mode
+                // DEPRECATED: is_paper derived from engine_mode (compat with Grafana).
+                // 已棄用：is_paper 由 engine_mode 派生（兼容 Grafana）。
+                b.push_bind(engine_mode != "live");
                 b.push_bind(strategy_name.as_str());
                 b.push_bind(context_id.as_str());
+                b.push_bind(engine_mode.as_str());
             }
         });
         qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
@@ -283,7 +289,7 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     };
     for chunk in buf.chunks(POSITION_BATCH_MAX) {
         let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
-            "INSERT INTO trading.position_snapshots (ts, symbol, side, qty, entry_price, mark_price, unrealized_pnl, is_paper) "
+            "INSERT INTO trading.position_snapshots (ts, symbol, side, qty, entry_price, mark_price, unrealized_pnl, is_paper, engine_mode) "
         );
         qb.push_values(chunk.iter(), |mut b, msg| {
             if let TradingMsg::PositionSnapshot {
@@ -294,6 +300,7 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 entry_price,
                 mark_price,
                 unrealized_pnl,
+                engine_mode,
             } = msg
             {
                 b.push_bind(
@@ -305,7 +312,10 @@ async fn flush_positions(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                 b.push_bind(sanitize_f64(*entry_price).map(|v| v as f32));
                 b.push_bind(sanitize_f64(*mark_price).map(|v| v as f32));
                 b.push_bind(sanitize_f64(*unrealized_pnl).map(|v| v as f32));
-                b.push_bind(true); // is_paper
+                // DEPRECATED: is_paper derived from engine_mode (compat with Grafana).
+                // 已棄用：is_paper 由 engine_mode 派生（兼容 Grafana）。
+                b.push_bind(engine_mode != "live");
+                b.push_bind(engine_mode.as_str());
             }
         });
         qb.push(" ON CONFLICT (symbol, side, ts) DO NOTHING");
@@ -354,6 +364,7 @@ mod tests {
             realized_pnl: 0.0,
             strategy_name: "ma".into(),
             context_id: "c1".into(),
+            engine_mode: "paper".into(),
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
     }
@@ -367,12 +378,15 @@ mod tests {
             "signals batch exceeds PG limit"
         );
         assert!(
-            INTENT_BATCH_MAX * 10 <= 65535,
+            INTENT_BATCH_MAX * 11 <= 65535,
             "intents batch exceeds PG limit"
         );
-        assert!(FILL_BATCH_MAX * 12 <= 65535, "fills batch exceeds PG limit");
         assert!(
-            POSITION_BATCH_MAX * 8 <= 65535,
+            FILL_BATCH_MAX * 14 <= 65535,
+            "fills batch exceeds PG limit"
+        );
+        assert!(
+            POSITION_BATCH_MAX * 9 <= 65535,
             "positions batch exceeds PG limit"
         );
     }
@@ -406,6 +420,7 @@ mod tests {
                 price: 50000.0,
                 order_type: "market".into(),
                 strategy_name: "ma".into(),
+                engine_mode: "paper".into(),
             },
             TradingMsg::Fill {
                 fill_id: "f1".into(),
@@ -420,6 +435,7 @@ mod tests {
                 realized_pnl: 0.0,
                 strategy_name: "ma".into(),
                 context_id: "c1".into(),
+                engine_mode: "paper".into(),
             },
             TradingMsg::PositionSnapshot {
                 ts_ms: 0,
@@ -429,6 +445,7 @@ mod tests {
                 entry_price: 50000.0,
                 mark_price: 50100.0,
                 unrealized_pnl: 10.0,
+                engine_mode: "paper".into(),
             },
         ];
 
