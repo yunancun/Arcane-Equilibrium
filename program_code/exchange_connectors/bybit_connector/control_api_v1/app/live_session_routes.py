@@ -59,6 +59,12 @@ live_router = APIRouter(
 
 _LIVE_USER_STOPPED: bool = False
 
+# In-memory execution authority override (operator grant/revoke from GUI).
+# Survives IPC failures; cleared on process restart (fail-closed by design).
+# 記憶體內 execution_authority override（Operator 從 GUI 授予/撤銷）。
+# 重啟後清零（fail-closed 設計）。
+_EXECUTION_AUTHORITY_OVERRIDE: str | None = None
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # IPC helpers / IPC 輔助函數
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -84,6 +90,21 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
         ) from exc
     finally:
         await client.disconnect()
+
+
+def _get_rust_client_safe():
+    """
+    Import and return PyO3 BybitClient (same client used by demo endpoints).
+    Works with both demo and live API keys depending on engine mode.
+    Returns None on any failure — callers must handle gracefully.
+    導入並返回 PyO3 BybitClient（與 demo 端點使用相同客戶端）。
+    demo / live API key 均可使用，依引擎模式而定。失敗時返回 None。
+    """
+    try:
+        from .strategy_ai_routes import _get_rust_client
+        return _get_rust_client()
+    except Exception:
+        return None
 
 
 def _live_response(data: dict[str, Any]) -> dict[str, Any]:
@@ -128,11 +149,16 @@ def _require_operator(actor: Any) -> None:
 
 def _get_execution_authority() -> str:
     """
-    Read current execution_authority from the governance state.
-    從治理狀態讀取當前 execution_authority。
+    Read current execution_authority. Checks in-memory override first (set via
+    /api/v1/live/execution-authority/grant), then falls back to governance state.
+    讀取 execution_authority。優先檢查記憶體 override（由 grant 端點設置），
+    然後回退到治理狀態。
 
     Returns: "granted" | "not_granted" | "unknown"
     """
+    global _EXECUTION_AUTHORITY_OVERRIDE
+    if _EXECUTION_AUTHORITY_OVERRIDE is not None:
+        return _EXECUTION_AUTHORITY_OVERRIDE
     try:
         from .governance_hub import GovernanceHub
         hub = GovernanceHub.get_instance()
@@ -250,20 +276,25 @@ async def post_live_session_start(
                    "Operator approval required to grant execution authority.",
         )
 
-    # HARD LOCK #2: trading_mode must be "live"
-    # 硬鎖 #2：trading_mode 必須為 "live"
+    # GATE #2: trading_mode must be "live" or "demo" (demo allowed for pre-live testing)
+    # 門控 #2：trading_mode 必須為 "live" 或 "demo"（demo 允許用於測試 live 流程）
     trading_mode = _get_trading_mode_from_engine()
-    if trading_mode not in ("live", "unknown"):  # "unknown" = engine offline, allow attempt
-        if trading_mode != "live":
-            logger.warning(
-                "Live session start BLOCKED: trading_mode=%s (not live) — actor=%s",
-                trading_mode, getattr(actor, "actor_id", "?"),
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=f"Live session blocked: engine trading_mode={trading_mode!r}. "
-                       "Set trading_mode = 'live' in engine.toml and restart the engine.",
-            )
+    if trading_mode not in ("live", "demo", "unknown"):
+        logger.warning(
+            "Live session start BLOCKED: trading_mode=%s (not live/demo) — actor=%s",
+            trading_mode, getattr(actor, "actor_id", "?"),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Live session blocked: engine trading_mode={trading_mode!r}. "
+                   "Set trading_mode = 'demo' (for testing) or 'live' in engine.toml.",
+        )
+    if trading_mode == "demo":
+        logger.warning(
+            "⚠ DEMO-LIVE TEST: live session started with trading_mode=demo — "
+            "using demo API keys, NO real money at risk — actor=%s",
+            getattr(actor, "actor_id", "?"),
+        )
 
     # Resume paper pipeline (sends orders to exchange when TradingMode=Live)
     # 恢復 paper 管線（TradingMode=Live 時會向交易所發送訂單）
@@ -411,13 +442,69 @@ async def post_live_session_resume(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Execution authority grant / revoke (in-memory, Operator only)
+# Execution authority 授予 / 撤銷（記憶體，僅 Operator 角色）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@live_router.post("/execution-authority/grant")
+async def grant_execution_authority(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/execution-authority/grant
+    Operator explicitly grants execution authority in-memory.
+    Clears on process restart (fail-closed). Used for pre-live demo testing
+    and future supervised live gate (Phase M).
+
+    Operator 顯式授予 execution_authority（記憶體中）。
+    重啟後清零（fail-closed）。用於實盤前 demo 測試及未來 M 章受監督實盤門控。
+    """
+    _require_operator(actor)
+    global _EXECUTION_AUTHORITY_OVERRIDE
+    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+    logger.warning(
+        "⚠ execution_authority GRANTED by actor=%s — live session now unlocked",
+        getattr(actor, "actor_id", "?"),
+    )
+    return _live_response({
+        "execution_authority": "granted",
+        "message": "execution_authority granted — live session unlocked",
+        "actor": getattr(actor, "actor_id", "?"),
+    })
+
+
+@live_router.post("/execution-authority/revoke")
+async def revoke_execution_authority(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/execution-authority/revoke
+    Operator revokes execution authority; lock screen re-appears.
+    Operator 撤銷 execution_authority；鎖定頁重新顯示。
+    """
+    _require_operator(actor)
+    global _EXECUTION_AUTHORITY_OVERRIDE
+    _EXECUTION_AUTHORITY_OVERRIDE = "not_granted"
+    logger.info(
+        "execution_authority REVOKED by actor=%s",
+        getattr(actor, "actor_id", "?"),
+    )
+    return _live_response({
+        "execution_authority": "not_granted",
+        "message": "execution_authority revoked — live session locked",
+        "actor": getattr(actor, "actor_id", "?"),
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Live account data — balance / positions / orders
 # 實盤帳戶數據端點 — 餘額 / 倉位 / 掛單
 #
-# These endpoints read from the Rust engine's internal state via IPC get_paper_state.
-# In Live mode the engine tracks real-money positions through the same pipeline.
-# Full Bybit exchange data (exact balances from REST) requires OPENCLAW_ALLOW_MAINNET=1
-# + live API keys in settings/secret_files/bybit/live/.
+# Primary: Rust PyO3 BybitClient (real exchange data, same client as demo).
+# Fallback: IPC get_paper_state (engine internal state).
+# 主路徑：Rust PyO3 BybitClient（真實交易所數據，同 demo 使用相同客戶端）。
+# 降級：IPC get_paper_state（引擎內部狀態）。
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -427,12 +514,20 @@ async def get_live_balance(
 ):
     """
     GET /api/v1/live/balance
-    Return live engine account balance from internal engine state.
-    Returns bybit_sync_balance when available (synced from exchange REST).
+    Primary: real Bybit account balance via Rust PyO3 client (demo or live key).
+    Fallback: engine internal balance + bybit_sync_balance.
 
-    返回實盤引擎帳戶餘額（從引擎內部狀態讀取）。
-    若有 bybit_sync_balance 則優先返回（從交易所 REST 同步的真實餘額）。
+    主路徑：Rust PyO3 client 獲取真實 Bybit 帳戶餘額（demo 或 live key 均可）。
+    降級：引擎內部餘額 + bybit_sync_balance。
     """
+    rc = _get_rust_client_safe()
+    if rc is not None:
+        try:
+            wallet = rc.refresh_balance()
+            return _live_response({"source": "rust_engine", **wallet})
+        except Exception as e:
+            logger.warning("Rust balance fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
     try:
         state = await _ipc_command("get_paper_state")
     except HTTPException:
@@ -453,22 +548,31 @@ async def get_live_positions(
 ):
     """
     GET /api/v1/live/positions
-    Return open positions tracked by the live engine (internal state).
-    In Live mode these are real-money positions opened via execute_order.
+    Primary: real Bybit positions via Rust PyO3 client.
+    Fallback: engine-tracked positions (internal state).
 
-    返回實盤引擎追蹤的持倉（內部狀態）。
-    Live 模式下為通過 execute_order 開的真實倉位。
+    主路徑：Rust PyO3 client 獲取真實 Bybit 倉位。
+    降級：引擎追蹤倉位（內部狀態）。
     """
+    rc = _get_rust_client_safe()
+    if rc is not None:
+        try:
+            positions = rc.get_positions("linear")
+            return _live_response({
+                "source": "rust_engine",
+                "positions": positions,
+                "list": positions,
+                "count": len(positions),
+            })
+        except Exception as e:
+            logger.warning("Rust positions fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
     try:
         state = await _ipc_command("get_paper_state")
     except HTTPException:
         return _live_response({"positions": [], "count": 0, "available": False})
-    positions: list = state.get("positions", [])
-    return _live_response({
-        "positions": positions,
-        "count": len(positions),
-        "source": "engine_state",
-    })
+    positions = state.get("positions", [])
+    return _live_response({"positions": positions, "count": len(positions), "source": "engine_state"})
 
 
 @live_router.get("/orders")
@@ -477,20 +581,31 @@ async def get_live_orders(
 ):
     """
     GET /api/v1/live/orders
-    Return active orders tracked by the live engine.
-    Derives pending-close orders from position state; full exchange-level order list
-    requires active live Bybit API connection.
+    Primary: real Bybit active orders via Rust PyO3 client.
+    Fallback: pending-close orders derived from engine position state.
 
-    返回實盤引擎追蹤的掛單。
-    從倉位狀態派生 pending_close 訂單；完整的交易所掛單列表需要實盤 Bybit API 連接。
+    主路徑：Rust PyO3 client 獲取真實 Bybit 掛單。
+    降級：從引擎倉位狀態派生 pending_close 訂單。
     """
+    rc = _get_rust_client_safe()
+    if rc is not None:
+        try:
+            orders = rc.get_active_orders("linear")
+            return _live_response({
+                "source": "rust_engine",
+                "list": orders,
+                "count": len(orders),
+                "regular_count": len(orders),
+                "conditional_count": 0,
+            })
+        except Exception as e:
+            logger.warning("Rust orders fetch failed for live endpoint: %s", e)
+    # Fallback: engine internal state / 降級：引擎內部狀態
     try:
         state = await _ipc_command("get_paper_state")
     except HTTPException:
         return _live_response({"list": [], "count": 0, "available": False})
     positions: list = state.get("positions", [])
-    # Derive pending-close orders from positions; open orders tracked in exchange via stop manager
-    # 從倉位派生 pending_close 訂單；止損管理器在交易所側追蹤掛單
     pending = [p for p in positions if p.get("pending_close") or p.get("stop_order_id")]
     return _live_response({
         "list": pending,
