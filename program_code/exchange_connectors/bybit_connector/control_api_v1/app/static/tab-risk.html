@@ -594,6 +594,21 @@ function toggleTPInputs() {
   else $('in-take-profit').style.opacity = '1';
 }
 
+// ─── Dirty-tracking: skip input population during 15s refresh while user has unsaved edits ──
+// 髒標記：用戶有未保存的編輯時，15s 刷新跳過輸入框填充
+// WP-F/AH-06 fix: prevents loadAll from overwriting user edits in-flight.
+let _riskFormDirty = false;
+const _RISK_INPUT_IDS = [
+  'in-hard-stop', 'in-take-profit', 'in-trailing', 'in-atr-mult', 'in-time-stop',
+  'in-drawdown', 'in-leverage', 'in-daily-loss', 'in-p1-risk', 'in-single-pos',
+  'in-total-exp', 'in-corr-exp', 'in-allowed-cats', 'in-same-dir',
+  'in-cooldown-count', 'in-cooldown-min',
+];
+_RISK_INPUT_IDS.forEach(id => {
+  const el = $(id);
+  if (el) el.addEventListener('input', () => { _riskFormDirty = true; });
+});
+
 // _btnSaving — helper: disable btn and show loading text during async save
 // _btnSaving — 辅助函数：保存期间禁用按钮并显示"储存中..."
 function _btnSaving(btn, saving) {
@@ -630,7 +645,7 @@ async function saveStopSettings(btn) {
       max_holding_hours: parseFloat($('in-time-stop').value) || 72,
     };
     const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('止损设置已保存 / Stop settings saved', 'success'); loadAll(); }
+    if (d) { ocToast('止损设置已保存 / Stop settings saved', 'success'); _riskFormDirty = false; loadAll(); }
     else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -660,7 +675,7 @@ async function savePositionSettings(btn) {
       allowed_categories: catsRaw ? catsRaw.split(',').map(s => s.trim()).filter(Boolean) : null,
     };
     const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('仓位设置已保存 / Position settings saved', 'success'); loadAll(); }
+    if (d) { ocToast('仓位设置已保存 / Position settings saved', 'success'); _riskFormDirty = false; loadAll(); }
     else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -677,7 +692,7 @@ async function saveCooldownSettings(btn) {
       consecutive_loss_cooldown_minutes: parseFloat($('in-cooldown-min').value) || 30,
     };
     const d = await ocPost('/api/v1/paper/risk/config/global', body);
-    if (d) { ocToast('冷却设置已保存 / Cooldown settings saved', 'success'); loadAll(); }
+    if (d) { ocToast('冷却设置已保存 / Cooldown settings saved', 'success'); _riskFormDirty = false; loadAll(); }
     else ocToast('Save failed / 保存失败', 'error');
   } finally {
     _btnSaving(btn, false);
@@ -992,33 +1007,39 @@ async function loadRiskConfig() {
   // tick-pushed and lag one tick behind a config patch.
   // 輸入框用 fresh Rust ConfigStore (gc) 作真相源。post 1C-3 只有一個真相源，IPC patch
   // 後 cache 已刷新，下一次 GET 返回新值。rStop/rGuard 滯後一拍，不用作輸入預設。
-  function _setInput(id, val) {
-    const el = $(id);
-    if (el && document.activeElement !== el) el.value = val;
+
+  // WP-F/AH-06: skip input population when user has unsaved edits (dirty flag).
+  // Display-only fields (ocSetText, ocSetHtml) always update — they don't conflict.
+  // 當用戶有未保存的編輯時跳過輸入框填充。純顯示欄位始終更新。
+  if (!_riskFormDirty) {
+    function _setInput(id, val) {
+      const el = $(id);
+      if (el) el.value = val;
+    }
+    _setInput('in-hard-stop', gc.max_stop_loss_pct ?? 5);
+    // Checkboxes are not text-editable — safe to always update
+    $('in-tp-enabled').checked = gc.tp_enabled === true;
+    _setInput('in-take-profit', gc.max_take_profit_pct ?? 20);
+    toggleTPInputs();
+    _setInput('in-trailing', gc.trailing_stop_pct ?? '');
+    _setInput('in-atr-mult', gc.atr_multiplier ?? '');
+    _setInput('in-time-stop', gc.max_holding_hours ?? 72);
+    _setInput('in-drawdown', gc.max_session_drawdown_pct ?? 15);
+    _setInput('in-leverage', gc.max_leverage ?? 20);
+    _setInput('in-daily-loss', gc.max_daily_loss_pct ?? 5);
+    // p1_risk_pct now sourced from Rust ConfigStore (limits.per_trade_risk_pct).
+    // Route exposes it as percent already, so no /100 vs *100 ambiguity here.
+    // p1_risk_pct 從 Rust ConfigStore 取得，路由已換算為百分比。
+    const gcP1Pct = gc.p1_risk_pct != null ? gc.p1_risk_pct : p1RiskPct;
+    _setInput('in-p1-risk', parseFloat(gcP1Pct).toFixed(1));
+    _setInput('in-single-pos', gc.max_single_position_pct ?? 20);
+    _setInput('in-total-exp', gc.max_total_exposure_pct ?? 100);
+    _setInput('in-corr-exp', gc.max_correlated_exposure_pct ?? '');
+    _setInput('in-allowed-cats', (gc.allowed_categories || []).join(', '));
+    _setInput('in-same-dir', gc.max_same_direction_positions ?? 3);
+    _setInput('in-cooldown-count', gc.consecutive_loss_cooldown_count ?? 3);
+    _setInput('in-cooldown-min', gc.consecutive_loss_cooldown_minutes ?? 30);
   }
-  _setInput('in-hard-stop', gc.max_stop_loss_pct ?? 5);
-  // Checkboxes are not text-editable — safe to always update
-  $('in-tp-enabled').checked = gc.tp_enabled === true;
-  _setInput('in-take-profit', gc.max_take_profit_pct ?? 20);
-  toggleTPInputs();
-  _setInput('in-trailing', gc.trailing_stop_pct ?? '');
-  _setInput('in-atr-mult', gc.atr_multiplier ?? '');
-  _setInput('in-time-stop', gc.max_holding_hours ?? 72);
-  _setInput('in-drawdown', gc.max_session_drawdown_pct ?? 15);
-  _setInput('in-leverage', gc.max_leverage ?? 20);
-  _setInput('in-daily-loss', gc.max_daily_loss_pct ?? 5);
-  // p1_risk_pct now sourced from Rust ConfigStore (limits.per_trade_risk_pct).
-  // Route exposes it as percent already, so no /100 vs *100 ambiguity here.
-  // p1_risk_pct 從 Rust ConfigStore 取得，路由已換算為百分比。
-  const gcP1Pct = gc.p1_risk_pct != null ? gc.p1_risk_pct : p1RiskPct;
-  _setInput('in-p1-risk', parseFloat(gcP1Pct).toFixed(1));
-  _setInput('in-single-pos', gc.max_single_position_pct ?? 20);
-  _setInput('in-total-exp', gc.max_total_exposure_pct ?? 100);
-  _setInput('in-corr-exp', gc.max_correlated_exposure_pct ?? '');
-  $('in-allowed-cats').value = (gc.allowed_categories || []).join(', ');
-  _setInput('in-same-dir', gc.max_same_direction_positions ?? 3);
-  _setInput('in-cooldown-count', gc.consecutive_loss_cooldown_count ?? 3);
-  _setInput('in-cooldown-min', gc.consecutive_loss_cooldown_minutes ?? 30);
 }
 
 async function loadAIContext() {

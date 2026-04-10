@@ -748,12 +748,12 @@ async function refreshKellyData() {
       const s = strategies[k];
       const tierColor = s.kelly_tier === 'normal' ? 'green' : (s.kelly_tier === 'moderate' ? 'var(--accent)' : 'var(--text-dim)');
       return `<tr>
-        <td>${k}</td>
+        <td>${ocEsc(k)}</td>
         <td>${(s.kelly_fraction * 100).toFixed(2)}%</td>
         <td>${s.recommended_qty.toFixed(4)}</td>
         <td>${(s.win_rate * 100).toFixed(1)}%</td>
         <td>${s.sample_size}</td>
-        <td style="color:${tierColor}">${s.kelly_tier}</td>
+        <td style="color:${tierColor}">${ocEsc(s.kelly_tier)}</td>
       </tr>`;
     }).join('');
   } catch(e) {
