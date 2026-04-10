@@ -339,42 +339,22 @@ class TestLearningTierRESTEndpoint:
 
 
 class TestOMSOrdersEndpoint:
-    """IT-P10-10: GET /oms/orders"""
+    """IT-P10-10: GET /oms/orders — Python OMS removed 2026-04-10, returns empty list + note"""
 
     def test_oms_orders_endpoint_exists(self):
-        """Verify /oms/orders route is registered"""
+        """Verify /oms/orders route is still registered (deprecated stub)"""
         from app.governance_routes import governance_router
 
         routes = [route for route in governance_router.routes if '/oms/orders' in route.path]
         assert len(routes) > 0, "Missing /oms/orders endpoint"
 
-    def test_oms_orders_via_hub(self):
-        """GovernanceHub.get_oms_orders returns list"""
+    def test_oms_orders_returns_empty_migrated(self):
+        """GET /oms/orders returns empty list with migration note; get_oms_orders removed from hub"""
         from app.governance_hub import GovernanceHub
 
-        with tempfile.TemporaryDirectory() as audit_dir:
-            hub = GovernanceHub(audit_dir=audit_dir)
-
-            # No OMS SM = empty list
-            orders = hub.get_oms_orders()
-            assert isinstance(orders, list)
-            assert len(orders) == 0
-
-    def test_oms_orders_via_hub_with_mock_sm(self):
-        """GovernanceHub.get_oms_orders with mock OMS SM"""
-        from app.governance_hub import GovernanceHub
-
-        with tempfile.TemporaryDirectory() as audit_dir:
-            hub = GovernanceHub(audit_dir=audit_dir)
-
-            mock_oms = Mock()
-            mock_oms.get_by_state.return_value = [
-                {"order_id": "ord-001", "state": "PENDING"},
-            ]
-            hub._oms_sm = mock_oms
-
-            orders = hub.get_oms_orders(state="PENDING")
-            assert len(orders) == 1
+        hub = GovernanceHub.__new__(GovernanceHub)
+        # get_oms_orders no longer exists — order tracking in Rust trading.orders
+        assert not hasattr(hub, "get_oms_orders"), "get_oms_orders must be removed from GovernanceHub"
 
 
 class TestBoundedEventBuffer:

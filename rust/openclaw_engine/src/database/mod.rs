@@ -320,6 +320,36 @@ pub enum TradingMsg {
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
     },
+    /// Exchange order record — emitted when order enters Working state on exchange.
+    /// 訂單進入交易所 Working 狀態時發出，寫入 trading.orders。
+    Order {
+        order_id: String,
+        ts_ms: u64,
+        symbol: String,
+        /// "Buy" or "Sell" / 買或賣
+        side: String,
+        /// "Market" or "Limit" / 市價或限價
+        order_type: String,
+        qty: f64,
+        strategy_name: String,
+        /// True if this is a close/reduce order / 是否為平倉單
+        is_close: bool,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
+    },
+    /// Order status transition — emitted on fill, cancel, or rejection.
+    /// 訂單狀態轉換事件，成交 / 撤銷 / 拒絕時發出，寫入 trading.order_state_changes。
+    OrderStateChange {
+        order_id: String,
+        ts_ms: u64,
+        from_status: Option<String>,
+        to_status: String,
+        filled_qty: Option<f64>,
+        avg_price: Option<f64>,
+        reason: Option<String>,
+        /// Engine mode: "paper", "demo", or "live" / 引擎模式
+        engine_mode: String,
+    },
     /// Guardian risk verdict for a trade intent (DB-RW: missing wiring fix).
     /// Guardian 對交易意圖的風控裁定（DB-RW：補充缺失的接線）。
     RiskVerdict {

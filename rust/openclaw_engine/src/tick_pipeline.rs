@@ -186,6 +186,22 @@ pub enum PaperSessionCommand {
         mode: crate::config::TradingMode,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// Phase 6: Reconciler auto-escalation (tighten risk on drift detection).
+    /// Bypasses operator whitelist/24h cooldown — drift response must not be blocked.
+    /// Phase 6: 對帳器自動升級（漂移偵測時收緊風控）。繞過 operator 白名單/冷卻。
+    ReconcilerEscalate {
+        target_tier: String,
+        reason: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// Phase 6: Reconciler auto-recovery (de-escalate after clean cycles).
+    /// Only for Cautious/Reduced/Defensive. CB/MR stays operator-only.
+    /// Phase 6: 對帳器自動恢復（乾淨週期後降級）。CB/MR 仍需 operator。
+    ReconcilerDeEscalate {
+        target_tier: String,
+        reason: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).
@@ -319,7 +335,7 @@ pub struct TickPipeline {
     pub paper_paused: bool,
     /// EXT-1: Trading mode (paper_only or exchange).
     /// EXT-1：交易模式（紙盤或交易所）。
-    trading_mode: crate::config::TradingMode,
+    pub(crate) trading_mode: crate::config::TradingMode,
     /// EXT-1: Sequence counter for generating unique order_link_id.
     /// EXT-1：序列計數器，用於生成唯一 order_link_id。
     exchange_seq: u64,

@@ -1,11 +1,13 @@
-//! Trading lifecycle writer — batch INSERT signals/intents/fills/positions/verdicts to PG.
-//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/持倉/風控裁定到 PG。
+//! Trading lifecycle writer — batch INSERT signals/intents/fills/positions/verdicts/orders to PG.
+//! 交易生命週期寫入器 — 批量 INSERT 信號/意圖/成交/持倉/風控裁定/訂單到 PG。
 //!
 //! MODULE_NOTE (EN): Async consumer for TradingMsg channel. Routes by variant type
-//!   and batch-inserts to 5 trading.* tables (signals, intents, fills, position_snapshots,
-//!   risk_verdicts). Same pattern as market_writer: QueryBuilder::push_values + NaN sanitization.
+//!   and batch-inserts to 7 trading.* tables (signals, intents, fills, position_snapshots,
+//!   risk_verdicts, orders, order_state_changes).
+//!   Same pattern as market_writer: QueryBuilder::push_values + NaN sanitization.
 //! MODULE_NOTE (中): TradingMsg 通道的異步消費者。按變體類型路由，
-//!   批量插入到 5 個 trading.* 表（含 risk_verdicts）。與 market_writer 相同模式。
+//!   批量插入到 7 個 trading.* 表（含 risk_verdicts + orders + order_state_changes）。
+//!   與 market_writer 相同模式。
 
 use super::pool::DbPool;
 use super::{sanitize_f64, sanitize_f64_or_zero, TradingMsg};
@@ -28,6 +30,8 @@ pub async fn run_trading_writer(
     let mut fill_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut pos_buf: Vec<TradingMsg> = Vec::with_capacity(16);
     let mut verdict_buf: Vec<TradingMsg> = Vec::with_capacity(16);
+    let mut order_buf: Vec<TradingMsg> = Vec::with_capacity(16);
+    let mut state_change_buf: Vec<TradingMsg> = Vec::with_capacity(16);
 
     let flush_interval = {
         let cfg = config.get();
@@ -43,7 +47,8 @@ pub async fn run_trading_writer(
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
                 if pool.is_available() {
-                    flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf, &mut pos_buf, &mut verdict_buf).await;
+                    flush_all(&pool, &mut signal_buf, &mut intent_buf, &mut fill_buf,
+                              &mut pos_buf, &mut verdict_buf, &mut order_buf, &mut state_change_buf).await;
                 }
             }
             msg = rx.recv() => {
@@ -54,6 +59,8 @@ pub async fn run_trading_writer(
                         TradingMsg::Fill { .. } => fill_buf.push(m),
                         TradingMsg::PositionSnapshot { .. } => pos_buf.push(m),
                         TradingMsg::RiskVerdict { .. } => verdict_buf.push(m),
+                        TradingMsg::Order { .. } => order_buf.push(m),
+                        TradingMsg::OrderStateChange { .. } => state_change_buf.push(m),
                     },
                     None => break,
                 }
@@ -69,6 +76,8 @@ pub async fn run_trading_writer(
             &mut fill_buf,
             &mut pos_buf,
             &mut verdict_buf,
+            &mut order_buf,
+            &mut state_change_buf,
         )
         .await;
     }
@@ -82,6 +91,8 @@ async fn flush_all(
     fills: &mut Vec<TradingMsg>,
     positions: &mut Vec<TradingMsg>,
     verdicts: &mut Vec<TradingMsg>,
+    orders: &mut Vec<TradingMsg>,
+    state_changes: &mut Vec<TradingMsg>,
 ) {
     if !signals.is_empty() {
         flush_signals(pool, signals).await;
@@ -98,6 +109,12 @@ async fn flush_all(
     if !verdicts.is_empty() {
         flush_verdicts(pool, verdicts).await;
     }
+    if !orders.is_empty() {
+        flush_orders(pool, orders).await;
+    }
+    if !state_changes.is_empty() {
+        flush_order_state_changes(pool, state_changes).await;
+    }
 }
 
 /// Max rows per batch INSERT to stay under PostgreSQL's 65535 parameter limit.
@@ -108,6 +125,8 @@ const INTENT_BATCH_MAX: usize = 5000; // 11 columns → 5957 max
 const FILL_BATCH_MAX: usize = 4000; // 14 columns → 4681 max
 const POSITION_BATCH_MAX: usize = 5000; // 9 columns → 7281 max
 const VERDICT_BATCH_MAX: usize = 4000; // 8 columns → 8191 max, use 4000 as safe limit
+const ORDER_BATCH_MAX: usize = 5000; // 10 columns → 6553 max
+const STATE_CHANGE_BATCH_MAX: usize = 5000; // 9 columns → 7281 max
 
 async fn flush_signals(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     let pg = match pool.get() {
@@ -403,6 +422,87 @@ async fn flush_verdicts(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     buf.clear();
 }
 
+/// Flush exchange orders to trading.orders.
+/// 將交易所訂單批量寫入 trading.orders。
+async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => { buf.clear(); return; }
+    };
+    for chunk in buf.chunks(ORDER_BATCH_MAX) {
+        let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+            "INSERT INTO trading.orders \
+             (ts, order_id, symbol, side, order_type, qty, strategy_name, \
+              category, is_paper, status, engine_mode) "
+        );
+        qb.push_values(chunk.iter(), |mut b, msg| {
+            if let TradingMsg::Order {
+                order_id, ts_ms, symbol, side, order_type, qty,
+                strategy_name, is_close: _, engine_mode,
+            } = msg {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
+                b.push_bind(order_id.as_str());
+                b.push_bind(symbol.as_str());
+                b.push_bind(side.as_str());
+                b.push_bind(order_type.as_str());
+                b.push_bind(sanitize_f64_or_zero(*qty) as f32);
+                b.push_bind(strategy_name.as_str());
+                b.push_bind("linear"); // Bybit USDT perp default / USDT 永續默認
+                // DEPRECATED is_paper derived from engine_mode (Grafana compat)
+                b.push_bind(engine_mode != "live");
+                b.push_bind("Working"); // order enters this table when exchange confirms
+                b.push_bind(engine_mode.as_str());
+            }
+        });
+        qb.push(" ON CONFLICT (order_id, ts) DO NOTHING");
+        match qb.build().execute(pg).await {
+            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "orders flushed"); }
+            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "orders flush failed"); }
+        }
+    }
+    buf.clear();
+}
+
+/// Flush order state changes to trading.order_state_changes.
+/// 將訂單狀態轉換批量寫入 trading.order_state_changes。
+async fn flush_order_state_changes(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
+    let pg = match pool.get() {
+        Some(p) => p,
+        None => { buf.clear(); return; }
+    };
+    for chunk in buf.chunks(STATE_CHANGE_BATCH_MAX) {
+        let mut qb: QueryBuilder<sqlx::Postgres> = QueryBuilder::new(
+            "INSERT INTO trading.order_state_changes \
+             (ts, order_id, from_status, to_status, filled_qty, avg_price, reason, engine_mode) "
+        );
+        qb.push_values(chunk.iter(), |mut b, msg| {
+            if let TradingMsg::OrderStateChange {
+                order_id, ts_ms, from_status, to_status,
+                filled_qty, avg_price, reason, engine_mode,
+            } = msg {
+                b.push_bind(
+                    chrono::DateTime::from_timestamp_millis(*ts_ms as i64).unwrap_or_default(),
+                );
+                b.push_bind(order_id.as_str());
+                b.push_bind(from_status.as_deref());
+                b.push_bind(to_status.as_str());
+                b.push_bind(filled_qty.and_then(|v| sanitize_f64(v)).map(|v| v as f32));
+                b.push_bind(avg_price.and_then(|v| sanitize_f64(v)).map(|v| v as f32));
+                b.push_bind(reason.as_deref());
+                b.push_bind(engine_mode.as_str());
+            }
+        });
+        qb.push(" ON CONFLICT (order_id, ts, to_status) DO NOTHING");
+        match qb.build().execute(pg).await {
+            Ok(r) => { pool.record_success(); debug!(rows = r.rows_affected(), "order_state_changes flushed"); }
+            Err(e) => { let _ = pool.record_failure(); warn!(error = %e, "order_state_changes flush failed"); }
+        }
+    }
+    buf.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,6 +620,8 @@ mod tests {
         ];
 
         let mut verdicts = Vec::new();
+        let mut orders = Vec::new();
+        let mut state_changes = Vec::new();
         for m in msgs {
             match &m {
                 TradingMsg::Signal { .. } => sigs.push(m),
@@ -527,6 +629,8 @@ mod tests {
                 TradingMsg::Fill { .. } => fills.push(m),
                 TradingMsg::PositionSnapshot { .. } => positions.push(m),
                 TradingMsg::RiskVerdict { .. } => verdicts.push(m),
+                TradingMsg::Order { .. } => orders.push(m),
+                TradingMsg::OrderStateChange { .. } => state_changes.push(m),
             }
         }
 
@@ -535,5 +639,7 @@ mod tests {
         assert_eq!(fills.len(), 1);
         assert_eq!(positions.len(), 1);
         assert_eq!(verdicts.len(), 0);
+        assert_eq!(orders.len(), 0);
+        assert_eq!(state_changes.len(), 0);
     }
 }
