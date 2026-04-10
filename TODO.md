@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（ML Pipeline Remediation ✅ `ee3dc84` + DEAD-PY-1 Wave 標籤清理）
+最後更新：2026-04-10（Live GUI + per-engine risk + API key mgmt 設計定稿）
 測試基準線：**Rust engine lib 838 · Python control_api 2678 passed (1 pre-existing fail · 15 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -9,6 +9,61 @@
 ---
 
 ## 🎯 當前焦點（按執行順序）
+
+### 0. 🔴 Live GUI + Per-Engine Risk + API Key 管理（新工作 2026-04-10 排入）
+
+目標：Live 頁面功能完備可測試、風控按引擎分離、GUI 可安全填入/替換 API key。
+物理隔離原則：Live key 槽（`secrets/secret_files/bybit/live/`）目前填另一個 Demo 帳號，上線時換 key，零代碼改動。
+
+#### P0 — GUI 框架 + API key 管理（不需改 Rust，可立即做）
+
+- [ ] **LIVE-P0-1** `tab-settings.html` 加 API Key 管理區塊
+  - `GET /api/v1/settings/api-key/{slot}` → 返回 `{has_key, key_hint: "****XXXX", last_modified}`（永不返回明文）
+  - `POST /api/v1/settings/api-key/{slot}` → validate via test REST call → 寫入 `secrets/secret_files/bybit/{slot}/` → `chmod 600` → 返回 `{saved, validated, key_hint}`
+  - slot = `demo` | `live`；GUI 顯示現有 key 遮罩 + 替換輸入框 + 測試並保存按鈕
+  - 安全保障：write-only from GUI、auth 守衛、Tailscale HTTPS、rate-limit 此 endpoint
+
+- [ ] **LIVE-P0-2** `tab-live.html` 前置條件動態化
+  - 前置條件清單改為 API 動態查詢（`/api/v1/governance/status` + `/api/v1/paper/session/status`），動態顯示 ✓/⬜/⚠
+  - `engine.toml` 中 `trading_mode` 顯示 + `execution_authority` 顯示
+  - 加「Phase badge」更新為當前真實 Phase（目前 Phase 5 觀察期）
+
+- [ ] **LIVE-P0-3** `tab-live.html` 實盤儀表板框架（解鎖後顯示）
+  - 鎖定條件：`execution_authority != "granted"`，顯示鎖定頁
+  - 解鎖後：顯示完整儀表板（positions、orders、PnL、emergency stop）
+  - 視覺：紅色邊框主題 + 大號 PnL 卡片強調真實資金風險
+  - 獨立啟停按鈕（不合並入 tab-trading.html 雙引擎控制）
+
+#### P1 — Rust TradingMode::Live + 槽位感知 key 讀取
+
+- [ ] **LIVE-P1-1** `bybit_rest_client.rs`：`read_secret_file(slot, name)` 槽位感知
+  - 現在硬編碼 `bybit/demo/`，改為接受 `slot: &str` 參數
+  - `BybitRestClient::new()` 新增 `slot: Option<&str>` 參數，默認 `"demo"`
+
+- [ ] **LIVE-P1-2** `config/mod.rs`：`TradingMode` 加 `Live` variant
+  - `PaperOnly` | `Demo`（原 Exchange 改名）| `Live`（Mainnet + live key slot）
+  - `main.rs` 依 mode 選 `BybitEnvironment::Demo` 或 `Mainnet` + 對應 key slot
+
+- [ ] **LIVE-P1-3** Python `/api/v1/live/session/start|stop|status` 路由
+  - 與 paper_trading_routes.py 平行，但目標是 Live engine state
+  - `start` 需確認 `execution_authority = granted`（硬鎖，不可繞過）
+  - `stop` → 平倉 + cancel orders + 進入 observation
+
+#### P2 — Per-Engine RiskConfig 分離
+
+- [ ] **LIVE-P2-1** Rust：三個獨立 RiskConfig 文件
+  - `risk_config_paper.toml`、`risk_config_demo.toml`、`risk_config_live.toml`
+  - Env var 覆蓋路徑：`OPENCLAW_RISK_CONFIG_PAPER` / `_DEMO` / `_LIVE`
+  - IPC `patch_risk_config` 加 `engine: "paper"|"demo"|"live"` 路由到對應 store
+
+- [ ] **LIVE-P2-2** GUI 風控頁 per-engine tab
+  - `tab-risk.html` 頂部加 Engine 選擇器（Paper / Demo / Live）
+  - 每個 engine 顯示/修改各自的 RiskConfig
+  - Live risk tab 加額外警示：修改實盤風控需二次確認彈窗
+
+- [ ] **LIVE-P2-3** E2 + E4 全量回歸 + commit
+
+---
 
 ### 1. 🟢 觀察期 — 等數據（無開發動作，只需維運）
 
