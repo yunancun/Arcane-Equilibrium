@@ -8,6 +8,8 @@
 //!   OU 模型：最佳間距 = σ·√(2/θ)，地板 = 2× 來回手續費。
 //!   幾何模式：等比間距（更適合加密貨幣）。含庫存漂移健康檢查。
 
+use std::collections::HashMap;
+
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use serde::{Deserialize, Serialize};
@@ -147,34 +149,47 @@ pub enum GridHealth {
 
 pub struct GridTrading {
     active: bool,
-    grid_levels: Vec<f64>,
-    last_cross_idx: Option<usize>,
-    net_inventory: f64,
+    /// Template grid bounds for non-adaptive constructors (None = adaptive / ±10%).
+    /// 非自適應構造函數的模板邊界（None = 自適應 / ±10%）。
+    template_bounds: Option<(f64, f64)>,
+    /// Per-symbol grid levels. Initialized lazily on first tick per symbol.
+    /// 每幣種網格層級。每個 symbol 首次 tick 時延遲初始化。
+    grid_levels: HashMap<String, Vec<f64>>,
+    /// Per-symbol last crossed grid index.
+    /// 每幣種最後穿越的網格索引。
+    last_cross_idx: HashMap<String, usize>,
+    /// Per-symbol net inventory tracking.
+    /// 每幣種淨庫存追蹤。
+    net_inventory: HashMap<String, f64>,
     /// Max net inventory — reserved for future Agent position sizing control (Phase 3a).
     /// 最大淨庫存 — 預留給未來 Agent 倉位管理（Phase 3a）。
     #[allow(dead_code)]
     max_inventory: f64,
-    last_trade_ms: u64,
+    /// Per-symbol last trade timestamp for cooldown.
+    /// 每幣種最後交易時間戳（用於冷卻）。
+    last_trade_ms: HashMap<String, u64>,
     cooldown_ms: u64,
     qty_per_grid: f64,
-    // OU parameters / OU 參數
-    price_history: Vec<f64>,
+    // OU parameters / OU 參數 — per-symbol price history
+    price_history: HashMap<String, Vec<f64>>,
     ou_lookback: usize,
     // Spacing mode / 間距模式
     spacing_mode: GridSpacingMode,
     // Health check fields / 健康檢查欄位
     /// How often (in ticks) to run health check / 每隔多少 tick 執行健康檢查
     health_check_interval: usize,
-    /// Ticks elapsed since last health check / 距上次健康檢查已過的 tick 數
-    ticks_since_health_check: usize,
-    /// Consecutive ticks price was out of grid range / 連續價格超出網格範圍的 tick 數
-    out_of_range_count: usize,
+    /// Per-symbol ticks elapsed since last health check.
+    /// 每幣種距上次健康檢查已過的 tick 數。
+    ticks_since_health_check: HashMap<String, usize>,
+    /// Per-symbol consecutive ticks price was out of grid range.
+    /// 每幣種連續價格超出網格範圍的 tick 數。
+    out_of_range_count: HashMap<String, usize>,
     /// Max allowed consecutive out-of-range ticks before rebalance / 觸發再平衡前允許的最大連續超出範圍次數
     max_out_of_range: usize,
-    // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
-    prev_cross_idx: Option<usize>,
-    prev_inventory: f64,
-    prev_last_trade_ms: u64,
+    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
+    prev_cross_idx: HashMap<String, Option<usize>>,
+    prev_inventory: HashMap<String, f64>,
+    prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
 }
@@ -222,27 +237,30 @@ fn build_levels(lower: f64, upper: f64, count: usize, mode: &GridSpacingMode) ->
 impl GridTrading {
     /// Create a grid with linear (arithmetic) spacing — original behavior.
     /// 建立線性（等差）間距網格 — 原始行為。
+    /// Create a grid with linear (arithmetic) spacing — bounds stored as template.
+    /// Grid levels are lazily initialized per symbol on first tick.
+    /// 建立線性（等差）間距網格 — 邊界存為模板，各 symbol 首次 tick 時延遲初始化。
     pub fn new(lower: f64, upper: f64) -> Self {
-        let levels = build_linear_levels(lower, upper, DEFAULT_GRID_COUNT);
         Self {
             active: true,
-            grid_levels: levels,
-            last_cross_idx: None,
-            net_inventory: 0.0,
+            template_bounds: Some((lower, upper)),
+            grid_levels: HashMap::new(),
+            last_cross_idx: HashMap::new(),
+            net_inventory: HashMap::new(),
             max_inventory: 5.0,
-            last_trade_ms: 0,
+            last_trade_ms: HashMap::new(),
             cooldown_ms: 60_000,
             qty_per_grid: DEFAULT_QTY_PER_GRID,
-            price_history: Vec::new(),
+            price_history: HashMap::new(),
             ou_lookback: 100,
             spacing_mode: GridSpacingMode::Linear,
             health_check_interval: 200,
-            ticks_since_health_check: 0,
-            out_of_range_count: 0,
+            ticks_since_health_check: HashMap::new(),
+            out_of_range_count: HashMap::new(),
             max_out_of_range: 50,
-            prev_cross_idx: None,
-            prev_inventory: 0.0,
-            prev_last_trade_ms: 0,
+            prev_cross_idx: HashMap::new(),
+            prev_inventory: HashMap::new(),
+            prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
         }
     }
@@ -253,26 +271,26 @@ impl GridTrading {
     /// 尚未在 main.rs 部署 — Phase 3a 供 Agent/配置選擇使用。
     #[allow(dead_code)]
     pub fn new_geometric(lower: f64, upper: f64) -> Self {
-        let levels = build_geometric_levels(lower, upper, DEFAULT_GRID_COUNT);
         Self {
             active: true,
-            grid_levels: levels,
-            last_cross_idx: None,
-            net_inventory: 0.0,
+            template_bounds: Some((lower, upper)),
+            grid_levels: HashMap::new(),
+            last_cross_idx: HashMap::new(),
+            net_inventory: HashMap::new(),
             max_inventory: 5.0,
-            last_trade_ms: 0,
+            last_trade_ms: HashMap::new(),
             cooldown_ms: 60_000,
             qty_per_grid: DEFAULT_QTY_PER_GRID,
-            price_history: Vec::new(),
+            price_history: HashMap::new(),
             ou_lookback: 100,
             spacing_mode: GridSpacingMode::Geometric,
             health_check_interval: 200,
-            ticks_since_health_check: 0,
-            out_of_range_count: 0,
+            ticks_since_health_check: HashMap::new(),
+            out_of_range_count: HashMap::new(),
             max_out_of_range: 50,
-            prev_cross_idx: None,
-            prev_inventory: 0.0,
-            prev_last_trade_ms: 0,
+            prev_cross_idx: HashMap::new(),
+            prev_inventory: HashMap::new(),
+            prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
         }
     }
@@ -295,37 +313,42 @@ impl GridTrading {
     /// 以指定的間距模式建立自適應網格（Phase 3a — 尚未部署）。
     #[allow(dead_code)]
     pub fn new_adaptive_with_mode(mode: GridSpacingMode) -> Self {
-        // Start with a placeholder range; the first tick will re-center the grid.
-        // 使用占位范围；第一个 tick 会重新居中网格。
+        // Start with empty grids per symbol; each symbol's first tick will initialize its grid.
+        // 各 symbol 空白起始；每個 symbol 首次 tick 時初始化自己的網格。
         Self {
             active: true,
-            grid_levels: Vec::new(), // Empty — initialized on first tick / 空 — 首次 tick 時初始化
-            last_cross_idx: None,
-            net_inventory: 0.0,
+            template_bounds: None,
+            grid_levels: HashMap::new(),
+            last_cross_idx: HashMap::new(),
+            net_inventory: HashMap::new(),
             max_inventory: 5.0,
-            last_trade_ms: 0,
+            last_trade_ms: HashMap::new(),
             cooldown_ms: 60_000,
             qty_per_grid: DEFAULT_QTY_PER_GRID,
-            price_history: Vec::new(),
+            price_history: HashMap::new(),
             ou_lookback: 100,
             spacing_mode: mode,
             health_check_interval: 200,
-            ticks_since_health_check: 0,
-            out_of_range_count: 0,
+            ticks_since_health_check: HashMap::new(),
+            out_of_range_count: HashMap::new(),
             max_out_of_range: 50,
-            prev_cross_idx: None,
-            prev_inventory: 0.0,
-            prev_last_trade_ms: 0,
+            prev_cross_idx: HashMap::new(),
+            prev_inventory: HashMap::new(),
+            prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
         }
     }
 
-    /// Find nearest grid level index for a price.
-    /// 找到價格最近的網格等級索引。
-    fn nearest_grid_idx(&self, price: f64) -> usize {
+    /// Find nearest grid level index for a price in a given symbol's grid.
+    /// 找到指定幣種網格中價格最近的等級索引。
+    fn nearest_grid_idx(&self, symbol: &str, price: f64) -> usize {
+        let levels = match self.grid_levels.get(symbol) {
+            Some(l) => l,
+            None => return 0,
+        };
         let mut best = 0;
         let mut best_dist = f64::MAX;
-        for (i, &level) in self.grid_levels.iter().enumerate() {
+        for (i, &level) in levels.iter().enumerate() {
             let d = (price - level).abs();
             if d < best_dist {
                 best_dist = d;
@@ -335,25 +358,27 @@ impl GridTrading {
         best
     }
 
-    /// Check grid health: is price within bounds? Should we rebalance?
-    /// 檢查網格健康：價格是否在範圍內？是否需要再平衡？
-    pub fn check_health(&mut self, price: f64) -> GridHealth {
-        if self.grid_levels.is_empty() {
-            return GridHealth::Healthy;
-        }
-        let lo = self.grid_levels[0];
-        let hi = self.grid_levels[self.grid_levels.len() - 1];
+    /// Check grid health for a symbol: is price within bounds? Should we rebalance?
+    /// 檢查指定幣種的網格健康：價格是否在範圍內？是否需要再平衡？
+    pub fn check_health(&mut self, symbol: &str, price: f64) -> GridHealth {
+        let levels = match self.grid_levels.get(symbol) {
+            Some(l) if !l.is_empty() => l,
+            _ => return GridHealth::Healthy,
+        };
+        let lo = levels[0];
+        let hi = levels[levels.len() - 1];
 
         if price < lo || price > hi {
-            self.out_of_range_count += 1;
-            if self.out_of_range_count >= self.max_out_of_range {
+            let count = self.out_of_range_count.entry(symbol.to_string()).or_insert(0);
+            *count += 1;
+            if *count >= self.max_out_of_range {
                 GridHealth::NeedsRebalance
             } else {
                 GridHealth::OutOfRange
             }
         } else {
             // Price back in range — reset counter / 價格回到範圍 — 重置計數器
-            self.out_of_range_count = 0;
+            self.out_of_range_count.insert(symbol.to_string(), 0);
             GridHealth::Healthy
         }
     }
@@ -364,10 +389,11 @@ impl GridTrading {
     /// 以指定價格為中心重建網格。
     /// 若 OU 有足夠數據則使用 OU 間距；否則 ±10% 範圍。
     /// 遵循當前 spacing_mode。
-    fn rebalance(&mut self, price: f64) {
-        let (lower, upper) = if self.price_history.len() >= 20 {
+    fn rebalance(&mut self, symbol: &str, price: f64) {
+        let history = self.price_history.get(symbol);
+        let (lower, upper) = if history.map(|h| h.len()).unwrap_or(0) >= 20 {
             // Use OU-derived step to compute bounds / 用 OU 推導的步長計算邊界
-            let ou_step = self.compute_ou_step();
+            let ou_step = self.compute_ou_step(symbol);
             if let Some(step) = ou_step {
                 let lo = price - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
                 let hi = price + step * (DEFAULT_GRID_COUNT as f64 / 2.0);
@@ -387,21 +413,21 @@ impl GridTrading {
             )
         };
 
-        self.grid_levels = build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode);
-        self.out_of_range_count = 0;
-        self.last_cross_idx = None;
+        self.grid_levels.insert(symbol.to_string(), build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode));
+        self.out_of_range_count.insert(symbol.to_string(), 0);
+        self.last_cross_idx.remove(symbol);
     }
 
-    /// Compute OU-derived optimal step size (without rebuilding the grid).
+    /// Compute OU-derived optimal step size for a symbol (without rebuilding the grid).
     /// Returns None if data is insufficient or parameters are degenerate.
-    /// 計算 OU 推導的最佳步長（不重建網格）。
-    /// 數據不足或參數退化時返回 None。
-    fn compute_ou_step(&self) -> Option<f64> {
-        if self.price_history.len() < 20 {
+    /// 計算指定幣種的 OU 推導最佳步長（不重建網格）。
+    fn compute_ou_step(&self, symbol: &str) -> Option<f64> {
+        let history = self.price_history.get(symbol)?;
+        if history.len() < 20 {
             return None;
         }
-        let n = self.price_history.len().min(self.ou_lookback);
-        let prices = &self.price_history[self.price_history.len() - n..];
+        let n = history.len().min(self.ou_lookback);
+        let prices = &history[history.len() - n..];
 
         let changes: Vec<f64> = prices.windows(2).map(|w| w[1] - w[0]).collect();
         let x_lag: Vec<f64> = prices[..prices.len() - 1].to_vec();
@@ -443,37 +469,35 @@ impl GridTrading {
         }
     }
 
-    /// Update grid spacing based on OU model (V2). Respects current spacing_mode.
-    /// 基於 OU 模型更新網格間距 (V2)。遵循當前 spacing_mode。
-    pub fn update_ou_spacing(&mut self) {
-        if self.price_history.len() < 20 {
-            return;
-        }
-        let n = self.price_history.len().min(self.ou_lookback);
-        let prices = &self.price_history[self.price_history.len() - n..];
+    /// Update grid spacing for a symbol based on OU model (V2). Respects current spacing_mode.
+    /// 基於 OU 模型更新指定幣種的網格間距 (V2)。遵循當前 spacing_mode。
+    pub fn update_ou_spacing(&mut self, symbol: &str) {
+        let history = match self.price_history.get(symbol) {
+            Some(h) if h.len() >= 20 => h,
+            _ => return,
+        };
+        let n = history.len().min(self.ou_lookback);
+        let prices = &history[history.len() - n..];
         let mu = prices.iter().sum::<f64>() / prices.len() as f64;
 
-        if let Some(step) = self.compute_ou_step() {
-            match self.spacing_mode {
+        if let Some(step) = self.compute_ou_step(symbol) {
+            let new_levels = match self.spacing_mode {
                 GridSpacingMode::Linear => {
-                    // Linear: center on mu with equal dollar steps.
-                    // 線性：以 mu 為中心，等差步長。
                     let lower = mu - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
-                    self.grid_levels = build_linear_levels(
+                    build_linear_levels(
                         lower,
                         lower + step * (DEFAULT_GRID_COUNT as f64 - 1.0),
                         DEFAULT_GRID_COUNT,
-                    );
+                    )
                 }
                 GridSpacingMode::Geometric => {
-                    // Geometric: center on mu, derive lower/upper from step size.
-                    // 幾何：以 mu 為中心，由步長推算上下界。
                     let half_range = step * (DEFAULT_GRID_COUNT as f64 / 2.0);
-                    let lower = (mu - half_range).max(mu * 0.01); // Ensure positive / 確保正數
+                    let lower = (mu - half_range).max(mu * 0.01);
                     let upper = mu + half_range;
-                    self.grid_levels = build_geometric_levels(lower, upper, DEFAULT_GRID_COUNT);
+                    build_geometric_levels(lower, upper, DEFAULT_GRID_COUNT)
                 }
-            }
+            };
+            self.grid_levels.insert(symbol.to_string(), new_levels);
         }
     }
 
@@ -512,96 +536,129 @@ impl Strategy for GridTrading {
         self.active = active;
     }
 
-    /// Reset net_inventory on external close (risk-stop) to prevent desync.
-    /// 外部平倉（風控止損）時重設 net_inventory，防止與 paper_state 脫鉤。
-    fn on_external_close(&mut self, _symbol: &str) {
-        if self.net_inventory != 0.0 {
-            info!(strategy = "grid_trading", prev_inventory = %self.net_inventory,
+    /// Reset per-symbol net_inventory on external close (risk-stop) to prevent desync.
+    /// 外部平倉（風控止損）時重設該幣種 net_inventory，防止與 paper_state 脫鉤。
+    fn on_external_close(&mut self, symbol: &str) {
+        let inv = self.net_inventory.get(symbol).copied().unwrap_or(0.0);
+        if inv != 0.0 {
+            info!(strategy = "grid_trading", %symbol, prev_inventory = %inv,
                   "external close: resetting net_inventory / 外部平倉：重設淨庫存");
-            self.net_inventory = 0.0;
+            self.net_inventory.insert(symbol.to_string(), 0.0);
         }
     }
 
-    /// Pipeline confirmed a strategy-emitted Close was executed — adjust inventory.
-    /// 管線確認策略平倉已執行 — 調整庫存。
-    fn on_close_confirmed(&mut self, _symbol: &str) {
-        // Determine direction from prev snapshot: if prev_inventory was negative, this was a buy (close short).
-        // 從先前快照判斷方向：prev_inventory < 0 → 此為買入（平空）。
-        if self.prev_inventory < 0.0 {
-            self.net_inventory += self.qty_per_grid;
-        } else if self.prev_inventory > 0.0 {
-            self.net_inventory -= self.qty_per_grid;
+    /// Pipeline confirmed a strategy-emitted Close was executed — adjust per-symbol inventory.
+    /// 管線確認策略平倉已執行 — 調整該幣種庫存。
+    fn on_close_confirmed(&mut self, symbol: &str) {
+        let prev_inv = self.prev_inventory.get(symbol).copied().unwrap_or(0.0);
+        let cur_inv = self.net_inventory.entry(symbol.to_string()).or_insert(0.0);
+        if prev_inv < 0.0 {
+            *cur_inv += self.qty_per_grid;
+        } else if prev_inv > 0.0 {
+            *cur_inv -= self.qty_per_grid;
         }
-        info!(strategy = "grid_trading", new_inventory = %self.net_inventory,
+        info!(strategy = "grid_trading", %symbol, new_inventory = %cur_inv,
               "close confirmed: inventory adjusted / 平倉確認：庫存已調整");
     }
 
-    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back cross state.
-    /// 管線跳過策略平倉（未找到倉位）— 回滾交叉狀態。
-    fn on_close_skipped(&mut self, _symbol: &str) {
-        self.last_cross_idx = self.prev_cross_idx;
-        self.last_trade_ms = self.prev_last_trade_ms;
-        info!(strategy = "grid_trading", "close skipped: cross state rolled back / 平倉跳過：交叉狀態已回滾");
+    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back per-symbol cross state.
+    /// 管線跳過策略平倉（未找到倉位）— 回滾該幣種交叉狀態。
+    fn on_close_skipped(&mut self, symbol: &str) {
+        if let Some(prev) = self.prev_cross_idx.get(symbol) {
+            match prev {
+                Some(idx) => { self.last_cross_idx.insert(symbol.to_string(), *idx); }
+                None => { self.last_cross_idx.remove(symbol); }
+            }
+        }
+        if let Some(&ts) = self.prev_last_trade_ms.get(symbol) {
+            if ts == 0 { self.last_trade_ms.remove(symbol); } else { self.last_trade_ms.insert(symbol.to_string(), ts); }
+        }
+        info!(strategy = "grid_trading", %symbol, "close skipped: cross state rolled back / 平倉跳過：交叉狀態已回滾");
     }
 
-    /// RC-04: Revert net_inventory, last_cross_idx, last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾 net_inventory、last_cross_idx、last_trade_ms。
-    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
-        self.last_cross_idx = self.prev_cross_idx;
-        self.net_inventory = self.prev_inventory;
-        self.last_trade_ms = self.prev_last_trade_ms;
+    /// RC-04: Revert per-symbol net_inventory, last_cross_idx, last_trade_ms on rejection.
+    /// RC-04：拒絕時回滾該幣種的 net_inventory、last_cross_idx、last_trade_ms。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+        let sym = &intent.symbol;
+        if let Some(prev) = self.prev_cross_idx.get(sym) {
+            match prev {
+                Some(idx) => { self.last_cross_idx.insert(sym.clone(), *idx); }
+                None => { self.last_cross_idx.remove(sym); }
+            }
+        }
+        if let Some(&inv) = self.prev_inventory.get(sym) {
+            self.net_inventory.insert(sym.clone(), inv);
+        }
+        if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
+            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+        }
     }
 
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
-        self.price_history.push(ctx.price);
-        if self.price_history.len() > self.ou_lookback * 2 {
-            self.price_history.drain(0..self.ou_lookback);
+        let sym = &ctx.symbol;
+
+        // Per-symbol price history for OU model
+        let history = self.price_history.entry(sym.clone()).or_default();
+        history.push(ctx.price);
+        let ou_lookback = self.ou_lookback;
+        if history.len() > ou_lookback * 2 {
+            history.drain(0..ou_lookback);
         }
 
-        // Auto-initialize grid from first price (±10% range) for adaptive mode.
-        // Respects spacing_mode.
-        // 自适应模式：首次价格 ±10% 初始化网格，遵循 spacing_mode。
-        if self.grid_levels.is_empty() && ctx.price > 0.0 {
-            let lower = ctx.price * (1.0 - ADAPTIVE_RANGE_PCT);
-            let upper = ctx.price * (1.0 + ADAPTIVE_RANGE_PCT);
-            self.grid_levels = build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode);
+        // Auto-initialize per-symbol grid on first tick.
+        // If template_bounds is set (from new(lower, upper)), use those bounds;
+        // otherwise use adaptive ±10% of current price.
+        // 每幣種首次 tick 初始化網格。有 template_bounds 用模板邊界，否則自適應 ±10%。
+        if !self.grid_levels.contains_key(sym) && ctx.price > 0.0 {
+            let (lower, upper) = match self.template_bounds {
+                Some((lo, hi)) => (lo, hi),
+                None => (
+                    ctx.price * (1.0 - ADAPTIVE_RANGE_PCT),
+                    ctx.price * (1.0 + ADAPTIVE_RANGE_PCT),
+                ),
+            };
+            self.grid_levels.insert(sym.clone(), build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode));
         }
 
-        // Health check every health_check_interval ticks.
-        // 每 health_check_interval 個 tick 執行健康檢查。
-        self.ticks_since_health_check += 1;
-        if self.ticks_since_health_check >= self.health_check_interval {
-            self.ticks_since_health_check = 0;
-            let health = self.check_health(ctx.price);
+        // Per-symbol health check every health_check_interval ticks.
+        // 每幣種每 health_check_interval 個 tick 執行健康檢查。
+        let ticks = self.ticks_since_health_check.entry(sym.clone()).or_insert(0);
+        *ticks += 1;
+        if *ticks >= self.health_check_interval {
+            *ticks = 0;
+            let health = self.check_health(sym, ctx.price);
             if health == GridHealth::NeedsRebalance {
-                self.rebalance(ctx.price);
+                self.rebalance(sym, ctx.price);
             }
         }
 
-        // Periodically update grid spacing via OU model
-        // 定期通过 OU 模型更新网格间距
-        if self.price_history.len() % 50 == 0 {
-            self.update_ou_spacing();
+        // Periodically update per-symbol grid spacing via OU model
+        // 定期通過 OU 模型更新該幣種網格間距
+        let hist_len = self.price_history.get(sym).map(|h| h.len()).unwrap_or(0);
+        if hist_len > 0 && hist_len % 50 == 0 {
+            self.update_ou_spacing(sym);
         }
 
-        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms {
+        let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
+        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
         }
 
-        let idx = self.nearest_grid_idx(ctx.price);
-        if self.last_cross_idx == Some(idx) {
+        let idx = self.nearest_grid_idx(sym, ctx.price);
+        if self.last_cross_idx.get(sym) == Some(&idx) {
             return vec![];
         }
 
-        let prev_idx = self.last_cross_idx.unwrap_or(idx);
+        let prev_idx = self.last_cross_idx.get(sym).copied().unwrap_or(idx);
 
-        // RC-04: Snapshot state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照狀態，供拒絕回滾使用。
-        self.prev_cross_idx = self.last_cross_idx;
-        self.prev_inventory = self.net_inventory;
-        self.prev_last_trade_ms = self.last_trade_ms;
+        // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
+        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
+        self.prev_cross_idx.insert(sym.clone(), self.last_cross_idx.get(sym).copied());
+        let cur_inventory = self.net_inventory.get(sym).copied().unwrap_or(0.0);
+        self.prev_inventory.insert(sym.clone(), cur_inventory);
+        self.prev_last_trade_ms.insert(sym.clone(), last_ms);
 
-        self.last_cross_idx = Some(idx);
+        self.last_cross_idx.insert(sym.clone(), idx);
 
         let mut intents = Vec::new();
 
@@ -623,19 +680,17 @@ impl Strategy for GridTrading {
                 order_type: "market".into(),
                 limit_price: None,
             };
-            if self.net_inventory < 0.0 {
+            if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
                     symbol: ctx.symbol.clone(),
                     confidence: conf,
                     reason: "grid_close_short".into(),
                 });
-                // Inventory adjustment deferred to on_close_confirmed to avoid drift if close is a no-op.
-                // 庫存調整延遲到 on_close_confirmed，避免平倉無效時漂移。
             } else {
                 intents.push(StrategyAction::Open(intent));
-                self.net_inventory += self.qty_per_grid;
+                *self.net_inventory.entry(sym.clone()).or_insert(0.0) += self.qty_per_grid;
             }
-            self.last_trade_ms = ctx.timestamp_ms;
+            self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
         } else if idx > prev_idx {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
             // Otherwise it's a new short → Open.
@@ -649,19 +704,17 @@ impl Strategy for GridTrading {
                 order_type: "market".into(),
                 limit_price: None,
             };
-            if self.net_inventory > 0.0 {
+            if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {
                     symbol: ctx.symbol.clone(),
                     confidence: conf,
                     reason: "grid_close_long".into(),
                 });
-                // Inventory adjustment deferred to on_close_confirmed to avoid drift if close is a no-op.
-                // 庫存調整延遲到 on_close_confirmed，避免平倉無效時漂移。
             } else {
                 intents.push(StrategyAction::Open(intent));
-                self.net_inventory -= self.qty_per_grid;
+                *self.net_inventory.entry(sym.clone()).or_insert(0.0) -= self.qty_per_grid;
             }
-            self.last_trade_ms = ctx.timestamp_ms;
+            self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
         }
 
         intents
@@ -702,9 +755,14 @@ mod tests {
 
     #[test]
     fn test_grid_creation() {
-        let g = GridTrading::new(49000.0, 51000.0);
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
-        assert!((g.grid_levels[0] - 49000.0).abs() < 0.01);
+        // Grid levels are lazily initialized on first tick, not at construction.
+        // 網格層級在首次 tick 時延遲初始化，不在構造時。
+        let mut g = GridTrading::new(49000.0, 51000.0);
+        assert!(g.grid_levels.is_empty(), "grid_levels should be empty before first tick");
+        g.on_tick(&ctx(50000.0, 0)); // triggers lazy init with template_bounds
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+        assert!((levels[0] - 49000.0).abs() < 0.01);
     }
 
     #[test]
@@ -738,8 +796,9 @@ mod tests {
         // Inventory cap removed — intent_processor Gate 1.5 handles duplicates.
         // 庫存上限已移除 — intent_processor Gate 1.5 處理重複。
         let mut g = GridTrading::new(49000.0, 51000.0);
-        g.net_inventory = g.max_inventory;
+        // First tick initializes grid lazily / 首次 tick 延遲初始化網格
         g.on_tick(&ctx(50500.0, 0));
+        g.net_inventory.insert("BTC".into(), g.max_inventory);
         let i = g.on_tick(&ctx(49500.0, 100_000));
         assert!(!i.is_empty()); // Grid always emits; intent_processor decides
     }
@@ -756,7 +815,7 @@ mod tests {
         g.on_tick(&ctx(50500.0, 0));
         let i = g.on_tick(&ctx(49500.0, 100_000));
         assert!(!i.is_empty());
-        assert!(g.net_inventory > 0.0);
+        assert!(*g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0);
         match &i[0] {
             StrategyAction::Open(intent) => assert!(intent.is_long),
             other => panic!("expected Open for initial buy, got {:?}", other),
@@ -771,15 +830,16 @@ mod tests {
         }
         // Inventory NOT yet adjusted (deferred until on_close_confirmed)
         // 庫存尚未調整（延遲到 on_close_confirmed）
-        assert!(g.net_inventory > 0.0, "inventory deferred: still positive before confirm");
+        assert!(*g.net_inventory.get("BTC").unwrap_or(&0.0) > 0.0, "inventory deferred: still positive before confirm");
 
         // Pipeline confirms close → inventory adjusted
         // 管線確認平倉 → 庫存已調整
         g.on_close_confirmed("BTC");
+        let inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
         assert!(
-            (g.net_inventory).abs() < 1e-9,
+            inv.abs() < 1e-9,
             "inventory should be 0 after close confirmed, got {}",
-            g.net_inventory
+            inv
         );
     }
 
@@ -791,8 +851,8 @@ mod tests {
         // Build positive inventory via Open
         g.on_tick(&ctx(50500.0, 0));
         g.on_tick(&ctx(49500.0, 100_000));
-        let prev_cross = g.last_cross_idx;
-        let prev_inventory = g.net_inventory;
+        let prev_cross = g.last_cross_idx.get("BTC").copied();
+        let prev_inventory = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
 
         // Emit Close (sell with positive inventory)
         let i = g.on_tick(&ctx(50500.0, 200_000));
@@ -804,9 +864,10 @@ mod tests {
 
         // Pipeline says no position found → skip → roll back
         g.on_close_skipped("BTC");
-        assert_eq!(g.last_cross_idx, prev_cross, "cross state should be rolled back");
+        assert_eq!(g.last_cross_idx.get("BTC").copied(), prev_cross, "cross state should be rolled back");
         // Inventory unchanged since Close doesn't adjust eagerly
-        assert!((g.net_inventory - prev_inventory).abs() < 1e-9);
+        let cur_inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
+        assert!((cur_inv - prev_inventory).abs() < 1e-9);
     }
 
     #[test]
@@ -816,22 +877,25 @@ mod tests {
         let mut g = GridTrading::new_adaptive();
         assert!(g.grid_levels.is_empty());
         let intents = g.on_tick(&ctx(50000.0, 0));
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
         // Range should be ±10% of 50000 → 45000..55000
-        assert!((g.grid_levels[0] - 45000.0).abs() < 1.0);
+        assert!((levels[0] - 45000.0).abs() < 1.0);
         assert!(intents.is_empty()); // first tick = no trade
     }
 
     #[test]
     fn test_ou_spacing_update() {
         let mut g = GridTrading::new(49000.0, 51000.0);
-        // Fill price history
+        g.on_tick(&ctx(50000.0, 0)); // lazy init
+        // Fill price history for BTC
+        let history = g.price_history.entry("BTC".into()).or_default();
         for i in 0..60 {
-            g.price_history
-                .push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
+            history.push(50000.0 + (i as f64 * 0.1).sin() * 100.0);
         }
-        g.update_ou_spacing();
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
+        g.update_ou_spacing("BTC");
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
     }
 
     // ── Geometric spacing tests / 幾何間距測試 ──
@@ -840,17 +904,19 @@ mod tests {
     fn test_geometric_grid_levels() {
         // Verify geometric spacing produces correct ratio-based levels.
         // 驗證幾何間距產生正確的等比層級。
-        let g = GridTrading::new_geometric(1000.0, 2000.0);
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
-        assert!((g.grid_levels[0] - 1000.0).abs() < 0.01);
-        let last = g.grid_levels[g.grid_levels.len() - 1];
+        let mut g = GridTrading::new_geometric(1000.0, 2000.0);
+        g.on_tick(&ctx(1500.0, 0)); // lazy init with template_bounds
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+        assert!((levels[0] - 1000.0).abs() < 0.01);
+        let last = levels[levels.len() - 1];
         assert!((last - 2000.0).abs() < 0.1);
 
         // All ratios between consecutive levels should be equal.
         // 所有相鄰層級之間的比率應相等。
         let expected_ratio = (2000.0_f64 / 1000.0).powf(1.0 / 9.0);
-        for i in 1..g.grid_levels.len() {
-            let ratio = g.grid_levels[i] / g.grid_levels[i - 1];
+        for i in 1..levels.len() {
+            let ratio = levels[i] / levels[i - 1];
             assert!(
                 (ratio - expected_ratio).abs() < 1e-10,
                 "Ratio at index {} was {}, expected {}",
@@ -865,25 +931,29 @@ mod tests {
     fn test_geometric_vs_linear() {
         // Geometric levels should differ from linear levels for the same bounds.
         // 相同邊界下，幾何層級應與線性層級不同。
-        let lin = GridTrading::new(1000.0, 2000.0);
-        let geo = GridTrading::new_geometric(1000.0, 2000.0);
+        let mut lin = GridTrading::new(1000.0, 2000.0);
+        let mut geo = GridTrading::new_geometric(1000.0, 2000.0);
+        lin.on_tick(&ctx(1500.0, 0)); // lazy init
+        geo.on_tick(&ctx(1500.0, 0)); // lazy init
+        let lin_l = lin.grid_levels.get("BTC").unwrap();
+        let geo_l = geo.grid_levels.get("BTC").unwrap();
 
-        assert_eq!(lin.grid_levels.len(), geo.grid_levels.len());
+        assert_eq!(lin_l.len(), geo_l.len());
 
         // First and last levels match (same bounds).
         // 首末層級應相同（邊界一致）。
-        assert!((lin.grid_levels[0] - geo.grid_levels[0]).abs() < 0.01);
-        let last = lin.grid_levels.len() - 1;
-        assert!((lin.grid_levels[last] - geo.grid_levels[last]).abs() < 0.5);
+        assert!((lin_l[0] - geo_l[0]).abs() < 0.01);
+        let last = lin_l.len() - 1;
+        assert!((lin_l[last] - geo_l[last]).abs() < 0.5);
 
         // Middle levels should differ — geometric bunches more toward lower end.
         // 中間層級應不同 — 幾何模式在低端更密集。
-        let mid = lin.grid_levels.len() / 2;
+        let mid = lin_l.len() / 2;
         assert!(
-            (lin.grid_levels[mid] - geo.grid_levels[mid]).abs() > 1.0,
+            (lin_l[mid] - geo_l[mid]).abs() > 1.0,
             "Middle levels should differ: linear={}, geometric={}",
-            lin.grid_levels[mid],
-            geo.grid_levels[mid]
+            lin_l[mid],
+            geo_l[mid]
         );
     }
 
@@ -894,9 +964,10 @@ mod tests {
         // Price within grid → Healthy.
         // 價格在網格範圍內 → Healthy。
         let mut g = GridTrading::new(49000.0, 51000.0);
-        let h = g.check_health(50000.0);
+        g.on_tick(&ctx(50000.0, 0)); // lazy init
+        let h = g.check_health("BTC", 50000.0);
         assert_eq!(h, GridHealth::Healthy);
-        assert_eq!(g.out_of_range_count, 0);
+        assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
     }
 
     #[test]
@@ -904,22 +975,23 @@ mod tests {
         // Price outside grid → OutOfRange (but not yet NeedsRebalance).
         // 價格超出網格 → OutOfRange（但尚未到 NeedsRebalance）。
         let mut g = GridTrading::new(49000.0, 51000.0);
+        g.on_tick(&ctx(50000.0, 0)); // lazy init
 
         // Price below grid
-        let h = g.check_health(48000.0);
+        let h = g.check_health("BTC", 48000.0);
         assert_eq!(h, GridHealth::OutOfRange);
-        assert_eq!(g.out_of_range_count, 1);
+        assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 1);
 
         // Price above grid
-        let h = g.check_health(52000.0);
+        let h = g.check_health("BTC", 52000.0);
         assert_eq!(h, GridHealth::OutOfRange);
-        assert_eq!(g.out_of_range_count, 2);
+        assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 2);
 
         // Price back in range → resets counter
         // 價格回到範圍 → 重置計數器
-        let h = g.check_health(50000.0);
+        let h = g.check_health("BTC", 50000.0);
         assert_eq!(h, GridHealth::Healthy);
-        assert_eq!(g.out_of_range_count, 0);
+        assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
     }
 
     #[test]
@@ -940,9 +1012,10 @@ mod tests {
 
         // Grid should have rebalanced around 60000 (±10% → 54000..66000).
         // 網格應已以 60000 為中心重建（±10% → 54000..66000）。
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
-        let lo = g.grid_levels[0];
-        let hi = g.grid_levels[g.grid_levels.len() - 1];
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
+        let lo = levels[0];
+        let hi = levels[levels.len() - 1];
         // The new grid should contain the far price.
         // 新網格應包含遠離的價格。
         assert!(
@@ -952,7 +1025,7 @@ mod tests {
             hi,
             far_price
         );
-        assert_eq!(g.out_of_range_count, 0);
+        assert_eq!(g.out_of_range_count.get("BTC").copied().unwrap_or(0), 0);
     }
 
     #[test]
@@ -970,12 +1043,13 @@ mod tests {
 
         // Grid should have rebalanced with geometric spacing.
         // 網格應已以幾何間距重建。
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
+        let levels = g.grid_levels.get("BTC").unwrap();
+        assert_eq!(levels.len(), DEFAULT_GRID_COUNT);
         assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
 
         // Verify geometric property: constant ratio between consecutive levels.
         // 驗證幾何特性：相鄰層級間比率恆定。
-        let ratios: Vec<f64> = g.grid_levels.windows(2).map(|w| w[1] / w[0]).collect();
+        let ratios: Vec<f64> = levels.windows(2).map(|w| w[1] / w[0]).collect();
         let first_ratio = ratios[0];
         for (i, &r) in ratios.iter().enumerate() {
             assert!(
@@ -989,8 +1063,8 @@ mod tests {
 
         // New grid should contain the rebalance price.
         // 新網格應包含再平衡價格。
-        let lo = g.grid_levels[0];
-        let hi = g.grid_levels[g.grid_levels.len() - 1];
+        let lo = levels[0];
+        let hi = levels[levels.len() - 1];
         assert!(lo < far_price && far_price < hi);
     }
 
@@ -1003,11 +1077,12 @@ mod tests {
         assert_eq!(g.spacing_mode, GridSpacingMode::Geometric);
 
         g.on_tick(&ctx(50000.0, 0));
-        assert_eq!(g.grid_levels.len(), DEFAULT_GRID_COUNT);
+        let btc_levels = g.grid_levels.get("BTC").expect("BTC grid should be initialized on first tick");
+        assert_eq!(btc_levels.len(), DEFAULT_GRID_COUNT);
 
         // Verify geometric property.
         // 驗證幾何特性。
-        let ratios: Vec<f64> = g.grid_levels.windows(2).map(|w| w[1] / w[0]).collect();
+        let ratios: Vec<f64> = btc_levels.windows(2).map(|w| w[1] / w[0]).collect();
         let first_ratio = ratios[0];
         for &r in &ratios {
             assert!((r - first_ratio).abs() < 1e-10);

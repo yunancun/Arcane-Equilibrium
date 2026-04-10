@@ -6,6 +6,8 @@
 //! MODULE_NOTE (中): 快慢 KAMA 交叉 + ADX 趨勢過濾 + 赫斯特狀態門控 +
 //!   多時間框架確認，減少假信號。
 
+use std::collections::HashMap;
+
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -97,28 +99,32 @@ impl StrategyParams for MaCrossoverParams {
 
 pub struct MaCrossover {
     active: bool,
-    position: Option<bool>,
-    last_trade_ms: u64,
+    /// Per-symbol position tracking: symbol → is_long direction.
+    /// 每幣種獨立持倉追蹤：symbol → 多空方向。
+    positions: HashMap<String, bool>,
+    /// Per-symbol last trade timestamp for cooldown.
+    /// 每幣種最後交易時間戳（用於冷卻）。
+    last_trade_ms: HashMap<String, u64>,
     cooldown_ms: u64,
     adx_threshold: f64,
     default_qty: f64,
     /// RC-01: Enable Hurst regime filter — skip entry in mean-reverting / random-walk markets.
     /// RC-01: 啟用赫斯特狀態過濾 — 在均值回歸/隨機漫步市場中跳過入場。
     regime_filter_enabled: bool,
-    /// RC-02: Higher timeframe trend direction (None = no data yet).
-    /// RC-02: 較高時間框架趨勢方向（None = 尚無數據）。
-    higher_tf_trend: Option<bool>,
-    /// RC-02: Slow EMA of sma_50 as proxy for 4h trend.
-    /// RC-02: sma_50 的慢速 EMA，作為 4h 趨勢的替代指標。
-    higher_tf_sma: Option<f64>,
+    /// RC-02: Per-symbol higher timeframe trend direction.
+    /// RC-02: 每幣種較高時間框架趨勢方向。
+    higher_tf_trend: HashMap<String, bool>,
+    /// RC-02: Per-symbol slow EMA of sma_50 as proxy for 4h trend.
+    /// RC-02: 每幣種 sma_50 的慢速 EMA，作為 4h 趨勢的替代指標。
+    higher_tf_sma: HashMap<String, f64>,
     /// Higher-TF EMA smoothing alpha. Default 0.003 = ~231min half-life ≈ 4h at 1m ticks.
     /// Agent can tune this parameter. Will be replaced by real multi-TF klines in Phase 1.
     /// 較高時間框架 EMA 平滑 alpha。默認 0.003 = ~231 分鐘半衰期 ≈ 1 分鐘 tick 下約 4 小時。
     /// Agent 可調整此參數。Phase 1 將改用真實多時間框架 K 線替代。
     pub higher_tf_alpha: f64,
-    // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
-    prev_position: Option<bool>,
-    prev_last_trade_ms: u64,
+    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
+    prev_position: HashMap<String, Option<bool>>,
+    prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     /// CONF-D：發出 intent.confidence 的乘數（默認 1.0，範圍 [0,2]）。
     conf_scale: f64,
@@ -128,17 +134,17 @@ impl MaCrossover {
     pub fn new() -> Self {
         Self {
             active: true,
-            position: None,
-            last_trade_ms: 0,
+            positions: HashMap::new(),
+            last_trade_ms: HashMap::new(),
             cooldown_ms: 300_000,
             adx_threshold: 20.0,
             default_qty: 1e9,
             regime_filter_enabled: true,
-            higher_tf_trend: None,
-            higher_tf_sma: None,
+            higher_tf_trend: HashMap::new(),
+            higher_tf_sma: HashMap::new(),
             higher_tf_alpha: 0.003,
-            prev_position: None,
-            prev_last_trade_ms: 0,
+            prev_position: HashMap::new(),
+            prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
         }
     }
@@ -205,20 +211,20 @@ impl MaCrossover {
     /// Alpha=0.003 gives half-life ~231 min ≈ 4h on 1m ticks (ln2/0.003=231).
     /// RC-02: 使用 sma_50 的 EMA 更新較高時間框架 SMA 及趨勢。
     /// Alpha=0.003 在 1 分鐘 tick 上半衰期 ~231 分鐘 ≈ 4 小時。
-    fn update_higher_tf(&mut self, sma_50: f64) {
+    fn update_higher_tf(&mut self, symbol: &str, sma_50: f64) {
         let alpha = self.higher_tf_alpha;
-        let new_val = match self.higher_tf_sma {
+        let new_val = match self.higher_tf_sma.get(symbol) {
             // First data point — initialize directly, no trend yet.
             // 第一個數據點 — 直接初始化，尚無趨勢。
             None => {
-                self.higher_tf_sma = Some(sma_50);
-                self.higher_tf_trend = None; // Need at least one update to determine trend.
+                self.higher_tf_sma.insert(symbol.to_string(), sma_50);
+                self.higher_tf_trend.remove(symbol); // Need at least one update to determine trend.
                 return;
             }
-            Some(prev) => alpha * sma_50 + (1.0 - alpha) * prev,
+            Some(&prev) => alpha * sma_50 + (1.0 - alpha) * prev,
         };
-        self.higher_tf_sma = Some(new_val);
-        self.higher_tf_trend = Some(sma_50 > new_val);
+        self.higher_tf_sma.insert(symbol.to_string(), new_val);
+        self.higher_tf_trend.insert(symbol.to_string(), sma_50 > new_val);
     }
 
     /// Dynamic confidence: ADX excess + Hurst regime fit.
@@ -246,14 +252,14 @@ impl MaCrossover {
 
     /// RC-02: Check if higher-TF trend aligns with the proposed entry direction.
     /// RC-02: 檢查較高時間框架趨勢是否與擬入場方向一致。
-    fn higher_tf_allows_entry(&self, is_long: bool) -> bool {
-        match self.higher_tf_trend {
+    fn higher_tf_allows_entry(&self, symbol: &str, is_long: bool) -> bool {
+        match self.higher_tf_trend.get(symbol) {
             // No trend data yet — allow entry (cold-start safe).
             // 尚無趨勢數據 — 允許入場（冷啟動安全）。
             None => true,
             // Long requires bullish (true), short requires bearish (false).
             // 做多需要看漲（true），做空需要看跌（false）。
-            Some(bullish) => bullish == is_long,
+            Some(&bullish) => bullish == is_long,
         }
     }
 }
@@ -269,17 +275,25 @@ impl Strategy for MaCrossover {
         self.active = active;
     }
 
-    /// RC-04: Revert position and last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾 position 和 last_trade_ms。
-    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
-        self.position = self.prev_position;
-        self.last_trade_ms = self.prev_last_trade_ms;
+    /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
+    /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+        let sym = &intent.symbol;
+        if let Some(prev) = self.prev_position.get(sym) {
+            match prev {
+                Some(b) => { self.positions.insert(sym.clone(), *b); }
+                None => { self.positions.remove(sym); }
+            }
+        }
+        if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
+            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+        }
     }
 
-    /// Reset internal position on external close (risk-stop).
-    /// 外部平倉（風控止損）時重設內部倉位狀態。
-    fn on_external_close(&mut self, _symbol: &str) {
-        self.position = None;
+    /// Reset internal position for the closed symbol (risk-stop).
+    /// 外部平倉（風控止損）時重設該幣種的內部倉位狀態。
+    fn on_external_close(&mut self, symbol: &str) {
+        self.positions.remove(symbol);
     }
 
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
@@ -287,7 +301,8 @@ impl Strategy for MaCrossover {
             Some(i) => i,
             None => return vec![],
         };
-        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms {
+        let last_ms = self.last_trade_ms.get(&ctx.symbol).copied().unwrap_or(0);
+        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
         }
 
@@ -298,10 +313,10 @@ impl Strategy for MaCrossover {
             return vec![];
         }
 
-        // RC-02: Update higher-TF proxy from sma_50 (do this every tick for EMA warmup).
-        // RC-02: 從 sma_50 更新較高時間框架替代指標（每個 tick 更新以暖機 EMA）。
+        // RC-02: Update per-symbol higher-TF proxy from sma_50 (every tick for EMA warmup).
+        // RC-02: 從 sma_50 更新該幣種的較高時間框架替代指標（每個 tick 更新以暖機 EMA）。
         if let Some(sma_50) = ind.sma_50 {
-            self.update_higher_tf(sma_50);
+            self.update_higher_tf(&ctx.symbol, sma_50);
         }
 
         let fast = ind
@@ -316,12 +331,12 @@ impl Strategy for MaCrossover {
 
         let mut intents = Vec::new();
 
-        // RC-04: Snapshot state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照狀態，供拒絕回滾使用。
-        self.prev_position = self.position;
-        self.prev_last_trade_ms = self.last_trade_ms;
+        // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
+        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
+        self.prev_position.insert(ctx.symbol.clone(), self.positions.get(&ctx.symbol).copied());
+        self.prev_last_trade_ms.insert(ctx.symbol.clone(), last_ms);
 
-        match self.position {
+        match self.positions.get(&ctx.symbol).copied() {
             None => {
                 // Entry path — apply RC-01 regime filter + RC-02 higher-TF confirmation.
                 // 入場路徑 — 套用 RC-01 狀態過濾 + RC-02 較高時間框架確認。
@@ -332,19 +347,19 @@ impl Strategy for MaCrossover {
                 let regime = ind.hurst.as_ref().map(|h| h.regime.as_str());
                 let entry_conf = self.compute_entry_confidence(adx, regime);
                 if fast > slow {
-                    if !self.higher_tf_allows_entry(true) {
+                    if !self.higher_tf_allows_entry(&ctx.symbol, true) {
                         return vec![];
                     }
                     intents.push(StrategyAction::Open(self.make_intent(ctx, true, entry_conf)));
-                    self.position = Some(true);
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.insert(ctx.symbol.clone(), true);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 } else if fast < slow {
-                    if !self.higher_tf_allows_entry(false) {
+                    if !self.higher_tf_allows_entry(&ctx.symbol, false) {
                         return vec![];
                     }
                     intents.push(StrategyAction::Open(self.make_intent(ctx, false, entry_conf)));
-                    self.position = Some(false);
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.insert(ctx.symbol.clone(), false);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 }
             }
             Some(is_long) => {
@@ -359,16 +374,16 @@ impl Strategy for MaCrossover {
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
-                    self.position = None;
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.remove(&ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 } else if !is_long && fast > slow {
                     intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.clone(),
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
-                    self.position = None;
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.remove(&ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 }
             }
         }
@@ -623,7 +638,7 @@ mod tests {
         let mut s = MaCrossover::new();
         // Warm up higher_tf_sma with a high value so sma_50 < higher_tf_sma → bearish trend.
         // 用高值暖機 higher_tf_sma，使 sma_50 < higher_tf_sma → 看跌趨勢。
-        s.higher_tf_sma = Some(110.0);
+        s.higher_tf_sma.insert("BTC".into(), 110.0);
         // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*110 = 109.9, sma_50=100 < 109.9 → bearish.
         // 一個 tick 後，higher_tf_sma ≈ 109.9，sma_50=100 < 109.9 → 看跌。
         let ctx = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
@@ -643,7 +658,7 @@ mod tests {
         let mut s = MaCrossover::new();
         // Warm up higher_tf_sma with a low value so sma_50 > higher_tf_sma → bullish trend.
         // 用低值暖機 higher_tf_sma，使 sma_50 > higher_tf_sma → 看漲趨勢。
-        s.higher_tf_sma = Some(90.0);
+        s.higher_tf_sma.insert("BTC".into(), 90.0);
         // After one tick, higher_tf_sma ≈ 0.01*100 + 0.99*90 = 90.1, sma_50=100 > 90.1 → bullish.
         // 一個 tick 後，higher_tf_sma ≈ 90.1，sma_50=100 > 90.1 → 看漲。
         let ctx = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
@@ -664,7 +679,7 @@ mod tests {
     #[test]
     fn test_higher_tf_blocks_short_when_bullish() {
         let mut s = MaCrossover::new();
-        s.higher_tf_sma = Some(90.0);
+        s.higher_tf_sma.insert("BTC".into(), 90.0);
         // sma_50=100 > 90.1 → bullish → short blocked.
         let ctx = ctx_with_sma50(101.0, 100.0, 25.0, 0, 100.0);
         let intents = s.on_tick(&ctx);
@@ -696,15 +711,15 @@ mod tests {
     fn test_higher_tf_does_not_block_exit() {
         let mut s = MaCrossover::new();
         // Enter long with aligned higher TF.
-        s.higher_tf_sma = Some(90.0);
+        s.higher_tf_sma.insert("BTC".into(), 90.0);
         let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
         let entry = s.on_tick(&ctx_entry);
         assert_eq!(entry.len(), 1);
 
         // Now flip higher TF to bearish and reverse crossover → exit must still work.
         // 現在將較高 TF 翻轉為看跌並反轉交叉 → 出場仍必須有效。
-        s.higher_tf_sma = Some(110.0);
-        s.higher_tf_trend = Some(false);
+        s.higher_tf_sma.insert("BTC".into(), 110.0);
+        s.higher_tf_trend.insert("BTC".into(), false);
         let ctx_exit = ctx_with_sma50(101.0, 100.0, 25.0, 500_000, 100.0);
         let exit = s.on_tick(&ctx_exit);
         assert_eq!(

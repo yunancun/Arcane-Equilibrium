@@ -15,7 +15,7 @@ use super::types::PendingOrder;
 use crate::persistence::StateWriter;
 use crate::tick_pipeline::{PaperSessionCommand, TickPipeline};
 use std::collections::HashMap;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Apply one PaperSessionCommand variant to the pipeline. Returns nothing —
 /// command outcomes are reported via the optional response_tx oneshot inside
@@ -495,6 +495,17 @@ pub fn handle_paper_command(
             // Phase 3: Switch primary trading mode with state swap.
             // Phase 3：切換主交易模式，附帶狀態切換。
             pipeline.set_trading_mode(mode);
+            // Re-grant paper authorization for the new active mode's GovernanceCore.
+            // Without this, the loaded ModeState may have uninitialized auth (created
+            // before grant_paper_auth() ran at startup), causing governance_not_authorized.
+            // 重新授予新活躍模式的 GovernanceCore 紙盤授權。
+            // 不做此步驟，加載的 ModeState 可能包含未初始化授權（在 startup 的
+            // grant_paper_auth() 之前創建），導致 governance_not_authorized。
+            if let Err(e) = pipeline.grant_paper_auth() {
+                warn!(error = %e, "SwitchMode: grant_paper_auth failed / 模式切換後紙盤授權失敗");
+            } else {
+                info!(new_mode = %mode, "SwitchMode: paper auth re-granted / 模式切換後紙盤授權已重新授予");
+            }
             snapshot_writer.force_write(&pipeline.snapshot());
             let _ = response_tx.send(Ok(format!("switched to mode {}", mode)));
         }
@@ -541,6 +552,15 @@ pub fn handle_paper_command(
                     "{{\"from\":\"{current}\",\"to\":\"{target}\",\"reason\":\"{reason}\"}}"
                 ))
             })();
+            let _ = response_tx.send(result);
+        }
+        // Sync global system mode from Python GUI → engine.
+        // 從 Python GUI 同步全局系統模式到引擎。
+        PaperSessionCommand::SetSystemMode { mode, response_tx } => {
+            let result = pipeline.set_system_mode(&mode);
+            if result.is_ok() {
+                snapshot_writer.force_write(&pipeline.snapshot());
+            }
             let _ = response_tx.send(result);
         }
     }

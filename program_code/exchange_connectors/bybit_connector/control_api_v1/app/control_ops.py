@@ -47,6 +47,7 @@ from .state_helpers import (
     ensure_source_is_usable,
 )
 from .state_models import RequestEnvelope
+from .ipc_client import sync_ipc_call
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +500,28 @@ def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
         return compiled
 
     final_state = _base.STORE.mutate(mutator)
+
+    # If global_execution_mode_switch was accepted, push the new mode to Rust engine.
+    # Fail-soft: engine may not be running; it will sync from snapshot on next start.
+    # 如果 global_execution_mode_switch 被接受，將新模式推送到 Rust 引擎。
+    # 失敗時靜默：引擎可能未運行；下次啟動時將從快照同步。
+    _MODE_PATH = "global_runtime.controls.global_execution_mode_switch"
+    if _MODE_PATH in accepted_paths:
+        new_mode = final_state.get("global_runtime", {}).get("controls", {}).get(
+            "global_execution_mode_switch", ""
+        )
+        if new_mode:
+            try:
+                sync_ipc_call("set_system_mode", {"mode": new_mode})
+                logger.info(
+                    "system_mode synced to Rust engine: %s / 系統模式已同步到 Rust 引擎: %s",
+                    new_mode, new_mode,
+                )
+            except Exception:  # noqa: BLE001
+                # Best-effort only — engine may be stopped, mode will sync on restart.
+                # 盡力而為 — 引擎可能已停止，重啟後將自動同步。
+                pass
+
     return {
         "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
         "data": {"accepted_paths": accepted_paths, "rejected_paths": rejected_paths},

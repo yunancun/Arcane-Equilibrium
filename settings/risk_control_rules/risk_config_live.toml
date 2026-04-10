@@ -1,27 +1,9 @@
-# Live Engine Risk Config — Stable Profitability
-# 實盤引擎風控配置 — 穩定盈利，資本保全優先
-#
-# Design intent / 設計意圖:
-#   P1 (limits): Backstop only — set generous enough to not constrain normal operation.
-#                P1 僅作緊急兜底，足夠寬不干擾正常交易。
-#   P2 (dynamic_stop): base_ratio=0.50, cap_ratio=0.75 →
-#     agent real working stop range ~3.8%–11.25% (relative to P1=15%).
-#     Agent 有效止損範圍約 3.8%–11.25%（P1 15% 的 50%–75%）。
-#   partial_tp: 5%→30% close, 10%→40% close, remaining on trailing.
-#               分批止盈：5% 時平 30%，10% 再平 40%，剩餘追蹤。
-#   Adjusted upward from initial draft for small-account usability.
-#   相比初稿適當上調，確保小金額帳戶可正常交易。
-#
-# B1 fix: allowed_categories corrected ("reverse" → "inverse")
-# B1 修復：品類清單糾錯（"reverse" 改為 "inverse"）
-# GUI / IPC patch_risk_config can override any field at runtime.
-
 [meta]
 version = 2
 saved_ts_ms = 0
 
 [limits]
-stop_loss_max_pct = 15.0          # P1 backstop; P2 dynamic stop caps at ~11.25%
+stop_loss_max_pct = 15.0
 take_profit_max_pct = 20.0
 take_profit_enforced = false
 position_size_max_pct = 15.0
@@ -37,12 +19,12 @@ open_positions_max = 10
 min_order_notional_usdt = 5.0
 max_order_notional_usdt = 0.0
 min_balance_usdt = 50.0
-allowed_categories = ["linear", "spot", "inverse"]   # B1 fix: was "reverse"
+allowed_categories = ["linear", "spot", "inverse"]
 margin_mode = "isolated"
 position_mode = "one_way"
 guardian_modification_size_factor = 0.4
 guardian_modification_leverage_cap = 1.5
-per_trade_risk_pct = 0.03         # 3% per trade — usable on small accounts
+per_trade_risk_pct = 0.05
 
 [overrides]
 
@@ -57,12 +39,10 @@ prefer_limit = true
 reduce_only_close = true
 post_only_limit = true
 partial_tp_enabled = true
-partial_tp_levels = [[5.0, 0.3], [10.0, 0.4]]  # 5%→close30%, 10%→close40%, rest trailing
+partial_tp_levels = [[5.0, 0.3], [10.0, 0.4]]
 
 [agent.category_weights]
 
-# Cascade: tight but not hair-trigger — leaves room for normal volatility
-# 熔斷緊但不過敏，為正常波動留餘裕
 [cascade]
 drawdown_cautious_pct = 2.5
 drawdown_reduced_pct = 5.0
@@ -75,9 +55,9 @@ consec_loss_cautious = 2
 consec_loss_reduced = 3
 consec_loss_circuit = 6
 pressure_cautious = 0.25
-pressure_reduced = 0.40
-pressure_defensive = 0.60
-pressure_circuit = 0.80
+pressure_reduced = 0.4
+pressure_defensive = 0.6
+pressure_circuit = 0.8
 min_hold_ms = 600000
 
 [regime.trending]
@@ -105,26 +85,20 @@ stop = 1.0
 tp = 1.0
 time = 1.0
 
-# Cost gate: stricter than demo but practical for real markets
-# 費率門控比 demo 嚴，但對真實市場實用
 [cost_gate]
-min_confidence = 0.20
+min_confidence = 0.2
 k_base = 1.8
 k_medium = 2.2
 k_small = 3.5
 adx_trending = 28.0
 
-# Dynamic stop: base=50%×P1=7.5%, cap=75%×P1=11.25%
-# 動態止損：基礎=7.5%，上限=11.25%，P1 15% 純兜底
 [dynamic_stop]
-base_ratio = 0.50
+base_ratio = 0.5
 cap_ratio = 0.75
 trailing_min_rr = 0.8
 atr_stop_mult = 1.5
 atr_tp_mult = 2.5
 
-# Market gate: liquidity-focused but practical for mid-cap coins
-# 微結構門控：注重流動性但不僅限 BTC/ETH
 [market_gate]
 min_ob_depth_usdt = 50000.0
 max_ob_imbalance = 0.65
@@ -137,7 +111,7 @@ liquidation_buffer_pct = 25.0
 max_orders_per_minute = 40
 
 [anti_cluster]
-offset_fraction = 0.20
+offset_fraction = 0.2
 max_same_direction = 4
 
 [correlation]

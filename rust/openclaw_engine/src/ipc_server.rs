@@ -577,7 +577,7 @@ async fn dispatch_request(
 
     match method {
         "ping" => handle_ping(id),
-        "get_state" => handle_get_state(id, config),
+        "get_state" => handle_get_state(id, config, data_dir),
         "reload_config" => handle_reload_config(id, config),
         "get_paper_state" => {
             // Phase 4: optional `engine` param routes to per-mode snapshot.
@@ -708,6 +708,8 @@ async fn dispatch_request(
         // Phase 3: Engine mode management / 引擎模式管理
         "add_engine_mode" => handle_add_engine_mode(id, paper_cmd_tx, &req.params).await,
         "switch_engine_mode" => handle_switch_engine_mode(id, paper_cmd_tx, &req.params).await,
+        // System mode sync from Python GUI / 從 Python GUI 同步系統模式
+        "set_system_mode" => handle_set_system_mode(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
         "get_phase4_status" => handle_get_phase4_status(id),
         // Phase 4 (4-15): AI budget status / config / AI 預算狀態與配置
@@ -802,17 +804,34 @@ fn handle_ping(id: serde_json::Value) -> JsonRpcResponse {
     JsonRpcResponse::success(id, serde_json::Value::String("pong".into()))
 }
 
-/// Get current engine state summary (stub).
-/// 獲取當前引擎狀態摘要（存根）。
-fn handle_get_state(id: serde_json::Value, config: &Arc<ConfigManager>) -> JsonRpcResponse {
+/// Get current engine state summary.
+/// Reads system_mode from pipeline snapshot (set by Python GUI sync).
+/// 獲取當前引擎狀態摘要。
+/// 從 pipeline 快照讀取 system_mode（由 Python GUI 同步設置）。
+fn handle_get_state(
+    id: serde_json::Value,
+    config: &Arc<ConfigManager>,
+    data_dir: &Arc<std::path::PathBuf>,
+) -> JsonRpcResponse {
     let cfg = config.get();
     // ARCH-RC1 1C-1: risk display fields now sourced from RiskConfig::default()
     // placeholder; 1C-2 will replace with live ConfigStore<RiskConfig> snapshot.
     // ARCH-RC1 1C-1：風控展示欄位暫從 RiskConfig::default() 讀；1C-2 改真快照。
     let risk = crate::config::RiskConfig::default();
+    // Read system_mode from pipeline snapshot; fall back to "live_reserved" if unavailable.
+    // 從 pipeline 快照讀取 system_mode；不可用時回退到 "live_reserved"。
+    let system_mode = {
+        let path = data_dir.join("pipeline_snapshot.json");
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<crate::pipeline_types::PipelineSnapshot>(&c).ok())
+            .map(|s| s.system_mode)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "live_reserved".to_string())
+    };
     let state = serde_json::json!({
         "status": "running",
-        "system_mode": "demo_only",
+        "system_mode": system_mode,
         "trading_mode": cfg.trading_mode.to_string(),
         "max_open_positions": risk.limits.open_positions_max,
         "max_total_exposure_pct": risk.limits.total_exposure_max_pct,
@@ -1718,6 +1737,42 @@ async fn handle_switch_engine_mode(
     }
 }
 
+/// Sync global system mode from Python GUI to the engine tick pipeline.
+/// Accepts modes: live_reserved / demo_reserved / shadow_only / observe_only / design_only.
+/// Auto-closes exchange positions when entering blocking modes.
+/// 從 Python GUI 同步全局系統模式到引擎 tick 管線。
+/// 進入封鎖模式時自動平倉交易所持倉。
+async fn handle_set_system_mode(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
+        }
+    };
+    let mode = match params.get("mode").and_then(|v| v.as_str()) {
+        Some(m) => m.to_string(),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "missing required param: mode (live_reserved/demo_reserved/shadow_only/observe_only/design_only)".to_string(),
+            )
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    let _ = tx.send(PaperSessionCommand::SetSystemMode { mode, response_tx: resp_tx });
+    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
+    }
+}
+
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).
 /// 讀取 pipeline_snapshot.json 並提取欄位（R06-A 輔助函數 — 三個 handler 共用）。
 fn handle_snapshot_field<F>(id: serde_json::Value, data_dir: &Path, extract: F) -> JsonRpcResponse
@@ -2135,6 +2190,7 @@ mod tests {
             daily_loss_pct: 0.0,
             session_drawdown_pct: 0.0,
             mode_snapshots: HashMap::new(),
+            system_mode: "live_reserved".into(),
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();
@@ -2177,7 +2233,10 @@ mod tests {
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
-        assert_eq!(result["system_mode"], "demo_only");
+        // system_mode is read from pipeline_snapshot.json; falls back to "live_reserved" when
+        // no snapshot exists (test environment). Assert it's a non-empty string.
+        // system_mode 從 pipeline_snapshot.json 讀取；測試環境無快照時回退 "live_reserved"。
+        assert!(result["system_mode"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
     }
 
     #[tokio::test]

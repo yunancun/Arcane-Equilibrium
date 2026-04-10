@@ -6,6 +6,8 @@
 //! MODULE_NOTE (中): 在布林帶極端值處均值回歸入場，RSI 超賣/超買確認。
 //!   觸及帶中線或時間止損出場。
 
+use std::collections::HashMap;
+
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -73,8 +75,12 @@ impl StrategyParams for BbReversionParams {
 
 pub struct BbReversion {
     active: bool,
-    position: Option<bool>,
-    last_trade_ms: u64,
+    /// Per-symbol position tracking: symbol → is_long direction.
+    /// 每幣種獨立持倉追蹤：symbol → 多空方向。
+    positions: HashMap<String, bool>,
+    /// Per-symbol last trade timestamp for cooldown.
+    /// 每幣種最後交易時間戳（用於冷卻）。
+    last_trade_ms: HashMap<String, u64>,
     cooldown_ms: u64,
     default_qty: f64,
     // RC-07: Limit order support — Agent can switch from market to limit entries
@@ -83,9 +89,9 @@ pub struct BbReversion {
     pub use_limit: bool,
     /// Basis points inside the band for limit price offset / 限價偏移（基點，band 內側）
     pub limit_offset_bps: f64,
-    // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
-    prev_position: Option<bool>,
-    prev_last_trade_ms: u64,
+    // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
+    prev_position: HashMap<String, Option<bool>>,
+    prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
 }
@@ -94,14 +100,14 @@ impl BbReversion {
     pub fn new() -> Self {
         Self {
             active: true,
-            position: None,
-            last_trade_ms: 0,
+            positions: HashMap::new(),
+            last_trade_ms: HashMap::new(),
             cooldown_ms: 600_000,
             default_qty: 1e9,
             use_limit: false,
             limit_offset_bps: 10.0,
-            prev_position: None,
-            prev_last_trade_ms: 0,
+            prev_position: HashMap::new(),
+            prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
         }
     }
@@ -201,15 +207,23 @@ impl Strategy for BbReversion {
         self.active = active;
     }
 
-    /// RC-04: Revert position and last_trade_ms on rejection.
-    /// RC-04：拒絕時回滾 position 和 last_trade_ms。
-    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
-        self.position = self.prev_position;
-        self.last_trade_ms = self.prev_last_trade_ms;
+    /// RC-04: Revert per-symbol position and last_trade_ms on rejection.
+    /// RC-04：拒絕時回滾該幣種的 position 和 last_trade_ms。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+        let sym = &intent.symbol;
+        if let Some(prev) = self.prev_position.get(sym) {
+            match prev {
+                Some(b) => { self.positions.insert(sym.clone(), *b); }
+                None => { self.positions.remove(sym); }
+            }
+        }
+        if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
+            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+        }
     }
 
-    fn on_external_close(&mut self, _symbol: &str) {
-        self.position = None;
+    fn on_external_close(&mut self, symbol: &str) {
+        self.positions.remove(symbol);
     }
 
     fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
@@ -217,7 +231,8 @@ impl Strategy for BbReversion {
             Some(i) => i,
             None => return vec![],
         };
-        if self.last_trade_ms > 0 && ctx.timestamp_ms < self.last_trade_ms + self.cooldown_ms {
+        let last_ms = self.last_trade_ms.get(&ctx.symbol).copied().unwrap_or(0);
+        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
         }
 
@@ -234,13 +249,13 @@ impl Strategy for BbReversion {
             _ => 0.0,
         };
 
-        // RC-04: Snapshot state before any mutation for rejection rollback.
-        // RC-04：在任何變更前快照狀態，供拒絕回滾使用。
-        self.prev_position = self.position;
-        self.prev_last_trade_ms = self.last_trade_ms;
+        // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
+        // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
+        self.prev_position.insert(ctx.symbol.clone(), self.positions.get(&ctx.symbol).copied());
+        self.prev_last_trade_ms.insert(ctx.symbol.clone(), last_ms);
 
         let mut intents = Vec::new();
-        match self.position {
+        match self.positions.get(&ctx.symbol).copied() {
             None => {
                 // Entry: oversold long / 入場：超賣做多
                 if bb.percent_b < 0.0 && rsi < 30.0 {
@@ -251,8 +266,8 @@ impl Strategy for BbReversion {
                         bb.lower,
                         bb.upper,
                     )));
-                    self.position = Some(true);
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.insert(ctx.symbol.clone(), true);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 // Entry: overbought short / 入場：超買做空
                 } else if bb.percent_b > 1.0 && rsi > 70.0 {
                     intents.push(StrategyAction::Open(self.make_entry_intent(
@@ -262,8 +277,8 @@ impl Strategy for BbReversion {
                         bb.lower,
                         bb.upper,
                     )));
-                    self.position = Some(false);
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.insert(ctx.symbol.clone(), false);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 }
             }
             Some(_is_long) => {
@@ -277,8 +292,8 @@ impl Strategy for BbReversion {
                         confidence: exit_conf,
                         reason: "bb_mean_revert".into(),
                     });
-                    self.position = None;
-                    self.last_trade_ms = ctx.timestamp_ms;
+                    self.positions.remove(&ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 }
             }
         }
