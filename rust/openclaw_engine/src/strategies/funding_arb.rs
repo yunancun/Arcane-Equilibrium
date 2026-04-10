@@ -1,8 +1,12 @@
 //! Funding Rate Arbitrage Strategy V2 — delta-neutral paired execution.
 //! 資金費率套利策略 V2 — delta 中性配對執行。
 //!
-//! Entry: |funding_rate| > threshold + edge > 0 after cost amortization.
-//! Exit: rate flipped | rate < exit_threshold | basis > 0.5% | max hold 72h.
+//! MODULE_NOTE (EN): Entry: |funding_rate| > threshold + edge > 0 after cost
+//!   amortization. Exit: rate flipped | rate < exit_threshold | basis > 0.5% |
+//!   max hold 72h. Currently stub (on_tick returns vec![]), pending OC-5 REST wiring.
+//! MODULE_NOTE (中): 入場：|資金費率| > 閾值 + 扣除成本後 edge > 0。
+//!   出場：費率反轉 | 費率 < 退出閾值 | 基差 > 0.5% | 最大持有 72h。
+//!   當前為 stub（on_tick 返回 vec![]），待 OC-5 REST 接線。
 
 use super::{Strategy, StrategyAction};
 use crate::intent_processor::OrderIntent;

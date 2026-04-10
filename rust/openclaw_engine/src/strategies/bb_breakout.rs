@@ -1,5 +1,10 @@
 //! BB Breakout Strategy V2 — Squeeze→Expansion + Volume + Donchian + ATR trailing stop + Regime exit.
 //! BB 突破策略 V2 — 壓縮→擴張 + 成交量 + Donchian + ATR 追蹤止損 + Regime 出場。
+//!
+//! MODULE_NOTE (EN): Detects Bollinger Band squeeze→expansion with volume
+//!   confirmation and Donchian channel breakout. ATR-based trailing stop for exits.
+//! MODULE_NOTE (中): 檢測布林帶壓縮→擴張 + 成交量確認 + Donchian 通道突破。
+//!   ATR 追蹤止損出場。
 
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;

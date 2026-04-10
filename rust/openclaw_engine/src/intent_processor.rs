@@ -1,8 +1,11 @@
 //! Intent Processor — H0 → Guardian → CostGate → Governance → OMS (R04-2).
 //! 意圖處理器 — H0 → 守護者 → 成本門 → 治理 → OMS。
 //!
-//! Processes trade intents through the governance pipeline.
-//! 通過治理管線處理交易意圖。
+//! MODULE_NOTE (EN): Processes trade intents through the governance pipeline:
+//!   H0 gate → Guardian risk check → CostGate EV filter → Kelly sizing → OMS.
+//!   Holds RiskConfig snapshot for per-tick limit enforcement.
+//! MODULE_NOTE (中): 通過治理管線處理交易意圖：H0 門控 → Guardian 風控 →
+//!   CostGate EV 過濾 → Kelly 倉位 → OMS。持有 RiskConfig 快照用於逐 tick 限制。
 
 use openclaw_core::{
     execution::{self, FillResult},

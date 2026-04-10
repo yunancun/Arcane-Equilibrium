@@ -1,5 +1,11 @@
 //! Dynamic stop-loss calculations with ATR adaptation and anti-cluster offset.
 //! 動態止損計算：ATR 自適應 + 反聚集偏移。
+//!
+//! MODULE_NOTE (EN): Computes dynamic stop-loss prices using ATR-scaled base,
+//!   regime multiplier, and anti-cluster offset. Feeds StopManager with per-tick
+//!   adaptive stop levels. Cap/floor from RiskConfig.dynamic_stop.
+//! MODULE_NOTE (中): 使用 ATR 縮放基礎值、regime 乘數和反聚集偏移計算動態止損價。
+//!   每 tick 為 StopManager 提供自適應止損水平。上下限來自 RiskConfig.dynamic_stop。
 
 use super::regime::regime_multipliers;
 

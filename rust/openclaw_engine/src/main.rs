@@ -579,6 +579,15 @@ async fn async_main(
     // Scanner D4: clone paper_cmd_tx for ScannerRunner (queries GetOpenPositionSymbols).
     // 掃描器 D4：為 ScannerRunner 複製 paper_cmd_tx（查詢 GetOpenPositionSymbols）。
     let scanner_paper_cmd_tx = paper_cmd_tx.clone();
+    // Phase 6: clone paper_cmd_tx for reconciler auto-contraction commands.
+    // Phase 6：為對帳器自動降級命令複製 paper_cmd_tx。
+    let reconciler_cmd_tx = paper_cmd_tx.clone();
+    // Phase 6: shared atomic for reconciler to read current risk level without IPC.
+    // The event_consumer handler writes to this on every governor state change.
+    // Phase 6：共享原子量供對帳器無 IPC 讀取當前風控級別。
+    let shared_risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
+        openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
+    ));
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
@@ -1540,25 +1549,41 @@ async fn async_main(
     }
 
     // ------------------------------------------------------------------
-    // ARCH-RC1 1C-4 B2: spawn position reconciler (Bybit truth vs in-memory baseline).
-    // Gated on Some(shared_client) — paper-only / no-REST runs skip the loop entirely.
-    // Audit pool is optional; missing pool degrades to log-only audits.
-    // POST 1C-4-WRAP DOWNGRADE: audit-only — no automatic governor trigger.
-    // Automated contraction is tracked as a Phase 6 deliverable (see TODO.md).
-    // ARCH-RC1 1C-4 B2：spawn 持倉對帳器（純審計模式）。需要 shared_client；
-    // 無 REST 模式整體跳過。自動 governor 收縮已降級移除，列為 Phase 6 任務。
+    // Phase 6: spawn position reconciler with auto-contraction action layer.
+    // Gated on Some(shared_client) — paper-only / no-REST runs skip entirely.
+    // Phase 6：spawn 持倉對帳器（含自動降級動作層）。需要 shared_client。
     if let Some(client) = shared_client.as_ref() {
         use openclaw_engine::position_manager::PositionManager;
         use openclaw_engine::position_reconciler::run_position_reconciler;
         let pos_mgr = Arc::new(PositionManager::new(Arc::clone(client)));
         let reconciler_audit_pool = db_pool.get().cloned();
         let reconciler_cancel = cancel.clone();
+        let reconciler_instruments = shared_instruments.clone();
+        // Phase 6: closure reads current risk level from shared atomic.
+        // Phase 6：閉包從共享原子量讀取當前風控級別。
+        let reconciler_risk_level = Arc::clone(&shared_risk_level);
+        let get_risk_level = move || -> openclaw_core::sm::risk_gov::RiskLevel {
+            let val = reconciler_risk_level.load(std::sync::atomic::Ordering::Relaxed);
+            match val {
+                0 => openclaw_core::sm::risk_gov::RiskLevel::Normal,
+                1 => openclaw_core::sm::risk_gov::RiskLevel::Cautious,
+                2 => openclaw_core::sm::risk_gov::RiskLevel::Reduced,
+                3 => openclaw_core::sm::risk_gov::RiskLevel::Defensive,
+                4 => openclaw_core::sm::risk_gov::RiskLevel::CircuitBreaker,
+                5 => openclaw_core::sm::risk_gov::RiskLevel::ManualReview,
+                // Fail-safe: unknown u8 → most restrictive level (QC audit fix).
+                _ => openclaw_core::sm::risk_gov::RiskLevel::ManualReview,
+            }
+        };
         tokio::spawn(run_position_reconciler(
             pos_mgr,
             reconciler_audit_pool,
             reconciler_cancel,
+            reconciler_cmd_tx,
+            reconciler_instruments,
+            get_risk_level,
         ));
-        info!("position_reconciler task spawned (audit-only) / 持倉對帳器任務已啟動（純審計模式）");
+        info!("position_reconciler task spawned (Phase 6 auto-contraction) / 持倉對帳器任務已啟動（Phase 6 自動降級）");
     } else {
         info!("position_reconciler skipped (no REST client) / 持倉對帳器跳過（無 REST 客戶端）");
     }
@@ -1608,6 +1633,9 @@ async fn async_main(
             // 掃描器 D1：注冊表 + 掃描器 store，供未來 kline bootstrap 接線。
             symbol_registry: Some(Arc::clone(&symbol_registry)),
             scanner_store: Some(Arc::clone(&scanner_store)),
+            // Phase 6: shared atomic so event consumer writes governor level for reconciler.
+            // Phase 6：共享原子量，event consumer 寫入 governor 級別供對帳器讀取。
+            shared_risk_level: Some(Arc::clone(&shared_risk_level)),
         };
         tokio::spawn(run_event_consumer(deps))
     };

@@ -1,5 +1,10 @@
 //! Event consumer types — shared data types for the event consumer module.
 //! 事件消費者類型 — 事件消費者模組的共享資料類型。
+//!
+//! MODULE_NOTE (EN): Defines EventConsumerDeps bundle, ExchangeEvent enum,
+//!   PendingOrder tracking struct, and module constants (SYMBOLS, STATUS_INTERVAL_SECS).
+//! MODULE_NOTE (中): 定義 EventConsumerDeps 依賴集合、ExchangeEvent 枚舉、
+//!   PendingOrder 追蹤結構體、及模組常量（SYMBOLS、STATUS_INTERVAL_SECS）。
 
 use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 use crate::bybit_rest_client::BybitRestClient;
@@ -131,4 +136,8 @@ pub struct EventConsumerDeps {
     /// 24h 冷卻時間戳，避免重啟期間冷卻被靜默重置。fail-soft：None 或
     /// 查詢失敗時冷卻從零開始並記 warn，其他多層守衛繼續生效。
     pub audit_pool: Option<sqlx::PgPool>,
+    /// Phase 6: Shared atomic for reconciler to read current risk level.
+    /// Event consumer writes governor level here after every command handler call.
+    /// Phase 6：共享原子量供對帳器讀取當前風控級別。
+    pub shared_risk_level: Option<Arc<std::sync::atomic::AtomicU8>>,
 }

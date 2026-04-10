@@ -1,10 +1,12 @@
 //! Grid Trading Strategy V2 — OU dynamic spacing + fee floor + geometric mode + health check.
 //! 網格交易策略 V2 — OU 動態間距 + 手續費地板 + 幾何模式 + 健康檢查。
 //!
-//! Grid levels between lower/upper bounds. Buy on down-cross, sell on up-cross.
-//! OU model: optimal spacing = σ·√(2/θ) with floor = 2× round-trip fee.
-//! Geometric mode: equal ratio gaps between levels (better for crypto).
-//! Health check: detect stale/out-of-range grids and auto-rebalance.
+//! MODULE_NOTE (EN): Grid levels between lower/upper bounds. Buy on down-cross,
+//!   sell on up-cross. OU model: optimal spacing = σ·√(2/θ) with floor = 2× round-trip fee.
+//!   Geometric mode: equal ratio gaps (better for crypto). Inventory drift health check.
+//! MODULE_NOTE (中): 在上下界之間設置網格。下穿買入，上穿賣出。
+//!   OU 模型：最佳間距 = σ·√(2/θ)，地板 = 2× 來回手續費。
+//!   幾何模式：等比間距（更適合加密貨幣）。含庫存漂移健康檢查。
 
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;

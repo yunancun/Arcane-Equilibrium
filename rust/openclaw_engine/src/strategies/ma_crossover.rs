@@ -1,5 +1,10 @@
 //! MA Crossover Strategy V2 — KAMA + ADX filter + Hurst regime filter + multi-TF confirmation.
 //! MA 交叉策略 V2 — KAMA + ADX 過濾 + 赫斯特狀態過濾 + 多時間框架確認。
+//!
+//! MODULE_NOTE (EN): Fast/slow KAMA crossover with ADX trending filter, Hurst
+//!   regime gating, and multi-timeframe confirmation for reduced false signals.
+//! MODULE_NOTE (中): 快慢 KAMA 交叉 + ADX 趨勢過濾 + 赫斯特狀態門控 +
+//!   多時間框架確認，減少假信號。
 
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;

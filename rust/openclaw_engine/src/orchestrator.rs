@@ -1,5 +1,10 @@
 //! Strategy Orchestrator — dispatch ticks to strategies, collect intents (R04-4).
 //! 策略調度器 — 分派 tick 到策略，收集意圖。
+//!
+//! MODULE_NOTE (EN): Holds registered Strategy trait objects, dispatches TickContext
+//!   to each on_tick(), collects StrategyAction results for the pipeline.
+//! MODULE_NOTE (中): 持有已註冊的 Strategy trait 物件，將 TickContext 分派到各
+//!   on_tick()，收集 StrategyAction 結果供管線處理。
 
 use crate::strategies::{Strategy, StrategyAction};
 use crate::tick_pipeline::{StrategyInfo, TickContext};

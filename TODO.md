@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-10（DB fresh-start reset · 乾淨數據重新起算 · 審計 G-1~G-10 全入計劃）
-測試基準線：**Rust engine lib 879 · Python program_code 2760 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 879 · Python program_code 2787 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -64,9 +64,9 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 ### W20：深度安全審查
 
 - [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後，W22 依賴 HTTPS 部署）
-- [ ] **SEC-04 / 06 / 13** 深度 E3 審查（4 項，W20）
-- [ ] **G-9** HMAC dead import 確認（governance_routes.py L39 `import hmac` 用途確認，W20 E3 審查時一併處理）
-- [ ] **WP-CC/FS-1 / BI-1 / P9 / SM-1**（4 項 CC，W20）
+- [x] **SEC-04 / 06 / 13** 深度 E3 審查 ✅ — SEC-04 safe (parameterized queries), SEC-06 fixed (HttpOnly cookie), SEC-13 fixed (saturating cast)
+- [x] **G-9** HMAC dead import 確認 ✅ — NOT dead, `hmac.compare_digest()` used at L171 for auth token verification
+- [x] **WP-CC/FS-1 / BI-1 / P9 / SM-1** ✅ — FS-1 tests extracted (1083→742 lines), BI-1 MODULE_NOTE 12 files, P9 dual-rail stop wired, SM-1 compliant
 
 ---
 
@@ -87,7 +87,7 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 
 ### 6-Phase（漸進放權 + 驗收，W20-W21）
 
-- [ ] **6-01~03** 漸進放權管線 + 畢業邏輯 + Live 審批（W20，依賴 6-RC-6）
+- [x] **6-01~03** 漸進放權管線 + 畢業邏輯 + Live 審批 ✅ — promotion_pipeline.py (PromotionGate + 5 stages + graduation gates + operator approval) + 3 API endpoints + 27 tests
 - [ ] **6-04~06** 全管線回放 + 壓測 + sync_commit Live 驗證（W21）
 - [ ] **6-07~08** EvolutionEngine deprecated + 文檔（W21）
 - [ ] **6-09~13** E2 + E4 + QA 端到端 + E5 + PM（W21）

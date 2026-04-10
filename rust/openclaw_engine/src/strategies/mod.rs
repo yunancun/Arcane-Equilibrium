@@ -1,5 +1,10 @@
 //! Strategy modules — 5 trading strategies (R04-5).
 //! 策略模組 — 5 個交易策略。
+//!
+//! MODULE_NOTE (EN): Defines Strategy trait + StrategyAction enum + StrategyParams.
+//!   Sub-modules: ma_crossover, bb_breakout, bb_reversion, grid_trading, funding_arb.
+//! MODULE_NOTE (中): 定義 Strategy trait + StrategyAction 枚舉 + StrategyParams。
+//!   子模組：ma_crossover、bb_breakout、bb_reversion、grid_trading、funding_arb。
 
 pub mod bb_breakout;
 pub mod bb_reversion;
