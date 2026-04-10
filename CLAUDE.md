@@ -56,7 +56,11 @@
 
 **Runtime 硬狀態**：`demo_only` / `disabled` / `not_granted`。**Live blocker**：7d paper trading 觀察期 + 多通道告警上線。
 
-**留尾**（非阻塞）：A2 News scheduler · W1 event_consumer 拆分 · DEAD-PY-1 完成度 P1+P2+P3+P4（唯一殘留：test_risk_view_client 1 pre-existing fail）。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
+**A2 NewsPipeline Scheduler ✅**（2026-04-10）— 60s 定時排程器接入 main.rs：3 providers（CryptoPanic free + CoinTelegraph RSS + Google News RSS）→ 去重 → severity → DB write → 4-09 三路 fan-out（Guardian/Regime/Learning）。受 `LearningConfig.switches.news_pipeline_enabled` 熱重載 gate 控制。
+
+**DEAD-PY-1 全部完成 ✅**（2026-04-10）— Wave A/B/C 標籤 + WP-ARCH-RC1 舊命名 + whitelist UI 全量移除（tab-governance.html 220 行 + governance.js 19 行）。唯一殘留：test_risk_view_client 1 pre-existing fail。
+
+**留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
 - 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
@@ -233,4 +237,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **838** / Python **2692** passed **1 pre-existing fail** · **StrategyAction Enum ✅** · **Scanner A-D + QC/FA + P2 + IPC-SCAN-1 ✅** · WIRE-1 ✅ · 5-01~03 ✅ · PH5-VERIFY-1 觀察期進行中 · **LIVE-P0-1/P0-2/P0-3 ✅**（settings_routes API key mgmt + tab-live.html 動態前置條件 + 儀表板框架）· Live blocker 仍在（LIVE-P1 Rust TradingMode::Live 待實施）。
+> 截至 2026-04-10：tests engine lib **838** / Python **2692** passed **1 pre-existing fail** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · **LIVE-P0-1/P0-2/P0-3 ✅** · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。

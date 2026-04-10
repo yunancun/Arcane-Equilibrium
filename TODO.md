@@ -75,20 +75,20 @@ Phase 5 cost_gate 改造已全部上線（mode-aware exploration + JS shrinkage 
   - `settings/edge_estimates.json` 更新後需重啟引擎才生效（無 hot-reload）
 - [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）
 
-### 2. 🟡 1C-4 最終收尾（小工作量，可隨時做）
+### 2. ✅ 1C-4 最終收尾（DONE）
 
-ARCH-RC1 1C-4 wrap commit chain 已完成（A1/B1/B2/熱重載 e2e/E-Merge-4/doc sync），剩這兩塊：
+ARCH-RC1 1C-4 wrap commit chain 已完成（A1/B1/B2/熱重載 e2e/E-Merge-4/doc sync）。
 
-- [ ] **A2** NewsPipeline `run_once` 60s scheduler spawn（~120-200 行，等 4-09 router decision + provider wire-up）
-- [ ] **1C-4 最終驗收** E2 + E4 + QA Audit + 文檔同步
+- [x] **A2** NewsPipeline `run_once` 60s scheduler spawn ✅ — 3 providers (CryptoPanic + 2 RSS) + 4-09 router + config hot-reload gate
+- [x] **1C-4 最終驗收** E2 + E4 + QA Audit + 文檔同步 ✅
 
-### 3. 🟡 DEAD-PY-1 死代碼清理留尾（非阻塞，~2h）
+### 3. ✅ DEAD-PY-1 死代碼清理（DONE）
 
-Phase 1+3+4 大部分已完成（commit history 可查）。剩餘低優先項：
+Phase 1+2+3+4 全部完成。
 
 - [x] **Phase 3 殘留** state_*.py / pnl_ops.py 「Wave A/B/C」標籤 → 移到 git history ✅
 - [x] **Phase 3 殘留** `main.py:176` 「WP-ARCH-RC1 RC1-2」舊命名 ✅
-- [ ] **Phase 4 殘留** `static/tab-governance.html:310-322` whitelist UI 區塊（移至 WP-CLEANUP-WHITELIST-UI 獨立 session）
+- [x] **Phase 4 殘留** whitelist UI 全量移除（tab-governance.html 220 行 + governance.js 19 行）✅
 
 **KEEP（不要動）**：`risk_view_client.py:196-197` force_governor_tier_* / `apply_ai_consultation` / `governance_hub.py` RC-11 docstrings / `bridge_core.py` activate/on_tick docstrings — 全有 test callers 或生產呼叫。
 

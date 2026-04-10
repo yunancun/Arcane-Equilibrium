@@ -3,6 +3,22 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### A2 NewsPipeline Scheduler + DEAD-PY-1 Complete + 1C-4 Close（2026-04-10）
+
+**A2 NewsPipeline 60s scheduler** wired into `main.rs`:
+- 3 providers: CryptoPanic (free tier, 28min self-throttle) + CoinTelegraph RSS + Google News RSS
+- 4-09 triple-route NewsRouter: Guardian halt check + regime buffer + learning context sink
+- Gated by `LearningConfig.switches.news_pipeline_enabled` (hot-reloadable via ConfigStore)
+- Follows existing fee_rate/instrument refresh tokio::spawn pattern with cancel token
+- ~95 lines added to `main.rs`
+
+**DEAD-PY-1 whitelist UI removal** (WP-CLEANUP-WHITELIST-UI):
+- `tab-governance.html`: removed HTML card + modal + CSS + JS vars/functions + init + explainers (−220 lines)
+- `governance.js`: removed 3 dead API wrapper functions (−19 lines)
+- All whitelist references eliminated; backend already returns HTTP 410 Gone
+
+**1C-4 final verification**: E2 code review + E4 regression (838 Rust lib / 2692 Python passed / 1 pre-existing fail) + doc sync
+
 ### LIVE-P0-1/P0-2/P0-3 — API key mgmt + live page rewrite（2026-04-10 · commit c680ffd）
 
 - `settings_routes.py` (new): GET/POST /api/v1/settings/api-key/{slot}  

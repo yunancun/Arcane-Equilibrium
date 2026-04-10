@@ -180,26 +180,6 @@ async function govDismissAllAudit(reason) {
   return ocPost('/api/v1/governance/audit/dismiss-all', { reason: reason || '' });
 }
 
-async function govGetSymbolWhitelist() {
-  // GET /api/v1/governance/symbols/whitelist
-  return ocApi('/api/v1/governance/symbols/whitelist');
-}
-
-async function govAddSymbolWhitelist(symbol, category) {
-  // POST /api/v1/governance/symbols/whitelist
-  return ocPost('/api/v1/governance/symbols/whitelist', {
-    symbol: symbol,
-    category: category,
-  });
-}
-
-async function govRemoveSymbolWhitelist(symbol, category) {
-  // DELETE /api/v1/governance/symbols/whitelist/{symbol}?category=...
-  return ocApi(`/api/v1/governance/symbols/whitelist/${symbol}?category=${category}`, {
-    method: 'DELETE',
-  });
-}
-
 // ─── Render Helpers ──────────────────────────────────────────────────────────
 
 function govAuthBadge(state) {

@@ -306,50 +306,6 @@
   </div>
 </div>
 
-<!-- ═══ Symbol Whitelist Management / 符号白名单管理 ═══ -->
-<!-- DEPRECATED 2026-04-01 (T5.04, commits 35ab853 + f4663d3) -->
-<!-- Backend endpoints return HTTP 410 Gone. Scanner + Guardian + H0 Gate -->
-<!-- provide sufficient filtering. Full GUI removal tracked as -->
-<!-- WP-CLEANUP-WHITELIST-UI in TODO.md. -->
-<div class="oc-card" id="whitelist-card">
-  <h3 style="cursor:pointer" onclick="toggleWhitelist()">
-    &#x2705; Symbol Whitelist / 符号白名單
-    <span style="font-size:11px;color:var(--red);background:rgba(248,81,73,0.12);padding:2px 6px;border-radius:4px;margin-left:8px">⚠️ DEPRECATED</span>
-    <span id="whitelist-toggle" style="float:right">▼</span>
-  </h3>
-  <div id="whitelist-body">
-    <div style="background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.4);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px;color:var(--text-dim)">
-      ⚠️ <strong>Deprecated 2026-04-01</strong> (T5.04) — 此功能已棄用 / This feature is deprecated.
-      Symbol-level enforcement was removed because Scanner + Guardian + H0 Gate provide sufficient filtering.
-      Backend endpoints now return HTTP 410 Gone. UI removal pending (WP-CLEANUP-WHITELIST-UI).
-      <br>Symbol 級別的強制執行已被移除，因為 Scanner + Guardian + H0 Gate 已提供充分過濾。
-    </div>
-    <!-- Add Symbol Form -->
-    <div style="margin-bottom:16px;padding:12px;background:var(--bg);border-radius:6px">
-      <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Add Symbol / 添加符号</h4>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input type="text" id="whitelist-symbol" class="oc-input" placeholder="BTCUSDT" style="flex:1;min-width:120px" />
-        <select id="whitelist-category" class="oc-select" style="flex:1;min-width:100px">
-          <option value="">-- Category --</option>
-          <option value="spot">Spot</option>
-          <option value="linear">Linear</option>
-          <option value="inverse">Inverse</option>
-          <option value="option">Option</option>
-        </select>
-        <button class="oc-btn oc-btn-primary" onclick="submitAddWhitelist()">Add / 添加</button>
-      </div>
-    </div>
-
-    <!-- Whitelist by Category -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px">
-      <div id="whitelist-spot" class="oc-whitelist-category"></div>
-      <div id="whitelist-linear" class="oc-whitelist-category"></div>
-      <div id="whitelist-inverse" class="oc-whitelist-category"></div>
-      <div id="whitelist-option" class="oc-whitelist-category"></div>
-    </div>
-  </div>
-</div>
-
 <!-- ═══ Audit Trail / 審計軌跡 ═══ -->
 <div class="oc-card" id="audit-trail-card">
   <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleAuditTrail()">
@@ -465,24 +421,6 @@
   </div>
 </div>
 
-<!-- ═══ Modal: Remove Whitelist Symbol ═══ -->
-<div id="modal-remove-whitelist" class="oc-modal" style="display:none">
-  <div class="oc-modal-content">
-    <h3>Remove Symbol / 移除符号</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
-      Are you sure you want to remove this symbol from the whitelist? This action is permanent.
-    </p>
-    <div id="remove-whitelist-summary" style="background:var(--bg);padding:8px;border-radius:6px;margin-bottom:12px;font-size:12px">
-      <div>Symbol: <strong id="remove-symbol-name">--</strong></div>
-      <div>Category: <strong id="remove-symbol-category">--</strong></div>
-    </div>
-    <div class="oc-modal-footer">
-      <button class="oc-btn" onclick="hideRemoveWhitelistModal()">Cancel / 取消</button>
-      <button class="oc-btn oc-btn-danger" onclick="submitRemoveWhitelist()">Remove / 移除</button>
-    </div>
-  </div>
-</div>
-
 <!-- ═══ Modal: Promote Learning Tier ═══ -->
 <div id="modal-promote" class="oc-modal" style="display:none">
   <div class="oc-modal-content">
@@ -529,35 +467,6 @@
   display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;
 }
 
-/* Whitelist Category Styling */
-.oc-whitelist-category {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
-}
-.oc-whitelist-category h4 {
-  font-size: 12px; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.4px;
-}
-.oc-whitelist-category .empty {
-  color: var(--text-dim); font-size: 12px; padding: 8px;
-}
-.oc-whitelist-items {
-  display: flex; flex-direction: column; gap: 6px;
-}
-.oc-whitelist-item {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--card-bg); border: 1px solid #21262d; border-radius: 6px;
-  padding: 8px 10px; font-size: 12px;
-}
-.oc-whitelist-item .symbol {
-  font-weight: 600; color: var(--accent);
-}
-.oc-whitelist-item .remove-btn {
-  padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(248,81,73,0.3);
-  background: rgba(248,81,73,0.08); color: var(--red); font-size: 10px;
-  cursor: pointer; transition: all 0.15s;
-}
-.oc-whitelist-item .remove-btn:hover {
-  background: rgba(248,81,73,0.15); border-color: rgba(248,81,73,0.5);
-}
 </style>
 
 <script>
@@ -575,10 +484,6 @@ let _currentRiskLevel = 0;
 let _govEventLog = [];
 let _prevStatus = null;
 const MAX_EVENTS = 50;
-
-// ─── Whitelist Management State ────────────────────────────────
-let _removeWhitelistSymbol = null;
-let _removeWhitelistCategory = null;
 
 // ─── Toggle Functions for Collapsible Sections ────────────────
 function toggleAuthScope() {
@@ -620,18 +525,6 @@ function toggleAuditTrail() {
 function togglePendingApprovals() {
   const body = document.getElementById('pending-approvals-body');
   const toggle = document.getElementById('pending-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
-}
-
-function toggleWhitelist() {
-  const body = document.getElementById('whitelist-body');
-  const toggle = document.getElementById('whitelist-toggle');
   if (body.style.display === 'none') {
     body.style.display = '';
     toggle.textContent = '▼';
@@ -1795,28 +1688,7 @@ const _WHAT_RULES = [
     reject: '记录异议。参数不会自动回退，如需改回请在「风控设置」中操作。',
   },
 
-  // ═══ 13. 白名单新增品种 ═══
-  { pattern: /^Symbol added to (\w+) whitelist: (\w+)$/,
-    cn: (m) => '新增可交易品种：' + m[2] + '（' + _translateComp(m[1]) + '类）',
-    risk: '低',
-    detail: '交易品种已添加至允许交易名单。系统仅可交易名单内的品种。添加后 AI 可在该品种上执行分析和交易。',
-    explain: '系统维护着一份"允许交易的品种清单"。只有清单上的品种，AI 才能去分析和买卖——这是为了防止 AI 去碰你不了解或风险过高的品种。\n\n'
-      + '新增一个品种 = AI 多了一个可以交易的标的。它不会立即下单，但会开始分析该品种的行情，在条件合适时可能发起交易。',
-    approve: '同意系统交易该品种。',
-    reject: '记录异议。品种可能已生效，如需移除请在「白名单管理」中操作。',
-  },
-
-  // ═══ 14. 白名单移除品种 ═══
-  { pattern: /^Symbol removed from (\w+) whitelist: (\w+)$/,
-    cn: (m) => '移除可交易品种：' + m[2] + '（' + _translateComp(m[1]) + '类）',
-    risk: '低',
-    detail: '交易品种已从允许名单中移除。移除后系统不再对该品种执行新交易。注意：现有持仓不会被自动平仓，可能需手动处理。',
-    explain: '从清单中移除一个品种后，AI 将不再在该品种上下单。但如果你目前持有该品种的仓位，移除白名单并不会自动帮你平仓——你可能需要手动处理现有持仓。',
-    approve: '确认移除操作。',
-    reject: '记录异议。如需恢复请在「白名单管理」中重新添加。',
-  },
-
-  // ═══ 15. 模拟→实盘评估 ═══
+  // ═══ 13. 模拟→实盘评估 ═══
   { pattern: /^PaperLiveGate evaluation: (.+)$/,
     cn: (m) => '模拟→实盘升级评估：' + m[1],
     risk: '无',
@@ -2078,97 +1950,6 @@ async function loadPendingApprovals() {
   }
 }
 
-// ─── Whitelist Rendering ──────────────────────────────────────────
-async function loadSymbolWhitelist() {
-  const d = await govGetSymbolWhitelist();
-  if (!d || !d.ok) {
-    for (const cat of ['spot', 'linear', 'inverse', 'option']) {
-      const el = $('whitelist-' + cat);
-      if (el) {
-        el.innerHTML = '<h4>' + cat.toUpperCase() + '</h4><div class="empty">Failed to load / 加載失敗</div>'; // SAFE: cat is from static array ['spot','linear','inverse','option']
-      }
-    }
-    return;
-  }
-
-  const whitelist = d.data || {};
-  for (const cat of ['spot', 'linear', 'inverse', 'option']) {
-    const symbols = whitelist[cat] || [];
-    const el = $('whitelist-' + cat);
-    if (!el) continue;
-
-    let html = '<h4>' + cat.toUpperCase() + '</h4>';
-    if (symbols.length === 0) {
-      html += '<div class="empty">No symbols / 無符号</div>';
-    } else {
-      html += '<div class="oc-whitelist-items">';
-      for (const sym of symbols) {
-        html += '<div class="oc-whitelist-item">';
-        html += '<span class="symbol">' + ocEsc(sym) + '</span>';
-        var _symJs = sym.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); /* APR01-MEDIUM-4 XSS fix: JS string escape */
-        html += '<button class="remove-btn" onclick="showRemoveWhitelistModal(\'' + ocEsc(_symJs) + '\', \'' + ocEsc(cat) + '\')">Remove / 移除</button>';
-        html += '</div>';
-      }
-      html += '</div>';
-    }
-    el.innerHTML = html;
-  }
-}
-
-function showRemoveWhitelistModal(symbol, category) {
-  $('remove-symbol-name').textContent = symbol;
-  $('remove-symbol-category').textContent = category;
-  _removeWhitelistSymbol = symbol;
-  _removeWhitelistCategory = category;
-  $('modal-remove-whitelist').style.display = 'flex';
-}
-
-function hideRemoveWhitelistModal() {
-  $('modal-remove-whitelist').style.display = 'none';
-  _removeWhitelistSymbol = null;
-  _removeWhitelistCategory = null;
-}
-
-async function submitRemoveWhitelist() {
-  if (!_removeWhitelistSymbol || !_removeWhitelistCategory) {
-    ocToast('Invalid symbol or category / 無效符号或類別', 'error');
-    return;
-  }
-
-  const d = await govRemoveSymbolWhitelist(_removeWhitelistSymbol, _removeWhitelistCategory);
-  if (d && d.ok) {
-    ocToast('Symbol removed from whitelist / 符号已從白名單移除', 'success');
-    hideRemoveWhitelistModal();
-    loadSymbolWhitelist();
-  } else {
-    ocToast(d ? d.message : 'Failed to remove symbol / 移除失敗', 'error');
-  }
-}
-
-async function submitAddWhitelist() {
-  const symbol = $('whitelist-symbol').value.trim().toUpperCase();
-  const category = $('whitelist-category').value.trim().toLowerCase();
-
-  if (!symbol) {
-    ocToast('Please enter a symbol / 請輸入符号', 'error');
-    return;
-  }
-  if (!category) {
-    ocToast('Please select a category / 請選擇類別', 'error');
-    return;
-  }
-
-  const d = await govAddSymbolWhitelist(symbol, category);
-  if (d && d.ok) {
-    ocToast('Symbol added to whitelist / 符号已添加至白名單', 'success');
-    $('whitelist-symbol').value = '';
-    $('whitelist-category').value = '';
-    loadSymbolWhitelist();
-  } else {
-    ocToast(d ? d.message : 'Failed to add symbol / 新增失敗', 'error');
-  }
-}
-
 async function confirmApproveRecovery(requestId) {
   if (confirm('Approve this recovery request? / 批准此恢復請求?')) {
     const d = await govApprovePendingRecovery(requestId);
@@ -2240,9 +2021,8 @@ async function loadAll() {
     // 加载治理事件流
     loadEventsFeed().catch(e => console.warn('Events feed load failed:', e));
 
-    // Load pending approvals and whitelist (async, non-blocking)
+    // Load pending approvals (async, non-blocking)
     loadPendingApprovals().catch(e => console.warn('Failed to load pending approvals:', e));
-    loadSymbolWhitelist().catch(e => console.warn('Failed to load whitelist:', e));
   }
 }
 
@@ -2251,7 +2031,7 @@ loadAll();
 ocStartRefresh(loadAll, 10000);
 
 // Close modals on background click
-['modal-request-auth', 'modal-approve', 'modal-override', 'modal-reconcile', 'modal-remove-whitelist', 'modal-promote'].forEach(id => {
+['modal-request-auth', 'modal-approve', 'modal-override', 'modal-reconcile', 'modal-promote'].forEach(id => {
   const el = $(id);
   if (el) {
     el.addEventListener('click', function(e) {
