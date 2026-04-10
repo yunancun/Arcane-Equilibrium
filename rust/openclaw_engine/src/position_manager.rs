@@ -152,6 +152,11 @@ impl PositionManager {
         let mut params: Vec<(&str, &str)> = vec![("category", category.as_str())];
         if let Some(sym) = symbol {
             params.push(("symbol", sym));
+        } else {
+            // Bybit requires symbol OR settleCoin when listing all positions.
+            // Linear perp positions are always settled in USDT.
+            // Bybit 列出所有倉位時要求 symbol 或 settleCoin 二擇一；linear 永遠以 USDT 結算。
+            params.push(("settleCoin", "USDT"));
         }
 
         let resp = self

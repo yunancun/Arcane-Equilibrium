@@ -144,7 +144,30 @@ impl WsClient {
 
             log_state(WsState::Connecting, attempt);
 
-            match tokio_tungstenite::connect_async(&url).await {
+            // WS-TIMEOUT: 15s connect timeout prevents indefinite hang on broken TCP/TLS
+            // WS-TIMEOUT: 15s 連接超時，防止 TCP/TLS 握手掛死（如 03:31 事件）
+            let connect_result = tokio::time::timeout(
+                Duration::from_secs(15),
+                tokio_tungstenite::connect_async(&url),
+            )
+            .await;
+
+            let connect_result = match connect_result {
+                Ok(r) => r,
+                Err(_elapsed) => {
+                    warn!(url = url, "WS connect timed out (15s) / WS 連接超時（15s）");
+                    log_state(WsState::Reconnecting, attempt);
+                    let delay = std::cmp::min(
+                        base_delay.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
+                        MAX_RECONNECT_DELAY_MS,
+                    );
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    attempt = attempt.saturating_add(1);
+                    continue;
+                }
+            };
+
+            match connect_result {
                 Ok((ws_stream, _response)) => {
                     attempt = 0;
                     log_state(WsState::Connected, 0);
