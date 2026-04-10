@@ -336,17 +336,10 @@ impl BybitRestClient {
         api_key: Option<String>,
         api_secret: Option<String>,
     ) -> BybitResult<Self> {
-        // SEC-5: Mainnet guard — require explicit env var to prevent accidental Live usage
-        // SEC-5：主網防護 — 需要明確環境變量以防止意外使用 Live
+        // Mainnet warning — real money at risk; guard removed (operator gates are: live_reserved
+        // global mode + Operator role + valid live API key in secret slot).
+        // 主網警告 — 真金白銀；鎖已移除（門控：live_reserved global mode + Operator 角色 + live slot 有效 API key）。
         if matches!(env, BybitEnvironment::Mainnet) {
-            if std::env::var("OPENCLAW_ALLOW_MAINNET").unwrap_or_default() != "1" {
-                return Err(BybitApiError::Business {
-                    ret_code: -1,
-                    ret_msg: "Mainnet blocked: set OPENCLAW_ALLOW_MAINNET=1 to enable / 主網被阻止"
-                        .into(),
-                    response: serde_json::json!({"blocked": true}),
-                });
-            }
             tracing::warn!(
                 "⚠ MAINNET mode enabled — real money at risk / 主網模式已啟用 — 真金白銀"
             );

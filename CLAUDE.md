@@ -54,7 +54,7 @@
 
 **Rust 市場掃描器 Phase A-D + QC/FA + P2 ✅**（2026-04-09）— ScannerRunner 完整接線 + D2/D3 動態 symbol + C-3 XRP + C-4 pinned cap + M-1 pending_close + adl_alerts + M-2 TOML + M-3 f_ma 閾值 1.5%→0.5% + M-5 edge_bonus +5→+2 + m-1 relay log + m-3 rest_poller Vec<String> + **IPC-SCAN-1 掃描器可觀測性**（get_active_symbols / get_scanner_status）。**系統目標達成度 ~100%**。835 lib tests pass。
 
-**Runtime 狀態**：`Live_Ready` ✅ — 所有前置阻隔已移除。**實際 Live 交易上線條件（僅剩）**：OPENCLAW_ALLOW_MAINNET=1 + live API key 配置。execution_authority 在 live session start 時自動授予，無需另行 grant。（Gov-P1 ✅：live start 向 GovernanceHub 提交審計記錄；GovernanceCore Rust 端紙盤授權繼續作為引擎內部狀態機健康標誌，不影響 live 執行路徑。）
+**Runtime 狀態**：`Live_Ready` ✅ — 所有前置阻隔已移除。**實際 Live 交易上線條件（唯一）**：`settings/secret_files/bybit/live/{api_key,api_secret}` 配置完畢（OPENCLAW_ALLOW_MAINNET env var 鎖已從 Rust 源碼移除）。execution_authority 在 live session start 時自動授予。**Live 縮倉監控 ✅**：session 啟動後每 5 分鐘輪詢 peak_balance/bybit_sync_balance；回撤 ≥5% → 警告；回撤 ≥15% → 自動撤銷 execution_authority + 平倉 + 凍結 GovernanceHub 授權。
 
 **A2 NewsPipeline Scheduler ✅**（2026-04-10）— 60s 定時排程器接入 main.rs：3 providers（CryptoPanic free + CoinTelegraph RSS + Google News RSS）→ 去重 → severity → DB write → 4-09 三路 fan-out（Guardian/Regime/Learning）。受 `LearningConfig.switches.news_pipeline_enabled` 熱重載 gate 控制。
 
@@ -252,4 +252,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2280** passed **1 pre-existing fail** · **Gov-P1 ✅**（execution_authority 自動授予 + live GovernanceHub 審計記錄）· **Live GUI Phase 5 ✅** (commit c392220) · **Live GUI Phase 4 ✅** (commit af392c2) · **Live_Ready ✅ 全阻隔已移除**（LIVE-P0/P1/P2 + Phase 4+5 + Gov-P1 全部完成）· **SEC-05 innerHTML XSS ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 剩餘前置（operator 決定時機）**：OPENCLAW_ALLOW_MAINNET=1 + Live API Key。
+> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live 縮倉監控 ✅**（5% warn + 15% halt，回撤觸發自動撤銷 + 平倉 + 凍結 GovernanceHub）· **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅**（API key = 唯一上線條件）· **Gov-P1 ✅** · **Live GUI Phase 5 ✅** · **Live_Ready ✅ 全阻隔已移除** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 配置。

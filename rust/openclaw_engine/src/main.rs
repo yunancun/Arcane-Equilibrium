@@ -624,9 +624,9 @@ async fn async_main(
     let mut shared_account_manager: Option<Arc<AccountManager>> = None;
     let cfg_snapshot = config.get();
     // Derive Bybit environment from trading_mode (LIVE-P1-2):
-    // PaperOnly/Demo → api-demo.bybit.com; Live → api.bybit.com (requires OPENCLAW_ALLOW_MAINNET=1)
+    // PaperOnly/Demo → api-demo.bybit.com; Live → api.bybit.com
     // 根據 trading_mode 派生 Bybit 環境（LIVE-P1-2）：
-    // PaperOnly/Demo → Demo 環境；Live → 主網（需 OPENCLAW_ALLOW_MAINNET=1）
+    // PaperOnly/Demo → Demo 環境；Live → 主網
     let bybit_env = match cfg_snapshot.trading_mode {
         TradingMode::Live => BybitEnvironment::Mainnet,
         TradingMode::Demo | TradingMode::PaperOnly => BybitEnvironment::Demo,

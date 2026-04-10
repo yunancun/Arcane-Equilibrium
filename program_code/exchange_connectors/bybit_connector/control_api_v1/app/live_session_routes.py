@@ -33,6 +33,7 @@ MODULE_NOTE (English):
   6. start submits live authorization request to GovernanceHub (non-blocking audit trail)
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -64,6 +65,23 @@ _LIVE_USER_STOPPED: bool = False
 # 記憶體內 execution_authority override（Operator 從 GUI 授予/撤銷）。
 # 重啟後清零（fail-closed 設計）。
 _EXECUTION_AUTHORITY_OVERRIDE: str | None = None
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Live contraction monitor state / 實盤縮倉監控狀態
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Drawdown thresholds (from session-start peak equity).
+# 回撤閾值（相對於 session 啟動時的峰值淨值）。
+CONTRACTION_WARN_PCT:  float = 5.0   # -5%  → warning log only / 僅記警告
+CONTRACTION_HALT_PCT:  float = 15.0  # -15% → auto-halt: revoke auth + close positions / 自動停止
+
+# Current contraction state: "normal" | "warned" | "halted"
+# 當前縮倉狀態
+_live_contraction_state: str = "normal"
+
+# Background monitor asyncio task (None when session is not active)
+# 後台監控 asyncio task（session 非活躍時為 None）
+_live_monitor_task: asyncio.Task | None = None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IPC helpers / IPC 輔助函數
@@ -219,6 +237,160 @@ def _get_trading_mode_from_engine() -> str:
     return "unknown"
 
 
+def _freeze_live_governance_auth(reason: str = "auto_halt_drawdown") -> None:
+    """
+    Freeze the live-scoped GovernanceHub authorization after auto-halt.
+    Creates an audit record showing why the session was stopped.
+    在自動停止後凍結 GovernanceHub 中 mode=live 的授權，生成審計記錄。
+    """
+    try:
+        from .governance_hub import GovernanceHub
+        hub = GovernanceHub.get_instance()
+        if hub is None:
+            return
+        auth_sm = getattr(hub, "_authorization_sm", None)
+        if auth_sm is None:
+            return
+        effective = auth_sm.get_effective()
+        for auth in effective:
+            scope = getattr(auth, "scope", {}) or {}
+            if isinstance(scope, dict) and scope.get("mode") == "live":
+                auth_sm.freeze(auth.authorization_id, reason)
+                logger.info(
+                    "GovernanceHub live authorization frozen (id=%s reason=%s) / "
+                    "實盤 GovernanceHub 授權已凍結（id=%s reason=%s）",
+                    auth.authorization_id, reason,
+                    auth.authorization_id, reason,
+                )
+    except Exception as exc:
+        logger.warning(
+            "Failed to freeze live governance auth (non-fatal): %s / "
+            "凍結實盤治理授權失敗（非致命）: %s", exc, exc,
+        )
+
+
+async def _live_contraction_monitor() -> None:
+    """
+    Background drawdown monitor — runs while live session is active.
+    Polls engine state every 5 minutes; auto-halts on drawdown breach.
+
+    Uses PaperStateSnapshot fields (peak_balance + bybit_sync_balance/balance)
+    directly from the Rust engine via IPC — no separate peak tracking needed.
+
+    Levels:
+      normal  → drawdown < CONTRACTION_WARN_PCT
+      warned  → CONTRACTION_WARN_PCT ≤ drawdown < CONTRACTION_HALT_PCT (log only)
+      halted  → drawdown ≥ CONTRACTION_HALT_PCT → revoke auth + close positions
+
+    後台回撤監控 — 實盤 session 活躍時持續運行，每 5 分鐘輪詢引擎狀態。
+    直接使用 Rust PaperStateSnapshot（peak_balance + bybit_sync_balance/balance）。
+    警告閾值：只記錄。停止閾值：撤銷授權 + 平倉。
+    """
+    global _live_contraction_state, _EXECUTION_AUTHORITY_OVERRIDE, _LIVE_USER_STOPPED
+
+    POLL_INTERVAL_S = 300  # 5 minutes / 5 分鐘
+    logger.info("Live contraction monitor started / 縮倉監控已啟動")
+
+    while True:
+        try:
+            await asyncio.sleep(POLL_INTERVAL_S)
+        except asyncio.CancelledError:
+            logger.info("Live contraction monitor cancelled / 縮倉監控已取消")
+            return
+
+        # Skip check if session already stopped by user or authority revoked
+        if _LIVE_USER_STOPPED or _EXECUTION_AUTHORITY_OVERRIDE != "granted":
+            logger.debug("Contraction monitor: session inactive — skipping check")
+            continue
+
+        try:
+            state = await _ipc_command("get_paper_state")
+        except Exception as exc:
+            logger.warning("Contraction monitor: IPC get_paper_state failed: %s", exc)
+            continue
+
+        try:
+            # Prefer exchange-synced balance; fall back to internal engine balance
+            # 優先使用交易所同步餘額，否則使用引擎內部餘額
+            equity = float(
+                state.get("bybit_sync_balance") or state.get("balance") or 0
+            )
+            peak   = float(state.get("peak_balance") or equity)
+
+            if equity <= 0 or peak <= 0:
+                logger.debug("Contraction monitor: equity/peak not available yet")
+                continue
+
+            drawdown_pct = ((peak - equity) / peak) * 100.0
+
+            if drawdown_pct >= CONTRACTION_HALT_PCT:
+                # ── AUTO-HALT ────────────────────────────────────────────────
+                # Drawdown exceeded halt threshold: revoke authority + close positions
+                # 回撤超過停止閾值：撤銷授權 + 平倉
+                _live_contraction_state  = "halted"
+                _EXECUTION_AUTHORITY_OVERRIDE = None
+
+                logger.error(
+                    "🚨 LIVE AUTO-HALT — drawdown=%.1f%% >= halt_threshold=%.1f%% "
+                    "(peak=%.2f, current=%.2f) — execution_authority REVOKED, closing positions / "
+                    "🚨 實盤自動停止 — 回撤=%.1f%% ≥ 閾值=%.1f%% "
+                    "（峰值=%.2f，當前=%.2f）— 已撤銷 execution_authority，平倉中",
+                    drawdown_pct, CONTRACTION_HALT_PCT, peak, equity,
+                    drawdown_pct, CONTRACTION_HALT_PCT, peak, equity,
+                )
+
+                # Close all positions (best-effort; error logged but not re-raised)
+                # 平倉（盡力而為；錯誤記錄但不重拋）
+                try:
+                    await _ipc_command("close_all_positions")
+                    logger.info("Auto-halt: close_all_positions dispatched / 自動停止：已下發平倉命令")
+                except Exception as close_exc:
+                    logger.error(
+                        "Auto-halt: close_all_positions failed: %s / 自動停止：平倉失敗: %s",
+                        close_exc, close_exc,
+                    )
+
+                # Freeze GovernanceHub live authorization (audit trail)
+                # 凍結 GovernanceHub 實盤授權（審計留痕）
+                _freeze_live_governance_auth(
+                    f"auto_halt_drawdown_{drawdown_pct:.1f}pct"
+                )
+                return  # Stop monitoring after halt / 停止後退出監控循環
+
+            elif drawdown_pct >= CONTRACTION_WARN_PCT:
+                if _live_contraction_state != "warned":
+                    _live_contraction_state = "warned"
+                    logger.warning(
+                        "⚠ Live drawdown WARNING: %.1f%% (warn_threshold=%.1f%%) "
+                        "peak=%.2f current=%.2f / "
+                        "⚠ 實盤回撤警告：%.1f%%（閾值=%.1f%%）峰值=%.2f 當前=%.2f",
+                        drawdown_pct, CONTRACTION_WARN_PCT, peak, equity,
+                        drawdown_pct, CONTRACTION_WARN_PCT, peak, equity,
+                    )
+                else:
+                    # Already warned — log at debug level only
+                    logger.debug(
+                        "Contraction monitor: drawdown=%.1f%% (warned state, threshold=%.1f%%)",
+                        drawdown_pct, CONTRACTION_WARN_PCT,
+                    )
+            else:
+                # Recovery below warn threshold
+                if _live_contraction_state == "warned":
+                    logger.info(
+                        "Live drawdown recovered: %.1f%% < %.1f%% — state: warned → normal / "
+                        "實盤回撤恢復：%.1f%% < %.1f%% — 狀態：warned → normal",
+                        drawdown_pct, CONTRACTION_WARN_PCT,
+                        drawdown_pct, CONTRACTION_WARN_PCT,
+                    )
+                _live_contraction_state = "normal"
+
+        except Exception as exc:
+            logger.warning(
+                "Contraction monitor: check error (non-fatal): %s / 縮倉監控：檢查異常（非致命）: %s",
+                exc, exc,
+            )
+
+
 def _submit_live_governance_request(actor_id: str) -> None:
     """
     Submit a live-mode authorization request to GovernanceHub (non-blocking).
@@ -303,6 +475,22 @@ def get_live_session_status(
         paper_paused = rust_state.get("paper_paused", True)
         session_state = "paused" if paper_paused else "active"
 
+    # Derive drawdown info from engine state for status display
+    # 從引擎狀態派生回撤信息用於狀態顯示
+    drawdown_info: dict = {}
+    if rust_state and isinstance(rust_state, dict):
+        try:
+            bal   = float(rust_state.get("bybit_sync_balance") or rust_state.get("balance") or 0)
+            peak  = float(rust_state.get("peak_balance") or bal)
+            if peak > 0 and bal > 0:
+                drawdown_info = {
+                    "drawdown_pct": round(((peak - bal) / peak) * 100, 2),
+                    "peak_balance": round(peak, 4),
+                    "current_balance": round(bal, 4),
+                }
+        except Exception:
+            pass
+
     return _live_response({
         "engine_available": engine_available,
         "execution_authority": execution_authority,
@@ -312,6 +500,12 @@ def get_live_session_status(
             "session_id": "rust_engine_live",
         },
         "rust_state": rust_state,
+        "contraction": {
+            "state": _live_contraction_state,
+            "warn_pct": CONTRACTION_WARN_PCT,
+            "halt_pct": CONTRACTION_HALT_PCT,
+            **drawdown_info,
+        },
     })
 
 
@@ -354,9 +548,11 @@ async def post_live_session_start(
     # 啟動時自動授予 execution_authority。
     # 雙重門控（Operator 角色 + live_reserved global mode）已在上方驗證。
     # 無需另行手動 grant — stop 時 / 進程重啟後清零（fail-closed）。
-    global _EXECUTION_AUTHORITY_OVERRIDE, _LIVE_USER_STOPPED
+    global _EXECUTION_AUTHORITY_OVERRIDE, _LIVE_USER_STOPPED, \
+           _live_contraction_state, _live_monitor_task
     _EXECUTION_AUTHORITY_OVERRIDE = "granted"
     _LIVE_USER_STOPPED = False
+    _live_contraction_state = "normal"
 
     # Submit live governance request for operator audit trail (non-blocking)
     # 提交實盤治理申請用於操作員審計留痕（非阻塞）
@@ -370,9 +566,17 @@ async def post_live_session_start(
     except Exception as exc:
         logger.warning("IPC resume_paper skipped (engine may already be running): %s", exc)
 
+    # Start drawdown contraction monitor (cancel any stale task first)
+    # 啟動回撤縮倉監控（先取消舊 task）
+    if _live_monitor_task is not None and not _live_monitor_task.done():
+        _live_monitor_task.cancel()
+    _live_monitor_task = asyncio.create_task(_live_contraction_monitor())
+
     logger.warning(
-        "⚠ LIVE SESSION STARTED — trading_mode=%s execution_authority=granted — actor=%s",
-        trading_mode, getattr(actor, "actor_id", "?"),
+        "⚠ LIVE SESSION STARTED — trading_mode=%s execution_authority=granted "
+        "contraction_monitor=active warn=%.0f%% halt=%.0f%% — actor=%s",
+        trading_mode, CONTRACTION_WARN_PCT, CONTRACTION_HALT_PCT,
+        getattr(actor, "actor_id", "?"),
     )
     return _live_response({
         "message": "Live session started / 實盤 session 已啟動",
@@ -381,6 +585,11 @@ async def post_live_session_start(
         "authority": "granted",
         "ipc_result": result,
         "session": {"session_state": "active", "session_id": "rust_engine_live"},
+        "contraction": {
+            "state": "normal",
+            "warn_pct": CONTRACTION_WARN_PCT,
+            "halt_pct": CONTRACTION_HALT_PCT,
+        },
     })
 
 
@@ -399,11 +608,19 @@ async def post_live_session_stop(
     """
     _require_operator(actor)
 
-    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE
+    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE, \
+           _live_contraction_state, _live_monitor_task
     _LIVE_USER_STOPPED = True
     # Reset execution authority on stop — fail-closed until next explicit start
     # stop 後重置 execution_authority — 下次明確 start 前保持 fail-closed
     _EXECUTION_AUTHORITY_OVERRIDE = None
+    _live_contraction_state = "normal"
+
+    # Cancel contraction monitor task if running
+    # 如果縮倉監控 task 在運行，取消它
+    if _live_monitor_task is not None and not _live_monitor_task.done():
+        _live_monitor_task.cancel()
+    _live_monitor_task = None
 
     errors: list[str] = []
     rust_online = get_rust_reader().is_available()
@@ -481,11 +698,19 @@ async def post_live_session_resume(
                    "Switch Global Mode to live_reserved first.",
         )
 
-    # Re-grant execution_authority on resume (may have been reset by a stop)
-    # 恢復時重新授予 execution_authority（可能已被 stop 重置）
-    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE
+    # Re-grant execution_authority and restart monitor on resume
+    # 恢復時重新授予 execution_authority 並重啟縮倉監控
+    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE, \
+           _live_contraction_state, _live_monitor_task
     _EXECUTION_AUTHORITY_OVERRIDE = "granted"
     _LIVE_USER_STOPPED = False
+    _live_contraction_state = "normal"
+
+    # Restart contraction monitor (cancel stale task if any)
+    if _live_monitor_task is not None and not _live_monitor_task.done():
+        _live_monitor_task.cancel()
+    _live_monitor_task = asyncio.create_task(_live_contraction_monitor())
+
     try:
         result = await _ipc_command("resume_paper")
         return _live_response({
@@ -493,6 +718,7 @@ async def post_live_session_resume(
             "source": "rust_engine",
             "ipc_result": result,
             "session": {"session_state": "active", "session_id": "rust_engine_live"},
+            "contraction": {"state": "normal", "warn_pct": CONTRACTION_WARN_PCT, "halt_pct": CONTRACTION_HALT_PCT},
         })
     except Exception as exc:
         logger.error("IPC resume_paper failed (live resume): %s", exc)
