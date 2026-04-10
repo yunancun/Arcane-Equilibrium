@@ -1182,7 +1182,15 @@ class GovernanceHub:
                 try:
                     effective_auths = self._authorization_sm.get_effective()
                     if effective_auths:
-                        auth = effective_auths[0]
+                        # Prefer live-mode authorization when multiple are active
+                        # (e.g. paper still ACTIVE alongside live).
+                        # 多個有效授權並存時優先顯示 live 模式授權（如 paper 仍 ACTIVE）。
+                        auth = next(
+                            (a for a in effective_auths
+                             if isinstance(getattr(a, "scope", None), dict)
+                             and a.scope.get("mode") == "live"),
+                            effective_auths[0],
+                        )
                         auth_state = auth.state.value
                         auth_expires_at_ms = auth.expires_at_ms
                         auth_scope = auth.scope
