@@ -68,6 +68,8 @@
 
 **Live GUI Phase 5 完成 ✅**（2026-04-10）— 紫色主題（live_reserved 所有紅色 → #a855f7 / rgba(168,85,247,..)）+ 擴展儀表板（Account Balance 卡片組：equity/available/wallet/margin-used；PnL Overview：unrealized large + realized from cumRealisedPnl + net；持倉表 + Leverage 列；成交記錄折疊區懶加載 `/api/v1/live/fills`）+ Global Mode Gate（`_get_global_mode_state()` + 409 block if not live_reserved）+ auto-stop on mode exit + `oc-chip-live` 紫色 chip。緊急停止保持紅色。（commit c392220）
 
+**Live GUI Phase 6 完成 ✅**（2026-04-10）— Live-Demo 虛擬 API key 槽（`settings_routes.py`：validate via demo server → 寫入 live path，operator 可用 Demo 帳號完整測試 live 路徑，換 key 時零代碼改動）；`tab-settings.html` 3 槽位卡片（Demo / Live-Demo / Live）+ peek 按鈕 + 上下文警示；`GET /api/v1/live/metrics` 新端點；paper_trading_routes `/metrics` 修復（`compute_full_metrics()` 返回完整 trade_metrics / drawdown_metrics / holding_period / sharpe，修復所有欄位顯示 "--"）；`tab-live.html` 新增 Performance Metrics 區塊（10 個指標卡，30s 自動刷新）。**DB_TODO.md** 新增 Signal Diamond 多引擎數據隔離規劃（共享市場數據 + per-mode intents/fills/positions，5 階段實施）。（commit 25b5d73）
+
 **留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
@@ -237,11 +239,11 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-04-08 重排序 — Edge 危機）**：**(1) Phase 5 提前啟動 — DL-1/2 backtest infra + James-Stein shrinkage 整合到 cost_gate**。實證 paper realized edge ≈ 2 bps，fee 11 bps → Net EV ≈ −9 bps；cost_gate 公式 `EV = atr × conf × qty`（`intent_processor.rs:558`）把 ATR range 當 directional edge，高估 ~13×（DOGE 案例 0.052% predict vs 0.004% realized），qty 與 fee 兩邊約掉 → gate 與 size 無關。Hand-roll C+D（in-house realized-edge tracker）已被否決：跟 Phase 5 重疊 ~70%。次焦點：(2) 7d paper trading 觀察期（可與 Phase 5 並行）· (3) DEAD-PY-1 · (4) A2 News scheduler · (5) 多通道告警 (OC-3)。
+**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（7d paper 數據累積，2026-04-11 滾動重跑 JS-1 `--days 3`）。Phase 5 功能全交付，cost_gate 改造完成，等數據。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 — 漸進放權 + Reconciler 自動收縮**（6-RC-1~9，需先完成 OC-3 多通道告警）。
 
-**路線圖**：Phase 0-4 + ARCH-RC1 1A→1C-4 ✅ · **Phase 5 ⬜（從 W16-18 提前到立即）** · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
+**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-20) ⬜** 漸進放權+自動收縮+壓測。
 
-**Live 前置**：Paper trading ≥21d · Phase 6 完成 · Rust R-07 灰度通過 · Alpha PnL>0 · provider pricing 綁定。M/N 章未完成，執行權限未授予。
+**Live 前置**：Paper trading ≥21d · Phase 6 完成 · Alpha PnL>0 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
@@ -252,4 +254,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live 縮倉監控 ✅**（5% warn + 15% halt，回撤觸發自動撤銷 + 平倉 + 凍結 GovernanceHub）· **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅**（API key = 唯一上線條件）· **Gov-P1 ✅** · **Live GUI Phase 5 ✅** · **Live_Ready ✅ 全阻隔已移除** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 配置。
+> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live GUI P0~P6 ✅**（API key 3 槽位 + Live-Demo virtual slot + live/paper metrics 端點 + DB Signal Diamond 規劃）· **Live 縮倉監控 ✅**（5% warn + 15% halt）· **OPENCLAW_ALLOW_MAINNET 鎖已移除 ✅** · **Gov-P1 ✅** · **Live GUI Phase 5 ✅** · **Live_Ready ✅** · **SEC-05 XSS ✅** · **A2 NewsPipeline ✅** · **DEAD-PY-1 ✅** · **1C-4 ✅** · PH5-VERIFY-1 觀察期進行中 · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入。

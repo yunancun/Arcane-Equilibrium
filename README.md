@@ -18,7 +18,7 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 | Tab | 内容 |
 |-----|------|
 | 📊 系统总览 / Overview | 系统状态 + 章节状态 + Paper Trading 概览 |
-| 🔒 实盘交易 / Live | **锁定占位**（前置条件 8 项 + Phase 路线图，Phase 4 后开放） |
+| 🟣 实盘交易 / Live | **Live_Ready** — 紫色主题仪表板（余额/PnL/持仓/成交/缩仓监控）+ API key 管理 + 3 槽位（Demo/Live-Demo/Live）|
 | 🧪 测试交易 / Test | **子 Tab 包装器**：纸面交易 / Bybit Demo（iframe 独立加载） |
 | 📈 K线图表 / Charts | TradingView K线 + 信号标记 + 策略面板 |
 | ⚙ 策略中心 / Strategy | 策略部署 + 扫描器 + 品种管理 |
@@ -31,11 +31,12 @@ AI Agent 自动交易系统 — 自主扫描 650+ 交易对，智能部署策略
 
 ---
 
-## 当前状态 (2026-04-10 · LIVE-P0/P1/P2 完毕 · SEC-05 XSS 修复 · 观察期进行中)
+## 当前状态 (2026-04-10 · Live_Ready ✅ · Live GUI P0~P6 全完毕 · 观察期进行中)
 
 ```
-系统模式:     demo_only（仅限 Bybit Demo · live_execution_allowed = False）
-执行权限:     disabled / not_granted（live 前必须保持）
+系统模式:     Live_Ready ✅ — 所有代码阻隔已移除
+执行权限:     auto_granted_on_start（live session 启动后自动授予）
+上线唯一条件: settings/secret_files/bybit/live/{api_key,api_secret} 填入
 测试:         Rust  engine lib 840
               Python control_api 2692 passed (1 pre-existing fail · 0 regression)
 API 路由:     183 条（全部 Rust-first）
@@ -53,7 +54,10 @@ Phase 5:      ✅ 功能交付完毕（cost_gate 重写）
 Live 准备:    ✅ P0 API key 管理 + tab-live 动态前置条件 + 仪表板框架
               ✅ P1 TradingMode::Live + slot-aware key 读取 + session routes
               ✅ P2 PerEngineRiskStores（paper/demo/live 独立风控）+ GUI per-engine tab
+              ✅ P3 Gov-P1 + OPENCLAW_ALLOW_MAINNET 锁移除 + 缩仓监控（5%/15% 自动停）
+              ✅ P4 Live-Demo 虚拟槽 + live/paper metrics 端点 + DB Signal Diamond 规划
 安全:         ✅ SEC-05 innerHTML XSS 全面修复（safeText→ocEsc + badge fallbacks）
+              ✅ SEC-17 OPENCLAW_ALLOW_MAINNET 架构决策（env var 移除，API key = 唯一门控）
               ✅ WP-F/AH-06 risk-tab dirty-tracking 防覆盖
 治理:         GovernanceHub 4 SM (Python) + GovernanceCore (Rust) · fail-closed
               Operator manual governor override（白名单 / 24h cooldown / V014 audit）
@@ -64,11 +68,12 @@ Phase 4:      ✅ CODE-COMPLETE（4-00~4-21 + 4.1）· Claude Teacher consumer l
 Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
 5 Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 11 Grafana VIEWs
+              DB_TODO.md: Signal Diamond 多引擎数据隔离规划（5 阶段实施）
 Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
 下一步（按顺序）:
   1) 7d paper 观察期 + 2026-04-11 滚动 JS-1 重跑（无开发动作，纯维运）
-  2) Live 前必做：SEC-08/17/21 + OC-3 多通道告警（Phase 6-RC-6 阻塞依赖）
+  2) Live 前必做：SEC-08 IPC 无认证 + OC-3 多通道告警（Phase 6-RC-6 阻塞依赖）
   3) Phase 6：6-RC-1~9 reconciler 自动收缩 + 渐进放权 + 验收
   4) Live Gate：21 天 paper + LG-1~5
 ```
