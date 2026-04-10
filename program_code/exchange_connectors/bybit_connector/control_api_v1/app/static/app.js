@@ -1578,7 +1578,7 @@ function confidenceBadge(level) {
   const colors = { fact: "#27ae60", inference: "#f39c12", hypothesis: "#3498db" };
   const labels = { fact: "事实/fact", inference: "推断/inference", hypothesis: "假设/hypothesis" };
   const color = colors[level] || "#999";
-  return `<span class="confidence-badge" style="background:${color}">${labels[level] || level}</span>`;
+  return `<span class="confidence-badge" style="background:${color}">${labels[level] || ocEsc(level)}</span>`;
 }
 
 /**
@@ -1592,7 +1592,7 @@ function statusBadge(status) {
     in_progress: "#9b59b6", completed: "#2ecc71"
   };
   const color = colors[status] || "#999";
-  return `<span class="status-badge" style="background:${color}">${status}</span>`;
+  return `<span class="status-badge" style="background:${color}">${ocEsc(status)}</span>`;
 }
 
 /**
@@ -1964,7 +1964,7 @@ function reviewStatusBadge(status) {
     deferred: '<span class="badge badge-muted">已搁置 / Deferred</span>',
     ai_consulted: '<span class="badge badge-info">已咨询AI / AI Consulted</span>'
   };
-  return map[status] || `<span class="badge">${status}</span>`;
+  return map[status] || `<span class="badge">${ocEsc(status)}</span>`;
 }
 
 /**
@@ -1976,7 +1976,7 @@ function reviewTypeLabel(packetType) {
     auto_lesson: "自动经验 / Auto Lesson",
     auto_hypothesis: "自动假设 / Auto Hypothesis"
   };
-  return map[packetType] || packetType;
+  return map[packetType] || ocEsc(packetType);
 }
 
 /**
