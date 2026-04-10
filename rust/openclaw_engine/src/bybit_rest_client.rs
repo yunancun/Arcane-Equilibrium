@@ -73,6 +73,11 @@ pub enum BybitEnvironment {
     Testnet,
     /// Mainnet (production) / 主網（生產）
     Mainnet,
+    /// Live-Demo: live slot credentials (GBR key) against demo server.
+    /// Used when operator configures keys via the "Live-Demo" tab in settings.
+    /// Live-Demo：使用 live 槽憑證（GBR key），連接 Demo 伺服器。
+    /// 用於 operator 通過設定頁「Live-Demo」tab 配置 key 的情況。
+    LiveDemo,
 }
 
 impl BybitEnvironment {
@@ -80,7 +85,7 @@ impl BybitEnvironment {
     /// 取得此環境的基礎 REST URL。
     pub fn rest_base_url(&self) -> &'static str {
         match self {
-            Self::Demo => "https://api-demo.bybit.com",
+            Self::Demo | Self::LiveDemo => "https://api-demo.bybit.com",
             Self::Testnet => "https://api-testnet.bybit.com",
             Self::Mainnet => "https://api.bybit.com",
         }
@@ -90,7 +95,7 @@ impl BybitEnvironment {
     /// 取得此環境的私有 WebSocket URL。
     pub fn private_ws_url(&self) -> &'static str {
         match self {
-            Self::Demo => "wss://stream-demo.bybit.com/v5/private",
+            Self::Demo | Self::LiveDemo => "wss://stream-demo.bybit.com/v5/private",
             Self::Testnet => "wss://stream-testnet.bybit.com/v5/private",
             Self::Mainnet => "wss://stream.bybit.com/v5/private",
         }
@@ -100,13 +105,13 @@ impl BybitEnvironment {
     /// 將環境映射到對應的 secret 文件槽位名稱。
     ///
     /// Demo and Testnet share the "demo" slot (development credentials).
-    /// Mainnet uses the "live" slot (production credentials — must never be mixed up).
+    /// Mainnet and LiveDemo both use the "live" slot — LiveDemo uses live key against demo server.
     /// Demo 和 Testnet 共用 "demo" 槽位（開發憑證）。
-    /// Mainnet 使用 "live" 槽位（生產憑證 — 絕對不能混淆）。
+    /// Mainnet 和 LiveDemo 均使用 "live" 槽位 — LiveDemo 用 live key 連 demo 伺服器。
     pub fn secret_slot(&self) -> &'static str {
         match self {
             Self::Demo | Self::Testnet => "demo",
-            Self::Mainnet => "live",
+            Self::Mainnet | Self::LiveDemo => "live",
         }
     }
 }
@@ -114,6 +119,26 @@ impl BybitEnvironment {
 impl Default for BybitEnvironment {
     fn default() -> Self {
         Self::Demo // Safe default — never accidentally hit mainnet
+    }
+}
+
+/// Determine the correct BybitEnvironment for TradingMode::Live by reading
+/// the `bybit_endpoint` metadata file written by the Python settings API.
+///
+/// 通過讀取 Python 設定 API 寫入的 `bybit_endpoint` 元數據文件，
+/// 為 TradingMode::Live 決定正確的 BybitEnvironment。
+///
+/// Returns:
+///   `LiveDemo`  — if `live/bybit_endpoint` contains "demo"
+///   `Mainnet`   — if "mainnet" or file absent (fail-safe: never accidentally use demo in prod)
+///
+/// 返回值：
+///   `LiveDemo`  — `live/bybit_endpoint` 內容為 "demo"
+///   `Mainnet`   — 內容為 "mainnet" 或文件不存在（安全默認值：不意外走 demo）
+pub fn live_bybit_environment() -> BybitEnvironment {
+    match read_secret_file("live", "bybit_endpoint").as_deref() {
+        Some("demo") => BybitEnvironment::LiveDemo,
+        _ => BybitEnvironment::Mainnet,
     }
 }
 

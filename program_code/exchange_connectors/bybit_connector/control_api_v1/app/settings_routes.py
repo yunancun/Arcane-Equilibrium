@@ -396,9 +396,15 @@ async def save_api_key(
         }
 
     # Write to secrets directory / 寫入 secrets 目錄
+    # Also write bybit_endpoint metadata so Rust knows which server to connect to.
+    # live_demo slot → demo server; live slot → mainnet; demo slot → demo (informational).
+    # 同時寫入 bybit_endpoint 元數據，讓 Rust 知道連哪個伺服器。
+    # live_demo 槽 → demo 伺服器；live 槽 → 主網；demo 槽 → demo（參考用）。
+    _SLOT_ENDPOINT: dict[str, str] = {"demo": "demo", "live_demo": "demo", "live": "mainnet"}
     try:
         _write_key_file(slot, "api_key", api_key)
         _write_key_file(slot, "api_secret", api_secret)
+        _write_key_file(slot, "bybit_endpoint", _SLOT_ENDPOINT.get(slot, "mainnet"))
     except (OSError, PermissionError) as exc:
         # Log full detail server-side; return generic message to client (no path leakage)
         # 服務器端記錄完整細節；返回通用錯誤消息，不向客戶端洩漏文件路徑

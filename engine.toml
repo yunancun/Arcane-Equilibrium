@@ -1,0 +1,14 @@
+# OpenClaw Engine Bootstrap Configuration
+# 引擎啟動配置
+#
+# trading_mode = "live" — uses live slot credentials (GBR key).
+# Rust reads live/bybit_endpoint metadata to pick the actual server:
+#   "demo"    → api-demo.bybit.com  (Live-Demo: real live path, demo server)
+#   "mainnet" → api.bybit.com       (True Live: real money)
+#
+# trading_mode = "live"：使用 live 槽憑證（GBR key）。
+# Rust 讀取 live/bybit_endpoint 元數據決定連哪個伺服器：
+#   "demo"    → api-demo.bybit.com（Live-Demo：走 live 路徑，連 demo 伺服器）
+#   "mainnet" → api.bybit.com（真實實盤：真實資金）
+
+trading_mode = "live"
