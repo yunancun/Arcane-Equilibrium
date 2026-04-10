@@ -2,13 +2,13 @@
 MODULE_NOTE (中文):
   狀態編譯器模塊。包含 compile_state() 及所有 _compile_* 派生字段計算函數，
   加上系統常量（ACTION_NAMES、PRODUCT_FAMILIES、學習系統白名單等）。
-  從 main_legacy.py 拆分而來（Wave A 重構）。所有函數為純函數（輸入→輸出），
+  從 main_legacy.py 拆分而來。所有函數為純函數（輸入→輸出），
   不持有狀態，不引用 STORE singleton。
 
 MODULE_NOTE (English):
   State compiler module. Contains compile_state() and all _compile_* derived-field
   computation functions, plus system constants (ACTION_NAMES, PRODUCT_FAMILIES,
-  learning system whitelists, etc.). Extracted from main_legacy.py (Wave A refactoring).
+  learning system whitelists, etc.). Extracted from main_legacy.py.
   All functions are pure (input→output), hold no state, do not reference the STORE singleton.
 """
 from __future__ import annotations

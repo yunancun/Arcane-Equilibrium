@@ -3,14 +3,14 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   PnL 與經營指標操作模塊。包含 PnL 條目錄入、經營摘要構建、周期快照保存、
-  Net PnL 儀表盤構建等函數。從 main_legacy.py 拆分而來（Wave C 重構）。
+  Net PnL 儀表盤構建等函數。從 main_legacy.py 拆分而來。
 
   ★ 寫操作通過 _base.STORE / _base.get_latest_snapshot() 間接訪問單例。
 
 MODULE_NOTE (English):
   PnL and business metrics operations module. Contains PnL entry recording,
   business summary builder, period snapshot saving, and Net PnL dashboard builder.
-  Extracted from main_legacy.py (Wave C refactoring).
+  Extracted from main_legacy.py.
 
   ★ Write operations access singletons indirectly via _base.STORE / _base.get_latest_snapshot().
 """

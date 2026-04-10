@@ -2,7 +2,7 @@
 MODULE_NOTE (中文):
   狀態存儲模塊。包含 JsonStateStore（線程安全 JSON 文件讀寫 + 原子寫入）
   和 build_default_state()（初始狀態構建器）。
-  從 main_legacy.py 拆分而來（Wave A 重構）。
+  從 main_legacy.py 拆分而來。
 
   ★ Monkey-patch 安全說明：main.py 在啟動時完全替換 JsonStateStore.read/write/mutate
   方法，因此本模塊內部對 compile_state/_compile_for_response 的引用在生產環境中
@@ -11,7 +11,7 @@ MODULE_NOTE (中文):
 MODULE_NOTE (English):
   State store module. Contains JsonStateStore (thread-safe JSON file read/write
   with atomic writes) and build_default_state() (initial state builder).
-  Extracted from main_legacy.py (Wave A refactoring).
+  Extracted from main_legacy.py.
 
   ★ Monkey-patch safety note: main.py completely replaces JsonStateStore.read/write/mutate
   methods at startup, so internal references to compile_state/_compile_for_response in this
