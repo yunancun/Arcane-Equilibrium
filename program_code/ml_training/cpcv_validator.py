@@ -217,6 +217,8 @@ def validate_cpcv(
     strategy_type: str,
     model_fn: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict[str, Any]],
     config: Optional[CPCVConfig] = None,
+    model_name: str = "lightgbm_scorer",
+    model_version: str = "v1",
 ) -> CPCVResult:
     """Run full CPCV validation pipeline.
     執行完整 CPCV 驗證管線。
@@ -231,6 +233,8 @@ def validate_cpcv(
             'rmse', 'correlation', etc.
             必須返回包含 'sharpe' 的字典。
         config: CPCV configuration. / CPCV 配置。
+        model_name: Model identifier for DB persistence. / 模型標識符，用於 DB 持久化。
+        model_version: Model version for DB persistence. / 模型版本，用於 DB 持久化。
 
     Returns:
         CPCVResult with aggregated metrics and pass/fail decision.
@@ -291,7 +295,7 @@ def validate_cpcv(
     )
 
     # Persist to PG (fail-soft) / 持久化到 PG（失敗不中斷）
-    _persist_cpcv_result(result)
+    _persist_cpcv_result(result, model_name=model_name, model_version=model_version)
 
     return result
 

@@ -76,12 +76,38 @@ class BybitDemoSync:
         self._stats = {"syncs": 0, "executions_synced": 0, "positions_synced": 0, "errors": 0}
 
     def _get_conn(self):
+        """Get PG connection — prefer shared pool, fallback to direct connect.
+        獲取 PG 連接 — 優先共享池，回退到直連。"""
+        try:
+            from . import db_pool
+            conn = db_pool.get_conn()
+            if conn is not None:
+                return conn
+        except Exception:
+            pass
+        # Fallback: direct connect (e.g., pool not initialized)
+        # 回退：直連（如連接池未初始化）
         try:
             import psycopg2
             return psycopg2.connect(**self._pg_config, connect_timeout=5)
         except Exception as e:
             logger.debug("PG connection failed: %s", e)
             return None
+
+    def _release_conn(self, conn) -> None:
+        """Return connection to shared pool, or close if pool unavailable.
+        歸還連接到共享池，池不可用時直接關閉。"""
+        try:
+            from . import db_pool
+            if db_pool._pool is not None:
+                db_pool.put_conn(conn)
+                return
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     def start(self) -> None:
         if self._running or not self._demo or not self._demo.is_enabled:
@@ -128,7 +154,7 @@ class BybitDemoSync:
             conn.rollback()
             raise
         finally:
-            conn.close()
+            self._release_conn(conn)
 
     def _sync_executions(self, cur: Any, now_ms: int) -> None:
         """Pull recent executions from Bybit Demo."""
