@@ -725,3 +725,94 @@ class EngineIPCClient:
                     "Reconnected from fallback mode / 從降級模式恢復連接"
                 )
                 return
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Sync IPC helper — for use from synchronous Python contexts (e.g. STORE mutators)
+# 同步 IPC 輔助函數 — 用於同步 Python 上下文（例如 STORE mutator）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def sync_ipc_call(
+    method: str,
+    params: dict,
+    timeout: float = 3.0,
+    socket_path: str | None = None,
+) -> dict:
+    """
+    Synchronous fire-and-best-effort IPC call to the Rust engine.
+    Uses a fresh socket connection per call — suitable only for low-frequency
+    control-plane operations (e.g. mode sync on config change), NOT for
+    hot-path per-tick calls.
+
+    Returns the JSON-RPC result dict on success, or raises on error.
+    Failures are logged but never propagate to callers — this is a best-effort
+    sync from Python config to Rust engine state. If the engine is not running,
+    the mode will sync on next engine startup via snapshot read.
+
+    同步的盡力而為 IPC 調用 Rust 引擎。
+    每次調用使用新的 socket 連接 — 僅適用於低頻控制面操作（如模式同步），
+    不適用於高頻 per-tick 調用。
+
+    成功時返回 JSON-RPC result dict，失敗時拋出異常。
+    失敗只記錄日誌，不傳播 — 這是盡力同步。引擎未運行時，模式將在下次啟動時
+    通過快照讀取同步。
+    """
+    import socket as _socket
+
+    _path = socket_path or os.environ.get(SOCKET_ENV_VAR, DEFAULT_SOCKET_PATH)
+    ipc_secret = os.environ.get("OPENCLAW_IPC_SECRET", "")
+
+    try:
+        with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(_path)
+
+            def _recv_line() -> str:
+                buf = b""
+                while True:
+                    ch = sock.recv(1)
+                    if not ch:
+                        raise ConnectionResetError("engine closed connection")
+                    if ch == b"\n":
+                        return buf.decode("utf-8")
+                    buf += ch
+
+            def _send(msg: dict) -> None:
+                data = (json.dumps(msg) + "\n").encode("utf-8")
+                sock.sendall(data)
+
+            # Authenticate if secret configured / 如果配置了密鑰則進行認證
+            if ipc_secret:
+                ts = int(time.time() * 1000)
+                token = _hmac_lib.new(
+                    ipc_secret.encode("utf-8"),
+                    str(ts).encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                _send({"jsonrpc": "2.0", "method": "__auth",
+                       "params": {"token": token, "ts": ts}, "id": 0})
+                auth_resp = json.loads(_recv_line())
+                if auth_resp.get("error"):
+                    raise PermissionError(f"IPC auth failed: {auth_resp['error']}")
+
+            # Send the actual request / 發送實際請求
+            _send({"jsonrpc": "2.0", "method": method, "params": params, "id": 1})
+            resp = json.loads(_recv_line())
+
+            if resp.get("error"):
+                raise RuntimeError(f"IPC error from engine: {resp['error']}")
+            return resp.get("result", {})
+
+    except FileNotFoundError:
+        logger.debug(
+            "sync_ipc_call: engine socket not found (engine not running?) — skipping / "
+            "同步 IPC：引擎 socket 不存在（引擎未運行？）— 跳過"
+        )
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "sync_ipc_call(%s) failed: %s — engine may sync on next restart / "
+            "sync_ipc_call(%s) 失敗：%s — 引擎可能在下次重啟時同步",
+            method, exc, method, exc,
+        )
+        raise

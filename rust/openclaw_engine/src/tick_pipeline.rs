@@ -33,6 +33,62 @@ use crate::orchestrator::Orchestrator;
 use crate::paper_state::PaperState;
 use crate::strategies::StrategyAction;
 
+/// Global system operating mode — synced from Python GUI `global_execution_mode_switch`.
+/// Controls which engines are allowed to trade. Persisted in TickPipeline.system_mode.
+/// 全局系統運行模式 — 從 Python GUI `global_execution_mode_switch` 同步。
+/// 控制哪些引擎允許交易。持久化在 TickPipeline.system_mode 中。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemMode {
+    /// Live trading reserved — all engines (paper/demo/live) allowed.
+    /// 保留實盤模式 — 所有引擎（paper/demo/live）均允許。
+    #[default]
+    LiveReserved,
+    /// Demo trading reserved — demo + paper allowed, live blocked.
+    /// 保留 Demo 模式 — demo + paper 允許，live 封鎖。
+    DemoReserved,
+    /// Shadow only — paper simulation only; exchange (demo/live) blocked + positions closed.
+    /// 影子模式 — 僅 paper 模擬；交易所（demo/live）封鎖並平倉。
+    ShadowOnly,
+    /// Observe only — all trading engines stopped; scanner + market data continue.
+    /// 觀察模式 — 所有交易引擎停止；掃描器 + 市場數據繼續。
+    ObserveOnly,
+    /// Design only — same as ObserveOnly for the engine (development mode).
+    /// 設計模式 — 引擎側等同 ObserveOnly（開發模式）。
+    DesignOnly,
+}
+
+impl SystemMode {
+    /// Parse from Python GUI string values / 從 Python GUI 字符串值解析
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "live_reserved" => Ok(Self::LiveReserved),
+            "demo_reserved" => Ok(Self::DemoReserved),
+            "shadow_only" => Ok(Self::ShadowOnly),
+            "observe_only" => Ok(Self::ObserveOnly),
+            "design_only" => Ok(Self::DesignOnly),
+            _ => Err(format!("unknown system_mode: {s}")),
+        }
+    }
+
+    /// Serialize to string / 序列化為字符串
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::LiveReserved => "live_reserved",
+            Self::DemoReserved => "demo_reserved",
+            Self::ShadowOnly => "shadow_only",
+            Self::ObserveOnly => "observe_only",
+            Self::DesignOnly => "design_only",
+        }
+    }
+}
+
+impl std::fmt::Display for SystemMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Paper trading session command — IPC → event consumer → TickPipeline.
 /// 紙上交易 session 命令 — IPC → 事件消費者 → TickPipeline。
 #[derive(Debug)]
@@ -207,6 +263,14 @@ pub enum PaperSessionCommand {
     ReconcilerDeEscalate {
         target_tier: String,
         reason: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// Sync global system mode from Python GUI → Rust engine.
+    /// Blocks certain engines and auto-closes positions as required.
+    /// 從 Python GUI 同步全局系統模式到 Rust 引擎。
+    /// 按需封鎖特定引擎並自動平倉。
+    SetSystemMode {
+        mode: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
 }
@@ -440,6 +504,9 @@ pub struct TickPipeline {
     /// Phase 3: Ordered list of active modes for on_tick iteration.
     /// Phase 3：活躍模式列表，on_tick 按此順序迭代。
     active_modes: Vec<crate::config::TradingMode>,
+    /// Global system mode — synced from Python GUI. Gates trading at tick level.
+    /// 全局系統模式 — 從 Python GUI 同步。在 tick 級別封鎖交易。
+    system_mode: SystemMode,
 }
 
 impl TickPipeline {
@@ -523,6 +590,7 @@ impl TickPipeline {
                 m
             },
             active_modes: vec![crate::config::TradingMode::PaperOnly],
+            system_mode: SystemMode::default(),
         }
     }
 
@@ -1773,6 +1841,36 @@ impl TickPipeline {
             self.trading_mode,
             crate::config::TradingMode::Demo | crate::config::TradingMode::Live
         );
+
+        // System mode gate — blocks trading based on GUI-set global mode.
+        // ObserveOnly/DesignOnly: no trading of any kind (scanner + market data continue).
+        // ShadowOnly: only paper simulation; exchange intents suppressed.
+        // DemoReserved: live engine blocked (Demo + Paper allowed).
+        // LiveReserved: all engines allowed (default).
+        // 系統模式門控 — 根據 GUI 設置的全局模式封鎖交易。
+        {
+            let block = match self.system_mode {
+                SystemMode::ObserveOnly | SystemMode::DesignOnly => true,
+                SystemMode::ShadowOnly if is_exchange_mode => true,
+                SystemMode::DemoReserved
+                    if matches!(self.trading_mode, crate::config::TradingMode::Live) =>
+                {
+                    true
+                }
+                _ => false,
+            };
+            if block {
+                let tick_duration_us = tick_start.elapsed().as_micros() as u64;
+                return self.maybe_canary_record(
+                    event,
+                    indicators,
+                    signals,
+                    vec![],
+                    tick_duration_us,
+                );
+            }
+        }
+
         // Extract ATR for cost gate (Gate 3) / 提取 ATR 用於成本門控
         let atr_value = indicators
             .as_ref()
@@ -2738,6 +2836,7 @@ impl TickPipeline {
             source: "rust_engine".into(),
             paper_paused: self.paper_paused,
             trading_mode: self.trading_mode,
+            system_mode: self.system_mode.to_string(),
             indicators: self.latest_indicators.clone(),
             signals: self.recent_signals.iter().cloned().collect(),
             strategies,
@@ -2764,6 +2863,54 @@ impl TickPipeline {
                 ms
             },
         }
+    }
+
+    /// Set global system mode, syncing from Python GUI.
+    /// Automatically closes exchange positions when entering ShadowOnly/ObserveOnly/DesignOnly.
+    /// Pauses paper simulation when entering ObserveOnly/DesignOnly.
+    /// 設置全局系統模式，從 Python GUI 同步。
+    /// 進入 ShadowOnly/ObserveOnly/DesignOnly 時自動平倉交易所持倉。
+    /// 進入 ObserveOnly/DesignOnly 時暫停 paper 模擬。
+    pub fn set_system_mode(&mut self, mode: &str) -> Result<String, String> {
+        let new_mode = SystemMode::from_str(mode)?;
+        let old_mode = self.system_mode;
+        let is_exchange_mode = matches!(
+            self.trading_mode,
+            crate::config::TradingMode::Demo | crate::config::TradingMode::Live
+        );
+        let was_exchange_allowed = !matches!(
+            old_mode,
+            SystemMode::ShadowOnly | SystemMode::ObserveOnly | SystemMode::DesignOnly
+        );
+        let exchange_now_blocked = matches!(
+            new_mode,
+            SystemMode::ShadowOnly | SystemMode::ObserveOnly | SystemMode::DesignOnly
+        );
+        // Auto-close exchange positions when transitioning into a blocking mode
+        // 過渡到封鎖模式時自動平倉交易所持倉
+        if is_exchange_mode && was_exchange_allowed && exchange_now_blocked {
+            let count = self.ipc_close_all();
+            info!(
+                old = %old_mode, new = %new_mode, closed = count,
+                "system_mode gate: auto-closing exchange positions / 系統模式門控：自動平倉交易所持倉"
+            );
+        }
+        // Pause/resume paper simulation based on new mode
+        // 根據新模式暫停/恢復 paper 模擬
+        match new_mode {
+            SystemMode::ObserveOnly | SystemMode::DesignOnly => {
+                self.paper_paused = true;
+            }
+            SystemMode::ShadowOnly => {
+                self.paper_paused = false;
+            }
+            _ => {}
+        }
+        self.system_mode = new_mode;
+        info!(old = %old_mode, new = %new_mode, "system_mode updated / 系統模式已更新");
+        Ok(format!(
+            "{{\"old\":\"{old_mode}\",\"new\":\"{new_mode}\"}}"
+        ))
     }
 
     /// Read-only access to latest prices map (R06-A).

@@ -148,4 +148,8 @@ pub struct PipelineSnapshot {
     /// Phase 3：每模式快照用於多引擎 IPC（Phase 4）。
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub mode_snapshots: HashMap<String, crate::mode_state::ModeStateSnapshot>,
+    /// Global system mode string — synced from Python GUI, gates trading at tick level.
+    /// 全局系統模式字符串 — 從 Python GUI 同步，在 tick 級別封鎖交易。
+    #[serde(default)]
+    pub system_mode: String,
 }
