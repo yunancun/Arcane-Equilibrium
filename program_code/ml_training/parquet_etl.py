@@ -84,11 +84,16 @@ def extract_training_data(
         conn.execute(fills_query)
         fills_count = conn.execute(f"SELECT count(*) FROM read_parquet('{fills_path}')").fetchone()[0]
 
-        # Extract features / 提取特徵
+        # Extract features with temporal window — exclude stale entries / 提取特徵（帶時間窗口，排除過期條目）
         features_path = f"{output_dir}/features_latest.parquet"
+        # Only include features updated within the ETL window to avoid stale data.
+        # updated_ts_ms is epoch millis; convert start_date to epoch ms.
+        # 只包含 ETL 窗口內更新的特徵，避免過期數據。
+        start_epoch_ms = int(start_date.timestamp() * 1000)
         features_query = f"""
             COPY (
                 SELECT * FROM pg.features.online_latest
+                WHERE updated_ts_ms >= {start_epoch_ms}
             ) TO '{features_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
         """
         conn.execute(features_query)

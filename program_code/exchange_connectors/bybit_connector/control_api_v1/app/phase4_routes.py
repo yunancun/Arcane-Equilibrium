@@ -187,18 +187,13 @@ def _fetch_linucb_state_from_pg() -> dict[str, Any]:  # pragma: no cover — liv
 
     Fail-soft: any exception → grey placeholder via caller.
     """
-    import os
+    from . import db_pool
+
+    conn = db_pool.get_conn()
+    if conn is None:
+        raise RuntimeError("db_unavailable")
 
     try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        raise RuntimeError("no_dsn")
-
-    with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             # Active version = most recent migration's to_version, default v1_15
             cur.execute(
@@ -223,6 +218,8 @@ def _fetch_linucb_state_from_pg() -> dict[str, Any]:  # pragma: no cover — liv
                 "FROM learning.linucb_migrations ORDER BY migration_id DESC LIMIT 5"
             )
             mig_rows = cur.fetchall()
+    finally:
+        db_pool.put_conn(conn)
 
     min_samples = 100
     arms_payload = [
@@ -327,18 +324,13 @@ def _fetch_teacher_state_from_pg() -> dict[str, Any]:  # pragma: no cover — li
 
     Fail-soft: any exception → caller maps to grey placeholder.
     """
-    import os
+    from . import db_pool
+
+    conn = db_pool.get_conn()
+    if conn is None:
+        raise RuntimeError("db_unavailable")
 
     try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        raise RuntimeError("no_dsn")
-
-    with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             # 7d aggregate stats
             # 7d 聚合統計
@@ -369,6 +361,8 @@ def _fetch_teacher_state_from_pg() -> dict[str, Any]:  # pragma: no cover — li
                 """
             )
             recent_rows = cur.fetchall()
+    finally:
+        db_pool.put_conn(conn)
 
     exec_rate = (applied_7d / total_7d) if total_7d > 0 else 0.0
     status_light = _classify_teacher_status(exec_rate, avg_outcome_24h)
@@ -485,18 +479,13 @@ def _fetch_news_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live 
 
     Fail-soft: any exception → caller maps to grey placeholder.
     """
-    import os
+    from . import db_pool
+
+    conn = db_pool.get_conn()
+    if conn is None:
+        raise RuntimeError("db_unavailable")
 
     try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        raise RuntimeError("no_dsn")
-
-    with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             # 24h aggregate stats / 24h 聚合統計
             # Column names confirmed against sql/migrations/V002__market_tables.sql:
@@ -526,6 +515,8 @@ def _fetch_news_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live 
                 """
             )
             recent_rows = cur.fetchall()
+    finally:
+        db_pool.put_conn(conn)
 
     status_light = _classify_news_status(total_24h, halt_triggers_24h, max_severity_24h)
     recent = [
@@ -640,21 +631,16 @@ def _fetch_dl3_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live D
 
     Fail-soft: any exception → caller maps to grey placeholder.
     """
-    import os
+    from . import db_pool
 
-    try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        raise RuntimeError(f"psycopg2_unavailable:{exc}") from exc
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        raise RuntimeError("no_dsn")
+    conn = db_pool.get_conn()
+    if conn is None:
+        raise RuntimeError("db_unavailable")
 
     latest_decision: str | None = "PENDING_DATA"
     auc_delta: float | None = None
 
-    with psycopg2.connect(dsn) as conn:
+    try:
         with conn.cursor() as cur:
             # Recent 5 inferences / 最近 5 筆推理（V011 schema）
             cur.execute(
@@ -720,6 +706,8 @@ def _fetch_dl3_state_from_pg() -> dict[str, Any]:  # pragma: no cover — live D
                 # Table missing / schema drift — stub as PENDING_DATA.
                 # 表不存在 / schema 漂移 — 退回 PENDING_DATA。
                 conn.rollback()
+    finally:
+        db_pool.put_conn(conn)
 
     recent = [
         {
@@ -794,48 +782,41 @@ def _update_weekly_review(week_iso: str, approved: bool, approved_by: str, decis
     Returns dict ok/error suitable for direct JSON response.
     返回適合直接 JSON 回應的 ok/error dict。
     """
-    import os
+    from . import db_pool
+
+    conn = db_pool.get_conn()
+    if conn is None:
+        return {"ok": False, "error": "db_unavailable"}
 
     try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        return {"ok": False, "error": f"psycopg2 unavailable: {exc}"}
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        return {"ok": False, "error": "no_dsn"}
-
-    try:
-        conn = psycopg2.connect(dsn)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE learning.weekly_review_log
-                    SET approved = %s,
-                        approved_at = NOW(),
-                        approved_by = %s,
-                        decision_notes = %s
-                    WHERE week_iso = %s AND approved IS NULL
-                    RETURNING review_id
-                    """,
-                    (approved, approved_by, decision_notes, week_iso),
-                )
-                row = cur.fetchone()
-                conn.commit()
-                if row:
-                    return {
-                        "ok": True,
-                        "review_id": int(row[0]),
-                        "week_iso": week_iso,
-                        "approved": approved,
-                    }
-                return {"ok": False, "error": "no_pending_review_for_week"}
-        finally:
-            conn.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE learning.weekly_review_log
+                SET approved = %s,
+                    approved_at = NOW(),
+                    approved_by = %s,
+                    decision_notes = %s
+                WHERE week_iso = %s AND approved IS NULL
+                RETURNING review_id
+                """,
+                (approved, approved_by, decision_notes, week_iso),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            if row:
+                return {
+                    "ok": True,
+                    "review_id": int(row[0]),
+                    "week_iso": week_iso,
+                    "approved": approved,
+                }
+            return {"ok": False, "error": "no_pending_review_for_week"}
     except Exception as exc:
         logger.warning("phase4/weekly_review update fail-soft: %s", exc)
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    finally:
+        db_pool.put_conn(conn)
 
 
 @phase4_router.post("/weekly_review/approve")
@@ -865,53 +846,46 @@ async def get_latest_weekly_review() -> dict[str, Any]:
 
     Fail-soft: any PG error → ok=false (never raises 5xx).
     """
-    import os
+    from . import db_pool
+
+    conn = db_pool.get_conn()
+    if conn is None:
+        return {"ok": False, "error": "db_unavailable", "review": None}
 
     try:
-        import psycopg2  # type: ignore
-    except Exception as exc:
-        return {"ok": False, "error": f"psycopg2 unavailable: {exc}", "review": None}
-
-    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
-    if not dsn:
-        return {"ok": False, "error": "no_dsn", "review": None}
-
-    try:
-        conn = psycopg2.connect(dsn)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT review_id, week_iso, generated_at, approved,
-                           approved_at, approved_by, decision_notes,
-                           metrics_json, report_md_path
-                    FROM learning.weekly_review_log
-                    ORDER BY generated_at DESC
-                    LIMIT 1
-                    """
-                )
-                row = cur.fetchone()
-                if not row:
-                    return {"ok": True, "review": None}
-                return {
-                    "ok": True,
-                    "review": {
-                        "review_id": int(row[0]),
-                        "week_iso": row[1],
-                        "generated_at": row[2].isoformat() if row[2] else None,
-                        "approved": row[3],
-                        "approved_at": row[4].isoformat() if row[4] else None,
-                        "approved_by": row[5],
-                        "decision_notes": row[6],
-                        "metrics_json": row[7],
-                        "report_md_path": row[8],
-                    },
-                }
-        finally:
-            conn.close()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT review_id, week_iso, generated_at, approved,
+                       approved_at, approved_by, decision_notes,
+                       metrics_json, report_md_path
+                FROM learning.weekly_review_log
+                ORDER BY generated_at DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"ok": True, "review": None}
+            return {
+                "ok": True,
+                "review": {
+                    "review_id": int(row[0]),
+                    "week_iso": row[1],
+                    "generated_at": row[2].isoformat() if row[2] else None,
+                    "approved": row[3],
+                    "approved_at": row[4].isoformat() if row[4] else None,
+                    "approved_by": row[5],
+                    "decision_notes": row[6],
+                    "metrics_json": row[7],
+                    "report_md_path": row[8],
+                },
+            }
     except Exception as exc:
         logger.warning("phase4/weekly_review/latest fail-soft: %s", exc)
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "review": None}
+    finally:
+        db_pool.put_conn(conn)
 
 
 @phase4_router.get("", include_in_schema=False)

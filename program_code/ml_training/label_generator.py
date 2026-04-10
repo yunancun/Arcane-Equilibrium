@@ -40,7 +40,10 @@ def compute_atr_floor(atr_values: np.ndarray, quantile: float = 0.05) -> float:
     計算動態 ATR 下限。"""
     if len(atr_values) == 0:
         return 0.001  # absolute minimum
-    floor = float(np.quantile(atr_values[atr_values > 0], quantile))
+    positive = atr_values[atr_values > 0]
+    if len(positive) == 0:
+        return 0.001  # all zeros — use absolute minimum / 全為零，用絕對最小值
+    floor = float(np.quantile(positive, quantile))
     return max(floor, 0.001)
 
 

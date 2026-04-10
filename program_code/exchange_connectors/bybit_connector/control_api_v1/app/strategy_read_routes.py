@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from . import main_legacy as base
 from .ipc_state_reader import get_rust_reader
@@ -417,18 +418,17 @@ async def get_kelly_recommendations(actor: base.AuthenticatedActor = Depends(bas
 
 
 def _get_pg_conn():
-    """Get a PostgreSQL connection for read queries. Returns None on failure.
-    獲取 PG 連接用於讀取查詢。失敗返回 None。"""
-    try:
-        import psycopg2
-        from .grafana_data_writer import PG_HOST, PG_PORT, PG_USER, PG_PASS, PG_DB
-        return psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASS, dbname=PG_DB,
-            connect_timeout=3,
-        )
-    except Exception as e:
-        logger.debug("PG connection failed for read route: %s", e)
-        return None
+    """Get a PostgreSQL connection from the shared pool. Returns None on failure.
+    從共享連接池獲取 PG 連接。失敗返回 None。"""
+    from . import db_pool
+    return db_pool.get_conn()
+
+
+def _put_pg_conn(conn) -> None:
+    """Return a PostgreSQL connection to the shared pool.
+    將 PG 連接歸還到共享連接池。"""
+    from . import db_pool
+    db_pool.put_conn(conn)
 
 
 @phase2_router.get("/data/fills/recent")
@@ -444,7 +444,7 @@ async def get_recent_fills_from_pg(
     """
     conn = _get_pg_conn()
     if conn is None:
-        return _envelope({"fills": [], "source": "pg_unavailable"})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "fills": []})
     try:
         cur = conn.cursor()
         if symbol:
@@ -469,9 +469,9 @@ async def get_recent_fills_from_pg(
         return _envelope({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
     except Exception as e:
         logger.error("PG fills query failed: %s", e)
-        return _envelope({"fills": [], "source": "pg_error", "error": str(e)})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "fills": []})
     finally:
-        conn.close()
+        _put_pg_conn(conn)
 
 
 @phase2_router.get("/data/signals/recent")
@@ -487,7 +487,7 @@ async def get_recent_signals_from_pg(
     """
     conn = _get_pg_conn()
     if conn is None:
-        return _envelope({"signals": [], "source": "pg_unavailable"})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "signals": []})
     try:
         cur = conn.cursor()
         if symbol:
@@ -511,9 +511,9 @@ async def get_recent_signals_from_pg(
         return _envelope({"signals": signals, "count": len(signals), "source": "pg_trading_signals"})
     except Exception as e:
         logger.error("PG signals query failed: %s", e)
-        return _envelope({"signals": [], "source": "pg_error", "error": str(e)})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "signals": []})
     finally:
-        conn.close()
+        _put_pg_conn(conn)
 
 
 @phase2_router.get("/data/features/latest")
@@ -528,7 +528,7 @@ async def get_latest_features_from_pg(
     """
     conn = _get_pg_conn()
     if conn is None:
-        return _envelope({"features": [], "source": "pg_unavailable"})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "features": []})
     try:
         cur = conn.cursor()
         if symbol:
@@ -548,6 +548,6 @@ async def get_latest_features_from_pg(
         return _envelope({"features": features, "count": len(features), "source": "pg_features_online"})
     except Exception as e:
         logger.error("PG features query failed: %s", e)
-        return _envelope({"features": [], "source": "pg_error", "error": str(e)})
+        return JSONResponse(status_code=503, content={"error": "database_unavailable", "detail": str(e), "features": []})
     finally:
-        conn.close()
+        _put_pg_conn(conn)

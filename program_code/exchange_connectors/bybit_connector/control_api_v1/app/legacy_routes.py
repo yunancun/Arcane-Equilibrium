@@ -449,6 +449,32 @@ def register_legacy_routes(app) -> None:
             return {"action_result": "success", "data": {"ok": False}}
 
 
+    @app.get(f"{settings.api_prefix}/health/db", include_in_schema=False)
+    def health_db():
+        """PostgreSQL connection pool health check.
+        PostgreSQL 連接池健康檢查。
+
+        Returns pool stats + simple SELECT 1 liveness probe.
+        返回連接池統計 + SELECT 1 存活探測。
+        """
+        from . import db_pool
+        stats = db_pool.pool_stats()
+        if not stats.get("available"):
+            return {"ok": False, "pool": stats}
+        conn = db_pool.get_conn()
+        if conn is None:
+            return {"ok": False, "pool": stats, "probe": "getconn_failed"}
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+            return {"ok": True, "pool": stats}
+        except Exception as e:
+            return {"ok": False, "pool": stats, "probe": str(e)}
+        finally:
+            db_pool.put_conn(conn)
+
+
     @app.get(f"{settings.api_prefix}/system/audit-summary", response_model=ResponseEnvelope[dict[str, Any]])
     def get_audit_summary(actor=Depends(_base.current_actor)) -> ResponseEnvelope[dict[str, Any]]:
         snapshot, _ = _base.get_latest_snapshot()

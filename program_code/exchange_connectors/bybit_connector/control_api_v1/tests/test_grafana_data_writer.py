@@ -181,31 +181,32 @@ class TestWriteSnapshot:
         成功写入提交事务并递增统计。"""
         writer = _make_writer()
         mock_conn = _make_mock_conn()
-        with patch("app.grafana_data_writer._get_pg_conn", return_value=mock_conn):
+        with patch("app.grafana_data_writer._get_pg_conn", return_value=mock_conn), \
+             patch("app.grafana_data_writer._put_pg_conn") as mock_put:
             writer._write_snapshot()
         mock_conn.commit.assert_called_once()
-        mock_conn.close.assert_called_once()
+        mock_put.assert_called_once_with(mock_conn)
         assert writer._stats["writes"] == 1
         assert writer._stats["last_write_ts"] is not None
 
 class TestGetPgConn:
-    """Test PostgreSQL connection helper.
-    测试 PostgreSQL 连接辅助函数。"""
+    """Test PostgreSQL connection helper (now delegates to db_pool).
+    测试 PostgreSQL 连接辅助函数（现委托给 db_pool）。"""
 
-    def test_returns_none_on_import_error(self):
-        """psycopg2 not installed → None.
-        psycopg2 未安装 → None。"""
-        with patch.dict(sys.modules, {"psycopg2": None}):
+    def test_returns_none_when_pool_unavailable(self):
+        """Pool returns None → _get_pg_conn returns None.
+        連接池返回 None → _get_pg_conn 返回 None。"""
+        with patch("app.db_pool.get_conn", return_value=None):
             result = _get_pg_conn()
             assert result is None
 
-    def test_returns_none_on_connection_error(self):
-        """Connection failure → None. 连接失败 → None。"""
-        mock_pg = MagicMock()
-        mock_pg.connect.side_effect = Exception("connection refused")
-        with patch.dict(sys.modules, {"psycopg2": mock_pg}):
+    def test_returns_conn_from_pool(self):
+        """Pool returns connection → _get_pg_conn returns it.
+        連接池返回連接 → _get_pg_conn 返回該連接。"""
+        mock_conn = MagicMock()
+        with patch("app.db_pool.get_conn", return_value=mock_conn):
             result = _get_pg_conn()
-            assert result is None
+            assert result is mock_conn
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,7 +1,33 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-09
+> 最後更新：2026-04-10
+
+### ML Pipeline Remediation — S0-S3+S5（2026-04-10）
+
+基於 2026-04-09 DB R/W + ML Pipeline 全面審計完成大規模修復。
+
+**Rust cost_gate 統一（S1）**：
+- `intent_processor.rs`：5-tier slippage lookup、ATR% 正規化、win_rate 加權門檻（`fee_bps / max(0.3, wr) * 1.3`）
+- `edge_estimates.rs`：`CellEstimate` struct（win_rate, n_trades, std_bps）、`get_cell()` + `load_from_str()`
+- 838 lib tests pass（基準 835→838，+3 new: slippage_tier, js_win_rate, atr_pct）
+
+**ML 推理管線（S2）**：
+- `parquet_etl.py`：加時間窗口過濾 `WHERE updated_ts_ms >= start_epoch_ms`
+- `label_generator.py`：修復 zero-ATR floor（`np.quantile` on empty array）+ 2 test fixes
+- FeatureCollector 已接線確認（審計報告過時）
+
+**參數優化管線（S3）**：
+- `optuna_optimizer.py`：`_persist_suggestion()` → `learning.ml_parameter_suggestions`（V004 DDL 已上線）
+- `cpcv_validator.py`：`_persist_cpcv_result()` → `learning.cpcv_results`
+- Thompson Sampling：確認為 (A) offline 工具，`bayesian_posteriors` UPSERT 已存在
+
+**DB 基礎設施（S5）**：
+- `db_pool.py`（NEW）：`ThreadedConnectionPool`（min=2, max=10），singleton + env var 可配
+- `grafana_data_writer.py` + `strategy_read_routes.py` + `phase4_routes.py`：全部委託到 db_pool
+- `strategy_read_routes.py`：DB 失敗返回 HTTP 503（非 200 空數據）
+- `/api/v1/health/db` endpoint：連接池統計 + SELECT 1 探測
+- 2692 Python tests pass（基準 2678→2692），1 pre-existing fail · 160 ML tests pass（基準 135→160）
 
 ### Scanner QC/FA Audit P0+P1 全修（2026-04-09 · commit `72f6617`）
 

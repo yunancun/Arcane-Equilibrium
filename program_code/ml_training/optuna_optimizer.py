@@ -5,14 +5,12 @@ Optuna TPE 策略內參數優化管線。
 MODULE_NOTE (EN): Uses Tree-structured Parzen Estimator (TPE) to optimize strategy
   parameters. Layer 1 of the 2-layer optimization system (Layer 2 = Thompson Sampling).
   Studies stored in JournalFileStorage (not PG) per E5-O4 audit. Results written to PG
-  learning.ml_parameter_suggestions. Parameter updates applied via IPC.
-  PG writes deferred until V004 DDL is executed — see learning.ml_parameter_suggestions.
-  Training reads will use a separate psycopg2 connection pool (not shared with
-  the main application pool) to avoid contention; pool not implemented yet.
+  learning.ml_parameter_suggestions (V004 DDL live since 2026-04-10). Parameter updates
+  applied via IPC. Training uses standalone psycopg2 connections (not shared app pool).
 MODULE_NOTE (中): 使用 TPE 優化策略參數。兩層優化系統的第 1 層（第 2 層 = Thompson Sampling）。
-  Study 存儲在 JournalFileStorage（非 PG，E5-O4 審計）。結果寫入 PG。參數更新通過 IPC 應用。
-  PG 寫入延後至 V004 DDL 執行後 — 見 learning.ml_parameter_suggestions。
-  訓練讀取將使用獨立 psycopg2 連接池（非應用主池）以避免競爭；池尚未實現。
+  Study 存儲在 JournalFileStorage（非 PG，E5-O4 審計）。結果寫入 PG
+  learning.ml_parameter_suggestions（V004 DDL 自 2026-04-10 上線）。參數更新通過 IPC 應用。
+  訓練使用獨立 psycopg2 連接（非應用共享連接池）。
 """
 
 from __future__ import annotations
@@ -356,6 +354,79 @@ def _send_ipc_command(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PG persistence / PG 持久化
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _get_ml_pg_conn():
+    """Get a PG connection for ML training writes. Fail-soft: returns None.
+    獲取 ML 訓練寫入用的 PG 連接。Fail-soft：失敗返回 None。
+    """
+    try:
+        import psycopg2
+        dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+        if dsn:
+            return psycopg2.connect(dsn)
+        # Fallback: build DSN from individual env vars / 回退：從單獨的環境變量構建 DSN
+        return psycopg2.connect(
+            host=os.getenv("PG_HOST", "127.0.0.1"),
+            port=int(os.getenv("PG_PORT", "5432")),
+            user=os.getenv("PG_USER", "trading_admin"),
+            password=os.getenv("PG_PASS", ""),
+            dbname=os.getenv("PG_DB", "trading_ai"),
+            connect_timeout=5,
+        )
+    except Exception as e:
+        logger.warning("ML PG connection failed (non-fatal): %s / ML PG 連接失敗（非致命）：%s", e, e)
+        return None
+
+
+def _persist_suggestion(
+    strategy_name: str,
+    symbol: str,
+    regime: str,
+    model_name: str,
+    suggested_params: dict,
+    expected_improvement: dict | None = None,
+) -> bool:
+    """Write optimization result to learning.ml_parameter_suggestions. Fail-soft.
+    將優化結果寫入 learning.ml_parameter_suggestions。Fail-soft。
+    """
+    conn = _get_ml_pg_conn()
+    if conn is None:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO learning.ml_parameter_suggestions
+                    (strategy_name, symbol, regime, model_name, suggested_params, expected_improvement)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    strategy_name, symbol, regime, model_name,
+                    json.dumps(suggested_params),
+                    json.dumps(expected_improvement) if expected_improvement else None,
+                ),
+            )
+        conn.commit()
+        logger.info(
+            "Persisted suggestion: strategy=%s symbol=%s regime=%s / "
+            "已持久化建議：strategy=%s symbol=%s regime=%s",
+            strategy_name, symbol, regime, strategy_name, symbol, regime,
+        )
+        return True
+    except Exception as e:
+        logger.warning(
+            "Failed to persist suggestion (non-fatal): %s / "
+            "持久化建議失敗（非致命）：%s", e, e,
+        )
+        return False
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main optimization entry point / 主優化入口
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -378,9 +449,6 @@ def run_optimization(
     new fills per trial.
     這是優化管線的主入口。Phase 3b 離線模式：在現有成交上以
     參數加權評分計算 EV_net。未來：通過 IPC 應用參數並逐試收集新成交。
-
-    PG write to learning.ml_parameter_suggestions deferred until V004 DDL executed.
-    PG 寫入 learning.ml_parameter_suggestions 延後至 V004 DDL 執行後。
 
     Args:
         strategy_name: Strategy identifier / 策略標識符
@@ -522,8 +590,16 @@ def run_optimization(
         strategy_name, symbol, regime, best_val, cfg.n_trials,
     )
 
-    # TODO: Write to learning.ml_parameter_suggestions when V004 DDL is live
-    # TODO: V004 DDL 上線後寫入 learning.ml_parameter_suggestions
+    # Persist suggestion to PG learning.ml_parameter_suggestions
+    # 將建議持久化到 PG learning.ml_parameter_suggestions
+    _persist_suggestion(
+        strategy_name=strategy_name,
+        symbol=symbol,
+        regime=regime,
+        model_name="optuna_tpe",
+        suggested_params=best,
+        expected_improvement={"best_value": best_val, "n_trials": len(study.trials)},
+    )
 
     return {
         "status": "success",
