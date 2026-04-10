@@ -256,6 +256,43 @@
 .pf-mode-select:disabled { opacity:0.4; cursor:not-allowed; }
 </style>
 
+<!-- ═══ API Key Management ═══ -->
+<div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+  <h3>&#x1F511; API Key 管理 / API Key Management</h3>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+    每個引擎槽位獨立配置 Bybit API key。寫入前自動通過 Bybit REST 驗證。GUI 僅顯示遮罩 hint，永不暴露明文。<br>
+    Each engine slot has its own Bybit API key. Auto-validated via Bybit REST before saving. GUI shows masked hint only — plaintext never exposed.
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px" id="apikey-slots-grid">
+    <!-- Dynamically rendered by loadApiKeyStatus() / 由 loadApiKeyStatus() 動態渲染 -->
+    <div class="oc-loading">Loading...</div>
+  </div>
+</div>
+
+<!-- ── API Key Replace Dialog ─────────────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-apikey">
+  <div class="oc-dialog" style="max-width:480px">
+    <h3>&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
+    <p style="margin-bottom:6px">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
+    <div class="note">&#x26A0; secret 僅在此次輸入時可見。保存後將永久遮罩，請妥善備份原始 key。</div>
+    <div style="display:grid;gap:10px;margin-bottom:14px">
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Key</label>
+        <input class="oc-input" id="dlg-apikey-key" type="text" placeholder="e.g. abcdefXXXXXXXXXX" autocomplete="off" style="width:100%;font-family:monospace" />
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Secret</label>
+        <input class="oc-input" id="dlg-apikey-secret" type="password" placeholder="•••••••••••••••••••••••••••••••" autocomplete="new-password" style="width:100%;font-family:monospace" />
+      </div>
+    </div>
+    <div id="dlg-apikey-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeApikeyDialog()">取消</button>
+      <button class="oc-btn oc-btn-primary" id="dlg-apikey-save-btn" onclick="doSaveApiKey()">&#x2714; 驗證並保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Debug JSON ═══ -->
 <details class="oc-collapse">
   <summary>&#x1F41B; 调试原文 / Debug Raw JSON</summary>
@@ -644,7 +681,109 @@ async function loadDebug() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadControlPlane(), loadProductFamilyConfig(), loadDebug()]);
+  await Promise.allSettled([loadControlPlane(), loadProductFamilyConfig(), loadDebug(), loadApiKeyStatus()]);
+}
+
+// ─── API Key Management ───────────────────────────────────────
+const APIKEY_SLOTS = [
+  { id: 'demo', label: 'Demo 引擎', icon: '🏦', desc: 'Bybit Demo Trading 帳號（api-demo.bybit.com）' },
+  { id: 'live', label: 'Live 引擎', icon: '🔴', desc: 'Bybit 實盤帳號（api.bybit.com）', warn: true },
+];
+
+let _currentApikeySlot = '';
+
+async function loadApiKeyStatus() {
+  const grid = document.getElementById('apikey-slots-grid');
+  const results = await Promise.allSettled(
+    APIKEY_SLOTS.map(s => ocApi('/api/v1/settings/api-key/' + s.id))
+  );
+
+  let html = '';
+  APIKEY_SLOTS.forEach((slot, i) => {
+    const res = results[i];
+    const d = (res.status === 'fulfilled' && res.value && res.value.data) ? res.value.data
+            : (res.status === 'fulfilled' && res.value && !res.value.data) ? res.value
+            : null;
+    const hasKey = d && d.has_key;
+    const hint = (d && d.key_hint) ? d.key_hint : '（未設置）';
+    const lastMod = (d && d.last_modified) ? d.last_modified : '';
+    const borderColor = slot.warn ? 'rgba(239,68,68,0.3)' : 'rgba(56,139,253,0.2)';
+    const chipCls = hasKey ? 'oc-chip-good' : 'oc-chip-warn';
+    const chipTxt = hasKey ? '已配置' : '未配置';
+
+    html += '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:8px;padding:14px">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+    html += '<span style="font-size:18px">' + slot.icon + '</span>';
+    html += '<span style="font-weight:600;font-size:13px">' + ocEsc(slot.label) + '</span>';
+    html += '<span class="oc-chip ' + chipCls + '" style="margin-left:auto">' + chipTxt + '</span>';
+    html += '</div>';
+    html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">' + ocEsc(slot.desc) + '</div>';
+    html += '<div style="font-family:monospace;font-size:12px;color:var(--text);margin-bottom:6px">Key: <strong>' + ocEsc(hint) + '</strong></div>';
+    if (lastMod) {
+      html += '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">最後更新: ' + ocEsc(lastMod) + '</div>';
+    }
+    if (slot.warn) {
+      html += '<div style="font-size:11px;color:#f87171;margin-bottom:8px">⚠ 實盤 key 修改後立即生效，請謹慎操作。</div>';
+    }
+    html += '<button class="oc-btn oc-btn-primary" style="font-size:12px" onclick="openApikeyDialog(\'' + slot.id + '\')">✏ 替換 Key</button>';
+    html += '</div>';
+  });
+  grid.innerHTML = html || '<div style="color:var(--text-dim);font-size:12px">無法載入 key 狀態</div>';
+}
+
+function openApikeyDialog(slot) {
+  _currentApikeySlot = slot;
+  const slotCfg = APIKEY_SLOTS.find(s => s.id === slot) || { label: slot };
+  document.getElementById('dlg-apikey-slot-label').textContent = slotCfg.label || slot;
+  document.getElementById('dlg-apikey-key').value = '';
+  document.getElementById('dlg-apikey-secret').value = '';
+  document.getElementById('dlg-apikey-status').textContent = '';
+  document.getElementById('dlg-apikey-save-btn').disabled = false;
+  document.getElementById('dlg-apikey').classList.add('show');
+  setTimeout(() => document.getElementById('dlg-apikey-key').focus(), 50);
+}
+
+function closeApikeyDialog() {
+  document.getElementById('dlg-apikey').classList.remove('show');
+  // Clear sensitive values from DOM immediately / 立即清除 DOM 中的敏感值
+  document.getElementById('dlg-apikey-key').value = '';
+  document.getElementById('dlg-apikey-secret').value = '';
+  _currentApikeySlot = '';
+}
+
+async function doSaveApiKey() {
+  const slot = _currentApikeySlot;
+  if (!slot) return;
+
+  const apiKey = document.getElementById('dlg-apikey-key').value.trim();
+  const apiSecret = document.getElementById('dlg-apikey-secret').value.trim();
+  const statusEl = document.getElementById('dlg-apikey-status');
+  const saveBtn = document.getElementById('dlg-apikey-save-btn');
+
+  if (!apiKey || !apiSecret) {
+    statusEl.innerHTML = '<span style="color:#f87171">⚠ API key 和 secret 均不能為空</span>';
+    return;
+  }
+
+  saveBtn.disabled = true;
+  statusEl.innerHTML = '<span style="color:var(--text-dim)">⏳ 正在通過 Bybit 驗證...</span>';
+
+  const d = await ocPost('/api/v1/settings/api-key/' + slot, { api_key: apiKey, api_secret: apiSecret });
+
+  // Immediately clear sensitive fields from DOM / 立即清除 DOM 中的敏感字段
+  document.getElementById('dlg-apikey-key').value = '';
+  document.getElementById('dlg-apikey-secret').value = '';
+
+  if (d && (d.saved || (d.data && d.data.saved))) {
+    const hint = (d.key_hint) || (d.data && d.data.key_hint) || '****';
+    statusEl.innerHTML = '<span style="color:var(--green)">✓ 驗證通過，已保存 (' + ocEsc(hint) + ')</span>';
+    ocToast(slot + ' API key 已更新', 'success');
+    setTimeout(() => { closeApikeyDialog(); loadApiKeyStatus(); }, 1200);
+  } else {
+    const errMsg = (d && d.error) || (d && d.data && d.data.error) || '驗證失敗，請檢查 key 是否正確';
+    statusEl.innerHTML = '<span style="color:#f87171">✗ ' + ocEsc(errMsg) + '</span>';
+    saveBtn.disabled = false;
+  }
 }
 
 loadAll();

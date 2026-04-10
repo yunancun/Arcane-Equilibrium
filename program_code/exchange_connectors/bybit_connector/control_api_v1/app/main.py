@@ -177,6 +177,10 @@ app.include_router(attribution_router)
 from .ai_budget_routes import router as ai_budget_router  # noqa: E402
 app.include_router(ai_budget_router)
 
+# ── Settings Router / 設置路由注册（API key 管理）──
+from .settings_routes import settings_router  # noqa: E402
+app.include_router(settings_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be
