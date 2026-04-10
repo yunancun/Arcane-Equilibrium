@@ -48,7 +48,7 @@ Safety invariant:
 #   STILL ACTIVE in Python (12+ importers):
 #     - grant_paper_authorization, de_escalation, reconcile
 #     - is_authorized (startup reauth), acquire/release_lease
-#     - get_status, get_governance_events, get_oms_orders
+#     - get_status, get_governance_events
 #     - All set_*() dependency injection methods
 #
 #   DEPRECATED (RC-11, no callers):
@@ -73,7 +73,7 @@ from typing import Any, Callable, Optional
 
 from .change_audit_log import ChangeAuditLog, ChangeType, ChangeApprovalStatus
 from .recovery_approval_gate import RecoveryApprovalGate
-from .governance_events import risk_event, recon_event, auth_event, lease_event, oms_event
+from .governance_events import risk_event, recon_event, auth_event, lease_event
 from .utils.time_utils import now_ms
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class GovernanceHub:
         self._risk_governor_sm: Optional[Any] = None
         self._lease_sm: Optional[Any] = None
         self._reconciliation_engine: Optional[Any] = None
-        self._oms_sm: Optional[Any] = None  # T5.03: OMS State Machine for order reconciliation
+        # _oms_sm removed 2026-04-10: Python OMS deprecated, order tracking moved to Rust DB
 
         # Tracking for callbacks
         self._callback_errors = 0
@@ -260,19 +260,6 @@ class GovernanceHub:
         with self._lock:
             self._alerter = alerter
             logger.info("TelegramAlerter set on GovernanceHub")
-
-    def set_oms_sm(self, oms_sm: 'Any') -> None:
-        """
-        T5.03: Inject OMS State Machine for order reconciliation.
-        注入 OMS 狀態機用於訂單對賬。
-
-        Args:
-            oms_sm: OmsStateMachine instance with get_by_state(), reconciliation_pass/fail().
-                    Type: oms_state_machine.OmsStateMachine (lazy import to avoid circular dep)
-        """
-        with self._lock:
-            self._oms_sm = oms_sm
-            logger.info("OMS State Machine set on GovernanceHub")
 
     def set_learning_tier_gate(self, gate: 'Any') -> None:
         """
@@ -474,15 +461,6 @@ class GovernanceHub:
                         if logger.isEnabledFor(logging.DEBUG):
                             logger.debug("Reconciliation warning: %s", report.get('result'))
 
-                # T5.03: Handle OMS reconciliation state transitions if available
-                if action == "reconciliation_complete" and self._oms_sm is not None:
-                    try:
-                        self._handle_oms_reconciliation(report)
-                    except Exception as e:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug("Error handling OMS reconciliation: %s", e)
-                        with self._lock:
-                            self._callback_errors += 1
 
             except Exception as e:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -1270,41 +1248,6 @@ class GovernanceHub:
             # Return most recent events first (reverse chronological)
             return list(reversed(filtered))[-min(limit, 1000):]
 
-    def get_oms_orders(self, state: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """
-        T10.05: Retrieve OMS orders by state for REST exposure.
-        按状态检索 OMS 订单供 REST 端点使用。
-
-        Args:
-            state: Optional filter by OrderState name (e.g., "PENDING", "RECONCILING")
-            limit: Maximum number of orders to return
-
-        Returns:
-            List of order dictionaries
-        """
-        with self._lock:
-            if self._oms_sm is None:
-                return []
-            try:
-                if state:
-                    from .oms_state_machine import OrderState
-                    target_state = OrderState[state.upper()]
-                    orders = self._oms_sm.get_by_state(target_state)
-                else:
-                    # Return all orders from all states
-                    from .oms_state_machine import OrderState
-                    orders = []
-                    for s in OrderState:
-                        try:
-                            orders.extend(self._oms_sm.get_by_state(s))
-                        except Exception as _evt_err:
-                            pass  # Non-fatal: event emission failure does not block governance action
-                return orders[:limit]
-            except Exception as e:
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("Error getting OMS orders: %s", e)
-                return []
-
     def _append_governance_event(self, event: dict[str, Any]) -> None:
         """
         T9A.02: Append a governance event to the event stream (internal helper).
@@ -1865,82 +1808,5 @@ class GovernanceHub:
             return scope in permitted_scopes if permitted_scopes else True
         except Exception:
             return False
-
-    def _handle_oms_reconciliation(self, report: dict[str, Any]) -> None:
-        """
-        T5.03: Handle OMS reconciliation state transitions based on reconciliation report.
-        Based on reconciliation result, call appropriate OMS methods for orders in RECONCILING state.
-        """
-        if self._oms_sm is None:
-            return
-
-        try:
-            from .oms_state_machine import OrderState, OrderInitiator
-
-            overall_result = report.get("overall_result", "").upper()
-
-            # Query orders that are currently in RECONCILING state
-            reconciling_orders = self._oms_sm.get_by_state(OrderState.RECONCILING)
-
-            if not reconciling_orders:
-                return
-
-            # Based on reconciliation result, transition orders appropriately
-            if overall_result == "PASS":
-                # Reconciliation passed - mark orders as COMPLETED
-                for order_dict in reconciling_orders:
-                    order_id = order_dict.get("order_id")
-                    try:
-                        self._oms_sm.reconciliation_pass(
-                            order_id,
-                            OrderInitiator.RECONCILIATION_ENGINE,
-                            reason="Reconciliation passed",
-                        )
-                        logger.info("OMS order %s transitioned to COMPLETED after reconciliation", order_id)
-                        # T11.01: Emit OMS event for reconciliation pass
-                        try:
-                            evt = oms_event(
-                                order_id=order_id,
-                                state_from="RECONCILING",
-                                state_to="COMPLETED",
-                                initiator="ReconciliationEngine",
-                                message=f"Order {order_id} completed after reconciliation pass",
-                            )
-                            self._append_governance_event(evt.to_dict())
-                        except Exception as _evt_err:
-                            pass  # Non-fatal: event emission failure does not block governance action
-                    except Exception as e:
-                        logger.error("Failed to complete order %s: %s", order_id, e)
-
-            elif overall_result in ["MISMATCH_MINOR", "MISMATCH_MAJOR", "FAIL"]:
-                # Reconciliation failed - mark orders as REJECTED
-                for order_dict in reconciling_orders:
-                    order_id = order_dict.get("order_id")
-                    try:
-                        self._oms_sm.reconciliation_fail(
-                            order_id,
-                            OrderInitiator.RECONCILIATION_ENGINE,
-                            reason=f"Reconciliation failed: {overall_result}",
-                        )
-                        logger.info("OMS order %s transitioned to REJECTED after reconciliation", order_id)
-                        # T11.01: Emit OMS event for reconciliation fail
-                        try:
-                            evt = oms_event(
-                                order_id=order_id,
-                                state_from="RECONCILING",
-                                state_to="REJECTED",
-                                initiator="ReconciliationEngine",
-                                message=f"Order {order_id} rejected: {overall_result}",
-                            )
-                            self._append_governance_event(evt.to_dict())
-                        except Exception as _evt_err:
-                            pass  # Non-fatal: event emission failure does not block governance action
-                    except Exception as e:
-                        logger.error("Failed to reject order %s: %s", order_id, e)
-
-        except Exception as e:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("Error in _handle_oms_reconciliation: %s", e)
-
 
 __all__ = ["GovernanceHub", "GovernanceStatus", "GovernanceMode"]

@@ -107,32 +107,6 @@ def auth_sm_with_audit():
     return machine, records
 
 
-@pytest.fixture
-def oms_state_machine():
-    """
-    Create a fresh OMSStateMachine instance.
-    全新 OMS 状态机实例。
-    """
-    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
-    machine = OMSStateMachine()
-    yield machine
-    machine.close()
-
-
-@pytest.fixture
-def oms_sm_with_audit():
-    """
-    Create an OMSStateMachine with audit callback tracking.
-    带审计回调的 OMS 状态机。
-    Returns: (machine, records_list)
-    """
-    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
-
-    records = []
-    machine = OMSStateMachine(audit_callback=lambda r: records.append(r))
-    yield machine, records
-    machine.close()
-
 
 @pytest.fixture
 def decision_lease_state_machine():
@@ -362,65 +336,8 @@ def _make_active(sm) -> Any:
     return sm.get(auth.authorization_id)
 
 
-def _create_and_advance_oms_order(sm, target_state) -> str:
-    """
-    Helper: create OMS order and advance to target state.
-    辅助函数：创建 OMS 订单并推进到目标状态。
-
-    Args:
-        sm: OMSStateMachine instance
-        target_state: OrderState enum value to advance to
-
-    Returns:
-        order_id (str)
-    """
-    from app.shared_types import OrderState, OrderInitiator
-    from app.oms_state_machine import OMSStateMachine  # TODO R-06: replace with IPC mock
-
-    if not isinstance(sm, OMSStateMachine):
-        raise TypeError("sm must be an OMSStateMachine instance")
-
-    oid = sm.create_order(
-        symbol="BTCUSDT",
-        side="Buy",
-        qty=0.1,
-        order_type="limit",
-        price=50000
-    )
-
-    if target_state == OrderState.CREATED:
-        return oid
-
-    sm.submit_for_approval(oid, OrderInitiator.AI_AGENT)
-    if target_state == OrderState.PENDING:
-        return oid
-
-    sm.approve(oid, OrderInitiator.AUTHORIZATION_SM)
-    if target_state == OrderState.APPROVED:
-        return oid
-
-    sm.send_to_venue(oid, OrderInitiator.SYSTEM)
-    if target_state == OrderState.SUBMITTED:
-        return oid
-
-    sm.acknowledge(oid, OrderInitiator.EXECUTION_VENUE)
-    if target_state == OrderState.WORKING:
-        return oid
-
-    if target_state == OrderState.PARTIALLY_FILLED:
-        sm.partial_fill(oid, OrderInitiator.EXECUTION_VENUE)
-        return oid
-
-    sm.fill(oid, OrderInitiator.EXECUTION_VENUE)
-    if target_state == OrderState.FILLED:
-        return oid
-
-    sm.begin_reconciliation(oid, OrderInitiator.RECONCILIATION_ENGINE)
-    if target_state == OrderState.RECONCILING:
-        return oid
-
-    sm.reconciliation_pass(oid, OrderInitiator.RECONCILIATION_ENGINE)
-    return oid  # COMPLETED
+# _create_and_advance_oms_order removed 2026-04-10: Python OMS deprecated.
+# Order lifecycle now tracked in Rust event_consumer → trading.orders + order_state_changes.
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -535,9 +452,7 @@ __all__ = [
     "dispatcher_with_engine",
     "auth_state_machine",
     "auth_sm_with_audit",
-    "oms_state_machine",
-    "oms_sm_with_audit",
-    "decision_lease_state_machine",
+"decision_lease_state_machine",
     "decision_lease_sm_with_audit",
     "risk_governor_state_machine",
     "risk_governor_sm_with_audit",

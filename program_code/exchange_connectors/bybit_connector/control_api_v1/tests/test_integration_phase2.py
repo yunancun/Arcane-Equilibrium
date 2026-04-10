@@ -267,44 +267,13 @@ class TestRecoveryRequiresApproval:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestReconcilingGate:
-    """IT-P2-09: FILLED → COMPLETED direct transition is forbidden in OMS SM"""
+    """IT-P2-09: Python OMS removed 2026-04-10 — order lifecycle now in Rust trading.orders"""
 
-    def test_filled_to_completed_forbidden(self):
-        from app.oms_state_machine import OMSStateMachine, OrderState, OrderInitiator
-
-        sm = OMSStateMachine()
-
-        # Create and advance an order to FILLED (use correct initiators per transition rules)
-        oid = sm.create_order("BTCUSDT", "Buy", 0.1, order_type="market")
-        sm.submit_for_approval(oid, initiator=OrderInitiator.SYSTEM, reason="test")
-        sm.approve(oid, initiator=OrderInitiator.AUTHORIZATION_SM, reason="auto")
-        sm.send_to_venue(oid, initiator=OrderInitiator.SYSTEM, reason="submit")
-        sm.acknowledge(oid, initiator=OrderInitiator.SYSTEM, reason="ack")
-        sm.fill(oid, initiator=OrderInitiator.SYSTEM, reason="filled")
-
-        # Direct FILLED → COMPLETED — should fail (forbidden transition)
-        with pytest.raises(ValueError, match="Forbidden"):
-            sm.transition(oid, OrderState.COMPLETED, OrderInitiator.SYSTEM, "skip_recon")
-
-    def test_filled_to_reconciling_to_completed(self):
-        from app.oms_state_machine import OMSStateMachine, OrderState, OrderInitiator
-
-        sm = OMSStateMachine()
-        oid = sm.create_order("BTCUSDT", "Buy", 0.1, order_type="market")
-        sm.submit_for_approval(oid, initiator=OrderInitiator.SYSTEM, reason="test")
-        sm.approve(oid, initiator=OrderInitiator.AUTHORIZATION_SM, reason="auto")
-        sm.send_to_venue(oid, initiator=OrderInitiator.SYSTEM, reason="submit")
-        sm.acknowledge(oid, initiator=OrderInitiator.SYSTEM, reason="ack")
-        sm.fill(oid, initiator=OrderInitiator.SYSTEM, reason="filled")
-
-        # Correct: FILLED → RECONCILING → COMPLETED
-        sm.begin_reconciliation(oid, initiator=OrderInitiator.RECONCILIATION_ENGINE)
-        sm.reconciliation_pass(oid, initiator=OrderInitiator.RECONCILIATION_ENGINE)
-
-        # Verify final state
-        orders = sm.get_by_state(OrderState.COMPLETED)
-        completed_ids = [o["order_id"] for o in orders]
-        assert oid in completed_ids
+    def test_oms_sm_removed(self):
+        """oms_state_machine module must not exist after Python OMS removal"""
+        import importlib
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("app.oms_state_machine")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

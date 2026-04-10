@@ -10,7 +10,7 @@
 #[cfg(test)]
 mod tests;
 mod dispatch;
-mod handlers;
+pub mod handlers;
 mod setup;
 mod types;
 
@@ -58,6 +58,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         audit_pool,
         symbol_registry,
         scanner_store: _scanner_store,
+        shared_risk_level,
     } = deps;
     let mut paper_cmd_rx = paper_cmd_rx;
 
@@ -120,6 +121,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
              (fail-soft) / 審計 pool 不可用，governor 冷卻將從零開始（fail-soft）"
         );
     }
+
+    // Clone trading_tx before moving into pipeline — event loop needs it for
+    // order lifecycle DB writes (trading.orders + order_state_changes).
+    // 在移入 pipeline 前克隆，供事件循環寫入 trading.orders + order_state_changes。
+    let order_tx = trading_tx.clone();
 
     // I-22: Pipeline wire-up extracted to setup helper.
     setup::wire_pipeline(
@@ -450,7 +456,25 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 );
                                 snapshot_writer.force_write(&pipeline.snapshot());
 
-                                if po.cum_filled_qty >= po.qty * 0.999 {
+                                let fully_filled = po.cum_filled_qty >= po.qty * 0.999;
+                                // Emit order state change: Working → Filled / PartiallyFilled.
+                                // 發出訂單狀態轉換：Working → Filled / PartiallyFilled。
+                                if let Some(ref tx) = order_tx {
+                                    let em = pipeline.trading_mode.db_mode().to_string();
+                                    let to_status = if fully_filled { "Filled" } else { "PartiallyFilled" };
+                                    let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
+                                        order_id: po.order_link_id.clone(),
+                                        ts_ms: exec_ts,
+                                        from_status: Some("Working".into()),
+                                        to_status: to_status.into(),
+                                        filled_qty: Some(po.cum_filled_qty),
+                                        avg_price: Some(exec_price),
+                                        reason: None,
+                                        engine_mode: em,
+                                    });
+                                }
+
+                                if fully_filled {
                                     info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
                                     pending_orders.remove(&key);
                                 }
@@ -489,6 +513,24 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                                 "close order {} — clearing pending_close / 平倉訂單{} — 清除待處理平倉",
                                                 status, status,
                                             );
+                                        }
+                                        // Emit order state change: Working → Cancelled/Rejected.
+                                        // 發出訂單狀態轉換：Working → Cancelled/Rejected。
+                                        if let Some(ref tx) = order_tx {
+                                            let em = pipeline.trading_mode.db_mode().to_string();
+                                            let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
+                                                order_id: po.order_link_id.clone(),
+                                                ts_ms: std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .map(|d| d.as_millis() as u64)
+                                                    .unwrap_or(0),
+                                                from_status: Some("Working".into()),
+                                                to_status: status.to_string(),
+                                                filled_qty: None,
+                                                avg_price: None,
+                                                reason: Some(format!("exchange_status:{}", status)),
+                                                engine_mode: em,
+                                            });
                                         }
                                     }
                                     warn!(
@@ -541,6 +583,32 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         qty = %po.qty, strategy = %po.strategy,
                         "pending order registered / 待處理訂單已註冊"
                     );
+                    // Emit Order row when exchange confirms Working state.
+                    // 訂單進入 Working 狀態時寫入 trading.orders。
+                    if let Some(ref tx) = order_tx {
+                        let em = pipeline.trading_mode.db_mode().to_string();
+                        let _ = tx.try_send(crate::database::TradingMsg::Order {
+                            order_id: po.order_link_id.clone(),
+                            ts_ms: po.sent_ts_ms,
+                            symbol: po.symbol.clone(),
+                            side: if po.is_long { "Buy".into() } else { "Sell".into() },
+                            order_type: "Market".into(),
+                            qty: po.qty,
+                            strategy_name: po.strategy.clone(),
+                            is_close: po.is_close,
+                            engine_mode: em.clone(),
+                        });
+                        let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
+                            order_id: po.order_link_id.clone(),
+                            ts_ms: po.sent_ts_ms,
+                            from_status: Some("Submitted".into()),
+                            to_status: "Working".into(),
+                            filled_qty: None,
+                            avg_price: None,
+                            reason: None,
+                            engine_mode: em,
+                        });
+                    }
                     pending_orders.insert(po.order_link_id.clone(), po);
                 }
             },
@@ -556,6 +624,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         &mut snapshot_writer,
                         &mut pending_orders,
                     );
+                    // Phase 6: sync governor risk level to shared atomic for reconciler.
+                    // Phase 6：同步 governor 風控級別到共享原子量供對帳器讀取。
+                    if let Some(ref rl) = shared_risk_level {
+                        rl.store(
+                            pipeline.governance.risk.snapshot_level().value(),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
                 }
             },
 

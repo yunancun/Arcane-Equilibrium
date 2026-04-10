@@ -1438,37 +1438,22 @@ def get_oms_orders(
     actor: Any = Depends(_get_auth_actor),
 ) -> dict[str, Any]:
     """
-    T10.05: Retrieve OMS order states for governance visibility.
-    检索 OMS 订单状态以提供治理可见性。
+    Order history endpoint — Python OMS removed 2026-04-10.
+    Order lifecycle now tracked in Rust: trading.orders + trading.order_state_changes.
+    訂單歷史端點 — Python OMS 已移除，訂單生命週期由 Rust 寫入 trading.orders。
 
-    Query Parameters:
-      - state: Optional filter by OrderState name (e.g., "PENDING", "RECONCILING")
-      - limit: Maximum number of orders to return (default 50)
+    Returns empty list; order data is in DB table trading.orders (engine_mode column discriminates paper/demo/live).
     """
-    hub = _get_governance_hub()
-    if hub is None:
-        raise HTTPException(status_code=503, detail="Governance hub not available")
-
-    try:
-        if limit < 1 or limit > 500:
-            limit = min(max(limit, 1), 500)
-
-        orders = hub.get_oms_orders(state=state, limit=limit)
-
-        return GovernanceResponse.success(
-            data={
-                "orders": orders,
-                "count": len(orders),
-                "state_filter": state,
-                "limit": limit,
-            },
-            message="oms_orders_retrieved"
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Error retrieving OMS orders: %s", e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+    return GovernanceResponse.success(
+        data={
+            "orders": [],
+            "count": 0,
+            "state_filter": state,
+            "limit": limit,
+            "note": "Order tracking migrated to Rust DB (trading.orders). Query DB directly.",
+        },
+        message="oms_orders_retrieved"
+    )
 
 
 @governance_router.post("/health-check")

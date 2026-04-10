@@ -307,18 +307,10 @@ try:
 except Exception as e:
     logger.warning("Could not inject CognitiveModulator: %s / 注入认知调制器失败: %s", e, e)
 
-# --- Batch 10: OMS SM-03 injection into GovernanceHub ---
-# Batch 10：OMS 状态机注入治理集線器
-try:
-    from .oms_state_machine import OMSStateMachine
-    OMS_STATE_MACHINE = OMSStateMachine()
-    from .paper_trading_routes import GOV_HUB as _GOV_HUB_REF
-    if _GOV_HUB_REF is not None:
-        _GOV_HUB_REF.set_oms_sm(OMS_STATE_MACHINE)
-        logger.info("OMS SM-03 injected into GovernanceHub / OMS 状态机已注入治理集線器")
-except (ImportError, Exception) as e:
-    OMS_STATE_MACHINE = None
-    logger.warning("Could not inject OMS SM-03: %s", e)
+# Batch 10: OMS SM-03 removed — Python OMS deprecated 2026-04-10.
+# Order lifecycle now tracked in Rust event_consumer → trading.orders + order_state_changes.
+# Batch 10：OMS SM-03 已移除 — Python OMS 於 2026-04-10 廢棄。
+# 訂單生命週期現由 Rust event_consumer 寫入 trading.orders + order_state_changes。
 
 # --- Batch 10: AnalystAgent initialization ---
 # Batch 10：AnalystAgent 初始化（交易結果分析 + L2 Cron 觸發）
