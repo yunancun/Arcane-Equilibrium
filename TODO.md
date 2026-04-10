@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（Live GUI P0~P6 全完畢 + 縮倉監控 + OPENCLAW_ALLOW_MAINNET 鎖移除 + DB Signal Diamond 規劃）
-測試基準線：**Rust engine lib 840 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-10（DEAD-PY-2 大型 Python 死代碼清理完成）
+測試基準線：**Rust engine lib 872 · Python control_api 2427 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -103,41 +103,29 @@ Phase 1+2+3+4 全部完成。
 
 **KEEP（不要動）**：`risk_view_client.py:196-197` force_governor_tier_* / `apply_ai_consultation` / `governance_hub.py` RC-11 docstrings / `bridge_core.py` activate/on_tick docstrings — 全有 test callers 或生產呼叫。
 
-### 4. ⬜ DEAD-PY-2 大型死代碼清理（Option 2，~3000 行）
-
-> 前置：DEAD-PY-2 需在 DEAD-PY-1 完全穩定後執行（當前進行中的 Option A 清理完畢後才可開始）。
-> 每個子項需獨立 E2 + E4 + 回歸測試。
+### 4. ✅ DEAD-PY-2 大型死代碼清理（DONE 2026-04-10）
 
 **A. 完全刪除 Python Bridge 核心（PipelineBridge 已確認死透）**
-- [ ] 刪除 `app/bridge_core.py` — `PipelineBridge._active` 永不為 True（RC-10 退場），所有 `activate()` / `on_tick()` 死路徑
-- [ ] 刪除 `app/bridge_agents.py` — 依賴 PipelineBridge，已完全死透
-- [ ] 刪除 `app/bridge_stats.py` — 依賴 PipelineBridge，已完全死透
-- [ ] 刪除 `app/pipeline_bridge.py` — PipelineBridge 主體，RC-10 後未被激活
-- [ ] 清理所有 `from .bridge_core import` / `from .pipeline_bridge import` 等引用（`paper_trading_wiring.py`, `strategy_wiring.py` 等）
+- [x] 刪除 `app/bridge_core.py` / `bridge_agents.py` / `bridge_stats.py` / `pipeline_bridge.py` ✅
+- [x] 清理所有引用（`paper_trading_wiring.py`, `strategy_wiring.py`, `main.py`, `governance_routes.py` 等）✅
 
 **B. 刪除 Python 策略類（Rust 引擎接管）**
-- [ ] 刪除 `local_model_tools/strategies/ma_crossover.py`
-- [ ] 刪除 `local_model_tools/strategies/bollinger_reversion.py`
-- [ ] 刪除 `local_model_tools/strategies/funding_rate_arb.py`
-- [ ] 刪除 `local_model_tools/strategies/grid_trading.py`
-- [ ] 刪除 `local_model_tools/strategies/bb_breakout.py`
-- [ ] 更新 `strategy_wiring.py`：移除 Python 策略 import + `PIPELINE_BRIDGE` 設置 + `DEMO_CONNECTOR` wiring
+- [x] 刪除 `local_model_tools/strategies/{ma_crossover,bollinger_reversion,funding_rate_arb,grid_trading,bb_breakout}.py` ✅
+- [x] 更新 `strategy_wiring.py`：移除 Python 策略 import + `PIPELINE_BRIDGE` 設置 + `DEMO_CONNECTOR` wiring ✅
 
 **C. 刪除 ProtectiveOrderManager（Rust ShadowOrder 接管）**
-- [ ] 刪除 `app/protective_order_manager.py`
-- [ ] 清理 `paper_trading_wiring.py` 中 `PROTECTIVE_ORDER_MANAGER` singleton
-- [ ] 確認無生產路由調用 PROTECTIVE_ORDER_MANAGER（先 grep 確認）
+- [x] 刪除 `app/protective_order_manager.py` + 清理 `paper_trading_wiring.py` PROTECTIVE_ORDER_MANAGER ✅
 
 **D. 清理 BybitDemoConnector（只保留工具函數）**
-- [ ] `bybit_demo_connector.py`：刪除 `submit_order()` / `cancel_order()` / `_request()` / `cancel_all_orders()` / `place_order()` 等交易方法
-- [ ] 保留：`round_price_for_exchange()` / `round_qty_for_exchange()` 兩個純工具函數（有多處調用）
-- [ ] 更新 class docstring 說明剩餘用途
+- [x] 刪除全部交易方法（`submit_order()` / `cancel_order()` / `_request()` 等）✅
+- [x] 保留：`round_price_for_exchange()` / `round_qty_for_exchange()` ✅
 
-**E. 清理 `paper_trading_wiring.py` 殘留**
-- [ ] 移除 `DEMO_CONNECTOR` / `PROTECTIVE_ORDER_MANAGER` singleton 初始化（對應 C/D 完成後）
-- [ ] 移除 `ENGINE` Python paper engine singleton（已 None，ARCH-RC1 1C-3-F 退場）
+**E. 清理殘留 + test 更新**
+- [x] 刪除 11 個死 test 文件 + 外科手術刪除 10+ 個文件中的死 test class ✅
+- [x] 修復 `main.py` SymbolCategoryRegistry → PipelineBridge 背景初始化塊（DEAD-PY-2）✅
+- [x] E4 回歸：872 Rust lib + **2427 Python passed** (1 pre-existing fail) ✅
 
-> **估算**：~3000 行刪除，0 新增。完成後 Python 層完全無交易邏輯，僅剩 API 橋接 + GUI 路由 + 輔助工具。
+> **結果**：~4500 行刪除。Python 層完全無交易邏輯，僅剩 API 橋接 + GUI 路由 + 輔助工具。
 
 ---
 
@@ -153,7 +141,7 @@ Phase 1+2+3+4 全部完成。
 
 ### 告警通道（Phase 6 reconciler 自動收縮的硬依賴）
 - [ ] **OC-3** 多通道分級告警（P0→緊急群 / P1→常規群）— **阻塞 6-RC-6**
-- [ ] 1C-4 B2 Position Reconciler 已上線 30s 真相輪詢 + V014 audit，但只進審計。在 OC-3 + Phase 6-RC-1~9 完成前，operator 必須人工看 V014 處理漂移。
+- [x] 1C-4 B2 Position Reconciler 已上線 30s 真相輪詢 + V014 audit。**Phase 6 自動降級動作層已完成**（6-RC-1~5,9,10）。6-RC-6 阻塞於 OC-3。
 
 ---
 
@@ -163,15 +151,16 @@ Phase 1+2+3+4 全部完成。
 
 > **背景**：1C-4 B2 已部署觀察層（30s 輪詢 + 5 級漂移分類 + V014 audit），自動 governor 收縮被降級移除（QA+E2 發現原設計與 B1 operator cooldown 語義衝突）。Phase 6 補上動作層。
 
-- [ ] **6-RC-9 Baseline staleness 政策** — `PositionView` 加 `last_fetch_ms`，>10min 走 warmup-reseed（**6-RC-1 前必須先做**，否則 REST 恢復第一個 cycle 會誤觸發）
-- [ ] **6-RC-1 動作通道隔離** — 新增 `PaperSessionCommand::ReconcilerAutoContract`，handler 直呼 `governance.risk.de_escalate_to`，**繞過** operator override 白名單與 step-rule guard
-- [ ] **6-RC-2 V014 event_type 隔離** — `event_type="reconciler_auto_contract"` 與 `governor_de_escalate` 區隔；補 SQL filter 安全網（顯式 `AND payload->>'reason_code' IN (operator_whitelist)`）
-- [ ] **6-RC-3 動作策略** — Major/Orphan/Ghost → step one tier looser；連續 ≥3 cycle 持續漂移 → Defensive；單 cycle ≥5 個獨立漂移 → CircuitBreaker
-- [ ] **6-RC-4 自身冷卻** — 同 (symbol,side) 30 分鐘內不重複；全局 5 分鐘最多 1 次
-- [ ] **6-RC-5 Per-symbol minQty dust floor** — 從 instrument_info 讀 `lotSizeFilter.minOrderQty`，閾值 `1.5 × minQty`（**禁止**全局魔法數）
+- [x] **6-RC-9 Baseline staleness 政策** — `last_successful_fetch_ms` >10min → warmup-reseed，不分類（避免誤觸發）
+- [x] **6-RC-1 動作通道隔離** — `PaperSessionCommand::ReconcilerEscalate/DeEscalate`，handler 直呼 `reconciler_escalate_to/de_escalate_to`，**繞過** operator whitelist/24h cooldown/step-rule guard（獨立通道）。**方向修正**：漂移→escalate（收緊），恢復→de_escalate（放寬）
+- [x] **6-RC-2 V014 event_type 隔離** — `event_type="reconciler_auto_escalate"/"reconciler_auto_recover"`，與觀察事件（`reconcile_major_drift`）區隔
+- [x] **6-RC-3 動作策略** — MajorDrift/Orphan/Ghost/SideFlip → Cautious；持續 ≥3 cycle → Defensive；同 cycle ≥5 獨立漂移 → CircuitBreaker + CloseAll。Ghost/Orphan 同級。MinorDrift 不觸發動作。
+- [x] **6-RC-4 自身冷卻** — per-(symbol,side) 30min + 全局 5min + hybrid 恢復（clean cycles + wall-clock）
+- [x] **6-RC-5 Per-symbol minQty dust floor** — `filter_dust()` 用 `1.5 × minOrderQty` from InstrumentInfoCache
 - [ ] **6-RC-6 多通道告警 + 15s 介入窗口** — 動作前先告警，15s 未 ACK 才執行 ⚠️ 阻塞於 OC-3
-- [ ] **6-RC-7 整合測試** — e2e 斷言進入 `apply_de_escalation`，覆蓋 4 場景
-- [ ] **6-RC-8 Live blocker 解除** — 完成後從 Live blocker 清單移除「Bybit REST `/v5/position/list` 必須可達」隱含依賴
+- [ ] **6-RC-7 整合測試** — e2e 斷言 reconciler → command → governor level change，覆蓋 4+ 場景
+- [ ] **6-RC-8 Live blocker 解除** — 完成後從 Live blocker 清單移除
+- [x] **6-RC-10 REST 失敗升級** — 連續 REST 失敗 ≥10 次（~5min）→ escalate to Cautious
 
 ### 6-Phase（漸進放權 + 驗收）
 - [ ] 6-01~03 漸進放權管線 + 畢業邏輯 + Live 審批

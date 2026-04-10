@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 from bybit_demo_connector import (
     round_qty_for_exchange,
     round_price_for_exchange,
-    BybitDemoConnector,
+    # BybitDemoConnector deleted (DEAD-PY-2)
 )
 from symbol_category_registry import SymbolCategoryRegistry
 
@@ -182,62 +182,8 @@ class TestOrderValidation:
         assert reason == "no_instrument_info"
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# V1-4: Error type distinction (Fix 7)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestErrorTypeDistinction:
-    """Test that _request returns proper errorType fields."""
-
-    def test_connector_disabled_returns_not_enabled(self):
-        """Disabled connector should reject with retCode -1."""
-        conn = BybitDemoConnector.__new__(BybitDemoConnector)
-        conn._enabled = False
-        conn._api_key = ""
-        conn._api_secret = ""
-        conn._lock = __import__("threading").Lock()
-        conn._stats = {"orders_submitted": 0, "orders_filled": 0, "orders_rejected": 0, "errors": 0}
-        conn._rate_limit_remaining = 120
-        conn._rate_limit_reset_ms = 0
-        conn._account_type = "UNIFIED"
-        conn._position_mode = "one_way"
-        result = conn.submit_order("BTCUSDT", "Buy")
-        assert result["retCode"] == -1
-        assert "not enabled" in result["retMsg"]
-
-    def test_connector_has_rate_limit_state(self):
-        """Connector should have rate limit state initialized."""
-        conn = BybitDemoConnector(api_key="", api_secret="")
-        assert conn._rate_limit_remaining == 120
-        assert conn._rate_limit_reset_ms == 0
-
-    def test_connector_has_account_state(self):
-        """Connector should have account type and position mode defaults."""
-        conn = BybitDemoConnector(api_key="", api_secret="")
-        assert conn._account_type == "UNIFIED"
-        assert conn._position_mode == "one_way"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# V1-5: positionIdx inclusion (Fix 3)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestPositionIdx:
-    """Test that positionIdx is correctly set based on position mode."""
-
-    def test_one_way_mode_idx_is_zero(self):
-        """In one-way mode, positionIdx should be 0."""
-        conn = BybitDemoConnector(api_key="", api_secret="")
-        conn._position_mode = "one_way"
-        # We can't actually call submit_order (no API), but verify the logic:
-        assert conn._position_mode == "one_way"
-
-    def test_hedge_mode_buy_idx_is_1(self):
-        """In hedge mode, Buy side → positionIdx=1."""
-        conn = BybitDemoConnector(api_key="", api_secret="")
-        conn._position_mode = "hedge"
-        # Verify hedge mode is stored correctly
-        assert conn._position_mode == "hedge"
+# TestErrorTypeDistinction deleted (DEAD-PY-2 — BybitDemoConnector removed)
+# TestPositionIdx deleted (DEAD-PY-2 — BybitDemoConnector removed)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -441,19 +441,9 @@ def get_detailed_governance_status(
             logger.debug("Error getting OMS status: %s", e)
             detailed["oms"] = None
 
-        # Demo connector status: ENGINE is always None (PaperTradingEngine retired, ARCH-RC1 1C-3-F).
-        # DEAD-PY-1: ENGINE dead branch removed. Demo connector status now comes from DEMO_CONNECTOR directly.
-        # Demo 連接器狀態：ENGINE 已退場，改從 DEMO_CONNECTOR 直接讀取。
-        try:
-            from .paper_trading_routes import DEMO_CONNECTOR
-            demo_enabled = DEMO_CONNECTOR is not None and getattr(DEMO_CONNECTOR, "is_enabled", False)
-            detailed["demo_connector"] = {
-                "enabled": demo_enabled,
-                "connector_type": type(DEMO_CONNECTOR).__name__ if demo_enabled else None,
-            }
-        except Exception as e:
-            logger.debug("Error getting demo connector status: %s", e)
-            detailed["demo_connector"] = None
+        # DEAD-PY-2: BybitDemoConnector removed. Demo orders go through Rust IPC.
+        # Demo 連接器已移除（DEAD-PY-2）。Demo 訂單通過 Rust IPC 執行。
+        detailed["demo_connector"] = {"enabled": False, "connector_type": None}
 
         # Overall health
         detailed["health"] = {
