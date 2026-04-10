@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（LIVE-P0/P1/P2 + SEC-05 + WP-F/AH-06 全部完畢）
+最後更新：2026-04-10（Live GUI P0~P6 全完畢 + 縮倉監控 + OPENCLAW_ALLOW_MAINNET 鎖移除 + DB Signal Diamond 規劃）
 測試基準線：**Rust engine lib 840 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -61,6 +61,17 @@
 
 - [x] **LIVE-P2-3** E2 + E4 全量回歸 + commit ✅ (commit 006d905)
 
+#### P3 — Gov-P1 + 全阻隔移除 + 縮倉監控（2026-04-10）
+
+- [x] **LIVE-P3-1** Gov-P1：`post_live_session_start` 自動授予 `execution_authority`；`_submit_live_governance_request()` 向 GovernanceHub 提交 PENDING 審計記錄；`post_live_session_resume` 改為 global_mode 二次確認 ✅ (commit 045e79c)
+- [x] **LIVE-P3-2** 移除 `OPENCLAW_ALLOW_MAINNET=1` Rust hard guard（`bybit_rest_client.rs` 9 行）；更新 `config/mod.rs` docstring + `main.rs` banner ✅ (commit 25b5d73)
+- [x] **LIVE-P3-3** `_live_contraction_monitor()`：每 5 分鐘輪詢 peak/equity；5% warn / 15% halt（revoke auth + close all + freeze GovernanceHub）；`tab-live.html` 縮倉 badge ✅ (commit 25b5d73)
+
+#### P4 — Live-Demo 槽位 + 指標端點（2026-04-10）
+
+- [x] **LIVE-P4-1** `settings_routes.py` `live_demo` 虛擬槽位（validate via demo server，寫入 live path）；`tab-settings.html` 3 API key 卡片 + peek + 上下文警示 ✅ (commit 25b5d73)
+- [x] **LIVE-P4-2** `GET /api/v1/live/metrics` 新端點；paper `/metrics` 修復（`compute_full_metrics()` 完整指標）；`tab-live.html` Performance Metrics 區塊 ✅ (commit 25b5d73)
+
 ---
 
 ### 1. 🟢 觀察期 — 等數據（無開發動作，只需維運）
@@ -99,7 +110,7 @@ Phase 1+2+3+4 全部完成。
 ### 安全（架構性，必做）
 - [x] **SEC-05 / WP-B/SEC-05** GUI `innerHTML` XSS ✅ — safeText()→ocEsc() 委託 + 逐文件 ocEsc() 包裹（app.js / linucb_card.html / tab-ai.html）
 - [ ] **SEC-08** IPC socket 無認證
-- [ ] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 2FA 架構決策
+- [x] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 架構決策 ✅ — 決策：移除 env var guard，API key 填入 = 唯一上線條件（commit 25b5d73）
 - [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後）
 - [ ] **SEC-04 / 06 / 13** 深度 E3 審查（4 項）
 - [ ] WP-CC/FS-1 / BI-1 / P9 / SM-1（4 項 CC）
