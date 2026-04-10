@@ -753,9 +753,22 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             if let Ok(guard) = bal_arc.read() {
                                 if let Some(bal) = *guard {
                                     pipeline.paper_state.set_bybit_sync_balance(Some(bal));
-                                    // P0-5: In exchange mode, reconcile local balance from exchange
-                                    // P0-5：交易所模式下，從交易所餘額對賬本地餘額
-                                    if is_exchange_mode {
+                                    // P0-5: Reconcile local balance from exchange only in the mode
+                                    // that actually owns this WS connection (Demo or Live).
+                                    // Use pipeline.trading_mode dynamically — the mode may have
+                                    // been switched via IPC (SwitchMode) after startup, in which
+                                    // case the static is_exchange_mode flag would be stale and
+                                    // would incorrectly overwrite the paper simulation balance
+                                    // with the live/demo exchange balance.
+                                    // P0-5：僅在擁有此 WS 連接的模式（Demo 或 Live）下對賬本地餘額。
+                                    // 使用 pipeline.trading_mode 動態計算 — 模式可能已通過 IPC
+                                    // （SwitchMode）在啟動後切換。使用靜態 is_exchange_mode 標誌
+                                    // 會導致紙盤模擬餘額被交易所餘額錯誤覆蓋。
+                                    let current_is_exchange = matches!(
+                                        pipeline.trading_mode,
+                                        crate::config::TradingMode::Demo | crate::config::TradingMode::Live
+                                    );
+                                    if current_is_exchange {
                                         if let Some(old_bal) = pipeline.paper_state.reconcile_balance_from_exchange(bal) {
                                             warn!(
                                                 old = format!("{:.2}", old_bal),
