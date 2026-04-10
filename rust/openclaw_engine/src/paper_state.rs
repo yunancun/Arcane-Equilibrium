@@ -1,5 +1,12 @@
 //! Paper Trading State — position tracking + PnL (R04-7).
 //! 紙盤交易狀態 — 持倉追蹤 + 損益。
+//!
+//! MODULE_NOTE (EN): Manages simulated positions, fills, balance, and PnL for
+//!   paper/demo/live modes. apply_fill() updates positions; mark_to_market()
+//!   computes unrealized PnL each tick. Thread-safe: sole-owner in TickPipeline.
+//! MODULE_NOTE (中): 管理紙盤/Demo/Live 模式的模擬持倉、成交、餘額和損益。
+//!   apply_fill() 更新持倉；mark_to_market() 每 tick 計算未實現損益。
+//!   線程安全：TickPipeline 獨佔所有權。
 
 use openclaw_core::stop_manager::{self, PositionState, StopConfig, StopTrigger};
 use serde::{Deserialize, Serialize};

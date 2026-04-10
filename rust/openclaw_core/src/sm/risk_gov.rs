@@ -69,6 +69,15 @@ pub enum RiskEvent {
     OperatorCircuitBreak,
     OperatorManualReview,
     OperatorResetNormal,
+    /// Reconciler detected position drift (MajorDrift / Orphan / Ghost / persistent).
+    /// 對帳器偵測到持倉漂移。
+    ReconcilerDrift,
+    /// Reconciler REST polling failed consecutively (6-RC-10).
+    /// 對帳器 REST 輪詢連續失敗。
+    ReconcilerRestFailure,
+    /// Reconciler clean cycles met — auto-recovery toward pre-escalation floor.
+    /// 對帳器連續乾淨週期達標 — 自動恢復至降級前水位。
+    ReconcilerRecovery,
 }
 
 impl RiskEvent {
@@ -92,6 +101,9 @@ impl RiskEvent {
             Self::OperatorCircuitBreak => "operator_circuit_break",
             Self::OperatorManualReview => "operator_manual_review",
             Self::OperatorResetNormal => "operator_reset_normal",
+            Self::ReconcilerDrift => "reconciler_drift",
+            Self::ReconcilerRestFailure => "reconciler_rest_failure",
+            Self::ReconcilerRecovery => "reconciler_recovery",
         }
     }
 }
@@ -107,6 +119,9 @@ pub enum RiskInitiator {
     IncidentPolicy,
     HealthMonitor,
     ExpiryGuardian,
+    /// Position reconciler — auto-escalation on drift, auto-recovery when clean.
+    /// 持倉對帳器 — 漂移時自動升級，恢復時自動降級。
+    Reconciler,
 }
 
 impl RiskInitiator {
@@ -117,6 +132,7 @@ impl RiskInitiator {
             Self::IncidentPolicy => "IncidentPolicy",
             Self::HealthMonitor => "HealthMonitor",
             Self::ExpiryGuardian => "ExpiryGuardian",
+            Self::Reconciler => "Reconciler",
         }
     }
 }
@@ -254,8 +270,8 @@ fn lookup_rule(from: RiskLevel, to: RiskLevel) -> Option<TransitionRule> {
     use RiskInitiator::*;
     use RiskLevel::*;
 
-    const AUTO: &[RiskInitiator] = &[RiskGovernor, Operator, IncidentPolicy, HealthMonitor];
-    const OP_GOV: &[RiskInitiator] = &[Operator, RiskGovernor];
+    const AUTO: &[RiskInitiator] = &[RiskGovernor, Operator, IncidentPolicy, HealthMonitor, Reconciler];
+    const OP_GOV: &[RiskInitiator] = &[Operator, RiskGovernor, Reconciler];
     const OP_ONLY: &[RiskInitiator] = &[Operator];
 
     match (from, to) {
@@ -488,6 +504,43 @@ impl RiskGovernorSm {
             RiskInitiator::Operator,
             vec!["de_escalation_approved".into()],
             Some(approved_by),
+            reason,
+        )
+    }
+
+    /// Reconciler-driven escalation (tighten risk on drift detection).
+    /// Bypasses operator whitelist/cooldown — drift response must never be blocked.
+    /// 對帳器驅動的升級（漂移時收緊風控）。繞過 operator 白名單/冷卻。
+    pub fn reconciler_escalate_to(
+        &mut self,
+        level: RiskLevel,
+        reason: &str,
+    ) -> Result<(), SmError> {
+        self.transition(
+            level,
+            RiskEvent::ReconcilerDrift,
+            RiskInitiator::Reconciler,
+            vec!["reconciler_drift".into()],
+            None,
+            reason,
+        )
+    }
+
+    /// Reconciler-driven de-escalation (auto-recovery after clean cycles).
+    /// Only works for Cautious/Reduced/Defensive → one-step-lower.
+    /// CB/MR recovery remains OP_ONLY and will be rejected.
+    /// 對帳器驅動的降級（乾淨週期後自動恢復）。CB/MR 仍需 operator。
+    pub fn reconciler_de_escalate_to(
+        &mut self,
+        level: RiskLevel,
+        reason: &str,
+    ) -> Result<(), SmError> {
+        self.transition(
+            level,
+            RiskEvent::ReconcilerRecovery,
+            RiskInitiator::Reconciler,
+            vec!["reconciler_auto_recovery".into()],
+            Some("reconciler_auto_recovery"),
             reason,
         )
     }
@@ -813,5 +866,68 @@ mod tests {
         sm.de_escalate_to(RiskLevel::Defensive, "admin", "resolved")
             .unwrap();
         assert_eq!(sm.level, RiskLevel::Defensive);
+    }
+
+    // ── Phase 6: Reconciler auto-contraction tests ──
+
+    #[test]
+    fn test_reconciler_escalate_to_cautious() {
+        let mut sm = RiskGovernorSm::new();
+        sm.reconciler_escalate_to(RiskLevel::Cautious, "major_drift: BTCUSDT|Buy")
+            .unwrap();
+        assert_eq!(sm.level, RiskLevel::Cautious);
+        assert_eq!(sm.consecutive_escalations, 1);
+        let rec = &sm.transitions[0];
+        assert_eq!(rec.initiator, "Reconciler");
+        assert_eq!(rec.event, "reconciler_drift");
+    }
+
+    #[test]
+    fn test_reconciler_escalate_to_circuit_breaker() {
+        let mut sm = RiskGovernorSm::new();
+        sm.reconciler_escalate_to(RiskLevel::CircuitBreaker, "5+ simultaneous drifts")
+            .unwrap();
+        assert_eq!(sm.level, RiskLevel::CircuitBreaker);
+    }
+
+    #[test]
+    fn test_reconciler_de_escalate_cautious_to_normal() {
+        let mut sm = RiskGovernorSm::new();
+        sm.thresholds.min_hold_time_ms = 0;
+        sm.reconciler_escalate_to(RiskLevel::Cautious, "drift").unwrap();
+        sm.reconciler_de_escalate_to(RiskLevel::Normal, "30 clean cycles")
+            .unwrap();
+        assert_eq!(sm.level, RiskLevel::Normal);
+    }
+
+    #[test]
+    fn test_reconciler_cannot_de_escalate_from_cb() {
+        // Reconciler should NOT be able to auto-recover from CircuitBreaker.
+        // CB de-escalation is OP_ONLY. Reconciler is in OP_GOV but CB→Defensive
+        // path is restricted to OP_ONLY.
+        // 對帳器不能從 CB 自動恢復。CB 降級限 operator-only。
+        let mut sm = RiskGovernorSm::new();
+        sm.thresholds.min_hold_time_ms = 0;
+        sm.reconciler_escalate_to(RiskLevel::CircuitBreaker, "drift storm")
+            .unwrap();
+        let err = sm
+            .reconciler_de_escalate_to(RiskLevel::Defensive, "clean cycles")
+            .unwrap_err();
+        assert!(matches!(err, SmError::InitiatorNotAllowed { .. }));
+    }
+
+    #[test]
+    fn test_reconciler_rest_failure_escalation() {
+        let mut sm = RiskGovernorSm::new();
+        sm.transition(
+            RiskLevel::Cautious,
+            RiskEvent::ReconcilerRestFailure,
+            RiskInitiator::Reconciler,
+            vec!["rest_failure_streak".into()],
+            None,
+            "10 consecutive REST failures",
+        )
+        .unwrap();
+        assert_eq!(sm.level, RiskLevel::Cautious);
     }
 }

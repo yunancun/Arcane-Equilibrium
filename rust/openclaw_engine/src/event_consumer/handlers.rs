@@ -21,7 +21,7 @@ use tracing::info;
 /// command outcomes are reported via the optional response_tx oneshot inside
 /// each variant.
 /// 將一個 PaperSessionCommand 變體應用到管線；結果通過 oneshot 返回。
-pub(super) fn handle_paper_command(
+pub fn handle_paper_command(
     cmd: PaperSessionCommand,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut StateWriter,
@@ -497,6 +497,51 @@ pub(super) fn handle_paper_command(
             pipeline.set_trading_mode(mode);
             snapshot_writer.force_write(&pipeline.snapshot());
             let _ = response_tx.send(Ok(format!("switched to mode {}", mode)));
+        }
+        // ── Phase 6: Reconciler auto-contraction ──
+        PaperSessionCommand::ReconcilerEscalate {
+            target_tier,
+            reason,
+            response_tx,
+        } => {
+            let result = (|| -> Result<String, String> {
+                let target = TickPipeline::parse_risk_level(&target_tier)?;
+                let current = pipeline.governance.risk.snapshot_level();
+                pipeline
+                    .governance
+                    .risk
+                    .reconciler_escalate_to(target, &reason)
+                    .map_err(|e| format!("reconciler_escalate_to failed: {e}"))?;
+                info!(from = %current, to = %target, reason = %reason,
+                    "reconciler auto-escalation (drift detected) / 對帳器自動升級（偵測到漂移）");
+                snapshot_writer.force_write(&pipeline.snapshot());
+                Ok(format!(
+                    "{{\"from\":\"{current}\",\"to\":\"{target}\",\"reason\":\"{reason}\"}}"
+                ))
+            })();
+            let _ = response_tx.send(result);
+        }
+        PaperSessionCommand::ReconcilerDeEscalate {
+            target_tier,
+            reason,
+            response_tx,
+        } => {
+            let result = (|| -> Result<String, String> {
+                let target = TickPipeline::parse_risk_level(&target_tier)?;
+                let current = pipeline.governance.risk.snapshot_level();
+                pipeline
+                    .governance
+                    .risk
+                    .reconciler_de_escalate_to(target, &reason)
+                    .map_err(|e| format!("reconciler_de_escalate_to failed: {e}"))?;
+                info!(from = %current, to = %target, reason = %reason,
+                    "reconciler auto-recovery (clean cycles met) / 對帳器自動恢復（乾淨週期達標）");
+                snapshot_writer.force_write(&pipeline.snapshot());
+                Ok(format!(
+                    "{{\"from\":\"{current}\",\"to\":\"{target}\",\"reason\":\"{reason}\"}}"
+                ))
+            })();
+            let _ = response_tx.send(result);
         }
     }
 }

@@ -3,6 +3,50 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### W20 安全審查 + 漸進放權 + CC 合規（2026-04-10）
+
+**SEC-04/06/13 + G-9 E3 深度審查**
+- SEC-04（SQL injection）：全 parameterized queries，PASS
+- SEC-06（token in JSON）：已修復為 HttpOnly cookie，PASS
+- SEC-13（u32 truncation）：已修復為 saturating cast，PASS
+- G-9（HMAC dead import）：NOT dead — `hmac.compare_digest()` 用於 auth token 驗證（L171），PASS
+
+**WP-CC/P9 — 交易所雙軌止損接線（原則 #9）**
+- `event_consumer/mod.rs`：StopRequest channel consumer 從 log-only 升級為調用 `PositionManager.set_trading_stop()`
+- Paper 模式無 client 時優雅跳過；Demo/Live 調用 Bybit `POST /v5/position/trading-stop`
+- Fail-closed：API 失敗時 warn 但本地 StopManager 繼續保護
+
+**WP-CC/FS-1 — market_data_client tests 提取**
+- `market_data_client/mod.rs` 從 1083→742 行（低於 800 警告線）
+- 18 tests 提取至獨立 `tests.rs`，全部通過
+
+**WP-CC/BI-1 — MODULE_NOTE 雙語補全**
+- 12 個 Rust 文件補全 MODULE_NOTE（EN+中文）header
+
+**WP-CC/SM-1 — Singleton 合規確認**
+- 審計確認無未登記 singleton
+
+**6-01~03 — 策略漸進放權管線**
+- 新增 `promotion_pipeline.py`（~640 行）：PromotionGate class
+  - 5 階段：LEARNING → PAPER_SHADOW → DEMO_ACTIVE → LIVE_PENDING → LIVE_ACTIVE
+  - Paper 畢業門檻：14d + 100 trades + PnL≥0% + DD<10% + Sharpe>0.5
+  - Demo 畢業門檻：21d + 200 trades + DD<8% + Sharpe>0.8 + slippage<15bps + reliability>95%
+  - LIVE_ACTIVE 必須 operator 顯式審批（APPROVED/REJECTED/EXTEND）
+  - Thread-safe（Lock）+ audit callback + DB 序列化 round-trip
+- 3 API endpoints 加入 `governance_routes.py`：
+  - `GET /promotion-pipeline/status` — 查詢管線狀態
+  - `POST /promotion-pipeline/promote` — 晉升（含畢業門檻預檢）
+  - `POST /promotion-pipeline/operator-decision` — Operator 審批
+- 27 tests（5 classes：StateMachine/GraduationGates/LiveApproval/Audit/Serialization）
+
+**E2 審查修復**
+- P1：`register_strategy()` 返回 copy 而非 mutable ref
+- P1：JSON API endpoints 不對 lookup key 做 html.escape（避免 key 不匹配）
+- P1：lazy singleton 加 threading.Lock 修復 TOCTOU race
+- P2：capital_pct/max_leverage 加類型+範圍驗證
+
+**測試基準線**：Rust engine lib 879 / Python 2787 passed / 0 fail
+
 ### W19 安全補強：G-3 IPC 認證 + OC-3/6-RC-6 告警（2026-04-10 · commit W19）
 
 **G-3 / SEC-08 — IPC HMAC-SHA256 認證**

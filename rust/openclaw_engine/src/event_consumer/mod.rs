@@ -217,7 +217,20 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::StopRequest>();
         pipeline.set_stop_channel(stop_tx);
 
+        // P9: Clone shared client for exchange-side conditional stop orders
+        // (Principle #9 dual-rail: local stop + exchange stop).
+        // Paper mode: no client → log only. Demo/Live: call Bybit trading-stop API.
+        // P9：Clone 共享客戶端用於交易所端條件止損單
+        // （根原則 #9 雙軌止損：本地止損 + 交易所止損）。
+        // 紙盤模式無客戶端僅記錄；Demo/Live 調用 Bybit API。
+        let stop_client = shared_client.clone();
+
         tokio::spawn(async move {
+            // Create PositionManager once if exchange client is available.
+            // 若交易所客戶端可用，一次性創建 PositionManager。
+            let pos_mgr = stop_client
+                .map(crate::position_manager::PositionManager::new);
+
             while let Some(req) = stop_rx.recv().await {
                 info!(
                     symbol = %req.symbol,
@@ -225,6 +238,41 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     side = if req.is_long { "long" } else { "short" },
                     "server-side stop request dispatched / 伺服器端止損請求已派發"
                 );
+
+                // P9: Place exchange-side conditional stop (dual-rail, Principle #9).
+                // Fail-closed on API error: local StopManager remains active.
+                // P9：放置交易所端條件止損（雙軌，根原則 #9）。
+                // API 失敗時 fail-closed：本地 StopManager 仍生效。
+                if let Some(ref mgr) = pos_mgr {
+                    let stop_req = crate::position_manager::TradingStopRequest {
+                        category: crate::order_manager::OrderCategory::Linear,
+                        symbol: req.symbol.clone(),
+                        take_profit: None,
+                        stop_loss: Some(req.stop_loss),
+                        tp_trigger_by: None,
+                        sl_trigger_by: Some("LastPrice".to_string()),
+                        trailing_stop: None,
+                        active_price: None,
+                        position_idx: Some(0), // one-way mode / 單向模式
+                    };
+                    match mgr.set_trading_stop(stop_req).await {
+                        Ok(()) => {
+                            info!(
+                                symbol = %req.symbol,
+                                stop_loss = format!("{:.2}", req.stop_loss),
+                                "P9: exchange stop-loss set / 交易所止損已設置"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                symbol = %req.symbol,
+                                error = %e,
+                                "P9: exchange stop-loss failed (local stop active) \
+                                 / 交易所止損失敗（本地止損生效）"
+                            );
+                        }
+                    }
+                }
             }
         });
         info!("dual-track stop channel active / 雙軌止損通道已啟用");

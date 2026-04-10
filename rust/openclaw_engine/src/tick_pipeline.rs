@@ -1,8 +1,15 @@
 //! Tick Pipeline — on_tick 4-step orchestration (R04-1).
 //! Tick 管線 — on_tick 4 步編排。
 //!
-//! WS event → kline aggregate → indicator compute → signal evaluate → strategy dispatch.
-//! Tick actor sole-owner: no locks [V3-PA-1].
+//! MODULE_NOTE (EN): Core tick processing loop. WS event → kline aggregate →
+//!   indicator compute → signal evaluate → strategy dispatch → governance →
+//!   fill/stop. Sole-owner actor pattern: no locks [V3-PA-1]. Holds all
+//!   sub-systems (KlineManager, IndicatorEngine, SignalEngine, Orchestrator,
+//!   IntentProcessor, PaperState, StopManager, Governance).
+//! MODULE_NOTE (中): 核心 tick 處理循環。WS 事件 → K 線聚合 → 指標計算 →
+//!   信號評估 → 策略分派 → 治理 → 成交/止損。獨佔所有者模式：無鎖 [V3-PA-1]。
+//!   持有所有子系統（KlineManager、IndicatorEngine、SignalEngine、Orchestrator、
+//!   IntentProcessor、PaperState、StopManager、Governance）。
 
 use openclaw_core::{
     governance_core::GovernanceCore,

@@ -1,5 +1,10 @@
 //! BB Reversion Strategy V2 — Bollinger Band mean reversion + RSI filter.
 //! BB 回歸策略 V2 — 布林帶均值回歸 + RSI 過濾。
+//!
+//! MODULE_NOTE (EN): Mean-reversion entries at Bollinger Band extremes with
+//!   RSI oversold/overbought confirmation. Exits on band middle touch or time stop.
+//! MODULE_NOTE (中): 在布林帶極端值處均值回歸入場，RSI 超賣/超買確認。
+//!   觸及帶中線或時間止損出場。
 
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
