@@ -34,32 +34,32 @@
 
 #### P1 — Rust TradingMode::Live + 槽位感知 key 讀取
 
-- [ ] **LIVE-P1-1** `bybit_rest_client.rs`：`read_secret_file(slot, name)` 槽位感知
+- [x] **LIVE-P1-1** `bybit_rest_client.rs`：`read_secret_file(slot, name)` 槽位感知 ✅ (commit 11283c7)
   - 現在硬編碼 `bybit/demo/`，改為接受 `slot: &str` 參數
   - `BybitRestClient::new()` 新增 `slot: Option<&str>` 參數，默認 `"demo"`
 
-- [ ] **LIVE-P1-2** `config/mod.rs`：`TradingMode` 加 `Live` variant
+- [x] **LIVE-P1-2** `config/mod.rs`：`TradingMode` 加 `Live` variant ✅ (commit 11283c7)
   - `PaperOnly` | `Demo`（原 Exchange 改名）| `Live`（Mainnet + live key slot）
   - `main.rs` 依 mode 選 `BybitEnvironment::Demo` 或 `Mainnet` + 對應 key slot
 
-- [ ] **LIVE-P1-3** Python `/api/v1/live/session/start|stop|status` 路由
+- [x] **LIVE-P1-3** Python `/api/v1/live/session/start|stop|status` 路由 ✅ (commit 11283c7)
   - 與 paper_trading_routes.py 平行，但目標是 Live engine state
   - `start` 需確認 `execution_authority = granted`（硬鎖，不可繞過）
   - `stop` → 平倉 + cancel orders + 進入 observation
 
 #### P2 — Per-Engine RiskConfig 分離
 
-- [ ] **LIVE-P2-1** Rust：三個獨立 RiskConfig 文件
+- [x] **LIVE-P2-1** Rust：三個獨立 RiskConfig 文件 ✅ (commit 006d905)
   - `risk_config_paper.toml`、`risk_config_demo.toml`、`risk_config_live.toml`
   - Env var 覆蓋路徑：`OPENCLAW_RISK_CONFIG_PAPER` / `_DEMO` / `_LIVE`
   - IPC `patch_risk_config` 加 `engine: "paper"|"demo"|"live"` 路由到對應 store
 
-- [ ] **LIVE-P2-2** GUI 風控頁 per-engine tab
+- [x] **LIVE-P2-2** GUI 風控頁 per-engine tab ✅ (commit 006d905)
   - `tab-risk.html` 頂部加 Engine 選擇器（Paper / Demo / Live）
   - 每個 engine 顯示/修改各自的 RiskConfig
   - Live risk tab 加額外警示：修改實盤風控需二次確認彈窗
 
-- [ ] **LIVE-P2-3** E2 + E4 全量回歸 + commit
+- [x] **LIVE-P2-3** E2 + E4 全量回歸 + commit ✅ (commit 006d905)
 
 ---
 
