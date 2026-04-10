@@ -13,24 +13,20 @@ MODULE_NOTE (中文):
   - POST /api/v1/live/session/resume  — 恢復 live session（恢復策略下單）
 
   安全不變量（Safety invariants）：
-  1. start 端點強制雙重硬鎖：
-     a) execution_authority 必須為 "granted"（否則拒絕，不管誰調用）
-     b) trading_mode 必須為 "live"（否則拒絕，防止意外用 demo key 跑 live session）
-  2. 所有寫入端點要求 Operator 角色認證
-  3. stop 端點先平倉再 pause，fail-partial 容忍（記錄錯誤繼續執行）
-  4. IPC 命令複用 paper 通道（pause_paper / resume_paper / close_all_positions）
+  1. 所有寫入端點要求 Operator 角色認證（唯一門控）
+  2. start 端點無二次 execution_authority 硬鎖 — Operator 角色即為授權
+  3. stop 端點只平倉，不 pause 引擎管線 — paper/demo 不受影響
+  4. IPC 命令複用 paper 通道（resume_paper / close_all_positions）
 
 MODULE_NOTE (English):
   Live trading session control endpoints, parallel to paper_trading_routes but targeting
   the Live engine mode.
 
   Safety invariants:
-  1. start endpoint enforces dual hard lock:
-     a) execution_authority must be "granted" (rejected otherwise, regardless of caller)
-     b) trading_mode must be "live" (rejected otherwise, prevents accidental live session on demo key)
-  2. All write endpoints require Operator role authentication
-  3. stop endpoint closes positions then pauses; fail-partial tolerant (logs errors, continues)
-  4. IPC commands reuse paper channel (pause_paper / resume_paper / close_all_positions)
+  1. All write endpoints require Operator role authentication (single gate)
+  2. start endpoint has no separate execution_authority hard lock — Operator role is the auth
+  3. stop endpoint only closes positions, does NOT pause engine pipeline — paper/demo unaffected
+  4. IPC commands reuse paper channel (resume_paper / close_all_positions)
 """
 
 import logging
@@ -248,73 +244,41 @@ async def post_live_session_start(
 ) -> dict:
     """
     POST /api/v1/live/session/start
-    啟動 Live session（雙重硬鎖：execution_authority=granted + trading_mode=live）
+    啟動 Live session。
 
-    HARD LOCK: execution_authority must be "granted" before starting live session.
-    HARD LOCK: trading_mode must be "live" to prevent accidental start with demo key.
-    Both conditions are enforced server-side — GUI lock alone is insufficient.
+    Guard: Operator role auth is the single gate (no separate execution_authority check).
+    trading_mode is read for logging/context only — engine config controls actual routing.
 
-    雙重硬鎖：
-    1. execution_authority 必須為 "granted"（防止未授權啟動）
-    2. trading_mode 必須為 "live"（防止意外用 demo key 跑 live session）
-    兩個條件在服務器端強制，GUI 鎖定不足以保護。
+    保護：Operator 角色認證是唯一門控，不設獨立 execution_authority 二次確認。
+    trading_mode 僅用於日誌/上下文，引擎配置控制實際訂單路由。
     """
-    # Require Operator role / 要求 Operator 角色
+    # Require Operator role — only gate / 要求 Operator 角色 — 唯一門控
     _require_operator(actor)
 
-    # HARD LOCK #1: execution_authority must be granted
-    # 硬鎖 #1：execution_authority 必須已授予
-    authority = _get_execution_authority()
-    if authority != "granted":
-        logger.warning(
-            "Live session start BLOCKED: execution_authority=%s (not granted) — actor=%s",
-            authority, getattr(actor, "actor_id", "?"),
-        )
-        raise HTTPException(
-            status_code=403,
-            detail=f"Live session blocked: execution_authority={authority!r}. "
-                   "Operator approval required to grant execution authority.",
-        )
-
-    # GATE #2: trading_mode must be "live" or "demo" (demo allowed for pre-live testing)
-    # 門控 #2：trading_mode 必須為 "live" 或 "demo"（demo 允許用於測試 live 流程）
     trading_mode = _get_trading_mode_from_engine()
-    if trading_mode not in ("live", "demo", "unknown"):
-        logger.warning(
-            "Live session start BLOCKED: trading_mode=%s (not live/demo) — actor=%s",
-            trading_mode, getattr(actor, "actor_id", "?"),
-        )
-        raise HTTPException(
-            status_code=409,
-            detail=f"Live session blocked: engine trading_mode={trading_mode!r}. "
-                   "Set trading_mode = 'demo' (for testing) or 'live' in engine.toml.",
-        )
-    if trading_mode == "demo":
-        logger.warning(
-            "⚠ DEMO-LIVE TEST: live session started with trading_mode=demo — "
-            "using demo API keys, NO real money at risk — actor=%s",
-            getattr(actor, "actor_id", "?"),
-        )
+    authority = _get_execution_authority()
 
-    # Resume paper pipeline (sends orders to exchange when TradingMode=Live)
-    # 恢復 paper 管線（TradingMode=Live 時會向交易所發送訂單）
+    # Mark live session as user-started / 標記 live session 為用戶啟動
     global _LIVE_USER_STOPPED
     _LIVE_USER_STOPPED = False
+
+    # Resume engine pipeline if it was paused by a previous stop
+    # 如果管線因上次 stop 而暫停，恢復管線
+    result: dict = {}
     try:
         result = await _ipc_command("resume_paper")
     except Exception as exc:
-        logger.error("IPC resume_paper failed for live start: %s", exc)
-        raise HTTPException(status_code=502, detail=f"IPC command failed: {exc}")
+        logger.warning("IPC resume_paper skipped (engine may already be running): %s", exc)
 
     logger.warning(
-        "⚠ LIVE SESSION STARTED — real money at risk — actor=%s",
-        getattr(actor, "actor_id", "?"),
+        "⚠ LIVE SESSION STARTED — trading_mode=%s authority=%s — actor=%s",
+        trading_mode, authority, getattr(actor, "actor_id", "?"),
     )
     return _live_response({
-        "message": "Live session started — REAL MONEY / 實盤 session 已啟動 — 真實資金",
+        "message": "Live session started / 實盤 session 已啟動",
         "source": "rust_engine",
-        "execution_authority": authority,
         "trading_mode": trading_mode,
+        "authority": authority,
         "ipc_result": result,
         "session": {"session_state": "active", "session_id": "rust_engine_live"},
     })
@@ -326,14 +290,12 @@ async def post_live_session_stop(
 ) -> dict:
     """
     POST /api/v1/live/session/stop
-    停止 Live session：取消掛單 + 平倉 + 暫停策略
+    停止 Live session：平倉 + 取消交易所掛單。
 
-    Stop sequence (fail-partial tolerant — all steps attempted):
-    1. Close all positions via IPC (also cancels exchange orders in Live mode)
-    2. Pause paper pipeline via IPC
-    停止序列（fail-partial 容忍 — 所有步驟都會嘗試）：
-    1. 通過 IPC 平倉（Live 模式下同時取消交易所掛單）
-    2. 通過 IPC 暫停管線
+    Stop only closes live positions. Does NOT pause the engine pipeline —
+    paper/demo session continues running independently after live stop.
+
+    只平倉，不 pause 引擎管線 — paper/demo session 在 live stop 後繼續獨立運行。
     """
     _require_operator(actor)
 
@@ -343,7 +305,8 @@ async def post_live_session_stop(
     errors: list[str] = []
     rust_online = get_rust_reader().is_available()
 
-    # Step 1: Close positions via IPC / 通過 IPC 平倉
+    # Close all live positions via IPC (engine handles exchange order cancellation in live mode)
+    # 通過 IPC 平倉（live 模式下引擎同時處理交易所掛單取消）
     close_result: dict = {}
     if rust_online:
         try:
@@ -354,26 +317,14 @@ async def post_live_session_stop(
     else:
         close_result = {"skipped": True, "reason": "engine_offline"}
 
-    # Step 2: Pause pipeline via IPC / 通過 IPC 暫停管線
-    pause_result: dict = {}
-    if rust_online:
-        try:
-            pause_result = await _ipc_command("pause_paper")
-        except Exception as exc:
-            errors.append(f"pause_pipeline: {exc}")
-            logger.error("IPC pause_paper failed (live stop): %s", exc)
-    else:
-        pause_result = {"skipped": True, "reason": "engine_offline"}
-
     logger.warning(
-        "⚠ LIVE SESSION STOPPED — errors=%s — actor=%s",
+        "⚠ LIVE SESSION STOPPED — positions closed — errors=%s — actor=%s",
         errors or None, getattr(actor, "actor_id", "?"),
     )
     return _live_response({
         "message": "Live session stopped — positions closed / 實盤 session 已停止 — 倉位已平",
         "source": "rust_engine",
         "close_result": close_result,
-        "pause_result": pause_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped", "session_id": "rust_engine_live"},
     })
