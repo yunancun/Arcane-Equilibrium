@@ -152,7 +152,8 @@ pub fn check_position_on_tick(
         ));
     }
 
-    // 2. Dynamic stop
+    // 2. Dynamic stop — pass atr_stop_mult from DynamicStop config (was hardcoded 1.5 in core).
+    // 動態止損 — 傳入 DynamicStop.atr_stop_mult（原本在 core 內寫死 1.5）。
     let dyn_stop = compute_dynamic_stop_pct(
         limits.stop_loss_max_pct * dyn_cfg.base_ratio,
         atr_pct,
@@ -161,6 +162,7 @@ pub fn check_position_on_tick(
         regime,
         limits.stop_loss_max_pct,
         dyn_cfg.cap_ratio,
+        dyn_cfg.atr_stop_mult,
     );
     if pnl_pct <= -dyn_stop {
         return RiskAction::ClosePosition(format!(
@@ -334,8 +336,12 @@ mod tests {
 
     #[test]
     fn test_tick_dynamic_stop() {
+        // Default atr_stop_mult=2.0, hard_stop=5%, base_ratio=0.6, cap_ratio=0.8:
+        //   base=3%, cap=4%, ATR=2% → atr_stop=4% → effective=4%
+        //   max dyn_stop with anti-cluster (+15%) = 4.6%; use -4.7 to guarantee trigger.
+        // 預設 atr_stop_mult=2.0：atr_stop=4%，最大 dyn_stop≈4.6%，用 -4.7% 確保觸發。
         let cfg = default_config();
-        let action = call_tick(-4.0, 0.0, 1.0, 0.0, "trending", Some(2.0), 0, 0.0, 0.0, &cfg);
+        let action = call_tick(-4.7, 0.0, 1.0, 0.0, "trending", Some(2.0), 0, 0.0, 0.0, &cfg);
         assert!(
             matches!(action, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
             "expected dynamic stop, got {:?}", action
@@ -441,6 +447,34 @@ mod tests {
         let cfg = default_config();
         let action = call_tick(-5.0, 3.0, 1.0, 0.0, "trending", Some(1.0), 0, 0.0, 0.0, &cfg);
         assert!(matches!(action, RiskAction::ClosePosition(ref r) if r.contains("HARD STOP")));
+    }
+
+    #[test]
+    fn test_tick_atr_stop_mult_respected() {
+        // Verify DynamicStop.atr_stop_mult is wired through to compute_dynamic_stop_pct.
+        // 驗證 DynamicStop.atr_stop_mult 確實傳入 compute_dynamic_stop_pct。
+        //
+        // Setup: hard_stop=5%, base_ratio=0.6, cap_ratio=0.8, ATR=1.5%
+        //   base = 3.0%,  cap = 4.0%
+        //   mult=1.0 → atr_stop=1.5 < base → effective=3.0 → dyn_stop ≈ 3.3%  → -3.5 triggers
+        //   mult=2.5 → atr_stop=3.75 > base → effective=3.75 → dyn_stop ≈ 4.2% → -3.5 holds
+        let mut cfg_tight = RiskConfig::default();
+        cfg_tight.dynamic_stop.atr_stop_mult = 1.0;
+
+        let mut cfg_wide = RiskConfig::default();
+        cfg_wide.dynamic_stop.atr_stop_mult = 2.5;
+
+        let tight = call_tick(-3.5, 0.0, 1.0, 0.0, "trending", Some(1.5), 0, 0.0, 0.0, &cfg_tight);
+        let wide  = call_tick(-3.5, 0.0, 1.0, 0.0, "trending", Some(1.5), 0, 0.0, 0.0, &cfg_wide);
+
+        assert!(
+            matches!(tight, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
+            "tight mult=1.0 should trigger dynamic stop, got {:?}", tight
+        );
+        assert!(
+            matches!(wide, RiskAction::Hold),
+            "wide mult=2.5 should hold (wider stop), got {:?}", wide
+        );
     }
 
     #[test]
