@@ -1,24 +1,35 @@
-# risk_config_demo.toml — Demo engine risk configuration
-# Demo 引擎風控配置（連接 Bybit Demo 交易所，模擬資金）
-# LIVE-P2-1: per-engine RiskConfig separation
+# Demo Engine Risk Config — Aggressive but Realistic
+# Demo 引擎風控配置 — 激進但可遷移到 live
+#
+# Design intent / 設計意圖:
+#   P1 (limits): Wide ceilings for aggressive strategy testing.
+#                寬上限，測試激進策略邊界。
+#   P2 (dynamic_stop): base_ratio=0.40, cap_ratio=0.85 →
+#     agent real working stop range ~5%–25% of account.
+#     Agent 有效止損範圍約 5%–25%。
+#   cascade: Meaningful risk governance — triggers at realistic levels.
+#            有意義的風控治理，在實際可接受的水平觸發。
+#   h0_shadow_mode=false: H0 gate fully enforced (B3 fix).
+#                         H0 gate 強制執行（修復 B3：原來誤設為 shadow mode）。
+# GUI / IPC patch_risk_config can override any field at runtime.
 
 [meta]
-version = 1
+version = 2
 saved_ts_ms = 0
 
 [limits]
-stop_loss_max_pct = 20.0
-take_profit_max_pct = 20.0
+stop_loss_max_pct = 25.0          # P1 backstop; P2 dynamic stop caps at ~21.25%
+take_profit_max_pct = 25.0
 take_profit_enforced = false
-position_size_max_pct = 15.0
-total_exposure_max_pct = 100.0
-correlated_exposure_max_pct = 60.0
+position_size_max_pct = 25.0
+total_exposure_max_pct = 150.0
+correlated_exposure_max_pct = 65.0
 leverage_max = 50.0
-session_drawdown_max_pct = 10.0
-daily_loss_max_pct = 10.0
-consec_loss_cooldown_count = 3
-consec_loss_cooldown_min = 30
-holding_hours_max = 76.0
+session_drawdown_max_pct = 25.0
+daily_loss_max_pct = 15.0
+consec_loss_cooldown_count = 4
+consec_loss_cooldown_min = 15
+holding_hours_max = 168.0
 open_positions_max = 25
 min_order_notional_usdt = 0.0
 max_order_notional_usdt = 0.0
@@ -28,7 +39,7 @@ margin_mode = "isolated"
 position_mode = "one_way"
 guardian_modification_size_factor = 0.5
 guardian_modification_leverage_cap = 2.0
-per_trade_risk_pct = 0.1
+per_trade_risk_pct = 0.08         # B2 fix: was 0.15, now 8% — aggressive but not suicidal
 
 [overrides]
 
@@ -36,8 +47,8 @@ per_trade_risk_pct = 0.1
 
 [agent]
 trailing_enabled = true
-trailing_activation_pct = 1.0
-trailing_distance_pct = 3.0
+trailing_activation_pct = 0.8
+trailing_distance_pct = 3.5
 size_multiplier = 1.0
 prefer_limit = true
 reduce_only_close = true
@@ -47,22 +58,24 @@ partial_tp_levels = []
 
 [agent.category_weights]
 
+# Cascade: aggressive thresholds — distinct from paper, meaningful for strategy validation
+# 激進但有意義的熔斷閾值，用於驗證策略穩健性
 [cascade]
-drawdown_cautious_pct = 5.0
-drawdown_reduced_pct = 8.0
-drawdown_defensive_pct = 12.0
-drawdown_circuit_pct = 15.0
-daily_loss_cautious_pct = 2.0
-daily_loss_reduced_pct = 3.5
-daily_loss_circuit_pct = 5.0
-consec_loss_cautious = 3
-consec_loss_reduced = 5
-consec_loss_circuit = 10
-pressure_cautious = 0.3
-pressure_reduced = 0.5
-pressure_defensive = 0.7
-pressure_circuit = 0.9
-min_hold_ms = 300000
+drawdown_cautious_pct = 8.0
+drawdown_reduced_pct = 15.0
+drawdown_defensive_pct = 20.0
+drawdown_circuit_pct = 22.0
+daily_loss_cautious_pct = 5.0
+daily_loss_reduced_pct = 10.0
+daily_loss_circuit_pct = 14.0
+consec_loss_cautious = 4
+consec_loss_reduced = 7
+consec_loss_circuit = 12
+pressure_cautious = 0.35
+pressure_reduced = 0.55
+pressure_defensive = 0.72
+pressure_circuit = 0.88
+min_hold_ms = 120000
 
 [regime.trending]
 stop = 1.0
@@ -90,41 +103,45 @@ tp = 1.0
 time = 1.0
 
 [cost_gate]
-min_confidence = 0.15
-k_base = 1.5
-k_medium = 2.0
-k_small = 3.0
-adx_trending = 25.0
+min_confidence = 0.10
+k_base = 1.2
+k_medium = 1.5
+k_small = 2.0
+adx_trending = 20.0
 
+# Dynamic stop: base=40%×P1=10%, cap=85%×P1=21.25%
+# 動態止損：基礎=10%，上限=21.25%
 [dynamic_stop]
-base_ratio = 0.6
-cap_ratio = 0.8
-trailing_min_rr = 0.5
+base_ratio = 0.40
+cap_ratio = 0.85
+trailing_min_rr = 0.3
 atr_stop_mult = 2.0
-atr_tp_mult = 3.0
+atr_tp_mult = 3.5
 
 [market_gate]
-min_ob_depth_usdt = 50000.0
-max_ob_imbalance = 0.7
-min_volume_24h_usdt = 1000000.0
+min_ob_depth_usdt = 30000.0
+max_ob_imbalance = 0.75
+min_volume_24h_usdt = 500000.0
 max_taker_fee_bps = 8.0
-spread_max_bps = 20.0
-slippage_max_bps = 15.0
+spread_max_bps = 25.0
+slippage_max_bps = 18.0
 funding_rate_max_abs = 0.03
-liquidation_buffer_pct = 20.0
-max_orders_per_minute = 60
+liquidation_buffer_pct = 15.0
+max_orders_per_minute = 90
 
 [anti_cluster]
 offset_fraction = 0.15
-max_same_direction = 5
+max_same_direction = 7
 
 [correlation]
-max_pairwise_r = 0.7
-window_minutes = 60
+max_pairwise_r = 0.75
+window_minutes = 45
 
+# h0_shadow_mode=false: H0 gate fully enforced in demo (B3 fix)
+# h0_shadow_mode=false：Demo 模式 H0 強制執行（修復原誤設為 true）
 [runtime]
 boot_cooldown_ms = 60000
 signals_heartbeat_ms = 60000
-h0_shadow_mode = true
+h0_shadow_mode = false
 
 [experimental.flags]

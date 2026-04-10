@@ -1,40 +1,48 @@
-# risk_config_live.toml — Live engine risk configuration (REAL MONEY)
-# 實盤引擎風控配置（真實資金 — 默認比 paper/demo 更保守）
-# LIVE-P2-1: per-engine RiskConfig separation
+# Live Engine Risk Config — Stable Profitability
+# 實盤引擎風控配置 — 穩定盈利，資本保全優先
 #
-# IMPORTANT: These defaults are intentionally more conservative than paper/demo.
-# Operator must explicitly relax limits here before going live.
-# 重要：這些默認值比 paper/demo 更保守，需要 Operator 明確放寬才能實盤。
+# Design intent / 設計意圖:
+#   P1 (limits): Backstop only — set generous enough to not constrain normal operation.
+#                P1 僅作緊急兜底，足夠寬不干擾正常交易。
+#   P2 (dynamic_stop): base_ratio=0.50, cap_ratio=0.75 →
+#     agent real working stop range ~3.8%–11.25% (relative to P1=15%).
+#     Agent 有效止損範圍約 3.8%–11.25%（P1 15% 的 50%–75%）。
+#   partial_tp: 5%→30% close, 10%→40% close, remaining on trailing.
+#               分批止盈：5% 時平 30%，10% 再平 40%，剩餘追蹤。
+#   Adjusted upward from initial draft for small-account usability.
+#   相比初稿適當上調，確保小金額帳戶可正常交易。
+#
+# B1 fix: allowed_categories corrected ("reverse" → "inverse")
+# B1 修復：品類清單糾錯（"reverse" 改為 "inverse"）
+# GUI / IPC patch_risk_config can override any field at runtime.
 
 [meta]
-version = 1
+version = 2
 saved_ts_ms = 0
 
 [limits]
-# Tighter hard ceilings for live (real money) operation
-# 實盤（真實資金）更嚴格的硬上限
-stop_loss_max_pct = 10.0
+stop_loss_max_pct = 15.0          # P1 backstop; P2 dynamic stop caps at ~11.25%
 take_profit_max_pct = 20.0
 take_profit_enforced = false
-position_size_max_pct = 5.0
-total_exposure_max_pct = 50.0
-correlated_exposure_max_pct = 30.0
-leverage_max = 10.0
-session_drawdown_max_pct = 5.0
-daily_loss_max_pct = 3.0
-consec_loss_cooldown_count = 3
-consec_loss_cooldown_min = 60
-holding_hours_max = 48.0
+position_size_max_pct = 15.0
+total_exposure_max_pct = 80.0
+correlated_exposure_max_pct = 40.0
+leverage_max = 15.0
+session_drawdown_max_pct = 12.0
+daily_loss_max_pct = 7.0
+consec_loss_cooldown_count = 2
+consec_loss_cooldown_min = 45
+holding_hours_max = 72.0
 open_positions_max = 10
 min_order_notional_usdt = 5.0
 max_order_notional_usdt = 0.0
-min_balance_usdt = 100.0
-allowed_categories = ["linear"]
+min_balance_usdt = 50.0
+allowed_categories = ["linear", "spot", "inverse"]   # B1 fix: was "reverse"
 margin_mode = "isolated"
 position_mode = "one_way"
-guardian_modification_size_factor = 0.3
+guardian_modification_size_factor = 0.4
 guardian_modification_leverage_cap = 1.5
-per_trade_risk_pct = 0.03
+per_trade_risk_pct = 0.03         # 3% per trade — usable on small accounts
 
 [overrides]
 
@@ -44,32 +52,32 @@ per_trade_risk_pct = 0.03
 trailing_enabled = true
 trailing_activation_pct = 0.5
 trailing_distance_pct = 2.0
-size_multiplier = 0.5
+size_multiplier = 0.7
 prefer_limit = true
 reduce_only_close = true
 post_only_limit = true
-partial_tp_enabled = false
-partial_tp_levels = []
+partial_tp_enabled = true
+partial_tp_levels = [[5.0, 0.3], [10.0, 0.4]]  # 5%→close30%, 10%→close40%, rest trailing
 
 [agent.category_weights]
 
+# Cascade: tight but not hair-trigger — leaves room for normal volatility
+# 熔斷緊但不過敏，為正常波動留餘裕
 [cascade]
-# Tighter cascade thresholds for live trading
-# 實盤更嚴格的級聯閾值
-drawdown_cautious_pct = 2.0
-drawdown_reduced_pct = 3.5
-drawdown_defensive_pct = 5.0
-drawdown_circuit_pct = 7.0
-daily_loss_cautious_pct = 1.0
-daily_loss_reduced_pct = 2.0
-daily_loss_circuit_pct = 3.0
+drawdown_cautious_pct = 2.5
+drawdown_reduced_pct = 5.0
+drawdown_defensive_pct = 8.0
+drawdown_circuit_pct = 10.0
+daily_loss_cautious_pct = 1.5
+daily_loss_reduced_pct = 3.0
+daily_loss_circuit_pct = 5.5
 consec_loss_cautious = 2
 consec_loss_reduced = 3
-consec_loss_circuit = 5
+consec_loss_circuit = 6
 pressure_cautious = 0.25
-pressure_reduced = 0.4
-pressure_defensive = 0.6
-pressure_circuit = 0.8
+pressure_reduced = 0.40
+pressure_defensive = 0.60
+pressure_circuit = 0.80
 min_hold_ms = 600000
 
 [regime.trending]
@@ -97,42 +105,47 @@ stop = 1.0
 tp = 1.0
 time = 1.0
 
+# Cost gate: stricter than demo but practical for real markets
+# 費率門控比 demo 嚴，但對真實市場實用
 [cost_gate]
-# Higher confidence bar for live trades / 實盤要求更高信心門檻
-min_confidence = 0.25
-k_base = 2.0
-k_medium = 2.5
-k_small = 4.0
-adx_trending = 30.0
+min_confidence = 0.20
+k_base = 1.8
+k_medium = 2.2
+k_small = 3.5
+adx_trending = 28.0
 
+# Dynamic stop: base=50%×P1=7.5%, cap=75%×P1=11.25%
+# 動態止損：基礎=7.5%，上限=11.25%，P1 15% 純兜底
 [dynamic_stop]
-base_ratio = 0.5
-cap_ratio = 0.7
+base_ratio = 0.50
+cap_ratio = 0.75
 trailing_min_rr = 0.8
 atr_stop_mult = 1.5
 atr_tp_mult = 2.5
 
+# Market gate: liquidity-focused but practical for mid-cap coins
+# 微結構門控：注重流動性但不僅限 BTC/ETH
 [market_gate]
-min_ob_depth_usdt = 100000.0
-max_ob_imbalance = 0.6
-min_volume_24h_usdt = 5000000.0
-max_taker_fee_bps = 6.0
-spread_max_bps = 10.0
-slippage_max_bps = 8.0
-funding_rate_max_abs = 0.02
-liquidation_buffer_pct = 30.0
-max_orders_per_minute = 30
+min_ob_depth_usdt = 50000.0
+max_ob_imbalance = 0.65
+min_volume_24h_usdt = 2000000.0
+max_taker_fee_bps = 7.0
+spread_max_bps = 15.0
+slippage_max_bps = 10.0
+funding_rate_max_abs = 0.025
+liquidation_buffer_pct = 25.0
+max_orders_per_minute = 40
 
 [anti_cluster]
-offset_fraction = 0.2
-max_same_direction = 3
+offset_fraction = 0.20
+max_same_direction = 4
 
 [correlation]
-max_pairwise_r = 0.5
-window_minutes = 120
+max_pairwise_r = 0.55
+window_minutes = 90
 
 [runtime]
-boot_cooldown_ms = 120000
+boot_cooldown_ms = 90000
 signals_heartbeat_ms = 30000
 h0_shadow_mode = false
 

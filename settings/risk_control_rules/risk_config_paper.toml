@@ -1,24 +1,36 @@
-# risk_config_paper.toml — Paper-only engine risk configuration
-# 純 Paper 引擎風控配置（無真實資金，可用於策略驗證）
-# LIVE-P2-1: per-engine RiskConfig separation
+# Paper Engine Risk Config — Maximum Agent Exploration
+# 紙盤引擎風控配置 — 最大 Agent 探索自由度
+#
+# Design intent / 設計意圖:
+#   P1 (limits): Very wide ceilings — emergency backstop only.
+#                硬上限極寬，僅作緊急兜底。
+#   P2 (dynamic_stop): base_ratio=0.30, cap_ratio=0.95 →
+#     agent real working stop range ~9%–54% of account.
+#     Agent 有效止損範圍約 9%–54%（含 regime×anti-cluster）。
+#   cascade: Very tolerant — let agent explore deep drawdowns before halting.
+#            高容忍，讓 Agent 在熔斷前充分探索。
+#   h0_shadow_mode=true: H0 gate logs decisions but never blocks.
+#                        H0 gate 純觀察，不阻擋交易。
+# GUI / IPC patch_risk_config can override any field at runtime.
+# GUI / IPC patch_risk_config 可在運行時覆蓋任何欄位。
 
 [meta]
-version = 1
+version = 2
 saved_ts_ms = 0
 
 [limits]
-stop_loss_max_pct = 20.0
-take_profit_max_pct = 20.0
+stop_loss_max_pct = 50.0          # P1 backstop; P2 dynamic stop caps at ~47.5%
+take_profit_max_pct = 30.0
 take_profit_enforced = false
-position_size_max_pct = 15.0
-total_exposure_max_pct = 100.0
-correlated_exposure_max_pct = 60.0
-leverage_max = 50.0
-session_drawdown_max_pct = 10.0
-daily_loss_max_pct = 10.0
-consec_loss_cooldown_count = 3
-consec_loss_cooldown_min = 30
-holding_hours_max = 76.0
+position_size_max_pct = 50.0
+total_exposure_max_pct = 200.0
+correlated_exposure_max_pct = 80.0
+leverage_max = 100.0
+session_drawdown_max_pct = 50.0
+daily_loss_max_pct = 30.0
+consec_loss_cooldown_count = 5
+consec_loss_cooldown_min = 3
+holding_hours_max = 720.0
 open_positions_max = 25
 min_order_notional_usdt = 0.0
 max_order_notional_usdt = 0.0
@@ -28,7 +40,7 @@ margin_mode = "isolated"
 position_mode = "one_way"
 guardian_modification_size_factor = 0.5
 guardian_modification_leverage_cap = 2.0
-per_trade_risk_pct = 0.1
+per_trade_risk_pct = 0.20
 
 [overrides]
 
@@ -36,8 +48,8 @@ per_trade_risk_pct = 0.1
 
 [agent]
 trailing_enabled = true
-trailing_activation_pct = 1.0
-trailing_distance_pct = 3.0
+trailing_activation_pct = 0.5
+trailing_distance_pct = 2.0
 size_multiplier = 1.0
 prefer_limit = true
 reduce_only_close = true
@@ -47,22 +59,24 @@ partial_tp_levels = []
 
 [agent.category_weights]
 
+# Cascade: fire very late — agent needs room to explore
+# 熔斷極晚觸發，讓 Agent 自由探索
 [cascade]
-drawdown_cautious_pct = 5.0
-drawdown_reduced_pct = 8.0
-drawdown_defensive_pct = 12.0
-drawdown_circuit_pct = 15.0
-daily_loss_cautious_pct = 2.0
-daily_loss_reduced_pct = 3.5
-daily_loss_circuit_pct = 5.0
-consec_loss_cautious = 3
-consec_loss_reduced = 5
-consec_loss_circuit = 10
-pressure_cautious = 0.3
-pressure_reduced = 0.5
-pressure_defensive = 0.7
+drawdown_cautious_pct = 15.0
+drawdown_reduced_pct = 25.0
+drawdown_defensive_pct = 35.0
+drawdown_circuit_pct = 45.0
+daily_loss_cautious_pct = 10.0
+daily_loss_reduced_pct = 20.0
+daily_loss_circuit_pct = 28.0
+consec_loss_cautious = 5
+consec_loss_reduced = 8
+consec_loss_circuit = 15
+pressure_cautious = 0.4
+pressure_reduced = 0.6
+pressure_defensive = 0.75
 pressure_circuit = 0.9
-min_hold_ms = 300000
+min_hold_ms = 60000
 
 [regime.trending]
 stop = 1.0
@@ -89,41 +103,49 @@ stop = 1.0
 tp = 1.0
 time = 1.0
 
+# Cost gate: very permissive — let agent try low-confidence signals
+# 費率門控極寬鬆，允許低信心信號入場
 [cost_gate]
-min_confidence = 0.15
-k_base = 1.5
-k_medium = 2.0
-k_small = 3.0
-adx_trending = 25.0
+min_confidence = 0.05
+k_base = 1.0
+k_medium = 1.2
+k_small = 1.5
+adx_trending = 15.0
 
+# Dynamic stop: base=30%×P1=15%, cap=95%×P1=47.5%
+# 動態止損：基礎=15%，上限=47.5%（相對帳戶）
 [dynamic_stop]
-base_ratio = 0.6
-cap_ratio = 0.8
-trailing_min_rr = 0.5
-atr_stop_mult = 2.0
-atr_tp_mult = 3.0
+base_ratio = 0.30
+cap_ratio = 0.95
+trailing_min_rr = 0.2
+atr_stop_mult = 2.5
+atr_tp_mult = 4.0
 
+# Market gate: minimal filters — allow illiquid / exotic pairs
+# 微結構門控極低，允許流動性較低的幣種
 [market_gate]
-min_ob_depth_usdt = 50000.0
-max_ob_imbalance = 0.7
-min_volume_24h_usdt = 1000000.0
-max_taker_fee_bps = 8.0
-spread_max_bps = 20.0
-slippage_max_bps = 15.0
-funding_rate_max_abs = 0.03
-liquidation_buffer_pct = 20.0
-max_orders_per_minute = 60
+min_ob_depth_usdt = 10000.0
+max_ob_imbalance = 0.85
+min_volume_24h_usdt = 100000.0
+max_taker_fee_bps = 12.0
+spread_max_bps = 50.0
+slippage_max_bps = 30.0
+funding_rate_max_abs = 0.05
+liquidation_buffer_pct = 10.0
+max_orders_per_minute = 120
 
 [anti_cluster]
 offset_fraction = 0.15
-max_same_direction = 5
+max_same_direction = 10
 
 [correlation]
-max_pairwise_r = 0.7
-window_minutes = 60
+max_pairwise_r = 0.90
+window_minutes = 30
 
+# h0_shadow_mode=true: H0 gate observes only, never blocks paper trades
+# h0_shadow_mode=true：H0 gate 純觀察，不阻擋紙盤交易
 [runtime]
-boot_cooldown_ms = 60000
+boot_cooldown_ms = 30000
 signals_heartbeat_ms = 60000
 h0_shadow_mode = true
 
