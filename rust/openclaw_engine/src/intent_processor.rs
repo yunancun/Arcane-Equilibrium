@@ -28,6 +28,17 @@ pub struct OrderIntent {
     pub limit_price: Option<f64>,
 }
 
+/// Captured Guardian verdict for DB persistence (risk_verdicts table).
+/// 捕獲的 Guardian 裁定，用於持久化到 risk_verdicts 表。
+#[derive(Debug, Clone)]
+pub struct VerdictInfo {
+    /// "Approved", "Modified", or "Rejected" / 批准、修改或拒絕
+    pub verdict: String,
+    pub risk_score: f64,
+    pub reasons: Vec<String>,
+    pub modified_qty: Option<f64>,
+}
+
 /// Result of intent processing.
 /// 意圖處理結果。
 #[derive(Debug, Clone)]
@@ -35,6 +46,9 @@ pub struct IntentResult {
     pub submitted: bool,
     pub rejected_reason: Option<String>,
     pub fill: Option<FillResult>,
+    /// Guardian verdict for DB persistence; None if rejected before guardian check.
+    /// Guardian 裁定供 DB 持久化；在 Guardian 前被拒時為 None。
+    pub verdict_info: Option<VerdictInfo>,
 }
 
 /// EXT-1: Result of gate-only processing for exchange mode.
@@ -47,6 +61,9 @@ pub struct ExchangeGateResult {
     pub rejected_reason: Option<String>,
     /// Gate-approved quantity after Kelly sizing + P1 cap / 門禁批准的數量（Kelly + P1 上限後）
     pub approved_qty: f64,
+    /// Guardian verdict for DB persistence; None if rejected before guardian check.
+    /// Guardian 裁定供 DB 持久化；在 Guardian 前被拒時為 None。
+    pub verdict_info: Option<VerdictInfo>,
 }
 
 /// Intent processor with guardian checks.
@@ -412,6 +429,7 @@ impl IntentProcessor {
                 submitted: false,
                 rejected_reason: Some("governance_not_authorized".into()),
                 fill: None,
+                verdict_info: None,
             };
         }
 
@@ -428,6 +446,7 @@ impl IntentProcessor {
                         existing.qty,
                     )),
                     fill: None,
+                    verdict_info: None,
                 };
             }
         }
@@ -464,6 +483,19 @@ impl IntentProcessor {
 
         let guardian_result = self.guardian.review(&check, &ctx);
 
+        // Capture Guardian verdict for DB persistence (trading.risk_verdicts).
+        // 捕獲 Guardian 裁定供 DB 持久化（trading.risk_verdicts）。
+        let mut vi: Option<VerdictInfo> = Some(VerdictInfo {
+            verdict: match guardian_result.verdict {
+                Verdict::Approved => "Approved".to_string(),
+                Verdict::Modified => "Modified".to_string(),
+                Verdict::Rejected => "Rejected".to_string(),
+            },
+            risk_score: guardian_result.risk_score,
+            reasons: guardian_result.reasons.clone(),
+            modified_qty: guardian_result.modified_qty,
+        });
+
         match guardian_result.verdict {
             Verdict::Rejected => {
                 return IntentResult {
@@ -473,6 +505,7 @@ impl IntentProcessor {
                         guardian_result.reasons
                     )),
                     fill: None,
+                    verdict_info: vi.take(),
                 };
             }
             Verdict::Modified => {
@@ -532,6 +565,7 @@ impl IntentProcessor {
                     final_qty, kelly_qty, p1_max_qty, balance, price,
                 )),
                 fill: None,
+                verdict_info: vi.take(),
             };
         }
 
@@ -562,6 +596,7 @@ impl IntentProcessor {
                     submitted: false,
                     rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
                     fill: None,
+                    verdict_info: vi.take(),
                 };
             }
         }
@@ -578,6 +613,7 @@ impl IntentProcessor {
                         intent.confidence, min_confidence,
                     )),
                     fill: None,
+                    verdict_info: vi.take(),
                 };
             }
             // SEC-11: ATR=0 → fail-closed (cold-start by PNL-3 boot cooldown; runtime ATR=0 = indicator failure).
@@ -589,12 +625,13 @@ impl IntentProcessor {
                     submitted: false,
                     rejected_reason: Some("cost_gate: ATR unavailable (fail-closed, SEC-11)".into()),
                     fill: None,
+                    verdict_info: vi.take(),
                 };
             }
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
             if let Some(r) = self.cost_gate_paper(&intent.strategy, &intent.symbol,
                                                    atr, intent.confidence, final_qty, price, volume_24h) {
-                return r;
+                return IntentResult { verdict_info: vi.take(), ..r };
             }
         }
 
@@ -620,6 +657,7 @@ impl IntentProcessor {
             submitted: true,
             rejected_reason: None,
             fill: Some(fill),
+            verdict_info: vi.take(),
         }
     }
 
@@ -639,6 +677,7 @@ impl IntentProcessor {
                 approved: false,
                 rejected_reason: Some("governance_not_authorized".into()),
                 approved_qty: 0.0,
+                verdict_info: None,
             };
         }
         // Gate 1.5: Reject same-direction duplicate
@@ -653,6 +692,7 @@ impl IntentProcessor {
                         existing.qty,
                     )),
                     approved_qty: 0.0,
+                    verdict_info: None,
                 };
             }
         }
@@ -684,11 +724,26 @@ impl IntentProcessor {
             qty: intent.qty,
         };
         let guardian_result = self.guardian.review(&check, &ctx);
+
+        // Capture Guardian verdict for DB persistence (trading.risk_verdicts).
+        // 捕獲 Guardian 裁定供 DB 持久化（trading.risk_verdicts）。
+        let mut vi: Option<VerdictInfo> = Some(VerdictInfo {
+            verdict: match guardian_result.verdict {
+                Verdict::Approved => "Approved".to_string(),
+                Verdict::Modified => "Modified".to_string(),
+                Verdict::Rejected => "Rejected".to_string(),
+            },
+            risk_score: guardian_result.risk_score,
+            reasons: guardian_result.reasons.clone(),
+            modified_qty: guardian_result.modified_qty,
+        });
+
         if let Verdict::Rejected = guardian_result.verdict {
             return ExchangeGateResult {
                 approved: false,
                 rejected_reason: Some(format!("guardian_rejected: {:?}", guardian_result.reasons)),
                 approved_qty: 0.0,
+                verdict_info: vi.take(),
             };
         }
         // Gate 2.5: Kelly position sizing
@@ -736,6 +791,7 @@ impl IntentProcessor {
                     final_qty, kelly_qty, p1_max_qty, balance, price,
                 )),
                 approved_qty: 0.0,
+                verdict_info: vi.take(),
             };
         }
 
@@ -766,6 +822,7 @@ impl IntentProcessor {
                     approved: false,
                     rejected_reason: Some(format!("risk_gate: {}", check_result.reason)),
                     approved_qty: 0.0,
+                    verdict_info: vi.take(),
                 };
             }
         }
@@ -782,6 +839,7 @@ impl IntentProcessor {
                         intent.confidence, min_confidence,
                     )),
                     approved_qty: 0.0,
+                    verdict_info: vi.take(),
                 };
             }
             // SEC-11: ATR=0 → fail-closed.
@@ -792,12 +850,13 @@ impl IntentProcessor {
                     approved: false,
                     rejected_reason: Some("cost_gate: ATR unavailable (fail-closed, SEC-11)".into()),
                     approved_qty: 0.0,
+                    verdict_info: vi.take(),
                 };
             }
             let fee_rate = self.fee_rate(&intent.symbol);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
             if let Some(r) = self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h) {
-                return r;
+                return ExchangeGateResult { verdict_info: vi.take(), ..r };
             }
         }
 
@@ -805,6 +864,7 @@ impl IntentProcessor {
             approved: true,
             rejected_reason: None,
             approved_qty: final_qty,
+            verdict_info: vi.take(),
         }
     }
 
@@ -876,6 +936,7 @@ impl IntentProcessor {
                             slippage * 10_000.0,
                         )),
                         fill: None,
+                        verdict_info: None,
                     });
                 }
                 tracing::debug!(strategy, symbol, shrunk_edge_bps = cell.shrunk_bps,
@@ -914,6 +975,7 @@ impl IntentProcessor {
                             slippage * 10_000.0,
                         )),
                         fill: None,
+                        verdict_info: None,
                     });
                 }
                 None
@@ -952,6 +1014,7 @@ impl IntentProcessor {
                             cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
                         )),
                         approved_qty: 0.0,
+                        verdict_info: None,
                     });
                 }
                 None // pass
@@ -963,6 +1026,7 @@ impl IntentProcessor {
                     cell.shrunk_bps,
                 )),
                 approved_qty: 0.0,
+                verdict_info: None,
             }),
             None => Some(ExchangeGateResult {
                 approved: false,
@@ -970,6 +1034,7 @@ impl IntentProcessor {
                     "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉".into(),
                 ),
                 approved_qty: 0.0,
+                verdict_info: None,
             }),
         }
     }
