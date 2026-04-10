@@ -15,10 +15,10 @@
 | 層級 | 分離狀態 | 說明 |
 |------|---------|------|
 | **Risk Config** | ✅ 已完成 | `PerEngineRiskStores` 3 獨立 ConfigStore，IPC 路由按 engine 參數選擇 |
-| **Rust 引擎實例** | ❌ 缺失 | 單一 `TickPipeline`，單一 `PaperState`，切換模式共享狀態 |
-| **數據庫** | ❌ 缺失 | `trading.signals/intents/fills/orders/position_snapshots` 均無 `engine_mode` 列 |
-| **策略參數** | ❌ 缺失 | 全局一套，無 paper/demo/live 變體 |
-| **IPC 狀態** | ❌ 缺失 | `get_paper_state` 返回唯一共享狀態，無模式過濾 |
+| **Rust 引擎實例** | ✅ 完成 | `ModeState` 結構體 + `mode_states` HashMap + `ModeStateSnapshot`（Phase 3） |
+| **數據庫** | ✅ 完成 | V015 遷移 + 所有 writer 傳遞 `engine_mode`（Phase 1+2a） |
+| **策略參數** | ❌ 缺失 | 全局一套，無 paper/demo/live 變體（Phase 5 未來） |
+| **IPC 狀態** | ✅ 完成 | `get_paper_state(engine=)` + `get_mode_snapshot` + `get_active_modes`（Phase 4） |
 
 ---
 
@@ -81,7 +81,7 @@ Fills / Orders / Positions (每模式獨立)
 
 ## 實施計劃（5 Phase）
 
-### Phase 1: DB Schema — V015 Migration `[ ]`
+### Phase 1: DB Schema — V015 Migration `[x]`
 
 新增 `engine_mode TEXT NOT NULL DEFAULT 'paper'` 列。Signal 表不加（共享）。
 
@@ -109,7 +109,7 @@ Fills / Orders / Positions (每模式獨立)
 
 ---
 
-### Phase 2a: Rust DB Writer — 傳遞 engine_mode `[ ]`
+### Phase 2a: Rust DB Writer — 傳遞 engine_mode `[x]`
 
 **已有 writer 的表（4 個）：**
 
@@ -144,7 +144,7 @@ Fills / Orders / Positions (每模式獨立)
 
 ---
 
-### Phase 3: Rust Engine — Per-Mode State (ModeState) `[ ]`
+### Phase 3: Rust Engine — Per-Mode State (ModeState) `[x]`
 
 **核心變更：** `tick_pipeline.rs`
 
@@ -213,13 +213,23 @@ on_tick(event):
 
 ---
 
-### Phase 4: IPC + Python Side `[ ]`
+### Phase 4: IPC + Python Side `[x]`
 
 - `ipc_server.rs` — `PipelineSnapshot` 新增 `mode_snapshots: HashMap<String, ModeSnapshot>`
 - IPC `get_paper_state` 接受可選 `engine` 參數（默認 "paper" 向後兼容）
 - `ipc_state_reader.py` — `get_paper_state(mode="paper")` 參數化
 - `paper_trading_routes.py` → `get_paper_state("paper")`
 - `live_session_routes.py` → `get_paper_state("live")` 或 `get_paper_state("demo")`
+
+---
+
+### Phase 3 已知限制（2026-04-10 Fix Round 確認）
+
+**同時多模式 on_tick 需 per-mode 策略實例：** 當前 `Orchestrator` 內策略（grid_scalper、bb_breakout 等）維護內部狀態（`net_inventory`、`position` flags）。若在同一 tick 內為多個 mode 分別調用 `on_tick()`，策略內部狀態會被污染。
+
+**當前方案：** 支持模式**切換**（`set_trading_mode()` + `std::mem::swap`），各模式狀態完整保存/恢復。不支持同一 tick 內同時為 paper+demo+live 各自執行策略。
+
+**Phase 5+ 方案（未來）：** 為每個 active mode 各自持有一份策略實例（`HashMap<TradingMode, Orchestrator>`），on_tick 共享階段後 fan-out 到各模式的 Orchestrator。策略狀態自然隔離。
 
 ---
 

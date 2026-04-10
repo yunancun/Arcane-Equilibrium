@@ -59,7 +59,7 @@ use tracing::{info, warn};
 /// - PaperOnly：本地模擬，不需要交易所連線
 /// - Demo：對接 Bybit Demo 環境（api-demo.bybit.com）
 /// - Live：對接 Bybit 主網（api.bybit.com）— 需要 live slot 有效 API key + live_reserved global mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TradingMode {
     /// Local paper simulation (default) / 本地紙盤模擬（預設）
@@ -84,6 +84,19 @@ impl std::fmt::Display for TradingMode {
             TradingMode::PaperOnly => write!(f, "paper_only"),
             TradingMode::Demo => write!(f, "demo"),
             TradingMode::Live => write!(f, "live"),
+        }
+    }
+}
+
+impl TradingMode {
+    /// DB-canonical engine_mode string: "paper" / "demo" / "live".
+    /// Matches V015 migration DEFAULT and query filters.
+    /// DB 標準 engine_mode 字串，對應 V015 migration 預設值和查詢過濾。
+    pub fn db_mode(&self) -> &'static str {
+        match self {
+            TradingMode::PaperOnly => "paper",
+            TradingMode::Demo => "demo",
+            TradingMode::Live => "live",
         }
     }
 }

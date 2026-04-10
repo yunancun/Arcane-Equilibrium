@@ -114,13 +114,56 @@ class RustSnapshotReader:
         with self._lock:
             return self._refresh_cache()
 
-    def get_paper_state(self) -> Optional[dict[str, Any]]:
+    def get_paper_state(self, mode: str = "paper") -> Optional[dict[str, Any]]:
         """
         Get paper trading state (balance, positions, pnl, fees).
+        Phase 4: accepts `mode` param to query a specific engine mode.
+        Default "paper" for backward compatibility.
         獲取紙盤交易狀態（餘額、持倉、損益、手續費）。
+        Phase 4：接受 `mode` 參數查詢特定引擎模式，默認 "paper" 向後兼容。
         """
         snap = self.get_snapshot()
-        return snap.get("paper_state") if snap else None
+        if snap is None:
+            return None
+        # Phase 4: check mode_snapshots first for the requested mode.
+        # Phase 4：優先從 mode_snapshots 查找請求的模式。
+        mode_snapshots = snap.get("mode_snapshots", {})
+        if mode in mode_snapshots:
+            return mode_snapshots[mode].get("paper_state")
+        # Fallback: top-level paper_state (primary mode / backward compat).
+        # TradingMode serde: "paper_only" / "demo" / "live"; db_mode: "paper" / "demo" / "live".
+        # Accept both forms for backward compatibility.
+        # 回退：頂層 paper_state（主模式 / 向後兼容）。
+        # 接受兩種形式（serde 和 db_mode）。
+        trading_mode = snap.get("trading_mode", "paper_only")
+        _MODE_ALIASES = {"paper": "paper_only", "paper_only": "paper"}
+        if mode == trading_mode or _MODE_ALIASES.get(mode) == trading_mode:
+            return snap.get("paper_state")
+        return None
+
+    def get_mode_snapshot(self, mode: str = "paper") -> Optional[dict[str, Any]]:
+        """
+        Get full ModeStateSnapshot for a specific engine mode.
+        Phase 4: returns paper_state + recent_intents + recent_fills +
+        consecutive_losses + session_halted + paper_paused for that mode.
+        獲取特定引擎模式的完整 ModeStateSnapshot。
+        """
+        snap = self.get_snapshot()
+        if snap is None:
+            return None
+        mode_snapshots = snap.get("mode_snapshots", {})
+        return mode_snapshots.get(mode)
+
+    def get_active_modes(self) -> list[str]:
+        """
+        List all active engine modes (e.g. ["paper", "demo", "live"]).
+        列出所有活躍引擎模式。
+        """
+        snap = self.get_snapshot()
+        if snap is None:
+            return []
+        mode_snapshots = snap.get("mode_snapshots", {})
+        return list(mode_snapshots.keys())
 
     def get_latest_prices(self) -> Optional[dict[str, float]]:
         """
@@ -178,19 +221,29 @@ class RustSnapshotReader:
         snap = self.get_snapshot()
         return (snap or {}).get("strategies", [])
 
-    def get_recent_intents(self) -> list:
+    def get_recent_intents(self, mode: Optional[str] = None) -> list:
         """
         Get recent order intents from Rust engine (up to 50).
+        Phase 4: optional `mode` param for per-mode intents.
         從 Rust 引擎獲取最近交易意圖（最多 50 條）。
+        Phase 4：可選 `mode` 參數獲取特定模式的意圖。
         """
+        if mode:
+            ms = self.get_mode_snapshot(mode)
+            return (ms or {}).get("recent_intents", [])
         snap = self.get_snapshot()
         return (snap or {}).get("recent_intents", [])
 
-    def get_recent_fills(self) -> list:
+    def get_recent_fills(self, mode: Optional[str] = None) -> list:
         """
         Get recent fills from Rust engine (up to 50).
+        Phase 4: optional `mode` param for per-mode fills.
         從 Rust 引擎獲取最近成交記錄（最多 50 條）。
+        Phase 4：可選 `mode` 參數獲取特定模式的成交。
         """
+        if mode:
+            ms = self.get_mode_snapshot(mode)
+            return (ms or {}).get("recent_fills", [])
         snap = self.get_snapshot()
         return (snap or {}).get("recent_fills", [])
 

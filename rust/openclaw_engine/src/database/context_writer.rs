@@ -103,9 +103,10 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
               indicators_snapshot, position_detail, decision_payload, \
               outcome_backfilled, \
               claude_directive_id, linucb_arm_id, linucb_confidence_bound, \
-              news_severity, hours_since_last_major_news) \
+              news_severity, hours_since_last_major_news, \
+              engine_mode) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,\
-                     $21,$22,$23,$24,$25) \
+                     $21,$22,$23,$24,$25,$26) \
              ON CONFLICT (context_id, ts) DO NOTHING",
         )
         .bind(ts)
@@ -141,6 +142,8 @@ async fn flush_contexts(pool: &DbPool, pending: &mut HashMap<String, DecisionCon
             ctx.hours_since_last_major_news
                 .and_then(super::sanitize_f64),
         )
+        // V015: engine_mode / 引擎模式
+        .bind(ctx.engine_mode.as_str())
         .execute(pg)
         .await;
 
@@ -188,6 +191,7 @@ mod tests {
             linucb_confidence_bound: None,
             news_severity: None,
             hours_since_last_major_news: None,
+            engine_mode: "paper".into(),
         }
     }
 
@@ -291,21 +295,21 @@ mod tests {
             src.contains("hours_since_last_major_news"),
             "INSERT SQL must include hours_since_last_major_news"
         );
-        // Bind count jumped 20 → 25 (5 new columns).
-        // Bind 數量由 20 → 25（新增 5 欄位）。
+        // Bind count jumped 20 → 25 (5 Phase 4) → 26 (V015 engine_mode).
+        // Bind 數量由 20 → 25（Phase 4 新增 5）→ 26（V015 engine_mode）。
         assert!(
-            src.contains("$25"),
-            "INSERT must bind $25 after Phase 4 expansion"
+            src.contains("$26"),
+            "INSERT must bind $26 after V015 engine_mode addition"
         );
     }
 
     #[test]
     fn test_sql_column_count() {
-        // Verify we bind exactly 25 values matching 25 columns in INSERT.
-        // Original 20 + 5 Phase 4 / V009+V003 additions ($21..$25):
+        // Verify we bind exactly 26 values matching 26 columns in INSERT.
+        // Original 20 + 5 Phase 4 / V009+V003 additions ($21..$25) + V015 engine_mode ($26):
         //   $21=claude_directive_id, $22=linucb_arm_id, $23=linucb_confidence_bound,
-        //   $24=news_severity,       $25=hours_since_last_major_news
-        // 驗證綁定 25 個值對應 INSERT 25 個欄位（原 20 + Phase 4 新增 5）。
-        assert_eq!(25, 25); // compile-time documentation test
+        //   $24=news_severity,       $25=hours_since_last_major_news, $26=engine_mode
+        // 驗證綁定 26 個值對應 INSERT 26 個欄位（原 20 + Phase 4 新增 5 + V015 新增 1）。
+        assert_eq!(26, 26); // compile-time documentation test
     }
 }

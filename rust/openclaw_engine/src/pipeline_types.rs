@@ -144,4 +144,8 @@ pub struct PipelineSnapshot {
     /// Current session drawdown percentage / 當前會話回撤百分比
     #[serde(default)]
     pub session_drawdown_pct: f64,
+    /// Phase 3: Per-mode snapshots for multi-engine IPC (Phase 4).
+    /// Phase 3：每模式快照用於多引擎 IPC（Phase 4）。
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub mode_snapshots: HashMap<String, crate::mode_state::ModeStateSnapshot>,
 }

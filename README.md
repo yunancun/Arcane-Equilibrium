@@ -68,7 +68,7 @@ Phase 4:      ✅ CODE-COMPLETE（4-00~4-21 + 4.1）· Claude Teacher consumer l
 Layer 2:      L0 确定性 → L1 Ollama 9B/27B → L2 Claude API
 5 Agent:      Scout + Strategist + Guardian + Analyst + Executor 全部运行
 数据库:       TimescaleDB 2.26.1 · 43 tables · 28 hypertables · 11 Grafana VIEWs
-              DB_TODO.md: Signal Diamond 多引擎数据隔离规划（5 阶段实施）
+              Signal Diamond Phase 1-4 ✅（归档：docs/references/2026-04-10--signal_diamond_db_todo.md）
 Bybit API:    64 REST + 8 WS + 5 Private WS + 8 IPC
 
 下一步（按顺序）:

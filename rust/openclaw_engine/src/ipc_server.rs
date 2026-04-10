@@ -480,7 +480,58 @@ async fn dispatch_request(
         "get_state" => handle_get_state(id, config),
         "reload_config" => handle_reload_config(id, config),
         "get_paper_state" => {
-            handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.paper_state))
+            // Phase 4: optional `engine` param routes to per-mode snapshot.
+            // Default "paper" for backward compatibility.
+            // Phase 4：可選 `engine` 參數路由到每模式快照，默認 "paper" 向後兼容。
+            let engine = req.params.get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("paper")
+                .to_string();
+            handle_snapshot_field(id, data_dir, move |s| {
+                // Primary mode: return top-level paper_state (authoritative).
+                // Secondary modes: look up mode_snapshots.
+                // 主模式：返回頂層 paper_state（權威來源）。
+                // 次級模式：查找 mode_snapshots。
+                if let Some(mode_snap) = s.mode_snapshots.get(&engine) {
+                    serde_json::to_value(&mode_snap.paper_state)
+                } else if engine == s.trading_mode.db_mode() {
+                    serde_json::to_value(&s.paper_state)
+                } else {
+                    // Requested mode not active — return null with metadata.
+                    // 請求的模式未啟用 — 返回 null 帶元數據。
+                    serde_json::to_value(serde_json::json!({
+                        "error": "mode_not_active",
+                        "requested": engine,
+                        "active_modes": s.mode_snapshots.keys().collect::<Vec<_>>()
+                    }))
+                }
+            })
+        }
+        "get_mode_snapshot" => {
+            // Phase 4: Full ModeStateSnapshot for a specific engine mode.
+            // Phase 4：特定引擎模式的完整 ModeStateSnapshot。
+            let engine = req.params.get("engine")
+                .and_then(|v| v.as_str())
+                .unwrap_or("paper")
+                .to_string();
+            handle_snapshot_field(id, data_dir, move |s| {
+                if let Some(mode_snap) = s.mode_snapshots.get(&engine) {
+                    serde_json::to_value(mode_snap)
+                } else {
+                    serde_json::to_value(serde_json::json!({
+                        "error": "mode_not_active",
+                        "requested": engine,
+                        "active_modes": s.mode_snapshots.keys().collect::<Vec<_>>()
+                    }))
+                }
+            })
+        }
+        "get_active_modes" => {
+            // Phase 4: List all active engine modes.
+            // Phase 4：列出所有活躍引擎模式。
+            handle_snapshot_field(id, data_dir, |s| {
+                serde_json::to_value(s.mode_snapshots.keys().collect::<Vec<_>>())
+            })
         }
         "get_latest_prices" => {
             handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.latest_prices))
@@ -554,6 +605,9 @@ async fn dispatch_request(
         "submit_paper_order" => handle_submit_paper_order(id, paper_cmd_tx, &req.params).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
+        // Phase 3: Engine mode management / 引擎模式管理
+        "add_engine_mode" => handle_add_engine_mode(id, paper_cmd_tx, &req.params).await,
+        "switch_engine_mode" => handle_switch_engine_mode(id, paper_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
         "get_phase4_status" => handle_get_phase4_status(id),
         // Phase 4 (4-15): AI budget status / config / AI 預算狀態與配置
@@ -1477,6 +1531,93 @@ async fn handle_set_strategy_active(
     }
 }
 
+/// Phase 3: Add a secondary engine mode at runtime.
+/// Phase 3：運行時添加次級引擎模式。
+async fn handle_add_engine_mode(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
+        }
+    };
+    let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
+        Some(m) => m,
+        None => {
+            return JsonRpcResponse::error(
+                id, ERR_INVALID_REQUEST,
+                "missing required param: mode (paper/demo/live)".to_string(),
+            )
+        }
+    };
+    let mode = match mode_str {
+        "paper" => crate::config::TradingMode::PaperOnly,
+        "demo" => crate::config::TradingMode::Demo,
+        "live" => crate::config::TradingMode::Live,
+        _ => {
+            return JsonRpcResponse::error(
+                id, ERR_INVALID_REQUEST,
+                format!("invalid mode: {mode_str}, expected paper/demo/live"),
+            )
+        }
+    };
+    let balance = params.get("balance").and_then(|v| v.as_f64()).unwrap_or(10_000.0);
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    let _ = tx.send(PaperSessionCommand::AddMode { mode, balance, response_tx: resp_tx });
+    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
+    }
+}
+
+/// Phase 3: Switch primary trading mode with state swap.
+/// Phase 3：切換主交易模式，附帶狀態切換。
+async fn handle_switch_engine_mode(
+    id: serde_json::Value,
+    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match paper_cmd_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
+        }
+    };
+    let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
+        Some(m) => m,
+        None => {
+            return JsonRpcResponse::error(
+                id, ERR_INVALID_REQUEST,
+                "missing required param: mode (paper/demo/live)".to_string(),
+            )
+        }
+    };
+    let mode = match mode_str {
+        "paper" => crate::config::TradingMode::PaperOnly,
+        "demo" => crate::config::TradingMode::Demo,
+        "live" => crate::config::TradingMode::Live,
+        _ => {
+            return JsonRpcResponse::error(
+                id, ERR_INVALID_REQUEST,
+                format!("invalid mode: {mode_str}, expected paper/demo/live"),
+            )
+        }
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    let _ = tx.send(PaperSessionCommand::SwitchMode { mode, response_tx: resp_tx });
+    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
+        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
+    }
+}
+
 /// Read pipeline_snapshot.json and extract a field (R06-A helper — DRY for 3 handlers).
 /// 讀取 pipeline_snapshot.json 並提取欄位（R06-A 輔助函數 — 三個 handler 共用）。
 fn handle_snapshot_field<F>(id: serde_json::Value, data_dir: &Path, extract: F) -> JsonRpcResponse
@@ -1893,6 +2034,7 @@ mod tests {
             session_halted: false,
             daily_loss_pct: 0.0,
             session_drawdown_pct: 0.0,
+            mode_snapshots: HashMap::new(),
         };
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(dir.path().join("pipeline_snapshot.json"), &json).unwrap();

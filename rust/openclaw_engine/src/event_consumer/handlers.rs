@@ -473,5 +473,23 @@ pub(super) fn handle_paper_command(
                 .collect();
             let _ = response_tx.send(open_symbols);
         }
+        PaperSessionCommand::AddMode {
+            mode,
+            balance,
+            response_tx,
+        } => {
+            // Phase 3: Add secondary engine mode at runtime.
+            // Phase 3：運行時添加次級引擎模式。
+            pipeline.add_mode(mode, balance);
+            snapshot_writer.force_write(&pipeline.snapshot());
+            let _ = response_tx.send(Ok(format!("mode {} added with balance {:.2}", mode, balance)));
+        }
+        PaperSessionCommand::SwitchMode { mode, response_tx } => {
+            // Phase 3: Switch primary trading mode with state swap.
+            // Phase 3：切換主交易模式，附帶狀態切換。
+            pipeline.set_trading_mode(mode);
+            snapshot_writer.force_write(&pipeline.snapshot());
+            let _ = response_tx.send(Ok(format!("switched to mode {}", mode)));
+        }
     }
 }
