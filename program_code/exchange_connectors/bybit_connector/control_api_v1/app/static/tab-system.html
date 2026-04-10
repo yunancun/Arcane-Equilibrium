@@ -38,6 +38,7 @@
   .mode-btn-name { font-size: 14px; font-weight: 600; }
   .mode-btn-sub { font-size: 10px; color: var(--accent); font-family: monospace; margin: 2px 0 6px; }
   .mode-btn-desc { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  .purple { color: #a855f7; }
   /* Confirm Modal */
   .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
   .confirm-overlay.show { display: flex; align-items: center; justify-content: center; }
@@ -127,8 +128,8 @@
       <div class="mode-btn-sub">demo_reserved</div>
       <div class="mode-btn-desc">Paper + Bybit Demo 沙盒双重执行</div>
     </button>
-    <button class="mode-btn" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')" style="border-color:rgba(239,68,68,0.4)">
-      <div class="mode-btn-icon">🔴</div>
+    <button class="mode-btn" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')" style="border-color:rgba(168,85,247,0.4)">
+      <div class="mode-btn-icon">🟣</div>
       <div class="mode-btn-name">实盘</div>
       <div class="mode-btn-sub">live_reserved</div>
       <div class="mode-btn-desc">Live 引擎开放 — 真实资金交易</div>
@@ -137,7 +138,7 @@
 
   <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.7">
     <strong style="color:var(--text)">模式升级路径：</strong>
-    设计 → 观察（行情流启动）→ 影子（Paper引擎启动）→ Demo 预留（Bybit Demo 双执行）→ <strong style="color:#f87171">实盘（真实资金）</strong><br>
+    设计 → 观察（行情流启动）→ 影子（Paper引擎启动）→ Demo 预留（Bybit Demo 双执行）→ <strong style="color:#a855f7">实盘（真实资金）</strong><br>
     <strong style="color:var(--text)">注意：</strong>各模式独立控制 — 切换模式不会停止已运行的 Paper / Demo / Live session，需在对应 Tab 手动控制。
   </div>
 </div>
@@ -336,9 +337,9 @@ const MODE_CONFIRM = {
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">适用场景：完整测试交易链路（含 Bybit 订单撮合），验证策略在真实订单流中的表现。</p>`
   },
   live_reserved: {
-    icon: '🔴', label: '实盘',
-    title: '🔴 切换到实盘模式 / live_reserved',
-    body: `<strong style="color:#f87171">⚠ 实盘模式 — 真实资金风险</strong>
+    icon: '🟣', label: '实盘',
+    title: '🟣 切换到实盘模式 / live_reserved',
+    body: `<strong style="color:#a855f7">⚠ 实盘模式 — 真实资金风险</strong>
 <ul style="margin:8px 0;padding-left:18px;line-height:2">
   <li>引擎模式：<strong>live_reserved</strong> — 允许实盘引擎启动</li>
   <li>Paper / Demo session：<strong>独立运行，不受影响</strong></li>
@@ -346,7 +347,7 @@ const MODE_CONFIRM = {
   <li>真实资金：<strong>所有订单使用真实 Bybit 账户资金</strong></li>
   <li>前置条件：OPENCLAW_ALLOW_MAINNET=1 + Live API Key 配置</li>
 </ul>
-<div class="warn-box" style="border-color:rgba(239,68,68,0.5);color:#f87171">🔴 此模式开放实盘交易权限。确认前请检查风控参数和 API Key 配置。</div>
+<div class="warn-box" style="border-color:rgba(168,85,247,0.5);color:#a855f7">🟣 此模式开放实盘交易权限。确认前请检查风控参数和 API Key 配置。</div>
 <p style="margin-top:8px;font-size:12px;color:var(--text-dim)">切换后 Paper/Demo session 继续独立运行，live session 需单独在实盘 Tab 启动/停止。</p>`
   },
 };
@@ -448,6 +449,22 @@ async function executeModeChange() {
   closeConfirm();
   if (!mode) return;
 
+  // Auto-stop live session if switching away from live_reserved
+  // 切離 live_reserved 時自動停止 live session
+  if (_currentGlobalMode === 'live_reserved' && mode !== 'live_reserved') {
+    try {
+      const liveStatus = await ocApi('/api/v1/live/session/status');
+      const liveState = liveStatus && liveStatus.data && liveStatus.data.session && liveStatus.data.session.session_state;
+      if (liveState === 'active' || liveState === 'paused') {
+        ocToast('⚠ 正在停止 Live 引擎...', 'warn');
+        await ocPost('/api/v1/live/session/stop', {});
+        ocToast('Live 引擎已停止', 'success');
+      }
+    } catch(e) {
+      ocToast('⚠ 無法自動停止 Live session，請手動確認', 'warn');
+    }
+  }
+
   // Map derived mode names to actual switch values
   // 将派生模式名映射为控制开关的实际值（design_only 是派生态，开关值为 disabled）
   const MODE_TO_SWITCH = {
@@ -501,7 +518,7 @@ function updateModeBtns(currentMode) {
     const info = MODE_CONFIRM[switchVal];
     chip.textContent = (info ? info.icon + ' ' + info.label : switchVal);
     chip.className = 'oc-chip ' + (
-      switchVal === 'live_reserved' ? 'oc-chip-bad' :
+      switchVal === 'live_reserved' ? 'oc-chip-live' :
       switchVal === 'demo_reserved' ? 'oc-chip-warn' :
       switchVal === 'observe_only' || switchVal === 'shadow_only' ? 'oc-chip-good' : 'oc-chip-neutral'
     );
@@ -518,13 +535,13 @@ async function loadOverview() {
   // Global Mode
   const modeRaw = gr.global_mode_state || '';
   ocSetText('m-mode', cnLabel(modeRaw, MODE_CN));
-  $('m-mode').className = 'oc-metric-val ' + (modeRaw.includes('live') ? 'red' : modeRaw.includes('demo') ? 'yellow' : 'green');
+  $('m-mode').className = 'oc-metric-val ' + (modeRaw.includes('live') ? 'purple' : modeRaw.includes('demo') ? 'yellow' : 'green');
   setTip('m-mode-tip', modeRaw, '全局运行模式。design_only = 仅设计阶段，不执行任何操作；observe_only = 可观察市场但不交易；demo_enabled = 允许 Demo 交易；live_enabled = 允许真实交易。');
 
   // Execution Authority
   const authRaw = gr.global_execution_authority_state || '';
   ocSetText('m-auth', cnLabel(authRaw, AUTH_CN));
-  $('m-auth').className = 'oc-metric-val ' + (authRaw.includes('live') ? 'red' : authRaw.includes('demo_enabled') ? 'yellow' : 'green');
+  $('m-auth').className = 'oc-metric-val ' + (authRaw.includes('live') ? 'purple' : authRaw.includes('demo_enabled') ? 'yellow' : 'green');
   setTip('m-auth-tip', authRaw, '执行权限状态。blocked/not_granted = 不允许任何下单；demo_blocked = Demo 模式受限；demo_only = 仅允许 Demo 下单；live_enabled = 允许真实下单（需要多重审批）。');
 
   // Capability
