@@ -368,6 +368,162 @@ async def reset_cooldown(
     return _risk_response({"message": "cooldown_reset", "result": result, "status": client.get_status()})
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIVE-P2-1/P2-2: Per-engine RiskConfig endpoints
+# LIVE-P2-1/P2-2：每引擎 RiskConfig 端點
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Allowed engine names (whitelist prevents IPC injection via path param).
+# 允許的引擎名稱白名單（防止 path param 注入到 IPC）。
+_ALLOWED_ENGINES: frozenset[str] = frozenset({"paper", "demo", "live"})
+
+
+async def _get_direct_ipc() -> EngineIPCClient:
+    """
+    Return a direct EngineIPCClient for per-engine IPC calls (bypasses RiskViewClient
+    so version tracking doesn't bleed across engines).
+    為每引擎 IPC 調用返回直接 EngineIPCClient（繞過 RiskViewClient 避免跨引擎版本追蹤）。
+    """
+    # Reuse the module-level IPC client if it was already initialized, otherwise
+    # create a fresh one.  Lazy init mirrors _get_risk_view_client() pattern.
+    # 如果模組級 IPC 客戶端已初始化則複用，否則創建新實例。
+    global _IPC_CLIENT
+    if _IPC_CLIENT is None:
+        _IPC_CLIENT = EngineIPCClient()
+        try:
+            await _IPC_CLIENT.connect()
+        except Exception as e:
+            logger.warning("Per-engine IPC connect failed: %s", e)
+    return _IPC_CLIENT
+
+
+def _build_global_patch(updates: dict[str, Any]) -> dict[str, Any]:
+    """
+    Remap flat GUI field names → Rust RiskConfig nested patch dict.
+    Reuses the same _GLOBAL_TO_RUST mapping as RiskViewClient.
+    將 GUI 平坦欄位映射到 Rust RiskConfig 嵌套 patch dict（複用 RiskViewClient 映射）。
+    """
+    from .risk_view_client import _GLOBAL_TO_RUST
+    patch: dict[str, Any] = {}
+    for gui_key, value in updates.items():
+        if gui_key not in _GLOBAL_TO_RUST:
+            continue
+        section, rust_key = _GLOBAL_TO_RUST[gui_key]
+        # Special: p1_risk_pct is sent as percent (3.0) but Rust stores as fraction (0.03).
+        # p1_risk_pct 以百分比傳入（3.0），Rust 以小數存（0.03）。
+        if gui_key == "p1_risk_pct" and isinstance(value, (int, float)):
+            value = value / 100.0
+        if section not in patch:
+            patch[section] = {}
+        patch[section][rust_key] = value
+    return patch
+
+
+@risk_router.get("/config/engine/{engine}")
+async def get_per_engine_risk_config(
+    engine: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    GET /api/v1/paper/risk/config/engine/{engine}
+    Returns full RiskConfig snapshot for the specified engine (paper|demo|live).
+    Calls IPC get_risk_config with engine routing param (LIVE-P2-1).
+
+    返回指定引擎（paper|demo|live）的完整 RiskConfig 快照。
+    透過 IPC get_risk_config 的 engine 路由參數讀取對應 store（LIVE-P2-1）。
+    """
+    if engine not in _ALLOWED_ENGINES:
+        raise HTTPException(status_code=400, detail=f"Invalid engine '{engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}")
+    ipc = await _get_direct_ipc()
+    try:
+        resp = await ipc.call("get_risk_config", params={"engine": engine})
+    except Exception as e:
+        raise _ipc_failure(f"get_risk_config engine={engine}: {e}") from e
+
+    raw = resp if isinstance(resp, dict) else {}
+    config = raw.get("config", raw)
+    version = raw.get("version", 0)
+
+    # Build the same GUI-compatible flat global_config shape as GET /config.
+    # 建立與 GET /config 相同的 GUI 兼容 global_config 形狀。
+    limits  = config.get("limits", {}) if isinstance(config, dict) else {}
+    agent   = config.get("agent", {}) if isinstance(config, dict) else {}
+    dstop   = config.get("dynamic_stop", {}) if isinstance(config, dict) else {}
+    aclust  = config.get("anti_cluster", {}) if isinstance(config, dict) else {}
+    runtime = config.get("runtime", {}) if isinstance(config, dict) else {}
+    global_config: dict[str, Any] = {
+        "max_stop_loss_pct":            limits.get("stop_loss_max_pct"),
+        "max_take_profit_pct":          limits.get("take_profit_max_pct"),
+        "tp_enabled":                   limits.get("take_profit_enforced"),
+        "max_single_position_pct":      limits.get("position_size_max_pct"),
+        "max_total_exposure_pct":       limits.get("total_exposure_max_pct"),
+        "max_correlated_exposure_pct":  limits.get("correlated_exposure_max_pct"),
+        "max_leverage":                 limits.get("leverage_max"),
+        "max_session_drawdown_pct":     limits.get("session_drawdown_max_pct"),
+        "max_daily_loss_pct":           limits.get("daily_loss_max_pct"),
+        "consecutive_loss_cooldown_count":   limits.get("consec_loss_cooldown_count"),
+        "consecutive_loss_cooldown_minutes": limits.get("consec_loss_cooldown_min"),
+        "max_holding_hours":            limits.get("holding_hours_max"),
+        "p1_risk_pct": (
+            limits.get("per_trade_risk_pct") * 100.0
+            if isinstance(limits.get("per_trade_risk_pct"), (int, float))
+            else None
+        ),
+        "allowed_categories":           limits.get("allowed_categories"),
+        "preferred_margin_mode":        limits.get("margin_mode"),
+        "preferred_position_mode":      limits.get("position_mode"),
+        "max_same_direction_positions": aclust.get("max_same_direction"),
+        "trailing_stop_pct":            agent.get("trailing_distance_pct"),
+        "atr_multiplier":               dstop.get("atr_stop_mult"),
+        "h0_shadow_mode":               runtime.get("h0_shadow_mode"),
+    }
+    config_out = dict(config) if isinstance(config, dict) else {}
+    config_out["global_config"] = global_config
+    config_out["p1"] = global_config
+    return _risk_response({"engine": engine, "config": config_out, "version": version})
+
+
+@risk_router.post("/config/engine/{engine}/global")
+async def update_per_engine_global_config(
+    engine: str,
+    body: GlobalConfigUpdate,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    POST /api/v1/paper/risk/config/engine/{engine}/global
+    Patch RiskConfig for the specified engine (paper|demo|live) via IPC.
+    Operator role required. Live engine: extra care — changes affect real money.
+
+    透過 IPC patch_risk_config 修改指定引擎（paper|demo|live）的 RiskConfig。
+    需要 Operator 角色。Live 引擎：更新影響真實資金，需謹慎。
+    """
+    if engine not in _ALLOWED_ENGINES:
+        raise HTTPException(status_code=400, detail=f"Invalid engine '{engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}")
+    ipc = await _get_direct_ipc()
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        return _risk_response({"engine": engine, "message": "no_updates"})
+    patch = _build_global_patch(updates)
+    if not patch:
+        return _risk_response({"engine": engine, "message": "no_mappable_fields"})
+    try:
+        resp = await ipc.call(
+            "patch_risk_config",
+            params={"engine": engine, "patch": patch, "source": "operator"},
+        )
+    except Exception as e:
+        raise _ipc_failure(f"patch_risk_config engine={engine}: {e}") from e
+    result = resp if isinstance(resp, dict) else {}
+    if not result.get("ok"):
+        raise _ipc_failure(f"patch_risk_config engine={engine} returned not-ok: {result}")
+    return _risk_response({
+        "engine": engine,
+        "message": "updated",
+        "version": result.get("version"),
+        "source": result.get("source"),
+    })
+
+
 @risk_router.post("/unhalt-session")
 async def unhalt_session(
     actor: base.AuthenticatedActor = Depends(base.current_actor),

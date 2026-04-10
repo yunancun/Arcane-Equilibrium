@@ -1,0 +1,139 @@
+# risk_config_live.toml — Live engine risk configuration (REAL MONEY)
+# 實盤引擎風控配置（真實資金 — 默認比 paper/demo 更保守）
+# LIVE-P2-1: per-engine RiskConfig separation
+#
+# IMPORTANT: These defaults are intentionally more conservative than paper/demo.
+# Operator must explicitly relax limits here before going live.
+# 重要：這些默認值比 paper/demo 更保守，需要 Operator 明確放寬才能實盤。
+
+[meta]
+version = 1
+saved_ts_ms = 0
+
+[limits]
+# Tighter hard ceilings for live (real money) operation
+# 實盤（真實資金）更嚴格的硬上限
+stop_loss_max_pct = 10.0
+take_profit_max_pct = 20.0
+take_profit_enforced = false
+position_size_max_pct = 5.0
+total_exposure_max_pct = 50.0
+correlated_exposure_max_pct = 30.0
+leverage_max = 10.0
+session_drawdown_max_pct = 5.0
+daily_loss_max_pct = 3.0
+consec_loss_cooldown_count = 3
+consec_loss_cooldown_min = 60
+holding_hours_max = 48.0
+open_positions_max = 10
+min_order_notional_usdt = 5.0
+max_order_notional_usdt = 0.0
+min_balance_usdt = 100.0
+allowed_categories = ["linear"]
+margin_mode = "isolated"
+position_mode = "one_way"
+guardian_modification_size_factor = 0.3
+guardian_modification_leverage_cap = 1.5
+per_trade_risk_pct = 0.03
+
+[overrides]
+
+[per_strategy]
+
+[agent]
+trailing_enabled = true
+trailing_activation_pct = 0.5
+trailing_distance_pct = 2.0
+size_multiplier = 0.5
+prefer_limit = true
+reduce_only_close = true
+post_only_limit = true
+partial_tp_enabled = false
+partial_tp_levels = []
+
+[agent.category_weights]
+
+[cascade]
+# Tighter cascade thresholds for live trading
+# 實盤更嚴格的級聯閾值
+drawdown_cautious_pct = 2.0
+drawdown_reduced_pct = 3.5
+drawdown_defensive_pct = 5.0
+drawdown_circuit_pct = 7.0
+daily_loss_cautious_pct = 1.0
+daily_loss_reduced_pct = 2.0
+daily_loss_circuit_pct = 3.0
+consec_loss_cautious = 2
+consec_loss_reduced = 3
+consec_loss_circuit = 5
+pressure_cautious = 0.25
+pressure_reduced = 0.4
+pressure_defensive = 0.6
+pressure_circuit = 0.8
+min_hold_ms = 600000
+
+[regime.trending]
+stop = 1.0
+tp = 1.5
+time = 1.5
+
+[regime.volatile]
+stop = 1.5
+tp = 0.8
+time = 0.8
+
+[regime.ranging]
+stop = 0.7
+tp = 0.7
+time = 0.8
+
+[regime.squeeze]
+stop = 0.6
+tp = 0.5
+time = 1.0
+
+[regime.unknown]
+stop = 1.0
+tp = 1.0
+time = 1.0
+
+[cost_gate]
+# Higher confidence bar for live trades / 實盤要求更高信心門檻
+min_confidence = 0.25
+k_base = 2.0
+k_medium = 2.5
+k_small = 4.0
+adx_trending = 30.0
+
+[dynamic_stop]
+base_ratio = 0.5
+cap_ratio = 0.7
+trailing_min_rr = 0.8
+atr_stop_mult = 1.5
+atr_tp_mult = 2.5
+
+[market_gate]
+min_ob_depth_usdt = 100000.0
+max_ob_imbalance = 0.6
+min_volume_24h_usdt = 5000000.0
+max_taker_fee_bps = 6.0
+spread_max_bps = 10.0
+slippage_max_bps = 8.0
+funding_rate_max_abs = 0.02
+liquidation_buffer_pct = 30.0
+max_orders_per_minute = 30
+
+[anti_cluster]
+offset_fraction = 0.2
+max_same_direction = 3
+
+[correlation]
+max_pairwise_r = 0.5
+window_minutes = 120
+
+[runtime]
+boot_cooldown_ms = 120000
+signals_heartbeat_ms = 30000
+h0_shadow_mode = false
+
+[experimental.flags]
