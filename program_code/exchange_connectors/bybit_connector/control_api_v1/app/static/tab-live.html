@@ -196,10 +196,10 @@ html, body {
 <div class="live-lock-wrap">
 
   <div class="lock-icon">&#x1F512;</div>
-  <div class="lock-title">实盘交易 — 尚未解锁 / Live Trading Locked</div>
+  <div class="lock-title">实盘交易 — 待授权 / Live Trading — Awaiting Authorization</div>
   <div class="lock-sub">
-    实盘执行权限尚未授予。系统当前运行于 <strong>demo_only</strong> 模式，所有实盘订单通道已禁用。<br>
-    完成以下前置条件并经 Operator 人工审批后，方可进入受监督实盘阶段（Phase M）。
+    实盘基础设施已就绪（Live_Ready）。Operator 授予 execution_authority 后即可进入实盘仪表板。<br>
+    Demo 环境测试：使用 Demo API Key 可完整测试 live session 流程，不涉及真实资金。
   </div>
 
   <!-- Phase badge (dynamic) / 動態 Phase badge -->
@@ -215,9 +215,15 @@ html, body {
     <div class="oc-loading">Loading prerequisites...</div>
   </div>
 
-  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6;text-align:center">
-    &#x26A0;&#xFE0F; 实盘放权须经 Operator 手动审批。即使所有前置条件满足，系统不会自动开启实盘执行。<br>
-    当前 Live 开发状态：P0 GUI 框架已就绪，P1 Rust TradingMode::Live 待实施。
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px">
+    <button class="oc-btn oc-btn-danger" style="font-weight:700;padding:10px 24px" onclick="grantLiveAuthority()">
+      &#x1F513; 授予 Execution Authority / Grant Authority
+    </button>
+  </div>
+
+  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6;text-align:center;margin-top:16px">
+    &#x26A0;&#xFE0F; 授予后进入实盘仪表板。Demo 模式下使用 demo API key，无真实资金风险。<br>
+    Mainnet 真实资金交易须另配置 OPENCLAW_ALLOW_MAINNET=1 + live API key。
   </div>
 
 </div>
@@ -248,6 +254,7 @@ html, body {
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
     <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
+    <button class="oc-btn" style="font-size:11px;padding:6px 12px;opacity:0.7" onclick="revokeLiveAuthority()" title="撤銷 Execution Authority / Revoke Authority">&#x1F512; 撤銷授權</button>
   </div>
 
   <!-- PnL + metrics / 收益指標 -->
@@ -521,17 +528,30 @@ async function loadDashboardData() {
     ocApi('/api/v1/live/orders'),
   ]);
 
-  // Balance — from /api/v1/live/balance (engine internal + bybit_sync_balance when live)
-  // 餘額 — 來自實盤端點（引擎內部狀態；live API 連接後為 bybit_sync_balance）
+  // Balance — from /api/v1/live/balance (PyO3 Rust client → real exchange data)
+  // 餘額 — 來自實盤端點（PyO3 Rust client → 真實交易所帳戶資料）
   try {
     const balData = balRes.status === 'fulfilled' && balRes.value && balRes.value.data;
     if (balData && balData.available !== false) {
-      const bal = parseFloat(balData.balance || 0);
-      document.getElementById('live-equity').textContent = bal > 0 ? '₮' + bal.toFixed(2) : '--';
-      document.getElementById('live-available').textContent = balData.bybit_sync_balance != null
-        ? '₮' + parseFloat(balData.bybit_sync_balance).toFixed(2) : '--';
+      // PyO3 returns snake_case; Bybit REST returns camelCase — handle both
+      // PyO3 返回 snake_case；Bybit REST 返回 camelCase — 兩者均相容
+      const equity = parseFloat(
+        balData.total_equity || balData.totalEquity || balData.equity || balData.balance || 0
+      );
+      const avail = parseFloat(
+        balData.total_available_balance || balData.totalAvailableBalance ||
+        balData.available_balance || balData.bybit_sync_balance || 0
+      );
+      const upnl = parseFloat(
+        balData.total_unrealised_pnl || balData.totalPerpUPL || balData.unrealized_pnl || 0
+      );
+      document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
+      document.getElementById('live-available').textContent = avail > 0 ? '₮' + avail.toFixed(2) : '--';
       const pnlEl = document.getElementById('live-unrealized-pnl');
-      pnlEl.textContent = '--'; pnlEl.className = 'live-metric-val';
+      if (pnlEl) {
+        pnlEl.textContent = upnl !== 0 ? (upnl >= 0 ? '+' : '') + upnl.toFixed(4) : '--';
+        pnlEl.className = 'live-metric-val' + (upnl > 0 ? ' pos' : upnl < 0 ? ' neg' : '');
+      }
     }
   } catch (_) {}
 
@@ -546,17 +566,22 @@ async function loadDashboardData() {
       posBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
       posBody.innerHTML = arr.map(p => {
-        const pos = p.position || p;
-        const pnl = parseFloat(pos.unrealized_pnl || pos.unrealisedPnl || 0);
+        // Bybit flat format (camelCase) + snake_case fallback
+        // Bybit 扁平格式（camelCase）+ snake_case 兼容
+        const pnl = parseFloat(p.unrealisedPnl || p.unrealized_pnl || p.unrealised_pnl || 0);
         const pnlCls = pnl >= 0 ? 'color:var(--green)' : 'color:#f87171';
+        const size = p.size || p.qty || '--';
+        const entry = p.avgPrice || p.avg_price || p.entry_price || '--';
+        const mark = p.markPrice || p.mark_price || '--';
+        const liq = p.liqPrice || p.liq_price || '--';
         return `<tr>
-          <td><strong>${ocEsc(pos.symbol || p.symbol || '--')}</strong></td>
-          <td>${ocEsc(pos.side || p.side || '--')}</td>
-          <td>${ocEsc(String(pos.size || pos.qty || p.size || '--'))}</td>
-          <td>${ocEsc(String(pos.entry_price || pos.avgPrice || '--'))}</td>
-          <td>${ocEsc(String(pos.mark_price || pos.markPrice || '--'))}</td>
+          <td><strong>${ocEsc(p.symbol || '--')}</strong></td>
+          <td>${ocEsc(p.side || '--')}</td>
+          <td>${ocEsc(String(size))}</td>
+          <td>${ocEsc(String(entry))}</td>
+          <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
-          <td>${ocEsc(String(pos.liq_price || pos.liqPrice || '--'))}</td>
+          <td>${ocEsc(String(liq))}</td>
         </tr>`;
       }).join('');
     }
@@ -575,14 +600,19 @@ async function loadDashboardData() {
       ordBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:16px">無掛單 / No open orders</td></tr>';
     } else {
       ordBody.innerHTML = ordArr.map(o => {
-        const pos = o.position || o;
+        // Bybit order format: orderId, symbol, side, qty, price, orderStatus, orderType
+        // Bybit 訂單格式：orderId、symbol、side、qty、price、orderStatus、orderType
+        const qty = o.qty || o.size || o.orderQty || '--';
+        const price = o.price || o.triggerPrice || '--';
+        const orderType = o.orderType || o.stopOrderType || (o.pending_close ? '平倉' : 'stop');
+        const status = o.orderStatus || (o.pending_close ? 'PendingClose' : '--');
         return `<tr>
-          <td>${ocEsc(pos.symbol || o.symbol || '--')}</td>
-          <td>${ocEsc(pos.side || o.side || '--')}</td>
-          <td>${ocEsc(String(pos.size || o.qty || '--'))}</td>
-          <td>${ocEsc(String(pos.stop_order_id || '--'))}</td>
-          <td>${ocEsc(pos.pending_close ? '平倉中' : 'stop')}</td>
-          <td>--</td>
+          <td>${ocEsc(o.symbol || '--')}</td>
+          <td>${ocEsc(o.side || '--')}</td>
+          <td>${ocEsc(String(qty))}</td>
+          <td>${ocEsc(String(price))}</td>
+          <td>${ocEsc(String(orderType))}</td>
+          <td>${ocEsc(String(status))}</td>
         </tr>`;
       }).join('');
     }
@@ -631,6 +661,26 @@ async function checkLiveEngineStatus() {
   if (btnStart) btnStart.disabled = isActive || authority !== 'granted';
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Execution authority grant / revoke / 授予/撤銷 execution authority
+// ═══════════════════════════════════════════════════════════════
+async function grantLiveAuthority() {
+  if (!confirm('確認授予 Execution Authority？\n\nDemo 模式：使用 Demo API key 測試 live 流程，無真實資金風險。\nMainnet：需另配置 OPENCLAW_ALLOW_MAINNET=1 + live API key。')) return;
+  const d = await ocPost('/api/v1/live/execution-authority/grant', {});
+  if (d) {
+    ocShowToast && ocShowToast('Execution Authority 已授予 / Granted', 'success');
+    refreshPage();
+  }
+}
+async function revokeLiveAuthority() {
+  if (!confirm('撤銷 Execution Authority？Live session 將返回鎖定頁。')) return;
+  const d = await ocPost('/api/v1/live/execution-authority/revoke', {});
+  if (d) {
+    ocShowToast && ocShowToast('已撤銷 / Revoked', 'warn');
+    refreshPage();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
