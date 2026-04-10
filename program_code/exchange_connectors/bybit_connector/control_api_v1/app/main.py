@@ -181,6 +181,10 @@ app.include_router(ai_budget_router)
 from .settings_routes import settings_router  # noqa: E402
 app.include_router(settings_router)
 
+# ── Live Session Router / 實盤 Session 路由注册 ──
+from .live_session_routes import live_router  # noqa: E402
+app.include_router(live_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  PIPELINE_BRIDGE and H0_GATE are allowed to be

@@ -48,22 +48,43 @@ use tracing::{info, warn};
 
 /// Trading execution mode (cold param — requires restart).
 /// 交易執行模式（冷參數 — 需重啟）。
+///
+/// Three modes (LIVE-P1-2):
+/// - PaperOnly: local simulation, no exchange connection required
+/// - Demo: Exchange-as-Truth against Bybit Demo environment (api-demo.bybit.com)
+/// - Live: Exchange-as-Truth against Bybit Mainnet (api.bybit.com) — requires
+///         OPENCLAW_ALLOW_MAINNET=1 env var AND execution_authority=granted
+///
+/// 三種模式：
+/// - PaperOnly：本地模擬，不需要交易所連線
+/// - Demo：對接 Bybit Demo 環境（api-demo.bybit.com）
+/// - Live：對接 Bybit 主網（api.bybit.com）— 需要 OPENCLAW_ALLOW_MAINNET=1 環境變量
+///         且 execution_authority=granted（雙重硬鎖）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TradingMode {
     /// Local paper simulation (default) / 本地紙盤模擬（預設）
     #[default]
     PaperOnly,
-    /// Exchange-as-Truth: orders placed on exchange, fills confirmed via WS
-    /// 交易所即真相：訂單送交交易所，成交經 WS 確認
-    Exchange,
+    /// Demo Exchange-as-Truth: orders on Bybit Demo, fills confirmed via WS
+    /// Demo 交易所即真相：訂單送 Bybit Demo，成交經 WS 確認
+    /// Backward-compat: serde alias "exchange" accepted for existing engine.toml files
+    /// 向後兼容：接受舊配置文件中的 "exchange" 值
+    #[serde(alias = "exchange")]
+    Demo,
+    /// Live Exchange-as-Truth: orders on Bybit Mainnet — REAL MONEY
+    /// 實盤交易所即真相：訂單送 Bybit 主網 — 真實資金
+    /// Requires: OPENCLAW_ALLOW_MAINNET=1 env var + execution_authority=granted
+    /// 要求：OPENCLAW_ALLOW_MAINNET=1 環境變量 + execution_authority=granted（雙重硬鎖）
+    Live,
 }
 
 impl std::fmt::Display for TradingMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TradingMode::PaperOnly => write!(f, "paper_only"),
-            TradingMode::Exchange => write!(f, "exchange"),
+            TradingMode::Demo => write!(f, "demo"),
+            TradingMode::Live => write!(f, "live"),
         }
     }
 }

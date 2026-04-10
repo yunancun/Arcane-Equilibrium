@@ -226,9 +226,17 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // EXT-1: Set trading mode on pipeline / 設定管線交易模式
     pipeline.set_trading_mode(cfg_snapshot.trading_mode);
-    let is_exchange_mode = cfg_snapshot.trading_mode == crate::config::TradingMode::Exchange;
+    // Exchange mode = any mode that routes real orders to an exchange (Demo or Live)
+    // 交易所模式 = 向交易所發送真實訂單的任何模式（Demo 或 Live）
+    let is_exchange_mode = matches!(
+        cfg_snapshot.trading_mode,
+        crate::config::TradingMode::Demo | crate::config::TradingMode::Live
+    );
     if is_exchange_mode {
-        info!("EXT-1: exchange mode active — orders sent to exchange, fills confirmed via WS / 交易所模式啟用");
+        info!(
+            mode = %cfg_snapshot.trading_mode,
+            "EXT-1: exchange mode active — orders sent to exchange, fills confirmed via WS / 交易所模式啟用"
+        );
     }
 
     // Order dispatch: shadow orders (paper_only) or primary orders (exchange mode)
