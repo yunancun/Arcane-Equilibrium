@@ -220,8 +220,11 @@ def _get_global_mode_state() -> str:
 
 def _get_trading_mode_from_engine() -> str:
     """
-    Read current trading_mode from Rust engine snapshot.
-    從 Rust 引擎快照讀取當前 trading_mode。
+    Read current trading_mode from Rust engine snapshot top-level field.
+    從 Rust 引擎快照頂層字段讀取 trading_mode。
+
+    trading_mode is at the snapshot root, NOT inside paper_state.
+    trading_mode 在快照根層，不在 paper_state 內部。
 
     Returns: "live" | "demo" | "paper_only" | "unknown"
     """
@@ -229,9 +232,9 @@ def _get_trading_mode_from_engine() -> str:
     if not rust.is_available():
         return "unknown"
     try:
-        paper_state = rust.get_paper_state()
-        if paper_state and isinstance(paper_state, dict):
-            return paper_state.get("trading_mode", "unknown")
+        snap = rust.get_snapshot()
+        if snap and isinstance(snap, dict):
+            return snap.get("trading_mode", "unknown")
     except Exception:
         pass
     return "unknown"
