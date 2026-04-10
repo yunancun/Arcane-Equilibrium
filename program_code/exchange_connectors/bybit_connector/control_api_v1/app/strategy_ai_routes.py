@@ -211,6 +211,37 @@ def _normalize_execution(f: dict) -> dict:
     }
 
 
+@phase2_router.post("/demo/close-all-positions")
+async def post_demo_close_all_positions(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    POST /api/v1/strategy/demo/close-all-positions
+    平掉所有 Demo API 倉位並取消掛單（通過 PyO3 BybitClient 直接調用 Bybit API）。
+    不影響 session 運行狀態。需要 Operator 角色。
+
+    Close all Demo API positions and cancel orders via PyO3 BybitClient (real Bybit Demo API).
+    Does not affect session state. Requires Operator role.
+    """
+    from .governance_routes import _require_operator_role
+    _require_operator_role(actor)
+    from .paper_trading_routes import _close_all_demo_positions
+    result = _close_all_demo_positions()
+    closed = result.get("demo_closed", 0)
+    errors = result.get("demo_errors", [])
+    msg = f"Demo positions closed: {closed}" + (f" (errors: {', '.join(errors)})" if errors else "")
+    logger.warning(
+        "Demo close-all-positions (manual) — closed=%d errors=%s actor=%s",
+        closed, errors or None, getattr(actor, "actor_id", "?"),
+    )
+    return _envelope({
+        "message": msg,
+        "closed": closed,
+        "canceled": result.get("demo_canceled", False),
+        "errors": errors if errors else None,
+    })
+
+
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo recent executions / 获取 Bybit Demo 最近成交"""
