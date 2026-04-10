@@ -64,6 +64,9 @@ pub(crate) fn parse_environment(env: &str) -> BybitEnvironment {
     match env.to_lowercase().as_str() {
         "testnet" => BybitEnvironment::Testnet,
         "mainnet" | "live" => BybitEnvironment::Mainnet,
+        // live_demo: live slot key (GBR) against demo server — matches engine LiveDemo mode.
+        // live_demo：使用 live 槽 key（GBR）連 demo 伺服器，對應引擎 LiveDemo 模式。
+        "live_demo" => BybitEnvironment::LiveDemo,
         _ => BybitEnvironment::Demo,
     }
 }
