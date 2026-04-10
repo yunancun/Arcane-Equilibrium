@@ -164,27 +164,29 @@ class TestBybitDemoSyncMainSync:
         assert sync._stats["syncs"] == 0
 
     def test_sync_commits_on_success(self):
-        """_sync() commits transaction on success.
-        成功时 _sync() 提交事务。"""
+        """_sync() commits transaction and releases connection on success.
+        成功时 _sync() 提交事务并释放连接。"""
         sync = _make_sync()
         mock_conn = _make_mock_conn()
-        with patch.object(sync, "_get_conn", return_value=mock_conn):
+        with patch.object(sync, "_get_conn", return_value=mock_conn), \
+             patch.object(sync, "_release_conn") as mock_release:
             sync._sync()
         mock_conn.commit.assert_called_once()
-        mock_conn.close.assert_called_once()
+        mock_release.assert_called_once_with(mock_conn)
         assert sync._stats["syncs"] == 1
 
     def test_sync_rollback_on_exception(self):
-        """_sync() rolls back and re-raises on error.
-        出错时 _sync() 回滚并重新抛出异常。"""
+        """_sync() rolls back and releases connection on error.
+        出错时 _sync() 回滚并释放连接。"""
         sync = _make_sync()
         mock_conn = _make_mock_conn()
         with patch.object(sync, "_sync_executions", side_effect=RuntimeError("db error")):
-            with patch.object(sync, "_get_conn", return_value=mock_conn):
+            with patch.object(sync, "_get_conn", return_value=mock_conn), \
+                 patch.object(sync, "_release_conn") as mock_release:
                 with pytest.raises(RuntimeError, match="db error"):
                     sync._sync()
         mock_conn.rollback.assert_called_once()
-        mock_conn.close.assert_called_once()
+        mock_release.assert_called_once_with(mock_conn)
 
     def test_sync_calls_all_sub_syncs(self):
         """_sync() calls executions, positions, and wallet sub-syncs.
@@ -530,11 +532,11 @@ class TestSyncLoop:
         assert sync._stats["errors"] == 1
 
     def test_pg_connection_failure_returns_none(self):
-        """_get_conn returns None when psycopg2 fails.
-        psycopg2 连接失败时 _get_conn 返回 None。"""
+        """_get_conn returns None when both pool and direct connect fail.
+        連接池和直連都失敗時 _get_conn 返回 None。"""
         sync = _make_sync()
-        with patch.dict(sys.modules, {"psycopg2": MagicMock()}):
-            import importlib
+        with patch("app.db_pool.get_conn", return_value=None), \
+             patch.dict(sys.modules, {"psycopg2": MagicMock()}):
             mock_pg = sys.modules["psycopg2"]
             mock_pg.connect.side_effect = Exception("connection refused")
             result = sync._get_conn()

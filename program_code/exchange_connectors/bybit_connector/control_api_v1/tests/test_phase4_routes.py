@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -121,7 +122,8 @@ def test_phase4_teacher_route_schema_complete(client: TestClient) -> None:
     assert isinstance(body["last_update_ms"], int)
 
 
-def test_phase4_teacher_route_grey_when_no_pg(client: TestClient) -> None:
+@patch("app.db_pool.get_conn", return_value=None)
+def test_phase4_teacher_route_grey_when_no_pg(_mock_pool, client: TestClient) -> None:
     """Without PG, the route should fail-soft to grey + ok=false.
     無 PG 時應 fail-soft 為 grey + ok=false。
     """
@@ -209,7 +211,8 @@ def test_phase4_news_route_schema_complete(client: TestClient) -> None:
         assert "quota_remaining" in p
 
 
-def test_phase4_news_route_grey_when_no_pg(client: TestClient) -> None:
+@patch("app.db_pool.get_conn", return_value=None)
+def test_phase4_news_route_grey_when_no_pg(_mock_pool, client: TestClient) -> None:
     """Without PG, the route should fail-soft to grey + ok=false.
     無 PG 時應 fail-soft 為 grey + ok=false。
     """
@@ -282,7 +285,8 @@ def test_phase4_dl3_route_schema_complete(client: TestClient) -> None:
     assert isinstance(body["last_update_ms"], int)
 
 
-def test_phase4_dl3_route_grey_when_no_pg(client: TestClient) -> None:
+@patch("app.db_pool.get_conn", return_value=None)
+def test_phase4_dl3_route_grey_when_no_pg(_mock_pool, client: TestClient) -> None:
     """Without PG, the route should fail-soft to grey + ok=false.
     無 PG 時應 fail-soft 為 grey + ok=false。
     """
@@ -371,7 +375,8 @@ def test_phase4_weekly_review_reject_route_returns_200_fail_soft(client: TestCli
     assert body["ok"] is False
 
 
-def test_phase4_weekly_review_latest_route_fail_soft(client: TestClient) -> None:
+@patch("app.db_pool.get_conn", return_value=None)
+def test_phase4_weekly_review_latest_route_fail_soft(_mock_pool, client: TestClient) -> None:
     """GET latest endpoint should fail-soft to ok=false + review=null.
     GET latest 端點應 fail-soft 為 ok=false + review=null。
     """
