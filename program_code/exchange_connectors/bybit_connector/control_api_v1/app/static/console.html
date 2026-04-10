@@ -354,19 +354,31 @@ async function refreshSidebar() {
   document.getElementById('live-balance-section').style.opacity = '1';
   document.getElementById('live-pnl-section').style.opacity = '1';
 
-  // Show trading mode from engine / 從引擎顯示交易模式
+  // Show trading mode from live session status / 從 live session 狀態顯示交易模式
+  // Use /api/v1/live/session/status (has proper trading_mode + execution_authority)
+  // 使用 /api/v1/live/session/status（含準確 trading_mode + execution_authority）
   try {
-    const gov = await api('/api/v1/governance/status');
-    if (gov && gov.data) {
-      const gs = gov.data;
-      const tradingMode = gs.trading_mode || gs.system_mode || 'unknown';
-      const execAuth = gs.execution_authority || 'not_granted';
-      const modeEl = document.getElementById('s-live-mode');
-      const isLiveActive = tradingMode === 'live' && execAuth === 'granted';
-      modeEl.textContent = tradingMode.toUpperCase();
+    const ls = await api('/api/v1/live/session/status');
+    const modeEl = document.getElementById('s-live-mode');
+    if (ls && ls.data) {
+      const d = ls.data;
+      const tradingMode = d.trading_mode || 'unknown';
+      const execAuth = d.execution_authority || 'not_granted';
+      const sessionState = (d.session && d.session.session_state) || 'offline';
+      const isLiveActive = sessionState === 'active' && execAuth === 'granted';
+      // Show readable mode label; fall back to Live_Ready when engine not in live mode
+      // 顯示可讀模式標籤；引擎非 live 模式時回退到 Live_Ready
+      const modeLabel = tradingMode === 'unknown' || tradingMode === 'offline'
+        ? 'Live_Ready' : tradingMode.toUpperCase();
+      modeEl.textContent = modeLabel;
       modeEl.className = 'mc-val';
       modeEl.style.color = isLiveActive ? '#a855f7' : '';
-      document.getElementById('s-live-mode-detail').textContent = 'auth: ' + execAuth;
+      // Only show auth detail when session is active / 僅在 session active 時顯示 auth
+      document.getElementById('s-live-mode-detail').textContent =
+        isLiveActive ? 'auth: ' + execAuth : '';
+    } else {
+      modeEl.textContent = 'Live_Ready';
+      document.getElementById('s-live-mode-detail').textContent = '';
     }
   } catch(e) {
     document.getElementById('s-live-mode').textContent = 'Live_Ready';

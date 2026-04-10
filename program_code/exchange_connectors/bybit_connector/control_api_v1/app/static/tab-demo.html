@@ -19,6 +19,7 @@
   <button class="oc-btn" id="btn-demo-pause" onclick="demoSessionAction('pause')" disabled style="font-size:12px;padding:4px 10px">&#x23F8; 暂停</button>
   <button class="oc-btn" id="btn-demo-resume" onclick="demoSessionAction('resume')" disabled style="font-size:12px;padding:4px 10px">&#x25B6; 继续</button>
   <button class="oc-btn oc-btn-danger" id="btn-demo-stop" onclick="demoSessionAction('stop')" disabled style="font-size:12px;padding:4px 10px">&#x23F9; 停止</button>
+  <button class="oc-btn" onclick="openDemoCloseAllDialog()" style="font-size:12px;padding:4px 10px;border-color:rgba(234,179,8,0.6);color:#eab308">&#x274C; 关闭所有仓位</button>
   <span style="font-size:12px;color:var(--text-dim);margin-left:8px" id="demo-api-info"></span>
 </div>
 
@@ -649,6 +650,51 @@ loadAll();
 ocStartRefresh(loadAll, 15000);
 ocInitFx();
 window.addEventListener('occurrencychange', loadAll);
+
+// ─── Close All Demo Positions ─────────────────────────────────
+// 關閉所有 Demo 倉位
+function openDemoCloseAllDialog() {
+  const el = document.getElementById('dlg-demo-close-all');
+  el.style.display = 'flex';
+}
+function closeDemoDialog(id) {
+  document.getElementById(id).style.display = 'none';
+}
+
+async function doDemoCloseAll() {
+  // Close all Demo positions via Bybit API (real exchange, demo account)
+  // 通過 Bybit API 平掉所有 Demo 倉位（真實交易所，Demo 帳號）
+  closeDemoDialog('dlg-demo-close-all');
+  const d = await ocPost('/api/v1/strategy/demo/close-all-positions', {});
+  if (d && d.data) {
+    const closed = d.data.closed || 0;
+    const errors = d.data.errors;
+    if (errors && errors.length) {
+      ocToast(`平倉完成 ${closed} 筆（錯誤: ${errors.join('; ')}）`, 'warn');
+    } else {
+      ocToast(`✓ Demo 倉位已全部關閉（${closed} 筆）`, 'success');
+    }
+    setTimeout(loadAll, 1500);
+  } else {
+    ocToast('關閉倉位失敗，請檢查 Demo 連接狀態', 'error');
+  }
+}
 </script>
+
+<!-- ── Close All Demo Positions Dialog ─────────────────────────── -->
+<!-- 關閉所有 Demo 倉位對話框 -->
+<div style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center" id="dlg-demo-close-all">
+  <div style="background:var(--card-bg);border:1px solid rgba(234,179,8,0.5);border-radius:10px;padding:24px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+    <h3 style="margin:0 0 12px;font-size:16px;color:#eab308">&#x274C; 關閉所有 Demo 倉位</h3>
+    <p style="margin:0 0 16px;font-size:13px;color:var(--text-dim);line-height:1.6">
+      此操作將通過 Bybit Demo API 市價平掉所有 Demo 帳戶倉位並取消掛單。<br>
+      <strong>使用虛擬資金，不影響真實帳戶。</strong>
+    </p>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="oc-btn" onclick="closeDemoDialog('dlg-demo-close-all')">取消</button>
+      <button class="oc-btn" onclick="doDemoCloseAll()" style="border-color:rgba(234,179,8,0.7);color:#eab308;font-weight:700">確認關閉所有 Demo 倉位</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

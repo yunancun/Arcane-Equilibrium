@@ -927,6 +927,38 @@ async def get_live_fills(
     return _live_response({"list": [], "count": 0, "available": False})
 
 
+@live_router.post("/close-all-positions")
+async def post_live_close_all_positions(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/close-all-positions
+    立即平掉所有實盤倉位（不停止 session，引擎繼續運行）。
+    需要 Operator 角色 + 引擎在線。
+
+    Close all live positions immediately without stopping the session.
+    Requires Operator role and engine online. Engine pipeline continues running.
+    """
+    _require_operator(actor)
+    rust_online = get_rust_reader().is_available()
+    if not rust_online:
+        raise HTTPException(status_code=503, detail="Rust engine offline — cannot close positions")
+    try:
+        result = await _ipc_command("close_all_positions")
+    except Exception as exc:
+        logger.error("IPC close_all_positions failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"close_all_positions IPC failed: {exc}")
+    logger.warning(
+        "⚠ LIVE close-all-positions (manual, session continues) — actor=%s",
+        getattr(actor, "actor_id", "?"),
+    )
+    return _live_response({
+        "message": "All live positions closed — session continues / 已平掉所有實盤倉位，session 繼續運行",
+        "source": "rust_engine",
+        "close_result": result,
+    })
+
+
 @live_router.get("/metrics")
 def get_live_metrics(
     actor: Any = Depends(base.current_actor),

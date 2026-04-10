@@ -183,6 +183,7 @@ html, body {
     <span style="flex:1"></span>
     <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
     <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
+    <button class="oc-btn" id="btn-live-close-all" onclick="openCloseAllDialog()" style="font-weight:700;border-color:rgba(168,85,247,0.6);color:#a855f7">&#x274C; 關閉所有倉位</button>
     <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
   </div>
 
@@ -329,6 +330,22 @@ html, body {
   </div>
 </div>
 
+<!-- ── Close All Positions Dialog (session continues) ─────────── -->
+<!-- 關閉所有倉位對話框（session 繼續運行） -->
+<div class="oc-dialog-overlay" id="dlg-live-close-all">
+  <div class="oc-dialog" style="border-color:rgba(168,85,247,0.5)">
+    <h3 style="color:#a855f7">&#x274C; 關閉所有實盤倉位</h3>
+    <p>此操作將通過 Bybit API 市價平掉所有實盤持倉並取消掛單。<br>
+      <strong>Session 不會停止</strong> — 引擎繼續運行，策略可繼續開新倉。<br>
+      <span style="color:#f87171;font-size:12px">⚠ 市價成交，存在滑點風險。真實資金。</span>
+    </p>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeDialog('dlg-live-close-all')">取消</button>
+      <button class="oc-btn" onclick="doLiveCloseAll()" style="border-color:rgba(168,85,247,0.7);color:#a855f7;font-weight:700">確認關閉所有倉位</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════
 // Dialog helpers / 對話框輔助函數
@@ -336,6 +353,7 @@ html, body {
 function closeDialog(id) { document.getElementById(id).classList.remove('show'); }
 function openStopDialog() { document.getElementById('dlg-live-stop').classList.add('show'); }
 function openEmergencyDialog() { document.getElementById('dlg-live-emergency').classList.add('show'); }
+function openCloseAllDialog() { document.getElementById('dlg-live-close-all').classList.add('show'); }
 
 // ═══════════════════════════════════════════════════════════════
 // Refresh page — reload dashboard + engine status
@@ -590,6 +608,24 @@ async function doEmergencyStop() {
     await refreshPage();
   } else {
     ocToast('緊急停止命令失敗，請手動操作', 'error');
+  }
+}
+
+async function doLiveCloseAll() {
+  // Close all live positions without stopping session / 平掉所有倉位但不停止 session
+  closeDialog('dlg-live-close-all');
+  const d = await ocPost('/api/v1/live/close-all-positions', {});
+  if (d) {
+    const msg = (d.data && d.data.message) || d.message || '已平倉';
+    const errors = d.data && d.data.close_result && d.data.close_result.errors;
+    if (errors && errors.length) {
+      ocToast('平倉完成（部分錯誤: ' + errors.join('; ') + '）', 'warn');
+    } else {
+      ocToast('✓ ' + msg, 'success');
+    }
+    await refreshPage();
+  } else {
+    ocToast('平倉指令失敗，請檢查引擎狀態', 'error');
   }
 }
 
