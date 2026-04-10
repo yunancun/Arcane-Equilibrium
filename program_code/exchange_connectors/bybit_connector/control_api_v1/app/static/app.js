@@ -2368,7 +2368,11 @@ async function handlePaperAction(action) {
   try {
     let r;
     if (action === "start") {
-      r = await apiPost("/api/v1/paper/session/start", { initial_balance: 10000 });
+      // Balance is set by Rust engine at startup (reads Demo account via Bybit API).
+      // Do not send initial_balance — Python route ignores it; Rust owns the balance.
+      // 餘額由 Rust 引擎在啟動時設定（通過 Bybit API 讀取 Demo 帳號），
+      // 不傳送 initial_balance — Python 路由忽略此參數，Rust 擁有餘額。
+      r = await apiPost("/api/v1/paper/session/start", {});
     } else if (action === "pause") {
       r = await apiPost("/api/v1/paper/session/pause", {});
     } else if (action === "resume") {
