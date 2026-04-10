@@ -249,11 +249,19 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（DB fresh-start reset 後乾淨數據從 2026-04-10 重新起算；2026-04-11 滾動重跑 JS-1 `--days 2`，之後每日 +1 直到 Day 7 後每週滾動）。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 剩餘**：6-RC-6 多通道告警（阻塞 OC-3）+ 6-RC-7 e2e 測試 + 6-RC-8 live blocker + 6-01~08 漸進放權。
+**當前焦點（2026-04-10 審計後更新）**：10 個架構 gap 全部入計劃（TODO.md Gap 索引）。
+- **W19（04-14~18）**：G-3 IPC 認證 + G-5 Rate Limiting + OC-3 多通道告警 + 6-RC-6（Live 阻塞項全清）
+- **W20（04-21~25）**：SEC-04/06/13 E3 審查 + G-9 HMAC 確認 + 6-01~03 漸進放權
+- **W21（04-28~05-02）**：6-04~13 Phase 6 完整驗收；LG-1 21d paper 到期（05-01）
+- **W22（05-05~09）**：G-1 R-02 AI Agent（Strategist/Guardian）+ G-2/OC-5 FundingArb + LG-2/3
+- **W23（05-12~16）**：G-1 R-06 全 5 agent + G-7 ClaudeTeacher + G-10 Calibration + LG-4/5 Live
 
-**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-20) 🟡** 自動降級 ✅ · 漸進放權+告警+壓測 ⬜。
+**關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(05-01) → LG-2 → LG-4 → Live`
+**最早 Live 日期**：W23 末（～2026-05-16）
 
-**Live 前置**：Paper trading ≥21d · Phase 6 完成 · Alpha PnL>0 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
+**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) 🟡** 自動降級 ✅ · 告警+漸進放權+壓測 ⬜ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
+
+**Live 前置**：Paper trading ≥21d · G-3 IPC 認證 · G-5 Rate Limiting · Phase 6 完成 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`

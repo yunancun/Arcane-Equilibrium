@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（DB fresh-start reset · 乾淨數據重新起算）
+最後更新：2026-04-10（DB fresh-start reset · 乾淨數據重新起算 · 審計 G-1~G-10 全入計劃）
 測試基準線：**Rust engine lib 872 · Python control_api 2427 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -8,7 +8,23 @@
 
 ---
 
-## 🎯 當前焦點（按執行順序）
+## 🗓️ 排期總覽（2026-04-10 基準）
+
+| 週次 | 日期 | 主要焦點 |
+|------|------|---------|
+| W19 | 04-14~18 | **G-3** IPC 認證 · **G-5** Rate Limit · **OC-3** / **6-RC-6** 告警分級 |
+| W20 | 04-21~25 | SEC-04/06/13 E3 審查 · **6-01~03** 漸進放權 |
+| W21 | 04-28~05-02 | **6-04~13** Phase 6 完整驗收 · LG-1 倒計時 |
+| W22 | 05-05~09 | **G-1 R-02** AI Agent Strategist/Guardian · **G-2/OC-5** FundingArb · LG-2/3 |
+| W23 | 05-12~16 | **G-1 R-06** Agent 完整 · **G-7** Teacher 啟用 · **G-10** Calibration · LG-4/5 |
+| W24+ | 05-19+ | Phase 5 補強 · Backlog |
+
+**關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(21d到05-01) → LG-2 → LG-4 → Live`
+**最早 Live 日期**：W23 末（～2026-05-16）
+
+---
+
+## 🎯 當前焦點（W19 開始，按執行順序）
 
 ### 1. 🟢 觀察期 — 等數據（無開發動作，只需維運）
 
@@ -23,29 +39,44 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
   - 之後每週拉長窗口（14d → 30d）直到估計穩定
   - 若某 cell 轉正 → 重啟引擎後 mode-aware gate 自動對該 pair 生效
   - `settings/edge_estimates.json` 更新後需重啟引擎才生效（無 hot-reload）
-- [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）
+  - ↳ **G-6**（ML edge 重訓）：JS 重跑本身即為修復路徑，W19-W20 維運覆蓋
+  - ↳ **G-8**（cost_gate 可信度）：G-6 完成後 W21 評估是否需人工干預
+- [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）— 最早 2026-05-01 完成
 
 ---
 
-## 🛡️ Live 前必做（SEC 安全 + 告警基礎設施）
+## 🛡️ W19 — 安全 + 告警（Live 前必做）
 
-### 安全（架構性，必做）
+### W19-P0：IPC 認證 + Rate Limiting（無依賴，立即可做）
 
 - [x] **SEC-05** GUI `innerHTML` XSS ✅ — ocEsc() 全量包裹
 - [x] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 移除 ✅ — API key 填入 = 唯一上線條件
-- [ ] **SEC-08** IPC socket 無認證（Live 前必做）
-- [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後）
-- [ ] **SEC-04 / 06 / 13** 深度 E3 審查（4 項）
-- [ ] WP-CC/FS-1 / BI-1 / P9 / SM-1（4 項 CC）
+- [ ] **G-3 / SEC-08** IPC socket 無認證（**Live 前必做 · W19**）
+  - 現況：ipc_server.rs Unix socket 僅 chmod 600，任意可訪問進程可發送任意命令（close_all_positions / update_risk_config）
+  - 方案：HMAC-SHA256 握手（雙端：Rust ipc_server.rs + Python ipc_client.py）
+  - 交付：認證握手 · 錯誤測試 · E2 迴歸
+- [ ] **G-5** API Rate Limiting 全局缺失（**Live 前必做 · W19**）
+  - 現況：控制 API 203 個路由，slowapi 已裝但僅 3 個路由掛 decorator
+  - 方案：在 APIRouter 層加 default_limits 或逐路由補 `@limiter.limit`
+  - 交付：全覆蓋限流配置 · E2 迴歸
 
-### 告警通道
+### W19-P0：告警通道（阻塞 6-RC-6）
 
-- [ ] **OC-3** 多通道分級告警（P0→緊急群 / P1→常規群）— **阻塞 6-RC-6**
+- [ ] **OC-3** 多通道分級告警（P0→緊急群 / P1→常規群）— **阻塞 6-RC-6**（W19）
+  - 方案：擴展 AlertRouter + TelegramAlerter，P0/P1 分群發送
+- [ ] **6-RC-6** 多通道告警 + 15s 介入窗口 ⚠️ 阻塞於 OC-3（W19 末）
 - [x] Phase 6 自動降級動作層完成（6-RC-1~5,7,8,9,10）✅
+
+### W20：深度安全審查
+
+- [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後，W22 依賴 HTTPS 部署）
+- [ ] **SEC-04 / 06 / 13** 深度 E3 審查（4 項，W20）
+- [ ] **G-9** HMAC dead import 確認（governance_routes.py L39 `import hmac` 用途確認，W20 E3 審查時一併處理）
+- [ ] **WP-CC/FS-1 / BI-1 / P9 / SM-1**（4 項 CC，W20）
 
 ---
 
-## 📈 Phase 6 — 漸進放權 + Reconciler 自動收縮（W19-20）
+## 📈 Phase 6 — 漸進放權 + Reconciler 自動收縮（W20-W21）
 
 ### 6-RC（Reconciler 自動 governor 動作層）
 
@@ -54,34 +85,70 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 - [x] **6-RC-3** 動作策略（MajorDrift→Cautious / burst→CB+CloseAll）✅
 - [x] **6-RC-4** 自身冷卻（per-symbol 30min + 全局 5min + hybrid 恢復）✅
 - [x] **6-RC-5** Per-symbol minQty dust floor ✅
-- [ ] **6-RC-6** 多通道告警 + 15s 介入窗口 ⚠️ 阻塞於 OC-3
+- [ ] **6-RC-6** 多通道告警 + 15s 介入窗口 ⚠️ 阻塞於 OC-3（W19 末）
 - [x] **6-RC-7** 整合測試（7 場景 reconciler_e2e.rs）✅
 - [x] **6-RC-8** Live blocker 解除 ✅
 - [x] **6-RC-9** Baseline staleness 政策 ✅
 - [x] **6-RC-10** REST 失敗升級（≥10 次→Cautious）✅
 
-### 6-Phase（漸進放權 + 驗收）
+### 6-Phase（漸進放權 + 驗收，W20-W21）
 
-- [ ] 6-01~03 漸進放權管線 + 畢業邏輯 + Live 審批
-- [ ] 6-04~06 全管線回放 + 壓測 + sync_commit Live 驗證
-- [ ] 6-07~08 EvolutionEngine deprecated + 文檔
-- [ ] 6-09~13 E2 + E4 + QA 端到端 + E5 + PM
+- [ ] **6-01~03** 漸進放權管線 + 畢業邏輯 + Live 審批（W20，依賴 6-RC-6）
+- [ ] **6-04~06** 全管線回放 + 壓測 + sync_commit Live 驗證（W21）
+- [ ] **6-07~08** EvolutionEngine deprecated + 文檔（W21）
+- [ ] **6-09~13** E2 + E4 + QA 端到端 + E5 + PM（W21）
 
 ---
 
-## 🚦 Live Gate（前置：Phase 6 + 21 天 paper + Alpha > 0）
+## 🤖 AI 治理層補強（W22-W23）
 
-- [ ] LG-1 Paper Trading 穩定運行 21 天（同觀察期）
-- [ ] LG-2 H0 Gate blocking 驗證（shadow → blocking）
-- [ ] LG-3 provider pricing table 正式綁定
-- [ ] LG-4 M 章 Supervised Live Gate
-- [ ] LG-5 N 章 Constrained Autonomous Live
+> 背景：`ai_service.py` 5 個 handler 全為 stub（返回保守固定值），H1-H5 AI 判決輸入為空值。系統目前完全靠 H0 + Rust 規則驅動。
+> R-02 = Strategist + Guardian 接線；R-06 = Analyst + Conductor + Scout + FundingArb IPC。
+
+- [ ] **G-1 / R-02** Strategist + Guardian 真實接線（ai_service.py → multi_agent_framework，優先這兩個關鍵角色，W22）
+  - 前置：G-3 IPC 認證完成
+- [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
+- [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
+  - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
+- [ ] **G-7** ClaudeTeacher 正式啟用（SEC-04/06/13 E3 審查 PASS 後 flip enabled AtomicBool，學習閉環接通，W23）
+  - 現況：consumer_loop.rs `enabled = false`（啟動時 fail-closed）+ learning_store "currently has no consumer"
+  - 前置：E3 審查 PASS + G-3 IPC 認證 + 21d paper 穩定
+- [ ] **G-10** Calibration.py 整合（calibrate_isotonic → run_training_pipeline.py，加入 ECE < 0.05 門檻，W23）
+  - 現況：ml_training/calibration.py 骨架，apply_calibration 缺整合入口
+  - 前置：fills 累積 + 2-11 actual training
+
+---
+
+## 🚦 Live Gate（W22-W23）
+
+前置條件（全部必須）：
+- G-3 IPC 認證 ✅（W19）
+- G-5 Rate Limiting ✅（W19）
+- Phase 6 完整驗收 ✅（W21）
+- LG-1 Paper Trading 21 天 ✅（05-01）
+
+- [ ] **LG-1** Paper Trading 穩定運行 21 天（同觀察期，05-01 完成）
+- [ ] **LG-2** H0 Gate blocking 驗證（shadow → blocking，W22）
+- [ ] **LG-3** provider pricing table 正式綁定（W22）
+- [ ] **G-4 / SEC-21** Cookie `secure=True`（HTTPS 就緒後，W22）
+- [ ] **LG-4** M 章 Supervised Live Gate（W23）
+- [ ] **LG-5** N 章 Constrained Autonomous Live（W23）
 
 **完成後**：換入 mainnet API key，系統即進入真實 Live（零代碼改動）。
 
 ---
 
-## 📈 Phase 5 補強（非阻塞，觀察期後評估）
+## 📊 ML Edge Gap（觀察期後自動改善）
+
+- [ ] **G-6** Edge estimates 重訓（JS 重跑使用重置後乾淨數據，W19-W20 滾動排程已覆蓋）
+  - 現況：edge_estimates.json 8 個 cells 基於 71M 開發噪音數據
+  - 修復路徑：JS 滾動重跑（14d/30d 窗口後估計穩定）
+- [ ] **G-8** cost_gate 可信度評估（G-6 JS 重跑自然改善；W21 評估是否需要人工干預）
+  - 現況：cost_gate 依賴不可靠的 edge_estimates，決策精度有限
+
+---
+
+## 📈 Phase 5 補強（W24+，非阻塞，觀察期後評估）
 
 WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 精度提升項：
 
@@ -91,7 +158,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ---
 
-## 🧰 WP Backlog（低優先 · 維護性）
+## 🧰 WP Backlog（W24+，低優先 · 維護性）
 
 詳細子項見 `docs/audits/2026-04-06_consolidated_remediation_report.md` §10。
 
@@ -125,18 +192,32 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ## 📦 殘留延後（前 phase，非阻塞）
 
-- [ ] 2-11 actual training（需足夠 trading.fills 累積）
-- [ ] ort crate activation（首個 ONNX 模型訓練後）
-- [ ] 4-06 LinUCB live warm-start deployment（script 已交付，等首次 v1→v2 遷移）
+- [ ] **2-11** actual training（需足夠 trading.fills 累積）
+- [ ] **ort crate** activation（首個 ONNX 模型訓練後）
+- [ ] **4-06** LinUCB live warm-start deployment（script 已交付，等首次 v1→v2 遷移）
+- [ ] **OC-4** MCP PostgreSQL 自然語言查詢
+- [ ] **OC-5** FundingArb REST 資金費率輪詢（W22，解鎖 G-2）
 
 ### Phase 4-Conditional（觸發後）
 
 - [ ] 4-1 PairsTrading（需 3 月協整）/ 4-2 Beta Hedging / 4-3 Kalman / 4-5 Mac Studio 遷移 / 4-10 Jump detection
 
-### 長期整合（非緊急）
+---
 
-- [ ] OC-4 MCP PostgreSQL 自然語言查詢
-- [ ] OC-5 FundingArb REST 資金費率輪詢
+## 🔍 Gap 排期索引（2026-04-10 審計，10 項全錄）
+
+| Gap | 描述 | 複雜度 | 排期週 | 依賴 | Live 阻塞 |
+|-----|------|--------|--------|------|----------|
+| **G-1** | AI Agent 5 stub（H1-H5 AI 治理層無效）| XL | W22(R-02) + W23(R-06) | G-3, G-7 | — |
+| **G-2** | FundingArb.on_tick() 永遠 vec![] | M | W22 | OC-5 | — |
+| **G-3** | IPC socket 無認證（SEC-08）| M | **W19** | — | ✅ 阻塞 |
+| **G-4** | Cookie secure=False（SEC-21）| S | W22 | HTTPS 部署 | ⚠️ 前置 |
+| **G-5** | API Rate Limiting 全局缺失 | M | **W19** | — | ✅ 阻塞 |
+| **G-6** | ML edge 基於噪音數據（重訓路徑）| S | W19-W20 | PH5-VERIFY-1 7d | — |
+| **G-7** | ClaudeTeacher disabled + 學習閉環斷路 | M | W23 | E3 audit · G-3 · 21d paper | — |
+| **G-8** | cost_gate 可信度低 | S | W21 評估 | G-6 | — |
+| **G-9** | HMAC dead import 確認 | S | W20 E3 審查 | SEC-04/06/13 | — |
+| **G-10** | Calibration.py 骨架 | M | W23 | fills 累積 | — |
 
 ---
 
