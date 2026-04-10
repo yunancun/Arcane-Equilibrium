@@ -50,7 +50,7 @@
 
 **StrategyAction Enum ✅**（2026-04-09）— 策略出場死鎖修復。策略 `on_tick()` 返回 `Vec<StrategyAction>`（`Open` 走完整治理，`Close` 輕量路徑繞過 Guardian/cost_gate/Kelly/P1）。5 策略改造完畢 + QC/FA 全修（grid 庫存漂移 P1、exchange Kelly P2、audit logging P2）。830 lib tests pass。
 
-**Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅ · PH5-DL-2+JS-1 ✅ · PH5-WIRE-1 ✅（mode-aware cost_gate 已上線，引擎已加載 8 cells，exploration mode 激活）· 5-01~03 ✅（per-param JS + k-means）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。**數據策略**：ARCH-RC1 前的歷史 fills 數據存在開發噪音，不清空（審計保留）；改用滾動窗口：2026-04-11 用 `--days 3` 重跑 JS-1，只看 ARCH-RC1 穩定後的乾淨數據。
+**Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅ · PH5-DL-2+JS-1 ✅ · PH5-WIRE-1 ✅（mode-aware cost_gate 已上線，引擎已加載 8 cells，exploration mode 激活）· 5-01~03 ✅（per-param JS + k-means）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。**數據策略**：2026-04-10 執行 DB fresh-start reset（71.3M 開發噪音行清除，市場數據保留）。乾淨數據從 2026-04-10 重新起算，JS-1 滾動重跑排程：Day 2（2026-04-11）`--days 2` → Day 3（2026-04-12）`--days 3` → Day 7（2026-04-17）`--days 7` → 之後每週拉長窗口直到估計穩定。
 
 **Rust 市場掃描器 Phase A-D + QC/FA + P2 ✅**（2026-04-09）— ScannerRunner 完整接線 + D2/D3 動態 symbol + C-3 XRP + C-4 pinned cap + M-1 pending_close + adl_alerts + M-2 TOML + M-3 f_ma 閾值 1.5%→0.5% + M-5 edge_bonus +5→+2 + m-1 relay log + m-3 rest_poller Vec<String> + **IPC-SCAN-1 掃描器可觀測性**（get_active_symbols / get_scanner_status）。**系統目標達成度 ~100%**。835 lib tests pass。
 
@@ -249,7 +249,7 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十、下一步工作指針
 
-**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（7d paper 數據累積，2026-04-11 滾動重跑 JS-1 `--days 3`）。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 剩餘**：6-RC-6 多通道告警（阻塞 OC-3）+ 6-RC-7 e2e 測試 + 6-RC-8 live blocker + 6-01~08 漸進放權。
+**當前焦點（2026-04-10 更新）**：**(1) PH5-VERIFY-1 觀察期**（DB fresh-start reset 後乾淨數據從 2026-04-10 重新起算；2026-04-11 滾動重跑 JS-1 `--days 2`，之後每日 +1 直到 Day 7 後每週滾動）。**(2) 安全補強**：SEC-08 IPC socket 無認證 + SEC-17 2FA 架構決策（Live 前必做）。**(3) Phase 6 剩餘**：6-RC-6 多通道告警（阻塞 OC-3）+ 6-RC-7 e2e 測試 + 6-RC-8 live blocker + 6-01~08 漸進放權。
 
 **路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-20) 🟡** 自動降級 ✅ · 漸進放權+告警+壓測 ⬜。
 

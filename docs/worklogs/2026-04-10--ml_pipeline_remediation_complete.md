@@ -48,7 +48,7 @@
 - **Note**: `std_bps` is stored but not yet consumed by gate logic (future uncertainty-adjusted gating)
 
 ### 1-2: Realized Edge Verification
-- **Deferred**: needs engine running with `--days 3` post-ARCH-RC1
+- **Deferred**: DB fresh-start reset done 2026-04-10; run `--days 2` on 2026-04-11, then daily +1 until Day 7
 
 ---
 
@@ -131,7 +131,7 @@
 ## Remaining Work (Needs Engine / Separate Scope)
 
 ### Needs Engine Running
-- **S1-2**: Realized edge verification (`--days 3`)
+- **S1-2**: Realized edge verification — `--days 2` on 2026-04-11 (Day 2 post fresh-start)
 - **S2-2b**: Parquet ETL end-to-end
 - **S2-3**: Scorer training end-to-end
 - **S3-1c**: Optuna dry-run

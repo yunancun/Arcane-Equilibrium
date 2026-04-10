@@ -80,8 +80,12 @@ Phase 5 cost_gate 改造已全部上線（mode-aware exploration + JS shrinkage 
 現在唯一阻擋 Live 的是**時間**：需要 ARCH-RC1 後乾淨數據累積。
 
 - [ ] **PH5-VERIFY-1** 7d paper observation — 看 fills / realized pnl 分布是否改善（同時也是 Live blocker 觀察期）
-- [ ] **2026-04-11 JS 滾動重跑** `PG_PASSWORD=... python3 -m program_code.ml_training.james_stein_estimator --days 3`
-  - 之後每週重跑，窗口逐步拉長（7d → 14d → 30d）直到估計穩定
+  - **重新起算**：2026-04-10 DB fresh-start reset 後，乾淨數據從今天開始
+- [ ] **JS 滾動重跑排程**（DB 重置後重新計算，2026-04-10 = Day 1）
+  - 2026-04-11（Day 2）：`--days 2`
+  - 2026-04-12（Day 3）：`--days 3`
+  - 2026-04-17（Day 7）：`--days 7`
+  - 之後每週重跑，窗口逐步拉長（14d → 30d）直到估計穩定
   - 若某 cell 轉正 → 下次引擎重啟後 mode-aware gate 自動對該 pair 生效
   - `settings/edge_estimates.json` 更新後需重啟引擎才生效（無 hot-reload）
 - [ ] **LG-1** Paper Trading 穩定運行 21 天（Live Gate 前置）
@@ -158,8 +162,8 @@ Phase 1+2+3+4 全部完成。
 - [x] **6-RC-4 自身冷卻** — per-(symbol,side) 30min + 全局 5min + hybrid 恢復（clean cycles + wall-clock）
 - [x] **6-RC-5 Per-symbol minQty dust floor** — `filter_dust()` 用 `1.5 × minOrderQty` from InstrumentInfoCache
 - [ ] **6-RC-6 多通道告警 + 15s 介入窗口** — 動作前先告警，15s 未 ACK 才執行 ⚠️ 阻塞於 OC-3
-- [ ] **6-RC-7 整合測試** — e2e 斷言 reconciler → command → governor level change，覆蓋 4+ 場景
-- [ ] **6-RC-8 Live blocker 解除** — 完成後從 Live blocker 清單移除
+- [x] **6-RC-7 整合測試** — `tests/reconciler_e2e.rs` 7 場景：MajorDrift→Cautious / persistent→Defensive / burst→CB+CloseAll / recovery Cautious→Normal / CB blocked / REST fail / floor rule
+- [x] **6-RC-8 Live blocker 解除** — Reconciler 自動降級完整，不再為 Live 隱含阻塞
 - [x] **6-RC-10 REST 失敗升級** — 連續 REST 失敗 ≥10 次（~5min）→ escalate to Cautious
 
 ### 6-Phase（漸進放權 + 驗收）
