@@ -11,8 +11,10 @@ MODULE_NOTE (中): 實現 4 折 CPCV，含時間清洗和每策略 embargo 期�
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -277,7 +279,7 @@ def validate_cpcv(
             config.n_folds,
         )
 
-    return CPCVResult(
+    result = CPCVResult(
         fold_metrics=fold_metrics,
         mean_sharpe=mean_sharpe,
         std_sharpe=std_sharpe,
@@ -287,3 +289,68 @@ def validate_cpcv(
         embargo_hours=embargo_hours,
         strategy_type=strategy_type,
     )
+
+    # Persist to PG (fail-soft) / 持久化到 PG（失敗不中斷）
+    _persist_cpcv_result(result)
+
+    return result
+
+
+def _persist_cpcv_result(result: CPCVResult, model_name: str = "lightgbm_scorer", model_version: str = "v1") -> bool:
+    """Write CPCV result to learning.cpcv_results. Fail-soft.
+    將 CPCV 結果寫入 learning.cpcv_results。失敗不中斷。
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        return False
+
+    dsn = os.environ.get("OPENCLAW_PG_DSN") or os.environ.get("PG_DSN")
+    try:
+        if dsn:
+            conn = psycopg2.connect(dsn)
+        else:
+            conn = psycopg2.connect(
+                host=os.getenv("PG_HOST", "127.0.0.1"),
+                port=int(os.getenv("PG_PORT", "5432")),
+                user=os.getenv("PG_USER", "trading_admin"),
+                password=os.getenv("PG_PASS", ""),
+                dbname=os.getenv("PG_DB", "trading_ai"),
+                connect_timeout=5,
+            )
+    except Exception as e:
+        logger.warning("CPCV PG connection failed (non-fatal): %s / CPCV PG 連接失敗（非致命）：%s", e, e)
+        return False
+
+    try:
+        # Compute mean_accuracy from fold_metrics if available
+        # 從 fold_metrics 計算 mean_accuracy（如有）
+        accuracies = [
+            fm.get("accuracy") for fm in result.fold_metrics
+            if fm.get("accuracy") is not None
+        ]
+        mean_accuracy = float(np.mean(accuracies)) if accuracies and np is not None else None
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO learning.cpcv_results
+                    (model_name, model_version, n_folds, embargo_hours, strategy_type,
+                     fold_metrics, mean_sharpe, std_sharpe, mean_accuracy, power_estimate, passed)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    model_name, model_version, result.n_folds, result.embargo_hours,
+                    result.strategy_type, json.dumps(result.fold_metrics),
+                    result.mean_sharpe, result.std_sharpe, mean_accuracy,
+                    result.power_estimate, result.passed,
+                ),
+            )
+        conn.commit()
+        logger.info("Persisted CPCV result: passed=%s sharpe=%.4f / 已持久化 CPCV 結果", result.passed, result.mean_sharpe)
+        return True
+    except Exception as e:
+        logger.warning("Failed to persist CPCV result (non-fatal): %s / 持久化 CPCV 結果失敗（非致命）：%s", e, e)
+        return False
+    finally:
+        conn.close()

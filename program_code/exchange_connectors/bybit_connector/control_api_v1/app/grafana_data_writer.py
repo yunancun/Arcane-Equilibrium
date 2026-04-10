@@ -67,20 +67,17 @@ PG_DB = os.getenv("PG_DB", "trading_ai")
 
 
 def _get_pg_conn():
-    """Get a PostgreSQL connection. Returns None on failure (graceful degradation).
-    获取 PostgreSQL 连接，失败时返回 None（静默降级）。"""
-    try:
-        import psycopg2
-        return psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, user=PG_USER, password=PG_PASS, dbname=PG_DB,
-            connect_timeout=5,
-        )
-    except ImportError:
-        logger.debug("psycopg2 not installed — Grafana data writer disabled")
-        return None
-    except Exception as e:
-        logger.debug("PostgreSQL connection failed: %s", e)
-        return None
+    """Get a PostgreSQL connection from the shared pool. Returns None on failure.
+    從共享連接池獲取 PostgreSQL 連接。失敗時返回 None。"""
+    from . import db_pool
+    return db_pool.get_conn()
+
+
+def _put_pg_conn(conn) -> None:
+    """Return a PostgreSQL connection to the shared pool.
+    將 PostgreSQL 連接歸還到共享連接池。"""
+    from . import db_pool
+    db_pool.put_conn(conn)
 
 
 class GrafanaDataWriter:
@@ -186,7 +183,7 @@ class GrafanaDataWriter:
             conn.rollback()
             raise
         finally:
-            conn.close()
+            _put_pg_conn(conn)
 
     # ── 1. Paper PnL Snapshots (from Rust IPC snapshot) ──
 

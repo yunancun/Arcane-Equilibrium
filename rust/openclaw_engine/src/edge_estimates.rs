@@ -14,13 +14,31 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Per-cell edge detail parsed from the JSON snapshot.
+/// 從 JSON 快照解析的每格子邊際詳情。
+#[derive(Debug, Clone)]
+pub struct CellEstimate {
+    /// James-Stein shrunk realized edge in basis points.
+    /// James-Stein 收縮實現邊際（bps）。
+    pub shrunk_bps: f64,
+    /// Win rate (shrunk or raw), clamped to [0, 1]. Default 0.5.
+    /// 勝率（收縮或原始），限制在 [0, 1]。默認 0.5。
+    pub win_rate: f64,
+    /// Number of observed trades for this cell.
+    /// 此格子的觀測交易數。
+    pub n_trades: u64,
+    /// Standard deviation of realized edge in bps. 0 if unavailable.
+    /// 實現邊際標準差（bps）。不可用時為 0。
+    pub std_bps: f64,
+}
+
 /// Shrunk realized-edge estimates per (strategy, symbol) cell.
 /// 每 (策略, 幣種) 格子的收縮實現邊際估計。
 #[derive(Debug, Clone, Default)]
 pub struct EdgeEstimates {
-    /// Maps "strategy::symbol" → shrunk_bps (James-Stein shrunk realized edge).
-    /// 映射 "策略::幣種" → 收縮 bps（James-Stein 收縮實現邊際）。
-    data: HashMap<String, f64>,
+    /// Maps "strategy::symbol" → full cell estimate.
+    /// 映射 "策略::幣種" → 完整格子估計。
+    data: HashMap<String, CellEstimate>,
     /// Grand mean across all cells at snapshot time.
     /// 快照時所有格子的全域均值。
     grand_mean_bps: f64,
@@ -62,7 +80,23 @@ impl EdgeEstimates {
                 continue;
             }
             if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
-                data.insert(key.clone(), bps);
+                let win_rate = val.get("win_rate_shrunk")
+                    .or_else(|| val.get("win_rate"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5)
+                    .clamp(0.0, 1.0);
+                let n_trades = val.get("n")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let std_bps = val.get("std_bps")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                data.insert(key.clone(), CellEstimate {
+                    shrunk_bps: bps,
+                    win_rate,
+                    n_trades,
+                    std_bps,
+                });
             }
         }
 
@@ -74,6 +108,51 @@ impl EdgeEstimates {
             "PH5-WIRE-1: edge estimates loaded / 邊際估計已加載"
         );
 
+        Some(Self { data, grand_mean_bps, n_cells })
+    }
+
+    /// Load from a JSON string (convenience for tests and inline initialization).
+    /// 從 JSON 字符串加載（測試和內聯初始化的便捷方法）。
+    pub fn load_from_str(json: &str) -> Option<Self> {
+        let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+        let obj = parsed.as_object()?;
+
+        let mut data = HashMap::new();
+        let mut grand_mean_bps = 0.0;
+
+        if let Some(meta) = obj.get("_meta").and_then(|v| v.as_object()) {
+            grand_mean_bps = meta
+                .get("grand_mean_bps")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+        }
+
+        for (key, val) in obj {
+            if key.starts_with('_') {
+                continue;
+            }
+            if let Some(bps) = val.get("shrunk_bps").and_then(|v| v.as_f64()) {
+                let win_rate = val.get("win_rate_shrunk")
+                    .or_else(|| val.get("win_rate"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.5)
+                    .clamp(0.0, 1.0);
+                let n_trades = val.get("n")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let std_bps = val.get("std_bps")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                data.insert(key.clone(), CellEstimate {
+                    shrunk_bps: bps,
+                    win_rate,
+                    n_trades,
+                    std_bps,
+                });
+            }
+        }
+
+        let n_cells = data.len();
         Some(Self { data, grand_mean_bps, n_cells })
     }
 
@@ -95,12 +174,18 @@ impl EdgeEstimates {
         })
     }
 
-    /// Look up shrunk edge estimate for a (strategy, symbol) pair.
+    /// Look up shrunk edge bps for a (strategy, symbol) pair (convenience).
     /// Returns None if no estimate available (unknown pair or cold-start).
-    /// 查找 (策略, 幣種) 對的收縮邊際估計。無估計時返回 None。
+    /// 查找 (策略, 幣種) 對的收縮邊際 bps（便捷方法）。無估計時返回 None。
     pub fn get(&self, strategy: &str, symbol: &str) -> Option<f64> {
+        self.get_cell(strategy, symbol).map(|c| c.shrunk_bps)
+    }
+
+    /// Look up full cell estimate for a (strategy, symbol) pair.
+    /// 查找 (策略, 幣種) 對的完整格子估計。
+    pub fn get_cell(&self, strategy: &str, symbol: &str) -> Option<&CellEstimate> {
         let key = format!("{}::{}", strategy, symbol);
-        self.data.get(&key).copied()
+        self.data.get(&key)
     }
 
     /// Whether estimates have been loaded (non-empty).

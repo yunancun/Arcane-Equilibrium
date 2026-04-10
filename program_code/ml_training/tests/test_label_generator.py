@@ -36,12 +36,18 @@ def test_generate_labels_basic():
 
 
 def test_generate_labels_extreme_detection():
-    pnl = np.concatenate([np.zeros(95), np.array([1000, -1000, 2000, -2000, 5000])])
-    atr = np.ones(100) * 10
+    # MAD outlier detection needs a spread of non-zero values for mad > 0.
+    # Normal body: 90 samples drawn from tight range; outliers at extremes.
+    # MAD 異常檢測需要非零值分佈使 mad > 0。
+    rng = np.random.default_rng(42)
+    body = rng.normal(0, 1, 90) * 10  # pnl ≈ N(0, 10)
+    outliers = np.array([500, -500, 800, -800, 1000, -1000, 1500, -1500, 2000, -2000])
+    pnl = np.concatenate([body, outliers])
+    atr = np.ones(100) * 10  # labels = pnl / 10
 
     labels, is_extreme = generate_labels(pnl, atr)
 
-    assert is_extreme.sum() > 0  # should flag the outliers
+    assert is_extreme.sum() > 0  # should flag the outlier values
 
 
 def test_generate_labels_zero_atr_uses_floor():

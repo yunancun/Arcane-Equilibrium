@@ -59,6 +59,35 @@ const DEFAULT_P1_RISK_PCT: f64 = 0.02;
 /// Bybit USDT 永續合約默認 taker 費率，API 未提供時的回退值。
 const DEFAULT_TAKER_FEE_RATE: f64 = 0.00055;
 
+/// Default slippage rate when volume data is unavailable (5 bps).
+/// 無成交量數據時的默認滑點率（5 bps）。
+const DEFAULT_SLIPPAGE_RATE: f64 = 0.0005;
+
+/// Slippage tiers by 24h USD turnover — mirrors Python cost_gate.py SLIPPAGE_TIERS.
+/// 按 24h 成交額分級的滑點 — 對齊 Python cost_gate.py。
+/// (min_turnover_usd, slippage_rate)
+const SLIPPAGE_TIERS: [(f64, f64); 5] = [
+    (1_000_000_000.0, 0.0001),  // >$1B: 1 bps (BTC/ETH)
+    (100_000_000.0,   0.0002),  // >$100M: 2 bps
+    (10_000_000.0,    0.0005),  // >$10M: 5 bps
+    (1_000_000.0,     0.0015),  // >$1M: 15 bps
+    (0.0,             0.0030),  // <$1M: 30 bps (illiquid alts)
+];
+
+/// Look up slippage rate by 24h volume tier (mirrors Python _lookup_slippage).
+/// 根據 24h 成交量查找滑點率（對齊 Python 版本）。
+fn lookup_slippage(volume_24h: f64) -> f64 {
+    if volume_24h <= 0.0 {
+        return DEFAULT_SLIPPAGE_RATE;
+    }
+    for &(threshold, rate) in &SLIPPAGE_TIERS {
+        if volume_24h >= threshold {
+            return rate;
+        }
+    }
+    DEFAULT_SLIPPAGE_RATE
+}
+
 pub struct IntentProcessor {
     guardian: Guardian,
     /// Legacy single-rate fallback (None = use hardcoded default).
@@ -562,8 +591,9 @@ impl IntentProcessor {
                     fill: None,
                 };
             }
+            let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
             if let Some(r) = self.cost_gate_paper(&intent.strategy, &intent.symbol,
-                                                   atr, intent.confidence, final_qty, price) {
+                                                   atr, intent.confidence, final_qty, price, volume_24h) {
                 return r;
             }
         }
@@ -765,7 +795,8 @@ impl IntentProcessor {
                 };
             }
             let fee_rate = self.fee_rate(&intent.symbol);
-            if let Some(r) = self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate) {
+            let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
+            if let Some(r) = self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h) {
                 return r;
             }
         }
@@ -819,50 +850,68 @@ impl IntentProcessor {
         conf: f64,
         qty: f64,
         price: f64,
+        volume_24h: f64,
     ) -> Option<IntentResult> {
         let fee_rate = self.fee_rate(symbol);
-        let fee_bps = 2.0 * fee_rate * 10_000.0; // round-trip fee in bps
-        match self.edge_estimates.get(strategy, symbol) {
-            Some(bps) if bps > 0.0 => {
-                // Positive JS estimate: use it as EV signal
-                // 正 JS 估計：作為 EV 信號
-                if bps < fee_bps {
+        let slippage = lookup_slippage(volume_24h);
+        // Round-trip cost in bps: (fee + slippage) × 2 legs × 10000
+        // 來回成本 bps：(手續費 + 滑點) × 2 腿 × 10000
+        let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
+
+        match self.edge_estimates.get_cell(strategy, symbol) {
+            Some(cell) if cell.shrunk_bps > 0.0 => {
+                // Positive JS estimate: use it as EV signal with win_rate weighting.
+                // 正 JS 估計：作為 EV 信號，加入 win_rate 加權。
+                // Effective threshold: fee_bps / max(0.3, win_rate) × 1.3 (30% safety margin)
+                // Mirrors Python: min_move_pct = c_round / max(0.3, win_rate) × 1.3
+                let wr = cell.win_rate.clamp(0.3, 1.0);
+                let threshold_bps = fee_bps / wr * 1.3;
+                if cell.shrunk_bps < threshold_bps {
                     return Some(IntentResult {
                         submitted: false,
                         rejected_reason: Some(format!(
-                            "cost_gate(JS): shrunk_edge={:.2}bps < fee={:.2}bps",
-                            bps, fee_bps,
+                            "cost_gate(JS): edge={:.2}bps < threshold={:.2}bps \
+                             (fee={:.2}bps, wr={:.2}, slip={:.1}bps)",
+                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
+                            slippage * 10_000.0,
                         )),
                         fill: None,
                     });
                 }
-                tracing::debug!(strategy, symbol, shrunk_edge_bps = bps,
+                tracing::debug!(strategy, symbol, shrunk_edge_bps = cell.shrunk_bps,
+                    win_rate = cell.win_rate, n_trades = cell.n_trades,
                     "cost_gate(JS): positive edge — allowed / 正 edge 允許通過");
                 None
             }
-            Some(bps) => {
+            Some(cell) => {
                 // Negative JS estimate: exploration mode — allow to accumulate data.
                 // Circular dependency: blocking here = no new data = estimates never improve.
                 // 負 JS 估計：探索模式——允許以積累數據。
                 // 循環依賴：攔截 = 無新數據 = 估計永遠不改善。
-                tracing::info!(strategy, symbol, estimated_edge_bps = bps,
+                tracing::info!(strategy, symbol, estimated_edge_bps = cell.shrunk_bps,
+                    win_rate = cell.win_rate, n_trades = cell.n_trades,
                     "cost_gate(JS): negative estimate — exploration mode / 負估計探索模式");
                 None
             }
             None => {
-                // Cold start: no JS estimate — ATR×conf×0.2 fallback (PH5-WIRE-0).
-                // 冷啟動：無 JS 估計 — ATR×conf×0.2 回退（PH5-WIRE-0）。
-                const DAMP: f64 = 0.2;
-                let ev = atr * conf * qty * DAMP;
-                let notional = qty * price;
-                let rt_fee = notional * 2.0 * fee_rate;
-                let k = self.cost_gate_k(notional).max(self.risk_config.cost_gate.k_base);
-                if ev < k * rt_fee {
+                // Cold start: no JS estimate — ATR%-based gate (aligned with Python cost_gate.py).
+                // Formula: atr_pct = atr / price; round_trip_cost_pct = (fee + slip) × 2 × 100;
+                //          min_move_pct = cost_pct / max(0.3, default_wr=0.5) × 1.3;
+                //          reject if atr_pct < min_move_pct
+                // 冷啟動：無 JS 估計 — ATR% 門（對齊 Python cost_gate.py）。
+                let atr_pct = if price > 0.0 { (atr / price) * 100.0 } else { 0.0 };
+                let cost_pct = (fee_rate + slippage) * 2.0 * 100.0;
+                let default_wr: f64 = 0.5; // conservative default win rate / 保守默認勝率
+                let min_move_pct = cost_pct / default_wr.max(0.3) * 1.3;
+
+                if atr_pct < min_move_pct {
                     return Some(IntentResult {
                         submitted: false,
                         rejected_reason: Some(format!(
-                            "cost_gate(ATR cold-start): EV ${ev:.4} < {k:.1}× fee ${rt_fee:.4} \
-                             (atr={atr:.6}, conf={conf:.2}, damp={DAMP})",
+                            "cost_gate(ATR cold-start): atr%={:.4} < min%={:.4} \
+                             (cost%={:.4}, wr={:.2}, slip={:.1}bps)",
+                            atr_pct, min_move_pct, cost_pct, default_wr,
+                            slippage * 10_000.0,
                         )),
                         fill: None,
                     });
@@ -882,26 +931,36 @@ impl IntentProcessor {
         strategy: &str,
         symbol: &str,
         fee_rate: f64,
+        volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
-        let fee_bps = 2.0 * fee_rate * 10_000.0;
-        match self.edge_estimates.get(strategy, symbol) {
-            Some(bps) if bps > 0.0 => {
-                if bps < fee_bps {
+        let slippage = lookup_slippage(volume_24h);
+        // Round-trip cost in bps including slippage
+        // 包含滑點的來回成本 bps
+        let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
+        match self.edge_estimates.get_cell(strategy, symbol) {
+            Some(cell) if cell.shrunk_bps > 0.0 => {
+                // Win-rate weighted threshold (aligned with Python cost_gate.py)
+                // 勝率加權門檻（對齊 Python cost_gate.py）
+                let wr = cell.win_rate.clamp(0.3, 1.0);
+                let threshold_bps = fee_bps / wr * 1.3;
+                if cell.shrunk_bps < threshold_bps {
                     return Some(ExchangeGateResult {
                         approved: false,
                         rejected_reason: Some(format!(
-                            "cost_gate(JS-live): shrunk={:.2}bps < fee={:.2}bps", bps, fee_bps,
+                            "cost_gate(JS-live): edge={:.2}bps < threshold={:.2}bps \
+                             (fee={:.2}bps, wr={:.2})",
+                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
                         )),
                         approved_qty: 0.0,
                     });
                 }
                 None // pass
             }
-            Some(bps) => Some(ExchangeGateResult {
+            Some(cell) => Some(ExchangeGateResult {
                 approved: false,
                 rejected_reason: Some(format!(
                     "cost_gate(JS-live): estimated={:.2}bps < 0 — fail-closed / 負估計失敗關閉",
-                    bps,
+                    cell.shrunk_bps,
                 )),
                 approved_qty: 0.0,
             }),
@@ -1234,19 +1293,17 @@ mod tests {
     }
 
     #[test]
-    fn test_pnl5_small_notional_tightens_cost_gate() {
-        // PNL-5: A trade that passed the old k=1.5 gate now fails under k=3.0
-        // because notional ~ $20 falls into the smallest tier.
-        // PNL-5：在 $20 notional 級別，原本通過 k=1.5 的單現在 k=3.0 應被攔截。
+    fn test_cost_gate_atr_pct_rejects_low_volatility() {
+        // Cold-start ATR% gate: low ATR relative to price → atr_pct < min_move_pct → reject.
+        // 冷啟動 ATR% 門：ATR 相對價格太低 → 拒絕。
+        // SOL $80, ATR=0.1 → atr_pct = 0.125%.
+        // cost_pct = (0.00055 + 0.0005) × 2 × 100 = 0.21%.
+        // min_move_pct = 0.21 / 0.5 × 1.3 = 0.546%. 0.125% < 0.546% → reject.
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
-        let mut state = PaperState::new(1_000.0); // $1k balance
+        let mut state = PaperState::new(1_000.0);
         state.set_latest_price("SOL", 80.0);
-        // qty 0.005 → notional $0.40 → tier <$50 → k=3.0
-        // EV = atr(0.5) * conf(0.4) * 0.005 = 0.001
-        // fee = 0.4 * 2 * 0.00055 = 0.00044
-        // 1.5 * fee = 0.00066 (would pass), 3.0 * fee = 0.00132 (fails)
         let intent = OrderIntent {
             symbol: "SOL".into(),
             is_long: true,
@@ -1256,9 +1313,81 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        let result = proc.process(&intent, &gov, &state, 0.5);
-        assert!(!result.submitted, "PNL-5: expected reject under tightened k");
-        assert!(result.rejected_reason.unwrap().contains("3.0× fee"));
+        let result = proc.process(&intent, &gov, &state, 0.1);
+        assert!(!result.submitted, "Low ATR% should be rejected by cost_gate");
+        assert!(result.rejected_reason.unwrap().contains("cost_gate(ATR cold-start)"));
+    }
+
+    #[test]
+    fn test_slippage_tier_lookup() {
+        // Verify slippage tiers match Python cost_gate.py SLIPPAGE_TIERS.
+        // 驗證滑點分級與 Python cost_gate.py 一致。
+        assert_eq!(lookup_slippage(2_000_000_000.0), 0.0001); // >$1B: 1 bps
+        assert_eq!(lookup_slippage(500_000_000.0), 0.0002);   // >$100M: 2 bps
+        assert_eq!(lookup_slippage(50_000_000.0), 0.0005);    // >$10M: 5 bps
+        assert_eq!(lookup_slippage(5_000_000.0), 0.0015);     // >$1M: 15 bps
+        assert_eq!(lookup_slippage(100_000.0), 0.0030);       // <$1M: 30 bps
+        assert_eq!(lookup_slippage(0.0), DEFAULT_SLIPPAGE_RATE);
+        assert_eq!(lookup_slippage(-1.0), DEFAULT_SLIPPAGE_RATE);
+    }
+
+    #[test]
+    fn test_cost_gate_js_win_rate_weighting() {
+        // JS estimate with low win rate should require higher edge to pass.
+        // win_rate=0.3 → threshold = fee_bps / 0.3 × 1.3 (tighter than wr=0.5)
+        // 低勝率需要更高 edge 才能通過。
+        let mut proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 67_000.0);
+        // Set edge estimate with positive edge but low win_rate
+        // fee_bps = 2 * (0.00055 + 0.0005) * 10000 = 21 bps (with 5bps default slippage)
+        // threshold at wr=0.3: 21 / 0.3 × 1.3 = 91 bps
+        // edge=25bps < 91bps → should reject
+        let mut estimates = crate::edge_estimates::EdgeEstimates::empty();
+        let json = r#"{"test::BTC":{"shrunk_bps":25.0,"win_rate_shrunk":0.3,"n":50},"_meta":{"grand_mean_bps":10.0}}"#;
+        estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap_or_default();
+        proc.set_edge_estimates(estimates);
+        let intent = OrderIntent {
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.5,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        let result = proc.process(&intent, &gov, &state, 500.0);
+        assert!(!result.submitted, "Low win_rate should tighten JS gate threshold");
+        assert!(result.rejected_reason.unwrap().contains("cost_gate(JS)"));
+    }
+
+    #[test]
+    fn test_cost_gate_high_volume_reduces_slippage() {
+        // High-volume symbol (BTC >$1B turnover) → slippage 1bps → lower cost → passes easier.
+        // 高成交量幣種 → 滑點低 → 成本低 → 更容易通過。
+        let proc = IntentProcessor::new();
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 67_000.0);
+        state.set_latest_turnover("BTC", 2_000_000_000.0); // $2B → 1bps slippage
+        let intent = OrderIntent {
+            symbol: "BTC".into(),
+            is_long: true,
+            qty: 0.001,
+            confidence: 0.5,
+            strategy: "test".into(),
+            order_type: "market".into(),
+            limit_price: None,
+        };
+        // BTC $67k, ATR=300 → atr_pct = 0.4478%
+        // cost_pct = (0.00055 + 0.0001) × 2 × 100 = 0.13% (with 1bps slip)
+        // min_move = 0.13 / 0.5 × 1.3 = 0.338%
+        // 0.4478% > 0.338% → passes
+        let result = proc.process(&intent, &gov, &state, 300.0);
+        assert!(result.submitted, "BTC with high volume should pass: {:?}", result.rejected_reason);
     }
 
     #[test]
