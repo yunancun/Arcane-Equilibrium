@@ -3,6 +3,21 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### 全系統審計 + Gap 計劃（2026-04-10 · PM/PA/FA/CC）
+
+**背景**：PM/PA/FA/CC 四角色對 Rust engine + Python 控制層 + ML pipeline 進行嚴格完成度審計，發現文檔宣稱「~100%」但實際完成度 72-75%。
+
+**關鍵發現**：
+- H1-H5 AI 治理層 5 個 agent handler 全為 stub（ai_service.py），AI 判決層無效
+- FundingArb.on_tick() 永遠返回 vec![]（第 5 個策略不產生信號）
+- API 203 個路由無全局 Rate Limiting
+- HMAC dead import、Calibration.py 骨架
+- 以上均未出現在原 TODO.md
+
+**動作**：10 個 gap（G-1~G-10）全部入 TODO.md Gap 索引，排入 W19~W23；CLAUDE.md §十更新排期；最早 Live 日期修正為 W23 末（2026-05-16）。
+
+---
+
 ### DB Fresh-Start Reset（2026-04-10 · commit 3acb9cc）
 
 **背景**：開發過程中積累了大量噪音數據（52.9M signals、18.3M decision_context_snapshots、3.6K fills 等），PH5-VERIFY-1 觀察期需要乾淨數據基準。
