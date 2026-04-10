@@ -7,16 +7,18 @@ Live Session Routes — REST API endpoints for Live trading session control
 MODULE_NOTE (中文):
   本模塊提供實盤交易 session 的控制接口，平行於 paper_trading_routes 但目標是 Live 引擎：
   - GET  /api/v1/live/session/status  — 當前 live session 狀態（不需 operator 角色）
-  - POST /api/v1/live/session/start   — 啟動 live session（雙重硬鎖：execution_authority=granted + TradingMode=live）
-  - POST /api/v1/live/session/stop    — 停止 live session（平倉 + 取消訂單 + pause）
+  - POST /api/v1/live/session/start   — 啟動 live session（門控：Operator 角色 + live_reserved global mode）
+  - POST /api/v1/live/session/stop    — 停止 live session（平倉 + 取消訂單）
   - POST /api/v1/live/session/pause   — 暫停 live session（停止策略下單）
   - POST /api/v1/live/session/resume  — 恢復 live session（恢復策略下單）
 
   安全不變量（Safety invariants）：
   1. 所有寫入端點要求 Operator 角色認證（唯一門控）
-  2. start 端點無二次 execution_authority 硬鎖 — Operator 角色即為授權
-  3. stop 端點只平倉，不 pause 引擎管線 — paper/demo 不受影響
-  4. IPC 命令複用 paper 通道（resume_paper / close_all_positions）
+  2. start 端點雙重門控：Operator 角色 + live_reserved global mode
+  3. start 時自動授予 execution_authority（fail-closed：重啟清零，stop 後重置）
+  4. stop 端點只平倉，不 pause 引擎管線 — paper/demo 不受影響
+  5. IPC 命令複用 paper 通道（resume_paper / close_all_positions）
+  6. start 時向 GovernanceHub 提交 live 授權申請（非阻塞審計留痕）
 
 MODULE_NOTE (English):
   Live trading session control endpoints, parallel to paper_trading_routes but targeting
@@ -24,9 +26,11 @@ MODULE_NOTE (English):
 
   Safety invariants:
   1. All write endpoints require Operator role authentication (single gate)
-  2. start endpoint has no separate execution_authority hard lock — Operator role is the auth
-  3. stop endpoint only closes positions, does NOT pause engine pipeline — paper/demo unaffected
-  4. IPC commands reuse paper channel (resume_paper / close_all_positions)
+  2. start has dual gate: Operator role + live_reserved global mode
+  3. execution_authority auto-granted on start (fail-closed: cleared on restart, reset on stop)
+  4. stop endpoint only closes positions, does NOT pause engine pipeline — paper/demo unaffected
+  5. IPC commands reuse paper channel (resume_paper / close_all_positions)
+  6. start submits live authorization request to GovernanceHub (non-blocking audit trail)
 """
 
 import logging
@@ -215,6 +219,56 @@ def _get_trading_mode_from_engine() -> str:
     return "unknown"
 
 
+def _submit_live_governance_request(actor_id: str) -> None:
+    """
+    Submit a live-mode authorization request to GovernanceHub (non-blocking).
+    Creates a PENDING record visible in the Governance tab for operator awareness.
+    Failure is logged as warning but never blocks live session start.
+
+    向 GovernanceHub 提交實盤授權申請（非阻塞）。
+    在治理頁創建 PENDING 記錄供 Operator 確認；失敗僅警告，不阻塞 session 啟動。
+    """
+    try:
+        from .governance_hub import GovernanceHub
+        hub = GovernanceHub.get_instance()
+        if hub is None or not getattr(hub, "_initialized", False):
+            logger.debug("GovernanceHub not ready — skipping live governance request")
+            return
+        auth_sm = getattr(hub, "_authorization_sm", None)
+        if auth_sm is None:
+            logger.debug("GovernanceHub._authorization_sm not available")
+            return
+        import time as _time
+        live_scope = {
+            "mode": "live",
+            "execution": ["live_submit", "paper_submit"],
+            "auto_approved": False,
+        }
+        expires_at_ms = int((_time.time() + 24 * 3600) * 1000)  # 24h TTL
+        auth_obj = auth_sm.create_draft(
+            title=f"Live Session Authorization — {actor_id}",
+            scope=live_scope,
+            created_by=actor_id,
+            description=(
+                f"Live session started by operator '{actor_id}'. "
+                "Requires daily operator acknowledgement. / "
+                f"實盤 session 由 Operator '{actor_id}' 啟動，需每日確認。"
+            ),
+            expires_at_ms=expires_at_ms,
+        )
+        auth_sm.submit_for_approval(auth_obj.authorization_id)
+        logger.info(
+            "Live governance request submitted (id=%s) — pending operator approval / "
+            "實盤治理申請已提交（id=%s）— 待 Operator 批准",
+            auth_obj.authorization_id, auth_obj.authorization_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to submit live governance request (non-fatal): %s / "
+            "提交實盤治理申請失敗（非致命）: %s", exc, exc,
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Endpoints / 端點
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -293,11 +347,20 @@ async def post_live_session_start(
         )
 
     trading_mode = _get_trading_mode_from_engine()
-    authority = _get_execution_authority()
 
-    # Mark live session as user-started / 標記 live session 為用戶啟動
-    global _LIVE_USER_STOPPED
+    # Auto-grant execution_authority on session start.
+    # Double gate (Operator role + live_reserved global mode) is already verified above.
+    # No separate manual grant step required — cleared on stop / process restart (fail-closed).
+    # 啟動時自動授予 execution_authority。
+    # 雙重門控（Operator 角色 + live_reserved global mode）已在上方驗證。
+    # 無需另行手動 grant — stop 時 / 進程重啟後清零（fail-closed）。
+    global _EXECUTION_AUTHORITY_OVERRIDE, _LIVE_USER_STOPPED
+    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
     _LIVE_USER_STOPPED = False
+
+    # Submit live governance request for operator audit trail (non-blocking)
+    # 提交實盤治理申請用於操作員審計留痕（非阻塞）
+    _submit_live_governance_request(getattr(actor, "actor_id", "live_operator"))
 
     # Resume engine pipeline if it was paused by a previous stop
     # 如果管線因上次 stop 而暫停，恢復管線
@@ -308,14 +371,14 @@ async def post_live_session_start(
         logger.warning("IPC resume_paper skipped (engine may already be running): %s", exc)
 
     logger.warning(
-        "⚠ LIVE SESSION STARTED — trading_mode=%s authority=%s — actor=%s",
-        trading_mode, authority, getattr(actor, "actor_id", "?"),
+        "⚠ LIVE SESSION STARTED — trading_mode=%s execution_authority=granted — actor=%s",
+        trading_mode, getattr(actor, "actor_id", "?"),
     )
     return _live_response({
         "message": "Live session started / 實盤 session 已啟動",
         "source": "rust_engine",
         "trading_mode": trading_mode,
-        "authority": authority,
+        "authority": "granted",
         "ipc_result": result,
         "session": {"session_state": "active", "session_id": "rust_engine_live"},
     })
@@ -336,8 +399,11 @@ async def post_live_session_stop(
     """
     _require_operator(actor)
 
-    global _LIVE_USER_STOPPED
+    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE
     _LIVE_USER_STOPPED = True
+    # Reset execution authority on stop — fail-closed until next explicit start
+    # stop 後重置 execution_authority — 下次明確 start 前保持 fail-closed
+    _EXECUTION_AUTHORITY_OVERRIDE = None
 
     errors: list[str] = []
     rust_online = get_rust_reader().is_available()
@@ -400,21 +466,25 @@ async def post_live_session_resume(
     POST /api/v1/live/session/resume
     恢復 Live session — 從暫停狀態恢復策略下單
 
-    HARD LOCK: execution_authority must still be "granted" before resuming.
-    硬鎖：恢復前仍需確認 execution_authority=granted。
+    Gate: Operator role + live_reserved global mode (same as start).
+    門控：Operator 角色 + live_reserved global mode（與 start 相同）。
     """
     _require_operator(actor)
 
-    # Re-check execution_authority on resume (not just on start)
-    # 恢復時重新確認 execution_authority（不僅在 start 時）
-    authority = _get_execution_authority()
-    if authority != "granted":
+    # Gate: global_mode_state must still be live_reserved
+    # 門控：global_mode_state 仍需為 live_reserved
+    global_mode = _get_global_mode_state()
+    if "live" not in global_mode:
         raise HTTPException(
-            status_code=403,
-            detail=f"Live session resume blocked: execution_authority={authority!r}.",
+            status_code=409,
+            detail=f"Live session resume blocked: global_mode={global_mode!r}. "
+                   "Switch Global Mode to live_reserved first.",
         )
 
-    global _LIVE_USER_STOPPED
+    # Re-grant execution_authority on resume (may have been reset by a stop)
+    # 恢復時重新授予 execution_authority（可能已被 stop 重置）
+    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE
+    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
     _LIVE_USER_STOPPED = False
     try:
         result = await _ipc_command("resume_paper")
@@ -629,3 +699,32 @@ async def get_live_fills(
         except Exception:
             pass
     return _live_response({"list": [], "count": 0, "available": False})
+
+
+@live_router.get("/metrics")
+def get_live_metrics(
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    GET /api/v1/live/metrics
+    Performance metrics computed from engine state (fills, positions, PnL).
+    Works for both demo-key-on-live and real-live modes — data comes from the
+    Rust engine's internal paper_state which tracks all modes.
+
+    性能指標：從引擎狀態（成交、持倉、PnL）計算。
+    demo-key-on-live 和 real-live 模式均可用 — 數據來自 Rust 引擎內部狀態。
+    """
+    from .paper_trading_metrics import compute_full_metrics
+
+    rust = get_rust_reader()
+    rust_state = rust.get_paper_state() if rust.is_available() else None
+    if rust_state is None:
+        return _live_response({"available": False, "source": "engine_unavailable"})
+    full = compute_full_metrics(rust_state)
+    stats = rust.get_tick_stats() or {}
+    full["source"] = "rust_engine"
+    full["total_ticks"] = stats.get("total_ticks", 0)
+    full["total_intents"] = stats.get("total_intents", 0)
+    full["total_fills"] = stats.get("total_fills", 0)
+    full["total_stops"] = stats.get("total_stops", 0)
+    return _live_response(full)

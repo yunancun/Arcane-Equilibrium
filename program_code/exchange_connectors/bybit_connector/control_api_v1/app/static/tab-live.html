@@ -266,6 +266,12 @@ html, body {
     </table>
   </div>
 
+  <!-- Performance Metrics / 性能指標 -->
+  <div class="live-section-title">&#x1F4CB; 性能指標 / Performance Metrics</div>
+  <div class="oc-metrics" id="live-perf-metrics">
+    <div style="color:var(--text-dim);font-size:12px;padding:12px">加載中...</div>
+  </div>
+
   <!-- Fill history / 成交記錄（可折疊）-->
   <button class="live-fills-toggle" id="fills-toggle-btn" onclick="toggleFills()">
     <span class="arrow">&#x25B6;</span>
@@ -337,6 +343,7 @@ function openEmergencyDialog() { document.getElementById('dlg-live-emergency').c
 async function refreshPage() {
   loadDashboardData();
   checkLiveEngineStatus();
+  loadLiveMetrics();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -516,7 +523,11 @@ async function checkLiveEngineStatus() {
     badge.className = 'oc-chip oc-chip-neutral';
   }
 
-  detail.textContent = `mode: ${tradingMode} | authority: ${authority}`;
+  // Show authority only when active (auto-granted on start); hide when idle
+  // 僅在 active 時顯示 authority（啟動時自動授予）；空閒時隱藏
+  detail.textContent = isActive
+    ? `mode: ${tradingMode} | authority: ${authority}`
+    : `mode: ${tradingMode}`;
   if (btnStart) btnStart.disabled = isActive;
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;
@@ -559,6 +570,43 @@ async function doEmergencyStop() {
   } else {
     ocToast('緊急停止命令失敗，請手動操作', 'error');
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Performance Metrics / 性能指標
+// ═══════════════════════════════════════════════════════════════
+
+async function loadLiveMetrics() {
+  const d = await ocApi('/api/v1/live/metrics');
+  if (!d || !d.data) {
+    ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
+    return;
+  }
+  const m = d.data;
+  const tm = m.trade_metrics || {};
+  const dm = m.drawdown_metrics || {};
+  const hm = m.holding_period_metrics || {};
+  const sr = m.sharpe_ratio || {};
+
+  const items = [
+    ['總成交筆數 / Total Fills', '', tm.total_fills || m.total_fills],
+    ['完整交易次數 / Round Trips', '一次開倉到完全平倉為一次完整交易。', tm.total_round_trips || m.total_trades],
+    ['勝率 / Win Rate', '盈利交易佔總交易的百分比。', tm.win_rate != null ? (tm.win_rate * 100).toFixed(1) + '%' : null],
+    ['盈虧比 / Win/Loss Ratio', '平均盈利與平均虧損的比值。>1 表示盈利大於虧損。', tm.win_loss_ratio != null ? ocNum(tm.win_loss_ratio, 2) : null],
+    ['最大回撤 / Max Drawdown', '從峰值到最低點的最大跌幅。', dm.max_drawdown_pct != null ? dm.max_drawdown_pct.toFixed(2) + '%' : null],
+    ['夏普比率 / Sharpe Ratio', '風險調整後收益指標。>1 良好，>2 優秀。', sr.sharpe_ratio != null ? ocNum(sr.sharpe_ratio, 3) : null],
+    ['平均持倉時間 / Avg Hold Time', '持倉從開倉到平倉的平均時長。', hm.avg_holding_period_sec != null ? Math.round(hm.avg_holding_period_sec / 60) + ' min' : null],
+    ['單筆最高盈利 / Largest Win', '', tm.largest_win != null ? ocMoney(tm.largest_win) : null],
+    ['單筆最高虧損 / Largest Loss', '', tm.largest_loss != null ? ocMoney(tm.largest_loss) : null],
+    ['總手續費 / Total Fees', '所有交易產生的手續費總和。', tm.total_fees_paid != null ? ocBalance(tm.total_fees_paid, 4) : null],
+  ];
+
+  let html = '';
+  items.forEach(([label, tip, val]) => {
+    const tipAttr = tip ? ' title="' + ocEsc(tip) + '"' : '';
+    html += '<div class="oc-metric"><div class="oc-metric-label"' + tipAttr + '>' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+  });
+  ocSetHtml('live-perf-metrics', html);
 }
 
 // ═══════════════════════════════════════════════════════════════
