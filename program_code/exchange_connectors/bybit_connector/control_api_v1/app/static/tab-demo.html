@@ -665,21 +665,16 @@ function closeDemoDialog(id) {
 }
 
 async function doDemoCloseAll() {
-  // Close all Demo positions via Bybit API (real exchange, demo account)
-  // 通過 Bybit API 平掉所有 Demo 倉位（真實交易所，Demo 帳號）
+  // Close all positions via IPC (Rust engine dispatches to Bybit API in Demo/Live mode)
+  // 通過 IPC 平倉（Rust 引擎在 Demo/Live 模式下派發到 Bybit API）
   closeDemoDialog('dlg-demo-close-all');
   const d = await ocPost('/api/v1/strategy/demo/close-all-positions', {});
   if (d && d.data) {
-    const closed = d.data.closed || 0;
-    const errors = d.data.errors;
-    if (errors && errors.length) {
-      ocToast('平倉完成 ' + closed + ' 筆（錯誤: ' + errors.join('; ') + '）', 'warn');
-    } else {
-      ocToast('✓ Demo 倉位已全部關閉（' + closed + ' 筆）', 'success');
-    }
+    const msg = (d.data && d.data.message) || '平倉指令已發送';
+    ocToast('✓ ' + msg, 'success');
     setTimeout(loadAll, 1500);
   } else {
-    ocToast('關閉倉位失敗，請檢查 Demo 連接狀態', 'error');
+    ocToast('關閉倉位失敗，請檢查引擎狀態', 'error');
   }
 }
 

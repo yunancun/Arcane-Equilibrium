@@ -2463,6 +2463,124 @@ impl TickPipeline {
         }
     }
 
+    /// IPC-triggered close-all: exchange mode (Demo/Live) dispatches reduce_only market orders
+    /// via the shadow channel; paper mode clears paper_state directly.
+    /// Returns the number of positions acted on.
+    ///
+    /// IPC 觸發全部平倉：交易所模式（Demo/Live）通過 shadow 通道發 reduce_only 市價單；
+    /// 紙盤模式直接清除 paper_state。返回操作的倉位數量。
+    pub(crate) fn ipc_close_all(&mut self) -> usize {
+        use crate::config::TradingMode;
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live);
+        if is_exchange {
+            // Collect position snapshot first to avoid borrow conflict on self.
+            // 先快照倉位，避免 borrow 衝突。
+            let positions: Vec<(String, bool, f64, f64)> = self
+                .paper_state
+                .positions()
+                .into_iter()
+                .filter(|p| p.qty > 0.0)
+                .map(|p| {
+                    let price = self
+                        .paper_state
+                        .latest_price(&p.symbol)
+                        .unwrap_or(p.entry_price);
+                    (p.symbol.clone(), p.is_long, p.qty, price)
+                })
+                .collect();
+            let count = positions.len();
+            for (symbol, is_long, qty, price) in positions {
+                if let Some(ref tx) = self.shadow_order_tx {
+                    self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                    let order_link_id =
+                        format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                    let _ = tx.send(ShadowOrderRequest {
+                        symbol: symbol.clone(),
+                        is_long: !is_long, // opposite side to close / 相反方向平倉
+                        qty,
+                        price,
+                        strategy: "ipc_close_all".into(),
+                        paper_fill_ts: ts_ms,
+                        is_close: true,
+                        order_link_id,
+                        is_primary: true, // exchange mode: primary order / 交易所模式主訂單
+                        stop_loss: None,
+                        take_profit: None,
+                    });
+                    self.pending_close_symbols.insert(symbol);
+                }
+            }
+            count
+        } else {
+            // Paper mode: clear paper_state directly (no exchange orders).
+            // 紙盤模式：直接清除 paper_state（無交易所訂單）。
+            self.paper_state.close_all_positions()
+        }
+    }
+
+    /// IPC-triggered close-symbol: exchange mode dispatches a single reduce_only market order;
+    /// paper mode calls close_position_at_market directly.
+    /// Returns true if a position was found and acted on.
+    ///
+    /// IPC 觸發單倉平倉：交易所模式發單一 reduce_only 市價單；
+    /// 紙盤模式直接調用 close_position_at_market。找到倉位則返回 true。
+    pub(crate) fn ipc_close_symbol(&mut self, symbol: &str) -> bool {
+        use crate::config::TradingMode;
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live);
+        if is_exchange {
+            // Read position data before mutating self.exchange_seq.
+            // 先讀倉位數據，再修改 self.exchange_seq。
+            let pos_info = self.paper_state.get_position(symbol).and_then(|p| {
+                if p.qty > 0.0 {
+                    let price = self
+                        .paper_state
+                        .latest_price(symbol)
+                        .unwrap_or(p.entry_price);
+                    Some((p.is_long, p.qty, price))
+                } else {
+                    None
+                }
+            });
+            let (is_long, qty, price) = match pos_info {
+                Some(v) => v,
+                None => return false,
+            };
+            if let Some(ref tx) = self.shadow_order_tx {
+                self.exchange_seq = self.exchange_seq.wrapping_add(1);
+                let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
+                let _ = tx.send(ShadowOrderRequest {
+                    symbol: symbol.to_string(),
+                    is_long: !is_long, // opposite side to close / 相反方向平倉
+                    qty,
+                    price,
+                    strategy: "ipc_close_symbol".into(),
+                    paper_fill_ts: ts_ms,
+                    is_close: true,
+                    order_link_id,
+                    is_primary: true,
+                    stop_loss: None,
+                    take_profit: None,
+                });
+                self.pending_close_symbols.insert(symbol.to_string());
+                true
+            } else {
+                false
+            }
+        } else {
+            // Paper mode: immediate close via paper_state.
+            // 紙盤模式：通過 paper_state 立即平倉。
+            self.paper_state.close_position_at_market(symbol).is_some()
+        }
+    }
+
     /// Build a canary record if canary_mode is enabled (R07-2).
     /// 灰度模式啟用時構建灰度記錄。
     fn maybe_canary_record(

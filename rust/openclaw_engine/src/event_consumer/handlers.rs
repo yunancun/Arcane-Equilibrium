@@ -41,13 +41,20 @@ pub(super) fn handle_paper_command(
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         PaperSessionCommand::CloseAll => {
-            let closed = pipeline.paper_state.close_all_positions();
-            info!(closed = closed, "IPC close_all_positions / IPC 全部平倉");
+            // Exchange mode (Demo/Live): dispatch reduce_only market orders via shadow channel.
+            // Paper mode: clear paper_state directly.
+            // 交易所模式（Demo/Live）：通過 shadow 通道發 reduce_only 市價單。
+            // 紙盤模式：直接清除 paper_state。
+            let count = pipeline.ipc_close_all();
+            info!(count, "IPC close_all_positions / IPC 全部平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         PaperSessionCommand::CloseSymbol { symbol } => {
-            let pnl = pipeline.paper_state.close_position_at_market(&symbol);
-            info!(symbol = symbol.as_str(), pnl = ?pnl, "IPC close_position / IPC 單倉平倉");
+            // Exchange mode (Demo/Live): dispatch reduce_only market order via shadow channel.
+            // Paper mode: close_position_at_market directly.
+            // 交易所模式：發 reduce_only 市價單；紙盤模式：直接平倉。
+            let found = pipeline.ipc_close_symbol(&symbol);
+            info!(symbol = symbol.as_str(), found, "IPC close_position / IPC 單倉平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         PaperSessionCommand::Reset { new_balance } => {

@@ -218,36 +218,25 @@ async def post_demo_close_position(
 ):
     """
     POST /api/v1/strategy/demo/positions/{symbol}/close
-    通過 PyO3 BybitClient 市價平掉指定 symbol 的 Demo 倉位。
-    Close a single Demo position by symbol via PyO3 BybitClient market order (reduce_only).
+    通過 IPC close_position 平掉指定 symbol 的 Demo 倉位。
+    Rust 引擎依 trading_mode 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
+
+    Close a single position by symbol via IPC close_position.
+    Rust engine branches by trading_mode: Demo/Live → reduce_only market order; Paper → paper_state.
     """
     from .governance_routes import _require_operator_role
+    from .paper_trading_routes import _ipc_command
     _require_operator_role(actor)
-    rc = _get_rust_client()
-    if rc is None:
-        raise HTTPException(status_code=503, detail="PyO3 BybitClient not available")
     sym = symbol.upper()
     try:
-        positions = rc.get_positions("linear")
-        pos = next((p for p in positions if p.get("symbol") == sym), None)
-        if pos is None or float(pos.get("size") or pos.get("qty") or 0) <= 0:
-            raise HTTPException(status_code=404, detail=f"No open position for {sym}")
-        qty = float(pos.get("size") or pos.get("qty"))
-        side = pos.get("side", "Buy")
-        close_side = "Sell" if side == "Buy" else "Buy"
-        rc.place_order(
-            symbol=sym, side=close_side, order_type="Market",
-            qty=qty, category="linear", reduce_only=True,
-        )
-    except HTTPException:
-        raise
+        result = await _ipc_command("close_position", {"symbol": sym})
     except Exception as exc:
-        logger.error("Demo close_position failed for %s: %s", sym, exc)
-        raise HTTPException(status_code=500, detail=f"close failed: {exc}")
+        logger.error("IPC close_position failed for %s: %s", sym, exc)
+        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
     logger.warning(
-        "Demo close_position %s qty=%.4f — actor=%s", sym, qty, getattr(actor, "actor_id", "?"),
+        "close_position %s — actor=%s", sym, getattr(actor, "actor_id", "?"),
     )
-    return _envelope({"symbol": sym, "closed": True, "qty": qty})
+    return _envelope({"symbol": sym, "closed": True, "source": "rust_engine", "ipc": result})
 
 
 @phase2_router.post("/demo/close-all-positions")
@@ -256,28 +245,28 @@ async def post_demo_close_all_positions(
 ):
     """
     POST /api/v1/strategy/demo/close-all-positions
-    平掉所有 Demo API 倉位並取消掛單（通過 PyO3 BybitClient 直接調用 Bybit API）。
-    不影響 session 運行狀態。需要 Operator 角色。
+    通過 IPC close_all_positions 平掉所有倉位。不影響 session 運行狀態。需要 Operator 角色。
+    Rust 引擎依 trading_mode 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
 
-    Close all Demo API positions and cancel orders via PyO3 BybitClient (real Bybit Demo API).
-    Does not affect session state. Requires Operator role.
+    Close all positions via IPC close_all_positions. Does not affect session state.
+    Rust engine branches by trading_mode: Demo/Live → reduce_only market orders; Paper → paper_state.
+    Requires Operator role.
     """
     from .governance_routes import _require_operator_role
+    from .paper_trading_routes import _ipc_command
     _require_operator_role(actor)
-    from .paper_trading_routes import _close_all_demo_positions
-    result = _close_all_demo_positions()
-    closed = result.get("demo_closed", 0)
-    errors = result.get("demo_errors", [])
-    msg = f"Demo positions closed: {closed}" + (f" (errors: {', '.join(errors)})" if errors else "")
+    try:
+        result = await _ipc_command("close_all_positions")
+    except Exception as exc:
+        logger.error("IPC close_all_positions failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"IPC error: {exc}")
     logger.warning(
-        "Demo close-all-positions (manual) — closed=%d errors=%s actor=%s",
-        closed, errors or None, getattr(actor, "actor_id", "?"),
+        "close-all-positions (manual) — actor=%s", getattr(actor, "actor_id", "?"),
     )
     return _envelope({
-        "message": msg,
-        "closed": closed,
-        "canceled": result.get("demo_canceled", False),
-        "errors": errors if errors else None,
+        "message": "All positions closed — session continues / 已平掉所有倉位，session 繼續運行",
+        "source": "rust_engine",
+        "close_result": result,
     })
 
 
