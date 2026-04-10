@@ -3,6 +3,15 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### LIVE-P0-1/P0-2/P0-3 — API key mgmt + live page rewrite（2026-04-10 · commit c680ffd）
+
+- `settings_routes.py` (new): GET/POST /api/v1/settings/api-key/{slot}  
+  Slot whitelist → HMAC validation → write + chmod 600 → masked hint only  
+- `main.py`: registered settings_router  
+- `tab-settings.html`: API key management card for demo/live slots  
+- `tab-live.html`: full rewrite — dynamic prereq checklist (10 checks, live API queries) + dashboard framework (lock overlay / unlocked with PnL metrics / positions table / emergency stop)  
+- Tests: 2692 passed / 1 pre-existing fail (unchanged)
+
 ### ML Pipeline Audit Gap Fixes（2026-04-10）
 
 Cold audit of all ML_TODO completed items found 3 real issues + 4 pre-existing test failures:

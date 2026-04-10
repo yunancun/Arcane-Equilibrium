@@ -233,4 +233,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-09：tests engine lib **835** / Python 2280 passed **1 pre-existing fail** · **StrategyAction Enum ✅** · **Scanner A-D + QC/FA + P2 + IPC-SCAN-1 ✅**（全部問題清零，達成度 ~100%，IPC get_active_symbols/get_scanner_status 已接線）· WIRE-1 ✅ · 5-01~03 ✅ · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
+> 截至 2026-04-10：tests engine lib **838** / Python **2692** passed **1 pre-existing fail** · **StrategyAction Enum ✅** · **Scanner A-D + QC/FA + P2 + IPC-SCAN-1 ✅** · WIRE-1 ✅ · 5-01~03 ✅ · PH5-VERIFY-1 觀察期進行中 · **LIVE-P0-1/P0-2/P0-3 ✅**（settings_routes API key mgmt + tab-live.html 動態前置條件 + 儀表板框架）· Live blocker 仍在（LIVE-P1 Rust TradingMode::Live 待實施）。

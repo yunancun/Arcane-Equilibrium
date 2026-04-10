@@ -17,16 +17,16 @@
 
 #### P0 — GUI 框架 + API key 管理（不需改 Rust，可立即做）
 
-- [x] **LIVE-P0-1** `tab-settings.html` 加 API Key 管理區塊 ✅ (commit 待填)
+- [x] **LIVE-P0-1** `tab-settings.html` 加 API Key 管理區塊 ✅ (commit c680ffd)
   - `GET /api/v1/settings/api-key/{slot}` → 返回 `{has_key, key_hint: "****XXXX", last_modified}`（永不返回明文）
   - `POST /api/v1/settings/api-key/{slot}` → validate via test REST call → 寫入 `secrets/secret_files/bybit/{slot}/` → `chmod 600` → 返回 `{saved, validated, key_hint}`
   - `settings_routes.py` 新建 + `main.py` 注册 + `tab-settings.html` 加 UI 卡片 + 替換彈窗
 
-- [x] **LIVE-P0-2** `tab-live.html` 前置條件動態化 ✅ (commit 待填)
+- [x] **LIVE-P0-2** `tab-live.html` 前置條件動態化 ✅ (commit c680ffd)
   - 前置條件清單改為 API 動態查詢（`/api/v1/governance/status` + `/api/v1/paper/session/status` + `/api/v1/settings/api-key/live`），動態顯示 ✓/⬜/⚠
   - Phase badge 更新為當前真實 Phase（Phase 5 觀察期 → Phase 6 待實施）
 
-- [x] **LIVE-P0-3** `tab-live.html` 實盤儀表板框架（解鎖後顯示）✅ (commit 待填)
+- [x] **LIVE-P0-3** `tab-live.html` 實盤儀表板框架（解鎖後顯示）✅ (commit c680ffd)
   - 鎖定條件：`execution_authority != "granted"`，顯示鎖定頁
   - 解鎖後：顯示完整儀表板（positions、orders、PnL、緊急停止、倉位表格）
   - 視覺：紅色邊框主題 + 大號 PnL 卡片強調真實資金風險
