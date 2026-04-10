@@ -927,6 +927,31 @@ async def get_live_fills(
     return _live_response({"list": [], "count": 0, "available": False})
 
 
+@live_router.post("/positions/{symbol}/close")
+async def post_live_close_position(
+    symbol: str,
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/live/positions/{symbol}/close
+    通過 IPC close_position 平掉指定 symbol 的實盤倉位。
+    Close a single live position by symbol via IPC close_position command.
+    """
+    _require_operator(actor)
+    rust = get_rust_reader()
+    if not rust.is_available():
+        raise HTTPException(status_code=503, detail="Rust engine not available")
+    try:
+        result = await _ipc_command("close_position", {"symbol": symbol.upper()})
+    except Exception as exc:
+        logger.error("IPC close_position failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+    logger.warning(
+        "⚠ LIVE close_position %s — actor=%s", symbol.upper(), getattr(actor, "actor_id", "?"),
+    )
+    return _live_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
+
+
 @live_router.post("/close-all-positions")
 async def post_live_close_all_positions(
     actor: Any = Depends(base.current_actor),

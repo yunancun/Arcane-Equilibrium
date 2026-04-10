@@ -54,11 +54,14 @@
 
   <!-- Positions / 持仓 -->
   <div class="oc-card">
-    <h3>&#x1F4CA; 持仓 / Positions</h3>
+    <h3 style="display:flex;align-items:center;gap:10px">
+      &#x1F4CA; 持仓 / Positions
+      <button class="oc-btn oc-btn-danger" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="openDemoCloseAllDialog()">&#x274C; 全部平仓</button>
+    </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th></tr></thead>
-        <tbody id="demo-positions"><tr class="empty-row"><td colspan="10">加载中...</td></tr></tbody>
+        <thead><tr><th>交易对</th><th>策略</th><th>品类</th><th>方向</th><th>数量</th><th>开仓价</th><th>标记价</th><th>未实现盈亏</th><th>杠杆</th><th>强平价</th><th>操作</th></tr></thead>
+        <tbody id="demo-positions"><tr class="empty-row"><td colspan="11">加载中...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -321,7 +324,7 @@ async function loadPositions() {
   }
   positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
-    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="10">暂无持仓</td></tr>');
+    ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="11">暂无持仓</td></tr>');
     return;
   }
   // Cross-reference with Paper positions to get strategy_name / 交叉参考 Paper 持仓获取策略名
@@ -354,6 +357,7 @@ async function loadPositions() {
     html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl) + '</td>';
     html += '<td>' + (p.leverage || '1') + 'x</td>';
     html += '<td>' + ocNum(parseFloat(p.liqPrice || p.liq_price || 0), 2) + '</td>';
+    html += '<td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="closeDemoPosition(\'' + ocEsc(p.symbol) + '\')">平仓</button></td>';
     html += '</tr>';
   });
   ocSetHtml('demo-positions', html);
@@ -670,13 +674,25 @@ async function doDemoCloseAll() {
     const closed = d.data.closed || 0;
     const errors = d.data.errors;
     if (errors && errors.length) {
-      ocToast(`平倉完成 ${closed} 筆（錯誤: ${errors.join('; ')}）`, 'warn');
+      ocToast('平倉完成 ' + closed + ' 筆（錯誤: ' + errors.join('; ') + '）', 'warn');
     } else {
-      ocToast(`✓ Demo 倉位已全部關閉（${closed} 筆）`, 'success');
+      ocToast('✓ Demo 倉位已全部關閉（' + closed + ' 筆）', 'success');
     }
     setTimeout(loadAll, 1500);
   } else {
     ocToast('關閉倉位失敗，請檢查 Demo 連接狀態', 'error');
+  }
+}
+
+async function closeDemoPosition(symbol) {
+  // Close a single Demo position via Bybit API / 通過 Bybit API 平掉單一 Demo 倉位
+  if (!confirm('确认平仓 ' + symbol + '？\nConfirm close Demo position: ' + symbol + '?')) return;
+  const d = await ocPost('/api/v1/strategy/demo/positions/' + encodeURIComponent(symbol) + '/close', {});
+  if (d && d.data) {
+    ocToast('✓ ' + symbol + ' 平仓指令已发送', 'success');
+    setTimeout(loadAll, 1500);
+  } else {
+    ocToast(symbol + ' 平仓失败，请检查 Demo 连接', 'error');
   }
 }
 </script>
