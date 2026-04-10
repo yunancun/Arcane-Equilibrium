@@ -66,6 +66,8 @@
 
 **SEC-05 innerHTML XSS ✅ + WP-F/AH-06 ✅**（2026-04-10）— `safeText()`→`ocEsc()` 委託 + 4 badge/label 函數 fallback 修復 + 逐文件 `ocEsc()` 包裹（app.js / linucb_card / tab-ai）。Risk-tab `_riskFormDirty` 防覆蓋。
 
+**Live GUI Phase 5 完成 ✅**（2026-04-10）— 紫色主題（live_reserved 所有紅色 → #a855f7 / rgba(168,85,247,..)）+ 擴展儀表板（Account Balance 卡片組：equity/available/wallet/margin-used；PnL Overview：unrealized large + realized from cumRealisedPnl + net；持倉表 + Leverage 列；成交記錄折疊區懶加載 `/api/v1/live/fills`）+ Global Mode Gate（`_get_global_mode_state()` + 409 block if not live_reserved）+ auto-stop on mode exit + `oc-chip-live` 紫色 chip。緊急停止保持紅色。（commit c392220）
+
 **留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
@@ -249,4 +251,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live GUI Phase 4 ✅** (commit af392c2 — grant/revoke authority + PyO3 real data + _ipc_command fix) · **Live_Ready ✅**（LIVE-P0/P1/P2 + Phase 4 全部完成）· **LIVE-P2-1/P2-2/P2-3 ✅** (commit 006d905) · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · Live 前置：待 OPENCLAW_ALLOW_MAINNET=1 + Live API Key。
+> 截至 2026-04-10：tests engine lib **840** / Python **2280** passed **1 pre-existing fail** · **Live GUI Phase 5 ✅** (commit c392220 — purple theme + expanded dashboard + global mode gate + fills history) · **Live GUI Phase 4 ✅** (commit af392c2) · **Live_Ready ✅**（LIVE-P0/P1/P2 + Phase 4+5 全部完成）· **SEC-05 innerHTML XSS ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · Live 前置：待 OPENCLAW_ALLOW_MAINNET=1 + Live API Key。
