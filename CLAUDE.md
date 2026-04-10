@@ -62,6 +62,8 @@
 
 **LIVE-P0/P1/P2 全部完成 ✅**（2026-04-10）— P0: API key 管理 + tab-live 前置條件動態化 + 儀表板框架（commit c680ffd）。P1: `read_secret_file(slot)` 槽位感知 + `TradingMode::Live` variant + Python live session routes（commit 11283c7）。P2: `PerEngineRiskStores` 3 獨立 ConfigStore + IPC engine 路由 + GUI per-engine tab + Live 二次確認彈窗（commit 006d905）。840 lib tests pass。
 
+**Live GUI Phase 4 完成 ✅**（2026-04-10）— `_EXECUTION_AUTHORITY_OVERRIDE` 記憶體覆蓋（in-memory gate，重啟清空 fail-closed）+ grant/revoke endpoints + `_ipc_command()` 3 bug 修復 + 實盤端點接入 PyO3 BybitClient（真實交易所數據）+ demo 模式 live session start + tab-live.html Grant/Revoke 按鈕 + 儀表板解析 PyO3 snake_case/Bybit camelCase 雙格式。（commit af392c2）
+
 **SEC-05 innerHTML XSS ✅ + WP-F/AH-06 ✅**（2026-04-10）— `safeText()`→`ocEsc()` 委託 + 4 badge/label 函數 fallback 修復 + 逐文件 `ocEsc()` 包裹（app.js / linucb_card / tab-ai）。Risk-tab `_riskFormDirty` 防覆蓋。
 
 **留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
@@ -247,4 +249,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live_Ready ✅**（LIVE-P0/P1/P2 全部完成，live balance/positions/orders 端點上線，§四硬限制更新）· **LIVE-P1-1/P1-2/P1-3 ✅** (commit 11283c7) · **LIVE-P2-1/P2-2/P2-3 ✅** (commit 006d905 — PerEngineRiskStores + per-engine GUI tab) · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · 待 operator 授予 execution_authority + OPENCLAW_ALLOW_MAINNET=1 + Live API Key。
+> 截至 2026-04-10：tests engine lib **840** / Python **2692** passed **1 pre-existing fail** · **Live GUI Phase 4 ✅** (commit af392c2 — grant/revoke authority + PyO3 real data + _ipc_command fix) · **Live_Ready ✅**（LIVE-P0/P1/P2 + Phase 4 全部完成）· **LIVE-P2-1/P2-2/P2-3 ✅** (commit 006d905) · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · PH5-VERIFY-1 觀察期進行中 · Live 前置：待 OPENCLAW_ALLOW_MAINNET=1 + Live API Key。
