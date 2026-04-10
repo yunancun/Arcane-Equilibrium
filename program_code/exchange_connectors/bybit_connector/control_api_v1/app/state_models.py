@@ -1,11 +1,11 @@
 """
 MODULE_NOTE (中文):
   狀態模型定義模塊。包含 Control API 所有 Pydantic 請求/響應模型和類型別名。
-  從 main_legacy.py 拆分而來（Wave A 重構），純數據定義，零業務邏輯。
+  從 main_legacy.py 拆分而來，純數據定義，零業務邏輯。
 
 MODULE_NOTE (English):
   State model definitions. Contains all Pydantic request/response models and type aliases
-  for the Control API. Extracted from main_legacy.py (Wave A refactoring).
+  for the Control API. Extracted from main_legacy.py.
   Pure data definitions, zero business logic.
 """
 

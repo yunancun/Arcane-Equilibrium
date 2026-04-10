@@ -1,7 +1,7 @@
 """
 MODULE_NOTE (中文):
   狀態操作輔助函數模塊。包含請求指紋計算、版本斷言、冪等性緩存、
-  審計字段寫入等純狀態操作。從 main_legacy.py 拆分而來（Wave B 重構）。
+  審計字段寫入等純狀態操作。從 main_legacy.py 拆分而來。
 
   ★ 注意：依賴 settings 單例的函數（build_source_context / envelope_response /
   get_latest_snapshot / build_authenticated_actor / current_actor）留在 main_legacy.py，
@@ -10,7 +10,7 @@ MODULE_NOTE (中文):
 MODULE_NOTE (English):
   State operation helper functions module. Contains request fingerprint calculation,
   revision assertions, idempotency cache, audit field writing, and other pure state
-  operations. Extracted from main_legacy.py (Wave B refactoring).
+  operations. Extracted from main_legacy.py.
 
   ★ Note: Functions that depend on the settings singleton (build_source_context /
   envelope_response / get_latest_snapshot / build_authenticated_actor / current_actor)

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-09（StrategyAction Enum ✅ `fc51439`→`83f9d2e` + Scanner A-D ✅ + QC/FA 全修）
-測試基準線：**Rust engine lib 830 · core 387 · types 27 · ml_training 35 · Python control_api 2694 passed (1 pre-existing fail · 0 regression)**
+最後更新：2026-04-10（ML Pipeline Remediation ✅ `ee3dc84` + DEAD-PY-1 Wave 標籤清理）
+測試基準線：**Rust engine lib 838 · Python control_api 2678 passed (1 pre-existing fail · 15 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -33,8 +33,8 @@ ARCH-RC1 1C-4 wrap commit chain 已完成（A1/B1/B2/熱重載 e2e/E-Merge-4/doc
 
 Phase 1+3+4 大部分已完成（commit history 可查）。剩餘低優先項：
 
-- [ ] **Phase 3 殘留** state_*.py / pnl_ops.py 「Wave A/B/C」標籤 → 移到 git history
-- [ ] **Phase 3 殘留** `main.py:176` 「WP-ARCH-RC1 RC1-2」舊命名
+- [x] **Phase 3 殘留** state_*.py / pnl_ops.py 「Wave A/B/C」標籤 → 移到 git history ✅
+- [x] **Phase 3 殘留** `main.py:176` 「WP-ARCH-RC1 RC1-2」舊命名 ✅
 - [ ] **Phase 4 殘留** `static/tab-governance.html:310-322` whitelist UI 區塊（移至 WP-CLEANUP-WHITELIST-UI 獨立 session）
 
 **KEEP（不要動）**：`risk_view_client.py:196-197` force_governor_tier_* / `apply_ai_consultation` / `governance_hub.py` RC-11 docstrings / `bridge_core.py` activate/on_tick docstrings — 全有 test callers 或生產呼叫。
