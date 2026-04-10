@@ -50,9 +50,7 @@ from .paper_trading_wiring import (  # noqa: F811 — explicit re-exports for ty
     PORTFOLIO_RISK_CONTROL,
     PERCEPTION_PLANE,
     ENGINE,
-    DEMO_CONNECTOR,
     DEMO_SYNC,
-    PROTECTIVE_ORDER_MANAGER,
     GOV_HUB,
     AUDIT_PIPELINE,
     INCIDENT_POLICY,
@@ -194,63 +192,6 @@ def _get_demo_summary() -> dict:
         return {"available": False, "error": str(e)}
 
 
-def _close_all_demo_positions() -> dict:
-    """Close all Demo API positions + cancel orders via PyO3 BybitClient.
-    通過 PyO3 BybitClient 平掉所有 Demo API 倉位 + 取消掛單。
-
-    Best-effort: failures are logged but don't block paper stop.
-    盡力而為：失敗只記錄不阻塞 paper 停止。
-    """
-    from .strategy_ai_routes import _get_rust_client
-    result = {"demo_closed": 0, "demo_canceled": False, "demo_errors": []}
-    rc = _get_rust_client()
-    if rc is None:
-        result["demo_errors"].append("PyO3 BybitClient not available")
-        return result
-
-    # Step 1: Cancel all Demo orders / 取消所有 Demo 掛單
-    try:
-        for sym in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"]:
-            try:
-                rc.cancel_all_orders(sym, "linear")
-            except Exception:
-                pass  # Some symbols may have no orders
-        result["demo_canceled"] = True
-        logger.info("Demo orders canceled / Demo 掛單已取消")
-    except Exception as e:
-        result["demo_errors"].append(f"cancel_all: {e}")
-        logger.warning("Demo cancel_all failed: %s", e)
-
-    # Step 2: Close all Demo positions / 平掉所有 Demo 倉位
-    try:
-        positions = rc.get_positions("linear")
-        for pos in positions:
-            qty = float(pos.get("size") or pos.get("qty") or 0)
-            if qty <= 0:
-                continue
-            side = pos.get("side", "Buy")
-            close_side = "Sell" if side == "Buy" else "Buy"
-            symbol = pos.get("symbol", "")
-            try:
-                rc.place_order(
-                    symbol=symbol,
-                    side=close_side,
-                    order_type="Market",
-                    qty=qty,
-                    category="linear",
-                    reduce_only=True,
-                )
-                result["demo_closed"] += 1
-                logger.info("Demo position closed: %s %s %.4f / Demo 倉位已平：%s", symbol, close_side, qty, symbol)
-            except Exception as e:
-                result["demo_errors"].append(f"close {symbol}: {e}")
-                logger.warning("Demo close %s failed: %s", symbol, e)
-    except Exception as e:
-        result["demo_errors"].append(f"get_positions: {e}")
-        logger.warning("Demo get_positions failed: %s", e)
-
-    return result
-
 
 @paper_router.post("/session/start")
 async def post_session_start(
@@ -384,12 +325,9 @@ async def post_session_stop(
         close_result = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC close_all_positions (already stopped)")
 
-    # Step 2: Close all Demo positions + cancel orders via PyO3 / 通過 PyO3 平掉 Demo 倉位
-    demo_result = _close_all_demo_positions()
-    if demo_result.get("demo_errors"):
-        errors.extend(demo_result["demo_errors"])
-
-    # Step 3: Pause Paper strategies via IPC / 通過 IPC 暫停 Paper 策略
+    # Step 2: Pause Rust engine strategies via IPC / 通過 IPC 暫停 Rust 引擎策略
+    # Demo/Live close orders are dispatched by Rust ipc_close_all() in Step 1.
+    # Demo/Live 平倉訂單已由 Step 1 Rust ipc_close_all() 分派至交易所。
     pause_result = {}
     if rust_online:
         try:
@@ -406,7 +344,6 @@ async def post_session_stop(
         "message": "Positions closed — Rust engine in observation mode / 倉位已平 — Rust 引擎進入觀察模式",
         "source": "rust_engine",
         "paper_close": close_result,
-        "demo_close": demo_result,
         "paper_pause": pause_result,
         "errors": errors if errors else None,
         "session": {"session_state": "observing", "session_id": "rust_engine"},
