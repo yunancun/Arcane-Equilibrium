@@ -105,7 +105,7 @@
 
     REGIMES.forEach(function(reg) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td style="padding:2px 6px;">'+reg+'</td>' +
+      tr.innerHTML = '<td style="padding:2px 6px;">'+ocEsc(reg)+'</td>' +
         STRATEGIES.map(function(strat) {
           var key = reg + '__' + strat;
           var a = byKey[key] || {n_pulls: 0};
@@ -125,7 +125,7 @@
       var row = document.createElement('div');
       row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0;';
       row.innerHTML =
-        '<span style="flex:0 0 160px;">'+ a.arm_id +'</span>' +
+        '<span style="flex:0 0 160px;">'+ ocEsc(a.arm_id) +'</span>' +
         '<span style="flex:1 1 auto;background:#30363d;border-radius:3px;overflow:hidden;height:8px;">' +
           '<span style="display:block;height:100%;width:'+ pct +'%;background:#2ea043;"></span>' +
         '</span>' +
@@ -144,11 +144,11 @@
               : (shadow.decision === 'KEEP_CHAMPION' ? '#d29922' : '#6e7681');
     bar.innerHTML =
       '<div style="font-size:11px;padding:4px;border:1px solid '+color+';border-radius:4px;color:'+color+';">' +
-      (shadow.champion || '—') + ' vs ' + (shadow.challenger || '—') +
+      ocEsc(shadow.champion || '—') + ' vs ' + ocEsc(shadow.challenger || '—') +
       ' · Δ=' + (shadow.delta || 0).toFixed(4) +
       ' · z=' + ((shadow.delta && shadow.sigma) ? (shadow.delta/shadow.sigma).toFixed(2) : '—') +
       ' · n=' + (shadow.n || 0) +
-      ' · ' + shadow.decision +
+      ' · ' + ocEsc(shadow.decision) +
       '</div>';
   }
 

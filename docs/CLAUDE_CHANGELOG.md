@@ -3,6 +3,20 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-10
 
+### SEC-05 innerHTML XSS + WP-F/AH-06 risk-tab dirty-tracking（2026-04-10）
+
+**SEC-05 innerHTML XSS remediation** across GUI:
+- `app.js`: `safeText()` now delegates to `ocEsc()` (covers ~20+ call sites at once); 15+ individual `ocEsc()` wraps for paper positions/orders/fills, market feed, learning feed, cost breakdown, risk envelope
+- `cards/linucb_card.html`: `ocEsc()` on regime names, arm_id, shadow champion/challenger/decision
+- `tab-ai.html`: `ocEsc()` on Kelly strategy keys and tier labels
+- Remaining files (tab-governance, tab-settings, tab-system, tab-live, console) audited — already properly escaped or use hardcoded data only
+
+**WP-F/AH-06 risk-tab form overwrite fix**:
+- `tab-risk.html`: `_riskFormDirty` flag set on any input event across 16 risk form fields
+- `loadRiskConfig()` skips populating inputs when dirty flag is true
+- Flag cleared after successful save in all 3 save functions
+- Replaces inadequate `document.activeElement` guard that only protected focused element
+
 ### A2 NewsPipeline Scheduler + DEAD-PY-1 Complete + 1C-4 Close（2026-04-10）
 
 **A2 NewsPipeline 60s scheduler** wired into `main.rs`:

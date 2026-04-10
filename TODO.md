@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（LIVE-P0-1/P0-2/P0-3 完成）
+最後更新：2026-04-10（SEC-05 + WP-F/AH-06 完畢）
 測試基準線：**Rust engine lib 838 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -97,7 +97,7 @@ Phase 1+2+3+4 全部完成。
 ## 🛡️ Live 前必做（SEC 安全 + 告警基礎設施）
 
 ### 安全（架構性，必做）
-- [ ] **SEC-05 / WP-B/SEC-05** GUI `innerHTML` XSS（架構性，16 文件 133 處）
+- [x] **SEC-05 / WP-B/SEC-05** GUI `innerHTML` XSS ✅ — safeText()→ocEsc() 委託 + 逐文件 ocEsc() 包裹（app.js / linucb_card.html / tab-ai.html）
 - [ ] **SEC-08** IPC socket 無認證
 - [ ] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 2FA 架構決策
 - [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後）
@@ -163,7 +163,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 Phase 5 
 - [ ] WP-F/UX-06 Submit 無 loading 狀態
 - [ ] WP-F/UX-07~10 術語混亂（Demo/Paper/Session）
 - [ ] WP-F/AH-05 Apply 標籤誤導
-- [ ] WP-F/AH-06 ⚠️ Risk-tab 每 15s 強制覆蓋用戶輸入（需重寫 loadAll 防抖）
+- [x] WP-F/AH-06 ✅ Risk-tab dirty-tracking 防止 15s loadAll 覆蓋用戶輸入
 - [ ] WP-F/O-xx / AH-08~11（詳見 §10.1）
 - [ ] `preferred_margin_mode` / `preferred_position_mode` GUI 入口（Rust 僅存儲未執行）
 
@@ -177,10 +177,10 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 Phase 5 
 - [ ] tick_pipeline.rs 2117 行 — 已抽 decision_context_producer + position_risk_evaluator，剩 on_tick Step 0/0.5/1/4+5/dispatch loop borrow checker 重度，留專屬 session
 - [ ] governance_hub.py 1927 行 — 拆分需獨立 sprint + E2+E4
 
-### WP-CLEANUP-WHITELIST-UI（P2）
-- [ ] tab-governance.html whitelist card markup (~309-470)
-- [ ] governance.js / tab JS 6 個 helper
-- [ ] governance_routes.py 3 個 410 stub + Pydantic class
+### ✅ WP-CLEANUP-WHITELIST-UI（DONE · commit 7602656）
+- [x] tab-governance.html whitelist card + modal + CSS + JS + init (−220 lines)
+- [x] governance.js 3 個 dead API wrappers (−19 lines)
+- [ ] governance_routes.py 3 個 410 stub + Pydantic class（保留：後端 stub 無害，移除需額外 E4）
 
 ### WP-I 文檔衛生（minor 命名 3 項）
 - [ ] R4-NAME-1 / R4-MEM-1 / R4-REF-ST-1
@@ -219,7 +219,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 Phase 5 
 - **Phase 0/1/2/3 + Rust migration**：`docs/worklogs/2026-04-04--completed_todo_archive_phase0123_rust.md`
 - **L3 整合審計**：`docs/audits/2026-04-06_consolidated_remediation_report.md`
 - **CFG-PERSIST 三件套（已完成）**：CFG-PERSIST-1 `5d7d673` · CFG-COST-EDGE-1 `0e848fa` · diag log `638afa3`
-- **DEAD-PY-1 主體**：4-phase plan 大部分已 ship（見 git log，sub-agent audit 2026-04-08）
+- **DEAD-PY-1 全部完成**：Wave labels `b7f644b` + whitelist UI + A2 scheduler `7602656`
 - **已知問題清單**：`docs/KNOWN_ISSUES.md`
 - **Bybit API 字典手冊**：`docs/references/2026-04-04--bybit_api_reference.md`（開發前必查）
 

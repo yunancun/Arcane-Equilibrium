@@ -140,7 +140,9 @@ function headers() {
 }
 
 function pretty(value) { return JSON.stringify(value, null, 2); }
-function safeText(value) { return value === undefined || value === null ? "-" : String(value); }
+// SEC-05: safeText now HTML-escapes to prevent XSS when used in innerHTML templates.
+// SEC-05：safeText 現在做 HTML 轉義，防止 innerHTML 模板中的 XSS。
+function safeText(value) { return value === undefined || value === null ? "-" : ocEsc(String(value)); }
 
 /**
  * 根据状态值返回 CSS variant 名。
@@ -471,7 +473,7 @@ function renderCostBreakdown(breakdown) {
   }
   node.innerHTML = keys.map((k) =>
     `<div class="breakdown-item">
-       <span class="breakdown-cat">${k}</span>
+       <span class="breakdown-cat">${ocEsc(k)}</span>
        <span class="breakdown-amt bad">${fmtPnl(breakdown[k])}</span>
      </div>`
   ).join("");
@@ -672,7 +674,7 @@ function updateSettingsConsoleFromControlPlane(controlPlane) {
   const riskStateEl = document.getElementById("settingsRiskEnvelopeState");
   if (riskStateEl) {
     const effectiveState = riskEnvelope.effective_risk_envelope_state || "-";
-    riskStateEl.innerHTML = `<span class="status-chip ${variantForState(effectiveState)}">${effectiveState}</span>`;
+    riskStateEl.innerHTML = `<span class="status-chip ${variantForState(effectiveState)}">${ocEsc(effectiveState)}</span>`;
   }
 }
 
@@ -1609,12 +1611,12 @@ function renderLearningFeed(feedData) {
         <div class="learning-record-item">
           <div class="learning-record-header">
             ${confidenceBadge(o.confidence_level)}
-            <span class="learning-record-category">${o.category}</span>
+            <span class="learning-record-category">${ocEsc(o.category)}</span>
             <span class="learning-record-ts">${fmtTs(o.recorded_ts_ms)}</span>
           </div>
           <div class="learning-record-title">${escHtml(o.title)}</div>
           <div class="learning-record-detail">${escHtml(o.detail)}</div>
-          <div class="learning-record-id">${o.observation_id}</div>
+          <div class="learning-record-id">${ocEsc(o.observation_id)}</div>
         </div>`).join("");
   }
 
@@ -1628,12 +1630,12 @@ function renderLearningFeed(feedData) {
         <div class="learning-record-item">
           <div class="learning-record-header">
             ${confidenceBadge(l.confidence_level)}
-            <span class="learning-record-category">${l.category}</span>
+            <span class="learning-record-category">${ocEsc(l.category)}</span>
             <span class="learning-record-ts">${fmtTs(l.recorded_ts_ms)}</span>
           </div>
           <div class="learning-record-title">${escHtml(l.title)}</div>
           <div class="learning-record-detail">${escHtml(l.detail)}</div>
-          <div class="learning-record-id">${l.lesson_id}</div>
+          <div class="learning-record-id">${ocEsc(l.lesson_id)}</div>
         </div>`).join("");
   }
 
@@ -1667,14 +1669,14 @@ function renderLearningExperiments(expData) {
           <div class="learning-record-title">${escHtml(h.title)}</div>
           <div class="learning-record-detail">${escHtml(h.description || "")}</div>
           <div class="learning-record-prediction"><strong>预测 / Prediction:</strong> ${escHtml(h.testable_prediction || "")}</div>
-          <div class="learning-record-id">${h.hypothesis_id}</div>
+          <div class="learning-record-id">${ocEsc(h.hypothesis_id)}</div>
           ${h.status === "proposed" || h.status === "under_review" ? `
             <div class="learning-record-actions">
-              <button class="hyp-verdict-btn" data-hyp-id="${h.hypothesis_id}" data-verdict="approved">批准 / Approve</button>
-              <button class="hyp-verdict-btn btn-danger" data-hyp-id="${h.hypothesis_id}" data-verdict="rejected">拒绝 / Reject</button>
-              <button class="hyp-verdict-btn btn-muted" data-hyp-id="${h.hypothesis_id}" data-verdict="archived">归档 / Archive</button>
+              <button class="hyp-verdict-btn" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="approved">批准 / Approve</button>
+              <button class="hyp-verdict-btn btn-danger" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="rejected">拒绝 / Reject</button>
+              <button class="hyp-verdict-btn btn-muted" data-hyp-id="${ocEsc(h.hypothesis_id)}" data-verdict="archived">归档 / Archive</button>
             </div>` : ""}
-          ${h.operator_verdict ? `<div class="learning-record-verdict">判定 / Verdict: ${h.operator_verdict} (${h.operator_verdict_reason || "-"})</div>` : ""}
+          ${h.operator_verdict ? `<div class="learning-record-verdict">判定 / Verdict: ${ocEsc(h.operator_verdict)} (${ocEsc(h.operator_verdict_reason || "-")})</div>` : ""}
         </div>`).join("");
   }
 
@@ -1688,20 +1690,20 @@ function renderLearningExperiments(expData) {
         <div class="learning-record-item">
           <div class="learning-record-header">
             ${statusBadge(e.status)}
-            <span class="learning-record-category">hyp: ${e.hypothesis_id}</span>
+            <span class="learning-record-category">hyp: ${ocEsc(e.hypothesis_id)}</span>
             <span class="learning-record-ts">${fmtTs(e.recorded_ts_ms)}</span>
           </div>
           <div class="learning-record-title">${escHtml(e.title)}</div>
           <div class="learning-record-detail">${escHtml(e.description || "")}</div>
-          <div class="learning-record-id">${e.experiment_id}</div>
+          <div class="learning-record-id">${ocEsc(e.experiment_id)}</div>
           ${e.status === "pending_approval" ? `
             <div class="learning-record-actions">
-              <button class="exp-approve-btn" data-exp-id="${e.experiment_id}" data-action="approved">批准 / Approve</button>
-              <button class="exp-approve-btn btn-danger" data-exp-id="${e.experiment_id}" data-action="rejected">拒绝 / Reject</button>
+              <button class="exp-approve-btn" data-exp-id="${ocEsc(e.experiment_id)}" data-action="approved">批准 / Approve</button>
+              <button class="exp-approve-btn btn-danger" data-exp-id="${ocEsc(e.experiment_id)}" data-action="rejected">拒绝 / Reject</button>
             </div>` : ""}
           ${e.status === "approved" ? `
             <div class="learning-record-actions">
-              <button class="exp-complete-btn" data-exp-id="${e.experiment_id}">标记完成 / Mark Complete</button>
+              <button class="exp-complete-btn" data-exp-id="${ocEsc(e.experiment_id)}">标记完成 / Mark Complete</button>
             </div>` : ""}
           ${e.result_summary ? `<div class="learning-record-verdict">结论 / Result: ${escHtml(e.result_summary)} ${confidenceBadge(e.result_confidence_level || "inference")}</div>` : ""}
         </div>`).join("");
@@ -1732,7 +1734,7 @@ function renderNetPnlDashboard(dashData) {
     const keys = Object.keys(brk);
     brkEl.innerHTML = keys.length === 0
       ? '<div class="muted-row">暂无成本 / No costs yet</div>'
-      : keys.map(k => `<div class="breakdown-item"><span>${k}</span><strong>${fmtPnl(brk[k])}</strong></div>`).join("");
+      : keys.map(k => `<div class="breakdown-item"><span>${ocEsc(k)}</span><strong>${fmtPnl(brk[k])}</strong></div>`).join("");
   }
 
   // 趋势列表 / Trend list
@@ -2463,12 +2465,12 @@ function renderPaperPositions(d) {
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   if (positions.length === 0) { el.textContent = "无持仓 / No positions"; return; }
   el.innerHTML = positions.map(p => {
-    const sym = p.symbol || '??';
+    const sym = ocEsc(p.symbol || '??');
     const pnlColor = p.unrealized_pnl > 0 ? "paper-positive" : p.unrealized_pnl < 0 ? "paper-negative" : "";
     return `<div class="paper-position-row">
       <span class="paper-pos-symbol">${sym}</span>
-      <span class="paper-pos-side">${p.side}</span>
-      <span>${p.qty}</span>
+      <span class="paper-pos-side">${ocEsc(p.side)}</span>
+      <span>${ocEsc(p.qty)}</span>
       <span>@ ${(p.avg_entry_price || p.entry_price || 0).toFixed(2)}</span>
       <span class="${pnlColor}">${(p.unrealized_pnl || 0).toFixed(4)}</span>
     </div>`;
@@ -2483,11 +2485,11 @@ function renderPaperOrders(d) {
     const stateLabel = o.state.replace("paper_order_", "");
     const stateClass = o.state.includes("filled") ? "paper-filled" : o.state.includes("canceled") || o.state.includes("rejected") ? "paper-canceled" : "paper-working";
     return `<div class="paper-order-row ${stateClass}">
-      <span>${o.symbol}</span>
-      <span>${o.side}</span>
-      <span>${o.order_type}</span>
-      <span>${o.qty}${o.price ? " @ " + o.price : ""}</span>
-      <span class="paper-order-state">${stateLabel}</span>
+      <span>${ocEsc(o.symbol)}</span>
+      <span>${ocEsc(o.side)}</span>
+      <span>${ocEsc(o.order_type)}</span>
+      <span>${ocEsc(o.qty)}${o.price ? " @ " + ocEsc(o.price) : ""}</span>
+      <span class="paper-order-state">${ocEsc(stateLabel)}</span>
     </div>`;
   }).join("");
 }
@@ -2498,9 +2500,9 @@ function renderPaperFills(d) {
   if (fills.length === 0) { el.textContent = "无成交 / No fills"; return; }
   el.innerHTML = fills.slice(-20).reverse().map(f => {
     return `<div class="paper-fill-row">
-      <span>${f.symbol}</span>
-      <span>${f.side}</span>
-      <span>${f.qty} @ ${(f.price || 0).toFixed(2)}</span>
+      <span>${ocEsc(f.symbol)}</span>
+      <span>${ocEsc(f.side)}</span>
+      <span>${ocEsc(f.qty)} @ ${(f.price || 0).toFixed(2)}</span>
       <span>Fee: ${(f.fee || 0).toFixed(6)}</span>
     </div>`;
   }).join("");
@@ -2571,7 +2573,7 @@ function renderMarketFeedStatus(d) {
   if (symbols.length > 0) {
     pricesEl.innerHTML = symbols.map(sym => {
       return `<span class="paper-feed-price-item">
-        <span class="price-symbol">${sym}</span>
+        <span class="price-symbol">${ocEsc(sym)}</span>
         <span class="price-value">${prices[sym].toFixed(2)}</span>
       </span>`;
     }).join("");
@@ -2593,7 +2595,7 @@ function renderMarketFeedStatus(d) {
   const attentionClass = "paper-attention-" + attention;
 
   statsEl.innerHTML = `
-    <span class="paper-attention-badge ${attentionClass}">${attentionLabels[attention] || attention}</span>
+    <span class="paper-attention-badge ${attentionClass}">${attentionLabels[attention] || ocEsc(attention)}</span>
     ${stats.ticks_triggered != null ? ` Ticks: ${stats.ticks_triggered}` : ""}
     ${d.ws_listener?.ticker_update_count != null ? ` | 行情更新: ${d.ws_listener.ticker_update_count}` : ""}
     ${stats.volatility_spikes ? ` | 波动飙升: ${stats.volatility_spikes}` : ""}

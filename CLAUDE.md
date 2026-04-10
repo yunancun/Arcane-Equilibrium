@@ -237,4 +237,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-10：tests engine lib **838** / Python **2692** passed **1 pre-existing fail** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · **LIVE-P0-1/P0-2/P0-3 ✅** · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
+> 截至 2026-04-10：tests engine lib **838** / Python **2692** passed **1 pre-existing fail** · **SEC-05 innerHTML XSS ✅** · **WP-F/AH-06 risk-tab dirty-tracking ✅** · **A2 NewsPipeline Scheduler ✅** · **DEAD-PY-1 全部完成 ✅** · **1C-4 收尾完畢 ✅** · **LIVE-P0-1/P0-2/P0-3 ✅** · PH5-VERIFY-1 觀察期進行中 · Live blocker 仍在。
