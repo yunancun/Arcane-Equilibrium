@@ -66,6 +66,12 @@ pub struct EventConsumerDeps {
     pub config: Arc<ConfigManager>,
     pub cancel: CancellationToken,
     pub initial_balance: f64,
+    /// When trading_mode=Live, paper mode should mirror the Demo account balance
+    /// (wBu0 slot), not the Live/GBR balance. If Some, paper mode is pre-initialized
+    /// with this value at startup. None = use initial_balance (normal case).
+    /// Live 模式下 paper 模式應映射 Demo 帳號（wBu0 槽），而非 Live/GBR 餘額。
+    /// 若 Some，啟動時以此值預初始化 paper 模式。None = 使用 initial_balance（一般情況）。
+    pub paper_initial_balance: Option<f64>,
     pub taker_fee_rate: Option<f64>,
     /// Live AccountManager for per-symbol fee lookups (Bybit `/v5/account/fee-rate`).
     /// 用於 per-symbol 動態費率查詢的 AccountManager。

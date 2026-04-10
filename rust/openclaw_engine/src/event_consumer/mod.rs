@@ -37,6 +37,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         config,
         cancel,
         initial_balance,
+        paper_initial_balance,
         taker_fee_rate,
         instruments: shared_instruments,
         bootstrap_client,
@@ -280,6 +281,27 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
     // EXT-1: Set trading mode on pipeline / 設定管線交易模式
     pipeline.set_trading_mode(cfg_snapshot.trading_mode);
+
+    // When trading_mode=Live, update paper mode (PaperOnly) balance to the demo slot value.
+    // Must be done AFTER set_trading_mode(), because set_trading_mode() calls
+    // sync_direct_to_mode_state(old=PaperOnly) which would overwrite any earlier update.
+    // After set_trading_mode(Live): mode_states[PaperOnly] has balance=initial_balance (live).
+    // We replace it with the demo slot balance so paper always mirrors the Demo account.
+    // Live 模式下更新 paper 模式餘額為 demo 槽數值。必須在 set_trading_mode() 之後執行，
+    // 因為 set_trading_mode() 會調用 sync_direct_to_mode_state(PaperOnly) 覆蓋較早的更新。
+    if let Some(paper_bal) = paper_initial_balance {
+        if cfg_snapshot.trading_mode == crate::config::TradingMode::Live {
+            if let Some(ms) = pipeline.get_mode_state_mut(crate::config::TradingMode::PaperOnly) {
+                ms.paper_state = crate::paper_state::PaperState::new(paper_bal);
+                info!(
+                    balance = paper_bal,
+                    "paper mode balance updated to demo account value (live mode) \
+                     / paper 模式餘額已更新為 demo 帳號數值（live 模式）"
+                );
+            }
+        }
+    }
+
     // Exchange mode = any mode that routes real orders to an exchange (Demo or Live)
     // 交易所模式 = 向交易所發送真實訂單的任何模式（Demo 或 Live）
     let is_exchange_mode = matches!(

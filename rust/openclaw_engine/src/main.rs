@@ -50,15 +50,6 @@ fn paper_balance_from_env() -> Option<f64> {
         .filter(|&b| b > 0.0)
 }
 
-/// Fetch USDT balance from Bybit Demo account via REST API.
-/// 通過 REST API 從 Bybit Demo 帳戶讀取 USDT 餘額。
-///
-/// Falls back to env var OPENCLAW_PAPER_BALANCE, then $10,000 default.
-/// 回退順序：環境變量 → $10,000 預設值。
-async fn fetch_demo_balance() -> f64 {
-    fetch_exchange_balance(BybitEnvironment::Demo).await
-}
-
 /// Fetch initial account balance using the given BybitEnvironment.
 /// Reads the correct secret slot based on the environment (live slot for Live/LiveDemo,
 /// demo slot for Demo).
@@ -657,6 +648,23 @@ async fn async_main(
     // 使用正確的環境讀取初始餘額（Live/LiveDemo → live 槽；Demo/PaperOnly → demo 槽）。
     // 必須在 bybit_env 確定後執行。
     let initial_balance = fetch_exchange_balance(bybit_env).await;
+
+    // When trading_mode=Live, also fetch the demo account balance (wBu0 slot) so
+    // paper mode can be pre-initialized with the demo balance, not the live balance.
+    // Paper trading always mirrors the Demo account; live is independent.
+    // Live 模式下，另外讀取 demo 帳號餘額（wBu0 槽），用於 paper 模式預初始化。
+    // paper 交易始終映射 Demo 帳號，live 為獨立數值。
+    let paper_initial_balance: Option<f64> = if cfg_snapshot.trading_mode == TradingMode::Live {
+        let demo_bal = fetch_exchange_balance(BybitEnvironment::Demo).await;
+        info!(
+            demo_balance = demo_bal,
+            "fetched demo balance for paper mode pre-init (live mode) \
+             / 已讀取 demo 餘額用於 paper 模式預初始化（live 模式）"
+        );
+        Some(demo_bal)
+    } else {
+        None
+    };
 
     if let Ok(rest_client) = BybitRestClient::new(bybit_env, None, None) {
         if rest_client.has_credentials() {
@@ -1613,6 +1621,7 @@ async fn async_main(
             config: Arc::clone(&config),
             cancel: cancel.clone(),
             initial_balance,
+            paper_initial_balance,
             taker_fee_rate: api_taker_fee,
             instruments: shared_instruments.clone(),
             bootstrap_client: shared_client.as_ref().map(Arc::clone),

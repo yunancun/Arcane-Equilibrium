@@ -112,14 +112,33 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
 
 def _get_rust_client_safe():
     """
-    Import and return PyO3 BybitClient (same client used by demo endpoints).
-    Works with both demo and live API keys depending on engine mode.
+    Return a PyO3 BybitClient using the correct environment for the current engine mode.
+    當前引擎模式決定使用的 BybitClient 環境。
+
+    - trading_mode "live" + bybit_endpoint "demo" → environment "live_demo"
+      (live slot key / GBR against api-demo.bybit.com)
+    - trading_mode "live" + bybit_endpoint "mainnet" → environment "mainnet"
+    - otherwise → "demo" (default demo slot / wBu0)
+
     Returns None on any failure — callers must handle gracefully.
-    導入並返回 PyO3 BybitClient（與 demo 端點使用相同客戶端）。
-    demo / live API key 均可使用，依引擎模式而定。失敗時返回 None。
+    失敗時返回 None，調用方必須處理。
     """
     try:
         from .strategy_ai_routes import _get_rust_client
+        engine_mode = _get_trading_mode_from_engine()
+        if engine_mode == "live":
+            # Read bybit_endpoint metadata to know which server live slot uses
+            # 讀取 bybit_endpoint 元數據決定 live 槽連哪個伺服器
+            import os
+            from pathlib import Path
+            secrets_base = os.environ.get("OPENCLAW_SECRETS_DIR") or str(
+                Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
+            )
+            ep_file = Path(secrets_base) / "live" / "bybit_endpoint"
+            endpoint = ep_file.read_text(encoding="utf-8").strip() if ep_file.exists() else "mainnet"
+            environment = "live_demo" if endpoint == "demo" else "mainnet"
+            from openclaw_core import BybitClient
+            return BybitClient(environment=environment)
         return _get_rust_client()
     except Exception:
         return None
