@@ -211,6 +211,45 @@ def _normalize_execution(f: dict) -> dict:
     }
 
 
+@phase2_router.post("/demo/positions/{symbol}/close")
+async def post_demo_close_position(
+    symbol: str,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """
+    POST /api/v1/strategy/demo/positions/{symbol}/close
+    通過 PyO3 BybitClient 市價平掉指定 symbol 的 Demo 倉位。
+    Close a single Demo position by symbol via PyO3 BybitClient market order (reduce_only).
+    """
+    from .governance_routes import _require_operator_role
+    _require_operator_role(actor)
+    rc = _get_rust_client()
+    if rc is None:
+        raise HTTPException(status_code=503, detail="PyO3 BybitClient not available")
+    sym = symbol.upper()
+    try:
+        positions = rc.get_positions("linear")
+        pos = next((p for p in positions if p.get("symbol") == sym), None)
+        if pos is None or float(pos.get("size") or pos.get("qty") or 0) <= 0:
+            raise HTTPException(status_code=404, detail=f"No open position for {sym}")
+        qty = float(pos.get("size") or pos.get("qty"))
+        side = pos.get("side", "Buy")
+        close_side = "Sell" if side == "Buy" else "Buy"
+        rc.place_order(
+            symbol=sym, side=close_side, order_type="Market",
+            qty=qty, category="linear", reduce_only=True,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Demo close_position failed for %s: %s", sym, exc)
+        raise HTTPException(status_code=500, detail=f"close failed: {exc}")
+    logger.warning(
+        "Demo close_position %s qty=%.4f — actor=%s", sym, qty, getattr(actor, "actor_id", "?"),
+    )
+    return _envelope({"symbol": sym, "closed": True, "qty": qty})
+
+
 @phase2_router.post("/demo/close-all-positions")
 async def post_demo_close_all_positions(
     actor: base.AuthenticatedActor = Depends(base.current_actor),

@@ -241,15 +241,18 @@ html, body {
   </div>
 
   <!-- Positions table / 持倉表格 -->
-  <div class="live-section-title">&#x1F4CA; 持倉 / Positions</div>
+  <div class="live-section-title" style="display:flex;align-items:center;justify-content:space-between">
+    <span>&#x1F4CA; 持倉 / Positions</span>
+    <button class="oc-btn" onclick="openCloseAllDialog()" style="font-size:11px;padding:3px 10px;border-color:rgba(168,85,247,0.6);color:#a855f7">&#x274C; 全部平倉</button>
+  </div>
   <div style="overflow-x:auto">
     <table class="live-table" id="live-positions-table">
       <thead><tr>
         <th>Symbol</th><th>Side</th><th>Size</th>
-        <th>Leverage</th><th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th>
+        <th>Leverage</th><th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th><th>操作</th>
       </tr></thead>
       <tbody id="live-positions-body">
-        <tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+        <tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
       </tbody>
     </table>
   </div>
@@ -433,7 +436,7 @@ async function loadDashboardData() {
     let realizedPnl = 0;
     // Try to compute realized from positions cumRealisedPnl sum
     if (arr.length === 0) {
-      posBody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
     } else {
       posBody.innerHTML = arr.map(p => {
         // Bybit flat format (camelCase) + snake_case fallback
@@ -447,8 +450,9 @@ async function loadDashboardData() {
         const leverage = p.leverage || p.lev || '--';
         const cumPnl = parseFloat(p.cumRealisedPnl || p.cum_realised_pnl || 0);
         realizedPnl += cumPnl;
+        const sym = ocEsc(p.symbol || '');
         return `<tr>
-          <td><strong>${ocEsc(p.symbol || '--')}</strong></td>
+          <td><strong>${sym}</strong></td>
           <td>${ocEsc(p.side || '--')}</td>
           <td>${ocEsc(String(size))}</td>
           <td>${ocEsc(String(leverage))}x</td>
@@ -456,6 +460,7 @@ async function loadDashboardData() {
           <td>${ocEsc(String(mark))}</td>
           <td style="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
+          <td><button class="oc-btn oc-btn-danger" style="padding:2px 8px;font-size:10px" onclick="closeLivePosition('${sym}')">平倉</button></td>
         </tr>`;
       }).join('');
       // Update realized and net PnL display
@@ -471,7 +476,7 @@ async function loadDashboardData() {
       }
     }
   } catch (_) {
-    posBody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+    posBody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
   }
 
   // Orders — from /api/v1/live/orders (pending-close + stop orders from engine state)
@@ -626,6 +631,18 @@ async function doLiveCloseAll() {
     await refreshPage();
   } else {
     ocToast('平倉指令失敗，請檢查引擎狀態', 'error');
+  }
+}
+
+async function closeLivePosition(symbol) {
+  // Close a single live position by symbol / 平掉單一實盤倉位
+  if (!confirm('確認平倉 ' + symbol + '？\nConfirm close live position: ' + symbol + '?')) return;
+  const d = await ocPost('/api/v1/live/positions/' + encodeURIComponent(symbol) + '/close', {});
+  if (d) {
+    ocToast('⚠ ' + symbol + ' 平倉指令已發送', 'warn');
+    await refreshPage();
+  } else {
+    ocToast(symbol + ' 平倉失敗', 'error');
   }
 }
 
