@@ -2136,7 +2136,7 @@ async function applyReviewDecision(packetId, decision) {
  */
 async function requestAIConsult(packetId) {
   try {
-    const result = await apiPost(`/api/v1/learning/review/${encodeURIComponent(packetId)}/ai-consult`, baseEnvelope());
+    const result = await apiPost(`/api/v1/learning/review/${encodeURIComponent(packetId)}/decide`, { ...baseEnvelope(), decision: 'ask_ai' });
     const d = result.data || {};
     setActionSummary(
       "AI 咨询 / AI Consult", "success",
@@ -2517,6 +2517,7 @@ let _marketFeedRefreshInterval = null;
 async function handleMarketFeedAction(action) {
   // Market feed managed by Rust engine — no Python dispatcher needed
   // 行情流由 Rust 引擎管理 — 不需要 Python 分發器
+  ocToast('行情流由 Rust 引擎自動管理 / Market feed is managed by Rust engine automatically', 'info');
 }
 
 function startMarketFeedRefresh() {

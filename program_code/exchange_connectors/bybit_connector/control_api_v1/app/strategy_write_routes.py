@@ -170,69 +170,13 @@ async def create_strategy(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
-    Create and register a new strategy instance.
-    创建并注册新策略实例。AI Agent 或用户均可调用。
-
-    Body JSON:
-      strategy_type: str — one of: ma_crossover, bb_reversion, funding_arb, grid, bb_breakout
-      symbol: str — trading pair (e.g. BTCUSDT)
-      qty_per_trade: float — quantity per trade (optional, default 0.001)
-      params: dict — additional strategy-specific params (optional)
+    [DEPRECATED] Python strategy creation removed — Rust engine manages all strategies.
+    [已廢棄] Python 策略創建已移除 — Rust 引擎管理所有策略。
     """
-    from program_code.local_model_tools.strategies.ma_crossover import MACrossoverStrategy
-    from program_code.local_model_tools.strategies.bollinger_reversion import BollingerReversionStrategy
-    from program_code.local_model_tools.strategies.funding_rate_arb import FundingRateArbStrategy
-    from program_code.local_model_tools.strategies.grid_trading import GridTradingStrategy
-    from program_code.local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
-
-    stype = request.get("strategy_type", "").lower()
-    symbol = request.get("symbol", "").upper()
-    qty = request.get("qty_per_trade", 0.001)
-    params = request.get("params", {})
-
-    if not stype or not symbol:
-        raise HTTPException(status_code=400, detail="strategy_type and symbol required / 需要 strategy_type 和 symbol")
-
-    strategy = None
-    try:
-        if stype in ("ma_crossover", "trend"):
-            strategy = MACrossoverStrategy(symbol=symbol, qty_per_trade=qty)
-        elif stype in ("bb_reversion", "reversion"):
-            strategy = BollingerReversionStrategy(symbol=symbol, qty_per_trade=qty)
-        elif stype in ("funding_arb", "funding_rate_arb"):
-            strategy = FundingRateArbStrategy(symbol=symbol, qty_per_trade=qty)
-        elif stype in ("grid", "grid_trading"):
-            upper = params.get("upper_price", 0)
-            lower = params.get("lower_price", 0)
-            grid_count = params.get("grid_count", 20)
-            if not upper or not lower:
-                raise HTTPException(status_code=400, detail="Grid strategy requires upper_price and lower_price in params / 网格策略需要 upper_price 和 lower_price")
-            strategy = GridTradingStrategy(symbol=symbol, upper_price=upper, lower_price=lower,
-                                          grid_count=grid_count, qty_per_grid=qty)
-        elif stype in ("bb_breakout", "breakout"):
-            strategy = BBBreakoutStrategy(symbol=symbol, qty_per_trade=qty)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown strategy_type: {stype} / 未知策略类型: {stype}")
-
-        unique_name = f"{strategy.name}_{symbol}"
-        ORCHESTRATOR.register_strategy(strategy, name=unique_name)
-
-        # Add symbol to kline manager if new
-        if KLINE_MANAGER and symbol not in KLINE_MANAGER.get_tracked_symbols():
-            KLINE_MANAGER.add_symbol(symbol)
-
-        return _envelope({
-            "strategy": unique_name,
-            "action": "created",
-            "state": "idle",
-            "symbol": symbol,
-            "strategy_type": stype,
-        })
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Error creating strategy / 创建策略异常")
-        raise HTTPException(status_code=500, detail="Internal error / 内部错误")
+    raise HTTPException(
+        status_code=410,
+        detail="Python strategy creation removed (DEAD-PY-3). Strategies are managed by Rust engine. / Python 策略創建已移除，策略由 Rust 引擎管理。",
+    )
 
 
 # TODO(R-IPC): Migrate to Rust command channel when available / 待 Rust 命令通道可用後遷移

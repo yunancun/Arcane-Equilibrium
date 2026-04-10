@@ -128,7 +128,7 @@ async function reviewAction(id, action) {
 }
 
 async function aiConsult(id) {
-  const d = await ocPost('/api/v1/learning/review/' + id + '/ai-consult');
+  const d = await ocPost('/api/v1/learning/review/' + id + '/decide', { decision: 'ask_ai' });
   if (d) { ocToast('AI consultation requested', 'success'); loadReviewQueue(); }
   else ocToast('AI consult failed', 'error');
 }

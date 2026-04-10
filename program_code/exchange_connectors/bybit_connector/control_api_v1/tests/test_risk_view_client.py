@@ -161,7 +161,9 @@ def test_patch_raises_when_version_not_advanced(client, fake_ipc):
     fake_ipc.responses["patch_risk_config"] = {"ok": True}
     fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 0}
     with pytest.raises(RuntimeError, match="version did not advance"):
-        _run(client.update_global_config({"limits": {"max_leverage": 4.0}}))
+        # Use flat GUI key (not nested) — _remap_global_to_rust drops unknown keys
+        # 使用平坦 GUI 欄位（非嵌套）— _remap_global_to_rust 會丟棄未知 key
+        _run(client.update_global_config({"max_leverage": 4.0}))
 
 
 def test_unhalt_session_calls_resume_paper(client, fake_ipc):

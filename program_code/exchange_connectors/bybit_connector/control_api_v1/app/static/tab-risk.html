@@ -97,35 +97,10 @@
   </div>
 </div>
 
-<!-- ═══ Three-Tier Risk Config ═══ -->
-<div class="oc-grid-3">
-  <!-- P0: Category (Highest) -->
-  <div class="oc-card" style="border-color:rgba(248,81,73,0.3)">
-    <h3 style="color:var(--red)">&#x1F6D1; P0: Category Limits</h3>
-    <div class="subtitle">最高优先级 — 按品类的硬限制，不可被 AI 覆盖</div>
-    <div id="explain-p0"></div>
-    <div id="p0-config" class="oc-loading">Loading...</div>
-  </div>
-
-  <!-- P1: Global (Medium) -->
-  <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
-    <h3 style="color:var(--yellow)">&#x26A0; P1: Global Limits</h3>
-    <div class="subtitle">中等优先级 — 全局风控参数</div>
-    <div id="explain-p1"></div>
-    <div id="p1-config" class="oc-loading">Loading...</div>
-  </div>
-
-  <!-- P2: Agent (Adjustable) -->
-  <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-    <h3 style="color:var(--blue)">&#x1F916; P2: Agent Parameters</h3>
-    <div class="subtitle">AI 可调整 — 根据市场状态自适应</div>
-    <div id="explain-p2"></div>
-    <div id="p2-config" class="oc-loading">Loading...</div>
-  </div>
-</div>
-
 <!-- ═══ LIVE-P2-2: Per-Engine Risk Config Selector ═══ -->
 <!-- 每引擎風控配置選擇器 — Paper / Demo / Live 分 tab 各自編輯 -->
+<!-- MOVED TO TOP: select engine first, then P0/P1/P2 and editable settings update accordingly -->
+<!-- 已移至頂部：先選引擎，再查看/編輯該引擎的 P0/P1/P2 與可調參數 -->
 <div class="oc-card" id="engine-risk-selector-card">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div>
@@ -174,9 +149,37 @@
   </div>
 </div>
 
+<!-- ═══ Three-Tier Risk Config (per selected engine) ═══ -->
+<!-- P0/P1/P2 顯示選中引擎的配置，15s 刷新時隨 _selectedRiskEngine 更新 -->
+<div class="oc-grid-3">
+  <!-- P0: Category (Highest) -->
+  <div class="oc-card" style="border-color:rgba(248,81,73,0.3)">
+    <h3 style="color:var(--red)">&#x1F6D1; P0: Category Limits</h3>
+    <div class="subtitle">最高优先级 — 按品类的硬限制，不可被 AI 覆盖</div>
+    <div id="explain-p0"></div>
+    <div id="p0-config" class="oc-loading">Loading...</div>
+  </div>
+
+  <!-- P1: Global (Medium) -->
+  <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+    <h3 style="color:var(--yellow)">&#x26A0; P1: Global Limits</h3>
+    <div class="subtitle">中等优先级 — 全局风控参数</div>
+    <div id="explain-p1"></div>
+    <div id="p1-config" class="oc-loading">Loading...</div>
+  </div>
+
+  <!-- P2: Agent (Adjustable) -->
+  <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+    <h3 style="color:var(--blue)">&#x1F916; P2: Agent Parameters</h3>
+    <div class="subtitle">AI 可调整 — 根据市场状态自适应</div>
+    <div id="explain-p2"></div>
+    <div id="p2-config" class="oc-loading">Loading...</div>
+  </div>
+</div>
+
 <!-- ═══ Stop Manager (Editable) ═══ -->
 <div class="oc-card">
-  <h3>&#x1F6D1; 止损设置 / Stop Manager Settings</h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6D1; 止损设置 / Stop Manager Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-stops"></div>
 
   <div class="oc-grid-2" style="margin-top:10px">
@@ -241,7 +244,7 @@
 
 <!-- ═══ Position Sizing & Exposure / 仓位控制与曝险 ═══ -->
 <div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
-  <h3>&#x1F4CA; 仓位控制与曝险 / Position Sizing & Exposure</h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F4CA; 仓位控制与曝险 / Position Sizing & Exposure <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-position-sizing"></div>
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
@@ -252,7 +255,7 @@
           <div style="font-size:10px;color:var(--text-dim)">每笔交易投入的最大余额比例。越大允许单笔越重，越小则单笔更轻。</div>
           <div style="font-size:10px;color:var(--text-dim)">关键影响：BTC/ETH 等高价资产需要至少 5-10% 才能产生最小手数</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-p1-risk" type="number" step="0.5" min="0.5" max="20" style="width:80px" /><span style="font-size:12px">%</span></div>
+        <div style="display:flex;align-items:center;gap:6px"><input class="oc-input" id="in-p1-risk" type="number" step="0.5" min="0.5" max="100" style="width:80px" /><span style="font-size:12px">%</span></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -319,7 +322,7 @@
 
 <!-- ═══ Session Protection / 连续亏损保护 ═══ -->
 <div class="oc-card">
-  <h3>&#x1F6A8; 连续亏损保护 / Loss Cooldown Settings</h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6A8; 连续亏损保护 / Loss Cooldown Settings <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-cooldown"></div>
   <div class="oc-grid-2" style="margin-top:10px">
     <div style="display:grid;gap:10px">
@@ -357,7 +360,7 @@
 
 <!-- ═══ H0 Gate Control / H0 门控 ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.15)">
-  <h3>&#x1F6AA; H0 Gate / H0 入场门控</h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x1F6AA; H0 Gate / H0 入场门控 <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div id="explain-h0"></div>
   <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-radius:6px;border:1px solid #21262d;margin-top:10px">
     <div>
@@ -376,7 +379,7 @@
 
 <!-- ═══ Dynamic Auto-Adjustment Toggles / 自動動態調整開關 ═══ -->
 <div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <h3>&#x2699; 自动动态调整 / Auto Dynamic Adjustment</h3>
+  <h3 style="display:flex;justify-content:space-between;align-items:center">&#x2699; 自动动态调整 / Auto Dynamic Adjustment <span class="rc-engine-badge oc-chip" style="font-size:10px;margin-left:auto"></span></h3>
   <div class="subtitle">Agent 自主调节的功能开关 — 关闭后恢复为手动设定值</div>
   <div id="explain-auto-adjust"></div>
   <div style="display:grid;gap:12px;margin-top:10px">
@@ -661,49 +664,32 @@ function selectRiskEngine(engine) {
   });
   const w = $('engine-risk-live-warn');
   if (w) w.style.display = engine === 'live' ? '' : 'none';
+  // Update engine badges on each editable card / 更新每張可編輯卡片的引擎標記
+  _updateEngineBadges(engine);
   _riskFormDirty = false;
-  loadRiskConfigForEngine(engine);
+  // loadRiskConfig() reads _selectedRiskEngine, so calling it is enough.
+  // This also refreshes P0/P1/P2 display cards for the selected engine.
+  // loadRiskConfig() 讀取 _selectedRiskEngine，呼叫它即可同時更新 P0/P1/P2 顯示與輸入框。
+  loadRiskConfig();
 }
 
-async function loadRiskConfigForEngine(engine) {
-  const badge = $('engine-risk-loaded-badge');
-  if (badge) { badge.textContent = '加載中...'; badge.className = 'oc-chip oc-chip-neutral'; }
-  try {
-    const url = engine === 'paper' ? '/api/v1/paper/risk/config' : '/api/v1/paper/risk/config/engine/' + engine;
-    const d = await ocApi(url);
-    const cfg = (d && d.data) ? (d.data.config || d.data) : {};
-    _populateRiskFormFromConfig(cfg);
-    if (badge) {
-      badge.textContent = engine.toUpperCase() + ' v' + (cfg.meta ? cfg.meta.version : '?');
-      badge.className = engine === 'live' ? 'oc-chip oc-chip-bad' : 'oc-chip oc-chip-good';
-    }
-  } catch (e) {
-    if (badge) { badge.textContent = '加載失敗'; badge.className = 'oc-chip oc-chip-warn'; }
-  }
-}
-
-// Populate editable form from RiskConfig snapshot / 從快照填充表單
-function _populateRiskFormFromConfig(c) {
-  if (!c || _riskFormDirty) return;
-  const g = c.global_config || c.p1 || {}, l = c.limits || {};
-  const sv = (id, v) => { const e = $(id); if (e && v != null) e.value = v; };
-  const sc = (id, v) => { const e = $(id); if (e && v != null) e.checked = !!v; };
-  sv('in-hard-stop', g.max_stop_loss_pct ?? l.stop_loss_max_pct);
-  sv('in-take-profit', g.max_take_profit_pct ?? l.take_profit_max_pct);
-  sc('in-tp-enabled', g.tp_enabled ?? l.take_profit_enforced); toggleTPInputs();
-  sv('in-trailing', g.trailing_stop_pct); sv('in-atr-mult', g.atr_multiplier);
-  sv('in-time-stop', g.max_holding_hours ?? l.holding_hours_max);
-  sv('in-drawdown', g.max_session_drawdown_pct ?? l.session_drawdown_max_pct);
-  sv('in-leverage', g.max_leverage ?? l.leverage_max);
-  sv('in-daily-loss', g.max_daily_loss_pct ?? l.daily_loss_max_pct);
-  sv('in-p1-risk', g.p1_risk_pct);
-  sv('in-single-pos', g.max_single_position_pct ?? l.position_size_max_pct);
-  sv('in-total-exp', g.max_total_exposure_pct ?? l.total_exposure_max_pct);
-  sv('in-corr-exp', g.max_correlated_exposure_pct ?? l.correlated_exposure_max_pct);
-  sv('in-same-dir', g.max_same_direction_positions);
-  sv('in-cooldown-count', g.consecutive_loss_cooldown_count ?? l.consec_loss_cooldown_count);
-  sv('in-cooldown-min', g.consecutive_loss_cooldown_minutes ?? l.consec_loss_cooldown_min);
-  if (Array.isArray(g.allowed_categories)) sv('in-allowed-cats', g.allowed_categories.join(', '));
+// _updateEngineBadges — set color-coded engine indicator on all editable cards
+// 在所有可編輯卡片上設置顏色區分的引擎標記
+function _updateEngineBadges(engine) {
+  const labels = { paper: 'Paper', demo: 'Demo', live: 'Live' };
+  const colors = {
+    paper: { bg: 'rgba(56,139,253,0.15)', border: 'rgba(56,139,253,0.5)', text: 'var(--blue)' },
+    demo:  { bg: 'rgba(210,153,34,0.15)', border: 'rgba(210,153,34,0.5)', text: 'var(--yellow)' },
+    live:  { bg: 'rgba(248,81,73,0.15)',  border: 'rgba(248,81,73,0.5)',  text: 'var(--red)' },
+  };
+  const c = colors[engine] || colors.paper;
+  document.querySelectorAll('.rc-engine-badge').forEach(badge => {
+    badge.textContent = labels[engine] || engine;
+    badge.style.background = c.bg;
+    badge.style.borderColor = c.border;
+    badge.style.color = c.text;
+    badge.style.fontWeight = '600';
+  });
 }
 
 // Return save URL for current engine / 返回當前引擎的保存 URL
@@ -1029,14 +1015,29 @@ async function loadRiskStatus() {
 }
 
 async function loadRiskConfig() {
-  const d = await ocApi('/api/v1/paper/risk/config');
-  if (!d || !d.data) return;
+  // Always fetch for the currently selected engine so P0/P1/P2 display cards and inputs
+  // all reflect the chosen engine. The 15s loadAll() refresh also respects this.
+  // 始終讀取當前選中引擎的配置，P0/P1/P2 顯示卡與輸入框統一更新。15s 刷新也遵守此邏輯。
+  const _engine = _selectedRiskEngine || 'paper';
+  const _url = _engine === 'paper' ? '/api/v1/paper/risk/config' : '/api/v1/paper/risk/config/engine/' + _engine;
+  const badge = $('engine-risk-loaded-badge');
+  if (badge) { badge.textContent = '加載中...'; badge.className = 'oc-chip oc-chip-neutral'; }
+  const d = await ocApi(_url);
+  if (!d || !d.data) {
+    if (badge) { badge.textContent = '加載失敗'; badge.className = 'oc-chip oc-chip-warn'; }
+    return;
+  }
   // Route returns _risk_response({"config": {...}, "version": N}) so envelope is
   // d.data = {config: {global_config, limits, ...}, version: N}. Earlier code read
   // cfg.global_config directly which was always undefined → all reads fell through
   // to JS defaults → values appeared to "revert" after every save.
   // 路由實際回傳 {data: {config: {...}, version: N}}，必須再下一層讀 config。
   const cfg = (d.data && d.data.config) || d.data || {};
+  const _ver = (d.data && d.data.version) || (cfg.meta && cfg.meta.version) || '?';
+  if (badge) {
+    badge.textContent = _engine.toUpperCase() + ' v' + _ver;
+    badge.className = _engine === 'live' ? 'oc-chip oc-chip-bad' : 'oc-chip oc-chip-good';
+  }
 
   // P0 - Category config: field is "category_overrides" or "category" or from allowed_categories
   // NOTE: don't read cfg.overrides here — Rust returns {linear: null, spot: null, ...}
@@ -1282,6 +1283,7 @@ async function loadAll() {
   await Promise.allSettled([loadRiskGovernor(), loadRiskStatus(), loadRiskConfig(), loadAIContext(), loadDynamicRisk()]);
 }
 
+_updateEngineBadges(_selectedRiskEngine);
 loadAll();
 ocStartRefresh(loadAll, 15000);
 ocInitFx();

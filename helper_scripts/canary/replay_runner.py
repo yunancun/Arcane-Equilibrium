@@ -209,112 +209,13 @@ def run_python_shadow(
     output_path: str,
 ) -> int:
     """
-    Run ticks through Python pipeline and output shadow_results.jsonl.
-    通過 Python 管線運行 tick 並輸出 shadow_results.jsonl。
+    [DEPRECATED] Python shadow pipeline removed — strategies migrated to Rust.
+    [已廢棄] Python 影子管線已移除 — 策略已遷移至 Rust。
 
-    Returns number of records written.
+    Returns 0 (no records written).
     """
-    # Import Python pipeline components / 導入 Python 管線組件
-    program_code = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "program_code",
-    )
-    if program_code not in sys.path:
-        sys.path.insert(0, program_code)
-
-    from local_model_tools.kline_manager import KlineManager as PyKlineManager
-    from local_model_tools.indicator_engine import IndicatorEngine as PyIndicatorEngine
-    from local_model_tools.signal_generator import SignalEngine as PySignalEngine
-    from local_model_tools.strategy_orchestrator import StrategyOrchestrator as PyOrchestrator
-    from local_model_tools.strategies.ma_crossover import MACrossoverStrategy
-    from local_model_tools.strategies.bollinger_reversion import BollingerReversionStrategy
-    from local_model_tools.strategies.bb_breakout import BBBreakoutStrategy
-
-    symbols = list({t["symbol"] for t in all_ticks})
-    km = PyKlineManager(symbols=symbols)
-    ie = PyIndicatorEngine(kline_manager=km)
-    se = PySignalEngine()
-
-    # Wire indicator → signal → strategy pipeline (proper wiring via SignalEngine)
-    # 連接指標 → 信號 → 策略管線（通過 SignalEngine 正式接線）
-    ie.register_on_update(se.on_indicators_update)
-
-    # Create orchestrator with default strategies matching Rust engine (R07)
-    # 創建帶有默認策略的編排器，與 Rust 引擎匹配（R07）
-    orch = PyOrchestrator(kline_manager=km, indicator_engine=ie, signal_engine=se)
-    for sym in symbols:
-        for StrategyCls in (MACrossoverStrategy, BollingerReversionStrategy, BBBreakoutStrategy):
-            strat = StrategyCls(symbol=sym)
-            orch.register_strategy(strat, name=f"{strat.name}_{sym}")
-            orch.activate_strategy(f"{strat.name}_{sym}")
-
-    # Collect signals via callback for the canary record
-    # 通過回調收集信號用於灰度記錄
-    collected_signals: list[dict] = []
-
-    def _on_signal(sig) -> None:
-        collected_signals.append(_serialize_signal_obj(sig))
-
-    se.register_on_signal(_on_signal)
-
-    record_count = 0
-    tick_number = 0
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        for tick in all_ticks:
-            tick_number += 1
-            symbol = tick["symbol"]
-            price = tick["last_price"]
-            ts_ms = tick["ts_ms"]
-
-            # Clear signal collector / 清空信號收集器
-            collected_signals.clear()
-
-            # Feed kline manager (triggers indicator → signal → strategy pipeline)
-            # 餵入 K 線管理器（觸發指標 → 信號 → 策略管線）
-            km.on_price_event(tick)
-
-            # Dispatch tick to tick-driven strategies (Grid Trading, etc.)
-            # 將 tick 分發給 tick 驅動策略（網格交易等）
-            orch.dispatch_tick(symbol, price, ts_ms)
-
-            # Collect order intents from strategies / 從策略收集訂單意圖
-            intents = orch.collect_pending_intents()
-            serialized_intents = [_serialize_intent(i) for i in intents]
-
-            # Get current indicators (may be from last closed bar)
-            # 獲取當前指標（可能來自上一根收盤 K 線）
-            indicators = ie.get_indicators(symbol, "1m")
-
-            # Build canary record / 構建灰度記錄
-            # NOTE: paper_state remains {} — full PaperTradingEngine integration
-            # requires 60+ lines of wiring (dependencies: RiskManager, ProtectiveOrderManager,
-            # PaperStateStore, GovernanceHub). Comparator skips paper_state when empty.
-            # 注意：paper_state 保持 {} — 完整 PaperTradingEngine 集成需要 60+ 行接線
-            # （依賴：RiskManager、ProtectiveOrderManager、PaperStateStore、GovernanceHub）。
-            # 比較器在 paper_state 為空時跳過比較。
-            record = {
-                "schema_version": SCHEMA_VERSION,
-                "source": "python_shadow",
-                "tick_number": tick_number,
-                "timestamp_ms": ts_ms,
-                "symbol": symbol,
-                "price": price,
-                "indicators": _serialize_indicators(indicators),
-                "signals": list(collected_signals),
-                "order_intents": serialized_intents,
-                "paper_state": {},    # See NOTE above / 見上方注意事項
-                "stats": {"total_ticks": tick_number},
-            }
-
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            record_count += 1
-
-            if tick_number % 10000 == 0:
-                logger.info("  Python shadow: %d / %d ticks processed", tick_number, len(all_ticks))
-
-    logger.info("Python shadow complete: %d records → %s", record_count, output_path)
-    return record_count
+    logger.warning("Python shadow pipeline disabled: strategies removed (DEAD-PY-3). Returning 0 records.")
+    return 0
 
 
 def _serialize_indicators(ind: Any) -> dict:
