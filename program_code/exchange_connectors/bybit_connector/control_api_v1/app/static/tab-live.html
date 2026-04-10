@@ -3,151 +3,615 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>实盘交易</title>
+<title>实盘交易 / Live Trading</title>
 <script src="/static/common.js"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <style>
-  .live-lock-wrap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 60vh;
-    text-align: center;
-    padding: 40px 24px;
-  }
-  .lock-icon { font-size: 56px; margin-bottom: 16px; }
-  .lock-title { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-  .lock-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 28px; max-width: 480px; line-height: 1.6; }
+/* ── Live page theme — red-border emphasis for real-money risk ── */
+/* 實盤頁主題 — 紅色邊框強調真實資金風險 */
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+}
 
-  .prereq-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-    width: 100%;
-    max-width: 860px;
-    margin-bottom: 28px;
-    text-align: left;
-  }
-  .prereq-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-  }
-  .prereq-card .pc-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-  .prereq-card .pc-title { font-size: 12px; font-weight: 600; color: var(--text); }
-  .prereq-card .pc-desc { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
-  .dot-done  { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; flex-shrink: 0; }
-  .dot-todo  { width: 8px; height: 8px; border-radius: 50%; background: #484f58; border: 1px solid #6e7681; flex-shrink: 0; }
-  .dot-warn  { width: 8px; height: 8px; border-radius: 50%; background: #d29922; flex-shrink: 0; }
+/* ── Lock overlay / 鎖定頁 ─────────────────────────────────── */
+.live-lock-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  text-align: center;
+  padding: 40px 24px;
+}
+.lock-icon { font-size: 56px; margin-bottom: 16px; }
+.lock-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.lock-sub {
+  font-size: 13px; color: var(--text-dim); margin-bottom: 24px;
+  max-width: 500px; line-height: 1.6;
+}
 
-  .phase-badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3);
-    color: #d29922; border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 600;
-    margin-bottom: 20px;
-  }
-  .state-row {
-    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 24px;
-  }
+/* ── Prereq grid / 前置條件列表 ────────────────────────────── */
+.prereq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  width: 100%; max-width: 880px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+.prereq-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.prereq-card.done  { border-color: rgba(63,185,80,0.35); }
+.prereq-card.warn  { border-color: rgba(210,153,34,0.35); }
+.prereq-card.todo  { border-color: var(--border); }
+.pc-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+}
+.pc-title { font-size: 12px; font-weight: 600; }
+.pc-desc  { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.dot-done { width:8px; height:8px; border-radius:50%; background:#3fb950; flex-shrink:0; }
+.dot-todo { width:8px; height:8px; border-radius:50%; background:#484f58; border:1px solid #6e7681; flex-shrink:0; }
+.dot-warn { width:8px; height:8px; border-radius:50%; background:#d29922; flex-shrink:0; }
+
+.phase-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(210,153,34,0.12); border: 1px solid rgba(210,153,34,0.3);
+  color: #d29922; border-radius: 20px; padding: 4px 14px;
+  font-size: 12px; font-weight: 600; margin-bottom: 18px;
+}
+.state-row {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  justify-content: center; margin-bottom: 20px;
+}
+
+/* ── Dashboard (shown when execution_authority=granted) ───── */
+/* 儀表板（execution_authority=granted 時顯示）*/
+.live-dashboard { display: none; }
+.live-dashboard.active { display: block; }
+
+.live-warn-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.35);
+  border-radius: 8px; padding: 10px 16px;
+  font-size: 13px; margin-bottom: 14px;
+}
+.live-warn-bar .warn-icon { font-size: 20px; flex-shrink: 0; }
+
+.live-control-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--card-bg);
+  border: 1px solid rgba(239,68,68,0.4);
+  border-radius: 10px; padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.live-control-bar .bar-title { font-weight: 700; font-size: 14px; }
+
+/* Metrics grid / 指標網格 */
+.live-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.live-metric {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+}
+.live-metric.pnl-card {
+  border-color: rgba(239,68,68,0.4);
+  grid-column: span 2;
+}
+.live-metric-label {
+  font-size: 11px; color: var(--text-dim);
+  margin-bottom: 4px; font-weight: 500;
+}
+.live-metric-val {
+  font-size: 22px; font-weight: 700;
+}
+.live-metric-val.pos { color: var(--green); }
+.live-metric-val.neg { color: #f87171; }
+.live-metric-val.neutral { color: var(--text); }
+
+/* Positions table / 倉位表格 */
+.live-section-title {
+  font-size: 13px; font-weight: 600;
+  margin: 14px 0 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.live-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; margin-bottom: 14px;
+}
+.live-table th {
+  text-align: left; padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim); font-weight: 500;
+  font-size: 11px;
+}
+.live-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.live-table tr:last-child td { border-bottom: none; }
+
+/* Emergency stop button / 緊急停止按鈕 */
+.btn-emergency {
+  background: rgba(239,68,68,0.12);
+  border: 2px solid rgba(239,68,68,0.7);
+  color: #f87171;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: all 0.15s;
+}
+.btn-emergency:hover {
+  background: rgba(239,68,68,0.25);
+  border-color: #f87171; color: #fff;
+}
+.btn-emergency:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
+
+/* ── Stop confirm dialog ──────────────────────────────────── */
+.oc-dialog-overlay {
+  display: none;
+  position: fixed; top:0; left:0; right:0; bottom:0;
+  background: rgba(0,0,0,0.6);
+  z-index: 9999;
+  align-items: center; justify-content: center;
+}
+.oc-dialog-overlay.show { display: flex; }
+.oc-dialog {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px;
+  max-width: 440px; width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.oc-dialog h3 { margin: 0 0 12px; font-size: 16px; }
+.oc-dialog p  { margin: 0 0 16px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+.oc-dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.oc-dialog .note { font-size: 11px; color: #d29922; margin-bottom: 12px; }
+
+/* Container padding / 容器內邊距 */
+.live-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
 </style>
 
+<!-- ══════════════════════════════════════════════════════════════
+     LOCK VIEW — shown when execution_authority ≠ granted
+     鎖定視圖 — execution_authority ≠ granted 時顯示
+═══════════════════════════════════════════════════════════════ -->
+<div id="live-lock-view">
 <div class="live-lock-wrap">
+
   <div class="lock-icon">&#x1F512;</div>
   <div class="lock-title">实盘交易 — 尚未解锁 / Live Trading Locked</div>
   <div class="lock-sub">
-    实盘执行权限尚未授予。系统当前运行于 <strong>read_only</strong> 模式，所有订单通道已禁用。<br>
-    完成以下前置条件并通过人工审批后，方可进入受监督实盘阶段（Phase M）。
+    实盘执行权限尚未授予。系统当前运行于 <strong>demo_only</strong> 模式，所有实盘订单通道已禁用。<br>
+    完成以下前置条件并经 Operator 人工审批后，方可进入受监督实盘阶段（Phase M）。
   </div>
 
-  <div class="phase-badge">&#x23F3; 当前：Phase 0 → Phase 1 开发中</div>
+  <!-- Phase badge (dynamic) / 動態 Phase badge -->
+  <div class="phase-badge" id="lock-phase-badge">&#x23F3; 載入中...</div>
 
-  <!-- Runtime State -->
-  <div class="state-row" id="state-row">
+  <!-- Runtime state chips / 運行時狀態 chip -->
+  <div class="state-row" id="lock-state-row">
     <span class="oc-chip oc-chip-neutral">loading...</span>
   </div>
 
-  <!-- Prerequisites -->
-  <div class="prereq-grid">
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-warn"></span><span class="pc-title">H0 Gate — 确定性门控</span></div>
-      <div class="pc-desc">DOC-02 规定 &lt;1ms 本地判断内核，Live 前必须实施并压测验证。（Phase 1 最高优先）</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Paper Trading 稳定运行 21 天</span></div>
-      <div class="pc-desc">模拟引擎需连续稳定运行满 21 天，积累足够的历史成交数据作为 Live 基线。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">回测引擎验证策略 Alpha</span></div>
-      <div class="pc-desc">所有部署策略须通过回测引擎验证，证明存在可重复的统计 alpha，非随机收益。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Learning Tier ≥ L2</span></div>
-      <div class="pc-desc">系统须完成足够观察周期并晋升至学习层级 L2，证明具备自我校正能力。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">治理 fail-closed 验证</span></div>
-      <div class="pc-desc">GovernanceHub 4 SM 已接入，is_authorized / acquire_lease fail-closed 已验证通过。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">P0/P1/P2 风控实测</span></div>
-      <div class="pc-desc">三层风控框架已实测：check_order_allowed 返回 False 实际阻止订单执行。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-todo"></span><span class="pc-title">Supervised Live Gate (M 章)</span></div>
-      <div class="pc-desc">M 章受监督实盘门控需完整实施，包括 authority grant contract 和 execution adapter contract。</div>
-    </div>
-
-    <div class="prereq-card">
-      <div class="pc-header"><span class="dot-done"></span><span class="pc-title">远程访问安全加固</span></div>
-      <div class="pc-desc">Tailscale + HTTPS + CSP 已配置，GUI 登录认证已启用。</div>
-    </div>
-
+  <!-- Prerequisite cards (dynamically rendered) / 動態渲染前置條件卡片 -->
+  <div class="prereq-grid" id="lock-prereq-grid">
+    <div class="oc-loading">Loading prerequisites...</div>
   </div>
 
-  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6">
+  <div style="font-size:11px;color:var(--text-dim);max-width:520px;line-height:1.6;text-align:center">
     &#x26A0;&#xFE0F; 实盘放权须经 Operator 手动审批。即使所有前置条件满足，系统不会自动开启实盘执行。<br>
-    开发路线图：Phase 1 → Phase 2 → Phase 3 → Phase 4 Paper 观察 → Phase M Supervised Live
+    当前 Live 开发状态：P0 GUI 框架已就绪，P1 Rust TradingMode::Live 待实施。
+  </div>
+
+</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     DASHBOARD VIEW — shown when execution_authority = granted
+     儀表板視圖 — execution_authority = granted 時顯示
+═══════════════════════════════════════════════════════════════ -->
+<div id="live-dashboard-view" class="live-dashboard">
+<div class="live-wrap">
+
+  <!-- Red warning banner / 紅色警示橫幅 -->
+  <div class="live-warn-bar">
+    <span class="warn-icon">&#x1F534;</span>
+    <div>
+      <strong>實盤模式啟用 — 所有訂單使用真實資金 / LIVE MODE — Real funds at risk</strong><br>
+      <span style="font-size:12px;color:var(--text-dim)">此頁面操作直接影響 Bybit 實盤帳戶。請確保風控參數正確配置，謹慎操作。</span>
+    </div>
+  </div>
+
+  <!-- Control bar / 控制欄 -->
+  <div class="live-control-bar">
+    <span class="bar-title">&#x1F534; Live Engine</span>
+    <span id="live-engine-status" class="oc-chip oc-chip-neutral">--</span>
+    <span id="live-engine-detail" style="font-size:12px;color:var(--text-dim)"></span>
+    <span style="flex:1"></span>
+    <button class="oc-btn oc-btn-success" id="btn-live-start" onclick="liveStart()" style="font-weight:700">&#x25B6; 啟動 Live</button>
+    <button class="oc-btn oc-btn-danger" id="btn-live-stop" onclick="openStopDialog()" disabled style="font-weight:700">&#x23F9; 停止 Live</button>
+    <button class="btn-emergency" id="btn-emergency-stop" onclick="openEmergencyDialog()">&#x1F6A8; 緊急停止</button>
+  </div>
+
+  <!-- PnL + metrics / 收益指標 -->
+  <div class="live-metrics" id="live-metrics-grid">
+    <div class="live-metric pnl-card">
+      <div class="live-metric-label">未實現 PnL / Unrealized PnL</div>
+      <div class="live-metric-val neutral" id="live-unrealized-pnl">--</div>
+    </div>
+    <div class="live-metric">
+      <div class="live-metric-label">今日已實現 / Today Realized</div>
+      <div class="live-metric-val neutral" id="live-realized-pnl">--</div>
+    </div>
+    <div class="live-metric">
+      <div class="live-metric-label">賬戶淨值 / Equity</div>
+      <div class="live-metric-val neutral" id="live-equity">--</div>
+    </div>
+    <div class="live-metric">
+      <div class="live-metric-label">可用餘額 / Available</div>
+      <div class="live-metric-val neutral" id="live-available">--</div>
+    </div>
+    <div class="live-metric">
+      <div class="live-metric-label">持倉數 / Positions</div>
+      <div class="live-metric-val neutral" id="live-position-count">--</div>
+    </div>
+    <div class="live-metric">
+      <div class="live-metric-label">掛單數 / Open Orders</div>
+      <div class="live-metric-val neutral" id="live-order-count">--</div>
+    </div>
+  </div>
+
+  <!-- Positions table / 持倉表格 -->
+  <div class="live-section-title">&#x1F4CA; 持倉 / Positions</div>
+  <div style="overflow-x:auto">
+    <table class="live-table" id="live-positions-table">
+      <thead><tr>
+        <th>Symbol</th><th>Side</th><th>Size</th>
+        <th>Entry</th><th>Mark</th><th>PnL</th><th>Liq.</th>
+      </tr></thead>
+      <tbody id="live-positions-body">
+        <tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Open orders table / 掛單表格 -->
+  <div class="live-section-title">&#x1F4CB; 掛單 / Open Orders</div>
+  <div style="overflow-x:auto">
+    <table class="live-table" id="live-orders-table">
+      <thead><tr>
+        <th>Symbol</th><th>Side</th><th>Qty</th>
+        <th>Price</th><th>Type</th><th>Status</th>
+      </tr></thead>
+      <tbody id="live-orders-body">
+        <tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:20px">加載中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /live-wrap -->
+</div><!-- /live-dashboard-view -->
+
+<!-- ── Stop Confirmation Dialog ───────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-live-stop">
+  <div class="oc-dialog">
+    <h3>&#x23F9; 停止 Live 引擎</h3>
+    <p>停止將執行以下操作：<br>
+      1. 取消所有實盤掛單<br>
+      2. 平掉所有實盤持倉（市價）<br>
+      3. 引擎進入觀察模式（observing），停止新訂單<br>
+      <span style="color:#f87171;font-size:12px">⚠ 平倉操作使用真實資金，請確認市場流動性充足。</span>
+    </p>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeDialog('dlg-live-stop')">取消</button>
+      <button class="oc-btn oc-btn-danger" onclick="doLiveStop()">確認停止</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Emergency Stop Dialog ──────────────────────────────────── -->
+<div class="oc-dialog-overlay" id="dlg-live-emergency">
+  <div class="oc-dialog" style="border-color:rgba(239,68,68,0.6)">
+    <h3 style="color:#f87171">&#x1F6A8; 緊急停止 / Emergency Stop</h3>
+    <p>緊急停止將立即：<br>
+      1. 強制取消所有掛單<br>
+      2. 強制市價平倉所有持倉<br>
+      3. 封鎖引擎 — 不接受任何新指令直到手動解除<br>
+      <span style="color:#f87171;font-size:12px">⚠ 高滑點風險。僅在緊急情況下使用。</span>
+    </p>
+    <div class="note">⚠ 此操作無法撤銷，所有平倉單立即市價成交。</div>
+    <div class="btn-row">
+      <button class="oc-btn" onclick="closeDialog('dlg-live-emergency')">取消</button>
+      <button class="btn-emergency" onclick="doEmergencyStop()">&#x1F6A8; 確認緊急停止</button>
+    </div>
   </div>
 </div>
 
 <script>
-// Pull live system state to show current mode/execution status
-async function loadState() {
-  const row = document.getElementById('state-row');
-  try {
-    const d = await ocApi('/api/v1/governance/status');
-    const s = (d && d.data) ? d.data : {};
+// ═══════════════════════════════════════════════════════════════
+// Dialog helpers / 對話框輔助函數
+// ═══════════════════════════════════════════════════════════════
+function closeDialog(id) { document.getElementById(id).classList.remove('show'); }
+function openStopDialog() { document.getElementById('dlg-live-stop').classList.add('show'); }
+function openEmergencyDialog() { document.getElementById('dlg-live-emergency').classList.add('show'); }
+
+// ═══════════════════════════════════════════════════════════════
+// Prerequisite data / 前置條件數據
+// ═══════════════════════════════════════════════════════════════
+const PREREQS = [
+  {
+    id: 'h0_gate',
+    title: 'H0 Gate — 確定性門控',
+    desc: 'DOC-02 規定 <1ms 本地判斷內核，Live 前必須實施並壓測驗證。',
+    // Dynamic check via engine status
+    // 動態查詢引擎狀態
+    check: (s) => s.h0_gate_active ? 'done' : 'warn',
+  },
+  {
+    id: 'paper_21d',
+    title: 'Paper Trading 穩定運行 21 天',
+    desc: '模擬引擎需連續穩定運行滿 21 天，積累足夠歷史成交數據。',
+    check: (s) => s.paper_running_days >= 21 ? 'done' : 'todo',
+    detail: (s) => s.paper_running_days > 0 ? `（目前 ${s.paper_running_days} 天）` : '',
+  },
+  {
+    id: 'backtest_alpha',
+    title: '回測引擎驗證策略 Alpha',
+    desc: '所有部署策略須通過回測引擎驗證，證明存在可重複的統計 alpha。',
+    check: (s) => s.backtest_alpha_verified ? 'done' : 'todo',
+  },
+  {
+    id: 'phase6_done',
+    title: 'Phase 6 漸進放權完成',
+    desc: 'Phase 6 漸進放權框架 + Reconciler 自動收縮 + 壓測通過。',
+    check: (s) => s.phase6_done ? 'done' : 'todo',
+  },
+  {
+    id: 'governance_failclosed',
+    title: '治理 fail-closed 驗證',
+    desc: 'GovernanceHub 4 SM 已接入，is_authorized / acquire_lease fail-closed 已驗證通過。',
+    check: (s) => 'done',  // verified in code / 已在代碼中驗證
+  },
+  {
+    id: 'risk_framework',
+    title: 'P0/P1/P2 風控實測',
+    desc: '三層風控框架已實測：check_order_allowed 返回 False 實際阻止訂單執行。',
+    check: (s) => 'done',
+  },
+  {
+    id: 'live_key_configured',
+    title: 'Live API Key 已配置',
+    desc: 'settings/api-key/live 槽位需填入有效 Bybit API key。',
+    check: (s) => s.live_key_configured ? 'done' : 'warn',
+  },
+  {
+    id: 'supervised_gate',
+    title: 'Supervised Live Gate (M 章)',
+    desc: 'M 章受監督實盤門控完整實施，包括 authority grant contract 和 execution adapter contract。',
+    check: (s) => s.supervised_gate_done ? 'done' : 'todo',
+  },
+  {
+    id: 'alert_infra',
+    title: '多通道告警基礎設施 (OC-3)',
+    desc: '緊急群 P0 告警 + 常規群 P1 告警 + 15s 介入窗口 (Phase 6-RC-6 依賴)。',
+    check: (s) => s.alert_infra_ready ? 'done' : 'todo',
+  },
+  {
+    id: 'remote_security',
+    title: '遠程訪問安全加固',
+    desc: 'Tailscale + HTTPS + CSP 已配置，GUI 登錄認證已啟用。',
+    check: (s) => 'done',
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════
+// Load prerequisite status / 加載前置條件狀態
+// ═══════════════════════════════════════════════════════════════
+async function loadPrereqStatus() {
+  // Fetch all data in parallel / 並行獲取所有數據
+  const [govRes, paperRes, apiKeyRes] = await Promise.allSettled([
+    ocApi('/api/v1/governance/status'),
+    ocApi('/api/v1/paper/session/status'),
+    ocApi('/api/v1/settings/api-key/live'),
+  ]);
+
+  const gov = (govRes.status === 'fulfilled' && govRes.value && govRes.value.data) ? govRes.value.data : {};
+  const paper = (paperRes.status === 'fulfilled' && paperRes.value && paperRes.value.data) ? paperRes.value.data : {};
+  const liveKey = (apiKeyRes.status === 'fulfilled' && apiKeyRes.value) ? (apiKeyRes.value.data || apiKeyRes.value) : {};
+
+  // Build aggregated state for prereq checks / 聚合狀態供前置條件判斷
+  const state = {
+    system_mode: gov.system_mode || 'unknown',
+    execution_state: gov.execution_state || 'disabled',
+    execution_authority: gov.execution_authority || 'not_granted',
+    engine_available: !!(paper && paper.engine_available),
+    paper_state: (paper.session && paper.session.session_state) || 'idle',
+    paper_running_days: 0,  // placeholder — no endpoint yet / 暫無端點，預留
+    h0_gate_active: false,  // placeholder — wired after H0 Gate impl / H0 Gate 實施後接線
+    backtest_alpha_verified: false,
+    phase6_done: false,
+    live_key_configured: !!(liveKey && liveKey.has_key),
+    supervised_gate_done: false,
+    alert_infra_ready: false,
+  };
+
+  // Update lock view state chips / 更新鎖定頁狀態 chip
+  const stateRow = document.getElementById('lock-state-row');
+  if (stateRow) {
     const chips = [
-      ['system_mode',        s.system_mode        || 'read_only',    'warn'],
-      ['execution_state',    s.execution_state    || 'disabled',     'bad'],
-      ['execution_authority',s.execution_authority|| 'not_granted',  'bad'],
+      ['system_mode',         state.system_mode,         state.system_mode === 'live' ? 'good' : 'warn'],
+      ['execution_state',     state.execution_state,     state.execution_state === 'enabled' ? 'good' : 'bad'],
+      ['execution_authority', state.execution_authority, state.execution_authority === 'granted' ? 'good' : 'bad'],
     ];
-    row.innerHTML = chips.map(([label, val, type]) =>
-      `<span class="oc-chip oc-chip-${type}" title="${label}">${label}: ${ocEsc(String(val))}</span>`
+    stateRow.innerHTML = chips.map(([label, val, cls]) =>
+      `<span class="oc-chip oc-chip-${cls}" title="${label}">${label}: ${ocEsc(String(val))}</span>`
     ).join('');
-  } catch (_) {
-    row.innerHTML = '<span class="oc-chip oc-chip-neutral">system_mode: read_only &nbsp;|&nbsp; execution: disabled</span>';
+  }
+
+  // Update phase badge / 更新 phase badge
+  const phaseBadge = document.getElementById('lock-phase-badge');
+  if (phaseBadge) {
+    phaseBadge.textContent = '⏳ 當前：Phase 5 觀察期 → Phase 6 漸進放權（待實施）';
+  }
+
+  // Render prereq cards / 渲染前置條件卡片
+  const grid = document.getElementById('lock-prereq-grid');
+  if (grid) {
+    let html = '';
+    PREREQS.forEach(p => {
+      const status = p.check(state);
+      const detail = p.detail ? p.detail(state) : '';
+      const dotCls = status === 'done' ? 'dot-done' : status === 'warn' ? 'dot-warn' : 'dot-todo';
+      const cardCls = status;
+      html += `<div class="prereq-card ${cardCls}">
+        <div class="pc-header"><span class="${dotCls}"></span><span class="pc-title">${ocEsc(p.title)}</span></div>
+        <div class="pc-desc">${ocEsc(p.desc)}${detail ? ' ' + ocEsc(detail) : ''}</div>
+      </div>`;
+    });
+    grid.innerHTML = html;
+  }
+
+  return state;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// View routing — show lock or dashboard / 視圖路由
+// ═══════════════════════════════════════════════════════════════
+async function refreshPage() {
+  const state = await loadPrereqStatus();
+
+  const isUnlocked = (state.execution_authority === 'granted');
+  document.getElementById('live-lock-view').style.display = isUnlocked ? 'none' : '';
+  const dash = document.getElementById('live-dashboard-view');
+  if (isUnlocked) {
+    dash.classList.add('active');
+    loadDashboardData();
+  } else {
+    dash.classList.remove('active');
   }
 }
 
-loadState();
+// ═══════════════════════════════════════════════════════════════
+// Dashboard data / 儀表板數據
+// ═══════════════════════════════════════════════════════════════
+async function loadDashboardData() {
+  // Load balance, positions, orders in parallel
+  // 並行加載餘額、倉位、掛單
+  const [balRes, posRes] = await Promise.allSettled([
+    ocApi('/api/v1/strategy/demo/balance'),  // placeholder — live balance endpoint TBD
+    ocApi('/api/v1/strategy/demo/positions'), // placeholder — live positions endpoint TBD
+  ]);
+
+  // Balance / 餘額
+  try {
+    const balData = balRes.status === 'fulfilled' && balRes.value && balRes.value.data;
+    if (balData) {
+      let b = balData;
+      if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
+      const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
+      const available = parseFloat(b.totalAvailableBalance || b.available || 0);
+      const unrealPnl = parseFloat(b.totalPerpUPL || b.unrealized_pnl || 0);
+      document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
+      document.getElementById('live-available').textContent = available > 0 ? '₮' + available.toFixed(2) : '--';
+      const pnlEl = document.getElementById('live-unrealized-pnl');
+      pnlEl.textContent = '₮' + unrealPnl.toFixed(2);
+      pnlEl.className = 'live-metric-val ' + (unrealPnl >= 0 ? 'pos' : 'neg');
+    }
+  } catch (_) {}
+
+  // Positions / 倉位
+  const posBody = document.getElementById('live-positions-body');
+  try {
+    const posData = posRes.status === 'fulfilled' && posRes.value && posRes.value.data;
+    const positions = (posData && (posData.positions || posData.list || posData)) || [];
+    const arr = Array.isArray(positions) ? positions : [];
+    document.getElementById('live-position-count').textContent = arr.length;
+    if (arr.length === 0) {
+      posBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+    } else {
+      posBody.innerHTML = arr.map(p => {
+        const pnl = parseFloat(p.unrealisedPnl || p.unrealized_pnl || 0);
+        const pnlCls = pnl >= 0 ? 'color:var(--green)' : 'color:#f87171';
+        return `<tr>
+          <td><strong>${ocEsc(p.symbol || '--')}</strong></td>
+          <td>${ocEsc(p.side || '--')}</td>
+          <td>${ocEsc(String(p.size || p.qty || '--'))}</td>
+          <td>${ocEsc(String(p.avgPrice || p.entry_price || '--'))}</td>
+          <td>${ocEsc(String(p.markPrice || p.mark_price || '--'))}</td>
+          <td style="${pnlCls}">${pnl.toFixed(4)}</td>
+          <td>${ocEsc(String(p.liqPrice || '--'))}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch (_) {
+    posBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+  }
+
+  // Orders placeholder / 掛單佔位
+  const ordBody = document.getElementById('live-orders-body');
+  ordBody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim);text-align:center;padding:16px">Live 訂單端點待接線 / Live order endpoint pending (LIVE-P1-3)</td></tr>';
+  document.getElementById('live-order-count').textContent = '--';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Live engine session status / 引擎 session 狀態
+// ═══════════════════════════════════════════════════════════════
+async function checkLiveEngineStatus() {
+  const badge = document.getElementById('live-engine-status');
+  const detail = document.getElementById('live-engine-detail');
+  const btnStart = document.getElementById('btn-live-start');
+  const btnStop = document.getElementById('btn-live-stop');
+  if (!badge) return;
+
+  // Placeholder: live session endpoint is LIVE-P1-3 (not yet implemented)
+  // 佔位：live session 端點為 LIVE-P1-3，尚未實施
+  badge.textContent = '待接線';
+  badge.className = 'oc-chip oc-chip-neutral';
+  detail.textContent = 'Live session routes pending (LIVE-P1-3)';
+  if (btnStart) btnStart.disabled = false;
+  if (btnStop) btnStop.disabled = true;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Live actions (stubs — wired in LIVE-P1-3)
+// Live 操作（佔位 — LIVE-P1-3 接線後啟用）
+// ═══════════════════════════════════════════════════════════════
+async function liveStart() {
+  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+}
+
+async function doLiveStop() {
+  closeDialog('dlg-live-stop');
+  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+}
+
+async function doEmergencyStop() {
+  closeDialog('dlg-live-emergency');
+  ocToast('Live session routes pending (LIVE-P1-3)', 'warn');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Init / 初始化
+// ═══════════════════════════════════════════════════════════════
+refreshPage();
+setInterval(refreshPage, 30000);
 </script>
 </body>
 </html>

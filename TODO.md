@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-10（Live GUI + per-engine risk + API key mgmt 設計定稿）
-測試基準線：**Rust engine lib 838 · Python control_api 2678 passed (1 pre-existing fail · 15 skipped) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-10（LIVE-P0-1/P0-2/P0-3 完成）
+測試基準線：**Rust engine lib 838 · Python control_api 2692 passed (1 pre-existing fail · 1 skipped) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -17,22 +17,20 @@
 
 #### P0 — GUI 框架 + API key 管理（不需改 Rust，可立即做）
 
-- [ ] **LIVE-P0-1** `tab-settings.html` 加 API Key 管理區塊
+- [x] **LIVE-P0-1** `tab-settings.html` 加 API Key 管理區塊 ✅ (commit 待填)
   - `GET /api/v1/settings/api-key/{slot}` → 返回 `{has_key, key_hint: "****XXXX", last_modified}`（永不返回明文）
   - `POST /api/v1/settings/api-key/{slot}` → validate via test REST call → 寫入 `secrets/secret_files/bybit/{slot}/` → `chmod 600` → 返回 `{saved, validated, key_hint}`
-  - slot = `demo` | `live`；GUI 顯示現有 key 遮罩 + 替換輸入框 + 測試並保存按鈕
-  - 安全保障：write-only from GUI、auth 守衛、Tailscale HTTPS、rate-limit 此 endpoint
+  - `settings_routes.py` 新建 + `main.py` 注册 + `tab-settings.html` 加 UI 卡片 + 替換彈窗
 
-- [ ] **LIVE-P0-2** `tab-live.html` 前置條件動態化
-  - 前置條件清單改為 API 動態查詢（`/api/v1/governance/status` + `/api/v1/paper/session/status`），動態顯示 ✓/⬜/⚠
-  - `engine.toml` 中 `trading_mode` 顯示 + `execution_authority` 顯示
-  - 加「Phase badge」更新為當前真實 Phase（目前 Phase 5 觀察期）
+- [x] **LIVE-P0-2** `tab-live.html` 前置條件動態化 ✅ (commit 待填)
+  - 前置條件清單改為 API 動態查詢（`/api/v1/governance/status` + `/api/v1/paper/session/status` + `/api/v1/settings/api-key/live`），動態顯示 ✓/⬜/⚠
+  - Phase badge 更新為當前真實 Phase（Phase 5 觀察期 → Phase 6 待實施）
 
-- [ ] **LIVE-P0-3** `tab-live.html` 實盤儀表板框架（解鎖後顯示）
+- [x] **LIVE-P0-3** `tab-live.html` 實盤儀表板框架（解鎖後顯示）✅ (commit 待填)
   - 鎖定條件：`execution_authority != "granted"`，顯示鎖定頁
-  - 解鎖後：顯示完整儀表板（positions、orders、PnL、emergency stop）
+  - 解鎖後：顯示完整儀表板（positions、orders、PnL、緊急停止、倉位表格）
   - 視覺：紅色邊框主題 + 大號 PnL 卡片強調真實資金風險
-  - 獨立啟停按鈕（不合並入 tab-trading.html 雙引擎控制）
+  - 獨立啟停按鈕（獨立於 tab-trading.html）；P1-3 session routes 佔位 stub
 
 #### P1 — Rust TradingMode::Live + 槽位感知 key 讀取
 
