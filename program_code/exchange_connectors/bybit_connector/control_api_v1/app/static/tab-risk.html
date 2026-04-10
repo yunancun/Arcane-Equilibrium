@@ -28,6 +28,14 @@
     <span id="risk-badge" class="oc-chip oc-chip-good">checking...</span>
   </div>
 
+  <!-- Rust engine connection status — independent of trading session state -->
+  <!-- Rust 引擎連接狀態 — 與交易 session 狀態無關 -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-dim)">
+    Rust 引擎:
+    <span id="r-engine-status" class="oc-chip oc-chip-neutral" style="font-size:10px">--</span>
+    <span id="r-session-mode" style="font-size:11px;color:var(--text-dim)"></span>
+  </div>
+
   <div id="explain-risk"></div>
 
   <div class="oc-metrics" id="risk-metrics">
@@ -772,6 +780,27 @@ async function unhaltSession() {
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadRiskStatus() {
+  // Check Rust engine availability via session status (engine_available field).
+  // This is INDEPENDENT of paper trading state — engine can be "observing" but still alive.
+  // 通過 session status 的 engine_available 欄位確認 Rust 引擎存活。
+  // 與 paper 交易狀態無關 — 引擎可以是「觀察中」但仍然存活。
+  try {
+    const pd = await ocApi('/api/v1/paper/session/status');
+    const engineEl = $('r-engine-status');
+    const modeEl = $('r-session-mode');
+    if (pd && pd.data) {
+      const engineAvail = pd.data.engine_available === true;
+      const sessState = (pd.data.session && pd.data.session.session_state) || 'unknown';
+      const stateLabels = { active: '运行中', observing: '观察中', paused: '已暂停', offline: '离线', idle: '未启动' };
+      engineEl.textContent = engineAvail ? '✓ 运行中' : '✗ 未连接';
+      engineEl.className = 'oc-chip ' + (engineAvail ? 'oc-chip-good' : 'oc-chip-bad');
+      modeEl.textContent = '| Paper: ' + (stateLabels[sessState] || sessState);
+    } else {
+      engineEl.textContent = '✗ 未连接';
+      engineEl.className = 'oc-chip oc-chip-bad';
+    }
+  } catch (e) { /* non-blocking */ }
+
   const d = await ocApi('/api/v1/paper/risk/status');
   if (!d || !d.data) return;
   const s = d.data;

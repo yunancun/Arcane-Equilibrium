@@ -180,7 +180,7 @@ async function sessionAction(action) {
   }
   const d = await ocPost('/api/v1/paper/session/' + action, body);
   if (d) {
-    const labels = { start: '引擎已启动', stop: '引擎已停止' };
+    const labels = { start: '引擎已启动', stop: '引擎进入观察模式 (持仓已平)' };
     ocToast(labels[action] || ('操作: ' + action), 'success');
     // Wait briefly for engine state to settle before reloading
     // 等待引擎狀態穩定後再重新加載
@@ -214,17 +214,21 @@ async function loadSession() {
   const state = s.session_state;
 
   const badge = $('session-badge');
-  const stateLabels = { active: '运行中 (Rust)', starting: '启动中...', stopped: '已停止', offline: '离线', idle: '未启动' };
+  const stateLabels = { active: '运行中 (Rust)', starting: '启动中...', observing: '观察中', stopped: '已停止', paused: '已暂停', offline: '离线', idle: '未启动' };
   badge.textContent = stateLabels[state] || state;
   if (state === 'active') badge.className = 'oc-chip oc-chip-good';
+  else if (state === 'observing') badge.className = 'oc-chip oc-chip-good';  // engine alive
   else if (state === 'starting') badge.className = 'oc-chip oc-chip-warn';
   else badge.className = 'oc-chip oc-chip-neutral';
 
   // Session controls: start/pause/resume/stop via IPC to Rust engine
-  // Session 控制：通過 IPC 向 Rust 引擎發送 start/pause/resume/stop
+  // observing = paper_paused (user stop) — Start re-enables trading, Stop already done.
+  // Session 控制：observing = paper_paused（用戶 Stop）— Start 重啟交易，Stop 已完成。
   $('btn-start').disabled = (state === 'active');
   $('btn-pause').disabled = (state !== 'active');
-  $('btn-resume').disabled = (state !== 'paused' && state !== 'stopped');
+  // Resume also works from observing (same as paused — just calls resume_paper IPC)
+  // 觀察模式下也可以 Resume（效果等同 paused → active）
+  $('btn-resume').disabled = (state !== 'paused' && state !== 'stopped' && state !== 'observing');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
 
   const _initBal = s.initial_paper_balance_usdt || s.initial_balance || 100000;
