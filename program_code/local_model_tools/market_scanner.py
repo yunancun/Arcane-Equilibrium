@@ -2,6 +2,11 @@
 Market Scanner — Discover trading opportunities across all Bybit symbols
 市场扫描器 — 在所有 Bybit 交易对中发现交易机会
 
+DEPRECATED 2026-04-10: Superseded by Rust MarketScanner (openclaw_engine/src/scanner/).
+已棄用 2026-04-10：已被 Rust MarketScanner（openclaw_engine/src/scanner/）取代。
+Kept for audit trail only. Do not call from live trading paths.
+僅保留用於審計追蹤，禁止在 live 交易路徑中調用。
+
 MODULE_NOTE (中文):
   定期扫描 Bybit 全市场 tickers，对每个交易对进行分类和评分：
   1. 高 funding rate → Funding Rate 套利机会

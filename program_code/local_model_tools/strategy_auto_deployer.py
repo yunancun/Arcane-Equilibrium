@@ -380,11 +380,21 @@ class StrategyAutoDeployer:
         Callback from MarketScanner. Deploys/updates strategies based on opportunities.
         市场扫描回调。根据机会部署/更新策略。
 
+        DEPRECATED 2026-04-10: Symbol management is now handled by the Rust ScannerRunner
+        (openclaw_engine/src/scanner/runner.rs). This callback is dead code — Rust engine
+        does not call Python scanner. Kept for audit trail only.
+        已棄用 2026-04-10：symbol 管理已由 Rust ScannerRunner 接管，此回調為死代碼，
+        Rust 引擎不調用 Python scanner。僅保留用於審計追蹤。
+
         Smart rebalancing: when all slots are full and a high-score opportunity appears,
         evaluate existing positions and close the weakest one to make room.
         智能再平衡：當所有槽位已滿且出現高分機會時，評估現有持倉，
         關閉最弱的持倉以騰出空間。
         """
+        # DEPRECATED: Rust ScannerRunner owns symbol selection. This path is never called
+        # from live trading. / Rust ScannerRunner 已接管 symbol 選擇，此路徑不被 live 交易調用。
+        return
+
         with self._lock:
             self._stats["scan_callbacks_received"] += 1
 
