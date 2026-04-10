@@ -9,7 +9,7 @@
 //!   事件消費者將 PriceEvent 送入 TickPipeline 進行紙盤交易。
 
 use openclaw_engine::account_manager::AccountManager;
-use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
+use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
     load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
     TradingMode,
@@ -636,8 +636,13 @@ async fn async_main(
     // PaperOnly/Demo → api-demo.bybit.com; Live → api.bybit.com
     // 根據 trading_mode 派生 Bybit 環境（LIVE-P1-2）：
     // PaperOnly/Demo → Demo 環境；Live → 主網
+    // For TradingMode::Live, read the bybit_endpoint metadata file written by the
+    // Python settings API to determine if this is a Live-Demo (demo server + live key)
+    // or true Mainnet. Fail-safe: missing file → Mainnet.
+    // 對於 TradingMode::Live，讀取 Python 設定 API 寫入的 bybit_endpoint 元數據文件，
+    // 決定使用 Live-Demo（demo 伺服器 + live key）還是真實主網。安全默認：文件缺失→主網。
     let bybit_env = match cfg_snapshot.trading_mode {
-        TradingMode::Live => BybitEnvironment::Mainnet,
+        TradingMode::Live => live_bybit_environment(),
         TradingMode::Demo | TradingMode::PaperOnly => BybitEnvironment::Demo,
     };
     if let Ok(rest_client) = BybitRestClient::new(bybit_env, None, None) {
