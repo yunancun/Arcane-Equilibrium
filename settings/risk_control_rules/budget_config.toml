@@ -1,0 +1,27 @@
+[meta]
+version = 1
+saved_ts_ms = 0
+
+[caps]
+daily_usd_max = 100.0
+monthly_usd_max = 150.0
+exhaustion_cooldown_minutes = 60
+alert_threshold_pct = 0.8
+
+[caps.per_scope_caps]
+
+[model_costs.models]
+
+[attention_tax]
+enabled = true
+burn_rate_dormant = 0.0
+burn_rate_low = 0.003
+burn_rate_medium = 0.01
+burn_rate_high = 0.05
+grade_a_threshold = 0.2
+grade_b_threshold = 0.4
+grade_c_threshold = 0.6
+grade_d_threshold = 0.8
+cost_edge_max_ratio = 100.0
+
+[experimental.flags]
