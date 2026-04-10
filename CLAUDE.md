@@ -60,6 +60,10 @@
 
 **DEAD-PY-1 全部完成 ✅**（2026-04-10）— Wave A/B/C 標籤 + WP-ARCH-RC1 舊命名 + whitelist UI 全量移除（tab-governance.html 220 行 + governance.js 19 行）。唯一殘留：test_risk_view_client 1 pre-existing fail。
 
+**LIVE-P0/P1/P2 全部完成 ✅**（2026-04-10）— P0: API key 管理 + tab-live 前置條件動態化 + 儀表板框架（commit c680ffd）。P1: `read_secret_file(slot)` 槽位感知 + `TradingMode::Live` variant + Python live session routes（commit 11283c7）。P2: `PerEngineRiskStores` 3 獨立 ConfigStore + IPC engine 路由 + GUI per-engine tab + Live 二次確認彈窗（commit 006d905）。840 lib tests pass。
+
+**SEC-05 innerHTML XSS ✅ + WP-F/AH-06 ✅**（2026-04-10）— `safeText()`→`ocEsc()` 委託 + 4 badge/label 函數 fallback 修復 + 逐文件 `ocEsc()` 包裹（app.js / linucb_card / tab-ai）。Risk-tab `_riskFormDirty` 防覆蓋。
+
 **留尾**（非阻塞）：W1 event_consumer 拆分。Phase 6 自動收縮 6-RC-1~9 規格已寫死於 TODO.md。
 
 **歷史細節**（不要重複載入）：
