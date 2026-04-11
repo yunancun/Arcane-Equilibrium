@@ -8,8 +8,8 @@
 //!   緩存最後已知狀態供快速存取。從複雜的 Bybit 錢包回應中提取 USDT 權益/餘額。
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::RwLock;
 use tracing::info;
 
 // ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ impl AccountManager {
             "wallet balance refreshed / 錢包餘額已刷新"
         );
 
-        *self.wallet.write().unwrap() = state;
+        *self.wallet.write() = state;
         Ok(self)
     }
 
@@ -212,7 +212,6 @@ impl AccountManager {
     pub fn usdt_equity(&self) -> f64 {
         self.wallet
             .read()
-            .unwrap()
             .coins
             .get("USDT")
             .map_or(0.0, |c| c.equity)
@@ -223,7 +222,6 @@ impl AccountManager {
     pub fn usdt_wallet_balance(&self) -> f64 {
         self.wallet
             .read()
-            .unwrap()
             .coins
             .get("USDT")
             .map_or(0.0, |c| c.wallet_balance)
@@ -234,7 +232,6 @@ impl AccountManager {
     pub fn usdt_available(&self) -> f64 {
         self.wallet
             .read()
-            .unwrap()
             .coins
             .get("USDT")
             .map_or(0.0, |c| c.available_to_withdraw)
@@ -243,7 +240,7 @@ impl AccountManager {
     /// Get full cached wallet state snapshot.
     /// 取得完整的緩存錢包狀態快照。
     pub fn wallet_snapshot(&self) -> WalletState {
-        self.wallet.read().unwrap().clone()
+        self.wallet.read().clone()
     }
 
     // -----------------------------------------------------------------------
@@ -280,7 +277,7 @@ impl AccountManager {
             .unwrap_or_default();
 
         let mut count = 0;
-        let mut cache = self.fee_rates.write().unwrap();
+        let mut cache = self.fee_rates.write();
 
         for item in &list {
             if let Some(rate) = parse_fee_rate_item(item) {
@@ -311,7 +308,6 @@ impl AccountManager {
     pub fn get_fee_rate(&self, symbol: &str) -> FeeRate {
         self.fee_rates
             .read()
-            .unwrap()
             .get(symbol)
             .cloned()
             .unwrap_or(FeeRate {
@@ -326,7 +322,6 @@ impl AccountManager {
     pub fn taker_fee(&self, symbol: &str) -> f64 {
         self.fee_rates
             .read()
-            .unwrap()
             .get(symbol)
             .map_or(DEFAULT_TAKER_FEE, |r| r.taker_fee_rate)
     }
@@ -336,7 +331,6 @@ impl AccountManager {
     pub fn maker_fee(&self, symbol: &str) -> f64 {
         self.fee_rates
             .read()
-            .unwrap()
             .get(symbol)
             .map_or(DEFAULT_MAKER_FEE, |r| r.maker_fee_rate)
     }
@@ -682,7 +676,7 @@ mod tests {
     fn test_account_manager_fee_cache() {
         let mgr = AccountManager::new();
         {
-            let mut cache = mgr.fee_rates.write().unwrap();
+            let mut cache = mgr.fee_rates.write();
             cache.insert(
                 "ETHUSDT".to_string(),
                 FeeRate {
@@ -702,7 +696,7 @@ mod tests {
     fn test_wallet_state_snapshot() {
         let mgr = AccountManager::new();
         {
-            let mut wallet = mgr.wallet.write().unwrap();
+            let mut wallet = mgr.wallet.write();
             wallet.total_equity = 12345.67;
             wallet.coins.insert(
                 "USDT".to_string(),

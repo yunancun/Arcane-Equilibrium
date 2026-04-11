@@ -45,6 +45,28 @@ impl StateWriter {
                     error!(path = %tmp_path.display(), error = %e, "state write failed / 狀態寫入失敗");
                     return false;
                 }
+                // MAJOR-1 fix: Tighten permissions to 0600 (owner r/w only) before the
+                // rename, because the snapshot may contain balance / position info.
+                // fail-soft: a chmod error is logged but does not block the write —
+                // the tmp file is already owner-created, so the usual default umask
+                // keeps it reasonably tight even if this explicit call fails.
+                // MAJOR-1 修復：rename 前收緊權限為 0600（僅所有者讀寫）—
+                // 快照可能包含餘額/持倉資訊。fail-soft：chmod 失敗僅 warn，
+                // 不阻塞寫入（tmp 檔已由本 process 建立，umask 已提供合理權限）。
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Err(e) = std::fs::set_permissions(
+                        &tmp_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    ) {
+                        tracing::warn!(
+                            path = %tmp_path.display(),
+                            error = %e,
+                            "chmod 0600 failed (fail-soft) / chmod 0600 失敗（fail-soft）"
+                        );
+                    }
+                }
                 if let Err(e) = std::fs::rename(&tmp_path, &self.path) {
                     error!(path = %self.path.display(), error = %e, "state rename failed / 狀態重命名失敗");
                     return false;
@@ -225,6 +247,30 @@ mod tests {
 
         std::fs::remove_file(&primary_path).ok();
         std::fs::remove_file(&compat_path).ok();
+    }
+
+    /// MAJOR-1 regression test: snapshot file must be chmod 0600 on Unix.
+    /// MAJOR-1 回歸測試：快照檔在 Unix 上必須是 0600。
+    #[cfg(unix)]
+    #[test]
+    fn test_state_writer_chmod_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join("oc_test_chmod_0600");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join("test_chmod.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut w = StateWriter::new(&path, 1);
+        let data = json!({"balance": 123});
+        assert!(w.maybe_write(&data));
+
+        let meta = std::fs::metadata(&path).expect("snapshot must exist");
+        // mode() returns the full stat mode; mask to permission bits only.
+        // mode() 回傳整個 stat mode，只比對權限位。
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "snapshot must be chmod 0600, got {:o}", mode);
+
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

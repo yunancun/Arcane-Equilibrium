@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-ARCH v4 計劃 + 13-session 執行計劃錄入）
-測試基準線：**Rust engine lib 896 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-11（3E-E2 多角色審計後 — Phase A-G 補入 + MEGA-BLOCKER-0 錄入）
+測試基準線：**Rust engine lib 897 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -38,11 +38,81 @@
 - [x] **3E-7+8** API Key 衝突偵測 409 + Watchdog multi-snapshot + Paper balance GUI（S11）✅
 
 ### 驗收（S12-S13, Day 7-8）
-- [ ] **3E-E2** E2 代碼審查 — D1-D26 全量 checklist（S12）
-- [ ] **3E-E4** E4 測試回歸 + ~40 新增 tests（S13，基線：879 lib + 18 e2e + 2792 Python）
+- [🟡] **3E-E2** 多角色並行審計已跑，**不通過** — 10 BLOCKER + 7 MAJOR + MEGA-BLOCKER-0（見 Phase A-G）
+- [ ] **3E-E4** E4 測試回歸 + ~40 新增 tests（S13，基線：897 lib + 18 e2e + 2792 Python）— 阻塞於 Phase E
 
 **排期**：W22（2026-05-05~12）—— 8 個工作日  
 **Session 間恢復**：compact 後讀 TODO.md 找下一個 `[ ]` → 讀 plan 對應 § → `cargo test --lib | tail -3` 確認基線
+
+---
+
+## 🔴 3E-E2 Fix Rounds — 多角色審計後修復計劃（2026-04-11）
+
+**審計報告**：`docs/audits/2026-04-11--3e_arch_e2_multi_role_review.md`（633 行、9 角色平行審查）  
+**核心結論**：3E-ARCH S0-S11 編譯/測試 pass（897 lib + 18 e2e + 2797 Python），但**實施不完整**：
+1. **MEGA-BLOCKER-0**：當前 spawn 是「Primary + Paper alongside」，**非**用戶目標的「三者無條件並行」
+2. **10 BLOCKER + 7 MAJOR + 6 MINOR** 覆蓋 D1-D26 架構缺口
+
+**用戶 2026-04-11 架構澄清**：
+- 唯一運行模式 = Paper/Demo/Live **三者同時並行**（各自依 API key 存在性獨立啟停）
+- `trading_mode` / `TradingMode` enum / `primary_kind` **徹底刪除**，不留 deprecated 過渡
+- 每個 Pipeline 啟動條件 = 自己的 API key + system_mode 允許
+
+### Phase A — 快速修復（無架構依賴）✅ 完成
+- [x] **BLOCKER-5** `settings_routes.py:391` `==` → `hmac.compare_digest(bytes, bytes)`（constant-time）
+- [x] **BLOCKER-7** `settings_routes.py` 加 `_save_api_key_lock: asyncio.Lock`，衝突檢查→validate→write 串行
+- [x] **BLOCKER-6** 遷移 5 處 `std::sync::RwLock` → `parking_lot::RwLock`（types.rs + main.rs PrivateWsBindings + account_manager.rs 全部 `.unwrap()` 移除）
+- [x] **MAJOR-1** `persistence.rs` StateWriter chmod 0600（rename 前）+ `#[cfg(unix)]` 回歸測試
+- [~] **BLOCKER-1** D19 DB 去重 — **延後到 Phase C**（隨 spawn 重構一併處理）
+- [~] **MINOR-2** `paper_cmd_rx` 改名 — **延後到 Phase C**（隨 spawn 重構一併處理）
+
+**Phase A 測試結果**：cargo test lib **897 passed** / 0 failed（+1 新 chmod 測試），pytest settings **24 passed** / 0 failed。
+
+### Phase B — 配置層補完（半天）
+- [ ] **BLOCKER-8** 創建 4 個 TOML 配置文件 + 實現 `load_strategy_params()`
+  - `settings/paper_config.toml`（initial_balance + taker_fee）
+  - `settings/strategy_params_paper.toml` / `_demo.toml` / `_live.toml`（per-engine 策略參數）
+  - `tab-paper.html` initial_balance 寫入目標需對應真實存在的文件
+- [ ] **MAJOR-4** Paper balance 優先級解析統一（env > TOML > 硬編碼 default）
+
+### Phase C — 三引擎並行重構 · MEGA-BLOCKER-0（2-3 天）
+- [ ] **3E-10.1** `main.rs` spawn 邏輯重構：刪除 `primary_kind`，改為三個 Pipeline 各自獨立判斷啟動條件（API key + system_mode gate）
+- [ ] **3E-10.2** 刪除 `config.trading_mode` 字段 + `engine.toml` 清理 + env var `TRADING_MODE` 清除
+- [ ] **3E-10.3** Python 側 `ipc_state_reader.py` / `live_session_routes.py` / `paper_trading_routes.py` 向後兼容 `trading_mode` serde 殘留清零（8 處）
+- [ ] **3E-10.4** Rust `TradingMode` enum 真正刪除（不是 deprecated 保留）
+- [ ] **3E-10.5** **BLOCKER-1 D19 DB 去重**（隨 spawn 重構）— 僅 Paper Pipeline 寫 market_data / feature，Demo/Live 的 `market_data_tx` / `feature_tx` 為 `None`
+- [ ] **3E-10.6** **MINOR-2 paper_cmd_rx 改名**（隨 spawn 重構）— 變 `pipeline_cmd_rx_{paper,demo,live}`
+- [ ] **3E-10.7** reconciler_e2e 測試 + event_consumer tests 調整
+
+### Phase D — 架構級補完（2-3 天，依賴 Phase C）
+- [ ] **BLOCKER-2** D6 三級遞減收縮實施（`cross_engine_notify` + `EngineEvent::Crashed` + `PipelineHealth`）+ `tokio::spawn` catch_unwind（Paper crash → Demo Cautious 60s / Demo crash → Live Cautious 120s）
+- [ ] **BLOCKER-3** D15 `global_notional_cap_usdt` 實施（跨引擎 portfolio-level 曝險上限）
+- [ ] **BLOCKER-4** D17 Live 獨立 tokio Runtime（避免與 Paper/Demo CPU 爭搶）
+- [ ] **MAJOR-2** 啟動競態修復（barrier 或 initialization signal 阻塞等待三引擎 ready）
+- [ ] **MAJOR-3** shutdown 分級順序（Live → Demo → Paper，避免 Paper 先死帶走 DB writer）
+- [ ] **MAJOR-5** IPC per-engine audit log（`EngineCommandChannels::select` 路由日誌）
+- [ ] **MAJOR-7** snapshot 格式版本號（未來 migration 保險）
+
+### Phase E — 測試補完（1-2 天，即 3E-E4 session）
+- [ ] **BLOCKER-10** 補 ~23 blocker tests（D1/D2/D6/D21/D23/D15/D17 + StopManager 綁定/MAJOR-6）
+- [ ] 全測試套件跑通：cargo lib + e2e + Python（目標 ≥ 897 + 18 + 2815）
+
+### Phase F — 文件拆分（2-3 天，獨立 session）
+- [ ] **BLOCKER-9** 5 個超 1200 硬上限文件拆分：
+  - `tick_pipeline.rs` 3717 行 → 拆多模組
+  - `ipc_server.rs` 3197 行 → 拆 handlers/routing/auth
+  - `main.rs`（當前 2004+，Phase C 後可能再漲）→ 拆 startup/spawn/supervise
+  - `intent_processor.rs` 1614 行 → 拆 gates/router
+  - `position_reconciler.rs` 1397 行 → 拆 escalation/rest_poller
+
+### Phase G — 重跑驗收
+- [ ] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查**
+- [ ] 通過後：更新 TODO.md 標記 `3E-E2` / `3E-E4` 為 `[x]`
+- [ ] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
+
+**Phase 依賴圖**：  
+`Phase A ✅ → Phase B → Phase C (MEGA-BLOCKER-0) → Phase D → Phase E → Phase F → Phase G`  
+**總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
 
 ---
 
