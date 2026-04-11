@@ -204,7 +204,7 @@ async def post_session_start(
     if not rust.is_available():
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
     try:
-        result = await _ipc_command("resume_paper")
+        result = await _ipc_command("resume_paper", {"engine": "paper"})
         # Clear sticky stop flag — user explicitly restarted / 用戶顯式重啟，清除停止標誌
         global _USER_STOPPED
         _USER_STOPPED = False
@@ -266,7 +266,7 @@ async def post_session_pause(
 ):
     """Pause paper trading — stops strategy dispatch + Demo shadow orders / 暫停紙盤交易"""
     try:
-        result = await _ipc_command("pause_paper")
+        result = await _ipc_command("pause_paper", {"engine": "paper"})
         return _paper_response({
             "message": "Paper trading paused / 紙盤交易已暫停",
             "source": "rust_engine",
@@ -284,7 +284,7 @@ async def post_session_resume(
 ):
     """Resume paper trading — restores strategy dispatch + Demo shadow orders / 恢復紙盤交易"""
     try:
-        result = await _ipc_command("resume_paper")
+        result = await _ipc_command("resume_paper", {"engine": "paper"})
         # Resume also clears any prior sticky stop / 恢復同樣清除停止標誌
         global _USER_STOPPED
         _USER_STOPPED = False
@@ -311,31 +311,42 @@ async def post_session_stop(
     # 標記為用戶主動停止，讓 status 顯示「stopped」而非「paused」
     global _USER_STOPPED
     _USER_STOPPED = True
-    # Step 1: Close all Paper positions via IPC / 通過 IPC 平掉所有 Paper 倉位
-    # If the engine is already offline, treat paper as already stopped (no error).
-    # 引擎已離線時跳過 IPC（視同已停止，不算錯誤）。
+    # Step 1: Close all Paper + Demo positions via explicit per-engine IPC.
+    # 通過明確的 per-engine IPC 平掉 Paper + Demo 所有倉位。
+    # IMPORTANT: must pass engine="paper"/"demo" — without it IPC routes to primary()
+    # which is live > demo > paper, causing cross-engine writes.
+    # 重要：必須傳 engine 參數 — 否則 IPC 路由到 primary()（live > demo > paper），造成跨引擎操作。
     close_result = {}
+    demo_close_result = {}
     rust_online = get_rust_reader().is_available()
     if rust_online:
         try:
-            close_result = await _ipc_command("close_all_positions")
+            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
         except Exception as e:
             errors.append(f"paper_close: {e}")
-            logger.error("IPC close_all_positions failed: %s", e)
+            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        try:
+            demo_close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
+        except Exception as e:
+            # Demo engine may not be running — not a hard error / Demo 未運行時不算錯誤
+            logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
     else:
         close_result = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC close_all_positions (already stopped)")
 
-    # Step 2: Pause Rust engine strategies via IPC / 通過 IPC 暫停 Rust 引擎策略
-    # Demo/Live close orders are dispatched by Rust ipc_close_all() in Step 1.
-    # Demo/Live 平倉訂單已由 Step 1 Rust ipc_close_all() 分派至交易所。
+    # Step 2: Pause Paper + Demo engines via explicit per-engine IPC.
+    # 通過 per-engine IPC 暫停 Paper + Demo 引擎策略分派。
     pause_result = {}
     if rust_online:
         try:
-            pause_result = await _ipc_command("pause_paper")
+            pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
         except Exception as e:
             errors.append(f"paper_pause: {e}")
-            logger.error("IPC pause_paper failed: %s", e)
+            logger.error("IPC pause_paper (paper) failed: %s", e)
+        try:
+            await _ipc_command("pause_paper", {"engine": "demo"})
+        except Exception as e:
+            logger.info("IPC pause_paper (demo) skipped or failed: %s", e)
     else:
         pause_result = {"skipped": True, "reason": "engine_offline"}
 
@@ -511,7 +522,7 @@ async def post_close_position(
     if not rust.is_available():
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
     try:
-        result = await _ipc_command("close_position", {"symbol": symbol.upper()})
+        result = await _ipc_command("close_position", {"symbol": symbol.upper(), "engine": "paper"})
         return _paper_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
     except Exception as e:
         logger.error("IPC close_position failed for %s: %s", symbol, e)
