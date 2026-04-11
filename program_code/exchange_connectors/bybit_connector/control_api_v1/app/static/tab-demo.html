@@ -148,25 +148,24 @@ $('explain-comparison').innerHTML = ocExplain(
   '常见偏差来源：滑点模型差异（本地固定 0.01%，Demo 受真实订单簿影响）、成交时间差（本地即时，Demo 需要网络往返）、费率差异（本地使用配置费率，Demo 使用 Bybit 实际费率）。'
 );
 
-// Session baseline tracking — cleared on each engine start, captured on first load
-// 会话基准追踪 — 每次启动引擎时清除，首次加载时捕获
-let _demoInitialEquity = null;
-let _demoPeakEquity = null;
-let _demoRealizedBaseline = null; // cumRealisedPnl baseline at session start
-let _demoFillsCache = []; // Cache fills for metrics calculation
-const STORAGE_KEY = 'oc_demo_initial_equity';
-const PEAK_KEY = 'oc_demo_peak_equity';
-const BASELINE_KEY = 'oc_demo_realized_baseline';
-
-// Try to load saved values
+// Session baseline — server-authoritative, NO browser caching.
+// Engine's PaperState owns initial_balance / peak_balance per session and the
+// /api/v1/strategy/demo/balance endpoint exposes them as engine_initial_balance /
+// engine_peak_balance. They reset on each engine process restart and persist
+// across pause/resume because the engine pipeline keeps running.
+// 會話基線 — 由伺服器（Rust 引擎）權威，瀏覽器不快取。
+// 引擎進程重啟時自動重置；pause/resume 期間引擎管線持續運行，基線保持不變。
+//
+// One-time cleanup of legacy localStorage keys that used to cache these values.
+// Stale entries from older builds would otherwise leak across engine restarts.
+// 一次性清除舊版瀏覽器快取，避免歷史值越過引擎重啟邊界。
 try {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) _demoInitialEquity = parseFloat(saved);
-  const savedPeak = localStorage.getItem(PEAK_KEY);
-  if (savedPeak) _demoPeakEquity = parseFloat(savedPeak);
-  const savedBase = localStorage.getItem(BASELINE_KEY);
-  if (savedBase) _demoRealizedBaseline = parseFloat(savedBase);
+  localStorage.removeItem('oc_demo_initial_equity');
+  localStorage.removeItem('oc_demo_peak_equity');
+  localStorage.removeItem('oc_demo_realized_baseline');
 } catch (e) {}
+
+let _demoFillsCache = []; // Cache fills for metrics calculation
 
 // ─── Data Loading ─────────────────────────────────────────────
 async function loadDemoStatus() {
@@ -209,33 +208,24 @@ function renderBalance(raw) {
   const margin = parseFloat(b.totalInitialMargin || b.used_margin || b.margin_used || 0)
     || (walletBal > 0 && available > 0 ? walletBal - available : 0);
   const unrealized = parseFloat(b.totalPerpUPL || b.unrealized_pnl || b.total_unrealised_pnl || b.total_unrealized_pnl || 0);
-  const cumRealized = (b.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
 
-  // Save baseline cumRealisedPnl on first load (Bybit's value is lifetime cumulative)
-  // 首次加载时保存基准已实现盈亏（Bybit 返回的是账户生命周期累计值）
-  if (_demoRealizedBaseline == null) {
-    _demoRealizedBaseline = cumRealized;
-    try { localStorage.setItem(BASELINE_KEY, String(cumRealized)); } catch (e) {}
-  }
-  // Session-relative realized PnL = cumulative - baseline
-  const realized = cumRealized - (_demoRealizedBaseline || 0);
+  // Session baseline from Rust engine snapshot (paper_state per demo engine).
+  // Engine restart → fresh values; pause/resume → preserved.
+  // 會話基線來自 Rust 引擎快照（demo engine 的 paper_state）。
+  // 引擎重啟 → 重新讀取；pause/resume → 保持不變。
+  const engineInitial = parseFloat(b.engine_initial_balance);
+  const enginePeak = parseFloat(b.engine_peak_balance);
+  const engineRealized = parseFloat(b.engine_realized_pnl);
+  // Session-relative realized PnL: prefer engine value (delta from session start),
+  // fall back to 0 if engine state not yet populated.
+  // Session 內已實現盈虧：優先使用引擎側值，引擎尚未就緒時退化為 0。
+  const realized = Number.isFinite(engineRealized) ? engineRealized : 0;
 
-  // Save initial equity on first load
-  if (_demoInitialEquity == null && equity > 0) {
-    _demoInitialEquity = equity;
-    try { localStorage.setItem(STORAGE_KEY, String(equity)); } catch (e) {}
-  }
-
-  // Track peak equity
-  if (equity > 0) {
-    if (_demoPeakEquity == null || equity > _demoPeakEquity) {
-      _demoPeakEquity = equity;
-      try { localStorage.setItem(PEAK_KEY, String(equity)); } catch (e) {}
-    }
-  }
-
-  // Initial balance (approximation: saved first-seen equity, or equity - pnl)
-  const initialApprox = _demoInitialEquity || (equity - realized - unrealized);
+  // Initial balance: engine-authoritative; fallback to derived only if missing.
+  // 初始餘額：以引擎為準；快照尚未生成時退化為推算值。
+  const initialApprox = Number.isFinite(engineInitial) && engineInitial > 0
+    ? engineInitial
+    : (equity - realized - unrealized);
   ocSetText('d-initial', ocBalance(initialApprox, 2));
 
   // Available balance
@@ -244,8 +234,10 @@ function renderBalance(raw) {
   // Margin used
   ocSetText('d-margin', ocBalance(margin, 2));
 
-  // Peak balance
-  ocSetText('d-peak', ocBalance(_demoPeakEquity || equity, 2));
+  // Peak balance: engine-authoritative; fallback to current equity if missing.
+  // 峰值餘額：以引擎為準；快照尚未生成時退化為當前 equity。
+  const peakDisplay = Number.isFinite(enginePeak) && enginePeak > 0 ? enginePeak : equity;
+  ocSetText('d-peak', ocBalance(peakDisplay, 2));
 
   // PnL fields
   const net = realized + unrealized;
@@ -296,8 +288,11 @@ function renderBalance(raw) {
     ocSetText('d-wlratio', 'N/A');
   }
 
-  // Max drawdown: from peak equity
-  const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
+  // Max drawdown: peak from engine snapshot, fallback to current equity.
+  // 最大回撤：峰值來自引擎快照，無快照時退化為當前 equity。
+  const peakRef = (Number.isFinite(enginePeak) && enginePeak > 0)
+    ? enginePeak
+    : (Number.isFinite(engineInitial) && engineInitial > 0 ? engineInitial : equity);
   if (peakRef > 0 && equity < peakRef) {
     ocSetText('d-maxdd', ((peakRef - equity) / peakRef * 100).toFixed(2) + '%');
   } else {
@@ -482,13 +477,17 @@ async function loadComparison() {
   if (demo.result && demo.result.list && demo.result.list[0]) {
     demoB = demo.result.list[0];
   }
-  const demoCumRealized = (demoB.coin || []).reduce((s, c) => s + parseFloat(c.cumRealisedPnl || 0), 0);
-  const demoRealized = demoCumRealized - (_demoRealizedBaseline || 0);
+  // Use engine snapshot for session-relative realized PnL and initial equity.
+  // 用引擎快照取得 session 內已實現盈虧與初始 equity。
+  const demoEngineRealized = parseFloat(demo.engine_realized_pnl);
+  const demoRealized = Number.isFinite(demoEngineRealized) ? demoEngineRealized : 0;
+  const demoEngineInitial = parseFloat(demo.engine_initial_balance);
+  const demoInitial = Number.isFinite(demoEngineInitial) && demoEngineInitial > 0 ? demoEngineInitial : 0;
   const rows = [
     ['已实现盈亏', ocMoney(paperPnl.realized_pnl || 0), ocMoney(demoRealized)],
     ['未实现盈亏', ocMoney(paperPnl.unrealized_pnl || 0), ocMoney(parseFloat(demoB.totalPerpUPL || 0))],
     ['净盈亏', ocMoney(paperPnl.net_paper_pnl || 0), ocMoney(demoRealized + parseFloat(demoB.totalPerpUPL || 0))],
-    ['当前余额', ocBalance((_demoInitialEquity || 0) + demoRealized + parseFloat(demoB.totalPerpUPL || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
+    ['当前余额', ocBalance(demoInitial + demoRealized + parseFloat(demoB.totalPerpUPL || 0), 2), ocBalance(parseFloat(demoB.totalEquity || 0), 2)],
     ['可用余额', '--', ocBalance(parseFloat(demoB.totalAvailableBalance || demoB.availableBalance || 0), 2)],
   ];
 
@@ -562,7 +561,13 @@ function loadDemoMetrics(raw) {
   if (!b) { ocSetHtml('demo-perf-metrics', '<div class="oc-loading">暂无数据</div>'); return; }
 
   const equity = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-  const peakRef = _demoPeakEquity || _demoInitialEquity || equity;
+  // Peak from engine snapshot (session-scoped, resets on engine restart).
+  // 峰值來自引擎快照（session 範圍，引擎重啟時重置）。
+  const enginePeakM = parseFloat(b.engine_peak_balance);
+  const engineInitM = parseFloat(b.engine_initial_balance);
+  const peakRef = (Number.isFinite(enginePeakM) && enginePeakM > 0)
+    ? enginePeakM
+    : (Number.isFinite(engineInitM) && engineInitM > 0 ? engineInitM : equity);
   const ddPct = (peakRef > 0 && equity < peakRef) ? ((peakRef - equity) / peakRef * 100).toFixed(2) + '%' : '0.00%';
   const fillsArr = Array.isArray(_demoFillsCache) ? _demoFillsCache : [];
   const totalFills = fillsArr.length;
