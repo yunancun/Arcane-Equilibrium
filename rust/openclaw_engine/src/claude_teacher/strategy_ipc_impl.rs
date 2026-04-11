@@ -1,8 +1,8 @@
-//! Production StrategyIpcSink wrapping PaperSessionCommand sender (Phase 4 W-1).
-//! 生產環境 StrategyIpcSink wrapper，包 PaperSessionCommand sender（Phase 4 W-1）。
+//! Production StrategyIpcSink wrapping PipelineCommand sender (Phase 4 W-1).
+//! 生產環境 StrategyIpcSink wrapper，包 PipelineCommand sender（Phase 4 W-1）。
 //!
 //! MODULE_NOTE (EN):
-//!   Implements `StrategyIpcSink` by sending `PaperSessionCommand` variants
+//!   Implements `StrategyIpcSink` by sending `PipelineCommand` variants
 //!   (UpdateStrategyParams / SetStrategyActive) into the existing event-consumer
 //!   command channel. Each variant carries a `tokio::sync::oneshot::Sender`
 //!   for ack/error propagation, which we use here to await Rust's confirmation
@@ -15,7 +15,7 @@
 //!
 //! MODULE_NOTE (中):
 //!   實作 `StrategyIpcSink` — 透過既有 event-consumer 命令通道發送
-//!   `PaperSessionCommand` variant（UpdateStrategyParams / SetStrategyActive）。
+//!   `PipelineCommand` variant（UpdateStrategyParams / SetStrategyActive）。
 //!   每個 variant 帶 `tokio::sync::oneshot::Sender` 傳回 ack/error，本 wrapper
 //!   await Rust 確認後才返回 directive applier。
 //!
@@ -24,7 +24,7 @@
 //!   `RiskManager` 的路徑都違反架構不變量。
 
 use crate::claude_teacher::applier::{IpcFuture, StrategyIpcSink};
-use crate::tick_pipeline::PaperSessionCommand;
+use crate::tick_pipeline::PipelineCommand;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
@@ -32,17 +32,17 @@ use tokio::sync::{mpsc, oneshot};
 /// 中文: 預設 IPC ack 超時（5 秒）。
 const DEFAULT_IPC_TIMEOUT_MS: u64 = 5_000;
 
-/// EN: Production StrategyIpcSink that forwards into the PaperSessionCommand channel.
-/// 中文: 把呼叫轉發到 PaperSessionCommand 通道的生產 StrategyIpcSink。
-pub struct PaperSessionCommandSink {
-    sender: mpsc::UnboundedSender<PaperSessionCommand>,
+/// EN: Production StrategyIpcSink that forwards into the PipelineCommand channel.
+/// 中文: 把呼叫轉發到 PipelineCommand 通道的生產 StrategyIpcSink。
+pub struct PipelineCommandSink {
+    sender: mpsc::UnboundedSender<PipelineCommand>,
     timeout_ms: u64,
 }
 
-impl PaperSessionCommandSink {
-    /// EN: Construct with the existing PaperSessionCommand sender (cloned from main.rs).
-    /// 中文: 用既有的 PaperSessionCommand sender 構造（從 main.rs clone）。
-    pub fn new(sender: mpsc::UnboundedSender<PaperSessionCommand>) -> Self {
+impl PipelineCommandSink {
+    /// EN: Construct with the existing PipelineCommand sender (cloned from main.rs).
+    /// 中文: 用既有的 PipelineCommand sender 構造（從 main.rs clone）。
+    pub fn new(sender: mpsc::UnboundedSender<PipelineCommand>) -> Self {
         Self {
             sender,
             timeout_ms: DEFAULT_IPC_TIMEOUT_MS,
@@ -57,7 +57,7 @@ impl PaperSessionCommandSink {
     }
 }
 
-impl StrategyIpcSink for PaperSessionCommandSink {
+impl StrategyIpcSink for PipelineCommandSink {
     fn update_strategy_params<'a>(
         &'a self,
         strategy_name: &'a str,
@@ -69,7 +69,7 @@ impl StrategyIpcSink for PaperSessionCommandSink {
         let timeout = Duration::from_millis(self.timeout_ms);
         Box::pin(async move {
             let (tx, rx) = oneshot::channel();
-            let cmd = PaperSessionCommand::UpdateStrategyParams {
+            let cmd = PipelineCommand::UpdateStrategyParams {
                 strategy_name: strategy,
                 params_json: params,
                 response_tx: tx,
@@ -94,7 +94,7 @@ impl StrategyIpcSink for PaperSessionCommandSink {
         let timeout = Duration::from_millis(self.timeout_ms);
         Box::pin(async move {
             let (tx, rx) = oneshot::channel();
-            let cmd = PaperSessionCommand::SetStrategyActive {
+            let cmd = PipelineCommand::SetStrategyActive {
                 strategy_name: strategy,
                 active,
                 response_tx: tx,
@@ -114,17 +114,17 @@ impl StrategyIpcSink for PaperSessionCommandSink {
 mod tests {
     use super::*;
 
-    /// EN: Receiver thread that auto-acks any incoming PaperSessionCommand
+    /// EN: Receiver thread that auto-acks any incoming PipelineCommand
     ///     by sending Ok("ack") to the response_tx.
-    /// 中文: 接收 thread，對任何傳入的 PaperSessionCommand 自動回 Ok("ack")。
+    /// 中文: 接收 thread，對任何傳入的 PipelineCommand 自動回 Ok("ack")。
     fn spawn_ack_receiver(
-        mut rx: mpsc::UnboundedReceiver<PaperSessionCommand>,
+        mut rx: mpsc::UnboundedReceiver<PipelineCommand>,
         seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     ) {
         tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    PaperSessionCommand::UpdateStrategyParams {
+                    PipelineCommand::UpdateStrategyParams {
                         strategy_name,
                         response_tx,
                         ..
@@ -134,7 +134,7 @@ mod tests {
                             .push(format!("update:{}", strategy_name));
                         let _ = response_tx.send(Ok("ack".to_string()));
                     }
-                    PaperSessionCommand::SetStrategyActive {
+                    PipelineCommand::SetStrategyActive {
                         strategy_name,
                         active,
                         response_tx,
@@ -159,7 +159,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         spawn_ack_receiver(rx, std::sync::Arc::clone(&seen));
-        let sink = PaperSessionCommandSink::new(tx);
+        let sink = PipelineCommandSink::new(tx);
         let result = sink
             .update_strategy_params("ma_crossover", r#"{"min_confidence":0.5}"#)
             .await;
@@ -176,7 +176,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         spawn_ack_receiver(rx, std::sync::Arc::clone(&seen));
-        let sink = PaperSessionCommandSink::new(tx);
+        let sink = PipelineCommandSink::new(tx);
         let result = sink.set_strategy_active("bb_breakout", true).await;
         assert!(result.is_ok());
         tokio::task::yield_now().await;
@@ -188,7 +188,7 @@ mod tests {
     async fn test_send_failed_when_channel_closed() {
         let (tx, rx) = mpsc::unbounded_channel();
         drop(rx); // close receiver immediately / 立即關閉 receiver
-        let sink = PaperSessionCommandSink::new(tx);
+        let sink = PipelineCommandSink::new(tx);
         let result = sink.update_strategy_params("any", "{}").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("ipc send failed"));
@@ -205,7 +205,7 @@ mod tests {
                 // 忽略 _cmd 即丟棄 response_tx。
             }
         });
-        let sink = PaperSessionCommandSink::new(tx).with_timeout_ms(50);
+        let sink = PipelineCommandSink::new(tx).with_timeout_ms(50);
         let result = sink.update_strategy_params("any", "{}").await;
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -218,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn test_with_timeout_ms_overrides_default() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        let sink = PaperSessionCommandSink::new(tx).with_timeout_ms(123);
+        let sink = PipelineCommandSink::new(tx).with_timeout_ms(123);
         assert_eq!(sink.timeout_ms, 123);
     }
 }

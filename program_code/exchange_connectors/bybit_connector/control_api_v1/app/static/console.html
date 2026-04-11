@@ -115,7 +115,7 @@
     <div id="side-panel-live" class="side-panel active" onclick="toggleSidePanel('live')">
       <h2 style="margin:0 0 5px">&#x1F534; Live / 实盘</h2>
       <div class="mc" id="live-section" style="opacity:0.5">
-        <div class="mc-label">Mode</div>
+        <div class="mc-label">System Mode</div>
         <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
         <div class="mc-sub" id="s-live-mode-detail"></div>
       </div>
@@ -354,34 +354,38 @@ async function refreshSidebar() {
   document.getElementById('live-balance-section').style.opacity = '1';
   document.getElementById('live-pnl-section').style.opacity = '1';
 
-  // Show trading mode from live session status / 從 live session 狀態顯示交易模式
-  // Use /api/v1/live/session/status (has proper trading_mode + execution_authority)
-  // 使用 /api/v1/live/session/status（含準確 trading_mode + execution_authority）
+  // Show system_mode + active engines from live session status
+  // 從 live session status 顯示 system_mode + 活躍引擎列表
   try {
     const ls = await api('/api/v1/live/session/status');
     const modeEl = document.getElementById('s-live-mode');
     if (ls && ls.data) {
       const d = ls.data;
-      const tradingMode = d.trading_mode || 'unknown';
+      const systemMode = d.system_mode || 'unknown';
       const execAuth = d.execution_authority || 'not_granted';
       const sessionState = (d.session && d.session.session_state) || 'offline';
       const isLiveActive = sessionState === 'active' && execAuth === 'granted';
-      // Show readable mode label; fall back to Live_Ready when engine not in live mode
-      // 顯示可讀模式標籤；引擎非 live 模式時回退到 Live_Ready
-      const modeLabel = tradingMode === 'unknown' || tradingMode === 'offline'
-        ? 'Live_Ready' : tradingMode.toUpperCase();
+      // Display system_mode with readable formatting / 以可讀格式顯示 system_mode
+      const modeLabel = systemMode.replace(/_/g, ' ');
+      const modeColor = {
+        live_reserved: '#a855f7',
+        demo_reserved: '#3b82f6',
+        shadow_only:   '#f59e0b',
+        observe_only:  '#6b7280',
+        design_only:   '#6b7280',
+      }[systemMode] || '';
       modeEl.textContent = modeLabel;
       modeEl.className = 'mc-val';
-      modeEl.style.color = isLiveActive ? '#a855f7' : '';
-      // Only show auth detail when session is active / 僅在 session active 時顯示 auth
+      modeEl.style.color = modeColor;
+      // Show auth detail when session is active / 僅在 session active 時顯示 auth
       document.getElementById('s-live-mode-detail').textContent =
         isLiveActive ? 'auth: ' + execAuth : '';
     } else {
-      modeEl.textContent = 'Live_Ready';
+      modeEl.textContent = '--';
       document.getElementById('s-live-mode-detail').textContent = '';
     }
   } catch(e) {
-    document.getElementById('s-live-mode').textContent = 'Live_Ready';
+    document.getElementById('s-live-mode').textContent = '--';
     document.getElementById('s-live-mode-detail').textContent = '';
   }
 

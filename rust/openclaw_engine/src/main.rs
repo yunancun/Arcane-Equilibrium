@@ -24,7 +24,7 @@ use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
 };
-use openclaw_engine::tick_pipeline::TickPipeline;
+use openclaw_engine::tick_pipeline::{PipelineKind, TickPipeline};
 use openclaw_engine::ws_client::WsClient;
 use openclaw_types::PriceEvent;
 use std::sync::Arc;
@@ -522,7 +522,7 @@ async fn async_main(
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| std::path::PathBuf::from("."));
         let estimates = openclaw_engine::edge_estimates::EdgeEstimates::load_from_env_or_default(&base);
-        Arc::new(std::sync::RwLock::new(estimates))
+        Arc::new(parking_lot::RwLock::new(estimates))
     };
 
     // Scanner D4: Relay channel — ScannerRunner sends to a persistent channel;
@@ -569,16 +569,16 @@ async fn async_main(
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
     // Paper session command channel: IPC → event consumer
     // 紙盤 session 命令通道：IPC → 事件消費者
-    let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (pipeline_cmd_tx, pipeline_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
     // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
     // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
-    let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
-    // Scanner D4: clone paper_cmd_tx for ScannerRunner (queries GetOpenPositionSymbols).
-    // 掃描器 D4：為 ScannerRunner 複製 paper_cmd_tx（查詢 GetOpenPositionSymbols）。
-    let scanner_paper_cmd_tx = paper_cmd_tx.clone();
-    // Phase 6: clone paper_cmd_tx for reconciler auto-contraction commands.
-    // Phase 6：為對帳器自動降級命令複製 paper_cmd_tx。
-    let reconciler_cmd_tx = paper_cmd_tx.clone();
+    let phase4_consumer_cmd_tx = pipeline_cmd_tx.clone();
+    // Scanner D4: clone pipeline_cmd_tx for ScannerRunner (queries GetOpenPositionSymbols).
+    // 掃描器 D4：為 ScannerRunner 複製 pipeline_cmd_tx（查詢 GetOpenPositionSymbols）。
+    let scanner_pipeline_cmd_tx = pipeline_cmd_tx.clone();
+    // Phase 6: clone pipeline_cmd_tx for reconciler auto-contraction commands.
+    // Phase 6：為對帳器自動降級命令複製 pipeline_cmd_tx。
+    let reconciler_cmd_tx = pipeline_cmd_tx.clone();
     // Phase 6: shared atomic for reconciler to read current risk level without IPC.
     // The event_consumer handler writes to this on every governor state change.
     // Phase 6：共享原子量供對帳器無 IPC 讀取當前風控級別。
@@ -589,7 +589,7 @@ async fn async_main(
         Arc::clone(&config),
         cancel.clone(),
         ipc_data_dir,
-        Some(paper_cmd_tx),
+        Some(pipeline_cmd_tx),
     );
     // ARCH-RC1 1C-2-C / LIVE-P2-1: wire per-engine risk stores + unified Config stores into IPC.
     // ARCH-RC1 1C-2-C / LIVE-P2-1：將每引擎 risk stores + 統一 Config stores 接入 IPC。
@@ -874,7 +874,7 @@ async fn async_main(
             Arc::clone(&scanner_edge_estimates),
             Arc::clone(&scanner_store),
             scanner_ws_tx,
-            scanner_paper_cmd_tx,
+            scanner_pipeline_cmd_tx,
             cancel.clone(),
         );
         tokio::spawn(runner.run());
@@ -993,17 +993,42 @@ async fn async_main(
     };
 
     // ------------------------------------------------------------------
-    // Item 5: Private WS + ExecutionListener (order/fill/position/wallet callbacks)
-    // 項目 5：私有 WS + 執行監聽器（訂單/成交/持倉/餘額回調）
+    // 3E D21: Per-pipeline private WS supervisor — extracted into helper.
+    // Each exchange-connected pipeline (Demo/Live) gets its own BybitPrivateWs
+    // + ExecutionListener. Paper pipelines have no private WS.
+    //
+    // 3E D21：每管線私有 WS 監管器 — 提取為輔助函數。
+    // 每個交易所管線（Demo/Live）獲得自己的 BybitPrivateWs + ExecutionListener。
+    // Paper 管線無私有 WS。
     // ------------------------------------------------------------------
-    let _private_ws_handle = if let Some((api_key, api_secret)) = api_credentials {
+
+    /// Exchange bindings produced by spawning a private WS supervisor.
+    /// 啟動私有 WS 監管器後產生的交易所綁定。
+    struct PrivateWsBindings {
+        bybit_balance: Arc<std::sync::RwLock<Option<f64>>>,
+        api_pnl: Arc<std::sync::RwLock<std::collections::HashMap<String, f64>>>,
+        exchange_event_rx: mpsc::UnboundedReceiver<openclaw_engine::event_consumer::ExchangeEvent>,
+        _ws_handle: tokio::task::JoinHandle<()>,
+        _listener_handle: tokio::task::JoinHandle<()>,
+    }
+
+    /// Spawn a per-pipeline private WS supervisor + ExecutionListener.
+    /// Returns exchange bindings for the pipeline's EventConsumerDeps.
+    /// 為每管線啟動私有 WS 監管器 + 執行監聽器。
+    /// 返回管線 EventConsumerDeps 所需的交易所綁定。
+    fn spawn_private_ws_supervisor(
+        api_key: String,
+        api_secret: String,
+        env: BybitEnvironment,
+        label: &str,
+        cancel: CancellationToken,
+    ) -> PrivateWsBindings {
         use openclaw_engine::bybit_private_ws::BybitPrivateWs;
         use openclaw_engine::event_consumer::ExchangeEvent;
         use openclaw_engine::execution_listener::ExecutionListener;
         use std::sync::RwLock;
 
         let (priv_tx, priv_rx) = mpsc::channel(512);
-        // EXT-1: Channel for forwarding exchange events to event consumer
         let (exchange_event_tx, exchange_event_rx) = mpsc::unbounded_channel::<ExchangeEvent>();
 
         // Shared state updated by callbacks / 回調更新的共享狀態
@@ -1013,9 +1038,9 @@ async fn async_main(
 
         let mut listener = ExecutionListener::new(priv_rx);
 
-        // Item 3: on_balance_update → track Bybit sync balance
-        // 項目 3：餘額更新回調 → 追蹤 Bybit 同步餘額
+        // on_balance_update → track Bybit sync balance / 餘額更新回調
         let bal_ref = Arc::clone(&bybit_balance);
+        let lbl_bal = label.to_string();
         listener.set_on_balance_update(move |wallet| {
             for coin_update in &wallet.coin {
                 if coin_update.coin.eq_ignore_ascii_case("USDT") {
@@ -1024,6 +1049,7 @@ async fn async_main(
                             *guard = Some(bal);
                         }
                         info!(
+                            engine = %lbl_bal,
                             equity = %coin_update.equity,
                             balance = %coin_update.wallet_balance,
                             "WS wallet update (USDT) / WS 錢包更新"
@@ -1034,9 +1060,9 @@ async fn async_main(
             }
         });
 
-        // Item 4: on_position_update → track API unrealized PnL
-        // 項目 4：持倉更新回調 → 追蹤 API 未實現損益
+        // on_position_update → track API unrealized PnL / 持倉更新回調
         let pnl_ref = Arc::clone(&api_pnl);
+        let lbl_pos = label.to_string();
         listener.set_on_position_update(move |pos| {
             if let Ok(pnl) = pos.unrealised_pnl.parse::<f64>() {
                 if let Ok(mut guard) = pnl_ref.write() {
@@ -1044,6 +1070,7 @@ async fn async_main(
                 }
             }
             debug!(
+                engine = %lbl_pos,
                 symbol = %pos.symbol,
                 side = %pos.side,
                 size = %pos.size,
@@ -1052,10 +1079,12 @@ async fn async_main(
             );
         });
 
-        // Item 5: on_fill → log execution + EXT-1: forward to event consumer
+        // on_fill → log execution + forward to event consumer / 成交回調
         let fill_tx = exchange_event_tx.clone();
+        let lbl_fill = label.to_string();
         listener.set_on_fill(move |exec| {
             info!(
+                engine = %lbl_fill,
                 exec_id = %exec.exec_id,
                 symbol = %exec.symbol,
                 side = %exec.side,
@@ -1067,10 +1096,12 @@ async fn async_main(
             let _ = fill_tx.send(ExchangeEvent::Fill(exec));
         });
 
-        // on_order_update → log status changes + EXT-1: forward to event consumer
+        // on_order_update → log + forward / 訂單更新回調
         let order_tx = exchange_event_tx.clone();
+        let lbl_ord = label.to_string();
         listener.set_on_order_update(move |order| {
             debug!(
+                engine = %lbl_ord,
                 order_id = %order.order_id,
                 symbol = %order.symbol,
                 status = %order.order_status,
@@ -1080,8 +1111,7 @@ async fn async_main(
             let _ = order_tx.send(ExchangeEvent::OrderUpdate(order));
         });
 
-        // P0-3: Wire DCP/Disconnected events to event consumer
-        // P0-3：將 DCP/斷連事件接入事件消費者
+        // DCP/Disconnected events / DCP/斷連事件
         let dcp_tx = exchange_event_tx.clone();
         listener.set_on_dcp(move || {
             let _ = dcp_tx.send(ExchangeEvent::DcpTriggered);
@@ -1097,80 +1127,84 @@ async fn async_main(
             listener.run().await;
         });
 
-        // RE-2: Supervisor wrapper for private WS — restarts on unexpected exit
-        // RE-2：私有 WS 監管器包裝 — 意外退出時自動重啟
-        let priv_cancel = cancel.clone();
-        let priv_ws_handle = {
-            let api_key_owned = api_key.clone();
-            let api_secret_owned = api_secret.clone();
-            let sv_cancel = priv_cancel.clone();
-            tokio::spawn(async move {
-                let mut supervisor_attempt: u32 = 0;
-                loop {
-                    if sv_cancel.is_cancelled() {
-                        break;
-                    }
-
-                    // Use bybit_env derived from trading_mode — Demo or Mainnet (LIVE-P1-2)
-                    // 使用從 trading_mode 派生的 bybit_env — Demo 或 Mainnet（LIVE-P1-2）
-                    let priv_ws = BybitPrivateWs::new(
-                        api_key_owned.clone(),
-                        api_secret_owned.clone(),
-                        bybit_env,
-                        sv_cancel.clone(),
-                        priv_tx.clone(),
-                    );
-                    priv_ws.run().await;
-
-                    if sv_cancel.is_cancelled() {
-                        break;
-                    }
-
-                    supervisor_attempt = supervisor_attempt.saturating_add(1);
-                    let delay_ms = std::cmp::min(
-                        5000_u64.saturating_mul(2_u64.saturating_pow(supervisor_attempt.min(4))),
-                        60_000,
-                    );
-                    warn!(
-                        delay_ms = delay_ms,
-                        attempt = supervisor_attempt,
-                        "Private WS supervisor restarting / 私有 WS 監管器重啟"
-                    );
-                    tokio::select! {
-                        _ = sv_cancel.cancelled() => break,
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {},
-                    }
+        // RE-2: Supervisor wrapper — restarts on unexpected exit
+        // RE-2：監管器包裝 — 意外退出時自動重啟
+        let lbl_sv = label.to_string();
+        let sv_cancel = cancel.clone();
+        let ws_handle = tokio::spawn(async move {
+            let mut supervisor_attempt: u32 = 0;
+            loop {
+                if sv_cancel.is_cancelled() {
+                    break;
                 }
-            })
-        };
+                let priv_ws = BybitPrivateWs::new(
+                    api_key.clone(),
+                    api_secret.clone(),
+                    env,
+                    sv_cancel.clone(),
+                    priv_tx.clone(),
+                );
+                priv_ws.run().await;
+                if sv_cancel.is_cancelled() {
+                    break;
+                }
+                supervisor_attempt = supervisor_attempt.saturating_add(1);
+                let delay_ms = std::cmp::min(
+                    5000_u64.saturating_mul(2_u64.saturating_pow(supervisor_attempt.min(4))),
+                    60_000,
+                );
+                warn!(
+                    engine = %lbl_sv,
+                    delay_ms = delay_ms,
+                    attempt = supervisor_attempt,
+                    "Private WS supervisor restarting / 私有 WS 監管器重啟"
+                );
+                tokio::select! {
+                    _ = sv_cancel.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(delay_ms)) => {},
+                }
+            }
+        });
 
-        info!("Private WS + ExecutionListener started / 私有 WS + 執行監聯器已啟動");
-        Some((
-            priv_ws_handle,
-            listener_handle,
+        info!(engine = label, "Private WS + ExecutionListener started / 私有 WS + 執行監聽器已啟動");
+        PrivateWsBindings {
             bybit_balance,
             api_pnl,
             exchange_event_rx,
-        ))
-    } else {
-        info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
-        None
-    };
-
-    // Extract shared state Arcs for event consumer (H1+H2 fix: bridge WS data → pipeline)
-    // 提取共享狀態 Arc 給事件消費者（H1+H2 修復：橋接 WS 數據 → 管線）
-    // Extract shared state + exchange_event_rx from private WS handle
-    // Keep WS/listener handles for shutdown, move exchange_event_rx out
-    let (shared_bybit_balance, shared_api_pnl, shared_exchange_event_rx, _priv_handles) = {
-        match _private_ws_handle {
-            Some((ws_h, listener_h, bal, pnl, exch_rx)) => (
-                Some(Arc::clone(&bal)),
-                Some(Arc::clone(&pnl)),
-                Some(exch_rx),
-                Some((ws_h, listener_h)),
-            ),
-            None => (None, None, None, None),
+            _ws_handle: ws_handle,
+            _listener_handle: listener_handle,
         }
+    }
+
+    // Spawn private WS for the primary exchange pipeline (if credentials exist).
+    // Paper pipelines have no private WS.
+    // 為主交易所管線啟動私有 WS（如有憑證）。Paper 管線無私有 WS。
+    let primary_ws_bindings: Option<PrivateWsBindings> =
+        if let Some((api_key, api_secret)) = api_credentials {
+            Some(spawn_private_ws_supervisor(
+                api_key,
+                api_secret,
+                bybit_env,
+                match bybit_env {
+                    BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
+                    BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
+                },
+                cancel.clone(),
+            ))
+        } else {
+            info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
+            None
+        };
+
+    // Extract exchange bindings for EventConsumerDeps / 提取交易所綁定
+    let (shared_bybit_balance, shared_api_pnl, shared_exchange_event_rx) = match primary_ws_bindings
+    {
+        Some(bindings) => (
+            Some(Arc::clone(&bindings.bybit_balance)),
+            Some(Arc::clone(&bindings.api_pnl)),
+            Some(bindings.exchange_event_rx),
+        ),
+        None => (None, None, None),
     };
 
     // ------------------------------------------------------------------
@@ -1288,7 +1322,7 @@ async fn async_main(
         if let Some(budget) = budget_opt {
             use openclaw_engine::claude_teacher::{
                 AnthropicClient, ClaudeTeacher, ConsumerLoopConfig, DirectiveApplier,
-                GovernanceCheck, LlmClient, OutcomeTracker, PaperSessionCommandSink,
+                GovernanceCheck, LlmClient, OutcomeTracker, PipelineCommandSink,
                 StrategyIpcSink, TeacherConsumerLoop,
             };
             use std::sync::atomic::AtomicBool;
@@ -1304,7 +1338,7 @@ async fn async_main(
             let governance_for_applier: Arc<dyn GovernanceCheck> =
                 Arc::clone(&governance_wrapper) as Arc<dyn GovernanceCheck>;
             let ipc_sink: Arc<dyn StrategyIpcSink> =
-                Arc::new(PaperSessionCommandSink::new(phase4_consumer_cmd_tx));
+                Arc::new(PipelineCommandSink::new(phase4_consumer_cmd_tx));
             let applier = Arc::new(DirectiveApplier::new(
                 governance_for_applier,
                 Some(ipc_sink),
@@ -1601,6 +1635,12 @@ async fn async_main(
                 _ => openclaw_core::sm::risk_gov::RiskLevel::ManualReview,
             }
         };
+        // 3E D23: derive engine label from bybit_env for reconciler V014 audit.
+        // 3E D23：從 bybit_env 派生引擎標籤，用於對帳器 V014 審計。
+        let reconciler_label = match bybit_env {
+            BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo".to_string(),
+            BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live".to_string(),
+        };
         tokio::spawn(run_position_reconciler(
             pos_mgr,
             reconciler_audit_pool,
@@ -1608,16 +1648,136 @@ async fn async_main(
             reconciler_cmd_tx,
             reconciler_instruments,
             get_risk_level,
+            reconciler_label,
         ));
         info!("position_reconciler task spawned (Phase 6 auto-contraction) / 持倉對帳器任務已啟動（Phase 6 自動降級）");
     } else {
         info!("position_reconciler skipped (no REST client) / 持倉對帳器跳過（無 REST 客戶端）");
     }
 
+    // ------------------------------------------------------------------
+    // 3E-2b-α: Multi-pipeline spawn skeleton + bounded fan-out
+    // 3E-2b-α：多管線 spawn 骨架 + 有界扇出
+    //
+    // Paper pipeline always spawns. Demo/Live spawn conditionally based on
+    // TradingMode (interim — 3E-4 will read API keys directly).
+    // Each pipeline gets its own event_rx (from fan-out), pipeline_cmd channel,
+    // and risk_level atomic. DB writer channels are shared across all pipelines.
+    //
+    // Paper 管線始終啟動。Demo/Live 根據 TradingMode 條件啟動（過渡方案 —
+    // 3E-4 將直接讀 API key）。每管線獨立 event_rx（扇出）、pipeline_cmd 通道、
+    // risk_level 原子量。DB writer 通道跨管線共享。
+    // ------------------------------------------------------------------
+    use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
+
+    // 3E-2b: Determine which pipelines to spawn based on TradingMode.
+    // Paper always runs. The "primary" pipeline (Demo or Live) gets exchange
+    // bindings (private WS, bybit client, account manager). Paper gets None.
+    // 3E-2b：根據 TradingMode 決定啟動哪些管線。Paper 始終運行。
+    // "主要"管線（Demo 或 Live）獲得交易所綁定。Paper 獲得 None。
+    let primary_kind = match config.get().trading_mode {
+        TradingMode::PaperOnly => PipelineKind::Paper,
+        TradingMode::Demo => PipelineKind::Demo,
+        TradingMode::Live => PipelineKind::Live,
+    };
+    // In PaperOnly mode, only Paper runs (it IS the primary).
+    // In Demo/Live mode, Paper runs alongside the primary exchange-connected pipeline.
+    // PaperOnly 模式下只有 Paper 運行（它就是主管線）。
+    // Demo/Live 模式下 Paper 與主交易所管線並行。
+    let spawn_paper_alongside = primary_kind != PipelineKind::Paper;
+
+    // ------------------------------------------------------------------
+    // 3E D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
+    // Arc<PriceEvent> avoids deep-cloning HashMap metadata per pipeline.
+    // 有界扇出 — 一個 WS 源，N 個管線接收端。
+    // Arc<PriceEvent> 避免每管線深拷貝 HashMap metadata。
+    // ------------------------------------------------------------------
+    // Primary pipeline channel (1024 for Paper/Demo, 512 for Live)
+    let primary_buf = if primary_kind == PipelineKind::Live { 512 } else { 1024 };
+    let (primary_event_tx, primary_event_rx) = mpsc::channel::<Arc<PriceEvent>>(primary_buf);
+    // Paper-alongside channel (only if Paper runs separately from primary)
+    let paper_alongside_channel: Option<(
+        mpsc::Sender<Arc<PriceEvent>>,
+        mpsc::Receiver<Arc<PriceEvent>>,
+    )> = if spawn_paper_alongside {
+        Some(mpsc::channel(1024))
+    } else {
+        None
+    };
+
+    // Fan-out task: read from single event_rx, broadcast Arc-wrapped events
+    // 扇出任務：從單一 event_rx 讀取，廣播 Arc 包裝的事件
+    {
+        let primary_tx = primary_event_tx;
+        let paper_tx = paper_alongside_channel
+            .as_ref()
+            .map(|(tx, _)| tx.clone());
+        let fan_cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut event_rx = event_rx;
+            loop {
+                tokio::select! {
+                    _ = fan_cancel.cancelled() => break,
+                    evt = event_rx.recv() => {
+                        match evt {
+                            Some(price_event) => {
+                                let arc_event = Arc::new(price_event);
+                                // Primary pipeline — lag detection with try_send
+                                if primary_tx.try_send(Arc::clone(&arc_event)).is_err() {
+                                    tracing::warn!(
+                                        kind = %primary_kind,
+                                        "fan-out: primary pipeline lagging, tick dropped / 主管線延遲，tick 已丟棄"
+                                    );
+                                }
+                                // Paper-alongside pipeline
+                                if let Some(ref ptx) = paper_tx {
+                                    if ptx.try_send(arc_event).is_err() {
+                                        tracing::debug!(
+                                            "fan-out: paper pipeline lagging, tick dropped / Paper 管線延遲，tick 已丟棄"
+                                        );
+                                    }
+                                }
+                            }
+                            None => break, // WS channel closed
+                        }
+                    }
+                }
+            }
+            tracing::info!("fan-out task stopped / 扇出任務已停止");
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Per-pipeline command channels + risk level atomics
+    // 每管線命令通道 + 風控級別原子量
+    // ------------------------------------------------------------------
+    // Primary pipeline reuses the existing pipeline_cmd_rx (IPC is already wired)
+    // Paper-alongside gets a new channel (no IPC wiring yet — TODO(3E-3))
+    let paper_alongside_cmd_rx: Option<mpsc::UnboundedReceiver<openclaw_engine::tick_pipeline::PipelineCommand>> =
+        if spawn_paper_alongside {
+            let (_paper_cmd_tx, paper_cmd_rx) = mpsc::unbounded_channel();
+            // TODO(3E-3): wire paper_cmd_tx into IPC EngineCommandChannels
+            Some(paper_cmd_rx)
+        } else {
+            None
+        };
+    // Paper-alongside risk level atomic (separate from primary)
+    let paper_risk_level: Option<Arc<std::sync::atomic::AtomicU8>> = if spawn_paper_alongside {
+        Some(Arc::new(std::sync::atomic::AtomicU8::new(
+            openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
+        )))
+    } else {
+        None
+    };
+
+    // ------------------------------------------------------------------
+    // Spawn primary pipeline (Demo/Live with exchange bindings, or Paper if PaperOnly)
+    // 啟動主管線（Demo/Live 帶交易所綁定，或 PaperOnly 時為 Paper）
+    // ------------------------------------------------------------------
     let event_handle = {
-        use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
         let deps = EventConsumerDeps {
-            event_rx,
+            pipeline_kind: primary_kind,
+            event_rx: primary_event_rx,
             config: Arc::clone(&config),
             cancel: cancel.clone(),
             initial_balance,
@@ -1628,43 +1788,83 @@ async fn async_main(
             shared_client: shared_client.clone(),
             bybit_balance: shared_bybit_balance,
             api_pnl: shared_api_pnl,
-            paper_cmd_rx: Some(paper_cmd_rx),
+            pipeline_cmd_rx: Some(pipeline_cmd_rx),
+            market_data_tx: market_tx.clone(),
+            feature_tx: feature_tx.clone(),
+            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+            trading_tx: trading_tx.clone(),
+            context_tx: context_tx.clone(),
+            exchange_event_rx: shared_exchange_event_rx,
+            account_manager: shared_account_manager.clone(),
+            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+            risk_store: {
+                let store = match primary_kind {
+                    PipelineKind::Live => Arc::clone(&risk_stores.live),
+                    PipelineKind::Demo => Arc::clone(&risk_stores.demo),
+                    PipelineKind::Paper => Arc::clone(&risk_stores.paper),
+                };
+                Some(store)
+            },
+            budget_store: Some(Arc::clone(&budget_store)),
+            audit_pool: db_pool.get().cloned(),
+            symbol_registry: Some(Arc::clone(&symbol_registry)),
+            scanner_store: Some(Arc::clone(&scanner_store)),
+            shared_risk_level: Some(Arc::clone(&shared_risk_level)),
+        };
+        tokio::spawn(run_event_consumer(deps))
+    };
+    info!(kind = %primary_kind, "primary pipeline spawned / 主管線已啟動");
+
+    // ------------------------------------------------------------------
+    // Spawn Paper-alongside pipeline (when primary is Demo or Live)
+    // 啟動 Paper 伴隨管線（當主管線為 Demo 或 Live 時）
+    // ------------------------------------------------------------------
+    let _paper_handle = if spawn_paper_alongside {
+        let (_, paper_event_rx) = paper_alongside_channel.unwrap();
+        let paper_cmd_rx = paper_alongside_cmd_rx.unwrap();
+        let paper_rl = paper_risk_level.unwrap();
+        // Paper uses demo balance for initial_balance (mirrors demo account)
+        // Paper 使用 demo 餘額作為初始餘額（映射 demo 帳號）
+        let paper_balance = paper_initial_balance.unwrap_or(initial_balance);
+        let deps = EventConsumerDeps {
+            pipeline_kind: PipelineKind::Paper,
+            event_rx: paper_event_rx,
+            config: Arc::clone(&config),
+            cancel: cancel.clone(),
+            initial_balance: paper_balance,
+            paper_initial_balance: None,
+            taker_fee_rate: api_taker_fee,
+            instruments: shared_instruments.clone(),
+            // Paper has no exchange bindings / Paper 無交易所綁定
+            bootstrap_client: None,
+            shared_client: None,
+            bybit_balance: None,
+            api_pnl: None,
+            pipeline_cmd_rx: Some(paper_cmd_rx),
+            // Shared DB writer channels / 共享 DB 寫入通道
             market_data_tx: market_tx,
             feature_tx,
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx,
             context_tx,
-            exchange_event_rx: shared_exchange_event_rx,
-            account_manager: shared_account_manager,
-            // Phase 4 W-3/W-4 live plumbing / Phase 4 W-3/W-4 實時接線
+            // No exchange events for paper / Paper 無交易所事件
+            exchange_event_rx: None,
+            account_manager: None,
             linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
             news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-            // ARCH-RC1 1C-2-B / LIVE-P2-1: select per-engine risk store for hot-reload.
-            // Route: PaperOnly→paper, Demo→demo, Live→live.
-            // ARCH-RC1 1C-2-B / LIVE-P2-1：按 trading_mode 選擇對應 risk store。
-            risk_store: {
-                let mode = config.get().trading_mode;
-                let store = match mode {
-                    TradingMode::Live => Arc::clone(&risk_stores.live),
-                    TradingMode::Demo => Arc::clone(&risk_stores.demo),
-                    TradingMode::PaperOnly => Arc::clone(&risk_stores.paper),
-                };
-                Some(store)
-            },
+            risk_store: Some(Arc::clone(&risk_stores.paper)),
             budget_store: Some(Arc::clone(&budget_store)),
-            // ARCH-RC1 1C-4 B1: clone the V014 PG handle so the event consumer
-            // can restore the governor de-escalation cooldown on startup.
-            // ARCH-RC1 1C-4 B1：clone V014 PG handle，讓 event consumer 啟動時還原 cooldown。
             audit_pool: db_pool.get().cloned(),
-            // Scanner D1: registry + scanner store for future kline bootstrap wiring.
-            // 掃描器 D1：注冊表 + 掃描器 store，供未來 kline bootstrap 接線。
             symbol_registry: Some(Arc::clone(&symbol_registry)),
             scanner_store: Some(Arc::clone(&scanner_store)),
-            // Phase 6: shared atomic so event consumer writes governor level for reconciler.
-            // Phase 6：共享原子量，event consumer 寫入 governor 級別供對帳器讀取。
-            shared_risk_level: Some(Arc::clone(&shared_risk_level)),
+            shared_risk_level: Some(paper_rl),
         };
-        tokio::spawn(run_event_consumer(deps))
+        let h = tokio::spawn(run_event_consumer(deps));
+        info!("paper-alongside pipeline spawned / Paper 伴隨管線已啟動");
+        Some(h)
+    } else {
+        None
     };
 
     info!(version = VERSION, "engine started / 引擎已啟動");
@@ -1688,12 +1888,13 @@ async fn async_main(
         let _ = ws_handle.await;
         let _ = ipc_handle.await;
         let _ = event_handle.await;
-        // M4 fix: Await private WS handles if present
-        // M4 修復：等待私有 WS 任務完成
-        if let Some((priv_ws_h, listener_h)) = _priv_handles {
-            let _ = priv_ws_h.await;
-            let _ = listener_h.await;
+        // 3E: Await paper-alongside handle if present / 等待 Paper 伴隨管線
+        if let Some(ph) = _paper_handle {
+            let _ = ph.await;
         }
+        // Private WS handles are dropped here — supervisor tasks receive cancel
+        // and exit on their own via the CancellationToken.
+        // 私有 WS 句柄在此丟棄 — 監管器任務通過 CancellationToken 自行退出。
     })
     .await;
 

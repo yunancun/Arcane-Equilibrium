@@ -39,6 +39,47 @@ impl GovernanceMode {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GovernanceProfile — per-pipeline governance strictness (3E-1 / D3)
+// ---------------------------------------------------------------------------
+
+/// Governance strictness tier — determines which gates are active per pipeline.
+/// Paper pipelines explore freely; Demo validates with moderate gates; Live enforces all.
+/// 治理嚴格程度 — 決定各管線啟用哪些 gate。
+/// Paper 自由探索；Demo 中等驗證；Live 全嚴格。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GovernanceProfile {
+    /// Paper: auto-grant auth, no lease, exploration cost_gate, lenient Guardian.
+    /// Paper：自動授權，無租約，探索性 cost_gate，寬鬆 Guardian。
+    Exploration,
+    /// Demo: auto-grant auth, no lease, moderate cost_gate, moderate Guardian.
+    /// Demo：自動授權，無租約，中等 cost_gate，中等 Guardian。
+    Validation,
+    /// Live: full auth + lease + strict cost_gate + strict Guardian.
+    /// Live：完整授權 + 租約 + 嚴格 cost_gate + 嚴格 Guardian。
+    Production,
+}
+
+impl GovernanceProfile {
+    /// Whether this profile requires explicit SM-1 authorization.
+    /// 此檔案是否需要顯式 SM-1 授權。
+    pub fn requires_authorization(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Whether this profile requires a Decision Lease (SM-2).
+    /// 此檔案是否需要決策租約（SM-2）。
+    pub fn requires_lease(&self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    /// Whether this profile auto-grants authorization at construction.
+    /// 此檔案是否在構造時自動授予授權。
+    pub fn auto_grant_auth(&self) -> bool {
+        matches!(self, Self::Exploration | Self::Validation)
+    }
+}
+
 /// Cascade result describing what happened.
 /// 級聯結果，描述發生了什麼。
 #[derive(Debug, Clone)]
@@ -75,6 +116,33 @@ impl GovernanceCore {
             enabled: true,
             mode: GovernanceMode::Frozen, // No auth = frozen (fail-closed)
         }
+    }
+
+    /// Create GovernanceCore with profile-appropriate defaults (3E-1 / D3).
+    /// Exploration/Validation: auto-grant authorization (no operator action needed).
+    /// Production: fail-closed, requires explicit grant_live_authorization().
+    /// 按 profile 創建治理核心。Exploration/Validation 自動授權；Production 失敗關閉。
+    pub fn new_with_profile(profile: GovernanceProfile) -> Self {
+        let mut core = Self::new();
+        if profile.auto_grant_auth() {
+            let label = match profile {
+                GovernanceProfile::Exploration => "paper",
+                GovernanceProfile::Validation => "demo",
+                GovernanceProfile::Production => unreachable!(),
+            };
+            // Auto-grant: create → submit → approve in one shot.
+            // 自動授權：一步完成 create → submit → approve。
+            let idx = core.auth.create_draft(
+                &format!("{label} auto-authorization (3E-1)"),
+                serde_json::json!({"mode": label, "profile": format!("{:?}", profile)}),
+                &format!("system_{label}_auto"),
+                None, // no TTL — permanent until session ends
+            );
+            let _ = core.auth.submit_for_approval(idx);
+            let _ = core.auth.approve(idx, &format!("system_{label}_auto"), &format!("{label} mode auto-approved (GovernanceProfile)"));
+            core.update_mode();
+        }
+        core
     }
 
     pub fn is_enabled(&self) -> bool {

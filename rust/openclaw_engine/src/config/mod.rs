@@ -59,6 +59,7 @@ use tracing::{info, warn};
 /// - PaperOnly：本地模擬，不需要交易所連線
 /// - Demo：對接 Bybit Demo 環境（api-demo.bybit.com）
 /// - Live：對接 Bybit 主網（api.bybit.com）— 需要 live slot 有效 API key + live_reserved global mode
+#[deprecated(note = "3E-ARCH: use PipelineKind instead — TradingMode will be removed in 3E-4")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TradingMode {

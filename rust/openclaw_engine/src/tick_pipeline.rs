@@ -3140,6 +3140,39 @@ mod tests {
         assert_eq!(format!("{}", PipelineKind::Live), "live");
     }
 
+    /// 3E D10/D20: Verify Arc<PriceEvent> fan-out delivers to multiple receivers.
+    /// 3E D10/D20：驗證 Arc<PriceEvent> 扇出可向多個接收端投遞。
+    #[tokio::test]
+    async fn test_fanout_arc_price_event() {
+        use std::sync::Arc;
+        use tokio::sync::mpsc;
+        let (tx1, mut rx1) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(16);
+        let (tx2, mut rx2) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(16);
+        let event = openclaw_types::PriceEvent::new("BTCUSDT".into(), 50000.0, 1000);
+        let arc_event = Arc::new(event);
+        tx1.try_send(Arc::clone(&arc_event)).unwrap();
+        tx2.try_send(arc_event).unwrap();
+        let e1 = rx1.recv().await.unwrap();
+        let e2 = rx2.recv().await.unwrap();
+        assert_eq!(e1.symbol, "BTCUSDT");
+        assert_eq!(e2.symbol, "BTCUSDT");
+        assert_eq!(e1.last_price, e2.last_price);
+    }
+
+    /// 3E D10: Verify try_send returns Err when channel is full (lag detection).
+    /// 3E D10：驗證通道滿時 try_send 返回 Err（延遲檢測）。
+    #[tokio::test]
+    async fn test_fanout_lag_detection() {
+        use std::sync::Arc;
+        use tokio::sync::mpsc;
+        // Buffer size 1 — second send should fail
+        let (tx, _rx) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(1);
+        let e1 = Arc::new(openclaw_types::PriceEvent::new("A".into(), 1.0, 1));
+        let e2 = Arc::new(openclaw_types::PriceEvent::new("B".into(), 2.0, 2));
+        assert!(tx.try_send(e1).is_ok());
+        assert!(tx.try_send(e2).is_err()); // channel full → lag detected
+    }
+
     #[test]
     fn test_pipeline_creation() {
         let pipeline = TickPipeline::new(&["BTCUSDT"]);

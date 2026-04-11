@@ -5,7 +5,7 @@
 //!   until the CancellationToken fires. Each cycle:
 //!   1. Fetch all linear perp tickers from Bybit REST
 //!   2. Hard-filter → per-strategy scoring → edge bonus → correlation filter
-//!   3. Query open positions from event_consumer (via PaperSessionCommand)
+//!   3. Query open positions from event_consumer (via PipelineCommand)
 //!   4. Apply result to SymbolRegistry (anti-churn rules enforced)
 //!   5. Send WsTopicChange::Subscribe/Unsubscribe for added/removed symbols
 //!   6. Trigger kline bootstrap for newly added symbols
@@ -14,7 +14,7 @@
 //!   每個週期：
 //!   1. 從 Bybit REST 獲取所有 linear perp 行情
 //!   2. 硬過濾 → 分策略評分 → 邊際獎勵 → 相關性過濾
-//!   3. 從 event_consumer 查詢開放持倉（通過 PaperSessionCommand）
+//!   3. 從 event_consumer 查詢開放持倉（通過 PipelineCommand）
 //!   4. 將結果應用到 SymbolRegistry（執行反 churn 規則）
 //!   5. 為新增/移除的交易對發送 WsTopicChange::Subscribe/Unsubscribe
 //!   6. 為新增的交易對觸發 kline bootstrap
@@ -26,7 +26,7 @@ use crate::scanner::config::ScannerConfig;
 use crate::scanner::registry::SymbolRegistry;
 use crate::scanner::scorer::{apply_correlation_filter, score_ticker};
 use crate::scanner::types::ScanResult;
-use crate::tick_pipeline::PaperSessionCommand;
+use crate::tick_pipeline::PipelineCommand;
 use crate::ws_client::WsTopicChange;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -51,10 +51,10 @@ fn topics_for_symbol(symbol: &str) -> Vec<String> {
 pub struct ScannerRunner {
     registry: Arc<SymbolRegistry>,
     market_client: Arc<MarketDataClient>,
-    edge_estimates: Arc<std::sync::RwLock<EdgeEstimates>>,
+    edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
     scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
     ws_tx: mpsc::UnboundedSender<WsTopicChange>,
-    paper_cmd_tx: mpsc::UnboundedSender<PaperSessionCommand>,
+    pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
     cancel: CancellationToken,
 }
 
@@ -65,10 +65,10 @@ impl ScannerRunner {
     pub fn new(
         registry: Arc<SymbolRegistry>,
         market_client: Arc<MarketDataClient>,
-        edge_estimates: Arc<std::sync::RwLock<EdgeEstimates>>,
+        edge_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,
         scanner_config: Arc<crate::config::ConfigStore<ScannerConfig>>,
         ws_tx: mpsc::UnboundedSender<WsTopicChange>,
-        paper_cmd_tx: mpsc::UnboundedSender<PaperSessionCommand>,
+        pipeline_cmd_tx: mpsc::UnboundedSender<PipelineCommand>,
         cancel: CancellationToken,
     ) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl ScannerRunner {
             edge_estimates,
             scanner_config,
             ws_tx,
-            paper_cmd_tx,
+            pipeline_cmd_tx,
             cancel,
         }
     }
@@ -135,8 +135,7 @@ impl ScannerRunner {
             // RwLockReadGuard is not Send, so it must not be held across .await.
             // 使用塊確保 RwLockReadGuard 在任何 await 點之前被丟棄。
             let mut candidates: Vec<_> = {
-                let estimates_guard =
-                    self.edge_estimates.read().unwrap_or_else(|e| e.into_inner());
+                let estimates_guard = self.edge_estimates.read();
                 tickers
                     .iter()
                     .filter_map(|t| {
@@ -240,11 +239,11 @@ impl ScannerRunner {
     async fn query_open_positions(&self) -> HashSet<String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if self
-            .paper_cmd_tx
-            .send(PaperSessionCommand::GetOpenPositionSymbols { response_tx: tx })
+            .pipeline_cmd_tx
+            .send(PipelineCommand::GetOpenPositionSymbols { response_tx: tx })
             .is_err()
         {
-            warn!("[scanner] paper_cmd_tx send failed (channel closed?)");
+            warn!("[scanner] pipeline_cmd_tx send failed (channel closed?)");
             return HashSet::new();
         }
         match tokio::time::timeout(Duration::from_secs(2), rx).await {

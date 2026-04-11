@@ -19,7 +19,7 @@
 //!   ARCH-RC1 alignment: this module **never** touches Python RiskManager,
 //!   `operator_risk_config.json`, or any Python-side state. Side-effects go
 //!   through an injected `StrategyIpcSink` trait which in production is backed
-//!   by the existing `PaperSessionCommand` channel (`update_strategy_params`,
+//!   by the existing `PipelineCommand` channel (`update_strategy_params`,
 //!   `set_strategy_active`). The wiring of the real sink into `main.rs` is
 //!   deferred to the Phase 4 wiring sweep — this module ships fully unit-
 //!   testable via mock impls so it can be written, reviewed, and merged
@@ -38,7 +38,7 @@
 //!
 //!   ARCH-RC1 對齊：本模組 **絕不** 觸碰 Python RiskManager、
 //!   `operator_risk_config.json` 或任何 Python 側狀態。副作用透過注入的
-//!   `StrategyIpcSink` trait 走 — 生產環境由既有的 `PaperSessionCommand`
+//!   `StrategyIpcSink` trait 走 — 生產環境由既有的 `PipelineCommand`
 //!   channel 承載（`update_strategy_params` / `set_strategy_active`）。
 //!   真實 sink 在 `main.rs` 的接線留給 Phase 4 wiring sweep — 本模組
 //!   透過 mock 實作完全可單元測試，可在不動 `lib.rs` / `main.rs` /
@@ -163,7 +163,7 @@ pub type IpcFuture<'a> =
     Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
 
 /// Strategy IPC sink — the **only** channel through which the applier
-/// mutates engine state. Production impl wraps `PaperSessionCommand` sender.
+/// mutates engine state. Production impl wraps `PipelineCommand` sender.
 ///
 /// ARCH-RC1: this trait has intentionally zero methods that could reach
 /// Python. No `update_operator_risk_config`, no `update_risk_manager`, no
@@ -171,7 +171,7 @@ pub type IpcFuture<'a> =
 /// add it here (not on Python RiskManager).
 ///
 /// 策略 IPC sink — applier 唯一可變動引擎狀態的通道。生產實作包裝
-/// `PaperSessionCommand` sender。
+/// `PipelineCommand` sender。
 ///
 /// ARCH-RC1：此 trait 刻意完全沒有任何可觸及 Python 的方法。
 /// 沒有 `update_operator_risk_config`、沒有 `update_risk_manager`、
@@ -179,9 +179,9 @@ pub type IpcFuture<'a> =
 /// 加在這裡（絕不走 Python RiskManager）。
 pub trait StrategyIpcSink: Send + Sync {
     /// Update strategy params by JSON patch (maps to
-    /// `PaperSessionCommand::UpdateStrategyParams`).
+    /// `PipelineCommand::UpdateStrategyParams`).
     /// 以 JSON patch 更新策略參數（對應
-    /// `PaperSessionCommand::UpdateStrategyParams`）。
+    /// `PipelineCommand::UpdateStrategyParams`）。
     fn update_strategy_params<'a>(
         &'a self,
         strategy_name: &'a str,
@@ -189,9 +189,9 @@ pub trait StrategyIpcSink: Send + Sync {
     ) -> IpcFuture<'a>;
 
     /// Toggle strategy active flag (maps to
-    /// `PaperSessionCommand::SetStrategyActive`).
+    /// `PipelineCommand::SetStrategyActive`).
     /// 切換策略 active 旗標（對應
-    /// `PaperSessionCommand::SetStrategyActive`）。
+    /// `PipelineCommand::SetStrategyActive`）。
     fn set_strategy_active<'a>(
         &'a self,
         strategy_name: &'a str,

@@ -31,7 +31,7 @@ use openclaw_engine::position_reconciler::{
     GLOBAL_COOLDOWN_MS, REST_FAILURE_TIER1_COUNT, REST_FAILURE_TIER2_COUNT,
     REST_FAILURE_TIER3_COUNT,
 };
-use openclaw_engine::tick_pipeline::{PaperSessionCommand, TickPipeline};
+use openclaw_engine::tick_pipeline::{PipelineCommand, TickPipeline};
 use openclaw_engine::event_consumer::PendingOrder;
 use openclaw_core::sm::risk_gov::RiskLevel;
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ fn drive_escalate(
     let mut pending: HashMap<String, PendingOrder> = HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     openclaw_engine::event_consumer::handlers::handle_paper_command(
-        PaperSessionCommand::ReconcilerEscalate {
+        PipelineCommand::ReconcilerEscalate {
             target_tier: target.into(),
             reason: reason.into(),
             response_tx: tx,
@@ -91,7 +91,7 @@ fn drive_de_escalate(
     let mut pending: HashMap<String, PendingOrder> = HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     openclaw_engine::event_consumer::handlers::handle_paper_command(
-        PaperSessionCommand::ReconcilerDeEscalate {
+        PipelineCommand::ReconcilerDeEscalate {
             target_tier: target.into(),
             reason: reason.into(),
             response_tx: tx,

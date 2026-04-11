@@ -160,6 +160,30 @@ pub struct ParamRange {
     pub db_persisted: bool,
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 3E-9: StrategyFactory — single registration point for all strategies.
+// 3E-9：策略工廠 — 所有策略的唯一註冊點。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Strategy factory — single registration point. Add/remove strategies here ONLY.
+/// Pipeline code calls `create_all()` instead of hard-coding strategy constructors.
+/// 策略工廠 — 唯一註冊點。新增/移除策略只改這裡。
+/// 管線代碼調用 `create_all()` 而非硬編碼策略構造函數。
+pub struct StrategyFactory;
+
+impl StrategyFactory {
+    /// Create all strategies with default parameters.
+    /// 以默認參數創建所有策略。
+    pub fn create_all() -> Vec<Box<dyn Strategy>> {
+        vec![
+            Box::new(ma_crossover::MaCrossover::new()),
+            Box::new(bb_reversion::BbReversion::new()),
+            Box::new(bb_breakout::BbBreakout::new()),
+            Box::new(grid_trading::GridTrading::new_adaptive()),
+        ]
+    }
+}
+
 /// Strategy parameters trait — interface for DB persistence and Agent tuning.
 /// 策略參數 trait — 數據庫持久化和 Agent 調參的接口。
 /// Phase 3a will implement this for each strategy. For now, just the trait definition.
@@ -259,6 +283,27 @@ mod tests {
         assert_eq!(de.step, Some(1.0));
         assert!(de.agent_adjustable);
         assert!(de.db_persisted);
+    }
+
+    // ── 3E-9: StrategyFactory tests ──
+
+    #[test]
+    fn test_strategy_factory_creates_four_strategies() {
+        let strategies = StrategyFactory::create_all();
+        assert_eq!(strategies.len(), 4, "factory should produce exactly 4 strategies");
+        let names: Vec<&str> = strategies.iter().map(|s| s.name()).collect();
+        assert!(names.contains(&"ma_crossover"), "missing ma_crossover");
+        assert!(names.contains(&"bb_reversion"), "missing bb_reversion");
+        assert!(names.contains(&"bb_breakout"), "missing bb_breakout");
+        assert!(names.contains(&"grid_trading"), "missing grid_trading");
+    }
+
+    #[test]
+    fn test_strategy_factory_all_active_by_default() {
+        let strategies = StrategyFactory::create_all();
+        for s in &strategies {
+            assert!(s.is_active(), "{} should be active by default", s.name());
+        }
     }
 
     #[test]

@@ -9,7 +9,7 @@
 
 use openclaw_core::{
     execution::{self, FillResult},
-    governance_core::GovernanceCore,
+    governance_core::{GovernanceCore, GovernanceProfile},
     guardian::{ExistingPosition, Guardian, PortfolioContext, TradeIntentCheck, Verdict},
 };
 use crate::config::RiskConfig;
@@ -425,6 +425,7 @@ impl IntentProcessor {
         governance: &GovernanceCore,
         paper_state: &PaperState,
         atr: f64,
+        profile: GovernanceProfile,
     ) -> IntentResult {
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {
@@ -673,6 +674,7 @@ impl IntentProcessor {
         governance: &GovernanceCore,
         paper_state: &PaperState,
         atr: f64,
+        profile: GovernanceProfile,
     ) -> ExchangeGateResult {
         // Gate 1: Governance authorization
         if !governance.is_authorized() {
@@ -830,8 +832,8 @@ impl IntentProcessor {
             }
         }
 
-        // ─── Gate 3: Cost gate — PH5-WIRE-1 live mode (fail-closed without positive estimate) ───
-        // 成本門控：PH5-WIRE-1 live 模式（無正估計則失敗關閉，原則 #5 生存 > 利潤）
+        // ─── Gate 3: Cost gate — profile-aware (3E-2a) ───
+        // 成本門控：按 GovernanceProfile 分層（3E-2a）
         {
             let min_confidence = self.risk_config.cost_gate.min_confidence;
             if intent.confidence < min_confidence {
@@ -858,7 +860,16 @@ impl IntentProcessor {
             }
             let fee_rate = self.fee_rate(&intent.symbol);
             let volume_24h = paper_state.latest_turnover(&intent.symbol).unwrap_or(0.0);
-            if let Some(r) = self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h) {
+            // Profile-based cost gate selection (D3):
+            // Validation (Demo) → moderate: allows cold-start, blocks negative edge
+            // Production (Live) → strict: fail-closed without positive estimate
+            // 按 profile 選擇 cost gate：Validation 中等，Production 嚴格
+            let gate_result = match profile {
+                GovernanceProfile::Validation => self.cost_gate_moderate(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
+                GovernanceProfile::Production => self.cost_gate_live(&intent.strategy, &intent.symbol, fee_rate, volume_24h),
+                GovernanceProfile::Exploration => None, // Paper doesn't call process_gates_only, but handle gracefully
+            };
+            if let Some(r) = gate_result {
                 return ExchangeGateResult { verdict_info: vi.take(), ..r };
             }
         }
@@ -965,6 +976,63 @@ impl IntentProcessor {
                 // Paper/demo 需要積累交易以建立 JS 估計；攔截會造成死循環。
                 tracing::info!(strategy, symbol,
                     "cost_gate(cold-start): no JS estimate — exploration mode (paper) / 無 JS 估計探索模式");
+                None
+            }
+        }
+    }
+
+    /// 3E-2a: Demo mode cost gate — moderate strictness (between exploration and strict).
+    /// Positive JS estimate → apply threshold; negative → block; cold-start → allow with warning.
+    /// 3E-2a：Demo 模式成本門——中等嚴格（介於探索和嚴格之間）。
+    /// 正 JS 估計 → 應用門檻；負 → 阻擋；冷啟動 → 放行並警告。
+    fn cost_gate_moderate(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        fee_rate: f64,
+        volume_24h: f64,
+    ) -> Option<ExchangeGateResult> {
+        let slippage = lookup_slippage(volume_24h);
+        let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
+        match self.edge_estimates.get_cell(strategy, symbol) {
+            Some(cell) if cell.shrunk_bps > 0.0 => {
+                // Positive JS estimate: same threshold as live (win-rate weighted)
+                // 正 JS 估計：與 live 相同門檻（勝率加權）
+                let wr = cell.win_rate.clamp(0.3, 1.0);
+                let threshold_bps = fee_bps / wr * 1.3;
+                if cell.shrunk_bps < threshold_bps {
+                    return Some(ExchangeGateResult {
+                        approved: false,
+                        rejected_reason: Some(format!(
+                            "cost_gate(JS-demo): edge={:.2}bps < threshold={:.2}bps \
+                             (fee={:.2}bps, wr={:.2})",
+                            cell.shrunk_bps, threshold_bps, fee_bps, cell.win_rate,
+                        )),
+                        approved_qty: 0.0,
+                        verdict_info: None,
+                    });
+                }
+                None // pass
+            }
+            Some(cell) => {
+                // Negative JS estimate: block (unlike paper exploration which allows)
+                // 負 JS 估計：阻擋（不同於 paper 探索模式允許）
+                Some(ExchangeGateResult {
+                    approved: false,
+                    rejected_reason: Some(format!(
+                        "cost_gate(JS-demo): estimated={:.2}bps < 0 — blocked / 負估計阻擋",
+                        cell.shrunk_bps,
+                    )),
+                    approved_qty: 0.0,
+                    verdict_info: None,
+                })
+            }
+            None => {
+                // Cold start: allow with warning (unlike live which blocks)
+                // Demo needs to accumulate trades — blocking creates dead-loop like paper.
+                // 冷啟動：放行並警告（不同於 live 阻擋）。Demo 需累積交易數據。
+                tracing::info!(strategy, symbol,
+                    "cost_gate(demo-cold-start): no JS estimate — allowing for data accumulation / 無 JS 估計放行以累積數據");
                 None
             }
         }
@@ -1101,7 +1169,7 @@ mod tests {
         let proc = IntentProcessor::new();
         let gov = GovernanceCore::new(); // no auth
         let state = PaperState::new(10_000.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
         assert!(!result.submitted);
         assert!(result.rejected_reason.unwrap().contains("governance"));
     }
@@ -1115,7 +1183,7 @@ mod tests {
         state.set_latest_price("BTC", 50000.0);
         // PH5-WIRE-0: ATR=2000 so EV=2000×0.7×0.004×0.2=$1.12 >> k×fee=1.5×$0.22=$0.33
         // (ATR raised from 500 to clear the 0.2 cold-start dampening factor)
-        let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0, GovernanceProfile::Exploration);
         assert!(result.submitted);
         assert!(result.fill.is_some());
     }
@@ -1132,7 +1200,7 @@ mod tests {
         let mut state = PaperState::new(10_000.0);
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state, 2000.0);
+        let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // fill.fill_qty should be 0.004 (= 10000 * 0.02 / 50000), not 0.01
@@ -1155,7 +1223,7 @@ mod tests {
         let mut state = PaperState::new(100.0); // tiny balance
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state, 2000.0);
+        let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         // P1 calc: 100 * 0.02 / 50000 = 0.00004 — used directly, no MIN_QTY floor.
@@ -1177,7 +1245,7 @@ mod tests {
         state.set_latest_price("ETH", 3_000.0);
         // P1 cap: 1,000,000 * 0.02 / 3000 = 6.67; intent qty=0.01 is smaller
         let intent = make_intent("ETH", true); // qty=0.01
-        let result = proc.process(&intent, &gov, &state, 500.0);
+        let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
         assert!(result.submitted);
         let fill = result.fill.unwrap();
         assert!(
@@ -1196,7 +1264,7 @@ mod tests {
         state.set_latest_price("BTC", 50000.0);
         // Simulate high drawdown
         state.force_drawdown(20.0);
-        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0);
+        let result = proc.process(&make_intent("BTC", true), &gov, &state, 500.0, GovernanceProfile::Exploration);
         assert!(!result.submitted);
     }
 
@@ -1218,7 +1286,7 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        let result = proc.process(&intent, &gov, &state, 10.0);
+        let result = proc.process(&intent, &gov, &state, 10.0, GovernanceProfile::Exploration);
         assert!(!result.submitted);
         assert!(result
             .rejected_reason
@@ -1247,7 +1315,7 @@ mod tests {
         };
         // ATR=20 (very compressed for BTC) — previously rejected by ATR cold-start gate,
         // now allowed in paper exploration mode to accumulate data.
-        let result = proc.process(&intent, &gov, &state, 20.0);
+        let result = proc.process(&intent, &gov, &state, 20.0, GovernanceProfile::Exploration);
         assert!(result.submitted, "cold-start paper should allow through for data accumulation");
     }
 
@@ -1270,7 +1338,7 @@ mod tests {
             limit_price: None,
         };
         // ATR=0 (indicator unavailable) — would have been waved through pre-SEC-11
-        let result = proc.process(&intent, &gov, &state, 0.0);
+        let result = proc.process(&intent, &gov, &state, 0.0, GovernanceProfile::Exploration);
         assert!(!result.submitted, "ATR=0 must fail-closed");
         assert!(result
             .rejected_reason
@@ -1278,7 +1346,7 @@ mod tests {
             .contains("ATR unavailable"));
 
         // Same on the exchange-mode path
-        let gate = proc.process_gates_only(&intent, &gov, &state, 0.0);
+        let gate = proc.process_gates_only(&intent, &gov, &state, 0.0, GovernanceProfile::Production);
         assert!(!gate.approved, "ATR=0 must fail-closed in gates_only too");
         assert!(gate.rejected_reason.unwrap().contains("ATR unavailable"));
     }
@@ -1302,7 +1370,7 @@ mod tests {
             limit_price: None,
         };
         // ATR=20 compressed → EV << fee → reject
-        let result = proc.process_gates_only(&intent, &gov, &state, 20.0);
+        let result = proc.process_gates_only(&intent, &gov, &state, 20.0, GovernanceProfile::Production);
         assert!(!result.approved);
         assert!(result.rejected_reason.unwrap().contains("cost_gate"));
     }
@@ -1328,7 +1396,7 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        let result = proc.process(&intent, &gov, &state, 5.0);
+        let result = proc.process(&intent, &gov, &state, 5.0, GovernanceProfile::Exploration);
         assert!(result.submitted);
     }
 
@@ -1363,7 +1431,7 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        let result = proc.process(&intent, &gov, &state, 0.1);
+        let result = proc.process(&intent, &gov, &state, 0.1, GovernanceProfile::Exploration);
         assert!(result.submitted, "cold-start paper should allow low-volatility for data accumulation");
     }
 
@@ -1407,7 +1475,7 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        let result = proc.process(&intent, &gov, &state, 500.0);
+        let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
         assert!(!result.submitted, "Low win_rate should tighten JS gate threshold");
         assert!(result.rejected_reason.unwrap().contains("cost_gate(JS)"));
     }
@@ -1435,7 +1503,7 @@ mod tests {
         // cost_pct = (0.00055 + 0.0001) × 2 × 100 = 0.13% (with 1bps slip)
         // min_move = 0.13 / 0.5 × 1.3 = 0.338%
         // 0.4478% > 0.338% → passes
-        let result = proc.process(&intent, &gov, &state, 300.0);
+        let result = proc.process(&intent, &gov, &state, 300.0, GovernanceProfile::Exploration);
         assert!(result.submitted, "BTC with high volume should pass: {:?}", result.rejected_reason);
     }
 
@@ -1449,7 +1517,7 @@ mod tests {
         let mut state = PaperState::new(0.0); // zero balance → p1_max_qty=0
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true);
-        let result = proc.process(&intent, &gov, &state, 500.0);
+        let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
         assert!(!result.submitted);
         let reason = result.rejected_reason.unwrap();
         assert!(reason.starts_with("qty_zero:"), "got: {}", reason);
@@ -1465,9 +1533,82 @@ mod tests {
         let mut state = PaperState::new(0.0);
         state.set_latest_price("BTC", 50_000.0);
         let intent = make_intent("BTC", true);
-        let result = proc.process_gates_only(&intent, &gov, &state, 500.0);
+        let result = proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
         assert!(!result.approved);
         assert_eq!(result.approved_qty, 0.0);
         assert!(result.rejected_reason.unwrap().starts_with("qty_zero:"));
+    }
+
+    // ── 3E-2a: GovernanceProfile + cost_gate_moderate tests ──
+
+    #[test]
+    fn test_governance_core_new_with_profile_exploration_auto_grants() {
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+        assert!(gov.is_authorized(), "Exploration profile should auto-grant auth");
+    }
+
+    #[test]
+    fn test_governance_core_new_with_profile_validation_auto_grants() {
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+        assert!(gov.is_authorized(), "Validation profile should auto-grant auth");
+    }
+
+    #[test]
+    fn test_governance_core_new_with_profile_production_fail_closed() {
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Production);
+        assert!(!gov.is_authorized(), "Production profile should NOT auto-grant auth");
+    }
+
+    #[test]
+    fn test_cost_gate_moderate_positive_edge_passes() {
+        let mut proc = IntentProcessor::new();
+        // Build estimates with a high positive edge (50 bps > any realistic threshold)
+        let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": 50.0, "win_rate": 0.6, "n_trades": 100, "std_bps": 5.0}}"#;
+        let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+        proc.set_edge_estimates(estimates);
+        let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+        assert!(result.is_none(), "positive edge should pass moderate gate");
+    }
+
+    #[test]
+    fn test_cost_gate_moderate_negative_edge_blocks() {
+        let mut proc = IntentProcessor::new();
+        let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -5.0, "win_rate": 0.4, "n_trades": 50, "std_bps": 2.0}}"#;
+        let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+        proc.set_edge_estimates(estimates);
+        let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+        assert!(result.is_some(), "negative edge should be blocked in moderate mode");
+        assert!(result.unwrap().rejected_reason.unwrap().contains("demo"));
+    }
+
+    #[test]
+    fn test_cost_gate_moderate_cold_start_allows() {
+        let proc = IntentProcessor::new();
+        // No edge estimates set = cold start
+        let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+        assert!(result.is_none(), "cold start should be allowed in moderate mode (data accumulation)");
+    }
+
+    #[test]
+    fn test_process_with_exploration_profile() {
+        let proc = IntentProcessor::new();
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true);
+        let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
+        assert!(result.submitted, "Exploration profile should process successfully");
+    }
+
+    #[test]
+    fn test_process_gates_with_production_no_auth_rejects() {
+        let proc = IntentProcessor::new();
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Production);
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true);
+        let result = proc.process_gates_only(&intent, &gov, &state, 500.0, GovernanceProfile::Production);
+        assert!(!result.approved, "Production without auth should reject");
+        assert!(result.rejected_reason.unwrap().contains("governance_not_authorized"));
     }
 }
