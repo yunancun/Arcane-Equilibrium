@@ -482,35 +482,9 @@ pub fn handle_paper_command(
                 .collect();
             let _ = response_tx.send(open_symbols);
         }
-        PipelineCommand::AddMode {
-            mode,
-            balance,
-            response_tx,
-        } => {
-            // Phase 3: Add secondary engine mode at runtime.
-            // Phase 3：運行時添加次級引擎模式。
-            pipeline.add_mode(mode, balance);
-            snapshot_writer.force_write(&pipeline.snapshot());
-            let _ = response_tx.send(Ok(format!("mode {} added with balance {:.2}", mode, balance)));
-        }
-        PipelineCommand::SwitchMode { mode, response_tx } => {
-            // Phase 3: Switch primary trading mode with state swap.
-            // Phase 3：切換主交易模式，附帶狀態切換。
-            pipeline.set_trading_mode(mode);
-            // Re-grant paper authorization for the new active mode's GovernanceCore.
-            // Without this, the loaded ModeState may have uninitialized auth (created
-            // before grant_paper_auth() ran at startup), causing governance_not_authorized.
-            // 重新授予新活躍模式的 GovernanceCore 紙盤授權。
-            // 不做此步驟，加載的 ModeState 可能包含未初始化授權（在 startup 的
-            // grant_paper_auth() 之前創建），導致 governance_not_authorized。
-            if let Err(e) = pipeline.grant_paper_auth() {
-                warn!(error = %e, "SwitchMode: grant_paper_auth failed / 模式切換後紙盤授權失敗");
-            } else {
-                info!(new_mode = %mode, "SwitchMode: paper auth re-granted / 模式切換後紙盤授權已重新授予");
-            }
-            snapshot_writer.force_write(&pipeline.snapshot());
-            let _ = response_tx.send(Ok(format!("switched to mode {}", mode)));
-        }
+        // 3E-3: AddMode and SwitchMode REMOVED — pipelines spawned at startup
+        // with fixed PipelineKind. See EngineCommandChannels for per-pipeline routing.
+        // 3E-3：AddMode 和 SwitchMode 已移除 — 管線啟動時固定 PipelineKind。
         // ── Phase 6: Reconciler auto-contraction ──
         PipelineCommand::ReconcilerEscalate {
             target_tier,

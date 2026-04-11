@@ -32,8 +32,8 @@
 - [x] **3E-2b-γ** D23 dual reconciler + D6 三級遞減收縮 + 有序 shutdown（S7）✅
 
 ### IPC + 清除（S8-S11, Day 5-6）
-- [ ] **3E-3** IPC Server `EngineCommandChannels` + per-engine 快照路由（S8，可與 S7 並行）
-- [ ] **3E-4** `TradingMode` + `EngineConfig` Rust 完整清除（S9）
+- [x] **3E-3** IPC Server `EngineCommandChannels` + per-engine 快照路由（S8）✅
+- [x] **3E-4** `TradingMode` → `PipelineKind` 運行時清除（S9，config 保留過渡橋接）✅
 - [ ] **3E-5** Python 側 trading_mode 清除 + per-engine metrics 隔離（S10）
 - [ ] **3E-7+8** API Key 衝突偵測 409 + Watchdog multi-snapshot + Paper balance GUI（S11，可與 S10 並行）
 
