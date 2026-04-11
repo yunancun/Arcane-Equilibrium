@@ -152,4 +152,7 @@ pub struct EventConsumerDeps {
     /// Event consumer writes governor level here after every command handler call.
     /// Phase 6：共享原子量供對帳器讀取當前風控級別。
     pub shared_risk_level: Option<Arc<std::sync::atomic::AtomicU8>>,
+    /// 3E-5: Whether this is the primary pipeline (writes compat pipeline_snapshot.json).
+    /// 3E-5：是否為主管線（寫入兼容的 pipeline_snapshot.json）。
+    pub is_primary: bool,
 }

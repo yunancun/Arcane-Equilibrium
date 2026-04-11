@@ -17,7 +17,7 @@ mod types;
 use types::STATUS_INTERVAL_SECS;
 pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
-use crate::persistence::{AuditWriter, StateWriter};
+use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::strategies::StrategyFactory;
 use crate::tick_pipeline::TickPipeline;
 use std::collections::HashMap;
@@ -58,6 +58,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         symbol_registry,
         scanner_store: _scanner_store,
         shared_risk_level,
+        is_primary,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
@@ -378,9 +379,23 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     if let Err(e) = std::fs::create_dir_all(&data_path) {
         warn!(error = %e, "failed to create data dir / 創建數據目錄失敗");
     }
-    let mut state_writer = StateWriter::new(&data_path.join("paper_state.json"), 30_000);
-    let mut snapshot_writer = StateWriter::new(&data_path.join("pipeline_snapshot.json"), 5_000);
-    let audit_writer = AuditWriter::new(&data_path.join("paper_audit.jsonl"));
+    // 3E-5: per-engine snapshot filenames derived from pipeline_kind.
+    // Primary pipeline also writes pipeline_snapshot.json for backward compat (IPC server, watchdog).
+    // 3E-5：每個引擎的快照文件名由 pipeline_kind 決定。
+    // 主管線同時寫入 pipeline_snapshot.json 保持向後兼容（IPC 伺服器、看門狗）。
+    let kind_tag = pipeline.pipeline_kind.db_mode(); // "paper" | "demo" | "live"
+    let per_engine_snapshot = format!("pipeline_snapshot_{kind_tag}.json");
+    let mut state_writer = StateWriter::new(&data_path.join(format!("{kind_tag}_state.json")), 30_000);
+    let primary_writer = StateWriter::new(&data_path.join(&per_engine_snapshot), 5_000);
+    // Backward compat: primary pipeline also writes pipeline_snapshot.json
+    // 向後兼容：主管線同時寫入 pipeline_snapshot.json
+    let compat_writer = if is_primary {
+        Some(StateWriter::new(&data_path.join("pipeline_snapshot.json"), 5_000))
+    } else {
+        None
+    };
+    let mut snapshot_writer = DualStateWriter::new(primary_writer, compat_writer);
+    let audit_writer = AuditWriter::new(&data_path.join(format!("{kind_tag}_audit.jsonl")));
 
     // Canary mode: emit per-tick JSONL for comparison with Python shadow (R07-2)
     // 灰度模式：每 tick 輸出 JSONL 用於與 Python 影子進程比較

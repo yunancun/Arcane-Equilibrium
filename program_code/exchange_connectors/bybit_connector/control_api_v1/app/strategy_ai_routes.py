@@ -251,10 +251,10 @@ async def post_demo_close_all_positions(
     """
     POST /api/v1/strategy/demo/close-all-positions
     通過 IPC close_all_positions 平掉所有倉位。不影響 session 運行狀態。需要 Operator 角色。
-    Rust 引擎依 trading_mode 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
+    Rust 引擎依 pipeline_kind 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
 
     Close all positions via IPC close_all_positions. Does not affect session state.
-    Rust engine branches by trading_mode: Demo/Live → reduce_only market orders; Paper → paper_state.
+    Rust engine branches by pipeline_kind: Demo/Live → reduce_only market orders; Paper → paper_state.
     Requires Operator role.
     """
     from .governance_routes import _require_operator_role

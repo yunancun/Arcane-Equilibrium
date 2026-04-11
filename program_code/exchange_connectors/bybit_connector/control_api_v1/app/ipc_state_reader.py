@@ -1,12 +1,14 @@
 # MODULE_NOTE:
-# IPC State Reader — file-based read of Rust engine pipeline snapshot (R06-B).
+# IPC State Reader — file-based read of Rust engine pipeline snapshots (R06-B / 3E-5).
 # IPC 狀態讀取器 — 基於文件讀取 Rust 引擎管線快照。
 #
-# Reads pipeline_snapshot.json written by Rust StateWriter (5s debounce).
+# 3E-5: Per-engine snapshot files (pipeline_snapshot_{paper|demo|live}.json).
+# Primary pipeline also writes pipeline_snapshot.json for backward compat.
 # Provides cached, thread-safe access to paper state, latest prices, and tick stats.
 # Falls back gracefully when the file is missing or stale (engine not running).
 #
-# 讀取 Rust StateWriter 寫入的 pipeline_snapshot.json（5 秒去抖）。
+# 3E-5：每引擎快照文件（pipeline_snapshot_{paper|demo|live}.json）。
+# 主管線同時寫入 pipeline_snapshot.json 保持向後兼容。
 # 提供緩存的、線程安全的 paper state、最新價格和 tick 統計訪問。
 # 當文件缺失或過期時（引擎未運行）優雅降級。
 
@@ -30,17 +32,23 @@ _CACHE_TTL_SECONDS = 2.0
 # 快照過期閾值 — 超過此時間的數據視為過期
 _STALENESS_THRESHOLD_SECONDS = 60.0
 
+# Valid engine names / 有效引擎名稱
+_VALID_ENGINES = frozenset({"paper", "demo", "live"})
+
 
 class RustSnapshotReader:
     """
-    Thread-safe cached reader for Rust engine's pipeline_snapshot.json.
-    線程安全的緩存讀取器，用於讀取 Rust 引擎的 pipeline_snapshot.json。
+    Thread-safe cached reader for Rust engine pipeline snapshots.
+    3E-5: Supports per-engine snapshot files (pipeline_snapshot_{engine}.json)
+    and backward-compat primary file (pipeline_snapshot.json).
+    線程安全的緩存讀取器，支持每引擎快照文件和向後兼容主文件。
 
     Usage / 用法:
         reader = RustSnapshotReader()
-        state = reader.get_paper_state()   # dict or None
-        prices = reader.get_latest_prices() # dict or None
-        stats = reader.get_tick_stats()     # dict or None
+        state = reader.get_paper_state()            # primary snapshot
+        state = reader.get_paper_state(engine="demo") # per-engine snapshot
+        prices = reader.get_latest_prices()
+        engines = reader.get_active_engines()       # ["paper", "demo"]
     """
 
     def __init__(self, data_dir: Optional[str] = None) -> None:
@@ -48,19 +56,28 @@ class RustSnapshotReader:
             "OPENCLAW_DATA_DIR", "/tmp/openclaw"
         )
         self._lock = threading.Lock()
+        # Primary (compat) cache / 主（兼容）緩存
         self._cache: Optional[dict[str, Any]] = None
         self._cache_ts: float = 0.0
-        self._cache_file_age: float = 999999.0  # seconds since last snapshot write
+        self._cache_file_age: float = 999999.0
+        # Per-engine caches / 每引擎緩存
+        self._engine_caches: dict[str, dict[str, Any]] = {}
+        self._engine_cache_ts: dict[str, float] = {}
+        self._engine_file_ages: dict[str, float] = {}
 
     @property
     def snapshot_path(self) -> Path:
-        """Path to the pipeline snapshot file / 管線快照文件路徑"""
+        """Path to the primary (compat) pipeline snapshot file / 主（兼容）管線快照文件路徑"""
         return Path(self._data_dir) / "pipeline_snapshot.json"
+
+    def _engine_snapshot_path(self, engine: str) -> Path:
+        """Path to per-engine snapshot file / 每引擎快照文件路徑"""
+        return Path(self._data_dir) / f"pipeline_snapshot_{engine}.json"
 
     def _refresh_cache(self) -> Optional[dict[str, Any]]:
         """
-        Re-read snapshot file if cache is stale.
-        如果緩存過期則重新讀取快照文件。
+        Re-read primary snapshot file if cache is stale.
+        如果緩存過期則重新讀取主快照文件。
         """
         now = time.monotonic()
         if self._cache is not None and (now - self._cache_ts) < _CACHE_TTL_SECONDS:
@@ -91,79 +108,118 @@ class RustSnapshotReader:
             )
             return None
 
+    def _refresh_engine_cache(self, engine: str) -> Optional[dict[str, Any]]:
+        """
+        Re-read per-engine snapshot file if cache is stale (3E-5).
+        如果緩存過期則重新讀取每引擎快照文件。
+        """
+        now = time.monotonic()
+        cached_ts = self._engine_cache_ts.get(engine, 0.0)
+        if engine in self._engine_caches and (now - cached_ts) < _CACHE_TTL_SECONDS:
+            return self._engine_caches[engine]
+
+        path = self._engine_snapshot_path(engine)
+        try:
+            mtime = path.stat().st_mtime
+            self._engine_file_ages[engine] = time.time() - mtime
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            self._engine_caches[engine] = data
+            self._engine_cache_ts[engine] = now
+            return data
+        except FileNotFoundError:
+            self._engine_file_ages[engine] = 999999.0
+            return None
+        except (json.JSONDecodeError, OSError):
+            self._engine_file_ages[engine] = 999999.0
+            return None
+
     def is_available(self) -> bool:
         """
         Check if Rust engine snapshot is available and fresh.
         檢查 Rust 引擎快照是否可用且未過期。
-        Uses file mtime cached alongside data to avoid extra stat() calls.
-        使用與數據一起緩存的 mtime，避免額外 stat() 調用。
         """
         with self._lock:
             data = self._refresh_cache()
         if data is None:
             return False
-        # Use mtime captured during _refresh_cache, not an extra stat() call
-        # 使用 _refresh_cache 時捕獲的 mtime，不做額外 stat()
         return self._cache_file_age < _STALENESS_THRESHOLD_SECONDS
+
+    def is_engine_available(self, engine: str) -> bool:
+        """
+        Check if a specific engine's snapshot is available and fresh (3E-5).
+        檢查特定引擎的快照是否可用且未過期。
+        """
+        with self._lock:
+            data = self._refresh_engine_cache(engine)
+        if data is None:
+            return False
+        return self._engine_file_ages.get(engine, 999999.0) < _STALENESS_THRESHOLD_SECONDS
 
     def get_snapshot(self) -> Optional[dict[str, Any]]:
         """
-        Get the full pipeline snapshot (or None if unavailable).
-        獲取完整管線快照（不可用時返回 None）。
+        Get the full primary pipeline snapshot (or None if unavailable).
+        獲取主管線完整快照（不可用時返回 None）。
         """
         with self._lock:
             return self._refresh_cache()
 
-    def get_paper_state(self, mode: str = "paper") -> Optional[dict[str, Any]]:
+    def get_engine_snapshot(self, engine: str) -> Optional[dict[str, Any]]:
+        """
+        Get per-engine pipeline snapshot (3E-5). Falls back to primary if per-engine
+        file not found and engine matches primary pipeline kind.
+        獲取每引擎管線快照。若每引擎文件未找到且引擎匹配主管線 kind，回退到主快照。
+        """
+        with self._lock:
+            snap = self._refresh_engine_cache(engine)
+            if snap is not None:
+                return snap
+            # Fallback: primary snapshot if its trading_mode matches requested engine
+            # 回退：若主快照的 trading_mode 匹配請求的引擎
+            primary = self._refresh_cache()
+            if primary is None:
+                return None
+            primary_kind = primary.get("trading_mode", "paper")
+            _ALIASES = {"paper_only": "paper"}
+            if _ALIASES.get(primary_kind, primary_kind) == engine:
+                return primary
+            return None
+
+    def get_paper_state(self, mode: str = "paper", engine: Optional[str] = None) -> Optional[dict[str, Any]]:
         """
         Get paper trading state (balance, positions, pnl, fees).
-        Phase 4: accepts `mode` param to query a specific engine mode.
-        Default "paper" for backward compatibility.
-        獲取紙盤交易狀態（餘額、持倉、損益、手續費）。
-        Phase 4：接受 `mode` 參數查詢特定引擎模式，默認 "paper" 向後兼容。
+        3E-5: if `engine` is specified, read from per-engine snapshot file.
+        Otherwise falls back to primary snapshot for backward compatibility.
+        獲取紙盤交易狀態。3E-5：指定 engine 時從每引擎快照讀取。
         """
-        snap = self.get_snapshot()
+        if engine:
+            snap = self.get_engine_snapshot(engine)
+        else:
+            snap = self.get_snapshot()
         if snap is None:
             return None
-        # Phase 4: check mode_snapshots first for the requested mode.
-        # Phase 4：優先從 mode_snapshots 查找請求的模式。
-        mode_snapshots = snap.get("mode_snapshots", {})
-        if mode in mode_snapshots:
-            return mode_snapshots[mode].get("paper_state")
-        # Fallback: top-level paper_state (primary mode / backward compat).
-        # TradingMode serde: "paper_only" / "demo" / "live"; db_mode: "paper" / "demo" / "live".
-        # Accept both forms for backward compatibility.
-        # 回退：頂層 paper_state（主模式 / 向後兼容）。
-        # 接受兩種形式（serde 和 db_mode）。
-        trading_mode = snap.get("trading_mode", "paper_only")
-        _MODE_ALIASES = {"paper": "paper_only", "paper_only": "paper"}
-        if mode == trading_mode or _MODE_ALIASES.get(mode) == trading_mode:
-            return snap.get("paper_state")
-        return None
+        return snap.get("paper_state")
 
     def get_mode_snapshot(self, mode: str = "paper") -> Optional[dict[str, Any]]:
         """
         Get full ModeStateSnapshot for a specific engine mode.
-        Phase 4: returns paper_state + recent_intents + recent_fills +
-        consecutive_losses + session_halted + paper_paused for that mode.
-        獲取特定引擎模式的完整 ModeStateSnapshot。
+        3E-5: reads from per-engine snapshot file.
+        獲取特定引擎模式的完整快照。3E-5：從每引擎快照文件讀取。
         """
-        snap = self.get_snapshot()
-        if snap is None:
-            return None
-        mode_snapshots = snap.get("mode_snapshots", {})
-        return mode_snapshots.get(mode)
+        snap = self.get_engine_snapshot(mode)
+        return snap
 
-    def get_active_modes(self) -> list[str]:
+    def get_active_engines(self) -> list[str]:
         """
-        List all active engine modes (e.g. ["paper", "demo", "live"]).
-        列出所有活躍引擎模式。
+        List all engines with fresh snapshots (3E-5).
+        Checks pipeline_snapshot_{paper|demo|live}.json freshness.
+        列出所有擁有新鮮快照的引擎。
         """
-        snap = self.get_snapshot()
-        if snap is None:
-            return []
-        mode_snapshots = snap.get("mode_snapshots", {})
-        return list(mode_snapshots.keys())
+        active = []
+        for eng in sorted(_VALID_ENGINES):
+            if self.is_engine_available(eng):
+                active.append(eng)
+        return active
 
     def get_latest_prices(self) -> Optional[dict[str, float]]:
         """
@@ -224,26 +280,24 @@ class RustSnapshotReader:
     def get_recent_intents(self, mode: Optional[str] = None) -> list:
         """
         Get recent order intents from Rust engine (up to 50).
-        Phase 4: optional `mode` param for per-mode intents.
+        3E-5: mode param reads from per-engine snapshot.
         從 Rust 引擎獲取最近交易意圖（最多 50 條）。
-        Phase 4：可選 `mode` 參數獲取特定模式的意圖。
         """
         if mode:
-            ms = self.get_mode_snapshot(mode)
-            return (ms or {}).get("recent_intents", [])
+            snap = self.get_engine_snapshot(mode)
+            return (snap or {}).get("recent_intents", [])
         snap = self.get_snapshot()
         return (snap or {}).get("recent_intents", [])
 
     def get_recent_fills(self, mode: Optional[str] = None) -> list:
         """
         Get recent fills from Rust engine (up to 50).
-        Phase 4: optional `mode` param for per-mode fills.
+        3E-5: mode param reads from per-engine snapshot.
         從 Rust 引擎獲取最近成交記錄（最多 50 條）。
-        Phase 4：可選 `mode` 參數獲取特定模式的成交。
         """
         if mode:
-            ms = self.get_mode_snapshot(mode)
-            return (ms or {}).get("recent_fills", [])
+            snap = self.get_engine_snapshot(mode)
+            return (snap or {}).get("recent_fills", [])
         snap = self.get_snapshot()
         return (snap or {}).get("recent_fills", [])
 

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-11（3E-ARCH v4 計劃 + 13-session 執行計劃錄入）
-測試基準線：**Rust engine lib 879 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 896 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -34,8 +34,8 @@
 ### IPC + 清除（S8-S11, Day 5-6）
 - [x] **3E-3** IPC Server `EngineCommandChannels` + per-engine 快照路由（S8）✅
 - [x] **3E-4** `TradingMode` → `PipelineKind` 運行時清除（S9，config 保留過渡橋接）✅
-- [ ] **3E-5** Python 側 trading_mode 清除 + per-engine metrics 隔離（S10）
-- [ ] **3E-7+8** API Key 衝突偵測 409 + Watchdog multi-snapshot + Paper balance GUI（S11，可與 S10 並行）
+- [x] **3E-5** Python 側 trading_mode 清除 + per-engine metrics 隔離（S10）✅
+- [x] **3E-7+8** API Key 衝突偵測 409 + Watchdog multi-snapshot + Paper balance GUI（S11）✅
 
 ### 驗收（S12-S13, Day 7-8）
 - [ ] **3E-E2** E2 代碼審查 — D1-D26 全量 checklist（S12）

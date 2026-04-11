@@ -1843,6 +1843,7 @@ async fn async_main(
             symbol_registry: Some(Arc::clone(&symbol_registry)),
             scanner_store: Some(Arc::clone(&scanner_store)),
             shared_risk_level: Some(Arc::clone(&shared_risk_level)),
+            is_primary: true,
         };
         tokio::spawn(run_event_consumer(deps))
     };
@@ -1891,6 +1892,7 @@ async fn async_main(
             symbol_registry: Some(Arc::clone(&symbol_registry)),
             scanner_store: Some(Arc::clone(&scanner_store)),
             shared_risk_level: Some(paper_rl),
+            is_primary: false,
         };
         let h = tokio::spawn(run_event_consumer(deps));
         info!("paper-alongside pipeline spawned / Paper 伴隨管線已啟動");
