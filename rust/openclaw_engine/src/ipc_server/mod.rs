@@ -160,6 +160,18 @@ impl EngineCommandChannels {
             &self.paper
         }
     }
+
+    /// Return the label of the primary engine ("live" / "demo" / "paper").
+    /// 返回主引擎的標籤。
+    pub fn primary_label(&self) -> &'static str {
+        if self.live.is_some() {
+            "live"
+        } else if self.demo.is_some() {
+            "demo"
+        } else {
+            "paper"
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -494,7 +494,7 @@ impl TickPipeline {
                         &self.governance,
                         &self.paper_state,
                         atr_value,
-                        GovernanceProfile::Production, // TODO(3E-2b): derive from self.pipeline_kind
+                        self.pipeline_kind.governance_profile(),
                     );
 
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
@@ -613,7 +613,7 @@ impl TickPipeline {
                         &self.governance,
                         &self.paper_state,
                         atr_value,
-                        GovernanceProfile::Exploration, // TODO(3E-2b): derive from self.pipeline_kind
+                        self.pipeline_kind.governance_profile(),
                     );
 
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）

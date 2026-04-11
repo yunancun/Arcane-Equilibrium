@@ -140,6 +140,7 @@ impl AuditWriter {
         match serde_json::to_string(record) {
             Ok(json) => {
                 use std::io::Write;
+                let is_new = !self.path.exists();
                 let mut file = match std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -151,6 +152,18 @@ impl AuditWriter {
                         return false;
                     }
                 };
+                // m-8: Set chmod 0600 on newly created audit files.
+                // m-8：新建審計文件設定 chmod 0600。
+                #[cfg(unix)]
+                if is_new {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &self.path,
+                        std::fs::Permissions::from_mode(0o600),
+                    );
+                }
+                #[cfg(not(unix))]
+                let _ = is_new;
                 if let Err(e) = writeln!(file, "{}", json) {
                     error!(error = %e, "audit write failed");
                     return false;

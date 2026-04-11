@@ -17,26 +17,21 @@ pub(super) fn handle_get_state(
     // placeholder; 1C-2 will replace with live ConfigStore<RiskConfig> snapshot.
     // ARCH-RC1 1C-1：風控展示欄位暫從 RiskConfig::default() 讀；1C-2 改真快照。
     let risk = crate::config::RiskConfig::default();
-    // Read system_mode from pipeline snapshot; fall back to "live_reserved" if unavailable.
-    // 從 pipeline 快照讀取 system_mode；不可用時回退到 "live_reserved"。
-    let system_mode = {
+    // Read system_mode + trading_mode from pipeline snapshot (single read).
+    // 從 pipeline 快照一次讀取 system_mode + trading_mode。
+    let (system_mode, trading_mode) = {
         let path = data_dir.join("pipeline_snapshot.json");
-        std::fs::read_to_string(&path)
+        let parsed = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|c| serde_json::from_str::<crate::pipeline_types::PipelineSnapshot>(&c).ok())
-            .map(|s| s.system_mode)
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok());
+        let sm = parsed.as_ref()
+            .and_then(|v| v.get("system_mode").and_then(|s| s.as_str().map(String::from)))
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "live_reserved".to_string())
-    };
-    // 3E-10.2: trading_mode derived from pipeline snapshot (TradingMode deleted).
-    // 3E-10.2：trading_mode 從管線快照派生（TradingMode 已刪除）。
-    let trading_mode = {
-        let path = data_dir.join("pipeline_snapshot.json");
-        std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .unwrap_or_else(|| "live_reserved".to_string());
+        let tm = parsed.as_ref()
             .and_then(|v| v.get("trading_mode").and_then(|t| t.as_str().map(String::from)))
-            .unwrap_or_else(|| "paper".to_string())
+            .unwrap_or_else(|| "paper".to_string());
+        (sm, tm)
     };
     let state = serde_json::json!({
         "status": "running",
@@ -885,9 +880,11 @@ pub(super) async fn handle_set_system_mode_broadcast(
     let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: resp_tx });
     // Fire-and-forget to other pipelines (they don't need response channels for broadcast)
     // 向其他管線 fire-and-forget（廣播不需要回應通道）
+    let primary_label = cmd_channels.primary_label();
     for (label, ch) in [("paper", &cmd_channels.paper), ("demo", &cmd_channels.demo), ("live", &cmd_channels.live)] {
         // Skip the primary (already sent above) and None channels
-        if std::ptr::eq(ch, primary_tx) { continue; }
+        // 跳過主管線（已發送）和 None 通道
+        if label == primary_label { continue; }
         if let Some(tx) = ch {
             let (other_resp_tx, _other_resp_rx) = tokio::sync::oneshot::channel();
             let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: other_resp_tx });

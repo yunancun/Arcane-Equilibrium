@@ -193,6 +193,12 @@ async fn async_main(
     let (event_tx, event_rx) = mpsc::channel::<PriceEvent>(EVENT_CHANNEL_SIZE);
 
     // ------------------------------------------------------------------
+    // Determine primary pipeline kind (single call, reused everywhere).
+    // 決定主管線類型（單次調用，全局複用）。
+    // ------------------------------------------------------------------
+    let primary_kind = determine_primary_kind();
+
+    // ------------------------------------------------------------------
     // Start IPC server / 啟動 IPC 服務器
     // ------------------------------------------------------------------
     let ipc_data_dir =
@@ -215,9 +221,8 @@ async fn async_main(
         {
             // 3E-10.1: Build EngineCommandChannels based on API key detection.
             use openclaw_engine::ipc_server::EngineCommandChannels;
-            let ipc_primary_kind = determine_primary_kind();
             let mut channels = EngineCommandChannels::default();
-            match ipc_primary_kind.db_mode() {
+            match primary_kind.db_mode() {
                 "paper" => {
                     channels.paper = Some(primary_cmd_tx.clone());
                 }
@@ -262,8 +267,7 @@ async fn async_main(
         None;
     let mut shared_account_manager: Option<Arc<AccountManager>> = None;
     let cfg_snapshot = config.get();
-    let primary_kind_early = determine_primary_kind();
-    let bybit_env = match primary_kind_early {
+    let bybit_env = match primary_kind {
         PipelineKind::Live => live_bybit_environment(),
         PipelineKind::Demo | PipelineKind::Paper => BybitEnvironment::Demo,
     };
@@ -271,7 +275,7 @@ async fn async_main(
     let initial_balance = fetch_exchange_balance(bybit_env).await;
 
     // MAJOR-4: Paper balance uses unified priority.
-    let paper_initial_balance: Option<f64> = if primary_kind_early == PipelineKind::Live {
+    let paper_initial_balance: Option<f64> = if primary_kind == PipelineKind::Live {
         Some(resolve_paper_initial_balance().await)
     } else {
         None
@@ -619,7 +623,6 @@ async fn async_main(
     // ------------------------------------------------------------------
     use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 
-    let primary_kind = determine_primary_kind();
     let spawn_paper_alongside = primary_kind != PipelineKind::Paper;
 
     // 3E D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
@@ -792,6 +795,7 @@ async fn async_main(
     if primary_kind == PipelineKind::Live {
         let live_cancel = cancel.clone();
         let live_crash_tx = cross_engine_tx.clone();
+        let live_health = Arc::clone(&primary_health);
         let thread_handle = std::thread::Builder::new()
             .name("oc-live-rt".into())
             .spawn(move || {
@@ -801,26 +805,41 @@ async fn async_main(
                     .thread_name("oc-live")
                     .build()
                     .expect("failed to build live runtime / 構建 live runtime 失敗");
-                live_rt.block_on(async {
-                    run_event_consumer(primary_deps).await;
-                    live_cancel.cancelled().await;
-                });
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    live_rt.block_on(async {
+                        run_event_consumer(primary_deps).await;
+                        live_cancel.cancelled().await;
+                    });
+                }));
+                if let Err(panic_info) = result {
+                    let msg = panic_info.downcast_ref::<&str>().copied()
+                        .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown panic");
+                    tracing::error!(kind = "live", panic = msg,
+                        "M-4: pipeline PANICKED — broadcasting Crashed / 管線 panic — 廣播 Crashed");
+                    live_health.store(
+                        openclaw_engine::tick_pipeline::PipelineHealth::Down as u8,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    let _ = live_crash_tx.send(openclaw_engine::tick_pipeline::EngineEvent::Crashed(PipelineKind::Live));
+                }
             })
             .expect("failed to spawn live thread / 啟動 live 線程失敗");
 
         let shutdown_cancel = cancel.clone();
         event_handle = tokio::spawn(async move {
             shutdown_cancel.cancelled().await;
-            drop(live_crash_tx);
         });
         _live_thread_handle = Some(thread_handle);
     } else {
         let crash_tx = cross_engine_tx.clone();
         let crash_kind = primary_kind;
+        let crash_health = Arc::clone(&primary_health);
         event_handle = tokio::spawn(async move {
             run_event_consumer(primary_deps).await;
             let _ = crash_tx;
             let _ = crash_kind;
+            let _ = crash_health;
         });
         _live_thread_handle = None;
     }
@@ -830,9 +849,9 @@ async fn async_main(
     // Spawn Paper-alongside pipeline (when primary is Demo or Live)
     // ------------------------------------------------------------------
     let _paper_handle = if spawn_paper_alongside {
-        let (_, paper_event_rx) = paper_alongside_channel.unwrap();
-        let pipeline_cmd_rx_paper = pipeline_cmd_rx_paper_opt.unwrap();
-        let paper_rl = paper_risk_level.unwrap();
+        let (_, paper_event_rx) = paper_alongside_channel.expect("paper channel must be Some when spawn_paper_alongside");
+        let pipeline_cmd_rx_paper = pipeline_cmd_rx_paper_opt.expect("paper cmd_rx must be Some when spawn_paper_alongside");
+        let paper_rl = paper_risk_level.expect("paper risk_level must be Some when spawn_paper_alongside");
         let paper_balance = paper_initial_balance.unwrap_or(initial_balance);
         let deps = EventConsumerDeps {
             pipeline_kind: PipelineKind::Paper,
@@ -898,14 +917,23 @@ async fn async_main(
 
         if spawn_paper_alongside {
             info!(kind = %primary_kind, "draining primary pipeline / 排空主管線");
-            let _ = event_handle.await;
+            match event_handle.await {
+                Err(e) if e.is_panic() => error!(kind = %primary_kind, "primary pipeline panicked during shutdown / 主管線 panic"),
+                _ => {}
+            }
 
             if let Some(ph) = _paper_handle {
                 info!("draining paper-alongside pipeline / 排空 Paper 伴隨管線");
-                let _ = ph.await;
+                match ph.await {
+                    Err(e) if e.is_panic() => error!("paper-alongside pipeline panicked during shutdown / Paper 伴隨管線 panic"),
+                    _ => {}
+                }
             }
         } else {
-            let _ = event_handle.await;
+            match event_handle.await {
+                Err(e) if e.is_panic() => error!(kind = %primary_kind, "primary pipeline panicked during shutdown / 主管線 panic"),
+                _ => {}
+            }
         }
     })
     .await;
