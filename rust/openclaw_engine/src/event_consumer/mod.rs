@@ -18,10 +18,7 @@ use types::STATUS_INTERVAL_SECS;
 pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
 use crate::persistence::{AuditWriter, StateWriter};
-use crate::strategies::{
-    bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
-    ma_crossover::MaCrossover,
-};
+use crate::strategies::StrategyFactory;
 use crate::tick_pipeline::TickPipeline;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -33,6 +30,7 @@ use tracing::{error, info, warn};
 /// 運行事件消費者循環：構建管線、註冊策略、處理 tick。
 pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let EventConsumerDeps {
+        pipeline_kind,
         mut event_rx,
         config,
         cancel,
@@ -44,7 +42,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         shared_client,
         bybit_balance: shared_bybit_balance,
         api_pnl: shared_api_pnl,
-        paper_cmd_rx,
+        pipeline_cmd_rx,
         market_data_tx,
         feature_tx,
         last_tick_ms: shared_last_tick_ms,
@@ -61,12 +59,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         scanner_store: _scanner_store,
         shared_risk_level,
     } = deps;
-    let mut paper_cmd_rx = paper_cmd_rx;
+    let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
     let cfg_snapshot = config.get();
 
-    // Build pipeline with Bybit Demo balance / 使用 Demo 餘額構建管線
-    let mut pipeline = TickPipeline::with_balance(SYMBOLS, initial_balance);
+    // Build pipeline with kind-appropriate governance + balance (3E-2a)
+    // 以 kind 對應的治理 + 餘額構建管線（3E-2a）
+    let mut pipeline = TickPipeline::with_kind(SYMBOLS, initial_balance, pipeline_kind);
 
     // D2/D3: Track known symbols so we can diff against registry and call
     // pipeline.add_symbol / remove_symbol when the scanner changes the universe.
@@ -324,15 +323,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         cfg_snapshot.shadow_orders || is_exchange_mode,
     );
 
-    // Register strategies / 註冊策略
-    pipeline.orchestrator.register(Box::new(MaCrossover::new()));
-    pipeline.orchestrator.register(Box::new(BbReversion::new()));
-    pipeline.orchestrator.register(Box::new(BbBreakout::new()));
-    pipeline
-        .orchestrator
-        .register(Box::new(GridTrading::new_adaptive()));
+    // Register strategies via factory (3E-9: single registration point)
+    // 通過工廠註冊策略（3E-9：唯一註冊點）
+    for strategy in StrategyFactory::create_all() {
+        pipeline.orchestrator.register(strategy);
+    }
 
-    // Grant paper authorization / 授予紙盤授權
+    // Grant paper authorization (redundant for Paper/Demo since with_kind() auto-grants,
+    // but kept for backward compat until 3E-4 cleans up). Harmless double-grant.
+    // 授予紙盤授權（Paper/Demo 用 with_kind() 已自動授權，保留向後兼容直到 3E-4 清理）
     match pipeline.grant_paper_auth() {
         Ok(()) => info!("paper authorization granted / 紙盤授權已授予"),
         Err(e) => {
@@ -685,7 +684,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
             // ── Paper session commands from IPC / 來自 IPC 的紙盤 session 命令 ──
             cmd = async {
-                if let Some(ref mut rx) = paper_cmd_rx { rx.recv().await } else { std::future::pending().await }
+                if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
                 if let Some(cmd) = cmd {
                     handlers::handle_paper_command(

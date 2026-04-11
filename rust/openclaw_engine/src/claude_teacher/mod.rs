@@ -35,7 +35,7 @@ pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockCl
 pub use consumer_loop::{ConsumerLoopConfig, ConsumerLoopStatus, TeacherConsumerLoop};
 pub use governance_impl::GovernanceCoreWrapper;
 pub use outcome_tracker::{sharpe_from_returns, OutcomeTracker, OutcomeWindow, PendingExecution};
-pub use strategy_ipc_impl::PaperSessionCommandSink;
+pub use strategy_ipc_impl::PipelineCommandSink;
 pub use parser::{parse_directive, Directive, DirectiveType, ParserError};
 pub use writer::{persist_directive, record_execution, WriterError};
 

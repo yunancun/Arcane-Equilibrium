@@ -10,12 +10,15 @@ use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 use crate::bybit_rest_client::BybitRestClient;
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
-use crate::tick_pipeline::PaperSessionCommand;
+use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use openclaw_types::PriceEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+// 3E D20: Fan-out sends Arc-wrapped events to avoid cloning HashMap metadata.
+// 3E D20：扇出發送 Arc 包裝事件，避免深拷貝 HashMap metadata。
 
 /// Symbols tracked by the engine / 引擎追蹤的交易對
 pub const SYMBOLS: &[&str] = &["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"];
@@ -62,7 +65,10 @@ pub struct PendingOrder {
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).
 /// 事件消費者依賴集合（W1 修復：避免 9+ 參數的函數）。
 pub struct EventConsumerDeps {
-    pub event_rx: mpsc::Receiver<PriceEvent>,
+    /// 3E-2a: Pipeline identity — determines governance profile, DB prefix, exchange binding.
+    /// 管線身份 — 決定治理檔案、DB 前綴、交易所綁定。
+    pub pipeline_kind: PipelineKind,
+    pub event_rx: mpsc::Receiver<Arc<PriceEvent>>,
     pub config: Arc<ConfigManager>,
     pub cancel: CancellationToken,
     pub initial_balance: f64,
@@ -83,7 +89,7 @@ pub struct EventConsumerDeps {
     pub api_pnl: Option<Arc<std::sync::RwLock<HashMap<String, f64>>>>,
     /// Paper session command receiver — IPC sends Pause/Resume/CloseAll/Reset.
     /// 紙盤 session 命令接收端 — IPC 發送 Pause/Resume/CloseAll/Reset。
-    pub paper_cmd_rx: Option<mpsc::UnboundedReceiver<PaperSessionCommand>>,
+    pub pipeline_cmd_rx: Option<mpsc::UnboundedReceiver<PipelineCommand>>,
     /// Phase 1: Channel to dispatch market data to async PG writer.
     /// Phase 1：市場數據派發通道。
     pub market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,

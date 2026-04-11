@@ -1192,6 +1192,7 @@ dependencies = [
  "ndarray",
  "openclaw_core",
  "openclaw_types",
+ "parking_lot",
  "reqwest",
  "rustls",
  "serde",

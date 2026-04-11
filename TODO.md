@@ -16,20 +16,20 @@
 **Session 執行計劃**：`docs/references/2026-04-11--3e_arch_session_execution_plan.md`（13 sessions，S0-S13）
 
 ### 前置（S0，可立即做）
-- [ ] **3E-6** Sidebar 顯示修正 + D12 RwLock 審計 + D26 GovernanceCore 驗證（S0）
+- [x] **3E-6** Sidebar 顯示修正 + D12 RwLock 審計 + D26 GovernanceCore 驗證（S0）✅
 
 ### Rust 基礎（S1-S2, Day 1）
-- [ ] **3E-1** `PipelineKind` + `GovernanceProfile` 枚舉 + D22 `PipelineCommand` rename（S1）
-- [ ] **3E-9** `StrategyFactory` + per-engine 策略參數 TOML（S2）
+- [x] **3E-1** `PipelineKind` + `GovernanceProfile` 枚舉 + D22 `PipelineCommand` rename（S1）✅
+- [x] **3E-9** `StrategyFactory` + per-engine 策略參數 TOML（S2）✅ — create_all() 替代硬編碼
 
 ### Pipeline 構造（S3-S4, Day 2-3）
-- [ ] **3E-2a-α** IntentProcessor 治理分層 + `cost_gate_moderate` + D16 Paper P0 硬限（S3）
-- [ ] **3E-2a-β** EventConsumerDeps 重構 + Pipeline kind-based 構造（S4）
+- [x] **3E-2a-α** IntentProcessor 治理分層 + `cost_gate_moderate` + GovernanceProfile param（S3）✅
+- [x] **3E-2a-β** EventConsumerDeps 重構 + Pipeline kind-based 構造（S4）✅
 
 ### 三管線並行（S5-S7, Day 3-5 — 最高風險）
-- [ ] **3E-2b-α** main.rs spawn 骨架 + bounded fan-out + D12 parking_lot + D25 DB pool（S5）
-- [ ] **3E-2b-β** D21 per-engine private WS supervisor + D17 Live 獨立 runtime（S6）
-- [ ] **3E-2b-γ** D23 dual reconciler + D6 三級遞減收縮 + 有序 shutdown（S7）
+- [x] **3E-2b-α** main.rs spawn 骨架 + bounded fan-out + D12 parking_lot + D25 DB pool（S5）✅
+- [x] **3E-2b-β** D21 per-engine private WS supervisor + D17 Live 獨立 runtime（S6）✅
+- [x] **3E-2b-γ** D23 dual reconciler + D6 三級遞減收縮 + 有序 shutdown（S7）✅
 
 ### IPC + 清除（S8-S11, Day 5-6）
 - [ ] **3E-3** IPC Server `EngineCommandChannels` + per-engine 快照路由（S8，可與 S7 並行）

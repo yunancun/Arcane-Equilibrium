@@ -526,7 +526,7 @@ async function checkLiveEngineStatus() {
   const data = (d && d.data) ? d.data : {};
   const sessionState = (data.session && data.session.session_state) || 'offline';
   const authority = data.execution_authority || 'not_granted';
-  const tradingMode = data.trading_mode || 'unknown';
+  const systemMode = data.system_mode || 'unknown';
   const contraction = data.contraction || {};
   const contractionState = contraction.state || 'normal';
   const drawdownPct = contraction.drawdown_pct;
@@ -566,11 +566,11 @@ async function checkLiveEngineStatus() {
     }
   }
 
-  // Show authority only when active (auto-granted on start); hide when idle
-  // 僅在 active 時顯示 authority（啟動時自動授予）；空閒時隱藏
+  // Show system_mode + authority when active; mode only when idle
+  // Active 時顯示 system_mode + authority；空閒時只顯示 mode
   detail.textContent = isActive
-    ? `mode: ${tradingMode} | authority: ${authority}`
-    : `mode: ${tradingMode}`;
+    ? `mode: ${systemMode.replace(/_/g, ' ')} | authority: ${authority}`
+    : `mode: ${systemMode.replace(/_/g, ' ')}`;
   if (btnStart) btnStart.disabled = isActive || contractionState === 'halted';
   if (btnStop) btnStop.disabled = !isActive && !isPausedOrStopped;
   if (btnEmg) btnEmg.disabled = !data.engine_available;

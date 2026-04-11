@@ -96,7 +96,7 @@ fn default_database_url() -> String {
     std::env::var("OPENCLAW_DATABASE_URL").unwrap_or_else(|_| String::new())
 }
 fn default_pool_max() -> u32 {
-    5
+    20
 }
 fn default_pool_min() -> u32 {
     2
@@ -446,7 +446,7 @@ mod tests {
     #[test]
     fn test_database_config_defaults() {
         let cfg = DatabaseConfig::default();
-        assert_eq!(cfg.pool_max_connections, 5);
+        assert_eq!(cfg.pool_max_connections, 20);
         assert_eq!(cfg.pool_min_connections, 2);
         assert_eq!(cfg.batch_flush_interval_ms, 2000);
         assert!((cfg.adwin_delta - 0.05).abs() < 1e-10);

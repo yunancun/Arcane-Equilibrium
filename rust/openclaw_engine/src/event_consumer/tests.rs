@@ -80,14 +80,14 @@ fn make_test_writer() -> crate::persistence::StateWriter {
 
 #[test]
 fn test_handle_pause_sets_paused() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
     pipeline.paper_paused = false;
 
     super::handlers::handle_paper_command(
-        PaperSessionCommand::Pause,
+        PipelineCommand::Pause,
         &mut pipeline,
         &mut writer,
         &mut pending,
@@ -97,7 +97,7 @@ fn test_handle_pause_sets_paused() {
 
 #[test]
 fn test_handle_resume_clears_paused_and_halt() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
@@ -105,7 +105,7 @@ fn test_handle_resume_clears_paused_and_halt() {
     pipeline.session_halted = true;
 
     super::handlers::handle_paper_command(
-        PaperSessionCommand::Resume,
+        PipelineCommand::Resume,
         &mut pipeline,
         &mut writer,
         &mut pending,
@@ -116,7 +116,7 @@ fn test_handle_resume_clears_paused_and_halt() {
 
 #[test]
 fn test_handle_reset_clears_state_and_pending() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
@@ -138,7 +138,7 @@ fn test_handle_reset_clears_state_and_pending() {
     pipeline.consecutive_losses.insert("BTCUSDT".into(), 3);
 
     super::handlers::handle_paper_command(
-        PaperSessionCommand::Reset {
+        PipelineCommand::Reset {
             new_balance: 5_000.0,
         },
         &mut pipeline,
@@ -154,13 +154,13 @@ fn test_handle_reset_clears_state_and_pending() {
 
 #[test]
 fn test_handle_get_strategy_params_unknown_returns_err() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::GetStrategyParams {
+        PipelineCommand::GetStrategyParams {
             strategy_name: "no_such_strategy".into(),
             response_tx: tx,
         },
@@ -175,14 +175,14 @@ fn test_handle_get_strategy_params_unknown_returns_err() {
 
 #[test]
 fn test_handle_update_risk_config_clamps_values() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
 
     // Push out-of-range values; clamp should bring them inside.
     super::handlers::handle_paper_command(
-        PaperSessionCommand::UpdateRiskConfig {
+        PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: Some(99.0),    // → 0.5
             trailing_stop_pct: None,
             time_stop_hours: None,
@@ -215,14 +215,14 @@ fn test_handle_update_risk_config_clamps_values() {
 
 #[test]
 fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
 
     // Apply valid + invalid mix; valid ones land, invalid ones rejected by patch fn.
     super::handlers::handle_paper_command(
-        PaperSessionCommand::UpdateRiskConfig {
+        PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: None,
             trailing_stop_pct: None,
             time_stop_hours: None,
@@ -256,13 +256,13 @@ fn test_pnl7_handle_dynamic_stop_knobs_apply_and_reject() {
 
 #[test]
 fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pipeline = make_test_pipeline();
     let mut writer = make_test_writer();
     let mut pending = std::collections::HashMap::new();
 
     super::handlers::handle_paper_command(
-        PaperSessionCommand::UpdateRiskConfig {
+        PipelineCommand::UpdateRiskConfig {
             hard_stop_pct: None,
             trailing_stop_pct: None,
             time_stop_hours: None,
@@ -359,11 +359,11 @@ fn run_looser(
     reason_code: &str,
     notes: &str,
 ) -> Result<String, String> {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::ForceGovernorLooser {
+        PipelineCommand::ForceGovernorLooser {
             target_tier: target.into(),
             reason_code: reason_code.into(),
             notes: notes.into(),
@@ -382,11 +382,11 @@ fn run_tighter(
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::ForceGovernorTighter {
+        PipelineCommand::ForceGovernorTighter {
             target_tier: target.into(),
             reason: reason.into(),
             response_tx: tx,
@@ -551,11 +551,11 @@ fn run_submit(
     side: &str,
     qty: f64,
 ) -> Result<String, String> {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::SubmitOrder {
+        PipelineCommand::SubmitOrder {
             symbol: symbol.into(),
             side: side.into(),
             qty,
@@ -672,11 +672,11 @@ fn run_reconciler_escalate(
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::ReconcilerEscalate {
+        PipelineCommand::ReconcilerEscalate {
             target_tier: target.into(),
             reason: reason.into(),
             response_tx: tx,
@@ -694,11 +694,11 @@ fn run_reconciler_de_escalate(
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
     let mut pending = std::collections::HashMap::new();
     let (tx, rx) = tokio::sync::oneshot::channel();
     super::handlers::handle_paper_command(
-        PaperSessionCommand::ReconcilerDeEscalate {
+        PipelineCommand::ReconcilerDeEscalate {
             target_tier: target.into(),
             reason: reason.into(),
             response_tx: tx,

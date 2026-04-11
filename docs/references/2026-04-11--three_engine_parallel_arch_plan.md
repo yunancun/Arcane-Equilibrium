@@ -497,6 +497,17 @@ grep -rn "std::sync::RwLock" rust/openclaw_engine/src/ rust/openclaw_core/src/
 ```
 如有 `std::sync::RwLock` 用於共享資源 → 替換為 `parking_lot::RwLock`。
 
+**S0 審計結果（2026-04-11）**：8 處 `std::sync::RwLock` 用法，全部在 `openclaw_engine`：
+- `main.rs:525` — `Arc<RwLock<EdgeEstimates>>`（跨 Pipeline 共享市場數據 → **需替換**）
+- `main.rs:1003` — `RwLock<HashMap<...>>`（mode_states → 3E-4 清除時一併處理）
+- `account_manager.rs:12` — `RwLock<AccountManager>`（per-engine → 不需替換）
+- `scanner/runner.rs:54,68` — `Arc<RwLock<EdgeEstimates>>`（共享 → **需替換**）
+- `instrument_info.rs:12` — `RwLock<InstrumentInfoCache>`（跨 Pipeline 共享 → **需替換**）
+- `event_consumer/types.rs:82-83` — `bybit_balance` + `api_pnl`（per-engine → 不需替換）
+- `openclaw_core` — 零 `std::sync::RwLock`。
+
+**結論**：3 處需在 S5（D12 實施步驟）替換為 `parking_lot::RwLock`：EdgeEstimates、InstrumentInfoCache。
+
 ### D13: 回滾安全策略（審查 PA-H3 修正）
 
 3E-1 **不立即刪除** `TradingMode` / `mode_states` / `set_trading_mode()`。而是：
@@ -677,6 +688,8 @@ grep -n "static\|lazy_static\|OnceCell\|GOVERNANCE" \
 ```
 
 **要求**：每個 GovernanceCore 實例必須完全獨立（獨立 SM-1 授權狀態、獨立 SM-2 租約追蹤）。如果現有實現有共享全局狀態，3E-2a 必須先重構為 per-instance 狀態。
+
+**S0 審計結果（2026-04-11）**：✅ **確認安全**。`governance_core.rs`（openclaw_core）無 `static`/`lazy_static`/`OnceCell`/`GOVERNANCE` 全局引用。`GovernanceCore::new()` 是純實例方法，所有狀態（SM-1/SM-2/SM-4）存在 struct fields 中。三引擎各自 `new_with_profile()` 不會互相干擾。`openclaw_engine/src/` 下亦無 governance 相關全局狀態。
 
 ---
 

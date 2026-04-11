@@ -792,7 +792,7 @@ mod tests {
     fn sample_cache() -> InstrumentInfoCache {
         let cache = InstrumentInfoCache::new();
         {
-            let mut map = cache.cache.write().unwrap();
+            let mut map = cache.cache.write();
             map.insert(
                 "BTCUSDT".to_string(),
                 SymbolSpec {

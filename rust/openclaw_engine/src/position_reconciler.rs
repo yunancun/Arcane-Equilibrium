@@ -560,6 +560,7 @@ fn spawn_reconcile_audit(
     side: &str,
     baseline_qty: Option<f64>,
     current_qty: Option<f64>,
+    engine_label: &str,
 ) {
     let Some(pool) = audit_pool.clone() else {
         return;
@@ -570,6 +571,7 @@ fn spawn_reconcile_audit(
         "side": side,
         "baseline_qty": baseline_qty,
         "current_qty": current_qty,
+        "engine": engine_label,
     });
     let event_type = format!("reconcile_{}", verdict.kind_str());
     let ts_ms = std::time::SystemTime::now()
@@ -623,6 +625,7 @@ pub async fn reconcile_once(
     pos_mgr: &PositionManager,
     audit_pool: &Option<sqlx::PgPool>,
     baseline: &HashMap<String, PositionView>,
+    engine_label: &str,
 ) -> Option<HashMap<String, PositionView>> {
     let current = fetch_current_view(pos_mgr).await?;
 
@@ -652,7 +655,7 @@ pub async fn reconcile_once(
             current_qty = ?current_qty,
             "reconcile drift detected (audit-only) / 對帳發現漂移（純審計）"
         );
-        spawn_reconcile_audit(audit_pool, &verdict, &sym, &side, baseline_qty, current_qty);
+        spawn_reconcile_audit(audit_pool, &verdict, &sym, &side, baseline_qty, current_qty, engine_label);
     }
 
     Some(current)
@@ -666,20 +669,27 @@ pub async fn reconcile_once(
 ///   3. Enter the cycle loop: reconcile_once → evaluate_actions → send commands.
 ///
 /// Phase 6 additions: `ReconcilerState` tracks drift streaks, cooldowns, and
-/// recovery progress. Actions are dispatched as `PaperSessionCommand` variants.
+/// recovery progress. Actions are dispatched as `PipelineCommand` variants.
 ///
 /// 長運行對帳任務（含 Phase 6 自動降級動作層）。
+/// 3E D23: `engine_label` identifies which pipeline owns this reconciler instance
+/// (e.g. "demo", "live"). Used in V014 audit events and log messages to
+/// distinguish per-engine reconciler output when multiple reconcilers run.
+/// 3E D23：`engine_label` 識別此對帳器實例所屬管線（如 "demo"、"live"）。
+/// 用於 V014 審計事件和日誌訊息，區分多對帳器並行時的輸出。
 pub async fn run_position_reconciler(
     pos_mgr: Arc<PositionManager>,
     audit_pool: Option<sqlx::PgPool>,
     cancel: CancellationToken,
-    cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PaperSessionCommand>,
+    cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PipelineCommand>,
     instrument_cache: Option<Arc<InstrumentInfoCache>>,
     get_risk_level: impl Fn() -> RiskLevel + Send + 'static,
+    engine_label: String,
 ) {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
 
     info!(
+        engine = %engine_label,
         interval_secs = RECONCILE_INTERVAL_SECS,
         minor_threshold_pct = MINOR_DRIFT_THRESHOLD_PCT,
         "position_reconciler started (Phase 6 auto-contraction) / 持倉對帳器啟動（Phase 6 自動降級）"
@@ -731,7 +741,7 @@ pub async fn run_position_reconciler(
                         if let Some(action) = check_rest_failure_escalation(
                             &mut rc_state, current_level, now,
                         ) {
-                            let sent = dispatch_action(&action, &cmd_tx, &audit_pool);
+                            let sent = dispatch_action(&action, &cmd_tx, &audit_pool, &engine_label);
                             if sent && rc_state.pre_escalation_level.is_none() {
                                 rc_state.pre_escalation_level = Some(current_level);
                             }
@@ -792,7 +802,7 @@ pub async fn run_position_reconciler(
                                 );
                                 spawn_reconcile_audit(
                                     &audit_pool, &verdict, &sym, &side,
-                                    baseline_qty, current_qty,
+                                    baseline_qty, current_qty, &engine_label,
                                 );
                                 drifts.push(((*key).clone(), verdict));
                             }
@@ -803,7 +813,7 @@ pub async fn run_position_reconciler(
                             &mut rc_state, current_level, &drifts, now,
                         );
                         for action in &actions {
-                            let sent = dispatch_action(action, &cmd_tx, &audit_pool);
+                            let sent = dispatch_action(action, &cmd_tx, &audit_pool, &engine_label);
                             // Set pre_escalation_level only after successful channel send.
                             // This prevents recording a floor for commands that failed to dispatch.
                             // 只在成功送入通道後設置 pre_escalation_level，
@@ -826,22 +836,23 @@ pub async fn run_position_reconciler(
     }
 }
 
-/// Dispatch a `ReconcilerAction` by sending the corresponding `PaperSessionCommand`.
+/// Dispatch a `ReconcilerAction` by sending the corresponding `PipelineCommand`.
 /// Returns `true` if the command was successfully sent to the channel.
-/// 分發 `ReconcilerAction`，發送對應的 `PaperSessionCommand`。成功送入通道返回 true。
+/// 分發 `ReconcilerAction`，發送對應的 `PipelineCommand`。成功送入通道返回 true。
 fn dispatch_action(
     action: &ReconcilerAction,
-    cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PaperSessionCommand>,
+    cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PipelineCommand>,
     audit_pool: &Option<sqlx::PgPool>,
+    engine_label: &str,
 ) -> bool {
-    use crate::tick_pipeline::PaperSessionCommand;
+    use crate::tick_pipeline::PipelineCommand;
 
     match action {
         ReconcilerAction::Escalate { target, reason } => {
             let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
             let event_type = "reconciler_auto_escalate";
-            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason);
-            if let Err(e) = cmd_tx.send(PaperSessionCommand::ReconcilerEscalate {
+            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason, engine_label);
+            if let Err(e) = cmd_tx.send(PipelineCommand::ReconcilerEscalate {
                 target_tier: target.as_str().to_string(),
                 reason: reason.clone(),
                 response_tx: resp_tx,
@@ -863,8 +874,8 @@ fn dispatch_action(
         ReconcilerAction::DeEscalate { target, reason } => {
             let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
             let event_type = "reconciler_auto_recover";
-            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason);
-            if let Err(e) = cmd_tx.send(PaperSessionCommand::ReconcilerDeEscalate {
+            spawn_action_audit(audit_pool, event_type, &target.as_str(), reason, engine_label);
+            if let Err(e) = cmd_tx.send(PipelineCommand::ReconcilerDeEscalate {
                 target_tier: target.as_str().to_string(),
                 reason: reason.clone(),
                 response_tx: resp_tx,
@@ -884,8 +895,8 @@ fn dispatch_action(
         }
         ReconcilerAction::CloseAll { reason } => {
             let event_type = "reconciler_close_all";
-            spawn_action_audit(audit_pool, event_type, "CIRCUIT_BREAKER", reason);
-            if let Err(e) = cmd_tx.send(PaperSessionCommand::CloseAll) {
+            spawn_action_audit(audit_pool, event_type, "CIRCUIT_BREAKER", reason, engine_label);
+            if let Err(e) = cmd_tx.send(PipelineCommand::CloseAll) {
                 warn!(error = %e, "failed to send CloseAll command / 發送全平倉命令失敗");
                 return false;
             }
@@ -902,11 +913,13 @@ fn spawn_action_audit(
     event_type: &str,
     target_tier: &str,
     reason: &str,
+    engine_label: &str,
 ) {
     let Some(pool) = audit_pool.clone() else { return };
     let payload = serde_json::json!({
         "target_tier": target_tier,
         "reason": reason,
+        "engine": engine_label,
     });
     let et = event_type.to_string();
     let ts_ms = now_ms_util() as i64;

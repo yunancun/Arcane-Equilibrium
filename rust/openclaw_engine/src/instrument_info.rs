@@ -9,7 +9,7 @@
 
 use crate::bybit_rest_client::{BybitApiError, BybitRestClient, BybitResult};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use parking_lot::RwLock;
 use tracing::info;
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ impl InstrumentInfoCache {
             .unwrap_or_default();
 
         let mut count = 0;
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write();
 
         for item in &list {
             if let Some(spec) = parse_instrument_item(item) {
@@ -202,19 +202,19 @@ impl InstrumentInfoCache {
     /// Get the SymbolSpec for a given symbol.
     /// 取得指定交易對的 SymbolSpec。
     pub fn get(&self, symbol: &str) -> Option<SymbolSpec> {
-        self.cache.read().unwrap().get(symbol).cloned()
+        self.cache.read().get(symbol).cloned()
     }
 
     /// Get lot size (qty_step) for a symbol. Returns None if not cached.
     /// 取得交易對的步長。未緩存時返回 None。
     pub fn get_lot_size(&self, symbol: &str) -> Option<f64> {
-        self.cache.read().unwrap().get(symbol).map(|s| s.qty_step)
+        self.cache.read().get(symbol).map(|s| s.qty_step)
     }
 
     /// Get tick size for a symbol. Returns None if not cached.
     /// 取得交易對的 tick 精度。未緩存時返回 None。
     pub fn get_tick_size(&self, symbol: &str) -> Option<f64> {
-        self.cache.read().unwrap().get(symbol).map(|s| s.tick_size)
+        self.cache.read().get(symbol).map(|s| s.tick_size)
     }
 
     /// Round qty for a symbol using cached spec.
@@ -222,9 +222,8 @@ impl InstrumentInfoCache {
     pub fn round_qty(&self, symbol: &str, qty: f64) -> Option<f64> {
         self.cache
             .read()
-            .unwrap()
             .get(symbol)
-            .map(|s| s.round_qty(qty))
+            .map(|s: &SymbolSpec| s.round_qty(qty))
     }
 
     /// Round price for a symbol using cached spec.
@@ -232,27 +231,26 @@ impl InstrumentInfoCache {
     pub fn round_price(&self, symbol: &str, price: f64) -> Option<f64> {
         self.cache
             .read()
-            .unwrap()
             .get(symbol)
-            .map(|s| s.round_price(price))
+            .map(|s: &SymbolSpec| s.round_price(price))
     }
 
     /// Get all cached symbols.
     /// 取得所有已緩存的交易對。
     pub fn symbols(&self) -> Vec<String> {
-        self.cache.read().unwrap().keys().cloned().collect()
+        self.cache.read().keys().cloned().collect()
     }
 
     /// Get number of cached symbols.
     /// 取得已緩存的交易對數量。
     pub fn len(&self) -> usize {
-        self.cache.read().unwrap().len()
+        self.cache.read().len()
     }
 
     /// Check if cache is empty.
     /// 檢查緩存是否為空。
     pub fn is_empty(&self) -> bool {
-        self.cache.read().unwrap().is_empty()
+        self.cache.read().is_empty()
     }
 }
 
@@ -527,7 +525,7 @@ mod tests {
     fn test_cache_manual_insert_and_query() {
         let cache = InstrumentInfoCache::new();
         {
-            let mut map = cache.cache.write().unwrap();
+            let mut map = cache.cache.write();
             map.insert("BTCUSDT".to_string(), sample_btc_spec());
         }
 
