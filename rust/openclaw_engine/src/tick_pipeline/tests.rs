@@ -28,6 +28,73 @@ use super::*;
         assert_eq!(p_live.pipeline_kind.db_mode(), "live");
     }
 
+    /// 3E-ARCH regression: emit_close_fill must embed `pipeline_kind.db_mode()`
+    /// into fill_id / order_id / context_id so that Paper/Demo/Live records
+    /// sharing the same trading_tx channel never collide on `ON CONFLICT DO NOTHING`.
+    /// Locks the fix from commit d670759 (BUG-1/2/3).
+    /// 3E-ARCH 回歸：emit_close_fill 必須將 db_mode() 嵌入 fill_id / order_id /
+    /// context_id，避免三引擎共享 trading_tx 時 ON CONFLICT DO NOTHING 互相吞掉。
+    /// 鎖定 commit d670759 的修復（BUG-1/2/3）。
+    #[test]
+    fn test_emit_close_fill_embeds_engine_mode_per_kind() {
+        let kinds = [
+            (PipelineKind::Paper, "paper"),
+            (PipelineKind::Demo, "demo"),
+            (PipelineKind::Live, "live"),
+        ];
+        for (kind, expected_em) in kinds {
+            let mut pipeline =
+                TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, kind);
+            let (tx, mut rx) =
+                tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+            pipeline.set_trading_channel(tx);
+
+            // Trigger the risk-close path. Direct call covers fill_id /
+            // order_id / context_id / engine_mode embedding all at once.
+            // 直接觸發 risk-close 路徑，一次覆蓋四個 ID 欄位。
+            pipeline.emit_close_fill(
+                "BTCUSDT",
+                true,    // is_long
+                0.1,     // qty
+                50_000.0, // price
+                123,     // ts_ms
+                0.0,     // realized_pnl
+                "sl_hit",
+            );
+
+            let msg = rx
+                .try_recv()
+                .expect("emit_close_fill must enqueue a Fill message");
+            match msg {
+                crate::database::TradingMsg::Fill {
+                    fill_id,
+                    order_id,
+                    context_id,
+                    engine_mode,
+                    ..
+                } => {
+                    assert_eq!(
+                        engine_mode, expected_em,
+                        "{:?}: engine_mode tag", kind
+                    );
+                    assert!(
+                        fill_id.starts_with(&format!("close-{}-", expected_em)),
+                        "{:?}: fill_id={} missing engine_mode", kind, fill_id
+                    );
+                    assert!(
+                        order_id.starts_with(&format!("risk_close_{}_", expected_em)),
+                        "{:?}: order_id={} missing engine_mode", kind, order_id
+                    );
+                    assert!(
+                        context_id.starts_with(&format!("ctx-{}-", expected_em)),
+                        "{:?}: context_id={} missing engine_mode", kind, context_id
+                    );
+                }
+                other => panic!("{:?}: expected Fill, got {:?}", kind, other),
+            }
+        }
+    }
+
     #[test]
     fn test_pipeline_kind_is_exchange() {
         assert!(!PipelineKind::Paper.is_exchange());
