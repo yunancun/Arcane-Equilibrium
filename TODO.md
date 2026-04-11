@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-E2 Phase F 完成 — 5 超限文件拆分）
+最後更新：2026-04-11（3E-E2 Phase G 通過 — 9/9 角色 PASS，0 BLOCKER）
 測試基準線：**Rust engine lib 929 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -38,8 +38,8 @@
 - [x] **3E-7+8** API Key 衝突偵測 409 + Watchdog multi-snapshot + Paper balance GUI（S11）✅
 
 ### 驗收（S12-S13, Day 7-8）
-- [🟡] **3E-E2** 多角色並行審計已跑，**不通過** — 10 BLOCKER + 7 MAJOR + MEGA-BLOCKER-0（見 Phase A-G）
-- [ ] **3E-E4** E4 測試回歸 + ~40 新增 tests（S13，基線：897 lib + 18 e2e + 2792 Python）— 阻塞於 Phase E
+- [x] **3E-E2** Phase G 重審 **9/9 PASS** — 0 BLOCKER / 4 MAJOR（非阻塞）/ 10 MINOR。原 10B+7M 全確認修復。報告：`docs/audits/2026-04-11--3e_arch_phase_g_reaudit.md`
+- [x] **3E-E4** E4 測試回歸 PASS — 929 lib + 366 core + 18 e2e = 1313 passed / 0 failed / 0 ignored
 
 **排期**：W22（2026-05-05~12）—— 8 個工作日  
 **Session 間恢復**：compact 後讀 TODO.md 找下一個 `[ ]` → 讀 plan 對應 § → `cargo test --lib | tail -3` 確認基線
@@ -110,13 +110,18 @@
   - `intent_processor.rs` 1785→ mod.rs(493) + gates.rs(204) + router.rs(499) + tests.rs(597)
   - `position_reconciler.rs` 1397→ mod.rs(617) + escalation.rs(351) + tests.rs(438)
 
-### Phase G — 重跑驗收
-- [ ] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查**
-- [ ] 通過後：更新 TODO.md 標記 `3E-E2` / `3E-E4` 為 `[x]`
-- [ ] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
+### Phase G — 重跑驗收 ✅
+- [x] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查** — **9/9 PASS**
+- [x] 通過後：更新 TODO.md 標記 `3E-E2` / `3E-E4` 為 `[x]`
+- [x] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
+- **殘留 4 MAJOR**（非阻塞，已記入 backlog）：
+  - M-1: `handlers.rs` 1195 行（下次加 handler 前拆分）
+  - M-2: `on_tick.rs` 1172 行（監控）
+  - M-3: GovernanceProfile hardcoded（TODO(3E-2b)，W22）
+  - M-4: 無 catch_unwind 包裹 pipeline（Live 前修）
 
 **Phase 依賴圖**：  
-`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G`  
+`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G ✅`  
 **總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
 
 ---
