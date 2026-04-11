@@ -25,8 +25,13 @@ restart_api() {
     lsof -ti :8000 | xargs kill -9 2>/dev/null || true
     sleep 2
     echo ">>> Starting API server ($WORKERS workers)..."
+    # Pass DB URL to API server for metrics DB fallback (fills query).
+    # 傳遞 DB URL 給 API 以支持指標 DB 降級（成交查詢）。
+    local pg_pass
+    pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
     cd program_code/exchange_connectors/bybit_connector/control_api_v1
-    .venv/bin/python3 .venv/bin/uvicorn app.main:app \
+    OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
+        .venv/bin/python3 .venv/bin/uvicorn app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" &
     cd - > /dev/null
 }
