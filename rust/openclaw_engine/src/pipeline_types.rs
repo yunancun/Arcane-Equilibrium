@@ -90,6 +90,15 @@ pub struct TimestampedFill {
 /// 完整管線快照供 IPC 消費者使用。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineSnapshot {
+    /// MAJOR-7: Schema version for forward-compatible migration.
+    /// 快照格式版本號，供未來遷移使用。
+    #[serde(default = "default_snapshot_schema_version")]
+    pub schema_version: String,
+    /// MAJOR-7: Wall-clock timestamp (ms) when this snapshot was serialized.
+    /// Readers can detect cross-engine staleness by comparing written_at_ms values.
+    /// 快照序列化時的 wall-clock 時間戳（ms），讀取端可用於偵測跨引擎時間差。
+    #[serde(default)]
+    pub written_at_ms: u64,
     /// Paper trading state / 紙盤交易狀態
     pub paper_state: crate::paper_state::PaperStateSnapshot,
     /// Latest per-symbol prices / 每交易對最新價格
@@ -154,4 +163,8 @@ pub struct PipelineSnapshot {
     /// 全局系統模式字符串 — 從 Python GUI 同步，在 tick 級別封鎖交易。
     #[serde(default)]
     pub system_mode: String,
+}
+
+fn default_snapshot_schema_version() -> String {
+    "2.0.0".into()
 }

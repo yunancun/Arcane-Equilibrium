@@ -619,6 +619,20 @@ async fn dispatch_request(
         }
     };
 
+    // MAJOR-5: Per-engine IPC audit log — every routed request is traced with
+    // method + target engine for post-hoc forensics.
+    // MAJOR-5：每引擎 IPC 審計日誌 — 記錄 method + 目標引擎以供事後取證。
+    {
+        let target_engine = req.params.get("engine")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(default)");
+        tracing::info!(
+            ipc_method = method,
+            target_engine = target_engine,
+            "ipc_audit: dispatching request / IPC 審計：分發請求"
+        );
+    }
+
     match method {
         "ping" => handle_ping(id),
         "get_state" => handle_get_state(id, config, data_dir),
@@ -2174,6 +2188,8 @@ mod tests {
     fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let snapshot = PipelineSnapshot {
+            schema_version: "2.0.0".into(),
+            written_at_ms: 1700000050000,
             paper_state: crate::paper_state::PaperStateSnapshot {
                 balance: 9500.0,
                 peak_balance: 10000.0,

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-E2 多角色審計後 — Phase A-G 補入 + MEGA-BLOCKER-0 錄入）
-測試基準線：**Rust engine lib 897 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-11（3E-E2 Phase D 完成 — 7 BLOCKER/MAJOR 架構級補完）
+測試基準線：**Rust engine lib 904 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -87,14 +87,16 @@
 
 **Phase B+C 測試結果**：cargo test lib **904 passed** / 0 failed + e2e **18 passed** / 0 failed。
 
-### Phase D — 架構級補完（2-3 天，依賴 Phase C）
-- [ ] **BLOCKER-2** D6 三級遞減收縮實施（`cross_engine_notify` + `EngineEvent::Crashed` + `PipelineHealth`）+ `tokio::spawn` catch_unwind（Paper crash → Demo Cautious 60s / Demo crash → Live Cautious 120s）
-- [ ] **BLOCKER-3** D15 `global_notional_cap_usdt` 實施（跨引擎 portfolio-level 曝險上限）
-- [ ] **BLOCKER-4** D17 Live 獨立 tokio Runtime（避免與 Paper/Demo CPU 爭搶）
-- [ ] **MAJOR-2** 啟動競態修復（barrier 或 initialization signal 阻塞等待三引擎 ready）
-- [ ] **MAJOR-3** shutdown 分級順序（Live → Demo → Paper，避免 Paper 先死帶走 DB writer）
-- [ ] **MAJOR-5** IPC per-engine audit log（`EngineCommandChannels::select` 路由日誌）
-- [ ] **MAJOR-7** snapshot 格式版本號（未來 migration 保險）
+### Phase D — 架構級補完（2-3 天，依賴 Phase C）✅ 完成
+- [x] **BLOCKER-2** D6 三級遞減收縮實施（`EngineEvent::Crashed/CircuitBreakerTripped` + `PipelineHealth` atomic + `broadcast::channel` 跨引擎通知 + CB 事件自動廣播 + 對等管線 Cautious 升級）
+- [x] **BLOCKER-3** D15 `global_notional_cap_usdt` 實施（`Arc<AtomicU64>` 跨引擎共享 + `IntentProcessor.check_global_notional_cap()` Gate 2.7 後檢查 + Paper 排除）
+- [x] **BLOCKER-4** D17 Live 獨立 tokio Runtime（`std::thread` + `runtime::Builder::new_multi_thread().worker_threads(2)` + Demo/Paper 留共享 runtime）
+- [x] **MAJOR-2** 啟動競態修復（`oneshot::channel` per-pipeline ready 信號 + fan-out 等待 60s 超時）
+- [x] **MAJOR-3** shutdown 分級順序（WS+IPC → Primary(Live/Demo) → Paper，10s 超時 + Live thread join）
+- [x] **MAJOR-5** IPC per-engine audit log（`dispatch_request` 入口 `tracing::info!` 記錄 `ipc_method` + `target_engine`）
+- [x] **MAJOR-7** snapshot 格式版本號（`PipelineSnapshot` 新增 `schema_version: "2.0.0"` + `written_at_ms`）
+
+**Phase D 測試結果**：cargo test lib **904 passed** + core **366 passed** + e2e **18 passed** / 0 failed。
 
 ### Phase E — 測試補完（1-2 天，即 3E-E4 session）
 - [ ] **BLOCKER-10** 補 ~23 blocker tests（D1/D2/D6/D21/D23/D15/D17 + StopManager 綁定/MAJOR-6）
@@ -114,7 +116,7 @@
 - [ ] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
 
 **Phase 依賴圖**：  
-`Phase A ✅ → Phase B → Phase C (MEGA-BLOCKER-0) → Phase D → Phase E → Phase F → Phase G`  
+`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E → Phase F → Phase G`  
 **總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
 
 ---

@@ -141,6 +141,44 @@ impl std::fmt::Display for PipelineKind {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BLOCKER-2 D6: Cross-engine event types for crash cascade notification
+// 跨引擎事件類型，用於崩潰級聯通知
+// ---------------------------------------------------------------------------
+
+/// Cross-engine events broadcast from one pipeline to all others.
+/// 從一個管線廣播到所有其他管線的跨引擎事件。
+#[derive(Debug, Clone)]
+pub enum EngineEvent {
+    /// Pipeline panicked or task exited unexpectedly / 管線 panic 或任務異常退出
+    Crashed(PipelineKind),
+    /// Pipeline's risk governor tripped to CircuitBreaker / 管線風控觸發熔斷
+    CircuitBreakerTripped(PipelineKind),
+}
+
+/// Per-pipeline health status (stored as AtomicU8 for lock-free reads).
+/// 每管線健康狀態（以 AtomicU8 存儲，無鎖讀取）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PipelineHealth {
+    /// Pipeline is running normally / 管線正常運行
+    Running = 0,
+    /// Pipeline is paused (risk contraction) / 管線已暫停（風控收縮）
+    Paused = 1,
+    /// Pipeline has crashed or been shut down / 管線已崩潰或關閉
+    Down = 2,
+}
+
+impl PipelineHealth {
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Running,
+            1 => Self::Paused,
+            _ => Self::Down,
+        }
+    }
+}
+
 // GovernanceProfile is re-exported from openclaw_core::governance_core (3E-1 / D3).
 // GovernanceProfile 從 openclaw_core::governance_core 重導出。
 
@@ -679,6 +717,12 @@ impl TickPipeline {
     /// PH5-WIRE-1：將 JS 收縮邊際估計注入意圖處理器。
     pub fn set_edge_estimates(&mut self, estimates: crate::edge_estimates::EdgeEstimates) {
         self.intent_processor.set_edge_estimates(estimates);
+    }
+
+    /// BLOCKER-3 D15: Wire shared cross-engine global exposure atomic.
+    /// BLOCKER-3 D15：接入跨引擎全局曝險共享原子量。
+    pub fn set_global_exposure(&mut self, exposure: std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        self.intent_processor.set_global_exposure(exposure);
     }
 
     /// W-3: Plug in a LinUCB runtime (read-only on the live path; metadata only).
@@ -2787,6 +2831,11 @@ impl TickPipeline {
         }
 
         PipelineSnapshot {
+            schema_version: "2.0.0".into(),
+            written_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
             paper_state: self.paper_state.export_state(),
             latest_prices: self.latest_prices.clone(),
             stats: self.stats.clone(),

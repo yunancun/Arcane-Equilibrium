@@ -160,4 +160,21 @@ pub struct EventConsumerDeps {
     /// 3E-5: Whether this is the primary pipeline (writes compat pipeline_snapshot.json).
     /// 3E-5：是否為主管線（寫入兼容的 pipeline_snapshot.json）。
     pub is_primary: bool,
+    /// MAJOR-2: Startup barrier — pipeline sends () after initialization completes,
+    /// letting the fan-out task know it's safe to start delivering ticks.
+    /// MAJOR-2：啟動屏障 — 管線初始化完成後發送 ()，通知扇出任務可以開始分發 tick。
+    pub ready_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// BLOCKER-3 D15: Shared cross-engine global exposure (USDT × 100 as AtomicU64).
+    /// Only exchange pipelines (Demo/Live) should write; Paper is excluded.
+    /// BLOCKER-3 D15：跨引擎全局曝險原子量（USDT × 100），僅交易所管線更新。
+    pub global_exposure_usdt: Option<Arc<std::sync::atomic::AtomicU64>>,
+    /// BLOCKER-2 D6: Cross-engine event sender — broadcast crash/CB events to peers.
+    /// BLOCKER-2 D6：跨引擎事件發送端 — 向對等管線廣播崩潰/熔斷事件。
+    pub cross_engine_tx: Option<tokio::sync::broadcast::Sender<crate::tick_pipeline::EngineEvent>>,
+    /// BLOCKER-2 D6: Cross-engine event receiver — react to peer crash/CB events.
+    /// BLOCKER-2 D6：跨引擎事件接收端 — 對對等管線崩潰/熔斷事件作出反應。
+    pub cross_engine_rx: Option<tokio::sync::broadcast::Receiver<crate::tick_pipeline::EngineEvent>>,
+    /// BLOCKER-2 D6: Per-pipeline health atomic (written by this pipeline, read by others).
+    /// BLOCKER-2 D6：管線健康原子量（本管線寫入，其他管線讀取）。
+    pub pipeline_health: Option<Arc<std::sync::atomic::AtomicU8>>,
 }

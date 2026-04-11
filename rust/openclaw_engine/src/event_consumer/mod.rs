@@ -59,6 +59,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         scanner_store: _scanner_store,
         shared_risk_level,
         is_primary,
+        ready_tx,
+        global_exposure_usdt,
+        cross_engine_tx,
+        cross_engine_rx,
+        pipeline_health,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
 
@@ -200,6 +205,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         pipeline.set_edge_estimates(estimates);
     }
 
+    // BLOCKER-3 D15: Wire global exposure atomic (exchange pipelines only).
+    // BLOCKER-3 D15：接入全局曝險原子量（僅交易所管線）。
+    if let Some(ge) = global_exposure_usdt {
+        pipeline.set_global_exposure(ge);
+        info!("pipeline wired to global notional cap / 接入全局名目上限");
+    }
+
     // Item 3: Bybit sync mode — set initial sync balance / 設定 Bybit 同步餘額
     if cfg_snapshot.balance_mode == "bybit_sync" {
         pipeline
@@ -328,6 +340,13 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         SYMBOLS.len(),
     );
 
+    // MAJOR-2: Signal that this pipeline has completed initialization.
+    // Fan-out task waits for all pipelines before distributing ticks.
+    // MAJOR-2：通知此管線已完成初始化。扇出任務等所有管線就緒後才分發 tick。
+    if let Some(tx) = ready_tx {
+        let _ = tx.send(());
+    }
+
     // Kline bootstrap: fetch 200 1m bars per symbol via REST (eliminates 30min cold start)
     // K 線引導：通過 REST 為每個幣種獲取 200 根 1 分鐘歷史 K 線（消除 30 分鐘冷啟動）
     if cfg_snapshot.kline_bootstrap {
@@ -444,9 +463,59 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let pending_timeout = std::time::Duration::from_secs(5);
 
     // ── Main event loop / 主事件循環 ──
+    // BLOCKER-2 D6: Shadow local copies for the select! loop.
+    let mut cross_engine_rx = cross_engine_rx;
+    let _cross_engine_tx = cross_engine_tx;
+    let _pipeline_health = pipeline_health;
+
+    // BLOCKER-2 D6: Set health to Running at loop start.
+    if let Some(ref h) = _pipeline_health {
+        h.store(
+            crate::tick_pipeline::PipelineHealth::Running as u8,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
     loop {
         tokio::select! {
             _ = cancel.cancelled() => break,
+
+            // ── BLOCKER-2 D6: Cross-engine crash/CB event handler ──
+            // ── BLOCKER-2 D6：跨引擎崩潰/熔斷事件處理 ──
+            engine_evt = async {
+                if let Some(ref mut rx) = cross_engine_rx { rx.recv().await } else { std::future::pending().await }
+            } => {
+                match engine_evt {
+                    Ok(crate::tick_pipeline::EngineEvent::Crashed(crashed_kind)) => {
+                        warn!(
+                            this = %pipeline_kind, crashed = %crashed_kind,
+                            "BLOCKER-2: peer pipeline crashed — escalating to Cautious (60s) \
+                             / 對等管線崩潰 — 升級至 Cautious（60s）"
+                        );
+                        // Cascade: escalate this pipeline's risk to Cautious.
+                        // 級聯：將本管線風控升級至 Cautious。
+                        let duration_s = if crashed_kind == crate::tick_pipeline::PipelineKind::Paper { 60 } else { 120 };
+                        let _ = pipeline.governance.risk.reconciler_escalate_to(
+                            openclaw_core::sm::risk_gov::RiskLevel::Cautious,
+                            &format!("cross_engine_cascade: {} crashed, hold {}s", crashed_kind, duration_s),
+                        );
+                    }
+                    Ok(crate::tick_pipeline::EngineEvent::CircuitBreakerTripped(cb_kind)) => {
+                        warn!(
+                            this = %pipeline_kind, cb = %cb_kind,
+                            "BLOCKER-2: peer pipeline hit circuit breaker — escalating to Cautious \
+                             / 對等管線觸發熔斷 — 升級至 Cautious"
+                        );
+                        let _ = pipeline.governance.risk.reconciler_escalate_to(
+                            openclaw_core::sm::risk_gov::RiskLevel::Cautious,
+                            &format!("cross_engine_cascade: {} circuit_breaker", cb_kind),
+                        );
+                    }
+                    Err(_) => {
+                        // Sender dropped — all peers gone, no more events.
+                    }
+                }
+            },
 
             // ── D3: Receive async kline bootstrap results and seed pipeline ──
             // ── D3：接收異步 K 線引導結果並植入管線 ──
@@ -687,11 +756,20 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     );
                     // Phase 6: sync governor risk level to shared atomic for reconciler.
                     // Phase 6：同步 governor 風控級別到共享原子量供對帳器讀取。
+                    let current_level = pipeline.governance.risk.snapshot_level();
                     if let Some(ref rl) = shared_risk_level {
                         rl.store(
-                            pipeline.governance.risk.snapshot_level().value(),
+                            current_level.value(),
                             std::sync::atomic::Ordering::Relaxed,
                         );
+                    }
+
+                    // BLOCKER-2 D6: Broadcast CircuitBreaker event to peer pipelines.
+                    // BLOCKER-2 D6：向對等管線廣播熔斷事件。
+                    if current_level == openclaw_core::sm::risk_gov::RiskLevel::CircuitBreaker {
+                        if let Some(ref tx) = _cross_engine_tx {
+                            let _ = tx.send(crate::tick_pipeline::EngineEvent::CircuitBreakerTripped(pipeline_kind));
+                        }
                     }
                 }
             },
@@ -1000,6 +1078,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     }
 
     // Force-write final state / 強制寫入最終狀態
+    // BLOCKER-2 D6: Mark pipeline as Down on exit.
+    // BLOCKER-2 D6：退出時標記管線為 Down。
+    if let Some(ref h) = _pipeline_health {
+        h.store(
+            crate::tick_pipeline::PipelineHealth::Down as u8,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
     let snap = pipeline.paper_state.export_state();
     state_writer.force_write(&snap);
     let full_snap = pipeline.snapshot();
