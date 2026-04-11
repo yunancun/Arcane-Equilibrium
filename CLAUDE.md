@@ -50,6 +50,8 @@
 
 **StrategyAction Enum ✅**（2026-04-09）— 策略出場死鎖修復。策略 `on_tick()` 返回 `Vec<StrategyAction>`（`Open` 走完整治理，`Close` 輕量路徑繞過 Guardian/cost_gate/Kelly/P1）。5 策略改造完畢 + QC/FA 全修（grid 庫存漂移 P1、exchange Kelly P2、audit logging P2）。830 lib tests pass。
 
+**3E-ARCH 三引擎並行架構 ✅**（2026-04-11）— Paper/Demo/Live 三管線同時並行（各自依 API key 存在性獨立啟停）。`TradingMode` 徹底刪除 → `PipelineKind` 不可變。Per-engine TOML 配置 + `PerEngineRiskStores` + `StrategyFactory::create_for_engine()`。D6 三級故障收縮 + D15 全局名義值上限 + D17 Live 獨立 runtime。3E-E2 Fix Rounds Phase A-G 完成：10 BLOCKER + 7 MAJOR 全修 → Phase G 9/9 角色 PASS（0 BLOCKER / 4 MAJOR 非阻塞）。5 超限文件拆分（tick_pipeline / ipc_server / main / intent_processor / position_reconciler）。929 engine lib + 366 core + 18 e2e = 1313 tests passed。
+
 **Multi-Symbol Position Tracking ✅**（2026-04-11）— 4 策略（MaCrossover/BbReversion/BbBreakout/GridTrading）從單一全局 `position: Option<bool>` 改為 `HashMap<String, bool>` per-symbol 獨立追蹤。GridTrading `new()`/`new_geometric()` 移除硬編碼 symbol + 預填 grid，改為 `template_bounds` 延遲初始化。理論併發上限 4→100（4策略×25symbols），實際受 `open_positions_max`/`max_same_direction` 風控約束。879 lib tests pass。
 
 **Phase 5 P0 ACTIVE**（2026-04-08 提前）— Edge 危機：realized ≈ 2 bps vs fee 11 bps。PH5-WIRE-0 ✅ · PH5-DL-2+JS-1 ✅ · PH5-WIRE-1 ✅（mode-aware cost_gate 已上線，引擎已加載 8 cells，exploration mode 激活）· 5-01~03 ✅（per-param JS + k-means）· PH5-VERIFY-1 ⬜（7d 觀察期進行中）。**數據策略**：2026-04-10 執行 DB fresh-start reset（71.3M 開發噪音行清除，市場數據保留）。乾淨數據從 2026-04-10 重新起算，JS-1 滾動重跑排程：Day 2（2026-04-11）`--days 2` → Day 3（2026-04-12）`--days 3` → Day 7（2026-04-17）`--days 7` → 之後每週拉長窗口直到估計穩定。
@@ -278,4 +280,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-11：tests engine lib **879** + e2e **18** / Python **2792** passed **0 fail** · **system_mode GUI→Rust 同步 ✅**（SetSystemMode IPC + on_tick gate + 6 files） · **3E-ARCH 計劃 ✅**（三引擎並行 + trading_mode 清除方案，W22） · **Multi-Symbol Position Tracking ✅** · **W21 6-04~08 ✅** · **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：3E-6 Sidebar 修正（立即）→ 6-09~13 PM 驗收（W21）→ 3E-ARCH（W22）。
+> 截至 2026-04-11：tests engine lib **929** + core **366** + e2e **18** / Python **2792** passed **0 fail** · **3E-ARCH 完成 ✅**（三引擎並行 + TradingMode 刪除 + 3E-E2 Phase A-G 9/9 PASS） · **Multi-Symbol Position Tracking ✅** · **W21 6-04~08 ✅** · **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：6-09~13 PM 驗收（W21）→ G-1 AI Agent（W22）。
