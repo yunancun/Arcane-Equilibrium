@@ -704,7 +704,7 @@ async function loadAuditTrail() {
     for (const r of records) {
       // 服务端字段: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
       // Server fields: timestamp, who, what, reason, change_type, old_value, new_value, auto_approved, affected_components
-      const timeStr = r.timestamp ? ocTime(r.timestamp) : '--';
+      const timeStr = r.when_ms ? ocTime(r.when_ms) : (r.when ? ocTime(r.when * 1000) : '--');
       const who = r.who || '--';
       const what = r.what || '--';
       const changeType = r.change_type || '--';

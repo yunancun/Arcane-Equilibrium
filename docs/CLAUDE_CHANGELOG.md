@@ -1,7 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-11
+> 最後更新：2026-04-12
+
+### Phase 6 PM 驗收 PASS + TODO 歸檔整理（2026-04-12）
+
+6-09~13 最終驗收週期完成。E4: 935 engine lib + 366 core + 18 e2e + 32 promotion = 1351 passed / 0 failed / 0 warnings。E2: Reconciler 0 BLOCKER 0 MAJOR（pre_escalation_level 文檔建議 MINOR）· Promotion Pipeline 0 BLOCKER 0 MAJOR（governance_routes 超限 pre-existing）。QA: 三引擎存活 + 雙 Reconciler 運行 + baseline seeded + API auth enforced。E5: stress PASS。Phase 6 路線圖狀態從 🟡 升為 ✅。TODO.md 歸檔：晚間 Audit BLOCKERs（B-1/B-2/M-1~4）+ Phase 6 驗收詳情移入 `docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`；3E-ARCH 折疊內容移除（已有專屬歸檔）；排期表更新 W19-21 ✅；Gap 索引標記 G-3/G-5/G-9 完成。
+
+### GUI 指標 DB 降級 + 顯示修復 4 項（2026-04-12）
+
+(1) Live engine badge 顯示「已暫停」— `get_live_session_status()` 改用 `get_engine_snapshot()` 讀頂層 `paper_paused`。(2) Performance Metrics 全 0 — 新增 `fetch_fills_from_db(engine_mode)` DB 降級讀取，paper 1336 fills / demo 68 fills 正確顯示。(3) Live 掛單 Price/Status 顯示 "--" — `OrderInfo` 新增 `trigger_price` 欄位 + JS snake_case 兼容。(4) Demo 夏普比率硬編碼 N/A — 改為從 round-trip PnL 計算。worklog: `docs/worklogs/2026-04-12--gui_metrics_db_fallback_and_display_fixes.md`。935 engine lib + 366 core + 22 paper_metrics pass。
 
 ### 3E-ARCH GUI 路由修復：Paper tab 顯示 Live 引擎數據（2026-04-11）
 

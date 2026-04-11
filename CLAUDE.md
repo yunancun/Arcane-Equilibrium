@@ -260,16 +260,16 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 **當前焦點（2026-04-10 審計後更新）**：10 個架構 gap 全部入計劃（TODO.md Gap 索引）。
 - **W19（04-14~18）**：G-3 IPC 認證 + G-5 Rate Limiting + OC-3 多通道告警 + 6-RC-6 ✅
 - **W20（04-21~25）**：SEC-04/06/13 E3 審查 + G-9 HMAC 確認 + WP-CC(FS-1/BI-1/P9/SM-1) + 6-01~03 漸進放權 ✅
-- **W21（04-28~05-02）**：6-04~08 ✅ · 6-09~13 Phase 6 PM 驗收；LG-1 21d paper 到期（05-01）
+- **W21（04-28~05-02）**：6-04~08 ✅ · 6-09~13 Phase 6 PM 驗收 ✅；LG-1 21d paper 到期（05-01）
 - **W22（05-05~09）**：G-1 R-02 AI Agent（Strategist/Guardian）+ G-2/OC-5 FundingArb + LG-2/3
 - **W23（05-12~16）**：G-1 R-06 全 5 agent + G-7 ClaudeTeacher + G-10 Calibration + LG-4/5 Live
 
-**關鍵路徑**：`G-3 → OC-3 → 6-RC-6 → 6-01~13 → LG-1(05-01) → LG-2 → LG-4 → Live`
+**關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
 
-**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) 🟡** 自動降級 ✅ · 告警 ✅ · 漸進放權 ✅ · 壓測+驗收 ✅ · PM 端到端 ⬜ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
+**路線圖**：Phase 0-5 ✅ · Live GUI P0~P6 ✅ · **Phase 6 (W19-21) ✅** 自動降級 ✅ · 告警 ✅ · 漸進放權 ✅ · 壓測+驗收 ✅ · PM 端到端 ✅ · **AI 治理層 (W22-W23) ⬜**（H1-H5 AI agent 目前全 stub）。
 
-**Live 前置**：Paper trading ≥21d · ~~G-3 IPC 認證~~ ✅ · ~~G-5 Rate Limiting~~ ✅ · Phase 6 驗收完成 · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
+**Live 前置**：Paper trading ≥21d · ~~G-3 IPC 認證~~ ✅ · ~~G-5 Rate Limiting~~ ✅ · ~~Phase 6 驗收~~ ✅ · provider pricing 綁定。API key 填入即可上線（所有代碼阻隔已移除）。
 
 **關鍵文件指針**（按需 Read，不要全載入）：
 - Bybit API 字典/審計：`docs/references/2026-04-04--bybit_api_reference.md` · `docs/audits/2026-04-04--bybit_api_infra_audit.md`
@@ -280,4 +280,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-11：tests engine lib **930** + core **366** + e2e **29** / Python **2792**（+6 ipc_state_reader regression）passed **0 fail** · **0 cargo warnings** · **3E-ARCH L3 審計 PASS ✅**（9 角色並行：PM/PA/FA/CC/E3/E4/E5/MIT/QC 全通過）· **3E-ARCH MEGA-BLOCKER-0 修復 ✅**（真正三引擎獨立並行）· **3E-ARCH 留尾修復 ✅**（with_kind 持久化 + Python 路由 paper-tab 顯式 engine="paper"）· **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：6-09~13 PM 驗收（W21）→ G-1 AI Agent（W22）。
+> 截至 2026-04-12：tests engine lib **935** + core **366** + e2e **18** + promotion **32** = **1351** / Python **2792** passed **0 fail** · **0 cargo warnings** · **Phase 6 PM 驗收 PASS ✅**（E2 0 BLOCKER · E4 1351 pass · QA 三引擎+雙 Reconciler 確認 · E5 stress PASS）· **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：G-1 AI Agent（W22）→ LG-1 21d paper 到期（05-01）。
