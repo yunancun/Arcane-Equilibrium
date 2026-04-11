@@ -103,15 +103,42 @@ async def get_demo_status(actor: base.AuthenticatedActor = Depends(base.current_
 
 @phase2_router.get("/demo/balance")
 async def get_demo_balance(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get Bybit Demo account balance via PyO3 BybitClient / 通過 PyO3 獲取 Demo 餘額"""
+    """
+    Get Bybit Demo account balance via PyO3 BybitClient.
+    Also exposes engine-side session baseline (initial_balance, peak_balance) so the
+    GUI can show "session initial / peak" that resets on engine process restart and
+    persists across pause/resume.
+    通過 PyO3 獲取 Demo 餘額；同時暴露引擎側 session 基線（initial_balance / peak_balance），
+    供 GUI 顯示「本次 session 初始 / 峰值」，引擎進程重啟時重置，pause/resume 期間保持不變。
+    """
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
         wallet = rc.refresh_balance()
-        return _envelope({"source": "rust_engine", **wallet})
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Bybit balance fetch failed: {exc}")
+
+    # Pull per-engine session baseline from Rust snapshot (paper_state sub-dict).
+    # 從 Rust 快照拉取本 session 的基線（paper_state 子字段）。
+    session_baseline: dict[str, Any] = {}
+    try:
+        from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+        demo_state = get_rust_reader().get_paper_state(engine="demo") or {}
+        if demo_state:
+            session_baseline = {
+                "engine_initial_balance": demo_state.get("initial_balance"),
+                "engine_peak_balance": demo_state.get("peak_balance"),
+                "engine_current_balance": demo_state.get("balance"),
+                "engine_realized_pnl": demo_state.get("total_realized_pnl"),
+                "engine_total_fees": demo_state.get("total_fees"),
+            }
+    except Exception:
+        # Snapshot read is best-effort — wallet data is the primary payload.
+        # 快照讀取是 best-effort — wallet 數據才是主要 payload。
+        pass
+
+    return _envelope({"source": "rust_engine", **wallet, **session_baseline})
 
 
 @phase2_router.get("/demo/positions")
@@ -293,6 +320,65 @@ def _ipc_command_sync_import():
     return _ipc_command
 
 
+async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
+    """Close any exchange Demo positions not tracked in paper_state (orphan sweep).
+
+    ipc_close_all() only iterates paper_state — positions that exist on the exchange
+    but not in paper_state are silently skipped.  This sweep queries the exchange via
+    BybitClient and issues a close_position IPC (with exchange-side hints) for every
+    open position, so orphans are caught regardless.
+
+    Uses reduce_only market orders — safe to call even if the position was already
+    closed by the preceding close_all_positions IPC (exchange will reject with a
+    benign "position size zero" error; Rust logs and ignores it).
+
+    IPC close_all 只遍歷 paper_state，交易所有但 paper_state 沒有的「孤兒倉位」
+    會被靜默跳過。本函數通過 BybitClient 查詢交易所所有持倉，對每個持倉發
+    close_position IPC（帶 exchange-side hints），確保孤兒倉位也被平掉。
+    使用 reduce_only 市價單，若倉位已被前一個 close_all 平掉則交易所拒單（無害）。
+    """
+    rc = _get_rust_client()
+    if rc is None:
+        return {"skipped": True, "reason": "rust_client_unavailable"}
+
+    positions: list = []
+    try:
+        positions = rc.get_positions("linear") or []
+    except Exception as exc:
+        logger.warning("Orphan sweep: get_positions failed: %s", exc)
+        errors.append(f"orphan_sweep_query: {exc}")
+        return {"skipped": True, "reason": str(exc)}
+
+    open_positions = [p for p in positions if float(p.get("size") or p.get("qty") or 0) > 0]
+    if not open_positions:
+        return {"swept": 0}
+
+    _ipc_command = _ipc_command_sync_import()
+    swept = 0
+    for p in open_positions:
+        sym = p.get("symbol", "")
+        size = float(p.get("size") or p.get("qty") or 0)
+        if not sym or size <= 0:
+            continue
+        ipc_params: dict = {
+            "symbol": sym,
+            "engine": "demo",
+            "is_long": p.get("side") == "Buy",
+            "qty": size,
+        }
+        try:
+            await _ipc_command("close_position", ipc_params)
+            swept += 1
+            logger.warning(
+                "Orphan sweep: close_position %s qty=%.4f is_long=%s (demo)",
+                sym, size, ipc_params["is_long"],
+            )
+        except Exception as exc:
+            logger.warning("Orphan sweep: close_position %s failed: %s", sym, exc)
+
+    return {"swept": swept, "found": len(open_positions)}
+
+
 @phase2_router.post("/demo/session/start")
 async def post_demo_session_start(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
@@ -380,17 +466,23 @@ async def post_demo_session_stop(
         except Exception as e:
             errors.append(f"demo_close: {e}")
             logger.error("IPC close_all_positions (demo) failed: %s", e)
+        # Orphan sweep: close any exchange positions not tracked in paper_state.
+        # ipc_close_all only covers paper_state — orphan positions on the exchange
+        # (e.g. FARTCOINUSDT opened externally or after paper_state reset) are missed.
+        # 孤兒清掃：平掉交易所有但 paper_state 沒有的倉位。
+        orphan_result = await _sweep_demo_orphan_positions(errors)
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "demo"})
         except Exception as e:
             errors.append(f"demo_pause: {e}")
             logger.error("IPC pause_paper (demo) failed: %s", e)
     else:
-        close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+        close_result = pause_result = orphan_result = {"skipped": True, "reason": "engine_offline"}
     return _envelope({
         "message": "Demo engine stopped — positions closed / Demo 引擎已停止，倉位已平",
         "source": "rust_engine",
         "demo_close": close_result,
+        "orphan_sweep": orphan_result,
         "demo_pause": pause_result,
         "errors": errors if errors else None,
         "session": {"session_state": "stopped"},
