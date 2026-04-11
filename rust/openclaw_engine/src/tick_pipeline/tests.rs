@@ -1,0 +1,930 @@
+use super::*;
+
+    fn make_event(symbol: &str, price: f64, ts: u64) -> PriceEvent {
+        PriceEvent::new(symbol.to_string(), price, ts)
+    }
+
+    // ── 3E-1: PipelineKind + GovernanceProfile tests ──
+
+    #[test]
+    fn test_pipeline_kind_db_mode() {
+        assert_eq!(PipelineKind::Paper.db_mode(), "paper");
+        assert_eq!(PipelineKind::Demo.db_mode(), "demo");
+        assert_eq!(PipelineKind::Live.db_mode(), "live");
+    }
+
+    #[test]
+    fn test_pipeline_kind_is_exchange() {
+        assert!(!PipelineKind::Paper.is_exchange());
+        assert!(PipelineKind::Demo.is_exchange());
+        assert!(PipelineKind::Live.is_exchange());
+    }
+
+    #[test]
+    fn test_pipeline_kind_governance_profile() {
+        assert_eq!(PipelineKind::Paper.governance_profile(), GovernanceProfile::Exploration);
+        assert_eq!(PipelineKind::Demo.governance_profile(), GovernanceProfile::Validation);
+        assert_eq!(PipelineKind::Live.governance_profile(), GovernanceProfile::Production);
+    }
+
+    #[test]
+    fn test_governance_profile_authorization_requirements() {
+        assert!(!GovernanceProfile::Exploration.requires_authorization());
+        assert!(!GovernanceProfile::Validation.requires_authorization());
+        assert!(GovernanceProfile::Production.requires_authorization());
+    }
+
+    #[test]
+    fn test_governance_profile_lease_requirements() {
+        assert!(!GovernanceProfile::Exploration.requires_lease());
+        assert!(!GovernanceProfile::Validation.requires_lease());
+        assert!(GovernanceProfile::Production.requires_lease());
+    }
+
+    #[test]
+    fn test_pipeline_kind_serde_roundtrip() {
+        for kind in [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live] {
+            let json = serde_json::to_string(&kind).expect("serialize");
+            let back: PipelineKind = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn test_pipeline_kind_display() {
+        assert_eq!(format!("{}", PipelineKind::Paper), "paper");
+        assert_eq!(format!("{}", PipelineKind::Demo), "demo");
+        assert_eq!(format!("{}", PipelineKind::Live), "live");
+    }
+
+    /// 3E D10/D20: Verify Arc<PriceEvent> fan-out delivers to multiple receivers.
+    /// 3E D10/D20：驗證 Arc<PriceEvent> 扇出可向多個接收端投遞。
+    #[tokio::test]
+    async fn test_fanout_arc_price_event() {
+        use std::sync::Arc;
+        use tokio::sync::mpsc;
+        let (tx1, mut rx1) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(16);
+        let (tx2, mut rx2) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(16);
+        let event = openclaw_types::PriceEvent::new("BTCUSDT".into(), 50000.0, 1000);
+        let arc_event = Arc::new(event);
+        tx1.try_send(Arc::clone(&arc_event)).unwrap();
+        tx2.try_send(arc_event).unwrap();
+        let e1 = rx1.recv().await.unwrap();
+        let e2 = rx2.recv().await.unwrap();
+        assert_eq!(e1.symbol, "BTCUSDT");
+        assert_eq!(e2.symbol, "BTCUSDT");
+        assert_eq!(e1.last_price, e2.last_price);
+    }
+
+    /// 3E D10: Verify try_send returns Err when channel is full (lag detection).
+    /// 3E D10：驗證通道滿時 try_send 返回 Err（延遲檢測）。
+    #[tokio::test]
+    async fn test_fanout_lag_detection() {
+        use std::sync::Arc;
+        use tokio::sync::mpsc;
+        // Buffer size 1 — second send should fail
+        let (tx, _rx) = mpsc::channel::<Arc<openclaw_types::PriceEvent>>(1);
+        let e1 = Arc::new(openclaw_types::PriceEvent::new("A".into(), 1.0, 1));
+        let e2 = Arc::new(openclaw_types::PriceEvent::new("B".into(), 2.0, 2));
+        assert!(tx.try_send(e1).is_ok());
+        assert!(tx.try_send(e2).is_err()); // channel full → lag detected
+    }
+
+    #[test]
+    fn test_pipeline_creation() {
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(pipeline.stats.total_ticks, 0);
+    }
+
+    #[test]
+    fn test_pipeline_on_tick() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000));
+        assert_eq!(pipeline.stats.total_ticks, 1);
+    }
+
+    #[test]
+    fn test_pipeline_multiple_ticks() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
+        for i in 0..50 {
+            pipeline.on_tick(&make_event("BTCUSDT", 50000.0 + i as f64, i * 60_000));
+        }
+        assert_eq!(pipeline.stats.total_ticks, 50);
+    }
+
+    #[test]
+    fn test_position_snapshot_emitted_every_1000_ticks() {
+        // GAP-7 regression: PositionSnapshot must be emitted every 1000 ticks
+        // for every open paper position when trading_tx is wired.
+        // GAP-7 回歸：掛接 trading_tx 時每 1000 ticks 為每個持倉發射快照。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8192);
+        pipeline.set_trading_channel(tx);
+        // Open a paper long position directly.
+        // 直接建立紙盤多單持倉。
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+        // Pump exactly 1000 ticks. total_ticks becomes 1000 -> snapshot.
+        // 打 1000 tick，total_ticks 達到 1000 觸發快照。
+        for i in 0..1000 {
+            pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, (i + 1) * 60_000));
+        }
+        // Drain channel; expect at least one PositionSnapshot for BTCUSDT.
+        // 抽取通道；至少應有一條 BTCUSDT 的 PositionSnapshot。
+        let mut found = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let crate::database::TradingMsg::PositionSnapshot {
+                symbol,
+                side,
+                qty,
+                mark_price,
+                unrealized_pnl,
+                ..
+            } = msg
+            {
+                if symbol == "BTCUSDT" {
+                    assert_eq!(side, "long");
+                    assert!((qty - 0.1).abs() < 1e-9);
+                    assert!((mark_price - 50_000.0).abs() < 1e-9);
+                    assert!(unrealized_pnl.abs() < 1e-6);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found,
+            "expected a PositionSnapshot for BTCUSDT; positions={}",
+            pipeline.paper_state.position_count()
+        );
+    }
+
+    #[test]
+    fn test_position_snapshot_noop_without_channel() {
+        // Without trading_tx wired, snapshot loop must be a no-op and never panic.
+        // 未掛接 trading_tx 時快照循環必須無動作且不 panic。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", false, 0.2, 50_000.0, 0.0, 0);
+        for i in 0..1000 {
+            pipeline.on_tick(&make_event("BTCUSDT", 49_000.0, (i + 1) * 60_000));
+        }
+        assert_eq!(pipeline.stats.total_ticks, 1000);
+    }
+
+    #[test]
+    fn test_pipeline_with_auth() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.grant_paper_auth().unwrap();
+        assert!(pipeline.governance.is_authorized());
+    }
+
+    #[test]
+    fn test_canary_mode_off_returns_none() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert!(!pipeline.canary_mode);
+        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000));
+        assert!(record.is_none());
+    }
+
+    #[test]
+    fn test_canary_mode_on_returns_record() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.canary_mode = true;
+        let record = pipeline.on_tick(&make_event("BTCUSDT", 50000.0, 1000));
+        assert!(record.is_some());
+        let r = record.unwrap();
+        assert_eq!(r.schema_version, "1.0.0");
+        assert_eq!(r.source, "rust_engine");
+        assert_eq!(r.tick_number, 1);
+        assert_eq!(r.symbol, "BTCUSDT");
+        assert_eq!(r.price, 50000.0);
+        assert_eq!(r.timestamp_ms, 1000);
+    }
+
+    #[test]
+    fn test_canary_record_serializable() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.canary_mode = true;
+        let record = pipeline
+            .on_tick(&make_event("BTCUSDT", 50000.0, 1000))
+            .unwrap();
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains("\"schema_version\":\"1.0.0\""));
+        assert!(json.contains("\"source\":\"rust_engine\""));
+        // Deserialize back / 反序列化
+        let r2: CanaryRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(r2.tick_number, record.tick_number);
+    }
+
+    #[test]
+    fn test_snapshot_to_input() {
+        let snap = IndicatorSnapshot {
+            sma_20: Some(50000.0),
+            sma_50: None,
+            ema_12: Some(50100.0),
+            ema_26: None,
+            rsi_14: Some(55.0),
+            macd: None,
+            bollinger: None,
+            atr_14: None,
+            atr_5: None,
+            stochastic: None,
+            kama: None,
+            adx: None,
+            hurst: None,
+            ewma_vol: None,
+            volume_ratio: Some(1.2),
+            donchian: None,
+        };
+        let input = snapshot_to_input(&snap);
+        assert_eq!(input.sma, Some(50000.0));
+        assert_eq!(input.rsi, Some(55.0));
+        assert_eq!(input.volume_ratio, Some(1.2));
+    }
+
+    // ─── I-08 Dual-Rail Stop tests (Principle #9) ───
+    // 雙軌止損測試：驗證 broker-side SL 只在 primary exchange mode 開倉時啟用
+
+    #[test]
+    fn test_dual_rail_shadow_order_has_sl_fields() {
+        // Struct must expose stop_loss / take_profit for broker rail wiring
+        let req = ShadowOrderRequest {
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            price: 50000.0,
+            strategy: "test".into(),
+            paper_fill_ts: 0,
+            is_close: false,
+            order_link_id: "oc_test".into(),
+            is_primary: true,
+            stop_loss: Some(49000.0),
+            take_profit: Some(52000.0),
+        };
+        assert_eq!(req.stop_loss, Some(49000.0));
+        assert_eq!(req.take_profit, Some(52000.0));
+    }
+
+    #[test]
+    fn test_dual_rail_broker_sl_long_below_entry() {
+        // Long SL must sit below entry price
+        let entry: f64 = 50000.0;
+        let sl_pct: f64 = 2.0;
+        let sl = entry * (1.0 - sl_pct / 100.0);
+        assert!(sl < entry);
+        assert!((sl - 49000.0f64).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_dual_rail_broker_sl_short_above_entry() {
+        // Short SL must sit above entry price
+        let entry: f64 = 50000.0;
+        let sl_pct: f64 = 2.0;
+        let sl = entry * (1.0 + sl_pct / 100.0);
+        assert!(sl > entry);
+        assert!((sl - 51000.0f64).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_dual_rail_close_orders_no_broker_sl() {
+        // Close orders never attach broker SL (Bybit auto-cancels on reduce-only fill)
+        let req = ShadowOrderRequest {
+            symbol: "BTCUSDT".into(),
+            is_long: false,
+            qty: 0.01,
+            price: 50000.0,
+            strategy: "risk_check".into(),
+            paper_fill_ts: 0,
+            is_close: true,
+            order_link_id: "oc_risk".into(),
+            is_primary: true,
+            stop_loss: None,
+            take_profit: None,
+        };
+        assert!(req.stop_loss.is_none());
+        assert!(req.is_close);
+    }
+
+    #[test]
+    fn test_dual_rail_paper_shadow_skips_broker_sl() {
+        // Paper/shadow orders keep broker SL None (engine rail handles stops locally)
+        let req = ShadowOrderRequest {
+            symbol: "ETHUSDT".into(),
+            is_long: true,
+            qty: 0.1,
+            price: 3000.0,
+            strategy: "ma".into(),
+            paper_fill_ts: 0,
+            is_close: false,
+            order_link_id: "sh_test".into(),
+            is_primary: false,
+            stop_loss: None,
+            take_profit: None,
+        };
+        assert!(!req.is_primary);
+        assert!(req.stop_loss.is_none());
+    }
+
+    fn make_signal(symbol: &str, dir: openclaw_core::signals::SignalDirection, ts_ms: u64) -> openclaw_core::signals::Signal {
+        openclaw_core::signals::Signal {
+            symbol: symbol.into(),
+            direction: dir,
+            confidence: 0.5,
+            edge_bps: 10.0,
+            source: "ma_crossover".into(),
+            timeframe: "1m".into(),
+            reasoning: "test".into(),
+            ts_ms,
+        }
+    }
+
+    #[test]
+    fn test_dbrun1_first_signal_persisted() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_unchanged_signal_throttled_within_heartbeat() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Same direction, +30s → throttled
+        assert!(!p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 31_000)));
+        assert_eq!(p.signals_throttled(), 1);
+    }
+
+    #[test]
+    fn test_dbrun1_direction_change_breaks_throttle() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Direction flips → persist immediately even within heartbeat
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Short, 5_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_heartbeat_elapsed_persists() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Same direction, 60s later → heartbeat fires
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 61_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_disable_throttle() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        p.set_signals_heartbeat_ms(0);
+        // Every call persists, no dedupe state consulted
+        for ts in [1, 2, 3, 4, 5] {
+            assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, ts)));
+        }
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun3_close_position_returns_pnl() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        // Open long at 50k, close at 51k → +0.1 * 1000 = +$100 realized
+        p.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
+        let pnl = p.paper_state.close_position("BTCUSDT", 51_000.0, 1_000);
+        assert_eq!(pnl, Some(100.0));
+        // Subsequent close on same symbol → None
+        let none = p.paper_state.close_position("BTCUSDT", 52_000.0, 2_000);
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn test_dbrun3_emit_close_fill_increments_stats() {
+        let mut p = TickPipeline::new(&["BTCUSDT"]);
+        let before = p.stats.total_fills;
+        p.emit_close_fill("BTCUSDT", true, 0.1, 51_000.0, 1_000, 100.0, "test");
+        assert_eq!(p.stats.total_fills, before + 1);
+    }
+
+    #[test]
+    fn test_dbrun2_context_counter_starts_zero() {
+        let p = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(p.context_throttled(), 0);
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_dbrun1_per_symbol_strategy_isolation() {
+        use openclaw_core::signals::SignalDirection;
+        let mut p = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
+        p.set_signals_heartbeat_ms(60_000);
+        assert!(p.should_persist_signal(&make_signal("BTCUSDT", SignalDirection::Long, 1_000)));
+        // Different symbol, same strategy → independent key, persists
+        assert!(p.should_persist_signal(&make_signal("ETHUSDT", SignalDirection::Long, 1_000)));
+        assert_eq!(p.signals_throttled(), 0);
+    }
+
+    #[test]
+    fn test_pnl3_boot_cooldown_stamps_first_tick() {
+        // PNL-3: First tick stamps boot_ts_ms; subsequent ticks reuse it.
+        // PNL-3：首個 tick 記錄 boot_ts_ms；後續 tick 沿用。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert!(pipeline.boot_ts_ms.is_none());
+        pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 1_000_000));
+        assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
+        pipeline.on_tick(&make_event("BTCUSDT", 50_001.0, 1_010_000));
+        assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_hurst_priority() {
+        use openclaw_core::indicators::{HurstResult, IndicatorSnapshot};
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut ind = IndicatorSnapshot::default();
+        ind.hurst = Some(HurstResult { hurst: 0.7, regime: "trending".into() });
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "trending");
+        ind.hurst = Some(HurstResult { hurst: 0.3, regime: "mean_reverting".into() });
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "ranging");
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_adx_fallback() {
+        use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot};
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut ind = IndicatorSnapshot::default();
+        ind.hurst = Some(HurstResult { hurst: 0.5, regime: "random_walk".into() });
+        ind.adx = Some(AdxResult { adx: 30.0, plus_di: 25.0, minus_di: 10.0 });
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "trending");
+        ind.adx = Some(AdxResult { adx: 15.0, plus_di: 10.0, minus_di: 12.0 });
+        assert_eq!(pipeline.derive_regime(Some(&ind)), "ranging");
+    }
+
+    #[test]
+    fn test_pnl4_derive_regime_none_default() {
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(pipeline.derive_regime(None), "ranging");
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_no_boot_ts() {
+        // 1C-3-B: before first tick, boot_ts_ms is None → remaining = 0
+        // 1C-3-B：第一個 tick 之前 boot_ts_ms 為 None → 剩餘 0
+        let pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let snap = pipeline.risk_runtime_status_json(1_000_000);
+        assert_eq!(snap["boot_cooldown_remaining_ms"], 0);
+        assert_eq!(snap["paper_paused"], false);
+        assert_eq!(snap["session_halted"], false);
+        assert!(snap["governor_tier"].is_string());
+        assert!(snap["consecutive_losses_by_symbol"].is_object());
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_boot_cooldown_math() {
+        // 1C-3-B: boot at t=1000, cooldown=60s, now=t=11000 → remaining 50s
+        // 1C-3-B：boot 時間 1000、冷卻 60s、現在 11000 → 剩 50s
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.boot_ts_ms = Some(1_000);
+        pipeline.boot_cooldown_ms = 60_000;
+        let snap = pipeline.risk_runtime_status_json(11_000);
+        assert_eq!(snap["boot_cooldown_remaining_ms"], 50_000);
+        assert_eq!(snap["boot_cooldown_total_ms"], 60_000);
+        // Past expiry → saturating to 0
+        // 過期 → 飽和到 0
+        let snap2 = pipeline.risk_runtime_status_json(999_999_999);
+        assert_eq!(snap2["boot_cooldown_remaining_ms"], 0);
+    }
+
+    #[test]
+    fn test_rc1b2_parse_risk_level_aliases() {
+        use openclaw_core::sm::risk_gov::RiskLevel;
+        assert_eq!(TickPipeline::parse_risk_level("normal").unwrap(), RiskLevel::Normal);
+        assert_eq!(TickPipeline::parse_risk_level("CAUTIOUS").unwrap(), RiskLevel::Cautious);
+        assert_eq!(TickPipeline::parse_risk_level("circuit_breaker").unwrap(), RiskLevel::CircuitBreaker);
+        assert_eq!(TickPipeline::parse_risk_level("CircuitBreaker").unwrap(), RiskLevel::CircuitBreaker);
+        assert_eq!(TickPipeline::parse_risk_level("manual_review").unwrap(), RiskLevel::ManualReview);
+        assert!(TickPipeline::parse_risk_level("foo").is_err());
+    }
+
+    #[test]
+    fn test_rc1b2_governor_cooldown_const_24h() {
+        // 1C-3-B-2: 24h = 86_400_000 ms
+        // 1C-3-B-2：24h = 86_400_000 ms
+        assert_eq!(TickPipeline::GOVERNOR_DE_ESCALATION_COOLDOWN_MS, 86_400_000);
+    }
+
+    #[test]
+    fn test_rc1b2_de_escalation_reason_whitelist() {
+        let valid = TickPipeline::VALID_DE_ESCALATION_REASONS;
+        assert!(valid.contains(&"false_positive"));
+        assert!(valid.contains(&"root_cause_fixed"));
+        assert!(valid.contains(&"accept_risk"));
+        assert!(!valid.contains(&"because_i_said_so"));
+        assert_eq!(valid.len(), 3);
+    }
+
+    #[test]
+    fn test_rc1b2_cooldown_state_setter_and_getter() {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), None);
+        pipeline.set_last_governor_de_escalation_ms(Some(12345));
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), Some(12345));
+        pipeline.set_last_governor_de_escalation_ms(None);
+        assert_eq!(pipeline.last_governor_de_escalation_ms(), None);
+    }
+
+    #[test]
+    fn test_rc1b2_sm_escalate_then_de_escalate_round_trip() {
+        // End-to-end through pipeline.governance.risk: simulate operator
+        // first making things tighter then relaxing them. Bypass min_hold_time
+        // to keep the test fast.
+        // 模擬 operator 先收緊再放鬆。繞過 min_hold_time 加速測試。
+        use openclaw_core::sm::risk_gov::{RiskEvent, RiskLevel};
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.governance.risk.thresholds.min_hold_time_ms = 0;
+        // Tighter: Normal → Cautious
+        pipeline
+            .governance
+            .risk
+            .escalate_to(RiskLevel::Cautious, "operator_ipc: testing", RiskEvent::OperatorEscalation)
+            .unwrap();
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Cautious);
+        // Looser: Cautious → Normal
+        pipeline
+            .governance
+            .risk
+            .de_escalate_to(RiskLevel::Normal, "operator_ipc", "operator_ipc:false_positive")
+            .unwrap();
+        assert_eq!(pipeline.governance.risk.snapshot_level(), RiskLevel::Normal);
+    }
+
+    #[test]
+    fn test_rc1_risk_runtime_status_consecutive_losses_map() {
+        // 1C-3-B: per-symbol map round-trips into JSON object
+        // 1C-3-B：per-symbol map 序列化為 JSON object
+        let mut pipeline = TickPipeline::new(&["BTCUSDT", "ETHUSDT"]);
+        pipeline.consecutive_losses.insert("BTCUSDT".into(), 3);
+        pipeline.consecutive_losses.insert("ETHUSDT".into(), 1);
+        let snap = pipeline.risk_runtime_status_json(0);
+        assert_eq!(snap["consecutive_losses_by_symbol"]["BTCUSDT"], 3);
+        assert_eq!(snap["consecutive_losses_by_symbol"]["ETHUSDT"], 1);
+    }
+
+    #[test]
+    fn test_pnl3_boot_cooldown_default_60s() {
+        // PNL-3: default cooldown is 60_000ms when env var not set.
+        // PNL-3：未設環境變量時冷卻期默認 60_000ms。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        // Force-set boot_ts_ms then check elapsed math via direct field.
+        pipeline.boot_ts_ms = Some(0);
+        assert_eq!(pipeline.boot_cooldown_ms, 60_000);
+        // Tick at t=30s → still in cooldown
+        let in_cd_30s: bool = (30_000u64).saturating_sub(0) < pipeline.boot_cooldown_ms;
+        assert!(in_cd_30s);
+        // Tick at t=61s → out of cooldown
+        let in_cd_61s: bool = (61_000u64).saturating_sub(0) < pipeline.boot_cooldown_ms;
+        assert!(!in_cd_61s);
+    }
+
+    // ─── ARCH-RC1 1C-4 hot-reload e2e ───────────────────────────────────
+    // 驗證 IPC patch_risk_config 後的下一個 tick：5 個下游消費者全部
+    // 同步看到新值（intent_processor / guardian / paper_state / h0_gate /
+    // governance.risk.thresholds）。這份硬證據是 1C-4 wrap 的關鍵。
+    // E2E proof: after a ConfigStore.replace() that simulates an IPC
+    // patch_risk_config, driving a single on_tick must propagate the new
+    // RiskConfig snapshot into ALL 5 owned-copy consumers via
+    // sync_risk_config_if_changed → apply_risk_snapshot.
+    #[test]
+    fn test_arch_rc1_hot_reload_e2e_propagates_to_all_5_consumers() {
+        use crate::config::{ConfigStore, PatchSource, RiskConfig};
+        use std::sync::Arc;
+
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+
+        // Build a baseline RiskConfig (defaults) and wire it as the live store.
+        // 建立預設 RiskConfig 並以 live store 接線。
+        let initial = RiskConfig::default();
+        let store = Arc::new(ConfigStore::new(initial.clone()));
+        pipeline.set_risk_store(Arc::clone(&store));
+
+        // Sanity: initial seed must already be visible across all 5 consumers.
+        // 初始 seed 應已同步至 5 個下游。
+        assert_eq!(
+            pipeline.intent_processor.risk_config().limits.leverage_max,
+            initial.limits.leverage_max
+        );
+        assert_eq!(
+            pipeline.intent_processor.guardian_config().max_leverage,
+            initial.limits.leverage_max
+        );
+        assert_eq!(
+            pipeline.h0_gate.config().max_open_positions,
+            initial.limits.open_positions_max
+        );
+        assert_eq!(
+            pipeline.paper_state.stop_config().hard_stop_pct,
+            initial.limits.stop_loss_max_pct
+        );
+        assert_eq!(
+            pipeline.governance.risk.thresholds.drawdown_cautious_pct,
+            initial.cascade.drawdown_cautious_pct
+        );
+        let v0 = store.version();
+
+        // Build a mutated config that differs in fields touched by all 5
+        // downstream paths inside apply_risk_snapshot, then atomically
+        // replace() — this is exactly what handle_patch_config does after
+        // a successful patch_risk_config IPC call.
+        // 修改一份新 config（覆蓋 5 條下游路徑各自讀的欄位），用 replace()
+        // 原子寫入 — 這正是 IPC patch_risk_config 成功後的行為。
+        let mut next = initial.clone();
+        next.limits.leverage_max = initial.limits.leverage_max + 1.0;
+        next.limits.open_positions_max = initial.limits.open_positions_max + 1;
+        next.limits.stop_loss_max_pct = initial.limits.stop_loss_max_pct + 0.5;
+        next.anti_cluster.max_same_direction =
+            initial.anti_cluster.max_same_direction + 1;
+        next.cascade.drawdown_cautious_pct =
+            initial.cascade.drawdown_cautious_pct + 0.001;
+        // Validate the mutated config to make sure we don't accidentally
+        // craft an invalid one (defaults + tiny bumps should always pass).
+        next.validate().expect("mutated test config must be valid");
+
+        store
+            .replace(next.clone(), PatchSource::Operator)
+            .expect("replace must succeed");
+        assert_eq!(store.version(), v0 + 1);
+
+        // Drive a single tick — sync_risk_config_if_changed runs at the top
+        // of on_tick and must apply_risk_snapshot to all 5 consumers.
+        // 打一個 tick — sync_risk_config_if_changed 會在 on_tick 頂部執行
+        // 並把新快照推到 5 個下游。
+        pipeline.on_tick(&make_event("BTCUSDT", 50_000.0, 1_000));
+
+        // 1) intent_processor's owned RiskConfig (Gate 0 / cost-edge / dynamic_stop)
+        assert_eq!(
+            pipeline.intent_processor.risk_config().limits.leverage_max,
+            next.limits.leverage_max,
+            "consumer #1: intent_processor.risk_config NOT hot-reloaded"
+        );
+        // 2) Guardian (P0 trade intent veto path)
+        let g = pipeline.intent_processor.guardian_config();
+        assert_eq!(
+            g.max_leverage, next.limits.leverage_max,
+            "consumer #2: guardian.max_leverage NOT hot-reloaded"
+        );
+        assert_eq!(
+            g.max_same_direction_positions,
+            next.anti_cluster.max_same_direction as usize,
+            "consumer #2: guardian.max_same_direction_positions NOT hot-reloaded"
+        );
+        // 3) H0Gate (risk-level fields RMW)
+        assert_eq!(
+            pipeline.h0_gate.config().max_open_positions,
+            next.limits.open_positions_max,
+            "consumer #3: h0_gate.max_open_positions NOT hot-reloaded"
+        );
+        // 4) paper_state.stop_config (H0-blocked / paused fallback stops)
+        assert!(
+            (pipeline.paper_state.stop_config().hard_stop_pct
+                - next.limits.stop_loss_max_pct)
+                .abs()
+                < 1e-9,
+            "consumer #4: paper_state.stop_config.hard_stop_pct NOT hot-reloaded"
+        );
+        // 5) GovernanceCore.risk.thresholds (6-tier cascade SM)
+        assert!(
+            (pipeline.governance.risk.thresholds.drawdown_cautious_pct
+                - next.cascade.drawdown_cautious_pct)
+                .abs()
+                < 1e-9,
+            "consumer #5: governance.risk.thresholds NOT hot-reloaded"
+        );
+
+        // The pipeline must remember the new version so the NEXT tick is a
+        // no-op (cheap atomic load + equality, no re-apply).
+        // 紀錄版本號避免下個 tick 重複套用。
+        assert_eq!(pipeline.risk_config_version_seen, store.version());
+    }
+
+    #[test]
+    fn test_strategy_close_action_closes_position() {
+        // Integration test: open a paper position, then simulate the strategy Close
+        // deferred execution path, verify position is closed and fills/stats updated.
+        // 集成測試：建立紙盤倉位，模擬策略 Close 延遲執行路徑，驗證倉位已平且成交/統計已更新。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.grant_paper_auth().unwrap();
+
+        // Open a long position directly via paper_state
+        pipeline
+            .paper_state
+            .apply_fill("BTCUSDT", true, 0.1, 50_000.0, 5.5, 1000);
+        assert_eq!(pipeline.paper_state.position_count(), 1);
+        let balance_before = pipeline.paper_state.balance();
+
+        // Simulate the deferred close: close_position + record_trade + recent_fills
+        // (This is exactly what the deferred close loop does for paper mode.)
+        let close_price = 51_000.0;
+        let close_ts = 2000_u64;
+        let pos = pipeline.paper_state.get_position("BTCUSDT").unwrap();
+        let is_long = pos.is_long;
+        let qty = pos.qty;
+        assert!(is_long);
+        assert!((qty - 0.1).abs() < 1e-9);
+
+        let pnl = pipeline
+            .paper_state
+            .close_position("BTCUSDT", close_price, close_ts);
+        assert!(pnl.is_some(), "close_position should return pnl");
+        let pnl = pnl.unwrap();
+        assert!(pnl > 0.0, "long closed at higher price should be profitable");
+
+        // Kelly stats update
+        pipeline.intent_processor.record_trade("BTCUSDT", pnl);
+
+        // Position should be gone
+        assert_eq!(pipeline.paper_state.position_count(), 0);
+        assert!(pipeline.paper_state.get_position("BTCUSDT").is_none());
+
+        // Balance should have increased (profit minus fees)
+        assert!(pipeline.paper_state.balance() > balance_before);
+    }
+
+    #[test]
+    fn test_strategy_close_no_position_is_noop() {
+        // Close when no position exists must be a safe no-op.
+        // 無倉位時 Close 必須安全無動作。
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let result = pipeline
+            .paper_state
+            .close_position("BTCUSDT", 50_000.0, 1000);
+        assert!(result.is_none(), "close_position on empty should return None");
+        assert_eq!(pipeline.paper_state.position_count(), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Phase 3: set_trading_mode state swap tests / 模式切換狀態交換測試
+    // ═══════════════════════════════════════════════════════════════
+
+    // 3E-4: set_trading_mode / add_mode / mode_snapshot tests REMOVED.
+    // Pipeline identity is now immutable (PipelineKind set at construction).
+    // Mode state swap tests replaced by per-pipeline independence tests (3E e2e).
+    // 3E-4：模式切換/添加/快照測試已移除。管線身份不可變。
+
+    #[test]
+    fn test_snapshot_contains_pipeline_kind_mode_snapshot() {
+        let pipeline = TickPipeline::with_balance(&["BTCUSDT"], 8_000.0);
+        let snap = pipeline.snapshot();
+        // mode_snapshots should contain exactly the pipeline's own kind.
+        // mode_snapshots 應包含管線自身 kind。
+        assert!(snap.mode_snapshots.contains_key("paper"));
+        assert_eq!(snap.mode_snapshots.len(), 1);
+        assert_eq!(snap.mode_snapshots["paper"].paper_state.balance, 8_000.0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BLOCKER-10 / D6: EngineEvent + PipelineHealth tests
+    // D6 跨引擎事件與管線健康狀態測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_d6_engine_event_crashed_clone() {
+        // EngineEvent::Crashed must be Clone + Debug (required for broadcast).
+        // Crashed 必須支持 Clone + Debug（broadcast 需要）。
+        let evt = EngineEvent::Crashed(PipelineKind::Paper);
+        let cloned = evt.clone();
+        let dbg = format!("{:?}", cloned);
+        assert!(dbg.contains("Crashed"));
+        assert!(dbg.contains("Paper"));
+    }
+
+    #[test]
+    fn test_d6_engine_event_cb_tripped_clone() {
+        // EngineEvent::CircuitBreakerTripped must be Clone + Debug.
+        // CircuitBreakerTripped 必須支持 Clone + Debug。
+        let evt = EngineEvent::CircuitBreakerTripped(PipelineKind::Live);
+        let cloned = evt.clone();
+        let dbg = format!("{:?}", cloned);
+        assert!(dbg.contains("CircuitBreakerTripped"));
+        assert!(dbg.contains("Live"));
+    }
+
+    #[test]
+    fn test_d6_pipeline_health_from_u8_roundtrip() {
+        // PipelineHealth from_u8 covers all repr values + unknown default.
+        // from_u8 覆蓋所有 repr 值 + 未知值默認 Down。
+        assert_eq!(PipelineHealth::from_u8(0), PipelineHealth::Running);
+        assert_eq!(PipelineHealth::from_u8(1), PipelineHealth::Paused);
+        assert_eq!(PipelineHealth::from_u8(2), PipelineHealth::Down);
+        assert_eq!(PipelineHealth::from_u8(255), PipelineHealth::Down); // unknown → Down
+    }
+
+    #[test]
+    fn test_d6_pipeline_health_repr_values() {
+        // Repr values must be stable (stored in AtomicU8 by other code).
+        // repr 值必須穩定（其他代碼以 AtomicU8 存儲）。
+        assert_eq!(PipelineHealth::Running as u8, 0);
+        assert_eq!(PipelineHealth::Paused as u8, 1);
+        assert_eq!(PipelineHealth::Down as u8, 2);
+    }
+
+    #[tokio::test]
+    async fn test_d6_broadcast_delivers_to_multiple_receivers() {
+        // broadcast::channel delivers same event to 2 receivers.
+        // broadcast 通道將同一事件送達 2 個接收端。
+        let (tx, mut rx1) = tokio::sync::broadcast::channel::<EngineEvent>(4);
+        let mut rx2 = tx.subscribe();
+        tx.send(EngineEvent::Crashed(PipelineKind::Demo)).unwrap();
+        let e1 = rx1.recv().await.unwrap();
+        let e2 = rx2.recv().await.unwrap();
+        assert!(matches!(e1, EngineEvent::Crashed(PipelineKind::Demo)));
+        assert!(matches!(e2, EngineEvent::Crashed(PipelineKind::Demo)));
+    }
+
+    #[tokio::test]
+    async fn test_d6_broadcast_cb_event_delivery() {
+        // CircuitBreakerTripped event delivered via broadcast.
+        // 熔斷事件通過 broadcast 送達。
+        let (tx, mut rx) = tokio::sync::broadcast::channel::<EngineEvent>(4);
+        tx.send(EngineEvent::CircuitBreakerTripped(PipelineKind::Live)).unwrap();
+        let evt = rx.recv().await.unwrap();
+        assert!(matches!(evt, EngineEvent::CircuitBreakerTripped(PipelineKind::Live)));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BLOCKER-10 / MAJOR-7 (D23): Snapshot versioning tests
+    // 快照版本控制測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_d23_snapshot_schema_version_is_2_0_0() {
+        // New snapshot must have schema_version "2.0.0".
+        // 新快照的 schema_version 必須是 "2.0.0"。
+        let pipeline = TickPipeline::with_balance(&["BTCUSDT"], 1_000.0);
+        let snap = pipeline.snapshot();
+        assert_eq!(snap.schema_version, "2.0.0");
+    }
+
+    #[test]
+    fn test_d23_snapshot_written_at_ms_nonzero() {
+        // written_at_ms must be set to a recent wall-clock timestamp.
+        // written_at_ms 必須設為近期的 wall-clock 時間戳。
+        let pipeline = TickPipeline::with_balance(&["BTCUSDT"], 1_000.0);
+        let snap = pipeline.snapshot();
+        assert!(snap.written_at_ms > 0, "written_at_ms should be nonzero");
+        // Sanity: should be after 2026-01-01 (~1767225600000 ms)
+        assert!(snap.written_at_ms > 1_700_000_000_000, "written_at_ms too old: {}", snap.written_at_ms);
+    }
+
+    #[test]
+    fn test_d23_snapshot_deserialization_without_schema_version() {
+        // Old snapshot JSON without schema_version should default to "2.0.0".
+        // 舊快照 JSON 無 schema_version 時應默認為 "2.0.0"。
+        let pipeline = TickPipeline::with_balance(&["BTCUSDT"], 1_000.0);
+        let snap = pipeline.snapshot();
+        let mut json: serde_json::Value = serde_json::to_value(&snap).unwrap();
+        // Remove schema_version + written_at_ms to simulate old format
+        json.as_object_mut().unwrap().remove("schema_version");
+        json.as_object_mut().unwrap().remove("written_at_ms");
+        let raw = serde_json::to_string(&json).unwrap();
+        let restored: crate::pipeline_types::PipelineSnapshot = serde_json::from_str(&raw).unwrap();
+        assert_eq!(restored.schema_version, "2.0.0"); // serde default
+        assert_eq!(restored.written_at_ms, 0); // serde default
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BLOCKER-10 / MAJOR-2 (D2): Startup barrier tests
+    // 啟動屏障測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_d2_startup_barrier_oneshot_fires() {
+        // oneshot channel used for startup barrier works as expected.
+        // 啟動屏障的 oneshot 通道正常運作。
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tx.send(()).unwrap();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            rx,
+        ).await;
+        assert!(result.is_ok(), "oneshot must resolve");
+        assert!(result.unwrap().is_ok(), "oneshot must deliver ()");
+    }
+
+    #[tokio::test]
+    async fn test_d2_startup_barrier_timeout_on_no_send() {
+        // If pipeline never sends ready, fan-out timeout should fire.
+        // 若管線永不發送 ready，扇出超時應觸發。
+        let (_tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            rx,
+        ).await;
+        assert!(result.is_err(), "should timeout when no ready signal sent");
+    }
