@@ -949,14 +949,20 @@ Topic 生成函數（`multi_interval_ws.rs`）：
 
 連接 URL: `wss://stream{-demo|-testnet|}.bybit.com/v5/private`
 認證：HMAC-SHA256（GET/realtime + expires）。
-訂閱：`["order", "execution.fast", "position", "wallet", "dcp"]`
+
+**訂閱（環境感知，由 `BybitEnvironment::private_ws_topics()` 決定）**：
+- **Mainnet**：`["order", "execution.fast", "position", "wallet", "dcp"]`（`execution.fast` ~50ms）
+- **Demo / LiveDemo / Testnet**：`["order", "execution", "position", "wallet", "dcp"]`（demo 端點**不支援** `execution.fast`）
+
+⚠️ **execution.fast 是 mainnet-only 功能**。Bybit demo 對 `execution.fast` 訂閱會返回 `success:true` 但永遠不推送資料 → `total_fills` 永遠為 0。詳見 `gotchas` 第 3 條。2026-04-11 B-2 根因發現。
 
 事件通過 `mpsc::Sender<PrivateWsEvent>` 發送。
 
 | Topic | Event | 描述 | Struct |
 |-------|-------|------|--------|
 | `order` | `Order(OrderUpdate)` | 訂單狀態變化 | `{ order_id, symbol, side, order_type, price, qty, cum_exec_qty, order_status, ... }` |
-| `execution.fast` | `Execution(ExecutionUpdate)` | 低延遲成交通知（~50ms） | `{ exec_id, order_id, symbol, side, exec_price, exec_qty, exec_fee, exec_type, exec_time }` |
+| `execution` | `Execution(ExecutionUpdate)` | 標準成交通知（demo/testnet 唯一可用，~300ms） | `{ exec_id, order_id, symbol, side, exec_price, exec_qty, exec_fee, exec_type, exec_time }` |
+| `execution.fast` | `Execution(ExecutionUpdate)` | 低延遲成交通知（~50ms，**mainnet-only**） | 同上但精簡：無 `exec_fee` / `exec_value` / `exec_type` / `fee_rate` 欄位（serde default 為空字串） |
 | `position` | `Position(PositionUpdate)` | 持倉變化 | `{ symbol, side, size, avg_price, unrealised_pnl, mark_price, liq_price }` |
 | `wallet` | `Wallet(WalletUpdate)` | 錢包餘額變化 | `{ account_type, coin: Vec<CoinUpdate { coin, equity, wallet_balance, available_to_withdraw }> }` |
 | `dcp` | `DcpTriggered` | DCP 觸發（訂單已被取消） | 無數據，僅信號 |
@@ -1092,7 +1098,7 @@ pub struct ShadowOrderRequest {
 
 1. **所有數字都是字串** — Bybit 返回 `"65000.50"` 不是 `65000.50`。所有解析器用 `parse_f64()` 處理。
 2. **默認環境 = Demo** — `BybitEnvironment::default()` 永遠是 Demo，不會意外打到主網。
-3. **execution.fast 替代 execution** — 不要同時訂閱兩者，會產生重複 fill 事件。**注意 topic 名為 `execution.fast`（含點），不是 `fast-execution`**。Bybit 對未知 topic 不報錯，typo 會使 fast-execution 永遠收不到資料（2026-04-11 B-2 根因）。
+3. **execution.fast 是 mainnet-only** — Bybit demo 端點（`stream-demo.bybit.com`）支援的私有 topic 僅為 `order, execution, position, wallet, greeks`，**不包含 `execution.fast`**。對未知 topic 訂閱 Bybit 會回應 `success:true` 但永遠不推送資料 → `total_fills` 永遠為 0 且無任何錯誤訊息（2026-04-11 B-2 根因）。同樣不要同時訂閱 `execution` 和 `execution.fast`，會產生重複 fill 事件。topic 名為 `execution.fast`（含點），不是 `fast-execution`。**正確做法**：用 `BybitEnvironment::private_ws_topics()` 按環境選 topic — demo/testnet/live-demo → `execution`，mainnet → `execution.fast`。
 4. **110043 不是錯誤** — `set_leverage` 返回 110043 表示槓桿已設置，代碼視為成功。
 5. **confirm-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除。
 6. **subscribe 批次大小** — Spot 每次最多 10 topics；Linear 無硬性限制（總字元上限 21,000）。代碼保守地分批 10 個。

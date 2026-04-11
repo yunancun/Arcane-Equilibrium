@@ -101,6 +101,31 @@ impl BybitEnvironment {
         }
     }
 
+    /// Private WS topics to subscribe per environment.
+    /// 每個環境下要訂閱的私有 WS 主題列表。
+    ///
+    /// IMPORTANT: `execution.fast` is **mainnet-only**. Bybit Demo's supported
+    /// private topics are `order, execution, position, wallet, greeks` only —
+    /// `execution.fast` is silently accepted (subscribe returns success:true)
+    /// but no fill data ever flows. Result: total_fills permanently 0 on demo.
+    /// Discovered 2026-04-11 via B-2 root-cause investigation; verified against
+    /// https://bybit-exchange.github.io/docs/v5/demo private-topic list.
+    /// 重要：`execution.fast` 僅 mainnet 支援。Bybit Demo 支援的私有 topic 僅
+    /// `order, execution, position, wallet, greeks` —`execution.fast` 會被靜默
+    /// 接受（subscribe 返回 success:true）但永遠收不到成交資料，導致
+    /// total_fills 永遠為 0。2026-04-11 B-2 根因調查發現並驗證。
+    pub fn private_ws_topics(&self) -> &'static [&'static str] {
+        match self {
+            // Demo/LiveDemo/Testnet: regular `execution` topic (the only fill topic
+            // supported on the demo/testnet endpoint).
+            Self::Demo | Self::LiveDemo | Self::Testnet => {
+                &["order", "execution", "position", "wallet", "dcp"]
+            }
+            // Mainnet: `execution.fast` for ~50ms latency (vs ~300ms for `execution`).
+            Self::Mainnet => &["order", "execution.fast", "position", "wallet", "dcp"],
+        }
+    }
+
     /// Map environment to its corresponding secret file slot name.
     /// 將環境映射到對應的 secret 文件槽位名稱。
     ///

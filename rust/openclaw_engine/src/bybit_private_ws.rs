@@ -35,21 +35,15 @@ const PING_INTERVAL_MS: u64 = 20_000;
 /// Auth expires offset (ms) / 認證過期偏移
 const AUTH_EXPIRES_OFFSET_MS: u64 = 10_000;
 
-/// Private topics to subscribe after auth.
-/// 認證後要訂閱的私有主題。
-///
-/// Note: `execution.fast` is the V5 low-latency fill topic (~50ms vs `execution` ~300ms).
-/// Subscribing to both would cause duplicate fill events; we use execution.fast only.
-/// IMPORTANT: the topic name is `execution.fast` (with a dot). The earlier value
-/// `fast-execution` was a documentation transcription error — Bybit silently accepts
-/// the unknown topic but never pushes any data, leaving total_fills permanently 0.
-/// See 2026-04-11 B-1/B-2 root-cause investigation.
-/// 注意：`execution.fast` 是 V5 低延遲成交 topic（~50ms vs `execution` ~300ms）。
-/// 同時訂閱兩者會產生重複成交事件，我們只用 execution.fast。
-/// 重要：topic 名為 `execution.fast`（含點）。先前的 `fast-execution` 是文件轉錄錯誤 —
-/// Bybit 靜默接受未知 topic 但永不推送資料，導致 total_fills 永遠為 0。
-/// 詳見 2026-04-11 B-1/B-2 根因調查。
-const PRIVATE_TOPICS: &[&str] = &["order", "execution.fast", "position", "wallet", "dcp"];
+// Private topic list now lives on `BybitEnvironment::private_ws_topics()`
+// because it varies by environment: mainnet supports `execution.fast` (~50ms)
+// while demo/testnet only support the regular `execution` topic. Bybit silently
+// accepts unknown topics on subscribe, so a wrong topic = total_fills stuck at 0
+// with no error. See 2026-04-11 B-2 root-cause investigation.
+// 私有 topic 列表已遷移到 `BybitEnvironment::private_ws_topics()`，因為它隨環境
+// 而異：mainnet 支援 `execution.fast`（~50ms），demo/testnet 只支援普通的 `execution`。
+// Bybit 對未知 topic 在 subscribe 時靜默接受，因此 topic 錯了會導致 total_fills
+// 卡在 0 且無任何錯誤。詳見 2026-04-11 B-2 根因調查。
 
 // ---------------------------------------------------------------------------
 // Event types / 事件類型
@@ -347,9 +341,12 @@ impl BybitPrivateWs {
                         // Fall through to reconnect logic / 進入重連邏輯
                     } else {
                         // Step 3: Subscribe to private topics / 步驟 3：訂閱私有主題
+                        // Topic list is environment-specific (mainnet vs demo). See
+                        // BybitEnvironment::private_ws_topics() for the rationale.
+                        let topics = self.environment.private_ws_topics();
                         let sub_msg = serde_json::json!({
                             "op": "subscribe",
-                            "args": PRIVATE_TOPICS,
+                            "args": topics,
                         });
                         if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await
                         {
@@ -357,7 +354,11 @@ impl BybitPrivateWs {
                             let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                             continue;
                         }
-                        info!(topics = ?PRIVATE_TOPICS, "Subscribed to private topics / 已訂閱私有主題");
+                        info!(
+                            env = ?self.environment,
+                            topics = ?topics,
+                            "Subscribed to private topics / 已訂閱私有主題"
+                        );
 
                         // Step 4: Message loop with periodic ping
                         // 步驟 4：帶定期 ping 的消息循環
@@ -507,8 +508,42 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
                 return Some(PrivateWsEvent::AuthFailed(msg));
             }
         }
-        // Pong or subscribe confirmation — skip / Pong 或訂閱確認 — 跳過
-        if op == "pong" || op == "subscribe" {
+        // Pong: skip silently / Pong: 靜默跳過
+        if op == "pong" {
+            return None;
+        }
+        // Subscribe confirmation: log success/failure so a wrong topic name
+        // doesn't go undetected (B-2 lesson — silently dropping these once cost
+        // us a full session of zero-fill mystery).
+        // 訂閱確認：記錄成功或失敗，避免錯誤的 topic 名稱被靜默忽略。
+        if op == "subscribe" {
+            let success = parsed
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let ret_msg = parsed
+                .get("ret_msg")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let conn_id = parsed
+                .get("conn_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if success {
+                info!(
+                    success = success,
+                    ret_msg = ret_msg,
+                    conn_id = conn_id,
+                    "Subscribe confirmation / 訂閱確認"
+                );
+            } else {
+                error!(
+                    success = success,
+                    ret_msg = ret_msg,
+                    conn_id = conn_id,
+                    "Subscribe REJECTED / 訂閱被拒絕"
+                );
+            }
             return None;
         }
     }
@@ -783,19 +818,66 @@ mod tests {
         }
     }
 
-    /// B-2 regression: PRIVATE_TOPICS const must use the correct V5 topic name.
-    /// Catches the typo at the subscribe-args layer in case the parser arm is
-    /// edited in isolation.
-    /// B-2 回歸：PRIVATE_TOPICS 常數必須用正確的 V5 topic 名稱。
+    /// B-2 regression: per-environment private topic selection.
+    ///
+    /// Bybit Demo (and Testnet/LiveDemo, which use the demo endpoint) does NOT
+    /// support `execution.fast` — only mainnet does. Demo subscribe to
+    /// `execution.fast` returns success:true but never pushes data, leaving
+    /// total_fills permanently 0. Mainnet must use `execution.fast` for ~50ms
+    /// latency. This test enforces the correct topic per environment so the
+    /// regression cannot reappear at the subscribe-args layer.
+    /// B-2 回歸：每個環境的私有 topic 選擇。Demo（含 Testnet/LiveDemo）不支援
+    /// `execution.fast`，只能用 `execution`；mainnet 才用 `execution.fast`。
     #[test]
-    fn test_private_topics_constant_uses_execution_fast() {
+    fn test_private_topics_per_environment() {
+        use crate::bybit_rest_client::BybitEnvironment;
+
+        // Demo / Testnet / LiveDemo: must use `execution`, NOT `execution.fast`.
+        for env in [
+            BybitEnvironment::Demo,
+            BybitEnvironment::Testnet,
+            BybitEnvironment::LiveDemo,
+        ] {
+            let topics = env.private_ws_topics();
+            assert!(
+                topics.contains(&"execution"),
+                "{:?} must subscribe to `execution` (the only fill topic supported on demo)",
+                env
+            );
+            assert!(
+                !topics.contains(&"execution.fast"),
+                "{:?} must NOT subscribe to `execution.fast` (mainnet-only; \
+                 demo silently drops it leaving total_fills=0)",
+                env
+            );
+            // Sanity: also expect the other essential topics.
+            assert!(topics.contains(&"order"), "{:?} missing `order` topic", env);
+            assert!(
+                topics.contains(&"position"),
+                "{:?} missing `position` topic",
+                env
+            );
+            assert!(
+                topics.contains(&"wallet"),
+                "{:?} missing `wallet` topic",
+                env
+            );
+        }
+
+        // Mainnet: must use `execution.fast` for low-latency fills.
+        let mainnet_topics = BybitEnvironment::Mainnet.private_ws_topics();
         assert!(
-            PRIVATE_TOPICS.contains(&"execution.fast"),
-            "PRIVATE_TOPICS must subscribe to execution.fast (V5 fill topic)"
+            mainnet_topics.contains(&"execution.fast"),
+            "Mainnet must subscribe to `execution.fast` (~50ms vs `execution` ~300ms)"
         );
         assert!(
-            !PRIVATE_TOPICS.contains(&"fast-execution"),
-            "PRIVATE_TOPICS must NOT use fast-execution (Bybit silently drops it)"
+            !mainnet_topics.contains(&"execution"),
+            "Mainnet should not subscribe to both `execution` and `execution.fast` \
+             (would yield duplicate fill events)"
+        );
+        assert!(
+            !mainnet_topics.contains(&"fast-execution"),
+            "Mainnet must NOT use the typo `fast-execution` — Bybit silently drops it"
         );
     }
 
