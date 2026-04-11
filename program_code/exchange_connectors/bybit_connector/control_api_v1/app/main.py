@@ -185,6 +185,10 @@ app.include_router(settings_router)
 from .live_session_routes import live_router  # noqa: E402
 app.include_router(live_router)
 
+# ── Live Trust Router / 實盤信任階梯路由注册 ──
+from .live_trust_routes import live_trust_router  # noqa: E402
+app.include_router(live_trust_router)
+
 # ── Startup Integrity Check / 啟動完整性驗證 ────────────────────────────────
 # Verify that non-optional critical dependencies were successfully injected at
 # module initialisation time.  H0_GATE is allowed to be None in degraded /

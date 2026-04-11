@@ -156,6 +156,29 @@ html, body {
 
 /* Container padding / 容器內邊距 */
 .live-wrap { padding: 16px; max-width: 1200px; margin: 0 auto; }
+
+/* ── Earned-Trust Tier bar / 贏得信任階梯欄 ────────────────── */
+.trust-bar {
+  border-radius: 8px; padding: 10px 16px; margin-bottom: 14px;
+  font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  border: 1px solid var(--border);
+}
+.trust-bar.ok   { background: rgba(34,197,94,0.07); border-color: rgba(34,197,94,0.3); }
+.trust-bar.warn { background: rgba(210,153,34,0.1);  border-color: rgba(210,153,34,0.5); }
+.trust-bar.crit { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.4); }
+.trust-bar.review { background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.4); }
+.trust-tier-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+}
+.trust-renew-card {
+  background: var(--card-bg); border: 1px solid rgba(168,85,247,0.4);
+  border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+}
+.trust-conditions { margin: 8px 0 0; font-size: 11px; color: var(--text-dim); line-height: 1.8; }
+.trust-conditions li { list-style: none; padding-left: 14px; }
+.trust-conditions li::before { content: "✓ "; color: var(--green); margin-left: -14px; }
+.trust-conditions li.fail::before { content: "✗ "; color: #f87171; }
 </style>
 
 <!-- ══════════════════════════════════════════════════════════════
@@ -270,6 +293,44 @@ html, body {
     </table>
   </div>
 
+  <!-- ── Earned-Trust Auth Status / 贏得信任授權狀態 ── -->
+  <div id="trust-status-bar" class="trust-bar ok" style="display:none">
+    <span id="trust-tier-badge" class="trust-tier-badge" style="background:rgba(34,197,94,.15);color:var(--green)">T0 Entry</span>
+    <span id="trust-clean-days" style="color:var(--text-dim)">Clean days: --</span>
+    <span id="trust-expires-label" style="color:var(--text-dim)">Auth expires: --</span>
+    <span style="flex:1"></span>
+    <button class="oc-btn" style="font-size:11px;padding:3px 10px" onclick="openTrustRenewCard()">&#x1F504; Renew</button>
+  </div>
+
+  <!-- Renewal card (shown when near expiry or expired) / 到期前後顯示的續期卡片 -->
+  <div id="trust-renew-card" class="trust-renew-card" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">&#x1F511; Live Auth Renewal / 實盤授權續期</div>
+        <div id="trust-rec-summary" style="font-size:12px;color:var(--text-dim)">Evaluating...</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="trust-tier-select" class="oc-select" style="font-size:12px;padding:4px 8px">
+          <option value="0">T0 Entry (24h)</option>
+          <option value="1">T1 Provisional (72h)</option>
+          <option value="2">T2 Established (168h)</option>
+          <option value="3">T3 Trusted (360h)</option>
+        </select>
+        <button class="oc-btn oc-btn-primary" onclick="submitRenew()" style="background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.6);color:#a855f7">Renew</button>
+        <button class="oc-btn" onclick="closeTrustRenewCard()" style="font-size:11px">&#x2715;</button>
+      </div>
+    </div>
+    <ul id="trust-rec-reasons" class="trust-conditions" style="margin-top:8px"></ul>
+    <!-- Full Review panel (T3 exhausted) / T3 全面審查面板 -->
+    <div id="trust-full-review-panel" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;color:#a855f7;font-weight:600;margin-bottom:6px">&#x26A0;&#xFE0F; T3 Full Review Required / T3 強制全面審查</div>
+      <textarea id="trust-review-notes" class="oc-input" rows="3"
+        style="width:100%;resize:vertical;font-family:inherit;font-size:12px"
+        placeholder="Operator review notes (min 10 chars required)... / 審查備注（最少10字）..."></textarea>
+      <button class="oc-btn oc-btn-primary" style="margin-top:8px;background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.6);color:#a855f7" onclick="submitFullReview()">Submit Full Review</button>
+    </div>
+  </div>
+
   <!-- Performance Metrics / 性能指標 -->
   <div class="live-section-title">&#x1F4CB; 性能指標 / Performance Metrics</div>
   <div class="oc-metrics" id="live-perf-metrics">
@@ -358,6 +419,218 @@ function openEmergencyDialog() { document.getElementById('dlg-live-emergency').c
 function openCloseAllDialog() { document.getElementById('dlg-live-close-all').classList.add('show'); }
 
 // ═══════════════════════════════════════════════════════════════
+// Earned-Trust Tier UI / 贏得信任階梯介面
+// ═══════════════════════════════════════════════════════════════
+
+const TRUST_TIER_LABELS = {
+  0: 'T0 Entry',
+  1: 'T1 Provisional',
+  2: 'T2 Established',
+  3: 'T3 Trusted',
+};
+const TRUST_TIER_COLORS = {
+  0: { bg: 'rgba(100,116,139,.2)', fg: '#94a3b8' },
+  1: { bg: 'rgba(34,197,94,.15)', fg: 'var(--green)' },
+  2: { bg: 'rgba(59,130,246,.15)', fg: '#60a5fa' },
+  3: { bg: 'rgba(168,85,247,.15)', fg: '#a855f7' },
+};
+
+/**
+ * Load and render Earned-Trust tier status bar.
+ * 加載並渲染信任階梯狀態欄。
+ * Called on every page refresh cycle.
+ */
+async function loadTrustStatus() {
+  const bar = document.getElementById('trust-status-bar');
+  if (!bar) return;
+
+  let d;
+  try {
+    const r = await ocApi('/api/v1/live/auth/trust-status');
+    d = r && r.data;
+  } catch (_) { return; }
+  if (!d) return;
+
+  // Show the bar now that we have data / 有數據後顯示狀態欄
+  bar.style.display = 'flex';
+
+  const tier = d.current_tier ?? 0;
+  const colors = TRUST_TIER_COLORS[tier] || TRUST_TIER_COLORS[0];
+  const label = TRUST_TIER_LABELS[tier] || ('T' + tier);
+
+  // Tier badge / 階梯徽章
+  const badge = document.getElementById('trust-tier-badge');
+  if (badge) {
+    badge.textContent = label;
+    badge.style.background = colors.bg;
+    badge.style.color = colors.fg;
+  }
+
+  // Clean days / 連續乾淨天數
+  const cleanEl = document.getElementById('trust-clean-days');
+  if (cleanEl) {
+    const days = d.clean_days_in_tier ?? 0;
+    cleanEl.textContent = 'Clean days: ' + days.toFixed(1);
+  }
+
+  // Auth expiry countdown / 授權到期倒計時
+  const expiresEl = document.getElementById('trust-expires-label');
+  if (expiresEl) {
+    const expiresMs = d.last_auth_expires_ts_ms;
+    if (expiresMs) {
+      const diffMs = expiresMs - Date.now();
+      if (diffMs <= 0) {
+        expiresEl.textContent = 'Auth: EXPIRED';
+        expiresEl.style.color = 'var(--red)';
+      } else {
+        const h = Math.floor(diffMs / 3600000);
+        const m = Math.floor((diffMs % 3600000) / 60000);
+        expiresEl.textContent = 'Expires in: ' + h + 'h ' + m + 'm';
+        expiresEl.style.color = diffMs < 7200000 ? 'var(--yellow)' : 'var(--text-dim)';
+      }
+    } else {
+      expiresEl.textContent = 'Auth: --';
+    }
+  }
+
+  // Bar color class — ok / warn / crit / review
+  // 狀態欄顏色 — 正常 / 警告 / 嚴重 / 審查
+  bar.classList.remove('ok', 'warn', 'crit', 'review');
+  if (d.pending_downgrade_tier != null) {
+    bar.classList.add('crit');
+  } else if (d.requires_full_review) {
+    bar.classList.add('review');
+  } else if (d.near_expiry || d.expired) {
+    bar.classList.add('warn');
+  } else {
+    bar.classList.add('ok');
+  }
+
+  // Pending downgrade banner inside bar / 待降級通知
+  let pdBanner = document.getElementById('trust-pd-banner');
+  if (d.pending_downgrade_tier != null) {
+    if (!pdBanner) {
+      pdBanner = document.createElement('span');
+      pdBanner.id = 'trust-pd-banner';
+      pdBanner.style.cssText = 'color:#f87171;font-weight:600;font-size:11px';
+      bar.insertBefore(pdBanner, bar.lastElementChild);
+    }
+    pdBanner.textContent = '⚠ Pending downgrade → T' + d.pending_downgrade_tier + ': ' + ocEsc(d.pending_downgrade_reason || '');
+  } else if (pdBanner) {
+    pdBanner.remove();
+  }
+
+  // Auto-open renewal card when near expiry, expired, or operator must review
+  // 接近到期 / 已過期 / 需全面審查時自動展開續期卡片
+  const renewCard = document.getElementById('trust-renew-card');
+  if (!renewCard) return;
+  if (d.near_expiry || d.expired || d.requires_full_review) {
+    renewCard.style.display = 'block';
+    _renderRenewalCard(d);
+  }
+}
+
+/**
+ * Populate renewal card with recommendation details.
+ * 填充續期卡片的建議詳情。
+ */
+function _renderRenewalCard(d) {
+  const rec = d.renewal_recommendation || {};
+  const recSummary = document.getElementById('trust-rec-summary');
+  const recReasons = document.getElementById('trust-rec-reasons');
+  const fullPanel = document.getElementById('trust-full-review-panel');
+  const tierSelect = document.getElementById('trust-tier-select');
+
+  if (recSummary) {
+    const recTier = rec.recommended_tier ?? 0;
+    recSummary.textContent = 'Recommendation: ' + (TRUST_TIER_LABELS[recTier] || 'T' + recTier);
+  }
+
+  if (recReasons && rec.reasons) {
+    recReasons.innerHTML = rec.reasons
+      .map(r => '<li style="font-size:11px;color:var(--text-dim)">' + ocEsc(r) + '</li>')
+      .join('');
+  }
+
+  // Pre-select recommended tier in dropdown / 下拉菜單預選建議階梯
+  if (tierSelect && rec.recommended_tier != null) {
+    tierSelect.value = String(rec.recommended_tier);
+  }
+
+  // Show full-review panel when T3 renewal cap exhausted / T3 自動續期耗盡時顯示全面審查面板
+  if (fullPanel) {
+    fullPanel.style.display = d.requires_full_review ? 'block' : 'none';
+  }
+}
+
+/** Open renewal card manually. / 手動展開續期卡片 */
+function openTrustRenewCard() {
+  const card = document.getElementById('trust-renew-card');
+  if (!card) return;
+  card.style.display = card.style.display === 'none' ? 'block' : 'none';
+  // Refresh recommendation when opening / 打開時刷新建議
+  ocApi('/api/v1/live/auth/trust-status').then(r => {
+    if (r && r.data) _renderRenewalCard(r.data);
+  }).catch(() => {});
+}
+
+/** Close renewal card. / 關閉續期卡片 */
+function closeTrustRenewCard() {
+  const card = document.getElementById('trust-renew-card');
+  if (card) card.style.display = 'none';
+}
+
+/**
+ * Submit Live Auth Renewal. Operator selects tier + provides reason.
+ * 提交實盤授權續期。operator 選擇階梯並填寫原因。
+ */
+async function submitRenew() {
+  const tierSelect = document.getElementById('trust-tier-select');
+  const tier = tierSelect ? parseInt(tierSelect.value, 10) : 0;
+  const reason = prompt('Renewal reason (optional) / 續期原因（可選）：') || '';
+  const d = await ocApi('/api/v1/live/auth/renew', 'POST', {
+    accepted_tier: tier,
+    reason: reason,
+  });
+  if (d && (d.ok || d.status === 'ok' || d.data)) {
+    ocToast('✓ Auth renewed — ' + (TRUST_TIER_LABELS[tier] || 'T' + tier), 'success');
+    closeTrustRenewCard();
+    await loadTrustStatus();
+  } else {
+    const msg = (d && d.message) || (d && d.data && d.data.message) || 'Renewal failed';
+    ocToast('✗ ' + ocEsc(msg), 'error');
+  }
+}
+
+/**
+ * Submit T3 Full Review (mandatory when T3 auto-renewal cap exhausted).
+ * 提交 T3 全面審查（T3 自動續期耗盡後強制）。
+ */
+async function submitFullReview() {
+  const notes = (document.getElementById('trust-review-notes') || {}).value || '';
+  if (notes.trim().length < 10) {
+    ocToast('Review notes must be at least 10 characters / 審查備注最少10字', 'warn');
+    return;
+  }
+  const tierSelect = document.getElementById('trust-tier-select');
+  const tier = tierSelect ? parseInt(tierSelect.value, 10) : 3;
+  const d = await ocApi('/api/v1/live/auth/renew-review', 'POST', {
+    review_notes: notes,
+    confirmed_tier: tier,
+  });
+  if (d && (d.ok || d.status === 'ok' || d.data)) {
+    ocToast('✓ Full review accepted — restarting at ' + (TRUST_TIER_LABELS[tier] || 'T' + tier), 'success');
+    closeTrustRenewCard();
+    const notesEl = document.getElementById('trust-review-notes');
+    if (notesEl) notesEl.value = '';
+    await loadTrustStatus();
+  } else {
+    const msg = (d && d.message) || (d && d.data && d.data.message) || 'Review submission failed';
+    ocToast('✗ ' + ocEsc(msg), 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Refresh page — reload dashboard + engine status
 // 刷新頁面 — 重新加載儀表板 + 引擎狀態
 // ═══════════════════════════════════════════════════════════════
@@ -365,6 +638,7 @@ async function refreshPage() {
   loadDashboardData();
   checkLiveEngineStatus();
   loadLiveMetrics();
+  loadTrustStatus();
 }
 
 // ═══════════════════════════════════════════════════════════════

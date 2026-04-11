@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-12（Phase 6 PM 驗收 PASS + 晚間 Audit BLOCKERs 歸檔。W19-W21 + Phase 6 全部完成）
-測試基準線：**Rust engine lib 935 + core 366 + e2e 18 + promotion 32 = 1351 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-12（Earned-Trust TTL Ladder + Audit Trail 修復）
+測試基準線：**Rust engine lib 939 + core 366 + e2e 18 + promotion 32 = 1355 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -202,10 +202,26 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 來源：DB 清理後的乾淨基線揭露多個失真假設。
 
-- [ ] **PNL-1** Phase 5 narrative reframing — CLAUDE.md §三 與 `project_phase5_promotion_edge_crisis.md` 寫的「Edge 危機: realized ≈ 2 bps vs fee 11 bps」是基於受污染數據。Post-cleanup 真相：**gross edge = -0.81 bps**（**負數，未扣手續費**），fee = 1.42 bps，net = -$995.38 / 1371 fills。Phase 5 的「保護現有 alpha」前提不成立 — 4 策略在乾淨數據下沒有正 alpha 可保護，需要重做策略而非調 cost_gate。重寫 CLAUDE.md §三 + Phase 5 段落 + memory 對應條目
-- [ ] **PNL-2** Fee underreporting investigation — `tick_pipeline/mod.rs:955` `emit_close_fill()` 註解寫 "close fees accrued by paper_state separately" 並硬編碼 `fee: 0.0`，但實際觀測 fee = 1.42 bps 對 Bybit perp taker（6 bps）來說過低。追查 close 路徑 fees 是否真的在 `paper_state` 累計，還是落在某個未寫入 DB `trading.fills.fee` 列的地方。修復後重新計算 net edge
-- [ ] **PNL-3** Per-strategy edge breakdown — 在 1371 乾淨 fills 上按 `strategy_name` 分組計算 gross/net edge，找出是否有任何單一策略具備正 alpha（即使整體為負）。若有 → 作為策略重做的起點；若全負 → 4 策略全部需要重新設計訊號邏輯。輸出表格寫入 worklog
-- [ ] **PNL-4** fast_track 觸發根因調查 — 2026-04-11 20:51:44.723 production 環境 CircuitBreaker fast_track 路徑首次觸發（產生 8 個跨 symbol 同價平倉，引爆 PNL-FIX-1 bug）。調查當時 governor escalation 日誌、risk level 狀態、餘額/回撤、最近 N 個 fills，判斷是真實 margin/flash crash 觸發還是誤觸發。若誤觸發 → 收緊 CB 觸發條件
+- [x] **PNL-1** ✅ Phase 5 reframing 完成（同日，本 commit）— CLAUDE.md §三 Phase 5 段落重寫 + `project_phase5_promotion_edge_crisis.md` memory 重寫 + MEMORY.md 索引更新。Post-cleanup 真相寫入：所有活躍策略 gross edge **負數**（bb_reversion -0.46 / ma_crossover -2.64 / grid_trading -0.67 bps），Phase 5 cost_gate 工作暫停等策略重做
+- [x] **PNL-2** ✅ Fee underreporting 修復（同日，本 commit）— 根因確認：`emit_close_fill` 寫 `fee: 0.0`，註解謊稱「accrued separately」但 `paper_state.close_position()` 完全不收費。所有 5 條 close 路徑（fast_track / H0-stops / paused / strategy_close / risk_close）共 653 筆 fill 全部 fee=$0（vs opens 742 筆共 $648 真實費用 → 真實 round-trip 應為 ~$2483，**漏報 4×**）。修復：新增 `paper_state.charge_fee()` helper + `emit_close_fill` 計算 `qty * price * fee_rate` 並 (a) 扣餘額 (b) 寫 DB。+2 regression tests（charge_fee garbage rejection + close fee charge end-to-end）
+- [x] **PNL-3** ✅ Per-strategy edge breakdown 完成（同日，本 commit）— FIFO open-close pairing on 1395 paper fills（trading.fills.realized_pnl 已被 PNL-FIX-1 cleanup 修復）：
+
+  | 策略 | round trips | gross PnL | rt fee real | net | gross bps | net bps |
+  |---|---|---|---|---|---|---|
+  | bb_reversion | 62 | -$9.71 | $115 | -$125 | -0.46 | -5.96 |
+  | ma_crossover | 148 | -$119.88 | $250 | -$370 | -2.64 | -8.14 |
+  | grid_trading | 446 | -$248.80 | $2032 | -$2280 | -0.67 | -6.17 |
+  | bb_breakout | 0 | — | — | — | — | — |
+  | **總計** | 656 | **-$378** | **$2397** | **-$2775** | — | — |
+
+  **結論**：4 策略無任何 positive-edge 起點。bb_breakout 在乾淨基線從未平倉（疑：from never opened or held all positions until cleanup），需單獨驗證。**bb_breakout 需另開 TODO 確認是否完全 dead**
+
+- [x] **PNL-4** ✅ fast_track 觸發根因（同日，本 commit）— 代碼追蹤已盡可能：`evaluate_fast_track(level, 0.0, 0.0)` 中 `price_drop_pct` 與 `margin_utilization_pct` 為硬編 `0.0`（comments 寫 "computed externally" 但**從未真的 externally computed**），閃崩+保證金分支為**死碼**。唯一可觸發 CloseAll 的是 `risk_level ≥ CircuitBreaker`。**04-11 18:51 logs 已隨 22:39 引擎重啟丟失**，無法 log 追蹤誰把 risk level 升到 CB。**已加觀測**：`on_tick.rs` fast_track CloseAll 分支現會 `tracing::warn!` 記錄 risk_level / ts / position count / 觸發 tick 的 symbol+price，下次觸發必留痕跡。**留尾**：(a) 調查是否要 wire price_drop / margin_util 真實計算，或乾脆刪除死碼；(b) 確認 04-11 那次是 Reconciler 升級、operator manual SetTier、還是某個未知路徑（無 log 不可考）
+
+### 留尾追蹤項
+
+- [ ] **PNL-5** bb_breakout 是否完全 dead — PNL-3 表中 round_trips=0；可能 (a) `on_tick()` 從未產生 Open intent、(b) 產生但全被 cost_gate / Guardian 攔下、(c) 開了倉但持續持有未平倉。檢查最近 7d signals/intents 表
+- [ ] **PNL-6** fast_track 死碼決議 — `fast_track::evaluate_fast_track` 的 `price_drop_pct` / `margin_utilization_pct` 兩條分支：要嘛真實接線（從 paper_state 計算 margin util、從 black_swan_detector 計算閃崩 pct），要嘛刪除死碼。當前唯一觸發路徑（CB 升級）已有 reconciler 自動處理，flash/margin 邏輯重複度低
 
 ---
 

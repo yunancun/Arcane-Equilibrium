@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-12
 
+### Earned-Trust TTL Ladder + Audit Trail 時間戳修復（2026-04-12）
+
+(1) **Audit Trail 時間戳修復**：`tab-governance.html` JS 讀 `r.timestamp` 改為 `r.when_ms || r.when*1000`，修復 Audit Trail 時間欄永遠顯示 `'--'` 的 bug。(2) **Earned-Trust 授權 TTL 階梯**：新增 `earned_trust_engine.py`（715 行）— T0(24h)/T1(72h)/T2(168h)/T3(360h) 四層階梯，連續乾淨天數晉升，中途降級即時標記（session 繼續），T3 最多自動續期 1 次後強制 Operator 全面審查；新增 `live_trust_routes.py`（484 行）— 3 端點（GET trust-status / POST renew / POST renew-review）；`live_session_routes.py` 新增 session start/stop 鉤子 + `_grant_execution_authority_internal()` 內部輔助；`main.py` 注冊 `live_trust_router`；`tab-live.html` 新增 Trust Status Bar（tier badge + 倒計時 + 續期卡 + T3 全面審查面板）+ 完整 JS（loadTrustStatus / openTrustRenewCard / submitRenew / submitFullReview）。53 新測試 pass。E4: 2852 Python passed。
+
 ### Phase 6 PM 驗收 PASS + TODO 歸檔整理（2026-04-12）
 
 6-09~13 最終驗收週期完成。E4: 935 engine lib + 366 core + 18 e2e + 32 promotion = 1351 passed / 0 failed / 0 warnings。E2: Reconciler 0 BLOCKER 0 MAJOR（pre_escalation_level 文檔建議 MINOR）· Promotion Pipeline 0 BLOCKER 0 MAJOR（governance_routes 超限 pre-existing）。QA: 三引擎存活 + 雙 Reconciler 運行 + baseline seeded + API auth enforced。E5: stress PASS。Phase 6 路線圖狀態從 🟡 升為 ✅。TODO.md 歸檔：晚間 Audit BLOCKERs（B-1/B-2/M-1~4）+ Phase 6 驗收詳情移入 `docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`；3E-ARCH 折疊內容移除（已有專屬歸檔）；排期表更新 W19-21 ✅；Gap 索引標記 G-3/G-5/G-9 完成。
