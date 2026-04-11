@@ -949,14 +949,14 @@ Topic 生成函數（`multi_interval_ws.rs`）：
 
 連接 URL: `wss://stream{-demo|-testnet|}.bybit.com/v5/private`
 認證：HMAC-SHA256（GET/realtime + expires）。
-訂閱：`["order", "fast-execution", "position", "wallet", "dcp"]`
+訂閱：`["order", "execution.fast", "position", "wallet", "dcp"]`
 
 事件通過 `mpsc::Sender<PrivateWsEvent>` 發送。
 
 | Topic | Event | 描述 | Struct |
 |-------|-------|------|--------|
 | `order` | `Order(OrderUpdate)` | 訂單狀態變化 | `{ order_id, symbol, side, order_type, price, qty, cum_exec_qty, order_status, ... }` |
-| `fast-execution` | `Execution(ExecutionUpdate)` | 低延遲成交通知（~50ms） | `{ exec_id, order_id, symbol, side, exec_price, exec_qty, exec_fee, exec_type, exec_time }` |
+| `execution.fast` | `Execution(ExecutionUpdate)` | 低延遲成交通知（~50ms） | `{ exec_id, order_id, symbol, side, exec_price, exec_qty, exec_fee, exec_type, exec_time }` |
 | `position` | `Position(PositionUpdate)` | 持倉變化 | `{ symbol, side, size, avg_price, unrealised_pnl, mark_price, liq_price }` |
 | `wallet` | `Wallet(WalletUpdate)` | 錢包餘額變化 | `{ account_type, coin: Vec<CoinUpdate { coin, equity, wallet_balance, available_to_withdraw }> }` |
 | `dcp` | `DcpTriggered` | DCP 觸發（訂單已被取消） | 無數據，僅信號 |
@@ -1092,7 +1092,7 @@ pub struct ShadowOrderRequest {
 
 1. **所有數字都是字串** — Bybit 返回 `"65000.50"` 不是 `65000.50`。所有解析器用 `parse_f64()` 處理。
 2. **默認環境 = Demo** — `BybitEnvironment::default()` 永遠是 Demo，不會意外打到主網。
-3. **fast-execution 替代 execution** — 不要同時訂閱兩者，會產生重複 fill 事件。
+3. **execution.fast 替代 execution** — 不要同時訂閱兩者，會產生重複 fill 事件。**注意 topic 名為 `execution.fast`（含點），不是 `fast-execution`**。Bybit 對未知 topic 不報錯，typo 會使 fast-execution 永遠收不到資料（2026-04-11 B-2 根因）。
 4. **110043 不是錯誤** — `set_leverage` 返回 110043 表示槓桿已設置，代碼視為成功。
 5. **confirm-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除。
 6. **subscribe 批次大小** — Spot 每次最多 10 topics；Linear 無硬性限制（總字元上限 21,000）。代碼保守地分批 10 個。
