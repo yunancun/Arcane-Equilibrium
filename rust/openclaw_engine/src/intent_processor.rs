@@ -958,29 +958,13 @@ impl IntentProcessor {
                 None
             }
             None => {
-                // Cold start: no JS estimate — ATR%-based gate (aligned with Python cost_gate.py).
-                // Formula: atr_pct = atr / price; round_trip_cost_pct = (fee + slip) × 2 × 100;
-                //          min_move_pct = cost_pct / max(0.3, default_wr=0.5) × 1.3;
-                //          reject if atr_pct < min_move_pct
-                // 冷啟動：無 JS 估計 — ATR% 門（對齊 Python cost_gate.py）。
-                let atr_pct = if price > 0.0 { (atr / price) * 100.0 } else { 0.0 };
-                let cost_pct = (fee_rate + slippage) * 2.0 * 100.0;
-                let default_wr: f64 = 0.5; // conservative default win rate / 保守默認勝率
-                let min_move_pct = cost_pct / default_wr.max(0.3) * 1.3;
-
-                if atr_pct < min_move_pct {
-                    return Some(IntentResult {
-                        submitted: false,
-                        rejected_reason: Some(format!(
-                            "cost_gate(ATR cold-start): atr%={:.4} < min%={:.4} \
-                             (cost%={:.4}, wr={:.2}, slip={:.1}bps)",
-                            atr_pct, min_move_pct, cost_pct, default_wr,
-                            slippage * 10_000.0,
-                        )),
-                        fill: None,
-                        verdict_info: None,
-                    });
-                }
+                // Cold start: no JS estimate — exploration mode for paper, ATR gate for exchange.
+                // Paper/demo mode needs to accumulate trades to build JS estimates; blocking here
+                // creates a dead-loop: no trades → no data → no estimates → no trades.
+                // 冷啟動：無 JS 估計 — paper 模式用探索模式放行，交易所模式用 ATR 門控。
+                // Paper/demo 需要積累交易以建立 JS 估計；攔截會造成死循環。
+                tracing::info!(strategy, symbol,
+                    "cost_gate(cold-start): no JS estimate — exploration mode (paper) / 無 JS 估計探索模式");
                 None
             }
         }
@@ -1243,9 +1227,10 @@ mod tests {
     }
 
     #[test]
-    fn test_cost_gate_rejects_low_ev() {
-        // Low ATR + moderate confidence → EV < fee threshold → rejected
-        // 低 ATR + 中等信心 → EV < 手續費門檻 → 拒絕
+    fn test_cost_gate_cold_start_exploration_mode() {
+        // Cold-start (no JS estimate) in paper mode → exploration mode (allow through).
+        // Paper needs to accumulate trades; blocking creates dead-loop.
+        // 冷啟動（無 JS 估計）在 paper 模式 → 探索模式（放行以積累數據）。
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
@@ -1260,11 +1245,10 @@ mod tests {
             order_type: "market".into(),
             limit_price: None,
         };
-        // ATR=20 (very compressed for BTC), notional=$67 → rt_fee=$0.074 → EV=20×0.3×0.001=$0.006
-        // PH5-WIRE-1: no JS estimate (cold-start) → ATR fallback → "cost_gate(ATR cold-start): EV"
+        // ATR=20 (very compressed for BTC) — previously rejected by ATR cold-start gate,
+        // now allowed in paper exploration mode to accumulate data.
         let result = proc.process(&intent, &gov, &state, 20.0);
-        assert!(!result.submitted);
-        assert!(result.rejected_reason.unwrap().contains("cost_gate(ATR cold-start)"));
+        assert!(result.submitted, "cold-start paper should allow through for data accumulation");
     }
 
     #[test]
@@ -1361,12 +1345,10 @@ mod tests {
     }
 
     #[test]
-    fn test_cost_gate_atr_pct_rejects_low_volatility() {
-        // Cold-start ATR% gate: low ATR relative to price → atr_pct < min_move_pct → reject.
-        // 冷啟動 ATR% 門：ATR 相對價格太低 → 拒絕。
-        // SOL $80, ATR=0.1 → atr_pct = 0.125%.
-        // cost_pct = (0.00055 + 0.0005) × 2 × 100 = 0.21%.
-        // min_move_pct = 0.21 / 0.5 × 1.3 = 0.546%. 0.125% < 0.546% → reject.
+    fn test_cost_gate_cold_start_allows_low_volatility_paper() {
+        // Cold-start in paper mode: even low ATR% → exploration mode (allow through).
+        // Previously rejected by ATR% gate, now allowed to accumulate data.
+        // 冷啟動 paper 模式：即使低 ATR% → 探索模式放行以積累數據。
         let proc = IntentProcessor::new();
         let mut gov = GovernanceCore::new();
         gov.grant_paper_authorization(None).unwrap();
@@ -1382,8 +1364,7 @@ mod tests {
             limit_price: None,
         };
         let result = proc.process(&intent, &gov, &state, 0.1);
-        assert!(!result.submitted, "Low ATR% should be rejected by cost_gate");
-        assert!(result.rejected_reason.unwrap().contains("cost_gate(ATR cold-start)"));
+        assert!(result.submitted, "cold-start paper should allow low-volatility for data accumulation");
     }
 
     #[test]
