@@ -90,17 +90,18 @@ impl TickPipeline {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
+            let em_v = self.pipeline_kind.db_mode();
             let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                verdict_id: format!("vrd-{symbol}-{now_ms_v}"),
+                verdict_id: format!("vrd-{em_v}-{symbol}-{now_ms_v}"),
                 ts_ms: now_ms_v,
-                intent_id: format!("intent-{symbol}-{now_ms_v}"),
-                context_id: format!("ctx-{symbol}-{now_ms_v}"),
+                intent_id: format!("intent-{em_v}-{symbol}-{now_ms_v}"),
+                context_id: format!("ctx-{em_v}-{symbol}-{now_ms_v}"),
                 symbol: symbol.to_string(),
                 verdict: vi.verdict.clone(),
                 risk_score: vi.risk_score,
                 reasons: vi.reasons.clone(),
                 modified_qty: vi.modified_qty,
-                engine_mode: self.pipeline_kind.db_mode().to_string(),
+                engine_mode: em_v.to_string(),
             });
         }
 
@@ -171,10 +172,10 @@ impl TickPipeline {
         // Persistence parity: emit Intent + Fill to PG writer when wired.
         // 持久化對等：trading_tx 已接時，發 Intent + Fill 到 PG writer。
         if let Some(ref tx) = self.trading_tx {
-            let context_id = format!("ctx-{symbol}-{now_ms}");
-            let em = self.pipeline_kind.db_mode().to_string();
+            let em = self.pipeline_kind.db_mode();
+            let context_id = format!("ctx-{em}-{symbol}-{now_ms}");
             let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                intent_id: format!("intent-{symbol}-{now_ms}"),
+                intent_id: format!("intent-{em}-{symbol}-{now_ms}"),
                 ts_ms: now_ms,
                 signal_id: String::new(),
                 context_id: context_id.clone(),
@@ -184,10 +185,10 @@ impl TickPipeline {
                 price,
                 order_type: order_type.to_string(),
                 strategy_name: strategy.to_string(),
-                engine_mode: em.clone(),
+                engine_mode: em.to_string(),
             });
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("fill-{symbol}-{now_ms}"),
+                fill_id: format!("fill-{em}-{symbol}-{now_ms}"),
                 ts_ms: now_ms,
                 order_id: order_id.clone(),
                 symbol: symbol.to_string(),
@@ -199,7 +200,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id,
-                engine_mode: em,
+                engine_mode: em.to_string(),
             });
         }
 
@@ -346,9 +347,10 @@ impl TickPipeline {
         }
 
         if let Some(ref tx) = self.trading_tx {
+            let em = self.pipeline_kind.db_mode();
             let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("fill-{}-{}", symbol, ts_ms),
+                fill_id: format!("fill-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
                 order_id: order_link_id.to_string(),
                 symbol: symbol.to_string(),
@@ -359,8 +361,8 @@ impl TickPipeline {
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
-                context_id: format!("ctx-{}-{}", symbol, ts_ms),
-                engine_mode: self.pipeline_kind.db_mode().to_string(),
+                context_id: format!("ctx-{em}-{}-{}", symbol, ts_ms),
+                engine_mode: em.to_string(),
             });
         }
 

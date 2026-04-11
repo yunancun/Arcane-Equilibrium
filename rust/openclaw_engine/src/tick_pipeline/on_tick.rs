@@ -343,6 +343,9 @@ impl TickPipeline {
 
         // Store recent signals for IPC snapshot (ring buffer, max 100)
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
+        // Engine mode tag for DB record IDs — prevents cross-pipeline collisions.
+        // 引擎模式標記用於 DB 記錄 ID — 防止跨管線 ID 碰撞。
+        let em = self.pipeline_kind.db_mode();
         let mut signals_persisted_this_tick = 0u32;
         for sig in &signals {
             self.recent_signals.push_back(sig.clone());
@@ -359,18 +362,24 @@ impl TickPipeline {
             }
             signals_persisted_this_tick += 1;
 
-            // Phase 2a: Emit signal to trading_writer for PG persistence
-            if let Some(ref tx) = self.trading_tx {
-                let _ = tx.try_send(crate::database::TradingMsg::Signal {
-                    signal_id: format!("sig-{}-{}", sig.source, sig.ts_ms),
-                    ts_ms: sig.ts_ms,
-                    symbol: sig.symbol.clone(),
-                    strategy_name: sig.source.clone(),
-                    timeframe: sig.timeframe.clone(),
-                    signal_type: format!("{:?}", sig.direction),
-                    strength: sig.confidence,
-                    context_id: format!("ctx-{}-{}", sig.symbol, sig.ts_ms),
-                });
+            // Phase 2a: Emit signal to trading_writer for PG persistence.
+            // Signal Diamond (V015): signals are market observations — only Paper
+            // writes them to avoid triple-write waste from identical signal_ids.
+            // Signal Diamond（V015）：信號為市場觀察 — 僅 Paper 寫入以避免
+            // 相同 signal_id 的三重寫入浪費。
+            if !self.pipeline_kind.is_exchange() {
+                if let Some(ref tx) = self.trading_tx {
+                    let _ = tx.try_send(crate::database::TradingMsg::Signal {
+                        signal_id: format!("sig-{}-{}", sig.source, sig.ts_ms),
+                        ts_ms: sig.ts_ms,
+                        symbol: sig.symbol.clone(),
+                        strategy_name: sig.source.clone(),
+                        timeframe: sig.timeframe.clone(),
+                        signal_type: format!("{:?}", sig.direction),
+                        strength: sig.confidence,
+                        context_id: format!("ctx-{}-{}-{}", em, sig.symbol, sig.ts_ms),
+                    });
+                }
             }
         }
 
@@ -500,10 +509,10 @@ impl TickPipeline {
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
                     if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &gate.verdict_info) {
                         let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                            verdict_id: format!("vrd-{}-{}", intent.symbol, event.ts_ms),
+                            verdict_id: format!("vrd-{}-{}-{}", em, intent.symbol, event.ts_ms),
                             ts_ms: event.ts_ms,
-                            intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
-                            context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                            intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
+                            context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
                             symbol: intent.symbol.clone(),
                             verdict: vi.verdict.clone(),
                             risk_score: vi.risk_score,
@@ -520,10 +529,10 @@ impl TickPipeline {
                         // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
                         if let Some(ref tx) = self.trading_tx {
                             let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                                intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                                intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                 ts_ms: event.ts_ms,
                                 signal_id: String::new(),
-                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                 symbol: intent.symbol.clone(),
                                 side: if intent.is_long {
                                     "Buy".into()
@@ -619,10 +628,10 @@ impl TickPipeline {
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
                     if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
                         let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                            verdict_id: format!("vrd-{}-{}", intent.symbol, event.ts_ms),
+                            verdict_id: format!("vrd-{}-{}-{}", em, intent.symbol, event.ts_ms),
                             ts_ms: event.ts_ms,
-                            intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
-                            context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                            intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
+                            context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
                             symbol: intent.symbol.clone(),
                             verdict: vi.verdict.clone(),
                             risk_score: vi.risk_score,
@@ -647,10 +656,10 @@ impl TickPipeline {
                         // Phase 3b 修復：發送 Intent 到 trading_tx 以持久化到 PG。
                         if let Some(ref tx) = self.trading_tx {
                             let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                                intent_id: format!("intent-{}-{}", intent.symbol, event.ts_ms),
+                                intent_id: format!("intent-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                 ts_ms: event.ts_ms,
                                 signal_id: String::new(),
-                                context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                 symbol: intent.symbol.clone(),
                                 side: if intent.is_long {
                                     "Buy".into()
@@ -718,9 +727,9 @@ impl TickPipeline {
 
                             if let Some(ref tx) = self.trading_tx {
                                 let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                                    fill_id: format!("fill-{}-{}", intent.symbol, event.ts_ms),
+                                    fill_id: format!("fill-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                     ts_ms: event.ts_ms,
-                                    order_id: format!("order-{}-{}", intent.symbol, event.ts_ms),
+                                    order_id: format!("order-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                     symbol: intent.symbol.clone(),
                                     side: if intent.is_long {
                                         "Buy".into()
@@ -733,7 +742,7 @@ impl TickPipeline {
                                     fee_rate: self.intent_processor.fee_rate(&intent.symbol),
                                     realized_pnl,
                                     strategy_name: intent.strategy.clone(),
-                                    context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
+                                    context_id: format!("ctx-{}-{}-{}", em, intent.symbol, event.ts_ms),
                                     engine_mode: self.pipeline_kind.db_mode().to_string(),
                                 });
                             }
