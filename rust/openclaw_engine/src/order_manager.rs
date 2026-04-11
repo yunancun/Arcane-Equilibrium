@@ -205,8 +205,11 @@ pub struct OrderInfo {
     pub side: String,
     /// Order type: "Market" | "Limit" / 訂單類型
     pub order_type: String,
-    /// Order price / 訂單價格
+    /// Order price (0.0 for conditional market orders) / 訂單價格（條件市價單為 0.0）
     pub price: f64,
+    /// Trigger price for conditional orders (stop-loss/take-profit).
+    /// 條件單觸發價（止損/止盈）。
+    pub trigger_price: f64,
     /// Order quantity / 訂單數量
     pub qty: f64,
     /// Cumulative executed quantity / 累計成交數量
@@ -682,6 +685,7 @@ fn parse_order_info_item(item: &serde_json::Value) -> OrderInfo {
         side: str_field(item, "side"),
         order_type: str_field(item, "orderType"),
         price: f64_field(item, "price"),
+        trigger_price: f64_field(item, "triggerPrice"),
         qty: f64_field(item, "qty"),
         cum_exec_qty: f64_field(item, "cumExecQty"),
         cum_exec_value: f64_field(item, "cumExecValue"),
@@ -1108,6 +1112,7 @@ mod tests {
             side: "Buy".to_string(),
             order_type: "Limit".to_string(),
             price: 65000.0,
+            trigger_price: 0.0,
             qty: 0.01,
             cum_exec_qty: 0.0,
             cum_exec_value: 0.0,
