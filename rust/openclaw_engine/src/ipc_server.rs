@@ -109,6 +109,50 @@ impl PerEngineRiskStores {
 }
 
 // ---------------------------------------------------------------------------
+// 3E-3: Per-pipeline command channel routing
+// 3E-3：每管線命令通道路由
+// ---------------------------------------------------------------------------
+
+/// Routes IPC commands to the correct pipeline's command channel.
+/// In 3E-ARCH, each pipeline (Paper/Demo/Live) has its own command channel.
+/// IPC handlers extract the `engine` param and select the correct sender.
+///
+/// 將 IPC 命令路由到正確管線的命令通道。
+/// 3E-ARCH 下每個管線有獨立命令通道，IPC handler 按 `engine` 參數選擇。
+#[derive(Clone, Default)]
+pub struct EngineCommandChannels {
+    pub paper: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    pub demo: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    pub live: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+}
+
+impl EngineCommandChannels {
+    /// Select the command sender for the given engine name.
+    /// Falls back to paper for unknown names (fail-safe).
+    /// 按引擎名選擇命令發送端。未知名稱回退到 paper（安全默認）。
+    pub fn select(&self, engine: &str) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+        match engine {
+            "demo" => &self.demo,
+            "live" => &self.live,
+            _ => &self.paper, // "paper" or unknown → paper (fail-safe)
+        }
+    }
+
+    /// Return the primary (first available) sender for commands that
+    /// don't specify an engine param. Priority: live > demo > paper.
+    /// 返回主要（第一個可用）sender，供未指定 engine 的命令使用。
+    pub fn primary(&self) -> &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+        if self.live.is_some() {
+            &self.live
+        } else if self.demo.is_some() {
+            &self.demo
+        } else {
+            &self.paper
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JSON-RPC error codes / JSON-RPC 錯誤碼
 // ---------------------------------------------------------------------------
 
@@ -196,9 +240,9 @@ pub struct IpcServer {
     /// Data directory for reading pipeline snapshot files (R06-A).
     /// 數據目錄，用於讀取管線快照文件。
     data_dir: Arc<PathBuf>,
-    /// Paper session command sender — dispatches Pause/Resume/CloseAll/Reset to event consumer.
-    /// 紙盤 session 命令發送端 — 派發 Pause/Resume/CloseAll/Reset 到事件消費者。
-    pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    /// 3E-3: Per-pipeline command channels — routes commands to Paper/Demo/Live pipelines.
+    /// 3E-3：每管線命令通道 — 將命令路由到 Paper/Demo/Live 管線。
+    cmd_channels: EngineCommandChannels,
     /// Phase 4 (4-15): Late-injected AI BudgetTracker slot.
     /// Phase 4 (4-15)：延後注入的 AI BudgetTracker 槽位。
     budget_tracker: BudgetTrackerSlot,
@@ -225,13 +269,13 @@ impl IpcServer {
         config: Arc<ConfigManager>,
         cancel: CancellationToken,
         data_dir: impl Into<String>,
-        pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+        cmd_channels: EngineCommandChannels,
     ) -> Self {
         Self {
             config,
             cancel,
             data_dir: Arc::new(PathBuf::from(data_dir.into())),
-            pipeline_cmd_tx,
+            cmd_channels,
             budget_tracker: Arc::new(RwLock::new(None)),
             teacher_loop: Arc::new(RwLock::new(None)),
             risk_stores: None,
@@ -350,7 +394,7 @@ impl IpcServer {
                             let config = Arc::clone(&self.config);
                             let cancel = self.cancel.clone();
                             let data_dir = Arc::clone(&self.data_dir);
-                            let cmd_tx = self.pipeline_cmd_tx.clone();
+                            let cmd_channels = self.cmd_channels.clone();
                             let budget_slot = Arc::clone(&self.budget_tracker);
                             let teacher_slot = Arc::clone(&self.teacher_loop);
                             let risk_stores = self.risk_stores.clone();
@@ -359,7 +403,7 @@ impl IpcServer {
                             let audit_pool = self.audit_pool.read().await.clone();
                             let scanner_reg = self.scanner_registry.clone();
                             tokio::spawn(async move {
-                                handle_connection(stream, config, cancel, data_dir, cmd_tx, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg).await;
+                                handle_connection(stream, config, cancel, data_dir, cmd_channels, budget_slot, teacher_slot, risk_stores, learning_store, budget_store, audit_pool, scanner_reg).await;
                             });
                         }
                         Err(e) => {
@@ -407,7 +451,7 @@ async fn handle_connection(
     config: Arc<ConfigManager>,
     cancel: CancellationToken,
     data_dir: Arc<PathBuf>,
-    pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    cmd_channels: EngineCommandChannels,
     budget_slot: BudgetTrackerSlot,
     teacher_slot: TeacherLoopSlot,
     risk_stores: Option<PerEngineRiskStores>,
@@ -509,7 +553,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &pipeline_cmd_tx, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &cmd_channels, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -541,7 +585,7 @@ async fn dispatch_request(
     line: &str,
     config: &Arc<ConfigManager>,
     data_dir: &Arc<PathBuf>,
-    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    cmd_channels: &EngineCommandChannels,
     budget_slot: &BudgetTrackerSlot,
     teacher_slot: &TeacherLoopSlot,
     risk_stores: &Option<PerEngineRiskStores>,
@@ -594,7 +638,7 @@ async fn dispatch_request(
                 // 次級模式：查找 mode_snapshots。
                 if let Some(mode_snap) = s.mode_snapshots.get(&engine) {
                     serde_json::to_value(&mode_snap.paper_state)
-                } else if engine == s.trading_mode.db_mode() {
+                } else if engine == s.pipeline_kind.db_mode() {
                     serde_json::to_value(&s.paper_state)
                 } else {
                     // Requested mode not active — return null with metadata.
@@ -637,17 +681,22 @@ async fn dispatch_request(
             handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.latest_prices))
         }
         "get_tick_stats" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.stats)),
-        // ── Paper session control commands / 紙盤 session 控制命令 ──
-        "pause_paper" => handle_paper_cmd(id, pipeline_cmd_tx, PipelineCommand::Pause, "paused"),
-        "resume_paper" => {
-            handle_paper_cmd(id, pipeline_cmd_tx, PipelineCommand::Resume, "resumed")
+        // ── Pipeline control commands / 管線控制命令 ──
+        // 3E-3: Commands accept optional `engine` param ("paper"/"demo"/"live")
+        // to route to the correct pipeline. Default: primary pipeline.
+        // 3E-3：命令接受可選 `engine` 參數路由到正確管線，默認為主管線。
+        "pause_paper" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_paper_cmd(id, tx, PipelineCommand::Pause, "paused")
         }
-        "close_all_positions" => handle_paper_cmd(
-            id,
-            pipeline_cmd_tx,
-            PipelineCommand::CloseAll,
-            "close_all_sent",
-        ),
+        "resume_paper" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_paper_cmd(id, tx, PipelineCommand::Resume, "resumed")
+        }
+        "close_all_positions" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_paper_cmd(id, tx, PipelineCommand::CloseAll, "close_all_sent")
+        }
         "close_position" => {
             let symbol = req
                 .params
@@ -664,9 +713,10 @@ async fn dispatch_request(
             // 使 Rust 可平掉 paper_state 未追蹤的孤兒倉位。
             let hint_is_long = req.params.get("is_long").and_then(|v| v.as_bool());
             let hint_qty = req.params.get("qty").and_then(|v| v.as_f64());
+            let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_paper_cmd(
                 id,
-                pipeline_cmd_tx,
+                tx,
                 PipelineCommand::CloseSymbol { symbol, hint_is_long, hint_qty },
                 "close_position_sent",
             )
@@ -677,9 +727,10 @@ async fn dispatch_request(
                 .get("new_balance")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(10_000.0);
+            let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_paper_cmd(
                 id,
-                pipeline_cmd_tx,
+                tx,
                 PipelineCommand::Reset {
                     new_balance: balance,
                 },
@@ -688,34 +739,53 @@ async fn dispatch_request(
         }
         // ── Phase 3b: Strategy parameter commands (Optuna → Rust) / 策略參數命令 ──
         "update_strategy_params" => {
-            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Update).await
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Update).await
         }
         "get_strategy_params" => {
-            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Get).await
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Get).await
         }
         "get_param_ranges" => {
-            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Ranges).await
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_strategy_param_cmd(id, tx, &req.params, StrategyParamOp::Ranges).await
         }
-        "update_risk_config" => handle_update_risk_config(id, pipeline_cmd_tx, &req.params).await,
+        "update_risk_config" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_update_risk_config(id, tx, &req.params).await
+        }
         // ARCH-RC1 1C-3-B: Rust-native risk runtime status + safe counter clear
-        "get_risk_runtime_status" => handle_risk_runtime_status(id, pipeline_cmd_tx).await,
-        "clear_consecutive_losses" => handle_clear_consecutive_losses(id, pipeline_cmd_tx).await,
+        "get_risk_runtime_status" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_risk_runtime_status(id, tx).await
+        }
+        "clear_consecutive_losses" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_clear_consecutive_losses(id, tx).await
+        }
         // ARCH-RC1 1C-3-B-2: governor manual override (operator escalation/de-escalation)
         "force_governor_tier_tighter" => {
-            handle_force_governor_tighter(id, pipeline_cmd_tx, &req.params, audit_pool).await
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_force_governor_tighter(id, tx, &req.params, audit_pool).await
         }
         "force_governor_tier_looser" => {
-            handle_force_governor_looser(id, pipeline_cmd_tx, &req.params, audit_pool).await
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_force_governor_looser(id, tx, &req.params, audit_pool).await
         }
         // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
-        "submit_paper_order" => handle_submit_paper_order(id, pipeline_cmd_tx, &req.params).await,
+        "submit_paper_order" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_submit_paper_order(id, tx, &req.params).await
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
-        "set_strategy_active" => handle_set_strategy_active(id, pipeline_cmd_tx, &req.params).await,
-        // Phase 3: Engine mode management / 引擎模式管理
-        "add_engine_mode" => handle_add_engine_mode(id, pipeline_cmd_tx, &req.params).await,
-        "switch_engine_mode" => handle_switch_engine_mode(id, pipeline_cmd_tx, &req.params).await,
+        "set_strategy_active" => {
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_set_strategy_active(id, tx, &req.params).await
+        }
         // System mode sync from Python GUI / 從 Python GUI 同步系統模式
-        "set_system_mode" => handle_set_system_mode(id, pipeline_cmd_tx, &req.params).await,
+        // set_system_mode broadcasts to ALL pipelines (not engine-specific)
+        // set_system_mode 廣播到所有管線（非引擎特定）
+        "set_system_mode" => handle_set_system_mode_broadcast(id, cmd_channels, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
         "get_phase4_status" => handle_get_phase4_status(id),
         // Phase 4 (4-15): AI budget status / config / AI 預算狀態與配置
@@ -786,6 +856,19 @@ async fn dispatch_request(
 // ---------------------------------------------------------------------------
 // Method handlers / 方法處理器
 // ---------------------------------------------------------------------------
+
+/// 3E-3: Extract the `engine` param from request params and select the
+/// matching pipeline command sender. Falls back to primary if missing.
+/// 3E-3：從請求參數提取 `engine` 並選擇對應管線命令發送端，缺失時回退到主管線。
+fn extract_engine_tx<'a>(
+    params: &serde_json::Value,
+    channels: &'a EngineCommandChannels,
+) -> &'a Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
+    match params.get("engine").and_then(|v| v.as_str()) {
+        Some(engine) => channels.select(engine),
+        None => channels.primary(),
+    }
+}
 
 /// Handle paper session command — send to event consumer via channel.
 /// 處理紙盤 session 命令 — 通過通道發送到事件消費者。
@@ -1656,109 +1739,22 @@ async fn handle_set_strategy_active(
     }
 }
 
-/// Phase 3: Add a secondary engine mode at runtime.
-/// Phase 3：運行時添加次級引擎模式。
-async fn handle_add_engine_mode(
-    id: serde_json::Value,
-    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    params: &serde_json::Value,
-) -> JsonRpcResponse {
-    let tx = match pipeline_cmd_tx {
-        Some(tx) => tx,
-        None => {
-            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
-        }
-    };
-    let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
-        Some(m) => m,
-        None => {
-            return JsonRpcResponse::error(
-                id, ERR_INVALID_REQUEST,
-                "missing required param: mode (paper/demo/live)".to_string(),
-            )
-        }
-    };
-    let mode = match mode_str {
-        "paper" => crate::config::TradingMode::PaperOnly,
-        "demo" => crate::config::TradingMode::Demo,
-        "live" => crate::config::TradingMode::Live,
-        _ => {
-            return JsonRpcResponse::error(
-                id, ERR_INVALID_REQUEST,
-                format!("invalid mode: {mode_str}, expected paper/demo/live"),
-            )
-        }
-    };
-    let balance = params.get("balance").and_then(|v| v.as_f64()).unwrap_or(10_000.0);
-    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PipelineCommand::AddMode { mode, balance, response_tx: resp_tx });
-    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
-        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
-        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
-        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
-        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
-    }
-}
+// 3E-3: handle_add_engine_mode and handle_switch_engine_mode REMOVED.
+// In 3E-ARCH, pipelines are spawned at startup with fixed PipelineKind.
+// Dynamic mode switching is replaced by per-pipeline command routing.
+// 3E-3：handle_add_engine_mode 和 handle_switch_engine_mode 已移除。
+// 3E-ARCH 下管線在啟動時以固定 PipelineKind 啟動，動態模式切換被管線路由取代。
 
-/// Phase 3: Switch primary trading mode with state swap.
-/// Phase 3：切換主交易模式，附帶狀態切換。
-async fn handle_switch_engine_mode(
+/// 3E-3: Broadcast system mode to ALL active pipelines.
+/// SetSystemMode is global — every pipeline must see the same system mode.
+/// Sends to primary first (waits for response), then fire-and-forget to others.
+/// 3E-3：廣播系統模式到所有活躍管線。SetSystemMode 是全局的。
+/// 先發送到主管線（等待回應），再 fire-and-forget 發送到其他管線。
+async fn handle_set_system_mode_broadcast(
     id: serde_json::Value,
-    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    cmd_channels: &EngineCommandChannels,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match pipeline_cmd_tx {
-        Some(tx) => tx,
-        None => {
-            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
-        }
-    };
-    let mode_str = match params.get("mode").and_then(|v| v.as_str()) {
-        Some(m) => m,
-        None => {
-            return JsonRpcResponse::error(
-                id, ERR_INVALID_REQUEST,
-                "missing required param: mode (paper/demo/live)".to_string(),
-            )
-        }
-    };
-    let mode = match mode_str {
-        "paper" => crate::config::TradingMode::PaperOnly,
-        "demo" => crate::config::TradingMode::Demo,
-        "live" => crate::config::TradingMode::Live,
-        _ => {
-            return JsonRpcResponse::error(
-                id, ERR_INVALID_REQUEST,
-                format!("invalid mode: {mode_str}, expected paper/demo/live"),
-            )
-        }
-    };
-    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PipelineCommand::SwitchMode { mode, response_tx: resp_tx });
-    match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
-        Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
-        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
-        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "channel closed".to_string()),
-        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout".to_string()),
-    }
-}
-
-/// Sync global system mode from Python GUI to the engine tick pipeline.
-/// Accepts modes: live_reserved / demo_reserved / shadow_only / observe_only / design_only.
-/// Auto-closes exchange positions when entering blocking modes.
-/// 從 Python GUI 同步全局系統模式到引擎 tick 管線。
-/// 進入封鎖模式時自動平倉交易所持倉。
-async fn handle_set_system_mode(
-    id: serde_json::Value,
-    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
-    params: &serde_json::Value,
-) -> JsonRpcResponse {
-    let tx = match pipeline_cmd_tx {
-        Some(tx) => tx,
-        None => {
-            return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
-        }
-    };
     let mode = match params.get("mode").and_then(|v| v.as_str()) {
         Some(m) => m.to_string(),
         None => {
@@ -1769,8 +1765,27 @@ async fn handle_set_system_mode(
             )
         }
     };
+    // Send to primary pipeline (with response channel for confirmation)
+    let primary_tx = cmd_channels.primary();
+    let tx = match primary_tx {
+        Some(tx) => tx,
+        None => {
+            return JsonRpcResponse::error(id, ERR_INTERNAL, "no command channel configured".to_string())
+        }
+    };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PipelineCommand::SetSystemMode { mode, response_tx: resp_tx });
+    let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: resp_tx });
+    // Fire-and-forget to other pipelines (they don't need response channels for broadcast)
+    // 向其他管線 fire-and-forget（廣播不需要回應通道）
+    for (label, ch) in [("paper", &cmd_channels.paper), ("demo", &cmd_channels.demo), ("live", &cmd_channels.live)] {
+        // Skip the primary (already sent above) and None channels
+        if std::ptr::eq(ch, primary_tx) { continue; }
+        if let Some(tx) = ch {
+            let (other_resp_tx, _other_resp_rx) = tokio::sync::oneshot::channel();
+            let _ = tx.send(PipelineCommand::SetSystemMode { mode: mode.clone(), response_tx: other_resp_tx });
+            tracing::debug!(engine = label, "set_system_mode broadcast sent / 系統模式廣播已發送");
+        }
+    }
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
         Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
@@ -2186,7 +2201,7 @@ mod tests {
             recent_fills: vec![],
             klines: HashMap::new(),
             paper_paused: false,
-            trading_mode: crate::config::TradingMode::PaperOnly,
+            pipeline_kind: crate::tick_pipeline::PipelineKind::Paper,
             h0_gate_stats: None,
             stop_config: None,
             guardian_config: None,
@@ -2221,7 +2236,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         assert_eq!(
             resp.result.unwrap(),
@@ -2235,7 +2250,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "get_state", "params": {}, "id": 2}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["status"], "running");
@@ -2250,7 +2265,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 3}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_METHOD_NOT_FOUND);
     }
@@ -2260,7 +2275,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = "not valid json";
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -2270,7 +2285,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"method": "ping", "params": {}, "id": 4}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -2280,7 +2295,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "params": {}, "id": 5}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         assert_eq!(resp.error.unwrap().code, ERR_INVALID_REQUEST);
     }
@@ -2290,7 +2305,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc": "2.0", "method": "reload_config", "params": {}, "id": 8}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let result = resp.result.unwrap();
         assert_eq!(result["reloaded"], true);
@@ -2322,7 +2337,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir(); // nonexistent dir
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 20}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when snapshot file missing"
@@ -2334,7 +2349,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_paper_state", "params": {}, "id": 21}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["balance"], 9500.0);
@@ -2347,7 +2362,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_latest_prices", "params": {}, "id": 22}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["BTCUSDT"], 66000.0);
@@ -2359,7 +2374,7 @@ mod tests {
         let config = make_test_config();
         let (dd, _dir) = write_test_snapshot();
         let req = r#"{"jsonrpc": "2.0", "method": "get_tick_stats", "params": {}, "id": 23}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["total_ticks"], 5000);
@@ -2461,7 +2476,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_risk_runtime_channel(0);
         let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":40}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["governor_tier"].as_str().unwrap(), "Normal");
@@ -2475,7 +2490,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_risk_runtime_channel(3);
         let req = r#"{"jsonrpc":"2.0","method":"clear_consecutive_losses","params":{},"id":41}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["result"].as_str().unwrap(), "cleared 3 symbol(s)");
@@ -2529,7 +2544,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(true, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS","reason":"manual probe"},"id":50}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["to"].as_str().unwrap(), "CAUTIOUS");
@@ -2541,7 +2556,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(true, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_tighter","params":{"target_tier":"CAUTIOUS"},"id":51}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
     }
 
@@ -2551,7 +2566,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(false, false);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":"test"},"id":52}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
         let err_msg = resp.error.unwrap().message;
         assert!(err_msg.contains("cooldown"), "expected cooldown error, got: {}", err_msg);
@@ -2563,7 +2578,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_governor_override_channel(false, true);
         let req = r#"{"jsonrpc":"2.0","method":"force_governor_tier_looser","params":{"target_tier":"NORMAL","reason_code":"false_positive","notes":""},"id":53}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         assert_eq!(result["reason_code"].as_str().unwrap(), "false_positive");
@@ -2575,7 +2590,7 @@ mod tests {
         let config = make_test_config();
         let dd = make_test_data_dir();
         let req = r#"{"jsonrpc":"2.0","method":"get_risk_runtime_status","params":{},"id":42}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_some());
     }
 
@@ -2585,7 +2600,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_param_ranges", "params": {"strategy_name": "ma_crossover"}, "id": 30}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let ranges_str = result["result"].as_str().unwrap();
@@ -2599,7 +2614,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "get_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 31}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
         let result = resp.result.unwrap();
         let params_str = result["result"].as_str().unwrap();
@@ -2616,7 +2631,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover", "params_json": "{\"cooldown_ms\":600000,\"adx_threshold\":30.0,\"default_qty\":0.02,\"regime_filter_enabled\":true,\"higher_tf_alpha\":0.08}"}, "id": 32}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "error: {:?}", resp.error);
     }
 
@@ -2626,7 +2641,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "nonexistent_strategy", "params_json": "{}"}, "id": 33}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error for nonexistent strategy"
@@ -2639,7 +2654,7 @@ mod tests {
         let dd = make_test_data_dir();
         let tx = setup_strategy_param_channel();
         let req = r#"{"jsonrpc": "2.0", "method": "update_strategy_params", "params": {"strategy_name": "ma_crossover"}, "id": 34}"#;
-        let resp = dispatch_request(req, &config, &dd, &Some(tx), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels { paper: Some(tx), ..Default::default() }, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(
             resp.error.is_some(),
             "should error when params_json missing"
@@ -2656,7 +2671,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4000}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none(), "phase4 status must succeed");
         let r = resp.result.unwrap();
         assert_eq!(r["teacher"], "grey");
@@ -2673,7 +2688,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4001}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert!(resp.error.is_none());
         let r = resp.result.unwrap();
         for key in ["teacher", "linucb", "news", "dl3", "last_update_ms"] {
@@ -2698,7 +2713,7 @@ mod tests {
         let dd = make_test_data_dir();
         let req =
             r#"{"jsonrpc": "2.0", "method": "get_phase4_status", "params": {}, "id": 4002}"#;
-        let resp = dispatch_request(req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
+        let resp = dispatch_request(req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &None, &None, &None, &None, &None).await;
         assert_eq!(resp.id, serde_json::json!(4002));
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());
@@ -2738,7 +2753,7 @@ mod tests {
             req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2765,7 +2780,7 @@ mod tests {
             req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2798,7 +2813,7 @@ mod tests {
             req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2826,7 +2841,7 @@ mod tests {
             req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2851,7 +2866,7 @@ mod tests {
             patch_req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2868,7 +2883,7 @@ mod tests {
             get_req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2887,7 +2902,7 @@ mod tests {
             bud_req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &rs,
@@ -2910,7 +2925,7 @@ mod tests {
             req,
             &config,
             &dd,
-            &None,
+            &EngineCommandChannels::default(),
             &empty_budget_slot(),
             &empty_teacher_slot(),
             &None,
@@ -2936,7 +2951,7 @@ mod tests {
         // Patch live engine only.
         let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"live","source":"operator","patch":{"limits":{"leverage_max":5.0}}},"id":9020}"#;
         let resp = dispatch_request(
-            req, &config, &dd, &None,
+            req, &config, &dd, &EngineCommandChannels::default(),
             &empty_budget_slot(), &empty_teacher_slot(),
             &rs, &ls, &bs, &None, &None,
         ).await;
@@ -2962,16 +2977,16 @@ mod tests {
         let (rs, ls, bs) = rc1_stores();
         // Pre-patch demo store so it has a distinct version.
         let patch_req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"demo","patch":{"limits":{"open_positions_max":7}}},"id":9021}"#;
-        dispatch_request(patch_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        dispatch_request(patch_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
         // Now GET demo config — should show version=1.
         let get_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{"engine":"demo"},"id":9022}"#;
-        let resp = dispatch_request(get_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        let resp = dispatch_request(get_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
         assert!(resp.error.is_none(), "expected success: {resp:?}");
         let r = resp.result.unwrap();
         assert_eq!(r["version"], 1, "demo store should be at version 1");
         // Paper store should still be at version 0.
         let paper_req = r#"{"jsonrpc":"2.0","method":"get_risk_config","params":{},"id":9023}"#;
-        let resp2 = dispatch_request(paper_req, &config, &dd, &None, &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
+        let resp2 = dispatch_request(paper_req, &config, &dd, &EngineCommandChannels::default(), &empty_budget_slot(), &empty_teacher_slot(), &rs, &ls, &bs, &None, &None).await;
         let r2 = resp2.result.unwrap();
         assert_eq!(r2["version"], 0, "paper store should be at version 0");
     }

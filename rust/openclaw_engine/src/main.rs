@@ -567,29 +567,61 @@ async fn async_main(
     // IPC 服務器數據目錄，用於基於文件的狀態讀取
     let ipc_data_dir =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
-    // Paper session command channel: IPC → event consumer
-    // 紙盤 session 命令通道：IPC → 事件消費者
-    let (pipeline_cmd_tx, pipeline_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    // Primary pipeline command channel: IPC → event consumer
+    // 主管線命令通道：IPC → 事件消費者
+    let (primary_cmd_tx, pipeline_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
     // Clone the command sender for the Phase 4.1 Teacher consumer loop wiring below.
     // 為下方 Phase 4.1 Teacher consumer loop 接線預先複製 command sender。
-    let phase4_consumer_cmd_tx = pipeline_cmd_tx.clone();
+    let phase4_consumer_cmd_tx = primary_cmd_tx.clone();
     // Scanner D4: clone pipeline_cmd_tx for ScannerRunner (queries GetOpenPositionSymbols).
     // 掃描器 D4：為 ScannerRunner 複製 pipeline_cmd_tx（查詢 GetOpenPositionSymbols）。
-    let scanner_pipeline_cmd_tx = pipeline_cmd_tx.clone();
+    let scanner_pipeline_cmd_tx = primary_cmd_tx.clone();
     // Phase 6: clone pipeline_cmd_tx for reconciler auto-contraction commands.
     // Phase 6：為對帳器自動降級命令複製 pipeline_cmd_tx。
-    let reconciler_cmd_tx = pipeline_cmd_tx.clone();
+    let reconciler_cmd_tx = primary_cmd_tx.clone();
     // Phase 6: shared atomic for reconciler to read current risk level without IPC.
     // The event_consumer handler writes to this on every governor state change.
     // Phase 6：共享原子量供對帳器無 IPC 讀取當前風控級別。
     let shared_risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
         openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
     ));
+    // 3E-3: Paper-alongside command channel (created here, wired into IPC + deps below)
+    // 3E-3：Paper 伴隨管線命令通道（此處創建，下方接入 IPC + deps）
+    let (paper_alongside_cmd_tx, paper_alongside_cmd_rx_slot) = tokio::sync::mpsc::unbounded_channel();
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
         ipc_data_dir,
-        Some(pipeline_cmd_tx),
+        {
+            // 3E-3: Build EngineCommandChannels based on primary_kind.
+            // PaperOnly → paper=primary; Demo → demo=primary + paper=alongside;
+            // Live → live=primary + paper=alongside.
+            // 3E-3：根據 primary_kind 構建 EngineCommandChannels。
+            use openclaw_engine::ipc_server::EngineCommandChannels;
+            let primary_kind_for_ipc = match config.get().trading_mode {
+                TradingMode::PaperOnly => "paper",
+                TradingMode::Demo => "demo",
+                TradingMode::Live => "live",
+            };
+            let mut channels = EngineCommandChannels::default();
+            match primary_kind_for_ipc {
+                "paper" => {
+                    channels.paper = Some(primary_cmd_tx.clone());
+                }
+                "demo" => {
+                    channels.demo = Some(primary_cmd_tx.clone());
+                    channels.paper = Some(paper_alongside_cmd_tx.clone());
+                }
+                "live" => {
+                    channels.live = Some(primary_cmd_tx.clone());
+                    channels.paper = Some(paper_alongside_cmd_tx.clone());
+                }
+                _ => {
+                    channels.paper = Some(primary_cmd_tx.clone());
+                }
+            }
+            channels
+        },
     );
     // ARCH-RC1 1C-2-C / LIVE-P2-1: wire per-engine risk stores + unified Config stores into IPC.
     // ARCH-RC1 1C-2-C / LIVE-P2-1：將每引擎 risk stores + 統一 Config stores 接入 IPC。
@@ -1751,13 +1783,13 @@ async fn async_main(
     // Per-pipeline command channels + risk level atomics
     // 每管線命令通道 + 風控級別原子量
     // ------------------------------------------------------------------
-    // Primary pipeline reuses the existing pipeline_cmd_rx (IPC is already wired)
-    // Paper-alongside gets a new channel (no IPC wiring yet — TODO(3E-3))
+    // 3E-3: Primary pipeline uses pipeline_cmd_rx (IPC wired via EngineCommandChannels).
+    // Paper-alongside uses paper_alongside_cmd_rx_slot (IPC wired above).
+    // 3E-3：主管線使用 pipeline_cmd_rx（IPC 通過 EngineCommandChannels 接線）。
+    // Paper 伴隨管線使用 paper_alongside_cmd_rx_slot（上方已接入 IPC）。
     let paper_alongside_cmd_rx: Option<mpsc::UnboundedReceiver<openclaw_engine::tick_pipeline::PipelineCommand>> =
         if spawn_paper_alongside {
-            let (_paper_cmd_tx, paper_cmd_rx) = mpsc::unbounded_channel();
-            // TODO(3E-3): wire paper_cmd_tx into IPC EngineCommandChannels
-            Some(paper_cmd_rx)
+            Some(paper_alongside_cmd_rx_slot)
         } else {
             None
         };

@@ -101,9 +101,11 @@ pub struct PipelineSnapshot {
     /// Paper trading paused flag / 紙盤交易暫停標誌
     #[serde(default)]
     pub paper_paused: bool,
-    /// EXT-1: Current trading mode / 當前交易模式
-    #[serde(default)]
-    pub trading_mode: crate::config::TradingMode,
+    /// 3E-4: Pipeline identity (replaces TradingMode).
+    /// Serialized as "trading_mode" for backward compatibility with IPC clients.
+    /// 3E-4：管線身份（取代 TradingMode），序列化為 "trading_mode" 以向後兼容。
+    #[serde(default, rename = "trading_mode")]
+    pub pipeline_kind: crate::tick_pipeline::PipelineKind,
     /// Per-symbol latest indicator values / 每交易對最新指標值
     pub indicators: HashMap<String, IndicatorSnapshot>,
     /// Recent signals (last 100) / 最近信號（最近 100 個）

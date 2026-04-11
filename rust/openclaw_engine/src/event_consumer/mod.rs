@@ -278,38 +278,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         info!("dual-track stop channel active / 雙軌止損通道已啟用");
     }
 
-    // EXT-1: Set trading mode on pipeline / 設定管線交易模式
-    pipeline.set_trading_mode(cfg_snapshot.trading_mode);
+    // 3E-4: pipeline_kind is set at construction via with_kind() — no runtime set_trading_mode.
+    // 3E-4：pipeline_kind 在構造時通過 with_kind() 設定 — 無運行時 set_trading_mode。
 
-    // When trading_mode=Live, update paper mode (PaperOnly) balance to the demo slot value.
-    // Must be done AFTER set_trading_mode(), because set_trading_mode() calls
-    // sync_direct_to_mode_state(old=PaperOnly) which would overwrite any earlier update.
-    // After set_trading_mode(Live): mode_states[PaperOnly] has balance=initial_balance (live).
-    // We replace it with the demo slot balance so paper always mirrors the Demo account.
-    // Live 模式下更新 paper 模式餘額為 demo 槽數值。必須在 set_trading_mode() 之後執行，
-    // 因為 set_trading_mode() 會調用 sync_direct_to_mode_state(PaperOnly) 覆蓋較早的更新。
-    if let Some(paper_bal) = paper_initial_balance {
-        if cfg_snapshot.trading_mode == crate::config::TradingMode::Live {
-            if let Some(ms) = pipeline.get_mode_state_mut(crate::config::TradingMode::PaperOnly) {
-                ms.paper_state = crate::paper_state::PaperState::new(paper_bal);
-                info!(
-                    balance = paper_bal,
-                    "paper mode balance updated to demo account value (live mode) \
-                     / paper 模式餘額已更新為 demo 帳號數值（live 模式）"
-                );
-            }
-        }
-    }
-
-    // Exchange mode = any mode that routes real orders to an exchange (Demo or Live)
-    // 交易所模式 = 向交易所發送真實訂單的任何模式（Demo 或 Live）
-    let is_exchange_mode = matches!(
-        cfg_snapshot.trading_mode,
-        crate::config::TradingMode::Demo | crate::config::TradingMode::Live
-    );
+    // Exchange mode = pipeline connects to real exchange (Demo or Live).
+    // 交易所模式 = 管線連接真實交易所（Demo 或 Live）。
+    let is_exchange_mode = pipeline.pipeline_kind.is_exchange();
     if is_exchange_mode {
         info!(
-            mode = %cfg_snapshot.trading_mode,
+            kind = %pipeline.pipeline_kind,
             "EXT-1: exchange mode active — orders sent to exchange, fills confirmed via WS / 交易所模式啟用"
         );
     }
@@ -529,7 +506,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 // Emit order state change: Working → Filled / PartiallyFilled.
                                 // 發出訂單狀態轉換：Working → Filled / PartiallyFilled。
                                 if let Some(ref tx) = order_tx {
-                                    let em = pipeline.trading_mode.db_mode().to_string();
+                                    let em = pipeline.pipeline_kind.db_mode().to_string();
                                     let to_status = if fully_filled { "Filled" } else { "PartiallyFilled" };
                                     let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
                                         order_id: po.order_link_id.clone(),
@@ -586,7 +563,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                         // Emit order state change: Working → Cancelled/Rejected.
                                         // 發出訂單狀態轉換：Working → Cancelled/Rejected。
                                         if let Some(ref tx) = order_tx {
-                                            let em = pipeline.trading_mode.db_mode().to_string();
+                                            let em = pipeline.pipeline_kind.db_mode().to_string();
                                             let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
                                                 order_id: po.order_link_id.clone(),
                                                 ts_ms: std::time::SystemTime::now()
@@ -655,7 +632,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     // Emit Order row when exchange confirms Working state.
                     // 訂單進入 Working 狀態時寫入 trading.orders。
                     if let Some(ref tx) = order_tx {
-                        let em = pipeline.trading_mode.db_mode().to_string();
+                        let em = pipeline.pipeline_kind.db_mode().to_string();
                         let _ = tx.try_send(crate::database::TradingMsg::Order {
                             order_id: po.order_link_id.clone(),
                             ts_ms: po.sent_ts_ms,
@@ -752,21 +729,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                             if let Ok(guard) = bal_arc.read() {
                                 if let Some(bal) = *guard {
                                     pipeline.paper_state.set_bybit_sync_balance(Some(bal));
-                                    // P0-5: Reconcile local balance from exchange only in the mode
-                                    // that actually owns this WS connection (Demo or Live).
-                                    // Use pipeline.trading_mode dynamically — the mode may have
-                                    // been switched via IPC (SwitchMode) after startup, in which
-                                    // case the static is_exchange_mode flag would be stale and
-                                    // would incorrectly overwrite the paper simulation balance
-                                    // with the live/demo exchange balance.
-                                    // P0-5：僅在擁有此 WS 連接的模式（Demo 或 Live）下對賬本地餘額。
-                                    // 使用 pipeline.trading_mode 動態計算 — 模式可能已通過 IPC
-                                    // （SwitchMode）在啟動後切換。使用靜態 is_exchange_mode 標誌
-                                    // 會導致紙盤模擬餘額被交易所餘額錯誤覆蓋。
-                                    let current_is_exchange = matches!(
-                                        pipeline.trading_mode,
-                                        crate::config::TradingMode::Demo | crate::config::TradingMode::Live
-                                    );
+                                    // P0-5: Reconcile local balance from exchange only in exchange pipelines.
+                                    // 3E-4: pipeline_kind is immutable — no dynamic mode check needed.
+                                    // P0-5：僅在交易所管線中對賬本地餘額。3E-4：pipeline_kind 不可變。
+                                    let current_is_exchange = pipeline.pipeline_kind.is_exchange();
                                     if current_is_exchange {
                                         if let Some(old_bal) = pipeline.paper_state.reconcile_balance_from_exchange(bal) {
                                             warn!(

@@ -98,9 +98,10 @@ impl std::fmt::Display for SystemMode {
 /// and determines the pipeline's DB prefix, governance profile, and exchange binding.
 /// 不可變管線身份 — 構造時固定，永不更改。
 /// 與可變全局 `TradingMode` 不同，`PipelineKind` 一次設定，決定 DB 前綴、治理檔案、交易所綁定。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineKind {
+    #[default]
     Paper,
     Demo,
     Live,
@@ -304,19 +305,10 @@ pub enum PipelineCommand {
     GetOpenPositionSymbols {
         response_tx: tokio::sync::oneshot::Sender<std::collections::HashSet<String>>,
     },
-    /// Phase 3: Add a secondary engine mode at runtime.
-    /// Phase 3：運行時添加次級引擎模式。
-    AddMode {
-        mode: crate::config::TradingMode,
-        balance: f64,
-        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
-    },
-    /// Phase 3: Switch primary trading mode (saves current, loads target).
-    /// Phase 3：切換主交易模式（保存當前狀態，加載目標狀態）。
-    SwitchMode {
-        mode: crate::config::TradingMode,
-        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
-    },
+    // 3E-3: AddMode and SwitchMode REMOVED — pipelines are now spawned
+    // at startup with fixed PipelineKind. Dynamic mode switching replaced
+    // by per-pipeline command routing via EngineCommandChannels.
+    // 3E-3：AddMode 和 SwitchMode 已移除 — 管線啟動時以固定 PipelineKind 啟動。
     /// Phase 6: Reconciler auto-escalation (tighten risk on drift detection).
     /// Bypasses operator whitelist/24h cooldown — drift response must not be blocked.
     /// Phase 6: 對帳器自動升級（漂移偵測時收緊風控）。繞過 operator 白名單/冷卻。
@@ -472,9 +464,9 @@ pub struct TickPipeline {
     /// Paper trading paused — skip strategy dispatch + shadow orders, keep prices/indicators/stops.
     /// 紙盤交易暫停 — 跳過策略分派+影子訂單，保留價格/指標/止損。
     pub paper_paused: bool,
-    /// EXT-1: Trading mode (paper_only or exchange).
-    /// EXT-1：交易模式（紙盤或交易所）。
-    pub(crate) trading_mode: crate::config::TradingMode,
+    /// 3E-4: Pipeline identity — immutable, set at construction (replaces TradingMode).
+    /// 3E-4：管線身份 — 不可變，構造時設定（取代 TradingMode）。
+    pub(crate) pipeline_kind: PipelineKind,
     /// EXT-1: Sequence counter for generating unique order_link_id.
     /// EXT-1：序列計數器，用於生成唯一 order_link_id。
     exchange_seq: u64,
@@ -562,16 +554,9 @@ pub struct TickPipeline {
     /// 僅在變化時同步 intent_processor 快照。
     risk_config_version_seen: u64,
     /// Phase 3: Per-mode trading state (Signal Diamond architecture).
-    /// Keyed by TradingMode; each value owns an independent PaperState,
-    /// IntentProcessor, GovernanceCore, etc. Currently initialized with
-    /// the primary mode only; multi-mode activation via `add_mode()`.
-    /// Phase 3：每模式交易狀態（Signal Diamond 架構）。
-    /// 以 TradingMode 為 key；每個值獨立擁有 PaperState、IntentProcessor 等。
-    /// 目前僅初始化主模式，多模式通過 `add_mode()` 啟用。
-    mode_states: std::collections::HashMap<crate::config::TradingMode, crate::mode_state::ModeState>,
-    /// Phase 3: Ordered list of active modes for on_tick iteration.
-    /// Phase 3：活躍模式列表，on_tick 按此順序迭代。
-    active_modes: Vec<crate::config::TradingMode>,
+    // 3E-4: mode_states and active_modes REMOVED — each pipeline is now
+    // an independent TickPipeline instance with its own PipelineKind.
+    // 3E-4：mode_states 和 active_modes 已移除 — 每管線是獨立 TickPipeline 實例。
     /// Global system mode — synced from Python GUI. Gates trading at tick level.
     /// 全局系統模式 — 從 Python GUI 同步。在 tick 級別封鎖交易。
     system_mode: SystemMode,
@@ -617,7 +602,7 @@ impl TickPipeline {
             market_tx_dropped: 0,
             feature_tx_dropped: 0,
             paper_paused: false,
-            trading_mode: crate::config::TradingMode::PaperOnly,
+            pipeline_kind: PipelineKind::Paper,
             exchange_seq: 0,
             pending_close_symbols: std::collections::HashSet::new(),
             h0_gate: H0Gate::new(Some(openclaw_types::H0GateConfig {
@@ -649,15 +634,7 @@ impl TickPipeline {
             risk_store: None,
             budget_store: None,
             risk_config_version_seen: 0,
-            mode_states: {
-                let mut m = std::collections::HashMap::new();
-                m.insert(
-                    crate::config::TradingMode::PaperOnly,
-                    crate::mode_state::ModeState::new(crate::config::TradingMode::PaperOnly, balance),
-                );
-                m
-            },
-            active_modes: vec![crate::config::TradingMode::PaperOnly],
+            // 3E-4: mode_states/active_modes removed (per-pipeline architecture)
             system_mode: SystemMode::default(),
         }
     }
@@ -991,7 +968,7 @@ impl TickPipeline {
                 risk_score: vi.risk_score,
                 reasons: vi.reasons.clone(),
                 modified_qty: vi.modified_qty,
-                engine_mode: self.trading_mode.db_mode().to_string(),
+                engine_mode: self.pipeline_kind.db_mode().to_string(),
             });
         }
 
@@ -1063,7 +1040,7 @@ impl TickPipeline {
         // 持久化對等：trading_tx 已接時，發 Intent + Fill 到 PG writer。
         if let Some(ref tx) = self.trading_tx {
             let context_id = format!("ctx-{symbol}-{now_ms}");
-            let em = self.trading_mode.db_mode().to_string();
+            let em = self.pipeline_kind.db_mode().to_string();
             let _ = tx.try_send(crate::database::TradingMsg::Intent {
                 intent_id: format!("intent-{symbol}-{now_ms}"),
                 ts_ms: now_ms,
@@ -1224,7 +1201,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: format!("risk_close:{reason}"),
                 context_id: format!("ctx-{}-{}", symbol, ts_ms),
-                engine_mode: self.trading_mode.db_mode().to_string(),
+                engine_mode: self.pipeline_kind.db_mode().to_string(),
             });
         }
         self.stats.total_fills += 1;
@@ -1301,35 +1278,8 @@ impl TickPipeline {
     }
 
     /// EXT-1: Set trading mode (paper_only or exchange).
-    /// EXT-1：設定交易模式。
-    /// Set trading mode, properly swapping per-mode state (Phase 3).
-    /// Saves current direct fields → mode_states[old], loads mode_states[new] → direct fields.
-    /// If the new mode doesn't exist yet, creates it with current balance.
-    /// 設置交易模式，正確切換每模式狀態（Phase 3）。
-    /// 保存直接字段到 mode_states[舊]，加載 mode_states[新]到直接字段。
-    pub fn set_trading_mode(&mut self, mode: crate::config::TradingMode) {
-        let old = self.trading_mode;
-        if old == mode {
-            return;
-        }
-        // Save current direct fields → mode_states[old].
-        // 保存當前直接字段到 mode_states[舊模式]。
-        self.sync_direct_to_mode_state(old);
-        // Ensure new mode exists (create with current balance if not).
-        // 確保新模式存在（不存在則以當前餘額創建）。
-        if !self.mode_states.contains_key(&mode) {
-            let balance = self.paper_state.balance();
-            self.add_mode(mode, balance);
-        }
-        // Load mode_states[new] → direct fields.
-        // 加載 mode_states[新模式]到直接字段。
-        self.load_mode_state_to_direct(mode);
-        self.trading_mode = mode;
-        info!(
-            old_mode = %old, new_mode = %mode,
-            "trading mode switched / 交易模式已切換"
-        );
-    }
+    // 3E-4: set_trading_mode() REMOVED — pipeline identity is immutable.
+    // 3E-4：set_trading_mode() 已移除 — 管線身份不可變。
 
     /// EXT-1: Clear pending close flag for a symbol (called when close order is rejected/cancelled).
     /// EXT-1：清除交易對的待處理平倉標記（平倉訂單被拒/取消時調用）。
@@ -1379,116 +1329,11 @@ impl TickPipeline {
         self.context_tx = Some(tx);
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Phase 3: Multi-mode infrastructure / 多模式基礎設施
-    // ═══════════════════════════════════════════════════════════════
-
-    /// Sync direct (primary alias) fields → mode_states[mode].
-    /// Called before mode switch to save current state.
-    /// 同步直接字段 → mode_states[mode]。模式切換前調用以保存狀態。
-    fn sync_direct_to_mode_state(&mut self, mode: crate::config::TradingMode) {
-        if let Some(ms) = self.mode_states.get_mut(&mode) {
-            // Swap paper_state instead of clone (avoid expensive deep copy).
-            // 用 swap 而非 clone 避免昂貴的深拷貝。
-            std::mem::swap(&mut ms.paper_state, &mut self.paper_state);
-            std::mem::swap(&mut ms.intent_processor, &mut self.intent_processor);
-            std::mem::swap(&mut ms.governance, &mut self.governance);
-            std::mem::swap(&mut ms.recent_intents, &mut self.recent_intents);
-            std::mem::swap(&mut ms.recent_fills, &mut self.recent_fills);
-            std::mem::swap(&mut ms.consecutive_losses, &mut self.consecutive_losses);
-            ms.session_halted = self.session_halted;
-            ms.paper_paused = self.paper_paused;
-            std::mem::swap(&mut ms.pending_close_symbols, &mut self.pending_close_symbols);
-            ms.exchange_seq = self.exchange_seq;
-        }
-    }
-
-    /// Load mode_states[mode] → direct (primary alias) fields.
-    /// Called after mode switch to restore the target mode's state.
-    /// 加載 mode_states[mode] → 直接字段。模式切換後調用以恢復目標狀態。
-    fn load_mode_state_to_direct(&mut self, mode: crate::config::TradingMode) {
-        if let Some(ms) = self.mode_states.get_mut(&mode) {
-            std::mem::swap(&mut self.paper_state, &mut ms.paper_state);
-            std::mem::swap(&mut self.intent_processor, &mut ms.intent_processor);
-            std::mem::swap(&mut self.governance, &mut ms.governance);
-            std::mem::swap(&mut self.recent_intents, &mut ms.recent_intents);
-            std::mem::swap(&mut self.recent_fills, &mut ms.recent_fills);
-            std::mem::swap(&mut self.consecutive_losses, &mut ms.consecutive_losses);
-            self.session_halted = ms.session_halted;
-            self.paper_paused = ms.paper_paused;
-            std::mem::swap(&mut self.pending_close_symbols, &mut ms.pending_close_symbols);
-            self.exchange_seq = ms.exchange_seq;
-        }
-    }
-
-    /// Add a secondary engine mode with independent state.
-    /// 添加一個帶有獨立狀態的次級引擎模式。
-    pub fn add_mode(&mut self, mode: crate::config::TradingMode, balance: f64) {
-        if !self.mode_states.contains_key(&mode) {
-            self.mode_states
-                .insert(mode, crate::mode_state::ModeState::new(mode, balance));
-            self.active_modes.push(mode);
-            info!(mode = %mode, balance = %balance, "engine mode added / 引擎模式已添加");
-        }
-    }
-
-    /// Get immutable reference to a mode's state. Returns None if mode not active.
-    /// 獲取某模式狀態的不可變引用。模式未啟用時返回 None。
-    pub fn get_mode_state(&self, mode: crate::config::TradingMode) -> Option<&crate::mode_state::ModeState> {
-        self.mode_states.get(&mode)
-    }
-
-    /// Get mutable reference to a mode's state. Returns None if mode not active.
-    /// 獲取某模式狀態的可變引用。
-    pub fn get_mode_state_mut(&mut self, mode: crate::config::TradingMode) -> Option<&mut crate::mode_state::ModeState> {
-        self.mode_states.get_mut(&mode)
-    }
-
-    /// List currently active modes.
-    /// 列出當前活躍模式。
-    pub fn active_modes(&self) -> &[crate::config::TradingMode] {
-        &self.active_modes
-    }
-
-    /// Set the risk store for a specific mode.
-    /// 為特定模式設定 risk store。
-    pub fn set_mode_risk_store(
-        &mut self,
-        mode: crate::config::TradingMode,
-        store: Arc<crate::config::ConfigStore<crate::config::RiskConfig>>,
-    ) {
-        if let Some(ms) = self.mode_states.get_mut(&mode) {
-            ms.risk_store = Some(store);
-        }
-    }
-
-    /// Build a mode-specific snapshot (Phase 4 IPC prep).
-    /// For the primary mode, syncs from direct fields first (Phase 3 bridge).
-    /// 構建模式特定的快照（Phase 4 IPC 預備）。
-    /// 主模式先從直接字段同步（Phase 3 橋接）。
-    pub fn mode_snapshot(&self, mode: crate::config::TradingMode) -> Option<crate::mode_state::ModeStateSnapshot> {
-        // For the primary mode, build snapshot from direct fields (authoritative).
-        // Secondary modes use their own ModeState.
-        // 主模式從直接字段構建快照（權威來源），次級模式用自己的 ModeState。
-        if mode == self.trading_mode {
-            return Some(crate::mode_state::ModeStateSnapshot {
-                paper_state: self.paper_state.export_state(),
-                recent_intents: self.recent_intents.iter().cloned().collect(),
-                recent_fills: self.recent_fills.iter().cloned().collect(),
-                consecutive_losses: self.consecutive_losses.clone(),
-                session_halted: self.session_halted,
-                paper_paused: self.paper_paused,
-            });
-        }
-        self.mode_states.get(&mode).map(|ms| crate::mode_state::ModeStateSnapshot {
-            paper_state: ms.paper_state.export_state(),
-            recent_intents: ms.recent_intents.iter().cloned().collect(),
-            recent_fills: ms.recent_fills.iter().cloned().collect(),
-            consecutive_losses: ms.consecutive_losses.clone(),
-            session_halted: ms.session_halted,
-            paper_paused: ms.paper_paused,
-        })
-    }
+    // 3E-4: Multi-mode infrastructure REMOVED — each pipeline is independent.
+    // set_trading_mode / sync_direct_to_mode_state / load_mode_state_to_direct /
+    // add_mode / get_mode_state / get_mode_state_mut / active_modes /
+    // set_mode_risk_store / mode_snapshot all removed.
+    // 3E-4：多模式基礎設施已移除 — 每管線獨立運行。
 
     /// Process a single price event through the full pipeline.
     /// Returns a CanaryRecord when canary_mode is enabled (R07-2).
@@ -1892,7 +1737,7 @@ impl TickPipeline {
                     self.paper_state.drawdown_pct(),
                     self.linucb.as_ref(),
                     self.news_snapshot.as_ref(),
-                    self.trading_mode.db_mode(),
+                    self.pipeline_kind.db_mode(),
                 );
             }
         }
@@ -1914,10 +1759,7 @@ impl TickPipeline {
         // 注意：當前拒絕回滾假設每策略每 tick 最多發出 1 個意圖。所有當前策略滿足此約束。
         // Exchange mode = any mode that routes real orders to an exchange (Demo or Live)
         // 交易所模式 = 向交易所發送真實訂單的任何模式（Demo 或 Live）
-        let is_exchange_mode = matches!(
-            self.trading_mode,
-            crate::config::TradingMode::Demo | crate::config::TradingMode::Live
-        );
+        let is_exchange_mode = self.pipeline_kind.is_exchange();
 
         // System mode gate — blocks trading based on GUI-set global mode.
         // ObserveOnly/DesignOnly: no trading of any kind (scanner + market data continue).
@@ -1930,7 +1772,7 @@ impl TickPipeline {
                 SystemMode::ObserveOnly | SystemMode::DesignOnly => true,
                 SystemMode::ShadowOnly if is_exchange_mode => true,
                 SystemMode::DemoReserved
-                    if matches!(self.trading_mode, crate::config::TradingMode::Live) =>
+                    if self.pipeline_kind == PipelineKind::Live =>
                 {
                     true
                 }
@@ -1998,7 +1840,7 @@ impl TickPipeline {
                             risk_score: vi.risk_score,
                             reasons: vi.reasons.clone(),
                             modified_qty: vi.modified_qty,
-                            engine_mode: self.trading_mode.db_mode().to_string(),
+                            engine_mode: self.pipeline_kind.db_mode().to_string(),
                         });
                     }
 
@@ -2023,7 +1865,7 @@ impl TickPipeline {
                                 price: event.last_price,
                                 order_type: intent.order_type.clone(),
                                 strategy_name: intent.strategy.clone(),
-                                engine_mode: self.trading_mode.db_mode().to_string(),
+                                engine_mode: self.pipeline_kind.db_mode().to_string(),
                             });
                         }
 
@@ -2117,7 +1959,7 @@ impl TickPipeline {
                             risk_score: vi.risk_score,
                             reasons: vi.reasons.clone(),
                             modified_qty: vi.modified_qty,
-                            engine_mode: self.trading_mode.db_mode().to_string(),
+                            engine_mode: self.pipeline_kind.db_mode().to_string(),
                         });
                     }
 
@@ -2150,7 +1992,7 @@ impl TickPipeline {
                                 price: event.last_price,
                                 order_type: intent.order_type.clone(),
                                 strategy_name: intent.strategy.clone(),
-                                engine_mode: self.trading_mode.db_mode().to_string(),
+                                engine_mode: self.pipeline_kind.db_mode().to_string(),
                             });
                         }
 
@@ -2223,7 +2065,7 @@ impl TickPipeline {
                                     realized_pnl,
                                     strategy_name: intent.strategy.clone(),
                                     context_id: format!("ctx-{}-{}", intent.symbol, event.ts_ms),
-                                    engine_mode: self.trading_mode.db_mode().to_string(),
+                                    engine_mode: self.pipeline_kind.db_mode().to_string(),
                                 });
                             }
 
@@ -2607,7 +2449,7 @@ impl TickPipeline {
                         entry_price: pos.entry_price,
                         mark_price,
                         unrealized_pnl,
-                        engine_mode: self.trading_mode.db_mode().to_string(),
+                        engine_mode: self.pipeline_kind.db_mode().to_string(),
                     };
                     let _ = tx.try_send(msg);
                 }
@@ -2675,7 +2517,7 @@ impl TickPipeline {
                 realized_pnl,
                 strategy_name: strategy.to_string(),
                 context_id: format!("ctx-{}-{}", symbol, ts_ms),
-                engine_mode: self.trading_mode.db_mode().to_string(),
+                engine_mode: self.pipeline_kind.db_mode().to_string(),
             });
         }
 
@@ -2725,12 +2567,11 @@ impl TickPipeline {
     /// IPC 觸發全部平倉：交易所模式（Demo/Live）通過 shadow 通道發 reduce_only 市價單；
     /// 紙盤模式直接清除 paper_state。返回操作的倉位數量。
     pub(crate) fn ipc_close_all(&mut self) -> usize {
-        use crate::config::TradingMode;
         let ts_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live);
+        let is_exchange = self.pipeline_kind.is_exchange();
         if is_exchange {
             // Collect position snapshot first to avoid borrow conflict on self.
             // 先快照倉位，避免 borrow 衝突。
@@ -2799,20 +2640,18 @@ impl TickPipeline {
         hint_is_long: Option<bool>,
         hint_qty: Option<f64>,
     ) -> bool {
-        use crate::config::TradingMode;
         let ts_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
         // Use exchange path when:
-        //   (a) trading_mode is Demo or Live, OR
+        //   (a) pipeline_kind is Demo or Live, OR
         //   (b) system_mode is DemoReserved AND shadow channel is active
         //       (paper_only + demo_reserved is the current shadow-dispatch setup).
         // 交易所路徑條件：
-        //   (a) trading_mode 為 Demo 或 Live，或
-        //   (b) system_mode 為 DemoReserved 且 shadow channel 可用
-        //       （當前 paper_only + demo_reserved 的 shadow 分發模式）。
-        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live)
+        //   (a) pipeline_kind 為 Demo 或 Live，或
+        //   (b) system_mode 為 DemoReserved 且 shadow channel 可用。
+        let is_exchange = self.pipeline_kind.is_exchange()
             || (self.shadow_order_tx.is_some()
                 && matches!(self.system_mode, SystemMode::DemoReserved));
         if is_exchange {
@@ -2953,7 +2792,7 @@ impl TickPipeline {
             stats: self.stats.clone(),
             source: "rust_engine".into(),
             paper_paused: self.paper_paused,
-            trading_mode: self.trading_mode,
+            pipeline_kind: self.pipeline_kind,
             system_mode: self.system_mode.to_string(),
             indicators: self.latest_indicators.clone(),
             signals: self.recent_signals.iter().cloned().collect(),
@@ -2972,12 +2811,20 @@ impl TickPipeline {
                 .daily_loss_pct_pub(self.paper_state.balance()),
             session_drawdown_pct: self.paper_state.drawdown_pct(),
             mode_snapshots: {
+                // 3E-4: Each pipeline emits its own snapshot. Multi-mode iteration removed.
+                // 3E-4：每管線發出自己的快照。多模式迭代已移除。
                 let mut ms = HashMap::new();
-                for mode in &self.active_modes {
-                    if let Some(snap) = self.mode_snapshot(*mode) {
-                        ms.insert(mode.db_mode().to_string(), snap);
-                    }
-                }
+                ms.insert(
+                    self.pipeline_kind.db_mode().to_string(),
+                    crate::mode_state::ModeStateSnapshot {
+                        paper_state: self.paper_state.export_state(),
+                        recent_intents: self.recent_intents.iter().cloned().collect(),
+                        recent_fills: self.recent_fills.iter().cloned().collect(),
+                        consecutive_losses: self.consecutive_losses.clone(),
+                        session_halted: self.session_halted,
+                        paper_paused: self.paper_paused,
+                    },
+                );
                 ms
             },
         }
@@ -2992,10 +2839,7 @@ impl TickPipeline {
     pub fn set_system_mode(&mut self, mode: &str) -> Result<String, String> {
         let new_mode = SystemMode::from_str(mode)?;
         let old_mode = self.system_mode;
-        let is_exchange_mode = matches!(
-            self.trading_mode,
-            crate::config::TradingMode::Demo | crate::config::TradingMode::Live
-        );
+        let is_exchange_mode = self.pipeline_kind.is_exchange();
         let was_exchange_allowed = !matches!(
             old_mode,
             SystemMode::ShadowOnly | SystemMode::ObserveOnly | SystemMode::DesignOnly
@@ -3855,73 +3699,19 @@ mod tests {
     // Phase 3: set_trading_mode state swap tests / 模式切換狀態交換測試
     // ═══════════════════════════════════════════════════════════════
 
-    #[test]
-    fn test_set_trading_mode_preserves_state() {
-        let mut pipeline = TickPipeline::with_balance(&["BTCUSDT"], 10_000.0);
-        // Modify paper state / 修改紙盤狀態
-        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
-        assert_eq!(pipeline.paper_state.position_count(), 1);
-        // Switch to Demo / 切換到 Demo
-        pipeline.set_trading_mode(crate::config::TradingMode::Demo);
-        assert_eq!(pipeline.trading_mode, crate::config::TradingMode::Demo);
-        // Demo starts fresh — no positions / Demo 初始狀態無持倉
-        assert_eq!(pipeline.paper_state.position_count(), 0);
-        // Switch back to Paper / 切回 Paper
-        pipeline.set_trading_mode(crate::config::TradingMode::PaperOnly);
-        // Paper state restored — position present / Paper 狀態恢復 — 持倉存在
-        assert_eq!(pipeline.paper_state.position_count(), 1);
-    }
+    // 3E-4: set_trading_mode / add_mode / mode_snapshot tests REMOVED.
+    // Pipeline identity is now immutable (PipelineKind set at construction).
+    // Mode state swap tests replaced by per-pipeline independence tests (3E e2e).
+    // 3E-4：模式切換/添加/快照測試已移除。管線身份不可變。
 
     #[test]
-    fn test_set_trading_mode_same_mode_noop() {
-        let mut pipeline = TickPipeline::with_balance(&["BTCUSDT"], 5_000.0);
-        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.1, 50_000.0, 0.0, 0);
-        // Same mode = no-op / 相同模式 = 無操作
-        pipeline.set_trading_mode(crate::config::TradingMode::PaperOnly);
-        assert_eq!(pipeline.paper_state.position_count(), 1);
-    }
-
-    #[test]
-    fn test_add_mode_and_mode_snapshot() {
-        let mut pipeline = TickPipeline::with_balance(&["BTCUSDT"], 10_000.0);
-        pipeline.add_mode(crate::config::TradingMode::Demo, 20_000.0);
-        assert_eq!(pipeline.active_modes().len(), 2);
-        // Primary mode snapshot comes from direct fields.
-        // 主模式快照來自直接字段。
-        let snap = pipeline.mode_snapshot(crate::config::TradingMode::PaperOnly);
-        assert!(snap.is_some());
-        assert_eq!(snap.unwrap().paper_state.balance, 10_000.0);
-        // Demo mode snapshot comes from mode_states.
-        // Demo 模式快照來自 mode_states。
-        let demo_snap = pipeline.mode_snapshot(crate::config::TradingMode::Demo);
-        assert!(demo_snap.is_some());
-        assert_eq!(demo_snap.unwrap().paper_state.balance, 20_000.0);
-    }
-
-    #[test]
-    fn test_mode_snapshot_in_pipeline_snapshot() {
-        let mut pipeline = TickPipeline::with_balance(&["BTCUSDT"], 8_000.0);
-        pipeline.add_mode(crate::config::TradingMode::Demo, 15_000.0);
+    fn test_snapshot_contains_pipeline_kind_mode_snapshot() {
+        let pipeline = TickPipeline::with_balance(&["BTCUSDT"], 8_000.0);
         let snap = pipeline.snapshot();
-        // mode_snapshots should have both paper and demo.
-        // mode_snapshots 應包含 paper 和 demo。
+        // mode_snapshots should contain exactly the pipeline's own kind.
+        // mode_snapshots 應包含管線自身 kind。
         assert!(snap.mode_snapshots.contains_key("paper"));
-        assert!(snap.mode_snapshots.contains_key("demo"));
+        assert_eq!(snap.mode_snapshots.len(), 1);
         assert_eq!(snap.mode_snapshots["paper"].paper_state.balance, 8_000.0);
-        assert_eq!(snap.mode_snapshots["demo"].paper_state.balance, 15_000.0);
-    }
-
-    #[test]
-    fn test_set_trading_mode_switch_back_preserves_consecutive_losses() {
-        let mut pipeline = TickPipeline::with_balance(&["BTCUSDT"], 10_000.0);
-        pipeline.consecutive_losses.insert("BTCUSDT".into(), 3);
-        pipeline.session_halted = true;
-        // Switch to Demo, then back / 切到 Demo 再切回
-        pipeline.set_trading_mode(crate::config::TradingMode::Demo);
-        assert!(!pipeline.session_halted); // Demo is fresh
-        assert!(pipeline.consecutive_losses.is_empty());
-        pipeline.set_trading_mode(crate::config::TradingMode::PaperOnly);
-        assert!(pipeline.session_halted); // Paper state restored
-        assert_eq!(*pipeline.consecutive_losses.get("BTCUSDT").unwrap(), 3);
     }
 }
