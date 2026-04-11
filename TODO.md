@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-E2 Phase D 完成 — 7 BLOCKER/MAJOR 架構級補完）
-測試基準線：**Rust engine lib 904 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-11（3E-E2 Phase F 完成 — 5 超限文件拆分）
+測試基準線：**Rust engine lib 929 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -102,13 +102,13 @@
 - [x] **BLOCKER-10** 補 25 blocker tests（D2/D6/D15/D23 — 覆蓋 global notional cap / EngineEvent / PipelineHealth / broadcast / snapshot versioning / startup barrier / cross-engine cascade）
 - [x] 全測試套件跑通：engine lib **929** + core **366** + e2e **18** = **1313 passed** / 0 failed
 
-### Phase F — 文件拆分（2-3 天，獨立 session）
-- [ ] **BLOCKER-9** 5 個超 1200 硬上限文件拆分：
-  - `tick_pipeline.rs` 3717 行 → 拆多模組
-  - `ipc_server.rs` 3197 行 → 拆 handlers/routing/auth
-  - `main.rs`（當前 2004+，Phase C 後可能再漲）→ 拆 startup/spawn/supervise
-  - `intent_processor.rs` 1614 行 → 拆 gates/router
-  - `position_reconciler.rs` 1397 行 → 拆 escalation/rest_poller
+### Phase F — 文件拆分 ✅
+- [x] **BLOCKER-9** 5 個超 1200 硬上限文件拆分：
+  - `tick_pipeline.rs` 3907→ mod.rs(1122) + on_tick.rs(1172) + commands.rs(708) + tests.rs(930)
+  - `ipc_server.rs` 3223→ mod.rs(975) + handlers.rs(1195) + tests.rs(1058)
+  - `main.rs` 2243→ main.rs(930) + startup.rs(716) + tasks.rs(488)
+  - `intent_processor.rs` 1785→ mod.rs(493) + gates.rs(204) + router.rs(499) + tests.rs(597)
+  - `position_reconciler.rs` 1397→ mod.rs(617) + escalation.rs(351) + tests.rs(438)
 
 ### Phase G — 重跑驗收
 - [ ] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查**
@@ -116,7 +116,7 @@
 - [ ] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
 
 **Phase 依賴圖**：  
-`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E → Phase F → Phase G`  
+`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G`  
 **總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
 
 ---
