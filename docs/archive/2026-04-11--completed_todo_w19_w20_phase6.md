@@ -120,4 +120,33 @@
 
 ---
 
-**歸檔依據**：2026-04-11 晚間 audit 後 TODO 整理，全部標記 `[x]` 的 W19/W20/Phase 6 / 3E-E2 Fix Rounds 子項移入此檔，TODO.md 僅保留 `[ ]` 工作項與精簡摘要。
+---
+
+## 🔴 2026-04-11 晚間 Audit BLOCKERs ✅ 全部已修（2026-04-12 歸檔）
+
+**起源**：用戶要求「仔細檢查現在的持倉和今天的交易，看看是否風控全都在有效接入」→ 9 角色 audit 發現 4 MAJOR + 2 BLOCKER。M-1~M-4 + B-1 + B-2 全部修復完畢。
+
+- [x] **B-1 Demo/Live 快照 positions 空（startup 不導入既存倉 + WS PositionUpdate 未寫回）** ✅ FIXED 2026-04-12（commit f6e7afc, Phase 2）
+  - 根因：startup seeding 缺失 + WS PositionUpdate 不寫回。修復：`paper_state.import_positions()` + `upsert_position_from_exchange()` + `ExchangeEvent::PositionUpdate` 新增變體。驗證：demo positions=12 + live positions=9 與 Bybit 一致。+2 tests。935 lib pass。
+
+- [x] **B-2 total_fills 不遞增（exchange 模式）** ✅ FIXED 2026-04-11（commits 8e08c34 / b5e45f7 / 152d1f6）
+  - 根因：Bybit demo 不支援 `execution.fast` topic + typo `fast-execution`。修復：環境感知 topic 選擇 + parser 日誌改善 + Live worker_threads 2→4。驗證：demo 6min 收到 18 筆真實 WS fills。
+
+- [x] **M-1** `order_manager.validate_and_round` fail-closed 缺 spec + `dispatch.rs` Market 訂單 pre-flight 名義值檢查
+- [x] **M-2** `grid_trading.on_rejection` per-symbol 30s 拒絕冷卻 + `on_tick.rs` post-Guardian capped qty 顯示
+- [x] **M-3** cost_gate 跨引擎驗證 — 日誌證據確認設計正確運作（無代碼變更）
+- [x] **M-4** `risk_config_live.toml` 限額驗證 — 全部正確收緊
+
+---
+
+## 📈 Phase 6 — 6-09~13 PM 驗收 ✅（2026-04-12 歸檔）
+
+- [x] **6-09~13** E2 + E4 + QA 端到端 + E5 + PM 驗收（2026-04-12 PM sign-off PASS）
+  - E4: 935 engine lib + 366 core + 18 e2e + 32 promotion = 1351 passed / 0 failed / 0 warnings
+  - E2: Reconciler 0 BLOCKER 0 MAJOR · Promotion 0 BLOCKER 0 MAJOR（governance_routes 超限 pre-existing）
+  - QA: 三引擎存活 + 雙 Reconciler 運行 + baseline seeded + API auth enforced
+  - E5: stress test PASS（1000 calls <100ms）· 32 promotion tests 0.06s
+
+---
+
+**歸檔依據**：2026-04-11 晚間 audit 後 TODO 整理 + 2026-04-12 Phase 6 PM 驗收完成後追加歸檔。全部標記 `[x]` 的 W19/W20/Phase 6 / 3E-E2 Fix Rounds / 晚間 Audit 子項移入此檔，TODO.md 僅保留 `[ ]` 工作項與精簡摘要。
