@@ -594,6 +594,7 @@ impl PaperState {
             .collect();
         PaperStateSnapshot {
             balance: self.balance,
+            initial_balance: self._initial_balance,
             peak_balance: self.peak_balance,
             total_realized_pnl: self.total_realized_pnl,
             total_fees: self.total_fees,
@@ -619,6 +620,9 @@ pub struct PositionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperStateSnapshot {
     pub balance: f64,
+    /// The balance the engine was initialized with (never changes after startup).
+    /// 引擎啟動時的初始餘額（啟動後永不改變）。
+    pub initial_balance: f64,
     pub peak_balance: f64,
     pub total_realized_pnl: f64,
     pub total_fees: f64,

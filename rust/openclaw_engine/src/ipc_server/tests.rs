@@ -28,6 +28,7 @@ fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
         written_at_ms: 1700000050000,
         paper_state: crate::paper_state::PaperStateSnapshot {
             balance: 9500.0,
+            initial_balance: 10000.0,
             peak_balance: 10000.0,
             total_realized_pnl: -500.0,
             total_fees: 12.5,

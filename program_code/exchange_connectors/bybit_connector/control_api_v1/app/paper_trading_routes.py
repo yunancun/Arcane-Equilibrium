@@ -405,7 +405,7 @@ def get_session_status(
         "session": {
             "session_state": session_state,
             "session_id": "rust_engine",
-            "initial_paper_balance_usdt": peak,
+            "initial_paper_balance_usdt": rust_state.get("initial_balance", peak),
             "current_paper_balance_usdt": balance,
             "peak_balance_usdt": peak,
             "session_halted": False,
@@ -766,9 +766,38 @@ def get_metrics(
     rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
         return _paper_response({"available": False, "source": "rust_engine"})
+
+    # ── Build authoritative PnL from Rust snapshot ──────────────────────
+    # Rust paper_state has flat keys (balance, peak_balance, total_realized_pnl,
+    # total_fees, positions). Inject as nested "pnl" so compute_full_metrics
+    # uses engine-authoritative values instead of reconstructing from DB fills
+    # (which may span multiple engine sessions and produce wrong totals).
+    # 從 Rust 快照構建權威 PnL，避免從跨 session 的 DB fills 重建導致錯誤。
+    positions = rust_state.get("positions", [])
+    total_unrealized = sum(p.get("unrealized_pnl", 0) for p in positions)
+    rust_realized = rust_state.get("total_realized_pnl", 0.0)
+    rust_fees = rust_state.get("total_fees", 0.0)
+    rust_state["pnl"] = {
+        "realized_pnl": rust_realized,
+        "unrealized_pnl": total_unrealized,
+        "total_fees_paid": rust_fees,
+        "net_paper_pnl": rust_realized + total_unrealized - rust_fees,
+    }
+
     # Full metrics via compute_full_metrics (trade_metrics, drawdown, sharpe, etc.)
     # 完整指標通過 compute_full_metrics 計算
     full = compute_full_metrics(rust_state, engine_mode="paper")
+
+    # ── Override drawdown metrics with Rust-authoritative values ────────
+    # The DB-derived balance series may span prior engine sessions and diverge
+    # from the current engine state. Rust paper_state is the single source of
+    # truth for current balance and peak balance.
+    # DB 成交記錄可能跨越多次引擎重啟，餘額重建與當前引擎狀態不符。
+    # Rust paper_state 是餘額/峰值的唯一權威來源。
+    dm = full.get("drawdown_metrics", {})
+    dm["current_balance"] = round(rust_state.get("balance", 0.0), 4)
+    dm["peak_balance"] = round(rust_state.get("peak_balance", 0.0), 4)
+
     # Merge tick stats from engine / 合併引擎 tick 統計
     paper_snap = rust.get_snapshot(engine="paper") or {}
     stats = paper_snap.get("stats") or {}
