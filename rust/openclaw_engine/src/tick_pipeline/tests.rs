@@ -13,6 +13,21 @@ use super::*;
         assert_eq!(PipelineKind::Live.db_mode(), "live");
     }
 
+    /// 3E-ARCH regression: with_kind() must persist `pipeline_kind` on the pipeline.
+    /// Before the fix, all engines kept the with_balance() default Paper and raced
+    /// on paper_state.json / pipeline_snapshot_paper.json.
+    /// 3E-ARCH 回歸：with_kind() 必須把 kind 寫入 pipeline 字段。修復前三引擎都
+    /// 留在 with_balance() 預設的 Paper，搶寫同一份 paper_state.json。
+    #[test]
+    fn test_with_kind_sets_pipeline_kind_field() {
+        let p_paper = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let p_demo  = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
+        let p_live  = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Live);
+        assert_eq!(p_paper.pipeline_kind.db_mode(), "paper");
+        assert_eq!(p_demo.pipeline_kind.db_mode(), "demo");
+        assert_eq!(p_live.pipeline_kind.db_mode(), "live");
+    }
+
     #[test]
     fn test_pipeline_kind_is_exchange() {
         assert!(!PipelineKind::Paper.is_exchange());

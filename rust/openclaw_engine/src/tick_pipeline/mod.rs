@@ -682,6 +682,13 @@ impl TickPipeline {
     /// 3E-2a：以明確 kind + balance 創建管線。GovernanceCore 按 profile 構造（Paper/Demo 自動授權）。
     pub fn with_kind(symbols: &[&str], balance: f64, kind: PipelineKind) -> Self {
         let mut p = Self::with_balance(symbols, balance);
+        // 3E-ARCH bugfix: persist the kind on the pipeline so downstream consumers
+        // (event_consumer persistence kind_tag, IPC routing, status reports) see the
+        // correct value. Without this all engines kept the with_balance() default
+        // PipelineKind::Paper and raced on paper_state.json / pipeline_snapshot_paper.json.
+        // 3E-ARCH 修復：把 kind 寫入 pipeline 字段，否則下游持久化 / IPC / 狀態報告
+        // 都讀回 with_balance() 預設的 Paper，三引擎搶寫同一份 paper_state.json。
+        p.pipeline_kind = kind;
         p.governance = GovernanceCore::new_with_profile(kind.governance_profile());
         p
     }
