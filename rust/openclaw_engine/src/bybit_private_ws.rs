@@ -38,11 +38,18 @@ const AUTH_EXPIRES_OFFSET_MS: u64 = 10_000;
 /// Private topics to subscribe after auth.
 /// 認證後要訂閱的私有主題。
 ///
-/// Note: `fast-execution` replaces `execution` with ~50ms latency (vs ~300ms).
-/// Subscribing to both would cause duplicate fill events. We use fast-execution only.
-/// 注意：`fast-execution` 替代 `execution`（~50ms vs ~300ms）。
-/// 同時訂閱兩者會導致重複成交事件。我們只使用 fast-execution。
-const PRIVATE_TOPICS: &[&str] = &["order", "fast-execution", "position", "wallet", "dcp"];
+/// Note: `execution.fast` is the V5 low-latency fill topic (~50ms vs `execution` ~300ms).
+/// Subscribing to both would cause duplicate fill events; we use execution.fast only.
+/// IMPORTANT: the topic name is `execution.fast` (with a dot). The earlier value
+/// `fast-execution` was a documentation transcription error — Bybit silently accepts
+/// the unknown topic but never pushes any data, leaving total_fills permanently 0.
+/// See 2026-04-11 B-1/B-2 root-cause investigation.
+/// 注意：`execution.fast` 是 V5 低延遲成交 topic（~50ms vs `execution` ~300ms）。
+/// 同時訂閱兩者會產生重複成交事件，我們只用 execution.fast。
+/// 重要：topic 名為 `execution.fast`（含點）。先前的 `fast-execution` 是文件轉錄錯誤 —
+/// Bybit 靜默接受未知 topic 但永不推送資料，導致 total_fills 永遠為 0。
+/// 詳見 2026-04-11 B-1/B-2 根因調查。
+const PRIVATE_TOPICS: &[&str] = &["order", "execution.fast", "position", "wallet", "dcp"];
 
 // ---------------------------------------------------------------------------
 // Event types / 事件類型
@@ -548,9 +555,13 @@ fn parse_private_message(text: &str) -> Option<PrivateWsEvent> {
             }
             None
         }
-        "fast-execution" => {
-            // Same structure as execution but lower latency (~50ms vs ~300ms)
-            // 與 execution 結構相同但延遲更低
+        "execution.fast" => {
+            // Same payload as `execution` but lower latency (~50ms vs ~300ms).
+            // V5 fast-execution carries fewer fields (no execFee/execValue/feeRate);
+            // ExecutionUpdate uses serde defaults so missing fields parse as "".
+            // 與 execution 相同 payload 但延遲更低（~50ms vs ~300ms）。
+            // V5 execution.fast 欄位較少（無 execFee/execValue/feeRate），
+            // ExecutionUpdate 用 serde default，缺失欄位解析為空字串。
             for item in data {
                 if let Ok(update) = serde_json::from_value::<ExecutionUpdate>(item.clone()) {
                     return Some(PrivateWsEvent::Execution(update));
@@ -737,6 +748,55 @@ mod tests {
             }
             _ => panic!("Expected Execution event"),
         }
+    }
+
+    /// B-2 regression: parsing must accept the V5 `execution.fast` topic name.
+    /// Bybit silently accepts unknown topics, so a typo here makes total_fills
+    /// permanently 0 — only a parser-level test catches it.
+    /// B-2 回歸：解析必須接受 V5 `execution.fast` topic 名稱。Bybit 對未知 topic
+    /// 不報錯，typo 會使 total_fills 永遠為 0，只有解析層測試能擋住。
+    #[test]
+    fn test_parse_fast_execution_update() {
+        let msg = r#"{
+            "topic": "execution.fast",
+            "data": [{
+                "execId": "fast-exec-001",
+                "orderId": "1234567890",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "execPrice": "65000.00",
+                "execQty": "0.001",
+                "execFee": "0.0325",
+                "execType": "Trade",
+                "execTime": "1700000002000"
+            }]
+        }"#;
+        let event = parse_private_message(msg).unwrap();
+        match event {
+            PrivateWsEvent::Execution(exec) => {
+                assert_eq!(exec.exec_id, "fast-exec-001");
+                assert_eq!(exec.symbol, "BTCUSDT");
+                assert_eq!(exec.side, "Buy");
+                assert_eq!(exec.exec_price, "65000.00");
+            }
+            _ => panic!("Expected Execution event from execution.fast topic"),
+        }
+    }
+
+    /// B-2 regression: PRIVATE_TOPICS const must use the correct V5 topic name.
+    /// Catches the typo at the subscribe-args layer in case the parser arm is
+    /// edited in isolation.
+    /// B-2 回歸：PRIVATE_TOPICS 常數必須用正確的 V5 topic 名稱。
+    #[test]
+    fn test_private_topics_constant_uses_execution_fast() {
+        assert!(
+            PRIVATE_TOPICS.contains(&"execution.fast"),
+            "PRIVATE_TOPICS must subscribe to execution.fast (V5 fill topic)"
+        );
+        assert!(
+            !PRIVATE_TOPICS.contains(&"fast-execution"),
+            "PRIVATE_TOPICS must NOT use fast-execution (Bybit silently drops it)"
+        );
     }
 
     /// Test parsing position update message.
