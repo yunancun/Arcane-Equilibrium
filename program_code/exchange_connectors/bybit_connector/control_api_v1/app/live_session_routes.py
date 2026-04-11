@@ -571,6 +571,12 @@ def get_live_session_status(
     # 3E-5：通過每引擎快照直接查詢 live/demo 引擎。
     engine_kind = _get_live_engine_kind()
     rust_state = rust.get_paper_state(engine=engine_kind) if engine_available and engine_kind != "unknown" else None
+    # Read full engine snapshot for top-level fields like paper_paused.
+    # get_paper_state() only returns the nested paper_state sub-object (balance/positions),
+    # which does NOT contain paper_paused — that lives at the snapshot root.
+    # 讀完整引擎快照以取得頂層欄位（如 paper_paused）。
+    # get_paper_state() 僅返回 paper_state 子對象，不含頂層的 paper_paused。
+    engine_snap = rust.get_engine_snapshot(engine_kind) if engine_available and engine_kind != "unknown" else None
 
     execution_authority = _get_execution_authority()
 
@@ -579,9 +585,9 @@ def get_live_session_status(
     elif _LIVE_USER_STOPPED:
         session_state = "stopped"
     else:
-        # Live session inherits paper session state (same underlying pipeline)
-        # Live session 繼承 paper session 狀態（同一底層管線）
-        paper_paused = rust_state.get("paper_paused", True)
+        # paper_paused is a top-level field in the engine snapshot, not inside paper_state.
+        # paper_paused 在引擎快照頂層，不在 paper_state 內。
+        paper_paused = (engine_snap or {}).get("paper_paused", True)
         session_state = "paused" if paper_paused else "active"
 
     # Derive drawdown info from engine state for status display
@@ -1174,8 +1180,10 @@ def get_live_metrics(
     rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
     if rust_state is None:
         return _live_response({"available": False, "source": "engine_unavailable"})
-    full = compute_full_metrics(rust_state)
-    stats = rust.get_tick_stats() or {}
+    full = compute_full_metrics(rust_state, engine_mode=engine_kind)
+    # Read per-engine tick stats / 讀取每引擎 tick 統計
+    engine_snap = rust.get_engine_snapshot(engine_kind) if engine_kind != "unknown" else None
+    stats = (engine_snap or {}).get("stats") or {}
     full["source"] = "rust_engine"
     full["total_ticks"] = stats.get("total_ticks", 0)
     full["total_intents"] = stats.get("total_intents", 0)

@@ -581,6 +581,20 @@ function loadDemoMetrics(raw) {
   const largestLoss = losses.length > 0 ? Math.min(...losses.map(t => t.pnl)) : null;
   const avgHoldMs = tripCount > 0 ? trips.reduce((s, t) => s + t.holdMs, 0) / tripCount : 0;
 
+  // Per-trade Sharpe ratio from round-trip PnL (raw mean/std, NOT annualized, risk-free=0).
+  // 每筆交易的夏普比率（raw mean/std，未年化，無風險利率=0）。
+  let sharpeStr = 'N/A';
+  if (tripCount >= 2) {
+    const returns = trips.map(t => t.pnl);
+    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const variance = returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
+    const std = Math.sqrt(variance);
+    if (std > 0) {
+      const rawSharpe = mean / std;
+      sharpeStr = rawSharpe.toFixed(2);
+    }
+  }
+
   // Format hold time
   let holdStr = 'N/A';
   if (avgHoldMs > 0) {
@@ -594,7 +608,7 @@ function loadDemoMetrics(raw) {
     ['胜率 / Win Rate', '盈利交易占总交易的百分比。50%以上通常被视为良好。/ Percentage of profitable trades. Above 50% is generally good.', winRate],
     ['盈亏比 / Win/Loss Ratio', '平均盈利与平均亏损的比值。>1 表示盈利大于亏损。/ Ratio of avg win to avg loss. >1 means wins outsize losses.', winLossRatio],
     ['最大回撤 / Max Drawdown', '从峰值到最低点的最大跌幅，衡量最坏情况的资金损失。<10% 优秀，10-20% 正常，>20% 需关注。/ Largest peak-to-trough decline. <10% excellent, 10-20% normal, >20% concerning.', ddPct],
-    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。/ Risk-adjusted return. >1 good, >2 excellent, <0 underperforming risk-free rate.', 'N/A'],
+    ['夏普比率 / Sharpe Ratio', '风险调整后收益指标。>1 良好，>2 优秀，<0 表示收益不如无风险利率。/ Risk-adjusted return. >1 good, >2 excellent, <0 underperforming risk-free rate.', sharpeStr],
     ['平均持仓时间 / Avg Hold Time', '持仓从开仓到平仓的平均时长。/ Average duration from open to close.', holdStr],
     ['单笔最高盈利 / Largest Win', '', largestWin != null ? ocMoney(largestWin) : 'N/A'],
     ['单笔最高亏损 / Largest Loss', '', largestLoss != null ? ocMoney(largestLoss) : 'N/A'],

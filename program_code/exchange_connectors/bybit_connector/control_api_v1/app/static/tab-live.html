@@ -491,10 +491,13 @@ async function loadDashboardData() {
       ordBody.innerHTML = ordArr.map(o => {
         // Bybit order format: orderId, symbol, side, qty, price, orderStatus, orderType
         // Bybit 訂單格式：orderId、symbol、side、qty、price、orderStatus、orderType
-        const qty = o.qty || o.size || o.orderQty || '--';
-        const price = o.price || o.triggerPrice || '--';
-        const orderType = o.orderType || o.stopOrderType || (o.pending_close ? '平倉' : 'stop');
-        const status = o.orderStatus || (o.pending_close ? 'PendingClose' : '--');
+        const qty = o.qty || o.size || o.orderQty || o.order_qty || '--';
+        // Conditional orders have price=0 (market when triggered); show trigger_price instead.
+        // 條件單 price=0（觸發時市價執行），顯示觸發價。
+        const rawPrice = parseFloat(o.price) || parseFloat(o.trigger_price) || parseFloat(o.triggerPrice) || 0;
+        const price = rawPrice > 0 ? rawPrice : '--';
+        const orderType = o.order_type || o.orderType || o.stopOrderType || (o.pending_close ? '平倉' : 'stop');
+        const status = o.order_status || o.orderStatus || (o.pending_close ? 'PendingClose' : '--');
         return `<tr>
           <td>${ocEsc(o.symbol || '--')}</td>
           <td>${ocEsc(o.side || '--')}</td>
