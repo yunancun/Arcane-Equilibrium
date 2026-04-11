@@ -1056,21 +1056,64 @@ async def post_live_close_position(
     """
     POST /api/v1/live/positions/{symbol}/close
     通過 IPC close_position 平掉指定 symbol 的倉位。
-    Rust 引擎依 trading_mode 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
+    執行路徑完全在 Rust 引擎內：
+      1. Python 從 Bybit REST 查詢持倉（只讀），取得 is_long / qty 作為 hints
+      2. IPC 帶 hints 傳給 Rust
+      3. Rust 引擎直接 dispatch reduce_only 市價單至 Bybit（不經 Python 下單）
+      4. paper_state 有倉 → 走既有路徑；無倉 → 用 hints 平孤兒倉位
 
-    Close a single position by symbol via IPC close_position.
-    Rust engine branches by trading_mode: Demo/Live → reduce_only market order; Paper → paper_state.
+    Close a single Live position by symbol. All trading execution happens inside Rust:
+    Python only does a read-only REST lookup to supply is_long/qty hints.
+    Rust dispatches the reduce_only market order directly.
     """
     _require_operator(actor)
+    sym = symbol.upper()
+
+    # Step 1: read-only lookup of exchange position to build hints for Rust.
+    # Python 只查倉位資料（只讀），供 Rust 平孤兒倉位時使用。
+    hint_is_long: bool | None = None
+    hint_qty: float | None = None
+    rc = _get_rust_client_safe()
+    if rc is not None:
+        try:
+            positions = rc.get_positions("linear")
+            for p in positions:
+                if p.get("symbol") == sym:
+                    size = float(p.get("size") or p.get("qty") or 0)
+                    if size > 0:
+                        hint_is_long = p.get("side") == "Buy"
+                        hint_qty = size
+                    break
+        except Exception as exc:
+            logger.warning("live close: position hint lookup failed for %s: %s", sym, exc)
+
+    # Step 2: send IPC — Rust handles the actual close order.
+    # 發 IPC — Rust 引擎執行平倉，Python 不介入下單。
+    ipc_params: dict = {"symbol": sym}
+    if hint_is_long is not None:
+        ipc_params["is_long"] = hint_is_long
+    if hint_qty is not None and hint_qty > 0:
+        ipc_params["qty"] = hint_qty
+
     try:
-        result = await _ipc_command("close_position", {"symbol": symbol.upper()})
+        result = await _ipc_command("close_position", ipc_params)
     except Exception as exc:
-        logger.error("IPC close_position failed for %s: %s", symbol, exc)
+        logger.error("IPC close_position failed for %s: %s", sym, exc)
         raise HTTPException(status_code=502, detail=f"IPC error: {exc}")
+
+    # If no exchange position AND paper IPC also found nothing, return 404.
+    # 交易所和紙盤都沒倉，回 404（避免謊報 closed=True）。
+    if hint_qty is None or hint_qty <= 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No position found for {sym} (neither paper state nor exchange) / 倉位不存在",
+        )
+
     logger.warning(
-        "⚠ close_position %s — actor=%s", symbol.upper(), getattr(actor, "actor_id", "?"),
+        "⚠ close_position %s hint_is_long=%s hint_qty=%s — actor=%s",
+        sym, hint_is_long, hint_qty, getattr(actor, "actor_id", "?"),
     )
-    return _live_response({"symbol": symbol.upper(), "closed": True, "source": "rust_engine", "ipc": result})
+    return _live_response({"symbol": sym, "closed": True, "source": "rust_engine", "ipc": result})
 
 
 @live_router.post("/close-all-positions")
