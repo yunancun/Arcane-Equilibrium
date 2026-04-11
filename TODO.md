@@ -63,23 +63,25 @@
 
 **起源**：用戶要求「仔細檢查現在的持倉和今天的交易，看看是否風控全都在有效接入」→ 9 角色 audit 發現 4 MAJOR + 2 BLOCKER。M-1~M-4 已修復（commit 待出），B-1/B-2 待修。
 
-- [ ] **B-1 Demo/Live 快照與真實持倉斷開** — 結構性 P0
-  - **症狀**：`/tmp/openclaw/pipeline_snapshot_demo.json` 顯示 `positions=[]` `fills=0` `trades=0`，但 Bybit Demo 帳戶實際 9 個活躍倉位。Live snapshot 同樣空。
-  - **根因假設**：`event_consumer/dispatch.rs` 派發 primary 訂單後，`ExchangeEvent::Fill` 沒有流回 `pipeline.paper_state` / `stats.total_fills`。Private WS `fast-execution` 訂閱已建立但事件未被消費或未路由到對應引擎的 state 結構。
-  - **影響**：Demo/Live GUI 完全顯示不出真實持倉/餘額/PnL；Reconciler 對賬會以為「漂移=baseline 9 vs snapshot 0」永遠告警；風控基於空 state 計算 → 無法執行 daily_loss / position_size 等所有與當前 state 相關的硬限制。
-  - **修復方向**：
-    1. 確認 `EventConsumer::handle_exchange_event` Fill 分支是否有路由到正確 pipeline（per-engine）
-    2. 確認 demo/live pipeline 是否擁有 `paper_state` 等價物來吸收 Fill 事件
-    3. 若架構決定 demo/live 不複用 `paper_state`，需新增 `LivePositionState` 並接線
-  - **驗收**：Demo session 啟動 1 分鐘後 `pipeline_snapshot_demo.json` 顯示與 Bybit 一致的 positions/balance；fills 計數隨成交遞增。
+- [ ] **B-1 Demo/Live 快照 positions 空（startup 不導入既存倉 + WS PositionUpdate 未寫回）** — 結構性 P0
+  - **症狀**：B-2 修好後 demo 收到 12+ WS fills，`stats.total_fills` 正常遞增，但 `pipeline_snapshot_demo.json` 仍 `positions=[]`。Bybit Demo 帳戶實際持倉不會被引擎看見。
+  - **根因（已隔離）**：B-1 與 B-2 是**兩個獨立的 wiring 缺失**，B-2 修好不會自動修 B-1：
+    1. **Startup seeding 缺失** — `startup.rs:469-478` 已調 `pos_mgr.get_positions()` 拉取 Bybit 既存持倉，但只用於 `set_auto_add_margin`，沒寫進 paper_state。
+    2. **WS PositionUpdate 不寫回** — Private WS 的 `position` topic 已訂閱（subscribe confirmation success），但事件未路由到 `paper_state` 的位置追蹤層。Fill 事件能進但 Position 事件斷線。
+  - **影響**：Demo/Live GUI 顯示「fills 進來但 positions=0」；Reconciler 對賬會誤報「漂移=baseline N vs snapshot 0」永遠告警；風控基於空 state 計算 → 無法執行 daily_loss / position_size 等所有與當前 state 相關的硬限制。
+  - **修復方向**（Phase 2）：
+    1. 在 `build_exchange_pipeline()` 後、spawn 前調用新 `paper_state.import_positions(Vec<Position>)` API 把 Bybit 既存持倉灌進去
+    2. 在 `handlers.rs` 為 `ExchangeEvent::PositionUpdate` 補上 paper_state 寫入路徑（目前可能根本沒這個 event 變體？需確認）
+    3. 補 e2e 回歸測試：startup → snapshot positions 非空、收 PositionUpdate → snapshot 更新
+  - **驗收**：Demo session 啟動 1 分鐘後 `pipeline_snapshot_demo.json` `positions` 與 Bybit 一致；新成交後 positions 自動更新。
 
-- [ ] **B-2 total_fills 不遞增（exchange 模式）**
-  - **症狀**：今日 80 次 primary dispatch 中 66 次成功（Bybit 返回 orderId），但 `pipeline_snapshot_demo.json` `stats.total_fills=0`，0 ExchangeEvent::Fill 被處理。
-  - **與 B-1 的關係**：B-1 是 state 層斷開，B-2 是 stats 計數層斷開。可能是同一根因，也可能是兩處獨立 wiring 缺失。
-  - **修復方向**：跟踪一個 orderId 從 dispatch → REST 確認 → WS execution event → consumer handler → stats.total_fills 增加，找出鏈路斷點。
-  - **驗收**：Demo 一筆成交後 `stats.total_fills` +1，`recent_fills` 出現對應條目。
+- [x] **B-2 total_fills 不遞增（exchange 模式）** ✅ FIXED 2026-04-11（commits 8e08c34 / b5e45f7 / 152d1f6）
+  - **根因（最終）**：Bybit demo 端點**不支援** `execution.fast` topic — 只 mainnet 有。Demo 對 `execution.fast` 訂閱會回 `success:true` 但永遠不推資料 → `total_fills` 卡在 0 且無任何錯誤。歷史代碼還更早把 topic 寫成 `fast-execution`（typo），雙重 bug。
+  - **修復**：(1) `BybitEnvironment::private_ws_topics()` 環境感知 — demo/testnet/live-demo → `execution`，mainnet → `execution.fast`；(2) parser 不再靜默吞掉 `op:subscribe` 回應，改為 info/error 記錄 success+ret_msg+conn_id；(3) 順手也從 demo topic 移除 `dcp`（demo 也不支援，每次重連會 ERROR）；(4) Live runtime worker_threads 2→4 解決 1808 條 lag warnings。
+  - **驗證**：post-fix demo 6 min 收到 18 筆真實 WS fills（ETHUSDT/BTCUSDT/FARTCOINUSDT/FFUSDT/1000PEPEUSDT 等），真實 exec_id、價格、fee；後續 5 min 0 lag warning、0 subscribe rejection。
+  - **遺留**：positions=0 仍未解決，但已隔離為純 B-1（startup seeding + PositionUpdate 寫回）。
 
-**互鎖**：B-1 / B-2 修復前 Demo/Live 兩條管線在 GUI 視角下「不存在持倉與成交」，但 Bybit 後台真實有交易發生 → 風險：如果 daily_loss 邏輯依賴 paper_state，當前 Demo/Live 不會觸發停損。**建議在 Live 上線前必須清零**（W22 之前）。
+**互鎖**：B-1 修復前 Demo/Live 兩條管線雖然 fills 正確進來，但 GUI 視角下「無持倉」，Reconciler 誤報，風控基於空 state 計算 → 無法執行 daily_loss / position_size 等與當前 state 相關的硬限制。**Live 上線前 B-1 必須清零**（W22 之前）。
 
 ---
 
