@@ -49,6 +49,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         trading_tx,
         context_tx,
         exchange_event_rx: _exchange_event_rx_field,
+        seed_positions,
         account_manager,
         linucb_runtime,
         news_snapshot,
@@ -84,6 +85,27 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // Build pipeline with kind-appropriate governance + balance (3E-2a)
     // 以 kind 對應的治理 + 餘額構建管線（3E-2a）
     let mut pipeline = TickPipeline::with_kind(SYMBOLS, initial_balance, pipeline_kind);
+
+    // B-1 Phase 2: Seed paper_state with positions captured from the exchange
+    // at startup (build_exchange_pipeline). Without this, the engine would only
+    // discover existing positions when the next WS PositionUpdate arrived — which
+    // never happens for inactive symbols, leaving the snapshot positions=0 even
+    // when the account holds real exposure.
+    // Paper pipelines pass an empty Vec, so this is a no-op for them.
+    // B-1 Phase 2：以 build_exchange_pipeline 啟動時抓到的交易所持倉 seed paper_state。
+    // 沒有這一步，引擎只能在下一次 WS PositionUpdate 抵達時才能發現持倉 ——
+    // 而對未活躍交易對，PositionUpdate 永遠不會送達，導致快照 positions=0，
+    // 即使帳戶實際上持有真實曝險。
+    // Paper 管線傳入空 Vec，對其等同 no-op。
+    if !seed_positions.is_empty() {
+        let count = pipeline.paper_state.import_positions(seed_positions);
+        info!(
+            kind = %pipeline_kind,
+            seeded = count,
+            "B-1 Phase 2: paper_state seeded from exchange snapshot \
+             / 已用交易所快照種入 paper_state"
+        );
+    }
 
     // D2/D3: Track known symbols so we can diff against registry and call
     // pipeline.add_symbol / remove_symbol when the scanner changes the universe.
@@ -691,6 +713,48 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                     pending_orders.remove(&order.order_link_id);
                                 }
                             }
+                        }
+                    }
+                    Some(ExchangeEvent::PositionUpdate(pos)) => {
+                        // B-1 Phase 2: Mirror exchange position state into paper_state.
+                        // size==0 → remove; size>0 → upsert with avg_price as entry.
+                        // We treat side=="None" / empty side as "flat" (size==0 path).
+                        // B-1 Phase 2：將交易所持倉狀態映射回 paper_state。
+                        // size==0 視為平倉並移除；size>0 則 upsert（avg_price 作為入場價）。
+                        // side=="None" 或空字串視為 flat（走 size==0 邏輯）。
+                        let size: f64 = pos.size.parse().unwrap_or(0.0);
+                        let avg_price: f64 = pos.avg_price.parse().unwrap_or(0.0);
+                        let is_long = pos.side.eq_ignore_ascii_case("Buy");
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        // Bybit returns side=="None" when the position is flat — coerce
+                        // size to 0 so upsert removes any stale local entry.
+                        // Bybit 在持倉為空時回傳 side=="None"，強制 size 為 0 以移除舊條目。
+                        let effective_size = if pos.side.eq_ignore_ascii_case("None") || pos.side.is_empty() {
+                            0.0
+                        } else {
+                            size
+                        };
+                        let changed = pipeline.paper_state.upsert_position_from_exchange(
+                            &pos.symbol,
+                            is_long,
+                            effective_size,
+                            avg_price,
+                            now_ms,
+                        );
+                        if changed {
+                            info!(
+                                symbol = %pos.symbol,
+                                side = %pos.side,
+                                size = effective_size,
+                                avg_price = avg_price,
+                                kind = %pipeline.pipeline_kind,
+                                "B-1 Phase 2: paper_state synced from WS position update \
+                                 / paper_state 已根據 WS 持倉更新同步"
+                            );
+                            snapshot_writer.force_write(&pipeline.snapshot());
                         }
                     }
                     Some(ExchangeEvent::DcpTriggered) => {

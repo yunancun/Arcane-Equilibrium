@@ -696,6 +696,7 @@ async fn async_main(
         trading_tx: trading_tx.clone(),
         context_tx: context_tx.clone(),
         exchange_event_rx: None,
+        seed_positions: Vec::new(), // Paper has no exchange-side positions to seed
         account_manager: None,
         linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
         news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
@@ -721,6 +722,9 @@ async fn async_main(
     // ------------------------------------------------------------------
     let demo_handle: Option<tokio::task::JoinHandle<()>> = if let Some(demo_b) = demo_bindings {
         let (_, demo_event_rx) = demo_event_channel.expect("demo channel must exist");
+        // B-1 Phase 2: capture seed_positions before move into deps below.
+        // B-1 Phase 2：在 demo_b 被 move 進 deps 之前先取出 seed_positions。
+        let demo_seed_positions = demo_b.seed_positions.clone();
         let demo_deps = EventConsumerDeps {
             pipeline_kind: PipelineKind::Demo,
             event_rx: demo_event_rx,
@@ -742,6 +746,7 @@ async fn async_main(
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
             exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
+            seed_positions: demo_seed_positions,
             account_manager: Some(demo_b.account_manager),
             linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
             news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
@@ -771,6 +776,9 @@ async fn async_main(
     // ------------------------------------------------------------------
     let live_thread_handle: Option<std::thread::JoinHandle<()>> = if let Some(live_b) = live_bindings {
         let (_, live_event_rx) = live_event_channel.expect("live channel must exist");
+        // B-1 Phase 2: capture seed_positions before move into deps below.
+        // B-1 Phase 2：在 live_b 被 move 進 deps 之前先取出 seed_positions。
+        let live_seed_positions = live_b.seed_positions.clone();
         let live_deps = EventConsumerDeps {
             pipeline_kind: PipelineKind::Live,
             event_rx: live_event_rx,
@@ -792,6 +800,7 @@ async fn async_main(
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
             exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
+            seed_positions: live_seed_positions,
             account_manager: Some(live_b.account_manager),
             linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
             news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
