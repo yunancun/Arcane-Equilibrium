@@ -2,7 +2,7 @@
 # Three-Engine Parallel Architecture Migration Plan
 
 **作者 / Authors**: PM + PA + FA  
-**日期 / Date**: 2026-04-11（v3 修訂 — 六角色審查整合）  
+**日期 / Date**: 2026-04-11（v4 修訂 — 嚴格審查：+6 gaps 修復 +4 事實校正）  
 **優先級 / Priority**: P0 — 下一個主要開發週期首要任務  
 **TODO 索引 / TODO ref**: 3E-1 ~ 3E-9  
 
@@ -59,7 +59,7 @@ main.rs
 | `config/mod.rs:363-368` | cold 參數警告，阻止熱重載 | 整個 `TradingMode` 移除後自然消失 |
 | `ipc_server.rs:597` | 快照路由：mode == trading_mode → 返回頂層 paper_state | 每個 Pipeline 有各自快照文件，按 engine 參數路由 |
 
-**Python 側（46 處引用）**：
+**Python 側（~35 處引用，集中在 live_session_routes.py）**：
 
 | 文件 | 用途 | 替換方案 |
 |---|---|---|
@@ -92,21 +92,23 @@ main.rs
 │   ├── 風控：RiskGovernor（獨立 SM，寬鬆）+ RiskConfig paper
 │   ├── 策略角色：激進探索（所有策略、寬參數範圍）
 │   ├── cost_gate：探索模式（cold-start 放行）
-│   ├── paper_cmd_tx_paper channel
+│   ├── pipeline_cmd_tx_paper channel（★ 已統一命名為 PipelineCommand）
 │   ├── DB engine_mode = "paper"
 │   └── 快照 → pipeline_snapshot_paper.json
 │
 ├── ── Demo Pipeline（需要 Demo API key）─────────────────────
 │   ├── pipeline_kind = PipelineKind::Demo（固定）
 │   ├── REST client → api-demo.bybit.com（Demo API key）
-│   ├── private WS → stream-demo.bybit.com（Demo API key）
+│   ├── ★ private WS → stream-demo.bybit.com（Demo API key，獨立 supervisor）
+│   │   └── 事件路由：fill/order/position → 僅此 Demo pipeline（不進 Live）
 │   ├── initial_balance = Demo 帳戶實際餘額
 │   ├── 治理：簡化 Authorization（自動授予）/ 無 Lease
 │   ├── 風控：RiskGovernor（獨立 SM，中等）+ RiskConfig demo
-│   ├── Reconciler：獨立實例（對賬 Demo 交易所倉位）
+│   ├── StopManager：獨立實例，綁定 Demo BybitRestClient（★ REST 綁定）
+│   ├── Reconciler：獨立實例（對賬 Demo 交易所倉位，持有 Demo cmd_tx）
 │   ├── 策略角色：穩定策略驗證（從 Paper 畢業的策略）
 │   ├── cost_gate：中等（有 JS 估計時用，無時 ATR gate）
-│   ├── paper_cmd_tx_demo channel
+│   ├── pipeline_cmd_tx_demo channel
 │   ├── DB engine_mode = "demo"
 │   └── 快照 → pipeline_snapshot_demo.json
 │
@@ -118,14 +120,16 @@ main.rs
     ├── REST client → 按環境決定：
     │   ├── Mainnet → api.bybit.com（真實資金）
     │   └── LiveDemo → api-demo.bybit.com（Live-Demo 測試）
-    ├── private WS → 對應 endpoint
+    ├── ★ private WS → 對應 endpoint（獨立 supervisor，獨立 credentials）
+    │   └── 事件路由：fill/order/position → 僅此 Live pipeline（不進 Demo）
     ├── initial_balance = Live/Live-Demo 帳戶實際餘額
-    ├── 治理：完整 Authorization + Lease + GovernanceHub 全流程
+    ├── 治理：完整 GovernanceCore（Production profile）全流程
     ├── 風控：RiskGovernor（獨立 SM，最嚴格）+ RiskConfig live
-    ├── Reconciler：獨立實例（對賬 Live 交易所倉位）
+    ├── StopManager：獨立實例，綁定 Live BybitRestClient（★ REST 綁定）
+    ├── Reconciler：獨立實例（對賬 Live 交易所倉位，持有 Live cmd_tx）
     ├── 策略角色：生產策略（只跑經驗證的策略）
     ├── cost_gate：嚴格 fail-closed（必須有正 JS 估計）
-    ├── paper_cmd_tx_live channel
+    ├── pipeline_cmd_tx_live channel
     ├── DB engine_mode = "live"
     └── 快照 → pipeline_snapshot_live.json
 ```
@@ -218,7 +222,7 @@ pub enum GovernanceProfile {
 
 ### D4: 策略角色分層
 
-每個 Pipeline 實例化自己的策略組（5 strategies × 3 pipelines = 15 instances），但參數不同：
+每個 Pipeline 實例化自己的策略組（4 active strategies × 3 pipelines = 12 instances；FundingRateArb 已定義但未啟用），參數不同：
 
 | 策略 | Paper | Demo | Live |
 |------|-------|------|------|
@@ -439,9 +443,9 @@ pub struct PerEngineEdgeEstimates {
 - Live 的 edge 估計只基於 Live 歷史交易（最保守、最準確）
 - Demo 啟動時如果自身數據不足，可選擇從 Paper 估計**只讀複製初始值**（一次性 bootstrap，不持續同步）
 
-### D10: Bounded Channel + 背壓保護（審查 BB-C3 修正）
+### D10: Fan-out Bounded Channel + 背壓保護（審查 BB-C3 修正）
 
-Fan-out 改用 `bounded_channel`，防止慢管線導致 OOM：
+**現狀**：當前 event channel 已是 bounded `mpsc::channel(4096)`（`main.rs:39,561`），但這是單管線的點對點 channel。三引擎需要 1→N fan-out，每條 fan-out leg 各自 bounded：
 ```rust
 let (event_tx_paper, event_rx_paper) = mpsc::channel(1024);  // bounded
 let (event_tx_demo, event_rx_demo) = mpsc::channel(1024);
@@ -562,6 +566,118 @@ for tx in &senders {
 ```
 當前 `PriceEvent` 只有 `String + f64 + i64`（clone ~100ns），開銷極小。但此改動為未來擴展到 OrderBook depth 等大結構預做準備。
 
+### D21: Private WS per-engine 隔離（v4 新增 — 嚴格審查 GAP-1 修正）
+
+**問題**：計劃架構圖標註了 Demo/Live 各有 private WS，但原始實施步驟未涵蓋。當前系統只有一個 `BybitPrivateWs` supervisor（`main.rs:1100-1158`），綁定一組 API key。三引擎後 Demo 和 Live 各自連不同 Bybit 帳戶，各自需要獨立的 private WS 接收自己帳戶的 fill/order/position 更新。
+
+**影響**：如果不做這步，exchange pipeline 只能靠 Reconciler 30s REST 輪詢感知訂單成交，完全無法滿足 <1s fill 確認 SLA。**這是三引擎方案能否工作的基礎**。
+
+**方案**：
+```rust
+// 每個 exchange pipeline 持有自己的 private WS supervisor
+pub struct PerEnginePrivateWs {
+    // Paper: None（無真實訂單）
+    // Demo: BybitPrivateWs(demo_key, demo_secret, Demo env)
+    // Live:  BybitPrivateWs(live_key, live_secret, Live env)
+    ws: Option<BybitPrivateWs>,
+    supervisor_handle: Option<JoinHandle<()>>,
+}
+
+// 事件路由：每個 private WS 的 event_tx 直連對應 pipeline
+// Demo private WS → demo_private_event_tx → Demo pipeline on_private_event()
+// Live private WS → live_private_event_tx → Live pipeline on_private_event()
+// 絕不跨 pipeline（一個帳戶的 fill 不能觸發另一個 pipeline 的狀態變更）
+```
+
+**與 D14 Rate Limiter 的關係**：private WS 是長連接（無 REST rate limit 影響）。但 WS 重連時的 auth 請求仍走 REST，需經過共享 rate limiter。
+
+**歸入 3E-2b 實施**。
+
+### D22: PipelineCommand 統一命名（v4 新增 — 嚴格審查 GAP-3 修正）
+
+**問題**：`PaperSessionCommand` 在三引擎語境下語義錯誤 — Demo/Live pipeline 的 command channel 也用此 enum，但名字暗示只用於 Paper。`paper_cmd_tx` 命名同理。
+
+**方案**：3E-1 階段統一 rename：
+```
+PaperSessionCommand  →  PipelineCommand
+paper_cmd_tx         →  pipeline_cmd_tx
+paper_cmd_rx         →  pipeline_cmd_rx
+```
+
+純機械替換（`sed`），不改邏輯。在 `#[deprecated]` TradingMode 的同一步完成，避免半新半舊命名。
+
+### D23: Reconciler per-engine 雙實例化（v4 新增 — 嚴格審查 GAP-4 修正）
+
+**問題**：當前 `run_position_reconciler()` 單實例（`main.rs:1604-1611`），clone 同一個 `paper_cmd_tx`。三引擎後 Demo 和 Live 各自有獨立 Bybit 帳戶需要獨立 Reconciler。
+
+**方案**：
+```rust
+// Demo Reconciler
+if demo_pipeline_active {
+    let demo_reconciler = Reconciler::new(
+        demo_bybit_client.clone(),       // REST → api-demo.bybit.com
+        pipeline_cmd_tx_demo.clone(),     // 升降級命令 → Demo pipeline
+        instrument_cache.clone(),
+        demo_risk_level_reader,           // 讀 Demo pipeline 的 risk level
+        rate_limiter.clone(),             // 共享 D14 rate limiter
+    );
+    tokio::spawn(run_position_reconciler(demo_reconciler, "demo", ...));
+}
+
+// Live Reconciler
+if live_pipeline_active {
+    let live_reconciler = Reconciler::new(
+        live_bybit_client.clone(),        // REST → api.bybit.com 或 api-demo
+        pipeline_cmd_tx_live.clone(),      // 升降級命令 → Live pipeline
+        instrument_cache.clone(),
+        live_risk_level_reader,
+        rate_limiter.clone(),             // 同一個 limiter（同 IP）
+    );
+    tokio::spawn(run_position_reconciler(live_reconciler, "live", ...));
+}
+```
+
+每個 Reconciler 實例擁有獨立的 `ReconcilerState`（baseline / drift_streak / clean_cycles / cooldown timers），互不干擾。V014 audit 事件按 `engine_mode` 標記。
+
+### D24: StopManager / PositionManager REST 綁定（v4 新增 — 嚴格審查 GAP-2 修正）
+
+**問題**：StopManager 通過 REST client 向 Bybit 設置條件止損單。當前只有一個 REST client。三引擎後每個 exchange pipeline 的 StopManager 必須操作正確的帳戶。
+
+**方案**：`EventConsumerDeps` 已有 `bybit_client: Option<Arc<BybitRestClient>>`。確保：
+1. `StopManager::new()` 接受 `Option<Arc<BybitRestClient>>` 參數（Paper 傳 None → 本地模擬止損）
+2. `StopManager::set_trading_stop()` 使用構造時綁定的 client（不引用全局單例）
+3. PositionManager 同理 — 通過構造時注入的 client 與正確帳戶交互
+
+**開工前必做**：
+```bash
+# 確認 StopManager 和 PositionManager 如何獲取 REST client
+grep -n "BybitRestClient\|bybit_client\|rest_client" \
+  rust/openclaw_engine/src/stop_manager.rs \
+  rust/openclaw_engine/src/position_manager.rs
+```
+
+### D25: DB 連接池容量（v4 新增 — 嚴格審查 GAP-5 修正）
+
+**問題**：三 pipeline + 兩 reconciler + scanner 同時寫 DB。D19 減少 market_data 重複寫入（-40%），但 trading 寫入（intents/fills/positions）從 1× 變 3×。
+
+**方案**：
+- 3E-2b 實施時檢查 `PgPool` max_connections 設定
+- 建議 max_connections ≥ 20（當前可能為 10）
+- 每個 pipeline 的 DB writer task 限併發（如 `Semaphore(5)`），避免一個 pipeline 獨佔 pool
+
+### D26: GovernanceCore 多實例安全（v4 新增 — 嚴格審查 GAP-6 修正）
+
+**問題**：計劃用 `GovernanceCore::new_with_profile()` per-engine 創建三個實例。需確認 GovernanceCore 是否持有共享全局狀態（如 GovernanceHub 單例引用），否則 Paper/Demo 的 auto-grant 可能意外修改 Live 的授權狀態。
+
+**開工前必做**：
+```bash
+# 確認 GovernanceCore 是否引用全局 singleton
+grep -n "static\|lazy_static\|OnceCell\|GOVERNANCE" \
+  rust/openclaw_engine/src/governance*.rs rust/openclaw_core/src/governance*.rs
+```
+
+**要求**：每個 GovernanceCore 實例必須完全獨立（獨立 SM-1 授權狀態、獨立 SM-2 租約追蹤）。如果現有實現有共享全局狀態，3E-2a 必須先重構為 per-instance 狀態。
+
 ---
 
 ## 五、實施計劃（分 9 個子任務）
@@ -622,6 +738,19 @@ impl GovernanceProfile {
 - `trading_mode` / `mode_states` / `set_trading_mode()` 等舊 API：**`#[deprecated]` 標記但保留**（D13 回滾安全）
 - 3E-4 才統一移除
 
+**PipelineCommand 統一命名**（D22）：
+```bash
+# 同步 rename — 純機械替換，不改邏輯
+# PaperSessionCommand → PipelineCommand
+# paper_cmd_tx → pipeline_cmd_tx
+# paper_cmd_rx → pipeline_cmd_rx
+sed -i 's/PaperSessionCommand/PipelineCommand/g' rust/openclaw_engine/src/**/*.rs
+sed -i 's/paper_cmd_tx/pipeline_cmd_tx/g' rust/openclaw_engine/src/**/*.rs
+sed -i 's/paper_cmd_rx/pipeline_cmd_rx/g' rust/openclaw_engine/src/**/*.rs
+# 同步 Python 側引用
+grep -rn "PaperSessionCommand\|paper_cmd" program_code/ --include="*.py"
+```
+
 **開工前必做**（審查 PA-H4）：
 ```bash
 # 統計受影響測試數量，確認 3E-1 scope 包含測試改造
@@ -659,30 +788,33 @@ impl StrategyFactory {
 pub struct EventConsumerDeps {
     pub pipeline_kind: PipelineKind,
     pub initial_balance: f64,
-    pub bybit_client: Option<Arc<BybitRestClient>>,  // None for Paper
-    pub private_ws: Option<BybitPrivateWs>,           // None for Paper
+    pub bybit_client: Option<Arc<BybitRestClient>>,  // None for Paper（★ StopManager/PositionManager 通過此 client 操作正確帳戶 D24）
+    pub private_ws_rx: Option<mpsc::Receiver<PrivateWsEvent>>,  // ★ D21: per-engine private WS 事件接收
     pub risk_config: Arc<ConfigStore<RiskConfig>>,    // per-engine
     pub risk_governor: RiskGovernorSm,                // per-engine, 獨立實例
-    pub stop_manager: StopManager,                    // per-engine, 獨立實例
-    pub governance_core: GovernanceCore,              // per-engine（Profile 決定行為）
-    pub reconciler: Option<Reconciler>,               // None for Paper
-    pub event_rx: mpsc::UnboundedReceiver<WsEvent>,
-    pub cmd_rx: mpsc::UnboundedReceiver<PaperSessionCommand>,
+    pub stop_manager: StopManager,                    // per-engine, 綁定對應 bybit_client（D24）
+    pub governance_core: GovernanceCore,              // per-engine, 完全獨立實例（D26，無共享全局狀態）
+    pub reconciler: Option<Reconciler>,               // None for Paper（★ D23: per-engine 獨立實例）
+    pub event_rx: mpsc::Receiver<Arc<WsEvent>>,       // ★ bounded fan-out（D10），Arc<WsEvent>（D20）
+    pub cmd_rx: mpsc::UnboundedReceiver<PipelineCommand>,  // ★ D22: renamed
     pub snapshot_path: PathBuf,                       // pipeline_snapshot_{kind}.json
     pub cancellation_token: CancellationToken,
     // ... 共享資源（Arc）
     pub instrument_cache: Arc<InstrumentInfoCache>,
-    pub symbol_registry: Arc<RwLock<SymbolRegistry>>,
-    pub js_estimates: Arc<RwLock<EdgeEstimates>>,     // 共享讀取
-    pub db_pool: Arc<PgPool>,
+    pub symbol_registry: Arc<parking_lot::RwLock<SymbolRegistry>>,  // ★ D12: parking_lot
+    pub js_estimates: Arc<parking_lot::RwLock<EdgeEstimates>>,      // ★ D9: per-engine 隔離 + D12
+    pub db_pool: Arc<PgPool>,                         // ★ D25: max_connections ≥ 20
 }
 ```
 
-**GovernanceCore 分層行為**：
+**GovernanceCore 分層行為**（D26：每個實例完全獨立，無共享全局狀態）：
 ```rust
 impl GovernanceCore {
+    /// Creates a fully independent GovernanceCore for one pipeline.
+    /// 為單條管線創建完全獨立的 GovernanceCore — 不引用全局 singleton。
+    /// D26: 開工前必須 grep 確認無 static/lazy_static/OnceCell 共享狀態。
     pub fn new_with_profile(profile: GovernanceProfile) -> Self {
-        let mut core = Self::new();
+        let mut core = Self::new();  // 必須是全新實例，不是 clone 全局單例
         match profile {
             Exploration | Validation => {
                 // Auto-grant authorization, no lease required
@@ -761,9 +893,9 @@ fn cost_gate_moderate(&self, ...) -> Option<IntentResult> {
 
 ### 3E-2b：三管線並行啟動 + 條件式啟動 + 錯誤隔離（`main.rs`）
 
-**目標**：`main.rs` 按條件 spawn 1~3 個 `run_event_consumer()` 實例，互不影響。
+**目標**：`main.rs` 按條件 spawn 1~3 個 `run_event_consumer()` 實例，互不影響。含 per-engine private WS（D21）、per-engine Reconciler（D23）、DB pool 調整（D25）。
 
-**條件式啟動邏輯**（整合 D1/D10/D11/D12/D13/D17 修正）：
+**條件式啟動邏輯**（整合 D1/D10/D11/D12/D13/D17/D21/D23/D25 修正）：
 ```rust
 // ── API Key 讀取（一次性，避免 TOCTOU）──
 let demo_keys = read_api_keys("demo");  // Option<(String, String)>
@@ -783,6 +915,11 @@ if let (Some((dk, _)), Some((lk, _))) = (&demo_keys, &live_keys) {
 let (event_tx_paper, event_rx_paper) = mpsc::channel(1024);   // bounded
 let mut senders: Vec<(&str, mpsc::Sender<Arc<WsEvent>>)> = vec![("paper", event_tx_paper)];
 
+// ── DB Pool 容量（D25）──
+let db_pool = PgPoolOptions::new()
+    .max_connections(20)  // ★ 三 pipeline + 雙 reconciler + scanner（原 10 不夠）
+    .connect(&db_url).await?;
+
 // ── Paper Pipeline: 永遠啟動 ──
 let paper_balance = match &demo_keys {
     Some(_) => fetch_demo_balance(&demo_client).await.unwrap_or(default_balance),
@@ -792,12 +929,32 @@ let paper_handle = tokio::spawn(run_pipeline(PipelineKind::Paper, paper_balance,
 
 // ── Demo Pipeline: 需要 demo slot 有 API key ──
 let demo_handle = if let Some((key, secret)) = demo_keys.clone() {
-    let client = BybitRestClient::new(BybitEnvironment::Demo, Some(key), Some(secret))?;
-    match client.get_wallet_balance().await {
+    let demo_client = BybitRestClient::new(BybitEnvironment::Demo, Some(key.clone()), Some(secret.clone()))?;
+    match demo_client.get_wallet_balance().await {
         Ok(bal) => {
             let (tx, rx) = mpsc::channel(1024);  // bounded
             senders.push(("demo", tx));
-            Some(tokio::spawn(run_pipeline(PipelineKind::Demo, bal, client, rx, ...)))
+
+            // ★ D21: Demo private WS（獨立 supervisor，獨立 credentials）
+            let (demo_priv_tx, demo_priv_rx) = mpsc::channel(256);
+            let demo_priv_ws = BybitPrivateWs::new(
+                key.clone(), secret.clone(), BybitEnvironment::Demo, demo_priv_tx,
+            );
+            let demo_priv_cancel = cancel.clone();
+            tokio::spawn(private_ws_supervisor(demo_priv_ws, demo_priv_cancel, "demo"));
+
+            // ★ D23: Demo Reconciler（獨立實例，持有 Demo cmd_tx + Demo REST client）
+            let demo_reconciler = Reconciler::new(
+                demo_client.clone(), pipeline_cmd_tx_demo.clone(),
+                instrument_cache.clone(), demo_risk_level.clone(), rate_limiter.clone(),
+            );
+            tokio::spawn(run_position_reconciler(demo_reconciler, "demo", cancel.clone()));
+
+            Some(tokio::spawn(run_pipeline(
+                PipelineKind::Demo, bal, demo_client, rx,
+                demo_priv_rx,  // ★ private WS 事件只進此 pipeline
+                ...
+            )))
         }
         Err(e) => {
             error!("Demo Pipeline: API key invalid or unreachable: {e} — skipped");
@@ -812,16 +969,36 @@ let demo_handle = if let Some((key, secret)) = demo_keys.clone() {
 // ── Live Pipeline: 需要 live slot 有自己的 key（不降級）──
 let live_handle = if let Some((key, secret)) = live_keys {
     let live_env = live_bybit_environment();
-    let client = BybitRestClient::new(live_env, Some(key), Some(secret))?;
-    match client.get_wallet_balance().await {
+    let live_client = BybitRestClient::new(live_env, Some(key.clone()), Some(secret.clone()))?;
+    match live_client.get_wallet_balance().await {
         Ok(bal) => {
             let (tx, rx) = mpsc::channel(512);  // bounded，更小 buffer
             senders.push(("live", tx));
+
+            // ★ D21: Live private WS（獨立 supervisor，獨立 credentials）
+            let (live_priv_tx, live_priv_rx) = mpsc::channel(256);
+            let live_priv_ws = BybitPrivateWs::new(
+                key.clone(), secret.clone(), live_env, live_priv_tx,
+            );
+            // Note: Live WS supervisor 也在獨立 runtime 上運行（D17）
+            let live_priv_cancel = cancel.clone();
+
+            // ★ D23: Live Reconciler（獨立實例）
+            let live_reconciler = Reconciler::new(
+                live_client.clone(), pipeline_cmd_tx_live.clone(),
+                instrument_cache.clone(), live_risk_level.clone(), rate_limiter.clone(),
+            );
+
             // Live 使用獨立 tokio Runtime（D17 優先級保護）
             let live_rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2).enable_all().build()?;
             Some(std::thread::spawn(move || {
-                live_rt.block_on(run_pipeline(PipelineKind::Live, bal, client, rx, ...))
+                live_rt.block_on(async {
+                    // Private WS + Reconciler + Pipeline 全在 Live runtime 上
+                    tokio::spawn(private_ws_supervisor(live_priv_ws, live_priv_cancel, "live"));
+                    tokio::spawn(run_position_reconciler(live_reconciler, "live", cancel.clone()));
+                    run_pipeline(PipelineKind::Live, bal, live_client, rx, live_priv_rx, ...).await
+                })
             }))
         }
         Err(e) => {
@@ -865,13 +1042,23 @@ tokio::select! {
 
 **阻塞式初始化**（D11）：每個 Pipeline 的 `run_event_consumer()` 內部，先完成策略創建 + 參數加載，**才開始消費** `event_rx`。見 D11 偽碼。
 
+**Private WS 事件處理**（D21）：每個 exchange pipeline 的主循環需要同時 `select!` market data event_rx 和 private_ws_rx：
+```rust
+tokio::select! {
+    Some(market_event) = event_rx.recv() => { pipeline.on_tick(market_event); }
+    Some(priv_event) = private_ws_rx.recv() => { pipeline.on_private_event(priv_event); }
+    Some(cmd) = cmd_rx.recv() => { pipeline.handle_command(cmd); }
+    _ = cancel.cancelled() => { break; }
+}
+```
+
 **錯誤隔離 + 三級遞減**（D6）：
 - 每個 `tokio::spawn` 內部 catch panic + log
 - `PipelineHealth` atomic 狀態（Running / Down / Paused）
 - 跨引擎通知 channel：Paper crash → Demo Cautious；Demo crash → Live Cautious
 - 所有共享 `RwLock` 使用 `parking_lot`（D12，不 poison）
 
-**估算規模**：main.rs ~+350 / -100 行
+**估算規模**：main.rs ~+450 / -100 行（含 D21 private WS spawn + D23 dual reconciler + D25 pool）
 
 ---
 
@@ -879,15 +1066,15 @@ tokio::select! {
 
 **目標**：IPC 命令按 `engine` 參數精確路由到對應管線的 channel。
 
-**`EngineCommandChannels` 替換 `paper_cmd_tx`**：
+**`EngineCommandChannels` 替換 `pipeline_cmd_tx`**（D22 命名）：
 ```rust
 pub struct EngineCommandChannels {
-    pub paper: Option<mpsc::UnboundedSender<PaperSessionCommand>>,
-    pub demo:  Option<mpsc::UnboundedSender<PaperSessionCommand>>,
-    pub live:  Option<mpsc::UnboundedSender<PaperSessionCommand>>,
+    pub paper: Option<mpsc::UnboundedSender<PipelineCommand>>,
+    pub demo:  Option<mpsc::UnboundedSender<PipelineCommand>>,
+    pub live:  Option<mpsc::UnboundedSender<PipelineCommand>>,
 }
 impl EngineCommandChannels {
-    pub fn select(&self, engine: &str) -> Option<&mpsc::UnboundedSender<PaperSessionCommand>> {
+    pub fn select(&self, engine: &str) -> Option<&mpsc::UnboundedSender<PipelineCommand>> {
         match engine {
             "demo" => self.demo.as_ref(),
             "live" => self.live.as_ref(),
@@ -943,7 +1130,7 @@ impl EngineCommandChannels {
 
 **目標**：移除 Python 中 `trading_mode` 邏輯 + 所有 metrics 端點 per-engine 隔離。
 
-**開工前必做**（審查 PA-M4）：Python 有 46 處 `trading_mode` 引用，下面只列主要 4 文件。開工前跑全量 grep 確認完整範圍：
+**開工前必做**（審查 PA-M4）：Python 有 ~35 處 `trading_mode` 引用（集中在 `live_session_routes.py` ~27 處），下面只列主要 4 文件。開工前跑全量 grep 確認完整範圍：
 ```bash
 grep -rn "trading_mode" program_code/ --include="*.py" | wc -l
 ```
@@ -1147,13 +1334,13 @@ PromotionPipeline（6-01~03）在 promote 時：
 ## 六、實施時序與依賴圖
 
 ```
-3E-1 PipelineKind + GovernanceProfile 枚舉
+3E-1 PipelineKind + GovernanceProfile + PipelineCommand rename (D22)
   ↓
 3E-9 StrategyFactory + per-engine params ←── 3E-3 IPC 三管線路由
   ↓
-3E-2a 單 Pipeline 構造重構（含 Factory 注入）
+3E-2a 單 Pipeline 構造重構（含 Factory 注入 + D24 REST 綁定 + D26 GovernanceCore 驗證）
   ↓
-3E-2b 三管線並行啟動 + 條件啟動 + 錯誤隔離
+3E-2b 三管線並行啟動 + D21 private WS + D23 dual reconciler + D25 DB pool
   ↓
 3E-4 TradingMode 完整清除（Rust 收尾）
   ↓
@@ -1170,6 +1357,7 @@ PromotionPipeline（6-01~03）在 promote 時：
 **3E-1 → 3E-9 → 3E-2a → 3E-2b → 3E-4 → 3E-5 是關鍵路徑**。
 **3E-9 排在 3E-2a 之前**，因為 Pipeline 構造重構需要 Factory 先就位。
 **3E-1 和 3E-9 不可並行**（PA-M1：3E-9 的 `load_strategy_params()` 依賴 3E-1 的 `PipelineKind` 枚舉）。
+**3E-2b 是最大風險點**（v4 新增 D21/D23/D25，拆為 3 sub-days：α 骨架 / β private WS / γ reconciler+隔離）。
 
 ---
 
@@ -1177,27 +1365,28 @@ PromotionPipeline（6-01~03）在 promote 時：
 
 | 任務 | Rust LOC | Python/JS LOC | 風險 |
 |------|---------|---------------|------|
-| 3E-1 PipelineKind + Profile（不刪舊代碼） | +60 | — | 低 |
+| 3E-1 PipelineKind + Profile + PipelineCommand rename（D22） | +60 / -0（rename 淨零） | — | 低 |
 | 3E-9 StrategyFactory + params | +100 | +3 TOML files | 低 |
-| 3E-2a Pipeline 構造 + IntentProcessor 分層 | +300 / -80 | — | 高（治理分層核心） |
-| 3E-2b 三管線啟動 + 隔離 + bounded channel | +350 / -100 | — | 高（條件啟動 + 隔離） |
+| 3E-2a Pipeline 構造 + IntentProcessor 分層 + D24/D26 驗證 | +320 / -80 | — | 高（治理分層 + REST 綁定） |
+| 3E-2b 三管線啟動 + private WS(D21) + dual reconciler(D23) + pool(D25) | +450 / -100 | — | **最高**（新增 D21/D23/D25） |
 | 3E-3 IPC 路由 | -80 / +80 | — | 中 |
 | 3E-4 TradingMode 完整清除（含 deprecated 舊代碼） | -300 | — | 低（收尾） |
-| 3E-5 Python 清除 + 指標隔離（46 處 trading_mode） | — | -120 / +120 | 中 |
+| 3E-5 Python 清除 + 指標隔離（~35 處 trading_mode） | — | -120 / +120 | 中 |
 | 3E-6 Sidebar 修正 | — | +30 JS | 低 |
 | 3E-7 Key 衝突偵測（hard block） | +40 | +30 | 低 |
 | 3E-8 Watchdog + Paper GUI | — | +90 | 低 |
-| **總計** | **~+370 淨增** | **~+150** | — |
+| **總計** | **~+490 淨增**（v3: +370） | **~+150** | — |
 
-**建議排期**：W22（2026-05-05~12）—— **7 天**（審查 PA-M3/FA 修正，5 天過於樂觀）。
+**建議排期**：W22（2026-05-05~12）—— **8 天**（v4：+1 天，D21/D23 增加 3E-2b 工作量）。
 **建議執行方式**：
-- Day 1: 3E-1（枚舉 + deprecated 標記）→ 3E-9（Factory，依賴 3E-1）+ 3E-6（並行）
-- Day 2: 3E-2a（IntentProcessor 改造，核心難點，留整天）
-- Day 3: 3E-2b-α（單管線→多管線 spawn + fan-out，先只啟 Paper 驗證骨架）
-- Day 4: 3E-2b-β（條件啟動 Demo/Live + 錯誤隔離 + health）+ 3E-3（並行）+ 3E-7（並行）
-- Day 5: 3E-4（TradingMode 清除）→ 3E-5 + 3E-8（並行）
-- Day 6: E2 代碼審查 → E4 測試回歸
-- Day 7: Buffer / QA / 修復 E2 發現的問題
+- Day 1: 3E-1（枚舉 + deprecated + PipelineCommand rename D22）→ 3E-9（Factory，依賴 3E-1）+ 3E-6（並行）
+- Day 2: 3E-2a（IntentProcessor 改造 + D24 REST 綁定驗證 + D26 GovernanceCore 獨立性驗證）
+- Day 3: 3E-2b-α（單管線→多管線 spawn + fan-out + D25 DB pool）
+- Day 4: 3E-2b-β（D21 per-engine private WS supervisor + 事件路由接線）
+- Day 5: 3E-2b-γ（D23 dual reconciler + 條件啟動 Demo/Live + 錯誤隔離）+ 3E-3（並行）+ 3E-7（並行）
+- Day 6: 3E-4（TradingMode 清除）→ 3E-5 + 3E-8（並行）
+- Day 7: E2 代碼審查 → E4 測試回歸
+- Day 8: Buffer / QA / 修復 E2 發現的問題
 
 ---
 
@@ -1248,10 +1437,23 @@ Live Pipeline **不框死主網**，但**必須有自己的 key**（不降級到
   - 全量 `grep "trading_mode"` 確認零殘留（Rust + Python）
 - **3E-7**：API key 衝突偵測 409 測試
 - **3E-8**：Watchdog multi-snapshot 測試
-- **D12**：開工前審計 `grep "std::sync::RwLock"` — 共享資源必須用 `parking_lot`
+- **D12**：開工前審計 `grep "std::sync::RwLock"` — 共享資源必須用 `parking_lot`（現有 4 處需遷移）
 - **D15**：全局 notional cap 測試（Demo+Live 總曝險超限 → 拒絕）
 - **D9**：per-engine JS 估計隔離測試（Paper 交易數據不影響 Live 的 edge 計算）
-- **總目標**：遷移後測試基線不降 + 新增 ~30 tests
+- **D21**（v4 新增）：
+  1. Demo private WS 事件只路由到 Demo pipeline（不進 Live）
+  2. Live private WS 事件只路由到 Live pipeline（不進 Demo）
+  3. Private WS 斷線重連不影響其他 pipeline
+  4. Paper pipeline 不持有 private WS（`private_ws_rx = None`）
+- **D22**（v4 新增）：`grep "PaperSessionCommand\|paper_cmd"` 確認零殘留
+- **D23**（v4 新增）：
+  1. Demo Reconciler 對賬 Demo 帳戶倉位（不觸發 Live 動作）
+  2. Live Reconciler 對賬 Live 帳戶倉位（不觸發 Demo 動作）
+  3. 兩個 Reconciler 共享 rate limiter 但各自冷卻狀態獨立
+- **D24**（v4 新增）：Demo StopManager 通過 Demo REST client 設止損（非 Live client）
+- **D25**（v4 新增）：DB pool max_connections ≥ 20 + 三管線無連接飢餓
+- **D26**（v4 新增）：三個 GovernanceCore 實例互不影響（Paper auto-grant 不改 Live 狀態）
+- **總目標**：遷移後測試基線不降 + 新增 ~40 tests（v3: ~30，v4 新增 D21-D26 場景）
 
 ---
 
@@ -1285,6 +1487,21 @@ Live Pipeline **不框死主網**，但**必須有自己的 key**（不降級到
 | O2 | E5 | Opt | DB 去重寫入（-40% I/O） | D19 | ✅ 已整合 |
 | O3 | E5 | Opt | Arc\<WsEvent\> 替代 clone | D20 | ✅ 已整合 |
 | O4 | E5 | Opt | Paper 降頻 tick | — | ❌ 不實施（破壞 promotion 數據一致性） |
+
+### v4 嚴格審查新增修正
+
+| ID | 來源 | 嚴重度 | 問題 | 修正位置 | 狀態 |
+|---|---|---|---|---|---|
+| G1 | v4 審查 | **Critical** | Private WS per-engine 缺失 — 無 fill 確認 SLA | D21 + 3E-2b | ✅ 已整合 |
+| G2 | v4 審查 | **Critical** | StopManager/PositionManager REST client 未綁定 | D24 + 3E-2a | ✅ 已整合 |
+| G3 | v4 審查 | Medium | PaperSessionCommand 命名矛盾 | D22 + 3E-1 | ✅ 已整合 |
+| G4 | v4 審查 | Medium | Reconciler 雙實例化細節缺失 | D23 + 3E-2b | ✅ 已整合 |
+| G5 | v4 審查 | Medium | DB 連接池容量不足 | D25 + 3E-2b | ✅ 已整合 |
+| G6 | v4 審查 | Medium | GovernanceCore 多實例安全未驗證 | D26 + 3E-2a | ✅ 已整合 |
+| A1 | v4 審查 | 校正 | D10 前提錯誤（已是 bounded 4096，非 unbounded） | D10 描述修正 | ✅ 已校正 |
+| A2 | v4 審查 | 校正 | 策略數 5→4（FundingRateArb 未啟用） | D4 描述修正 | ✅ 已校正 |
+| A3 | v4 審查 | 校正 | Python trading_mode 引用數 46→35 | §二/3E-5 修正 | ✅ 已校正 |
+| A4 | v4 審查 | 校正 | EdgeEstimates 已有部分 per-component 隔離 | D9 描述不變（仍需 per-engine） | ✅ 已知 |
 
 **未整合 follow-up**（排入 W23）：
 - **E5-O1**：共享指標計算層（KlineManager+IndicatorEngine 拆為 shared actor）— 收益最大（CPU -60%）但改動面大，需獨立 Sprint
