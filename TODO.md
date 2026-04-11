@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-E2 Phase G 通過 — 9/9 角色 PASS，0 BLOCKER）
+最後更新：2026-04-11（3E-E2 Phase G 通過 + M-3/M-4/8 MINOR 修復完畢）
 測試基準線：**Rust engine lib 929 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。

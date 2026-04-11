@@ -3,7 +3,11 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-11
 
-### 3E-E2 Phase G: 9 角色重審 PASS（2026-04-11）
+### 3E-E2 Phase G 殘留修復：M-3/M-4 + 8 MINOR（2026-04-11 · commit 910d2bc）
+
+M-3：`on_tick.rs:497,616` GovernanceProfile hardcoded → `self.pipeline_kind.governance_profile()`（Demo 現用 Validation cost_gate）。M-4：Live pipeline 線程加 `catch_unwind` + panic → `Crashed` 廣播 + health=Down；shutdown JoinError panic 記錄而非靜默丟棄。m-1：`handle_get_state()` 合併 2 次 snapshot 讀取為 1 次。m-2：`std::ptr::eq` → `primary_label()` 字串比對。m-3：`determine_primary_kind()` 3→1 次調用。m-5：`.unwrap()` → `.expect()` with context。m-8：`AuditWriter` 新建檔案 chmod 0600。殘留僅 M-1/M-2 文件大小監控。929 lib + 366 core + 18 e2e pass。
+
+### 3E-E2 Phase G: 9 角色重審 PASS（2026-04-11 · commit de222bd）
 
 Phase A-F 修復完成後重跑 9 角色並行 E2 審查（E2/FA/PA/QC/BB/MIT/E3/E4/E5）。結果：**9/9 PASS — 0 BLOCKER / 4 MAJOR（非阻塞）/ 10 MINOR**。原 10 BLOCKER + 7 MAJOR + MEGA-BLOCKER-0 全部確認修復。測試基線：929 engine lib + 366 core + 18 e2e = 1313 passed / 0 failed / 0 ignored。4 殘留 MAJOR：handlers.rs 1195 行近上限、on_tick.rs 1172 行、GovernanceProfile hardcoded（TODO 3E-2b）、無 catch_unwind 包裹 pipeline（Live 前修）。審計報告：`docs/audits/2026-04-11--3e_arch_phase_g_reaudit.md`。
 
