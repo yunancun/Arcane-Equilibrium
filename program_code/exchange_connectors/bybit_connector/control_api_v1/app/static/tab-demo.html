@@ -626,9 +626,11 @@ function loadDemoMetrics(raw) {
 }
 
 // ─── Demo Session Controls / Demo 会话控制 ──────────────────────
+// All actions target Demo engine only — Paper engine is unaffected.
+// 所有操作僅影響 Demo 引擎，Paper 引擎不受影響。
 async function demoSessionAction(action) {
   const labels = { start: '已启动', pause: '已暂停', resume: '已继续', stop: '已停止' };
-  const d = await ocPost('/api/v1/paper/session/' + action, {});
+  const d = await ocPost('/api/v1/strategy/demo/session/' + action, {});
   if (d) {
     ocToast('Demo 引擎' + (labels[action] || action), 'success');
     setTimeout(loadAll, action === 'start' ? 3000 : 1000);
@@ -637,13 +639,12 @@ async function demoSessionAction(action) {
   }
 }
 
-function updateDemoSessionButtons(paperState) {
-  const running = (paperState === 'active');
-  const paused = (paperState === 'paused');
-  const stopped = (paperState === 'stopped' || paperState === 'offline');
+function updateDemoSessionButtons(demoState) {
+  const running = (demoState === 'active');
+  const paused = (demoState === 'paused');
   const badge = $('demo-session-badge');
   const stateLabels = { active: '运行中', paused: '已暂停', stopped: '已停止', offline: '离线' };
-  badge.textContent = stateLabels[paperState] || paperState || '--';
+  badge.textContent = stateLabels[demoState] || demoState || '--';
   badge.className = 'oc-chip ' + (running ? 'oc-chip-good' : paused ? 'oc-chip-warn' : 'oc-chip-neutral');
 
   $('btn-demo-start').disabled = running;
@@ -654,9 +655,10 @@ function updateDemoSessionButtons(paperState) {
 
 async function loadAll() {
   await loadDemoStatus();
-  // Update session buttons from Paper session state (controls both engines)
+  // Update session buttons from Demo engine state (independent of Paper).
+  // 從 Demo 引擎自己的狀態更新按鈕，與 Paper 引擎獨立。
   try {
-    const sd = await ocApi('/api/v1/paper/session/status');
+    const sd = await ocApi('/api/v1/strategy/demo/session/status');
     if (sd && sd.data && sd.data.session) {
       updateDemoSessionButtons(sd.data.session.session_state);
     }

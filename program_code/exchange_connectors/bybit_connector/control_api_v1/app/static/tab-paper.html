@@ -31,7 +31,8 @@
   <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
   <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
   <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
-  <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止</button>
+  <button class="oc-btn oc-btn-danger" id="btn-stop" onclick="sessionAction('stop')" disabled>&#x23F9; 停止 Paper</button>
+  <button class="oc-btn oc-btn-danger" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
   <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">余额: <strong id="balance-val">--</strong></span>
 </div>
 
@@ -186,13 +187,26 @@ async function sessionAction(action) {
   }
   const d = await ocPost('/api/v1/paper/session/' + action, body);
   if (d) {
-    const labels = { start: '引擎已启动', stop: '引擎进入观察模式 (持仓已平)' };
+    const labels = { start: '引擎已启动', stop: 'Paper 引擎已停止 (持仓已平)' };
     ocToast(labels[action] || ('操作: ' + action), 'success');
     // Wait briefly for engine state to settle before reloading
     // 等待引擎狀態穩定後再重新加載
     setTimeout(loadAll, action === 'start' ? 3000 : 1000);
   } else {
     ocToast('操作失败', 'error');
+  }
+}
+
+async function sessionStopAll() {
+  // Dual-engine stop: close Paper + Demo positions, pause both engines.
+  // 雙引擎聯停：平掉 Paper + Demo 倉位，暫停兩個引擎。
+  if (!confirm('停止 Paper + Demo 雙引擎？\nStop both Paper and Demo engines?')) return;
+  const d = await ocPost('/api/v1/paper/session/stop-all', {});
+  if (d) {
+    ocToast('Paper + Demo 雙引擎已停止', 'success');
+    setTimeout(loadAll, 1000);
+  } else {
+    ocToast('雙停操作失敗', 'error');
   }
 }
 
@@ -236,6 +250,9 @@ async function loadSession() {
   // 觀察模式下也可以 Resume（效果等同 paused → active）
   $('btn-resume').disabled = (state !== 'paused' && state !== 'stopped' && state !== 'observing');
   $('btn-stop').disabled = (state !== 'active' && state !== 'paused');
+  // Dual-stop enabled whenever paper is running or paused (demo may or may not be running)
+  // 雙停按鈕：只要 Paper 在運行或暫停就啟用（不管 Demo 狀態）
+  if ($('btn-stop-all')) $('btn-stop-all').disabled = (state !== 'active' && state !== 'paused');
 
   const _initBal = s.initial_paper_balance_usdt || s.initial_balance || 100000;
   if (!$('balance-val').dataset.fromMetrics) {
@@ -343,10 +360,10 @@ async function closePosition(symbol) {
 }
 
 async function closeAllPositions() {
-  // Close all paper positions via IPC close_all_positions.
-  // 通過 IPC close_all_positions 平掉所有持倉。
-  if (!confirm('确认平掉所有持仓？/ Confirm close ALL positions?')) return;
-  const d = await ocPost('/api/v1/paper/session/stop', {});
+  // Close all paper positions without stopping the session.
+  // 平掉所有 Paper 持倉，不停止 session（引擎繼續運行）。
+  if (!confirm('确认平掉所有 Paper 持仓？/ Confirm close ALL Paper positions?')) return;
+  const d = await ocPost('/api/v1/paper/close-all-positions', {});
   if (d) {
     ocToast('全部平仓指令已发送 / close all sent', 'success');
     setTimeout(loadAll, 1500);

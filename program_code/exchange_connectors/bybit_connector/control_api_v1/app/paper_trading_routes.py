@@ -303,22 +303,59 @@ async def post_session_resume(
 async def post_session_stop(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Stop dual engines — close all Paper + Demo positions, pause strategies.
-    停止雙引擎 — 平掉所有 Paper + Demo 倉位，暫停策略。
+    """Stop Paper engine only — close paper positions, pause paper strategy dispatch.
+    Does NOT affect Demo engine.  Use /session/stop-all to stop both engines.
+    僅停止 Paper 引擎 — 平倉、暫停策略分派。不影響 Demo 引擎。
+    雙引擎聯停請用 /session/stop-all。
     """
     errors: list[str] = []
-    # Mark user-initiated stop so /session/status reports "stopped" instead of "paused"
-    # 標記為用戶主動停止，讓 status 顯示「stopped」而非「paused」
     global _USER_STOPPED
     _USER_STOPPED = True
-    # Step 1: Close all Paper + Demo positions via explicit per-engine IPC.
-    # 通過明確的 per-engine IPC 平掉 Paper + Demo 所有倉位。
-    # IMPORTANT: must pass engine="paper"/"demo" — without it IPC routes to primary()
-    # which is live > demo > paper, causing cross-engine writes.
-    # 重要：必須傳 engine 參數 — 否則 IPC 路由到 primary()（live > demo > paper），造成跨引擎操作。
-    close_result = {}
-    demo_close_result = {}
     rust_online = get_rust_reader().is_available()
+    close_result: dict = {}
+    pause_result: dict = {}
+    if rust_online:
+        try:
+            close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
+        except Exception as e:
+            errors.append(f"paper_close: {e}")
+            logger.error("IPC close_all_positions (paper) failed: %s", e)
+        try:
+            pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
+        except Exception as e:
+            errors.append(f"paper_pause: {e}")
+            logger.error("IPC pause_paper (paper) failed: %s", e)
+    else:
+        close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+        logger.info("Rust engine offline — skipping IPC (already stopped)")
+    return _paper_response({
+        "message": "Paper engine stopped — positions closed / Paper 引擎已停止，倉位已平",
+        "source": "rust_engine",
+        "paper_close": close_result,
+        "paper_pause": pause_result,
+        "errors": errors if errors else None,
+        "session": {"session_state": "stopped", "session_id": "rust_engine"},
+    })
+
+
+@paper_router.post("/session/stop-all")
+async def post_session_stop_all(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Dual-engine stop — close ALL Paper + Demo positions, pause both strategies.
+    Use this when you want to halt both engines in one action.
+    雙引擎聯停 — 平掉 Paper + Demo 所有倉位、暫停兩個引擎策略分派。
+    IMPORTANT: engine params are explicit — without them IPC routes to primary()
+    which is live > demo > paper, causing unintended cross-engine writes.
+    重要：明確傳 engine 參數 — 否則 IPC 路由到 primary() 造成跨引擎操作。
+    """
+    errors: list[str] = []
+    global _USER_STOPPED
+    _USER_STOPPED = True
+    rust_online = get_rust_reader().is_available()
+    close_result: dict = {}
+    demo_close_result: dict = {}
+    pause_result: dict = {}
     if rust_online:
         try:
             close_result = await _ipc_command("close_all_positions", {"engine": "paper"})
@@ -330,14 +367,6 @@ async def post_session_stop(
         except Exception as e:
             # Demo engine may not be running — not a hard error / Demo 未運行時不算錯誤
             logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
-    else:
-        close_result = {"skipped": True, "reason": "engine_offline"}
-        logger.info("Rust engine offline — skipping IPC close_all_positions (already stopped)")
-
-    # Step 2: Pause Paper + Demo engines via explicit per-engine IPC.
-    # 通過 per-engine IPC 暫停 Paper + Demo 引擎策略分派。
-    pause_result = {}
-    if rust_online:
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
         except Exception as e:
@@ -348,17 +377,16 @@ async def post_session_stop(
         except Exception as e:
             logger.info("IPC pause_paper (demo) skipped or failed: %s", e)
     else:
-        pause_result = {"skipped": True, "reason": "engine_offline"}
-
+        close_result = demo_close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+        logger.info("Rust engine offline — skipping IPC (already stopped)")
     return _paper_response({
-        # Rust engine stays running in observation mode — scanner + price feed unaffected.
-        # Rust 引擎繼續以觀察模式運行 — scanner + 行情流不受影響。
-        "message": "Positions closed — Rust engine in observation mode / 倉位已平 — Rust 引擎進入觀察模式",
+        "message": "Both engines stopped — all positions closed / 雙引擎已停止，所有倉位已平",
         "source": "rust_engine",
         "paper_close": close_result,
+        "demo_close": demo_close_result,
         "paper_pause": pause_result,
         "errors": errors if errors else None,
-        "session": {"session_state": "observing", "session_id": "rust_engine"},
+        "session": {"session_state": "stopped", "session_id": "rust_engine"},
     })
 
 
@@ -508,6 +536,28 @@ def get_positions(
             "avg_entry_price": p.get("entry_price", p.get("avg_entry_price", 0)),
         })
     return _paper_response({"positions": transformed, "count": len(transformed), "source": "rust_engine"})
+
+
+@paper_router.post("/close-all-positions")
+async def post_close_all_positions(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Close all paper positions without stopping the session (engine keeps running).
+    平掉所有 Paper 持倉，不停止 session（引擎繼續運行）。
+    """
+    rust = get_rust_reader()
+    if not rust.is_available():
+        raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
+    try:
+        result = await _ipc_command("close_all_positions", {"engine": "paper"})
+        return _paper_response({
+            "message": "All paper positions closed — session continues / 所有 Paper 持倉已平，session 繼續",
+            "source": "rust_engine",
+            "close_result": result,
+        })
+    except Exception as e:
+        logger.error("IPC close_all_positions (paper) failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"IPC error: {e}")
 
 
 @paper_router.post("/positions/{symbol}/close")
