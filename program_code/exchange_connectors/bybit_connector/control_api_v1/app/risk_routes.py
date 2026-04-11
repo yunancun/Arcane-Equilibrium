@@ -195,9 +195,13 @@ async def get_risk_config(
     config["p1"] = global_config  # alias used by some GUI paths
 
     # Optional: append Rust state-reader snapshot for legacy GUI fields
-    # 可選：附加 Rust state-reader 快照供舊 GUI 欄位使用
+    # 3E-ARCH: read paper engine snapshot — risk dashboard tracks paper-engine
+    # drawdown / balance / gate stats. Without engine="paper" the compat file is
+    # written by whichever engine has is_primary=true (Live > Demo > Paper).
+    # 可選：附加 Rust state-reader 快照供舊 GUI 欄位使用。
+    # 3E-ARCH：必須讀 paper 引擎快照（風控儀表板追蹤 paper 引擎指標）。
     reader = get_rust_reader()
-    snap = reader.get_snapshot() if reader.is_available() else None
+    snap = reader.get_snapshot(engine="paper") if reader.is_engine_available("paper") else None
     if snap is not None:
         config["rust_active"] = {
             "stop_config": snap.get("stop_config"),
@@ -286,9 +290,10 @@ async def get_risk_status(
     client = await _get_risk_view_client()
     runtime = await client.refresh_runtime_status()
     # Append optional state-reader fields for richer dashboard
-    # 附加 state-reader 欄位給 dashboard 用
+    # 3E-ARCH: explicit engine="paper" for paper-engine drawdown / balance fields.
+    # 附加 state-reader 欄位給 dashboard 用。3E-ARCH：明確指定 paper 引擎。
     reader = get_rust_reader()
-    snap = reader.get_snapshot() if reader.is_available() else None
+    snap = reader.get_snapshot(engine="paper") if reader.is_engine_available("paper") else None
     if snap is not None:
         ps = snap.get("paper_state", {}) or {}
         runtime = dict(runtime)
@@ -305,9 +310,11 @@ async def get_risk_status(
 async def get_ai_risk_context(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Risk context for AI decision-making — Rust snapshot only, no RiskViewClient touch."""
+    """Risk context for AI decision-making — Rust snapshot only, no RiskViewClient touch.
+    3E-ARCH: read paper engine snapshot. / 3E-ARCH：讀 paper 引擎快照。
+    """
     reader = get_rust_reader()
-    snap = reader.get_snapshot() if reader.is_available() else None
+    snap = reader.get_snapshot(engine="paper") if reader.is_engine_available("paper") else None
     if snap is not None:
         dd = snap.get("session_drawdown_pct", 0.0)
         dl = snap.get("daily_loss_pct", 0.0)

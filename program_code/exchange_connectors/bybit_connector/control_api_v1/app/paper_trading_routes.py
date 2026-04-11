@@ -208,7 +208,7 @@ async def post_session_start(
         # Clear sticky stop flag — user explicitly restarted / 用戶顯式重啟，清除停止標誌
         global _USER_STOPPED
         _USER_STOPPED = False
-        rust_state = rust.get_paper_state() or {}
+        rust_state = rust.get_paper_state(engine="paper") or {}
         return _paper_response({
             "message": "Paper trading started (resumed) / 紙盤交易已啟動（恢復）",
             "source": "rust_engine",
@@ -357,7 +357,10 @@ def get_session_status(
 ):
     """Get current session status from Rust engine / 從 Rust 引擎獲取 session 狀態"""
     rust = get_rust_reader()
-    rust_state = rust.get_paper_state() if rust.is_available() else None
+    # 3E-ARCH: explicit engine="paper" — without it the compat snapshot file is
+    # whichever engine has is_primary=true (Live > Demo > Paper).
+    # 3E-ARCH：必須明確指定 engine="paper"，否則 compat 檔由 is_primary 引擎寫入。
+    rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
         return _paper_response({
             "source": "rust_engine",
@@ -371,8 +374,8 @@ def get_session_status(
             "pnl": {},
             "order_count": 0, "fill_count": 0, "position_count": 0,
         })
-    # Read paper_paused from full snapshot / 從完整快照讀取暫停狀態
-    full_snapshot = rust.get_snapshot() if rust.is_available() else None
+    # Read paper_paused from per-engine paper snapshot / 從 paper 引擎快照讀取暫停狀態
+    full_snapshot = rust.get_snapshot(engine="paper") if rust.is_engine_available("paper") else None
     is_paused = full_snapshot.get("paper_paused", False) if full_snapshot else False
     # 3E-5: pipeline_kind from snapshot (serde renamed from trading_mode); default "paper"
     pipeline_kind = full_snapshot.get("trading_mode", "paper") if full_snapshot else "paper"
@@ -463,8 +466,8 @@ def get_orders(
     # Rust engine manages orders internally; recent intents serve as order log
     # Rust 引擎內部管理訂單；最近意圖列表作為訂單記錄
     reader = get_rust_reader()
-    if reader.is_available():
-        intents = reader.get_recent_intents() or []
+    if reader.is_engine_available("paper"):
+        intents = reader.get_recent_intents(mode="paper") or []
         return _paper_response({"orders": intents, "count": len(intents), "source": "rust_engine"})
     return _paper_response({"orders": [], "count": 0, "source": "rust_engine"})
 
@@ -479,7 +482,8 @@ def get_positions(
 ):
     """Get current paper positions from Rust engine / 從 Rust 引擎獲取紙上持倉"""
     rust = get_rust_reader()
-    rust_state = rust.get_paper_state() if rust.is_available() else None
+    # 3E-ARCH: explicit engine="paper" required / 必須明確指定 paper 引擎
+    rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
         return _paper_response({"positions": [], "count": 0, "source": "rust_engine"})
     # Transform Rust position fields to GUI-expected format
@@ -519,10 +523,10 @@ def get_fills(
     limit: int = 50,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
-    """Get fill history from Rust engine / 從 Rust 引擎獲取成���歷史"""
+    """Get fill history from Rust engine / 從 Rust 引擎獲取成交歷史"""
     reader = get_rust_reader()
-    if reader.is_available():
-        rust_fills = reader.get_recent_fills() or []
+    if reader.is_engine_available("paper"):
+        rust_fills = reader.get_recent_fills(mode="paper") or []
         # Inject `side` field: Rust TimestampedFill has is_long bool, GUI expects side='Buy'/'Sell'
         # 注入 side 欄位：Rust 用 is_long，GUI 期望 side='Buy'/'Sell'
         for f in rust_fills:
@@ -539,7 +543,8 @@ def get_pnl(
 ):
     """Get paper PnL summary from Rust engine / 從 Rust 引擎獲取紙上 PnL"""
     rust = get_rust_reader()
-    rust_state = rust.get_paper_state() if rust.is_available() else None
+    # 3E-ARCH: explicit engine="paper" / 必須明確指定 paper 引擎
+    rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
         return _paper_response({"source": "rust_engine", "available": False})
     positions = rust_state.get("positions", [])
@@ -568,9 +573,9 @@ def get_audit_trail(
     # Rust recent intents + fills serve as audit trail / Rust 意圖+成交作為審計記錄
     reader = get_rust_reader()
     trail: list = []
-    if reader.is_available():
-        intents = reader.get_recent_intents() or []
-        fills = reader.get_recent_fills() or []
+    if reader.is_engine_available("paper"):
+        intents = reader.get_recent_intents(mode="paper") or []
+        fills = reader.get_recent_fills(mode="paper") or []
         trail = intents + fills
     return _paper_response({"audit_trail": trail[:min(limit, 500)], "count": len(trail), "source": "rust_engine"})
 
@@ -598,7 +603,8 @@ def get_export(
 ):
     """Export session data from Rust engine snapshot / 從 Rust 引擎快照導出 session 數據"""
     reader = get_rust_reader()
-    snapshot = reader.get_snapshot() if reader.is_available() else None
+    # 3E-ARCH: export paper-engine snapshot specifically / 匯出 paper 引擎快照
+    snapshot = reader.get_snapshot(engine="paper") if reader.is_engine_available("paper") else None
     if snapshot is None:
         return _paper_response({"available": False, "source": "rust_engine"})
     return _paper_response({"source": "rust_engine", **snapshot})
@@ -647,9 +653,11 @@ def get_market_feed_status(
 ):
     """Get market data feed status from Rust engine / 從 Rust 引擎獲取行情數據流狀態"""
     # Python DISPATCHER removed — read from Rust engine snapshot instead.
+    # 3E-ARCH: only Paper writes market_data_tx (D19) so read paper engine snapshot.
     # Python DISPATCHER 已移除 — 改從 Rust 引擎快照讀取。
+    # 3E-ARCH：只有 Paper 寫 market_data_tx（D19），所以讀 paper 引擎快照。
     reader = get_rust_reader()
-    snap = reader.get_snapshot() if reader.is_available() else None
+    snap = reader.get_snapshot(engine="paper") if reader.is_engine_available("paper") else None
     if snap is not None:
         stats = snap.get("stats", {})
         last_tick_ms = stats.get("last_tick_ms", 0)
@@ -729,10 +737,10 @@ def get_shadow_decisions(
 ):
     """Get shadow decisions from Rust engine / 從 Rust 引擎獲取影子決策"""
     # Shadow decisions are tracked via recent_intents in Rust snapshot
-    # 影子決策通過 Rust 快照��的 recent_intents 追蹤
+    # 影子決策通過 Rust 快照的 recent_intents 追蹤
     reader = get_rust_reader()
-    if reader.is_available():
-        intents = reader.get_recent_intents() or []
+    if reader.is_engine_available("paper"):
+        intents = reader.get_recent_intents(mode="paper") or []
         capped = intents[-min(limit, 200):]
         return _paper_response({"shadow_decisions": capped, "count": len(capped), "source": "rust_engine"})
     return _paper_response({"shadow_decisions": [], "count": 0, "source": "rust_engine"})
@@ -754,14 +762,16 @@ def get_metrics(
     返回完整嵌套指標（交易、回撤、持倉時間、夏普比率）+ 引擎 tick 統計。
     """
     rust = get_rust_reader()
-    rust_state = rust.get_paper_state() if rust.is_available() else None
+    # 3E-ARCH: explicit engine="paper" / 必須明確指定 paper 引擎
+    rust_state = rust.get_paper_state(engine="paper") if rust.is_engine_available("paper") else None
     if rust_state is None:
         return _paper_response({"available": False, "source": "rust_engine"})
     # Full metrics via compute_full_metrics (trade_metrics, drawdown, sharpe, etc.)
     # 完整指標通過 compute_full_metrics 計算
     full = compute_full_metrics(rust_state)
     # Merge tick stats from engine / 合併引擎 tick 統計
-    stats = rust.get_tick_stats() or {}
+    paper_snap = rust.get_snapshot(engine="paper") or {}
+    stats = paper_snap.get("stats") or {}
     full["source"] = "rust_engine"
     full["total_ticks"] = stats.get("total_ticks", 0)
     full["total_intents"] = stats.get("total_intents", 0)

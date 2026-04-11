@@ -302,9 +302,11 @@ async def get_intents(
     """
     try:
         # IPC-03: Rust-first for recent intents / 優先讀 Rust 最近交易意圖
+        # 3E-ARCH: explicit mode="paper" — strategy intents view tracks paper engine.
+        # 3E-ARCH：必須明確 mode="paper"，策略意圖視圖追蹤 paper 引擎。
         reader = get_rust_reader()
-        if reader.is_available():
-            rust_intents = reader.get_recent_intents()
+        if reader.is_engine_available("paper"):
+            rust_intents = reader.get_recent_intents(mode="paper")
             if rust_intents:
                 return _envelope({
                     "intents": rust_intents[:n],
