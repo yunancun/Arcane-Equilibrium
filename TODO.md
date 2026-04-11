@@ -194,7 +194,18 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [ ] **QoL-1** Engine 重啟後 `paper_state` 計數器歸零 — `total_realized_pnl` / `total_fees` / `trade_count` 為純記憶體變量，引擎啟動時應從 DB `trading.fills` 恢復累計值（現靠 Python metrics 端點 DB 降級繞過，但引擎內 snapshot 仍為 0）
 - [ ] **QoL-2** Demo AI cost 無追蹤 — `tab-demo.html` 硬編碼 `'N/A'`，後端無 per-engine AI 調用成本歸因機制（需 H1-H5 AI 治理層接通後才有意義，依賴 G-1）
 - [ ] **QoL-3** PyO3 `.so` 部署不統一 — `maturin develop` 默認裝到系統 venv（`~/.venv`），API server 用 `control_api_v1/.venv`，Rust struct 改動需手動 `maturin develop` 到正確 venv。應自動化或統一 venv
-- [ ] **QoL-4** Paper PnL 異常大（497,199 USDT，初始 10,000）— max drawdown 245% 意味餘額可為負仍繼續開倉。需檢查 paper 風控配置是否正確限制槓桿/倉位
+- [x] **QoL-4** ~~Paper PnL 異常大（497,199 USDT，初始 10,000）~~ — **不是風控配置問題**。根因為 `on_tick.rs` 5 條 close 路徑（L168 fast_track / L196 H0-stops / L304 paused-stops / L907 strategy_close / L1053 risk_close）誤用 `event.last_price`（觸發 tick 的單一 symbol 價）對所有 symbol 平倉，跨 symbol 平倉時 PnL 被放大 1000-10000 倍。Smoking gun: 8 個 fast_track fills 全部 price=2301.205 套用到 8 個不同 symbol（FFUSDT 真實 ~$0.50 被以 $2301 平倉 → -$757K；DOGEUSDT 真實 ~$0.20 被以 $2301 平倉 → +$750K）。修復：commit `2a422fa` PNL-FIX-1，新增 `close_position_at_symbol_market()` helper 統一從 `paper_state.latest_price(sym)` 取對應 symbol 價，並 fallback 至 entry_price（零 PnL 平倉）。+2 regression tests。DB 已按 Option B 清理（zero realized_pnl + 標記 invalid 後綴）
+
+---
+
+## 🔧 2026-04-12 PNL-FIX-1 後續（commit 2a422fa 觸發）
+
+來源：DB 清理後的乾淨基線揭露多個失真假設。
+
+- [ ] **PNL-1** Phase 5 narrative reframing — CLAUDE.md §三 與 `project_phase5_promotion_edge_crisis.md` 寫的「Edge 危機: realized ≈ 2 bps vs fee 11 bps」是基於受污染數據。Post-cleanup 真相：**gross edge = -0.81 bps**（**負數，未扣手續費**），fee = 1.42 bps，net = -$995.38 / 1371 fills。Phase 5 的「保護現有 alpha」前提不成立 — 4 策略在乾淨數據下沒有正 alpha 可保護，需要重做策略而非調 cost_gate。重寫 CLAUDE.md §三 + Phase 5 段落 + memory 對應條目
+- [ ] **PNL-2** Fee underreporting investigation — `tick_pipeline/mod.rs:955` `emit_close_fill()` 註解寫 "close fees accrued by paper_state separately" 並硬編碼 `fee: 0.0`，但實際觀測 fee = 1.42 bps 對 Bybit perp taker（6 bps）來說過低。追查 close 路徑 fees 是否真的在 `paper_state` 累計，還是落在某個未寫入 DB `trading.fills.fee` 列的地方。修復後重新計算 net edge
+- [ ] **PNL-3** Per-strategy edge breakdown — 在 1371 乾淨 fills 上按 `strategy_name` 分組計算 gross/net edge，找出是否有任何單一策略具備正 alpha（即使整體為負）。若有 → 作為策略重做的起點；若全負 → 4 策略全部需要重新設計訊號邏輯。輸出表格寫入 worklog
+- [ ] **PNL-4** fast_track 觸發根因調查 — 2026-04-11 20:51:44.723 production 環境 CircuitBreaker fast_track 路徑首次觸發（產生 8 個跨 symbol 同價平倉，引爆 PNL-FIX-1 bug）。調查當時 governor escalation 日誌、risk level 狀態、餘額/回撤、最近 N 個 fills，判斷是真實 margin/flash crash 觸發還是誤觸發。若誤觸發 → 收緊 CB 觸發條件
 
 ---
 
