@@ -925,6 +925,49 @@ impl TickPipeline {
     ) {
         self.intent_processor.set_account_manager(am);
     }
+    /// PNL-FIX-1: Close a single position at its OWN symbol's latest market price.
+    /// Returns (is_long, qty, close_price, pnl) on success — caller passes the
+    /// returned price to emit_close_fill so the fill record matches the close.
+    ///
+    /// Why this exists: every multi-symbol close path used to call
+    /// `paper_state.close_position(sym, event.last_price, ts)`, where
+    /// `event.last_price` is the price of the SINGLE tick that fired the close.
+    /// When sym ≠ event.symbol (e.g. fast_track CloseAll iterating all
+    /// positions on one tick) the wrong-symbol price corrupted PnL by 1000-
+    /// 10000x — see the 2026-04-12 paper anomaly: $497K fake PnL from 8 fills.
+    ///
+    /// Falls back to the position's entry_price (zero PnL) when no latest
+    /// price is recorded for the symbol — strictly safer than borrowing the
+    /// triggering tick's price.
+    ///
+    /// PNL-FIX-1：以「該交易對自己」的最新市場價平掉單一倉位。
+    /// 返回 (is_long, qty, close_price, pnl)，呼叫端把 close_price 傳給
+    /// emit_close_fill 讓 fill 記錄與真實平倉一致。
+    /// 無最新價時退回到 entry_price（pnl=0），絕不借用觸發 tick 的價格。
+    fn close_position_at_symbol_market(
+        &mut self,
+        sym: &str,
+        ts_ms: u64,
+    ) -> Option<(bool, f64, f64, f64)> {
+        let (is_long, qty, entry_price) = self
+            .paper_state
+            .get_position(sym)
+            .map(|p| (p.is_long, p.qty, p.entry_price))?;
+        let close_price = match self.paper_state.latest_price(sym) {
+            Some(p) if p.is_finite() && p > 0.0 => p,
+            _ => {
+                tracing::warn!(
+                    symbol = %sym,
+                    fallback = entry_price,
+                    "PNL-FIX-1: no latest_price for symbol — falling back to entry price (zero PnL close)"
+                );
+                entry_price
+            }
+        };
+        let pnl = self.paper_state.close_position(sym, close_price, ts_ms)?;
+        Some((is_long, qty, close_price, pnl))
+    }
+
     /// DB-RUN-3: Emit a TradingMsg::Fill row for a stop/risk-driven close so
     /// trading.fills records the realized PnL. Strategy is "risk_close" since
     /// these closes are not signal-driven. Counter on stats.total_fills.

@@ -1010,3 +1010,95 @@ use super::*;
         ).await;
         assert!(result.is_err(), "should timeout when no ready signal sent");
     }
+
+    /// PNL-FIX-1 regression: each position must close at its OWN symbol's
+    /// latest_price, not the price of whichever tick happened to fire the
+    /// close path. The 2026-04-12 paper anomaly produced ~$497K fake PnL
+    /// from 8 fast_track fills because every close used `event.last_price`
+    /// (the triggering tick's price) for ALL symbols regardless of their
+    /// real prices (FFUSDT closed at $2301 instead of ~$0.50, etc.).
+    /// PNL-FIX-1 回歸：每個倉位平倉時必須使用該交易對自己的 latest_price，
+    /// 禁止借用觸發 tick 的價格。鎖定 2026-04-12 paper 異常的修復。
+    #[test]
+    fn test_close_position_at_symbol_market_uses_per_symbol_price() {
+        let mut pipeline = TickPipeline::with_kind(
+            &["BTCUSDT", "ETHUSDT", "FFUSDT", "DOGEUSDT"],
+            10_000.0,
+            PipelineKind::Paper,
+        );
+        // Open four long positions at very different real-world price scales.
+        // 在四個價格相差幾個數量級的交易對上各開一個多倉。
+        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50_000.0, 0.0, 1_000);
+        pipeline.paper_state.apply_fill("ETHUSDT", true, 0.10, 3_000.0,  0.0, 1_000);
+        pipeline.paper_state.apply_fill("FFUSDT",  true, 100.0, 0.50,    0.0, 1_000);
+        pipeline.paper_state.apply_fill("DOGEUSDT", true, 1_000.0, 0.20, 0.0, 1_000);
+
+        // Set per-symbol latest prices — each at a small +1% gain over entry.
+        // The triggering tick (in production) would carry only ONE of these prices,
+        // but the close MUST use each symbol's own latest_price.
+        // 為每個交易對設定獨立的最新價（各 +1%）。觸發 tick 只會帶其中一個價格，
+        // 但平倉必須各自使用自己的 latest_price。
+        pipeline.paper_state.set_latest_price("BTCUSDT", 50_500.0);
+        pipeline.paper_state.set_latest_price("ETHUSDT", 3_030.0);
+        pipeline.paper_state.set_latest_price("FFUSDT",  0.505);
+        pipeline.paper_state.set_latest_price("DOGEUSDT", 0.202);
+
+        // Close each position via the helper. Returned close_price MUST equal
+        // that symbol's latest_price, NEVER another symbol's.
+        // 通過 helper 平倉，返回的 close_price 必須等於該交易對的 latest_price。
+        let (_il, _q, btc_px, btc_pnl) =
+            pipeline.close_position_at_symbol_market("BTCUSDT", 2_000).unwrap();
+        let (_il, _q, eth_px, eth_pnl) =
+            pipeline.close_position_at_symbol_market("ETHUSDT", 2_000).unwrap();
+        let (_il, _q, ff_px,  ff_pnl) =
+            pipeline.close_position_at_symbol_market("FFUSDT",  2_000).unwrap();
+        let (_il, _q, doge_px, doge_pnl) =
+            pipeline.close_position_at_symbol_market("DOGEUSDT", 2_000).unwrap();
+
+        // Each close uses the right symbol's price. (The bug closed
+        // FFUSDT at $50,500 — BTCUSDT's price — producing -$5,049,950 PnL.)
+        // 每個平倉都用了正確的價格。修復前 FFUSDT 會被以 BTC 的 50500 平倉。
+        assert!((btc_px - 50_500.0).abs() < 1e-9, "BTC close at wrong price: {btc_px}");
+        assert!((eth_px - 3_030.0).abs()  < 1e-9, "ETH close at wrong price: {eth_px}");
+        assert!((ff_px  - 0.505).abs()    < 1e-9, "FF close at wrong price: {ff_px}");
+        assert!((doge_px - 0.202).abs()   < 1e-9, "DOGE close at wrong price: {doge_px}");
+
+        // PnL = (close_price - entry_price) * qty for longs.
+        // Each position should show a small +1% gain in proportion to notional.
+        // PnL = (close - entry) * qty。每個都應該是小幅正收益。
+        assert!((btc_pnl - 5.0).abs()   < 1e-9, "BTC PnL: {btc_pnl}");   // (50500-50000)*0.01
+        assert!((eth_pnl - 3.0).abs()   < 1e-9, "ETH PnL: {eth_pnl}");   // (3030-3000)*0.1
+        assert!((ff_pnl  - 0.5).abs()   < 1e-9, "FF PnL: {ff_pnl}");     // (0.505-0.5)*100
+        assert!((doge_pnl - 2.0).abs()  < 1e-9, "DOGE PnL: {doge_pnl}"); // (0.202-0.2)*1000
+
+        assert_eq!(pipeline.paper_state.position_count(), 0, "all positions should be closed");
+    }
+
+    /// PNL-FIX-1 fallback: when no latest_price is recorded for a symbol,
+    /// the helper must fall back to the position's entry_price (yielding zero
+    /// PnL), NEVER to the triggering tick's price.
+    /// PNL-FIX-1 退路：無 latest_price 時必須回退到 entry_price（pnl=0），
+    /// 絕不能借用觸發 tick 的價格。
+    #[test]
+    fn test_close_position_at_symbol_market_fallback_to_entry_when_no_latest_price() {
+        let mut pipeline = TickPipeline::with_kind(
+            &["FFUSDT"],
+            10_000.0,
+            PipelineKind::Paper,
+        );
+        // Open position WITHOUT setting latest_price.
+        // 開倉但不設定 latest_price。
+        pipeline.paper_state.apply_fill("FFUSDT", true, 100.0, 0.50, 0.0, 1_000);
+        // apply_fill seeds latest_prices via its internal book-keeping; clear it
+        // explicitly to simulate a position whose price has not been observed yet.
+        // apply_fill 內部會種入 latest_price，這裡強制清掉模擬「未觀測過價格」的情境。
+        pipeline.paper_state.set_latest_price("FFUSDT", f64::NAN);
+
+        let (_il, _q, close_px, pnl) =
+            pipeline.close_position_at_symbol_market("FFUSDT", 2_000).unwrap();
+
+        // Falls back to entry_price (0.50), producing zero PnL — the safe choice.
+        // 回退到入場價，pnl 為零。
+        assert!((close_px - 0.50).abs() < 1e-9, "fallback should be entry price, got {close_px}");
+        assert!(pnl.abs() < 1e-9, "fallback close should produce zero PnL, got {pnl}");
+    }
