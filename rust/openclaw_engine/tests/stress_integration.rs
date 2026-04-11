@@ -4,7 +4,7 @@
 //! Covers: fast_track emergency, multi-symbol mixed trading, cascade governance,
 //!   flash crash, drawdown breach, position limits, stop triggers, rapid ticks.
 
-use openclaw_core::governance_core::GovernanceCore;
+use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile};
 use openclaw_core::indicators::*;
 use openclaw_core::sm::risk_gov::RiskLevel;
 use openclaw_engine::fast_track::{evaluate_fast_track, FastTrackAction};
@@ -12,7 +12,7 @@ use openclaw_engine::intent_processor::{IntentProcessor, OrderIntent};
 use openclaw_engine::paper_state::PaperState;
 use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
-    ma_crossover::MaCrossover, Strategy,
+    ma_crossover::MaCrossover, Strategy, StrategyAction,
 };
 use openclaw_engine::tick_pipeline::{TickContext, TickPipeline};
 use openclaw_types::PriceEvent;
@@ -313,7 +313,10 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
     );
     let intents = strat.on_tick(&ctx1);
     assert_eq!(intents.len(), 1, "should enter long on extreme oversold");
-    assert!(intents[0].is_long);
+    match &intents[0] {
+        StrategyAction::Open(i) => assert!(i.is_long),
+        other => panic!("expected Open, got {:?}", other),
+    }
 
     // Bounce to mean — should exit
     let ctx2 = make_ctx(
@@ -375,7 +378,10 @@ fn stress_bb_breakout_valid_squeeze_with_volume() {
     );
     let intents = strat.on_tick(&ctx2);
     assert_eq!(intents.len(), 1, "should enter on valid squeeze breakout");
-    assert!(intents[0].is_long, "should be long on upper breakout");
+    match &intents[0] {
+        StrategyAction::Open(i) => assert!(i.is_long, "should be long on upper breakout"),
+        other => panic!("expected Open, got {:?}", other),
+    }
 }
 
 #[test]
@@ -426,7 +432,7 @@ fn stress_guardian_rejects_on_high_drawdown() {
         order_type: "market".into(),
         limit_price: None,
     };
-    let result = proc.process(&intent, &gov, &state, 500.0);
+    let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject on high drawdown");
     assert!(result
         .rejected_reason
@@ -454,7 +460,7 @@ fn stress_guardian_rejects_direction_conflict() {
         order_type: "market".into(),
         limit_price: None,
     };
-    let result = proc.process(&intent, &gov, &state, 500.0);
+    let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject direction conflict");
 }
 
@@ -481,7 +487,7 @@ fn stress_guardian_rejects_position_count_limit() {
         order_type: "market".into(),
         limit_price: None,
     };
-    let result = proc.process(&intent, &gov, &state, 500.0);
+    let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
         !result.submitted,
         "should reject 4th same-direction position"
@@ -505,7 +511,7 @@ fn stress_governance_not_authorized_rejects_all() {
         order_type: "market".into(),
         limit_price: None,
     };
-    let result = proc.process(&intent, &gov, &state, 500.0);
+    let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);
     assert!(result
         .rejected_reason

@@ -27,7 +27,7 @@ const CHECK_INTERVAL_SECS: u64 = 60;
 pub async fn run_quality_monitor(
     pool: Arc<DbPool>,
     last_tick_ms: Arc<AtomicU64>,
-    symbols: Vec<String>,
+    _symbols: Vec<String>,
     cancel: CancellationToken,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(CHECK_INTERVAL_SECS));

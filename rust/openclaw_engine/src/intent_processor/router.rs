@@ -12,7 +12,7 @@ impl IntentProcessor {
         governance: &GovernanceCore,
         paper_state: &PaperState,
         atr: f64,
-        profile: GovernanceProfile,
+        _profile: GovernanceProfile,
     ) -> IntentResult {
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {

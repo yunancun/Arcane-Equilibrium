@@ -4,7 +4,7 @@
 //! Pure functions that evaluate drift results and determine actions
 //! (escalation / recovery / close-all). No I/O — the caller dispatches.
 
-use super::{DriftVerdict, PositionView, MINOR_DRIFT_THRESHOLD_PCT};
+use super::{DriftVerdict, PositionView};
 use openclaw_core::sm::risk_gov::RiskLevel;
 use std::collections::HashMap;
 

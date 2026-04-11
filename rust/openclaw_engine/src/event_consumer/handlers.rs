@@ -15,7 +15,7 @@ use super::types::PendingOrder;
 use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Apply one PipelineCommand variant to the pipeline. Returns nothing —
 /// command outcomes are reported via the optional response_tx oneshot inside

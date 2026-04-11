@@ -351,8 +351,6 @@ pub async fn run_position_reconciler(
     get_risk_level: impl Fn() -> RiskLevel + Send + 'static,
     engine_label: String,
 ) {
-    use crate::tick_pipeline::PipelineCommand;
-
     info!(
         engine = %engine_label,
         interval_secs = RECONCILE_INTERVAL_SECS,

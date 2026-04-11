@@ -19,7 +19,7 @@ pub use types::{EventConsumerDeps, ExchangeEvent, PendingOrder, SYMBOLS};
 
 use crate::persistence::{AuditWriter, DualStateWriter, StateWriter};
 use crate::strategies::StrategyFactory;
-use crate::tick_pipeline::TickPipeline;
+use crate::tick_pipeline::{PipelineKind, TickPipeline};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         config,
         cancel,
         initial_balance,
-        paper_initial_balance,
+        paper_initial_balance: _paper_initial_balance,
         taker_fee_rate,
         instruments: shared_instruments,
         bootstrap_client,
@@ -66,6 +66,18 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         pipeline_health,
     } = deps;
     let mut pipeline_cmd_rx = pipeline_cmd_rx;
+
+    // D19 safety assertion: only Paper pipeline writes market/feature DB.
+    // Exchange pipelines (Demo/Live) must receive None to prevent duplicate writes.
+    // D19 安全斷言：僅 Paper 管線寫入市場/特徵 DB。
+    // 交易所管線（Demo/Live）必須收到 None 以防止重複寫入。
+    if pipeline_kind.is_exchange() {
+        assert!(
+            market_data_tx.is_none() && feature_tx.is_none(),
+            "D19 violation: exchange pipeline ({:?}) must not write market/feature DB",
+            pipeline_kind,
+        );
+    }
 
     let cfg_snapshot = config.get();
 
@@ -404,8 +416,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // 主管線同時寫入 pipeline_snapshot.json 保持向後兼容（IPC 伺服器、看門狗）。
     let kind_tag = pipeline.pipeline_kind.db_mode(); // "paper" | "demo" | "live"
     let per_engine_snapshot = format!("pipeline_snapshot_{kind_tag}.json");
-    let mut state_writer = StateWriter::new(&data_path.join(format!("{kind_tag}_state.json")), 30_000);
-    let primary_writer = StateWriter::new(&data_path.join(&per_engine_snapshot), 5_000);
+    // Stagger snapshot debounce intervals per-engine to avoid I/O contention
+    // when all three pipelines flush in the same window.
+    // 每引擎錯開快照去抖間隔，避免三管線同時刷新時的 I/O 爭用。
+    let (state_interval_ms, snapshot_interval_ms) = match pipeline.pipeline_kind {
+        PipelineKind::Paper => (30_000, 5_000),
+        PipelineKind::Demo  => (31_000, 5_500),
+        PipelineKind::Live  => (29_000, 4_500),
+    };
+    let mut state_writer = StateWriter::new(&data_path.join(format!("{kind_tag}_state.json")), state_interval_ms);
+    let primary_writer = StateWriter::new(&data_path.join(&per_engine_snapshot), snapshot_interval_ms);
     // Backward compat: primary pipeline also writes pipeline_snapshot.json
     // 向後兼容：主管線同時寫入 pipeline_snapshot.json
     let compat_writer = if is_primary {
@@ -623,7 +643,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         }
                         // Match by order_link_id directly
                         if !order.order_link_id.is_empty() {
-                            if let Some(po) = pending_orders.get_mut(&order.order_link_id) {
+                            if let Some(_po) = pending_orders.get_mut(&order.order_link_id) {
                                 let status = &order.order_status;
                                 info!(
                                     order_link_id = %order.order_link_id,
