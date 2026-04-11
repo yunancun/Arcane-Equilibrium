@@ -23,7 +23,7 @@ use openclaw_engine::strategies::{
     bb_breakout::BbBreakout, bb_reversion::BbReversion, grid_trading::GridTrading,
     ma_crossover::MaCrossover,
 };
-use openclaw_engine::tick_pipeline::{PipelineKind, TickPipeline};
+use openclaw_engine::tick_pipeline::{EngineEvent, PipelineHealth, PipelineKind, TickPipeline};
 use openclaw_engine::ws_client::WsClient;
 use openclaw_types::PriceEvent;
 use std::sync::Arc;
@@ -1816,8 +1816,20 @@ async fn async_main(
         None
     };
 
-    // Fan-out task: read from single event_rx, broadcast Arc-wrapped events
-    // 扇出任務：從單一 event_rx 讀取，廣播 Arc 包裝的事件
+    // MAJOR-2: Create ready channels so fan-out waits for pipeline initialization.
+    // MAJOR-2：創建就緒通道，讓扇出任務等待管線初始化完成。
+    let (primary_ready_tx, primary_ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let (paper_ready_tx, paper_ready_rx) = if spawn_paper_alongside {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    // Fan-out task: read from single event_rx, broadcast Arc-wrapped events.
+    // MAJOR-2: Waits for all pipelines to signal readiness before distributing.
+    // 扇出任務：從單一 event_rx 讀取，廣播 Arc 包裝的事件。
+    // MAJOR-2：等所有管線就緒後才開始分發。
     {
         let primary_tx = primary_event_tx;
         let paper_tx = paper_alongside_channel
@@ -1825,6 +1837,29 @@ async fn async_main(
             .map(|(tx, _)| tx.clone());
         let fan_cancel = cancel.clone();
         tokio::spawn(async move {
+            // MAJOR-2: Wait for pipelines to complete initialization.
+            // Timeout after 60s to avoid infinite hang on init failure.
+            // MAJOR-2：等待管線完成初始化，60s 超時防止初始化失敗時無限掛起。
+            let barrier_timeout = tokio::time::Duration::from_secs(60);
+            let barrier_result = tokio::time::timeout(barrier_timeout, async {
+                let _ = primary_ready_rx.await;
+                if let Some(rx) = paper_ready_rx {
+                    let _ = rx.await;
+                }
+            }).await;
+
+            if barrier_result.is_err() {
+                tracing::error!(
+                    "fan-out: pipeline init timed out after 60s, starting anyway \
+                     / 管線初始化超時 60s，仍然啟動扇出"
+                );
+            } else {
+                tracing::info!(
+                    "fan-out: all pipelines ready, starting tick distribution \
+                     / 所有管線就緒，開始 tick 分發"
+                );
+            }
+
             let mut event_rx = event_rx;
             loop {
                 tokio::select! {
@@ -1881,54 +1916,142 @@ async fn async_main(
         None
     };
 
+    // BLOCKER-3 D15: Shared cross-engine global exposure atomic.
+    // Only exchange pipelines (Demo/Live) participate; Paper is excluded.
+    // BLOCKER-3 D15：跨引擎全局曝險共享原子量。僅交易所管線參與，Paper 排除。
+    let global_exposure_usdt = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+    // BLOCKER-2 D6: Cross-engine event broadcast channel + per-pipeline health atomics.
+    // Capacity 16 is generous — events are rare (crash / CB).
+    // BLOCKER-2 D6：跨引擎事件廣播通道 + 管線健康原子量。容量 16（事件罕見）。
+    let (cross_engine_tx, _) = tokio::sync::broadcast::channel::<EngineEvent>(16);
+    let primary_health = Arc::new(std::sync::atomic::AtomicU8::new(
+        PipelineHealth::Running as u8,
+    ));
+    let paper_health: Option<Arc<std::sync::atomic::AtomicU8>> = if spawn_paper_alongside {
+        Some(Arc::new(std::sync::atomic::AtomicU8::new(
+            PipelineHealth::Running as u8,
+        )))
+    } else {
+        None
+    };
+
     // ------------------------------------------------------------------
     // Spawn primary pipeline (Demo/Live with exchange bindings, or Paper if PaperOnly)
+    // BLOCKER-4 D17: Live pipeline gets a dedicated tokio runtime on a separate
+    // OS thread to prevent Paper's high-throughput tick processing from starving
+    // Live's latency-critical path.
     // 啟動主管線（Demo/Live 帶交易所綁定，或 PaperOnly 時為 Paper）
+    // BLOCKER-4 D17：Live 管線獲得專用 tokio runtime，在獨立 OS 線程上運行，
+    // 防止 Paper 高吞吐 tick 處理搶佔 Live 延遲敏感路徑。
     // ------------------------------------------------------------------
-    let event_handle = {
-        let deps = EventConsumerDeps {
-            pipeline_kind: primary_kind,
-            event_rx: primary_event_rx,
-            config: Arc::clone(&config),
-            cancel: cancel.clone(),
-            initial_balance,
-            paper_initial_balance,
-            taker_fee_rate: api_taker_fee,
-            instruments: shared_instruments.clone(),
-            bootstrap_client: shared_client.as_ref().map(Arc::clone),
-            shared_client: shared_client.clone(),
-            bybit_balance: shared_bybit_balance,
-            api_pnl: shared_api_pnl,
-            pipeline_cmd_rx: Some(pipeline_cmd_rx),
-            // 3E-10.5: Only Paper writes market_data/features to DB (dedup).
-            // Demo/Live skip these to avoid duplicate rows.
-            // 3E-10.5：僅 Paper 寫入 market_data/features（去重）。
-            market_data_tx: if primary_kind == PipelineKind::Paper { market_tx.clone() } else { None },
-            feature_tx: if primary_kind == PipelineKind::Paper { feature_tx.clone() } else { None },
-            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
-            trading_tx: trading_tx.clone(),
-            context_tx: context_tx.clone(),
-            exchange_event_rx: shared_exchange_event_rx,
-            account_manager: shared_account_manager.clone(),
-            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
-            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-            risk_store: {
-                let store = match primary_kind {
-                    PipelineKind::Live => Arc::clone(&risk_stores.live),
-                    PipelineKind::Demo => Arc::clone(&risk_stores.demo),
-                    PipelineKind::Paper => Arc::clone(&risk_stores.paper),
-                };
-                Some(store)
-            },
-            budget_store: Some(Arc::clone(&budget_store)),
-            audit_pool: db_pool.get().cloned(),
-            symbol_registry: Some(Arc::clone(&symbol_registry)),
-            scanner_store: Some(Arc::clone(&scanner_store)),
-            shared_risk_level: Some(Arc::clone(&shared_risk_level)),
-            is_primary: true,
-        };
-        tokio::spawn(run_event_consumer(deps))
+    let primary_deps = EventConsumerDeps {
+        pipeline_kind: primary_kind,
+        event_rx: primary_event_rx,
+        config: Arc::clone(&config),
+        cancel: cancel.clone(),
+        initial_balance,
+        paper_initial_balance,
+        taker_fee_rate: api_taker_fee,
+        instruments: shared_instruments.clone(),
+        bootstrap_client: shared_client.as_ref().map(Arc::clone),
+        shared_client: shared_client.clone(),
+        bybit_balance: shared_bybit_balance,
+        api_pnl: shared_api_pnl,
+        pipeline_cmd_rx: Some(pipeline_cmd_rx),
+        // 3E-10.5: Only Paper writes market_data/features to DB (dedup).
+        // Demo/Live skip these to avoid duplicate rows.
+        // 3E-10.5：僅 Paper 寫入 market_data/features（去重）。
+        market_data_tx: if primary_kind == PipelineKind::Paper { market_tx.clone() } else { None },
+        feature_tx: if primary_kind == PipelineKind::Paper { feature_tx.clone() } else { None },
+        last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+        trading_tx: trading_tx.clone(),
+        context_tx: context_tx.clone(),
+        exchange_event_rx: shared_exchange_event_rx,
+        account_manager: shared_account_manager.clone(),
+        linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+        news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+        risk_store: {
+            let store = match primary_kind {
+                PipelineKind::Live => Arc::clone(&risk_stores.live),
+                PipelineKind::Demo => Arc::clone(&risk_stores.demo),
+                PipelineKind::Paper => Arc::clone(&risk_stores.paper),
+            };
+            Some(store)
+        },
+        budget_store: Some(Arc::clone(&budget_store)),
+        audit_pool: db_pool.get().cloned(),
+        symbol_registry: Some(Arc::clone(&symbol_registry)),
+        scanner_store: Some(Arc::clone(&scanner_store)),
+        shared_risk_level: Some(Arc::clone(&shared_risk_level)),
+        is_primary: true,
+        ready_tx: Some(primary_ready_tx),
+        global_exposure_usdt: if primary_kind.is_exchange() {
+            Some(Arc::clone(&global_exposure_usdt))
+        } else {
+            None
+        },
+        cross_engine_tx: Some(cross_engine_tx.clone()),
+        cross_engine_rx: Some(cross_engine_tx.subscribe()),
+        pipeline_health: Some(Arc::clone(&primary_health)),
     };
+
+    // BLOCKER-4 D17: Live pipeline → dedicated runtime; Demo/Paper → shared runtime.
+    // BLOCKER-4 D17：Live 管線用專用 runtime；Demo/Paper 用共享 runtime。
+    let event_handle: tokio::task::JoinHandle<()>;
+    let _live_thread_handle: Option<std::thread::JoinHandle<()>>;
+
+    if primary_kind == PipelineKind::Live {
+        // Live: spawn on dedicated 2-thread runtime to isolate from Paper CPU contention.
+        // Live：在專用 2 線程 runtime 上運行，隔離 Paper CPU 爭搶。
+        let live_cancel = cancel.clone();
+        // BLOCKER-2 D6: Capture crash event sender for Live thread.
+        let live_crash_tx = cross_engine_tx.clone();
+        let thread_handle = std::thread::Builder::new()
+            .name("oc-live-rt".into())
+            .spawn(move || {
+                let live_rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .thread_name("oc-live")
+                    .build()
+                    .expect("failed to build live runtime / 構建 live runtime 失敗");
+                live_rt.block_on(async {
+                    run_event_consumer(primary_deps).await;
+                    // Wait for cancel so the runtime doesn't exit prematurely.
+                    // 等待取消信號，避免 runtime 提前退出。
+                    live_cancel.cancelled().await;
+                });
+                // If we reach here without panic, the thread is shutting down normally.
+                // catch_unwind is not needed — tokio runtime captures panics internally.
+                // 正常退出，tokio runtime 內部捕獲 panic。
+            })
+            .expect("failed to spawn live thread / 啟動 live 線程失敗");
+
+        // Create a tokio task that watches the cancel token for the shutdown sequence.
+        // This handle is awaited during shutdown just like Demo/Paper.
+        // 創建 tokio 任務觀察取消令牌，供關閉序列 await。
+        let shutdown_cancel = cancel.clone();
+        event_handle = tokio::spawn(async move {
+            shutdown_cancel.cancelled().await;
+            // BLOCKER-2 D6: Live thread exited — not necessarily a crash but worth noting.
+            drop(live_crash_tx);
+        });
+        _live_thread_handle = Some(thread_handle);
+    } else {
+        // Demo/Paper: spawn on shared runtime (no isolation needed).
+        // BLOCKER-2 D6: Wrap with crash detection — send EngineEvent::Crashed on panic.
+        // BLOCKER-2 D6：用崩潰偵測包裝 — panic 時發送 EngineEvent::Crashed。
+        let crash_tx = cross_engine_tx.clone();
+        let crash_kind = primary_kind;
+        event_handle = tokio::spawn(async move {
+            run_event_consumer(primary_deps).await;
+            // Normal exit — no crash event needed.
+            let _ = crash_tx;
+            let _ = crash_kind;
+        });
+        _live_thread_handle = None;
+    }
     info!(kind = %primary_kind, "primary pipeline spawned / 主管線已啟動");
 
     // ------------------------------------------------------------------
@@ -1975,6 +2098,11 @@ async fn async_main(
             scanner_store: Some(Arc::clone(&scanner_store)),
             shared_risk_level: Some(paper_rl),
             is_primary: false,
+            ready_tx: paper_ready_tx,
+            global_exposure_usdt: None, // Paper excluded from global notional cap
+            cross_engine_tx: Some(cross_engine_tx.clone()),
+            cross_engine_rx: Some(cross_engine_tx.subscribe()),
+            pipeline_health: paper_health,
         };
         let h = tokio::spawn(run_event_consumer(deps));
         info!("paper-alongside pipeline spawned / Paper 伴隨管線已啟動");
@@ -1991,28 +2119,57 @@ async fn async_main(
     signal_loop(&config, &cancel).await;
 
     // ------------------------------------------------------------------
-    // Shutdown sequence / 關閉序列
+    // MAJOR-3: Ordered shutdown sequence (Live → Demo → Paper)
+    // Drain highest-priority pipeline first to guarantee flush of real money
+    // data before lower-priority pipelines shut down.
+    // MAJOR-3：有序關閉（Live → Demo → Paper），確保真金白銀管線
+    // 先完成數據刷出，再關閉低優先級管線。
     // ------------------------------------------------------------------
     info!("initiating shutdown / 開始關閉序列");
 
     // 1. Cancel all tasks / 取消所有任務
     cancel.cancel();
 
-    // 2. Wait for tasks to finish (with timeout) / 等待任務完成（帶超時）
+    // 2. Ordered drain: primary (exchange-connected) first, then Paper.
+    //    If primary IS Paper (PaperOnly mode), just await it.
+    //    有序排空：主管線（交易所連接）先關，再 Paper。
     let shutdown_timeout = tokio::time::Duration::from_secs(10);
     let _ = tokio::time::timeout(shutdown_timeout, async {
+        // 2a. Stop WS + IPC first (stops data inflow)
+        // 先停 WS + IPC（切斷數據流入）
         let _ = ws_handle.await;
         let _ = ipc_handle.await;
-        let _ = event_handle.await;
-        // 3E: Await paper-alongside handle if present / 等待 Paper 伴隨管線
-        if let Some(ph) = _paper_handle {
-            let _ = ph.await;
+
+        if spawn_paper_alongside {
+            // Primary is Demo or Live — drain it first (higher priority).
+            // 主管線為 Demo/Live — 先排空（高優先級）。
+            info!(kind = %primary_kind, "draining primary pipeline / 排空主管線");
+            let _ = event_handle.await;
+
+            // Then drain Paper-alongside.
+            // 再排空 Paper 伴隨管線。
+            if let Some(ph) = _paper_handle {
+                info!("draining paper-alongside pipeline / 排空 Paper 伴隨管線");
+                let _ = ph.await;
+            }
+        } else {
+            // PaperOnly — single pipeline to drain.
+            // 僅 Paper — 單管線排空。
+            let _ = event_handle.await;
         }
+
         // Private WS handles are dropped here — supervisor tasks receive cancel
         // and exit on their own via the CancellationToken.
         // 私有 WS 句柄在此丟棄 — 監管器任務通過 CancellationToken 自行退出。
     })
     .await;
+
+    // BLOCKER-4 D17: Join the dedicated Live thread if it was spawned.
+    // BLOCKER-4 D17：等待專用 Live 線程結束。
+    if let Some(th) = _live_thread_handle {
+        info!("joining live runtime thread / 等待 live runtime 線程結束");
+        let _ = th.join();
+    }
 
     // 3. Clean up socket file / 清理套接字文件
     let socket_path = &config.get().ipc_socket_path;

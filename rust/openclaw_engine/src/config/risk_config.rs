@@ -175,6 +175,11 @@ pub struct GlobalLimits {
     /// 賬戶餘額低於此值時阻擋所有新進場。
     #[serde(default)]
     pub min_balance_usdt: f64,
+    /// BLOCKER-3 D15: Global notional cap across all exchange pipelines (USDT).
+    /// 0 = no cap (default). Paper is excluded — only Demo+Live real exposure counts.
+    /// BLOCKER-3 D15：跨交易所管線全局名目上限（USDT）。0 = 無上限。Paper 排除。
+    #[serde(default)]
+    pub global_notional_cap_usdt: f64,
     #[serde(default = "default_allowed_categories")]
     pub allowed_categories: Vec<String>,
     #[serde(default = "default_margin_mode")]
@@ -278,6 +283,7 @@ impl Default for GlobalLimits {
             min_order_notional_usdt: 0.0,
             max_order_notional_usdt: 0.0,
             min_balance_usdt: 0.0,
+            global_notional_cap_usdt: 0.0,
             allowed_categories: default_allowed_categories(),
             margin_mode: default_margin_mode(),
             position_mode: default_position_mode(),

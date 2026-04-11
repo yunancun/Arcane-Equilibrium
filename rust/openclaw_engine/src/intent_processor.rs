@@ -150,6 +150,11 @@ pub struct IntentProcessor {
     /// Loaded at startup from settings/edge_estimates.json; refreshed via set_edge_estimates().
     /// PH5-WIRE-1：每 (策略, 幣種) JS 收縮實現邊際估計。啟動時加載，可通過 set_edge_estimates() 刷新。
     edge_estimates: crate::edge_estimates::EdgeEstimates,
+    /// BLOCKER-3 D15: Shared cross-engine global exposure (USDT × 100 for AtomicU64 precision).
+    /// Updated by exchange pipelines (Demo/Live); Paper is excluded.
+    /// BLOCKER-3 D15：跨引擎全局曝險（USDT × 100 存入 AtomicU64 以保留精度）。
+    /// 由交易所管線（Demo/Live）更新；Paper 排除。
+    global_exposure_usdt: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 }
 
 impl IntentProcessor {
@@ -167,6 +172,7 @@ impl IntentProcessor {
             linucb: None,
             last_arm_selection: None,
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
+            global_exposure_usdt: None,
         }
     }
 
@@ -186,6 +192,36 @@ impl IntentProcessor {
             linucb: None,
             last_arm_selection: None,
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
+            global_exposure_usdt: None,
+        }
+    }
+
+    /// BLOCKER-3 D15: Wire shared global exposure atomic for cross-engine notional cap.
+    /// BLOCKER-3 D15：接入跨引擎全局曝險原子量，用於全局名目上限檢查。
+    pub fn set_global_exposure(&mut self, exposure: std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        self.global_exposure_usdt = Some(exposure);
+    }
+
+    /// BLOCKER-3 D15: Check if adding `order_notional_usdt` would breach the global cap.
+    /// Returns None if no cap is configured or no shared atomic wired. Returns Some(reason) if blocked.
+    /// BLOCKER-3 D15：檢查新增 order_notional_usdt 是否超出全局上限。
+    /// 無上限或無共享原子量時返回 None。被阻擋時返回 Some(reason)。
+    fn check_global_notional_cap(&self, order_notional_usdt: f64) -> Option<String> {
+        let cap = self.risk_config.limits.global_notional_cap_usdt;
+        if cap <= 0.0 {
+            return None; // disabled
+        }
+        let exposure_arc = self.global_exposure_usdt.as_ref()?;
+        let current_cents = exposure_arc.load(std::sync::atomic::Ordering::Relaxed);
+        let current_usdt = current_cents as f64 / 100.0;
+        let projected = current_usdt + order_notional_usdt;
+        if projected > cap {
+            Some(format!(
+                "global_notional_cap: projected {:.2} USDT > cap {:.2} USDT (current {:.2})",
+                projected, cap, current_usdt
+            ))
+        } else {
+            None
         }
     }
 
@@ -603,6 +639,20 @@ impl IntentProcessor {
                     verdict_info: vi.take(),
                 };
             }
+
+            // BLOCKER-3 D15: Cross-engine global notional cap check.
+            // 跨引擎全局名目上限檢查。
+            if !is_reducing {
+                let order_notional = final_qty * price;
+                if let Some(reason) = self.check_global_notional_cap(order_notional) {
+                    return IntentResult {
+                        submitted: false,
+                        rejected_reason: Some(reason),
+                        fill: None,
+                        verdict_info: vi.take(),
+                    };
+                }
+            }
         }
 
         // ─── Gate 3: Cost gate — PH5-WIRE-1 mode-aware (paper/demo = exploration) ───
@@ -829,6 +879,20 @@ impl IntentProcessor {
                     approved_qty: 0.0,
                     verdict_info: vi.take(),
                 };
+            }
+
+            // BLOCKER-3 D15: Cross-engine global notional cap check.
+            // 跨引擎全局名目上限檢查。
+            if !is_reducing {
+                let order_notional = final_qty * price;
+                if let Some(reason) = self.check_global_notional_cap(order_notional) {
+                    return ExchangeGateResult {
+                        approved: false,
+                        rejected_reason: Some(reason),
+                        approved_qty: 0.0,
+                        verdict_info: vi.take(),
+                    };
+                }
             }
         }
 
