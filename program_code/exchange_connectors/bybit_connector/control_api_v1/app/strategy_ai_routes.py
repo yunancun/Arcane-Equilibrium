@@ -275,6 +275,149 @@ async def post_demo_close_all_positions(
     })
 
 
+# ---------------------------------------------------------------------------
+# Demo session controls — demo-engine-only, never touches paper/live.
+# Demo 引擎 session 控制 — 僅影響 demo 引擎，不觸碰 paper/live。
+# ---------------------------------------------------------------------------
+
+# Sticky "user stopped" flag for demo engine — mirrors paper_trading_routes._USER_STOPPED.
+# Demo 引擎「用戶主動停止」標誌 — 類比 paper 的 _USER_STOPPED。
+_DEMO_USER_STOPPED: bool = False
+
+
+def _ipc_command_sync_import():
+    """Lazy import _ipc_command from paper_trading_routes to avoid circular import.
+    延遲導入 _ipc_command 以避免循環導入。
+    """
+    from .paper_trading_routes import _ipc_command  # noqa: PLC0415
+    return _ipc_command
+
+
+@phase2_router.post("/demo/session/start")
+async def post_demo_session_start(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Demo-only session start — resume Demo engine, does NOT affect Paper.
+    Demo 引擎單獨啟動 — 僅恢復 Demo 引擎，不影響 Paper。
+    """
+    global _DEMO_USER_STOPPED
+    _DEMO_USER_STOPPED = False
+    _ipc_command = _ipc_command_sync_import()
+    try:
+        result = await _ipc_command("resume_paper", {"engine": "demo"})
+    except Exception as exc:
+        logger.warning("IPC resume_paper (demo) failed (may already be running): %s", exc)
+        result = {}
+    return _envelope({
+        "message": "Demo engine started / Demo 引擎已啟動",
+        "source": "rust_engine",
+        "ipc_result": result,
+        "session": {"session_state": "active"},
+    })
+
+
+@phase2_router.post("/demo/session/pause")
+async def post_demo_session_pause(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Demo-only pause — pause Demo strategy dispatch, does NOT affect Paper.
+    Demo 引擎單獨暫停 — 暫停策略分派，不影響 Paper。
+    """
+    _ipc_command = _ipc_command_sync_import()
+    try:
+        result = await _ipc_command("pause_paper", {"engine": "demo"})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"IPC pause (demo) failed: {exc}")
+    return _envelope({
+        "message": "Demo engine paused / Demo 引擎已暫停",
+        "source": "rust_engine",
+        "ipc_result": result,
+        "session": {"session_state": "paused"},
+    })
+
+
+@phase2_router.post("/demo/session/resume")
+async def post_demo_session_resume(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Demo-only resume — resume Demo engine, does NOT affect Paper.
+    Demo 引擎單獨恢復 — 不影響 Paper。
+    """
+    global _DEMO_USER_STOPPED
+    _DEMO_USER_STOPPED = False
+    _ipc_command = _ipc_command_sync_import()
+    try:
+        result = await _ipc_command("resume_paper", {"engine": "demo"})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"IPC resume (demo) failed: {exc}")
+    return _envelope({
+        "message": "Demo engine resumed / Demo 引擎已恢復",
+        "source": "rust_engine",
+        "ipc_result": result,
+        "session": {"session_state": "active"},
+    })
+
+
+@phase2_router.post("/demo/session/stop")
+async def post_demo_session_stop(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Demo-only stop — close Demo positions and pause Demo engine, does NOT affect Paper.
+    Demo 引擎單獨停止 — 平倉+暫停 Demo 引擎，不影響 Paper 引擎。
+    雙引擎聯停請用 POST /api/v1/paper/session/stop-all。
+    """
+    global _DEMO_USER_STOPPED
+    _DEMO_USER_STOPPED = True
+    errors: list[str] = []
+    from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+    _ipc_command = _ipc_command_sync_import()
+    rust_online = get_rust_reader().is_available()
+    close_result: dict = {}
+    pause_result: dict = {}
+    if rust_online:
+        try:
+            close_result = await _ipc_command("close_all_positions", {"engine": "demo"})
+        except Exception as e:
+            errors.append(f"demo_close: {e}")
+            logger.error("IPC close_all_positions (demo) failed: %s", e)
+        try:
+            pause_result = await _ipc_command("pause_paper", {"engine": "demo"})
+        except Exception as e:
+            errors.append(f"demo_pause: {e}")
+            logger.error("IPC pause_paper (demo) failed: %s", e)
+    else:
+        close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
+    return _envelope({
+        "message": "Demo engine stopped — positions closed / Demo 引擎已停止，倉位已平",
+        "source": "rust_engine",
+        "demo_close": close_result,
+        "demo_pause": pause_result,
+        "errors": errors if errors else None,
+        "session": {"session_state": "stopped"},
+    })
+
+
+@phase2_router.get("/demo/session/status")
+def get_demo_session_status(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Demo engine session status — independent of Paper engine state.
+    Demo 引擎 session 狀態 — 與 Paper 引擎狀態獨立。
+    """
+    from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+    rust = get_rust_reader()
+    if not rust.is_available():
+        return _envelope({"session": {"session_state": "offline"}})
+    if _DEMO_USER_STOPPED:
+        return _envelope({"session": {"session_state": "stopped"}})
+    # Read demo engine's paper_paused flag from its own snapshot.
+    # 從 Demo 引擎自己的快照讀取 paper_paused 標誌。
+    engine_snap = rust.get_engine_snapshot("demo") if hasattr(rust, "get_engine_snapshot") else None
+    paper_paused = (engine_snap or {}).get("paper_paused", True)
+    state = "paused" if paper_paused else "active"
+    return _envelope({"session": {"session_state": state}})
+
+
 @phase2_router.get("/demo/fills")
 async def get_demo_fills(actor: base.AuthenticatedActor = Depends(base.current_actor)):
     """Get Bybit Demo recent executions via PyO3 BybitClient / 通過 PyO3 獲取 Demo 成交"""
