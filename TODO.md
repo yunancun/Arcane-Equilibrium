@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-E2 Phase G 通過 + M-3/M-4/8 MINOR 修復完畢）
+最後更新：2026-04-11（3E-ARCH S0-S13 + Fix Rounds A-G 已全部歸檔 → `docs/archive/2026-04-11--completed_todo_3e_arch.md`）
 測試基準線：**Rust engine lib 929 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -8,12 +8,19 @@
 
 ---
 
-## 🏗️ 3E-ARCH — 三引擎並行架構 + trading_mode 清除（P0 · W22 首要）
+## 🏗️ 3E-ARCH — 三引擎並行架構 + trading_mode 清除 ✅ 完成（2026-04-11 歸檔）
 
-**背景**：當前系統是「單一 TickPipeline + 模式切換」（Signal Diamond Phase 3 中間態）。用戶目標是 Paper / Demo / Live 三管線**同時並行**，各自接入對應 API，各自寫 DB，由 `system_mode` 統一治理。`trading_mode` 全局配置是單引擎遺物，三引擎世界中無意義，需徹底移除。
+**歸檔**：`docs/archive/2026-04-11--completed_todo_3e_arch.md` — 完整記錄 S0-S13 主實施 + Phase A-G Fix Rounds（10 BLOCKER + 7 MAJOR + MEGA-BLOCKER-0 全修，9/9 角色重審 PASS）。
+**今日 worklog**：`docs/worklogs/2026-04-11--daily_summary.md`。
+**計劃文件（保留參考）**：`docs/references/2026-04-11--three_engine_parallel_arch_plan.md`（v4，D1-D26）+ `docs/references/2026-04-11--3e_arch_session_execution_plan.md`（S0-S13）。
+**審計報告**：`docs/audits/2026-04-11--3e_arch_e2_multi_role_review.md`（初審 633 行） + `docs/audits/2026-04-11--3e_arch_phase_g_reaudit.md`（重審 9/9 PASS）。
 
-**計劃文件**：`docs/references/2026-04-11--three_engine_parallel_arch_plan.md`（v4，26 設計決策 D1-D26）  
-**Session 執行計劃**：`docs/references/2026-04-11--3e_arch_session_execution_plan.md`（13 sessions，S0-S13）
+**殘留非阻塞**（2 MAJOR 文件大小監控，非阻塞，下次加 handler 前處理）：
+- [ ] **M-1** `rust/openclaw_engine/src/ipc_server/handlers.rs` 1195 行
+- [ ] **M-2** `rust/openclaw_engine/src/tick_pipeline/on_tick.rs` 1170 行（-2，監控）
+
+<details>
+<summary>原展開清單（已全部完成，保留折疊備查）</summary>
 
 ### 前置（S0，可立即做）
 - [x] **3E-6** Sidebar 顯示修正 + D12 RwLock 審計 + D26 GovernanceCore 驗證（S0）✅
@@ -122,6 +129,8 @@
 **Phase 依賴圖**：  
 `Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G ✅`  
 **總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
+
+</details>
 
 ---
 
@@ -336,6 +345,7 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ## 📚 已完成歸檔索引
 
+- **3E-ARCH 三引擎並行 + 3E-E2 Fix Rounds A-G**：`docs/archive/2026-04-11--completed_todo_3e_arch.md`（2026-04-11 歸檔，S0-S13 + 10 BLOCKER + 7 MAJOR）
 - **Live GUI P0~P6 + DEAD-PY-1/2 + 1C-4 收尾**：`docs/archive/2026-04-10--completed_todo_live_gui_dead_py.md`
 - **Phase 5 P0 promotion + WIRE chain**：commits `5d7d673` → `0e848fa` → `638afa3` → `563d54a` → `5e760be`
 - **ARCH-RC1 Session 1A → 1C-4 WRAP**：`docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
