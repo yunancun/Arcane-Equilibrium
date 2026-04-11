@@ -367,6 +367,15 @@ async def post_session_stop_all(
         except Exception as e:
             # Demo engine may not be running — not a hard error / Demo 未運行時不算錯誤
             logger.info("IPC close_all_positions (demo) skipped or failed: %s", e)
+        # Orphan sweep: catch exchange positions not tracked in paper_state.
+        # Lazy import to avoid circular dependency with strategy_ai_routes.
+        # 孤兒清掃：懶加載 strategy_ai_routes 避免循環導入。
+        try:
+            from .strategy_ai_routes import _sweep_demo_orphan_positions  # noqa: PLC0415
+            orphan_result = await _sweep_demo_orphan_positions(errors)
+            demo_close_result = {**demo_close_result, "orphan_sweep": orphan_result}
+        except Exception as e:
+            logger.info("Orphan sweep skipped (non-fatal): %s", e)
         try:
             pause_result = await _ipc_command("pause_paper", {"engine": "paper"})
         except Exception as e:
