@@ -968,10 +968,23 @@ impl TickPipeline {
         Some((is_long, qty, close_price, pnl))
     }
 
-    /// DB-RUN-3: Emit a TradingMsg::Fill row for a stop/risk-driven close so
-    /// trading.fills records the realized PnL. Strategy is "risk_close" since
-    /// these closes are not signal-driven. Counter on stats.total_fills.
-    /// DB-RUN-3：為止損/風控平倉發送 Fill 訊息，使 trading.fills 記錄已實現損益。
+    /// DB-RUN-3 / PNL-FIX-2: Emit a TradingMsg::Fill row for a stop/risk-driven
+    /// close so trading.fills records the realized PnL **and** the real taker
+    /// fee. Strategy is "risk_close" since these closes are not signal-driven.
+    /// Counter on stats.total_fills.
+    ///
+    /// PNL-FIX-2 (2026-04-12): the previous version wrote `fee: 0.0` and the
+    /// comment claimed close fees were accrued by paper_state "separately" —
+    /// but `paper_state.close_position()` charges no fee at all. So every
+    /// risk/strategy/fast_track close skipped its taker fee, under-reporting
+    /// real costs by ~4× on the 2026-04-12 cleanup baseline (742 opens
+    /// billed $648, but 653 closes billed $0; real round-trip fee should
+    /// have been ~$2483). Now we compute close_fee = qty × price × fee_rate,
+    /// charge it via paper_state.charge_fee(), AND write it to DB so
+    /// downstream cost analytics see the truth.
+    ///
+    /// DB-RUN-3 / PNL-FIX-2：為止損/風控平倉發送 Fill 訊息，使 trading.fills
+    /// 記錄已實現損益及真實 taker 費用。
     fn emit_close_fill(
         &mut self,
         symbol: &str,
@@ -982,11 +995,17 @@ impl TickPipeline {
         realized_pnl: f64,
         reason: &str,
     ) {
+        // PNL-FIX-2: compute close fee from per-symbol taker rate, charge it
+        // to paper_state, and record it in the DB row. Charge always happens
+        // (even when trading_tx is unwired) so paper_state.balance / total_fees
+        // stay consistent with the close action regardless of persistence.
+        let fr = self.intent_processor.fee_rate(symbol);
+        let close_fee = qty * price * fr;
+        self.paper_state.charge_fee(close_fee);
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
             let em = self.pipeline_kind.db_mode();
-            let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
                 fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
@@ -995,7 +1014,7 @@ impl TickPipeline {
                 side: close_side.into(),
                 qty,
                 price,
-                fee: 0.0, // close fees accrued by paper_state separately
+                fee: close_fee,
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: format!("risk_close:{reason}"),

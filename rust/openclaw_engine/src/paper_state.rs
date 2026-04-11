@@ -348,6 +348,29 @@ impl PaperState {
         self.forced_drawdown = pct;
     }
 
+    /// Read total cumulative fees charged to the paper account (open + close).
+    /// 讀取累計手續費（含開倉與平倉）。
+    pub fn total_fees(&self) -> f64 {
+        self.total_fees
+    }
+
+    /// PNL-FIX-2: Charge a standalone fee against the paper account.
+    /// Used by `emit_close_fill` so risk/strategy/fast_track closes — which all
+    /// route through the synchronous `close_position()` path (no fee param) —
+    /// still bill the same maker/taker fee a real close would incur.
+    /// `apply_fill` already bills its own fee on the open path; this helper is
+    /// strictly for the close-only paths.
+    /// PNL-FIX-2：對紙盤帳戶單獨計入一筆費用。
+    /// 風控/策略/fast_track 平倉走的是同步 `close_position()` 路徑，原本不收費。
+    /// 開倉路徑由 `apply_fill` 自行收費，本 helper 僅供 close-only 路徑使用。
+    pub fn charge_fee(&mut self, fee: f64) {
+        if fee <= 0.0 || !fee.is_finite() {
+            return;
+        }
+        self.balance -= fee;
+        self.total_fees += fee;
+    }
+
     /// Apply a fill to paper state.
     /// 在紙盤狀態上應用成交。
     /// Apply a fill and return the realized PnL (0.0 for opens/accumulates, non-zero for closes).
