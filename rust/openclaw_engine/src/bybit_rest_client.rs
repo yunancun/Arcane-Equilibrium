@@ -122,11 +122,11 @@ impl Default for BybitEnvironment {
     }
 }
 
-/// Determine the correct BybitEnvironment for TradingMode::Live by reading
+/// Determine the correct BybitEnvironment for Live pipeline by reading
 /// the `bybit_endpoint` metadata file written by the Python settings API.
 ///
 /// 通過讀取 Python 設定 API 寫入的 `bybit_endpoint` 元數據文件，
-/// 為 TradingMode::Live 決定正確的 BybitEnvironment。
+/// 為 Live 管線決定正確的 BybitEnvironment。
 ///
 /// Returns:
 ///   `LiveDemo`  — if `live/bybit_endpoint` contains "demo"

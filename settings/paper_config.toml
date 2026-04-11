@@ -1,0 +1,9 @@
+# Paper Engine Config (3E-8) / Paper 引擎配置
+# Written by GUI POST /api/v1/paper/config or manually.
+# GUI 寫入或手動編輯。
+#
+# Priority: env OPENCLAW_PAPER_BALANCE > this file > hardcoded default (10000.0)
+# 優先級：環境變數 > 此文件 > 硬編碼默認值
+
+initial_balance_usdt = 10000.0
+taker_fee_rate = 0.00055

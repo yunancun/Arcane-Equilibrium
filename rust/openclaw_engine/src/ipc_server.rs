@@ -75,11 +75,11 @@ pub type AuditPoolSlot = Arc<RwLock<Option<sqlx::PgPool>>>;
 // LIVE-P2-1：每個引擎模式的 RiskConfig stores
 // ---------------------------------------------------------------------------
 
-/// Bundles three RiskConfig stores — one per TradingMode — so IPC routing and
+/// Bundles three RiskConfig stores — one per PipelineKind — so IPC routing and
 /// TickPipeline wiring can select the correct store without scattering
 /// individual Option<Arc<...>> fields across every function signature.
 ///
-/// 將三個 RiskConfig stores 捆綁為一個結構體（每個 TradingMode 一個），
+/// 將三個 RiskConfig stores 捆綁為一個結構體（每個 PipelineKind 一個），
 /// 使 IPC 路由與 TickPipeline 接線可以選擇正確 store，
 /// 而不需在每個函數簽名中分散獨立的 Option<Arc<...>> 字段。
 #[derive(Clone)]
@@ -918,10 +918,20 @@ fn handle_get_state(
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "live_reserved".to_string())
     };
+    // 3E-10.2: trading_mode derived from pipeline snapshot (TradingMode deleted).
+    // 3E-10.2：trading_mode 從管線快照派生（TradingMode 已刪除）。
+    let trading_mode = {
+        let path = data_dir.join("pipeline_snapshot.json");
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .and_then(|v| v.get("trading_mode").and_then(|t| t.as_str().map(String::from)))
+            .unwrap_or_else(|| "paper".to_string())
+    };
     let state = serde_json::json!({
         "status": "running",
         "system_mode": system_mode,
-        "trading_mode": cfg.trading_mode.to_string(),
+        "trading_mode": trading_mode,
         "max_open_positions": risk.limits.open_positions_max,
         "max_total_exposure_pct": risk.limits.total_exposure_max_pct,
         "ws_url": cfg.ws_url,

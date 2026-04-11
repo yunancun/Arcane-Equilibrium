@@ -116,7 +116,7 @@ pub struct BbBreakout {
     /// Per-symbol last trade timestamp for cooldown.
     /// 每幣種最後交易時間戳（用於冷卻）。
     last_trade_ms: HashMap<String, u64>,
-    cooldown_ms: u64,
+    pub(crate) cooldown_ms: u64,
     default_qty: f64,
     // V2: Per-symbol ATR trailing stop fields / 每幣種 ATR 追蹤止損欄位
     entry_price: HashMap<String, f64>,

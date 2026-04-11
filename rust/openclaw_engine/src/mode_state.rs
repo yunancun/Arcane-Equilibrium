@@ -11,10 +11,11 @@
 //!   PaperState、IntentProcessor、GovernanceCore、風控配置、連虧計數、
 //!   暫停標誌、近期意圖/成交。共享狀態留在 TickPipeline。
 
-use crate::config::{ConfigStore, RiskConfig, TradingMode};
+use crate::config::{ConfigStore, RiskConfig};
 use crate::intent_processor::IntentProcessor;
 use crate::paper_state::{PaperState, PaperStateSnapshot};
 use crate::pipeline_types::{TimestampedFill, TimestampedIntent};
+use crate::tick_pipeline::PipelineKind;
 use openclaw_core::governance_core::GovernanceCore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -23,8 +24,8 @@ use std::sync::Arc;
 /// Per-mode trading state — one instance per active engine mode.
 /// 每模式交易狀態 — 每個活躍引擎模式一個實例。
 pub struct ModeState {
-    /// Which mode this state belongs to / 此狀態對應的模式
-    pub mode: TradingMode,
+    /// Which pipeline this state belongs to / 此狀態對應的管線
+    pub mode: PipelineKind,
     /// Independent paper/simulated state (balance, positions, stops).
     /// 獨立紙盤/模擬狀態（餘額、持倉、止損）。
     pub paper_state: PaperState,
@@ -59,7 +60,7 @@ pub struct ModeState {
 impl ModeState {
     /// Create a new ModeState with default configuration.
     /// 使用預設配置創建新的 ModeState。
-    pub fn new(mode: TradingMode, balance: f64) -> Self {
+    pub fn new(mode: PipelineKind, balance: f64) -> Self {
         Self {
             mode,
             paper_state: PaperState::new(balance),
@@ -77,8 +78,8 @@ impl ModeState {
         }
     }
 
-    /// DB-canonical engine_mode string for this mode.
-    /// 此模式的 DB 標準 engine_mode 字串。
+    /// DB-canonical engine_mode string for this pipeline.
+    /// 此管線的 DB 標準 engine_mode 字串。
     #[inline]
     pub fn db_mode(&self) -> &'static str {
         self.mode.db_mode()
@@ -149,8 +150,8 @@ mod tests {
 
     #[test]
     fn test_mode_state_new_defaults() {
-        let ms = ModeState::new(TradingMode::PaperOnly, 10_000.0);
-        assert_eq!(ms.mode, TradingMode::PaperOnly);
+        let ms = ModeState::new(PipelineKind::Paper, 10_000.0);
+        assert_eq!(ms.mode, PipelineKind::Paper);
         assert_eq!(ms.db_mode(), "paper");
         assert!(!ms.session_halted);
         assert!(!ms.paper_paused);
@@ -161,14 +162,14 @@ mod tests {
 
     #[test]
     fn test_mode_state_db_mode_variants() {
-        assert_eq!(ModeState::new(TradingMode::PaperOnly, 0.0).db_mode(), "paper");
-        assert_eq!(ModeState::new(TradingMode::Demo, 0.0).db_mode(), "demo");
-        assert_eq!(ModeState::new(TradingMode::Live, 0.0).db_mode(), "live");
+        assert_eq!(ModeState::new(PipelineKind::Paper, 0.0).db_mode(), "paper");
+        assert_eq!(ModeState::new(PipelineKind::Demo, 0.0).db_mode(), "demo");
+        assert_eq!(ModeState::new(PipelineKind::Live, 0.0).db_mode(), "live");
     }
 
     #[test]
     fn test_push_intent_ring_buffer_cap() {
-        let mut ms = ModeState::new(TradingMode::PaperOnly, 1000.0);
+        let mut ms = ModeState::new(PipelineKind::Paper, 1000.0);
         for i in 0..60 {
             ms.push_intent(TimestampedIntent {
                 timestamp_ms: i,
@@ -191,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_push_fill_ring_buffer_cap() {
-        let mut ms = ModeState::new(TradingMode::PaperOnly, 1000.0);
+        let mut ms = ModeState::new(PipelineKind::Paper, 1000.0);
         for i in 0..60 {
             ms.push_fill(TimestampedFill {
                 timestamp_ms: i,
@@ -209,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_remove_symbol() {
-        let mut ms = ModeState::new(TradingMode::PaperOnly, 1000.0);
+        let mut ms = ModeState::new(PipelineKind::Paper, 1000.0);
         ms.consecutive_losses.insert("BTC".into(), 3);
         ms.pending_close_symbols.insert("BTC".into());
         ms.remove_symbol("BTC");

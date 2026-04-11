@@ -12,7 +12,6 @@ use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
     load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
-    TradingMode,
 };
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::{IpcServer, PerEngineRiskStores};
@@ -41,8 +40,8 @@ const EVENT_CHANNEL_SIZE: usize = 4096;
 // SYMBOLS moved to event_consumer.rs (Phase 1 Day 0-A extraction)
 // STATUS_INTERVAL_SECS moved to event_consumer.rs
 
-/// Read paper balance from env var or use default.
-/// 從環境變量讀取紙盤餘額，若未設定則使用預設值。
+/// Read paper balance from env var.
+/// 從環境變量讀取紙盤餘額。
 fn paper_balance_from_env() -> Option<f64> {
     std::env::var("OPENCLAW_PAPER_BALANCE")
         .ok()
@@ -50,14 +49,26 @@ fn paper_balance_from_env() -> Option<f64> {
         .filter(|&b| b > 0.0)
 }
 
-/// Fetch initial account balance using the given BybitEnvironment.
-/// Reads the correct secret slot based on the environment (live slot for Live/LiveDemo,
-/// demo slot for Demo).
-/// 使用指定的 BybitEnvironment 讀取初始帳戶餘額。
-/// 根據環境讀取對應的 secret 槽位（Live/LiveDemo → live 槽；Demo → demo 槽）。
+/// Read paper balance from `settings/paper_config.toml` → `initial_balance_usdt`.
+/// 從 `settings/paper_config.toml` 讀取 `initial_balance_usdt`。
+fn paper_balance_from_toml() -> Option<f64> {
+    let base = std::env::var("OPENCLAW_BASE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = base.join("settings").join("paper_config.toml");
+    let contents = std::fs::read_to_string(&path).ok()?;
+    let table: toml::Table = toml::from_str(&contents).ok()?;
+    let val = table.get("initial_balance_usdt")?.as_float()?;
+    if val > 0.0 { Some(val) } else { None }
+}
+
+/// Fetch account balance from Bybit API only (no env/TOML fallback).
+/// Used for primary engine (Live/Demo) and for demo-balance pre-init.
+/// 僅從 Bybit API 讀取帳戶餘額（無 env/TOML 回退）。
+/// 用於主引擎（Live/Demo）和 demo 餘額預初始化。
 async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
-    // 1. Explicit env var override takes precedence
-    // 明確的環境變量覆蓋優先
+    // Env var override still respected for backward compat
+    // 向後兼容仍尊重環境變數覆蓋
     if let Some(env_bal) = paper_balance_from_env() {
         info!(
             balance = format!("{:.2}", env_bal),
@@ -66,8 +77,6 @@ async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
         return env_bal;
     }
 
-    // 2. Try reading from Bybit API using the correct environment/slot
-    // 使用正確的環境和槽位從 Bybit API 讀取
     match BybitRestClient::new(env, None, None) {
         Ok(client) if client.has_credentials() => {
             let acct = AccountManager::new();
@@ -77,14 +86,14 @@ async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
                     if bal > 0.0 {
                         info!(
                             balance = format!("{:.2}", bal),
-                            "fetched Bybit Demo USDT balance / 已從 Bybit Demo 讀取 USDT 餘額"
+                            "fetched Bybit USDT balance / 已從 Bybit 讀取 USDT 餘額"
                         );
                         return bal;
                     }
-                    warn!("Bybit Demo USDT balance is 0, using default / Demo USDT 餘額為 0，使用預設值");
+                    warn!("Bybit USDT balance is 0, using default / USDT 餘額為 0，使用預設值");
                 }
                 Err(e) => {
-                    warn!(error = %e, "failed to fetch Bybit Demo balance, using default / 讀取 Demo 餘額失敗");
+                    warn!(error = %e, "failed to fetch Bybit balance, using default / 讀取餘額失敗");
                 }
             }
         }
@@ -96,13 +105,104 @@ async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
         }
     }
 
-    // 3. Fallback default
     let default = 10_000.0;
     info!(
         balance = format!("{:.2}", default),
-        "using default paper balance / 使用預設紙盤餘額"
+        "using default balance / 使用預設餘額"
     );
     default
+}
+
+/// Resolve paper initial balance with unified priority (MAJOR-4):
+///   1. `OPENCLAW_PAPER_BALANCE` env var (explicit operator override)
+///   2. `settings/paper_config.toml` → `initial_balance_usdt` (GUI-configured)
+///   3. Demo API balance (if Demo key exists)
+///   4. Hardcoded default (10000.0)
+///
+/// 統一優先級解析紙盤初始餘額（MAJOR-4）：
+///   1. 環境變數 > 2. TOML 配置 > 3. Demo API 餘額 > 4. 硬編碼默認值
+async fn resolve_paper_initial_balance() -> f64 {
+    const DEFAULT_BALANCE: f64 = 10_000.0;
+
+    // 1. Env var override (highest priority)
+    if let Some(env_bal) = paper_balance_from_env() {
+        info!(
+            balance = format!("{:.2}", env_bal),
+            "paper balance: OPENCLAW_PAPER_BALANCE env override / 紙盤餘額：環境變量覆蓋"
+        );
+        return env_bal;
+    }
+
+    // 2. TOML config (GUI-configured via POST /api/v1/paper/config)
+    if let Some(toml_bal) = paper_balance_from_toml() {
+        info!(
+            balance = format!("{:.2}", toml_bal),
+            "paper balance: paper_config.toml / 紙盤餘額：TOML 配置"
+        );
+        return toml_bal;
+    }
+
+    // 3. Demo API balance
+    match BybitRestClient::new(BybitEnvironment::Demo, None, None) {
+        Ok(client) if client.has_credentials() => {
+            let acct = AccountManager::new();
+            if let Ok(_) = acct.refresh_balance(&client).await {
+                let bal = acct.usdt_wallet_balance();
+                if bal > 0.0 {
+                    info!(
+                        balance = format!("{:.2}", bal),
+                        "paper balance: Demo API / 紙盤餘額：Demo API"
+                    );
+                    return bal;
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // 4. Hardcoded default
+    info!(
+        balance = format!("{:.2}", DEFAULT_BALANCE),
+        "paper balance: default / 紙盤餘額：默認值"
+    );
+    DEFAULT_BALANCE
+}
+
+/// 3E-10.1: Detect which pipelines should start based on API key availability.
+/// Paper always starts. Demo starts if demo slot has credentials.
+/// Live starts if live slot has credentials.
+///
+/// 3E-10.1：根據 API key 可用性決定啟動哪些管線。
+/// Paper 始終啟動。Demo 在 demo 槽有憑證時啟動。
+/// Live 在 live 槽有憑證時啟動。
+fn detect_available_pipelines() -> (bool, bool) {
+    let demo_available = BybitRestClient::new(BybitEnvironment::Demo, None, None)
+        .map(|c| c.has_credentials())
+        .unwrap_or(false);
+    let live_available = BybitRestClient::new(live_bybit_environment(), None, None)
+        .map(|c| c.has_credentials())
+        .unwrap_or(false);
+    (demo_available, live_available)
+}
+
+/// Determine the "primary" pipeline kind (3E-10.1 interim).
+/// Priority: Live > Demo > Paper. Paper always runs alongside if primary is exchange.
+/// In the future (Phase D), all three will be fully independent.
+///
+/// 決定"主"管線類型（3E-10.1 過渡方案）。
+/// 優先級：Live > Demo > Paper。主管線為交易所時 Paper 始終並行。
+fn determine_primary_kind() -> PipelineKind {
+    let (demo_available, live_available) = detect_available_pipelines();
+    if live_available {
+        info!("live API key detected → primary=Live / 偵測到 live API key → 主管線=Live");
+        PipelineKind::Live
+    } else if demo_available {
+        info!("demo API key detected → primary=Demo / 偵測到 demo API key → 主管線=Demo");
+        PipelineKind::Demo
+    } else {
+        info!("no exchange API keys → primary=Paper / 無交易所 API key → 主管線=Paper");
+        PipelineKind::Paper
+    }
 }
 
 /// Parse replay CLI arguments from std::env::args().
@@ -587,34 +687,29 @@ async fn async_main(
     ));
     // 3E-3: Paper-alongside command channel (created here, wired into IPC + deps below)
     // 3E-3：Paper 伴隨管線命令通道（此處創建，下方接入 IPC + deps）
-    let (paper_alongside_cmd_tx, paper_alongside_cmd_rx_slot) = tokio::sync::mpsc::unbounded_channel();
+    let (pipeline_cmd_tx_paper, pipeline_cmd_rx_paper) = tokio::sync::mpsc::unbounded_channel();
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
         ipc_data_dir,
         {
-            // 3E-3: Build EngineCommandChannels based on primary_kind.
-            // PaperOnly → paper=primary; Demo → demo=primary + paper=alongside;
-            // Live → live=primary + paper=alongside.
-            // 3E-3：根據 primary_kind 構建 EngineCommandChannels。
+            // 3E-10.1: Build EngineCommandChannels based on API key detection.
+            // Paper always; Demo if demo key exists; Live if live key exists.
+            // 3E-10.1：根據 API key 偵測構建 EngineCommandChannels。
             use openclaw_engine::ipc_server::EngineCommandChannels;
-            let primary_kind_for_ipc = match config.get().trading_mode {
-                TradingMode::PaperOnly => "paper",
-                TradingMode::Demo => "demo",
-                TradingMode::Live => "live",
-            };
+            let ipc_primary_kind = determine_primary_kind();
             let mut channels = EngineCommandChannels::default();
-            match primary_kind_for_ipc {
+            match ipc_primary_kind.db_mode() {
                 "paper" => {
                     channels.paper = Some(primary_cmd_tx.clone());
                 }
                 "demo" => {
                     channels.demo = Some(primary_cmd_tx.clone());
-                    channels.paper = Some(paper_alongside_cmd_tx.clone());
+                    channels.paper = Some(pipeline_cmd_tx_paper.clone());
                 }
                 "live" => {
                     channels.live = Some(primary_cmd_tx.clone());
-                    channels.paper = Some(paper_alongside_cmd_tx.clone());
+                    channels.paper = Some(pipeline_cmd_tx_paper.clone());
                 }
                 _ => {
                     channels.paper = Some(primary_cmd_tx.clone());
@@ -661,39 +756,25 @@ async fn async_main(
         None;
     let mut shared_account_manager: Option<Arc<AccountManager>> = None;
     let cfg_snapshot = config.get();
-    // Derive Bybit environment from trading_mode (LIVE-P1-2):
-    // PaperOnly/Demo → api-demo.bybit.com; Live → api.bybit.com
-    // 根據 trading_mode 派生 Bybit 環境（LIVE-P1-2）：
-    // PaperOnly/Demo → Demo 環境；Live → 主網
-    // For TradingMode::Live, read the bybit_endpoint metadata file written by the
-    // Python settings API to determine if this is a Live-Demo (demo server + live key)
-    // or true Mainnet. Fail-safe: missing file → Mainnet.
-    // 對於 TradingMode::Live，讀取 Python 設定 API 寫入的 bybit_endpoint 元數據文件，
-    // 決定使用 Live-Demo（demo 伺服器 + live key）還是真實主網。安全默認：文件缺失→主網。
-    let bybit_env = match cfg_snapshot.trading_mode {
-        TradingMode::Live => live_bybit_environment(),
-        TradingMode::Demo | TradingMode::PaperOnly => BybitEnvironment::Demo,
+    // 3E-10.1: Derive Bybit environment from API key detection (replaces trading_mode).
+    // Live key → live_bybit_environment(); else Demo.
+    // 3E-10.1：從 API key 偵測派生 Bybit 環境（取代 trading_mode）。
+    let primary_kind_early = determine_primary_kind();
+    let bybit_env = match primary_kind_early {
+        PipelineKind::Live => live_bybit_environment(),
+        PipelineKind::Demo | PipelineKind::Paper => BybitEnvironment::Demo,
     };
 
-    // Fetch initial balance using the correct environment (live slot for Live/LiveDemo,
-    // demo slot for Demo/PaperOnly). Must be after bybit_env is determined.
-    // 使用正確的環境讀取初始餘額（Live/LiveDemo → live 槽；Demo/PaperOnly → demo 槽）。
-    // 必須在 bybit_env 確定後執行。
+    // Fetch initial balance for the primary exchange environment.
+    // 為主交易所環境讀取初始餘額。
     let initial_balance = fetch_exchange_balance(bybit_env).await;
 
-    // When trading_mode=Live, also fetch the demo account balance (wBu0 slot) so
-    // paper mode can be pre-initialized with the demo balance, not the live balance.
-    // Paper trading always mirrors the Demo account; live is independent.
-    // Live 模式下，另外讀取 demo 帳號餘額（wBu0 槽），用於 paper 模式預初始化。
-    // paper 交易始終映射 Demo 帳號，live 為獨立數值。
-    let paper_initial_balance: Option<f64> = if cfg_snapshot.trading_mode == TradingMode::Live {
-        let demo_bal = fetch_exchange_balance(BybitEnvironment::Demo).await;
-        info!(
-            demo_balance = demo_bal,
-            "fetched demo balance for paper mode pre-init (live mode) \
-             / 已讀取 demo 餘額用於 paper 模式預初始化（live 模式）"
-        );
-        Some(demo_bal)
+    // MAJOR-4: Paper balance uses unified priority (env > TOML > Demo API > default).
+    // When primary is Live, paper needs its own balance (not the live balance).
+    // When primary is Paper/Demo, paper_initial_balance=None → uses initial_balance.
+    // MAJOR-4：紙盤餘額使用統一優先級（環境變數 > TOML > Demo API > 默認值）。
+    let paper_initial_balance: Option<f64> = if primary_kind_early == PipelineKind::Live {
+        Some(resolve_paper_initial_balance().await)
     } else {
         None
     };
@@ -1694,26 +1775,22 @@ async fn async_main(
     // 3E-2b-α：多管線 spawn 骨架 + 有界扇出
     //
     // Paper pipeline always spawns. Demo/Live spawn conditionally based on
-    // TradingMode (interim — 3E-4 will read API keys directly).
+    // API key detection (determine_primary_kind).
     // Each pipeline gets its own event_rx (from fan-out), pipeline_cmd channel,
     // and risk_level atomic. DB writer channels are shared across all pipelines.
     //
-    // Paper 管線始終啟動。Demo/Live 根據 TradingMode 條件啟動（過渡方案 —
-    // 3E-4 將直接讀 API key）。每管線獨立 event_rx（扇出）、pipeline_cmd 通道、
+    // Paper 管線始終啟動。Demo/Live 根據 API key 偵測條件啟動。
+    // 每管線獨立 event_rx（扇出）、pipeline_cmd 通道、
     // risk_level 原子量。DB writer 通道跨管線共享。
     // ------------------------------------------------------------------
     use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 
-    // 3E-2b: Determine which pipelines to spawn based on TradingMode.
+    // 3E-10.2: Determine primary pipeline from API key detection.
     // Paper always runs. The "primary" pipeline (Demo or Live) gets exchange
     // bindings (private WS, bybit client, account manager). Paper gets None.
-    // 3E-2b：根據 TradingMode 決定啟動哪些管線。Paper 始終運行。
+    // 3E-10.2：從 API key 偵測決定主管線。Paper 始終運行。
     // "主要"管線（Demo 或 Live）獲得交易所綁定。Paper 獲得 None。
-    let primary_kind = match config.get().trading_mode {
-        TradingMode::PaperOnly => PipelineKind::Paper,
-        TradingMode::Demo => PipelineKind::Demo,
-        TradingMode::Live => PipelineKind::Live,
-    };
+    let primary_kind = determine_primary_kind();
     // In PaperOnly mode, only Paper runs (it IS the primary).
     // In Demo/Live mode, Paper runs alongside the primary exchange-connected pipeline.
     // PaperOnly 模式下只有 Paper 運行（它就是主管線）。
@@ -1786,12 +1863,12 @@ async fn async_main(
     // 每管線命令通道 + 風控級別原子量
     // ------------------------------------------------------------------
     // 3E-3: Primary pipeline uses pipeline_cmd_rx (IPC wired via EngineCommandChannels).
-    // Paper-alongside uses paper_alongside_cmd_rx_slot (IPC wired above).
+    // Paper-alongside uses pipeline_cmd_rx_paper (IPC wired above).
     // 3E-3：主管線使用 pipeline_cmd_rx（IPC 通過 EngineCommandChannels 接線）。
-    // Paper 伴隨管線使用 paper_alongside_cmd_rx_slot（上方已接入 IPC）。
-    let paper_alongside_cmd_rx: Option<mpsc::UnboundedReceiver<openclaw_engine::tick_pipeline::PipelineCommand>> =
+    // Paper 伴隨管線使用 pipeline_cmd_rx_paper（上方已接入 IPC）。
+    let pipeline_cmd_rx_paper_opt: Option<mpsc::UnboundedReceiver<openclaw_engine::tick_pipeline::PipelineCommand>> =
         if spawn_paper_alongside {
-            Some(paper_alongside_cmd_rx_slot)
+            Some(pipeline_cmd_rx_paper)
         } else {
             None
         };
@@ -1823,8 +1900,11 @@ async fn async_main(
             bybit_balance: shared_bybit_balance,
             api_pnl: shared_api_pnl,
             pipeline_cmd_rx: Some(pipeline_cmd_rx),
-            market_data_tx: market_tx.clone(),
-            feature_tx: feature_tx.clone(),
+            // 3E-10.5: Only Paper writes market_data/features to DB (dedup).
+            // Demo/Live skip these to avoid duplicate rows.
+            // 3E-10.5：僅 Paper 寫入 market_data/features（去重）。
+            market_data_tx: if primary_kind == PipelineKind::Paper { market_tx.clone() } else { None },
+            feature_tx: if primary_kind == PipelineKind::Paper { feature_tx.clone() } else { None },
             last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
             trading_tx: trading_tx.clone(),
             context_tx: context_tx.clone(),
@@ -1857,7 +1937,7 @@ async fn async_main(
     // ------------------------------------------------------------------
     let _paper_handle = if spawn_paper_alongside {
         let (_, paper_event_rx) = paper_alongside_channel.unwrap();
-        let paper_cmd_rx = paper_alongside_cmd_rx.unwrap();
+        let pipeline_cmd_rx_paper = pipeline_cmd_rx_paper_opt.unwrap();
         let paper_rl = paper_risk_level.unwrap();
         // Paper uses demo balance for initial_balance (mirrors demo account)
         // Paper 使用 demo 餘額作為初始餘額（映射 demo 帳號）
@@ -1876,7 +1956,7 @@ async fn async_main(
             shared_client: None,
             bybit_balance: None,
             api_pnl: None,
-            pipeline_cmd_rx: Some(paper_cmd_rx),
+            pipeline_cmd_rx: Some(pipeline_cmd_rx_paper),
             // Shared DB writer channels / 共享 DB 寫入通道
             market_data_tx: market_tx,
             feature_tx,

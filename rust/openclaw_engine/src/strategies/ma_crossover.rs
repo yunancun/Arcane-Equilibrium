@@ -105,12 +105,12 @@ pub struct MaCrossover {
     /// Per-symbol last trade timestamp for cooldown.
     /// 每幣種最後交易時間戳（用於冷卻）。
     last_trade_ms: HashMap<String, u64>,
-    cooldown_ms: u64,
-    adx_threshold: f64,
+    pub(crate) cooldown_ms: u64,
+    pub(crate) adx_threshold: f64,
     default_qty: f64,
     /// RC-01: Enable Hurst regime filter — skip entry in mean-reverting / random-walk markets.
     /// RC-01: 啟用赫斯特狀態過濾 — 在均值回歸/隨機漫步市場中跳過入場。
-    regime_filter_enabled: bool,
+    pub(crate) regime_filter_enabled: bool,
     /// RC-02: Per-symbol higher timeframe trend direction.
     /// RC-02: 每幣種較高時間框架趨勢方向。
     higher_tf_trend: HashMap<String, bool>,

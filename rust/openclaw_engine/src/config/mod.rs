@@ -3,7 +3,7 @@
 //!
 //! MODULE_NOTE (EN): Module root containing both the legacy `RuntimeConfig`
 //!   (engine bootstrap params loaded from engine.toml — ws_url, db, ipc_socket,
-//!   trading_mode, etc.) AND the new ARCH-RC1 unified Config types added in 1B:
+//!   etc.) AND the new ARCH-RC1 unified Config types added in 1B:
 //!   `RiskConfig` (1 source of truth for ALL risk decisions),
 //!   `LearningConfig` (ML/RL/Agent behaviour switches),
 //!   `BudgetConfig` (AI cost limits + attention tax). The new Configs are
@@ -12,7 +12,7 @@
 //!   risk/leverage/drawdown duplication will be removed in Session 1C when call
 //!   sites migrate to the new Configs.
 //! MODULE_NOTE (中): 模組根，包含既有 `RuntimeConfig`（從 engine.toml 載入的
-//!   引擎啟動參數 —— ws_url、db、ipc_socket、trading_mode 等）以及 1B 新增的
+//!   引擎啟動參數 —— ws_url、db、ipc_socket 等）以及 1B 新增的
 //!   ARCH-RC1 統一 Config 型別：`RiskConfig`（所有風控決策的單一真相來源）、
 //!   `LearningConfig`（ML/RL/Agent 行為開關）、`BudgetConfig`（AI 成本上限 +
 //!   注意力稅）。新 Config 透過泛型 `ConfigStore<T>` 包裹（ArcSwap 無鎖讀、
@@ -36,75 +36,18 @@ pub use crate::scanner::config::ScannerConfig;
 pub use store::{ConfigStore, PatchOutcome, PatchSource};
 
 use arc_swap::ArcSwap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, warn};
 
 // ---------------------------------------------------------------------------
-// TradingMode — EXT-1 Exchange-as-Truth / 交易所即真相模式
+// 3E-10.4: TradingMode DELETED — replaced by PipelineKind (tick_pipeline.rs).
+// 3E-10.4：TradingMode 已刪除 — 由 PipelineKind（tick_pipeline.rs）取代。
+// Each pipeline is identified by PipelineKind at construction; no global mode.
+// 每個管線在構造時由 PipelineKind 標識；無全局模式。
 // ---------------------------------------------------------------------------
-
-/// Trading execution mode (cold param — requires restart).
-/// 交易執行模式（冷參數 — 需重啟）。
-///
-/// Three modes (LIVE-P1-2):
-/// - PaperOnly: local simulation, no exchange connection required
-/// - Demo: Exchange-as-Truth against Bybit Demo environment (api-demo.bybit.com)
-/// - Live: Exchange-as-Truth against Bybit Mainnet (api.bybit.com) — requires
-///         valid live API key in secret slot + live_reserved global mode
-///
-/// 三種模式：
-/// - PaperOnly：本地模擬，不需要交易所連線
-/// - Demo：對接 Bybit Demo 環境（api-demo.bybit.com）
-/// - Live：對接 Bybit 主網（api.bybit.com）— 需要 live slot 有效 API key + live_reserved global mode
-#[deprecated(note = "3E-ARCH: use PipelineKind instead — TradingMode will be removed in 3E-4")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TradingMode {
-    /// Local paper simulation (default) / 本地紙盤模擬（預設）
-    #[default]
-    PaperOnly,
-    /// Demo Exchange-as-Truth: orders on Bybit Demo, fills confirmed via WS
-    /// Demo 交易所即真相：訂單送 Bybit Demo，成交經 WS 確認
-    /// Backward-compat: serde alias "exchange" accepted for existing engine.toml files
-    /// 向後兼容：接受舊配置文件中的 "exchange" 值
-    #[serde(alias = "exchange")]
-    Demo,
-    /// Live Exchange-as-Truth: orders on Bybit Mainnet — REAL MONEY
-    /// 實盤交易所即真相：訂單送 Bybit 主網 — 真實資金
-    /// Requires: live API key in secrets/bybit/live/ + live_reserved global mode
-    /// 要求：secrets/bybit/live/ 有效 API key + live_reserved global mode
-    Live,
-}
-
-impl std::fmt::Display for TradingMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TradingMode::PaperOnly => write!(f, "paper_only"),
-            TradingMode::Demo => write!(f, "demo"),
-            TradingMode::Live => write!(f, "live"),
-        }
-    }
-}
-
-impl TradingMode {
-    /// DB-canonical engine_mode string: "paper" / "demo" / "live".
-    /// Matches V015 migration DEFAULT and query filters.
-    /// DB 標準 engine_mode 字串，對應 V015 migration 預設值和查詢過濾。
-    pub fn db_mode(&self) -> &'static str {
-        match self {
-            TradingMode::PaperOnly => "paper",
-            TradingMode::Demo => "demo",
-            TradingMode::Live => "live",
-        }
-    }
-}
-
-fn default_trading_mode() -> TradingMode {
-    TradingMode::PaperOnly
-}
 
 // ---------------------------------------------------------------------------
 // Error types / 錯誤類型
@@ -145,8 +88,8 @@ pub enum ConfigError {
 /// ARCH-RC1 統一 Config (`RiskConfig` / `LearningConfig` / `BudgetConfig`) 擁有。
 ///
 /// Cold params (require restart): ws_url, reconnect_delay_ms,
-/// heartbeat_interval_ms, ipc_socket_path, state_push_interval_ms, trading_mode.
-/// 冷參數（需重啟）：ws_url / reconnect / heartbeat / ipc_socket / state_push / trading_mode。
+/// heartbeat_interval_ms, ipc_socket_path, state_push_interval_ms.
+/// 冷參數（需重啟）：ws_url / reconnect / heartbeat / ipc_socket / state_push。
 #[derive(Debug, Clone, Deserialize)]
 pub struct EngineBootstrap {
     // -- Cold params / 冷參數 --
@@ -212,11 +155,8 @@ pub struct EngineBootstrap {
     #[serde(default)]
     pub database: crate::database::DatabaseConfig,
 
-    // -- EXT-1: Trading mode (cold param) / 交易模式（冷參數） --
-    /// Trading execution mode: paper_only (local sim) or exchange (exchange-as-truth).
-    /// 交易執行模式：paper_only（本地模擬）或 exchange（交易所即真相）。
-    #[serde(default = "default_trading_mode")]
-    pub trading_mode: TradingMode,
+    // 3E-10.2: trading_mode field DELETED — pipelines use PipelineKind at construction.
+    // 3E-10.2：trading_mode 字段已刪除 — 管線在構造時使用 PipelineKind。
 
 }
 
@@ -266,7 +206,6 @@ impl Default for EngineBootstrap {
             enable_extended_ws: default_true(),
             shadow_orders: true,
             kline_bootstrap: default_true(),
-            trading_mode: TradingMode::PaperOnly,
             database: crate::database::DatabaseConfig::default(),
         }
     }
@@ -361,13 +300,6 @@ impl ConfigManager {
         }
         // SEC-1: Preserve cold params from running config (prevent accidental hot-switch)
         // SEC-1：保留運行中配置的冷參數（防止意外熱切換）
-        if old.trading_mode != new_config.trading_mode {
-            warn!(
-                old = %old.trading_mode, new = %new_config.trading_mode,
-                "trading_mode changed but is cold — preserving old value, requires restart"
-            );
-            new_config.trading_mode = old.trading_mode;
-        }
         if old.ws_url != new_config.ws_url {
             new_config.ws_url = old.ws_url.clone();
         }
@@ -444,7 +376,6 @@ mod tests {
         let cfg = EngineBootstrap::default();
         assert!(cfg.validate().is_ok());
         assert_eq!(cfg.ws_url, "wss://stream.bybit.com/v5/public/linear");
-        assert_eq!(cfg.trading_mode, TradingMode::PaperOnly);
     }
 
     #[test]
