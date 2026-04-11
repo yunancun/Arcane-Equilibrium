@@ -942,11 +942,12 @@ impl TickPipeline {
         if let Some(ref tx) = self.trading_tx {
             // Fill side reflects the closing direction (opposite of position side).
             let close_side = if is_long { "Sell" } else { "Buy" };
+            let em = self.pipeline_kind.db_mode();
             let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("close-{}-{}", symbol, ts_ms),
+                fill_id: format!("close-{em}-{}-{}", symbol, ts_ms),
                 ts_ms,
-                order_id: format!("risk_close_{}_{}", symbol, ts_ms),
+                order_id: format!("risk_close_{em}_{}_{}", symbol, ts_ms),
                 symbol: symbol.to_string(),
                 side: close_side.into(),
                 qty,
@@ -955,8 +956,8 @@ impl TickPipeline {
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: format!("risk_close:{reason}"),
-                context_id: format!("ctx-{}-{}", symbol, ts_ms),
-                engine_mode: self.pipeline_kind.db_mode().to_string(),
+                context_id: format!("ctx-{em}-{}-{}", symbol, ts_ms),
+                engine_mode: em.to_string(),
             });
         }
         self.stats.total_fills += 1;
