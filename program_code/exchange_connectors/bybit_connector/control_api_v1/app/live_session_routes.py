@@ -112,32 +112,33 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
 
 def _get_rust_client_safe():
     """
-    Return a PyO3 BybitClient using the correct environment for the current engine mode (3E-5).
-    當前引擎模式決定使用的 BybitClient 環境。
+    Return a PyO3 BybitClient using the live API key slot if configured, else demo.
+    Live tab 始終使用 live 槽 API key（若已配置），與引擎狀態無關。
 
-    - live engine + bybit_endpoint "demo" → environment "live_demo"
-    - live engine + bybit_endpoint "mainnet" → environment "mainnet"
-    - otherwise → "demo" (default demo slot / wBu0)
+    - live slot has api_key → use live slot (environment from bybit_endpoint)
+    - otherwise → "demo" (default demo slot)
 
     Returns None on any failure — callers must handle gracefully.
     失敗時返回 None，調用方必須處理。
     """
     try:
-        from .strategy_ai_routes import _get_rust_client
-        engine_kind = _get_live_engine_kind()
-        if engine_kind == "live":
-            # Read bybit_endpoint metadata to know which server live slot uses
-            # 讀取 bybit_endpoint 元數據決定 live 槽連哪個伺服器
-            import os
-            from pathlib import Path
-            secrets_base = os.environ.get("OPENCLAW_SECRETS_DIR") or str(
-                Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
-            )
+        import os
+        from pathlib import Path
+        secrets_base = os.environ.get("OPENCLAW_SECRETS_DIR") or str(
+            Path.home() / "BybitOpenClaw" / "secrets" / "secret_files" / "bybit"
+        )
+        live_key_file = Path(secrets_base) / "live" / "api_key"
+        if live_key_file.exists() and live_key_file.read_text(encoding="utf-8").strip():
+            # Live slot configured — use it with correct server
+            # Live 槽已配置 — 使用正確伺服器
             ep_file = Path(secrets_base) / "live" / "bybit_endpoint"
             endpoint = ep_file.read_text(encoding="utf-8").strip() if ep_file.exists() else "mainnet"
             environment = "live_demo" if endpoint == "demo" else "mainnet"
             from openclaw_core import BybitClient
             return BybitClient(environment=environment)
+        # No live slot — fall back to demo
+        # 無 live 槽 — 回退到 demo
+        from .strategy_ai_routes import _get_rust_client
         return _get_rust_client()
     except Exception:
         return None
@@ -239,23 +240,25 @@ def _get_global_mode_state() -> str:
 def _get_live_engine_kind() -> str:
     """
     Determine which engine the live routes should query (3E-5).
-    3E world: live routes query "live" engine; fallback to "demo" if live unavailable.
-    確定 live 路由應查詢哪個引擎。3E：優先 live，不可用時回退 demo。
+    3E world: live routes query "live" engine; fallback to "demo", then "paper".
+    確定 live 路由應查詢哪個引擎。3E：優先 live → demo → paper。
 
-    Returns: "live" | "demo" | "unknown"
+    Returns: "live" | "demo" | "paper" | "unknown"
     """
     rust = get_rust_reader()
     if rust.is_engine_available("live"):
         return "live"
     if rust.is_engine_available("demo"):
         return "demo"
+    if rust.is_engine_available("paper"):
+        return "paper"
     # Backward compat: check primary snapshot trading_mode
     # 向後兼容：檢查主快照的 trading_mode
     if rust.is_available():
         snap = rust.get_snapshot()
         if snap:
             tm = snap.get("trading_mode", "")
-            if tm in ("live", "demo"):
+            if tm in ("live", "demo", "paper"):
                 return tm
     return "unknown"
 

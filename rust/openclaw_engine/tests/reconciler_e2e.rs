@@ -44,7 +44,7 @@ fn make_pipeline() -> TickPipeline {
     TickPipeline::with_balance(&["BTCUSDT", "ETHUSDT"], 10_000.0)
 }
 
-fn make_writer() -> openclaw_engine::persistence::StateWriter {
+fn make_writer() -> openclaw_engine::persistence::DualStateWriter {
     use std::path::PathBuf;
     let mut p = std::env::temp_dir();
     // Use pid + thread id to avoid collisions in parallel test runs.
@@ -54,14 +54,15 @@ fn make_writer() -> openclaw_engine::persistence::StateWriter {
         std::process::id(),
         std::thread::current().id()
     ));
-    openclaw_engine::persistence::StateWriter::new(&p as &PathBuf, 5_000)
+    let primary = openclaw_engine::persistence::StateWriter::new(&p as &PathBuf, 5_000);
+    openclaw_engine::persistence::DualStateWriter::new(primary, None)
 }
 
 /// Drive a ReconcilerEscalate command through the handler and return result.
 /// 驅動 ReconcilerEscalate 命令通過 handler 並返回結果。
 fn drive_escalate(
     pipeline: &mut TickPipeline,
-    writer: &mut openclaw_engine::persistence::StateWriter,
+    writer: &mut openclaw_engine::persistence::DualStateWriter,
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
@@ -84,7 +85,7 @@ fn drive_escalate(
 /// 驅動 ReconcilerDeEscalate 命令通過 handler 並返回結果。
 fn drive_de_escalate(
     pipeline: &mut TickPipeline,
-    writer: &mut openclaw_engine::persistence::StateWriter,
+    writer: &mut openclaw_engine::persistence::DualStateWriter,
     target: &str,
     reason: &str,
 ) -> Result<String, String> {

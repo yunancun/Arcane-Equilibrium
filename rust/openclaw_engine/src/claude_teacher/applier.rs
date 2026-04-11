@@ -226,10 +226,9 @@ const P0_P1_DENYLIST_FIELDS: &[&str] = &[
     "execution_authority",
     "system_mode",
     "live_execution_allowed",
-    "trading_mode",
+    // 3E-10.4: "trading_mode" / "trading_mode_override" removed — TradingMode deleted.
     "max_same_direction_positions",
     "boot_cooldown_ms",
-    "trading_mode_override",
 ];
 
 /// Upper limit on LinUCB boost factor — anything above this is a single-arm

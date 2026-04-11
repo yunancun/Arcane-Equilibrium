@@ -301,9 +301,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         cfg_snapshot.shadow_orders || is_exchange_mode,
     );
 
-    // Register strategies via factory (3E-9: single registration point)
-    // 通過工廠註冊策略（3E-9：唯一註冊點）
-    for strategy in StrategyFactory::create_all() {
+    // Register strategies via factory (3E-9 + BLOCKER-8: per-engine TOML params)
+    // 通過工廠註冊策略（3E-9 + BLOCKER-8：每引擎 TOML 參數）
+    for strategy in StrategyFactory::create_for_engine(deps.pipeline_kind) {
         pipeline.orchestrator.register(strategy);
     }
 

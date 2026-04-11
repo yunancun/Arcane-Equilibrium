@@ -174,10 +174,10 @@ pub struct GridTrading {
     price_history: HashMap<String, Vec<f64>>,
     ou_lookback: usize,
     // Spacing mode / 間距模式
-    spacing_mode: GridSpacingMode,
+    pub(crate) spacing_mode: GridSpacingMode,
     // Health check fields / 健康檢查欄位
     /// How often (in ticks) to run health check / 每隔多少 tick 執行健康檢查
-    health_check_interval: usize,
+    pub(crate) health_check_interval: usize,
     /// Per-symbol ticks elapsed since last health check.
     /// 每幣種距上次健康檢查已過的 tick 數。
     ticks_since_health_check: HashMap<String, usize>,
@@ -185,7 +185,7 @@ pub struct GridTrading {
     /// 每幣種連續價格超出網格範圍的 tick 數。
     out_of_range_count: HashMap<String, usize>,
     /// Max allowed consecutive out-of-range ticks before rebalance / 觸發再平衡前允許的最大連續超出範圍次數
-    max_out_of_range: usize,
+    pub(crate) max_out_of_range: usize,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_cross_idx: HashMap<String, Option<usize>>,
     prev_inventory: HashMap<String, f64>,

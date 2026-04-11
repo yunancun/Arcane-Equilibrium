@@ -1,0 +1,40 @@
+# Per-Engine Strategy Parameters — Paper (3E-9 / BLOCKER-8)
+# 每引擎策略參數 — 紙盤
+#
+# Paper = maximum exploration. All strategies active, wide parameters.
+# 紙盤 = 最大探索空間。所有策略啟用，參數寬鬆。
+#
+# Agent/Optuna can tune these at runtime via IPC update_strategy_params.
+# Agent/Optuna 可通過 IPC update_strategy_params 在運行時調參。
+
+[ma_crossover]
+active = true
+cooldown_ms = 300000
+adx_threshold = 20.0
+regime_filter_enabled = true
+higher_tf_alpha = 0.003
+conf_scale = 1.0
+
+[bb_reversion]
+active = true
+cooldown_ms = 600000
+use_limit = false
+limit_offset_bps = 10.0
+conf_scale = 1.0
+
+[bb_breakout]
+active = true
+cooldown_ms = 600000
+squeeze_bw = 0.02
+expansion_bw = 0.04
+volume_threshold = 1.5
+trailing_stop_atr_mult = 2.0
+conf_scale = 1.0
+
+[grid_trading]
+active = true
+grid_levels = 10
+spacing_mode = "linear"
+health_check_interval = 200
+max_out_of_range = 50
+conf_scale = 1.0

@@ -81,7 +81,7 @@ pub struct BbReversion {
     /// Per-symbol last trade timestamp for cooldown.
     /// 每幣種最後交易時間戳（用於冷卻）。
     last_trade_ms: HashMap<String, u64>,
-    cooldown_ms: u64,
+    pub(crate) cooldown_ms: u64,
     default_qty: f64,
     // RC-07: Limit order support — Agent can switch from market to limit entries
     // RC-07：限價單支持 — Agent 可從市價切換為限價入場

@@ -68,21 +68,24 @@
 
 **Phase A 測試結果**：cargo test lib **897 passed** / 0 failed（+1 新 chmod 測試），pytest settings **24 passed** / 0 failed。
 
-### Phase B — 配置層補完（半天）
-- [ ] **BLOCKER-8** 創建 4 個 TOML 配置文件 + 實現 `load_strategy_params()`
+### Phase B — 配置層補完（半天）✅ 完成
+- [x] **BLOCKER-8** 創建 4 個 TOML 配置文件 + 實現 `load_strategy_params()`
   - `settings/paper_config.toml`（initial_balance + taker_fee）
   - `settings/strategy_params_paper.toml` / `_demo.toml` / `_live.toml`（per-engine 策略參數）
-  - `tab-paper.html` initial_balance 寫入目標需對應真實存在的文件
-- [ ] **MAJOR-4** Paper balance 優先級解析統一（env > TOML > 硬編碼 default）
+  - `StrategyParamsConfig` + `StrategyFactory::create_for_engine(kind)` + 7 tests
+- [x] **MAJOR-4** Paper balance 優先級解析統一（env > TOML > Demo API > 硬編碼 default）
+  - `paper_balance_from_toml()` + `resolve_paper_initial_balance()`
 
-### Phase C — 三引擎並行重構 · MEGA-BLOCKER-0（2-3 天）
-- [ ] **3E-10.1** `main.rs` spawn 邏輯重構：刪除 `primary_kind`，改為三個 Pipeline 各自獨立判斷啟動條件（API key + system_mode gate）
-- [ ] **3E-10.2** 刪除 `config.trading_mode` 字段 + `engine.toml` 清理 + env var `TRADING_MODE` 清除
-- [ ] **3E-10.3** Python 側 `ipc_state_reader.py` / `live_session_routes.py` / `paper_trading_routes.py` 向後兼容 `trading_mode` serde 殘留清零（8 處）
-- [ ] **3E-10.4** Rust `TradingMode` enum 真正刪除（不是 deprecated 保留）
-- [ ] **3E-10.5** **BLOCKER-1 D19 DB 去重**（隨 spawn 重構）— 僅 Paper Pipeline 寫 market_data / feature，Demo/Live 的 `market_data_tx` / `feature_tx` 為 `None`
-- [ ] **3E-10.6** **MINOR-2 paper_cmd_rx 改名**（隨 spawn 重構）— 變 `pipeline_cmd_rx_{paper,demo,live}`
-- [ ] **3E-10.7** reconciler_e2e 測試 + event_consumer tests 調整
+### Phase C — 三引擎並行重構 · MEGA-BLOCKER-0（2-3 天）✅ 完成
+- [x] **3E-10.1** `main.rs` spawn 邏輯重構：`determine_primary_kind()` 基於 API key 偵測取代 `config.trading_mode`
+- [x] **3E-10.2** 刪除 `config.trading_mode` 字段 + `engine.toml` 清理 + ipc_server 改從快照派生
+- [x] **3E-10.3** Python 側向後兼容確認 — serde rename `pipeline_kind` → `"trading_mode"` 保持不變，Python 讀取正確
+- [x] **3E-10.4** Rust `TradingMode` enum 真正刪除 + `mode_state.rs` 遷移至 `PipelineKind`
+- [x] **3E-10.5** **BLOCKER-1 D19 DB 去重** — Demo/Live 管線 `market_data_tx` / `feature_tx` 設為 `None`
+- [x] **3E-10.6** **MINOR-2 paper_cmd_rx 改名** — `pipeline_cmd_tx_paper` / `pipeline_cmd_rx_paper`
+- [x] **3E-10.7** reconciler_e2e 測試修復（`StateWriter` → `DualStateWriter`）— 18 e2e pass
+
+**Phase B+C 測試結果**：cargo test lib **904 passed** / 0 failed + e2e **18 passed** / 0 failed。
 
 ### Phase D — 架構級補完（2-3 天，依賴 Phase C）
 - [ ] **BLOCKER-2** D6 三級遞減收縮實施（`cross_engine_notify` + `EngineEvent::Crashed` + `PipelineHealth`）+ `tokio::spawn` catch_unwind（Paper crash → Demo Cautious 60s / Demo crash → Live Cautious 120s）

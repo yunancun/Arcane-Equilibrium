@@ -1,0 +1,40 @@
+# Per-Engine Strategy Parameters — Live (3E-9 / BLOCKER-8)
+# 每引擎策略參數 — 實盤
+#
+# Live = conservative. Operator adjusts after promotion pipeline graduation.
+# 實盤 = 保守。策略經放權管線畢業後由 Operator 調整。
+#
+# FundingArb intentionally excluded (stub — no IPC data yet).
+# FundingArb 故意排除（stub — 尚無 IPC 資金費率數據）。
+
+[ma_crossover]
+active = true
+cooldown_ms = 300000
+adx_threshold = 20.0
+regime_filter_enabled = true
+higher_tf_alpha = 0.003
+conf_scale = 1.0
+
+[bb_reversion]
+active = true
+cooldown_ms = 600000
+use_limit = false
+limit_offset_bps = 10.0
+conf_scale = 1.0
+
+[bb_breakout]
+active = true
+cooldown_ms = 600000
+squeeze_bw = 0.02
+expansion_bw = 0.04
+volume_threshold = 1.5
+trailing_stop_atr_mult = 2.0
+conf_scale = 1.0
+
+[grid_trading]
+active = true
+grid_levels = 10
+spacing_mode = "linear"
+health_check_interval = 200
+max_out_of_range = 50
+conf_scale = 1.0
