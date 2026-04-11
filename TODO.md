@@ -114,11 +114,10 @@
 - [x] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查** — **9/9 PASS**
 - [x] 通過後：更新 TODO.md 標記 `3E-E2` / `3E-E4` 為 `[x]`
 - [x] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
-- **殘留 4 MAJOR**（非阻塞，已記入 backlog）：
+- [x] **殘留修復**：M-3 GovernanceProfile → `pipeline_kind.governance_profile()` ✅ + M-4 catch_unwind + panic logging ✅ + 8 MINOR 修復（m-1~m-3,m-5,m-7,m-8; m-4 已修/m-6 test-only/m-9,m-10 不影響）
+- **殘留 2 MAJOR**（M-1/M-2 文件大小監控，非阻塞）：
   - M-1: `handlers.rs` 1195 行（下次加 handler 前拆分）
-  - M-2: `on_tick.rs` 1172 行（監控）
-  - M-3: GovernanceProfile hardcoded（TODO(3E-2b)，W22）
-  - M-4: 無 catch_unwind 包裹 pipeline（Live 前修）
+  - M-2: `on_tick.rs` 1170 行（-2 行，監控）
 
 **Phase 依賴圖**：  
 `Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G ✅`  
