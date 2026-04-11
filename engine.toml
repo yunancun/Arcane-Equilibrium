@@ -11,4 +11,4 @@
 #   "demo"    → api-demo.bybit.com（Live-Demo：走 live 路徑，連 demo 伺服器）
 #   "mainnet" → api.bybit.com（真實實盤：真實資金）
 
-trading_mode = "live"
+trading_mode = "paper_only"
