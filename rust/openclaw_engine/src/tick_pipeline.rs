@@ -12,7 +12,7 @@
 //!   IntentProcessor、PaperState、StopManager、Governance）。
 
 use openclaw_core::{
-    governance_core::GovernanceCore,
+    governance_core::{GovernanceCore, GovernanceProfile},
     h0_gate::H0Gate,
     indicators::{IndicatorEngine, IndicatorSnapshot},
     klines::KlineManager,
@@ -89,10 +89,70 @@ impl std::fmt::Display for SystemMode {
     }
 }
 
-/// Paper trading session command — IPC → event consumer → TickPipeline.
-/// 紙上交易 session 命令 — IPC → 事件消費者 → TickPipeline。
+// ---------------------------------------------------------------------------
+// PipelineKind — immutable pipeline identity (3E-1)
+// ---------------------------------------------------------------------------
+
+/// Immutable pipeline identity — baked in at construction, never changes.
+/// Unlike `TradingMode` (which was a mutable global), `PipelineKind` is set once
+/// and determines the pipeline's DB prefix, governance profile, and exchange binding.
+/// 不可變管線身份 — 構造時固定，永不更改。
+/// 與可變全局 `TradingMode` 不同，`PipelineKind` 一次設定，決定 DB 前綴、治理檔案、交易所綁定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineKind {
+    Paper,
+    Demo,
+    Live,
+}
+
+impl PipelineKind {
+    /// DB-canonical engine_mode string: "paper" / "demo" / "live".
+    /// DB 標準 engine_mode 字串。
+    pub fn db_mode(&self) -> &'static str {
+        match self {
+            Self::Paper => "paper",
+            Self::Demo => "demo",
+            Self::Live => "live",
+        }
+    }
+
+    /// Whether this pipeline connects to a real exchange (Demo or Live).
+    /// 此管線是否連接真實交易所（Demo 或 Live）。
+    pub fn is_exchange(&self) -> bool {
+        matches!(self, Self::Demo | Self::Live)
+    }
+
+    /// Derive the governance profile from pipeline identity.
+    /// 從管線身份推導治理檔案。
+    pub fn governance_profile(&self) -> GovernanceProfile {
+        match self {
+            Self::Paper => GovernanceProfile::Exploration,
+            Self::Demo => GovernanceProfile::Validation,
+            Self::Live => GovernanceProfile::Production,
+        }
+    }
+}
+
+impl std::fmt::Display for PipelineKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.db_mode())
+    }
+}
+
+// GovernanceProfile is re-exported from openclaw_core::governance_core (3E-1 / D3).
+// GovernanceProfile 從 openclaw_core::governance_core 重導出。
+
+// ---------------------------------------------------------------------------
+// PipelineCommand — IPC → event consumer → TickPipeline
+// ---------------------------------------------------------------------------
+
+/// Pipeline command — IPC → event consumer → TickPipeline.
+/// Renamed from PipelineCommand (D22): serves all 3 pipeline kinds.
+/// 管線命令 — IPC → 事件消費者 → TickPipeline。
+/// 從 PipelineCommand 改名（D22）：服務所有 3 種管線。
 #[derive(Debug)]
-pub enum PaperSessionCommand {
+pub enum PipelineCommand {
     /// Pause strategy dispatch + shadow orders. Prices/indicators/stops continue.
     /// 暫停策略分派+影子訂單。價格/指標/止損繼續。
     Pause,
@@ -103,8 +163,16 @@ pub enum PaperSessionCommand {
     /// 以當前市場價格平掉所有持倉。
     CloseAll,
     /// Close a single position by symbol at current market price.
+    /// Optional hints let the caller supply side/qty for orphan exchange positions
+    /// not tracked in paper_state (e.g. GUI manual close of a shadow-only position).
     /// 以當前市場價格平掉指定 symbol 的持倉。
-    CloseSymbol { symbol: String },
+    /// hint_is_long / hint_qty：呼叫方提供的交易所側倉位方向與數量（paper_state
+    /// 沒有追蹤的孤兒倉位時使用，例如 GUI 手動平掉 shadow-only 倉位）。
+    CloseSymbol {
+        symbol: String,
+        hint_is_long: Option<bool>,
+        hint_qty: Option<f64>,
+    },
     /// Reset paper state — clear positions, reset balance.
     /// 重置紙盤狀態 — 清倉、重置餘額。
     Reset { new_balance: f64 },
@@ -594,6 +662,15 @@ impl TickPipeline {
         }
     }
 
+    /// 3E-2a: Create a pipeline with explicit kind + balance.
+    /// GovernanceCore is constructed with the appropriate profile (auto-grant for Paper/Demo).
+    /// 3E-2a：以明確 kind + balance 創建管線。GovernanceCore 按 profile 構造（Paper/Demo 自動授權）。
+    pub fn with_kind(symbols: &[&str], balance: f64, kind: PipelineKind) -> Self {
+        let mut p = Self::with_balance(symbols, balance);
+        p.governance = GovernanceCore::new_with_profile(kind.governance_profile());
+        p
+    }
+
     /// Scanner C3: Add a symbol to the kline manager (idempotent).
     /// Per-symbol HashMaps (latest_prices, latest_indicators, consecutive_losses)
     /// self-populate on first tick — no explicit initialisation needed.
@@ -896,7 +973,7 @@ impl TickPipeline {
 
         let result = self
             .intent_processor
-            .process(&intent, &self.governance, &self.paper_state, atr_value);
+            .process(&intent, &self.governance, &self.paper_state, atr_value, GovernanceProfile::Exploration);
 
         // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
         if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
@@ -1906,6 +1983,7 @@ impl TickPipeline {
                         &self.governance,
                         &self.paper_state,
                         atr_value,
+                        GovernanceProfile::Production, // TODO(3E-2b): derive from self.pipeline_kind
                     );
 
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
@@ -2024,6 +2102,7 @@ impl TickPipeline {
                         &self.governance,
                         &self.paper_state,
                         atr_value,
+                        GovernanceProfile::Exploration, // TODO(3E-2b): derive from self.pipeline_kind
                     );
 
                     // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
@@ -2704,13 +2783,38 @@ impl TickPipeline {
     ///
     /// IPC 觸發單倉平倉：交易所模式發單一 reduce_only 市價單；
     /// 紙盤模式直接調用 close_position_at_market。找到倉位則返回 true。
-    pub(crate) fn ipc_close_symbol(&mut self, symbol: &str) -> bool {
+    /// IPC-triggered single-symbol close.
+    /// hint_is_long / hint_qty: caller-supplied exchange position info for orphan positions
+    /// (positions that exist on the exchange but are not tracked in paper_state).
+    /// When paper_state has no position but valid hints are provided, a shadow reduce_only
+    /// market order is dispatched directly — Rust handles the Bybit API call.
+    ///
+    /// IPC 觸發單倉平倉。
+    /// hint_is_long / hint_qty：呼叫方提供的交易所側倉位資訊（孤兒倉位用）。
+    /// paper_state 無倉但有有效 hints 時，直接發 shadow reduce_only 市價單，
+    /// 由 Rust 引擎完成 Bybit API 調用，Python 層不介入交易執行。
+    pub(crate) fn ipc_close_symbol(
+        &mut self,
+        symbol: &str,
+        hint_is_long: Option<bool>,
+        hint_qty: Option<f64>,
+    ) -> bool {
         use crate::config::TradingMode;
         let ts_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live);
+        // Use exchange path when:
+        //   (a) trading_mode is Demo or Live, OR
+        //   (b) system_mode is DemoReserved AND shadow channel is active
+        //       (paper_only + demo_reserved is the current shadow-dispatch setup).
+        // 交易所路徑條件：
+        //   (a) trading_mode 為 Demo 或 Live，或
+        //   (b) system_mode 為 DemoReserved 且 shadow channel 可用
+        //       （當前 paper_only + demo_reserved 的 shadow 分發模式）。
+        let is_exchange = matches!(self.trading_mode, TradingMode::Demo | TradingMode::Live)
+            || (self.shadow_order_tx.is_some()
+                && matches!(self.system_mode, SystemMode::DemoReserved));
         if is_exchange {
             // Read position data before mutating self.exchange_seq.
             // 先讀倉位數據，再修改 self.exchange_seq。
@@ -2725,9 +2829,23 @@ impl TickPipeline {
                     None
                 }
             });
+            // Fallback: use caller hints for orphan exchange positions not in paper_state.
+            // paper_state 無倉時，使用呼叫方提供的 hints 平掉交易所側的孤兒倉位。
             let (is_long, qty, price) = match pos_info {
                 Some(v) => v,
-                None => return false,
+                None => match (hint_is_long, hint_qty) {
+                    (Some(il), Some(q)) if q > 0.0 => {
+                        let price = self.paper_state.latest_price(symbol).unwrap_or(0.0);
+                        info!(
+                            symbol,
+                            is_long = il,
+                            qty = q,
+                            "ipc_close_symbol: orphan hint close — no paper pos, using caller hint / 孤兒倉位 hint 平倉"
+                        );
+                        (il, q, price)
+                    }
+                    _ => return false,
+                },
             };
             if let Some(ref tx) = self.shadow_order_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
@@ -2967,6 +3085,59 @@ mod tests {
 
     fn make_event(symbol: &str, price: f64, ts: u64) -> PriceEvent {
         PriceEvent::new(symbol.to_string(), price, ts)
+    }
+
+    // ── 3E-1: PipelineKind + GovernanceProfile tests ──
+
+    #[test]
+    fn test_pipeline_kind_db_mode() {
+        assert_eq!(PipelineKind::Paper.db_mode(), "paper");
+        assert_eq!(PipelineKind::Demo.db_mode(), "demo");
+        assert_eq!(PipelineKind::Live.db_mode(), "live");
+    }
+
+    #[test]
+    fn test_pipeline_kind_is_exchange() {
+        assert!(!PipelineKind::Paper.is_exchange());
+        assert!(PipelineKind::Demo.is_exchange());
+        assert!(PipelineKind::Live.is_exchange());
+    }
+
+    #[test]
+    fn test_pipeline_kind_governance_profile() {
+        assert_eq!(PipelineKind::Paper.governance_profile(), GovernanceProfile::Exploration);
+        assert_eq!(PipelineKind::Demo.governance_profile(), GovernanceProfile::Validation);
+        assert_eq!(PipelineKind::Live.governance_profile(), GovernanceProfile::Production);
+    }
+
+    #[test]
+    fn test_governance_profile_authorization_requirements() {
+        assert!(!GovernanceProfile::Exploration.requires_authorization());
+        assert!(!GovernanceProfile::Validation.requires_authorization());
+        assert!(GovernanceProfile::Production.requires_authorization());
+    }
+
+    #[test]
+    fn test_governance_profile_lease_requirements() {
+        assert!(!GovernanceProfile::Exploration.requires_lease());
+        assert!(!GovernanceProfile::Validation.requires_lease());
+        assert!(GovernanceProfile::Production.requires_lease());
+    }
+
+    #[test]
+    fn test_pipeline_kind_serde_roundtrip() {
+        for kind in [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live] {
+            let json = serde_json::to_string(&kind).expect("serialize");
+            let back: PipelineKind = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(kind, back);
+        }
+    }
+
+    #[test]
+    fn test_pipeline_kind_display() {
+        assert_eq!(format!("{}", PipelineKind::Paper), "paper");
+        assert_eq!(format!("{}", PipelineKind::Demo), "demo");
+        assert_eq!(format!("{}", PipelineKind::Live), "live");
     }
 
     #[test]

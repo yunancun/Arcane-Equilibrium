@@ -13,34 +13,34 @@
 
 use super::types::PendingOrder;
 use crate::persistence::StateWriter;
-use crate::tick_pipeline::{PaperSessionCommand, TickPipeline};
+use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
 use tracing::{info, warn};
 
-/// Apply one PaperSessionCommand variant to the pipeline. Returns nothing —
+/// Apply one PipelineCommand variant to the pipeline. Returns nothing —
 /// command outcomes are reported via the optional response_tx oneshot inside
 /// each variant.
-/// 將一個 PaperSessionCommand 變體應用到管線；結果通過 oneshot 返回。
+/// 將一個 PipelineCommand 變體應用到管線；結果通過 oneshot 返回。
 pub fn handle_paper_command(
-    cmd: PaperSessionCommand,
+    cmd: PipelineCommand,
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut StateWriter,
     pending_orders: &mut HashMap<String, PendingOrder>,
 ) {
     match cmd {
-        PaperSessionCommand::Pause => {
+        PipelineCommand::Pause => {
             pipeline.paper_paused = true;
             info!("paper trading PAUSED via IPC / 紙盤交易已通過 IPC 暫停");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PaperSessionCommand::Resume => {
+        PipelineCommand::Resume => {
             pipeline.paper_paused = false;
             // F2 fix: clear session_halted on Resume / 恢復時清除會話暫停標誌
             pipeline.session_halted = false;
             info!("paper trading RESUMED via IPC / 紙盤交易已通過 IPC 恢復");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PaperSessionCommand::CloseAll => {
+        PipelineCommand::CloseAll => {
             // Exchange mode (Demo/Live): dispatch reduce_only market orders via shadow channel.
             // Paper mode: clear paper_state directly.
             // 交易所模式（Demo/Live）：通過 shadow 通道發 reduce_only 市價單。
@@ -49,15 +49,17 @@ pub fn handle_paper_command(
             info!(count, "IPC close_all_positions / IPC 全部平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PaperSessionCommand::CloseSymbol { symbol } => {
+        PipelineCommand::CloseSymbol { symbol, hint_is_long, hint_qty } => {
             // Exchange mode (Demo/Live): dispatch reduce_only market order via shadow channel.
             // Paper mode: close_position_at_market directly.
+            // hint_is_long/hint_qty allow closing orphan exchange positions not in paper_state.
             // 交易所模式：發 reduce_only 市價單；紙盤模式：直接平倉。
-            let found = pipeline.ipc_close_symbol(&symbol);
+            // hint 參數允許平掉 paper_state 沒有追蹤的交易所孤兒倉位。
+            let found = pipeline.ipc_close_symbol(&symbol, hint_is_long, hint_qty);
             info!(symbol = symbol.as_str(), found, "IPC close_position / IPC 單倉平倉");
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PaperSessionCommand::Reset { new_balance } => {
+        PipelineCommand::Reset { new_balance } => {
             pipeline.paper_state = crate::paper_state::PaperState::new(new_balance);
             pipeline.stats = crate::tick_pipeline::TickStats::default();
             pipeline.paper_paused = false;
@@ -74,7 +76,7 @@ pub fn handle_paper_command(
             snapshot_writer.force_write(&pipeline.snapshot());
         }
         // ── Phase 3b: Strategy parameter IPC commands / 策略參數 IPC 命令 ──
-        PaperSessionCommand::UpdateStrategyParams {
+        PipelineCommand::UpdateStrategyParams {
             strategy_name,
             params_json,
             response_tx,
@@ -130,7 +132,7 @@ pub fn handle_paper_command(
             };
             let _ = response_tx.send(result);
         }
-        PaperSessionCommand::GetStrategyParams {
+        PipelineCommand::GetStrategyParams {
             strategy_name,
             response_tx,
         } => {
@@ -140,7 +142,7 @@ pub fn handle_paper_command(
             };
             let _ = response_tx.send(result);
         }
-        PaperSessionCommand::GetParamRanges {
+        PipelineCommand::GetParamRanges {
             strategy_name,
             response_tx,
         } => {
@@ -151,7 +153,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(result);
         }
         // ── ARCH-RC1 1C-3-B: Risk runtime status + safe counter clear ──
-        PaperSessionCommand::GetRiskRuntimeStatus { response_tx } => {
+        PipelineCommand::GetRiskRuntimeStatus { response_tx } => {
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -159,7 +161,7 @@ pub fn handle_paper_command(
             let snapshot = pipeline.risk_runtime_status_json(now_ms);
             let _ = response_tx.send(Ok(snapshot.to_string()));
         }
-        PaperSessionCommand::ClearConsecutiveLosses { response_tx } => {
+        PipelineCommand::ClearConsecutiveLosses { response_tx } => {
             let cleared = pipeline.consecutive_losses.len();
             pipeline.consecutive_losses.clear();
             info!(
@@ -170,7 +172,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(Ok(format!("cleared {cleared} symbol(s)")));
         }
         // ── ARCH-RC1 1C-3-B-2: Governor manual override (operator escalation) ──
-        PaperSessionCommand::ForceGovernorTighter {
+        PipelineCommand::ForceGovernorTighter {
             target_tier,
             reason,
             response_tx,
@@ -205,7 +207,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(result);
         }
         // ── ARCH-RC1 1C-3-B-2: Governor manual override (operator de-escalation) ──
-        PaperSessionCommand::ForceGovernorLooser {
+        PipelineCommand::ForceGovernorLooser {
             target_tier,
             reason_code,
             notes,
@@ -283,7 +285,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(result);
         }
         // ── ARCH-RC1 1C-3-F: External paper-side order submission ──
-        PaperSessionCommand::SubmitOrder {
+        PipelineCommand::SubmitOrder {
             symbol,
             side,
             qty,
@@ -316,7 +318,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(result);
         }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
-        PaperSessionCommand::SetStrategyActive {
+        PipelineCommand::SetStrategyActive {
             strategy_name,
             active,
             response_tx,
@@ -334,7 +336,7 @@ pub fn handle_paper_command(
             }
             let _ = response_tx.send(result.map(|was| format!("was_active={was}")));
         }
-        PaperSessionCommand::UpdateRiskConfig {
+        PipelineCommand::UpdateRiskConfig {
             hard_stop_pct,
             trailing_stop_pct,
             time_stop_hours,
@@ -469,7 +471,7 @@ pub fn handle_paper_command(
             }
             snapshot_writer.force_write(&pipeline.snapshot());
         }
-        PaperSessionCommand::GetOpenPositionSymbols { response_tx } => {
+        PipelineCommand::GetOpenPositionSymbols { response_tx } => {
             // Collect symbols with an active open position for scanner removal deferral.
             // 收集有活躍持倉的交易對，供掃描器移除延遲使用。
             let open_symbols: std::collections::HashSet<String> = pipeline
@@ -480,7 +482,7 @@ pub fn handle_paper_command(
                 .collect();
             let _ = response_tx.send(open_symbols);
         }
-        PaperSessionCommand::AddMode {
+        PipelineCommand::AddMode {
             mode,
             balance,
             response_tx,
@@ -491,7 +493,7 @@ pub fn handle_paper_command(
             snapshot_writer.force_write(&pipeline.snapshot());
             let _ = response_tx.send(Ok(format!("mode {} added with balance {:.2}", mode, balance)));
         }
-        PaperSessionCommand::SwitchMode { mode, response_tx } => {
+        PipelineCommand::SwitchMode { mode, response_tx } => {
             // Phase 3: Switch primary trading mode with state swap.
             // Phase 3：切換主交易模式，附帶狀態切換。
             pipeline.set_trading_mode(mode);
@@ -510,7 +512,7 @@ pub fn handle_paper_command(
             let _ = response_tx.send(Ok(format!("switched to mode {}", mode)));
         }
         // ── Phase 6: Reconciler auto-contraction ──
-        PaperSessionCommand::ReconcilerEscalate {
+        PipelineCommand::ReconcilerEscalate {
             target_tier,
             reason,
             response_tx,
@@ -532,7 +534,7 @@ pub fn handle_paper_command(
             })();
             let _ = response_tx.send(result);
         }
-        PaperSessionCommand::ReconcilerDeEscalate {
+        PipelineCommand::ReconcilerDeEscalate {
             target_tier,
             reason,
             response_tx,
@@ -556,7 +558,7 @@ pub fn handle_paper_command(
         }
         // Sync global system mode from Python GUI → engine.
         // 從 Python GUI 同步全局系統模式到引擎。
-        PaperSessionCommand::SetSystemMode { mode, response_tx } => {
+        PipelineCommand::SetSystemMode { mode, response_tx } => {
             let result = pipeline.set_system_mode(&mode);
             if result.is_ok() {
                 snapshot_writer.force_write(&pipeline.snapshot());
