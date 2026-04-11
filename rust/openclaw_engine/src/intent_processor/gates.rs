@@ -15,10 +15,10 @@ impl IntentProcessor {
         &self,
         strategy: &str,
         symbol: &str,
-        atr: f64,
-        conf: f64,
-        qty: f64,
-        price: f64,
+        _atr: f64,
+        _conf: f64,
+        _qty: f64,
+        _price: f64,
         volume_24h: f64,
     ) -> Option<IntentResult> {
         let fee_rate = self.fee_rate(symbol);
@@ -191,7 +191,10 @@ impl IntentProcessor {
 
     /// PNL-5: Cost-gate k multiplier scaled by notional size, reading
     /// k_small / k_medium / k_base from RiskManagerConfig (Session 12 cleanup).
+    /// Reserved for exchange-mode cost gate (Live pipeline).
     /// PNL-5：成本門 k 倍率隨 notional 規模調整，三檔 k 從 config 讀取。
+    /// 為交易所模式成本門（Live 管線）保留。
+    #[allow(dead_code)]
     pub(super) fn cost_gate_k(&self, notional: f64) -> f64 {
         if notional < 50.0 {
             self.risk_config.cost_gate.k_small

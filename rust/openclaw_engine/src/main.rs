@@ -565,6 +565,13 @@ async fn async_main(
     let has_demo = demo_bindings.is_some();
 
     // D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
+    // Buffer sizes: Paper/Demo 1024 for headroom during burst ticks;
+    // Live 512 (smaller = fail-fast under lag — real-money pipeline should
+    // never accumulate a deep backlog; dropped ticks are logged at warn level).
+    // D10/D20：有界扇出 — 一個 WS 來源，N 個管線接收者。
+    // 緩衝區大小：Paper/Demo 1024 提供突發 tick 容量；
+    // Live 512（較小 = 延遲時快速失敗 — 實盤管線不應累積深度積壓，
+    // 丟棄的 tick 以 warn 級別記錄）。
     let (paper_event_tx, paper_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
     let demo_event_channel = if has_demo { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
     let live_event_channel = if has_live { Some(mpsc::channel::<Arc<PriceEvent>>(512)) } else { None };

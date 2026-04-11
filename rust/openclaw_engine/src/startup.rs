@@ -437,6 +437,15 @@ pub(crate) async fn build_exchange_pipeline(
         }
     };
 
+    // NOTE: Credentials are cloned to String and moved into the WS reconnect closure.
+    // They persist in memory for the lifetime of the pipeline (needed for WS reconnection).
+    // Rust's default String::drop does not guarantee memory zeroing.
+    // Acceptable tradeoff: the process address space is not shared, and credentials
+    // are already present in the REST client. If defense-in-depth zeroing is needed
+    // in the future, wrap with `secrecy::SecretString` (requires adding dependency).
+    // 注意：憑證被複製為 String 並移入 WS 重連閉包。它們在管線生命週期內常駐記憶體
+    // （WS 重連需要）。Rust 默認 String::drop 不保證記憶體清零。
+    // 可接受的權衡：進程地址空間不共享，且憑證已存在於 REST 客戶端中。
     let (api_key, api_secret) = rest_client.credentials();
     let api_key = api_key.to_string();
     let api_secret = api_secret.to_string();

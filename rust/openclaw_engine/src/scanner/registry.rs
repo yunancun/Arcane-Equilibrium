@@ -21,7 +21,7 @@ use crate::scanner::config::AntiChurnConfig;
 use crate::scanner::types::{ChurnState, ScanResult, ScoredSymbol};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
-use tracing::{info, warn};
+use tracing::info;
 
 /// Shared active symbol registry with anti-churn guarantees.
 /// 具有反 churn 保證的共享活躍交易對注冊表。

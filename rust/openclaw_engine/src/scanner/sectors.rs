@@ -69,11 +69,12 @@ pub fn symbol_sector(base: &str) -> &'static str {
         "FET" | "AGIX" | "OCEAN" | "RNDR" | "WLD" | "ARKM" | "BITTENSOR" | "GRASS"
         | "AIOZ" => "ai_infra",
 
-        // Privacy / 隱私
-        "ZEC" | "XMR" | "SCRT" | "ROSE" | "NYM" | "PHA" => "privacy",
+        // Privacy / 隱私 (ZEC/XMR already matched in payments_l1)
+        "SCRT" | "ROSE" | "NYM" | "PHA" => "privacy",
 
         // Infrastructure / middleware / 基礎設施 / 中間件
-        "BAND" | "AXL" | "WORMHOLE" | "W" | "PYTH" | "JITO" | "JTO" | "EIGEN" => {
+        // (BAND/PYTH already matched in oracle)
+        "AXL" | "WORMHOLE" | "W" | "JITO" | "JTO" | "EIGEN" => {
             "infrastructure"
         }
 

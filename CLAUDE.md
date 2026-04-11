@@ -50,7 +50,7 @@
 
 **StrategyAction Enum ✅**（2026-04-09）— 策略出場死鎖修復。策略 `on_tick()` 返回 `Vec<StrategyAction>`（`Open` 走完整治理，`Close` 輕量路徑繞過 Guardian/cost_gate/Kelly/P1）。5 策略改造完畢 + QC/FA 全修（grid 庫存漂移 P1、exchange Kelly P2、audit logging P2）。830 lib tests pass。
 
-**3E-ARCH 三引擎並行架構 ✅**（2026-04-11）— Paper/Demo/Live 三管線真正獨立並行（MEGA-BLOCKER-0 修復：從「primary+alongside」二管線模型升級為三獨立 spawn）。`determine_primary_kind()` 已刪除 → `build_exchange_pipeline()` 按 API key 獨立構建 `ExchangePipelineBindings`。D1 三獨立判斷 + D21 per-engine Private WS + D23 per-engine Reconciler + D17 Live 獨立 OS thread。`Vec<Sender>` 動態扇出。`TradingMode` 徹底刪除 → `PipelineKind` 不可變。Per-engine TOML 配置 + `PerEngineRiskStores` + `StrategyFactory::create_for_engine()`。D6 三級故障收縮 + D15 全局名義值上限。3E-E2 Fix Rounds Phase A-G 完成：10 BLOCKER + 7 MAJOR 全修 → Phase G 9/9 角色 PASS。929 engine lib + 366 core + 18 e2e = 1313 tests passed。
+**3E-ARCH 三引擎並行架構 ✅**（2026-04-11）— Paper/Demo/Live 三管線真正獨立並行（MEGA-BLOCKER-0 修復：從「primary+alongside」二管線模型升級為三獨立 spawn）。`determine_primary_kind()` 已刪除 → `build_exchange_pipeline()` 按 API key 獨立構建 `ExchangePipelineBindings`。D1 三獨立判斷 + D21 per-engine Private WS + D23 per-engine Reconciler + D17 Live 獨立 OS thread。`Vec<Sender>` 動態扇出。`TradingMode` 徹底刪除 → `PipelineKind` 不可變。Per-engine TOML 配置 + `PerEngineRiskStores` + `StrategyFactory::create_for_engine()`。D6 三級故障收縮 + D15 全局名義值上限。3E-E2 Fix Rounds Phase A-G 完成：10 BLOCKER + 7 MAJOR 全修 → Phase G 9/9 角色 PASS。929 engine lib + 366 core + 29 e2e = 1324 tests passed。
 
 **Multi-Symbol Position Tracking ✅**（2026-04-11）— 4 策略（MaCrossover/BbReversion/BbBreakout/GridTrading）從單一全局 `position: Option<bool>` 改為 `HashMap<String, bool>` per-symbol 獨立追蹤。GridTrading `new()`/`new_geometric()` 移除硬編碼 symbol + 預填 grid，改為 `template_bounds` 延遲初始化。理論併發上限 4→100（4策略×25symbols），實際受 `open_positions_max`/`max_same_direction` 風控約束。879 lib tests pass。
 
@@ -280,4 +280,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-11：tests engine lib **929** + core **366** + e2e **18** / Python **2792** passed **0 fail** · **3E-ARCH MEGA-BLOCKER-0 修復 ✅**（真正三引擎獨立並行：`build_exchange_pipeline()` + `Vec<Sender>` 扇出 + D21/D23 per-engine WS/Reconciler） · **Multi-Symbol Position Tracking ✅** · **W21 6-04~08 ✅** · **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：6-09~13 PM 驗收（W21）→ G-1 AI Agent（W22）。
+> 截至 2026-04-11：tests engine lib **929** + core **366** + e2e **29** / Python **2792** passed **0 fail** · **0 cargo warnings** · **3E-ARCH L3 審計 PASS ✅**（9 角色並行：PM/PA/FA/CC/E3/E4/E5/MIT/QC 全通過）· **3E-ARCH MEGA-BLOCKER-0 修復 ✅**（真正三引擎獨立並行）· **Live_Ready ✅** · **Live 唯一前置**：`settings/secret_files/bybit/live/` API key 填入 · **下一步**：6-09~13 PM 驗收（W21）→ G-1 AI Agent（W22）。

@@ -179,21 +179,6 @@ impl BbReversion {
         }
     }
 
-    /// Build an exit intent — always market for guaranteed fills.
-    /// 建構出場意圖 — 永遠使用市價單以確保成交。
-    fn make_exit_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
-        // CONF-D: scale exit confidence
-        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
-        OrderIntent {
-            symbol: ctx.symbol.clone(),
-            is_long,
-            qty: self.default_qty,
-            confidence: scaled,
-            strategy: self.name().into(),
-            order_type: "market".into(),
-            limit_price: None,
-        }
-    }
 }
 
 impl Strategy for BbReversion {

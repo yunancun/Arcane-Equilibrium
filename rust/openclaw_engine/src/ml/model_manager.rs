@@ -11,7 +11,7 @@
 //!   SIGHUP 觸發 try_reload() 熱交換模型。ort 依賴延後添加。
 
 use arc_swap::ArcSwap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -33,11 +33,11 @@ type ModelState = Option<LoadedModel>;
 /// 已載入 ONNX 模型的佔位（ort::Session 將替換此項）。
 struct LoadedModel {
     /// Model file path / 模型文件路徑
-    path: PathBuf,
+    _path: PathBuf,
     /// Feature dimension expected / 期望的特徵維度
     feature_dim: usize,
     /// Version string / 版本字符串
-    version: String,
+    _version: String,
 }
 
 /// ONNX Model Manager with ArcSwap for zero-lock hot-swap.
@@ -57,9 +57,9 @@ impl OnnxModelManager {
         let initial_state = if !model_path.is_empty() && path.exists() {
             info!(path = model_path, "ONNX model found / 找到 ONNX 模型");
             Some(LoadedModel {
-                path: path.clone(),
+                _path: path.clone(),
                 feature_dim,
-                version: "v1".into(),
+                _version: "v1".into(),
             })
         } else {
             if !model_path.is_empty() {
@@ -122,9 +122,9 @@ impl OnnxModelManager {
         // TODO: Replace with actual ort::Session::builder()...commit_from_file()
         let new_version = self.version_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let new_model = Some(LoadedModel {
-            path: self.model_path.clone(),
+            _path: self.model_path.clone(),
             feature_dim: self.feature_dim,
-            version: format!("v{}", new_version),
+            _version: format!("v{}", new_version),
         });
         self.state.store(Arc::new(new_model));
         info!(

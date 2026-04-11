@@ -9,7 +9,6 @@
 //!   並對特徵流運行 ADWIN。非重疊 7 天測試窗口。ADWIN delta=0.05 + 3 次多數票 + 30 天預熱。
 
 use super::pool::DbPool;
-use crate::database::DatabaseConfig;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;

@@ -901,7 +901,14 @@ fn extract_engine_tx<'a>(
 ) -> &'a Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>> {
     match params.get("engine").and_then(|v| v.as_str()) {
         Some(engine) => channels.select(engine),
-        None => channels.primary(),
+        None => {
+            tracing::debug!(
+                "ipc: no 'engine' param — routing to primary pipeline \
+                 (add explicit engine param for deterministic routing) \
+                 / ipc：無 'engine' 參數 — 路由到主管線（建議加入明確 engine 參數）"
+            );
+            channels.primary()
+        }
     }
 }
 
