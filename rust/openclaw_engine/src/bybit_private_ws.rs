@@ -862,10 +862,22 @@ mod tests {
                 "{:?} missing `wallet` topic",
                 env
             );
+            // dcp is mainnet-only; demo rejects with "topic does not exist".
+            assert!(
+                !topics.contains(&"dcp"),
+                "{:?} must NOT subscribe to `dcp` (mainnet-only; demo rejects \
+                 with \"topic does not exist\" — visible noise per reconnect)",
+                env
+            );
         }
 
-        // Mainnet: must use `execution.fast` for low-latency fills.
+        // Mainnet: must use `execution.fast` for low-latency fills, and dcp for
+        // server-side cancel-on-disconnect.
         let mainnet_topics = BybitEnvironment::Mainnet.private_ws_topics();
+        assert!(
+            mainnet_topics.contains(&"dcp"),
+            "Mainnet must subscribe to `dcp` for server-side cancel-on-disconnect"
+        );
         assert!(
             mainnet_topics.contains(&"execution.fast"),
             "Mainnet must subscribe to `execution.fast` (~50ms vs `execution` ~300ms)"

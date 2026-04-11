@@ -104,24 +104,26 @@ impl BybitEnvironment {
     /// Private WS topics to subscribe per environment.
     /// 每個環境下要訂閱的私有 WS 主題列表。
     ///
-    /// IMPORTANT: `execution.fast` is **mainnet-only**. Bybit Demo's supported
-    /// private topics are `order, execution, position, wallet, greeks` only —
-    /// `execution.fast` is silently accepted (subscribe returns success:true)
-    /// but no fill data ever flows. Result: total_fills permanently 0 on demo.
-    /// Discovered 2026-04-11 via B-2 root-cause investigation; verified against
-    /// https://bybit-exchange.github.io/docs/v5/demo private-topic list.
-    /// 重要：`execution.fast` 僅 mainnet 支援。Bybit Demo 支援的私有 topic 僅
-    /// `order, execution, position, wallet, greeks` —`execution.fast` 會被靜默
-    /// 接受（subscribe 返回 success:true）但永遠收不到成交資料，導致
-    /// total_fills 永遠為 0。2026-04-11 B-2 根因調查發現並驗證。
+    /// IMPORTANT: Bybit Demo only supports `order, execution, position, wallet, greeks`.
+    /// Both `execution.fast` and `dcp` are mainnet-only — Bybit silently accepts
+    /// `execution.fast` (subscribe returns success:true but no data ever flows;
+    /// total_fills permanently 0) and explicitly rejects `dcp` with "topic does not
+    /// exist". Discovered 2026-04-11 via B-2 root-cause investigation; verified
+    /// against https://bybit-exchange.github.io/docs/v5/demo and live subscribe
+    /// confirmation logs.
+    /// 重要：Bybit Demo 僅支援 `order, execution, position, wallet, greeks`。
+    /// `execution.fast` 與 `dcp` 都只在 mainnet — `execution.fast` 會被靜默接受
+    /// 但永遠不推資料；`dcp` 會被明確拒絕 "topic does not exist"。
+    /// 2026-04-11 B-2 根因調查發現並驗證。
     pub fn private_ws_topics(&self) -> &'static [&'static str] {
         match self {
-            // Demo/LiveDemo/Testnet: regular `execution` topic (the only fill topic
-            // supported on the demo/testnet endpoint).
+            // Demo/LiveDemo/Testnet: regular `execution` topic. No `dcp` (rejected
+            // by demo). DCP server-side cancellation is mainnet-only anyway.
             Self::Demo | Self::LiveDemo | Self::Testnet => {
-                &["order", "execution", "position", "wallet", "dcp"]
+                &["order", "execution", "position", "wallet"]
             }
-            // Mainnet: `execution.fast` for ~50ms latency (vs ~300ms for `execution`).
+            // Mainnet: `execution.fast` for ~50ms latency, plus `dcp` for
+            // server-side cancel-on-disconnect notifications.
             Self::Mainnet => &["order", "execution.fast", "position", "wallet", "dcp"],
         }
     }
