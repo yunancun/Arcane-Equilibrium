@@ -567,9 +567,15 @@ impl TickPipeline {
                             continue;
                         }
 
+                        // M-2 (2026-04-11) audit fix: display the post-cap qty instead of
+                        // the strategy's raw pre-cap qty (e.g. grid_trading's 1e9 sentinel).
+                        // M-2 審計修復：顯示治理後 qty 而非策略原始 pre-cap qty
+                        // （例如 grid_trading 的 1e9 哨兵值）。
+                        let mut display_intent = intent.clone();
+                        display_intent.qty = final_qty;
                         self.recent_intents.push_back(TimestampedIntent {
                             timestamp_ms: event.ts_ms,
-                            intent: intent.clone(),
+                            intent: display_intent,
                             result: format!("pending_exchange:{}", order_link_id),
                         });
                         if self.recent_intents.len() > 50 {
@@ -605,9 +611,19 @@ impl TickPipeline {
                         }
                     } else if let Some(ref reason) = gate.rejected_reason {
                         strategy.on_rejection(intent, reason);
+                        // M-2: surface the post-Guardian capped qty if available so the
+                        // GUI doesn't show e.g. grid_trading's 1e9 raw sentinel.
+                        // M-2：可用時顯示 Guardian 治理後 qty，避免 GUI 顯示
+                        // grid_trading 的 1e9 原始哨兵。
+                        let mut display_intent = intent.clone();
+                        if let Some(vi) = gate.verdict_info.as_ref() {
+                            if let Some(mq) = vi.modified_qty {
+                                display_intent.qty = mq;
+                            }
+                        }
                         self.recent_intents.push_back(TimestampedIntent {
                             timestamp_ms: event.ts_ms,
-                            intent: intent.clone(),
+                            intent: display_intent,
                             result: format!("rejected:{}", reason),
                         });
                         if self.recent_intents.len() > 50 {
@@ -643,9 +659,17 @@ impl TickPipeline {
 
                     if result.submitted {
                         self.stats.total_intents += 1;
+                        // M-2: surface post-Guardian capped qty so the GUI doesn't
+                        // show raw strategy sentinels (e.g. grid_trading 1e9).
+                        let mut display_intent = intent.clone();
+                        if let Some(ref vi) = result.verdict_info {
+                            if let Some(mq) = vi.modified_qty {
+                                display_intent.qty = mq;
+                            }
+                        }
                         self.recent_intents.push_back(TimestampedIntent {
                             timestamp_ms: event.ts_ms,
-                            intent: intent.clone(),
+                            intent: display_intent,
                             result: "submitted".into(),
                         });
                         if self.recent_intents.len() > 50 {
@@ -786,9 +810,16 @@ impl TickPipeline {
                         }
                     } else if let Some(ref reason) = result.rejected_reason {
                         strategy.on_rejection(intent, reason);
+                        // M-2: surface post-Guardian capped qty if available.
+                        let mut display_intent = intent.clone();
+                        if let Some(ref vi) = result.verdict_info {
+                            if let Some(mq) = vi.modified_qty {
+                                display_intent.qty = mq;
+                            }
+                        }
                         self.recent_intents.push_back(TimestampedIntent {
                             timestamp_ms: event.ts_ms,
-                            intent: intent.clone(),
+                            intent: display_intent,
                             result: format!("rejected:{}", reason),
                         });
                         if self.recent_intents.len() > 50 {

@@ -115,6 +115,15 @@ const DEFAULT_GRID_COUNT: usize = 10;
 /// Large default qty — intent_processor P1 sizing will cap to actual risk budget.
 /// 大默認 qty — intent_processor P1 sizing 會裁剪到實際風險預算。
 const DEFAULT_QTY_PER_GRID: f64 = 1e9;
+/// M-2 (2026-04-11) audit fix: per-symbol backoff after a rejection so the strategy
+/// doesn't tight-loop re-emitting the same intent every tick. The rollback in
+/// `on_rejection` restores prev_cross_idx, which immediately re-fires next tick
+/// because price has not moved. 30s gives Guardian/cost_gate state a chance to
+/// change before retry.
+/// M-2 審計修復：拒絕後每幣種退避，避免策略每 tick 重發同一意圖緊湊迴圈。
+/// `on_rejection` 中的回滾會還原 prev_cross_idx，下一 tick 立即重發（價格未動）。
+/// 30 秒給 Guardian/cost_gate 狀態變化的機會再重試。
+const REJECT_BACKOFF_MS: u64 = 30_000;
 const FEE_PCT: f64 = 0.00055; // one-way taker
 /// Default adaptive range: ±10% of current price for initial/rebalance grid.
 /// 默認自適應範圍：當前價格 ±10% 用於初始化/再平衡網格。
@@ -192,6 +201,12 @@ pub struct GridTrading {
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
+    /// M-2: Per-symbol rejection backoff deadline (epoch ms). Set in `on_rejection`,
+    /// honored at the top of `on_tick` to prevent tight retry loops on persistent
+    /// guardian/cost_gate rejections.
+    /// M-2：每幣種拒絕退避截止時間（epoch ms）。`on_rejection` 中設定，
+    /// `on_tick` 開頭遵守，避免持續性 guardian/cost_gate 拒絕造成緊湊迴圈。
+    reject_cooldown_until_ms: HashMap<String, u64>,
 }
 
 /// Build grid levels with linear (arithmetic) spacing.
@@ -262,6 +277,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            reject_cooldown_until_ms: HashMap::new(),
         }
     }
 
@@ -292,6 +308,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            reject_cooldown_until_ms: HashMap::new(),
         }
     }
 
@@ -336,6 +353,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            reject_cooldown_until_ms: HashMap::new(),
         }
     }
 
@@ -577,9 +595,24 @@ impl Strategy for GridTrading {
     }
 
     /// RC-04: Revert per-symbol net_inventory, last_cross_idx, last_trade_ms on rejection.
+    /// M-2: Also arm a per-symbol rejection backoff using the emit timestamp captured
+    /// in `last_trade_ms` BEFORE the rollback overwrites it. This breaks tight retry
+    /// loops on persistent guardian/cost_gate rejections without losing state coherence.
     /// RC-04：拒絕時回滾該幣種的 net_inventory、last_cross_idx、last_trade_ms。
+    /// M-2：同時使用回滾前 `last_trade_ms` 中捕獲的發送時間戳設定該幣種拒絕退避。
+    /// 在不破壞狀態一致性的前提下打破持續性 guardian/cost_gate 拒絕的緊湊重試迴圈。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
+
+        // M-2: Capture emit timestamp before rollback overwrites it.
+        // M-2：在回滾覆蓋之前捕獲發送時間戳。
+        if let Some(&emit_ts) = self.last_trade_ms.get(sym) {
+            if emit_ts > 0 {
+                self.reject_cooldown_until_ms
+                    .insert(sym.clone(), emit_ts + REJECT_BACKOFF_MS);
+            }
+        }
+
         if let Some(prev) = self.prev_cross_idx.get(sym) {
             match prev {
                 Some(idx) => { self.last_cross_idx.insert(sym.clone(), *idx); }
@@ -637,6 +670,14 @@ impl Strategy for GridTrading {
         let hist_len = self.price_history.get(sym).map(|h| h.len()).unwrap_or(0);
         if hist_len > 0 && hist_len % 50 == 0 {
             self.update_ou_spacing(sym);
+        }
+
+        // M-2: Honor per-symbol rejection backoff before any cross detection.
+        // M-2：在任何 cross 偵測前遵守該幣種的拒絕退避。
+        if let Some(&until) = self.reject_cooldown_until_ms.get(sym) {
+            if ctx.timestamp_ms < until {
+                return vec![];
+            }
         }
 
         let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);

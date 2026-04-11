@@ -51,6 +51,7 @@ pub(super) fn spawn_order_dispatch(
     pipeline.set_shadow_channel(shadow_tx);
 
     let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
+    let icache_for_check = Arc::clone(icache);
     let (pending_reg_tx, pending_reg_rx) = mpsc::unbounded_channel::<PendingOrder>();
 
     tokio::spawn(async move {
@@ -58,6 +59,32 @@ pub(super) fn spawn_order_dispatch(
             if req.qty <= 0.0 {
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
                 continue;
+            }
+
+            // M-1 (2026-04-11) audit fix: pre-flight notional check for Market orders.
+            // Bybit V5 enforces a min notional (typically 5 USDT) but local validate_order
+            // skips that branch when req.price is None (Market orders carry no limit price).
+            // Use ShadowOrderRequest.price (last tick reference price) as a proxy for notional.
+            // Without this, sub-min orders round-trip to Bybit only to fail with retCode=10001.
+            // M-1 審計修復：市價單的名義值預檢。Bybit V5 強制最小名義值（通常 5 USDT）但
+            // 本地 validate_order 在 req.price=None（市價單無限價）時跳過該檢查。使用
+            // ShadowOrderRequest.price（最近 tick 參考價）作為名義值代理。
+            // 否則低於最小值的訂單會空跑到 Bybit 才被 retCode=10001 拒絕。
+            if let Some(spec) = icache_for_check.get(&req.symbol) {
+                if spec.min_notional > 0.0 && req.price > 0.0 {
+                    let est_notional = req.qty * req.price;
+                    if est_notional < spec.min_notional {
+                        warn!(
+                            symbol = %req.symbol,
+                            qty = req.qty,
+                            ref_price = req.price,
+                            est_notional = est_notional,
+                            min_notional = spec.min_notional,
+                            "order dispatch skipped: notional below exchange minimum / 訂單跳過：名義值低於交易所最小值"
+                        );
+                        continue;
+                    }
+                }
             }
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
