@@ -768,7 +768,7 @@ def get_metrics(
         return _paper_response({"available": False, "source": "rust_engine"})
     # Full metrics via compute_full_metrics (trade_metrics, drawdown, sharpe, etc.)
     # 完整指標通過 compute_full_metrics 計算
-    full = compute_full_metrics(rust_state)
+    full = compute_full_metrics(rust_state, engine_mode="paper")
     # Merge tick stats from engine / 合併引擎 tick 統計
     paper_snap = rust.get_snapshot(engine="paper") or {}
     stats = paper_snap.get("stats") or {}

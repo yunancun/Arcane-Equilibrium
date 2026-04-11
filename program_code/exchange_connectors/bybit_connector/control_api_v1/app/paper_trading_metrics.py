@@ -18,9 +18,71 @@ MODULE_NOTE (English):
   state data. v2 fixes: metrics now use real trade PnL (not just fees).
 """
 
+import logging
 import math
+import os
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DB fill read (fallback when engine snapshot has no fills)
+# DB 成交讀取（引擎快照無 fills 時的降級路徑）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _get_db_url() -> str | None:
+    """Resolve PostgreSQL connection URL from environment.
+    從環境變量解析 PostgreSQL 連接 URL。"""
+    return os.environ.get("OPENCLAW_DATABASE_URL") or None
+
+
+def fetch_fills_from_db(engine_mode: str = "paper") -> list[dict[str, Any]]:
+    """Read fills from trading.fills for a given engine_mode.
+    Lightweight psycopg2 query — called only when snapshot has no fills.
+    從 DB 讀取指定 engine_mode 的成交記錄。僅在快照無 fills 時調用。
+    """
+    db_url = _get_db_url()
+    if not db_url:
+        return []
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name
+                       FROM trading.fills
+                       WHERE engine_mode = %s
+                       ORDER BY ts ASC""",
+                    (engine_mode,),
+                )
+                cols = [d[0] for d in cur.description]
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+        fills = []
+        for row in rows:
+            d = dict(zip(cols, row))
+            # Convert timestamp to ms for balance series
+            # 轉換時間戳為毫秒供餘額序列使用
+            ts = d.get("ts")
+            if ts is not None:
+                d["ts_ms"] = int(ts.timestamp() * 1000) if hasattr(ts, "timestamp") else 0
+            # Ensure numeric types / 確保數值類型
+            d["qty"] = float(d.get("qty") or 0)
+            d["price"] = float(d.get("price") or 0)
+            d["fee"] = float(d.get("fee") or 0)
+            d["realized_pnl"] = float(d.get("realized_pnl") or 0)
+            d["side"] = d.get("side", "")
+            d["symbol"] = d.get("symbol", "")
+            fills.append(d)
+        logger.info("Loaded %d fills from DB for engine_mode=%s / 從 DB 載入 %d 筆成交", len(fills), engine_mode, len(fills))
+        return fills
+    except Exception as exc:
+        logger.warning("DB fill fetch failed for %s: %s / DB 成交讀取失敗", engine_mode, exc)
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -380,14 +442,32 @@ def compute_shadow_decision_metrics(shadow_decisions: list[dict]) -> dict[str, A
 # Full Metrics Report / 完整指标报告
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_full_metrics(state: dict[str, Any]) -> dict[str, Any]:
-    """Compute all performance metrics from paper trading state."""
+def compute_full_metrics(state: dict[str, Any], engine_mode: str = "paper") -> dict[str, Any]:
+    """Compute all performance metrics from paper trading state.
+    Falls back to DB fills when engine snapshot has none (e.g. after restart).
+    從引擎狀態計算性能指標。快照無 fills 時降級從 DB 讀取（如重啟後）。
+    """
     fills = state.get("fills", [])
     orders = state.get("orders", [])
     positions = state.get("positions", {})
     session = state.get("session", {})
     pnl = state.get("pnl", {})
     shadow_decisions = state.get("shadow_decisions", [])
+
+    # Fallback: snapshot has no fills → read from DB (all historical fills for this engine).
+    # 降級：快照無 fills → 從 DB 讀取此引擎的所有歷史成交。
+    if not fills:
+        fills = fetch_fills_from_db(engine_mode)
+        # Reconstruct PnL summary from DB fills if snapshot pnl is empty.
+        # 若快照 pnl 為空，從 DB fills 重建 PnL 摘要。
+        if fills and not pnl:
+            total_rpnl = sum(f.get("realized_pnl", 0.0) for f in fills)
+            total_fees = sum(f.get("fee", 0.0) for f in fills)
+            pnl = {
+                "realized_pnl": total_rpnl,
+                "total_fees_paid": total_fees,
+                "net_paper_pnl": total_rpnl - total_fees,
+            }
 
     initial_balance = session.get("initial_paper_balance_usdt", 10000.0)
 
