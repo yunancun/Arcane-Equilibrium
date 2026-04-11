@@ -371,7 +371,7 @@ async def _live_contraction_monitor() -> None:
                 # Close all positions (best-effort; error logged but not re-raised)
                 # 平倉（盡力而為；錯誤記錄但不重拋）
                 try:
-                    await _ipc_command("close_all_positions")
+                    await _ipc_command("close_all_positions", {"engine": "live"})
                     logger.info("Auto-halt: close_all_positions dispatched / 自動停止：已下發平倉命令")
                 except Exception as close_exc:
                     logger.error(
@@ -677,7 +677,7 @@ async def post_live_session_start(
     # 如果管線因上次 stop 而暫停，恢復管線
     result: dict = {}
     try:
-        result = await _ipc_command("resume_paper")
+        result = await _ipc_command("resume_paper", {"engine": "live"})
     except Exception as exc:
         logger.warning("IPC resume_paper skipped (engine may already be running): %s", exc)
 
@@ -758,7 +758,7 @@ async def post_live_session_stop(
     close_result: dict = {}
     if rust_online:
         try:
-            close_result = await _ipc_command("close_all_positions")
+            close_result = await _ipc_command("close_all_positions", {"engine": "live"})
         except Exception as exc:
             errors.append(f"close_positions: {exc}")
             logger.error("IPC close_all_positions failed (live stop): %s", exc)
@@ -791,7 +791,7 @@ async def post_live_session_pause(
     """
     _require_operator(actor)
     try:
-        result = await _ipc_command("pause_paper")
+        result = await _ipc_command("pause_paper", {"engine": "live"})
         return _live_response({
             "message": "Live session paused — no new orders / 實盤 session 已暫停",
             "source": "rust_engine",
@@ -840,7 +840,7 @@ async def post_live_session_resume(
     _live_monitor_task = asyncio.create_task(_live_contraction_monitor())
 
     try:
-        result = await _ipc_command("resume_paper")
+        result = await _ipc_command("resume_paper", {"engine": "live"})
         return _live_response({
             "message": "Live session resumed / 實盤 session 已恢復",
             "source": "rust_engine",
@@ -1105,7 +1105,7 @@ async def post_live_close_position(
 
     # Step 2: send IPC — Rust handles the actual close order.
     # 發 IPC — Rust 引擎執行平倉，Python 不介入下單。
-    ipc_params: dict = {"symbol": sym}
+    ipc_params: dict = {"symbol": sym, "engine": "live"}
     if hint_is_long is not None:
         ipc_params["is_long"] = hint_is_long
     if hint_qty is not None and hint_qty > 0:
@@ -1148,7 +1148,7 @@ async def post_live_close_all_positions(
     """
     _require_operator(actor)
     try:
-        result = await _ipc_command("close_all_positions")
+        result = await _ipc_command("close_all_positions", {"engine": "live"})
     except Exception as exc:
         logger.error("IPC close_all_positions failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"close_all_positions IPC failed: {exc}")

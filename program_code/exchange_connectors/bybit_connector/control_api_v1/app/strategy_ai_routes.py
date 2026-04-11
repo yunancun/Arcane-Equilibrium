@@ -217,7 +217,7 @@ async def post_demo_close_position(
 
     # Step 2: send IPC — Rust handles the actual close order via shadow channel.
     # 發 IPC — Rust 引擎通過 shadow channel 執行平倉，Python 不介入下單。
-    ipc_params: dict = {"symbol": sym}
+    ipc_params: dict = {"symbol": sym, "engine": "demo"}
     if hint_is_long is not None:
         ipc_params["is_long"] = hint_is_long
     if hint_qty is not None and hint_qty > 0:
@@ -261,7 +261,7 @@ async def post_demo_close_all_positions(
     from .paper_trading_routes import _ipc_command
     _require_operator_role(actor)
     try:
-        result = await _ipc_command("close_all_positions")
+        result = await _ipc_command("close_all_positions", {"engine": "demo"})
     except Exception as exc:
         logger.error("IPC close_all_positions failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"IPC error: {exc}")
