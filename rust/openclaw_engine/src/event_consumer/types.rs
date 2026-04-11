@@ -85,8 +85,13 @@ pub struct EventConsumerDeps {
     pub instruments: Option<Arc<InstrumentInfoCache>>,
     pub bootstrap_client: Option<Arc<BybitRestClient>>,
     pub shared_client: Option<Arc<BybitRestClient>>,
-    pub bybit_balance: Option<Arc<std::sync::RwLock<Option<f64>>>>,
-    pub api_pnl: Option<Arc<std::sync::RwLock<HashMap<String, f64>>>>,
+    // BLOCKER-6 / D12: parking_lot::RwLock is non-poisoning so a panic in
+    // one pipeline's WS callback cannot cascade-poison other pipelines'
+    // readers (cross-engine isolation).
+    // BLOCKER-6 / D12：parking_lot::RwLock 不會中毒，單一管線 WS 回調 panic
+    // 不會把其他管線的讀取者一併 poison（跨引擎隔離）。
+    pub bybit_balance: Option<Arc<parking_lot::RwLock<Option<f64>>>>,
+    pub api_pnl: Option<Arc<parking_lot::RwLock<HashMap<String, f64>>>>,
     /// Paper session command receiver — IPC sends Pause/Resume/CloseAll/Reset.
     /// 紙盤 session 命令接收端 — IPC 發送 Pause/Resume/CloseAll/Reset。
     pub pipeline_cmd_rx: Option<mpsc::UnboundedReceiver<PipelineCommand>>,

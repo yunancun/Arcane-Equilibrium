@@ -31,6 +31,7 @@ MODULE_NOTE (English):
   6. chmod 600 — file permissions tightened immediately after write
 """
 
+import asyncio
 import hashlib
 import hmac as hmac_lib
 import json
@@ -47,6 +48,17 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+# BLOCKER-7 fix: Module-level asyncio.Lock serialising save_api_key so that
+# two concurrent POSTs (e.g. demo + live with the same key) cannot race past
+# the cross-slot conflict check. Bybit validation network I/O is held inside
+# the lock, so worst case the second writer waits ~2-3 s — acceptable for an
+# operator-only endpoint.
+# BLOCKER-7 修復：模組層級 asyncio.Lock，串行化 save_api_key — 避免兩個並行
+# POST（如 demo 與 live 同一把 key）同時通過跨槽位衝突檢查後各自落盤。
+# Bybit 驗證網路 I/O 在鎖內進行，最壞情況第二個寫入等約 2-3 秒 —
+# 這是 operator-only 端點，代價可接受。
+_save_api_key_lock: asyncio.Lock = asyncio.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Router / 路由器
@@ -379,67 +391,81 @@ async def save_api_key(
     if any(c in api_key + api_secret for c in ("\n", "\r", "\x00", "/")):
         raise HTTPException(status_code=400, detail="API key contains invalid characters")
 
-    # 3E-7: Cross-slot conflict detection — same API key must not be used by two pipelines.
-    # 3E-7：跨槽位衝突檢測 — 同一 API key 不能同時被兩個管線使用。
-    _CONFLICT_PAIRS: dict[str, list[str]] = {
-        "demo": ["live", "live_demo"],
-        "live_demo": ["demo"],
-        "live": ["demo"],
-    }
-    for other_slot in _CONFLICT_PAIRS.get(slot, []):
-        existing_key = _read_key_file(other_slot, "api_key")
-        if existing_key and existing_key.strip() == api_key:
-            logger.warning(
-                "API key conflict: slot '%s' key matches '%s' slot (actor: %s)",
-                slot, other_slot, getattr(actor, "actor_id", "?"),
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=f"API key conflicts with '{other_slot}' slot. "
-                       "Each pipeline must use a distinct API key.",
-            )
-
-    # Validate via Bybit REST / 調用 Bybit REST 驗證
-    logger.info("Validating Bybit API key for slot '%s' (actor: %s)", slot, getattr(actor, "actor_id", "?"))
-    is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
-
-    if not is_valid:
-        logger.warning(
-            "Bybit key validation failed for slot '%s': %s (actor: %s)",
-            slot, err_msg, getattr(actor, "actor_id", "?"),
-        )
-        return {
-            "saved": False,
-            "validated": False,
-            "key_hint": "",
-            "error": err_msg,
+    # BLOCKER-7 fix: serialize the whole conflict-check → validate → write
+    # sequence under a module-level lock, otherwise two concurrent POSTs with
+    # the same key into different slots both pass the check before either writes.
+    # BLOCKER-7 修復：整段衝突檢查 → 驗證 → 寫入必須串行 —
+    # 否則兩個並行 POST 以同一 key 寫入不同槽位時會雙雙通過檢查。
+    async with _save_api_key_lock:
+        # 3E-7: Cross-slot conflict detection — same API key must not be used by two pipelines.
+        # 3E-7：跨槽位衝突檢測 — 同一 API key 不能同時被兩個管線使用。
+        _CONFLICT_PAIRS: dict[str, list[str]] = {
+            "demo": ["live", "live_demo"],
+            "live_demo": ["demo"],
+            "live": ["demo"],
         }
+        # BLOCKER-5 fix: Use hmac.compare_digest for constant-time comparison to
+        # prevent timing-attack leakage of existing keys. Encode to bytes first
+        # because compare_digest is strictest on same-type inputs.
+        # BLOCKER-5 修復：使用 hmac.compare_digest 做常數時間比較，避免透過
+        # 回應耗時洩漏既存 key。先 encode 為 bytes — compare_digest 對同型別輸入最安全。
+        api_key_b = api_key.encode("utf-8")
+        for other_slot in _CONFLICT_PAIRS.get(slot, []):
+            existing_key = _read_key_file(other_slot, "api_key")
+            if existing_key and hmac_lib.compare_digest(
+                existing_key.strip().encode("utf-8"), api_key_b
+            ):
+                logger.warning(
+                    "API key conflict: slot '%s' key matches '%s' slot (actor: %s)",
+                    slot, other_slot, getattr(actor, "actor_id", "?"),
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"API key conflicts with '{other_slot}' slot. "
+                           "Each pipeline must use a distinct API key.",
+                )
 
-    # Write to secrets directory / 寫入 secrets 目錄
-    # Also write bybit_endpoint metadata so Rust knows which server to connect to.
-    # live_demo slot → demo server; live slot → mainnet; demo slot → demo (informational).
-    # 同時寫入 bybit_endpoint 元數據，讓 Rust 知道連哪個伺服器。
-    # live_demo 槽 → demo 伺服器；live 槽 → 主網；demo 槽 → demo（參考用）。
-    _SLOT_ENDPOINT: dict[str, str] = {"demo": "demo", "live_demo": "demo", "live": "mainnet"}
-    try:
-        _write_key_file(slot, "api_key", api_key)
-        _write_key_file(slot, "api_secret", api_secret)
-        _write_key_file(slot, "bybit_endpoint", _SLOT_ENDPOINT.get(slot, "mainnet"))
-    except (OSError, PermissionError) as exc:
-        # Log full detail server-side; return generic message to client (no path leakage)
-        # 服務器端記錄完整細節；返回通用錯誤消息，不向客戶端洩漏文件路徑
-        logger.error("Failed to write API key for slot '%s': %s", slot, exc)
-        raise HTTPException(status_code=500, detail="Failed to persist API key. Check server logs.")
+        # Validate via Bybit REST / 調用 Bybit REST 驗證
+        logger.info("Validating Bybit API key for slot '%s' (actor: %s)", slot, getattr(actor, "actor_id", "?"))
+        is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
 
-    key_hint = _mask_key(api_key)
-    logger.info(
-        "API key saved for slot '%s', hint=%s (actor: %s)",
-        slot, key_hint, getattr(actor, "actor_id", "?"),
-    )
+        if not is_valid:
+            logger.warning(
+                "Bybit key validation failed for slot '%s': %s (actor: %s)",
+                slot, err_msg, getattr(actor, "actor_id", "?"),
+            )
+            return {
+                "saved": False,
+                "validated": False,
+                "key_hint": "",
+                "error": err_msg,
+            }
 
-    return {
-        "saved": True,
-        "validated": True,
-        "key_hint": key_hint,
-        "slot": slot,
-    }
+        # Write to secrets directory / 寫入 secrets 目錄
+        # Also write bybit_endpoint metadata so Rust knows which server to connect to.
+        # live_demo slot → demo server; live slot → mainnet; demo slot → demo (informational).
+        # 同時寫入 bybit_endpoint 元數據，讓 Rust 知道連哪個伺服器。
+        # live_demo 槽 → demo 伺服器；live 槽 → 主網；demo 槽 → demo（參考用）。
+        _SLOT_ENDPOINT: dict[str, str] = {"demo": "demo", "live_demo": "demo", "live": "mainnet"}
+        try:
+            _write_key_file(slot, "api_key", api_key)
+            _write_key_file(slot, "api_secret", api_secret)
+            _write_key_file(slot, "bybit_endpoint", _SLOT_ENDPOINT.get(slot, "mainnet"))
+        except (OSError, PermissionError) as exc:
+            # Log full detail server-side; return generic message to client (no path leakage)
+            # 服務器端記錄完整細節；返回通用錯誤消息，不向客戶端洩漏文件路徑
+            logger.error("Failed to write API key for slot '%s': %s", slot, exc)
+            raise HTTPException(status_code=500, detail="Failed to persist API key. Check server logs.")
+
+        key_hint = _mask_key(api_key)
+        logger.info(
+            "API key saved for slot '%s', hint=%s (actor: %s)",
+            slot, key_hint, getattr(actor, "actor_id", "?"),
+        )
+
+        return {
+            "saved": True,
+            "validated": True,
+            "key_hint": key_hint,
+            "slot": slot,
+        }

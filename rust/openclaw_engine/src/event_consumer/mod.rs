@@ -740,31 +740,31 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         }
 
                         // H1+H2 fix: Sync WS shared state → paper_state
+                        // BLOCKER-6: parking_lot RwLock — read()/write() return guards directly.
+                        // BLOCKER-6：parking_lot RwLock — read()/write() 直接回傳 guard。
                         if let Some(ref bal_arc) = shared_bybit_balance {
-                            if let Ok(guard) = bal_arc.read() {
-                                if let Some(bal) = *guard {
-                                    pipeline.paper_state.set_bybit_sync_balance(Some(bal));
-                                    // P0-5: Reconcile local balance from exchange only in exchange pipelines.
-                                    // 3E-4: pipeline_kind is immutable — no dynamic mode check needed.
-                                    // P0-5：僅在交易所管線中對賬本地餘額。3E-4：pipeline_kind 不可變。
-                                    let current_is_exchange = pipeline.pipeline_kind.is_exchange();
-                                    if current_is_exchange {
-                                        if let Some(old_bal) = pipeline.paper_state.reconcile_balance_from_exchange(bal) {
-                                            warn!(
-                                                old = format!("{:.2}", old_bal),
-                                                new = format!("{:.2}", bal),
-                                                "balance reconciled from exchange / 餘額已從交易所對賬"
-                                            );
-                                        }
+                            let maybe_bal = *bal_arc.read();
+                            if let Some(bal) = maybe_bal {
+                                pipeline.paper_state.set_bybit_sync_balance(Some(bal));
+                                // P0-5: Reconcile local balance from exchange only in exchange pipelines.
+                                // 3E-4: pipeline_kind is immutable — no dynamic mode check needed.
+                                // P0-5：僅在交易所管線中對賬本地餘額。3E-4：pipeline_kind 不可變。
+                                let current_is_exchange = pipeline.pipeline_kind.is_exchange();
+                                if current_is_exchange {
+                                    if let Some(old_bal) = pipeline.paper_state.reconcile_balance_from_exchange(bal) {
+                                        warn!(
+                                            old = format!("{:.2}", old_bal),
+                                            new = format!("{:.2}", bal),
+                                            "balance reconciled from exchange / 餘額已從交易所對賬"
+                                        );
                                     }
                                 }
                             }
                         }
                         if let Some(ref pnl_arc) = shared_api_pnl {
-                            if let Ok(guard) = pnl_arc.read() {
-                                for (symbol, &pnl) in guard.iter() {
-                                    pipeline.paper_state.set_api_unrealized_pnl(symbol, pnl);
-                                }
+                            let guard = pnl_arc.read();
+                            for (symbol, &pnl) in guard.iter() {
+                                pipeline.paper_state.set_api_unrealized_pnl(symbol, pnl);
                             }
                         }
 

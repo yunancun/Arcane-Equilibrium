@@ -1037,8 +1037,10 @@ async fn async_main(
     /// Exchange bindings produced by spawning a private WS supervisor.
     /// 啟動私有 WS 監管器後產生的交易所綁定。
     struct PrivateWsBindings {
-        bybit_balance: Arc<std::sync::RwLock<Option<f64>>>,
-        api_pnl: Arc<std::sync::RwLock<std::collections::HashMap<String, f64>>>,
+        // BLOCKER-6 / D12: parking_lot::RwLock for non-poisoning cross-pipeline isolation.
+        // BLOCKER-6 / D12：parking_lot::RwLock，不中毒 → 跨管線隔離。
+        bybit_balance: Arc<parking_lot::RwLock<Option<f64>>>,
+        api_pnl: Arc<parking_lot::RwLock<std::collections::HashMap<String, f64>>>,
         exchange_event_rx: mpsc::UnboundedReceiver<openclaw_engine::event_consumer::ExchangeEvent>,
         _ws_handle: tokio::task::JoinHandle<()>,
         _listener_handle: tokio::task::JoinHandle<()>,
@@ -1058,7 +1060,7 @@ async fn async_main(
         use openclaw_engine::bybit_private_ws::BybitPrivateWs;
         use openclaw_engine::event_consumer::ExchangeEvent;
         use openclaw_engine::execution_listener::ExecutionListener;
-        use std::sync::RwLock;
+        use parking_lot::RwLock;
 
         let (priv_tx, priv_rx) = mpsc::channel(512);
         let (exchange_event_tx, exchange_event_rx) = mpsc::unbounded_channel::<ExchangeEvent>();
@@ -1077,9 +1079,9 @@ async fn async_main(
             for coin_update in &wallet.coin {
                 if coin_update.coin.eq_ignore_ascii_case("USDT") {
                     if let Ok(bal) = coin_update.wallet_balance.parse::<f64>() {
-                        if let Ok(mut guard) = bal_ref.write() {
-                            *guard = Some(bal);
-                        }
+                        // BLOCKER-6: parking_lot RwLock — write() returns guard directly.
+                        // BLOCKER-6：parking_lot RwLock — write() 直接回傳 guard。
+                        *bal_ref.write() = Some(bal);
                         info!(
                             engine = %lbl_bal,
                             equity = %coin_update.equity,
@@ -1097,9 +1099,9 @@ async fn async_main(
         let lbl_pos = label.to_string();
         listener.set_on_position_update(move |pos| {
             if let Ok(pnl) = pos.unrealised_pnl.parse::<f64>() {
-                if let Ok(mut guard) = pnl_ref.write() {
-                    guard.insert(pos.symbol.clone(), pnl);
-                }
+                // BLOCKER-6: parking_lot RwLock — write() returns guard directly.
+                // BLOCKER-6：parking_lot RwLock — write() 直接回傳 guard。
+                pnl_ref.write().insert(pos.symbol.clone(), pnl);
             }
             debug!(
                 engine = %lbl_pos,
