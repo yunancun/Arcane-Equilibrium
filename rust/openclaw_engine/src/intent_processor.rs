@@ -1675,4 +1675,111 @@ mod tests {
         assert!(!result.approved, "Production without auth should reject");
         assert!(result.rejected_reason.unwrap().contains("governance_not_authorized"));
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // BLOCKER-10 / D15: Global notional cap tests
+    // D15 全局名目上限測試
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_d15_global_cap_disabled_when_zero() {
+        // cap=0 (default) → check returns None regardless of exposure.
+        // 上限=0（預設）→ 無論曝險多大都放行。
+        let proc = IntentProcessor::new();
+        assert!(proc.check_global_notional_cap(999_999.0).is_none());
+    }
+
+    #[test]
+    fn test_d15_global_cap_allows_under_limit() {
+        // Projected exposure under cap → allowed.
+        // 預估曝險低於上限 → 放行。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 100_000.0;
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(5000_00)); // 5000 USDT
+        proc.set_global_exposure(exposure);
+        assert!(proc.check_global_notional_cap(10_000.0).is_none()); // 5000+10000=15000 < 100000
+    }
+
+    #[test]
+    fn test_d15_global_cap_blocks_over_limit() {
+        // Projected exposure exceeds cap → blocked with reason.
+        // 預估曝險超出上限 → 阻擋並附理由。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 10_000.0;
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(9500_00)); // 9500 USDT
+        proc.set_global_exposure(exposure);
+        let result = proc.check_global_notional_cap(600.0); // 9500+600=10100 > 10000
+        assert!(result.is_some());
+        let reason = result.unwrap();
+        assert!(reason.contains("global_notional_cap"), "reason: {reason}");
+        assert!(reason.contains("10100.00"), "should show projected: {reason}");
+    }
+
+    #[test]
+    fn test_d15_global_cap_no_atomic_wired_allows() {
+        // No shared atomic → cap check is a no-op (returns None).
+        // 無共享原子量 → 上限檢查無效（返回 None）。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 10_000.0;
+        // global_exposure_usdt remains None
+        assert!(proc.check_global_notional_cap(999_999.0).is_none());
+    }
+
+    #[test]
+    fn test_d15_global_cap_exact_boundary_allows() {
+        // Projected exactly == cap → allowed (strict >).
+        // 預估剛好等於上限 → 放行（嚴格大於才阻擋）。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 10_000.0;
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(9000_00)); // 9000
+        proc.set_global_exposure(exposure);
+        assert!(proc.check_global_notional_cap(1000.0).is_none()); // 9000+1000=10000 == cap → ok
+    }
+
+    #[test]
+    fn test_d15_global_cap_negative_cap_disabled() {
+        // Negative cap value treated as disabled.
+        // 負上限值視為禁用。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = -100.0;
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(999_999_00));
+        proc.set_global_exposure(exposure);
+        assert!(proc.check_global_notional_cap(100_000.0).is_none());
+    }
+
+    #[test]
+    fn test_d15_paper_path_cap_blocks_intent() {
+        // Full process() path: cap blocks an intent that would otherwise pass.
+        // 完整 process() 路徑：上限阻擋原本會通過的意圖。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 100.0; // very low cap
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(99_00)); // 99 USDT
+        proc.set_global_exposure(exposure);
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true); // qty=0.01 → notional=~200 USDT (after P1 sizing)
+        let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+        assert!(!result.submitted, "cap should block");
+        assert!(result.rejected_reason.unwrap().contains("global_notional_cap"));
+    }
+
+    #[test]
+    fn test_d15_exchange_path_cap_blocks_intent() {
+        // Full process_gates_only() path: cap blocks an exchange intent.
+        // 完整 process_gates_only() 路徑：上限阻擋交易所意圖。
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.limits.global_notional_cap_usdt = 100.0;
+        let exposure = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(99_00));
+        proc.set_global_exposure(exposure);
+        let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+        let mut state = PaperState::new(10_000.0);
+        state.set_latest_price("BTC", 50_000.0);
+        let intent = make_intent("BTC", true);
+        let result = proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Production);
+        // Production needs auth, so it'll reject on governance first. Use Exploration.
+        let result = proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Validation);
+        assert!(!result.approved, "cap should block exchange path");
+        assert!(result.rejected_reason.unwrap().contains("global_notional_cap"));
+    }
 }

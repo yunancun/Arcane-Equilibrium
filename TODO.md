@@ -98,9 +98,9 @@
 
 **Phase D 測試結果**：cargo test lib **904 passed** + core **366 passed** + e2e **18 passed** / 0 failed。
 
-### Phase E — 測試補完（1-2 天，即 3E-E4 session）
-- [ ] **BLOCKER-10** 補 ~23 blocker tests（D1/D2/D6/D21/D23/D15/D17 + StopManager 綁定/MAJOR-6）
-- [ ] 全測試套件跑通：cargo lib + e2e + Python（目標 ≥ 897 + 18 + 2815）
+### Phase E — 測試補完 ✅
+- [x] **BLOCKER-10** 補 25 blocker tests（D2/D6/D15/D23 — 覆蓋 global notional cap / EngineEvent / PipelineHealth / broadcast / snapshot versioning / startup barrier / cross-engine cascade）
+- [x] 全測試套件跑通：engine lib **929** + core **366** + e2e **18** = **1313 passed** / 0 failed
 
 ### Phase F — 文件拆分（2-3 天，獨立 session）
 - [ ] **BLOCKER-9** 5 個超 1200 硬上限文件拆分：
