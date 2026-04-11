@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-11
 
+### 3E-ARCH MEGA-BLOCKER-0：真正三引擎獨立並行（2026-04-11 · commit e012faa）
+
+完成原始 3E-ARCH Phase C（3E-10.1）設計中未實現的「三個獨立 spawn」。**startup.rs**：新增 `ExchangePipelineBindings` struct + `build_exchange_pipeline()` 按 API key 獨立構建每條交易所管線（DCP/auto-margin/fee/balance/Private WS 全封裝）；刪除 `determine_primary_kind()` / `detect_available_pipelines()` / `fetch_exchange_balance()`。**main.rs**：刪除「primary+alongside」二管線模型，改為三獨立 spawn（Paper 永遠啟動 + Demo 條件 + Live 條件 D17 OS thread）；`Vec<Sender>` 動態扇出取代固定 primary+paper 雙通道；三獨立 IPC cmd channels 全填充 `EngineCommandChannels`；D23 per-exchange Reconciler（Live + Demo 各自獨立）；有序 shutdown Live→Demo→Paper。2 files, +482/-469 行。929 lib + 366 core + 18 e2e pass。
+
 ### 3E-E2 Phase G 殘留修復：M-3/M-4 + 8 MINOR（2026-04-11 · commit 910d2bc）
 
 M-3：`on_tick.rs:497,616` GovernanceProfile hardcoded → `self.pipeline_kind.governance_profile()`（Demo 現用 Validation cost_gate）。M-4：Live pipeline 線程加 `catch_unwind` + panic → `Crashed` 廣播 + health=Down；shutdown JoinError panic 記錄而非靜默丟棄。m-1：`handle_get_state()` 合併 2 次 snapshot 讀取為 1 次。m-2：`std::ptr::eq` → `primary_label()` 字串比對。m-3：`determine_primary_kind()` 3→1 次調用。m-5：`.unwrap()` → `.expect()` with context。m-8：`AuditWriter` 新建檔案 chmod 0600。殘留僅 M-1/M-2 文件大小監控。929 lib + 366 core + 18 e2e pass。

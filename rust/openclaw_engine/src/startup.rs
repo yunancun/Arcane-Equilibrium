@@ -4,7 +4,7 @@
 //! 私有 WS 監管、信號處理、啟動標語。
 
 use openclaw_engine::account_manager::AccountManager;
-use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment, BybitRestClient};
+use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::config::{
     load_toml_or_default, BudgetConfig, ConfigManager, ConfigStore, LearningConfig, RiskConfig,
 };
@@ -47,57 +47,6 @@ pub(crate) fn paper_balance_from_toml() -> Option<f64> {
     let table: toml::Table = toml::from_str(&contents).ok()?;
     let val = table.get("initial_balance_usdt")?.as_float()?;
     if val > 0.0 { Some(val) } else { None }
-}
-
-/// Fetch account balance from Bybit API only (no env/TOML fallback).
-/// Used for primary engine (Live/Demo) and for demo-balance pre-init.
-/// 僅從 Bybit API 讀取帳戶餘額（無 env/TOML 回退）。
-/// 用於主引擎（Live/Demo）和 demo 餘額預初始化。
-pub(crate) async fn fetch_exchange_balance(env: BybitEnvironment) -> f64 {
-    // Env var override still respected for backward compat
-    // 向後兼容仍尊重環境變數覆蓋
-    if let Some(env_bal) = paper_balance_from_env() {
-        info!(
-            balance = format!("{:.2}", env_bal),
-            "using OPENCLAW_PAPER_BALANCE env override / 使用環境變量覆蓋餘額"
-        );
-        return env_bal;
-    }
-
-    match BybitRestClient::new(env, None, None) {
-        Ok(client) if client.has_credentials() => {
-            let acct = AccountManager::new();
-            match acct.refresh_balance(&client).await {
-                Ok(_) => {
-                    let bal = acct.usdt_wallet_balance();
-                    if bal > 0.0 {
-                        info!(
-                            balance = format!("{:.2}", bal),
-                            "fetched Bybit USDT balance / 已從 Bybit 讀取 USDT 餘額"
-                        );
-                        return bal;
-                    }
-                    warn!("Bybit USDT balance is 0, using default / USDT 餘額為 0，使用預設值");
-                }
-                Err(e) => {
-                    warn!(error = %e, "failed to fetch Bybit balance, using default / 讀取餘額失敗");
-                }
-            }
-        }
-        Ok(_) => {
-            info!("no Bybit API credentials — using default balance / 無 API 憑證，使用預設餘額");
-        }
-        Err(e) => {
-            warn!(error = %e, "failed to create Bybit client / 創建 Bybit 客戶端失敗");
-        }
-    }
-
-    let default = 10_000.0;
-    info!(
-        balance = format!("{:.2}", default),
-        "using default balance / 使用預設餘額"
-    );
-    default
 }
 
 /// Resolve paper initial balance with unified priority (MAJOR-4):
@@ -155,42 +104,9 @@ pub(crate) async fn resolve_paper_initial_balance() -> f64 {
     DEFAULT_BALANCE
 }
 
-/// 3E-10.1: Detect which pipelines should start based on API key availability.
-/// Paper always starts. Demo starts if demo slot has credentials.
-/// Live starts if live slot has credentials.
-///
-/// 3E-10.1：根據 API key 可用性決定啟動哪些管線。
-/// Paper 始終啟動。Demo 在 demo 槽有憑證時啟動。
-/// Live 在 live 槽有憑證時啟動。
-pub(crate) fn detect_available_pipelines() -> (bool, bool) {
-    let demo_available = BybitRestClient::new(BybitEnvironment::Demo, None, None)
-        .map(|c| c.has_credentials())
-        .unwrap_or(false);
-    let live_available = BybitRestClient::new(live_bybit_environment(), None, None)
-        .map(|c| c.has_credentials())
-        .unwrap_or(false);
-    (demo_available, live_available)
-}
-
-/// Determine the "primary" pipeline kind (3E-10.1 interim).
-/// Priority: Live > Demo > Paper. Paper always runs alongside if primary is exchange.
-/// In the future (Phase D), all three will be fully independent.
-///
-/// 決定"主"管線類型（3E-10.1 過渡方案）。
-/// 優先級：Live > Demo > Paper。主管線為交易所時 Paper 始終並行。
-pub(crate) fn determine_primary_kind() -> PipelineKind {
-    let (demo_available, live_available) = detect_available_pipelines();
-    if live_available {
-        info!("live API key detected → primary=Live / 偵測到 live API key → 主管線=Live");
-        PipelineKind::Live
-    } else if demo_available {
-        info!("demo API key detected → primary=Demo / 偵測到 demo API key → 主管線=Demo");
-        PipelineKind::Demo
-    } else {
-        info!("no exchange API keys → primary=Paper / 無交易所 API key → 主管線=Paper");
-        PipelineKind::Paper
-    }
-}
+// 3E-ARCH: detect_available_pipelines() and determine_primary_kind() removed.
+// Pipeline availability is now determined by build_exchange_pipeline() returning Some/None.
+// 管線可用性現由 build_exchange_pipeline() 返回 Some/None 決定。
 
 /// Parse replay CLI arguments from std::env::args().
 /// 從命令行參數解析 replay 模式選項。
@@ -480,6 +396,141 @@ pub(crate) fn run_replay_mode(args: ReplayArgs) {
         output = %output_path,
         "replay complete / 回放完成"
     );
+}
+
+/// Per-exchange pipeline resources — one instance per Demo/Live pipeline.
+/// 每條交易所管線的獨立資源（Demo/Live 各一份）。
+pub(crate) struct ExchangePipelineBindings {
+    pub env: BybitEnvironment,
+    pub rest_client: Arc<BybitRestClient>,
+    pub account_manager: Arc<AccountManager>,
+    pub taker_fee: Option<f64>,
+    pub initial_balance: f64,
+    pub ws_bindings: PrivateWsBindings,
+    pub risk_level: Arc<std::sync::atomic::AtomicU8>,
+    pub health: Arc<std::sync::atomic::AtomicU8>,
+}
+
+/// Build exchange pipeline bindings if credentials exist for the given environment.
+/// Returns None if no API key found → that pipeline will not start.
+///
+/// 為指定環境構建交易所管線綁定（若有 API key）。
+/// 若無 API key 則返回 None → 該管線不啟動。
+pub(crate) async fn build_exchange_pipeline(
+    kind: PipelineKind,
+    env: BybitEnvironment,
+    cancel: CancellationToken,
+    cfg_snapshot: &openclaw_engine::config::EngineBootstrap,
+) -> Option<ExchangePipelineBindings> {
+    let rest_client = match BybitRestClient::new(env, None, None) {
+        Ok(c) if c.has_credentials() => c,
+        Ok(_) => {
+            info!(
+                kind = %kind,
+                "no API credentials for {kind} pipeline — skipped / 無 API 憑證，跳過 {kind} 管線"
+            );
+            return None;
+        }
+        Err(e) => {
+            warn!(kind = %kind, error = %e, "Bybit client init failed for {kind} / Bybit 客戶端初始化失敗");
+            return None;
+        }
+    };
+
+    let (api_key, api_secret) = rest_client.credentials();
+    let api_key = api_key.to_string();
+    let api_secret = api_secret.to_string();
+    let client_arc = Arc::new(rest_client);
+
+    // DCP — Disconnected Cancel Protection / 斷連取消保護
+    if cfg_snapshot.dcp_enabled {
+        use openclaw_engine::platform_client::PlatformClient;
+        let platform = PlatformClient::new(Arc::clone(&client_arc));
+        match platform.set_dcp(cfg_snapshot.dcp_time_window).await {
+            Ok(()) => info!(kind = %kind, window = cfg_snapshot.dcp_time_window, "DCP enabled / DCP 已啟用"),
+            Err(e) => warn!(kind = %kind, error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗"),
+        }
+    }
+
+    // Auto-add-margin for existing positions / 現有持倉自動追保
+    if cfg_snapshot.auto_add_margin {
+        use openclaw_engine::order_manager::OrderCategory;
+        use openclaw_engine::position_manager::PositionManager;
+        let pos_mgr = PositionManager::new(Arc::clone(&client_arc));
+        if let Ok(positions) = pos_mgr.get_positions(OrderCategory::Linear, None).await {
+            for pos in &positions {
+                if pos.size > 0.0 {
+                    match pos_mgr.set_auto_add_margin(OrderCategory::Linear, &pos.symbol, 1, None).await {
+                        Ok(()) => info!(kind = %kind, symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用"),
+                        Err(e) => warn!(kind = %kind, symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗"),
+                    }
+                }
+            }
+        }
+    }
+
+    // Fetch fee rates / 獲取費率
+    let acct = Arc::new(AccountManager::new());
+    let taker_fee = match acct.refresh_fee_rates(&*client_arc, "linear").await {
+        Ok(count) => {
+            let rate = acct.taker_fee("BTCUSDT");
+            info!(kind = %kind, symbols = count, taker_rate = format!("{:.5}", rate), "fee rates loaded / 費率已加載");
+            Some(rate)
+        }
+        Err(e) => {
+            warn!(kind = %kind, error = %e, "fee rate fetch failed / 費率獲取失敗");
+            None
+        }
+    };
+
+    // Fetch initial balance / 獲取初始餘額
+    let initial_balance = {
+        let bal_acct = AccountManager::new();
+        match bal_acct.refresh_balance(&*client_arc).await {
+            Ok(_) => {
+                let bal = bal_acct.usdt_wallet_balance();
+                if bal > 0.0 {
+                    info!(kind = %kind, balance = format!("{:.2}", bal), "exchange balance fetched / 交易所餘額已獲取");
+                    bal
+                } else {
+                    warn!(kind = %kind, "exchange balance is 0 / 交易所餘額為 0");
+                    10_000.0
+                }
+            }
+            Err(e) => {
+                warn!(kind = %kind, error = %e, "balance fetch failed, using default / 餘額獲取失敗，使用默認值");
+                10_000.0
+            }
+        }
+    };
+
+    // Spawn Private WS supervisor (D21: per-engine isolation) / 啟動私有 WS 監管器
+    let label = match env {
+        BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
+        BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
+    };
+    let ws_bindings = spawn_private_ws_supervisor(api_key, api_secret, env, label, cancel);
+
+    let risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
+        openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
+    ));
+    let health = Arc::new(std::sync::atomic::AtomicU8::new(
+        openclaw_engine::tick_pipeline::PipelineHealth::Running as u8,
+    ));
+
+    info!(kind = %kind, env = ?env, balance = format!("{:.2}", initial_balance),
+        "exchange pipeline bindings built / 交易所管線綁定已構建");
+
+    Some(ExchangePipelineBindings {
+        env,
+        rest_client: client_arc,
+        account_manager: acct,
+        taker_fee,
+        initial_balance,
+        ws_bindings,
+        risk_level,
+        health,
+    })
 }
 
 /// Exchange bindings produced by spawning a private WS supervisor.
