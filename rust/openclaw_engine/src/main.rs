@@ -817,8 +817,22 @@ async fn async_main(
         let thread_handle = std::thread::Builder::new()
             .name("oc-live-rt".into())
             .spawn(move || {
+                // worker_threads(4): bumped from 2 (2026-04-11) after observing
+                // 1808 "live pipeline lagging, tick dropped" warnings in a single
+                // session. Live runs WS reader + tick consumer + dispatch task +
+                // reconciler poller + private WS auth/heartbeat concurrently;
+                // 2 workers serialized them too tightly and the bounded tick
+                // channel overflowed under bursty market data. 4 workers gives
+                // headroom while keeping Live's runtime isolated from main
+                // (paper/demo + scanner + everything else still on default rt).
+                // worker_threads(4)：2026-04-11 從 2 提升 — 一個 session 觀察到
+                // 1808 條 "live pipeline lagging, tick dropped" 警告。Live 同時跑
+                // WS reader + tick consumer + 派發任務 + reconciler poller + 私有
+                // WS auth/heartbeat，2 workers 串行化過緊導致 bounded tick 通道
+                // 在突發行情下溢出。4 workers 留出餘裕，仍保持 Live runtime 與
+                // 主 runtime（paper/demo + scanner 等）的隔離。
                 let live_rt = tokio::runtime::Builder::new_multi_thread()
-                    .worker_threads(2)
+                    .worker_threads(4)
                     .enable_all()
                     .thread_name("oc-live")
                     .build()
