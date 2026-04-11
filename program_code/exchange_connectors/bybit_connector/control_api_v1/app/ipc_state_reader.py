@@ -156,11 +156,25 @@ class RustSnapshotReader:
             return False
         return self._engine_file_ages.get(engine, 999999.0) < _STALENESS_THRESHOLD_SECONDS
 
-    def get_snapshot(self) -> Optional[dict[str, Any]]:
+    def get_snapshot(self, engine: Optional[str] = None) -> Optional[dict[str, Any]]:
         """
-        Get the full primary pipeline snapshot (or None if unavailable).
-        獲取主管線完整快照（不可用時返回 None）。
+        Get the full pipeline snapshot.
+
+        Default (engine=None): reads the legacy compat pipeline_snapshot.json
+        (preserved for backward compat with pre-3E-ARCH unit tests / single-engine
+        deployments).
+
+        Pass engine="paper"/"demo"/"live" to read the per-engine snapshot file
+        directly — REQUIRED in 3E-ARCH for paper-tab routes, otherwise the compat
+        file is whichever engine has is_primary=true (Live > Demo > Paper) and
+        paper-tab callers will accidentally read Live data.
+
+        獲取完整管線快照。預設讀 compat 檔（向後兼容單元測試 / 單引擎部署）。
+        3E-ARCH 下 paper-tab 路由必須顯式傳 engine="paper"，否則 compat 檔由
+        is_primary 引擎寫入（Live > Demo > Paper 優先序），會誤讀 Live 數據。
         """
+        if engine and engine in _VALID_ENGINES:
+            return self.get_engine_snapshot(engine)
         with self._lock:
             return self._refresh_cache()
 
@@ -188,14 +202,21 @@ class RustSnapshotReader:
     def get_paper_state(self, mode: str = "paper", engine: Optional[str] = None) -> Optional[dict[str, Any]]:
         """
         Get paper trading state (balance, positions, pnl, fees).
-        3E-5: if `engine` is specified, read from per-engine snapshot file.
-        Otherwise falls back to primary snapshot for backward compatibility.
-        獲取紙盤交易狀態。3E-5：指定 engine 時從每引擎快照讀取。
+        3E-ARCH: routes through per-engine snapshot file by default (mode="paper").
+        Pass engine="demo"/"live" or mode="demo"/"live" to read other engines.
+
+        ★ Bugfix 2026-04-11: previously defaulted to the compat pipeline_snapshot.json,
+        which under 3E-ARCH is written by whichever engine has is_primary=true (Live > Demo > Paper).
+        That made the Paper GUI tab show Live engine balance + zero positions when all
+        three engines ran. Now defaults to pipeline_snapshot_paper.json.
+        ★ 修復 2026-04-11：之前預設讀取 compat pipeline_snapshot.json，
+        該檔在 3E-ARCH 下由 is_primary=true 的引擎寫入（Live > Demo > Paper 優先序），
+        導致 Paper GUI 顯示 Live 餘額 + 零持倉。現在預設讀 pipeline_snapshot_paper.json。
         """
-        if engine:
-            snap = self.get_engine_snapshot(engine)
-        else:
-            snap = self.get_snapshot()
+        target = engine or mode or "paper"
+        if target not in _VALID_ENGINES:
+            target = "paper"
+        snap = self.get_engine_snapshot(target)
         if snap is None:
             return None
         return snap.get("paper_state")

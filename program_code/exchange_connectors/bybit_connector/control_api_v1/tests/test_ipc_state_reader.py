@@ -303,6 +303,151 @@ class TestErrorHandling(unittest.TestCase):
 
 
 # ===========================================================================
+# 4b. 3E-ARCH per-engine routing (regression for paper-tab Live data bug)
+# 4b. 3E-ARCH 每引擎路由（修復 paper tab 顯示 Live 數據的回歸測試）
+# ===========================================================================
+
+
+class TestPerEngineRouting(unittest.TestCase):
+    """
+    3E-ARCH regression: when all three per-engine snapshot files exist alongside
+    the compat pipeline_snapshot.json (which under 3E-ARCH is written by whichever
+    engine has is_primary=true — Live > Demo > Paper priority), the paper-tab
+    callers MUST read pipeline_snapshot_paper.json, not the compat file.
+
+    Before the 2026-04-11 fix, get_paper_state() and friends defaulted to the
+    compat reader, so the Paper GUI tab showed Live engine balance + zero
+    positions when all three engines were running.
+
+    3E-ARCH 回歸：當三個 per-engine 檔與 compat 檔並存（compat 由 is_primary
+    引擎寫入，Live > Demo > Paper 優先序），paper-tab 呼叫者必須讀
+    pipeline_snapshot_paper.json，不能讀 compat。修復前 paper tab 會顯示 Live
+    餘額 + 零持倉。
+
+    Sentinel balances are deliberately obvious-fake values (11111 / 22222 / 33333)
+    so it's clear at a glance these are test fixtures, not real engine state.
+    哨兵餘額刻意用顯而易見的假數值（11111 / 22222 / 33333），一眼就知道是
+    測試 fixture，不是真實引擎狀態。
+    """
+
+    # Sentinel balances — deliberately fake / 哨兵餘額——刻意用假值
+    PAPER_SENTINEL_BALANCE = 11111.11
+    DEMO_SENTINEL_BALANCE = 22222.22
+    LIVE_SENTINEL_BALANCE = 33333.33
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        # Compat file written by Live engine (is_primary=true) — what the bug saw
+        # Compat 檔由 Live 引擎寫入（is_primary=true）— 即 bug 觀察到的狀況
+        live_data = {
+            "trading_mode": "live",
+            "paper_state": {
+                "balance": self.LIVE_SENTINEL_BALANCE,
+                "peak_balance": self.LIVE_SENTINEL_BALANCE,
+                "total_realized_pnl": 0.0,
+                "total_fees": 0.0,
+                "trade_count": 0,
+                "positions": [],
+            },
+            "latest_prices": {},
+            "stats": {},
+            "source": "rust_engine",
+        }
+        paper_data = {
+            "trading_mode": "paper",
+            "paper_state": {
+                "balance": self.PAPER_SENTINEL_BALANCE,
+                "peak_balance": 99999.99,
+                "total_realized_pnl": -10.0,
+                "total_fees": 5.0,
+                "trade_count": 4,
+                "positions": [
+                    {
+                        "symbol": "FAKEUSDT",
+                        "is_long": True,
+                        "qty": 0.01,
+                        "entry_price": 12345.0,
+                        "best_price": 12345.0,
+                        "entry_fee": 1.0,
+                        "entry_ts_ms": 1700000000000,
+                        "unrealized_pnl": 0.0,
+                    }
+                ],
+            },
+            "latest_prices": {"FAKEUSDT": 12345.0},
+            "stats": {"total_ticks": 100},
+            "source": "rust_engine",
+            "recent_intents": [{"id": "paper_intent_1"}],
+            "recent_fills": [{"id": "paper_fill_1"}],
+        }
+        demo_data = {
+            "trading_mode": "demo",
+            "paper_state": {
+                "balance": self.DEMO_SENTINEL_BALANCE,
+                "peak_balance": self.DEMO_SENTINEL_BALANCE,
+                "total_realized_pnl": 0.0,
+                "total_fees": 0.0,
+                "trade_count": 0,
+                "positions": [],
+            },
+            "latest_prices": {},
+            "stats": {},
+            "source": "rust_engine",
+        }
+        with open(os.path.join(self._tmpdir.name, "pipeline_snapshot.json"), "w") as f:
+            json.dump(live_data, f)
+        with open(os.path.join(self._tmpdir.name, "pipeline_snapshot_live.json"), "w") as f:
+            json.dump(live_data, f)
+        with open(os.path.join(self._tmpdir.name, "pipeline_snapshot_paper.json"), "w") as f:
+            json.dump(paper_data, f)
+        with open(os.path.join(self._tmpdir.name, "pipeline_snapshot_demo.json"), "w") as f:
+            json.dump(demo_data, f)
+        self.reader = RustSnapshotReader(data_dir=self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_get_paper_state_default_routes_to_paper_engine(self):
+        """get_paper_state() with no args MUST return paper engine data, not compat (Live)."""
+        state = self.reader.get_paper_state()
+        self.assertIsNotNone(state)
+        self.assertEqual(state["balance"], self.PAPER_SENTINEL_BALANCE)
+        self.assertEqual(len(state["positions"]), 1)
+        self.assertEqual(state["positions"][0]["symbol"], "FAKEUSDT")
+
+    def test_get_paper_state_explicit_paper(self):
+        """get_paper_state(engine='paper') returns paper data."""
+        state = self.reader.get_paper_state(engine="paper")
+        self.assertEqual(state["balance"], self.PAPER_SENTINEL_BALANCE)
+
+    def test_get_paper_state_explicit_demo(self):
+        """get_paper_state(engine='demo') returns demo data."""
+        state = self.reader.get_paper_state(engine="demo")
+        self.assertEqual(state["balance"], self.DEMO_SENTINEL_BALANCE)
+
+    def test_get_paper_state_explicit_live(self):
+        """get_paper_state(engine='live') returns live data."""
+        state = self.reader.get_paper_state(engine="live")
+        self.assertEqual(state["balance"], self.LIVE_SENTINEL_BALANCE)
+
+    def test_get_paper_state_via_mode_param(self):
+        """get_paper_state(mode='demo') routes through mode (engine alias)."""
+        state = self.reader.get_paper_state(mode="demo")
+        self.assertEqual(state["balance"], self.DEMO_SENTINEL_BALANCE)
+
+    def test_get_snapshot_default_still_reads_compat(self):
+        """get_snapshot() with no args reads compat (legacy callers untouched)."""
+        snap = self.reader.get_snapshot()
+        self.assertEqual(snap["trading_mode"], "live")  # compat = Live under 3E-ARCH
+
+    def test_get_snapshot_with_engine_param_routes_per_engine(self):
+        """get_snapshot(engine='paper') routes to per-engine file."""
+        snap = self.reader.get_snapshot(engine="paper")
+        self.assertEqual(snap["trading_mode"], "paper")
+        self.assertEqual(snap["paper_state"]["balance"], self.PAPER_SENTINEL_BALANCE)
+
+
+# ===========================================================================
 # 5. Singleton / 單例
 # ===========================================================================
 

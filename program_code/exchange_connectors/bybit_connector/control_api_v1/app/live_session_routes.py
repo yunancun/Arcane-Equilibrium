@@ -1041,11 +1041,12 @@ async def get_live_fills(
             return _live_response({"source": "rust_engine", "list": fills, "count": len(fills)})
         except Exception as e:
             logger.warning("Rust fills fetch failed for live endpoint: %s", e)
-    # Fallback: engine recent fills / 降級：引擎最近成交
+    # Fallback: engine recent fills (3E-ARCH: read live engine snapshot)
+    # 降級：引擎最近成交（3E-ARCH：讀 live 引擎快照）
     rust = get_rust_reader()
-    if rust.is_available():
+    if rust.is_engine_available("live"):
         try:
-            recent = rust.get_recent_fills()
+            recent = rust.get_recent_fills(mode="live")
             return _live_response({"source": "engine_state", "list": recent or [], "count": len(recent or [])})
         except Exception:
             pass

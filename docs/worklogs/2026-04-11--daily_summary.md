@@ -1,7 +1,7 @@
 # 2026-04-11 Daily Summary — 3E-ARCH 三引擎並行架構 · 多角色審計 · Phase A-G 修復
 
-**測試基線（收盤）**：929 engine lib + 366 core + 18 e2e = **1313 passed** / 0 failed / 0 ignored · Python 2792 passed。
-**今日 commit 數**：18（`6e42c42` → `2f93738`）
+**測試基線（收盤）**：930 engine lib + 366 core + 18 e2e = **1314 passed** / 0 failed / 0 ignored · Python 2792 + 6 ipc_state_reader regression passed。
+**今日 commit 數**：20+（`6e42c42` → `c9d9bc5` → 本次 paper-tab 路由修復）
 
 ---
 
@@ -122,6 +122,12 @@
 - `2473efb` fix(demo): GUI 平倉透過 Rust shadow channel
 - `6bafa4e` fix(live): 同 close position hint 修復套用 live 路由
 - `56c648f` fix(engine): paper_only 模式 + cost_gate 冷啟動 exploration（為數據累積）
+- `c9d9bc5` fix(3e-arch): `with_kind()` 必須持久化 `pipeline_kind` 字段（三引擎搶寫同一份 paper_state.json）
+- **本次** fix(3e-arch): Paper GUI tab 顯示 Live 引擎數據 — Python `RustSnapshotReader` 路由層修復
+  - **根因**：`main.rs:563-708` `is_primary` 優先序 Live > Demo > Paper → Live 寫 compat `pipeline_snapshot.json` → `get_paper_state()` 預設讀 compat → paper-tab 顯示 Live 餘額
+  - **修復範圍**：`ipc_state_reader.py` 預設改為 `get_engine_snapshot("paper")` + `paper_trading_routes.py` 9 call site 顯式 `engine="paper"` + `risk_routes.py` 3 call site + `strategy_read_routes.py` + `live_session_routes.py` fills 降級
+  - **回歸測試**：`TestPerEngineRouting` class 6 tests，使用 11111.11/22222.22/33333.33 哨兵餘額（避免與真實數據混淆）
+  - **驗證**：reader 直讀真實 `/tmp/openclaw/pipeline_snapshot_*.json`，paper 預設返回 9941.47 / 9 倉位（之前 612.95 / 0 倉位）
 
 ---
 
