@@ -3,6 +3,10 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-11
 
+### 3E-ARCH 持久化修復：with_kind() 漏設 pipeline_kind 字段（2026-04-11）
+
+MEGA-BLOCKER-0 commit 0f3af65 留尾 bug：`TickPipeline::with_kind()` 只設 `governance` 不設 `pipeline_kind`，三個引擎全部留在 `with_balance()` 預設的 `PipelineKind::Paper`，導致 demo/live event_consumer 在 `kind_tag = pipeline.pipeline_kind.db_mode()` 時都返回 `"paper"`，三引擎 StateWriter 搶寫同一份 `paper_state.json` / `pipeline_snapshot_paper.json`，產生大量 `state rename failed` ERROR；watchdog 因此誤報 demo/live "not_running"。**修復**：`tick_pipeline/mod.rs:683` `with_kind()` 補一行 `p.pipeline_kind = kind`。**回歸測試**：`test_with_kind_sets_pipeline_kind_field` 鎖定三個 variant。**驗證**：重啟後 `pipeline_snapshot_paper.json` / `pipeline_snapshot_demo.json` / `pipeline_snapshot_live.json` 三檔案各自獨立寫入（balance 10000/793.97/612.95 對應 Paper 默認/Demo Bybit/LiveDemo Bybit），watchdog 三引擎全 alive，0 persistence errors。930 engine lib pass（+1 regression test）。
+
 ### 3E-ARCH L3 審計修復：e2e 測試 + 21 warning 清零 + 防御性加固（2026-04-11）
 
 L3 全面審計（PM/PA/FA/CC/E3/E4/E5/MIT/QC 9 角色並行）發現並修復所有問題。**P0**：`stress_integration.rs` 6 個編譯錯誤修復（StrategyAction enum 適配 + IntentProcessor 5th arg GovernanceProfile）。**P2 防御性加固**：(1) event_consumer D19 安全斷言（交易所管線禁止寫入 market/feature DB）；(2) 快照去抖間隔按引擎錯開（Paper 5s/Demo 5.5s/Live 4.5s）避免 I/O 爭用；(3) IPC `extract_engine_tx` 無 engine 參數時 debug 提示；(4) startup.rs 憑證記憶體持留文檔化；(5) fan-out channel buffer 非對稱設計文檔化。**P3 代碼清潔**：21 cargo warning 全部清除 — 6 unused imports + 6 unused variables + 4 unreachable patterns（sector 重複分類）+ 2 dead methods（`cost_gate_k` #[allow] / `make_exit_intent` 刪除）+ 2 never-read fields + 1 unused inner import。**INFO**：Python ipc_client.py `mode` → `engine` 參數重命名語義修正。0 warnings / 929 lib + 366 core + 29 e2e + 2792 Python = 4116 tests passed。
