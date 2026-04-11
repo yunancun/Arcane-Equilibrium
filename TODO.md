@@ -158,6 +158,11 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 
 - [ ] **G-1 / R-02** Strategist + Guardian 真實接線（ai_service.py → multi_agent_framework，優先這兩個關鍵角色，W22）
   - 前置：G-3 IPC 認證完成
+- [ ] **G-SR-1** 真正策略研究（W22）— Strategist Agent 主導，在現有 4 策略參數空間外探索新策略邏輯
+  - 現況：Rust 引擎固定 4 策略（MaCrossover/BbReversion/BbBreakout/GridTrading），參數由 JumpStart/LinUCB 調優但種類不增加；Python AUTO_DEPLOYER.on_scan_results() 已於 2026-04-10 廢棄（死代碼），GUI "Auto-Deployed" 區塊改為顯示 Rust ScannerRunner 的活躍 symbol universe
+  - 目標：Strategist Agent 能提出新策略邏輯（訊號組合/出入場規則/止損方式），通過 Paper 驗證後由開發者實作為 Rust Strategy trait，進入正式 4+ 策略池
+  - 實施方向：(a) Strategist 定期（每週）分析 fills/PnL/regime 數據，生成「策略改進提案」寫入 DB；(b) 提案包含：新策略描述、預期 Sharpe、測試週期、所需指標；(c) 人類 operator 審閱後批准進入 Rust 實作 backlog；(d) 長期：自動 backtesting 管線驗證提案（依賴 Phase 7+ backtest 基礎設施）
+  - 前置：G-1/R-02 Strategist Agent 接線 + 足夠 fills 數據積累（LG-1 21d 後）
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
 - [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
   - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）

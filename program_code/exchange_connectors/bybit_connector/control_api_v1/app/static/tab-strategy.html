@@ -64,11 +64,12 @@
   </div>
 
   <div class="oc-card">
-    <h3>&#x1F680; 自动部署 / Auto-Deployed</h3>
-    <div class="subtitle">扫描器自动创建的策略实例</div>
+    <h3>&#x1F680; 活跃交易对 / Active Symbols</h3>
+    <div class="subtitle">Rust ScannerRunner 管理的活跃交易对（固定 + 动态扫描）</div>
+    <div id="deployed-meta" style="font-size:11px;color:var(--text-dim);margin-bottom:6px"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
-        <thead><tr><th>Strategy</th><th>Symbol</th><th>State</th><th>Deployed At</th></tr></thead>
+        <thead><tr><th>Symbol</th><th>Type</th><th>Strategies</th><th>State</th></tr></thead>
         <tbody id="deployed-tbody"><tr class="empty-row"><td colspan="4">Loading...</td></tr></tbody>
       </table>
     </div>
@@ -441,22 +442,37 @@ async function loadScanner() {
 
 async function loadDeployed() {
   const d = await ocApi('/api/v1/strategy/scanner/deployed');
-  if (!d || !d.data) {
-    ocSetHtml('deployed-tbody', '<tr class="empty-row"><td colspan="4">No auto-deployed strategies</td></tr>');
-    return;
+  const empty = '<tr class="empty-row"><td colspan="4">No active symbols</td></tr>';
+  if (!d || !d.data) { ocSetHtml('deployed-tbody', empty); return; }
+
+  const deployed = d.data.deployed || [];
+  const src = d.data.source || 'unknown';
+  const cnt = d.data.symbol_count != null ? d.data.symbol_count : deployed.length;
+
+  // Meta line: source + count
+  const metaEl = document.getElementById('deployed-meta');
+  if (metaEl) {
+    const srcLabel = src === 'rust_scanner' ? 'Rust ScannerRunner' : (src === 'python_deployer' ? 'Python Deployer (legacy)' : src);
+    metaEl.textContent = srcLabel + ' · ' + cnt + ' symbol(s) active';
   }
-  const deployed = d.data.deployed || d.data || [];
-  if (!deployed.length) {
-    ocSetHtml('deployed-tbody', '<tr class="empty-row"><td colspan="4">No auto-deployed strategies</td></tr>');
-    return;
-  }
+
+  if (!deployed.length) { ocSetHtml('deployed-tbody', empty); return; }
+
   let html = '';
   deployed.forEach(dd => {
+    const kind = dd.kind || '';
+    const kindChip = kind === 'pinned'
+      ? ocChip('pinned', 'warn')
+      : (kind === 'dynamic' ? ocChip('dynamic', 'neutral') : ocChip(kind || '--', 'neutral'));
+    // Rust scanner runs all 4 strategies per symbol; legacy deployer shows specific strategy name.
+    const stratLabel = src === 'rust_scanner'
+      ? 'MA · BB · Grid · BBBreakout'
+      : ocEsc(dd.strategy_name || dd.name || '--');
     html += '<tr>';
-    html += '<td>' + ocEsc(dd.strategy_name || dd.name) + '</td>';
-    html += '<td>' + ocEsc(dd.symbol) + '</td>';
+    html += '<td><strong>' + ocEsc(dd.symbol) + '</strong></td>';
+    html += '<td>' + kindChip + '</td>';
+    html += '<td style="font-size:11px;color:var(--text-dim)">' + stratLabel + '</td>';
     html += '<td>' + ocChip(dd.state || 'active', dd.state === 'active' ? 'good' : 'neutral') + '</td>';
-    html += '<td>' + ocTime(dd.deployed_at || dd.created_at) + '</td>';
     html += '</tr>';
   });
   ocSetHtml('deployed-tbody', html);

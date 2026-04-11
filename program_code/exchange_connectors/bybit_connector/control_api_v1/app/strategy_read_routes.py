@@ -390,13 +390,61 @@ async def get_scanner_opportunities(actor: base.AuthenticatedActor = Depends(bas
 
 @phase2_router.get("/scanner/deployed")
 async def get_auto_deployed(actor: base.AuthenticatedActor = Depends(base.current_actor)):
-    """Get auto-deployed strategies / 获取自动部署的策略"""
+    """
+    Get active symbols managed by Rust ScannerRunner (primary) with Python deployer as fallback.
+    優先返回 Rust ScannerRunner 管理的活躍 symbol universe；降級到 Python 部署器。
+
+    NOTE: Python AUTO_DEPLOYER.on_scan_results() is deprecated (2026-04-10) — Rust ScannerRunner
+    owns symbol management. This route now reflects the true runtime state via IPC.
+    注意：Python AUTO_DEPLOYER 回調已棄用，此路由改為透過 IPC 讀取 Rust 真實活躍 symbol。
+    """
+    # IPC-SCAN-1a: Rust ScannerRunner is the authoritative symbol source.
+    # IPC-SCAN-1a：Rust ScannerRunner 為活躍 symbol 的權威來源。
+    try:
+        from .ipc_client import EngineIPCClient  # noqa: PLC0415
+        client = EngineIPCClient()
+        try:
+            await client.connect()
+            result = await client.call("get_active_symbols", params={}, timeout=3.0)
+        finally:
+            await client.disconnect()
+
+        symbols: list[str] = result.get("symbols", [])
+        pinned: list[str] = result.get("pinned", [])
+        status: str = result.get("status", "unknown")
+
+        if status == "ok" and symbols:
+            deployed = [
+                {
+                    "symbol": sym,
+                    "strategy_name": "All Strategies",
+                    "kind": "pinned" if sym in pinned else "dynamic",
+                    "state": "active",
+                    "source": "rust_scanner",
+                }
+                for sym in symbols
+            ]
+            stats = AUTO_DEPLOYER.get_stats() if AUTO_DEPLOYER is not None else {}
+            return _envelope({
+                "deployed": deployed,
+                "stats": stats,
+                "source": "rust_scanner",
+                "symbol_count": len(symbols),
+            })
+    except Exception:
+        # IPC unavailable — fall through to Python deployer.
+        # IPC 不可用，降級到 Python 部署器。
+        pass
+
+    # Fallback: Python AUTO_DEPLOYER (deprecated path, may be empty).
+    # 降級：Python AUTO_DEPLOYER（已棄用路徑，可能為空）。
     if AUTO_DEPLOYER is None:
-        return _envelope({"available": False})
+        return _envelope({"available": False, "deployed": [], "source": "none"})
     try:
         return _envelope({
             "deployed": AUTO_DEPLOYER.get_deployed(),
             "stats": AUTO_DEPLOYER.get_stats(),
+            "source": "python_deployer",
         })
     except Exception:
         raise HTTPException(status_code=500, detail="Internal error")
