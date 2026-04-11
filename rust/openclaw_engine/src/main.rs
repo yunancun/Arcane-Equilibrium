@@ -193,50 +193,71 @@ async fn async_main(
     let (event_tx, event_rx) = mpsc::channel::<PriceEvent>(EVENT_CHANNEL_SIZE);
 
     // ------------------------------------------------------------------
-    // Determine primary pipeline kind (single call, reused everywhere).
-    // 決定主管線類型（單次調用，全局複用）。
+    // 3E-ARCH: Build exchange pipeline bindings independently (D1).
+    // Paper always starts. Demo/Live start if their API keys exist.
+    // 3E-ARCH：獨立構建每條交易所管線綁定（D1）。
+    // Paper 始終啟動。Demo/Live 依 API key 存在性獨立啟動。
     // ------------------------------------------------------------------
-    let primary_kind = determine_primary_kind();
+    let cfg_snapshot_pipelines = config.get();
+    let live_bindings = build_exchange_pipeline(
+        PipelineKind::Live,
+        live_bybit_environment(),
+        cancel.clone(),
+        &cfg_snapshot_pipelines,
+    ).await;
+    let demo_bindings = build_exchange_pipeline(
+        PipelineKind::Demo,
+        BybitEnvironment::Demo,
+        cancel.clone(),
+        &cfg_snapshot_pipelines,
+    ).await;
+    drop(cfg_snapshot_pipelines);
+
+    // Log pipeline availability / 記錄管線可用性
+    info!(
+        live = live_bindings.is_some(),
+        demo = demo_bindings.is_some(),
+        paper = true,
+        "3E-ARCH: pipeline availability detected / 管線可用性偵測完成"
+    );
 
     // ------------------------------------------------------------------
     // Start IPC server / 啟動 IPC 服務器
     // ------------------------------------------------------------------
     let ipc_data_dir =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
-    let (primary_cmd_tx, pipeline_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-    let phase4_consumer_cmd_tx = primary_cmd_tx.clone();
-    let scanner_pipeline_cmd_tx = primary_cmd_tx.clone();
-    let reconciler_cmd_tx = primary_cmd_tx.clone();
-    // Phase 6: shared atomic for reconciler to read current risk level without IPC.
-    // Phase 6：共享原子量供對帳器無 IPC 讀取當前風控級別。
-    let shared_risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
-        openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
-    ));
-    // 3E-3: Paper-alongside command channel
-    let (pipeline_cmd_tx_paper, pipeline_cmd_rx_paper) = tokio::sync::mpsc::unbounded_channel();
+
+    // 3E-ARCH: Independent command channels per pipeline.
+    // 3E-ARCH：每條管線獨立的命令通道。
+    let (paper_cmd_tx, paper_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (demo_cmd_tx, demo_cmd_rx) = if demo_bindings.is_some() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+    let (live_cmd_tx, live_cmd_rx) = if live_bindings.is_some() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
+
+    let phase4_consumer_cmd_tx = paper_cmd_tx.clone();
+
     let mut ipc_server = IpcServer::new(
         Arc::clone(&config),
         cancel.clone(),
         ipc_data_dir,
         {
-            // 3E-10.1: Build EngineCommandChannels based on API key detection.
             use openclaw_engine::ipc_server::EngineCommandChannels;
             let mut channels = EngineCommandChannels::default();
-            match primary_kind.db_mode() {
-                "paper" => {
-                    channels.paper = Some(primary_cmd_tx.clone());
-                }
-                "demo" => {
-                    channels.demo = Some(primary_cmd_tx.clone());
-                    channels.paper = Some(pipeline_cmd_tx_paper.clone());
-                }
-                "live" => {
-                    channels.live = Some(primary_cmd_tx.clone());
-                    channels.paper = Some(pipeline_cmd_tx_paper.clone());
-                }
-                _ => {
-                    channels.paper = Some(primary_cmd_tx.clone());
-                }
+            channels.paper = Some(paper_cmd_tx.clone());
+            if let Some(ref tx) = demo_cmd_tx {
+                channels.demo = Some(tx.clone());
+            }
+            if let Some(ref tx) = live_cmd_tx {
+                channels.live = Some(tx.clone());
             }
             channels
         },
@@ -257,127 +278,46 @@ async fn async_main(
     });
 
     // ------------------------------------------------------------------
-    // Bybit API integration — DCP, auto-margin, fee rates (Items 2/7/8)
-    // Bybit API 整合 — 斷連保護、自動追加保證金、動態費率
+    // 3E-ARCH: Shared REST client = highest-priority exchange pipeline's client.
+    // Used by Scanner, InstrumentRefresh, fee refresh tasks.
+    // 共享 REST 客戶端 = 最高優先級交易所管線的客戶端。
     // ------------------------------------------------------------------
-    let mut api_taker_fee: Option<f64> = None;
-    let mut api_credentials: Option<(String, String)> = None;
-    let mut shared_client: Option<Arc<BybitRestClient>> = None;
+    let shared_client: Option<Arc<BybitRestClient>> = live_bindings
+        .as_ref()
+        .map(|b| Arc::clone(&b.rest_client))
+        .or_else(|| demo_bindings.as_ref().map(|b| Arc::clone(&b.rest_client)));
+
+    let shared_account_manager: Option<Arc<AccountManager>> = live_bindings
+        .as_ref()
+        .map(|b| Arc::clone(&b.account_manager))
+        .or_else(|| demo_bindings.as_ref().map(|b| Arc::clone(&b.account_manager)));
+
     let mut shared_instruments: Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>> =
         None;
-    let mut shared_account_manager: Option<Arc<AccountManager>> = None;
-    let cfg_snapshot = config.get();
-    let bybit_env = match primary_kind {
-        PipelineKind::Live => live_bybit_environment(),
-        PipelineKind::Demo | PipelineKind::Paper => BybitEnvironment::Demo,
-    };
 
-    let initial_balance = fetch_exchange_balance(bybit_env).await;
-
-    // MAJOR-4: Paper balance uses unified priority.
-    let paper_initial_balance: Option<f64> = if primary_kind == PipelineKind::Live {
-        Some(resolve_paper_initial_balance().await)
-    } else {
-        None
-    };
-
-    if let Ok(rest_client) = BybitRestClient::new(bybit_env, None, None) {
-        if rest_client.has_credentials() {
-            let (key, secret) = rest_client.credentials();
-            api_credentials = Some((key.to_string(), secret.to_string()));
-            let client_arc = Arc::new(rest_client);
-            shared_client = Some(Arc::clone(&client_arc));
-
-            // R-05: Load instrument info cache
-            let instrument_cache =
-                Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
-            match instrument_cache.refresh(&*client_arc, "linear").await {
-                Ok(count) => {
-                    shared_instruments = Some(Arc::clone(&instrument_cache));
-                    info!(symbols = count, "instrument info loaded / 品種規格已加載");
-                }
-                Err(e) => warn!(error = %e, "instrument info fetch failed / 品種規格加載失敗"),
+    // R-05: Load instrument info cache using shared client.
+    if let Some(ref client) = shared_client {
+        let instrument_cache =
+            Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::new());
+        match instrument_cache.refresh(&**client, "linear").await {
+            Ok(count) => {
+                shared_instruments = Some(Arc::clone(&instrument_cache));
+                info!(symbols = count, "instrument info loaded / 品種規格已加載");
             }
+            Err(e) => warn!(error = %e, "instrument info fetch failed / 品種規格加載失敗"),
+        }
 
-            // Item 8: DCP — Disconnected Cancel Protection
-            if cfg_snapshot.dcp_enabled {
-                use openclaw_engine::platform_client::PlatformClient;
-                let platform = PlatformClient::new(Arc::clone(&client_arc));
-                match platform.set_dcp(cfg_snapshot.dcp_time_window).await {
-                    Ok(()) => info!(
-                        window = cfg_snapshot.dcp_time_window,
-                        "DCP enabled / DCP 已啟用"
-                    ),
-                    Err(e) => {
-                        warn!(error = %e, "DCP setup failed (non-fatal) / DCP 設定失敗（非致命）")
-                    }
-                }
-            }
-
-            // Item 7: Auto-add-margin for existing positions
-            if cfg_snapshot.auto_add_margin {
-                use openclaw_engine::order_manager::OrderCategory;
-                use openclaw_engine::position_manager::PositionManager;
-                let pos_mgr = PositionManager::new(Arc::clone(&client_arc));
-                match pos_mgr.get_positions(OrderCategory::Linear, None).await {
-                    Ok(positions) => {
-                        for pos in &positions {
-                            if pos.size > 0.0 {
-                                match pos_mgr
-                                    .set_auto_add_margin(
-                                        OrderCategory::Linear,
-                                        &pos.symbol,
-                                        1,
-                                        None,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        info!(symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用")
-                                    }
-                                    Err(e) => {
-                                        warn!(symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to query positions for auto-margin / 查詢倉位失敗")
-                    }
-                }
-            }
-
-            // Item 2: Fetch dynamic per-symbol fee rates
-            let acct = Arc::new(AccountManager::new());
-            match acct.refresh_fee_rates(&*client_arc, "linear").await {
-                Ok(count) => {
-                    let rate = acct.taker_fee("BTCUSDT");
-                    api_taker_fee = Some(rate);
-                    info!(
-                        symbols = count,
-                        taker_rate = format!("{:.5}", rate),
-                        "fee rates loaded / 費率已加載"
-                    );
-                }
-                Err(e) => {
-                    warn!(error = %e, "fee rate fetch failed, using defaults / 費率獲取失敗，使用默認值")
-                }
-            }
-            shared_account_manager = Some(Arc::clone(&acct));
-
-            // Spawn fee rate refresh + staleness monitor
-            tasks::spawn_fee_rate_tasks(&acct, &client_arc, &cancel);
-        } else {
-            info!(
-                "no Bybit credentials — skipping DCP/margin/fee setup / 無 API 憑證，跳過 API 設定"
-            );
+        // Spawn fee rate refresh + staleness monitor using shared client's account manager.
+        if let Some(ref acct) = shared_account_manager {
+            tasks::spawn_fee_rate_tasks(acct, client, &cancel);
         }
     } else {
-        info!(
-            "Bybit client init failed — skipping API setup / Bybit 客戶端初始化失敗，跳過 API 設定"
-        );
+        info!("no exchange clients — skipping instrument/fee setup / 無交易所客戶端，跳過品種/費率設定");
     }
+
+    // MAJOR-4: Paper balance uses unified priority.
+    // 紙盤餘額統一優先級解析。
+    let paper_balance = resolve_paper_initial_balance().await;
 
     // R-05: Periodic instrument info refresh (every 4 hours)
     if let (Some(ref icache), Some(ref client)) = (&shared_instruments, &shared_client) {
@@ -388,7 +328,11 @@ async fn async_main(
     // Scanner D4: Spawn ScannerRunner (requires market REST client)
     // 掃描器 D4：啟動 ScannerRunner（需要市場 REST 客戶端）
     // ------------------------------------------------------------------
+    // 3E-ARCH: Scanner broadcasts AddSymbol/RemoveSymbol to ALL pipelines.
+    // 掃描器向所有管線廣播 AddSymbol/RemoveSymbol。
     if let Some(ref client) = shared_client {
+        // Build a fan-out sender that sends to all pipeline cmd channels.
+        let scanner_cmd_tx = paper_cmd_tx.clone();
         let market_client = Arc::new(MarketDataClient::new(Arc::clone(client)));
         let runner = ScannerRunner::new(
             Arc::clone(&symbol_registry),
@@ -396,7 +340,7 @@ async fn async_main(
             Arc::clone(&scanner_edge_estimates),
             Arc::clone(&scanner_store),
             scanner_ws_tx,
-            scanner_pipeline_cmd_tx,
+            scanner_cmd_tx,
             cancel.clone(),
         );
         tokio::spawn(runner.run());
@@ -409,6 +353,7 @@ async fn async_main(
     // Start WS client — subscribe to all symbols
     // 啟動 WebSocket 客戶端 — 訂閱所有交易對
     // ------------------------------------------------------------------
+    let cfg_snapshot = config.get();
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
         let mut topics = Vec::new();
         for sym in symbol_registry.snapshot() {
@@ -491,35 +436,8 @@ async fn async_main(
         })
     };
 
-    // ------------------------------------------------------------------
-    // 3E D21: Per-pipeline private WS supervisor
-    // ------------------------------------------------------------------
-    let primary_ws_bindings: Option<startup::PrivateWsBindings> =
-        if let Some((api_key, api_secret)) = api_credentials {
-            Some(spawn_private_ws_supervisor(
-                api_key,
-                api_secret,
-                bybit_env,
-                match bybit_env {
-                    BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
-                    BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
-                },
-                cancel.clone(),
-            ))
-        } else {
-            info!("no credentials — Private WS skipped / 無憑證，跳過私有 WS");
-            None
-        };
-
-    let (shared_bybit_balance, shared_api_pnl, shared_exchange_event_rx) = match primary_ws_bindings
-    {
-        Some(bindings) => (
-            Some(Arc::clone(&bindings.bybit_balance)),
-            Some(Arc::clone(&bindings.api_pnl)),
-            Some(bindings.exchange_event_rx),
-        ),
-        None => (None, None, None),
-    };
+    // 3E-ARCH: Private WS bindings are now inside ExchangePipelineBindings (D21).
+    // 私有 WS 綁定已在 ExchangePipelineBindings 內（D21）。
 
     // ------------------------------------------------------------------
     // Phase 1: Database pool + writer tasks
@@ -601,63 +519,98 @@ async fn async_main(
     ).await;
 
     // ------------------------------------------------------------------
-    // Phase 6: spawn position reconciler with auto-contraction action layer.
-    // Phase 6：spawn 持倉對帳器（含自動降級動作層）。
+    // Phase 6 + D23: Per-exchange position reconciler.
+    // Phase 6 + D23：每條交易所管線獨立持倉對帳器。
     // ------------------------------------------------------------------
-    if let Some(client) = shared_client.as_ref() {
-        tasks::spawn_position_reconciler(
-            client,
-            &db_pool,
-            &cancel,
-            reconciler_cmd_tx,
-            &shared_instruments,
-            &shared_risk_level,
-            bybit_env,
-        );
-    } else {
-        info!("position_reconciler skipped (no REST client) / 持倉對帳器跳過（無 REST 客戶端）");
+    if let Some(ref live_b) = live_bindings {
+        if let Some(ref tx) = live_cmd_tx {
+            tasks::spawn_position_reconciler(
+                &live_b.rest_client,
+                &db_pool,
+                &cancel,
+                tx.clone(),
+                &shared_instruments,
+                &live_b.risk_level,
+                live_b.env,
+            );
+            info!("position_reconciler spawned for Live / Live 持倉對帳器已啟動");
+        }
+    }
+    if let Some(ref demo_b) = demo_bindings {
+        if let Some(ref tx) = demo_cmd_tx {
+            tasks::spawn_position_reconciler(
+                &demo_b.rest_client,
+                &db_pool,
+                &cancel,
+                tx.clone(),
+                &shared_instruments,
+                &demo_b.risk_level,
+                demo_b.env,
+            );
+            info!("position_reconciler spawned for Demo / Demo 持倉對帳器已啟動");
+        }
+    }
+    if live_bindings.is_none() && demo_bindings.is_none() {
+        info!("position_reconciler skipped (no exchange pipelines) / 持倉對帳器跳過（無交易所管線）");
     }
 
     // ------------------------------------------------------------------
-    // 3E-2b-α: Multi-pipeline spawn skeleton + bounded fan-out
+    // 3E-ARCH: Three-pipeline fan-out + independent spawn
+    // 3E-ARCH：三管線扇出 + 獨立 spawn
     // ------------------------------------------------------------------
     use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 
-    let spawn_paper_alongside = primary_kind != PipelineKind::Paper;
+    // is_primary priority: Live > Demo > Paper
+    let has_live = live_bindings.is_some();
+    let has_demo = demo_bindings.is_some();
 
-    // 3E D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
-    let primary_buf = if primary_kind == PipelineKind::Live { 512 } else { 1024 };
-    let (primary_event_tx, primary_event_rx) = mpsc::channel::<Arc<PriceEvent>>(primary_buf);
-    let paper_alongside_channel: Option<(
-        mpsc::Sender<Arc<PriceEvent>>,
-        mpsc::Receiver<Arc<PriceEvent>>,
-    )> = if spawn_paper_alongside {
-        Some(mpsc::channel(1024))
+    // D10/D20: Bounded fan-out — one WS source, N pipeline receivers.
+    let (paper_event_tx, paper_event_rx) = mpsc::channel::<Arc<PriceEvent>>(1024);
+    let demo_event_channel = if has_demo { Some(mpsc::channel::<Arc<PriceEvent>>(1024)) } else { None };
+    let live_event_channel = if has_live { Some(mpsc::channel::<Arc<PriceEvent>>(512)) } else { None };
+
+    // MAJOR-2: Ready barriers — tx goes to pipeline deps, rx goes to fan-out.
+    let (paper_ready_tx, paper_ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let (demo_ready_tx, demo_ready_rx) = if has_demo {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        (Some(tx), Some(rx))
     } else {
-        None
+        (None, None)
     };
-
-    // MAJOR-2: Create ready channels so fan-out waits for pipeline initialization.
-    let (primary_ready_tx, primary_ready_rx) = tokio::sync::oneshot::channel::<()>();
-    let (paper_ready_tx, paper_ready_rx) = if spawn_paper_alongside {
+    let (live_ready_tx, live_ready_rx) = if has_live {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         (Some(tx), Some(rx))
     } else {
         (None, None)
     };
 
-    // Fan-out task: read from single event_rx, broadcast Arc-wrapped events.
+    // BLOCKER-3 D15: Shared cross-engine global exposure atomic.
+    let global_exposure_usdt = Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+    // BLOCKER-2 D6: Cross-engine event broadcast channel.
+    let (cross_engine_tx, _) = tokio::sync::broadcast::channel::<EngineEvent>(16);
+
+    // Paper pipeline health atomic.
+    let paper_health = Arc::new(std::sync::atomic::AtomicU8::new(PipelineHealth::Running as u8));
+    let paper_risk_level = Arc::new(std::sync::atomic::AtomicU8::new(
+        openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
+    ));
+
+    // Fan-out task: read from single event_rx, broadcast Arc-wrapped events to all pipelines.
+    // 扇出任務：從單一 event_rx 讀取，向所有管線廣播 Arc 包裝的事件。
     {
-        let primary_tx = primary_event_tx;
-        let paper_tx = paper_alongside_channel
-            .as_ref()
-            .map(|(tx, _)| tx.clone());
+        let paper_tx = paper_event_tx;
+        let demo_tx = demo_event_channel.as_ref().map(|(tx, _)| tx.clone());
+        let live_tx = live_event_channel.as_ref().map(|(tx, _)| tx.clone());
         let fan_cancel = cancel.clone();
         tokio::spawn(async move {
             let barrier_timeout = tokio::time::Duration::from_secs(60);
             let barrier_result = tokio::time::timeout(barrier_timeout, async {
-                let _ = primary_ready_rx.await;
-                if let Some(rx) = paper_ready_rx {
+                let _ = paper_ready_rx.await;
+                if let Some(rx) = demo_ready_rx {
+                    let _ = rx.await;
+                }
+                if let Some(rx) = live_ready_rx {
                     let _ = rx.await;
                 }
             }).await;
@@ -682,16 +635,22 @@ async fn async_main(
                         match evt {
                             Some(price_event) => {
                                 let arc_event = Arc::new(price_event);
-                                if primary_tx.try_send(Arc::clone(&arc_event)).is_err() {
-                                    tracing::warn!(
-                                        kind = %primary_kind,
-                                        "fan-out: primary pipeline lagging, tick dropped / 主管線延遲，tick 已丟棄"
+                                if paper_tx.try_send(Arc::clone(&arc_event)).is_err() {
+                                    tracing::debug!(
+                                        "fan-out: paper pipeline lagging, tick dropped / Paper 管線延遲，tick 已丟棄"
                                     );
                                 }
-                                if let Some(ref ptx) = paper_tx {
-                                    if ptx.try_send(arc_event).is_err() {
+                                if let Some(ref dtx) = demo_tx {
+                                    if dtx.try_send(Arc::clone(&arc_event)).is_err() {
                                         tracing::debug!(
-                                            "fan-out: paper pipeline lagging, tick dropped / Paper 管線延遲，tick 已丟棄"
+                                            "fan-out: demo pipeline lagging, tick dropped / Demo 管線延遲，tick 已丟棄"
+                                        );
+                                    }
+                                }
+                                if let Some(ref ltx) = live_tx {
+                                    if ltx.try_send(arc_event).is_err() {
+                                        tracing::warn!(
+                                            "fan-out: live pipeline lagging, tick dropped / Live 管線延遲，tick 已丟棄"
                                         );
                                     }
                                 }
@@ -706,96 +665,148 @@ async fn async_main(
     }
 
     // ------------------------------------------------------------------
-    // Per-pipeline command channels + risk level atomics
+    // Spawn Paper pipeline (always starts)
+    // 啟動 Paper 管線（始終啟動）
     // ------------------------------------------------------------------
-    let pipeline_cmd_rx_paper_opt = if spawn_paper_alongside {
-        Some(pipeline_cmd_rx_paper)
-    } else {
-        None
-    };
-    let paper_risk_level: Option<Arc<std::sync::atomic::AtomicU8>> = if spawn_paper_alongside {
-        Some(Arc::new(std::sync::atomic::AtomicU8::new(
-            openclaw_core::sm::risk_gov::RiskLevel::Normal.value(),
-        )))
-    } else {
-        None
-    };
-
-    // BLOCKER-3 D15: Shared cross-engine global exposure atomic.
-    let global_exposure_usdt = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
-    // BLOCKER-2 D6: Cross-engine event broadcast channel + per-pipeline health atomics.
-    let (cross_engine_tx, _) = tokio::sync::broadcast::channel::<EngineEvent>(16);
-    let primary_health = Arc::new(std::sync::atomic::AtomicU8::new(
-        PipelineHealth::Running as u8,
-    ));
-    let paper_health: Option<Arc<std::sync::atomic::AtomicU8>> = if spawn_paper_alongside {
-        Some(Arc::new(std::sync::atomic::AtomicU8::new(
-            PipelineHealth::Running as u8,
-        )))
-    } else {
-        None
-    };
-
-    // ------------------------------------------------------------------
-    // Spawn primary pipeline
-    // ------------------------------------------------------------------
-    let primary_deps = EventConsumerDeps {
-        pipeline_kind: primary_kind,
-        event_rx: primary_event_rx,
+    let paper_deps = EventConsumerDeps {
+        pipeline_kind: PipelineKind::Paper,
+        event_rx: paper_event_rx,
         config: Arc::clone(&config),
         cancel: cancel.clone(),
-        initial_balance,
-        paper_initial_balance,
-        taker_fee_rate: api_taker_fee,
+        initial_balance: paper_balance,
+        paper_initial_balance: None,
+        taker_fee_rate: live_bindings.as_ref().and_then(|b| b.taker_fee)
+            .or_else(|| demo_bindings.as_ref().and_then(|b| b.taker_fee)),
         instruments: shared_instruments.clone(),
-        bootstrap_client: shared_client.as_ref().map(Arc::clone),
-        shared_client: shared_client.clone(),
-        bybit_balance: shared_bybit_balance,
-        api_pnl: shared_api_pnl,
-        pipeline_cmd_rx: Some(pipeline_cmd_rx),
-        market_data_tx: if primary_kind == PipelineKind::Paper { market_tx.clone() } else { None },
-        feature_tx: if primary_kind == PipelineKind::Paper { feature_tx.clone() } else { None },
+        bootstrap_client: None,
+        shared_client: None,
+        bybit_balance: None,
+        api_pnl: None,
+        pipeline_cmd_rx: Some(paper_cmd_rx),
+        market_data_tx: market_tx,
+        feature_tx,
         last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
         trading_tx: trading_tx.clone(),
         context_tx: context_tx.clone(),
-        exchange_event_rx: shared_exchange_event_rx,
-        account_manager: shared_account_manager.clone(),
+        exchange_event_rx: None,
+        account_manager: None,
         linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
         news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-        risk_store: {
-            let store = match primary_kind {
-                PipelineKind::Live => Arc::clone(&risk_stores.live),
-                PipelineKind::Demo => Arc::clone(&risk_stores.demo),
-                PipelineKind::Paper => Arc::clone(&risk_stores.paper),
-            };
-            Some(store)
-        },
+        risk_store: Some(Arc::clone(&risk_stores.paper)),
         budget_store: Some(Arc::clone(&budget_store)),
         audit_pool: db_pool.get().cloned(),
         symbol_registry: Some(Arc::clone(&symbol_registry)),
         scanner_store: Some(Arc::clone(&scanner_store)),
-        shared_risk_level: Some(Arc::clone(&shared_risk_level)),
-        is_primary: true,
-        ready_tx: Some(primary_ready_tx),
-        global_exposure_usdt: if primary_kind.is_exchange() {
-            Some(Arc::clone(&global_exposure_usdt))
-        } else {
-            None
-        },
+        shared_risk_level: Some(Arc::clone(&paper_risk_level)),
+        is_primary: !has_live && !has_demo,
+        ready_tx: Some(paper_ready_tx),
+        global_exposure_usdt: None,
         cross_engine_tx: Some(cross_engine_tx.clone()),
         cross_engine_rx: Some(cross_engine_tx.subscribe()),
-        pipeline_health: Some(Arc::clone(&primary_health)),
+        pipeline_health: Some(Arc::clone(&paper_health)),
+    };
+    let paper_handle = tokio::spawn(run_event_consumer(paper_deps));
+    info!("paper pipeline spawned / Paper 管線已啟動");
+
+    // ------------------------------------------------------------------
+    // Spawn Demo pipeline (conditional — if demo API key exists)
+    // 啟動 Demo 管線（條件性 — 若 demo API key 存在）
+    // ------------------------------------------------------------------
+    let demo_handle: Option<tokio::task::JoinHandle<()>> = if let Some(demo_b) = demo_bindings {
+        let (_, demo_event_rx) = demo_event_channel.expect("demo channel must exist");
+        let demo_deps = EventConsumerDeps {
+            pipeline_kind: PipelineKind::Demo,
+            event_rx: demo_event_rx,
+            config: Arc::clone(&config),
+            cancel: cancel.clone(),
+            initial_balance: demo_b.initial_balance,
+            paper_initial_balance: None,
+            taker_fee_rate: demo_b.taker_fee,
+            instruments: shared_instruments.clone(),
+            bootstrap_client: Some(Arc::clone(&demo_b.rest_client)),
+            shared_client: Some(Arc::clone(&demo_b.rest_client)),
+            bybit_balance: Some(demo_b.ws_bindings.bybit_balance),
+            api_pnl: Some(demo_b.ws_bindings.api_pnl),
+            pipeline_cmd_rx: demo_cmd_rx,
+            // D19: Demo does not write market/feature DB (Paper handles that).
+            market_data_tx: None,
+            feature_tx: None,
+            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+            trading_tx: trading_tx.clone(),
+            context_tx: context_tx.clone(),
+            exchange_event_rx: Some(demo_b.ws_bindings.exchange_event_rx),
+            account_manager: Some(demo_b.account_manager),
+            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+            risk_store: Some(Arc::clone(&risk_stores.demo)),
+            budget_store: Some(Arc::clone(&budget_store)),
+            audit_pool: db_pool.get().cloned(),
+            symbol_registry: Some(Arc::clone(&symbol_registry)),
+            scanner_store: Some(Arc::clone(&scanner_store)),
+            shared_risk_level: Some(Arc::clone(&demo_b.risk_level)),
+            is_primary: !has_live,
+            ready_tx: demo_ready_tx,
+            global_exposure_usdt: Some(Arc::clone(&global_exposure_usdt)),
+            cross_engine_tx: Some(cross_engine_tx.clone()),
+            cross_engine_rx: Some(cross_engine_tx.subscribe()),
+            pipeline_health: Some(Arc::clone(&demo_b.health)),
+        };
+        let h = tokio::spawn(run_event_consumer(demo_deps));
+        info!("demo pipeline spawned / Demo 管線已啟動");
+        Some(h)
+    } else {
+        None
     };
 
-    // BLOCKER-4 D17: Live pipeline → dedicated runtime; Demo/Paper → shared runtime.
-    let event_handle: tokio::task::JoinHandle<()>;
-    let _live_thread_handle: Option<std::thread::JoinHandle<()>>;
+    // ------------------------------------------------------------------
+    // Spawn Live pipeline (conditional — D17: dedicated OS thread + catch_unwind)
+    // 啟動 Live 管線（條件性 — D17：獨立 OS 線程 + catch_unwind）
+    // ------------------------------------------------------------------
+    let live_thread_handle: Option<std::thread::JoinHandle<()>> = if let Some(live_b) = live_bindings {
+        let (_, live_event_rx) = live_event_channel.expect("live channel must exist");
+        let live_deps = EventConsumerDeps {
+            pipeline_kind: PipelineKind::Live,
+            event_rx: live_event_rx,
+            config: Arc::clone(&config),
+            cancel: cancel.clone(),
+            initial_balance: live_b.initial_balance,
+            paper_initial_balance: None,
+            taker_fee_rate: live_b.taker_fee,
+            instruments: shared_instruments.clone(),
+            bootstrap_client: Some(Arc::clone(&live_b.rest_client)),
+            shared_client: Some(Arc::clone(&live_b.rest_client)),
+            bybit_balance: Some(live_b.ws_bindings.bybit_balance),
+            api_pnl: Some(live_b.ws_bindings.api_pnl),
+            pipeline_cmd_rx: live_cmd_rx,
+            // D19: Live does not write market/feature DB.
+            market_data_tx: None,
+            feature_tx: None,
+            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
+            trading_tx: trading_tx.clone(),
+            context_tx: context_tx.clone(),
+            exchange_event_rx: Some(live_b.ws_bindings.exchange_event_rx),
+            account_manager: Some(live_b.account_manager),
+            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
+            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
+            risk_store: Some(Arc::clone(&risk_stores.live)),
+            budget_store: Some(Arc::clone(&budget_store)),
+            audit_pool: db_pool.get().cloned(),
+            symbol_registry: Some(Arc::clone(&symbol_registry)),
+            scanner_store: Some(Arc::clone(&scanner_store)),
+            shared_risk_level: Some(Arc::clone(&live_b.risk_level)),
+            is_primary: true,
+            ready_tx: live_ready_tx,
+            global_exposure_usdt: Some(Arc::clone(&global_exposure_usdt)),
+            cross_engine_tx: Some(cross_engine_tx.clone()),
+            cross_engine_rx: Some(cross_engine_tx.subscribe()),
+            pipeline_health: Some(Arc::clone(&live_b.health)),
+        };
 
-    if primary_kind == PipelineKind::Live {
+        // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
+        // D17：Live 在獨立 OS 線程運行，catch_unwind 隔離 panic。
         let live_cancel = cancel.clone();
         let live_crash_tx = cross_engine_tx.clone();
-        let live_health = Arc::clone(&primary_health);
+        let live_health_ref = Arc::clone(&live_b.health);
         let thread_handle = std::thread::Builder::new()
             .name("oc-live-rt".into())
             .spawn(move || {
@@ -807,96 +818,46 @@ async fn async_main(
                     .expect("failed to build live runtime / 構建 live runtime 失敗");
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     live_rt.block_on(async {
-                        run_event_consumer(primary_deps).await;
+                        run_event_consumer(live_deps).await;
                         live_cancel.cancelled().await;
                     });
                 }));
                 if let Err(panic_info) = result {
-                    let msg = panic_info.downcast_ref::<&str>().copied()
+                    let msg = panic_info
+                        .downcast_ref::<&str>()
+                        .copied()
                         .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
                         .unwrap_or("unknown panic");
-                    tracing::error!(kind = "live", panic = msg,
-                        "M-4: pipeline PANICKED — broadcasting Crashed / 管線 panic — 廣播 Crashed");
-                    live_health.store(
-                        openclaw_engine::tick_pipeline::PipelineHealth::Down as u8,
+                    tracing::error!(
+                        kind = "live",
+                        panic = msg,
+                        "M-4: live pipeline PANICKED — broadcasting Crashed / Live 管線 panic — 廣播 Crashed"
+                    );
+                    live_health_ref.store(
+                        PipelineHealth::Down as u8,
                         std::sync::atomic::Ordering::Relaxed,
                     );
-                    let _ = live_crash_tx.send(openclaw_engine::tick_pipeline::EngineEvent::Crashed(PipelineKind::Live));
+                    let _ = live_crash_tx
+                        .send(EngineEvent::Crashed(PipelineKind::Live));
                 }
             })
             .expect("failed to spawn live thread / 啟動 live 線程失敗");
 
-        let shutdown_cancel = cancel.clone();
-        event_handle = tokio::spawn(async move {
-            shutdown_cancel.cancelled().await;
-        });
-        _live_thread_handle = Some(thread_handle);
-    } else {
-        let crash_tx = cross_engine_tx.clone();
-        let crash_kind = primary_kind;
-        let crash_health = Arc::clone(&primary_health);
-        event_handle = tokio::spawn(async move {
-            run_event_consumer(primary_deps).await;
-            let _ = crash_tx;
-            let _ = crash_kind;
-            let _ = crash_health;
-        });
-        _live_thread_handle = None;
-    }
-    info!(kind = %primary_kind, "primary pipeline spawned / 主管線已啟動");
-
-    // ------------------------------------------------------------------
-    // Spawn Paper-alongside pipeline (when primary is Demo or Live)
-    // ------------------------------------------------------------------
-    let _paper_handle = if spawn_paper_alongside {
-        let (_, paper_event_rx) = paper_alongside_channel.expect("paper channel must be Some when spawn_paper_alongside");
-        let pipeline_cmd_rx_paper = pipeline_cmd_rx_paper_opt.expect("paper cmd_rx must be Some when spawn_paper_alongside");
-        let paper_rl = paper_risk_level.expect("paper risk_level must be Some when spawn_paper_alongside");
-        let paper_balance = paper_initial_balance.unwrap_or(initial_balance);
-        let deps = EventConsumerDeps {
-            pipeline_kind: PipelineKind::Paper,
-            event_rx: paper_event_rx,
-            config: Arc::clone(&config),
-            cancel: cancel.clone(),
-            initial_balance: paper_balance,
-            paper_initial_balance: None,
-            taker_fee_rate: api_taker_fee,
-            instruments: shared_instruments.clone(),
-            bootstrap_client: None,
-            shared_client: None,
-            bybit_balance: None,
-            api_pnl: None,
-            pipeline_cmd_rx: Some(pipeline_cmd_rx_paper),
-            market_data_tx: market_tx,
-            feature_tx,
-            last_tick_ms: Some(Arc::clone(&shared_last_tick_ms)),
-            trading_tx,
-            context_tx,
-            exchange_event_rx: None,
-            account_manager: None,
-            linucb_runtime: Some(Arc::clone(&shared_linucb_runtime)),
-            news_snapshot: Some(Arc::clone(&shared_news_snapshot)),
-            risk_store: Some(Arc::clone(&risk_stores.paper)),
-            budget_store: Some(Arc::clone(&budget_store)),
-            audit_pool: db_pool.get().cloned(),
-            symbol_registry: Some(Arc::clone(&symbol_registry)),
-            scanner_store: Some(Arc::clone(&scanner_store)),
-            shared_risk_level: Some(paper_rl),
-            is_primary: false,
-            ready_tx: paper_ready_tx,
-            global_exposure_usdt: None,
-            cross_engine_tx: Some(cross_engine_tx.clone()),
-            cross_engine_rx: Some(cross_engine_tx.subscribe()),
-            pipeline_health: paper_health,
-        };
-        let h = tokio::spawn(run_event_consumer(deps));
-        info!("paper-alongside pipeline spawned / Paper 伴隨管線已啟動");
-        Some(h)
+        info!("live pipeline spawned (dedicated OS thread) / Live 管線已啟動（獨立 OS 線程）");
+        Some(thread_handle)
     } else {
         None
     };
 
-    info!(version = VERSION, "engine started / 引擎已啟動");
+    info!(
+        version = VERSION,
+        pipelines = format!(
+            "paper{}{}",
+            if has_demo { "+demo" } else { "" },
+            if has_live { "+live" } else { "" }
+        ),
+        "engine started / 引擎已啟動"
+    );
 
     // ------------------------------------------------------------------
     // Signal handling / 信號處理
@@ -905,6 +866,7 @@ async fn async_main(
 
     // ------------------------------------------------------------------
     // MAJOR-3: Ordered shutdown sequence (Live → Demo → Paper)
+    // MAJOR-3：有序關閉序列（Live → Demo → Paper）
     // ------------------------------------------------------------------
     info!("initiating shutdown / 開始關閉序列");
 
@@ -915,34 +877,34 @@ async fn async_main(
         let _ = ws_handle.await;
         let _ = ipc_handle.await;
 
-        if spawn_paper_alongside {
-            info!(kind = %primary_kind, "draining primary pipeline / 排空主管線");
-            match event_handle.await {
-                Err(e) if e.is_panic() => error!(kind = %primary_kind, "primary pipeline panicked during shutdown / 主管線 panic"),
-                _ => {}
-            }
+        // D17: Join Live OS thread first.
+        // D17：先等待 Live OS 線程結束。
+        if let Some(th) = live_thread_handle {
+            info!("joining live runtime thread / 等待 live runtime 線程結束");
+            let _ = th.join();
+        }
 
-            if let Some(ph) = _paper_handle {
-                info!("draining paper-alongside pipeline / 排空 Paper 伴隨管線");
-                match ph.await {
-                    Err(e) if e.is_panic() => error!("paper-alongside pipeline panicked during shutdown / Paper 伴隨管線 panic"),
-                    _ => {}
+        // Demo pipeline (tokio task).
+        if let Some(dh) = demo_handle {
+            info!("draining demo pipeline / 排空 Demo 管線");
+            match dh.await {
+                Err(e) if e.is_panic() => {
+                    error!("demo pipeline panicked during shutdown / Demo 管線關閉時 panic")
                 }
-            }
-        } else {
-            match event_handle.await {
-                Err(e) if e.is_panic() => error!(kind = %primary_kind, "primary pipeline panicked during shutdown / 主管線 panic"),
                 _ => {}
             }
         }
+
+        // Paper pipeline (tokio task).
+        info!("draining paper pipeline / 排空 Paper 管線");
+        match paper_handle.await {
+            Err(e) if e.is_panic() => {
+                error!("paper pipeline panicked during shutdown / Paper 管線關閉時 panic")
+            }
+            _ => {}
+        }
     })
     .await;
-
-    // BLOCKER-4 D17: Join the dedicated Live thread if it was spawned.
-    if let Some(th) = _live_thread_handle {
-        info!("joining live runtime thread / 等待 live runtime 線程結束");
-        let _ = th.join();
-    }
 
     // Clean up socket file
     let socket_path = &config.get().ipc_socket_path;
