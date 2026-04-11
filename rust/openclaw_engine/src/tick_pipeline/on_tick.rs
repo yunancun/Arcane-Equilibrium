@@ -146,10 +146,17 @@ impl TickPipeline {
         }
 
         // Step 0: Fast track check — emergency actions before normal processing
+        // PNL-4 (2026-04-12): price_drop_pct and margin_utilization_pct are
+        // hardcoded 0.0 — flash-crash and margin-crisis branches inside
+        // fast_track::evaluate_fast_track() are dead until something computes
+        // them on each tick. The ONLY reachable CloseAll trigger today is
+        // `risk_level >= CircuitBreaker`. Tracked as a separate follow-up.
+        // PNL-4：price_drop / margin_util 仍硬編 0，閃崩/保證金危機分支死碼，
+        // 唯一可觸發的 CloseAll 是 risk_level ≥ CircuitBreaker。
         let ft_action = crate::fast_track::evaluate_fast_track(
             self.governance.risk.level,
-            0.0, // price_drop_pct computed externally
-            0.0, // margin_utilization computed externally
+            0.0, // PNL-4 dead input — see note above
+            0.0, // PNL-4 dead input — see note above
         );
         if ft_action == crate::fast_track::FastTrackAction::CloseAll {
             let symbols: Vec<String> = self
@@ -158,6 +165,19 @@ impl TickPipeline {
                 .iter()
                 .map(|p| p.symbol.clone())
                 .collect();
+            // PNL-4: every fast_track CloseAll now leaves a forensic breadcrumb
+            // (risk level + ts + position count + triggering tick symbol). The
+            // 2026-04-11 18:51 incident was untraceable because logs rotated;
+            // the next time a CloseAll fires, this WARN line is what you grep.
+            // PNL-4：每次 fast_track CloseAll 留下取證痕跡，避免 2026-04-11 重演。
+            tracing::warn!(
+                risk_level = ?self.governance.risk.level,
+                ts_ms = event.ts_ms,
+                positions = symbols.len(),
+                trigger_symbol = %event.symbol,
+                trigger_price = event.last_price,
+                "FAST_TRACK CloseAll fired — closing all positions / 快速通道全平觸發"
+            );
             // PNL-FIX-1: must close each position at ITS OWN symbol's latest price,
             // not event.last_price (which is the triggering tick's price for ONE
             // symbol — applying it to all symbols inflated PnL by 1000-10000x in

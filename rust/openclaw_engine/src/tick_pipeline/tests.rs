@@ -1102,3 +1102,89 @@ use super::*;
         assert!((close_px - 0.50).abs() < 1e-9, "fallback should be entry price, got {close_px}");
         assert!(pnl.abs() < 1e-9, "fallback close should produce zero PnL, got {pnl}");
     }
+
+    /// PNL-FIX-2: emit_close_fill must (a) charge the close-side taker fee
+    /// against paper_state.balance / total_fees, AND (b) write that same fee
+    /// into the DB Fill row. Locks the 2026-04-12 fix where every risk_close
+    /// row had fee=$0 and the comment lied about "accrued separately".
+    /// PNL-FIX-2：emit_close_fill 必須對 paper_state 計入平倉費，並寫入 DB 行。
+    #[test]
+    fn test_emit_close_fill_charges_real_close_fee() {
+        let mut pipeline =
+            TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+        // Pin a known taker rate so the math is reproducible (5.5 bps = 0.00055).
+        // 鎖定一個已知 taker 費率讓計算可預期。
+        pipeline.intent_processor.set_fee_rate(0.00055);
+
+        let (tx, mut rx) =
+            tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+        pipeline.set_trading_channel(tx);
+
+        let bal_before = pipeline.paper_state.balance();
+        let fees_before = pipeline.paper_state.total_fees();
+
+        // qty=0.1 @ price=50_000 → notional=5_000 → fee=5_000 × 0.00055 = 2.75
+        pipeline.emit_close_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            1_000,
+            0.0,
+            "sl_hit",
+        );
+
+        // (a) paper_state must show the fee charge.
+        let bal_after = pipeline.paper_state.balance();
+        let fees_after = pipeline.paper_state.total_fees();
+        assert!(
+            (bal_before - bal_after - 2.75).abs() < 1e-9,
+            "balance should drop by close fee 2.75, got drop {}",
+            bal_before - bal_after
+        );
+        assert!(
+            (fees_after - fees_before - 2.75).abs() < 1e-9,
+            "total_fees should rise by 2.75, got rise {}",
+            fees_after - fees_before
+        );
+
+        // (b) DB Fill row must carry the real fee value, NOT 0.0.
+        let msg = rx
+            .try_recv()
+            .expect("emit_close_fill must enqueue a Fill message");
+        match msg {
+            crate::database::TradingMsg::Fill { fee, fee_rate, .. } => {
+                assert!(
+                    (fee - 2.75).abs() < 1e-9,
+                    "DB fee must equal close fee 2.75, got {fee}"
+                );
+                assert!(
+                    (fee_rate - 0.00055).abs() < 1e-9,
+                    "DB fee_rate must equal taker rate, got {fee_rate}"
+                );
+            }
+            other => panic!("expected Fill, got {other:?}"),
+        }
+    }
+
+    /// PNL-FIX-2: charge_fee() helper rejects non-positive / non-finite inputs
+    /// so a malformed fee_rate cannot corrupt balance. Locks the safety guard.
+    /// PNL-FIX-2：charge_fee 必須拒絕非正或非有限值，避免費率異常污染餘額。
+    #[test]
+    fn test_paper_state_charge_fee_rejects_garbage() {
+        let mut pipeline =
+            TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Paper);
+        let bal0 = pipeline.paper_state.balance();
+        pipeline.paper_state.charge_fee(0.0);
+        pipeline.paper_state.charge_fee(-5.0);
+        pipeline.paper_state.charge_fee(f64::NAN);
+        pipeline.paper_state.charge_fee(f64::INFINITY);
+        assert!(
+            (pipeline.paper_state.balance() - bal0).abs() < 1e-9,
+            "garbage fees must not move balance"
+        );
+        // A real fee must still apply.
+        // 真實費用仍應扣除。
+        pipeline.paper_state.charge_fee(1.50);
+        assert!((bal0 - pipeline.paper_state.balance() - 1.50).abs() < 1e-9);
+    }
