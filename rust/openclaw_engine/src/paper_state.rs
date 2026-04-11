@@ -225,6 +225,117 @@ impl PaperState {
         self.api_unrealized_pnl.get(symbol).copied()
     }
 
+    /// B-1 Phase 2: Seed paper_state positions from exchange snapshot at startup.
+    /// Replaces the entire positions map with the supplied list. Use the tuple
+    /// `(symbol, is_long, qty, entry_price, ts_ms)`. Items with qty <= 0.0 or
+    /// non-finite price are silently dropped (matches Bybit "size=0" stale rows).
+    /// Returns the count of positions actually inserted. The latest_prices map
+    /// is also seeded so trailing/stop checks have a non-zero reference price
+    /// before the first market tick arrives.
+    /// B-1 Phase 2：啟動時用交易所快照種入 paper_state 持倉。
+    /// 直接以傳入清單覆蓋整個 positions map。元組格式為
+    /// (symbol, is_long, qty, entry_price, ts_ms)。qty <= 0.0 或價格非有限值
+    /// 的條目會被靜默丟棄（對應 Bybit 回傳的 "size=0" 殘留行）。
+    /// 回傳實際插入的持倉數。同時種入 latest_prices，避免首個市場 tick 抵達前
+    /// 跟蹤/止損檢查讀到 0 參考價。
+    pub fn import_positions(
+        &mut self,
+        positions: Vec<(String, bool, f64, f64, u64)>,
+    ) -> usize {
+        self.positions.clear();
+        let mut inserted = 0_usize;
+        for (symbol, is_long, qty, entry_price, ts_ms) in positions {
+            if qty <= 0.0 || !qty.is_finite() || !entry_price.is_finite() || entry_price <= 0.0 {
+                continue;
+            }
+            self.latest_prices
+                .entry(symbol.clone())
+                .or_insert(entry_price);
+            self.positions.insert(
+                symbol.clone(),
+                PaperPosition {
+                    symbol,
+                    is_long,
+                    qty,
+                    entry_price,
+                    best_price: entry_price,
+                    entry_fee: 0.0, // exchange did not bill fees through us — leave 0
+                    entry_ts_ms: ts_ms,
+                    unrealized_pnl: 0.0,
+                },
+            );
+            inserted += 1;
+        }
+        inserted
+    }
+
+    /// B-1 Phase 2: Apply a runtime PositionUpdate from the exchange WS to paper_state.
+    /// `size == 0` removes the entry (the exchange just reported a flat position).
+    /// `size > 0` upserts using the latest avg entry price reported by the exchange;
+    /// existing entries are updated in place so trailing-stop best_price is preserved
+    /// when only size/avg_price changed.
+    /// Returns true if anything was changed.
+    /// B-1 Phase 2：將交易所 WS 推送的 PositionUpdate 應用到 paper_state。
+    /// size == 0 表示交易所側已平倉，移除條目。size > 0 則 upsert：若條目存在
+    /// 則就地更新（保留 best_price，避免重設跟蹤止損），否則新建。
+    /// 任何狀態變動都回傳 true。
+    pub fn upsert_position_from_exchange(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        size: f64,
+        avg_price: f64,
+        ts_ms: u64,
+    ) -> bool {
+        if !size.is_finite() || size < 0.0 {
+            return false;
+        }
+        if size == 0.0 {
+            return self.positions.remove(symbol).is_some();
+        }
+        if !avg_price.is_finite() || avg_price <= 0.0 {
+            return false;
+        }
+        match self.positions.get_mut(symbol) {
+            Some(pos) => {
+                // Capture old direction BEFORE mutating, so the flip-detection
+                // comparison still has something meaningful to compare against.
+                // 在改寫前先記下舊方向，方向翻轉的判斷才會正確。
+                let direction_flipped = pos.is_long != is_long;
+                pos.is_long = is_long;
+                pos.qty = size;
+                pos.entry_price = avg_price;
+                // Reset best_price only if direction flipped (different position).
+                // Same-direction upsert preserves best_price so trailing-stop tracking
+                // does not reset on every WS heartbeat.
+                // 方向翻轉視為新倉，best_price 重置；同向僅尺寸/均價變動則保留，
+                // 避免每次 WS 心跳重置跟蹤止損狀態。
+                if direction_flipped {
+                    pos.best_price = avg_price;
+                    pos.entry_ts_ms = ts_ms;
+                    pos.entry_fee = 0.0;
+                }
+                true
+            }
+            None => {
+                self.positions.insert(
+                    symbol.to_string(),
+                    PaperPosition {
+                        symbol: symbol.to_string(),
+                        is_long,
+                        qty: size,
+                        entry_price: avg_price,
+                        best_price: avg_price,
+                        entry_fee: 0.0,
+                        entry_ts_ms: ts_ms,
+                        unrealized_pnl: 0.0,
+                    },
+                );
+                true
+            }
+        }
+    }
+
     /// Get hard stop percentage from config (for server-side stop calc).
     /// 從配置獲取硬止損百分比（用於伺服器端止損計算）。
     pub fn stop_config_pct(&self) -> f64 {
@@ -626,5 +737,76 @@ mod tests {
         s.apply_fill("BTC", true, 0.1, 50000.0, 0.0, 0);
         assert!(s.get_position("BTC").is_some());
         assert!(s.get_position("ETH").is_none());
+    }
+
+    #[test]
+    fn test_import_positions_seeds_state() {
+        // B-1 Phase 2: import_positions replaces the map and seeds latest_prices.
+        // B-1 Phase 2：import_positions 覆蓋持倉並種入 latest_prices。
+        let mut s = PaperState::new(10000.0);
+        // Pre-existing position should be wiped by import_positions.
+        // 既有持倉應被 import_positions 清掉。
+        s.apply_fill("STALE", true, 1.0, 10.0, 0.0, 0);
+        let inserted = s.import_positions(vec![
+            ("BTCUSDT".to_string(), true, 0.5, 50_000.0, 1_000),
+            ("ETHUSDT".to_string(), false, 2.0, 3_000.0, 1_001),
+            ("ZERO".to_string(), true, 0.0, 1.0, 0),       // skipped (qty=0)
+            ("BAD".to_string(), true, 1.0, -5.0, 0),       // skipped (price<=0)
+        ]);
+        assert_eq!(inserted, 2);
+        assert_eq!(s.position_count(), 2);
+        assert!(s.get_position("STALE").is_none());
+
+        let btc = s.get_position("BTCUSDT").unwrap();
+        assert!(btc.is_long);
+        assert!((btc.qty - 0.5).abs() < 1e-12);
+        assert!((btc.entry_price - 50_000.0).abs() < 1e-9);
+        assert_eq!(s.latest_price("BTCUSDT"), Some(50_000.0));
+
+        let eth = s.get_position("ETHUSDT").unwrap();
+        assert!(!eth.is_long);
+        assert!((eth.qty - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_upsert_position_from_exchange_handles_size_zero() {
+        // size==0 → remove (Bybit just reported a flat position).
+        // size > 0 → upsert (preserve best_price if direction unchanged).
+        // size==0 → 移除（交易所剛回報該倉已平）。
+        // size > 0 → upsert（同向時保留 best_price）。
+        let mut s = PaperState::new(10000.0);
+
+        // 1. Insert via upsert (no prior position).
+        assert!(s.upsert_position_from_exchange("BTCUSDT", true, 0.5, 50_000.0, 100));
+        assert_eq!(s.position_count(), 1);
+
+        // 2. Mutate best_price via market move + update_best_prices.
+        s.set_latest_price("BTCUSDT", 51_000.0);
+        s.update_best_prices();
+        let best_after_move = s.get_position("BTCUSDT").unwrap().best_price;
+        assert!((best_after_move - 51_000.0).abs() < 1e-9);
+
+        // 3. Same-direction upsert with new avg_price → best_price preserved.
+        assert!(s.upsert_position_from_exchange("BTCUSDT", true, 1.0, 50_500.0, 200));
+        let pos = s.get_position("BTCUSDT").unwrap();
+        assert!((pos.qty - 1.0).abs() < 1e-12);
+        assert!((pos.entry_price - 50_500.0).abs() < 1e-9);
+        assert!((pos.best_price - 51_000.0).abs() < 1e-9); // preserved
+
+        // 4. Size==0 removes the entry.
+        assert!(s.upsert_position_from_exchange("BTCUSDT", true, 0.0, 50_000.0, 300));
+        assert_eq!(s.position_count(), 0);
+
+        // 5. Size==0 on non-existent symbol → no-op false.
+        assert!(!s.upsert_position_from_exchange("NOPE", true, 0.0, 0.0, 0));
+
+        // 6. Direction flip resets best_price.
+        s.upsert_position_from_exchange("ETHUSDT", true, 1.0, 3_000.0, 100);
+        s.set_latest_price("ETHUSDT", 3_100.0);
+        s.update_best_prices();
+        s.upsert_position_from_exchange("ETHUSDT", false, 1.0, 3_050.0, 200);
+        let eth = s.get_position("ETHUSDT").unwrap();
+        assert!(!eth.is_long);
+        assert!((eth.best_price - 3_050.0).abs() < 1e-9); // reset on flip
     }
 }

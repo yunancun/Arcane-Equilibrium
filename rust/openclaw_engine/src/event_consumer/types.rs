@@ -6,7 +6,7 @@
 //! MODULE_NOTE (中): 定義 EventConsumerDeps 依賴集合、ExchangeEvent 枚舉、
 //!   PendingOrder 追蹤結構體、及模組常量（SYMBOLS、STATUS_INTERVAL_SECS）。
 
-use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
+use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate, PositionUpdate};
 use crate::bybit_rest_client::BybitRestClient;
 use crate::config::ConfigManager;
 use crate::instrument_info::InstrumentInfoCache;
@@ -34,6 +34,10 @@ pub enum ExchangeEvent {
     Fill(ExecutionUpdate),
     /// An order status update from the exchange / 交易所的訂單狀態更新
     OrderUpdate(OrderUpdate),
+    /// B-1 Phase 2: Runtime position delta from the exchange — paper_state should
+    /// upsert/remove the entry to stay in sync with what Bybit thinks we hold.
+    /// B-1 Phase 2：交易所推送的運行時持倉變更，paper_state 應 upsert/移除以保持同步。
+    PositionUpdate(PositionUpdate),
     /// DCP triggered — exchange auto-cancelled orders / DCP 觸發 — 交易所自動取消訂單
     DcpTriggered,
     /// Private WS disconnected / 私有 WS 斷連
@@ -113,6 +117,12 @@ pub struct EventConsumerDeps {
     /// EXT-1: Channel to receive exchange events (fills/order updates) from ExecutionListener.
     /// EXT-1：從執行監聽器接收交易所事件（成交/訂單更新）的通道。
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
+    /// B-1 Phase 2: Existing exchange positions captured by build_exchange_pipeline,
+    /// used to seed paper_state before the first market tick. Empty Vec on cold
+    /// accounts, REST failure, or paper-only pipelines.
+    /// B-1 Phase 2：build_exchange_pipeline 抓取的既存持倉，用於在首個市場 tick
+    /// 前 seed paper_state。冷帳戶、REST 失敗或純 paper 管線時為空 Vec。
+    pub seed_positions: Vec<(String, bool, f64, f64, u64)>,
     /// Phase 4 W-3: Optional LinUCB runtime for read-only arm selection at the
     /// DecisionContextMsg producer site.
     /// Phase 4 W-3：可選的 LinUCB 運行時，用於 DecisionContextMsg producer

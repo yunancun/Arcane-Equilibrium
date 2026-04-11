@@ -409,6 +409,13 @@ pub(crate) struct ExchangePipelineBindings {
     pub ws_bindings: PrivateWsBindings,
     pub risk_level: Arc<std::sync::atomic::AtomicU8>,
     pub health: Arc<std::sync::atomic::AtomicU8>,
+    /// B-1 Phase 2: Snapshot of existing exchange positions captured at startup.
+    /// Forwarded into EventConsumerDeps so paper_state can be seeded before the
+    /// first market tick. Empty Vec on cold accounts or REST failure.
+    /// B-1 Phase 2：啟動時抓取的交易所現存持倉快照，傳給 EventConsumerDeps，
+    /// 讓 paper_state 在首個市場 tick 前就能與交易所側對齊。
+    /// 帳戶為空或 REST 失敗時為空 Vec。
+    pub seed_positions: Vec<(String, bool, f64, f64, u64)>,
 }
 
 /// Build exchange pipeline bindings if credentials exist for the given environment.
@@ -461,22 +468,86 @@ pub(crate) async fn build_exchange_pipeline(
         }
     }
 
-    // Auto-add-margin for existing positions / 現有持倉自動追保
-    if cfg_snapshot.auto_add_margin {
+    // B-1 Phase 2: Always fetch existing positions at startup so paper_state can
+    // be seeded with the exchange's view (before this fix, positions were only
+    // queried when auto_add_margin was enabled, and even then only used for
+    // /v5/position/set-auto-add-margin — never written into paper_state).
+    // The captured snapshot is later forwarded via ExchangePipelineBindings.
+    // B-1 Phase 2：啟動時無條件抓取現存持倉，讓 paper_state 可在首個市場 tick
+    // 前對齊交易所側狀態（修復前只在 auto_add_margin 開啟時才抓，且只用於
+    // 設定自動追保，從未寫進 paper_state）。
+    // 抓到的快照之後透過 ExchangePipelineBindings 轉發給事件消費者。
+    let mut seed_positions: Vec<(String, bool, f64, f64, u64)> = Vec::new();
+    {
         use openclaw_engine::order_manager::OrderCategory;
         use openclaw_engine::position_manager::PositionManager;
         let pos_mgr = PositionManager::new(Arc::clone(&client_arc));
-        if let Ok(positions) = pos_mgr.get_positions(OrderCategory::Linear, None).await {
-            for pos in &positions {
-                if pos.size > 0.0 {
-                    match pos_mgr.set_auto_add_margin(OrderCategory::Linear, &pos.symbol, 1, None).await {
-                        Ok(()) => info!(kind = %kind, symbol = %pos.symbol, "auto-margin enabled / 自動追保已啟用"),
-                        Err(e) => warn!(kind = %kind, symbol = %pos.symbol, error = %e, "auto-margin failed / 自動追保失敗"),
+        match pos_mgr.get_positions(OrderCategory::Linear, None).await {
+            Ok(positions) => {
+                for pos in &positions {
+                    if pos.size > 0.0 && pos.avg_price > 0.0 {
+                        let is_long = pos.side.eq_ignore_ascii_case("Buy");
+                        // Bybit updated_time is a millisecond string; fall back to 0 on parse failure.
+                        // updated_time 為毫秒字串，解析失敗時退回 0。
+                        let ts_ms: u64 = pos.updated_time.parse().unwrap_or(0);
+                        seed_positions.push((
+                            pos.symbol.clone(),
+                            is_long,
+                            pos.size,
+                            pos.avg_price,
+                            ts_ms,
+                        ));
+                        info!(
+                            kind = %kind,
+                            symbol = %pos.symbol,
+                            side = %pos.side,
+                            size = pos.size,
+                            avg_price = pos.avg_price,
+                            "startup position captured / 啟動時抓取既存持倉"
+                        );
+                    }
+                }
+                // Auto-add-margin (legacy behaviour, gated on config) — uses the
+                // same fetch result so we don't double-call REST.
+                // 自動追保（沿用舊行為，由 config 開關），重用同一次 REST 抓取結果。
+                if cfg_snapshot.auto_add_margin {
+                    for pos in &positions {
+                        if pos.size > 0.0 {
+                            match pos_mgr
+                                .set_auto_add_margin(OrderCategory::Linear, &pos.symbol, 1, None)
+                                .await
+                            {
+                                Ok(()) => info!(
+                                    kind = %kind,
+                                    symbol = %pos.symbol,
+                                    "auto-margin enabled / 自動追保已啟用"
+                                ),
+                                Err(e) => warn!(
+                                    kind = %kind,
+                                    symbol = %pos.symbol,
+                                    error = %e,
+                                    "auto-margin failed / 自動追保失敗"
+                                ),
+                            }
+                        }
                     }
                 }
             }
+            Err(e) => {
+                warn!(
+                    kind = %kind,
+                    error = %e,
+                    "startup position fetch failed (paper_state will start empty) \
+                     / 啟動持倉抓取失敗（paper_state 將以空狀態啟動）"
+                );
+            }
         }
     }
+    info!(
+        kind = %kind,
+        count = seed_positions.len(),
+        "startup position seed prepared / 啟動持倉種子已準備"
+    );
 
     // Fetch fee rates / 獲取費率
     let acct = Arc::new(AccountManager::new());
@@ -539,6 +610,7 @@ pub(crate) async fn build_exchange_pipeline(
         ws_bindings,
         risk_level,
         health,
+        seed_positions,
     })
 }
 
@@ -601,9 +673,12 @@ pub(crate) fn spawn_private_ws_supervisor(
         }
     });
 
-    // on_position_update → track API unrealized PnL / 持倉更新回調
+    // on_position_update → track API unrealized PnL + forward delta to event consumer.
+    // 持倉更新回調：更新 api_pnl 的同時把 delta 也轉發給事件消費者，
+    // 讓 paper_state.upsert_position_from_exchange() 能與交易所側保持一致。
     let pnl_ref = Arc::clone(&api_pnl);
     let lbl_pos = label.to_string();
+    let pos_tx = exchange_event_tx.clone();
     listener.set_on_position_update(move |pos| {
         if let Ok(pnl) = pos.unrealised_pnl.parse::<f64>() {
             // BLOCKER-6: parking_lot RwLock — write() returns guard directly.
@@ -618,6 +693,11 @@ pub(crate) fn spawn_private_ws_supervisor(
             pnl = %pos.unrealised_pnl,
             "WS position update / WS 持倉更新"
         );
+        // B-1 Phase 2: forward to event consumer for paper_state upsert.
+        // Channel send is best-effort — drop on backpressure rather than block the WS thread.
+        // B-1 Phase 2：轉發給事件消費者以便 upsert paper_state。
+        // 通道發送為盡力而為，背壓時直接丟棄以免阻塞 WS 執行緒。
+        let _ = pos_tx.send(ExchangeEvent::PositionUpdate(pos));
     });
 
     // on_fill → log execution + forward to event consumer / 成交回調
