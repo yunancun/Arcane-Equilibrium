@@ -186,7 +186,7 @@ impl JsonRpcResponse {
 // IPC Server / IPC 服務器
 // ---------------------------------------------------------------------------
 
-use crate::tick_pipeline::PaperSessionCommand;
+use crate::tick_pipeline::PipelineCommand;
 
 /// Unix domain socket IPC server.
 /// Unix 域套接字 IPC 服務器。
@@ -198,7 +198,7 @@ pub struct IpcServer {
     data_dir: Arc<PathBuf>,
     /// Paper session command sender — dispatches Pause/Resume/CloseAll/Reset to event consumer.
     /// 紙盤 session 命令發送端 — 派發 Pause/Resume/CloseAll/Reset 到事件消費者。
-    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     /// Phase 4 (4-15): Late-injected AI BudgetTracker slot.
     /// Phase 4 (4-15)：延後注入的 AI BudgetTracker 槽位。
     budget_tracker: BudgetTrackerSlot,
@@ -225,13 +225,13 @@ impl IpcServer {
         config: Arc<ConfigManager>,
         cancel: CancellationToken,
         data_dir: impl Into<String>,
-        paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+        pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     ) -> Self {
         Self {
             config,
             cancel,
             data_dir: Arc::new(PathBuf::from(data_dir.into())),
-            paper_cmd_tx,
+            pipeline_cmd_tx,
             budget_tracker: Arc::new(RwLock::new(None)),
             teacher_loop: Arc::new(RwLock::new(None)),
             risk_stores: None,
@@ -350,7 +350,7 @@ impl IpcServer {
                             let config = Arc::clone(&self.config);
                             let cancel = self.cancel.clone();
                             let data_dir = Arc::clone(&self.data_dir);
-                            let cmd_tx = self.paper_cmd_tx.clone();
+                            let cmd_tx = self.pipeline_cmd_tx.clone();
                             let budget_slot = Arc::clone(&self.budget_tracker);
                             let teacher_slot = Arc::clone(&self.teacher_loop);
                             let risk_stores = self.risk_stores.clone();
@@ -407,7 +407,7 @@ async fn handle_connection(
     config: Arc<ConfigManager>,
     cancel: CancellationToken,
     data_dir: Arc<PathBuf>,
-    paper_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     budget_slot: BudgetTrackerSlot,
     teacher_slot: TeacherLoopSlot,
     risk_stores: Option<PerEngineRiskStores>,
@@ -509,7 +509,7 @@ async fn handle_connection(
             line_result = lines.next_line() => {
                 match line_result {
                     Ok(Some(line)) => {
-                        let response = dispatch_request(&line, &config, &data_dir, &paper_cmd_tx, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
+                        let response = dispatch_request(&line, &config, &data_dir, &pipeline_cmd_tx, &budget_slot, &teacher_slot, &risk_stores, &learning_store, &budget_store, &audit_pool, &scanner_registry).await;
                         let mut resp_bytes = serde_json::to_vec(&response)
                             .unwrap_or_else(|_| br#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"serialization error"},"id":null}"#.to_vec());
                         resp_bytes.push(b'\n');
@@ -541,7 +541,7 @@ async fn dispatch_request(
     line: &str,
     config: &Arc<ConfigManager>,
     data_dir: &Arc<PathBuf>,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     budget_slot: &BudgetTrackerSlot,
     teacher_slot: &TeacherLoopSlot,
     risk_stores: &Option<PerEngineRiskStores>,
@@ -638,14 +638,14 @@ async fn dispatch_request(
         }
         "get_tick_stats" => handle_snapshot_field(id, data_dir, |s| serde_json::to_value(&s.stats)),
         // ── Paper session control commands / 紙盤 session 控制命令 ──
-        "pause_paper" => handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Pause, "paused"),
+        "pause_paper" => handle_paper_cmd(id, pipeline_cmd_tx, PipelineCommand::Pause, "paused"),
         "resume_paper" => {
-            handle_paper_cmd(id, paper_cmd_tx, PaperSessionCommand::Resume, "resumed")
+            handle_paper_cmd(id, pipeline_cmd_tx, PipelineCommand::Resume, "resumed")
         }
         "close_all_positions" => handle_paper_cmd(
             id,
-            paper_cmd_tx,
-            PaperSessionCommand::CloseAll,
+            pipeline_cmd_tx,
+            PipelineCommand::CloseAll,
             "close_all_sent",
         ),
         "close_position" => {
@@ -658,10 +658,16 @@ async fn dispatch_request(
             if symbol.is_empty() {
                 return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing required param: symbol");
             }
+            // Optional hints: caller (Python GUI route) supplies exchange-side position info
+            // so Rust can close orphan positions not tracked in paper_state.
+            // 可選 hints：呼叫方（Python GUI 路由）提供交易所側倉位資訊，
+            // 使 Rust 可平掉 paper_state 未追蹤的孤兒倉位。
+            let hint_is_long = req.params.get("is_long").and_then(|v| v.as_bool());
+            let hint_qty = req.params.get("qty").and_then(|v| v.as_f64());
             handle_paper_cmd(
                 id,
-                paper_cmd_tx,
-                PaperSessionCommand::CloseSymbol { symbol },
+                pipeline_cmd_tx,
+                PipelineCommand::CloseSymbol { symbol, hint_is_long, hint_qty },
                 "close_position_sent",
             )
         }
@@ -673,8 +679,8 @@ async fn dispatch_request(
                 .unwrap_or(10_000.0);
             handle_paper_cmd(
                 id,
-                paper_cmd_tx,
-                PaperSessionCommand::Reset {
+                pipeline_cmd_tx,
+                PipelineCommand::Reset {
                     new_balance: balance,
                 },
                 "reset_sent",
@@ -682,34 +688,34 @@ async fn dispatch_request(
         }
         // ── Phase 3b: Strategy parameter commands (Optuna → Rust) / 策略參數命令 ──
         "update_strategy_params" => {
-            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Update).await
+            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Update).await
         }
         "get_strategy_params" => {
-            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Get).await
+            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Get).await
         }
         "get_param_ranges" => {
-            handle_strategy_param_cmd(id, paper_cmd_tx, &req.params, StrategyParamOp::Ranges).await
+            handle_strategy_param_cmd(id, pipeline_cmd_tx, &req.params, StrategyParamOp::Ranges).await
         }
-        "update_risk_config" => handle_update_risk_config(id, paper_cmd_tx, &req.params).await,
+        "update_risk_config" => handle_update_risk_config(id, pipeline_cmd_tx, &req.params).await,
         // ARCH-RC1 1C-3-B: Rust-native risk runtime status + safe counter clear
-        "get_risk_runtime_status" => handle_risk_runtime_status(id, paper_cmd_tx).await,
-        "clear_consecutive_losses" => handle_clear_consecutive_losses(id, paper_cmd_tx).await,
+        "get_risk_runtime_status" => handle_risk_runtime_status(id, pipeline_cmd_tx).await,
+        "clear_consecutive_losses" => handle_clear_consecutive_losses(id, pipeline_cmd_tx).await,
         // ARCH-RC1 1C-3-B-2: governor manual override (operator escalation/de-escalation)
         "force_governor_tier_tighter" => {
-            handle_force_governor_tighter(id, paper_cmd_tx, &req.params, audit_pool).await
+            handle_force_governor_tighter(id, pipeline_cmd_tx, &req.params, audit_pool).await
         }
         "force_governor_tier_looser" => {
-            handle_force_governor_looser(id, paper_cmd_tx, &req.params, audit_pool).await
+            handle_force_governor_looser(id, pipeline_cmd_tx, &req.params, audit_pool).await
         }
         // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
-        "submit_paper_order" => handle_submit_paper_order(id, paper_cmd_tx, &req.params).await,
+        "submit_paper_order" => handle_submit_paper_order(id, pipeline_cmd_tx, &req.params).await,
         // RRC-1-E2: Strategy activate/pause / 策略啟停
-        "set_strategy_active" => handle_set_strategy_active(id, paper_cmd_tx, &req.params).await,
+        "set_strategy_active" => handle_set_strategy_active(id, pipeline_cmd_tx, &req.params).await,
         // Phase 3: Engine mode management / 引擎模式管理
-        "add_engine_mode" => handle_add_engine_mode(id, paper_cmd_tx, &req.params).await,
-        "switch_engine_mode" => handle_switch_engine_mode(id, paper_cmd_tx, &req.params).await,
+        "add_engine_mode" => handle_add_engine_mode(id, pipeline_cmd_tx, &req.params).await,
+        "switch_engine_mode" => handle_switch_engine_mode(id, pipeline_cmd_tx, &req.params).await,
         // System mode sync from Python GUI / 從 Python GUI 同步系統模式
-        "set_system_mode" => handle_set_system_mode(id, paper_cmd_tx, &req.params).await,
+        "set_system_mode" => handle_set_system_mode(id, pipeline_cmd_tx, &req.params).await,
         // Phase 4 (4-00): Dashboard skeleton status aggregation / 儀表板骨架狀態聚合
         "get_phase4_status" => handle_get_phase4_status(id),
         // Phase 4 (4-15): AI budget status / config / AI 預算狀態與配置
@@ -785,8 +791,8 @@ async fn dispatch_request(
 /// 處理紙盤 session 命令 — 通過通道發送到事件消費者。
 fn handle_paper_cmd(
     id: serde_json::Value,
-    tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
-    cmd: PaperSessionCommand,
+    tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
+    cmd: PipelineCommand,
     result_key: &str,
 ) -> JsonRpcResponse {
     match tx {
@@ -1090,7 +1096,7 @@ enum StrategyParamOp {
 /// 處理策略參數命令 — 發送 oneshot 請求到事件消費者。
 async fn handle_strategy_param_cmd(
     id: serde_json::Value,
-    tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
     op: StrategyParamOp,
 ) -> JsonRpcResponse {
@@ -1133,17 +1139,17 @@ async fn handle_strategy_param_cmd(
                     }
                 }
             };
-            PaperSessionCommand::UpdateStrategyParams {
+            PipelineCommand::UpdateStrategyParams {
                 strategy_name,
                 params_json,
                 response_tx: resp_tx,
             }
         }
-        StrategyParamOp::Get => PaperSessionCommand::GetStrategyParams {
+        StrategyParamOp::Get => PipelineCommand::GetStrategyParams {
             strategy_name,
             response_tx: resp_tx,
         },
-        StrategyParamOp::Ranges => PaperSessionCommand::GetParamRanges {
+        StrategyParamOp::Ranges => PipelineCommand::GetParamRanges {
             strategy_name,
             response_tx: resp_tx,
         },
@@ -1176,10 +1182,10 @@ fn parse_opt_opt_f64(params: &serde_json::Value, key: &str) -> Option<Option<f64
 
 async fn handle_update_risk_config(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
@@ -1253,7 +1259,7 @@ async fn handle_update_risk_config(
         );
     }
 
-    let _ = tx.send(PaperSessionCommand::UpdateRiskConfig {
+    let _ = tx.send(PipelineCommand::UpdateRiskConfig {
         hard_stop_pct,
         trailing_stop_pct,
         time_stop_hours,
@@ -1284,16 +1290,16 @@ async fn handle_update_risk_config(
 /// ARCH-RC1 1C-3-B：獲取 Rust 原生風控運行時狀態快照。
 async fn handle_risk_runtime_status(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PaperSessionCommand::GetRiskRuntimeStatus { response_tx: resp_tx }) {
+    if let Err(e) = tx.send(PipelineCommand::GetRiskRuntimeStatus { response_tx: resp_tx }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
@@ -1314,16 +1320,16 @@ async fn handle_risk_runtime_status(
 /// ARCH-RC1 1C-3-B：清除 per-symbol 連虧計數器（安全重置，不影響 governor tier）。
 async fn handle_clear_consecutive_losses(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PaperSessionCommand::ClearConsecutiveLosses { response_tx: resp_tx }) {
+    if let Err(e) = tx.send(PipelineCommand::ClearConsecutiveLosses { response_tx: resp_tx }) {
         return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
     }
     match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
@@ -1341,10 +1347,10 @@ async fn handle_clear_consecutive_losses(
 /// ARCH-RC1 1C-3-F：外部紙盤訂單入口 — 與策略走同一條 IntentProcessor 管線。
 async fn handle_submit_paper_order(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
@@ -1379,7 +1385,7 @@ async fn handle_submit_paper_order(
         .to_string();
 
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PaperSessionCommand::SubmitOrder {
+    if let Err(e) = tx.send(PipelineCommand::SubmitOrder {
         symbol,
         side,
         qty,
@@ -1408,11 +1414,11 @@ async fn handle_submit_paper_order(
 /// ARCH-RC1 1C-3-B-2：強制 governor 往更嚴方向（無冷卻 + V014 audit）。
 async fn handle_force_governor_tighter(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
     audit_pool: &Option<sqlx::PgPool>,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
@@ -1427,7 +1433,7 @@ async fn handle_force_governor_tighter(
         None => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing reason"),
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PaperSessionCommand::ForceGovernorTighter {
+    if let Err(e) = tx.send(PipelineCommand::ForceGovernorTighter {
         target_tier: target_tier.clone(),
         reason: reason.clone(),
         response_tx: resp_tx,
@@ -1486,11 +1492,11 @@ async fn handle_force_governor_tighter(
 /// ARCH-RC1 1C-3-B-2：強制 governor 降級（reason enum + 24h cooldown + audit）。
 async fn handle_force_governor_looser(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
     audit_pool: &Option<sqlx::PgPool>,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "paper command channel not configured")
@@ -1510,7 +1516,7 @@ async fn handle_force_governor_looser(
         .unwrap_or("")
         .to_string();
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    if let Err(e) = tx.send(PaperSessionCommand::ForceGovernorLooser {
+    if let Err(e) = tx.send(PipelineCommand::ForceGovernorLooser {
         target_tier: target_tier.clone(),
         reason_code: reason_code.clone(),
         notes: notes.clone(),
@@ -1603,10 +1609,10 @@ fn spawn_governor_audit_row(
 /// RRC-1-E2: Set strategy active/paused via IPC / 通過 IPC 設置策略啟停。
 async fn handle_set_strategy_active(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
@@ -1633,7 +1639,7 @@ async fn handle_set_strategy_active(
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PaperSessionCommand::SetStrategyActive {
+    let _ = tx.send(PipelineCommand::SetStrategyActive {
         strategy_name: name,
         active,
         response_tx: resp_tx,
@@ -1654,10 +1660,10 @@ async fn handle_set_strategy_active(
 /// Phase 3：運行時添加次級引擎模式。
 async fn handle_add_engine_mode(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
@@ -1685,7 +1691,7 @@ async fn handle_add_engine_mode(
     };
     let balance = params.get("balance").and_then(|v| v.as_f64()).unwrap_or(10_000.0);
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PaperSessionCommand::AddMode { mode, balance, response_tx: resp_tx });
+    let _ = tx.send(PipelineCommand::AddMode { mode, balance, response_tx: resp_tx });
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
         Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
@@ -1698,10 +1704,10 @@ async fn handle_add_engine_mode(
 /// Phase 3：切換主交易模式，附帶狀態切換。
 async fn handle_switch_engine_mode(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
@@ -1728,7 +1734,7 @@ async fn handle_switch_engine_mode(
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PaperSessionCommand::SwitchMode { mode, response_tx: resp_tx });
+    let _ = tx.send(PipelineCommand::SwitchMode { mode, response_tx: resp_tx });
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
         Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
@@ -1744,10 +1750,10 @@ async fn handle_switch_engine_mode(
 /// 進入封鎖模式時自動平倉交易所持倉。
 async fn handle_set_system_mode(
     id: serde_json::Value,
-    paper_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PaperSessionCommand>>,
+    pipeline_cmd_tx: &Option<tokio::sync::mpsc::UnboundedSender<PipelineCommand>>,
     params: &serde_json::Value,
 ) -> JsonRpcResponse {
-    let tx = match paper_cmd_tx {
+    let tx = match pipeline_cmd_tx {
         Some(tx) => tx,
         None => {
             return JsonRpcResponse::error(id, ERR_INTERNAL, "no paper command channel".to_string())
@@ -1764,7 +1770,7 @@ async fn handle_set_system_mode(
         }
     };
     let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
-    let _ = tx.send(PaperSessionCommand::SetSystemMode { mode, response_tx: resp_tx });
+    let _ = tx.send(PipelineCommand::SetSystemMode { mode, response_tx: resp_tx });
     match tokio::time::timeout(std::time::Duration::from_secs(3), resp_rx).await {
         Ok(Ok(Ok(msg))) => JsonRpcResponse::success(id, serde_json::json!({ "ok": true, "detail": msg })),
         Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INTERNAL, e),
@@ -2367,14 +2373,14 @@ mod tests {
 
     /// Helper: create a paper_cmd channel with a consumer that handles param commands.
     /// 輔助：創建帶有參數命令消費者的 paper_cmd 通道。
-    fn setup_strategy_param_channel() -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+    fn setup_strategy_param_channel() -> tokio::sync::mpsc::UnboundedSender<PipelineCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
         tokio::spawn(async move {
             use crate::strategies::{ma_crossover::MaCrossover, Strategy};
             let mut strategy: Box<dyn Strategy> = Box::new(MaCrossover::new());
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    PaperSessionCommand::UpdateStrategyParams {
+                    PipelineCommand::UpdateStrategyParams {
                         strategy_name,
                         params_json,
                         response_tx,
@@ -2388,7 +2394,7 @@ mod tests {
                         };
                         let _ = response_tx.send(result);
                     }
-                    PaperSessionCommand::GetStrategyParams {
+                    PipelineCommand::GetStrategyParams {
                         strategy_name,
                         response_tx,
                     } => {
@@ -2399,7 +2405,7 @@ mod tests {
                         };
                         let _ = response_tx.send(result);
                     }
-                    PaperSessionCommand::GetParamRanges {
+                    PipelineCommand::GetParamRanges {
                         strategy_name,
                         response_tx,
                     } => {
@@ -2423,12 +2429,12 @@ mod tests {
     /// ARCH-RC1 1C-3-B 輔助：模擬事件消費者，回傳合成的風控狀態快照與清除計數。
     fn setup_risk_runtime_channel(
         cleared_count: usize,
-    ) -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+    ) -> tokio::sync::mpsc::UnboundedSender<PipelineCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
         tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    PaperSessionCommand::GetRiskRuntimeStatus { response_tx } => {
+                    PipelineCommand::GetRiskRuntimeStatus { response_tx } => {
                         let snap = serde_json::json!({
                             "governor_tier": "Normal",
                             "consecutive_losses_by_symbol": {"BTCUSDT": 2u32},
@@ -2439,7 +2445,7 @@ mod tests {
                         });
                         let _ = response_tx.send(Ok(snap.to_string()));
                     }
-                    PaperSessionCommand::ClearConsecutiveLosses { response_tx } => {
+                    PipelineCommand::ClearConsecutiveLosses { response_tx } => {
                         let _ = response_tx.send(Ok(format!("cleared {cleared_count} symbol(s)")));
                     }
                     _ => {}
@@ -2481,12 +2487,12 @@ mod tests {
     fn setup_governor_override_channel(
         accept_tighter: bool,
         accept_looser: bool,
-    ) -> tokio::sync::mpsc::UnboundedSender<PaperSessionCommand> {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PaperSessionCommand>();
+    ) -> tokio::sync::mpsc::UnboundedSender<PipelineCommand> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
         tokio::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 match cmd {
-                    PaperSessionCommand::ForceGovernorTighter {
+                    PipelineCommand::ForceGovernorTighter {
                         target_tier, reason, response_tx,
                     } => {
                         let result = if accept_tighter {
@@ -2498,7 +2504,7 @@ mod tests {
                         };
                         let _ = response_tx.send(result);
                     }
-                    PaperSessionCommand::ForceGovernorLooser {
+                    PipelineCommand::ForceGovernorLooser {
                         target_tier, reason_code, response_tx, ..
                     } => {
                         let result = if accept_looser {
