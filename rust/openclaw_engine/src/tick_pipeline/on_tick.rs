@@ -158,18 +158,16 @@ impl TickPipeline {
                 .iter()
                 .map(|p| p.symbol.clone())
                 .collect();
+            // PNL-FIX-1: must close each position at ITS OWN symbol's latest price,
+            // not event.last_price (which is the triggering tick's price for ONE
+            // symbol — applying it to all symbols inflated PnL by 1000-10000x in
+            // the 2026-04-12 anomaly).
+            // PNL-FIX-1：每個倉位必須以該交易對自己的最新價平倉，禁止使用 event.last_price。
             for sym in symbols {
-                let pos_info = self
-                    .paper_state
-                    .get_position(&sym)
-                    .map(|p| (p.is_long, p.qty));
-                if let Some(pnl) = self
-                    .paper_state
-                    .close_position(&sym, event.last_price, event.ts_ms)
+                if let Some((il, q, px, pnl)) =
+                    self.close_position_at_symbol_market(&sym, event.ts_ms)
                 {
-                    if let Some((il, q)) = pos_info {
-                        self.emit_close_fill(&sym, il, q, event.last_price, event.ts_ms, pnl, "fast_track");
-                    }
+                    self.emit_close_fill(&sym, il, q, px, event.ts_ms, pnl, "fast_track");
                 }
                 self.stats.total_stops += 1;
             }
@@ -186,18 +184,14 @@ impl TickPipeline {
             // Hard block: stops only / 硬阻斷：僅處理止損
             warn!(symbol = %event.symbol, reason = %h0_result.reason,
                 "H0 BLOCKED — stops only / H0 阻斷 — 僅止損");
+            // PNL-FIX-1: triggers may fire on positions whose symbol ≠ event.symbol;
+            // close each at its own symbol's latest price (see fast_track block).
+            // PNL-FIX-1：被觸發的倉位 symbol 可能 ≠ event.symbol，必須各自用自己的最新價平倉。
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
-                let pos_info = self
-                    .paper_state
-                    .get_position(sym)
-                    .map(|p| (p.is_long, p.qty));
-                if let Some(pnl) = self
-                    .paper_state
-                    .close_position(sym, event.last_price, event.ts_ms)
+                if let Some((il, q, px, pnl)) =
+                    self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
-                    if let Some((il, q)) = pos_info {
-                        self.emit_close_fill(sym, il, q, event.last_price, event.ts_ms, pnl, &trigger.reason);
-                    }
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &trigger.reason);
                 }
                 self.stats.total_stops += 1;
             }
@@ -293,23 +287,17 @@ impl TickPipeline {
         // 暫停門控：暫停時跳過信號評估+策略分派（價格/指標/止損繼續）
         if self.paper_paused {
             // Protective stops while paused / 暫停時的保護性止損
+            // PNL-FIX-1: per-symbol close price (see fast_track block).
             for (sym, trigger) in &self.paper_state.check_stops(event.last_price, event.ts_ms) {
-                let pos_info = self
-                    .paper_state
-                    .get_position(sym)
-                    .map(|p| (p.is_long, p.qty));
                 debug!(symbol = %sym, reason = %trigger.reason, "stop (paused)");
-                if let Some(pnl) = self
-                    .paper_state
-                    .close_position(sym, event.last_price, event.ts_ms)
+                if let Some((il, q, px, pnl)) =
+                    self.close_position_at_symbol_market(sym, event.ts_ms)
                 {
-                    if let Some((il, q)) = pos_info {
-                        self.emit_close_fill(sym, il, q, event.last_price, event.ts_ms, pnl, &trigger.reason);
-                    }
-                }
-                self.stats.total_stops += 1;
-                if let Some((is_long, qty)) = pos_info {
-                    self.dispatch_close_order(sym, is_long, qty, event, false);
+                    self.emit_close_fill(sym, il, q, px, event.ts_ms, pnl, &trigger.reason);
+                    self.stats.total_stops += 1;
+                    self.dispatch_close_order(sym, il, q, event, false);
+                } else {
+                    self.stats.total_stops += 1;
                 }
             }
             let tick_duration_us = tick_start.elapsed().as_micros() as u64;
@@ -904,8 +892,14 @@ impl TickPipeline {
                     let qty = pos.qty;
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close (paper) / 策略平倉（紙盤）");
-                    if let Some(pnl) = self.paper_state.close_position(symbol, event.last_price, event.ts_ms) {
-                        self.emit_close_fill(symbol, is_long, qty, event.last_price, event.ts_ms, pnl, reason);
+                    // PNL-FIX-1: close at this symbol's own latest price — strategies may
+                    // close cross-symbol positions (after multi-symbol position tracking),
+                    // so event.last_price (current tick) is wrong when symbol ≠ event.symbol.
+                    // PNL-FIX-1：策略可能跨交易對平倉，必須以該交易對自己的最新價平倉。
+                    if let Some((_il, _q, close_px, pnl)) =
+                        self.close_position_at_symbol_market(symbol, event.ts_ms)
+                    {
+                        self.emit_close_fill(symbol, is_long, qty, close_px, event.ts_ms, pnl, reason);
                         // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
                         self.intent_processor.record_trade(symbol, pnl);
                         // Push to recent_fills ring buffer / 推入最近成交環形緩衝
@@ -915,8 +909,8 @@ impl TickPipeline {
                             symbol: symbol.clone(),
                             is_long,
                             qty,
-                            price: event.last_price,
-                            fee: qty * event.last_price * fr,
+                            price: close_px,
+                            fee: qty * close_px * fr,
                             strategy: format!("strategy_close:{reason}"),
                         });
                         if self.recent_fills.len() > 50 {
@@ -1048,11 +1042,13 @@ impl TickPipeline {
                         } else {
                             self.consecutive_losses.remove(symbol);
                         }
-                        if let Some(pnl) = self
-                            .paper_state
-                            .close_position(symbol, event.last_price, event.ts_ms)
+                        // PNL-FIX-1: risk evaluator can act on cross-symbol positions —
+                        // close at this symbol's own latest price, not event.last_price.
+                        // PNL-FIX-1：風控評估器可作用於跨交易對倉位，必須以該交易對自己的最新價平倉。
+                        if let Some((_il, _q, close_px, pnl)) =
+                            self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
-                            self.emit_close_fill(symbol, *is_long, *qty, event.last_price, event.ts_ms, pnl, &reason);
+                            self.emit_close_fill(symbol, *is_long, *qty, close_px, event.ts_ms, pnl, &reason);
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
                             self.intent_processor.record_trade(symbol, pnl);
