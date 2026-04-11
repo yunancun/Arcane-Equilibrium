@@ -35,6 +35,7 @@ MODULE_NOTE (English):
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -490,13 +491,7 @@ def _submit_live_governance_request(actor_id: str) -> None:
 
 
 def _revoke_live_governance_auth(reason: str = "live_session_stopped", actor_id: str = "system") -> None:
-    """
-    Revoke all live-scoped GovernanceHub SM-1 authorizations (non-blocking).
-    Called on session stop, execution authority revoke, or emergency halt.
-
-    撤銷所有 live 模式 GovernanceHub SM-1 授權（非阻塞）。
-    在 session 停止、execution_authority 撤銷或緊急停止時調用。
-    """
+    """Revoke all live SM-1 auths (session stop / authority revoke / emergency). / 撤銷所有 live SM-1 授權。"""
     try:
         from .governance_hub import GovernanceHub
         hub = GovernanceHub.get_instance()
@@ -557,14 +552,7 @@ def _revoke_live_governance_auth(reason: str = "live_session_stopped", actor_id:
 def get_live_session_status(
     actor: Any = Depends(base.current_actor),
 ) -> dict:
-    """
-    GET /api/v1/live/session/status
-    返回當前 live session 狀態（引擎快照 + 執行授權 + active_engines）
-
-    Returns live session state, engine availability, execution_authority, and active_engines.
-    Mirrors /api/v1/paper/session/status structure for GUI consistency.
-    結構與 /api/v1/paper/session/status 保持一致，方便 GUI 複用。
-    """
+    """GET /api/v1/live/session/status — engine state + execution_authority + active_engines. / 當前 live session 狀態。"""
     rust = get_rust_reader()
     engine_available = rust.is_available()
     # 3E-5: query the live/demo engine directly via per-engine snapshot.
@@ -673,7 +661,17 @@ async def post_live_session_start(
 
     # Submit live governance request for operator audit trail (non-blocking)
     # 提交實盤治理申請用於操作員審計留痕（非阻塞）
-    _submit_live_governance_request(getattr(actor, "actor_id", "live_operator"))
+    actor_id = getattr(actor, "actor_id", "live_operator")
+    _submit_live_governance_request(actor_id)
+
+    # Hook: earned-trust engine — record session start / 信任引擎 session 啟動鉤子
+    try:
+        from .earned_trust_engine import TIER_TTL_HOURS, get_trust_engine
+        _te = get_trust_engine()
+        _ttl = TIER_TTL_HOURS.get(_te.get_state_snapshot()["current_tier"], 24)
+        _te.on_session_start(auth_expires_ts_ms=int((time.time() + _ttl * 3600) * 1000))
+    except Exception as _te_exc:
+        logger.debug("EarnedTrustEngine start hook (non-fatal): %s", _te_exc)
 
     # Resume engine pipeline if it was paused by a previous stop
     # 如果管線因上次 stop 而暫停，恢復管線
@@ -738,6 +736,13 @@ async def post_live_session_stop(
         reason="live_session_stopped",
         actor_id=getattr(actor, "actor_id", "system"),
     )
+
+    # Hook: earned-trust engine — voluntary stop resets tier to T0 / 主動停止重置信任 tier
+    try:
+        from .earned_trust_engine import get_trust_engine
+        get_trust_engine().on_session_stop()
+    except Exception as _te_exc:
+        logger.debug("EarnedTrustEngine stop hook (non-fatal): %s", _te_exc)
 
     # Cancel contraction monitor task if running
     # 如果縮倉監控 task 在運行，取消它
@@ -1162,15 +1167,7 @@ async def post_live_close_all_positions(
 def get_live_metrics(
     actor: Any = Depends(base.current_actor),
 ) -> dict:
-    """
-    GET /api/v1/live/metrics
-    Performance metrics computed from engine state (fills, positions, PnL).
-    Works for both demo-key-on-live and real-live modes — data comes from the
-    Rust engine's internal paper_state which tracks all modes.
-
-    性能指標：從引擎狀態（成交、持倉、PnL）計算。
-    demo-key-on-live 和 real-live 模式均可用 — 數據來自 Rust 引擎內部狀態。
-    """
+    """GET /api/v1/live/metrics — performance metrics from Rust engine (fills/positions/PnL). / 性能指標。"""
     from .paper_trading_metrics import compute_full_metrics
 
     rust = get_rust_reader()
@@ -1190,3 +1187,11 @@ def get_live_metrics(
     full["total_fills"] = stats.get("total_fills", 0)
     full["total_stops"] = stats.get("total_stops", 0)
     return _live_response(full)
+
+
+def _grant_execution_authority_internal() -> None:
+    """Re-grant execution_authority (called by live_trust_routes after Renew). / 信任續期後重新授予 execution_authority。"""
+    global _EXECUTION_AUTHORITY_OVERRIDE
+    if _EXECUTION_AUTHORITY_OVERRIDE != "granted":
+        _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+        logger.info("execution_authority re-granted via earned-trust renewal / 信任續期重新授予")
