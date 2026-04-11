@@ -556,24 +556,28 @@ impl OrderManager {
     ///
     /// Returns (rounded_qty, rounded_price_opt).
     /// 返回 (取整後的 qty, 取整後的 price 或 None)。
+    ///
+    /// M-1 (2026-04-11) audit fix: fail-closed when spec missing instead of bypassing
+    /// rounding/validation. Previously a missing spec silently passed raw qty/price
+    /// to Bybit, which then rejected with `retCode=10001 Qty invalid`.
+    /// M-1 審計修復：缺少品種規格時 fail-closed，而非繞過取整/驗證。先前缺失規格
+    /// 會將原始 qty/price 直接送往 Bybit，導致 `retCode=10001 Qty invalid` 拒絕。
     fn validate_and_round(&self, req: &CreateOrderRequest) -> BybitResult<(f64, Option<f64>)> {
-        let spec = self.instruments.get(&req.symbol);
+        let spec = self.instruments.get(&req.symbol).ok_or_else(|| {
+            BybitApiError::Business {
+                ret_code: -1,
+                ret_msg: format!(
+                    "instrument spec missing for {} — fail-closed / 缺少品種規格 {} — 拒絕下單",
+                    req.symbol, req.symbol
+                ),
+                response: serde_json::json!(null),
+            }
+        })?;
 
-        let qty = if let Some(ref s) = spec {
-            s.round_qty(req.qty)
-        } else {
-            req.qty
-        };
+        let qty = spec.round_qty(req.qty);
 
         let price = match (req.order_type, req.price) {
-            (OrderType::Limit, Some(p)) => {
-                let rounded = if let Some(ref s) = spec {
-                    s.round_price(p)
-                } else {
-                    p
-                };
-                Some(rounded)
-            }
+            (OrderType::Limit, Some(p)) => Some(spec.round_price(p)),
             (OrderType::Limit, None) => {
                 return Err(BybitApiError::Business {
                     ret_code: -1,
@@ -581,27 +585,17 @@ impl OrderManager {
                     response: serde_json::json!(null),
                 });
             }
-            _ => req.price.map(|p| {
-                if let Some(ref s) = spec {
-                    s.round_price(p)
-                } else {
-                    p
-                }
-            }),
+            _ => req.price.map(|p| spec.round_price(p)),
         };
 
-        // Validate against exchange limits if spec available
-        // 有合約信息時驗證交易所限制
-        if let Some(ref s) = spec {
-            let check_price = price.unwrap_or(0.0);
-            let (valid, reason) = s.validate_order(qty, check_price);
-            if !valid {
-                return Err(BybitApiError::Business {
-                    ret_code: -1,
-                    ret_msg: format!("Order validation failed: {reason} / 訂單驗證失敗：{reason}"),
-                    response: serde_json::json!(null),
-                });
-            }
+        let check_price = price.unwrap_or(0.0);
+        let (valid, reason) = spec.validate_order(qty, check_price);
+        if !valid {
+            return Err(BybitApiError::Business {
+                ret_code: -1,
+                ret_msg: format!("Order validation failed: {reason} / 訂單驗證失敗：{reason}"),
+                response: serde_json::json!(null),
+            });
         }
 
         Ok((qty, price))

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-11（3E-ARCH S0-S13 + Fix Rounds A-G 已全部歸檔 → `docs/archive/2026-04-11--completed_todo_3e_arch.md`）
-測試基準線：**Rust engine lib 929 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+最後更新：2026-04-11（晚間 audit + housekeeping。3E-ARCH S0-S13 + Fix Rounds A-G + W19 + W20 + Phase 6 已全部歸檔）
+測試基準線：**Rust engine lib 931 + core 366 + e2e 18 · Python program_code 2792 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -53,84 +53,42 @@
 
 ---
 
-## 🔴 3E-E2 Fix Rounds — 多角色審計後修復計劃（2026-04-11）
-
-**審計報告**：`docs/audits/2026-04-11--3e_arch_e2_multi_role_review.md`（633 行、9 角色平行審查）  
-**核心結論**：3E-ARCH S0-S11 編譯/測試 pass（897 lib + 18 e2e + 2797 Python），但**實施不完整**：
-1. **MEGA-BLOCKER-0**：當前 spawn 是「Primary + Paper alongside」，**非**用戶目標的「三者無條件並行」
-2. **10 BLOCKER + 7 MAJOR + 6 MINOR** 覆蓋 D1-D26 架構缺口
-
-**用戶 2026-04-11 架構澄清**：
-- 唯一運行模式 = Paper/Demo/Live **三者同時並行**（各自依 API key 存在性獨立啟停）
-- `trading_mode` / `TradingMode` enum / `primary_kind` **徹底刪除**，不留 deprecated 過渡
-- 每個 Pipeline 啟動條件 = 自己的 API key + system_mode 允許
-
-### Phase A — 快速修復（無架構依賴）✅ 完成
-- [x] **BLOCKER-5** `settings_routes.py:391` `==` → `hmac.compare_digest(bytes, bytes)`（constant-time）
-- [x] **BLOCKER-7** `settings_routes.py` 加 `_save_api_key_lock: asyncio.Lock`，衝突檢查→validate→write 串行
-- [x] **BLOCKER-6** 遷移 5 處 `std::sync::RwLock` → `parking_lot::RwLock`（types.rs + main.rs PrivateWsBindings + account_manager.rs 全部 `.unwrap()` 移除）
-- [x] **MAJOR-1** `persistence.rs` StateWriter chmod 0600（rename 前）+ `#[cfg(unix)]` 回歸測試
-- [~] **BLOCKER-1** D19 DB 去重 — **延後到 Phase C**（隨 spawn 重構一併處理）
-- [~] **MINOR-2** `paper_cmd_rx` 改名 — **延後到 Phase C**（隨 spawn 重構一併處理）
-
-**Phase A 測試結果**：cargo test lib **897 passed** / 0 failed（+1 新 chmod 測試），pytest settings **24 passed** / 0 failed。
-
-### Phase B — 配置層補完（半天）✅ 完成
-- [x] **BLOCKER-8** 創建 4 個 TOML 配置文件 + 實現 `load_strategy_params()`
-  - `settings/paper_config.toml`（initial_balance + taker_fee）
-  - `settings/strategy_params_paper.toml` / `_demo.toml` / `_live.toml`（per-engine 策略參數）
-  - `StrategyParamsConfig` + `StrategyFactory::create_for_engine(kind)` + 7 tests
-- [x] **MAJOR-4** Paper balance 優先級解析統一（env > TOML > Demo API > 硬編碼 default）
-  - `paper_balance_from_toml()` + `resolve_paper_initial_balance()`
-
-### Phase C — 三引擎並行重構 · MEGA-BLOCKER-0（2-3 天）✅ 完成
-- [x] **3E-10.1** `main.rs` spawn 邏輯重構：`determine_primary_kind()` 基於 API key 偵測取代 `config.trading_mode`
-- [x] **3E-10.2** 刪除 `config.trading_mode` 字段 + `engine.toml` 清理 + ipc_server 改從快照派生
-- [x] **3E-10.3** Python 側向後兼容確認 — serde rename `pipeline_kind` → `"trading_mode"` 保持不變，Python 讀取正確
-- [x] **3E-10.4** Rust `TradingMode` enum 真正刪除 + `mode_state.rs` 遷移至 `PipelineKind`
-- [x] **3E-10.5** **BLOCKER-1 D19 DB 去重** — Demo/Live 管線 `market_data_tx` / `feature_tx` 設為 `None`
-- [x] **3E-10.6** **MINOR-2 paper_cmd_rx 改名** — `pipeline_cmd_tx_paper` / `pipeline_cmd_rx_paper`
-- [x] **3E-10.7** reconciler_e2e 測試修復（`StateWriter` → `DualStateWriter`）— 18 e2e pass
-
-**Phase B+C 測試結果**：cargo test lib **904 passed** / 0 failed + e2e **18 passed** / 0 failed。
-
-### Phase D — 架構級補完（2-3 天，依賴 Phase C）✅ 完成
-- [x] **BLOCKER-2** D6 三級遞減收縮實施（`EngineEvent::Crashed/CircuitBreakerTripped` + `PipelineHealth` atomic + `broadcast::channel` 跨引擎通知 + CB 事件自動廣播 + 對等管線 Cautious 升級）
-- [x] **BLOCKER-3** D15 `global_notional_cap_usdt` 實施（`Arc<AtomicU64>` 跨引擎共享 + `IntentProcessor.check_global_notional_cap()` Gate 2.7 後檢查 + Paper 排除）
-- [x] **BLOCKER-4** D17 Live 獨立 tokio Runtime（`std::thread` + `runtime::Builder::new_multi_thread().worker_threads(2)` + Demo/Paper 留共享 runtime）
-- [x] **MAJOR-2** 啟動競態修復（`oneshot::channel` per-pipeline ready 信號 + fan-out 等待 60s 超時）
-- [x] **MAJOR-3** shutdown 分級順序（WS+IPC → Primary(Live/Demo) → Paper，10s 超時 + Live thread join）
-- [x] **MAJOR-5** IPC per-engine audit log（`dispatch_request` 入口 `tracing::info!` 記錄 `ipc_method` + `target_engine`）
-- [x] **MAJOR-7** snapshot 格式版本號（`PipelineSnapshot` 新增 `schema_version: "2.0.0"` + `written_at_ms`）
-
-**Phase D 測試結果**：cargo test lib **904 passed** + core **366 passed** + e2e **18 passed** / 0 failed。
-
-### Phase E — 測試補完 ✅
-- [x] **BLOCKER-10** 補 25 blocker tests（D2/D6/D15/D23 — 覆蓋 global notional cap / EngineEvent / PipelineHealth / broadcast / snapshot versioning / startup barrier / cross-engine cascade）
-- [x] 全測試套件跑通：engine lib **929** + core **366** + e2e **18** = **1313 passed** / 0 failed
-
-### Phase F — 文件拆分 ✅
-- [x] **BLOCKER-9** 5 個超 1200 硬上限文件拆分：
-  - `tick_pipeline.rs` 3907→ mod.rs(1122) + on_tick.rs(1172) + commands.rs(708) + tests.rs(930)
-  - `ipc_server.rs` 3223→ mod.rs(975) + handlers.rs(1195) + tests.rs(1058)
-  - `main.rs` 2243→ main.rs(930) + startup.rs(716) + tasks.rs(488)
-  - `intent_processor.rs` 1785→ mod.rs(493) + gates.rs(204) + router.rs(499) + tests.rs(597)
-  - `position_reconciler.rs` 1397→ mod.rs(617) + escalation.rs(351) + tests.rs(438)
-
-### Phase G — 重跑驗收 ✅
-- [x] 所有 blocker/major 清零後**重跑 9 角色並行 3E-E2 審查** — **9/9 PASS**
-- [x] 通過後：更新 TODO.md 標記 `3E-E2` / `3E-E4` 為 `[x]`
-- [x] 更新 `CLAUDE.md` §三 + `docs/CLAUDE_CHANGELOG.md` + 基線測試數
-- [x] **殘留修復**：M-3 GovernanceProfile → `pipeline_kind.governance_profile()` ✅ + M-4 catch_unwind + panic logging ✅ + 8 MINOR 修復（m-1~m-3,m-5,m-7,m-8; m-4 已修/m-6 test-only/m-9,m-10 不影響）
-- **殘留 2 MAJOR**（M-1/M-2 文件大小監控，非阻塞）：
-  - M-1: `handlers.rs` 1195 行（下次加 handler 前拆分）
-  - M-2: `on_tick.rs` 1170 行（-2 行，監控）
-
-**Phase 依賴圖**：  
-`Phase A ✅ → Phase B ✅ → Phase C ✅ → Phase D ✅ → Phase E ✅ → Phase F ✅ → Phase G ✅`  
-**總預估**：~10-12 工作日 · 建議分 4-5 個 session 推進
+**3E-E2 Fix Rounds A-G** ✅ 全部完成 — 已歸檔至 `docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`（10 BLOCKER + 7 MAJOR + MEGA-BLOCKER-0 全修）。
 
 </details>
+
+---
+
+## 🔴 2026-04-11 晚間 Audit BLOCKERs（待修）
+
+**起源**：用戶要求「仔細檢查現在的持倉和今天的交易，看看是否風控全都在有效接入」→ 9 角色 audit 發現 4 MAJOR + 2 BLOCKER。M-1~M-4 已修復（commit 待出），B-1/B-2 待修。
+
+- [ ] **B-1 Demo/Live 快照與真實持倉斷開** — 結構性 P0
+  - **症狀**：`/tmp/openclaw/pipeline_snapshot_demo.json` 顯示 `positions=[]` `fills=0` `trades=0`，但 Bybit Demo 帳戶實際 9 個活躍倉位。Live snapshot 同樣空。
+  - **根因假設**：`event_consumer/dispatch.rs` 派發 primary 訂單後，`ExchangeEvent::Fill` 沒有流回 `pipeline.paper_state` / `stats.total_fills`。Private WS `fast-execution` 訂閱已建立但事件未被消費或未路由到對應引擎的 state 結構。
+  - **影響**：Demo/Live GUI 完全顯示不出真實持倉/餘額/PnL；Reconciler 對賬會以為「漂移=baseline 9 vs snapshot 0」永遠告警；風控基於空 state 計算 → 無法執行 daily_loss / position_size 等所有與當前 state 相關的硬限制。
+  - **修復方向**：
+    1. 確認 `EventConsumer::handle_exchange_event` Fill 分支是否有路由到正確 pipeline（per-engine）
+    2. 確認 demo/live pipeline 是否擁有 `paper_state` 等價物來吸收 Fill 事件
+    3. 若架構決定 demo/live 不複用 `paper_state`，需新增 `LivePositionState` 並接線
+  - **驗收**：Demo session 啟動 1 分鐘後 `pipeline_snapshot_demo.json` 顯示與 Bybit 一致的 positions/balance；fills 計數隨成交遞增。
+
+- [ ] **B-2 total_fills 不遞增（exchange 模式）**
+  - **症狀**：今日 80 次 primary dispatch 中 66 次成功（Bybit 返回 orderId），但 `pipeline_snapshot_demo.json` `stats.total_fills=0`，0 ExchangeEvent::Fill 被處理。
+  - **與 B-1 的關係**：B-1 是 state 層斷開，B-2 是 stats 計數層斷開。可能是同一根因，也可能是兩處獨立 wiring 缺失。
+  - **修復方向**：跟踪一個 orderId 從 dispatch → REST 確認 → WS execution event → consumer handler → stats.total_fills 增加，找出鏈路斷點。
+  - **驗收**：Demo 一筆成交後 `stats.total_fills` +1，`recent_fills` 出現對應條目。
+
+**互鎖**：B-1 / B-2 修復前 Demo/Live 兩條管線在 GUI 視角下「不存在持倉與成交」，但 Bybit 後台真實有交易發生 → 風險：如果 daily_loss 邏輯依賴 paper_state，當前 Demo/Live 不會觸發停損。**建議在 Live 上線前必須清零**（W22 之前）。
+
+---
+
+### M-1~M-4 已修復（待 commit）
+
+- [x] **M-1** `order_manager.validate_and_round` fail-closed 缺 spec + `dispatch.rs` Market 訂單 pre-flight 名義值檢查（消除 14 次 retCode=10001 round-trip / session）
+- [x] **M-2** `grid_trading.on_rejection` per-symbol 30s 拒絕冷卻 + `on_tick.rs` 4 個 `recent_intents.push_back` 站點顯示 post-Guardian capped qty（GUI 不再顯示 1e9 sentinel）
+- [x] **M-3** cost_gate 跨引擎驗證 — 日誌證據確認 paper exploration mode + demo cold-start 探索均按設計運作（無代碼變更）
+- [x] **M-4** `risk_config_live.toml` 限額驗證 — stop_loss_max=15%, leverage_max=15, daily_loss_max=7%, position_size_max=15%, h0_shadow_mode=false 全部正確收緊
 
 ---
 
@@ -171,54 +129,23 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 
 ---
 
-## 🛡️ W19 — 安全 + 告警（Live 前必做）
+## 🛡️ W19 安全 + 告警 ✅ 全部完成
 
-### W19-P0：IPC 認證 + Rate Limiting（無依賴，立即可做）
+歸檔：`docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`（SEC-05/17, G-3/5, OC-3, 6-RC-6 等全部）。
 
-- [x] **SEC-05** GUI `innerHTML` XSS ✅ — ocEsc() 全量包裹
-- [x] **SEC-17** `OPENCLAW_ALLOW_MAINNET` 移除 ✅ — API key 填入 = 唯一上線條件
-- [x] **G-3 / SEC-08** IPC socket HMAC-SHA256 認證 ✅ (commit W19)
-  - verify_ipc_token()（常數時間 mac.verify_slice）+ handle_connection auth 區塊 + Python _authenticate() + fail-closed + 向後兼容（無 env var 跳過）
-- [x] **G-5** API Rate Limiting 全局覆蓋 ✅ — 驗證 main_legacy.py:304-307 default_limits=[120/min]+SlowAPIMiddleware 已覆蓋全部 214 路由（login 5/min 保留嚴格限制）
+## 🛡️ W20 深度安全審查 ✅ 大部分完成
 
-### W19-P0：告警通道（阻塞 6-RC-6）
-
-- [x] **OC-3** 多通道分級告警 ✅ (commit W19) — reconciler_alert_monitor() 每 30s 輪詢 get_risk_runtime_status；CIRCUIT_BREAKER/MANUAL_REVIEW→P0；CAUTIOUS/REDUCED/DEFENSIVE→P1；asyncio.to_thread 包裹 sync alert；main.py startup create_task
-- [x] **6-RC-6** 多通道告警 + governor tier 升降告警 ✅ (commit W19) — OC-3 實施覆蓋 6-RC-6 需求；CloseAll/CB 觸發時 P0 alert 已接線
-- [x] Phase 6 自動降級動作層完成（6-RC-1~5,7,8,9,10）✅
-
-### W20：深度安全審查
+歸檔：同上（SEC-04/06/13, G-9, WP-CC FS-1/BI-1/P9/SM-1）。剩餘：
 
 - [ ] **SEC-21** Cookie `secure=True`（HTTPS 上線後，W22 依賴 HTTPS 部署）
-- [x] **SEC-04 / 06 / 13** 深度 E3 審查 ✅ — SEC-04 safe (parameterized queries), SEC-06 fixed (HttpOnly cookie), SEC-13 fixed (saturating cast)
-- [x] **G-9** HMAC dead import 確認 ✅ — NOT dead, `hmac.compare_digest()` used at L171 for auth token verification
-- [x] **WP-CC/FS-1 / BI-1 / P9 / SM-1** ✅ — FS-1 tests extracted (1083→742 lines), BI-1 MODULE_NOTE 12 files, P9 dual-rail stop wired, SM-1 compliant
 
 ---
 
-## 📈 Phase 6 — 漸進放權 + Reconciler 自動收縮（W20-W21）
+## 📈 Phase 6 — 漸進放權 + Reconciler 自動收縮 ✅ 大部分完成
 
-### 6-RC（Reconciler 自動 governor 動作層）
+歸檔：同上（6-RC-1~10, 6-01~08）。剩餘：
 
-- [x] **6-RC-1** 動作通道隔離 ReconcilerEscalate/DeEscalate ✅
-- [x] **6-RC-2** V014 event_type 隔離 ✅
-- [x] **6-RC-3** 動作策略（MajorDrift→Cautious / burst→CB+CloseAll）✅
-- [x] **6-RC-4** 自身冷卻（per-symbol 30min + 全局 5min + hybrid 恢復）✅
-- [x] **6-RC-5** Per-symbol minQty dust floor ✅
-- [x] **6-RC-6** 多通道告警 + governor tier 升降告警 ✅ (W19 OC-3 覆蓋)
-- [x] **6-RC-7** 整合測試（7 場景 reconciler_e2e.rs）✅
-- [x] **6-RC-8** Live blocker 解除 ✅
-- [x] **6-RC-9** Baseline staleness 政策 ✅
-- [x] **6-RC-10** REST 失敗升級（≥10 次→Cautious）✅
-
-### 6-Phase（漸進放權 + 驗收，W20-W21）
-
-- [x] **6-01~03** 漸進放權管線 + 畢業邏輯 + Live 審批 ✅ — promotion_pipeline.py (PromotionGate + 5 stages + graduation gates + operator approval) + 3 API endpoints + 27 tests
-- [x] **6-04** 集成測試（合成場景模擬器 7 新場景：MinorDrift 不重設/SideFlip/Ghost/冷卻/全局冷卻/多級恢復/REST 漸進）✅
-- [x] **6-05** 壓測（Rust 4 場景：100 cycle 快速翻轉 / 50 symbols 爆發 / handler 快速升降 / 性能 <100ms；Python 5 場景：並發 register/promote/metrics）✅
-- [x] **6-06** sync_commit Live 驗證 PASS — global `synchronous_commit=on`（V006:90）已保護 orders/fills，per-session 分層優化歸 WP Backlog
-- [x] **6-07~08** EvolutionEngine 保留（用於 DL/AI agent 學習），與 PromotionPipeline 分工文檔化 ✅
-- [ ] **6-09~13** E2 + E4 + QA 端到端 + E5 + PM（W21）
+- [ ] **6-09~13** E2 + E4 + QA 端到端 + E5 + PM 驗收（W21）
 
 ---
 
@@ -290,7 +217,6 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 - [ ] WP-F/UX-06 Submit 無 loading 狀態
 - [ ] WP-F/UX-07~10 術語統一（Paper/Live/Session 各 Tab 標籤）
 - [ ] WP-F/AH-05 Apply 標籤誤導
-- [x] WP-F/AH-06 Risk-tab dirty-tracking ✅
 - [ ] WP-F/O-xx / AH-08~11（詳見 §10.1）
 - [ ] `preferred_margin_mode` / `preferred_position_mode` GUI 入口
 
@@ -345,7 +271,8 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ## 📚 已完成歸檔索引
 
-- **3E-ARCH 三引擎並行 + 3E-E2 Fix Rounds A-G**：`docs/archive/2026-04-11--completed_todo_3e_arch.md`（2026-04-11 歸檔，S0-S13 + 10 BLOCKER + 7 MAJOR）
+- **W19 + W20 + Phase 6 + 3E-E2 Fix Rounds A-G**：`docs/archive/2026-04-11--completed_todo_w19_w20_phase6.md`（2026-04-11 晚間整理）
+- **3E-ARCH 三引擎並行 + 3E-E2 Fix Rounds A-G（完整版）**：`docs/archive/2026-04-11--completed_todo_3e_arch.md`（2026-04-11 歸檔，S0-S13 + 10 BLOCKER + 7 MAJOR）
 - **Live GUI P0~P6 + DEAD-PY-1/2 + 1C-4 收尾**：`docs/archive/2026-04-10--completed_todo_live_gui_dead_py.md`
 - **Phase 5 P0 promotion + WIRE chain**：commits `5d7d673` → `0e848fa` → `638afa3` → `563d54a` → `5e760be`
 - **ARCH-RC1 Session 1A → 1C-4 WRAP**：`docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md` + `docs/archive/2026-04-08--main_docs_1c3_1c4_narrative.md`
