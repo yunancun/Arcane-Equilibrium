@@ -25,6 +25,9 @@
   <span style="font-weight:600">&#x1F4B0; 模拟引擎</span>
   <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
   <span class="spacer" style="flex:1"></span>
+  <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
+    Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" style="width:90px;font-size:12px" />
+  </label>
   <button class="oc-btn oc-btn-success" id="btn-start" onclick="sessionAction('start')">&#x25B6; 启动</button>
   <button class="oc-btn" id="btn-pause" onclick="sessionAction('pause')" disabled>&#x23F8; 暂停</button>
   <button class="oc-btn" id="btn-resume" onclick="sessionAction('resume')" disabled>&#x25B6; 继续</button>
@@ -165,17 +168,20 @@ async function sessionAction(action) {
   // Session 操作控制 Rust 引擎進程（啟動/停止）
   let body = {};
   if (action === 'start') {
-    // For start, pass initial_balance from Demo if available
-    // 啟動時傳遞 Demo 餘額（如果可用）
-    let bal = 0;
-    try {
-      const balD = await ocApi('/api/v1/strategy/demo/balance');
-      if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
-        let b = balD.data;
-        if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
-        bal = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
-      }
-    } catch (e) {}
+    // 3E-8: Use GUI-configured initial balance, fallback to Demo balance if available.
+    // 3E-8：使用 GUI 配置的初始餘額，回退到 Demo 餘額（如可用）。
+    const guiBal = parseFloat(($('paper-init-bal') || {}).value || 0);
+    let bal = guiBal > 0 ? guiBal : 0;
+    if (bal <= 0) {
+      try {
+        const balD = await ocApi('/api/v1/strategy/demo/balance');
+        if (balD && balD.data && (balD.data.source === 'rust_engine' || balD.data.retCode === 0)) {
+          let b = balD.data;
+          if (b.result && b.result.list && b.result.list[0]) b = b.result.list[0];
+          bal = parseFloat(b.totalEquity || b.total_equity || b.equity || 0);
+        }
+      } catch (e) {}
+    }
     body = bal > 0 ? { initial_balance: bal } : {};
   }
   const d = await ocPost('/api/v1/paper/session/' + action, body);

@@ -112,12 +112,11 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict[str, Any
 
 def _get_rust_client_safe():
     """
-    Return a PyO3 BybitClient using the correct environment for the current engine mode.
+    Return a PyO3 BybitClient using the correct environment for the current engine mode (3E-5).
     當前引擎模式決定使用的 BybitClient 環境。
 
-    - trading_mode "live" + bybit_endpoint "demo" → environment "live_demo"
-      (live slot key / GBR against api-demo.bybit.com)
-    - trading_mode "live" + bybit_endpoint "mainnet" → environment "mainnet"
+    - live engine + bybit_endpoint "demo" → environment "live_demo"
+    - live engine + bybit_endpoint "mainnet" → environment "mainnet"
     - otherwise → "demo" (default demo slot / wBu0)
 
     Returns None on any failure — callers must handle gracefully.
@@ -125,8 +124,8 @@ def _get_rust_client_safe():
     """
     try:
         from .strategy_ai_routes import _get_rust_client
-        engine_mode = _get_trading_mode_from_engine()
-        if engine_mode == "live":
+        engine_kind = _get_live_engine_kind()
+        if engine_kind == "live":
             # Read bybit_endpoint metadata to know which server live slot uses
             # 讀取 bybit_endpoint 元數據決定 live 槽連哪個伺服器
             import os
@@ -237,25 +236,27 @@ def _get_global_mode_state() -> str:
         return "unknown"
 
 
-def _get_trading_mode_from_engine() -> str:
+def _get_live_engine_kind() -> str:
     """
-    Read current trading_mode from Rust engine snapshot top-level field.
-    從 Rust 引擎快照頂層字段讀取 trading_mode。
+    Determine which engine the live routes should query (3E-5).
+    3E world: live routes query "live" engine; fallback to "demo" if live unavailable.
+    確定 live 路由應查詢哪個引擎。3E：優先 live，不可用時回退 demo。
 
-    trading_mode is at the snapshot root, NOT inside paper_state.
-    trading_mode 在快照根層，不在 paper_state 內部。
-
-    Returns: "live" | "demo" | "paper_only" | "unknown"
+    Returns: "live" | "demo" | "unknown"
     """
     rust = get_rust_reader()
-    if not rust.is_available():
-        return "unknown"
-    try:
+    if rust.is_engine_available("live"):
+        return "live"
+    if rust.is_engine_available("demo"):
+        return "demo"
+    # Backward compat: check primary snapshot trading_mode
+    # 向後兼容：檢查主快照的 trading_mode
+    if rust.is_available():
         snap = rust.get_snapshot()
-        if snap and isinstance(snap, dict):
-            return snap.get("trading_mode", "unknown")
-    except Exception:
-        pass
+        if snap:
+            tm = snap.get("trading_mode", "")
+            if tm in ("live", "demo"):
+                return tm
     return "unknown"
 
 
@@ -555,19 +556,18 @@ def get_live_session_status(
 ) -> dict:
     """
     GET /api/v1/live/session/status
-    返回當前 live session 狀態（引擎快照 + 執行授權 + trading_mode）
+    返回當前 live session 狀態（引擎快照 + 執行授權 + active_engines）
 
-    Returns live session state, engine availability, execution_authority, and trading_mode.
+    Returns live session state, engine availability, execution_authority, and active_engines.
     Mirrors /api/v1/paper/session/status structure for GUI consistency.
     結構與 /api/v1/paper/session/status 保持一致，方便 GUI 複用。
     """
     rust = get_rust_reader()
     engine_available = rust.is_available()
-    # Phase 4: query live or demo mode state depending on trading_mode.
-    # Phase 4：根據 trading_mode 查詢 live 或 demo 模式狀態。
-    trading_mode = _get_trading_mode_from_engine()
-    _mode_key = "live" if trading_mode == "live" else "demo" if trading_mode == "demo" else "paper"
-    rust_state = rust.get_paper_state(mode=_mode_key) if engine_available else None
+    # 3E-5: query the live/demo engine directly via per-engine snapshot.
+    # 3E-5：通過每引擎快照直接查詢 live/demo 引擎。
+    engine_kind = _get_live_engine_kind()
+    rust_state = rust.get_paper_state(engine=engine_kind) if engine_available and engine_kind != "unknown" else None
 
     execution_authority = _get_execution_authority()
 
@@ -600,7 +600,8 @@ def get_live_session_status(
     return _live_response({
         "engine_available": engine_available,
         "execution_authority": execution_authority,
-        "trading_mode": trading_mode,
+        "engine_kind": engine_kind,
+        "active_engines": rust.get_active_engines(),
         "system_mode": _get_global_mode_state(),
         "session": {
             "session_state": session_state,
@@ -625,10 +626,10 @@ async def post_live_session_start(
     啟動 Live session。
 
     Guard: Operator role auth is the single gate (no separate execution_authority check).
-    trading_mode is read for logging/context only — engine config controls actual routing.
+    engine_kind is read for logging/context only — engine config controls actual routing.
 
     保護：Operator 角色認證是唯一門控，不設獨立 execution_authority 二次確認。
-    trading_mode 僅用於日誌/上下文，引擎配置控制實際訂單路由。
+    engine_kind 僅用於日誌/上下文，引擎配置控制實際訂單路由。
     """
     # Require Operator role — primary gate / 要求 Operator 角色 — 主門控
     _require_operator(actor)
@@ -647,7 +648,7 @@ async def post_live_session_start(
                    "Switch Global Mode to live_reserved in the System Overview tab first.",
         )
 
-    trading_mode = _get_trading_mode_from_engine()
+    engine_kind = _get_live_engine_kind()
 
     # Auto-grant execution_authority on session start.
     # Double gate (Operator role + live_reserved global mode) is already verified above.
@@ -680,15 +681,15 @@ async def post_live_session_start(
     _live_monitor_task = asyncio.create_task(_live_contraction_monitor())
 
     logger.warning(
-        "⚠ LIVE SESSION STARTED — trading_mode=%s execution_authority=granted "
+        "⚠ LIVE SESSION STARTED — engine_kind=%s execution_authority=granted "
         "contraction_monitor=active warn=%.0f%% halt=%.0f%% — actor=%s",
-        trading_mode, CONTRACTION_WARN_PCT, CONTRACTION_HALT_PCT,
+        engine_kind, CONTRACTION_WARN_PCT, CONTRACTION_HALT_PCT,
         getattr(actor, "actor_id", "?"),
     )
     return _live_response({
         "message": "Live session started / 實盤 session 已啟動",
         "source": "rust_engine",
-        "trading_mode": trading_mode,
+        "engine_kind": engine_kind,
         "authority": "granted",
         "ipc_result": result,
         "session": {"session_state": "active", "session_id": "rust_engine_live"},
@@ -1123,11 +1124,11 @@ async def post_live_close_all_positions(
     """
     POST /api/v1/live/close-all-positions
     通過 IPC close_all_positions 立即平掉所有倉位（不停止 session，引擎繼續運行）。
-    Rust 引擎依 trading_mode 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
+    Rust 引擎依 pipeline_kind 分派：Demo/Live → reduce_only 市價單；Paper → 清 paper_state。
     需要 Operator 角色。
 
     Close all positions immediately without stopping the session via IPC close_all_positions.
-    Rust engine branches by trading_mode: Demo/Live → reduce_only market orders; Paper → paper_state.
+    Rust engine branches by pipeline_kind: Demo/Live → reduce_only market orders; Paper → paper_state.
     Requires Operator role.
     """
     _require_operator(actor)
@@ -1163,10 +1164,10 @@ def get_live_metrics(
     from .paper_trading_metrics import compute_full_metrics
 
     rust = get_rust_reader()
-    # Phase 4: query mode-specific state for live metrics.
-    # Phase 4：查詢模式特定狀態用於 live 指標。
-    _mode_key = "live" if _get_trading_mode_from_engine() == "live" else "demo"
-    rust_state = rust.get_paper_state(mode=_mode_key) if rust.is_available() else None
+    # 3E-5: query per-engine snapshot for live metrics.
+    # 3E-5：查詢每引擎快照用於 live 指標。
+    engine_kind = _get_live_engine_kind()
+    rust_state = rust.get_paper_state(engine=engine_kind) if rust.is_available() and engine_kind != "unknown" else None
     if rust_state is None:
         return _live_response({"available": False, "source": "engine_unavailable"})
     full = compute_full_metrics(rust_state)

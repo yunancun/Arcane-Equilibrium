@@ -68,6 +68,37 @@ impl StateWriter {
     }
 }
 
+/// Dual snapshot writer — writes to per-engine file + optional backward-compat file (3E-5).
+/// 雙快照寫入器 — 寫入每引擎文件 + 可選向後兼容文件。
+pub struct DualStateWriter {
+    primary: StateWriter,
+    compat: Option<StateWriter>,
+}
+
+impl DualStateWriter {
+    pub fn new(primary: StateWriter, compat: Option<StateWriter>) -> Self {
+        Self { primary, compat }
+    }
+
+    pub fn maybe_write<T: Serialize>(&mut self, state: &T) -> bool {
+        let wrote = self.primary.maybe_write(state);
+        if wrote {
+            if let Some(ref mut c) = self.compat {
+                c.force_write(state);
+            }
+        }
+        wrote
+    }
+
+    pub fn force_write<T: Serialize>(&mut self, state: &T) -> bool {
+        let wrote = self.primary.force_write(state);
+        if let Some(ref mut c) = self.compat {
+            c.force_write(state);
+        }
+        wrote
+    }
+}
+
 /// JSONL append-only audit writer.
 /// JSONL 追加模式審計寫入器。
 pub struct AuditWriter {
@@ -167,5 +198,55 @@ mod tests {
         assert_eq!(lines.len(), 2);
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_dual_state_writer_writes_both() {
+        let dir = std::env::temp_dir().join("oc_test_dual");
+        std::fs::create_dir_all(&dir).ok();
+        let primary_path = dir.join("pipeline_snapshot_paper.json");
+        let compat_path = dir.join("pipeline_snapshot.json");
+        let _ = std::fs::remove_file(&primary_path);
+        let _ = std::fs::remove_file(&compat_path);
+
+        let primary = StateWriter::new(&primary_path, 5_000);
+        let compat = StateWriter::new(&compat_path, 5_000);
+        let mut dual = DualStateWriter::new(primary, Some(compat));
+
+        let data = json!({"pipeline_kind": "paper", "balance": 10000});
+        assert!(dual.force_write(&data));
+
+        // Both files should exist with correct content
+        // 兩個文件都應該存在且包含正確內容
+        let p_content = std::fs::read_to_string(&primary_path).unwrap();
+        let c_content = std::fs::read_to_string(&compat_path).unwrap();
+        assert!(p_content.contains("paper"));
+        assert!(c_content.contains("paper"));
+
+        std::fs::remove_file(&primary_path).ok();
+        std::fs::remove_file(&compat_path).ok();
+    }
+
+    #[test]
+    fn test_dual_state_writer_no_compat() {
+        let dir = std::env::temp_dir().join("oc_test_dual_no_compat");
+        std::fs::create_dir_all(&dir).ok();
+        let primary_path = dir.join("pipeline_snapshot_demo.json");
+        let compat_path = dir.join("pipeline_snapshot.json");
+        let _ = std::fs::remove_file(&primary_path);
+        let _ = std::fs::remove_file(&compat_path);
+
+        let primary = StateWriter::new(&primary_path, 5_000);
+        let mut dual = DualStateWriter::new(primary, None);
+
+        let data = json!({"pipeline_kind": "demo"});
+        assert!(dual.force_write(&data));
+
+        // Only primary file should exist
+        // 只有主文件應該存在
+        assert!(primary_path.exists());
+        assert!(!compat_path.exists());
+
+        std::fs::remove_file(&primary_path).ok();
     }
 }

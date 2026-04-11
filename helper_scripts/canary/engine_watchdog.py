@@ -160,7 +160,15 @@ def run_watchdog(
         max_iterations: Stop after N iterations (None = run forever, for testing)
         grace_period: Seconds after startup during which stale snapshots are ignored / 啟動後寬限期秒數，期間忽略過期快照
     """
-    snapshot_path = Path(data_dir) / "pipeline_snapshot.json"
+    data_path = Path(data_dir)
+    # 3E-5: monitor per-engine + compat snapshots — system alive if ANY engine is fresh.
+    # 3E-5：監控每引擎 + 兼容快照 — 任一引擎新鮮即視為存活。
+    snapshot_paths = [
+        data_path / "pipeline_snapshot.json",
+        data_path / "pipeline_snapshot_paper.json",
+        data_path / "pipeline_snapshot_demo.json",
+        data_path / "pipeline_snapshot_live.json",
+    ]
     state = WatchdogState()
     iteration = 0
     # Record startup time for grace period calculation / 記錄啟動時間用於寬限期計算
@@ -169,15 +177,25 @@ def run_watchdog(
     logger.info(
         "Watchdog started — monitoring %s (threshold=%.1fs, poll=%.1fs, grace=%.1fs) "
         "/ 看門狗啟動 — 監控 %s（閾值=%.1f秒，輪詢=%.1f秒，寬限期=%.1f秒）",
-        snapshot_path, stale_threshold, poll_interval, grace_period,
-        snapshot_path, stale_threshold, poll_interval, grace_period,
+        data_path, stale_threshold, poll_interval, grace_period,
+        data_path, stale_threshold, poll_interval, grace_period,
     )
 
     while True:
         if max_iterations is not None and iteration >= max_iterations:
             break
 
-        is_fresh, age = check_snapshot_freshness(snapshot_path, stale_threshold)
+        # Check all snapshot files — alive if ANY is fresh (3E-5)
+        # 檢查所有快照文件 — 任一新鮮即存活
+        best_age = float("inf")
+        is_fresh = False
+        for sp in snapshot_paths:
+            sp_fresh, sp_age = check_snapshot_freshness(sp, stale_threshold)
+            if sp_fresh:
+                is_fresh = True
+            if sp_age < best_age:
+                best_age = sp_age
+        age = best_age
 
         if is_fresh:
             on_engine_recovery(state)
@@ -214,15 +232,33 @@ def run_watchdog(
 def get_watchdog_status(data_dir: str, stale_threshold: float = STALE_THRESHOLD_SECONDS) -> dict:
     """
     Get a one-shot status check (for API endpoint integration).
-    獲取一次性狀態檢查（用於 API 端點整合）。
+    3E-5: checks per-engine snapshots + compat primary.
+    獲取一次性狀態檢查（含每引擎快照）。
     """
-    snapshot_path = Path(data_dir) / "pipeline_snapshot.json"
-    is_fresh, age = check_snapshot_freshness(snapshot_path, stale_threshold)
+    data_path = Path(data_dir)
+    # Primary (compat) snapshot / 主（兼容）快照
+    primary_path = data_path / "pipeline_snapshot.json"
+    is_fresh, age = check_snapshot_freshness(primary_path, stale_threshold)
+
+    # Per-engine snapshots (3E-5) / 每引擎快照
+    engines: dict[str, dict] = {}
+    for eng in ("paper", "demo", "live"):
+        eng_path = data_path / f"pipeline_snapshot_{eng}.json"
+        eng_fresh, eng_age = check_snapshot_freshness(eng_path, stale_threshold)
+        if eng_age != float("inf"):
+            engines[eng] = {
+                "alive": eng_fresh,
+                "age_seconds": round(eng_age, 1),
+            }
+        else:
+            engines[eng] = {"alive": False, "status": "not_running"}
+
     return {
         "engine_alive": is_fresh,
         "snapshot_age_seconds": round(age, 1) if age != float("inf") else None,
-        "snapshot_path": str(snapshot_path),
+        "snapshot_path": str(primary_path),
         "stale_threshold_seconds": stale_threshold,
+        "engines": engines,
     }
 
 

@@ -22,12 +22,13 @@ MODULE_NOTE (English):
 import json
 import logging
 import os
+from pathlib import Path
 import subprocess
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import main_legacy as base
@@ -373,7 +374,8 @@ def get_session_status(
     # Read paper_paused from full snapshot / 從完整快照讀取暫停狀態
     full_snapshot = rust.get_snapshot() if rust.is_available() else None
     is_paused = full_snapshot.get("paper_paused", False) if full_snapshot else False
-    trading_mode = full_snapshot.get("trading_mode", "paper_only") if full_snapshot else "paper_only"
+    # 3E-5: pipeline_kind from snapshot (serde renamed from trading_mode); default "paper"
+    pipeline_kind = full_snapshot.get("trading_mode", "paper") if full_snapshot else "paper"
     # Wrap flat Rust snapshot into nested structure expected by GUI
     # 將 Rust 扁平快照包裝為 GUI 預期的嵌套結構
     positions = rust_state.get("positions", [])
@@ -405,7 +407,7 @@ def get_session_status(
             "peak_balance_usdt": peak,
             "session_halted": False,
             "session_halt_reason": None,
-            "trading_mode": trading_mode,
+            "pipeline_kind": pipeline_kind,
         },
         "pnl": {
             "realized_pnl": realized,
@@ -837,4 +839,71 @@ def get_ai_cost(
             "cache_write_cost": round(totals.get("cacheWriteCost", 0.0), 6),
         },
         "daily": daily[-7:],  # Last 7 days
+    })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Paper Config (3E-8) / Paper 配置
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_PAPER_CONFIG_PATH = Path(
+    os.environ.get("OPENCLAW_BASE_DIR", str(Path(__file__).resolve().parents[5]))
+) / "settings" / "paper_config.toml"
+
+
+@paper_router.get("/config")
+def get_paper_config(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict:
+    """
+    GET /api/v1/paper/config
+    Read paper engine configuration (initial_balance, etc.) (3E-8).
+    讀取 paper 引擎配置。
+    """
+    try:
+        if _PAPER_CONFIG_PATH.exists():
+            import tomllib
+            raw = _PAPER_CONFIG_PATH.read_text(encoding="utf-8")
+            cfg = tomllib.loads(raw)
+            return _paper_response({"config": cfg})
+    except Exception as exc:
+        logger.warning("Failed to read paper config: %s", exc)
+    return _paper_response({"config": {"initial_balance_usdt": 10000.0}})
+
+
+@paper_router.post("/config")
+async def post_paper_config(
+    request: Request,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict:
+    """
+    POST /api/v1/paper/config
+    Update paper engine configuration (initial_balance_usdt) (3E-8).
+    更新 paper 引擎配置。Takes effect on next session start.
+    下次 session 啟動時生效。
+    """
+    body = await request.json()
+    initial_balance = body.get("initial_balance_usdt")
+    if initial_balance is not None:
+        try:
+            initial_balance = float(initial_balance)
+            if initial_balance < 100 or initial_balance > 10_000_000:
+                raise HTTPException(status_code=400, detail="initial_balance_usdt must be 100~10,000,000")
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid initial_balance_usdt")
+
+    # Write TOML config / 寫入 TOML 配置
+    try:
+        _PAPER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lines = ["# Paper engine config (3E-8) / Paper 引擎配置\n"]
+        if initial_balance is not None:
+            lines.append(f"initial_balance_usdt = {initial_balance}\n")
+        _PAPER_CONFIG_PATH.write_text("".join(lines), encoding="utf-8")
+    except OSError as exc:
+        logger.error("Failed to write paper config: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist config")
+
+    return _paper_response({
+        "saved": True,
+        "config": {"initial_balance_usdt": initial_balance or 10000.0},
     })

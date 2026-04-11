@@ -12,7 +12,7 @@
 //!   enum 轉發過來。
 
 use super::types::PendingOrder;
-use crate::persistence::StateWriter;
+use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -24,7 +24,7 @@ use tracing::{info, warn};
 pub fn handle_paper_command(
     cmd: PipelineCommand,
     pipeline: &mut TickPipeline,
-    snapshot_writer: &mut StateWriter,
+    snapshot_writer: &mut DualStateWriter,
     pending_orders: &mut HashMap<String, PendingOrder>,
 ) {
     match cmd {

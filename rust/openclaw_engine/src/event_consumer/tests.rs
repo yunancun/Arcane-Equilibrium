@@ -68,14 +68,15 @@ fn make_test_pipeline() -> crate::tick_pipeline::TickPipeline {
     crate::tick_pipeline::TickPipeline::with_balance(&["BTCUSDT", "ETHUSDT"], 10_000.0)
 }
 
-fn make_test_writer() -> crate::persistence::StateWriter {
+fn make_test_writer() -> crate::persistence::DualStateWriter {
     use std::path::PathBuf;
     let mut p = std::env::temp_dir();
     p.push(format!(
         "openclaw_test_handlers_{}.json",
         std::process::id()
     ));
-    crate::persistence::StateWriter::new(&p as &PathBuf, 5_000)
+    let primary = crate::persistence::StateWriter::new(&p as &PathBuf, 5_000);
+    crate::persistence::DualStateWriter::new(primary, None)
 }
 
 #[test]
@@ -354,7 +355,7 @@ fn escalate_to_tier(
 
 fn run_looser(
     pipeline: &mut crate::tick_pipeline::TickPipeline,
-    writer: &mut crate::persistence::StateWriter,
+    writer: &mut crate::persistence::DualStateWriter,
     target: &str,
     reason_code: &str,
     notes: &str,
@@ -378,7 +379,7 @@ fn run_looser(
 
 fn run_tighter(
     pipeline: &mut crate::tick_pipeline::TickPipeline,
-    writer: &mut crate::persistence::StateWriter,
+    writer: &mut crate::persistence::DualStateWriter,
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
@@ -546,7 +547,7 @@ fn test_m1_tighter_reverse_rejected() {
 
 fn run_submit(
     pipeline: &mut crate::tick_pipeline::TickPipeline,
-    writer: &mut crate::persistence::StateWriter,
+    writer: &mut crate::persistence::DualStateWriter,
     symbol: &str,
     side: &str,
     qty: f64,
@@ -668,7 +669,7 @@ fn test_f_submit_order_invalid_side_rejected() {
 
 fn run_reconciler_escalate(
     pipeline: &mut crate::tick_pipeline::TickPipeline,
-    writer: &mut crate::persistence::StateWriter,
+    writer: &mut crate::persistence::DualStateWriter,
     target: &str,
     reason: &str,
 ) -> Result<String, String> {
@@ -690,7 +691,7 @@ fn run_reconciler_escalate(
 
 fn run_reconciler_de_escalate(
     pipeline: &mut crate::tick_pipeline::TickPipeline,
-    writer: &mut crate::persistence::StateWriter,
+    writer: &mut crate::persistence::DualStateWriter,
     target: &str,
     reason: &str,
 ) -> Result<String, String> {

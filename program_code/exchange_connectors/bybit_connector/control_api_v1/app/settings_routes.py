@@ -379,6 +379,26 @@ async def save_api_key(
     if any(c in api_key + api_secret for c in ("\n", "\r", "\x00", "/")):
         raise HTTPException(status_code=400, detail="API key contains invalid characters")
 
+    # 3E-7: Cross-slot conflict detection — same API key must not be used by two pipelines.
+    # 3E-7：跨槽位衝突檢測 — 同一 API key 不能同時被兩個管線使用。
+    _CONFLICT_PAIRS: dict[str, list[str]] = {
+        "demo": ["live", "live_demo"],
+        "live_demo": ["demo"],
+        "live": ["demo"],
+    }
+    for other_slot in _CONFLICT_PAIRS.get(slot, []):
+        existing_key = _read_key_file(other_slot, "api_key")
+        if existing_key and existing_key.strip() == api_key:
+            logger.warning(
+                "API key conflict: slot '%s' key matches '%s' slot (actor: %s)",
+                slot, other_slot, getattr(actor, "actor_id", "?"),
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"API key conflicts with '{other_slot}' slot. "
+                       "Each pipeline must use a distinct API key.",
+            )
+
     # Validate via Bybit REST / 調用 Bybit REST 驗證
     logger.info("Validating Bybit API key for slot '%s' (actor: %s)", slot, getattr(actor, "actor_id", "?"))
     is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
