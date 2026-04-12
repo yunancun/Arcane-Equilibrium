@@ -67,6 +67,16 @@ _LIVE_USER_STOPPED: bool = False
 # 重啟後清零（fail-closed 設計）。
 _EXECUTION_AUTHORITY_OVERRIDE: str | None = None
 
+
+def _get_hub():
+    """Lazy import GovernanceHub singleton. / 延遲導入 GovernanceHub 單例。"""
+    try:
+        from .paper_trading_routes import GOV_HUB
+        return GOV_HUB
+    except (ImportError, AttributeError):
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Live contraction monitor state / 實盤縮倉監控狀態
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -198,8 +208,7 @@ def _get_execution_authority() -> str:
     if _EXECUTION_AUTHORITY_OVERRIDE is not None:
         return _EXECUTION_AUTHORITY_OVERRIDE
     try:
-        from .governance_hub import GovernanceHub
-        hub = GovernanceHub.get_instance()
+        hub = _get_hub()
         if hub is not None:
             auth_sm = getattr(hub, "authorization_sm", None) or getattr(hub, "auth_sm", None)
             if auth_sm is not None:
@@ -271,8 +280,7 @@ def _freeze_live_governance_auth(reason: str = "auto_halt_drawdown") -> None:
     在自動停止後凍結 GovernanceHub 中 mode=live 的授權，生成審計記錄。
     """
     try:
-        from .governance_hub import GovernanceHub
-        hub = GovernanceHub.get_instance()
+        hub = _get_hub()
         if hub is None:
             return
         auth_sm = getattr(hub, "_authorization_sm", None)
@@ -432,8 +440,7 @@ def _submit_live_governance_request(actor_id: str) -> None:
     失敗僅警告，不阻塞 session 啟動。
     """
     try:
-        from .governance_hub import GovernanceHub
-        hub = GovernanceHub.get_instance()
+        hub = _get_hub()
         if hub is None or not getattr(hub, "_initialized", False):
             logger.debug("GovernanceHub not ready — skipping live governance request")
             return
@@ -493,8 +500,7 @@ def _submit_live_governance_request(actor_id: str) -> None:
 def _revoke_live_governance_auth(reason: str = "live_session_stopped", actor_id: str = "system") -> None:
     """Revoke all live SM-1 auths (session stop / authority revoke / emergency). / 撤銷所有 live SM-1 授權。"""
     try:
-        from .governance_hub import GovernanceHub
-        hub = GovernanceHub.get_instance()
+        hub = _get_hub()
         if hub is None:
             return
         auth_sm = getattr(hub, "_authorization_sm", None)
