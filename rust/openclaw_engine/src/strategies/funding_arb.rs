@@ -23,12 +23,12 @@ const MAX_BASIS_PCT: f64 = 0.5;
 #[allow(dead_code)]
 const MAX_HOLD_MS: u64 = 72 * 3_600_000;
 
-#[allow(dead_code)] // Fields used when funding rate IPC is wired in R-06
 pub struct FundingArb {
     active: bool,
     position: Option<FundingPosition>,
     last_trade_ms: u64,
-    cooldown_ms: u64,
+    pub cooldown_ms: u64,
+    #[allow(dead_code)] // used when funding rate IPC is wired in R-06
     default_qty: f64,
     // RC-04: Previous state for rejection rollback / 拒絕回滾用的先前狀態
     prev_position: Option<FundingPosition>,
@@ -46,11 +46,11 @@ struct FundingPosition {
 impl FundingArb {
     pub fn new() -> Self {
         Self {
-            active: true,
+            active: false, // FIX-23: inactive by default — pending OC-5/R-06 data wiring
             position: None,
             last_trade_ms: 0,
-            cooldown_ms: 3_600_000,
-            default_qty: 1e9, // 1h cooldown
+            cooldown_ms: 3_600_000, // 1h cooldown
+            default_qty: 1e9,
             prev_position: None,
             prev_last_trade_ms: 0,
         }

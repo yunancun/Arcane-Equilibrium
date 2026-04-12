@@ -486,3 +486,21 @@ pub(crate) fn spawn_position_reconciler(
     ));
     info!("position_reconciler task spawned (Phase 6 auto-contraction) / 持倉對帳器任務已啟動（Phase 6 自動降級）");
 }
+
+/// Spawn the periodic decision outcome backfill task (FIX-34).
+/// Computes 1m/5m/1h/4h/24h return windows from market.klines and writes
+/// to trading.decision_outcomes. Runs every 5 minutes.
+/// FIX-34：啟動定期決策結果回填任務。
+/// 從 market.klines 計算 1m/5m/1h/4h/24h 回報窗口，寫入 trading.decision_outcomes。
+/// 每 5 分鐘運行。
+pub(crate) fn spawn_outcome_backfiller(
+    db_pool: &Arc<DbPool>,
+    cancel: &CancellationToken,
+) {
+    let pool = Arc::clone(db_pool);
+    let cancel = cancel.clone();
+    tokio::spawn(openclaw_engine::database::outcome_backfiller::run_backfill_loop(
+        pool, cancel,
+    ));
+    info!("outcome backfill task spawned (FIX-34, 5min interval) / 結果回填任務已啟動");
+}

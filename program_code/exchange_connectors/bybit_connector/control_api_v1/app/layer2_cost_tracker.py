@@ -238,7 +238,13 @@ class Layer2CostTracker:
             session.input_tokens += input_tokens
             session.output_tokens += output_tokens
             self._add_daily_claude_cost(cost)
-            return cost
+        # FIX-57: Sync to Rust BudgetTracker (fire-and-forget, non-blocking).
+        # FIX-57：同步到 Rust BudgetTracker（非阻塞，失敗不影響本地記錄）。
+        self._sync_to_rust_budget(
+            provider="anthropic", model=model_tier,
+            tokens_in=input_tokens, tokens_out=output_tokens,
+        )
+        return cost
 
     def record_search_cost(self, session: Layer2Session, provider: str, cost_usd: float) -> None:
         """Record cost of a search query / 记录一次搜索查询的成本"""
@@ -254,6 +260,42 @@ class Layer2CostTracker:
         day["claude_usd"] = round(day["claude_usd"] + cost, 6)
         day["total_usd"] = round(day["claude_usd"] + day["search_usd"], 6)
         self._write_raw(raw)
+
+    def _sync_to_rust_budget(
+        self, provider: str, model: str, tokens_in: int = 0, tokens_out: int = 0,
+    ) -> None:
+        """
+        FIX-57: Fire-and-forget sync to Rust BudgetTracker via IPC.
+        Non-blocking: runs in a background thread. Failure is non-fatal.
+        FIX-57：透過 IPC 非阻塞同步到 Rust BudgetTracker。失敗不影響本地記錄。
+        """
+        import threading
+
+        def _do_sync():
+            try:
+                import asyncio
+                from .ipc_client import EngineIPCClient
+                async def _call():
+                    client = EngineIPCClient()
+                    await client.connect()
+                    try:
+                        return await client.call("record_ai_usage", params={
+                            "scope": "local_total",
+                            "provider": provider,
+                            "model": model,
+                            "tokens_in": tokens_in,
+                            "tokens_out": tokens_out,
+                            "purpose": "layer2_sync",
+                        }, timeout=3.0)
+                    finally:
+                        await client.disconnect()
+                asyncio.run(_call())
+            except Exception:
+                # Non-fatal: Rust tracker may be unavailable (e.g., engine not running).
+                # 非致命：Rust tracker 可能不可用（例如引擎未運行）。
+                logger.debug("FIX-57: Rust budget sync failed (non-fatal)")
+
+        threading.Thread(target=_do_sync, daemon=True).start()
 
     def _add_daily_search_cost(self, cost: float) -> None:
         raw = self._read_raw()
