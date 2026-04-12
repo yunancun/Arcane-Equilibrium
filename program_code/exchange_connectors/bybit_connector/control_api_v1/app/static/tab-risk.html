@@ -928,14 +928,14 @@ function applyAIAdvice() {
 
 // ─── Actions ──────────────────────────────────────────────────
 async function resetCooldown() {
-  if (!confirm('確認重置連續虧損冷卻期？\n這將立即恢復開倉權限，請確認目前市況適合繼續交易。\nConfirm reset loss cooldown? This will immediately re-enable new orders.')) return;
+  if (!await openConfirmModal("reset-cooldown")) return;
   const d = await ocPost('/api/v1/paper/risk/reset-cooldown');
   if (d) { ocToast('Cooldown reset OK', 'success'); loadAll(); }
   else ocToast('Reset failed', 'error');
 }
 
 async function unhaltSession() {
-  if (!confirm('確認解除熔斷保護（Unhalt Session）？\n這將恢復被暫停的交易會話，請確認回撤已受控。\nConfirm unhalt session? This will resume all trading after circuit-breaker halt.')) return;
+  if (!await openConfirmModal("unhalt-session")) return;
   const d = await ocPost('/api/v1/paper/risk/unhalt-session');
   if (d) { ocToast('Session unhalted', 'success'); loadAll(); }
   else ocToast('Unhalt failed', 'error');

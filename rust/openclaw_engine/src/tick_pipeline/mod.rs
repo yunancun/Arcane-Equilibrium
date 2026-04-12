@@ -1159,6 +1159,7 @@ impl TickPipeline {
 }
 
 mod on_tick;
+mod on_tick_helpers;
 mod commands;
 #[cfg(test)]
 mod tests;

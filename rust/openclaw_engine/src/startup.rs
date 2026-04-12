@@ -854,3 +854,107 @@ pub(crate) fn print_banner() {
     info!("  Bybit V5 Linear — Rust Trading Engine");
     info!("==============================================");
 }
+
+// ── FIX-16: startup.rs tests ──
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIX-16b: Verify VERSION is valid semver (not just non-empty).
+    /// 驗證 VERSION 符合語義版本格式。
+    #[test]
+    fn test_version_is_valid_semver() {
+        let parts: Vec<&str> = VERSION.split('.').collect();
+        assert!(parts.len() >= 2, "VERSION must have at least major.minor: {VERSION}");
+        for (i, part) in parts.iter().take(3).enumerate() {
+            // Strip any pre-release suffix from the last part (e.g., "3-rc1")
+            let numeric = part.split('-').next().unwrap();
+            assert!(
+                numeric.parse::<u32>().is_ok(),
+                "VERSION part {i} must be numeric, got '{part}' in {VERSION}"
+            );
+        }
+    }
+
+    /// FIX-16b: Verify paper_balance_from_env parses valid values and rejects invalid ones.
+    /// 驗證 env 解析：有效數字→Some / 無效→None / 負數→None / 零→None。
+    #[test]
+    fn test_paper_balance_from_env_valid_and_invalid() {
+        let prev = std::env::var("OPENCLAW_PAPER_BALANCE").ok();
+
+        // Valid
+        std::env::set_var("OPENCLAW_PAPER_BALANCE", "5000.0");
+        assert_eq!(paper_balance_from_env(), Some(5000.0));
+
+        // Invalid string
+        std::env::set_var("OPENCLAW_PAPER_BALANCE", "not_a_number");
+        assert_eq!(paper_balance_from_env(), None);
+
+        // Negative (filter b > 0.0)
+        std::env::set_var("OPENCLAW_PAPER_BALANCE", "-100.0");
+        assert_eq!(paper_balance_from_env(), None);
+
+        // Zero (filter b > 0.0)
+        std::env::set_var("OPENCLAW_PAPER_BALANCE", "0.0");
+        assert_eq!(paper_balance_from_env(), None);
+
+        // Restore
+        if let Some(v) = prev {
+            std::env::set_var("OPENCLAW_PAPER_BALANCE", v);
+        } else {
+            std::env::remove_var("OPENCLAW_PAPER_BALANCE");
+        }
+    }
+
+    /// FIX-16: paper_balance_from_env returns None when env var absent.
+    /// 環境變量不存在時返回 None。
+    #[test]
+    fn test_paper_balance_from_env_missing() {
+        // Temporarily remove the env var if set
+        let prev = std::env::var("OPENCLAW_PAPER_BALANCE").ok();
+        std::env::remove_var("OPENCLAW_PAPER_BALANCE");
+        assert!(paper_balance_from_env().is_none());
+        // Restore
+        if let Some(v) = prev {
+            std::env::set_var("OPENCLAW_PAPER_BALANCE", v);
+        }
+    }
+
+    /// FIX-16: paper_balance_from_toml returns None when file missing.
+    /// TOML 文件缺失時返回 None（不 panic）。
+    #[test]
+    fn test_paper_balance_from_toml_missing_file() {
+        let prev = std::env::var("OPENCLAW_BASE_DIR").ok();
+        std::env::set_var("OPENCLAW_BASE_DIR", "/tmp/openclaw_nonexistent_test_dir");
+        assert!(paper_balance_from_toml().is_none());
+        if let Some(v) = prev {
+            std::env::set_var("OPENCLAW_BASE_DIR", v);
+        } else {
+            std::env::remove_var("OPENCLAW_BASE_DIR");
+        }
+    }
+
+    /// FIX-16: load_unified_configs succeeds with default TOML fallbacks.
+    /// 使用默認 TOML 回退時 load_unified_configs 不 panic。
+    #[test]
+    fn test_load_unified_configs_defaults() {
+        // Point to a non-existent directory so all configs fall back to defaults.
+        let prev = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
+        std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", "/tmp/openclaw_nodir_test");
+        let result = load_unified_configs();
+        assert!(result.is_ok(), "load_unified_configs must succeed with defaults: {:?}", result.err());
+        let (risk_stores, learning_store, budget_store) = result.unwrap();
+        // All stores should have version 0 (initial load)
+        assert!(risk_stores.paper.version() <= 1);
+        assert!(risk_stores.demo.version() <= 1);
+        assert!(risk_stores.live.version() <= 1);
+        assert!(learning_store.version() <= 1);
+        assert!(budget_store.version() <= 1);
+        // Restore
+        if let Some(v) = prev {
+            std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", v);
+        } else {
+            std::env::remove_var("OPENCLAW_RISK_CONFIG_DIR");
+        }
+    }
+}

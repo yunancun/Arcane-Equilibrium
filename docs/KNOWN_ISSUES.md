@@ -7,8 +7,8 @@
 # 格式：每個問題獨立章節，含 狀態/位置/排查方式/緩解方案。
 # 狀態：OPEN（待驗證）/ CONFIRMED（已確認是問題）/ RESOLVED（已修復，附 commit）
 #
-# 統計：OPEN 10 / CONFIRMED 0 / RESOLVED 11
-# 最後更新：2026-04-05（Session 9c）
+# 統計：OPEN 9 / CONFIRMED 0 / RESOLVED 15
+# 最後更新：2026-04-12（FIX-48 全程序鏈審計更新）
 
 ---
 
@@ -82,14 +82,13 @@
 
 ---
 
-## OPEN — ARCH-2：Pipeline Bridge GovernanceHub 注入時序風險
+## RESOLVED — ARCH-2：Pipeline Bridge GovernanceHub 注入時序風險
 
 **來源**：PA 審查（2026-03-31）
-**嚴重性**：MEDIUM
-**問題**：PipelineBridge 在 `phase2_strategy_routes.py` 注入 GOV_HUB 之前就已創建，存在 `_governance_hub=None` 的時間窗口
-**位置**：`app/pipeline_bridge.py` + `app/phase2_strategy_routes.py`
-**影響**：時間窗口內的 intent 可能繞過治理檢查（fail-open 設計）
-**緩解**：啟動順序在當前 demo 場景下是可控的，但 live 前需驗證
+**嚴重性**：原 MEDIUM → 已修復
+**修復**：2026-04-10 DEAD-PY-2 Phase A 全面移除 PipelineBridge（4 bridge 文件全刪）
+**問題**：PipelineBridge 在 `phase2_strategy_routes.py` 注入 GOV_HUB 之前就已創建
+**結論**：DEAD-PY-2 刪除了所有 Python 交易邏輯，PipelineBridge 已不存在。問題自動解決。
 
 ---
 
@@ -130,13 +129,13 @@
 
 ---
 
-## OPEN — TRADE-2：Intent 排隊競態條件
+## RESOLVED — TRADE-2：Intent 排隊競態條件
 
 **來源**：改善報告 V3 Final（2026-04-03）
 **嚴重性**：MEDIUM
 **問題**：Normal channel 推送 long intent + 閃崩觸發 fast-lane close_all。若 Guardian 先處理 long（approved → 開倉），再處理 close_all（平倉），雙重手續費浪費。
-**位置**：`app/pipeline_bridge.py` intent 隊列 + `rust/openclaw_engine/src/fast_track.rs`
-**緩解**：fast_track 有 pre-empt 設計，但 Python 側排隊順序未保證
+**原位置**：`app/pipeline_bridge.py` intent 隊列（已於 DEAD-PY-2 Phase A 刪除）
+**修復**：Rust `on_tick()` 同步處理——fast_track 在 tick 頂部（L80-155）先於策略 intent（L500+）執行，`ft_pause_new_entries` 旗標阻止同 tick 內新開倉。無異步隊列，無競態。（2026-04-12 審計確認）
 
 ---
 
@@ -150,14 +149,13 @@
 
 ---
 
-## OPEN — TRADE-4：Partial Fill 回滾數量不一致
+## RESOLVED — TRADE-4：Partial Fill 回滾數量不一致
 
 **來源**：改善報告 V3 Final（2026-04-03）
 **嚴重性**：MEDIUM
 **問題**：限價單部分成交（下 0.1 BTC，成交 0.06），回滾時應平 0.06 而非 0.1 → 倉位大小錯誤
-**位置**：`app/paper_trading_engine.py` + `app/oms_state_machine.py`
-**影響**：Paper 中影響有限，live 時可能導致超額平倉或不足平倉
-**備註**：`compute_partial_fill_qty()` 已實現，但回滾路徑是否使用 filled_qty 需驗證
+**原位置**：`app/paper_trading_engine.py` + `app/oms_state_machine.py`（已於 DEAD-PY-2 Phase B/C 刪除）
+**修復**：Rust 架構無此問題——每筆交易所成交（`event_consumer/mod.rs` L589）獨立攜帶 `exec_qty`，`paper_state.apply_fill()` 僅使用傳入的實際成交量（非原始訂單量）；`reduce_position()` 中 `actual_reduce = reduce_qty.min(pos.qty)` 保證不會超額平倉。無"回滾"概念，每筆 fill 獨立結算。（2026-04-12 審計確認）
 
 ---
 
@@ -275,14 +273,15 @@
 
 ---
 
-## OPEN — RISK-3：Daily Loss Limit 僅 Python 層執行
+## RESOLVED — RISK-3：Daily Loss Limit 僅 Python 層執行
 
 **來源**：Session 9 架構審查
-**嚴重性**：MEDIUM
-**問題**：日虧損限額（daily loss limit）目前僅在 Python GovernanceHub SM-04 中執行。Rust Guardian 有 max_drawdown_pct（總帳戶回撤）但無獨立的日內虧損限額檢查。
-**位置**：`rust/openclaw_engine/src/guardian.rs` + Python `app/governance_hub.py`
-**影響**：Exchange 模式下（Rust-only 路徑），日虧損限額可能被繞過
-**緩解**：max_drawdown_pct 提供基本保護。Phase 4 需將 daily loss limit 加入 Guardian。
+**嚴重性**：原 MEDIUM → 已修復
+**修復**：RRC-1 + position_risk_evaluator 實現 Rust 日損限額
+**問題**：原先日虧損限額僅在 Python GovernanceHub SM-04 中執行
+**修復內容**：IntentProcessor.daily_loss_pct_pub() + position_risk_evaluator.evaluate_positions()
+   的 daily_loss 參數 → RiskConfig.limits.max_daily_loss_pct 比對 → CloseAll + HaltSession。
+   Rust 引擎獨立執行，不依賴 Python。
 
 ---
 

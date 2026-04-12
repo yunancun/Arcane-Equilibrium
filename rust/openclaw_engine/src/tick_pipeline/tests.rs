@@ -1167,6 +1167,41 @@ use super::*;
         }
     }
 
+    // ── FIX-18: Price=0.0 tick boundary tests ──
+
+    /// FIX-18: A tick with price=0.0 must not panic or cause division-by-zero.
+    /// All code paths (indicators, stops, risk evaluator) must survive gracefully.
+    /// FIX-18：price=0.0 的 tick 不能 panic 或導致除零。所有路徑必須存活。
+    #[test]
+    fn test_zero_price_tick_no_panic() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+        // First feed some normal ticks to populate klines
+        for i in 0..50 {
+            let e = make_event("BTCUSDT", 50000.0, 1_000_000 + i * 60_000);
+            pipeline.on_tick(&e);
+        }
+        // Now feed a zero-price tick — must not panic
+        let zero_event = make_event("BTCUSDT", 0.0, 1_000_000 + 50 * 60_000);
+        let _result = pipeline.on_tick(&zero_event);
+        // Balance should be unchanged (no fills at price 0)
+        assert!(pipeline.paper_state.balance() > 0.0, "balance must survive zero-price tick");
+    }
+
+    /// FIX-18: A tick with price=0.0 on a symbol with open position must not produce NaN PnL.
+    /// FIX-18：有持倉的交易對收到 price=0 tick 時不能產生 NaN PnL。
+    #[test]
+    fn test_zero_price_tick_with_position_no_nan() {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Paper);
+        // Open a position via paper_state directly
+        pipeline.paper_state.apply_fill("BTCUSDT", true, 0.01, 50000.0, 2.75, 100_000);
+        // Feed zero-price tick
+        let zero_event = make_event("BTCUSDT", 0.0, 200_000);
+        let _result = pipeline.on_tick(&zero_event);
+        // Balance must still be finite
+        let bal = pipeline.paper_state.balance();
+        assert!(bal.is_finite(), "balance must be finite after zero-price tick, got {bal}");
+    }
+
     /// PNL-FIX-2: charge_fee() helper rejects non-positive / non-finite inputs
     /// so a malformed fee_rate cannot corrupt balance. Locks the safety guard.
     /// PNL-FIX-2：charge_fee 必須拒絕非正或非有限值，避免費率異常污染餘額。

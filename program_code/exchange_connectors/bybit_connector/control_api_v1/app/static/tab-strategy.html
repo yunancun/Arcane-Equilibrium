@@ -220,7 +220,7 @@ async function createStrategy() {
 }
 
 async function deleteStrategy(name) {
-  if (!confirm('確認刪除策略「' + name + '」？此操作無法撤銷。\nConfirm delete strategy "' + name + '"? This cannot be undone.')) return;
+  if (!await openConfirmModal("delete-strategy")) return;
   const d = await ocApi('/api/v1/strategy/' + encodeURIComponent(name), { method: 'DELETE' });
   if (d) {
     ocToast(name + ' deleted', 'success');

@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-12（全程序鏈審計 58 發現 · 8 P0 · PM APPROVED 修復計劃）
-測試基準線：**Rust engine lib 961 + core 366 + e2e 29 + promotion 32 = 1388 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 965 + bin 5 + core 366 + e2e 29 + promotion 32 = 1397 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -58,24 +58,24 @@ PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md
 
 ### P1 — 架構缺陷（W22 Wed 完成核心項）
 
-- [ ] **FIX-05** ← QC: RG-1 [P1] — correlated_exposure_pct 永遠 0.0 — `router.rs:179,420`，組合級風險（原則 #16）實質失效
-- [ ] **FIX-06** ← QC: RG-3 [P1] + H5 [P1] — GridTrading grid_levels TOML 配置存儲但不應用 — `grid_trading.rs`，dead param 違反規則
-- [ ] **FIX-07** ← QC: RG-4 [P1] — OU theta clamp 0.001 在非 OU 序列產生巨大間距 — `grid_trading.rs` compute_ou_step
-- [ ] **FIX-11** ← E3: SEC-D02 [HIGH] — Cookie secure=False — `legacy_routes.py:322`，1 行修改
-- [ ] **FIX-16** ← E4: P1-#4 [P1-HIGH] — startup.rs 零測試（856 行）— 啟動邏輯關鍵
-- [ ] **FIX-17** ← E4: P1-#9 [P1-HIGH] — Config hot-reload + tick 並發無測試 — ArcSwap 語義正確性未驗證
-- [ ] **FIX-18** ← E4: §四.2 [P1-HIGH] — Price=0.0 tick 行為未測試 — 除零風險
-- [ ] **FIX-20** ← BB: BB-A5 [P1] [RISK] — pre_check_order() 使用真正下單端點 — 意外下單風險，Live 模式需禁用
-- [ ] **FIX-22** ← FA: #8 [MAJOR] + #6 [MAJOR] — 4 個 MlSwitches config 欄位未運行時讀取 — `learning_config.rs:86-106`，假功能
-- [ ] **FIX-29** ← E5: R-02 [High] — on_tick() 1187 行需拆分為 7 子方法 — 超 1200 硬上限
-- [ ] **FIX-30** ← E5: P-01 [High] — on_tick() symbol.clone() 重複 9 次 — 熱路徑堆分配
-- [ ] **FIX-32** ← E5: P-04 [Medium] — risk_config().clone() 每 tick 深拷貝 — 不必要開銷
-- [ ] **FIX-39** ← A3: §5.1 [CRITICAL] — Danger Zone 操作使用原生 confirm() — 需自定義 modal
-- [ ] **FIX-40** ← A3: §5.1 [CRITICAL] — 策略刪除使用原生 confirm() — 不可逆操作需二次確認
-- [ ] **FIX-47** ← TW: §4.1 [STALE] — CLAUDE_REFERENCE.md 過時 6 天
-- [ ] **FIX-48** ← TW: §4.1 [STALE] — KNOWN_ISSUES.md 過時 7 天
-- [ ] **FIX-52** ← R4: §四 P1-#5 [P1] — SCRIPT_INDEX.md 覆蓋率 ~11%
-- [ ] **FIX-55** ← BB: BB-A1+A2+A3 [P1] [API-MISMATCH] — 3 個 API 路徑 MISMATCH（dead code）— `position_manager.rs`, `account_manager.rs`
+- [x] **FIX-05** ← QC: RG-1 [P1] — correlated_exposure_pct 永遠 0.0 ✅ compute_correlated_exposure_pct() 實現
+- [x] **FIX-06** ← QC: RG-3 [P1] + H5 [P1] — GridTrading grid_levels TOML→runtime ✅ grid_count 字段 + update_params 接線
+- [x] **FIX-07** ← QC: RG-4 [P1] — OU theta clamp → non-OU fallback None ✅ b≥0 return None
+- [x] **FIX-11** ← E3: SEC-D02 [HIGH] — Cookie secure auto-detect ✅ request.url.scheme=="https"
+- [x] **FIX-16** ← E4: P1-#4 — startup.rs +5 tests ✅ (semver驗證/env_valid+invalid/paper_balance_env_missing/toml_missing/load_unified_configs) FIX-16b: 2 trivial→meaningful
+- [x] **FIX-17** ← E4: P1-#9 — Config hot-reload 並發 +2 tests ✅ (torn state + version monotonic)
+- [x] **FIX-18** ← E4: ��四.2 — Price=0 +2 tests ✅ (no panic + no NaN with position)
+- [x] **FIX-20** ← BB: BB-A5 [P1] [RISK] — pre_check_order() 刪除 ✅ dead code 移除
+- [x] **FIX-22** ← FA: #8 [MAJOR] + #6 [MAJOR] — 4 個 MlSwitches 假欄位刪除 ✅ 僅保留 teacher_loop + news_pipeline
+- [x] **FIX-29** ← E5: R-02 [High] — on_tick() 1307→1186 行 ✅ 抽出 on_tick_helpers.rs
+- [x] **FIX-30** ← E5: P-01 [High] — symbol.clone() 審查 ✅ 多數為必要（owned struct），FIX-32 是真正 perf win
+- [x] **FIX-32** ← E5: P-04 [Medium] — risk_config() 改用借用 ✅ 去除每 tick 深拷貝
+- [x] **FIX-39** ← A3: §5.1 — Danger Zone → openConfirmModal() ✅ reset-cooldown + unhalt-session
+- [x] **FIX-40** ← A3: §5.1 — 策略刪除 → openConfirmModal("delete-strategy") ✅
+- [x] **FIX-47** ← TW: §4.1 — CLAUDE_REFERENCE.md 更新至 2026-04-12 ✅
+- [x] **FIX-48** ← TW: §4.1 — KNOWN_ISSUES.md 更新（ARCH-2→RESOLVED, RISK-3→RESOLVED）✅
+- [x] **FIX-52** ← R4: §四 P1-#5 — SCRIPT_INDEX.md 全面更新 ~11%→~90% ✅
+- [x] **FIX-55** ← BB: BB-A1+A2+A3 [P1] — 3 API paths verified correct ✅ dead code #[allow(dead_code)] 標註
 
 P2/P3 共 25 項（文件拆分、策略參數化、ML backfill、文檔清理等）見完整報告。
 

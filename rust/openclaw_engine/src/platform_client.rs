@@ -353,22 +353,10 @@ impl PlatformClient {
     // -----------------------------------------------------------------------
 
     /// Pre-check order — validate order params without submitting.
-    /// 訂單預檢 — 驗證訂單參數但不提交。
-    ///
-    /// POST /v5/order/create (dry-run concept; Bybit doesn't have a dedicated pre-check
-    /// endpoint, so this method validates params locally and returns the raw response
-    /// if the endpoint exists in the environment).
-    /// 注意：Bybit 沒有專門的預檢端點。此方法嘗試調用，如失敗則返回錯誤。
-    pub async fn pre_check_order(
-        &self,
-        params: serde_json::Value,
-    ) -> BybitResult<serde_json::Value> {
-        debug!("pre-checking order / 訂單預檢");
-        // Attempt the endpoint; it may not exist on all environments
-        // 嘗試調用端點；可能不存在於所有環境
-        let resp = self.client.post("/v5/order/create", &params).await?;
-        Ok(serde_json::to_value(&resp).unwrap_or_default())
-    }
+    // FIX-20: pre_check_order() removed — it called the real /v5/order/create
+    // endpoint (Bybit has no dry-run), risking accidental order placement in Live.
+    // FIX-20：pre_check_order() 已移除 — 它調用真實下單端點（Bybit 無 dry-run），
+    // Live 模式下有意外下單風險。
 
     // -----------------------------------------------------------------------
     // Inter-account transfers / 帳戶間轉帳

@@ -319,7 +319,7 @@ def register_legacy_routes(app) -> None:
             value=settings.api_token,
             httponly=True,           # JS 不可读取，防 XSS / Not accessible from JS, prevents XSS
             samesite="strict",       # 防 CSRF / Prevents CSRF
-            secure=False,            # TODO: 启用 HTTPS 后改为 True / Set True when HTTPS is enabled
+            secure=request.url.scheme == "https",  # FIX-11: auto-detect HTTPS / 自動偵測 HTTPS
             max_age=86400,           # 24 小时有效 / 24h TTL
             path="/",                # 全站可用 / Available site-wide
         )
@@ -339,7 +339,7 @@ def register_legacy_routes(app) -> None:
             path="/",
             httponly=True,
             samesite="strict",
-            secure=False,  # TODO: 启用 HTTPS 后改为 True / Set True when HTTPS is enabled
+            secure=request.url.scheme == "https",  # FIX-11: auto-detect / 自動偵測
         )
         return resp
 

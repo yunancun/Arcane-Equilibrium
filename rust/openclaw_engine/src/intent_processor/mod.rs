@@ -449,6 +449,29 @@ impl IntentProcessor {
         (total_notional / balance * 100.0).min(999.0)
     }
 
+    /// FIX-05: Compute correlated exposure — max(long_notional, short_notional) / balance.
+    /// All crypto is highly correlated, so same-direction positions compound risk.
+    /// FIX-05：計算相關曝險 — max(多頭名義值, 空頭名義值) / 餘額。
+    /// 加密貨幣高度相關，同方向持倉風險疊加。
+    fn compute_correlated_exposure_pct(paper_state: &PaperState) -> f64 {
+        let balance = paper_state.balance();
+        if balance <= 0.0 {
+            return 0.0;
+        }
+        let mut long_notional = 0.0_f64;
+        let mut short_notional = 0.0_f64;
+        for p in paper_state.positions() {
+            let price = paper_state.latest_price(&p.symbol).unwrap_or(p.entry_price);
+            let notional = p.qty * price;
+            if p.is_long {
+                long_notional += notional;
+            } else {
+                short_notional += notional;
+            }
+        }
+        (long_notional.max(short_notional) / balance * 100.0).min(999.0)
+    }
+
     /// Phase 2b: Record a closed trade for Kelly stats.
     /// Phase 2b：記錄已平倉交易用於 Kelly 統計。
     pub fn record_trade(&mut self, symbol: &str, pnl: f64) {

@@ -305,6 +305,8 @@ impl PositionManager {
     /// 風險限額調整後確認待定的 MMR（維持保證金率）變更。
     ///
     /// POST /v5/position/confirm-mmr
+    /// FIX-55/BB-A1: Pre-wired, not on trading path. Path verified per Bybit V5 docs.
+    #[allow(dead_code)]
     ///
     /// Note: Replaces the deprecated /v5/position/set-risk-limit endpoint.
     /// Risk limits are now auto-adjusted; this endpoint confirms the new MMR.
