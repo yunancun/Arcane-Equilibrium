@@ -579,8 +579,15 @@ impl Strategy for GridTrading {
               "close confirmed: inventory adjusted / 平倉確認：庫存已調整");
     }
 
-    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back per-symbol cross state.
-    /// 管線跳過策略平倉（未找到倉位）— 回滾該幣種交叉狀態。
+    /// Pipeline skipped a strategy-emitted Close (no position found) — roll back cross state.
+    /// FIX-C: Do NOT roll back last_trade_ms. The emit timestamp is kept as-is so the
+    /// existing 30s cooldown (REJECT_BACKOFF_MS) stays active and prevents tight-loop
+    /// re-emission on the next tick. Previously, rolling back last_trade_ms removed the
+    /// cooldown entirely, causing grid to re-emit the same Close intent every single tick
+    /// (observed: hundreds of `close_skipped:no_position_grid_close_short` per second during CB).
+    /// 管線跳過策略平倉（未找到倉位）— 回滾交叉狀態。
+    /// FIX-C：不回滾 last_trade_ms。保留發送時間戳使現有 30s 冷卻繼續有效，防止下一 tick 立即重發。
+    /// 舊行為：回滾 last_trade_ms → 冷卻失效 → 每 tick 重發 Close（CB 期間每秒數百條 close_skipped）。
     fn on_close_skipped(&mut self, symbol: &str) {
         if let Some(prev) = self.prev_cross_idx.get(symbol) {
             match prev {
@@ -588,10 +595,9 @@ impl Strategy for GridTrading {
                 None => { self.last_cross_idx.remove(symbol); }
             }
         }
-        if let Some(&ts) = self.prev_last_trade_ms.get(symbol) {
-            if ts == 0 { self.last_trade_ms.remove(symbol); } else { self.last_trade_ms.insert(symbol.to_string(), ts); }
-        }
-        info!(strategy = "grid_trading", %symbol, "close skipped: cross state rolled back / 平倉跳過：交叉狀態已回滾");
+        // NOTE: last_trade_ms intentionally NOT rolled back here (FIX-C).
+        // last_trade_ms 此處刻意不回滾（FIX-C）。
+        info!(strategy = "grid_trading", %symbol, "close skipped: cross state rolled back, trade_ms preserved / 平倉跳過：交叉狀態已回滾，trade_ms 保留");
     }
 
     /// RC-04: Revert per-symbol net_inventory, last_cross_idx, last_trade_ms on rejection.
