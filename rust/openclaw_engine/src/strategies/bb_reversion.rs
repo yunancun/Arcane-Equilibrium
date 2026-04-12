@@ -237,7 +237,7 @@ impl BbReversion {
             ("market".to_string(), None)
         };
         // CONF-D: scale entry confidence
-        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
+        let scaled = crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,

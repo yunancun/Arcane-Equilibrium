@@ -782,7 +782,7 @@ impl Strategy for GridTrading {
         // Dynamic confidence: grid thrives in ranging + narrow BB, suffers in trending.
         // 動態信心：grid 在 ranging + 窄 BB 中表現好，trending 中表現差。
         // CONF-D: apply per-strategy scale.
-        let conf = (compute_grid_confidence(ctx.indicators) * self.conf_scale).clamp(0.0, 1.0);
+        let conf = crate::tick_pipeline::on_tick_helpers::clamp_confidence(compute_grid_confidence(ctx.indicators) * self.conf_scale);
 
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.

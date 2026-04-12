@@ -187,7 +187,7 @@ impl MaCrossover {
     fn make_intent(&self, ctx: &TickContext<'_>, is_long: bool, conf: f64) -> OrderIntent {
         // CONF-D: scale and clamp the emitted confidence into [0, 1].
         // CONF-D：套用 conf_scale 後 clamp 到 [0, 1]。
-        let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
+        let scaled = crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,

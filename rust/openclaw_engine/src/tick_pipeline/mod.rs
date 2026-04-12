@@ -385,8 +385,8 @@ pub struct StopRequest {
 /// Order dispatch request from tick_pipeline to exchange API (EXT-1).
 /// 從 tick_pipeline 派發到交易所 API 的訂單派發請求。
 ///
-/// R-04: Renamed from OrderDispatchRequest — used for both shadow and primary orders.
-/// R-04：從 OrderDispatchRequest 重命名 — 同時用於影子單和主訂單。
+/// R-04: Renamed from ShadowOrderRequest — used for both shadow and primary orders.
+/// R-04：從 ShadowOrderRequest 重命名 — 同時用於影子單和主訂單。
 ///
 /// Used in both modes:
 /// - `paper_only`: shadow order (fire-and-forget after local fill, is_primary=false)

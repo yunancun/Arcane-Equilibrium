@@ -327,7 +327,7 @@ impl Strategy for BbBreakout {
                             symbol: ctx.symbol.to_string(),
                             is_long,
                             qty: self.default_qty,
-                            confidence: (raw_conf * self.conf_scale).clamp(0.0, 1.0),
+                            confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(raw_conf * self.conf_scale),
                             strategy: self.name().into(),
                             order_type: "market".into(),
                             limit_price: None,
@@ -404,7 +404,7 @@ impl Strategy for BbBreakout {
                 if let Some(reason) = exit_reason {
                     intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.to_string(),
-                        confidence: (exit_confidence * self.conf_scale).clamp(0.0, 1.0),
+                        confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(exit_confidence * self.conf_scale),
                         reason: reason.into(),
                     });
                     self.positions.remove(sym);
