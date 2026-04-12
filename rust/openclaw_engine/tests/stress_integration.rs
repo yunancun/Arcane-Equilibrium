@@ -25,13 +25,17 @@ fn make_event(symbol: &str, price: f64, ts_ms: u64) -> PriceEvent {
     PriceEvent::new(symbol.to_string(), price, ts_ms)
 }
 
-fn make_ctx(symbol: &str, price: f64, ts: u64, ind: Option<IndicatorSnapshot>) -> TickContext {
+// P-08: TickContext<'a> uses borrowed refs; Box::leak gives 'static lifetime for test helpers.
+// P-08：TickContext<'a> 使用借用引用；Box::leak 為測試輔助函數提供 'static 生命週期。
+fn make_ctx(symbol: &'static str, price: f64, ts: u64, ind: Option<IndicatorSnapshot>) -> TickContext<'static> {
+    static NO_SIGNALS: &[openclaw_core::signals::Signal] = &[];
+    let indicators = ind.map(|i| &*Box::leak(Box::new(i)));
     TickContext {
-        symbol: symbol.into(),
+        symbol,
         price,
         timestamp_ms: ts,
-        indicators: ind,
-        signals: vec![],
+        indicators,
+        signals: NO_SIGNALS,
         h0_allowed: true,
     }
 }

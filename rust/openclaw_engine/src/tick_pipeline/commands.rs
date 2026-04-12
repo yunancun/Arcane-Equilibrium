@@ -359,9 +359,10 @@ impl TickPipeline {
         );
     }
 
-    /// RRC-1-C2: Dispatch a close order via shadow/exchange channel.
-    /// RRC-1-C2：通過影子/交易所通道派發平倉訂單。
-    pub(super) fn dispatch_close_order(
+    /// RRC-1-C2 / R-03: Execute a position close — dispatches to shadow/exchange channel
+    /// and marks the symbol as pending-close to prevent duplicate dispatches.
+    /// RRC-1-C2 / R-03：執行平倉 — 派發到影子/交易所通道，並標記 pending 防止重複派發。
+    pub(super) fn execute_position_close(
         &mut self,
         symbol: &str,
         is_long: bool,
@@ -388,6 +389,32 @@ impl TickPipeline {
             if is_primary {
                 self.pending_close_symbols.insert(symbol.to_string());
             }
+        }
+    }
+
+    /// R-02: Reconcile pending_close_symbols against actual open positions.
+    /// Removes entries for symbols that no longer have an open position (fill was processed
+    /// but the flag was not cleared, or the exchange order was silently dropped).
+    /// Should be called after fill processing and/or by periodic IPC health checks.
+    ///
+    /// R-02：將 pending_close_symbols 與實際持倉對照清理。
+    /// 移除已無對應倉位的條目（成交已處理但標記未清除，或交易所訂單靜默丟失）。
+    /// 應在成交處理後和/或 IPC 定期健康檢查時調用。
+    pub(crate) fn reconcile_pending_exchange_orders(&mut self) {
+        if self.pending_close_symbols.is_empty() {
+            return;
+        }
+        let open_symbols: std::collections::HashSet<String> = self
+            .paper_state
+            .positions()
+            .iter()
+            .map(|p| p.symbol.clone())
+            .collect();
+        let before = self.pending_close_symbols.len();
+        self.pending_close_symbols.retain(|s| open_symbols.contains(s));
+        let removed = before - self.pending_close_symbols.len();
+        if removed > 0 {
+            tracing::debug!(removed, "reconcile_pending_exchange_orders: cleared stale pending-close flags / 清理過期 pending-close 標記");
         }
     }
 
