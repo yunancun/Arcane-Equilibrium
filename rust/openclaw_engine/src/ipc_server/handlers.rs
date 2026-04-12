@@ -190,6 +190,59 @@ pub(super) async fn handle_update_ai_budget_config(
     )
 }
 
+/// FIX-57: Record external AI usage (Python Layer2 → Rust BudgetTracker sync).
+/// FIX-57：記錄外部 AI 用量（Python Layer2 → Rust BudgetTracker 同步）。
+///
+/// Params: { "scope": str, "provider": str, "model": str,
+///           "tokens_in": u32, "tokens_out": u32,
+///           "purpose": str?, "request_id": str? }
+/// Returns: { "ok": true, "cost_usd": f64 } or error.
+/// 參數與回傳如上。fail-closed：tracker 未初始化或 DB 寫入失敗時回傳錯誤。
+pub(super) async fn handle_record_ai_usage(
+    id: serde_json::Value,
+    params: &serde_json::Value,
+    slot: &BudgetTrackerSlot,
+) -> JsonRpcResponse {
+    const ERR_INVALID_PARAMS: i64 = -32602;
+
+    let scope = match params.get("scope").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s,
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'scope'"),
+    };
+    let provider = match params.get("provider").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s,
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'provider'"),
+    };
+    let model = match params.get("model").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s,
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_PARAMS, "missing 'model'"),
+    };
+    let tokens_in = params.get("tokens_in").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let tokens_out = params.get("tokens_out").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let purpose = params.get("purpose").and_then(|v| v.as_str()).unwrap_or("layer2_external");
+    let request_id = params.get("request_id").and_then(|v| v.as_str()).unwrap_or("py-sync");
+
+    let guard = slot.read().await;
+    let tracker = match guard.as_ref() {
+        Some(t) => Arc::clone(t),
+        None => {
+            return JsonRpcResponse::error(
+                id, ERR_INTERNAL,
+                "budget tracker not initialized (DB pool unavailable?)",
+            );
+        }
+    };
+    drop(guard);
+
+    match tracker.record_usage(scope, provider, model, tokens_in, tokens_out, purpose, request_id).await {
+        Ok(cost_usd) => JsonRpcResponse::success(
+            id,
+            serde_json::json!({ "ok": true, "cost_usd": cost_usd }),
+        ),
+        Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("record_usage failed: {e}")),
+    }
+}
+
 /// Phase 4.1: flip the Teacher consumer loop enabled flag (operator gate).
 /// Phase 4.1：翻轉 Teacher consumer loop enabled 旗標（operator 閘）。
 ///

@@ -1,10 +1,9 @@
 -- ============================================================
--- DRAFT — Phase 0a DDL（尚未執行）
--- DRAFT — Phase 0a DDL (not yet executed)
+-- Phase 0a DDL — 已執行 / Executed
 -- 設計來源：融合方案 v0.5 + DB 架構 V1
 -- Source: Unified Work Plan v0.5 + DB Architecture V1
--- 預計執行日期：2026-04-11
--- Planned execution date: 2026-04-11
+-- 執行日期：2026-04-11 · FIX-35: DRAFT 標記移除
+-- Execution date: 2026-04-11 · FIX-35: DRAFT marker removed
 -- ============================================================
 --
 -- V005: Indexes + Views + Legacy Rename + Grafana Bridge

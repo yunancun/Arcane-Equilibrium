@@ -18,6 +18,7 @@ pub mod experiment_ledger_pg;
 pub mod fallback;
 pub mod feature_writer;
 pub mod market_writer;
+pub mod outcome_backfiller;
 pub mod pool;
 pub mod quality_writer;
 pub mod rest_poller;

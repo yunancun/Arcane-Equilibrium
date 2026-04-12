@@ -179,6 +179,8 @@ pub struct StrategyParamsConfig {
     pub bb_breakout: BbBreakoutParams,
     #[serde(default)]
     pub grid_trading: GridTradingParams,
+    #[serde(default)]
+    pub funding_arb: FundingArbParams,
 }
 
 /// MaCrossover tunable parameters / MaCrossover 可調參數
@@ -316,6 +318,28 @@ impl Default for GridTradingParams {
     }
 }
 
+/// FundingArb tunable parameters / FundingArb 可調參數
+/// FIX-23: Explicitly registered with active=false — pending OC-5/R-06 data wiring.
+/// FIX-23：顯式註冊且預設停用 — 待 OC-5/R-06 數據接線完成。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FundingArbParams {
+    /// Default false: strategy stub, no external funding rate in TickContext yet.
+    /// 預設 false：策略為 stub，TickContext 尚無外部資金費率數據。
+    #[serde(default)]
+    pub active: bool,
+    #[serde(default = "default_funding_cooldown")]
+    pub cooldown_ms: u64,
+}
+
+impl Default for FundingArbParams {
+    fn default() -> Self {
+        Self {
+            active: false,
+            cooldown_ms: 3_600_000,
+        }
+    }
+}
+
 // Serde default helpers / Serde 默認值輔助函數
 fn default_true() -> bool { true }
 fn default_ma_cooldown() -> u64 { 300_000 }
@@ -331,6 +355,7 @@ fn default_squeeze_expiry() -> u64 { 1_800_000 }
 fn default_limit_offset() -> f64 { 10.0 }
 fn default_rsi_oversold() -> f64 { 30.0 }
 fn default_rsi_overbought() -> f64 { 70.0 }
+fn default_funding_cooldown() -> u64 { 3_600_000 }
 fn default_grid_levels() -> usize { 10 }
 fn default_spacing_mode() -> String { "linear".into() }
 fn default_health_check_interval() -> u64 { 200 }
@@ -461,6 +486,13 @@ impl StrategyFactory {
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));
 
+        // FundingArb (FIX-23: registered but inactive by default — pending OC-5/R-06)
+        // FIX-23：已註冊但預設停用 — 待 OC-5/R-06 數據接線
+        let mut fa = funding_arb::FundingArb::new();
+        fa.cooldown_ms = p.funding_arb.cooldown_ms;
+        fa.set_active(p.funding_arb.active);
+        strategies.push(Box::new(fa));
+
         strategies
     }
 }
@@ -569,21 +601,26 @@ mod tests {
     // ── 3E-9: StrategyFactory tests ──
 
     #[test]
-    fn test_strategy_factory_creates_four_strategies() {
+    fn test_strategy_factory_creates_five_strategies() {
         let strategies = StrategyFactory::create_all();
-        assert_eq!(strategies.len(), 4, "factory should produce exactly 4 strategies");
+        assert_eq!(strategies.len(), 5, "factory should produce exactly 5 strategies");
         let names: Vec<&str> = strategies.iter().map(|s| s.name()).collect();
         assert!(names.contains(&"ma_crossover"), "missing ma_crossover");
         assert!(names.contains(&"bb_reversion"), "missing bb_reversion");
         assert!(names.contains(&"bb_breakout"), "missing bb_breakout");
         assert!(names.contains(&"grid_trading"), "missing grid_trading");
+        assert!(names.contains(&"funding_arb"), "missing funding_arb");
     }
 
     #[test]
-    fn test_strategy_factory_all_active_by_default() {
+    fn test_strategy_factory_active_defaults() {
         let strategies = StrategyFactory::create_all();
         for s in &strategies {
-            assert!(s.is_active(), "{} should be active by default", s.name());
+            match s.name() {
+                // FIX-23: funding_arb inactive by default (pending OC-5/R-06)
+                "funding_arb" => assert!(!s.is_active(), "funding_arb should be inactive by default"),
+                _ => assert!(s.is_active(), "{} should be active by default", s.name()),
+            }
         }
     }
 
@@ -702,10 +739,12 @@ grid_levels = 20
         p.ma_crossover.active = false;
         p.bb_breakout.active = false;
         let strategies = StrategyFactory::create_with_params(&p);
-        assert_eq!(strategies.len(), 4);
+        assert_eq!(strategies.len(), 5);
         for s in &strategies {
             match s.name() {
-                "ma_crossover" | "bb_breakout" => assert!(!s.is_active(), "{} should be inactive", s.name()),
+                "ma_crossover" | "bb_breakout" | "funding_arb" => {
+                    assert!(!s.is_active(), "{} should be inactive", s.name())
+                }
                 _ => assert!(s.is_active(), "{} should be active", s.name()),
             }
         }

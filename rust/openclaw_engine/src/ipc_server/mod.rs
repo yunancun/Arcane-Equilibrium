@@ -827,6 +827,10 @@ async fn dispatch_request(
         "update_ai_budget_config" => {
             handle_update_ai_budget_config(id, &req.params, budget_slot).await
         }
+        // FIX-57: External AI usage recording (Python Layer2 → Rust sync)
+        "record_ai_usage" => {
+            handle_record_ai_usage(id, &req.params, budget_slot).await
+        }
         // Phase 4.1: Teacher consumer loop control / Teacher consumer loop 控制
         "set_teacher_loop_enabled" => {
             handle_set_teacher_loop_enabled(id, &req.params, teacher_slot).await
