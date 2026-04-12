@@ -283,7 +283,6 @@ logger.info(
 # PipelineBridge 已退場（DEAD-PY-2，RC-10）— Rust openclaw_engine 為唯一引擎。
 # PIPELINE_BRIDGE = None signals soft-degraded mode to startup integrity check.
 PIPELINE_BRIDGE = None
-STOP_MANAGER = None
 
 # PAPER_ENGINE is always None since ARCH-RC1 1C-3-F (retired).
 # Kept as None for compatibility with components that accept paper_engine= kwarg.

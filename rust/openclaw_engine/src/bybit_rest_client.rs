@@ -1169,4 +1169,74 @@ mod tests {
         };
         assert!(client.has_credentials());
     }
+
+    /// P0-2: Timeout fires for a hung server → Transport error, no retry.
+    /// Constitution §4 requires fail-closed on timeout. This test binds a TCP
+    /// listener that accepts connections but never responds, then verifies the
+    /// client returns Transport error within the configured timeout.
+    /// P0-2: hung server 超時 → Transport 錯誤，不重試。
+    /// 憲法 §4 要求超時 fail-closed。本測試綁定一個 TCP listener 接受連線但
+    /// 永不回應，驗證 client 在 timeout 內返回 Transport 錯誤。
+    #[tokio::test]
+    async fn test_timeout_fires_on_hung_server_fail_closed() {
+        use std::net::TcpListener;
+
+        // EN: Bind a listener that accepts but never sends a response.
+        // 中文: 綁定一個接受連線但永不回應的 listener。
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().unwrap();
+
+        // EN: Accept connections in background so the TCP handshake completes
+        //     but the server hangs forever (simulates a stuck upstream).
+        // 中文: 在背景接受連線使 TCP 握手完成，但 server 永遠掛起。
+        let _bg = std::thread::spawn(move || {
+            // Accept up to 2 connections (one per test call below), hold them
+            // open without writing anything. They'll be dropped when the
+            // thread exits (after test completes).
+            let mut conns = Vec::new();
+            for incoming in listener.incoming() {
+                if let Ok(conn) = incoming {
+                    conns.push(conn);
+                    if conns.len() >= 2 {
+                        // Keep alive until test finishes.
+                        std::thread::sleep(std::time::Duration::from_secs(30));
+                        break;
+                    }
+                }
+            }
+        });
+
+        let client = BybitRestClient {
+            client: Client::builder()
+                .timeout(std::time::Duration::from_millis(200)) // 200ms timeout
+                .build()
+                .unwrap(),
+            api_key: "key".to_string(),
+            api_secret: "secret".to_string(),
+            base_url: format!("http://{}", addr),
+            recv_window: "5000".to_string(),
+            rate_limit: RateLimitState::default(),
+        };
+
+        // EN: GET must fail with Transport, not hang forever.
+        // 中文: GET 必須以 Transport 錯誤失敗，不能永遠掛起。
+        let start = std::time::Instant::now();
+        let result = client
+            .get("/v5/position/list", &[("category", "linear")])
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "hung server must trigger an error");
+        assert!(
+            matches!(result.unwrap_err(), BybitApiError::Transport(_)),
+            "error must be Transport variant (timeout)"
+        );
+        // EN: Should fire within ~200ms, give generous 2s bound.
+        // 中文: 應在 ~200ms 內觸發，給予寬鬆的 2s 上限。
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "timeout should fire within 2s, took {:?}",
+            elapsed
+        );
+    }
 }

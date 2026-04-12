@@ -12,12 +12,14 @@
 //!   快照讀取（paper_state/prices/stats）、策略參數（update/get/ranges）。
 
 mod handlers;
+mod handlers_config;
 #[cfg(test)]
 mod tests;
 
 // Re-export handler functions so dispatch_request (in this file) and tests can use them.
 // 重新導出 handler 函數，供 dispatch_request 和 tests 使用。
 use handlers::*;
+use handlers_config::*;
 
 use crate::ai_budget::BudgetTracker;
 use crate::claude_teacher::ConsumerLoopStatus;

@@ -177,3 +177,129 @@ impl NewsProvider for RssProvider {
 fn truncate(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// EN: Valid RSS feed with 2 items parses correctly.
+    /// 中文: 含 2 個項目的有效 RSS feed 正確解析。
+    #[test]
+    fn test_parse_valid_rss_feed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Crypto News</title>
+    <item>
+      <title>BTC hits 100k</title>
+      <description>Bitcoin breaks the 100k barrier.</description>
+      <link>https://example.com/btc-100k</link>
+      <pubDate>Sat, 12 Apr 2026 12:00:00 GMT</pubDate>
+      <guid>item-1</guid>
+    </item>
+    <item>
+      <title>ETH upgrade</title>
+      <link>https://example.com/eth</link>
+      <guid>item-2</guid>
+    </item>
+  </channel>
+</rss>"#;
+        let provider = RssProvider::new("test_feed", "https://example.com/rss");
+        let items = provider.parse_feed_xml(xml).expect("valid RSS must parse");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].headline, "BTC hits 100k");
+        assert_eq!(items[0].url, "https://example.com/btc-100k");
+        assert_eq!(items[0].source, "test_feed");
+        assert!(items[0].raw_id.is_some());
+        // Second item has no description → empty body_excerpt
+        assert_eq!(items[1].headline, "ETH upgrade");
+        assert!(items[1].body_excerpt.is_empty());
+    }
+
+    /// EN: Empty feed returns empty vec, no error.
+    /// 中文: 空 feed 返回空 vec，不報錯。
+    #[test]
+    fn test_parse_empty_rss_feed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Empty</title></channel></rss>"#;
+        let provider = RssProvider::new("empty", "https://example.com/rss");
+        let items = provider.parse_feed_xml(xml).unwrap();
+        assert!(items.is_empty());
+    }
+
+    /// EN: Malformed XML returns Parse error.
+    /// 中文: 格式錯誤的 XML 返回 Parse 錯誤。
+    #[test]
+    fn test_parse_malformed_xml_returns_error() {
+        let provider = RssProvider::new("bad", "https://example.com/rss");
+        let result = provider.parse_feed_xml("<not-a-feed>broken");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::Parse(msg) => assert!(msg.contains("feed-rs")),
+            other => panic!("expected Parse, got {:?}", other),
+        }
+    }
+
+    /// EN: Atom feed also parses (feed-rs supports both RSS and Atom).
+    /// 中文: Atom feed 也能解析（feed-rs 同時支援 RSS 和 Atom）。
+    #[test]
+    fn test_parse_atom_feed() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Feed</title>
+  <entry>
+    <title>Atom entry</title>
+    <id>urn:entry:1</id>
+    <link href="https://example.com/atom-1"/>
+    <updated>2026-04-12T00:00:00Z</updated>
+    <summary>Summary text here.</summary>
+  </entry>
+</feed>"#;
+        let provider = RssProvider::new("atom_test", "https://example.com/atom");
+        let items = provider.parse_feed_xml(xml).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].headline, "Atom entry");
+        assert_eq!(items[0].body_excerpt, "Summary text here.");
+        assert!(items[0].published_ms != 0);
+    }
+
+    /// EN: CoinTelegraph and Google News preset constructors have correct names/URLs.
+    /// 中文: CoinTelegraph 和 Google News 預設 constructor 名稱/URL 正確。
+    #[test]
+    fn test_preset_constructors() {
+        let ct = RssProvider::cointelegraph();
+        assert_eq!(ct.name, "cointelegraph");
+        assert!(ct.url.contains("cointelegraph.com"));
+
+        let gn = RssProvider::google_news_crypto();
+        assert_eq!(gn.name, "google_news_crypto");
+        assert!(gn.url.contains("news.google.com"));
+    }
+
+    /// EN: cached_etag is None initially.
+    /// 中文: 初始 cached_etag 為 None。
+    #[test]
+    fn test_cached_etag_initially_none() {
+        let provider = RssProvider::new("test", "https://example.com");
+        assert!(provider.cached_etag().is_none());
+    }
+
+    /// EN: Body excerpt truncation at 512 chars (via feed parse).
+    /// 中文: body_excerpt 截斷在 512 字元（透過 feed 解析）。
+    #[test]
+    fn test_body_excerpt_truncated() {
+        let long_desc = "A".repeat(1000);
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>T</title>
+<item><title>Long</title><description>{}</description>
+<link>https://x.com</link><guid>g1</guid></item>
+</channel></rss>"#,
+            long_desc
+        );
+        let provider = RssProvider::new("trunc", "https://example.com");
+        let items = provider.parse_feed_xml(&xml).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].body_excerpt.len(), 512);
+    }
+}
