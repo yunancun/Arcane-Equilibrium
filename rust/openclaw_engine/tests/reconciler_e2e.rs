@@ -209,6 +209,9 @@ fn e2e_persistent_drift_escalates_to_defensive() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 #[test]
+/// FIX-B: Two consecutive burst cycles are now required to reach CB.
+/// First cycle → Defensive (warning shot); second consecutive → CB + CloseAll.
+/// FIX-B：現在需要兩次連續 burst 週期才能達到 CB。第一次 → Defensive；連續第二次 → CB。
 fn e2e_burst_triggers_circuit_breaker_and_close_all() {
     let mut state = ReconcilerState::new();
     let t0 = 100_000_000u64;
@@ -222,23 +225,30 @@ fn e2e_burst_triggers_circuit_breaker_and_close_all() {
         ("DOGEUSDT|Buy".into(), DriftVerdict::Orphan),
     ];
 
-    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    // First burst cycle: must escalate to Defensive (not CB yet)
+    let actions1 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    let has_defensive = actions1.iter().any(|a| {
+        matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
+    });
+    assert!(has_defensive, "first burst cycle must escalate to Defensive, not CB");
+    assert_eq!(state.burst_drift_streak, 1);
 
-    // Must contain both Escalate(CB) and CloseAll
-    let has_cb = actions.iter().any(|a| {
+    // Second consecutive burst cycle (far-future ts to bypass cooldown): must reach CB
+    let actions2 = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, 999_999_999);
+    let has_cb = actions2.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)
     });
-    let has_close_all = actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
+    let has_close_all = actions2.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
 
-    assert!(has_cb, "burst must trigger CircuitBreaker escalation");
-    assert!(has_close_all, "burst must trigger CloseAll");
+    assert!(has_cb, "second consecutive burst cycle must trigger CircuitBreaker escalation");
+    assert!(has_close_all, "second consecutive burst cycle must trigger CloseAll");
 
     // Drive CB through handler
     let mut p = make_pipeline();
     let mut w = make_writer();
     p.governance.risk.thresholds.min_hold_time_ms = 0;
 
-    let r = drive_escalate(&mut p, &mut w, "CircuitBreaker", "5 simultaneous drifts (burst)");
+    let r = drive_escalate(&mut p, &mut w, "CircuitBreaker", "5 simultaneous drifts (burst, streak=2)");
     assert!(r.is_ok());
     assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::CircuitBreaker);
 }
@@ -739,8 +749,9 @@ fn stress_100_cycles_rapid_drift_clean_alternation() {
     );
 }
 
-/// 6-05-S2: 50 simultaneous symbols drifting — burst→CB, no panic.
-/// 6-05-S2：50 個 symbol 同時漂移 — 爆發→CB，不 panic。
+/// 6-05-S2: 50 simultaneous symbols drifting — two consecutive burst cycles → CB, no panic.
+/// FIX-B: first cycle → Defensive, second consecutive → CB + CloseAll.
+/// 6-05-S2：50 個 symbol 同時漂移 — 兩次連續 burst → CB，不 panic。
 #[test]
 fn stress_50_symbols_simultaneous_drift() {
     let mut state = ReconcilerState::new();
@@ -751,15 +762,21 @@ fn stress_50_symbols_simultaneous_drift() {
         .map(|i| (format!("SYM{i}USDT|Buy"), DriftVerdict::MajorDrift))
         .collect();
 
-    let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    // First burst cycle → Defensive (FIX-B: not CB on first burst)
+    let actions1 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, t0);
+    let has_defensive = actions1.iter().any(|a| {
+        matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)
+    });
+    assert!(has_defensive, "50 symbols first burst cycle must escalate to Defensive");
 
-    // Must trigger CB + CloseAll (≥5 simultaneous)
-    let has_cb = actions.iter().any(|a| {
+    // Second consecutive burst cycle → CB + CloseAll
+    let actions2 = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, 999_999_999);
+    let has_cb = actions2.iter().any(|a| {
         matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)
     });
-    let has_close_all = actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
-    assert!(has_cb, "50 symbols must trigger CB");
-    assert!(has_close_all, "50 symbols must trigger CloseAll");
+    let has_close_all = actions2.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. }));
+    assert!(has_cb, "50 symbols must trigger CB on second consecutive burst");
+    assert!(has_close_all, "50 symbols must trigger CloseAll on second consecutive burst");
 
     // State should have 50 drift streaks tracked
     assert_eq!(state.drift_streak.len(), 50);

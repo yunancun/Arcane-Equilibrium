@@ -195,8 +195,11 @@ fn phase6_persistent_drift_3_cycles_to_defensive() {
     assert!(matches!(&a3[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }));
 }
 
+/// FIX-B: First burst cycle → Defensive (not CB). Prevents single API-sync hiccup from
+/// immediately tripping CB (e.g. IPC close_all + delayed Bybit REST response).
+/// FIX-B：第一次 burst → Defensive（非 CB），防止 IPC close_all 後 REST 延遲誤觸 CB。
 #[test]
-fn phase6_burst_5_drifts_to_circuit_breaker_and_close_all() {
+fn phase6_burst_5_drifts_first_cycle_to_defensive_not_cb() {
     let mut state = make_state();
     let drifts = vec![
         ("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift),
@@ -205,13 +208,40 @@ fn phase6_burst_5_drifts_to_circuit_breaker_and_close_all() {
         ("SOLUSDT|Buy".into(), DriftVerdict::MajorDrift),
         ("DOGEUSDT|Buy".into(), DriftVerdict::Orphan),
     ];
+    // First cycle with 5 simultaneous drifts → Defensive (not CB)
     let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
-    assert_eq!(actions.len(), 2);
+    assert_eq!(actions.len(), 1, "first burst cycle must produce exactly 1 action (Escalate to Defensive)");
     assert!(matches!(
         &actions[0],
+        ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }
+    ), "first burst must escalate to Defensive, got: {:?}", &actions[0]);
+    assert_eq!(state.burst_drift_streak, 1);
+}
+
+/// FIX-B: Two consecutive burst cycles → CircuitBreaker + CloseAll.
+/// FIX-B：連續兩個 burst 週期 → CircuitBreaker + 全平倉。
+#[test]
+fn phase6_burst_5_drifts_two_consecutive_cycles_to_circuit_breaker_and_close_all() {
+    let mut state = make_state();
+    let drifts = vec![
+        ("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift),
+        ("ETHUSDT|Buy".into(), DriftVerdict::Orphan),
+        ("XRPUSDT|Sell".into(), DriftVerdict::Ghost),
+        ("SOLUSDT|Buy".into(), DriftVerdict::MajorDrift),
+        ("DOGEUSDT|Buy".into(), DriftVerdict::Orphan),
+    ];
+    // First cycle: Normal → Defensive (streak=1). Use far-future ts to bypass cooldowns.
+    let actions1 = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
+    assert!(matches!(&actions1[0], ReconcilerAction::Escalate { target: RiskLevel::Defensive, .. }));
+    // Second consecutive cycle: Defensive → CircuitBreaker + CloseAll (streak=2)
+    let actions2 = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, 999_999_999);
+    assert_eq!(actions2.len(), 2);
+    assert!(matches!(
+        &actions2[0],
         ReconcilerAction::Escalate { target: RiskLevel::CircuitBreaker, .. }
-    ));
-    assert!(matches!(&actions[1], ReconcilerAction::CloseAll { .. }));
+    ), "second consecutive burst must escalate to CB");
+    assert!(matches!(&actions2[1], ReconcilerAction::CloseAll { .. }));
+    assert_eq!(state.burst_drift_streak, 2);
 }
 
 #[test]

@@ -165,6 +165,15 @@ impl TickPipeline {
                 .iter()
                 .map(|p| p.symbol.clone())
                 .collect();
+            // FIX-A: If CB is set but positions are already gone (IPC already closed them),
+            // skip the WARN + empty loop every tick — it only generates noise and wastes CPU.
+            // The CB risk level will persist until operator de-escalates via IPC.
+            // FIX-A：若 CB 已設但倉位已清（IPC 已平倉），每 tick 跳過 WARN + 空迴圈，避免日誌垃圾。
+            // CB 風控級別持續直到 Operator 通過 IPC 手動降級。
+            if symbols.is_empty() {
+                let tick_duration_us = tick_start.elapsed().as_micros() as u64;
+                return self.maybe_canary_record(event, None, vec![], vec![], tick_duration_us);
+            }
             // PNL-4: every fast_track CloseAll now leaves a forensic breadcrumb
             // (risk level + ts + position count + triggering tick symbol). The
             // 2026-04-11 18:51 incident was untraceable because logs rotated;

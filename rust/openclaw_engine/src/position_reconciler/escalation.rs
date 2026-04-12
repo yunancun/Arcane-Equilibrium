@@ -106,6 +106,15 @@ pub struct ReconcilerState {
     /// None if reconciler has not escalated. Auto-recovery will not go below this.
     /// 對帳器開始升級前的風控級別（恢復 floor）。None = 對帳器未曾升級。
     pub pre_escalation_level: Option<RiskLevel>,
+    /// FIX-B: Consecutive cycles where actionable_count >= BURST_DRIFT_COUNT.
+    /// First burst cycle → Defensive (not CB). Second consecutive → CircuitBreaker.
+    /// This prevents a single transient API-sync hiccup (e.g. IPC close_all followed by
+    /// delayed Bybit REST, making 5 positions appear to vanish simultaneously) from
+    /// immediately tripping CB across all three engines.
+    /// FIX-B：連續 actionable_count >= BURST_DRIFT_COUNT 的週期數。
+    /// 第一次 burst → Defensive（非 CB），連續第二次 → CircuitBreaker。
+    /// 防止單次瞬態 API 同步抖動（如 IPC close_all 後 Bybit REST 延遲）誤觸 CB。
+    pub burst_drift_streak: u32,
 }
 
 impl ReconcilerState {
@@ -120,6 +129,7 @@ impl ReconcilerState {
             last_escalation_ms: HashMap::new(),
             global_last_escalation_ms: 0,
             pre_escalation_level: None,
+            burst_drift_streak: 0,
         }
     }
 }
@@ -174,10 +184,26 @@ pub fn evaluate_actions(
     let actionable_count = actionable.len();
     let max_streak = state.drift_streak.values().copied().max().unwrap_or(0);
 
+    // FIX-B: Track consecutive burst cycles. First burst → Defensive (warning shot);
+    // second consecutive burst → CircuitBreaker. Resets on any non-burst cycle.
+    // FIX-B：追蹤連續 burst 週期。第一次 burst → Defensive（預警）；
+    // 第二次連續 burst → CircuitBreaker。任何非 burst 週期重置計數。
+    if actionable_count >= BURST_DRIFT_COUNT {
+        state.burst_drift_streak += 1;
+    } else {
+        state.burst_drift_streak = 0;
+    }
+
     let escalation_target: Option<RiskLevel> = if actionable_count >= BURST_DRIFT_COUNT {
-        // 5+ simultaneous drifts → CircuitBreaker + CloseAll
-        // 5+ 同時漂移 → CB + 全平倉
-        Some(RiskLevel::CircuitBreaker)
+        if state.burst_drift_streak >= 2 {
+            // Two consecutive cycles with 5+ drifts → CircuitBreaker + CloseAll
+            // 連續兩個週期 5+ 漂移 → CircuitBreaker + 全平倉
+            Some(RiskLevel::CircuitBreaker)
+        } else {
+            // First burst cycle → Defensive (not yet CB; may be transient API sync hiccup)
+            // 第一次 burst 週期 → Defensive（尚未 CB；可能是瞬態 API 同步抖動）
+            Some(RiskLevel::Defensive)
+        }
     } else if max_streak >= PERSISTENT_DRIFT_CYCLES {
         // Persistent drift ≥3 cycles → Defensive
         // 持續漂移 ≥3 週期 → Defensive
@@ -227,7 +253,7 @@ pub fn evaluate_actions(
                 // IPC 命令確認後設置，避免為被拒絕的升級記錄 floor。
 
                 let reason = if actionable_count >= BURST_DRIFT_COUNT {
-                    format!("{actionable_count} simultaneous drifts (burst)")
+                    format!("{actionable_count} simultaneous drifts (burst, streak={})", state.burst_drift_streak)
                 } else if max_streak >= PERSISTENT_DRIFT_CYCLES {
                     format!("persistent drift {max_streak} cycles")
                 } else {
