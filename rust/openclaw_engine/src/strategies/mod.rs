@@ -1,14 +1,18 @@
-//! Strategy modules — 5 trading strategies (R04-5).
-//! 策略模組 — 5 個交易策略。
+//! Strategy modules — 5 trading strategies + shared helpers (R04-5, G-SR-1).
+//! 策略模組 — 5 個交易策略 + 共享輔助模組。
 //!
 //! MODULE_NOTE (EN): Defines Strategy trait + StrategyAction enum + StrategyParams.
-//!   Sub-modules: ma_crossover, bb_breakout, bb_reversion, grid_trading, funding_arb.
+//!   Sub-modules: ma_crossover, bb_breakout, bb_reversion, grid_trading, funding_arb,
+//!   confluence (shared scoring/persistence), grid_helpers (extracted grid math).
 //! MODULE_NOTE (中): 定義 Strategy trait + StrategyAction 枚舉 + StrategyParams。
-//!   子模組：ma_crossover、bb_breakout、bb_reversion、grid_trading、funding_arb。
+//!   子模組：ma_crossover、bb_breakout、bb_reversion、grid_trading、funding_arb、
+//!   confluence（共享評分/持續性）、grid_helpers（提取的網格數學）。
 
 pub mod bb_breakout;
 pub mod bb_reversion;
+pub mod confluence;
 pub mod funding_arb;
+pub mod grid_helpers;
 pub mod grid_trading;
 pub mod ma_crossover;
 
@@ -207,11 +211,67 @@ pub struct MaCrossoverParams {
     /// QC-H1: Exit confidence base / 出場信心基礎值
     #[serde(default = "default_exit_conf_base_ma")]
     pub exit_conf_base: f64,
+    // ── G-SR-1 A0-c: Confluence TOML fields ──
+    #[serde(default = "default_min_persistence_ms")]
+    pub min_persistence_ms: u64,
+    #[serde(default = "default_min_notional_usd")]
+    pub min_notional_usd: f64,
+    #[serde(default = "default_weight_adx_trend")]
+    pub weight_adx: f64,
+    #[serde(default = "default_weight_regime_trend")]
+    pub weight_regime: f64,
+    #[serde(default = "default_weight_volume_trend")]
+    pub weight_volume: f64,
+    #[serde(default = "default_weight_momentum_trend")]
+    pub weight_momentum: f64,
+    #[serde(default = "default_adx_floor")]
+    pub adx_floor: f64,
+    #[serde(default = "default_threshold_no_trade")]
+    pub confluence_threshold_no_trade: f64,
+    #[serde(default = "default_threshold_light")]
+    pub confluence_threshold_light: f64,
+    #[serde(default = "default_threshold_full")]
+    pub confluence_threshold_full: f64,
 }
 
 fn default_entry_conf_base_ma() -> f64 { 0.45 }
 fn default_entry_regime_bonus() -> f64 { 0.15 }
 fn default_exit_conf_base_ma() -> f64 { 0.5 }
+// G-SR-1 confluence defaults (shared) / 匯流默認值
+fn default_min_persistence_ms() -> u64 { 120_000 }
+fn default_min_persistence_ms_breakout() -> u64 { 60_000 }
+fn default_min_notional_usd() -> f64 { 10.0 }
+fn default_weight_adx_trend() -> f64 { 25.0 }
+fn default_weight_regime_trend() -> f64 { 20.0 }
+fn default_weight_volume_trend() -> f64 { 12.0 }
+fn default_weight_momentum_trend() -> f64 { 8.0 }
+fn default_weight_adx_reversion() -> f64 { 15.0 }
+fn default_weight_regime_reversion() -> f64 { 30.0 }
+fn default_weight_volume_reversion() -> f64 { 10.0 }
+fn default_weight_momentum_reversion() -> f64 { 10.0 }
+fn default_adx_floor() -> f64 { 8.0 }
+fn default_threshold_no_trade() -> f64 { 35.0 }
+fn default_threshold_light() -> f64 { 45.0 }
+fn default_threshold_full() -> f64 { 55.0 }
+
+impl MaCrossoverParams {
+    /// Build ConfluenceConfig from TOML params (trend profile).
+    /// 從 TOML 參數構建 ConfluenceConfig（趨勢配置）。
+    pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
+        confluence::ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: false,
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: true,
+        }
+    }
+}
 
 impl Default for MaCrossoverParams {
     fn default() -> Self {
@@ -225,6 +285,16 @@ impl Default for MaCrossoverParams {
             entry_conf_base: 0.45,
             entry_regime_bonus: 0.15,
             exit_conf_base: 0.5,
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
+            weight_adx: 25.0,
+            weight_regime: 20.0,
+            weight_volume: 12.0,
+            weight_momentum: 8.0,
+            adx_floor: 8.0,
+            confluence_threshold_no_trade: 35.0,
+            confluence_threshold_light: 45.0,
+            confluence_threshold_full: 55.0,
         }
     }
 }
@@ -264,6 +334,29 @@ pub struct BbReversionParams {
     /// QC-#7：均���回歸市場狀態信心加成。
     #[serde(default = "default_hurst_regime_boost")]
     pub hurst_regime_boost: f64,
+    // ── G-SR-1 A0-c: Confluence TOML fields (reversion profile) ──
+    #[serde(default = "default_min_persistence_ms")]
+    pub min_persistence_ms: u64,
+    #[serde(default = "default_min_notional_usd")]
+    pub min_notional_usd: f64,
+    #[serde(default = "default_weight_adx_reversion")]
+    pub weight_adx: f64,
+    #[serde(default = "default_weight_regime_reversion")]
+    pub weight_regime: f64,
+    #[serde(default = "default_weight_volume_reversion")]
+    pub weight_volume: f64,
+    #[serde(default = "default_weight_momentum_reversion")]
+    pub weight_momentum: f64,
+    #[serde(default = "default_adx_floor")]
+    pub adx_floor: f64,
+    #[serde(default = "default_true")]
+    pub adx_inverted: bool,
+    #[serde(default = "default_threshold_no_trade")]
+    pub confluence_threshold_no_trade: f64,
+    #[serde(default = "default_threshold_light")]
+    pub confluence_threshold_light: f64,
+    #[serde(default = "default_threshold_full")]
+    pub confluence_threshold_full: f64,
 }
 
 fn default_entry_conf_base_bbr() -> f64 { 0.6 }
@@ -271,6 +364,23 @@ fn default_exit_conf_base_bbr() -> f64 { 0.55 }
 fn default_exit_pctb_lower() -> f64 { 0.2 }
 fn default_exit_pctb_upper() -> f64 { 0.8 }
 fn default_hurst_regime_boost() -> f64 { 0.1 }
+
+impl BbReversionParams {
+    pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
+        confluence::ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: self.adx_inverted,
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: true,
+        }
+    }
+}
 
 impl Default for BbReversionParams {
     fn default() -> Self {
@@ -287,6 +397,17 @@ impl Default for BbReversionParams {
             exit_pctb_lower: 0.2,
             exit_pctb_upper: 0.8,
             hurst_regime_boost: 0.1,
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
+            weight_adx: 15.0,
+            weight_regime: 30.0,
+            weight_volume: 10.0,
+            weight_momentum: 10.0,
+            adx_floor: 8.0,
+            adx_inverted: true,
+            confluence_threshold_no_trade: 35.0,
+            confluence_threshold_light: 45.0,
+            confluence_threshold_full: 55.0,
         }
     }
 }
@@ -318,10 +439,54 @@ pub struct BbBreakoutParams {
     /// QC-H4：出場信心基礎值。各出場原因加減偏移。
     #[serde(default = "default_exit_conf_base_bbb")]
     pub exit_conf_base: f64,
+    // ── G-SR-1 A0-c: Confluence TOML fields (breakout profile) ──
+    #[serde(default = "default_min_persistence_ms_breakout")]
+    pub min_persistence_ms: u64,
+    #[serde(default = "default_min_notional_usd")]
+    pub min_notional_usd: f64,
+    #[serde(default = "default_weight_adx_trend")]
+    pub weight_adx: f64,
+    #[serde(default = "default_weight_regime_trend")]
+    pub weight_regime: f64,
+    #[serde(default = "default_weight_volume_trend")]
+    pub weight_volume: f64,
+    #[serde(default = "default_weight_momentum_trend")]
+    pub weight_momentum: f64,
+    #[serde(default = "default_adx_floor")]
+    pub adx_floor: f64,
+    /// Breakout uses confluence as qty modifier, not gate (default false).
+    /// Breakout 使用 confluence 作為倉位修正器而非門檻（默認 false）。
+    #[serde(default)]
+    pub confluence_as_gate: bool,
+    #[serde(default = "default_threshold_no_trade")]
+    pub confluence_threshold_no_trade: f64,
+    #[serde(default = "default_threshold_light")]
+    pub confluence_threshold_light: f64,
+    #[serde(default = "default_threshold_full")]
+    pub confluence_threshold_full: f64,
 }
 
 fn default_entry_conf_base_bbb() -> f64 { 0.7 }
 fn default_exit_conf_base_bbb() -> f64 { 0.5 }
+
+impl BbBreakoutParams {
+    /// Build ConfluenceConfig from TOML params (breakout profile: qty modifier, not gate).
+    /// 從 TOML 參數構建 ConfluenceConfig（突破配置：倉位修正器，非門檻）。
+    pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
+        confluence::ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: false,
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: self.confluence_as_gate,
+        }
+    }
+}
 
 impl Default for BbBreakoutParams {
     fn default() -> Self {
@@ -336,6 +501,17 @@ impl Default for BbBreakoutParams {
             squeeze_expiry_ms: 1_800_000,
             entry_conf_base: 0.7,
             exit_conf_base: 0.5,
+            min_persistence_ms: 60_000,
+            min_notional_usd: 10.0,
+            weight_adx: 25.0,
+            weight_regime: 20.0,
+            weight_volume: 12.0,
+            weight_momentum: 8.0,
+            adx_floor: 8.0,
+            confluence_as_gate: false,
+            confluence_threshold_no_trade: 35.0,
+            confluence_threshold_light: 45.0,
+            confluence_threshold_full: 55.0,
         }
     }
 }
@@ -366,11 +542,24 @@ pub struct GridTradingParams {
     /// QC-H9: OU model recalc interval in ticks (default 50) / OU 重算間隔
     #[serde(default = "default_ou_update_interval")]
     pub ou_update_interval: usize,
+    // ── G-SR-1 A3: Trend-adaptive cooldown ──
+    /// ADX low threshold for cooldown scaling (default 20). / ADX 冷卻縮放下閾值。
+    #[serde(default = "default_adx_low_threshold")]
+    pub adx_low_threshold: f64,
+    /// ADX high threshold for cooldown scaling (default 50). / ADX 冷卻縮放上閾值。
+    #[serde(default = "default_adx_high_threshold")]
+    pub adx_high_threshold: f64,
+    /// Max cooldown boost factor (default 5.0, range 1x–6x). / 最大冷卻倍率加成。
+    #[serde(default = "default_max_cooldown_boost")]
+    pub max_cooldown_boost: f64,
 }
 
 fn default_adaptive_range_pct() -> f64 { 0.10 }
 fn default_reject_backoff_ms() -> u64 { 30_000 }
 fn default_ou_update_interval() -> usize { 50 }
+fn default_adx_low_threshold() -> f64 { 20.0 }
+fn default_adx_high_threshold() -> f64 { 50.0 }
+fn default_max_cooldown_boost() -> f64 { 5.0 }
 
 impl Default for GridTradingParams {
     fn default() -> Self {
@@ -384,6 +573,9 @@ impl Default for GridTradingParams {
             adaptive_range_pct: 0.10,
             reject_backoff_ms: 30_000,
             ou_update_interval: 50,
+            adx_low_threshold: 20.0,
+            adx_high_threshold: 50.0,
+            max_cooldown_boost: 5.0,
         }
     }
 }
@@ -551,6 +743,11 @@ impl StrategyFactory {
         mac.entry_conf_base = p.ma_crossover.entry_conf_base;
         mac.entry_regime_bonus = p.ma_crossover.entry_regime_bonus;
         mac.exit_conf_base = p.ma_crossover.exit_conf_base;
+        // G-SR-1 A0-c: Wire confluence params from TOML.
+        // G-SR-1 A0-c：從 TOML 接線匯流參數。
+        mac.min_persistence_ms = p.ma_crossover.min_persistence_ms;
+        mac.min_notional_usd = p.ma_crossover.min_notional_usd;
+        mac.confluence_config = p.ma_crossover.build_confluence_config();
         mac.set_conf_scale(p.ma_crossover.conf_scale);
         mac.set_active(p.ma_crossover.active);
         strategies.push(Box::new(mac));
@@ -567,6 +764,10 @@ impl StrategyFactory {
         bbr.exit_pctb_lower = p.bb_reversion.exit_pctb_lower;
         bbr.exit_pctb_upper = p.bb_reversion.exit_pctb_upper;
         bbr.hurst_regime_boost = p.bb_reversion.hurst_regime_boost;
+        // G-SR-1 A0-c: Wire confluence params from TOML.
+        bbr.min_persistence_ms = p.bb_reversion.min_persistence_ms;
+        bbr.min_notional_usd = p.bb_reversion.min_notional_usd;
+        bbr.confluence_config = p.bb_reversion.build_confluence_config();
         bbr.set_conf_scale(p.bb_reversion.conf_scale);
         bbr.set_active(p.bb_reversion.active);
         strategies.push(Box::new(bbr));
@@ -581,14 +782,18 @@ impl StrategyFactory {
         bbb.squeeze_expiry_ms = p.bb_breakout.squeeze_expiry_ms;
         bbb.entry_conf_base = p.bb_breakout.entry_conf_base;
         bbb.exit_conf_base = p.bb_breakout.exit_conf_base;
+        // G-SR-1 A0-c: Wire confluence params from TOML.
+        bbb.min_persistence_ms = p.bb_breakout.min_persistence_ms;
+        bbb.min_notional_usd = p.bb_breakout.min_notional_usd;
+        bbb.confluence_config = p.bb_breakout.build_confluence_config();
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));
 
         // GridTrading
         let spacing = match p.grid_trading.spacing_mode.as_str() {
-            "geometric" => grid_trading::GridSpacingMode::Geometric,
-            _ => grid_trading::GridSpacingMode::Linear,
+            "geometric" => grid_helpers::GridSpacingMode::Geometric,
+            _ => grid_helpers::GridSpacingMode::Linear,
         };
         let mut gt = grid_trading::GridTrading::new_adaptive_with_mode(spacing);
         gt.health_check_interval = p.grid_trading.health_check_interval as usize;
@@ -597,6 +802,9 @@ impl StrategyFactory {
         gt.adaptive_range_pct = p.grid_trading.adaptive_range_pct;
         gt.reject_backoff_ms = p.grid_trading.reject_backoff_ms;
         gt.ou_update_interval = p.grid_trading.ou_update_interval;
+        gt.adx_low_threshold = p.grid_trading.adx_low_threshold;
+        gt.adx_high_threshold = p.grid_trading.adx_high_threshold;
+        gt.max_cooldown_boost = p.grid_trading.max_cooldown_boost;
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
         strategies.push(Box::new(gt));

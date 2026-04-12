@@ -14,8 +14,13 @@ restart_engine() {
     # Load PG password from secrets (cross-platform: no hardcoded credentials)
     local pg_pass
     pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
+    # Load IPC HMAC secret for Live pipeline authentication
+    # 載入 IPC HMAC 密鑰（Live 管線 HMAC 認證必需）
+    local ipc_secret
+    ipc_secret=$(cat "$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     OPENCLAW_DATA_DIR=/tmp/openclaw OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
+        OPENCLAW_IPC_SECRET="${ipc_secret}" \
         nohup rust/target/release/openclaw-engine > /tmp/openclaw/engine.log 2>&1 &
     echo "    PID: $!"
 }
@@ -30,7 +35,12 @@ restart_api() {
     local pg_pass
     pg_pass=$(grep POSTGRES_PASSWORD "$HOME/BybitOpenClaw/secrets/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2-)
     cd program_code/exchange_connectors/bybit_connector/control_api_v1
+    # Load IPC HMAC secret for API-side HMAC verification
+    # 載入 IPC HMAC 密鑰（API 端 HMAC 驗證）
+    local ipc_secret
+    ipc_secret=$(cat "$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt" 2>/dev/null || echo "")
     OPENCLAW_DATABASE_URL="postgresql://redacted@127.0.0.1:5432/trading_ai" \
+        OPENCLAW_IPC_SECRET="${ipc_secret}" \
         .venv/bin/python3 .venv/bin/uvicorn app.main:app \
         --host 0.0.0.0 --port 8000 --workers "$WORKERS" &
     cd - > /dev/null
