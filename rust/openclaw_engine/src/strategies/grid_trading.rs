@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use super::grid_helpers;
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ use tracing::info;
 /// FIX-06: added grid_levels field (was hardcoded, TOML stored but not applied).
 /// FIX-06：新增 grid_levels 欄位（原硬編碼，TOML 存但不生效）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GridTradingParams {
     pub cooldown_ms: u64,
     pub qty_per_grid: f64,
@@ -28,12 +30,15 @@ pub struct GridTradingParams {
     pub max_out_of_range: usize,
     /// Number of grid levels. FIX-06: was hardcoded DEFAULT_GRID_COUNT=10.
     /// 網格層級數量。FIX-06：原硬編碼為 10。
-    #[serde(default = "default_grid_levels")]
     pub grid_levels: usize,
-}
-
-fn default_grid_levels() -> usize {
-    DEFAULT_GRID_COUNT
+    // ── G-SR-1 A3: Trend-adaptive cooldown params ──
+    // ── G-SR-1 A3：趨勢自適應冷卻參數 ──
+    /// ADX low threshold for cooldown scaling (below = no boost). / ADX 冷卻縮放下閾值。
+    pub adx_low_threshold: f64,
+    /// ADX high threshold for cooldown scaling (above = max boost). / ADX 冷卻縮放上閾值。
+    pub adx_high_threshold: f64,
+    /// Max cooldown multiplier boost (1+boost = max multiplier). / 最大冷卻倍率加成。
+    pub max_cooldown_boost: f64,
 }
 
 impl Default for GridTradingParams {
@@ -46,6 +51,9 @@ impl Default for GridTradingParams {
             health_check_interval: 100,
             max_out_of_range: 5,
             grid_levels: DEFAULT_GRID_COUNT,
+            adx_low_threshold: 20.0,
+            adx_high_threshold: 50.0,
+            max_cooldown_boost: 5.0,
         }
     }
 }
@@ -145,17 +153,9 @@ const DEFAULT_FEE_PCT: f64 = 0.00055;
 /// 默認自適應範圍：當前價格 ±10% 用於初始化/再平衡網格。
 const ADAPTIVE_RANGE_PCT: f64 = 0.10;
 
-/// Grid spacing mode: linear (equal dollar) or geometric (equal ratio).
-/// 網格間距模式：線性（等差）或幾何（等比）。
-#[derive(Debug, Clone, PartialEq)]
-pub enum GridSpacingMode {
-    /// Equal dollar spacing between levels (arithmetic progression).
-    /// 等差間距：各層級之間價差相等。
-    Linear,
-    /// Equal ratio spacing between levels (geometric progression).
-    /// 等比間距：各層級之間比率相等，更適合加密貨幣（價格按比例波動）。
-    Geometric,
-}
+// GridSpacingMode moved to grid_helpers.rs (A0-a extraction), re-exported for compatibility.
+// GridSpacingMode 已移至 grid_helpers.rs（A0-a 提取），此處重導出保持兼容。
+pub use super::grid_helpers::GridSpacingMode;
 
 /// Grid health status returned by health check.
 /// 健康檢查返回的網格狀態。
@@ -238,47 +238,18 @@ pub struct GridTrading {
     /// QC-H9: OU model recalculation interval in ticks (default 50).
     /// QC-H9：OU 模型重算間隔（tick 數，默認 50）。
     pub(crate) ou_update_interval: usize,
+    // ── G-SR-1 A3: Trend-adaptive cooldown ──
+    // ── G-SR-1 A3：趨勢自適應冷卻 ──
+    /// ADX low threshold for cooldown scaling. / ADX 冷卻縮放下閾值。
+    pub(crate) adx_low_threshold: f64,
+    /// ADX high threshold for cooldown scaling. / ADX 冷卻縮放上閾值。
+    pub(crate) adx_high_threshold: f64,
+    /// Max cooldown boost factor (range 1x to 1+boost). / 最大冷卻倍率加成。
+    pub(crate) max_cooldown_boost: f64,
 }
 
-/// Build grid levels with linear (arithmetic) spacing.
-/// 以線性（等差）間距建構網格層級。
-fn build_linear_levels(lower: f64, upper: f64, count: usize) -> Vec<f64> {
-    let mut levels = Vec::with_capacity(count);
-    let step = (upper - lower) / (count as f64 - 1.0);
-    for i in 0..count {
-        levels.push(lower + step * i as f64);
-    }
-    levels
-}
-
-/// Build grid levels with geometric (ratio-based) spacing.
-/// 以幾何（等比）間距建構網格層級。
-/// ratio = (upper / lower)^(1/(n-1)), level[i] = lower * ratio^i
-fn build_geometric_levels(lower: f64, upper: f64, count: usize) -> Vec<f64> {
-    let mut levels = Vec::with_capacity(count);
-    if count <= 1 || lower <= 0.0 || upper <= 0.0 {
-        // Degenerate case — fall back to single level or empty.
-        // 退化情況 — 回退為單層級或空。
-        if count >= 1 && lower > 0.0 {
-            levels.push(lower);
-        }
-        return levels;
-    }
-    let ratio = (upper / lower).powf(1.0 / (count as f64 - 1.0));
-    for i in 0..count {
-        levels.push(lower * ratio.powi(i as i32));
-    }
-    levels
-}
-
-/// Build grid levels respecting the given spacing mode.
-/// 根據指定的間距模式建構網格層級。
-fn build_levels(lower: f64, upper: f64, count: usize, mode: &GridSpacingMode) -> Vec<f64> {
-    match mode {
-        GridSpacingMode::Linear => build_linear_levels(lower, upper, count),
-        GridSpacingMode::Geometric => build_geometric_levels(lower, upper, count),
-    }
-}
+// build_linear_levels, build_geometric_levels, build_levels moved to grid_helpers.rs (A0-a)
+// 建構函數已移至 grid_helpers.rs（A0-a 提取）
 
 impl GridTrading {
     /// Create a grid with linear (arithmetic) spacing — original behavior.
@@ -314,6 +285,9 @@ impl GridTrading {
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
+            adx_low_threshold: 20.0,
+            adx_high_threshold: 50.0,
+            max_cooldown_boost: 5.0,
         }
     }
 
@@ -350,6 +324,9 @@ impl GridTrading {
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
+            adx_low_threshold: 20.0,
+            adx_high_threshold: 50.0,
+            max_cooldown_boost: 5.0,
         }
     }
 
@@ -400,6 +377,9 @@ impl GridTrading {
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
             ou_update_interval: 50,
+            adx_low_threshold: 20.0,
+            adx_high_threshold: 50.0,
+            max_cooldown_boost: 5.0,
         }
     }
 
@@ -414,20 +394,10 @@ impl GridTrading {
     /// Find nearest grid level index for a price in a given symbol's grid.
     /// 找到指定幣種網格中價格最近的等級索引。
     fn nearest_grid_idx(&self, symbol: &str, price: f64) -> usize {
-        let levels = match self.grid_levels.get(symbol) {
-            Some(l) => l,
-            None => return 0,
-        };
-        let mut best = 0;
-        let mut best_dist = f64::MAX;
-        for (i, &level) in levels.iter().enumerate() {
-            let d = (price - level).abs();
-            if d < best_dist {
-                best_dist = d;
-                best = i;
-            }
+        match self.grid_levels.get(symbol) {
+            Some(levels) => grid_helpers::nearest_grid_idx(levels, price),
+            None => 0,
         }
-        best
     }
 
     /// Check grid health for a symbol: is price within bounds? Should we rebalance?
@@ -485,68 +455,50 @@ impl GridTrading {
             )
         };
 
-        self.grid_levels.insert(symbol.to_string(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
+        self.grid_levels.insert(symbol.to_string(), grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode));
         self.out_of_range_count.insert(symbol.to_string(), 0);
         self.last_cross_idx.remove(symbol);
     }
 
     /// Compute OU-derived optimal step size for a symbol (without rebuilding the grid).
-    /// Returns None if data is insufficient or parameters are degenerate.
-    /// 計算指定幣種的 OU 推導最佳步長（不重建網格）。
+    /// Delegates to grid_helpers::compute_ou_step() pure function.
+    /// 計算指定幣種的 OU 推導最佳步長。委派給 grid_helpers::compute_ou_step() 純函數。
     fn compute_ou_step(&self, symbol: &str) -> Option<f64> {
         let history = self.price_history.get(symbol)?;
-        if history.len() < 20 {
-            return None;
-        }
-        let n = history.len().min(self.ou_lookback);
-        let prices = &history[history.len() - n..];
+        grid_helpers::compute_ou_step(history, self.ou_lookback, self.fee_rate)
+    }
 
-        let changes: Vec<f64> = prices.windows(2).map(|w| w[1] - w[0]).collect();
-        let x_lag: Vec<f64> = prices[..prices.len() - 1].to_vec();
+    /// G-SR-1 A3: Compute trend-adjusted cooldown for a symbol.
+    /// In trending markets (high ADX + high Hurst), cooldown scales up 1x→6x
+    /// to reduce grid frequency and limit inventory drift losses.
+    /// G-SR-1 A3：計算趨勢調整後的冷卻時間。
+    /// 趨勢市場（高 ADX + 高 Hurst）中，冷卻從 1x 增至 6x，降低網格頻率。
+    fn compute_trend_adjusted_cooldown(&self, snap: Option<&IndicatorSnapshot>) -> u64 {
+        let Some(ind) = snap else {
+            return self.cooldown_ms;
+        };
 
-        if changes.is_empty() {
-            return None;
-        }
-        let n_f = changes.len() as f64;
-        let mean_x: f64 = x_lag.iter().sum::<f64>() / n_f;
-        let mean_dx: f64 = changes.iter().sum::<f64>() / n_f;
+        let adx_val = ind.adx.as_ref().map(|a| a.adx).unwrap_or(0.0);
+        let hurst_val = ind.hurst.as_ref().map(|h| h.hurst).unwrap_or(0.5);
 
-        let mut num = 0.0;
-        let mut den = 0.0;
-        for i in 0..changes.len() {
-            let dx = x_lag[i] - mean_x;
-            num += dx * (changes[i] - mean_dx);
-            den += dx * dx;
-        }
-
-        if den.abs() < 1e-15 {
-            return None;
-        }
-        let b = num / den;
-        // FIX-07: If b >= 0 (trending/random walk, not mean-reverting), OU model
-        // is invalid — return None to fall back to adaptive ±10% range.
-        // Old code clamped theta to 0.001 which produced σ·√(2/0.001) = huge spacing.
-        // FIX-07：若 b >= 0（趨勢/隨機遊走，非均值回歸），OU 模型不適用，
-        // 返回 None 讓呼叫端回退到 ±10% 自適應範圍。
-        if b >= 0.0 {
-            return None;
-        }
-        let theta = (-b).max(0.01); // sane minimum for genuine mean-reversion
-
-        let sigma = (changes.iter().map(|c| c * c).sum::<f64>() / n_f).sqrt();
-        let mu = prices.iter().sum::<f64>() / prices.len() as f64;
-
-        // OU optimal grid spacing: σ·√(2/θ) — derived from OU first-passage time.
-        // OU 最佳網格間距：σ·√(2/θ) — 由 OU 首次穿越時間推導。
-        let ou_step = sigma * (2.0_f64 / theta).sqrt();
-        let fee_floor = 2.0 * self.fee_rate * mu;
-        let step = ou_step.max(fee_floor);
-
-        if step > 0.0 && mu > 0.0 {
-            Some(step)
+        // ADX factor: adx_low→adx_high maps to 0→1
+        let adx_range = self.adx_high_threshold - self.adx_low_threshold;
+        let adx_factor = if adx_range > 0.0 {
+            ((adx_val - self.adx_low_threshold) / adx_range).clamp(0.0, 1.0)
         } else {
-            None
-        }
+            0.0
+        };
+
+        // Hurst factor: 0.50→0.75 maps to 0→1
+        let hurst_factor = ((hurst_val - 0.50) / 0.25).clamp(0.0, 1.0);
+
+        // Blend 60/40 (ADX reacts faster than Hurst) / 混合 60/40（ADX 反應快於 Hurst）
+        let trend_score = 0.6 * adx_factor + 0.4 * hurst_factor;
+
+        // Multiplier range: 1x to (1 + max_cooldown_boost)x / 倍率範圍：1x 到 (1+max_cooldown_boost)x
+        let multiplier = 1.0 + (trend_score * self.max_cooldown_boost);
+
+        (self.cooldown_ms as f64 * multiplier) as u64
     }
 
     /// Update grid spacing for a symbol based on OU model (V2). Respects current spacing_mode.
@@ -565,7 +517,7 @@ impl GridTrading {
             let new_levels = match self.spacing_mode {
                 GridSpacingMode::Linear => {
                     let lower = mu - step * (gc as f64 / 2.0);
-                    build_linear_levels(
+                    grid_helpers::build_linear_levels(
                         lower,
                         lower + step * (gc as f64 - 1.0),
                         gc,
@@ -575,7 +527,7 @@ impl GridTrading {
                     let half_range = step * (gc as f64 / 2.0);
                     let lower = (mu - half_range).max(mu * 0.01);
                     let upper = mu + half_range;
-                    build_geometric_levels(lower, upper, gc)
+                    grid_helpers::build_geometric_levels(lower, upper, gc)
                 }
             };
             self.grid_levels.insert(symbol.to_string(), new_levels);
@@ -595,6 +547,10 @@ impl GridTrading {
         if params.grid_levels >= 3 {
             self.grid_count = params.grid_levels;
         }
+        // A3: Trend-adaptive cooldown params / A3：趨勢自適應冷卻參數
+        self.adx_low_threshold = params.adx_low_threshold;
+        self.adx_high_threshold = params.adx_high_threshold;
+        self.max_cooldown_boost = params.max_cooldown_boost;
         info!(strategy = "grid_trading", grid_count = self.grid_count, "params updated / 參數已更新");
         Ok(())
     }
@@ -608,6 +564,9 @@ impl GridTrading {
             health_check_interval: self.health_check_interval,
             max_out_of_range: self.max_out_of_range,
             grid_levels: self.grid_count,
+            adx_low_threshold: self.adx_low_threshold,
+            adx_high_threshold: self.adx_high_threshold,
+            max_cooldown_boost: self.max_cooldown_boost,
         }
     }
 }
@@ -725,7 +684,7 @@ impl Strategy for GridTrading {
                     ctx.price * (1.0 + self.adaptive_range_pct),
                 ),
             };
-            self.grid_levels.insert(sym.to_string(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
+            self.grid_levels.insert(sym.to_string(), grid_helpers::build_levels(lower, upper, self.grid_count, &self.spacing_mode));
         }
 
         // Per-symbol health check every health_check_interval ticks.
@@ -757,7 +716,10 @@ impl Strategy for GridTrading {
         }
 
         let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
-        if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
+        // A3: Trend-adaptive cooldown — scales 1x→6x in trending markets.
+        // A3：趨勢自適應冷卻 — 趨勢市場中 1x→6x 縮放。
+        let effective_cooldown = self.compute_trend_adjusted_cooldown(ctx.indicators);
+        if last_ms > 0 && ctx.timestamp_ms < last_ms + effective_cooldown {
             return vec![];
         }
 

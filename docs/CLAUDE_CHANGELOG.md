@@ -1,7 +1,13 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-04-12
+> 最後更新：2026-04-13
+
+### G-SR-1 Signal Tightening Phase A Session 1+2（2026-04-13）
+
+**Phase A S1: A0 基礎模組提取** — `grid_helpers.rs` 純函數提取（build_linear_levels/build_geometric_levels/nearest_grid_idx/compute_ou_step/rebalance）+ `confluence.rs` 共享模組（PersistenceTracker + compute_score 4 分量 65 分制 + score_to_qty_pct 5 段平滑插值 + ConfluenceConfig 三配置 trend/reversion/breakout）。
+
+**Phase A S2: A0-c + A1 + A2 + A3** — A0-c：3 策略 TOML Params struct 加 confluence 字段（serde(default) backward compat）+ build_confluence_config() + StrategyFactory 接線 + R4-7 update_params rebuild。A1：PersistenceTracker.check() 時間制過濾器接入 ma_crossover/bb_reversion/bb_breakout entry path（MA/BBR 120s, BBB 60s），close 免檢 + clear() 清理。A2（提前實施）：weighted confluence scoring（trend 25/20/12/8, reversion 15inv/30/10/10, breakout qty-only 10% 底線），冷啟動 adx&&rsi None→全倉退化，min_notional guard。A3：Grid trend-adaptive cooldown（ADX 60% + Hurst 40%, 1x-6x 動態倍率，3 TOML 參數）。修復：bb_reversion 測試加 ADX 數據、dead `make_entry_intent()` 刪除、stress test pub 可見性、BbBreakoutParams TOML struct 補齊。Engine lib 934→1024 tests（+90），e2e 29→33（+4）= 1057 total, 0 fail。
 
 ### 04-12 審計修復 Wave 2：14 角色報告逐一核實 + 代碼修復（2026-04-12）
 

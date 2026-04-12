@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -16,6 +17,7 @@ use tracing::info;
 
 /// Tunable parameters for BB Breakout (Phase 3a).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BbBreakoutParams {
     pub cooldown_ms: u64,
     pub default_qty: f64,
@@ -26,10 +28,27 @@ pub struct BbBreakoutParams {
     /// FIX-26: Squeeze state expiry duration (ms). Default 30 min.
     /// FIX-26：壓縮狀態有效期（ms）。默認 30 分鐘。
     pub squeeze_expiry_ms: u64,
+    // ── G-SR-1 confluence + persistence fields (A0-c) ──
+    /// Minimum signal persistence before entry (ms). / 入場前信號最小持續時間（ms）。
+    pub min_persistence_ms: u64,
+    /// Minimum order notional (USD). / 最小訂單名義值（USD）。
+    pub min_notional_usd: f64,
+    /// Confluence as qty modifier only (not gate). / 匯流僅作為 qty 調整器（非門控）。
+    pub confluence_as_gate: bool,
+    /// Confluence weights + thresholds (breakout profile).
+    pub weight_adx: f64,
+    pub weight_regime: f64,
+    pub weight_volume: f64,
+    pub weight_momentum: f64,
+    pub adx_floor: f64,
+    pub confluence_threshold_no_trade: f64,
+    pub confluence_threshold_light: f64,
+    pub confluence_threshold_full: f64,
 }
 
 impl Default for BbBreakoutParams {
     fn default() -> Self {
+        let cc = ConfluenceConfig::breakout();
         Self {
             cooldown_ms: 300_000,
             default_qty: 1e9,
@@ -38,6 +57,17 @@ impl Default for BbBreakoutParams {
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             trailing_stop_atr_mult: 2.0,
             squeeze_expiry_ms: 1_800_000,
+            min_persistence_ms: 60_000, // 1 min (triple gate already strict)
+            min_notional_usd: 10.0,
+            confluence_as_gate: false,
+            weight_adx: cc.weight_adx,
+            weight_regime: cc.weight_regime,
+            weight_volume: cc.weight_volume,
+            weight_momentum: cc.weight_momentum,
+            adx_floor: cc.adx_floor,
+            confluence_threshold_no_trade: cc.threshold_no_trade,
+            confluence_threshold_light: cc.threshold_light,
+            confluence_threshold_full: cc.threshold_full,
         }
     }
 }
@@ -98,7 +128,30 @@ impl StrategyParams for BbBreakoutParams {
         if self.trailing_stop_atr_mult < 0.5 {
             return Err("trailing_stop_atr_mult must be >= 0.5".into());
         }
+        self.build_confluence_config().validate()?;
+        if self.min_notional_usd < 1.0 {
+            return Err("min_notional_usd must be >= 1.0".into());
+        }
         Ok(())
+    }
+}
+
+impl BbBreakoutParams {
+    /// Build ConfluenceConfig (breakout profile: qty modifier only, non-inverted ADX).
+    /// 構建 ConfluenceConfig（突破配置：僅 qty 調整器，非反轉 ADX）。
+    pub fn build_confluence_config(&self) -> ConfluenceConfig {
+        ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: false,
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: self.confluence_as_gate,
+        }
     }
 }
 
@@ -153,6 +206,11 @@ pub struct BbBreakout {
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
+    // ── G-SR-1: Confluence scoring + persistence filter (A0-c, A1) ──
+    pub confluence_config: ConfluenceConfig,
+    persistence: PersistenceTracker,
+    pub min_persistence_ms: u64,
+    pub min_notional_usd: f64,
 }
 
 impl BbBreakout {
@@ -179,6 +237,10 @@ impl BbBreakout {
             prev_trailing_stop: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            confluence_config: ConfluenceConfig::breakout(),
+            persistence: PersistenceTracker::new(),
+            min_persistence_ms: 60_000, // 1 min (triple gate already strict)
+            min_notional_usd: 10.0,
         }
     }
 
@@ -191,6 +253,9 @@ impl BbBreakout {
         self.volume_threshold = params.volume_threshold;
         self.trailing_stop_atr_mult = params.trailing_stop_atr_mult;
         self.squeeze_expiry_ms = params.squeeze_expiry_ms;
+        self.confluence_config = params.build_confluence_config();
+        self.min_persistence_ms = params.min_persistence_ms;
+        self.min_notional_usd = params.min_notional_usd;
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -204,6 +269,17 @@ impl BbBreakout {
             volume_threshold: self.volume_threshold,
             trailing_stop_atr_mult: self.trailing_stop_atr_mult,
             squeeze_expiry_ms: self.squeeze_expiry_ms,
+            min_persistence_ms: self.min_persistence_ms,
+            min_notional_usd: self.min_notional_usd,
+            confluence_as_gate: self.confluence_config.confluence_as_gate,
+            weight_adx: self.confluence_config.weight_adx,
+            weight_regime: self.confluence_config.weight_regime,
+            weight_volume: self.confluence_config.weight_volume,
+            weight_momentum: self.confluence_config.weight_momentum,
+            adx_floor: self.confluence_config.adx_floor,
+            confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
+            confluence_threshold_light: self.confluence_config.threshold_light,
+            confluence_threshold_full: self.confluence_config.threshold_full,
         }
     }
 }
@@ -225,6 +301,7 @@ impl Strategy for BbBreakout {
         self.positions.remove(symbol);
         self.entry_price.remove(symbol);
         self.trailing_stop.remove(symbol);
+        self.persistence.clear(symbol);
     }
 
     /// RC-04: Revert per-symbol position, entry_price, trailing_stop, squeeze_detected_ms on rejection.
@@ -315,18 +392,55 @@ impl Strategy for BbBreakout {
                     }
 
                     if is_long || is_short {
+                        // A1: Persistence filter — triple gate signal must hold.
+                        // A1：持續性過濾 — 三重門控信號必須持續。
+                        let signal = Some(is_long);
+                        if !self.persistence.check(
+                            sym,
+                            signal,
+                            ctx.timestamp_ms,
+                            self.min_persistence_ms,
+                            false,
+                        ) {
+                            return intents;
+                        }
+
                         // A4: Hurst regime boost — trending regime boosts breakout confidence
                         // A4：Hurst 趋势状态 — 趋势型市场提升突破信心
                         let hurst_boost: f64 = match &ind.hurst {
                             Some(h) if h.regime == "trending" => 0.1,
                             _ => 0.0,
                         };
-                        // QC-H4: entry_conf_base configurable (was hardcoded 0.7)
+
+                        // A2: Confluence scoring — qty modifier only for breakout.
+                        // A2：匯流評分 — 突破策略僅作為 qty 調整器。
+                        let score = confluence::compute_score(
+                            &self.confluence_config,
+                            true,
+                            ind.adx.as_ref().map(|a| a.adx),
+                            ind.hurst.as_ref().map(|h| h.regime.as_str()).unwrap_or("uncertain"),
+                            ind.volume_ratio,
+                            ind.rsi_14,
+                            is_long,
+                        );
+                        let qty_pct = confluence::score_to_qty_pct(score, &self.confluence_config);
+                        // confluence_as_gate=false: always trade if triple gate passed,
+                        // but scale qty. qty_pct=0 only blocks if confluence_as_gate=true.
+                        let effective_pct = if self.confluence_config.confluence_as_gate {
+                            qty_pct
+                        } else {
+                            qty_pct.max(0.10) // minimum 10% qty for breakout
+                        };
+                        let qty = self.default_qty * effective_pct;
+                        if qty * ctx.price < self.min_notional_usd {
+                            return intents;
+                        }
+
                         let raw_conf = (self.entry_conf_base + hurst_boost).min(1.0);
                         intents.push(StrategyAction::Open(OrderIntent {
                             symbol: ctx.symbol.to_string(),
                             is_long,
-                            qty: self.default_qty,
+                            qty,
                             confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(raw_conf * self.conf_scale),
                             strategy: self.name().into(),
                             order_type: "market".into(),
@@ -336,7 +450,6 @@ impl Strategy for BbBreakout {
                         self.squeeze_detected_ms.remove(sym);
                         self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
                         // V2: Record entry price and initialize trailing stop per-symbol
-                        // V2：記錄該幣種入場價格並初始化追蹤止損
                         self.entry_price.insert(sym.to_string(), ctx.price);
                         if let Some(atr_res) = &ind.atr_14 {
                             let dist = atr_res.atr * self.trailing_stop_atr_mult;
@@ -483,6 +596,7 @@ mod tests {
     #[test]
     fn test_squeeze_then_breakout() {
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0));
         let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));
         assert_eq!(i.len(), 1);
@@ -495,6 +609,7 @@ mod tests {
     #[test]
     fn test_no_breakout_without_squeeze() {
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         assert!(s.on_tick(&ctx(0.05, 1.1, 2.0, 0)).is_empty());
     }
 
@@ -502,6 +617,7 @@ mod tests {
     fn test_entry_price_recorded() {
         // After entry, entry_price should be set / 入場後 entry_price 應被設置
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
         assert_eq!(s.entry_price.get("BTC"), Some(&50000.0));
@@ -513,6 +629,7 @@ mod tests {
         // Long position: price drops below trailing stop -> exit
         // 做多倉位：價格跌破追蹤止損 -> 出場
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let atr = || {
             Some(AtrResult {
                 atr: 500.0,
@@ -554,6 +671,7 @@ mod tests {
         // Short position: price rises above trailing stop -> exit
         // 做空倉位：價格漲破追蹤止損 -> 出場
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let atr = || {
             Some(AtrResult {
                 atr: 500.0,
@@ -586,6 +704,7 @@ mod tests {
     fn test_regime_exit() {
         // Exit when regime changes to mean_reverting / 當 regime 變為均值回歸時出場
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let trending = || {
             Some(HurstResult {
                 hurst: 0.7,
@@ -637,6 +756,7 @@ mod tests {
         // RC-03: Custom volume threshold — higher threshold blocks low-volume breakouts
         // RC-03：自訂成交量閾值 — 較高閾值阻擋低量突破
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.volume_threshold = 3.0; // require 3x volume instead of default 1.5x
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
                                             // vol=2.0 passes default (1.5) but fails custom (3.0)
@@ -658,6 +778,7 @@ mod tests {
         // RC-03: Custom squeeze/expansion bandwidth thresholds
         // RC-03：自訂壓縮/擴張帶寬閾值
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.squeeze_bw = 0.03; // wider squeeze detection / 更寬的壓縮偵測
         s.expansion_bw = 0.06; // require stronger expansion / 要求更強擴張
 
@@ -692,6 +813,7 @@ mod tests {
     #[test]
     fn test_bb_brk_update() {
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         assert!(s
             .update_params(BbBreakoutParams {
                 trailing_stop_atr_mult: 3.0,
@@ -706,6 +828,7 @@ mod tests {
         // Failed breakout: %B returns to mid-band [0.2, 0.8] → exit with pctb_revert
         // 突破失敗：%B 回到中間帶 [0.2, 0.8] → 以 pctb_revert 出場
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Enter long (no ATR, no Hurst — only pctb/bw exits active)
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long
@@ -730,6 +853,7 @@ mod tests {
         // Volatility collapse: bandwidth drops below squeeze_bw while %B still extreme → bw_squeeze
         // 波動塌陷：帶寬低於壓縮閾值且 %B 仍在極端 → bw_squeeze
         let mut s = BbBreakout::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Enter long
         s.on_tick(&ctx(0.01, 0.5, 1.0, 0)); // squeeze
         s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000)); // breakout long

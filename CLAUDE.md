@@ -1,6 +1,6 @@
 # OpenClaw / Bybit AI Agent 交易系統
 # CLAUDE.md — 項目指令文件（核心規則 + 下一步指針）
-# 最後更新：2026-04-11
+# 最後更新：2026-04-13
 
 ---
 
@@ -53,6 +53,8 @@
 **3E-ARCH 三引擎並行架構 ✅**（2026-04-11）— Paper/Demo/Live 三管線真正獨立並行（MEGA-BLOCKER-0 修復：從「primary+alongside」二管線模型升級為三獨立 spawn）。`determine_primary_kind()` 已刪除 → `build_exchange_pipeline()` 按 API key 獨立構建 `ExchangePipelineBindings`。D1 三獨立判斷 + D21 per-engine Private WS + D23 per-engine Reconciler + D17 Live 獨立 OS thread。`Vec<Sender>` 動態扇出。`TradingMode` 徹底刪除 → `PipelineKind` 不可變。Per-engine TOML 配置 + `PerEngineRiskStores` + `StrategyFactory::create_for_engine()`。D6 三級故障收縮 + D15 全局名義值上限。3E-E2 Fix Rounds Phase A-G 完成：10 BLOCKER + 7 MAJOR 全修 → Phase G 9/9 角色 PASS。**留尾修復**：(a) `with_kind()` 補設 `pipeline_kind` 字段（commit `c9d9bc5`，三引擎搶寫同一份 paper_state.json）；(b) Python `RustSnapshotReader` 路由層 — `get_paper_state()` 預設改讀 per-engine `pipeline_snapshot_paper.json`，paper_trading/risk/strategy_read/live_session 路由顯式 `engine="paper"/"live"`（修 paper-tab 顯示 Live 餘額 bug，因 Live 寫 compat 檔）。930 engine lib + 366 core + 29 e2e = 1325 tests passed · +6 Python ipc_state_reader regression。
 
 **Multi-Symbol Position Tracking ✅**（2026-04-11）— 4 策略（MaCrossover/BbReversion/BbBreakout/GridTrading）從單一全局 `position: Option<bool>` 改為 `HashMap<String, bool>` per-symbol 獨立追蹤。GridTrading `new()`/`new_geometric()` 移除硬編碼 symbol + 預填 grid，改為 `template_bounds` 延遲初始化。理論併發上限 4→100（4策略×25symbols），實際受 `open_positions_max`/`max_same_direction` 風控約束。879 lib tests pass。
+
+**G-SR-1 Signal Tightening Phase A S1+S2 ✅**（2026-04-13）— 策略訊號收緊基礎設施完成。A0-a `grid_helpers.rs` 提取；A0-b `confluence.rs` 共享模組（PersistenceTracker + compute_score 4 分量 65 分制 + score_to_qty_pct 平滑插值）；A0-c 3 策略 TOML Params struct 加 confluence 字段 + serde(default) + build_confluence_config() + factory 接線 + R4-7 update_params rebuild；A1 時間制持續性過濾器（MA/BBR=120s, BBB=60s）接入 3 策略 entry path；A2 加權匯合評分（trend 25/20/12/8, reversion 15inv/30/10/10, breakout qty-only 10% 底線）；A3 Grid 趨勢冷卻（ADX 60% + Hurst 40%, 1x-6x）。1024 lib + 33 e2e = 1057 tests pass。剩餘：S3 A-PARAMS → S4 A-TEST → S5+ Phase B Agent 接線。計劃文件：`docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.5.md`。
 
 **Phase 5 PAUSED — strategies broken, not fees**（2026-04-12 reframe）— 兩個 PnL bug 揭露真相：(a) **PNL-FIX-1**（commit `2a422fa`）`on_tick.rs` 5 條 close 路徑誤用 `event.last_price` 跨 symbol 平倉，PnL 被放大 1000-10000×；(b) **PNL-FIX-2**（同日 follow-up）`emit_close_fill` 寫 `fee: 0.0`，所有 risk/strategy/fast_track 平倉根本不收費。乾淨 1395-fill 基線 + 真實費用後：**bb_reversion -0.46 / ma_crossover -2.64 / grid_trading -0.67 bps**，所有活躍策略 gross edge 為負（非僅扣費後負），net 總損 -$2775。Phase 5 cost_gate / James-Stein 機械正確但餵的是污染輸入；2026-04-08 的「realized 2 bps vs fee 11 bps」前提已作廢。**Phase 5 暫停**等策略重做（G-SR-1 / Strategist Agent / 新訊號邏輯）；先前完成的 PH5-WIRE-0/1 + DL-1/2 + JS-1 + 5-01~03 程式碼保留待 positive-edge 策略接入。fast_track 的 `price_drop_pct` / `margin_utilization` 輸入仍硬編 0（死碼），唯一可觸發 CloseAll 的是 `risk_level ≥ CircuitBreaker`，2026-04-12 已加 `tracing::warn!` 觀測。詳見 `memory/project_phase5_promotion_edge_crisis.md` + TODO PNL-1~4。
 
@@ -291,4 +293,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-12：tests engine lib **934** + core **366** + types **27** + e2e **29** + promotion **32** = **1388** / Python **2852** passed **0 fail** · **E5 Performance Optimization 23 items 全部處理 ✅**（20 fixed / 2 skipped / 1 deferred，net -336 lines）· **全程序鏈審計 P0（8/8）+ P1（18/18）全修 ✅** + 二輪驗證 26/26 PASS + CONCERN 全修 · **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：W22 Thu+ G-1 AI Agent · LG-1 21d paper 到期（05-01）。
+> 截至 2026-04-13：tests engine lib **1024** + e2e **33** = **1057** Rust passed **0 fail** · **G-SR-1 Phase A Session 1+2 完成 ✅**（A0-a/b/c + A1 + A2 + A3，confluence scoring + persistence filter + grid trend cooldown）· **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：S3 A-PARAMS → S4 A-TEST → S5 B0+B1 Agent 基礎設施 · LG-1 21d paper 到期（05-01）。

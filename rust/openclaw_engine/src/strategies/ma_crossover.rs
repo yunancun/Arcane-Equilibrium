@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -17,22 +18,49 @@ use tracing::info;
 /// Tunable parameters for MA Crossover strategy (Phase 3a AGT-1).
 /// MA 交叉策略的可調參數。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MaCrossoverParams {
     pub cooldown_ms: u64,
     pub adx_threshold: f64,
     pub default_qty: f64,
     pub regime_filter_enabled: bool,
     pub higher_tf_alpha: f64,
+    // ── G-SR-1 confluence + persistence fields (A0-c) ──
+    // ── G-SR-1 匯流 + 持續性欄位（A0-c）──
+    /// Minimum signal persistence before entry (ms). / 入場前信號最小持續時間（ms）。
+    pub min_persistence_ms: u64,
+    /// Minimum order notional to emit intent (USD). / 發出 intent 的最小名義值（USD）。
+    pub min_notional_usd: f64,
+    /// Confluence scoring weights + thresholds (trend profile). / 匯流評分權重 + 閾值（趨勢配置）。
+    pub weight_adx: f64,
+    pub weight_regime: f64,
+    pub weight_volume: f64,
+    pub weight_momentum: f64,
+    pub adx_floor: f64,
+    pub confluence_threshold_no_trade: f64,
+    pub confluence_threshold_light: f64,
+    pub confluence_threshold_full: f64,
 }
 
 impl Default for MaCrossoverParams {
     fn default() -> Self {
+        let cc = ConfluenceConfig::default(); // trend profile
         Self {
             cooldown_ms: 300_000,
             adx_threshold: 20.0,
             default_qty: 1e9,
             regime_filter_enabled: true,
             higher_tf_alpha: 0.003,
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
+            weight_adx: cc.weight_adx,
+            weight_regime: cc.weight_regime,
+            weight_volume: cc.weight_volume,
+            weight_momentum: cc.weight_momentum,
+            adx_floor: cc.adx_floor,
+            confluence_threshold_no_trade: cc.threshold_no_trade,
+            confluence_threshold_light: cc.threshold_light,
+            confluence_threshold_full: cc.threshold_full,
         }
     }
 }
@@ -93,7 +121,31 @@ impl StrategyParams for MaCrossoverParams {
         if self.higher_tf_alpha <= 0.0 || self.higher_tf_alpha > 0.1 {
             return Err("higher_tf_alpha must be in (0, 0.1]".into());
         }
+        // G-SR-1: Validate confluence weight sum = 65 / 驗證匯流權重總和 = 65
+        self.build_confluence_config().validate()?;
+        if self.min_notional_usd < 1.0 {
+            return Err("min_notional_usd must be >= 1.0".into());
+        }
         Ok(())
+    }
+}
+
+impl MaCrossoverParams {
+    /// Build ConfluenceConfig from flat params (trend profile, non-inverted ADX).
+    /// 從扁平參數構建 ConfluenceConfig（趨勢配置，非反轉 ADX）。
+    pub fn build_confluence_config(&self) -> ConfluenceConfig {
+        ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: false, // trend-following / 趨勢跟蹤
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: true,
+        }
     }
 }
 
@@ -135,6 +187,16 @@ pub struct MaCrossover {
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     /// CONF-D：發出 intent.confidence 的乘數（默認 1.0，範圍 [0,2]）。
     conf_scale: f64,
+    // ── G-SR-1: Confluence scoring + persistence filter (A0-c, A1) ──
+    // ── G-SR-1：匯流評分 + 持續性過濾器 ──
+    /// Confluence scoring configuration (trend profile). / 匯流評分配置（趨勢配置）。
+    pub confluence_config: ConfluenceConfig,
+    /// Time-based signal persistence tracker. / 基於時間的信號持續性追蹤器。
+    persistence: PersistenceTracker,
+    /// Minimum signal persistence before entry (ms). / 入場前信號最小持續時間。
+    pub min_persistence_ms: u64,
+    /// Minimum order notional (USD). / 最小訂單名義值。
+    pub min_notional_usd: f64,
 }
 
 impl MaCrossover {
@@ -156,6 +218,10 @@ impl MaCrossover {
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            confluence_config: ConfluenceConfig::default(),
+            persistence: PersistenceTracker::new(),
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
         }
     }
 
@@ -168,6 +234,11 @@ impl MaCrossover {
         self.default_qty = params.default_qty;
         self.regime_filter_enabled = params.regime_filter_enabled;
         self.higher_tf_alpha = params.higher_tf_alpha;
+        // R4-7: Rebuild ConfluenceConfig from updated params (cheap struct copy).
+        // R4-7：從更新的參數重建 ConfluenceConfig（廉價結構體拷貝）。
+        self.confluence_config = params.build_confluence_config();
+        self.min_persistence_ms = params.min_persistence_ms;
+        self.min_notional_usd = params.min_notional_usd;
         info!(strategy = "ma_crossover", "params updated / 參數已更新");
         Ok(())
     }
@@ -181,17 +252,38 @@ impl MaCrossover {
             default_qty: self.default_qty,
             regime_filter_enabled: self.regime_filter_enabled,
             higher_tf_alpha: self.higher_tf_alpha,
+            min_persistence_ms: self.min_persistence_ms,
+            min_notional_usd: self.min_notional_usd,
+            weight_adx: self.confluence_config.weight_adx,
+            weight_regime: self.confluence_config.weight_regime,
+            weight_volume: self.confluence_config.weight_volume,
+            weight_momentum: self.confluence_config.weight_momentum,
+            adx_floor: self.confluence_config.adx_floor,
+            confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
+            confluence_threshold_light: self.confluence_config.threshold_light,
+            confluence_threshold_full: self.confluence_config.threshold_full,
         }
     }
 
     fn make_intent(&self, ctx: &TickContext<'_>, is_long: bool, conf: f64) -> OrderIntent {
-        // CONF-D: scale and clamp the emitted confidence into [0, 1].
-        // CONF-D：套用 conf_scale 後 clamp 到 [0, 1]。
-        let scaled = crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
+        self.make_intent_with_qty(ctx, is_long, conf, self.default_qty)
+    }
+
+    /// Build intent with explicit qty (used by confluence-scaled entries).
+    /// 使用顯式 qty 構建 intent（用於匯流調整後的入場）。
+    fn make_intent_with_qty(
+        &self,
+        ctx: &TickContext<'_>,
+        is_long: bool,
+        conf: f64,
+        qty: f64,
+    ) -> OrderIntent {
+        let scaled =
+            crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
-            qty: self.default_qty,
+            qty,
             confidence: scaled,
             strategy: self.name().into(),
             order_type: "market".into(),
@@ -306,6 +398,7 @@ impl Strategy for MaCrossover {
     /// 外部平倉（風控止損）時重設該幣種的內部倉位狀態。
     fn on_external_close(&mut self, symbol: &str) {
         self.positions.remove(symbol);
+        self.persistence.clear(symbol);
     }
 
     fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
@@ -363,22 +456,74 @@ impl Strategy for MaCrossover {
                     return vec![];
                 }
 
+                // G-SR-1 A1: Determine signal direction for persistence check.
+                // G-SR-1 A1：確定信號方向供持續性檢查。
+                let signal: Option<bool> = if fast > slow {
+                    Some(true)
+                } else if fast < slow {
+                    Some(false)
+                } else {
+                    None
+                };
+
+                // A1: Time-based persistence filter — signal must hold ≥ min_persistence_ms.
+                // A1：基於時間的持續性過濾 — 信號必須持續 ≥ min_persistence_ms。
+                if !self.persistence.check(
+                    ctx.symbol,
+                    signal,
+                    ctx.timestamp_ms,
+                    self.min_persistence_ms,
+                    false, // not a close signal / 非平倉信號
+                ) {
+                    return vec![];
+                }
+
+                // A2: Confluence scoring — primary signal is mandatory gate.
+                // A2：匯流評分 — 主信號是強制門控。
+                let score = confluence::compute_score(
+                    &self.confluence_config,
+                    signal.is_some(),
+                    ind.adx.as_ref().map(|a| a.adx),
+                    ind.hurst
+                        .as_ref()
+                        .map(|h| h.regime.as_str())
+                        .unwrap_or("uncertain"),
+                    ind.volume_ratio,
+                    ind.rsi_14,
+                    signal.unwrap_or(true),
+                );
+                let qty_pct = confluence::score_to_qty_pct(score, &self.confluence_config);
+                if qty_pct <= 0.0 {
+                    return vec![];
+                }
+                let qty = self.default_qty * qty_pct;
+                // R3-9: Min notional guard / 最小名義值守衛
+                if qty * ctx.price < self.min_notional_usd {
+                    return vec![];
+                }
+
                 let regime = ind.hurst.as_ref().map(|h| h.regime.as_str());
                 let entry_conf = self.compute_entry_confidence(adx, regime);
-                if fast > slow {
-                    if !self.higher_tf_allows_entry(ctx.symbol, true) {
+                // R3-2: Reuse confidence field for confluence score.
+                // R3-2：復用 confidence 欄位存放匯流分數。
+                let conf_with_score = match score {
+                    Some(s) if s > 0.0 => s / 65.0, // normalize to [0,1]
+                    _ => entry_conf,
+                };
+
+                if let Some(is_long) = signal {
+                    if !self.higher_tf_allows_entry(ctx.symbol, is_long) {
                         return vec![];
                     }
-                    intents.push(StrategyAction::Open(self.make_intent(ctx, true, entry_conf)));
-                    self.positions.insert(ctx.symbol.to_string(), true);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
-                } else if fast < slow {
-                    if !self.higher_tf_allows_entry(ctx.symbol, false) {
-                        return vec![];
-                    }
-                    intents.push(StrategyAction::Open(self.make_intent(ctx, false, entry_conf)));
-                    self.positions.insert(ctx.symbol.to_string(), false);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
+                    intents.push(StrategyAction::Open(self.make_intent_with_qty(
+                        ctx,
+                        is_long,
+                        conf_with_score,
+                        qty,
+                    )));
+                    self.positions.insert(ctx.symbol.to_string(), is_long);
+                    self.last_trade_ms
+                        .insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
             Some(is_long) => {
@@ -535,12 +680,14 @@ mod tests {
     #[test]
     fn test_no_signal_low_adx() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         assert!(s.on_tick(&ctx_with(100.0, 101.0, 15.0, 0)).is_empty());
     }
 
     #[test]
     fn test_long_entry() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let i = s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         assert_eq!(i.len(), 1);
         match &i[0] {
@@ -552,6 +699,7 @@ mod tests {
     #[test]
     fn test_exit_on_reverse() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.on_tick(&ctx_with(100.0, 101.0, 25.0, 0));
         let i = s.on_tick(&ctx_with(101.0, 100.0, 25.0, 500_000));
         assert_eq!(i.len(), 1);
@@ -573,6 +721,7 @@ mod tests {
     #[test]
     fn test_regime_filter_blocks_mean_reverting() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // fast(kama=101) > slow(sma_20=100), ADX=25 → would normally enter long.
         // 快線 > 慢線, ADX 足夠 → 正常情況會做多入場。
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
@@ -588,6 +737,7 @@ mod tests {
     #[test]
     fn test_regime_filter_allows_trending() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
         let intents = s.on_tick(&ctx);
         assert_eq!(intents.len(), 1, "Entry must be allowed in trending regime");
@@ -602,6 +752,7 @@ mod tests {
     #[test]
     fn test_regime_filter_allows_exit() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Step 1: Enter long in trending regime.
         // 步驟 1：在趨勢狀態下做多入場。
         let ctx_entry = ctx_with_hurst(100.0, 101.0, 25.0, 0, "trending", 0.72);
@@ -628,6 +779,7 @@ mod tests {
     #[test]
     fn test_regime_filter_blocks_random_walk() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "random_walk", 0.50);
         let intents = s.on_tick(&ctx);
         assert!(
@@ -641,6 +793,7 @@ mod tests {
     #[test]
     fn test_regime_filter_disabled() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.regime_filter_enabled = false;
         let ctx = ctx_with_hurst(100.0, 101.0, 25.0, 0, "mean_reverting", 0.35);
         let intents = s.on_tick(&ctx);
@@ -660,6 +813,7 @@ mod tests {
     #[test]
     fn test_higher_tf_blocks_misaligned() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Warm up higher_tf_sma with a high value so sma_50 < higher_tf_sma → bearish trend.
         // 用高值暖機 higher_tf_sma，使 sma_50 < higher_tf_sma → 看跌趨勢。
         s.higher_tf_sma.insert("BTC".into(), 110.0);
@@ -680,6 +834,7 @@ mod tests {
     #[test]
     fn test_higher_tf_allows_aligned() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Warm up higher_tf_sma with a low value so sma_50 > higher_tf_sma → bullish trend.
         // 用低值暖機 higher_tf_sma，使 sma_50 > higher_tf_sma → 看漲趨勢。
         s.higher_tf_sma.insert("BTC".into(), 90.0);
@@ -703,6 +858,7 @@ mod tests {
     #[test]
     fn test_higher_tf_blocks_short_when_bullish() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.higher_tf_sma.insert("BTC".into(), 90.0);
         // sma_50=100 > 90.1 → bullish → short blocked.
         let ctx = ctx_with_sma50(101.0, 100.0, 25.0, 0, 100.0);
@@ -718,6 +874,7 @@ mod tests {
     #[test]
     fn test_higher_tf_cold_start_allows_entry() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // No sma_50 in context → higher_tf_trend stays None → entry allowed.
         // 上下文中無 sma_50 → higher_tf_trend 保持 None → 允許入場。
         let ctx = ctx_with(100.0, 101.0, 25.0, 0);
@@ -734,6 +891,7 @@ mod tests {
     #[test]
     fn test_higher_tf_does_not_block_exit() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         // Enter long with aligned higher TF.
         s.higher_tf_sma.insert("BTC".into(), 90.0);
         let ctx_entry = ctx_with_sma50(100.0, 101.0, 25.0, 0, 100.0);
@@ -780,6 +938,7 @@ mod tests {
     #[test]
     fn test_update_and_get_roundtrip() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let new_params = MaCrossoverParams {
             adx_threshold: 35.0,
             ..Default::default()
@@ -792,6 +951,7 @@ mod tests {
     #[test]
     fn test_json_roundtrip() {
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let json = r#"{"cooldown_ms":600000,"adx_threshold":25.0,"default_qty":1000000000.0,"regime_filter_enabled":true,"higher_tf_alpha":0.005}"#;
         assert!(s.update_params_json(json).is_ok());
         let out = s.get_params_json();
@@ -802,6 +962,7 @@ mod tests {
     fn test_conf_scale_clamps_to_range() {
         // CONF-D: set_conf_scale must clamp to [0, 2].
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.set_conf_scale(3.0);
         assert!((s.conf_scale() - 2.0).abs() < 1e-10);
         s.set_conf_scale(-1.0);
@@ -823,6 +984,7 @@ mod tests {
             h0_allowed: true,
         };
         let mut s = MaCrossover::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.set_conf_scale(0.5);
         let intent = s.make_intent(&ctx, true, 0.8);
         assert!((intent.confidence - 0.4).abs() < 1e-10);

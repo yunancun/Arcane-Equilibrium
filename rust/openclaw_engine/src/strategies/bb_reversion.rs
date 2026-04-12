@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
 use crate::intent_processor::OrderIntent;
 use crate::tick_pipeline::TickContext;
@@ -17,6 +18,7 @@ use tracing::info;
 /// Tunable parameters for BB Reversion strategy (Phase 3a).
 /// BB 回歸策略的可調參數。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BbReversionParams {
     pub cooldown_ms: u64,
     pub default_qty: f64,
@@ -29,10 +31,27 @@ pub struct BbReversionParams {
     /// QC-#7: Hurst regime confidence boost for mean-reverting regime (default 0.1).
     /// QC-#7：均值回歸市場狀態信心加成（默認 0.1）。
     pub hurst_regime_boost: f64,
+    // ── G-SR-1 confluence + persistence fields (A0-c) ──
+    /// Minimum signal persistence before entry (ms). / 入場前信號最小持續時間（ms）。
+    pub min_persistence_ms: u64,
+    /// Minimum order notional (USD). / 最小訂單名義值（USD）。
+    pub min_notional_usd: f64,
+    /// Confluence weights + thresholds (reversion profile, inverted ADX).
+    /// 匯流權重 + 閾值（回歸配置，反轉 ADX）。
+    pub weight_adx: f64,
+    pub weight_regime: f64,
+    pub weight_volume: f64,
+    pub weight_momentum: f64,
+    pub adx_floor: f64,
+    pub adx_inverted: bool,
+    pub confluence_threshold_no_trade: f64,
+    pub confluence_threshold_light: f64,
+    pub confluence_threshold_full: f64,
 }
 
 impl Default for BbReversionParams {
     fn default() -> Self {
+        let cc = ConfluenceConfig::reversion();
         Self {
             cooldown_ms: 600_000,
             default_qty: 1e9,
@@ -41,6 +60,17 @@ impl Default for BbReversionParams {
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
             hurst_regime_boost: 0.1,
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
+            weight_adx: cc.weight_adx,
+            weight_regime: cc.weight_regime,
+            weight_volume: cc.weight_volume,
+            weight_momentum: cc.weight_momentum,
+            adx_floor: cc.adx_floor,
+            adx_inverted: true,
+            confluence_threshold_no_trade: cc.threshold_no_trade,
+            confluence_threshold_light: cc.threshold_light,
+            confluence_threshold_full: cc.threshold_full,
         }
     }
 }
@@ -112,7 +142,31 @@ impl StrategyParams for BbReversionParams {
         if self.hurst_regime_boost < 0.0 || self.hurst_regime_boost > 0.3 {
             return Err("hurst_regime_boost must be in [0, 0.3]".into());
         }
+        // G-SR-1: Validate confluence weight sum = 65 / 驗證匯流權重總和 = 65
+        self.build_confluence_config().validate()?;
+        if self.min_notional_usd < 1.0 {
+            return Err("min_notional_usd must be >= 1.0".into());
+        }
         Ok(())
+    }
+}
+
+impl BbReversionParams {
+    /// Build ConfluenceConfig from flat params (reversion profile, inverted ADX).
+    /// 從扁平參數構建 ConfluenceConfig（回歸配置，反轉 ADX）。
+    pub fn build_confluence_config(&self) -> ConfluenceConfig {
+        ConfluenceConfig {
+            weight_adx: self.weight_adx,
+            weight_regime: self.weight_regime,
+            weight_volume: self.weight_volume,
+            weight_momentum: self.weight_momentum,
+            adx_floor: self.adx_floor,
+            invert_adx: self.adx_inverted,
+            threshold_no_trade: self.confluence_threshold_no_trade,
+            threshold_light: self.confluence_threshold_light,
+            threshold_full: self.confluence_threshold_full,
+            confluence_as_gate: true,
+        }
     }
 }
 
@@ -151,6 +205,11 @@ pub struct BbReversion {
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
+    // ── G-SR-1: Confluence scoring + persistence filter (A0-c, A1) ──
+    pub confluence_config: ConfluenceConfig,
+    persistence: PersistenceTracker,
+    pub min_persistence_ms: u64,
+    pub min_notional_usd: f64,
 }
 
 impl BbReversion {
@@ -173,6 +232,10 @@ impl BbReversion {
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            confluence_config: ConfluenceConfig::reversion(),
+            persistence: PersistenceTracker::new(),
+            min_persistence_ms: 120_000,
+            min_notional_usd: 10.0,
         }
     }
 
@@ -195,6 +258,10 @@ impl BbReversion {
         self.rsi_oversold = params.rsi_oversold;
         self.rsi_overbought = params.rsi_overbought;
         self.hurst_regime_boost = params.hurst_regime_boost;
+        // R4-7: Rebuild ConfluenceConfig from updated params.
+        self.confluence_config = params.build_confluence_config();
+        self.min_persistence_ms = params.min_persistence_ms;
+        self.min_notional_usd = params.min_notional_usd;
         info!(strategy = "bb_reversion", "params updated / 參數���更新");
         Ok(())
     }
@@ -209,46 +276,51 @@ impl BbReversion {
             rsi_oversold: self.rsi_oversold,
             rsi_overbought: self.rsi_overbought,
             hurst_regime_boost: self.hurst_regime_boost,
+            min_persistence_ms: self.min_persistence_ms,
+            min_notional_usd: self.min_notional_usd,
+            weight_adx: self.confluence_config.weight_adx,
+            weight_regime: self.confluence_config.weight_regime,
+            weight_volume: self.confluence_config.weight_volume,
+            weight_momentum: self.confluence_config.weight_momentum,
+            adx_floor: self.confluence_config.adx_floor,
+            adx_inverted: self.confluence_config.invert_adx,
+            confluence_threshold_no_trade: self.confluence_config.threshold_no_trade,
+            confluence_threshold_light: self.confluence_config.threshold_light,
+            confluence_threshold_full: self.confluence_config.threshold_full,
         }
     }
 
-    /// Build an entry intent — may be limit or market depending on use_limit.
-    /// 建構入場意圖 — 根據 use_limit 決定限價或市價單。
-    fn make_entry_intent(
+    /// Build entry intent with explicit qty (confluence-scaled). / 使用顯式 qty 構建入場 intent。
+    fn make_entry_intent_with_qty(
         &self,
         ctx: &TickContext<'_>,
         is_long: bool,
         conf: f64,
         bb_lower: f64,
         bb_upper: f64,
+        qty: f64,
     ) -> OrderIntent {
         let (order_type, limit_price) = if self.use_limit {
-            // RC-07: Place limit order slightly inside the Bollinger band
-            // RC-07：在布林帶內側略偏位置掛限價單
             let price = if is_long {
-                // Buy near lower band: slightly above / 在下軌附近買入：略高於下軌
                 bb_lower * (1.0 + self.limit_offset_bps / 10_000.0)
             } else {
-                // Sell near upper band: slightly below / 在上軌附近賣出：略低於上軌
                 bb_upper * (1.0 - self.limit_offset_bps / 10_000.0)
             };
             ("limit".to_string(), Some(price))
         } else {
             ("market".to_string(), None)
         };
-        // CONF-D: scale entry confidence
         let scaled = crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
         OrderIntent {
             symbol: ctx.symbol.to_string(),
             is_long,
-            qty: self.default_qty,
+            qty,
             confidence: scaled,
             strategy: self.name().into(),
             order_type,
             limit_price,
         }
     }
-
 }
 
 impl Strategy for BbReversion {
@@ -279,6 +351,7 @@ impl Strategy for BbReversion {
 
     fn on_external_close(&mut self, symbol: &str) {
         self.positions.remove(symbol);
+        self.persistence.clear(symbol);
     }
 
     fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
@@ -313,28 +386,60 @@ impl Strategy for BbReversion {
         let mut intents = Vec::new();
         match self.positions.get(ctx.symbol).copied() {
             None => {
-                // Entry: oversold long / 入場：超賣做多
-                if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
-                    // QC-H3: entry_conf_base configurable (was hardcoded 0.6)
-                    intents.push(StrategyAction::Open(self.make_entry_intent(
-                        ctx,
-                        true,
-                        (self.entry_conf_base + hurst_boost).min(1.0),
-                        bb.lower,
-                        bb.upper,
-                    )));
-                    self.positions.insert(ctx.symbol.to_string(), true);
-                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
-                // Entry: overbought short / 入場：超買做空
+                // G-SR-1 A1: Determine signal for persistence check.
+                let signal: Option<bool> = if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
+                    Some(true) // oversold → long
                 } else if bb.percent_b > 1.0 && rsi > self.rsi_overbought {
-                    intents.push(StrategyAction::Open(self.make_entry_intent(
+                    Some(false) // overbought → short
+                } else {
+                    None
+                };
+
+                // A1: Persistence filter / 持續性過濾
+                if !self.persistence.check(
+                    ctx.symbol,
+                    signal,
+                    ctx.timestamp_ms,
+                    self.min_persistence_ms,
+                    false,
+                ) {
+                    return intents;
+                }
+
+                if let Some(is_long) = signal {
+                    // A2: Confluence scoring (reversion profile, inverted ADX).
+                    // A2：匯流評分（回歸配置，反轉 ADX）。
+                    let score = confluence::compute_score(
+                        &self.confluence_config,
+                        true, // signal already confirmed
+                        ind.adx.as_ref().map(|a| a.adx),
+                        ind.hurst.as_ref().map(|h| h.regime.as_str()).unwrap_or("uncertain"),
+                        ind.volume_ratio,
+                        ind.rsi_14,
+                        is_long,
+                    );
+                    let qty_pct = confluence::score_to_qty_pct(score, &self.confluence_config);
+                    if qty_pct <= 0.0 {
+                        return intents;
+                    }
+                    let qty = self.default_qty * qty_pct;
+                    if qty * ctx.price < self.min_notional_usd {
+                        return intents;
+                    }
+
+                    let conf_with_score = match score {
+                        Some(s) if s > 0.0 => s / 65.0,
+                        _ => (self.entry_conf_base + hurst_boost).min(1.0),
+                    };
+                    intents.push(StrategyAction::Open(self.make_entry_intent_with_qty(
                         ctx,
-                        false,
-                        (self.entry_conf_base + hurst_boost).min(1.0),
+                        is_long,
+                        conf_with_score,
                         bb.lower,
                         bb.upper,
+                        qty,
                     )));
-                    self.positions.insert(ctx.symbol.to_string(), false);
+                    self.positions.insert(ctx.symbol.to_string(), is_long);
                     self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
@@ -382,7 +487,7 @@ impl Strategy for BbReversion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openclaw_core::indicators::{BollingerResult, IndicatorSnapshot};
+    use openclaw_core::indicators::{AdxResult, BollingerResult, IndicatorSnapshot};
 
     fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
         let ind = Box::leak(Box::new(IndicatorSnapshot {
@@ -394,6 +499,9 @@ mod tests {
                 percent_b: pct_b,
             }),
             rsi_14: Some(rsi),
+            // ADX=15: low ADX = ranging market = ideal for mean-reversion.
+            // ADX=15：低 ADX = 震盪市場 = 均值回歸理想環境。
+            adx: Some(AdxResult { adx: 15.0, plus_di: 20.0, minus_di: 18.0 }),
             ..Default::default()
         }));
         TickContext {
@@ -409,6 +517,7 @@ mod tests {
     #[test]
     fn test_long_oversold() {
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
         match &i[0] {
@@ -420,6 +529,7 @@ mod tests {
     #[test]
     fn test_exit_mean() {
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         let i = s.on_tick(&ctx_bb(0.5, 50.0, 700_000));
         assert_eq!(i.len(), 1);
@@ -436,6 +546,7 @@ mod tests {
         // RC-07: use_limit=true, oversold entry produces limit order with correct price
         // RC-07：use_limit=true，超賣入場產生正確限價的限價單
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.use_limit = true;
         s.limit_offset_bps = 10.0; // 10 bps = 0.1%
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
@@ -461,6 +572,7 @@ mod tests {
         // RC-07: use_limit=true, overbought entry produces limit order
         // RC-07：use_limit=true，超買入場產生限價單
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.use_limit = true;
         s.limit_offset_bps = 10.0;
         let i = s.on_tick(&ctx_bb(1.1, 75.0, 0));
@@ -486,6 +598,7 @@ mod tests {
         // RC-07: use_limit=false (default), entries produce market orders
         // RC-07：use_limit=false（默認），入場產生市價單
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         assert!(!s.use_limit); // verify default is false / 確認默認為 false
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
         assert_eq!(i.len(), 1);
@@ -505,6 +618,7 @@ mod tests {
         // it's a Close action that the pipeline handles directly.
         // 使用 StrategyAction::Close 後，出場不再是 OrderIntent。
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         s.use_limit = true;
         // Enter long with limit order / 限價入場做多
         let i = s.on_tick(&ctx_bb(-0.1, 25.0, 0));
@@ -543,6 +657,7 @@ mod tests {
     #[test]
     fn test_bb_rev_update_roundtrip() {
         let mut s = BbReversion::new();
+        s.min_persistence_ms = 0;  // disable persistence for unit tests
         let p = BbReversionParams {
             use_limit: true, // GAP-9: should be coerced to false
             limit_offset_bps: 20.0,

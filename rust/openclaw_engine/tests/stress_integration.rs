@@ -257,6 +257,7 @@ fn stress_multi_symbol_rapid_alternating_ticks() {
 fn stress_ma_crossover_whipsaw_rapid_reversals() {
     // Rapid crossover reversals within cooldown window — cooldown should throttle
     let mut strat = MaCrossover::new();
+    strat.min_persistence_ms = 0; // disable persistence for test
     let mut fills_throttled = 0;
     let mut fills_unthrottled = 0;
 
@@ -283,6 +284,7 @@ fn stress_ma_crossover_whipsaw_rapid_reversals() {
 
     // Phase 2: Beyond cooldown (400s > 300s) — every alternation should trade
     let mut strat2 = MaCrossover::new();
+    strat2.min_persistence_ms = 0; // disable persistence for test
     for i in 0..20 {
         let sma = 50000.0;
         let kama = if i % 2 == 0 { 50100.0 } else { 49900.0 };
@@ -307,6 +309,7 @@ fn stress_ma_crossover_whipsaw_rapid_reversals() {
 #[test]
 fn stress_bb_reversion_extreme_oversold_bounce() {
     let mut strat = BbReversion::new();
+    strat.min_persistence_ms = 0; // disable persistence for test
 
     // Extreme oversold: %B = -0.5, RSI = 10
     let ctx1 = make_ctx(
@@ -336,6 +339,7 @@ fn stress_bb_reversion_extreme_oversold_bounce() {
 #[test]
 fn stress_bb_breakout_false_squeeze_no_volume() {
     let mut strat = BbBreakout::new();
+    strat.min_persistence_ms = 0; // disable persistence for test
 
     // Enter squeeze
     let ctx1 = make_ctx(
@@ -363,6 +367,7 @@ fn stress_bb_breakout_false_squeeze_no_volume() {
 #[test]
 fn stress_bb_breakout_valid_squeeze_with_volume() {
     let mut strat = BbBreakout::new();
+    strat.min_persistence_ms = 0; // disable persistence for test
 
     // Squeeze phase
     let ctx1 = make_ctx(
