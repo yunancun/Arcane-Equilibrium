@@ -326,8 +326,11 @@ class TestPipelineAndScannerRoutes:
             _ipc._READER = _orig
         assert result["data"]["available"] is False
 
-    @patch(f"{_MOD_READ}.PIPELINE_BRIDGE")
-    def test_pipeline_stats_happy(self, mock_pb):
+    def test_pipeline_stats_happy(self):
+        """DEAD-PY-2: PIPELINE_BRIDGE permanently None — Rust engine is sole source.
+        When Rust reader has no data, endpoint returns available=False.
+        DEAD-PY-2：PIPELINE_BRIDGE 永久 None — Rust 引擎為唯一數據源。
+        當 Rust reader 無數據時，端點返回 available=False。"""
         from app.phase2_strategy_routes import get_pipeline_stats
         import app.ipc_state_reader as _ipc
         _orig = _ipc._READER
@@ -335,10 +338,9 @@ class TestPipelineAndScannerRoutes:
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             _ipc._READER = RustSnapshotReader(data_dir=d)
-            mock_pb.get_stats.return_value = {"ticks": 100}
             result = _run(get_pipeline_stats(actor=_FakeActor()))
             _ipc._READER = _orig
-        assert result["data"]["ticks"] == 100
+        assert result["data"]["available"] is False
 
     @patch(f"{_MOD_READ}.MARKET_SCANNER", None)
     def test_scanner_unavailable(self):

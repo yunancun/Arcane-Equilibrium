@@ -366,12 +366,9 @@ async def get_pipeline_stats(actor: base.AuthenticatedActor = Depends(base.curre
             "total_stops": rust_stats.get("total_stops", 0),
             "last_tick_ms": rust_stats.get("last_tick_ms", 0),
         })
-    if PIPELINE_BRIDGE is None:
-        return _envelope({"available": False})
-    try:
-        return _envelope(PIPELINE_BRIDGE.get_stats())
-    except Exception:
-        raise HTTPException(status_code=500, detail="Internal error")
+    # DEAD-PY-2: PIPELINE_BRIDGE permanently None — Rust engine is sole source.
+    # DEAD-PY-2：PIPELINE_BRIDGE 永久 None — Rust 引擎為唯一數據源。
+    return _envelope({"available": False})
 
 
 @phase2_router.get("/scanner/opportunities")

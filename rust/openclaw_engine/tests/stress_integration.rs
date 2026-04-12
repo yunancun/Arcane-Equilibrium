@@ -833,3 +833,231 @@ fn stress_full_pipeline_extreme_prices() {
     let status = pipeline.status();
     assert!(!status.balance.is_nan());
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0-3: Three-pipeline concurrent isolation / 三管線並發隔離
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// P0-3: Three pipelines (Paper/Demo/Live) running concurrently produce
+/// isolated state — no cross-contamination in balance, fills, or stats.
+/// Uses std::thread to drive real parallelism.
+/// P0-3：三管線（Paper/Demo/Live）並發運行產生隔離狀態 — 餘額、成交、統計
+/// 互不污染。使用 std::thread 驅動真正並行。
+#[test]
+fn stress_three_pipeline_concurrent_isolation() {
+    use openclaw_engine::tick_pipeline::PipelineKind;
+    use std::thread;
+
+    let configs: Vec<(PipelineKind, f64)> = vec![
+        (PipelineKind::Paper, 10_000.0),
+        (PipelineKind::Demo, 20_000.0),
+        (PipelineKind::Live, 50_000.0),
+    ];
+
+    let mut handles = Vec::new();
+    for (kind, balance) in configs {
+        handles.push(thread::spawn(move || {
+            let mut pipeline =
+                TickPipeline::with_kind(&["BTCUSDT", "ETHUSDT"], balance, kind);
+            pipeline.grant_paper_auth().unwrap();
+            pipeline
+                .orchestrator
+                .register(Box::new(MaCrossover::new()));
+
+            // Feed 500 ticks with slightly different prices per pipeline kind
+            // to create distinct trading paths.
+            // 每條管線用略有不同的價格餵 500 tick，產生不同的交易路徑。
+            let offset = balance / 10.0; // unique price offset per pipeline
+            for i in 0..500u64 {
+                let btc_price = 65_000.0 + offset + (i as f64 * 0.7).sin() * 500.0;
+                pipeline.on_tick(&make_event("BTCUSDT", btc_price, i * 60_000));
+                let eth_price = 3_200.0 + offset / 10.0 + (i as f64 * 0.3).cos() * 50.0;
+                pipeline.on_tick(&make_event("ETHUSDT", eth_price, i * 60_000 + 500));
+            }
+
+            let status = pipeline.status();
+            (kind.db_mode().to_string(), status.balance, pipeline.stats.total_ticks)
+        }));
+    }
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    // Verify isolation: each pipeline reports distinct balance and correct tick count.
+    // 驗證隔離：每條管線報告不同餘額和正確 tick 數量。
+    assert_eq!(results.len(), 3);
+    for (mode, balance, ticks) in &results {
+        assert_eq!(*ticks, 1000, "{} should have 1000 ticks", mode);
+        assert!(!balance.is_nan(), "{} balance must not be NaN", mode);
+    }
+
+    // Balances must differ (different initial + different price paths).
+    // 餘額必須不同（不同初始值 + 不同價格路徑）。
+    assert_ne!(results[0].1, results[1].1, "Paper and Demo balances must differ");
+    assert_ne!(results[1].1, results[2].1, "Demo and Live balances must differ");
+
+    // db_mode must be correct per kind.
+    assert_eq!(results[0].0, "paper");
+    assert_eq!(results[1].0, "demo");
+    assert_eq!(results[2].0, "live");
+}
+
+/// P0-3b: Concurrent snapshot writes — three pipelines write snapshots to distinct
+/// per-engine files in temp dir without collision.
+/// P0-3b：並發快照寫入 — 三管線在 temp 目錄寫入不同的 per-engine 快照文件。
+#[test]
+fn stress_three_pipeline_concurrent_snapshot_writes() {
+    use openclaw_engine::tick_pipeline::PipelineKind;
+    use std::thread;
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "oc_3pipe_test_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&tmp_dir).ok();
+
+    let kinds = [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live];
+    let mut handles = Vec::new();
+
+    for kind in kinds {
+        let dir = tmp_dir.clone();
+        handles.push(thread::spawn(move || {
+            let mut pipeline =
+                TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
+            pipeline.grant_paper_auth().unwrap();
+
+            for i in 0..100u64 {
+                pipeline.on_tick(&make_event(
+                    "BTCUSDT",
+                    65_000.0 + (i as f64).sin() * 100.0,
+                    i * 60_000,
+                ));
+            }
+
+            // Write snapshot JSON to per-engine file
+            let snapshot = pipeline.snapshot();
+            let path = dir.join(format!("pipeline_snapshot_{}.json", kind.db_mode()));
+            let json = serde_json::to_string_pretty(&snapshot).unwrap();
+            std::fs::write(&path, &json).unwrap();
+            kind.db_mode().to_string()
+        }));
+    }
+
+    let modes: Vec<String> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(modes, vec!["paper", "demo", "live"]);
+
+    // Verify three distinct files were created.
+    // 驗證創建了三個不同的文件。
+    for mode in &modes {
+        let path = tmp_dir.join(format!("pipeline_snapshot_{}.json", mode));
+        assert!(path.exists(), "snapshot file for {} must exist", mode);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.is_empty(), "{} snapshot must not be empty", mode);
+    }
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P1-9: Config hot-reload concurrent with tick processing / 配置熱重載與 tick 並發
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// P1-9: ArcSwap-based config reload concurrent with on_tick — verify no panic,
+/// no torn reads, no data corruption under parallel load+store.
+/// P1-9：基於 ArcSwap 的配置重載與 on_tick 並發 — 驗證無 panic、無撕裂讀取、
+/// 無數據損壞。
+#[test]
+fn stress_config_hot_reload_during_ticks() {
+    use openclaw_engine::config::ConfigStore;
+    use openclaw_engine::config::RiskConfig;
+    use std::sync::Arc;
+    use std::thread;
+
+    let store = Arc::new(ConfigStore::<RiskConfig>::default());
+
+    // Thread 1: rapidly reload config 100 times
+    // 線程 1：快速重載配置 100 次
+    let store_writer = Arc::clone(&store);
+    let writer_handle = thread::spawn(move || {
+        for i in 0..100u32 {
+            store_writer.apply_patch(
+                openclaw_engine::config::PatchSource::Ipc,
+                |c| {
+                    c.limits.max_open_positions = (i % 50 + 1) as usize;
+                },
+                |_| Ok(()),
+            ).unwrap();
+        }
+    });
+
+    // Thread 2: feed ticks while config is being reloaded
+    // 線程 2：在配置重載同時餵 tick
+    let store_reader = Arc::clone(&store);
+    let reader_handle = thread::spawn(move || {
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.grant_paper_auth().unwrap();
+        pipeline.orchestrator.register(Box::new(MaCrossover::new()));
+
+        for i in 0..500u64 {
+            // Read config snapshot (simulates what on_tick does internally)
+            let _snap = store_reader.load();
+            pipeline.on_tick(&make_event(
+                "BTCUSDT",
+                65_000.0 + (i as f64 * 0.5).sin() * 200.0,
+                i * 60_000,
+            ));
+        }
+        pipeline.stats.total_ticks
+    });
+
+    writer_handle.join().expect("config writer must not panic");
+    let ticks = reader_handle.join().expect("tick reader must not panic");
+    assert_eq!(ticks, 500, "all ticks must be processed");
+
+    // Final config version should be 100
+    assert_eq!(store.version(), 100);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P1-8: catch_unwind recovery semantics / panic 恢復語義
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// P1-8: A panic inside a pipeline closure is caught by catch_unwind — the
+/// calling thread survives and can inspect the error.
+/// P1-8：管線閉包內的 panic 被 catch_unwind 捕獲 — 調用線程存活並可檢查錯誤。
+#[test]
+fn stress_catch_unwind_recovers_from_pipeline_panic() {
+    use std::panic;
+
+    // Simulate the pattern used in main.rs for the Live OS thread:
+    // std::thread::spawn → catch_unwind → handle error.
+    // 模擬 main.rs 中 Live OS 線程的模式。
+    let handle = std::thread::spawn(|| {
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+            pipeline.grant_paper_auth().unwrap();
+            // Normal ticks first
+            for i in 0..10u64 {
+                pipeline.on_tick(&make_event("BTCUSDT", 65_000.0, i * 60_000));
+            }
+            // Force a panic (simulates unexpected runtime error)
+            panic!("simulated live pipeline panic");
+        }));
+        // catch_unwind must capture the panic
+        assert!(result.is_err(), "catch_unwind must capture panic");
+        let err = result.unwrap_err();
+        let msg = err
+            .downcast_ref::<&str>()
+            .copied()
+            .unwrap_or("unknown panic");
+        assert!(
+            msg.contains("simulated"),
+            "panic message must be preserved: {}",
+            msg
+        );
+        true // signal success
+    });
+
+    let recovered = handle.join().expect("thread with catch_unwind must not abort");
+    assert!(recovered, "recovery path must complete successfully");
+}

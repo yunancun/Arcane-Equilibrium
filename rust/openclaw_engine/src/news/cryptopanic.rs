@@ -135,3 +135,113 @@ fn current_unix_ms() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// EN: build_url constructs correct CryptoPanic URL.
+    /// 中文: build_url 建構正確的 CryptoPanic URL。
+    #[test]
+    fn test_build_url() {
+        let url = CryptoPanicProvider::build_url("my_key_123");
+        assert!(url.contains("cryptopanic.com/api/v1/posts"));
+        assert!(url.contains("auth_token=my_key_123"));
+        assert!(url.contains("public=true"));
+    }
+
+    /// EN: No API key → AuthMissing error.
+    /// 中文: 無 API key → AuthMissing 錯誤。
+    #[test]
+    fn test_no_api_key_returns_auth_missing() {
+        let p = CryptoPanicProvider::new(None);
+        let result = p.check_and_record(1_000_000);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::AuthMissing(msg) => assert!(msg.contains("CRYPTOPANIC_API_KEY")),
+            other => panic!("expected AuthMissing, got {:?}", other),
+        }
+    }
+
+    /// EN: First call with key succeeds, returns URL.
+    /// 中文: 首次帶 key 呼叫成功，返回 URL。
+    #[test]
+    fn test_first_call_succeeds() {
+        let p = CryptoPanicProvider::new(Some("test_key".into()));
+        let url = p.check_and_record(1_000_000).unwrap();
+        assert!(url.contains("test_key"));
+    }
+
+    /// EN: Second call within MIN_POLL_INTERVAL_MS → RateLimit.
+    /// 中文: 在 MIN_POLL_INTERVAL_MS 內第二次呼叫 → RateLimit。
+    #[test]
+    fn test_interval_rate_limit() {
+        let p = CryptoPanicProvider::new(Some("k".into()));
+        let t0 = 1_000_000u64;
+        p.check_and_record(t0).unwrap();
+        // Call again 1 minute later (< 28 min interval)
+        let result = p.check_and_record(t0 + 60_000);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::RateLimit(msg) => assert!(msg.contains("min interval")),
+            other => panic!("expected RateLimit, got {:?}", other),
+        }
+    }
+
+    /// EN: Call after MIN_POLL_INTERVAL_MS elapsed succeeds.
+    /// 中文: 超過 MIN_POLL_INTERVAL_MS 後呼叫成功。
+    #[test]
+    fn test_interval_elapsed_succeeds() {
+        let p = CryptoPanicProvider::new(Some("k".into()));
+        let t0 = 1_000_000u64;
+        p.check_and_record(t0).unwrap();
+        // Call after 29 minutes (> 28 min)
+        let result = p.check_and_record(t0 + 29 * 60 * 1_000);
+        assert!(result.is_ok());
+    }
+
+    /// EN: Exhaust daily quota → RateLimit.
+    /// 中文: 用盡每日 quota → RateLimit。
+    #[test]
+    fn test_daily_quota_exhausted() {
+        let p = CryptoPanicProvider::new(Some("k".into()));
+        // Burn all 50 requests with large time gaps
+        for i in 0..MAX_DAILY_REQUESTS {
+            let t = (i as u64 + 1) * MIN_POLL_INTERVAL_MS * 2;
+            p.check_and_record(t).unwrap();
+        }
+        // 51st should fail
+        let t_last = (MAX_DAILY_REQUESTS as u64 + 1) * MIN_POLL_INTERVAL_MS * 2;
+        let result = p.check_and_record(t_last);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::RateLimit(msg) => assert!(msg.contains("quota")),
+            other => panic!("expected RateLimit quota, got {:?}", other),
+        }
+    }
+
+    /// EN: reset_daily_quota allows new calls after exhaustion.
+    /// 中文: reset_daily_quota 在用盡後允許新呼叫。
+    #[test]
+    fn test_reset_daily_quota() {
+        let p = CryptoPanicProvider::new(Some("k".into()));
+        // Manually set quota near limit
+        p.quota_used_today.store(MAX_DAILY_REQUESTS, Ordering::Relaxed);
+        // Should fail
+        assert!(p.check_and_record(999_999_999).is_err());
+        // Reset
+        p.reset_daily_quota();
+        // Should succeed now
+        assert!(p.check_and_record(999_999_999).is_ok());
+    }
+
+    /// EN: quota_remaining reflects usage.
+    /// 中文: quota_remaining 反映使用量。
+    #[test]
+    fn test_quota_remaining() {
+        let p = CryptoPanicProvider::new(Some("k".into()));
+        assert_eq!(p.quota_remaining(), Some(MAX_DAILY_REQUESTS));
+        p.check_and_record(1_000_000).unwrap();
+        assert_eq!(p.quota_remaining(), Some(MAX_DAILY_REQUESTS - 1));
+    }
+}
