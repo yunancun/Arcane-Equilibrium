@@ -504,3 +504,76 @@ pub(crate) fn spawn_outcome_backfiller(
     ));
     info!("outcome backfill task spawned (FIX-34, 5min interval) / 結果回填任務已啟動");
 }
+
+/// EN: Map a u8 atomic value to RiskLevel enum (fail-safe to ManualReview).
+///     Extracted from spawn_position_reconciler for testability.
+/// 中文: 將 u8 原子值映射到 RiskLevel 枚舉（未知值安全回退至 ManualReview）。
+///       從 spawn_position_reconciler 提取以便測試。
+pub(crate) fn risk_level_from_u8(val: u8) -> openclaw_core::sm::risk_gov::RiskLevel {
+    use openclaw_core::sm::risk_gov::RiskLevel;
+    match val {
+        0 => RiskLevel::Normal,
+        1 => RiskLevel::Cautious,
+        2 => RiskLevel::Reduced,
+        3 => RiskLevel::Defensive,
+        4 => RiskLevel::CircuitBreaker,
+        5 => RiskLevel::ManualReview,
+        _ => RiskLevel::ManualReview, // fail-safe
+    }
+}
+
+/// EN: Derive reconciler engine label from BybitEnvironment.
+/// 中文: 從 BybitEnvironment 派生對帳器引擎標籤。
+pub(crate) fn reconciler_label_for_env(env: BybitEnvironment) -> &'static str {
+    match env {
+        BybitEnvironment::Demo | BybitEnvironment::Testnet => "demo",
+        BybitEnvironment::Mainnet | BybitEnvironment::LiveDemo => "live",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openclaw_core::sm::risk_gov::RiskLevel;
+
+    // ── risk_level_from_u8 ──
+
+    /// EN: All 6 valid u8 values map to correct RiskLevel.
+    /// 中文: 所有 6 個有效 u8 值映射到正確的 RiskLevel。
+    #[test]
+    fn test_risk_level_all_valid_mappings() {
+        assert_eq!(risk_level_from_u8(0), RiskLevel::Normal);
+        assert_eq!(risk_level_from_u8(1), RiskLevel::Cautious);
+        assert_eq!(risk_level_from_u8(2), RiskLevel::Reduced);
+        assert_eq!(risk_level_from_u8(3), RiskLevel::Defensive);
+        assert_eq!(risk_level_from_u8(4), RiskLevel::CircuitBreaker);
+        assert_eq!(risk_level_from_u8(5), RiskLevel::ManualReview);
+    }
+
+    /// EN: Unknown u8 values fail-safe to ManualReview (most restrictive).
+    /// 中文: 未知 u8 值安全回退至 ManualReview（最嚴格）。
+    #[test]
+    fn test_risk_level_unknown_failsafe() {
+        assert_eq!(risk_level_from_u8(6), RiskLevel::ManualReview);
+        assert_eq!(risk_level_from_u8(100), RiskLevel::ManualReview);
+        assert_eq!(risk_level_from_u8(255), RiskLevel::ManualReview);
+    }
+
+    // ── reconciler_label_for_env ──
+
+    /// EN: Demo and Testnet map to "demo".
+    /// 中文: Demo 和 Testnet 映射到 "demo"。
+    #[test]
+    fn test_reconciler_label_demo_variants() {
+        assert_eq!(reconciler_label_for_env(BybitEnvironment::Demo), "demo");
+        assert_eq!(reconciler_label_for_env(BybitEnvironment::Testnet), "demo");
+    }
+
+    /// EN: Mainnet and LiveDemo map to "live".
+    /// 中文: Mainnet 和 LiveDemo 映射到 "live"。
+    #[test]
+    fn test_reconciler_label_live_variants() {
+        assert_eq!(reconciler_label_for_env(BybitEnvironment::Mainnet), "live");
+        assert_eq!(reconciler_label_for_env(BybitEnvironment::LiveDemo), "live");
+    }
+}

@@ -153,3 +153,93 @@ pub fn spawn_rest_pollers(
 
     info!("REST pollers spawned (funding/OI/LSR) / REST 輪詢器已啟動");
 }
+
+/// EN: Compute long-short ratio with divide-by-zero guard.
+///     Extracted for testability (used inline in LSR poller).
+/// 中文: 計算多空比，帶除零保護。提取為可測函式。
+pub(crate) fn compute_lsr_ratio(buy_ratio: f64, sell_ratio: f64) -> f64 {
+    if sell_ratio > 0.0 {
+        buy_ratio / sell_ratio
+    } else {
+        1.0
+    }
+}
+
+/// EN: Compute daily funding rate from per-interval rate (8h intervals → ×3).
+/// 中文: 從單次區間費率計算日化費率（8h 間隔 → ×3）。
+pub(crate) fn funding_rate_daily(funding_rate: f64) -> f64 {
+    funding_rate * 3.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Constants ──
+
+    /// EN: Polling intervals match documented values.
+    /// 中文: 輪詢間隔與文件記載一致。
+    #[test]
+    fn test_polling_interval_constants() {
+        assert_eq!(FUNDING_INTERVAL_SECS, 900, "funding = 15 min");
+        assert_eq!(OI_INTERVAL_SECS, 300, "OI = 5 min");
+        assert_eq!(LSR_INTERVAL_SECS, 900, "LSR = 15 min");
+    }
+
+    // ── LSR ratio ──
+
+    /// EN: Normal case: buy/sell ratio division.
+    /// 中文: 正常情況：買/賣比值除法。
+    #[test]
+    fn test_lsr_ratio_normal() {
+        let ratio = compute_lsr_ratio(0.6, 0.4);
+        assert!((ratio - 1.5).abs() < 1e-9);
+    }
+
+    /// EN: sell_ratio=0 → safe default 1.0 (no divide-by-zero).
+    /// 中文: sell_ratio=0 → 安全預設 1.0（無除零）。
+    #[test]
+    fn test_lsr_ratio_zero_sell_returns_one() {
+        assert_eq!(compute_lsr_ratio(0.8, 0.0), 1.0);
+    }
+
+    /// EN: Negative sell_ratio (shouldn't happen) → safe default 1.0.
+    /// 中文: 負 sell_ratio（不應發生）→ 安全預設 1.0。
+    #[test]
+    fn test_lsr_ratio_negative_sell_returns_one() {
+        assert_eq!(compute_lsr_ratio(0.5, -0.1), 1.0);
+    }
+
+    /// EN: Equal ratios → 1.0.
+    /// 中文: 相等比率 → 1.0。
+    #[test]
+    fn test_lsr_ratio_equal() {
+        let ratio = compute_lsr_ratio(0.5, 0.5);
+        assert!((ratio - 1.0).abs() < 1e-9);
+    }
+
+    // ── Funding rate daily ──
+
+    /// EN: Daily = 3× per-interval rate.
+    /// 中文: 日化 = 3 × 單次區間費率。
+    #[test]
+    fn test_funding_rate_daily_multiplier() {
+        let daily = funding_rate_daily(0.0001);
+        assert!((daily - 0.0003).abs() < 1e-12);
+    }
+
+    /// EN: Zero funding rate → zero daily.
+    /// 中文: 零費率 → 零日化。
+    #[test]
+    fn test_funding_rate_daily_zero() {
+        assert_eq!(funding_rate_daily(0.0), 0.0);
+    }
+
+    /// EN: Negative funding rate stays negative after multiplication.
+    /// 中文: 負費率乘以 3 後仍為負。
+    #[test]
+    fn test_funding_rate_daily_negative() {
+        let daily = funding_rate_daily(-0.0002);
+        assert!((daily - (-0.0006)).abs() < 1e-12);
+    }
+}

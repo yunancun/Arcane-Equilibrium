@@ -595,3 +595,110 @@ fn test_d15_exchange_path_cap_blocks_intent() {
     assert!(!result.approved, "cap should block exchange path");
     assert!(result.rejected_reason.unwrap().contains("global_notional_cap"));
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Router coverage — duplicate position / negative ATR / gates_only profiles
+// 路由器覆蓋 — 重複持倉 / 負 ATR / gates_only 分支
+// ═══════════════════════════════════════════════════════════════════════
+
+/// EN: Same-direction duplicate position is rejected (Gate 1.5 in router.rs).
+/// 中文: 同方向重複持倉被拒絕（router.rs Gate 1.5）。
+#[test]
+fn test_duplicate_position_same_direction_rejected() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    // Manually open a long BTC position in paper_state
+    state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
+    // Try to open another long BTC → rejected
+    let result = proc.process(&make_intent("BTC", true), &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    assert!(!result.submitted);
+    assert!(result.rejected_reason.unwrap().contains("duplicate_position"));
+}
+
+/// EN: Opposite-direction intent on existing position is allowed (closes existing).
+/// 中文: 現有持倉的反向意圖被允許（平掉現有持倉）。
+#[test]
+fn test_opposite_direction_on_existing_position_allowed() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    state.import_positions(vec![("BTC".into(), true, 0.001, 50_000.0, 0)]);
+    // Short intent on existing long → should pass gate 1.5 (not duplicate)
+    let intent = OrderIntent {
+        symbol: "BTC".into(),
+        is_long: false,
+        qty: 0.001,
+        confidence: 0.7,
+        strategy: "test".into(),
+        order_type: "market".into(),
+        limit_price: None,
+    };
+    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    // May be rejected by other gates (guardian drawdown, etc.), but NOT by duplicate check
+    if let Some(reason) = &result.rejected_reason {
+        assert!(!reason.contains("duplicate_position"),
+            "opposite direction should not be rejected as duplicate, got: {reason}");
+    }
+}
+
+/// EN: Negative ATR (impossible in practice) also triggers fail-closed (SEC-11).
+/// 中文: 負 ATR（實際不應發生）同樣觸發 fail-closed（SEC-11）。
+#[test]
+fn test_negative_atr_fails_closed() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Exploration);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    let intent = make_intent("BTC", true);
+    let result = proc.process(&intent, &gov, &state, -100.0, GovernanceProfile::Exploration);
+    assert!(!result.submitted, "negative ATR must fail-closed");
+    assert!(result.rejected_reason.unwrap().contains("ATR unavailable"));
+}
+
+/// EN: process_gates_only with Validation profile passes authorized intent.
+/// 中文: process_gates_only 以 Validation 模式通過授權意圖。
+#[test]
+fn test_gates_only_validation_profile_passes() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("SOL", 80.0);
+    let intent = OrderIntent {
+        symbol: "SOL".into(),
+        is_long: true,
+        qty: 0.5,
+        confidence: 0.7,
+        strategy: "test".into(),
+        order_type: "market".into(),
+        limit_price: None,
+    };
+    let result = proc.process_gates_only(&intent, &gov, &state, 5.0, GovernanceProfile::Validation);
+    assert!(result.approved, "Validation profile should pass: {:?}", result.rejected_reason);
+    assert!(result.approved_qty > 0.0);
+}
+
+/// EN: process_gates_only duplicate same-direction also rejected.
+/// 中文: process_gates_only 的同方向重複持倉也被拒絕。
+#[test]
+fn test_gates_only_duplicate_rejected() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("ETH", 3000.0);
+    state.import_positions(vec![("ETH".into(), false, 0.1, 3000.0, 0)]);
+    let intent = OrderIntent {
+        symbol: "ETH".into(),
+        is_long: false, // same direction as existing short
+        qty: 0.05,
+        confidence: 0.7,
+        strategy: "test".into(),
+        order_type: "market".into(),
+        limit_price: None,
+    };
+    let result = proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
+    assert!(!result.approved);
+    assert!(result.rejected_reason.unwrap().contains("duplicate_position"));
+}
