@@ -430,15 +430,18 @@ async def save_api_key(
         is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
 
         if not is_valid:
+            # SEC-F04: Truncate err_msg to prevent potential info leakage from Bybit API responses.
+            # SEC-F04：截斷 err_msg 防止 Bybit API 回應洩漏敏感信息。
+            safe_err = (err_msg or "")[:200]
             logger.warning(
                 "Bybit key validation failed for slot '%s': %s (actor: %s)",
-                slot, err_msg, getattr(actor, "actor_id", "?"),
+                slot, safe_err, getattr(actor, "actor_id", "?"),
             )
             return {
                 "saved": False,
                 "validated": False,
                 "key_hint": "",
-                "error": err_msg,
+                "error": safe_err,
             }
 
         # Write to secrets directory / 寫入 secrets 目錄

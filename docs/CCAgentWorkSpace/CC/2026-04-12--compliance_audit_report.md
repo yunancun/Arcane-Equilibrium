@@ -339,3 +339,40 @@
 
 *審計完成時間：2026-04-12*
 *下次計劃審計：W22 末（AI Agent 層實現後）*
+
+---
+
+## 七、驗證與修復狀態更新 / Verification & Fix Status Update (2026-04-12)
+
+> PM 逐條校驗後的狀態更新。
+
+### 7.1 文件大小違規 — ❌ 報告數據失準，裁定撤銷
+
+報告聲稱 9 個文件超 1200 行硬上限，經 `wc -l` 驗證全部不實：
+
+| 文件 | 報告聲稱 | 實際行數 | 偏差 |
+|------|---------|---------|------|
+| governance_routes.py | 1914 | 1172 | -742 |
+| governance_hub.py | 1812 | 1052 | -760 |
+| signal_generator.py | 1452 | 1174 | -278 |
+| risk_config.rs | 1381 | 1144 | -237 |
+| backtest_engine.py | 1352 | 1142 | -210 |
+| event_consumer/mod.rs | 1302 | 1180 | -122 |
+| applier.rs | 1257 | 1140 | -117 |
+| on_tick.rs | 1228 | 1050 | -178 |
+| live_session_routes.py | 1203 | 1115 | -88 |
+
+**結論**：所有 9 個文件均在 1200 行硬上限以下。❌ FAIL 裁定**撤銷**→ ⚠️ PARTIAL（4+ 文件在 800-1200 警告區間）。
+
+### 7.2 Singleton 登記 — 已補全
+
+- `LeaseTTLConfigManager._instance`、`_RUST_BYBIT_CLIENT`、`strategy_wiring.py` 12+ 全局 → 已補入 CLAUDE.md §九
+- `PromotionGate._instance`（原報告聲稱 governance_routes.py:1719）→ **不存在**（文件僅 1172 行），為報告錯誤
+
+### 7.3 SEC-A01 引用 — 已過時
+
+報告引用 PNL-4 fast_track 死碼，實際已被 FIX-03+04 修復，`evaluate_fast_track` 現傳入真實輸入。
+
+### 7.4 修正後總體評級
+
+原評級 ⚠️ PARTIAL PASS → 修正為 **✅ CONDITIONAL PASS**（文件大小無違規；Singleton 已登記；AI Agent 層 stub 為已知計劃項 W22）。

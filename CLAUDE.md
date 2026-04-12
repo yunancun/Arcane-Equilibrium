@@ -254,6 +254,9 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 | `_scheduler` | evolution_auto_scheduler.py | 內部懶加載 `start_scheduler()` |
 | `_evolution_engine` | evolution_routes.py | 內部懶加載 `get_evolution_engine()` |
 | `_ledger` | experiment_routes.py | 內部懶加載 `get_experiment_ledger()` |
+| `LeaseTTLConfigManager._instance` | lease_ttl_config.py | `LeaseTTLConfigManager.get_instance()` |
+| `_RUST_BYBIT_CLIENT` | strategy_ai_routes.py | 內部懶加載 `_get_rust_client()` |
+| `KLINE_MANAGER` / `INDICATOR_ENGINE` / `SIGNAL_ENGINE` / `ORCHESTRATOR` 等 12+ | strategy_wiring.py | 模組級全局，import 時初始化 |
 
 新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態。
 

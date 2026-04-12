@@ -357,12 +357,29 @@ static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
-# Disable browser caching for static files (HTML/JS/CSS) during development.
-# 開發階段禁止靜態文件瀏覽器緩存，確保每次加載最新版本。
+# SEC-D03: Auth guard for static files — prevent unauthenticated access to GUI HTML/JS.
+# SEC-D03：靜態文件認證守衛 — 防止未認證用戶訪問 GUI HTML/JS。
+# Exempt: styles.css (needed by login page before auth), favicon, and robots.txt.
+# 豁免：styles.css（登錄頁面認證前需要）、favicon、robots.txt。
+_STATIC_AUTH_EXEMPT = frozenset({"/static/styles.css", "/static/favicon.ico", "/static/robots.txt"})
+
+
 @app.middleware("http")
-async def no_cache_static(request: Request, call_next):
+async def static_auth_guard(request: Request, call_next):
+    """Block unauthenticated access to static files (except login-page assets).
+    阻止未認證用戶訪問靜態文件（登錄頁面資源除外）。
+    """
+    path = request.url.path
+    if path.startswith("/static/") and path not in _STATIC_AUTH_EXEMPT:
+        cookie_token = request.cookies.get("oc_auth_token")
+        if not cookie_token or not hmac.compare_digest(
+            cookie_token.encode("utf-8"), settings.api_token.encode("utf-8")
+        ):
+            from starlette.responses import JSONResponse
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
     response = await call_next(request)
-    if request.url.path.startswith("/static/"):
+    # No-cache for static files during development / 開發階段禁止靜態文件緩存
+    if path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
