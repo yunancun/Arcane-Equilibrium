@@ -61,11 +61,67 @@ live_router = APIRouter(
 
 _LIVE_USER_STOPPED: bool = False
 
+
+def _init_execution_authority_from_trust() -> str | None:
+    """
+    EA-PERSIST: On startup, restore execution_authority from persisted trust state
+    if and only if:
+      (a) the trust state recorded execution_authority_granted=True, AND
+      (b) last_auth_expires_ts_ms is still in the future (trust has not expired).
+    Fail-closed: any exception returns None (not_granted).
+
+    EA-PERSIST：啟動時從持久化信任狀態恢復 execution_authority，當且僅當：
+      (a) 信任狀態記錄了 execution_authority_granted=True，且
+      (b) last_auth_expires_ts_ms 仍在未來（信任未到期）。
+    失敗關閉：任何異常返回 None（not_granted）。
+    """
+    try:
+        from .earned_trust_engine import get_trust_engine
+        te = get_trust_engine()
+        snap = te.get_state_snapshot()
+        now_ms = int(time.time() * 1000)
+        expires_ms: int = snap.get("last_auth_expires_ts_ms") or 0
+        if snap.get("execution_authority_granted") and expires_ms > now_ms:
+            remaining_h = (expires_ms - now_ms) / 3_600_000.0
+            logger.warning(
+                "EA-PERSIST: execution_authority auto-restored from persisted trust state "
+                "(tier=%s, expires_in=%.1fh) — live trading authority ACTIVE / "
+                "EA-PERSIST：從持久化信任狀態恢復 execution_authority（tier=%s，剩餘=%.1fh）— 實盤授權有效",
+                snap.get("tier_name", "T0"), remaining_h,
+                snap.get("tier_name", "T0"), remaining_h,
+            )
+            return "granted"
+    except Exception as exc:
+        logger.debug("EA-PERSIST: trust restore failed (fail-closed): %s", exc)
+    return None
+
+
 # In-memory execution authority override (operator grant/revoke from GUI).
-# Survives IPC failures; cleared on process restart (fail-closed by design).
+# EA-PERSIST: initialized from persisted trust state on startup if trust is still valid.
+# Cleared on voluntary revoke / auto-halt / session-stop (persisted → not restored next restart).
 # 記憶體內 execution_authority override（Operator 從 GUI 授予/撤銷）。
-# 重啟後清零（fail-closed 設計）。
-_EXECUTION_AUTHORITY_OVERRIDE: str | None = None
+# EA-PERSIST：啟動時若信任狀態仍有效則從持久化狀態恢復；主動撤銷/自動停止/session 停止時清除（持久化，下次重啟不恢復）。
+_EXECUTION_AUTHORITY_OVERRIDE: str | None = _init_execution_authority_from_trust()
+
+
+def _set_execution_authority(value: str | None) -> None:
+    """
+    EA-PERSIST: Set execution_authority in memory AND persist to trust state file.
+    Use this instead of direct assignment to keep the two systems in sync.
+    EA-PERSIST：同步設置記憶體 execution_authority 並持久化到信任狀態文件。
+    用此函數替代直接賦值，確保兩個系統保持同步。
+    """
+    global _EXECUTION_AUTHORITY_OVERRIDE
+    _EXECUTION_AUTHORITY_OVERRIDE = value
+    try:
+        from .earned_trust_engine import get_trust_engine
+        te = get_trust_engine()
+        if value == "granted":
+            te.on_authority_granted()
+        else:
+            te.on_authority_revoked()
+    except Exception as exc:
+        logger.debug("EA-PERSIST: trust sync failed (non-fatal): %s", exc)
 
 
 def _get_hub():
@@ -365,7 +421,7 @@ async def _live_contraction_monitor() -> None:
                 # Drawdown exceeded halt threshold: revoke authority + close positions
                 # 回撤超過停止閾值：撤銷授權 + 平倉
                 _live_contraction_state  = "halted"
-                _EXECUTION_AUTHORITY_OVERRIDE = None
+                _set_execution_authority(None)  # EA-PERSIST: auto-halt → revoke + persist
 
                 logger.error(
                     "🚨 LIVE AUTO-HALT — drawdown=%.1f%% >= halt_threshold=%.1f%% "
@@ -659,9 +715,8 @@ async def post_live_session_start(
     # 啟動時自動授予 execution_authority。
     # 雙重門控（Operator 角色 + live_reserved global mode）已在上方驗證。
     # 無需另行手動 grant — stop 時 / 進程重啟後清零（fail-closed）。
-    global _EXECUTION_AUTHORITY_OVERRIDE, _LIVE_USER_STOPPED, \
-           _live_contraction_state, _live_monitor_task
-    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+    global _LIVE_USER_STOPPED, _live_contraction_state, _live_monitor_task
+    _set_execution_authority("granted")  # EA-PERSIST: session start → grant + persist
     _LIVE_USER_STOPPED = False
     _live_contraction_state = "normal"
 
@@ -729,12 +784,11 @@ async def post_live_session_stop(
     """
     _require_operator(actor)
 
-    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE, \
-           _live_contraction_state, _live_monitor_task
+    global _LIVE_USER_STOPPED, _live_contraction_state, _live_monitor_task
     _LIVE_USER_STOPPED = True
-    # Reset execution authority on stop — fail-closed until next explicit start
-    # stop 後重置 execution_authority — 下次明確 start 前保持 fail-closed
-    _EXECUTION_AUTHORITY_OVERRIDE = None
+    # EA-PERSIST: revoke + persist on voluntary stop — will NOT auto-restore on next restart
+    # EA-PERSIST：主動停止時撤銷並持久化 — 下次重啟不會自動恢復
+    _set_execution_authority(None)
     _live_contraction_state = "normal"
     # Revoke live SM-1 authorization so governance center reflects stopped state.
     # 撤銷 live SM-1 授權，讓治理中心反映已停止狀態。
@@ -834,9 +888,8 @@ async def post_live_session_resume(
 
     # Re-grant execution_authority and restart monitor on resume
     # 恢復時重新授予 execution_authority 並重啟縮倉監控
-    global _LIVE_USER_STOPPED, _EXECUTION_AUTHORITY_OVERRIDE, \
-           _live_contraction_state, _live_monitor_task
-    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+    global _LIVE_USER_STOPPED, _live_contraction_state, _live_monitor_task
+    _set_execution_authority("granted")  # EA-PERSIST: resume → re-grant + persist
     _LIVE_USER_STOPPED = False
     _live_contraction_state = "normal"
 
@@ -879,8 +932,7 @@ async def grant_execution_authority(
     重啟後清零（fail-closed）。用於實盤前 demo 測試及未來 M 章受監督實盤門控。
     """
     _require_operator(actor)
-    global _EXECUTION_AUTHORITY_OVERRIDE
-    _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+    _set_execution_authority("granted")  # EA-PERSIST: manual grant + persist
     actor_id = getattr(actor, "actor_id", "?")
     # Also create + approve live SM-1 authorization so governance center shows mode=live.
     # 同步創建並批准 live SM-1 授權，讓治理中心顯示 mode=live。
@@ -906,8 +958,7 @@ async def revoke_execution_authority(
     Operator 撤銷 execution_authority；鎖定頁重新顯示。
     """
     _require_operator(actor)
-    global _EXECUTION_AUTHORITY_OVERRIDE
-    _EXECUTION_AUTHORITY_OVERRIDE = "not_granted"
+    _set_execution_authority("not_granted")  # EA-PERSIST: manual revoke + persist
     actor_id = getattr(actor, "actor_id", "?")
     # Revoke live SM-1 authorization so governance center reflects revoked state.
     # 撤銷 live SM-1 授權，讓治理中心反映已撤銷狀態。
@@ -1197,7 +1248,6 @@ def get_live_metrics(
 
 def _grant_execution_authority_internal() -> None:
     """Re-grant execution_authority (called by live_trust_routes after Renew). / 信任續期後重新授予 execution_authority。"""
-    global _EXECUTION_AUTHORITY_OVERRIDE
     if _EXECUTION_AUTHORITY_OVERRIDE != "granted":
-        _EXECUTION_AUTHORITY_OVERRIDE = "granted"
+        _set_execution_authority("granted")  # EA-PERSIST: trust renewal re-grant + persist
         logger.info("execution_authority re-granted via earned-trust renewal / 信任續期重新授予")

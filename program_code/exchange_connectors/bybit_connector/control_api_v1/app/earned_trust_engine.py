@@ -190,6 +190,12 @@ class EarnedTrustState:
     last_renewal_ts_ms: Optional[int] = None       # when last renewal occurred / 上次續期時間
     last_auth_expires_ts_ms: Optional[int] = None  # when current auth expires / 當前授權到期時間
     promotion_history: list = field(default_factory=list)  # audit trail / 審計軌跡
+    # EA-PERSIST: whether execution_authority was explicitly granted in the last live session.
+    # Survives process restart so GUI + trading authority can be auto-restored when T0 is
+    # still valid. Set True on grant, False on revoke / stop / auto-halt / session-stop.
+    # EA-PERSIST：上次 live session 是否明確授予了 execution_authority。
+    # 在進程重啟後保留，用於 T0 仍有效時自動恢復授權。
+    execution_authority_granted: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict / 序列化為字典"""
@@ -394,6 +400,30 @@ class EarnedTrustEngine:
             new_tier, TIER_TTL_HOURS.get(new_tier, 24),
         )
 
+    # ── EA-PERSIST: execution authority persistence hooks ────────────────────
+
+    def on_authority_granted(self) -> None:
+        """
+        Persist execution_authority=granted so it survives a clean process restart.
+        Called whenever execution_authority is set to 'granted' (session start / manual grant / resume).
+        持久化 execution_authority=granted，使其在乾淨進程重啟後能恢復。
+        在任何 execution_authority 被設為 granted 時調用（session 啟動/手動授予/恢復）。
+        """
+        with self._lock:
+            self._state.execution_authority_granted = True
+            self._save()
+
+    def on_authority_revoked(self) -> None:
+        """
+        Persist execution_authority=revoked so restart does NOT auto-restore authority.
+        Called on voluntary revoke, auto-halt (drawdown), or session stop.
+        持久化 execution_authority=revoked，確保重啟後不自動恢復授權。
+        在主動撤銷、自動停止（回撤觸發）或 session 停止時調用。
+        """
+        with self._lock:
+            self._state.execution_authority_granted = False
+            self._save()
+
     def on_session_stop(self) -> None:
         """
         Called on voluntary session stop. Resets to T0 for next session start.
@@ -416,6 +446,7 @@ class EarnedTrustEngine:
             self._state.pending_downgrade_tier = None
             self._state.pending_downgrade_reason = None
             self._state.last_auth_expires_ts_ms = None
+            self._state.execution_authority_granted = False  # EA-PERSIST: explicit stop clears persisted authority
             self._save()
         logger.info("EarnedTrustEngine: session stopped — tier reset to T0 / Session 停止，tier 重置為 T0")
 
