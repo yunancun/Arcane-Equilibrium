@@ -77,7 +77,17 @@ PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md
 - [x] **FIX-52** ← R4: §四 P1-#5 — SCRIPT_INDEX.md 全面更新 ~11%→~90% ✅
 - [x] **FIX-55** ← BB: BB-A1+A2+A3 [P1] — 3 API paths verified correct ✅ dead code #[allow(dead_code)] 標註
 
-P2/P3 共 25 項（文件拆分、策略參數化、ML backfill、文檔清理等）見完整報告。
+### P2 — Rust 7 項 ✅ 完成（commit `84f00eb`）
+
+- [x] **FIX-24** ← QC: RG-2 [P2] — bb_reversion RSI 閾值可配（30/70 → TOML params + agent adjustable）
+- [x] **FIX-25** ← QC: H1 [P2] — grid_trading fee_rate 字段取代硬編碼 FEE_PCT 常量
+- [x] **FIX-26** ← QC: H4 [P2] — bb_breakout squeeze bool→時間戳過期（30min expiry）
+- [x] **FIX-27** ← QC: H3 [P2] — kelly_sizer 負 edge 返回 0.0（拒絕）非 fallback qty
+- [x] **FIX-28** ← QC: H2 [P2] — intent_processor account_leverage 字段（paper=1x, exchange=actual）
+- [x] **FIX-31** ← E5: D-03 [Low] — PriceEventKind typed enum + 向後兼容 metadata 雙路徑
+- [x] **FIX-33** ← E5: P-03 [Medium] — event_consumer exec_id 去重 HashSet+VecDeque O(1)
+
+### P2/P3 — 餘下 18 項（文件拆分、ML backfill、GUI/UX、文檔清理）見完整報告。
 
 ---
 
