@@ -153,8 +153,9 @@ function showGrafanaOffline() {
 async function loadPipeline() {
   // Pipeline stats from paper session (pipeline_bridge stats live there)
   // 管线统计从 paper session 获取（pipeline_bridge 的统计在那里）
-  const d = await ocApi('/api/v1/paper/session/status');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/paper/session/status'); } catch(e) { d = null; }
+  if (!d || !d.data) { $('pipe-status').textContent = 'Load Failed'; $('pipe-status').className = 'oc-metric-val'; return; }
   const sess = d.data.session || d.data;
   const isActive = sess.session_state === 'active';
   const el = $('pipe-status');
@@ -174,7 +175,8 @@ async function loadPipeline() {
 }
 
 async function loadTelegram() {
-  const d = await ocApi('/api/v1/strategy/telegram/status');
+  let d;
+  try { d = await ocApi('/api/v1/strategy/telegram/status'); } catch(e) { d = null; }
   if (!d || !d.data) {
     ocSetText('tg-status', 'Not Configured');
     return;

@@ -170,10 +170,11 @@ async function loadOverview() {
 }
 
 async function loadReviewQueue() {
-  const d = await ocApi('/api/v1/learning/review-queue');
+  let d;
+  try { d = await ocApi('/api/v1/learning/review-queue'); } catch(e) { d = null; }
   if (!d || !d.data) {
-    ocSetText('l-queue', '0');
-    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6">审核队列为空 / Queue is empty</td></tr>');
+    ocSetText('l-queue', '--');
+    ocSetHtml('review-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">无法加载 / Failed to load review queue</td></tr>');
     return;
   }
   const items = d.data.items || d.data.queue || d.data || [];
@@ -202,8 +203,9 @@ async function loadReviewQueue() {
 }
 
 async function loadFeed() {
-  const d = await ocApi('/api/v1/learning/feed');
-  if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading">No feed data</div>'); return; }
+  let d;
+  try { d = await ocApi('/api/v1/learning/feed'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('feed-body', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Failed to load feed</div>'); return; }
 
   // API returns observations_recent and lessons_recent arrays
   const observations = (d.data.observations_recent || []).map(o => ({ ...o, _feedType: 'observation' }));
@@ -241,8 +243,9 @@ async function loadFeed() {
 }
 
 async function loadNetPnl() {
-  const d = await ocApi('/api/v1/learning/net-pnl');
-  if (!d || !d.data) { ocSetHtml('netpnl-body', '<div class="oc-loading">No PnL data</div>'); return; }
+  let d;
+  try { d = await ocApi('/api/v1/learning/net-pnl'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('netpnl-body', '<div class="oc-loading" style="color:var(--text-dim)">无法加载 / Failed to load PnL</div>'); return; }
   const pnl = d.data;
   let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
   const fields = [
@@ -269,8 +272,9 @@ async function loadNetPnl() {
 }
 
 async function loadExperiments() {
-  const d = await ocApi('/api/v1/learning/experiments');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/learning/experiments'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
   const exps = d.data.experiments || d.data || [];
   if (!exps.length) {
     ocSetHtml('experiments-tbody', '<tr class="empty-row"><td colspan="5">暂无实验 / No experiments</td></tr>');
@@ -290,8 +294,9 @@ async function loadExperiments() {
 }
 
 async function loadHypotheses() {
-  const d = await ocApi('/api/v1/learning/hypotheses');
-  if (!d || !d.data) return;
+  let d;
+  try { d = await ocApi('/api/v1/learning/hypotheses'); } catch(e) { d = null; }
+  if (!d || !d.data) { ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5" style="color:var(--text-dim)">无法加载 / Load failed</td></tr>'); return; }
   const hyps = d.data.hypotheses || d.data || [];
   if (!hyps.length) {
     ocSetHtml('hypotheses-tbody', '<tr class="empty-row"><td colspan="5">暂无假设 / No hypotheses</td></tr>');

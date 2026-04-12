@@ -3,6 +3,18 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-12
 
+### 審計 P2 Batch A+B：10 項快速修復（2026-04-12）
+
+FIX-21 lib.rs 3 孤立模組移除（batch_order_manager/leverage_token_client/spot_margin_client）· FIX-38 CLAUDE.md §九 Singleton 表補登 6 項（_pool/DEFAULT_LEASE_TTL_CONFIG/_backtest_engine/_scheduler/_evolution_engine/_ledger）· FIX-41 Bearer Token panel 死碼清除（index.html/app-gui.js/app-review.js/styles.css）· FIX-44 tab-learning/monitoring/strategy 加載失敗狀態 UI · FIX-45 Live tab 刷新 30s→15s · FIX-46 tab-risk.html 已達標（510 行，無需拆分）· FIX-51 3 DEPRECATED 文件移至 archive/ · FIX-53 docs/README.md 補 4 子目錄索引 · FIX-54 CHANGELOG 缺失 commit 補錄 · FIX-56 Layer2 定價日期 2026-03-27→04-12。
+
+### PNL-FIX-1/2 + 3 項重要中間修復（2026-04-12）
+
+**PNL-FIX-1** (commit `2a422fa`)：`on_tick.rs` 5 條 close 路徑誤用 `event.last_price` 跨 symbol 平倉 → 改用 per-symbol latest_price。**PNL-FIX-2** (commit `cbb4e45`)：`emit_close_fill` 寫 `fee: 0.0` → 所有平倉路徑收真實費用。**Circuit Breaker 修復** (commit `6ae6e1b`)：3 fixes 防止誤觸 CB + spam。**EA-Persist** (commit `0255a35`)：execution_authority 統一至 T0 trust persistence。**Paper/Demo Session Split** (commit `986d724`)：Paper/Demo 獨立 session 控制。
+
+### 3E-ARCH 中間修復合集（2026-04-11~12）
+
+(commit `d670759`) cross-pipeline DB ID 碰撞修復 — ID 嵌入 engine_mode。(commit `f6e7afc`) paper_state 啟動時從交易所快照 seed。(commit `b5e45f7`+`8e08c34`) private WS topic 環境感知修復。(commit `152d1f6`) demo DCP topic 移除 + live worker_threads 2→4。(commit `660cb75`) scanner/deployed 顯示 Rust active symbols。(commit `87bbe66`) live-gui 條件單顯示 + per-engine session/metrics。(commit `9853845`) paper-metrics 改用 Rust 權威 balance/peak。(commit `35272d3`) IPC 所有命令加顯式 engine 參數修復跨引擎路由。(commit `56c648f`) paper_only 模式 + cost_gate 冷啟動探索。(commit `15203f6`) 動態 is_exchange_mode 防 live WS 覆寫 paper state。(commit `326a191`) 移除 handlePaperAction 硬編碼 initial_balance:10000。(commit `2473efb`+`6bafa4e`) demo/live GUI 平倉路由修復。
+
 ### 審計 P2 Rust 7 項修復（2026-04-12 · commit `84f00eb`）
 
 FIX-24 bb_reversion RSI 閾值 30/70→TOML 可配 + ParamRange agent-adjustable · FIX-25 grid_trading fee_rate 字段取代硬編碼常量 · FIX-26 bb_breakout squeeze bool→時間戳 30min 過期 · FIX-27 kelly_sizer 負 edge 拒絕（0.0）非 fallback · FIX-28 intent_processor account_leverage 字段 · FIX-31 PriceEventKind typed enum（Trade/Orderbook/Ticker/Liquidation/PriceLimit/AdlNotice/RestPoll）+ 向後兼容 metadata 雙路徑 · FIX-33 event_consumer exec_id 去重 O(n)→O(1) HashSet+VecDeque。15 files changed, +199/-194。E4: 965+366+27+29+2852 = 4239 pass。
