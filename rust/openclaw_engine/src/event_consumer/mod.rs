@@ -592,27 +592,28 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                         // FIX-19: execution.fast topic omits execFee/feeRate fields.
                         // When the field is empty or unparseable, estimate fee from
-                        // notional × taker_fee_rate so PnL accounting stays correct.
+                        // notional × per-symbol fee rate so PnL accounting stays correct.
+                        // FIX-19b: Use pipeline.intent_processor.fee_rate(symbol) for
+                        // per-symbol resolution (AccountManager → legacy → constant).
                         // FIX-19：execution.fast 不帶 execFee，空值時用名義值×手續費率估算。
+                        // FIX-19b：改用 per-symbol 費率（AccountManager → 單一費率 → 常量）。
                         let exec_fee: f64 = {
                             let parsed = exec.exec_fee.parse::<f64>().unwrap_or(0.0);
                             if parsed == 0.0 && exec_qty > 0.0 && exec_price > 0.0 {
-                                if let Some(fee_rate) = taker_fee_rate {
-                                    let estimated = exec_qty * exec_price * fee_rate;
-                                    if estimated > 0.0 {
-                                        tracing::debug!(
-                                            exec_id = %exec.exec_id,
-                                            notional = exec_qty * exec_price,
-                                            fee_rate,
-                                            estimated_fee = estimated,
-                                            "FIX-19: execFee missing, estimated from taker rate \
-                                             / execFee 缺失，使用 taker 費率估算"
-                                        );
-                                    }
-                                    estimated
-                                } else {
-                                    0.0
+                                let fee_rate = pipeline.intent_processor.fee_rate(&exec.symbol);
+                                let estimated = exec_qty * exec_price * fee_rate;
+                                if estimated > 0.0 {
+                                    tracing::debug!(
+                                        exec_id = %exec.exec_id,
+                                        symbol = %exec.symbol,
+                                        notional = exec_qty * exec_price,
+                                        fee_rate,
+                                        estimated_fee = estimated,
+                                        "FIX-19b: execFee missing, estimated from per-symbol rate \
+                                         / execFee 缺失，使用 per-symbol 費率估算"
+                                    );
                                 }
+                                estimated
                             } else {
                                 parsed
                             }

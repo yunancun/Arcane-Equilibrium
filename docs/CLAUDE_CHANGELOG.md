@@ -3,6 +3,18 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-12
 
+### 全程序鏈審計 P0+P1 全修 + 二輪驗證 + CONCERN 修復（2026-04-12）
+
+**Session 1 (P0 8/8)**：FIX-03 FastTrack ReduceToHalf/PauseNewEntries 實現 · FIX-04 真實 price_drop/margin_util · FIX-09 ocEsc 單引號 · FIX-10 IPC HMAC Live 強制 · FIX-13 edge_estimates +14 tests · FIX-14 REST fail-closed +7 tests · FIX-15 三管線並發 +1 test · FIX-19 execFee taker_fee_rate 估算。
+
+**Session 2 (P1 18/18)**：FIX-05 correlated_exposure_pct 實現 · FIX-06 grid_levels TOML→runtime · FIX-07 OU theta non-OU fallback · FIX-11 Cookie secure auto-detect · FIX-16 startup +5 tests · FIX-17 ConfigStore 並發 +2 tests · FIX-18 Price=0 +2 tests · FIX-20 pre_check_order 刪除 · FIX-22 MlSwitches 4 死欄位刪除 · FIX-29 on_tick 1307→1186 行 · FIX-30 symbol.clone 審查（文檔結論）· FIX-32 risk_config 借用 · FIX-39/40 Danger Zone + 策略刪除 openConfirmModal · FIX-47/48 REFERENCE/KNOWN_ISSUES 更新 · FIX-52 SCRIPT_INDEX 全面重寫 · FIX-55 API paths verified。
+
+**二輪嚴格驗證**：8 組並行 agent 逐行讀碼，26/26 PASS。發現並修復 3 CONCERN：(1) **FIX-03b** ReduceToHalf 缺 `dispatch_close_order()` — Live 模式下本地狀態與交易所倉位脫節 **[HIGH]** → 已補 dispatch；(2) **FIX-19b** 單一 fee rate 近似所有 symbol → 改用 `intent_processor.fee_rate(&symbol)` per-symbol 3 級解析；(3) **FIX-16b** 2/5 tests trivially passing → 替換為 semver 驗證 + env valid/invalid/negative/zero。
+
+**KNOWN_ISSUES**：TRADE-2 → RESOLVED（Rust 同步 tick 無競態）· TRADE-4 → RESOLVED（Rust 每筆 fill 獨立 exec_qty）· 統計修正 OPEN 9 / RESOLVED 15。
+
+965 engine lib + 5 bin + 29 e2e = 999 tests · 0 failures。
+
 ### Earned-Trust TTL Ladder + Audit Trail 時間戳修復（2026-04-12）
 
 (1) **Audit Trail 時間戳修復**：`tab-governance.html` JS 讀 `r.timestamp` 改為 `r.when_ms || r.when*1000`，修復 Audit Trail 時間欄永遠顯示 `'--'` 的 bug。(2) **Earned-Trust 授權 TTL 階梯**：新增 `earned_trust_engine.py`（715 行）— T0(24h)/T1(72h)/T2(168h)/T3(360h) 四層階梯，連續乾淨天數晉升，中途降級即時標記（session 繼續），T3 最多自動續期 1 次後強制 Operator 全面審查；新增 `live_trust_routes.py`（484 行）— 3 端點（GET trust-status / POST renew / POST renew-review）；`live_session_routes.py` 新增 session start/stop 鉤子 + `_grant_execution_authority_internal()` 內部輔助；`main.py` 注冊 `live_trust_router`；`tab-live.html` 新增 Trust Status Bar（tier badge + 倒計時 + 續期卡 + T3 全面審查面板）+ 完整 JS（loadTrustStatus / openTrustRenewCard / submitRenew / submitFullReview）。53 新測試 pass。E4: 2852 Python passed。

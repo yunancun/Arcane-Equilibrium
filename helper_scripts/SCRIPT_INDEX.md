@@ -1,18 +1,67 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
+最後更新：2026-04-12（FIX-52 覆蓋率更新）
 
 ---
 
-## 腳本列表 (Scripts)
+## 頂層腳本 (Top-Level Scripts)
 
-- `restart_all.sh` — 一鍵重啟 Rust 引擎 + API server（支援 `--engine-only` / `--api-only` 選項）
-- `cron_daily_report.sh` — 每日自動採集 Paper Trading 指標並推送 Telegram 報告（Cron UTC 0:00 觸發）
-- `cron_observer_cycle.sh` — 每 5 分鐘執行完整 Observer 循環並自動橋接到 runtime snapshot
-- `start_paper_trading.sh` — API server 就緒後自動啟動 Paper Trading（可由 systemd ExecStartPost 或 cron @reboot 呼叫）
-- `schema_diff.py` — CI 類型一致性檢查：比對 Python shared_types 與 Rust golden JSON schema，防止 Python/Rust 類型漂移
-- `golden_dataset_gen.py` — 生成 Rust↔Python 指標交叉驗證黃金數據集（確定性合成 OHLCV + 13 個指標 Python 參考值，輸出 JSON）
+| 腳本 | 用途 |
+|------|------|
+| `restart_all.sh` | 一鍵重啟 Rust 引擎 + API server（`--engine-only` / `--api-only`） |
+| `start_paper_trading.sh` | API server 就緒後自動啟動 Paper Trading（systemd / cron @reboot） |
+| `cron_daily_report.sh` | 每日自動採集 Paper Trading 指標 + Telegram 推送（Cron UTC 0:00） |
+| `cron_observer_cycle.sh` | 每 5 分鐘執行 Observer 循環 + runtime snapshot 橋接 |
+| `schema_diff.py` | CI 類型一致性：比對 Python shared_types vs Rust golden JSON schema |
+| `golden_dataset_gen.py` | Rust↔Python 指標交叉驗證黃金數據集（確定性 OHLCV + 13 指標） |
 
-### db/ — 數據庫維護 (Database Maintenance)
+## db/ — 數據庫維護 (Database Maintenance)
 
-- `db/fresh_start_reset.py` — 開發噪音清理：保留客觀市場數據（klines/funding_rates/ob_snapshots/news），清除所有系統經驗數據（fills/orders/intents/signals/learning 狀態）。LinUCB 狀態清除前自動歸檔。需 psycopg2 venv + POSTGRES_* env 或 DSN。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"` 三種模式。
+| 腳本 | 用途 |
+|------|------|
+| `db/fresh_start_reset.py` | 開發噪音清理：保留客觀市場數據，清除系統經驗數據。支援 `--report-only`（默認）/ `--dry-run` / `--execute --confirm "FRESH_START_YYYY_MM_DD"` |
+
+## canary/ — 灰度驗證 (Canary / Soak Test)
+
+| 腳本 | 用途 |
+|------|------|
+| `canary/engine_watchdog.py` | 引擎存活監控（`--status` 顯示健康狀態，`--stale-threshold` 設定過期秒數） |
+| `canary/replay_runner.py` | 灰度回放：讀取 canary JSONL 並與 Python 基線比對 |
+| `canary/canary_comparator.py` | Canary 記錄比對器：逐 tick 驗證 Rust vs Python 指標/信號/PnL |
+| `canary/canary_schema.py` | Canary JSONL schema 定義（Pydantic model） |
+| `canary/rollback_drill.sh` | 回滾演練腳本 |
+| `canary/test_canary.py` | Canary 系統單元測試 |
+
+## phase4/ — Phase 4 學習/晉升工具 (Learning & Promotion)
+
+| 腳本 | 用途 |
+|------|------|
+| `phase4/backfill_directive_outcomes.py` | 回填 directive 結果到學習表 |
+| `phase4/dl3_go_no_go.py` | DL-3 Go/No-Go 決策檢查 |
+| `phase4/weekly_report.py` | 每週學習/交易績效報告 |
+
+## maintenance_scripts/ — 維護腳本 (Maintenance)
+
+| 腳本 | 用途 |
+|------|------|
+| `maintenance_scripts/prune_dated_files.sh` | 清理過期的 dated 輸出文件 |
+
+### maintenance_scripts/bybit_connector/ — 舊治理鏈腳本 (Legacy H/I/J/K Chain)
+
+> **注意**：此目錄包含 ~60 個舊 H-chain / I-chain / J-chain / K-chain 維護腳本，
+> 來自 2026-03 的治理管線開發期。DEAD-PY-2 後大部分已無法直接運行（依賴已刪除的
+> Python 治理類），但作為歷史參考保留。以下僅列出仍可能有用的：
+
+| 腳本 | 用途 |
+|------|------|
+| `lib_trading_env.sh` | 共享環境變量設定（被其他腳本 source） |
+| `run_with_trading_env.sh` | 在交易環境中運行任意命令 |
+| `run_i10_canonical_h_chain_recheck.sh` | H 鏈權威檢查器 |
+| `run_i10_canonical_decision_lease_recheck.sh` | I 鏈權威檢查器 |
+| `cleanup_legacy_ai_env.py` | 清理舊 AI 環境殘留 |
+| `_bybit_latest_wrapper.py` | Bybit API 最新值包裝器 |
+| `repair_i10_stage_source_aliases.py` | 修復 I10 stage source 別名 |
+
+其餘 ~50 個 `fix_*` / `repair_*` / `run_h*` / `run_i*` 腳本為一次性修復腳本，
+各自的 MODULE_NOTE 內有用途說明。

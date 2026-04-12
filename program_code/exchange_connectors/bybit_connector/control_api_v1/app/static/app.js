@@ -78,6 +78,25 @@ const CRITICAL_ACTIONS = {
     subtitle: "Apply system-level configuration change",
     risk: "这一步会修改全局系统设置，如风险策略或 Demo Ack 开关。这些设置影响整个控制判断链路。",
     consequence: "设置变更后立即生效。请确认你理解修改后的效果，特别是风险策略相关的变更。"
+  },
+  // FIX-39/40: Danger Zone operations + strategy deletion — replaced native confirm()
+  "delete-strategy": {
+    title: "刪除策略 / Delete Strategy",
+    subtitle: "Permanently remove this strategy configuration",
+    risk: "此操作無法撤銷。策略的所有參數、狀態將被永久刪除。",
+    consequence: "策略刪除後立即生效，已開倉位不受影響但不再被該策略管理。"
+  },
+  "reset-cooldown": {
+    title: "重置冷卻期 / Reset Loss Cooldown",
+    subtitle: "Re-enable new order placement immediately",
+    risk: "連續虧損冷卻期是風控保護機制。重置後系統將立即恢復開倉。",
+    consequence: "請確認當前市況適合繼續交易，否則可能加速虧損。"
+  },
+  "unhalt-session": {
+    title: "解除熔斷 / Unhalt Session",
+    subtitle: "Resume trading after circuit-breaker halt",
+    risk: "熔斷保護在回撤嚴重時觸發。解除後所有交易功能恢復。",
+    consequence: "請確認回撤已受控、市場條件改善後再操作。錯誤解除可能導致進一步虧損。"
   }
 };
 

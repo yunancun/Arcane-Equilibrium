@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 
 /// Tunable parameters for Grid Trading (Phase 3a).
+/// FIX-06: added grid_levels field (was hardcoded, TOML stored but not applied).
+/// FIX-06：新增 grid_levels 欄位（原硬編碼，TOML 存但不生效）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GridTradingParams {
     pub cooldown_ms: u64,
@@ -24,6 +26,14 @@ pub struct GridTradingParams {
     pub ou_lookback: usize,
     pub health_check_interval: usize,
     pub max_out_of_range: usize,
+    /// Number of grid levels. FIX-06: was hardcoded DEFAULT_GRID_COUNT=10.
+    /// 網格層級數量。FIX-06：原硬編碼為 10。
+    #[serde(default = "default_grid_levels")]
+    pub grid_levels: usize,
+}
+
+fn default_grid_levels() -> usize {
+    DEFAULT_GRID_COUNT
 }
 
 impl Default for GridTradingParams {
@@ -35,6 +45,7 @@ impl Default for GridTradingParams {
             ou_lookback: 60,
             health_check_interval: 100,
             max_out_of_range: 5,
+            grid_levels: DEFAULT_GRID_COUNT,
         }
     }
 }
@@ -83,6 +94,9 @@ impl StrategyParams for GridTradingParams {
         }
         if self.ou_lookback < 10 {
             return Err("ou_lookback must be >= 10".into());
+        }
+        if self.grid_levels < 3 {
+            return Err("grid_levels must be >= 3".into());
         }
         Ok(())
     }
@@ -201,6 +215,9 @@ pub struct GridTrading {
     prev_last_trade_ms: HashMap<String, u64>,
     /// CONF-D: Multiplier applied to emitted intent.confidence (default 1.0, range [0,2]).
     conf_scale: f64,
+    /// FIX-06: Configurable grid level count (was hardcoded DEFAULT_GRID_COUNT).
+    /// FIX-06：可配置的網格層級數（原硬編碼 DEFAULT_GRID_COUNT）。
+    grid_count: usize,
     /// M-2: Per-symbol rejection backoff deadline (epoch ms). Set in `on_rejection`,
     /// honored at the top of `on_tick` to prevent tight retry loops on persistent
     /// guardian/cost_gate rejections.
@@ -277,6 +294,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            grid_count: DEFAULT_GRID_COUNT,
             reject_cooldown_until_ms: HashMap::new(),
         }
     }
@@ -308,6 +326,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            grid_count: DEFAULT_GRID_COUNT,
             reject_cooldown_until_ms: HashMap::new(),
         }
     }
@@ -353,6 +372,7 @@ impl GridTrading {
             prev_inventory: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
+            grid_count: DEFAULT_GRID_COUNT,
             reject_cooldown_until_ms: HashMap::new(),
         }
     }
@@ -413,8 +433,8 @@ impl GridTrading {
             // Use OU-derived step to compute bounds / 用 OU 推導的步長計算邊界
             let ou_step = self.compute_ou_step(symbol);
             if let Some(step) = ou_step {
-                let lo = price - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
-                let hi = price + step * (DEFAULT_GRID_COUNT as f64 / 2.0);
+                let lo = price - step * (self.grid_count as f64 / 2.0);
+                let hi = price + step * (self.grid_count as f64 / 2.0);
                 // For geometric mode, ensure lower > 0
                 // 幾何模式需確保下界 > 0
                 (lo.max(price * 0.01), hi)
@@ -431,7 +451,7 @@ impl GridTrading {
             )
         };
 
-        self.grid_levels.insert(symbol.to_string(), build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode));
+        self.grid_levels.insert(symbol.to_string(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
         self.out_of_range_count.insert(symbol.to_string(), 0);
         self.last_cross_idx.remove(symbol);
     }
@@ -469,7 +489,15 @@ impl GridTrading {
             return None;
         }
         let b = num / den;
-        let theta = (-b).max(0.001);
+        // FIX-07: If b >= 0 (trending/random walk, not mean-reverting), OU model
+        // is invalid — return None to fall back to adaptive ±10% range.
+        // Old code clamped theta to 0.001 which produced σ·√(2/0.001) = huge spacing.
+        // FIX-07：若 b >= 0（趨勢/隨機遊走，非均值回歸），OU 模型不適用，
+        // 返回 None 讓呼叫端回退到 ±10% 自適應範圍。
+        if b >= 0.0 {
+            return None;
+        }
+        let theta = (-b).max(0.01); // sane minimum for genuine mean-reversion
 
         let sigma = (changes.iter().map(|c| c * c).sum::<f64>() / n_f).sqrt();
         let mu = prices.iter().sum::<f64>() / prices.len() as f64;
@@ -499,20 +527,21 @@ impl GridTrading {
         let mu = prices.iter().sum::<f64>() / prices.len() as f64;
 
         if let Some(step) = self.compute_ou_step(symbol) {
+            let gc = self.grid_count;
             let new_levels = match self.spacing_mode {
                 GridSpacingMode::Linear => {
-                    let lower = mu - step * (DEFAULT_GRID_COUNT as f64 / 2.0);
+                    let lower = mu - step * (gc as f64 / 2.0);
                     build_linear_levels(
                         lower,
-                        lower + step * (DEFAULT_GRID_COUNT as f64 - 1.0),
-                        DEFAULT_GRID_COUNT,
+                        lower + step * (gc as f64 - 1.0),
+                        gc,
                     )
                 }
                 GridSpacingMode::Geometric => {
-                    let half_range = step * (DEFAULT_GRID_COUNT as f64 / 2.0);
+                    let half_range = step * (gc as f64 / 2.0);
                     let lower = (mu - half_range).max(mu * 0.01);
                     let upper = mu + half_range;
-                    build_geometric_levels(lower, upper, DEFAULT_GRID_COUNT)
+                    build_geometric_levels(lower, upper, gc)
                 }
             };
             self.grid_levels.insert(symbol.to_string(), new_levels);
@@ -527,7 +556,12 @@ impl GridTrading {
         self.ou_lookback = params.ou_lookback;
         self.health_check_interval = params.health_check_interval;
         self.max_out_of_range = params.max_out_of_range;
-        info!(strategy = "grid_trading", "params updated / 參數已更新");
+        // FIX-06: Apply grid_levels from config (was ignored before).
+        // FIX-06：應用配置中的 grid_levels（之前被忽略）。
+        if params.grid_levels >= 3 {
+            self.grid_count = params.grid_levels;
+        }
+        info!(strategy = "grid_trading", grid_count = self.grid_count, "params updated / 參數已更新");
         Ok(())
     }
 
@@ -539,6 +573,7 @@ impl GridTrading {
             ou_lookback: self.ou_lookback,
             health_check_interval: self.health_check_interval,
             max_out_of_range: self.max_out_of_range,
+            grid_levels: self.grid_count,
         }
     }
 }
@@ -656,7 +691,7 @@ impl Strategy for GridTrading {
                     ctx.price * (1.0 + ADAPTIVE_RANGE_PCT),
                 ),
             };
-            self.grid_levels.insert(sym.clone(), build_levels(lower, upper, DEFAULT_GRID_COUNT, &self.spacing_mode));
+            self.grid_levels.insert(sym.clone(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
         }
 
         // Per-symbol health check every health_check_interval ticks.

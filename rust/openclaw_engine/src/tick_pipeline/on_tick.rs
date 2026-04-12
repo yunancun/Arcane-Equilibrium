@@ -89,61 +89,8 @@ impl TickPipeline {
         }
 
         // Session 11: feed trade & orderbook events into 1-minute aggregators.
-        // Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
-        // Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。
-        if let Some(event_type) = event.metadata.get("type").map(|s| s.as_str()) {
-            match event_type {
-                "trade" => {
-                    let side = event
-                        .metadata
-                        .get("side")
-                        .and_then(|s| crate::database::aggregators::TradeSide::parse(s));
-                    let qty = event
-                        .metadata
-                        .get("qty")
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .unwrap_or(0.0);
-                    if let Some(side) = side {
-                        if let Some(msg) = self.trade_aggregator.record(
-                            &event.symbol,
-                            side,
-                            qty,
-                            event.last_price,
-                            event.ts_ms,
-                        ) {
-                            if let Some(ref tx) = self.market_data_tx {
-                                let _ = tx.try_send(msg);
-                            }
-                        }
-                    }
-                }
-                "orderbook" => {
-                    let bids: Vec<(f64, f64)> = event
-                        .metadata
-                        .get("bids5")
-                        .and_then(|s| serde_json::from_str(s).ok())
-                        .unwrap_or_default();
-                    let asks: Vec<(f64, f64)> = event
-                        .metadata
-                        .get("asks5")
-                        .and_then(|s| serde_json::from_str(s).ok())
-                        .unwrap_or_default();
-                    if !bids.is_empty() && !asks.is_empty() {
-                        if let Some(msg) = self.ob_aggregator.record(
-                            &event.symbol,
-                            &bids,
-                            &asks,
-                            event.ts_ms,
-                        ) {
-                            if let Some(ref tx) = self.market_data_tx {
-                                let _ = tx.try_send(msg);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        // FIX-29: extracted to on_tick_helpers.rs.
+        self.process_aggregator_events(event);
 
         // Step 0: Fast track check — emergency actions before normal processing
         // FIX-03+04: Real inputs for flash-crash and margin-crisis detection.
@@ -199,6 +146,11 @@ impl TickPipeline {
                             if close_price > 0.0 {
                                 let pnl = self.paper_state.reduce_position(sym, half_qty, close_price);
                                 self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "fast_track_reduce_half");
+                                // FIX-03b: dispatch exchange order for Demo/Live so
+                                // Bybit-side position matches local paper_state.
+                                // FIX-03b：Demo/Live 模式派發交易所訂單，避免本地狀態與交易所倉位脫節。
+                                let is_primary = self.pipeline_kind.is_exchange();
+                                self.dispatch_close_order(sym, *is_long, half_qty, event, is_primary);
                             }
                         }
                     }
@@ -1074,7 +1026,8 @@ impl TickPipeline {
         let daily_loss = self
             .intent_processor
             .daily_loss_pct_pub(self.paper_state.balance());
-        let risk_config = self.intent_processor.risk_config().clone();
+        // FIX-32: borrow instead of deep-cloning RiskConfig per tick.
+        let risk_config = self.intent_processor.risk_config();
         let position_rows: Vec<crate::position_risk_evaluator::PositionRow> = self
             .paper_state
             .positions()
@@ -1226,82 +1179,13 @@ impl TickPipeline {
                 "tick stats"
             );
 
-            // GAP-7 / idle-writer-fix #4: emit PositionSnapshot for every open
-            // paper position every 1000 ticks so trading.position_snapshots
-            // stays populated for ML training.
-            // GAP-7：每 1000 ticks 發射持倉快照以填充 position_snapshots 表。
-            if let Some(ref tx) = self.trading_tx {
-                for pos in self.paper_state.positions() {
-                    let mark_price = *self
-                        .latest_prices
-                        .get(&pos.symbol)
-                        .unwrap_or(&pos.entry_price);
-                    let unrealized_pnl = if pos.is_long {
-                        (mark_price - pos.entry_price) * pos.qty
-                    } else {
-                        (pos.entry_price - mark_price) * pos.qty
-                    };
-                    let msg = crate::database::TradingMsg::PositionSnapshot {
-                        ts_ms: event.ts_ms,
-                        symbol: pos.symbol.clone(),
-                        side: if pos.is_long {
-                            "long".to_string()
-                        } else {
-                            "short".to_string()
-                        },
-                        qty: pos.qty,
-                        entry_price: pos.entry_price,
-                        mark_price,
-                        unrealized_pnl,
-                        engine_mode: self.pipeline_kind.db_mode().to_string(),
-                    };
-                    let _ = tx.try_send(msg);
-                }
-            }
+            // GAP-7: FIX-29 extracted to on_tick_helpers.rs.
+            self.emit_periodic_snapshots(event);
         }
 
         // Measure elapsed time for the full tick / 計算完整 tick 處理耗時
         let tick_duration_us = tick_start.elapsed().as_micros() as u64;
         self.maybe_canary_record(event, indicators, signals, intents, tick_duration_us)
     }
-
-    fn maybe_canary_record(
-        &self,
-        event: &PriceEvent,
-        indicators: Option<IndicatorSnapshot>,
-        signals: Vec<Signal>,
-        intents: Vec<crate::intent_processor::OrderIntent>,
-        tick_duration_us: u64,
-    ) -> Option<CanaryRecord> {
-        if !self.canary_mode {
-            return None;
-        }
-        Some(CanaryRecord {
-            schema_version: "1.0.0".into(),
-            source: "rust_engine".into(),
-            tick_number: self.stats.total_ticks,
-            timestamp_ms: event.ts_ms,
-            symbol: event.symbol.clone(),
-            price: event.last_price,
-            indicators,
-            signals,
-            order_intents: intents,
-            paper_state: self.paper_state.export_state(),
-            stats: self.stats.clone(),
-            tick_duration_us,
-        })
-    }
-
-    fn compute_indicators(&self, symbol: &str) -> Option<IndicatorSnapshot> {
-        let ohlcv = self.kline_manager.get_ohlcv(symbol, "1m", Some(100))?;
-        if ohlcv.close.len() < 30 {
-            return None;
-        }
-        Some(IndicatorEngine::compute_all(
-            &ohlcv.high,
-            &ohlcv.low,
-            &ohlcv.close,
-            &ohlcv.volume,
-        ))
-    }
+    // FIX-29: maybe_canary_record + compute_indicators moved to on_tick_helpers.rs
 }

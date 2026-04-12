@@ -78,32 +78,18 @@ impl LearningConfig {
 
 /// Master enable flags for all ML/RL/AI subsystems.
 /// 所有 ML/RL/AI 子系統的總開關。
+///
+/// FIX-22: Removed 4 dead fields (linucb_enabled, thompson_enabled,
+/// directive_apply_enabled, scorer_enabled) — they were never read at runtime,
+/// violating the "可調參數禁止假功能" rule. Re-add when subsystems are wired.
+/// FIX-22：移除 4 個死欄位 — 運行時從未讀取，違反「可調參數禁止假功能」規則。
+/// 子系統接線時再加回。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MlSwitches {
-    /// LinUCB contextual bandit arm selection.
-    /// LinUCB 上下文老虎機 arm 選擇。
-    #[serde(default = "default_true")]
-    pub linucb_enabled: bool,
-
-    /// Thompson Sampling NIG posterior arm selection.
-    /// Thompson Sampling NIG 後驗 arm 選擇。
-    #[serde(default = "default_true")]
-    pub thompson_enabled: bool,
-
     /// Phase 4.1 Claude API teacher consumer loop. Default OFF (operator IPC flip to enable).
     /// Phase 4.1 Claude API 教師消費迴圈。預設關閉（operator IPC 翻開才啟用）。
     #[serde(default)]
     pub teacher_loop_enabled: bool,
-
-    /// Hard kill-switch for DirectiveApplier execution path.
-    /// DirectiveApplier 執行路徑的硬性 kill-switch。
-    #[serde(default = "default_true")]
-    pub directive_apply_enabled: bool,
-
-    /// LightGBM/ONNX scorer Tier-1 inference.
-    /// LightGBM/ONNX scorer Tier-1 推論。
-    #[serde(default = "default_true")]
-    pub scorer_enabled: bool,
 
     /// News pipeline periodic fetch.
     /// 新聞管線週期擷取。
@@ -118,11 +104,7 @@ fn default_true() -> bool {
 impl Default for MlSwitches {
     fn default() -> Self {
         Self {
-            linucb_enabled: default_true(),
-            thompson_enabled: default_true(),
             teacher_loop_enabled: false, // Phase 4.1 default-off contract
-            directive_apply_enabled: default_true(),
-            scorer_enabled: default_true(),
             news_pipeline_enabled: default_true(),
         }
     }
@@ -380,11 +362,7 @@ mod tests {
             !cfg.switches.teacher_loop_enabled,
             "Phase 4.1 teacher loop must default OFF"
         );
-        // Other switches default ON for normal operation
-        assert!(cfg.switches.linucb_enabled);
-        assert!(cfg.switches.thompson_enabled);
-        assert!(cfg.switches.directive_apply_enabled);
-        assert!(cfg.switches.scorer_enabled);
+        // FIX-22: linucb/thompson/directive_apply/scorer removed (dead config)
         assert!(cfg.switches.news_pipeline_enabled);
     }
 
@@ -475,7 +453,6 @@ teacher_loop_enabled = true
         let cfg: LearningConfig = toml::from_str(toml_str).unwrap();
         assert!(cfg.switches.teacher_loop_enabled);
         // Other defaults preserved / 其他預設值保留
-        assert!(cfg.switches.linucb_enabled);
         assert_eq!(cfg.linucb.exploration_weight, 1.0);
         assert!(cfg.validate().is_ok());
     }

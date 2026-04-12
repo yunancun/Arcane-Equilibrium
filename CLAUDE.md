@@ -280,4 +280,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-12：tests engine lib **961** + core **366** + e2e **29** + promotion **32** = **1388** / Python **2852** passed **0 fail** · **全程序鏈審計 P0 全修 ✅**（8/8 P0 Live blocker 修復完畢：FIX-03/04/09/10/13/14/15/19）· **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：W22 Wed P1 核心（FIX-05/06/07/11/29）→ W22 Thu+ G-1 AI Agent · LG-1 21d paper 到期（05-01）。
+> 截至 2026-04-12：tests engine lib **965** + bin **5** + core **366** + e2e **29** + promotion **32** = **1397** / Python **2852** passed **0 fail** · **全程序鏈審計 P0（8/8）+ P1（18/18）全修 ✅** + 二輪嚴格逐行驗證 26/26 PASS + CONCERN 全修（FIX-03b 交易所派單/FIX-19b per-symbol fee/FIX-16b 測試品質）· KNOWN_ISSUES TRADE-2/TRADE-4 → RESOLVED（OPEN 9 / RESOLVED 15）· **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：commit → W22 Thu+ G-1 AI Agent · LG-1 21d paper 到期（05-01）。

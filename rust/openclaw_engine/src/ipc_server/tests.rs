@@ -724,7 +724,7 @@ async fn test_rc1_patch_learning_and_budget_configs_round_trip() {
     let dd = make_test_data_dir();
     let (rs, ls, bs) = rc1_stores();
     // Patch learning + then read back via get_learning_config.
-    let patch_req = r#"{"jsonrpc":"2.0","method":"patch_learning_config","params":{"patch":{"linucb_enabled":true}},"id":9005}"#;
+    let patch_req = r#"{"jsonrpc":"2.0","method":"patch_learning_config","params":{"patch":{"news_pipeline_enabled":true}},"id":9005}"#;
     let resp = dispatch_request(
         patch_req,
         &config,

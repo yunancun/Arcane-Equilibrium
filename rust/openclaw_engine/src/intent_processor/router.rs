@@ -176,7 +176,7 @@ impl IntentProcessor {
                 price,
                 balance,
                 exposure_pct,
-                0.0, // correlated_exposure_pct — Phase C wiring
+                Self::compute_correlated_exposure_pct(paper_state), // FIX-05: real correlated exposure
                 1.0, // leverage — paper = 1x
                 daily_loss,
                 is_reducing,
@@ -417,7 +417,7 @@ impl IntentProcessor {
                 price,
                 balance,
                 exposure_pct,
-                0.0, // correlated_exposure_pct — Phase C wiring
+                Self::compute_correlated_exposure_pct(paper_state), // FIX-05: real correlated exposure
                 1.0, // leverage — paper = 1x
                 daily_loss,
                 is_reducing,

@@ -356,9 +356,11 @@ impl AccountManager {
     /// 啟用或禁用帳戶的對沖模式。
     ///
     /// POST /v5/account/set-hedging-mode
+    /// FIX-55/BB-A2: Pre-wired, not on trading path. Path verified per Bybit V5 docs.
     ///
     /// hedging: "ON" = enable, "OFF" = disable
     /// hedging: "ON" = 啟用, "OFF" = 禁用
+    #[allow(dead_code)]
     pub async fn set_hedging_mode(
         &self,
         client: &BybitRestClient,
@@ -410,6 +412,8 @@ impl AccountManager {
     /// 還款保證金借幣。
     ///
     /// POST /v5/account/repay
+    /// FIX-55/BB-A3: Pre-wired, not on trading path. Path verified per Bybit V5 docs.
+    #[allow(dead_code)]
     pub async fn repay(&self, client: &BybitRestClient, coin: &str) -> BybitResult<()> {
         let body = serde_json::json!({
             "coin": coin,

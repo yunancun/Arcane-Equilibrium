@@ -488,4 +488,121 @@ mod tests {
         assert_eq!(PatchSource::Migration.as_str(), "migration");
         assert_eq!(PatchSource::Startup.as_str(), "startup");
     }
+
+    // ── FIX-17: Config hot-reload + tick concurrency tests ──
+
+    /// FIX-17: Concurrent readers + writers must never observe torn/partial state.
+    /// 10 reader threads + 5 writer threads. Every snapshot must be internally
+    /// consistent (threshold and name move together in each patch).
+    /// FIX-17：並發讀寫不能觀察到撕裂/部分狀態。10 讀線程 + 5 寫線程，
+    /// 每個快照的 threshold 和 name 必須一致。
+    #[test]
+    fn test_concurrent_read_during_write_no_torn_state() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+
+        let store = Arc::new(ConfigStore::new(ToyConfig {
+            threshold: 0,
+            name: "v0".into(),
+        }));
+        let done = Arc::new(AtomicBool::new(false));
+
+        // 5 writer threads — each sets threshold=i, name="vN"
+        let mut handles = vec![];
+        for i in 1..=5 {
+            let s = Arc::clone(&store);
+            handles.push(thread::spawn(move || {
+                for _ in 0..200 {
+                    let val = i;
+                    s.apply_patch(
+                        PatchSource::Agent,
+                        |c| {
+                            c.threshold = val;
+                            c.name = format!("v{val}");
+                        },
+                        no_validation,
+                    )
+                    .unwrap();
+                }
+            }));
+        }
+
+        // 10 reader threads — each reads and verifies consistency
+        for _ in 0..10 {
+            let s = Arc::clone(&store);
+            let d = Arc::clone(&done);
+            handles.push(thread::spawn(move || {
+                while !d.load(Ordering::Relaxed) {
+                    let snap = s.load();
+                    let expected_name = format!("v{}", snap.threshold);
+                    assert_eq!(
+                        snap.name, expected_name,
+                        "torn state: threshold={} but name={}",
+                        snap.threshold, snap.name
+                    );
+                }
+            }));
+        }
+
+        // Wait for writers, then signal readers to stop
+        for h in handles.drain(..5) {
+            h.join().unwrap();
+        }
+        done.store(true, Ordering::Relaxed);
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    /// FIX-17: version() is monotonically increasing even under concurrent patching.
+    /// FIX-17：version() 在並發補丁下仍單調遞增。
+    #[test]
+    fn test_version_monotonic_under_concurrent_writes() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+
+        let store = Arc::new(ConfigStore::new(ToyConfig {
+            threshold: 0,
+            name: "mono".into(),
+        }));
+        let done = Arc::new(AtomicBool::new(false));
+
+        // 3 writer threads
+        let mut handles = vec![];
+        for _ in 0..3 {
+            let s = Arc::clone(&store);
+            handles.push(thread::spawn(move || {
+                for _ in 0..100 {
+                    s.apply_patch(PatchSource::Agent, |c| c.threshold += 1, no_validation)
+                        .unwrap();
+                }
+            }));
+        }
+
+        // 1 version-monitor thread — version must never decrease
+        {
+            let s = Arc::clone(&store);
+            let d = Arc::clone(&done);
+            handles.push(thread::spawn(move || {
+                let mut last_v = 0u64;
+                while !d.load(Ordering::Relaxed) {
+                    let v = s.version();
+                    assert!(v >= last_v, "version went backwards: {last_v} → {v}");
+                    last_v = v;
+                }
+            }));
+        }
+
+        // Wait writers, signal monitor
+        for h in handles.drain(..3) {
+            h.join().unwrap();
+        }
+        done.store(true, Ordering::Relaxed);
+        for h in handles {
+            h.join().unwrap();
+        }
+        // 3 writers × 100 = 300
+        assert_eq!(store.version(), 300);
+        assert_eq!(store.load().threshold, 300);
+    }
 }
