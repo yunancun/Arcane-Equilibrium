@@ -88,7 +88,9 @@
 
 **W21 6-04~08 Phase 6 驗收 ✅**（2026-04-11）— 6-04 集成測試：reconciler_e2e.rs 新增 7 場景（MinorDrift 不重設/SideFlip/Ghost/冷卻/全局冷卻/多級恢復 Defensive→Normal/REST 漸進三階段）+ 6-05 壓測 Rust 4 場景（100 cycle 快速翻轉/50 symbols 爆發/handler 快速升降/性能 1000 calls <100ms）+ Python 5 場景（10 線程並發 register/promote/metrics/冪等/100 策略批量）+ 6-06 sync_commit 驗證 PASS（global `synchronous_commit=on` V006:90 已保護 orders/fills）+ 6-07~08 EvolutionEngine 保留決策（用於 DL/AI agent 學習，與 PromotionPipeline 分工文檔化）。E2 修復 3 項（Ghost handler 完整鏈路/promote 並發斷言 ==1/temp 文件碰撞）。879 engine lib + 18 e2e + 2792 Python passed。
 
-**留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1907 行超 1200 硬上限（pre-existing，需 refactor 拆分）。
+**E5 Performance Optimization ✅**（2026-04-12）— 23 項全部處理（20 fixed / 2 skipped / 1 deferred）。關鍵：`TickContext<'a>` 零拷貝策略接口 + `push_capped<T>()` 環形緩衝工具（13+ 重複消除）+ PriceEvent 5 typed fields + `tokio::join!` 7 表並行 flush + `ShadowOrderRequest`→`OrderDispatchRequest` 重命名 + `now_ms()`/`is_stale()` 工具函數。17 files, net -336 lines。934+366+27 = 1327 tests pass。
+
+**留尾**（非阻塞）：W1 event_consumer 拆分。governance_routes.py 1907 行超 1200 硬上限（pre-existing，需 refactor 拆分）。D-02 PriceEvent metadata HashMap 移除（待所有 producer 遷移至 structured fields）。
 
 **歷史細節**（不要重複載入）：
 - 1A→1C-4 commit 敘事 → `docs/worklogs/2026-04-08--arch_rc1_1c_history_archive.md`
@@ -286,4 +288,4 @@ state_models ← state_compiler ← state_store ← main_legacy ← main.py
 
 ## 十一、一句話狀態
 
-> 截至 2026-04-12：tests engine lib **965** + bin **5** + core **366** + e2e **29** + promotion **32** = **1397** / Python **2852** passed **0 fail** · **全程序鏈審計 P0（8/8）+ P1（18/18）全修 ✅** + 二輪嚴格逐行驗證 26/26 PASS + CONCERN 全修（FIX-03b 交易所派單/FIX-19b per-symbol fee/FIX-16b 測試品質）· KNOWN_ISSUES TRADE-2/TRADE-4 → RESOLVED（OPEN 9 / RESOLVED 15）· **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：commit → W22 Thu+ G-1 AI Agent · LG-1 21d paper 到期（05-01）。
+> 截至 2026-04-12：tests engine lib **934** + core **366** + types **27** + e2e **29** + promotion **32** = **1388** / Python **2852** passed **0 fail** · **E5 Performance Optimization 23 items 全部處理 ✅**（20 fixed / 2 skipped / 1 deferred，net -336 lines）· **全程序鏈審計 P0（8/8）+ P1（18/18）全修 ✅** + 二輪驗證 26/26 PASS + CONCERN 全修 · **Phase 5 PAUSED**（策略 gross 負 edge）· **Live_Ready ✅** · **下一步**：W22 Thu+ G-1 AI Agent · LG-1 21d paper 到期（05-01）。

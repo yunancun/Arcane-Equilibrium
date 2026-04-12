@@ -149,7 +149,7 @@ impl Strategy for FundingArb {
         self.positions.remove(symbol);
     }
 
-    fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
+    fn on_tick(&mut self, _ctx: &TickContext<'_>) -> Vec<StrategyAction> {
         // TODO(R-06): When real funding rate logic is wired, add prev_* snapshot
         // before mutation here (same pattern as other strategies).
         // TODO(R-06)：接入真實資金費率邏輯時，在此處突變前添加 prev_* 快照。
@@ -241,11 +241,11 @@ mod tests {
     fn test_on_tick_placeholder() {
         let mut s = FundingArb::new();
         let ctx = TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         };
         assert!(s.on_tick(&ctx).is_empty());

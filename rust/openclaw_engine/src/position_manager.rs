@@ -304,8 +304,10 @@ impl PositionManager {
     /// Confirm pending MMR (Maintenance Margin Rate) change after risk limit adjustment.
     /// 風險限額調整後確認待定的 MMR（維持保證金率）變更。
     ///
-    /// POST /v5/position/confirm-mmr
-    /// FIX-55/BB-A1: Pre-wired, not on trading path. Path verified per Bybit V5 docs.
+    /// POST /v5/position/confirm-pending-mmr
+    /// FIX-56/BB-A1: Corrected path (was confirm-mmr, missing `pending-`).
+    /// FIX-56/BB-A1：修正路徑（原為 confirm-mmr，缺少 `pending-`）。
+    /// Pre-wired, not on trading path. 預接線，不在交易路徑上。
     #[allow(dead_code)]
     ///
     /// Note: Replaces the deprecated /v5/position/set-risk-limit endpoint.
@@ -327,8 +329,10 @@ impl PositionManager {
             "confirming pending MMR / 確認待定 MMR 變更"
         );
 
+        // FIX-56/BB-A1: Correct path is confirm-pending-mmr (not confirm-mmr).
+        // FIX-56/BB-A1：正確路徑為 confirm-pending-mmr（非 confirm-mmr）。
         self.client
-            .post_checked("/v5/position/confirm-mmr", &body)
+            .post_checked("/v5/position/confirm-pending-mmr", &body)
             .await?;
         Ok(())
     }

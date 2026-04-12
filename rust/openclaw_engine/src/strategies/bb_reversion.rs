@@ -216,7 +216,7 @@ impl BbReversion {
     /// 建構入場意圖 — 根據 use_limit 決定限價或市價單。
     fn make_entry_intent(
         &self,
-        ctx: &TickContext,
+        ctx: &TickContext<'_>,
         is_long: bool,
         conf: f64,
         bb_lower: f64,
@@ -239,7 +239,7 @@ impl BbReversion {
         // CONF-D: scale entry confidence
         let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
         OrderIntent {
-            symbol: ctx.symbol.clone(),
+            symbol: ctx.symbol.to_string(),
             is_long,
             qty: self.default_qty,
             confidence: scaled,
@@ -281,12 +281,12 @@ impl Strategy for BbReversion {
         self.positions.remove(symbol);
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
-        let ind = match &ctx.indicators {
+    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],
         };
-        let last_ms = self.last_trade_ms.get(&ctx.symbol).copied().unwrap_or(0);
+        let last_ms = self.last_trade_ms.get(ctx.symbol).copied().unwrap_or(0);
         if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
         }
@@ -307,11 +307,11 @@ impl Strategy for BbReversion {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(ctx.symbol.clone(), self.positions.get(&ctx.symbol).copied());
-        self.prev_last_trade_ms.insert(ctx.symbol.clone(), last_ms);
+        self.prev_position.insert(ctx.symbol.to_string(), self.positions.get(ctx.symbol).copied());
+        self.prev_last_trade_ms.insert(ctx.symbol.to_string(), last_ms);
 
         let mut intents = Vec::new();
-        match self.positions.get(&ctx.symbol).copied() {
+        match self.positions.get(ctx.symbol).copied() {
             None => {
                 // Entry: oversold long / 入場：超賣做多
                 if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
@@ -323,8 +323,8 @@ impl Strategy for BbReversion {
                         bb.lower,
                         bb.upper,
                     )));
-                    self.positions.insert(ctx.symbol.clone(), true);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.insert(ctx.symbol.to_string(), true);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 // Entry: overbought short / 入場：超買做空
                 } else if bb.percent_b > 1.0 && rsi > self.rsi_overbought {
                     intents.push(StrategyAction::Open(self.make_entry_intent(
@@ -334,8 +334,8 @@ impl Strategy for BbReversion {
                         bb.lower,
                         bb.upper,
                     )));
-                    self.positions.insert(ctx.symbol.clone(), false);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.insert(ctx.symbol.to_string(), false);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
             Some(_is_long) => {
@@ -346,12 +346,12 @@ impl Strategy for BbReversion {
                 if bb.percent_b >= self.exit_pctb_lower && bb.percent_b <= self.exit_pctb_upper {
                     let exit_conf = (self.exit_conf_base + hurst_boost).clamp(0.4, 0.8);
                     intents.push(StrategyAction::Close {
-                        symbol: ctx.symbol.clone(),
+                        symbol: ctx.symbol.to_string(),
                         confidence: exit_conf,
                         reason: "bb_mean_revert".into(),
                     });
-                    self.positions.remove(&ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.remove(ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
         }
@@ -384,23 +384,24 @@ mod tests {
     use super::*;
     use openclaw_core::indicators::{BollingerResult, IndicatorSnapshot};
 
-    fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext {
+    fn ctx_bb(pct_b: f64, rsi: f64, ts: u64) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: 0.04,
+                percent_b: pct_b,
+            }),
+            rsi_14: Some(rsi),
+            ..Default::default()
+        }));
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: ts,
-            indicators: Some(IndicatorSnapshot {
-                bollinger: Some(BollingerResult {
-                    upper: 51000.0,
-                    middle: 50000.0,
-                    lower: 49000.0,
-                    bandwidth: 0.04,
-                    percent_b: pct_b,
-                }),
-                rsi_14: Some(rsi),
-                ..Default::default()
-            }),
-            signals: vec![],
+            indicators: Some(ind),
+            signals: &[],
             h0_allowed: true,
         }
     }

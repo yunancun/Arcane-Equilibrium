@@ -88,19 +88,13 @@ impl ModeState {
     /// Push a timestamped intent, keeping max 50.
     /// 推入帶時間戳意圖，保留最多 50 個。
     pub fn push_intent(&mut self, intent: TimestampedIntent) {
-        self.recent_intents.push_back(intent);
-        if self.recent_intents.len() > 50 {
-            self.recent_intents.pop_front();
-        }
+        crate::tick_pipeline::on_tick_helpers::push_capped(&mut self.recent_intents, intent, 50);
     }
 
     /// Push a timestamped fill, keeping max 50.
     /// 推入帶時間戳成交，保留最多 50 個。
     pub fn push_fill(&mut self, fill: TimestampedFill) {
-        self.recent_fills.push_back(fill);
-        if self.recent_fills.len() > 50 {
-            self.recent_fills.pop_front();
-        }
+        crate::tick_pipeline::on_tick_helpers::push_capped(&mut self.recent_fills, fill, 50);
     }
 
     /// Check if risk config store version bumped since last sync.

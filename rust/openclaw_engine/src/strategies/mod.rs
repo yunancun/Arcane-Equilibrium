@@ -58,7 +58,7 @@ pub trait Strategy: Send {
 
     /// Process a tick and return strategy actions (Open or Close).
     /// 處理 tick 並返回策略動作（Open 或 Close）。
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction>;
+    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction>;
 
     /// Called when an intent from this strategy was rejected by the governance pipeline.
     /// 當此策略的意圖被治理管線拒絕時調用。
@@ -653,7 +653,7 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.active = active;
         }
-        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
+        fn on_tick(&mut self, _ctx: &TickContext<'_>) -> Vec<StrategyAction> {
             Vec::new()
         }
     }

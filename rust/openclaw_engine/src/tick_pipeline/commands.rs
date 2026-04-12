@@ -322,7 +322,7 @@ impl TickPipeline {
         // Clear pending_close flag if this was a close fill / 如果是平倉成交，清除待處理平倉標記
         self.pending_close_symbols.remove(symbol);
 
-        self.recent_fills.push_back(TimestampedFill {
+        push_capped(&mut self.recent_fills, TimestampedFill {
             timestamp_ms: ts_ms,
             symbol: symbol.to_string(),
             is_long,
@@ -330,10 +330,7 @@ impl TickPipeline {
             price: fill_price,
             fee,
             strategy: strategy.to_string(),
-        });
-        if self.recent_fills.len() > 50 {
-            self.recent_fills.pop_front();
-        }
+        }, 50);
 
         if let Some(ref tx) = self.trading_tx {
             let em = self.pipeline_kind.db_mode();
@@ -372,10 +369,10 @@ impl TickPipeline {
         event: &PriceEvent,
         is_primary: bool,
     ) {
-        if let Some(ref tx) = self.shadow_order_tx {
+        if let Some(ref tx) = self.order_dispatch_tx {
             self.exchange_seq = self.exchange_seq.wrapping_add(1);
             let prefix = if is_primary { "oc_risk" } else { "sh_risk" };
-            let _ = tx.send(ShadowOrderRequest {
+            let _ = tx.send(OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
                 qty,
@@ -421,11 +418,11 @@ impl TickPipeline {
                 .collect();
             let count = positions.len();
             for (symbol, is_long, qty, price) in positions {
-                if let Some(ref tx) = self.shadow_order_tx {
+                if let Some(ref tx) = self.order_dispatch_tx {
                     self.exchange_seq = self.exchange_seq.wrapping_add(1);
                     let order_link_id =
                         format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
-                    let _ = tx.send(ShadowOrderRequest {
+                    let _ = tx.send(OrderDispatchRequest {
                         symbol: symbol.clone(),
                         is_long: !is_long, // opposite side to close / 相反方向平倉
                         qty,
@@ -480,7 +477,7 @@ impl TickPipeline {
         //   (a) pipeline_kind 為 Demo 或 Live，或
         //   (b) system_mode 為 DemoReserved 且 shadow channel 可用。
         let is_exchange = self.pipeline_kind.is_exchange()
-            || (self.shadow_order_tx.is_some()
+            || (self.order_dispatch_tx.is_some()
                 && matches!(self.system_mode, SystemMode::DemoReserved));
         if is_exchange {
             // Read position data before mutating self.exchange_seq.
@@ -514,10 +511,10 @@ impl TickPipeline {
                     _ => return false,
                 },
             };
-            if let Some(ref tx) = self.shadow_order_tx {
+            if let Some(ref tx) = self.order_dispatch_tx {
                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
                 let order_link_id = format!("oc_ipc_close_{}_{}", ts_ms, self.exchange_seq);
-                let _ = tx.send(ShadowOrderRequest {
+                let _ = tx.send(OrderDispatchRequest {
                     symbol: symbol.to_string(),
                     is_long: !is_long, // opposite side to close / 相反方向平倉
                     qty,
@@ -578,10 +575,7 @@ impl TickPipeline {
 
         PipelineSnapshot {
             schema_version: "2.0.0".into(),
-            written_at_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0),
+            written_at_ms: openclaw_core::now_ms(),
             paper_state: self.paper_state.export_state(),
             latest_prices: self.latest_prices.clone(),
             stats: self.stats.clone(),
