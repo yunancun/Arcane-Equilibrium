@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-12（全程序鏈審計 58 發現 · 8 P0 · PM APPROVED 修復計劃）
+最後更新：2026-04-13（G-SR-1 v2.5 FINAL · 5 輪 52 項修正 · 7 Session 實施計劃）
 測試基準線：**Rust engine lib 965 + bin 5 + core 366 + e2e 29 + promotion 32 = 1397 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -31,9 +31,9 @@
 | W19 | 04-14~18 | G-3 IPC 認證 · G-5 Rate Limit · OC-3 / 6-RC-6 告警 | ✅ |
 | W20 | 04-21~25 | SEC E3 審查 · 6-01~03 漸進放權 | ✅ |
 | W21 | 04-28~05-02 | 6-04~13 Phase 6 驗收 · 3E-ARCH · Audit BLOCKERs | ✅ |
-| W22 | 05-05~09 | **G-1 R-02** AI Agent（Strategist/Guardian）· G-2/OC-5 FundingArb · LG-2/3 | ⬜ |
-| W23 | 05-12~16 | **G-1 R-06** 全 5 agent · **G-7** Teacher · **G-10** Calibration · LG-4/5 | ⬜ |
-| W24+ | 05-19+ | Phase 5 補強 · Backlog | ⬜ |
+| W22 | 05-05~09 | **G-SR-1 S1-S4** Phase A 信號源收緊（~18h）· LG-2/3 | ⬜ |
+| W23 | 05-12~16 | **G-SR-1 S5-S7** Phase B Agent 接線（~14h）· G-7 Teacher · G-10 Cal · LG-4/5 | ⬜ |
+| W24+ | 05-19+ | G-SR-1-RESEARCH 策略研究 · R-06 全 5 agent · Phase 5 補強 · Backlog | ⬜ |
 
 **關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13 → 3E-ARCH~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
@@ -97,13 +97,101 @@ Phase 5 cost_gate 改造已全部上線。現在唯一阻擋正式 Live 的是**
 > 背景：`ai_service.py` 5 個 handler 全為 stub（返回保守固定值），H1-H5 AI 判決輸入為空值。系統目前完全靠 H0 + Rust 規則驅動。
 > R-02 = Strategist + Guardian 接線；R-06 = Analyst + Conductor + Scout + FundingArb IPC。
 
-- [ ] **G-1 / R-02** Strategist + Guardian 真實接線（ai_service.py → multi_agent_framework，優先這兩個關鍵角色，W22）
-  - 前置：G-3 IPC 認證完成
-- [ ] **G-SR-1** 真正策略研究（W22）— Strategist Agent 主導，在現有 4 策略參數空間外探索新策略邏輯
-  - 現況：Rust 引擎固定 4 策略（MaCrossover/BbReversion/BbBreakout/GridTrading），參數由 JumpStart/LinUCB 調優但種類不增加；Python AUTO_DEPLOYER.on_scan_results() 已於 2026-04-10 廢棄（死代碼），GUI "Auto-Deployed" 區塊改為顯示 Rust ScannerRunner 的活躍 symbol universe
-  - 目標：Strategist Agent 能提出新策略邏輯（訊號組合/出入場規則/止損方式），通過 Paper 驗證後由開發者實作為 Rust Strategy trait，進入正式 4+ 策略池
-  - 實施方向：(a) Strategist 定期（每週）分析 fills/PnL/regime 數據，生成「策略改進提案」寫入 DB；(b) 提案包含：新策略描述、預期 Sharpe、測試週期、所需指標；(c) 人類 operator 審閱後批准進入 Rust 實作 backlog；(d) 長期：自動 backtesting 管線驗證提案（依賴 Phase 7+ backtest 基礎設施）
-  - 前置：G-1/R-02 Strategist Agent 接線 + 足夠 fills 數據積累（LG-1 21d 後）
+### G-SR-1 Signal Tightening + R-02 Agent Wiring（計劃 FINAL，5 輪 52 項修正）
+
+方案文件：`docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.5.md`
+Phase A ~23h（信號源收緊）+ Phase B ~18h（Agent 接線）= ~41h 總實施量
+
+#### Session 1 — A0 基礎模組提取（~4h）
+
+**可並行**：兩路 sub-agent 同時工作，無相互依賴。
+
+- [ ] **A0-a** 從 `grid_trading.rs` 提取 `grid_helpers.rs`（~130 行純函數）
+  - Sub-agent 1：提取 build_linear_levels/build_geometric_levels/build_levels/nearest_grid_idx/compute_ou_step/rebalance
+  - 目標：grid_trading.rs 1234→~1104 行
+- [ ] **A0-b** 建立 `confluence.rs` 共享模組（~250 行）
+  - Sub-agent 2：PersistenceTracker struct + compute_score() + score_to_qty_pct() + indicators_ready()
+  - `pub mod confluence;` + `pub mod grid_helpers;` 加入 strategies/mod.rs
+- [ ] **A0-E2** 兩路完成後 E2 快速審查
+
+#### Session 2 — A0-c + A1 + A3 三路並行（~5h）
+
+**可並行**：A0-c/A1 依賴 A0-b（S1 完成）；A3 依賴 A0-a（S1 完成）。三者無相互依賴。
+
+- [ ] **A0-c** ConfluenceConfig 初始化路徑 + `#[serde(default)]` 全覆蓋
+  - Sub-agent 1：3 個 Params struct 加 confluence 字段 + StrategyFactory 構建 + update_params 觸發 rebuild（R4-7）
+- [ ] **A1** 時間制信號持續性過濾器（min_persistence_ms=120000）
+  - Sub-agent 2：PersistenceTracker.check() 接入 ma_crossover/bb_reversion/bb_breakout 三策略 on_tick()
+- [ ] **A3** Grid 趨勢冷卻（1x-6x 動態倍率）
+  - Sub-agent 3：grid_trading.rs 加 trend_adjusted_cooldown()，per-symbol HashMap，TOML 3 新參數
+- [ ] **S2-E2** 三路合併後 E2 審查
+
+#### Session 3 — A2 加權匯合評分 + A-PARAMS（~5h）
+
+**順序執行**：A2 依賴 A1（persistence 邏輯已存在）；A-PARAMS 依賴 A2。
+
+- [ ] **A2** 加權匯合評分接入 3 策略
+  - compute_score() 調用點：ma_crossover（trend 權重）/ bb_reversion（reversion 權重）/ bb_breakout（qty-only）
+  - intent.confidence = confluence_score（R3-2）；min_notional guard（R3-9）
+  - Grid 排除（用 A3 冷卻）；funding_arb 排除（stub）
+- [ ] **A-PARAMS** 擴展 3 個 Params struct + param_ranges() + TOML 默認值 + 驗證邏輯
+  - weight_sum=65 驗證 + 所有新字段 serde(default)
+- [ ] **S3-E2** E2 審查
+
+#### Session 4 — A-TEST 測試 + E4 回歸（~4h）
+
+**可並行**：confluence 單元測試 / persistence 測試 / integration 測試 三路。
+
+- [ ] **A-TEST-1** confluence.rs 單元測試（~22 個）— Sub-agent 1
+- [ ] **A-TEST-2** PersistenceTracker 單元測試（~10 個）— Sub-agent 2
+- [ ] **A-TEST-3** 策略集成測試（~5 個）— Sub-agent 3
+- [ ] **A-E4** E4 回歸（engine lib + e2e 全基線）
+- [ ] **A-E5** E5 性能審查（Phase A 改動 ≥3 E1 任務，強制）
+
+#### Session 5 — B0+B1+B1.5 Rust 側 Agent 基礎設施（~6h）
+
+**可並行前半段**：B0（scheduler）和 B1（client）可同時開發；B1.5 依賴 B1。
+
+- [ ] **B0** `strategist_scheduler.rs` — tokio 後台任務 + DB metrics 查詢（R4-6）+ 指數退避（R4-2）+ Mutex 策略引用（R5-2）
+  - Sub-agent 1：StrategistScheduler struct + run_forever + evaluate_cycle + validate_recommendation
+- [ ] **B1** `ai_client.rs` — AiServiceClient（100ms connect timeout + per-method TTL）
+  - Sub-agent 2：JSON-RPC over Unix socket + request_async + error handling
+- [ ] **B1.5** AIServiceListener 啟動接線（R4-3）— `app.on_event("startup")` + stale socket cleanup
+- [ ] **S5-E2** E2 審查
+
+#### Session 6 — B2+B3+B4 Agent 真實接線 + 驗收（~6h）
+
+**順序為主**：B2→B3→B4 有依賴鏈。
+
+- [ ] **B2** ai_service.py stub→real wiring（strategist_evaluate + guardian_check）
+- [ ] **B3** Strategist 驗證層（range + delta ±30% + weight sum=65，weight params 免 delta cap）
+- [ ] **B4** Guardian L1 信息層（事件分類 via Ollama L1，MessageBus relay）
+- [ ] **B-E2** E2 審查
+- [ ] **B-E4** E4 回歸（全基線）
+- [ ] **B-E5** E5 性能審查（Phase B 完成，強制）
+
+#### Session 7 — Phase C stub + PM 驗收（~2h）
+
+- [ ] **C1-C2** Analyst attribution + Scout intelligence stub 接線（Phase C 為 W23 R-06 依賴）
+- [ ] **G-SR-1-PM** PM 端到端驗收：Fragment signal 過濾率 / Grid 降頻效果 / Strategist 參數調整確認
+
+**Sub-agent 並行策略總結**：
+| Session | 並行路數 | 方式 |
+|---------|---------|------|
+| S1 | 2 路 | A0-a ‖ A0-b（worktree 隔離） |
+| S2 | 3 路 | A0-c ‖ A1 ‖ A3（不同文件，可 inline 並行） |
+| S3 | 1 路 | A2→A-PARAMS 順序（修改同批文件） |
+| S4 | 3 路 | 三組測試（不同 test 文件） |
+| S5 | 2 路 | B0 ‖ B1（不同新文件） |
+| S6 | 1 路 | B2→B3→B4 順序鏈 |
+| S7 | 1 路 | 收尾 |
+
+---
+
+- [ ] **G-1 / R-02** Strategist + Guardian 真實接線（= G-SR-1 Phase B，上方 S5-S6）
+  - 前置：G-3 IPC 認證 ✅ + G-SR-1 Phase A 完成
+- [ ] **G-SR-1-RESEARCH** 策略研究（Phase B 後）— Strategist Agent 分析 fills/PnL/regime，生成策略改進提案
+  - 前置：G-SR-1 全部完成 + 足夠 fills 數據（LG-1 21d 後）
 - [ ] **G-1 / R-06** Analyst + Conductor + Scout 接線（完整 5 agent，W23）
 - [ ] **G-2** FundingArb.on_tick() 資金費率 IPC 接線（依賴 OC-5 REST 輪詢，W22）
   - 現況：funding_arb.rs on_tick() 永遠返回 vec![]（TODO R-06 註解）
@@ -219,8 +307,8 @@ WIRE-0/WIRE-1 + DL-1/DL-2 + JS-1 + 5-01~03 已全部 ✅。下面是原 backlog 
 
 ### 留尾追蹤項
 
-- [ ] **PNL-5** bb_breakout 是否完全 dead — PNL-3 表中 round_trips=0；可能 (a) `on_tick()` 從未產生 Open intent、(b) 產生但全被 cost_gate / Guardian 攔下、(c) 開了倉但持續持有未平倉。檢查最近 7d signals/intents 表
-- [ ] **PNL-6** fast_track 死碼決議 — `fast_track::evaluate_fast_track` 的 `price_drop_pct` / `margin_utilization_pct` 兩條分支：要嘛真實接線（從 paper_state 計算 margin util、從 black_swan_detector 計算閃崩 pct），要嘛刪除死碼。當前唯一觸發路徑（CB 升級）已有 reconciler 自動處理，flash/margin 邏輯重複度低
+- [x] **PNL-5** bb_breakout 近乎 dead ✅ 調查完成（2026-04-12）— 3 天僅 2 fills / 2 intents（ARIAUSDT Sell + RAVEUSDT Buy），零 round-trip。對比 grid_trading 3418 / ma_crossover 766 / bb_reversion 422。根因：三重入場門檻（squeeze→expansion 序列 + volume_ratio≥1.5 + Donchian 突破）+ 30min 窗口過嚴。**結論：非完全 dead 但參數過嚴致觸發率 ~0，等 G-SR-1 策略研究一起重新評估參數**
+- [x] **PNL-6** fast_track 已真實接線 ✅ 調查完成（2026-04-12）— FIX-03/04 已將 `price_drop_pct`（PriceTracker.max_drop_pct()）和 `margin_utilization_pct`（positions notional/balance×100）真實接線。三條路徑（CloseAll/ReduceToHalf/PauseNewEntries）全有真實邏輯 + exchange dispatch + PNL-4 forensic logging。**TODO 描述已過時，不再是死碼**
 
 ---
 
