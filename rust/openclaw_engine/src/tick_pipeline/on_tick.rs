@@ -146,18 +146,78 @@ impl TickPipeline {
         }
 
         // Step 0: Fast track check — emergency actions before normal processing
-        // PNL-4 (2026-04-12): price_drop_pct and margin_utilization_pct are
-        // hardcoded 0.0 — flash-crash and margin-crisis branches inside
-        // fast_track::evaluate_fast_track() are dead until something computes
-        // them on each tick. The ONLY reachable CloseAll trigger today is
-        // `risk_level >= CircuitBreaker`. Tracked as a separate follow-up.
-        // PNL-4：price_drop / margin_util 仍硬編 0，閃崩/保證金危機分支死碼，
-        // 唯一可觸發的 CloseAll 是 risk_level ≥ CircuitBreaker。
+        // FIX-03+04: Real inputs for flash-crash and margin-crisis detection.
+        // price_drop_pct: max peak-to-current drop across all symbols in window.
+        // margin_utilization_pct: total position notional / balance × 100.
+        // FIX-03+04：閃崩和保證金危機偵測的真實輸入。
+        let price_drop_pct = self.price_tracker.max_drop_pct();
+        let margin_utilization_pct = {
+            let balance = self.paper_state.balance();
+            if balance > 0.0 {
+                let total_notional: f64 = self.paper_state.positions().iter().map(|p| {
+                    let px = self.latest_prices.get(&p.symbol).copied().unwrap_or(p.entry_price);
+                    p.qty * px
+                }).sum();
+                (total_notional / balance * 100.0).min(999.0)
+            } else {
+                0.0
+            }
+        };
         let ft_action = crate::fast_track::evaluate_fast_track(
             self.governance.risk.level,
-            0.0, // PNL-4 dead input — see note above
-            0.0, // PNL-4 dead input — see note above
+            price_drop_pct,
+            margin_utilization_pct,
         );
+        // FIX-03: Track whether fast_track blocks new entries for this tick.
+        // ReduceToHalf and PauseNewEntries both suppress new opens.
+        // FIX-03：追蹤 fast_track 是否暫停本 tick 的新開倉。
+        let ft_pause_new_entries = ft_action == crate::fast_track::FastTrackAction::PauseNewEntries
+            || ft_action == crate::fast_track::FastTrackAction::ReduceToHalf;
+
+        // FIX-03: Handle ReduceToHalf — close half qty of each position.
+        // FIX-03：處理 ReduceToHalf — 每個倉位平半倉。
+        if ft_action == crate::fast_track::FastTrackAction::ReduceToHalf {
+            let positions: Vec<(String, bool, f64)> = self
+                .paper_state
+                .positions()
+                .iter()
+                .map(|p| (p.symbol.clone(), p.is_long, p.qty))
+                .collect();
+            if !positions.is_empty() {
+                tracing::warn!(
+                    risk_level = ?self.governance.risk.level,
+                    ts_ms = event.ts_ms,
+                    positions = positions.len(),
+                    price_drop_pct,
+                    margin_utilization_pct,
+                    "FAST_TRACK ReduceToHalf — halving all positions / 快速通道半倉"
+                );
+                for (sym, is_long, qty) in &positions {
+                    let half_qty = qty / 2.0;
+                    if half_qty > 0.0 {
+                        if let Some(close_price) = self.paper_state.latest_price(sym) {
+                            if close_price > 0.0 {
+                                let pnl = self.paper_state.reduce_position(sym, half_qty, close_price);
+                                self.emit_close_fill(sym, *is_long, half_qty, close_price, event.ts_ms, pnl, "fast_track_reduce_half");
+                            }
+                        }
+                    }
+                }
+            }
+            // Continue processing stops but skip new entries (ft_pause_new_entries = true)
+        }
+
+        if ft_action == crate::fast_track::FastTrackAction::PauseNewEntries {
+            tracing::info!(
+                risk_level = ?self.governance.risk.level,
+                ts_ms = event.ts_ms,
+                price_drop_pct,
+                margin_utilization_pct,
+                "FAST_TRACK PauseNewEntries — stops only, no new positions / 快速通道暫停開倉"
+            );
+            // Continue processing — stops will run, but new entries blocked by ft_pause_new_entries
+        }
+
         if ft_action == crate::fast_track::FastTrackAction::CloseAll {
             let symbols: Vec<String> = self
                 .paper_state
@@ -512,6 +572,16 @@ impl TickPipeline {
                 // StrategyAction::Open — 完整治理管線（不變）
                 // ═══════════════════════════════════════════════════════════════
                 StrategyAction::Open(intent) => {
+                // FIX-03: fast_track ReduceToHalf/PauseNewEntries blocks new opens.
+                // FIX-03：快速通道暫停開倉時跳過所有新開倉意圖。
+                if ft_pause_new_entries {
+                    tracing::debug!(
+                        strategy = %strategy.name(),
+                        symbol = %intent.symbol,
+                        "FIX-03: new entry blocked by fast_track / 快速通道暫停開倉"
+                    );
+                    continue;
+                }
                 if is_exchange_mode {
                     // ═══ EXCHANGE MODE: gates only, send order to exchange ═══
                     // ═══ 交易所模式：僅過門禁，發送訂單到交易所 ═══

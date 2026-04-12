@@ -206,3 +206,127 @@ impl EdgeEstimates {
         self.grand_mean_bps
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FIX-13: Tests for edge_estimates (9 pub fn, JSON parse, edge cases)
+// FIX-13：邊際估計測試（9 公開函數、JSON 解析、邊界情況）
+// ═══════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_json() -> &'static str {
+        r#"{
+            "_meta": {"grand_mean_bps": -1.5, "n_cells": 3},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 2.1, "win_rate_shrunk": 0.55, "n": 120, "std_bps": 3.0},
+            "ma_crossover::ETHUSDT": {"shrunk_bps": -0.8, "win_rate": 0.48, "n": 80},
+            "grid_trading::SOLUSDT": {"shrunk_bps": 0.0, "n": 5}
+        }"#
+    }
+
+    #[test]
+    fn test_empty_returns_default() {
+        let e = EdgeEstimates::empty();
+        assert!(!e.is_populated());
+        assert_eq!(e.n_cells(), 0);
+        assert_eq!(e.grand_mean_bps(), 0.0);
+        assert!(e.get("any", "ANY").is_none());
+    }
+
+    #[test]
+    fn test_load_from_str_valid() {
+        let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
+        assert!(e.is_populated());
+        assert_eq!(e.n_cells(), 3);
+        assert!((e.grand_mean_bps() - (-1.5)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_get_existing_cell() {
+        let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
+        assert!((e.get("bb_reversion", "BTCUSDT").unwrap() - 2.1).abs() < 1e-10);
+        let cell = e.get_cell("bb_reversion", "BTCUSDT").unwrap();
+        assert!((cell.win_rate - 0.55).abs() < 1e-10);
+        assert_eq!(cell.n_trades, 120);
+        assert!((cell.std_bps - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_get_nonexistent_cell() {
+        let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
+        assert!(e.get("unknown_strat", "BTCUSDT").is_none());
+        assert!(e.get("bb_reversion", "UNKNOWN").is_none());
+    }
+
+    #[test]
+    fn test_win_rate_fallback_to_raw() {
+        // ma_crossover::ETHUSDT has "win_rate" not "win_rate_shrunk"
+        let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
+        let cell = e.get_cell("ma_crossover", "ETHUSDT").unwrap();
+        assert!((cell.win_rate - 0.48).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_win_rate_default_and_std_default() {
+        // grid_trading::SOLUSDT has no win_rate or std_bps
+        let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
+        let cell = e.get_cell("grid_trading", "SOLUSDT").unwrap();
+        assert!((cell.win_rate - 0.5).abs() < 1e-10); // default 0.5
+        assert!((cell.std_bps - 0.0).abs() < 1e-10);  // default 0.0
+    }
+
+    #[test]
+    fn test_load_from_str_invalid_json() {
+        assert!(EdgeEstimates::load_from_str("not json").is_none());
+    }
+
+    #[test]
+    fn test_load_from_str_empty_object() {
+        let e = EdgeEstimates::load_from_str("{}").unwrap();
+        assert!(!e.is_populated());
+        assert_eq!(e.n_cells(), 0);
+        assert_eq!(e.grand_mean_bps(), 0.0);
+    }
+
+    #[test]
+    fn test_load_from_str_meta_only() {
+        let e = EdgeEstimates::load_from_str(r#"{"_meta": {"grand_mean_bps": 5.0}}"#).unwrap();
+        assert!(!e.is_populated());
+        assert!((e.grand_mean_bps() - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_load_from_file_missing() {
+        assert!(EdgeEstimates::load_from_file("/nonexistent/path.json").is_none());
+    }
+
+    #[test]
+    fn test_win_rate_clamped() {
+        let json = r#"{"strat::SYM": {"shrunk_bps": 1.0, "win_rate_shrunk": 1.5, "n": 10}}"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let cell = e.get_cell("strat", "SYM").unwrap();
+        assert!((cell.win_rate - 1.0).abs() < 1e-10); // clamped to 1.0
+    }
+
+    #[test]
+    fn test_negative_win_rate_clamped() {
+        let json = r#"{"strat::SYM": {"shrunk_bps": 1.0, "win_rate_shrunk": -0.3, "n": 10}}"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let cell = e.get_cell("strat", "SYM").unwrap();
+        assert!((cell.win_rate - 0.0).abs() < 1e-10); // clamped to 0.0
+    }
+
+    #[test]
+    fn test_load_from_env_or_default_missing_file() {
+        // With a non-existent base dir, should return empty (cold-start fallback)
+        let e = EdgeEstimates::load_from_env_or_default("/nonexistent_base");
+        assert!(!e.is_populated());
+    }
+
+    #[test]
+    fn test_entry_without_shrunk_bps_skipped() {
+        let json = r#"{"strat::SYM": {"win_rate": 0.6, "n": 10}}"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        assert_eq!(e.n_cells(), 0); // no shrunk_bps → not inserted
+    }
+}

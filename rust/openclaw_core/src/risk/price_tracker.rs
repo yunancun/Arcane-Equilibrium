@@ -164,6 +164,39 @@ impl PriceHistoryTracker {
         }
     }
 
+    /// Compute the maximum price drop percentage across all tracked symbols
+    /// within the rolling window. Returns the worst (largest) drop as a
+    /// positive percentage (e.g., 5.2 means a 5.2% drop from peak).
+    /// Used by fast_track to detect flash crashes.
+    /// 計算滾動窗口內所有追蹤幣種的最大跌幅百分比。
+    /// 返回最大跌幅（正值，如 5.2 表示從峰值跌 5.2%）。
+    /// 供 fast_track 閃崩偵測使用。
+    pub fn max_drop_pct(&self) -> f64 {
+        let mut worst = 0.0_f64;
+        for deque in self.history.values() {
+            if deque.len() < 2 {
+                continue;
+            }
+            // Find peak price and current (last) price in window
+            // 找窗口內的峰值和當前（最後）價格
+            let mut peak = f64::MIN;
+            for &(_, p) in deque.iter() {
+                if p > peak {
+                    peak = p;
+                }
+            }
+            if peak <= 0.0 {
+                continue;
+            }
+            let current = deque.back().map(|&(_, p)| p).unwrap_or(0.0);
+            let drop_pct = (peak - current) / peak * 100.0;
+            if drop_pct > worst {
+                worst = drop_pct;
+            }
+        }
+        worst
+    }
+
     /// Get the number of tracked symbols / 取得追蹤的幣種數量
     pub fn symbol_count(&self) -> usize {
         self.history.len()

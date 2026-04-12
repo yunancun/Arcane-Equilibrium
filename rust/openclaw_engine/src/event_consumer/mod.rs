@@ -588,8 +588,35 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                         let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
                         let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
-                        let exec_fee: f64 = exec.exec_fee.parse().unwrap_or(0.0);
                         let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
+
+                        // FIX-19: execution.fast topic omits execFee/feeRate fields.
+                        // When the field is empty or unparseable, estimate fee from
+                        // notional × taker_fee_rate so PnL accounting stays correct.
+                        // FIX-19：execution.fast 不帶 execFee，空值時用名義值×手續費率估算。
+                        let exec_fee: f64 = {
+                            let parsed = exec.exec_fee.parse::<f64>().unwrap_or(0.0);
+                            if parsed == 0.0 && exec_qty > 0.0 && exec_price > 0.0 {
+                                if let Some(fee_rate) = taker_fee_rate {
+                                    let estimated = exec_qty * exec_price * fee_rate;
+                                    if estimated > 0.0 {
+                                        tracing::debug!(
+                                            exec_id = %exec.exec_id,
+                                            notional = exec_qty * exec_price,
+                                            fee_rate,
+                                            estimated_fee = estimated,
+                                            "FIX-19: execFee missing, estimated from taker rate \
+                                             / execFee 缺失，使用 taker 費率估算"
+                                        );
+                                    }
+                                    estimated
+                                } else {
+                                    0.0
+                                }
+                            } else {
+                                parsed
+                            }
+                        };
 
                         info!(
                             exec_id = %exec.exec_id,
