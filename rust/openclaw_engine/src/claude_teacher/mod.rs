@@ -206,14 +206,9 @@ impl ClaudeTeacher {
     }
 }
 
-/// Wall-clock millis helper (mirrors ai_budget::tracker::now_ms).
-/// 牆鐘毫秒輔助函數（對應 ai_budget::tracker::now_ms）。
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+// S-04: use shared now_ms() from openclaw_core instead of local copy.
+// S-04：使用 openclaw_core 的共用 now_ms() 取代本地副本。
+use openclaw_core::now_ms;
 
 // ---------------------------------------------------------------------------
 // Tests / 測試

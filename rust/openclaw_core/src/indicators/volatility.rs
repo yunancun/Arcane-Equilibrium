@@ -123,7 +123,20 @@ pub struct HurstResult {
 
 /// Hurst Exponent via R/S analysis with log-log OLS regression.
 /// 通過 R/S 分析和對數-對數 OLS 回歸計算赫斯特指數。
-pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResult> {
+/// Default Hurst trending threshold (H > 0.60 → trending regime).
+/// 默認赫斯特趨勢門檻（H > 0.60 → 趨勢狀態）。
+pub const DEFAULT_HURST_TRENDING_THRESHOLD: f64 = 0.60;
+/// Default Hurst mean-reverting threshold (H < 0.40 → mean-reverting regime).
+/// 默認赫斯特均值回歸門檻（H < 0.40 → 均值回歸狀態）。
+pub const DEFAULT_HURST_MEAN_REVERTING_THRESHOLD: f64 = 0.40;
+
+pub fn hurst(
+    close: &[f64],
+    min_lag: usize,
+    max_lag: usize,
+    trending_threshold: f64,
+    mean_reverting_threshold: f64,
+) -> Option<HurstResult> {
     if min_lag < 2 || min_lag >= max_lag {
         return None;
     }
@@ -228,16 +241,11 @@ pub fn hurst(close: &[f64], min_lag: usize, max_lag: usize) -> Option<HurstResul
     // 將結果鉗位到 [0.0, 1.0] — 有效赫斯特指數範圍。
     let h = ((n * sum_xy - sum_x * sum_y) / denom).clamp(0.0, 1.0);
 
-    // QC-2: Hurst threshold for trending regime (H > this → trending).
-    // QC-2: 赫斯特趨勢狀態門檻（H > 此值 → 趨勢）。
-    const HURST_TRENDING_THRESHOLD: f64 = 0.60;
-    // QC-2: Hurst threshold for mean-reverting regime (H < this → mean-reverting).
-    // QC-2: 赫斯特均值回歸狀態門檻（H < 此值 → 均值回歸）。
-    const HURST_MEAN_REVERTING_THRESHOLD: f64 = 0.40;
-
-    let regime = if h > HURST_TRENDING_THRESHOLD {
+    // QC-H12: Regime thresholds now injected via function params (was hardcoded 0.60/0.40).
+    // QC-H12：Regime 門檻現從函數參數注入（原硬編碼 0.60/0.40）。
+    let regime = if h > trending_threshold {
         "trending".to_string()
-    } else if h < HURST_MEAN_REVERTING_THRESHOLD {
+    } else if h < mean_reverting_threshold {
         "mean_reverting".to_string()
     } else {
         "random_walk".to_string()
@@ -359,14 +367,14 @@ mod tests {
     fn test_hurst_trending() {
         // Strong uptrend should yield H > 0.5
         let data: Vec<f64> = (0..200).map(|i| 100.0 + i as f64 * 0.5).collect();
-        let r = hurst(&data, 10, 50).unwrap();
+        let r = hurst(&data, 10, 50, DEFAULT_HURST_TRENDING_THRESHOLD, DEFAULT_HURST_MEAN_REVERTING_THRESHOLD).unwrap();
         assert!(r.hurst > 0.4); // trending tendency
     }
 
     #[test]
     fn test_hurst_edge() {
-        assert!(hurst(&[1.0; 10], 10, 50).is_none()); // too little data
-        assert!(hurst(&CLOSE_20, 5, 3).is_none()); // min_lag >= max_lag
+        assert!(hurst(&[1.0; 10], 10, 50, 0.60, 0.40).is_none()); // too little data
+        assert!(hurst(&CLOSE_20, 5, 3, 0.60, 0.40).is_none()); // min_lag >= max_lag
     }
 
     // --- EWMA Vol ---

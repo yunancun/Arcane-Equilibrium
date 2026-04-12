@@ -4,6 +4,7 @@
 //! 平倉操作、快照、系統模式。
 
 use super::*;
+use super::on_tick_helpers::{push_capped, make_context_id, make_intent_id, make_verdict_id, make_fill_id};
 
 impl TickPipeline {
 
@@ -86,16 +87,13 @@ impl TickPipeline {
 
         // Persist Guardian verdict (all verdicts including rejections) / 持久化 Guardian 裁定（含拒絕）
         if let (Some(ref tx), Some(ref vi)) = (&self.trading_tx, &result.verdict_info) {
-            let now_ms_v = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+            let now_ms_v = openclaw_core::now_ms();
             let em_v = self.pipeline_kind.db_mode();
             let _ = tx.try_send(crate::database::TradingMsg::RiskVerdict {
-                verdict_id: format!("vrd-{em_v}-{symbol}-{now_ms_v}"),
+                verdict_id: make_verdict_id(em_v, symbol, now_ms_v),
                 ts_ms: now_ms_v,
-                intent_id: format!("intent-{em_v}-{symbol}-{now_ms_v}"),
-                context_id: format!("ctx-{em_v}-{symbol}-{now_ms_v}"),
+                intent_id: make_intent_id(em_v, symbol, now_ms_v),
+                context_id: make_context_id(em_v, symbol, now_ms_v),
                 symbol: symbol.to_string(),
                 verdict: vi.verdict.clone(),
                 risk_score: vi.risk_score,
@@ -130,10 +128,7 @@ impl TickPipeline {
             return Err("fill_qty rounded to 0".into());
         }
 
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = openclaw_core::now_ms();
         let realized_pnl = self.paper_state.apply_fill(
             symbol,
             is_long,
@@ -146,15 +141,12 @@ impl TickPipeline {
         self.stats.total_intents += 1;
         self.stats.total_fills += 1;
 
-        self.recent_intents.push_back(TimestampedIntent {
+        push_capped(&mut self.recent_intents, TimestampedIntent {
             timestamp_ms: now_ms,
             intent: intent.clone(),
             result: "submitted".into(),
-        });
-        if self.recent_intents.len() > 50 {
-            self.recent_intents.pop_front();
-        }
-        self.recent_fills.push_back(TimestampedFill {
+        }, 50);
+        push_capped(&mut self.recent_fills, TimestampedFill {
             timestamp_ms: now_ms,
             symbol: symbol.to_string(),
             is_long,
@@ -162,10 +154,7 @@ impl TickPipeline {
             price: fill.fill_price,
             fee: fill.fee,
             strategy: strategy.to_string(),
-        });
-        if self.recent_fills.len() > 50 {
-            self.recent_fills.pop_front();
-        }
+        }, 50);
 
         let order_id = format!("ext-{symbol}-{now_ms}");
 
@@ -173,9 +162,9 @@ impl TickPipeline {
         // 持久化對等：trading_tx 已接時，發 Intent + Fill 到 PG writer。
         if let Some(ref tx) = self.trading_tx {
             let em = self.pipeline_kind.db_mode();
-            let context_id = format!("ctx-{em}-{symbol}-{now_ms}");
+            let context_id = make_context_id(em, symbol, now_ms);
             let _ = tx.try_send(crate::database::TradingMsg::Intent {
-                intent_id: format!("intent-{em}-{symbol}-{now_ms}"),
+                intent_id: make_intent_id(em, symbol, now_ms),
                 ts_ms: now_ms,
                 signal_id: String::new(),
                 context_id: context_id.clone(),
@@ -188,7 +177,7 @@ impl TickPipeline {
                 engine_mode: em.to_string(),
             });
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("fill-{em}-{symbol}-{now_ms}"),
+                fill_id: make_fill_id(em, symbol, now_ms),
                 ts_ms: now_ms,
                 order_id: order_id.clone(),
                 symbol: symbol.to_string(),
@@ -350,7 +339,7 @@ impl TickPipeline {
             let em = self.pipeline_kind.db_mode();
             let fr = self.intent_processor.fee_rate(symbol);
             let _ = tx.try_send(crate::database::TradingMsg::Fill {
-                fill_id: format!("fill-{em}-{}-{}", symbol, ts_ms),
+                fill_id: make_fill_id(em, symbol, ts_ms),
                 ts_ms,
                 order_id: order_link_id.to_string(),
                 symbol: symbol.to_string(),
@@ -361,7 +350,7 @@ impl TickPipeline {
                 fee_rate: fr,
                 realized_pnl,
                 strategy_name: strategy.to_string(),
-                context_id: format!("ctx-{em}-{}-{}", symbol, ts_ms),
+                context_id: make_context_id(em, symbol, ts_ms),
                 engine_mode: em.to_string(),
             });
         }
@@ -412,10 +401,7 @@ impl TickPipeline {
     /// IPC 觸發全部平倉：交易所模式（Demo/Live）通過 shadow 通道發 reduce_only 市價單；
     /// 紙盤模式直接清除 paper_state。返回操作的倉位數量。
     pub(crate) fn ipc_close_all(&mut self) -> usize {
-        let ts_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let ts_ms = openclaw_core::now_ms();
         let is_exchange = self.pipeline_kind.is_exchange();
         if is_exchange {
             // Collect position snapshot first to avoid borrow conflict on self.
@@ -485,10 +471,7 @@ impl TickPipeline {
         hint_is_long: Option<bool>,
         hint_qty: Option<f64>,
     ) -> bool {
-        let ts_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let ts_ms = openclaw_core::now_ms();
         // Use exchange path when:
         //   (a) pipeline_kind is Demo or Live, OR
         //   (b) system_mode is DemoReserved AND shadow channel is active

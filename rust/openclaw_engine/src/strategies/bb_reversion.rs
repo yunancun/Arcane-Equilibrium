@@ -26,6 +26,9 @@ pub struct BbReversionParams {
     pub rsi_oversold: f64,
     /// RSI overbought threshold for short entry / RSI 超買閾值（做空入場）
     pub rsi_overbought: f64,
+    /// QC-#7: Hurst regime confidence boost for mean-reverting regime (default 0.1).
+    /// QC-#7：均值回歸市場狀態信心加成（默認 0.1）。
+    pub hurst_regime_boost: f64,
 }
 
 impl Default for BbReversionParams {
@@ -37,6 +40,7 @@ impl Default for BbReversionParams {
             limit_offset_bps: 10.0,
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
+            hurst_regime_boost: 0.1,
         }
     }
 }
@@ -81,6 +85,14 @@ impl StrategyParams for BbReversionParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            ParamRange {
+                name: "hurst_regime_boost".into(),
+                min: 0.0,
+                max: 0.3,
+                step: Some(0.05),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -96,6 +108,9 @@ impl StrategyParams for BbReversionParams {
         }
         if self.rsi_overbought < 55.0 || self.rsi_overbought > 95.0 {
             return Err("rsi_overbought must be in [55, 95]".into());
+        }
+        if self.hurst_regime_boost < 0.0 || self.hurst_regime_boost > 0.3 {
+            return Err("hurst_regime_boost must be in [0, 0.3]".into());
         }
         Ok(())
     }
@@ -120,6 +135,17 @@ pub struct BbReversion {
     /// FIX-24: Configurable RSI thresholds / 可配置 RSI 閾值
     pub rsi_oversold: f64,
     pub rsi_overbought: f64,
+    /// QC-H3: Entry confidence base (default 0.6). / 入場信心基礎值。
+    pub(crate) entry_conf_base: f64,
+    /// QC-H3: Exit confidence base (default 0.55). / 出場信心基礎值。
+    pub(crate) exit_conf_base: f64,
+    /// QC-H3: Exit %B lower bound (default 0.2). / 出場 %B 下界。
+    pub(crate) exit_pctb_lower: f64,
+    /// QC-H3: Exit %B upper bound (default 0.8). / 出場 %B 上界。
+    pub(crate) exit_pctb_upper: f64,
+    /// QC-#7: Hurst regime boost for mean-reverting regime (default 0.1).
+    /// QC-#7：均值回歸市場狀態信心加成。
+    pub(crate) hurst_regime_boost: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_position: HashMap<String, Option<bool>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -139,6 +165,11 @@ impl BbReversion {
             limit_offset_bps: 10.0,
             rsi_oversold: 30.0,
             rsi_overbought: 70.0,
+            entry_conf_base: 0.6,
+            exit_conf_base: 0.55,
+            exit_pctb_lower: 0.2,
+            exit_pctb_upper: 0.8,
+            hurst_regime_boost: 0.1,
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
@@ -163,7 +194,8 @@ impl BbReversion {
         self.limit_offset_bps = params.limit_offset_bps;
         self.rsi_oversold = params.rsi_oversold;
         self.rsi_overbought = params.rsi_overbought;
-        info!(strategy = "bb_reversion", "params updated / 參數已更新");
+        self.hurst_regime_boost = params.hurst_regime_boost;
+        info!(strategy = "bb_reversion", "params updated / 參數���更新");
         Ok(())
     }
 
@@ -176,6 +208,7 @@ impl BbReversion {
             limit_offset_bps: self.limit_offset_bps,
             rsi_oversold: self.rsi_oversold,
             rsi_overbought: self.rsi_overbought,
+            hurst_regime_boost: self.hurst_regime_boost,
         }
     }
 
@@ -266,8 +299,9 @@ impl Strategy for BbReversion {
 
         // A4: Hurst regime boost — mean-reverting regime boosts reversion confidence
         // A4：Hurst 市场状态 — 均值回归型市场提升回归信心
+        // QC-#7: hurst_regime_boost configurable (was hardcoded 0.1)
         let hurst_boost: f64 = match &ind.hurst {
-            Some(h) if h.regime == "mean_reverting" => 0.1,
+            Some(h) if h.regime == "mean_reverting" => self.hurst_regime_boost,
             _ => 0.0,
         };
 
@@ -281,10 +315,11 @@ impl Strategy for BbReversion {
             None => {
                 // Entry: oversold long / 入場：超賣做多
                 if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
+                    // QC-H3: entry_conf_base configurable (was hardcoded 0.6)
                     intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         true,
-                        (0.6_f64 + hurst_boost).min(1.0),
+                        (self.entry_conf_base + hurst_boost).min(1.0),
                         bb.lower,
                         bb.upper,
                     )));
@@ -295,7 +330,7 @@ impl Strategy for BbReversion {
                     intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         false,
-                        (0.6_f64 + hurst_boost).min(1.0),
+                        (self.entry_conf_base + hurst_boost).min(1.0),
                         bb.lower,
                         bb.upper,
                     )));
@@ -307,8 +342,9 @@ impl Strategy for BbReversion {
                 // Exit: %B returns to [0.2, 0.8] = textbook mean-reversion target reached.
                 // Wider than exact 0.5 to handle crypto mean-overshoot.
                 // 出場：%B 回到 [0.2, 0.8] = 教科書均值回歸目標。比精確 0.5 更寬以應對加密貨幣超調。
-                if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
-                    let exit_conf = (0.55_f64 + hurst_boost).clamp(0.4, 0.8);
+                // QC-H3: exit %B range + exit_conf_base configurable (was [0.2, 0.8] / 0.55)
+                if bb.percent_b >= self.exit_pctb_lower && bb.percent_b <= self.exit_pctb_upper {
+                    let exit_conf = (self.exit_conf_base + hurst_boost).clamp(0.4, 0.8);
                     intents.push(StrategyAction::Close {
                         symbol: ctx.symbol.clone(),
                         confidence: exit_conf,

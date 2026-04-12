@@ -87,7 +87,21 @@ PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md
 - [x] **FIX-31** ← E5: D-03 [Low] — PriceEventKind typed enum + 向後兼容 metadata 雙路徑
 - [x] **FIX-33** ← E5: P-03 [Medium] — event_consumer exec_id 去重 HashSet+VecDeque O(1)
 
-### P2/P3 — 餘下 18 項（文件拆分、ML backfill、GUI/UX、文檔清理）見完整報告。
+### P2/P3 — Session 3.3 追加修復
+
+- [x] **FIX-36** ← FA: #15 [MINOR] — delegation_framework.py 562 行孤立模組刪除
+- [x] **FIX-42** ← A3: §2.1 [MAJOR] — console.html 雙重導航移除（nav-grid 刪除，保留 tab-bar）
+- [x] **FIX-43** ← A3: §2.1 [MAJOR] — tab-trading.html 雙層 iframe 消除（拆為直接 Demo+Paper 頂層 tab）
+- [x] **FIX-49** ← TW: §3.1 [MISSING] — 3 個 daily_summary 補建（04-09/04-10/04-12）
+- **FIX-37** ← FA: #14 [MINOR] — PIPELINE_BRIDGE/STOP_MANAGER None：**by design**（DEAD-PY-2 後有意設 None + 註解 "soft-degraded mode"，strategy_read_routes 有 None check fallback）
+- **FIX-50** ← TW: §7.1 — CHANGELOG 超長：**自然解決**（當前 925 行 < 1200 限）
+- **FIX-58** ← E3: SEC-F05 — Unix socket chmod：**已完成**（0o600 owner-only 已設置）
+
+### 餘下 P2（大工程，W22+ 排期）
+
+- FIX-01 — H1-H5 AI Agent 接入（= G-1 R-02/R-06）
+- FIX-02 — Decision Lease Rust 接入（與 FIX-01 一起）
+- FIX-12 — CSP nonce 遷移（長期）
 
 ---
 

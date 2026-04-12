@@ -11,6 +11,7 @@
 use crate::config::ConfigManager;
 use futures_util::{SinkExt, StreamExt};
 use openclaw_types::{PriceEvent, PriceEventKind};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -75,8 +76,9 @@ pub struct WsClient {
     config: Arc<ConfigManager>,
     event_tx: mpsc::Sender<PriceEvent>,
     cancel: CancellationToken,
-    /// Startup subscriptions (also serves as reconnect replay list) / 啟動訂閱（同時用作重連重播列表）
-    subscriptions: Vec<String>,
+    /// P-06: HashSet for O(1) dedup; Vec reconstituted for batch send.
+    /// P-06：HashSet 去重 O(1)；批次發送時轉 Vec。
+    subscriptions: HashSet<String>,
     /// Optional channel for runtime topic additions/removals (from ScannerRunner) / 運行時主題增減的可選通道
     topic_change_rx: Option<mpsc::UnboundedReceiver<WsTopicChange>>,
 }
@@ -101,7 +103,7 @@ impl WsClient {
             config,
             event_tx,
             cancel,
-            subscriptions: Vec::new(),
+            subscriptions: HashSet::new(),
             topic_change_rx: None,
         }
     }
@@ -109,7 +111,7 @@ impl WsClient {
     /// Add a startup subscription topic (called before run()).
     /// 添加啟動訂閱主題（在 run() 前調用）。
     pub fn subscribe(&mut self, topic: impl Into<String>) {
-        self.subscriptions.push(topic.into());
+        self.subscriptions.insert(topic.into());
     }
 
     /// Attach a runtime topic-change channel. Returns the sender half for callers.
@@ -176,8 +178,9 @@ impl WsClient {
 
                     // Send subscriptions in batches of 10 (Bybit limit per call)
                     // 分批發送訂閱（Bybit 每次調用限制 10 個主題）
+                    let sub_list: Vec<&String> = self.subscriptions.iter().collect();
                     let mut sub_ok = true;
-                    for chunk in self.subscriptions.chunks(SUBSCRIBE_BATCH_SIZE) {
+                    for chunk in sub_list.chunks(SUBSCRIBE_BATCH_SIZE) {
                         let sub_msg = serde_json::json!({
                             "op": "subscribe",
                             "args": chunk,
@@ -232,10 +235,9 @@ impl WsClient {
                                     match change {
                                         WsTopicChange::Subscribe(topics) => {
                                             // 1. Record for reconnect replay / 記錄以供重連重播
+                                            // P-06: HashSet.insert() handles dedup natively / HashSet.insert() 自動去重
                                             for t in &topics {
-                                                if !self.subscriptions.contains(t) {
-                                                    self.subscriptions.push(t.clone());
-                                                }
+                                                self.subscriptions.insert(t.clone());
                                             }
                                             // 2. Send to Bybit in batches / 分批發送給 Bybit
                                             for chunk in topics.chunks(SUBSCRIBE_BATCH_SIZE) {
@@ -420,14 +422,9 @@ impl WsClient {
 // Message parsers / 消息解析器
 // ---------------------------------------------------------------------------
 
-/// Current time in milliseconds — fallback when Bybit omits timestamps (common on Demo).
-/// 當前時間毫秒 — Bybit 省略時間戳時的後備方案（Demo 常見）。
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+// S-04: use shared now_ms() from openclaw_core instead of local copy.
+// S-04：使用 openclaw_core 的共用 now_ms() 取代本地副本。
+use openclaw_core::now_ms;
 
 /// Parse a Bybit public trade item into PriceEvent.
 /// 將 Bybit 公開交易項目解析為 PriceEvent。
@@ -462,10 +459,13 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
     let mut event = PriceEvent::new(symbol, price, ts);
     event.volume_24h = volume;
     event.event_kind = Some(PriceEventKind::Trade);
-    event.metadata.insert("type".into(), "trade".into());
+    // P-02: populate structured fields (preferred over metadata)
+    event.trade_qty = Some(volume);
     if !side.is_empty() {
+        event.trade_side = Some(side.clone());
         event.metadata.insert("side".into(), side);
     }
+    event.metadata.insert("type".into(), "trade".into());
     event.metadata.insert("qty".into(), volume.to_string());
     Some(event)
 }
@@ -576,6 +576,12 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
     event.bid_price = best_bid;
     event.ask_price = best_ask;
     event.event_kind = Some(PriceEventKind::Orderbook);
+    // P-02: Populate structured fields directly — avoids serde round-trip in consumers.
+    // P-02：直接填充結構化欄位 — 消費端免 serde 反序列化。
+    event.bids5 = Some(bid_levels.clone());
+    event.asks5 = Some(ask_levels.clone());
+    // Legacy metadata — kept for backward compat until all consumers migrated.
+    // 舊版 metadata — 保留向後兼容直到所有消費端遷移完畢。
     event.metadata.insert("type".into(), "orderbook".into());
     if let Ok(s) = serde_json::to_string(&bid_levels) {
         event.metadata.insert("bids5".into(), s);
@@ -698,6 +704,10 @@ fn parse_adl_notice_item(item: &serde_json::Value) -> Option<PriceEvent> {
 
     let mut event = PriceEvent::new(symbol, 0.0, ts);
     event.event_kind = Some(PriceEventKind::AdlNotice);
+    // P-02: Structured field — avoids string parse in consumers.
+    // P-02：結構化欄位 — 消費端免字串解析。
+    event.adl_rank = Some(adl_rank as u32);
+    // Legacy metadata — kept for backward compat.
     event.metadata.insert("type".into(), "adl_notice".into());
     event
         .metadata
@@ -903,6 +913,9 @@ mod tests {
         });
         let event = parse_adl_notice_item(&item).unwrap();
         assert_eq!(event.symbol, "BTCUSDT");
+        // P-02: Verify structured field is populated.
+        assert_eq!(event.adl_rank, Some(4));
+        // Legacy metadata still populated for backward compat.
         assert_eq!(event.metadata.get("type").unwrap(), "adl_notice");
         assert_eq!(event.metadata.get("adl_rank").unwrap(), "4");
         assert_eq!(event.metadata.get("side").unwrap(), "Buy");

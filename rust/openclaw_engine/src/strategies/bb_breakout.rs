@@ -136,6 +136,11 @@ pub struct BbBreakout {
     // RC-03：可配置閾值，供 Agent 動態調整
     /// Bandwidth below this = squeeze detected / 帶寬低於此值 = 偵測到壓縮
     pub squeeze_bw: f64,
+    /// QC-H4: Entry confidence base (default 0.7). / 入場信心基礎值。
+    pub(crate) entry_conf_base: f64,
+    /// QC-H4: Exit confidence base (default 0.5). Exit reasons add offsets.
+    /// QC-H4：出場信心基礎值。各出場原因加減偏移。
+    pub(crate) exit_conf_base: f64,
     /// Bandwidth above this = expansion confirmed / 帶寬高於此值 = 確認擴張
     pub expansion_bw: f64,
     /// Minimum volume ratio for breakout entry / 突破入場最低成交量倍率
@@ -166,6 +171,8 @@ impl BbBreakout {
             squeeze_bw: DEFAULT_SQUEEZE_BW,
             expansion_bw: DEFAULT_EXPANSION_BW,
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
+            entry_conf_base: 0.7,
+            exit_conf_base: 0.5,
             prev_position: HashMap::new(),
             prev_squeeze_detected_ms: HashMap::new(),
             prev_entry_price: HashMap::new(),
@@ -314,8 +321,8 @@ impl Strategy for BbBreakout {
                             Some(h) if h.regime == "trending" => 0.1,
                             _ => 0.0,
                         };
-                        // CONF-D: scale entry confidence
-                        let raw_conf = (0.7_f64 + hurst_boost).min(1.0);
+                        // QC-H4: entry_conf_base configurable (was hardcoded 0.7)
+                        let raw_conf = (self.entry_conf_base + hurst_boost).min(1.0);
                         intents.push(StrategyAction::Open(OrderIntent {
                             symbol: ctx.symbol.clone(),
                             is_long,
@@ -341,7 +348,8 @@ impl Strategy for BbBreakout {
             }
             Some(is_long) => {
                 let mut exit_reason: Option<&str> = None;
-                let mut exit_confidence = 0.5_f64;
+                // QC-H4: exit_conf_base configurable (was hardcoded 0.5)
+                let mut exit_confidence = self.exit_conf_base;
 
                 // V2: ATR trailing stop — Chandelier exit, 2×ATR from peak.
                 // V2：ATR 追蹤止損 — Chandelier 出場，峰值 2×ATR。
@@ -355,7 +363,7 @@ impl Strategy for BbBreakout {
                         }
                         if ctx.price <= self.trailing_stop.get(sym).copied().unwrap_or(0.0) {
                             exit_reason = Some("trailing_stop");
-                            exit_confidence = 0.7;
+                            exit_confidence = self.exit_conf_base + 0.2;
                         }
                     } else {
                         let new_stop = ctx.price + stop_distance;
@@ -364,7 +372,7 @@ impl Strategy for BbBreakout {
                         }
                         if ctx.price >= self.trailing_stop.get(sym).copied().unwrap_or(f64::MAX) {
                             exit_reason = Some("trailing_stop");
-                            exit_confidence = 0.7;
+                            exit_confidence = self.exit_conf_base + 0.2;
                         }
                     }
                 }
@@ -375,7 +383,7 @@ impl Strategy for BbBreakout {
                     if let Some(h) = &ind.hurst {
                         if h.regime == "mean_reverting" || h.regime == "random_walk" {
                             exit_reason = Some("regime_shift");
-                            exit_confidence = 0.6;
+                            exit_confidence = self.exit_conf_base + 0.1;
                         }
                     }
                 }
@@ -385,11 +393,11 @@ impl Strategy for BbBreakout {
                 if exit_reason.is_none() {
                     if bb.percent_b >= 0.2 && bb.percent_b <= 0.8 {
                         exit_reason = Some("pctb_revert");
-                        exit_confidence = 0.55;
+                        exit_confidence = self.exit_conf_base + 0.05;
                     } else if bb.bandwidth < self.squeeze_bw {
                         // BW squeeze: volatility collapsed / 帶寬壓縮：波動塌陷
                         exit_reason = Some("bw_squeeze");
-                        exit_confidence = 0.45;
+                        exit_confidence = self.exit_conf_base - 0.05;
                     }
                 }
 

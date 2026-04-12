@@ -50,7 +50,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         last_tick_ms: shared_last_tick_ms,
         trading_tx,
         context_tx,
-        exchange_event_rx: _exchange_event_rx_field,
+        exchange_event_rx,
         seed_positions,
         account_manager,
         linucb_runtime,
@@ -59,7 +59,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         budget_store,
         audit_pool,
         symbol_registry,
-        scanner_store: _scanner_store,
+        scanner_store: _, // D-03: unused — ScannerConfig read via scanner_runner, not event_consumer
         shared_risk_level,
         is_primary,
         ready_tx,
@@ -115,10 +115,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // See governor_cooldown.rs for logic details.
     // ARCH-RC1 1C-4 B1：從 V014 還原 governor 降級冷卻。邏輯詳見 governor_cooldown.rs。
     if let Some(pool) = audit_pool.as_ref() {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+        let now_ms = openclaw_core::now_ms();
         match load_governor_cooldown_from_audit(pool, now_ms).await {
             Some(ts_ms) => {
                 pipeline.set_last_governor_de_escalation_ms(Some(ts_ms));
@@ -375,10 +372,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     .await
                 {
                     Ok(bars) => {
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
+                        let now_ms = openclaw_core::now_ms();
                         let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
                             .iter()
                             .filter(|b| b.start_time + 60_000 <= now_ms)
@@ -485,7 +479,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut seen_exec_set: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut seen_exec_order: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     const MAX_SEEN_EXEC_IDS: usize = 500;
-    let mut exchange_event_rx = _exchange_event_rx_field;
+    let mut exchange_event_rx = exchange_event_rx;
     let mut pending_reg_rx = pending_reg_rx_slot;
     let mut last_pending_check = Instant::now();
     let pending_timeout = std::time::Duration::from_secs(5);
@@ -710,10 +704,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                             let em = pipeline.pipeline_kind.db_mode().to_string();
                                             let _ = tx.try_send(crate::database::TradingMsg::OrderStateChange {
                                                 order_id: po.order_link_id.clone(),
-                                                ts_ms: std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .map(|d| d.as_millis() as u64)
-                                                    .unwrap_or(0),
+                                                ts_ms: openclaw_core::now_ms(),
                                                 from_status: Some("Working".into()),
                                                 to_status: status.to_string(),
                                                 filled_qty: None,
@@ -743,10 +734,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         let size: f64 = pos.size.parse().unwrap_or(0.0);
                         let avg_price: f64 = pos.avg_price.parse().unwrap_or(0.0);
                         let is_long = pos.side.eq_ignore_ascii_case("Buy");
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
+                        let now_ms = openclaw_core::now_ms();
                         // Bybit returns side=="None" when the position is flat — coerce
                         // size to 0 so upsert removes any stale local entry.
                         // Bybit 在持倉為空時回傳 side=="None"，強制 size 為 0 以移除舊條目。
@@ -950,10 +938,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
                         // EXT-1: Check for timed-out pending orders (every 5s)
                         if !pending_orders.is_empty() && last_pending_check.elapsed() >= pending_timeout {
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as u64;
+                            let now_ms = openclaw_core::now_ms();
                             let stale_keys: Vec<String> = pending_orders
                                 .iter()
                                 .filter(|(_, po)| now_ms.saturating_sub(po.sent_ts_ms) > 5000)
@@ -1015,10 +1000,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                 total_exposure_pct,
                                 cooldown_until_ts_ms: 0,
                                 kill_switch_active: false,
-                                snapshot_ts_ms: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_default()
-                                    .as_millis() as u64,
+                                snapshot_ts_ms: openclaw_core::now_ms(),
                             });
 
                             let status = pipeline.status();
@@ -1109,13 +1091,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                                                 {
                                                     Ok(bars) => {
                                                         let now_ms =
-                                                            std::time::SystemTime::now()
-                                                                .duration_since(
-                                                                    std::time::UNIX_EPOCH,
-                                                                )
-                                                                .unwrap_or_default()
-                                                                .as_millis()
-                                                                as u64;
+                                                            openclaw_core::now_ms();
                                                         let mut core_bars: Vec<
                                                             openclaw_core::klines::KlineBar,
                                                         > = bars

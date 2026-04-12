@@ -21,12 +21,9 @@ const FUNDING_INTERVAL_SECS: u64 = 900; // 15 min
 const OI_INTERVAL_SECS: u64 = 300; // 5 min
 const LSR_INTERVAL_SECS: u64 = 900; // 15 min
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
+// S-04: use shared now_ms() from openclaw_core instead of local copy.
+// S-04：使用 openclaw_core 的共用 now_ms() 取代本地副本。
+use openclaw_core::now_ms;
 
 /// Spawn REST polling tasks for funding, OI, LSR.
 /// m-3 fix: accepts Vec<String> so callers can pass SymbolRegistry::snapshot() directly.
