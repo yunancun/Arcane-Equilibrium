@@ -456,12 +456,14 @@ impl TickPipeline {
 
         // Step 4+5: Per-strategy dispatch + intent processing with rejection/fill callbacks (RC-04/RC-05).
         // 步驟 4+5：逐策略分派 + 意圖處理，含拒絕/成交回調。
+        // P-08: Borrow instead of clone — lifetime scoped to this on_tick call.
+        // P-08：借用取代克隆 — 生命週期限定在此 on_tick 調用中。
         let ctx = TickContext {
-            symbol: sym.clone(),
+            symbol: sym,
             price: event.last_price,
             timestamp_ms: event.ts_ms,
-            indicators: indicators.clone(),
-            signals: signals.clone(),
+            indicators: indicators.as_ref(),
+            signals: &signals,
             h0_allowed, // RRC-1-A1: real H0 gate result from Step 0.5
         };
 
@@ -595,8 +597,8 @@ impl TickPipeline {
                         } else {
                             None
                         };
-                        if let Some(ref tx) = self.shadow_order_tx {
-                            let _ = tx.send(ShadowOrderRequest {
+                        if let Some(ref tx) = self.order_dispatch_tx {
+                            let _ = tx.send(OrderDispatchRequest {
                                 symbol: intent.symbol.clone(),
                                 is_long: intent.is_long,
                                 qty: final_qty,
@@ -725,9 +727,9 @@ impl TickPipeline {
                             }
 
                             // Shadow order: mirror paper fill to Demo API
-                            if let Some(ref tx) = self.shadow_order_tx {
+                            if let Some(ref tx) = self.order_dispatch_tx {
                                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
-                                let _ = tx.send(ShadowOrderRequest {
+                                let _ = tx.send(OrderDispatchRequest {
                                     symbol: intent.symbol.clone(),
                                     is_long: intent.is_long,
                                     qty: fill.fill_qty,

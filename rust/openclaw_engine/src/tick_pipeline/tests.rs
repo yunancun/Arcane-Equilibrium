@@ -333,7 +333,7 @@ use super::*;
     #[test]
     fn test_dual_rail_shadow_order_has_sl_fields() {
         // Struct must expose stop_loss / take_profit for broker rail wiring
-        let req = ShadowOrderRequest {
+        let req = OrderDispatchRequest {
             symbol: "BTCUSDT".into(),
             is_long: true,
             qty: 0.01,
@@ -373,7 +373,7 @@ use super::*;
     #[test]
     fn test_dual_rail_close_orders_no_broker_sl() {
         // Close orders never attach broker SL (Bybit auto-cancels on reduce-only fill)
-        let req = ShadowOrderRequest {
+        let req = OrderDispatchRequest {
             symbol: "BTCUSDT".into(),
             is_long: false,
             qty: 0.01,
@@ -393,7 +393,7 @@ use super::*;
     #[test]
     fn test_dual_rail_paper_shadow_skips_broker_sl() {
         // Paper/shadow orders keep broker SL None (engine rail handles stops locally)
-        let req = ShadowOrderRequest {
+        let req = OrderDispatchRequest {
             symbol: "ETHUSDT".into(),
             is_long: true,
             qty: 0.1,

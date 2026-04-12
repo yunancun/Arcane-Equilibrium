@@ -84,6 +84,8 @@ pub async fn run_trading_writer(
     info!("trading_writer stopped / 交易寫入器已停止");
 }
 
+/// P-10: Parallel flush — each buffer writes to an independent table, no cross-deps.
+/// P-10：並行 flush — 各緩衝區寫入獨立表，無交叉依賴。
 async fn flush_all(
     pool: &DbPool,
     signals: &mut Vec<TradingMsg>,
@@ -94,27 +96,15 @@ async fn flush_all(
     orders: &mut Vec<TradingMsg>,
     state_changes: &mut Vec<TradingMsg>,
 ) {
-    if !signals.is_empty() {
-        flush_signals(pool, signals).await;
-    }
-    if !intents.is_empty() {
-        flush_intents(pool, intents).await;
-    }
-    if !fills.is_empty() {
-        flush_fills(pool, fills).await;
-    }
-    if !positions.is_empty() {
-        flush_positions(pool, positions).await;
-    }
-    if !verdicts.is_empty() {
-        flush_verdicts(pool, verdicts).await;
-    }
-    if !orders.is_empty() {
-        flush_orders(pool, orders).await;
-    }
-    if !state_changes.is_empty() {
-        flush_order_state_changes(pool, state_changes).await;
-    }
+    tokio::join!(
+        async { if !signals.is_empty() { flush_signals(pool, signals).await; } },
+        async { if !intents.is_empty() { flush_intents(pool, intents).await; } },
+        async { if !fills.is_empty() { flush_fills(pool, fills).await; } },
+        async { if !positions.is_empty() { flush_positions(pool, positions).await; } },
+        async { if !verdicts.is_empty() { flush_verdicts(pool, verdicts).await; } },
+        async { if !orders.is_empty() { flush_orders(pool, orders).await; } },
+        async { if !state_changes.is_empty() { flush_order_state_changes(pool, state_changes).await; } },
+    );
 }
 
 /// Max rows per batch INSERT to stay under PostgreSQL's 65535 parameter limit.

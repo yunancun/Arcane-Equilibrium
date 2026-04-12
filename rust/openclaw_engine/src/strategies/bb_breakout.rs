@@ -233,35 +233,35 @@ impl Strategy for BbBreakout {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_position.get(sym) {
             match prev {
-                Some(b) => { self.positions.insert(sym.clone(), *b); }
+                Some(b) => { self.positions.insert(sym.to_string(), *b); }
                 None => { self.positions.remove(sym); }
             }
         }
         if let Some(prev) = self.prev_squeeze_detected_ms.get(sym) {
             match prev {
-                Some(ts) => { self.squeeze_detected_ms.insert(sym.clone(), *ts); }
+                Some(ts) => { self.squeeze_detected_ms.insert(sym.to_string(), *ts); }
                 None => { self.squeeze_detected_ms.remove(sym); }
             }
         }
         if let Some(prev) = self.prev_entry_price.get(sym) {
             match prev {
-                Some(p) => { self.entry_price.insert(sym.clone(), *p); }
+                Some(p) => { self.entry_price.insert(sym.to_string(), *p); }
                 None => { self.entry_price.remove(sym); }
             }
         }
         if let Some(prev) = self.prev_trailing_stop.get(sym) {
             match prev {
-                Some(s) => { self.trailing_stop.insert(sym.clone(), *s); }
+                Some(s) => { self.trailing_stop.insert(sym.to_string(), *s); }
                 None => { self.trailing_stop.remove(sym); }
             }
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.to_string(), ts); }
         }
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
-        let ind = match &ctx.indicators {
+    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],
         };
@@ -273,17 +273,17 @@ impl Strategy for BbBreakout {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        let sym = &ctx.symbol;
-        self.prev_position.insert(sym.clone(), self.positions.get(sym).copied());
-        self.prev_squeeze_detected_ms.insert(sym.clone(), self.squeeze_detected_ms.get(sym).copied());
-        self.prev_entry_price.insert(sym.clone(), self.entry_price.get(sym).copied());
-        self.prev_trailing_stop.insert(sym.clone(), self.trailing_stop.get(sym).copied());
+        let sym = ctx.symbol;
+        self.prev_position.insert(sym.to_string(), self.positions.get(sym).copied());
+        self.prev_squeeze_detected_ms.insert(sym.to_string(), self.squeeze_detected_ms.get(sym).copied());
+        self.prev_entry_price.insert(sym.to_string(), self.entry_price.get(sym).copied());
+        self.prev_trailing_stop.insert(sym.to_string(), self.trailing_stop.get(sym).copied());
         let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
-        self.prev_last_trade_ms.insert(sym.clone(), last_ms);
+        self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
         if bb.bandwidth < self.squeeze_bw {
             // FIX-26: Only record first detection time; don't reset on continued squeeze.
-            self.squeeze_detected_ms.entry(sym.clone()).or_insert(ctx.timestamp_ms);
+            self.squeeze_detected_ms.entry(sym.to_string()).or_insert(ctx.timestamp_ms);
         }
         if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
@@ -324,7 +324,7 @@ impl Strategy for BbBreakout {
                         // QC-H4: entry_conf_base configurable (was hardcoded 0.7)
                         let raw_conf = (self.entry_conf_base + hurst_boost).min(1.0);
                         intents.push(StrategyAction::Open(OrderIntent {
-                            symbol: ctx.symbol.clone(),
+                            symbol: ctx.symbol.to_string(),
                             is_long,
                             qty: self.default_qty,
                             confidence: (raw_conf * self.conf_scale).clamp(0.0, 1.0),
@@ -332,16 +332,16 @@ impl Strategy for BbBreakout {
                             order_type: "market".into(),
                             limit_price: None,
                         }));
-                        self.positions.insert(sym.clone(), is_long);
+                        self.positions.insert(sym.to_string(), is_long);
                         self.squeeze_detected_ms.remove(sym);
-                        self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
+                        self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
                         // V2: Record entry price and initialize trailing stop per-symbol
                         // V2：記錄該幣種入場價格並初始化追蹤止損
-                        self.entry_price.insert(sym.clone(), ctx.price);
+                        self.entry_price.insert(sym.to_string(), ctx.price);
                         if let Some(atr_res) = &ind.atr_14 {
                             let dist = atr_res.atr * self.trailing_stop_atr_mult;
                             let stop = if is_long { ctx.price - dist } else { ctx.price + dist };
-                            self.trailing_stop.insert(sym.clone(), stop);
+                            self.trailing_stop.insert(sym.to_string(), stop);
                         }
                     }
                 }
@@ -359,7 +359,7 @@ impl Strategy for BbBreakout {
                     if is_long {
                         let new_stop = ctx.price - stop_distance;
                         if cur_stop.is_none() || new_stop > cur_stop.unwrap() {
-                            self.trailing_stop.insert(sym.clone(), new_stop);
+                            self.trailing_stop.insert(sym.to_string(), new_stop);
                         }
                         if ctx.price <= self.trailing_stop.get(sym).copied().unwrap_or(0.0) {
                             exit_reason = Some("trailing_stop");
@@ -368,7 +368,7 @@ impl Strategy for BbBreakout {
                     } else {
                         let new_stop = ctx.price + stop_distance;
                         if cur_stop.is_none() || new_stop < cur_stop.unwrap() {
-                            self.trailing_stop.insert(sym.clone(), new_stop);
+                            self.trailing_stop.insert(sym.to_string(), new_stop);
                         }
                         if ctx.price >= self.trailing_stop.get(sym).copied().unwrap_or(f64::MAX) {
                             exit_reason = Some("trailing_stop");
@@ -403,12 +403,12 @@ impl Strategy for BbBreakout {
 
                 if let Some(reason) = exit_reason {
                     intents.push(StrategyAction::Close {
-                        symbol: ctx.symbol.clone(),
+                        symbol: ctx.symbol.to_string(),
                         confidence: (exit_confidence * self.conf_scale).clamp(0.0, 1.0),
                         reason: reason.into(),
                     });
                     self.positions.remove(sym);
-                    self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
+                    self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
                     // V2: Reset per-symbol trailing stop state on exit / 出場時重置該幣種追蹤止損狀態
                     self.entry_price.remove(sym);
                     self.trailing_stop.remove(sym);
@@ -441,7 +441,8 @@ mod tests {
     use super::*;
     use openclaw_core::indicators::{AtrResult, BollingerResult, HurstResult, IndicatorSnapshot};
 
-    fn ctx(bw: f64, pct_b: f64, vol: f64, ts: u64) -> TickContext {
+    // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
+    fn ctx(bw: f64, pct_b: f64, vol: f64, ts: u64) -> TickContext<'static> {
         ctx_ext(bw, pct_b, vol, ts, 50000.0, None, None)
     }
 
@@ -455,25 +456,26 @@ mod tests {
         price: f64,
         atr: Option<AtrResult>,
         hurst: Option<HurstResult>,
-    ) -> TickContext {
+    ) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            bollinger: Some(BollingerResult {
+                upper: 51000.0,
+                middle: 50000.0,
+                lower: 49000.0,
+                bandwidth: bw,
+                percent_b: pct_b,
+            }),
+            volume_ratio: Some(vol),
+            atr_14: atr,
+            hurst,
+            ..Default::default()
+        }));
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price,
             timestamp_ms: ts,
-            indicators: Some(IndicatorSnapshot {
-                bollinger: Some(BollingerResult {
-                    upper: 51000.0,
-                    middle: 50000.0,
-                    lower: 49000.0,
-                    bandwidth: bw,
-                    percent_b: pct_b,
-                }),
-                volume_ratio: Some(vol),
-                atr_14: atr,
-                hurst,
-                ..Default::default()
-            }),
-            signals: vec![],
+            indicators: Some(ind),
+            signals: &[],
             h0_allowed: true,
         }
     }

@@ -1,11 +1,11 @@
 //! Order dispatch task spawn — extracted from event_consumer/mod.rs (I-22).
 //! 訂單派發任務 — 從 event_consumer/mod.rs 提取（I-22）。
 //!
-//! MODULE_NOTE (EN): Spawns the async task that drains the ShadowOrderRequest channel
+//! MODULE_NOTE (EN): Spawns the async task that drains the OrderDispatchRequest channel
 //!   from TickPipeline and forwards orders to OrderManager. Handles both shadow (paper_only)
 //!   and primary (exchange) modes. Returns the PendingOrder receiver used by the event
 //!   consumer to track exchange-mode order confirmations.
-//! MODULE_NOTE (中): 啟動從 TickPipeline 排出 ShadowOrderRequest 通道並轉發到 OrderManager
+//! MODULE_NOTE (中): 啟動從 TickPipeline 排出 OrderDispatchRequest 通道並轉發到 OrderManager
 //!   的異步任務。同時處理 shadow（紙盤）和 primary（交易所）模式。返回 event consumer
 //!   用於追蹤交易所模式訂單確認的 PendingOrder 接收端。
 
@@ -47,7 +47,7 @@ pub(super) fn spawn_order_dispatch(
         CreateOrderRequest, OrderCategory, OrderManager, OrderSide, OrderType,
     };
     let (shadow_tx, mut shadow_rx) =
-        mpsc::unbounded_channel::<crate::tick_pipeline::ShadowOrderRequest>();
+        mpsc::unbounded_channel::<crate::tick_pipeline::OrderDispatchRequest>();
     pipeline.set_shadow_channel(shadow_tx);
 
     let order_mgr = OrderManager::new(Arc::clone(client), Arc::clone(icache));
@@ -64,11 +64,11 @@ pub(super) fn spawn_order_dispatch(
             // M-1 (2026-04-11) audit fix: pre-flight notional check for Market orders.
             // Bybit V5 enforces a min notional (typically 5 USDT) but local validate_order
             // skips that branch when req.price is None (Market orders carry no limit price).
-            // Use ShadowOrderRequest.price (last tick reference price) as a proxy for notional.
+            // Use OrderDispatchRequest.price (last tick reference price) as a proxy for notional.
             // Without this, sub-min orders round-trip to Bybit only to fail with retCode=10001.
             // M-1 審計修復：市價單的名義值預檢。Bybit V5 強制最小名義值（通常 5 USDT）但
             // 本地 validate_order 在 req.price=None（市價單無限價）時跳過該檢查。使用
-            // ShadowOrderRequest.price（最近 tick 參考價）作為名義值代理。
+            // OrderDispatchRequest.price（最近 tick 參考價）作為名義值代理。
             // 否則低於最小值的訂單會空跑到 Bybit 才被 retCode=10001 拒絕。
             if let Some(spec) = icache_for_check.get(&req.symbol) {
                 if spec.min_notional > 0.0 && req.price > 0.0 {

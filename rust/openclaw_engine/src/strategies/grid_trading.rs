@@ -106,9 +106,9 @@ use openclaw_core::indicators::IndicatorSnapshot;
 
 /// Dynamic grid confidence: ranging regime + narrow BB → high; trending → low.
 /// 動態網格信心：ranging regime + 窄 BB → 高；trending → 低。
-fn compute_grid_confidence(snap: &Option<IndicatorSnapshot>) -> f64 {
+fn compute_grid_confidence(snap: Option<&IndicatorSnapshot>) -> f64 {
     let base = 0.5_f64;
-    let Some(ind) = snap.as_ref() else {
+    let Some(ind) = snap else {
         return base;
     };
     let regime_bonus = match ind.hurst.as_ref().map(|h| h.regime.as_str()) {
@@ -684,29 +684,29 @@ impl Strategy for GridTrading {
         if let Some(&emit_ts) = self.last_trade_ms.get(sym) {
             if emit_ts > 0 {
                 self.reject_cooldown_until_ms
-                    .insert(sym.clone(), emit_ts + self.reject_backoff_ms);
+                    .insert(sym.to_string(), emit_ts + self.reject_backoff_ms);
             }
         }
 
         if let Some(prev) = self.prev_cross_idx.get(sym) {
             match prev {
-                Some(idx) => { self.last_cross_idx.insert(sym.clone(), *idx); }
+                Some(idx) => { self.last_cross_idx.insert(sym.to_string(), *idx); }
                 None => { self.last_cross_idx.remove(sym); }
             }
         }
         if let Some(&inv) = self.prev_inventory.get(sym) {
-            self.net_inventory.insert(sym.clone(), inv);
+            self.net_inventory.insert(sym.to_string(), inv);
         }
         if let Some(&ts) = self.prev_last_trade_ms.get(sym) {
-            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.clone(), ts); }
+            if ts == 0 { self.last_trade_ms.remove(sym); } else { self.last_trade_ms.insert(sym.to_string(), ts); }
         }
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
-        let sym = &ctx.symbol;
+    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        let sym = ctx.symbol;
 
         // Per-symbol price history for OU model
-        let history = self.price_history.entry(sym.clone()).or_default();
+        let history = self.price_history.entry(sym.to_string()).or_default();
         history.push(ctx.price);
         let ou_lookback = self.ou_lookback;
         if history.len() > ou_lookback * 2 {
@@ -725,12 +725,12 @@ impl Strategy for GridTrading {
                     ctx.price * (1.0 + self.adaptive_range_pct),
                 ),
             };
-            self.grid_levels.insert(sym.clone(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
+            self.grid_levels.insert(sym.to_string(), build_levels(lower, upper, self.grid_count, &self.spacing_mode));
         }
 
         // Per-symbol health check every health_check_interval ticks.
         // 每幣種每 health_check_interval 個 tick 執行健康檢查。
-        let ticks = self.ticks_since_health_check.entry(sym.clone()).or_insert(0);
+        let ticks = self.ticks_since_health_check.entry(sym.to_string()).or_insert(0);
         *ticks += 1;
         if *ticks >= self.health_check_interval {
             *ticks = 0;
@@ -770,26 +770,26 @@ impl Strategy for GridTrading {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_cross_idx.insert(sym.clone(), self.last_cross_idx.get(sym).copied());
+        self.prev_cross_idx.insert(sym.to_string(), self.last_cross_idx.get(sym).copied());
         let cur_inventory = self.net_inventory.get(sym).copied().unwrap_or(0.0);
-        self.prev_inventory.insert(sym.clone(), cur_inventory);
-        self.prev_last_trade_ms.insert(sym.clone(), last_ms);
+        self.prev_inventory.insert(sym.to_string(), cur_inventory);
+        self.prev_last_trade_ms.insert(sym.to_string(), last_ms);
 
-        self.last_cross_idx.insert(sym.clone(), idx);
+        self.last_cross_idx.insert(sym.to_string(), idx);
 
         let mut intents = Vec::new();
 
         // Dynamic confidence: grid thrives in ranging + narrow BB, suffers in trending.
         // 動態信心：grid 在 ranging + 窄 BB 中表現好，trending 中表現差。
         // CONF-D: apply per-strategy scale.
-        let conf = (compute_grid_confidence(&ctx.indicators) * self.conf_scale).clamp(0.0, 1.0);
+        let conf = (compute_grid_confidence(ctx.indicators) * self.conf_scale).clamp(0.0, 1.0);
 
         if idx < prev_idx {
             // Price crossed down → buy. If net_inventory < 0 (short), this closes short → Close.
             // Otherwise it's a new long → Open.
             // 價格下穿 → 買入。若 net_inventory < 0（空倉），為平空 → Close；否則新多 → Open。
             let intent = OrderIntent {
-                symbol: ctx.symbol.clone(),
+                symbol: ctx.symbol.to_string(),
                 is_long: true,
                 qty: self.qty_per_grid,
                 confidence: conf,
@@ -799,21 +799,21 @@ impl Strategy for GridTrading {
             };
             if cur_inventory < 0.0 {
                 intents.push(StrategyAction::Close {
-                    symbol: ctx.symbol.clone(),
+                    symbol: ctx.symbol.to_string(),
                     confidence: conf,
                     reason: "grid_close_short".into(),
                 });
             } else {
                 intents.push(StrategyAction::Open(intent));
-                *self.net_inventory.entry(sym.clone()).or_insert(0.0) += self.qty_per_grid;
+                *self.net_inventory.entry(sym.to_string()).or_insert(0.0) += self.qty_per_grid;
             }
-            self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
+            self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
         } else if idx > prev_idx {
             // Price crossed up → sell. If net_inventory > 0 (long), this closes long → Close.
             // Otherwise it's a new short → Open.
             // 價格上穿 → 賣出。若 net_inventory > 0（多倉），為平多 → Close；否則新空 → Open。
             let intent = OrderIntent {
-                symbol: ctx.symbol.clone(),
+                symbol: ctx.symbol.to_string(),
                 is_long: false,
                 qty: self.qty_per_grid,
                 confidence: conf,
@@ -823,15 +823,15 @@ impl Strategy for GridTrading {
             };
             if cur_inventory > 0.0 {
                 intents.push(StrategyAction::Close {
-                    symbol: ctx.symbol.clone(),
+                    symbol: ctx.symbol.to_string(),
                     confidence: conf,
                     reason: "grid_close_long".into(),
                 });
             } else {
                 intents.push(StrategyAction::Open(intent));
-                *self.net_inventory.entry(sym.clone()).or_insert(0.0) -= self.qty_per_grid;
+                *self.net_inventory.entry(sym.to_string()).or_insert(0.0) -= self.qty_per_grid;
             }
-            self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
+            self.last_trade_ms.insert(sym.to_string(), ctx.timestamp_ms);
         }
 
         intents
@@ -859,13 +859,13 @@ impl Strategy for GridTrading {
 mod tests {
     use super::*;
 
-    fn ctx(price: f64, ts: u64) -> TickContext {
+    fn ctx(price: f64, ts: u64) -> TickContext<'static> {
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price,
             timestamp_ms: ts,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         }
     }

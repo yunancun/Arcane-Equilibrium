@@ -213,12 +213,16 @@ impl SpotMarginClient {
     /// 獲取現貨保證金可還款金額（UTA 帳戶）。
     ///
     /// GET /v5/spot-margin-uta/repayment-available-amount
-    pub async fn get_repay_history(
+    /// FIX-57/BB-A6: Renamed from get_repay_history() — old name implied
+    /// "repayment history" but the endpoint returns available repayment amount.
+    /// FIX-57/BB-A6：從 get_repay_history() 重命名 — 舊名暗示「還款歷史」，
+    /// 但端點實際返回可還款金額。
+    pub async fn get_repayment_available(
         &self,
         token: Option<&str>,
         limit: Option<u32>,
     ) -> BybitResult<Vec<RepaymentRecord>> {
-        debug!("fetching repayment history / 獲取還款歷史");
+        debug!("fetching repayment available amount / 獲取可還款金額");
         let limit_str = limit.unwrap_or(50).to_string();
         let mut params: Vec<(&str, &str)> = vec![("limit", &limit_str)];
         if let Some(t) = token {

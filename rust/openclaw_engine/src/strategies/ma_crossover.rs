@@ -184,12 +184,12 @@ impl MaCrossover {
         }
     }
 
-    fn make_intent(&self, ctx: &TickContext, is_long: bool, conf: f64) -> OrderIntent {
+    fn make_intent(&self, ctx: &TickContext<'_>, is_long: bool, conf: f64) -> OrderIntent {
         // CONF-D: scale and clamp the emitted confidence into [0, 1].
         // CONF-D：套用 conf_scale 後 clamp 到 [0, 1]。
         let scaled = (conf * self.conf_scale).clamp(0.0, 1.0);
         OrderIntent {
-            symbol: ctx.symbol.clone(),
+            symbol: ctx.symbol.to_string(),
             is_long,
             qty: self.default_qty,
             confidence: scaled,
@@ -201,11 +201,11 @@ impl MaCrossover {
 
     /// RC-01: Check if Hurst regime allows entry (only "trending" passes).
     /// RC-01: 檢查赫斯特狀態是否允許入場（僅 "trending" 通過）。
-    fn regime_allows_entry(&self, ctx: &TickContext) -> bool {
+    fn regime_allows_entry(&self, ctx: &TickContext<'_>) -> bool {
         if !self.regime_filter_enabled {
             return true;
         }
-        let ind = match &ctx.indicators {
+        let ind = match ctx.indicators {
             Some(i) => i,
             None => return true,
         };
@@ -308,12 +308,12 @@ impl Strategy for MaCrossover {
         self.positions.remove(symbol);
     }
 
-    fn on_tick(&mut self, ctx: &TickContext) -> Vec<StrategyAction> {
-        let ind = match &ctx.indicators {
+    fn on_tick(&mut self, ctx: &TickContext<'_>) -> Vec<StrategyAction> {
+        let ind = match ctx.indicators {
             Some(i) => i,
             None => return vec![],
         };
-        let last_ms = self.last_trade_ms.get(&ctx.symbol).copied().unwrap_or(0);
+        let last_ms = self.last_trade_ms.get(ctx.symbol).copied().unwrap_or(0);
         if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
         }
@@ -328,7 +328,7 @@ impl Strategy for MaCrossover {
         // RC-02: Update per-symbol higher-TF proxy from sma_50 (every tick for EMA warmup).
         // RC-02: 從 sma_50 更新該幣種的較高時間框架替代指標（每個 tick 更新以暖機 EMA）。
         if let Some(sma_50) = ind.sma_50 {
-            self.update_higher_tf(&ctx.symbol, sma_50);
+            self.update_higher_tf(ctx.symbol, sma_50);
         }
 
         let fast = match ind.kama.as_ref() {
@@ -352,10 +352,10 @@ impl Strategy for MaCrossover {
 
         // RC-04: Snapshot per-symbol state before any mutation for rejection rollback.
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
-        self.prev_position.insert(ctx.symbol.clone(), self.positions.get(&ctx.symbol).copied());
-        self.prev_last_trade_ms.insert(ctx.symbol.clone(), last_ms);
+        self.prev_position.insert(ctx.symbol.to_string(), self.positions.get(ctx.symbol).copied());
+        self.prev_last_trade_ms.insert(ctx.symbol.to_string(), last_ms);
 
-        match self.positions.get(&ctx.symbol).copied() {
+        match self.positions.get(ctx.symbol).copied() {
             None => {
                 // Entry path — apply RC-01 regime filter + RC-02 higher-TF confirmation.
                 // 入場路徑 — 套用 RC-01 狀態過濾 + RC-02 較高時間框架確認。
@@ -366,19 +366,19 @@ impl Strategy for MaCrossover {
                 let regime = ind.hurst.as_ref().map(|h| h.regime.as_str());
                 let entry_conf = self.compute_entry_confidence(adx, regime);
                 if fast > slow {
-                    if !self.higher_tf_allows_entry(&ctx.symbol, true) {
+                    if !self.higher_tf_allows_entry(ctx.symbol, true) {
                         return vec![];
                     }
                     intents.push(StrategyAction::Open(self.make_intent(ctx, true, entry_conf)));
-                    self.positions.insert(ctx.symbol.clone(), true);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.insert(ctx.symbol.to_string(), true);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 } else if fast < slow {
-                    if !self.higher_tf_allows_entry(&ctx.symbol, false) {
+                    if !self.higher_tf_allows_entry(ctx.symbol, false) {
                         return vec![];
                     }
                     intents.push(StrategyAction::Open(self.make_intent(ctx, false, entry_conf)));
-                    self.positions.insert(ctx.symbol.clone(), false);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.insert(ctx.symbol.to_string(), false);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
             Some(is_long) => {
@@ -389,20 +389,20 @@ impl Strategy for MaCrossover {
                 let exit_conf = self.compute_exit_confidence(adx);
                 if is_long && fast < slow {
                     intents.push(StrategyAction::Close {
-                        symbol: ctx.symbol.clone(),
+                        symbol: ctx.symbol.to_string(),
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
-                    self.positions.remove(&ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.remove(ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 } else if !is_long && fast > slow {
                     intents.push(StrategyAction::Close {
-                        symbol: ctx.symbol.clone(),
+                        symbol: ctx.symbol.to_string(),
                         confidence: exit_conf,
                         reason: "ma_reverse_cross".into(),
                     });
-                    self.positions.remove(&ctx.symbol);
-                    self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
+                    self.positions.remove(ctx.symbol);
+                    self.last_trade_ms.insert(ctx.symbol.to_string(), ctx.timestamp_ms);
                 }
             }
         }
@@ -436,27 +436,30 @@ mod tests {
     use super::*;
     use openclaw_core::indicators::{AdxResult, HurstResult, IndicatorSnapshot, KamaResult};
 
+    // P-08: Test helpers use Box::leak for owned indicator data (fine for tests).
+
     /// Helper: build a TickContext with given indicator values.
     /// 輔助函數：用給定指標值構建 TickContext。
-    fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext {
+    fn ctx_with(sma: f64, kama: f64, adx: f64, ts: u64) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            ..Default::default()
+        }));
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: ts,
-            indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma),
-                kama: Some(KamaResult {
-                    kama,
-                    efficiency_ratio: 0.5,
-                }),
-                adx: Some(AdxResult {
-                    adx,
-                    plus_di: 25.0,
-                    minus_di: 15.0,
-                }),
-                ..Default::default()
-            }),
-            signals: vec![],
+            indicators: Some(ind),
+            signals: &[],
             h0_allowed: true,
         }
     }
@@ -470,55 +473,57 @@ mod tests {
         ts: u64,
         regime: &str,
         hurst_val: f64,
-    ) -> TickContext {
+    ) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            sma_20: Some(sma),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            hurst: Some(HurstResult {
+                hurst: hurst_val,
+                regime: regime.to_string(),
+            }),
+            ..Default::default()
+        }));
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: ts,
-            indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma),
-                kama: Some(KamaResult {
-                    kama,
-                    efficiency_ratio: 0.5,
-                }),
-                adx: Some(AdxResult {
-                    adx,
-                    plus_di: 25.0,
-                    minus_di: 15.0,
-                }),
-                hurst: Some(HurstResult {
-                    hurst: hurst_val,
-                    regime: regime.to_string(),
-                }),
-                ..Default::default()
-            }),
-            signals: vec![],
+            indicators: Some(ind),
+            signals: &[],
             h0_allowed: true,
         }
     }
 
     /// Helper: build a TickContext with sma_50 for higher-TF testing.
     /// 輔助函數：用 sma_50 構建 TickContext 以測試較高時間框架。
-    fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext {
+    fn ctx_with_sma50(sma_20: f64, kama: f64, adx: f64, ts: u64, sma_50: f64) -> TickContext<'static> {
+        let ind = Box::leak(Box::new(IndicatorSnapshot {
+            sma_20: Some(sma_20),
+            sma_50: Some(sma_50),
+            kama: Some(KamaResult {
+                kama,
+                efficiency_ratio: 0.5,
+            }),
+            adx: Some(AdxResult {
+                adx,
+                plus_di: 25.0,
+                minus_di: 15.0,
+            }),
+            ..Default::default()
+        }));
         TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: ts,
-            indicators: Some(IndicatorSnapshot {
-                sma_20: Some(sma_20),
-                sma_50: Some(sma_50),
-                kama: Some(KamaResult {
-                    kama,
-                    efficiency_ratio: 0.5,
-                }),
-                adx: Some(AdxResult {
-                    adx,
-                    plus_di: 25.0,
-                    minus_di: 15.0,
-                }),
-                ..Default::default()
-            }),
-            signals: vec![],
+            indicators: Some(ind),
+            signals: &[],
             h0_allowed: true,
         }
     }
@@ -810,11 +815,11 @@ mod tests {
         // CONF-D: emitted confidence == raw * conf_scale, clamped to [0, 1].
         use crate::tick_pipeline::TickContext;
         let ctx = TickContext {
-            symbol: "BTCUSDT".into(),
+            symbol: "BTCUSDT",
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         };
         let mut s = MaCrossover::new();

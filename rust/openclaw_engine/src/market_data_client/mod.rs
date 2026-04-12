@@ -472,8 +472,14 @@ impl MarketDataClient {
     ///
     /// GET /v5/market/adl-alert
     ///
-    /// Returns symbols with high ADL risk. Critical for position survival (Principle #5).
-    /// 返回高 ADL 風險的交易對。對倉位生存至關重要（原則 #5）。
+    /// FIX-58/BB-A7: This public REST endpoint may not exist in Bybit V5.
+    /// ADL info is typically obtained via private WS `position` topic's
+    /// `adlRankIndicator` field. Retained as stub — will silently fail
+    /// (into_result handles retCode != 0). Not called anywhere.
+    /// FIX-58/BB-A7：此公開 REST 端點在 Bybit V5 中可能不存在。
+    /// ADL 資訊通常透過私有 WS `position` topic 的 `adlRankIndicator` 取得。
+    /// 保留為 stub — 靜默失敗（into_result 處理 retCode != 0）。全 codebase 無調用。
+    #[allow(dead_code)]
     pub async fn get_adl_alert(
         &self,
         category: &str,

@@ -130,7 +130,7 @@ mod tests {
         fn set_active(&mut self, active: bool) {
             self.active = active;
         }
-        fn on_tick(&mut self, _ctx: &TickContext) -> Vec<StrategyAction> {
+        fn on_tick(&mut self, _ctx: &TickContext<'_>) -> Vec<StrategyAction> {
             self.actions.clone()
         }
     }
@@ -139,11 +139,11 @@ mod tests {
     fn test_empty_orchestrator() {
         let mut orch = Orchestrator::new();
         let ctx = TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());
@@ -166,11 +166,11 @@ mod tests {
             actions: vec![StrategyAction::Open(intent.clone())],
         }));
         let ctx = TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         };
         assert_eq!(orch.dispatch_tick(&ctx).len(), 1);
@@ -193,11 +193,11 @@ mod tests {
             actions: vec![StrategyAction::Open(intent)],
         }));
         let ctx = TickContext {
-            symbol: "BTC".into(),
+            symbol: "BTC",
             price: 50000.0,
             timestamp_ms: 0,
             indicators: None,
-            signals: vec![],
+            signals: &[],
             h0_allowed: true,
         };
         assert!(orch.dispatch_tick(&ctx).is_empty());

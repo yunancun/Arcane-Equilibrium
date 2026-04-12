@@ -385,11 +385,14 @@ pub struct StopRequest {
 /// Order dispatch request from tick_pipeline to exchange API (EXT-1).
 /// 從 tick_pipeline 派發到交易所 API 的訂單派發請求。
 ///
+/// R-04: Renamed from OrderDispatchRequest — used for both shadow and primary orders.
+/// R-04：從 OrderDispatchRequest 重命名 — 同時用於影子單和主訂單。
+///
 /// Used in both modes:
 /// - `paper_only`: shadow order (fire-and-forget after local fill, is_primary=false)
 /// - `exchange`: primary order (tracked, fill confirmed via WS, is_primary=true)
 #[derive(Debug, Clone)]
-pub struct ShadowOrderRequest {
+pub struct OrderDispatchRequest {
     /// Trading symbol / 交易對
     pub symbol: String,
     /// Long direction / 多方向
@@ -415,15 +418,16 @@ pub struct ShadowOrderRequest {
     pub take_profit: Option<f64>,
 }
 
-/// Tick context passed to strategies.
-/// 傳遞給策略的 tick 上下文。
+/// Tick context passed to strategies — borrows from on_tick scope to avoid cloning.
+/// 傳遞給策略的 tick 上下文 — 從 on_tick 作用域借用以避免克隆。
+/// P-08: Lifetime-parameterized to eliminate per-tick clone of indicators/signals.
 #[derive(Debug, Clone)]
-pub struct TickContext {
-    pub symbol: String,
+pub struct TickContext<'a> {
+    pub symbol: &'a str,
     pub price: f64,
     pub timestamp_ms: u64,
-    pub indicators: Option<IndicatorSnapshot>,
-    pub signals: Vec<Signal>,
+    pub indicators: Option<&'a IndicatorSnapshot>,
+    pub signals: &'a [Signal],
     pub h0_allowed: bool,
 }
 
@@ -479,7 +483,7 @@ pub struct TickPipeline {
     instrument_cache: Option<Arc<InstrumentInfoCache>>,
     /// Channel to dispatch shadow orders to Bybit Demo API.
     /// 派發影子訂單到 Bybit Demo API 的通道。
-    shadow_order_tx: Option<tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>>,
+    order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
     /// Phase 1: Channel to dispatch market data to async PG writer.
     /// Phase 1：派發市場數據到異步 PG 寫入器的通道。
     market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,
@@ -631,7 +635,7 @@ impl TickPipeline {
             adl_alerts: VecDeque::new(),
             canary_mode: false,
             instrument_cache: None,
-            shadow_order_tx: None,
+            order_dispatch_tx: None,
             market_data_tx: None,
             feature_tx: None,
             trading_tx: None,
@@ -1090,9 +1094,9 @@ impl TickPipeline {
     /// 設定訂單派發通道到交易所 API。
     pub fn set_shadow_channel(
         &mut self,
-        tx: tokio::sync::mpsc::UnboundedSender<ShadowOrderRequest>,
+        tx: tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
     ) {
-        self.shadow_order_tx = Some(tx);
+        self.order_dispatch_tx = Some(tx);
     }
 
     /// EXT-1: Set trading mode (paper_only or exchange).
