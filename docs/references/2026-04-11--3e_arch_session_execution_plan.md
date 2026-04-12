@@ -4,6 +4,7 @@
 **日期 / Date**: 2026-04-11  
 **排期 / Schedule**: W22（2026-05-05~12），共 8 個工作日  
 **前置 / Prerequisite**: 本文件基於 `three_engine_parallel_arch_plan.md` v4（26 個設計決策）  
+**狀態 / Status**: ✅ 已完成（2026-04-11 commit 0f3af65）— `TradingMode` 已完全由 `PipelineKind` 取代，文中 `TradingMode` 引用為歷史上下文  
 
 ---
 

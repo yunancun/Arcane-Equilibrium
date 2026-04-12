@@ -3,6 +3,28 @@
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-04-12
 
+### 04-12 審計修復 Wave 2：14 角色報告逐一核實 + 代碼修復（2026-04-12）
+
+**A3 GUI 可用性審計全修** (commit `fd0bc45`)：CRITICAL×2 + MAJOR×14 + MINOR×18 + SUGGESTION×2 一次性全修。關鍵：Live/Demo/Paper 持倉「平倉」按鈕確認流程 + 空狀態提示 + 響應式間距 + 按鈕排列一致性。
+
+**QC 量化審計全修** (commit `e03421f`)：Session 3.3+3.3b — 12 hardcoded 參數移至 TOML + 7 risk gap 修補 + 10 action items 全部解決。
+
+**P2 FIX-08 超限文件拆分** (commit `50d7a4b`)：12+ 超過 1200 行硬上限的文件拆分（governance_routes / strategy_ai_routes / paper_trading_routes / strategy_read_routes / strategy_wiring / experiment_routes / live_session_routes / evolution_routes / backtest_routes）。
+
+**P2 FIX-23/34/35/57** (commit `0de58bb`)：FundingArb 策略註冊 + outcome backfiller DDL + budget sync 修復。
+
+**E3+CC 安全/合規修復** (commit `f8685bf`)：5 fixes + 2 報告更新 — Cookie secure flag + HMAC edge cases + error disclosure。
+
+**E5+MIT 報告核實** (commit `c73a3f2`)：5 code fixes + 2 report corrections — 補漏 push_capped 缺失 + budget tracker sync。
+
+**E5 審計收尾** (commit `6e2a01e`)：3 remaining items implemented + P-08 test fixed。
+
+**FA 審計修復** (commit `d16ed08`)：3 orphan Rust files 刪除（batch_order_manager/leverage_token_client/spot_margin_client）+ handlers.rs 拆分 handlers_config.rs + PIPELINE_BRIDGE 死碼清理。
+
+**AI-E 審計報告校正** (commit `4d427f5`)：18 inaccuracies corrected（3 Serious / 8 Medium / 7 Light — 均為報告錯誤非代碼 bug）。
+
+**BB Bybit API 審計驗收** (commit `50a4b1e`)：7/7 P1 全部關閉 — 最終核實 worklog。
+
 ### E5 Performance Optimization — 23 items（2026-04-12）
 
 P-01 `push_capped<T>()` ring buffer utility（13+ 重複消除）· P-02 PriceEvent 5 structured fields · P-03 hot-path structured reads · P-04 `now_ms()` utility · P-05 `is_stale()` utility · P-06 WS subscriptions Vec→HashSet O(1) · P-08 `TickContext<'a>` zero-copy borrowed refs（5 strategies + orchestrator）· P-09 Arc<RiskConfig> bind-once · P-10 parallel async DB flush `tokio::join!` 7 tables · S-01 confidence clamp · S-02 ring-buffer dedup（+E2 residuals）· S-03 `build_intent()` · S-04 timestamp centralize（+E2 residual）· R-01~R-05 naming（`ShadowOrderRequest`→`OrderDispatchRequest` 等）· D-01/D-03 dead method removal。P-07 skipped（WS SDK managed）· S-05 skipped（fail-closed）· D-02 deferred（HashMap removal post-migration）。17 files changed, +563/-899, net -336。E4: 934+366+27 = 1327 pass 0 fail。
