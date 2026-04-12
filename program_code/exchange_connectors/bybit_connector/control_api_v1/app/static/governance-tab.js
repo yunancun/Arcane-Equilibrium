@@ -495,6 +495,8 @@ function renderAuthCard(authData) {
     REJECTED:         '已拒绝，需重新申请 Re-authorization required',
   };
   ocSetText('auth-state-desc', AUTH_DESC[state] || '');
+  // Quick status banner update / 更新快速状态栏
+  if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(state, undefined, undefined, undefined);
 
   // Render scope using the new visualizer
   const scope = authData.scope || {};
@@ -528,6 +530,9 @@ function renderRiskCard(riskData) {
 
   const reason = riskData.escalation_reason || '--';
   ocSetText('risk-reason', ocEsc(reason));
+  // Quick status banner update / 更新快速状态栏风险等级
+  const riskName = GOV_RISK_LEVELS[level] || ('L' + level);
+  if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, riskName, undefined, undefined);
 
   // Populate override dropdown with lower levels
   const selectEl = $('override-level');
@@ -618,6 +623,9 @@ function renderReconCard(reconData) {
 
   const result = reconData.last_result || '--';
   ocSetText('recon-result', ocEsc(result));
+  // Quick status banner update / 更新快速状态栏对账状态
+  const reconLabel = isConsistent === true ? 'OK' : isConsistent === false ? 'DRIFT' : '--';
+  if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, undefined, reconLabel, undefined);
 }
 
 function renderSummary(fullStatus) {
@@ -787,6 +795,8 @@ async function loadLearningTier() {
 
     const data = d.data || d;
     const tier = data.current_tier || 'L0';
+    // Quick status banner update / 更新快速状态栏学习层级
+    if (typeof window.updateQuickStatus === 'function') window.updateQuickStatus(undefined, undefined, undefined, tier);
     const obsCount = data.observation_count != null ? data.observation_count : 0;
     const winRate = data.win_rate != null ? data.win_rate : null;
     const eligible = data.eligible_for_promotion === true;

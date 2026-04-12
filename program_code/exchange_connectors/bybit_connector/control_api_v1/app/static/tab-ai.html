@@ -410,10 +410,31 @@ async function doTriggerSession() {
 }
 
 // ─── Provider Key Management ─────────────────────────────────
+// Key format validation rules / API Key 格式校验规则
+const KEY_FORMATS = {
+  anthropic:  { prefix: 'sk-ant-',  minLen: 20, hint: '必须以 sk-ant- 开头 / Must start with sk-ant-' },
+  openai:     { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 开头 / Must start with sk-' },
+  deepseek:   { prefix: 'sk-',      minLen: 20, hint: '必须以 sk- 开头 / Must start with sk-' },
+  perplexity: { prefix: 'pplx-',    minLen: 20, hint: '必须以 pplx- 开头 / Must start with pplx-' },
+  google:     { prefix: null,       minLen: 20, hint: '至少 20 个字符 / At least 20 characters' },
+  local_llm:  { prefix: 'http',     minLen: 8,  hint: '必须是 http:// 或 https:// URL' },
+};
+
 async function saveProviderKey(provider) {
   const inputId = 'key-' + (provider === 'local_llm' ? 'local' : provider);
   const key = $(inputId).value.trim();
-  if (!key) { ocToast('请输入 API Key', 'error'); return; }
+  if (!key) { ocToast('请输入 API Key / Please enter an API key', 'error'); return; }
+
+  // Validate format / 格式验证
+  const fmt = KEY_FORMATS[provider];
+  if (fmt) {
+    if (fmt.prefix && !key.startsWith(fmt.prefix)) {
+      ocToast('格式错误：' + fmt.hint, 'error'); return;
+    }
+    if (key.length < fmt.minLen) {
+      ocToast('Key 太短（至少 ' + fmt.minLen + ' 个字符）/ Key too short (min ' + fmt.minLen + ')', 'error'); return;
+    }
+  }
 
   // Save via API (backend will write to secrets folder)
   const d = await ocPost('/api/v1/paper/layer2/config', {
@@ -453,7 +474,9 @@ async function saveAIConfig() {
 async function loadCost() {
   let d = await ocApi('/api/v1/paper/layer2/cost');
   if (!d || !d.data) d = await ocApi('/api/v1/paper/ai-cost');
-  if (!d || !d.data) return;
+  // Show connection error in Today Cost cell so user sees the failure
+  // 在今日花费栏显示连接失败，让用户可见错误而非静默显示 '--'
+  if (!d || !d.data) { ocSetText('a-today', '⚠ 失败 / Failed'); return; }
   const c = d.data;
   const todayCost = c.today_cost || c.cost_today || 0;
   const totalCost = c.total_cost || c.cost_total || c.total_cost_30d || 0;
@@ -471,7 +494,7 @@ async function loadCost() {
 
 async function loadAdaptive() {
   const d = await ocApi('/api/v1/paper/layer2/cost/adaptive');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetText('ab-mult', '⚠'); ocSetText('ab-reason', '连接失败 / Failed'); return; }
   const a = d.data;
   ocSetText('ab-mult', ocNum(a.multiplier || a.budget_multiplier, 2) + 'x');
   // FA-8: 使用 ?? 空值合并（而非 || 短路），确保 cost_edge_ratio=0 不被跳过
@@ -492,7 +515,9 @@ async function loadAdaptive() {
 
 async function loadConsult() {
   const d = await ocApi('/api/v1/strategy/ai/status');
-  if (!d || !d.data) return;
+  // On failure, update the AI status badge so user sees the error
+  // 失败时更新 AI 状态 chip，让用户可见而非静默
+  if (!d || !d.data) { const b = $('ai-badge'); if (b) { b.textContent = 'API 失败 / Failed'; b.className = 'oc-chip oc-chip-bad'; } return; }
   const s = d.data;
   ocSetText('c-enabled', s.enabled ? '是' : '否');
   $('c-enabled').className = 'oc-metric-val ' + (s.enabled ? 'green' : '');
@@ -506,7 +531,7 @@ async function loadConsult() {
 
 async function loadSessions() {
   const d = await ocApi('/api/v1/paper/layer2/sessions?limit=20');
-  if (!d || !d.data) return;
+  if (!d || !d.data) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7" style="color:var(--text-dim)">⚠ 连接失败 / Connection failed</td></tr>'); return; }
   const sessions = d.data.sessions || d.data || [];
   if (!sessions.length) { ocSetHtml('sessions-tbody', '<tr class="empty-row"><td colspan="7">暂无推理会话</td></tr>'); return; }
   let html = '';

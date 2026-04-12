@@ -3,8 +3,8 @@
  * OpenClaw / Bybit 控制台前端脚本
  *
  * 功能概述 / Feature overview:
- * - 通过 Bearer Token 认证调用 Control API
- *   Authenticates via Bearer Token to call the Control API
+ * - 通过 HttpOnly Cookie 认证调用 Control API（已从 Bearer Token 迁移）
+ *   Authenticates via HttpOnly cookie to call the Control API (migrated from Bearer Token)
  * - 展示系统运行态、健康、审计、产品族状态
  *   Displays system runtime state, health, audit trail, product family status
  * - 产品族配置设置台：可交互修改 enabled/visible/mode/action_permissions

@@ -51,10 +51,15 @@
   </form>
   <div class="error" id="error"></div>
   <div class="links">
-    <a href="https://trade-core.tail358794.ts.net" target="_blank">OpenClaw Gateway</a>
+    <!-- Use dynamic origin to avoid hardcoded Tailscale URL / 使用动态 origin 避免硬编码 Tailscale URL -->
+    <a id="gw-link" href="#" target="_blank">OpenClaw Gateway</a>
   </div>
 </div>
 <script>
+// Set gateway link dynamically using current origin to avoid hardcoded Tailscale URL
+// 使用当前 origin 动态设置网关链接，避免硬编码 Tailscale URL
+document.getElementById('gw-link').href = window.location.origin + '/openclaw';
+
 // Password visibility toggle / 密码显示切换
 document.getElementById('pwToggle').addEventListener('click', function() {
   const pw = document.getElementById('password');

@@ -18,7 +18,10 @@
   .tip-metric:hover .tip-box { display: block; }
   .tip-box .tip-raw { font-family: monospace; color: var(--accent); font-size: 11px; margin-bottom: 6px; word-break: break-all; }
   .tip-box .tip-desc { color: var(--text-dim); }
-  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid #21262d; }
+  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid #21262d; align-items: center; }
+  .qa-status-row { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px;
+    border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
+    font-size: 12px; color: var(--text-dim); cursor: default; }
   .qa-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg);
     color: var(--text); font-size: 12px; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
   .qa-btn:hover { border-color: var(--accent); }
@@ -72,24 +75,30 @@
     <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">阶段标签</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
   </div>
 
-  <!-- Quick Actions -->
+  <!-- Quick Actions / 快捷操作 -->
   <div class="quick-actions">
-    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')">
-      <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span> 模拟交易 Paper
+    <!-- Paper: interactive toggle — session-state-aware / 模拟交易：可交互，感知 session 状态 -->
+    <button class="qa-btn" id="qa-paper" onclick="confirmAction('paper')" title="启动/停止 Paper Trading Session">
+      <span class="qa-dot qa-dot-off" id="qa-paper-dot"></span>
+      <span id="qa-paper-label">模拟交易 Paper</span>
     </button>
-    <!-- WP-F/D-03: Demo has no start/stop API (Rust engine manages Bybit WS); show status only
-         WP-F/AH-04: removed toggle-style dot to avoid visual deception — status indicator only -->
-    <button class="qa-btn" id="qa-demo" disabled title="Bybit Demo 连接状态由 Rust 引擎管理 — 无法从 GUI 直接开关 / Managed by Rust engine, no GUI toggle available" style="opacity:0.55;cursor:not-allowed">
-      <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span> Bybit Demo <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
-    </button>
-    <button class="qa-btn" id="qa-feed" disabled title="行情流由 Rust 引擎自动管理 — 无法从 GUI 开关 / Auto-managed by Rust engine" style="opacity:0.55;cursor:not-allowed">
-      <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span> 行情流 Feed <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
-    </button>
-    <!-- WP-F/D-04: Scanner has no start/stop API endpoint; redirect to Strategy tab for management
-         WP-F/AH-04: disabled to prevent no-op click confusion -->
-    <button class="qa-btn" id="qa-scanner" disabled title="扫描器在「策略中心」Tab 管理，此处仅显示运行状态 / Manage scanner in Strategy tab" style="opacity:0.55;cursor:not-allowed">
-      <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span> 自动扫描 Scanner <span style="font-size:10px;color:var(--text-dim)">(只读/RO)</span>
-    </button>
+    <!-- Demo / Feed / Scanner: status indicators only, not interactive buttons -->
+    <!-- Demo/Feed/Scanner：仅状态指示器，非可点击按钮 -->
+    <span class="qa-status-row" title="Bybit Demo 连接状态由 Rust 引擎管理，无法从 GUI 直接开关">
+      <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span>
+      <span style="font-size:12px">Bybit Demo</span>
+      <span class="oc-chip oc-chip-neutral" id="qa-demo-chip" style="font-size:10px;padding:1px 7px">Rust管理</span>
+    </span>
+    <span class="qa-status-row" title="行情流由 Rust 引擎自动管理，无法从 GUI 开关">
+      <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span>
+      <span style="font-size:12px">行情流 Feed</span>
+      <span class="oc-chip oc-chip-neutral" id="qa-feed-chip" style="font-size:10px;padding:1px 7px">自动</span>
+    </span>
+    <span class="qa-status-row" title="扫描器在「策略中心」Tab 管理，此处仅显示运行状态">
+      <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span>
+      <span style="font-size:12px">扫描器 Scanner</span>
+      <span class="oc-chip oc-chip-neutral" id="qa-scanner-chip" style="font-size:10px;padding:1px 7px">策略中心</span>
+    </span>
   </div>
 </div>
 
@@ -101,6 +110,20 @@
       <div class="subtitle" style="margin-top:4px">切换系统运行阶段 — 每次切换需二次确认</div>
     </div>
     <span id="cur-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
+  </div>
+
+  <!-- Mode progression flow / 模式升级路径流程图 -->
+  <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
+    <span title="完全静默 / Silent">&#x1F512; 设计</span>
+    <span style="color:var(--border)">&#x2192;</span>
+    <span title="观察市场，无交易 / Observe, no trading">&#x1F441;&#xFE0F; 观察</span>
+    <span style="color:var(--border)">&#x2192;</span>
+    <span title="Paper Trading 引擎激活 / Paper engine active">&#x1F311; 影子</span>
+    <span style="color:var(--border)">&#x2192;</span>
+    <span title="Paper + Bybit Demo / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
+    <span style="color:var(--border)">&#x2192;</span>
+    <span title="实盘交易（真实资金）/ Live trading — real money" style="color:#a855f7">&#x1F7E3; 实盘</span>
+    <span style="margin-left:8px;font-size:10px">— 点击按钮切换模式，每次切换需二次确认 / Click a button below to switch modes</span>
   </div>
 
   <div class="mode-btn-grid" id="mode-btn-grid">
@@ -418,6 +441,8 @@ async function executeConfirmed() {
     }
     _paperActive = !_paperActive;
     $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+    // Update Paper button label to reflect current state / 更新按钮文字
+    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟交易 Paper';
     ocToast('Paper Trading ' + (_paperActive ? '已启动' : '已停止'), 'success');
   } else if (action === 'feed') {
     ocToast('行情流由 Rust 引擎管理（自动运行）', 'info');
@@ -652,6 +677,7 @@ async function loadQuickStatus() {
     if (d && d.data) {
       _paperActive = d.data.session.session_state === 'active';
       $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模拟交易 Paper';
       if (d.data.state_revision) _stateRevision = d.data.state_revision;
     }
   } catch(e) {}
@@ -661,6 +687,7 @@ async function loadQuickStatus() {
     if (d && d.data) {
       _feedRunning = d.data.dispatcher_running || d.data.running || false;
       $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
+      if ($('qa-feed-chip')) { $('qa-feed-chip').textContent = _feedRunning ? '运行中' : '待机'; $('qa-feed-chip').className = 'oc-chip ' + (_feedRunning ? 'oc-chip-good' : 'oc-chip-neutral') + ' ' + 'qa-chip-sm'; }
     }
   } catch(e) {}
   // Demo

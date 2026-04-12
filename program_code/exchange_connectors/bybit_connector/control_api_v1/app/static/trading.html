@@ -130,13 +130,23 @@
 </head>
 <body>
 
-<div class="header">
+<!-- header hidden in ?embed=1 mode (when loaded inside console.html iframe) -->
+<!-- 在 ?embed=1 模式下隐藏 header（嵌入 console.html iframe 时） -->
+<div class="header" id="trading-header">
   <div class="status-dot" id="api-dot"></div>
   <h1>OpenClaw K线图表</h1>
   <span class="tag tag-blue">Paper Trading</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
 </div>
+<script>
+// Hide header when embedded in iframe via ?embed=1
+// 嵌入 iframe 时通过 ?embed=1 隐藏 header
+if (new URLSearchParams(window.location.search).get('embed') === '1') {
+  var h = document.getElementById('trading-header');
+  if (h) h.style.display = 'none';
+}
+</script>
 
 <div class="layout">
   <!-- Sidebar -->

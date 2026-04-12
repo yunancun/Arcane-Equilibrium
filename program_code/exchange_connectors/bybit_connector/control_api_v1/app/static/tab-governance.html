@@ -12,9 +12,29 @@
 
 <!-- ═══ Page Header ═══ -->
 <div class="oc-card">
-  <h2>&#x2696; Governance Control Center / 治理控制中心</h2>
-  <div class="subtitle">授权、风控、租约、对账的统一控制台</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <div>
+      <h2>&#x2696; Governance Control Center / 治理控制中心</h2>
+      <div class="subtitle">授权、风控、租约、对账的统一控制台</div>
+    </div>
+  </div>
   <div id="explain-governance"></div>
+</div>
+
+<!-- ═══ Quick Status Banner / 快速状态栏 ═══ -->
+<!-- One-line summary: Auth | Risk Level | Reconciler | Learning — updates with main 10s poll -->
+<!-- 单行状态摘要：授权 | 风险等级 | 对账 | 学习层级 — 随主轮询 10s 刷新 -->
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;
+  background:var(--card-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:12px">
+  <span style="color:var(--text-dim)">&#x26A1; Quick Status:</span>
+  <span title="SM-01 授权状态 / SM-01 authorization state">Auth: <strong id="qs-auth">--</strong></span>
+  <span style="color:var(--border)">|</span>
+  <span title="SM-04 风险治理等级 / SM-04 risk governance level">Risk: <strong id="qs-risk">--</strong></span>
+  <span style="color:var(--border)">|</span>
+  <span title="EX-04 对账状态 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
+  <span style="color:var(--border)">|</span>
+  <span title="学习层级 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
+  <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadGovernance()">&#x1F504;</button>
 </div>
 
 <!-- ═══ 2x2 Grid: 4 Cards ═══ -->
@@ -22,8 +42,8 @@
 
   <!-- Card 1: Authorization (SM-01) -->
   <div class="oc-card">
-    <h3>&#x1F511; Authorization / 授权</h3>
-    <div class="subtitle">SM-01 | 授权状态和范围</div>
+    <h3>&#x1F511; Authorization / 授权 <abbr title="SM-01: 授权状态机。控制谁可以启动交易 session / Authorization state machine. Controls who can start trading sessions." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
+    <div class="subtitle">授权状态和范围</div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
@@ -66,8 +86,8 @@
 
   <!-- Card 2: Risk Governor (SM-04) -->
   <div class="oc-card">
-    <h3>&#x1F6E1; Risk Governor / 风控治理</h3>
-    <div class="subtitle">SM-04 | 风险等级和模式</div>
+    <h3>&#x1F6E1; Risk Governor / 风控治理 <abbr title="SM-04: 风险治理状态机。管理 Normal/Cautious/Defensive/CircuitBreaker 四级风险等级 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
+    <div class="subtitle">风险等级和模式</div>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
@@ -90,11 +110,15 @@
     </button>
   </div>
 
-  <!-- Card 3: Decision Leases (SM-02) -->
+  <!-- Card 3: Decision Leases (SM-02) — collapsed by default / 默认折叠 -->
   <div class="oc-card">
-    <h3>&#x1F4DD; Decision Leases / 决策租约</h3>
-    <div class="subtitle">SM-02 | 活跃租约追踪</div>
+    <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleDL()">
+      <span>&#x1F4DD; Decision Leases / 决策租约 <abbr title="SM-02: 决策租约状态机。每个 AI 交易意图持有一个有时效的租约，过期自动作废 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
+      <span id="dl-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展开</span>
+    </h3>
+    <div class="subtitle">活跃租约追踪</div>
 
+    <div id="dl-body" style="display:none">
     <div class="oc-metrics">
       <div class="oc-metric">
         <div class="oc-metric-label">Active Leases / 活跃租约</div>
@@ -118,13 +142,18 @@
         </div>
       </div>
     </div>
+    </div><!-- end dl-body -->
   </div>
 
-  <!-- Card 4: Reconciliation (EX-04) -->
+  <!-- Card 4: Reconciliation (EX-04) — collapsed by default / 默认折叠 -->
   <div class="oc-card">
-    <h3>&#x1F503; Reconciliation / 对账</h3>
-    <div class="subtitle">EX-04 | 一致性检查和手动触发</div>
+    <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleRecon()">
+      <span>&#x1F503; Reconciliation / 对账 <abbr title="EX-04: 持仓对账。比较 Rust 内部持仓与交易所实际持仓，检测漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
+      <span id="recon-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展开</span>
+    </h3>
+    <div class="subtitle">一致性检查和手动触发</div>
 
+    <div id="recon-body" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 状态</div>
@@ -144,6 +173,7 @@
     <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
       &#x1F504; Trigger / 触发对账
     </button>
+    </div><!-- end recon-body -->
   </div>
 
 </div>
@@ -469,6 +499,37 @@
 
 </style>
 
+
+<script>
+// ── Decision Leases + Reconciliation collapse toggles / 折叠切换 ───────���───
+function toggleDL() {
+  const body = document.getElementById('dl-body');
+  const tog = document.getElementById('dl-toggle');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  tog.textContent = open ? '▶ 展开' : '▼ 折叠';
+}
+function toggleRecon() {
+  const body = document.getElementById('recon-body');
+  const tog = document.getElementById('recon-toggle');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  tog.textContent = open ? '▶ 展开' : '▼ 折叠';
+}
+
+// ── Quick Status Banner updater — hooks into governance-tab.js data flows ──
+// Populated by loadGovernance() and loadSummary() callbacks in governance-tab.js
+// 通过 governance-tab.js 的 loadGovernance()/loadSummary() 回调填充
+function updateQuickStatus(auth, risk, recon, learning) {
+  const el = function(id) { return document.getElementById(id); };
+  if (auth !== undefined) el('qs-auth').textContent = auth || '--';
+  if (risk !== undefined) el('qs-risk').textContent = risk || '--';
+  if (recon !== undefined) el('qs-recon').textContent = recon || '--';
+  if (learning !== undefined) el('qs-learning').textContent = learning || '--';
+}
+// Expose for governance-tab.js / 暴露给 governance-tab.js 使用
+window.updateQuickStatus = updateQuickStatus;
+</script>
 
 <script src="/static/governance-tab.js"></script>
 
