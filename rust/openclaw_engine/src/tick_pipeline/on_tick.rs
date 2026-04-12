@@ -70,7 +70,7 @@ impl TickPipeline {
 
         // Item 9 (M3 fix): ADL alert monitoring
         // 項目 9（M3 修復）：ADL 警報監控
-        if event.metadata.get("type").map(|t| t.as_str()) == Some("adl_notice") {
+        if event.event_kind.as_ref() == Some(&PriceEventKind::AdlNotice) {
             if let Some(rank_str) = event.metadata.get("adl_rank") {
                 if let Ok(rank) = rank_str.parse::<u32>() {
                     self.adl_alerts

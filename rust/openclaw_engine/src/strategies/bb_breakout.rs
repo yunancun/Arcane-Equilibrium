@@ -23,6 +23,9 @@ pub struct BbBreakoutParams {
     pub expansion_bw: f64,
     pub volume_threshold: f64,
     pub trailing_stop_atr_mult: f64,
+    /// FIX-26: Squeeze state expiry duration (ms). Default 30 min.
+    /// FIX-26：壓縮狀態有效期（ms）。默認 30 分鐘。
+    pub squeeze_expiry_ms: u64,
 }
 
 impl Default for BbBreakoutParams {
@@ -34,6 +37,7 @@ impl Default for BbBreakoutParams {
             expansion_bw: DEFAULT_EXPANSION_BW,
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             trailing_stop_atr_mult: 2.0,
+            squeeze_expiry_ms: 1_800_000,
         }
     }
 }
@@ -110,9 +114,13 @@ pub struct BbBreakout {
     /// Per-symbol position tracking: symbol → is_long direction.
     /// 每幣種獨立持倉追蹤：symbol → 多空方向。
     positions: HashMap<String, bool>,
-    /// Per-symbol squeeze state tracking.
-    /// 每幣種壓縮狀態追蹤。
-    was_in_squeeze: HashMap<String, bool>,
+    /// Per-symbol squeeze state tracking: symbol → timestamp (ms) when squeeze was first detected.
+    /// FIX-26: Now stores detection time so squeeze expires after `squeeze_expiry_ms`.
+    /// 每幣種壓縮狀態追蹤：symbol → 首次偵測壓縮的時間戳（ms）。
+    squeeze_detected_ms: HashMap<String, u64>,
+    /// FIX-26: Max duration (ms) a squeeze remains valid. Default 30 min.
+    /// FIX-26：壓縮狀態最長有效期（ms）。默認 30 分鐘。
+    pub squeeze_expiry_ms: u64,
     /// Per-symbol last trade timestamp for cooldown.
     /// 每幣種最後交易時間戳（用於冷卻）。
     last_trade_ms: HashMap<String, u64>,
@@ -134,7 +142,7 @@ pub struct BbBreakout {
     pub volume_threshold: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_position: HashMap<String, Option<bool>>,
-    prev_was_in_squeeze: HashMap<String, bool>,
+    prev_squeeze_detected_ms: HashMap<String, Option<u64>>,
     prev_entry_price: HashMap<String, Option<f64>>,
     prev_trailing_stop: HashMap<String, Option<f64>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -147,7 +155,8 @@ impl BbBreakout {
         Self {
             active: true,
             positions: HashMap::new(),
-            was_in_squeeze: HashMap::new(),
+            squeeze_detected_ms: HashMap::new(),
+            squeeze_expiry_ms: 1_800_000, // 30 minutes
             last_trade_ms: HashMap::new(),
             cooldown_ms: 600_000,
             default_qty: 1e9,
@@ -158,7 +167,7 @@ impl BbBreakout {
             expansion_bw: DEFAULT_EXPANSION_BW,
             volume_threshold: DEFAULT_VOLUME_THRESHOLD,
             prev_position: HashMap::new(),
-            prev_was_in_squeeze: HashMap::new(),
+            prev_squeeze_detected_ms: HashMap::new(),
             prev_entry_price: HashMap::new(),
             prev_trailing_stop: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
@@ -174,6 +183,7 @@ impl BbBreakout {
         self.expansion_bw = params.expansion_bw;
         self.volume_threshold = params.volume_threshold;
         self.trailing_stop_atr_mult = params.trailing_stop_atr_mult;
+        self.squeeze_expiry_ms = params.squeeze_expiry_ms;
         info!(strategy = "bb_breakout", "params updated / 參數已更新");
         Ok(())
     }
@@ -186,6 +196,7 @@ impl BbBreakout {
             expansion_bw: self.expansion_bw,
             volume_threshold: self.volume_threshold,
             trailing_stop_atr_mult: self.trailing_stop_atr_mult,
+            squeeze_expiry_ms: self.squeeze_expiry_ms,
         }
     }
 }
@@ -209,8 +220,8 @@ impl Strategy for BbBreakout {
         self.trailing_stop.remove(symbol);
     }
 
-    /// RC-04: Revert per-symbol position, entry_price, trailing_stop, was_in_squeeze on rejection.
-    /// RC-04：拒絕時回滾該幣種的 position、entry_price、trailing_stop、was_in_squeeze。
+    /// RC-04: Revert per-symbol position, entry_price, trailing_stop, squeeze_detected_ms on rejection.
+    /// RC-04：拒絕時回滾該幣種的 position、entry_price、trailing_stop、squeeze_detected_ms。
     fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
         let sym = &intent.symbol;
         if let Some(prev) = self.prev_position.get(sym) {
@@ -219,8 +230,11 @@ impl Strategy for BbBreakout {
                 None => { self.positions.remove(sym); }
             }
         }
-        if let Some(&prev) = self.prev_was_in_squeeze.get(sym) {
-            if prev { self.was_in_squeeze.insert(sym.clone(), true); } else { self.was_in_squeeze.remove(sym); }
+        if let Some(prev) = self.prev_squeeze_detected_ms.get(sym) {
+            match prev {
+                Some(ts) => { self.squeeze_detected_ms.insert(sym.clone(), *ts); }
+                None => { self.squeeze_detected_ms.remove(sym); }
+            }
         }
         if let Some(prev) = self.prev_entry_price.get(sym) {
             match prev {
@@ -254,14 +268,15 @@ impl Strategy for BbBreakout {
         // RC-04：在任何變更前快照該幣種狀態，供拒絕回滾使用。
         let sym = &ctx.symbol;
         self.prev_position.insert(sym.clone(), self.positions.get(sym).copied());
-        self.prev_was_in_squeeze.insert(sym.clone(), self.was_in_squeeze.get(sym).copied().unwrap_or(false));
+        self.prev_squeeze_detected_ms.insert(sym.clone(), self.squeeze_detected_ms.get(sym).copied());
         self.prev_entry_price.insert(sym.clone(), self.entry_price.get(sym).copied());
         self.prev_trailing_stop.insert(sym.clone(), self.trailing_stop.get(sym).copied());
         let last_ms = self.last_trade_ms.get(sym).copied().unwrap_or(0);
         self.prev_last_trade_ms.insert(sym.clone(), last_ms);
 
         if bb.bandwidth < self.squeeze_bw {
-            self.was_in_squeeze.insert(sym.clone(), true);
+            // FIX-26: Only record first detection time; don't reset on continued squeeze.
+            self.squeeze_detected_ms.entry(sym.clone()).or_insert(ctx.timestamp_ms);
         }
         if last_ms > 0 && ctx.timestamp_ms < last_ms + self.cooldown_ms {
             return vec![];
@@ -270,7 +285,10 @@ impl Strategy for BbBreakout {
         let mut intents = Vec::new();
         match self.positions.get(sym).copied() {
             None => {
-                let in_squeeze = self.was_in_squeeze.get(sym).copied().unwrap_or(false);
+                // FIX-26: Check squeeze exists AND hasn't expired.
+                let in_squeeze = self.squeeze_detected_ms.get(sym)
+                    .map(|&ts| ctx.timestamp_ms < ts + self.squeeze_expiry_ms)
+                    .unwrap_or(false);
                 if in_squeeze
                     && bb.bandwidth > self.expansion_bw
                     && vol_ratio >= self.volume_threshold
@@ -308,7 +326,7 @@ impl Strategy for BbBreakout {
                             limit_price: None,
                         }));
                         self.positions.insert(sym.clone(), is_long);
-                        self.was_in_squeeze.remove(sym);
+                        self.squeeze_detected_ms.remove(sym);
                         self.last_trade_ms.insert(sym.clone(), ctx.timestamp_ms);
                         // V2: Record entry price and initialize trailing stop per-symbol
                         // V2：記錄該幣種入場價格並初始化追蹤止損
@@ -635,7 +653,7 @@ mod tests {
 
         // bw=0.025 triggers squeeze with custom threshold (< 0.03)
         s.on_tick(&ctx(0.025, 0.5, 1.0, 0));
-        assert_eq!(s.was_in_squeeze.get("BTC"), Some(&true));
+        assert!(s.squeeze_detected_ms.contains_key("BTC"));
 
         // bw=0.05 is expansion for default (> 0.04) but NOT for custom (< 0.06)
         let i = s.on_tick(&ctx(0.05, 1.1, 2.0, 700_000));

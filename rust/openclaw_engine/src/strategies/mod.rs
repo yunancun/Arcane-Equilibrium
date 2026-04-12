@@ -224,6 +224,12 @@ pub struct BbReversionParams {
     pub limit_offset_bps: f64,
     #[serde(default = "default_conf_scale")]
     pub conf_scale: f64,
+    /// FIX-24: RSI oversold threshold (default 30) / RSI 超賣閾值
+    #[serde(default = "default_rsi_oversold")]
+    pub rsi_oversold: f64,
+    /// FIX-24: RSI overbought threshold (default 70) / RSI 超買閾值
+    #[serde(default = "default_rsi_overbought")]
+    pub rsi_overbought: f64,
 }
 
 impl Default for BbReversionParams {
@@ -234,6 +240,8 @@ impl Default for BbReversionParams {
             use_limit: false,
             limit_offset_bps: 10.0,
             conf_scale: 1.0,
+            rsi_oversold: 30.0,
+            rsi_overbought: 70.0,
         }
     }
 }
@@ -255,6 +263,9 @@ pub struct BbBreakoutParams {
     pub trailing_stop_atr_mult: f64,
     #[serde(default = "default_conf_scale")]
     pub conf_scale: f64,
+    /// FIX-26: Squeeze state expiry (ms). Default 30 min / 壓縮狀態有效期
+    #[serde(default = "default_squeeze_expiry")]
+    pub squeeze_expiry_ms: u64,
 }
 
 impl Default for BbBreakoutParams {
@@ -267,6 +278,7 @@ impl Default for BbBreakoutParams {
             volume_threshold: 1.5,
             trailing_stop_atr_mult: 2.0,
             conf_scale: 1.0,
+            squeeze_expiry_ms: 1_800_000,
         }
     }
 }
@@ -315,7 +327,10 @@ fn default_squeeze_bw() -> f64 { 0.02 }
 fn default_expansion_bw() -> f64 { 0.04 }
 fn default_volume_threshold() -> f64 { 1.5 }
 fn default_trailing_atr() -> f64 { 2.0 }
+fn default_squeeze_expiry() -> u64 { 1_800_000 }
 fn default_limit_offset() -> f64 { 10.0 }
+fn default_rsi_oversold() -> f64 { 30.0 }
+fn default_rsi_overbought() -> f64 { 70.0 }
 fn default_grid_levels() -> usize { 10 }
 fn default_spacing_mode() -> String { "linear".into() }
 fn default_health_check_interval() -> u64 { 200 }
@@ -416,6 +431,8 @@ impl StrategyFactory {
         bbr.cooldown_ms = p.bb_reversion.cooldown_ms;
         bbr.use_limit = p.bb_reversion.use_limit;
         bbr.limit_offset_bps = p.bb_reversion.limit_offset_bps;
+        bbr.rsi_oversold = p.bb_reversion.rsi_oversold;
+        bbr.rsi_overbought = p.bb_reversion.rsi_overbought;
         bbr.set_conf_scale(p.bb_reversion.conf_scale);
         bbr.set_active(p.bb_reversion.active);
         strategies.push(Box::new(bbr));
@@ -427,6 +444,7 @@ impl StrategyFactory {
         bbb.expansion_bw = p.bb_breakout.expansion_bw;
         bbb.volume_threshold = p.bb_breakout.volume_threshold;
         bbb.trailing_stop_atr_mult = p.bb_breakout.trailing_stop_atr_mult;
+        bbb.squeeze_expiry_ms = p.bb_breakout.squeeze_expiry_ms;
         bbb.set_conf_scale(p.bb_breakout.conf_scale);
         bbb.set_active(p.bb_breakout.active);
         strategies.push(Box::new(bbb));

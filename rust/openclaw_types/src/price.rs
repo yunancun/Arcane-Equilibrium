@@ -4,6 +4,27 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// FIX-31: Typed price event kind — replaces stringly-typed metadata["type"].
+/// FIX-31：類型化價格事件種類 — 取代字串型 metadata["type"]。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PriceEventKind {
+    /// Trade execution tick / 成交 tick
+    Trade,
+    /// Orderbook snapshot / 訂單簿快照
+    Orderbook,
+    /// Ticker update / 行情更新
+    Ticker,
+    /// Liquidation event / 強平事件
+    Liquidation,
+    /// Price limit update / 價格限制更新
+    PriceLimit,
+    /// ADL (auto-deleverage) notice / 自動減倉通知
+    AdlNotice,
+    /// REST poller fallback / REST 輪詢回退
+    RestPoll,
+}
+
 /// Real-time price event from WebSocket.
 /// 來自 WebSocket 的實時價格事件。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +41,12 @@ pub struct PriceEvent {
     pub bid_price: f64,
     #[serde(default)]
     pub ask_price: f64,
+    /// FIX-31: Typed event kind (preferred over metadata["type"]).
+    /// FIX-31：類型化事件種類（優先於 metadata["type"]）。
+    #[serde(default)]
+    pub event_kind: Option<PriceEventKind>,
+    /// Legacy metadata map — still populated for backward compat, but prefer `event_kind`.
+    /// 舊版 metadata — 為向後兼容仍填充，但應優先使用 `event_kind`。
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
@@ -34,6 +61,7 @@ impl PriceEvent {
             ts_ms,
             bid_price: 0.0,
             ask_price: 0.0,
+            event_kind: None,
             metadata: HashMap::new(),
         }
     }

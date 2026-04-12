@@ -208,6 +208,7 @@ mod tests {
             bid_price: 99.5,
             ask_price: 100.5,
             ts_ms,
+            event_kind: None,
             metadata: Default::default(),
         }
     }

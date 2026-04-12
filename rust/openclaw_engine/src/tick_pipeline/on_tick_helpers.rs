@@ -52,12 +52,10 @@ impl TickPipeline {
     /// Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
     /// Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。
     pub(super) fn process_aggregator_events(&mut self, event: &PriceEvent) {
-        let event_type = match event.metadata.get("type").map(|s| s.as_str()) {
-            Some(t) => t,
-            None => return,
-        };
-        match event_type {
-            "trade" => {
+        // FIX-31: Use typed event_kind, fall back to legacy metadata["type"].
+        let kind = event.event_kind.as_ref();
+        match kind {
+            Some(PriceEventKind::Trade) => {
                 let side = event
                     .metadata
                     .get("side")
@@ -81,7 +79,7 @@ impl TickPipeline {
                     }
                 }
             }
-            "orderbook" => {
+            Some(PriceEventKind::Orderbook) => {
                 let bids: Vec<(f64, f64)> = event
                     .metadata
                     .get("bids5")

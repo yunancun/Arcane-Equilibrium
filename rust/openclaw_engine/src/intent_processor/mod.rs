@@ -160,6 +160,9 @@ pub struct IntentProcessor {
     /// BLOCKER-3 D15：跨引擎全局曝險（USDT × 100 存入 AtomicU64 以保留精度）。
     /// 由交易所管線（Demo/Live）更新；Paper 排除。
     global_exposure_usdt: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    /// FIX-28: Account leverage for risk checks. Paper=1.0, exchange=actual.
+    /// FIX-28：帳戶槓桿用於風控檢查。Paper=1.0，交易所=實際值。
+    account_leverage: f64,
 }
 
 impl IntentProcessor {
@@ -178,6 +181,7 @@ impl IntentProcessor {
             last_arm_selection: None,
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
             global_exposure_usdt: None,
+            account_leverage: 1.0,
         }
     }
 
@@ -198,7 +202,14 @@ impl IntentProcessor {
             last_arm_selection: None,
             edge_estimates: crate::edge_estimates::EdgeEstimates::empty(),
             global_exposure_usdt: None,
+            account_leverage: 1.0,
         }
+    }
+
+    /// FIX-28: Set account leverage for exchange pipelines (Demo/Live).
+    /// FIX-28：為交易所管線設定帳戶槓桿。
+    pub fn set_account_leverage(&mut self, leverage: f64) {
+        self.account_leverage = leverage.max(1.0);
     }
 
     /// BLOCKER-3 D15: Wire shared global exposure atomic for cross-engine notional cap.
