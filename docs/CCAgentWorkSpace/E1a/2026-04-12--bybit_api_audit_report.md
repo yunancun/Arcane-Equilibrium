@@ -270,17 +270,17 @@
 
 ### P0 — 無
 
-### P1 — 低風險，建議修復
+### P1 — 低風險，建議修復（全部已修復 2026-04-12）
 
-| 編號 | 標籤 | 文件 | 問題 | 建議 |
-|------|------|------|------|------|
-| BB-A1 | [API-MISMATCH] | `position_manager.rs:329` | `/v5/position/confirm-mmr` 可能應為 `/v5/position/confirm-pending-mmr`。但此端點未在交易路徑中被調用 | 驗證 Bybit 最新 API 文檔後修正 |
-| BB-A2 | [API-MISMATCH] | `account_manager.rs:374` | `/v5/account/set-hedging-mode` 可能不是正確路徑。Dead code，從未被調用 | 驗證或刪除 |
-| BB-A3 | [API-MISMATCH] | `account_manager.rs:420` | `/v5/account/repay` 可能不是 UTA 帳戶的正確還款路徑。Dead code，從未被調用 | 驗證或刪除 |
-| BB-A4 | [PARSE-ERROR] | `bybit_private_ws.rs:593-605` | `execution.fast` topic 缺少 `execFee`，WS 推送的手續費為 `""` → 0.0。Mainnet 上線時需從 REST 補全 | 上線前補全邏輯或使用普通 `execution` topic 覆蓋 |
-| BB-A5 | [RISK] | `platform_client.rs:362-370` | `pre_check_order()` 使用真正的 `/v5/order/create`，可能意外下單 | 明確標記為 dangerous 或移除 |
-| BB-A6 | [NAMING] | `spot_margin_client.rs:216` | `get_repay_history()` 實際查的是「可還款金額」不是「還款歷史」 | 重命名為 `get_repayment_available()` |
-| BB-A7 | [MISSING-HANDLER] | `market_data_client/mod.rs:473` | `/v5/market/adl-alert` 可能不是有效的 Bybit V5 公開端點 | 驗證端點存在性；考慮改用持倉 adlRankIndicator |
+| 編號 | 標籤 | 文件 | 問題 | 修復 | 狀態 |
+|------|------|------|------|------|------|
+| BB-A1 | [API-MISMATCH] | `position_manager.rs:307,335` | `/v5/position/confirm-mmr` 應為 `confirm-pending-mmr` | FIX-56: 修正路徑 + 雙語註釋 | ✅ |
+| BB-A2 | [API-MISMATCH] | `account_manager.rs:359` | `/v5/account/set-hedging-mode` 路徑存疑 | FIX-55: 驗證確認路徑正確 + 標記 dead code | ✅ |
+| BB-A3 | [API-MISMATCH] | `account_manager.rs:415` | `/v5/account/repay` 路徑存疑 | FIX-55: 驗證確認路徑正確 + 標記 dead code | ✅ |
+| BB-A4 | [PARSE-ERROR] | `event_consumer/mod.rs:577-604` | `execution.fast` 缺少 `execFee`，手續費為 0 | FIX-19b: backfill `notional × per-symbol fee_rate` | ✅ |
+| BB-A5 | [RISK] | `platform_client.rs:355-359` | `pre_check_order()` 會真實下單 | FIX-20: 函數已移除 | ✅ |
+| BB-A6 | [NAMING] | `spot_margin_client.rs:220` | `get_repay_history()` 名不符實 | FIX-57: 重命名為 `get_repayment_available()` | ✅ |
+| BB-A7 | [MISSING-HANDLER] | `market_data_client/mod.rs:475-482` | `/v5/market/adl-alert` 可能不存在 | FIX-58: `#[allow(dead_code)]` + 警告註釋 | ✅ |
 
 ### P2 — 觀察項
 
@@ -298,6 +298,4 @@
 
 **B-2 修復徹底**: `execution.fast` vs `execution` 的環境差異在代碼（`private_ws_topics()`）和測試（`test_private_topics_per_environment()`）兩層防護，回歸風險極低。
 
-**主要風險**: BB-A4（`execution.fast` 缺少手續費）是 mainnet 上線前唯一需要關注的 P1 問題，因為它可能導致通過 WS 收到的 fill 事件手續費為 0，與 PNL-FIX-2 同類。其他 API-MISMATCH 問題均在 dead code 路徑，不影響運行。
-
-**建議優先級**: BB-A4 > BB-A5 > BB-A1 > BB-A6 > BB-A7 > BB-A2 = BB-A3
+**7/7 P1 全部已修復**（2026-04-12）：FIX-19b/20/55/56/57/58。BB-A4（execution.fast fee backfill）為唯一關鍵修復，其餘均為 dead code 路徑的文檔/命名修正。詳見 `docs/worklogs/2026-04-12--bb_bybit_api_audit_final.md`。
