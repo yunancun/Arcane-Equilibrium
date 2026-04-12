@@ -475,6 +475,33 @@ impl PaperState {
         }
     }
 
+    /// Reduce a position by `reduce_qty` at `price`. If reduce_qty >= position qty,
+    /// closes the entire position. Returns realized PnL for the reduced portion.
+    /// FIX-03: Used by fast_track ReduceToHalf.
+    /// 按 reduce_qty 減倉。若 reduce_qty >= 持倉量則全平。返回減倉部分的已實現損益。
+    pub fn reduce_position(&mut self, symbol: &str, reduce_qty: f64, price: f64) -> f64 {
+        if let Some(pos) = self.positions.get_mut(symbol) {
+            let actual_reduce = reduce_qty.min(pos.qty);
+            let pnl = if pos.is_long {
+                (price - pos.entry_price) * actual_reduce
+            } else {
+                (pos.entry_price - price) * actual_reduce
+            };
+            self.balance += pnl;
+            self.total_realized_pnl += pnl;
+            pos.qty -= actual_reduce;
+            if pos.qty < 1e-12 {
+                // Fully closed / 全部平倉
+                self.positions.remove(symbol);
+                self.trade_count += 1;
+            }
+            self.peak_balance = self.peak_balance.max(self.balance);
+            pnl
+        } else {
+            0.0
+        }
+    }
+
     /// Close a single position at current market price (falls back to entry price if no live
     /// price available). Returns realized PnL or None if no position exists for the symbol.
     /// 以當前市場價平掉單一持倉（無市場價時回退入場價），返回已實現損益或 None。

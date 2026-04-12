@@ -222,6 +222,20 @@ async fn async_main(
     );
 
     // ------------------------------------------------------------------
+    // FIX-10: IPC HMAC mandatory for Live — if Live pipeline is active,
+    // OPENCLAW_IPC_SECRET MUST be set. Fail-closed: panic on startup.
+    // FIX-10：Live 管線啟動時 IPC HMAC 認證強制——無密鑰直接 panic。
+    // ------------------------------------------------------------------
+    if live_bindings.is_some() && std::env::var("OPENCLAW_IPC_SECRET").is_err() {
+        panic!(
+            "FATAL: Live pipeline detected but OPENCLAW_IPC_SECRET is not set. \
+             IPC HMAC authentication is mandatory for Live trading. \
+             Set OPENCLAW_IPC_SECRET env var before starting with Live credentials. \
+             / Live 管線偵測到但 OPENCLAW_IPC_SECRET 未設置。Live 交易必須啟用 IPC HMAC 認證。"
+        );
+    }
+
+    // ------------------------------------------------------------------
     // Start IPC server / 啟動 IPC 服務器
     // ------------------------------------------------------------------
     let ipc_data_dir =

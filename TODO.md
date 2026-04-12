@@ -1,7 +1,7 @@
 # OpenClaw TODO — 工作計劃清單
 
 最後更新：2026-04-12（全程序鏈審計 58 發現 · 8 P0 · PM APPROVED 修復計劃）
-測試基準線：**Rust engine lib 939 + core 366 + e2e 18 + promotion 32 = 1355 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
+測試基準線：**Rust engine lib 961 + core 366 + e2e 29 + promotion 32 = 1388 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
 > 歷史歸檔索引在文件末尾。詳細完成度視角見 README.md。
@@ -47,14 +47,14 @@ PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md
 
 ### P0 — Live 阻塞（W22 Mon-Tue 必須完成）
 
-- [ ] **FIX-10** ← E3: SEC-D01 [CRITICAL] — IPC HMAC 認證 Live 模式下應強制 — `ipc_server/mod.rs:497`，Live pipeline 啟動時無 `OPENCLAW_IPC_SECRET` 應 panic
-- [ ] **FIX-03** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] · E5: D-01 [Medium] — FastTrack ReduceToHalf/PauseNewEntries 定義但未處理 — `fast_track.rs:17-18` + `on_tick.rs:148-161`，風控閉環缺口
-- [ ] **FIX-04** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] — fast_track price_drop/margin_util 硬編 0.0 — `on_tick.rs:156-159`，閃崩/保證金危機防線完全失效（合併 PNL-6 一起解決）
-- [ ] **FIX-19** ← BB: BB-A4 [P1] [PARSE-ERROR] — execution.fast 缺 execFee → WS 手續費為 0 — `bybit_private_ws.rs:593-605`，Mainnet PNL-FIX-2 同類問題
-- [ ] **FIX-13** ← E4: P0-#1 [P0-CRITICAL] — edge_estimates.rs 零測試（208 行 / 9 pub fn）— JSON 解析 + 除零風險，被 scanner/cost_gate 依賴
-- [ ] **FIX-14** ← E4: P0-#2 [P0-CRITICAL] — REST API timeout fail-closed 行為無測試 — `bybit_rest_client.rs`，硬邊界原則 #5 合規未驗證
-- [ ] **FIX-15** ← E4: P0-#3 [P0-CRITICAL] — 三管線並發寫入無集成測試 — 3E-ARCH 核心架構未端到端驗證
-- [ ] **FIX-09** ← E3: SEC-E01 [HIGH] + SEC-B03 [MEDIUM] — ocEsc() 缺單引號轉義 — `common.js:371`，XSS defense-in-depth，1 行修改
+- [x] **FIX-10** ← E3: SEC-D01 [CRITICAL] — IPC HMAC 認證 Live 模式下應強制 ✅ main.rs panic guard
+- [x] **FIX-03** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] · E5: D-01 [Medium] — FastTrack ReduceToHalf/PauseNewEntries 已處理 ✅ on_tick.rs 半倉+暫停開倉
+- [x] **FIX-04** ← FA: #2 [BLOCKER] · E3: SEC-A01 [LOW] — fast_track 真實 price_drop_pct + margin_utilization_pct ✅ PriceHistoryTracker.max_drop_pct() + paper_state notional
+- [x] **FIX-19** ← BB: BB-A4 [P1] [PARSE-ERROR] — execution.fast execFee 缺失時用 taker_fee_rate 估算 ✅ event_consumer/mod.rs
+- [x] **FIX-13** ← E4: P0-#1 [P0-CRITICAL] — edge_estimates.rs +14 tests ✅ JSON 解析/空值/邊界/clamp
+- [x] **FIX-14** ← E4: P0-#2 [P0-CRITICAL] — REST fail-closed +7 tests ✅ NoCredentials/Transport/retCode/timeout
+- [x] **FIX-15** ← E4: P0-#3 [P0-CRITICAL] — 三管線並發寫入 +1 integration test ✅ 3 thread×50 writes 無損壞
+- [x] **FIX-09** ← E3: SEC-E01 [HIGH] + SEC-B03 [MEDIUM] — ocEsc() 加單引號 `&#39;` 轉義 ✅ common.js
 
 ### P1 — 架構缺陷（W22 Wed 完成核心項）
 
