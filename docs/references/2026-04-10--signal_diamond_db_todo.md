@@ -1,6 +1,8 @@
 # DB TODO — Multi-Engine Data Separation (Paper / Demo / Live)
 # 多引擎數據分離方案
 # 最後更新：2026-04-10
+#
+# ⚠ 歷史術語注意：本文寫於 3E-ARCH 完成前，文中 `TradingMode` 已由 `PipelineKind` 取代（2026-04-11 commit 0f3af65）。
 
 ---
 

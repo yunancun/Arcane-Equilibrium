@@ -194,17 +194,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
-| `2026-03-22--项目总报告_含github核对.md` | 项目总报告（含 GitHub 核对，md 版） |
-| `2026-03-22--项目总报告_含github核对.txt` | 项目总报告（含 GitHub 核对，txt 版） |
+| `2026-03-22--项目总报告_含github核对.md` | 项目总报告（含 GitHub 核对） |
 | `2026-03-22--夜间_最终整合总报告.txt` | 夜间最终整合总报告 |
 | `2026-03-22--夜间_github迁移与诊断报告.txt` | GitHub 迁移与夜间诊断报告 |
 | `2026-03-22--夜间_新对话接手prompt_github版.txt` | 新对话接手 Prompt（GitHub 工作流版） |
 | `2026-03-24--工程总报告_结构迁移完成.txt` | 工程总报告：结构迁移完成 + 新工作流 |
 | `2026-03-24--交接日志.txt` | 03-24 晚交接日志 |
 | `2026-03-24--新对话启动prompt.txt` | 新对话启动 Prompt |
-| `2026-03-24--work_report_current_dialogue.txt` | 当前对话工作报告（txt） |
-| `2026-03-24--work_report_current_dialogue.md` | 当前对话工作报告（md） |
-| `2026-03-24--work_report_current_dialogue.pdf` | 当前对话工作报告（pdf） |
+| `2026-03-24--work_report_current_dialogue.md` | 当前对话工作报告 |
 
 ### worklogs/control_api_gui/ — Control API + GUI 开发日志（2026-03-25 ~ 2026-04-02）
 
@@ -257,7 +254,6 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-01--phase3_full_completion_and_wave7b.md` | ★★★★ Wave 7b Inverse 品類（INV-1~5）+ Phase 3 全完成（3A ExperimentLedger/Routes/EvolutionEngine + 3B TruthSourceRegistry持久化/AnalystAgent觀測/auto_seed + 3C EvolutionScheduler週進化/小時清理/GUI dashboard）· 3103→3330 tests |
 | `2026-04-01--governance_auth_restart_fix_and_order_unblock.md` | ★★ GovernanceHub 重啟後授權丟失根因診斷與修復：5 層診斷（state.json→audit→bridge stats→auth NONE）· get_status() auth_pending_approval 修復 · /session/reauth 端點 · startup 自動補授 · 首筆 FARTCOINUSDT 訂單解封成交 |
 | `2026-04-01--main_legacy_refactor_wave_a_to_e.md` | ★★★★ main_legacy.py 重構全記錄：5265→407 行（-92%），Wave A-E 共拆出 11 模塊，monkey-patch 延遲查找修復，E5 審查 build_review_queue bug 修復，§14 約定建立，3005 tests 零回歸 |
-| `2026-04-01--completed_todo_archive.md` | ★★ TODO 已完成項目歸檔：Wave 0-7 / Phase 1-3 / Audit Batch 1-7 / main_legacy 重構全部完成記錄 |
 | `2026-04-01--wave8_pa_reality_check_and_parallel_fix.md` | ★★★★ Wave 8 工作日誌：PA 69 項實況檢查 + 6 軌道×2 批並行修復 38/39 項 + strategist 拆分 + on_tick/mutator 拆分 + now_ms 統一 + +148 測試 |
 | `2026-04-02--batch9a_deterministic_adaptive_risk.md` | ★★★ Batch 9A 確定性自適應風控：QC 量化審查驅動 · ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用 · 修復 ATR 止損死代碼 bug · +66 測試 · 3703 passed |
 
@@ -266,21 +262,20 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | 文件 | 内容 |
 |------|------|
 | `2026-04-03--daily_summary.md` | ★★★★ 2026-04-03 日匯總（12 Sessions · 28 Commits）：文檔治理 + Phase 0-3 全覽 + Rust R-00~R-04 |
-| `2026-04-03--completed_todo_archive_batch9a_wave8_xp.md` | TODO 已完成歸檔：Batch 9A + Wave 8A-8D + XP-1~4（路線圖定稿清理） |
 | `2026-04-04--daily_summary.md` | ★★★★ 2026-04-04 日匯總：V2 策略功能全面啟用（P0 緊急修復）+ Bybit API 基礎設施 |
 | `2026-04-04--td01_td02_td03_file_split.md` | Session 3：TD-01/02/03 Python 大文件拆分（Phase 1 前置技術債清零） |
 | `2026-04-04--session4_bybit_api_audit.md` | ★★★ Session 4：BB+E5+PA 三角色聯合審計 Bybit V5 API 層 + 完整 API 字典手冊 |
 | `2026-04-04--session5_bybit_full_integration.md` | ★★★ Session 5：9 項 API 整合改進 + 3 新模組 + Demo→Live 對齊（PM+PA+FA+BB 四角色） |
-| `2026-04-04--completed_todo_archive_phase0123_rust.md` | TODO 已完成歸檔：Phase 0-3（26 項）+ Rust R-00~R-06（7 項）|
 | `2026-04-05--daily_summary.md` | ★★★★ 2026-04-05 日匯總（3 Sessions）：Phase 1 Full Rust 數據管線（G1-G4）+ Phase 2/3a/3b ML 基礎設施 + EXT-1 Exchange-as-Truth + RRC-1 設計 + 風控 GUI 補齊 + Demo 架構完成 |
+| `2026-04-06--daily_summary.md` | ★★★★ 2026-04-06 日匯總：L3 整改 R0/R1/R2 + Drift Detector 接線 + Phase 4 啟動 |
 | `2026-04-06--session10_r0_r1_remediation.md` | ★★★ Session 10：L3 414 findings → 63 tracker + R0 Week 1（7 P0 修復）+ R1 Wave 1（WP-B Security + WP-MIT DB/ML + idle writer） |
 | `2026-04-06--session11_p1_6_drift_detector.md` | Session 11：WP-MIT P1-6 drift_detector PG 接線（fetch_active_baselines / DriftMonitorState / PSI 滑動窗口） |
 | `2026-04-06--session11_r2_batch.md` | ★★★ Session 11：R1 收尾 + R2 批次（多項 L3 整改繼續推進） |
 | `2026-04-06--session11_precompact.md` | Session 11 Pre-Compact 快照：453 engine + 411 core + 35 ml_training · 0 failures |
 | `2026-04-06--session12_precompact.md` | Session 12 Pre-Compact 快照：474 engine + 413 core + 35 ml_training · 0 failures |
 | `2026-04-06--session13_precompact.md` | ★★★★ Session 13：I-22 event_consumer 拆分 + FA-GAP-2/4 接線（cost_ratio/Kelly ATR%）+ per-symbol 真實費率 + SEC-11 fail-closed + FA-GAP-8/9 dead code 清除 |
-| `2026-04-06--completed_todo_archive_l3_phases.md` | TODO 已完成歸檔：L3 整改 + Phase 0/1/2/3 + Rust 遷移已驗收項（Session 11 後清理） |
 | `2026-04-06--session_progress_2.md` | Session 進度快照（Session 2）|
+| `2026-04-07--daily_summary.md` | ★★★★ 2026-04-07 日匯總：Phase 4 完成 + ARCH-RC1 1A/1B/1C-1/1C-2 |
 | `2026-04-07--session_arch_rc1_1a_1b.md` | ARCH-RC1 1A + 1B：ConfigStore 單一寫入口 + StrategyParams JSON 接線 |
 | `2026-04-07--session_arch_rc1_1c1_1c2.md` | ARCH-RC1 1C-1 + 1C-2：IPC patch 接線 + hot-reload ArcSwap |
 | `2026-04-07--session_arch_rc1_1c2_complete.md` | ARCH-RC1 1C-2 完成：IPC 全鏈路驗收 |
@@ -304,6 +299,24 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-08--session_progress_1c3f.md` | 1C-3-F session 進度 |
 | `2026-04-08--session_progress_post_1c4_wrap.md` | 1C-4 wrap 後 session 進度 |
 | `2026-04-08--session_resume_notes.md` | Session 恢復筆記 |
+| `2026-04-09--rust_market_scanner_phase_a_d_complete.md` | ★★★ Rust 市場掃描器 Phase A-D 完整工程日誌：ScannerRunner 全接線 + D2/D3 動態 symbol + QC/FA + IPC-SCAN-1 |
+| `2026-04-09--strategy_action_enum_implementation.md` | StrategyAction Enum 完整實現日誌：策略出場死鎖修復 + QC/FA 審查 · 830 tests |
+| `2026-04-10--ml_pipeline_remediation_complete.md` | ML Pipeline 整改完成日誌：Rust 學習寫入路徑 + per-mode 數據隔離驗收 |
+| `2026-04-10--signal_diamond_phase1_4_fix_round.md` | ★★★ Signal Diamond Phase 1-4 + Fix Round：V015 Migration + Rust DB Writers + ModeState + IPC mode-aware · 850 tests |
+| `2026-04-10--daily_summary.md` | 2026-04-10 日匯總 |
+| `2026-04-11--daily_summary.md` | ★★★★ 2026-04-11 日匯總：3E-ARCH 三引擎並行 + Multi-Symbol + Fix Rounds Phase A-G |
+| `2026-04-12--daily_summary.md` | ★★★★ 2026-04-12 日匯總：全程序鏈審計 + E5 優化 + PNL-FIX + GUI 修復 |
+| `2026-04-12--gui_metrics_db_fallback_and_display_fixes.md` | GUI 指標 DB 降級 + 顯示修復 4 項 |
+| `2026-04-12--earned_trust_ladder_and_audit_trail_fix.md` | Earned-Trust TTL Ladder + Audit Trail 時間戳修復 |
+| `2026-04-12--session1_p0_full_program_audit_fixes.md` | 全程序鏈審計 P0 8/8 修復 |
+| `2026-04-12--session2_p1_full_program_audit_fixes.md` | 全程序鏈審計 P1 18/18 修復 |
+| `2026-04-12--session3_p2_rust_7_fixes.md` | 審計 P2 Rust 7 項修復 |
+| `2026-04-12--session3.1_p2_batch_ab_10_fixes.md` | 審計 P2 Batch A+B 10 項修復 |
+| `2026-04-12--session3.2_p2_final_5_fixes.md` | 審計 P2 最終 5 項修復 |
+| `2026-04-12--fix08_file_size_split_verification.md` | FIX-08 超限文件拆分驗證 |
+| `2026-04-12--session3.3_p3_cleanup_and_qc_params.md` | P3 清理 + QC 參數全修 |
+| `2026-04-12--a3_gui_audit_fix_session.md` | A3 GUI 可用性審計全修 |
+| `2026-04-12--bb_bybit_api_audit_final.md` | BB Bybit API 審計 7/7 P1 全修 |
 
 ### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
 
@@ -408,6 +421,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-07_phase4_final_signoff_audit.md` | Phase 4 最终验收审计报告 |
 | `2026-04-08--e2_review_1c3_bbc.md` | E2 代码审查：ARCH-RC1 1C-3 BBC（Build-Before-Commit 验收） |
 | `2026-04-09--db_rw_ml_pipeline_full_audit.md` | DB 读写 + ML 管线全量审计（Signal Diamond Phase 1 前置）|
+| `2026-04-11--3e_arch_e2_multi_role_review.md` | ★★ 3E-ARCH E2 多角色審查：9 角色並行 Phase A-F 全修驗證 |
+| `2026-04-11--3e_arch_phase_g_reaudit.md` | ★★ 3E-ARCH Phase G 重審：9/9 PASS — 0 BLOCKER |
+
+### KNOWN_ISSUES.md
+
+| 文件 | 内容 |
+|------|------|
+| `KNOWN_ISSUES.md` | ★ 已知問題追蹤（OPEN 9 / RESOLVED 15，最後更新 2026-04-12） |
 
 ### architecture/ — 架構設計文件
 
@@ -455,11 +476,18 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | 數據存儲架構最優方案草稿 V0.1：PG + TimescaleDB · 分區策略 · 冷熱分層 |
 | `2026-04-03--llm_abstraction_audit.md` | LLM 抽象層審計：LocalLLMClient ABC 介面覆蓋度 · Ollama 耦合殘留 · 跨平台兼容性評估 |
 | `2026-04-03--ml_dl_learning_architecture_v0.4.md` | ★ ML/DL 學習架構 V0.4：Teacher-Student + LightGBM + Optuna + 3 DL 場景 · 三方審查完成 |
-| `2026-04-10--signal_diamond_db_todo.md` | ★★ Signal Diamond DB TODO 歸檔：多引擎數據分離 5 Phase 規劃 · Phase 1-4 ✅ + 審計備註 · Phase 5 待實施 |
+| `2026-04-10--signal_diamond_db_todo.md` | ★★ Signal Diamond DB TODO 歸檔：多引擎數據分離 5 Phase 規劃 · Phase 1-4 ✅ + 審計備註 · Phase 5 待實施（⚠ TradingMode→PipelineKind 歷史術語） |
 | `2026-04-04--bybit_api_reference.md` | ★★ Bybit API 字典手冊：REST/WS 全端點速查 · V5 API 分類覆蓋 · 開發必讀 |
 | `2026-04-04--comprehensive_audit_template_v1.md` | 全面審查模板 V1：L1/L2/L3 三級審計流程 · 5 路並行 9 角色 + DL/DB 專項 |
 | `2026-04-04--execution_plan_v1.md` | ★ 融合方案執行計劃 V1：DB + ML/DL + 新聞 Agent 20 週路線圖 · Phase 0-6 詳細規格 |
 | `2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md` | 統一 DB + ML + 新聞 Agent 工作計劃草稿 V0.1：融合方案 v0.5 設計文件 · 67 項修正後版本 |
+| `2026-04-06--phase4_execution_plan_v2.md` | 融合方案執行計劃 V2：Phase 4 更新版排期 |
+| `2026-04-07--arch_rc1_1c3_scope.md` | ARCH-RC1 1C-3 範圍定義 |
+| `2026-04-07--arch_rc1_1c3a_gap_analysis.md` | ARCH-RC1 1C-3A 缺口分析 |
+| `2026-04-07--arch_rc1_1c3c_recon.md` | ARCH-RC1 1C-3C 對賬設計 |
+| `2026-04-11--three_engine_parallel_arch_plan.md` | ★★★ 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（✅ 已完成） |
+| `2026-04-11--3e_arch_session_execution_plan.md` | ★★ 3E-ARCH Session 執行計劃：8 工作日排期（✅ 已完成） |
+| `math_implementation_notes.md` | 數學實現筆記：策略/風控公式參考 |
 
 ### governance_dev/ — 治理开发文档
 
@@ -581,7 +609,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ### CCAgentWorkSpace/ — Agent 獨立工作空間（2026-03-31 新增）
 
-15 個 Agent 角色各自的獨立工作空間。每個 Agent 有 `profile.md`（角色定位）、`memory.md`（工作記憶）、`workspace/`（報告存檔）。
+17 個 Agent 角色各自的獨立工作空間。每個 Agent 有 `profile.md`（角色定位）、`memory.md`（工作記憶）、`workspace/`（報告存檔）。
 
 | 目錄 | Agent | 層次 |
 |------|-------|------|
@@ -600,3 +628,5 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/TW/` | Technical Writer | 專項審查層 |
 | `CCAgentWorkSpace/AI-E/` | AI Effectiveness Evaluator | 分析層 |
 | `CCAgentWorkSpace/QA/` | Quality Assurance | 分析層 |
+| `CCAgentWorkSpace/QC/` | Quantitative/Math Auditor | 專項審查層 |
+| `CCAgentWorkSpace/Operator/` | Operator（人類 Operator 視角） | 管理層 |

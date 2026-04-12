@@ -5,6 +5,7 @@
 **日期 / Date**: 2026-04-11（v4 修訂 — 嚴格審查：+6 gaps 修復 +4 事實校正）  
 **優先級 / Priority**: P0 — 下一個主要開發週期首要任務  
 **TODO 索引 / TODO ref**: 3E-1 ~ 3E-9  
+**狀態 / Status**: ✅ 已完成（2026-04-11 commit 0f3af65）— `TradingMode` 已完全由 `PipelineKind` 取代，文中 `TradingMode` 引用為歷史上下文  
 
 ---
 

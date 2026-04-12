@@ -31,12 +31,16 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_h_chain_rec
 helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_lease_recheck.sh
 ```
 
-### 已知文件名修正
-| 舊名 | 當前正確名 |
-|---|---|
-| `bybit_local_risk_envelope_builder.py` | `bybit_local_risk_envelope_gate.py` |
-| `bybit_local_trade_eligibility_handoff.py` | `bybit_local_trade_eligibility_handoff_builder.py` |
-| `bybit_local_judgment_contract_check.py` | `bybit_local_judgment_final_audit_contract_check.py` |
+### 已知文件名修正（歷史記錄）
+
+> **注意**：以下三個 .py 源文件已在 DEAD-PY-2 Phase C（2026-04-10）中全部刪除，僅 `__pycache__` .pyc 殘留。
+> 此表保留為歷史參考，不再適用於當前代碼庫。
+
+| 舊名 | 曾重命名為 | 當前狀態 |
+|---|---|---|
+| `bybit_local_risk_envelope_builder.py` | `bybit_local_risk_envelope_gate.py` | **已刪除**（DEAD-PY-2） |
+| `bybit_local_trade_eligibility_handoff.py` | `bybit_local_trade_eligibility_handoff_builder.py` | **已刪除**（DEAD-PY-2） |
+| `bybit_local_judgment_contract_check.py` | `bybit_local_judgment_final_audit_contract_check.py` | **已刪除**（DEAD-PY-2） |
 
 ---
 
