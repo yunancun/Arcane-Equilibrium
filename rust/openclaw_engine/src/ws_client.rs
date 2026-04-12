@@ -939,4 +939,48 @@ mod tests {
         let delay5 = std::cmp::min(base * BACKOFF_FACTOR.pow(5), MAX_RECONNECT_DELAY_MS);
         assert_eq!(delay5, MAX_RECONNECT_DELAY_MS);
     }
+
+    /// EN: Subscribe batch size matches Bybit per-call limit (10).
+    /// 中文: 訂閱批次大小符合 Bybit 每次調用限制（10）。
+    #[test]
+    fn test_subscribe_batch_size_constant() {
+        assert_eq!(SUBSCRIBE_BATCH_SIZE, 10);
+        assert_eq!(MAX_RECONNECT_DELAY_MS, 60_000);
+        assert_eq!(BACKOFF_FACTOR, 2);
+    }
+
+    /// EN: Backoff progression — monotonically increasing until cap.
+    /// 中文: 退避遞增 — 單調遞增直到上限。
+    #[test]
+    fn test_backoff_monotonic_progression() {
+        let base: u64 = 3000;
+        let mut prev = 0u64;
+        for attempt in 1..=10u32 {
+            let delay = std::cmp::min(
+                base.saturating_mul(BACKOFF_FACTOR.saturating_pow(attempt)),
+                MAX_RECONNECT_DELAY_MS,
+            );
+            assert!(delay >= prev, "delay should be monotonically non-decreasing");
+            assert!(delay <= MAX_RECONNECT_DELAY_MS, "delay should never exceed max");
+            prev = delay;
+        }
+        // After enough attempts, should be capped at max
+        assert_eq!(prev, MAX_RECONNECT_DELAY_MS);
+    }
+
+    /// EN: extract_symbol handles multi-segment topics (kline.interval.SYMBOL).
+    /// 中文: extract_symbol 處理多段主題（kline.interval.SYMBOL）。
+    #[test]
+    fn test_extract_symbol_multi_segment() {
+        // 3-segment: kline.1.BTCUSDT → BTCUSDT
+        assert_eq!(extract_symbol_from_topic("kline.1.BTCUSDT"), Some("BTCUSDT".into()));
+        // 2-segment: tickers.ETHUSDT → ETHUSDT
+        assert_eq!(extract_symbol_from_topic("tickers.ETHUSDT"), Some("ETHUSDT".into()));
+        // 3-segment orderbook: orderbook.50.XRPUSDT → XRPUSDT
+        assert_eq!(extract_symbol_from_topic("orderbook.50.XRPUSDT"), Some("XRPUSDT".into()));
+        // Edge: trailing dot → empty segment → None
+        assert_eq!(extract_symbol_from_topic("kline.1."), None);
+        // Single segment (no dot) → just the string itself
+        assert_eq!(extract_symbol_from_topic("BTCUSDT"), Some("BTCUSDT".into()));
+    }
 }

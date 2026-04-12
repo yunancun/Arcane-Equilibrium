@@ -259,3 +259,56 @@ impl ScannerRunner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// EN: topics_for_symbol generates kline.1 + publicTrade for each symbol.
+    /// 中文: topics_for_symbol 為每個交易對生成 kline.1 + publicTrade。
+    #[test]
+    fn test_topics_for_symbol_standard() {
+        let topics = topics_for_symbol("BTCUSDT");
+        assert_eq!(topics.len(), 2);
+        assert_eq!(topics[0], "kline.1.BTCUSDT");
+        assert_eq!(topics[1], "publicTrade.BTCUSDT");
+    }
+
+    /// EN: topics_for_symbol with different symbols produces unique topics.
+    /// 中文: 不同交易對產生唯一主題。
+    #[test]
+    fn test_topics_for_symbol_uniqueness() {
+        let btc = topics_for_symbol("BTCUSDT");
+        let eth = topics_for_symbol("ETHUSDT");
+        // No overlap between different symbols
+        for t in &btc {
+            assert!(!eth.contains(t));
+        }
+    }
+
+    /// EN: query_open_positions returns empty set when channel is closed.
+    /// 中文: 通道關閉時 query_open_positions 返回空集合。
+    #[tokio::test]
+    async fn test_query_open_positions_channel_closed() {
+        let (ws_tx, _ws_rx) = mpsc::unbounded_channel();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        drop(cmd_rx); // receiver dropped → send will fail
+        let runner = ScannerRunner {
+            registry: Arc::new(SymbolRegistry::new(vec![], vec![])),
+            market_client: Arc::new(MarketDataClient::new(Arc::new(
+                crate::bybit_rest_client::BybitRestClient::new(
+                    crate::bybit_rest_client::BybitEnvironment::Demo,
+                    None,
+                    None,
+                ).expect("demo client"),
+            ))),
+            edge_estimates: Arc::new(parking_lot::RwLock::new(EdgeEstimates::empty())),
+            scanner_config: Arc::new(crate::config::ConfigStore::new(ScannerConfig::default())),
+            ws_tx,
+            pipeline_cmd_tx: cmd_tx,
+            cancel: CancellationToken::new(),
+        };
+        let result = runner.query_open_positions().await;
+        assert!(result.is_empty());
+    }
+}

@@ -541,3 +541,182 @@ pub fn handle_paper_command(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::StateWriter;
+    use crate::tick_pipeline::TickPipeline;
+
+    /// EN: Helper — build a DualStateWriter pointing at a temp directory.
+    /// 中文: 輔助函式 — 建構指向暫存目錄的 DualStateWriter。
+    fn make_writer(dir: &std::path::Path) -> DualStateWriter {
+        let path = dir.join("test_snapshot.json");
+        let primary = StateWriter::new(&path, 0); // interval=0 → always write
+        DualStateWriter::new(primary, None)
+    }
+
+    // ── Pause / Resume / Reset ──
+
+    /// EN: Pause sets paper_paused=true.
+    /// 中文: Pause 設定 paper_paused=true。
+    #[test]
+    fn test_pause_sets_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        assert!(!pipeline.paper_paused);
+        handle_paper_command(PipelineCommand::Pause, &mut pipeline, &mut writer, &mut pending);
+        assert!(pipeline.paper_paused);
+    }
+
+    /// EN: Resume clears both paper_paused and session_halted.
+    /// 中文: Resume 同時清除 paper_paused 和 session_halted。
+    #[test]
+    fn test_resume_clears_pause_and_halt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.paper_paused = true;
+        pipeline.session_halted = true;
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        handle_paper_command(PipelineCommand::Resume, &mut pipeline, &mut writer, &mut pending);
+        assert!(!pipeline.paper_paused);
+        assert!(!pipeline.session_halted);
+    }
+
+    /// EN: Reset restores balance, clears paused+halted+consecutive_losses+pending.
+    /// 中文: Reset 恢復餘額、清除暫停+中止+連虧+掛單。
+    #[test]
+    fn test_reset_clears_all_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.paper_paused = true;
+        pipeline.session_halted = true;
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        pending.insert("order1".to_string(), PendingOrder {
+            order_link_id: "order1".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            qty: 0.01,
+            strategy: "test".into(),
+            sent_ts_ms: 1000,
+            cum_filled_qty: 0.0,
+            is_close: false,
+        });
+        handle_paper_command(
+            PipelineCommand::Reset { new_balance: 5000.0 },
+            &mut pipeline, &mut writer, &mut pending,
+        );
+        assert!(!pipeline.paper_paused);
+        assert!(!pipeline.session_halted);
+        assert!(pending.is_empty());
+        assert!((pipeline.paper_state.balance() - 5000.0).abs() < 1e-9);
+    }
+
+    // ── ClearConsecutiveLosses ──
+
+    /// EN: ClearConsecutiveLosses empties the map and responds with count.
+    /// 中文: ClearConsecutiveLosses 清空映射並回應清除數量。
+    #[test]
+    fn test_clear_consecutive_losses() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        pipeline.consecutive_losses.insert("BTCUSDT".to_string(), 3);
+        pipeline.consecutive_losses.insert("ETHUSDT".to_string(), 5);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        handle_paper_command(
+            PipelineCommand::ClearConsecutiveLosses { response_tx: tx },
+            &mut pipeline, &mut writer, &mut pending,
+        );
+        assert!(pipeline.consecutive_losses.is_empty());
+        let resp = rx.blocking_recv().unwrap();
+        assert!(resp.unwrap().contains("2 symbol"));
+    }
+
+    // ── GetOpenPositionSymbols ──
+
+    /// EN: GetOpenPositionSymbols returns empty set when no positions.
+    /// 中文: 無持倉時返回空集合。
+    #[test]
+    fn test_get_open_position_symbols_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+        let mut writer = make_writer(dir.path());
+        let mut pending = HashMap::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        handle_paper_command(
+            PipelineCommand::GetOpenPositionSymbols { response_tx: tx },
+            &mut pipeline, &mut writer, &mut pending,
+        );
+        let symbols = rx.blocking_recv().unwrap();
+        assert!(symbols.is_empty());
+    }
+
+    // ── UpdateStrategyParams: conf_scale extraction ──
+
+    /// EN: UpdateStrategyParams with only conf_scale skips typed update.
+    /// 中文: 僅含 conf_scale 時跳過類型化更新。
+    #[test]
+    fn test_conf_scale_extraction_logic() {
+        // Test the JSON parsing logic directly (same as handler lines 89-98)
+        let params_json = r#"{"conf_scale": 1.5}"#;
+        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
+            serde_json::from_str::<serde_json::Value>(params_json)
+        {
+            Ok(serde_json::Value::Object(mut map)) => {
+                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                let stripped = serde_json::Value::Object(map);
+                (stripped.to_string(), cs)
+            }
+            _ => (params_json.to_string(), None),
+        };
+        assert_eq!(effective_json, "{}");
+        assert_eq!(conf_scale_opt, Some(1.5));
+    }
+
+    /// EN: UpdateStrategyParams with conf_scale + other fields preserves both.
+    /// 中文: conf_scale + 其他欄位時兩者皆保留。
+    #[test]
+    fn test_conf_scale_mixed_with_other_params() {
+        let params_json = r#"{"conf_scale": 2.0, "fast_period": 10}"#;
+        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
+            serde_json::from_str::<serde_json::Value>(params_json)
+        {
+            Ok(serde_json::Value::Object(mut map)) => {
+                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                let stripped = serde_json::Value::Object(map);
+                (stripped.to_string(), cs)
+            }
+            _ => (params_json.to_string(), None),
+        };
+        assert_eq!(conf_scale_opt, Some(2.0));
+        let parsed: serde_json::Value = serde_json::from_str(&effective_json).unwrap();
+        assert_eq!(parsed["fast_period"], 10);
+        // conf_scale should be stripped
+        assert!(parsed.get("conf_scale").is_none());
+    }
+
+    /// EN: Invalid JSON falls back to original string with None conf_scale.
+    /// 中文: 無效 JSON 回退為原始字串，conf_scale 為 None。
+    #[test]
+    fn test_conf_scale_invalid_json_fallback() {
+        let params_json = "not-json";
+        let (effective_json, conf_scale_opt): (String, Option<f64>) = match
+            serde_json::from_str::<serde_json::Value>(params_json)
+        {
+            Ok(serde_json::Value::Object(mut map)) => {
+                let cs = map.remove("conf_scale").and_then(|v| v.as_f64());
+                let stripped = serde_json::Value::Object(map);
+                (stripped.to_string(), cs)
+            }
+            _ => (params_json.to_string(), None),
+        };
+        assert_eq!(effective_json, "not-json");
+        assert!(conf_scale_opt.is_none());
+    }
+}

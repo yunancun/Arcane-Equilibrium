@@ -367,11 +367,206 @@ pub fn check_rest_failure_escalation(
 
 /// Return (required_clean_cycles, required_wall_clock_ms) for recovery from a given level.
 /// 返回從指定級別恢復所需的（乾淨週期數, 牆鐘毫秒數）。
-fn recovery_params(level: RiskLevel) -> (u32, u64) {
+pub(crate) fn recovery_params(level: RiskLevel) -> (u32, u64) {
     match level {
         RiskLevel::Cautious => (RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL, RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS),
         RiskLevel::Reduced => (RECOVERY_CYCLES_REDUCED_TO_CAUTIOUS, RECOVERY_WALL_REDUCED_TO_CAUTIOUS_MS),
         RiskLevel::Defensive => (RECOVERY_CYCLES_DEFENSIVE_TO_REDUCED, RECOVERY_WALL_DEFENSIVE_TO_REDUCED_MS),
         _ => (u32::MAX, u64::MAX), // CB/MR — never auto-recover
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: build N actionable drifts with unique keys.
+    /// 輔助：構建 N 個可觸發動作的漂移。
+    fn make_drifts(n: usize, verdict: DriftVerdict) -> Vec<(String, DriftVerdict)> {
+        (0..n)
+            .map(|i| (format!("SYM{}USDT|Buy", i), verdict.clone()))
+            .collect()
+    }
+
+    // ── Constants ──
+
+    /// EN: Verify key constant values match design doc.
+    /// 中文: 關鍵常量值與設計文檔一致。
+    #[test]
+    fn test_escalation_constants() {
+        assert_eq!(PERSISTENT_DRIFT_CYCLES, 3);
+        assert_eq!(BURST_DRIFT_COUNT, 5);
+        assert_eq!(GLOBAL_COOLDOWN_MS, 5 * 60 * 1000);
+        assert_eq!(PER_SYMBOL_COOLDOWN_MS, 30 * 60 * 1000);
+        assert_eq!(REST_FAILURE_TIER1_COUNT, 10);
+        assert_eq!(REST_FAILURE_TIER2_COUNT, 30);
+        assert_eq!(REST_FAILURE_TIER3_COUNT, 60);
+    }
+
+    // ── evaluate_actions: escalation ──
+
+    /// EN: Single MajorDrift at Normal → Escalate to Cautious.
+    /// 中文: 正常狀態下單個 MajorDrift → 升級到 Cautious。
+    #[test]
+    fn test_single_drift_escalates_to_cautious() {
+        let mut state = ReconcilerState::new();
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            ReconcilerAction::Escalate { target, .. } => assert_eq!(*target, RiskLevel::Cautious),
+            other => panic!("expected Escalate, got {:?}", other),
+        }
+    }
+
+    /// EN: Persistent drift (3 cycles) at Normal → Escalate to Defensive.
+    /// 中文: 持續漂移 3 週期 → 升級到 Defensive。
+    #[test]
+    fn test_persistent_drift_escalates_to_defensive() {
+        let mut state = ReconcilerState::new();
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)];
+        // Run 2 cycles to build streak, then 3rd triggers Defensive
+        let now = 1_000_000u64;
+        let _ = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        // After first: streak=1, escalated to Cautious, global cooldown set
+        let _ = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, now + GLOBAL_COOLDOWN_MS);
+        // After second: streak=2, still Cautious (not yet 3)
+        let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, now + 2 * GLOBAL_COOLDOWN_MS);
+        // After third: streak=3 → Defensive
+        assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)));
+    }
+
+    /// EN: First burst (5+ drifts) → Defensive (not CircuitBreaker). FIX-B.
+    /// 中文: 首次 burst（5+ 漂移）→ Defensive（非 CB）。FIX-B。
+    #[test]
+    fn test_burst_first_cycle_defensive_not_cb() {
+        let mut state = ReconcilerState::new();
+        let drifts = make_drifts(5, DriftVerdict::MajorDrift);
+        let actions = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, 1_000_000);
+        assert_eq!(state.burst_drift_streak, 1);
+        // Should escalate to Defensive, not CB
+        assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::Defensive)));
+        assert!(!actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
+    }
+
+    /// EN: Second consecutive burst → CircuitBreaker + CloseAll.
+    /// 中文: 第二次連續 burst → CircuitBreaker + 全平倉。
+    #[test]
+    fn test_burst_second_cycle_circuit_breaker() {
+        let mut state = ReconcilerState::new();
+        let drifts = make_drifts(5, DriftVerdict::Ghost);
+        let now = 1_000_000u64;
+        // First burst → Defensive
+        let _ = evaluate_actions(&mut state, RiskLevel::Normal, &drifts, now);
+        assert_eq!(state.burst_drift_streak, 1);
+        // Second burst → CB + CloseAll (CB bypasses all cooldowns)
+        let actions = evaluate_actions(&mut state, RiskLevel::Defensive, &drifts, now + 1000);
+        assert_eq!(state.burst_drift_streak, 2);
+        assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::Escalate { target, .. } if *target == RiskLevel::CircuitBreaker)));
+        assert!(actions.iter().any(|a| matches!(a, ReconcilerAction::CloseAll { .. })));
+    }
+
+    // ── evaluate_actions: recovery ──
+
+    /// EN: After enough clean cycles + wall time → DeEscalate one level.
+    /// 中文: 足夠乾淨週期 + 牆鐘時間後 → 降級一級。
+    #[test]
+    fn test_recovery_deescalates() {
+        let mut state = ReconcilerState::new();
+        state.pre_escalation_level = Some(RiskLevel::Normal);
+        state.clean_cycles_since_last_drift = RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL;
+        state.last_drift_seen_ms = 0; // long ago
+        let now = RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS + 1;
+        let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &[], now);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            ReconcilerAction::DeEscalate { target, .. } => assert_eq!(*target, RiskLevel::Normal),
+            other => panic!("expected DeEscalate, got {:?}", other),
+        }
+        // Floor cleared since we reached it
+        assert!(state.pre_escalation_level.is_none());
+    }
+
+    /// EN: MinorDrift does NOT reset clean cycle counter (noise tolerance).
+    /// 中文: MinorDrift 不重設乾淨週期計數器（噪聲容忍）。
+    #[test]
+    fn test_minor_drift_does_not_reset_clean_cycles() {
+        let mut state = ReconcilerState::new();
+        state.clean_cycles_since_last_drift = 10;
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MinorDrift)];
+        let _ = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, 1_000_000);
+        // MinorDrift is filtered out of actionable → clean_cycles increments
+        assert_eq!(state.clean_cycles_since_last_drift, 11);
+    }
+
+    // ── check_rest_failure_escalation ──
+
+    /// EN: 10 consecutive REST failures → Cautious.
+    /// 中文: 連續 10 次 REST 失敗 → Cautious。
+    #[test]
+    fn test_rest_failure_tier1_escalates() {
+        let mut state = ReconcilerState::new();
+        state.consecutive_rest_failures = REST_FAILURE_TIER1_COUNT;
+        let action = check_rest_failure_escalation(&mut state, RiskLevel::Normal, 1_000_000);
+        assert!(action.is_some());
+        match action.unwrap() {
+            ReconcilerAction::Escalate { target, .. } => assert_eq!(target, RiskLevel::Cautious),
+            other => panic!("expected Escalate, got {:?}", other),
+        }
+    }
+
+    /// EN: 9 REST failures (below tier 1) → no action.
+    /// 中文: 9 次 REST 失敗（低於閾值）→ 無動作。
+    #[test]
+    fn test_rest_failure_below_threshold_no_action() {
+        let mut state = ReconcilerState::new();
+        state.consecutive_rest_failures = 9;
+        let action = check_rest_failure_escalation(&mut state, RiskLevel::Normal, 1_000_000);
+        assert!(action.is_none());
+    }
+
+    /// EN: 60 REST failures → Defensive (highest tier).
+    /// 中文: 60 次 REST 失敗 → Defensive（最高級別）。
+    #[test]
+    fn test_rest_failure_tier3_defensive() {
+        let mut state = ReconcilerState::new();
+        state.consecutive_rest_failures = REST_FAILURE_TIER3_COUNT;
+        let action = check_rest_failure_escalation(&mut state, RiskLevel::Normal, 1_000_000);
+        match action.unwrap() {
+            ReconcilerAction::Escalate { target, .. } => assert_eq!(target, RiskLevel::Defensive),
+            other => panic!("expected Defensive, got {:?}", other),
+        }
+    }
+
+    // ── recovery_params ──
+
+    /// EN: recovery_params returns correct values per tier.
+    /// 中文: recovery_params 每級返回正確值。
+    #[test]
+    fn test_recovery_params_per_tier() {
+        assert_eq!(recovery_params(RiskLevel::Cautious), (30, 15 * 60 * 1000));
+        assert_eq!(recovery_params(RiskLevel::Reduced), (20, 10 * 60 * 1000));
+        assert_eq!(recovery_params(RiskLevel::Defensive), (20, 10 * 60 * 1000));
+        // CB/MR never auto-recover
+        assert_eq!(recovery_params(RiskLevel::CircuitBreaker), (u32::MAX, u64::MAX));
+    }
+
+    // ── ReconcilerState::new ──
+
+    /// EN: Fresh state has all fields zeroed/empty.
+    /// 中文: 新狀態所有字段為零/空。
+    #[test]
+    fn test_reconciler_state_new_defaults() {
+        let state = ReconcilerState::new();
+        assert!(state.baseline.is_empty());
+        assert_eq!(state.last_successful_fetch_ms, 0);
+        assert_eq!(state.consecutive_rest_failures, 0);
+        assert!(state.drift_streak.is_empty());
+        assert_eq!(state.clean_cycles_since_last_drift, 0);
+        assert_eq!(state.last_drift_seen_ms, 0);
+        assert!(state.last_escalation_ms.is_empty());
+        assert_eq!(state.global_last_escalation_ms, 0);
+        assert!(state.pre_escalation_level.is_none());
+        assert_eq!(state.burst_drift_streak, 0);
     }
 }

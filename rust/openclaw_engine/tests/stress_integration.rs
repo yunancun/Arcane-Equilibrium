@@ -968,12 +968,12 @@ fn stress_three_pipeline_concurrent_snapshot_writes() {
 /// 無數據損壞。
 #[test]
 fn stress_config_hot_reload_during_ticks() {
-    use openclaw_engine::config::ConfigStore;
-    use openclaw_engine::config::RiskConfig;
+    use openclaw_engine::config::{ConfigStore, PatchSource};
+    use openclaw_engine::config::risk_config::RiskConfig;
     use std::sync::Arc;
     use std::thread;
 
-    let store = Arc::new(ConfigStore::<RiskConfig>::default());
+    let store = Arc::new(ConfigStore::new(RiskConfig::default()));
 
     // Thread 1: rapidly reload config 100 times
     // 線程 1：快速重載配置 100 次
@@ -981,9 +981,9 @@ fn stress_config_hot_reload_during_ticks() {
     let writer_handle = thread::spawn(move || {
         for i in 0..100u32 {
             store_writer.apply_patch(
-                openclaw_engine::config::PatchSource::Ipc,
-                |c| {
-                    c.limits.max_open_positions = (i % 50 + 1) as usize;
+                PatchSource::Operator,
+                |c: &mut RiskConfig| {
+                    c.limits.open_positions_max = i % 50 + 1;
                 },
                 |_| Ok(()),
             ).unwrap();
@@ -1000,7 +1000,8 @@ fn stress_config_hot_reload_during_ticks() {
 
         for i in 0..500u64 {
             // Read config snapshot (simulates what on_tick does internally)
-            let _snap = store_reader.load();
+            let snap = store_reader.load();
+            assert!(snap.limits.open_positions_max >= 1u32);
             pipeline.on_tick(&make_event(
                 "BTCUSDT",
                 65_000.0 + (i as f64 * 0.5).sin() * 200.0,
