@@ -587,8 +587,8 @@ function closeTrustRenewCard() {
 async function submitRenew() {
   const tierSelect = document.getElementById('trust-tier-select');
   const tier = tierSelect ? parseInt(tierSelect.value, 10) : 0;
-  const reason = prompt('Renewal reason (optional) / 續期原因（可選）：') || '';
-  const d = await ocApi('/api/v1/live/auth/renew', 'POST', {
+  const reason = prompt('Renewal reason (optional) / 續期原因（可選）：') || 'operator_renew';
+  const d = await ocPost('/api/v1/live/auth/renew', {
     accepted_tier: tier,
     reason: reason,
   });
@@ -614,7 +614,7 @@ async function submitFullReview() {
   }
   const tierSelect = document.getElementById('trust-tier-select');
   const tier = tierSelect ? parseInt(tierSelect.value, 10) : 3;
-  const d = await ocApi('/api/v1/live/auth/renew-review', 'POST', {
+  const d = await ocPost('/api/v1/live/auth/renew-review', {
     review_notes: notes,
     confirmed_tier: tier,
   });

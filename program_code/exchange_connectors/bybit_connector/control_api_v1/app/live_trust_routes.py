@@ -36,6 +36,15 @@ from .earned_trust_engine import (
 
 logger = logging.getLogger(__name__)
 
+
+def _get_hub():
+    """Lazy import GovernanceHub singleton. / 延遲導入 GovernanceHub 單例。"""
+    try:
+        from .paper_trading_routes import GOV_HUB
+        return GOV_HUB
+    except (ImportError, AttributeError):
+        return None
+
 live_trust_router = APIRouter(
     prefix="/api/v1/live",
     tags=["Live Trust / 實盤信任階梯"],
@@ -113,8 +122,7 @@ def _collect_live_metrics() -> TrustMetrics:
 
         # Reconciler state / 對賬狀態
         try:
-            from .governance_hub import GovernanceHub
-            hub = GovernanceHub.get_instance()
+            hub = _get_hub()
             if hub is not None:
                 recon = getattr(hub, "_reconciler", None)
                 if recon is not None:
@@ -127,8 +135,7 @@ def _collect_live_metrics() -> TrustMetrics:
 
         # Incident counts / 事件計數
         try:
-            from .governance_hub import GovernanceHub
-            hub = GovernanceHub.get_instance()
+            hub = _get_hub()
             if hub is not None:
                 incidents = getattr(hub, "_incident_log", None)
                 if incidents is not None:
@@ -167,8 +174,7 @@ def _create_live_auth(actor_id: str, tier: int) -> tuple[str, int]:
     Returns (auth_id, expires_at_ms). Raises on failure.
     按給定 tier TTL 創建並自動批准 live SM-01 授權。返回 (auth_id, expires_at_ms)。
     """
-    from .governance_hub import GovernanceHub
-    hub = GovernanceHub.get_instance()
+    hub = _get_hub()
     if hub is None or not getattr(hub, "_initialized", False):
         raise RuntimeError("GovernanceHub not available")
     auth_sm = getattr(hub, "_authorization_sm", None)
@@ -217,8 +223,7 @@ def _revoke_existing_live_auths(actor_id: str) -> None:
     在創建新授權前撤銷所有當前有效的 live 授權。
     """
     try:
-        from .governance_hub import GovernanceHub
-        hub = GovernanceHub.get_instance()
+        hub = _get_hub()
         if hub is None:
             return
         auth_sm = getattr(hub, "_authorization_sm", None)

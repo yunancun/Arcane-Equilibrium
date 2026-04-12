@@ -685,7 +685,7 @@ async fn async_main(
         taker_fee_rate: live_bindings.as_ref().and_then(|b| b.taker_fee)
             .or_else(|| demo_bindings.as_ref().and_then(|b| b.taker_fee)),
         instruments: shared_instruments.clone(),
-        bootstrap_client: None,
+        bootstrap_client: shared_client.clone(), // Paper uses shared REST for kline bootstrap
         shared_client: None,
         bybit_balance: None,
         api_pnl: None,
