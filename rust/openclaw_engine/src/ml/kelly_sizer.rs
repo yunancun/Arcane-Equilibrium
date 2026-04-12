@@ -139,12 +139,14 @@ pub fn compute_kelly_qty(
     let kelly_full = win_rate - (1.0 - win_rate) / r;
 
     if kelly_full <= 0.0 {
-        // Negative Kelly → edge is negative, minimum sizing
+        // FIX-27: Negative Kelly → negative edge → reject (return 0).
+        // Old behavior returned 1% minimum which actively trades a losing edge.
+        // FIX-27：Kelly 為負 → 負 edge → 拒絕（返回 0）。
         debug!(
             kelly = kelly_full,
-            "negative Kelly, minimum sizing / Kelly 為負"
+            "negative Kelly, rejecting / Kelly 為負，拒絕開倉"
         );
-        return (balance * 0.01 / price).min(max_qty); // 1% minimum
+        return 0.0;
     }
 
     // Fractional Kelly based on sample size (conservative)
@@ -220,17 +222,13 @@ mod tests {
     }
 
     #[test]
-    fn test_negative_kelly_minimum() {
+    fn test_negative_kelly_rejects() {
+        // FIX-27: Negative Kelly → 0 qty (reject), not 1% minimum.
         let cfg = KellyConfig::default();
         // 30% win rate, avg_win=50, avg_loss=100 → negative Kelly
         let stats = make_stats(30, 70, 50.0, 100.0);
         let qty = compute_kelly_qty(&cfg, &stats, 10000.0, 50000.0, 0.02, 1.0);
-        assert!(qty > 0.0, "negative Kelly still gives minimum position");
-        assert!(
-            qty < 0.01,
-            "negative Kelly gives very small position: {}",
-            qty
-        );
+        assert_eq!(qty, 0.0, "negative Kelly must return 0 (reject)");
     }
 
     #[test]

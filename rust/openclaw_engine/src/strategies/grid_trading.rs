@@ -138,7 +138,9 @@ const DEFAULT_QTY_PER_GRID: f64 = 1e9;
 /// `on_rejection` 中的回滾會還原 prev_cross_idx，下一 tick 立即重發（價格未動）。
 /// 30 秒給 Guardian/cost_gate 狀態變化的機會再重試。
 const REJECT_BACKOFF_MS: u64 = 30_000;
-const FEE_PCT: f64 = 0.00055; // one-way taker
+/// FIX-25: Default fallback fee rate; prefer runtime `taker_fee_rate` via `set_fee_rate()`.
+/// FIX-25：默認回退費率；優先使用 `set_fee_rate()` 設定的運行時 taker_fee_rate。
+const DEFAULT_FEE_PCT: f64 = 0.00055;
 /// Default adaptive range: ±10% of current price for initial/rebalance grid.
 /// 默認自適應範圍：當前價格 ±10% 用於初始化/再平衡網格。
 const ADAPTIVE_RANGE_PCT: f64 = 0.10;
@@ -218,6 +220,9 @@ pub struct GridTrading {
     /// FIX-06: Configurable grid level count (was hardcoded DEFAULT_GRID_COUNT).
     /// FIX-06：可配置的網格層級數（原硬編碼 DEFAULT_GRID_COUNT）。
     grid_count: usize,
+    /// FIX-25: One-way taker fee rate for OU spacing floor calculation.
+    /// FIX-25：單邊 taker 手續費率，用於 OU 間距地板計算。
+    fee_rate: f64,
     /// M-2: Per-symbol rejection backoff deadline (epoch ms). Set in `on_rejection`,
     /// honored at the top of `on_tick` to prevent tight retry loops on persistent
     /// guardian/cost_gate rejections.
@@ -295,6 +300,7 @@ impl GridTrading {
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
+            fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
         }
     }
@@ -327,6 +333,7 @@ impl GridTrading {
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
+            fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
         }
     }
@@ -373,7 +380,16 @@ impl GridTrading {
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
             grid_count: DEFAULT_GRID_COUNT,
+            fee_rate: DEFAULT_FEE_PCT,
             reject_cooldown_until_ms: HashMap::new(),
+        }
+    }
+
+    /// FIX-25: Set runtime taker fee rate (called from factory with actual exchange rate).
+    /// FIX-25：設定運行時 taker 費率（由工廠使用實際交易所費率調用）。
+    pub fn set_fee_rate(&mut self, rate: f64) {
+        if rate > 0.0 {
+            self.fee_rate = rate;
         }
     }
 
@@ -505,7 +521,7 @@ impl GridTrading {
         // OU optimal grid spacing: σ·√(2/θ) — derived from OU first-passage time.
         // OU 最佳網格間距：σ·√(2/θ) — 由 OU 首次穿越時間推導。
         let ou_step = sigma * (2.0_f64 / theta).sqrt();
-        let fee_floor = 2.0 * FEE_PCT * mu;
+        let fee_floor = 2.0 * self.fee_rate * mu;
         let step = ou_step.max(fee_floor);
 
         if step > 0.0 && mu > 0.0 {

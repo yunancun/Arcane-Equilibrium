@@ -68,7 +68,7 @@ impl IntentProcessor {
             } else {
                 "Sell".into()
             },
-            leverage: 1.0, // paper = 1x
+            leverage: self.account_leverage,
             qty: intent.qty,
         };
 
@@ -177,7 +177,7 @@ impl IntentProcessor {
                 balance,
                 exposure_pct,
                 Self::compute_correlated_exposure_pct(paper_state), // FIX-05: real correlated exposure
-                1.0, // leverage — paper = 1x
+                self.account_leverage, // FIX-28: paper=1x, exchange=actual
                 daily_loss,
                 is_reducing,
                 &self.risk_config,
@@ -326,7 +326,7 @@ impl IntentProcessor {
             } else {
                 "Sell".into()
             },
-            leverage: 1.0,
+            leverage: self.account_leverage,
             qty: intent.qty,
         };
         let guardian_result = self.guardian.review(&check, &ctx);
@@ -418,7 +418,7 @@ impl IntentProcessor {
                 balance,
                 exposure_pct,
                 Self::compute_correlated_exposure_pct(paper_state), // FIX-05: real correlated exposure
-                1.0, // leverage — paper = 1x
+                self.account_leverage, // FIX-28: paper=1x, exchange=actual
                 daily_loss,
                 is_reducing,
                 &self.risk_config,

@@ -20,7 +20,7 @@ use openclaw_core::{
     signals::{IndicatorInput, Signal, SignalEngine},
 };
 use crate::risk_checks::RiskAction;
-use openclaw_types::PriceEvent;
+use openclaw_types::{PriceEvent, PriceEventKind};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

@@ -10,7 +10,7 @@
 
 use crate::config::ConfigManager;
 use futures_util::{SinkExt, StreamExt};
-use openclaw_types::PriceEvent;
+use openclaw_types::{PriceEvent, PriceEventKind};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -461,6 +461,7 @@ fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent>
 
     let mut event = PriceEvent::new(symbol, price, ts);
     event.volume_24h = volume;
+    event.event_kind = Some(PriceEventKind::Trade);
     event.metadata.insert("type".into(), "trade".into());
     if !side.is_empty() {
         event.metadata.insert("side".into(), side);
@@ -574,6 +575,7 @@ fn parse_orderbook_snapshot(data: &[serde_json::Value], topic: &str) -> Option<P
     let mut event = PriceEvent::new(symbol, mid_price, ts);
     event.bid_price = best_bid;
     event.ask_price = best_ask;
+    event.event_kind = Some(PriceEventKind::Orderbook);
     event.metadata.insert("type".into(), "orderbook".into());
     if let Ok(s) = serde_json::to_string(&bid_levels) {
         event.metadata.insert("bids5".into(), s);
@@ -627,6 +629,7 @@ fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent
     event.turnover_24h = turnover;
     event.bid_price = bid;
     event.ask_price = ask;
+    event.event_kind = Some(PriceEventKind::Ticker);
     event.metadata.insert("type".into(), "ticker".into());
     Some(event)
 }
@@ -652,6 +655,7 @@ fn parse_liquidation_item(item: &serde_json::Value, topic: &str) -> Option<Price
         .unwrap_or(0);
 
     let mut event = PriceEvent::new(symbol, price, ts);
+    event.event_kind = Some(PriceEventKind::Liquidation);
     event.metadata.insert("type".into(), "liquidation".into());
     event.metadata.insert("side".into(), side.into());
     event.metadata.insert("qty".into(), qty.into());
@@ -668,6 +672,7 @@ fn parse_price_limit_item(item: &serde_json::Value) -> Option<PriceEvent> {
 
     let mid = max_price.parse::<f64>().unwrap_or(0.0);
     let mut event = PriceEvent::new(symbol, mid, ts);
+    event.event_kind = Some(PriceEventKind::PriceLimit);
     event.metadata.insert("type".into(), "price_limit".into());
     event.metadata.insert("max_price".into(), max_price.into());
     event.metadata.insert("min_price".into(), min_price.into());
@@ -692,6 +697,7 @@ fn parse_adl_notice_item(item: &serde_json::Value) -> Option<PriceEvent> {
     let ts = item.get("ts").and_then(|v| v.as_u64()).unwrap_or(0);
 
     let mut event = PriceEvent::new(symbol, 0.0, ts);
+    event.event_kind = Some(PriceEventKind::AdlNotice);
     event.metadata.insert("type".into(), "adl_notice".into());
     event
         .metadata

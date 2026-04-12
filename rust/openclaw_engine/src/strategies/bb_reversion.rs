@@ -22,6 +22,10 @@ pub struct BbReversionParams {
     pub default_qty: f64,
     pub use_limit: bool,
     pub limit_offset_bps: f64,
+    /// RSI oversold threshold for long entry / RSI 超賣閾值（做多入場）
+    pub rsi_oversold: f64,
+    /// RSI overbought threshold for short entry / RSI 超買閾值（做空入場）
+    pub rsi_overbought: f64,
 }
 
 impl Default for BbReversionParams {
@@ -31,6 +35,8 @@ impl Default for BbReversionParams {
             default_qty: 1e9,
             use_limit: false,
             limit_offset_bps: 10.0,
+            rsi_oversold: 30.0,
+            rsi_overbought: 70.0,
         }
     }
 }
@@ -59,6 +65,22 @@ impl StrategyParams for BbReversionParams {
             // limit→market, so enabling these would corrupt PnL accounting.
             // Re-add when paper engine grows a real limit-order matcher.
             // GAP-9：use_limit/limit_offset_bps 從可調列表移除（paper 無撮合）。
+            ParamRange {
+                name: "rsi_oversold".into(),
+                min: 5.0,
+                max: 45.0,
+                step: Some(5.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
+            ParamRange {
+                name: "rsi_overbought".into(),
+                min: 55.0,
+                max: 95.0,
+                step: Some(5.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -68,6 +90,12 @@ impl StrategyParams for BbReversionParams {
         }
         if self.limit_offset_bps < 0.0 || self.limit_offset_bps > 200.0 {
             return Err("limit_offset_bps must be in [0, 200]".into());
+        }
+        if self.rsi_oversold < 5.0 || self.rsi_oversold > 45.0 {
+            return Err("rsi_oversold must be in [5, 45]".into());
+        }
+        if self.rsi_overbought < 55.0 || self.rsi_overbought > 95.0 {
+            return Err("rsi_overbought must be in [55, 95]".into());
         }
         Ok(())
     }
@@ -89,6 +117,9 @@ pub struct BbReversion {
     pub use_limit: bool,
     /// Basis points inside the band for limit price offset / 限價偏移（基點，band 內側）
     pub limit_offset_bps: f64,
+    /// FIX-24: Configurable RSI thresholds / 可配置 RSI 閾值
+    pub rsi_oversold: f64,
+    pub rsi_overbought: f64,
     // RC-04: Per-symbol previous state for rejection rollback / 每幣種拒絕回滾用的先前狀態
     prev_position: HashMap<String, Option<bool>>,
     prev_last_trade_ms: HashMap<String, u64>,
@@ -106,6 +137,8 @@ impl BbReversion {
             default_qty: 1e9,
             use_limit: false,
             limit_offset_bps: 10.0,
+            rsi_oversold: 30.0,
+            rsi_overbought: 70.0,
             prev_position: HashMap::new(),
             prev_last_trade_ms: HashMap::new(),
             conf_scale: 1.0,
@@ -128,6 +161,8 @@ impl BbReversion {
         }
         self.use_limit = false;
         self.limit_offset_bps = params.limit_offset_bps;
+        self.rsi_oversold = params.rsi_oversold;
+        self.rsi_overbought = params.rsi_overbought;
         info!(strategy = "bb_reversion", "params updated / 參數已更新");
         Ok(())
     }
@@ -139,6 +174,8 @@ impl BbReversion {
             default_qty: self.default_qty,
             use_limit: self.use_limit,
             limit_offset_bps: self.limit_offset_bps,
+            rsi_oversold: self.rsi_oversold,
+            rsi_overbought: self.rsi_overbought,
         }
     }
 
@@ -243,7 +280,7 @@ impl Strategy for BbReversion {
         match self.positions.get(&ctx.symbol).copied() {
             None => {
                 // Entry: oversold long / 入場：超賣做多
-                if bb.percent_b < 0.0 && rsi < 30.0 {
+                if bb.percent_b < 0.0 && rsi < self.rsi_oversold {
                     intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         true,
@@ -254,7 +291,7 @@ impl Strategy for BbReversion {
                     self.positions.insert(ctx.symbol.clone(), true);
                     self.last_trade_ms.insert(ctx.symbol.clone(), ctx.timestamp_ms);
                 // Entry: overbought short / 入場：超買做空
-                } else if bb.percent_b > 1.0 && rsi > 70.0 {
+                } else if bb.percent_b > 1.0 && rsi > self.rsi_overbought {
                     intents.push(StrategyAction::Open(self.make_entry_intent(
                         ctx,
                         false,
