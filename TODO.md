@@ -1,6 +1,6 @@
 # OpenClaw TODO — 工作計劃清單
 
-最後更新：2026-04-12（Earned-Trust TTL Ladder + Audit Trail 修復）
+最後更新：2026-04-12（全程序鏈審計 58 發現 · 8 P0 · PM APPROVED 修復計劃）
 測試基準線：**Rust engine lib 939 + core 366 + e2e 18 + promotion 32 = 1355 · Python program_code 2852 passed (5 skipped · 0 fail) · ml_training 135 passed (6 skipped)**
 
 > compact 後從此文件恢復工作狀態。第一個 `[ ]` 即為下一步起點。
@@ -37,6 +37,47 @@
 
 **關鍵路徑**：`~~G-3 → OC-3 → 6-RC-6 → 6-01~13 → 3E-ARCH~~ ✅ → LG-1(05-01) → LG-2 → LG-4 → Live`
 **最早 Live 日期**：W23 末（～2026-05-16）
+
+---
+
+## 🔴 2026-04-12 全程序鏈審計（12 報告 · 58 發現 · 8 P0）
+
+來源：`2026-04-12--full_audit_fix_plan_pm_confirmed.md`（PM APPROVED）
+PA 原始報告：`docs/CCAgentWorkSpace/PA/2026-04-12--consolidated_fix_plan.md`
+
+### P0 — Live 阻塞（W22 Mon-Tue 必須完成）
+
+- [ ] **FIX-10** IPC HMAC 認證 Live 模式下應強制 — `ipc_server/mod.rs:497`，Live pipeline 啟動時無 `OPENCLAW_IPC_SECRET` 應 panic
+- [ ] **FIX-03** FastTrack ReduceToHalf/PauseNewEntries 定義但未處理 — `fast_track.rs:17-18` + `on_tick.rs:148-161`，風控閉環缺口
+- [ ] **FIX-04** fast_track price_drop/margin_util 硬編 0.0 — `on_tick.rs:156-159`，閃崩/保證金危機防線完全失效（合併 PNL-6 一起解決）
+- [ ] **FIX-19** execution.fast 缺 execFee → WS 手續費為 0 — `bybit_private_ws.rs:593-605`，Mainnet PNL-FIX-2 同類問題
+- [ ] **FIX-13** edge_estimates.rs 零測試（208 行 / 9 pub fn）— JSON 解析 + 除零風險，被 scanner/cost_gate 依賴
+- [ ] **FIX-14** REST API timeout fail-closed 行為無測試 — `bybit_rest_client.rs`，硬邊界原則 #5 合規未驗證
+- [ ] **FIX-15** 三管線並發寫入無集成測試 — 3E-ARCH 核心架構未端到端驗證
+- [ ] **FIX-09** ocEsc() 缺單引號轉義 — `common.js:371`，XSS defense-in-depth，1 行修改
+
+### P1 — 架構缺陷（W22 Wed 完成核心項）
+
+- [ ] **FIX-05** correlated_exposure_pct 永遠 0.0 — `router.rs:179,420`，組合級風險（原則 #16）實質失效
+- [ ] **FIX-06** GridTrading grid_levels TOML 配置存儲但不應用 — `grid_trading.rs`，dead param 違反規則
+- [ ] **FIX-07** OU theta clamp 0.001 在非 OU 序列產生巨大間距 — `grid_trading.rs` compute_ou_step
+- [ ] **FIX-11** Cookie secure=False — `legacy_routes.py:322`，1 行修改
+- [ ] **FIX-16** startup.rs 零測試（856 行）— 啟動邏輯關鍵
+- [ ] **FIX-17** Config hot-reload + tick 並發無測試 — ArcSwap 語義正確性未驗證
+- [ ] **FIX-18** Price=0.0 tick 行為未測試 — 除零風險
+- [ ] **FIX-20** pre_check_order() 使用真正下單端點 — 意外下單風險，Live 模式需禁用
+- [ ] **FIX-22** 4 個 MlSwitches config 欄位未運行時讀取 — `learning_config.rs:86-106`，假功能
+- [ ] **FIX-29** on_tick() 1187 行需拆分為 7 子方法 — 超 1200 硬上限
+- [ ] **FIX-30** on_tick() symbol.clone() 重複 9 次 — 熱路徑堆分配
+- [ ] **FIX-32** risk_config().clone() 每 tick 深拷貝 — 不必要開銷
+- [ ] **FIX-39** Danger Zone 操作使用原生 confirm() — 需自定義 modal
+- [ ] **FIX-40** 策略刪除使用原生 confirm() — 不可逆操作需二次確認
+- [ ] **FIX-47** CLAUDE_REFERENCE.md 過時 6 天
+- [ ] **FIX-48** KNOWN_ISSUES.md 過時 7 天
+- [ ] **FIX-52** SCRIPT_INDEX.md 覆蓋率 ~11%
+- [ ] **FIX-55** 3 個 API 路徑 MISMATCH（dead code）— `position_manager.rs`, `account_manager.rs`
+
+P2/P3 共 25 項（文件拆分、策略參數化、ML backfill、文檔清理等）見完整報告。
 
 ---
 
