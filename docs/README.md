@@ -42,7 +42,7 @@ docs/
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
 ├── audits/                            ← ★ 全系统审计报告（专项 + 综合审计子目录）
-│   ├── 2026-04-05_l3_comprehensive/   ← L3 全系统综合审计（12 角色专项报告，2026-04-05）
+│   ├── 2026-04-05--l3_comprehensive/   ← L3 全系统综合审计（12 角色专项报告，2026-04-05）
 │   └── （专项审计报告）                ← 按日期命名的专项审计（如 Bybit API 审计）
 │                                      ← 注：03-31/04-01 全系统审计报告在 CCAgentWorkSpace/ 对应 Agent 下
 │
@@ -391,7 +391,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | Operator | `2026-04-01--pa_review.md` | PA 技术复验 |
 | Operator | `2026-04-01--pm_execution_plan.md` | PM 执行计划 |
 
-### audits/2026-04-05_l3_comprehensive/ — L3 全系统综合审计（2026-04-05，12 角色专项报告）
+### audits/2026-04-05--l3_comprehensive/ — L3 全系统综合审计（2026-04-05，12 角色专项报告）
 
 注：这批审计文件是 2026-04-05 L3 审计轮次产出，因当时未遵守命名规范（无日期前缀），现统一归入此子目录。
 
@@ -416,13 +416,15 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 |------|------|
 | `2026-03-30--bilingual_comment_audit_report.md` | 双语注释全量审计报告（评级 9.5/10，100% 覆盖） |
 | `2026-04-04--bybit_api_infra_audit.md` | ★ Bybit API 基础设施专项审计：REST/WS 端点覆盖度、SDK 对接质量、IPC 接口审核 |
-| `2026-04-06_consolidated_remediation_report.md` | ★ L3 全系统审计 63 问题整改追踪报告：11 工作包 · 4 波执行 · R0-R3 整改记录 |
-| `2026-04-07_e3_r6_directive_applier_security_audit.md` | E3 R6 Directive Applier 安全审计（Phase 4 前置） |
-| `2026-04-07_phase4_final_signoff_audit.md` | Phase 4 最终验收审计报告 |
+| `2026-04-06--consolidated_remediation_report.md` | ★ L3 全系统审计 63 问题整改追踪报告：11 工作包 · 4 波执行 · R0-R3 整改记录 |
+| `2026-04-07--e3_r6_directive_applier_security_audit.md` | E3 R6 Directive Applier 安全审计（Phase 4 前置） |
+| `2026-04-07--phase4_final_signoff_audit.md` | Phase 4 最终验收审计报告 |
 | `2026-04-08--e2_review_1c3_bbc.md` | E2 代码审查：ARCH-RC1 1C-3 BBC（Build-Before-Commit 验收） |
 | `2026-04-09--db_rw_ml_pipeline_full_audit.md` | DB 读写 + ML 管线全量审计（Signal Diamond Phase 1 前置）|
 | `2026-04-11--3e_arch_e2_multi_role_review.md` | ★★ 3E-ARCH E2 多角色審查：9 角色並行 Phase A-F 全修驗證 |
 | `2026-04-11--3e_arch_phase_g_reaudit.md` | ★★ 3E-ARCH Phase G 重審：9/9 PASS — 0 BLOCKER |
+| `2026-04-12--full_program_chain_audit.md` | ★★★★ 全程序鏈審計總報告：12 角色合併 · 58 findings（8 P0 · 17 P1 · 28 P2 · 5 P3） |
+| `2026-04-12--full_audit_fix_plan_pm_confirmed.md` | ★★★ PM 確認修復計劃：P0~P3 分級修復排期 + PM 簽核 |
 
 ### KNOWN_ISSUES.md
 
@@ -487,7 +489,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-07--arch_rc1_1c3c_recon.md` | ARCH-RC1 1C-3C 對賬設計 |
 | `2026-04-11--three_engine_parallel_arch_plan.md` | ★★★ 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（✅ 已完成） |
 | `2026-04-11--3e_arch_session_execution_plan.md` | ★★ 3E-ARCH Session 執行計劃：8 工作日排期（✅ 已完成） |
-| `math_implementation_notes.md` | 數學實現筆記：策略/風控公式參考 |
+| `2026-04-06--math_implementation_notes.md` | 數學實現方案彙編：LinUCB/風控公式/統計檢定/校準/shrinkage |
 
 ### governance_dev/ — 治理开发文档
 
